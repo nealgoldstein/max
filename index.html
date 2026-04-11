@@ -57,6 +57,18 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .tm-dest{padding:10px 12px;border-radius:7px;border:1px solid #e8e8e8;background:#fff;margin-bottom:6px;cursor:pointer;}
 .tm-dest:hover{border-color:#bbb;background:#fafafa;}
 .tm-dest.active{border-color:#c8dff8;background:#eef5ff;}
+.tm-dest-row{display:flex;align-items:flex-start;gap:4px;}
+.tm-dest-reorder{display:flex;flex-direction:column;flex-shrink:0;opacity:0;}
+.tm-dest:hover .tm-dest-reorder{opacity:1;}
+.tm-reorder-btn{font-size:11px;color:#bbb;background:none;border:none;cursor:pointer;padding:1px 2px;line-height:1;font-family:inherit;}
+.tm-reorder-btn:hover{color:#333;}
+.tm-dest-body{flex:1;min-width:0;}
+.tm-dest-actions{display:flex;align-items:center;gap:4px;}
+.tm-rename-btn{font-size:9px;color:#ccc;background:none;border:none;cursor:pointer;padding:0 3px;font-family:inherit;opacity:0;}
+.tm-dest:hover .tm-rename-btn{opacity:1;}
+.tm-rename-btn:hover{color:#555;}
+.tm-rename-inp{font-size:12px;font-weight:600;color:#111;border:none;border-bottom:1px solid #999;outline:none;background:transparent;font-family:inherit;padding:0;width:100%;}
+.tm-dest-label{font-size:10px;color:#aaa;margin-top:1px;}
 .tm-dest-name{font-size:13px;font-weight:600;color:#111;}
 .tm-dest-dates{font-size:11px;color:#999;margin-top:2px;}
 .tm-dest-acts{display:flex;gap:5px;margin-top:6px;}
@@ -1438,7 +1450,29 @@ function selectTrip(id){
 function enterApp(){
   g("home-screen").style.display="none";
   g("app").style.display="flex";
-  var tn=g("trip-name-display"); if(tn)tn.textContent=trip.name||"Untitled trip";
+  var tn=g("trip-name-display"); if(tn){
+    tn.textContent=trip.name||"Untitled trip";
+    tn.title="Double-click to rename";
+    tn.ondblclick=function(e){
+      e.stopPropagation();
+      var inp=document.createElement("input");
+      inp.value=trip.name||""; inp.style.cssText="font-size:11px;color:#111;background:transparent;border:none;border-bottom:1px solid #999;outline:none;font-family:inherit;width:120px;";
+      tn.parentNode.replaceChild(inp,tn);
+      inp.focus(); inp.select();
+      function saveName(){
+        var v=inp.value.trim()||"Untitled trip";
+        trip.name=v; autoSave();
+        var span=document.createElement("span"); span.id="trip-name-display";
+        span.style.cssText="font-size:11px;color:#999;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px;cursor:default;";
+        span.title="Double-click to rename"; span.textContent=v;
+        inp.parentNode.replaceChild(span,inp);
+        span.ondblclick=tn.ondblclick;
+        var hsTc=document.querySelectorAll(".tc-name"); hsTc.forEach(function(el){if(trip.name)el.textContent=trip.name;});
+      }
+      inp.onblur=saveName;
+      inp.onkeydown=function(e){if(e.key==="Enter")inp.blur();if(e.key==="Escape"){trip.name=trip.name;inp.blur();}};
+    };
+  }
   // Wire up map controls
   var closeBtn=document.getElementById('mpp-close-btn');
   if(closeBtn) closeBtn.onclick=closeMapPinPanel;
@@ -1480,7 +1514,29 @@ function doCreateTrip(){
 }
 
 function restoreTripUI(){
-  var tn=g("trip-name-display"); if(tn)tn.textContent=trip.name||"Untitled trip";
+  var tn=g("trip-name-display"); if(tn){
+    tn.textContent=trip.name||"Untitled trip";
+    tn.title="Double-click to rename";
+    tn.ondblclick=function(e){
+      e.stopPropagation();
+      var inp=document.createElement("input");
+      inp.value=trip.name||""; inp.style.cssText="font-size:11px;color:#111;background:transparent;border:none;border-bottom:1px solid #999;outline:none;font-family:inherit;width:120px;";
+      tn.parentNode.replaceChild(inp,tn);
+      inp.focus(); inp.select();
+      function saveName(){
+        var v=inp.value.trim()||"Untitled trip";
+        trip.name=v; autoSave();
+        var span=document.createElement("span"); span.id="trip-name-display";
+        span.style.cssText="font-size:11px;color:#999;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px;cursor:default;";
+        span.title="Double-click to rename"; span.textContent=v;
+        inp.parentNode.replaceChild(span,inp);
+        span.ondblclick=tn.ondblclick;
+        var hsTc=document.querySelectorAll(".tc-name"); hsTc.forEach(function(el){if(trip.name)el.textContent=trip.name;});
+      }
+      inp.onblur=saveName;
+      inp.onkeydown=function(e){if(e.key==="Enter")inp.blur();if(e.key==="Escape"){trip.name=trip.name;inp.blur();}};
+    };
+  }
   var stBtn=g("spend-toggle-btn"); if(stBtn)stBtn.className=trip.trackSpending?"spend-toggle on":"spend-toggle";
 }
 
@@ -3021,10 +3077,24 @@ function drawTripMode(){
 
   trip.destinations.forEach(function(dest,idx){
     var card=document.createElement("div"); card.className="tm-dest"+(dest.id===activeDest?" active":"");
-    var name=document.createElement("div"); name.className="tm-dest-name"; name.textContent=dest.place;
+    var cardRow=document.createElement("div"); cardRow.className="tm-dest-row";
+    // Reorder arrows (▲▼)
+    var reorderDiv=document.createElement("div"); reorderDiv.className="tm-dest-reorder";
+    if(idx>0){var upBtn=document.createElement("button");upBtn.className="tm-reorder-btn";upBtn.textContent="\u25b2";upBtn.title="Move up";upBtn.onclick=function(e){e.stopPropagation();var i=trip.destinations.indexOf(dest);if(i>0){trip.destinations.splice(i,1);trip.destinations.splice(i-1,0,dest);autoSave();drawTripMode();}};reorderDiv.appendChild(upBtn);}
+    if(idx<trip.destinations.length-1){var dnBtn=document.createElement("button");dnBtn.className="tm-reorder-btn";dnBtn.textContent="\u25bc";dnBtn.title="Move down";dnBtn.onclick=function(e){e.stopPropagation();var i=trip.destinations.indexOf(dest);if(i<trip.destinations.length-1){trip.destinations.splice(i,1);trip.destinations.splice(i+1,0,dest);autoSave();drawTripMode();}};reorderDiv.appendChild(dnBtn);}
+    // Body: name + optional label + dates
+    var bodyDiv=document.createElement("div"); bodyDiv.className="tm-dest-body";
+    var nameRow=document.createElement("div"); nameRow.className="tm-dest-actions";
+    var nameEl=document.createElement("div"); nameEl.className="tm-dest-name"; nameEl.style.flex="1"; nameEl.textContent=dest.label||dest.place;
+    var renBtn=document.createElement("button"); renBtn.className="tm-rename-btn"; renBtn.textContent="\u270e"; renBtn.title="Rename";
+    (function(d,nel){renBtn.onclick=function(e){e.stopPropagation();var inp=document.createElement("input");inp.className="tm-rename-inp";inp.value=d.label||d.place;nameRow.replaceChild(inp,nel);renBtn.style.display="none";inp.focus();inp.select();function sv(){var v=inp.value.trim();d.label=(v&&v!==d.place)?v:null;autoSave();drawTripMode();}inp.onblur=sv;inp.onclick=function(e2){e2.stopPropagation();};inp.onkeydown=function(e2){if(e2.key==="Enter")inp.blur();if(e2.key==="Escape"){inp.blur();}};};})(dest,nameEl);
+    nameRow.appendChild(nameEl); nameRow.appendChild(renBtn);
+    bodyDiv.appendChild(nameRow);
+    if(dest.label&&dest.label!==dest.place){var plLbl=document.createElement("div");plLbl.className="tm-dest-label";plLbl.textContent=dest.place;bodyDiv.appendChild(plLbl);}
     var dates=document.createElement("div"); dates.className="tm-dest-dates";
     dates.textContent=fmtD(dest.dateFrom)+" \u2013 "+fmtD(dest.dateTo)+" ("+dest.nights+" night"+(dest.nights!==1?"s":"")+")";
-    card.appendChild(name); card.appendChild(dates);
+    bodyDiv.appendChild(dates);
+    cardRow.appendChild(reorderDiv); cardRow.appendChild(bodyDiv); card.appendChild(cardRow);
     // Show generating indicator for unknown cities
     var genData=_generatedCityData[dest.place.toLowerCase()];
     if(genData&&genData.loading){
