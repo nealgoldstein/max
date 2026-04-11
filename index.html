@@ -2177,38 +2177,42 @@ function saveDates(destId){
 
 function computeDateChangeImpact(dest,newFrom,newTo){
   var affected={bookings:[],overlapping:[]};
+  var extending=newTo>dest.dateTo;
 
-  // 1. Own bookings affected by date change
+  // 1. Own hotel booking — always needs rebooking when dates change
   (dest.hotelBookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
-    // Hotel always needs rebooking when dates change
     affected.bookings.push({dest:dest.label||dest.place,type:'Hotel',name:b.name,detail:'Dates change — rebook required'});
   });
+
+  // 2. Own general/restaurant bookings after the new end date — no longer valid
   (dest.generalBookings||[]).forEach(function(b){
-    // General bookings after new end date are no longer valid
-    if(!b.date||b.date>newTo)
-      affected.bookings.push({dest:dest.label||dest.place,type:'Reservation',name:b.name||b.type||'Booking',detail:b.date?'Date: '+fmtD(b.date):'Dates change'});
+    if(b.date&&b.date>newTo)
+      affected.bookings.push({dest:dest.label||dest.place,type:'Reservation',name:b.name||b.type||'Booking',detail:'Booked for '+fmtD(b.date)+' — after new end date'});
   });
 
-  // 2. Transport leg departing this destination — date likely invalid
+  // 3. Transport leg departing this destination — departure date may be invalid
   var destIdx=trip.destinations.indexOf(dest);
   if(destIdx<trip.destinations.length-1){
     var nextDest=trip.destinations[destIdx+1];
     var leg=getLeg(dest.id,nextDest.id);
     (leg.bookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
-      affected.bookings.push({dest:dest.label||dest.place,type:'Transport',name:b.operator||'Transport to '+(nextDest.label||nextDest.place),detail:'Departs '+fmtD(b.departure||dest.dateTo)});
+      affected.bookings.push({dest:dest.label||dest.place,type:'Transport',
+        name:b.operator||'Transport to '+(nextDest.label||nextDest.place),
+        detail:'Departs '+fmtD(b.departure||dest.dateTo)+' — date may be invalid'});
     });
   }
 
-  // 3. Only flag next destination if new end date OVERLAPS its start date
-  if(destIdx<trip.destinations.length-1){
+  // 4. Next destination overlap — ONLY possible when extending (new end date later)
+  // Leaving early moves end date back, so next destination cannot overlap
+  if(extending&&destIdx<trip.destinations.length-1){
     var nd=trip.destinations[destIdx+1];
     if(newTo>=nd.dateFrom){
-      // Real overlap — this destination's bookings are affected
+      var overlapDays=Math.ceil((new Date(newTo)-new Date(nd.dateFrom))/86400000)+1;
       var hasBookings=(nd.hotelBookings&&nd.hotelBookings.some(function(b){return b.status==='booked';}))
         ||(nd.generalBookings&&nd.generalBookings.length>0)
         ||Object.keys(trip.legs||{}).some(function(k){return k.indexOf(nd.id)>-1&&trip.legs[k].bookings&&trip.legs[k].bookings.length>0;});
       if(hasBookings) affected.overlapping.push({dest:nd.label||nd.place,id:nd.id,
-        detail:'Overlaps by '+Math.ceil((new Date(newTo)-new Date(nd.dateFrom))/86400000+1)+' day(s)'});
+        detail:'Your extension overlaps '+nd.place+' by '+overlapDays+' day'+(overlapDays!==1?'s':'')});
     }
   }
   return affected;
