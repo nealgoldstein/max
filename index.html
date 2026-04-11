@@ -1794,8 +1794,9 @@ async function generateCityData(place,destId){
     }
   }catch(err){
     delete _generatedCityData[key];
-    showSaveStatus('Could not generate '+place+' data \u2014 tap Retry in Explore tab',5000);
     console.error('generateCityData failed:',err);
+    var d2x=getDest(destId);
+    if(!d2x||!d2x.suggestions||d2x.suggestions.length===0) showSaveStatus('Could not generate '+place+' data — tap Refresh in Explore',5000);
     // Show retry option in explore pane
     var d2=getDest(destId);
     if(d2&&activeDest===destId&&_leftMode==='dest'){
@@ -3181,7 +3182,7 @@ function buildExplorePane(dest){
   wrap.appendChild(sightsSec);
 
   // ── Restaurants section ────────────────────────────────
-  var restSec=document.createElement("div"); restSec.className="exp-section"; restSec.style.borderTop="1px solid #f0f0f0"; restSec.style.marginTop="4px";
+  var restSec=document.createElement("div"); restSec.className="exp-section"; restSec.id="dm-rest-section"; restSec.style.borderTop="1px solid #f0f0f0"; restSec.style.marginTop="4px";
   var rHdr=document.createElement("div"); rHdr.className="exp-section-hdr";
   var rLbl=document.createElement("div"); rLbl.className="exp-section-lbl"; rLbl.textContent="Restaurants";
   var rRef=document.createElement("button"); rRef.className="exp-refresh-btn"; rRef.textContent=dest.restaurantSuggestions.length?"Refresh":"Ask Max";
@@ -3197,6 +3198,22 @@ function buildExplorePane(dest){
   }
   wrap.appendChild(restSec);
   return wrap;
+}
+
+function buildRestaurantSection(dest){
+  var restSec=document.createElement("div"); restSec.className="exp-section"; restSec.id="dm-rest-section"; restSec.style.borderTop="1px solid #f0f0f0"; restSec.style.marginTop="4px";
+  var rHdr=document.createElement("div"); rHdr.className="exp-section-hdr";
+  var rLbl=document.createElement("div"); rLbl.className="exp-section-lbl"; rLbl.textContent="Restaurants";
+  var rRef=document.createElement("button"); rRef.className="exp-refresh-btn"; rRef.textContent=dest.restaurantSuggestions.length?"Refresh":"Ask Max";
+  (function(d,btn){rRef.onclick=function(){refreshRestaurantSuggestions(d,btn);};})(dest,rRef);
+  rHdr.appendChild(rLbl); rHdr.appendChild(rRef); restSec.appendChild(rHdr);
+  if(dest.restaurantSuggestions.length===0){
+    var rEmp=document.createElement("div"); rEmp.className="exp-empty";
+    rEmp.textContent="Restaurant suggestions will appear here."; restSec.appendChild(rEmp);
+  } else {
+    dest.restaurantSuggestions.forEach(function(s){restSec.appendChild(mkExploreSuggestion(s,"restaurant",dest));});
+  }
+  return restSec;
 }
 
 function mkExploreSuggestion(s,dest,type){
@@ -3307,10 +3324,15 @@ async function refreshRestaurantSuggestions(dest,btn){
     if(suggestions.length){
       dest.restaurantSuggestions=suggestions;
       autoSave();
-      // Look up pane fresh — DOM may have been built after we were called
-      var pane=document.getElementById("dm-pane-explore");
-      if(pane&&activeDest===dest.id){pane.innerHTML="";pane.appendChild(buildExplorePane(dest));}
-      else if(activeDest===dest.id){drawDestMode(dest.id);}
+      // Update only the restaurant section in-place — don't wipe sights
+      var restSection=document.getElementById("dm-rest-section");
+      if(restSection&&activeDest===dest.id){
+        restSection.innerHTML="";
+        restSection.appendChild(buildRestaurantSection(dest));
+      } else if(activeDest===dest.id){
+        // Pane not built yet — redraw when map settles
+        setTimeout(function(){if(activeDest===dest.id)drawDestMode(dest.id);},100);
+      }
     }
   }catch(e){console.error("refreshRestaurantSuggestions:",e);}
   window[lockKey]=false;
