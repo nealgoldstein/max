@@ -1569,11 +1569,15 @@ function showMapPinPanel(item,dest,itemType,mapEvent){
   if(item.note){var noteEl=document.createElement('div'); noteEl.className='mpp-note'; noteEl.textContent=item.note; cont.appendChild(noteEl);}
   var acts=document.createElement('div'); acts.className='mpp-actions';
   var isUnscheduled=(itemType==='suggestion'||itemType==='restaurant-suggestion');
-  // Story button — always present
-  var stb=document.createElement('button'); stb.className='mpp-btn'; stb.textContent='Story \u2197';
-  (function(sid,did){stb.onclick=function(){sStory(sid,did);panel.style.display='none';};})(item.id,dest.id);
-  acts.appendChild(stb);
-  if(isUnscheduled){
+  var isUtility=(itemType==='hotel'||itemType==='info'||itemType==='transit'||itemType==='atm'||itemType==='grocery');
+  // Story button — only for sights and restaurants
+  var storyTypes=['suggestion','restaurant-suggestion','sight','restaurant'];
+  if(storyTypes.indexOf(itemType)>-1){
+    var stb=document.createElement('button'); stb.className='mpp-btn'; stb.textContent='Story \u2197';
+    (function(sid,did){stb.onclick=function(){sStory(sid,did);panel.style.display='none';};})(item.id,dest.id);
+    acts.appendChild(stb);
+  }
+  if(isUtility){ /* no actions for hotel/transit/utility pins */ } else if(isUnscheduled){
     var addBtn=document.createElement('button'); addBtn.className='mpp-btn primary'; addBtn.textContent='Add to day \u2192';
     (function(it,tp){addBtn.onclick=function(){panel.style.display='none';showAddToDay(it,tp,dest,addBtn);};})(item,itemType==='restaurant-suggestion'?'restaurant':'sight');
     acts.appendChild(addBtn);
