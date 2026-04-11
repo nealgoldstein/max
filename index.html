@@ -1723,6 +1723,33 @@ function ensureSuggestions(dest){
   }
 }
 
+async function fetchCityMeta(dest){
+  // Fills in missing districts/practicalInfo/transitHub for saved generated cities
+  if(dest.generatedDistricts&&dest.generatedPracticalInfo) return; // already have it
+  var lockKey='_metaLoading_'+dest.id;
+  if(window[lockKey]) return;
+  window[lockKey]=true;
+  try{
+    var prompt='For '+dest.place+', return ONLY a JSON object with these fields:\n'+
+      '{"districts":[{"name":"...","good":"...","bad":"...","hotels":[{"name":"...","desc":"...","price":"...","tier":2}]}],'+
+      '"practicalInfo":{"currency":"...","tipping":"...","note":"...","emergency":"..."},'+
+      '"transitHub":{"arrival":{"name":"...","lat":0,"lng":0},"departure":{"name":"...","lat":0,"lng":0}}}\n'+
+      '2-3 districts with 1-2 hotels each. Be specific.';
+    var text=await callMax([{role:'user',content:prompt}],1500);
+    var json=text.replace(/```json\s*/g,'').replace(/```\s*/g,'').trim();
+    var s=json.indexOf('{'),e=json.lastIndexOf('}');
+    if(s>-1&&e>-1) json=json.substring(s,e+1);
+    var data=JSON.parse(json);
+    if(data.districts) dest.generatedDistricts=data.districts;
+    if(data.practicalInfo) dest.generatedPracticalInfo=data.practicalInfo;
+    if(data.transitHub) dest.generatedTransitHub=data.transitHub;
+    autoSave();
+    // Redraw stay & info tabs if currently viewing this dest
+    if(activeDest===dest.id&&_leftMode==='dest') drawDestMode(dest.id);
+  }catch(e){ console.error('fetchCityMeta failed:',e); }
+  window[lockKey]=false;
+}
+
 async function generateCityData(place,destId){
   var key=place.toLowerCase();
   if(_generatedCityData[key]&&!_generatedCityData[key].loading)return;
@@ -3628,6 +3655,11 @@ function drawDestMode(destId){
   if(!dest.todayItems)dest.todayItems=[];
   if(!dest.discoveredItems)dest.discoveredItems=[];
   migrateDest(dest);
+  // For saved generated cities missing district/info data, fetch it in background
+  if(!isKnownCity(dest.place)&&dest.suggestions&&dest.suggestions.length>0&&
+     !dest.generatedDistricts&&!_generatedCityData[dest.place.toLowerCase()]){
+    fetchCityMeta(dest);
+  }
   // Auto-generate restaurants if none exist — lock prevents concurrent calls
   if(!dest.restaurantSuggestions||dest.restaurantSuggestions.length===0){
     var _rl='_restLoading_'+dest.id;
