@@ -983,6 +983,10 @@ function getCityCenter(place){
     return _generatedCityData[p].cityCenter;
   if(_generatedCityData[p]&&_generatedCityData[p].loading)
     return null; // still generating — caller handles null
+  // Check persisted generatedData
+  var dest4=_getDestForPlace(place);
+  if(dest4&&dest4.generatedData&&dest4.generatedData.cityCenter&&dest4.generatedData.cityCenter[0])
+    return dest4.generatedData.cityCenter;
   var centers={interlaken:[46.6863,7.8632],vienna:[48.2082,16.3738],prague:[50.0755,14.4378],
     budapest:[47.4979,19.0402],amsterdam:[52.3676,4.9041],paris:[48.8566,2.3522],
     rome:[41.9028,12.4964],barcelona:[41.3851,2.1734],berlin:[52.5200,13.4050]};
@@ -1114,6 +1118,10 @@ function getCityTransitHub(place,direction){
   var gen=_generatedCityData[p];
   if(gen&&!gen.loading&&gen.transitHub&&gen.transitHub[direction]&&gen.transitHub[direction].lat)
     return gen.transitHub[direction];
+  // Fallback: persisted generatedData
+  var dest3=_getDestForPlace(place);
+  if(dest3&&dest3.generatedData&&dest3.generatedData.transitHub&&dest3.generatedData.transitHub[direction])
+    return dest3.generatedData.transitHub[direction];
   var hubs={
     "interlaken":{arrival:{name:"Interlaken Ost",lat:46.6904,lng:7.8691},departure:{name:"Interlaken Ost",lat:46.6904,lng:7.8691}},
     "vienna":{arrival:{name:"Wien Hauptbahnhof",lat:48.1847,lng:16.3765},departure:{name:"Wien Hauptbahnhof",lat:48.1847,lng:16.3765}},
@@ -1729,6 +1737,18 @@ async function generateCityData(place,destId){
     if(s>-1&&e>-1)json=json.substring(s,e+1);
     var data=JSON.parse(json);
     _generatedCityData[key]=data;
+
+    // Persist key city data to the destination so it survives page reloads
+    var destForSave=getDest(destId);
+    if(destForSave){
+      destForSave.generatedData={
+        cityCenter:data.cityCenter,
+        districts:data.districts,
+        practicalInfo:data.practicalInfo,
+        transitHub:data.transitHub
+      };
+      autoSave();
+    }
 
     // Populate suggestions — user assigns to days from Explore tab
     var destRef=getDest(destId);
@@ -4864,6 +4884,9 @@ function getPracticalInfo(place,intent){
   // Generated city data takes priority
   var gen=_generatedCityData[place.toLowerCase()];
   if(gen&&!gen.loading&&gen.practicalInfo) return gen.practicalInfo;
+  // Fallback: persisted generatedData
+  var dest2=_getDestForPlace(place);
+  if(dest2&&dest2.generatedData&&dest2.generatedData.practicalInfo) return dest2.generatedData.practicalInfo;
   var p=(place+" "+(intent||"")).toLowerCase();
   if(p.indexOf("interlaken")>-1||p.indexOf("zurich")>-1||p.indexOf("bern")>-1||p.indexOf("geneva")>-1)return{
     currency:"Swiss Franc (CHF) \u00b7 roughly 1:1 with USD",
@@ -5011,9 +5034,19 @@ function getSights(place,intent){
   ];
 }
 
+function _getDestForPlace(place){
+  if(typeof trip==='undefined') return null;
+  var p=place.toLowerCase();
+  return trip.destinations.find(function(d){return d.place.toLowerCase()===p;})||null;
+}
+
 function getDistricts(place,intent){
   var gen=_generatedCityData[place.toLowerCase()];
   if(gen&&!gen.loading&&gen.districts&&gen.districts.length) return gen.districts;
+  // Fallback: check persisted generatedData on the destination
+  var dest=_getDestForPlace(place);
+  if(dest&&dest.generatedData&&dest.generatedData.districts&&dest.generatedData.districts.length)
+    return dest.generatedData.districts;
   var p=(place+" "+(intent||"")).toLowerCase();
   if(p.indexOf("interlaken")>-1)return[
     {name:"Interlaken West",good:"Tourist center - restaurants, shops, easy access",bad:"Busy and more tourist-facing",hotels:[
