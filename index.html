@@ -987,7 +987,25 @@ function getCityCenter(place){
     budapest:[47.4979,19.0402],amsterdam:[52.3676,4.9041],paris:[48.8566,2.3522],
     rome:[41.9028,12.4964],barcelona:[41.3851,2.1734],berlin:[52.5200,13.4050]};
   for(var k in centers) if(p.indexOf(k)>-1) return centers[k];
-  return null; // truly unknown — don't show wrong place
+  // For generated cities loaded from storage: derive center from stored suggestion coords
+  // Find the destination and average its suggestion coordinates
+  var dest=trip.destinations.find(function(d){return d.place.toLowerCase()===p;});
+  if(dest&&dest.suggestions){
+    var pts=dest.suggestions.filter(function(s){return s.lat&&s.lng&&!s.approx;});
+    if(pts.length>=2){
+      var avgLat=pts.reduce(function(a,s){return a+s.lat;},0)/pts.length;
+      var avgLng=pts.reduce(function(a,s){return a+s.lng;},0)/pts.length;
+      return [avgLat,avgLng];
+    }
+    // Even approx coords are better than nothing
+    var anyPts=dest.suggestions.filter(function(s){return s.lat&&s.lng;});
+    if(anyPts.length>=2){
+      var avgLat2=anyPts.reduce(function(a,s){return a+s.lat;},0)/anyPts.length;
+      var avgLng2=anyPts.reduce(function(a,s){return a+s.lng;},0)/anyPts.length;
+      return [avgLat2,avgLng2];
+    }
+  }
+  return null;
 }
 
 function getNearbyLocations(place){
