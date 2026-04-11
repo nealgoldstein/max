@@ -679,7 +679,7 @@ function clearApiKey(){
 // ── Max AI ─────────────────────────────────────────────────
 var MAX_SYSTEM = "You are Max \u2014 the guide behind \"A Tourist's Guide to the Existential Universe.\" Your voice comes from five years of travel across Europe, Central America, and the American West. You are not a tour operator. You are the traveler who stands in the Belvedere in front of Klimt's Judith for forty minutes because you want to understand what he was actually thinking, not what the audio guide says he was thinking.\n\nYou work from specific historical facts \u2014 the date, the name, the decision that made a place what it is. You present those facts without commentary. The implication does its own work. You do not tell travelers what they will feel. You tell them what happened and you trust them.\n\nYour register shifts with purpose: light and observational when things are moving, something quieter when a place earns it. You know the difference between a place that matters and a place that has been told it matters. You are comfortable with uncertainty \u2014 sometimes \"I'd check locally\" is the most honest answer.\n\nFor place stories: open with a specific fact, stay in 3\u20135 sentences, end with an open observation rather than a summary. For direct questions: be brief and concrete. For dig-deeper follow-ups: go further into the historical or cultural thread, don't repeat what you already said.\n\nNever say: hidden gem, vibrant, bustling, must-see, off the beaten path, iconic, charming, quaint, magical. Never tell the traveler how they will feel.";
 
-async function callMax(messages) {
+async function callMax(messages, maxTokens) {
   var headers = {"Content-Type": "application/json"};
   if (_apiKey) {
     headers["x-api-key"] = _apiKey;
@@ -693,7 +693,7 @@ async function callMax(messages) {
       headers: headers,
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
-        max_tokens: 1000,
+        max_tokens: maxTokens||1000,
         system: MAX_SYSTEM,
         messages: messages
       })
@@ -1694,7 +1694,7 @@ async function generateCityData(place,destId){
     'Include 8-10 sights each with a specific one-sentence desc (not generic), 2-3 districts with 1-2 hotels each (tier 1=budget 2=mid 3=upper 4=luxury). cityCenter=[latitude,longitude]. Be specific and concrete.';
 
   try{
-    var text=await callMax([{role:'user',content:prompt}]);
+    var text=await callMax([{role:'user',content:prompt}], 2000);
     var json=text.replace(/```json\s*/g,'').replace(/```\s*/g,'').trim();
     var s=json.indexOf('{'),e=json.lastIndexOf('}');
     if(s>-1&&e>-1)json=json.substring(s,e+1);
@@ -1760,8 +1760,24 @@ async function generateCityData(place,destId){
     }
   }catch(err){
     delete _generatedCityData[key];
-    showSaveStatus('Could not generate '+place+' data \u2014 check connection',4000);
+    showSaveStatus('Could not generate '+place+' data \u2014 tap Retry in Explore tab',5000);
     console.error('generateCityData failed:',err);
+    // Show retry option in explore pane
+    var d2=getDest(destId);
+    if(d2&&activeDest===destId&&_leftMode==='dest'){
+      var explPane=document.getElementById('dm-pane-explore');
+      if(explPane){
+        var errMsg=document.createElement('div');
+        errMsg.style.cssText='margin:12px 14px;padding:10px;background:#fff5f5;border:1px solid #f8c8c8;border-radius:7px;font-size:11px;color:#b04040;line-height:1.5;';
+        errMsg.textContent='Could not load '+place+' data. ';
+        var retryBtn=document.createElement('button');
+        retryBtn.style.cssText='font-size:11px;padding:2px 8px;border:1px solid #f8c8c8;border-radius:4px;background:#fff;color:#b04040;cursor:pointer;margin-left:4px;';
+        retryBtn.textContent='Retry';
+        (function(p,did){retryBtn.onclick=function(){delete _generatedCityData[p.toLowerCase()];generateCityData(p,did);drawDestMode(did);};})(place,destId);
+        errMsg.appendChild(retryBtn);
+        explPane.insertBefore(errMsg,explPane.firstChild);
+      }
+    }
   }
 }
 
