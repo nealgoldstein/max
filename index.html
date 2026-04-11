@@ -76,9 +76,12 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .tm-submit.on{background:#111;color:#fff;border-color:#111;cursor:pointer;}
 /* Destination mode */
 .dm-hdr{padding:12px 14px 0;flex-shrink:0;}
-.dm-back{font-size:11px;color:#888;background:none;border:none;cursor:pointer;font-family:inherit;padding:0 0 6px;display:flex;align-items:center;gap:4px;}
-.dm-add-dest-btn{font-size:10px;color:#666;background:none;border:1px solid #ddd;border-radius:4px;cursor:pointer;font-family:inherit;padding:3px 8px;float:right;margin-bottom:4px;}
+.dm-hdr-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+.dm-back{font-size:11px;color:#555;background:none;border:none;cursor:pointer;font-family:inherit;padding:0;display:flex;align-items:center;gap:4px;font-weight:500;}
+.dm-back:hover{color:#111;}
+.dm-add-dest-btn{font-size:10px;color:#555;background:none;border:1px solid #ccc;border-radius:4px;cursor:pointer;font-family:inherit;padding:3px 8px;}
 .dm-add-dest-btn:hover{border-color:#888;color:#111;}
+
 .dm-back:hover{color:#333;}
 .dm-title{font-size:15px;font-weight:600;color:#111;margin-bottom:2px;}
 .dm-dates{font-size:11px;color:#aaa;margin-bottom:8px;}
@@ -3658,9 +3661,15 @@ function drawDestMode(destId){
 
   // Header
   var hdr=document.createElement("div"); hdr.className="dm-hdr";
+  var navRow=document.createElement("div"); navRow.className="dm-hdr-nav";
   var back=document.createElement("button"); back.className="dm-back";
   back.innerHTML="\u2190 All destinations";
   back.onclick=function(){setLeftMode("trip");};
+  var addDestBtn=document.createElement("button"); addDestBtn.className="dm-add-dest-btn";
+  addDestBtn.textContent="+ Destination";
+  addDestBtn.onclick=function(){setLeftMode("trip");setTimeout(function(){var b=document.getElementById("tm-add-btn");if(b)b.click();},80);};
+  navRow.appendChild(back); navRow.appendChild(addDestBtn);
+  hdr.appendChild(navRow);
   var title=document.createElement("div"); title.className="dm-title"; title.textContent=dest.place;
   var dates=document.createElement("div"); dates.className="dm-dates"; dates.id="ud-dates-"+destId;
   dates.textContent=fmtD(dest.dateFrom)+" \u2013 "+fmtD(dest.dateTo)+" ("+dest.nights+" night"+(dest.nights!==1?"s":"")+")";
@@ -3706,19 +3715,7 @@ function drawDestMode(destId){
   }
   var ovWarn=document.createElement("div"); ovWarn.id="ov-warn-"+dest.id; ovWarn.className="overlap-warn hidden";
 
-  // "+ Add destination" button in header
-  var addDestBtn=document.createElement("button"); addDestBtn.className="dm-add-dest-btn";
-  addDestBtn.textContent="+ Destination";
-  addDestBtn.onclick=function(){
-    setLeftMode("trip");
-    // Small delay then trigger the add form
-    setTimeout(function(){
-      var addBtn=document.getElementById("tm-add-btn");
-      if(addBtn) addBtn.click();
-    },80);
-  };
-
-  hdr.appendChild(back); hdr.appendChild(title); hdr.appendChild(dates);
+  hdr.appendChild(title); hdr.appendChild(dates);
   hdr.appendChild(dmActs); hdr.appendChild(dsw); hdr.appendChild(ovWarn);
   c.appendChild(hdr);
 
