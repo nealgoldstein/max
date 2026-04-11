@@ -589,7 +589,8 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
     </div>
     <div class="hs-actions">
       <button class="hs-btn hs-btn-primary" onclick="showNewTripForm()" id="hs-new-btn">+ New trip</button>
-      <button class="hs-btn hs-btn-secondary" onclick="openTripFile()">Open trip file</button>
+      <button class="hs-btn hs-btn-secondary" onclick="openTripFile()">Open trip</button>
+      <input type="file" id="hs-trip-file-input" accept=".json" style="display:none;" onchange="loadTripFile(this)">
     </div>
   </div>
 </div>
@@ -785,6 +786,41 @@ function showSaveStatus(msg,duration){
   var el=g("save-status"); el.style.display="block"; el.textContent=msg;
   if(_saveTimer)clearTimeout(_saveTimer);
   _saveTimer=setTimeout(function(){el.style.display="none";},duration||3000);
+}
+
+function openTripFile(){
+  var inp=document.getElementById("hs-trip-file-input");
+  if(inp) inp.click();
+}
+
+function loadTripFile(input){
+  var file=input.files&&input.files[0];
+  if(!file) return;
+  var reader=new FileReader();
+  reader.onload=function(e){
+    try{
+      var data=JSON.parse(e.target.result);
+      if(!data.trip||!data.trip.destinations) throw new Error("Not a valid trip file");
+      trip=data.trip; activeDest=data.activeDest||null;
+      destCtr=data.destCtr||trip.destinations.length;
+      sidCtr=data.sidCtr||100; bkCtr=data.bkCtr||0;
+      if(data.activeDmSection) _activeDmSection=data.activeDmSection;
+      // Save to localStorage with a new ID
+      var newId="trip-"+Date.now();
+      _currentTripId=newId;
+      _tripsIndex.push({id:newId,name:trip.name||"Imported trip",
+        dateRange:trip.destinations.length?trip.destinations[0].dateFrom+" – "+trip.destinations[trip.destinations.length-1].dateTo:"",
+        destCount:trip.destinations.length});
+      saveTripsIndex();
+      localStorage.setItem("max-trip-"+newId,JSON.stringify(data));
+      enterApp();
+      showSaveStatus("Trip loaded: "+( trip.name||"Untitled trip"),4000);
+    }catch(err){
+      alert("Could not load trip file: "+err.message);
+    }
+    input.value=""; // reset so same file can be loaded again
+  };
+  reader.readAsText(file);
 }
 
 async function saveTrip(){
