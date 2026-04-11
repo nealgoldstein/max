@@ -1125,15 +1125,19 @@ function collectMapLocations(dest){
       var center=anchor?[anchor.lat,anchor.lng]:getCityCenter(dest.place);
       // Use real geocoded coords if available in generated data
       var sLat=null,sLng=null;
-      var gen=_generatedCityData[dest.place.toLowerCase()];
-      if(gen&&!gen.loading&&gen.sights){
-        var match=gen.sights.find(function(gs){return gs.name===s.n;});
-        if(match&&match.lat){sLat=match.lat;sLng=match.lng;}
-      }
-      // Also check dest.suggestions for coords
-      if(!sLat&&dest.suggestions){
-        var sm=dest.suggestions.find(function(sg){return sg.n===s.n&&sg.lat;});
-        if(sm){sLat=sm.lat;sLng=sm.lng;}
+      // Use coords stored on the item itself (set when added to day from Explore)
+      if(s.lat&&s.lng){sLat=s.lat;sLng=s.lng;}
+      else {
+        var gen=_generatedCityData[dest.place.toLowerCase()];
+        if(gen&&!gen.loading&&gen.sights){
+          var match=gen.sights.find(function(gs){return gs.name===s.n;});
+          if(match&&match.lat){sLat=match.lat;sLng=match.lng;}
+        }
+        // Also check dest.suggestions for coords
+        if(!sLat&&dest.suggestions){
+          var sm=dest.suggestions.find(function(sg){return sg.n===s.n&&sg.lat;});
+          if(sm){sLat=sm.lat;sLng=sm.lng;}
+        }
       }
       if(!center&&!sLat)return;
       locs.push({type:s.p==="must"?"sight-must":"sight-nice",name:s.n,
@@ -1146,7 +1150,10 @@ function collectMapLocations(dest){
       var center=getCityCenter(dest.place);
       // Look up coords from restaurantSuggestions if available
       var rLat=null,rLng=null;
-      if(dest.restaurantSuggestions){
+      // Use coords stored on the item itself (set when added to day)
+      if(s.lat&&s.lng){rLat=s.lat;rLng=s.lng;}
+      // Fallback: look up from suggestions pool
+      else if(dest.restaurantSuggestions){
         var rm=dest.restaurantSuggestions.find(function(rs){return rs.n===s.n&&rs.lat;});
         if(rm){rLat=rm.lat;rLng=rm.lng;}
       }
@@ -3210,7 +3217,9 @@ function showAddToDay(item,type,dest,triggerBtn){
         e.stopPropagation();
         // Add to day.items
         sidCtr++;
-        var ni={id:"s"+sidCtr,type:type,slot:sl2,n:item.n||item.name,p:"nice",done:false,st:item.st||item.n||item.name,note:item.note||null,time:""};
+        var ni={id:"s"+sidCtr,type:type,slot:sl2,n:item.n||item.name,p:"nice",done:false,
+          st:item.st||item.n||item.name,note:item.note||null,time:"",
+          lat:item.lat||null,lng:item.lng||null};
         if(!d.items)d.items=[];
         d.items.push(ni);
         // Remove from suggestions
