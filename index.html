@@ -3277,7 +3277,6 @@ async function refreshRestaurantSuggestions(dest,btn){
   if(window[lockKey]) return;
   window[lockKey]=true;
   if(btn){btn.disabled=true;btn.textContent="thinking\u2026";}
-  var pane=document.getElementById("dm-pane-explore");
   try{
     var text=await callMax([{role:"user",content:"Suggest 6 restaurants in "+dest.place+". For each: name, neighborhood, one sentence on why it\u2019s worth going, and the one dish or drink to order. Be specific. Format: one restaurant per line, as: Name | Neighborhood | Why go | What to order"}]);
     var suggestions=[];
@@ -3308,7 +3307,10 @@ async function refreshRestaurantSuggestions(dest,btn){
     if(suggestions.length){
       dest.restaurantSuggestions=suggestions;
       autoSave();
-      if(pane){pane.innerHTML="";pane.appendChild(buildExplorePane(dest));}
+      // Look up pane fresh — DOM may have been built after we were called
+      var pane=document.getElementById("dm-pane-explore");
+      if(pane&&activeDest===dest.id){pane.innerHTML="";pane.appendChild(buildExplorePane(dest));}
+      else if(activeDest===dest.id){drawDestMode(dest.id);}
     }
   }catch(e){console.error("refreshRestaurantSuggestions:",e);}
   window[lockKey]=false;
