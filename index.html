@@ -1680,6 +1680,10 @@ async function populateStaticSuggestions(dest){
   // All geocoding done — now show real pins and fitBounds
   if(activeDest===dest.id && _leftMode==='dest') updateMainMap();
   else updateMainMap();
+  // Auto-generate restaurants if none exist
+  if(!dest.restaurantSuggestions||dest.restaurantSuggestions.length===0){
+    refreshRestaurantSuggestions(dest,null);
+  }
   autoSave();
 }
 
@@ -1764,6 +1768,11 @@ async function generateCityData(place,destId){
       // Final map update with geocoded sight pins
       if(activeDest===destId&&_leftMode==='dest') updateMainMap();
       else updateMainMap();
+      // Auto-generate restaurants if none exist yet
+      var destForRest=getDest(destId);
+      if(destForRest&&(!destForRest.restaurantSuggestions||destForRest.restaurantSuggestions.length===0)){
+        refreshRestaurantSuggestions(destForRest,null);
+      }
     }
   }catch(err){
     delete _generatedCityData[key];
@@ -3572,6 +3581,10 @@ function drawDestMode(destId){
   if(!dest.todayItems)dest.todayItems=[];
   if(!dest.discoveredItems)dest.discoveredItems=[];
   migrateDest(dest);
+  // Auto-generate restaurants if none exist
+  if(!dest.restaurantSuggestions||dest.restaurantSuggestions.length===0){
+    setTimeout(function(){refreshRestaurantSuggestions(dest,null);},500);
+  }
   // Ensure suggestions exist and have coords — catches any edge case migrateDest misses
   if((!dest.suggestions||dest.suggestions.length===0||dest.suggestions.every(function(s){return !s.lat;}))){
     if(isKnownCity(dest.place)){
