@@ -2179,9 +2179,11 @@ function computeDateChangeImpact(dest,newFrom,newTo){
   var affected={bookings:[],overlapping:[]};
   var extending=newTo>dest.dateTo;
 
-  // 1. Own hotel booking — always needs rebooking when dates change
+  // 1. Own hotel booking — warn user to contact hotel, don't auto-clear
   (dest.hotelBookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
-    affected.bookings.push({dest:dest.label||dest.place,type:'Hotel',name:b.name,detail:'Dates change — rebook required'});
+    affected.bookings.push({dest:dest.label||dest.place,type:'Hotel',name:b.name,
+      detail:'Contact hotel to adjust reservation — confirmation: '+(b.confirmationNumber||'see booking'),
+      keepInApp:true}); // keepInApp means don't clear — just warn
   });
 
   // 2. Own general/restaurant bookings after the new end date — no longer valid
@@ -2233,7 +2235,7 @@ function showDateChangeDialog(dest,newFrom,newTo,affected,onConfirm){
     var list=document.createElement('div'); list.style.cssText='margin-bottom:10px;';
     affected.bookings.forEach(function(b){
       var row=document.createElement('div'); row.style.cssText='font-size:11px;padding:4px 8px;background:#fff8f0;border:1px solid #f0dcc0;border-radius:4px;margin-bottom:3px;';
-      row.innerHTML='<strong>'+b.type+'</strong>: '+b.name+' <span style="color:#999;">('+b.detail+')</span>';
+      row.innerHTML='<strong>'+b.type+'</strong>: '+b.name+' <span style="color:#999;">('+b.detail+')</span>'+(b.keepInApp?' <span style="color:#2a7a4e;font-size:10px;">kept in app</span>':' <span style="color:#b05820;font-size:10px;">will be removed</span>');
       list.appendChild(row);
     });
     dlg.appendChild(list);
@@ -2252,7 +2254,7 @@ function showDateChangeDialog(dest,newFrom,newTo,affected,onConfirm){
 
   // Cancellation reminder
   var warn=document.createElement('div'); warn.className='move-dialog-warn';
-  warn.innerHTML='<strong>Important:</strong> Cancelling in the app removes these bookings from your plan, and any scheduled sights/restaurants in affected destinations will return to the Explore pool. You must contact providers directly to cancel and request refunds. Check cancellation and refund policies before proceeding.';
+  warn.innerHTML='<strong>Important:</strong> Hotel reservations are kept in the app — you must contact the hotel directly to adjust. Other bookings (transport, restaurant reservations) will be removed from the plan. Scheduled sights and restaurants in affected destinations return to the Explore/Eat pool. Always check cancellation and refund policies before contacting providers.';
   dlg.appendChild(warn);
 
   var acts=document.createElement('div'); acts.className='move-dialog-actions';
@@ -2283,9 +2285,10 @@ function applyDateChange(dest,newFrom,newTo,affected){
   }
   if(dest.days.length>count) dest.days=dest.days.slice(0,count);
 
-  // Clear own bookings
+  // Clear own bookings (keep hotel — user must contact provider directly)
   if(affected){
-    dest.hotelBookings=[]; dest.generalBookings=[];
+    // Don't clear hotel — user needs confirmation number to contact hotel
+    dest.generalBookings=[];
     // Clear transport legs to/from this dest
     Object.keys(trip.legs||{}).forEach(function(k){
       var parts=k.split('-');
@@ -2301,27 +2304,20 @@ function applyDateChange(dest,newFrom,newTo,affected){
         var parts=k.split('-');
         if(parts.length===2&&(parts[0]===od.id||parts[1]===od.id)) trip.legs[k]={bookings:[]};
       });
-      // Move items from overlap days back to suggestions pool
-      // Overlap period: od.dateFrom up to newTo (the new end of the extended destination)
+      // Return ALL scheduled items to pool — sights → Explore, restaurants → Eat
       if(od.days){
         od.days.forEach(function(day){
-          var dayDate=new Date(day.lbl+' '+(new Date().getFullYear()));
-          // Items on days that fall within the overlap period go back to pool
-          // Simpler: move ALL items from affected days back to suggestions
-          // (since the whole destination is shifting, existing planned items are now orphaned)
-          var itemsToReturn=(day.items||[]).filter(function(s){return s.type==='sight';});
-          var restToReturn=(day.items||[]).filter(function(s){return s.type==='restaurant';});
-          itemsToReturn.forEach(function(s){
-            var alreadyIn=od.suggestions&&od.suggestions.some(function(sg){return sg.n===s.n;});
-            if(!alreadyIn&&od.suggestions){
-              od.suggestions.push({id:s.id,type:'sight',n:s.n,st:s.st||s.n,note:s.note||null,
-                lat:s.lat||null,lng:s.lng||null,approx:true});
-            }
-          });
-          restToReturn.forEach(function(r){
-            var alreadyIn=od.restaurantSuggestions&&od.restaurantSuggestions.some(function(rs){return rs.n===r.n;});
-            if(!alreadyIn&&od.restaurantSuggestions){
-              od.restaurantSuggestions.push({id:r.id,type:'restaurant',n:r.n,st:r.st||r.n,note:r.note||null,lat:r.lat||null,lng:r.lng||null});
+          (day.items||[]).forEach(function(s){
+            if(s.type==='sight'){
+              if(!od.suggestions) od.suggestions=[];
+              var alreadyIn=od.suggestions.some(function(sg){return sg.n===s.n;});
+              if(!alreadyIn) od.suggestions.push({id:s.id,type:'sight',n:s.n,st:s.st||s.n,
+                note:s.note||null,lat:s.lat||null,lng:s.lng||null,approx:!!s.approx});
+            } else if(s.type==='restaurant'){
+              if(!od.restaurantSuggestions) od.restaurantSuggestions=[];
+              var alreadyInR=od.restaurantSuggestions.some(function(rs){return rs.n===s.n;});
+              if(!alreadyInR) od.restaurantSuggestions.push({id:s.id,type:'restaurant',n:s.n,
+                st:s.st||s.n,note:s.note||null,lat:s.lat||null,lng:s.lng||null});
             }
           });
           day.items=[];
