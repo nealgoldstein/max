@@ -2161,6 +2161,116 @@ function saveDates(destId){
   var dest=getDest(destId); if(!dest)return;
   var oldFrom=dest.dateFrom, oldTo=dest.dateTo;
   var datesChanged=(newFrom!==oldFrom||newTo!==oldTo);
+
+  if(datesChanged){
+    // Compute what would be affected before asking
+    var affected=computeDateChangeImpact(dest,newFrom,newTo);
+    if(affected.bookings.length>0||affected.downstream.length>0){
+      showDateChangeDialog(dest,newFrom,newTo,affected,function(){
+        applyDateChange(dest,newFrom,newTo,affected);
+      });
+      return;
+    }
+  }
+  applyDateChange(dest,newFrom,newTo,null);
+}
+
+function computeDateChangeImpact(dest,newFrom,newTo){
+  var affected={bookings:[],downstream:[]};
+  var oldTo=dest.dateTo;
+  var extending=newTo>oldTo;
+  var shortening=newTo<oldTo;
+
+  // Check dest's own bookings
+  (dest.hotelBookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
+    if(shortening&&b.checkOut&&b.checkOut>newTo)
+      affected.bookings.push({dest:dest.label||dest.place,type:'Hotel',name:b.name,detail:'Check-out '+fmtD(b.checkOut)});
+    else if(extending)
+      affected.bookings.push({dest:dest.label||dest.place,type:'Hotel',name:b.name,detail:'Dates change — rebook required'});
+  });
+  (dest.generalBookings||[]).forEach(function(b){
+    if(b.date&&b.date>newTo)
+      affected.bookings.push({dest:dest.label||dest.place,type:'Booking',name:b.name||b.type||'General',detail:fmtD(b.date)});
+  });
+
+  // Check transport legs
+  var destIdx=trip.destinations.indexOf(dest);
+  // Outgoing leg
+  if(destIdx<trip.destinations.length-1){
+    var nextDest=trip.destinations[destIdx+1];
+    var leg=getLeg(dest.id,nextDest.id);
+    (leg.bookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
+      affected.bookings.push({dest:dest.label||dest.place,type:'Transport',name:b.operator||'Transport',detail:'Departs '+fmtD(b.departure||dest.dateTo)+' → '+(nextDest.label||nextDest.place)});
+    });
+  }
+
+  // Downstream destinations whose dates shift
+  if(newTo!==dest.dateTo){
+    var shift=Math.round((new Date(newTo)-new Date(dest.dateTo))/86400000);
+    for(var i=destIdx+1;i<trip.destinations.length;i++){
+      var d=trip.destinations[i];
+      var hasBookings=(d.hotelBookings&&d.hotelBookings.some(function(b){return b.status==='booked';}))
+        ||(d.generalBookings&&d.generalBookings.length>0)
+        ||Object.keys(trip.legs||{}).some(function(k){return k.indexOf(d.id)>-1&&trip.legs[k].bookings&&trip.legs[k].bookings.length>0;});
+      if(hasBookings) affected.downstream.push({dest:d.label||d.place,shift:shift});
+    }
+  }
+  return affected;
+}
+
+function showDateChangeDialog(dest,newFrom,newTo,affected,onConfirm){
+  var overlay=document.createElement('div'); overlay.className='move-dialog-overlay';
+  var dlg=document.createElement('div'); dlg.className='move-dialog';
+
+  var title=document.createElement('div'); title.className='move-dialog-title';
+  title.textContent='Update dates for '+(dest.label||dest.place);
+  dlg.appendChild(title);
+
+  // List affected bookings
+  if(affected.bookings.length>0){
+    var secLbl=document.createElement('div'); secLbl.className='move-dialog-label'; secLbl.textContent='Bookings that will be cancelled:';
+    dlg.appendChild(secLbl);
+    var list=document.createElement('div'); list.style.cssText='margin-bottom:10px;';
+    affected.bookings.forEach(function(b){
+      var row=document.createElement('div'); row.style.cssText='font-size:11px;padding:4px 8px;background:#fff8f0;border:1px solid #f0dcc0;border-radius:4px;margin-bottom:3px;';
+      row.innerHTML='<strong>'+b.type+'</strong>: '+b.name+' <span style="color:#999;">('+b.detail+')</span>';
+      list.appendChild(row);
+    });
+    dlg.appendChild(list);
+  }
+  if(affected.downstream.length>0){
+    var dsLbl=document.createElement('div'); dsLbl.className='move-dialog-label'; dsLbl.textContent='Downstream destinations with bookings (dates will shift):';
+    dlg.appendChild(dsLbl);
+    var dsList=document.createElement('div'); dsList.style.cssText='margin-bottom:10px;';
+    affected.downstream.forEach(function(d){
+      var row=document.createElement('div'); row.style.cssText='font-size:11px;padding:4px 8px;background:#fff8f0;border:1px solid #f0dcc0;border-radius:4px;margin-bottom:3px;';
+      var shiftTxt=d.shift>0?'+'+d.shift+' day'+(Math.abs(d.shift)!==1?'s':''):d.shift+' day'+(Math.abs(d.shift)!==1?'s':'');
+      row.innerHTML='<strong>'+d.dest+'</strong> <span style="color:#999;">(shifts '+shiftTxt+')</span>';
+      dsList.appendChild(row);
+    });
+    dlg.appendChild(dsList);
+  }
+
+  // Cancellation reminder
+  var warn=document.createElement('div'); warn.className='move-dialog-warn';
+  warn.innerHTML='<strong>Important:</strong> Cancelling in the app removes these bookings from your plan. You must contact providers directly to cancel and request refunds. Check cancellation and refund policies before proceeding.';
+  dlg.appendChild(warn);
+
+  var acts=document.createElement('div'); acts.className='move-dialog-actions';
+  var cancelBtn=document.createElement('button'); cancelBtn.className='move-dialog-cancel'; cancelBtn.textContent='Go back';
+  cancelBtn.onclick=function(){document.body.removeChild(overlay);};
+  var confirmBtn=document.createElement('button'); confirmBtn.className='move-dialog-confirm'; confirmBtn.textContent='Update dates & cancel bookings';
+  confirmBtn.onclick=function(){document.body.removeChild(overlay);onConfirm();};
+  acts.appendChild(cancelBtn); acts.appendChild(confirmBtn);
+  dlg.appendChild(acts);
+  overlay.appendChild(dlg);
+  overlay.onclick=function(e){if(e.target===overlay)document.body.removeChild(overlay);};
+  document.body.appendChild(overlay);
+}
+
+function applyDateChange(dest,newFrom,newTo,affected){
+  var destId=dest.id;
+  var oldTo=dest.dateTo;
   dest.dateFrom=newFrom; dest.dateTo=newTo;
   var fD=new Date(newFrom+"T12:00:00"), tD=new Date(newTo+"T12:00:00");
   dest.nights=Math.max(1,Math.round((tD-fD)/86400000));
@@ -2174,44 +2284,35 @@ function saveDates(destId){
   }
   if(dest.days.length>count) dest.days=dest.days.slice(0,count);
 
-  if(datesChanged){
-    // Clear hotel booking — dates no longer valid
-    dest.hotelBookings=[];
-    // Clear restaurant items from days that no longer exist (if shortened)
-    // (days already trimmed above — items removed with them)
-    // Clear restaurant reservations in generalBookings
-    dest.generalBookings=(dest.generalBookings||[]).filter(function(b){
-      return b.type!=='restaurant'; // keep non-restaurant general bookings
-    });
-    // Clear transport legs to/from this destination and cascade downstream
-    var destIdx=trip.destinations.indexOf(dest);
-    var affectedIds=new Set([dest.id]);
-    for(var j=destIdx+1;j<trip.destinations.length;j++) affectedIds.add(trip.destinations[j].id);
+  // Clear bookings if affected was computed (came through dialog)
+  if(affected){
+    dest.hotelBookings=[]; dest.generalBookings=[];
     Object.keys(trip.legs||{}).forEach(function(k){
       var parts=k.split('-');
-      if(parts.length===2&&(affectedIds.has(parts[0])||affectedIds.has(parts[1]))){
-        trip.legs[k]={bookings:[]};
-      }
+      if(parts.length===2&&(parts[0]===dest.id||parts[1]===dest.id)) trip.legs[k]={bookings:[]};
     });
-    // Clear hotel/general bookings for downstream destinations too
-    for(var k=destIdx+1;k<trip.destinations.length;k++){
-      trip.destinations[k].hotelBookings=[];
-      trip.destinations[k].generalBookings=[];
-    }
-    // Cascade dates downstream — each dest starts day after previous ends
-    for(var m=destIdx+1;m<trip.destinations.length;m++){
-      var prev=trip.destinations[m-1];
-      var prevEnd=new Date(prev.dateTo+"T12:00:00"); prevEnd.setDate(prevEnd.getDate()+1);
-      var nights=trip.destinations[m].nights||3;
-      var newEnd=new Date(prevEnd); newEnd.setDate(newEnd.getDate()+nights);
-      trip.destinations[m].dateFrom=prevEnd.toISOString().slice(0,10);
-      trip.destinations[m].dateTo=newEnd.toISOString().slice(0,10);
+    var dIdx=trip.destinations.indexOf(dest);
+    for(var m=dIdx+1;m<trip.destinations.length;m++){
+      var prev2=trip.destinations[m-1];
+      var prevEnd2=new Date(prev2.dateTo+"T12:00:00"); prevEnd2.setDate(prevEnd2.getDate()+1);
+      var oldFrom2=trip.destinations[m].dateFrom;
+      var nts=trip.destinations[m].nights||3;
+      var newEnd2=new Date(prevEnd2); newEnd2.setDate(newEnd2.getDate()+nts);
+      trip.destinations[m].dateFrom=prevEnd2.toISOString().slice(0,10);
+      trip.destinations[m].dateTo=newEnd2.toISOString().slice(0,10);
       if(trip.destinations[m].days) trip.destinations[m].days.forEach(function(day,di){
-        var dd=new Date(prevEnd); dd.setDate(dd.getDate()+di);
+        var dd=new Date(prevEnd2); dd.setDate(dd.getDate()+di);
         day.lbl=dd.toLocaleDateString("en-US",{month:"short",day:"numeric"});
       });
+      if(trip.destinations[m].dateFrom!==oldFrom2){
+        trip.destinations[m].hotelBookings=[];
+        trip.destinations[m].generalBookings=[];
+        Object.keys(trip.legs||{}).forEach(function(k){
+          var parts=k.split('-');
+          if(parts.length===2&&(parts[0]===trip.destinations[m].id||parts[1]===trip.destinations[m].id)) trip.legs[k]={bookings:[]};
+        });
+      }
     }
-    showSaveStatus("Dates updated \u2014 all bookings cleared for this and downstream destinations",5000);
   }
 
   closeListDateEdit(destId);
