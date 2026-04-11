@@ -3959,15 +3959,29 @@ function buildRoutingSection(fromDest, toDest, label){
     });
   } else {
     var mr=document.createElement("div"); mr.className="gh-max-row";
-    var mb=document.createElement("button"); mb.className="gh-max-btn"; mb.textContent="Ask Max \u2197";
+    var mb=document.createElement("button"); mb.className="gh-max-btn"; mb.textContent="Ask Max for options \u2197";
     var mresp=document.createElement("div"); mresp.className="gh-max-resp hidden";
     (function(f,t,b,r){b.onclick=async function(){
       b.disabled=true; b.textContent="thinking\u2026";
       try{var txt=await callMax([{role:"user",content:"How do I get from "+f+" to "+t+"? Give 2-3 options with duration and price. Be brief."}]);
         r.textContent=txt;r.classList.remove("hidden");b.style.display="none";
-      }catch(e){b.disabled=false;b.textContent="Ask Max \u2197";}
+      }catch(e){b.disabled=false;b.textContent="Ask Max for options \u2197";}
     };})(fromPlace,toPlace,mb,mresp);
-    mr.appendChild(mb); mr.appendChild(mresp); sec.appendChild(mr);
+    mr.appendChild(mb); mr.appendChild(mresp);
+    // Always show Log booking even without pre-defined route data
+    var genWrap=document.createElement("div"); genWrap.style.marginTop="8px";
+    var genLogBtn=document.createElement("button"); genLogBtn.className="bk-log-btn"; genLogBtn.textContent="Log booking";
+    var genFormId="bkf-"+fromId+"-"+toId+"-gen";
+    (function(btn,wrap,fId,tId){
+      btn.onclick=function(){toggleTransportForm(btn,wrap,genFormId,{
+        mode:"train",operator:"",from:fromPlace,to:toPlace,
+        fromId:fId,toId:tId,defaultDate:fromDest.dateTo,currency:"EUR"
+      });};
+    })(genLogBtn,genWrap,fromId,toId);
+    genWrap.appendChild(genLogBtn);
+    var leg0=getLeg(fromId,toId);
+    leg0.bookings.forEach(function(b){genWrap.appendChild(mkTransportRecord(b,fromId,toId));});
+    mr.appendChild(genWrap); sec.appendChild(mr);
   }
   return sec;
 }
