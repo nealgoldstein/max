@@ -1733,9 +1733,6 @@ async function generateCityData(place,destId){
     // Populate suggestions — user assigns to days from Explore tab
     var destRef=getDest(destId);
     if(destRef){
-      // Persist districts/hotels to dest object so they survive page reload
-      if(data.districts&&data.districts.length) destRef.districts=data.districts;
-      if(data.practicalInfo) destRef.practicalInfo=data.practicalInfo;
       var genCenter=data.cityCenter&&data.cityCenter[0]?data.cityCenter:getCityCenter(destRef.place);
       destRef.suggestions=data.sights.map(function(s){
         sidCtr++;
@@ -3607,6 +3604,11 @@ function drawDestMode(destId){
   if(!dest.todayItems)dest.todayItems=[];
   if(!dest.discoveredItems)dest.discoveredItems=[];
   migrateDest(dest);
+  // Auto-generate restaurants if none exist — lock prevents concurrent calls
+  if(!dest.restaurantSuggestions||dest.restaurantSuggestions.length===0){
+    var _rl='_restLoading_'+dest.id;
+    if(!window[_rl]) refreshRestaurantSuggestions(dest,null);
+  }
   // Ensure suggestions exist and have coords — catches any edge case migrateDest misses
   if((!dest.suggestions||dest.suggestions.length===0||dest.suggestions.every(function(s){return !s.lat;}))){
     if(isKnownCity(dest.place)){
@@ -4867,9 +4869,6 @@ function getPracticalInfo(place,intent){
   // Generated city data takes priority
   var gen=_generatedCityData[place.toLowerCase()];
   if(gen&&!gen.loading&&gen.practicalInfo) return gen.practicalInfo;
-  // Check stored dest data (persists across reloads)
-  var storedDest=trip.destinations.find(function(d){return d.place.toLowerCase()===place.toLowerCase();});
-  if(storedDest&&storedDest.practicalInfo) return storedDest.practicalInfo;
   var p=(place+" "+(intent||"")).toLowerCase();
   if(p.indexOf("interlaken")>-1||p.indexOf("zurich")>-1||p.indexOf("bern")>-1||p.indexOf("geneva")>-1)return{
     currency:"Swiss Franc (CHF) \u00b7 roughly 1:1 with USD",
@@ -5020,9 +5019,6 @@ function getSights(place,intent){
 function getDistricts(place,intent){
   var gen=_generatedCityData[place.toLowerCase()];
   if(gen&&!gen.loading&&gen.districts&&gen.districts.length) return gen.districts;
-  // Check stored dest data (persists across reloads)
-  var storedDest=trip.destinations.find(function(d){return d.place.toLowerCase()===place.toLowerCase();});
-  if(storedDest&&storedDest.districts&&storedDest.districts.length) return storedDest.districts;
   var p=(place+" "+(intent||"")).toLowerCase();
   if(p.indexOf("interlaken")>-1)return[
     {name:"Interlaken West",good:"Tourist center - restaurants, shops, easy access",bad:"Busy and more tourist-facing",hotels:[
