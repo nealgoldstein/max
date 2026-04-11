@@ -69,6 +69,23 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .tm-rename-btn:hover{color:#555;}
 .tm-rename-inp{font-size:12px;font-weight:600;color:#111;border:none;border-bottom:1px solid #999;outline:none;background:transparent;font-family:inherit;padding:0;width:100%;}
 .tm-dest-label{font-size:10px;color:#aaa;margin-top:1px;}
+.tm-move-btn{font-size:9px;color:#ccc;background:none;border:none;cursor:pointer;padding:0 3px;font-family:inherit;opacity:0;}
+.tm-dest:hover .tm-move-btn{opacity:1;}
+.tm-move-btn:hover{color:#555;}
+/* Move dialog */
+.move-dialog-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:1000;display:flex;align-items:center;justify-content:center;}
+.move-dialog{background:#fff;border-radius:10px;padding:18px 20px;min-width:280px;max-width:340px;box-shadow:0 8px 32px rgba(0,0,0,.2);}
+.move-dialog-title{font-size:13px;font-weight:600;color:#111;margin-bottom:6px;}
+.move-dialog-warn{font-size:11px;color:#888;line-height:1.5;margin-bottom:12px;padding:8px 10px;background:#fff8f0;border:1px solid #f0dcc0;border-radius:6px;}
+.move-dialog-warn strong{color:#b05820;}
+.move-dialog-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#aaa;margin-bottom:6px;}
+.move-dialog-opts{display:flex;flex-direction:column;gap:4px;margin-bottom:14px;}
+.move-dialog-opt{padding:6px 10px;font-size:11px;border:1px solid #e0e0e0;border-radius:5px;cursor:pointer;background:#fafafa;}
+.move-dialog-opt:hover{border-color:#888;background:#f0f0f0;}
+.move-dialog-opt.selected{border-color:#2563eb;background:#eff6ff;color:#1d4ed8;}
+.move-dialog-actions{display:flex;gap:8px;justify-content:flex-end;}
+.move-dialog-confirm{font-size:11px;padding:5px 14px;border:1px solid #e05050;border-radius:5px;background:#e05050;color:#fff;cursor:pointer;font-family:inherit;}
+.move-dialog-cancel{font-size:11px;padding:5px 10px;border:1px solid #ddd;border-radius:5px;background:#fff;color:#666;cursor:pointer;font-family:inherit;}
 .tm-dest-name{font-size:13px;font-weight:600;color:#111;}
 .tm-dest-dates{font-size:11px;color:#999;margin-top:2px;}
 .tm-dest-acts{display:flex;gap:5px;margin-top:6px;}
@@ -3061,6 +3078,97 @@ function switchTab(destId, tab) {
 }
 
 // ── Trip mode renderer ─────────────────────────────────────
+function showMoveDestDialog(dest){
+  var fromIdx=trip.destinations.indexOf(dest);
+  if(trip.destinations.length<2) return;
+  // Build overlay
+  var overlay=document.createElement('div'); overlay.className='move-dialog-overlay';
+  var dlg=document.createElement('div'); dlg.className='move-dialog';
+  var title=document.createElement('div'); title.className='move-dialog-title'; title.textContent='Move '+(dest.label||dest.place);
+  var warn=document.createElement('div'); warn.className='move-dialog-warn';
+  warn.innerHTML='Moving will <strong>clear transport bookings and hotel reservations</strong> for this destination and everything after it. Sight and restaurant itineraries are kept. Dates will be recalculated.';
+  var lbl=document.createElement('div'); lbl.className='move-dialog-label'; lbl.textContent='New position';
+  var opts=document.createElement('div'); opts.className='move-dialog-opts';
+  var selectedIdx=fromIdx;
+  var optEls=[];
+  trip.destinations.forEach(function(d,i){
+    if(d.id===dest.id) return; // skip self
+    var opt=document.createElement('div'); opt.className='move-dialog-opt';
+    opt.textContent=(i<fromIdx?'Before ':'After ')+(d.label||d.place);
+    var targetIdx=i<fromIdx?i:i; // position after clicking
+    (function(ti,el){opt.onclick=function(){
+      selectedIdx=ti; optEls.forEach(function(o){o.className='move-dialog-opt';});el.className='move-dialog-opt selected';
+    };})(i<fromIdx?i:i+1,opt);
+    optEls.push(opt); opts.appendChild(opt);
+  });
+  var acts=document.createElement('div'); acts.className='move-dialog-actions';
+  var cancelBtn=document.createElement('button'); cancelBtn.className='move-dialog-cancel'; cancelBtn.textContent='Cancel';
+  cancelBtn.onclick=function(){document.body.removeChild(overlay);};
+  var confirmBtn=document.createElement('button'); confirmBtn.className='move-dialog-confirm'; confirmBtn.textContent='Move & clear bookings';
+  confirmBtn.onclick=function(){
+    document.body.removeChild(overlay);
+    executeMoveDest(dest,fromIdx,selectedIdx);
+  };
+  acts.appendChild(cancelBtn); acts.appendChild(confirmBtn);
+  dlg.appendChild(title); dlg.appendChild(warn); dlg.appendChild(lbl); dlg.appendChild(opts); dlg.appendChild(acts);
+  overlay.appendChild(dlg);
+  overlay.onclick=function(e){if(e.target===overlay)document.body.removeChild(overlay);};
+  document.body.appendChild(overlay);
+}
+
+function executeMoveDest(dest,fromIdx,toIdx){
+  if(fromIdx===toIdx) return;
+  var minIdx=Math.min(fromIdx,toIdx);
+  // 1. Clear transport legs involving moved dest and all downstream
+  // Clear legs to/from moved dest
+  var affectedIds=new Set();
+  affectedIds.add(dest.id);
+  // All destinations that come after minIdx in the current order are "downstream"
+  for(var i=minIdx;i<trip.destinations.length;i++) affectedIds.add(trip.destinations[i].id);
+  // Clear legs between any two affected destinations
+  Object.keys(trip.legs||{}).forEach(function(k){
+    var parts=k.split('-');
+    if(parts.length===2&&(affectedIds.has(parts[0])||affectedIds.has(parts[1]))){
+      trip.legs[k]={bookings:[]};
+    }
+  });
+  // 2. Clear hotel bookings and general bookings for affected destinations
+  trip.destinations.forEach(function(d,i){
+    if(i>=minIdx||d.id===dest.id){
+      d.hotelBookings=[]; d.generalBookings=[];
+    }
+  });
+  // 3. Move destination in array
+  trip.destinations.splice(fromIdx,1);
+  var insertAt=toIdx>fromIdx?toIdx-1:toIdx;
+  trip.destinations.splice(insertAt,0,dest);
+  // 4. Recalculate dates from minIdx onwards
+  var newMinIdx=Math.min(trip.destinations.indexOf(dest),minIdx);
+  for(var j=newMinIdx;j<trip.destinations.length;j++){
+    var d=trip.destinations[j];
+    if(j===0){
+      // First dest keeps its own start date
+    } else {
+      var prev=trip.destinations[j-1];
+      // Start the day after previous dest ends
+      var prevEnd=new Date(prev.dateTo+'T12:00:00');
+      prevEnd.setDate(prevEnd.getDate()+1);
+      var newFrom=prevEnd.toISOString().slice(0,10);
+      var nights=d.nights||3;
+      var newTo=new Date(prevEnd); newTo.setDate(newTo.getDate()+nights);
+      d.dateFrom=newFrom; d.dateTo=newTo.toISOString().slice(0,10);
+      // Update day labels
+      if(d.days) d.days.forEach(function(day,di){
+        var dayDate=new Date(prevEnd); dayDate.setDate(dayDate.getDate()+di);
+        day.lbl=dayDate.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+      });
+    }
+  }
+  autoSave();
+  drawTripMode();
+  updateMainMap();
+}
+
 function drawTripMode(){
   var c=g("lp-content"); if(!c)return;
   c.innerHTML="";
@@ -3083,7 +3191,9 @@ function drawTripMode(){
     var nameEl=document.createElement("div"); nameEl.className="tm-dest-name"; nameEl.style.flex="1"; nameEl.textContent=dest.label||dest.place;
     var renBtn=document.createElement("button"); renBtn.className="tm-rename-btn"; renBtn.textContent="\u270e"; renBtn.title="Rename";
     (function(d,nel){renBtn.onclick=function(e){e.stopPropagation();var inp=document.createElement("input");inp.className="tm-rename-inp";inp.value=d.label||d.place;nameRow.replaceChild(inp,nel);renBtn.style.display="none";inp.focus();inp.select();function sv(){var v=inp.value.trim();d.label=(v&&v!==d.place)?v:null;autoSave();drawTripMode();}inp.onblur=sv;inp.onclick=function(e2){e2.stopPropagation();};inp.onkeydown=function(e2){if(e2.key==="Enter")inp.blur();if(e2.key==="Escape"){inp.blur();}};};})(dest,nameEl);
-    nameRow.appendChild(nameEl); nameRow.appendChild(renBtn);
+    var moveBtn=document.createElement("button"); moveBtn.className="tm-move-btn"; moveBtn.textContent="↕"; moveBtn.title="Move destination";
+    (function(d){moveBtn.onclick=function(e){e.stopPropagation();showMoveDestDialog(d);};})(dest);
+    nameRow.appendChild(nameEl); nameRow.appendChild(renBtn); nameRow.appendChild(moveBtn);
     bodyDiv.appendChild(nameRow);
     if(dest.label&&dest.label!==dest.place){var plLbl=document.createElement("div");plLbl.className="tm-dest-label";plLbl.textContent=dest.place;bodyDiv.appendChild(plLbl);}
     var dates=document.createElement("div"); dates.className="tm-dest-dates";
