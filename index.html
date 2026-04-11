@@ -3255,6 +3255,9 @@ function showAddToDay(item,type,dest,triggerBtn){
 }
 
 async function refreshRestaurantSuggestions(dest,btn){
+  var lockKey='_restLoading_'+dest.id;
+  if(window[lockKey]) return;
+  window[lockKey]=true;
   if(btn){btn.disabled=true;btn.textContent="thinking\u2026";}
   var pane=document.getElementById("dm-pane-explore");
   try{
@@ -3290,7 +3293,9 @@ async function refreshRestaurantSuggestions(dest,btn){
       if(pane){pane.innerHTML="";pane.appendChild(buildExplorePane(dest));}
     }
   }catch(e){console.error("refreshRestaurantSuggestions:",e);}
+  window[lockKey]=false;
   if(btn){btn.disabled=false;btn.textContent="Refresh";}
+  if(activeDest===dest.id) updateMainMap();
 }
 
 // ── Later / Maybe bucket builder ───────────────────────────
@@ -3581,10 +3586,6 @@ function drawDestMode(destId){
   if(!dest.todayItems)dest.todayItems=[];
   if(!dest.discoveredItems)dest.discoveredItems=[];
   migrateDest(dest);
-  // Auto-generate restaurants if none exist
-  if(!dest.restaurantSuggestions||dest.restaurantSuggestions.length===0){
-    setTimeout(function(){refreshRestaurantSuggestions(dest,null);},500);
-  }
   // Ensure suggestions exist and have coords — catches any edge case migrateDest misses
   if((!dest.suggestions||dest.suggestions.length===0||dest.suggestions.every(function(s){return !s.lat;}))){
     if(isKnownCity(dest.place)){
