@@ -3181,22 +3181,7 @@ function buildExplorePane(dest){
   }
   wrap.appendChild(sightsSec);
 
-  // ── Restaurants section ────────────────────────────────
-  var restSec=document.createElement("div"); restSec.className="exp-section"; restSec.id="dm-rest-section"; restSec.style.borderTop="1px solid #f0f0f0"; restSec.style.marginTop="4px";
-  var rHdr=document.createElement("div"); rHdr.className="exp-section-hdr";
-  var rLbl=document.createElement("div"); rLbl.className="exp-section-lbl"; rLbl.textContent="Restaurants";
-  var rRef=document.createElement("button"); rRef.className="exp-refresh-btn"; rRef.textContent=dest.restaurantSuggestions.length?"Refresh":"Ask Max";
-  (function(d,btn){rRef.onclick=function(){refreshRestaurantSuggestions(d,btn);};})(dest,rRef);
-  rHdr.appendChild(rLbl); rHdr.appendChild(rRef); restSec.appendChild(rHdr);
-
-  if(dest.restaurantSuggestions.length===0){
-    var remp=document.createElement("div"); remp.className="exp-empty"; remp.textContent="Click \u201cAsk Max\u201d for restaurant suggestions."; restSec.appendChild(remp);
-  } else {
-    dest.restaurantSuggestions.forEach(function(s){
-      restSec.appendChild(mkExploreSuggestion(s,dest,"restaurant"));
-    });
-  }
-  wrap.appendChild(restSec);
+  // Restaurants moved to Stay & Eat tab
   return wrap;
 }
 
@@ -3715,7 +3700,7 @@ function drawDestMode(destId){
 
   // Section tabs
   var tabs=document.createElement("div"); tabs.className="dm-tabs";
-  var sections=[{id:"sights",lbl:"Itinerary"},{id:"explore",lbl:"Explore"},{id:"stay",lbl:"Stay"},{id:"info",lbl:"Info"},{id:"routing",lbl:"Routing"},{id:"tracker",lbl:"Tracker"}];
+  var sections=[{id:"sights",lbl:"Itinerary"},{id:"explore",lbl:"Explore"},{id:"stay",lbl:"Stay & Eat"},{id:"info",lbl:"Info"},{id:"routing",lbl:"Routing"},{id:"tracker",lbl:"Tracker"}];
   sections.forEach(function(s){
     var btn=document.createElement("button"); btn.className="dm-tab"+(s.id===_activeDmSection?" on":"");
     btn.id="dm-tab-"+s.id; btn.textContent=s.lbl;
@@ -3935,6 +3920,24 @@ function drawDestMode(destId){
     });
     if(!anyD){var noneD=document.createElement("div");noneD.style.cssText="font-size:12px;color:#bbb;font-style:italic;";noneD.textContent="No hotel data for this destination.";stayPane2.appendChild(noneD);}
   }
+  // ── Restaurant suggestions in Stay & Eat ───────────────
+  var restDivider=document.createElement("div");
+  restDivider.style.cssText="margin:16px 0 8px;border-top:1px solid #f0f0f0;padding-top:12px;";
+  var restHdr=document.createElement("div"); restHdr.className="exp-section-hdr";
+  var restLbl=document.createElement("div"); restLbl.className="exp-section-lbl"; restLbl.textContent="Restaurants";
+  var restRef=document.createElement("button"); restRef.className="exp-refresh-btn";
+  restRef.textContent=dest.restaurantSuggestions&&dest.restaurantSuggestions.length?"Refresh":"Ask Max";
+  (function(d,btn){restRef.onclick=function(){refreshRestaurantSuggestions(d,btn);};})(dest,restRef);
+  restHdr.appendChild(restLbl); restHdr.appendChild(restRef); restDivider.appendChild(restHdr);
+  var restInner=document.createElement("div"); restInner.id="dm-rest-section";
+  if(!dest.restaurantSuggestions||dest.restaurantSuggestions.length===0){
+    var rEmp=document.createElement("div"); rEmp.className="exp-empty";
+    rEmp.textContent="Restaurant suggestions will appear here."; restInner.appendChild(rEmp);
+  } else {
+    dest.restaurantSuggestions.forEach(function(s){restInner.appendChild(mkExploreSuggestion(s,"restaurant",dest));});
+  }
+  restDivider.appendChild(restInner);
+  stayPane2.appendChild(restDivider);
   paneWrap.appendChild(stayPane2);
 
   // INFO pane
