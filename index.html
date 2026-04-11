@@ -125,6 +125,12 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .itin-add-btn.on{background:#111;color:#fff;border-color:#111;cursor:pointer;}
 /* Explore tab */
 .exp-section{padding:10px 14px 6px;}
+/* Stay & Eat sub-tabs */
+.se-tabs{display:flex;gap:0;margin:-12px -14px 12px;border-bottom:1px solid #f0f0f0;}
+.se-tab{flex:1;font-size:10px;font-weight:600;padding:7px 0;border:none;background:transparent;color:#aaa;cursor:pointer;font-family:inherit;text-align:center;border-bottom:2px solid transparent;letter-spacing:.03em;}
+.se-tab.on{color:#111;border-bottom-color:#111;}
+.se-pane{display:none;}
+.se-pane.on{display:block;}
 .exp-section-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
 .exp-section-lbl{font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#888;}
 .exp-refresh-btn{font-size:10px;padding:2px 8px;border:1px solid #ddd;border-radius:4px;background:#fff;color:#888;cursor:pointer;font-family:inherit;}
@@ -3829,6 +3835,26 @@ function drawDestMode(destId){
   var stayPane2=document.createElement("div"); stayPane2.id="dm-pane-stay";
   stayPane2.style.display=_activeDmSection==="stay"?"block":"none";
   stayPane2.style.padding="12px 14px";
+
+  // ── Sub-tabs: Stay / Eat ────────────────────────────────
+  var seTabs=document.createElement("div"); seTabs.className="se-tabs";
+  var seStayBtn=document.createElement("button"); seStayBtn.className="se-tab on"; seStayBtn.id="se-tab-stay"; seStayBtn.textContent="Stay";
+  var seEatBtn=document.createElement("button"); seEatBtn.className="se-tab"; seEatBtn.id="se-tab-eat"; seEatBtn.textContent="Eat";
+  var seStayPane=document.createElement("div"); seStayPane.className="se-pane on"; seStayPane.id="se-pane-stay";
+  var seEatPane=document.createElement("div"); seEatPane.className="se-pane"; seEatPane.id="se-pane-eat";
+
+  seStayBtn.onclick=function(){
+    seStayBtn.className="se-tab on"; seEatBtn.className="se-tab";
+    seStayPane.className="se-pane on"; seEatPane.className="se-pane";
+  };
+  seEatBtn.onclick=function(){
+    seEatBtn.className="se-tab on"; seStayBtn.className="se-tab";
+    seEatPane.className="se-pane on"; seStayPane.className="se-pane";
+  };
+  seTabs.appendChild(seStayBtn); seTabs.appendChild(seEatBtn);
+  stayPane2.appendChild(seTabs);
+
+  // ── STAY sub-pane: hotels ───────────────────────────────
   var districts=getDistricts(dest.place,dest.intent);
   var btier=4; // show all hotel tiers
   var bookedHotel=dest.hotelBookings.find(function(b){return b.status==="booked";});
@@ -3872,7 +3898,7 @@ function drawDestMode(destId){
     }
     dest.hotelBookings.filter(function(b){return b.status==="booked";}).forEach(function(b){hbWrap0.appendChild(mkHotelRecord(b,dest.id));});
     bookedWrap.appendChild(hbWrap0);
-    stayPane2.appendChild(bookedWrap);
+    seStayPane.appendChild(bookedWrap);
   } else {
     // ── Full list view ───────────────────────────────────────
     if(bookedHotel){
@@ -3883,7 +3909,7 @@ function drawDestMode(destId){
       (function(did){doneBtn2.onclick=function(){
         if(_showAllHotelsDests)_showAllHotelsDests.delete(did); drawDestMode(did);
       };})(dest.id);
-      curBanner.appendChild(curTxt); curBanner.appendChild(doneBtn2); stayPane2.appendChild(curBanner);
+      curBanner.appendChild(curTxt); curBanner.appendChild(doneBtn2); seStayPane.appendChild(curBanner);
     }
     var anyD=false;
     districts.forEach(function(dist,distIdx){
@@ -3916,28 +3942,30 @@ function drawDestMode(destId){
         dest.hotelBookings.filter(function(b){return b.name===h.name;}).forEach(function(b){hbWrap.appendChild(mkHotelRecord(b,dest.id));});
         db2.appendChild(hbWrap);
       });
-      stayPane2.appendChild(db2);
+      seStayPane.appendChild(db2);
     });
-    if(!anyD){var noneD=document.createElement("div");noneD.style.cssText="font-size:12px;color:#bbb;font-style:italic;";noneD.textContent="No hotel data for this destination.";stayPane2.appendChild(noneD);}
+    if(!anyD){var noneD=document.createElement("div");noneD.style.cssText="font-size:12px;color:#bbb;font-style:italic;";noneD.textContent="No hotel data for this destination.";seStayPane.appendChild(noneD);}
   }
-  // ── Restaurant suggestions in Stay & Eat ───────────────
-  var restDivider=document.createElement("div");
-  restDivider.style.cssText="margin:16px 0 8px;border-top:1px solid #f0f0f0;padding-top:12px;";
-  var restHdr=document.createElement("div"); restHdr.className="exp-section-hdr";
-  var restLbl=document.createElement("div"); restLbl.className="exp-section-lbl"; restLbl.textContent="Restaurants";
-  var restRef=document.createElement("button"); restRef.className="exp-refresh-btn";
-  restRef.textContent=dest.restaurantSuggestions&&dest.restaurantSuggestions.length?"Refresh":"Ask Max";
-  (function(d,btn){restRef.onclick=function(){refreshRestaurantSuggestions(d,btn);};})(dest,restRef);
-  restHdr.appendChild(restLbl); restHdr.appendChild(restRef); restDivider.appendChild(restHdr);
-  var restInner=document.createElement("div"); restInner.id="dm-rest-section";
+
+  stayPane2.appendChild(seStayPane);
+
+  // ── EAT sub-pane: restaurants ───────────────────────────
+  var restHdrEat=document.createElement("div"); restHdrEat.className="exp-section-hdr";
+  var restLblEat=document.createElement("div"); restLblEat.className="exp-section-lbl"; restLblEat.textContent="Restaurants";
+  var restRefEat=document.createElement("button"); restRefEat.className="exp-refresh-btn";
+  restRefEat.textContent=dest.restaurantSuggestions&&dest.restaurantSuggestions.length?"Refresh":"Ask Max";
+  (function(d,btn){restRefEat.onclick=function(){refreshRestaurantSuggestions(d,btn);};})(dest,restRefEat);
+  restHdrEat.appendChild(restLblEat); restHdrEat.appendChild(restRefEat); seEatPane.appendChild(restHdrEat);
+  var restInnerEat=document.createElement("div"); restInnerEat.id="dm-rest-section";
   if(!dest.restaurantSuggestions||dest.restaurantSuggestions.length===0){
-    var rEmp=document.createElement("div"); rEmp.className="exp-empty";
-    rEmp.textContent="Restaurant suggestions will appear here."; restInner.appendChild(rEmp);
+    var rEmpEat=document.createElement("div"); rEmpEat.className="exp-empty";
+    rEmpEat.textContent="Restaurant suggestions will appear here."; restInnerEat.appendChild(rEmpEat);
   } else {
-    dest.restaurantSuggestions.forEach(function(s){restInner.appendChild(mkExploreSuggestion(s,"restaurant",dest));});
+    dest.restaurantSuggestions.forEach(function(s){restInnerEat.appendChild(mkExploreSuggestion(s,"restaurant",dest));});
   }
-  restDivider.appendChild(restInner);
-  stayPane2.appendChild(restDivider);
+  seEatPane.appendChild(restInnerEat);
+  stayPane2.appendChild(seEatPane);
+
   paneWrap.appendChild(stayPane2);
 
   // INFO pane
