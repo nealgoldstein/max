@@ -2123,6 +2123,8 @@ function saveDates(destId){
   var newTo=g("edit-to-"+destId).value;
   if(!newFrom||!newTo||newTo<=newFrom)return;
   var dest=getDest(destId); if(!dest)return;
+  var oldFrom=dest.dateFrom, oldTo=dest.dateTo;
+  var datesChanged=(newFrom!==oldFrom||newTo!==oldTo);
   dest.dateFrom=newFrom; dest.dateTo=newTo;
   var fD=new Date(newFrom+"T12:00:00"), tD=new Date(newTo+"T12:00:00");
   dest.nights=Math.max(1,Math.round((tD-fD)/86400000));
@@ -2135,8 +2137,47 @@ function saveDates(destId){
     else dest.days.push({id:"dy"+destId+"_"+i,lbl:lbl,note:"",items:[]});
   }
   if(dest.days.length>count) dest.days=dest.days.slice(0,count);
-  // Reorder destinations by dateFrom
-  trip.destinations.sort(function(a,b){return a.dateFrom<b.dateFrom?-1:a.dateFrom>b.dateFrom?1:0;});
+
+  if(datesChanged){
+    // Clear hotel booking — dates no longer valid
+    dest.hotelBookings=[];
+    // Clear restaurant items from days that no longer exist (if shortened)
+    // (days already trimmed above — items removed with them)
+    // Clear restaurant reservations in generalBookings
+    dest.generalBookings=(dest.generalBookings||[]).filter(function(b){
+      return b.type!=='restaurant'; // keep non-restaurant general bookings
+    });
+    // Clear transport legs to/from this destination and cascade downstream
+    var destIdx=trip.destinations.indexOf(dest);
+    var affectedIds=new Set([dest.id]);
+    for(var j=destIdx+1;j<trip.destinations.length;j++) affectedIds.add(trip.destinations[j].id);
+    Object.keys(trip.legs||{}).forEach(function(k){
+      var parts=k.split('-');
+      if(parts.length===2&&(affectedIds.has(parts[0])||affectedIds.has(parts[1]))){
+        trip.legs[k]={bookings:[]};
+      }
+    });
+    // Clear hotel/general bookings for downstream destinations too
+    for(var k=destIdx+1;k<trip.destinations.length;k++){
+      trip.destinations[k].hotelBookings=[];
+      trip.destinations[k].generalBookings=[];
+    }
+    // Cascade dates downstream — each dest starts day after previous ends
+    for(var m=destIdx+1;m<trip.destinations.length;m++){
+      var prev=trip.destinations[m-1];
+      var prevEnd=new Date(prev.dateTo+"T12:00:00"); prevEnd.setDate(prevEnd.getDate()+1);
+      var nights=trip.destinations[m].nights||3;
+      var newEnd=new Date(prevEnd); newEnd.setDate(newEnd.getDate()+nights);
+      trip.destinations[m].dateFrom=prevEnd.toISOString().slice(0,10);
+      trip.destinations[m].dateTo=newEnd.toISOString().slice(0,10);
+      if(trip.destinations[m].days) trip.destinations[m].days.forEach(function(day,di){
+        var dd=new Date(prevEnd); dd.setDate(dd.getDate()+di);
+        day.lbl=dd.toLocaleDateString("en-US",{month:"short",day:"numeric"});
+      });
+    }
+    showSaveStatus("Dates updated \u2014 hotel, restaurant & transport bookings cleared for affected destinations",5000);
+  }
+
   closeListDateEdit(destId);
   renderDestList();
   drawItin();
