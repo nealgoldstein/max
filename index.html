@@ -2252,7 +2252,7 @@ function showDateChangeDialog(dest,newFrom,newTo,affected,onConfirm){
 
   // Cancellation reminder
   var warn=document.createElement('div'); warn.className='move-dialog-warn';
-  warn.innerHTML='<strong>Important:</strong> Cancelling in the app removes these bookings from your plan. You must contact providers directly to cancel and request refunds. Check cancellation and refund policies before proceeding.';
+  warn.innerHTML='<strong>Important:</strong> Cancelling in the app removes these bookings from your plan, and any scheduled sights/restaurants in affected destinations will return to the Explore pool. You must contact providers directly to cancel and request refunds. Check cancellation and refund policies before proceeding.';
   dlg.appendChild(warn);
 
   var acts=document.createElement('div'); acts.className='move-dialog-actions';
@@ -2291,14 +2291,40 @@ function applyDateChange(dest,newFrom,newTo,affected){
       var parts=k.split('-');
       if(parts.length===2&&(parts[0]===dest.id||parts[1]===dest.id)) trip.legs[k]={bookings:[]};
     });
-    // Clear only overlapping destinations' bookings (not all downstream)
+    // For overlapping destinations: move overlap-period items back to pool, clear bookings
     (affected.overlapping||[]).forEach(function(ov){
       var od=trip.destinations.find(function(d){return d.id===ov.id;});
-      if(od){
-        od.hotelBookings=[]; od.generalBookings=[];
-        Object.keys(trip.legs||{}).forEach(function(k){
-          var parts=k.split('-');
-          if(parts.length===2&&(parts[0]===od.id||parts[1]===od.id)) trip.legs[k]={bookings:[]};
+      if(!od) return;
+      // Clear bookings
+      od.hotelBookings=[]; od.generalBookings=[];
+      Object.keys(trip.legs||{}).forEach(function(k){
+        var parts=k.split('-');
+        if(parts.length===2&&(parts[0]===od.id||parts[1]===od.id)) trip.legs[k]={bookings:[]};
+      });
+      // Move items from overlap days back to suggestions pool
+      // Overlap period: od.dateFrom up to newTo (the new end of the extended destination)
+      if(od.days){
+        od.days.forEach(function(day){
+          var dayDate=new Date(day.lbl+' '+(new Date().getFullYear()));
+          // Items on days that fall within the overlap period go back to pool
+          // Simpler: move ALL items from affected days back to suggestions
+          // (since the whole destination is shifting, existing planned items are now orphaned)
+          var itemsToReturn=(day.items||[]).filter(function(s){return s.type==='sight';});
+          var restToReturn=(day.items||[]).filter(function(s){return s.type==='restaurant';});
+          itemsToReturn.forEach(function(s){
+            var alreadyIn=od.suggestions&&od.suggestions.some(function(sg){return sg.n===s.n;});
+            if(!alreadyIn&&od.suggestions){
+              od.suggestions.push({id:s.id,type:'sight',n:s.n,st:s.st||s.n,note:s.note||null,
+                lat:s.lat||null,lng:s.lng||null,approx:true});
+            }
+          });
+          restToReturn.forEach(function(r){
+            var alreadyIn=od.restaurantSuggestions&&od.restaurantSuggestions.some(function(rs){return rs.n===r.n;});
+            if(!alreadyIn&&od.restaurantSuggestions){
+              od.restaurantSuggestions.push({id:r.id,type:'restaurant',n:r.n,st:r.st||r.n,note:r.note||null,lat:r.lat||null,lng:r.lng||null});
+            }
+          });
+          day.items=[];
         });
       }
     });
