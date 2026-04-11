@@ -3163,7 +3163,7 @@ function showMoveDestDialog(dest){
   var dlg=document.createElement('div'); dlg.className='move-dialog';
   var title=document.createElement('div'); title.className='move-dialog-title'; title.textContent='Move '+(dest.label||dest.place);
   var warn=document.createElement('div'); warn.className='move-dialog-warn';
-  warn.innerHTML='Moving will <strong>clear all bookings</strong> for this destination and everything after it — hotel reservations, transport, and restaurant reservations. Sight and restaurant itineraries are kept. Dates will be recalculated.';
+  warn.innerHTML='Moving will <strong>clear all bookings</strong> (hotel, transport, restaurant reservations) for this destination and any destination whose dates overlap as a result. Sight and restaurant itineraries are kept.';
   var lbl=document.createElement('div'); lbl.className='move-dialog-label'; lbl.textContent='New position';
   var opts=document.createElement('div'); opts.className='move-dialog-opts';
   var selectedIdx=fromIdx;
@@ -3195,49 +3195,47 @@ function showMoveDestDialog(dest){
 
 function executeMoveDest(dest,fromIdx,toIdx){
   if(fromIdx===toIdx) return;
-  var minIdx=Math.min(fromIdx,toIdx);
-  // 1. Clear transport legs involving moved dest and all downstream
-  // Clear legs to/from moved dest
-  var affectedIds=new Set();
-  affectedIds.add(dest.id);
-  // All destinations that come after minIdx in the current order are "downstream"
-  for(var i=minIdx;i<trip.destinations.length;i++) affectedIds.add(trip.destinations[i].id);
-  // Clear legs between any two affected destinations
-  Object.keys(trip.legs||{}).forEach(function(k){
-    var parts=k.split('-');
-    if(parts.length===2&&(affectedIds.has(parts[0])||affectedIds.has(parts[1]))){
-      trip.legs[k]={bookings:[]};
-    }
-  });
-  // 2. Clear hotel bookings and general bookings for affected destinations
-  trip.destinations.forEach(function(d,i){
-    if(i>=minIdx||d.id===dest.id){
-      d.hotelBookings=[]; d.generalBookings=[];
-    }
-  });
-  // 3. Move destination in array
+  // 1. Move destination in array first
   trip.destinations.splice(fromIdx,1);
   var insertAt=toIdx>fromIdx?toIdx-1:toIdx;
   trip.destinations.splice(insertAt,0,dest);
-  // 4. Recalculate dates from minIdx onwards
-  var newMinIdx=Math.min(trip.destinations.indexOf(dest),minIdx);
-  for(var j=newMinIdx;j<trip.destinations.length;j++){
+  var newIdx=trip.destinations.indexOf(dest);
+
+  // 2. Always clear the moved destination's own bookings (dates will change)
+  dest.hotelBookings=[]; dest.generalBookings=[];
+  // Clear transport legs to/from moved dest (old neighbors changed)
+  Object.keys(trip.legs||{}).forEach(function(k){
+    var parts=k.split('-');
+    if(parts.length===2&&(parts[0]===dest.id||parts[1]===dest.id)){
+      trip.legs[k]={bookings:[]};
+    }
+  });
+
+  // 3. Recalculate dates from the insertion point forward
+  for(var j=newIdx;j<trip.destinations.length;j++){
     var d=trip.destinations[j];
-    if(j===0){
-      // First dest keeps its own start date
-    } else {
-      var prev=trip.destinations[j-1];
-      // Start the day after previous dest ends
-      var prevEnd=new Date(prev.dateTo+'T12:00:00');
-      prevEnd.setDate(prevEnd.getDate()+1);
-      var newFrom=prevEnd.toISOString().slice(0,10);
-      var nights=d.nights||3;
-      var newTo=new Date(prevEnd); newTo.setDate(newTo.getDate()+nights);
-      d.dateFrom=newFrom; d.dateTo=newTo.toISOString().slice(0,10);
-      // Update day labels
-      if(d.days) d.days.forEach(function(day,di){
-        var dayDate=new Date(prevEnd); dayDate.setDate(dayDate.getDate()+di);
-        day.lbl=dayDate.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+    if(j===0) continue; // first dest keeps its dates
+    var prev=trip.destinations[j-1];
+    var prevEnd=new Date(prev.dateTo+'T12:00:00'); prevEnd.setDate(prevEnd.getDate()+1);
+    var oldFrom=d.dateFrom;
+    var nights=d.nights||3;
+    var newEnd=new Date(prevEnd); newEnd.setDate(newEnd.getDate()+nights);
+    d.dateFrom=prevEnd.toISOString().slice(0,10);
+    d.dateTo=newEnd.toISOString().slice(0,10);
+    // Update day labels
+    if(d.days) d.days.forEach(function(day,di){
+      var dd=new Date(prevEnd); dd.setDate(dd.getDate()+di);
+      day.lbl=dd.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+    });
+    // If dates changed for this destination, clear its bookings too (they're now invalid)
+    if(d.id!==dest.id&&d.dateFrom!==oldFrom){
+      d.hotelBookings=[]; d.generalBookings=[];
+      // Clear transport legs for this dest
+      Object.keys(trip.legs||{}).forEach(function(k){
+        var parts=k.split('-');
+        if(parts.length===2&&(parts[0]===d.id||parts[1]===d.id)){
+          trip.legs[k]={bookings:[]};
+        }
       });
     }
   }
