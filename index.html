@@ -1740,6 +1740,10 @@ async function generateCityData(place,destId){
     var destRef=getDest(destId);
     if(destRef){
       var genCenter=data.cityCenter&&data.cityCenter[0]?data.cityCenter:getCityCenter(destRef.place);
+      // Persist generated data to dest so it survives page reloads
+      if(data.districts) destRef.generatedDistricts=data.districts;
+      if(data.practicalInfo) destRef.generatedPracticalInfo=data.practicalInfo;
+      if(data.transitHub) destRef.generatedTransitHub=data.transitHub;
       destRef.suggestions=data.sights.map(function(s){
         sidCtr++;
         var sLat=s.lat||(genCenter?genCenter[0]+(Math.random()-.5)*.025:null);
@@ -3855,7 +3859,7 @@ function drawDestMode(destId){
   stayPane2.appendChild(seTabs);
 
   // ── STAY sub-pane: hotels ───────────────────────────────
-  var districts=getDistricts(dest.place,dest.intent);
+  var districts=getDistricts(dest.place,dest.intent,dest);
   var btier=4; // show all hotel tiers
   var bookedHotel=dest.hotelBookings.find(function(b){return b.status==="booked";});
   var showAll=!bookedHotel||(_showAllHotelsDests&&_showAllHotelsDests.has(dest.id));
@@ -3972,7 +3976,7 @@ function drawDestMode(destId){
   var infoPane2=document.createElement("div"); infoPane2.id="dm-pane-info";
   infoPane2.style.display=_activeDmSection==="info"?"block":"none";
   infoPane2.style.padding="12px 14px";
-  var pi2=getPracticalInfo(dest.place,dest.intent);
+  var pi2=getPracticalInfo(dest.place,dest.intent,dest);
   var pigrid2=document.createElement("div"); pigrid2.className="pi-grid";
   [{lbl:"Currency",val:pi2.currency},{lbl:"Tipping",val:pi2.tipping},{lbl:"Emergency",val:pi2.emergency}].forEach(function(item){
     var el=document.createElement("div"); el.className="pi-item";
@@ -5071,9 +5075,11 @@ function getSights(place,intent){
   ];
 }
 
-function getDistricts(place,intent){
+function getDistricts(place,intent,dest){
   var gen=_generatedCityData[place.toLowerCase()];
   if(gen&&!gen.loading&&gen.districts&&gen.districts.length) return gen.districts;
+  // Check dest.generatedDistricts — persisted across page reloads
+  if(dest&&dest.generatedDistricts&&dest.generatedDistricts.length) return dest.generatedDistricts;
   var p=(place+" "+(intent||"")).toLowerCase();
   if(p.indexOf("interlaken")>-1)return[
     {name:"Interlaken West",good:"Tourist center - restaurants, shops, easy access",bad:"Busy and more tourist-facing",hotels:[
