@@ -4488,23 +4488,25 @@ function drawDestMode(destId){
       var dbad2=document.createElement("div"); dbad2.className="dbad"; dbad2.textContent="\u2212 "+dist.bad; db2.appendChild(dbad2);
       matching.forEach(function(h){
         hotelCtr++;
-        var hbWrap=document.createElement("div"); hbWrap.className="hotel-item-wrap";
+        var hbWrap=document.createElement("div");
         var hiEl=document.createElement("div"); hiEl.className="hi";
         var hl=document.createElement("div"); hl.style.cssText="min-width:0;flex:1;overflow:hidden;";
         var hn=document.createElement("div"); hn.className="hn"; hn.textContent=h.name;
-        var hd=document.createElement("div"); hd.className="hd"; hd.textContent=h.desc;
+        var hd=document.createElement("div"); hd.className="hd"; hd.textContent=h.desc||"";
         hl.appendChild(hn); hl.appendChild(hd);
-        var hp=document.createElement("div"); hp.className="hp"; hp.textContent=h.price;
-        var formId="hbf-"+dest.id+"-"+hotelCtr+"-"+Date.now(); // unique per render
-        var logBtn=document.createElement("button"); logBtn.className="bk-log-btn"; logBtn.style.marginTop="0"; logBtn.style.flexShrink="0"; logBtn.textContent="Log booking";
+        var hp=document.createElement("div"); hp.className="hp"; hp.textContent=h.price||"";
+        hiEl.appendChild(hl); hiEl.appendChild(hp);
+        hbWrap.appendChild(hiEl);
+        var formId="hbf-"+dest.id+"-"+hotelCtr+"-"+Date.now();
+        var logBtn=document.createElement("button"); logBtn.className="bk-log-btn"; logBtn.textContent="Log booking";
+        logBtn.style.cssText="display:block;margin-top:4px;";
         (function(btn,wrap,hname,did,fid){btn.onclick=function(){toggleHotelForm(btn,wrap,fid,{
           hotelName:hname,area:dist.name,destId:did,checkIn:dest.dateFrom,checkOut:dest.dateTo,currency:"EUR"
         },function(){
           if(_showAllHotelsDests)_showAllHotelsDests.delete(did);
           drawDestMode(did);
         });};})(logBtn,hbWrap,h.name,dest.id,formId);
-        hiEl.appendChild(hl); hiEl.appendChild(hp); hiEl.appendChild(logBtn);
-        hbWrap.appendChild(hiEl);
+        hbWrap.appendChild(logBtn);
         dest.hotelBookings.filter(function(b){return b.name===h.name;}).forEach(function(b){hbWrap.appendChild(mkHotelRecord(b,dest.id));});
         db2.appendChild(hbWrap);
       });
