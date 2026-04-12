@@ -1313,9 +1313,10 @@ function collectMapLocations(dest){
   // Booked hotel
   var bookedHotel=dest.hotelBookings.find(function(b){return b.status==="booked";});
   if(bookedHotel){
-    var hlat=bookedHotel.lat||getCityCenter(dest.place)[0]+(Math.random()-.5)*.008;
-    var hlng=bookedHotel.lng||getCityCenter(dest.place)[1]+(Math.random()-.5)*.010;
-    locs.push({type:"stay",name:bookedHotel.name,lat:hlat,lng:hlng,
+    var _hc=getCityCenter(dest.place);
+    var hlat=bookedHotel.lat||(_hc?_hc[0]+(Math.random()-.5)*.008:null);
+    var hlng=bookedHotel.lng||(_hc?_hc[1]+(Math.random()-.5)*.010:null);
+    if(hlat&&hlng) locs.push({type:"stay",name:bookedHotel.name,lat:hlat,lng:hlng,
       note:"Check-in "+fmtD(bookedHotel.checkIn)+(bookedHotel.confirmationNumber?" \u00b7 Conf: "+bookedHotel.confirmationNumber:"")});
   }
   // Arrival / departure
