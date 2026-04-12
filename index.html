@@ -86,6 +86,19 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .move-dialog-actions{display:flex;gap:8px;justify-content:flex-end;}
 .move-dialog-confirm{font-size:11px;padding:5px 14px;border:1px solid #e05050;border-radius:5px;background:#e05050;color:#fff;cursor:pointer;font-family:inherit;}
 .move-dialog-cancel{font-size:11px;padding:5px 10px;border:1px solid #ddd;border-radius:5px;background:#fff;color:#666;cursor:pointer;font-family:inherit;}
+/* Action log */
+#action-log{position:fixed;bottom:20px;right:20px;z-index:2000;background:#fff;border:1px solid #ddd;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.18);width:320px;max-height:400px;display:none;flex-direction:column;}
+.action-log-hdr{display:flex;align-items:center;justify-content:space-between;padding:10px 14px 8px;border-bottom:1px solid #f0f0f0;flex-shrink:0;}
+.action-log-title{font-size:12px;font-weight:600;color:#111;}
+.action-log-close{font-size:14px;color:#bbb;background:none;border:none;cursor:pointer;padding:0 4px;font-family:inherit;line-height:1;}
+.action-log-close:hover{color:#333;}
+.action-log-body{overflow-y:auto;padding:10px 14px;flex:1;}
+.action-log-entry{font-size:11px;line-height:1.6;color:#333;padding:3px 0;border-bottom:1px solid #f8f8f8;}
+.action-log-entry:last-child{border-bottom:none;}
+.action-log-entry.warn{color:#b05820;}
+.action-log-entry.cleared{color:#555;}
+.action-log-entry.pool{color:#2056b0;}
+.action-log-footer{padding:8px 14px;border-top:1px solid #f0f0f0;font-size:10px;color:#aaa;flex-shrink:0;}
 .tm-dest-name{font-size:13px;font-weight:600;color:#111;}
 .tm-dest-dates{font-size:11px;color:#999;margin-top:2px;}
 .tm-dest-acts{display:flex;gap:5px;margin-top:6px;}
@@ -2334,6 +2347,23 @@ function applyDateChange(dest,newFrom,newTo,affected){
     });
   }
 
+  // Build action log
+  var logEntries=[];
+  if(affected){
+    (affected.bookings||[]).forEach(function(b){
+      if(b.keepInApp){
+        logEntries.push({type:'warn',icon:'⚠️',text:b.type+': '+b.name+' — '+b.detail});
+      } else {
+        logEntries.push({type:'cleared',icon:'❌',text:b.type+' removed: '+b.name+' ('+b.detail+')'});
+      }
+    });
+    (affected.overlapping||[]).forEach(function(ov){
+      logEntries.push({type:'cleared',icon:'❌',text:'Bookings cleared for '+ov.dest+' — '+ov.detail});
+      logEntries.push({type:'pool',icon:'↩️',text:'Items from overlapping days in '+ov.dest+' returned to Explore/Eat pool'});
+    });
+  }
+  if(logEntries.length>0) showActionLog(logEntries);
+
   closeListDateEdit(destId);
   renderDestList();
   drawItin();
@@ -2697,6 +2727,23 @@ function updateMainMapMarkers(){
       m.addTo(_mainMap);_mainMarkers.push(m);
     }
   });
+}
+
+function showActionLog(entries){
+  var body=document.getElementById('action-log-body');
+  var panel=document.getElementById('action-log');
+  if(!body||!panel) return;
+  body.innerHTML='';
+  entries.forEach(function(e){
+    var row=document.createElement('div'); row.className='action-log-entry '+(e.type||'');
+    row.textContent=e.icon+' '+e.text;
+    body.appendChild(row);
+  });
+  panel.style.display='flex';
+}
+
+function closeActionLog(){
+  var p=document.getElementById('action-log'); if(p)p.style.display='none';
 }
 
 function closeMapPinPanel(){
@@ -3359,6 +3406,17 @@ function executeMoveDest(dest,fromIdx,toIdx){
       });
     }
   }
+  // Build action log for move
+  var movLog=[];
+  movLog.push({type:'cleared',icon:'❌',text:'All bookings cleared for '+(dest.label||dest.place)+' — contact providers to cancel'});
+  trip.destinations.forEach(function(d){
+    if(d.id!==dest.id&&d._clearLog){
+      movLog.push({type:'cleared',icon:'❌',text:'Bookings cleared for '+(d.label||d.place)+' (dates shifted)'});
+      delete d._clearLog;
+    }
+  });
+  if(movLog.length>0) showActionLog(movLog);
+
   autoSave();
   drawTripMode();
   updateMainMap();
@@ -5622,5 +5680,13 @@ function getDistricts(place,intent,dest){
   </div>
 </div>
 
+  <div id="action-log">
+    <div class="action-log-hdr">
+      <span class="action-log-title">Changes made</span>
+      <button class="action-log-close" onclick="closeActionLog()">✕</button>
+    </div>
+    <div class="action-log-body" id="action-log-body"></div>
+    <div class="action-log-footer">Keep this open while you contact providers</div>
+  </div>
 </body>
 </html>
