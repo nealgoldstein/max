@@ -767,6 +767,7 @@ async function callMax(messages, maxTokens) {
     headers["anthropic-version"] = "2023-06-01";
     headers["anthropic-dangerous-direct-browser-access"] = "true";
   }
+  if(!_apiKey){throw new Error('No API key — click Settings to add your key');}
   var resp, data;
   try {
     var fetchTimeout=new Promise(function(_,reject){setTimeout(function(){reject(new Error('API timeout'));},25000);});
@@ -1987,9 +1988,11 @@ async function generateCityData(place,destId){
     }
   }catch(err){
     delete _generatedCityData[key];
-    console.error('generateCityData failed:',err);
+    var errDetail=err&&err.message?err.message:'Unknown error';
+    console.error('generateCityData failed:',errDetail);
     var d2x=getDest(destId);
-    if(!d2x||!d2x.suggestions||d2x.suggestions.length===0) showSaveStatus('Could not generate '+place+' data — tap Refresh in Explore',5000);
+    var alreadyHasData=d2x&&d2x.suggestions&&d2x.suggestions.length>0;
+    if(!alreadyHasData) showSaveStatus('⚠ Generation failed: '+errDetail,10000);
     // Only show error pane if suggestions are genuinely missing
     var d2=getDest(destId);
     var alreadyHasData=d2&&d2.suggestions&&d2.suggestions.length>0;
@@ -1998,7 +2001,7 @@ async function generateCityData(place,destId){
       if(explPane){
         var errMsg=document.createElement('div');
         errMsg.style.cssText='margin:12px 14px;padding:10px;background:#fff5f5;border:1px solid #f8c8c8;border-radius:7px;font-size:11px;color:#b04040;line-height:1.5;';
-        errMsg.textContent='Could not load '+place+' data. ';
+        errMsg.textContent='Could not load '+place+' data: '+(errMsg2||'')+' ';
         var retryBtn=document.createElement('button');
         retryBtn.style.cssText='font-size:11px;padding:2px 8px;border:1px solid #f8c8c8;border-radius:4px;background:#fff;color:#b04040;cursor:pointer;margin-left:4px;';
         retryBtn.textContent='Retry';
