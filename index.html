@@ -3840,6 +3840,7 @@ function drawTripMode(){
     sv.onclick=function(e){e.stopPropagation();saveDates(dest.id);};
     var cx=document.createElement("button"); cx.className="date-cancel-btn"; cx.textContent="Cancel";
     cx.onclick=function(e){e.stopPropagation();closeListDateEdit(dest.id);};
+    editRow.onclick=function(e){e.stopPropagation();};
     editRow.appendChild(fi); editRow.appendChild(arrow); editRow.appendChild(ti);
     editRow.appendChild(document.createElement("br")); editRow.appendChild(sv); editRow.appendChild(cx);
     card.appendChild(editRow);
@@ -4521,29 +4522,7 @@ function drawDestMode(destId){
   var datesRow=document.createElement("div"); datesRow.style.cssText="display:flex;align-items:center;gap:8px;margin-bottom:8px;";
   var dates=document.createElement("div"); dates.className="dm-dates"; dates.id="ud-dates-"+destId;
   dates.textContent=fmtD(dest.dateFrom)+" \u2013 "+fmtD(dest.dateTo)+" ("+dest.nights+" night"+(dest.nights!==1?"s":"")+")";
-  var editDatesBtn=document.createElement("button"); editDatesBtn.className="di-edit-btn"; editDatesBtn.textContent="edit dates";
-  (function(did){editDatesBtn.onclick=function(){
-    // Show inline date edit form below the dates row
-    var existingForm=g("dm-date-edit-"+did);
-    if(existingForm){existingForm.parentNode.removeChild(existingForm);editDatesBtn.textContent="edit dates";return;}
-    editDatesBtn.textContent="cancel";
-    var ef=document.createElement("div"); ef.id="dm-date-edit-"+did;
-    ef.style.cssText="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:5px;";
-    var fi=document.createElement("input"); fi.type="date"; fi.className="date-edit-inp"; fi.value=getDest(did).dateFrom;
-    var arrow=document.createElement("span"); arrow.style.cssText="font-size:10px;color:#aaa;"; arrow.textContent="\u2192";
-    var ti=document.createElement("input"); ti.type="date"; ti.className="date-edit-inp"; ti.value=getDest(did).dateTo;
-    fi.onchange=function(){ti.min=fi.value;if(ti.value&&ti.value<fi.value)ti.value="";};
-    var sv=document.createElement("button"); sv.className="date-save-btn"; sv.textContent="Save";
-    sv.onclick=function(){
-      ef.parentNode.removeChild(ef); editDatesBtn.textContent="edit dates";
-      saveDates(did,fi.value,ti.value);
-    };
-    var cx=document.createElement("button"); cx.className="date-cancel-btn"; cx.textContent="Cancel";
-    cx.onclick=function(){ef.parentNode.removeChild(ef);editDatesBtn.textContent="edit dates";};
-    ef.appendChild(fi); ef.appendChild(arrow); ef.appendChild(ti); ef.appendChild(sv); ef.appendChild(cx);
-    datesRow.parentNode.insertBefore(ef,datesRow.nextSibling);
-  };})(destId);
-  datesRow.appendChild(dates); datesRow.appendChild(editDatesBtn);
+  datesRow.appendChild(dates);
   // Story + compare map buttons
   var dmActs=document.createElement("div"); dmActs.className="dm-actions";
   var stBtn2=document.createElement("button"); stBtn2.className="dm-act-btn tlink story-tl";
