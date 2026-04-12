@@ -2439,6 +2439,11 @@ function showDateChangeDialog(dest,newFrom,newTo,affected,onConfirm){
     var confirmBtn=document.createElement('button'); confirmBtn.className='move-dialog-confirm'; confirmBtn.textContent='Update dates in Max';
     confirmBtn.onclick=function(){
       var items=buildCancelItems(dest,affected);
+      // Clear any stale pendingCancellations from previous date changes on all affected dests
+      dest.pendingCancellations=null;
+      (affected.overlapping||[]).forEach(function(ov){
+        var od=getDest(ov.id); if(od) od.pendingCancellations=null;
+      });
       if(items.length>0){dest.pendingCancellations={destName:dest.label||dest.place,items:items};autoSave();}
       onConfirm(); showPhase2(items);
     };
@@ -5403,6 +5408,13 @@ function migrateDest(dest){
   if(!dest.restaurantSuggestions)dest.restaurantSuggestions=[];
   if(!dest.laterItems){dest.laterItems=dest.discoveredItems||[];}
   if(!dest.maybeItems){dest.maybeItems=[];}
+  // Wipe stale pendingCancellations saved before wording was standardised
+  if(dest.pendingCancellations&&dest.pendingCancellations.items){
+    var hasOldWording=dest.pendingCancellations.items.some(function(it){
+      return it.detail&&(it.detail.indexOf('Contact hotel')>-1||it.detail.indexOf('Contact provider to adjust dates')>-1||it.keepInApp===true);
+    });
+    if(hasOldWording) dest.pendingCancellations=null;
+  }
   if(!dest.discoveredItems)dest.discoveredItems=[];
   // Migrate day.sights[] → day.items[] for existing trips
   if(dest.days){
