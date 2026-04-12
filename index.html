@@ -1588,8 +1588,8 @@ function enterApp(){
   if(dayBtn) dayBtn.onclick=function(e){e.stopPropagation();toggleDayDropdown();};
   setTimeout(function(){
     initMainMap();
-    if(activeDest) drawDestMode(activeDest);
-    else { _leftMode="trip"; drawTripMode(); updateMainMap(); }
+    // Always open in trip list — activeDest is remembered so user can resume
+    _leftMode="trip"; drawTripMode(); updateMainMap();
     checkDeadlineAlert();
   },50);
 }
@@ -3846,7 +3846,9 @@ function drawTripMode(){
 
     // Action buttons
     var acts=document.createElement("div"); acts.className="tm-dest-acts";
-    var openBtn=document.createElement("button"); openBtn.className="tm-dest-btn"; openBtn.textContent="Open \u2192";
+    var openBtn=document.createElement("button"); openBtn.className="tm-dest-btn";
+    openBtn.textContent=(dest.id===activeDest?"Resume \u21a9":"Open \u2192");
+    if(dest.id===activeDest) openBtn.style.cssText="font-weight:600;border-color:#aac4e8;color:#1a5fa8;";
     (function(did){openBtn.onclick=function(e){e.stopPropagation();selectDest(did);};})(dest.id);
     var editBtn=document.createElement("button"); editBtn.className="tm-dest-btn"; editBtn.id="di-edit-btn-"+dest.id; editBtn.textContent="Edit dates";
     (function(did){editBtn.onclick=function(e){e.stopPropagation();toggleListDateEdit(did);};})(dest.id);
