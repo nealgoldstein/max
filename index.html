@@ -2884,6 +2884,7 @@ function updateMainMapMarkers(){
   closeMapPinPanel();
   if(_leftMode==="trip") return;
   var dest=getDest(activeDest); if(!dest)return;
+  console.log('[MAX MAP] updateMainMapMarkers — dest:',dest.place,'hotelBookings:',dest.hotelBookings,'layers:',JSON.stringify(_mainActiveLayers));
 
   function addPin(latlng,icon,opacity,item,itemType){
     var m=L.marker(latlng,{icon:icon,opacity:opacity});
@@ -2989,9 +2990,11 @@ function updateMainMapMarkers(){
   // Hotel
   if(_mainActiveLayers['stay']){
     var bookedH=dest.hotelBookings&&dest.hotelBookings.find(function(b){return b.status==='booked';});
+    console.log('[MAX MAP] hotel check — _mainActiveLayers.stay:',_mainActiveLayers['stay'],'bookedH:',bookedH?bookedH.name:'none','hotelBookings:',dest.hotelBookings);
     if(bookedH){
       var hc2=getCityCenter(dest.place);
       var hcoords2=bookedH.lat&&bookedH.lng?[bookedH.lat,bookedH.lng]:(hc2?[hc2[0]+stableOffset(bookedH.name)[0],hc2[1]+stableOffset(bookedH.name)[1]]:null);
+      console.log('[MAX MAP] hotel coords:',hcoords2,'from bk.lat:',bookedH.lat,'cityCenter:',hc2);
       if(hcoords2){
         var hm2=L.marker(hcoords2,{icon:makeMapIcon('stay'),opacity:1});
         (function(bk){hm2.on('click',function(e){
@@ -2999,8 +3002,11 @@ function updateMainMapMarkers(){
           showMapPinPanel({id:'hotel-'+bk.name,n:bk.name,note:'Check-in '+fmtD(bk.checkIn)+(bk.confirmationNumber?' \u00b7 Conf: '+bk.confirmationNumber:''),done:false,slot:'day'},dest,'hotel');
         });})(bookedH);
         hm2.addTo(_mainMap);_mainMarkers.push(hm2);
+        console.log('[MAX MAP] hotel marker added at',hcoords2);
       }
     }
+  } else {
+    console.log('[MAX MAP] hotel layer OFF');
   }
 
   // Utility locations only (arrival, departure, ATM, grocery, transit, tourist-info)
