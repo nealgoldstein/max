@@ -2295,111 +2295,151 @@ function computeDateChangeImpact(dest,newFrom,newTo){
   return affected;
 }
 
+function buildCancelItems(dest,affected){
+  var items=[];
+  (affected.bookings||[]).forEach(function(b){
+    items.push({type:b.type,name:b.name,detail:b.detail,dest:dest.label||dest.place,keepInApp:b.keepInApp||false});
+  });
+  (affected.overlapping||[]).forEach(function(d){
+    (d.bookings||[]).forEach(function(b){
+      items.push({type:b.type,name:b.name,detail:b.detail,dest:d.dest,keepInApp:false});
+    });
+  });
+  return items;
+}
+
+function openMailtoChecklist(destName,items){
+  var subject='Cancellation checklist — '+destName+' date change';
+  var body='The following bookings need to be cancelled or adjusted with providers:\n\n';
+  items.forEach(function(it){
+    body+=it.type+': '+it.name+' ('+it.dest+')';
+    if(it.detail) body+=' — '+it.detail;
+    body+= it.keepInApp?' [contact to adjust dates]':' [cancel]';
+    body+='\n';
+  });
+  body+='\n— Sent from Max';
+  window.location.href='mailto:?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);
+}
+
+function buildCancelRows(container,items){
+  var groups={};
+  items.forEach(function(it){if(!groups[it.dest])groups[it.dest]=[];groups[it.dest].push(it);});
+  Object.keys(groups).forEach(function(gDest){
+    var hdr=document.createElement('div'); hdr.className='move-dialog-label';
+    hdr.textContent=gDest; container.appendChild(hdr);
+    var list=document.createElement('div'); list.style.cssText='margin-bottom:10px;';
+    groups[gDest].forEach(function(b){
+      var row=document.createElement('div');
+      row.style.cssText='font-size:11px;padding:4px 8px;background:#fff8f0;border:1px solid #f0dcc0;border-radius:4px;margin-bottom:3px;';
+      row.innerHTML='<strong>'+b.type+'</strong>: '+b.name
+        +(b.detail?' <span style="color:#999;">('+b.detail+')</span>':'')
+        +(b.keepInApp
+          ?'<span style="margin-left:6px;color:#2a7a4e;font-size:10px;">contact provider to adjust dates</span>'
+          :'<span style="margin-left:6px;color:#b05820;font-size:10px;">removed from Max — cancel with provider</span>');
+      list.appendChild(row);
+    });
+    container.appendChild(list);
+  });
+}
+
+function showCancellationChecklist(dest){
+  if(!dest.pendingCancellations||!dest.pendingCancellations.items||!dest.pendingCancellations.items.length)return;
+  var pc=dest.pendingCancellations;
+  var overlay=document.createElement('div'); overlay.className='move-dialog-overlay';
+  var dlg=document.createElement('div'); dlg.className='move-dialog';
+  var title=document.createElement('div'); title.className='move-dialog-title';
+  title.style.color='#2a7a4e'; title.textContent='\u2713 Dates updated in Max';
+  dlg.appendChild(title);
+  var notice=document.createElement('div'); notice.className='move-dialog-warn';
+  notice.innerHTML='<strong>Max has been updated.</strong> Contact each provider below to cancel or adjust your reservations.';
+  dlg.appendChild(notice);
+  buildCancelRows(dlg,pc.items);
+  var acts=document.createElement('div'); acts.className='move-dialog-actions';
+  var emailBtn=document.createElement('button'); emailBtn.className='move-dialog-cancel'; emailBtn.textContent='\u2709 Email myself this list';
+  (function(dn,its){emailBtn.onclick=function(){openMailtoChecklist(dn,its);};})(pc.destName,pc.items);
+  var doneBtn=document.createElement('button'); doneBtn.className='move-dialog-confirm'; doneBtn.textContent='Done \u2014 all cancelled';
+  doneBtn.onclick=function(){dest.pendingCancellations=null;autoSave();document.body.removeChild(overlay);if(activeDest===dest.id&&_leftMode==='dest')drawDestMode(dest.id);};
+  acts.appendChild(emailBtn); acts.appendChild(doneBtn); dlg.appendChild(acts);
+  overlay.appendChild(dlg);
+  document.body.appendChild(overlay);
+}
+
 function showDateChangeDialog(dest,newFrom,newTo,affected,onConfirm){
   var overlay=document.createElement('div'); overlay.className='move-dialog-overlay';
   var dlg=document.createElement('div'); dlg.className='move-dialog';
 
-  // Helper: build the booking rows section (shared between phase 1 and phase 2)
-  function buildBookingRows(container){
-    // Own-destination bookings
+  function showPhase1(){
+    dlg.innerHTML='';
+    var title=document.createElement('div'); title.className='move-dialog-title';
+    title.textContent='Update dates for '+(dest.label||dest.place); dlg.appendChild(title);
+    var intro=document.createElement('div'); intro.className='move-dialog-warn';
+    intro.innerHTML='Removing items from Max does <strong>not</strong> cancel them with providers. After updating, this dialog stays open so you can contact each provider.';
+    dlg.appendChild(intro);
     if(affected.bookings.length>0){
       var secLbl=document.createElement('div'); secLbl.className='move-dialog-label';
-      secLbl.textContent='Your bookings for '+(dest.label||dest.place)+':';
-      container.appendChild(secLbl);
+      secLbl.textContent='Your bookings for '+(dest.label||dest.place)+':'; dlg.appendChild(secLbl);
       var list=document.createElement('div'); list.style.cssText='margin-bottom:10px;';
       affected.bookings.forEach(function(b){
         var row=document.createElement('div'); row.style.cssText='font-size:11px;padding:4px 8px;background:#fff8f0;border:1px solid #f0dcc0;border-radius:4px;margin-bottom:3px;';
         row.innerHTML='<strong>'+b.type+'</strong>: '+b.name+' <span style="color:#999;">('+b.detail+')</span>'
-          +(b.keepInApp
-            ?'<span style="margin-left:6px;color:#2a7a4e;font-size:10px;">kept in app — contact provider to adjust</span>'
-            :'<span style="margin-left:6px;color:#b05820;font-size:10px;">removed from Max</span>');
+          +(b.keepInApp?'<span style="margin-left:6px;color:#2a7a4e;font-size:10px;">kept in Max \u2014 contact to adjust</span>':'<span style="margin-left:6px;color:#b05820;font-size:10px;">will be removed from Max</span>');
         list.appendChild(row);
-      });
-      container.appendChild(list);
+      }); dlg.appendChild(list);
     }
-    // Overlapping destination bookings
     if(affected.overlapping.length>0){
       var ovLbl=document.createElement('div'); ovLbl.className='move-dialog-label';
-      ovLbl.textContent='Bookings removed from overlapping destinations:';
-      container.appendChild(ovLbl);
+      ovLbl.textContent='Bookings in overlapping destinations:'; dlg.appendChild(ovLbl);
       var ovList=document.createElement('div'); ovList.style.cssText='margin-bottom:10px;';
       affected.overlapping.forEach(function(d){
-        var destHdr=document.createElement('div');
-        destHdr.style.cssText='font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#b05820;margin:6px 0 3px;';
-        destHdr.textContent=d.dest+' — '+d.detail;
-        ovList.appendChild(destHdr);
+        var dh=document.createElement('div');
+        dh.style.cssText='font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#b05820;margin:6px 0 3px;';
+        dh.textContent=d.dest+' \u2014 '+d.detail; ovList.appendChild(dh);
         if(d.bookings&&d.bookings.length>0){
           d.bookings.forEach(function(b){
             var row=document.createElement('div'); row.style.cssText='font-size:11px;padding:4px 8px;background:#fff8f0;border:1px solid #f0dcc0;border-radius:4px;margin-bottom:3px;';
-            row.innerHTML='<strong>'+b.type+'</strong>: '+b.name+(b.detail?' <span style="color:#999;">('+b.detail+')</span>':'')
-              +'<span style="margin-left:6px;color:#b05820;font-size:10px;">removed from Max</span>';
+            row.innerHTML='<strong>'+b.type+'</strong>: '+b.name+(b.detail?' <span style="color:#999;">('+b.detail+')</span>':'')+'<span style="margin-left:6px;color:#b05820;font-size:10px;">will be removed from Max</span>';
             ovList.appendChild(row);
           });
         } else {
           var none=document.createElement('div'); none.style.cssText='font-size:11px;color:#aaa;padding:2px 8px;';
-          none.textContent='No logged bookings — itinerary items in overlapping days returned to pool';
-          ovList.appendChild(none);
+          none.textContent='No logged bookings \u2014 itinerary items in overlapping days returned to pool'; ovList.appendChild(none);
         }
-      });
-      container.appendChild(ovList);
+      }); dlg.appendChild(ovList);
     }
-  }
-
-  // ── Phase 1: confirm ──────────────────────────────────────
-  function showPhase1(){
-    dlg.innerHTML='';
-    var title=document.createElement('div'); title.className='move-dialog-title';
-    title.textContent='Update dates for '+(dest.label||dest.place);
-    dlg.appendChild(title);
-
-    var intro=document.createElement('div'); intro.className='move-dialog-warn';
-    intro.innerHTML='Removing items below from Max does <strong>not</strong> cancel them with providers. '
-      +'After updating, this dialog stays open so you can contact each provider to cancel or adjust.';
-    dlg.appendChild(intro);
-
-    buildBookingRows(dlg);
-
     var acts=document.createElement('div'); acts.className='move-dialog-actions';
     var backBtn=document.createElement('button'); backBtn.className='move-dialog-cancel'; backBtn.textContent='Go back';
     backBtn.onclick=function(){document.body.removeChild(overlay);};
-    var confirmBtn=document.createElement('button'); confirmBtn.className='move-dialog-confirm';
-    confirmBtn.textContent='Update dates in Max';
+    var confirmBtn=document.createElement('button'); confirmBtn.className='move-dialog-confirm'; confirmBtn.textContent='Update dates in Max';
     confirmBtn.onclick=function(){
-      onConfirm();
-      showPhase2();
+      var items=buildCancelItems(dest,affected);
+      if(items.length>0){dest.pendingCancellations={destName:dest.label||dest.place,items:items};autoSave();}
+      onConfirm(); showPhase2(items);
     };
-    acts.appendChild(backBtn); acts.appendChild(confirmBtn);
-    dlg.appendChild(acts);
+    acts.appendChild(backBtn); acts.appendChild(confirmBtn); dlg.appendChild(acts);
   }
 
-  // ── Phase 2: done — dialog stays open as cancellation reference ──
-  function showPhase2(){
+  function showPhase2(items){
     dlg.innerHTML='';
     var title=document.createElement('div'); title.className='move-dialog-title';
-    title.style.color='#2a7a4e';
-    title.textContent='✓ Dates updated in Max';
-    dlg.appendChild(title);
-
+    title.style.color='#2a7a4e'; title.textContent='\u2713 Dates updated in Max'; dlg.appendChild(title);
     var notice=document.createElement('div'); notice.className='move-dialog-warn';
-    notice.innerHTML='<strong>Max has been updated.</strong> The bookings below have been removed from Max — '
-      +'but you still need to contact each provider directly to cancel or adjust. '
-      +'Keep this open while you make your calls.';
+    notice.innerHTML='<strong>Max has been updated.</strong> Contact each provider below to cancel or adjust your reservations. <strong>Keep this open while you make your calls.</strong> You can also reopen it from the destination view.';
     dlg.appendChild(notice);
-
-    buildBookingRows(dlg);
-
+    buildCancelRows(dlg,items);
     var acts=document.createElement('div'); acts.className='move-dialog-actions';
-    var doneBtn=document.createElement('button'); doneBtn.className='move-dialog-confirm'; doneBtn.textContent='Done — all cancelled';
-    doneBtn.onclick=function(){document.body.removeChild(overlay);};
-    acts.appendChild(doneBtn);
-    dlg.appendChild(acts);
+    var emailBtn=document.createElement('button'); emailBtn.className='move-dialog-cancel'; emailBtn.textContent='\u2709 Email myself this list';
+    (function(dn,its){emailBtn.onclick=function(){openMailtoChecklist(dn,its);};})(dest.label||dest.place,items);
+    var doneBtn=document.createElement('button'); doneBtn.className='move-dialog-confirm'; doneBtn.textContent='Done \u2014 all cancelled';
+    doneBtn.onclick=function(){dest.pendingCancellations=null;autoSave();document.body.removeChild(overlay);if(activeDest===dest.id&&_leftMode==='dest')drawDestMode(dest.id);};
+    acts.appendChild(emailBtn); acts.appendChild(doneBtn); dlg.appendChild(acts);
   }
 
   showPhase1();
   overlay.appendChild(dlg);
-  overlay.onclick=function(e){if(e.target===overlay)document.body.removeChild(overlay);};
+  // No click-outside-to-close: this dialog is a working reference
   document.body.appendChild(overlay);
 }
+
 
 function applyDateChange(dest,newFrom,newTo,affected){
   var destId=dest.id;
@@ -4351,6 +4391,20 @@ function drawDestMode(destId){
   hdr.appendChild(title); hdr.appendChild(dates);
   hdr.appendChild(dmActs); hdr.appendChild(dsw); hdr.appendChild(ovWarn);
   c.appendChild(hdr);
+
+  // Pending cancellations banner
+  if(dest.pendingCancellations&&dest.pendingCancellations.items&&dest.pendingCancellations.items.length){
+    var pcBanner=document.createElement('div');
+    pcBanner.style.cssText='background:#fff8f0;border:1px solid #f0dcc0;border-radius:6px;padding:8px 10px;margin:8px 0 4px;display:flex;align-items:center;justify-content:space-between;gap:8px;';
+    var pcTxt=document.createElement('div');
+    pcTxt.style.cssText='font-size:11px;color:#b05820;';
+    pcTxt.innerHTML='<strong>⚠ Pending cancellations</strong> — '+dest.pendingCancellations.items.length+' booking'+(dest.pendingCancellations.items.length!==1?'s':'')+' need provider action';
+    var pcBtn=document.createElement('button'); pcBtn.className='bk-log-btn';
+    pcBtn.textContent='View checklist';
+    (function(d){pcBtn.onclick=function(){showCancellationChecklist(d);};})(dest);
+    pcBanner.appendChild(pcTxt); pcBanner.appendChild(pcBtn);
+    c.appendChild(pcBanner);
+  }
 
   // Section tabs
   var tabs=document.createElement("div"); tabs.className="dm-tabs";
