@@ -2246,7 +2246,7 @@ function computeDateChangeImpact(dest,newFrom,newTo){
   // 1. Own hotel booking — remove from Max, contact provider to adjust dates
   (dest.hotelBookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
     affected.bookings.push({dest:dest.label||dest.place,type:'Hotel',name:b.name,
-      detail:'Contact provider to adjust dates — confirmation: '+(b.confirmationNumber||'see booking'),
+      detail:'Conf: '+(b.confirmationNumber||'see booking')+' — contact provider to adjust or cancel',
       keepInApp:false});
   });
 
@@ -2277,7 +2277,7 @@ function computeDateChangeImpact(dest,newFrom,newTo){
       var overlapDays=Math.ceil((new Date(newTo+'T12:00:00')-new Date(nd.dateFrom+'T12:00:00'))/86400000)+1;
       var ovBookings=[];
       (nd.hotelBookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
-        ovBookings.push({type:'Hotel',name:b.name,detail:'Conf: '+(b.confirmationNumber||'see booking'),keepInApp:false});
+        ovBookings.push({type:'Hotel',name:b.name,detail:'Conf: '+(b.confirmationNumber||'see booking')+' — contact provider to adjust or cancel',keepInApp:false});
       });
       (nd.generalBookings||[]).forEach(function(b){
         ovBookings.push({type:'Reservation',name:b.name||b.type||'Booking',detail:b.date?'Booked for '+fmtD(b.date):'',keepInApp:false});
@@ -2302,7 +2302,7 @@ function computeDateChangeImpact(dest,newFrom,newTo){
       var pdOverlapDays=Math.ceil((new Date(pd.dateTo+'T12:00:00')-new Date(newFrom+'T12:00:00'))/86400000)+1;
       var pdBookings=[];
       (pd.hotelBookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
-        pdBookings.push({type:'Hotel',name:b.name,detail:'Conf: '+(b.confirmationNumber||'see booking'),keepInApp:false});
+        pdBookings.push({type:'Hotel',name:b.name,detail:'Conf: '+(b.confirmationNumber||'see booking')+' — contact provider to adjust or cancel',keepInApp:false});
       });
       (pd.generalBookings||[]).forEach(function(b){
         pdBookings.push({type:'Reservation',name:b.name||b.type||'Booking',detail:b.date?'Booked for '+fmtD(b.date):'',keepInApp:false});
@@ -2342,7 +2342,7 @@ function openMailtoChecklist(destName,items){
   items.forEach(function(it){
     body+=it.type+': '+it.name+' ('+it.dest+')';
     if(it.detail) body+=' — '+it.detail;
-    body+= it.keepInApp?' [contact to adjust dates]':' [cancel]';
+    body+=' [contact provider]';
     body+='\n';
   });
   body+='\n— Sent from Max';
@@ -2361,9 +2361,7 @@ function buildCancelRows(container,items){
       row.style.cssText='font-size:11px;padding:4px 8px;background:#fff8f0;border:1px solid #f0dcc0;border-radius:4px;margin-bottom:3px;';
       row.innerHTML='<strong>'+b.type+'</strong>: '+b.name
         +(b.detail?' <span style="color:#999;">('+b.detail+')</span>':'')
-        +(b.keepInApp
-          ?'<span style="margin-left:6px;color:#2a7a4e;font-size:10px;">contact provider to adjust dates</span>'
-          :'<span style="margin-left:6px;color:#b05820;font-size:10px;">removed from Max — cancel with provider</span>');
+        +'<span style="margin-left:6px;color:#b05820;font-size:10px;">removed from Max — contact provider</span>';
       list.appendChild(row);
     });
     container.appendChild(list);
@@ -2411,7 +2409,7 @@ function showDateChangeDialog(dest,newFrom,newTo,affected,onConfirm){
       affected.bookings.forEach(function(b){
         var row=document.createElement('div'); row.style.cssText='font-size:11px;padding:4px 8px;background:#fff8f0;border:1px solid #f0dcc0;border-radius:4px;margin-bottom:3px;';
         row.innerHTML='<strong>'+b.type+'</strong>: '+b.name+' <span style="color:#999;">('+b.detail+')</span>'
-          +(b.keepInApp?'<span style="margin-left:6px;color:#2a7a4e;font-size:10px;">kept in Max \u2014 contact to adjust</span>':'<span style="margin-left:6px;color:#b05820;font-size:10px;">will be removed from Max</span>');
+          +'<span style="margin-left:6px;color:#b05820;font-size:10px;">will be removed from Max</span>';
         list.appendChild(row);
       }); dlg.appendChild(list);
     }
@@ -2538,11 +2536,7 @@ function applyDateChange(dest,newFrom,newTo,affected){
   var logEntries=[];
   if(affected){
     (affected.bookings||[]).forEach(function(b){
-      if(b.keepInApp){
-        logEntries.push({type:'warn',icon:'⚠️',text:b.type+': '+b.name+' — '+b.detail});
-      } else {
-        logEntries.push({type:'cleared',icon:'❌',text:b.type+' removed: '+b.name+' ('+b.detail+')'});
-      }
+      logEntries.push({type:'cleared',icon:'❌',text:b.type+' removed: '+b.name+' ('+b.detail+')'});
     });
     (affected.overlapping||[]).forEach(function(ov){
       logEntries.push({type:'cleared',icon:'❌',text:'Bookings cleared for '+ov.dest+' — '+ov.detail});
