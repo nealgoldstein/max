@@ -3796,6 +3796,14 @@ function drawTripMode(){
   var c=g("lp-content"); if(!c)return;
   c.innerHTML="";
 
+  // Safety check
+  if(!trip||!trip.destinations){
+    c.innerHTML='<div style="padding:14px;font-size:11px;color:#e05050;">Error: trip data missing. Try reloading.</div>';
+    return;
+  }
+
+  try {
+
   // Destination list
   var listSec=document.createElement("div"); listSec.className="tm-section";
   var lbl=document.createElement("div"); lbl.className="tm-sec-title"; lbl.textContent="Destinations";
@@ -3995,6 +4003,10 @@ function drawTripMode(){
   }
 
   checkAndShowOverlaps();
+  } catch(e) {
+    c.innerHTML='<div style="padding:14px;font-size:11px;color:#e05050;white-space:pre-wrap;">Render error: '+e.message+'</div>';
+    console.error('drawTripMode error:',e);
+  }
 }
 
 function syncAddVis(){
