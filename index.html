@@ -2942,16 +2942,29 @@ function updateMainMapMarkers(){
       var iconKey=s.type==='restaurant'?'restaurant':(s.p==='must'?'sight-must':'sight-nice');
       addPin(coords,makeMapIcon(iconKey),s.done?0.4:1,s,s.type==='restaurant'?'restaurant':'sight');
     });
+    // Hotels in execution mode — always show booked, suggestions gated by layer
+    var _execDistHotels=[];
+    var _execDistData=getDistricts(dest.place,dest.intent,dest);
+    _execDistData.forEach(function(dist){(dist.hotels||[]).forEach(function(h){_execDistHotels.push({name:h.name,distName:dist.name,lat:h.lat||null,lng:h.lng||null});});});
+    var bh=dest.hotelBookings&&dest.hotelBookings.find(function(b){return b.status==='booked';});
+    var bhName=bh?bh.name:null;
     if(_mainActiveLayers['stay']){
-      var bh=dest.hotelBookings&&dest.hotelBookings.find(function(b){return b.status==='booked';});
-      if(bh){
+      _execDistHotels.forEach(function(h){
+        if(h.name===bhName) return;
         var hc=getCityCenter(dest.place);
-        var hcoords=bh.lat&&bh.lng?[bh.lat,bh.lng]:(hc?[hc[0]+stableOffset(bh.name)[0],hc[1]+stableOffset(bh.name)[1]]:null);
-        if(hcoords){
-          var hm=L.marker(hcoords,{icon:makeMapIcon('stay'),opacity:1});
-          (function(name){hm.on('click',function(e){if(L.DomEvent)L.DomEvent.stopPropagation(e);showMapPinPanel({id:'hotel-'+name,n:name,note:'Your booked hotel',done:false,slot:'day'},dest,'hotel');});})(bh.name);
-          hm.addTo(_mainMap);_mainMarkers.push(hm);
-        }
+        var c=h.lat&&h.lng?[h.lat,h.lng]:(hc?[hc[0]+stableOffset(h.name)[0],hc[1]+stableOffset(h.name)[1]]:null);
+        if(!c) return;
+        var hp=L.marker(c,{icon:makeMapIcon('stay'),opacity:0.3}); hp.addTo(_mainMap);_mainMarkers.push(hp);
+      });
+    }
+    if(bh){
+      var hcE=getCityCenter(dest.place);
+      var dmE=_execDistHotels.find(function(h){return h.name===bh.name;});
+      var bhC=bh.lat&&bh.lng?[bh.lat,bh.lng]:(dmE&&dmE.lat?[dmE.lat,dmE.lng]:(hcE?[hcE[0]+stableOffset(bh.name)[0],hcE[1]+stableOffset(bh.name)[1]]:null));
+      if(bhC){
+        var bhM=L.marker(bhC,{icon:makeMapIcon('stay'),opacity:1});
+        (function(name){bhM.on('click',function(e){if(L.DomEvent)L.DomEvent.stopPropagation(e);showMapPinPanel({id:'hotel-'+name,n:name,note:'✓ Booked',done:false,slot:'day'},dest,'hotel');});})(bh.name);
+        bhM.addTo(_mainMap);_mainMarkers.push(bhM);
       }
     }
     return;
@@ -2998,26 +3011,52 @@ function updateMainMapMarkers(){
     });
   }
 
-  // Hotel
+  // Hotels — all district suggestions + always-on booked pin
+  var _allDistHotels=[];
+  var _distData=getDistricts(dest.place,dest.intent,dest);
+  _distData.forEach(function(dist){
+    (dist.hotels||[]).forEach(function(h){
+      _allDistHotels.push({name:h.name,distName:dist.name,lat:h.lat||null,lng:h.lng||null});
+    });
+  });
+  var bookedH=dest.hotelBookings&&dest.hotelBookings.find(function(b){return b.status==='booked';});
+  var bookedName=bookedH?bookedH.name:null;
+  dbg('dist hotels: '+_allDistHotels.length+' booked: '+(bookedName||'none'));
+
+  // Unbooked suggestions — gated by layer toggle
   if(_mainActiveLayers['stay']){
-    var bookedH=dest.hotelBookings&&dest.hotelBookings.find(function(b){return b.status==='booked';});
-    dbg('booked hotel: '+(bookedH?bookedH.name:'none'));
-    if(bookedH){
-      var hc2=getCityCenter(dest.place);
-      var hcoords2=bookedH.lat&&bookedH.lng?[bookedH.lat,bookedH.lng]:(hc2?[hc2[0]+stableOffset(bookedH.name)[0],hc2[1]+stableOffset(bookedH.name)[1]]:null);
-      dbg('coords: '+(hcoords2?hcoords2[0].toFixed(4)+','+hcoords2[1].toFixed(4):'NULL'));
-      if(hcoords2){
-        var hm2=L.marker(hcoords2,{icon:makeMapIcon('stay'),opacity:1});
-        (function(bk){hm2.on('click',function(e){
-          if(L.DomEvent)L.DomEvent.stopPropagation(e);
-          showMapPinPanel({id:'hotel-'+bk.name,n:bk.name,note:'Check-in '+fmtD(bk.checkIn)+(bk.confirmationNumber?' \u00b7 Conf: '+bk.confirmationNumber:''),done:false,slot:'day'},dest,'hotel');
-        });})(bookedH);
-        hm2.addTo(_mainMap);_mainMarkers.push(hm2);
-        dbg('✓ marker added');
-      } else { dbg('✗ no coords'); }
-    }
-  } else {
-    dbg('hotel layer OFF');
+    _allDistHotels.forEach(function(h){
+      if(h.name===bookedName) return; // skip — rendered separately at full opacity
+      var hc3=getCityCenter(dest.place);
+      var hcoords3=h.lat&&h.lng?[h.lat,h.lng]:(hc3?[hc3[0]+stableOffset(h.name)[0],hc3[1]+stableOffset(h.name)[1]]:null);
+      if(!hcoords3) return;
+      var hpin=L.marker(hcoords3,{icon:makeMapIcon('stay'),opacity:0.3});
+      (function(name,distName){hpin.on('click',function(e){
+        if(L.DomEvent)L.DomEvent.stopPropagation(e);
+        showMapPinPanel({id:'hotel-s-'+name,n:name,note:distName,done:false,slot:'day'},dest,'info',e);
+      });})(h.name,h.distName);
+      hpin.addTo(_mainMap);_mainMarkers.push(hpin);
+    });
+  }
+
+  // Booked hotel — ALWAYS shown, regardless of layer toggle
+  if(bookedH){
+    var hc2=getCityCenter(dest.place);
+    // Try to find coords from district data first (more precise than stored coords)
+    var _distMatch=_allDistHotels.find(function(h){return h.name===bookedH.name;});
+    var hcoords2=bookedH.lat&&bookedH.lng?[bookedH.lat,bookedH.lng]:
+      (_distMatch&&_distMatch.lat?[_distMatch.lat,_distMatch.lng]:
+      (hc2?[hc2[0]+stableOffset(bookedH.name)[0],hc2[1]+stableOffset(bookedH.name)[1]]:null));
+    dbg('booked coords: '+(hcoords2?hcoords2[0].toFixed(4)+','+hcoords2[1].toFixed(4):'NULL'));
+    if(hcoords2){
+      var hm2=L.marker(hcoords2,{icon:makeMapIcon('stay'),opacity:1});
+      (function(bk){hm2.on('click',function(e){
+        if(L.DomEvent)L.DomEvent.stopPropagation(e);
+        showMapPinPanel({id:'hotel-'+bk.name,n:bk.name,note:'✓ Booked · Check-in '+fmtD(bk.checkIn)+(bk.confirmationNumber?' · Conf: '+bk.confirmationNumber:''),done:false,slot:'day'},dest,'hotel');
+      });})(bookedH);
+      hm2.addTo(_mainMap);_mainMarkers.push(hm2);
+      dbg('✓ booked marker added');
+    } else { dbg('✗ no coords for booked hotel'); }
   }
 
   // Utility locations only (arrival, departure, ATM, grocery, transit, tourist-info)
