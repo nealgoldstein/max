@@ -4278,7 +4278,7 @@ function drawDestMode(destId){
     btn.id="dm-tab-"+s.id; btn.textContent=s.lbl;
     (function(sid){btn.onclick=function(){
       _activeDmSection=sid;
-      var _lpc=g("lp-content"); if(_lpc)_lpc.scrollTop=0;
+      var _pw=g("dm-pane-wrap"); if(_pw)_pw.scrollTop=0;
       sections.forEach(function(x){
         var b=g("dm-tab-"+x.id); if(b)b.className="dm-tab"+(x.id===sid?" on":"");
         var p=g("dm-pane-"+x.id); if(p)p.style.display=x.id===sid?"block":"none";
@@ -4290,7 +4290,7 @@ function drawDestMode(destId){
   c.appendChild(tabs);
 
   // Tab panes container
-  var paneWrap=document.createElement("div"); paneWrap.className="dm-tab-body";
+  var paneWrap=document.createElement("div"); paneWrap.className="dm-tab-body"; paneWrap.id="dm-pane-wrap";
 
   // ITINERARY pane — day/evening sections per day + Later + Maybe
   var sightsPane=document.createElement("div"); sightsPane.id="dm-pane-sights";
@@ -4488,24 +4488,23 @@ function drawDestMode(destId){
       var dbad2=document.createElement("div"); dbad2.className="dbad"; dbad2.textContent="\u2212 "+dist.bad; db2.appendChild(dbad2);
       matching.forEach(function(h){
         hotelCtr++;
+        var hbWrap=document.createElement("div"); hbWrap.className="hotel-item-wrap";
         var hiEl=document.createElement("div"); hiEl.className="hi";
         var hl=document.createElement("div");
         var hn=document.createElement("div"); hn.className="hn"; hn.textContent=h.name;
         var hd=document.createElement("div"); hd.className="hd"; hd.textContent=h.desc;
         hl.appendChild(hn); hl.appendChild(hd);
         var hp=document.createElement("div"); hp.className="hp"; hp.textContent=h.price;
-        hiEl.appendChild(hl); hiEl.appendChild(hp); db2.appendChild(hiEl);
-        var hbWrap=document.createElement("div");
         var formId="hbf-"+dest.id+"-"+hotelCtr+"-"+Date.now(); // unique per render
-        var logBtn=document.createElement("button"); logBtn.className="bk-log-btn"; logBtn.textContent="Log booking";
+        var logBtn=document.createElement("button"); logBtn.className="bk-log-btn"; logBtn.style.marginTop="0"; logBtn.style.flexShrink="0"; logBtn.textContent="Log booking";
         (function(btn,wrap,hname,did,fid){btn.onclick=function(){toggleHotelForm(btn,wrap,fid,{
           hotelName:hname,area:dist.name,destId:did,checkIn:dest.dateFrom,checkOut:dest.dateTo,currency:"EUR"
         },function(){
-          // After booking saved: collapse to booked view
           if(_showAllHotelsDests)_showAllHotelsDests.delete(did);
           drawDestMode(did);
         });};})(logBtn,hbWrap,h.name,dest.id,formId);
-        hbWrap.appendChild(logBtn);
+        hiEl.appendChild(hl); hiEl.appendChild(hp); hiEl.appendChild(logBtn);
+        hbWrap.appendChild(hiEl);
         dest.hotelBookings.filter(function(b){return b.name===h.name;}).forEach(function(b){hbWrap.appendChild(mkHotelRecord(b,dest.id));});
         db2.appendChild(hbWrap);
       });
