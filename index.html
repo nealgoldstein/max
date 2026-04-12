@@ -2243,11 +2243,11 @@ function computeDateChangeImpact(dest,newFrom,newTo){
   var affected={bookings:[],overlapping:[]};
   var extending=newTo>dest.dateTo;
 
-  // 1. Own hotel booking — warn user to contact hotel, don't auto-clear
+  // 1. Own hotel booking — remove from Max, contact provider to adjust dates
   (dest.hotelBookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
     affected.bookings.push({dest:dest.label||dest.place,type:'Hotel',name:b.name,
-      detail:'Contact hotel to adjust reservation — confirmation: '+(b.confirmationNumber||'see booking'),
-      keepInApp:true}); // keepInApp means don't clear — just warn
+      detail:'Contact provider to adjust dates — confirmation: '+(b.confirmationNumber||'see booking'),
+      keepInApp:false});
   });
 
   // 2. Own general/restaurant bookings after the new end date — no longer valid
@@ -2401,7 +2401,8 @@ function showDateChangeDialog(dest,newFrom,newTo,affected,onConfirm){
     var title=document.createElement('div'); title.className='move-dialog-title';
     title.textContent='Update dates for '+(dest.label||dest.place); dlg.appendChild(title);
     var intro=document.createElement('div'); intro.className='move-dialog-warn';
-    intro.innerHTML='Removing items from Max does <strong>not</strong> cancel them with providers. After updating, this dialog stays open so you can contact each provider.';
+    intro.innerHTML='Removing items from Max does <strong>not</strong> cancel them with providers. '
+      +'Contact each provider directly to adjust or cancel. This dialog stays open after updating so you can make those calls.';
     dlg.appendChild(intro);
     if(affected.bookings.length>0){
       var secLbl=document.createElement('div'); secLbl.className='move-dialog-label';
@@ -2485,10 +2486,9 @@ function applyDateChange(dest,newFrom,newTo,affected){
   }
   if(dest.days.length>count) dest.days=dest.days.slice(0,count);
 
-  // Clear own bookings (keep hotel — user must contact provider directly)
+  // Clear own bookings including hotel — user must contact all providers directly
   if(affected){
-    // Don't clear hotel — user needs confirmation number to contact hotel
-    dest.generalBookings=[];
+    dest.hotelBookings=[]; dest.generalBookings=[];
     // Clear transport legs to/from this dest
     Object.keys(trip.legs||{}).forEach(function(k){
       var parts=k.split('-');
