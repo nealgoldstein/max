@@ -2209,7 +2209,7 @@ function computeDateChangeImpact(dest,newFrom,newTo){
   if(extending&&destIdx<trip.destinations.length-1){
     var nd=trip.destinations[destIdx+1];
     if(newTo>=nd.dateFrom){
-      var overlapDays=Math.ceil((new Date(newTo)-new Date(nd.dateFrom))/86400000)+1;
+      var overlapDays=Math.ceil((new Date(newTo+'T12:00:00')-new Date(nd.dateFrom+'T12:00:00'))/86400000)+1;
       var hasBookings=(nd.hotelBookings&&nd.hotelBookings.some(function(b){return b.status==='booked';}))
         ||(nd.generalBookings&&nd.generalBookings.length>0)
         ||Object.keys(trip.legs||{}).some(function(k){return k.indexOf(nd.id)>-1&&trip.legs[k].bookings&&trip.legs[k].bookings.length>0;});
@@ -2304,23 +2304,31 @@ function applyDateChange(dest,newFrom,newTo,affected){
         var parts=k.split('-');
         if(parts.length===2&&(parts[0]===od.id||parts[1]===od.id)) trip.legs[k]={bookings:[]};
       });
-      // Return ALL scheduled items to pool — sights → Explore, restaurants → Eat
+      // Only return items from OVERLAPPING days back to pool
+      // Overlap = days between od.dateFrom and newTo (the extended end date)
       if(od.days){
-        od.days.forEach(function(day){
-          (day.items||[]).forEach(function(s){
-            if(s.type==='sight'){
-              if(!od.suggestions) od.suggestions=[];
-              var alreadyIn=od.suggestions.some(function(sg){return sg.n===s.n;});
-              if(!alreadyIn) od.suggestions.push({id:s.id,type:'sight',n:s.n,st:s.st||s.n,
-                note:s.note||null,lat:s.lat||null,lng:s.lng||null,approx:!!s.approx});
-            } else if(s.type==='restaurant'){
-              if(!od.restaurantSuggestions) od.restaurantSuggestions=[];
-              var alreadyInR=od.restaurantSuggestions.some(function(rs){return rs.n===s.n;});
-              if(!alreadyInR) od.restaurantSuggestions.push({id:s.id,type:'restaurant',n:s.n,
-                st:s.st||s.n,note:s.note||null,lat:s.lat||null,lng:s.lng||null});
-            }
-          });
-          day.items=[];
+        od.days.forEach(function(day,di){
+          // Compute this day's date from the destination's start date + index
+          var dayDate=new Date(od.dateFrom+'T12:00:00'); dayDate.setDate(dayDate.getDate()+di);
+          var dayStr=dayDate.toISOString().slice(0,10);
+          var inOverlap=dayStr<=newTo; // this day falls within the overlap period
+          if(inOverlap){
+            (day.items||[]).forEach(function(s){
+              if(s.type==='sight'){
+                if(!od.suggestions) od.suggestions=[];
+                var alreadyIn=od.suggestions.some(function(sg){return sg.n===s.n;});
+                if(!alreadyIn) od.suggestions.push({id:s.id,type:'sight',n:s.n,st:s.st||s.n,
+                  note:s.note||null,lat:s.lat||null,lng:s.lng||null,approx:!!s.approx});
+              } else if(s.type==='restaurant'){
+                if(!od.restaurantSuggestions) od.restaurantSuggestions=[];
+                var alreadyInR=od.restaurantSuggestions.some(function(rs){return rs.n===s.n;});
+                if(!alreadyInR) od.restaurantSuggestions.push({id:s.id,type:'restaurant',n:s.n,
+                  st:s.st||s.n,note:s.note||null,lat:s.lat||null,lng:s.lng||null});
+              }
+            });
+            day.items=[];
+          }
+          // Non-overlapping days keep their items untouched
         });
       }
     });
