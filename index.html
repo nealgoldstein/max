@@ -86,6 +86,32 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .move-dialog-actions{display:flex;gap:8px;justify-content:flex-end;}
 .move-dialog-confirm{font-size:11px;padding:5px 14px;border:1px solid #e05050;border-radius:5px;background:#e05050;color:#fff;cursor:pointer;font-family:inherit;}
 .move-dialog-cancel{font-size:11px;padding:5px 10px;border:1px solid #ddd;border-radius:5px;background:#fff;color:#666;cursor:pointer;font-family:inherit;}
+/* Cancellation policy */
+.cancel-row{display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap;}
+.cancel-lbl{font-size:10px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;}
+.cancel-opts{display:flex;gap:4px;}
+.cancel-opt{font-size:10px;padding:3px 8px;border:1px solid #ddd;border-radius:4px;background:#fff;color:#666;cursor:pointer;font-family:inherit;}
+.cancel-opt:hover{border-color:#888;}
+.cancel-opt.selected{background:#111;color:#fff;border-color:#111;}
+.cancel-opt.selected.free{background:#2a7a4e;border-color:#2a7a4e;}
+.cancel-opt.selected.deadline{background:#d97706;border-color:#d97706;}
+.cancel-opt.selected.noncancel{background:#e05050;border-color:#e05050;}
+.cancel-date-inp{font-size:10px;padding:3px 6px;border:1px solid #ddd;border-radius:4px;font-family:inherit;display:none;}
+/* Tracker deadlines */
+.tk-deadlines{margin-bottom:16px;}
+.tk-deadline-item{display:flex;align-items:flex-start;gap:8px;padding:7px 0;border-bottom:1px solid #f5f5f5;}
+.tk-deadline-item:last-child{border-bottom:none;}
+.tk-deadline-date{font-size:10px;font-weight:700;color:#111;min-width:50px;flex-shrink:0;margin-top:1px;}
+.tk-deadline-date.urgent{color:#e05050;}
+.tk-deadline-date.soon{color:#d97706;}
+.tk-deadline-body{flex:1;min-width:0;}
+.tk-deadline-name{font-size:11px;font-weight:600;color:#111;}
+.tk-deadline-dest{font-size:10px;color:#aaa;}
+.tk-deadline-badge{font-size:9px;padding:1px 6px;border-radius:3px;font-weight:600;letter-spacing:.03em;}
+.tk-deadline-badge.noncancel{background:#fff0f0;color:#e05050;border:1px solid #f8c8c8;}
+/* Deadline alert banner */
+#deadline-alert{display:none;background:#fff8f0;border-bottom:2px solid #f0dcc0;padding:8px 14px;font-size:11px;color:#b05820;cursor:pointer;flex-shrink:0;}
+#deadline-alert strong{color:#b05820;}
 /* Action log */
 #action-log{position:fixed;bottom:20px;right:20px;z-index:2000;background:#fff;border:1px solid #ddd;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.18);width:320px;max-height:400px;display:none;flex-direction:column;}
 .action-log-hdr{display:flex;align-items:center;justify-content:space-between;padding:10px 14px 8px;border-bottom:1px solid #f0f0f0;flex-shrink:0;}
@@ -609,6 +635,7 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 </div>
 
 <div class="app" id="app">
+    <div id="deadline-alert"></div>
 
   <!-- LEFT PANEL -->
   <div class="lp" id="lp">
@@ -1548,6 +1575,7 @@ function enterApp(){
     initMainMap();
     if(activeDest) drawDestMode(activeDest);
     else { _leftMode="trip"; drawTripMode(); updateMainMap(); }
+    checkDeadlineAlert();
   },50);
 }
 
@@ -2410,6 +2438,30 @@ function mkField(labelText,inputEl){
   w.appendChild(l); w.appendChild(inputEl); return w;
 }
 
+function mkCancelField(formId){
+  var wrap=document.createElement('div'); wrap.className='cancel-row';
+  var lbl=document.createElement('span'); lbl.className='cancel-lbl'; lbl.textContent='Cancellation:';
+  var optsDiv=document.createElement('div'); optsDiv.className='cancel-opts';
+  var dateInp=document.createElement('input'); dateInp.type='date'; dateInp.className='cancel-date-inp'; dateInp.id=formId+'-cancel-date';
+  var selected='free';
+  [{val:'free',lbl:'Free'},{val:'deadline',lbl:'Deadline'},{val:'non-cancellable',lbl:'Non-cancellable'}].forEach(function(o){
+    var btn=document.createElement('button'); btn.className='cancel-opt '+o.val.replace(/-/g,'');
+    btn.textContent=o.lbl; btn.type='button';
+    if(o.val==='free') btn.classList.add('selected');
+    btn.onclick=function(e){
+      e.preventDefault(); e.stopPropagation();
+      selected=o.val;
+      optsDiv.querySelectorAll('.cancel-opt').forEach(function(b){b.classList.remove('selected');});
+      btn.classList.add('selected');
+      dateInp.style.display=o.val==='deadline'?'inline-block':'none';
+    };
+    optsDiv.appendChild(btn);
+  });
+  wrap.appendChild(lbl); wrap.appendChild(optsDiv); wrap.appendChild(dateInp);
+  wrap.getCancelPolicy=function(){return {type:selected,deadline:selected==='deadline'?(dateInp.value||null):null};};
+  return wrap;
+}
+
 function mkCurrSel(id,val){
   var sel=document.createElement("select"); sel.className="bk-inp"; sel.id=id;
   ["EUR","USD","CHF","GBP","CZK","HUF"].forEach(function(c){
@@ -2436,15 +2488,17 @@ function toggleTransportForm(btn,container,formId,opts){
   var notesInp=document.createElement("input"); notesInp.type="text"; notesInp.className="bk-inp"; notesInp.placeholder="Seat, platform, baggage\u2026";
   r2.appendChild(mkField("Price paid",priceInp)); r2.appendChild(mkField("Currency",currSel)); r2.appendChild(mkField("Notes",notesInp));
   form.appendChild(r1); form.appendChild(r2);
+  var cancelFieldT=mkCancelField(formId+"-tc"); form.appendChild(cancelFieldT);
   var acts=document.createElement("div"); acts.className="bk-form-actions";
   var sv=document.createElement("button"); sv.className="bk-save-btn"; sv.textContent="Save booking";
   var cx=document.createElement("button"); cx.className="bk-dismiss-btn"; cx.textContent="Cancel";
   cx.onclick=function(){form.parentNode.removeChild(form);btn.classList.remove("active");btn.textContent="Log booking";};
   sv.onclick=function(){
+    var cp=cancelFieldT.getCancelPolicy();
     var bk={id:newBkId(),mode:opts.mode,operator:opts.operator,from:opts.from,to:opts.to,
       departure:dateInp.value,departureTime:timeInp.value,confirmationNumber:confInp.value,
       pricePaid:parseFloat(priceInp.value)||null,currency:currSel.value,notes:notesInp.value,
-      status:"booked",source:"manual"};
+      status:"booked",source:"manual",cancelType:cp.type,cancelDeadline:cp.deadline};
     getLeg(opts.fromId,opts.toId).bookings.push(bk);
     form.parentNode.removeChild(form);
     btn.classList.remove("active"); btn.textContent="Log booking";
@@ -2500,17 +2554,20 @@ function toggleHotelForm(btn,container,formId,opts,onSaved){
   var notesInp=document.createElement("input"); notesInp.type="text"; notesInp.className="bk-inp"; notesInp.placeholder="Room notes, access code\u2026";
   r2.appendChild(mkField("Total paid",priceInp)); r2.appendChild(mkField("Currency",currSel)); r2.appendChild(mkField("Notes",notesInp));
   form.appendChild(r1); form.appendChild(r2);
+  var cancelFieldH=mkCancelField(formId+"-hc"); form.appendChild(cancelFieldH);
   var acts=document.createElement("div"); acts.className="bk-form-actions";
   var sv=document.createElement("button"); sv.className="bk-save-btn"; sv.textContent="Save booking";
   var cx=document.createElement("button"); cx.className="bk-dismiss-btn"; cx.textContent="Cancel";
   cx.onclick=function(){form.parentNode.removeChild(form);btn.classList.remove("active");btn.textContent="Log booking";};
   sv.onclick=function(){
+    var cp=cancelFieldH.getCancelPolicy();
     var hotelCoords=null;
     var allDists=getDistricts(opts.destId?getDest(opts.destId).place:"",opts.destId?getDest(opts.destId).intent:"");
     allDists.forEach(function(d){d.hotels.forEach(function(h){if(h.name===opts.hotelName&&h.lat){hotelCoords={lat:h.lat,lng:h.lng};}});});
     var bk={id:newBkId(),name:opts.hotelName,area:opts.area,checkIn:ciInp.value,checkOut:coInp.value,
       confirmationNumber:confInp.value,pricePaid:parseFloat(priceInp.value)||null,currency:currSel.value,
       notes:notesInp.value,status:"booked",source:"manual",
+      cancelType:cp.type,cancelDeadline:cp.deadline,
       lat:hotelCoords?hotelCoords.lat:null,lng:hotelCoords?hotelCoords.lng:null};
     var dest=getDest(opts.destId); if(dest){
       dest.hotelBookings.push(bk);
@@ -5057,9 +5114,89 @@ function doAI(dayId,destId,type,slot){
   autoSave(); drawDestMode(destId);
 }
 
+function collectDeadlines(dest){
+  // Gather all bookings with cancelType='deadline' from this destination
+  var list=[];
+  var dName=dest.label||dest.place;
+  // Hotel bookings
+  (dest.hotelBookings||[]).forEach(function(b){
+    if(b.cancelDeadline&&b.status==='booked')
+      list.push({deadline:b.cancelDeadline,name:b.name,type:'Hotel',destName:dName,id:b.id});
+  });
+  // General bookings
+  (dest.generalBookings||[]).forEach(function(b){
+    if(b.cancelDeadline&&b.status==='booked')
+      list.push({deadline:b.cancelDeadline,name:b.label||b.type,type:'Activity',destName:dName,id:b.id});
+  });
+  // Transport legs involving this destination
+  Object.keys(trip.legs||{}).forEach(function(k){
+    var parts=k.split('-');
+    if(parts.length===2&&(parts[0]===dest.id||parts[1]===dest.id)){
+      (trip.legs[k].bookings||[]).forEach(function(b){
+        if(b.cancelDeadline&&b.status==='booked'){
+          var label=b.operator||'Transport';
+          list.push({deadline:b.cancelDeadline,name:label,type:'Transport',destName:dName,id:b.id});
+        }
+      });
+    }
+  });
+  // Sort by deadline date
+  list.sort(function(a,b){return a.deadline<b.deadline?-1:a.deadline>b.deadline?1:0;});
+  return list;
+}
+
+function collectAllDeadlines(){
+  var all=[];
+  (trip.destinations||[]).forEach(function(d){all=all.concat(collectDeadlines(d));});
+  all.sort(function(a,b){return a.deadline<b.deadline?-1:a.deadline>b.deadline?1:0;});
+  return all;
+}
+
+function checkDeadlineAlert(){
+  var all=collectAllDeadlines();
+  var today=new Date(); today.setHours(0,0,0,0);
+  var tomorrow=new Date(today); tomorrow.setDate(today.getDate()+1);
+  var tomorrowStr=tomorrow.toISOString().slice(0,10);
+  var urgent=all.filter(function(d){return d.deadline===tomorrowStr;});
+  var alert=document.getElementById('deadline-alert');
+  if(!alert) return;
+  if(urgent.length>0){
+    alert.innerHTML='\u26a0\ufe0f <strong>Cancellation deadline tomorrow:</strong> '+
+      urgent.map(function(d){return d.name+' ('+d.destName+')';}).join(', ')+
+      ' \u2014 <span style="text-decoration:underline;cursor:pointer;" onclick="setLeftMode(\'dest\');_activeDmSection=\'tracker\';">view in Tracker</span>';
+    alert.style.display='flex';
+  } else {
+    alert.style.display='none';
+  }
+}
+
 // ── Tracker ────────────────────────────────────────────────
 function mkTrackerInner(dest){
   var wrap=document.createElement("div");
+
+  // ── Cancellation Deadlines section ─────────────────────────
+  var deadlines=collectDeadlines(dest);
+  if(deadlines.length>0){
+    var dlSec=document.createElement("div"); dlSec.className="tk-section tk-deadlines";
+    var dlLbl=document.createElement("div"); dlLbl.className="tk-section-lbl"; dlLbl.textContent="Cancellation deadlines";
+    dlSec.appendChild(dlLbl);
+    var today=new Date(); today.setHours(0,0,0,0);
+    var in7=new Date(today); in7.setDate(today.getDate()+7);
+    deadlines.forEach(function(d){
+      var row=document.createElement("div"); row.className="tk-deadline-item";
+      var deadDate=new Date(d.deadline+'T12:00:00');
+      var isUrgent=deadDate<=today;
+      var isSoon=!isUrgent&&deadDate<=in7;
+      var dateLbl=document.createElement("div"); dateLbl.className="tk-deadline-date"+(isUrgent?' urgent':isSoon?' soon':'');
+      dateLbl.textContent=isUrgent?'PAST':fmtD(d.deadline);
+      var body=document.createElement("div"); body.className="tk-deadline-body";
+      var name=document.createElement("div"); name.className="tk-deadline-name"; name.textContent=d.name;
+      var destLbl=document.createElement("div"); destLbl.className="tk-deadline-dest"; destLbl.textContent=d.destName+' \u00b7 '+d.type;
+      body.appendChild(name); body.appendChild(destLbl);
+      row.appendChild(dateLbl); row.appendChild(body); dlSec.appendChild(row);
+    });
+    wrap.appendChild(dlSec);
+  }
 
   // Spend total (when tracking enabled)
   if(trip.trackSpending){
@@ -5253,15 +5390,17 @@ function toggleGeneralForm(btn,container,formId,destId){
   var notesInp=document.createElement("input"); notesInp.type="text"; notesInp.className="bk-inp"; notesInp.placeholder="Notes\u2026";
   r3.appendChild(mkField("Price paid",priceInp)); r3.appendChild(mkField("Currency",currSel)); r3.appendChild(mkField("Notes",notesInp));
   form.appendChild(r1); form.appendChild(r2); form.appendChild(r3);
+  var cancelFieldG=mkCancelField(formId+"-gc"); form.appendChild(cancelFieldG);
   var acts=document.createElement("div"); acts.className="bk-form-actions";
   var sv=document.createElement("button"); sv.className="bk-save-btn"; sv.textContent="Save booking";
   var cx=document.createElement("button"); cx.className="bk-dismiss-btn"; cx.textContent="Cancel";
   cx.onclick=function(){form.parentNode.removeChild(form);btn.classList.remove("active");btn.textContent="+ Log booking";};
   sv.onclick=function(){
     if(!labelInp.value.trim())return;
+    var cp=cancelFieldG.getCancelPolicy();
     var bk={id:newBkId(),type:typeSel.value,label:labelInp.value.trim(),date:dateInp.value,time:timeInp.value,
       confirmationNumber:confInp.value,pricePaid:parseFloat(priceInp.value)||null,currency:currSel.value,
-      notes:notesInp.value,status:"booked",source:"manual"};
+      notes:notesInp.value,status:"booked",source:"manual",cancelType:cp.type,cancelDeadline:cp.deadline};
     var dest=getDest(destId); if(!dest)return;
     dest.generalBookings.push(bk);
     form.parentNode.removeChild(form);
