@@ -983,14 +983,20 @@ var MAP_ICONS = {
       +'</svg>';
   },
   "stay": function(){
-    // Rounded square, black, bed symbol
+    // Rounded square, dark gray, bed symbol — unbooked suggestion
     return '<svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg">'
-      +'<rect x="1" y="1" width="26" height="26" rx="6" fill="#111" stroke="#fff" stroke-width="2"/>'
-      // bed: base platform
+      +'<rect x="1" y="1" width="26" height="26" rx="6" fill="#888" stroke="#fff" stroke-width="2"/>'
       +'<rect x="5" y="17" width="18" height="3" rx="1" fill="#fff"/>'
-      // headboard
       +'<rect x="5" y="12" width="4" height="6" rx="1" fill="#fff"/>'
-      // mattress
+      +'<rect x="9" y="14" width="14" height="4" rx="1" fill="#fff"/>'
+      +'</svg>';
+  },
+  "stay-booked": function(){
+    // Rounded square, deep green, bed symbol — confirmed booking
+    return '<svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg">'
+      +'<rect x="1" y="1" width="26" height="26" rx="6" fill="#1a6b3a" stroke="#fff" stroke-width="2"/>'
+      +'<rect x="5" y="17" width="18" height="3" rx="1" fill="#fff"/>'
+      +'<rect x="5" y="12" width="4" height="6" rx="1" fill="#fff"/>'
       +'<rect x="9" y="14" width="14" height="4" rx="1" fill="#fff"/>'
       +'</svg>';
   },
@@ -2957,27 +2963,25 @@ function updateMainMapMarkers(){
       var iconKey=s.type==='restaurant'?'restaurant':(s.p==='must'?'sight-must':'sight-nice');
       addPin(coords,makeMapIcon(iconKey),s.done?0.4:1,s,s.type==='restaurant'?'restaurant':'sight');
     });
-    // Hotels in execution mode — always show booked, suggestions gated by layer
+    // Hotels in execution mode — all always shown; booked green, unbooked gray
     var _execDistHotels=[];
     var _execDistData=getDistricts(dest.place,dest.intent,dest);
     _execDistData.forEach(function(dist){(dist.hotels||[]).forEach(function(h){_execDistHotels.push({name:h.name,distName:dist.name,lat:h.lat||null,lng:h.lng||null});});});
     var bh=dest.hotelBookings&&dest.hotelBookings.find(function(b){return b.status==='booked';});
     var bhName=bh?bh.name:null;
-    if(_mainActiveLayers['stay']){
-      _execDistHotels.forEach(function(h){
-        if(h.name===bhName) return;
-        var hc=getCityCenter(dest.place);
-        var c=h.lat&&h.lng?[h.lat,h.lng]:(hc?[hc[0]+stableOffset(h.name)[0],hc[1]+stableOffset(h.name)[1]]:null);
-        if(!c) return;
-        var hp=L.marker(c,{icon:makeMapIcon('stay'),opacity:0.3}); hp.addTo(_mainMap);_mainMarkers.push(hp);
-      });
-    }
+    _execDistHotels.forEach(function(h){
+      if(h.name===bhName) return;
+      var hc=getCityCenter(dest.place);
+      var c=h.lat&&h.lng?[h.lat,h.lng]:(hc?[hc[0]+stableOffset(h.name)[0],hc[1]+stableOffset(h.name)[1]]:null);
+      if(!c) return;
+      var hp=L.marker(c,{icon:makeMapIcon('stay'),opacity:0.55}); hp.addTo(_mainMap);_mainMarkers.push(hp);
+    });
     if(bh){
       var hcE=getCityCenter(dest.place);
       var dmE=_execDistHotels.find(function(h){return h.name===bh.name;});
       var bhC=bh.lat&&bh.lng?[bh.lat,bh.lng]:(dmE&&dmE.lat?[dmE.lat,dmE.lng]:(hcE?[hcE[0]+stableOffset(bh.name)[0],hcE[1]+stableOffset(bh.name)[1]]:null));
       if(bhC){
-        var bhM=L.marker(bhC,{icon:makeMapIcon('stay'),opacity:1});
+        var bhM=L.marker(bhC,{icon:makeMapIcon('stay-booked'),opacity:1});
         (function(name){bhM.on('click',function(e){if(L.DomEvent)L.DomEvent.stopPropagation(e);showMapPinPanel({id:'hotel-'+name,n:name,note:'✓ Booked',done:false,slot:'day'},dest,'hotel');});})(bh.name);
         bhM.addTo(_mainMap);_mainMarkers.push(bhM);
       }
@@ -3037,32 +3041,30 @@ function updateMainMapMarkers(){
   var bookedH=dest.hotelBookings&&dest.hotelBookings.find(function(b){return b.status==='booked';});
   var bookedName=bookedH?bookedH.name:null;
 
-  // Unbooked suggestions — gated by layer toggle
-  if(_mainActiveLayers['stay']){
-    _allDistHotels.forEach(function(h){
-      if(h.name===bookedName) return; // skip — rendered separately at full opacity
-      var hc3=getCityCenter(dest.place);
-      var hcoords3=h.lat&&h.lng?[h.lat,h.lng]:(hc3?[hc3[0]+stableOffset(h.name)[0],hc3[1]+stableOffset(h.name)[1]]:null);
-      if(!hcoords3) return;
-      var hpin=L.marker(hcoords3,{icon:makeMapIcon('stay'),opacity:0.3});
-      (function(name,distName){hpin.on('click',function(e){
-        if(L.DomEvent)L.DomEvent.stopPropagation(e);
-        showMapPinPanel({id:'hotel-s-'+name,n:name,note:distName,done:false,slot:'day'},dest,'info',e);
-      });})(h.name,h.distName);
-      hpin.addTo(_mainMap);_mainMarkers.push(hpin);
-    });
-  }
+  // All district hotels — always shown regardless of layer toggle
+  // Unbooked: gray at 0.6 opacity; Booked: green at full opacity
+  _allDistHotels.forEach(function(h){
+    if(h.name===bookedName) return; // skip — rendered separately below
+    var hc3=getCityCenter(dest.place);
+    var hcoords3=h.lat&&h.lng?[h.lat,h.lng]:(hc3?[hc3[0]+stableOffset(h.name)[0],hc3[1]+stableOffset(h.name)[1]]:null);
+    if(!hcoords3) return;
+    var hpin=L.marker(hcoords3,{icon:makeMapIcon('stay'),opacity:0.55});
+    (function(name,distName){hpin.on('click',function(e){
+      if(L.DomEvent)L.DomEvent.stopPropagation(e);
+      showMapPinPanel({id:'hotel-s-'+name,n:name,note:distName,done:false,slot:'day'},dest,'info',e);
+    });})(h.name,h.distName);
+    hpin.addTo(_mainMap);_mainMarkers.push(hpin);
+  });
 
-  // Booked hotel — ALWAYS shown, regardless of layer toggle
+  // Booked hotel — always shown, green icon
   if(bookedH){
     var hc2=getCityCenter(dest.place);
-    // Try to find coords from district data first (more precise than stored coords)
     var _distMatch=_allDistHotels.find(function(h){return h.name===bookedH.name;});
     var hcoords2=bookedH.lat&&bookedH.lng?[bookedH.lat,bookedH.lng]:
       (_distMatch&&_distMatch.lat?[_distMatch.lat,_distMatch.lng]:
       (hc2?[hc2[0]+stableOffset(bookedH.name)[0],hc2[1]+stableOffset(bookedH.name)[1]]:null));
     if(hcoords2){
-      var hm2=L.marker(hcoords2,{icon:makeMapIcon('stay'),opacity:1});
+      var hm2=L.marker(hcoords2,{icon:makeMapIcon('stay-booked'),opacity:1});
       (function(bk){hm2.on('click',function(e){
         if(L.DomEvent)L.DomEvent.stopPropagation(e);
         showMapPinPanel({id:'hotel-'+bk.name,n:bk.name,note:'✓ Booked · Check-in '+fmtD(bk.checkIn)+(bk.confirmationNumber?' · Conf: '+bk.confirmationNumber:''),done:false,slot:'day'},dest,'hotel');
