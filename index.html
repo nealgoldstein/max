@@ -2268,36 +2268,58 @@ function computeDateChangeImpact(dest,newFrom,newTo){
     });
   }
 
-  // 4. Next destination overlap — ONLY possible when extending (new end date later)
-  // Leaving early moves end date back, so next destination cannot overlap
-  if(extending&&destIdx<trip.destinations.length-1){
+  // 4. Overlap detection — check both directions
+
+  // Next destination overlap (end date extends later)
+  if(newTo>dest.dateTo&&destIdx<trip.destinations.length-1){
     var nd=trip.destinations[destIdx+1];
     if(newTo>=nd.dateFrom){
       var overlapDays=Math.ceil((new Date(newTo+'T12:00:00')-new Date(nd.dateFrom+'T12:00:00'))/86400000)+1;
-      var hasBookings=(nd.hotelBookings&&nd.hotelBookings.some(function(b){return b.status==='booked';}))
-        ||(nd.generalBookings&&nd.generalBookings.length>0)
-        ||Object.keys(trip.legs||{}).some(function(k){return k.indexOf(nd.id)>-1&&trip.legs[k].bookings&&trip.legs[k].bookings.length>0;});
-      if(hasBookings){
-        var ovBookings=[];
-        (nd.hotelBookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
-          ovBookings.push({type:'Hotel',name:b.name,detail:'Conf: '+(b.confirmationNumber||'see booking'),keepInApp:false});
-        });
-        (nd.generalBookings||[]).forEach(function(b){
-          ovBookings.push({type:'Reservation',name:b.name||b.type||'Booking',detail:b.date?'Booked for '+fmtD(b.date):'',keepInApp:false});
-        });
-        Object.keys(trip.legs||{}).forEach(function(k){
-          if(k.indexOf(nd.id)>-1){
-            (trip.legs[k].bookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
-              ovBookings.push({type:'Transport',name:b.operator||'Transport',detail:b.departure?'Departs '+fmtD(b.departure):'',keepInApp:false});
-            });
-          }
-        });
-        affected.overlapping.push({dest:nd.label||nd.place,id:nd.id,
-          detail:'Your extension overlaps '+nd.place+' by '+overlapDays+' day'+(overlapDays!==1?'s':''),
-          bookings:ovBookings});
-      }
+      var ovBookings=[];
+      (nd.hotelBookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
+        ovBookings.push({type:'Hotel',name:b.name,detail:'Conf: '+(b.confirmationNumber||'see booking'),keepInApp:false});
+      });
+      (nd.generalBookings||[]).forEach(function(b){
+        ovBookings.push({type:'Reservation',name:b.name||b.type||'Booking',detail:b.date?'Booked for '+fmtD(b.date):'',keepInApp:false});
+      });
+      Object.keys(trip.legs||{}).forEach(function(k){
+        if(k.indexOf(nd.id)>-1){
+          (trip.legs[k].bookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
+            ovBookings.push({type:'Transport',name:b.operator||'Transport',detail:b.departure?'Departs '+fmtD(b.departure):'',keepInApp:false});
+          });
+        }
+      });
+      affected.overlapping.push({dest:nd.label||nd.place,id:nd.id,
+        detail:'New end date overlaps '+nd.place+' by '+overlapDays+' day'+(overlapDays!==1?'s':''),
+        bookings:ovBookings});
     }
   }
+
+  // Previous destination overlap (start date moves earlier)
+  if(newFrom<dest.dateFrom&&destIdx>0){
+    var pd=trip.destinations[destIdx-1];
+    if(pd.dateTo>=newFrom){
+      var pdOverlapDays=Math.ceil((new Date(pd.dateTo+'T12:00:00')-new Date(newFrom+'T12:00:00'))/86400000)+1;
+      var pdBookings=[];
+      (pd.hotelBookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
+        pdBookings.push({type:'Hotel',name:b.name,detail:'Conf: '+(b.confirmationNumber||'see booking'),keepInApp:false});
+      });
+      (pd.generalBookings||[]).forEach(function(b){
+        pdBookings.push({type:'Reservation',name:b.name||b.type||'Booking',detail:b.date?'Booked for '+fmtD(b.date):'',keepInApp:false});
+      });
+      Object.keys(trip.legs||{}).forEach(function(k){
+        if(k.indexOf(pd.id)>-1){
+          (trip.legs[k].bookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
+            pdBookings.push({type:'Transport',name:b.operator||'Transport',detail:b.departure?'Departs '+fmtD(b.departure):'',keepInApp:false});
+          });
+        }
+      });
+      affected.overlapping.push({dest:pd.label||pd.place,id:pd.id,
+        detail:'New start date overlaps '+pd.place+' by '+pdOverlapDays+' day'+(pdOverlapDays!==1?'s':''),
+        bookings:pdBookings});
+    }
+  }
+
   return affected;
 }
 
