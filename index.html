@@ -2892,7 +2892,6 @@ function initMainMap(){
   }).addTo(_mainMap);
   // Ensure map fills container correctly after layout settles
   setTimeout(function(){if(_mainMap)_mainMap.invalidateSize();},100);
-  setTimeout(function(){if(_mainMap)_mainMap.invalidateSize();},500);
   window.addEventListener("resize",function(){if(_mainMap)_mainMap.invalidateSize();});
 }
 
@@ -3163,22 +3162,21 @@ function updateMainMap(){
     }
     _mainMap.setView(center,13);
     updateMainMapMarkers();
-    // Only fitBounds if at least some markers have real geocoded coords (not all approx)
+    // fitBounds once after markers are placed — only if we have real coords
     setTimeout(function(){
       if(!_mainMap||!_mainMarkers.length)return;
       var dest=getDest(activeDest); if(!dest)return;
-      // Always fitBounds once we have coords (real or approx)
-      var hasAnyCoords=(dest.suggestions||[]).some(function(s){return s.lat;});
-      if(!hasAnyCoords) return;
+      var hasRealCoords=(dest.suggestions||[]).some(function(s){return s.lat&&!s.approx;});
+      if(!hasRealCoords) return;
       try{
         var pts=[];
         _mainMarkers.forEach(function(m){try{var ll=m.getLatLng();if(ll)pts.push(ll);}catch(e){}});
         if(pts.length>1){
           var b=L.latLngBounds(pts);
-          if(b.isValid())_mainMap.fitBounds(b,{padding:[40,40],maxZoom:14});
+          if(b.isValid())_mainMap.fitBounds(b,{padding:[40,40],maxZoom:14,animate:false});
         }
       }catch(e){}
-    },200);
+    },50);
   }
 }
 
