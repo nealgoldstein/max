@@ -3626,9 +3626,17 @@ function drawTripMode(){
   var fi2=document.createElement("input"); fi2.type="date"; fi2.className="tm-date-inp"; fi2.id="dest-from-vis";
   fi2.onchange=function(){
     g("dest-from").value=this.value; onFromChange(); syncAddVis();
-    // Update departure min to arrival date so calendar opens there
     ti2.min=this.value;
-    if(ti2.value&&ti2.value<this.value) ti2.value="";
+    // Pre-fill departure with arrival + reasonable default nights
+    // so the date picker opens at (or near) the arrival date
+    if(!ti2.value||ti2.value<this.value){
+      var arr=new Date(this.value+'T12:00:00');
+      var defaultNights=trip.destinations.length>0?(trip.destinations[trip.destinations.length-1].nights||3):3;
+      arr.setDate(arr.getDate()+defaultNights);
+      ti2.value=arr.toISOString().slice(0,10);
+      g("dest-to").value=ti2.value;
+      syncAddVis();
+    }
   };
   fc.appendChild(fl); fc.appendChild(fi2);
   var tc=document.createElement("div"); tc.className="tm-date-col";
