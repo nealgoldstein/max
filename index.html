@@ -2299,58 +2299,103 @@ function showDateChangeDialog(dest,newFrom,newTo,affected,onConfirm){
   var overlay=document.createElement('div'); overlay.className='move-dialog-overlay';
   var dlg=document.createElement('div'); dlg.className='move-dialog';
 
-  var title=document.createElement('div'); title.className='move-dialog-title';
-  title.textContent='Update dates for '+(dest.label||dest.place);
-  dlg.appendChild(title);
-
-  // List affected bookings
-  if(affected.bookings.length>0){
-    var secLbl=document.createElement('div'); secLbl.className='move-dialog-label'; secLbl.textContent='Bookings that will be cancelled:';
-    dlg.appendChild(secLbl);
-    var list=document.createElement('div'); list.style.cssText='margin-bottom:10px;';
-    affected.bookings.forEach(function(b){
-      var row=document.createElement('div'); row.style.cssText='font-size:11px;padding:4px 8px;background:#fff8f0;border:1px solid #f0dcc0;border-radius:4px;margin-bottom:3px;';
-      row.innerHTML='<strong>'+b.type+'</strong>: '+b.name+' <span style="color:#999;">('+b.detail+')</span>'+(b.keepInApp?' <span style="color:#2a7a4e;font-size:10px;">kept in app</span>':' <span style="color:#b05820;font-size:10px;">will be removed</span>');
-      list.appendChild(row);
-    });
-    dlg.appendChild(list);
+  // Helper: build the booking rows section (shared between phase 1 and phase 2)
+  function buildBookingRows(container){
+    // Own-destination bookings
+    if(affected.bookings.length>0){
+      var secLbl=document.createElement('div'); secLbl.className='move-dialog-label';
+      secLbl.textContent='Your bookings for '+(dest.label||dest.place)+':';
+      container.appendChild(secLbl);
+      var list=document.createElement('div'); list.style.cssText='margin-bottom:10px;';
+      affected.bookings.forEach(function(b){
+        var row=document.createElement('div'); row.style.cssText='font-size:11px;padding:4px 8px;background:#fff8f0;border:1px solid #f0dcc0;border-radius:4px;margin-bottom:3px;';
+        row.innerHTML='<strong>'+b.type+'</strong>: '+b.name+' <span style="color:#999;">('+b.detail+')</span>'
+          +(b.keepInApp
+            ?'<span style="margin-left:6px;color:#2a7a4e;font-size:10px;">kept in app — contact provider to adjust</span>'
+            :'<span style="margin-left:6px;color:#b05820;font-size:10px;">removed from Max</span>');
+        list.appendChild(row);
+      });
+      container.appendChild(list);
+    }
+    // Overlapping destination bookings
+    if(affected.overlapping.length>0){
+      var ovLbl=document.createElement('div'); ovLbl.className='move-dialog-label';
+      ovLbl.textContent='Bookings removed from overlapping destinations:';
+      container.appendChild(ovLbl);
+      var ovList=document.createElement('div'); ovList.style.cssText='margin-bottom:10px;';
+      affected.overlapping.forEach(function(d){
+        var destHdr=document.createElement('div');
+        destHdr.style.cssText='font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#b05820;margin:6px 0 3px;';
+        destHdr.textContent=d.dest+' — '+d.detail;
+        ovList.appendChild(destHdr);
+        if(d.bookings&&d.bookings.length>0){
+          d.bookings.forEach(function(b){
+            var row=document.createElement('div'); row.style.cssText='font-size:11px;padding:4px 8px;background:#fff8f0;border:1px solid #f0dcc0;border-radius:4px;margin-bottom:3px;';
+            row.innerHTML='<strong>'+b.type+'</strong>: '+b.name+(b.detail?' <span style="color:#999;">('+b.detail+')</span>':'')
+              +'<span style="margin-left:6px;color:#b05820;font-size:10px;">removed from Max</span>';
+            ovList.appendChild(row);
+          });
+        } else {
+          var none=document.createElement('div'); none.style.cssText='font-size:11px;color:#aaa;padding:2px 8px;';
+          none.textContent='No logged bookings — itinerary items in overlapping days returned to pool';
+          ovList.appendChild(none);
+        }
+      });
+      container.appendChild(ovList);
+    }
   }
-  if(affected.overlapping.length>0){
-    var ovLbl=document.createElement('div'); ovLbl.className='move-dialog-label'; ovLbl.textContent='Bookings that will be cleared in overlapping destinations:';
-    dlg.appendChild(ovLbl);
-    var ovList=document.createElement('div'); ovList.style.cssText='margin-bottom:10px;';
-    affected.overlapping.forEach(function(d){
-      var destHdr=document.createElement('div');
-      destHdr.style.cssText='font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#b05820;margin:6px 0 3px;';
-      destHdr.textContent=d.dest+' — '+d.detail;
-      ovList.appendChild(destHdr);
-      if(d.bookings&&d.bookings.length>0){
-        d.bookings.forEach(function(b){
-          var row=document.createElement('div'); row.style.cssText='font-size:11px;padding:4px 8px;background:#fff8f0;border:1px solid #f0dcc0;border-radius:4px;margin-bottom:3px;';
-          row.innerHTML='<strong>'+b.type+'</strong>: '+b.name+(b.detail?' <span style="color:#999;">('+b.detail+')</span>':'')+' <span style="color:#b05820;font-size:10px;">will be removed</span>';
-          ovList.appendChild(row);
-        });
-      } else {
-        var none=document.createElement('div'); none.style.cssText='font-size:11px;color:#aaa;padding:2px 8px;';
-        none.textContent='No logged bookings — itinerary items in overlapping days returned to pool';
-        ovList.appendChild(none);
-      }
-    });
-    dlg.appendChild(ovList);
+
+  // ── Phase 1: confirm ──────────────────────────────────────
+  function showPhase1(){
+    dlg.innerHTML='';
+    var title=document.createElement('div'); title.className='move-dialog-title';
+    title.textContent='Update dates for '+(dest.label||dest.place);
+    dlg.appendChild(title);
+
+    var intro=document.createElement('div'); intro.className='move-dialog-warn';
+    intro.innerHTML='Removing items below from Max does <strong>not</strong> cancel them with providers. '
+      +'After updating, this dialog stays open so you can contact each provider to cancel or adjust.';
+    dlg.appendChild(intro);
+
+    buildBookingRows(dlg);
+
+    var acts=document.createElement('div'); acts.className='move-dialog-actions';
+    var backBtn=document.createElement('button'); backBtn.className='move-dialog-cancel'; backBtn.textContent='Go back';
+    backBtn.onclick=function(){document.body.removeChild(overlay);};
+    var confirmBtn=document.createElement('button'); confirmBtn.className='move-dialog-confirm';
+    confirmBtn.textContent='Update dates in Max';
+    confirmBtn.onclick=function(){
+      onConfirm();
+      showPhase2();
+    };
+    acts.appendChild(backBtn); acts.appendChild(confirmBtn);
+    dlg.appendChild(acts);
   }
 
-  // Cancellation reminder
-  var warn=document.createElement('div'); warn.className='move-dialog-warn';
-  warn.innerHTML='<strong>Important:</strong> Hotel reservations are kept in the app — you must contact the hotel directly to adjust. Other bookings (transport, restaurant reservations) will be removed from the plan. Scheduled sights and restaurants in affected destinations return to the Explore/Eat pool. Always check cancellation and refund policies before contacting providers.';
-  dlg.appendChild(warn);
+  // ── Phase 2: done — dialog stays open as cancellation reference ──
+  function showPhase2(){
+    dlg.innerHTML='';
+    var title=document.createElement('div'); title.className='move-dialog-title';
+    title.style.color='#2a7a4e';
+    title.textContent='✓ Dates updated in Max';
+    dlg.appendChild(title);
 
-  var acts=document.createElement('div'); acts.className='move-dialog-actions';
-  var cancelBtn=document.createElement('button'); cancelBtn.className='move-dialog-cancel'; cancelBtn.textContent='Go back';
-  cancelBtn.onclick=function(){document.body.removeChild(overlay);};
-  var confirmBtn=document.createElement('button'); confirmBtn.className='move-dialog-confirm'; confirmBtn.textContent='Update dates & cancel bookings';
-  confirmBtn.onclick=function(){document.body.removeChild(overlay);onConfirm();};
-  acts.appendChild(cancelBtn); acts.appendChild(confirmBtn);
-  dlg.appendChild(acts);
+    var notice=document.createElement('div'); notice.className='move-dialog-warn';
+    notice.innerHTML='<strong>Max has been updated.</strong> The bookings below have been removed from Max — '
+      +'but you still need to contact each provider directly to cancel or adjust. '
+      +'Keep this open while you make your calls.';
+    dlg.appendChild(notice);
+
+    buildBookingRows(dlg);
+
+    var acts=document.createElement('div'); acts.className='move-dialog-actions';
+    var doneBtn=document.createElement('button'); doneBtn.className='move-dialog-confirm'; doneBtn.textContent='Done — all cancelled';
+    doneBtn.onclick=function(){document.body.removeChild(overlay);};
+    acts.appendChild(doneBtn);
+    dlg.appendChild(acts);
+  }
+
+  showPhase1();
   overlay.appendChild(dlg);
   overlay.onclick=function(e){if(e.target===overlay)document.body.removeChild(overlay);};
   document.body.appendChild(overlay);
