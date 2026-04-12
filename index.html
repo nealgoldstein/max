@@ -769,7 +769,8 @@ async function callMax(messages, maxTokens) {
   }
   var resp, data;
   try {
-    resp = await fetch("https://api.anthropic.com/v1/messages", {
+    var fetchTimeout=new Promise(function(_,reject){setTimeout(function(){reject(new Error('API timeout'));},25000);});
+    resp = await Promise.race([fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: headers,
       body: JSON.stringify({
@@ -778,7 +779,7 @@ async function callMax(messages, maxTokens) {
         system: MAX_SYSTEM,
         messages: messages
       })
-    });
+    }), fetchTimeout]);
     data = await resp.json();
   } catch(fetchErr) {
     if (!_apiKey && !_inIframe) {
@@ -1909,7 +1910,9 @@ async function generateCityData(place,destId){
   var prompt='Generate travel data for '+place+'. Return ONLY valid JSON, no markdown:\n{"cityCenter":[lat,lng],"sights":[{"name":"...","st":"...","desc":"one sentence"}],"districts":[{"name":"...","good":"...","bad":"...","hotels":[{"name":"...","desc":"...","price":"...","tier":2}]}],"practicalInfo":{"currency":"...","tipping":"...","note":"...","emergency":"..."},"transitHub":{"arrival":{"name":"...","lat":0,"lng":0},"departure":{"name":"...","lat":0,"lng":0}}}\n6-8 sights, 2 districts, 1-2 hotels each. Be concise.';
 
   try{
-    var text=await callMax([{role:'user',content:prompt}], 1500);
+    // Add 30 second timeout to generation
+    var genTimeout=new Promise(function(_,reject){setTimeout(function(){reject(new Error('Generation timed out after 30s'));},30000);});
+    var text=await Promise.race([callMax([{role:'user',content:prompt}], 1500), genTimeout]);
     var json=text.replace(/```json\s*/g,'').replace(/```\s*/g,'').trim();
     var s=json.indexOf('{'),e=json.lastIndexOf('}');
     if(s>-1&&e>-1)json=json.substring(s,e+1);
