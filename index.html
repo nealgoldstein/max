@@ -2896,73 +2896,127 @@ function updateMainMapMarkers(){
     m.addTo(_mainMap); _mainMarkers.push(m); return m;
   }
 
-  // ── EXECUTION MODE: show only selected day items ─────────
+  // Stable offset from name — same place always same jitter, no Math.random() churn
+  function stableOffset(name){
+    var h=0; for(var i=0;i<(name||"").length;i++){h=(h*31+name.charCodeAt(i))&0xFFFFFF;}
+    return [(((h&0xFF)/255)-.5)*.022, ((((h>>8)&0xFF)/255)-.5)*.028];
+  }
+  function getCoords(item,pool,fallback){
+    if(item.lat&&item.lng) return [item.lat,item.lng];
+    if(pool){var pm=pool.find(function(s){return s.n===item.n&&s.lat;});if(pm)return[pm.lat,pm.lng];}
+    if(fallback){var off=stableOffset(item.n||"");return[fallback[0]+off[0],fallback[1]+off[1]];}
+    return null;
+  }
+
+  var center=getCityCenter(dest.place);
+
+  // Build index of scheduled items for de-duplication
+  var scheduledSights={}, scheduledRests={};
+  dest.days.forEach(function(d){
+    (d.items||[]).forEach(function(s){
+      if(s.type==='sight') scheduledSights[s.n]=s;
+      else if(s.type==='restaurant') scheduledRests[s.n]=s;
+    });
+  });
+
+  // ── EXECUTION MODE ────────────────────────────────────────
   if(_mapExecMode){
     var execDay=dest.days.find(function(d){return d.id===_mapExecMode.dayId;});
     if(!execDay) return;
-    var center=getCityCenter(dest.place);
     (execDay.items||[]).forEach(function(s){
-      var sLat=null,sLng=null;
       var pool=s.type==='restaurant'?dest.restaurantSuggestions:dest.suggestions;
-      if(pool){var pm=pool.find(function(sg){return sg.n===s.n&&sg.lat;});if(pm){sLat=pm.lat;sLng=pm.lng;}}
-      if(!sLat&&dest.suggestions){var sm=dest.suggestions.find(function(sg){return sg.n===s.n&&sg.lat;});if(sm){sLat=sm.lat;sLng=sm.lng;}}
-      if(!sLat&&center){sLat=center[0]+(Math.random()-.5)*.018;sLng=center[1]+(Math.random()-.5)*.022;}
-      if(!sLat) return;
+      var coords=getCoords(s,pool,center);
+      if(!coords) return;
       var iconKey=s.type==='restaurant'?'restaurant':(s.p==='must'?'sight-must':'sight-nice');
-      addPin([sLat,sLng],makeMapIcon(iconKey),s.done?0.4:1,s,s.type==='restaurant'?'restaurant':'sight');
+      addPin(coords,makeMapIcon(iconKey),s.done?0.4:1,s,s.type==='restaurant'?'restaurant':'sight');
     });
-    // Hotel pin
-    var bh=dest.hotelBookings&&dest.hotelBookings.find(function(b){return b.status==='booked';});
-    if(bh&&bh.lat&&_mainActiveLayers['stay']){var hm=L.marker([bh.lat,bh.lng],{icon:makeMapIcon('stay'),opacity:1});
-      (function(name){hm.on('click',function(e){if(L.DomEvent)L.DomEvent.stopPropagation(e);showMapPinPanel({id:'hotel-'+name,n:name,note:'Your booked hotel',done:false,slot:'day'},getDest(activeDest),'hotel');});})(bh.name);
-      hm.addTo(_mainMap);_mainMarkers.push(hm);}
+    if(_mainActiveLayers['stay']){
+      var bh=dest.hotelBookings&&dest.hotelBookings.find(function(b){return b.status==='booked';});
+      if(bh){
+        var hc=getCityCenter(dest.place);
+        var hcoords=bh.lat&&bh.lng?[bh.lat,bh.lng]:(hc?[hc[0]+stableOffset(bh.name)[0],hc[1]+stableOffset(bh.name)[1]]:null);
+        if(hcoords){
+          var hm=L.marker(hcoords,{icon:makeMapIcon('stay'),opacity:1});
+          (function(name){hm.on('click',function(e){if(L.DomEvent)L.DomEvent.stopPropagation(e);showMapPinPanel({id:'hotel-'+name,n:name,note:'Your booked hotel',done:false,slot:'day'},dest,'hotel');});})(bh.name);
+          hm.addTo(_mainMap);_mainMarkers.push(hm);
+        }
+      }
+    }
     return;
   }
 
-  // ── PLANNING MODE: suggestions dimmed, scheduled full ────
+  // ── PLANNING MODE ─────────────────────────────────────────
+
+  // Unscheduled sights — dimmed blue suggestions (skip if scheduled, shown below)
   if(_mainActiveLayers["sight-nice"]){
     (dest.suggestions||[]).forEach(function(s){
       if(!s.lat||!s.lng) return;
-      // Show all pins — approx slightly more transparent, real coords fully opaque
-      var pinOpacity=s.approx?0.55:0.75;
-      addPin([s.lat,s.lng],makeMapIcon("suggestion"),pinOpacity,s,'suggestion');
+      if(scheduledSights[s.n]) return;
+      addPin([s.lat,s.lng],makeMapIcon("suggestion"),s.approx?0.45:0.65,s,'suggestion');
     });
   }
+
+  // Unscheduled restaurant suggestions — dimmed (skip if scheduled)
   if(_mainActiveLayers["restaurant"]){
-    var rc=getCityCenter(dest.place);
     (dest.restaurantSuggestions||[]).forEach(function(s){
-      var lat=s.lat||(rc?rc[0]+(Math.random()-.5)*.014:null);
-      var lng=s.lng||(rc?rc[1]+(Math.random()-.5)*.018:null);
-      if(!lat||!lng) return;
-      addPin([lat,lng],makeMapIcon("restaurant-dim"),0.65,s,'restaurant-suggestion');
+      if(scheduledRests[s.n]) return;
+      var coords=getCoords(s,null,center);
+      if(!coords) return;
+      addPin(coords,makeMapIcon("restaurant-dim"),0.55,s,'restaurant-suggestion');
     });
   }
-  // Scheduled items full opacity, interactive
+
+  // Scheduled sights — full opacity
+  Object.keys(scheduledSights).forEach(function(n){
+    var s=scheduledSights[n];
+    var layerKey=s.p==='must'?'sight-must':'sight-nice';
+    if(!_mainActiveLayers[layerKey]) return;
+    var coords=getCoords(s,dest.suggestions,center);
+    if(!coords) return;
+    addPin(coords,makeMapIcon(layerKey),s.done?0.4:1,s,'sight');
+  });
+
+  // Scheduled restaurants — full opacity
+  if(_mainActiveLayers['restaurant']){
+    Object.keys(scheduledRests).forEach(function(n){
+      var s=scheduledRests[n];
+      var coords=getCoords(s,dest.restaurantSuggestions,center);
+      if(!coords) return;
+      addPin(coords,makeMapIcon('restaurant'),s.done?0.4:1,s,'restaurant');
+    });
+  }
+
+  // Hotel
+  if(_mainActiveLayers['stay']){
+    var bookedH=dest.hotelBookings&&dest.hotelBookings.find(function(b){return b.status==='booked';});
+    if(bookedH){
+      var hc2=getCityCenter(dest.place);
+      var hcoords2=bookedH.lat&&bookedH.lng?[bookedH.lat,bookedH.lng]:(hc2?[hc2[0]+stableOffset(bookedH.name)[0],hc2[1]+stableOffset(bookedH.name)[1]]:null);
+      if(hcoords2){
+        var hm2=L.marker(hcoords2,{icon:makeMapIcon('stay'),opacity:1});
+        (function(bk){hm2.on('click',function(e){
+          if(L.DomEvent)L.DomEvent.stopPropagation(e);
+          showMapPinPanel({id:'hotel-'+bk.name,n:bk.name,note:'Check-in '+fmtD(bk.checkIn)+(bk.confirmationNumber?' \u00b7 Conf: '+bk.confirmationNumber:''),done:false,slot:'day'},dest,'hotel');
+        });})(bookedH);
+        hm2.addTo(_mainMap);_mainMarkers.push(hm2);
+      }
+    }
+  }
+
+  // Utility locations only (arrival, departure, ATM, grocery, transit, tourist-info)
   var locs=collectMapLocations(dest);
   locs.forEach(function(loc){
     if(!loc.lat||!loc.lng)return;
+    if(loc.type==='sight-must'||loc.type==='sight-nice'||loc.type==='restaurant'||loc.type==='stay') return;
     var layerKey=_locLayerKey(loc);
     if(!_mainActiveLayers[layerKey]) return;
     var icon=makeMapIcon(loc.type);
-    // Find the backing item for interactive panel
-    var matchedItem=null,matchedType=null;
-    if(loc.type==='sight-must'||loc.type==='sight-nice'){
-      dest.days.forEach(function(d){(d.items||[]).forEach(function(s){if(s.n===loc.name&&s.type==='sight'){matchedItem=s;matchedType='sight';}});});
-    } else if(loc.type==='restaurant'){
-      dest.days.forEach(function(d){(d.items||[]).forEach(function(s){if(s.n===loc.name&&s.type==='restaurant'){matchedItem=s;matchedType='restaurant';}});});
-    }
-    if(matchedItem){
-      addPin([loc.lat,loc.lng],icon,1,matchedItem,matchedType);
-    } else {
-      // Non-interactive utility markers (hotel, routing, transit etc)
-      // Use simple click-to-show panel, no Leaflet popup bubble
-      var m=L.marker([loc.lat,loc.lng],{icon:icon,opacity:1});
-      (function(name,note,type){m.on('click',function(e){
-        if(L.DomEvent)L.DomEvent.stopPropagation(e);
-        showMapPinPanel({id:'util-'+name,n:name,note:note,done:false,slot:'day'},getDest(activeDest),'info',e);
-      });})(loc.name,loc.note||loc.type,loc.type);
-      m.addTo(_mainMap);_mainMarkers.push(m);
-    }
+    var m=L.marker([loc.lat,loc.lng],{icon:icon,opacity:1});
+    (function(name,note){m.on('click',function(e){
+      if(L.DomEvent)L.DomEvent.stopPropagation(e);
+      showMapPinPanel({id:'util-'+name,n:name,note:note,done:false,slot:'day'},dest,'info',e);
+    });})(loc.name,loc.note||loc.type);
+    m.addTo(_mainMap);_mainMarkers.push(m);
   });
 }
 
