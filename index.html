@@ -2212,9 +2212,12 @@ function cancelEditDates(destId){
   if(btn)btn.style.display="";
 }
 
-function saveDates(destId){
-  var newFrom=g("edit-from-"+destId).value;
-  var newTo=g("edit-to-"+destId).value;
+function saveDates(destId,newFrom,newTo){
+  if(!newFrom||!newTo){
+    var fi=g("edit-from-"+destId); var ti=g("edit-to-"+destId);
+    if(!fi||!ti)return;
+    newFrom=fi.value; newTo=ti.value;
+  }
   if(!newFrom||!newTo||newTo<=newFrom)return;
   var dest=getDest(destId); if(!dest)return;
   var oldFrom=dest.dateFrom, oldTo=dest.dateTo;
@@ -2725,6 +2728,43 @@ function mkHotelRecord(bk,destId){
   if(bk.cancelType){var cpLine=document.createElement("div");cpLine.className="bk-rec-meta";cpLine.style.fontWeight="600";if(bk.cancelType==="deadline"){cpLine.style.color="#d97706";cpLine.textContent="Cancel by: "+(bk.cancelDeadline?fmtD(bk.cancelDeadline):"date not set");}else if(bk.cancelType==="non-cancellable"){cpLine.style.color="#e05050";cpLine.textContent="Non-cancellable";}rec.appendChild(cpLine);}
   var a=document.createElement("div"); a.className="bk-rec-acts";
   if(bk.status!=="cancelled"){
+    // Edit button
+    var eb=document.createElement("button"); eb.className="bk-rec-btn"; eb.textContent="Edit";
+    (function(b,r,did){eb.onclick=function(){
+      var editId="bk-edit-"+b.id;
+      var existing=g(editId);
+      if(existing){existing.parentNode.removeChild(existing);eb.textContent="Edit";return;}
+      eb.textContent="Close";
+      var form=document.createElement("div"); form.id=editId; form.className="bk-form"; form.style.marginTop="6px";
+      var r1=document.createElement("div"); r1.className="bk-row";
+      var ciInp=document.createElement("input"); ciInp.type="date"; ciInp.className="bk-inp"; ciInp.value=b.checkIn||"";
+      var coInp=document.createElement("input"); coInp.type="date"; coInp.className="bk-inp"; coInp.value=b.checkOut||"";
+      var confInp=document.createElement("input"); confInp.type="text"; confInp.className="bk-inp"; confInp.placeholder="Confirmation #"; confInp.value=b.confirmationNumber||"";
+      r1.appendChild(mkField("Check-in",ciInp)); r1.appendChild(mkField("Check-out",coInp)); r1.appendChild(mkField("Conf #",confInp));
+      var r2=document.createElement("div"); r2.className="bk-row";
+      var priceInp=document.createElement("input"); priceInp.type="number"; priceInp.className="bk-inp"; priceInp.placeholder="0.00"; priceInp.step="0.01"; priceInp.value=b.pricePaid||"";
+      var currSel=mkCurrSel(editId+"-cur",b.currency||"EUR");
+      var notesInp=document.createElement("input"); notesInp.type="text"; notesInp.className="bk-inp"; notesInp.placeholder="Notes\u2026"; notesInp.value=b.notes||"";
+      r2.appendChild(mkField("Total paid",priceInp)); r2.appendChild(mkField("Currency",currSel)); r2.appendChild(mkField("Notes",notesInp));
+      form.appendChild(r1); form.appendChild(r2);
+      var acts2=document.createElement("div"); acts2.className="bk-form-actions";
+      var sv=document.createElement("button"); sv.className="bk-save-btn"; sv.textContent="Save changes";
+      var cx=document.createElement("button"); cx.className="bk-dismiss-btn"; cx.textContent="Cancel";
+      cx.onclick=function(){form.parentNode.removeChild(form);eb.textContent="Edit";};
+      sv.onclick=function(){
+        b.checkIn=ciInp.value; b.checkOut=coInp.value;
+        b.confirmationNumber=confInp.value;
+        b.pricePaid=parseFloat(priceInp.value)||null;
+        b.currency=currSel.value;
+        b.notes=notesInp.value;
+        autoSave();
+        drawDestMode(did);
+      };
+      acts2.appendChild(sv); acts2.appendChild(cx); form.appendChild(acts2);
+      r.appendChild(form);
+      setTimeout(function(){form.scrollIntoView({block:"nearest",behavior:"smooth"});},60);
+    };})(bk,rec,destId);
+    a.appendChild(eb);
     var cb=document.createElement("button"); cb.className="bk-rec-btn danger"; cb.textContent="Cancel booking";
     (function(b,r,did){cb.onclick=function(){
       var conf=confirm("Mark this booking as cancelled in Max?\n\nRemember: you must also contact the hotel directly to cancel your reservation.");
@@ -4344,9 +4384,32 @@ function drawDestMode(destId){
   navRow.appendChild(back); navRow.appendChild(addDestBtn);
   hdr.appendChild(navRow);
   var title=document.createElement("div"); title.className="dm-title"; title.textContent=dest.place;
+  var datesRow=document.createElement("div"); datesRow.style.cssText="display:flex;align-items:center;gap:8px;";
   var dates=document.createElement("div"); dates.className="dm-dates"; dates.id="ud-dates-"+destId;
   dates.textContent=fmtD(dest.dateFrom)+" \u2013 "+fmtD(dest.dateTo)+" ("+dest.nights+" night"+(dest.nights!==1?"s":"")+")";
-
+  var editDatesBtn=document.createElement("button"); editDatesBtn.className="di-edit-btn"; editDatesBtn.textContent="edit dates";
+  (function(did){editDatesBtn.onclick=function(){
+    // Show inline date edit form below the dates row
+    var existingForm=g("dm-date-edit-"+did);
+    if(existingForm){existingForm.parentNode.removeChild(existingForm);editDatesBtn.textContent="edit dates";return;}
+    editDatesBtn.textContent="cancel";
+    var ef=document.createElement("div"); ef.id="dm-date-edit-"+did;
+    ef.style.cssText="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:5px;";
+    var fi=document.createElement("input"); fi.type="date"; fi.className="date-edit-inp"; fi.value=getDest(did).dateFrom;
+    var arrow=document.createElement("span"); arrow.style.cssText="font-size:10px;color:#aaa;"; arrow.textContent="\u2192";
+    var ti=document.createElement("input"); ti.type="date"; ti.className="date-edit-inp"; ti.value=getDest(did).dateTo;
+    fi.onchange=function(){ti.min=fi.value;if(ti.value&&ti.value<fi.value)ti.value="";};
+    var sv=document.createElement("button"); sv.className="date-save-btn"; sv.textContent="Save";
+    sv.onclick=function(){
+      ef.parentNode.removeChild(ef); editDatesBtn.textContent="edit dates";
+      saveDates(did,fi.value,ti.value);
+    };
+    var cx=document.createElement("button"); cx.className="date-cancel-btn"; cx.textContent="Cancel";
+    cx.onclick=function(){ef.parentNode.removeChild(ef);editDatesBtn.textContent="edit dates";};
+    ef.appendChild(fi); ef.appendChild(arrow); ef.appendChild(ti); ef.appendChild(sv); ef.appendChild(cx);
+    datesRow.parentNode.insertBefore(ef,datesRow.nextSibling);
+  };})(destId);
+  datesRow.appendChild(dates); datesRow.appendChild(editDatesBtn);
   // Story + compare map buttons
   var dmActs=document.createElement("div"); dmActs.className="dm-actions";
   var stBtn2=document.createElement("button"); stBtn2.className="dm-act-btn tlink story-tl";
@@ -4388,7 +4451,7 @@ function drawDestMode(destId){
   }
   var ovWarn=document.createElement("div"); ovWarn.id="ov-warn-"+dest.id; ovWarn.className="overlap-warn hidden";
 
-  hdr.appendChild(title); hdr.appendChild(dates);
+  hdr.appendChild(title); hdr.appendChild(datesRow);
   hdr.appendChild(dmActs); hdr.appendChild(dsw); hdr.appendChild(ovWarn);
   c.appendChild(hdr);
 
