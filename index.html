@@ -2271,8 +2271,25 @@ function computeDateChangeImpact(dest,newFrom,newTo){
       var hasBookings=(nd.hotelBookings&&nd.hotelBookings.some(function(b){return b.status==='booked';}))
         ||(nd.generalBookings&&nd.generalBookings.length>0)
         ||Object.keys(trip.legs||{}).some(function(k){return k.indexOf(nd.id)>-1&&trip.legs[k].bookings&&trip.legs[k].bookings.length>0;});
-      if(hasBookings) affected.overlapping.push({dest:nd.label||nd.place,id:nd.id,
-        detail:'Your extension overlaps '+nd.place+' by '+overlapDays+' day'+(overlapDays!==1?'s':'')});
+      if(hasBookings){
+        var ovBookings=[];
+        (nd.hotelBookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
+          ovBookings.push({type:'Hotel',name:b.name,detail:'Conf: '+(b.confirmationNumber||'see booking'),keepInApp:false});
+        });
+        (nd.generalBookings||[]).forEach(function(b){
+          ovBookings.push({type:'Reservation',name:b.name||b.type||'Booking',detail:b.date?'Booked for '+fmtD(b.date):'',keepInApp:false});
+        });
+        Object.keys(trip.legs||{}).forEach(function(k){
+          if(k.indexOf(nd.id)>-1){
+            (trip.legs[k].bookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
+              ovBookings.push({type:'Transport',name:b.operator||'Transport',detail:b.departure?'Departs '+fmtD(b.departure):'',keepInApp:false});
+            });
+          }
+        });
+        affected.overlapping.push({dest:nd.label||nd.place,id:nd.id,
+          detail:'Your extension overlaps '+nd.place+' by '+overlapDays+' day'+(overlapDays!==1?'s':''),
+          bookings:ovBookings});
+      }
     }
   }
   return affected;
@@ -2299,13 +2316,25 @@ function showDateChangeDialog(dest,newFrom,newTo,affected,onConfirm){
     dlg.appendChild(list);
   }
   if(affected.overlapping.length>0){
-    var ovLbl=document.createElement('div'); ovLbl.className='move-dialog-label'; ovLbl.textContent='Destinations that overlap with new dates:';
+    var ovLbl=document.createElement('div'); ovLbl.className='move-dialog-label'; ovLbl.textContent='Bookings that will be cleared in overlapping destinations:';
     dlg.appendChild(ovLbl);
     var ovList=document.createElement('div'); ovList.style.cssText='margin-bottom:10px;';
     affected.overlapping.forEach(function(d){
-      var row=document.createElement('div'); row.style.cssText='font-size:11px;padding:4px 8px;background:#fff8f0;border:1px solid #f0dcc0;border-radius:4px;margin-bottom:3px;';
-      row.innerHTML='<strong>'+d.dest+'</strong> <span style="color:#b05820;">'+d.detail+'</span> — bookings will be cleared';
-      ovList.appendChild(row);
+      var destHdr=document.createElement('div');
+      destHdr.style.cssText='font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#b05820;margin:6px 0 3px;';
+      destHdr.textContent=d.dest+' — '+d.detail;
+      ovList.appendChild(destHdr);
+      if(d.bookings&&d.bookings.length>0){
+        d.bookings.forEach(function(b){
+          var row=document.createElement('div'); row.style.cssText='font-size:11px;padding:4px 8px;background:#fff8f0;border:1px solid #f0dcc0;border-radius:4px;margin-bottom:3px;';
+          row.innerHTML='<strong>'+b.type+'</strong>: '+b.name+(b.detail?' <span style="color:#999;">('+b.detail+')</span>':'')+' <span style="color:#b05820;font-size:10px;">will be removed</span>';
+          ovList.appendChild(row);
+        });
+      } else {
+        var none=document.createElement('div'); none.style.cssText='font-size:11px;color:#aaa;padding:2px 8px;';
+        none.textContent='No logged bookings — itinerary items in overlapping days returned to pool';
+        ovList.appendChild(none);
+      }
     });
     dlg.appendChild(ovList);
   }
