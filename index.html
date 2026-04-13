@@ -1655,47 +1655,6 @@ function doCreateTrip(){
 }
 
 function restoreTripUI(){
-  // Migrate: create pending actions for cancelled bookings logged before the action queue existed
-  if(!trip.pendingActions) trip.pendingActions=[];
-  var existingNames=trip.pendingActions.map(function(a){return a.eventName+a.destName;});
-  (trip.destinations||[]).forEach(function(dest){
-    var dName=dest.label||dest.place;
-    (dest.hotelBookings||[]).filter(function(b){return b.status==='cancelled';}).forEach(function(b){
-      var key=b.name+dName;
-      if(existingNames.indexOf(key)===-1){
-        trip.pendingActions.push({id:'mig-'+b.id,eventType:'hotel',
-          actionType:'Contact provider to adjust or cancel',eventName:b.name,destName:dName,
-          confirmationNumber:b.confirmationNumber||null,detail:'Contact hotel to cancel reservation',
-          requiresProviderAction:true,createdAt:new Date().toISOString(),cleared:false});
-        existingNames.push(key);
-      }
-    });
-    (dest.generalBookings||[]).filter(function(b){return b.status==='cancelled';}).forEach(function(b){
-      var key=(b.label||b.type)+dName;
-      if(existingNames.indexOf(key)===-1){
-        trip.pendingActions.push({id:'mig-'+b.id,eventType:'booking',
-          actionType:'Contact provider to adjust or cancel',eventName:b.label||b.type||'Booking',destName:dName,
-          confirmationNumber:b.confirmationNumber||null,detail:'Contact provider to cancel',
-          requiresProviderAction:true,createdAt:new Date().toISOString(),cleared:false});
-        existingNames.push(key);
-      }
-    });
-    Object.keys(trip.legs||{}).forEach(function(k){
-      var leg=trip.legs[k];
-      if(leg.fromId!==dest.id&&leg.toId!==dest.id) return;
-      (leg.bookings||[]).filter(function(b){return b.status==='cancelled';}).forEach(function(b){
-        var key=(b.operator||'Transport')+dName;
-        if(existingNames.indexOf(key)===-1){
-          trip.pendingActions.push({id:'mig-'+b.id,eventType:'transport',
-            actionType:'Contact provider to adjust or cancel',eventName:b.operator||'Transport',destName:dName,
-            confirmationNumber:b.confirmationNumber||null,detail:'Contact provider to cancel',
-            requiresProviderAction:true,createdAt:new Date().toISOString(),cleared:false});
-          existingNames.push(key);
-        }
-      });
-    });
-  });
-  if(trip.pendingActions.some(function(a){return a.id&&a.id.indexOf('mig-')===0;})) autoSave();
   var tn=g("trip-name-display"); if(tn){
     tn.textContent=trip.name||"Untitled trip";
     tn.title="Double-click to rename";
