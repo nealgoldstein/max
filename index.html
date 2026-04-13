@@ -3396,23 +3396,28 @@ function updateMainMap(){
       }
       return;
     }
-    _mainMap.setView(center,13);
+    var _prevMapDest=_mainMap._maxDestId;
+    var isNewDest=(_prevMapDest!==activeDest);
+    _mainMap._maxDestId=activeDest;
+    if(isNewDest) _mainMap.setView(center,13);
     updateMainMapMarkers();
-    // fitBounds once after markers are placed — only if we have real coords
-    setTimeout(function(){
-      if(!_mainMap||!_mainMarkers.length)return;
-      var dest=getDest(activeDest); if(!dest)return;
-      var hasRealCoords=(dest.suggestions||[]).some(function(s){return s.lat&&!s.approx;});
-      if(!hasRealCoords) return;
-      try{
-        var pts=[];
-        _mainMarkers.forEach(function(m){try{var ll=m.getLatLng();if(ll)pts.push(ll);}catch(e){}});
-        if(pts.length>1){
-          var b=L.latLngBounds(pts);
-          if(b.isValid())_mainMap.fitBounds(b,{padding:[40,40],maxZoom:14,animate:false});
-        }
-      }catch(e){}
-    },50);
+    // fitBounds only on first arrival at a destination with real coords
+    if(isNewDest){
+      setTimeout(function(){
+        if(!_mainMap||!_mainMarkers.length)return;
+        var dest=getDest(activeDest); if(!dest)return;
+        var hasRealCoords=(dest.suggestions||[]).some(function(s){return s.lat&&!s.approx;});
+        if(!hasRealCoords) return;
+        try{
+          var pts=[];
+          _mainMarkers.forEach(function(m){try{var ll=m.getLatLng();if(ll)pts.push(ll);}catch(e){}});
+          if(pts.length>1){
+            var b=L.latLngBounds(pts);
+            if(b.isValid())_mainMap.fitBounds(b,{padding:[40,40],maxZoom:14,animate:false});
+          }
+        }catch(e){}
+      },50);
+    }
   }
 }
 
