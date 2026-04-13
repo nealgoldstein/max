@@ -2474,7 +2474,7 @@ function showDateChangeDialog(dest,newFrom,newTo,affected,onConfirm){
       items.forEach(function(it){
         addPendingAction({
           eventType: it.type.toLowerCase(),
-          actionType: it.keepInApp?'adjust dates':'remove and cancel',
+          actionType: 'contact provider to adjust or cancel',
           eventName: it.name,
           destName: it.dest,
           confirmationNumber: it.detail&&it.detail.indexOf('Conf:')>-1?it.detail.replace(/.*Conf:\s*/,'').replace(/ —.*/,''):null,
@@ -2816,7 +2816,19 @@ function mkTransportRecord(bk,fromId,toId){
     a.appendChild(cb);
   }
   var db=document.createElement("button"); db.className="bk-rec-btn"; db.textContent="\u2715 Delete";
-  (function(b,r){db.onclick=function(){getLeg(fromId,toId).bookings=getLeg(fromId,toId).bookings.filter(function(x){return x.id!==b.id;});r.parentNode.removeChild(r);};})(bk,rec);
+  (function(b,r){db.onclick=function(){
+    if(b.status!=="cancelled"){
+      var fromDest=getDest(fromId);var toDest=getDest(toId);
+      addPendingAction({eventType:"transport",actionType:"cancel",
+        eventName:b.operator||"Transport",
+        destName:(fromDest?fromDest.label||fromDest.place:"")+(toDest?" \u2192 "+toDest.label||toDest.place:""),
+        confirmationNumber:b.confirmationNumber||null,
+        detail:"Contact provider to cancel"+(b.departure?" \u2014 departs "+fmtD(b.departure):""),
+        requiresProviderAction:true});
+    }
+    getLeg(fromId,toId).bookings=getLeg(fromId,toId).bookings.filter(function(x){return x.id!==b.id;});
+    r.parentNode.removeChild(r);
+  };})(bk,rec);
   a.appendChild(db); rec.appendChild(a); return rec;
 }
 
@@ -2827,9 +2839,11 @@ function toggleHotelForm(btn,container,formId,opts,onSaved){
   var form=document.createElement("div"); form.className="bk-form"; form.id=formId;
   var r1=document.createElement("div"); r1.className="bk-row";
   var ciInp=document.createElement("input"); ciInp.type="date"; ciInp.className="bk-inp"; ciInp.value=opts.checkIn||"";
+  var ciTime=document.createElement("input"); ciTime.type="time"; ciTime.className="bk-inp"; ciTime.value=opts.checkInTime||"";
   var coInp=document.createElement("input"); coInp.type="date"; coInp.className="bk-inp"; coInp.value=opts.checkOut||"";
+  var coTime=document.createElement("input"); coTime.type="time"; coTime.className="bk-inp"; coTime.value=opts.checkOutTime||"";
   var confInp=document.createElement("input"); confInp.type="text"; confInp.className="bk-inp"; confInp.placeholder="Confirmation #";
-  r1.appendChild(mkField("Check-in",ciInp)); r1.appendChild(mkField("Check-out",coInp)); r1.appendChild(mkField("Conf #",confInp));
+  r1.appendChild(mkField("Check-in",ciInp)); r1.appendChild(mkField("Time",ciTime)); r1.appendChild(mkField("Check-out",coInp)); r1.appendChild(mkField("Time",coTime)); r1.appendChild(mkField("Conf #",confInp));
   var r2=document.createElement("div"); r2.className="bk-row";
   var priceInp=document.createElement("input"); priceInp.type="number"; priceInp.className="bk-inp"; priceInp.placeholder="0.00"; priceInp.step="0.01";
   var currSel=mkCurrSel(formId+"-cur",opts.currency);
@@ -2846,7 +2860,7 @@ function toggleHotelForm(btn,container,formId,opts,onSaved){
     var hotelCoords=null;
     var allDists=getDistricts(opts.destId?getDest(opts.destId).place:"",opts.destId?getDest(opts.destId).intent:"");
     allDists.forEach(function(d){d.hotels.forEach(function(h){if(h.name===opts.hotelName&&h.lat){hotelCoords={lat:h.lat,lng:h.lng};}});});
-    var bk={id:newBkId(),name:opts.hotelName,area:opts.area,checkIn:ciInp.value,checkOut:coInp.value,
+    var bk={id:newBkId(),name:opts.hotelName,area:opts.area,checkIn:ciInp.value,checkInTime:ciTime.value||null,checkOut:coInp.value,checkOutTime:coTime.value||null,
       confirmationNumber:confInp.value,pricePaid:parseFloat(priceInp.value)||null,currency:currSel.value,
       notes:notesInp.value,status:"booked",source:"manual",
       cancelType:cp.type,cancelDeadline:cp.deadline,
@@ -2866,7 +2880,7 @@ function toggleHotelForm(btn,container,formId,opts,onSaved){
 function mkHotelRecord(bk,destId){
   var rec=document.createElement("div"); rec.className="bk-record"+(bk.status==="cancelled"?" cancelled":""); rec.id="bkrec-"+bk.id;
   var main=document.createElement("div"); main.className="bk-rec-main";
-  main.textContent="\u2713 Booked"+(bk.checkIn?" \u00b7 "+fmtD(bk.checkIn)+" \u2013 "+fmtD(bk.checkOut):"");
+  main.textContent="\u2713 Booked"+(bk.checkIn?" \u00b7 "+fmtD(bk.checkIn)+(bk.checkInTime?" "+bk.checkInTime:"")+" \u2013 "+fmtD(bk.checkOut)+(bk.checkOutTime?" "+bk.checkOutTime:""):"");
   var parts=[]; if(bk.confirmationNumber)parts.push("Conf: "+bk.confirmationNumber);
   if(bk.pricePaid)parts.push(bk.currency+" "+bk.pricePaid.toFixed(2)+" total"); if(bk.notes)parts.push(bk.notes);
   rec.appendChild(main);
@@ -2884,9 +2898,11 @@ function mkHotelRecord(bk,destId){
       var form=document.createElement("div"); form.id=editId; form.className="bk-form"; form.style.marginTop="6px";
       var r1=document.createElement("div"); r1.className="bk-row";
       var ciInp=document.createElement("input"); ciInp.type="date"; ciInp.className="bk-inp"; ciInp.value=b.checkIn||"";
+      var ciTime=document.createElement("input"); ciTime.type="time"; ciTime.className="bk-inp"; ciTime.value=b.checkInTime||"";
       var coInp=document.createElement("input"); coInp.type="date"; coInp.className="bk-inp"; coInp.value=b.checkOut||"";
+      var coTime=document.createElement("input"); coTime.type="time"; coTime.className="bk-inp"; coTime.value=b.checkOutTime||"";
       var confInp=document.createElement("input"); confInp.type="text"; confInp.className="bk-inp"; confInp.placeholder="Confirmation #"; confInp.value=b.confirmationNumber||"";
-      r1.appendChild(mkField("Check-in",ciInp)); r1.appendChild(mkField("Check-out",coInp)); r1.appendChild(mkField("Conf #",confInp));
+      r1.appendChild(mkField("Check-in",ciInp)); r1.appendChild(mkField("Time",ciTime)); r1.appendChild(mkField("Check-out",coInp)); r1.appendChild(mkField("Time",coTime)); r1.appendChild(mkField("Conf #",confInp));
       var r2=document.createElement("div"); r2.className="bk-row";
       var priceInp=document.createElement("input"); priceInp.type="number"; priceInp.className="bk-inp"; priceInp.placeholder="0.00"; priceInp.step="0.01"; priceInp.value=b.pricePaid||"";
       var currSel=mkCurrSel(editId+"-cur",b.currency||"EUR");
@@ -2898,7 +2914,7 @@ function mkHotelRecord(bk,destId){
       var cx=document.createElement("button"); cx.className="bk-dismiss-btn"; cx.textContent="Cancel";
       cx.onclick=function(){form.parentNode.removeChild(form);eb.textContent="Edit";};
       sv.onclick=function(){
-        b.checkIn=ciInp.value; b.checkOut=coInp.value;
+        b.checkIn=ciInp.value; b.checkInTime=ciTime.value||null; b.checkOut=coInp.value; b.checkOutTime=coTime.value||null;
         b.confirmationNumber=confInp.value;
         b.pricePaid=parseFloat(priceInp.value)||null;
         b.currency=currSel.value;
@@ -2926,7 +2942,17 @@ function mkHotelRecord(bk,destId){
     a.appendChild(cb);
   }
   var db=document.createElement("button"); db.className="bk-rec-btn"; db.textContent="\u2715 Delete";
-  (function(b,r){db.onclick=function(){var d=getDest(destId);if(d)d.hotelBookings=d.hotelBookings.filter(function(x){return x.id!==b.id;});r.parentNode.removeChild(r);};})(bk,rec);
+  (function(b,r){db.onclick=function(){
+    if(b.status!=="cancelled"){
+      var d2=getDest(destId);
+      addPendingAction({eventType:"hotel",actionType:"cancel",
+        eventName:b.name,destName:d2?d2.label||d2.place:"",
+        confirmationNumber:b.confirmationNumber||null,
+        detail:"Contact hotel to cancel reservation",requiresProviderAction:true});
+    }
+    var d=getDest(destId);if(d)d.hotelBookings=d.hotelBookings.filter(function(x){return x.id!==b.id;});
+    r.parentNode.removeChild(r);
+  };})(bk,rec);
   a.appendChild(db); rec.appendChild(a); return rec;
 }
 
@@ -5956,8 +5982,9 @@ function toggleGeneralForm(btn,container,formId,destId){
   var r2=document.createElement("div"); r2.className="bk-row";
   var dateInp=document.createElement("input"); dateInp.type="date"; dateInp.className="bk-inp";
   var timeInp=document.createElement("input"); timeInp.type="time"; timeInp.className="bk-inp";
+  var timeEndInp=document.createElement("input"); timeEndInp.type="time"; timeEndInp.className="bk-inp";
   var confInp=document.createElement("input"); confInp.type="text"; confInp.className="bk-inp"; confInp.placeholder="Confirmation #";
-  r2.appendChild(mkField("Date",dateInp)); r2.appendChild(mkField("Time",timeInp)); r2.appendChild(mkField("Conf #",confInp));
+  r2.appendChild(mkField("Date",dateInp)); r2.appendChild(mkField("Start",timeInp)); r2.appendChild(mkField("End",timeEndInp)); r2.appendChild(mkField("Conf #",confInp));
   var r3=document.createElement("div"); r3.className="bk-row";
   var priceInp=document.createElement("input"); priceInp.type="number"; priceInp.className="bk-inp"; priceInp.placeholder="0.00"; priceInp.step="0.01";
   var currSel=mkCurrSel(formId+"-cur","EUR");
@@ -5972,7 +5999,7 @@ function toggleGeneralForm(btn,container,formId,destId){
   sv.onclick=function(){
     if(!labelInp.value.trim())return;
     var cp=cancelFieldG.getCancelPolicy();
-    var bk={id:newBkId(),type:typeSel.value,label:labelInp.value.trim(),date:dateInp.value,time:timeInp.value,
+    var bk={id:newBkId(),type:typeSel.value,label:labelInp.value.trim(),date:dateInp.value,time:timeInp.value,timeEnd:timeEndInp.value||null,
       confirmationNumber:confInp.value,pricePaid:parseFloat(priceInp.value)||null,currency:currSel.value,
       notes:notesInp.value,status:"booked",source:"manual",cancelType:cp.type,cancelDeadline:cp.deadline};
     var dest=getDest(destId); if(!dest)return;
@@ -5989,7 +6016,7 @@ function toggleGeneralForm(btn,container,formId,destId){
 function mkGeneralRecord(bk,destId){
   var rec=document.createElement("div"); rec.className="bk-record"+(bk.status==="cancelled"?" cancelled":""); rec.id="bkrec-"+bk.id;
   var main=document.createElement("div"); main.className="bk-rec-main";
-  main.textContent="\u2713 "+bk.label+(bk.date?" \u00b7 "+fmtD(bk.date):"")+(bk.time?" "+bk.time:"");
+  main.textContent="\u2713 "+bk.label+(bk.date?" \u00b7 "+fmtD(bk.date):"")+(bk.time?" "+bk.time:"")+(bk.timeEnd?"\u2013"+bk.timeEnd:"");
   var parts=[]; if(bk.confirmationNumber)parts.push("Conf: "+bk.confirmationNumber);
   if(bk.pricePaid)parts.push(bk.currency+" "+bk.pricePaid.toFixed(2)); if(bk.notes)parts.push(bk.notes);
   rec.appendChild(main);
@@ -6012,7 +6039,18 @@ function mkGeneralRecord(bk,destId){
     a.appendChild(cb);
   }
   var db=document.createElement("button"); db.className="bk-rec-btn"; db.textContent="\u2715 Delete";
-  (function(b,r){db.onclick=function(){var d=getDest(destId);if(d)d.generalBookings=d.generalBookings.filter(function(x){return x.id!==b.id;});r.parentNode.removeChild(r);autoSave();};})(bk,rec);
+  (function(b,r){db.onclick=function(){
+    if(b.status!=="cancelled"){
+      var d2=getDest(destId);
+      addPendingAction({eventType:"booking",actionType:"cancel",
+        eventName:b.label||b.type||"Booking",destName:d2?d2.label||d2.place:"",
+        confirmationNumber:b.confirmationNumber||null,
+        detail:"Contact provider to cancel"+(b.date?" \u2014 booked for "+fmtD(b.date):""),
+        requiresProviderAction:true});
+    }
+    var d=getDest(destId);if(d)d.generalBookings=d.generalBookings.filter(function(x){return x.id!==b.id;});
+    r.parentNode.removeChild(r);autoSave();
+  };})(bk,rec);
   a.appendChild(db); rec.appendChild(a); return rec;
 }
 
