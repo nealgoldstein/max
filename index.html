@@ -3851,6 +3851,33 @@ function executeMoveDest(dest,fromIdx,toIdx){
   trip.destinations.splice(insertAt,0,dest);
   var newIdx=trip.destinations.indexOf(dest);
 
+  // Collect bookings BEFORE clearing so we can generate pending actions
+  var _actionsToAdd=[];
+  function collectBookingsForActions(d){
+    var dName=d.label||d.place;
+    (d.hotelBookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
+      _actionsToAdd.push({eventType:'hotel',actionType:'moved — contact to adjust',
+        eventName:b.name,destName:dName,confirmationNumber:b.confirmationNumber||null,
+        detail:'Destination moved — dates changed',requiresProviderAction:true});
+    });
+    (d.generalBookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
+      _actionsToAdd.push({eventType:'booking',actionType:'moved — contact to adjust',
+        eventName:b.label||b.type||'Booking',destName:dName,confirmationNumber:b.confirmationNumber||null,
+        detail:'Destination moved — dates changed',requiresProviderAction:true});
+    });
+    Object.keys(trip.legs||{}).forEach(function(k){
+      var parts=k.split('-');
+      if(parts.length===2&&(parts[0]===d.id||parts[1]===d.id)){
+        (trip.legs[k].bookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
+          _actionsToAdd.push({eventType:'transport',actionType:'moved — contact to adjust',
+            eventName:b.operator||'Transport',destName:dName,confirmationNumber:b.confirmationNumber||null,
+            detail:'Departure date changed — contact provider',requiresProviderAction:true});
+        });
+      }
+    });
+  }
+  collectBookingsForActions(dest);
+
   // 2. Always clear the moved destination's own bookings (dates will change)
   dest.hotelBookings=[]; dest.generalBookings=[];
   // Clear transport legs to/from moved dest (old neighbors changed)
@@ -3877,10 +3904,10 @@ function executeMoveDest(dest,fromIdx,toIdx){
       var dd=new Date(prevEnd); dd.setDate(dd.getDate()+di);
       day.lbl=dd.toLocaleDateString('en-US',{month:'short',day:'numeric'});
     });
-    // If dates changed for this destination, clear its bookings too (they're now invalid)
+    // If dates changed for this destination, collect and clear its bookings too
     if(d.id!==dest.id&&d.dateFrom!==oldFrom){
+      collectBookingsForActions(d);
       d.hotelBookings=[]; d.generalBookings=[];
-      // Clear transport legs for this dest
       Object.keys(trip.legs||{}).forEach(function(k){
         var parts=k.split('-');
         if(parts.length===2&&(parts[0]===d.id||parts[1]===d.id)){
@@ -3889,16 +3916,15 @@ function executeMoveDest(dest,fromIdx,toIdx){
       });
     }
   }
-  // Build action log for move
-  var movLog=[];
-  movLog.push({type:'cleared',icon:'❌',text:'All bookings cleared for '+(dest.label||dest.place)+' — contact providers to cancel'});
-  trip.destinations.forEach(function(d){
-    if(d.id!==dest.id&&d._clearLog){
-      movLog.push({type:'cleared',icon:'❌',text:'Bookings cleared for '+(d.label||d.place)+' (dates shifted)'});
-      delete d._clearLog;
-    }
-  });
-  if(movLog.length>0) showActionLog(movLog);
+
+  // Add pending actions for all cleared bookings
+  _actionsToAdd.forEach(function(a){addPendingAction(a);});
+
+  // Action log
+  if(_actionsToAdd.length>0){
+    showActionLog([{type:'warn',icon:'⚠️',text:_actionsToAdd.length+' booking'+(
+      _actionsToAdd.length!==1?'s':'')+' cleared — check Tracker tab for required provider actions'}]);
+  }
 
   autoSave();
   drawTripMode();
@@ -5972,7 +5998,17 @@ function mkGeneralRecord(bk,destId){
   var a=document.createElement("div"); a.className="bk-rec-acts";
   if(bk.status!=="cancelled"){
     var cb=document.createElement("button"); cb.className="bk-rec-btn danger"; cb.textContent="Cancel booking";
-    (function(b,r){cb.onclick=function(){b.status="cancelled";var n=mkGeneralRecord(b,destId);r.parentNode.replaceChild(n,r);autoSave();};})(bk,rec);
+    (function(b,r){cb.onclick=function(){
+      b.status="cancelled";
+      var d=getDest(destId);
+      addPendingAction({eventType:'booking',actionType:'cancel',
+        eventName:b.label||b.type||'Booking',
+        destName:d?d.label||d.place:'',
+        confirmationNumber:b.confirmationNumber||null,
+        detail:'Contact provider to cancel'+(b.date?' — booked for '+fmtD(b.date):''),
+        requiresProviderAction:true});
+      var n=mkGeneralRecord(b,destId);r.parentNode.replaceChild(n,r);autoSave();
+    };})(bk,rec);
     a.appendChild(cb);
   }
   var db=document.createElement("button"); db.className="bk-rec-btn"; db.textContent="\u2715 Delete";
