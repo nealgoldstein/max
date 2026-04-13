@@ -265,6 +265,8 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .mlt-panel{position:absolute;top:8px;right:8px;z-index:500;background:rgba(255,255,255,.95);border:1px solid #ddd;border-radius:8px;padding:7px 8px;box-shadow:0 2px 8px rgba(0,0,0,.1);display:none;max-width:160px;}
 /* Day selector */
 #map-day-btn{position:absolute;top:8px;right:8px;z-index:499;background:#fff;border:1px solid #ddd;border-radius:8px;padding:5px 10px 5px 8px;box-shadow:0 2px 8px rgba(0,0,0,.12);font-size:11px;font-weight:600;color:#111;cursor:pointer;font-family:inherit;display:none;align-items:center;gap:5px;white-space:nowrap;}
+#map-trip-btn{position:absolute;top:8px;left:8px;z-index:499;background:#fff;border:1px solid #ddd;border-radius:8px;padding:5px 10px 5px 8px;box-shadow:0 2px 8px rgba(0,0,0,.12);font-size:11px;font-weight:600;color:#111;cursor:pointer;font-family:inherit;display:none;align-items:center;gap:5px;white-space:nowrap;}
+#map-trip-btn.active{background:#111;color:#fff;border-color:#111;}
 #map-day-btn:hover{border-color:#999;}
 #map-day-btn.exec-mode{background:#111;color:#fff;border-color:#111;}
 #map-day-dropdown{position:absolute;top:8px;right:8px;z-index:600;background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.18);padding:4px 0;min-width:180px;display:none;white-space:nowrap;}
@@ -708,6 +710,11 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
       <span style="font-size:12px;">📅</span>
       <span id="map-day-btn-label">Day</span>
       <span style="font-size:9px;opacity:.6;">▾</span>
+    </div>
+    <!-- Trip overview button -->
+    <div id="map-trip-btn" style="display:none;" title="Show all destinations">
+      <span style="font-size:12px;">🗺</span>
+      <span>All</span>
     </div>
     <!-- Day dropdown -->
     <div id="map-day-dropdown"></div>
@@ -2652,7 +2659,7 @@ function checkAndShowOverlaps(){
 
 // ── Booking infrastructure ─────────────────────────────────
 // ── Action queue ───────────────────────────────────────────
-var _actionCtr=0;
+var _mapTripOverview = false; // when true, show all dests on map even in dest mode
 function newActionId(){ return "act"+(++_actionCtr); }
 
 function addPendingAction(opts){
@@ -3148,7 +3155,16 @@ function initMainMap(){
     attribution:"\u00a9 Esri World Imagery",maxZoom:19,noWrap:false
   }).addTo(_mainMap);
   L.tileLayer("https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png",{opacity:1.0,maxZoom:19,noWrap:false}).addTo(_mainMap);
-  // Ensure map fills container correctly after layout settles
+  // Trip overview button
+  var tripBtn=document.getElementById('map-trip-btn');
+  if(tripBtn){
+    tripBtn.onclick=function(){
+      _mapTripOverview=!_mapTripOverview;
+      tripBtn.classList.toggle('active',_mapTripOverview);
+      tripBtn.querySelector('span:last-child');
+      updateMainMap();
+    };
+  }
   setTimeout(function(){if(_mainMap)_mainMap.invalidateSize();},100);
   window.addEventListener("resize",function(){if(_mainMap)_mainMap.invalidateSize();});
 }
@@ -3372,10 +3388,17 @@ function closeMapPinPanel(){
 function updateMainMap(){
   if(!_mainMap)return;
   clearMainMarkers();
-  if(_leftMode==="trip"){
+  // Show/hide trip overview button — only in dest mode with 2+ destinations
+  var tripBtn=document.getElementById('map-trip-btn');
+  if(tripBtn){
+    var showTripBtn=_leftMode==='dest'&&trip.destinations.length>1;
+    tripBtn.style.display=showTripBtn?'flex':'none';
+    tripBtn.classList.toggle('active',_mapTripOverview);
+  }
+
+  if(_leftMode==="trip"||_mapTripOverview){
     buildMainLegend("trip");
     var overlay=g("no-dest-overlay");
-    // Hide day selector in trip mode
     var dayBtn=document.getElementById('map-day-btn');
     if(dayBtn)dayBtn.style.display='none';
     if(trip.destinations.length===0){
@@ -3395,7 +3418,10 @@ function updateMainMap(){
         className:"",iconSize:[28,28],iconAnchor:[14,14],popupAnchor:[0,-16]
       });
       var m=L.marker(c,{icon:icon}).addTo(_mainMap);
-      (function(did){m.on("click",function(){selectDest(did);});})(dest.id);
+      (function(did){m.on("click",function(){
+        _mapTripOverview=false; // close overview on selection
+        selectDest(did);
+      });})(dest.id);
       _mainMarkers.push(m);
       bounds.push(c);
     });
@@ -3450,6 +3476,7 @@ function updateMainMap(){
 
 function setLeftMode(mode){
   _leftMode=mode;
+  if(mode==='trip') _mapTripOverview=false; // not needed in trip mode
   g("mode-trip-btn").className="mode-btn"+(mode==="trip"?" on":"");
   g("mode-dest-btn").className="mode-btn"+(mode==="dest"?" on":"");
   if(mode==="trip") drawTripMode();
