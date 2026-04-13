@@ -210,7 +210,8 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .exp-refresh-btn{font-size:10px;padding:2px 8px;border:1px solid #ddd;border-radius:4px;background:#fff;color:#888;cursor:pointer;font-family:inherit;}
 .exp-refresh-btn:hover{border-color:#999;color:#333;}
 .exp-refresh-btn:disabled{opacity:.5;cursor:default;}
-.exp-item{display:flex;align-items:flex-start;gap:7px;padding:6px 0;border-bottom:1px solid #f5f5f5;}
+.exp-item{display:flex;align-items:flex-start;gap:7px;padding:6px 0;border-bottom:1px solid #f5f5f5;cursor:pointer;}
+.exp-item:hover{background:#fafafa;}
 .exp-item:last-of-type{border-bottom:none;}
 .exp-item-icon{font-size:12px;flex-shrink:0;padding-top:1px;}
 .exp-item-body{flex:1;min-width:0;}
@@ -4088,6 +4089,27 @@ function mkExploreSuggestion(s,dest,type){
   };})(s,type,addBtn);
   acts.appendChild(addBtn);
   row.appendChild(icon); row.appendChild(body); row.appendChild(acts);
+  // Click row: show pin popup on map and pan to it
+  (function(item,dest,type){row.onclick=function(e){
+    if(e.target.closest('button')) return; // don't intercept button clicks
+    if(!item.lat||!item.lng) return;
+    // Pan map to item
+    if(_mainMap){
+      _mainMap.setView([item.lat,item.lng],15,{animate:true});
+    }
+    // Show pin panel — synthesise a container point from the map
+    setTimeout(function(){
+      if(!_mainMap) return;
+      var pt=_mainMap.latLngToContainerPoint([item.lat,item.lng]);
+      var fakeEvent={containerPoint:pt};
+      showMapPinPanel(
+        {id:item.id,n:item.n||item.name,note:item.note||'',done:false,slot:'day'},
+        dest,
+        type==='restaurant'?'restaurant-suggestion':'suggestion',
+        fakeEvent
+      );
+    },300);
+  };})(s,dest,type);
   return row;
 }
 
