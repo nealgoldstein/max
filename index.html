@@ -159,6 +159,17 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .dm-act-btn.active{background:#111;color:#fff;border-color:#111;}
 .dm-tabs{display:flex;border-top:1px solid #f0f0f0;border-bottom:1px solid #f0f0f0;overflow-x:auto;scrollbar-width:none;flex-shrink:0;}
 .dm-tabs::-webkit-scrollbar{display:none;}
+.dm-tab-badge{display:inline-block;background:#e05050;color:#fff;border-radius:8px;font-size:8px;font-weight:700;padding:0px 4px;margin-left:3px;vertical-align:middle;line-height:14px;}
+.tk-action-item{display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px solid #f5f5f5;}
+.tk-action-item.cleared{opacity:0.4;}
+.tk-action-check{width:16px;height:16px;border:1.5px solid #ccc;border-radius:3px;flex-shrink:0;margin-top:1px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+.tk-action-check.done{background:#2a7a4e;border-color:#2a7a4e;color:#fff;}
+.tk-action-body{flex:1;min-width:0;}
+.tk-action-type{font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#e05050;margin-bottom:2px;}
+.tk-action-type.cleared{color:#aaa;}
+.tk-action-name{font-size:11px;font-weight:600;color:#111;}
+.tk-action-detail{font-size:10px;color:#888;margin-top:1px;}
+.tk-action-conf{font-size:10px;color:#aaa;margin-top:1px;}
 .dm-tab{flex:1;font-size:9.5px;font-weight:500;padding:7px 3px;border:none;border-top:2px solid transparent;background:transparent;color:#aaa;cursor:pointer;font-family:inherit;white-space:nowrap;min-width:40px;text-overflow:ellipsis;overflow:hidden;}
 .dm-tab.on{color:#111;border-top-color:#111;}
 .dm-tab-body{flex:1;overflow-y:auto;}
@@ -832,6 +843,7 @@ function restoreTrip(json){
   try{
     var d=JSON.parse(json);
     trip=d.trip; activeDest=d.activeDest;
+    if(!trip.pendingActions) trip.pendingActions=[];
     destCtr=d.destCtr||0; sidCtr=d.sidCtr||100; bkCtr=d.bkCtr||0;
     if(d.activeDmSection) _activeDmSection=d.activeDmSection;
     restoreTripUI();
@@ -858,6 +870,7 @@ function loadTripFile(input){
       var data=JSON.parse(e.target.result);
       if(!data.trip||!data.trip.destinations) throw new Error("Not a valid trip file");
       trip=data.trip; activeDest=data.activeDest||null;
+      if(!trip.pendingActions) trip.pendingActions=[];
       destCtr=data.destCtr||trip.destinations.length;
       sidCtr=data.sidCtr||100; bkCtr=data.bkCtr||0;
       if(data.activeDmSection) _activeDmSection=data.activeDmSection;
@@ -1500,7 +1513,7 @@ function autoSave(){
 // ── Home screen ────────────────────────────────────────────
 function showHome(){
   loadTripsIndex();
-  trip={name:"",destinations:[],legs:{},trackSpending:false};
+  trip={name:"",destinations:[],legs:{},trackSpending:false,pendingActions:[]};
   activeDest=null; _currentTripId=null; _fileHandle=null;
   // Clear left panel content
   var lpc=g("lp-content"); if(lpc)lpc.innerHTML="";
@@ -1625,7 +1638,7 @@ function hideNewTripForm(){
 
 function doCreateTrip(){
   var name=g("ntp-name").value.trim(); if(name.length<2)return;
-  trip={name:name,destinations:[],legs:{},trackSpending:false};
+  trip={name:name,destinations:[],legs:{},trackSpending:false,pendingActions:[]};
   activeDest=null; destCtr=0; sidCtr=100; bkCtr=0; _fileHandle=null;
   var id="trip-"+Date.now(); _currentTripId=id;
   _tripsIndex.push({id:id,name:name,destCount:0,dateRange:"",savedAt:new Date().toISOString()});
@@ -1682,7 +1695,8 @@ var trip = {
   name: "",
   destinations: [],
   legs: {},
-  trackSpending: false
+  trackSpending: false,
+  pendingActions: []
 };
 var activeDest = null;
 var destCtr = 0;
@@ -2456,6 +2470,18 @@ function showDateChangeDialog(dest,newFrom,newTo,affected,onConfirm){
       (affected.overlapping||[]).forEach(function(ov){
         var od=getDest(ov.id); if(od) od.pendingCancellations=null;
       });
+      // Add to trip-level action queue
+      items.forEach(function(it){
+        addPendingAction({
+          eventType: it.type.toLowerCase(),
+          actionType: it.keepInApp?'adjust dates':'remove and cancel',
+          eventName: it.name,
+          destName: it.dest,
+          confirmationNumber: it.detail&&it.detail.indexOf('Conf:')>-1?it.detail.replace(/.*Conf:\s*/,'').replace(/ —.*/,''):null,
+          detail: it.detail,
+          requiresProviderAction: true
+        });
+      });
       if(items.length>0){dest.pendingCancellations={destName:dest.label||dest.place,items:items};autoSave();}
       onConfirm(); showPhase2(items);
     };
@@ -2596,6 +2622,80 @@ function checkAndShowOverlaps(){
 }
 
 // ── Booking infrastructure ─────────────────────────────────
+// ── Action queue ───────────────────────────────────────────
+var _actionCtr=0;
+function newActionId(){ return "act"+(++_actionCtr); }
+
+function addPendingAction(opts){
+  // opts: {eventType, eventName, destName, confirmationNumber, detail, requiresProviderAction}
+  if(!trip.pendingActions) trip.pendingActions=[];
+  var action={
+    id: newActionId(),
+    eventType: opts.eventType||'booking',       // 'hotel','transport','restaurant','general'
+    actionType: opts.actionType||'changed',     // 'changed','cancelled','deleted','moved'
+    eventName: opts.eventName||'',
+    destName: opts.destName||'',
+    confirmationNumber: opts.confirmationNumber||null,
+    detail: opts.detail||'',
+    requiresProviderAction: opts.requiresProviderAction!==false, // default true
+    createdAt: new Date().toISOString(),
+    cleared: false
+  };
+  trip.pendingActions.push(action);
+  autoSave();
+  updateTrackerBadge();
+  return action;
+}
+
+function clearPendingAction(id){
+  if(!trip.pendingActions) return;
+  var a=trip.pendingActions.find(function(x){return x.id===id;});
+  if(a){a.cleared=true;autoSave();updateTrackerBadge();}
+}
+
+function clearAllPendingActions(){
+  if(!trip.pendingActions) return;
+  trip.pendingActions.forEach(function(a){a.cleared=true;});
+  autoSave(); updateTrackerBadge();
+}
+
+function pendingCount(){
+  if(!trip.pendingActions) return 0;
+  return trip.pendingActions.filter(function(a){return !a.cleared&&a.requiresProviderAction;}).length;
+}
+
+function updateTrackerBadge(){
+  var n=pendingCount();
+  // Update all tracker tab buttons (one per dest render)
+  document.querySelectorAll('#dm-tab-tracker').forEach(function(btn){
+    var badge=btn.querySelector('.dm-tab-badge');
+    if(n>0){
+      if(!badge){badge=document.createElement('span');badge.className='dm-tab-badge';btn.appendChild(badge);}
+      badge.textContent=n;
+    } else {
+      if(badge) badge.parentNode.removeChild(badge);
+    }
+  });
+}
+
+function openMailtoActions(){
+  if(!trip.pendingActions) return;
+  var open=trip.pendingActions.filter(function(a){return !a.cleared&&a.requiresProviderAction;});
+  if(!open.length) return;
+  var subject='Provider action needed — '+trip.name;
+  var body='The following bookings need action with providers:\n\n';
+  open.forEach(function(a){
+    body+=a.eventType.charAt(0).toUpperCase()+a.eventType.slice(1)+': '+a.eventName;
+    if(a.destName) body+=' ('+a.destName+')';
+    body+=' — '+a.actionType;
+    if(a.confirmationNumber) body+='\nConf: '+a.confirmationNumber;
+    if(a.detail) body+='\n'+a.detail;
+    body+='\n\n';
+  });
+  body+='— Sent from Max';
+  window.location.href='mailto:?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);
+}
+
 function newBkId(){ return "bk"+(++bkCtr); }
 
 function getLeg(fromId,toId){
@@ -2702,7 +2802,17 @@ function mkTransportRecord(bk,fromId,toId){
   var a=document.createElement("div"); a.className="bk-rec-acts";
   if(bk.status!=="cancelled"){
     var cb=document.createElement("button"); cb.className="bk-rec-btn danger"; cb.textContent="Cancel booking";
-    (function(b,r){cb.onclick=function(){b.status="cancelled";autoSave();var n=mkTransportRecord(b,fromId,toId);r.parentNode.replaceChild(n,r);};})(bk,rec);
+    (function(b,r){cb.onclick=function(){
+      b.status="cancelled";
+      var fromDest=getDest(fromId); var toDest=getDest(toId);
+      addPendingAction({eventType:'transport',actionType:'cancel',
+        eventName:b.operator||'Transport',
+        destName:(fromDest?fromDest.label||fromDest.place:'')+(toDest?' → '+toDest.label||toDest.place:''),
+        confirmationNumber:b.confirmationNumber||null,
+        detail:'Contact provider to cancel'+(b.departure?' — departs '+fmtD(b.departure):''),
+        requiresProviderAction:true});
+      autoSave();var n=mkTransportRecord(b,fromId,toId);r.parentNode.replaceChild(n,r);
+    };})(bk,rec);
     a.appendChild(cb);
   }
   var db=document.createElement("button"); db.className="bk-rec-btn"; db.textContent="\u2715 Delete";
@@ -2805,7 +2915,13 @@ function mkHotelRecord(bk,destId){
     (function(b,r,did){cb.onclick=function(){
       var conf=confirm("Mark this booking as cancelled in Max?\n\nRemember: you must also contact the hotel directly to cancel your reservation.");
       if(!conf)return;
-      b.status="cancelled";autoSave();if(_showAllHotelsDests)_showAllHotelsDests.delete(did);drawDestMode(did);
+      b.status="cancelled";
+      var d=getDest(did);
+      addPendingAction({eventType:'hotel',actionType:'cancel',eventName:b.name,
+        destName:d?d.label||d.place:'',confirmationNumber:b.confirmationNumber||null,
+        detail:'Contact hotel to cancel reservation'+(b.cancelDeadline?' — cancel by '+fmtD(b.cancelDeadline):''),
+        requiresProviderAction:true});
+      autoSave();if(_showAllHotelsDests)_showAllHotelsDests.delete(did);drawDestMode(did);
     };})(bk,rec,destId);
     a.appendChild(cb);
   }
@@ -4622,7 +4738,16 @@ function drawDestMode(destId){
   var sections=[{id:"sights",lbl:"Itinerary"},{id:"explore",lbl:"Explore"},{id:"stay",lbl:"Stay & Eat"},{id:"info",lbl:"Info"},{id:"routing",lbl:"Routing"},{id:"tracker",lbl:"Tracker"}];
   sections.forEach(function(s){
     var btn=document.createElement("button"); btn.className="dm-tab"+(s.id===_activeDmSection?" on":"");
-    btn.id="dm-tab-"+s.id; btn.textContent=s.lbl;
+    btn.id="dm-tab-"+s.id;
+    btn.textContent=s.lbl;
+    // Add badge for tracker if there are pending actions
+    if(s.id==="tracker"){
+      var n=pendingCount();
+      if(n>0){
+        var badge=document.createElement("span"); badge.className="dm-tab-badge"; badge.textContent=n;
+        btn.appendChild(badge);
+      }
+    }
     (function(sid){btn.onclick=function(){
       _activeDmSection=sid;
       var _pw=g("dm-pane-wrap"); if(_pw)_pw.scrollTop=0;
@@ -5552,6 +5677,50 @@ function checkDeadlineAlert(){
 // ── Tracker ────────────────────────────────────────────────
 function mkTrackerInner(dest){
   var wrap=document.createElement("div");
+
+  // ── Pending Actions section ─────────────────────────────
+  var openActions=(trip.pendingActions||[]).filter(function(a){return !a.cleared&&a.requiresProviderAction;});
+  if(openActions.length>0){
+    var actSec=document.createElement("div"); actSec.className="tk-section";
+    var actHdr=document.createElement("div"); actHdr.style.cssText="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;";
+    var actLbl=document.createElement("div"); actLbl.className="tk-section-lbl"; actLbl.style.color="#e05050"; actLbl.textContent="Provider action needed";
+    var actEmail=document.createElement("button"); actEmail.className="bk-log-btn"; actEmail.textContent="\u2709 Email list";
+    actEmail.onclick=function(){openMailtoActions();};
+    actHdr.appendChild(actLbl); actHdr.appendChild(actEmail);
+    actSec.appendChild(actHdr);
+    openActions.forEach(function(a){
+      var row=document.createElement("div"); row.className="tk-action-item";
+      var check=document.createElement("div"); check.className="tk-action-check";
+      check.title="Mark as done";
+      (function(action){check.onclick=function(){
+        clearPendingAction(action.id);
+        row.classList.add("cleared");
+        check.classList.add("done"); check.textContent="\u2713";
+        var typEl=row.querySelector(".tk-action-type"); if(typEl)typEl.classList.add("cleared");
+        // Refresh badge
+        var badge=g("dm-tab-tracker")&&g("dm-tab-tracker").querySelector(".dm-tab-badge");
+        if(badge){var n=pendingCount();if(n>0)badge.textContent=n;else badge.parentNode&&badge.parentNode.removeChild(badge);}
+      };})(a);
+      var body=document.createElement("div"); body.className="tk-action-body";
+      var typeEl=document.createElement("div"); typeEl.className="tk-action-type";
+      typeEl.textContent=a.actionType.toUpperCase()+" — "+a.eventType;
+      var nameEl=document.createElement("div"); nameEl.className="tk-action-name"; nameEl.textContent=a.eventName;
+      var destEl=document.createElement("div"); destEl.className="tk-action-detail"; destEl.textContent=a.destName;
+      body.appendChild(typeEl); body.appendChild(nameEl);
+      if(a.destName) body.appendChild(destEl);
+      if(a.confirmationNumber){
+        var confEl=document.createElement("div"); confEl.className="tk-action-conf"; confEl.textContent="Conf: "+a.confirmationNumber;
+        body.appendChild(confEl);
+      }
+      if(a.detail){
+        var detEl=document.createElement("div"); detEl.className="tk-action-detail"; detEl.textContent=a.detail;
+        body.appendChild(detEl);
+      }
+      row.appendChild(check); row.appendChild(body);
+      actSec.appendChild(row);
+    });
+    wrap.appendChild(actSec);
+  }
 
   // ── Cancellation Deadlines section ─────────────────────────
   var deadlines=collectDeadlines(dest);
