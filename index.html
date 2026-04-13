@@ -2723,28 +2723,55 @@ function checkTimeConflicts(dest,dayId){
   dest.days.forEach(function(day){
     if(dayId&&day.id!==dayId) return;
     var items=(day.items||[]).filter(function(s){return s.timeStart;});
-    // Clear existing conflict markers
-    items.forEach(function(s){
+
+    // Include booked events with times — transport and general bookings
+    var bookedEvents=[];
+    Object.keys(trip.legs||{}).forEach(function(k){
+      var leg=trip.legs[k];
+      if(leg.fromId!==dest.id) return;
+      (leg.bookings||[]).filter(function(b){return b.status==='booked'&&b.departureTime;}).forEach(function(b){
+        bookedEvents.push({id:'bk-'+b.id,n:b.operator||'Transport',
+          timeStart:b.departureTime,timeEnd:b.arrivalTime||null,_isBooking:true});
+      });
+    });
+    (dest.generalBookings||[]).filter(function(b){
+      return b.status==='booked'&&b.date&&b.time;
+    }).forEach(function(b){
+      bookedEvents.push({id:'bk-'+b.id,n:b.label||b.type,
+        timeStart:b.time,timeEnd:b.timeEnd||null,_isBooking:true});
+    });
+
+    var all=items.concat(bookedEvents);
+    all.forEach(function(s){
       s._timeConflict=false;
       var el=document.getElementById('sr-'+s.id);
       if(el){el.classList.remove('conflict-item');
         var tl=el.querySelector('.srow-time');if(tl)tl.classList.remove('conflict');}
     });
-    // Check each pair
-    for(var i=0;i<items.length;i++){
-      for(var j=i+1;j<items.length;j++){
-        if(timesOverlap(items[i].timeStart,items[i].timeEnd,items[j].timeStart,items[j].timeEnd)){
-          items[i]._timeConflict=true;
-          items[j]._timeConflict=true;
+    for(var i=0;i<all.length;i++){
+      for(var j=i+1;j<all.length;j++){
+        if(timesOverlap(all[i].timeStart,all[i].timeEnd,all[j].timeStart,all[j].timeEnd)){
+          all[i]._timeConflict=true; all[j]._timeConflict=true;
         }
       }
     }
-    // Apply visual markers
-    items.forEach(function(s){
+    all.forEach(function(s){
       var el=document.getElementById('sr-'+s.id);
       if(el&&s._timeConflict){
         el.classList.add('conflict-item');
         var tl=el.querySelector('.srow-time');if(tl)tl.classList.add('conflict');
+      }
+    });
+    // Surface booking conflicts in Tracker
+    bookedEvents.filter(function(e){return e._timeConflict;}).forEach(function(e){
+      var existingConflict=trip.pendingActions&&trip.pendingActions.find(function(a){
+        return a.eventName===e.n&&a.actionType==='time conflict'&&!a.cleared;
+      });
+      if(!existingConflict){
+        addPendingAction({eventType:'booking',actionType:'time conflict',
+          eventName:e.n,destName:dest.label||dest.place,
+          detail:'Time overlaps with another event — review schedule',
+          requiresProviderAction:false}); // No provider action — just user awareness
       }
     });
   });
@@ -4580,8 +4607,8 @@ function buildHotelChip(bk, type){
   nm.textContent=(type==='checkin'?'Check-in: ':'Check-out: ')+bk.name;
   var meta=document.createElement('div'); meta.className='itin-hotel-meta';
   var parts=[];
-  if(type==='checkin'&&bk.checkIn) parts.push(fmtD(bk.checkIn));
-  if(type==='checkout'&&bk.checkOut) parts.push(fmtD(bk.checkOut));
+  if(type==='checkin'&&bk.checkIn) parts.push(fmtD(bk.checkIn)+(bk.checkInTime?' '+bk.checkInTime:''));
+  if(type==='checkout'&&bk.checkOut) parts.push(fmtD(bk.checkOut)+(bk.checkOutTime?' '+bk.checkOutTime:''));
   if(bk.confirmationNumber) parts.push('Conf: '+bk.confirmationNumber);
   if(bk.notes) parts.push(bk.notes);
   meta.textContent=parts.join(' · ');
@@ -4976,6 +5003,27 @@ function drawDestMode(destId){
     var daySlot=document.createElement("div"); daySlot.className="itin-slot";
     var dayHdr=document.createElement("div"); dayHdr.className="itin-slot-hdr"; dayHdr.textContent="Day";
     daySlot.appendChild(dayHdr);
+
+    // General bookings for this day
+    var dayDate=new Date(dest.dateFrom+'T12:00:00'); dayDate.setDate(dayDate.getDate()+dayIdx);
+    var dayStr=dayDate.toISOString().slice(0,10);
+    (dest.generalBookings||[]).filter(function(b){return b.status==='booked'&&b.date===dayStr;}).forEach(function(b){
+      var chip=document.createElement('div'); chip.className='itin-hotel-item';
+      chip.style.cssText='background:#f0f4ff;border-color:#c0ccf0;cursor:pointer;';
+      var icon=document.createElement('span'); icon.className='itin-hotel-icon';
+      var iconMap={tour:'🎟',ticket:'🎟',restaurant:'🍽',other:'📌'};
+      icon.textContent=iconMap[b.type]||'📌';
+      var body=document.createElement('div'); body.style.flex='1';
+      var nm=document.createElement('div'); nm.className='itin-hotel-name'; nm.textContent=b.label||b.type;
+      var meta=document.createElement('div'); meta.className='itin-hotel-meta';
+      var pts=[]; if(b.time)pts.push(b.time+(b.timeEnd?'–'+b.timeEnd:'')); if(b.confirmationNumber)pts.push('Conf: '+b.confirmationNumber);
+      meta.textContent=pts.join(' · ');
+      body.appendChild(nm); if(pts.length)body.appendChild(meta);
+      chip.appendChild(icon); chip.appendChild(body);
+      (function(bk,did){chip.onclick=function(){_activeDmSection='tracker';drawDestMode(did);};})(b,dest.id);
+      daySlot.appendChild(chip);
+    });
+
     var dayList=document.createElement("div"); dayList.className="slist"; dayList.id="sl-day-"+day.id;
     items.filter(function(s){return s.slot==="day"||!s.slot;}).forEach(function(s){
       dayList.appendChild(mkItinItem(s,day.id,dest.id));
