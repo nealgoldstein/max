@@ -2480,7 +2480,7 @@ function showDateChangeDialog(dest,newFrom,newTo,affected,onConfirm){
       items.forEach(function(it){
         addPendingAction({
           eventType: it.type.toLowerCase(),
-          actionType: 'contact provider to adjust or cancel',
+          actionType: 'Contact provider to adjust or cancel',
           eventName: it.name,
           destName: it.dest,
           confirmationNumber: it.detail&&it.detail.indexOf('Conf:')>-1?it.detail.replace(/.*Conf:\s*/,'').replace(/ —.*/,''):null,
@@ -2892,7 +2892,7 @@ function mkTransportRecord(bk,fromId,toId){
     (function(b,r){cb.onclick=function(){
       b.status="cancelled";
       var fromDest=getDest(fromId); var toDest=getDest(toId);
-      addPendingAction({eventType:'transport',actionType:'cancel',
+      addPendingAction({eventType:'transport',actionType:'Contact provider to adjust or cancel',
         eventName:b.operator||'Transport',
         destName:(fromDest?fromDest.label||fromDest.place:'')+(toDest?' → '+toDest.label||toDest.place:''),
         confirmationNumber:b.confirmationNumber||null,
@@ -2906,7 +2906,7 @@ function mkTransportRecord(bk,fromId,toId){
   (function(b,r){db.onclick=function(){
     if(b.status!=="cancelled"){
       var fromDest=getDest(fromId);var toDest=getDest(toId);
-      addPendingAction({eventType:"transport",actionType:"cancel",
+      addPendingAction({eventType:"transport",actionType:"Contact provider to adjust or cancel",
         eventName:b.operator||"Transport",
         destName:(fromDest?fromDest.label||fromDest.place:"")+(toDest?" \u2192 "+toDest.label||toDest.place:""),
         confirmationNumber:b.confirmationNumber||null,
@@ -3020,7 +3020,7 @@ function mkHotelRecord(bk,destId){
       if(!conf)return;
       b.status="cancelled";
       var d=getDest(did);
-      addPendingAction({eventType:'hotel',actionType:'cancel',eventName:b.name,
+      addPendingAction({eventType:'hotel',actionType:'Contact provider to adjust or cancel',eventName:b.name,
         destName:d?d.label||d.place:'',confirmationNumber:b.confirmationNumber||null,
         detail:'Contact hotel to cancel reservation'+(b.cancelDeadline?' — cancel by '+fmtD(b.cancelDeadline):''),
         requiresProviderAction:true});
@@ -3032,7 +3032,7 @@ function mkHotelRecord(bk,destId){
   (function(b,r){db.onclick=function(){
     if(b.status!=="cancelled"){
       var d2=getDest(destId);
-      addPendingAction({eventType:"hotel",actionType:"cancel",
+      addPendingAction({eventType:"hotel",actionType:"Contact provider to adjust or cancel",
         eventName:b.name,destName:d2?d2.label||d2.place:"",
         confirmationNumber:b.confirmationNumber||null,
         detail:"Contact hotel to cancel reservation",requiresProviderAction:true});
@@ -3969,12 +3969,12 @@ function executeMoveDest(dest,fromIdx,toIdx){
   function collectBookingsForActions(d){
     var dName=d.label||d.place;
     (d.hotelBookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
-      _actionsToAdd.push({eventType:'hotel',actionType:'moved — contact to adjust',
+      _actionsToAdd.push({eventType:'hotel',actionType:'Contact provider to adjust or cancel',
         eventName:b.name,destName:dName,confirmationNumber:b.confirmationNumber||null,
         detail:'Destination moved — dates changed',requiresProviderAction:true});
     });
     (d.generalBookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
-      _actionsToAdd.push({eventType:'booking',actionType:'moved — contact to adjust',
+      _actionsToAdd.push({eventType:'booking',actionType:'Contact provider to adjust or cancel',
         eventName:b.label||b.type||'Booking',destName:dName,confirmationNumber:b.confirmationNumber||null,
         detail:'Destination moved — dates changed',requiresProviderAction:true});
     });
@@ -3982,7 +3982,7 @@ function executeMoveDest(dest,fromIdx,toIdx){
       var parts=k.split('-');
       if(parts.length===2&&(parts[0]===d.id||parts[1]===d.id)){
         (trip.legs[k].bookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
-          _actionsToAdd.push({eventType:'transport',actionType:'moved — contact to adjust',
+          _actionsToAdd.push({eventType:'transport',actionType:'Contact provider to adjust or cancel',
             eventName:b.operator||'Transport',destName:dName,confirmationNumber:b.confirmationNumber||null,
             detail:'Departure date changed — contact provider',requiresProviderAction:true});
         });
@@ -5904,7 +5904,8 @@ function mkTrackerInner(dest){
       };})(a);
       var body=document.createElement("div"); body.className="tk-action-body";
       var typeEl=document.createElement("div"); typeEl.className="tk-action-type";
-      typeEl.textContent=a.actionType.toUpperCase()+" — "+a.eventType;
+      var eventTypeLabel=({hotel:'Hotel',transport:'Transport',booking:'Booking',restaurant:'Restaurant'})[a.eventType]||a.eventType;
+      typeEl.textContent=a.actionType+' — '+eventTypeLabel;
       var nameEl=document.createElement("div"); nameEl.className="tk-action-name"; nameEl.textContent=a.eventName;
       var destEl=document.createElement("div"); destEl.className="tk-action-detail"; destEl.textContent=a.destName;
       body.appendChild(typeEl); body.appendChild(nameEl);
@@ -6178,7 +6179,7 @@ function mkGeneralRecord(bk,destId){
     (function(b,r){cb.onclick=function(){
       b.status="cancelled";
       var d=getDest(destId);
-      addPendingAction({eventType:'booking',actionType:'cancel',
+      addPendingAction({eventType:'booking',actionType:'Contact provider to adjust or cancel',
         eventName:b.label||b.type||'Booking',
         destName:d?d.label||d.place:'',
         confirmationNumber:b.confirmationNumber||null,
@@ -6192,7 +6193,7 @@ function mkGeneralRecord(bk,destId){
   (function(b,r){db.onclick=function(){
     if(b.status!=="cancelled"){
       var d2=getDest(destId);
-      addPendingAction({eventType:"booking",actionType:"cancel",
+      addPendingAction({eventType:"booking",actionType:"Contact provider to adjust or cancel",
         eventName:b.label||b.type||"Booking",destName:d2?d2.label||d2.place:"",
         confirmationNumber:b.confirmationNumber||null,
         detail:"Contact provider to cancel"+(b.date?" \u2014 booked for "+fmtD(b.date):""),
