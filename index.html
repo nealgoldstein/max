@@ -1145,7 +1145,11 @@ function getCityCenter(place){
     return null; // still generating — caller handles null
   var centers={interlaken:[46.6863,7.8632],vienna:[48.2082,16.3738],prague:[50.0755,14.4378],
     budapest:[47.4979,19.0402],amsterdam:[52.3676,4.9041],paris:[48.8566,2.3522],
-    rome:[41.9028,12.4964],barcelona:[41.3851,2.1734],berlin:[52.5200,13.4050]};
+    rome:[41.9028,12.4964],barcelona:[41.3851,2.1734],berlin:[52.5200,13.4050],
+    zurich:[47.3769,8.5417],lisbon:[38.7169,-9.1395],london:[51.5074,-0.1278],
+    florence:[43.7696,11.2558],madrid:[40.4168,-3.7038],athens:[37.9755,23.7348],
+    copenhagen:[55.6761,12.5683],stockholm:[59.3293,18.0686],brussels:[50.8503,4.3517],
+    edinburgh:[55.9533,-3.1883],munich:[48.1351,11.5820]};
   for(var k in centers) if(p.indexOf(k)>-1) return centers[k];
   // For generated cities loaded from storage: derive center from stored suggestion coords
   // Find the destination and average its suggestion coordinates
@@ -1865,7 +1869,7 @@ function showMapPinPanel(item,dest,itemType,mapEvent){
 }
 
 // Cities with complete hand-curated static data — everything else triggers AI generation
-var STATIC_CITIES=["interlaken","vienna","prague","budapest","amsterdam","paris","rome","barcelona","berlin"];
+var STATIC_CITIES=["interlaken","vienna","prague","budapest","amsterdam","paris","rome","barcelona","berlin","zurich","lisbon","london","florence","madrid","athens","copenhagen","stockholm","brussels","edinburgh","munich"];
 function isKnownCity(place){var p=place.toLowerCase();return STATIC_CITIES.some(function(c){return p.indexOf(c)>-1;});}
 
 async function populateStaticSuggestions(dest){
@@ -6378,6 +6382,12 @@ function getPracticalInfo(place,intent){
     note:"Berlin is still more cash-reliant than other European capitals. Carry \u20ac20\u201340.",
     emergency:"112 \u00b7 Police 110"
   };
+  if(p.indexOf("zurich")>-1)return{
+    currency:"Swiss Franc (CHF)",
+    tipping:"Not expected \u2014 service included by law. Round up if exceptional.",
+    note:"Zurich is expensive \u2014 budget CHF 25\u201340 for lunch. Sunday closures are strict; plan ahead. Tap water is excellent.",
+    emergency:"112 \u00b7 Police 117 \u00b7 Ambulance 144"
+  };
   if(p.indexOf("lisbon")>-1)return{
     currency:"Euro (\u20ac)",
     tipping:"Not expected \u2014 rounding up is appreciated",
@@ -6463,6 +6473,18 @@ function getSights(place,intent){
     {name:"Prenzlauer Berg walk",st:null},
     {name:"Checkpoint Charlie",st:"Checkpoint Charlie Berlin"},
     {name:"Hamburger Bahnhof",st:null}
+  ];
+  if(p.indexOf("zurich")>-1)return[
+    {name:"Kunsthaus Zürich",st:"Kunsthaus Zurich",lat:47.3703,lng:8.5487},
+    {name:"Old Town (Altstadt)",st:"Zurich Altstadt",lat:47.3724,lng:8.5416},
+    {name:"Grossmünster",st:"Grossmunster Zurich",lat:47.3699,lng:8.5438},
+    {name:"Fraumünster",st:"Fraumunster Zurich",lat:47.3697,lng:8.5413},
+    {name:"Swiss National Museum",st:"Swiss National Museum",lat:47.3789,lng:8.5395},
+    {name:"Lake Zürich promenade",st:"Lake Zurich",lat:47.3558,lng:8.5448},
+    {name:"Bahnhofstrasse",st:"Bahnhofstrasse Zurich",lat:47.3744,lng:8.5381},
+    {name:"Uetliberg viewpoint",st:"Uetliberg Zurich",lat:47.3527,lng:8.4916},
+    {name:"Lindenhügel hill walk",st:null,lat:47.3766,lng:8.5393},
+    {name:"Rietberg Museum",st:"Museum Rietberg",lat:47.3602,lng:8.5252}
   ];
   return[
     {name:"City center walk",st:null},{name:"Local market",st:null},
@@ -6575,6 +6597,19 @@ function getDistricts(place,intent,dest){
     ]},
     {name:"Kreuzberg",good:"Most interesting neighborhood; Turkish market; clubs",bad:"Noisy at night in summer",hotels:[
       {name:"25hours Hotel Bikini",desc:"Overlooking Berlin Zoo.",price:"\u20ac110-190/night",tier:2,lat:52.5066,lng:13.3328}
+    ]}
+  ];
+  if(p.indexOf("zurich")>-1)return[
+    {name:"Altstadt (Old Town)",good:"Walking distance to everything; most atmospheric",bad:"Expensive; tourist-heavy in summer",hotels:[
+      {name:"Widder Hotel",desc:"Converted medieval townhouses, Zurich's finest.",price:"CHF 400-700/night",tier:4,lat:47.3733,lng:8.5393},
+      {name:"Hotel Storchen",desc:"Right on the Limmat, 14th-century building.",price:"CHF 300-500/night",tier:3,lat:47.3706,lng:8.5415}
+    ]},
+    {name:"Zürich West (Kreis 4/5)",good:"Most interesting neighbourhood; galleries, food, nightlife",bad:"15min from sights; gritty",hotels:[
+      {name:"25hours Hotel Zürich West",desc:"Design hotel in former factory.",price:"CHF 180-320/night",tier:2,lat:47.3845,lng:8.5241},
+      {name:"Motel One Zürich",desc:"Budget-smart near main station.",price:"CHF 120-200/night",tier:1,lat:47.3789,lng:8.5349}
+    ]},
+    {name:"Seefeld (Kreis 8)",good:"Lake views; upscale residential; good restaurants",bad:"Quieter; less central",hotels:[
+      {name:"Hotel Seegarten",desc:"Lake-facing rooms, walk to Kunsthaus.",price:"CHF 200-360/night",tier:2,lat:47.3611,lng:8.5531}
     ]}
   ];
   return[];
