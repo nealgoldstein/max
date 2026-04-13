@@ -354,6 +354,12 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .srow:hover{background:#f8f8f8;border-color:#efefef;}
 .srow.done .sname{text-decoration:line-through;color:#ccc;}
 .srow-top{display:flex;align-items:center;gap:5px;}
+.srow-time{font-size:10px;color:#aaa;cursor:pointer;white-space:nowrap;padding-left:12px;margin-top:1px;}
+.srow-time:hover{color:#555;}
+.srow-time.conflict{color:#e05050;font-weight:600;}
+.srow.conflict-item{border-left:2px solid #e05050;padding-left:4px;}
+.stime-inp{font-size:10px;padding:1px 4px;border:1px solid #ddd;border-radius:3px;font-family:inherit;color:#555;background:#fff;width:70px;}
+
 .srow-btns{display:flex;gap:2px;padding-left:12px;}
 .pdot{width:7px;height:7px;border-radius:50%;flex-shrink:0;cursor:pointer;}
 .pdot.must{background:#111;}
@@ -2696,6 +2702,54 @@ function openMailtoActions(){
   window.location.href='mailto:?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);
 }
 
+// ── Time conflict detection ─────────────────────────────────
+function timeToMins(t){
+  if(!t) return null;
+  var p=t.split(':'); return parseInt(p[0])*60+parseInt(p[1]);
+}
+
+function timesOverlap(startA,endA,startB,endB){
+  var sa=timeToMins(startA),ea=timeToMins(endA);
+  var sb=timeToMins(startB),eb=timeToMins(endB);
+  if(sa===null||sb===null) return false;
+  // If no end time, treat as point event — only flag if same start
+  var eaR=ea!==null?ea:sa+1;
+  var ebR=eb!==null?eb:sb+1;
+  return sa<ebR&&eaR>sb;
+}
+
+function checkTimeConflicts(dest,dayId){
+  if(!dest) return;
+  dest.days.forEach(function(day){
+    if(dayId&&day.id!==dayId) return;
+    var items=(day.items||[]).filter(function(s){return s.timeStart;});
+    // Clear existing conflict markers
+    items.forEach(function(s){
+      s._timeConflict=false;
+      var el=document.getElementById('sr-'+s.id);
+      if(el){el.classList.remove('conflict-item');
+        var tl=el.querySelector('.srow-time');if(tl)tl.classList.remove('conflict');}
+    });
+    // Check each pair
+    for(var i=0;i<items.length;i++){
+      for(var j=i+1;j<items.length;j++){
+        if(timesOverlap(items[i].timeStart,items[i].timeEnd,items[j].timeStart,items[j].timeEnd)){
+          items[i]._timeConflict=true;
+          items[j]._timeConflict=true;
+        }
+      }
+    }
+    // Apply visual markers
+    items.forEach(function(s){
+      var el=document.getElementById('sr-'+s.id);
+      if(el&&s._timeConflict){
+        el.classList.add('conflict-item');
+        var tl=el.querySelector('.srow-time');if(tl)tl.classList.add('conflict');
+      }
+    });
+  });
+}
+
 function newBkId(){ return "bk"+(++bkCtr); }
 
 function getLeg(fromId,toId){
@@ -2751,8 +2805,12 @@ function toggleTransportForm(btn,container,formId,opts){
   var r1=document.createElement("div"); r1.className="bk-row";
   var dateInp=document.createElement("input"); dateInp.type="date"; dateInp.className="bk-inp"; dateInp.value=opts.defaultDate||"";
   var timeInp=document.createElement("input"); timeInp.type="time"; timeInp.className="bk-inp";
+  var arrDateInp=document.createElement("input"); arrDateInp.type="date"; arrDateInp.className="bk-inp"; arrDateInp.value=opts.defaultDate||"";
+  var arrTimeInp=document.createElement("input"); arrTimeInp.type="time"; arrTimeInp.className="bk-inp";
   var confInp=document.createElement("input"); confInp.type="text"; confInp.className="bk-inp"; confInp.placeholder="Confirmation #";
-  r1.appendChild(mkField("Departure",dateInp)); r1.appendChild(mkField("Time",timeInp)); r1.appendChild(mkField("Conf #",confInp));
+  // Auto-fill arrival date when departure date changes
+  dateInp.onchange=function(){if(!arrDateInp.value)arrDateInp.value=dateInp.value;};
+  r1.appendChild(mkField("Depart date",dateInp)); r1.appendChild(mkField("Time",timeInp)); r1.appendChild(mkField("Arrive date",arrDateInp)); r1.appendChild(mkField("Time",arrTimeInp)); r1.appendChild(mkField("Conf #",confInp));
   var r2=document.createElement("div"); r2.className="bk-row";
   var priceInp=document.createElement("input"); priceInp.type="number"; priceInp.className="bk-inp"; priceInp.placeholder="0.00"; priceInp.step="0.01";
   var currSel=mkCurrSel(formId+"-cur",opts.currency);
@@ -2767,7 +2825,9 @@ function toggleTransportForm(btn,container,formId,opts){
   sv.onclick=function(){
     var cp=cancelFieldT.getCancelPolicy();
     var bk={id:newBkId(),mode:opts.mode,operator:opts.operator,from:opts.from,to:opts.to,
-      departure:dateInp.value,departureTime:timeInp.value,confirmationNumber:confInp.value,
+      departure:dateInp.value,departureTime:timeInp.value,
+      arrival:arrDateInp.value||null,arrivalTime:arrTimeInp.value||null,
+      confirmationNumber:confInp.value,
       pricePaid:parseFloat(priceInp.value)||null,currency:currSel.value,notes:notesInp.value,
       status:"booked",source:"manual",cancelType:cp.type,cancelDeadline:cp.deadline};
     getLeg(opts.fromId,opts.toId).bookings.push(bk);
@@ -2793,7 +2853,7 @@ function toggleTransportForm(btn,container,formId,opts){
 function mkTransportRecord(bk,fromId,toId){
   var rec=document.createElement("div"); rec.className="bk-record"+(bk.status==="cancelled"?" cancelled":""); rec.id="bkrec-"+bk.id;
   var main=document.createElement("div"); main.className="bk-rec-main";
-  main.textContent="\u2713 "+bk.operator+(bk.departure?" \u00b7 "+fmtD(bk.departure):"")+(bk.departureTime?" "+bk.departureTime:"");
+  main.textContent="\u2713 "+bk.operator+(bk.departure?" \u00b7 "+fmtD(bk.departure):"")+(bk.departureTime?" "+bk.departureTime:"")+(bk.arrival&&bk.arrival!==bk.departure?" \u2192 "+fmtD(bk.arrival)+(bk.arrivalTime?" "+bk.arrivalTime:""):bk.arrivalTime?" \u2192 "+bk.arrivalTime:"");
   var parts=[]; if(bk.confirmationNumber)parts.push("Conf: "+bk.confirmationNumber);
   if(bk.pricePaid)parts.push(bk.currency+" "+bk.pricePaid.toFixed(2)); if(bk.notes)parts.push(bk.notes);
   rec.appendChild(main);
@@ -4303,7 +4363,7 @@ function showAddToDay(item,type,dest,triggerBtn){
         // Add to day.items
         sidCtr++;
         var ni={id:"s"+sidCtr,type:type,slot:sl2,n:item.n||item.name,p:"nice",done:false,
-          st:item.st||item.n||item.name,note:item.note||null,time:"",
+          st:item.st||item.n||item.name,note:item.note||null,timeStart:null,timeEnd:null,
           lat:item.lat||null,lng:item.lng||null};
         if(!d.items)d.items=[];
         d.items.push(ni);
@@ -4593,7 +4653,46 @@ function mkItinItem(s,dayId,destId){
   var top=document.createElement("div"); top.className="srow-top";
   top.appendChild(dot); top.appendChild(name);
   acts.className="srow-btns";
-  r.appendChild(top); r.appendChild(acts);
+
+  // Time display — click to edit
+  var timeRow=document.createElement("div"); timeRow.className="srow-time"; timeRow.id="stime-"+s.id;
+  function renderTimeLabel(){
+    var hasTime=s.timeStart||s.timeEnd;
+    if(hasTime){
+      timeRow.textContent=(s.timeStart||"?")+" \u2013 "+(s.timeEnd||"?");
+    } else {
+      timeRow.textContent="+ add time";
+      timeRow.style.opacity="0.4";
+    }
+  }
+  renderTimeLabel();
+  (function(item,did){timeRow.onclick=function(e){
+    e.stopPropagation();
+    var existing=r.querySelector('.stime-edit');
+    if(existing){existing.parentNode.removeChild(existing);renderTimeLabel();return;}
+    var editRow=document.createElement("div"); editRow.className="stime-edit";
+    editRow.style.cssText="display:flex;align-items:center;gap:4px;padding-left:12px;margin-top:2px;";
+    var startInp=document.createElement("input"); startInp.type="time"; startInp.className="stime-inp"; startInp.value=item.timeStart||"";
+    var sep=document.createElement("span"); sep.style.cssText="font-size:10px;color:#aaa;"; sep.textContent="\u2013";
+    var endInp=document.createElement("input"); endInp.type="time"; endInp.className="stime-inp"; endInp.value=item.timeEnd||"";
+    var saveBtn=document.createElement("button"); saveBtn.className="sa"; saveBtn.style.cssText="font-size:9px;padding:1px 5px;"; saveBtn.textContent="Save";
+    saveBtn.onclick=function(e){
+      e.stopPropagation();
+      item.timeStart=startInp.value||null;
+      item.timeEnd=endInp.value||null;
+      editRow.parentNode.removeChild(editRow);
+      renderTimeLabel();
+      autoSave();
+      checkTimeConflicts(getDest(did),dayId);
+    };
+    editRow.appendChild(startInp); editRow.appendChild(sep); editRow.appendChild(endInp); editRow.appendChild(saveBtn);
+    r.appendChild(editRow);
+    startInp.focus();
+  };})(s,destId);
+
+  r.appendChild(top);
+  r.appendChild(timeRow);
+  r.appendChild(acts);
   return r;
 }
 
@@ -4924,6 +5023,8 @@ function drawDestMode(destId){
   sightsPane.appendChild(buildBucketSection(dest,"later","Later","Sights and restaurants to get to if there\u2019s time"));
   sightsPane.appendChild(buildBucketSection(dest,"maybe","Maybe","Considering \u2014 not committed"));
   paneWrap.appendChild(sightsPane);
+  // Check for time conflicts after render
+  setTimeout(function(){checkTimeConflicts(dest,null);},0);
 
   // EXPLORE pane
   var explorePane=document.createElement("div"); explorePane.id="dm-pane-explore";
@@ -5978,7 +6079,8 @@ function toggleGeneralForm(btn,container,formId,destId){
     var o=document.createElement("option"); o.value=t.toLowerCase(); o.textContent=t; typeSel.appendChild(o);
   });
   var labelInp=document.createElement("input"); labelInp.type="text"; labelInp.className="bk-inp"; labelInp.placeholder="e.g. Borghese Gallery entrance";
-  r1.appendChild(mkField("Type",typeSel)); r1.appendChild(mkField("Description",labelInp));
+  var locationInp=document.createElement("input"); locationInp.type="text"; locationInp.className="bk-inp"; locationInp.placeholder="Meeting point or address";
+  r1.appendChild(mkField("Type",typeSel)); r1.appendChild(mkField("Description",labelInp)); r1.appendChild(mkField("Location",locationInp));
   var r2=document.createElement("div"); r2.className="bk-row";
   var dateInp=document.createElement("input"); dateInp.type="date"; dateInp.className="bk-inp";
   var timeInp=document.createElement("input"); timeInp.type="time"; timeInp.className="bk-inp";
