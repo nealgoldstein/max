@@ -1141,8 +1141,8 @@ function getCityCenter(place){
   var p=place.toLowerCase();
   if(_generatedCityData[p]&&_generatedCityData[p].cityCenter&&_generatedCityData[p].cityCenter[0])
     return _generatedCityData[p].cityCenter;
-  if(_generatedCityData[p]&&_generatedCityData[p].loading)
-    return null; // still generating — caller handles null
+  if(_generatedCityData[p]&&_generatedCityData[p].loading&&!_generatedCityData[p].cityCenter)
+    return null; // still loading with no geocode yet
   var centers={interlaken:[46.6863,7.8632],vienna:[48.2082,16.3738],prague:[50.0755,14.4378],
     budapest:[47.4979,19.0402],amsterdam:[52.3676,4.9041],paris:[48.8566,2.3522],
     rome:[41.9028,12.4964],barcelona:[41.3851,2.1734],berlin:[52.5200,13.4050],
@@ -1956,6 +1956,18 @@ async function generateCityData(place,destId){
   var key=place.toLowerCase();
   if(_generatedCityData[key]&&!_generatedCityData[key].loading)return;
   _generatedCityData[key]={loading:true};
+
+  // First: geocode the city via Nominatim so map shows correct location even with no API key
+  try{
+    var geoResp=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(place),{headers:{'Accept-Language':'en'}});
+    var geoData=await geoResp.json();
+    if(geoData.length&&_generatedCityData[key]){
+      _generatedCityData[key].cityCenter=[parseFloat(geoData[0].lat),parseFloat(geoData[0].lon)];
+      _generatedCityData[key].loading=true; // still loading full data
+      if(activeDest===destId&&_leftMode==='dest') updateMainMap();
+    }
+  }catch(e){ /* geocode failed — continue anyway */ }
+
   showSaveStatus('Max is generating '+place+' data\u2026',60000);
 
   var prompt='Generate travel data for '+place+'. Return ONLY valid JSON, no markdown:\n{"cityCenter":[lat,lng],"sights":[{"name":"...","st":"...","desc":"one sentence"}],"districts":[{"name":"...","good":"...","bad":"...","hotels":[{"name":"...","desc":"...","price":"...","tier":2}]}],"practicalInfo":{"currency":"...","tipping":"...","note":"...","emergency":"..."},"transitHub":{"arrival":{"name":"...","lat":0,"lng":0},"departure":{"name":"...","lat":0,"lng":0}}}\n6-8 sights, 2 districts, 1-2 hotels each. Be concise.';
@@ -2037,12 +2049,19 @@ async function generateCityData(place,destId){
       }
     }
   }catch(err){
-    delete _generatedCityData[key];
+    // Preserve any geocoded city center, just clear the loading state
+    var existingData=_generatedCityData[key]||{};
+    _generatedCityData[key]={cityCenter:existingData.cityCenter||null,loading:false,failed:true};
     var errDetail=err&&err.message?err.message:'Unknown error';
     console.error('generateCityData failed:',errDetail);
-    var d2x=getDest(destId);
-    var alreadyHasData=d2x&&d2x.suggestions&&d2x.suggestions.length>0;
-    if(!alreadyHasData) showSaveStatus('⚠ Generation failed: '+errDetail,10000);
+    var d2=getDest(destId);
+    if(d2&&(!d2.suggestions||d2.suggestions.length===0)){
+      var noKeyMsg=errDetail.indexOf('No API key')>-1?
+        place+' suggestions need an API key — add yours in Settings, then click Refresh.':
+        'Could not load '+place+' data. Click Refresh to try again.';
+      showSaveStatus('\u26a0 '+noKeyMsg,8000);
+    }
+    if(activeDest===destId&&_leftMode==='dest') drawDestMode(destId);
     // Only show error pane if suggestions are genuinely missing
     var d2=getDest(destId);
     var alreadyHasData=d2&&d2.suggestions&&d2.suggestions.length>0;
