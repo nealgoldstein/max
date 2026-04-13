@@ -3363,20 +3363,25 @@ function updateMainMap(){
     }
     if(overlay)overlay.style.display="none";
     var bounds=[];
+    var boundsKey=trip.destinations.map(function(d){return d.id;}).join(',');
+    var needsFit=(boundsKey!==_mainMap._lastTripBoundsKey);
     trip.destinations.forEach(function(dest){
       var c=getCityCenter(dest.place);
+      if(!c) return;
       var icon=L.divIcon({
         html:'<div style="background:#111;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.3);">'+dest.place.substring(0,2)+'</div>',
         className:"",iconSize:[28,28],iconAnchor:[14,14],popupAnchor:[0,-16]
       });
       var m=L.marker(c,{icon:icon}).addTo(_mainMap);
-      // No Leaflet popup — click opens dest directly
       (function(did){m.on("click",function(){selectDest(did);});})(dest.id);
       _mainMarkers.push(m);
       bounds.push(c);
     });
-    if(bounds.length===1){_mainMap.setView(bounds[0],10);}
-    else if(bounds.length>1){try{_mainMap.fitBounds(bounds,{padding:[40,40]});}catch(e){}}
+    if(needsFit){
+      _mainMap._lastTripBoundsKey=boundsKey;
+      if(bounds.length===1){_mainMap.setView(bounds[0],10,{animate:false});}
+      else if(bounds.length>1){try{_mainMap.fitBounds(bounds,{padding:[40,40],animate:false});}catch(e){}}
+    }
   } else {
     var dest=getDest(activeDest); if(!dest)return;
     var overlay2=g("no-dest-overlay");
