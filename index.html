@@ -4621,13 +4621,20 @@ function buildBucketSection(dest,bucketKey,title,subtitle){
   return sec;
 }
 
+var _hiddenStories = new Set(); // persists story hidden state across re-renders
+
 function mkCachedStoryBox(sid){
   var cached=_sightStories[sid]; if(!cached)return document.createDocumentFragment();
+  if(_hiddenStories.has(sid)) return document.createDocumentFragment(); // still hidden
   var box=document.createElement("div"); box.className="story-box"; box.id="stb-"+sid;
   var p=document.createElement("div"); p.style.cssText="margin-bottom:8px;line-height:1.75;"; p.textContent=cached.text;
   var acts=document.createElement("div"); acts.className="story-actions";
   var cls=document.createElement("button"); cls.className="story-btn cb"; cls.textContent="Hide";
-  (function(id){cls.onclick=function(){var bx=g("stb-"+id);if(bx)bx.style.display="none";var sb=g("ssa-"+id);if(sb){sb.setAttribute("data-state","idle");sb.textContent="story \u2197";}};})(sid);
+  (function(id){cls.onclick=function(){
+    _hiddenStories.add(id);
+    var bx=g("stb-"+id);if(bx)bx.style.display="none";
+    var sb=g("ssa-"+id);if(sb){sb.setAttribute("data-state","idle");sb.textContent="story \u2197";}
+  };})(sid);
   acts.appendChild(cls); box.appendChild(p); box.appendChild(acts);
   return box;
 }
@@ -5167,6 +5174,8 @@ function drawDestMode(destId){
     matching.forEach(function(h){
       hotelCtr++;
       var isBooked=bookedHotelNames.indexOf(h.name)>-1;
+      var cancelledBookings=dest.hotelBookings.filter(function(b){return b.name===h.name&&b.status==='cancelled';});
+      var hasCancelled=cancelledBookings.length>0;
       var hbWrap=document.createElement("div");
       if(isBooked) hbWrap.style.cssText="opacity:0.45;";
       var hiEl=document.createElement("div"); hiEl.className="hi";
@@ -5177,7 +5186,7 @@ function drawDestMode(destId){
       var hp=document.createElement("div"); hp.className="hp"; hp.textContent=h.price||"";
       hiEl.appendChild(hl); hiEl.appendChild(hp);
       hbWrap.appendChild(hiEl);
-      if(!isBooked){
+      if(!isBooked && !hasCancelled){
         var formId="hbf-"+dest.id+"-"+hotelCtr+"-"+Date.now();
         var logBtn=document.createElement("button"); logBtn.className="bk-log-btn"; logBtn.textContent="Log booking";
         logBtn.style.cssText="display:block;margin-top:4px;";
@@ -5185,8 +5194,9 @@ function drawDestMode(destId){
           hotelName:hname,area:dist.name,destId:did,checkIn:dest.dateFrom,checkOut:dest.dateTo,currency:"EUR"
         },function(){drawDestMode(did);});};})(logBtn,hbWrap,h.name,dest.id,formId);
         hbWrap.appendChild(logBtn);
-        dest.hotelBookings.filter(function(b){return b.name===h.name&&b.status!=="booked";}).forEach(function(b){hbWrap.appendChild(mkHotelRecord(b,dest.id));});
       }
+      // Show cancelled records under the hotel
+      cancelledBookings.forEach(function(b){hbWrap.appendChild(mkHotelRecord(b,dest.id));});
       db2.appendChild(hbWrap);
     });
     seStayPane.appendChild(db2);
@@ -5465,6 +5475,15 @@ async function sStory(sid, destId) {
   var topic = s.st || s.n; if (!topic) return;
   var btn = g("ssa-" + sid); if (!btn) return;
   if (btn.getAttribute("data-state") !== "idle") return;
+
+  // If story exists but was hidden, just re-show it
+  if(_sightStories[sid] && _hiddenStories.has(sid)){
+    _hiddenStories.delete(sid);
+    var day=fDayOf(sid,destId);
+    if(day) drawDestMode(destId); // re-render to show story
+    return;
+  }
+
   btn.setAttribute("data-state", "asking"); btn.textContent = "thinking\u2026";
 
   var dest = getDest(destId);
