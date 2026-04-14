@@ -1382,11 +1382,27 @@ function collectMapLocations(dest){
   // Nearby — use dest.locations if populated, else static fallback
   var nearbyTypes=["atm","grocery","tourist-info","transit"];
   var storedNearby=dest.locations.filter(function(l){return nearbyTypes.indexOf(l.type)>-1;});
-  if(storedNearby.length>0){
-    storedNearby.forEach(function(l){locs.push(l);});
-  } else {
-    getNearbyLocations(dest.place).forEach(function(l){locs.push(l);});
+  var nearbyLocs=storedNearby.length>0?storedNearby:getNearbyLocations(dest.place);
+
+  // Find booked hotel coords for proximity sorting
+  var bookedHotelLat=bookedHotel&&bookedHotel.lat?bookedHotel.lat:null;
+  var bookedHotelLng=bookedHotel&&bookedHotel.lng?bookedHotel.lng:null;
+  // Also check district data for hotel coords
+  if(!bookedHotelLat&&bookedHotel){
+    var allDists=getDistricts(dest.place,dest.intent,dest);
+    allDists.forEach(function(d){d.hotels.forEach(function(h){
+      if(h.name===bookedHotel.name&&h.lat){bookedHotelLat=h.lat;bookedHotelLng=h.lng;}
+    });});
   }
+  if(bookedHotelLat){
+    // Sort transit locations by distance to hotel; keep others in original order
+    var transitLocs=nearbyLocs.filter(function(l){return l.type==='transit';});
+    var otherLocs=nearbyLocs.filter(function(l){return l.type!=='transit';});
+    function dist2(a){return Math.pow(a.lat-bookedHotelLat,2)+Math.pow(a.lng-bookedHotelLng,2);}
+    transitLocs.sort(function(a,b){return dist2(a)-dist2(b);});
+    nearbyLocs=otherLocs.concat(transitLocs);
+  }
+  nearbyLocs.forEach(function(l){locs.push(l);});
   return locs;
 }
 
