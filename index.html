@@ -3625,6 +3625,16 @@ function updateMainMapMarkers(){
     addPin([loc.lat,loc.lng],makeMapIcon(loc.type),1,{id:'util-'+loc.name,n:loc.name,note:loc.note||loc.type,done:false,slot:'day'},'info');
   });
 
+  // Current destination city pin — always show even when sights are present
+  if(center){
+    var curIcon=L.divIcon({
+      html:'<div style="background:#111;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.35);">'+dest.place.substring(0,2)+'</div>',
+      className:'',iconSize:[28,28],iconAnchor:[14,14],popupAnchor:[0,-16]
+    });
+    var cm=L.marker(center,{icon:curIcon,zIndexOffset:100});
+    cm.addTo(_mainMap); _mainMarkers.push(cm);
+  }
+
   // Previous and next destination markers — ghosted city pins for context
   var destIdx=trip.destinations.indexOf(dest);
   var contextBounds=[center]; // start with current city center
@@ -3634,14 +3644,14 @@ function updateMainMapMarkers(){
     var nc=getCityCenter(nd.place); if(!nc) return;
     contextBounds.push(nc);
     var icon=L.divIcon({
-      html:'<div style="background:#888;color:#fff;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.25);">'+nd.place.substring(0,2)+'</div>',
+      html:'<div style="background:#444;color:#fff;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.3);">'+nd.place.substring(0,2)+'</div>',
       className:'',iconSize:[22,22],iconAnchor:[11,11],popupAnchor:[0,-13]
     });
-    var m=L.marker(nc,{icon:icon,opacity:0.75});
+    var m=L.marker(nc,{icon:icon,opacity:0.85});
     (function(nid){m.on('click',function(){selectDest(nid);});})(nd.id);
     m.addTo(_mainMap); _mainMarkers.push(m);
     var lbl=L.divIcon({
-      html:'<div style="font-size:9px;color:#555;font-weight:600;white-space:nowrap;background:rgba(255,255,255,0.88);padding:1px 5px;border-radius:3px;margin-top:2px;box-shadow:0 1px 3px rgba(0,0,0,.12);">'+nb.label+' '+nd.place+'</div>',
+      html:'<div style="font-size:9px;color:#333;font-weight:600;white-space:nowrap;background:rgba(255,255,255,0.92);padding:1px 5px;border-radius:3px;margin-top:2px;box-shadow:0 1px 3px rgba(0,0,0,.12);">'+nb.label+' '+nd.place+'</div>',
       className:'',iconSize:[0,0],iconAnchor:[-4,0]
     });
     var lm=L.marker(nc,{icon:lbl,interactive:false}); lm.addTo(_mainMap); _mainMarkers.push(lm);
