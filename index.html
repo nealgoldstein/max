@@ -1838,7 +1838,11 @@ function showMapPinPanel(item,dest,itemType,mapEvent){
   }
   if(isUtility){ /* no actions for hotel/transit/utility pins */ } else if(isUnscheduled){
     var addBtn=document.createElement('button'); addBtn.className='mpp-btn primary'; addBtn.textContent='Add to day \u2192';
-    (function(it,tp){addBtn.onclick=function(){panel.style.display='none';showAddToDay(it,tp,dest,addBtn);};})(item,itemType==='restaurant-suggestion'?'restaurant':'sight');
+    (function(it,tp){addBtn.onclick=function(e){
+      var btnRect=panel.getBoundingClientRect();
+      panel.style.display='none';
+      showAddToDay(it,tp,dest,addBtn,{x:btnRect.left,y:btnRect.top,execDayId:_mapExecMode?_mapExecMode.dayId:null});
+    };})(item,itemType==='restaurant-suggestion'?'restaurant':'sight');
     acts.appendChild(addBtn);
   } else {
     // Scheduled: done, move, delete
@@ -4497,49 +4501,56 @@ function mkExploreSuggestion(s,dest,type){
   return row;
 }
 
-function showAddToDay(item,type,dest,triggerBtn){
+function showAddToDay(item,type,dest,triggerBtn,opts){
   var existing=document.getElementById("exp-day-picker");
   if(existing)existing.parentNode.removeChild(existing);
   var picker=document.createElement("div"); picker.id="exp-day-picker";
-  picker.style.cssText="position:fixed;z-index:9999;background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.18);padding:6px 0;min-width:160px;";
-  var phdr=document.createElement("div"); phdr.style.cssText="font-size:9px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#bbb;padding:4px 14px 5px;border-bottom:1px solid #f0f0f0;margin-bottom:3px;";
-  phdr.textContent="Add to day"; picker.appendChild(phdr);
+  picker.style.cssText="position:fixed;z-index:9999;background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.18);padding:6px 0;min-width:180px;";
+  var phdr=document.createElement("div"); phdr.style.cssText="font-size:10px;font-weight:700;color:#333;padding:5px 14px 6px;border-bottom:1px solid #f0f0f0;margin-bottom:3px;";
+  phdr.textContent="Add to which day?"; picker.appendChild(phdr);
+  var execDayId=opts&&opts.execDayId;
   dest.days.forEach(function(day){
     [{slot:"day",lbl:"Day"},{slot:"evening",lbl:"Evening"}].forEach(function(sl){
+      var isCurrentDay=execDayId&&day.id===execDayId;
       var opt=document.createElement("div");
-      opt.style.cssText="padding:5px 14px;font-size:11px;color:#333;cursor:pointer;display:flex;justify-content:space-between;align-items:center;";
-      var dLbl=document.createElement("span"); dLbl.textContent=day.lbl; opt.appendChild(dLbl);
+      opt.style.cssText="padding:6px 14px;font-size:11px;color:#333;cursor:pointer;display:flex;justify-content:space-between;align-items:center;"+(isCurrentDay?"background:#f0f5ff;":"");
+      var dLbl=document.createElement("span");
+      dLbl.textContent=day.lbl+(isCurrentDay?" ←":"");
+      if(isCurrentDay) dLbl.style.cssText="font-weight:600;color:#1a5fa8;";
+      opt.appendChild(dLbl);
       var sLbl=document.createElement("span"); sLbl.style.cssText="font-size:9px;color:#aaa;"; sLbl.textContent=sl.lbl; opt.appendChild(sLbl);
       opt.onmouseover=function(){opt.style.background="#f5f5f5";};
-      opt.onmouseout=function(){opt.style.background="";};
+      opt.onmouseout=function(){opt.style.background=isCurrentDay?"#f0f5ff":"";};
       (function(d,sl2){opt.onclick=function(e){
         e.stopPropagation();
-        // Add to day.items
         sidCtr++;
         var ni={id:"s"+sidCtr,type:type,slot:sl2,n:item.n||item.name,p:"nice",done:false,
           st:item.st||item.n||item.name,note:item.note||null,timeStart:null,timeEnd:null,
           lat:item.lat||null,lng:item.lng||null};
         if(!d.items)d.items=[];
         d.items.push(ni);
-        // Remove from suggestions
         if(type==="restaurant"){
           dest.restaurantSuggestions=dest.restaurantSuggestions.filter(function(x){return x.id!==item.id;});
         } else {
           dest.suggestions=dest.suggestions.filter(function(x){return x.id!==item.id;});
         }
-        // Remove from DOM
         var expRow=document.getElementById("exp-"+item.id);
         if(expRow)expRow.parentNode.removeChild(expRow);
         picker.parentNode&&picker.parentNode.removeChild(picker);
         autoSave(); updateMainMap();
-        // Switch to Itinerary tab to show what was added
         _activeDmSection="sights"; drawDestMode(dest.id);
       };})(day,sl.slot);
       picker.appendChild(opt);
     });
   });
-  var r=triggerBtn.getBoundingClientRect();
-  picker.style.left=r.left+"px"; picker.style.top=(r.bottom+4)+"px";
+  // Position: use opts.x/y if provided (from map panel), otherwise use triggerBtn
+  if(opts&&opts.x!=null){
+    picker.style.left=Math.max(8,opts.x-20)+"px";
+    picker.style.top=Math.max(8,opts.y-20)+"px";
+  } else {
+    var r=triggerBtn.getBoundingClientRect();
+    picker.style.left=r.left+"px"; picker.style.top=(r.bottom+4)+"px";
+  }
   document.body.appendChild(picker);
   setTimeout(function(){document.addEventListener("click",function dismiss(e){if(!picker.contains(e.target)){picker.parentNode&&picker.parentNode.removeChild(picker);document.removeEventListener("click",dismiss,true);}},true);},0);
 }
