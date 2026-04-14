@@ -5,6 +5,8 @@
 <title>Max - Tourist's Guide Travel Agent</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pikaday/css/pikaday.css"/>
+<script src="https://cdn.jsdelivr.net/npm/pikaday/pikaday.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#e8e8e8;color:#111;font-size:14px;line-height:1.6;}
@@ -159,7 +161,12 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .dm-act-btn.active{background:#111;color:#fff;border-color:#111;}
 .dm-tabs{display:flex;border-top:1px solid #f0f0f0;border-bottom:1px solid #f0f0f0;overflow-x:auto;scrollbar-width:none;flex-shrink:0;}
 .dm-tabs::-webkit-scrollbar{display:none;}
-.dm-tab-badge{display:inline-block;background:#e05050;color:#fff;border-radius:8px;font-size:8px;font-weight:700;padding:0px 4px;margin-left:3px;vertical-align:middle;line-height:14px;}
+.pika-single{font-family:inherit;font-size:11px;border-radius:8px;border:1px solid #ddd;box-shadow:0 4px 16px rgba(0,0,0,.15);z-index:9999;}
+.pika-button:hover,.pika-button:focus{background:#f0f4ff;color:#1a5fa8;}
+.is-selected .pika-button{background:#111;color:#fff;border-radius:4px;}
+.is-today .pika-button{color:#1a5fa8;font-weight:700;}
+.pika-label{font-size:11px;font-weight:700;}
+.pika-prev,.pika-next{font-size:14px;}
 .tk-action-item{display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px solid #f5f5f5;}
 .tk-action-item.cleared{opacity:0.4;}
 .tk-action-check{width:16px;height:16px;border:1.5px solid #ccc;border-radius:3px;flex-shrink:0;margin-top:1px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
@@ -2923,6 +2930,45 @@ function getLeg(fromId,toId){
   return trip.legs[key];
 }
 
+function mkDateInp(id,value,opts){
+  // Creates a text input backed by Pikaday — cleaner UX than native date picker
+  var inp=document.createElement("input"); inp.type="text"; inp.className="bk-inp date-edit-inp";
+  if(id) inp.id=id;
+  inp.placeholder="MMM D, YYYY"; inp.readOnly=true; inp.style.cursor="pointer";
+  var _pik=null;
+  function initPikaday(){
+    if(_pik||typeof Pikaday==='undefined') return;
+    _pik=new Pikaday({
+      field: inp,
+      format: 'MMM D, YYYY',
+      toString: function(date){ return date.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); },
+      parse: function(str){ var d=new Date(str); return isNaN(d)?new Date():d; },
+      onSelect: function(date){
+        inp._isoValue=date.toISOString().slice(0,10);
+        inp.value=_pik.toString(date);
+        if(opts&&opts.onSelect) opts.onSelect(inp._isoValue,date);
+        if(opts&&opts.minDate) _pik.setMinDate(null); // reset after selection
+      },
+      minDate: opts&&opts.minDate?new Date(opts.minDate+'T12:00:00'):null,
+      maxDate: null,
+      yearRange: [2020,2030],
+      i18n: { previousMonth:'<',nextMonth:'>',months:['January','February','March','April','May','June','July','August','September','October','November','December'],weekdays:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],weekdaysShort:['Su','Mo','Tu','We','Th','Fr','Sa'] }
+    });
+  }
+  inp.onfocus=function(){ initPikaday(); };
+  inp.onclick=function(){ initPikaday(); if(_pik)_pik.show(); };
+  // Set initial value
+  if(value){
+    inp._isoValue=value;
+    var dv=new Date(value+'T12:00:00');
+    inp.value=dv.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  }
+  // Expose .value as ISO for compatibility
+  Object.defineProperty(inp,'isoValue',{get:function(){return inp._isoValue||'';},set:function(v){inp._isoValue=v;if(v){var d=new Date(v+'T12:00:00');inp.value=d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});}else{inp.value='';}}});
+  inp.destroy=function(){if(_pik)_pik.destroy();};
+  return inp;
+}
+
 function mkField(labelText,inputEl){
   var w=document.createElement("div"); w.className="bk-field";
   var l=document.createElement("div"); l.className="bk-lbl"; l.textContent=labelText;
@@ -4337,14 +4383,20 @@ function drawTripMode(){
       genLbl.textContent="Max is generating data\u2026"; card.appendChild(genLbl);
     }
 
-    // Edit dates inline
+    // Edit dates inline — Pikaday date picker
     var editRow=document.createElement("div"); editRow.id="di-edit-row-"+dest.id; editRow.style.display="none";
     editRow.style.cssText="display:none;padding:5px 0 2px;";
-    var fi=document.createElement("input"); fi.type="date"; fi.className="date-edit-inp"; fi.id="edit-from-"+dest.id; fi.value=dest.dateFrom; fi.min="";
-    var arrow=document.createElement("span"); arrow.style.cssText="font-size:10px;color:#aaa;"; arrow.textContent="\u2192";
-    var ti=document.createElement("input"); ti.type="date"; ti.className="date-edit-inp"; ti.id="edit-to-"+dest.id; ti.value=dest.dateTo;
-    ti.min=dest.dateFrom;
-    fi.onchange=function(){ti.min=fi.value;if(ti.value&&ti.value<fi.value)ti.value="";fi.blur();};
+    var fi=mkDateInp("edit-from-"+dest.id, dest.dateFrom, {onSelect:function(iso){
+      fi._isoValue=iso;
+      ti_pik&&ti_pik.setMinDate(new Date(iso+'T12:00:00'));
+      if(ti._isoValue&&ti._isoValue<iso){ti.isoValue='';}
+    }});
+    var ti_pik=null; // reference to ti's pikaday instance - set below
+    var arrow=document.createElement("span"); arrow.style.cssText="font-size:10px;color:#aaa;margin:0 4px;"; arrow.textContent="\u2192";
+    var ti=mkDateInp("edit-to-"+dest.id, dest.dateTo, {minDate:dest.dateFrom});
+    // Keep saveDates compatibility — it reads fi.value and ti.value via _isoValue
+    Object.defineProperty(fi,'value',{get:function(){return fi._isoValue||'';},set:function(v){fi.isoValue=v;},configurable:true});
+    Object.defineProperty(ti,'value',{get:function(){return ti._isoValue||'';},set:function(v){ti.isoValue=v;},configurable:true});
     var sv=document.createElement("button"); sv.className="date-save-btn"; sv.textContent="Save";
     sv.onclick=function(e){e.stopPropagation();saveDates(dest.id);};
     var cx=document.createElement("button"); cx.className="date-cancel-btn"; cx.textContent="Cancel";
