@@ -2554,50 +2554,64 @@ function showDateChangeDialog(dest,newFrom,newTo,affected,onConfirm){
 
     var hasOwnBookings=affected.bookings.length>0;
     var hasOverlaps=affected.overlapping.length>0;
+    var hasAnything=hasOwnBookings||hasOverlaps;
 
-    // Overlap warning first — ask if they still want to proceed
+    // Overlap warning
     if(hasOverlaps){
+      var ovNames=affected.overlapping.map(function(o){return o.dest;}).join(', ');
       var ovWarn=document.createElement('div'); ovWarn.className='move-dialog-warn';
       ovWarn.style.cssText='background:#fff3cd;border-color:#ffc107;color:#856404;';
-      var ovLines=affected.overlapping.map(function(o){return o.dest;}).join(', ');
-      ovWarn.innerHTML='<strong>\u26a0 Date overlap with: '+ovLines+'</strong> \u2014 these dates overlap with other destinations. Their bookings will also be affected. Do you still want to make this change?';
+      ovWarn.innerHTML='<strong>\u26a0 These dates overlap with '+ovNames+'.</strong> Changes to both destinations are shown below. Do you still want to proceed?';
       dlg.appendChild(ovWarn);
     }
 
-    if(hasOwnBookings){
-      var secLbl=document.createElement('div'); secLbl.className='move-dialog-label';
-      secLbl.textContent=(dest.label||dest.place)+' \u2014 your bookings:'; dlg.appendChild(secLbl);
-      var list=document.createElement('div'); list.style.cssText='margin-bottom:10px;';
-      affected.bookings.forEach(function(b){
-        var row=document.createElement('div'); row.style.cssText='font-size:11px;padding:4px 8px;background:#fff8f0;border:1px solid #f0dcc0;border-radius:4px;margin-bottom:3px;';
-        row.innerHTML='<strong>'+b.type+'</strong>: '+b.name+' <span style="color:#999;">('+b.detail+')</span><span style="margin-left:6px;color:#b05820;font-size:10px;">will be removed from Max</span>';
-        list.appendChild(row);
-      }); dlg.appendChild(list);
+    // Helper to render a destination section
+    function mkDestSection(name, bookings, extraNote){
+      var sec=document.createElement('div');
+      sec.style.cssText='margin-bottom:10px;border:1px solid #e8e0d8;border-radius:6px;overflow:hidden;';
+      var hdr=document.createElement('div');
+      hdr.style.cssText='font-size:11px;font-weight:700;padding:5px 10px;background:#f7f3ee;border-bottom:1px solid #e8e0d8;color:#333;';
+      hdr.textContent='In '+name;
+      sec.appendChild(hdr);
+      var body=document.createElement('div'); body.style.cssText='padding:5px 10px 8px;';
+      if(bookings&&bookings.length>0){
+        bookings.forEach(function(b){
+          var row=document.createElement('div'); row.style.cssText='font-size:11px;padding:3px 0;display:flex;align-items:baseline;gap:6px;';
+          row.innerHTML='<span style="color:#b05820;">✕</span><span><strong>'+b.type+':</strong> '+b.name+(b.detail?' <span style="color:#999;font-size:10px;">('+b.detail+')</span>':'')+'</span>';
+          body.appendChild(row);
+        });
+      } else if(extraNote){
+        var note=document.createElement('div'); note.style.cssText='font-size:11px;color:#888;';
+        note.textContent=extraNote; body.appendChild(note);
+      } else {
+        var ok=document.createElement('div'); ok.style.cssText='font-size:11px;color:#2a7a4e;';
+        ok.textContent='No bookings affected.'; body.appendChild(ok);
+      }
+      sec.appendChild(body);
+      return sec;
     }
-    if(hasOverlaps){
-      var ovLbl=document.createElement('div'); ovLbl.className='move-dialog-label';
-      ovLbl.textContent='Overlapping destinations \u2014 bookings that will be affected:'; dlg.appendChild(ovLbl);
-      var ovList=document.createElement('div'); ovList.style.cssText='margin-bottom:10px;';
+
+    if(hasAnything){
+      // Current destination section
+      dlg.appendChild(mkDestSection(
+        dest.label||dest.place,
+        affected.bookings,
+        hasOwnBookings?null:'No bookings to update.'
+      ));
+      // Overlapping destination sections
       affected.overlapping.forEach(function(d){
-        var dh=document.createElement('div');
-        dh.style.cssText='font-size:11px;font-weight:700;color:#b05820;margin:6px 0 3px;';
-        dh.textContent=d.dest+' \u2014 '+d.detail; ovList.appendChild(dh);
-        if(d.bookings&&d.bookings.length>0){
-          d.bookings.forEach(function(b){
-            var row=document.createElement('div'); row.style.cssText='font-size:11px;padding:4px 8px;background:#fff8f0;border:1px solid #f0dcc0;border-radius:4px;margin-bottom:3px;';
-            row.innerHTML='<strong>'+b.type+'</strong>: '+b.name+(b.detail?' <span style="color:#999;">('+b.detail+')</span>':'')+'<span style="margin-left:6px;color:#b05820;font-size:10px;">will be removed from Max</span>';
-            ovList.appendChild(row);
-          });
-        } else {
-          var none=document.createElement('div'); none.style.cssText='font-size:11px;color:#aaa;padding:2px 8px;';
-          none.textContent='No logged bookings \u2014 itinerary items in overlapping days returned to suggestions'; ovList.appendChild(none);
+        var note=null;
+        if(!d.bookings||d.bookings.length===0){
+          note='No bookings — any itinerary items in overlapping days will be returned to suggestions.';
         }
-      }); dlg.appendChild(ovList);
+        dlg.appendChild(mkDestSection(d.dest, d.bookings, note));
+      });
     }
+
     var acts=document.createElement('div'); acts.className='move-dialog-actions';
     var backBtn=document.createElement('button'); backBtn.className='move-dialog-cancel'; backBtn.textContent='Go back';
     backBtn.onclick=function(){document.body.removeChild(overlay);};
-    var confirmText=hasOverlaps?'Yes, update dates':'Update dates in Max';
+    var confirmText=hasOverlaps?'Yes, update dates':'Update dates';
     var confirmBtn=document.createElement('button'); confirmBtn.className='move-dialog-confirm'; confirmBtn.textContent=confirmText;
     confirmBtn.onclick=function(){
       var items=buildCancelItems(dest,affected);
