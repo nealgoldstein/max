@@ -719,6 +719,8 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
     </div>
     <!-- Map layer toggle panel -->
     <div id="mlt-panel" class="mlt-panel"></div>
+    <!-- Map style toggle -->
+    <div id="map-style-btn" style="position:absolute;bottom:34px;left:8px;z-index:499;background:#fff;border:1px solid #ddd;border-radius:6px;padding:4px 8px;box-shadow:0 2px 8px rgba(0,0,0,.12);font-size:10px;font-weight:600;color:#555;cursor:pointer;font-family:inherit;display:none;" title="Switch map style"></div>
     <!-- Map legend -->
     <div id="main-map-legend" class="map-legend" style="display:none;"></div>
     <!-- Layer controls -->
@@ -3223,22 +3225,47 @@ function initMainMap(){
   // Start with vector
   _mainVectorLayer.addTo(_mainMap);
   _currentMapStyle='vector';
+  initMapStyleBtn();
   setTimeout(function(){if(_mainMap)_mainMap.invalidateSize();},100);
   window.addEventListener("resize",function(){if(_mainMap)_mainMap.invalidateSize();});
 }
 
 var _mainVectorLayer=null, _mainSatLayer=null, _mainSatLabels=null, _currentMapStyle='vector';
+var _mapStylePref='auto'; // 'auto' | 'vector' | 'satellite'
 
-function setMapStyle(style){
-  if(!_mainMap||_currentMapStyle===style) return;
+function initMapStyleBtn(){
+  var btn=document.getElementById('map-style-btn');
+  if(!btn) return;
+  var styles=['auto','vector','satellite'];
+  var labels={'auto':'🗺 Auto','vector':'🗺 Map','satellite':'🛰 Satellite'};
+  function render(){
+    btn.textContent=labels[_mapStylePref];
+    try{localStorage.setItem('max-map-style',_mapStylePref);}catch(e){}
+  }
+  btn.onclick=function(){
+    var idx=(styles.indexOf(_mapStylePref)+1)%styles.length;
+    _mapStylePref=styles[idx];
+    render();
+    updateMainMap();
+  };
+  // Restore saved preference
+  try{var saved=localStorage.getItem('max-map-style');if(saved&&styles.indexOf(saved)>-1)_mapStylePref=saved;}catch(e){}
+  render();
+}
+
+function setMapStyle(autoStyle){
+  if(!_mainMap) return;
+  // Respect user preference; 'autoStyle' is what the app would pick automatically
+  var style=_mapStylePref==='auto'?autoStyle:_mapStylePref;
+  if(_currentMapStyle===style) return;
   if(style==='satellite'){
-    _mainMap.removeLayer(_mainVectorLayer);
+    if(_mainMap.hasLayer(_mainVectorLayer)) _mainMap.removeLayer(_mainVectorLayer);
     _mainSatLayer.addTo(_mainMap);
     _mainSatLabels.addTo(_mainMap);
   } else {
     if(_mainMap.hasLayer(_mainSatLayer)) _mainMap.removeLayer(_mainSatLayer);
     if(_mainMap.hasLayer(_mainSatLabels)) _mainMap.removeLayer(_mainSatLabels);
-    _mainVectorLayer.addTo(_mainMap);
+    if(!_mainMap.hasLayer(_mainVectorLayer)) _mainVectorLayer.addTo(_mainMap);
   }
   _currentMapStyle=style;
 }
@@ -3509,6 +3536,8 @@ function updateMainMap(){
   clearMainMarkers();
   if(_leftMode==="trip"){
     setMapStyle('vector');
+    var styleBtn=document.getElementById('map-style-btn');
+    if(styleBtn) styleBtn.style.display='none';
     buildMainLegend("trip");
     var overlay=g("no-dest-overlay");
     var dayBtn=document.getElementById('map-day-btn');
@@ -3538,6 +3567,8 @@ function updateMainMap(){
     var dest=getDest(activeDest); if(!dest)return;
     var overlay2=g("no-dest-overlay");
     if(overlay2)overlay2.style.display="none";
+    var styleBtn2=document.getElementById('map-style-btn');
+    if(styleBtn2) styleBtn2.style.display='block';
     buildMainLegend("dest");
     updateDaySelector();
     var center=getCityCenter(dest.place);
