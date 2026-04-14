@@ -3334,11 +3334,13 @@ function updateMainMapMarkers(){
         addPin(bhC,makeMapIcon('stay-booked'),1,{id:'hotel-'+bh.name,n:bh.name,note:'✓ Booked · Check-in '+fmtD(bh.checkIn)+(bh.confirmationNumber?' · Conf: '+bh.confirmationNumber:''),done:false,slot:'day'},'hotel');
       }
     });
-    // Utility locations in day mode — always shown (grocery, ATM, transit, tourist-info)
+    // Utility locations in day mode — respects layer toggle
     var execLocs=collectMapLocations(dest);
     execLocs.forEach(function(loc){
       if(!loc.lat||!loc.lng) return;
       if(loc.type==='sight-must'||loc.type==='sight-nice'||loc.type==='restaurant'||loc.type==='stay') return;
+      var layerKey=_locLayerKey(loc);
+      if(!_mainActiveLayers[layerKey]) return;
       addPin([loc.lat,loc.lng],makeMapIcon(loc.type),1,{id:'util-'+loc.name,n:loc.name,note:loc.note||loc.type,done:false,slot:'day'},'info');
     });
     return;
