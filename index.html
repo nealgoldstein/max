@@ -11,7 +11,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .app{display:flex;height:100vh;}
 .lp{width:340px;flex-shrink:0;background:#fff;border-right:1px solid #ddd;display:flex;flex-direction:column;overflow:hidden;}
 .rp{flex:1;position:relative;overflow:hidden;min-width:0;display:flex;flex-direction:column;}
-#main-map{flex:1;min-height:0;width:100%;}
+#main-map{flex:1;min-height:0;width:100%;touch-action:none;}
 
 /* Left panel */
 .lp-hdr{padding:12px 14px;border-bottom:1px solid #eee;display:flex;align-items:center;gap:8px;flex-shrink:0;}
@@ -3181,7 +3181,16 @@ function updateDayBtnPosition(){
 
 function initMainMap(){
   if(_mainMap)return;
-  _mainMap=L.map("main-map",{zoomControl:true,worldCopyJump:true,minZoom:2}).setView([20,0],2);
+  _mainMap=L.map("main-map",{zoomControl:true,worldCopyJump:true,minZoom:2,
+    scrollWheelZoom:true,wheelPxPerZoomLevel:60}).setView([20,0],2);
+  // Trackpad pinch-to-zoom: browsers send wheel+ctrlKey for pinch gestures
+  document.getElementById('main-map').addEventListener('wheel',function(e){
+    if(e.ctrlKey){
+      e.preventDefault();
+      var delta=e.deltaY>0?-0.5:0.5;
+      _mainMap.setZoom(_mainMap.getZoom()+delta,{animate:false});
+    }
+  },{passive:false});
   _mainMap.on('click',function(){closeMapPinPanel();});
   L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{
     attribution:"\u00a9 Esri World Imagery",maxZoom:19,noWrap:false
