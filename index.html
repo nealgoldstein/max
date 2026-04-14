@@ -2719,8 +2719,16 @@ function applyDateChange(dest,newFrom,newTo,affected){
       logEntries.push({type:'cleared',icon:'❌',text:b.type+' removed: '+b.name+' ('+b.detail+')'});
     });
     (affected.overlapping||[]).forEach(function(ov){
-      logEntries.push({type:'cleared',icon:'❌',text:'Bookings cleared for '+ov.dest+' — '+ov.detail});
-      logEntries.push({type:'pool',icon:'↩️',text:'Items from overlapping days in '+ov.dest+' returned to Explore/Eat pool'});
+      var hadBookings=ov.bookings&&ov.bookings.length>0;
+      // Check if any items were actually returned to pool
+      var od=getDest(ov.id);
+      var hadItems=od&&od.days&&od.days.some(function(d){return (d.items||[]).length>0;});
+      if(hadBookings){
+        logEntries.push({type:'cleared',icon:'❌',text:'Bookings cleared for '+ov.dest+' — '+ov.detail});
+      }
+      if(hadItems){
+        logEntries.push({type:'pool',icon:'↩️',text:'Items from overlapping days in '+ov.dest+' returned to Explore/Eat pool'});
+      }
     });
   }
   if(logEntries.length>0) showActionLog(logEntries);
