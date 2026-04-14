@@ -3278,7 +3278,6 @@ function updateMainMapMarkers(){
         if(s.type==='sight'||s.type==='restaurant') allDayItems[s.n]={item:s,onToday:execDayItemNames[s.n]||false};
       });
     });
-    console.log('[MAX] execMode: allDayItems=',Object.keys(allDayItems).length,'suggestions=',dest.suggestions.length,'center=',center);
     // Show items from all days
     Object.keys(allDayItems).forEach(function(n){
       var entry=allDayItems[n]; var s=entry.item;
@@ -3286,21 +3285,21 @@ function updateMainMapMarkers(){
       var coords=getCoords(s,pool,center); if(!coords) return;
       var onDay=entry.onToday;
       var iconKey=s.type==='restaurant'?'restaurant':(s.p==='must'?'sight-must':'sight-nice');
-      addPin(coords,makeMapIcon(iconKey),onDay?(s.done?0.3:1):0.2,s,onDay?(s.type==='restaurant'?'restaurant':'sight'):(s.type==='restaurant'?'restaurant-suggestion':'suggestion'));
+      addPin(coords,makeMapIcon(iconKey),onDay?(s.done?0.3:1):0.45,s,onDay?(s.type==='restaurant'?'restaurant':'sight'):(s.type==='restaurant'?'restaurant-suggestion':'suggestion'));
     });
     // Unscheduled suggestions (not on any day)
     (dest.suggestions||[]).forEach(function(s){
       var coords=getCoords(s,dest.suggestions,center); if(!coords) return;
       if(allDayItems[s.n]) return; // already rendered above
-      addPin(coords,makeMapIcon('sight-nice'),0.2,s,'suggestion');
+      addPin(coords,makeMapIcon('sight-nice'),0.45,s,'suggestion');
     });
     // Unscheduled restaurant suggestions
     (dest.restaurantSuggestions||[]).forEach(function(s){
       var coords=getCoords(s,dest.restaurantSuggestions,center); if(!coords) return;
       if(allDayItems[s.n]) return;
-      addPin(coords,makeMapIcon('restaurant'),0.2,s,'restaurant-suggestion');
+      addPin(coords,makeMapIcon('restaurant'),0.45,s,'restaurant-suggestion');
     });
-    // Hotels in execution mode — all always shown; booked green, unbooked gray
+    // Hotels — use addPin so they get click handlers
     var _execDistHotels=[];
     var _execDistData=getDistricts(dest.place,dest.intent,dest);
     _execDistData.forEach(function(dist){(dist.hotels||[]).forEach(function(h){_execDistHotels.push({name:h.name,distName:dist.name,lat:h.lat||null,lng:h.lng||null});});});
@@ -3311,16 +3310,14 @@ function updateMainMapMarkers(){
       var hc=getCityCenter(dest.place);
       var c=h.lat&&h.lng?[h.lat,h.lng]:(hc?[hc[0]+stableOffset(h.name)[0],hc[1]+stableOffset(h.name)[1]]:null);
       if(!c) return;
-      var hp=L.marker(c,{icon:makeMapIcon('stay'),opacity:0.55}); hp.addTo(_mainMap);_mainMarkers.push(hp);
+      addPin(c,makeMapIcon('stay'),0.55,{id:'hotel-s-'+h.name,n:h.name,note:h.distName,done:false,slot:'day'},'info');
     });
     var hcE=getCityCenter(dest.place);
     _execBooked.forEach(function(bh){
       var dmE=_execDistHotels.find(function(h){return h.name===bh.name;});
       var bhC=bh.lat&&bh.lng?[bh.lat,bh.lng]:(dmE&&dmE.lat?[dmE.lat,dmE.lng]:(hcE?[hcE[0]+stableOffset(bh.name)[0],hcE[1]+stableOffset(bh.name)[1]]:null));
       if(bhC){
-        var bhM=L.marker(bhC,{icon:makeMapIcon('stay-booked'),opacity:1});
-        (function(name){bhM.on('click',function(e){if(L.DomEvent)L.DomEvent.stopPropagation(e);showMapPinPanel({id:'hotel-'+name,n:name,note:'✓ Booked',done:false,slot:'day'},dest,'hotel',e);});})(bh.name);
-        bhM.addTo(_mainMap);_mainMarkers.push(bhM);
+        addPin(bhC,makeMapIcon('stay-booked'),1,{id:'hotel-'+bh.name,n:bh.name,note:'✓ Booked · Check-in '+fmtD(bh.checkIn)+(bh.confirmationNumber?' · Conf: '+bh.confirmationNumber:''),done:false,slot:'day'},'hotel');
       }
     });
     return;
