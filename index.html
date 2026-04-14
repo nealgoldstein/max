@@ -3209,12 +3209,38 @@ function initMainMap(){
   _mainMap=L.map("main-map",{zoomControl:true,worldCopyJump:true,minZoom:2,
     scrollWheelZoom:true}).setView([20,0],2);
   _mainMap.on('click',function(){closeMapPinPanel();});
-  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{
+  // Vector tiles (planning mode)
+  _mainVectorLayer=L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{
+    attribution:"\u00a9 OpenStreetMap contributors \u00a9 CartoDB",maxZoom:19,noWrap:false
+  });
+  // Satellite tiles (day/execution mode)
+  _mainSatLayer=L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{
     attribution:"\u00a9 Esri World Imagery",maxZoom:19,noWrap:false
-  }).addTo(_mainMap);
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png",{opacity:1.0,maxZoom:19,noWrap:false}).addTo(_mainMap);
+  });
+  _mainSatLabels=L.tileLayer("https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png",{
+    opacity:1.0,maxZoom:19,noWrap:false
+  });
+  // Start with vector
+  _mainVectorLayer.addTo(_mainMap);
+  _currentMapStyle='vector';
   setTimeout(function(){if(_mainMap)_mainMap.invalidateSize();},100);
   window.addEventListener("resize",function(){if(_mainMap)_mainMap.invalidateSize();});
+}
+
+var _mainVectorLayer=null, _mainSatLayer=null, _mainSatLabels=null, _currentMapStyle='vector';
+
+function setMapStyle(style){
+  if(!_mainMap||_currentMapStyle===style) return;
+  if(style==='satellite'){
+    _mainMap.removeLayer(_mainVectorLayer);
+    _mainSatLayer.addTo(_mainMap);
+    _mainSatLabels.addTo(_mainMap);
+  } else {
+    if(_mainMap.hasLayer(_mainSatLayer)) _mainMap.removeLayer(_mainSatLayer);
+    if(_mainMap.hasLayer(_mainSatLabels)) _mainMap.removeLayer(_mainSatLabels);
+    _mainVectorLayer.addTo(_mainMap);
+  }
+  _currentMapStyle=style;
 }
 
 function clearMainMarkers(){
@@ -3280,6 +3306,7 @@ function updateMainMapMarkers(){
 
   // ── EXECUTION MODE ────────────────────────────────────────
   if(_mapExecMode){
+    setMapStyle('satellite');
     var execDay=dest.days.find(function(d){return d.id===_mapExecMode.dayId;});
     // Build lookup of items on this day
     var execDayItemNames={};
@@ -3350,6 +3377,7 @@ function updateMainMapMarkers(){
   }
 
   // ── PLANNING MODE ─────────────────────────────────────────
+  setMapStyle('vector');
 
   // Build a day-number lookup for scheduled items
   var itemDayNum={};
@@ -3480,6 +3508,7 @@ function updateMainMap(){
   if(!_mainMap)return;
   clearMainMarkers();
   if(_leftMode==="trip"){
+    setMapStyle('vector');
     buildMainLegend("trip");
     var overlay=g("no-dest-overlay");
     var dayBtn=document.getElementById('map-day-btn');
