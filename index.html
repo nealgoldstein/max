@@ -3271,28 +3271,33 @@ function updateMainMapMarkers(){
     if(execDay)(execDay.items||[]).forEach(function(s){execDayItemNames[s.n]=true;execDayItemMap[s.n]=s;});
 
     // All sights — full opacity if on today, dimmed if not
+    // First collect items from ALL days (scheduled items are removed from suggestions)
+    var allDayItems={};
+    dest.days.forEach(function(d){
+      (d.items||[]).forEach(function(s){
+        if(s.type==='sight'||s.type==='restaurant') allDayItems[s.n]={item:s,onToday:execDayItemNames[s.n]||false};
+      });
+    });
+    // Show items from all days
+    Object.keys(allDayItems).forEach(function(n){
+      var entry=allDayItems[n]; var s=entry.item;
+      var pool=s.type==='restaurant'?dest.restaurantSuggestions:dest.suggestions;
+      var coords=getCoords(s,pool,center); if(!coords) return;
+      var onDay=entry.onToday;
+      var iconKey=s.type==='restaurant'?'restaurant':(s.p==='must'?'sight-must':'sight-nice');
+      addPin(coords,makeMapIcon(iconKey),onDay?(s.done?0.3:1):0.2,s,onDay?(s.type==='restaurant'?'restaurant':'sight'):(s.type==='restaurant'?'restaurant-suggestion':'suggestion'));
+    });
+    // Unscheduled suggestions (not on any day)
     (dest.suggestions||[]).forEach(function(s){
       var coords=getCoords(s,dest.suggestions,center); if(!coords) return;
-      var onDay=execDayItemNames[s.n];
-      var scheduled=execDayItemMap[s.n];
-      var iconKey=(scheduled&&scheduled.p==='must')?'sight-must':'sight-nice';
-      addPin(coords,makeMapIcon(iconKey),onDay?(scheduled&&scheduled.done?0.3:1):0.2,scheduled||s,onDay?'sight':'suggestion');
+      if(allDayItems[s.n]) return; // already rendered above
+      addPin(coords,makeMapIcon('sight-nice'),0.2,s,'suggestion');
     });
-    // All restaurants — full opacity if on today, dimmed if not
+    // Unscheduled restaurant suggestions
     (dest.restaurantSuggestions||[]).forEach(function(s){
       var coords=getCoords(s,dest.restaurantSuggestions,center); if(!coords) return;
-      var onDay=execDayItemNames[s.n];
-      var scheduled=execDayItemMap[s.n];
-      addPin(coords,makeMapIcon('restaurant'),onDay?(scheduled&&scheduled.done?0.3:1):0.2,scheduled||s,onDay?'restaurant':'restaurant-suggestion');
-    });
-    // Items on this day that aren't in suggestions (manually added)
-    if(execDay)(execDay.items||[]).forEach(function(s){
-      if(!s.lat||!s.lng) return;
-      var inSugg=dest.suggestions.some(function(sg){return sg.n===s.n;})||
-                 dest.restaurantSuggestions.some(function(sg){return sg.n===s.n;});
-      if(inSugg) return;
-      var iconKey=s.type==='restaurant'?'restaurant':(s.p==='must'?'sight-must':'sight-nice');
-      addPin([s.lat,s.lng],makeMapIcon(iconKey),s.done?0.3:1,s,s.type==='restaurant'?'restaurant':'sight');
+      if(allDayItems[s.n]) return;
+      addPin(coords,makeMapIcon('restaurant'),0.2,s,'restaurant-suggestion');
     });
     // Hotels in execution mode — all always shown; booked green, unbooked gray
     var _execDistHotels=[];
