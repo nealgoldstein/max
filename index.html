@@ -2682,16 +2682,16 @@ function applyDateChange(dest,newFrom,newTo,affected){
         var parts=k.split('-');
         if(parts.length===2&&(parts[0]===od.id||parts[1]===od.id)) trip.legs[k]={bookings:[]};
       });
-      // Only return items from OVERLAPPING days back to pool
-      // Overlap = days between od.dateFrom and newTo (the extended end date)
+      // Return items from overlapping days back to suggestions, collecting names for log
+      var returnedItems=[];
       if(od.days){
         od.days.forEach(function(day,di){
-          // Compute this day's date from the destination's start date + index
           var dayDate=new Date(od.dateFrom+'T12:00:00'); dayDate.setDate(dayDate.getDate()+di);
           var dayStr=dayDate.toISOString().slice(0,10);
-          var inOverlap=dayStr<=newTo; // this day falls within the overlap period
+          var inOverlap=dayStr<=newTo;
           if(inOverlap){
             (day.items||[]).forEach(function(s){
+              returnedItems.push(s.n);
               if(s.type==='sight'){
                 if(!od.suggestions) od.suggestions=[];
                 var alreadyIn=od.suggestions.some(function(sg){return sg.n===s.n;});
@@ -2709,6 +2709,7 @@ function applyDateChange(dest,newFrom,newTo,affected){
           // Non-overlapping days keep their items untouched
         });
       }
+      ov._returnedItems=returnedItems;
     });
   }
 
@@ -2720,14 +2721,12 @@ function applyDateChange(dest,newFrom,newTo,affected){
     });
     (affected.overlapping||[]).forEach(function(ov){
       var hadBookings=ov.bookings&&ov.bookings.length>0;
-      // Check if any items were actually returned to pool
-      var od=getDest(ov.id);
-      var hadItems=od&&od.days&&od.days.some(function(d){return (d.items||[]).length>0;});
+      var returnedItems=ov._returnedItems||[];
       if(hadBookings){
         logEntries.push({type:'cleared',icon:'❌',text:'Bookings cleared for '+ov.dest+' — '+ov.detail});
       }
-      if(hadItems){
-        logEntries.push({type:'pool',icon:'↩️',text:'Items from overlapping days in '+ov.dest+' returned to suggestions'});
+      if(returnedItems.length>0){
+        logEntries.push({type:'pool',icon:'↩️',text:'Returned to '+ov.dest+' suggestions: '+returnedItems.join(', ')});
       }
     });
   }
