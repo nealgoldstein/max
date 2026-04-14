@@ -3334,13 +3334,11 @@ function updateMainMapMarkers(){
         addPin(bhC,makeMapIcon('stay-booked'),1,{id:'hotel-'+bh.name,n:bh.name,note:'✓ Booked · Check-in '+fmtD(bh.checkIn)+(bh.confirmationNumber?' · Conf: '+bh.confirmationNumber:''),done:false,slot:'day'},'hotel');
       }
     });
-    // Utility locations in day mode too (grocery, ATM, transit, tourist-info)
+    // Utility locations in day mode — always shown (grocery, ATM, transit, tourist-info)
     var execLocs=collectMapLocations(dest);
     execLocs.forEach(function(loc){
       if(!loc.lat||!loc.lng) return;
       if(loc.type==='sight-must'||loc.type==='sight-nice'||loc.type==='restaurant'||loc.type==='stay') return;
-      var layerKey=_locLayerKey(loc);
-      if(!_mainActiveLayers[layerKey]) return;
       addPin([loc.lat,loc.lng],makeMapIcon(loc.type),1,{id:'util-'+loc.name,n:loc.name,note:loc.note||loc.type,done:false,slot:'day'},'info');
     });
     return;
@@ -3448,13 +3446,7 @@ function updateMainMapMarkers(){
     if(loc.type==='sight-must'||loc.type==='sight-nice'||loc.type==='restaurant'||loc.type==='stay') return;
     var layerKey=_locLayerKey(loc);
     if(!_mainActiveLayers[layerKey]) return;
-    var icon=makeMapIcon(loc.type);
-    var m=L.marker([loc.lat,loc.lng],{icon:icon,opacity:1});
-    (function(name,note){m.on('click',function(e){
-      if(L.DomEvent)L.DomEvent.stopPropagation(e);
-      showMapPinPanel({id:'util-'+name,n:name,note:note,done:false,slot:'day'},dest,'info',e);
-    });})(loc.name,loc.note||loc.type);
-    m.addTo(_mainMap);_mainMarkers.push(m);
+    addPin([loc.lat,loc.lng],makeMapIcon(loc.type),1,{id:'util-'+loc.name,n:loc.name,note:loc.note||loc.type,done:false,slot:'day'},'info');
   });
 }
 
