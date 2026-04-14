@@ -2648,10 +2648,21 @@ function applyDateChange(dest,newFrom,newTo,affected){
   if(logEntries.length>0) showActionLog(logEntries);
 
   closeListDateEdit(destId);
+  trip.destinations.sort(function(a,b){return(a.dateFrom||'').localeCompare(b.dateFrom||'');});
   renderDestList();
   drawItin();
   autoSave();
   if(_leftMode==='dest'&&activeDest===destId) drawDestMode(destId);
+  // Scroll the card into view after sort reorders the list
+  setTimeout(function(){
+    var card=document.querySelector('.tm-dest[data-id="'+destId+'"]')||document.getElementById('tm-card-'+destId);
+    if(!card){
+      // fallback: find by active class or dest name
+      var cards=document.querySelectorAll('.tm-dest');
+      cards.forEach(function(c){if(c.querySelector('[id*="'+destId+'"]'))card=c;});
+    }
+    if(card) card.scrollIntoView({behavior:'smooth',block:'nearest'});
+  },100);
 }
 
 function checkOverlaps(){
@@ -4142,7 +4153,7 @@ function drawTripMode(){
   }
 
   trip.destinations.forEach(function(dest,idx){
-    var card=document.createElement("div"); card.className="tm-dest"+(dest.id===activeDest?" active":"");
+    var card=document.createElement("div"); card.className="tm-dest"+(dest.id===activeDest?" active":""); card.setAttribute("data-id",dest.id);
     // Body: name + optional label + dates
     var bodyDiv=document.createElement("div"); bodyDiv.className="tm-dest-body";
     var nameRow=document.createElement("div"); nameRow.className="tm-dest-actions";
