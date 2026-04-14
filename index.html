@@ -2342,7 +2342,9 @@ function editDates(destId){
   var arrow=document.createElement("span"); arrow.style.cssText="font-size:10px;color:#aaa;"; arrow.textContent="\u2192";
   var ti=document.createElement("input"); ti.type="date"; ti.className="date-edit-inp"; ti.id="edit-to-"+destId; ti.value=dest.dateTo;
   ti.min=dest.dateFrom;
-  fi.onchange=function(){ti.min=fi.value;if(ti.value&&ti.value<fi.value)ti.value="";};
+  fi.onchange=function(){ti.min=fi.value;if(ti.value&&ti.value<fi.value)ti.value="";fi.blur();};
+  ti.onchange=function(){ti.blur();};
+    ti.onchange=function(){ti.blur();};
   var sv=document.createElement("button"); sv.className="date-save-btn"; sv.textContent="Save";
   (function(did){sv.onclick=function(){saveDates(did);};})(destId);
   var cx=document.createElement("button"); cx.className="date-cancel-btn"; cx.textContent="Cancel";
@@ -2722,7 +2724,12 @@ function applyDateChange(dest,newFrom,newTo,affected){
   renderDestList();
   drawItin();
   autoSave();
-  if(_leftMode==='dest'&&activeDest===destId) drawDestMode(destId);
+  if(_leftMode==='dest'&&activeDest===destId){
+    drawDestMode(destId);
+  } else {
+    drawTripMode();
+    updateMainMap();
+  }
   // Scroll the card into view after sort reorders the list
   setTimeout(function(){
     var card=document.querySelector('.tm-dest[data-id="'+destId+'"]')||document.getElementById('tm-card-'+destId);
@@ -4338,7 +4345,7 @@ function drawTripMode(){
     var arrow=document.createElement("span"); arrow.style.cssText="font-size:10px;color:#aaa;"; arrow.textContent="\u2192";
     var ti=document.createElement("input"); ti.type="date"; ti.className="date-edit-inp"; ti.id="edit-to-"+dest.id; ti.value=dest.dateTo;
     ti.min=dest.dateFrom;
-    fi.onchange=function(){ti.min=fi.value;if(ti.value&&ti.value<fi.value)ti.value="";};
+    fi.onchange=function(){ti.min=fi.value;if(ti.value&&ti.value<fi.value)ti.value="";fi.blur();};
     var sv=document.createElement("button"); sv.className="date-save-btn"; sv.textContent="Save";
     sv.onclick=function(e){e.stopPropagation();saveDates(dest.id);};
     var cx=document.createElement("button"); cx.className="date-cancel-btn"; cx.textContent="Cancel";
