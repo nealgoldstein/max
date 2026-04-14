@@ -2199,11 +2199,14 @@ function addDest(){
   var addForm=g("tm-add-form"); if(addForm)addForm.style.display="none";
   var addBtn2=g("tm-add-btn"); if(addBtn2)addBtn2.textContent="+ Add destination";
   autoSave();
-  // Always open on Explore tab for new destinations — that's where the content is
-  _activeDmSection='explore';
-  drawDestMode(id);
-  // updateMainMap after drawDestMode sets _leftMode='dest'
+  // Stay on trip list — user can add more destinations
+  drawTripMode();
   setTimeout(function(){updateMainMap();setTimeout(function(){if(_mainMap)_mainMap.invalidateSize();},100);},50);
+  // Scroll the new destination card into view
+  setTimeout(function(){
+    var card=document.querySelector('.tm-dest[data-id="'+id+'"]');
+    if(card) card.scrollIntoView({behavior:'smooth',block:'nearest'});
+  },150);
 }
 
 function guessPlace(txt){
