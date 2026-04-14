@@ -1658,6 +1658,10 @@ function doCreateTrip(){
 }
 
 function restoreTripUI(){
+  // Ensure destinations are in date order
+  if(trip.destinations&&trip.destinations.length>1){
+    trip.destinations.sort(function(a,b){return(a.dateFrom||'').localeCompare(b.dateFrom||'');});
+  }
   var tn=g("trip-name-display"); if(tn){
     tn.textContent=trip.name||"Untitled trip";
     tn.title="Double-click to rename";
@@ -2122,6 +2126,8 @@ function addDest(){
     suggestions:[] // populated by generateCityData or Explore tab refresh
   };
   trip.destinations.push(dest);
+  // Keep destinations in date order
+  trip.destinations.sort(function(a,b){return(a.dateFrom||'').localeCompare(b.dateFrom||'');});
   if(isKnownCity(place)){
     // Populate suggestions from static sight data immediately
     populateStaticSuggestions(dest);
@@ -2642,10 +2648,11 @@ function applyDateChange(dest,newFrom,newTo,affected){
   if(logEntries.length>0) showActionLog(logEntries);
 
   closeListDateEdit(destId);
+  // Re-sort after date change in case order changed
+  trip.destinations.sort(function(a,b){return(a.dateFrom||'').localeCompare(b.dateFrom||'');});
   renderDestList();
   drawItin();
   autoSave();
-  // If currently viewing this destination, refresh the panel so date/day changes are visible
   if(_leftMode==='dest'&&activeDest===destId) drawDestMode(destId);
 }
 
