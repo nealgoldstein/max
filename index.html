@@ -3744,7 +3744,18 @@ function updateMainMap(){
         if(!hasRealCoords) return;
         try{
           var pts=[];
-          _mainMarkers.forEach(function(m){try{var ll=m.getLatLng();if(ll)pts.push(ll);}catch(e){}});
+          var destCenter=getCityCenter(dest.place);
+          _mainMarkers.forEach(function(m){
+            try{
+              var ll=m.getLatLng(); if(!ll) return;
+              // Exclude context pins (prev/next destinations) — check if this is a neighboring city center
+              if(destCenter){
+                var distKm=Math.sqrt(Math.pow(ll.lat-destCenter[0],2)+Math.pow(ll.lng-destCenter[1],2))*111;
+                if(distKm>80) return; // skip pins more than ~80km from current city
+              }
+              pts.push(ll);
+            }catch(e){}
+          });
           if(pts.length>1){
             var b=L.latLngBounds(pts);
             if(b.isValid())_mainMap.fitBounds(b,{padding:[40,40],maxZoom:14,animate:false});
