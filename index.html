@@ -3242,6 +3242,11 @@ function updateMainMapMarkers(){
   function getCoords(item,pool,fallback){
     if(item.lat&&item.lng) return [item.lat,item.lng];
     if(pool){var pm=pool.find(function(s){return s.n===item.n&&s.lat;});if(pm)return[pm.lat,pm.lng];}
+    // Also check all day items for coords
+    var allItems=[];
+    dest.days.forEach(function(d){(d.items||[]).forEach(function(s){allItems.push(s);});});
+    var di=allItems.find(function(s){return s.n===item.n&&s.lat;});
+    if(di) return [di.lat,di.lng];
     if(fallback){var off=stableOffset(item.n||"");return[fallback[0]+off[0],fallback[1]+off[1]];}
     return null;
   }
@@ -3267,15 +3272,15 @@ function updateMainMapMarkers(){
 
     // All sights — full opacity if on today, dimmed if not
     (dest.suggestions||[]).forEach(function(s){
-      var coords=getCoords(s,null,center); if(!coords) return;
+      var coords=getCoords(s,dest.suggestions,center); if(!coords) return;
       var onDay=execDayItemNames[s.n];
       var scheduled=execDayItemMap[s.n];
-      var iconKey=s.p==='must'?'sight-must':'sight-nice';
+      var iconKey=(scheduled&&scheduled.p==='must')?'sight-must':'sight-nice';
       addPin(coords,makeMapIcon(iconKey),onDay?(scheduled&&scheduled.done?0.3:1):0.2,scheduled||s,onDay?'sight':'suggestion');
     });
     // All restaurants — full opacity if on today, dimmed if not
     (dest.restaurantSuggestions||[]).forEach(function(s){
-      var coords=getCoords(s,null,center); if(!coords) return;
+      var coords=getCoords(s,dest.restaurantSuggestions,center); if(!coords) return;
       var onDay=execDayItemNames[s.n];
       var scheduled=execDayItemMap[s.n];
       addPin(coords,makeMapIcon('restaurant'),onDay?(scheduled&&scheduled.done?0.3:1):0.2,scheduled||s,onDay?'restaurant':'restaurant-suggestion');
