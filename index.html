@@ -3422,8 +3422,6 @@ function updateMainMap(){
     }
     if(overlay)overlay.style.display="none";
     var bounds=[];
-    var boundsKey=trip.destinations.map(function(d){return d.id;}).join(',');
-    var needsFit=(boundsKey!==_mainMap._lastTripBoundsKey);
     trip.destinations.forEach(function(dest){
       var c=getCityCenter(dest.place);
       if(!c) return;
@@ -3436,11 +3434,8 @@ function updateMainMap(){
       _mainMarkers.push(m);
       bounds.push(c);
     });
-    if(needsFit){
-      _mainMap._lastTripBoundsKey=boundsKey;
-      if(bounds.length===1){_mainMap.setView(bounds[0],10,{animate:false});}
-      else if(bounds.length>1){try{_mainMap.fitBounds(bounds,{padding:[40,40],animate:false});}catch(e){}}
-    }
+    if(bounds.length===1){_mainMap.setView(bounds[0],10,{animate:false});}
+    else if(bounds.length>1){try{_mainMap.fitBounds(bounds,{padding:[40,40],animate:false});}catch(e){}}
   } else {
     var dest=getDest(activeDest); if(!dest)return;
     var overlay2=g("no-dest-overlay");
@@ -4131,20 +4126,7 @@ function drawTripMode(){
   var listHdr=document.createElement("div"); listHdr.style.cssText="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;";
   var lbl=document.createElement("div"); lbl.className="tm-sec-title"; lbl.style.marginBottom="0"; lbl.textContent="Destinations";
   listHdr.appendChild(lbl);
-  if(trip.destinations.length>1){
-    var mapBtn=document.createElement("button"); mapBtn.className="tm-dest-btn";
-    mapBtn.style.cssText="font-size:10px;padding:3px 9px;background:#f5f5f5;border-color:#ccc;";
-    mapBtn.textContent="Destinations";
-    mapBtn.onclick=function(){
-      if(!_mainMap) return;
-      var bounds=[];
-      trip.destinations.forEach(function(d){var c=getCityCenter(d.place);if(c)bounds.push(c);});
-      if(bounds.length===1) _mainMap.setView(bounds[0],10,{animate:true});
-      else if(bounds.length>1) try{_mainMap.fitBounds(bounds,{padding:[40,40],animate:true});}catch(e){}
-      _mainMap._lastTripBoundsKey=null; // force re-fit next updateMainMap call
-    };
-    listHdr.appendChild(mapBtn);
-  }
+
   listSec.appendChild(listHdr);
 
   if(trip.destinations.length===0){
