@@ -4885,6 +4885,11 @@ function mkItinItem(s,dayId,destId){
   var mb=document.createElement("button"); mb.className="sa msa"; mb.textContent="move";
   (function(id,did,ev){mb.onclick=function(e){e.stopPropagation();togMov(id,dayId,did,e,ev);};})(s.id,destId,s.slot==="evening");
   acts.appendChild(mb);
+  // Book button
+  var bkb=document.createElement("button"); bkb.className="sa"; bkb.textContent=s.booking?"booked \u2713":"book";
+  if(s.booking) bkb.style.cssText="color:#2a7a4e;font-weight:600;";
+  (function(item,did,dId){bkb.onclick=function(e){e.stopPropagation();toggleSightBookForm(r,item,did,dId);};})(s,destId,dayId);
+  acts.appendChild(bkb);
   // Delete button
   var xb=document.createElement("button"); xb.className="sa"; xb.textContent="\u2715";
   (function(id,did){xb.onclick=function(){delS(id,dayId,did);};})(s.id,destId);
@@ -4892,6 +4897,23 @@ function mkItinItem(s,dayId,destId){
   var top=document.createElement("div"); top.className="srow-top";
   top.appendChild(dot); top.appendChild(name);
   acts.className="srow-btns";
+
+  // Booking info strip if booked
+  var bkStrip=null;
+  if(s.booking){
+    bkStrip=document.createElement("div"); bkStrip.className="bk-record"; bkStrip.style.cssText="margin:3px 0 2px 12px;";
+    var bkMain=document.createElement("div"); bkMain.className="bk-rec-main";
+    var bkParts=[];
+    if(s.booking.time) bkParts.push(s.booking.time+(s.booking.timeEnd?'\u2013'+s.booking.timeEnd:''));
+    if(s.booking.confirmationNumber) bkParts.push('Conf: '+s.booking.confirmationNumber);
+    if(s.booking.pricePaid) bkParts.push((s.booking.currency||'')+" "+s.booking.pricePaid);
+    bkMain.textContent='\u2713 Reserved'+(bkParts.length?' \u00b7 '+bkParts.join(' \u00b7 '):'');
+    bkStrip.appendChild(bkMain);
+    if(s.booking.cancelDeadline){
+      var cpLine=document.createElement("div"); cpLine.className="bk-rec-meta"; cpLine.style.cssText="color:#d97706;font-weight:600;";
+      cpLine.textContent="Cancel by: "+fmtD(s.booking.cancelDeadline); bkStrip.appendChild(cpLine);
+    }
+  }
 
   // Time display — click to edit
   var timeRow=document.createElement("div"); timeRow.className="srow-time"; timeRow.id="stime-"+s.id;
@@ -4932,7 +4954,61 @@ function mkItinItem(s,dayId,destId){
   r.appendChild(top);
   r.appendChild(timeRow);
   r.appendChild(acts);
+  if(bkStrip) r.appendChild(bkStrip);
   return r;
+}
+
+function toggleSightBookForm(row,item,destId,dayId){
+  var existing=row.querySelector('.sight-book-form');
+  if(existing){existing.parentNode.removeChild(existing);return;}
+  var form=document.createElement("div"); form.className="sight-book-form bk-form";
+  form.style.cssText="margin:4px 0 4px 12px;padding:8px;background:#f8f8f8;border-radius:6px;";
+  var r1=document.createElement("div"); r1.className="bk-row";
+  var timeInp=document.createElement("input"); timeInp.type="time"; timeInp.className="bk-inp"; timeInp.value=item.booking?item.booking.time||"":"";
+  var timeEndInp=document.createElement("input"); timeEndInp.type="time"; timeEndInp.className="bk-inp"; timeEndInp.value=item.booking?item.booking.timeEnd||"":"";
+  var confInp=document.createElement("input"); confInp.type="text"; confInp.className="bk-inp"; confInp.placeholder="Confirmation #"; confInp.value=item.booking?item.booking.confirmationNumber||"":"";
+  r1.appendChild(mkField("Start",timeInp)); r1.appendChild(mkField("End",timeEndInp)); r1.appendChild(mkField("Conf #",confInp));
+  var r2=document.createElement("div"); r2.className="bk-row";
+  var priceInp=document.createElement("input"); priceInp.type="number"; priceInp.className="bk-inp"; priceInp.placeholder="0.00"; priceInp.step="0.01"; priceInp.value=item.booking?item.booking.pricePaid||"":"";
+  var currSel=mkCurrSel("sbf-cur-"+item.id,item.booking?item.booking.currency||"EUR":"EUR");
+  r2.appendChild(mkField("Price",priceInp)); r2.appendChild(mkField("Currency",currSel));
+  form.appendChild(r1); form.appendChild(r2);
+  var cancelField=mkCancelField("sbf-cancel-"+item.id); form.appendChild(cancelField);
+  if(item.booking&&item.booking.cancelType){
+    cancelField._restorePolicy&&cancelField._restorePolicy(item.booking.cancelType,item.booking.cancelDeadline);
+  }
+  var acts=document.createElement("div"); acts.className="bk-form-actions";
+  var sv=document.createElement("button"); sv.className="bk-save-btn"; sv.textContent="Save";
+  var cx=document.createElement("button"); cx.className="bk-dismiss-btn"; cx.textContent="Cancel";
+  if(item.booking){
+    var del=document.createElement("button"); del.className="bk-rec-btn danger"; del.style.marginLeft="auto"; del.textContent="Remove booking";
+    (function(it,did,dId){del.onclick=function(){
+      if(it.booking){
+        addPendingAction({eventType:'booking',actionType:'Contact provider to adjust or cancel',
+          eventName:it.n,destName:getDest(did)?getDest(did).label||getDest(did).place:'',
+          confirmationNumber:it.booking.confirmationNumber||null,
+          detail:'Contact provider to cancel reservation',requiresProviderAction:true});
+      }
+      it.booking=null; autoSave(); drawDestMode(did);
+    };})(item,destId,dayId);
+    acts.appendChild(del);
+  }
+  cx.onclick=function(){form.parentNode&&form.parentNode.removeChild(form);};
+  sv.onclick=function(){
+    var cp=cancelField.getCancelPolicy();
+    item.booking={
+      time:timeInp.value||null, timeEnd:timeEndInp.value||null,
+      confirmationNumber:confInp.value||null,
+      pricePaid:parseFloat(priceInp.value)||null, currency:currSel.value,
+      cancelType:cp.type, cancelDeadline:cp.deadline
+    };
+    // Sync time to item timeStart/timeEnd if not already set
+    if(timeInp.value&&!item.timeStart){item.timeStart=timeInp.value; item.timeEnd=timeEndInp.value||null;}
+    autoSave(); drawDestMode(destId);
+  };
+  acts.appendChild(sv); acts.appendChild(cx); form.appendChild(acts);
+  row.appendChild(form);
+  confInp.focus();
 }
 
 function mkItinAddRow(dayId,destId,slot){
