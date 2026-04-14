@@ -1384,21 +1384,33 @@ function collectMapLocations(dest){
   var storedNearby=dest.locations.filter(function(l){return nearbyTypes.indexOf(l.type)>-1;});
   var nearbyLocs=storedNearby.length>0?storedNearby:getNearbyLocations(dest.place);
 
-  // Find booked hotel coords for proximity sorting
-  var bookedHotelLat=bookedHotel&&bookedHotel.lat?bookedHotel.lat:null;
-  var bookedHotelLng=bookedHotel&&bookedHotel.lng?bookedHotel.lng:null;
-  // Also check district data for hotel coords
-  if(!bookedHotelLat&&bookedHotel){
-    var allDists=getDistricts(dest.place,dest.intent,dest);
-    allDists.forEach(function(d){d.hotels.forEach(function(h){
-      if(h.name===bookedHotel.name&&h.lat){bookedHotelLat=h.lat;bookedHotelLng=h.lng;}
-    });});
+  // Find best hotel anchor for transit proximity sorting
+  // Priority: booked hotel > first district hotel > city center
+  var hotelAnchorLat=null, hotelAnchorLng=null;
+  if(bookedHotel&&bookedHotel.lat){
+    hotelAnchorLat=bookedHotel.lat; hotelAnchorLng=bookedHotel.lng;
   }
-  if(bookedHotelLat){
+  // Check district data for hotel coords (covers booked without coords + suggested)
+  if(!hotelAnchorLat){
+    var allDistsH=getDistricts(dest.place,dest.intent,dest);
+    // Try booked hotel in district data first
+    if(bookedHotel){
+      allDistsH.forEach(function(d){d.hotels.forEach(function(h){
+        if(h.name===bookedHotel.name&&h.lat&&!hotelAnchorLat){hotelAnchorLat=h.lat;hotelAnchorLng=h.lng;}
+      });});
+    }
+    // Fall back to first available district hotel
+    if(!hotelAnchorLat){
+      allDistsH.forEach(function(d){d.hotels.forEach(function(h){
+        if(h.lat&&!hotelAnchorLat){hotelAnchorLat=h.lat;hotelAnchorLng=h.lng;}
+      });});
+    }
+  }
+  if(hotelAnchorLat){
     // Sort transit locations by distance to hotel; keep others in original order
     var transitLocs=nearbyLocs.filter(function(l){return l.type==='transit';});
     var otherLocs=nearbyLocs.filter(function(l){return l.type!=='transit';});
-    function dist2(a){return Math.pow(a.lat-bookedHotelLat,2)+Math.pow(a.lng-bookedHotelLng,2);}
+    function dist2(a){return Math.pow(a.lat-hotelAnchorLat,2)+Math.pow(a.lng-hotelAnchorLng,2);}
     transitLocs.sort(function(a,b){return dist2(a)-dist2(b);});
     nearbyLocs=otherLocs.concat(transitLocs);
   }
