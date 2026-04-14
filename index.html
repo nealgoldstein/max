@@ -2225,6 +2225,30 @@ function selectDest(id){
 
 function delDest(e,id){
   if(e)e.stopPropagation();
+  var dest=trip.destinations.find(function(d){return d.id===id;});
+  if(dest){
+    var dName=dest.label||dest.place;
+    // Generate pending actions for all active bookings before deleting
+    (dest.hotelBookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
+      addPendingAction({eventType:'hotel',actionType:'Contact provider to adjust or cancel',
+        eventName:b.name,destName:dName,confirmationNumber:b.confirmationNumber||null,
+        detail:'Destination removed — contact hotel to cancel reservation',requiresProviderAction:true});
+    });
+    (dest.generalBookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
+      addPendingAction({eventType:'booking',actionType:'Contact provider to adjust or cancel',
+        eventName:b.label||b.type||'Booking',destName:dName,confirmationNumber:b.confirmationNumber||null,
+        detail:'Destination removed — contact provider to cancel',requiresProviderAction:true});
+    });
+    Object.keys(trip.legs||{}).forEach(function(k){
+      var leg=trip.legs[k];
+      if(leg.fromId!==id&&leg.toId!==id) return;
+      (leg.bookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
+        addPendingAction({eventType:'transport',actionType:'Contact provider to adjust or cancel',
+          eventName:b.operator||'Transport',destName:dName,confirmationNumber:b.confirmationNumber||null,
+          detail:'Destination removed — contact provider to cancel',requiresProviderAction:true});
+      });
+    });
+  }
   trip.destinations=trip.destinations.filter(function(d){return d.id!==id;});
   delete _ffHistories[id]; delete _destStories[id];
   if(activeDest===id){
