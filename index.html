@@ -3635,14 +3635,12 @@ function updateMainMapMarkers(){
     cm.addTo(_mainMap); _mainMarkers.push(cm);
   }
 
-  // Previous and next destination markers — ghosted city pins for context
+  // Previous and next destination markers — context pins, don't affect zoom
   var destIdx=trip.destinations.indexOf(dest);
-  var contextBounds=[center]; // start with current city center
   [{idx:destIdx-1,label:'\u2190'},{idx:destIdx+1,label:'\u2192'}].forEach(function(nb){
     if(nb.idx<0||nb.idx>=trip.destinations.length) return;
     var nd=trip.destinations[nb.idx];
     var nc=getCityCenter(nd.place); if(!nc) return;
-    contextBounds.push(nc);
     var icon=L.divIcon({
       html:'<div style="background:#444;color:#fff;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.3);">'+nd.place.substring(0,2)+'</div>',
       className:'',iconSize:[22,22],iconAnchor:[11,11],popupAnchor:[0,-13]
@@ -3656,10 +3654,6 @@ function updateMainMapMarkers(){
     });
     var lm=L.marker(nc,{icon:lbl,interactive:false}); lm.addTo(_mainMap); _mainMarkers.push(lm);
   });
-  // Fit bounds to include prev/next if they exist
-  if(contextBounds.length>1){
-    try{_mainMap.fitBounds(contextBounds,{padding:[40,40],maxZoom:13,animate:false});}catch(e){}
-  }
 }
 
 function showActionLog(entries){
