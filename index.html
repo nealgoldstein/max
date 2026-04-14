@@ -1110,6 +1110,15 @@ function makeMapIcon(styleKey){
   });
 }
 
+function makeMapIconWithDay(styleKey,dayNum){
+  // Same as makeMapIcon but adds a small day-number badge
+  var svgFn=MAP_ICONS[styleKey]||MAP_ICONS["sight-nice"];
+  var svg=svgFn();
+  var badge='<div style="position:absolute;top:-5px;right:-5px;background:#1a5fa8;color:#fff;font-size:8px;font-weight:700;border-radius:8px;padding:0 4px;line-height:13px;min-width:13px;text-align:center;border:1px solid #fff;pointer-events:none;">'+dayNum+'</div>';
+  var html='<div style="position:relative;width:28px;height:28px;">'+svg+badge+'</div>';
+  return L.divIcon({html:html,className:"",iconSize:[28,28],iconAnchor:[14,14],popupAnchor:[0,-16]});
+}
+
 function makeLegendIcon(typeId){
   // Returns a small inline SVG for the legend button — scaled to 18px
   var svgFn=MAP_ICONS[typeId];
@@ -3251,13 +3260,34 @@ function updateMainMapMarkers(){
   // ── EXECUTION MODE ────────────────────────────────────────
   if(_mapExecMode){
     var execDay=dest.days.find(function(d){return d.id===_mapExecMode.dayId;});
-    if(!execDay) return;
-    (execDay.items||[]).forEach(function(s){
-      var pool=s.type==='restaurant'?dest.restaurantSuggestions:dest.suggestions;
-      var coords=getCoords(s,pool,center);
-      if(!coords) return;
+    // Build lookup of items on this day
+    var execDayItemNames={};
+    var execDayItemMap={};
+    if(execDay)(execDay.items||[]).forEach(function(s){execDayItemNames[s.n]=true;execDayItemMap[s.n]=s;});
+
+    // All sights — full opacity if on today, dimmed if not
+    (dest.suggestions||[]).forEach(function(s){
+      var coords=getCoords(s,null,center); if(!coords) return;
+      var onDay=execDayItemNames[s.n];
+      var scheduled=execDayItemMap[s.n];
+      var iconKey=s.p==='must'?'sight-must':'sight-nice';
+      addPin(coords,makeMapIcon(iconKey),onDay?(scheduled&&scheduled.done?0.3:1):0.2,scheduled||s,onDay?'sight':'suggestion');
+    });
+    // All restaurants — full opacity if on today, dimmed if not
+    (dest.restaurantSuggestions||[]).forEach(function(s){
+      var coords=getCoords(s,null,center); if(!coords) return;
+      var onDay=execDayItemNames[s.n];
+      var scheduled=execDayItemMap[s.n];
+      addPin(coords,makeMapIcon('restaurant'),onDay?(scheduled&&scheduled.done?0.3:1):0.2,scheduled||s,onDay?'restaurant':'restaurant-suggestion');
+    });
+    // Items on this day that aren't in suggestions (manually added)
+    if(execDay)(execDay.items||[]).forEach(function(s){
+      if(!s.lat||!s.lng) return;
+      var inSugg=dest.suggestions.some(function(sg){return sg.n===s.n;})||
+                 dest.restaurantSuggestions.some(function(sg){return sg.n===s.n;});
+      if(inSugg) return;
       var iconKey=s.type==='restaurant'?'restaurant':(s.p==='must'?'sight-must':'sight-nice');
-      addPin(coords,makeMapIcon(iconKey),s.done?0.4:1,s,s.type==='restaurant'?'restaurant':'sight');
+      addPin([s.lat,s.lng],makeMapIcon(iconKey),s.done?0.3:1,s,s.type==='restaurant'?'restaurant':'sight');
     });
     // Hotels in execution mode — all always shown; booked green, unbooked gray
     var _execDistHotels=[];
@@ -3287,6 +3317,12 @@ function updateMainMapMarkers(){
 
   // ── PLANNING MODE ─────────────────────────────────────────
 
+  // Build a day-number lookup for scheduled items
+  var itemDayNum={};
+  dest.days.forEach(function(d,di){
+    (d.items||[]).forEach(function(s){itemDayNum[s.n]=di+1;});
+  });
+
   // Unscheduled sights — dimmed blue suggestions (skip if scheduled, shown below)
   if(_mainActiveLayers["sight-nice"]){
     (dest.suggestions||[]).forEach(function(s){
@@ -3306,23 +3342,27 @@ function updateMainMapMarkers(){
     });
   }
 
-  // Scheduled sights — full opacity
+  // Scheduled sights — full opacity with day badge
   Object.keys(scheduledSights).forEach(function(n){
     var s=scheduledSights[n];
     var layerKey=s.p==='must'?'sight-must':'sight-nice';
     if(!_mainActiveLayers[layerKey]) return;
     var coords=getCoords(s,dest.suggestions,center);
     if(!coords) return;
-    addPin(coords,makeMapIcon(layerKey),s.done?0.4:1,s,'sight');
+    var dayNum=itemDayNum[n];
+    var icon=dayNum?makeMapIconWithDay(layerKey,dayNum):makeMapIcon(layerKey);
+    addPin(coords,icon,s.done?0.4:1,s,'sight');
   });
 
-  // Scheduled restaurants — full opacity
+  // Scheduled restaurants — full opacity with day badge
   if(_mainActiveLayers['restaurant']){
     Object.keys(scheduledRests).forEach(function(n){
       var s=scheduledRests[n];
       var coords=getCoords(s,dest.restaurantSuggestions,center);
       if(!coords) return;
-      addPin(coords,makeMapIcon('restaurant'),s.done?0.4:1,s,'restaurant');
+      var dayNum=itemDayNum[n];
+      var icon=dayNum?makeMapIconWithDay('restaurant',dayNum):makeMapIcon('restaurant');
+      addPin(coords,icon,s.done?0.4:1,s,'restaurant');
     });
   }
 
