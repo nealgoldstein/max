@@ -1110,6 +1110,15 @@ function makeMapIcon(styleKey){
   });
 }
 
+function makeMapIconDimmed(styleKey){
+  var svgFn=MAP_ICONS[styleKey]||MAP_ICONS["sight-nice"];
+  var svg=svgFn();
+  var ringStyle="position:absolute;top:0;left:0;right:0;bottom:0;border-radius:50%;border:2px solid rgba(255,255,255,0.9);pointer-events:none;";
+  var innerStyle="position:absolute;top:0;left:0;right:0;bottom:0;opacity:0.4;";
+  var html='<div style="position:relative;width:28px;height:28px;"><div style="'+innerStyle+'">'+svg+'</div><div style="'+ringStyle+'"></div></div>';
+  return L.divIcon({html:html,className:"",iconSize:[28,28],iconAnchor:[14,14],popupAnchor:[0,-16]});
+}
+
 function makeMapIconWithDay(styleKey,dayNum){
   // Same as makeMapIcon but adds a small day-number badge
   var svgFn=MAP_ICONS[styleKey]||MAP_ICONS["sight-nice"];
@@ -3285,19 +3294,20 @@ function updateMainMapMarkers(){
       var coords=getCoords(s,pool,center); if(!coords) return;
       var onDay=entry.onToday;
       var iconKey=s.type==='restaurant'?'restaurant':(s.p==='must'?'sight-must':'sight-nice');
-      addPin(coords,makeMapIcon(iconKey),onDay?(s.done?0.3:1):0.45,s,onDay?(s.type==='restaurant'?'restaurant':'sight'):(s.type==='restaurant'?'restaurant-suggestion':'suggestion'));
+      var icon=onDay?makeMapIcon(iconKey):makeMapIconDimmed(iconKey);
+      addPin(coords,icon,onDay?(s.done?0.3:1):1,s,onDay?(s.type==='restaurant'?'restaurant':'sight'):(s.type==='restaurant'?'restaurant-suggestion':'suggestion'));
     });
     // Unscheduled suggestions (not on any day)
     (dest.suggestions||[]).forEach(function(s){
       var coords=getCoords(s,dest.suggestions,center); if(!coords) return;
       if(allDayItems[s.n]) return; // already rendered above
-      addPin(coords,makeMapIcon('sight-nice'),0.45,s,'suggestion');
+      addPin(coords,makeMapIconDimmed('sight-nice'),1,s,'suggestion');
     });
     // Unscheduled restaurant suggestions
     (dest.restaurantSuggestions||[]).forEach(function(s){
       var coords=getCoords(s,dest.restaurantSuggestions,center); if(!coords) return;
       if(allDayItems[s.n]) return;
-      addPin(coords,makeMapIcon('restaurant'),0.45,s,'restaurant-suggestion');
+      addPin(coords,makeMapIconDimmed('restaurant'),1,s,'restaurant-suggestion');
     });
     // Hotels — use addPin so they get click handlers
     var _execDistHotels=[];
