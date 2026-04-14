@@ -2930,44 +2930,64 @@ function getLeg(fromId,toId){
   return trip.legs[key];
 }
 
-function mkDateInp(id,value,opts){
-  // Creates a text input backed by Pikaday — cleaner UX than native date picker
-  var inp=document.createElement("input"); inp.type="text"; inp.className="bk-inp date-edit-inp";
+function mkDateInp(id, value, opts){
+  // Text input backed by Pikaday — clean date picker
+  var inp=document.createElement("input");
+  inp.type="text"; inp.className="bk-inp date-edit-inp";
+  inp.style.cssText="cursor:pointer;width:90px;";
   if(id) inp.id=id;
-  inp.placeholder="MMM D, YYYY"; inp.readOnly=true; inp.style.cursor="pointer";
+  inp.readOnly=true;
+  inp.placeholder="Pick date";
+
+  // Store ISO value separately
+  inp._isoValue = value||"";
+  if(value){
+    var dv=new Date(value+"T12:00:00");
+    inp.value=dv.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
+  }
+
   var _pik=null;
-  function initPikaday(){
-    if(_pik||typeof Pikaday==='undefined') return;
-    _pik=new Pikaday({
+  function getPik(){
+    if(_pik) return _pik;
+    if(typeof Pikaday==="undefined") return null;
+    var pikOpts={
       field: inp,
-      format: 'MMM D, YYYY',
-      toString: function(date){ return date.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); },
-      parse: function(str){ var d=new Date(str); return isNaN(d)?new Date():d; },
+      toString: function(d){ return d.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}); },
+      parse: function(s){ var d=new Date(s); return isNaN(d)?new Date():d; },
       onSelect: function(date){
         inp._isoValue=date.toISOString().slice(0,10);
         inp.value=_pik.toString(date);
-        if(opts&&opts.onSelect) opts.onSelect(inp._isoValue,date);
-        if(opts&&opts.minDate) _pik.setMinDate(null); // reset after selection
+        if(opts&&opts.onSelect) opts.onSelect(inp._isoValue, date);
       },
-      minDate: opts&&opts.minDate?new Date(opts.minDate+'T12:00:00'):null,
-      maxDate: null,
-      yearRange: [2020,2030],
-      i18n: { previousMonth:'<',nextMonth:'>',months:['January','February','March','April','May','June','July','August','September','October','November','December'],weekdays:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],weekdaysShort:['Su','Mo','Tu','We','Th','Fr','Sa'] }
-    });
+      yearRange: [2020,2030]
+    };
+    if(opts&&opts.minDate) pikOpts.minDate=new Date(opts.minDate+"T12:00:00");
+    _pik=new Pikaday(pikOpts);
+    return _pik;
   }
-  inp.onfocus=function(){ initPikaday(); };
-  inp.onclick=function(){ initPikaday(); if(_pik)_pik.show(); };
-  // Set initial value
-  if(value){
-    inp._isoValue=value;
-    var dv=new Date(value+'T12:00:00');
-    inp.value=dv.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
-  }
-  // Expose .value as ISO for compatibility
-  Object.defineProperty(inp,'isoValue',{get:function(){return inp._isoValue||'';},set:function(v){inp._isoValue=v;if(v){var d=new Date(v+'T12:00:00');inp.value=d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});}else{inp.value='';}}});
-  inp.destroy=function(){if(_pik)_pik.destroy();};
+
+  inp.addEventListener("click", function(){
+    var p=getPik(); if(p) p.show();
+  });
+  inp.addEventListener("focus", function(){
+    var p=getPik(); if(p) p.show();
+  });
+
+  inp.getIso=function(){ return inp._isoValue||""; };
+  inp.setIso=function(v){
+    inp._isoValue=v||"";
+    if(v){ var d=new Date(v+"T12:00:00"); inp.value=d.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}); }
+    else inp.value="";
+  };
+  inp.setMin=function(minIso){
+    var p=getPik();
+    if(p&&minIso) p.setMinDate(new Date(minIso+"T12:00:00"));
+    else if(p) p.setMinDate(null);
+  };
+  inp.destroy=function(){ if(_pik){ _pik.destroy(); _pik=null; } };
   return inp;
 }
+
 
 function mkField(labelText,inputEl){
   var w=document.createElement("div"); w.className="bk-field";
@@ -4387,18 +4407,18 @@ function drawTripMode(){
     var editRow=document.createElement("div"); editRow.id="di-edit-row-"+dest.id; editRow.style.display="none";
     editRow.style.cssText="display:none;padding:5px 0 2px;";
     var fi=mkDateInp("edit-from-"+dest.id, dest.dateFrom, {onSelect:function(iso){
-      fi._isoValue=iso;
-      ti_pik&&ti_pik.setMinDate(new Date(iso+'T12:00:00'));
-      if(ti._isoValue&&ti._isoValue<iso){ti.isoValue='';}
+      ti.setMin(iso);
+      if(ti.getIso()&&ti.getIso()<iso) ti.setIso('');
     }});
-    var ti_pik=null; // reference to ti's pikaday instance - set below
     var arrow=document.createElement("span"); arrow.style.cssText="font-size:10px;color:#aaa;margin:0 4px;"; arrow.textContent="\u2192";
     var ti=mkDateInp("edit-to-"+dest.id, dest.dateTo, {minDate:dest.dateFrom});
-    // Keep saveDates compatibility — it reads fi.value and ti.value via _isoValue
-    Object.defineProperty(fi,'value',{get:function(){return fi._isoValue||'';},set:function(v){fi.isoValue=v;},configurable:true});
-    Object.defineProperty(ti,'value',{get:function(){return ti._isoValue||'';},set:function(v){ti.isoValue=v;},configurable:true});
     var sv=document.createElement("button"); sv.className="date-save-btn"; sv.textContent="Save";
-    sv.onclick=function(e){e.stopPropagation();saveDates(dest.id);};
+    sv.onclick=function(e){
+      e.stopPropagation();
+      var newFrom=fi.getIso(); var newTo=ti.getIso();
+      if(!newFrom||!newTo) return;
+      saveDates(dest.id, newFrom, newTo);
+    };
     var cx=document.createElement("button"); cx.className="date-cancel-btn"; cx.textContent="Cancel";
     cx.onclick=function(e){e.stopPropagation();closeListDateEdit(dest.id);};
     editRow.onclick=function(e){e.stopPropagation();};
