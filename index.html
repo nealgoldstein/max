@@ -4452,49 +4452,46 @@ function drawTripMode(){
       var dot=document.createElement("div"); dot.className="route-dot";
       var inner=document.createElement("div"); inner.className="route-chip-inner";
       var routing=getRouting(dest.place,next.place);
-      var bestOpt=routing&&routing.options.length?routing.options[0]:null;
-
-      // If there's a booked leg, show that instead
       var leg=getLeg(dest.id,next.id);
       var bookedBk=leg&&leg.bookings.find(function(b){return b.status==="booked";});
 
-      var top=document.createElement("div"); top.className="route-chip-top";
-      var modeIcon=document.createElement("span"); modeIcon.className="route-mode-icon";
-      var headlineTxt=document.createElement("span"); headlineTxt.className="route-headline";
-      var link=document.createElement("span"); link.className="route-chip-link"; link.textContent="Routing \u2192";
+      var row=document.createElement("div"); row.style.cssText="display:flex;align-items:center;gap:4px;flex-wrap:wrap;";
 
       if(bookedBk){
-        // Show booked transport with a confirmation indicator
+        // Booked: show confirmed transport + details
         var modeMap={"train":"\uD83D\uDE82","bus":"\uD83D\uDE8C","flight":"\u2708\uFE0F","ferry":"\u26F4\uFE0F"};
-        modeIcon.textContent=modeMap[bookedBk.mode]||"\uD83D\uDE82";
-        headlineTxt.textContent=bookedBk.operator;
-        headlineTxt.style.fontWeight="500";
-        top.appendChild(modeIcon); top.appendChild(headlineTxt);
-        var booked=document.createElement("span"); booked.style.cssText="font-size:9px;color:#2a7a4e;margin-left:3px;"; booked.textContent="\u2713 booked";
-        top.appendChild(booked); top.appendChild(link);
-        inner.appendChild(top);
-        var metaParts=[];
-        if(bookedBk.departure) metaParts.push(fmtD(bookedBk.departure)+(bookedBk.departureTime?" "+bookedBk.departureTime:""));
-        if(bookedBk.confirmationNumber) metaParts.push("Conf: "+bookedBk.confirmationNumber);
-        if(metaParts.length){
-          var meta=document.createElement("div"); meta.className="route-meta"; meta.textContent=metaParts.join(" \u00b7 ");
-          inner.appendChild(meta);
-        }
-      } else if(bestOpt){
-        modeIcon.textContent=bestOpt.icon;
-        headlineTxt.textContent=bestOpt.name;
-        top.appendChild(modeIcon); top.appendChild(headlineTxt); top.appendChild(link);
-        inner.appendChild(top);
-        if(bestOpt.meta){
-          var meta=document.createElement("div"); meta.className="route-meta"; meta.textContent=bestOpt.meta;
-          inner.appendChild(meta);
-        }
+        var bkLabel=document.createElement("span"); bkLabel.style.cssText="font-size:11px;";
+        bkLabel.textContent=(modeMap[bookedBk.mode]||"\uD83D\uDE82")+" "+bookedBk.operator;
+        var bkBadge=document.createElement("span"); bkBadge.style.cssText="font-size:9px;color:#2a7a4e;font-weight:600;";
+        bkBadge.textContent="\u2713 booked";
+        if(bookedBk.departure) bkLabel.textContent+=" \u00b7 "+fmtD(bookedBk.departure)+(bookedBk.departureTime?" "+bookedBk.departureTime:"");
+        row.appendChild(bkLabel); row.appendChild(bkBadge);
+      } else if(routing&&routing.options.length){
+        // Show all options as compact pills
+        routing.options.forEach(function(opt,i){
+          var pill=document.createElement("span");
+          pill.style.cssText="font-size:10px;color:#444;white-space:nowrap;";
+          pill.textContent=opt.icon+" "+opt.name.split(" ")[0]+(opt.meta?" \u00b7 "+opt.meta.split(" ")[0]:"");
+          row.appendChild(pill);
+          if(i<routing.options.length-1){
+            var sep=document.createElement("span"); sep.style.cssText="font-size:10px;color:#ccc;"; sep.textContent="|";
+            row.appendChild(sep);
+          }
+        });
       } else {
-        modeIcon.textContent="\u2194"; headlineTxt.textContent="route unknown \u2014 see Routing";
-        top.appendChild(modeIcon); top.appendChild(headlineTxt); inner.appendChild(top);
+        var unk=document.createElement("span"); unk.style.cssText="font-size:10px;color:#aaa;"; unk.textContent="\u2194 route unknown";
+        row.appendChild(unk);
       }
 
-      // Click: open source destination on Routing tab
+      // Routing → button always at end
+      var rtBtn=document.createElement("span");
+      rtBtn.style.cssText="font-size:10px;color:#1a6fb0;font-weight:600;margin-left:auto;white-space:nowrap;cursor:pointer;padding:1px 5px;border:1px solid #cce;border-radius:4px;background:#f0f5ff;flex-shrink:0;";
+      rtBtn.textContent="Routing \u2192";
+      row.appendChild(rtBtn);
+
+      inner.appendChild(row);
+
+      // Click anywhere: open Routing tab
       (function(did){inner.onclick=function(){
         _activeDmSection="routing";
         selectDest(did);
