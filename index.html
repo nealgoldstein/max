@@ -2278,7 +2278,7 @@ async function runCandidateSearch(requiredPlaces) {
   // and show results as each completes — so adding more required stops
   // doesn't increase the total wait time
   var reqNames = requiredPlaces.map(function(p){ return p.place+", "+p.country; }).join("; ");
-  var extraCount = Math.max(6, 10 - Math.min(requiredPlaces.length, 4));
+  var extraCount = Math.max(8, 12 - Math.min(requiredPlaces.length, 4));
   var skipList = requiredPlaces.map(function(p){ return p.place; }).join(", ");
 
   var p1 = requiredPlaces.length > 0
@@ -2296,16 +2296,17 @@ async function runCandidateSearch(requiredPlaces) {
       + releasedPlaces.map(function(p){ return p.place + " (was on " + p.releasedFrom + ")"; }).join(", ") + "\n"
     : "";
 
-  var p2 = "You are a travel expert helping plan a trip to " + (_tb.region||"this region") + ". Suggest " + extraCount + " destination candidates worth visiting.\n"
+  var p2 = "You are a travel expert helping plan a trip to " + (_tb.region||"this region") + ".\n"
     + "Trip context: " + brief + "\n"
     + releasedNote
-    + (skipList ? "Do NOT include (already required): " + skipList + "\n" : "")
-    + "\nIMPORTANT: Include the obvious major cities and hubs — do not avoid well-known places in favor of obscure ones. "
-    + "For Switzerland this means including Zurich, Bern, Geneva, Lucerne, Basel etc. if they fit the trip. "
-    + "The best trips include a mix of famous essential stops and less obvious discoveries. "
-    + "Prioritize places the traveler would genuinely regret missing.\n"
-    + "Return ONLY a JSON array (no markdown):\n"
-    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why worth visiting and what makes it distinctive.","tradeoffs":"One honest downside.","tags":["tag1"],"lat":0.0,"lng":0.0}]';
+    + (skipList ? "These stops are already confirmed: " + skipList + ". Do NOT include them again.\n" : "")
+    + "\nSurvey ALL the destinations in this region that a serious traveler would consider. "
+    + "Start by listing every place genuinely worth visiting — major cities, towns, natural areas — then select the " + extraCount + " that best fit this specific trip. "
+    + "Do NOT skip well-known places because they seem obvious. Famous cities are famous for good reasons. "
+    + "A traveler doing this trip would almost certainly regret missing: the major gateway cities, the cultural capitals, the places everyone who has been there mentions. Include those. "
+    + "Then add less obvious places that specifically fit what this traveler wants.\n"
+    + "Return ONLY a JSON array of exactly " + extraCount + " places (no markdown):\n"
+    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"What makes it worth visiting — specific, not generic.","tradeoffs":"One honest downside.","tags":["tag1"],"lat":0.0,"lng":0.0}]';
 
   // Run in parallel — total wait = max(call1, call2) not call1 + call2
   var calls = [];
@@ -2858,16 +2859,17 @@ async function retryDiscoveryCandidates() {
       + releasedPlaces.map(function(p){ return p.place + " (was on " + p.releasedFrom + ")"; }).join(", ") + "\n"
     : "";
 
-  var p2 = "You are a travel expert helping plan a trip to " + (_tb.region||"this region") + ". Suggest " + extraCount + " destination candidates worth visiting.\n"
+  var p2 = "You are a travel expert helping plan a trip to " + (_tb.region||"this region") + ".\n"
     + "Trip context: " + brief + "\n"
     + releasedNote
-    + (skipList ? "Do NOT include (already required): " + skipList + "\n" : "")
-    + "\nIMPORTANT: Include the obvious major cities and hubs — do not avoid well-known places in favor of obscure ones. "
-    + "For Switzerland this means including Zurich, Bern, Geneva, Lucerne, Basel etc. if they fit the trip. "
-    + "The best trips include a mix of famous essential stops and less obvious discoveries. "
-    + "Prioritize places the traveler would genuinely regret missing.\n"
-    + "Return ONLY a JSON array (no markdown):\n"
-    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why worth visiting and what makes it distinctive.","tradeoffs":"One honest downside.","tags":["tag1"],"lat":0.0,"lng":0.0}]';
+    + (skipList ? "These stops are already confirmed: " + skipList + ". Do NOT include them again.\n" : "")
+    + "\nSurvey ALL the destinations in this region that a serious traveler would consider. "
+    + "Start by listing every place genuinely worth visiting — major cities, towns, natural areas — then select the " + extraCount + " that best fit this specific trip. "
+    + "Do NOT skip well-known places because they seem obvious. Famous cities are famous for good reasons. "
+    + "A traveler doing this trip would almost certainly regret missing: the major gateway cities, the cultural capitals, the places everyone who has been there mentions. Include those. "
+    + "Then add less obvious places that specifically fit what this traveler wants.\n"
+    + "Return ONLY a JSON array of exactly " + extraCount + " places (no markdown):\n"
+    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"What makes it worth visiting — specific, not generic.","tradeoffs":"One honest downside.","tags":["tag1"],"lat":0.0,"lng":0.0}]';
   try {
     var t = await callMax([{role:"user",content:p2}], 2000, 45000);
     var newCands = JSON.parse(t.replace(/```json|```/g,"").trim());
