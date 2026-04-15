@@ -1861,7 +1861,15 @@ async function findCandidates(){
     _tb.candidates=cands;
     showCandidateExplorer(cands);
   }catch(e){
-    var el=g("ce-cards"); if(el) el.innerHTML='<div style="padding:16px;color:#c05020;font-size:11px;">Could not generate candidates: '+e.message+'</div>';
+    var el=g("ce-cards");
+    var noKey=e.message&&e.message.indexOf("No API key")>-1;
+    if(el) el.innerHTML='<div style="padding:16px;font-size:11px;">'
+      +(noKey
+        ?'<div style="color:#c05020;font-weight:600;margin-bottom:8px;">No API key set</div>'
+        +'<div style="color:#555;margin-bottom:10px;">Max needs your Anthropic API key to generate candidate places.</div>'
+        +'<button onclick="cancelCandidateExplorer();setTimeout(function(){showApiKeyForm();},100);" style="font-size:11px;padding:6px 12px;background:#111;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Set API key →</button>'
+        :'<div style="color:#c05020;">Could not generate candidates: '+e.message+'</div>')
+      +'</div>';
     var ld=g("ce-loading"); if(ld) ld.style.display="none";
   }
 }
