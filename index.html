@@ -2053,30 +2053,40 @@ async function runCandidateSearch(requiredPlaces) {
 
   showCandidateExplorer(null); // show loading state
 
-  var requiredNote = requiredPlaces.length
-    ? "\nREQUIRED STOPS (must appear as candidates): " + requiredPlaces.map(function(p){ return p.place+", "+p.country; }).join("; ")
-    : "";
+  var reqList = requiredPlaces.map(function(p){ return p.place+" ("+p.country+") — required for: "+p.requiredFor.join(", "); }).join("\n");
+  var reqCount = requiredPlaces.length;
+  var extraCount = Math.max(4, 8 - reqCount);
 
-  var prompt = "You are a travel expert. Suggest 6-8 destination candidates based on this trip brief.\n\n"
-    + "Trip: " + (_tb.name||"")
-    + (_tb.region ? "\nRegion: " + _tb.region : "")
-    + (_tb.when ? "\nWhen/how long: " + _tb.when : "")
-    + (_tb.intent ? "\nWhat they want: " + _tb.intent : "")
-    + (_tb.anchors ? "\nMust-dos: " + _tb.anchors : "")
-    + (_tb.interests&&_tb.interests.length ? "\nAlso want to: " + _tb.interests.join(", ") : "")
-    + (_tb.constraints ? "\nConstraints: " + _tb.constraints : "")
-    + requiredNote
-    + "\n\nReturn ONLY a valid JSON array (no markdown):\n"
-    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why.","tradeoffs":"Downside.","tags":["tag1","tag2"],"lat":48.2,"lng":16.4}]'
-    + "\nMix roles: base, anchor, pass-through. Include real lat/lng."
-    + (requiredPlaces.length ? " REQUIRED stops must all appear in the list." : "");
+  var prompt = "You are a travel expert planning a trip to " + (_tb.region||"this region") + ".\n\n"
+    + "Trip brief:\n"
+    + (_tb.when ? "When/how long: " + _tb.when + "\n" : "")
+    + (_tb.intent ? "What they want: " + _tb.intent + "\n" : "")
+    + (_tb.interests&&_tb.interests.length ? "Also want to: " + _tb.interests.join(", ") + "\n" : "")
+    + (_tb.constraints ? "Constraints: " + _tb.constraints + "\n" : "")
+    + (reqCount > 0
+      ? "\nCERTAIN STOPS ALREADY REQUIRED by their must-dos:\n" + reqList + "\n"
+        + "\nNow suggest " + extraCount + " ADDITIONAL places worth visiting purely on their own merits — not because of trains or must-dos. These should be genuinely interesting stops that complement the required ones."
+      : "\nSuggest 6-8 destination candidates.")
+    + "\n\nReturn ONLY a single JSON array (no markdown, no extra text):\n"
+    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why worth visiting on its own.","tradeoffs":"Downside.","tags":["tag1"],"lat":0.0,"lng":0.0}]'
+    + "\nInclude real lat/lng. Mix roles.";
 
   try {
     var text = await callMax([{role:"user",content:prompt}], 2000);
-    var cands = JSON.parse(text.replace(/```json|```/g,"").trim());
-    cands.forEach(function(c,i){ c.id="c"+i; c.status=null; });
-    _tb.candidates = cands;
-    showCandidateExplorer(cands);
+    var additional = JSON.parse(text.replace(/```json|```/g,"").trim());
+    // Tag additional candidates as non-required
+    additional.forEach(function(c){ c._required = false; });
+    // Build required-stop stubs (AI did not include them — we prepend them)
+    var reqCands = requiredPlaces.map(function(p){
+      return {place:p.place, country:p.country, role:"anchor",
+        stayRange:"2-4 nights", whyItFits:"Required stop — "+p.requiredFor.join(", "),
+        tradeoffs:"", tags:["required"], lat:0, lng:0, _required:true};
+    });
+    var allCands = reqCands.concat(additional);
+    allCands.forEach(function(c,i){ c.id="c"+i; c.status=null; });
+    _tb.candidates = allCands;
+    // Geocode required stops that have no coords
+    geocodeRequiredStops(allCands, function(){ showCandidateExplorer(allCands); });
   } catch(e) {
     var errDiv = g("ce-cards");
     var noKey = e.message && e.message.indexOf("No API key") > -1;
@@ -2088,6 +2098,23 @@ async function runCandidateSearch(requiredPlaces) {
   }
 }
 
+
+async function geocodeRequiredStops(cands, callback) {
+  var needCoords = cands.filter(function(c){ return c._required && (!c.lat || c.lat===0); });
+  if (!needCoords.length) { callback(); return; }
+  try {
+    var names = needCoords.map(function(c){ return c.place+", "+c.country; }).join("; ");
+    var prompt = "Return ONLY a JSON array with lat/lng for these places: "+names
+      +'\n[{"place":"Name","lat":0.0,"lng":0.0}]';
+    var text = await callMax([{role:"user",content:prompt}], 400);
+    var coords = JSON.parse(text.replace(/```json|```/g,"").trim());
+    coords.forEach(function(r){
+      var match = cands.find(function(c){ return c.place.toLowerCase()===r.place.toLowerCase(); });
+      if (match) { match.lat=r.lat; match.lng=r.lng; }
+    });
+  } catch(e) {}
+  callback();
+}
 
 // ─── TRIP BRIEF ────────────────────────────────────────────
 var _tb={};
