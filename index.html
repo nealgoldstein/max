@@ -779,16 +779,14 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
     <div class="hs-logo">
       <div class="hs-av">M</div>
       <div class="hs-logo-text"><p>Max</p><span>Tourist's Guide Travel Agent</span></div>
-      <div onclick="showAboutMax()" style="font-size:10px;color:#bbb;cursor:pointer;margin-left:auto;padding:2px 8px;border:1px solid #e8e8e8;border-radius:10px;white-space:nowrap;" title="How Max works">How it works</div>
+      <div onclick="showAboutMax()" id="hs-how-it-works" style="font-size:11px;color:#999;cursor:pointer;margin-left:auto;padding:3px 10px;border:1px solid #ddd;border-radius:10px;white-space:nowrap;" title="How Max works">How it works</div>
     </div>
     <div class="hs-welcome" id="hs-welcome">
-      A travel planning tool built around the voice and ideas of<br>
-      <em>A Tourist's Guide to the Existential Universe</em>.
       <div style="margin-top:14px;font-size:12px;color:#777;line-height:1.7;padding-top:14px;border-top:1px solid #eee;">
         Max is not an AI that spits out an itinerary and expects you to follow it.<br>
         It is a collaborator &#8212; to help you think, compare, test, and adapt.<br>
         The goal is not a rigid schedule. The goal is to arrive well-positioned.<br>
-        <div style="margin-top:10px;padding:9px 12px;background:#f5f5f5;border-radius:5px;font-size:11px;color:#555;font-style:italic;line-height:1.6;">
+        <div style="margin-top:12px;padding:8px 12px;border-left:3px solid #111;font-size:12px;color:#333;font-style:italic;line-height:1.6;">
           &#8220;There is no way to give Max all the information it would need to perfectly script a trip before you leave.&#8221;
         </div>
         <span id="hs-about-link" onclick="showAboutMax()" style="color:#1a5fa8;cursor:pointer;font-size:11px;margin-top:8px;display:inline-block;">Read more about how Max works &#8594;</span>
@@ -4962,6 +4960,48 @@ function closeMapPinPanel(){
   var p=document.getElementById('map-pin-popup'); if(p)p.style.display='none';
 }
 
+function getRegionCenter(region) {
+  var r = (region||"").toLowerCase();
+  // Known regions -> [lat, lng], zoom
+  var known = [
+    {k:["iceland"],          c:[64.9,  -18.5], z:6},
+    {k:["switzerland","swiss"], c:[46.8,   8.2], z:7},
+    {k:["norway"],           c:[60.5,   8.5], z:5},
+    {k:["sweden"],           c:[59.3,  18.0], z:5},
+    {k:["finland"],          c:[61.9,  25.7], z:5},
+    {k:["denmark"],          c:[56.2,  10.6], z:6},
+    {k:["japan"],            c:[36.2, 138.3], z:5},
+    {k:["central europe","europe"], c:[48.0,  14.0], z:5},
+    {k:["uk","britain","england","scotland"], c:[54.0,  -2.0], z:6},
+    {k:["france"],           c:[46.2,   2.2], z:6},
+    {k:["italy"],            c:[41.9,  12.5], z:6},
+    {k:["spain"],            c:[40.4,  -3.7], z:6},
+    {k:["portugal"],         c:[39.4,  -8.2], z:7},
+    {k:["greece"],           c:[39.1,  21.8], z:6},
+    {k:["austria"],          c:[47.5,  14.5], z:7},
+    {k:["czech","czechia"],  c:[49.8,  15.5], z:7},
+    {k:["new zealand"],      c:[-41.3, 174.8], z:5},
+    {k:["australia"],        c:[-25.3, 133.8], z:4},
+    {k:["patagonia","argentina","chile"], c:[-38.4, -63.6], z:4},
+    {k:["peru","machu picchu"], c:[-9.2, -75.0], z:5},
+    {k:["morocco"],          c:[31.8,  -7.1], z:6},
+    {k:["kenya","tanzania","africa"], c:[1.0,  37.9], z:5},
+    {k:["thailand","southeast asia"], c:[13.0, 101.0], z:6},
+    {k:["vietnam"],          c:[14.1, 108.3], z:6},
+    {k:["india"],            c:[20.6,  78.9], z:5},
+    {k:["alps","alpine"],    c:[46.5,  10.0], z:6},
+    {k:["scandinavia"],      c:[62.0,  15.0], z:4},
+  ];
+  for(var i=0;i<known.length;i++){
+    var entry=known[i];
+    for(var j=0;j<entry.k.length;j++){
+      if(r.indexOf(entry.k[j])>-1) return {center:entry.c, zoom:entry.z};
+    }
+  }
+  // Default: Europe
+  return {center:[48,14], zoom:4};
+}
+
 function updateMainMap(){
   if(!_mainMap)return;
   clearMainMarkers();
@@ -4976,6 +5016,12 @@ function updateMainMap(){
     if(trip.destinations.length===0){
       if(overlay)overlay.style.display="flex";
       clearMainMarkers();
+      // Center on region from brief if available
+      var region=(trip.brief&&trip.brief.region)||"";
+      if(region){
+        var rc=getRegionCenter(region);
+        _mainMap.setView(rc.center,rc.zoom,{animate:false});
+      }
       return;
     }
     if(overlay)overlay.style.display="none";
