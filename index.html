@@ -1855,9 +1855,7 @@ async function findCandidates(){
     +'[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why.","tradeoffs":"Downside.","tags":["tag1","tag2"],"lat":48.2,"lng":16.4}]'
     +"\nMix roles: base, anchor, pass-through. Include real lat/lng.";
   try{
-    var resp=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:2000,messages:[{role:"user",content:prompt}]})});
-    var data=await resp.json();
-    var text=(data.content&&data.content[0]&&data.content[0].text)||"";
+    var text=await callMax([{role:"user",content:prompt}],2000);
     var cands=JSON.parse(text.replace(/```json|```/g,"").trim());
     cands.forEach(function(c,i){c.id="c"+i;c.status=null;});
     _tb.candidates=cands;
@@ -2054,10 +2052,9 @@ async function openCompareModal(a,b){
       +"\n\n"+a.place+": "+a.whyItFits+" Tradeoffs: "+a.tradeoffs
       +"\n"+b.place+": "+b.whyItFits+" Tradeoffs: "+b.tradeoffs
       +"\n\n2-3 sentences: which better fits this trip and why? Be direct.";
-    var r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:200,messages:[{role:"user",content:p}]})});
-    var d=await r.json();
+    var verdict=await callMax([{role:"user",content:p}],200);
     var vt=document.getElementById("cmp-vt");
-    if(vt) vt.textContent=(d.content&&d.content[0]&&d.content[0].text)||"Could not load verdict.";
+    if(vt) vt.textContent=verdict||"Could not load verdict.";
   }catch(e){
     var vt=document.getElementById("cmp-vt"); if(vt) vt.textContent="Could not load verdict.";
   }
