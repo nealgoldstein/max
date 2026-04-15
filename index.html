@@ -720,6 +720,10 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
       A travel planning tool built around the voice and ideas of<br>
       <em>A Tourist's Guide to the Existential Universe</em>.
     </div>
+    <div id="hs-key-notice" style="margin-top:10px;padding:9px 12px;background:#fff8f0;border:1px solid #f0dcc0;border-radius:7px;font-size:11px;display:none;">
+      <span style="color:#b05820;font-weight:600;">API key needed</span> — Max needs your Anthropic key to suggest destinations.
+      <span onclick="showHomeApiKeyForm()" style="color:#1a5fa8;cursor:pointer;text-decoration:underline;margin-left:4px;">Set it here →</span>
+    </div>
     <div id="hs-trips-section" style="display:none;">
       <div class="hs-section-lbl">Your trips</div>
       <div class="trip-cards" id="trip-cards"></div>
@@ -1676,6 +1680,7 @@ function showHome(){
 }
 
 function renderHomeScreen(){
+  var kn=g("hs-key-notice"); if(kn) kn.style.display=_apiKey?"none":"block";
   if(_tripsIndex.length===0){
     g("hs-welcome").style.display="block";
     g("hs-trips-section").style.display="none";
@@ -1825,6 +1830,41 @@ function saveBriefKey(){
   setTimeout(function(){toast.remove();},2000);
 }
 
+
+function showHomeApiKeyForm(){
+  var existing = document.getElementById("home-key-modal");
+  if (existing) { existing.remove(); return; }
+  var ov = document.createElement("div");
+  ov.id = "home-key-modal";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9000;display:flex;align-items:center;justify-content:center;";
+  ov.innerHTML = '<div style="background:#fff;border-radius:10px;padding:24px;width:380px;max-width:90vw;">'
+    + '<div style="font-size:14px;font-weight:700;margin-bottom:6px;">Set Anthropic API key</div>'
+    + '<div style="font-size:11px;color:#888;margin-bottom:14px;">Your key is stored only in this browser. Get one at <a href="https://console.anthropic.com" target="_blank" style="color:#1a5fa8;">console.anthropic.com</a>.</div>'
+    + '<input id="home-key-inp" type="password" placeholder="sk-ant-..." autocomplete="off" style="width:100%;font-size:12px;padding:9px 11px;border:1px solid #ddd;border-radius:6px;font-family:monospace;box-sizing:border-box;margin-bottom:10px;">'
+    + '<div style="display:flex;gap:8px;">'
+    + '<button id="home-key-save" style="flex:1;padding:9px;font-size:12px;font-weight:600;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;">Save key</button>'
+    + '<button id="home-key-cancel" style="padding:9px 14px;font-size:12px;border:1px solid #ddd;border-radius:6px;cursor:pointer;font-family:inherit;background:#fff;">Cancel</button>'
+    + '</div></div>';
+  document.body.appendChild(ov);
+  ov.onclick = function(e){ if(e.target===ov) ov.remove(); };
+  document.getElementById("home-key-cancel").onclick = function(){ ov.remove(); };
+  document.getElementById("home-key-save").onclick = function(){
+    var v = document.getElementById("home-key-inp").value.trim();
+    if (!v || v.length < 20) { document.getElementById("home-key-inp").style.borderColor="#c05020"; return; }
+    saveApiKey(v);
+    ov.remove();
+    // Hide the notice, show confirmation
+    var notice = document.getElementById("hs-key-notice");
+    if (notice) notice.style.display = "none";
+    var t = document.createElement("div");
+    t.style.cssText = "position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#2a7a4e;color:#fff;padding:8px 18px;border-radius:6px;font-size:12px;font-weight:600;z-index:9999;";
+    t.textContent = "✓ API key saved";
+    document.body.appendChild(t);
+    setTimeout(function(){ t.remove(); }, 2500);
+  };
+  document.getElementById("home-key-inp").onkeydown = function(e){ if(e.key==="Enter") document.getElementById("home-key-save").click(); };
+  setTimeout(function(){ document.getElementById("home-key-inp").focus(); }, 50);
+}
 
 // ─── TRIP BRIEF ────────────────────────────────────────────
 var _tb={};
