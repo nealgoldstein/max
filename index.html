@@ -707,6 +707,12 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 
 
 /* Must-do confirmation step */
+.mdc-required-summary{background:#fff;border:1px solid #e8e8e8;border-radius:7px;padding:10px 12px;margin-bottom:10px;font-size:11px;line-height:1.6;}
+.mdc-req-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#aaa;margin-bottom:5px;}
+.mdc-req-places{display:flex;flex-wrap:wrap;gap:5px;align-items:center;}
+.mdc-req-place{font-size:11px;font-weight:600;padding:3px 9px;background:#111;color:#fff;border-radius:4px;}
+.mdc-req-arrow{color:#ccc;font-size:11px;}
+.mdc-req-empty{color:#bbb;font-style:italic;font-size:11px;}
 .mdc-overlay{position:fixed;inset:0;background:#f7f7f5;z-index:8500;display:flex;flex-direction:column;}
 .mdc-header{padding:16px 24px 0;flex-shrink:0;}
 .mdc-step{font-size:10px;color:#aaa;letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px;}
@@ -1943,6 +1949,7 @@ function showMustDoConfirmation(items) {
     +(!items ? '<div class="mdc-loading"><div style="font-size:20px;margin-bottom:8px;animation:spin 1s linear infinite;display:inline-block">\u2736</div><div>Interpreting your must-dos\u2026</div></div>' : '')
     +'</div>'
     +'<div class="mdc-footer">'
+    +'<div class="mdc-required-summary" id="mdc-req-summary"><div class="mdc-req-label">Required stops from your selections</div><div class="mdc-req-places" id="mdc-req-places"><span class="mdc-req-empty">No items selected yet</span></div></div>'
     +'<button class="mdc-btn-primary" id="mdc-confirm-btn" onclick="confirmMustDos()" '+(!items?'disabled style="background:#ccc;cursor:not-allowed;"':'')+'>Find candidate places \u2192</button>'
     +'<div class="mdc-skip" onclick="runCandidateSearch([])">Skip this step \u2192</div>'
     +'</div>';
@@ -1981,6 +1988,7 @@ function renderMustDoItems(items) {
   // Enable confirm button
   var btn = document.getElementById("mdc-confirm-btn");
   if (btn) { btn.disabled = false; btn.style.cssText = ""; }
+  updateMdcSummary();
 }
 
 function toggleMdcItem(id) {
@@ -1993,6 +2001,29 @@ function toggleMdcItem(id) {
     var check = div.querySelector(".mdc-check");
     if (check) check.textContent = item.checked ? "\u2713" : "";
   }
+  updateMdcSummary();
+}
+
+function updateMdcSummary() {
+  var container = document.getElementById("mdc-req-places");
+  if (!container) return;
+  // Collect unique required places from checked items in order
+  var seen = {};
+  var places = [];
+  _mdcItems.forEach(function(item) {
+    if (!item.checked) return;
+    (item.requiredPlaces||[]).forEach(function(p) {
+      if (!seen[p.place]) { seen[p.place] = true; places.push(p.place); }
+    });
+  });
+  if (!places.length) {
+    container.innerHTML = '<span class="mdc-req-empty">No items selected yet</span>';
+    return;
+  }
+  container.innerHTML = places.map(function(p, i) {
+    return (i > 0 ? '<span class="mdc-req-arrow">\u2192</span>' : '')
+      + '<span class="mdc-req-place">' + p + '</span>';
+  }).join('');
 }
 
 function confirmMustDos() {
