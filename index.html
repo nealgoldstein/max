@@ -2089,47 +2089,82 @@ function renderMustDoItems(items) {
   updateMdcSummary();
 }
 
-function addManualMdcItem() {
+async function addManualMdcItem() {
   var inp = document.getElementById("mdc-add-inp");
   if (!inp) return;
   var val = inp.value.trim();
   if (!val) return;
+  inp.value = "";
 
-  // Create a manual item
   var id = "md-manual-" + Date.now();
+  var region = (_tb && _tb.region) || "";
+
+  // Add a placeholder item immediately so the user sees feedback
   var item = {
-    id: id,
-    name: val,
-    description: "Added by you",
-    type: "manual",
-    checked: true,
-    requiredPlaces: [{place: val, country: ""}],
-    conditionNote: null
+    id: id, name: val, description: "Looking up " + val + "\u2026",
+    type: "manual", checked: true,
+    requiredPlaces: [{place: val, country: ""}], conditionNote: null
   };
   _mdcItems.push(item);
 
-  // Render it
+  // Render placeholder
   var body = document.getElementById("mdc-body");
   if (body) {
     var div = document.createElement("div");
-    div.className = "mdc-item checked manual";
+    div.className = "mdc-item checked";
     div.id = "mdc-item-" + id;
-    div.innerHTML = '<div class="mdc-item-top" onclick="toggleMdcItem(\'' + id + '\')">' 
-      + '<div class="mdc-check">\u2713</div>'
-      + '<div><div class="mdc-item-name">\uD83D\uDCCD ' + val + '</div>'
-      + '<div class="mdc-item-desc">Added by you \u2014 will be included as a required stop</div></div>'
-      + '</div>';
+    div.innerHTML = renderMdcItemHtml(item);
     body.appendChild(div);
   }
 
-  inp.value = "";
-  inp.focus();
-
-  // Enable confirm button if disabled
   var btn = document.getElementById("mdc-confirm-btn");
   if (btn) { btn.disabled = false; btn.style.cssText = ""; }
-
+  inp.focus();
   updateMdcSummary();
+
+  // Fetch a real description
+  try {
+    var prompt = "In one sentence (max 20 words), describe what makes " + val
+      + (region ? " in " + region : "") + " worth visiting as a travel destination. Be specific, not generic.";
+    var desc = await callMax([{role:"user",content:prompt}], 80, 15000);
+    item.description = desc.trim().replace(/^["\u201c]+|["\u201d]+$/g,"");
+    // Update the rendered item description
+    var descEl = document.querySelector("#mdc-item-" + id + " .mdc-item-desc");
+    if (descEl) descEl.textContent = item.description;
+  } catch(e) {
+    item.description = "Added as a required stop";
+    var descEl = document.querySelector("#mdc-item-" + id + " .mdc-item-desc");
+    if (descEl) descEl.textContent = item.description;
+  }
+}
+
+function renderMdcItemHtml(item) {
+  var rp = item.requiredPlaces||[];
+  var isCondition = item.type === "condition";
+  var placesRowHtml = rp.map(function(p,i){
+    return (i>0?'<span class="mdc-place-arrow">\u2192</span>':'')+'<span class="mdc-place">'+p.place+'</span>';
+  }).join("");
+  var placesSection = '';
+  if (rp.length && item.type !== "manual") {
+    if (isCondition) {
+      placesSection = '<div class="mdc-item-places" style="background:#fff9f0;border-top-color:#f0dcc0;">'
+        +'<div class="mdc-places-label" style="color:#b05820;">Best locations \u2014 keep schedule flexible:</div>'
+        +'<div class="mdc-places-row">'+placesRowHtml+'</div>'
+        +(item.conditionNote ? '<div style="font-size:10px;color:#b05820;margin-top:6px;line-height:1.5;">\u26a0 '+item.conditionNote+'</div>' : '')
+        +'</div>';
+    } else {
+      placesSection = '<div class="mdc-item-places">'
+        +'<div class="mdc-places-label">To do this you need stops in:</div>'
+        +'<div class="mdc-places-row">'+placesRowHtml+'</div>'
+        +'</div>';
+    }
+  }
+  return '<div class="mdc-item-top" onclick="toggleMdcItem(\''+item.id+'\')">'
+    +'<div class="mdc-check">' + (item.checked ? "\u2713" : "") + '</div>'
+    +'<div><div class="mdc-item-name">'+(isCondition ? '\u2728 ' : '')+item.name+'</div>'
+    +'<div class="mdc-item-desc">'+item.description+'</div></div>'
+    +'</div>'
+    +placesSection;
 }
 
 function toggleMdcItem(id) {
