@@ -2847,6 +2847,41 @@ async function retryDiscoveryCandidates() {
   }
 }
 
+async function geocodeMissingCandidates(missing, allCands) {
+  if (!missing.length) return;
+  try {
+    var names = missing.map(function(c){ return c.place + (c.country ? ", " + c.country : ""); }).join("; ");
+    var prompt = "Return ONLY a JSON array with accurate lat/lng for these places: " + names
+      + '\n[{"place":"Name","lat":0.0,"lng":0.0}]\nUse real coordinates.';
+    var text = await callMax([{role:"user",content:prompt}], 500, 20000);
+    var coords = JSON.parse(text.replace(/```json|```/g,"").trim());
+    coords.forEach(function(r){
+      var match = allCands.find(function(c){
+        return c.place && r.place && c.place.toLowerCase().indexOf(r.place.toLowerCase()) > -1;
+      });
+      if (match && r.lat && r.lng && r.lat !== 0) {
+        match.lat = r.lat; match.lng = r.lng;
+        // Add marker to map
+        if (_ceMap && r.lat && r.lng) {
+          var mc = match.status==="keep"?"#2a7a4e":match.status==="maybe"?"#d97706":match.status==="reject"?"#888":"#1a5fa8";
+          var icon = L.divIcon({html:'<div style="background:'+mc+';color:#fff;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.25);">'+
+            (match.place||"").substring(0,2)+'</div>',className:"",iconSize:[24,24],iconAnchor:[12,12]});
+          var m = L.marker([r.lat, r.lng], {icon:icon});
+          m.bindTooltip(match.place||"", {permanent:false,direction:"top",offset:[0,-14]});
+          m.addTo(_ceMap);
+          _ceMarkers.push(m);
+        }
+      }
+    });
+    // Refit bounds with new markers
+    var allBounds = [];
+    allCands.forEach(function(c){ if(c.lat && c.lng && c.lat!==0) allBounds.push([c.lat,c.lng]); });
+    if (allBounds.length > 1) {
+      try { _ceMap.fitBounds(allBounds, {padding:[28,28]}); } catch(e) {}
+    }
+  } catch(e) { console.warn("Geocoding failed:", e.message); }
+}
+
 function showCandidateExplorer(cands){
   g("trip-brief-overlay").style.display="none";
   var ov=g("candidate-explorer-overlay");
@@ -2983,6 +3018,11 @@ function renderCandidateCards(cands){
   });
   if(bounds.length>1) setTimeout(function(){try{_ceMap.fitBounds(bounds,{padding:[28,28]});}catch(e){}},150);
   updateCEShortlist();
+  // Geocode any candidates missing lat/lng and add their markers
+  var missingCoords = cands.filter(function(c){ return !c.lat || !c.lng || c.lat===0; });
+  if (missingCoords.length > 0) {
+    geocodeMissingCandidates(missingCoords, cands);
+  }
 }
 
 function rIcon(r){
