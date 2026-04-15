@@ -2204,8 +2204,10 @@ function updateMdcSummary() {
 
 function confirmMustDos() {
   var checked = _mdcItems.filter(function(x){ return x.checked; });
+  var unchecked = _mdcItems.filter(function(x){ return !x.checked; });
   var requiredMap = {};
-  var flexibilityNotes = []; // collect condition-type warnings for candidate prompt
+  var flexibilityNotes = [];
+
   checked.forEach(function(item){
     (item.requiredPlaces||[]).forEach(function(p){
       if (!requiredMap[p.place]) requiredMap[p.place] = {place:p.place,country:p.country,requiredFor:[],flexible:false};
@@ -2216,8 +2218,21 @@ function confirmMustDos() {
       flexibilityNotes.push(item.name + ": " + item.conditionNote);
     }
   });
+
+  // Track places from unchecked items that aren't already required
+  // These should be surfaced to the discovery prompt — worth visiting independently
+  var releasedMap = {};
+  unchecked.forEach(function(item){
+    (item.requiredPlaces||[]).forEach(function(p){
+      if (!requiredMap[p.place] && !releasedMap[p.place]) {
+        releasedMap[p.place] = {place:p.place, country:p.country, releasedFrom:item.name};
+      }
+    });
+  });
+
   var requiredPlaces = Object.values(requiredMap);
   _tb.requiredPlaces = requiredPlaces;
+  _tb.releasedPlaces = Object.values(releasedMap); // places worth considering independently
   _tb.flexibilityNotes = flexibilityNotes; // store for use in candidate rendering
   var ov = document.getElementById("mdc-overlay");
   if (ov) ov.remove();
@@ -2256,11 +2271,18 @@ async function runCandidateSearch(requiredPlaces) {
       + '[{"place":"City","country":"Country","role":"anchor","stayRange":"2-4 nights","whyItFits":"Why worth visiting.","tradeoffs":"One downside.","tags":["tag1"],"lat":0.0,"lng":0.0}]'
     : null;
 
+  var releasedPlaces = _tb.releasedPlaces || [];
+  var releasedNote = releasedPlaces.length
+    ? "\nThese places were on train routes the traveler decided against — include them as candidates if they are genuinely worth visiting independently (not just for the train): "
+      + releasedPlaces.map(function(p){ return p.place + " (was on " + p.releasedFrom + ")"; }).join(", ") + "\n"
+    : "";
+
   var p2 = "You are a travel expert. Suggest " + extraCount + " destinations in " + (_tb.region||"this region") + " worth visiting on their own merits.\n"
     + "Trip context: " + brief + "\n"
+    + releasedNote
     + (skipList ? "Do NOT include: " + skipList + "\n" : "")
     + "Return ONLY a JSON array (no markdown):\n"
-    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why worth visiting.","tradeoffs":"One downside.","tags":["tag1"],"lat":0.0,"lng":0.0}]';
+    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why worth visiting — independent of any train.","tradeoffs":"One downside.","tags":["tag1"],"lat":0.0,"lng":0.0}]';
 
   // Run in parallel — total wait = max(call1, call2) not call1 + call2
   var calls = [];
@@ -2787,11 +2809,18 @@ async function retryDiscoveryCandidates() {
   var brief = "Region: " + (_tb.region||"")
     + (_tb.when ? "\nWhen: " + _tb.when : "")
     + (_tb.intent ? "\nWhat they want: " + _tb.intent : "");
+  var releasedPlaces = _tb.releasedPlaces || [];
+  var releasedNote = releasedPlaces.length
+    ? "\nThese places were on train routes the traveler decided against — include them as candidates if they are genuinely worth visiting independently (not just for the train): "
+      + releasedPlaces.map(function(p){ return p.place + " (was on " + p.releasedFrom + ")"; }).join(", ") + "\n"
+    : "";
+
   var p2 = "You are a travel expert. Suggest " + extraCount + " destinations in " + (_tb.region||"this region") + " worth visiting on their own merits.\n"
     + "Trip context: " + brief + "\n"
+    + releasedNote
     + (skipList ? "Do NOT include: " + skipList + "\n" : "")
     + "Return ONLY a JSON array (no markdown):\n"
-    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why worth visiting.","tradeoffs":"One downside.","tags":["tag1"],"lat":0.0,"lng":0.0}]';
+    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why worth visiting — independent of any train.","tradeoffs":"One downside.","tags":["tag1"],"lat":0.0,"lng":0.0}]';
   try {
     var t = await callMax([{role:"user",content:p2}], 2000, 45000);
     var newCands = JSON.parse(t.replace(/```json|```/g,"").trim());
