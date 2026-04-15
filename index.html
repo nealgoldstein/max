@@ -1978,6 +1978,22 @@ function showCandidateExplorer(cands){
     +'<button class="ce-build-btn" id="ce-build-btn" disabled onclick="buildFromCandidates()">Build trip \u2192</button>'
     +'</div>';
   setTimeout(function(){
+    // Fix flex height collapse before map init
+    var ov2=document.getElementById("candidate-explorer-overlay");
+    var hdr2=ov2?ov2.querySelector(".ce-header"):null;
+    var ftr2=ov2?ov2.querySelector(".ce-footer"):null;
+    var bdy2=ov2?ov2.querySelector(".ce-body"):null;
+    var lft2=ov2?ov2.querySelector(".ce-left"):null;
+    var rgt2=ov2?ov2.querySelector(".ce-right"):null;
+    var avail=(window.innerHeight-(hdr2?hdr2.offsetHeight:60)-(ftr2?ftr2.offsetHeight:44));
+    if(bdy2){bdy2.style.height=avail+"px";bdy2.style.flex="none";bdy2.style.overflow="hidden";}
+    if(lft2){lft2.style.height=avail+"px";lft2.style.overflow="hidden";lft2.style.display="flex";lft2.style.flexDirection="column";}
+    if(rgt2){rgt2.style.height=avail+"px";}
+    var mapDiv=document.getElementById("ce-map");
+    if(mapDiv){mapDiv.style.height=avail+"px";mapDiv.style.width="100%";}
+    var cds=document.getElementById("ce-cards");
+    if(cds){cds.style.flex="1";cds.style.overflowY="scroll";cds.style.minHeight="0";}
+    // Init map
     if(_ceMap){_ceMap.remove();_ceMap=null;} _ceMarkers=[];
     _ceMap=L.map("ce-map",{zoomControl:true,scrollWheelZoom:true}).setView([48,14],4);
     L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:19}).addTo(_ceMap);
