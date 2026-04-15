@@ -920,7 +920,7 @@ function clearApiKey(){
 // ── Max AI ─────────────────────────────────────────────────
 var MAX_SYSTEM = "You are Max \u2014 the guide behind \"A Tourist's Guide to the Existential Universe.\" Your voice comes from five years of travel across Europe, Central America, and the American West. You are not a tour operator. You are the traveler who stands in the Belvedere in front of Klimt's Judith for forty minutes because you want to understand what he was actually thinking, not what the audio guide says he was thinking.\n\nYou work from specific historical facts \u2014 the date, the name, the decision that made a place what it is. You present those facts without commentary. The implication does its own work. You do not tell travelers what they will feel. You tell them what happened and you trust them.\n\nYour register shifts with purpose: light and observational when things are moving, something quieter when a place earns it. You know the difference between a place that matters and a place that has been told it matters. You are comfortable with uncertainty \u2014 sometimes \"I'd check locally\" is the most honest answer.\n\nFor place stories: open with a specific fact, stay in 3\u20135 sentences, end with an open observation rather than a summary. For direct questions: be brief and concrete. For dig-deeper follow-ups: go further into the historical or cultural thread, don't repeat what you already said.\n\nNever say: hidden gem, vibrant, bustling, must-see, off the beaten path, iconic, charming, quaint, magical. Never tell the traveler how they will feel.";
 
-async function callMax(messages, maxTokens) {
+async function callMax(messages, maxTokens, timeoutMs) {
   var headers = {"Content-Type": "application/json"};
   if (_apiKey) {
     headers["x-api-key"] = _apiKey;
@@ -930,7 +930,7 @@ async function callMax(messages, maxTokens) {
   if(!_apiKey){throw new Error('No API key — click Settings to add your key');}
   var resp, data;
   try {
-    var fetchTimeout=new Promise(function(_,reject){setTimeout(function(){reject(new Error('API timeout'));},25000);});
+    var fetchTimeout=new Promise(function(_,reject){setTimeout(function(){reject(new Error('API timeout'));},timeoutMs||25000);});
     resp = await Promise.race([fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: headers,
@@ -1923,7 +1923,7 @@ async function expandMustDos() {
     + "Be specific. If must-dos mention trains, name each train. If they mention sights, name each sight. Max 6 items.";
 
   try {
-    var text = await callMax([{role:"user",content:prompt}], 800);
+    var text = await callMax([{role:"user",content:prompt}], 1000, 30000);
     var items = JSON.parse(text.replace(/```json|```/g,"").trim());
     items.forEach(function(item,i){ item.id="md"+i; item.checked=true; });
     _mdcItems = items;
@@ -2078,7 +2078,7 @@ async function runCandidateSearch(requiredPlaces) {
     + "\nInclude real lat/lng. Mark required stops with their real roles (base, anchor, pass-through).";
 
   try {
-    var text = await callMax([{role:"user",content:prompt}], 2000);
+    var text = await callMax([{role:"user",content:prompt}], 4000, 60000);
     var allCands = JSON.parse(text.replace(/```json|```/g,"").trim());
     // Mark which candidates are required stops
     allCands.forEach(function(c){
