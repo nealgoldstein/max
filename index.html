@@ -2047,55 +2047,64 @@ function confirmMustDos() {
 }
 
 async function runCandidateSearch(requiredPlaces) {
-  // Build brief from _tb
   _tb.region = g("tb-region") ? g("tb-region").value.trim() : (_tb.region||"");
   _tb.when = g("tb-when") ? g("tb-when").value.trim() : (_tb.when||"");
   _tb.intent = g("tb-intent") ? g("tb-intent").value.trim() : (_tb.intent||"");
   _tb.anchors = g("tb-anchors") ? g("tb-anchors").value.trim() : (_tb.anchors||"");
   _tb.constraints = g("tb-constraints") ? g("tb-constraints").value.trim() : (_tb.constraints||"");
 
-  showCandidateExplorer(null); // show loading state
+  showCandidateExplorer(null);
 
-  var reqList = requiredPlaces.map(function(p){
-    return p.place + " (" + p.country + ") [needed for: " + p.requiredFor.join(", ") + "]";
-  }).join("\n");
-  var reqCount = requiredPlaces.length;
-  var extraCount = Math.max(4, 8 - reqCount);
-
-  var prompt = "You are a travel expert planning a trip to " + (_tb.region||"this region") + ".\n\n"
-    + "Trip brief:\n"
-    + (_tb.when ? "When/how long: " + _tb.when + "\n" : "")
-    + (_tb.intent ? "What they want: " + _tb.intent + "\n" : "")
-    + (_tb.interests&&_tb.interests.length ? "Also want to: " + _tb.interests.join(", ") + "\n" : "")
-    + (_tb.constraints ? "Constraints: " + _tb.constraints + "\n" : "")
-    + (reqCount > 0
-      ? "\nThe following places are REQUIRED stops because of the traveler's must-dos:\n" + reqList
-        + "\n\nFor each required stop, write a full description of why it is worth visiting — go BEYOND the train connection. What is the town itself like? What else is there to see, do, eat, experience? The train is one reason they're going; give them the full picture."
-        + "\n\nAlso suggest " + extraCount + " additional places worth visiting on their own merits (not train-related). These should complement the required stops."
-      : "\nSuggest 6-8 destination candidates.")
-    + "\n\nReturn ALL places (required + additional) in ONE JSON array (no markdown):\n"
-    + '[{"place":"City","country":"Country","role":"base|anchor|pass-through","stayRange":"2-4 nights","whyItFits":"Full reason — what makes this place worth visiting beyond any train.","tradeoffs":"One honest downside.","tags":["tag1","tag2"],"lat":0.0,"lng":0.0}]'
-    + "\nInclude real lat/lng. Mark required stops with their real roles (base, anchor, pass-through).";
+  var brief = "Region: " + (_tb.region||"")
+    + (_tb.when ? "\nWhen: " + _tb.when : "")
+    + (_tb.intent ? "\nWhat they want: " + _tb.intent : "")
+    + (_tb.interests&&_tb.interests.length ? "\nAlso want: " + _tb.interests.join(", ") : "")
+    + (_tb.constraints ? "\nConstraints: " + _tb.constraints : "");
 
   try {
-    var text = await callMax([{role:"user",content:prompt}], 4000, 60000);
-    var allCands = JSON.parse(text.replace(/```json|```/g,"").trim());
-    // Mark which candidates are required stops
-    allCands.forEach(function(c){
-      var req = (_tb.requiredPlaces||[]).find(function(r){
-        return r.place.toLowerCase()===c.place.toLowerCase();
+    var allCands = [];
+
+    // CALL 1: Describe required stops (if any)
+    if (requiredPlaces.length > 0) {
+      var reqNames = requiredPlaces.map(function(p){ return p.place+", "+p.country; }).join("; ");
+      var p1 = "You are a travel expert. For each of these places, write a candidate card for a traveler visiting " + (_tb.region||"this region") + ".\n"
+        + "Places: " + reqNames + "\n"
+        + "Trip context: " + brief + "\n\n"
+        + "For each place describe why it is genuinely worth visiting — its character, what to see and do, what makes it special. Do not mention trains unless they are one of several reasons.\n"
+        + "Return ONLY a JSON array (no markdown):\n"
+        + '[{"place":"City","country":"Country","role":"anchor","stayRange":"2-4 nights","whyItFits":"Why worth visiting.","tradeoffs":"One downside.","tags":["tag1"],"lat":0.0,"lng":0.0}]';
+      var t1 = await callMax([{role:"user",content:p1}], 2000, 40000);
+      var reqCands = JSON.parse(t1.replace(/```json|```/g,"").trim());
+      reqCands.forEach(function(c){
+        var req = requiredPlaces.find(function(r){ return r.place.toLowerCase()===c.place.toLowerCase(); });
+        c._required = true;
+        c._requiredFor = req ? req.requiredFor : [];
       });
-      c._required = !!req;
-      c._requiredFor = req ? req.requiredFor : [];
-    });
+      allCands = allCands.concat(reqCands);
+    }
+
+    // CALL 2: Additional candidates worth visiting on their own
+    var extraCount = Math.max(4, 8 - requiredPlaces.length);
+    var skipList = requiredPlaces.map(function(p){ return p.place; }).join(", ");
+    var p2 = "You are a travel expert. Suggest " + extraCount + " destinations in " + (_tb.region||"this region") + " worth visiting on their own merits.\n"
+      + "Trip context: " + brief + "\n"
+      + (skipList ? "Do NOT include: " + skipList + "\n" : "")
+      + "Return ONLY a JSON array (no markdown):\n"
+      + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why worth visiting.","tradeoffs":"One downside.","tags":["tag1"],"lat":0.0,"lng":0.0}]';
+    var t2 = await callMax([{role:"user",content:p2}], 2000, 40000);
+    var extraCands = JSON.parse(t2.replace(/```json|```/g,"").trim());
+    extraCands.forEach(function(c){ c._required=false; c._requiredFor=[]; });
+    allCands = allCands.concat(extraCands);
+
     allCands.forEach(function(c,i){ c.id="c"+i; c.status=null; });
     _tb.candidates = allCands;
     showCandidateExplorer(allCands);
+
   } catch(e) {
     var errDiv = g("ce-cards");
     var noKey = e.message && e.message.indexOf("No API key") > -1;
     if (errDiv) errDiv.innerHTML = '<div style="padding:16px;font-size:11px;">' + (noKey
-      ? '<div style="color:#c05020;font-weight:600;margin-bottom:8px;">No API key set</div><div style="color:#555;margin-bottom:10px;">Max needs your Anthropic API key to generate candidate places.</div><button onclick="cancelCandidateExplorer();setTimeout(function(){showApiKeyForm();},100);" style="font-size:11px;padding:6px 12px;background:#111;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Set API key \u2192</button>'
+      ? '<div style="color:#c05020;font-weight:600;margin-bottom:8px;">No API key set</div><button onclick="cancelCandidateExplorer();setTimeout(function(){showApiKeyForm();},100);" style="font-size:11px;padding:6px 12px;background:#111;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Set API key \u2192</button>'
       : '<div style="color:#c05020;">Could not generate candidates: ' + e.message + '</div>')
       + '</div>';
     var ld = g("ce-loading"); if (ld) ld.style.display = "none";
