@@ -2026,6 +2026,19 @@ function showMustDoConfirmation(items) {
     +'</div>';
   document.body.appendChild(ov);
 
+  // Fix flex height collapse so body scrolls and footer stays visible
+  setTimeout(function(){
+    var o=document.getElementById("mdc-overlay");
+    if(!o) return;
+    var h=o.querySelector(".mdc-header");
+    var f=o.querySelector(".mdc-footer");
+    var b=document.getElementById("mdc-body");
+    var addWrap=o.querySelector(".mdc-add-row");
+    var addH=addWrap?addWrap.parentNode.offsetHeight+4:0;
+    var avail=window.innerHeight-(h?h.offsetHeight:110)-(f?f.offsetHeight:170)-addH;
+    if(b){b.style.height=Math.max(avail,100)+"px";b.style.flex="none";b.style.overflowY="auto";}
+  },60);
+
   if (items) renderMustDoItems(items);
 }
 
