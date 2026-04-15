@@ -705,6 +705,29 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .cmp-act:hover{background:#f5f5f5;}
 .cmp-act.primary{background:#111;color:#fff;border-color:#111;}
 
+
+/* Must-do confirmation step */
+.mdc-overlay{position:fixed;inset:0;background:#f7f7f5;z-index:8500;display:flex;flex-direction:column;}
+.mdc-header{padding:16px 24px 0;flex-shrink:0;}
+.mdc-step{font-size:10px;color:#aaa;letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px;}
+.mdc-title{font-size:18px;font-weight:700;color:#111;margin-bottom:4px;}
+.mdc-sub{font-size:11px;color:#888;line-height:1.5;}
+.mdc-body{flex:1;overflow-y:auto;padding:16px 24px 0;}
+.mdc-loading{text-align:center;padding:48px 20px;color:#888;font-size:12px;}
+.mdc-item{border:1px solid #e8e8e8;border-radius:8px;background:#fff;margin-bottom:10px;overflow:hidden;transition:border-color .1s;}
+.mdc-item.checked{border-color:#111;}
+.mdc-item-top{padding:12px 14px;display:flex;align-items:flex-start;gap:12px;cursor:pointer;}
+.mdc-check{width:18px;height:18px;border-radius:4px;border:1.5px solid #ccc;flex-shrink:0;margin-top:1px;display:flex;align-items:center;justify-content:center;transition:all .1s;}
+.mdc-item.checked .mdc-check{background:#111;border-color:#111;color:#fff;}
+.mdc-item-name{font-size:12px;font-weight:700;color:#111;margin-bottom:3px;}
+.mdc-item-desc{font-size:11px;color:#666;line-height:1.5;}
+.mdc-item-places{padding:8px 14px 10px 44px;display:flex;flex-wrap:wrap;gap:5px;border-top:1px solid #f5f5f5;}
+.mdc-place{font-size:10px;padding:2px 8px;border-radius:10px;background:#f0f0f0;color:#555;}
+.mdc-place.required{background:#111;color:#fff;}
+.mdc-footer{padding:14px 24px 20px;flex-shrink:0;border-top:1px solid #eee;background:#f7f7f5;}
+.mdc-btn-primary{width:100%;padding:10px;font-size:12px;font-weight:600;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;}
+.mdc-skip{font-size:10px;color:#aaa;text-align:center;margin-top:7px;cursor:pointer;}
+
 </style>
 </head>
 <body>
@@ -1866,6 +1889,168 @@ function showHomeApiKeyForm(){
   setTimeout(function(){ document.getElementById("home-key-inp").focus(); }, 50);
 }
 
+
+// ── MUST-DO EXPANSION (Step 1.5) ────────────────────────────
+var _mdcItems = [];
+
+async function expandMustDos() {
+  var anchors = g("tb-anchors") ? g("tb-anchors").value.trim() : "";
+  var region = g("tb-region") ? g("tb-region").value.trim() : "";
+  var intent = g("tb-intent") ? g("tb-intent").value.trim() : "";
+
+  // No must-dos — skip straight to candidates
+  if (!anchors) { runCandidateSearch([]); return; }
+
+  showMustDoConfirmation(null); // loading state
+
+  var prompt = "A traveler is planning a trip to " + (region||"this region") + ".\n"
+    + (intent ? "Their goal: " + intent + "\n" : "")
+    + "They listed these must-dos: \"" + anchors + "\"\n\n"
+    + "Expand each must-do into specific named experiences. For each, list the places required to do it.\n"
+    + "Return ONLY a JSON array (no markdown):\n"
+    + '[{"name":"Glacier Express","description":"Classic 8hr panoramic rail journey through the Swiss Alps","requiredPlaces":[{"place":"Zermatt","country":"Switzerland"},{"place":"St. Moritz","country":"Switzerland"}]},...]\n'
+    + "Be specific. If must-dos mention trains, name each train. If they mention sights, name each sight. Max 6 items.";
+
+  try {
+    var text = await callMax([{role:"user",content:prompt}], 800);
+    var items = JSON.parse(text.replace(/```json|```/g,"").trim());
+    items.forEach(function(item,i){ item.id="md"+i; item.checked=true; });
+    _mdcItems = items;
+    showMustDoConfirmation(items);
+  } catch(e) {
+    // On error, skip this step and go straight to candidates
+    runCandidateSearch([]);
+  }
+}
+
+function showMustDoConfirmation(items) {
+  // Hide brief, show mdc overlay
+  g("trip-brief-overlay").style.display = "none";
+  var existing = document.getElementById("mdc-overlay");
+  if (existing) existing.remove();
+
+  var ov = document.createElement("div");
+  ov.id = "mdc-overlay";
+  ov.className = "mdc-overlay";
+  ov.innerHTML = '<div class="mdc-header">'
+    +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="mdc-step">Step 1.5 of 3 \u00b7 Must-dos</div></div></div>'
+    +'<div class="mdc-title" style="margin-top:8px;">Max understood your must-dos as:</div>'
+    +'<div class="mdc-sub">Uncheck anything Max got wrong. Checked items become required stops.</div>'
+    +'</div>'
+    +'<div class="mdc-body" id="mdc-body">'
+    +(!items ? '<div class="mdc-loading"><div style="font-size:20px;margin-bottom:8px;animation:spin 1s linear infinite;display:inline-block">\u2736</div><div>Interpreting your must-dos\u2026</div></div>' : '')
+    +'</div>'
+    +'<div class="mdc-footer">'
+    +'<button class="mdc-btn-primary" id="mdc-confirm-btn" onclick="confirmMustDos()" '+(!items?'disabled style="background:#ccc;cursor:not-allowed;"':'')+'>Find candidate places \u2192</button>'
+    +'<div class="mdc-skip" onclick="runCandidateSearch([])">Skip this step \u2192</div>'
+    +'</div>';
+  document.body.appendChild(ov);
+
+  if (items) renderMustDoItems(items);
+}
+
+function renderMustDoItems(items) {
+  var body = document.getElementById("mdc-body");
+  if (!body) return;
+  body.innerHTML = "";
+
+  items.forEach(function(item) {
+    var div = document.createElement("div");
+    div.className = "mdc-item" + (item.checked ? " checked" : "");
+    div.id = "mdc-item-" + item.id;
+
+    var placesHtml = (item.requiredPlaces||[]).map(function(p){
+      return '<span class="mdc-place required">\u2192 ' + p.place + '</span>';
+    }).join("");
+
+    div.innerHTML = '<div class="mdc-item-top" onclick="toggleMdcItem(\''+item.id+'\')">'
+      +'<div class="mdc-check">' + (item.checked ? "\u2713" : "") + '</div>'
+      +'<div><div class="mdc-item-name">'+item.name+'</div>'
+      +'<div class="mdc-item-desc">'+item.description+'</div></div>'
+      +'</div>'
+      +(placesHtml ? '<div class="mdc-item-places">'+placesHtml+'</div>' : '');
+    body.appendChild(div);
+  });
+
+  // Enable confirm button
+  var btn = document.getElementById("mdc-confirm-btn");
+  if (btn) { btn.disabled = false; btn.style.cssText = ""; }
+}
+
+function toggleMdcItem(id) {
+  var item = _mdcItems.find(function(x){ return x.id===id; });
+  if (!item) return;
+  item.checked = !item.checked;
+  var div = document.getElementById("mdc-item-"+id);
+  if (div) {
+    div.className = "mdc-item" + (item.checked ? " checked" : "");
+    var check = div.querySelector(".mdc-check");
+    if (check) check.textContent = item.checked ? "\u2713" : "";
+  }
+}
+
+function confirmMustDos() {
+  var checked = _mdcItems.filter(function(x){ return x.checked; });
+  // Collect required places from checked items
+  var requiredPlaces = [];
+  checked.forEach(function(item){
+    (item.requiredPlaces||[]).forEach(function(p){
+      if (!requiredPlaces.find(function(r){ return r.place===p.place; })){
+        requiredPlaces.push(p);
+      }
+    });
+  });
+  var ov = document.getElementById("mdc-overlay");
+  if (ov) ov.remove();
+  runCandidateSearch(requiredPlaces);
+}
+
+async function runCandidateSearch(requiredPlaces) {
+  // Build brief from _tb
+  _tb.region = g("tb-region") ? g("tb-region").value.trim() : (_tb.region||"");
+  _tb.when = g("tb-when") ? g("tb-when").value.trim() : (_tb.when||"");
+  _tb.intent = g("tb-intent") ? g("tb-intent").value.trim() : (_tb.intent||"");
+  _tb.anchors = g("tb-anchors") ? g("tb-anchors").value.trim() : (_tb.anchors||"");
+  _tb.constraints = g("tb-constraints") ? g("tb-constraints").value.trim() : (_tb.constraints||"");
+
+  showCandidateExplorer(null); // show loading state
+
+  var requiredNote = requiredPlaces.length
+    ? "\nREQUIRED STOPS (must appear as candidates): " + requiredPlaces.map(function(p){ return p.place+", "+p.country; }).join("; ")
+    : "";
+
+  var prompt = "You are a travel expert. Suggest 6-8 destination candidates based on this trip brief.\n\n"
+    + "Trip: " + (_tb.name||"")
+    + (_tb.region ? "\nRegion: " + _tb.region : "")
+    + (_tb.when ? "\nWhen/how long: " + _tb.when : "")
+    + (_tb.intent ? "\nWhat they want: " + _tb.intent : "")
+    + (_tb.anchors ? "\nMust-dos: " + _tb.anchors : "")
+    + (_tb.interests&&_tb.interests.length ? "\nAlso want to: " + _tb.interests.join(", ") : "")
+    + (_tb.constraints ? "\nConstraints: " + _tb.constraints : "")
+    + requiredNote
+    + "\n\nReturn ONLY a valid JSON array (no markdown):\n"
+    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why.","tradeoffs":"Downside.","tags":["tag1","tag2"],"lat":48.2,"lng":16.4}]'
+    + "\nMix roles: base, anchor, pass-through. Include real lat/lng."
+    + (requiredPlaces.length ? " REQUIRED stops must all appear in the list." : "");
+
+  try {
+    var text = await callMax([{role:"user",content:prompt}], 2000);
+    var cands = JSON.parse(text.replace(/```json|```/g,"").trim());
+    cands.forEach(function(c,i){ c.id="c"+i; c.status=null; });
+    _tb.candidates = cands;
+    showCandidateExplorer(cands);
+  } catch(e) {
+    var errDiv = g("ce-cards");
+    var noKey = e.message && e.message.indexOf("No API key") > -1;
+    if (errDiv) errDiv.innerHTML = '<div style="padding:16px;font-size:11px;">' + (noKey
+      ? '<div style="color:#c05020;font-weight:600;margin-bottom:8px;">No API key set</div><div style="color:#555;margin-bottom:10px;">Max needs your Anthropic API key to generate candidate places.</div><button onclick="cancelCandidateExplorer();setTimeout(function(){showApiKeyForm();},100);" style="font-size:11px;padding:6px 12px;background:#111;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Set API key \u2192</button>'
+      : '<div style="color:#c05020;">Could not generate candidates: ' + e.message + '</div>')
+      + '</div>';
+    var ld = g("ce-loading"); if (ld) ld.style.display = "none";
+  }
+}
+
+
 // ─── TRIP BRIEF ────────────────────────────────────────────
 var _tb={};
 
@@ -1917,11 +2102,12 @@ function cancelTripBrief(){
 }
 
 async function findCandidates(){
-  _tb.region=g("tb-region").value.trim();
-  _tb.when=g("tb-when").value.trim();
-  _tb.intent=g("tb-intent").value.trim();
-  _tb.anchors=g("tb-anchors").value.trim();
-  _tb.constraints=g("tb-constraints").value.trim();
+  _tb.region=g("tb-region")?g("tb-region").value.trim():(_tb.region||"");
+  _tb.when=g("tb-when")?g("tb-when").value.trim():(_tb.when||"");
+  _tb.intent=g("tb-intent")?g("tb-intent").value.trim():(_tb.intent||"");
+  _tb.anchors=g("tb-anchors")?g("tb-anchors").value.trim():(_tb.anchors||"");
+  _tb.constraints=g("tb-constraints")?g("tb-constraints").value.trim():(_tb.constraints||"");
+  expandMustDos(); return; // new flow: expand must-dos first
   showCandidateExplorer(null);
   var prompt="You are a travel expert. Suggest 6-8 destination candidates based on this trip brief.\n\n"
     +"Trip: "+_tb.name
