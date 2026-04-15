@@ -2328,14 +2328,34 @@ async function runCandidateSearch(requiredPlaces) {
     var results = await Promise.allSettled(calls);
     var allCands = [];
     var p2Failed = false;
+    var p1Failed = false;
+    // p1 is index 0 (required stops), p2 is last (discovery)
+    var p1Idx = (p1 !== null) ? 0 : -1;
+    var p2Idx = calls.length - 1;
     results.forEach(function(r, i){
       if (r.status === "fulfilled" && r.value && r.value.length) {
         allCands = allCands.concat(r.value);
-      } else if (i === calls.length - 1 && (!r.value || !r.value.length)) {
-        // p2 (discovery candidates) failed or returned empty
-        p2Failed = true;
+      } else {
+        if (i === p1Idx) {
+          p1Failed = true;
+          console.warn("Required stops (p1) returned empty or failed");
+        }
+        if (i === p2Idx) p2Failed = true;
       }
     });
+    // If p1 failed, surface required stops directly from _tb.requiredPlaces
+    if (p1Failed && requiredPlaces.length > 0) {
+      console.warn("p1 failed — using stub required stops from _tb.requiredPlaces");
+      requiredPlaces.forEach(function(p){
+        allCands.push({
+          place:p.place, country:p.country, role:"anchor",
+          stayRange:"2-4 nights",
+          whyItFits:"Required stop for: "+p.requiredFor.join(", ")+" — descriptions loading...",
+          tradeoffs:"", tags:["required"], lat:0, lng:0,
+          _required:true, _requiredFor:p.requiredFor
+        });
+      });
+    }
     if (!allCands.length) throw new Error("No candidates returned");
     allCands.forEach(function(c,i){ c.id="c"+i; c.status=null; });
     _tb.candidates = allCands;
