@@ -2440,7 +2440,12 @@ function saveLogistics() {
   autoSave();
   var ov = document.getElementById("log-overlay");
   if (ov) ov.remove();
-  drawTripMode();
+  // Resequence destinations based on train routes + arrival/departure
+  if (trip.destinations && trip.destinations.length > 1) {
+    resequenceTrip();
+  } else {
+    drawTripMode();
+  }
   showLogisticsConfirmation();
 }
 
@@ -2475,6 +2480,104 @@ function showLogisticsConfirmation() {
   lpc.insertBefore(b, lpc.firstChild);
 }
 
+
+function sequenceDestinations(destinations, mdcItems, logistics) {
+  if (!destinations || destinations.length <= 1) return destinations;
+
+  // Step 1: build ordered chain from train routes (_mdcItems)
+  // Each route has requiredPlaces in order e.g. [Zermatt, St.Moritz]
+  // Chain them: find where each route starts relative to prior route end
+  var chain = []; // ordered place names
+  var routes = (mdcItems||[]).filter(function(m){ return m.checked && m.type !== "condition"; });
+
+  routes.forEach(function(route) {
+    var places = (route.requiredPlaces||[]).map(function(p){ return p.place; });
+    if (!chain.length) {
+      chain = chain.concat(places);
+    } else {
+      // Find overlap: last place in chain that appears in this route
+      var lastChain = chain[chain.length-1];
+      var overlapIdx = places.indexOf(lastChain);
+      if (overlapIdx > -1) {
+        // Add the places after the overlap
+        chain = chain.concat(places.slice(overlapIdx+1));
+      } else {
+        // No overlap — append after
+        chain = chain.concat(places);
+      }
+    }
+  });
+
+  // Step 2: if logistics says arrival city, put it first
+  var arrCity = logistics && logistics.arrival && logistics.arrival.city;
+  var depCity = logistics && logistics.departure && logistics.departure.city;
+
+  // Step 3: sort destinations to match chain order
+  var ordered = [];
+  var remaining = destinations.slice();
+
+  // First: arrival city if not in chain
+  if (arrCity) {
+    var arrDest = remaining.find(function(d){ return d.place.toLowerCase().indexOf(arrCity.toLowerCase()) > -1; });
+    // Arrival city may not be a stop — it's a gateway
+  }
+
+  // Place chain destinations in order
+  chain.forEach(function(placeName) {
+    var idx = remaining.findIndex(function(d){
+      return d.place.toLowerCase().indexOf(placeName.toLowerCase()) > -1
+          || placeName.toLowerCase().indexOf(d.place.toLowerCase()) > -1;
+    });
+    if (idx > -1) {
+      ordered.push(remaining.splice(idx, 1)[0]);
+    }
+  });
+
+  // Append remaining destinations (discovery places not in chain)
+  // Try to insert them geographically near related chain stops
+  ordered = ordered.concat(remaining);
+
+  // Step 4: if departure city is different from arrival, try to end near it
+  if (depCity && depCity !== arrCity && ordered.length > 1) {
+    var depIdx = ordered.findIndex(function(d){
+      return d.place.toLowerCase().indexOf(depCity.toLowerCase()) > -1
+          || depCity.toLowerCase().indexOf(d.place.toLowerCase()) > -1;
+    });
+    if (depIdx > -1 && depIdx !== ordered.length-1) {
+      // Move departure-adjacent stop toward end
+      var depDest = ordered.splice(depIdx, 1)[0];
+      ordered.push(depDest);
+    }
+  }
+
+  return ordered;
+}
+
+function resequenceTrip() {
+  if (!trip || !trip.destinations || trip.destinations.length < 2) return;
+  var logistics = trip.logistics || {};
+  var ordered = sequenceDestinations(trip.destinations, _mdcItems, logistics);
+  
+  // Reassign dates preserving night counts
+  var startDate = logistics.arrival && logistics.arrival.date
+    ? new Date(logistics.arrival.date + "T12:00:00")
+    : new Date(trip.destinations[0].dateFrom + "T12:00:00");
+
+  var cur = new Date(startDate);
+  ordered.forEach(function(dest) {
+    var nights = dest.nights || 3;
+    dest.dateFrom = cur.toISOString().slice(0,10);
+    cur.setDate(cur.getDate() + nights);
+    dest.dateTo = cur.toISOString().slice(0,10);
+    // Rebuild days for new dates
+    dest.days = makeDays(dest.id, dest.place, dest.intent, dest.dateFrom, nights);
+  });
+
+  trip.destinations = ordered;
+  autoSave();
+  drawTripMode();
+  updateMainMap();
+}
 
 function showTripBrief(){
   var name=g("ntp-name").value.trim(); if(name.length<2) return;
