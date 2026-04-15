@@ -2280,12 +2280,21 @@ async function runCandidateSearch(requiredPlaces) {
   }).catch(function(){ return []; }));
 
   try {
-    var results = await Promise.all(calls);
+    var results = await Promise.allSettled(calls);
     var allCands = [];
-    results.forEach(function(r){ allCands = allCands.concat(r); });
+    var p2Failed = false;
+    results.forEach(function(r, i){
+      if (r.status === "fulfilled" && r.value && r.value.length) {
+        allCands = allCands.concat(r.value);
+      } else if (i === calls.length - 1 && (!r.value || !r.value.length)) {
+        // p2 (discovery candidates) failed or returned empty
+        p2Failed = true;
+      }
+    });
     if (!allCands.length) throw new Error("No candidates returned");
     allCands.forEach(function(c,i){ c.id="c"+i; c.status=null; });
     _tb.candidates = allCands;
+    _tb.p2Failed = p2Failed;
     showCandidateExplorer(allCands);
   } catch(e) {
     var errDiv = g("ce-cards");
@@ -2771,12 +2780,39 @@ async function findCandidates(){
 // ─── CANDIDATE EXPLORER ────────────────────────────────────
 var _ceMap=null,_ceMarkers=[];
 
+async function retryDiscoveryCandidates() {
+  var existingReq = (_tb.candidates||[]).filter(function(c){ return c._required; });
+  var skipList = existingReq.map(function(p){ return p.place; }).join(", ");
+  var extraCount = Math.max(4, 8 - Math.min(existingReq.length, 6));
+  var brief = "Region: " + (_tb.region||"")
+    + (_tb.when ? "\nWhen: " + _tb.when : "")
+    + (_tb.intent ? "\nWhat they want: " + _tb.intent : "");
+  var p2 = "You are a travel expert. Suggest " + extraCount + " destinations in " + (_tb.region||"this region") + " worth visiting on their own merits.\n"
+    + "Trip context: " + brief + "\n"
+    + (skipList ? "Do NOT include: " + skipList + "\n" : "")
+    + "Return ONLY a JSON array (no markdown):\n"
+    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why worth visiting.","tradeoffs":"One downside.","tags":["tag1"],"lat":0.0,"lng":0.0}]';
+  try {
+    var t = await callMax([{role:"user",content:p2}], 2000, 45000);
+    var newCands = JSON.parse(t.replace(/```json|```/g,"").trim());
+    newCands.forEach(function(c){ c._required=false; c._requiredFor=[]; });
+    var allCands = existingReq.concat(newCands);
+    var nextId = allCands.length;
+    newCands.forEach(function(c,i){ c.id="c"+(existingReq.length+i); c.status=null; });
+    _tb.candidates = existingReq.concat(newCands);
+    _tb.p2Failed = false;
+    showCandidateExplorer(_tb.candidates);
+  } catch(e) {
+    alert("Couldn't load suggestions: " + e.message);
+  }
+}
+
 function showCandidateExplorer(cands){
   g("trip-brief-overlay").style.display="none";
   var ov=g("candidate-explorer-overlay");
   ov.style.display="block"; ov.className="ce-overlay";
   ov.innerHTML='<div class="ce-header">'
-    +'<div><div class="ce-title">Candidate Places</div><div class="ce-sub">Step 2 of 3 \u00b7 Keep the ones that fit, reject the rest</div></div>'
+    +'<div><div class="ce-title">Candidate Places</div><div class="ce-sub">Step 2 of 3 \u00b7 Required stops + places worth visiting on their own</div></div>'
     +'<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:500;" onclick="cancelCandidateExplorer()">\u2190 Edit brief</button>'
     +'</div>'
     +'<div class="ce-body">'
@@ -2811,7 +2847,17 @@ function showCandidateExplorer(cands){
     if(_ceMap){_ceMap.remove();_ceMap=null;} _ceMarkers=[];
     _ceMap=L.map("ce-map",{zoomControl:true,scrollWheelZoom:true}).setView([48,14],4);
     L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:19}).addTo(_ceMap);
-    if(cands) renderCandidateCards(cands);
+    if(cands) {
+      renderCandidateCards(cands);
+      // Show notice if discovery candidates failed to load
+      if(_tb.p2Failed && cands.filter(function(c){return !c._required;}).length === 0) {
+        var note = document.createElement("div");
+        note.style.cssText = "margin:8px 4px;padding:8px 10px;background:#fff9f0;border:1px solid #f0dcc0;border-radius:6px;font-size:10px;color:#b05820;line-height:1.5;";
+        note.innerHTML = "\u26a0 Couldn\u2019t load discovery suggestions. <span style=\"cursor:pointer;text-decoration:underline;\" onclick=\"retryDiscoveryCandidates()\">Try again</span>";
+        var el = document.getElementById("ce-cards");
+        if(el) el.insertBefore(note, el.firstChild);
+      }
+    }
   },80);
 }
 
@@ -2820,7 +2866,25 @@ function renderCandidateCards(cands){
   el.innerHTML="";
   _ceMarkers.forEach(function(m){if(_ceMap)_ceMap.removeLayer(m);}); _ceMarkers=[];
   var bounds=[];
+  var seenDivider = false;
+  var hasRequired = cands.some(function(c){ return c._required; });
+  var hasDiscovery = cands.some(function(c){ return !c._required; });
   cands.forEach(function(c){
+    // Insert "Required by your must-dos" label before first required candidate
+    if (hasRequired && c._required && el.children.length === 0) {
+      var reqLabel = document.createElement("div");
+      reqLabel.style.cssText = "padding:4px 4px 6px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#1a5fa8;";
+      reqLabel.textContent = "Required by your must-dos";
+      el.appendChild(reqLabel);
+    }
+    // Insert section divider before first non-required candidate
+    if (hasRequired && hasDiscovery && !c._required && !seenDivider) {
+      seenDivider = true;
+      var divider = document.createElement("div");
+      divider.style.cssText = "padding:8px 4px 4px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#aaa;margin-top:4px;";
+      divider.textContent = "Also worth considering";
+      el.appendChild(divider);
+    }
     var card=document.createElement("div");
     card.className="ce-card"+(c.status?" "+c.status:""); card.id="ce-card-"+c.id;
     var sl=c.status==="keep"?"\u2713 Kept":c.status==="maybe"?"? Maybe":c.status==="reject"?"\u00d7 Rejected":"";
