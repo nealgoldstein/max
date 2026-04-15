@@ -1918,10 +1918,13 @@ async function expandMustDos() {
   var prompt = "A traveler is planning a trip to " + (region||"this region") + ".\n"
     + (intent ? "Their goal: " + intent + "\n" : "")
     + "They listed these must-dos: \"" + anchors + "\"\n\n"
-    + "Expand each must-do into specific named experiences. For each, list the places required to do it.\n"
+    + "Expand each must-do into specific named experiences. There are two types:\n"
+    + "TYPE 1 — ROUTE: a fixed journey between specific places (e.g. a train, a road trip, a hiking trail). Has required endpoint places.\n"
+    + "TYPE 2 — CONDITION: something that depends on weather, season, or circumstances (e.g. Northern Lights, whale watching, cherry blossoms, wildflowers). No fixed places — instead list the best locations and note the flexibility required.\n\n"
     + "Return ONLY a JSON array (no markdown):\n"
-    + '[{"name":"Glacier Express","description":"Classic 8hr panoramic rail journey through the Swiss Alps","requiredPlaces":[{"place":"Zermatt","country":"Switzerland"},{"place":"St. Moritz","country":"Switzerland"}]},...]\n'
-    + "Be specific. If must-dos mention trains, name each train. If they mention sights, name each sight. Max 6 items.";
+    + '[{"name":"Glacier Express","type":"route","description":"Classic 8hr panoramic rail journey through the Swiss Alps","requiredPlaces":[{"place":"Zermatt","country":"Switzerland"},{"place":"St. Moritz","country":"Switzerland"}],"flexibility":"low"},' 
+    + '{"name":"Northern Lights","type":"condition","description":"Aurora borealis visible Sep-Mar away from light pollution","requiredPlaces":[{"place":"Snæfellsnes Peninsula","country":"Iceland"},{"place":"Akureyri area","country":"Iceland"}],"flexibility":"high","conditionNote":"Requires clear skies and darkness — build in extra nights in aurora-viable locations and keep schedule loose"}]\n'
+    + "Be specific. For routes: name each leg. For conditions: name best locations and flag the scheduling implications. Max 6 items.";
 
   try {
     var text = await callMax([{role:"user",content:prompt}], 1000, 30000);
@@ -1973,19 +1976,33 @@ function renderMustDoItems(items) {
     div.id = "mdc-item-" + item.id;
 
     var rp = item.requiredPlaces||[];
+    var isCondition = item.type === "condition";
     var placesRowHtml = rp.map(function(p,i){
       return (i>0?'<span class="mdc-place-arrow">\u2192</span>':'')+'<span class="mdc-place">'+p.place+'</span>';
     }).join("");
 
+    var placesSection = '';
+    if (rp.length) {
+      if (isCondition) {
+        placesSection = '<div class="mdc-item-places" style="background:#fff9f0;border-top-color:#f0dcc0;">'
+          +'<div class="mdc-places-label" style="color:#b05820;">Best locations — keep schedule flexible:</div>'
+          +'<div class="mdc-places-row">'+placesRowHtml+'</div>'
+          +(item.conditionNote ? '<div style="font-size:10px;color:#b05820;margin-top:6px;line-height:1.5;">⚠ '+item.conditionNote+'</div>' : '')
+          +'</div>';
+      } else {
+        placesSection = '<div class="mdc-item-places">'
+          +'<div class="mdc-places-label">To do this you need stops in:</div>'
+          +'<div class="mdc-places-row">'+placesRowHtml+'</div>'
+          +'</div>';
+      }
+    }
+
     div.innerHTML = '<div class="mdc-item-top" onclick="toggleMdcItem(\''+item.id+'\')">'
       +'<div class="mdc-check">' + (item.checked ? "\u2713" : "") + '</div>'
-      +'<div><div class="mdc-item-name">'+item.name+'</div>'
+      +'<div><div class="mdc-item-name">'+(isCondition ? '\u2728 ' : '')+item.name+'</div>'
       +'<div class="mdc-item-desc">'+item.description+'</div></div>'
       +'</div>'
-      +(rp.length ? '<div class="mdc-item-places">'
-        +'<div class="mdc-places-label">To do this you need stops in:</div>'
-        +'<div class="mdc-places-row">'+placesRowHtml+'</div>'
-        +'</div>' : '');
+      +placesSection;
     body.appendChild(div);
   });
 
@@ -2032,16 +2049,21 @@ function updateMdcSummary() {
 
 function confirmMustDos() {
   var checked = _mdcItems.filter(function(x){ return x.checked; });
-  // Collect required places, tracking which must-do each place serves
   var requiredMap = {};
+  var flexibilityNotes = []; // collect condition-type warnings for candidate prompt
   checked.forEach(function(item){
     (item.requiredPlaces||[]).forEach(function(p){
-      if (!requiredMap[p.place]) requiredMap[p.place] = {place:p.place,country:p.country,requiredFor:[]};
+      if (!requiredMap[p.place]) requiredMap[p.place] = {place:p.place,country:p.country,requiredFor:[],flexible:false};
       requiredMap[p.place].requiredFor.push(item.name);
+      if (item.type === "condition") requiredMap[p.place].flexible = true;
     });
+    if (item.type === "condition" && item.conditionNote) {
+      flexibilityNotes.push(item.name + ": " + item.conditionNote);
+    }
   });
   var requiredPlaces = Object.values(requiredMap);
-  _tb.requiredPlaces = requiredPlaces; // store for use in candidate rendering
+  _tb.requiredPlaces = requiredPlaces;
+  _tb.flexibilityNotes = flexibilityNotes; // store for use in candidate rendering
   var ov = document.getElementById("mdc-overlay");
   if (ov) ov.remove();
   runCandidateSearch(requiredPlaces);
@@ -2060,7 +2082,8 @@ async function runCandidateSearch(requiredPlaces) {
     + (_tb.when ? "\nWhen: " + _tb.when : "")
     + (_tb.intent ? "\nWhat they want: " + _tb.intent : "")
     + (_tb.interests&&_tb.interests.length ? "\nAlso want: " + _tb.interests.join(", ") : "")
-    + (_tb.constraints ? "\nConstraints: " + _tb.constraints : "");
+    + (_tb.constraints ? "\nConstraints: " + _tb.constraints : "")
+    + (_tb.flexibilityNotes&&_tb.flexibilityNotes.length ? "\nSCHEDULING NOTES: " + _tb.flexibilityNotes.join("; ") : "");
 
   // For complex multi-country trips, run both calls in parallel
   // and show results as each completes — so adding more required stops
