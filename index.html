@@ -2357,13 +2357,73 @@ function buildFromCandidates(){
   trip={name:_tb.name||"New trip",destinations:[],legs:{},trackSpending:false,pendingActions:[],
     brief:{region:_tb.region,when:_tb.when,intent:_tb.intent,interests:_tb.interests,anchors:_tb.anchors}};
   activeDest=null; destCtr=0; sidCtr=100; bkCtr=0; _fileHandle=null;
-  var id="trip-"+Date.now(); _currentTripId=id;
-  _tripsIndex.push({id:id,name:_tb.name,destCount:0,dateRange:"",savedAt:new Date().toISOString()});
+  var tripId="trip-"+Date.now(); _currentTripId=tripId;
+
+  // Parse start date from brief
+  var startDate=parseStartDateFromBrief(_tb.when||"");
+
+  // Build destinations from kept candidates
+  var cur=new Date(startDate);
+  kept.forEach(function(c){
+    destCtr++;
+    var id="d"+destCtr;
+    var nights=parseNightsFromRange(c.stayRange)||3;
+    var dateFrom=cur.toISOString().slice(0,10);
+    var next=new Date(cur); next.setDate(next.getDate()+nights);
+    var dateTo=next.toISOString().slice(0,10);
+    var dest={
+      id:id, place:c.place, intent:c.place+(c.whyItFits?" — "+c.whyItFits.substring(0,60):""),
+      dateFrom:dateFrom, dateTo:dateTo, nights:nights,
+      days:makeDays(id,c.place,c.place,dateFrom,nights),
+      trackerItems:{booked:[],see:[],visited:[]}, trackerCat:"booked", storyState:"idle",
+      hotelBookings:[], generalBookings:[], locations:[],
+      execMode:false, todayItems:[], discoveredItems:[], suggestions:[]
+    };
+    trip.destinations.push(dest);
+    if(isKnownCity(c.place)){
+      populateStaticSuggestions(dest);
+    } else {
+      generateCityData(c.place,id);
+    }
+    cur=next;
+  });
+
+  trip.destinations.sort(function(a,b){return(a.dateFrom||"").localeCompare(b.dateFrom||"");});
+  _tripsIndex.push({id:tripId,name:_tb.name,destCount:kept.length,dateRange:"",savedAt:new Date().toISOString()});
   saveTripsIndex(); localSave();
   g("candidate-explorer-overlay").style.display="none";
   if(_ceMap){_ceMap.remove();_ceMap=null;}
   enterApp();
-  setTimeout(function(){drawTripMode();setTimeout(function(){showShortlistBanner(kept);},200);},100);
+  setTimeout(function(){drawTripMode();},100);
+}
+
+function parseStartDateFromBrief(when){
+  // Try to find a date in the when string like "August 15", "15 August", "September"
+  var now=new Date();
+  var months=["january","february","march","april","may","june","july","august","september","october","november","december"];
+  var w=(when||"").toLowerCase();
+  var monthIdx=-1, day=1;
+  months.forEach(function(m,i){ if(w.indexOf(m)>-1){ monthIdx=i; } });
+  // Try to find a day number
+  var dayMatch=w.match(/\b(\d{1,2})\b/);
+  if(dayMatch) day=parseInt(dayMatch[1]);
+  if(monthIdx>-1){
+    var year=now.getFullYear();
+    var d=new Date(year,monthIdx,day);
+    // If the date is in the past, use next year
+    if(d<now) d=new Date(year+1,monthIdx,day);
+    return d.toISOString().slice(0,10);
+  }
+  // Default: 3 months from now
+  var def=new Date(now); def.setMonth(def.getMonth()+3);
+  return def.toISOString().slice(0,10);
+}
+
+function parseNightsFromRange(stayRange){
+  // "3-4 nights" -> 3, "5-7 nights" -> 5, "2 nights" -> 2
+  if(!stayRange) return 3;
+  var m=stayRange.match(/(\d+)/);
+  return m?parseInt(m[1]):3;
 }
 
 function showShortlistBanner(kept){
