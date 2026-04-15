@@ -2053,7 +2053,9 @@ async function runCandidateSearch(requiredPlaces) {
 
   showCandidateExplorer(null); // show loading state
 
-  var reqList = requiredPlaces.map(function(p){ return p.place+" ("+p.country+") — required for: "+p.requiredFor.join(", "); }).join("\n");
+  var reqList = requiredPlaces.map(function(p){
+    return p.place + " (" + p.country + ") [needed for: " + p.requiredFor.join(", ") + "]";
+  }).join("\n");
   var reqCount = requiredPlaces.length;
   var extraCount = Math.max(4, 8 - reqCount);
 
@@ -2064,29 +2066,28 @@ async function runCandidateSearch(requiredPlaces) {
     + (_tb.interests&&_tb.interests.length ? "Also want to: " + _tb.interests.join(", ") + "\n" : "")
     + (_tb.constraints ? "Constraints: " + _tb.constraints + "\n" : "")
     + (reqCount > 0
-      ? "\nCERTAIN STOPS ALREADY REQUIRED by their must-dos:\n" + reqList + "\n"
-        + "\nNow suggest " + extraCount + " ADDITIONAL places worth visiting purely on their own merits — not because of trains or must-dos. These should be genuinely interesting stops that complement the required ones."
+      ? "\nThe following places are REQUIRED stops because of the traveler's must-dos:\n" + reqList
+        + "\n\nFor each required stop, write a full description of why it is worth visiting — go BEYOND the train connection. What is the town itself like? What else is there to see, do, eat, experience? The train is one reason they're going; give them the full picture."
+        + "\n\nAlso suggest " + extraCount + " additional places worth visiting on their own merits (not train-related). These should complement the required stops."
       : "\nSuggest 6-8 destination candidates.")
-    + "\n\nReturn ONLY a single JSON array (no markdown, no extra text):\n"
-    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why worth visiting on its own.","tradeoffs":"Downside.","tags":["tag1"],"lat":0.0,"lng":0.0}]'
-    + "\nInclude real lat/lng. Mix roles.";
+    + "\n\nReturn ALL places (required + additional) in ONE JSON array (no markdown):\n"
+    + '[{"place":"City","country":"Country","role":"base|anchor|pass-through","stayRange":"2-4 nights","whyItFits":"Full reason — what makes this place worth visiting beyond any train.","tradeoffs":"One honest downside.","tags":["tag1","tag2"],"lat":0.0,"lng":0.0}]'
+    + "\nInclude real lat/lng. Mark required stops with their real roles (base, anchor, pass-through).";
 
   try {
     var text = await callMax([{role:"user",content:prompt}], 2000);
-    var additional = JSON.parse(text.replace(/```json|```/g,"").trim());
-    // Tag additional candidates as non-required
-    additional.forEach(function(c){ c._required = false; });
-    // Build required-stop stubs (AI did not include them — we prepend them)
-    var reqCands = requiredPlaces.map(function(p){
-      return {place:p.place, country:p.country, role:"anchor",
-        stayRange:"2-4 nights", whyItFits:"Required stop — "+p.requiredFor.join(", "),
-        tradeoffs:"", tags:["required"], lat:0, lng:0, _required:true};
+    var allCands = JSON.parse(text.replace(/```json|```/g,"").trim());
+    // Mark which candidates are required stops
+    allCands.forEach(function(c){
+      var req = (_tb.requiredPlaces||[]).find(function(r){
+        return r.place.toLowerCase()===c.place.toLowerCase();
+      });
+      c._required = !!req;
+      c._requiredFor = req ? req.requiredFor : [];
     });
-    var allCands = reqCands.concat(additional);
     allCands.forEach(function(c,i){ c.id="c"+i; c.status=null; });
     _tb.candidates = allCands;
-    // Geocode required stops that have no coords
-    geocodeRequiredStops(allCands, function(){ showCandidateExplorer(allCands); });
+    showCandidateExplorer(allCands);
   } catch(e) {
     var errDiv = g("ce-cards");
     var noKey = e.message && e.message.indexOf("No API key") > -1;
@@ -2262,9 +2263,8 @@ function renderCandidateCards(cands){
     card.className="ce-card"+(c.status?" "+c.status:""); card.id="ce-card-"+c.id;
     var sl=c.status==="keep"?"\u2713 Kept":c.status==="maybe"?"? Maybe":c.status==="reject"?"\u00d7 Rejected":"";
     var sc=c.status==="keep"?"#2a7a4e":c.status==="maybe"?"#d97706":"#c05020";
-    var reqEntry=(_tb.requiredPlaces||[]).find(function(r){return r.place.toLowerCase()===c.place.toLowerCase();});
-    var reqBadge=reqEntry&&reqEntry.requiredFor&&reqEntry.requiredFor.length
-      ?'<div style="font-size:9px;font-weight:700;color:#1a5fa8;background:#e8f0fc;padding:2px 7px;border-radius:10px;margin:2px 0 4px;display:inline-block;">\uD83D\uDE82 Required for: '+reqEntry.requiredFor.join(", ")+'</div>'
+    var reqBadge=(c._requiredFor&&c._requiredFor.length)
+      ?'<div style="font-size:9px;font-weight:700;color:#1a5fa8;background:#e8f0fc;padding:2px 7px;border-radius:10px;margin:2px 0 4px;display:inline-block;">\uD83D\uDE82 Required for: '+c._requiredFor.join(", ")+'</div>'
       :'';
     card.innerHTML='<div class="ce-card-top">'
       +'<div style="display:flex;justify-content:space-between;align-items:baseline;">'
