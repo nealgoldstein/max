@@ -1789,6 +1789,43 @@ function hideNewTripForm(){
 }
 
 
+function showBriefApiKeyForm(){
+  // Inline API key entry that stays on the brief screen
+  var existing=document.getElementById("brief-key-overlay");
+  if(existing){existing.remove();return;}
+  var ov=document.createElement("div");
+  ov.id="brief-key-overlay";
+  ov.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9000;display:flex;align-items:center;justify-content:center;";
+  ov.innerHTML='<div style="background:#fff;border-radius:10px;padding:24px;width:380px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,.2);">'
+    +'<div style="font-size:14px;font-weight:700;margin-bottom:8px;">Set Anthropic API key</div>'
+    +'<div style="font-size:11px;color:#888;margin-bottom:14px;">Your key is stored locally in this browser. Max needs it to generate destination suggestions.</div>'
+    +'<input id="brief-key-inp" type="password" placeholder="sk-ant-..." style="width:100%;font-size:12px;padding:9px 11px;border:1px solid #ddd;border-radius:6px;font-family:monospace;box-sizing:border-box;margin-bottom:10px;">'
+    +'<div style="display:flex;gap:8px;">'
+    +'<button onclick="saveBriefKey()" style="flex:1;padding:9px;font-size:12px;font-weight:600;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;">Save key</button>'
+    +'<button onclick="var o=document.getElementById(&quot;brief-key-overlay&quot;);if(o)o.remove();" style="padding:9px 14px;font-size:12px;border:1px solid #ddd;border-radius:6px;cursor:pointer;font-family:inherit;background:#fff;color:#555;">Cancel</button>'
+    +'</div>'
+    +'</div>';
+  document.body.appendChild(ov);
+  ov.onclick=function(e){if(e.target===ov)ov.remove();};
+  setTimeout(function(){var i=document.getElementById("brief-key-inp");if(i)i.focus();},50);
+}
+
+function saveBriefKey(){
+  var inp=document.getElementById("brief-key-inp");
+  if(!inp) return;
+  var v=inp.value.trim();
+  if(v.length<10) return;
+  setApiKey(v);
+  var ov=document.getElementById("brief-key-overlay"); if(ov) ov.remove();
+  // Show confirmation
+  var toast=document.createElement("div");
+  toast.style.cssText="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#2a7a4e;color:#fff;padding:8px 16px;border-radius:6px;font-size:11px;font-weight:600;z-index:9999;pointer-events:none;";
+  toast.textContent="\u2713 API key saved";
+  document.body.appendChild(toast);
+  setTimeout(function(){toast.remove();},2000);
+}
+
+
 // ─── TRIP BRIEF ────────────────────────────────────────────
 var _tb={};
 
@@ -1821,7 +1858,7 @@ function renderTripBrief(){
     +'<button class="tb-btn-primary" onclick="findCandidates()">Find candidate places \u2192</button>'
     +'<div style="display:flex;justify-content:space-between;margin-top:8px;">'
     +'<div class="tb-btn-back" onclick="cancelTripBrief()">\u2190 Back</div>'
-    +'<div style="font-size:10px;color:#aaa;cursor:pointer;" onclick="cancelTripBrief();setTimeout(function(){showApiKeyForm();},50);">\uD83D\uDD11 Set API key</div>'
+    +'<div style="font-size:10px;color:#aaa;cursor:pointer;" onclick="showBriefApiKeyForm()">\uD83D\uDD11 Set API key</div>'
     +'</div>'
     +'</div>';
 }
