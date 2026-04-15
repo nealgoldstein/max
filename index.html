@@ -2061,45 +2061,53 @@ async function runCandidateSearch(requiredPlaces) {
     + (_tb.interests&&_tb.interests.length ? "\nAlso want: " + _tb.interests.join(", ") : "")
     + (_tb.constraints ? "\nConstraints: " + _tb.constraints : "");
 
-  try {
-    var allCands = [];
+  // For complex multi-country trips, run both calls in parallel
+  // and show results as each completes — so adding more required stops
+  // doesn't increase the total wait time
+  var reqNames = requiredPlaces.map(function(p){ return p.place+", "+p.country; }).join("; ");
+  var extraCount = Math.max(4, 8 - Math.min(requiredPlaces.length, 6));
+  var skipList = requiredPlaces.map(function(p){ return p.place; }).join(", ");
 
-    // CALL 1: Describe required stops (if any)
-    if (requiredPlaces.length > 0) {
-      var reqNames = requiredPlaces.map(function(p){ return p.place+", "+p.country; }).join("; ");
-      var p1 = "You are a travel expert. For each of these places, write a candidate card for a traveler visiting " + (_tb.region||"this region") + ".\n"
-        + "Places: " + reqNames + "\n"
-        + "Trip context: " + brief + "\n\n"
-        + "For each place describe why it is genuinely worth visiting — its character, what to see and do, what makes it special. Do not mention trains unless they are one of several reasons.\n"
-        + "Return ONLY a JSON array (no markdown):\n"
-        + '[{"place":"City","country":"Country","role":"anchor","stayRange":"2-4 nights","whyItFits":"Why worth visiting.","tradeoffs":"One downside.","tags":["tag1"],"lat":0.0,"lng":0.0}]';
-      var t1 = await callMax([{role:"user",content:p1}], 2000, 40000);
-      var reqCands = JSON.parse(t1.replace(/```json|```/g,"").trim());
-      reqCands.forEach(function(c){
-        var req = requiredPlaces.find(function(r){ return r.place.toLowerCase()===c.place.toLowerCase(); });
-        c._required = true;
-        c._requiredFor = req ? req.requiredFor : [];
-      });
-      allCands = allCands.concat(reqCands);
-    }
-
-    // CALL 2: Additional candidates worth visiting on their own
-    var extraCount = Math.max(4, 8 - requiredPlaces.length);
-    var skipList = requiredPlaces.map(function(p){ return p.place; }).join(", ");
-    var p2 = "You are a travel expert. Suggest " + extraCount + " destinations in " + (_tb.region||"this region") + " worth visiting on their own merits.\n"
-      + "Trip context: " + brief + "\n"
-      + (skipList ? "Do NOT include: " + skipList + "\n" : "")
+  var p1 = requiredPlaces.length > 0
+    ? "You are a travel expert. For each of these places, write a candidate card for a traveler visiting " + (_tb.region||"this region") + ".\n"
+      + "Places: " + reqNames + "\n"
+      + "Trip context: " + brief + "\n\n"
+      + "Describe why each is genuinely worth visiting — character, what to see and do, what makes it special. Trains may be one reason but not the only one.\n"
       + "Return ONLY a JSON array (no markdown):\n"
-      + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why worth visiting.","tradeoffs":"One downside.","tags":["tag1"],"lat":0.0,"lng":0.0}]';
-    var t2 = await callMax([{role:"user",content:p2}], 2000, 40000);
-    var extraCands = JSON.parse(t2.replace(/```json|```/g,"").trim());
-    extraCands.forEach(function(c){ c._required=false; c._requiredFor=[]; });
-    allCands = allCands.concat(extraCands);
+      + '[{"place":"City","country":"Country","role":"anchor","stayRange":"2-4 nights","whyItFits":"Why worth visiting.","tradeoffs":"One downside.","tags":["tag1"],"lat":0.0,"lng":0.0}]'
+    : null;
 
+  var p2 = "You are a travel expert. Suggest " + extraCount + " destinations in " + (_tb.region||"this region") + " worth visiting on their own merits.\n"
+    + "Trip context: " + brief + "\n"
+    + (skipList ? "Do NOT include: " + skipList + "\n" : "")
+    + "Return ONLY a JSON array (no markdown):\n"
+    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why worth visiting.","tradeoffs":"One downside.","tags":["tag1"],"lat":0.0,"lng":0.0}]';
+
+  // Run in parallel — total wait = max(call1, call2) not call1 + call2
+  var calls = [];
+  if (p1) calls.push(callMax([{role:"user",content:p1}], 2000, 45000).then(function(t){
+    var cands = JSON.parse(t.replace(/```json|```/g,"").trim());
+    cands.forEach(function(c){
+      var req = requiredPlaces.find(function(r){ return r.place.toLowerCase()===c.place.toLowerCase(); });
+      c._required=true; c._requiredFor=req?req.requiredFor:[];
+    });
+    return cands;
+  }).catch(function(){ return []; }));
+
+  calls.push(callMax([{role:"user",content:p2}], 2000, 45000).then(function(t){
+    var cands = JSON.parse(t.replace(/```json|```/g,"").trim());
+    cands.forEach(function(c){ c._required=false; c._requiredFor=[]; });
+    return cands;
+  }).catch(function(){ return []; }));
+
+  try {
+    var results = await Promise.all(calls);
+    var allCands = [];
+    results.forEach(function(r){ allCands = allCands.concat(r); });
+    if (!allCands.length) throw new Error("No candidates returned");
     allCands.forEach(function(c,i){ c.id="c"+i; c.status=null; });
     _tb.candidates = allCands;
     showCandidateExplorer(allCands);
-
   } catch(e) {
     var errDiv = g("ce-cards");
     var noKey = e.message && e.message.indexOf("No API key") > -1;
