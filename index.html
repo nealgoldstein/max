@@ -2959,6 +2959,15 @@ function renderCandidateCards(cands){
   var bounds=[];
   var seenDivider = false;
   var seenReqHeader = false;
+  // Re-check _required against _tb.requiredPlaces in case it wasn't set during generation
+  cands.forEach(function(c){
+    if (!c._required) {
+      var match = (_tb.requiredPlaces||[]).find(function(r){
+        return r.place && c.place && r.place.toLowerCase()===c.place.toLowerCase();
+      });
+      if (match) { c._required=true; c._requiredFor=match.requiredFor||[]; }
+    }
+  });
   var hasRequired = cands.some(function(c){ return c._required; });
   var hasDiscovery = cands.some(function(c){ return !c._required; });
   cands.forEach(function(c){
