@@ -2028,15 +2028,16 @@ function updateMdcSummary() {
 
 function confirmMustDos() {
   var checked = _mdcItems.filter(function(x){ return x.checked; });
-  // Collect required places from checked items
-  var requiredPlaces = [];
+  // Collect required places, tracking which must-do each place serves
+  var requiredMap = {};
   checked.forEach(function(item){
     (item.requiredPlaces||[]).forEach(function(p){
-      if (!requiredPlaces.find(function(r){ return r.place===p.place; })){
-        requiredPlaces.push(p);
-      }
+      if (!requiredMap[p.place]) requiredMap[p.place] = {place:p.place,country:p.country,requiredFor:[]};
+      requiredMap[p.place].requiredFor.push(item.name);
     });
   });
+  var requiredPlaces = Object.values(requiredMap);
+  _tb.requiredPlaces = requiredPlaces; // store for use in candidate rendering
   var ov = document.getElementById("mdc-overlay");
   if (ov) ov.remove();
   runCandidateSearch(requiredPlaces);
@@ -2234,11 +2235,16 @@ function renderCandidateCards(cands){
     card.className="ce-card"+(c.status?" "+c.status:""); card.id="ce-card-"+c.id;
     var sl=c.status==="keep"?"\u2713 Kept":c.status==="maybe"?"? Maybe":c.status==="reject"?"\u00d7 Rejected":"";
     var sc=c.status==="keep"?"#2a7a4e":c.status==="maybe"?"#d97706":"#c05020";
+    var reqEntry=(_tb.requiredPlaces||[]).find(function(r){return r.place.toLowerCase()===c.place.toLowerCase();});
+    var reqBadge=reqEntry&&reqEntry.requiredFor&&reqEntry.requiredFor.length
+      ?'<div style="font-size:9px;font-weight:700;color:#1a5fa8;background:#e8f0fc;padding:2px 7px;border-radius:10px;margin:2px 0 4px;display:inline-block;">\uD83D\uDE82 Required for: '+reqEntry.requiredFor.join(", ")+'</div>'
+      :'';
     card.innerHTML='<div class="ce-card-top">'
       +'<div style="display:flex;justify-content:space-between;align-items:baseline;">'
       +'<div class="ce-card-name">'+c.place+'</div>'
       +(sl?'<div style="font-size:9px;font-weight:700;color:'+sc+';">'+sl+'</div>':'')
       +'</div>'
+      +reqBadge
       +'<div class="ce-card-role">'+rIcon(c.role)+' '+c.role+(c.country?' \u00b7 '+c.country:'')+'</div>'
       +'<div class="ce-card-why">'+c.whyItFits+'</div>'
       +'<div class="ce-card-tags">'+(c.tags||[]).map(function(t){return '<span class="ce-tag">'+t+'</span>';}).join('')+'</div>'
