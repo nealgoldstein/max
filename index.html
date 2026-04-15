@@ -2898,6 +2898,27 @@ async function geocodeMissingCandidates(missing, allCands) {
   } catch(e) { console.warn("Geocoding failed:", e.message); }
 }
 
+function showCandidateDisclaimer() {
+  // Only show once per session (not once per trip — it's a useful reminder)
+  if (sessionStorage.getItem("ce-disclaimer-seen")) return;
+  var el = document.getElementById("ce-cards");
+  if (!el) return;
+
+  var banner = document.createElement("div");
+  banner.id = "ce-disclaimer";
+  banner.style.cssText = "margin-bottom:10px;padding:10px 12px;background:#fff;border:1px solid #e8e8e8;border-left:3px solid #999;border-radius:6px;font-size:11px;color:#555;line-height:1.6;";
+  banner.innerHTML = '<div style="font-weight:600;color:#333;margin-bottom:4px;">A note on these suggestions</div>'
+    + '<div>Max generates these candidates \u2014 but the best trips are built by people who have done their own research. Use this as a starting point, not a finished answer.</div>'
+    + '<div style="margin-top:6px;display:flex;justify-content:flex-end;">'
+    + '<span id="ce-disc-dismiss" style="font-size:10px;color:#aaa;cursor:pointer;">Got it</span>'
+    + '</div>';
+  banner.querySelector("#ce-disc-dismiss").onclick = function() {
+    banner.remove();
+  };
+  el.insertBefore(banner, el.firstChild);
+  sessionStorage.setItem("ce-disclaimer-seen", "1");
+}
+
 function showCandidateExplorer(cands){
   g("trip-brief-overlay").style.display="none";
   var ov=g("candidate-explorer-overlay");
@@ -3045,6 +3066,7 @@ function renderCandidateCards(cands){
   });
   if(bounds.length>1) setTimeout(function(){try{_ceMap.fitBounds(bounds,{padding:[28,28]});}catch(e){}},150);
   updateCEShortlist();
+  showCandidateDisclaimer();
   // Geocode any candidates missing lat/lng and add their markers
   var missingCoords = cands.filter(function(c){ return !c.lat || !c.lng || c.lat===0; });
   if (missingCoords.length > 0) {
