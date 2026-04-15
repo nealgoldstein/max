@@ -708,7 +708,8 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 
 /* Destination description panel */
 .tb-dest-desc{margin-top:6px;padding:10px 12px;background:#fff;border:1px solid #e8e8e8;border-radius:6px;font-size:11px;color:#555;line-height:1.7;display:none;white-space:pre-line;}
-.tb-dest-desc.loading{color:#bbb;font-style:italic;}
+.tb-dest-desc.loading{background:linear-gradient(90deg,#f0f0f0 25%,#e8e8e8 50%,#f0f0f0 75%);background-size:200% 100%;animation:shimmer 1.2s infinite;border-color:#eee;}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
 /* Must-do confirmation step */
 .mdc-required-summary{background:#fff;border:1px solid #e8e8e8;border-radius:7px;padding:10px 12px;margin-bottom:10px;font-size:11px;line-height:1.6;}
 .mdc-req-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#aaa;margin-bottom:5px;}
@@ -2145,8 +2146,15 @@ function debouncedDestDesc(val) {
   clearTimeout(_destDescTimer);
   var desc = document.getElementById("tb-dest-desc");
   if (!desc) return;
-  if (!val || val.trim().length < 3) { desc.style.display = "none"; return; }
-  _destDescTimer = setTimeout(function(){ fetchDestDesc(val.trim()); }, 800);
+  if (!val || val.trim().length < 3) { desc.style.display = "none"; desc.style.minHeight = ""; return; }
+  // Reserve space immediately so content loading doesn't shift the form
+  if (desc.style.display === "none") {
+    desc.style.display = "block";
+    desc.style.minHeight = "60px";
+    desc.className = "tb-dest-desc loading";
+    desc.textContent = "";
+  }
+  _destDescTimer = setTimeout(function(){ fetchDestDesc(val.trim()); }, 900);
 }
 
 async function fetchDestDesc(region) {
@@ -2155,13 +2163,14 @@ async function fetchDestDesc(region) {
   if (!_apiKey) return; // silently skip if no key
   desc.className = "tb-dest-desc loading";
   desc.style.display = "block";
-  desc.textContent = "Thinking about " + region + "\u2026";
+  desc.textContent = "";  // silent — space already reserved, no text thrash
   try {
     var prompt = "Write two short paragraphs about what makes " + region + " worth traveling to. "
       + "First paragraph: the defining character of the place — landscape, culture, pace, what sets it apart. "
       + "Second paragraph: what surprises or rewards travelers who go deeper — things that aren't obvious from a distance, or that distinguish it from similar destinations. "
       + "Be specific and concrete. No generic travel-writing phrases.";
     var text = await callMax([{role:"user",content:prompt}], 400);
+    desc.style.minHeight = "";
     desc.className = "tb-dest-desc";
     desc.textContent = text;
   } catch(e) {
