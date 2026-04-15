@@ -706,6 +706,9 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .cmp-act.primary{background:#111;color:#fff;border-color:#111;}
 
 
+/* Destination description panel */
+.tb-dest-desc{margin-top:6px;padding:9px 11px;background:#fff;border:1px solid #e8e8e8;border-radius:6px;font-size:11px;color:#555;line-height:1.6;display:none;}
+.tb-dest-desc.loading{color:#bbb;font-style:italic;}
 /* Must-do confirmation step */
 .mdc-required-summary{background:#fff;border:1px solid #e8e8e8;border-radius:7px;padding:10px 12px;margin-bottom:10px;font-size:11px;line-height:1.6;}
 .mdc-req-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#aaa;margin-bottom:5px;}
@@ -2120,6 +2123,34 @@ async function geocodeRequiredStops(cands, callback) {
 // ─── TRIP BRIEF ────────────────────────────────────────────
 var _tb={};
 
+var _destDescTimer = null;
+function debouncedDestDesc(val) {
+  clearTimeout(_destDescTimer);
+  var desc = document.getElementById("tb-dest-desc");
+  if (!desc) return;
+  if (!val || val.trim().length < 3) { desc.style.display = "none"; return; }
+  _destDescTimer = setTimeout(function(){ fetchDestDesc(val.trim()); }, 800);
+}
+
+async function fetchDestDesc(region) {
+  var desc = document.getElementById("tb-dest-desc");
+  if (!desc) return;
+  if (!_apiKey) return; // silently skip if no key
+  desc.className = "tb-dest-desc loading";
+  desc.style.display = "block";
+  desc.textContent = "Thinking about " + region + "\u2026";
+  try {
+    var prompt = "In 2-3 sentences, describe what makes " + region + " worth traveling to. "
+      + "Be specific and practical — mention the defining draws, what kind of traveler it suits, and one thing that surprises first-time visitors. "
+      + "Do not use generic phrases like \"hidden gems\" or \"something for everyone\".";
+    var text = await callMax([{role:"user",content:prompt}], 200);
+    desc.className = "tb-dest-desc";
+    desc.textContent = text;
+  } catch(e) {
+    desc.style.display = "none";
+  }
+}
+
 function showTripBrief(){
   var name=g("ntp-name").value.trim(); if(name.length<2) return;
   _tb={name:name,interests:[]};
@@ -2138,7 +2169,7 @@ function renderTripBrief(){
     +'<div class="tb-sub">The more you share, the better the suggestions.</div>'
     +'</div>'
     +'<div class="tb-body">'
-    +'<div class="tb-field"><label>Where are you thinking of going?</label><input id="tb-region" placeholder="e.g. Central Europe, Swiss Alps, Scandinavia\u2026" /></div>'
+    +'<div class="tb-field"><label>Where are you thinking of going?</label><input id="tb-region" placeholder="e.g. Central Europe, Swiss Alps, Scandinavia\u2026" oninput="debouncedDestDesc(this.value)" /><div id="tb-dest-desc" class="tb-dest-desc"></div></div>'
     +'<div class="tb-field"><label>When & how long?</label><input id="tb-when" placeholder="e.g. Late September, 10\u201314 days" /></div>'
     +'<div class="tb-field"><label>What are you looking for from this trip?</label><textarea id="tb-intent" rows="3" placeholder="e.g. Always wanted to ride the Glacier Express. Going with my partner for 3 weeks in September. Want a mix — some big mountain scenery but also a city with good food and culture."></textarea></div>'
     +'<div class="tb-field"><label>I also want to… <span style="font-weight:400;color:#aaa;">(optional)</span></label><div style="font-size:10px;color:#aaa;margin-bottom:6px;">Tap anything else you want to make sure the trip includes</div><div class="tb-tags">'+tagsHtml+'</div></div>'
