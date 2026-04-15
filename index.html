@@ -754,6 +754,28 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
     <div class="hs-welcome" id="hs-welcome">
       A travel planning tool built around the voice and ideas of<br>
       <em>A Tourist's Guide to the Existential Universe</em>.
+      <div style="margin-top:14px;font-size:12px;color:#777;line-height:1.7;padding-top:14px;border-top:1px solid #eee;">
+        Max is not an AI that spits out an itinerary and expects you to follow it.<br>
+        It is a collaborator &#8212; to help you think, compare, test, and adapt.<br>
+        The goal is not a rigid schedule. The goal is to arrive well-positioned.<br>
+        <span id="hs-about-link" onclick="showAboutMax()" style="color:#1a5fa8;cursor:pointer;font-size:11px;margin-top:6px;display:inline-block;">Read more about how Max works &#8594;</span>
+      </div>
+    </div>
+    <!-- About Max modal -->
+    <div id="about-max-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9500;display:none;align-items:center;justify-content:center;padding:24px;">
+      <div style="background:#fff;border-radius:12px;width:580px;max-width:100%;max-height:88vh;overflow:hidden;display:flex;flex-direction:column;">
+        <div style="padding:18px 22px 0;flex-shrink:0;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+            <div style="font-size:15px;font-weight:700;">How Max works</div>
+            <div onclick="document.getElementById('about-max-overlay').style.display='none'" style="cursor:pointer;color:#aaa;font-size:18px;line-height:1;">&#215;</div>
+          </div>
+          <div style="font-size:11px;color:#aaa;padding-bottom:14px;border-bottom:1px solid #eee;">The philosophy behind the tool</div>
+        </div>
+        <div style="flex:1;overflow-y:auto;padding:18px 22px;font-size:12px;color:#444;line-height:1.8;white-space:pre-line;" id="about-max-text"></div>
+        <div style="padding:14px 22px;border-top:1px solid #eee;flex-shrink:0;">
+          <button onclick="document.getElementById('about-max-overlay').style.display='none'" style="width:100%;padding:9px;font-size:12px;font-weight:600;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;">Got it</button>
+        </div>
+      </div>
     </div>
     <div id="hs-key-notice" style="margin-top:10px;padding:9px 12px;background:#fff8f0;border:1px solid #f0dcc0;border-radius:7px;font-size:11px;display:none;">
       <span style="color:#b05820;font-weight:600;">API key needed</span> — Max needs your Anthropic key to suggest destinations.
@@ -2199,6 +2221,18 @@ async function fetchDestDesc(region) {
   } catch(e) {
     desc.style.display = "none";
   }
+}
+
+
+var MAX_ABOUT_TEXT = "Max is not an AI that spits out an itinerary and expects you to follow it. That is not how good travel works.\n\nMax is a collaborator. Its job is to help you think, compare, test, revise, and adapt \u2014 to move from a vague idea of a trip to a well-positioned one. It helps you figure out what belongs, what doesn\u2019t, what deserves more time, and where you are creating friction for little gain. But it does not replace your judgment, your curiosity, or the things you can only learn by actually being somewhere.\n\nThat matters because travel is not a puzzle that can be solved in advance. There is no way to give Max all the information it would need to perfectly script a trip before you leave. Some of the most important things only appear once you arrive, walk around, talk to people, see the weather, and feel your own energy. Max can help you discover what questions to ask and what options are worth keeping open. But it cannot pretend to know the full trip before the trip begins.\n\nThat is why the philosophy behind Max is progressive commitment. At the beginning, almost everything is provisional. As the trip develops, some things become more fixed: which places really belong, how long they deserve, which bases make sense, and what is actually worth booking. Max is built to support that gradual tightening \u2014 not to force certainty too soon.\n\nThe planning process begins with intent, not logistics. A good trip does not start with a route. It starts with what you want from being there. From that intent, Max helps generate candidates: places that might belong because they serve the kind of trip you want. Then it helps you test them. Is this place worth going to? Does it truly fit, or is it just famous? Is it a base, a pass-through, or an anchor? How long does it deserve?\n\nEven then, the goal is not a rigid day-by-day schedule. The goal is to arrive well-positioned \u2014 in the right regions, for roughly the right amount of time, with a good sense of where to stay, what matters, what is optional, and what should remain loose.\n\nOnce you are on the ground, Max shifts roles. Before the trip, it helps shape and position. During the trip, it helps you decide. The useful questions change: Given where you are, what still makes sense? Should you stay longer, leave earlier, skip the next stop?\n\nGood travel is not slavishly following a plan. Good travel is arriving prepared enough that you can change the plan intelligently.";
+
+function showAboutMax(){
+  var ov=document.getElementById("about-max-overlay");
+  var txt=document.getElementById("about-max-text");
+  if(!ov||!txt) return;
+  txt.textContent=MAX_ABOUT_TEXT;
+  ov.style.display="flex";
+  ov.onclick=function(e){if(e.target===ov)ov.style.display="none";};
 }
 
 function showTripBrief(){
