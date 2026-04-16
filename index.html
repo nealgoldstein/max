@@ -2802,19 +2802,88 @@ function resequenceTrip() {
 
 function showTripBrief(){
   var name=g("ntp-name").value.trim(); if(name.length<2) return;
-  _tb={name:name,interests:[]};
+  _tb={name:name,interests:[],drivers:[]};
   hideNewTripForm();
-  g("trip-brief-overlay").style.display="block";
-  renderTripBrief();
+  var ov=g("trip-brief-overlay");
+  ov.style.display="block";
+  renderTripStep1Recognition();
+}
+
+function renderTripStep1Recognition(){
+  var ov=g("trip-brief-overlay"); ov.className="tb-overlay";
+  ov.style.cssText="position:fixed;inset:0;background:#f7f7f5;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
+
+  var sentences = [
+    {id:"narrative",  label:"\u201cI\u2019ve always wanted to\u2026\u201d",         sub:"Something about this has been sitting with you for a long time"},
+    {id:"doing",      label:"\u201cI want to do\u2026\u201d",                        sub:"An experience that requires participation \u2014 moving, making, going"},
+    {id:"seeing",     label:"\u201cI want to see\u2026\u201d",                       sub:"A place, a landscape, a thing that already holds meaning for you"},
+    {id:"different",  label:"\u201cI need something different\u2026\u201d",          sub:"Adjusting distance from your current life \u2014 direction before destination"},
+    {id:"relational", label:"\u201cWe should go somewhere that\u2026\u201d",         sub:"The people you\u2019re with are shaping where you go"},
+    {id:"signal",     label:"\u201cThis would be amazing to have done\u2026\u201d",  sub:"The trip matters partly because of what it means to have made it"}
+  ];
+  var drivers = _tb.drivers || [];
+  var sentHtml = sentences.map(function(s){
+    var on = drivers.indexOf(s.id) > -1;
+    return '<div class="tb-sentence'+(on?' on':'')+'" data-id="'+s.id+'" onclick="toggleSentence(this)">'
+      +'<div class="tb-sentence-label">'+s.label+'</div>'
+      +'<div class="tb-sentence-sub">'+s.sub+'</div>'
+      +'</div>';
+  }).join("");
+
+  ov.innerHTML='<div class="tb-header">'
+    +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Step 1 of 2</div></div></div>'
+    +'<div class="tb-title">What\u2019s the sentence that started this trip?</div>'
+    +'<div class="tb-sub">Select as many as feel true. The way you say it reveals what\u2019s actually driving things.</div>'
+    +'</div>'
+    +'<div class="tb-body">'
+
+    +'<div class="tb-field" style="margin-bottom:20px;"><div class="tb-sentences">'+sentHtml+'</div></div>'
+
+    +'<div class="tb-field" id="gradient-field" style="'+(drivers.indexOf('different')>-1?'':'display:none;')+'">'
+    +'<label>What does \u201cdifferent\u201d mean for you right now?</label>'
+    +'<textarea id="tb-gradient" rows="3" placeholder="e.g. My life is loud and busy. I want quiet, slow, and warm. Not a resort \u2014 something real but simpler.">'+((_tb.gradient)||'')+'</textarea>'
+    +'<div style="font-size:10px;color:#aaa;margin-top:4px;">Max will look for places at the right distance from your current life.</div></div>'
+
+    +'<div class="tb-field">'
+    +'<label>Tell Max more <span style="font-weight:400;color:#aaa;">(optional)</span></label>'
+    +'<textarea id="tb-intent" rows="3" placeholder="e.g. Going with my partner for three weeks. Want mountain scenery but also a city with real cultural depth. Always wanted to ride a great train.">'
+    +(_tb.intent||'')+'</textarea>'
+    +'<div style="font-size:10px;color:#aaa;margin-top:4px;">You don\u2019t need to have this figured out yet.</div></div>'
+
+    +'<div class="tb-field">'
+    +'<label>Must-dos or anchors <span style="font-weight:400;color:#aaa;">(optional)</span></label>'
+    +'<input id="tb-anchors" value="'+(_tb.anchors||'')+'" placeholder="e.g. Vienna Philharmonic, Glacier Express\u2026" /></div>'
+
+    +'</div>'
+    +'<div class="tb-footer">'
+    +'<button class="tb-btn-primary" onclick="saveRecognitionAndContinue()">A few things Max needs to know \u2192</button>'
+    +'<div style="display:flex;justify-content:space-between;margin-top:8px;">'
+    +'<div class="tb-btn-back" onclick="cancelTripBrief()">\u2190 Back</div>'
+    +'<div style="font-size:10px;color:#aaa;cursor:pointer;" onclick="showBriefApiKeyForm()">\ud83d\udd11 Set API key</div>'
+    +'</div>'
+    +'</div>';
+}
+
+function saveRecognitionAndContinue(){
+  _tb.intent   = g("tb-intent")   ? g("tb-intent").value.trim()   : (_tb.intent||"");
+  _tb.anchors  = g("tb-anchors")  ? g("tb-anchors").value.trim()  : (_tb.anchors||"");
+  _tb.gradient = g("tb-gradient") ? g("tb-gradient").value.trim() : (_tb.gradient||"");
+  var drivers = _tb.drivers || [];
+  // Gradient-only driver with no text → open gradient conversation
+  if(drivers.indexOf("different") > -1 && drivers.length === 1 && !_tb.gradient){
+    openGradientConversation();
+  } else {
+    renderTripBrief();
+  }
 }
 
 function renderTripBrief(){
   var ov=g("trip-brief-overlay"); ov.className="tb-overlay";
   ov.style.cssText="position:fixed;inset:0;background:#f7f7f5;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
   ov.innerHTML='<div class="tb-header">'
-    +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Step 1 of 2 \u00b7 How you travel</div></div></div>'
-    +'<div class="tb-title">How you travel</div>'
-    +'<div class="tb-sub">The ongoing context Max carries through everything \u2014 constraints that apply to the whole trip.</div>'
+    +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Step 2 of 2</div></div></div>'
+    +'<div class="tb-title">A few things Max needs to know</div>'
+    +'<div class="tb-sub">These shape what’s possible — the envelope your trip moves inside.</div>'
     +'</div>'
     +'<div class="tb-body">'
     +'<div class="tb-field"><label>Where are you going?</label><input id="tb-region" placeholder="e.g. Central Europe, Swiss Alps, Japan\u2026" oninput="debouncedDestDesc(this.value)" /><div id="tb-dest-desc" class="tb-dest-desc"></div></div>'
@@ -2843,9 +2912,9 @@ function renderTripBrief(){
     +'<div class="tb-field"><label>Where won\u2019t you compromise?</label><textarea id="tb-hardlimits" rows="2" placeholder="e.g. No car rentals under any circumstances. En suite bathroom required. No shared dormitory accommodation."></textarea><div style="font-size:10px;color:#aaa;margin-top:3px;">Hard limits Max won\u2019t route around.</div></div>'
     +'</div>'
     +'<div class="tb-footer">'
-    +'<button class="tb-btn-primary" onclick="goToTripStep2()">What do you want to see and do \u2192</button>'
+    +'<button class="tb-btn-primary" onclick="goToTripStep2()">Find candidate places \u2192</button>'
     +'<div style="display:flex;justify-content:space-between;margin-top:8px;">'
-    +'<div class="tb-btn-back" onclick="cancelTripBrief()">\u2190 Back</div>'
+    +'<div class="tb-btn-back" onclick="renderTripStep1Recognition()">\u2190 Back</div>'
     +'<div style="font-size:10px;color:#aaa;cursor:pointer;" onclick="showBriefApiKeyForm()">\ud83d\udd11 Set API key</div>'
     +'</div>'
     +'</div>';
@@ -2863,7 +2932,7 @@ function goToTripStep2(){
   _tb.compromises   = g("tb-compromises")   ? g("tb-compromises").value.trim()   : (_tb.compromises||"");
   _tb.hardlimits    = g("tb-hardlimits")    ? g("tb-hardlimits").value.trim()    : (_tb.hardlimits||"");
   if(!_tb.region){ alert("Please enter where you\u2019re going."); return; }
-  renderTripStep2();
+  findCandidates();
 }
 
 function renderTripStep2(){
@@ -2976,7 +3045,7 @@ function openGradientConversation(){
     +'</div>'
     +'<div class="tb-footer">'
     +'<button class="tb-btn-primary" onclick="submitGradientConversation()">Find places at the right distance \u2192</button>'
-    +'<div class="tb-btn-back" style="margin-top:8px;" onclick="renderTripStep2()">\u2190 Back</div>'
+    +'<div class="tb-btn-back" style="margin-top:8px;" onclick="renderTripStep1Recognition()">\u2190 Back</div>'
     +'</div>';
 }
 
