@@ -641,6 +641,11 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .tb-field input:focus,.tb-field textarea:focus{outline:none;border-color:#999;}
 .tb-field input::placeholder,.tb-field textarea::placeholder{color:#ccc;}
 .tb-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px;}
+.tb-sentence{padding:10px 14px;border:1px solid #ddd;border-radius:8px;margin-bottom:8px;cursor:pointer;background:#fff;transition:border-color 0.15s,background 0.15s;}
+.tb-sentence.on{border-color:#111;background:#f0f0f0;}
+.tb-sentence-label{font-size:12px;font-weight:600;color:#111;margin-bottom:2px;}
+.tb-sentence-sub{font-size:10px;color:#888;line-height:1.4;}
+.tb-sentences{margin-top:4px;}
 .tb-toggle{display:inline-block;padding:2px 10px;border-radius:10px;border:1px solid #ccc;font-size:10px;cursor:pointer;color:#777;background:#fff;user-select:none;}
 .tb-toggle.on{background:#111;color:#fff;border-color:#111;}
 .tb-tag{font-size:10px;padding:3px 9px;border-radius:20px;border:1px solid #ddd;background:#fff;cursor:pointer;color:#555;}
@@ -2290,6 +2295,9 @@ async function runCandidateSearch(requiredPlaces) {
     + (_tb.intent        ? "\nWhat they want: " + _tb.intent        : "")
     + (_tb.interests&&_tb.interests.length ? "\nAlso interested in: " + _tb.interests.join(", ") : "")
     + (_tb.anchors       ? "\nMust-dos: "       + _tb.anchors       : "")
+    + (_tb.drivers&&_tb.drivers.length ? "\nWhat\'s driving this trip: " + _tb.drivers.join(", ") : "")
+    + (_tb.familiarity   ? "\nFamiliarity with destination: " + _tb.familiarity : "")
+    + (_tb.gradient      ? "\nWhat \'different\' means to them: " + _tb.gradient : "")
     + (_tb.flexibilityNotes&&_tb.flexibilityNotes.length ? "\nSCHEDULING NOTES: " + _tb.flexibilityNotes.join("; ") : "");
 
   // For complex multi-country trips, run both calls in parallel
@@ -2844,28 +2852,83 @@ function goToTripStep2(){
 function renderTripStep2(){
   var ov=g("trip-brief-overlay"); ov.className="tb-overlay";
   ov.style.cssText="position:fixed;inset:0;background:#f7f7f5;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
-  var tags=["see great art & museums","dig into history","eat and drink well","hike in nature","explore architecture","enjoy nightlife & music","get to the beach","get into the mountains","see spectacular scenery","visit magnificent gardens","explore small towns","slow down & recharge","take great photos","do something adventurous"];
-  var tagsHtml=tags.map(function(t){
-    var on=(_tb.interests||[]).indexOf(t)>-1;
-    return '<div class="tb-tag'+(on?' on':'')+'" data-tag="'+t+'" onclick="toggleTag(this)">'+t+'</div>';
+
+  // Sentence starters
+  var sentences = [
+    {id:"narrative",  label:"“I’ve always wanted to…”",      sub:"A stored intention finally becoming a trip"},
+    {id:"doing",      label:"“I want to do…”",                     sub:"An experience that requires participation — moving, making, attending"},
+    {id:"seeing",     label:"“I want to see…”",                    sub:"A place, a landscape, a work, a thing that already holds meaning"},
+    {id:"different",  label:"“I need something different…”",       sub:"Adjusting distance from your current life — direction before destination"},
+    {id:"relational", label:"“We should go somewhere that…”",      sub:"The people you’re with are shaping where you go"},
+    {id:"signal",     label:"“This would be amazing to have done…”", sub:"The trip matters partly because of what it means to have made it"}
+  ];
+  var drivers = _tb.drivers || [];
+  var sentHtml = sentences.map(function(s){
+    var on = drivers.indexOf(s.id) > -1;
+    return '<div class="tb-sentence'+(on?' on':'')+'" data-id="'+s.id+'" onclick="toggleSentence(this)">'+
+      '<div class="tb-sentence-label">'+s.label+'</div>'+
+      '<div class="tb-sentence-sub">'+s.sub+'</div>'+
+    '</div>';
   }).join("");
+
+  // Familiarity
+  var famOptions = [{id:"first",label:"First visit"},{id:"before",label:"Been before"},{id:"know",label:"Know it well"}];
+  var fam = _tb.familiarity || "";
+  var famHtml = famOptions.map(function(f){
+    var on = fam === f.id;
+    return '<span class="tb-toggle'+(on?' on':'')+'" onclick="_tb.familiarity=\"'+f.id+'\";renderTripStep2();">'+f.label+'</span>';
+  }).join("");
+
   ov.innerHTML='<div class="tb-header">'
     +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Step 2 of 2 \u00b7 What you want</div></div></div>'
-    +'<div class="tb-title">What do you want to see and do?</div>'
-    +'<div class="tb-sub">This is what drives the trip \u2014 the goals Max works toward.</div>'
+    +'<div class="tb-title">What’s the sentence that started this trip?</div>'
+    +'<div class="tb-sub">Select as many as apply. The way you say it reveals what’s actually driving the trip.</div>'
     +'</div>'
     +'<div class="tb-body">'
-    +'<div class="tb-field"><label>What are you looking for from this trip?</label><textarea id="tb-intent" rows="3" placeholder="e.g. Always wanted to ride the Glacier Express. Going with my partner for three weeks. Want a mix \u2014 big mountain scenery but also a city with good food and culture."></textarea><div style="font-size:10px;color:#aaa;margin-top:5px;">You don\u2019t need to have this figured out. Max will help you test it.</div></div>'
-    +'<div class="tb-field"><label>I also want to\u2026 <span style="font-weight:400;color:#aaa;">(optional)</span></label><div style="font-size:10px;color:#aaa;margin-bottom:6px;">Tap anything that matters for this trip</div><div class="tb-tags">'+tagsHtml+'</div></div>'
-    +'<div class="tb-field"><label>Must-dos or anchors <span style="font-weight:400;color:#aaa;">(optional)</span></label><input id="tb-anchors" value="'+(_tb.anchors||'')+'" placeholder="e.g. Vienna Philharmonic, Glacier Express\u2026" /></div>'
+
+    +'<div class="tb-field"><div class="tb-sentences">'+sentHtml+'</div></div>'
+
+    +'<div class="tb-field" id="gradient-field" style="'+(drivers.indexOf('different')>-1?'':\'display:none;')+'">'
+    +'<label>What does “different” mean for you right now?</label>'
+    +'<textarea id="tb-gradient" rows="3" placeholder="e.g. My life is loud and busy. I want quiet, slow, and warm. Not a beach resort — something real but simple.">'+((_tb.gradient)||'')+'</textarea>'
+    +'<div style="font-size:10px;color:#aaa;margin-top:4px;">Max will use this to find places at the right distance from your current life.</div></div>'
+
+    +'<div class="tb-field"><label>How familiar are you with this part of the world?</label>'
+    +'<div style="display:flex;gap:6px;margin-top:5px;">'+famHtml+'</div></div>'
+
+    +'<div class="tb-field"><label>Tell Max more <span style="font-weight:400;color:#aaa;">(optional)</span></label>'
+    +'<textarea id="tb-intent" rows="3" placeholder="e.g. Going with my partner for three weeks. Want a mix — big mountain scenery but also a city with real cultural depth.">'+(_tb.intent||'')+'</textarea>'
+    +'<div style="font-size:10px;color:#aaa;margin-top:4px;">You don’t need to have this figured out. Max will help you test it.</div></div>'
+
+    +'<div class="tb-field"><label>Must-dos or anchors <span style="font-weight:400;color:#aaa;">(optional)</span></label>'
+    +'<input id="tb-anchors" value="'+(_tb.anchors||'')+'" placeholder="e.g. Vienna Philharmonic, Glacier Express…" /></div>'
+
     +'</div>'
     +'<div class="tb-footer">'
-    +'<button class="tb-btn-primary" onclick="findCandidates()">Find candidate places \u2192</button>'
+    +'<button class="tb-btn-primary" onclick="saveStep2AndProceed()">Find candidate places \u2192</button>'
     +'<div style="display:flex;justify-content:space-between;margin-top:8px;">'
     +'<div class="tb-btn-back" onclick="renderTripBrief()">\u2190 Back</div>'
     +'<div style="font-size:10px;color:#aaa;cursor:pointer;" onclick="showBriefApiKeyForm()">\ud83d\udd11 Set API key</div>'
     +'</div>'
     +'</div>';
+}
+
+function toggleSentence(el){
+  var id = el.dataset.id;
+  _tb.drivers = _tb.drivers || [];
+  var idx = _tb.drivers.indexOf(id);
+  if(idx > -1) _tb.drivers.splice(idx,1); else _tb.drivers.push(id);
+  // Show/hide gradient field
+  var gf = g("gradient-field");
+  if(gf) gf.style.display = _tb.drivers.indexOf("different") > -1 ? "" : "none";
+  el.classList.toggle("on");
+}
+
+function saveStep2AndProceed(){
+  _tb.intent    = g("tb-intent")  ? g("tb-intent").value.trim()  : (_tb.intent||"");
+  _tb.anchors   = g("tb-anchors") ? g("tb-anchors").value.trim() : (_tb.anchors||"");
+  _tb.gradient  = g("tb-gradient")? g("tb-gradient").value.trim(): (_tb.gradient||"");
+  findCandidates();
 }
 function toggleTag(el){
   el.classList.toggle("on");
