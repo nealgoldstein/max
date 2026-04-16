@@ -641,6 +641,8 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .tb-field input:focus,.tb-field textarea:focus{outline:none;border-color:#999;}
 .tb-field input::placeholder,.tb-field textarea::placeholder{color:#ccc;}
 .tb-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px;}
+.tb-toggle{display:inline-block;padding:2px 10px;border-radius:10px;border:1px solid #ccc;font-size:10px;cursor:pointer;color:#777;background:#fff;user-select:none;}
+.tb-toggle.on{background:#111;color:#fff;border-color:#111;}
 .tb-tag{font-size:10px;padding:3px 9px;border-radius:20px;border:1px solid #ddd;background:#fff;cursor:pointer;color:#555;}
 .tb-tag.on{background:#111;color:#fff;border-color:#111;}
 .tb-footer{padding:14px 28px 20px;flex-shrink:0;border-top:1px solid #eee;background:#f7f7f5;}
@@ -2245,6 +2247,7 @@ function confirmMustDos() {
 async function runCandidateSearch(requiredPlaces) {
   _tb.region        = g("tb-region")        ? g("tb-region").value.trim()        : (_tb.region||"");
   _tb.duration      = g("tb-duration")      ? g("tb-duration").value.trim()      : (_tb.duration||"");
+  _tb.when          = g("tb-when")          ? g("tb-when").value.trim()          : (_tb.when||"");
   _tb.entry         = g("tb-entry")         ? g("tb-entry").value.trim()         : (_tb.entry||"");
   _tb.tbExit        = g("tb-exit")          ? g("tb-exit").value.trim()          : (_tb.tbExit||"");
   _tb.transport     = g("tb-transport")     ? g("tb-transport").value.trim()     : (_tb.transport||"");
@@ -2274,8 +2277,9 @@ async function runCandidateSearch(requiredPlaces) {
 
   var brief = "Region: " + (_tb.region||"")
     + (_tb.duration      ? "\nDuration: "      + _tb.duration      : "")
-    + (_tb.entry         ? "\nArrives: "        + _tb.entry         : "")
-    + (_tb.tbExit        ? "\nDeparts from: "   + _tb.tbExit        : "")
+    + (_tb.when         ? "\nWhen: "          + _tb.when          : "")
+    + (_tb.entry         ? "\nArrives: "        + _tb.entry + (_tb.entryFixed?" (fixed)":"") : "")
+    + (_tb.tbExit        ? "\nDeparts from: "   + _tb.tbExit + (_tb.exitFixed?" (fixed)":"")  : "")
     + (_tb.transport     ? "\nTransport: "      + _tb.transport     : "")
     + (_tb.accommodation ? "\nStays: "          + _tb.accommodation : "")
     + (_tb.pace          ? "\nPace: "           + _tb.pace          : "")
@@ -2786,12 +2790,25 @@ function renderTripBrief(){
     +'<div class="tb-body">'
     +'<div class="tb-field"><label>Where are you going?</label><input id="tb-region" placeholder="e.g. Central Europe, Swiss Alps, Japan\u2026" oninput="debouncedDestDesc(this.value)" /><div id="tb-dest-desc" class="tb-dest-desc"></div></div>'
     +'<div class="tb-field"><label>How long?</label><input id="tb-duration" placeholder="e.g. 10\u201314 days, three weeks\u2026" /></div>'
+    +'<div class="tb-field"><label>When do you want to travel?</label><input id="tb-when" placeholder="e.g. September\u2013October, shoulder season. Or: fixed dates Jun 12\u201328." /></div>'
     +'<div class="tb-field" style="display:flex;gap:8px;">'
-    +'<div style="flex:1"><label>Where do you arrive?</label><input id="tb-entry" placeholder="e.g. Zurich, London Heathrow\u2026" /></div>'
-    +'<div style="flex:1"><label>Where do you leave from?</label><input id="tb-exit" placeholder="e.g. Same place, Geneva, Rome\u2026" /></div>'
+    +'<div style="flex:1">'
+    +'<label>Where do you arrive?</label>'
+    +'<div style="display:flex;gap:5px;margin-bottom:5px;">'
+    +'<span class="tb-toggle'+(_tb.entryFixed?' on':'')+" onclick=\"_tb.entryFixed=true;var r=g('tb-region');if(r)_tb.region=r.value;renderTripBrief();\">Fixed</span>"
+    +'<span class="tb-toggle'+(!_tb.entryFixed?' on':'')+" onclick=\"_tb.entryFixed=false;var r=g('tb-region');if(r)_tb.region=r.value;renderTripBrief();\">Flexible</span>"
+    +'</div>'
+    +'<input id="tb-entry" value="'+(_tb.entry||'')+'" placeholder="'+(_tb.entryFixed?'e.g. Zurich \u2014 tickets already booked':'e.g. Probably Zurich or Geneva, open to what fits')+'" /></div>'
+    +'<div style="flex:1">'
+    +'<label>Where do you leave from?</label>'
+    +'<div style="display:flex;gap:5px;margin-bottom:5px;">'
+    +'<span class="tb-toggle'+(_tb.exitFixed?' on':'')+" onclick=\"_tb.exitFixed=true;var r=g('tb-region');if(r)_tb.region=r.value;renderTripBrief();\">Fixed</span>"
+    +'<span class="tb-toggle'+(!_tb.exitFixed?' on':'')+" onclick=\"_tb.exitFixed=false;var r=g('tb-region');if(r)_tb.region=r.value;renderTripBrief();\">Flexible</span>"
+    +'</div>'
+    +'<input id="tb-exit" value="'+(_tb.tbExit||'')+'" placeholder="'+(_tb.exitFixed?'e.g. Geneva \u2014 tickets already booked':'e.g. Same place, or wherever makes sense')+'" /></div>'
     +'</div>'
     +'<div class="tb-field"><label>How do you get around?</label><input id="tb-transport" placeholder="e.g. Trains and walking. Will take a taxi when needed. No car rentals." /></div>'
-    +'<div class="tb-field"><label>Where do you stay?</label><input id="tb-accommodation" placeholder="e.g. Apartments or small family hotels. En suite required. No hostels." /></div>'
+    +'<div class="tb-field"><label>Where do you stay?</label><input id="tb-accommodation" placeholder="e.g. Small family hotels, apartments, rooms in private homes. En suite required. No hostels, no shared bathrooms." /></div>'
     +'<div class="tb-field"><label>What\u2019s your pace?</label><input id="tb-pace" placeholder="e.g. Slow \u2014 two or three things a day, time to sit and watch the world." /></div>'
     +'<div class="tb-field"><label>Where will you compromise?</label><textarea id="tb-compromises" rows="3" placeholder="e.g. I\u2019d rather spend a full morning in one place than see three things quickly \u2014 but I\u2019ll move faster if something is genuinely unmissable. I won\u2019t rent a car just for convenience, but I would for something extraordinary."></textarea><div style="font-size:10px;color:#aaa;margin-top:4px;">Tell Max where your edges are, and where you\u2019ll bend.</div></div>'
     +'</div>'
@@ -2807,6 +2824,7 @@ function renderTripBrief(){
 function goToTripStep2(){
   _tb.region        = g("tb-region")        ? g("tb-region").value.trim()        : (_tb.region||"");
   _tb.duration      = g("tb-duration")      ? g("tb-duration").value.trim()      : (_tb.duration||"");
+  _tb.when          = g("tb-when")          ? g("tb-when").value.trim()          : (_tb.when||"");
   _tb.entry         = g("tb-entry")         ? g("tb-entry").value.trim()         : (_tb.entry||"");
   _tb.tbExit        = g("tb-exit")          ? g("tb-exit").value.trim()          : (_tb.tbExit||"");
   _tb.transport     = g("tb-transport")     ? g("tb-transport").value.trim()     : (_tb.transport||"");
