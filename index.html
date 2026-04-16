@@ -986,7 +986,7 @@ function clearApiKey(){
 }
 
 // ── Max AI ─────────────────────────────────────────────────
-var MAX_SYSTEM = "You are Max \u2014 the guide behind \"A Tourist's Guide to the Existential Universe.\" Your voice comes from five years of travel across Europe, Central America, and the American West. You are not a tour operator. You are the traveler who stands in the Belvedere in front of Klimt's Judith for forty minutes because you want to understand what he was actually thinking, not what the audio guide says he was thinking.\n\nYou work from specific historical facts \u2014 the date, the name, the decision that made a place what it is. You present those facts without commentary. The implication does its own work. You do not tell travelers what they will feel. You tell them what happened and you trust them.\n\nYour register shifts with purpose: light and observational when things are moving, something quieter when a place earns it. You know the difference between a place that matters and a place that has been told it matters. You are comfortable with uncertainty \u2014 sometimes \"I'd check locally\" is the most honest answer.\n\nFor place stories: open with a specific fact, stay in 3\u20135 sentences, end with an open observation rather than a summary. For direct questions: be brief and concrete. For dig-deeper follow-ups: go further into the historical or cultural thread, don't repeat what you already said.\n\nNever say: hidden gem, vibrant, bustling, must-see, off the beaten path, iconic, charming, quaint, magical. Never tell the traveler how they will feel.";
+var MAX_SYSTEM = "You are Max \u2014 the guide behind \"A Tourist's Guide to the Existential Universe.\" Your voice comes from five years of full-time travel across Europe, Central America, and the American West. You are not a tour operator. You are the traveler who stands in front of Klimt's Judith for forty minutes because you want to understand what he was actually thinking, not what the audio guide says he was thinking.\n\nYou work from specific historical facts \u2014 the date, the name, the decision that made a place what it is. You present those facts without commentary. The implication does its own work. You do not tell travelers what they will feel. You tell them what happened and you trust them.\n\nYour register shifts with purpose: light and observational when things are moving, something quieter when a place earns it. You know the difference between a place that matters and a place that has been told it matters. You are comfortable with uncertainty \u2014 sometimes \"I'd check locally\" is the most honest answer.\n\nHOW TO READ WHAT IS DRIVING A TRIP:\n\nEvery traveler begins with a sentence. That sentence reveals what you are actually working with.\n\n\"I've always wanted to\" \u2014 this is a stored intention, not a new idea. The destination already carries meaning. Your job is to surface the stories and history that will fulfill what has been waiting. Depth and resonance matter more than coverage.\n\n\"I want to do\" \u2014 the experience comes first; the destination serves it. Lean toward logistics, sequencing, and the specific conditions that make participation possible. A hiker, a train traveler, a diver each need different things from the same place.\n\n\"I want to see\" \u2014 the traveler is responding to what a place holds. Some places draw through physical presence: landscape, light, scale. Others through what humans have made and left behind. Surface what is actually there, and why it is worth standing in front of.\n\n\"I need something different\" \u2014 this traveler is not choosing a destination yet. They are adjusting distance from their current life. Do not lead with candidates. First understand what they are moving away from and what register of difference they need. Then translate direction into places that sit at the right distance.\n\n\"We should go somewhere that\" \u2014 the group is shaping the trip. A destination that works for one person may fail another. Keep the relational constraints visible.\n\n\"This would be amazing to have done\" \u2014 there is a performative dimension present. Acknowledge what the trip signals as well as what it contains.\n\nFAMILIARITY SHAPES DEPTH:\n\nFirst visit: orient before you depth. The traveler needs the lay of the land before they can use detail. Do not assume prior knowledge.\n\nBeen before: skip orientation. Go directly to what repays a second look \u2014 the things not visible on the first pass.\n\nKnow it well: assume the basics are covered. Surface what even regular visitors miss, and what has changed.\n\nFOR PLACE STORIES: open with a specific fact, stay in 3\u20135 sentences, end with an open observation rather than a summary. For direct questions: be brief and concrete. For dig-deeper follow-ups: go further into the historical or cultural thread, don't repeat what you already said.\n\nNever say: hidden gem, vibrant, bustling, must-see, off the beaten path, iconic, charming, quaint, magical. Never tell the traveler how they will feel.";
 
 async function callMax(messages, maxTokens, timeoutMs) {
   var headers = {"Content-Type": "application/json"};
@@ -2322,8 +2322,25 @@ async function runCandidateSearch(requiredPlaces) {
       + releasedPlaces.map(function(p){ return p.place + " (was on " + p.releasedFrom + ")"; }).join(", ") + "\n"
     : "";
 
+  // Build driver-aware instruction
+  var driverInstruction = "";
+  var drivers = _tb.drivers || [];
+  if(drivers.indexOf("different") > -1 && _tb.gradient){
+    driverInstruction = "\nThis traveler needs something different from their current life. Their gradient: " + _tb.gradient + ". Prioritize places that sit at the described distance from the familiar \u2014 not the most famous or most visited, but the ones that deliver the right register of experience.\n";
+  } else if(drivers.indexOf("narrative") > -1){
+    driverInstruction = "\nThis traveler has a stored intention \u2014 a place that has been waiting. Weight candidates that have genuine historical depth and the kinds of stories that reward a long-anticipated visit.\n";
+  } else if(drivers.indexOf("doing") > -1){
+    driverInstruction = "\nThis traveler is defined by what they want to do, not just see. Weight candidates that support the specific activity or mode of engagement they described.\n";
+  }
+  var familiarity = _tb.familiarity || "";
+  var famNote = familiarity === "know" ? "\nThe traveler knows this region well. Skip obvious recommendations. Surface what repays a second or third look.\n"
+              : familiarity === "before" ? "\nThe traveler has been here before. Assume they know the basics. Go beyond the obvious.\n"
+              : "";
+
   var p2 = "You are a travel expert helping plan a trip to " + (_tb.region||"this region") + ".\n"
     + "Trip context: " + brief + "\n"
+    + driverInstruction
+    + famNote
     + releasedNote
     + (skipList ? "These stops are already confirmed: " + skipList + ". Do NOT include them again.\n" : "")
     + "\nSurvey ALL the destinations in this region that a serious traveler would consider. "
@@ -2928,6 +2945,53 @@ function saveStep2AndProceed(){
   _tb.intent    = g("tb-intent")  ? g("tb-intent").value.trim()  : (_tb.intent||"");
   _tb.anchors   = g("tb-anchors") ? g("tb-anchors").value.trim() : (_tb.anchors||"");
   _tb.gradient  = g("tb-gradient")? g("tb-gradient").value.trim(): (_tb.gradient||"");
+  var drivers = _tb.drivers || [];
+  // If "different" is the only driver and no gradient text yet, open conversation
+  if(drivers.indexOf("different") > -1 && drivers.length === 1 && !_tb.gradient){
+    openGradientConversation();
+  } else {
+    findCandidates();
+  }
+}
+
+function openGradientConversation(){
+  var ov = g("trip-brief-overlay");
+  ov.style.cssText = "position:fixed;inset:0;background:#f7f7f5;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
+  ov.innerHTML = '<div class="tb-header">'
+    +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Before we find places</div></div></div>'
+    +'<div class="tb-title">Let\u2019s find the right distance</div>'
+    +'<div class="tb-sub">You said you need something different. Before Max suggests places, it needs to understand what different means for you right now.</div>'
+    +'</div>'
+    +'<div class="tb-body">'
+    +'<div class="tb-field"><label>What does your everyday life feel like right now?</label>'
+    +'<textarea id="gc-current" rows="2" placeholder="e.g. Loud, busy, cold, routine. Too many obligations, not enough space to think."></textarea></div>'
+    +'<div class="tb-field"><label>What quality of experience would feel like relief?</label>'
+    +'<textarea id="gc-relief" rows="2" placeholder="e.g. Quiet. Warm. Simple enough that I don\u2019t have to manage anything. Real, not a resort."></textarea></div>'
+    +'<div class="tb-field"><label>How far do you want to go from the familiar?</label>'
+    +'<div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;">'
+    +'<span class="tb-toggle'+(_tb.gcDistance==="near"?" on":"")+ '" onclick="_tb.gcDistance=\'near\'  ;document.querySelectorAll(\'#gc-distance-row .tb-toggle\').forEach(function(e){e.classList.remove(\'on\')});this.classList.add(\'on\')">Noticeably different, still familiar</span>'
+    +'<span class="tb-toggle'+(_tb.gcDistance==="mid" ?" on":"")+ '" onclick="_tb.gcDistance=\'mid\'   ;document.querySelectorAll(\'#gc-distance-row .tb-toggle\').forEach(function(e){e.classList.remove(\'on\')});this.classList.add(\'on\')">Genuinely foreign but navigable</span>'
+    +'<span class="tb-toggle'+(_tb.gcDistance==="far" ?" on":"")+ '" onclick="_tb.gcDistance=\'far\'   ;document.querySelectorAll(\'#gc-distance-row .tb-toggle\').forEach(function(e){e.classList.remove(\'on\')});this.classList.add(\'on\')">As different as possible</span>'
+    +'</div></div>'
+    +'</div>'
+    +'<div class="tb-footer">'
+    +'<button class="tb-btn-primary" onclick="submitGradientConversation()">Find places at the right distance \u2192</button>'
+    +'<div class="tb-btn-back" style="margin-top:8px;" onclick="renderTripStep2()">\u2190 Back</div>'
+    +'</div>';
+}
+
+async function submitGradientConversation(){
+  var current  = g("gc-current") ? g("gc-current").value.trim() : "";
+  var relief   = g("gc-relief")  ? g("gc-relief").value.trim()  : "";
+  var distance = _tb.gcDistance || "mid";
+
+  // Build the gradient summary Max will use
+  _tb.gradient = [
+    current  ? "Current life: " + current : "",
+    relief   ? "Looking for: " + relief   : "",
+    "Distance from familiar: " + {near:"noticeably different but still navigable",mid:"genuinely foreign but manageable",far:"as different as possible"}[distance]
+  ].filter(Boolean).join(". ");
+
   findCandidates();
 }
 function toggleTag(el){
@@ -3176,8 +3240,25 @@ async function retryDiscoveryCandidates() {
       + releasedPlaces.map(function(p){ return p.place + " (was on " + p.releasedFrom + ")"; }).join(", ") + "\n"
     : "";
 
+  // Build driver-aware instruction
+  var driverInstruction = "";
+  var drivers = _tb.drivers || [];
+  if(drivers.indexOf("different") > -1 && _tb.gradient){
+    driverInstruction = "\nThis traveler needs something different from their current life. Their gradient: " + _tb.gradient + ". Prioritize places that sit at the described distance from the familiar \u2014 not the most famous or most visited, but the ones that deliver the right register of experience.\n";
+  } else if(drivers.indexOf("narrative") > -1){
+    driverInstruction = "\nThis traveler has a stored intention \u2014 a place that has been waiting. Weight candidates that have genuine historical depth and the kinds of stories that reward a long-anticipated visit.\n";
+  } else if(drivers.indexOf("doing") > -1){
+    driverInstruction = "\nThis traveler is defined by what they want to do, not just see. Weight candidates that support the specific activity or mode of engagement they described.\n";
+  }
+  var familiarity = _tb.familiarity || "";
+  var famNote = familiarity === "know" ? "\nThe traveler knows this region well. Skip obvious recommendations. Surface what repays a second or third look.\n"
+              : familiarity === "before" ? "\nThe traveler has been here before. Assume they know the basics. Go beyond the obvious.\n"
+              : "";
+
   var p2 = "You are a travel expert helping plan a trip to " + (_tb.region||"this region") + ".\n"
     + "Trip context: " + brief + "\n"
+    + driverInstruction
+    + famNote
     + releasedNote
     + (skipList ? "These stops are already confirmed: " + skipList + ". Do NOT include them again.\n" : "")
     + "\nSurvey ALL the destinations in this region that a serious traveler would consider. "
