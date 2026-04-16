@@ -856,6 +856,7 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
       </div>
       <div style="display:flex;gap:5px;align-items:center;flex-shrink:0;">
         <button class="file-btn" onclick="goHome()" title="All trips">&larr; Home</button>
+        <button class="file-btn" onclick="editConstraints()" title="Edit how you travel">&#9998; Constraints</button>
         <button class="file-btn" onclick="saveTrip()">Save</button>
         <button class="file-btn" onclick="showLogisticsScreen()" title="Arrival, departure &amp; transport">&#9992; Getting there</button>
         <button class="file-btn" id="api-key-btn" onclick="showApiKeyForm()" title="Set API key" style="opacity:0.6;">&#x1F511;</button>
@@ -2865,6 +2866,179 @@ function toggleTag(el){
   var tag=el.dataset.tag;
   var idx=_tb.interests.indexOf(tag);
   if(idx>-1) _tb.interests.splice(idx,1); else _tb.interests.push(tag);
+}
+
+
+// ── EDIT CONSTRAINTS (re-open Step 1 from within planning) ─────────────────
+
+function editConstraints(){
+  // Snapshot current values before editing
+  _tb._snapshot = {
+    region:_tb.region||"", duration:_tb.duration||"", when:_tb.when||"",
+    entry:_tb.entry||"", tbExit:_tb.tbExit||"",
+    entryFixed:!!_tb.entryFixed, exitFixed:!!_tb.exitFixed,
+    transport:_tb.transport||"", accommodation:_tb.accommodation||"",
+    pace:_tb.pace||"", compromises:_tb.compromises||""
+  };
+  _tb._editMode = true;
+  var ov = g("trip-brief-overlay");
+  if(ov){ ov.style.display="block"; renderTripBriefEdit(); }
+}
+
+function renderTripBriefEdit(){
+  // Same as renderTripBrief but CTA goes to previewConstraintChanges
+  var ov=g("trip-brief-overlay"); ov.className="tb-overlay";
+  ov.innerHTML='<div class="tb-header">'
+    +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Edit constraints</div></div></div>'
+    +'<div class="tb-title">How you travel</div>'
+    +'<div class="tb-sub">Make changes below. Max will show you what needs to be revisited before anything is applied.</div>'
+    +'</div>'
+    +'<div class="tb-body">'
+    +'<div class="tb-field"><label>Where are you going?</label><input id="tb-region" value="'+(_tb.region||'')+'" placeholder="e.g. Central Europe, Swiss Alps, Japan\u2026" /></div>'
+    +'<div class="tb-field"><label>How long?</label><input id="tb-duration" value="'+(_tb.duration||'')+'" placeholder="e.g. 10\u201314 days, three weeks\u2026" /></div>'
+    +'<div class="tb-field"><label>When do you want to travel?</label><input id="tb-when" value="'+(_tb.when||'')+'" placeholder="e.g. September\u2013October, shoulder season." /></div>'
+    +'<div class="tb-field" style="display:flex;gap:8px;">'
+    +'<div style="flex:1"><label>Where do you arrive?</label>'
+    +'<div style="display:flex;gap:5px;margin-bottom:5px;">'
+    +'<span class="tb-toggle'+(_tb.entryFixed?' on':'')+'" onclick="_tb.entryFixed=true;renderTripBriefEdit();">Fixed</span>'
+    +'<span class="tb-toggle'+(!_tb.entryFixed?' on':'')+'" onclick="_tb.entryFixed=false;renderTripBriefEdit();">Flexible</span>'
+    +'</div>'
+    +'<input id="tb-entry" value="'+(_tb.entry||'')+'" placeholder="'+(_tb.entryFixed?'e.g. Zurich \u2014 tickets already booked':'e.g. Probably Zurich or Geneva, open to what fits')+'" /></div>'
+    +'<div style="flex:1"><label>Where do you leave from?</label>'
+    +'<div style="display:flex;gap:5px;margin-bottom:5px;">'
+    +'<span class="tb-toggle'+(_tb.exitFixed?' on':'')+'" onclick="_tb.exitFixed=true;renderTripBriefEdit();">Fixed</span>'
+    +'<span class="tb-toggle'+(!_tb.exitFixed?' on':'')+'" onclick="_tb.exitFixed=false;renderTripBriefEdit();">Flexible</span>'
+    +'</div>'
+    +'<input id="tb-exit" value="'+(_tb.tbExit||'')+'" placeholder="'+(_tb.exitFixed?'e.g. Geneva \u2014 tickets already booked':'e.g. Same place, or wherever makes sense')+'" /></div>'
+    +'</div>'
+    +'<div class="tb-field"><label>How do you get around?</label><input id="tb-transport" value="'+(_tb.transport||'')+'" placeholder="e.g. Trains and walking. No car rentals." /></div>'
+    +'<div class="tb-field"><label>Where do you stay?</label><input id="tb-accommodation" value="'+(_tb.accommodation||'')+'" placeholder="e.g. Small family hotels, apartments, rooms in private homes. En suite required." /></div>'
+    +'<div class="tb-field"><label>What\u2019s your pace?</label><input id="tb-pace" value="'+(_tb.pace||'')+'" placeholder="e.g. Slow \u2014 two or three things a day." /></div>'
+    +'<div class="tb-field"><label>Where will you compromise?</label><textarea id="tb-compromises" rows="3">'+(_tb.compromises||'')+'</textarea></div>'
+    +'</div>'
+    +'<div class="tb-footer">'
+    +'<button class="tb-btn-primary" onclick="previewConstraintChanges()">Preview changes \u2192</button>'
+    +'<div style="display:flex;justify-content:space-between;margin-top:8px;">'
+    +'<div class="tb-btn-back" onclick="cancelEditConstraints()">\u2190 Cancel</div>'
+    +'</div>'
+    +'</div>';
+}
+
+function cancelEditConstraints(){
+  // Restore snapshot, close overlay
+  if(_tb._snapshot){ Object.assign(_tb, _tb._snapshot); }
+  _tb._editMode = false;
+  g("trip-brief-overlay").style.display="none";
+}
+
+async function previewConstraintChanges(){
+  // Read new values
+  var nw = {
+    region:        g("tb-region")        ? g("tb-region").value.trim()        : (_tb.region||""),
+    duration:      g("tb-duration")      ? g("tb-duration").value.trim()      : (_tb.duration||""),
+    when:          g("tb-when")          ? g("tb-when").value.trim()          : (_tb.when||""),
+    entry:         g("tb-entry")         ? g("tb-entry").value.trim()         : (_tb.entry||""),
+    tbExit:        g("tb-exit")          ? g("tb-exit").value.trim()          : (_tb.tbExit||""),
+    entryFixed:    !!_tb.entryFixed,
+    exitFixed:     !!_tb.exitFixed,
+    transport:     g("tb-transport")     ? g("tb-transport").value.trim()     : (_tb.transport||""),
+    accommodation: g("tb-accommodation") ? g("tb-accommodation").value.trim() : (_tb.accommodation||""),
+    pace:          g("tb-pace")          ? g("tb-pace").value.trim()          : (_tb.pace||""),
+    compromises:   g("tb-compromises")   ? g("tb-compromises").value.trim()   : (_tb.compromises||"")
+  };
+  var snap = _tb._snapshot || {};
+
+  // Build diff
+  var labels = {
+    region:"Destination scope", duration:"Duration", when:"When",
+    entry:"Arrival point", tbExit:"Departure point",
+    entryFixed:"Arrival (fixed vs flexible)", exitFixed:"Departure (fixed vs flexible)",
+    transport:"Transport", accommodation:"Accommodation",
+    pace:"Pace", compromises:"Compromises"
+  };
+  var diffs = [];
+  Object.keys(labels).forEach(function(k){
+    var ov = k==="entryFixed"||k==="exitFixed" ? (snap[k]?"Fixed":"Flexible") : (snap[k]||"");
+    var nv = k==="entryFixed"||k==="exitFixed" ? (nw[k]?"Fixed":"Flexible")   : (nw[k]||"");
+    if(ov !== nv) diffs.push({field:labels[k], from:ov||"(not set)", to:nv||"(not set)"});
+  });
+
+  if(diffs.length === 0){
+    cancelEditConstraints();
+    return;
+  }
+
+  // Store pending changes
+  _tb._pending = nw;
+
+  // Show loading state
+  var ov = g("trip-brief-overlay");
+  ov.innerHTML = '<div class="tb-overlay-inner" style="padding:32px 28px;text-align:center;">'
+    +'<div style="font-size:13px;font-weight:600;margin-bottom:8px;">Analysing changes\u2026</div>'
+    +'<div style="font-size:11px;color:#aaa;">Max is working out what needs to be revisited.</div>'
+    +'</div>';
+
+  // Build trip context summary
+  var destNames = (trip.destinations||[]).map(function(d){ return d.city+(d.country?", "+d.country:""); }).join("; ");
+  var diffText = diffs.map(function(d){ return d.field+": \u201c"+d.from+"\u201d \u2192 \u201c"+d.to+"\u201d"; }).join("\n");
+
+  var prompt = "A traveler is updating their trip constraints mid-planning. Here are the changes they made:\n\n"
+    + diffText + "\n\n"
+    + "Current trip destinations: " + (destNames||"none confirmed yet") + "\n"
+    + "Trip name: " + (trip.name||"") + "\n\n"
+    + "Analyse the impact of these changes on the current trip. Be specific and concrete:\n"
+    + "- Which destinations or plans are directly affected?\n"
+    + "- What are definite conflicts (things that must change)?\n"
+    + "- What are flags worth checking (things that may need revisiting)?\n"
+    + "- What stays fine as-is?\n\n"
+    + "Be brief and direct. Use plain language, no bullet-point headers. 3\u20135 short paragraphs maximum. "
+    + "End with a single sentence summarising whether the changes are minor or require significant replanning.";
+
+  var analysis = "";
+  try {
+    analysis = await callMax([{role:"user", content:prompt}], 600);
+  } catch(e) {
+    analysis = "Could not reach Max to analyse changes. You can still apply them manually.";
+  }
+
+  showConstraintConfirmation(diffs, analysis, nw);
+}
+
+function showConstraintConfirmation(diffs, analysis, pendingValues){
+  var ov = g("trip-brief-overlay");
+  var diffHtml = diffs.map(function(d){
+    return '<div style="margin-bottom:8px;">'
+      +'<div style="font-size:10px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:0.05em;">'+d.field+'</div>'
+      +'<div style="font-size:11px;color:#999;text-decoration:line-through;">'+d.from+'</div>'
+      +'<div style="font-size:11px;color:#111;">'+d.to+'</div>'
+      +'</div>';
+  }).join("");
+
+  ov.innerHTML = '<div class="tb-header">'
+    +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Review changes</div></div></div>'
+    +'<div class="tb-title">Here\u2019s what changes</div>'
+    +'<div class="tb-sub">Review Max\u2019s analysis before confirming.</div>'
+    +'</div>'
+    +'<div class="tb-body">'
+    +'<div style="background:#f7f7f7;border-radius:7px;padding:14px 16px;margin-bottom:16px;">'+diffHtml+'</div>'
+    +'<div style="font-size:12px;line-height:1.7;color:#333;white-space:pre-wrap;border-left:3px solid #ddd;padding-left:14px;">'+analysis+'</div>'
+    +'</div>'
+    +'<div class="tb-footer">'
+    +'<button class="tb-btn-primary" onclick="applyConstraintChanges()">Yes, apply these changes</button>'
+    +'<div class="tb-btn-back" style="margin-top:10px;" onclick="renderTripBriefEdit()">\u2190 Go back and edit</div>'
+    +'</div>';
+}
+
+function applyConstraintChanges(){
+  var p = _tb._pending;
+  if(!p) return;
+  Object.assign(_tb, p);
+  _tb._editMode = false;
+  _tb._snapshot = null;
+  _tb._pending = null;
+  g("trip-brief-overlay").style.display="none";
+  autoSave();
+  showSaveStatus("Constraints updated", 3000);
 }
 
 function cancelTripBrief(){
