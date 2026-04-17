@@ -2533,8 +2533,8 @@ function showLogisticsScreen() {
 
   ov.innerHTML = '<div class="log-header">'
     + '<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="log-step">Logistics</div></div></div>'
-    + '<div class="log-title" style="margin-top:8px;">How are you getting there?</div>'
-    + '<div class="log-sub">This helps Max sequence your stops and suggest how to get between them. Skip if you haven\u2019t decided yet.</div>'
+    + '<div class="log-title" style="margin-top:8px;">How are you getting to '+(_tb.entry||_tb.region||'your first stop')+'?</div>'
+    + '<div class="log-sub">These are the concrete details: airports, dates, car rentals. Max will use these to sequence things and suggest how to connect stops.</div>'
     + '</div>'
     + '<div class="log-body">'
 
@@ -2542,7 +2542,7 @@ function showLogisticsScreen() {
     + '<div class="log-section">'
     + '<div class="log-section-title">Arrival</div>'
     + '<div class="log-row">'
-    + '<div class="log-field"><label>Flying into</label><input id="log-arr-city" placeholder="e.g. Zurich" /></div>'
+    + '<div class="log-field"><label>Flying into</label><input id="log-arr-city" value="'+((_tb.entry&&_tb.entryFixed)?_tb.entry:'')+'" placeholder="'+(_tb.entry||'e.g. Zurich')+'" /></div>'
     + '<div class="log-field"><label>Date</label><input id="log-arr-date" type="date" value="' + tripStart + '" /></div>'
     + '</div></div>'
 
@@ -2552,13 +2552,14 @@ function showLogisticsScreen() {
     + '<label class="log-same-dep"><input type="checkbox" id="log-same-dep" onchange="toggleSameDep(this)" checked /> Same city as arrival</label>'
     + '<div id="log-dep-fields" style="display:none;">'
     + '<div class="log-row">'
-    + '<div class="log-field"><label>Flying out of</label><input id="log-dep-city" placeholder="e.g. Geneva" /></div>'
+    + '<div class="log-field"><label>Flying out of</label><input id="log-dep-city" value="'+((_tb.tbExit&&_tb.exitFixed)?_tb.tbExit:'')+'" placeholder="'+(_tb.tbExit||'e.g. Geneva')+'" /></div>'
     + '<div class="log-field"><label>Date</label><input id="log-dep-date" type="date" value="' + tripEnd + '" /></div>'
     + '</div></div></div>'
 
     // Ground transport
     + '<div class="log-section">'
-    + '<div class="log-section-title">Getting around</div>'
+    + '<div class="log-section-title">Connecting between stops</div>'
+    + (_tb.transport ? '<div style="font-size:11px;color:#888;margin-bottom:8px;font-style:italic;">You told Max: \u201c'+(_tb.transport)+'\u201d</div>' : '')
     + '<div class="log-transport-opts">'
     + '<div class="log-transport-opt on" id="log-t-rail" onclick="setTransport(\'rail\')">🚆 Train / transit</div>'
     + '<div class="log-transport-opt" id="log-t-car" onclick="setTransport(\'car\')">🚗 Rental car</div>'
@@ -2989,14 +2990,14 @@ function renderTripBrief(){
     +'<span class="tb-toggle'+(_tb.entryFixed?' on':'')+" onclick=\"toggleEntryExit('entry',true)\">Fixed</span>"
     +'<span class="tb-toggle'+(!_tb.entryFixed?' on':'')+" onclick=\"toggleEntryExit('entry',false)\">Flexible</span>"
     +'</div>'
-    +'<input id="tb-entry" value="'+(_tb.entry||'')+'" placeholder="'+(_tb.entryFixed?'e.g. Zurich \u2014 tickets already booked':'e.g. Probably Zurich or Geneva, open to what fits')+'" /></div>'
+    +'<input id="tb-entry" value="'+(_tb.entry||'')+'" oninput="if(this.value.trim().length>0 && !_tb.entryFixed){toggleEntryExit(\'entry\',true);}" placeholder="'+(_tb.entryFixed?'e.g. Zurich \u2014 tickets already booked':'e.g. Probably Zurich or Geneva, open to what fits')+'" /></div>'
     +'<div style="flex:1">'
     +'<label>Where will you depart from?</label>'
     +'<div id="exit-toggles" style="display:flex;gap:5px;margin-bottom:5px;">'
     +'<span class="tb-toggle'+(_tb.exitFixed?' on':'')+" onclick=\"toggleEntryExit('exit',true)\">Fixed</span>"
     +'<span class="tb-toggle'+(!_tb.exitFixed?' on':'')+" onclick=\"toggleEntryExit('exit',false)\">Flexible</span>"
     +'</div>'
-    +'<input id="tb-exit" value="'+(_tb.tbExit||'')+'" placeholder="'+(_tb.exitFixed?'e.g. Geneva \u2014 tickets already booked':'e.g. Same place, or wherever makes sense')+'" /></div>'
+    +'<input id="tb-exit" value="'+(_tb.tbExit||'')+'" oninput="if(this.value.trim().length>0 && !_tb.exitFixed){toggleEntryExit(\'exit\',true);}" placeholder="'+(_tb.exitFixed?'e.g. Geneva \u2014 tickets already booked':'e.g. Same place, or wherever makes sense')+'" /></div>'
     +'</div>'
     +'<div class="tb-field"><label>How do you want to get around?</label><input id="tb-transport" placeholder="e.g. Trains and walking. Will take a taxi when needed. No car rentals." /></div>'
     +'<div class="tb-field"><label>In approximate order of preference, what kinds of places do you want to stay in?</label><input id="tb-accommodation" placeholder="e.g. Small family hotels, apartments, rooms in private homes. En suite required. No hostels, no shared bathrooms." /></div>'
@@ -3194,13 +3195,13 @@ function renderTripBriefEdit(){
     +'<span class="tb-toggle'+(_tb.entryFixed?' on':'')+'" onclick="_tb.entryFixed=true;renderTripBriefEdit();">Fixed</span>'
     +'<span class="tb-toggle'+(!_tb.entryFixed?' on':'')+'" onclick="_tb.entryFixed=false;renderTripBriefEdit();">Flexible</span>'
     +'</div>'
-    +'<input id="tb-entry" value="'+(_tb.entry||'')+'" placeholder="'+(_tb.entryFixed?'e.g. Zurich \u2014 tickets already booked':'e.g. Probably Zurich or Geneva, open to what fits')+'" /></div>'
+    +'<input id="tb-entry" value="'+(_tb.entry||'')+'" oninput="if(this.value.trim().length>0 && !_tb.entryFixed){toggleEntryExit(\'entry\',true);}" placeholder="'+(_tb.entryFixed?'e.g. Zurich \u2014 tickets already booked':'e.g. Probably Zurich or Geneva, open to what fits')+'" /></div>'
     +'<div style="flex:1"><label>Where will you depart from?</label>'
     +'<div style="display:flex;gap:5px;margin-bottom:5px;">'
     +'<span class="tb-toggle'+(_tb.exitFixed?' on':'')+'" onclick="_tb.exitFixed=true;renderTripBriefEdit();">Fixed</span>'
     +'<span class="tb-toggle'+(!_tb.exitFixed?' on':'')+'" onclick="_tb.exitFixed=false;renderTripBriefEdit();">Flexible</span>'
     +'</div>'
-    +'<input id="tb-exit" value="'+(_tb.tbExit||'')+'" placeholder="'+(_tb.exitFixed?'e.g. Geneva \u2014 tickets already booked':'e.g. Same place, or wherever makes sense')+'" /></div>'
+    +'<input id="tb-exit" value="'+(_tb.tbExit||'')+'" oninput="if(this.value.trim().length>0 && !_tb.exitFixed){toggleEntryExit(\'exit\',true);}" placeholder="'+(_tb.exitFixed?'e.g. Geneva \u2014 tickets already booked':'e.g. Same place, or wherever makes sense')+'" /></div>'
     +'</div>'
     +'<div class="tb-field"><label>How do you want to get around?</label><input id="tb-transport" value="'+(_tb.transport||'')+'" placeholder="e.g. Trains and walking. No car rentals." /></div>'
     +'<div class="tb-field"><label>In approximate order of preference, what kinds of places do you want to stay in?</label><input id="tb-accommodation" value="'+(_tb.accommodation||'')+'" placeholder="e.g. Small family hotels, apartments, rooms in private homes. En suite required." /></div>'
