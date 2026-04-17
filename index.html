@@ -1994,9 +1994,10 @@ function showHomeApiKeyForm(){
 var _mdcItems = [];
 
 async function expandMustDos() {
-  var anchors = g("tb-anchors") ? g("tb-anchors").value.trim() : "";
-  var region = g("tb-region") ? g("tb-region").value.trim() : "";
-  var intent = g("tb-intent") ? g("tb-intent").value.trim() : "";
+  // Pull from DOM if present, fall back to _tb state (fields may not exist in current step)
+  var anchors = (g("tb-anchors") ? g("tb-anchors").value.trim() : "") || _tb.anchors || "";
+  var region  = (g("tb-region")  ? g("tb-region").value.trim()  : "") || _tb.region  || "";
+  var intent  = (g("tb-intent")  ? g("tb-intent").value.trim()  : "") || _tb.intent  || _tb.tripSentence || "";
 
   // No must-dos — skip straight to candidates
   if (!anchors) { runCandidateSearch([]); return; }
@@ -2685,25 +2686,27 @@ function showLogisticsScreen() {
   ov.innerHTML = '<div class="log-header">'
     + '<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="log-step">Logistics</div></div></div>'
     + '<div class="log-title" style="margin-top:8px;">How are you getting to '+(_tb.entry||_tb.region||'your first stop')+'?</div>'
-    + '<div class="log-sub">These are the concrete details: airports, dates, car rentals. Max will use these to sequence things and suggest how to connect stops.</div>'
+    + '<div class="log-sub">Max has what you told him earlier. This is where the concrete details go \u2014 dates, specific airports if different, rental periods.</div>'
     + '</div>'
     + '<div class="log-body">'
 
     // Arrival
     + '<div class="log-section">'
     + '<div class="log-section-title">Arrival</div>'
+    + (_tb.entry ? '<div style="font-size:11px;color:#888;margin-bottom:8px;font-style:italic;">You told Max you\u2019ll arrive in \u201c'+_tb.entry+'\u201d'+(_tb.entryFixed?' (fixed).':' (flexible).')+'</div>' : '')
     + '<div class="log-row">'
-    + '<div class="log-field"><label>Flying into</label><input id="log-arr-city" value="'+((_tb.entry&&_tb.entryFixed)?_tb.entry:'')+'" placeholder="'+(_tb.entry||'e.g. Zurich')+'" /></div>'
+    + '<div class="log-field"><label>Flying into</label><input id="log-arr-city" value="'+(_tb.entry||'')+'" placeholder="e.g. Zurich" /></div>'
     + '<div class="log-field"><label>Date</label><input id="log-arr-date" type="date" value="' + tripStart + '" /></div>'
     + '</div></div>'
 
     // Departure
     + '<div class="log-section">'
     + '<div class="log-section-title">Departure</div>'
-    + '<label class="log-same-dep"><input type="checkbox" id="log-same-dep" onchange="toggleSameDep(this)" checked /> Same city as arrival</label>'
-    + '<div id="log-dep-fields" style="display:none;">'
+    + (_tb.tbExit ? '<div style="font-size:11px;color:#888;margin-bottom:8px;font-style:italic;">You told Max you\u2019ll depart from \u201c'+_tb.tbExit+'\u201d'+(_tb.exitFixed?' (fixed).':' (flexible).')+'</div>' : '')
+    + '<label class="log-same-dep"><input type="checkbox" id="log-same-dep" onchange="toggleSameDep(this)" '+((_tb.entry && _tb.tbExit && _tb.entry===_tb.tbExit)?'checked':'')+' /> Same city as arrival</label>'
+    + '<div id="log-dep-fields" style="display:'+((_tb.entry && _tb.tbExit && _tb.entry!==_tb.tbExit)?'block':'none')+';">'
     + '<div class="log-row">'
-    + '<div class="log-field"><label>Flying out of</label><input id="log-dep-city" value="'+((_tb.tbExit&&_tb.exitFixed)?_tb.tbExit:'')+'" placeholder="'+(_tb.tbExit||'e.g. Geneva')+'" /></div>'
+    + '<div class="log-field"><label>Flying out of</label><input id="log-dep-city" value="'+(_tb.tbExit||'')+'" placeholder="e.g. Geneva" /></div>'
     + '<div class="log-field"><label>Date</label><input id="log-dep-date" type="date" value="' + tripEnd + '" /></div>'
     + '</div></div></div>'
 
