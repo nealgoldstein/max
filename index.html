@@ -3029,9 +3029,25 @@ function saveRecognitionAndContinue(){
   if(_tb.chips && _tb.chips.length) parts.push("Also interested in: " + _tb.chips.join(", "));
   _tb.intent = parts.join(". ");
 
-  // Extract region from sentence for downstream use: "I want to go to X in order to Y"
-  var m = (_tb.tripSentence||"").match(/^\s*i\s+want\s+to\s+go\s+to\s+([^,\.;]+?)(?:\s+in\s+order\s+to|\s*$)/i);
-  if(m && m[1]) _tb.region = m[1].trim();
+  // Extract region from sentence — try multiple patterns
+  var s = _tb.tripSentence || "";
+  var m;
+  // Pattern 1: "I want to go to X in order to..."
+  m = s.match(/^\s*i\s+want\s+to\s+go\s+to\s+([^,\.;]+?)(?:\s+in\s+order\s+to|\s+to\s+|\s*[,.;]|\s*$)/i);
+  if(!m){
+    // Pattern 2: "I want to go to X for..." / "I want to go to X,"
+    m = s.match(/^\s*i\s+want\s+to\s+go\s+to\s+([^,\.;]+?)(?:\s+for\s+|\s*[,.;]|\s*$)/i);
+  }
+  if(!m){
+    // Pattern 3: "going to X" / "travel to X" / "trip to X"
+    m = s.match(/(?:going|traveling|travel|trip|heading)\s+to\s+([^,\.;]+?)(?:\s+(?:in\s+order\s+to|to|for|because)|\s*[,.;]|\s*$)/i);
+  }
+  if(m && m[1]){
+    _tb.region = m[1].trim();
+  } else if(!_tb.region){
+    // Fallback: use the whole sentence (truncated if long) as the region context
+    _tb.region = s.length > 60 ? s.substring(0, 60).trim() + "\u2026" : s;
+  }
 
   if(!_tb.tripSentence){
     maxAlert("Please describe where you want to go and what you want to do there.");
@@ -3067,7 +3083,7 @@ function renderTripBrief(){
   ov.innerHTML='<div class="tb-header">'
     +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Step 2 of 2</div></div></div>'
     +'<div class="tb-title">A few things Max needs to know about how you want to travel</div>'
-    +'<div class="tb-sub" id="tb-scope-sub">While traveling in <strong>'+(_tb.region||'this region')+'</strong>, Max needs to know how you\u2019ll move through it.</div>'
+    +'<div class="tb-sub" id="tb-scope-sub">'+(_tb.region ? 'While traveling in <strong>'+_tb.region+'</strong>, Max needs to know how you\u2019ll move through it.' : 'Max needs to know how you\u2019ll move through it.')+'</div>'
     +'</div>'
     +'<div class="tb-body">'
     
