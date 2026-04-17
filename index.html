@@ -828,21 +828,19 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
       <div class="hs-section-lbl">Your trips</div>
       <div class="trip-cards" id="trip-cards"></div>
     </div>
-    <div id="new-trip-form" style="display:none;">
+    <div id="new-trip-form" style="margin-top:12px;">
       <div class="new-trip-form">
-        <div class="ntp-lbl">Trip name</div>
-        <input class="ntp-inp" id="ntp-name" placeholder="e.g. Europe 2026" oninput="g('ntp-create').disabled=this.value.trim().length<2;" onkeydown="if(event.key==='Enter')showTripBrief();"/>
+        <div class="ntp-lbl" id="ntp-lbl">Start a new trip</div>
+        <input class="ntp-inp" id="ntp-name" placeholder="Name this trip — e.g. Switzerland 2026" oninput="g('ntp-create').disabled=this.value.trim().length<2;" onkeydown="if(event.key==='Enter'&amp;&amp;!g('ntp-create').disabled)showTripBrief();"/>
         <div class="ntp-actions">
-          <button class="ntp-create" id="ntp-create" disabled onclick="showTripBrief()">Next: Build brief →</button>
-          <button class="ntp-cancel" onclick="hideNewTripForm()">Cancel</button>
+          <button class="ntp-create" id="ntp-create" disabled onclick="showTripBrief()">Begin →</button>
         </div>
       </div>
     </div>
     <div id="trip-brief-overlay" style="display:none;"></div>
     <div id="candidate-explorer-overlay" style="display:none;"></div>
     <div class="hs-actions">
-      <button class="hs-btn hs-btn-primary" onclick="showNewTripForm()" id="hs-new-btn">+ New trip</button>
-      <button class="hs-btn hs-btn-secondary" onclick="openTripFile()">Open trip</button>
+      <button class="hs-btn hs-btn-secondary" onclick="openTripFile()">Open trip file</button>
       <input type="file" id="hs-trip-file-input" accept=".json" style="display:none;" onchange="loadTripFile(this)">
     </div>
   </div>
@@ -1786,11 +1784,11 @@ function renderHomeScreen(){
   if(_tripsIndex.length===0){
     g("hs-welcome").style.display="block";
     g("hs-trips-section").style.display="none";
-    g("hs-new-btn").textContent="+ Create your first trip";
+    var lbl=g("ntp-lbl"); if(lbl) lbl.textContent="Start your first trip";
   } else {
     g("hs-welcome").style.display="none";
     g("hs-trips-section").style.display="block";
-    g("hs-new-btn").textContent="+ New trip";
+    var lbl=g("ntp-lbl"); if(lbl) lbl.textContent="Start a new trip";
     var cards=g("trip-cards"); cards.innerHTML="";
     _tripsIndex.slice().reverse().forEach(function(entry){
       var card=document.createElement("div"); card.className="trip-card";
@@ -1817,7 +1815,7 @@ function renderHomeScreen(){
           saveTripsIndex();
           try{localStorage.removeItem("max-trip-"+id);}catch(ex){}
           c.parentNode.removeChild(c);
-          if(_tripsIndex.length===0){g("hs-trips-section").style.display="none";g("hs-welcome").style.display="block";g("hs-new-btn").textContent="+ Create your first trip";}
+          if(_tripsIndex.length===0){g("hs-trips-section").style.display="none";g("hs-welcome").style.display="block";var lbl=g("ntp-lbl"); if(lbl) lbl.textContent="Start your first trip";}
         };
         no.onclick=function(e2){e2.stopPropagation();c.removeChild(cf);};
         cf.appendChild(msg); cf.appendChild(yes); cf.appendChild(no);
@@ -1886,15 +1884,14 @@ function goHome(){
 }
 
 function showNewTripForm(){
-  g("new-trip-form").style.display="block";
-  g("hs-new-btn").style.display="none";
-  setTimeout(function(){g("ntp-name").focus();},50);
+  var inp = g("ntp-name");
+  if(inp) { inp.focus(); inp.scrollIntoView({behavior:"smooth",block:"center"}); }
 }
 
 function hideNewTripForm(){
-  g("new-trip-form").style.display="none";
-  g("hs-new-btn").style.display="";
-  g("ntp-name").value=""; g("ntp-create").disabled=true;
+  var inp = g("ntp-name");
+  if(inp){ inp.value=""; }
+  var btn = g("ntp-create"); if(btn) btn.disabled=true;
 }
 
 
@@ -3266,8 +3263,7 @@ function applyConstraintChanges(){
 
 function cancelTripBrief(){
   g("trip-brief-overlay").style.display="none";
-  g("new-trip-form").style.display="block";
-  g("hs-new-btn").style.display="none";
+  var inp=g("ntp-name"); if(inp) inp.focus();
 }
 
 async function findCandidates(){
