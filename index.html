@@ -2271,6 +2271,93 @@ function confirmMustDos() {
   runCandidateSearch(requiredPlaces);
 }
 
+
+// ── MAX-VOICED BRIDGES ─────────────────────────────────────
+// Max reflects back what he heard, in his voice, before moving on.
+async function showMaxBridge(stage, onContinue) {
+  var ov = g("trip-brief-overlay");
+  if (!ov) { onContinue(); return; }
+  ov.style.display = "block";
+  ov.className = "tb-overlay";
+  ov.style.cssText = "position:fixed;inset:0;background:#f7f7f5;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
+
+  // Initial shell with loading state
+  ov.innerHTML = '<div class="tb-header">'
+    + '<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Thinking it through</div></div></div>'
+    + '</div>'
+    + '<div class="tb-body" style="display:flex;align-items:center;justify-content:center;min-height:60vh;">'
+    + '<div style="max-width:520px;width:100%;padding:32px 28px;">'
+    + '<div id="max-bridge-content" style="font-size:15px;line-height:1.75;color:#2a2a2a;font-family:Georgia,serif;">'
+    + '<span style="color:#aaa;">Max is thinking\u2026</span>'
+    + '</div>'
+    + '<div id="max-bridge-footer" style="margin-top:28px;opacity:0;transition:opacity 0.4s;"></div>'
+    + '</div>'
+    + '</div>';
+
+  // Build the prompt based on stage
+  var prompt;
+  if (stage === "pre-candidates") {
+    prompt = "You are Max, speaking in your own voice. The traveler has just filled out their trip. Reflect back what they told you in 2\u20134 short, natural sentences \u2014 as if you're a well-traveled friend jotting things down before thinking about where to go. Then add one short sentence about what you're looking for as you think about candidates. Be warm but spare. No bullet points, no headings, no \u201cI hear you\u201d language. Just natural reflection.\n\n"
+      + "The traveler's brief:\n"
+      + (_tb.tripSentence ? "\u2022 Sentence: " + _tb.tripSentence + "\n" : "")
+      + (_tb.intent && _tb.intent !== _tb.tripSentence ? "\u2022 Additional: " + _tb.intent + "\n" : "")
+      + (_tb.region ? "\u2022 Region: " + _tb.region + "\n" : "")
+      + (_tb.duration ? "\u2022 Duration: " + _tb.duration + "\n" : "")
+      + (_tb.when ? "\u2022 When: " + _tb.when + "\n" : "")
+      + (_tb.entry ? "\u2022 Arrival: " + _tb.entry + (_tb.entryFixed ? " (fixed)" : " (flexible)") + "\n" : "")
+      + (_tb.tbExit ? "\u2022 Departure: " + _tb.tbExit + (_tb.exitFixed ? " (fixed)" : " (flexible)") + "\n" : "")
+      + (_tb.transport ? "\u2022 Getting around: " + _tb.transport + "\n" : "")
+      + (_tb.accommodation ? "\u2022 Lodging: " + _tb.accommodation + "\n" : "")
+      + (_tb.pace ? "\u2022 Pace: " + _tb.pace + "\n" : "")
+      + (_tb.anchors ? "\u2022 Must-dos: " + _tb.anchors + "\n" : "")
+      + (_tb.compromises ? "\u2022 Will bend on: " + _tb.compromises + "\n" : "")
+      + (_tb.hardlimits ? "\u2022 Won't compromise on: " + _tb.hardlimits + "\n" : "")
+      + (_tb.familiarity ? "\u2022 Familiarity with region: " + _tb.familiarity + "\n" : "")
+      + (_tb.chips && _tb.chips.length ? "\u2022 Also interested in: " + _tb.chips.join(", ") + "\n" : "");
+  } else if (stage === "post-candidates") {
+    var selected = (_tb.candidates || []).filter(function(c){ return c.status === "keep" || c.status === "maybe"; });
+    var byCity = selected.map(function(c){ return c.place + " (" + (c.role||"stop") + ", " + (c.stayRange||"?") + ")"; }).join("; ");
+    prompt = "You are Max, speaking in your own voice. The traveler has just chosen their candidate places. In 2\u20134 short, natural sentences, reflect back the shape of what they picked \u2014 what fits, what makes the trip coherent, any tension worth naming. Be direct. No lists, no headings. One short sentence about what comes next.\n\n"
+      + "Their picks: " + byCity + "\n"
+      + (_tb.duration ? "Duration: " + _tb.duration + "\n" : "")
+      + (_tb.entry ? "Entry: " + _tb.entry + (_tb.entryFixed ? " (fixed)" : " (flexible)") + "\n" : "")
+      + (_tb.tbExit ? "Exit: " + _tb.tbExit + (_tb.exitFixed ? " (fixed)" : " (flexible)") + "\n" : "")
+      + (_tb.anchors ? "Must-dos: " + _tb.anchors + "\n" : "");
+  }
+
+  // Call Max in parallel — kick off candidate search early would be ideal but
+  // for now we just generate the reflection then continue
+  try {
+    var text = await callMax([{role:"user", content: prompt}], 400, 25000);
+    text = (text || "").trim();
+    var contentEl = document.getElementById("max-bridge-content");
+    var footerEl = document.getElementById("max-bridge-footer");
+    if (contentEl) {
+      // Render as paragraphs
+      var paras = text.split(/\n\n+/).filter(Boolean);
+      contentEl.innerHTML = paras.map(function(p){
+        return '<p style="margin:0 0 14px 0;">' + p.replace(/\n/g, '<br>') + '</p>';
+      }).join("");
+    }
+    if (footerEl) {
+      footerEl.innerHTML = '<button class="tb-btn-primary" onclick="document.getElementById(\'max-bridge-footer\').dataset.done=\'1\'" style="width:auto;padding:9px 20px;">' + (stage === "pre-candidates" ? "Show me candidates \u2192" : "Open the plan \u2192") + '</button>';
+      footerEl.style.opacity = "1";
+    }
+    // Wait for click
+    await new Promise(function(resolve){
+      var check = setInterval(function(){
+        var f = document.getElementById("max-bridge-footer");
+        if (!f || f.dataset.done === "1") { clearInterval(check); resolve(); }
+      }, 150);
+    });
+  } catch (e) {
+    // If bridge fails, don't block — just proceed
+    console.warn("Max bridge failed:", e);
+  }
+
+  onContinue();
+}
+
 async function runCandidateSearch(requiredPlaces) {
   // region already set from sentence in Step 1
   _tb.duration      = g("tb-duration")      ? g("tb-duration").value.trim()      : (_tb.duration||"");
@@ -2285,6 +2372,9 @@ async function runCandidateSearch(requiredPlaces) {
   _tb.intent        = g("tb-intent")        ? g("tb-intent").value.trim()        : (_tb.intent||"");
   _tb.anchors       = g("tb-anchors")       ? g("tb-anchors").value.trim()       : (_tb.anchors||"");
 
+  // Max-voiced bridge before candidates appear
+  await showMaxBridge("pre-candidates", function(){});
+  g("trip-brief-overlay").style.display="none";
   showCandidateExplorer(null);
 
   // Update loading detail once we know the required count
@@ -2981,29 +3071,29 @@ function renderTripBrief(){
     +'</div>'
     +'<div class="tb-body">'
     
-    +'<div class="tb-field"><label>When do you want to go?</label><input id="tb-when" placeholder="e.g. September\u2013October, shoulder season. Or: fixed dates Jun 12\u201328." /></div>'
-    +'<div class="tb-field"><label>How long do you want to travel?</label><input id="tb-duration" placeholder="e.g. 10\u201314 days, three weeks\u2026" /></div>'
+    +'<div class="tb-field"><label>When you want to go</label><input id="tb-when" placeholder="e.g. September\u2013October, shoulder season. Or: fixed dates Jun 12\u201328." /></div>'
+    +'<div class="tb-field"><label>How long you want to travel</label><input id="tb-duration" placeholder="e.g. 10\u201314 days, three weeks\u2026" /></div>'
     +'<div class="tb-field" style="display:flex;gap:8px;">'
     +'<div style="flex:1">'
-    +'<label>Where will you arrive?</label>'
+    +'<label>Where you\u2019ll arrive</label>'
     +'<div id="entry-toggles" style="display:flex;gap:5px;margin-bottom:5px;">'
     +'<span class="tb-toggle'+(_tb.entryFixed?' on':'')+" onclick=\"toggleEntryExit('entry',true)\">Fixed</span>"
     +'<span class="tb-toggle'+(!_tb.entryFixed?' on':'')+" onclick=\"toggleEntryExit('entry',false)\">Flexible</span>"
     +'</div>'
     +'<input id="tb-entry" value="'+(_tb.entry||'')+'" oninput="if(this.value.trim().length>0 && !_tb.entryFixed){toggleEntryExit(\'entry\',true);}" placeholder="'+(_tb.entryFixed?'e.g. Zurich \u2014 tickets already booked':'e.g. Probably Zurich or Geneva, open to what fits')+'" /></div>'
     +'<div style="flex:1">'
-    +'<label>Where will you depart from?</label>'
+    +'<label>Where you\u2019ll depart from</label>'
     +'<div id="exit-toggles" style="display:flex;gap:5px;margin-bottom:5px;">'
     +'<span class="tb-toggle'+(_tb.exitFixed?' on':'')+" onclick=\"toggleEntryExit('exit',true)\">Fixed</span>"
     +'<span class="tb-toggle'+(!_tb.exitFixed?' on':'')+" onclick=\"toggleEntryExit('exit',false)\">Flexible</span>"
     +'</div>'
     +'<input id="tb-exit" value="'+(_tb.tbExit||'')+'" oninput="if(this.value.trim().length>0 && !_tb.exitFixed){toggleEntryExit(\'exit\',true);}" placeholder="'+(_tb.exitFixed?'e.g. Geneva \u2014 tickets already booked':'e.g. Same place, or wherever makes sense')+'" /></div>'
     +'</div>'
-    +'<div class="tb-field"><label>How do you want to get around?</label><input id="tb-transport" placeholder="e.g. Trains and walking. Will take a taxi when needed. No car rentals." /></div>'
-    +'<div class="tb-field"><label>In approximate order of preference, what kinds of places do you want to stay in?</label><input id="tb-accommodation" placeholder="e.g. Small family hotels, apartments, rooms in private homes. En suite required. No hostels, no shared bathrooms." /></div>'
-    +'<div class="tb-field"><label>What\u2019s your pace?</label><input id="tb-pace" placeholder="e.g. Slow \u2014 two or three things a day, time to sit and watch the world." /></div>'
-    +'<div class="tb-field"><label>Where will you bend?</label><textarea id="tb-compromises" rows="2" placeholder="e.g. I\u2019d rather spend a full morning in one place than rush \u2014 but I\u2019ll move faster for something genuinely unmissable. I\u2019d consider a room in a private home if it\u2019s the best option."></textarea><div style="font-size:10px;color:#aaa;margin-top:3px;">Preferences Max can weigh, not rules.</div></div>'
-    +'<div class="tb-field"><label>Where won\u2019t you compromise?</label><textarea id="tb-hardlimits" rows="2" placeholder="e.g. No car rentals under any circumstances. En suite bathroom required. No shared dormitory accommodation."></textarea><div style="font-size:10px;color:#aaa;margin-top:3px;">Hard limits Max won\u2019t route around.</div></div>'
+    +'<div class="tb-field"><label>How you want to get around</label><input id="tb-transport" placeholder="e.g. Trains and walking. Will take a taxi when needed. No car rentals." /></div>'
+    +'<div class="tb-field"><label>Where you want to stay <span style="font-weight:400;color:#aaa;">(in rough order of preference)</span></label><input id="tb-accommodation" placeholder="e.g. Small family hotels, apartments, rooms in private homes. En suite required. No hostels, no shared bathrooms." /></div>'
+    +'<div class="tb-field"><label>Your pace</label><input id="tb-pace" placeholder="e.g. Slow \u2014 two or three things a day, time to sit and watch the world." /></div>'
+    +'<div class="tb-field"><label>Where you\u2019ll bend</label><textarea id="tb-compromises" rows="2" placeholder="e.g. I\u2019d rather spend a full morning in one place than rush \u2014 but I\u2019ll move faster for something genuinely unmissable. I\u2019d consider a room in a private home if it\u2019s the best option."></textarea><div style="font-size:10px;color:#aaa;margin-top:3px;">Preferences Max can weigh, not rules.</div></div>'
+    +'<div class="tb-field"><label>Where you won\u2019t compromise</label><textarea id="tb-hardlimits" rows="2" placeholder="e.g. No car rentals under any circumstances. En suite bathroom required. No shared dormitory accommodation."></textarea><div style="font-size:10px;color:#aaa;margin-top:3px;">Hard limits Max won\u2019t route around.</div></div>'
     +'</div>'
     +'<div class="tb-footer">'
     +'<button class="tb-btn-primary" onclick="goToTripStep2()">Find candidate places \u2192</button>'
@@ -3187,27 +3277,27 @@ function renderTripBriefEdit(){
     +'</div>'
     +'<div class="tb-body">'
     +'<div class="tb-field"><label>Where are you going?</label><input id="tb-region" value="'+(_tb.region||'')+'" placeholder="e.g. Central Europe, Swiss Alps, Japan\u2026" /></div>'
-    +'<div class="tb-field"><label>When do you want to go?</label><input id="tb-when" value="'+(_tb.when||'')+'" placeholder="e.g. September\u2013October, shoulder season." /></div>'
-    +'<div class="tb-field"><label>How long do you want to travel?</label><input id="tb-duration" value="'+(_tb.duration||'')+'" placeholder="e.g. 10\u201314 days, three weeks\u2026" /></div>'
+    +'<div class="tb-field"><label>When you want to go</label><input id="tb-when" value="'+(_tb.when||'')+'" placeholder="e.g. September\u2013October, shoulder season." /></div>'
+    +'<div class="tb-field"><label>How long you want to travel</label><input id="tb-duration" value="'+(_tb.duration||'')+'" placeholder="e.g. 10\u201314 days, three weeks\u2026" /></div>'
     +'<div class="tb-field" style="display:flex;gap:8px;">'
-    +'<div style="flex:1"><label>Where will you arrive?</label>'
+    +'<div style="flex:1"><label>Where you\u2019ll arrive</label>'
     +'<div style="display:flex;gap:5px;margin-bottom:5px;">'
     +'<span class="tb-toggle'+(_tb.entryFixed?' on':'')+'" onclick="_tb.entryFixed=true;renderTripBriefEdit();">Fixed</span>'
     +'<span class="tb-toggle'+(!_tb.entryFixed?' on':'')+'" onclick="_tb.entryFixed=false;renderTripBriefEdit();">Flexible</span>'
     +'</div>'
     +'<input id="tb-entry" value="'+(_tb.entry||'')+'" oninput="if(this.value.trim().length>0 && !_tb.entryFixed){toggleEntryExit(\'entry\',true);}" placeholder="'+(_tb.entryFixed?'e.g. Zurich \u2014 tickets already booked':'e.g. Probably Zurich or Geneva, open to what fits')+'" /></div>'
-    +'<div style="flex:1"><label>Where will you depart from?</label>'
+    +'<div style="flex:1"><label>Where you\u2019ll depart from</label>'
     +'<div style="display:flex;gap:5px;margin-bottom:5px;">'
     +'<span class="tb-toggle'+(_tb.exitFixed?' on':'')+'" onclick="_tb.exitFixed=true;renderTripBriefEdit();">Fixed</span>'
     +'<span class="tb-toggle'+(!_tb.exitFixed?' on':'')+'" onclick="_tb.exitFixed=false;renderTripBriefEdit();">Flexible</span>'
     +'</div>'
     +'<input id="tb-exit" value="'+(_tb.tbExit||'')+'" oninput="if(this.value.trim().length>0 && !_tb.exitFixed){toggleEntryExit(\'exit\',true);}" placeholder="'+(_tb.exitFixed?'e.g. Geneva \u2014 tickets already booked':'e.g. Same place, or wherever makes sense')+'" /></div>'
     +'</div>'
-    +'<div class="tb-field"><label>How do you want to get around?</label><input id="tb-transport" value="'+(_tb.transport||'')+'" placeholder="e.g. Trains and walking. No car rentals." /></div>'
-    +'<div class="tb-field"><label>In approximate order of preference, what kinds of places do you want to stay in?</label><input id="tb-accommodation" value="'+(_tb.accommodation||'')+'" placeholder="e.g. Small family hotels, apartments, rooms in private homes. En suite required." /></div>'
-    +'<div class="tb-field"><label>What\u2019s your pace?</label><input id="tb-pace" value="'+(_tb.pace||'')+'" placeholder="e.g. Slow \u2014 two or three things a day." /></div>'
-    +'<div class="tb-field"><label>Where will you bend?</label><textarea id="tb-compromises" rows="2">'+(_tb.compromises||'')+'</textarea><div style="font-size:10px;color:#aaa;margin-top:3px;">Preferences Max can weigh, not rules.</div></div>'
-    +'<div class="tb-field"><label>Where won\u2019t you compromise?</label><textarea id="tb-hardlimits" rows="2">'+(_tb.hardlimits||'')+'</textarea><div style="font-size:10px;color:#aaa;margin-top:3px;">Hard limits Max won\u2019t route around.</div></div>'
+    +'<div class="tb-field"><label>How you want to get around</label><input id="tb-transport" value="'+(_tb.transport||'')+'" placeholder="e.g. Trains and walking. No car rentals." /></div>'
+    +'<div class="tb-field"><label>Where you want to stay <span style="font-weight:400;color:#aaa;">(in rough order of preference)</span></label><input id="tb-accommodation" value="'+(_tb.accommodation||'')+'" placeholder="e.g. Small family hotels, apartments, rooms in private homes. En suite required." /></div>'
+    +'<div class="tb-field"><label>Your pace</label><input id="tb-pace" value="'+(_tb.pace||'')+'" placeholder="e.g. Slow \u2014 two or three things a day." /></div>'
+    +'<div class="tb-field"><label>Where you\u2019ll bend</label><textarea id="tb-compromises" rows="2">'+(_tb.compromises||'')+'</textarea><div style="font-size:10px;color:#aaa;margin-top:3px;">Preferences Max can weigh, not rules.</div></div>'
+    +'<div class="tb-field"><label>Where you won\u2019t compromise</label><textarea id="tb-hardlimits" rows="2">'+(_tb.hardlimits||'')+'</textarea><div style="font-size:10px;color:#aaa;margin-top:3px;">Hard limits Max won\u2019t route around.</div></div>'
     +'</div>'
     +'<div class="tb-footer">'
     +'<button class="tb-btn-primary" onclick="previewConstraintChanges()">Preview changes \u2192</button>'
@@ -3777,7 +3867,7 @@ async function openCompareModal(a,b){
 }
 
 // ─── BUILD TRIP FROM CANDIDATES ────────────────────────────
-function buildFromCandidates(){
+async function buildFromCandidates(){
   var kept=(_tb.candidates||[]).filter(function(c){return c.status==="keep";});
   if(!kept.length) return;
   trip={name:_tb.name||"New trip",destinations:[],legs:{},trackSpending:false,pendingActions:[],
@@ -3821,14 +3911,18 @@ function buildFromCandidates(){
   saveTripsIndex(); localSave();
   g("candidate-explorer-overlay").style.display="none";
   if(_ceMap){_ceMap.remove();_ceMap=null;}
-  enterApp();
-  setTimeout(function(){
-    drawTripMode();
+  // Max-voiced bridge before the plan opens
+  await showMaxBridge("post-candidates", function(){
+    g("trip-brief-overlay").style.display="none";
+    enterApp();
     setTimeout(function(){
-      showShortlistBanner(kept);
-      setTimeout(function(){ showLogisticsScreen(); }, 500);
-    },200);
-  },100);
+      drawTripMode();
+      setTimeout(function(){
+        showShortlistBanner(kept);
+        setTimeout(function(){ showLogisticsScreen(); }, 500);
+      },200);
+    },100);
+  });
 }
 
 function parseStartDateFromBrief(when){
