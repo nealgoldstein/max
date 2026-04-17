@@ -649,6 +649,10 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .tb-toggle{display:inline-block;padding:2px 10px;border-radius:10px;border:1px solid #ccc;font-size:10px;cursor:pointer;color:#777;background:#fff;user-select:none;}
 .tb-toggle.on{background:#111;color:#fff;border-color:#111;}
 .tb-tag{font-size:10px;padding:3px 9px;border-radius:20px;border:1px solid #ddd;background:#fff;cursor:pointer;color:#555;}
+.tb-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;}
+.tb-chip{display:inline-block;font-size:11px;padding:5px 11px;border-radius:16px;border:1px solid #ddd;background:#fff;cursor:pointer;color:#555;user-select:none;transition:all 0.15s;}
+.tb-chip:hover{border-color:#999;color:#222;}
+.tb-chip.on{background:#111;color:#fff;border-color:#111;}
 .tb-tag.on{background:#111;color:#fff;border-color:#111;}
 .tb-footer{padding:14px 28px 20px;border-top:1px solid #eee;background:#f7f7f5;position:sticky;bottom:0;}
 .tb-btn-primary{width:100%;padding:10px;font-size:12px;font-weight:600;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;}
@@ -2810,36 +2814,38 @@ function renderTripStep1Recognition(){
   var ov=g("trip-brief-overlay"); ov.className="tb-overlay";
   ov.style.cssText="position:fixed;inset:0;background:#f7f7f5;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
 
-  var sentences = [
-    {id:"narrative",  label:"\u201cI\u2019ve always wanted to\u2026\u201d",         placeholder:"\u2026ride the Trans-Siberian Railway. See the fjords in summer light. Walk the Camino de Santiago."},
-    {id:"doing",      label:"\u201cI want to\u2026\u201d",                            placeholder:"\u2026hike the Tour du Mont Blanc. Learn to make pasta in Bologna. Swim off a small Greek island."},
-    {id:"seeing",     label:"\u201cI want to see\u2026\u201d",                       placeholder:"\u2026the Klimts in the Belvedere. The light in the Cyclades. Angkor at dawn. The Rothko Chapel."},
-    {id:"different",  label:"\u201cI need something different\u2026\u201d",          placeholder:"\u2026from the noise and speed of my current life. Somewhere slow, warm, and simple."},
-    {id:"relational", label:"\u201cWe should go somewhere that\u2026\u201d",         placeholder:"\u2026works for the kids but doesn\u2019t bore us. Gives my partner and me time together. Suits my parents\u2019 pace."},
-    {id:"signal",     label:"\u201cIt would be amazing to\u2026\u201d",              placeholder:"\u2026say I\u2019ve walked through Petra. Watch the solar eclipse from somewhere extraordinary. See the lions before they\u2019re gone."}
-  ];
+  // Explanation shown unless permanently dismissed
+  var hideIntro = false;
+  try { hideIntro = localStorage.getItem("max-hide-trip-intro") === "1"; } catch(e){}
+  var showIntro = !hideIntro && !_tb._introDismissed;
 
-  var drivers = _tb.drivers || [];
-  var texts = _tb.driverTexts || {};
+  var introHtml = "";
+  if(showIntro){
+    introHtml = ''
+      +'<div id="tb-intro-box" style="background:#fff;border:1px solid #e8e8e8;border-radius:10px;padding:18px 22px;margin-bottom:20px;font-size:12px;color:#333;line-height:1.7;">'
+      +'<div style="font-size:11px;color:#999;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;margin-bottom:10px;">Before you start</div>'
+      +'<p style="margin:0 0 12px 0;">In 2015, Linda and I sold our house and our cars, put a few things in storage, and traveled full-time for five years \u2014 until the pandemic caught us in Belize in March 2020. Over those years we got pretty good at the traveling thing, and what emerged was a way of planning that actually worked. Max is built from that.</p>'
+      +'<p style="margin:0 0 12px 0;">What we learned, even before our great adventure, is that there\u2019s no way to have all the information you\u2019d need to script a trip before you leave. Some of the most important information only appears once you arrive \u2014 once you\u2019ve walked around, talked to people, and discovered that a place isn\u2019t quite what you expected, or better than you imagined. Eisenhower had it right: <em>plans are useless, but planning is everything.</em></p>'
+      +'<p style="margin:0 0 12px 0;">So Max isn\u2019t trying to hand you a finished itinerary. It helps you arrive <strong>well-positioned</strong> \u2014 in the right regions, for roughly the right amount of time, with a working sense of where to stay and what matters. A hypothesis. Strong enough to act on. Flexible enough to change.</p>'
+      +'<p style="margin:0 0 12px 0;">Once you\u2019re on the ground, the questions change. What still makes sense from where you are? Is there something nearby worth more time than what you\u2019d planned? The plan you arrived with was always meant to be revised. The goal was never to follow it. The goal was to arrive prepared enough to change it intelligently.</p>'
+      +'<p style="margin:0 0 12px 0;">Think of Max as a well-traveled friend helping you think through where to go and what to do when you get there.</p>'
+      +'<p style="margin:0 0 16px 0;">We start with a sentence: <em>I want to go to ___ in order to ___.</em> Where can be broad or specific \u2014 a region, a country, a city, a park. The \u201cin order to\u201d is what makes it yours. None of this is fixed. Change-of-mind isn\u2019t a problem; it\u2019s part of traveling.</p>'
+      +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px solid #eee;">'
+      +'<button onclick="dismissIntro(false)" style="padding:6px 14px;font-size:11px;font-weight:600;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;">Got it</button>'
+      +'<button onclick="dismissIntro(true)" style="padding:6px 14px;font-size:11px;background:#fff;color:#666;border:1px solid #ddd;border-radius:6px;cursor:pointer;font-family:inherit;">Got it \u2014 don\u2019t show this again</button>'
+      +'</div>'
+      +'</div>';
+  }
 
-  var sentHtml = sentences.map(function(s){
-    var on = drivers.indexOf(s.id) > -1;
-    var html = '<div class="tb-sentence'+(on?' on':'')+'" data-id="'+s.id+'" onclick="toggleSentence(this)">'
-      +'<div class="tb-sentence-label">'+s.label+'</div>';
-    if(!on){
-      html += '<div class="tb-sentence-sub" style="color:#aaa;font-size:10px;margin-top:3px;">Tap to complete the sentence</div>';
-    }
-    html += '</div>';
-    if(on){
-      html += '<div style="margin:4px 0 12px 0;padding:0 14px;">'
-        +'<textarea data-driver-text="'+s.id+'" rows="2" oninput="_tb.driverTexts=_tb.driverTexts||{};_tb.driverTexts[\''+s.id+'\']=this.value;" placeholder="'+s.placeholder+'" style="width:100%;border:1px solid #ddd;border-radius:6px;padding:8px 10px;font-family:inherit;font-size:12px;resize:vertical;background:#fff;box-sizing:border-box;">'
-        +(texts[s.id]||'')
-        +'</textarea>'
-        +'</div>';
-    }
-    return html;
+  // Activity chips
+  var chips = ["see great art & museums","dig into history","eat and drink well","hike in nature","explore architecture","enjoy nightlife & music","get to the beach","get into the mountains","see spectacular scenery","visit magnificent gardens","explore small towns","slow down & recharge","take great photos","do something adventurous"];
+  var selectedChips = _tb.chips || [];
+  var chipsHtml = chips.map(function(c){
+    var on = selectedChips.indexOf(c) > -1;
+    return '<span class="tb-chip'+(on?' on':'')+'" data-chip="'+c+'" onclick="toggleChip(this)">'+c+'</span>';
   }).join("");
 
+  // Familiarity
   var famOptions = [{id:"first",label:"Not at all"},{id:"before",label:"A passing understanding"},{id:"know",label:"Quite a bit"}];
   var fam = _tb.familiarity || "";
   var famHtml = famOptions.map(function(f){
@@ -2847,19 +2853,32 @@ function renderTripStep1Recognition(){
     return '<span class="tb-toggle'+(on?' on':'')+'" onclick="_tb.familiarity=\''+f.id+'\';renderTripStep1Recognition();">'+f.label+'</span>';
   }).join("");
 
+  // Build the sentence as a single textarea with soft prefix
+  var sentenceText = _tb.tripSentence || "";
+
   ov.innerHTML='<div class="tb-header">'
     +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Step 1 of 2</div></div></div>'
-    +'<div class="tb-title">What\u2019s the sentence that started this trip?</div>'
-    +'<div class="tb-intro" style="font-size:12px;color:#555;line-height:1.6;margin-top:8px;">'+'In order to construct a great trip, it helps to understand why you want to go. The sentences below are different ways of describing the same thing, so they overlap \u2014 tap any that feel true, and finish each one in your own words.'+'</div>'
+    +'<div class="tb-title">Where and why</div>'
     +'</div>'
     +'<div class="tb-body">'
-    +'<div class="tb-field" style="margin-bottom:20px;"><div class="tb-sentences">'+sentHtml+'</div></div>'
+    + introHtml
+    +'<div class="tb-field">'
+    +'<label style="display:block;margin-bottom:8px;font-size:13px;color:#333;font-weight:500;">Finish this sentence in your own words.</label>'
+    +'<textarea id="tb-sentence" rows="5" placeholder="I want to go to Switzerland in order to ride the Glacier Express, see the Alps in late summer, and eat well in a couple of small mountain towns." style="font-size:14px;line-height:1.6;padding:14px 16px;">'+(sentenceText||'')+'</textarea>'
+    +'<div style="font-size:11px;color:#aaa;margin-top:6px;">Where can be broad (Southeast Asia) or specific (Kyoto). The \u201cin order to\u201d is what makes it yours.</div>'
+    +'</div>'
+    +'<div class="tb-field">'
+    +'<label style="display:block;margin-bottom:6px;font-size:12px;color:#555;">Or tap anything else that matters for this trip <span style="color:#aaa;font-weight:400;">(optional)</span></label>'
+    +'<div class="tb-chips">'+chipsHtml+'</div>'
+    +'</div>'
     +'<div class="tb-field">'
     +'<label>How familiar are you with this part of the world?</label>'
-    +'<div style="display:flex;gap:6px;margin-top:5px;">'+famHtml+'</div></div>'
+    +'<div style="display:flex;gap:6px;margin-top:5px;flex-wrap:wrap;">'+famHtml+'</div>'
+    +'</div>'
     +'<div class="tb-field">'
     +'<label>Must-dos or anchors <span style="font-weight:400;color:#aaa;">(optional)</span></label>'
-    +'<input id="tb-anchors" value="'+(_tb.anchors||'')+'" placeholder="e.g. Vienna Philharmonic, Glacier Express\u2026" /></div>'
+    +'<input id="tb-anchors" value="'+(_tb.anchors||'')+'" placeholder="e.g. Vienna Philharmonic, Glacier Express\u2026" />'
+    +'</div>'
     +'</div>'
     +'<div class="tb-footer">'
     +'<button class="tb-btn-primary" onclick="saveRecognitionAndContinue()">A few things Max needs to know \u2192</button>'
@@ -2870,22 +2889,47 @@ function renderTripStep1Recognition(){
     +'</div>';
 }
 
-function saveRecognitionAndContinue(){
-  _tb.anchors  = g("tb-anchors")  ? g("tb-anchors").value.trim()  : (_tb.anchors||"");
-  var texts = _tb.driverTexts || {};
-  var labels = {narrative:"I\u2019ve always wanted to", doing:"I want to", seeing:"I want to see", different:"I need something different", relational:"We should go somewhere that", signal:"It would be amazing to"};
-  var parts = (_tb.drivers||[]).map(function(id){
-    return texts[id] ? labels[id] + " " + texts[id] : labels[id];
-  });
-  _tb.intent = parts.join(". ");
-  _tb.gradient = texts["different"] || "";
-  var drivers = _tb.drivers || [];
-  if(drivers.indexOf("different") > -1 && drivers.length === 1 && !texts["different"]){
-    openGradientConversation();
-  } else {
-    renderTripBrief();
+function dismissIntro(permanent){
+  _tb._introDismissed = true;
+  if(permanent){
+    try { localStorage.setItem("max-hide-trip-intro", "1"); } catch(e){}
   }
+  var box = document.getElementById("tb-intro-box");
+  if(box) box.style.display = "none";
 }
+
+function toggleChip(el){
+  var c = el.dataset.chip;
+  _tb.chips = _tb.chips || [];
+  var idx = _tb.chips.indexOf(c);
+  if(idx > -1) _tb.chips.splice(idx, 1);
+  else _tb.chips.push(c);
+  el.classList.toggle("on");
+}
+
+function saveRecognitionAndContinue(){
+  // Save sentence, chips, anchors
+  _tb.tripSentence = g("tb-sentence") ? g("tb-sentence").value.trim() : (_tb.tripSentence||"");
+  _tb.anchors      = g("tb-anchors")  ? g("tb-anchors").value.trim()  : (_tb.anchors||"");
+
+  // Build the intent that will feed the prompt
+  var parts = [];
+  if(_tb.tripSentence) parts.push(_tb.tripSentence);
+  if(_tb.chips && _tb.chips.length) parts.push("Also interested in: " + _tb.chips.join(", "));
+  _tb.intent = parts.join(". ");
+
+  // Extract region from sentence for downstream use: "I want to go to X in order to Y"
+  var m = (_tb.tripSentence||"").match(/^\s*i\s+want\s+to\s+go\s+to\s+([^,\.;]+?)(?:\s+in\s+order\s+to|\s*$)/i);
+  if(m && m[1]) _tb.region = m[1].trim();
+
+  if(!_tb.tripSentence){
+    alert("Please describe where you want to go and why.");
+    return;
+  }
+
+  renderTripBrief();
+}
+
 
 function renderTripBrief(){
   var ov=g("trip-brief-overlay"); ov.className="tb-overlay";
@@ -3009,19 +3053,7 @@ function renderTripStep2(){
     +'</div>';
 }
 
-function toggleSentence(el){
-  var id = el.dataset.id;
-  _tb.drivers = _tb.drivers || [];
-  _tb.driverTexts = _tb.driverTexts || {};
-  var idx = _tb.drivers.indexOf(id);
-  if(idx > -1){
-    _tb.drivers.splice(idx,1);
-    delete _tb.driverTexts[id];
-  } else {
-    _tb.drivers.push(id);
-  }
-  renderTripStep1Recognition();
-}
+function toggleSentence(el){ /* deprecated — sentence is now a textarea */ }
 
 function saveStep2AndProceed(){
   _tb.intent    = g("tb-intent")  ? g("tb-intent").value.trim()  : (_tb.intent||"");
