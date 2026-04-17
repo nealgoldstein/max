@@ -1050,6 +1050,7 @@ async function callMax(messages, maxTokens, timeoutMs) {
 // Context stores
 var _sightStories = {};
 var _destStories  = {};
+var _destNotes    = {};  // { destId: {text, hidden, seen, createdAt} }
 var _ffHistories  = {};
 
 // ── File persistence ───────────────────────────────────────
@@ -4683,7 +4684,7 @@ function delDest(e,id){
     });
   }
   trip.destinations=trip.destinations.filter(function(d){return d.id!==id;});
-  delete _ffHistories[id]; delete _destStories[id];
+  delete _ffHistories[id]; delete _destStories[id]; delete _destNotes[id];
   if(activeDest===id){
     activeDest=trip.destinations.length>0?trip.destinations[trip.destinations.length-1].id:null;
   }
@@ -7770,6 +7771,9 @@ function drawDestMode(destId){
   hdr.appendChild(dmActs); hdr.appendChild(dsw); hdr.appendChild(ovWarn);
   c.appendChild(hdr);
 
+  // Max says... — unsolicited observation, rendered below the header
+  renderMaxNoteCard(dest, c);
+
   // Pending cancellations banner
   if(dest.pendingCancellations&&dest.pendingCancellations.items&&dest.pendingCancellations.items.length){
     var pcBanner=document.createElement('div');
@@ -8370,6 +8374,112 @@ async function sStory(sid, destId) {
     if(sr2)sr2.parentNode.insertBefore(errBox,sr2.nextSibling);
     setTimeout(function(){if(errBox.parentNode)errBox.parentNode.removeChild(errBox);},4000);
     console.error("sStory error:", e);
+  }
+}
+
+async 
+// ─── MAX SAYS — unsolicited observations from a well-traveled friend ───────
+// One note per destination per session. Generated on first render, cached.
+// Cards should feel like a volunteered observation, not a feature.
+function renderMaxNoteCard(dest, container){
+  if(!container || !dest) return;
+  // Remove any prior card for this dest
+  var prior = document.getElementById("max-note-"+dest.id);
+  if(prior && prior.parentNode) prior.parentNode.removeChild(prior);
+
+  var card = document.createElement("div");
+  card.id = "max-note-"+dest.id;
+  card.className = "max-note-card";
+  card.style.cssText = "background:#fbfaf6;border:1px solid #e8e4d8;border-radius:8px;padding:11px 13px;margin:10px 0 4px;font-family:Georgia,serif;font-size:12.5px;line-height:1.6;color:#333;position:relative;";
+
+  var header = document.createElement("div");
+  header.style.cssText = "display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;";
+  var label = document.createElement("div");
+  label.style.cssText = "font-size:10px;font-weight:700;color:#888;letter-spacing:0.05em;text-transform:uppercase;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;";
+  label.textContent = "Max says\u2026";
+  var close = document.createElement("span");
+  close.style.cssText = "font-size:14px;color:#bbb;cursor:pointer;line-height:1;padding:2px 4px;font-family:-apple-system,sans-serif;";
+  close.innerHTML = "\u00d7";
+  close.title = "Hide";
+  close.onclick = function(){ card.style.display = "none"; if(_destNotes[dest.id]) _destNotes[dest.id].hidden = true; };
+  header.appendChild(label); header.appendChild(close);
+  card.appendChild(header);
+
+  var body = document.createElement("div");
+  body.id = "max-note-body-"+dest.id;
+
+  var refreshBtn = document.createElement("button");
+  refreshBtn.style.cssText = "margin-top:8px;font-size:10px;color:#888;background:none;border:none;cursor:pointer;padding:2px 0;font-family:inherit;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px;";
+  refreshBtn.textContent = "another thought \u2197";
+  refreshBtn.onclick = function(){ generateMaxNote(dest, true); };
+
+  if(_destNotes[dest.id] && _destNotes[dest.id].text && !_destNotes[dest.id].hidden){
+    body.textContent = _destNotes[dest.id].text;
+    card.appendChild(body);
+    card.appendChild(refreshBtn);
+  } else if(_destNotes[dest.id] && _destNotes[dest.id].hidden){
+    // User hid it — don't re-render
+    return;
+  } else {
+    body.innerHTML = '<span style="color:#aaa;">Max is thinking\u2026</span>';
+    card.appendChild(body);
+    container.appendChild(card);
+    generateMaxNote(dest, false);
+    return;
+  }
+  container.appendChild(card);
+}
+
+async function generateMaxNote(dest, replace){
+  if(!dest) return;
+  var bodyEl = document.getElementById("max-note-body-"+dest.id);
+  if(replace && bodyEl){
+    bodyEl.innerHTML = '<span style="color:#aaa;">Max is thinking\u2026</span>';
+  }
+
+  // Gather context: what stops nearby, itinerary shape, user's sentence, familiarity
+  var intent = (trip && trip.brief && trip.brief.intent) ? trip.brief.intent : (_tb.intent||_tb.tripSentence||"");
+  var familiarity = (trip && trip.brief && trip.brief.familiarity) || _tb.familiarity || "";
+  var nights = dest.nights || "?";
+  var sightsNames = (dest.suggestions||[]).slice(0,8).map(function(s){return s.n;}).join(", ");
+  var pickedIdx = (trip && trip.destinations) ? trip.destinations.findIndex(function(d){return d.id===dest.id;}) : -1;
+  var prev = (pickedIdx>0) ? trip.destinations[pickedIdx-1] : null;
+  var next = (pickedIdx>=0 && trip.destinations && pickedIdx<trip.destinations.length-1) ? trip.destinations[pickedIdx+1] : null;
+
+  var prompt = "You are Max, speaking as a well-traveled friend. The traveler is looking at the destination view for " + dest.place + ". Offer ONE short, specific, volunteered observation \u2014 something a well-traveled friend would mention unprompted. Not a recommendation. Not a list. One observation, 1\u20133 sentences, maximum 60 words.\n\n"
+    + "Good examples of what to write (style, not content):\n"
+    + "\u2022 \"If you're walking from the Altstadt to the station, the route past the Hofkirche is worth the extra five minutes.\"\n"
+    + "\u2022 \"The old town closes early on Sundays \u2014 worth saving errands for Monday morning.\"\n"
+    + "\u2022 \"The light on the lake is best an hour before sunset, from the east shore.\"\n"
+    + "\u2022 \"The short train from here to Bergen is one of the most scenic in the country \u2014 sit on the left heading north.\"\n\n"
+    + "Avoid: \"Don't miss X.\" \"Be sure to Y.\" Generic \"foodie heaven\" / \"cultural gem\" language. Explicit recommendations. Lists. Headlines.\n\n"
+    + "Context:\n"
+    + "\u2022 Destination: " + dest.place + "\n"
+    + "\u2022 Staying: " + nights + " nights\n"
+    + (intent ? "\u2022 Trip intent: " + intent + "\n" : "")
+    + (familiarity === "know" ? "\u2022 Familiarity: traveler knows this region well \u2014 surface what regulars miss\n"
+        : familiarity === "before" ? "\u2022 Familiarity: traveler has a passing understanding \u2014 add texture, not basics\n"
+        : familiarity === "first" ? "\u2022 Familiarity: first visit \u2014 orient, but with the small useful thing a friend would say\n"
+        : "")
+    + (sightsNames ? "\u2022 Planned stops include: " + sightsNames + "\n" : "")
+    + (prev ? "\u2022 Coming from: " + prev.place + "\n" : "")
+    + (next ? "\u2022 Heading to: " + next.place + "\n" : "")
+    + (replace ? "\n(The traveler asked for another thought \u2014 give a different observation from your last one.)" : "");
+
+  try {
+    var text = await callMax([{role:"user", content: prompt}], 250, 20000);
+    text = (text || "").trim();
+    // Strip any leading/trailing quotes the model sometimes adds
+    text = text.replace(/^["\u201c]+|["\u201d]+$/g, "");
+    _destNotes[dest.id] = { text: text, seen: false, createdAt: Date.now() };
+    var bodyEl2 = document.getElementById("max-note-body-"+dest.id);
+    if(bodyEl2) bodyEl2.textContent = text;
+  } catch(e){
+    var bodyEl3 = document.getElementById("max-note-body-"+dest.id);
+    if(bodyEl3){
+      bodyEl3.style.color = "#aaa";
+      bodyEl3.textContent = "(Max couldn\u2019t find a note right now.)";
+    }
   }
 }
 
