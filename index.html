@@ -2814,46 +2814,55 @@ function renderTripStep1Recognition(){
   ov.style.cssText="position:fixed;inset:0;background:#f7f7f5;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
 
   var sentences = [
-    {id:"narrative",  label:"\u201cI\u2019ve always wanted to\u2026\u201d",         sub:"Something about this has been sitting with you for a long time"},
-    {id:"doing",      label:"\u201cI want to do\u2026\u201d",                        sub:"An experience that requires participation \u2014 moving, making, going"},
-    {id:"seeing",     label:"\u201cI want to see\u2026\u201d",                       sub:"A place, a landscape, a thing that already holds meaning for you"},
-    {id:"different",  label:"\u201cI need something different\u2026\u201d",          sub:"Adjusting distance from your current life \u2014 direction before destination"},
-    {id:"relational", label:"\u201cWe should go somewhere that\u2026\u201d",         sub:"The people you\u2019re with are shaping where you go"},
-    {id:"signal",     label:"\u201cThis would be amazing to have done\u2026\u201d",  sub:"The trip matters partly because of what it means to have made it"}
+    {id:"narrative",  label:"\u201cI\u2019ve always wanted to\u2026\u201d",         placeholder:"\u2026ride the Trans-Siberian Railway. See the fjords. Walk the Camino."},
+    {id:"doing",      label:"\u201cI want to do\u2026\u201d",                        placeholder:"\u2026hike for a week in alpine country. Learn to make pasta in Bologna."},
+    {id:"seeing",     label:"\u201cI want to see\u2026\u201d",                       placeholder:"\u2026the Klimts in the Belvedere. The light in the Cyclades. Angkor at dawn."},
+    {id:"different",  label:"\u201cI need something different\u2026\u201d",          placeholder:"\u2026from the noise and speed of my current life."},
+    {id:"relational", label:"\u201cWe should go somewhere that\u2026\u201d",         placeholder:"\u2026works for the kids but doesn\u2019t bore us. Gives us time together."},
+    {id:"signal",     label:"\u201cThis would be amazing to have done\u2026\u201d",  placeholder:"\u2026once in my life. While I still can."}
   ];
+
   var drivers = _tb.drivers || [];
+  var texts = _tb.driverTexts || {};
+
   var sentHtml = sentences.map(function(s){
     var on = drivers.indexOf(s.id) > -1;
-    return '<div class="tb-sentence'+(on?' on':'')+'" data-id="'+s.id+'" onclick="toggleSentence(this)">'
-      +'<div class="tb-sentence-label">'+s.label+'</div>'
-      +'<div class="tb-sentence-sub">'+s.sub+'</div>'
-      +'</div>';
+    var html = '<div class="tb-sentence'+(on?' on':'')+'" data-id="'+s.id+'" onclick="toggleSentence(this)">'
+      +'<div class="tb-sentence-label">'+s.label+'</div>';
+    if(!on){
+      html += '<div class="tb-sentence-sub" style="color:#aaa;font-size:10px;margin-top:3px;">Tap to complete the sentence</div>';
+    }
+    html += '</div>';
+    if(on){
+      html += '<div style="margin:4px 0 12px 0;padding:0 14px;">'
+        +'<textarea data-driver-text="'+s.id+'" rows="2" oninput="_tb.driverTexts=_tb.driverTexts||{};_tb.driverTexts[\''+s.id+'\']=this.value;" placeholder="'+s.placeholder+'" style="width:100%;border:1px solid #ddd;border-radius:6px;padding:8px 10px;font-family:inherit;font-size:12px;resize:vertical;background:#fff;box-sizing:border-box;">'
+        +(texts[s.id]||'')
+        +'</textarea>'
+        +'</div>';
+    }
+    return html;
+  }).join("");
+
+  var famOptions = [{id:"first",label:"First visit"},{id:"before",label:"Been before"},{id:"know",label:"Know it well"}];
+  var fam = _tb.familiarity || "";
+  var famHtml = famOptions.map(function(f){
+    var on = fam === f.id;
+    return '<span class="tb-toggle'+(on?' on':'')+'" onclick="_tb.familiarity=\''+f.id+'\';renderTripStep1Recognition();">'+f.label+'</span>';
   }).join("");
 
   ov.innerHTML='<div class="tb-header">'
     +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Step 1 of 2</div></div></div>'
     +'<div class="tb-title">What\u2019s the sentence that started this trip?</div>'
-    +'<div class="tb-sub">Select as many as feel true. The way you say it reveals what\u2019s actually driving things.</div>'
+    +'<div class="tb-sub">Select as many as feel true, and finish each one.</div>'
     +'</div>'
     +'<div class="tb-body">'
-
     +'<div class="tb-field" style="margin-bottom:20px;"><div class="tb-sentences">'+sentHtml+'</div></div>'
-
-    +'<div class="tb-field" id="gradient-field" style="'+(drivers.indexOf('different')>-1?'':'display:none;')+'">'
-    +'<label>What does \u201cdifferent\u201d mean for you right now?</label>'
-    +'<textarea id="tb-gradient" rows="3" placeholder="e.g. My life is loud and busy. I want quiet, slow, and warm. Not a resort \u2014 something real but simpler.">'+((_tb.gradient)||'')+'</textarea>'
-    +'<div style="font-size:10px;color:#aaa;margin-top:4px;">Max will look for places at the right distance from your current life.</div></div>'
-
     +'<div class="tb-field">'
-    +'<label>Tell Max more <span style="font-weight:400;color:#aaa;">(optional)</span></label>'
-    +'<textarea id="tb-intent" rows="3" placeholder="e.g. Going with my partner for three weeks. Want mountain scenery but also a city with real cultural depth. Always wanted to ride a great train.">'
-    +(_tb.intent||'')+'</textarea>'
-    +'<div style="font-size:10px;color:#aaa;margin-top:4px;">You don\u2019t need to have this figured out yet.</div></div>'
-
+    +'<label>How familiar are you with this part of the world?</label>'
+    +'<div style="display:flex;gap:6px;margin-top:5px;">'+famHtml+'</div></div>'
     +'<div class="tb-field">'
     +'<label>Must-dos or anchors <span style="font-weight:400;color:#aaa;">(optional)</span></label>'
     +'<input id="tb-anchors" value="'+(_tb.anchors||'')+'" placeholder="e.g. Vienna Philharmonic, Glacier Express\u2026" /></div>'
-
     +'</div>'
     +'<div class="tb-footer">'
     +'<button class="tb-btn-primary" onclick="saveRecognitionAndContinue()">A few things Max needs to know \u2192</button>'
@@ -2865,12 +2874,16 @@ function renderTripStep1Recognition(){
 }
 
 function saveRecognitionAndContinue(){
-  _tb.intent   = g("tb-intent")   ? g("tb-intent").value.trim()   : (_tb.intent||"");
   _tb.anchors  = g("tb-anchors")  ? g("tb-anchors").value.trim()  : (_tb.anchors||"");
-  _tb.gradient = g("tb-gradient") ? g("tb-gradient").value.trim() : (_tb.gradient||"");
+  var texts = _tb.driverTexts || {};
+  var labels = {narrative:"I\u2019ve always wanted to", doing:"I want to do", seeing:"I want to see", different:"I need something different", relational:"We should go somewhere that", signal:"This would be amazing to have done"};
+  var parts = (_tb.drivers||[]).map(function(id){
+    return texts[id] ? labels[id] + " " + texts[id] : labels[id];
+  });
+  _tb.intent = parts.join(". ");
+  _tb.gradient = texts["different"] || "";
   var drivers = _tb.drivers || [];
-  // Gradient-only driver with no text → open gradient conversation
-  if(drivers.indexOf("different") > -1 && drivers.length === 1 && !_tb.gradient){
+  if(drivers.indexOf("different") > -1 && drivers.length === 1 && !texts["different"]){
     openGradientConversation();
   } else {
     renderTripBrief();
@@ -3002,12 +3015,15 @@ function renderTripStep2(){
 function toggleSentence(el){
   var id = el.dataset.id;
   _tb.drivers = _tb.drivers || [];
+  _tb.driverTexts = _tb.driverTexts || {};
   var idx = _tb.drivers.indexOf(id);
-  if(idx > -1) _tb.drivers.splice(idx,1); else _tb.drivers.push(id);
-  // Show/hide gradient field
-  var gf = g("gradient-field");
-  if(gf) gf.style.display = _tb.drivers.indexOf("different") > -1 ? "" : "none";
-  el.classList.toggle("on");
+  if(idx > -1){
+    _tb.drivers.splice(idx,1);
+    delete _tb.driverTexts[id];
+  } else {
+    _tb.drivers.push(id);
+  }
+  renderTripStep1Recognition();
 }
 
 function saveStep2AndProceed(){
