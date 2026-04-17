@@ -988,6 +988,26 @@ function clearApiKey(){
 }
 
 // ── Max AI ─────────────────────────────────────────────────
+
+// Max-styled alert (replaces native alert which shows domain)
+function maxAlert(message){
+  var existing = document.getElementById("max-alert-overlay");
+  if(existing) existing.remove();
+  var ov = document.createElement("div");
+  ov.id = "max-alert-overlay";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:11000;display:flex;align-items:center;justify-content:center;padding:24px;";
+  ov.innerHTML = '<div style="background:#fff;border-radius:12px;max-width:380px;width:100%;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);">'
+    +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">'
+    +'<div style="width:28px;height:28px;border-radius:50%;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0;">M</div>'
+    +'<div style="font-size:13px;font-weight:700;">Max</div>'
+    +'</div>'
+    +'<div style="font-size:13px;color:#333;line-height:1.55;margin-bottom:16px;">'+message+'</div>'
+    +'<button onclick="document.getElementById(\'max-alert-overlay\').remove()" style="width:100%;padding:9px;font-size:12px;font-weight:600;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;">OK</button>'
+    +'</div>';
+  ov.onclick = function(e){ if(e.target === ov) ov.remove(); };
+  document.body.appendChild(ov);
+}
+
 var MAX_SYSTEM = "You are Max \u2014 the guide behind \"A Tourist's Guide to the Existential Universe.\" Your voice comes from five years of full-time travel across Europe, Central America, and the American West. You are not a tour operator. You are the traveler who stands in front of Klimt's Judith for forty minutes because you want to understand what he was actually thinking, not what the audio guide says he was thinking.\n\nYou work from specific historical facts \u2014 the date, the name, the decision that made a place what it is. You present those facts without commentary. The implication does its own work. You do not tell travelers what they will feel. You tell them what happened and you trust them.\n\nYour register shifts with purpose: light and observational when things are moving, something quieter when a place earns it. You know the difference between a place that matters and a place that has been told it matters. You are comfortable with uncertainty \u2014 sometimes \"I'd check locally\" is the most honest answer.\n\nHOW TO READ WHAT IS DRIVING A TRIP:\n\nEvery traveler begins with a sentence. That sentence reveals what you are actually working with.\n\n\"I've always wanted to\" \u2014 this is a stored intention, not a new idea. The destination already carries meaning. Your job is to surface the stories and history that will fulfill what has been waiting. Depth and resonance matter more than coverage.\n\n\"I want to\" \u2014 the experience comes first; the destination serves it. Lean toward logistics, sequencing, and the specific conditions that make participation possible. A hiker, a train traveler, a diver each need different things from the same place.\n\n\"I want to see\" \u2014 the traveler is responding to what a place holds. Some places draw through physical presence: landscape, light, scale. Others through what humans have made and left behind. Surface what is actually there, and why it is worth standing in front of.\n\n\"I need something different\" \u2014 this traveler is not choosing a destination yet. They are adjusting distance from their current life. Do not lead with candidates. First understand what they are moving away from and what register of difference they need. Then translate direction into places that sit at the right distance.\n\n\"We should go somewhere that\" \u2014 the group is shaping the trip. A destination that works for one person may fail another. Keep the relational constraints visible.\n\n\"It would be amazing to\" \u2014 there is a performative dimension present. Acknowledge what the trip signals as well as what it contains.\n\nFAMILIARITY SHAPES DEPTH:\n\nNot at all: orient before you go deep. The traveler needs the lay of the land before they can use detail. Do not assume prior knowledge.\n\nA passing understanding: skip basic orientation but do not assume fluency. The traveler knows some names and images but little of the underlying story. Fill in the frame as you go.\n\nQuite a bit: assume the basics are covered. Surface what even regular visitors miss, and what has changed.\n\nFOR PLACE STORIES: open with a specific fact, stay in 3\u20135 sentences, end with an open observation rather than a summary. For direct questions: be brief and concrete. For dig-deeper follow-ups: go further into the historical or cultural thread, don't repeat what you already said.\n\nNever say: hidden gem, vibrant, bustling, must-see, off the beaten path, iconic, charming, quaint, magical. Never tell the traveler how they will feel.";
 
 async function callMax(messages, maxTokens, timeoutMs) {
@@ -2868,7 +2888,7 @@ function renderTripStep1Recognition(){
     +'<div style="font-size:11px;color:#aaa;margin-top:6px;">Where can be broad (Southeast Asia) or specific (Kyoto). The \u201cin order to\u201d is what makes it yours.</div>'
     +'</div>'
     +'<div class="tb-field">'
-    +'<label style="display:block;margin-bottom:6px;font-size:12px;color:#555;">Or tap anything else that matters for this trip <span style="color:#aaa;font-weight:400;">(optional)</span></label>'
+    +'<label style="display:block;margin-bottom:6px;font-size:12px;color:#555;">You can also tap anything else you might want to do in '+(_tb.region||'this region')+' <span style="color:#aaa;font-weight:400;">(optional)</span></label>'
     +'<div class="tb-chips">'+chipsHtml+'</div>'
     +'</div>'
     +'<div class="tb-field">'
@@ -2923,7 +2943,7 @@ function saveRecognitionAndContinue(){
   if(m && m[1]) _tb.region = m[1].trim();
 
   if(!_tb.tripSentence){
-    alert("Please describe where you want to go and why.");
+    maxAlert("Please describe where you want to go and what you want to do there.");
     return;
   }
 
@@ -2960,7 +2980,7 @@ function renderTripBrief(){
     +'<input id="tb-exit" value="'+(_tb.tbExit||'')+'" placeholder="'+(_tb.exitFixed?'e.g. Geneva \u2014 tickets already booked':'e.g. Same place, or wherever makes sense')+'" /></div>'
     +'</div>'
     +'<div class="tb-field"><label>How do you want to get around?</label><input id="tb-transport" placeholder="e.g. Trains and walking. Will take a taxi when needed. No car rentals." /></div>'
-    +'<div class="tb-field"><label>What kinds of places do you want to stay in?</label><input id="tb-accommodation" placeholder="e.g. Small family hotels, apartments, rooms in private homes. En suite required. No hostels, no shared bathrooms." /></div>'
+    +'<div class="tb-field"><label>In approximate order of preference, what kinds of places do you want to stay in?</label><input id="tb-accommodation" placeholder="e.g. Small family hotels, apartments, rooms in private homes. En suite required. No hostels, no shared bathrooms." /></div>'
     +'<div class="tb-field"><label>What\u2019s your pace?</label><input id="tb-pace" placeholder="e.g. Slow \u2014 two or three things a day, time to sit and watch the world." /></div>'
     +'<div class="tb-field"><label>Where will you bend?</label><textarea id="tb-compromises" rows="2" placeholder="e.g. I\u2019d rather spend a full morning in one place than rush \u2014 but I\u2019ll move faster for something genuinely unmissable. I\u2019d consider a room in a private home if it\u2019s the best option."></textarea><div style="font-size:10px;color:#aaa;margin-top:3px;">Preferences Max can weigh, not rules.</div></div>'
     +'<div class="tb-field"><label>Where won\u2019t you compromise?</label><textarea id="tb-hardlimits" rows="2" placeholder="e.g. No car rentals under any circumstances. En suite bathroom required. No shared dormitory accommodation."></textarea><div style="font-size:10px;color:#aaa;margin-top:3px;">Hard limits Max won\u2019t route around.</div></div>'
@@ -2985,7 +3005,9 @@ function goToTripStep2(){
   _tb.pace          = g("tb-pace")          ? g("tb-pace").value.trim()          : (_tb.pace||"");
   _tb.compromises   = g("tb-compromises")   ? g("tb-compromises").value.trim()   : (_tb.compromises||"");
   _tb.hardlimits    = g("tb-hardlimits")    ? g("tb-hardlimits").value.trim()    : (_tb.hardlimits||"");
-  if(!_tb.region){ alert("Please enter where you\u2019re going."); return; }
+  // Fallback: if sentence didn't parse cleanly into region, use the sentence itself
+  if(!_tb.region && _tb.tripSentence){ _tb.region = _tb.tripSentence; }
+  if(!_tb.region){ maxAlert("Please describe where you want to go and what you want to do there."); return; }
   findCandidates();
 }
 
@@ -3162,7 +3184,7 @@ function renderTripBriefEdit(){
     +'<input id="tb-exit" value="'+(_tb.tbExit||'')+'" placeholder="'+(_tb.exitFixed?'e.g. Geneva \u2014 tickets already booked':'e.g. Same place, or wherever makes sense')+'" /></div>'
     +'</div>'
     +'<div class="tb-field"><label>How do you want to get around?</label><input id="tb-transport" value="'+(_tb.transport||'')+'" placeholder="e.g. Trains and walking. No car rentals." /></div>'
-    +'<div class="tb-field"><label>What kinds of places do you want to stay in?</label><input id="tb-accommodation" value="'+(_tb.accommodation||'')+'" placeholder="e.g. Small family hotels, apartments, rooms in private homes. En suite required." /></div>'
+    +'<div class="tb-field"><label>In approximate order of preference, what kinds of places do you want to stay in?</label><input id="tb-accommodation" value="'+(_tb.accommodation||'')+'" placeholder="e.g. Small family hotels, apartments, rooms in private homes. En suite required." /></div>'
     +'<div class="tb-field"><label>What\u2019s your pace?</label><input id="tb-pace" value="'+(_tb.pace||'')+'" placeholder="e.g. Slow \u2014 two or three things a day." /></div>'
     +'<div class="tb-field"><label>Where will you bend?</label><textarea id="tb-compromises" rows="2">'+(_tb.compromises||'')+'</textarea><div style="font-size:10px;color:#aaa;margin-top:3px;">Preferences Max can weigh, not rules.</div></div>'
     +'<div class="tb-field"><label>Where won\u2019t you compromise?</label><textarea id="tb-hardlimits" rows="2">'+(_tb.hardlimits||'')+'</textarea><div style="font-size:10px;color:#aaa;margin-top:3px;">Hard limits Max won\u2019t route around.</div></div>'
