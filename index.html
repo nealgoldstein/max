@@ -2888,7 +2888,7 @@ function renderTripStep1Recognition(){
     +'<div style="font-size:11px;color:#aaa;margin-top:6px;">Where can be broad (Southeast Asia) or specific (Kyoto). The \u201cin order to\u201d is what makes it yours.</div>'
     +'</div>'
     +'<div class="tb-field">'
-    +'<label style="display:block;margin-bottom:6px;font-size:12px;color:#555;">You can also tap anything else you might want to do in '+(_tb.region||'this region')+' <span style="color:#aaa;font-weight:400;">(optional)</span></label>'
+    +'<label style="display:block;margin-bottom:6px;font-size:12px;color:#555;">You can also tap anything else you might want to do '+(_tb.region?'in '+_tb.region:'there')+' <span style="color:#aaa;font-weight:400;">(optional)</span></label>'
     +'<div class="tb-chips">'+chipsHtml+'</div>'
     +'</div>'
     +'<div class="tb-field">'
@@ -2951,6 +2951,25 @@ function saveRecognitionAndContinue(){
 }
 
 
+
+function toggleEntryExit(which, isFixed){
+  if(which === "entry") _tb.entryFixed = isFixed;
+  else _tb.exitFixed = isFixed;
+  // Update button classes
+  var row = document.getElementById(which + "-toggles");
+  if(row){
+    var spans = row.querySelectorAll(".tb-toggle");
+    spans[0].classList.toggle("on", isFixed);
+    spans[1].classList.toggle("on", !isFixed);
+  }
+  // Update placeholder of input
+  var inp = document.getElementById("tb-" + (which === "entry" ? "entry" : "exit"));
+  if(inp){
+    if(which === "entry") inp.placeholder = isFixed ? "e.g. Zurich \u2014 tickets already booked" : "e.g. Probably Zurich or Geneva, open to what fits";
+    else inp.placeholder = isFixed ? "e.g. Geneva \u2014 tickets already booked" : "e.g. Same place, or wherever makes sense";
+  }
+}
+
 function renderTripBrief(){
   var ov=g("trip-brief-overlay"); ov.className="tb-overlay";
   ov.style.cssText="position:fixed;inset:0;background:#f7f7f5;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
@@ -2966,16 +2985,16 @@ function renderTripBrief(){
     +'<div class="tb-field" style="display:flex;gap:8px;">'
     +'<div style="flex:1">'
     +'<label>Where will you arrive?</label>'
-    +'<div style="display:flex;gap:5px;margin-bottom:5px;">'
-    +'<span class="tb-toggle'+(_tb.entryFixed?' on':'')+" onclick=\"_tb.entryFixed=true;renderTripBrief();\">Fixed</span>"
-    +'<span class="tb-toggle'+(!_tb.entryFixed?' on':'')+" onclick=\"_tb.entryFixed=false;renderTripBrief();\">Flexible</span>"
+    +'<div id="entry-toggles" style="display:flex;gap:5px;margin-bottom:5px;">'
+    +'<span class="tb-toggle'+(_tb.entryFixed?' on':'')+" onclick=\"toggleEntryExit('entry',true)\">Fixed</span>"
+    +'<span class="tb-toggle'+(!_tb.entryFixed?' on':'')+" onclick=\"toggleEntryExit('entry',false)\">Flexible</span>"
     +'</div>'
     +'<input id="tb-entry" value="'+(_tb.entry||'')+'" placeholder="'+(_tb.entryFixed?'e.g. Zurich \u2014 tickets already booked':'e.g. Probably Zurich or Geneva, open to what fits')+'" /></div>'
     +'<div style="flex:1">'
     +'<label>Where will you depart from?</label>'
-    +'<div style="display:flex;gap:5px;margin-bottom:5px;">'
-    +'<span class="tb-toggle'+(_tb.exitFixed?' on':'')+" onclick=\"_tb.exitFixed=true;renderTripBrief();\">Fixed</span>"
-    +'<span class="tb-toggle'+(!_tb.exitFixed?' on':'')+" onclick=\"_tb.exitFixed=false;renderTripBrief();\">Flexible</span>"
+    +'<div id="exit-toggles" style="display:flex;gap:5px;margin-bottom:5px;">'
+    +'<span class="tb-toggle'+(_tb.exitFixed?' on':'')+" onclick=\"toggleEntryExit('exit',true)\">Fixed</span>"
+    +'<span class="tb-toggle'+(!_tb.exitFixed?' on':'')+" onclick=\"toggleEntryExit('exit',false)\">Flexible</span>"
     +'</div>'
     +'<input id="tb-exit" value="'+(_tb.tbExit||'')+'" placeholder="'+(_tb.exitFixed?'e.g. Geneva \u2014 tickets already booked':'e.g. Same place, or wherever makes sense')+'" /></div>'
     +'</div>'
@@ -3480,7 +3499,7 @@ function showCandidateExplorer(cands){
   ov.style.display="block"; ov.className="ce-overlay";
   ov.innerHTML='<div class="ce-header">'
     +'<div><div class="ce-title">Candidate Places</div><div class="ce-sub">Step 2 of 3 \u00b7 Required stops + places worth visiting on their own</div></div>'
-    +'<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:500;" onclick="cancelCandidateExplorer()">\u2190 Edit brief</button>'
+    +'<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:500;margin-right:6px;" onclick="editWhereWhy()">\u2190 Edit where & why</button>'+'<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:500;" onclick="editHowYouTravel()">Edit how you travel</button>'
     +'</div>'
     +'<div class="ce-body">'
     +'<div class="ce-left">'
@@ -3663,6 +3682,18 @@ function updateCEShortlist(){
 function cancelCandidateExplorer(){
   g("candidate-explorer-overlay").style.display="none";
   g("trip-brief-overlay").style.display="block";
+}
+
+function editWhereWhy(){
+  g("candidate-explorer-overlay").style.display="none";
+  g("trip-brief-overlay").style.display="block";
+  renderTripStep1Recognition();
+}
+
+function editHowYouTravel(){
+  g("candidate-explorer-overlay").style.display="none";
+  g("trip-brief-overlay").style.display="block";
+  renderTripBrief();
 }
 
 // ─── COMPARISON ────────────────────────────────────────────
