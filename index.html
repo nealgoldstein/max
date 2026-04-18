@@ -2864,21 +2864,37 @@ async function runCandidateSearch(requiredPlaces) {
               : familiarity === "before" ? "\nThe traveler has a passing understanding of this region. Fill in context as needed without over-explaining.\n"
               : "";
 
-  var p2 = "You are a travel expert helping plan a trip to " + (_tb.region||"this region") + ".\n"
+  // DISCOVERY is split into two parallel calls so major cities can't be
+  // crowded out by thematic picks near the must-dos.
+  //   pCities: 4-6 major cities of the region a traveler would regret missing
+  //   pThematic: places that fit the specific trip shape (the existing logic)
+  // Together they feed into "Other places worth considering".
+  var cityCount = Math.min(5, Math.max(3, Math.ceil(extraCount / 2)));
+  var thematicCount = Math.max(5, extraCount - cityCount);
+
+  var pCities = "You are a travel expert helping plan a trip to " + (_tb.region||"this region") + ".\n"
+    + "Trip context: " + brief + "\n"
+    + (skipList ? "These stops are already confirmed: " + skipList + ". Do NOT include them again.\n" : "")
+    + "\nList the " + cityCount + " most significant cities in " + (_tb.region||"this region") + " that a well-traveled visitor would consider \u2014 "
+    + "the major gateway cities, cultural capitals, and places most travelers regret missing regardless of trip theme. "
+    + "For " + (_tb.region||"this region") + ", think about the cities that anchor the country's identity \u2014 the capital, the banking/cultural centers, "
+    + "the historic trade cities. Include them even if they don't obviously fit this traveler's theme; the traveler can decide.\n"
+    + "Return ONLY a JSON array of exactly " + cityCount + " places (no markdown):\n"
+    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why a traveler to this region would want to see it \u2014 specific, not generic.","tradeoffs":"One honest downside (e.g. expensive, touristy, requires rearranging the trip).","tags":["tag1"],"lat":0.0,"lng":0.0}]';
+
+  var pThematic = "You are a travel expert helping plan a trip to " + (_tb.region||"this region") + ".\n"
     + "Trip context: " + brief + "\n"
     + driverInstruction
     + famNote
     + releasedNote
     + (skipList ? "These stops are already confirmed: " + skipList + ". Do NOT include them again.\n" : "")
-    + "\nSurvey ALL the destinations in this region that a serious traveler would consider. "
-    + "Start by listing every place genuinely worth visiting — major cities, towns, natural areas — then select the " + extraCount + " that best fit this specific trip. "
-    + "Do NOT skip well-known places because they seem obvious. Famous cities are famous for good reasons. "
-    + "A traveler doing this trip would almost certainly regret missing: the major gateway cities, the cultural capitals, the places everyone who has been there mentions. Include those. "
-    + "Then add less obvious places that specifically fit what this traveler wants.\n"
-    + "Return ONLY a JSON array of exactly " + extraCount + " places (no markdown):\n"
-    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"What makes it worth visiting — specific, not generic.","tradeoffs":"One honest downside.","tags":["tag1"],"lat":0.0,"lng":0.0}]';
+    + "\nList " + thematicCount + " additional destinations that specifically fit the shape of this trip \u2014 places that extend, enrich, or complement what the traveler described. "
+    + "These should NOT be the obvious major cities (those are handled separately). Focus on less obvious places that reward the kind of traveler this is: "
+    + "scenic towns, regional hubs, natural areas, places that deepen the trip's theme.\n"
+    + "Return ONLY a JSON array of exactly " + thematicCount + " places (no markdown):\n"
+    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"What makes it worth visiting for this specific trip \u2014 specific, not generic.","tradeoffs":"One honest downside.","tags":["tag1"],"lat":0.0,"lng":0.0}]';
 
-  // Run in parallel — total wait = max(call1, call2) not call1 + call2
+  // Run all three in parallel — total wait = max(p1, pCities, pThematic)
   var calls = [];
   if (p1) calls.push(callMax([{role:"user",content:p1}], 2000, 45000).then(function(t){
     var cands = JSON.parse(t.replace(/```json|```/g,"").trim());
@@ -2889,7 +2905,13 @@ async function runCandidateSearch(requiredPlaces) {
     return cands;
   }).catch(function(e){ console.warn("Required stops call failed:", e.message); return []; }));
 
-  calls.push(callMax([{role:"user",content:p2}], 2000, 45000).then(function(t){
+  calls.push(callMax([{role:"user",content:pCities}], 1500, 45000).then(function(t){
+    var cands = JSON.parse(t.replace(/```json|```/g,"").trim());
+    cands.forEach(function(c){ c._required=false; c._requiredFor=[]; c._cityPick=true; });
+    return cands;
+  }).catch(function(e){ console.warn("Major-cities call failed:", e.message); return []; }));
+
+  calls.push(callMax([{role:"user",content:pThematic}], 2000, 45000).then(function(t){
     var cands = JSON.parse(t.replace(/```json|```/g,"").trim());
     cands.forEach(function(c){ c._required=false; c._requiredFor=[]; });
     return cands;
@@ -2900,9 +2922,12 @@ async function runCandidateSearch(requiredPlaces) {
     var allCands = [];
     var p2Failed = false;
     var p1Failed = false;
-    // p1 is index 0 (required stops), p2 is last (discovery)
+    // With 3 calls: p1 (required) at index 0 when present; pCities next; pThematic last.
+    // p2Failed means BOTH discovery calls failed (treat as total discovery failure).
     var p1Idx = (p1 !== null) ? 0 : -1;
-    var p2Idx = calls.length - 1;
+    var citiesIdx = p1 !== null ? 1 : 0;
+    var thematicIdx = calls.length - 1;
+    var citiesFailed = false, thematicFailed = false;
     results.forEach(function(r, i){
       if (r.status === "fulfilled" && r.value && r.value.length) {
         allCands = allCands.concat(r.value);
@@ -2911,9 +2936,11 @@ async function runCandidateSearch(requiredPlaces) {
           p1Failed = true;
           console.warn("Required stops (p1) returned empty or failed");
         }
-        if (i === p2Idx) p2Failed = true;
+        if (i === citiesIdx) citiesFailed = true;
+        if (i === thematicIdx) thematicFailed = true;
       }
     });
+    p2Failed = citiesFailed && thematicFailed;
     // If p1 failed, surface required stops directly from _tb.requiredPlaces
     // and kick off a recovery fetch to fill in real descriptions
     if (p1Failed && requiredPlaces.length > 0) {
@@ -2934,6 +2961,15 @@ async function runCandidateSearch(requiredPlaces) {
       });
     }
     if (!allCands.length) throw new Error("No candidates returned");
+    // Dedupe: both discovery calls might return the same place. Keep first occurrence.
+    var seen = {};
+    allCands = allCands.filter(function(c){
+      var key = (c.place||"").toLowerCase().trim();
+      if (!key) return true;
+      if (seen[key]) return false;
+      seen[key] = true;
+      return true;
+    });
     allCands.forEach(function(c,i){ c.id="c"+i; c.status=null; });
     _tb.candidates = allCands;
     _tb.p2Failed = p2Failed;
