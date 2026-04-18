@@ -628,6 +628,25 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 
 /* ── Trip Brief & Candidate Explorer ────────────── */
 .tb-overlay{position:fixed;inset:0;background:#f7f7f5;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+/* Scroll affordance: when the overlay's form content extends beyond the viewport,
+   a soft fade appears on the top edge of the sticky footer, hinting at more content
+   above the CTA button. Fades away as the user scrolls to the bottom. */
+.tb-overlay.has-overflow .tb-footer{position:relative;}
+.tb-overlay.has-overflow .tb-footer::before{
+  content:"";position:absolute;left:0;right:0;top:-24px;height:24px;pointer-events:none;
+  background:linear-gradient(to bottom, rgba(247,247,245,0) 0%, rgba(247,247,245,0.9) 100%);
+  transition:opacity 0.3s ease;opacity:1;
+}
+.tb-overlay.at-bottom .tb-footer::before{opacity:0;}
+/* Bouncing chevron above the CTA when content overflows, to catch the eye */
+.tb-overlay.has-overflow .tb-footer::after{
+  content:"\2304";position:absolute;top:-22px;left:50%;transform:translateX(-50%);
+  font-size:16px;color:#aaa;pointer-events:none;opacity:0.75;
+  animation:scroll-bounce 2s ease-in-out infinite;
+}
+.tb-overlay.at-bottom .tb-footer::after{opacity:0;animation:none;}
+@keyframes scroll-bounce{0%,100%{transform:translate(-50%,0);opacity:0.5;}50%{transform:translate(-50%,4px);opacity:0.85;}}
+@media (prefers-reduced-motion:reduce){.tb-overlay.has-overflow .tb-footer::after{animation:none;}}
 .tb-header{padding:20px 28px 0;flex-shrink:0;}
 .tb-logo{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
 .tb-logo-m{width:28px;height:28px;background:#111;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:700;}
@@ -955,6 +974,33 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 function g(id){return document.getElementById(id);}
 function show(id){g(id).classList.remove("hidden");}
 function hide(id){g(id).classList.add("hidden");}
+
+// Scroll affordance: when a scrollable overlay has content extending beyond the
+// viewport, toggle .has-overflow on the overlay so CSS can show a gradient+chevron
+// on top of the sticky footer. .at-bottom hides the hint once the user reaches the end.
+// Idempotent — safe to call after every render.
+function attachScrollHint(ov){
+  if(!ov) return;
+  var update = function(){
+    var clientH = ov.clientHeight;
+    var scrollH = ov.scrollHeight;
+    var top = ov.scrollTop;
+    var hasOverflow = scrollH > clientH + 4;
+    var atBottom = top + clientH >= scrollH - 8;
+    ov.classList.toggle("has-overflow", hasOverflow);
+    ov.classList.toggle("at-bottom", atBottom);
+  };
+  // Remove old listener if this overlay has been set up before
+  if(ov._scrollHintBound){
+    ov.removeEventListener("scroll", ov._scrollHintBound);
+    window.removeEventListener("resize", ov._scrollHintBound);
+  }
+  ov._scrollHintBound = update;
+  ov.addEventListener("scroll", update, {passive:true});
+  window.addEventListener("resize", update);
+  setTimeout(update, 50);
+  setTimeout(update, 300);
+}
 
 // ── API key management ─────────────────────────────────────
 var _apiKey = null;
@@ -3228,6 +3274,8 @@ function renderTripStep1Recognition(){
   if(_anc) _tb.anchors = _anc.value;
   var ov=g("trip-brief-overlay"); ov.className="tb-overlay";
   ov.style.cssText="position:fixed;inset:0;background:#f7f7f5;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
+  // Reset scroll to top on render (fresh view), then attach the scroll hint
+  setTimeout(function(){ ov.scrollTop = 0; attachScrollHint(ov); }, 0);
 
   // Explanation shown unless permanently dismissed
   var hideIntro = false;
@@ -3384,6 +3432,8 @@ function toggleEntryExit(which, isFixed){
 function renderTripBrief(){
   var ov=g("trip-brief-overlay"); ov.className="tb-overlay";
   ov.style.cssText="position:fixed;inset:0;background:#f7f7f5;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
+  // Reset scroll to top on render (fresh view), then attach the scroll hint
+  setTimeout(function(){ ov.scrollTop = 0; attachScrollHint(ov); }, 0);
   ov.innerHTML='<div class="tb-header">'
     +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Step 2 of 2</div></div></div>'
     +'<div class="tb-title">A few things Max needs to know about how you want to travel</div>'
@@ -3606,6 +3656,7 @@ function renderTripBriefEdit(){
   // Same as renderTripBrief but CTA goes to previewConstraintChanges
   var ov=g("trip-brief-overlay"); ov.className="tb-overlay";
   ov.style.cssText="position:fixed;inset:0;background:#f7f7f5;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
+  setTimeout(function(){ ov.scrollTop = 0; attachScrollHint(ov); }, 0);
   ov.innerHTML='<div class="tb-header">'
     +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Edit constraints</div></div></div>'
     +'<div class="tb-title">How you travel</div>'
