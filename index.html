@@ -856,7 +856,6 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
         <button class="file-btn" onclick="goHome()" title="All trips">&larr; Home</button>
         <button class="file-btn" onclick="editConstraints()" title="Edit how you travel">&#9998; Constraints</button>
         <button class="file-btn" onclick="saveTrip()" title="Save">Save</button>
-        <button class="file-btn" onclick="showLogisticsScreen()" title="Arrival, departure &amp; transport">&#9992;</button>
         <button class="file-btn" id="api-key-btn" onclick="showApiKeyForm()" title="Set API key" style="opacity:0.6;">&#x1F511;</button>
       </div>
     </div>
@@ -2909,77 +2908,11 @@ var _logRentals = [];
 var _logRentalCtr = 0;
 
 function showLogisticsScreen() {
-  var existing = document.getElementById("log-overlay");
-  if (existing) existing.remove();
-  _logRentals = [];
-  _logRentalCtr = 0;
-
-  var ov = document.createElement("div");
-  ov.id = "log-overlay";
-  ov.className = "log-overlay";
-
-  // Parse start/end from trip dates if available
-  var tripStart = "";
-  var tripEnd = "";
-  if (trip && trip.destinations && trip.destinations.length) {
-    tripStart = trip.destinations[0].dateFrom || "";
-    var last = trip.destinations[trip.destinations.length-1];
-    tripEnd = last.dateTo || "";
-  }
-
-  ov.innerHTML = '<div class="log-header">'
-    + '<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="log-step">Logistics</div></div></div>'
-    + '<div class="log-title" style="margin-top:8px;">How are you getting to '+(_tb.entry||_tb.region||'your first stop')+'?</div>'
-    + '<div class="log-sub">Max has what you told him earlier. This is where the concrete details go \u2014 dates, specific airports if different, rental periods.</div>'
-    + '</div>'
-    + '<div class="log-body">'
-
-    // Arrival
-    + '<div class="log-section">'
-    + '<div class="log-section-title">Arrival</div>'
-    + (_tb.entry ? '<div style="font-size:11px;color:#888;margin-bottom:8px;font-style:italic;">You told Max you\u2019ll arrive in \u201c'+_tb.entry+'\u201d'+(_tb.entryFixed?' (fixed).':' (flexible).')+'</div>' : '')
-    + '<div class="log-row">'
-    + '<div class="log-field"><label>Flying into</label><input id="log-arr-city" value="'+(_tb.entry||'')+'" placeholder="e.g. Zurich" /></div>'
-    + '<div class="log-field"><label>Date</label><input id="log-arr-date" type="date" value="' + tripStart + '" /></div>'
-    + '</div></div>'
-
-    // Departure
-    + '<div class="log-section">'
-    + '<div class="log-section-title">Departure</div>'
-    + (_tb.tbExit ? '<div style="font-size:11px;color:#888;margin-bottom:8px;font-style:italic;">You told Max you\u2019ll depart from \u201c'+_tb.tbExit+'\u201d'+(_tb.exitFixed?' (fixed).':' (flexible).')+'</div>' : '')
-    + '<label class="log-same-dep"><input type="checkbox" id="log-same-dep" onchange="toggleSameDep(this)" '+((_tb.entry && _tb.tbExit && _tb.entry===_tb.tbExit)?'checked':'')+' /> Same city as arrival</label>'
-    + '<div id="log-dep-fields" style="display:'+((_tb.entry && _tb.tbExit && _tb.entry!==_tb.tbExit)?'block':'none')+';">'
-    + '<div class="log-row">'
-    + '<div class="log-field"><label>Flying out of</label><input id="log-dep-city" value="'+(_tb.tbExit||'')+'" placeholder="e.g. Geneva" /></div>'
-    + '<div class="log-field"><label>Date</label><input id="log-dep-date" type="date" value="' + tripEnd + '" /></div>'
-    + '</div></div></div>'
-
-    // Ground transport
-    + '<div class="log-section">'
-    + '<div class="log-section-title">Connecting between stops</div>'
-    + (_tb.transport ? '<div style="font-size:11px;color:#888;margin-bottom:8px;font-style:italic;">You told Max: \u201c'+(_tb.transport)+'\u201d</div>' : '')
-    + '<div class="log-transport-opts">'
-    + '<div class="log-transport-opt on" id="log-t-rail" onclick="setTransport(\'rail\')">🚆 Train / transit</div>'
-    + '<div class="log-transport-opt" id="log-t-car" onclick="setTransport(\'car\')">🚗 Rental car</div>'
-    + '<div class="log-transport-opt" id="log-t-mix" onclick="setTransport(\'mix\')">Mix of both</div>'
-    + '</div></div>'
-
-    // Car rentals
-    + '<div class="log-section" id="log-rental-section" style="display:none;">'
-    + '<div class="log-section-title">Car rental details</div>'
-    + '<div id="log-rentals"></div>'
-    + '<div class="log-add-rental" onclick="addRental()">\u002b Add rental period</div>'
-    + '</div>'
-
-    + '</div>' // end log-body
-    + '<div class="log-footer">'
-    + '<button class="log-btn-primary" onclick="saveLogistics()">Save and continue \u2192</button>'
-    + '<button class="log-btn-skip" onclick="skipLogistics()">Decide later \u2014 I\u2019ll set this up once I know more</button>'
-    + '</div>';
-
-  document.body.appendChild(ov);
-  // No height fix needed - CSS handles it
+  // Retired. Transport info now lives on Step 2 of the trip brief.
+  // If an existing trip still calls this, send the user to Constraints instead.
+  if (typeof editConstraints === "function") editConstraints();
 }
+
 
 function toggleSameDep(cb) {
   var depFields = document.getElementById("log-dep-fields");
@@ -3402,27 +3335,41 @@ function renderTripBrief(){
     
     +'<div class="tb-field"><label>When you want to go</label><input id="tb-when" placeholder="e.g. September\u2013October, shoulder season. Or: fixed dates Jun 12\u201328." /></div>'
     +'<div class="tb-field"><label>How long you want to travel</label><input id="tb-duration" placeholder="e.g. 10\u201314 days, three weeks\u2026" /></div>'
-    +'<div class="tb-field" style="display:flex;gap:8px;">'
-    +'<div style="flex:1">'
-    +'<label>Where you\u2019ll arrive</label>'
-    +'<div id="entry-toggles" style="display:flex;gap:5px;margin-bottom:5px;">'
-    +'<span class="tb-toggle'+(_tb.entryFixed?' on':'')+" onclick=\"toggleEntryExit('entry',true)\">Fixed</span>"
-    +'<span class="tb-toggle'+(!_tb.entryFixed?' on':'')+" onclick=\"toggleEntryExit('entry',false)\">Flexible</span>"
+
+    +'<div style="margin-top:14px;padding:8px 12px;background:#f0ede3;border-radius:6px;font-size:11px;font-weight:700;color:#555;letter-spacing:0.03em;text-transform:uppercase;">How you\u2019re moving</div>'
+    +'<div style="font-size:11px;color:#888;margin:4px 2px 10px;line-height:1.55;">Three parts Max will use together: how you get to the region, how you move within it, how you get out. Any of these can change \u2014 you can always come back and edit.</div>'
+
+    +'<div class="tb-field"><label>How you\u2019re getting to '+(_tb.region||'the region')+'</label>'
+    +'<input id="tb-gettingTo" value="'+(_tb.gettingTo||'')+'" placeholder="e.g. Flying into Zurich Aug 15, Swiss flight 38 \u2014 booked. Or: still deciding between flying or the train up from Milan." />'
+    +'<div style="font-size:10px;color:#aaa;margin-top:3px;">Plane, train, car, other \u2014 in your own words. Include specifics if you have them.</div>'
+    +'<div style="display:flex;gap:5px;margin-top:6px;">'
+    +'<span class="tb-toggle'+(_tb.entryFixed?' on':'')+'" onclick="_tb.entryFixed=true;renderTripBrief();">Booked / fixed</span>'
+    +'<span class="tb-toggle'+(!_tb.entryFixed?' on':'')+'" onclick="_tb.entryFixed=false;renderTripBrief();">Still flexible</span>'
     +'</div>'
-    +'<input id="tb-entry" value="'+(_tb.entry||'')+'" oninput="if(this.value.trim().length>0 && !_tb.entryFixed){toggleEntryExit(\'entry\',true);}" placeholder="'+(_tb.entryFixed?'e.g. Zurich \u2014 tickets already booked':'e.g. Probably Zurich or Geneva, open to what fits')+'" /></div>'
-    +'<div style="flex:1">'
-    +'<label>Where you\u2019ll depart from</label>'
-    +'<div id="exit-toggles" style="display:flex;gap:5px;margin-bottom:5px;">'
-    +'<span class="tb-toggle'+(_tb.exitFixed?' on':'')+" onclick=\"toggleEntryExit('exit',true)\">Fixed</span>"
-    +'<span class="tb-toggle'+(!_tb.exitFixed?' on':'')+" onclick=\"toggleEntryExit('exit',false)\">Flexible</span>"
+    +'<input id="tb-entry" value="'+(_tb.entry||'')+'" placeholder="'+(_tb.region?'First city / arrival point in '+_tb.region:'First city / arrival point')+'" style="margin-top:6px;" />'
     +'</div>'
-    +'<input id="tb-exit" value="'+(_tb.tbExit||'')+'" oninput="if(this.value.trim().length>0 && !_tb.exitFixed){toggleEntryExit(\'exit\',true);}" placeholder="'+(_tb.exitFixed?'e.g. Geneva \u2014 tickets already booked':'e.g. Same place, or wherever makes sense')+'" /></div>'
+
+    +'<div class="tb-field"><label>How you\u2019re moving within '+(_tb.region||'the region')+'</label>'
+    +'<input id="tb-transport" value="'+(_tb.transport||'')+'" placeholder="e.g. Trains and walking. Swiss Travel Pass. Taxi when needed. No rental car." />'
+    +'<div style="font-size:10px;color:#aaa;margin-top:3px;">The main way you\u2019ll get between destinations. Named passes, rental car, mixed \u2014 whatever fits.</div>'
     +'</div>'
-    +'<div class="tb-field"><label>How you want to get around</label><input id="tb-transport" placeholder="e.g. Trains and walking. Will take a taxi when needed. No car rentals." /></div>'
-    +'<div class="tb-field"><label>Where you want to stay <span style="font-weight:400;color:#aaa;">(in rough order of preference)</span></label><input id="tb-accommodation" placeholder="e.g. Small family hotels, apartments, rooms in private homes. En suite required. No hostels, no shared bathrooms." /></div>'
-    +'<div class="tb-field"><label>Your pace</label><input id="tb-pace" placeholder="e.g. Slow \u2014 two or three things a day, time to sit and watch the world." /></div>'
-    +'<div class="tb-field"><label>Where you\u2019ll bend</label><textarea id="tb-compromises" rows="2" placeholder="e.g. I\u2019d rather spend a full morning in one place than rush \u2014 but I\u2019ll move faster for something genuinely unmissable. I\u2019d consider a room in a private home if it\u2019s the best option."></textarea><div style="font-size:10px;color:#aaa;margin-top:3px;">Preferences Max can weigh, not rules.</div></div>'
-    +'<div class="tb-field"><label>Where you won\u2019t compromise</label><textarea id="tb-hardlimits" rows="2" placeholder="e.g. No car rentals under any circumstances. En suite bathroom required. No shared dormitory accommodation."></textarea><div style="font-size:10px;color:#aaa;margin-top:3px;">Hard limits Max won\u2019t route around.</div></div>'
+
+    +'<div class="tb-field"><label>How you\u2019re leaving</label>'
+    +'<input id="tb-gettingOut" value="'+(_tb.gettingOut||'')+'" placeholder="e.g. Flying out of Geneva Sep 5, Swiss 17 \u2014 booked. Or: same flight home from wherever makes sense." />'
+    +'<div style="font-size:10px;color:#aaa;margin-top:3px;">Can be the same mode as arrival, or different (fly in, train out).</div>'
+    +'<div style="display:flex;gap:5px;margin-top:6px;">'
+    +'<span class="tb-toggle'+(_tb.exitFixed?' on':'')+'" onclick="_tb.exitFixed=true;renderTripBrief();">Booked / fixed</span>'
+    +'<span class="tb-toggle'+(!_tb.exitFixed?' on':'')+'" onclick="_tb.exitFixed=false;renderTripBrief();">Still flexible</span>'
+    +'</div>'
+    +'<input id="tb-exit" value="'+(_tb.tbExit||'')+'" placeholder="'+(_tb.region?'Last city / departure point in '+_tb.region:'Last city / departure point')+'" style="margin-top:6px;" />'
+    +'</div>'
+
+    +'<div style="margin-top:14px;padding:8px 12px;background:#f0ede3;border-radius:6px;font-size:11px;font-weight:700;color:#555;letter-spacing:0.03em;text-transform:uppercase;">Where you\u2019ll stay, pace, and limits</div>'
+
+    +'<div class="tb-field"><label>Where you want to stay <span style="font-weight:400;color:#aaa;">(in rough order of preference)</span></label><input id="tb-accommodation" value="'+(_tb.accommodation||'')+'" placeholder="e.g. Small family hotels, apartments, rooms in private homes. En suite required. No hostels, no shared bathrooms." /></div>'
+    +'<div class="tb-field"><label>Your pace</label><input id="tb-pace" value="'+(_tb.pace||'')+'" placeholder="e.g. Slow \u2014 two or three things a day, time to sit and watch the world." /></div>'
+    +'<div class="tb-field"><label>Where you\u2019ll bend</label><textarea id="tb-compromises" rows="2" placeholder="e.g. I\u2019d rather spend a full morning in one place than rush \u2014 but I\u2019ll move faster for something genuinely unmissable.">'+(_tb.compromises||'')+'</textarea><div style="font-size:10px;color:#aaa;margin-top:3px;">Preferences Max can weigh, not rules.</div></div>'
+    +'<div class="tb-field"><label>Where you won\u2019t compromise</label><textarea id="tb-hardlimits" rows="2" placeholder="e.g. No car rentals under any circumstances. En suite bathroom required.">'+(_tb.hardlimits||'')+'</textarea><div style="font-size:10px;color:#aaa;margin-top:3px;">Hard limits Max won\u2019t route around.</div></div>'
     +'</div>'
     +'<div class="tb-footer">'
     +'<button class="tb-btn-primary" onclick="goToTripStep2()">Places to think about \u2192</button>'
@@ -3437,7 +3384,9 @@ function goToTripStep2(){
   // region already set from sentence in Step 1
   _tb.duration      = g("tb-duration")      ? g("tb-duration").value.trim()      : (_tb.duration||"");
   _tb.when          = g("tb-when")          ? g("tb-when").value.trim()          : (_tb.when||"");
+  _tb.gettingTo     = g("tb-gettingTo")     ? g("tb-gettingTo").value.trim()     : (_tb.gettingTo||"");
   _tb.entry         = g("tb-entry")         ? g("tb-entry").value.trim()         : (_tb.entry||"");
+  _tb.gettingOut    = g("tb-gettingOut")    ? g("tb-gettingOut").value.trim()    : (_tb.gettingOut||"");
   _tb.tbExit        = g("tb-exit")          ? g("tb-exit").value.trim()          : (_tb.tbExit||"");
   _tb.transport     = g("tb-transport")     ? g("tb-transport").value.trim()     : (_tb.transport||"");
   _tb.accommodation = g("tb-accommodation") ? g("tb-accommodation").value.trim() : (_tb.accommodation||"");
@@ -3608,22 +3557,33 @@ function renderTripBriefEdit(){
     +'<div class="tb-field"><label>Where are you going?</label><input id="tb-region" value="'+(_tb.region||'')+'" placeholder="e.g. Central Europe, Swiss Alps, Japan\u2026" /></div>'
     +'<div class="tb-field"><label>When you want to go</label><input id="tb-when" value="'+(_tb.when||'')+'" placeholder="e.g. September\u2013October, shoulder season." /></div>'
     +'<div class="tb-field"><label>How long you want to travel</label><input id="tb-duration" value="'+(_tb.duration||'')+'" placeholder="e.g. 10\u201314 days, three weeks\u2026" /></div>'
-    +'<div class="tb-field" style="display:flex;gap:8px;">'
-    +'<div style="flex:1"><label>Where you\u2019ll arrive</label>'
-    +'<div style="display:flex;gap:5px;margin-bottom:5px;">'
-    +'<span class="tb-toggle'+(_tb.entryFixed?' on':'')+'" onclick="_tb.entryFixed=true;renderTripBriefEdit();">Fixed</span>'
-    +'<span class="tb-toggle'+(!_tb.entryFixed?' on':'')+'" onclick="_tb.entryFixed=false;renderTripBriefEdit();">Flexible</span>'
+
+    +'<div style="margin-top:14px;padding:8px 12px;background:#f0ede3;border-radius:6px;font-size:11px;font-weight:700;color:#555;letter-spacing:0.03em;text-transform:uppercase;">How you\u2019re moving</div>'
+
+    +'<div class="tb-field"><label>How you\u2019re getting to '+(_tb.region||'the region')+'</label>'
+    +'<input id="tb-gettingTo" value="'+(_tb.gettingTo||'')+'" placeholder="e.g. Flying into Zurich Aug 15, booked. Or: still deciding." />'
+    +'<div style="display:flex;gap:5px;margin-top:6px;">'
+    +'<span class="tb-toggle'+(_tb.entryFixed?' on':'')+'" onclick="_tb.entryFixed=true;renderTripBriefEdit();">Booked / fixed</span>'
+    +'<span class="tb-toggle'+(!_tb.entryFixed?' on':'')+'" onclick="_tb.entryFixed=false;renderTripBriefEdit();">Still flexible</span>'
     +'</div>'
-    +'<input id="tb-entry" value="'+(_tb.entry||'')+'" oninput="if(this.value.trim().length>0 && !_tb.entryFixed){toggleEntryExit(\'entry\',true);}" placeholder="'+(_tb.entryFixed?'e.g. Zurich \u2014 tickets already booked':'e.g. Probably Zurich or Geneva, open to what fits')+'" /></div>'
-    +'<div style="flex:1"><label>Where you\u2019ll depart from</label>'
-    +'<div style="display:flex;gap:5px;margin-bottom:5px;">'
-    +'<span class="tb-toggle'+(_tb.exitFixed?' on':'')+'" onclick="_tb.exitFixed=true;renderTripBriefEdit();">Fixed</span>'
-    +'<span class="tb-toggle'+(!_tb.exitFixed?' on':'')+'" onclick="_tb.exitFixed=false;renderTripBriefEdit();">Flexible</span>'
+    +'<input id="tb-entry" value="'+(_tb.entry||'')+'" placeholder="First city / arrival point" style="margin-top:6px;" />'
     +'</div>'
-    +'<input id="tb-exit" value="'+(_tb.tbExit||'')+'" oninput="if(this.value.trim().length>0 && !_tb.exitFixed){toggleEntryExit(\'exit\',true);}" placeholder="'+(_tb.exitFixed?'e.g. Geneva \u2014 tickets already booked':'e.g. Same place, or wherever makes sense')+'" /></div>'
+
+    +'<div class="tb-field"><label>How you\u2019re moving within '+(_tb.region||'the region')+'</label>'
+    +'<input id="tb-transport" value="'+(_tb.transport||'')+'" placeholder="e.g. Trains and walking. Swiss Travel Pass. No rental car." />'
     +'</div>'
-    +'<div class="tb-field"><label>How you want to get around</label><input id="tb-transport" value="'+(_tb.transport||'')+'" placeholder="e.g. Trains and walking. No car rentals." /></div>'
-    +'<div class="tb-field"><label>Where you want to stay <span style="font-weight:400;color:#aaa;">(in rough order of preference)</span></label><input id="tb-accommodation" value="'+(_tb.accommodation||'')+'" placeholder="e.g. Small family hotels, apartments, rooms in private homes. En suite required." /></div>'
+
+    +'<div class="tb-field"><label>How you\u2019re leaving</label>'
+    +'<input id="tb-gettingOut" value="'+(_tb.gettingOut||'')+'" placeholder="e.g. Flying out of Geneva Sep 5, booked." />'
+    +'<div style="display:flex;gap:5px;margin-top:6px;">'
+    +'<span class="tb-toggle'+(_tb.exitFixed?' on':'')+'" onclick="_tb.exitFixed=true;renderTripBriefEdit();">Booked / fixed</span>'
+    +'<span class="tb-toggle'+(!_tb.exitFixed?' on':'')+'" onclick="_tb.exitFixed=false;renderTripBriefEdit();">Still flexible</span>'
+    +'</div>'
+    +'<input id="tb-exit" value="'+(_tb.tbExit||'')+'" placeholder="Last city / departure point" style="margin-top:6px;" />'
+    +'</div>'
+
+    +'<div style="margin-top:14px;padding:8px 12px;background:#f0ede3;border-radius:6px;font-size:11px;font-weight:700;color:#555;letter-spacing:0.03em;text-transform:uppercase;">Where you\u2019ll stay, pace, and limits</div>'
+    +'<div class="tb-field"><label>Where you want to stay <span style="font-weight:400;color:#aaa;">(in rough order of preference)</span></label><input id="tb-accommodation" value="'+(_tb.accommodation||'')+'" placeholder="e.g. Small family hotels, apartments, rooms in private homes." /></div>'
     +'<div class="tb-field"><label>Your pace</label><input id="tb-pace" value="'+(_tb.pace||'')+'" placeholder="e.g. Slow \u2014 two or three things a day." /></div>'
     +'<div class="tb-field"><label>Where you\u2019ll bend</label><textarea id="tb-compromises" rows="2">'+(_tb.compromises||'')+'</textarea><div style="font-size:10px;color:#aaa;margin-top:3px;">Preferences Max can weigh, not rules.</div></div>'
     +'<div class="tb-field"><label>Where you won\u2019t compromise</label><textarea id="tb-hardlimits" rows="2">'+(_tb.hardlimits||'')+'</textarea><div style="font-size:10px;color:#aaa;margin-top:3px;">Hard limits Max won\u2019t route around.</div></div>'
@@ -3649,6 +3609,8 @@ async function previewConstraintChanges(){
     region:        g("tb-region")        ? g("tb-region").value.trim()        : (_tb.region||""),
     duration:      g("tb-duration")      ? g("tb-duration").value.trim()      : (_tb.duration||""),
     when:          g("tb-when")          ? g("tb-when").value.trim()          : (_tb.when||""),
+    gettingTo:     g("tb-gettingTo")     ? g("tb-gettingTo").value.trim()     : (_tb.gettingTo||""),
+    gettingOut:    g("tb-gettingOut")    ? g("tb-gettingOut").value.trim()    : (_tb.gettingOut||""),
     entry:         g("tb-entry")         ? g("tb-entry").value.trim()         : (_tb.entry||""),
     tbExit:        g("tb-exit")          ? g("tb-exit").value.trim()          : (_tb.tbExit||""),
     entryFixed:    !!_tb.entryFixed,
@@ -4267,7 +4229,6 @@ async function buildFromCandidates(){
       drawTripMode();
       setTimeout(function(){
         showShortlistBanner(kept);
-        setTimeout(function(){ showLogisticsScreen(); }, 500);
       },200);
     },100);
   });
@@ -4526,17 +4487,8 @@ function parseNightsFromRange(stayRange){
 }
 
 function showLogisticsNudge() {
-  // Show a prompt if logistics haven't been set yet
-  var lpc = g("lp-content"); if (!lpc) return;
-  if (trip.logistics && trip.logistics.arrival && trip.logistics.arrival.city) return; // already set
-  if (document.getElementById("logistics-nudge")) return; // already shown
-  var b = document.createElement("div");
-  b.id = "logistics-nudge";
-  b.style.cssText = "background:#fff;border:1px solid #e8e8e8;border-left:3px solid #999;border-radius:7px;padding:10px 13px;margin-bottom:10px;font-size:11px;line-height:1.6;cursor:pointer;";
-  b.innerHTML = '<div style="font-weight:600;color:#555;margin-bottom:2px;">&#9992; How are you getting there?</div>'
-    + '<div style="color:#888;font-size:10px;">Set your arrival city, departure city, and transport to help Max sequence your stops.</div>';
-  b.onclick = function() { b.remove(); showLogisticsScreen(); };
-  lpc.insertBefore(b, lpc.firstChild);
+  // Retired — the "How you're moving" fields now live on Step 2 of the trip brief.
+  // If the user wants to change arrival/departure/transport, they click Constraints.
 }
 
 function showShortlistBanner(kept){
