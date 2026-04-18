@@ -2516,12 +2516,22 @@ async function showMaxBridge(stage, onContinue, correctionHistory) {
       + (_tb.chips && _tb.chips.length ? "\u2022 Also interested in: " + _tb.chips.join(", ") + "\n" : "");
   } else if (stage === "post-candidates") {
     var selected = (_tb.candidates || []).filter(function(c){ return c.status === "keep" || c.status === "maybe"; });
-    var byCity = selected.map(function(c){ return c.place + " (" + (c.role||"stop") + ", " + (c.stayRange||"?") + ")"; }).join("; ");
-    briefBlock = "Their picks: " + byCity + "\n"
+    // Build an ordered list using the same logic as buildFromCandidates, so the bridge reflects the actual plan
+    var kept = (_tb.candidates || []).filter(function(c){ return c.status === "keep"; });
+    var preview = orderKeptCandidates(kept, _mdcItems||[], _tb.entry||"", _tb.tbExit||"");
+    var orderedList = preview.ordered.map(function(c, i){
+      var tag = c._recoveryDay === "high" ? " (easy day \u2014 recovery)"
+              : c._recoveryDay === "moderate" ? " (slower pace)"
+              : "";
+      return (i+1) + ". " + c.place + " (" + (c.stayRange||"?") + ")" + tag;
+    }).join("\n");
+
+    briefBlock = "Their picks, ordered:\n" + orderedList + "\n\n"
       + (_tb.duration ? "Duration: " + _tb.duration + "\n" : "")
       + (_tb.entry ? "Entry: " + _tb.entry + (_tb.entryFixed ? " (fixed)" : " (flexible)") + "\n" : "")
       + (_tb.tbExit ? "Exit: " + _tb.tbExit + (_tb.exitFixed ? " (fixed)" : " (flexible)") + "\n" : "")
-      + (_tb.anchors ? "Must-dos: " + _tb.anchors + "\n" : "");
+      + (_tb.anchors ? "Must-dos: " + _tb.anchors + "\n" : "")
+      + (preview.reasoning && preview.reasoning.length ? "\nOrdering decisions I made:\n" + preview.reasoning.map(function(r){return "\u2022 " + r;}).join("\n") + "\n" : "");
   }
 
   // Build prompt — if correctionHistory has entries, fold them in
@@ -2530,7 +2540,9 @@ async function showMaxBridge(stage, onContinue, correctionHistory) {
     prompt = "You are Max, speaking in your own voice. The traveler has just filled out their trip. Reflect back what they told you in 2\u20134 short, natural sentences \u2014 as if you're a well-traveled friend jotting things down before thinking about where to go. Then add one short sentence about what you're looking for as you think about candidates. Be warm but spare. No bullet points, no headings, no \u201cI hear you\u201d language. Just natural reflection.\n\n"
       + "The traveler's brief:\n" + briefBlock;
   } else {
-    prompt = "You are Max, speaking in your own voice. The traveler has just chosen which places to keep. In 2\u20134 short, natural sentences, reflect back the shape of what they picked \u2014 what fits, what makes the trip coherent, any tension worth naming. Be direct. No lists, no headings. One short sentence about what comes next.\n\n" + briefBlock;
+    prompt = "You are Max, speaking in your own voice. The traveler has just chosen which places to keep, and I've already worked out an order that respects their route endpoints, conditions, and recovery needs. In 2\u20135 short, natural sentences, reflect back the shape of the trip \u2014 not as a list, but as how it flows. Weave in the ordering logic only where it matters (e.g. \"Zermatt before St. Moritz so the Glacier Express flows east, then a slow day in Lucerne after\"). If there's a tension worth naming (budget, pacing, something that might be too much), name it. End with a short sentence about what happens next (logistics/details).\n\n"
+      + "Avoid: bullet points, numbered lists, repeating the full itinerary, generic \"this will be wonderful\" language, overclaiming.\n\n"
+      + briefBlock;
   }
 
   // Append correction history so Max knows what he got wrong last time
