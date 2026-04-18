@@ -4119,15 +4119,48 @@ function renderCandidateCards(cands){
       if (match) { c._required=true; c._requiredFor=match.requiredFor||[]; }
     }
   });
+  // Sort: required candidates first, discovery candidates second. Stable within each group.
+  cands.sort(function(a, b){
+    var ar = a._required ? 0 : 1;
+    var br = b._required ? 0 : 1;
+    return ar - br;
+  });
   var hasRequired = cands.some(function(c){ return c._required; });
   var hasDiscovery = cands.some(function(c){ return !c._required; });
+  // Build a "if you want to X, Y, and Z, these stops are required" title
+  // from the checked must-dos that have required places in kept candidates
+  var reqTitle = "Required stops";
+  try {
+    var activeItems = (_mdcItems || []).filter(function(m){
+      if (!m.checked) return false;
+      // Only include must-dos that map to at least one currently-shown required candidate
+      var places = m.requiredPlaces || m.endpoints || m.viableLocations || [];
+      return places.some(function(p){
+        return cands.some(function(c){
+          return c._required && c.place && p.place &&
+            c.place.toLowerCase() === p.place.toLowerCase();
+        });
+      });
+    });
+    // Strip __manual__ placeholder items — they don't have a user-visible name in this context
+    var names = activeItems
+      .filter(function(m){ return m.name && m.name !== "__manual__"; })
+      .map(function(m){ return m.name; });
+    if (names.length === 1) {
+      reqTitle = "If you want to " + names[0] + ", these stops are required";
+    } else if (names.length === 2) {
+      reqTitle = "If you want to " + names[0] + " and " + names[1] + ", these stops are required";
+    } else if (names.length > 2) {
+      reqTitle = "If you want to " + names.slice(0, -1).join(", ") + ", and " + names[names.length-1] + ", these stops are required";
+    }
+  } catch(e) { /* fall back to generic title */ }
   cands.forEach(function(c){
-    // Insert "Required by your must-dos" label before first required candidate
+    // Insert dynamic section header before first required candidate
     if (hasRequired && c._required && !seenReqHeader) {
       seenReqHeader = true;
       var reqLabel = document.createElement("div");
-      reqLabel.style.cssText = "padding:4px 4px 6px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#1a5fa8;";
-      reqLabel.textContent = "Required by your must-dos";
+      reqLabel.style.cssText = "padding:6px 4px 8px;font-size:11px;font-weight:600;color:#1a5fa8;line-height:1.5;";
+      reqLabel.textContent = reqTitle;
       el.appendChild(reqLabel);
     }
     // Insert section divider before first non-required candidate
@@ -4135,7 +4168,7 @@ function renderCandidateCards(cands){
       seenDivider = true;
       var divider = document.createElement("div");
       divider.style.cssText = "padding:12px 4px 6px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#111;margin-top:4px;border-top:1px solid #e8e8e8;";
-      divider.textContent = "Also worth considering";
+      divider.textContent = "Other places worth considering";
       el.appendChild(divider);
     }
     var card=document.createElement("div");
