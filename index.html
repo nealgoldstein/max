@@ -4127,8 +4127,9 @@ function renderCandidateCards(cands){
   });
   var hasRequired = cands.some(function(c){ return c._required; });
   var hasDiscovery = cands.some(function(c){ return !c._required; });
-  // Build a "if you want to X, Y, and Z, these stops are required" title
-  // from the checked must-dos that have required places in kept candidates
+  // Build a "if you want to [verb] X, Y, and Z, these stops are required" title
+  // from the checked must-dos that have required places in kept candidates.
+  // Verb picked from must-do type + name pattern (train/hike/museum/etc).
   var reqTitle = "Required stops";
   try {
     var activeItems = (_mdcItems || []).filter(function(m){
@@ -4142,16 +4143,85 @@ function renderCandidateCards(cands){
         });
       });
     });
-    // Strip __manual__ placeholder items — they don't have a user-visible name in this context
-    var names = activeItems
-      .filter(function(m){ return m.name && m.name !== "__manual__"; })
-      .map(function(m){ return m.name; });
-    if (names.length === 1) {
-      reqTitle = "If you want to " + names[0] + ", these stops are required";
-    } else if (names.length === 2) {
-      reqTitle = "If you want to " + names[0] + " and " + names[1] + ", these stops are required";
-    } else if (names.length > 2) {
-      reqTitle = "If you want to " + names.slice(0, -1).join(", ") + ", and " + names[names.length-1] + ", these stops are required";
+    // Strip __manual__ placeholder items — they don't have a user-visible name here
+    var realItems = activeItems.filter(function(m){ return m.name && m.name !== "__manual__"; });
+
+    // Pick a verb phrase for each item based on its type and name patterns.
+    // Returns an object like {verb:"ride", article:"the", name:"Glacier Express"}
+    // so we can group items sharing the same verb+article cleanly.
+    function pickVerb(item){
+      var name = (item.name || "").trim();
+      var lc = name.toLowerCase();
+      var t = item.type;
+      // Condition type — weather/season-dependent
+      if (t === "condition") {
+        if (/aurora|northern lights/.test(lc)) return {verb:"see", article:"the", name:name};
+        if (/whale|wildlife|birding|migration/.test(lc)) return {verb:"see", article:"", name:name};
+        if (/bloom|blossom|flower|wildflower/.test(lc)) return {verb:"see", article:"the", name:name};
+        return {verb:"experience", article:"", name:name};
+      }
+      // Route type — trains, drives, hikes, walks
+      if (t === "route") {
+        if (/express|railway|bahn|bergbahn/.test(lc) || /train/.test(lc)) {
+          return {verb:"ride", article:"the", name:name};
+        }
+        if (/hike|trek|trail|walk/.test(lc)) {
+          return {verb:"hike", article:"the", name:name};
+        }
+        if (/drive|pass|road/.test(lc)) {
+          return {verb:"drive", article:"the", name:name};
+        }
+        // Default route — "do the" works as a catch-all
+        return {verb:"do", article:"the", name:name};
+      }
+      // Manual or unknown — just "visit"
+      if (/museum|gallery|cathedral|church|abbey|palace|castle/.test(lc)) {
+        return {verb:"visit", article:"the", name:name};
+      }
+      if (/festival|concert|show|opera|ballet|performance/.test(lc)) {
+        return {verb:"see", article:"", name:name};
+      }
+      return {verb:"visit", article:"", name:name};
+    }
+
+    var phrases = realItems.map(pickVerb);
+
+    // Group consecutive items with the same verb+article so "ride the X and Y"
+    // reads naturally instead of "ride the X and ride the Y"
+    function formatPhrases(ps){
+      if (ps.length === 0) return "";
+      if (ps.length === 1) {
+        var p = ps[0];
+        return p.verb + (p.article ? " " + p.article : "") + " " + p.name;
+      }
+      // Group adjacent same-verb+article into shared clauses
+      var groups = [];
+      var cur = null;
+      ps.forEach(function(p){
+        if (cur && cur.verb === p.verb && cur.article === p.article) {
+          cur.names.push(p.name);
+        } else {
+          cur = {verb:p.verb, article:p.article, names:[p.name]};
+          groups.push(cur);
+        }
+      });
+      // Render each group as "verb article X, Y, and Z" (Oxford comma for 3+)
+      function joinNames(names){
+        if (names.length === 1) return names[0];
+        if (names.length === 2) return names[0] + " and " + names[1];
+        return names.slice(0, -1).join(", ") + ", and " + names[names.length-1];
+      }
+      var clauses = groups.map(function(g){
+        return g.verb + (g.article ? " " + g.article : "") + " " + joinNames(g.names);
+      });
+      // Join clauses: "ride X and Y and see Z" reads OK; for 3+ clauses use commas.
+      if (clauses.length === 1) return clauses[0];
+      if (clauses.length === 2) return clauses[0] + " and " + clauses[1];
+      return clauses.slice(0, -1).join(", ") + ", and " + clauses[clauses.length-1];
+    }
+
+    if (phrases.length > 0) {
+      reqTitle = "If you want to " + formatPhrases(phrases) + ", these stops are required";
     }
   } catch(e) { /* fall back to generic title */ }
   cands.forEach(function(c){
