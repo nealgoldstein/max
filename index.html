@@ -629,23 +629,21 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 /* ── Trip Brief & Candidate Explorer ────────────── */
 .tb-overlay{position:fixed;inset:0;background:#f7f7f5;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;}
 /* Scroll affordance: when the overlay's form content extends beyond the viewport,
-   a soft fade appears on the top edge of the sticky footer, hinting at more content
-   above the CTA button. Fades away as the user scrolls to the bottom. */
-.tb-overlay.has-overflow .tb-footer{position:relative;}
+   a soft fade and bouncing chevron appear on the top edge of the sticky footer,
+   hinting at more content above the CTA button. Fades away at the bottom. */
 .tb-overlay.has-overflow .tb-footer::before{
-  content:"";position:absolute;left:0;right:0;top:-24px;height:24px;pointer-events:none;
-  background:linear-gradient(to bottom, rgba(247,247,245,0) 0%, rgba(247,247,245,0.9) 100%);
+  content:"";position:absolute;left:0;right:0;top:-32px;height:32px;pointer-events:none;
+  background:linear-gradient(to bottom, rgba(247,247,245,0) 0%, rgba(247,247,245,0.95) 70%, rgba(247,247,245,1) 100%);
   transition:opacity 0.3s ease;opacity:1;
 }
 .tb-overlay.at-bottom .tb-footer::before{opacity:0;}
-/* Bouncing chevron above the CTA when content overflows, to catch the eye */
 .tb-overlay.has-overflow .tb-footer::after{
-  content:"\2304";position:absolute;top:-22px;left:50%;transform:translateX(-50%);
-  font-size:16px;color:#aaa;pointer-events:none;opacity:0.75;
-  animation:scroll-bounce 2s ease-in-out infinite;
+  content:"\2304";position:absolute;top:-28px;left:50%;
+  font-size:22px;color:#888;font-weight:700;pointer-events:none;opacity:1;
+  animation:scroll-bounce 1.8s ease-in-out infinite;
 }
 .tb-overlay.at-bottom .tb-footer::after{opacity:0;animation:none;}
-@keyframes scroll-bounce{0%,100%{transform:translate(-50%,0);opacity:0.5;}50%{transform:translate(-50%,4px);opacity:0.85;}}
+@keyframes scroll-bounce{0%,100%{transform:translate(-50%,0);opacity:0.5;}50%{transform:translate(-50%,5px);opacity:1;}}
 @media (prefers-reduced-motion:reduce){.tb-overlay.has-overflow .tb-footer::after{animation:none;}}
 .tb-header{padding:20px 28px 0;flex-shrink:0;}
 .tb-logo{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
@@ -1903,7 +1901,16 @@ function renderHomeScreen(){
           saveTripsIndex();
           try{localStorage.removeItem("max-trip-"+id);}catch(ex){}
           c.parentNode.removeChild(c);
-          if(_tripsIndex.length===0){g("hs-trips-section").style.display="none";g("hs-welcome").style.display="block";var lbl=g("ntp-lbl"); if(lbl) lbl.textContent="Start your first trip";}
+          // Regenerate the option list so "Pick up where you left off" is removed if no trips remain
+          if(typeof renderHomeOptions === "function") renderHomeOptions();
+          if(_tripsIndex.length===0){
+            var ts = g("hs-trips-section"); if(ts) ts.style.display="none";
+            var w = g("hs-welcome"); if(w) w.style.display="block";
+            var lbl=g("ntp-lbl"); if(lbl) lbl.textContent="Start your first trip";
+            // If the resume panel is currently showing, close it
+            var resumePanel = document.getElementById("hs-resume-panel");
+            if(resumePanel) resumePanel.style.display = "none";
+          }
         };
         no.onclick=function(e2){e2.stopPropagation();c.removeChild(cf);};
         cf.appendChild(msg); cf.appendChild(yes); cf.appendChild(no);
