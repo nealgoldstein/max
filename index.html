@@ -2147,10 +2147,14 @@ async function expandMustDos() {
     + "Expand each must-do into specific named experiences. There are two types:\n"
     + "TYPE 1 — ROUTE: a fixed journey between specific places (e.g. a train, a road trip, a hiking trail). Has required endpoint places.\n"
     + "TYPE 2 — CONDITION: something that depends on weather, season, or circumstances (e.g. Northern Lights, whale watching, cherry blossoms, wildflowers). No fixed places — instead list the best locations and note the flexibility required.\n\n"
+    + "IMPORTANT: If the traveler uses a meta-reference (\"all the named trains\", \"the scenic trains\", \"the major museums\", \"the famous hikes\", \"the best vineyards\", etc.), expand it into every specific named instance that fits the region — do not pick just one or two. For example:\n"
+    + "• \"all the named trains\" in Switzerland → Glacier Express, Bernina Express, GoldenPass Line, Gotthard Panorama Express, Jungfrau Railway — each as its own TYPE 1 item\n"
+    + "• \"the Alpine passes\" → each individual named pass as its own item\n"
+    + "• \"the cathedrals\" → each individually, named\n\n"
     + "Return ONLY a JSON array (no markdown):\n"
     + '[{"name":"Glacier Express","type":"route","description":"Classic 8hr panoramic rail journey through the Swiss Alps","requiredPlaces":[{"place":"Zermatt","country":"Switzerland"},{"place":"St. Moritz","country":"Switzerland"}],"flexibility":"low"},' 
     + '{"name":"Northern Lights","type":"condition","description":"Aurora borealis visible Sep-Mar away from light pollution","requiredPlaces":[{"place":"Snæfellsnes Peninsula","country":"Iceland"},{"place":"Akureyri area","country":"Iceland"}],"flexibility":"high","conditionNote":"Requires clear skies and darkness — build in extra nights in aurora-viable locations and keep schedule loose"}]\n'
-    + "Be specific. For routes: name each leg. For conditions: name best locations and flag the scheduling implications. Max 6 items.";
+    + "Be specific. Use the real well-known name of each experience. For routes: name each leg. For conditions: name best locations and flag scheduling implications. Max 12 items for meta-references, max 6 otherwise.";
 
   try {
     var text = await callMax([{role:"user",content:prompt}], 1000, 30000);
@@ -2557,6 +2561,36 @@ async function showMaxBridge(stage, onContinue, correctionHistory) {
   onContinue();
 }
 
+// Normalise place names for matching: lowercase, strip punctuation/accents,
+// collapse whitespace, remove common prefixes. "St. Moritz" and "Saint-Moritz"
+// and "st moritz" all normalise identically.
+function _normPlaceName(s){
+  if(!s) return "";
+  return String(s)
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")  // strip diacritics
+    .replace(/\bsaint\b/g, "st")                         // saint → st
+    .replace(/\bst\.?\s+/g, "st ")                       // st. / st  → st
+    .replace(/[^\w\s]/g, " ")                            // punct → space
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Does candidate match any required place?
+function _findMatchingRequired(cand, requiredPlaces){
+  if(!cand || !cand.place || !requiredPlaces || !requiredPlaces.length) return null;
+  var candN = _normPlaceName(cand.place);
+  for(var i=0; i<requiredPlaces.length; i++){
+    var r = requiredPlaces[i];
+    if(!r.place) continue;
+    var rN = _normPlaceName(r.place);
+    if(rN === candN) return r;
+    // Substring match in either direction (handles "St. Moritz" vs "St. Moritz (Upper Engadine)")
+    if(rN && candN && (candN.indexOf(rN) >= 0 || rN.indexOf(candN) >= 0)) return r;
+  }
+  return null;
+}
+
 async function runCandidateSearch(requiredPlaces) {
   // region already set from sentence in Step 1
   _tb.duration      = g("tb-duration")      ? g("tb-duration").value.trim()      : (_tb.duration||"");
@@ -2666,7 +2700,7 @@ async function runCandidateSearch(requiredPlaces) {
   if (p1) calls.push(callMax([{role:"user",content:p1}], 2000, 45000).then(function(t){
     var cands = JSON.parse(t.replace(/```json|```/g,"").trim());
     cands.forEach(function(c){
-      var req = requiredPlaces.find(function(r){ return r.place.toLowerCase()===c.place.toLowerCase(); });
+      var req = _findMatchingRequired(c, requiredPlaces);
       c._required=true; c._requiredFor=req?req.requiredFor:[];
     });
     return cands;
@@ -3870,9 +3904,7 @@ function renderCandidateCards(cands){
   // Re-check _required against _tb.requiredPlaces in case it wasn't set during generation
   cands.forEach(function(c){
     if (!c._required) {
-      var match = (_tb.requiredPlaces||[]).find(function(r){
-        return r.place && c.place && r.place.toLowerCase()===c.place.toLowerCase();
-      });
+      var match = _findMatchingRequired(c, _tb.requiredPlaces);
       if (match) { c._required=true; c._requiredFor=match.requiredFor||[]; }
     }
   });
