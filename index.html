@@ -650,15 +650,37 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .tb-toggle.on{background:#111;color:#fff;border-color:#111;}
 .tb-tag{font-size:10px;padding:3px 9px;border-radius:20px;border:1px solid #ddd;background:#fff;cursor:pointer;color:#555;}
 .tb-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;}
-.tb-chip{display:inline-block;font-size:11px;padding:5px 11px;border-radius:16px;border:1px solid #ddd;background:#fff;cursor:pointer;color:#555;user-select:none;transition:all 0.15s;}
-.tb-chip:hover{border-color:#999;color:#222;}
+.tb-chip{display:inline-block;font-size:11px;padding:5px 11px;border-radius:16px;border:1px solid #ddd;background:#fff;cursor:pointer;color:#555;user-select:none;transition:border-color 0.22s ease, color 0.22s ease, background-color 0.18s ease, transform 0.14s ease;}
+.tb-chip:hover{border-color:#888;color:#222;background:#fafafa;}
+.tb-chip:active{transform:translateY(0.5px);}
 .tb-chip.on{background:#111;color:#fff;border-color:#111;}
 .tb-tag.on{background:#111;color:#fff;border-color:#111;}
+
+/* Thinking indicator — gentle pulse for "Max is thinking..." placeholders */
+.max-thinking{color:#aaa;animation:max-thinking-pulse 1.6s ease-in-out infinite;}
+@keyframes max-thinking-pulse{0%,100%{opacity:0.5;}50%{opacity:1;}}
+@media (prefers-reduced-motion:reduce){.max-thinking{animation:none;opacity:0.7;}}
 .tb-footer{padding:14px 28px 20px;border-top:1px solid #eee;background:#f7f7f5;position:sticky;bottom:0;}
 .tb-btn-primary{width:100%;padding:10px;font-size:12px;font-weight:600;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;}
 .tb-btn-back{font-size:11px;color:#aaa;cursor:pointer;text-align:center;margin-top:8px;}
+
+/* Touch-friendly sizing: phones, tablets, anything without a fine-pointer device */
+@media (pointer: coarse){
+  .tb-toggle{padding:7px 14px;font-size:12px;border-radius:16px;min-height:36px;display:inline-flex;align-items:center;}
+  .tb-chip{padding:9px 14px;font-size:12px;min-height:36px;display:inline-flex;align-items:center;}
+  .tb-tag{padding:7px 13px;font-size:12px;min-height:36px;display:inline-flex;align-items:center;}
+  .ce-act{padding:10px 4px;font-size:11px;min-height:44px;}
+  .file-btn{padding:7px 11px;font-size:11px;min-height:36px;}
+  .mdc-check{width:24px;height:24px;}
+  .hs-option{padding:14px 16px !important;}
+  .ntp-create{min-height:44px;}
+  .ntp-cancel{min-height:44px;}
+}
 /* Candidate Explorer */
-.ce-overlay{position:fixed;inset:0;z-index:8000;display:flex;flex-direction:column;background:#f7f7f5;height:100vh;}
+.ce-overlay{position:fixed;inset:0;z-index:8000;display:flex;flex-direction:column;background:#f7f7f5;height:100vh;opacity:0;animation:ce-fade-in 0.28s cubic-bezier(0.22,0.61,0.36,1) forwards;}
+@keyframes ce-fade-in{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+/* Reduce motion for users who ask for it */
+@media (prefers-reduced-motion:reduce){.ce-overlay{animation:none;opacity:1;}}
 .ce-header{padding:8px 14px;border-bottom:1px solid #eee;background:#fff;flex-shrink:0;display:flex;align-items:center;gap:10px;}
 .ce-title{font-size:13px;font-weight:700;flex:1;}
 .ce-sub{font-size:10px;color:#aaa;}
@@ -1910,7 +1932,7 @@ async function renderBrowseChat(){
   bc.style.display = "block";
   bc.innerHTML = '<div style="background:#fbfaf6;border:1px solid #e8e4d8;border-radius:8px;padding:14px 16px;font-family:Georgia,serif;font-size:13px;line-height:1.7;color:#333;">'
     + '<div style="font-size:10px;font-weight:700;color:#888;letter-spacing:0.05em;text-transform:uppercase;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;margin-bottom:6px;">Max says\u2026</div>'
-    + '<div id="browse-chat-body"><span style="color:#aaa;">Let me think\u2026</span></div>'
+    + '<div id="browse-chat-body"><span class="max-thinking">Let me think\u2026</span></div>'
     + '<textarea id="browse-input" rows="2" placeholder="e.g. somewhere warm, slow, not too crowded\u2026" style="width:100%;margin-top:12px;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;resize:vertical;box-sizing:border-box;"></textarea>'
     + '<div style="margin-top:8px;display:flex;gap:6px;">'
     + '<button id="browse-send" style="font-size:11px;padding:6px 14px;background:#111;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Ask Max</button>'
@@ -1965,7 +1987,8 @@ async function browseChatSend(){
   body.appendChild(userEl);
 
   var thinkingEl = document.createElement("div");
-  thinkingEl.style.cssText = "margin-top:10px;color:#aaa;";
+  thinkingEl.style.cssText = "margin-top:10px;";
+  thinkingEl.className = "max-thinking";
   thinkingEl.textContent = "Max is thinking\u2026";
   body.appendChild(thinkingEl);
 
@@ -2489,7 +2512,7 @@ async function showMaxBridge(stage, onContinue, correctionHistory) {
     + '<div class="tb-body" style="display:flex;align-items:center;justify-content:center;min-height:60vh;">'
     + '<div style="max-width:540px;width:100%;padding:32px 28px;">'
     + '<div id="max-bridge-content" style="font-size:15px;line-height:1.75;color:#2a2a2a;font-family:Georgia,serif;">'
-    + '<span style="color:#aaa;">Max is thinking\u2026</span>'
+    + '<span class="max-thinking">Max is thinking\u2026</span>'
     + '</div>'
     + '<div id="max-bridge-footer" style="margin-top:28px;opacity:0;transition:opacity 0.4s;"></div>'
     + '</div>'
@@ -6769,13 +6792,14 @@ function drawExecMode(dest){
     var ml=document.createElement("div"); ml.className="ex-max-line"; ml.textContent=savedMaxLine;
     hdr.appendChild(ml);
   } else {
-    var ml=document.createElement("div"); ml.className="ex-max-line"; ml.id="ex-max-line-"+dest.id;
+    var ml=document.createElement("div"); ml.className="ex-max-line max-thinking"; ml.id="ex-max-line-"+dest.id;
     ml.textContent="Max is thinking\u2026";
     hdr.appendChild(ml);
     (function(el,did){
       callMax([{role:"user",content:"I just arrived in "+dest.place+". Give me one sentence of practical orientation — the kind of thing a knowledgeable friend would say when you arrive. Not a welcome. A useful observation."}])
         .then(function(t){
           el.textContent=t;
+          el.classList.remove("max-thinking");
           try{sessionStorage.setItem("ex-maxline-"+did,t);}catch(e){}
         }).catch(function(){el.parentNode&&el.parentNode.removeChild(el);});
     })(ml,dest.id);
@@ -8899,7 +8923,7 @@ function renderMaxNoteCard(dest, container){
     // User hid it — don't re-render
     return;
   } else {
-    body.innerHTML = '<span style="color:#aaa;">Max is thinking\u2026</span>';
+    body.innerHTML = '<span class="max-thinking">Max is thinking\u2026</span>';
     card.appendChild(body);
     container.appendChild(card);
     generateMaxNote(dest, false);
@@ -8912,7 +8936,7 @@ async function generateMaxNote(dest, replace){
   if(!dest) return;
   var bodyEl = document.getElementById("max-note-body-"+dest.id);
   if(replace && bodyEl){
-    bodyEl.innerHTML = '<span style="color:#aaa;">Max is thinking\u2026</span>';
+    bodyEl.innerHTML = '<span class="max-thinking">Max is thinking\u2026</span>';
   }
 
   // Gather context: what stops nearby, itinerary shape, user's sentence, familiarity
