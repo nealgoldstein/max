@@ -2144,17 +2144,30 @@ async function expandMustDos() {
   var prompt = "A traveler is planning a trip to " + (region||"this region") + ".\n"
     + (intent ? "Their goal: " + intent + "\n" : "")
     + "They listed these must-dos: \"" + anchors + "\"\n\n"
-    + "Expand each must-do into specific named experiences. There are two types:\n"
-    + "TYPE 1 — ROUTE: a fixed journey between specific places (e.g. a train, a road trip, a hiking trail). Has required endpoint places.\n"
-    + "TYPE 2 — CONDITION: something that depends on weather, season, or circumstances (e.g. Northern Lights, whale watching, cherry blossoms, wildflowers). No fixed places — instead list the best locations and note the flexibility required.\n\n"
-    + "IMPORTANT: If the traveler uses a meta-reference (\"all the named trains\", \"the scenic trains\", \"the major museums\", \"the famous hikes\", \"the best vineyards\", etc.), expand it into every specific named instance that fits the region — do not pick just one or two. For example:\n"
-    + "• \"all the named trains\" in Switzerland → Glacier Express, Bernina Express, GoldenPass Line, Gotthard Panorama Express, Jungfrau Railway — each as its own TYPE 1 item\n"
-    + "• \"the Alpine passes\" → each individual named pass as its own item\n"
-    + "• \"the cathedrals\" → each individually, named\n\n"
+    + "Expand each must-do into specific named experiences. There are two types.\n\n"
+    + "TYPE 1 — ROUTE: a fixed journey between specific places (a train, a road trip, a hiking trail). Has ordered endpoints.\n"
+    + "  Required fields for routes:\n"
+    + "    • endpoints: ordered array [start, end] — the traditional direction if one exists\n"
+    + "    • requiredPlaces: same as endpoints (for backward compatibility)\n"
+    + "    • direction: \"either\" if the route works equally well in both directions, or \"forward\" / \"reverse\" if one direction is strongly preferred (rare)\n"
+    + "    • durationHours: approximate length of the journey\n"
+    + "    • modeOptions: \"tourist\" / \"regional\" / \"both\" — whether a branded tourist version AND an ordinary public-transport version exist on the same route\n"
+    + "    • alternatives: if modeOptions is \"both\", a string describing the ordinary alternative (e.g. \"Regular SBB trains cover the same Chur–St. Moritz route hourly, no reservation, standard fare covered by the Swiss Travel Pass. You can break the journey at any station.\")\n"
+    + "    • reservationNotes: for tourist-train routes, a short string noting what's required (\"Seat reservation required, runs 2-3x daily depending on season, CHF 152+ supplement on top of fare or pass\")\n\n"
+    + "TYPE 2 — CONDITION: something that depends on weather, season, daylight, or circumstance (Northern Lights, whale watching, cherry blossoms, wildflowers, migration).\n"
+    + "  Required fields for conditions:\n"
+    + "    • viableLocations: array of place objects where the condition can be experienced — these are the places Max should make sure the trip spends time in. NOT strict endpoints.\n"
+    + "    • requiredPlaces: same as viableLocations (for backward compatibility)\n"
+    + "    • recovery: \"low\" / \"moderate\" / \"high\" — how much the next day needs to be easy. Aurora hunt = high (up until 2-3am, next day must start late and move slowly). Dawn at Angkor = moderate. Wildflower hike = low.\n"
+    + "    • frequencyRequirement: minimum number of nights the trip should spend in viable locations so the condition has a real chance (aurora: 3+ nights; bloom or wildlife: 2+ depending on flexibility)\n"
+    + "    • conditionNote: one-sentence description of what the traveler needs to understand about planning around this\n\n"
+    + "META-REFERENCES: If the traveler uses something like \"all the named trains\", \"the scenic trains\", \"the major museums\", \"the cathedrals\", expand into every specific named instance that fits the region — do not pick one or two. If the phrase implies branded experiences (e.g. \"the named scenic trains\"), set modeOptions to \"both\" and include the ordinary alternative in the alternatives field.\n\n"
     + "Return ONLY a JSON array (no markdown):\n"
-    + '[{"name":"Glacier Express","type":"route","description":"Classic 8hr panoramic rail journey through the Swiss Alps","requiredPlaces":[{"place":"Zermatt","country":"Switzerland"},{"place":"St. Moritz","country":"Switzerland"}],"flexibility":"low"},' 
-    + '{"name":"Northern Lights","type":"condition","description":"Aurora borealis visible Sep-Mar away from light pollution","requiredPlaces":[{"place":"Snæfellsnes Peninsula","country":"Iceland"},{"place":"Akureyri area","country":"Iceland"}],"flexibility":"high","conditionNote":"Requires clear skies and darkness — build in extra nights in aurora-viable locations and keep schedule loose"}]\n'
-    + "Be specific. Use the real well-known name of each experience. For routes: name each leg. For conditions: name best locations and flag scheduling implications. Max 12 items for meta-references, max 6 otherwise.";
+    + '[\n'
+    + '  {"name":"Glacier Express","type":"route","description":"Classic 8hr panoramic rail journey through the Swiss Alps.","endpoints":[{"place":"Zermatt","country":"Switzerland"},{"place":"St. Moritz","country":"Switzerland"}],"requiredPlaces":[{"place":"Zermatt","country":"Switzerland"},{"place":"St. Moritz","country":"Switzerland"}],"direction":"either","durationHours":8,"modeOptions":"both","alternatives":"Regular SBB trains cover the same Zermatt-Brig-Chur-St. Moritz route hourly with one or two transfers. No reservation, standard fare covered by the Swiss Travel Pass or Half-Fare Card. Windows open in many cars, and you can break the journey at any station.","reservationNotes":"Seat reservation required, 2-3 departures daily depending on season, CHF 152+ supplement on top of fare or pass.","flexibility":"low"},\n'
+    + '  {"name":"Northern Lights","type":"condition","description":"Aurora borealis, visible on clear dark nights September-March away from light pollution.","viableLocations":[{"place":"Snæfellsnes Peninsula","country":"Iceland"},{"place":"Akureyri area","country":"Iceland"},{"place":"Westfjords","country":"Iceland"}],"requiredPlaces":[{"place":"Snæfellsnes Peninsula","country":"Iceland"},{"place":"Akureyri area","country":"Iceland"}],"recovery":"high","frequencyRequirement":3,"conditionNote":"You may be up until 2-3am on viable nights — the next morning needs to start late. Plan at least 3 nights in aurora-capable locations so weather gives you a real chance.","flexibility":"high"}\n'
+    + ']\n\n'
+    + "Be specific. Use real, well-known names. For routes, note each individual route (not 'the trains' as one item). For conditions, list multiple viable locations. Max 12 items for meta-references, max 6 otherwise.";
 
   try {
     var text = await callMax([{role:"user",content:prompt}], 1000, 30000);
@@ -2223,24 +2236,72 @@ function renderMustDoItems(items) {
     div.className = "mdc-item" + (item.checked ? " checked" : "");
     div.id = "mdc-item-" + item.id;
 
+    // Backfill: if endpoints exist but requiredPlaces doesn't, mirror them
+    if (item.endpoints && !item.requiredPlaces) item.requiredPlaces = item.endpoints;
+    if (item.viableLocations && !item.requiredPlaces) item.requiredPlaces = item.viableLocations;
+
     var rp = item.requiredPlaces||[];
     var isCondition = item.type === "condition";
     var placesRowHtml = rp.map(function(p,i){
       return (i>0?'<span class="mdc-place-arrow">\u2192</span>':'')+'<span class="mdc-place">'+p.place+'</span>';
     }).join("");
 
+    // For routes: mode comparison block (tourist vs regional alternative)
+    var modeBlock = '';
+    if (!isCondition && item.type !== "manual" && item.modeOptions === "both" && item.alternatives) {
+      modeBlock = '<div style="margin-top:8px;padding:8px 10px;background:#fff;border:1px solid #e8e8e8;border-radius:6px;font-size:10.5px;line-height:1.55;color:#555;">'
+        + '<div style="display:flex;gap:10px;align-items:baseline;margin-bottom:4px;">'
+        + '<div style="font-weight:700;color:#1a5fa8;white-space:nowrap;">\u{1F686} Tourist train</div>'
+        + '<div style="color:#666;">' + (item.reservationNotes || 'Branded scenic service with reservation required.') + '</div>'
+        + '</div>'
+        + '<div style="display:flex;gap:10px;align-items:baseline;">'
+        + '<div style="font-weight:700;color:#2a7a4e;white-space:nowrap;">\u{1F68A} Regional</div>'
+        + '<div style="color:#666;">' + item.alternatives + '</div>'
+        + '</div>'
+        + '<div style="margin-top:6px;font-style:italic;color:#888;">You decide which fits this trip \u2014 either way, the endpoint cities stay on your route.</div>'
+        + '</div>';
+    }
+
+    // For routes: direction + duration line
+    var routeMeta = '';
+    if (!isCondition && item.type !== "manual") {
+      var metaBits = [];
+      if (item.durationHours) metaBits.push(item.durationHours + "h journey");
+      if (item.direction === "either") metaBits.push("either direction works");
+      else if (item.direction === "forward") metaBits.push("preferred direction: " + (rp[0]?rp[0].place:'') + " \u2192 " + (rp[1]?rp[1].place:''));
+      else if (item.direction === "reverse") metaBits.push("preferred direction: " + (rp[1]?rp[1].place:'') + " \u2192 " + (rp[0]?rp[0].place:''));
+      if (metaBits.length) {
+        routeMeta = '<div style="font-size:10px;color:#888;margin-top:5px;">' + metaBits.join(' \u00b7 ') + '</div>';
+      }
+    }
+
+    // For conditions: recovery + frequency line
+    var conditionMeta = '';
+    if (isCondition) {
+      var bits = [];
+      if (item.recovery === "high") bits.push('\u26a0 next day starts late');
+      else if (item.recovery === "moderate") bits.push('slower pace the day after');
+      if (item.frequencyRequirement) bits.push('plan at least ' + item.frequencyRequirement + ' nights in viable locations');
+      if (bits.length) {
+        conditionMeta = '<div style="font-size:10px;color:#b05820;margin-top:5px;font-weight:500;">' + bits.join(' \u00b7 ') + '</div>';
+      }
+    }
+
     var placesSection = '';
     if (rp.length) {
       if (isCondition) {
         placesSection = '<div class="mdc-item-places" style="background:#fff9f0;border-top-color:#f0dcc0;">'
-          +'<div class="mdc-places-label" style="color:#b05820;">Best locations — keep schedule flexible:</div>'
+          +'<div class="mdc-places-label" style="color:#b05820;">Best locations \u2014 keep schedule flexible:</div>'
           +'<div class="mdc-places-row">'+placesRowHtml+'</div>'
-          +(item.conditionNote ? '<div style="font-size:10px;color:#b05820;margin-top:6px;line-height:1.5;">⚠ '+item.conditionNote+'</div>' : '')
+          +(item.conditionNote ? '<div style="font-size:10px;color:#b05820;margin-top:6px;line-height:1.5;">\u26a0 '+item.conditionNote+'</div>' : '')
+          +conditionMeta
           +'</div>';
       } else {
         placesSection = '<div class="mdc-item-places">'
           +'<div class="mdc-places-label">To do this you need stops in:</div>'
           +'<div class="mdc-places-row">'+placesRowHtml+'</div>'
+          +routeMeta
+          +modeBlock
           +'</div>';
       }
     }
