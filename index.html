@@ -8211,6 +8211,46 @@ function drawDestMode(destId){
   var dates=document.createElement("div"); dates.className="dm-dates"; dates.id="ud-dates-"+destId;
   dates.textContent=fmtD(dest.dateFrom)+" \u2013 "+fmtD(dest.dateTo)+" ("+dest.nights+" night"+(dest.nights!==1?"s":"")+")";
   datesRow.appendChild(dates);
+
+  // Attached events row — shows must-do events anchored to this destination
+  // (routes passing through, conditions viable here), plus recovery-day flag
+  var events = dest.attachedEvents || [];
+  var hasEvents = events.length > 0;
+  var hasRecovery = !!dest._recoveryDay;
+  if (hasEvents || hasRecovery) {
+    var eventsRow = document.createElement("div");
+    eventsRow.style.cssText = "margin-bottom:10px;display:flex;flex-wrap:wrap;gap:6px;";
+    events.forEach(function(ev){
+      var chip = document.createElement("div");
+      var isCondition = ev.type === "condition";
+      var bg = isCondition ? "#fff8f0" : "#e8f0fc";
+      var border = isCondition ? "#f0dcc0" : "#c8d8f0";
+      var color = isCondition ? "#b05820" : "#1a5fa8";
+      var icon = isCondition ? "\u2728" : "\ud83d\ude82";
+      chip.style.cssText = "font-size:10px;font-weight:600;color:"+color+";background:"+bg+";border:1px solid "+border+";padding:3px 9px;border-radius:11px;display:inline-flex;align-items:center;gap:5px;";
+      var modeLabel = "";
+      if (ev.modeOptions === "both" && !ev.chosenMode) modeLabel = " \u00b7 mode to decide";
+      else if (ev.chosenMode === "tourist") modeLabel = " \u00b7 tourist train";
+      else if (ev.chosenMode === "regional") modeLabel = " \u00b7 regional";
+      chip.innerHTML = icon + " " + ev.name + modeLabel;
+      if (ev.description) chip.title = ev.description;
+      eventsRow.appendChild(chip);
+    });
+    if (hasRecovery) {
+      var rChip = document.createElement("div");
+      var recColor = dest._recoveryDay === "high" ? "#b05820" : "#888";
+      var recBg = dest._recoveryDay === "high" ? "#fff8f0" : "#f5f5f5";
+      var recBorder = dest._recoveryDay === "high" ? "#f0dcc0" : "#ddd";
+      rChip.style.cssText = "font-size:10px;font-weight:600;color:"+recColor+";background:"+recBg+";border:1px solid "+recBorder+";padding:3px 9px;border-radius:11px;font-style:italic;";
+      var recText = dest._recoveryDay === "high" ? "easy day \u2014 recovery" : "slower pace";
+      if (dest._recoveryFor) rChip.title = "After last night's " + dest._recoveryFor;
+      rChip.textContent = recText;
+      eventsRow.appendChild(rChip);
+    }
+    // We'll append this row later, after datesRow, inside hdr
+    dest._eventsRowEl = eventsRow;
+  }
+
   // Story + compare map buttons
   var dmActs=document.createElement("div"); dmActs.className="dm-actions";
   var stBtn2=document.createElement("button"); stBtn2.className="dm-act-btn tlink story-tl";
@@ -8253,6 +8293,7 @@ function drawDestMode(destId){
   var ovWarn=document.createElement("div"); ovWarn.id="ov-warn-"+dest.id; ovWarn.className="overlap-warn hidden";
 
   hdr.appendChild(title); hdr.appendChild(datesRow);
+  if (dest._eventsRowEl) hdr.appendChild(dest._eventsRowEl);
   hdr.appendChild(dmActs); hdr.appendChild(dsw); hdr.appendChild(ovWarn);
   c.appendChild(hdr);
 
