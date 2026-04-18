@@ -800,13 +800,8 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
       <div onclick="showAboutMax()" id="hs-how-it-works" style="font-size:11px;color:#999;cursor:pointer;margin-left:auto;padding:3px 10px;border:1px solid #ddd;border-radius:10px;white-space:nowrap;" title="How Max works">How it works</div>
     </div>
     <div class="hs-welcome" id="hs-welcome">
-      <div style="margin-top:14px;font-size:12px;color:#777;line-height:1.7;padding-top:14px;border-top:1px solid #eee;">
-        Most trips begin as a sentence &#8212; one that has been sitting with you for a while. Max begins there, not with a map. It helps you understand what&#8217;s driving the trip before reaching for a plan. Then it stays with you as that plan meets reality.
-        <div style="margin-top:12px;padding:8px 12px;border-left:3px solid #111;font-size:12px;color:#333;font-style:italic;line-height:1.6;">
-          &#8220;There is no way to give Max all the information it would need to perfectly script a trip before you leave.&#8221;
-        </div>
-        <span id="hs-about-link" onclick="showAboutMax()" style="color:#1a5fa8;cursor:pointer;font-size:11px;margin-top:8px;display:inline-block;">Read more about how Max works &#8594;</span>
-      </div>
+      <div style="padding-top:14px;border-top:1px solid #eee;font-family:Georgia,serif;font-size:16px;color:#222;line-height:1.5;margin-bottom:6px;">What do you want to do today?</div>
+      <div id="hs-options" style="margin-top:14px;"></div>
     </div>
     <!-- About Max modal -->
     <div id="about-max-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9500;display:none;align-items:center;justify-content:center;padding:24px;">
@@ -828,25 +823,23 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
       <span style="color:#b05820;font-weight:600;">API key needed</span> — Max needs your Anthropic key to suggest destinations.
       <span onclick="showHomeApiKeyForm()" style="color:#1a5fa8;cursor:pointer;text-decoration:underline;margin-left:4px;">Set it here →</span>
     </div>
-    <div id="hs-trips-section" style="display:none;">
-      <div class="hs-section-lbl">Your trips</div>
+    <div id="hs-trips-section" style="display:none;margin-top:12px;">
+      <div class="hs-section-lbl" style="font-size:10px;">Pick one:</div>
       <div class="trip-cards" id="trip-cards"></div>
     </div>
-    <div id="new-trip-form" style="margin-top:12px;">
+    <div id="new-trip-form" style="margin-top:12px;display:none;">
       <div class="new-trip-form">
-        <div class="ntp-lbl" id="ntp-lbl">Start a new trip</div>
-        <input class="ntp-inp" id="ntp-name" placeholder="Name this trip — e.g. Switzerland 2026" oninput="g('ntp-create').disabled=this.value.trim().length<2;" onkeydown="if(event.key==='Enter'&amp;&amp;!g('ntp-create').disabled)showTripBrief();"/>
+        <div class="ntp-lbl" id="ntp-lbl">Name this trip</div>
+        <input class="ntp-inp" id="ntp-name" placeholder="e.g. Switzerland 2026" oninput="g('ntp-create').disabled=this.value.trim().length<2;" onkeydown="if(event.key==='Enter'&&!g('ntp-create').disabled)showTripBrief();"/>
         <div class="ntp-actions">
           <button class="ntp-create" id="ntp-create" disabled onclick="showTripBrief()">Begin →</button>
         </div>
       </div>
     </div>
+    <div id="browse-chat" style="display:none;margin-top:12px;"></div>
     <div id="trip-brief-overlay" style="display:none;"></div>
     <div id="candidate-explorer-overlay" style="display:none;"></div>
-    <div class="hs-actions" style="text-align:center;margin-top:14px;">
-      <span onclick="openTripFile()" style="font-size:11px;color:#999;cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px;">Import a trip &rarr;</span>
-      <input type="file" id="hs-trip-file-input" accept=".json" style="display:none;" onchange="loadTripFile(this)">
-    </div>
+    <input type="file" id="hs-trip-file-input" accept=".json" style="display:none;" onchange="loadTripFile(this)">
   </div>
 </div>
 
@@ -1804,14 +1797,19 @@ function showHome(){
 
 function renderHomeScreen(){
   var kn=g("hs-key-notice"); if(kn) kn.style.display=_apiKey?"none":"block";
-  if(_tripsIndex.length===0){
-    g("hs-welcome").style.display="block";
-    g("hs-trips-section").style.display="none";
-    var lbl=g("ntp-lbl"); if(lbl) lbl.textContent="Start your first trip";
-  } else {
-    g("hs-welcome").style.display="none";
-    g("hs-trips-section").style.display="block";
-    var lbl=g("ntp-lbl"); if(lbl) lbl.textContent="Start a new trip";
+
+  // Always show the "What do you want to do today?" question and options
+  g("hs-welcome").style.display="block";
+  renderHomeOptions();
+
+  // Hide everything that starts closed
+  g("hs-trips-section").style.display="none";
+  g("new-trip-form").style.display="none";
+  var bc=g("browse-chat"); if(bc){ bc.style.display="none"; bc.innerHTML=""; }
+
+  // Always build the trip cards list, even if hidden — the "Pick up" option will reveal it
+  if(_tripsIndex.length > 0){
+    var lbl=g("ntp-lbl"); if(lbl) lbl.textContent="Name this trip";
     var cards=g("trip-cards"); cards.innerHTML="";
     _tripsIndex.slice().reverse().forEach(function(entry){
       var card=document.createElement("div"); card.className="trip-card";
@@ -1850,6 +1848,142 @@ function renderHomeScreen(){
       (function(id){card.onclick=function(e){if(e.target===del)return;selectTrip(id);};})(entry.id);
       cards.appendChild(card);
     });
+  }
+}
+
+function renderHomeOptions(){
+  var opts = g("hs-options");
+  if(!opts) return;
+  var hasTrips = _tripsIndex && _tripsIndex.length > 0;
+  var options = [];
+  options.push({id:"new",    label:"Start something new",                  sub:"A trip that is still a sentence in your head"});
+  if(hasTrips){
+    options.push({id:"resume", label:"Pick up where you left off",          sub:"Continue working on one of your trips"});
+  }
+  options.push({id:"import", label:"Load a trip from a file",              sub:"Import a saved Max trip file"});
+  options.push({id:"browse", label:"Or just browse — I’m not planning yet", sub:"Look at places, dream a little, no commitment"});
+
+  opts.innerHTML = options.map(function(o){
+    return '<div class="hs-option" data-id="'+o.id+'" onclick="selectHomeOption(\''+o.id+'\')" style="padding:11px 14px;border:1px solid #e0e0e0;border-radius:8px;margin-bottom:6px;cursor:pointer;background:#fff;transition:all 0.12s;">'
+      + '<div style="font-size:13px;font-weight:600;color:#111;margin-bottom:2px;">'+o.label+'</div>'
+      + '<div style="font-size:11px;color:#888;">'+o.sub+'</div>'
+      + '</div>';
+  }).join("");
+}
+
+function selectHomeOption(id){
+  // Clear prior-option state
+  var opts = g("hs-options");
+  if(opts){
+    var cards = opts.querySelectorAll(".hs-option");
+    cards.forEach(function(c){
+      if(c.dataset.id === id){
+        c.style.borderColor = "#111";
+        c.style.background = "#f5f5f5";
+      } else {
+        c.style.borderColor = "#e0e0e0";
+        c.style.background = "#fff";
+      }
+    });
+  }
+
+  // Hide all option-triggered surfaces first
+  g("hs-trips-section").style.display = "none";
+  g("new-trip-form").style.display = "none";
+  var bc = g("browse-chat"); if(bc){ bc.style.display = "none"; bc.innerHTML = ""; }
+
+  if(id === "new"){
+    g("new-trip-form").style.display = "block";
+    setTimeout(function(){ var inp = g("ntp-name"); if(inp) inp.focus(); }, 50);
+  } else if(id === "resume"){
+    g("hs-trips-section").style.display = "block";
+    setTimeout(function(){ g("hs-trips-section").scrollIntoView({behavior:"smooth",block:"nearest"}); }, 80);
+  } else if(id === "import"){
+    openTripFile();
+  } else if(id === "browse"){
+    renderBrowseChat();
+  }
+}
+
+async function renderBrowseChat(){
+  var bc = g("browse-chat");
+  if(!bc) return;
+  bc.style.display = "block";
+  bc.innerHTML = '<div style="background:#fbfaf6;border:1px solid #e8e4d8;border-radius:8px;padding:14px 16px;font-family:Georgia,serif;font-size:13px;line-height:1.7;color:#333;">'
+    + '<div style="font-size:10px;font-weight:700;color:#888;letter-spacing:0.05em;text-transform:uppercase;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;margin-bottom:6px;">Max says\u2026</div>'
+    + '<div id="browse-chat-body"><span style="color:#aaa;">Let me think\u2026</span></div>'
+    + '<textarea id="browse-input" rows="2" placeholder="e.g. somewhere warm, slow, not too crowded\u2026" style="width:100%;margin-top:12px;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;resize:vertical;box-sizing:border-box;"></textarea>'
+    + '<div style="margin-top:8px;display:flex;gap:6px;">'
+    + '<button id="browse-send" style="font-size:11px;padding:6px 14px;background:#111;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Ask Max</button>'
+    + '<button onclick="document.getElementById(\'browse-chat\').style.display=\'none\';renderHomeOptions();" style="font-size:11px;padding:6px 10px;background:#fff;color:#888;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;">Never mind</button>'
+    + '</div>'
+    + '</div>';
+
+  // Initial warm opener from Max
+  var openerPrompt = "You are Max, a well-traveled friend. The user is on the home screen and has tapped \"Or just browse \u2014 I\'m not planning yet.\" They don\'t have a destination in mind. Greet them warmly in 2-3 sentences (Georgia-serif tone, no bullet points, no lists). Invite them to say what they\'re in the mood for \u2014 a feeling, a climate, a kind of place, even something vague like \"somewhere I can read outdoors.\" Make it easy to say anything. Don\'t sell travel; just be present.";
+  try {
+    var text = await callMax([{role:"user", content: openerPrompt}], 300, 20000);
+    var body = g("browse-chat-body");
+    if(body) body.textContent = (text||"").trim();
+  } catch(e){
+    var body2 = g("browse-chat-body");
+    if(body2) body2.textContent = "Not planning yet? That\u2019s fine. Tell me what you\u2019re in the mood for \u2014 a feeling, a climate, a kind of place. Even something vague. I\u2019ll take it from there.";
+  }
+
+  // Wire send
+  var sendBtn = g("browse-send");
+  if(sendBtn){
+    sendBtn.onclick = function(){ browseChatSend(); };
+  }
+  var inp = g("browse-input");
+  if(inp){
+    inp.onkeydown = function(e){
+      if(e.key === "Enter" && (e.metaKey || e.ctrlKey)){
+        e.preventDefault();
+        browseChatSend();
+      }
+    };
+  }
+}
+
+var _browseHistory = [];
+async function browseChatSend(){
+  var inp = g("browse-input");
+  if(!inp) return;
+  var userMsg = inp.value.trim();
+  if(!userMsg) return;
+  inp.value = "";
+  var body = g("browse-chat-body");
+  if(!body) return;
+
+  // Append user message to history + UI
+  _browseHistory.push({role:"user", content:userMsg});
+  var userEl = document.createElement("div");
+  userEl.style.cssText = "margin-top:10px;padding:6px 10px;background:#f0ede3;border-radius:6px;font-size:12px;color:#333;";
+  userEl.textContent = userMsg;
+  body.appendChild(userEl);
+
+  var thinkingEl = document.createElement("div");
+  thinkingEl.style.cssText = "margin-top:10px;color:#aaa;";
+  thinkingEl.textContent = "Max is thinking\u2026";
+  body.appendChild(thinkingEl);
+
+  var systemPreamble = "You are Max, a well-traveled friend talking with someone who said they\'re not planning a trip yet \u2014 they just want to browse, dream, get ideas. Be warm, specific, curious. Ask clarifying questions when helpful. Offer 1\u20133 specific places as suggestions when the user gives you enough to work with (not a numbered list \u2014 weave them into prose). Keep responses 2\u20135 sentences. Georgia-serif tone, no bullet points, no headers. If they seem ready to actually plan, you can say so gently \u2014 but don\'t push.";
+  var messages = [{role:"user", content: systemPreamble + "\n\nStart the conversation."}];
+  // Reconstruct the dialogue turns
+  _browseHistory.forEach(function(m){ messages.push(m); });
+
+  try {
+    var text = await callMax(messages, 500, 30000);
+    body.removeChild(thinkingEl);
+    var maxEl = document.createElement("div");
+    maxEl.style.cssText = "margin-top:10px;line-height:1.7;";
+    maxEl.textContent = (text||"").trim();
+    body.appendChild(maxEl);
+    _browseHistory.push({role:"assistant", content: text});
+    body.scrollTop = body.scrollHeight;
+  } catch(e){
+    thinkingEl.textContent = "(Max couldn\u2019t respond just now. Try again in a moment.)";
   }
 }
 
