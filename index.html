@@ -2915,15 +2915,21 @@ async function runCandidateSearch(requiredPlaces) {
       }
     });
     // If p1 failed, surface required stops directly from _tb.requiredPlaces
+    // and kick off a recovery fetch to fill in real descriptions
     if (p1Failed && requiredPlaces.length > 0) {
-      console.warn("p1 failed — using stub required stops from _tb.requiredPlaces");
+      console.warn("p1 failed — using stub required stops, will recover descriptions async");
       requiredPlaces.forEach(function(p){
+        // Clean __manual__ marker so user doesn't see it
+        var reqForClean = (p.requiredFor||[]).filter(function(r){return r && r !== "__manual__";});
+        var whyText = reqForClean.length
+          ? "Required stop for: " + reqForClean.join(", ") + " \u2014 description loading\u2026"
+          : "Description loading\u2026";
         allCands.push({
           place:p.place, country:p.country, role:"anchor",
           stayRange:"2-4 nights",
-          whyItFits:"Required stop for: "+p.requiredFor.join(", ")+" — descriptions loading...",
+          whyItFits:whyText,
           tradeoffs:"", tags:["required"], lat:0, lng:0,
-          _required:true, _requiredFor:p.requiredFor
+          _required:true, _requiredFor:reqForClean, _needsDescription:true
         });
       });
     }
@@ -2932,6 +2938,12 @@ async function runCandidateSearch(requiredPlaces) {
     _tb.candidates = allCands;
     _tb.p2Failed = p2Failed;
     showCandidateExplorer(allCands);
+
+    // After rendering stubs, fetch real descriptions for any required place flagged _needsDescription
+    var needDesc = allCands.filter(function(c){ return c._needsDescription; });
+    if (needDesc.length > 0) {
+      recoverRequiredDescriptions(needDesc);
+    }
   } catch(e) {
     var errDiv = g("ce-cards");
     var noKey = e.message && e.message.indexOf("No API key") > -1;
@@ -2940,6 +2952,54 @@ async function runCandidateSearch(requiredPlaces) {
       : '<div style="color:#c05020;">Could not generate candidates: ' + e.message + '</div>')
       + '</div>';
     var ld = g("ce-loading"); if (ld) ld.style.display = "none";
+  }
+}
+
+// Recovery: fetch real descriptions for required places after p1 failed.
+// Goes in small batches (3 at a time) so one bad place doesn't kill the rest.
+// Updates candidates in place and re-renders visible cards.
+async function recoverRequiredDescriptions(cands) {
+  var region = _tb.region || "this region";
+  var batchSize = 3;
+  for (var i = 0; i < cands.length; i += batchSize) {
+    var batch = cands.slice(i, i + batchSize);
+    var reqForContext = batch.map(function(c){
+      var rf = (c._requiredFor||[]).join(", ");
+      return rf
+        ? c.place + " (needed for " + rf + ")"
+        : c.place;
+    }).join("; ");
+    var prompt = "For a traveler visiting " + region + ", write a short candidate card for each of these places. "
+      + "Places: " + reqForContext + "\n\n"
+      + "For each, describe why it is genuinely worth visiting \u2014 character, what's there, what makes it worth the stop. "
+      + "If the place is primarily a scenic waypoint (a train station, summit, viewpoint), say so honestly and describe what the experience is like rather than inventing reasons to linger.\n\n"
+      + "Return ONLY a JSON array (no markdown):\n"
+      + '[{"place":"Name","whyItFits":"2-3 sentences.","tradeoffs":"One honest downside.","tags":["tag1","tag2"],"stayRange":"2-4 nights"}]';
+    try {
+      var text = await callMax([{role:"user",content:prompt}], 1500, 40000);
+      var parsed = JSON.parse(text.replace(/```json|```/g,"").trim());
+      parsed.forEach(function(r){
+        var match = (_tb.candidates||[]).find(function(c){
+          return c.place && r.place && c.place.toLowerCase() === r.place.toLowerCase();
+        });
+        if (match) {
+          if (r.whyItFits) match.whyItFits = r.whyItFits;
+          if (r.tradeoffs) match.tradeoffs = r.tradeoffs;
+          if (r.tags && r.tags.length) match.tags = r.tags;
+          if (r.stayRange) match.stayRange = r.stayRange;
+          delete match._needsDescription;
+        }
+      });
+      // Re-render any open explorer so updated cards appear
+      if (document.getElementById("candidate-explorer-overlay") &&
+          document.getElementById("candidate-explorer-overlay").style.display !== "none" &&
+          typeof renderCandidateCards === "function") {
+        renderCandidateCards(_tb.candidates);
+      }
+    } catch(e) {
+      console.warn("Description recovery batch failed:", e.message);
+      // Leave placeholders in place for this batch — still usable
+    }
   }
 }
 
