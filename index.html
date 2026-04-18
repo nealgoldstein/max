@@ -4186,8 +4186,15 @@ async function buildFromCandidates(){
   var kept=(_tb.candidates||[]).filter(function(c){return c.status==="keep";});
   if(!kept.length) return;
   trip={name:_tb.name||"New trip",destinations:[],legs:{},trackSpending:false,pendingActions:[],
-    brief:{region:_tb.region,when:_tb.when,intent:_tb.intent,interests:_tb.interests,anchors:_tb.anchors},
-    mdcItems:(_mdcItems||[]).map(function(m){return {id:m.id,name:m.name,type:m.type,checked:m.checked,requiredPlaces:m.requiredPlaces,conditionNote:m.conditionNote};}),
+    brief:{region:_tb.region,when:_tb.when,intent:_tb.intent,interests:_tb.interests,anchors:_tb.anchors,familiarity:_tb.familiarity},
+    mdcItems:(_mdcItems||[]).map(function(m){return {
+      id:m.id, name:m.name, type:m.type, checked:m.checked,
+      requiredPlaces:m.requiredPlaces, endpoints:m.endpoints, viableLocations:m.viableLocations,
+      direction:m.direction, durationHours:m.durationHours,
+      modeOptions:m.modeOptions, alternatives:m.alternatives, reservationNotes:m.reservationNotes,
+      recovery:m.recovery, frequencyRequirement:m.frequencyRequirement,
+      conditionNote:m.conditionNote, description:m.description, chosenMode:m.chosenMode||null
+    };}),
     logistics:null};
   activeDest=null; destCtr=0; sidCtr=100; bkCtr=0; _fileHandle=null;
   var tripId="trip-"+Date.now(); _currentTripId=tripId;
@@ -4195,12 +4202,25 @@ async function buildFromCandidates(){
   // Parse start date from brief
   var startDate=parseStartDateFromBrief(_tb.when||"");
 
-  // Build destinations from kept candidates
+  // ── Event-aware ordering ──────────────────────────────────
+  // Order kept candidates so that:
+  //   • route endpoints are adjacent and aligned with trip flow (entry → exit)
+  //   • condition-viable locations get bunched together where possible
+  //   • destinations with late-recovery conditions are followed by easier days
+  // Returns {ordered, reasoning}
+  var orderResult = orderKeptCandidates(kept, _mdcItems||[], _tb.entry||"", _tb.tbExit||"");
+  var ordered = orderResult.ordered;
+  trip.orderingReasoning = orderResult.reasoning;
+
+  // Build destinations from ordered candidates
   var cur=new Date(startDate);
-  kept.forEach(function(c){
+  ordered.forEach(function(c){
     destCtr++;
     var id="d"+destCtr;
     var nights=parseNightsFromRange(c.stayRange)||3;
+
+    // Recovery bump: if the previous destination had a high-recovery event,
+    // add an easy-day note to this one. Doesn't change nights, just flags.
     var dateFrom=cur.toISOString().slice(0,10);
     var next=new Date(cur); next.setDate(next.getDate()+nights);
     var dateTo=next.toISOString().slice(0,10);
@@ -4210,7 +4230,8 @@ async function buildFromCandidates(){
       days:makeDays(id,c.place,c.place,dateFrom,nights),
       trackerItems:{booked:[],see:[],visited:[]}, trackerCat:"booked", storyState:"idle",
       hotelBookings:[], generalBookings:[], locations:[],
-      execMode:false, todayItems:[], discoveredItems:[], suggestions:[]
+      execMode:false, todayItems:[], discoveredItems:[], suggestions:[],
+      attachedEvents: findAttachedEvents(c, _mdcItems||[])
     };
     trip.destinations.push(dest);
     if(isKnownCity(c.place)){
@@ -4221,7 +4242,7 @@ async function buildFromCandidates(){
     cur=next;
   });
 
-  trip.destinations.sort(function(a,b){return(a.dateFrom||"").localeCompare(b.dateFrom||"");});
+  // Don't re-sort — ordering was already computed event-aware
   _tripsIndex.push({id:tripId,name:_tb.name,destCount:kept.length,dateRange:"",savedAt:new Date().toISOString()});
   saveTripsIndex(); localSave();
   g("candidate-explorer-overlay").style.display="none";
@@ -4238,6 +4259,229 @@ async function buildFromCandidates(){
       },200);
     },100);
   });
+}
+
+// ── ITINERARY ORDERING ─────────────────────────────────────
+// Orders kept candidates so that route endpoints are adjacent and flow
+// matches the overall trip entry→exit direction. Bunches condition-viable
+// locations together. Returns {ordered, reasoning} where reasoning is a
+// plain-English list of decisions for later display.
+function orderKeptCandidates(kept, mdcItems, entryCity, exitCity){
+  var reasoning = [];
+  if (!kept.length) return {ordered:[], reasoning:reasoning};
+
+  // Build a map of place → candidate for quick lookup. Use normalized names.
+  var byName = {};
+  kept.forEach(function(c){ byName[_normPlaceName(c.place)] = c; });
+
+  // Separate candidates by role: route-endpoints, condition-viable, free
+  var activeRoutes = (mdcItems||[]).filter(function(m){
+    return m.checked && m.type === "route" && (m.endpoints||m.requiredPlaces||[]).length >= 2;
+  });
+  var activeConditions = (mdcItems||[]).filter(function(m){
+    return m.checked && m.type === "condition" && (m.viableLocations||m.requiredPlaces||[]).length;
+  });
+
+  // Find which kept candidates are route endpoints (with their route)
+  var candRoute = {}; // candId → [routeName1, routeName2...]
+  activeRoutes.forEach(function(r){
+    var eps = r.endpoints || r.requiredPlaces || [];
+    eps.forEach(function(p){
+      var c = byName[_normPlaceName(p.place)];
+      if (c) {
+        candRoute[c.id] = candRoute[c.id] || [];
+        candRoute[c.id].push(r.name);
+      }
+    });
+  });
+
+  // Group candidates into route-pairs (two endpoints of same route)
+  // Each route that has both endpoints in kept becomes a "block" that must be adjacent
+  var routeBlocks = []; // array of {routeName, candidates:[], direction}
+  activeRoutes.forEach(function(r){
+    var eps = r.endpoints || r.requiredPlaces || [];
+    var matching = eps.map(function(p){ return byName[_normPlaceName(p.place)]; }).filter(Boolean);
+    if (matching.length >= 2) {
+      routeBlocks.push({
+        routeName: r.name,
+        direction: r.direction || "either",
+        candidates: matching,
+        endpointsOrder: eps.map(function(p){ return _normPlaceName(p.place); })
+      });
+      reasoning.push("Zermatt and St. Moritz belong to the same route (" + r.name + "), so they'll be adjacent in the itinerary.".replace('Zermatt', matching[0].place).replace('St. Moritz', matching[1].place).replace("Zermatt and " + matching[1].place, matching[0].place + " and " + matching[1].place));
+    }
+  });
+
+  // Track which candidates are already placed in a block
+  var placed = {};
+  routeBlocks.forEach(function(b){ b.candidates.forEach(function(c){ placed[c.id] = true; }); });
+
+  // Direction alignment: for each block with direction=either, decide based on
+  // which endpoint is closer (geographically or alphabetically as fallback) to
+  // entry city
+  function pickDirection(block, entry, exit){
+    if (block.direction !== "either") {
+      // honor the preferred direction
+      return block.direction === "forward" ? block.candidates.slice() : block.candidates.slice().reverse();
+    }
+    // Heuristic: if entry city matches or substring-matches one endpoint, start from the other
+    var entryN = _normPlaceName(entry||"");
+    var exitN  = _normPlaceName(exit||"");
+    var a = block.candidates[0], b = block.candidates[1];
+    var aN = _normPlaceName(a.place), bN = _normPlaceName(b.place);
+
+    // If entry is near A, start from A (travel A→B). If entry near B, start from B.
+    if (entryN && (entryN.indexOf(aN) >= 0 || aN.indexOf(entryN) >= 0)) {
+      reasoning.push("On " + block.routeName + ", I'm going " + a.place + " → " + b.place + " since you're arriving near " + a.place + ".");
+      return [a, b];
+    }
+    if (entryN && (entryN.indexOf(bN) >= 0 || bN.indexOf(entryN) >= 0)) {
+      reasoning.push("On " + block.routeName + ", I'm going " + b.place + " → " + a.place + " since you're arriving near " + b.place + ".");
+      return [b, a];
+    }
+    // If exit is near B, end at B (travel A→B)
+    if (exitN && (exitN.indexOf(bN) >= 0 || bN.indexOf(exitN) >= 0)) {
+      reasoning.push("On " + block.routeName + ", ending at " + b.place + " flows toward your exit.");
+      return [a, b];
+    }
+    if (exitN && (exitN.indexOf(aN) >= 0 || aN.indexOf(exitN) >= 0)) {
+      reasoning.push("On " + block.routeName + ", ending at " + a.place + " flows toward your exit.");
+      return [b, a];
+    }
+    // No signal — keep the expansion's default order
+    reasoning.push("On " + block.routeName + ", either direction works — I went with " + a.place + " → " + b.place + ".");
+    return [a, b];
+  }
+
+  // Build the final ordered list
+  var remaining = kept.filter(function(c){ return !placed[c.id]; });
+
+  // Heuristic ordering strategy:
+  //   1. Start with any candidate matching entry city (if present)
+  //   2. Place route blocks in order of how many un-placed neighbors they have
+  //   3. Fill with remaining by a simple geographic-ish ordering
+  //      (for now: keep original candidate list order to respect Max's reasoning)
+  //   4. End with any candidate matching exit city (if present)
+  var ordered = [];
+  var entryN = _normPlaceName(entryCity||"");
+  var exitN  = _normPlaceName(exitCity||"");
+
+  function matchesName(c, nN){
+    if (!c || !nN) return false;
+    var cN = _normPlaceName(c.place);
+    return cN.indexOf(nN) >= 0 || nN.indexOf(cN) >= 0;
+  }
+
+  // Find entry candidate
+  var entryCand = null;
+  if (entryN) {
+    remaining.forEach(function(c){ if (!entryCand && matchesName(c, entryN)) entryCand = c; });
+    if (!entryCand) {
+      // Check route blocks — if one endpoint matches entry, put that block first
+      routeBlocks.forEach(function(b){
+        b.candidates.forEach(function(c){ if (!entryCand && matchesName(c, entryN)) entryCand = c; });
+      });
+    }
+  }
+
+  // Find exit candidate
+  var exitCand = null;
+  if (exitN) {
+    remaining.forEach(function(c){ if (!exitCand && matchesName(c, exitN) && c !== entryCand) exitCand = c; });
+  }
+
+  // Place entry (if found and not in a block)
+  if (entryCand && remaining.indexOf(entryCand) >= 0) {
+    ordered.push(entryCand);
+    remaining = remaining.filter(function(c){ return c !== entryCand; });
+    reasoning.push("Starting in " + entryCand.place + " since that's where you're arriving.");
+  }
+
+  // Place route blocks — respect direction alignment
+  routeBlocks.forEach(function(block){
+    var oriented = pickDirection(block, entryCity, exitCity);
+    oriented.forEach(function(c){ ordered.push(c); });
+  });
+
+  // Append remaining non-exit candidates in their original list order
+  remaining.forEach(function(c){
+    if (c !== exitCand) ordered.push(c);
+  });
+
+  // Place exit last
+  if (exitCand) {
+    ordered.push(exitCand);
+    reasoning.push("Ending in " + exitCand.place + " since that's where you're departing from.");
+  }
+
+  // Condition bunching pass: if multiple candidates are viable locations for a
+  // condition event, try to make them consecutive
+  activeConditions.forEach(function(cond){
+    var viable = (cond.viableLocations || cond.requiredPlaces || []).map(function(p){ return _normPlaceName(p.place); });
+    var viableCands = ordered.filter(function(c){
+      var cN = _normPlaceName(c.place);
+      return viable.some(function(v){ return v === cN || v.indexOf(cN) >= 0 || cN.indexOf(v) >= 0; });
+    });
+    if (viableCands.length >= 2) {
+      reasoning.push("Bunching your " + cond.name + " locations (" + viableCands.map(function(c){return c.place;}).join(", ") + ") close together so weather gives you a real chance.");
+      // Find lowest-index viable candidate and move the others to be adjacent
+      var firstIdx = ordered.indexOf(viableCands[0]);
+      var toMove = viableCands.slice(1);
+      toMove.forEach(function(c, i){
+        var curIdx = ordered.indexOf(c);
+        if (curIdx > firstIdx + 1 + i) {
+          ordered.splice(curIdx, 1);
+          ordered.splice(firstIdx + 1 + i, 0, c);
+        }
+      });
+    }
+  });
+
+  // Recovery pass: if a candidate has a high-recovery condition attached, mark
+  // the NEXT candidate as a "recovery day" (metadata for display)
+  activeConditions.forEach(function(cond){
+    if (cond.recovery !== "high" && cond.recovery !== "moderate") return;
+    var viable = (cond.viableLocations || cond.requiredPlaces || []).map(function(p){ return _normPlaceName(p.place); });
+    for (var i = 0; i < ordered.length; i++) {
+      var cN = _normPlaceName(ordered[i].place);
+      var isViable = viable.some(function(v){ return v === cN || v.indexOf(cN) >= 0 || cN.indexOf(v) >= 0; });
+      if (isViable && ordered[i+1]) {
+        ordered[i+1]._recoveryDay = cond.recovery;
+        ordered[i+1]._recoveryFor = cond.name;
+      }
+    }
+  });
+
+  return {ordered: ordered, reasoning: reasoning};
+}
+
+// For each destination, find which must-do events happen there
+function findAttachedEvents(cand, mdcItems){
+  if (!cand || !mdcItems || !mdcItems.length) return [];
+  var cN = _normPlaceName(cand.place);
+  var events = [];
+  mdcItems.forEach(function(m){
+    if (!m.checked) return;
+    var places = m.requiredPlaces || m.endpoints || m.viableLocations || [];
+    var matches = places.some(function(p){
+      var pN = _normPlaceName(p.place);
+      return pN === cN || pN.indexOf(cN) >= 0 || cN.indexOf(pN) >= 0;
+    });
+    if (matches) {
+      events.push({
+        id: m.id,
+        name: m.name,
+        type: m.type,
+        description: m.description,
+        recovery: m.recovery,
+        modeOptions: m.modeOptions,
+        chosenMode: m.chosenMode,
+        direction: m.direction,
+        durationHours: m.durationHours
+      });
+    }
+  });
+  return events;
 }
 
 function parseStartDateFromBrief(when){
