@@ -2189,15 +2189,50 @@ async function expandMustDos() {
     + '  {"name":"Glacier Express","type":"route","description":"Classic 8hr panoramic rail journey through the Swiss Alps.","endpoints":[{"place":"Zermatt","country":"Switzerland"},{"place":"St. Moritz","country":"Switzerland"}],"requiredPlaces":[{"place":"Zermatt","country":"Switzerland"},{"place":"St. Moritz","country":"Switzerland"}],"direction":"either","durationHours":8,"modeOptions":"both","alternatives":"Regular SBB trains cover the same Zermatt-Brig-Chur-St. Moritz route hourly with one or two transfers. No reservation, standard fare covered by the Swiss Travel Pass or Half-Fare Card. Windows open in many cars, and you can break the journey at any station.","reservationNotes":"Seat reservation required, 2-3 departures daily depending on season, CHF 152+ supplement on top of fare or pass.","flexibility":"low"},\n'
     + '  {"name":"Northern Lights","type":"condition","description":"Aurora borealis, visible on clear dark nights September-March away from light pollution.","viableLocations":[{"place":"Snæfellsnes Peninsula","country":"Iceland"},{"place":"Akureyri area","country":"Iceland"},{"place":"Westfjords","country":"Iceland"}],"requiredPlaces":[{"place":"Snæfellsnes Peninsula","country":"Iceland"},{"place":"Akureyri area","country":"Iceland"}],"recovery":"high","frequencyRequirement":3,"conditionNote":"You may be up until 2-3am on viable nights — the next morning needs to start late. Plan at least 3 nights in aurora-capable locations so weather gives you a real chance.","flexibility":"high"}\n'
     + ']\n\n'
-    + "Be specific. Use real, well-known names. For routes, note each individual route (not 'the trains' as one item). For conditions, list multiple viable locations. Max 12 items for meta-references, max 6 otherwise.";
+    + "Be specific. Use real, well-known names. For routes, note each individual route (not 'the trains' as one item). For conditions, list multiple viable locations. Max 12 items for meta-references, max 6 otherwise.\n\n"
+    + "CRITICAL: endpoints, requiredPlaces, and viableLocations are ARRAYS OF OBJECTS, each with {\"place\": \"...\", \"country\": \"...\"} \u2014 never plain strings. Even for a single-country trip, always include country. This matters because the consuming code looks up item.place and item.country.";
 
   try {
-    var text = await callMax([{role:"user",content:prompt}], 1000, 30000);
-    var items = JSON.parse(text.replace(/```json|```/g,"").trim());
-    items.forEach(function(item,i){ item.id="md"+i; item.checked=true; });
+    var text = await callMax([{role:"user",content:prompt}], 3000, 45000);
+    // Tolerant parsing: strip markdown fences, handle trailing commas, recover from truncation
+    var cleaned = text.replace(/```json|```/g,"").trim();
+    var items;
+    try {
+      items = JSON.parse(cleaned);
+    } catch(parseErr) {
+      // Attempt recovery — truncated response. Find last valid array element.
+      console.warn("Must-do parse failed, attempting recovery:", parseErr.message);
+      var lastBrace = cleaned.lastIndexOf("},");
+      if (lastBrace > 0) {
+        var recovered = cleaned.substring(0, lastBrace + 1) + "]";
+        try { items = JSON.parse(recovered); console.log("Recovered " + items.length + " items from truncated response"); }
+        catch(e2) { throw parseErr; }
+      } else { throw parseErr; }
+    }
+    // Normalize: some models return strings instead of {place,country} objects for endpoints/requiredPlaces/viableLocations
+    var _regionCountry = (_tb && _tb.region) ? _tb.region : "";
+    function _normPlaceArr(arr){
+      if (!Array.isArray(arr)) return arr;
+      return arr.map(function(p){
+        if (typeof p === "string") return {place: p, country: _regionCountry};
+        if (p && typeof p === "object" && p.place) return p;
+        return p;
+      });
+    }
+    items.forEach(function(item, i){
+      item.id = "md" + i;
+      item.checked = true;
+      if (item.endpoints) item.endpoints = _normPlaceArr(item.endpoints);
+      if (item.requiredPlaces) item.requiredPlaces = _normPlaceArr(item.requiredPlaces);
+      if (item.viableLocations) item.viableLocations = _normPlaceArr(item.viableLocations);
+      // Mirror endpoints into requiredPlaces if missing
+      if (item.type === "route" && !item.requiredPlaces && item.endpoints) item.requiredPlaces = item.endpoints;
+      if (item.type === "condition" && !item.requiredPlaces && item.viableLocations) item.requiredPlaces = item.viableLocations;
+    });
     _mdcItems = items;
     showMustDoConfirmation(items);
   } catch(e) {
+    console.error("expandMustDos failed:", e && e.message);
     // On error, skip this step and go straight to candidates
     runCandidateSearch([]);
   }
