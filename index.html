@@ -3910,7 +3910,7 @@ function showCandidateExplorer(cands){
     +'<div class="ce-left">'
     +'<div class="ce-shortlist"><div class="ce-sl-label">Shortlist</div><div class="ce-sl-pills" id="ce-sl"><span class="ce-sl-empty">Keep places to add them here</span></div></div>'
     +'<div class="ce-cards" id="ce-cards">'
-    +(cands?'':'<div class="ce-loading" id="ce-loading">'      +'<span class="ce-loading-spin">\u2736</span>'      +'<div style="font-size:12px;font-weight:600;color:#555;margin-bottom:5px;">Finding candidate places…</div>'      +'<div id="ce-loading-detail" style="font-size:10px;color:#aaa;line-height:1.7;">This usually takes 20–40 seconds.<br>Max is considering required stops and places worth visiting.</div>'      +'</div>')
+    +(cands?'':'<div class="ce-loading" id="ce-loading">'      +'<span class="ce-loading-spin">\u2736</span>'      +'<div class="max-thinking" style="font-size:12px;font-weight:600;color:#555;margin-bottom:5px;">Thinking about where you might go\u2026</div>'      +'<div id="ce-loading-detail" style="font-size:10px;color:#aaa;line-height:1.7;">This usually takes 20\u201340 seconds.<br>Max is considering required stops and places worth visiting.</div>'      +'</div>')
     +'</div></div>'
     +'<div class="ce-right"><div id="ce-map" class="ce-map"></div></div>'
     +'</div>'
@@ -4893,6 +4893,10 @@ async function generateCityData(place,destId){
       drawDestMode(destId);
       updateMainMap();
       setTimeout(function(){if(_mainMap)_mainMap.invalidateSize();},100);
+    } else if(_leftMode==='trip'){
+      // Re-render trip view so "Max is generating data..." label clears on the card
+      drawTripMode();
+      updateMainMap();
     } else {
       updateMainMap();
     }
@@ -4950,6 +4954,7 @@ async function generateCityData(place,destId){
       showSaveStatus('\u26a0 '+noKeyMsg,8000);
     }
     if(activeDest===destId&&_leftMode==='dest') drawDestMode(destId);
+    else if(_leftMode==='trip') drawTripMode();
     // Only show error pane if suggestions are genuinely missing
     var d2=getDest(destId);
     var alreadyHasData=d2&&d2.suggestions&&d2.suggestions.length>0;
@@ -6656,6 +6661,9 @@ function setLeftMode(mode){
   if(mode==="trip") drawTripMode();
   else { if(activeDest)drawDestMode(activeDest); else drawTripMode(); }
   updateMainMap();
+  // Reset scroll position on view switch — fresh view should start at top
+  var _lpc = g("lp-content"); if(_lpc) _lpc.scrollTop = 0;
+  window.scrollTo(0, 0);
 }
 
 function toggleMobSheet(){
@@ -7280,10 +7288,11 @@ function executeMoveDest(dest,fromIdx,toIdx){
 }
 
 function drawTripMode(){
-  setTimeout(showLogisticsNudge, 300);
   _leftMode="trip";
   var c=g("lp-content"); if(!c)return;
   c.innerHTML="";
+  c.scrollTop = 0;
+  window.scrollTo(0, 0);
   var sb=document.getElementById('map-style-btn'); if(sb) sb.style.display='none';
 
   // Safety check
@@ -7327,7 +7336,7 @@ function drawTripMode(){
     // Show generating indicator for unknown cities
     var genData=_generatedCityData[dest.place.toLowerCase()];
     if(genData&&genData.loading){
-      var genLbl=document.createElement("div"); genLbl.style.cssText="font-size:10px;color:#7c5cbf;padding:2px 0;font-style:italic;";
+      var genLbl=document.createElement("div"); genLbl.className="max-thinking"; genLbl.style.cssText="font-size:10px;color:#7c5cbf;padding:2px 0;font-style:italic;";
       genLbl.textContent="Max is generating data\u2026"; card.appendChild(genLbl);
     }
 
@@ -8125,6 +8134,9 @@ function drawDestMode(destId){
   activeDest=destId;
   _leftMode="dest";
   _mapExecMode=null;
+  // Fresh destination view — scroll to top
+  var _lpc = g("lp-content"); if(_lpc) _lpc.scrollTop = 0;
+  window.scrollTo(0, 0);
   document.querySelectorAll('.bk-form').forEach(function(f){if(f.parentNode)f.parentNode.removeChild(f);});
   g("mode-trip-btn").className="mode-btn";
   g("mode-dest-btn").className="mode-btn on";
