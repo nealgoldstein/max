@@ -4166,7 +4166,12 @@ async function geocodeMissingCandidates(missing, allCands) {
   if (!missing.length) return;
   try {
     var names = missing.map(function(c){ return c.place + (c.country ? ", " + c.country : ""); }).join("; ");
+    var region = (_tb && _tb.region) ? _tb.region : "";
+    var regionHint = region
+      ? " These are destinations for a trip to "+region+" — if a name is ambiguous or possibly a typo (e.g. 'Apenzell' instead of 'Appenzell'), use the place in "+region+"."
+      : "";
     var prompt = "Return ONLY a JSON array with accurate lat/lng for these places: " + names
+      + "." + regionHint
       + '\n[{"place":"Name","lat":0.0,"lng":0.0}]\nUse real coordinates.';
     var text = await callMax([{role:"user",content:prompt}], 500, 20000);
     var coords = JSON.parse(text.replace(/```json|```/g,"").trim());
@@ -4287,14 +4292,28 @@ async function geocodeMissingCoords(cands){
   _geocodeInFlight = true;
   var progressed = false;
   try {
+    var region = (_tb && _tb.region) ? _tb.region : "";
     for (var i = 0; i < need.length; i++) {
       var c = need[i];
       c._geocodeTried = true;
-      var q = c.place + (c.country ? ", " + c.country : "");
+      // Bias the geocoder toward the trip's region so user-typed manual must-dos
+      // ("Apenzell" for a Swiss Alps trip) don't match same-named places elsewhere
+      // (Apenzell, Nevada). Country takes precedence when we have it.
+      var qParts = [c.place];
+      if (c.country) qParts.push(c.country);
+      else if (region) qParts.push(region);
+      var q = qParts.join(", ");
       try {
         var r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='
           + encodeURIComponent(q), {headers:{'Accept-Language':'en'}});
         var data = await r.json();
+        // If the region-biased query returned nothing, retry with just the place name —
+        // better to have bad coords than none.
+        if ((!data || !data.length) && !c.country && region) {
+          r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='
+            + encodeURIComponent(c.place), {headers:{'Accept-Language':'en'}});
+          data = await r.json();
+        }
         if (data && data.length && data[0].lat && data[0].lon) {
           c.lat = parseFloat(data[0].lat);
           c.lng = parseFloat(data[0].lon);
@@ -4582,45 +4601,49 @@ function setCS(id,status){
     var realNames = (c._requiredFor||[]).filter(function(r){return r && r !== "__manual__";});
     var hasManual = (c._requiredFor||[]).some(function(r){return r === "__manual__";});
 
-    // Count remaining (non-rejected, non-this) support per must-do name
-    var supportByName = {};
+    // For each must-do this candidate supports, collect the OTHER non-rejected
+    // candidates that also satisfy it — so we can name them specifically.
+    var supportByName = {}; // { "bernina express": ["Tirano"], ... }
     (_tb.candidates||[]).forEach(function(other){
       if (other.id === c.id) return;
       if (other.status === "reject") return;
       (other._requiredFor||[]).forEach(function(r){
         if (r && r !== "__manual__") {
           var k = r.toLowerCase();
-          supportByName[k] = (supportByName[k]||0) + 1;
+          if (!supportByName[k]) supportByName[k] = [];
+          supportByName[k].push(other.place);
         }
       });
     });
-    var willDrop = [];
-    var willKeep = [];
+    var willDrop = []; // must-dos with no remaining support
+    var willKeep = []; // [{name, supporters:[...]}, ...]
     realNames.forEach(function(n){
-      if ((supportByName[n.toLowerCase()]||0) > 0) willKeep.push(n);
+      var sup = supportByName[n.toLowerCase()];
+      if (sup && sup.length) willKeep.push({name:n, supporters:sup});
       else willDrop.push(n);
     });
 
-    var msg;
-    if (willDrop.length && willKeep.length) {
-      msg = "Rejecting "+c.place+" will drop: "+willDrop.join(", ")+
-            ". Your other must-dos ("+willKeep.join(", ")+") stay — other places support them. Continue?";
-    } else if (willDrop.length && hasManual) {
-      msg = "Rejecting "+c.place+" will drop your must-dos: "+willDrop.join(", ")+
-            " (and affects a must-see you added). Continue?";
-    } else if (willDrop.length) {
-      msg = "Rejecting "+c.place+" will drop your must-dos: "+willDrop.join(", ")+". Continue?";
-    } else if (willKeep.length && hasManual) {
-      msg = c.place+" is a required stop, and a must-see you added. Your must-dos ("+willKeep.join(", ")+
-            ") stay — other places still support them. Reject anyway?";
-    } else if (willKeep.length) {
-      msg = c.place+" is a required stop, but your must-dos ("+willKeep.join(", ")+
-            ") stay — other places still support them. Reject anyway?";
-    } else if (hasManual) {
-      msg = c.place+" is a must-see you added. Reject anyway?";
-    } else {
-      msg = c.place+" is a required stop. Reject anyway?";
+    function joinList(arr){
+      if (arr.length === 1) return arr[0];
+      if (arr.length === 2) return arr[0]+" or "+arr[1];
+      return arr.slice(0,-1).join(", ")+", or "+arr[arr.length-1];
     }
+    var lines = [];
+    lines.push("Reject "+c.place+"?");
+    lines.push("");
+    willDrop.forEach(function(n){
+      lines.push("• "+n+" — will be dropped (no other stop in your shortlist can cover it).");
+    });
+    willKeep.forEach(function(k){
+      lines.push("• "+k.name+" — still works ("+joinList(k.supporters)+" can cover it).");
+    });
+    if (hasManual) {
+      lines.push("• "+c.place+" is a must-see you added — rejecting removes it from your trip.");
+    }
+    if (!willDrop.length && !willKeep.length && !hasManual) {
+      lines.push(c.place+" is marked required. Continue?");
+    }
+    var msg = lines.join("\n");
     if (!confirm(msg)) return;
 
     // Cascade the drops — only for must-dos with no remaining support.
