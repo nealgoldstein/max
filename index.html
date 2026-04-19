@@ -4410,10 +4410,62 @@ function showCandidateExplorer(cands){
   },80);
 }
 
+// Geocode any candidates that still have placeholder (0,0) coordinates via Nominatim.
+// Required stops especially often come back from p1 without real coords because the
+// example JSON shape has lat:0.0,lng:0.0 and models copy it verbatim. Runs in the
+// background after cards render; re-renders once coords land so pins appear.
+var _geocodeInFlight = false;
+async function geocodeMissingCoords(cands){
+  if (_geocodeInFlight) return; // one pass at a time
+  if (!cands || !cands.length) return;
+  var need = cands.filter(function(c){
+    return (!c.lat || c.lat === 0) && !c._geocodeFailed && !c._geocodeTried;
+  });
+  if (!need.length) return;
+  _geocodeInFlight = true;
+  var progressed = false;
+  try {
+    for (var i = 0; i < need.length; i++) {
+      var c = need[i];
+      c._geocodeTried = true;
+      var q = c.place + (c.country ? ", " + c.country : "");
+      try {
+        var r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='
+          + encodeURIComponent(q), {headers:{'Accept-Language':'en'}});
+        var data = await r.json();
+        if (data && data.length && data[0].lat && data[0].lon) {
+          c.lat = parseFloat(data[0].lat);
+          c.lng = parseFloat(data[0].lon);
+          progressed = true;
+        } else {
+          c._geocodeFailed = true;
+        }
+      } catch(e) {
+        c._geocodeFailed = true;
+      }
+      // Pace requests — Nominatim asks for <1 req/sec; 250ms is safe for small batches
+      await new Promise(function(res){ setTimeout(res, 250); });
+    }
+    if (progressed) {
+      if (typeof autoSave === "function") autoSave();
+      // Re-render so pins appear on the map
+      if (document.getElementById("candidate-explorer-overlay")
+          && document.getElementById("candidate-explorer-overlay").style.display !== "none") {
+        renderCandidateCards(cands);
+      }
+    }
+  } finally {
+    _geocodeInFlight = false;
+  }
+}
+
 function renderCandidateCards(cands){
   var el=g("ce-cards"); if(!el) return;
   el.innerHTML="";
   _ceMarkers.forEach(function(m){if(_ceMap)_ceMap.removeLayer(m);}); _ceMarkers=[];
+  // Kick off geocoding for any candidate with placeholder coords. Runs async in
+  // the background; will re-call this function when coords land so pins appear.
+  geocodeMissingCoords(cands);
   var bounds=[];
   var seenDivider = false;
   var seenReqHeader = false;
