@@ -1254,56 +1254,12 @@ async function saveTrip(){
   }
 }
 
-// ── Places API (stub — replace with Worker call when live) ──
-//
-// TO WIRE LIVE API: replace this function body with:
-//   var resp = await fetch('/api/places?lat='+lat+'&lng='+lng+'&types='+types.join(',')+'&radius='+radius);
-//   return await resp.json();
-//
-function fetchNearbyLocations(lat, lng, types, radius){
-  // Stub: filter static data by distance from lat/lng
-  // Uses Haversine formula for approximate meters
-  function distM(a,b,c,d){
-    var R=6371000,dLat=(c-a)*Math.PI/180,dLng=(d-b)*Math.PI/180;
-    var x=Math.sin(dLat/2)*Math.sin(dLat/2)+Math.cos(a*Math.PI/180)*Math.cos(c*Math.PI/180)*Math.sin(dLng/2)*Math.sin(dLng/2);
-    return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
-  }
-  // Get all static locations for the city closest to lat/lng
-  var cities={interlaken:[46.6863,7.8632],vienna:[48.2082,16.3738],prague:[50.0755,14.4378],
-    budapest:[47.4979,19.0402],amsterdam:[52.3676,4.9041],paris:[48.8566,2.3522],
-    rome:[41.9028,12.4964],barcelona:[41.3851,2.1734],berlin:[52.5200,13.4050]};
-  var closestCity=null,closestDist=Infinity;
-  Object.keys(cities).forEach(function(k){
-    var d=distM(lat,lng,cities[k][0],cities[k][1]);
-    if(d<closestDist){closestDist=d;closestCity=k;}
-  });
-  if(!closestCity)return[];
-  var allLocs=getNearbyLocations(closestCity);
-  return allLocs
-    .filter(function(l){return!types||types.indexOf(l.type)>-1;})
-    .map(function(l){return Object.assign({},l,{dist:Math.round(distM(lat,lng,l.lat,l.lng))})})
-    .filter(function(l){return!radius||l.dist<=radius;})
-    .sort(function(a,b){return a.dist-b.dist;});
-}
-
-function refreshDestLocations(dest){
-  if(!dest.locations) dest.locations=[];
-  if(!dest.hotelBookings) dest.hotelBookings=[];
-  // Determine anchor point — booked hotel if available, else city center
-  var anchor=null;
-  var booked=dest.hotelBookings.find(function(b){return b.status==="booked"&&b.lat&&b.lng;});
-  if(booked){anchor={lat:booked.lat,lng:booked.lng,source:"hotel",name:booked.name};}
-  else{var c=getCityCenter(dest.place);anchor={lat:c[0],lng:c[1],source:"city",name:dest.place};}
-  var radius=booked?1000:2000; // tighter radius when we have a hotel
-  var nearby=fetchNearbyLocations(anchor.lat,anchor.lng,["atm","grocery","tourist-info","transit"],radius);
-  // Preserve arrival/departure and non-nearby locations
-  var keep=dest.locations.filter(function(l){return l.type==="arrival"||l.type==="departure"||l.type==="sight-must"||l.type==="sight-nice"||l.type==="stay";});
-  dest.locations=keep.concat(nearby);
-  dest.locationAnchor=anchor;
-}
+// Essentials (ATMs, groceries, tourist info, pharmacies) are now pulled from
+// generateCityData and live on dest.suggestions. Transit/arrival/departure pins
+// come from getArrivalDeparture + getCityTransitHub (generated transitHub field).
 var _map1=null,_map2=null,_syncFlag=false,_mapDestId=null;
 var _mapLayers={};   // type -> {group1, group2}
-var _activeLayers={all:true,sights:true,stay:true,routing:true,atm:true,grocery:true,"tourist-info":true,transit:true};
+var _activeLayers={all:true,sights:true,stay:true,routing:true,atm:true,grocery:true,"tourist-info":true,pharmacy:true,transit:true};
 
 var MAP_LAYER_DEFS=[
   {id:"all",lbl:"All"},
@@ -1313,6 +1269,7 @@ var MAP_LAYER_DEFS=[
   {id:"atm",lbl:"ATMs"},
   {id:"grocery",lbl:"Grocery"},
   {id:"tourist-info",lbl:"Tourist info"},
+  {id:"pharmacy",lbl:"Pharmacy"},
   {id:"transit",lbl:"Transit"}
 ];
 
@@ -1384,6 +1341,14 @@ var MAP_ICONS = {
       +'<circle cx="14" cy="14" r="13" fill="#0057b8" stroke="#fff" stroke-width="2"/>'
       +'<circle cx="14" cy="9" r="1.8" fill="#fff"/>'
       +'<rect x="11.5" y="12.5" width="5" height="8" rx="1.5" fill="#fff"/>'
+      +'</svg>';
+  },
+  "pharmacy": function(){
+    // Red filled circle, white cross — international pharmacy symbol
+    return '<svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg">'
+      +'<circle cx="14" cy="14" r="13" fill="#c8252c" stroke="#fff" stroke-width="2"/>'
+      +'<rect x="12" y="7" width="4" height="14" rx="0.5" fill="#fff"/>'
+      +'<rect x="7" y="12" width="14" height="4" rx="0.5" fill="#fff"/>'
       +'</svg>';
   },
   "transit": function(){
@@ -1478,6 +1443,7 @@ var LAYER_ICON_KEY={
   "atm":"atm",
   "grocery":"grocery",
   "tourist-info":"tourist-info",
+  "pharmacy":"pharmacy",
   "transit":"transit"
 };
 
@@ -1491,14 +1457,6 @@ function getCityCenter(place){
     return _generatedCityData[p].cityCenter;
   if(_generatedCityData[p]&&_generatedCityData[p].loading&&!_generatedCityData[p].cityCenter)
     return null; // still loading with no geocode yet
-  var centers={interlaken:[46.6863,7.8632],vienna:[48.2082,16.3738],prague:[50.0755,14.4378],
-    budapest:[47.4979,19.0402],amsterdam:[52.3676,4.9041],paris:[48.8566,2.3522],
-    rome:[41.9028,12.4964],barcelona:[41.3851,2.1734],berlin:[52.5200,13.4050],
-    zurich:[47.3769,8.5417],lisbon:[38.7169,-9.1395],london:[51.5074,-0.1278],
-    florence:[43.7696,11.2558],madrid:[40.4168,-3.7038],athens:[37.9755,23.7348],
-    copenhagen:[55.6761,12.5683],stockholm:[59.3293,18.0686],brussels:[50.8503,4.3517],
-    edinburgh:[55.9533,-3.1883],munich:[48.1351,11.5820]};
-  for(var k in centers) if(p.indexOf(k)>-1) return centers[k];
   // For generated cities loaded from storage: derive center from stored suggestion coords
   // Find the destination and average its suggestion coordinates
   var dest=trip.destinations.find(function(d){return d.place.toLowerCase()===p;});
@@ -1518,84 +1476,6 @@ function getCityCenter(place){
     }
   }
   return null;
-}
-
-function getNearbyLocations(place){
-  var p=place.toLowerCase();
-  if(p.indexOf("interlaken")>-1)return[
-    {type:"atm",name:"Post Finance ATM",lat:46.6849,lng:7.8536,note:"Best for foreign cards \u2014 no fees reported. Marktgasse 1, 24hrs."},
-    {type:"atm",name:"Raiffeisen ATM",lat:46.6862,lng:7.8558,note:"Rugenparkstrasse 1, 24hrs."},
-    {type:"grocery",name:"Migros",lat:46.6852,lng:7.8541,note:"Main supermarket, central."},
-    {type:"grocery",name:"Coop",lat:46.6841,lng:7.8527,note:"Near West station."},
-    {type:"tourist-info",name:"Interlaken Tourismus",lat:46.6848,lng:7.8536,note:"Marktgasse 1. Staff will calculate excursion passes by hand."},
-    {type:"transit",name:"Interlaken Ost Station",lat:46.6904,lng:7.8691,note:"Arrivals from Zurich. Lake Brienz boats leave from here."},
-    {type:"transit",name:"Interlaken West Station",lat:46.6834,lng:7.8518,note:"Closer to town center. Bus connections to most sights."}
-  ];
-  if(p.indexOf("vienna")>-1)return[
-    {type:"atm",name:"Erste Bank ATM",lat:48.2086,lng:16.3726,note:"Stephansplatz. 24hrs."},
-    {type:"atm",name:"Raiffeisen ATM",lat:48.1978,lng:16.3668,note:"Mariahilfer Strasse."},
-    {type:"grocery",name:"Billa",lat:48.1982,lng:16.3562,note:"Mariahilfer Strasse \u2014 largest nearby."},
-    {type:"grocery",name:"Spar City",lat:48.2092,lng:16.3718,note:"Stephansplatz, small but central."},
-    {type:"tourist-info",name:"Wien Tourismus",lat:48.2042,lng:16.3684,note:"Albertinaplatz 1. Free maps and museum passes."},
-    {type:"transit",name:"Stephansplatz U-Bahn",lat:48.2082,lng:16.3737,note:"U1/U3 intersection. Most central stop."},
-    {type:"transit",name:"Wien Hauptbahnhof",lat:48.1847,lng:16.3765,note:"Main intercity station. Railjet arrivals from Budapest and Prague."},
-    {type:"transit",name:"Wien Westbahnhof",lat:48.1969,lng:16.3389,note:"Western lines. Some FlixBus departures."}
-  ];
-  if(p.indexOf("prague")>-1)return[
-    {type:"atm",name:"\u010cesk\u00e1 spo\u0159itelna ATM",lat:50.0879,lng:14.4208,note:"Old Town Square. Use bank ATMs, avoid exchange booths."},
-    {type:"grocery",name:"Albert Supermarket",lat:50.0798,lng:14.4280,note:"Wenceslas Square area."},
-    {type:"tourist-info",name:"Prague City Tourism",lat:50.0875,lng:14.4213,note:"Old Town Hall. Free maps, transport passes."},
-    {type:"transit",name:"Starom\u011bstsk\u00e1 Metro",lat:50.0868,lng:14.4167,note:"Line A. Closest metro to Old Town Square and Josefov."},
-    {type:"transit",name:"N\u00e1m\u011bst\u00ed Republiky Metro",lat:50.0892,lng:14.4297,note:"Line B. Municipal House, Palladium shopping. 5min from Hotel Josef."},
-    {type:"transit",name:"Praha Hlavn\u00ed n\u00e1dra\u017e\u00ed",lat:50.0833,lng:14.4356,note:"Main station. EC trains to Berlin and Vienna."},
-    {type:"transit",name:"M\u016fstek Metro",lat:50.0814,lng:14.4248,note:"A/B line junction. Fastest to most sights."}
-  ];
-  if(p.indexOf("budapest")>-1)return[
-    {type:"atm",name:"OTP Bank ATM",lat:47.4982,lng:19.0390,note:"V\u00e1ci utca. Use bank ATMs, not street exchange kiosks."},
-    {type:"grocery",name:"Spar Market",lat:47.5001,lng:19.0557,note:"Nyugati area."},
-    {type:"tourist-info",name:"Budapest Tourism",lat:47.4985,lng:19.0386,note:"De\u00e1k Ferenc t\u00e9r. Transport passes, maps."},
-    {type:"transit",name:"Keleti Station",lat:47.5004,lng:19.0836,note:"Main intercity terminus. Railjets to Vienna. Night trains."},
-    {type:"transit",name:"Nyugati Station",lat:47.5096,lng:19.0528,note:"Regional trains and some international services."},
-    {type:"transit",name:"De\u00e1k Ferenc t\u00e9r",lat:47.4984,lng:19.0538,note:"All three metro lines intersect here."}
-  ];
-  if(p.indexOf("amsterdam")>-1)return[
-    {type:"atm",name:"ING ATM",lat:52.3686,lng:4.8935,note:"Leidsestraat. Most Dutch ATMs work well with foreign cards."},
-    {type:"grocery",name:"Albert Heijn",lat:52.3735,lng:4.8924,note:"Dam Square area. Largest Dutch supermarket chain."},
-    {type:"tourist-info",name:"I amsterdam",lat:52.3774,lng:4.9009,note:"Centraal Station. Transport passes, maps, tours."},
-    {type:"transit",name:"Amsterdam Centraal",lat:52.3791,lng:4.9003,note:"Main station. Thalys to Paris. Intercity to rest of Netherlands."},
-    {type:"transit",name:"Leidseplein Tram Stop",lat:52.3625,lng:4.8819,note:"Hub for trams 1, 2, 5, 7, 19."}
-  ];
-  if(p.indexOf("paris")>-1)return[
-    {type:"atm",name:"BNP Paribas ATM",lat:48.8590,lng:2.3469,note:"Ch\u00e2telet. Use bank ATMs; airport exchange rates are poor."},
-    {type:"grocery",name:"Monoprix",lat:48.8588,lng:2.3455,note:"Ch\u00e2telet-Les Halles. Good for basics."},
-    {type:"tourist-info",name:"Paris Tourist Office",lat:48.8600,lng:2.3476,note:"25 Rue des Pyramides. Museum passes, skip-the-line tickets."},
-    {type:"transit",name:"Gare du Nord",lat:48.8809,lng:2.3553,note:"Eurostar to London. Thalys to Amsterdam. RER B to CDG airport."},
-    {type:"transit",name:"Gare de Lyon",lat:48.8448,lng:2.3735,note:"TGV to south of France and Italy. High-speed to Barcelona."},
-    {type:"transit",name:"Ch\u00e2telet-Les Halles",lat:48.8594,lng:2.3469,note:"Largest metro/RER interchange in Paris."}
-  ];
-  if(p.indexOf("rome")>-1)return[
-    {type:"atm",name:"UniCredit ATM",lat:41.9006,lng:12.4989,note:"Near Termini. Use bank ATMs inside branches for best rates."},
-    {type:"grocery",name:"Conad Supermarket",lat:41.9016,lng:12.4986,note:"Termini station \u2014 long hours, convenient."},
-    {type:"tourist-info",name:"Rome Tourist Info",lat:41.8989,lng:12.4768,note:"Near Colosseo. Maps, transport passes."},
-    {type:"transit",name:"Roma Termini",lat:41.9006,lng:12.5009,note:"Main hub. Metro A and B. Leonardo Express to FCO airport."},
-    {type:"transit",name:"Colosseo Metro",lat:41.8899,lng:12.4923,note:"Line B. Closest stop to Colosseum, Forum, Palatine Hill."}
-  ];
-  if(p.indexOf("barcelona")>-1)return[
-    {type:"atm",name:"CaixaBank ATM",lat:41.3803,lng:2.1726,note:"Las Ramblas. Largest Spanish bank \u2014 reliable for foreign cards."},
-    {type:"grocery",name:"Caprabo",lat:41.3862,lng:2.1683,note:"Eixample. Good selection, reasonable prices."},
-    {type:"tourist-info",name:"Turisme de Barcelona",lat:41.3785,lng:2.1759,note:"Pla\u00e7a de Catalunya. T-Casual transport cards, maps."},
-    {type:"transit",name:"Sants Station",lat:41.3793,lng:2.1406,note:"Main intercity station. TGV/AVE to Paris and Madrid."},
-    {type:"transit",name:"Passeig de Gr\u00e0cia Metro",lat:41.3916,lng:2.1649,note:"Lines 2, 3, 4. Near Sagrada Fam\u00edlia and Gaud\u00ed buildings."}
-  ];
-  if(p.indexOf("berlin")>-1)return[
-    {type:"atm",name:"Sparkasse ATM",lat:52.5160,lng:13.3777,note:"Potsdamer Platz area. Largest German savings bank network."},
-    {type:"grocery",name:"Rewe",lat:52.5170,lng:13.3900,note:"City center. Good quality, long hours."},
-    {type:"tourist-info",name:"Visit Berlin",lat:52.5195,lng:13.3929,note:"Hauptbahnhof and Brandenburg Gate locations. Welcome cards."},
-    {type:"transit",name:"Berlin Hauptbahnhof",lat:52.5251,lng:13.3694,note:"Main hub. ICE to Hamburg, Munich, Frankfurt. S-Bahn city network."},
-    {type:"transit",name:"Berlin Ostbahnhof",lat:52.5103,lng:13.4349,note:"Eastern lines. Near East Side Gallery."},
-    {type:"transit",name:"Alexanderplatz",lat:52.5219,lng:13.4132,note:"U-Bahn/S-Bahn hub. Most central interchange."}
-  ];
-  return[];
 }
 
 function getArrivalDeparture(dest){
@@ -1624,22 +1504,14 @@ function getArrivalDeparture(dest){
 
 function getCityTransitHub(place,direction){
   var p=place.toLowerCase();
-  // Check generated data first
+  // Generated transitHub only — static table removed in favor of live generation.
   var gen=_generatedCityData[p];
   if(gen&&!gen.loading&&gen.transitHub&&gen.transitHub[direction]&&gen.transitHub[direction].lat)
     return gen.transitHub[direction];
-  var hubs={
-    "interlaken":{arrival:{name:"Interlaken Ost",lat:46.6904,lng:7.8691},departure:{name:"Interlaken Ost",lat:46.6904,lng:7.8691}},
-    "vienna":{arrival:{name:"Wien Hauptbahnhof",lat:48.1847,lng:16.3765},departure:{name:"Wien Hauptbahnhof",lat:48.1847,lng:16.3765}},
-    "prague":{arrival:{name:"Praha Hlavn\u00ed n\u00e1dra\u017e\u00ed",lat:50.0833,lng:14.4356},departure:{name:"Praha Hlavn\u00ed n\u00e1dra\u017e\u00ed",lat:50.0833,lng:14.4356}},
-    "budapest":{arrival:{name:"Keleti Station",lat:47.5004,lng:19.0836},departure:{name:"Keleti Station",lat:47.5004,lng:19.0836}},
-    "amsterdam":{arrival:{name:"Amsterdam Centraal",lat:52.3791,lng:4.9003},departure:{name:"Amsterdam Centraal",lat:52.3791,lng:4.9003}},
-    "paris":{arrival:{name:"Gare du Nord",lat:48.8809,lng:2.3553},departure:{name:"Gare de Lyon",lat:48.8448,lng:2.3735}},
-    "rome":{arrival:{name:"Roma Termini",lat:41.9006,lng:12.5009},departure:{name:"Roma Termini",lat:41.9006,lng:12.5009}},
-    "barcelona":{arrival:{name:"Sants Station",lat:41.3793,lng:2.1406},departure:{name:"Sants Station",lat:41.3793,lng:2.1406}},
-    "berlin":{arrival:{name:"Berlin Hauptbahnhof",lat:52.5251,lng:13.3694},departure:{name:"Berlin Hauptbahnhof",lat:52.5251,lng:13.3694}}
-  };
-  for(var k in hubs) if(p.indexOf(k)>-1) return hubs[k][direction];
+  // Persisted on dest across reloads
+  var dest=trip.destinations.find(function(d){return d.place.toLowerCase()===p;});
+  if(dest&&dest.generatedTransitHub&&dest.generatedTransitHub[direction]&&dest.generatedTransitHub[direction].lat)
+    return dest.generatedTransitHub[direction];
   return null;
 }
 
@@ -1707,42 +1579,15 @@ function collectMapLocations(dest){
   }
   // Arrival / departure
   getArrivalDeparture(dest).forEach(function(l){locs.push(l);});
-  // Nearby — use dest.locations if populated, else static fallback
-  var nearbyTypes=["atm","grocery","tourist-info","transit"];
-  var storedNearby=dest.locations.filter(function(l){return nearbyTypes.indexOf(l.type)>-1;});
-  var nearbyLocs=storedNearby.length>0?storedNearby:getNearbyLocations(dest.place);
-
-  // Find best hotel anchor for transit proximity sorting
-  // Priority: booked hotel > first district hotel > city center
-  var hotelAnchorLat=null, hotelAnchorLng=null;
-  if(bookedHotel&&bookedHotel.lat){
-    hotelAnchorLat=bookedHotel.lat; hotelAnchorLng=bookedHotel.lng;
-  }
-  // Check district data for hotel coords (covers booked without coords + suggested)
-  if(!hotelAnchorLat){
-    var allDistsH=getDistricts(dest.place,dest.intent,dest);
-    // Try booked hotel in district data first
-    if(bookedHotel){
-      allDistsH.forEach(function(d){d.hotels.forEach(function(h){
-        if(h.name===bookedHotel.name&&h.lat&&!hotelAnchorLat){hotelAnchorLat=h.lat;hotelAnchorLng=h.lng;}
-      });});
-    }
-    // Fall back to first available district hotel
-    if(!hotelAnchorLat){
-      allDistsH.forEach(function(d){d.hotels.forEach(function(h){
-        if(h.lat&&!hotelAnchorLat){hotelAnchorLat=h.lat;hotelAnchorLng=h.lng;}
-      });});
-    }
-  }
-  if(hotelAnchorLat){
-    // Sort transit locations by distance to hotel; keep others in original order
-    var transitLocs=nearbyLocs.filter(function(l){return l.type==='transit';});
-    var otherLocs=nearbyLocs.filter(function(l){return l.type!=='transit';});
-    function dist2(a){return Math.pow(a.lat-hotelAnchorLat,2)+Math.pow(a.lng-hotelAnchorLng,2);}
-    transitLocs.sort(function(a,b){return dist2(a)-dist2(b);});
-    nearbyLocs=otherLocs.concat(transitLocs);
-  }
-  nearbyLocs.forEach(function(l){locs.push(l);});
+  // Essentials (atm/grocery/tourist-info/pharmacy) now live on dest.suggestions,
+  // populated by generateCityData and geocoded via Nominatim.
+  var essentialTypes=["atm","grocery","tourist-info","pharmacy"];
+  var essentials=(dest.suggestions||[]).filter(function(s){
+    return essentialTypes.indexOf(s.type)>-1 && s.lat && s.lng;
+  }).map(function(s){
+    return {type:s.type,name:s.n,lat:s.lat,lng:s.lng,note:s.note||""};
+  });
+  essentials.forEach(function(l){locs.push(l);});
   return locs;
 }
 
@@ -1813,7 +1658,7 @@ function openMap(destId){
   var dest=getDest(destId); if(!dest)return;
   _mapDestId=destId;
   g("map-dest-lbl").textContent=dest.place+" \u00b7 "+fmtD(dest.dateFrom)+" \u2013 "+fmtD(dest.dateTo);
-  _activeLayers={all:true,sights:true,stay:true,routing:true,atm:true,grocery:true,"tourist-info":true,transit:true};
+  _activeLayers={all:true,sights:true,stay:true,routing:true,atm:true,grocery:true,"tourist-info":true,pharmacy:true,transit:true};
   renderLayerToggles();
   g("map-overlay").style.display="flex";
   // Leaflet needs the container visible before init
@@ -4859,13 +4704,25 @@ async function buildFromCandidates(){
       attachedEvents: findAttachedEvents(c, _mdcItems||[])
     };
     trip.destinations.push(dest);
-    if(isKnownCity(c.place)){
-      populateStaticSuggestions(dest);
-    } else {
-      generateCityData(c.place,id);
-    }
     cur=next;
   });
+
+  // Pre-generate city data for all new destinations, throttled 3-at-a-time.
+  // Fire-and-forget — the plan opens immediately and cards light up as data arrives.
+  (function throttledGenerate(dests,limit){
+    var queue=dests.slice(), inFlight=0;
+    function pump(){
+      while(inFlight<limit && queue.length){
+        var d=queue.shift();
+        inFlight++;
+        Promise.resolve()
+          .then(function(){return generateCityData(d.place,d.id);})
+          .catch(function(){/* generateCityData handles its own errors */})
+          .then(function(){inFlight--;pump();});
+      }
+    }
+    pump();
+  })(trip.destinations.slice(-kept.length),3);
 
   // Don't re-sort — ordering was already computed event-aware
   _tripsIndex.push({id:tripId,name:_tb.name,destCount:kept.length,dateRange:"",savedAt:new Date().toISOString()});
@@ -5427,65 +5284,19 @@ function showMapPinPanel(item,dest,itemType,mapEvent){
 }
 
 // Cities with complete hand-curated static data — everything else triggers AI generation
-var STATIC_CITIES=["interlaken","vienna","prague","budapest","amsterdam","paris","rome","barcelona","berlin","zurich","lisbon","london","florence","madrid","athens","copenhagen","stockholm","brussels","edinburgh","munich"];
-function isKnownCity(place){var p=place.toLowerCase();return STATIC_CITIES.some(function(c){return p.indexOf(c)>-1;});}
-
-async function populateStaticSuggestions(dest){
-  // Re-populate if empty or if all suggestions lack coordinates (old saved data)
-  var needsCoords=dest.suggestions&&dest.suggestions.length>0&&dest.suggestions.every(function(s){return !s.lat;});
-  if(dest.suggestions&&dest.suggestions.length>0&&!needsCoords) return;
-  var sights=getSights(dest.place,dest.intent);
-  if(!sights||!sights.length) return;
-  sidCtr++;
-  var center=getCityCenter(dest.place);
-  dest.suggestions=sights.map(function(s,i){
-    sidCtr++;
-    // Assign scattered approximate coords immediately so map shows pins right away
-    var approxLat=center?center[0]+(Math.random()-.5)*.025:null;
-    var approxLng=center?center[1]+(Math.random()-.5)*.030:null;
-    return {id:"s"+sidCtr,type:"sight",n:s.name,st:s.st||s.name,note:s.desc||null,lat:approxLat,lng:approxLng,approx:true};
-  });
-  autoSave();
-  // Update map immediately with approx pins
-  if(activeDest===dest.id&&_leftMode==='dest') updateMainMap();
-  showSaveStatus(dest.place+' sights loaded — see Explore tab',3000);
-  // Geocode via Nominatim in background — replace approx with real coords
-  for(var i=0;i<Math.min(dest.suggestions.length,8);i++){
-    if(!dest.suggestions[i]) continue;
-    try{
-      await new Promise(function(r){setTimeout(r,350);});
-      var sr=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(dest.suggestions[i].n+', '+dest.place),{headers:{'Accept-Language':'en'}});
-      var res=await sr.json();
-      if(dest.suggestions[i]){
-        if(res.length){dest.suggestions[i].lat=parseFloat(res[0].lat);dest.suggestions[i].lng=parseFloat(res[0].lon);dest.suggestions[i].approx=false;}
-        else if(center){dest.suggestions[i].lat=center[0]+(Math.random()-.5)*.018;dest.suggestions[i].lng=center[1]+(Math.random()-.5)*.022;}
-      }
-    }catch(e){
-      if(dest.suggestions[i]&&center){dest.suggestions[i].lat=center[0]+(Math.random()-.5)*.018;dest.suggestions[i].lng=center[1]+(Math.random()-.5)*.022;}
-    }
-    // Update map silently as coords arrive
-    if(i%3===2&&activeDest===dest.id) updateMainMap();
-  }
-  // All geocoding done — now show real pins and fitBounds
-  if(activeDest===dest.id && _leftMode==='dest') updateMainMap();
-  else updateMainMap();
-  // Auto-generate restaurants if none exist
-  if(!dest.restaurantSuggestions||dest.restaurantSuggestions.length===0){
-    refreshRestaurantSuggestions(dest,null);
-  }
-  autoSave();
-}
-
-// Also call for existing destinations loaded from storage that have no suggestions
+// All destinations now route through generateCityData. Static shortcuts removed.
 function ensureSuggestions(dest){
   if(!dest.suggestions||dest.suggestions.length===0){
-    if(isKnownCity(dest.place)) populateStaticSuggestions(dest);
+    if(!_generatedCityData[dest.place.toLowerCase()]){
+      generateCityData(dest.place,dest.id);
+    }
   }
 }
 
 async function fetchCityMeta(dest){
-  // Fills in missing districts/practicalInfo/transitHub for saved generated cities
-  if(dest.generatedDistricts&&dest.generatedPracticalInfo) return; // already have it
+  // Fills in missing districts/practicalInfo/transitHub/essentials for saved generated cities
+  var hasEssentials=(dest.suggestions||[]).some(function(s){return ["atm","grocery","tourist-info","pharmacy"].indexOf(s.type)>-1;});
+  if(dest.generatedDistricts&&dest.generatedPracticalInfo&&hasEssentials) return; // already have it
   var lockKey='_metaLoading_'+dest.id;
   if(window[lockKey]) return;
   window[lockKey]=true;
@@ -5493,9 +5304,10 @@ async function fetchCityMeta(dest){
     var prompt='For '+dest.place+', return ONLY a JSON object with these fields:\n'+
       '{"districts":[{"name":"...","good":"...","bad":"...","hotels":[{"name":"...","desc":"...","price":"...","tier":2}]}],'+
       '"practicalInfo":{"currency":"...","tipping":"...","note":"...","emergency":"..."},'+
-      '"transitHub":{"arrival":{"name":"...","lat":0,"lng":0},"departure":{"name":"...","lat":0,"lng":0}}}\n'+
-      '2-3 districts with 1-2 hotels each. Be specific.';
-    var text=await callMax([{role:'user',content:prompt}],1500);
+      '"transitHub":{"arrival":{"name":"...","lat":0,"lng":0},"departure":{"name":"...","lat":0,"lng":0}},'+
+      '"essentials":{"atms":[{"name":"...","note":"..."}],"groceries":[{"name":"...","note":"..."}],"touristInfo":[{"name":"...","note":"..."}],"pharmacies":[{"name":"...","note":"..."}]}}\n'+
+      '2-3 districts with 1-2 hotels each. For essentials: 2-3 ATMs, 2-3 groceries, 1 tourist info, 1-2 pharmacies. Real named places. Be specific.';
+    var text=await callMax([{role:'user',content:prompt}],1800);
     var json=text.replace(/```json\s*/g,'').replace(/```\s*/g,'').trim();
     var s=json.indexOf('{'),e=json.lastIndexOf('}');
     if(s>-1&&e>-1) json=json.substring(s,e+1);
@@ -5503,11 +5315,68 @@ async function fetchCityMeta(dest){
     if(data.districts) dest.generatedDistricts=data.districts;
     if(data.practicalInfo) dest.generatedPracticalInfo=data.practicalInfo;
     if(data.transitHub) dest.generatedTransitHub=data.transitHub;
+    if(data.essentials){
+      mergeEssentialsIntoSuggestions(dest,data.essentials);
+      geocodeEssentials(dest);
+    }
     autoSave();
     // Redraw stay & info tabs if currently viewing this dest
     if(activeDest===dest.id&&_leftMode==='dest') drawDestMode(dest.id);
   }catch(e){ console.error('fetchCityMeta failed:',e); }
   window[lockKey]=false;
+}
+
+// Shared helper — takes an essentials block and appends pins to dest.suggestions.
+// Skips entries whose names already exist (idempotent across re-fetches).
+function mergeEssentialsIntoSuggestions(dest,essentials){
+  if(!dest.suggestions) dest.suggestions=[];
+  var center=getCityCenter(dest.place);
+  var existingNames={};
+  dest.suggestions.forEach(function(s){existingNames[(s.n||'').toLowerCase()]=true;});
+  function push(type,list){
+    (list||[]).forEach(function(item){
+      if(!item||!item.name) return;
+      if(existingNames[item.name.toLowerCase()]) return;
+      sidCtr++;
+      var lat=center?center[0]+(Math.random()-.5)*.018:null;
+      var lng=center?center[1]+(Math.random()-.5)*.022:null;
+      dest.suggestions.push({
+        id:"s"+sidCtr,type:type,n:item.name,st:item.name,
+        note:item.note||null,lat:lat,lng:lng,approx:true
+      });
+      existingNames[item.name.toLowerCase()]=true;
+    });
+  }
+  push("atm",essentials.atms);
+  push("grocery",essentials.groceries);
+  push("tourist-info",essentials.touristInfo);
+  push("pharmacy",essentials.pharmacies);
+}
+
+// Geocode any essential-type suggestion that's still approx via Nominatim (throttled).
+async function geocodeEssentials(dest){
+  var types=["atm","grocery","tourist-info","pharmacy"];
+  var pending=(dest.suggestions||[]).filter(function(s){
+    return types.indexOf(s.type)>-1 && s.approx;
+  });
+  for(var i=0;i<pending.length;i++){
+    var s=pending[i];
+    try{
+      await new Promise(function(r){setTimeout(r,400);});
+      var q=encodeURIComponent(s.n+', '+dest.place);
+      var r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+q,{headers:{'Accept-Language':'en'}});
+      var res=await r.json();
+      if(res.length){
+        s.lat=parseFloat(res[0].lat);
+        s.lng=parseFloat(res[0].lon);
+        s.approx=false;
+      }
+    }catch(ge){/* keep approx */}
+    // Update map silently as coords arrive
+    if(i%3===2&&activeDest===dest.id) updateMainMap();
+  }
+  if(activeDest===dest.id) updateMainMap();
+  autoSave();
 }
 
 async function generateCityData(place,destId){
@@ -5528,12 +5397,12 @@ async function generateCityData(place,destId){
 
   showSaveStatus('Max is generating '+place+' data\u2026',60000);
 
-  var prompt='Generate travel data for '+place+'. Return ONLY valid JSON, no markdown:\n{"cityCenter":[lat,lng],"sights":[{"name":"...","st":"...","desc":"one sentence"}],"districts":[{"name":"...","good":"...","bad":"...","hotels":[{"name":"...","desc":"...","price":"...","tier":2}]}],"practicalInfo":{"currency":"...","tipping":"...","note":"...","emergency":"..."},"transitHub":{"arrival":{"name":"...","lat":0,"lng":0},"departure":{"name":"...","lat":0,"lng":0}}}\n6-8 sights, 2 districts, 1-2 hotels each. Be concise.';
+  var prompt='Generate travel data for '+place+'. Return ONLY valid JSON, no markdown:\n{"cityCenter":[lat,lng],"sights":[{"name":"...","st":"...","desc":"one sentence"}],"districts":[{"name":"...","good":"...","bad":"...","hotels":[{"name":"...","desc":"...","price":"...","tier":2}]}],"practicalInfo":{"currency":"...","tipping":"...","note":"...","emergency":"..."},"transitHub":{"arrival":{"name":"...","lat":0,"lng":0},"departure":{"name":"...","lat":0,"lng":0}},"essentials":{"atms":[{"name":"...","note":"..."}],"groceries":[{"name":"...","note":"..."}],"touristInfo":[{"name":"...","note":"..."}],"pharmacies":[{"name":"...","note":"..."}]}}\n6-8 sights, 2 districts, 1-2 hotels each. For essentials: 2-3 ATMs, 2-3 groceries, 1 tourist info, 1-2 pharmacies. Real named places. Be concise.';
 
   try{
     // Add 30 second timeout to generation
     var genTimeout=new Promise(function(_,reject){setTimeout(function(){reject(new Error('Generation timed out after 30s'));},30000);});
-    var text=await Promise.race([callMax([{role:'user',content:prompt}], 1500), genTimeout]);
+    var text=await Promise.race([callMax([{role:'user',content:prompt}], 1800), genTimeout]);
     var json=text.replace(/```json\s*/g,'').replace(/```\s*/g,'').trim();
     var s=json.indexOf('{'),e=json.lastIndexOf('}');
     if(s>-1&&e>-1)json=json.substring(s,e+1);
@@ -5554,6 +5423,8 @@ async function generateCityData(place,destId){
         var sLng=s.lng||(genCenter?genCenter[1]+(Math.random()-.5)*.030:null);
         return {id:"s"+sidCtr,type:"sight",n:s.name,st:s.st||s.name,note:s.desc||null,lat:sLat,lng:sLng,approx:!s.lat};
       });
+      // Append essentials as additional suggestion pins
+      if(data.essentials) mergeEssentialsIntoSuggestions(destRef,data.essentials);
       autoSave();
     }
     showSaveStatus(place+' data ready \u2713 \u2014 see Explore tab',3000);
@@ -5604,6 +5475,9 @@ async function generateCityData(place,destId){
       // Final map update with geocoded sight pins
       if(activeDest===destId&&_leftMode==='dest') updateMainMap();
       else updateMainMap();
+      // Geocode essentials too — fire-and-forget so it doesn't block restaurants
+      var destForEss=getDest(destId);
+      if(destForEss) geocodeEssentials(destForEss);
       // Auto-generate restaurants if none exist yet
       var destForRest=getDest(destId);
       if(destForRest&&(!destForRest.restaurantSuggestions||destForRest.restaurantSuggestions.length===0)){
@@ -5688,13 +5562,7 @@ function addDest(){
   trip.destinations.push(dest);
   // Keep destinations in date order
   trip.destinations.sort(function(a,b){return(a.dateFrom||'').localeCompare(b.dateFrom||'');});
-  if(isKnownCity(place)){
-    // Populate suggestions from static sight data immediately
-    populateStaticSuggestions(dest);
-  } else {
-    // Generate via Max for unknown cities
-    generateCityData(place, id);
-  }
+  generateCityData(place, id);
   g("dest-from").value=to; g("dest-to").value=""; onFromChange();
   var visFrom=g("dest-from-vis"); if(visFrom)visFrom.value=to;
   var visTo=g("dest-to-vis"); if(visTo)visTo.value=g("dest-to").value||"";
@@ -6669,7 +6537,6 @@ function toggleHotelForm(btn,container,formId,opts,onSaved){
       lat:hotelCoords?hotelCoords.lat:null,lng:hotelCoords?hotelCoords.lng:null};
     var dest=getDest(opts.destId); if(dest){
       dest.hotelBookings.push(bk);
-      refreshDestLocations(dest);
     }
     autoSave();
     if(onSaved){onSaved();}else{drawDestMode(opts.destId);}
@@ -7650,10 +7517,11 @@ function drawExecMode(dest){
       if(s.note)popupHtml+='<div class="mp-note">'+s.note+'</div>';
       marker.bindPopup(popupHtml).addTo(_exMapInstance);
     });
-    // Nearby locations
-    getNearbyLocations(dest.place).forEach(function(loc){
+    // Essentials (from dest.suggestions)
+    var essentialTypes=["atm","grocery","tourist-info","pharmacy"];
+    (dest.suggestions||[]).filter(function(s){return essentialTypes.indexOf(s.type)>-1&&s.lat&&s.lng;}).forEach(function(loc){
       var icon=makeMapIcon(loc.type);
-      L.marker([loc.lat,loc.lng],{icon:icon}).bindPopup(makePopup(loc.name,loc.type.replace("-"," "),loc.note)).addTo(_exMapInstance);
+      L.marker([loc.lat,loc.lng],{icon:icon}).bindPopup(makePopup(loc.n,loc.type.replace("-"," "),loc.note||"")).addTo(_exMapInstance);
     });
   },80);
 }
@@ -9035,7 +8903,7 @@ function drawDestMode(destId){
   if(!dest.discoveredItems)dest.discoveredItems=[];
   migrateDest(dest);
   // For saved generated cities missing district/info data, fetch it in background
-  if(!isKnownCity(dest.place)&&dest.suggestions&&dest.suggestions.length>0&&
+  if(dest.suggestions&&dest.suggestions.length>0&&
      !dest.generatedDistricts&&!_generatedCityData[dest.place.toLowerCase()]){
     fetchCityMeta(dest);
   }
@@ -9046,9 +8914,7 @@ function drawDestMode(destId){
   }
   // Ensure suggestions exist and have coords — catches any edge case migrateDest misses
   if((!dest.suggestions||dest.suggestions.length===0||dest.suggestions.every(function(s){return !s.lat;}))){
-    if(isKnownCity(dest.place)){
-      populateStaticSuggestions(dest);
-    } else if(!_generatedCityData[dest.place.toLowerCase()]){
+    if(!_generatedCityData[dest.place.toLowerCase()]){
       // No data at all — trigger generation
       generateCityData(dest.place,dest.id);
     } else if(_generatedCityData[dest.place.toLowerCase()]&&!_generatedCityData[dest.place.toLowerCase()].loading){
@@ -9489,6 +9355,58 @@ function drawDestMode(destId){
   });
   infoPane2.appendChild(pigrid2);
   if(pi2.note){var pinote2=document.createElement("div");pinote2.className="pi-note";pinote2.textContent=pi2.note;infoPane2.appendChild(pinote2);}
+
+  // PRACTICAL — on-the-ground essentials from dest.suggestions
+  var practicalGroups=[
+    {type:"atm",lbl:"ATMs"},
+    {type:"grocery",lbl:"Groceries"},
+    {type:"tourist-info",lbl:"Tourist info"},
+    {type:"pharmacy",lbl:"Pharmacies"}
+  ];
+  var hasAnyEssential=practicalGroups.some(function(g){
+    return (dest.suggestions||[]).some(function(s){return s.type===g.type;});
+  });
+  if(hasAnyEssential){
+    var pracWrap=document.createElement("div");
+    pracWrap.style.cssText="margin-top:18px;padding-top:14px;border-top:1px solid #eee;";
+    var pracHdr=document.createElement("div");
+    pracHdr.style.cssText="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#666;margin-bottom:10px;";
+    pracHdr.textContent="Practical";
+    pracWrap.appendChild(pracHdr);
+    practicalGroups.forEach(function(grp){
+      var items=(dest.suggestions||[]).filter(function(s){return s.type===grp.type;});
+      if(!items.length) return;
+      var sec=document.createElement("div");
+      sec.style.cssText="margin-bottom:12px;";
+      var sLbl=document.createElement("div");
+      sLbl.style.cssText="font-size:11px;font-weight:600;color:#444;margin-bottom:4px;";
+      sLbl.textContent=grp.lbl;
+      sec.appendChild(sLbl);
+      items.forEach(function(it){
+        var row=document.createElement("div");
+        row.style.cssText="font-size:12px;color:#222;margin:3px 0 3px 4px;line-height:1.4;";
+        var nm=document.createElement("span");
+        nm.style.cssText="font-weight:500;";
+        nm.textContent=it.n;
+        row.appendChild(nm);
+        if(it.note){
+          var nt=document.createElement("span");
+          nt.style.cssText="color:#666;";
+          nt.textContent=" \u2014 "+it.note;
+          row.appendChild(nt);
+        }
+        sec.appendChild(row);
+      });
+      pracWrap.appendChild(sec);
+    });
+    infoPane2.appendChild(pracWrap);
+  } else if(_generatedCityData[dest.place.toLowerCase()]&&_generatedCityData[dest.place.toLowerCase()].loading){
+    var pracLoad=document.createElement("div");
+    pracLoad.style.cssText="margin-top:18px;padding-top:14px;border-top:1px solid #eee;font-size:11px;color:#999;font-style:italic;";
+    pracLoad.textContent="Loading practical essentials\u2026";
+    infoPane2.appendChild(pracLoad);
+  }
+
   paneWrap.appendChild(infoPane2);
 
   // ROUTING pane
@@ -10144,14 +10062,9 @@ function migrateDest(dest){
   // Populate suggestions if empty or all null-coord
   var allNullCoords=dest.suggestions.length>0&&dest.suggestions.every(function(s){return !s.lat;});
   if(dest.suggestions.length===0||allNullCoords){
-    if(isKnownCity(dest.place)){
-      populateStaticSuggestions(dest);
-    } else {
-      // Unknown city with no suggestions — re-trigger generation if not already running
-      var genKey=dest.place.toLowerCase();
-      if(!_generatedCityData[genKey]){
-        generateCityData(dest.place,dest.id);
-      }
+    var genKey=dest.place.toLowerCase();
+    if(!_generatedCityData[genKey]){
+      generateCityData(dest.place,dest.id);
     }
   }
 }
@@ -10778,81 +10691,16 @@ function routingHeadline(routing){
   return o.icon+" "+o.name;
 }
 
-function getPracticalInfo(place,intent){
+function getPracticalInfo(place,intent,dest){
   // Generated city data takes priority
   var gen=_generatedCityData[place.toLowerCase()];
   if(gen&&!gen.loading&&gen.practicalInfo) return gen.practicalInfo;
-  var p=(place+" "+(intent||"")).toLowerCase();
-  if(p.indexOf("interlaken")>-1||p.indexOf("zurich")>-1||p.indexOf("bern")>-1||p.indexOf("geneva")>-1)return{
-    currency:"Swiss Franc (CHF) \u00b7 roughly 1:1 with USD",
-    tipping:"Not expected \u2014 service included by law",
-    note:"Switzerland is still cash-heavy in smaller places. Carry CHF.",
-    emergency:"112 \u00b7 Police 117 \u00b7 Medical 144"
-  };
-  if(p.indexOf("vienna")>-1||p.indexOf("salzburg")>-1||p.indexOf("innsbruck")>-1)return{
-    currency:"Euro (\u20ac)",
-    tipping:"Round up or ~10% in restaurants",
-    note:"The U-Bahn runs 24hrs on weekends. Single tickets are expensive \u2014 get a day pass.",
-    emergency:"112 \u00b7 Police 133 \u00b7 Medical 144"
-  };
-  if(p.indexOf("prague")>-1)return{
-    currency:"Czech Koruna (CZK) \u00b7 ~23 CZK per USD",
-    tipping:"10% in restaurants. Avoid airport exchange counters.",
-    note:"Most tourist areas now accept cards, but smaller places and trams are cash only.",
-    emergency:"112 \u00b7 Police 158 \u00b7 Medical 155"
-  };
-  if(p.indexOf("budapest")>-1)return{
-    currency:"Hungarian Forint (HUF) \u00b7 ~370 HUF per USD",
-    tipping:"10\u201315% expected in restaurants",
-    note:"Thermal bath entry is cheapest booked online in advance. Bring a lock for the locker.",
-    emergency:"112 \u00b7 Police 107 \u00b7 Medical 104"
-  };
-  if(p.indexOf("amsterdam")>-1)return{
-    currency:"Euro (\u20ac)",
-    tipping:"Not obligatory \u2014 rounding up is appreciated",
-    note:"Bikes have right of way. Watch the cycle lanes before stepping off the pavement.",
-    emergency:"112"
-  };
-  if(p.indexOf("paris")>-1)return{
-    currency:"Euro (\u20ac)",
-    tipping:"Service included by law \u2014 rounding up is fine, not expected",
-    note:"Most museums are closed Monday or Tuesday \u2014 check before building your day around one.",
-    emergency:"112 \u00b7 Police 17 \u00b7 Medical (SAMU) 15"
-  };
-  if(p.indexOf("rome")>-1)return{
-    currency:"Euro (\u20ac)",
-    tipping:"Not expected \u2014 a small coperto charge is normal and separate",
-    note:"Borghese Gallery requires timed-entry booking days in advance. Don\u2019t show up without one.",
-    emergency:"112 \u00b7 Police 113 \u00b7 Medical 118"
-  };
-  if(p.indexOf("barcelona")>-1)return{
-    currency:"Euro (\u20ac)",
-    tipping:"Not obligatory \u2014 5\u201310% appreciated",
-    note:"Sagrada Fam\u00edlia sells out weeks ahead. Book the specific entry time before anything else.",
-    emergency:"112"
-  };
-  if(p.indexOf("berlin")>-1)return{
-    currency:"Euro (\u20ac)",
-    tipping:"Round up or ~10% \u2014 more expected than in southern Europe",
-    note:"Berlin is still more cash-reliant than other European capitals. Carry \u20ac20\u201340.",
-    emergency:"112 \u00b7 Police 110"
-  };
-  if(p.indexOf("zurich")>-1)return{
-    currency:"Swiss Franc (CHF)",
-    tipping:"Not expected \u2014 service included by law. Round up if exceptional.",
-    note:"Zurich is expensive \u2014 budget CHF 25\u201340 for lunch. Sunday closures are strict; plan ahead. Tap water is excellent.",
-    emergency:"112 \u00b7 Police 117 \u00b7 Ambulance 144"
-  };
-  if(p.indexOf("lisbon")>-1)return{
-    currency:"Euro (\u20ac)",
-    tipping:"Not expected \u2014 rounding up is appreciated",
-    note:"The trams are packed \u2014 Tram 28 specifically. Walk the hills instead; the routes are the point.",
-    emergency:"112"
-  };
-  // Generic fallback
+  // Persisted on dest across reloads
+  if(dest&&dest.generatedPracticalInfo) return dest.generatedPracticalInfo;
+  // Generic fallback — populated once generateCityData returns
   return{
-    currency:"Check locally",
-    tipping:"Varies by country",
+    currency:"Loading\u2026",
+    tipping:"Loading\u2026",
     note:"",
     emergency:"112 (EU) \u00b7 Check local numbers on arrival"
   };
@@ -10861,90 +10709,8 @@ function getPracticalInfo(place,intent){
 function getSights(place,intent){
   var gen=_generatedCityData[place.toLowerCase()];
   if(gen&&!gen.loading&&gen.sights&&gen.sights.length) return gen.sights;
-  var p=(place+" "+(intent||"")).toLowerCase();
-  if(p.indexOf("interlaken")>-1)return[
-    {name:"Harder Kulm",st:"Harder Kulm"},{name:"H\u00f6heweg promenade",st:"Hoheweg"},
-    {name:"Jungfraujoch (Top of Europe)",st:"Jungfraujoch"},{name:"Kleine Scheidegg",st:"Kleine Scheidegg"},
-    {name:"Schilthorn / Piz Gloria",st:"Schilthorn Piz Gloria"},{name:"M\u00fcrren village walk",st:"Murren"},
-    {name:"Lake Brienz boat circuit",st:"Lake Brienz"},{name:"Giessbach Falls",st:"Giessbach Falls"},
-    {name:"Schynige Platte railway",st:"Schynige Platte"},{name:"Lauterbrunnen valley",st:"Lauterbrunnen Valley"},
-    {name:"Tr\u00fcmmelbach Falls",st:"Trummelbach Falls"},{name:"First Cliff Walk, Grindelwald",st:"First Cliff Walk Grindelwald"},
-    {name:"Brienz town \u0026 woodcarving",st:"Brienz Switzerland"},{name:"Lake Thun boat to Thun",st:"Lake Thun"}
-  ];
-  if(p.indexOf("vienna")>-1)return[
-    {name:"Kunsthistorisches Museum",st:"Kunsthistorisches Museum"},
-    {name:"Leopold Museum / Schiele",st:"Leopold Museum Vienna"},
-    {name:"Belvedere",st:"Belvedere Vienna"},
-    {name:"Cafe Central",st:"Cafe Central Vienna"},
-    {name:"Naschmarkt",st:"Naschmarkt Vienna"},
-    {name:"Schonbrunn Palace",st:"Schonbrunn Palace"}
-  ];
-  if(p.indexOf("prague")>-1)return[
-    {name:"Old Town Square",st:"Old Town Square Prague"},{name:"Prague Castle",st:"Prague Castle"},
-    {name:"Josefov",st:"Josefov Prague"},{name:"Vysehrad",st:"Vysehrad Prague"},
-    {name:"Charles Bridge",st:"Charles Bridge Prague"},{name:"Cafe Savoy",st:null}
-  ];
-  if(p.indexOf("budapest")>-1)return[
-    {name:"Hungarian Parliament",st:"Hungarian Parliament Building"},
-    {name:"Szechenyi Baths",st:"Szechenyi Thermal Baths"},
-    {name:"Fisherman's Bastion",st:"Fisherman's Bastion Budapest"},
-    {name:"Ruin bars \u2014 Szimpla Kert",st:"Ruin bars Budapest"},
-    {name:"Chain Bridge walk",st:"Chain Bridge Budapest"},
-    {name:"National Museum",st:null}
-  ];
-  if(p.indexOf("amsterdam")>-1)return[
-    {name:"Rijksmuseum",st:"Rijksmuseum Amsterdam"},{name:"Van Gogh Museum",st:"Van Gogh Museum Amsterdam"},
-    {name:"Anne Frank Huis",st:"Anne Frank House Amsterdam"},{name:"Jordaan canal walk",st:null},
-    {name:"EYE Film Museum",st:"EYE Film Museum Amsterdam"},{name:"Albert Cuyp Market",st:null}
-  ];
-  if(p.indexOf("paris")>-1)return[
-    {name:"Mus\u00e9e d'Orsay",st:"Musee d'Orsay Paris"},
-    {name:"P\u00e8re Lachaise Cemetery",st:"Pere Lachaise Cemetery"},
-    {name:"Sainte-Chapelle",st:"Sainte-Chapelle Paris"},
-    {name:"Palais Royal gardens",st:"Palais Royal Paris"},
-    {name:"Promenade Plant\u00e9e",st:"Promenade Plantee Paris"},
-    {name:"March\u00e9 d'Aligre",st:null}
-  ];
-  if(p.indexOf("rome")>-1)return[
-    {name:"Palatine Hill",st:"Palatine Hill Rome"},
-    {name:"Borghese Gallery",st:"Borghese Gallery Rome"},
-    {name:"Trastevere walk",st:"Trastevere Rome"},
-    {name:"Campo de' Fiori",st:"Campo de Fiori Rome"},
-    {name:"Pantheon",st:"Pantheon Rome"},
-    {name:"Piazza Navona",st:"Piazza Navona Rome"}
-  ];
-  if(p.indexOf("barcelona")>-1)return[
-    {name:"Sagrada Fam\u00edlia",st:"Sagrada Familia Barcelona"},
-    {name:"Palau de la M\u00fasica",st:"Palau de la Musica Barcelona"},
-    {name:"Barri G\u00f2tic walk",st:"Barri Gotic Barcelona"},
-    {name:"Park G\u00fcell",st:"Park Guell Barcelona"},
-    {name:"Mercat de Sant Josep",st:"La Boqueria Barcelona"},
-    {name:"Montju\u00efc",st:"Montjuic Barcelona"}
-  ];
-  if(p.indexOf("berlin")>-1)return[
-    {name:"Pergamon Museum",st:"Pergamon Museum Berlin"},
-    {name:"East Side Gallery",st:"East Side Gallery Berlin"},
-    {name:"Topography of Terror",st:"Topography of Terror Berlin"},
-    {name:"Prenzlauer Berg walk",st:null},
-    {name:"Checkpoint Charlie",st:"Checkpoint Charlie Berlin"},
-    {name:"Hamburger Bahnhof",st:null}
-  ];
-  if(p.indexOf("zurich")>-1)return[
-    {name:"Kunsthaus Zürich",st:"Kunsthaus Zurich",lat:47.3703,lng:8.5487},
-    {name:"Old Town (Altstadt)",st:"Zurich Altstadt",lat:47.3724,lng:8.5416},
-    {name:"Grossmünster",st:"Grossmunster Zurich",lat:47.3699,lng:8.5438},
-    {name:"Fraumünster",st:"Fraumunster Zurich",lat:47.3697,lng:8.5413},
-    {name:"Swiss National Museum",st:"Swiss National Museum",lat:47.3789,lng:8.5395},
-    {name:"Lake Zürich promenade",st:"Lake Zurich",lat:47.3558,lng:8.5448},
-    {name:"Bahnhofstrasse",st:"Bahnhofstrasse Zurich",lat:47.3744,lng:8.5381},
-    {name:"Uetliberg viewpoint",st:"Uetliberg Zurich",lat:47.3527,lng:8.4916},
-    {name:"Lindenhügel hill walk",st:null,lat:47.3766,lng:8.5393},
-    {name:"Rietberg Museum",st:"Museum Rietberg",lat:47.3602,lng:8.5252}
-  ];
-  return[
-    {name:"City center walk",st:null},{name:"Local market",st:null},
-    {name:"Main museum",st:null},{name:"Historic quarter",st:null}
-  ];
+  // No static fallback — days start empty until generateCityData returns.
+  return [];
 }
 
 function getDistricts(place,intent,dest){
@@ -10952,121 +10718,6 @@ function getDistricts(place,intent,dest){
   if(gen&&!gen.loading&&gen.districts&&gen.districts.length) return gen.districts;
   // Check dest.generatedDistricts — persisted across page reloads
   if(dest&&dest.generatedDistricts&&dest.generatedDistricts.length) return dest.generatedDistricts;
-  var p=(place+" "+(intent||"")).toLowerCase();
-  if(p.indexOf("interlaken")>-1)return[
-    {name:"Interlaken West",good:"Tourist center - restaurants, shops, easy access",bad:"Busy and more tourist-facing",hotels:[
-      {name:"Victoria-Jungfrau Grand Hotel",desc:"The 5-star landmark of Interlaken.",price:"CHF 380-550/night",tier:4,lat:46.6861,lng:7.8580},
-      {name:"Metropole Hotel",desc:"On the Hoheweg promenade, rooftop pool.",price:"CHF 140-200/night",tier:2,lat:46.6861,lng:7.8563}
-    ]},
-    {name:"Interlaken Ost",good:"Quieter; Grindelwald trains and Lake Brienz boats from here",bad:"Less lively in the evenings",hotels:[
-      {name:"Hotel du Lac",desc:"On the Thunersee; Jungfrau views from most rooms.",price:"CHF 180-260/night",tier:3,lat:46.6884,lng:7.8648},
-      {name:"Alpenblick Hotel",desc:"Close to the Grindelwald train.",price:"CHF 130-190/night",tier:2,lat:46.6878,lng:7.8631},
-      {name:"Backpackers Villa Sonnenhof",desc:"Well-run hostel, great views.",price:"CHF 60-130/night",tier:1,lat:46.6896,lng:7.8653}
-    ]},
-    {name:"Grindelwald",good:"Dramatic setting; serious Alpine access right outside your door",bad:"20 min by train from town; cooler nights",hotels:[
-      {name:"Romantik Hotel Schweizerhof",desc:"Traditional grand hotel below the Eiger north face.",price:"CHF 220-380/night",tier:3,lat:46.6244,lng:8.0413},
-      {name:"Grindelwald Hostel",desc:"Clean and central, excellent value.",price:"CHF 50-100/night",tier:1,lat:46.6241,lng:8.0404}
-    ]},
-    {name:"Wengen / Murren",good:"Car-free, genuinely quiet, extraordinary views",bad:"Limited services; train or cable car required",hotels:[
-      {name:"Hotel Silberhorn Wengen",desc:"Classic Alpine hotel, car-free village.",price:"CHF 180-280/night",tier:2,lat:46.6086,lng:7.9224},
-      {name:"Hotel Eiger Murren",desc:"Directly facing the Eiger north face.",price:"CHF 160-260/night",tier:2,lat:46.5591,lng:7.8928}
-    ]}
-  ];
-  if(p.indexOf("vienna")>-1)return[
-    {name:"Innere Stadt (1st)",good:"Central - Stephansdom, Hofburg, opera all walkable",bad:"Expensive; tourist-heavy at night",hotels:[
-      {name:"Hotel Sacher",desc:"The Sachertorte is worth it.",price:"\u20ac350-600/night",tier:4,lat:48.2030,lng:16.3694},
-      {name:"Hotel Rathaus Wein and Design",desc:"Rooms themed around Austrian wineries.",price:"\u20ac150-250/night",tier:2,lat:48.2133,lng:16.3566}
-    ]},
-    {name:"MuseumsQuartier (7th)",good:"Best base for museum visits",bad:"Quiet at night",hotels:[
-      {name:"25hours Hotel",desc:"MuseumsQuartier directly across the street.",price:"\u20ac120-200/night",tier:2,lat:48.2028,lng:16.3567}
-    ]}
-  ];
-  if(p.indexOf("amsterdam")>-1)return[
-    {name:"Jordaan",good:"Most liveable central neighborhood",bad:"Books out fast; premium prices",hotels:[
-      {name:"Hotel V Nesplein",desc:"Good neighborhood, independent feel.",price:"\u20ac150-240/night",tier:2,lat:52.3688,lng:4.8832},
-      {name:"The Dylan Amsterdam",desc:"17th-century canal house.",price:"\u20ac280-450/night",tier:4,lat:52.3672,lng:4.8828}
-    ]},
-    {name:"De Pijp",good:"Young, local; Albert Cuyp market",bad:"20-min walk from main museums",hotels:[
-      {name:"Conscious Hotel Vondelpark",desc:"Sustainably designed.",price:"\u20ac100-180/night",tier:2,lat:52.3583,lng:4.8721}
-    ]}
-  ];
-  if(p.indexOf("prague")>-1)return[
-    {name:"Mal\u00e1 Strana",good:"Quieter, cobblestoned; best base for first visit",bad:"Hilly; limited restaurants",hotels:[
-      {name:"Augustine Hotel",desc:"Converted 13th-century monastery.",price:"\u20ac200-340/night",tier:3,lat:50.0877,lng:14.4034}
-    ]},
-    {name:"Vinohrady",good:"Where Praguers live; good restaurants",bad:"20-min tram from sights",hotels:[
-      {name:"Mosaic House",desc:"Sustainable design hotel.",price:"\u20ac80-150/night",tier:1,lat:50.0731,lng:14.4354}
-    ]},
-    {name:"Star\u00e9 M\u011bsto (Old Town)",good:"Central; Astronomical Clock at your door",bad:"Tourist-saturated; noisy at night",hotels:[
-      {name:"Hotel Josef",desc:"Modernist counterpoint to the Baroque.",price:"\u20ac120-200/night",tier:2,lat:50.0890,lng:14.4219}
-    ]}
-  ];
-  if(p.indexOf("budapest")>-1)return[
-    {name:"Pest District V",good:"Central; Parliament and Chain Bridge walkable",bad:"Pricier; tourist saturation",hotels:[
-      {name:"Four Seasons Gresham Palace",desc:"Art Nouveau landmark on the Danube.",price:"\u20ac350-600/night",tier:4,lat:47.5025,lng:19.0476},
-      {name:"Hotel Parliament",desc:"Opposite the Parliament. Strong value.",price:"\u20ac80-140/night",tier:1,lat:47.5072,lng:19.0478}
-    ]},
-    {name:"Pest District VII",good:"Most vibrant; ruin bars; Dohany St Synagogue",bad:"Loud at night on weekends",hotels:[
-      {name:"Brody House",desc:"Bohemian, arts-focused, Jewish Quarter.",price:"\u20ac120-200/night",tier:2,lat:47.4964,lng:19.0624}
-    ]}
-  ];
-  if(p.indexOf("paris")>-1)return[
-    {name:"Le Marais (3rd/4th)",good:"Central, walkable, interesting at street level",bad:"Can be crowded; weekend noise",hotels:[
-      {name:"H\u00f4tel de la Bretonnerie",desc:"17th-century townhouse, quiet interior courtyard.",price:"\u20ac140-220/night",tier:2,lat:48.8575,lng:2.3527},
-      {name:"H\u00f4tel du Petit Moulin",desc:"Converted patisserie, Marais.",price:"\u20ac180-280/night",tier:3,lat:48.8612,lng:2.3526}
-    ]},
-    {name:"Saint-Germain (6th)",good:"Literary Paris; good cafes and bookshops",bad:"Expensive; more tourist-facing than it used to be",hotels:[
-      {name:"H\u00f4tel Recamier",desc:"On a quiet square behind Saint-Sulpice.",price:"\u20ac200-350/night",tier:3,lat:48.8510,lng:2.3341},
-      {name:"H\u00f4tel du Globe",desc:"Simple, well-located, strong value.",price:"\u20ac100-160/night",tier:2,lat:48.8521,lng:2.3349}
-    ]},
-    {name:"11th Arrondissement",good:"Where Parisians actually eat; better value",bad:"30 min walk to main museums",hotels:[
-      {name:"Le Citizen Hotel",desc:"Overlooking Canal Saint-Martin.",price:"\u20ac120-190/night",tier:2,lat:48.8680,lng:2.3622}
-    ]}
-  ];
-  if(p.indexOf("rome")>-1)return[
-    {name:"Trastevere",good:"Oldest neighborhood feel; walkable to Colosseum",bad:"Lively until late",hotels:[
-      {name:"Hotel Santa Maria",desc:"Converted 16th-century convent, cloister garden.",price:"\u20ac150-250/night",tier:2,lat:41.8897,lng:12.4695}
-    ]},
-    {name:"Prati (near Vatican)",good:"Less tourist-facing; good restaurants",bad:"Vatican crowds in the morning",hotels:[
-      {name:"Hotel Amalia",desc:"Family-run, 10 min walk to Vatican.",price:"\u20ac90-160/night",tier:1,lat:41.9072,lng:12.4605}
-    ]},
-    {name:"Historic Center",good:"Pantheon, Navona, Campo all walkable",bad:"Most expensive; noisy at night",hotels:[
-      {name:"Hotel Raphael",desc:"Ivy-covered palazzo, Navona adjacent.",price:"\u20ac200-380/night",tier:3,lat:48.8988,lng:12.4729}
-    ]}
-  ];
-  if(p.indexOf("barcelona")>-1)return[
-    {name:"Eixample",good:"Modernisme architecture on every block; well-connected",bad:"Gridded and busy; tourist-heavy near Sagrada",hotels:[
-      {name:"Hotel Praktik Rambla",desc:"On the Rambla de Catalunya, quieter than Las Ramblas.",price:"\u20ac100-180/night",tier:2,lat:41.3918,lng:2.1608},
-      {name:"Casa Camper",desc:"Design hotel with 24hr food.",price:"\u20ac200-320/night",tier:3,lat:41.3829,lng:2.1685}
-    ]},
-    {name:"El Born / Sant Pere",good:"Best street-level Barcelona; Palau de la M\u00fasica nearby",bad:"Can get noisy on weekends",hotels:[
-      {name:"Chic and Basic Born",desc:"Loft-style, good value, central Born.",price:"\u20ac80-150/night",tier:1,lat:41.3849,lng:2.1815}
-    ]}
-  ];
-  if(p.indexOf("berlin")>-1)return[
-    {name:"Mitte",good:"Central; museums, gallery, government district",bad:"Expensive; less local character",hotels:[
-      {name:"Hotel Telegraphenamt",desc:"Converted telegraph office.",price:"\u20ac130-220/night",tier:2,lat:52.5117,lng:13.3905}
-    ]},
-    {name:"Prenzlauer Berg",good:"Where Berliners with kids live; good cafes",bad:"Gentrified; further from sights",hotels:[
-      {name:"Michelberger Hotel",desc:"Irreverent Berlin institution.",price:"\u20ac90-160/night",tier:1,lat:52.5021,lng:13.4487}
-    ]},
-    {name:"Kreuzberg",good:"Most interesting neighborhood; Turkish market; clubs",bad:"Noisy at night in summer",hotels:[
-      {name:"25hours Hotel Bikini",desc:"Overlooking Berlin Zoo.",price:"\u20ac110-190/night",tier:2,lat:52.5066,lng:13.3328}
-    ]}
-  ];
-  if(p.indexOf("zurich")>-1)return[
-    {name:"Altstadt (Old Town)",good:"Walking distance to everything; most atmospheric",bad:"Expensive; tourist-heavy in summer",hotels:[
-      {name:"Widder Hotel",desc:"Converted medieval townhouses, Zurich's finest.",price:"CHF 400-700/night",tier:4,lat:47.3733,lng:8.5393},
-      {name:"Hotel Storchen",desc:"Right on the Limmat, 14th-century building.",price:"CHF 300-500/night",tier:3,lat:47.3706,lng:8.5415}
-    ]},
-    {name:"Zürich West (Kreis 4/5)",good:"Most interesting neighbourhood; galleries, food, nightlife",bad:"15min from sights; gritty",hotels:[
-      {name:"25hours Hotel Zürich West",desc:"Design hotel in former factory.",price:"CHF 180-320/night",tier:2,lat:47.3845,lng:8.5241},
-      {name:"Motel One Zürich",desc:"Budget-smart near main station.",price:"CHF 120-200/night",tier:1,lat:47.3789,lng:8.5349}
-    ]},
-    {name:"Seefeld (Kreis 8)",good:"Lake views; upscale residential; good restaurants",bad:"Quieter; less central",hotels:[
-      {name:"Hotel Seegarten",desc:"Lake-facing rooms, walk to Kunsthaus.",price:"CHF 200-360/night",tier:2,lat:47.3611,lng:8.5531}
-    ]}
-  ];
   return[];
 }
 </script>
