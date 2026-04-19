@@ -4588,7 +4588,105 @@ function rIcon(r){
   return "\uD83D\uDCCD";
 }
 
-function setCS(id,status){
+// Custom confirmation modal for rejecting a required candidate. Opens immediately
+// with a "thinking" state, fires an LLM call for a conversational message naming
+// the specific supporters/countries/must-dos, and falls back to a structured
+// message if the call fails or times out. Returns Promise<boolean> — true = reject.
+function showRejectRequiredModal(c, willDrop, willKeep, hasManual){
+  var ov=document.createElement("div");
+  ov.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;";
+  var modal=document.createElement("div");
+  modal.style.cssText="background:#fff;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.25);max-width:480px;width:100%;overflow:hidden;font-family:inherit;";
+  modal.innerHTML=
+    '<div style="padding:16px 18px 10px;">'
+    +'<div style="font-size:14px;font-weight:700;color:#111;margin-bottom:10px;">Reject '+c.place+'?</div>'
+    +'<div id="rrm-body" style="font-size:12px;line-height:1.65;color:#333;min-height:54px;">'
+    +'<span style="color:#999;font-style:italic;">Thinking about the trade-offs\u2026</span>'
+    +'</div>'
+    +'</div>'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end;padding:10px 18px 16px;">'
+    +'<button id="rrm-cancel" style="font-size:11px;padding:7px 14px;border:1px solid #ddd;border-radius:5px;background:#fff;color:#333;cursor:pointer;font-family:inherit;font-weight:600;">Keep it</button>'
+    +'<button id="rrm-confirm" style="font-size:11px;padding:7px 14px;border:1px solid #c05020;border-radius:5px;background:#c05020;color:#fff;cursor:pointer;font-family:inherit;font-weight:600;">Reject</button>'
+    +'</div>';
+  ov.appendChild(modal);
+  document.body.appendChild(ov);
+
+  var resolved=false, resolver;
+  var decision=new Promise(function(r){resolver=r;});
+  function close(v){ if(resolved)return; resolved=true; ov.remove(); resolver(v); }
+  modal.querySelector("#rrm-cancel").onclick=function(){close(false);};
+  modal.querySelector("#rrm-confirm").onclick=function(){close(true);};
+  ov.onclick=function(e){if(e.target===ov)close(false);};
+  document.addEventListener("keydown",function esc(e){if(e.key==="Escape"){close(false);document.removeEventListener("keydown",esc);}});
+
+  // Build structured fallback once — used if LLM fails or returns nothing
+  function buildFallback(){
+    function joinList(arr){
+      if (arr.length===1) return arr[0];
+      if (arr.length===2) return arr[0]+" or "+arr[1];
+      return arr.slice(0,-1).join(", ")+", or "+arr[arr.length-1];
+    }
+    var parts=[];
+    willDrop.forEach(function(n){
+      parts.push(n+" would be dropped \u2014 no other place in your shortlist can cover it.");
+    });
+    willKeep.forEach(function(k){
+      parts.push(k.name+" still works \u2014 "+joinList(k.supporters.map(function(s){return s.place+(s.country?" ("+s.country+")":"");}))+" can cover it.");
+    });
+    if (hasManual) parts.push(c.place+" is a must-see you added; rejecting removes it from the trip.");
+    if (!parts.length) parts.push(c.place+" is marked required. Continue?");
+    return parts.join(" ");
+  }
+
+  // Kick off the LLM call (non-blocking — modal is already up with spinner text)
+  (async function(){
+    try{
+      var ctx={
+        rejecting: c.place,
+        rejectingCountry: c.country||null,
+        rejectingRole: c.role||null,
+        tripRegion: (_tb&&_tb.region)||null,
+        mustDos: [].concat(
+          willDrop.map(function(n){return {name:n, willDrop:true, supporters:[]};}),
+          willKeep.map(function(k){return {name:k.name, willDrop:false, supporters:k.supporters};})
+        ),
+        hasManualMustSee: hasManual
+      };
+      var lines=[];
+      lines.push("Write a short, conversational message (2\u20133 sentences, plain prose, no bullets, no markdown) for a traveler considering rejecting a destination. Voice: a knowledgeable friend who plans trips \u2014 direct, specific, flagging geographic wrinkles.");
+      lines.push("");
+      lines.push("Rejecting: "+ctx.rejecting+(ctx.rejectingCountry?" ("+ctx.rejectingCountry+")":"")+(ctx.rejectingRole?" \u2014 "+ctx.rejectingRole:""));
+      if(ctx.tripRegion) lines.push("Trip region: "+ctx.tripRegion);
+      lines.push("");
+      lines.push("Must-dos this destination is required for:");
+      ctx.mustDos.forEach(function(m){
+        if(m.willDrop){
+          lines.push("- "+m.name+": no other candidate can cover it \u2014 would be DROPPED if this is rejected.");
+        } else {
+          var subs=m.supporters.map(function(s){return s.place+(s.country?" ("+s.country+")":"");}).join(" or ");
+          lines.push("- "+m.name+": could still be covered by "+subs);
+        }
+      });
+      if(ctx.hasManualMustSee) lines.push("Note: also a must-see the user specifically added.");
+      lines.push("");
+      lines.push("If any surviving supporter is in a different country than the trip region, flag it naturally. End with a direct question (e.g., \"still want to reject it?\"). Do not list options or use bullets. Plain prose only.");
+      var prompt=lines.join("\n");
+      var text=await callMax([{role:"user",content:prompt}], 250, 10000);
+      if(resolved) return;
+      var clean=(text||"").trim().replace(/^["\u201c]+|["\u201d]+$/g,"");
+      var body=modal.querySelector("#rrm-body");
+      if(body) body.textContent=clean||buildFallback();
+    } catch(e){
+      if(resolved) return;
+      var body=modal.querySelector("#rrm-body");
+      if(body) body.textContent=buildFallback();
+    }
+  })();
+
+  return decision;
+}
+
+async function setCS(id,status){
   var c=(_tb.candidates||[]).find(function(x){return x.id===id;});
   if(!c) return;
   // Guardrail: rejecting a required candidate means at least one of the must-dos
@@ -4602,8 +4700,9 @@ function setCS(id,status){
     var hasManual = (c._requiredFor||[]).some(function(r){return r === "__manual__";});
 
     // For each must-do this candidate supports, collect the OTHER non-rejected
-    // candidates that also satisfy it — so we can name them specifically.
-    var supportByName = {}; // { "bernina express": ["Tirano"], ... }
+    // candidates that also satisfy it — so we can name them specifically and
+    // pass them to the LLM for a conversational rejection message.
+    var supportByName = {}; // { "bernina express": [{place, country}], ... }
     (_tb.candidates||[]).forEach(function(other){
       if (other.id === c.id) return;
       if (other.status === "reject") return;
@@ -4611,7 +4710,7 @@ function setCS(id,status){
         if (r && r !== "__manual__") {
           var k = r.toLowerCase();
           if (!supportByName[k]) supportByName[k] = [];
-          supportByName[k].push(other.place);
+          supportByName[k].push({place:other.place, country:other.country||null});
         }
       });
     });
@@ -4623,28 +4722,8 @@ function setCS(id,status){
       else willDrop.push(n);
     });
 
-    function joinList(arr){
-      if (arr.length === 1) return arr[0];
-      if (arr.length === 2) return arr[0]+" or "+arr[1];
-      return arr.slice(0,-1).join(", ")+", or "+arr[arr.length-1];
-    }
-    var lines = [];
-    lines.push("Reject "+c.place+"?");
-    lines.push("");
-    willDrop.forEach(function(n){
-      lines.push("• "+n+" — will be dropped (no other stop in your shortlist can cover it).");
-    });
-    willKeep.forEach(function(k){
-      lines.push("• "+k.name+" — still works ("+joinList(k.supporters)+" can cover it).");
-    });
-    if (hasManual) {
-      lines.push("• "+c.place+" is a must-see you added — rejecting removes it from your trip.");
-    }
-    if (!willDrop.length && !willKeep.length && !hasManual) {
-      lines.push(c.place+" is marked required. Continue?");
-    }
-    var msg = lines.join("\n");
-    if (!confirm(msg)) return;
+    var approved = await showRejectRequiredModal(c, willDrop, willKeep, hasManual);
+    if (!approved) return;
 
     // Cascade the drops — only for must-dos with no remaining support.
     if (willDrop.length) {
