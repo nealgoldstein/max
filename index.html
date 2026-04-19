@@ -3547,7 +3547,7 @@ function renderTripStep1Recognition(){
   var fam = _tb.familiarity || "";
   var famHtml = famOptions.map(function(f){
     var on = fam === f.id;
-    return '<span class="tb-toggle'+(on?' on':'')+'" onclick="_tb.familiarity=\''+f.id+'\';renderTripStep1Recognition();">'+f.label+'</span>';
+    return '<span class="tb-toggle tb-fam-chip'+(on?' on':'')+'" data-fam-id="'+f.id+'" onclick="_tbPickFamiliarity(\''+f.id+'\')">'+f.label+'</span>';
   }).join("");
 
   // Build the sentence as a single textarea with soft prefix
@@ -3644,6 +3644,24 @@ function saveRecognitionAndContinue(){
 }
 
 
+
+// Update _tb.familiarity and the chip's "on" class in place, without re-rendering
+// the whole overlay (which would reset scroll position).
+function _tbPickFamiliarity(id){
+  _tb.familiarity = id;
+  // Also persist textarea values so they don't get lost if the overlay DOES re-render later
+  var _ta = document.getElementById("tb-sentence");
+  if(_ta) _tb.tripSentence = _ta.value;
+  var _anc = document.getElementById("tb-anchors");
+  if(_anc) _tb.anchors = _anc.value;
+  // Update chip classes — all tb-fam-chip elements on the current overlay
+  var chips = document.querySelectorAll(".tb-fam-chip");
+  for (var i = 0; i < chips.length; i++){
+    var chip = chips[i];
+    var chipId = chip.getAttribute("data-fam-id");
+    chip.classList.toggle("on", chipId === id);
+  }
+}
 
 function toggleEntryExit(which, isFixed){
   if(which === "entry") _tb.entryFixed = isFixed;
@@ -3768,7 +3786,7 @@ function renderTripStep2(){
   var fam = _tb.familiarity || "";
   var famHtml = famOptions.map(function(f){
     var on = fam === f.id;
-    return '<span class="tb-toggle'+(on?' on':'')+'" onclick="_tb.familiarity=\"'+f.id+'\";renderTripStep2();">'+f.label+'</span>';
+    return '<span class="tb-toggle tb-fam-chip'+(on?' on':'')+'" data-fam-id="'+f.id+'" onclick="_tbPickFamiliarity(\''+f.id+'\')">'+f.label+'</span>';
   }).join("");
 
   ov.innerHTML='<div class="tb-header">'
@@ -9352,7 +9370,6 @@ async function sStory(sid, destId) {
   }
 }
 
-async 
 // ─── MAX SAYS — unsolicited observations from a well-traveled friend ───────
 // One note per destination per session. Generated on first render, cached.
 // Cards should feel like a volunteered observation, not a feature.
@@ -10290,16 +10307,18 @@ function getRouting(fromPlace, toPlace){
   if(typeof trip !== "undefined" && trip && trip._routingCache && trip._routingCache[key]){
     return trip._routingCache[key];
   }
+  // Ensure the in-flight tracker exists (defensive — in case script errored before its own init)
+  if(typeof _routingFetchInFlight === "undefined" || !_routingFetchInFlight) _routingFetchInFlight = {};
   // Not cached — kick off an async fetch (fire-and-forget; cache and re-render on success)
   if(typeof trip !== "undefined" && trip && !_routingFetchInFlight[key]){
     _routingFetchInFlight[key] = true;
-    fetchRoutingAsync(fromPlace, toPlace, key);
+    if(typeof fetchRoutingAsync === "function") fetchRoutingAsync(fromPlace, toPlace, key);
   }
   return null;
 }
 
 // Track in-flight routing fetches so we don't duplicate requests
-var _routingFetchInFlight = {};
+var _routingFetchInFlight = _routingFetchInFlight || {};
 
 // Fetch transport options between two cities using Max. Caches on trip._routingCache
 // and re-renders the trip view when the result lands.
