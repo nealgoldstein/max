@@ -4016,17 +4016,29 @@ async function previewConstraintChanges(){
     +'<div style="font-size:11px;color:#aaa;">Max is working out what needs to be revisited.</div>'
     +'</div>';
 
-  // Build trip context summary
+  // Build trip context summary — include booking counts so Max can flag invalidations
   var destNames = (trip.destinations||[]).map(function(d){ return d.city+(d.country?", "+d.country:""); }).join("; ");
+  var destList = (trip.destinations||[]).map(function(d, i){
+    var bookCount = (d.hotelBookings||[]).length + (d.generalBookings||[]).length;
+    return (i+1) + ". " + d.place + (d.dateFrom ? " (" + d.dateFrom + " to " + d.dateTo + ")" : "") + (bookCount ? " \u2014 " + bookCount + " booking(s)" : "");
+  }).join("\n");
+  var totalBookings = (trip.destinations||[]).reduce(function(s, d){ return s + (d.hotelBookings||[]).length + (d.generalBookings||[]).length; }, 0);
   var diffText = diffs.map(function(d){ return d.field+": \u201c"+d.from+"\u201d \u2192 \u201c"+d.to+"\u201d"; }).join("\n");
+
+  // Whether this change is likely to force a trip-order rebuild
+  var affectsOrder = diffs.some(function(d){
+    return d.field === "Arrival point" || d.field === "Departure point";
+  });
 
   var prompt = "A traveler is updating their trip constraints mid-planning. Here are the changes they made:\n\n"
     + diffText + "\n\n"
-    + "Current trip destinations: " + (destNames||"none confirmed yet") + "\n"
+    + "Current trip order:\n" + (destList||"(no destinations yet)") + "\n\n"
+    + (totalBookings > 0 ? "The traveler has " + totalBookings + " booking(s) already entered. " : "")
+    + (affectsOrder ? "IMPORTANT: changing arrival or departure will re-sequence destinations and reassign dates. Call out any bookings whose dates or locations may no longer match.\n" : "")
     + "Trip name: " + (trip.name||"") + "\n\n"
     + "Analyse the impact of these changes on the current trip. Be specific and concrete:\n"
     + "- Which destinations or plans are directly affected?\n"
-    + "- What are definite conflicts (things that must change)?\n"
+    + "- What are definite conflicts (things that must change \u2014 bookings, dates, routes)?\n"
     + "- What are flags worth checking (things that may need revisiting)?\n"
     + "- What stays fine as-is?\n\n"
     + "Be brief and direct. Use plain language, no bullet-point headers. 3\u20135 short paragraphs maximum. "
@@ -4070,13 +4082,80 @@ function showConstraintConfirmation(diffs, analysis, pendingValues){
 function applyConstraintChanges(){
   var p = _tb._pending;
   if(!p) return;
+  var snap = _tb._snapshot || {};
+  // Detect whether this change affects trip ordering (entry or exit changed)
+  var orderAffected = (p.entry || "") !== (snap.entry || "")
+                   || (p.tbExit || "") !== (snap.tbExit || "");
   Object.assign(_tb, p);
+  // If the user set an explicit entry, clear the "Max inferred this" marker
+  if (p.entry && p.entry !== (snap.entry || "")) {
+    _tb.entryInferred = false;
+    if (trip.brief) trip.brief.entryInferred = false;
+  }
+  // Mirror relevant changes onto trip.brief so saved state stays consistent
+  if (trip.brief) {
+    if (typeof p.entry !== "undefined") trip.brief.entry = p.entry;
+    if (typeof p.tbExit !== "undefined") trip.brief.exit = p.tbExit;
+    if (typeof p.gettingTo !== "undefined") trip.brief.gettingTo = p.gettingTo;
+    if (typeof p.gettingOut !== "undefined") trip.brief.gettingOut = p.gettingOut;
+    if (typeof p.transport !== "undefined") trip.brief.transport = p.transport;
+  }
   _tb._editMode = false;
   _tb._snapshot = null;
   _tb._pending = null;
   g("trip-brief-overlay").style.display="none";
+
+  // If entry/exit changed and we have a built trip, re-sequence using the new logic.
+  // Bookings and tracker items are preserved on each destination — only date ranges
+  // and order shift. The user will see any invalidations flagged by Max's preview.
+  if (orderAffected && trip && trip.destinations && trip.destinations.length > 1) {
+    resequenceWithCurrentBrief();
+  }
+
   autoSave();
   showSaveStatus("Constraints updated", 3000);
+}
+
+// Re-run orderKeptCandidates against the current trip's destinations + _tb entry/exit,
+// reassign dates preserving night counts. Bookings stay attached to their destinations.
+function resequenceWithCurrentBrief(){
+  if (!trip || !trip.destinations || !trip.destinations.length) return;
+  // Build pseudo-candidates from the current destinations so orderKeptCandidates can process them
+  var pseudoKept = trip.destinations.map(function(d){
+    var rf = (d.attachedEvents||[]).map(function(e){ return e.name; });
+    return {
+      id: d.id,
+      place: d.place,
+      country: d.country || "",
+      _required: !!(d.attachedEvents && d.attachedEvents.length),
+      _requiredFor: rf,
+      _dest: d,  // back-reference
+      stayRange: (d.nights||3) + " nights",
+      status: "keep"
+    };
+  });
+  var orderResult = orderKeptCandidates(pseudoKept, _mdcItems||[], _tb.entry||"", _tb.tbExit||"");
+  var newOrder = orderResult.ordered.map(function(pc){ return pc._dest; }).filter(Boolean);
+
+  // Preserve any destinations that didn't come back from the ordering (defensive)
+  trip.destinations.forEach(function(d){
+    if (newOrder.indexOf(d) < 0) newOrder.push(d);
+  });
+
+  // Reassign dates preserving night counts. Anchor to first destination's existing dateFrom.
+  var anchorDate = newOrder[0] && newOrder[0].dateFrom ? new Date(newOrder[0].dateFrom + "T12:00:00") : new Date();
+  var cur = new Date(anchorDate);
+  newOrder.forEach(function(d){
+    var nights = d.nights || 3;
+    d.dateFrom = cur.toISOString().slice(0,10);
+    cur.setDate(cur.getDate() + nights);
+    d.dateTo = cur.toISOString().slice(0,10);
+    d.days = makeDays(d.id, d.place, d.intent || d.place, d.dateFrom, nights);
+  });
+  trip.destinations = newOrder;
+  trip.orderingReasoning = orderResult.reasoning;
+  drawTripMode();
+  updateMainMap();
 }
 
 function cancelTripBrief(){
