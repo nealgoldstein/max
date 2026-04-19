@@ -574,7 +574,7 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 #map-overlay{position:fixed;inset:0;z-index:999;background:#1a1a1a;flex-direction:column;display:none;}
 .map-hdr{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#111;flex-shrink:0;flex-wrap:wrap;min-height:44px;}
 .map-dest-lbl{font-size:12px;font-weight:600;color:#fff;white-space:nowrap;}
-.map-layer-bar{display:flex;gap:5px;flex:1;flex-wrap:nowrap;overflow-x:auto;padding:2px 0;}
+.map-layer-bar{display:flex;gap:5px;flex:1 1 auto;flex-wrap:wrap;min-width:0;padding:2px 0;align-items:center;}
 .map-layer-btn{font-size:10px;padding:3px 9px;border-radius:12px;border:1px solid #555;background:transparent;color:#aaa;cursor:pointer;font-family:inherit;white-space:nowrap;flex-shrink:0;display:inline-flex;align-items:center;gap:2px;}
 .map-layer-btn:hover{border-color:#aaa;color:#fff;}
 .map-layer-btn.on{background:#fff;color:#111;border-color:#fff;}
@@ -5306,7 +5306,7 @@ async function fetchCityMeta(dest){
       '"practicalInfo":{"currency":"...","tipping":"...","note":"...","emergency":"..."},'+
       '"transitHub":{"arrival":{"name":"...","lat":0,"lng":0},"departure":{"name":"...","lat":0,"lng":0}},'+
       '"essentials":{"atms":[{"name":"...","note":"..."}],"groceries":[{"name":"...","note":"..."}],"touristInfo":[{"name":"...","note":"..."}],"pharmacies":[{"name":"...","note":"..."}]}}\n'+
-      '2-3 districts with 1-2 hotels each. For essentials: 2-3 ATMs, 2-3 groceries, 1 tourist info, 1-2 pharmacies. Real named places. Be specific.';
+      '2-3 districts with 1-2 hotels each. Essentials are ALL required — do not omit any field. Include 2-3 ATMs, 2-3 groceries, 1 tourist info, AND 1-2 pharmacies (chemists / drugstores / Apotheke / farmacia / pharmacie — whatever the local term). Real named places. Be specific.';
     var text=await callMax([{role:'user',content:prompt}],1800);
     var json=text.replace(/```json\s*/g,'').replace(/```\s*/g,'').trim();
     var s=json.indexOf('{'),e=json.lastIndexOf('}');
@@ -5397,7 +5397,7 @@ async function generateCityData(place,destId){
 
   showSaveStatus('Max is generating '+place+' data\u2026',60000);
 
-  var prompt='Generate travel data for '+place+'. Return ONLY valid JSON, no markdown:\n{"cityCenter":[lat,lng],"sights":[{"name":"...","st":"...","desc":"one sentence"}],"districts":[{"name":"...","good":"...","bad":"...","hotels":[{"name":"...","desc":"...","price":"...","tier":2}]}],"practicalInfo":{"currency":"...","tipping":"...","note":"...","emergency":"..."},"transitHub":{"arrival":{"name":"...","lat":0,"lng":0},"departure":{"name":"...","lat":0,"lng":0}},"essentials":{"atms":[{"name":"...","note":"..."}],"groceries":[{"name":"...","note":"..."}],"touristInfo":[{"name":"...","note":"..."}],"pharmacies":[{"name":"...","note":"..."}]}}\n6-8 sights, 2 districts, 1-2 hotels each. For essentials: 2-3 ATMs, 2-3 groceries, 1 tourist info, 1-2 pharmacies. Real named places. Be concise.';
+  var prompt='Generate travel data for '+place+'. Return ONLY valid JSON, no markdown:\n{"cityCenter":[lat,lng],"sights":[{"name":"...","st":"...","desc":"one sentence"}],"districts":[{"name":"...","good":"...","bad":"...","hotels":[{"name":"...","desc":"...","price":"...","tier":2}]}],"practicalInfo":{"currency":"...","tipping":"...","note":"...","emergency":"..."},"transitHub":{"arrival":{"name":"...","lat":0,"lng":0},"departure":{"name":"...","lat":0,"lng":0}},"essentials":{"atms":[{"name":"...","note":"..."}],"groceries":[{"name":"...","note":"..."}],"touristInfo":[{"name":"...","note":"..."}],"pharmacies":[{"name":"...","note":"..."}]}}\n6-8 sights, 2 districts, 1-2 hotels each. Essentials are ALL required — do not omit any field. Include 2-3 ATMs, 2-3 groceries, 1 tourist info, AND 1-2 pharmacies (chemists / drugstores / Apotheke / farmacia / pharmacie — whatever the local term). Real named places. Be concise.';
 
   try{
     // Add 30 second timeout to generation
@@ -9534,7 +9534,6 @@ function buildRoutingSection(fromDest, toDest, label){
 // ── Days and sights ────────────────────────────────────────
 function makeDays(destId,place,intent,dateFrom,nights){
   var count=Math.min(nights,7);
-  var sights=getSights(place,intent);
   var days=[];
   for(var i=0;i<count;i++){
     var d=new Date(dateFrom+"T12:00:00"); d.setDate(d.getDate()+i);
@@ -10030,6 +10029,12 @@ function migrateDest(dest){
   if(!dest.restaurantSuggestions)dest.restaurantSuggestions=[];
   if(!dest.laterItems){dest.laterItems=dest.discoveredItems||[];}
   if(!dest.maybeItems){dest.maybeItems=[];}
+  // Clean up orphaned dest.locations entries — essentials now live on dest.suggestions.
+  // Retain arrival/departure/sight-must/sight-nice/stay as other code paths may still use them.
+  if(dest.locations&&dest.locations.length){
+    var stale=["atm","grocery","tourist-info","transit","pharmacy"];
+    dest.locations=dest.locations.filter(function(l){return stale.indexOf(l.type)===-1;});
+  }
   // Wipe stale pendingCancellations saved before wording was standardised
   if(dest.pendingCancellations&&dest.pendingCancellations.items){
     var hasOldWording=dest.pendingCancellations.items.some(function(it){
@@ -10704,13 +10709,6 @@ function getPracticalInfo(place,intent,dest){
     note:"",
     emergency:"112 (EU) \u00b7 Check local numbers on arrival"
   };
-}
-
-function getSights(place,intent){
-  var gen=_generatedCityData[place.toLowerCase()];
-  if(gen&&!gen.loading&&gen.sights&&gen.sights.length) return gen.sights;
-  // No static fallback — days start empty until generateCityData returns.
-  return [];
 }
 
 function getDistricts(place,intent,dest){
