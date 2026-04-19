@@ -4572,44 +4572,82 @@ function rIcon(r){
 function setCS(id,status){
   var c=(_tb.candidates||[]).find(function(x){return x.id===id;});
   if(!c) return;
-  // Guardrail: rejecting a required candidate means dropping the must-do(s) that required it.
-  // Warn the user and cascade the uncheck so the decision is coherent.
+  // Guardrail: rejecting a required candidate means at least one of the must-dos
+  // that required it may no longer be viable. Smarter cascade: only drop a must-do
+  // if no OTHER non-rejected candidate is still required for it. For conditions
+  // (northern lights, etc.), the must-do survives as long as any remaining place
+  // can host it. For 2-endpoint trains where only one endpoint is being rejected,
+  // the user gets a second decision when they consider the other endpoint.
   if (status === "reject" && c._required && c.status !== "reject") {
     var realNames = (c._requiredFor||[]).filter(function(r){return r && r !== "__manual__";});
     var hasManual = (c._requiredFor||[]).some(function(r){return r === "__manual__";});
+
+    // Count remaining (non-rejected, non-this) support per must-do name
+    var supportByName = {};
+    (_tb.candidates||[]).forEach(function(other){
+      if (other.id === c.id) return;
+      if (other.status === "reject") return;
+      (other._requiredFor||[]).forEach(function(r){
+        if (r && r !== "__manual__") {
+          var k = r.toLowerCase();
+          supportByName[k] = (supportByName[k]||0) + 1;
+        }
+      });
+    });
+    var willDrop = [];
+    var willKeep = [];
+    realNames.forEach(function(n){
+      if ((supportByName[n.toLowerCase()]||0) > 0) willKeep.push(n);
+      else willDrop.push(n);
+    });
+
     var msg;
-    if (realNames.length && hasManual) {
-      msg = "Rejecting "+c.place+" will drop your must-dos: "+realNames.join(", ")+
+    if (willDrop.length && willKeep.length) {
+      msg = "Rejecting "+c.place+" will drop: "+willDrop.join(", ")+
+            ". Your other must-dos ("+willKeep.join(", ")+") stay — other places support them. Continue?";
+    } else if (willDrop.length && hasManual) {
+      msg = "Rejecting "+c.place+" will drop your must-dos: "+willDrop.join(", ")+
             " (and affects a must-see you added). Continue?";
-    } else if (realNames.length) {
-      msg = "Rejecting "+c.place+" will drop your must-dos: "+realNames.join(", ")+". Continue?";
+    } else if (willDrop.length) {
+      msg = "Rejecting "+c.place+" will drop your must-dos: "+willDrop.join(", ")+". Continue?";
+    } else if (willKeep.length && hasManual) {
+      msg = c.place+" is a required stop, and a must-see you added. Your must-dos ("+willKeep.join(", ")+
+            ") stay — other places still support them. Reject anyway?";
+    } else if (willKeep.length) {
+      msg = c.place+" is a required stop, but your must-dos ("+willKeep.join(", ")+
+            ") stay — other places still support them. Reject anyway?";
     } else if (hasManual) {
       msg = c.place+" is a must-see you added. Reject anyway?";
     } else {
       msg = c.place+" is a required stop. Reject anyway?";
     }
     if (!confirm(msg)) return;
-    // Cascade: uncheck any _mdcItems whose name matches a real (non-manual) requiredFor entry.
-    // Manual items can't be mapped back by name, so they're left alone — the candidate is
-    // rejected regardless, and the user can uncheck the manual item from the must-do list.
-    if (realNames.length && typeof _mdcItems !== 'undefined' && _mdcItems) {
-      var nameSet = {};
-      realNames.forEach(function(n){ nameSet[n.toLowerCase()] = true; });
-      _mdcItems.forEach(function(m){
-        if (m.checked && m.name && nameSet[m.name.toLowerCase()]) {
-          m.checked = false;
-        }
+
+    // Cascade the drops — only for must-dos with no remaining support.
+    if (willDrop.length) {
+      var dropSet = {};
+      willDrop.forEach(function(n){ dropSet[n.toLowerCase()] = true; });
+      if (typeof _mdcItems !== 'undefined' && _mdcItems) {
+        _mdcItems.forEach(function(m){
+          if (m.checked && m.name && dropSet[m.name.toLowerCase()]) {
+            m.checked = false;
+          }
+        });
+      }
+      // Clear this candidate's links to dropped must-dos so un-reject won't auto-keep from stale data
+      var myReq = (c._requiredFor||[]).filter(function(r){
+        if (r === "__manual__") return true;
+        return !dropSet[r.toLowerCase()];
       });
-    }
-    // Clear the required flag on this candidate and on any other candidates whose
-    // _requiredFor only referenced these dropped must-dos, so the UI no longer
-    // claims they're required.
-    if (realNames.length) {
+      c._requiredFor = myReq;
+      if (!myReq.length) c._required = false;
+      // Update other candidates' required links for the dropped must-dos
       (_tb.candidates||[]).forEach(function(other){
+        if (other.id === c.id) return;
         if (!other._required) return;
         var stillReq = (other._requiredFor||[]).filter(function(r){
-          if (r === "__manual__") return true; // manual items aren't affected here
-          return !nameSet[r.toLowerCase()];
+          if (r === "__manual__") return true;
+          return !dropSet[r.toLowerCase()];
         });
         if (!stillReq.length) {
           other._required = false;
@@ -4618,6 +4656,16 @@ function setCS(id,status){
           other._requiredFor = stillReq;
         }
       });
+      // Keep _tb.requiredPlaces in sync so renderCandidateCards re-match doesn't resurrect dropped entries
+      if (_tb.requiredPlaces) {
+        _tb.requiredPlaces = _tb.requiredPlaces.filter(function(p){
+          var rf = (p.requiredFor||[]).filter(function(r){
+            return r === "__manual__" || !dropSet[r.toLowerCase()];
+          });
+          p.requiredFor = rf;
+          return rf.length > 0;
+        });
+      }
     }
   }
   c.status=(c.status===status)?null:status;
