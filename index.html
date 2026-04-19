@@ -3706,7 +3706,8 @@ function renderTripBrief(){
     +'<span class="tb-toggle'+(_tb.entryFixed?' on':'')+'" onclick="_tb.entryFixed=true;renderTripBrief();">Booked / fixed</span>'
     +'<span class="tb-toggle'+(!_tb.entryFixed?' on':'')+'" onclick="_tb.entryFixed=false;renderTripBrief();">Still flexible</span>'
     +'</div>'
-    +'<input id="tb-entry" value="'+(_tb.entry||'')+'" placeholder="'+(_tb.region?'First city / arrival point in '+_tb.region:'First city / arrival point')+'" style="margin-top:6px;" />'
+    +'<input id="tb-entry" value="'+(_tb.entry||'')+'" placeholder="'+(_tb.region?'First city / arrival point in '+_tb.region:'First city / arrival point')+'" style="margin-top:6px;" oninput="_tb.entryInferred=false;" />'
+    +(_tb.entryInferred ? '<div style="font-size:10px;color:#888;margin-top:4px;font-style:italic;">\u2728 Max suggested this starting point since you haven\u2019t set arrival yet. Change it anytime.</div>' : '')
     +'</div>'
 
     +'<div class="tb-field"><label>How you\u2019re moving within '+(_tb.region||'the region')+'</label>'
@@ -3927,7 +3928,8 @@ function renderTripBriefEdit(){
     +'<span class="tb-toggle'+(_tb.entryFixed?' on':'')+'" onclick="_tb.entryFixed=true;renderTripBriefEdit();">Booked / fixed</span>'
     +'<span class="tb-toggle'+(!_tb.entryFixed?' on':'')+'" onclick="_tb.entryFixed=false;renderTripBriefEdit();">Still flexible</span>'
     +'</div>'
-    +'<input id="tb-entry" value="'+(_tb.entry||'')+'" placeholder="First city / arrival point" style="margin-top:6px;" />'
+    +'<input id="tb-entry" value="'+(_tb.entry||'')+'" placeholder="First city / arrival point" style="margin-top:6px;" oninput="_tb.entryInferred=false;" />'
+    +(_tb.entryInferred ? '<div style="font-size:10px;color:#888;margin-top:4px;font-style:italic;">\u2728 Max suggested this starting point. Edit to set your actual arrival.</div>' : '')
     +'</div>'
 
     +'<div class="tb-field"><label>How you\u2019re moving within '+(_tb.region||'the region')+'</label>'
@@ -4650,6 +4652,18 @@ async function buildFromCandidates(){
   var ordered = orderResult.ordered;
   trip.orderingReasoning = orderResult.reasoning;
 
+  // If entry was inferred (no arrival was set by the user), persist it so the
+  // Step 2 form shows it filled in with a "Max suggested" marker, and the brief
+  // accurately reflects what the trip is built on.
+  if (orderResult.inferredEntry && !_tb.entry) {
+    _tb.entry = orderResult.inferredEntry.place;
+    _tb.entryInferred = true;
+    if (trip.brief) {
+      trip.brief.entry = _tb.entry;
+      trip.brief.entryInferred = true;
+    }
+  }
+
   // Build destinations from ordered candidates
   var cur=new Date(startDate);
   ordered.forEach(function(c){
@@ -4705,7 +4719,7 @@ async function buildFromCandidates(){
 // plain-English list of decisions for later display.
 function orderKeptCandidates(kept, mdcItems, entryCity, exitCity){
   var reasoning = [];
-  if (!kept.length) return {ordered:[], reasoning:reasoning};
+  if (!kept.length) return {ordered:[], reasoning:reasoning, inferredEntry:null};
 
   // Build a map of place → candidate for quick lookup. Use normalized names.
   var byName = {};
@@ -4811,6 +4825,7 @@ function orderKeptCandidates(kept, mdcItems, entryCity, exitCity){
 
   // Find entry candidate
   var entryCand = null;
+  var entryInferred = false;
   if (entryN) {
     remaining.forEach(function(c){ if (!entryCand && matchesName(c, entryN)) entryCand = c; });
     if (!entryCand) {
@@ -4818,6 +4833,30 @@ function orderKeptCandidates(kept, mdcItems, entryCity, exitCity){
       routeBlocks.forEach(function(b){
         b.candidates.forEach(function(c){ if (!entryCand && matchesName(c, entryN)) entryCand = c; });
       });
+    }
+  } else {
+    // No entry city specified — infer a natural starting point.
+    // Preference order:
+    //   1. A major-gateway candidate (marked _cityPick by the major-cities discovery call)
+    //      that's among the "remaining" non-route-block candidates
+    //   2. A major-gateway candidate that's a route-block endpoint (we'll reorder blocks)
+    //   3. The first kept candidate in the list
+    var cityPicks = kept.filter(function(c){ return c._cityPick; });
+    // Prefer a gateway city that's NOT in a route block (keeps route-adjacency clean)
+    cityPicks.forEach(function(c){
+      if (!entryCand && remaining.indexOf(c) >= 0) entryCand = c;
+    });
+    // Otherwise prefer a gateway city that IS a route endpoint
+    if (!entryCand) {
+      cityPicks.forEach(function(c){
+        if (!entryCand && placed[c.id]) entryCand = c;
+      });
+    }
+    // Last resort — first kept candidate overall
+    if (!entryCand && kept.length > 0) entryCand = kept[0];
+    if (entryCand) {
+      entryInferred = true;
+      reasoning.push("No arrival city was set, so I'm starting the trip in " + entryCand.place + ". Change it if another city fits your arrival better.");
     }
   }
 
@@ -4831,7 +4870,20 @@ function orderKeptCandidates(kept, mdcItems, entryCity, exitCity){
   if (entryCand && remaining.indexOf(entryCand) >= 0) {
     ordered.push(entryCand);
     remaining = remaining.filter(function(c){ return c !== entryCand; });
-    reasoning.push("Starting in " + entryCand.place + " since that's where you're arriving.");
+    if (!entryInferred) {
+      reasoning.push("Starting in " + entryCand.place + " since that's where you're arriving.");
+    }
+  } else if (entryCand && placed[entryCand.id] && entryInferred) {
+    // Inferred entry is a route endpoint — put its block first
+    // Move the block containing entryCand to the front of routeBlocks
+    var blockIdx = -1;
+    routeBlocks.forEach(function(b, bi){
+      if (b.candidates.indexOf(entryCand) >= 0 && blockIdx < 0) blockIdx = bi;
+    });
+    if (blockIdx > 0) {
+      var block = routeBlocks.splice(blockIdx, 1)[0];
+      routeBlocks.unshift(block);
+    }
   }
 
   // Place route blocks — respect direction alignment
@@ -4889,7 +4941,11 @@ function orderKeptCandidates(kept, mdcItems, entryCity, exitCity){
     }
   });
 
-  return {ordered: ordered, reasoning: reasoning};
+  return {
+    ordered: ordered,
+    reasoning: reasoning,
+    inferredEntry: entryInferred && entryCand ? {place: entryCand.place, country: entryCand.country || ""} : null
+  };
 }
 
 // For each destination, find which must-do events happen there
