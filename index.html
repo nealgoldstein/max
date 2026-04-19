@@ -765,7 +765,6 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .ce-card.keep{border-color:#2a7a4e;background:#f6fbf8;}
 .ce-card.map-selected{border-color:#111!important;box-shadow:0 0 0 2px #111;transition:box-shadow .15s;}
 .ce-map-tooltip{font-size:11px;font-weight:600;padding:3px 8px;background:#111;color:#fff;border:none;border-radius:5px;box-shadow:0 2px 6px rgba(0,0,0,.2);}
-.ce-card.maybe{border-color:#d97706;background:#fffbf0;}
 .ce-card.reject{opacity:0.4;}
 .ce-card-top{padding:9px 11px 5px;}
 .ce-card-name{font-size:12px;font-weight:700;color:#111;}
@@ -778,7 +777,7 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .ce-card-actions{display:flex;border-top:1px solid #f0f0f0;}
 .ce-act{flex:1;padding:6px 3px;font-size:10px;font-weight:600;text-align:center;cursor:pointer;border:none;background:none;font-family:inherit;color:#555;}
 .ce-act:hover{background:#f5f5f5;}
-.ce-act.keep{color:#2a7a4e;}.ce-act.maybe-btn{color:#d97706;}.ce-act.reject{color:#c05020;}.ce-act.compare{color:#1a5fa8;}
+.ce-act.keep{color:#2a7a4e;}.ce-act.reject{color:#c05020;}.ce-act.compare{color:#1a5fa8;}
 .ce-act.on{background:#f0f0f0;}
 .ce-right{flex:1;position:relative;}
 .ce-map{width:100%;height:100%;}
@@ -2658,7 +2657,7 @@ async function showMaxBridge(stage, onContinue, correctionHistory) {
       + (_tb.familiarity ? "\u2022 Familiarity with region: " + _tb.familiarity + "\n" : "")
       + (_tb.chips && _tb.chips.length ? "\u2022 Also interested in: " + _tb.chips.join(", ") + "\n" : "");
   } else if (stage === "post-candidates") {
-    var selected = (_tb.candidates || []).filter(function(c){ return c.status === "keep" || c.status === "maybe"; });
+    var selected = (_tb.candidates || []).filter(function(c){ return c.status === "keep"; });
     // Build an ordered list using the same logic as buildFromCandidates, so the bridge reflects the actual plan
     var kept = (_tb.candidates || []).filter(function(c){ return c.status === "keep"; });
     var preview = orderKeptCandidates(kept, _mdcItems||[], _tb.entry||"", _tb.tbExit||"");
@@ -4105,7 +4104,7 @@ async function findCandidates(){
 }
 
 // ─── CANDIDATE EXPLORER ────────────────────────────────────
-var _ceMap=null,_ceMarkers=[];
+var _ceMap=null,_ceMarkers=[],_ceRejectedExpanded=false;
 
 async function retryDiscoveryCandidates() {
   var existingReq = (_tb.candidates||[]).filter(function(c){ return c._required; });
@@ -4179,7 +4178,7 @@ async function geocodeMissingCandidates(missing, allCands) {
         match.lat = r.lat; match.lng = r.lng;
         // Add marker to map
         if (_ceMap && r.lat && r.lng) {
-          var mc = match.status==="keep"?"#2a7a4e":match.status==="maybe"?"#d97706":match.status==="reject"?"#888":"#1a5fa8";
+          var mc = match.status==="keep"?"#2a7a4e":match.status==="reject"?"#888":"#1a5fa8";
           var icon = L.divIcon({html:'<div style="background:'+mc+';color:#fff;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.25);">'+
             (match.place||"").substring(0,2)+'</div>',className:"",iconSize:[24,24],iconAnchor:[12,12]});
           var m = L.marker([r.lat, r.lng], {icon:icon});
@@ -4338,6 +4337,9 @@ function renderCandidateCards(cands){
       var match = _findMatchingRequired(c, _tb.requiredPlaces);
       if (match) { c._required=true; c._requiredFor=match.requiredFor||[]; }
     }
+    // Required candidates are kept by default — the user already decided
+    // by checking the must-do. They can still Reject to override.
+    if (c._required && !c.status) c.status = "keep";
   });
   // Sort: required candidates first, discovery candidates second. Stable within each group.
   cands.sort(function(a, b){
@@ -4345,8 +4347,12 @@ function renderCandidateCards(cands){
     var br = b._required ? 0 : 1;
     return ar - br;
   });
-  var hasRequired = cands.some(function(c){ return c._required; });
-  var hasDiscovery = cands.some(function(c){ return !c._required; });
+  // Split into active (not rejected) and rejected. Rejected render in a collapsible
+  // footer so the user's attention stays on places still requiring a decision.
+  var activeCands = cands.filter(function(c){ return c.status !== "reject"; });
+  var rejectedCands = cands.filter(function(c){ return c.status === "reject"; });
+  var hasRequired = activeCands.some(function(c){ return c._required; });
+  var hasDiscovery = activeCands.some(function(c){ return !c._required; });
   // Build a "if you want to [verb] X, Y, and Z, these stops are required" title
   // from the checked must-dos that have required places in kept candidates.
   // Verb picked from must-do type + name pattern (train/hike/museum/etc).
@@ -4444,27 +4450,14 @@ function renderCandidateCards(cands){
       reqTitle = "If you want to " + formatPhrases(phrases) + ", these stops are required";
     }
   } catch(e) { /* fall back to generic title */ }
-  cands.forEach(function(c){
-    // Insert dynamic section header before first required candidate
-    if (hasRequired && c._required && !seenReqHeader) {
-      seenReqHeader = true;
-      var reqLabel = document.createElement("div");
-      reqLabel.style.cssText = "padding:6px 4px 8px;font-size:11px;font-weight:600;color:#1a5fa8;line-height:1.5;";
-      reqLabel.textContent = reqTitle;
-      el.appendChild(reqLabel);
-    }
-    // Insert section divider before first non-required candidate
-    if (hasRequired && hasDiscovery && !c._required && !seenDivider) {
-      seenDivider = true;
-      var divider = document.createElement("div");
-      divider.style.cssText = "padding:12px 4px 6px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#111;margin-top:4px;border-top:1px solid #e8e8e8;";
-      divider.textContent = "Other places worth considering";
-      el.appendChild(divider);
-    }
+
+  // Extracted so we can render active cards inline and rejected cards inside a
+  // collapsible footer without duplicating the body.
+  function renderCard(c, container){
     var card=document.createElement("div");
     card.className="ce-card"+(c.status?" "+c.status:""); card.id="ce-card-"+c.id;
-    var sl=c.status==="keep"?"\u2713 Kept":c.status==="maybe"?"? Maybe":c.status==="reject"?"\u00d7 Rejected":"";
-    var sc=c.status==="keep"?"#2a7a4e":c.status==="maybe"?"#d97706":"#c05020";
+    var sl=c.status==="keep"?"\u2713 Kept":c.status==="reject"?"\u00d7 Rejected":"";
+    var sc=c.status==="keep"?"#2a7a4e":"#c05020";
     var isManual = c._requiredFor && c._requiredFor.length && c._requiredFor.every(function(r){return r==="__manual__";});
     var trainRefs = c._requiredFor ? c._requiredFor.filter(function(r){return r!=="__manual__";}) : [];
     var reqBadge = isManual
@@ -4486,20 +4479,18 @@ function renderCandidateCards(cands){
       +(c.tradeoffs?'<div class="ce-card-tradeoff">\u26a0 '+c.tradeoffs+'</div>':'')
       +'<div class="ce-card-actions">'
       +'<button class="ce-act keep'+(c.status==="keep"?" on":'')+'">\u2713 Keep</button>'
-      +'<button class="ce-act maybe-btn'+(c.status==="maybe"?" on":'')+'">\u003f Maybe</button>'
       +'<button class="ce-act reject'+(c.status==="reject"?" on":'')+'">\u00d7 Reject</button>'
       +'<button class="ce-act compare">\u21c4 Compare</button>'
       +'</div>';
     var btns=card.querySelectorAll(".ce-act");
     (function(cand){
       btns[0].onclick=function(){setCS(cand.id,"keep");};
-      btns[1].onclick=function(){setCS(cand.id,"maybe");};
-      btns[2].onclick=function(){setCS(cand.id,"reject");};
-      btns[3].onclick=function(){doCompare(cand.id);};
+      btns[1].onclick=function(){setCS(cand.id,"reject");};
+      btns[2].onclick=function(){doCompare(cand.id);};
     })(c);
-    el.appendChild(card);
+    container.appendChild(card);
     if(c.lat&&c.lng){
-      var mc=c.status==="keep"?"#2a7a4e":c.status==="maybe"?"#d97706":c.status==="reject"?"#888":"#1a5fa8";
+      var mc=c.status==="keep"?"#2a7a4e":c.status==="reject"?"#888":"#1a5fa8";
       var icon=L.divIcon({html:'<div style="background:'+mc+';color:#fff;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.25);">'+(c.place||"").substring(0,2)+'</div>',className:"",iconSize:[24,24],iconAnchor:[12,12]});
       var m=L.marker([c.lat,c.lng],{icon:icon});
       m.bindTooltip(c.place||"", {permanent:false,direction:"top",offset:[0,-14],className:"ce-map-tooltip"});
@@ -4507,7 +4498,6 @@ function renderCandidateCards(cands){
         var ce=g("ce-card-"+cand.id);
         if(ce){
           ce.scrollIntoView({behavior:"smooth",block:"nearest"});
-          // Flash highlight
           document.querySelectorAll(".ce-card.map-selected").forEach(function(el){el.classList.remove("map-selected");});
           ce.classList.add("map-selected");
           setTimeout(function(){ce.classList.remove("map-selected");},2500);
@@ -4516,7 +4506,50 @@ function renderCandidateCards(cands){
       m.addTo(_ceMap); _ceMarkers.push(m);
       bounds.push([c.lat,c.lng]);
     }
+  }
+
+  activeCands.forEach(function(c){
+    // Insert dynamic section header before first required candidate
+    if (hasRequired && c._required && !seenReqHeader) {
+      seenReqHeader = true;
+      var reqLabel = document.createElement("div");
+      reqLabel.style.cssText = "padding:6px 4px 8px;font-size:11px;font-weight:600;color:#1a5fa8;line-height:1.5;";
+      reqLabel.textContent = reqTitle;
+      el.appendChild(reqLabel);
+    }
+    // Insert section divider before first non-required candidate
+    if (hasRequired && hasDiscovery && !c._required && !seenDivider) {
+      seenDivider = true;
+      var divider = document.createElement("div");
+      divider.style.cssText = "padding:12px 4px 6px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#111;margin-top:4px;border-top:1px solid #e8e8e8;";
+      divider.textContent = "Other places worth considering";
+      el.appendChild(divider);
+    }
+    renderCard(c, el);
   });
+
+  // Collapsed rejected section — out of the way but one click to revisit
+  if (rejectedCands.length) {
+    var rejWrap = document.createElement("div");
+    rejWrap.style.cssText = "margin-top:14px;padding-top:10px;border-top:1px solid #eee;";
+    var rejToggle = document.createElement("div");
+    var rejExpanded = !!_ceRejectedExpanded;
+    rejToggle.style.cssText = "font-size:10px;font-weight:600;color:#888;cursor:pointer;padding:4px 4px;user-select:none;";
+    rejToggle.textContent = (rejExpanded?"\u25BE":"\u25B8")+"  "+rejectedCands.length+" rejected";
+    var rejList = document.createElement("div");
+    rejList.style.display = rejExpanded?"block":"none";
+    rejList.style.marginTop = "6px";
+    rejToggle.onclick = function(){
+      _ceRejectedExpanded = !_ceRejectedExpanded;
+      rejList.style.display = _ceRejectedExpanded?"block":"none";
+      rejToggle.textContent = (_ceRejectedExpanded?"\u25BE":"\u25B8")+"  "+rejectedCands.length+" rejected";
+    };
+    rejectedCands.forEach(function(c){ renderCard(c, rejList); });
+    rejWrap.appendChild(rejToggle);
+    rejWrap.appendChild(rejList);
+    el.appendChild(rejWrap);
+  }
+
   if(bounds.length>1) setTimeout(function(){try{_ceMap.fitBounds(bounds,{padding:[28,28]});}catch(e){}},150);
   updateCEShortlist();
   showCandidateDisclaimer();
@@ -4539,6 +4572,54 @@ function rIcon(r){
 function setCS(id,status){
   var c=(_tb.candidates||[]).find(function(x){return x.id===id;});
   if(!c) return;
+  // Guardrail: rejecting a required candidate means dropping the must-do(s) that required it.
+  // Warn the user and cascade the uncheck so the decision is coherent.
+  if (status === "reject" && c._required && c.status !== "reject") {
+    var realNames = (c._requiredFor||[]).filter(function(r){return r && r !== "__manual__";});
+    var hasManual = (c._requiredFor||[]).some(function(r){return r === "__manual__";});
+    var msg;
+    if (realNames.length && hasManual) {
+      msg = "Rejecting "+c.place+" will drop your must-dos: "+realNames.join(", ")+
+            " (and affects a must-see you added). Continue?";
+    } else if (realNames.length) {
+      msg = "Rejecting "+c.place+" will drop your must-dos: "+realNames.join(", ")+". Continue?";
+    } else if (hasManual) {
+      msg = c.place+" is a must-see you added. Reject anyway?";
+    } else {
+      msg = c.place+" is a required stop. Reject anyway?";
+    }
+    if (!confirm(msg)) return;
+    // Cascade: uncheck any _mdcItems whose name matches a real (non-manual) requiredFor entry.
+    // Manual items can't be mapped back by name, so they're left alone — the candidate is
+    // rejected regardless, and the user can uncheck the manual item from the must-do list.
+    if (realNames.length && typeof _mdcItems !== 'undefined' && _mdcItems) {
+      var nameSet = {};
+      realNames.forEach(function(n){ nameSet[n.toLowerCase()] = true; });
+      _mdcItems.forEach(function(m){
+        if (m.checked && m.name && nameSet[m.name.toLowerCase()]) {
+          m.checked = false;
+        }
+      });
+    }
+    // Clear the required flag on this candidate and on any other candidates whose
+    // _requiredFor only referenced these dropped must-dos, so the UI no longer
+    // claims they're required.
+    if (realNames.length) {
+      (_tb.candidates||[]).forEach(function(other){
+        if (!other._required) return;
+        var stillReq = (other._requiredFor||[]).filter(function(r){
+          if (r === "__manual__") return true; // manual items aren't affected here
+          return !nameSet[r.toLowerCase()];
+        });
+        if (!stillReq.length) {
+          other._required = false;
+          other._requiredFor = [];
+        } else {
+          other._requiredFor = stillReq;
+        }
+      });
+    }
+  }
   c.status=(c.status===status)?null:status;
   renderCandidateCards(_tb.candidates);
 }
@@ -4548,7 +4629,11 @@ function updateCEShortlist(){
   var kept=(_tb.candidates||[]).filter(function(c){return c.status==="keep";});
   var cnt=g("ce-cnt"); if(cnt) cnt.textContent=kept.length+" kept";
   var bb=g("ce-build-btn"); if(bb) bb.disabled=kept.length<1;
-  if(!kept.length){sl.innerHTML='<span class="ce-sl-empty">Keep places to add them here</span>';return;}
+  if(!kept.length){
+    sl.innerHTML='<span class="ce-sl-empty">Keep places to add them here</span>';
+    renderCEStayTotal(kept);
+    return;
+  }
   sl.innerHTML="";
   kept.forEach(function(c){
     var pill=document.createElement("div"); pill.className="ce-sl-pill";
@@ -4556,6 +4641,69 @@ function updateCEShortlist(){
     (function(cand){pill.querySelector(".ce-sl-pill-x").onclick=function(){setCS(cand.id,"keep");};})(c);
     sl.appendChild(pill);
   });
+  renderCEStayTotal(kept);
+}
+
+// Parse "3-4 nights" → {min:3, max:4}; "5 nights" → {min:5, max:5}
+function _parseNightRange(s){
+  if(!s) return null;
+  var m=s.match(/(\d+)\s*[\-\u2013\u2014]\s*(\d+)/);
+  if(m) return {min:parseInt(m[1]),max:parseInt(m[2])};
+  var m2=s.match(/(\d+)/);
+  if(m2){var n=parseInt(m2[1]);return {min:n,max:n};}
+  return null;
+}
+
+// Parse trip duration string — "10-14 days", "2 weeks", "10 days". Returns
+// {min,max} in days, or null if unparseable (e.g. "three weeks").
+function _parseTripDuration(s){
+  if(!s) return null;
+  var str=String(s).toLowerCase();
+  // Weeks: "2 weeks", "2-3 weeks"
+  var wk=str.match(/(\d+)\s*[\-\u2013\u2014]\s*(\d+)\s*week/);
+  if(wk) return {min:parseInt(wk[1])*7,max:parseInt(wk[2])*7};
+  var wk1=str.match(/(\d+)\s*week/);
+  if(wk1){var n=parseInt(wk1[1]);return {min:n*7,max:n*7};}
+  // Days: "10-14 days", "10 days"
+  var dr=str.match(/(\d+)\s*[\-\u2013\u2014]\s*(\d+)\s*(day|night)/);
+  if(dr) return {min:parseInt(dr[1]),max:parseInt(dr[2])};
+  var d1=str.match(/(\d+)\s*(day|night)/);
+  if(d1){var nd=parseInt(d1[1]);return {min:nd,max:nd};}
+  return null;
+}
+
+function renderCEStayTotal(kept){
+  var host=g("ce-stay-total");
+  if(!host){
+    // Inject a line below the shortlist container, once
+    var shortlist=document.querySelector(".ce-shortlist");
+    if(!shortlist) return;
+    host=document.createElement("div");
+    host.id="ce-stay-total";
+    host.style.cssText="font-size:10px;color:#888;margin-top:5px;line-height:1.4;";
+    shortlist.appendChild(host);
+  }
+  if(!kept.length){host.textContent=""; return;}
+  var min=0,max=0,allParsed=true;
+  kept.forEach(function(c){
+    var r=_parseNightRange(c.stayRange);
+    if(!r){allParsed=false;return;}
+    min+=r.min; max+=r.max;
+  });
+  if(!allParsed){host.textContent=""; return;}
+  var rangeStr=(min===max)?(min+" nights"):(min+"\u2013"+max+" nights");
+  var trip=_parseTripDuration(_tb.duration||"");
+  if(trip){
+    // Flag if shortlist already exceeds or undercuts the trip length meaningfully.
+    var over=min>trip.max;
+    var under=max<trip.min;
+    var color= over?"#c05020":(under?"#888":"#2a7a4e");
+    var tripStr=(trip.min===trip.max)?(trip.min+" days"):(trip.min+"\u2013"+trip.max+" days");
+    var note=over?" \u2014 over your trip length":(under?" \u2014 room for more":"");
+    host.innerHTML='<span style="color:'+color+';">Shortlist: '+rangeStr+'</span> \u00b7 Trip: '+tripStr+note;
+  } else {
+    host.textContent="Shortlist: "+rangeStr;
+  }
 }
 
 function cancelCandidateExplorer(){
@@ -4584,7 +4732,7 @@ function doCompare(id){
   if(!others.length){
     var tip=document.createElement("div");
     tip.style.cssText="position:fixed;bottom:70px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:7px 13px;border-radius:5px;font-size:11px;z-index:9999;pointer-events:none;";
-    tip.textContent="Keep or Maybe other places first to compare";
+    tip.textContent="Keep at least one other place to compare";
     document.body.appendChild(tip); setTimeout(function(){tip.remove();},2500);
     return;
   }
