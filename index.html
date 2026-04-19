@@ -56,9 +56,60 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 /* Trip mode */
 .tm-section{padding:12px 14px;border-bottom:1px solid #eee;}
 .tm-sec-title{font-size:14px;font-weight:700;color:#222;margin-bottom:8px;}
-.tm-dest{padding:10px 12px;border-radius:7px;border:1px solid #e8e8e8;background:#fff;margin-bottom:6px;cursor:pointer;}
+.tm-dest{padding:10px 12px;border-radius:7px;border:1px solid #e8e8e8;background:#fff;margin-bottom:6px;cursor:pointer;position:relative;transition:border-color .15s ease, background .15s ease, opacity .15s ease;}
 .tm-dest:hover{border-color:#bbb;background:#fafafa;}
 .tm-dest.active{border-color:#c8dff8;background:#eef5ff;}
+/* Drag and drop: only active on fine-pointer devices (desktop). Mobile uses the move button. */
+@media (pointer:fine){
+  .tm-dest[draggable="true"]{cursor:grab;}
+  .tm-dest[draggable="true"]:active{cursor:grabbing;}
+  .tm-dest.dragging{opacity:0.4;}
+  .tm-dest.drop-above::before{
+    content:"";position:absolute;top:-4px;left:0;right:0;height:3px;
+    background:#1a6fb0;border-radius:2px;pointer-events:none;
+    box-shadow:0 0 0 1px rgba(26,111,176,0.3);
+  }
+  .tm-dest.drop-below::after{
+    content:"";position:absolute;bottom:-4px;left:0;right:0;height:3px;
+    background:#1a6fb0;border-radius:2px;pointer-events:none;
+    box-shadow:0 0 0 1px rgba(26,111,176,0.3);
+  }
+}
+/* Grip icon indicates draggability — shown only on hover on desktop */
+.tm-drag-handle{
+  display:none;color:#bbb;font-size:12px;line-height:1;
+  padding:0 4px;cursor:grab;user-select:none;
+  flex-shrink:0;margin-right:2px;letter-spacing:-1px;
+}
+@media (pointer:fine){
+  .tm-dest:hover .tm-drag-handle{display:inline-block;}
+}
+.tm-drag-handle:active{cursor:grabbing;}
+/* Undo toast */
+.reorder-toast{
+  position:fixed;bottom:24px;left:50%;transform:translateX(-50%);
+  background:#2a2a2a;color:#fff;padding:10px 14px;border-radius:7px;
+  box-shadow:0 4px 16px rgba(0,0,0,0.2);
+  font-size:11px;display:flex;align-items:center;gap:12px;
+  z-index:9000;max-width:calc(100vw - 40px);
+  animation:reorder-toast-in 0.25s ease;
+}
+.reorder-toast-msg{line-height:1.5;}
+.reorder-toast-undo{
+  background:#fff;color:#111;border:none;border-radius:4px;
+  padding:5px 10px;font-size:11px;font-weight:600;cursor:pointer;
+  font-family:inherit;flex-shrink:0;
+}
+.reorder-toast-undo:hover{background:#f0f0f0;}
+.reorder-toast.fading{opacity:0;transition:opacity 0.4s ease;}
+@keyframes reorder-toast-in{
+  from{opacity:0;transform:translate(-50%,10px);}
+  to{opacity:1;transform:translate(-50%,0);}
+}
+@media (prefers-reduced-motion:reduce){
+  .reorder-toast{animation:none;}
+  .reorder-toast.fading{transition:none;}
+}
 .tm-dest-row{display:flex;align-items:flex-start;gap:4px;}
 .tm-dest-reorder{display:flex;flex-direction:column;flex-shrink:0;opacity:0;}
 .tm-dest:hover .tm-dest-reorder{opacity:1;}
@@ -7737,6 +7788,179 @@ function switchTab(destId, tab) {
 }
 
 // ── Trip mode renderer ─────────────────────────────────────
+// ── DRAG & DROP REORDER (desktop only — mobile uses the move button) ──────
+// State during a drag: which destination is being dragged, last relative position
+// on the hovered card, ref to the card that's currently showing a drop indicator.
+var _dragDestId = null;
+var _dragLastTarget = null;
+var _reorderUndoTimer = null;
+var _reorderUndoToast = null;
+
+function _wireDragHandlers(card, dest){
+  card.addEventListener("dragstart", function(e){
+    _dragDestId = dest.id;
+    card.classList.add("dragging");
+    // Use opacity-only effect; some browsers need dataTransfer to be set for drag to start
+    try { e.dataTransfer.setData("text/plain", dest.id); e.dataTransfer.effectAllowed = "move"; } catch(_){}
+    // Clear any pending undo toast — starting a new drag commits the previous one
+    _dismissReorderToast(true);
+  });
+
+  card.addEventListener("dragend", function(){
+    card.classList.remove("dragging");
+    _clearAllDropIndicators();
+    _dragDestId = null;
+    _dragLastTarget = null;
+  });
+
+  card.addEventListener("dragover", function(e){
+    if (!_dragDestId || _dragDestId === dest.id) return;
+    e.preventDefault();
+    try { e.dataTransfer.dropEffect = "move"; } catch(_){}
+    var rect = card.getBoundingClientRect();
+    var midpoint = rect.top + rect.height / 2;
+    var dropAbove = e.clientY < midpoint;
+    _clearAllDropIndicators();
+    card.classList.add(dropAbove ? "drop-above" : "drop-below");
+    _dragLastTarget = {card: card, dest: dest, above: dropAbove};
+  });
+
+  card.addEventListener("dragleave", function(e){
+    // Only clear if we're actually leaving the card (dragleave fires on child elements too)
+    if (e.currentTarget !== card) return;
+    // Check relatedTarget — if it's outside this card, clear; otherwise keep the indicator
+    if (!card.contains(e.relatedTarget)) {
+      card.classList.remove("drop-above");
+      card.classList.remove("drop-below");
+    }
+  });
+
+  card.addEventListener("drop", function(e){
+    if (!_dragDestId || _dragDestId === dest.id) return;
+    e.preventDefault();
+    var fromDest = (trip.destinations||[]).find(function(d){ return d.id === _dragDestId; });
+    if (!fromDest) return;
+    var fromIdx = trip.destinations.indexOf(fromDest);
+    var toIdx = trip.destinations.indexOf(dest);
+    // If dropping above target, insert at target's index; if below, insert at target+1.
+    var insertIdx = toIdx + (_dragLastTarget && _dragLastTarget.above ? 0 : 1);
+    _clearAllDropIndicators();
+    _executeReorder(fromDest, fromIdx, insertIdx);
+  });
+}
+
+function _clearAllDropIndicators(){
+  var cards = document.querySelectorAll(".tm-dest.drop-above, .tm-dest.drop-below");
+  for (var i = 0; i < cards.length; i++){
+    cards[i].classList.remove("drop-above");
+    cards[i].classList.remove("drop-below");
+  }
+}
+
+// Perform the reorder, save a snapshot for undo, and show a toast.
+// Uses executeMoveDest under the hood, which handles date reassignment and booking cleanup.
+function _executeReorder(fromDest, fromIdx, insertIdx){
+  if (fromIdx === insertIdx || fromIdx + 1 === insertIdx) return; // same spot
+  // Snapshot the trip destinations (shallow) and their bookings so undo can restore
+  var snapshot = {
+    order: trip.destinations.map(function(d){ return d.id; }),
+    // Deep-clone bookings + tracker state that executeMoveDest may mutate
+    perDest: trip.destinations.map(function(d){
+      return {
+        id: d.id,
+        dateFrom: d.dateFrom,
+        dateTo: d.dateTo,
+        hotelBookings: JSON.parse(JSON.stringify(d.hotelBookings||[])),
+        generalBookings: JSON.parse(JSON.stringify(d.generalBookings||[])),
+        pendingActions: JSON.parse(JSON.stringify(d.pendingActions||[])),
+        days: JSON.parse(JSON.stringify(d.days||[]))
+      };
+    }),
+    pendingActions: JSON.parse(JSON.stringify(trip.pendingActions||[]))
+  };
+
+  // Count bookings that will be cleared for the toast message
+  var clearedCount = 0;
+  var affectedDests = [fromDest];
+  // After move: re-check any dest whose dates overlap with fromDest's new slot
+  // Simple count: anything booked on fromDest itself
+  (fromDest.hotelBookings||[]).forEach(function(b){ if(b.status==="booked") clearedCount++; });
+  (fromDest.generalBookings||[]).forEach(function(b){ if(b.status==="booked") clearedCount++; });
+
+  // Use the existing executeMoveDest logic (handles date shift + booking invalidation)
+  // It expects fromIdx and a toIdx where toIdx is the position AFTER the move.
+  // Our insertIdx needs to be translated: if insertIdx > fromIdx, the effective toIdx
+  // is insertIdx - 1 (since removing fromDest shifts later indices down by one).
+  var effectiveToIdx = insertIdx > fromIdx ? insertIdx - 1 : insertIdx;
+  executeMoveDest(fromDest, fromIdx, effectiveToIdx);
+
+  // Show undo toast
+  _showReorderToast(fromDest, clearedCount, snapshot);
+}
+
+function _showReorderToast(movedDest, clearedCount, snapshot){
+  _dismissReorderToast(true); // clear any previous toast instantly
+
+  var toast = document.createElement("div");
+  toast.className = "reorder-toast";
+  var msg = document.createElement("div");
+  msg.className = "reorder-toast-msg";
+  var name = movedDest.label || movedDest.place;
+  msg.innerHTML = "Moved <strong>" + name + "</strong>"
+    + (clearedCount > 0 ? " \u2014 " + clearedCount + " booking" + (clearedCount!==1?"s":"") + " cleared" : "");
+  var undoBtn = document.createElement("button");
+  undoBtn.className = "reorder-toast-undo";
+  undoBtn.textContent = "Undo";
+  undoBtn.onclick = function(){
+    _restoreFromSnapshot(snapshot);
+    _dismissReorderToast(true);
+  };
+  toast.appendChild(msg);
+  toast.appendChild(undoBtn);
+  document.body.appendChild(toast);
+  _reorderUndoToast = toast;
+
+  // Auto-dismiss after 6 seconds
+  _reorderUndoTimer = setTimeout(function(){ _dismissReorderToast(false); }, 6000);
+}
+
+function _dismissReorderToast(immediate){
+  if (_reorderUndoTimer) { clearTimeout(_reorderUndoTimer); _reorderUndoTimer = null; }
+  if (!_reorderUndoToast) return;
+  var t = _reorderUndoToast;
+  _reorderUndoToast = null;
+  if (immediate) {
+    if (t.parentNode) t.parentNode.removeChild(t);
+  } else {
+    t.classList.add("fading");
+    setTimeout(function(){ if (t.parentNode) t.parentNode.removeChild(t); }, 450);
+  }
+}
+
+function _restoreFromSnapshot(snapshot){
+  if (!snapshot || !trip || !trip.destinations) return;
+  // Restore order
+  var byId = {};
+  trip.destinations.forEach(function(d){ byId[d.id] = d; });
+  var reordered = snapshot.order.map(function(id){ return byId[id]; }).filter(Boolean);
+  // Restore per-destination state
+  snapshot.perDest.forEach(function(saved){
+    var d = byId[saved.id];
+    if (!d) return;
+    d.dateFrom = saved.dateFrom;
+    d.dateTo = saved.dateTo;
+    d.hotelBookings = saved.hotelBookings;
+    d.generalBookings = saved.generalBookings;
+    d.pendingActions = saved.pendingActions;
+    d.days = saved.days;
+  });
+  trip.destinations = reordered;
+  trip.pendingActions = snapshot.pendingActions;
+  autoSave();
+  drawTripMode();
+  updateMainMap();
+}
+
 function showMoveDestDialog(dest){
   var fromIdx=trip.destinations.indexOf(dest);
   if(trip.destinations.length<2) return;
@@ -7894,9 +8118,15 @@ function drawTripMode(){
 
   trip.destinations.forEach(function(dest,idx){
     var card=document.createElement("div"); card.className="tm-dest"+(dest.id===activeDest?" active":""); card.setAttribute("data-id",dest.id);
+    // Draggable on fine-pointer devices (gate enforced by CSS). Listeners are safe on any device — they just won't fire without HTML5 DnD.
+    card.setAttribute("draggable", "true");
+    _wireDragHandlers(card, dest);
     // Body: name + optional label + dates
     var bodyDiv=document.createElement("div"); bodyDiv.className="tm-dest-body";
     var nameRow=document.createElement("div"); nameRow.className="tm-dest-actions";
+    // Drag grip icon — visible on hover, conveys draggability
+    var grip=document.createElement("span"); grip.className="tm-drag-handle"; grip.textContent="\u2807\u2807"; grip.title="Drag to reorder";
+    nameRow.appendChild(grip);
     var nameEl=document.createElement("div"); nameEl.className="tm-dest-name"; nameEl.style.flex="1"; nameEl.textContent=dest.label||dest.place;
     var renBtn=document.createElement("button"); renBtn.className="tm-rename-btn"; renBtn.textContent="rename"; renBtn.title="Rename destination";
     (function(d,nel){renBtn.onclick=function(e){e.stopPropagation();var inp=document.createElement("input");inp.className="tm-rename-inp";inp.value=d.label||d.place;nameRow.replaceChild(inp,nel);renBtn.style.display="none";inp.focus();inp.select();function sv(){var v=inp.value.trim();d.label=(v&&v!==d.place)?v:null;autoSave();drawTripMode();}inp.onblur=sv;inp.onclick=function(e2){e2.stopPropagation();};inp.onkeydown=function(e2){if(e2.key==="Enter")inp.blur();if(e2.key==="Escape"){inp.blur();}};};})(dest,nameEl);
