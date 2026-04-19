@@ -783,6 +783,10 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .mdc-loading{text-align:center;padding:48px 20px;color:#888;font-size:12px;}
 .mdc-item{border:1px solid #e8e8e8;border-radius:8px;background:#fff;margin-bottom:10px;overflow:hidden;transition:border-color .1s;}
 .mdc-item.checked{border-color:#111;}
+/* Release message: shown briefly when a must-do is unchecked, to signal which places just lost their 'required' status */
+.mdc-release-msg{animation:mdc-fade-in 0.3s ease;}
+@keyframes mdc-fade-in{from{opacity:0;transform:translateY(-3px);}to{opacity:1;transform:translateY(0);}}
+@media (prefers-reduced-motion:reduce){.mdc-release-msg{animation:none;}}
 .mdc-item-top{padding:12px 14px;display:flex;align-items:flex-start;gap:12px;cursor:pointer;}
 .mdc-check{width:18px;height:18px;border-radius:4px;border:1.5px solid #ccc;flex-shrink:0;margin-top:1px;display:flex;align-items:center;justify-content:center;transition:all .1s;}
 .mdc-item.checked .mdc-check{background:#111;border-color:#111;color:#fff;}
@@ -2512,6 +2516,7 @@ function renderMdcItemHtml(item) {
 function toggleMdcItem(id) {
   var item = _mdcItems.find(function(x){ return x.id===id; });
   if (!item) return;
+  var wasChecked = item.checked;
   item.checked = !item.checked;
   var div = document.getElementById("mdc-item-"+id);
   if (div) {
@@ -2519,6 +2524,50 @@ function toggleMdcItem(id) {
     var check = div.querySelector(".mdc-check");
     if (check) check.textContent = item.checked ? "\u2713" : "";
   }
+
+  // When unchecking: figure out which places just lost their "required" status
+  // (places that were required ONLY by this item). Show a brief signal.
+  if (wasChecked && !item.checked) {
+    var stillRequired = {};
+    _mdcItems.forEach(function(other){
+      if (other.checked && other.id !== id) {
+        (other.requiredPlaces||[]).forEach(function(p){
+          stillRequired[(p.place||"").toLowerCase()] = true;
+        });
+      }
+    });
+    var dropped = (item.requiredPlaces||[])
+      .map(function(p){ return p.place; })
+      .filter(function(place){
+        return place && !stillRequired[(place||"").toLowerCase()];
+      });
+    if (dropped.length > 0 && div) {
+      // Inline release message below the item's description
+      var msg = document.createElement("div");
+      msg.className = "mdc-release-msg";
+      msg.style.cssText = "font-size:10px;color:#888;font-style:italic;padding:4px 14px 8px;line-height:1.5;background:#fafafa;border-top:1px solid #f0f0f0;animation:mdc-fade-in 0.3s ease;";
+      msg.innerHTML = dropped.map(function(p){
+        return '<span style="text-decoration:line-through;color:#aaa;">' + p + '</span>';
+      }).join(', ') + ' \u2014 no longer required';
+      // Remove any existing release message on this item
+      var existing = div.querySelector(".mdc-release-msg");
+      if (existing) existing.remove();
+      div.appendChild(msg);
+      // Fade out after 4 seconds
+      setTimeout(function(){
+        msg.style.transition = "opacity 0.5s ease";
+        msg.style.opacity = "0";
+        setTimeout(function(){ if(msg.parentNode) msg.remove(); }, 500);
+      }, 4000);
+    }
+  } else if (!wasChecked && item.checked) {
+    // Re-checking: remove any lingering release message
+    if (div) {
+      var existingMsg = div.querySelector(".mdc-release-msg");
+      if (existingMsg) existingMsg.remove();
+    }
+  }
+
   updateMdcSummary();
 }
 
