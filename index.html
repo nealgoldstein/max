@@ -819,11 +819,8 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .mdc-add-input:focus{outline:none;border-color:#999;}
 .mdc-add-btn{font-size:11px;font-weight:600;padding:8px 14px;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;white-space:nowrap;}
 .mdc-item.manual .mdc-item-places{background:#f0f5ff;border-top-color:#c8d8f0;}
-.mdc-required-summary{background:#fff;border:1px solid #e8e8e8;border-radius:7px;padding:10px 12px;margin-bottom:10px;font-size:11px;line-height:1.6;}
-.mdc-req-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#aaa;margin-bottom:5px;}
-.mdc-req-places{display:flex;flex-wrap:wrap;gap:5px;align-items:center;}
+.mdc-req-places{display:flex;flex-wrap:wrap;gap:5px;align-items:center;line-height:1.6;}
 .mdc-req-place{font-size:11px;font-weight:600;padding:3px 9px;background:#111;color:#fff;border-radius:4px;}
-.mdc-req-arrow{color:#ccc;font-size:11px;}
 .mdc-req-empty{color:#bbb;font-style:italic;font-size:11px;}
 .mdc-overlay{position:fixed;inset:0;background:#f7f7f5;z-index:8500;display:flex;flex-direction:column;}
 .mdc-header{padding:16px 24px 0;flex-shrink:0;}
@@ -2441,6 +2438,7 @@ function showMustDoConfirmation(items) {
     +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="mdc-step">Step 1.5 of 3 \u00b7 Must-dos</div></div></div>'
     +'<div class="mdc-title" style="margin-top:8px;">Max understood your must-dos as:</div>'
     +'<div class="mdc-sub">Max expanded your must-dos into specific experiences. Each one requires certain stops \u2014 those become places Max will keep in mind. Uncheck anything that\u2019s wrong.</div>'
+    +'<div class="mdc-req-places" id="mdc-req-places" style="margin-top:10px;"><span class="mdc-req-empty">No items selected yet</span></div>'
     +'</div>'
     +'<div class="mdc-body" id="mdc-body">'
     +(!items ? '<div class="mdc-loading"><div style="font-size:20px;margin-bottom:8px;animation:spin 1s linear infinite;display:inline-block">\u2736</div><div>Interpreting your must-dos\u2026</div></div>' : '')
@@ -2451,7 +2449,6 @@ function showMustDoConfirmation(items) {
     +'<button class="mdc-add-btn" onclick="addManualMdcItem()">+ Add</button>'
     +'</div></div>'
     +'<div class="mdc-footer">'
-    +'<div class="mdc-required-summary" id="mdc-req-summary"><div class="mdc-req-label">Required stops from your selections</div><div class="mdc-req-places" id="mdc-req-places"><span class="mdc-req-empty">No items selected yet</span></div></div>'
     +'<button class="mdc-btn-primary" id="mdc-confirm-btn" onclick="confirmMustDos()" '+(!items?'disabled style="background:#ccc;cursor:not-allowed;"':'')+'>Places to think about \u2192</button>'
     +'<div class="mdc-skip" onclick="runCandidateSearch([])">Skip this step \u2192</div>'
     +'</div>';
@@ -2707,7 +2704,7 @@ function toggleMdcItem(id) {
 function updateMdcSummary() {
   var container = document.getElementById("mdc-req-places");
   if (!container) return;
-  // Collect unique required places from checked items in order
+  // Collect unique required places from checked items
   var seen = {};
   var places = [];
   _mdcItems.forEach(function(item) {
@@ -2720,9 +2717,8 @@ function updateMdcSummary() {
     container.innerHTML = '<span class="mdc-req-empty">No items selected yet</span>';
     return;
   }
-  container.innerHTML = places.map(function(p, i) {
-    return (i > 0 ? '<span class="mdc-req-arrow">\u2192</span>' : '')
-      + '<span class="mdc-req-place">' + p + '</span>';
+  container.innerHTML = places.map(function(p) {
+    return '<span class="mdc-req-place">' + p + '</span>';
   }).join('');
 }
 
