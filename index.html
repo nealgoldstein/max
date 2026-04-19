@@ -2445,7 +2445,7 @@ function showMustDoConfirmation(items) {
     +'<div style="padding:8px 24px 0;box-sizing:border-box;">'
     +'<div style="font-size:11px;color:#555;font-weight:600;margin-bottom:4px;">Add any other places you must go to</div>'
     +'<div class="mdc-add-row" style="box-sizing:border-box;margin-top:0;padding-top:0;">'
-    +'<input class="mdc-add-input" id="mdc-add-inp" placeholder="e.g. Appenzell" onkeydown="if(event.key===&#39;Enter&#39;)addManualMdcItem()" style="min-width:0;" />'
+    +'<input class="mdc-add-input" id="mdc-add-inp" placeholder="e.g. Appenzell" autocomplete="off" onkeydown="if(event.key===&#39;Enter&#39;)addManualMdcItem()" style="min-width:0;" />'
     +'<button class="mdc-add-btn" onclick="addManualMdcItem()">+ Add</button>'
     +'</div>'
     +'<div class="mdc-req-places" id="mdc-req-places" style="margin-top:14px;"><span class="mdc-req-empty">No items selected yet</span></div>'
@@ -2562,6 +2562,9 @@ async function addManualMdcItem() {
   if (!inp) return;
   var val = inp.value.trim();
   if (!val) return;
+  // Title-case the first letter of each word so "appenzell" → "Appenzell",
+  // "st. moritz" → "St. Moritz". Respects existing caps (so "StMoritz" stays as typed).
+  val = val.replace(/\b([a-z])/g, function(_, c){ return c.toUpperCase(); });
   inp.value = "";
 
   var id = "md-manual-" + Date.now();
