@@ -822,12 +822,12 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .mdc-req-places{display:flex;flex-wrap:wrap;gap:5px;align-items:center;line-height:1.6;}
 .mdc-req-place{font-size:11px;font-weight:600;padding:3px 9px;background:#111;color:#fff;border-radius:4px;}
 .mdc-req-empty{color:#bbb;font-style:italic;font-size:11px;}
-.mdc-overlay{position:fixed;inset:0;background:#f7f7f5;z-index:8500;display:flex;flex-direction:column;}
-.mdc-header{padding:16px 24px 0;flex-shrink:0;}
+.mdc-overlay{position:fixed;inset:0;background:#f7f7f5;z-index:8500;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+.mdc-header{padding:16px 24px 0;}
 .mdc-step{font-size:10px;color:#aaa;letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px;}
 .mdc-title{font-size:18px;font-weight:700;color:#111;margin-bottom:4px;}
 .mdc-sub{font-size:11px;color:#888;line-height:1.5;}
-.mdc-body{flex:1;overflow-y:auto;padding:16px 24px 0;}
+.mdc-body{padding:16px 24px 0;}
 .mdc-loading{text-align:center;padding:48px 20px;color:#888;font-size:12px;}
 .mdc-item{border:1px solid #e8e8e8;border-radius:8px;background:#fff;margin-bottom:10px;overflow:hidden;transition:border-color .1s;}
 .mdc-item.checked{border-color:#111;}
@@ -845,7 +845,7 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .mdc-places-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
 .mdc-place{font-size:11px;font-weight:600;padding:4px 10px;border-radius:5px;background:#111;color:#fff;}
 .mdc-place-arrow{color:#aaa;font-size:12px;}
-.mdc-footer{padding:14px 24px 20px;flex-shrink:0;border-top:1px solid #eee;background:#f7f7f5;}
+.mdc-footer{padding:14px 24px 20px;position:sticky;bottom:0;border-top:1px solid #eee;background:#f7f7f5;}
 .mdc-btn-primary{width:100%;padding:10px;font-size:12px;font-weight:600;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;}
 .mdc-skip{font-size:10px;color:#aaa;text-align:center;margin-top:7px;cursor:pointer;}
 
@@ -2436,19 +2436,19 @@ function showMustDoConfirmation(items) {
   ov.className = "mdc-overlay";
   ov.innerHTML = '<div class="mdc-header">'
     +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="mdc-step">Step 1.5 of 3 \u00b7 Must-dos</div></div></div>'
-    +'<div class="mdc-title" style="margin-top:8px;">Max understood your must-dos as:</div>'
-    +'<div class="mdc-sub">Max expanded your must-dos into specific experiences that require certain stops \u2014 those become places Max will keep in mind. Uncheck anything that doesn\u2019t work for you.</div>'
-    +'<div class="mdc-req-places" id="mdc-req-places" style="margin-top:10px;"><span class="mdc-req-empty">No items selected yet</span></div>'
+    +'<div class="mdc-title" style="margin-top:8px;">Based on what you have told me, these are the destinations you should consider.</div>'
+    +'<div class="mdc-sub">Uncheck anything that doesn\u2019t work for you.</div>'
     +'</div>'
     +'<div class="mdc-body" id="mdc-body">'
     +(!items ? '<div class="mdc-loading"><div style="font-size:20px;margin-bottom:8px;animation:spin 1s linear infinite;display:inline-block">\u2736</div><div>Interpreting your must-dos\u2026</div></div>' : '')
     +'</div>'
-    +'<div style="padding:8px 24px 0;flex-shrink:0;box-sizing:border-box;">'
+    +'<div style="padding:8px 24px 0;box-sizing:border-box;">'
     +'<div style="font-size:11px;color:#555;font-weight:600;margin-bottom:4px;">Add any other places you must go to</div>'
     +'<div class="mdc-add-row" style="box-sizing:border-box;margin-top:0;padding-top:0;">'
     +'<input class="mdc-add-input" id="mdc-add-inp" placeholder="e.g. Appenzell" onkeydown="if(event.key===&#39;Enter&#39;)addManualMdcItem()" style="min-width:0;" />'
     +'<button class="mdc-add-btn" onclick="addManualMdcItem()">+ Add</button>'
     +'</div>'
+    +'<div class="mdc-req-places" id="mdc-req-places" style="margin-top:14px;"><span class="mdc-req-empty">No items selected yet</span></div>'
     +'<div id="mdc-closing" style="font-size:11px;color:#666;line-height:1.55;margin-top:12px;">'
     +'I\u2019ll include these stops with other recommendations and give you a complete list of places to consider.'
     +'</div>'
@@ -2458,19 +2458,6 @@ function showMustDoConfirmation(items) {
     +'<div class="mdc-skip" onclick="runCandidateSearch([])">Skip this step \u2192</div>'
     +'</div>';
   document.body.appendChild(ov);
-
-  // Fix flex height collapse so body scrolls and footer stays visible
-  setTimeout(function(){
-    var o=document.getElementById("mdc-overlay");
-    if(!o) return;
-    var h=o.querySelector(".mdc-header");
-    var f=o.querySelector(".mdc-footer");
-    var b=document.getElementById("mdc-body");
-    var addWrap=o.querySelector(".mdc-add-row");
-    var addH=addWrap?addWrap.parentNode.offsetHeight+4:0;
-    var avail=window.innerHeight-(h?h.offsetHeight:110)-(f?f.offsetHeight:170)-addH;
-    if(b){b.style.height=Math.max(avail,100)+"px";b.style.flex="none";b.style.overflowY="auto";}
-  },60);
 
   if (items) renderMustDoItems(items);
 }
