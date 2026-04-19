@@ -7624,6 +7624,29 @@ function drawTripMode(){
     var dates=document.createElement("div"); dates.className="tm-dest-dates";
     dates.textContent=fmtD(dest.dateFrom)+" \u2013 "+fmtD(dest.dateTo)+" ("+dest.nights+" night"+(dest.nights!==1?"s":"")+")";
     bodyDiv.appendChild(dates);
+
+    // Required-for badges: show which must-do routes this destination is an endpoint for
+    // (reads from attachedEvents computed at trip build time)
+    if(dest.attachedEvents && dest.attachedEvents.length){
+      var evRow=document.createElement("div");
+      evRow.style.cssText="display:flex;flex-wrap:wrap;gap:4px;margin-top:5px;";
+      dest.attachedEvents.forEach(function(ev){
+        if(!ev || !ev.name) return;
+        var isCondition = ev.type === "condition";
+        var isManual = ev.type === "manual" || ev.name === "__manual__";
+        if(isManual) return; // don't show manual markers as badges
+        var chip=document.createElement("div");
+        var icon = isCondition ? "\u2728" : "\uD83D\uDE82";
+        var color = isCondition ? "#b05820" : "#1a5fa8";
+        var bg    = isCondition ? "#fff8f0" : "#e8f0fc";
+        var border= isCondition ? "#f0dcc0" : "#c8d8f0";
+        chip.style.cssText="font-size:9px;font-weight:600;color:"+color+";background:"+bg+";border:1px solid "+border+";padding:2px 7px;border-radius:10px;display:inline-flex;align-items:center;gap:4px;";
+        chip.innerHTML = icon + " " + ev.name;
+        if(ev.description) chip.title = ev.description;
+        evRow.appendChild(chip);
+      });
+      if(evRow.children.length) bodyDiv.appendChild(evRow);
+    }
     card.appendChild(bodyDiv);
     // Show generating indicator for unknown cities
     var genData=_generatedCityData[dest.place.toLowerCase()];
