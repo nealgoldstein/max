@@ -2075,9 +2075,91 @@ function selectTrip(id){
   }
 }
 
+// One-time migration: pull car rentals out of the legacy trip.logistics.carRentals
+// array and turn each one into Tracker items on the destination where pickup happens.
+// Runs on every trip load but only migrates if _rentalsMigrated flag is unset.
+function migrateCarRentalsIntoTracker(){
+  if(!trip || !trip.logistics || !trip.logistics.carRentals) return;
+  if(trip._rentalsMigrated) return;
+  var rentals = trip.logistics.carRentals;
+  if(!rentals.length) { trip._rentalsMigrated = true; return; }
+
+  var migrated = 0;
+  rentals.forEach(function(r){
+    if(!r || (!r.pickupLocation && !r.company)) return; // skip empty rows
+    // Try to match pickup location to a destination by place name (case-insensitive substring)
+    var pickupLC = (r.pickupLocation||"").toLowerCase().trim();
+    var returnLC = (r.returnLocation||"").toLowerCase().trim();
+    function findDestByPlace(nameLC){
+      if(!nameLC) return null;
+      return (trip.destinations||[]).find(function(d){
+        var dp = (d.place||"").toLowerCase();
+        return dp && (dp.indexOf(nameLC) >= 0 || nameLC.indexOf(dp) >= 0);
+      });
+    }
+    var pickupDest = findDestByPlace(pickupLC);
+    var returnDest = findDestByPlace(returnLC);
+
+    // Build a pickup tracker item string
+    if(pickupDest){
+      if(!pickupDest.trackerItems) pickupDest.trackerItems = {booked:[],see:[],visited:[]};
+      var parts = ["\uD83D\uDE97 Car rental pickup"];
+      if(r.company) parts.push(r.company);
+      if(r.carType) parts.push("(" + r.carType + ")");
+      if(r.pickupDate) parts.push("\u2014 " + r.pickupDate);
+      var pickupStr = parts.join(" ");
+      // Avoid duplicate on repeated loads
+      if(pickupDest.trackerItems.booked.indexOf(pickupStr) === -1){
+        pickupDest.trackerItems.booked.push(pickupStr);
+        migrated++;
+      }
+    }
+
+    // Build a return tracker item on the return destination (if different from pickup)
+    if(returnDest && returnDest !== pickupDest){
+      if(!returnDest.trackerItems) returnDest.trackerItems = {booked:[],see:[],visited:[]};
+      var retParts = ["\uD83D\uDE97 Car rental return"];
+      if(r.company) retParts.push(r.company);
+      if(r.returnDate) retParts.push("\u2014 " + r.returnDate);
+      var returnStr = retParts.join(" ");
+      if(returnDest.trackerItems.booked.indexOf(returnStr) === -1){
+        returnDest.trackerItems.booked.push(returnStr);
+        migrated++;
+      }
+    }
+
+    // If neither matched, fall back to adding to the first destination with a note about the pickup location
+    if(!pickupDest && !returnDest && trip.destinations && trip.destinations.length){
+      var first = trip.destinations[0];
+      if(!first.trackerItems) first.trackerItems = {booked:[],see:[],visited:[]};
+      var orphanParts = ["\uD83D\uDE97 Car rental"];
+      if(r.company) orphanParts.push(r.company);
+      if(r.pickupLocation) orphanParts.push("pickup " + r.pickupLocation);
+      if(r.pickupDate) orphanParts.push(r.pickupDate);
+      if(r.returnLocation && r.returnLocation !== r.pickupLocation) orphanParts.push("\u2192 return " + r.returnLocation);
+      if(r.returnDate) orphanParts.push(r.returnDate);
+      var orphanStr = orphanParts.join(" ");
+      if(first.trackerItems.booked.indexOf(orphanStr) === -1){
+        first.trackerItems.booked.push(orphanStr);
+        migrated++;
+      }
+    }
+  });
+
+  trip._rentalsMigrated = true;
+  if(migrated > 0){
+    console.log("Migrated " + migrated + " car rental item(s) into Tracker");
+    if(typeof autoSave === "function") autoSave();
+  }
+}
+
 function enterApp(){
   // Restore _mdcItems from saved trip for route sequencing
   if(trip && trip.mdcItems) _mdcItems = trip.mdcItems;
+  // One-time migration: convert legacy trip.logistics.carRentals into Tracker items
+  // on the destination where pickup happens. The retired logistics screen used to
+  // handle this; Tracker items are the new home.
+  migrateCarRentalsIntoTracker();
   g("home-screen").style.display="none";
   g("app").style.display="flex";
   var tn=g("trip-name-display"); if(tn){
