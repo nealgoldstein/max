@@ -1254,12 +1254,12 @@ async function saveTrip(){
   }
 }
 
-// Essentials (ATMs, groceries, tourist info, pharmacies) are now pulled from
+// Essentials (ATMs, banks, groceries, tourist info, pharmacies) are now pulled from
 // generateCityData and live on dest.suggestions. Transit/arrival/departure pins
 // come from getArrivalDeparture + getCityTransitHub (generated transitHub field).
 var _map1=null,_map2=null,_syncFlag=false,_mapDestId=null;
 var _mapLayers={};   // type -> {group1, group2}
-var _activeLayers={all:true,sights:true,stay:true,routing:true,atm:true,grocery:true,"tourist-info":true,pharmacy:true,transit:true};
+var _activeLayers={all:true,sights:true,stay:true,routing:true,atm:true,bank:true,grocery:true,"tourist-info":true,pharmacy:true,transit:true};
 
 var MAP_LAYER_DEFS=[
   {id:"all",lbl:"All"},
@@ -1267,6 +1267,7 @@ var MAP_LAYER_DEFS=[
   {id:"stay",lbl:"Stay"},
   {id:"routing",lbl:"Getting here"},
   {id:"atm",lbl:"ATMs"},
+  {id:"bank",lbl:"Banks"},
   {id:"grocery",lbl:"Grocery"},
   {id:"tourist-info",lbl:"Tourist info"},
   {id:"pharmacy",lbl:"Pharmacy"},
@@ -1324,6 +1325,19 @@ var MAP_ICONS = {
     return '<svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg">'
       +'<circle cx="14" cy="14" r="13" fill="#2a7a4e" stroke="#fff" stroke-width="2"/>'
       +'<text x="14" y="19" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="bold" fill="#fff">$</text>'
+      +'</svg>';
+  },
+  "bank": function(){
+    // Dark teal circle with a small columned-building glyph — distinct from ATM $ icon
+    return '<svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg">'
+      +'<circle cx="14" cy="14" r="13" fill="#0f5f5a" stroke="#fff" stroke-width="2"/>'
+      +'<path d="M7 11 L14 7 L21 11 Z" fill="#fff"/>'
+      +'<rect x="7" y="11" width="14" height="1.5" fill="#fff"/>'
+      +'<rect x="8" y="13" width="1.5" height="6" fill="#fff"/>'
+      +'<rect x="11.5" y="13" width="1.5" height="6" fill="#fff"/>'
+      +'<rect x="15" y="13" width="1.5" height="6" fill="#fff"/>'
+      +'<rect x="18.5" y="13" width="1.5" height="6" fill="#fff"/>'
+      +'<rect x="7" y="19.5" width="14" height="1.5" fill="#fff"/>'
       +'</svg>';
   },
   "grocery": function(){
@@ -1441,6 +1455,7 @@ var LAYER_ICON_KEY={
   "stay":"stay",
   "routing":"arrival",
   "atm":"atm",
+  "bank":"bank",
   "grocery":"grocery",
   "tourist-info":"tourist-info",
   "pharmacy":"pharmacy",
@@ -1581,7 +1596,7 @@ function collectMapLocations(dest){
   getArrivalDeparture(dest).forEach(function(l){locs.push(l);});
   // Essentials (atm/grocery/tourist-info/pharmacy) now live on dest.suggestions,
   // populated by generateCityData and geocoded via Nominatim.
-  var essentialTypes=["atm","grocery","tourist-info","pharmacy"];
+  var essentialTypes=["atm","bank","grocery","tourist-info","pharmacy"];
   var essentials=(dest.suggestions||[]).filter(function(s){
     return essentialTypes.indexOf(s.type)>-1 && s.lat && s.lng;
   }).map(function(s){
@@ -1658,7 +1673,7 @@ function openMap(destId){
   var dest=getDest(destId); if(!dest)return;
   _mapDestId=destId;
   g("map-dest-lbl").textContent=dest.place+" \u00b7 "+fmtD(dest.dateFrom)+" \u2013 "+fmtD(dest.dateTo);
-  _activeLayers={all:true,sights:true,stay:true,routing:true,atm:true,grocery:true,"tourist-info":true,pharmacy:true,transit:true};
+  _activeLayers={all:true,sights:true,stay:true,routing:true,atm:true,bank:true,grocery:true,"tourist-info":true,pharmacy:true,transit:true};
   renderLayerToggles();
   g("map-overlay").style.display="flex";
   // Leaflet needs the container visible before init
@@ -5210,7 +5225,8 @@ function showMapPinPanel(item,dest,itemType,mapEvent){
   var typeEl=document.createElement('div'); typeEl.className='mpp-type';
   var typeLabels={'restaurant-suggestion':'Restaurant — not scheduled',
     'suggestion':'Sight — not scheduled','restaurant':'Restaurant',
-    'sight':'Sight','hotel':'Hotel','info':'Location','transit':'Transit','atm':'ATM','grocery':'Grocery'};
+    'sight':'Sight','hotel':'Hotel','info':'Location','transit':'Transit',
+    'atm':'ATM','bank':'Bank','grocery':'Grocery','tourist-info':'Tourist info','pharmacy':'Pharmacy'};
   typeEl.textContent=typeLabels[itemType]||itemType||'Location';
   cont.appendChild(typeEl);
   var nameEl=document.createElement('div'); nameEl.className='mpp-name'; nameEl.textContent=item.n||item.name||'';
@@ -5295,7 +5311,7 @@ function ensureSuggestions(dest){
 
 async function fetchCityMeta(dest){
   // Fills in missing districts/practicalInfo/transitHub/essentials for saved generated cities
-  var hasEssentials=(dest.suggestions||[]).some(function(s){return ["atm","grocery","tourist-info","pharmacy"].indexOf(s.type)>-1;});
+  var hasEssentials=(dest.suggestions||[]).some(function(s){return ["atm","bank","grocery","tourist-info","pharmacy"].indexOf(s.type)>-1;});
   if(dest.generatedDistricts&&dest.generatedPracticalInfo&&hasEssentials) return; // already have it
   var lockKey='_metaLoading_'+dest.id;
   if(window[lockKey]) return;
@@ -5305,8 +5321,8 @@ async function fetchCityMeta(dest){
       '{"districts":[{"name":"...","good":"...","bad":"...","hotels":[{"name":"...","desc":"...","price":"...","tier":2}]}],'+
       '"practicalInfo":{"currency":"...","tipping":"...","note":"...","emergency":"..."},'+
       '"transitHub":{"arrival":{"name":"...","lat":0,"lng":0},"departure":{"name":"...","lat":0,"lng":0}},'+
-      '"essentials":{"atms":[{"name":"...","note":"..."}],"groceries":[{"name":"...","note":"..."}],"touristInfo":[{"name":"...","note":"..."}],"pharmacies":[{"name":"...","note":"..."}]}}\n'+
-      '2-3 districts with 1-2 hotels each. Essentials are ALL required — do not omit any field. Include 2-3 ATMs, 2-3 groceries, 1 tourist info, AND 1-2 pharmacies (chemists / drugstores / Apotheke / farmacia / pharmacie — whatever the local term). Real named places. Be specific.';
+      '"essentials":{"atms":[{"name":"...","note":"..."}],"banks":[{"name":"...","note":"..."}],"groceries":[{"name":"...","note":"..."}],"touristInfo":[{"name":"...","note":"..."}],"pharmacies":[{"name":"...","note":"..."}]}}\n'+
+      '2-3 districts with 1-2 hotels each. Essentials are ALL required — do not omit any field. Include 2-3 ATMs, 1-2 banks (named branches — UBS, Raiffeisen, Barclays, BNP, etc. — whatever operates locally), 2-3 groceries, 1 tourist info, AND 1-2 pharmacies (chemists / drugstores / Apotheke / farmacia / pharmacie — whatever the local term). Real named places. Be specific.';
     var text=await callMax([{role:'user',content:prompt}],1800);
     var json=text.replace(/```json\s*/g,'').replace(/```\s*/g,'').trim();
     var s=json.indexOf('{'),e=json.lastIndexOf('}');
@@ -5348,6 +5364,7 @@ function mergeEssentialsIntoSuggestions(dest,essentials){
     });
   }
   push("atm",essentials.atms);
+  push("bank",essentials.banks);
   push("grocery",essentials.groceries);
   push("tourist-info",essentials.touristInfo);
   push("pharmacy",essentials.pharmacies);
@@ -5355,7 +5372,7 @@ function mergeEssentialsIntoSuggestions(dest,essentials){
 
 // Geocode any essential-type suggestion that's still approx via Nominatim (throttled).
 async function geocodeEssentials(dest){
-  var types=["atm","grocery","tourist-info","pharmacy"];
+  var types=["atm","bank","grocery","tourist-info","pharmacy"];
   var pending=(dest.suggestions||[]).filter(function(s){
     return types.indexOf(s.type)>-1 && s.approx;
   });
@@ -5397,7 +5414,7 @@ async function generateCityData(place,destId){
 
   showSaveStatus('Max is generating '+place+' data\u2026',60000);
 
-  var prompt='Generate travel data for '+place+'. Return ONLY valid JSON, no markdown:\n{"cityCenter":[lat,lng],"sights":[{"name":"...","st":"...","desc":"one sentence"}],"districts":[{"name":"...","good":"...","bad":"...","hotels":[{"name":"...","desc":"...","price":"...","tier":2}]}],"practicalInfo":{"currency":"...","tipping":"...","note":"...","emergency":"..."},"transitHub":{"arrival":{"name":"...","lat":0,"lng":0},"departure":{"name":"...","lat":0,"lng":0}},"essentials":{"atms":[{"name":"...","note":"..."}],"groceries":[{"name":"...","note":"..."}],"touristInfo":[{"name":"...","note":"..."}],"pharmacies":[{"name":"...","note":"..."}]}}\n6-8 sights, 2 districts, 1-2 hotels each. Essentials are ALL required — do not omit any field. Include 2-3 ATMs, 2-3 groceries, 1 tourist info, AND 1-2 pharmacies (chemists / drugstores / Apotheke / farmacia / pharmacie — whatever the local term). Real named places. Be concise.';
+  var prompt='Generate travel data for '+place+'. Return ONLY valid JSON, no markdown:\n{"cityCenter":[lat,lng],"sights":[{"name":"...","st":"...","desc":"one sentence"}],"districts":[{"name":"...","good":"...","bad":"...","hotels":[{"name":"...","desc":"...","price":"...","tier":2}]}],"practicalInfo":{"currency":"...","tipping":"...","note":"...","emergency":"..."},"transitHub":{"arrival":{"name":"...","lat":0,"lng":0},"departure":{"name":"...","lat":0,"lng":0}},"essentials":{"atms":[{"name":"...","note":"..."}],"banks":[{"name":"...","note":"..."}],"groceries":[{"name":"...","note":"..."}],"touristInfo":[{"name":"...","note":"..."}],"pharmacies":[{"name":"...","note":"..."}]}}\n6-8 sights, 2 districts, 1-2 hotels each. SIGHTS must be real cultural, historical, architectural, or natural attractions a tourist visits for the experience — museums, churches, landmarks, viewpoints, gondolas, trails, squares, gardens, ruins. Do NOT include hotels, spa retreats, wellness retreats, lodges, banks, ATMs, pharmacies, grocery stores, or other everyday services as sights — those belong in hotels or essentials, not sights. Essentials are ALL required — do not omit any field. Include 2-3 ATMs, 1-2 banks (named branches — UBS, Raiffeisen, Barclays, BNP, etc. — whatever operates locally), 2-3 groceries, 1 tourist info, AND 1-2 pharmacies (chemists / drugstores / Apotheke / farmacia / pharmacie — whatever the local term). Real named places. Be concise.';
 
   try{
     // Add 30 second timeout to generation
@@ -7518,7 +7535,7 @@ function drawExecMode(dest){
       marker.bindPopup(popupHtml).addTo(_exMapInstance);
     });
     // Essentials (from dest.suggestions)
-    var essentialTypes=["atm","grocery","tourist-info","pharmacy"];
+    var essentialTypes=["atm","bank","grocery","tourist-info","pharmacy"];
     (dest.suggestions||[]).filter(function(s){return essentialTypes.indexOf(s.type)>-1&&s.lat&&s.lng;}).forEach(function(loc){
       var icon=makeMapIcon(loc.type);
       L.marker([loc.lat,loc.lng],{icon:icon}).bindPopup(makePopup(loc.n,loc.type.replace("-"," "),loc.note||"")).addTo(_exMapInstance);
@@ -8299,13 +8316,15 @@ function buildExplorePane(dest){
   };})(dest,sRef);
   sHdr.appendChild(sLbl); sHdr.appendChild(sRef); sightsSec.appendChild(sHdr);
 
+  // Only true sights belong in Explore — essentials (atm/grocery/tourist-info/pharmacy/bank) live in the Practical section under Info
+  var sightOnly=dest.suggestions.filter(function(s){return s.type==="sight";});
   if(isGen){
     var genMsg=document.createElement("div"); genMsg.className="exp-generating";
     genMsg.textContent="Max is generating suggestions for "+dest.place+"\u2026"; sightsSec.appendChild(genMsg);
-  } else if(dest.suggestions.length===0){
+  } else if(sightOnly.length===0){
     var emp=document.createElement("div"); emp.className="exp-empty"; emp.textContent="No suggestions yet \u2014 click Refresh to generate."; sightsSec.appendChild(emp);
   } else {
-    dest.suggestions.forEach(function(s){
+    sightOnly.forEach(function(s){
       sightsSec.appendChild(mkExploreSuggestion(s,dest,"sight"));
     });
   }
@@ -9359,6 +9378,7 @@ function drawDestMode(destId){
   // PRACTICAL — on-the-ground essentials from dest.suggestions
   var practicalGroups=[
     {type:"atm",lbl:"ATMs"},
+    {type:"bank",lbl:"Banks"},
     {type:"grocery",lbl:"Groceries"},
     {type:"tourist-info",lbl:"Tourist info"},
     {type:"pharmacy",lbl:"Pharmacies"}
@@ -9384,7 +9404,8 @@ function drawDestMode(destId){
       sec.appendChild(sLbl);
       items.forEach(function(it){
         var row=document.createElement("div");
-        row.style.cssText="font-size:12px;color:#222;margin:3px 0 3px 4px;line-height:1.4;";
+        var hasCoords=it.lat&&it.lng;
+        row.style.cssText="font-size:12px;color:#222;margin:3px 0 3px 4px;line-height:1.4;padding:3px 5px;border-radius:4px;"+(hasCoords?"cursor:pointer;":"");
         var nm=document.createElement("span");
         nm.style.cssText="font-weight:500;";
         nm.textContent=it.n;
@@ -9394,6 +9415,23 @@ function drawDestMode(destId){
           nt.style.cssText="color:#666;";
           nt.textContent=" \u2014 "+it.note;
           row.appendChild(nt);
+        }
+        if(hasCoords){
+          row.onmouseover=function(){row.style.background="#f5f5f5";};
+          row.onmouseout=function(){row.style.background="";};
+          (function(item,d){row.onclick=function(){
+            if(_mainMap){_mainMap.setView([item.lat,item.lng],16,{animate:true});}
+            setTimeout(function(){
+              if(!_mainMap) return;
+              var pt=_mainMap.latLngToContainerPoint([item.lat,item.lng]);
+              showMapPinPanel(
+                {id:item.id,n:item.n,note:item.note||'',done:false,slot:'day'},
+                d,
+                'info',
+                {containerPoint:pt}
+              );
+            },300);
+          };})(it,dest);
         }
         sec.appendChild(row);
       });
