@@ -7731,7 +7731,22 @@ function drawTripMode(){
           }
         });
       } else {
-        var unk=document.createElement("span"); unk.style.cssText="font-size:10px;color:#aaa;"; unk.textContent="\u2194 route unknown";
+        // Check if a fetch is in flight for this pair
+        var _legKey = [dest.place.toLowerCase(), next.place.toLowerCase()].sort().join("|");
+        var _isFetching = _routingFetchInFlight[_legKey];
+        var _cachedFail = trip._routingCache && trip._routingCache[_legKey] && trip._routingCache[_legKey]._failed;
+        var unk=document.createElement("span");
+        if(_isFetching){
+          unk.className="max-thinking";
+          unk.style.cssText="font-size:10px;color:#888;";
+          unk.textContent="\u21c4 finding options\u2026";
+        } else if(_cachedFail){
+          unk.style.cssText="font-size:10px;color:#aaa;";
+          unk.textContent="\u2194 route unknown";
+        } else {
+          unk.style.cssText="font-size:10px;color:#aaa;";
+          unk.textContent="\u2194 route unknown";
+        }
         row.appendChild(unk);
       }
 
@@ -10138,7 +10153,65 @@ function getRouting(fromPlace, toPlace){
       {icon:"\uD83D\uDE97",name:"Drive",meta:"1h 30m",note:"Scenic route via Bern. Easy if you have a car.",book:null}
     ]}
   };
-  return R[key]||null;
+  // First check the hardcoded table
+  if(R[key]) return R[key];
+  // Then check the trip's dynamic routing cache
+  if(typeof trip !== "undefined" && trip && trip._routingCache && trip._routingCache[key]){
+    return trip._routingCache[key];
+  }
+  // Not cached — kick off an async fetch (fire-and-forget; cache and re-render on success)
+  if(typeof trip !== "undefined" && trip && !_routingFetchInFlight[key]){
+    _routingFetchInFlight[key] = true;
+    fetchRoutingAsync(fromPlace, toPlace, key);
+  }
+  return null;
+}
+
+// Track in-flight routing fetches so we don't duplicate requests
+var _routingFetchInFlight = {};
+
+// Fetch transport options between two cities using Max. Caches on trip._routingCache
+// and re-renders the trip view when the result lands.
+async function fetchRoutingAsync(fromPlace, toPlace, key){
+  try {
+    var region = (trip && trip.brief && trip.brief.region) || "";
+    var transportPref = (trip && trip.brief && trip.brief.transport) || "";
+    var prompt = "A traveler is going from " + fromPlace + " to " + toPlace
+      + (region ? " in " + region : "") + ".\n"
+      + (transportPref ? "Their transport preference: " + transportPref + "\n" : "")
+      + "\nList the realistic transport options between these two places. "
+      + "Include named scenic/branded services (like Glacier Express) AND the ordinary regional alternative if one exists. "
+      + "For each, give duration, approximate cost in local currency, whether a reservation is required, "
+      + "and a one-sentence note about what the experience is like or any practical caveat (frequency, changes, seasonality, pass coverage).\n\n"
+      + "Return ONLY a JSON object (no markdown), with an options array:\n"
+      + '{"options":[{"icon":"\uD83D\uDE82","name":"Service name","meta":"duration \u00b7 cost","note":"One-sentence caveat or observation.","book":"https://url.example or null"}]}\n\n'
+      + "Icons: \uD83D\uDE82 for trains, \uD83D\uDE8C for buses/coaches, \u2708\uFE0F for flights, \uD83D\uDE97 for driving, \u26F4\uFE0F for ferries. "
+      + "2-4 options max. Do not invent routes that don't exist.";
+    var text = await callMax([{role:"user",content:prompt}], 1200, 40000);
+    var cleaned = text.replace(/```json|```/g,"").trim();
+    var parsed;
+    try { parsed = JSON.parse(cleaned); }
+    catch(e){
+      // Try to recover by extracting the {...options...} object
+      var s = cleaned.indexOf("{"), e2 = cleaned.lastIndexOf("}");
+      if(s>-1 && e2>s) parsed = JSON.parse(cleaned.substring(s, e2+1));
+      else throw e;
+    }
+    if(!parsed || !parsed.options || !parsed.options.length) throw new Error("empty options");
+    // Cache on the trip
+    trip._routingCache = trip._routingCache || {};
+    trip._routingCache[key] = parsed;
+    if(typeof autoSave === "function") autoSave();
+    // Re-render trip view so new options appear
+    if(_leftMode === "trip" && typeof drawTripMode === "function") drawTripMode();
+  } catch(err){
+    console.warn("Routing fetch failed for " + key + ":", err && err.message);
+    // Cache a sentinel null so we don't keep retrying indefinitely this session
+    trip._routingCache = trip._routingCache || {};
+    trip._routingCache[key] = {options:[], _failed:true};
+  } finally {
+    delete _routingFetchInFlight[key];
+  }
 }
 
 function routingHeadline(routing){
