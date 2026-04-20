@@ -3205,14 +3205,8 @@ async function runCandidateSearch(requiredPlaces) {
   var extraCount = Math.max(8, 12 - Math.min(requiredPlaces.length, 4));
   var skipList = requiredPlaces.map(function(p){ return p.place; }).join(", ");
 
-  var p1 = requiredPlaces.length > 0
-    ? "You are a travel expert. For each of these places, write a candidate card for a traveler visiting " + (_tb.region||"this region") + ".\n"
-      + "Places: " + reqNames + "\n"
-      + "Trip context: " + brief + "\n\n"
-      + "Describe why each is genuinely worth visiting — character, what to see and do, what makes it special. Trains may be one reason but not the only one.\n"
-      + "Return ONLY a JSON array (no markdown):\n"
-      + '[{"place":"City","country":"Country","role":"anchor","stayRange":"2-4 nights","whyItFits":"Why worth visiting.","tradeoffs":"One downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here beyond the trip\u2019s stated reason (e.g. specific viewpoints, walks, museums, neighborhoods, dishes).","widelyRecommended":false,"lat":0.0,"lng":0.0}]\nSet widelyRecommended=true if this is a place that appears on most standard itineraries for this region (a canonical destination a first-time traveler would likely hear about) \u2014 false otherwise.'
-    : null;
+  // p1 is generated in batched calls below (was a single call; 20+ places
+  // consistently timed out).
 
   var releasedPlaces = _tb.releasedPlaces || [];
   var releasedNote = releasedPlaces.length
@@ -3265,33 +3259,39 @@ async function runCandidateSearch(requiredPlaces) {
     + "Return ONLY a JSON array of exactly " + thematicCount + " places (no markdown):\n"
     + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"What makes it worth visiting for this specific trip \u2014 specific, not generic.","tradeoffs":"One honest downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here beyond the trip\u2019s stated reason.","widelyRecommended":false,"lat":0.0,"lng":0.0}]\nSet widelyRecommended=true if this is a canonical destination for the region \u2014 false otherwise.';
 
-  // Run all three in parallel — total wait = max(p1, pCities, pThematic)
+  // Run p1 in batches for reliability. One big call for 20+ required places
+  // regularly times out; splitting into batches of ~8 lets them run in parallel
+  // and each finishes in well under the timeout.
   var calls = [];
-  // Token budget scales with the number of required places. Each card is ~150
-  // tokens of JSON; the 2000-token default truncates for trips with >12 required
-  // places (common when the user has several trains + several activities), which
-  // causes JSON.parse to fail and the required-candidates list to come back empty.
-  var p1Tokens = Math.min(8000, 1500 + requiredPlaces.length * 220);
-  if (p1) calls.push(callMax([{role:"user",content:p1}], p1Tokens, 60000).then(function(t){
-    var cleaned = t.replace(/```json|```/g,"").trim();
-    var cands;
-    try {
-      cands = JSON.parse(cleaned);
-    } catch(parseErr) {
-      // Truncation recovery: find the last complete object in the array
-      console.warn("p1 JSON parse failed, attempting recovery:", parseErr.message);
-      var last = cleaned.lastIndexOf("},");
-      if (last > 0) {
-        try { cands = JSON.parse(cleaned.substring(0, last+1) + "]"); }
-        catch(_) { throw parseErr; }
-      } else { throw parseErr; }
+  var BATCH = 8;
+  if (requiredPlaces.length > 0) {
+    for (var bi = 0; bi < requiredPlaces.length; bi += BATCH) {
+      var batch = requiredPlaces.slice(bi, bi + BATCH);
+      var batchNames = batch.map(function(p){ return p.place+", "+p.country; }).join("; ");
+      var p1b = "You are a travel expert. For each of these places, write a candidate card for a traveler visiting " + (_tb.region||"this region") + ".\n"
+        + "Places: " + batchNames + "\n"
+        + "Trip context: " + brief + "\n\n"
+        + "Describe why each is genuinely worth visiting — character, what to see and do, what makes it special. Trains may be one reason but not the only one.\n"
+        + "Return ONLY a JSON array (no markdown):\n"
+        + '[{"place":"City","country":"Country","role":"anchor","stayRange":"2-4 nights","whyItFits":"Why worth visiting.","tradeoffs":"One downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here.","widelyRecommended":false,"lat":0.0,"lng":0.0}]\nSet widelyRecommended=true if this is a canonical destination.';
+      var p1bTokens = 1800 + batch.length * 220;
+      calls.push(callMax([{role:"user",content:p1b}], p1bTokens, 50000).then(function(t){
+        var cleaned = t.replace(/```json|```/g,"").trim();
+        var cands;
+        try { cands = JSON.parse(cleaned); }
+        catch(parseErr) {
+          var last = cleaned.lastIndexOf("},");
+          if (last > 0) { try { cands = JSON.parse(cleaned.substring(0, last+1) + "]"); } catch(_) { throw parseErr; } }
+          else { throw parseErr; }
+        }
+        cands.forEach(function(c){
+          var req = _findMatchingRequired(c, requiredPlaces);
+          c._required=true; c._requiredFor=req?req.requiredFor:[];
+        });
+        return cands;
+      }).catch(function(e){ console.warn("p1 batch failed:", e.message); return []; }));
     }
-    cands.forEach(function(c){
-      var req = _findMatchingRequired(c, requiredPlaces);
-      c._required=true; c._requiredFor=req?req.requiredFor:[];
-    });
-    return cands;
-  }).catch(function(e){ console.warn("Required stops call failed:", e.message); return []; }));
+  }
 
   calls.push(callMax([{role:"user",content:pCities}], 1500, 45000).then(function(t){
     var cands = JSON.parse(t.replace(/```json|```/g,"").trim());
@@ -3309,44 +3309,55 @@ async function runCandidateSearch(requiredPlaces) {
     var results = await Promise.allSettled(calls);
     var allCands = [];
     var p2Failed = false;
-    var p1Failed = false;
-    // With 3 calls: p1 (required) at index 0 when present; pCities next; pThematic last.
-    // p2Failed means BOTH discovery calls failed (treat as total discovery failure).
-    var p1Idx = (p1 !== null) ? 0 : -1;
-    var citiesIdx = p1 !== null ? 1 : 0;
-    var thematicIdx = calls.length - 1;
-    var citiesFailed = false, thematicFailed = false;
+    // Index layout with batched p1:
+    //   calls[0 .. p1BatchCount-1] = p1 batches
+    //   calls[p1BatchCount]        = pCities
+    //   calls[p1BatchCount+1]      = pThematic
+    var p1BatchCount = requiredPlaces.length > 0 ? Math.ceil(requiredPlaces.length / BATCH) : 0;
+    var citiesIdx = p1BatchCount;
+    var thematicIdx = p1BatchCount + 1;
+    var p1AnyOk = false, citiesFailed = false, thematicFailed = false;
     results.forEach(function(r, i){
-      if (r.status === "fulfilled" && r.value && r.value.length) {
-        allCands = allCands.concat(r.value);
-      } else {
-        if (i === p1Idx) {
-          p1Failed = true;
-          console.warn("Required stops (p1) returned empty or failed");
-        }
-        if (i === citiesIdx) citiesFailed = true;
-        if (i === thematicIdx) thematicFailed = true;
+      var ok = r.status === "fulfilled" && r.value && r.value.length;
+      if (ok) allCands = allCands.concat(r.value);
+      if (i < p1BatchCount) {
+        if (ok) p1AnyOk = true;
+      } else if (i === citiesIdx && !ok) {
+        citiesFailed = true;
+      } else if (i === thematicIdx && !ok) {
+        thematicFailed = true;
       }
     });
+    var p1Failed = p1BatchCount > 0 && !p1AnyOk;
+    if (p1Failed) console.warn("All p1 batches failed — falling back to stub required stops");
     p2Failed = citiesFailed && thematicFailed;
     // If p1 failed, surface required stops directly from _tb.requiredPlaces
     // and kick off a recovery fetch to fill in real descriptions
-    if (p1Failed && requiredPlaces.length > 0) {
-      console.warn("p1 failed — using stub required stops, will recover descriptions async");
-      requiredPlaces.forEach(function(p){
-        // Clean __manual__ marker so user doesn't see it
-        var reqForClean = (p.requiredFor||[]).filter(function(r){return r && r !== "__manual__";});
-        var whyText = reqForClean.length
-          ? "Required stop for: " + reqForClean.join(", ") + " \u2014 description loading\u2026"
-          : "Description loading\u2026";
-        allCands.push({
-          place:p.place, country:p.country, role:"anchor",
-          stayRange:"2-4 nights",
-          whyItFits:whyText,
-          tradeoffs:"", tags:["required"], lat:0, lng:0,
-          _required:true, _requiredFor:reqForClean, _needsDescription:true
-        });
+    // Stub any required place that didn't get a real card (either because p1
+    // entirely failed, or because some batches succeeded but others didn't).
+    // Descriptions are recovered async below.
+    if (requiredPlaces.length > 0) {
+      var covered = {};
+      allCands.forEach(function(c){
+        if (c._required && c.place) covered[_normPlaceName(c.place)] = true;
       });
+      var missing = requiredPlaces.filter(function(p){ return !covered[_normPlaceName(p.place||"")]; });
+      if (missing.length) {
+        console.warn("Stubbing "+missing.length+" required place(s) not returned by p1:", missing.map(function(p){return p.place;}).join(", "));
+        missing.forEach(function(p){
+          var reqForClean = (p.requiredFor||[]).filter(function(r){return r && r !== "__manual__";});
+          var whyText = reqForClean.length
+            ? "Required stop for: " + reqForClean.join(", ") + " \u2014 description loading\u2026"
+            : "Description loading\u2026";
+          allCands.push({
+            place:p.place, country:p.country, role:"anchor",
+            stayRange:"2-4 nights",
+            whyItFits:whyText,
+            tradeoffs:"", tags:["required"], lat:0, lng:0,
+            _required:true, _requiredFor:reqForClean, _needsDescription:true
+          });
+        });
+      }
     }
     if (!allCands.length) throw new Error("No candidates returned");
     // Dedupe: both discovery calls might return the same place. Keep first occurrence.
