@@ -2283,7 +2283,8 @@ async function expandMustDos() {
     + "    • durationHours: approximate length of the journey\n"
     + "    • modeOptions: \"tourist\" / \"regional\" / \"both\" — whether a branded tourist version AND an ordinary public-transport version exist on the same route\n"
     + "    • alternatives: if modeOptions is \"both\", a string describing the ordinary alternative (e.g. \"Regular SBB trains cover the same Chur–St. Moritz route hourly, no reservation, standard fare covered by the Swiss Travel Pass. You can break the journey at any station.\")\n"
-    + "    • reservationNotes: for tourist-train routes, a short string noting what's required (\"Seat reservation required, runs 2-3x daily depending on season, CHF 152+ supplement on top of fare or pass\")\n\n"
+    + "    • reservationNotes: for tourist-train routes, a short string noting what's required (\"Seat reservation required, runs 2-3x daily depending on season, CHF 152+ supplement on top of fare or pass\")\n"
+    + "    • endpointHighlights: object keyed by endpoint place name, each value is a short comma-separated list of the OTHER things worth doing at that place — so the traveler can judge whether this route's endpoints are worth their own time, not just train stations. Example: {\"Zermatt\":\"Matterhorn views, Gornergrat Railway, high-altitude hikes\",\"St. Moritz\":\"Alpine lake, Engadin villages, winter-sports centre\"}. Keep each value under 12 words.\n\n"
     + "TYPE 2 — CONDITION: something that depends on weather, season, daylight, or circumstance (Northern Lights, whale watching, cherry blossoms, wildflowers, migration).\n"
     + "  Required fields for conditions:\n"
     + "    • viableLocations: array of place objects where the condition can be experienced — these are the places Max should make sure the trip spends time in. NOT strict endpoints.\n"
@@ -2299,7 +2300,7 @@ async function expandMustDos() {
     + "META-REFERENCES: If the traveler uses something like \"all the named trains\", \"the scenic trains\", \"the major museums\", \"the cathedrals\", expand into every specific named instance that fits the region — do not pick one or two. If the phrase implies branded experiences (e.g. \"the named scenic trains\"), set modeOptions to \"both\" and include the ordinary alternative in the alternatives field.\n\n"
     + "Return ONLY a JSON array (no markdown):\n"
     + '[\n'
-    + '  {"name":"Glacier Express","type":"route","description":"Classic 8hr panoramic rail journey through the Swiss Alps.","endpoints":[{"place":"Zermatt","country":"Switzerland"},{"place":"St. Moritz","country":"Switzerland"}],"requiredPlaces":[{"place":"Zermatt","country":"Switzerland"},{"place":"St. Moritz","country":"Switzerland"}],"direction":"either","durationHours":8,"modeOptions":"both","alternatives":"Regular SBB trains cover the same Zermatt-Brig-Chur-St. Moritz route hourly with one or two transfers. No reservation, standard fare covered by the Swiss Travel Pass or Half-Fare Card. Windows open in many cars, and you can break the journey at any station.","reservationNotes":"Seat reservation required, 2-3 departures daily depending on season, CHF 152+ supplement on top of fare or pass.","flexibility":"low"},\n'
+    + '  {"name":"Glacier Express","type":"route","description":"Classic 8hr panoramic rail journey through the Swiss Alps.","endpoints":[{"place":"Zermatt","country":"Switzerland"},{"place":"St. Moritz","country":"Switzerland"}],"requiredPlaces":[{"place":"Zermatt","country":"Switzerland"},{"place":"St. Moritz","country":"Switzerland"}],"direction":"either","durationHours":8,"modeOptions":"both","alternatives":"Regular SBB trains cover the same Zermatt-Brig-Chur-St. Moritz route hourly with one or two transfers. No reservation, standard fare covered by the Swiss Travel Pass or Half-Fare Card. Windows open in many cars, and you can break the journey at any station.","reservationNotes":"Seat reservation required, 2-3 departures daily depending on season, CHF 152+ supplement on top of fare or pass.","endpointHighlights":{"Zermatt":"Matterhorn views, Gornergrat Railway, high-altitude hikes","St. Moritz":"Alpine lake, Engadin villages, winter-sports centre"},"flexibility":"low"},\n'
     + '  {"name":"Northern Lights","type":"condition","description":"Aurora borealis, visible on clear dark nights September-March away from light pollution.","viableLocations":[{"place":"Snæfellsnes Peninsula","country":"Iceland"},{"place":"Akureyri area","country":"Iceland"},{"place":"Westfjords","country":"Iceland"}],"requiredPlaces":[{"place":"Snæfellsnes Peninsula","country":"Iceland"},{"place":"Akureyri area","country":"Iceland"}],"recovery":"high","frequencyRequirement":3,"conditionNote":"You may be up until 2-3am on viable nights — the next morning needs to start late. Plan at least 3 nights in aurora-capable locations so weather gives you a real chance.","flexibility":"high"}\n'
     + ']\n\n'
     + "Be specific. Use real, well-known names. For routes, note each individual route (not 'the trains' as one item). For conditions, list multiple viable locations. Max 12 items for meta-references, max 6 otherwise.\n\n"
@@ -2557,9 +2558,23 @@ function renderMdcItemHtml(item) {
         +(item.conditionNote ? '<div style="font-size:10px;color:#b05820;margin-top:6px;line-height:1.5;">\u26a0 '+item.conditionNote+'</div>' : '')
         +'</div>';
     } else {
+      // For route-type items, show endpoint highlights so the traveler can judge
+      // whether each endpoint is worth their time beyond being a train station.
+      var highlightsHtml = '';
+      if (item.type === "route" && item.endpointHighlights && typeof item.endpointHighlights === 'object') {
+        var hParts = [];
+        rp.forEach(function(p){
+          var h = item.endpointHighlights[p.place] || item.endpointHighlights[(p.place||"").toLowerCase()];
+          if (h) hParts.push('<div style="font-size:11px;color:#555;line-height:1.5;margin-top:3px;"><strong style="color:#333;">'+p.place+':</strong> '+h+'</div>');
+        });
+        if (hParts.length) {
+          highlightsHtml = '<div style="margin-top:6px;padding-top:6px;border-top:1px dashed #eee;">'+hParts.join("")+'</div>';
+        }
+      }
       placesSection = '<div class="mdc-item-places">'
         +'<div class="mdc-places-label">To do this you need stops in:</div>'
         +'<div class="mdc-places-row">'+placesRowHtml+'</div>'
+        +highlightsHtml
         +'</div>';
     }
   }
@@ -4919,10 +4934,20 @@ function renderCandidateCards(cands){
   mustDoOrder.forEach(function(mdName){
     var group = candByPrimary[mdName];
     if (!group || !group.length) return;
+    // Look up the underlying must-do item so the header can carry its description
+    var mdItem = (_mdcItems||[]).find(function(m){ return m.name === mdName; });
     var hdr = document.createElement("div");
-    hdr.style.cssText = "margin-top:12px;padding:8px 4px 6px;font-size:12px;font-weight:700;color:#1a5fa8;letter-spacing:0.02em;border-bottom:1px solid #e8f0fc;";
+    hdr.style.cssText = "margin-top:12px;padding:8px 4px 4px;font-size:12px;font-weight:700;color:#1a5fa8;letter-spacing:0.02em;";
     hdr.textContent = "For " + mdName;
     el.appendChild(hdr);
+    if (mdItem && mdItem.description) {
+      var sub = document.createElement("div");
+      sub.style.cssText = "padding:0 4px 6px;font-size:10px;color:#888;line-height:1.5;border-bottom:1px solid #e8f0fc;";
+      sub.textContent = mdItem.description;
+      el.appendChild(sub);
+    } else {
+      hdr.style.borderBottom = "1px solid #e8f0fc";
+    }
     var display = _ceBestMode ? bestPickFirst(group).slice(0, 1) : group;
     display.forEach(function(c){ renderCard(c, el); });
     if (_ceBestMode && group.length > 1) {
