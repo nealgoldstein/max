@@ -765,7 +765,11 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .ce-card.keep{border-color:#2a7a4e;background:#f6fbf8;}
 .ce-card.map-selected{border-color:#111!important;box-shadow:0 0 0 2px #111;transition:box-shadow .15s;}
 .ce-map-tooltip{font-size:11px;font-weight:600;padding:3px 8px;background:#111;color:#fff;border:none;border-radius:5px;box-shadow:0 2px 6px rgba(0,0,0,.2);}
-.ce-card.reject{opacity:0.4;}
+/* Rejected cards: dim the content but keep actions fully interactive so users know they can change their mind */
+.ce-card.reject .ce-card-top,.ce-card.reject .ce-card-tradeoff{opacity:0.5;}
+.ce-card.reject{background:#fafafa;border-color:#e8e8e8;}
+.ce-card.reject .ce-card-actions{background:#fff;}
+.ce-card.reject .ce-act.keep{color:#2a7a4e;font-weight:700;}
 .ce-card-top{padding:9px 11px 5px;}
 .ce-card-name{font-size:12px;font-weight:700;color:#111;}
 .ce-card-role{font-size:9px;color:#888;margin:2px 0 4px;}
@@ -4665,7 +4669,7 @@ function renderCandidateCards(cands){
       +'</div>'
       +(c.tradeoffs?'<div class="ce-card-tradeoff">\u26a0 '+c.tradeoffs+'</div>':'')
       +'<div class="ce-card-actions">'
-      +'<button class="ce-act keep'+(c.status==="keep"?" on":'')+'">\u2713 Keep</button>'
+      +'<button class="ce-act keep'+(c.status==="keep"?" on":'')+'">'+(c.status==="reject"?"\u21ba Restore":"\u2713 Keep")+'</button>'
       +'<button class="ce-act reject'+(c.status==="reject"?" on":'')+'">\u00d7 Reject</button>'
       +'<button class="ce-act compare">\u21c4 Compare</button>'
       +'</div>';
@@ -4721,15 +4725,23 @@ function renderCandidateCards(cands){
     rejWrap.style.cssText = "margin-top:14px;padding-top:10px;border-top:1px solid #eee;";
     var rejToggle = document.createElement("div");
     var rejExpanded = !!_ceRejectedExpanded;
-    rejToggle.style.cssText = "font-size:10px;font-weight:600;color:#888;cursor:pointer;padding:4px 4px;user-select:none;";
-    rejToggle.textContent = (rejExpanded?"\u25BE":"\u25B8")+"  "+rejectedCands.length+" rejected";
+    rejToggle.style.cssText = "font-size:10px;font-weight:600;color:#888;cursor:pointer;padding:6px 8px;user-select:none;background:#f5f5f5;border-radius:5px;display:flex;align-items:center;justify-content:space-between;";
+    var hint = '<span style="font-weight:400;color:#aaa;">change your mind</span>';
+    rejToggle.innerHTML = '<span>'+(rejExpanded?"\u25BE":"\u25B8")+'  '+rejectedCands.length+' rejected</span>'+hint;
     var rejList = document.createElement("div");
     rejList.style.display = rejExpanded?"block":"none";
     rejList.style.marginTop = "6px";
     rejToggle.onclick = function(){
       _ceRejectedExpanded = !_ceRejectedExpanded;
       rejList.style.display = _ceRejectedExpanded?"block":"none";
-      rejToggle.textContent = (_ceRejectedExpanded?"\u25BE":"\u25B8")+"  "+rejectedCands.length+" rejected";
+      rejToggle.innerHTML = '<span>'+(_ceRejectedExpanded?"\u25BE":"\u25B8")+'  '+rejectedCands.length+' rejected</span>'+hint;
+      // Scroll the first rejected card into view so the user sees their options
+      if (_ceRejectedExpanded) {
+        setTimeout(function(){
+          var first = rejList.firstElementChild;
+          if (first && first.scrollIntoView) first.scrollIntoView({behavior:"smooth",block:"start"});
+        }, 50);
+      }
     };
     rejectedCands.forEach(function(c){ renderCard(c, rejList); });
     rejWrap.appendChild(rejToggle);
