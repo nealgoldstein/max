@@ -2362,8 +2362,8 @@ function showMustDoConfirmation(items) {
   ov.className = "mdc-overlay";
   ov.innerHTML = '<div class="mdc-header">'
     +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="mdc-step">Step 1.5 of 3 \u00b7 Must-dos</div></div></div>'
-    +'<div class="mdc-title" style="margin-top:8px;">Based on what you have told me, these are the destinations you should consider.</div>'
-    +'<div class="mdc-sub">Uncheck anything that doesn\u2019t work for you.</div>'
+    +'<div class="mdc-title" style="margin-top:8px;">Based on what you told me, these are the things worth doing.</div>'
+    +'<div class="mdc-sub">Uncheck anything you don\u2019t actually want. Add more below if you do.</div>'
     +'</div>'
     +'<div class="mdc-body" id="mdc-body">'
     +(!items ? '<div class="mdc-loading"><div style="font-size:20px;margin-bottom:8px;animation:spin 1s linear infinite;display:inline-block">\u2736</div><div>Interpreting your must-dos\u2026</div></div>' : '')
@@ -3791,15 +3791,24 @@ function saveRecognitionAndContinue(){
   // Extract region from sentence — try multiple patterns
   var s = _tb.tripSentence || "";
   var m;
-  // Pattern 1: "I want to go to X in order to..."
-  m = s.match(/^\s*i\s+want\s+to\s+go\s+to\s+([^,\.;]+?)(?:\s+in\s+order\s+to|\s+to\s+|\s*[,.;]|\s*$)/i);
+  // Pattern 0: new template — "Because I want to ..., I'm going to go to X"
+  // Also handles "...I am going to X" and "...I am going to go to X"
+  m = s.match(/i['’]?\s*(?:am|m)\s+going\s+to\s+(?:go\s+to\s+)?([^,\.;]+?)(?:\s*[,.;]|\s*$)/i);
+  if(!m){
+    // Pattern 0b: "going to go to X" anywhere (handles the double-'to' so we don't capture just "go")
+    m = s.match(/going\s+to\s+go\s+to\s+([^,\.;]+?)(?:\s*[,.;]|\s*$)/i);
+  }
+  if(!m){
+    // Pattern 1: "I want to go to X in order to..."
+    m = s.match(/^\s*i\s+want\s+to\s+go\s+to\s+([^,\.;]+?)(?:\s+in\s+order\s+to|\s+to\s+|\s*[,.;]|\s*$)/i);
+  }
   if(!m){
     // Pattern 2: "I want to go to X for..." / "I want to go to X,"
     m = s.match(/^\s*i\s+want\s+to\s+go\s+to\s+([^,\.;]+?)(?:\s+for\s+|\s*[,.;]|\s*$)/i);
   }
   if(!m){
-    // Pattern 3: "going to X" / "travel to X" / "trip to X"
-    m = s.match(/(?:going|traveling|travel|trip|heading)\s+to\s+([^,\.;]+?)(?:\s+(?:in\s+order\s+to|to|for|because)|\s*[,.;]|\s*$)/i);
+    // Pattern 3: "going to X" / "travel to X" / "trip to X" — but exclude "going to go"
+    m = s.match(/(?:going|traveling|travel|trip|heading)\s+to\s+(?!go\b)([^,\.;]+?)(?:\s+(?:in\s+order\s+to|to|for|because)|\s*[,.;]|\s*$)/i);
   }
   if(m && m[1]){
     _tb.region = m[1].trim();
