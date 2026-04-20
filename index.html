@@ -753,7 +753,7 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .ce-title{font-size:13px;font-weight:700;flex:1;}
 .ce-sub{font-size:10px;color:#aaa;}
 .ce-body{flex:1;display:flex;min-height:0;overflow:hidden;height:0;}
-.ce-left{width:320px;flex-shrink:0;display:flex;flex-direction:column;border-right:1px solid #eee;background:#fff;overflow:hidden;min-height:0;height:100%;}
+.ce-left{flex:1;min-width:0;display:flex;flex-direction:column;background:#fff;overflow:hidden;min-height:0;height:100%;}
 .ce-shortlist{padding:7px 10px;border-bottom:1px solid #f0f0f0;background:#f9f9f7;flex-shrink:0;}
 .ce-sl-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#aaa;margin-bottom:4px;}
 .ce-sl-pills{display:flex;flex-wrap:wrap;gap:4px;min-height:20px;}
@@ -3267,8 +3267,25 @@ async function runCandidateSearch(requiredPlaces) {
 
   // Run all three in parallel — total wait = max(p1, pCities, pThematic)
   var calls = [];
-  if (p1) calls.push(callMax([{role:"user",content:p1}], 2000, 45000).then(function(t){
-    var cands = JSON.parse(t.replace(/```json|```/g,"").trim());
+  // Token budget scales with the number of required places. Each card is ~150
+  // tokens of JSON; the 2000-token default truncates for trips with >12 required
+  // places (common when the user has several trains + several activities), which
+  // causes JSON.parse to fail and the required-candidates list to come back empty.
+  var p1Tokens = Math.min(8000, 1500 + requiredPlaces.length * 220);
+  if (p1) calls.push(callMax([{role:"user",content:p1}], p1Tokens, 60000).then(function(t){
+    var cleaned = t.replace(/```json|```/g,"").trim();
+    var cands;
+    try {
+      cands = JSON.parse(cleaned);
+    } catch(parseErr) {
+      // Truncation recovery: find the last complete object in the array
+      console.warn("p1 JSON parse failed, attempting recovery:", parseErr.message);
+      var last = cleaned.lastIndexOf("},");
+      if (last > 0) {
+        try { cands = JSON.parse(cleaned.substring(0, last+1) + "]"); }
+        catch(_) { throw parseErr; }
+      } else { throw parseErr; }
+    }
     cands.forEach(function(c){
       var req = _findMatchingRequired(c, requiredPlaces);
       c._required=true; c._requiredFor=req?req.requiredFor:[];
@@ -4743,7 +4760,9 @@ function showCandidateExplorer(cands, editMode){
     +'<div class="ce-cards" id="ce-cards">'
     +(cands?'':'<div class="ce-loading" id="ce-loading">'      +'<span class="ce-loading-spin">\u2736</span>'      +'<div class="max-thinking" style="font-size:12px;font-weight:600;color:#555;margin-bottom:5px;">Thinking about where you might go\u2026</div>'      +'<div id="ce-loading-detail" style="font-size:10px;color:#aaa;line-height:1.7;">This usually takes 20\u201340 seconds.<br>Max is considering required stops and places worth visiting.</div>'      +'</div>')
     +'</div></div>'
-    +'<div class="ce-right"><div id="ce-map" class="ce-map"></div></div>'
+    /* Map is hidden by default on Places — it clutters the initial look for a */
+    /* sentence-driven flow. Users who want geographic context can add it back. */
+    +'<div class="ce-right" style="display:none;"><div id="ce-map" class="ce-map"></div></div>'
     +'</div>'
     +'<div class="ce-footer">'
     +'<span style="font-size:10px;color:#888;" id="ce-cnt">0 kept</span>'
