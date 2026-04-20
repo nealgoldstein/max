@@ -2210,7 +2210,7 @@ var _mdcItems = [];
 var _mdcChipSuggestions = [];
 async function expandChipSuggestions(region, intent, chips){
   _mdcChipSuggestions = [];
-  if (!chips || !chips.length) return;
+  if (!chips || !chips.length) return [];
   var chipList = chips.join(", ");
   var prompt = "A traveler is going to " + region + "."
     + (intent ? " Their stated goal: " + intent + "." : "")
@@ -2218,7 +2218,7 @@ async function expandChipSuggestions(region, intent, chips){
     + "For each interest, suggest 2-3 specific, named experiences worth considering in " + region + " — things a thoughtful traveler might want to do beyond their stated must-dos. These are OPTIONAL menu items, not requirements.\n\n"
     + "Return ONLY a JSON array (no markdown). Each item:\n"
     + '[{"name":"Specific named experience","type":"activity","description":"One sentence on what it is and why it\'s worth considering here.","requiredPlaces":[{"place":"City","country":"Country"}],"durationHours":6,"interest":"which chip this came from"}]\n\n'
-    + "Max 10 items total, skewed to the most interesting and feasible. Be specific — real named places, not generic categories. No duplicates of obvious must-dos.\n\n"
+    + "Max 5 items total. Pick the most worthwhile and distinctive. Be specific — real named places, not generic categories. No duplicates of obvious must-dos.\n\n"
     + "CRITICAL: requiredPlaces is an ARRAY OF OBJECTS, each with place and country strings. Even for a single-country trip, always include country.";
   try {
     var text = await callMax([{role:"user",content:prompt}], 2000, 30000);
@@ -2235,8 +2235,9 @@ async function expandChipSuggestions(region, intent, chips){
     var regionCountry = (_tb && _tb.region) ? _tb.region : "";
     items.forEach(function(item, i){
       item.id = "mdc-chip-" + i;
-      item.checked = false; // suggestions start OFF; user opts in
+      item.checked = true; // auto-include on the merged page; user drops what they don't want
       item.fromChip = true;
+      item.type = item.type || "activity";
       if (Array.isArray(item.requiredPlaces)) {
         item.requiredPlaces = item.requiredPlaces.map(function(p){
           if (typeof p === "string") return {place: p, country: regionCountry};
@@ -2245,14 +2246,16 @@ async function expandChipSuggestions(region, intent, chips){
       }
     });
     _mdcChipSuggestions = items;
-    // Refresh the section and banner if the must-do page is open
+    // Refresh the section and banner if the must-do page is open (legacy path)
     if (document.getElementById("mdc-body")) {
       _renderChipSuggestionsSection();
       _updateForcedMarchBanner();
     }
+    return items;
   } catch(e) {
     console.warn("Chip suggestion expansion failed:", e && e.message);
     _mdcChipSuggestions = [];
+    return [];
   }
 }
 
@@ -2267,9 +2270,9 @@ async function expandMustDos() {
 
   showMustDoConfirmation(null); // loading state
 
-  // Fire chip-based suggestions in parallel so the "menu" section can populate
-  // without adding to the user's wait time.
-  expandChipSuggestions(region, intent, _tb.chips || []);
+  // Fire chip-based suggestions in parallel — we wait for it below so its items
+  // can merge into the activity list before candidates are generated.
+  var chipPromise = expandChipSuggestions(region, intent, _tb.chips || []);
 
   var prompt = "A traveler is planning a trip to " + (region||"this region") + ".\n"
     + (intent ? "Their goal: " + intent + "\n" : "")
@@ -2344,9 +2347,41 @@ async function expandMustDos() {
       if (item.type === "condition" && !item.requiredPlaces && item.viableLocations) item.requiredPlaces = item.viableLocations;
     });
     _mdcItems = items;
-    showMustDoConfirmation(items);
+    // Wait for chip suggestions (if any) and merge them into the activity list
+    // so their places feed candidate generation and their sections render on the
+    // merged Places page. Don't block if the chip call errored — we still have
+    // the must-dos.
+    var chipItems = [];
+    try { chipItems = await chipPromise || []; } catch(_) { chipItems = []; }
+    if (chipItems.length) {
+      chipItems.forEach(function(ci){
+        // Avoid duplicates: if a chip item has the same name as a must-do, skip
+        if (!_mdcItems.some(function(m){ return m.name && ci.name && m.name.toLowerCase() === ci.name.toLowerCase(); })) {
+          _mdcItems.push(ci);
+        }
+      });
+    }
+
+    // Merged flow: build required-places from every checked activity (must-dos +
+    // chip suggestions) and jump straight into candidate generation.
+    var requiredMap = {};
+    _mdcItems.forEach(function(item){
+      if (!item.checked) return;
+      (item.requiredPlaces||[]).forEach(function(p){
+        if (!p || !p.place) return;
+        if (!requiredMap[p.place]) requiredMap[p.place] = {place:p.place, country:p.country||'', requiredFor:[], flexible:false};
+        requiredMap[p.place].requiredFor.push(item.type === "manual" ? "__manual__" : item.name);
+        if (item.type === "condition") requiredMap[p.place].flexible = true;
+      });
+    });
+    _tb.requiredPlaces = Object.values(requiredMap);
+    _tb.flexibilityNotes = _mdcItems.filter(function(i){return i.type==="condition" && i.conditionNote;}).map(function(i){return i.name + ": " + i.conditionNote;});
+    // Tear down the loading overlay so it doesn't stack behind the Explorer
+    var _mdcOv = document.getElementById("mdc-overlay"); if (_mdcOv) _mdcOv.remove();
+    runCandidateSearch(_tb.requiredPlaces);
   } catch(e) {
     console.error("expandMustDos failed:", e && e.message);
+    var _mdcOv2 = document.getElementById("mdc-overlay"); if (_mdcOv2) _mdcOv2.remove();
     // On error, skip this step and go straight to candidates
     runCandidateSearch([]);
   }
@@ -2363,7 +2398,7 @@ function showMustDoConfirmation(items) {
   ov.className = "mdc-overlay";
   ov.innerHTML = '<div class="mdc-header">'
     +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="mdc-step">Step 1.5 of 3 \u00b7 Must-dos</div></div></div>'
-    +'<div class="mdc-title" style="margin-top:8px;">Based on what you told me, these are the places where you can do what you want to do.</div>'
+    +'<div class="mdc-title" style="margin-top:8px;">Based on what you told me, these are the places in '+((_tb&&_tb.region)||'the region')+' where you can do what you want to do.</div>'
     +'<div class="mdc-sub">Uncheck anything you don\u2019t actually want. Add more below if you do.</div>'
     +'</div>'
     +'<div class="mdc-body" id="mdc-body">'
@@ -2546,9 +2581,22 @@ async function addManualMdcItem() {
 function renderMdcItemHtml(item) {
   var rp = item.requiredPlaces||[];
   var isCondition = item.type === "condition";
-  var placesRowHtml = rp.map(function(p,i){
-    return (i>0?'<span class="mdc-place-arrow">\u2192</span>':'')+'<span class="mdc-place">'+p.place+'</span>';
-  }).join("");
+  var isRoute = item.type === "route";
+  // Only routes have a real start→end journey. Everything else (activities,
+  // conditions, chip suggestions) lists alternative places where you can do
+  // this — so use commas and a final "or" instead of an arrow that implies order.
+  var placesRowHtml;
+  if (isRoute) {
+    placesRowHtml = rp.map(function(p,i){
+      return (i>0?'<span class="mdc-place-arrow">\u2192</span>':'')+'<span class="mdc-place">'+p.place+'</span>';
+    }).join("");
+  } else {
+    placesRowHtml = rp.map(function(p,i){
+      var sep = '';
+      if (i > 0) sep = (i === rp.length - 1 && rp.length > 1) ? '<span style="color:#888;"> or </span>' : '<span style="color:#888;">, </span>';
+      return sep + '<span class="mdc-place">'+p.place+'</span>';
+    }).join("");
+  }
   var placesSection = '';
   if (rp.length && item.type !== "manual") {
     if (isCondition) {
@@ -2572,7 +2620,7 @@ function renderMdcItemHtml(item) {
         }
       }
       placesSection = '<div class="mdc-item-places">'
-        +'<div class="mdc-places-label">To do this you need stops in:</div>'
+        +'<div class="mdc-places-label">To do this you should think about:</div>'
         +'<div class="mdc-places-row">'+placesRowHtml+'</div>'
         +highlightsHtml
         +'</div>';
@@ -2664,8 +2712,12 @@ function _renderChipSuggestionsSection(){
     div.className = "mdc-item" + (item.checked ? " checked" : "");
     div.id = "mdc-item-" + item.id;
     var isCondition = item.type === "condition";
-    var placesRowHtml = (item.requiredPlaces||[]).map(function(p,i){
-      return (i>0?'<span class="mdc-place-arrow">\u2192</span>':'')+'<span class="mdc-place">'+p.place+'</span>';
+    // Chip suggestions are alternatives (not routes) — comma/or list, no arrow
+    var rp = item.requiredPlaces||[];
+    var placesRowHtml = rp.map(function(p,i){
+      var sep = '';
+      if (i > 0) sep = (i === rp.length - 1 && rp.length > 1) ? '<span style="color:#888;"> or </span>' : '<span style="color:#888;">, </span>';
+      return sep + '<span class="mdc-place">'+p.place+'</span>';
     }).join("");
     var placesSection = placesRowHtml
       ? '<div class="mdc-item-places"><div class="mdc-places-label">Worth doing in:</div><div class="mdc-places-row">'+placesRowHtml+'</div></div>'
@@ -4945,24 +4997,61 @@ function renderCandidateCards(cands){
   }
 
   // Render one section per must-do in sentence order. Each candidate appears in
-  // exactly one section — its primary must-do.
+  // exactly one section — its primary must-do. Section header carries the full
+  // activity context (description + places/endpoint highlights) so the user can
+  // judge the activity itself, not just the destinations beneath it.
   mustDoOrder.forEach(function(mdName){
     var group = candByPrimary[mdName];
     if (!group || !group.length) return;
-    // Look up the underlying must-do item so the header can carry its description
     var mdItem = (_mdcItems||[]).find(function(m){ return m.name === mdName; });
+    var sectionWrap = document.createElement("div");
+    sectionWrap.style.cssText = "margin-top:14px;padding:10px 10px 8px;background:#f7faff;border-radius:8px;border:1px solid #e8f0fc;";
+
+    // Header row: title + "Drop this activity" control
+    var hdrRow = document.createElement("div");
+    hdrRow.style.cssText = "display:flex;justify-content:space-between;align-items:baseline;gap:8px;";
     var hdr = document.createElement("div");
-    hdr.style.cssText = "margin-top:12px;padding:8px 4px 4px;font-size:12px;font-weight:700;color:#1a5fa8;letter-spacing:0.02em;";
-    hdr.textContent = "For " + mdName;
-    el.appendChild(hdr);
+    hdr.style.cssText = "font-size:13px;font-weight:700;color:#1a5fa8;letter-spacing:0.02em;";
+    hdr.textContent = "For " + mdName + (mdItem && mdItem.type ? ' \u00b7 ' + mdItem.type : '');
+    hdrRow.appendChild(hdr);
+    if (mdItem && mdItem.fromChip && mdItem.interest) {
+      var chipSrc = document.createElement("div");
+      chipSrc.style.cssText = "font-size:10px;color:#888;font-style:italic;";
+      chipSrc.textContent = "from: " + mdItem.interest;
+      hdrRow.appendChild(chipSrc);
+    }
+    var drop = document.createElement("button");
+    drop.style.cssText = "font-size:10px;color:#888;background:none;border:none;cursor:pointer;font-family:inherit;padding:0;";
+    drop.textContent = "Drop this activity";
+    drop.title = "Reject every destination under this activity and uncheck it from your must-dos.";
+    (function(mName){ drop.onclick = function(){ _dropActivity(mName); }; })(mdName);
+    hdrRow.appendChild(drop);
+    sectionWrap.appendChild(hdrRow);
+
     if (mdItem && mdItem.description) {
       var sub = document.createElement("div");
-      sub.style.cssText = "padding:0 4px 6px;font-size:10px;color:#888;line-height:1.5;border-bottom:1px solid #e8f0fc;";
+      sub.style.cssText = "font-size:11px;color:#555;line-height:1.55;margin-top:4px;";
       sub.textContent = mdItem.description;
-      el.appendChild(sub);
-    } else {
-      hdr.style.borderBottom = "1px solid #e8f0fc";
+      sectionWrap.appendChild(sub);
     }
+
+    // Endpoint highlights (routes) or places list (activities/conditions)
+    if (mdItem && mdItem.type === "route" && mdItem.endpointHighlights && typeof mdItem.endpointHighlights === "object") {
+      var ehParts = [];
+      (mdItem.requiredPlaces||mdItem.endpoints||[]).forEach(function(p){
+        var h = mdItem.endpointHighlights[p.place] || mdItem.endpointHighlights[(p.place||"").toLowerCase()];
+        if (h) ehParts.push('<div style="font-size:11px;color:#555;line-height:1.5;margin-top:2px;"><strong style="color:#333;">'+p.place+':</strong> '+h+'</div>');
+      });
+      if (ehParts.length) {
+        var ehWrap = document.createElement("div");
+        ehWrap.style.cssText = "margin-top:6px;padding-top:6px;border-top:1px dashed #d8e4f0;";
+        ehWrap.innerHTML = ehParts.join("");
+        sectionWrap.appendChild(ehWrap);
+      }
+    }
+
+    el.appendChild(sectionWrap);
+
     var display = _ceBestMode ? bestPickFirst(group).slice(0, 1) : group;
     display.forEach(function(c){ renderCard(c, el); });
     if (_ceBestMode && group.length > 1) {
@@ -5044,6 +5133,37 @@ function rIcon(r){
   if(rl.indexOf("anchor")>-1) return "\u2693";
   if(rl.indexOf("pass")>-1) return "\u2192";
   return "\uD83D\uDCCD";
+}
+
+// "Drop this activity" — reject every candidate under a must-do and uncheck the
+// must-do itself, so the merged Places page can serve as both the must-do curation
+// screen and the destination picker in one view.
+function _dropActivity(mdName){
+  if (!mdName) return;
+  var cands = (_tb.candidates||[]).filter(function(c){
+    return (c._requiredFor||[]).indexOf(mdName) > -1 && c.status !== "reject";
+  });
+  if (!cands.length) return;
+  if (!confirm("Drop " + mdName + "? Every destination under it will be rejected and the must-do unchecked.")) return;
+  // Uncheck the must-do
+  if (typeof _mdcItems !== "undefined" && _mdcItems) {
+    _mdcItems.forEach(function(m){ if (m.name === mdName) m.checked = false; });
+  }
+  // Mark every candidate under it as rejected
+  cands.forEach(function(c){
+    c.status = "reject";
+    // Strip this must-do out of its _requiredFor so other sections don't show "also supports"
+    c._requiredFor = (c._requiredFor||[]).filter(function(r){ return r !== mdName; });
+    if (!c._requiredFor.length) c._required = false;
+  });
+  // Keep _tb.requiredPlaces in sync
+  if (_tb.requiredPlaces) {
+    _tb.requiredPlaces = _tb.requiredPlaces.filter(function(p){
+      p.requiredFor = (p.requiredFor||[]).filter(function(r){ return r !== mdName; });
+      return p.requiredFor.length > 0;
+    });
+  }
+  renderCandidateCards(_tb.candidates);
 }
 
 // Custom confirmation modal for rejecting a required candidate. Opens immediately
