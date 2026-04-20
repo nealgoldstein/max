@@ -2376,6 +2376,7 @@ async function expandMustDos() {
     });
     _tb.requiredPlaces = Object.values(requiredMap);
     _tb.flexibilityNotes = _mdcItems.filter(function(i){return i.type==="condition" && i.conditionNote;}).map(function(i){return i.name + ": " + i.conditionNote;});
+    console.log("[Max] expandMustDos complete. Must-dos:", _mdcItems.length, "items; requiredPlaces:", _tb.requiredPlaces.length, "unique places:", _tb.requiredPlaces.map(function(p){return p.place;}).join(", "));
     // Tear down the loading overlay so it doesn't stack behind the Explorer
     var _mdcOv = document.getElementById("mdc-overlay"); if (_mdcOv) _mdcOv.remove();
     runCandidateSearch(_tb.requiredPlaces);
@@ -3361,6 +3362,9 @@ async function runCandidateSearch(requiredPlaces) {
     allCands.forEach(function(c,i){ c.id="c"+i; c.status=null; });
     _tb.candidates = allCands;
     _tb.p2Failed = p2Failed;
+    console.log("[Max] runCandidateSearch: total candidates:", allCands.length,
+      "· required:", allCands.filter(function(c){return c._required;}).length,
+      "· p1Failed:", p1Failed, "· p2Failed:", p2Failed);
     showCandidateExplorer(allCands);
 
     // After rendering stubs, fetch real descriptions for any required place flagged _needsDescription
