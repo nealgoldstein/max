@@ -4440,7 +4440,7 @@ async function findCandidates(){
 }
 
 // ─── CANDIDATE EXPLORER ────────────────────────────────────
-var _ceMap=null,_ceMarkers=[],_ceRejectedExpanded=false,_ceEditMode=false,_ceBestMode=true,_ceCardExpanded={};
+var _ceMap=null,_ceMarkers=[],_ceRejectedExpanded=false,_ceEditMode=false,_ceBestMode=true,_ceCardExpanded={},_ceLens="activity";
 
 async function retryDiscoveryCandidates() {
   var existingReq = (_tb.candidates||[]).filter(function(c){ return c._required; });
@@ -5047,6 +5047,23 @@ function renderCandidateCards(cands){
   bestBtn.onclick = function(){ _ceBestMode = !_ceBestMode; renderCandidateCards(_tb.candidates); };
   headerBtns.appendChild(bestBtn);
   headerWrap.appendChild(headerBtns);
+  // Lens bar — four different organizations of the same data. Different
+  // travelers look for different things; same places, four reorderings.
+  var lensBar = document.createElement("div");
+  lensBar.style.cssText = "display:flex;gap:4px;margin-top:8px;padding-top:8px;border-top:1px solid #f0f0f0;flex-wrap:wrap;align-items:center;";
+  var lensLabel = document.createElement("span");
+  lensLabel.style.cssText = "font-size:9px;color:#999;letter-spacing:0.05em;text-transform:uppercase;font-weight:700;margin-right:4px;";
+  lensLabel.textContent = "Organize by:";
+  lensBar.appendChild(lensLabel);
+  [["activity","Activity"],["region","Region"],["time","Trip order"],["commitment","Status"]].forEach(function(pair){
+    var b = document.createElement("button");
+    var on = _ceLens === pair[0];
+    b.style.cssText = "font-size:10px;padding:4px 10px;border-radius:11px;border:1px solid "+(on?"#111":"#ddd")+";background:"+(on?"#111":"#fff")+";color:"+(on?"#fff":"#555")+";cursor:pointer;font-family:inherit;font-weight:"+(on?"700":"500")+";";
+    b.textContent = pair[1];
+    (function(k){ b.onclick = function(){ _ceLens = k; renderCandidateCards(_tb.candidates); }; })(pair[0]);
+    lensBar.appendChild(b);
+  });
+  headerWrap.appendChild(lensBar);
   el.appendChild(headerWrap);
 
   function bestPickFirst(group){
@@ -5061,6 +5078,13 @@ function renderCandidateCards(cands){
     return sorted;
   }
 
+  // ── Lens dispatch ───────────────────────────────────────
+  // The same candidate data is reorganized four ways so travelers can look at
+  // it the way that matches their current question: by activity (why is this
+  // place on my list?), by region (what fits together geographically?), by
+  // trip order (what does my trip actually look like?), or by commitment
+  // (what have I already decided?).
+  if (_ceLens === "activity") {
   // Group activity sections by type — all TRAINS together, all ACTIVITIES
   // together, all CONDITIONS together. Each type gets one umbrella header; the
   // individual must-dos live as sub-sections underneath. Reduces the "wall of
@@ -5184,6 +5208,89 @@ function renderCandidateCards(cands){
     dhdr.textContent = "Other places worth considering";
     el.appendChild(dhdr);
     regularDiscovery.forEach(function(c){ renderCard(c, el); });
+  }
+  } else if (_ceLens === "region") {
+    // Group candidates by country (fallback: "Unknown"). Within each group, sort
+    // kept first, then by place name. Gives the traveler a geographic view —
+    // useful for spotting clustering opportunities and cross-border trade-offs.
+    var byCountry = {};
+    activeCands.forEach(function(c){
+      var k = (c.country || "Unknown").trim() || "Unknown";
+      if (!byCountry[k]) byCountry[k] = [];
+      byCountry[k].push(c);
+    });
+    var countries = Object.keys(byCountry).sort(function(a,b){
+      return byCountry[b].length - byCountry[a].length; // largest group first
+    });
+    countries.forEach(function(country, idx){
+      var hdr = document.createElement("div");
+      hdr.style.cssText = "margin-top:"+(idx?14:6)+"px;padding:10px 4px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#111;"+(idx?"border-top:1px solid #e8e8e8;":"");
+      hdr.textContent = country + "  ·  " + byCountry[country].length + " place" + (byCountry[country].length!==1?"s":"");
+      el.appendChild(hdr);
+      byCountry[country]
+        .slice()
+        .sort(function(a,b){
+          var ak = a.status === "keep" ? 0 : 1;
+          var bk = b.status === "keep" ? 0 : 1;
+          if (ak !== bk) return ak - bk;
+          return (a.place||"").localeCompare(b.place||"");
+        })
+        .forEach(function(c){ renderCard(c, el); });
+    });
+  } else if (_ceLens === "time") {
+    // Run the same ordering the trip builder uses so the user can see the trip
+    // shape before committing. Only kept candidates get ordered; everything else
+    // lands in "Not yet in the trip" below.
+    var kept = activeCands.filter(function(c){return c.status === "keep";});
+    var unset = activeCands.filter(function(c){return c.status !== "keep";});
+    if (kept.length) {
+      try {
+        var orderRes = orderKeptCandidates(kept, _mdcItems||[], _tb.entry||"", _tb.tbExit||"");
+        var ordered = (orderRes && orderRes.ordered) || kept;
+        var hdr = document.createElement("div");
+        hdr.style.cssText = "margin-top:6px;padding:10px 4px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#111;";
+        hdr.textContent = "Your trip, in order";
+        el.appendChild(hdr);
+        if (orderRes && orderRes.reasoning && orderRes.reasoning.length) {
+          var why = document.createElement("div");
+          why.style.cssText = "padding:4px 4px 8px;font-size:10px;color:#888;line-height:1.55;";
+          why.innerHTML = orderRes.reasoning.map(function(r){return "\u2022 "+r;}).join("<br>");
+          el.appendChild(why);
+        }
+        ordered.forEach(function(c, i){
+          var ix = document.createElement("div");
+          ix.style.cssText = "font-size:10px;color:#888;padding:4px 6px 0;font-weight:600;";
+          ix.textContent = (i+1) + ".";
+          el.appendChild(ix);
+          renderCard(c, el);
+        });
+      } catch(e) {
+        kept.forEach(function(c){ renderCard(c, el); });
+      }
+    }
+    if (unset.length) {
+      var hdr2 = document.createElement("div");
+      hdr2.style.cssText = "margin-top:16px;padding:10px 4px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#111;border-top:1px solid #e8e8e8;";
+      hdr2.textContent = "Not yet in the trip";
+      el.appendChild(hdr2);
+      unset.forEach(function(c){ renderCard(c, el); });
+    }
+  } else if (_ceLens === "commitment") {
+    // Split by status: kept first (what you've decided), then undecided. Lets the
+    // user see at a glance how many real commitments they've made vs. how many
+    // options are still open.
+    var buckets = [
+      {key:"keep", label:"Kept \u2014 already in your trip", items: activeCands.filter(function(c){return c.status === "keep";})},
+      {key:"unset", label:"Undecided \u2014 still open", items: activeCands.filter(function(c){return !c.status;})}
+    ];
+    buckets.forEach(function(b, idx){
+      if (!b.items.length) return;
+      var hdr = document.createElement("div");
+      hdr.style.cssText = "margin-top:"+(idx?14:6)+"px;padding:10px 4px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:"+(b.key==="keep"?"#2a7a4e":"#111")+";"+(idx?"border-top:1px solid #e8e8e8;":"");
+      hdr.textContent = b.label + "  \u00b7  " + b.items.length;
+      el.appendChild(hdr);
+      b.items.forEach(function(c){ renderCard(c, el); });
+    });
   }
 
   // Collapsed rejected section — out of the way but one click to revisit
