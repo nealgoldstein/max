@@ -4104,7 +4104,7 @@ async function findCandidates(){
 }
 
 // ─── CANDIDATE EXPLORER ────────────────────────────────────
-var _ceMap=null,_ceMarkers=[],_ceRejectedExpanded=false;
+var _ceMap=null,_ceMarkers=[],_ceRejectedExpanded=false,_ceEditMode=false;
 
 async function retryDiscoveryCandidates() {
   var existingReq = (_tb.candidates||[]).filter(function(c){ return c._required; });
@@ -4223,13 +4223,179 @@ function showCandidateDisclaimer() {
   sessionStorage.setItem("ce-disclaimer-seen", "1");
 }
 
-function showCandidateExplorer(cands){
+// Re-open the Candidate Explorer on an already-built trip so the user can flip
+// keep/reject decisions. Hydrates _tb from the trip snapshot, flags edit mode,
+// and opens the overlay. See applyCandidateChanges for reconciliation logic.
+function reopenCandidateExplorer(){
+  if (!trip || !trip.candidates || !trip.candidates.length) return;
+  // Rehydrate trip-brief scratch from the trip so the Explorer's helpers work
+  _tb = _tb || {};
+  _tb.candidates = trip.candidates.map(function(c){
+    return {
+      id:c.id, place:c.place, country:c.country||null, role:c.role||null,
+      whyItFits:c.whyItFits||"", tags:c.tags||[], tradeoffs:c.tradeoffs||null,
+      stayRange:c.stayRange||"", lat:c.lat||null, lng:c.lng||null,
+      status:c.status||null, _required:!!c._required, _requiredFor:(c._requiredFor||[]).slice()
+    };
+  });
+  _tb.requiredPlaces = (trip.requiredPlaces||[]).slice();
+  if (trip.brief) {
+    _tb.region = trip.brief.region || _tb.region || "";
+    _tb.when = trip.brief.when || _tb.when || "";
+    _tb.duration = trip.brief.duration || _tb.duration || "";
+    _tb.entry = trip.brief.entry || _tb.entry || "";
+    _tb.tbExit = trip.brief.tbExit || _tb.tbExit || "";
+    _tb.intent = trip.brief.intent || _tb.intent || "";
+    _tb.interests = trip.brief.interests || _tb.interests || [];
+    _tb.anchors = trip.brief.anchors || _tb.anchors || [];
+    _tb.familiarity = trip.brief.familiarity || _tb.familiarity || "";
+  }
+  // Rehydrate must-dos so reject-cascade and required-badges work
+  if (trip.mdcItems) _mdcItems = trip.mdcItems.slice();
+  _ceRejectedExpanded = false;
+  showCandidateExplorer(_tb.candidates, true);
+}
+
+function cancelEditCandidates(){
+  _ceEditMode = false;
+  g("candidate-explorer-overlay").style.display="none";
+  if(_ceMap){_ceMap.remove();_ceMap=null;}
+}
+
+// Reconcile the Explorer's kept set against the existing trip.destinations.
+// New keeps → append as new destinations at the end. Existing destinations whose
+// backing candidate is now rejected → confirm with user (naming any content
+// that would be lost), then remove. Unchanged destinations keep all their data.
+async function applyCandidateChanges(){
+  if (!_ceEditMode || !trip) return;
+  var keptNow = (_tb.candidates||[]).filter(function(c){return c.status==="keep";});
+  if (!keptNow.length) {
+    alert("You need at least one kept destination to apply.");
+    return;
+  }
+  var keptNameSet = {};
+  keptNow.forEach(function(c){ keptNameSet[(c.place||"").toLowerCase()] = c; });
+  var destNameSet = {};
+  (trip.destinations||[]).forEach(function(d){ destNameSet[(d.place||"").toLowerCase()] = d; });
+
+  // Destinations to remove (no longer kept)
+  var toRemove = (trip.destinations||[]).filter(function(d){
+    return !keptNameSet[(d.place||"").toLowerCase()];
+  });
+  // Candidates to add (kept now, not already a destination)
+  var toAdd = keptNow.filter(function(c){
+    return !destNameSet[(c.place||"").toLowerCase()];
+  });
+
+  if (!toRemove.length && !toAdd.length) {
+    // Nothing to reconcile — just close
+    cancelEditCandidates();
+    drawTripMode();
+    return;
+  }
+
+  // Build a line-item summary with content-loss warnings
+  function describeDestContent(d){
+    var scheduled = 0;
+    (d.days||[]).forEach(function(day){ scheduled += (day.items||[]).length; });
+    var bookings = (d.hotelBookings||[]).filter(function(b){return b.status==="booked";}).length
+                 + (d.generalBookings||[]).filter(function(b){return b.status==="booked";}).length;
+    var parts = [];
+    if (scheduled) parts.push(scheduled+" scheduled item"+(scheduled!==1?"s":""));
+    if (bookings) parts.push(bookings+" booking"+(bookings!==1?"s":""));
+    return parts.length ? " ("+parts.join(", ")+" will be lost)" : "";
+  }
+  var lines = [];
+  if (toRemove.length) {
+    lines.push("Remove from trip:");
+    toRemove.forEach(function(d){ lines.push("  \u2022 "+d.place+describeDestContent(d)); });
+  }
+  if (toAdd.length) {
+    if (lines.length) lines.push("");
+    lines.push("Add to end of trip:");
+    toAdd.forEach(function(c){ lines.push("  \u2022 "+c.place+(c.stayRange?" ("+c.stayRange+")":"")); });
+  }
+  lines.push("");
+  lines.push("Apply these changes?");
+  if (!confirm(lines.join("\n"))) return;
+
+  // Apply removals — keep other destinations' data intact
+  if (toRemove.length) {
+    var removeIds = {};
+    toRemove.forEach(function(d){ removeIds[d.id] = true; });
+    trip.destinations = (trip.destinations||[]).filter(function(d){ return !removeIds[d.id]; });
+    if (activeDest && removeIds[activeDest]) activeDest = null;
+  }
+
+  // Append new destinations at the end, continuing dates from the last one
+  if (toAdd.length) {
+    var lastDest = trip.destinations[trip.destinations.length-1];
+    var cur = lastDest ? new Date(lastDest.dateTo) : new Date(parseStartDateFromBrief(_tb.when||""));
+    toAdd.forEach(function(c){
+      destCtr++;
+      var id="d"+destCtr;
+      var nights=parseNightsFromRange(c.stayRange)||3;
+      var dateFrom = cur.toISOString().slice(0,10);
+      var next = new Date(cur); next.setDate(next.getDate()+nights);
+      var dateTo = next.toISOString().slice(0,10);
+      var dest = {
+        id:id, place:c.place, intent:c.place+(c.whyItFits?" \u2014 "+c.whyItFits.substring(0,60):""),
+        dateFrom:dateFrom, dateTo:dateTo, nights:nights,
+        days:makeDays(id,c.place,c.place,dateFrom,nights),
+        trackerItems:{booked:[],see:[],visited:[]}, trackerCat:"booked", storyState:"idle",
+        hotelBookings:[], generalBookings:[], locations:[],
+        execMode:false, todayItems:[], discoveredItems:[], suggestions:[],
+        attachedEvents: findAttachedEvents(c, _mdcItems||[])
+      };
+      trip.destinations.push(dest);
+      cur = next;
+      // Kick off city data generation
+      Promise.resolve().then(function(){return generateCityData(c.place, id);}).catch(function(){});
+    });
+  }
+
+  // Update the snapshot on the trip so next re-entry reflects the new state
+  trip.candidates = (_tb.candidates||[]).map(function(c){
+    return {
+      id:c.id, place:c.place, country:c.country||null, role:c.role||null,
+      whyItFits:c.whyItFits||"", tags:c.tags||[], tradeoffs:c.tradeoffs||null,
+      stayRange:c.stayRange||"", lat:c.lat||null, lng:c.lng||null,
+      status:c.status||null, _required:!!c._required, _requiredFor:(c._requiredFor||[]).slice()
+    };
+  });
+  trip.mdcItems = (_mdcItems||[]).map(function(m){return {
+    id:m.id, name:m.name, type:m.type, checked:m.checked,
+    requiredPlaces:m.requiredPlaces, endpoints:m.endpoints, viableLocations:m.viableLocations,
+    direction:m.direction, durationHours:m.durationHours,
+    modeOptions:m.modeOptions, alternatives:m.alternatives, reservationNotes:m.reservationNotes,
+    recovery:m.recovery, frequencyRequirement:m.frequencyRequirement,
+    conditionNote:m.conditionNote, description:m.description, chosenMode:m.chosenMode||null
+  };});
+
+  autoSave && autoSave();
+  localSave && localSave();
+
+  _ceEditMode = false;
+  g("candidate-explorer-overlay").style.display="none";
+  if(_ceMap){_ceMap.remove();_ceMap=null;}
+  drawTripMode();
+  updateMainMap();
+}
+
+function showCandidateExplorer(cands, editMode){
+  _ceEditMode = !!editMode;
   g("trip-brief-overlay").style.display="none";
   var ov=g("candidate-explorer-overlay");
   ov.style.display="block"; ov.className="ce-overlay";
+  var _ceTitle = _ceEditMode ? "Edit your destinations" : "Places to think about";
+  var _ceSub = _ceEditMode
+    ? "Change what to keep or reject \u2014 Apply will update your trip"
+    : "Max\u2019s thoughts on where you might go \u2014 keep what fits, set aside what doesn\u2019t";
   ov.innerHTML='<div class="ce-header">'
-    +'<div><div class="ce-title">Places to think about</div><div class="ce-sub">Max\u2019s thoughts on where you might go \u2014 keep what fits, set aside what doesn\u2019t</div></div>'
-    +'<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:500;margin-right:6px;" onclick="editWhereWhy()">\u2190 Edit where & why</button>'+'<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:500;" onclick="editHowYouTravel()">Edit how you travel</button>'
+    +'<div><div class="ce-title">'+_ceTitle+'</div><div class="ce-sub">'+_ceSub+'</div></div>'
+    +(_ceEditMode
+      ? '<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:500;" onclick="cancelEditCandidates()">Cancel</button>'
+      : '<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:500;margin-right:6px;" onclick="editWhereWhy()">\u2190 Edit where & why</button>'+'<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:500;" onclick="editHowYouTravel()">Edit how you travel</button>')
     +'</div>'
     +'<div class="ce-body">'
     +'<div class="ce-left">'
@@ -4241,7 +4407,9 @@ function showCandidateExplorer(cands){
     +'</div>'
     +'<div class="ce-footer">'
     +'<span style="font-size:10px;color:#888;" id="ce-cnt">0 kept</span>'
-    +'<button class="ce-build-btn" id="ce-build-btn" disabled onclick="buildFromCandidates()">Build trip \u2192</button>'
+    +(_ceEditMode
+      ? '<button class="ce-build-btn" id="ce-build-btn" disabled onclick="applyCandidateChanges()">Apply changes \u2192</button>'
+      : '<button class="ce-build-btn" id="ce-build-btn" disabled onclick="buildFromCandidates()">Build trip \u2192</button>')
     +'</div>';
   setTimeout(function(){
     // Fix flex height collapse before map init
@@ -5036,6 +5204,24 @@ async function buildFromCandidates(){
     }
     pump();
   })(trip.destinations.slice(-kept.length),3);
+
+  // Snapshot the full candidate list (kept + rejected) onto the trip so the user
+  // can re-open the Candidate Explorer later and change their decisions.
+  trip.candidates = (_tb.candidates||[]).map(function(c){
+    return {
+      id:c.id, place:c.place, country:c.country||null, role:c.role||null,
+      whyItFits:c.whyItFits||"", tags:c.tags||[], tradeoffs:c.tradeoffs||null,
+      stayRange:c.stayRange||"", lat:c.lat||null, lng:c.lng||null,
+      status:c.status||null, _required:!!c._required, _requiredFor:(c._requiredFor||[]).slice()
+    };
+  });
+  trip.requiredPlaces = (_tb.requiredPlaces||[]).slice();
+  // Persist the trip-brief fields the Explorer needs to rehydrate
+  if (trip.brief) {
+    trip.brief.duration = _tb.duration || trip.brief.duration || "";
+    trip.brief.entry = _tb.entry || trip.brief.entry || "";
+    trip.brief.tbExit = _tb.tbExit || trip.brief.tbExit || "";
+  }
 
   // Don't re-sort — ordering was already computed event-aware
   _tripsIndex.push({id:tripId,name:_tb.name,destCount:kept.length,dateRange:"",savedAt:new Date().toISOString()});
@@ -8334,6 +8520,15 @@ function drawTripMode(){
   var listHdr=document.createElement("div"); listHdr.style.cssText="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;";
   var lbl=document.createElement("div"); lbl.className="tm-sec-title"; lbl.style.marginBottom="0"; lbl.textContent="Destinations";
   listHdr.appendChild(lbl);
+  // Edit candidates — only shown if we have a saved candidate snapshot from build
+  if (trip.candidates && trip.candidates.length) {
+    var editBtn=document.createElement("button");
+    editBtn.style.cssText="font-size:10px;color:#1a5fa8;background:none;border:none;cursor:pointer;padding:0;font-family:inherit;text-decoration:underline;";
+    editBtn.textContent="Edit candidates \u2192";
+    editBtn.title="Re-open the Candidate Explorer with your current keep/reject decisions";
+    editBtn.onclick=function(){reopenCandidateExplorer();};
+    listHdr.appendChild(editBtn);
+  }
 
   listSec.appendChild(listHdr);
 
