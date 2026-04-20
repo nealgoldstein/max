@@ -3144,7 +3144,7 @@ async function runCandidateSearch(requiredPlaces) {
       + "Trip context: " + brief + "\n\n"
       + "Describe why each is genuinely worth visiting — character, what to see and do, what makes it special. Trains may be one reason but not the only one.\n"
       + "Return ONLY a JSON array (no markdown):\n"
-      + '[{"place":"City","country":"Country","role":"anchor","stayRange":"2-4 nights","whyItFits":"Why worth visiting.","tradeoffs":"One downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here beyond the trip\u2019s stated reason (e.g. specific viewpoints, walks, museums, neighborhoods, dishes).","lat":0.0,"lng":0.0}]'
+      + '[{"place":"City","country":"Country","role":"anchor","stayRange":"2-4 nights","whyItFits":"Why worth visiting.","tradeoffs":"One downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here beyond the trip\u2019s stated reason (e.g. specific viewpoints, walks, museums, neighborhoods, dishes).","widelyRecommended":false,"lat":0.0,"lng":0.0}]\nSet widelyRecommended=true if this is a place that appears on most standard itineraries for this region (a canonical destination a first-time traveler would likely hear about) \u2014 false otherwise.'
     : null;
 
   var releasedPlaces = _tb.releasedPlaces || [];
@@ -3184,7 +3184,7 @@ async function runCandidateSearch(requiredPlaces) {
     + "For " + (_tb.region||"this region") + ", think about the cities that anchor the country's identity \u2014 the capital, the banking/cultural centers, "
     + "the historic trade cities. Include them even if they don't obviously fit this traveler's theme; the traveler can decide.\n"
     + "Return ONLY a JSON array of exactly " + cityCount + " places (no markdown):\n"
-    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why a traveler to this region would want to see it \u2014 specific, not generic.","tradeoffs":"One honest downside (e.g. expensive, touristy, requires rearranging the trip).","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here.","lat":0.0,"lng":0.0}]';
+    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why a traveler to this region would want to see it \u2014 specific, not generic.","tradeoffs":"One honest downside (e.g. expensive, touristy, requires rearranging the trip).","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here.","widelyRecommended":false,"lat":0.0,"lng":0.0}]\nSet widelyRecommended=true if this place appears on most standard itineraries for the region \u2014 a canonical destination \u2014 false otherwise.';
 
   var pThematic = "You are a travel expert helping plan a trip to " + (_tb.region||"this region") + ".\n"
     + "Trip context: " + brief + "\n"
@@ -3196,7 +3196,7 @@ async function runCandidateSearch(requiredPlaces) {
     + "These should NOT be the obvious major cities (those are handled separately). Focus on less obvious places that reward the kind of traveler this is: "
     + "scenic towns, regional hubs, natural areas, places that deepen the trip's theme.\n"
     + "Return ONLY a JSON array of exactly " + thematicCount + " places (no markdown):\n"
-    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"What makes it worth visiting for this specific trip \u2014 specific, not generic.","tradeoffs":"One honest downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here beyond the trip\u2019s stated reason.","lat":0.0,"lng":0.0}]';
+    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"What makes it worth visiting for this specific trip \u2014 specific, not generic.","tradeoffs":"One honest downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here beyond the trip\u2019s stated reason.","widelyRecommended":false,"lat":0.0,"lng":0.0}]\nSet widelyRecommended=true if this is a canonical destination for the region \u2014 false otherwise.';
 
   // Run all three in parallel — total wait = max(p1, pCities, pThematic)
   var calls = [];
@@ -3314,7 +3314,7 @@ async function recoverRequiredDescriptions(cands) {
       + "For each, describe why it is genuinely worth visiting \u2014 character, what's there, what makes it worth the stop. "
       + "If the place is primarily a scenic waypoint (a train station, summit, viewpoint), say so honestly and describe what the experience is like rather than inventing reasons to linger.\n\n"
       + "Return ONLY a JSON array (no markdown):\n"
-      + '[{"place":"Name","whyItFits":"2-3 sentences.","tradeoffs":"One honest downside.","tags":["tag1","tag2"],"otherAttractions":"2-3 other things worth considering here.","stayRange":"2-4 nights"}]';
+      + '[{"place":"Name","whyItFits":"2-3 sentences.","tradeoffs":"One honest downside.","tags":["tag1","tag2"],"otherAttractions":"2-3 other things worth considering here.","widelyRecommended":false,"stayRange":"2-4 nights"}]\nSet widelyRecommended=true for canonical destinations in the region, false otherwise.';
     try {
       var text = await callMax([{role:"user",content:prompt}], 1500, 40000);
       var parsed = JSON.parse(text.replace(/```json|```/g,"").trim());
@@ -4353,7 +4353,7 @@ async function findCandidates(){
     +(_tb.interests&&_tb.interests.length?"\nInterests: "+_tb.interests.join(", "):"")
     +(_tb.constraints?"\nConstraints: "+_tb.constraints:"")
     +"\n\nReturn ONLY a valid JSON array (no markdown):\n"
-    +'[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why.","tradeoffs":"Downside.","tags":["tag1","tag2"],"otherAttractions":"2-3 other things worth considering here.","lat":48.2,"lng":16.4}]'
+    +'[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why.","tradeoffs":"Downside.","tags":["tag1","tag2"],"otherAttractions":"2-3 other things worth considering here.","widelyRecommended":false,"lat":48.2,"lng":16.4}]\nSet widelyRecommended=true for canonical destinations.'
     +"\nMix roles: base, anchor, pass-through. Include real lat/lng.";
   try{
     var text=await callMax([{role:"user",content:prompt}],2000);
@@ -4376,7 +4376,7 @@ async function findCandidates(){
 }
 
 // ─── CANDIDATE EXPLORER ────────────────────────────────────
-var _ceMap=null,_ceMarkers=[],_ceRejectedExpanded=false,_ceEditMode=false;
+var _ceMap=null,_ceMarkers=[],_ceRejectedExpanded=false,_ceEditMode=false,_ceBestMode=false;
 
 async function retryDiscoveryCandidates() {
   var existingReq = (_tb.candidates||[]).filter(function(c){ return c._required; });
@@ -4418,7 +4418,7 @@ async function retryDiscoveryCandidates() {
     + "A traveler doing this trip would almost certainly regret missing: the major gateway cities, the cultural capitals, the places everyone who has been there mentions. Include those. "
     + "Then add less obvious places that specifically fit what this traveler wants.\n"
     + "Return ONLY a JSON array of exactly " + extraCount + " places (no markdown):\n"
-    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"What makes it worth visiting — specific, not generic.","tradeoffs":"One honest downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here.","lat":0.0,"lng":0.0}]';
+    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"What makes it worth visiting — specific, not generic.","tradeoffs":"One honest downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here.","widelyRecommended":false,"lat":0.0,"lng":0.0}]\nSet widelyRecommended=true for canonical destinations.';
   try {
     var t = await callMax([{role:"user",content:p2}], 2000, 45000);
     var newCands = JSON.parse(t.replace(/```json|```/g,"").trim());
@@ -4852,9 +4852,12 @@ function renderCandidateCards(cands){
       // Rejected or otherwise-ungrouped candidate with required links — show full list
       reqBadge = '<div style="font-size:9px;font-weight:700;color:#1a5fa8;background:#e8f0fc;padding:2px 7px;border-radius:10px;margin:2px 0 4px;display:inline-block;">\uD83D\uDE82 Required for: '+allRefs.join(", ")+'</div>';
     }
+    var wrTag = c.widelyRecommended
+      ? '<span style="font-size:9px;color:#6a4a80;font-weight:600;margin-left:6px;">widely recommended</span>'
+      : '';
     card.innerHTML='<div class="ce-card-top">'
       +'<div style="display:flex;justify-content:space-between;align-items:baseline;">'
-      +'<div class="ce-card-name">'+c.place+'</div>'
+      +'<div class="ce-card-name">'+c.place+wrTag+'</div>'
       +(sl?'<div style="font-size:9px;font-weight:700;color:'+sc+';">'+sl+'</div>':'')
       +'</div>'
       +reqBadge
@@ -4895,6 +4898,30 @@ function renderCandidateCards(cands){
     }
   }
 
+  // Top control: "Show me the best" / "Show all" toggle that caps each must-do
+  // section to its top pick (ranked: kept > required > first in array) and hides
+  // the Discovery pool. A quick-scan mode for travelers who feel overwhelmed.
+  var topCtrl = document.createElement("div");
+  topCtrl.style.cssText = "padding:6px 4px 0;display:flex;justify-content:flex-end;";
+  var bestBtn = document.createElement("button");
+  bestBtn.style.cssText = "font-size:10px;padding:4px 10px;border-radius:5px;border:1px solid #ddd;background:#fff;color:#333;cursor:pointer;font-family:inherit;font-weight:600;";
+  bestBtn.textContent = _ceBestMode ? "Show all" : "Show me the best";
+  bestBtn.onclick = function(){ _ceBestMode = !_ceBestMode; renderCandidateCards(_tb.candidates); };
+  topCtrl.appendChild(bestBtn);
+  el.appendChild(topCtrl);
+
+  function bestPickFirst(group){
+    var sorted = group.slice().sort(function(a,b){
+      var ak = a.status === "keep" ? 0 : 1;
+      var bk = b.status === "keep" ? 0 : 1;
+      if (ak !== bk) return ak - bk;
+      var ar = a._required ? 0 : 1;
+      var br = b._required ? 0 : 1;
+      return ar - br;
+    });
+    return sorted;
+  }
+
   // Render one section per must-do in sentence order. Each candidate appears in
   // exactly one section — its primary must-do.
   mustDoOrder.forEach(function(mdName){
@@ -4904,15 +4931,38 @@ function renderCandidateCards(cands){
     hdr.style.cssText = "margin-top:12px;padding:8px 4px 6px;font-size:12px;font-weight:700;color:#1a5fa8;letter-spacing:0.02em;border-bottom:1px solid #e8f0fc;";
     hdr.textContent = "For " + mdName;
     el.appendChild(hdr);
-    group.forEach(function(c){ renderCard(c, el); });
+    var display = _ceBestMode ? bestPickFirst(group).slice(0, 1) : group;
+    display.forEach(function(c){ renderCard(c, el); });
+    if (_ceBestMode && group.length > 1) {
+      var more = document.createElement("div");
+      more.style.cssText = "font-size:10px;color:#888;padding:4px 8px 8px;font-style:italic;";
+      more.textContent = "+ " + (group.length - 1) + " more, hidden \u2014 Show all to see";
+      el.appendChild(more);
+    }
   });
-  // After all must-do sections: the "Other places worth considering" pool
-  if (discoveryCands.length) {
+
+  // Split discovery into "Known for" (widelyRecommended) and the rest.
+  // The "Known for" section only appears when the user said they're new to the
+  // region — for experienced travelers, widelyRecommended just shows as an inline
+  // tag on the card in regular Discovery.
+  var firstTime = (_tb && _tb.familiarity === "first");
+  var knownForCands = firstTime ? discoveryCands.filter(function(c){return c.widelyRecommended;}) : [];
+  var regularDiscovery = firstTime ? discoveryCands.filter(function(c){return !c.widelyRecommended;}) : discoveryCands;
+
+  if (knownForCands.length && !_ceBestMode) {
+    var khdr = document.createElement("div");
+    khdr.style.cssText = "margin-top:14px;padding:10px 4px 6px;font-size:10px;font-weight:700;text-transform:uppercase;color:#6a4a80;letter-spacing:0.06em;border-top:1px solid #e8e8e8;";
+    khdr.textContent = "Known for — places most travelers to the region visit";
+    el.appendChild(khdr);
+    knownForCands.forEach(function(c){ renderCard(c, el); });
+  }
+
+  if (regularDiscovery.length && !_ceBestMode) {
     var dhdr = document.createElement("div");
     dhdr.style.cssText = "margin-top:14px;padding:10px 4px 6px;font-size:10px;font-weight:700;text-transform:uppercase;color:#111;letter-spacing:0.06em;border-top:1px solid #e8e8e8;";
     dhdr.textContent = "Other places worth considering";
     el.appendChild(dhdr);
-    discoveryCands.forEach(function(c){ renderCard(c, el); });
+    regularDiscovery.forEach(function(c){ renderCard(c, el); });
   }
 
   // Collapsed rejected section — out of the way but one click to revisit
