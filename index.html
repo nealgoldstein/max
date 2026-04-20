@@ -2202,6 +2202,60 @@ function showHomeApiKeyForm(){
 // ── MUST-DO EXPANSION (Step 1.5) ────────────────────────────
 var _mdcItems = [];
 
+// Kick off a parallel LLM call that turns the user's interest chips into
+// concrete, named suggestions for this region. These aren't must-dos — they're
+// the "menu" of other things worth considering once the must-dos are covered.
+// Populates _mdcChipSuggestions (unchecked by default). Fires in parallel with
+// expandMustDos so there's no extra perceived latency.
+var _mdcChipSuggestions = [];
+async function expandChipSuggestions(region, intent, chips){
+  _mdcChipSuggestions = [];
+  if (!chips || !chips.length) return;
+  var chipList = chips.join(", ");
+  var prompt = "A traveler is going to " + region + "."
+    + (intent ? " Their stated goal: " + intent + "." : "")
+    + " Their must-dos (the anchors) are handled separately. They also tapped these general interests: " + chipList + ".\n\n"
+    + "For each interest, suggest 2-3 specific, named experiences worth considering in " + region + " — things a thoughtful traveler might want to do beyond their stated must-dos. These are OPTIONAL menu items, not requirements.\n\n"
+    + "Return ONLY a JSON array (no markdown). Each item:\n"
+    + '[{"name":"Specific named experience","type":"activity","description":"One sentence on what it is and why it\'s worth considering here.","requiredPlaces":[{"place":"City","country":"Country"}],"durationHours":6,"interest":"which chip this came from"}]\n\n'
+    + "Max 10 items total, skewed to the most interesting and feasible. Be specific — real named places, not generic categories. No duplicates of obvious must-dos.\n\n"
+    + "CRITICAL: requiredPlaces is an ARRAY OF OBJECTS, each with place and country strings. Even for a single-country trip, always include country.";
+  try {
+    var text = await callMax([{role:"user",content:prompt}], 2000, 30000);
+    var cleaned = text.replace(/```json|```/g,"").trim();
+    var items;
+    try { items = JSON.parse(cleaned); }
+    catch(e) {
+      // Attempt recovery on truncated response
+      var last = cleaned.lastIndexOf("},");
+      if (last > 0) {
+        try { items = JSON.parse(cleaned.substring(0, last+1) + "]"); } catch(_) { throw e; }
+      } else throw e;
+    }
+    var regionCountry = (_tb && _tb.region) ? _tb.region : "";
+    items.forEach(function(item, i){
+      item.id = "mdc-chip-" + i;
+      item.checked = false; // suggestions start OFF; user opts in
+      item.fromChip = true;
+      if (Array.isArray(item.requiredPlaces)) {
+        item.requiredPlaces = item.requiredPlaces.map(function(p){
+          if (typeof p === "string") return {place: p, country: regionCountry};
+          return p;
+        });
+      }
+    });
+    _mdcChipSuggestions = items;
+    // Refresh the section and banner if the must-do page is open
+    if (document.getElementById("mdc-body")) {
+      _renderChipSuggestionsSection();
+      _updateForcedMarchBanner();
+    }
+  } catch(e) {
+    console.warn("Chip suggestion expansion failed:", e && e.message);
+    _mdcChipSuggestions = [];
+  }
+}
+
 async function expandMustDos() {
   // Pull from DOM if present, fall back to _tb state (fields may not exist in current step)
   var anchors = (g("tb-anchors") ? g("tb-anchors").value.trim() : "") || _tb.anchors || "";
@@ -2213,11 +2267,15 @@ async function expandMustDos() {
 
   showMustDoConfirmation(null); // loading state
 
+  // Fire chip-based suggestions in parallel so the "menu" section can populate
+  // without adding to the user's wait time.
+  expandChipSuggestions(region, intent, _tb.chips || []);
+
   var prompt = "A traveler is planning a trip to " + (region||"this region") + ".\n"
     + (intent ? "Their goal: " + intent + "\n" : "")
     + "They listed these must-dos: \"" + anchors + "\"\n\n"
-    + "Expand each must-do into specific named experiences. There are two types.\n\n"
-    + "TYPE 1 — ROUTE: a fixed journey between specific places (a train, a road trip, a hiking trail). Has ordered endpoints.\n"
+    + "CRITICAL: Generate at least one item for EVERY distinct thing they named. If they said 'ride the named trains, hike the mountains, explore the culture, eat chocolate' you must produce items for each of the four — not just the trains. Do not silently drop any. There are three types.\n\n"
+    + "TYPE 1 \u2014 ROUTE: a fixed journey between specific places (a train, a road trip, a hiking trail). Has ordered endpoints.\n"
     + "  Required fields for routes:\n"
     + "    • endpoints: ordered array [start, end] — the traditional direction if one exists\n"
     + "    • requiredPlaces: same as endpoints (for backward compatibility)\n"
@@ -2233,6 +2291,11 @@ async function expandMustDos() {
     + "    • recovery: \"low\" / \"moderate\" / \"high\" — how much the next day needs to be easy. Aurora hunt = high (up until 2-3am, next day must start late and move slowly). Dawn at Angkor = moderate. Wildflower hike = low.\n"
     + "    • frequencyRequirement: minimum number of nights the trip should spend in viable locations so the condition has a real chance (aurora: 3+ nights; bloom or wildlife: 2+ depending on flexibility)\n"
     + "    • conditionNote: one-sentence description of what the traveler needs to understand about planning around this\n\n"
+    + "TYPE 3 — ACTIVITY: anything else the traveler named that isn't a fixed route or a weather-dependent condition. Covers things like 'eat chocolate', 'take walks in the mountains', 'explore local culture', 'visit museums', 'relax on a beach', 'drink in the cafes'. An activity is pursued across one or more places where it's especially worthwhile.\n"
+    + "  Required fields for activities:\n"
+    + "    • requiredPlaces: array of place objects where this activity is especially good. If the activity is genuinely region-wide, pick 2-4 of the most notable spots (e.g. for 'eat chocolate in Switzerland': Zurich, Lucerne, Broc).\n"
+    + "    • durationHours: rough total time a committed traveler would want to spend on this across the whole trip (e.g. 'explore Swiss culture thoroughly' might be 16 hours spread over several days; 'eat chocolate seriously' might be 6 hours across 2-3 tasting visits).\n"
+    + "    • description: specific, concrete sentence about what doing this well looks like here.\n\n"
     + "META-REFERENCES: If the traveler uses something like \"all the named trains\", \"the scenic trains\", \"the major museums\", \"the cathedrals\", expand into every specific named instance that fits the region — do not pick one or two. If the phrase implies branded experiences (e.g. \"the named scenic trains\"), set modeOptions to \"both\" and include the ordinary alternative in the alternatives field.\n\n"
     + "Return ONLY a JSON array (no markdown):\n"
     + '[\n'
@@ -2334,6 +2397,8 @@ function renderMustDoItems(items) {
   body.innerHTML = "";
   // Insert the forced-march banner above the list (no-op if already present)
   _updateForcedMarchBanner();
+  // Mount the chip-suggestions section below; populates when chips finish loading
+  _renderChipSuggestionsSection();
 
   items.forEach(function(item) {
     var div = document.createElement("div");
@@ -2512,8 +2577,8 @@ function renderMdcItemHtml(item) {
 function _mdcItemDays(item){
   if (!item || !item.checked) return 0;
   if (item.type === "condition") return 0; // weather/season items flavor existing days, don't add new ones
-  if (item.type === "route" && item.durationHours) {
-    // Route with a known duration — minimum 1 day, ceiling of hours/8
+  if (item.durationHours) {
+    // Any item the LLM estimated hours for (route, activity) — ceil(hours/8), min 1
     return Math.max(1, Math.ceil(item.durationHours / 8));
   }
   if (item.type === "manual") return 2; // typical minimum for a place worth adding
@@ -2522,6 +2587,82 @@ function _mdcItemDays(item){
 
 function _totalForcedMarchDays(){
   return (_mdcItems||[]).reduce(function(s, i){ return s + _mdcItemDays(i); }, 0);
+}
+
+function _totalChipSuggestionDaysSelected(){
+  return (_mdcChipSuggestions||[]).reduce(function(s, i){ return s + _mdcItemDays(i); }, 0);
+}
+
+function _totalChipSuggestionDaysAll(){
+  // Hypothetical: what if the user checked ALL the chip suggestions?
+  return (_mdcChipSuggestions||[]).reduce(function(s, i){
+    return s + _mdcItemDays({checked:true, durationHours:i.durationHours, type:i.type});
+  }, 0);
+}
+
+// Toggle a chip-suggestion item in or out of the day total. Mirrors
+// toggleMdcItem's structure but for the optional-menu side.
+function toggleChipSuggestion(id){
+  var item = (_mdcChipSuggestions||[]).find(function(x){return x.id === id;});
+  if (!item) return;
+  item.checked = !item.checked;
+  var div = document.getElementById("mdc-item-" + id);
+  if (div) {
+    div.className = "mdc-item" + (item.checked ? " checked" : "");
+    var check = div.querySelector(".mdc-check");
+    if (check) check.textContent = item.checked ? "\u2713" : "";
+  }
+  _updateForcedMarchBanner();
+}
+
+// Render the "Other things worth considering" section on the must-do page.
+// Idempotent — replaces the section if it exists.
+function _renderChipSuggestionsSection(){
+  var region = (_tb && _tb.region) || "the region";
+  // Find or create host
+  var host = document.getElementById("mdc-chip-section");
+  if (!host) {
+    var body = document.getElementById("mdc-body");
+    if (!body) return;
+    host = document.createElement("div");
+    host.id = "mdc-chip-section";
+    host.style.cssText = "padding:14px 24px 0;box-sizing:border-box;margin-top:8px;border-top:1px solid #eee;";
+    // Insert after mdc-body
+    body.parentNode.insertBefore(host, body.nextSibling);
+  }
+  host.innerHTML = "";
+  if (!_mdcChipSuggestions || !_mdcChipSuggestions.length) {
+    host.style.display = "none";
+    return;
+  }
+  host.style.display = "block";
+  var hdr = document.createElement("div");
+  hdr.style.cssText = "font-size:11px;font-weight:700;color:#555;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.05em;";
+  hdr.textContent = "Other things worth considering in " + region;
+  host.appendChild(hdr);
+  var sub = document.createElement("div");
+  sub.style.cssText = "font-size:11px;color:#888;margin-bottom:10px;line-height:1.55;";
+  sub.textContent = "Based on your interests. Optional — tap any you'd want to make room for.";
+  host.appendChild(sub);
+  _mdcChipSuggestions.forEach(function(item){
+    var div = document.createElement("div");
+    div.className = "mdc-item" + (item.checked ? " checked" : "");
+    div.id = "mdc-item-" + item.id;
+    var isCondition = item.type === "condition";
+    var placesRowHtml = (item.requiredPlaces||[]).map(function(p,i){
+      return (i>0?'<span class="mdc-place-arrow">\u2192</span>':'')+'<span class="mdc-place">'+p.place+'</span>';
+    }).join("");
+    var placesSection = placesRowHtml
+      ? '<div class="mdc-item-places"><div class="mdc-places-label">Worth doing in:</div><div class="mdc-places-row">'+placesRowHtml+'</div></div>'
+      : '';
+    div.innerHTML = '<div class="mdc-item-top" onclick="toggleChipSuggestion(\''+item.id+'\')">'
+      +'<div class="mdc-check">'+(item.checked?'\u2713':'')+'</div>'
+      +'<div><div class="mdc-item-name">'+item.name+'</div>'
+      +'<div class="mdc-item-desc">'+(item.description||'')+(item.interest?' <span style="color:#aaa;">\u00b7 '+item.interest+'</span>':'')+'</div></div>'
+      +'</div>'
+      +placesSection;
+    host.appendChild(div);
+  });
 }
 
 // How many days does the user's checked must-do list actually require AT this
@@ -2575,23 +2716,37 @@ function showKeepToast(cand){
 function _updateForcedMarchBanner(){
   var host = document.getElementById("mdc-fm-banner");
   var total = _totalForcedMarchDays();
+  var chipSelected = _totalChipSuggestionDaysSelected();
+  var chipAvailable = _totalChipSuggestionDaysAll();
+  var region = (_tb && _tb.region) || "this region";
   var budget = _parseTripDuration((_tb && _tb.duration) || "");
   var msg;
+  var lines = [];
   if (total === 0) {
-    msg = '<span style="color:#888;">Nothing checked yet \u2014 pick what you actually want to do.</span>';
-  } else if (!budget) {
-    msg = 'At a forced march this would take <strong>about ' + total + ' day' + (total!==1?'s':'') + '</strong>. You didn\u2019t say how long your trip is, so there\u2019s no way to compare.';
+    lines.push('<span style="color:#888;">Nothing checked yet \u2014 pick what you actually want to do.</span>');
   } else {
-    var base = 'At a forced march this would take <strong>about ' + total + ' day' + (total!==1?'s':'') + '</strong>. Your trip is ' +
-      (budget.min===budget.max ? (budget.max + ' days') : (budget.min + '\u2013' + budget.max + ' days')) + '.';
-    if (total > budget.max) {
-      msg = base + ' <strong style="color:#c05020;">You\u2019ll need to pare some down, or extend the trip.</strong>';
-    } else if (total > budget.min) {
-      msg = base + ' <span style="color:#b05820;">That\u2019s right at the edge \u2014 room to add only if something else is dropped.</span>';
-    } else {
-      msg = base + ' <span style="color:#2a7a4e;">You\u2019ve got room to breathe, or room to add more.</span>';
+    var combined = total + chipSelected;
+    var primaryLine = 'Based on your must-dos, this takes <strong>about ' + total + ' day' + (total!==1?'s':'') + '</strong>.';
+    if (chipSelected > 0) primaryLine += ' With the other things you\u2019ve added, <strong>' + combined + ' days</strong>.';
+    if (budget) {
+      primaryLine += ' Your trip is ' + (budget.min===budget.max ? (budget.max + ' days') : (budget.min + '\u2013' + budget.max + ' days')) + '.';
+      if (combined > budget.max) {
+        primaryLine += ' <strong style="color:#c05020;">You\u2019ll need to pare some down, or extend the trip.</strong>';
+      } else if (combined > budget.min) {
+        primaryLine += ' <span style="color:#b05820;">Right at the edge.</span>';
+      } else {
+        primaryLine += ' <span style="color:#2a7a4e;">You\u2019ve got room.</span>';
+      }
+    }
+    lines.push(primaryLine);
+    if (chipAvailable > 0 && chipSelected === 0) {
+      lines.push('<span style="color:#666;">But there are other great places and things to do in ' + region + ' \u2014 doing all of those would take about <strong>' + chipAvailable + ' more days</strong>. Tap any you\u2019d want to make room for.</span>');
+    } else if (chipAvailable > chipSelected) {
+      var remaining = chipAvailable - chipSelected;
+      lines.push('<span style="color:#888;">Another ' + remaining + ' day' + (remaining!==1?'s':'') + ' of suggestions below, if you want more.</span>');
     }
   }
+  msg = lines.join("<br>");
   if (host) { host.innerHTML = msg; return; }
   // No banner exists yet — inject it above the mdc-body
   var body = document.getElementById("mdc-body");
@@ -2684,6 +2839,14 @@ function updateMdcSummary() {
 }
 
 function confirmMustDos() {
+  // Fold any checked chip-suggestions into _mdcItems so they flow through the
+  // rest of the pipeline (candidate requiredFor, day totals, cascade logic)
+  // exactly like must-dos. Unchecked suggestions stay out.
+  (_mdcChipSuggestions||[]).forEach(function(cs){
+    if (!cs.checked) return;
+    if (_mdcItems.some(function(m){ return m.id === cs.id; })) return;
+    _mdcItems.push(cs);
+  });
   var checked = _mdcItems.filter(function(x){ return x.checked; });
   var unchecked = _mdcItems.filter(function(x){ return !x.checked; });
   var requiredMap = {};
@@ -3706,10 +3869,10 @@ function renderTripBrief(){
     +'<div class="tb-field"><label>When you want to go</label><input id="tb-when" placeholder="e.g. September\u2013October, shoulder season. Or: fixed dates Jun 12\u201328." /></div>'
     +'<div class="tb-field"><label>How long you want to travel</label><input id="tb-duration" placeholder="e.g. 10\u201314 days, three weeks\u2026" /></div>'
 
-    +'<div style="margin-top:14px;padding:8px 12px;background:#f0ede3;border-radius:6px;font-size:11px;font-weight:700;color:#555;letter-spacing:0.03em;text-transform:uppercase;">How you\u2019re moving</div>'
+    +'<div style="margin-top:14px;padding:8px 12px;background:#f0ede3;border-radius:6px;font-size:11px;font-weight:700;color:#555;letter-spacing:0.03em;text-transform:uppercase;">How you\u2019ll be moving within '+(_tb.region||'the region')+'</div>'
     +'<div style="font-size:11px;color:#888;margin:4px 2px 10px;line-height:1.55;">How you\u2019ll get between destinations. Arrival and departure will come later \u2014 after you\u2019ve decided where you\u2019re going.</div>'
 
-    +'<div class="tb-field"><label>How you\u2019re moving within '+(_tb.region||'the region')+'</label>'
+    +'<div class="tb-field">'
     +'<input id="tb-transport" value="'+(_tb.transport||'')+'" placeholder="e.g. Trains and walking. Swiss Travel Pass. Taxi when needed. No rental car." />'
     +'<div style="font-size:10px;color:#aaa;margin-top:3px;">The main way you\u2019ll get between destinations. Named passes, rental car, mixed \u2014 whatever fits.</div>'
     +'</div>'
