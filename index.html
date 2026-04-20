@@ -4440,7 +4440,7 @@ async function findCandidates(){
 }
 
 // ─── CANDIDATE EXPLORER ────────────────────────────────────
-var _ceMap=null,_ceMarkers=[],_ceRejectedExpanded=false,_ceEditMode=false,_ceBestMode=true,_ceSummaryView=true,_ceCardExpanded={};
+var _ceMap=null,_ceMarkers=[],_ceRejectedExpanded=false,_ceEditMode=false,_ceBestMode=true,_ceCardExpanded={};
 
 async function retryDiscoveryCandidates() {
   var existingReq = (_tb.candidates||[]).filter(function(c){ return c._required; });
@@ -4937,14 +4937,18 @@ function renderCandidateCards(cands){
     var alsoHereHtml = alsoHere
       ? '<div style="font-size:11px;color:#555;line-height:1.5;margin-top:4px;"><strong style="color:#333;font-weight:600;">Also here:</strong> '+alsoHere+'</div>'
       : '';
-    // Compact header — always visible. Name, role, stay, status, Keep/chevron.
-    // Gives the user enough to decide "this is good, keep moving" without reading
-    // a paragraph.
+    // Compact header — always visible. Name + role/stay + status + "Also supports"
+    // badge (so you see at a glance which other activities this place covers) +
+    // Keep and expand-chevron buttons.
+    var compactAlso = (primary && otherRefs.length)
+      ? '<span style="font-size:9px;font-weight:600;color:#1a5fa8;background:#e8f0fc;padding:2px 7px;border-radius:10px;">Also supports: '+otherRefs.join(", ")+'</span>'
+      : '';
     var compactHtml = '<div class="ce-card-compact" style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;cursor:pointer;">'
       +'<div style="flex:1;min-width:0;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">'
       +'<span class="ce-card-name" style="font-size:13px;font-weight:700;color:#111;">'+c.place+'</span>'
       +'<span style="font-size:10px;color:#888;">'+rIcon(c.role)+' '+(c.role||'')+(c.stayRange?' \u00b7 '+c.stayRange:'')+(c.country?' \u00b7 '+c.country:'')+'</span>'
       +wrTag
+      +compactAlso
       +(sl?'<span style="font-size:9px;font-weight:700;color:'+sc+';">'+sl+'</span>':'')
       +'</div>'
       +'<div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">'
@@ -5013,71 +5017,37 @@ function renderCandidateCards(cands){
     }
   }
 
-  // Summary view — the calm first impression. Shows the kept places in order
-  // and a prominent Build button; sections and cards stay hidden until the user
-  // chooses to look at the options. This collapses the "wall of data" feeling
-  // without losing any of the detail for travelers who want it.
+  // Slim header — always visible. One line of context + a Build button + the
+  // Show-me-the-best/Show-all density toggle. No summary takeover; sections are
+  // the primary view.
   var kept = (_tb.candidates||[]).filter(function(c){ return c.status === "keep"; });
-  var summaryWrap = document.createElement("div");
-  summaryWrap.style.cssText = "margin:8px 4px 12px;padding:14px 16px;background:#fff;border:1px solid #e0e8f0;border-radius:10px;";
-  var summaryHead = document.createElement("div");
-  summaryHead.style.cssText = "font-size:12px;font-weight:700;color:#1a5fa8;margin-bottom:4px;letter-spacing:0.02em;";
-  summaryHead.textContent = kept.length
-    ? "Max\u2019s idea of your trip"
-    : "No destinations picked yet";
-  summaryWrap.appendChild(summaryHead);
-  var summarySub = document.createElement("div");
-  summarySub.style.cssText = "font-size:11px;color:#888;margin-bottom:10px;line-height:1.55;";
-  summarySub.textContent = kept.length
-    ? "These are the places Max thinks fit what you told it. They may not be what you had in mind — open the options below to swap, drop, or add."
-    : "Open the options below to pick where you\u2019d like to go.";
-  summaryWrap.appendChild(summarySub);
-  if (kept.length) {
-    var keptLine = document.createElement("div");
-    keptLine.style.cssText = "font-size:13px;color:#111;line-height:1.65;margin-bottom:6px;";
-    keptLine.innerHTML = kept.map(function(c){return '<strong>'+c.place+'</strong>';}).join(' \u00b7 ');
-    summaryWrap.appendChild(keptLine);
-  }
-  var sumStay = document.createElement("div");
-  sumStay.id = "ce-summary-stay";
-  sumStay.style.cssText = "font-size:11px;color:#888;margin-bottom:10px;";
-  summaryWrap.appendChild(sumStay);
-  var sumBtns = document.createElement("div");
-  sumBtns.style.cssText = "display:flex;gap:8px;flex-wrap:wrap;";
+  var headerWrap = document.createElement("div");
+  headerWrap.style.cssText = "margin:8px 4px 10px;padding:10px 14px;background:#fff;border:1px solid #e0e8f0;border-radius:8px;";
+  var headerLabel = document.createElement("div");
+  headerLabel.style.cssText = "font-size:11px;color:#555;line-height:1.55;margin-bottom:4px;";
+  headerLabel.innerHTML = kept.length
+    ? 'Max picked these to start: ' + kept.map(function(c){return '<strong style="color:#111;">'+c.place+'</strong>';}).join(' \u00b7 ') + '.'
+    : '<em>Nothing kept yet \u2014 pick at least one place below to build a trip.</em>';
+  headerWrap.appendChild(headerLabel);
+  var headerStay = document.createElement("div");
+  headerStay.id = "ce-summary-stay";
+  headerStay.style.cssText = "font-size:10px;color:#888;margin-bottom:8px;";
+  headerWrap.appendChild(headerStay);
+  var headerBtns = document.createElement("div");
+  headerBtns.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;align-items:center;";
   var sumBuild = document.createElement("button");
-  sumBuild.style.cssText = "font-size:12px;font-weight:700;padding:9px 16px;border-radius:6px;border:1px solid #111;background:#111;color:#fff;cursor:pointer;font-family:inherit;"+(kept.length?"":"opacity:0.5;cursor:not-allowed;");
-  sumBuild.textContent = "Build trip \u2192";
+  sumBuild.style.cssText = "font-size:11px;font-weight:700;padding:7px 13px;border-radius:5px;border:1px solid #111;background:#111;color:#fff;cursor:pointer;font-family:inherit;"+(kept.length?"":"opacity:0.5;cursor:not-allowed;");
+  sumBuild.textContent = _ceEditMode ? "Apply changes \u2192" : "Build trip \u2192";
   sumBuild.disabled = !kept.length;
   sumBuild.onclick = function(){ if (!sumBuild.disabled) (_ceEditMode ? applyCandidateChanges() : buildFromCandidates()); };
-  sumBtns.appendChild(sumBuild);
-  var sumToggle = document.createElement("button");
-  sumToggle.style.cssText = "font-size:11px;font-weight:600;padding:9px 14px;border-radius:6px;border:1px solid #ddd;background:#fff;color:#555;cursor:pointer;font-family:inherit;";
-  sumToggle.textContent = _ceSummaryView ? "Let me look at the options \u2193" : "\u2191 Hide options";
-  sumToggle.onclick = function(){ _ceSummaryView = !_ceSummaryView; renderCandidateCards(_tb.candidates); };
-  sumBtns.appendChild(sumToggle);
-  summaryWrap.appendChild(sumBtns);
-  el.appendChild(summaryWrap);
-
-  // If the user is in summary view, render no further sections — the shortlist
-  // and Build button ARE the screen. Updates to the stay-total line happen via
-  // updateCEShortlist at the bottom of this function.
-  if (_ceSummaryView) {
-    if (bounds.length > 1) setTimeout(function(){try{_ceMap.fitBounds(bounds,{padding:[28,28]});}catch(e){}},150);
-    updateCEShortlist();
-    showCandidateDisclaimer();
-    return;
-  }
-
-  // Secondary control (only visible in options mode): "Show me the best" caps
-  // each must-do section to its top pick; "Show all" expands.
-  var topCtrl = document.createElement("div");
-  topCtrl.style.cssText = "padding:6px 4px 0;display:flex;justify-content:flex-end;";
+  headerBtns.appendChild(sumBuild);
   var bestBtn = document.createElement("button");
-  bestBtn.style.cssText = "font-size:10px;padding:4px 10px;border-radius:5px;border:1px solid #ddd;background:#fff;color:#333;cursor:pointer;font-family:inherit;font-weight:600;";
+  bestBtn.style.cssText = "font-size:10px;padding:6px 10px;border-radius:5px;border:1px solid #ddd;background:#fff;color:#333;cursor:pointer;font-family:inherit;font-weight:600;";
   bestBtn.textContent = _ceBestMode ? "Show all" : "Show me the best";
   bestBtn.onclick = function(){ _ceBestMode = !_ceBestMode; renderCandidateCards(_tb.candidates); };
-  topCtrl.appendChild(bestBtn);
-  el.appendChild(topCtrl);
+  headerBtns.appendChild(bestBtn);
+  headerWrap.appendChild(headerBtns);
+  el.appendChild(headerWrap);
 
   function bestPickFirst(group){
     var sorted = group.slice().sort(function(a,b){
