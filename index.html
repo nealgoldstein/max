@@ -4875,7 +4875,7 @@ function renderCandidateCards(cands){
   // The Candidate Explorer organizes by must-do instead of a flat required/discovery
   // split. Each candidate appears in exactly one section — its FIRST must-do in the
   // user's sentence order. Other must-dos this candidate supports appear as an
-  // "Also supports: X, Y" badge on the card itself.
+  // "You will also find:X, Y" badge on the card itself.
   var mustDoOrder = (_mdcItems||[])
     .filter(function(m){ return m.checked && m.name && m.name !== "__manual__"; })
     .map(function(m){ return m.name; });
@@ -4915,7 +4915,7 @@ function renderCandidateCards(cands){
     if (isManual) {
       reqBadge = '<div style="font-size:9px;font-weight:700;color:#2a7a4e;background:#e8f5ee;padding:2px 7px;border-radius:10px;margin:2px 0 4px;display:inline-block;">\uD83D\uDCCC A must-see for you</div>';
     } else if (primary && otherRefs.length) {
-      reqBadge = '<div style="font-size:9px;font-weight:700;color:#1a5fa8;background:#e8f0fc;padding:2px 7px;border-radius:10px;margin:2px 0 4px;display:inline-block;">Also supports: '+otherRefs.join(", ")+'</div>';
+      reqBadge = '<div style="font-size:9px;font-weight:700;color:#1a5fa8;background:#e8f0fc;padding:2px 7px;border-radius:10px;margin:2px 0 4px;display:inline-block;">You will also find:'+otherRefs.join(", ")+'</div>';
     } else if (!primary && allRefs.length) {
       // Rejected or otherwise-ungrouped candidate with required links — show full list
       reqBadge = '<div style="font-size:9px;font-weight:700;color:#1a5fa8;background:#e8f0fc;padding:2px 7px;border-radius:10px;margin:2px 0 4px;display:inline-block;">\uD83D\uDE82 Required for: '+allRefs.join(", ")+'</div>';
@@ -4941,7 +4941,7 @@ function renderCandidateCards(cands){
     // badge (so you see at a glance which other activities this place covers) +
     // Keep and expand-chevron buttons.
     var compactAlso = (primary && otherRefs.length)
-      ? '<span style="font-size:9px;font-weight:600;color:#1a5fa8;background:#e8f0fc;padding:2px 7px;border-radius:10px;">Also supports: '+otherRefs.join(", ")+'</span>'
+      ? '<span style="font-size:9px;font-weight:600;color:#1a5fa8;background:#e8f0fc;padding:2px 7px;border-radius:10px;">You will also find:'+otherRefs.join(", ")+'</span>'
       : '';
     var compactHtml = '<div class="ce-card-compact" style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;cursor:pointer;">'
       +'<div style="flex:1;min-width:0;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">'
@@ -5167,10 +5167,15 @@ function renderCandidateCards(cands){
 
   if (knownForCands.length && !_ceBestMode) {
     var khdr = document.createElement("div");
-    khdr.style.cssText = "margin-top:14px;padding:10px 4px 6px;font-size:10px;font-weight:700;text-transform:uppercase;color:#6a4a80;letter-spacing:0.06em;border-top:1px solid #e8e8e8;";
-    khdr.textContent = "Known for — places most travelers to the region visit";
+    khdr.style.cssText = "margin-top:14px;padding:10px 4px 4px;font-size:10px;font-weight:700;text-transform:uppercase;color:#6a4a80;letter-spacing:0.06em;border-top:1px solid #e8e8e8;";
+    khdr.textContent = "Places most travelers to " + ((_tb && _tb.region) || "the region") + " visit";
     el.appendChild(khdr);
-    knownForCands.forEach(function(c){ renderCard(c, el); });
+    // Each Known-for card starts expanded so the reason is visible up front —
+    // first-time travelers need the context, not a row of unfamiliar names.
+    knownForCands.forEach(function(c){
+      _ceCardExpanded[c.id] = true;
+      renderCard(c, el);
+    });
   }
 
   if (regularDiscovery.length && !_ceBestMode) {
@@ -10245,6 +10250,11 @@ function drawDestMode(destId){
   _mapExecMode=null;
   // Fresh destination view — scroll to top
   var _lpc = g("lp-content"); if(_lpc) _lpc.scrollTop = 0;
+  // If the post-build throttled city-data generation never completed for this
+  // destination (interrupted, timed out), kick it off now so the map picks up
+  // suggestions instead of staying blank forever.
+  var _dNow = getDest(destId);
+  if (_dNow) { try { ensureSuggestions(_dNow); } catch(_){} }
   window.scrollTo(0, 0);
   document.querySelectorAll('.bk-form').forEach(function(f){if(f.parentNode)f.parentNode.removeChild(f);});
   g("mode-trip-btn").className="mode-btn";
