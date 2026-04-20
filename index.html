@@ -4130,8 +4130,13 @@ function editConstraints(){
     pace:_tb.pace||"", compromises:_tb.compromises||"", hardlimits:_tb.hardlimits||""
   };
   _tb._editMode = true;
-  var ov = g("trip-brief-overlay");
-  if(ov){ ov.style.display="block"; renderTripBriefEdit(); }
+  if(ov){
+    // Reparent to body so the display:none home-screen ancestor doesn't hide it
+    // when the user is in the trip view. Same fix as the Candidate Explorer.
+    if (ov.parentElement !== document.body) document.body.appendChild(ov);
+    ov.style.display="block";
+    renderTripBriefEdit();
+  }
 }
 
 function renderTripBriefEdit(){
@@ -4734,7 +4739,7 @@ function showCandidateExplorer(cands, editMode){
     +'</div>'
     +'<div class="ce-body">'
     +'<div class="ce-left">'
-    +'<div class="ce-shortlist"><div class="ce-sl-label">Shortlist</div><div class="ce-sl-pills" id="ce-sl"><span class="ce-sl-empty">Keep places to add them here</span></div></div>'
+    // Shortlist pills retired — the summary at top of ce-cards carries this info now.
     +'<div class="ce-cards" id="ce-cards">'
     +(cands?'':'<div class="ce-loading" id="ce-loading">'      +'<span class="ce-loading-spin">\u2736</span>'      +'<div class="max-thinking" style="font-size:12px;font-weight:600;color:#555;margin-bottom:5px;">Thinking about where you might go\u2026</div>'      +'<div id="ce-loading-detail" style="font-size:10px;color:#aaa;line-height:1.7;">This usually takes 20\u201340 seconds.<br>Max is considering required stops and places worth visiting.</div>'      +'</div>')
     +'</div></div>'
@@ -5016,11 +5021,17 @@ function renderCandidateCards(cands){
   var summaryWrap = document.createElement("div");
   summaryWrap.style.cssText = "margin:8px 4px 12px;padding:14px 16px;background:#fff;border:1px solid #e0e8f0;border-radius:10px;";
   var summaryHead = document.createElement("div");
-  summaryHead.style.cssText = "font-size:12px;font-weight:700;color:#1a5fa8;margin-bottom:8px;letter-spacing:0.02em;";
+  summaryHead.style.cssText = "font-size:12px;font-weight:700;color:#1a5fa8;margin-bottom:4px;letter-spacing:0.02em;";
   summaryHead.textContent = kept.length
-    ? "Here\u2019s what I\u2019d plan for you"
+    ? "Max\u2019s idea of your trip"
     : "No destinations picked yet";
   summaryWrap.appendChild(summaryHead);
+  var summarySub = document.createElement("div");
+  summarySub.style.cssText = "font-size:11px;color:#888;margin-bottom:10px;line-height:1.55;";
+  summarySub.textContent = kept.length
+    ? "These are the places Max thinks fit what you told it. They may not be what you had in mind — open the options below to swap, drop, or add."
+    : "Open the options below to pick where you\u2019d like to go.";
+  summaryWrap.appendChild(summarySub);
   if (kept.length) {
     var keptLine = document.createElement("div");
     keptLine.style.cssText = "font-size:13px;color:#111;line-height:1.65;margin-bottom:6px;";
@@ -5080,11 +5091,41 @@ function renderCandidateCards(cands){
     return sorted;
   }
 
-  // Render one section per must-do in sentence order. Each candidate appears in
-  // exactly one section — its primary must-do. Section header carries the full
-  // activity context (description + places/endpoint highlights) so the user can
-  // judge the activity itself, not just the destinations beneath it.
+  // Group activity sections by type — all TRAINS together, all ACTIVITIES
+  // together, all CONDITIONS together. Each type gets one umbrella header; the
+  // individual must-dos live as sub-sections underneath. Reduces the "wall of
+  // sections" feeling when a user has many must-dos.
+  var typeLabelMap = { route: "Trains & routes", activity: "Activities", condition: "Conditions", manual: "Places you added" };
+  var typeOrder = ["route", "activity", "condition", "manual"];
+  var mustDoOrderByType = {};
+  typeOrder.forEach(function(t){ mustDoOrderByType[t] = []; });
   mustDoOrder.forEach(function(mdName){
+    var mdItem = (_mdcItems||[]).find(function(m){ return m.name === mdName; });
+    var t = (mdItem && mdItem.type) || "activity";
+    if (!mustDoOrderByType[t]) mustDoOrderByType[t] = [];
+    mustDoOrderByType[t].push(mdName);
+  });
+  var renderedAny = false;
+  typeOrder.forEach(function(t){
+    var names = mustDoOrderByType[t];
+    if (!names || !names.length) return;
+    // Skip types whose must-dos have no candidates
+    var hasAnyGroup = names.some(function(n){ return candByPrimary[n] && candByPrimary[n].length; });
+    if (!hasAnyGroup) return;
+    // Umbrella type header
+    var typeHdr = document.createElement("div");
+    typeHdr.style.cssText = "margin-top:18px;padding:10px 4px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#111;border-top:"+(renderedAny?"1px solid #e8e8e8":"none")+";";
+    typeHdr.textContent = typeLabelMap[t] || t;
+    el.appendChild(typeHdr);
+    renderedAny = true;
+    // Render each must-do of this type as its sub-section
+    names.forEach(function(mdName){
+      _renderMustDoSection(mdName, el);
+    });
+  });
+
+  // Helper that renders a single must-do's section (header + description + cards)
+  function _renderMustDoSection(mdName, container){
     var group = candByPrimary[mdName];
     if (!group || !group.length) return;
     var mdItem = (_mdcItems||[]).find(function(m){ return m.name === mdName; });
@@ -5144,7 +5185,7 @@ function renderCandidateCards(cands){
       more.textContent = "+ " + (group.length - 1) + " more, hidden \u2014 Show all to see";
       el.appendChild(more);
     }
-  });
+  }
 
   // Split discovery into "Known for" (widelyRecommended) and the rest.
   // The "Known for" section only appears when the user said they're new to the
@@ -5443,22 +5484,11 @@ async function setCS(id,status){
 }
 
 function updateCEShortlist(){
-  var sl=g("ce-sl"); if(!sl) return;
+  // Pills are retired; this function now just updates the footer counter + Build
+  // button disabled state, and refreshes the stay-total line in the summary.
   var kept=(_tb.candidates||[]).filter(function(c){return c.status==="keep";});
   var cnt=g("ce-cnt"); if(cnt) cnt.textContent=kept.length+" kept";
   var bb=g("ce-build-btn"); if(bb) bb.disabled=kept.length<1;
-  if(!kept.length){
-    sl.innerHTML='<span class="ce-sl-empty">Keep places to add them here</span>';
-    renderCEStayTotal(kept);
-    return;
-  }
-  sl.innerHTML="";
-  kept.forEach(function(c){
-    var pill=document.createElement("div"); pill.className="ce-sl-pill";
-    pill.innerHTML=c.place+'<span class="ce-sl-pill-x">\u00d7</span>';
-    (function(cand){pill.querySelector(".ce-sl-pill-x").onclick=function(){setCS(cand.id,"keep");};})(c);
-    sl.appendChild(pill);
-  });
   renderCEStayTotal(kept);
 }
 
@@ -5491,21 +5521,9 @@ function _parseTripDuration(s){
 }
 
 function renderCEStayTotal(kept){
-  var host=g("ce-stay-total");
-  if(!host){
-    // Inject a line below the shortlist container, once
-    var shortlist=document.querySelector(".ce-shortlist");
-    if(!shortlist) return;
-    host=document.createElement("div");
-    host.id="ce-stay-total";
-    host.style.cssText="font-size:10px;color:#888;margin-top:5px;line-height:1.4;";
-    shortlist.appendChild(host);
-  }
+  // Shortlist container retired; stay-total now lives in the summary view only.
   var sumHost = g("ce-summary-stay");
-  function writeBoth(html){
-    if (host) host.innerHTML = html;
-    if (sumHost) sumHost.innerHTML = html;
-  }
+  function writeBoth(html){ if (sumHost) sumHost.innerHTML = html; }
   if(!kept.length){writeBoth(""); return;}
   var min=0,max=0,allParsed=true;
   kept.forEach(function(c){
