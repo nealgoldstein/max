@@ -2332,6 +2332,8 @@ function renderMustDoItems(items) {
   var body = document.getElementById("mdc-body");
   if (!body) return;
   body.innerHTML = "";
+  // Insert the forced-march banner above the list (no-op if already present)
+  _updateForcedMarchBanner();
 
   items.forEach(function(item) {
     var div = document.createElement("div");
@@ -2504,6 +2506,103 @@ function renderMdcItemHtml(item) {
     +placesSection;
 }
 
+// Estimate minimum days a single must-do item takes at a forced-march pace.
+// Used to warn the user when their must-do list already exceeds their stated
+// duration budget — so they can pare down or extend the trip before moving on.
+function _mdcItemDays(item){
+  if (!item || !item.checked) return 0;
+  if (item.type === "condition") return 0; // weather/season items flavor existing days, don't add new ones
+  if (item.type === "route" && item.durationHours) {
+    // Route with a known duration — minimum 1 day, ceiling of hours/8
+    return Math.max(1, Math.ceil(item.durationHours / 8));
+  }
+  if (item.type === "manual") return 2; // typical minimum for a place worth adding
+  return 1; // default: 1 day per other must-do
+}
+
+function _totalForcedMarchDays(){
+  return (_mdcItems||[]).reduce(function(s, i){ return s + _mdcItemDays(i); }, 0);
+}
+
+// How many days does the user's checked must-do list actually require AT this
+// candidate? Sums days for the must-dos whose names appear in c._requiredFor,
+// which is the subset of must-dos this candidate is a required stop for.
+function _candidateDaysForMustDos(cand){
+  var names = (cand && cand._requiredFor || []).filter(function(r){return r && r !== "__manual__";});
+  if (!names.length) return 0;
+  var nameSet = {};
+  names.forEach(function(n){ nameSet[n.toLowerCase()] = true; });
+  return (_mdcItems||[])
+    .filter(function(m){ return m.checked && m.name && nameSet[m.name.toLowerCase()]; })
+    .reduce(function(s, i){ return s + _mdcItemDays(i); }, 0);
+}
+
+// Transient toast shown when the user keeps a candidate — surfaces a day
+// estimate (based on their own must-dos at this place) plus the LLM-supplied
+// "other things worth considering" so they know what else is here before
+// committing all their time to the thing they came for.
+function showKeepToast(cand){
+  if (!cand) return;
+  var days = _candidateDaysForMustDos(cand);
+  var source = "your planned activities";
+  if (!days) {
+    days = parseNightsFromRange(cand.stayRange) || 2;
+    source = "typical visit";
+  }
+  var parts = ['<strong>' + cand.place + '</strong> \u2014 about ' + days + ' day' + (days!==1?'s':'') + ' for ' + source + '.'];
+  if (cand.otherAttractions) {
+    parts.push('<span style="color:#ccc;">Also worth considering:</span> ' + cand.otherAttractions);
+  }
+  // Remove any existing keep-toast first
+  var existing = document.getElementById("keep-toast");
+  if (existing) existing.remove();
+  var t = document.createElement("div");
+  t.id = "keep-toast";
+  t.style.cssText = "position:fixed;bottom:20px;right:20px;max-width:380px;background:#2a2a2a;color:#fff;border-radius:8px;padding:12px 14px;font-size:12px;line-height:1.55;box-shadow:0 4px 20px rgba(0,0,0,0.25);z-index:10001;font-family:inherit;";
+  t.innerHTML = parts.join("<br><br>");
+  var x = document.createElement("div");
+  x.style.cssText = "position:absolute;top:6px;right:8px;font-size:13px;color:#999;cursor:pointer;line-height:1;";
+  x.textContent = "\u00d7";
+  x.onclick = function(){ if(t.parentNode) t.parentNode.removeChild(t); };
+  t.appendChild(x);
+  document.body.appendChild(t);
+  setTimeout(function(){ if(t && t.parentNode) t.parentNode.removeChild(t); }, 7000);
+}
+
+// Update or insert the "forced march" banner that compares the current must-do
+// list's minimum-day estimate to the user's stated trip duration. Safe to call
+// any time — it reads live state and rebuilds only itself.
+function _updateForcedMarchBanner(){
+  var host = document.getElementById("mdc-fm-banner");
+  var total = _totalForcedMarchDays();
+  var budget = _parseTripDuration((_tb && _tb.duration) || "");
+  var msg;
+  if (total === 0) {
+    msg = '<span style="color:#888;">Nothing checked yet \u2014 pick what you actually want to do.</span>';
+  } else if (!budget) {
+    msg = 'At a forced march this would take <strong>about ' + total + ' day' + (total!==1?'s':'') + '</strong>. You didn\u2019t say how long your trip is, so there\u2019s no way to compare.';
+  } else {
+    var base = 'At a forced march this would take <strong>about ' + total + ' day' + (total!==1?'s':'') + '</strong>. Your trip is ' +
+      (budget.min===budget.max ? (budget.max + ' days') : (budget.min + '\u2013' + budget.max + ' days')) + '.';
+    if (total > budget.max) {
+      msg = base + ' <strong style="color:#c05020;">You\u2019ll need to pare some down, or extend the trip.</strong>';
+    } else if (total > budget.min) {
+      msg = base + ' <span style="color:#b05820;">That\u2019s right at the edge \u2014 room to add only if something else is dropped.</span>';
+    } else {
+      msg = base + ' <span style="color:#2a7a4e;">You\u2019ve got room to breathe, or room to add more.</span>';
+    }
+  }
+  if (host) { host.innerHTML = msg; return; }
+  // No banner exists yet — inject it above the mdc-body
+  var body = document.getElementById("mdc-body");
+  if (!body) return;
+  var b = document.createElement("div");
+  b.id = "mdc-fm-banner";
+  b.style.cssText = "padding:10px 24px;font-size:11px;color:#333;line-height:1.6;background:#fafafa;border-bottom:1px solid #eee;";
+  b.innerHTML = msg;
+  body.parentNode.insertBefore(b, body);
+}
+
 function toggleMdcItem(id) {
   var item = _mdcItems.find(function(x){ return x.id===id; });
   if (!item) return;
@@ -2563,6 +2662,7 @@ function toggleMdcItem(id) {
 }
 
 function updateMdcSummary() {
+  _updateForcedMarchBanner();
   var container = document.getElementById("mdc-req-places");
   if (!container) return;
   // Collect unique required places from checked items
@@ -2881,7 +2981,7 @@ async function runCandidateSearch(requiredPlaces) {
       + "Trip context: " + brief + "\n\n"
       + "Describe why each is genuinely worth visiting — character, what to see and do, what makes it special. Trains may be one reason but not the only one.\n"
       + "Return ONLY a JSON array (no markdown):\n"
-      + '[{"place":"City","country":"Country","role":"anchor","stayRange":"2-4 nights","whyItFits":"Why worth visiting.","tradeoffs":"One downside.","tags":["tag1"],"lat":0.0,"lng":0.0}]'
+      + '[{"place":"City","country":"Country","role":"anchor","stayRange":"2-4 nights","whyItFits":"Why worth visiting.","tradeoffs":"One downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here beyond the trip\u2019s stated reason (e.g. specific viewpoints, walks, museums, neighborhoods, dishes).","lat":0.0,"lng":0.0}]'
     : null;
 
   var releasedPlaces = _tb.releasedPlaces || [];
@@ -2921,7 +3021,7 @@ async function runCandidateSearch(requiredPlaces) {
     + "For " + (_tb.region||"this region") + ", think about the cities that anchor the country's identity \u2014 the capital, the banking/cultural centers, "
     + "the historic trade cities. Include them even if they don't obviously fit this traveler's theme; the traveler can decide.\n"
     + "Return ONLY a JSON array of exactly " + cityCount + " places (no markdown):\n"
-    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why a traveler to this region would want to see it \u2014 specific, not generic.","tradeoffs":"One honest downside (e.g. expensive, touristy, requires rearranging the trip).","tags":["tag1"],"lat":0.0,"lng":0.0}]';
+    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why a traveler to this region would want to see it \u2014 specific, not generic.","tradeoffs":"One honest downside (e.g. expensive, touristy, requires rearranging the trip).","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here.","lat":0.0,"lng":0.0}]';
 
   var pThematic = "You are a travel expert helping plan a trip to " + (_tb.region||"this region") + ".\n"
     + "Trip context: " + brief + "\n"
@@ -2933,7 +3033,7 @@ async function runCandidateSearch(requiredPlaces) {
     + "These should NOT be the obvious major cities (those are handled separately). Focus on less obvious places that reward the kind of traveler this is: "
     + "scenic towns, regional hubs, natural areas, places that deepen the trip's theme.\n"
     + "Return ONLY a JSON array of exactly " + thematicCount + " places (no markdown):\n"
-    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"What makes it worth visiting for this specific trip \u2014 specific, not generic.","tradeoffs":"One honest downside.","tags":["tag1"],"lat":0.0,"lng":0.0}]';
+    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"What makes it worth visiting for this specific trip \u2014 specific, not generic.","tradeoffs":"One honest downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here beyond the trip\u2019s stated reason.","lat":0.0,"lng":0.0}]';
 
   // Run all three in parallel — total wait = max(p1, pCities, pThematic)
   var calls = [];
@@ -3051,7 +3151,7 @@ async function recoverRequiredDescriptions(cands) {
       + "For each, describe why it is genuinely worth visiting \u2014 character, what's there, what makes it worth the stop. "
       + "If the place is primarily a scenic waypoint (a train station, summit, viewpoint), say so honestly and describe what the experience is like rather than inventing reasons to linger.\n\n"
       + "Return ONLY a JSON array (no markdown):\n"
-      + '[{"place":"Name","whyItFits":"2-3 sentences.","tradeoffs":"One honest downside.","tags":["tag1","tag2"],"stayRange":"2-4 nights"}]';
+      + '[{"place":"Name","whyItFits":"2-3 sentences.","tradeoffs":"One honest downside.","tags":["tag1","tag2"],"otherAttractions":"2-3 other things worth considering here.","stayRange":"2-4 nights"}]';
     try {
       var text = await callMax([{role:"user",content:prompt}], 1500, 40000);
       var parsed = JSON.parse(text.replace(/```json|```/g,"").trim());
@@ -3436,7 +3536,7 @@ function renderTripStep1Recognition(){
       +'<p style="margin:0 0 12px 0;">So Max isn\u2019t trying to hand you a finished itinerary. It helps you arrive <strong>well-positioned</strong> \u2014 in the right regions, for roughly the right amount of time, with a working sense of where to stay and what matters. A hypothesis. Strong enough to act on. Flexible enough to change.</p>'
       +'<p style="margin:0 0 12px 0;">Once you\u2019re on the ground, the questions change. What still makes sense from where you are? Is there something nearby worth more time than what you\u2019d planned? The plan you arrived with was always meant to be revised. The goal was never to follow it. The goal was to arrive prepared enough to change it intelligently.</p>'
       +'<p style="margin:0 0 12px 0;">Think of Max as a well-traveled friend helping you think through where to go and what to do when you get there.</p>'
-      +'<p style="margin:0 0 16px 0;">We start with a sentence: <em>Because I want to ___, I\u2019m going to go to ___.</em> The blank can be anything \u2014 ride trains through the Alps, see great art, learn about the history, visit friends, sit on a beach, drink cocktails with umbrellas in them. Whatever pulls you. That\u2019s the reason you\u2019re going, but it\u2019s not the only thing you\u2019ll do. Once you arrive, there will be all kinds of things you couldn\u2019t have known to plan for \u2014 and that\u2019s what makes the trip yours. The where can be broad or specific \u2014 a region, a country, a city, a park. None of it is fixed.</p>'
+      +'<p style="margin:0 0 16px 0;">We start with a sentence: <em>Because I want to ___, I\u2019m going to go to ___.</em> You can fill in the first blank with anything \u2014 ride trains through the Alps, see great art, learn about the history, visit friends, sit on a beach, drink cocktails with umbrellas in them. Whatever pulls you. The where can be broad or specific \u2014 a region, a country, a city, a park. But \u201cBecause I want to\u201d is only the reason you\u2019re going; it\u2019s likely not the only thing you\u2019ll do. What we learned is that in most places where you can do what you want to do, there\u2019s more than you\u2019ll have days for. And before you get there, you don\u2019t just lack the information about the place \u2014 you don\u2019t yet know what else you\u2019ll want to do once you arrive. To keep traveling from becoming a forced march, planning is forming a rough picture of what\u2019s possible and deciding where to go first. That first decision is usually some combination of the practical \u2014 some cities are cheaper to fly to than others \u2014 and what matters most to you. The rest flows, and that\u2019s what makes the trip yours, not a suggested itinerary from the internet or a guidebook. None of it is fixed.</p>'
       +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px solid #eee;">'
       +'<button onclick="dismissIntro(false)" style="padding:6px 14px;font-size:11px;font-weight:600;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;">Got it</button>'
       +'<button onclick="dismissIntro(true)" style="padding:6px 14px;font-size:11px;background:#fff;color:#666;border:1px solid #ddd;border-radius:6px;cursor:pointer;font-family:inherit;">Got it \u2014 don\u2019t show this again</button>'
@@ -3471,7 +3571,7 @@ function renderTripStep1Recognition(){
     + introHtml
     +'<div class="tb-field">'
     +'<label style="display:block;margin-bottom:8px;font-size:13px;color:#333;font-weight:500;">Write this in your own words.</label>'
-    +'<textarea id="tb-sentence" rows="5" placeholder="Because I want to ride the Glacier Express, see the Alps in late summer, and eat well in a couple of small mountain towns, I\u2019m going to Switzerland." style="font-size:14px;line-height:1.6;padding:14px 16px;">'+(sentenceText||'')+'</textarea>'
+    +'<textarea id="tb-sentence" rows="5" placeholder="Because I want to ride named trains through the mountains, take walks in the mountains, explore the local culture, and eat chocolate, I\u2019m going to go to Switzerland.&#10;&#10;Or because I need to sit on a beach and recover from my day-to-day life, I am going to Mexico." style="font-size:14px;line-height:1.6;padding:14px 16px;">'+(sentenceText||'')+'</textarea>'
     +'<div style="font-size:11px;color:#aaa;margin-top:6px;">The \u201cbecause I want to\u201d is what makes it yours. Where can be broad (Southeast Asia) or specific (Kyoto).</div>'
     +'</div>'
     +'<div class="tb-field">'
@@ -3607,32 +3707,11 @@ function renderTripBrief(){
     +'<div class="tb-field"><label>How long you want to travel</label><input id="tb-duration" placeholder="e.g. 10\u201314 days, three weeks\u2026" /></div>'
 
     +'<div style="margin-top:14px;padding:8px 12px;background:#f0ede3;border-radius:6px;font-size:11px;font-weight:700;color:#555;letter-spacing:0.03em;text-transform:uppercase;">How you\u2019re moving</div>'
-    +'<div style="font-size:11px;color:#888;margin:4px 2px 10px;line-height:1.55;">Three parts Max will use together: how you get to the region, how you move within it, how you get out. Any of these can change \u2014 you can always come back and edit.</div>'
-
-    +'<div class="tb-field"><label>How you\u2019re getting to '+(_tb.region||'the region')+'</label>'
-    +'<input id="tb-gettingTo" value="'+(_tb.gettingTo||'')+'" placeholder="e.g. Flying into Zurich Aug 15, Swiss flight 38 \u2014 booked. Or: still deciding between flying or the train up from Milan." />'
-    +'<div style="font-size:10px;color:#aaa;margin-top:3px;">Plane, train, car, other \u2014 in your own words. Include specifics if you have them.</div>'
-    +'<div style="display:flex;gap:5px;margin-top:6px;">'
-    +'<span class="tb-toggle'+(_tb.entryFixed?' on':'')+'" onclick="_tb.entryFixed=true;renderTripBrief();">Booked / fixed</span>'
-    +'<span class="tb-toggle'+(!_tb.entryFixed?' on':'')+'" onclick="_tb.entryFixed=false;renderTripBrief();">Still flexible</span>'
-    +'</div>'
-    +'<input id="tb-entry" value="'+(_tb.entry||'')+'" placeholder="'+(_tb.region?'First city / arrival point in '+_tb.region:'First city / arrival point')+'" style="margin-top:6px;" oninput="_tb.entryInferred=false;" />'
-    +(_tb.entryInferred ? '<div style="font-size:10px;color:#888;margin-top:4px;font-style:italic;">\u2728 Max suggested this starting point since you haven\u2019t set arrival yet. Change it anytime.</div>' : '')
-    +'</div>'
+    +'<div style="font-size:11px;color:#888;margin:4px 2px 10px;line-height:1.55;">How you\u2019ll get between destinations. Arrival and departure will come later \u2014 after you\u2019ve decided where you\u2019re going.</div>'
 
     +'<div class="tb-field"><label>How you\u2019re moving within '+(_tb.region||'the region')+'</label>'
     +'<input id="tb-transport" value="'+(_tb.transport||'')+'" placeholder="e.g. Trains and walking. Swiss Travel Pass. Taxi when needed. No rental car." />'
     +'<div style="font-size:10px;color:#aaa;margin-top:3px;">The main way you\u2019ll get between destinations. Named passes, rental car, mixed \u2014 whatever fits.</div>'
-    +'</div>'
-
-    +'<div class="tb-field"><label>How you\u2019re leaving</label>'
-    +'<input id="tb-gettingOut" value="'+(_tb.gettingOut||'')+'" placeholder="e.g. Flying out of Geneva Sep 5, Swiss 17 \u2014 booked. Or: same flight home from wherever makes sense." />'
-    +'<div style="font-size:10px;color:#aaa;margin-top:3px;">Can be the same mode as arrival, or different (fly in, train out).</div>'
-    +'<div style="display:flex;gap:5px;margin-top:6px;">'
-    +'<span class="tb-toggle'+(_tb.exitFixed?' on':'')+'" onclick="_tb.exitFixed=true;renderTripBrief();">Booked / fixed</span>'
-    +'<span class="tb-toggle'+(!_tb.exitFixed?' on':'')+'" onclick="_tb.exitFixed=false;renderTripBrief();">Still flexible</span>'
-    +'</div>'
-    +'<input id="tb-exit" value="'+(_tb.tbExit||'')+'" placeholder="'+(_tb.region?'Last city / departure point in '+_tb.region:'Last city / departure point')+'" style="margin-top:6px;" />'
     +'</div>'
 
     +'<div style="margin-top:14px;padding:8px 12px;background:#f0ede3;border-radius:6px;font-size:11px;font-weight:700;color:#555;letter-spacing:0.03em;text-transform:uppercase;">Where you\u2019ll stay, pace, and limits</div>'
@@ -4102,7 +4181,7 @@ async function findCandidates(){
     +(_tb.interests&&_tb.interests.length?"\nInterests: "+_tb.interests.join(", "):"")
     +(_tb.constraints?"\nConstraints: "+_tb.constraints:"")
     +"\n\nReturn ONLY a valid JSON array (no markdown):\n"
-    +'[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why.","tradeoffs":"Downside.","tags":["tag1","tag2"],"lat":48.2,"lng":16.4}]'
+    +'[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why.","tradeoffs":"Downside.","tags":["tag1","tag2"],"otherAttractions":"2-3 other things worth considering here.","lat":48.2,"lng":16.4}]'
     +"\nMix roles: base, anchor, pass-through. Include real lat/lng.";
   try{
     var text=await callMax([{role:"user",content:prompt}],2000);
@@ -4167,7 +4246,7 @@ async function retryDiscoveryCandidates() {
     + "A traveler doing this trip would almost certainly regret missing: the major gateway cities, the cultural capitals, the places everyone who has been there mentions. Include those. "
     + "Then add less obvious places that specifically fit what this traveler wants.\n"
     + "Return ONLY a JSON array of exactly " + extraCount + " places (no markdown):\n"
-    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"What makes it worth visiting — specific, not generic.","tradeoffs":"One honest downside.","tags":["tag1"],"lat":0.0,"lng":0.0}]';
+    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"What makes it worth visiting — specific, not generic.","tradeoffs":"One honest downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here.","lat":0.0,"lng":0.0}]';
   try {
     var t = await callMax([{role:"user",content:p2}], 2000, 45000);
     var newCands = JSON.parse(t.replace(/```json|```/g,"").trim());
@@ -4971,7 +5050,13 @@ async function setCS(id,status){
       }
     }
   }
+  var prevStatus = c.status;
   c.status=(c.status===status)?null:status;
+  // Fire the keep-toast only on transitions INTO "keep" — not un-keeps or
+  // restores from the rejected pile back to unset.
+  if (c.status === "keep" && prevStatus !== "keep") {
+    showKeepToast(c);
+  }
   renderCandidateCards(_tb.candidates);
 }
 
