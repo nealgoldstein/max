@@ -4792,8 +4792,6 @@ function renderCandidateCards(cands){
   // the background; will re-call this function when coords land so pins appear.
   geocodeMissingCoords(cands);
   var bounds=[];
-  var seenDivider = false;
-  var seenReqHeader = false;
   // Re-check _required against _tb.requiredPlaces in case it wasn't set during generation
   cands.forEach(function(c){
     if (!c._required) {
@@ -4804,116 +4802,34 @@ function renderCandidateCards(cands){
     // by checking the must-do. They can still Reject to override.
     if (c._required && !c.status) c.status = "keep";
   });
-  // Sort: required candidates first, discovery candidates second. Stable within each group.
-  cands.sort(function(a, b){
-    var ar = a._required ? 0 : 1;
-    var br = b._required ? 0 : 1;
-    return ar - br;
-  });
   // Split into active (not rejected) and rejected. Rejected render in a collapsible
   // footer so the user's attention stays on places still requiring a decision.
   var activeCands = cands.filter(function(c){ return c.status !== "reject"; });
   var rejectedCands = cands.filter(function(c){ return c.status === "reject"; });
-  var hasRequired = activeCands.some(function(c){ return c._required; });
-  var hasDiscovery = activeCands.some(function(c){ return !c._required; });
-  // Build a "if you want to [verb] X, Y, and Z, these stops are required" title
-  // from the checked must-dos that have required places in kept candidates.
-  // Verb picked from must-do type + name pattern (train/hike/museum/etc).
-  var reqTitle = "Required stops";
-  try {
-    var activeItems = (_mdcItems || []).filter(function(m){
-      if (!m.checked) return false;
-      // Only include must-dos that map to at least one currently-shown required candidate
-      var places = m.requiredPlaces || m.endpoints || m.viableLocations || [];
-      return places.some(function(p){
-        return cands.some(function(c){
-          return c._required && c.place && p.place &&
-            c.place.toLowerCase() === p.place.toLowerCase();
-        });
-      });
-    });
-    // Strip __manual__ placeholder items — they don't have a user-visible name here
-    var realItems = activeItems.filter(function(m){ return m.name && m.name !== "__manual__"; });
 
-    // Pick a verb phrase for each item based on its type and name patterns.
-    // Returns an object like {verb:"ride", article:"the", name:"Glacier Express"}
-    // so we can group items sharing the same verb+article cleanly.
-    function pickVerb(item){
-      var name = (item.name || "").trim();
-      var lc = name.toLowerCase();
-      var t = item.type;
-      // Condition type — weather/season-dependent
-      if (t === "condition") {
-        if (/aurora|northern lights/.test(lc)) return {verb:"see", article:"the", name:name};
-        if (/whale|wildlife|birding|migration/.test(lc)) return {verb:"see", article:"", name:name};
-        if (/bloom|blossom|flower|wildflower/.test(lc)) return {verb:"see", article:"the", name:name};
-        return {verb:"experience", article:"", name:name};
-      }
-      // Route type — trains, drives, hikes, walks
-      if (t === "route") {
-        if (/express|railway|bahn|bergbahn/.test(lc) || /train/.test(lc)) {
-          return {verb:"ride", article:"the", name:name};
-        }
-        if (/hike|trek|trail|walk/.test(lc)) {
-          return {verb:"hike", article:"the", name:name};
-        }
-        if (/drive|pass|road/.test(lc)) {
-          return {verb:"drive", article:"the", name:name};
-        }
-        // Default route — "do the" works as a catch-all
-        return {verb:"do", article:"the", name:name};
-      }
-      // Manual or unknown — just "visit"
-      if (/museum|gallery|cathedral|church|abbey|palace|castle/.test(lc)) {
-        return {verb:"visit", article:"the", name:name};
-      }
-      if (/festival|concert|show|opera|ballet|performance/.test(lc)) {
-        return {verb:"see", article:"", name:name};
-      }
-      return {verb:"visit", article:"", name:name};
+  // ── Group candidates by primary must-do ─────────────────────
+  // The Candidate Explorer organizes by must-do instead of a flat required/discovery
+  // split. Each candidate appears in exactly one section — its FIRST must-do in the
+  // user's sentence order. Other must-dos this candidate supports appear as an
+  // "Also supports: X, Y" badge on the card itself.
+  var mustDoOrder = (_mdcItems||[])
+    .filter(function(m){ return m.checked && m.name && m.name !== "__manual__"; })
+    .map(function(m){ return m.name; });
+  var candByPrimary = {};       // must-do name -> [candidates]
+  var primaryByCandId = {};     // candidate id -> primary must-do name (or null)
+  var discoveryCands = [];
+  activeCands.forEach(function(c){
+    var realRefs = (c._requiredFor||[]).filter(function(r){ return r && r !== "__manual__"; });
+    if (!realRefs.length) { discoveryCands.push(c); return; }
+    var primary = null;
+    for (var i = 0; i < mustDoOrder.length; i++) {
+      if (realRefs.indexOf(mustDoOrder[i]) > -1) { primary = mustDoOrder[i]; break; }
     }
-
-    var phrases = realItems.map(pickVerb);
-
-    // Group consecutive items with the same verb+article so "ride the X and Y"
-    // reads naturally instead of "ride the X and ride the Y"
-    function formatPhrases(ps){
-      if (ps.length === 0) return "";
-      if (ps.length === 1) {
-        var p = ps[0];
-        return p.verb + (p.article ? " " + p.article : "") + " " + p.name;
-      }
-      // Group adjacent same-verb+article into shared clauses
-      var groups = [];
-      var cur = null;
-      ps.forEach(function(p){
-        if (cur && cur.verb === p.verb && cur.article === p.article) {
-          cur.names.push(p.name);
-        } else {
-          cur = {verb:p.verb, article:p.article, names:[p.name]};
-          groups.push(cur);
-        }
-      });
-      // Render each group as "verb article X, Y, and Z" (Oxford comma for 3+)
-      function joinNames(names){
-        if (names.length === 1) return names[0];
-        if (names.length === 2) return names[0] + " and " + names[1];
-        return names.slice(0, -1).join(", ") + ", and " + names[names.length-1];
-      }
-      var clauses = groups.map(function(g){
-        return g.verb + (g.article ? " " + g.article : "") + " " + joinNames(g.names);
-      });
-      // Join clauses: "ride X and Y and see Z" reads OK; for 3+ clauses use commas.
-      if (clauses.length === 1) return clauses[0];
-      if (clauses.length === 2) return clauses[0] + " and " + clauses[1];
-      return clauses.slice(0, -1).join(", ") + ", and " + clauses[clauses.length-1];
-    }
-
-    if (phrases.length > 0) {
-      reqTitle = "If you want to " + formatPhrases(phrases) + ", these stops are required";
-    }
-  } catch(e) { /* fall back to generic title */ }
-
+    if (!primary) primary = realRefs[0];
+    primaryByCandId[c.id] = primary;
+    if (!candByPrimary[primary]) candByPrimary[primary] = [];
+    candByPrimary[primary].push(c);
+  });
   // Extracted so we can render active cards inline and rejected cards inside a
   // collapsible footer without duplicating the body.
   function renderCard(c, container){
@@ -4922,12 +4838,20 @@ function renderCandidateCards(cands){
     var sl=c.status==="keep"?"\u2713 Kept":c.status==="reject"?"\u00d7 Rejected":"";
     var sc=c.status==="keep"?"#2a7a4e":"#c05020";
     var isManual = c._requiredFor && c._requiredFor.length && c._requiredFor.every(function(r){return r==="__manual__";});
-    var trainRefs = c._requiredFor ? c._requiredFor.filter(function(r){return r!=="__manual__";}) : [];
-    var reqBadge = isManual
-      ? '<div style="font-size:9px;font-weight:700;color:#2a7a4e;background:#e8f5ee;padding:2px 7px;border-radius:10px;margin:2px 0 4px;display:inline-block;">\uD83D\uDCCC A must-see for you</div>'
-      : (trainRefs.length
-          ? '<div style="font-size:9px;font-weight:700;color:#1a5fa8;background:#e8f0fc;padding:2px 7px;border-radius:10px;margin:2px 0 4px;display:inline-block;">\uD83D\uDE82 Required for: '+trainRefs.join(", ")+'</div>'
-          : '');
+    var allRefs = c._requiredFor ? c._requiredFor.filter(function(r){return r!=="__manual__";}) : [];
+    var primary = primaryByCandId[c.id];
+    // "Also supports" badge — shown when this candidate serves must-dos beyond
+    // the section it's grouped under, so the user sees the place is doing more.
+    var otherRefs = primary ? allRefs.filter(function(r){ return r !== primary; }) : allRefs;
+    var reqBadge = '';
+    if (isManual) {
+      reqBadge = '<div style="font-size:9px;font-weight:700;color:#2a7a4e;background:#e8f5ee;padding:2px 7px;border-radius:10px;margin:2px 0 4px;display:inline-block;">\uD83D\uDCCC A must-see for you</div>';
+    } else if (primary && otherRefs.length) {
+      reqBadge = '<div style="font-size:9px;font-weight:700;color:#1a5fa8;background:#e8f0fc;padding:2px 7px;border-radius:10px;margin:2px 0 4px;display:inline-block;">Also supports: '+otherRefs.join(", ")+'</div>';
+    } else if (!primary && allRefs.length) {
+      // Rejected or otherwise-ungrouped candidate with required links — show full list
+      reqBadge = '<div style="font-size:9px;font-weight:700;color:#1a5fa8;background:#e8f0fc;padding:2px 7px;border-radius:10px;margin:2px 0 4px;display:inline-block;">\uD83D\uDE82 Required for: '+allRefs.join(", ")+'</div>';
+    }
     card.innerHTML='<div class="ce-card-top">'
       +'<div style="display:flex;justify-content:space-between;align-items:baseline;">'
       +'<div class="ce-card-name">'+c.place+'</div>'
@@ -4971,25 +4895,25 @@ function renderCandidateCards(cands){
     }
   }
 
-  activeCands.forEach(function(c){
-    // Insert dynamic section header before first required candidate
-    if (hasRequired && c._required && !seenReqHeader) {
-      seenReqHeader = true;
-      var reqLabel = document.createElement("div");
-      reqLabel.style.cssText = "padding:6px 4px 8px;font-size:11px;font-weight:600;color:#1a5fa8;line-height:1.5;";
-      reqLabel.textContent = reqTitle;
-      el.appendChild(reqLabel);
-    }
-    // Insert section divider before first non-required candidate
-    if (hasRequired && hasDiscovery && !c._required && !seenDivider) {
-      seenDivider = true;
-      var divider = document.createElement("div");
-      divider.style.cssText = "padding:12px 4px 6px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#111;margin-top:4px;border-top:1px solid #e8e8e8;";
-      divider.textContent = "Other places worth considering";
-      el.appendChild(divider);
-    }
-    renderCard(c, el);
+  // Render one section per must-do in sentence order. Each candidate appears in
+  // exactly one section — its primary must-do.
+  mustDoOrder.forEach(function(mdName){
+    var group = candByPrimary[mdName];
+    if (!group || !group.length) return;
+    var hdr = document.createElement("div");
+    hdr.style.cssText = "margin-top:12px;padding:8px 4px 6px;font-size:12px;font-weight:700;color:#1a5fa8;letter-spacing:0.02em;border-bottom:1px solid #e8f0fc;";
+    hdr.textContent = "For " + mdName;
+    el.appendChild(hdr);
+    group.forEach(function(c){ renderCard(c, el); });
   });
+  // After all must-do sections: the "Other places worth considering" pool
+  if (discoveryCands.length) {
+    var dhdr = document.createElement("div");
+    dhdr.style.cssText = "margin-top:14px;padding:10px 4px 6px;font-size:10px;font-weight:700;text-transform:uppercase;color:#111;letter-spacing:0.06em;border-top:1px solid #e8e8e8;";
+    dhdr.textContent = "Other places worth considering";
+    el.appendChild(dhdr);
+    discoveryCands.forEach(function(c){ renderCard(c, el); });
+  }
 
   // Collapsed rejected section — out of the way but one click to revisit
   if (rejectedCands.length) {
