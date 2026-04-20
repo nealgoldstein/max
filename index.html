@@ -4862,6 +4862,20 @@ function renderCandidateCards(cands){
     var wrTag = c.widelyRecommended
       ? '<span style="font-size:9px;color:#6a4a80;font-weight:600;margin-left:6px;">widely recommended</span>'
       : '';
+    // "Also here" line — what else is worth doing at this place. Pulls from the
+     // candidate's own otherAttractions, or from the primary must-do's endpointHighlights
+     // if it's a route endpoint. Either way the user sees at a glance whether the place
+     // is only a train station or has other things going on.
+    var alsoHere = c.otherAttractions || '';
+    if (!alsoHere && primary) {
+      var mdForPrimary = (_mdcItems||[]).find(function(m){ return m.name === primary; });
+      if (mdForPrimary && mdForPrimary.endpointHighlights && mdForPrimary.endpointHighlights[c.place]) {
+        alsoHere = mdForPrimary.endpointHighlights[c.place];
+      }
+    }
+    var alsoHereHtml = alsoHere
+      ? '<div style="font-size:11px;color:#555;line-height:1.5;margin-top:4px;"><strong style="color:#333;font-weight:600;">Also here:</strong> '+alsoHere+'</div>'
+      : '';
     card.innerHTML='<div class="ce-card-top">'
       +'<div style="display:flex;justify-content:space-between;align-items:baseline;">'
       +'<div class="ce-card-name">'+c.place+wrTag+'</div>'
@@ -4870,6 +4884,7 @@ function renderCandidateCards(cands){
       +reqBadge
       +'<div class="ce-card-role">'+rIcon(c.role)+' '+c.role+(c.country?' \u00b7 '+c.country:'')+'</div>'
       +'<div class="ce-card-why">'+c.whyItFits+'</div>'
+      +alsoHereHtml
       +'<div class="ce-card-tags">'+(c.tags||[]).map(function(t){return '<span class="ce-tag">'+t+'</span>';}).join('')+'</div>'
       +'<div class="ce-card-meta">Stay: '+c.stayRange+'</div>'
       +'</div>'
