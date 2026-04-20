@@ -4435,7 +4435,7 @@ async function findCandidates(){
 }
 
 // ─── CANDIDATE EXPLORER ────────────────────────────────────
-var _ceMap=null,_ceMarkers=[],_ceRejectedExpanded=false,_ceEditMode=false,_ceBestMode=false;
+var _ceMap=null,_ceMarkers=[],_ceRejectedExpanded=false,_ceEditMode=false,_ceBestMode=true,_ceSummaryView=true,_ceCardExpanded={};
 
 async function retryDiscoveryCandidates() {
   var existingReq = (_tb.candidates||[]).filter(function(c){ return c._required; });
@@ -4889,11 +4889,15 @@ function renderCandidateCards(cands){
     if (!candByPrimary[primary]) candByPrimary[primary] = [];
     candByPrimary[primary].push(c);
   });
-  // Extracted so we can render active cards inline and rejected cards inside a
-  // collapsible footer without duplicating the body.
+  // ── Progressive disclosure ──────────────────────────────
+  // Candidate cards render compact by default (name · role · stay · status +
+  // Keep/chevron). Full detail (whyItFits, Also here, badges, tags, Reject,
+  // Compare) only appears when the user explicitly expands a card. Less noise
+  // on first look; same information one tap away.
   function renderCard(c, container){
     var card=document.createElement("div");
     card.className="ce-card"+(c.status?" "+c.status:""); card.id="ce-card-"+c.id;
+    var expanded = !!_ceCardExpanded[c.id];
     var sl=c.status==="keep"?"\u2713 Kept":c.status==="reject"?"\u00d7 Rejected":"";
     var sc=c.status==="keep"?"#2a7a4e":"#c05020";
     var isManual = c._requiredFor && c._requiredFor.length && c._requiredFor.every(function(r){return r==="__manual__";});
@@ -4928,30 +4932,62 @@ function renderCandidateCards(cands){
     var alsoHereHtml = alsoHere
       ? '<div style="font-size:11px;color:#555;line-height:1.5;margin-top:4px;"><strong style="color:#333;font-weight:600;">Also here:</strong> '+alsoHere+'</div>'
       : '';
-    card.innerHTML='<div class="ce-card-top">'
-      +'<div style="display:flex;justify-content:space-between;align-items:baseline;">'
-      +'<div class="ce-card-name">'+c.place+wrTag+'</div>'
-      +(sl?'<div style="font-size:9px;font-weight:700;color:'+sc+';">'+sl+'</div>':'')
+    // Compact header — always visible. Name, role, stay, status, Keep/chevron.
+    // Gives the user enough to decide "this is good, keep moving" without reading
+    // a paragraph.
+    var compactHtml = '<div class="ce-card-compact" style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;cursor:pointer;">'
+      +'<div style="flex:1;min-width:0;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">'
+      +'<span class="ce-card-name" style="font-size:13px;font-weight:700;color:#111;">'+c.place+'</span>'
+      +'<span style="font-size:10px;color:#888;">'+rIcon(c.role)+' '+(c.role||'')+(c.stayRange?' \u00b7 '+c.stayRange:'')+(c.country?' \u00b7 '+c.country:'')+'</span>'
+      +wrTag
+      +(sl?'<span style="font-size:9px;font-weight:700;color:'+sc+';">'+sl+'</span>':'')
       +'</div>'
-      +reqBadge
-      +'<div class="ce-card-role">'+rIcon(c.role)+' '+c.role+(c.country?' \u00b7 '+c.country:'')+'</div>'
-      +'<div class="ce-card-why">'+c.whyItFits+'</div>'
-      +alsoHereHtml
-      +'<div class="ce-card-tags">'+(c.tags||[]).map(function(t){return '<span class="ce-tag">'+t+'</span>';}).join('')+'</div>'
-      +'<div class="ce-card-meta">Stay: '+c.stayRange+'</div>'
+      +'<div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">'
+      +'<button class="ce-act-compact-keep" style="font-size:10px;font-weight:600;padding:4px 9px;border-radius:5px;border:1px solid '+(c.status==="keep"?"#2a7a4e":"#ddd")+';background:'+(c.status==="keep"?"#e8f5ee":"#fff")+';color:'+(c.status==="keep"?"#2a7a4e":"#333")+';cursor:pointer;font-family:inherit;" title="'+(c.status==="keep"?"Remove from shortlist":(c.status==="reject"?"Restore":"Keep"))+'">'+(c.status==="keep"?"\u2713":(c.status==="reject"?"\u21ba":"+"))+'</button>'
+      +'<button class="ce-act-compact-expand" style="font-size:12px;color:#888;background:none;border:none;cursor:pointer;font-family:inherit;padding:0 4px;" title="'+(expanded?"Hide details":"See details")+'">'+(expanded?"\u25BE":"\u25B8")+'</button>'
       +'</div>'
-      +(c.tradeoffs?'<div class="ce-card-tradeoff">\u26a0 '+c.tradeoffs+'</div>':'')
-      +'<div class="ce-card-actions">'
-      +'<button class="ce-act keep'+(c.status==="keep"?" on":'')+'">'+(c.status==="reject"?"\u21ba Restore":"\u2713 Keep")+'</button>'
-      +'<button class="ce-act reject'+(c.status==="reject"?" on":'')+'">\u00d7 Reject</button>'
-      +'<button class="ce-act compare">\u21c4 Compare</button>'
       +'</div>';
-    var btns=card.querySelectorAll(".ce-act");
+
+    // Detail panel — only rendered when the card is expanded
+    var detailHtml = expanded
+      ? '<div class="ce-card-details" style="padding:4px 11px 10px;border-top:1px solid #f0f0f0;">'
+        +reqBadge
+        +'<div class="ce-card-why" style="font-size:11px;color:#555;line-height:1.55;margin-top:4px;">'+(c.whyItFits||'')+'</div>'
+        +alsoHereHtml
+        +'<div class="ce-card-tags" style="margin-top:6px;">'+(c.tags||[]).map(function(t){return '<span class="ce-tag">'+t+'</span>';}).join('')+'</div>'
+        +(c.tradeoffs?'<div class="ce-card-tradeoff" style="margin-top:6px;">\u26a0 '+c.tradeoffs+'</div>':'')
+        +'<div class="ce-card-actions" style="margin-top:8px;border-top:none;">'
+        +'<button class="ce-act reject'+(c.status==="reject"?" on":'')+'">\u00d7 Reject</button>'
+        +'<button class="ce-act compare">\u21c4 Compare</button>'
+        +'</div>'
+        +'</div>'
+      : '';
+
+    card.innerHTML = compactHtml + detailHtml;
+
+    // Wire up compact header interactions: keep button, expand chevron, whole-row
+    // click (also expands).
+    var keepBtn = card.querySelector(".ce-act-compact-keep");
+    var expandBtn = card.querySelector(".ce-act-compact-expand");
+    var compactRow = card.querySelector(".ce-card-compact");
     (function(cand){
-      btns[0].onclick=function(){setCS(cand.id,"keep");};
-      btns[1].onclick=function(){setCS(cand.id,"reject");};
-      btns[2].onclick=function(){doCompare(cand.id);};
+      if (keepBtn) keepBtn.onclick = function(e){ e.stopPropagation(); setCS(cand.id, cand.status==="reject" ? "keep" : "keep"); };
+      if (expandBtn) expandBtn.onclick = function(e){ e.stopPropagation(); _ceCardExpanded[cand.id] = !_ceCardExpanded[cand.id]; renderCandidateCards(_tb.candidates); };
+      if (compactRow) compactRow.onclick = function(e){
+        // Clicks on the row (not the buttons) toggle expansion too
+        if (e.target.closest("button")) return;
+        _ceCardExpanded[cand.id] = !_ceCardExpanded[cand.id];
+        renderCandidateCards(_tb.candidates);
+      };
     })(c);
+    // Wire detail buttons if present
+    if (expanded) {
+      var detailBtns = card.querySelectorAll(".ce-card-details .ce-act");
+      (function(cand){
+        if (detailBtns[0]) detailBtns[0].onclick = function(){ setCS(cand.id, "reject"); };
+        if (detailBtns[1]) detailBtns[1].onclick = function(){ doCompare(cand.id); };
+      })(c);
+    }
     container.appendChild(card);
     if(c.lat&&c.lng){
       var mc=c.status==="keep"?"#2a7a4e":c.status==="reject"?"#888":"#1a5fa8";
@@ -4972,9 +5008,57 @@ function renderCandidateCards(cands){
     }
   }
 
-  // Top control: "Show me the best" / "Show all" toggle that caps each must-do
-  // section to its top pick (ranked: kept > required > first in array) and hides
-  // the Discovery pool. A quick-scan mode for travelers who feel overwhelmed.
+  // Summary view — the calm first impression. Shows the kept places in order
+  // and a prominent Build button; sections and cards stay hidden until the user
+  // chooses to look at the options. This collapses the "wall of data" feeling
+  // without losing any of the detail for travelers who want it.
+  var kept = (_tb.candidates||[]).filter(function(c){ return c.status === "keep"; });
+  var summaryWrap = document.createElement("div");
+  summaryWrap.style.cssText = "margin:8px 4px 12px;padding:14px 16px;background:#fff;border:1px solid #e0e8f0;border-radius:10px;";
+  var summaryHead = document.createElement("div");
+  summaryHead.style.cssText = "font-size:12px;font-weight:700;color:#1a5fa8;margin-bottom:8px;letter-spacing:0.02em;";
+  summaryHead.textContent = kept.length
+    ? "Here\u2019s what I\u2019d plan for you"
+    : "No destinations picked yet";
+  summaryWrap.appendChild(summaryHead);
+  if (kept.length) {
+    var keptLine = document.createElement("div");
+    keptLine.style.cssText = "font-size:13px;color:#111;line-height:1.65;margin-bottom:6px;";
+    keptLine.innerHTML = kept.map(function(c){return '<strong>'+c.place+'</strong>';}).join(' \u00b7 ');
+    summaryWrap.appendChild(keptLine);
+  }
+  var sumStay = document.createElement("div");
+  sumStay.id = "ce-summary-stay";
+  sumStay.style.cssText = "font-size:11px;color:#888;margin-bottom:10px;";
+  summaryWrap.appendChild(sumStay);
+  var sumBtns = document.createElement("div");
+  sumBtns.style.cssText = "display:flex;gap:8px;flex-wrap:wrap;";
+  var sumBuild = document.createElement("button");
+  sumBuild.style.cssText = "font-size:12px;font-weight:700;padding:9px 16px;border-radius:6px;border:1px solid #111;background:#111;color:#fff;cursor:pointer;font-family:inherit;"+(kept.length?"":"opacity:0.5;cursor:not-allowed;");
+  sumBuild.textContent = "Build trip \u2192";
+  sumBuild.disabled = !kept.length;
+  sumBuild.onclick = function(){ if (!sumBuild.disabled) (_ceEditMode ? applyCandidateChanges() : buildFromCandidates()); };
+  sumBtns.appendChild(sumBuild);
+  var sumToggle = document.createElement("button");
+  sumToggle.style.cssText = "font-size:11px;font-weight:600;padding:9px 14px;border-radius:6px;border:1px solid #ddd;background:#fff;color:#555;cursor:pointer;font-family:inherit;";
+  sumToggle.textContent = _ceSummaryView ? "Let me look at the options \u2193" : "\u2191 Hide options";
+  sumToggle.onclick = function(){ _ceSummaryView = !_ceSummaryView; renderCandidateCards(_tb.candidates); };
+  sumBtns.appendChild(sumToggle);
+  summaryWrap.appendChild(sumBtns);
+  el.appendChild(summaryWrap);
+
+  // If the user is in summary view, render no further sections — the shortlist
+  // and Build button ARE the screen. Updates to the stay-total line happen via
+  // updateCEShortlist at the bottom of this function.
+  if (_ceSummaryView) {
+    if (bounds.length > 1) setTimeout(function(){try{_ceMap.fitBounds(bounds,{padding:[28,28]});}catch(e){}},150);
+    updateCEShortlist();
+    showCandidateDisclaimer();
+    return;
+  }
+
+  // Secondary control (only visible in options mode): "Show me the best" caps
+  // each must-do section to its top pick; "Show all" expands.
   var topCtrl = document.createElement("div");
   topCtrl.style.cssText = "padding:6px 4px 0;display:flex;justify-content:flex-end;";
   var bestBtn = document.createElement("button");
@@ -5417,14 +5501,19 @@ function renderCEStayTotal(kept){
     host.style.cssText="font-size:10px;color:#888;margin-top:5px;line-height:1.4;";
     shortlist.appendChild(host);
   }
-  if(!kept.length){host.textContent=""; return;}
+  var sumHost = g("ce-summary-stay");
+  function writeBoth(html){
+    if (host) host.innerHTML = html;
+    if (sumHost) sumHost.innerHTML = html;
+  }
+  if(!kept.length){writeBoth(""); return;}
   var min=0,max=0,allParsed=true;
   kept.forEach(function(c){
     var r=_parseNightRange(c.stayRange);
     if(!r){allParsed=false;return;}
     min+=r.min; max+=r.max;
   });
-  if(!allParsed){host.textContent=""; return;}
+  if(!allParsed){writeBoth(""); return;}
   var rangeStr=(min===max)?(min+" nights"):(min+"\u2013"+max+" nights");
   var trip=_parseTripDuration(_tb.duration||"");
   if(trip){
@@ -5434,9 +5523,9 @@ function renderCEStayTotal(kept){
     var color= over?"#c05020":(under?"#888":"#2a7a4e");
     var tripStr=(trip.min===trip.max)?(trip.min+" days"):(trip.min+"\u2013"+trip.max+" days");
     var note=over?" \u2014 over your trip length":(under?" \u2014 room for more":"");
-    host.innerHTML='<span style="color:'+color+';">Shortlist: '+rangeStr+'</span> \u00b7 Trip: '+tripStr+note;
+    writeBoth('<span style="color:'+color+';">Shortlist: '+rangeStr+'</span> \u00b7 Trip: '+tripStr+note);
   } else {
-    host.textContent="Shortlist: "+rangeStr;
+    writeBoth("Shortlist: "+rangeStr);
   }
 }
 
