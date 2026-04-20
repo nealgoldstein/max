@@ -2246,11 +2246,10 @@ async function expandChipSuggestions(region, intent, chips){
       }
     });
     _mdcChipSuggestions = items;
-    // Refresh the section and banner if the must-do page is open (legacy path)
-    if (document.getElementById("mdc-body")) {
-      _renderChipSuggestionsSection();
-      _updateForcedMarchBanner();
-    }
+    // Merged-flow: chip suggestions surface as activity sections on the Places
+    // page (via expandMustDos merging them into _mdcItems). Don't render into
+    // the legacy mdc-body — it's only visible as the brief loading overlay
+    // and flashing a section there just to have it torn down is confusing.
     return items;
   } catch(e) {
     console.warn("Chip suggestion expansion failed:", e && e.message);
@@ -4461,7 +4460,7 @@ async function findCandidates(){
 }
 
 // ─── CANDIDATE EXPLORER ────────────────────────────────────
-var _ceMap=null,_ceMarkers=[],_ceRejectedExpanded=false,_ceEditMode=false,_ceBestMode=true,_ceCardExpanded={},_ceLens="activity";
+var _ceMap=null,_ceMarkers=[],_ceRejectedExpanded=false,_ceEditMode=false,_ceBestMode=true,_ceCardExpanded={},_ceLens="activity",_ceSectionExpanded={};
 
 async function retryDiscoveryCandidates() {
   var existingReq = (_tb.candidates||[]).filter(function(c){ return c._required; });
@@ -5044,6 +5043,8 @@ function renderCandidateCards(cands){
   // Show-me-the-best/Show-all density toggle. No summary takeover; sections are
   // the primary view.
   var kept = (_tb.candidates||[]).filter(function(c){ return c.status === "keep"; });
+  console.log("[Max] renderCandidateCards: kept.length =", kept.length, "/ _tb.candidates =", (_tb.candidates||[]).length,
+    "/ sample status =", (_tb.candidates && _tb.candidates[0]) ? {place:_tb.candidates[0].place, status:_tb.candidates[0].status, required:_tb.candidates[0]._required} : null);
   var headerWrap = document.createElement("div");
   headerWrap.style.cssText = "margin:8px 4px 10px;padding:10px 14px;background:#fff;border:1px solid #e0e8f0;border-radius:8px;";
   var headerLabel = document.createElement("div");
@@ -5154,7 +5155,7 @@ function renderCandidateCards(cands){
     hdrRow.style.cssText = "display:flex;justify-content:space-between;align-items:baseline;gap:8px;";
     var hdr = document.createElement("div");
     hdr.style.cssText = "font-size:13px;font-weight:700;color:#1a5fa8;letter-spacing:0.02em;";
-    hdr.textContent = "For " + mdName + (mdItem && mdItem.type ? ' \u00b7 ' + mdItem.type : '');
+    hdr.textContent = mdName + (mdItem && mdItem.type ? ' \u00b7 ' + mdItem.type : '');
     hdrRow.appendChild(hdr);
     if (mdItem && mdItem.fromChip && mdItem.interest) {
       var chipSrc = document.createElement("div");
@@ -5194,13 +5195,25 @@ function renderCandidateCards(cands){
 
     el.appendChild(sectionWrap);
 
-    var display = _ceBestMode ? bestPickFirst(group).slice(0, 1) : group;
+    // Per-section expansion: global best-mode caps groups to 1, but a section's
+    // own flag can override and show all its candidates. Lets the user dig into
+    // one activity's alternatives without flipping the whole page to "Show all".
+    var sectionOpen = !!_ceSectionExpanded[mdName];
+    var showAllInSection = !_ceBestMode || sectionOpen;
+    var display = showAllInSection ? group : bestPickFirst(group).slice(0, 1);
     display.forEach(function(c){ renderCard(c, el); });
-    if (_ceBestMode && group.length > 1) {
-      var more = document.createElement("div");
-      more.style.cssText = "font-size:10px;color:#888;padding:4px 8px 8px;font-style:italic;";
-      more.textContent = "+ " + (group.length - 1) + " more, hidden \u2014 Show all to see";
+    if (_ceBestMode && group.length > 1 && !sectionOpen) {
+      var more = document.createElement("button");
+      more.style.cssText = "font-size:10px;color:#1a5fa8;padding:5px 10px;margin:4px 4px 10px;background:#eef4fc;border:1px solid #d4e2f5;border-radius:5px;cursor:pointer;font-family:inherit;font-weight:600;";
+      more.textContent = "+ " + (group.length - 1) + " more for " + mdName + " \u2014 show them";
+      (function(n){ more.onclick = function(){ _ceSectionExpanded[n] = true; renderCandidateCards(_tb.candidates); }; })(mdName);
       el.appendChild(more);
+    } else if (_ceBestMode && sectionOpen && group.length > 1) {
+      var less = document.createElement("button");
+      less.style.cssText = "font-size:10px;color:#888;padding:5px 10px;margin:4px 4px 10px;background:#fff;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;";
+      less.textContent = "\u2191 Collapse " + mdName + " back to top pick";
+      (function(n){ less.onclick = function(){ delete _ceSectionExpanded[n]; renderCandidateCards(_tb.candidates); }; })(mdName);
+      el.appendChild(less);
     }
   }
 
