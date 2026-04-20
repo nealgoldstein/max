@@ -2848,6 +2848,7 @@ async function runCandidateSearch(requiredPlaces) {
     }
   }, 100);
 
+  var _paceDir = _paceDirective(_getPaceMode(_tb.pace));
   var brief = "Region: " + (_tb.region||"")
     + (_tb.duration      ? "\nDuration: "      + _tb.duration      : "")
     + (_tb.when         ? "\nWhen: "          + _tb.when          : "")
@@ -2864,7 +2865,8 @@ async function runCandidateSearch(requiredPlaces) {
     + (_tb.drivers&&_tb.drivers.length ? "\nWhat\'s driving this trip: " + _tb.drivers.join(", ") : "")
     + (_tb.familiarity   ? "\nFamiliarity with destination: " + _tb.familiarity : "")
     + (_tb.gradient      ? "\nWhat \'different\' means to them: " + _tb.gradient : "")
-    + (_tb.flexibilityNotes&&_tb.flexibilityNotes.length ? "\nSCHEDULING NOTES: " + _tb.flexibilityNotes.join("; ") : "");
+    + (_tb.flexibilityNotes&&_tb.flexibilityNotes.length ? "\nSCHEDULING NOTES: " + _tb.flexibilityNotes.join("; ") : "")
+    + (_paceDir ? "\n\n" + _paceDir : "");
 
   // For complex multi-country trips, run both calls in parallel
   // and show results as each completes — so adding more required stops
@@ -5156,7 +5158,7 @@ async function buildFromCandidates(){
   var kept=(_tb.candidates||[]).filter(function(c){return c.status==="keep";});
   if(!kept.length) return;
   trip={name:_tb.name||"New trip",destinations:[],legs:{},trackSpending:false,pendingActions:[],
-    brief:{region:_tb.region,when:_tb.when,intent:_tb.intent,interests:_tb.interests,anchors:_tb.anchors,familiarity:_tb.familiarity},
+    brief:{region:_tb.region,when:_tb.when,intent:_tb.intent,interests:_tb.interests,anchors:_tb.anchors,familiarity:_tb.familiarity,pace:_tb.pace,accommodation:_tb.accommodation,compromises:_tb.compromises,hardlimits:_tb.hardlimits,duration:_tb.duration},
     mdcItems:(_mdcItems||[]).map(function(m){return {
       id:m.id, name:m.name, type:m.type, checked:m.checked,
       requiredPlaces:m.requiredPlaces, endpoints:m.endpoints, viableLocations:m.viableLocations,
@@ -5559,6 +5561,45 @@ function parseStartDateFromBrief(when){
   return def.toISOString().slice(0,10);
 }
 
+// Detect the user's pace intent from the freeform pace text on the trip brief.
+// Accepts the first word / first clause and returns a structured mode we can
+// pass to generation prompts and to the toast logic. Null if unrecognized —
+// prompts fall back to their default heuristics.
+function _getPaceMode(paceText){
+  if (!paceText) return null;
+  var t = String(paceText).toLowerCase().trim();
+  // Match at the start, allowing common delimiters
+  var head = t.split(/[\s\u2014\-,.:;]/)[0];
+  if (head === "loose") return "loose";
+  if (head === "enough") return "enough";
+  // "not much" — special case because head would be just "not"
+  if (t.indexOf("not much") === 0 || t.indexOf("notmuch") === 0) return "notmuch";
+  return null;
+}
+
+// LLM-readable directive for a given pace mode. Appended to candidate and
+// city-data generation prompts so the model shapes stay lengths, sight counts,
+// and evening suggestions to match what the user actually wants.
+function _paceDirective(mode){
+  if (mode === "loose") {
+    return "PACE: Loose. The traveler wants white space. Prefer LONGER stays (nudge stayRange up by 1 night where reasonable). Recommend FEWER sights per destination (5-6). Leave evenings open. Optimize for sitting in cafes, people-watching, unscheduled discovery.";
+  }
+  if (mode === "notmuch") {
+    return "PACE: Not much. The traveler has limited time and wants high throughput. Prefer SHORTER stays (minimum that makes sense). Recommend MORE sights per destination (8-10). Include evening suggestions. Pack the days.";
+  }
+  if (mode === "enough") {
+    return "PACE: Enough. Balanced. Moderate stays, 6-8 sights per destination, deliberate gaps for unexpected opportunities.";
+  }
+  return "";
+}
+
+// Pick a sights-count string appropriate for the pace mode
+function _paceSightCount(mode){
+  if (mode === "loose") return "5-6 sights";
+  if (mode === "notmuch") return "8-10 sights";
+  return "6-8 sights";
+}
+
 function parseNightsFromRange(stayRange){
   // "3-4 nights" -> 3, "5-7 nights" -> 5, "2 nights" -> 2
   if(!stayRange) return 3;
@@ -5595,7 +5636,7 @@ function showPaceToast(){
   }
   // Rebalance button — only meaningful in Nights mode (net-zero transfer between destinations)
   var rebalanceHtml = _paceMode === "nights"
-    ? '<button id="pace-balance" style="font-size:11px;padding:5px 10px;border-radius:5px;border:1px solid #4a6a8a;background:#2a3a5a;color:#fff;cursor:pointer;font-family:inherit;" title="Move 1 night from the least-packed destination to the most-packed one (trip length unchanged)">Rebalance</button>'
+    ? '<button id="pace-balance" style="font-size:11px;padding:5px 10px;border-radius:5px;border:1px solid #4a6a8a;background:#2a3a5a;color:#fff;cursor:pointer;font-family:inherit;" title="Move 1 night from the least-packed destination to the most-packed one (trip length unchanged)">Even out</button>'
     : '';
   t.innerHTML =
     '<span style="font-size:12px;font-weight:500;">Pace feel right?</span>'
@@ -5871,7 +5912,7 @@ function rebalanceNights(){
   if (activeDest && typeof drawDestMode === "function") drawDestMode(activeDest);
   else drawTripMode();
   setTimeout(showPaceToast, 20);
-  showSaveStatus("Rebalanced \u2014 moved 1 night from " + src.place + " to " + sink.place, 3800);
+  showSaveStatus("Evened out \u2014 moved 1 night from " + src.place + " to " + sink.place, 3800);
 }
 
 function showShortlistBanner(kept){
@@ -6232,7 +6273,10 @@ async function generateCityData(place,destId){
 
   showSaveStatus('Max is generating '+place+' data\u2026',60000);
 
-  var prompt='Generate travel data for '+place+'. Return ONLY valid JSON, no markdown:\n{"cityCenter":[lat,lng],"sights":[{"name":"...","st":"...","desc":"one sentence"}],"districts":[{"name":"...","good":"...","bad":"...","hotels":[{"name":"...","desc":"...","price":"...","tier":2}]}],"practicalInfo":{"currency":"...","tipping":"...","note":"...","emergency":"..."},"transitHub":{"arrival":{"name":"...","lat":0,"lng":0},"departure":{"name":"...","lat":0,"lng":0}},"essentials":{"atms":[{"name":"...","note":"..."}],"banks":[{"name":"...","note":"..."}],"groceries":[{"name":"...","note":"..."}],"touristInfo":[{"name":"...","note":"..."}],"pharmacies":[{"name":"...","note":"..."}]}}\n6-8 sights, 2 districts, 1-2 hotels each. SIGHTS must be real cultural, historical, architectural, or natural attractions a tourist visits for the experience — museums, churches, landmarks, viewpoints, gondolas, trails, squares, gardens, ruins. Do NOT include hotels, spa retreats, wellness retreats, lodges, banks, ATMs, pharmacies, grocery stores, or other everyday services as sights — those belong in hotels or essentials, not sights. Essentials are ALL required — do not omit any field. Include 2-3 ATMs, 1-2 banks (named branches — UBS, Raiffeisen, Barclays, BNP, etc. — whatever operates locally), 2-3 groceries, 1 tourist info, AND 1-2 pharmacies (chemists / drugstores / Apotheke / farmacia / pharmacie — whatever the local term). Real named places. Be concise.';
+  var _paceModeGD = _getPaceMode((trip && trip.brief && trip.brief.pace) || (_tb && _tb.pace) || "");
+  var _sightsCountGD = _paceSightCount(_paceModeGD);
+  var _paceDirGD = _paceDirective(_paceModeGD);
+  var prompt='Generate travel data for '+place+'. Return ONLY valid JSON, no markdown:\n{"cityCenter":[lat,lng],"sights":[{"name":"...","st":"...","desc":"one sentence"}],"districts":[{"name":"...","good":"...","bad":"...","hotels":[{"name":"...","desc":"...","price":"...","tier":2}]}],"practicalInfo":{"currency":"...","tipping":"...","note":"...","emergency":"..."},"transitHub":{"arrival":{"name":"...","lat":0,"lng":0},"departure":{"name":"...","lat":0,"lng":0}},"essentials":{"atms":[{"name":"...","note":"..."}],"banks":[{"name":"...","note":"..."}],"groceries":[{"name":"...","note":"..."}],"touristInfo":[{"name":"...","note":"..."}],"pharmacies":[{"name":"...","note":"..."}]}}\n'+_sightsCountGD+', 2 districts, 1-2 hotels each. SIGHTS must be real cultural, historical, architectural, or natural attractions a tourist visits for the experience — museums, churches, landmarks, viewpoints, gondolas, trails, squares, gardens, ruins. Do NOT include hotels, spa retreats, wellness retreats, lodges, banks, ATMs, pharmacies, grocery stores, or other everyday services as sights — those belong in hotels or essentials, not sights. Essentials are ALL required — do not omit any field. Include 2-3 ATMs, 1-2 banks (named branches — UBS, Raiffeisen, Barclays, BNP, etc. — whatever operates locally), 2-3 groceries, 1 tourist info, AND 1-2 pharmacies (chemists / drugstores / Apotheke / farmacia / pharmacie — whatever the local term). Real named places. Be concise.'+(_paceDirGD ? "\n\n"+_paceDirGD : "");
 
   try{
     // Add 30 second timeout to generation
