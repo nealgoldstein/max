@@ -4597,7 +4597,7 @@ async function findCandidates(){
 }
 
 // ─── CANDIDATE EXPLORER ────────────────────────────────────
-var _ceMap=null,_ceMarkers=[],_ceRejectedExpanded=false,_ceEditMode=false,_ceBestMode=false,_ceCardExpanded={},_ceLens="activity",_ceSectionExpanded={};
+var _ceMap=null,_ceMarkers=[],_ceRejectedExpanded=false,_ceEditMode=false,_ceBestMode=false,_ceCardExpanded={},_ceLens="time",_ceSectionExpanded={};
 
 async function retryDiscoveryCandidates() {
   var existingReq = (_tb.candidates||[]).filter(function(c){ return c._required; });
@@ -5224,11 +5224,29 @@ function renderCandidateCards(cands){
     "/ sample status =", (_tb.candidates && _tb.candidates[0]) ? {place:_tb.candidates[0].place, status:_tb.candidates[0].status, required:_tb.candidates[0]._required} : null);
   var headerWrap = document.createElement("div");
   headerWrap.style.cssText = "margin:8px 4px 10px;padding:10px 14px;background:#fff;border:1px solid #e0e8f0;border-radius:8px;";
+  // Compute the day-total range up front so the intro paragraph can reference it
+  var _dayMin = 0, _dayMax = 0, _daysOk = true;
+  kept.forEach(function(c){
+    var r = _parseNightRange(c.stayRange);
+    if (!r) { _daysOk = false; return; }
+    _dayMin += r.min; _dayMax += r.max;
+  });
+  var _dayRangeStr = _daysOk && kept.length
+    ? (_dayMin === _dayMax ? _dayMin + " days" : _dayMin + "\u2013" + _dayMax + " days")
+    : "";
+
   var headerLabel = document.createElement("div");
   headerLabel.style.cssText = "font-size:11px;color:#555;line-height:1.6;margin-bottom:6px;";
-  headerLabel.innerHTML = kept.length
-    ? 'Based on what you told me, here\u2019s a draft itinerary: the places where you can do the activities you want, ordered for transportation. As you select or reject places, the shape updates.'
-    : '<em>Nothing kept yet \u2014 pick at least one place below to build a trip.</em>';
+  if (!kept.length) {
+    headerLabel.innerHTML = '<em>Nothing kept yet \u2014 pick at least one place below to build a trip.</em>';
+  } else {
+    var timeClause = _dayRangeStr
+      ? 'At your pace, it\u2019ll take about <strong style="color:#111;">' + _dayRangeStr + '</strong>. '
+      : '';
+    headerLabel.innerHTML = 'Here\u2019s an itinerary that will take you to the places where you can do what you want to do. '
+      + timeClause
+      + 'Now it\u2019s time to make some decisions.';
+  }
   headerWrap.appendChild(headerLabel);
   if (kept.length) {
     var keptLine = document.createElement("div");
@@ -5236,32 +5254,6 @@ function renderCandidateCards(cands){
     keptLine.innerHTML = kept.map(function(c){return '<strong>'+c.place+'</strong>';}).join(' \u00b7 ');
     headerWrap.appendChild(keptLine);
   }
-  // Days scheduled line — specific and actionable. Uses parseNightRange for
-  // each kept candidate's stayRange so the number stays in sync with the
-  // underlying data.
-  var daysScheduled = document.createElement("div");
-  daysScheduled.id = "ce-days-scheduled";
-  daysScheduled.style.cssText = "font-size:11px;color:#555;margin-bottom:2px;";
-  (function(){
-    if (!kept.length) { daysScheduled.textContent = ""; return; }
-    var min = 0, max = 0, allOk = true;
-    kept.forEach(function(c){
-      var r = _parseNightRange(c.stayRange);
-      if (!r) { allOk = false; return; }
-      min += r.min; max += r.max;
-    });
-    if (!allOk) { daysScheduled.textContent = ""; return; }
-    var rangeStr = (min===max) ? (min+" days") : (min+"\u2013"+max+" days");
-    var perStay;
-    var stays = kept.map(function(c){var r=_parseNightRange(c.stayRange); return r?r:null;}).filter(Boolean);
-    if (stays.length) {
-      var lo = Math.min.apply(null, stays.map(function(r){return r.min;}));
-      var hi = Math.max.apply(null, stays.map(function(r){return r.max;}));
-      perStay = (lo===hi) ? (lo+" days each") : (lo+"\u2013"+hi+" days each");
-    }
-    daysScheduled.innerHTML = 'Right now you have <strong style="color:#111;">'+rangeStr+'</strong> scheduled across '+kept.length+' place'+(kept.length!==1?'s':'')+(perStay?' ('+perStay+')':'')+'.';
-  })();
-  headerWrap.appendChild(daysScheduled);
   var headerStay = document.createElement("div");
   headerStay.id = "ce-summary-stay";
   headerStay.style.cssText = "font-size:10px;color:#888;margin-bottom:8px;";
@@ -5506,41 +5498,70 @@ function renderCandidateCards(cands){
         .forEach(function(c){ renderCard(c, el); });
     });
   } else if (_ceLens === "time") {
-    // Run the same ordering the trip builder uses so the user can see the trip
-    // shape before committing. Only kept candidates get ordered; everything else
-    // lands in "Not yet in the trip" below.
+    // Trip-order lens — the draft itinerary itself. Kept candidates render in
+    // the sequence Max would put them in at Build, with travel legs inferred
+    // between adjacent stops where possible (shared route endpoints → that
+    // train's name; otherwise generic "by train / onward"). Unselected
+    // candidates fall into a secondary "Also worth considering" section.
     var kept = activeCands.filter(function(c){return c.status === "keep";});
     var unset = activeCands.filter(function(c){return c.status !== "keep";});
     if (kept.length) {
+      var orderRes, ordered;
       try {
-        var orderRes = orderKeptCandidates(kept, _mdcItems||[], _tb.entry||"", _tb.tbExit||"");
-        var ordered = (orderRes && orderRes.ordered) || kept;
-        var hdr = document.createElement("div");
-        hdr.style.cssText = "margin-top:6px;padding:10px 4px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#111;";
-        hdr.textContent = "Your trip, in order";
-        el.appendChild(hdr);
-        if (orderRes && orderRes.reasoning && orderRes.reasoning.length) {
-          var why = document.createElement("div");
-          why.style.cssText = "padding:4px 4px 8px;font-size:10px;color:#888;line-height:1.55;";
-          why.innerHTML = orderRes.reasoning.map(function(r){return "\u2022 "+r;}).join("<br>");
-          el.appendChild(why);
+        orderRes = orderKeptCandidates(kept, _mdcItems||[], _tb.entry||"", _tb.tbExit||"");
+        ordered = (orderRes && orderRes.ordered) || kept;
+      } catch(e) { ordered = kept; }
+
+      // Build a route-endpoint lookup so we can label the leg between two
+      // adjacent cards with the train/route they share.
+      var routeByPair = {};
+      (_mdcItems||[]).filter(function(m){return m.checked && m.type === "route";}).forEach(function(m){
+        var eps = (m.endpoints || m.requiredPlaces || []).map(function(p){return (p.place||"").toLowerCase();});
+        for (var a=0;a<eps.length;a++) for (var b=0;b<eps.length;b++) if (a!==b) {
+          routeByPair[eps[a]+"\u2192"+eps[b]] = m.name;
         }
-        ordered.forEach(function(c, i){
-          var ix = document.createElement("div");
-          ix.style.cssText = "font-size:10px;color:#888;padding:4px 6px 0;font-weight:600;";
-          ix.textContent = (i+1) + ".";
-          el.appendChild(ix);
-          renderCard(c, el);
-        });
-      } catch(e) {
-        kept.forEach(function(c){ renderCard(c, el); });
+      });
+
+      var hdr = document.createElement("div");
+      hdr.style.cssText = "margin-top:6px;padding:10px 4px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#111;";
+      hdr.textContent = "Draft itinerary \u2014 in order";
+      el.appendChild(hdr);
+      if (orderRes && orderRes.reasoning && orderRes.reasoning.length) {
+        var why = document.createElement("div");
+        why.style.cssText = "padding:4px 4px 8px;font-size:10px;color:#888;line-height:1.55;";
+        why.innerHTML = orderRes.reasoning.map(function(r){return "\u2022 "+r;}).join("<br>");
+        el.appendChild(why);
       }
+
+      ordered.forEach(function(c, i){
+        // Travel leg between previous stop and this one
+        if (i > 0) {
+          var prev = ordered[i-1];
+          var key = (prev.place||"").toLowerCase() + "\u2192" + (c.place||"").toLowerCase();
+          var routeName = routeByPair[key];
+          var leg = document.createElement("div");
+          leg.style.cssText = "margin:2px 12px 2px;padding:4px 8px;font-size:10px;color:#666;border-left:2px solid #e8e8e8;line-height:1.55;";
+          leg.innerHTML = routeName
+            ? '\u2193 <strong style="color:#1a5fa8;">'+routeName+'</strong> \u00b7 '+prev.place+' \u2192 '+c.place
+            : '\u2193 Travel: '+prev.place+' \u2192 '+c.place;
+          el.appendChild(leg);
+        }
+        var ix = document.createElement("div");
+        ix.style.cssText = "font-size:10px;color:#888;padding:6px 6px 0;font-weight:700;letter-spacing:0.03em;";
+        ix.textContent = "STOP " + (i+1);
+        el.appendChild(ix);
+        renderCard(c, el);
+      });
     }
     if (unset.length) {
       var hdr2 = document.createElement("div");
-      hdr2.style.cssText = "margin-top:16px;padding:10px 4px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#111;border-top:1px solid #e8e8e8;";
-      hdr2.textContent = "Not yet in the trip";
+      hdr2.style.cssText = "margin-top:18px;padding:10px 4px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#111;border-top:1px solid #e8e8e8;";
+      hdr2.textContent = "Also worth considering";
       el.appendChild(hdr2);
+      var hdr2Sub = document.createElement("div");
+      hdr2Sub.style.cssText = "padding:0 4px 8px;font-size:10px;color:#888;";
+      hdr2Sub.textContent = "Places not yet in the draft. Keep any that fit; they\u2019ll slot into the order.";
+      el.appendChild(hdr2Sub);
       unset.forEach(function(c){ renderCard(c, el); });
     }
   } else if (_ceLens === "commitment") {
