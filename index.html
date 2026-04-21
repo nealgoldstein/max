@@ -10880,6 +10880,13 @@ function drawDestMode(destId){
   var dates=document.createElement("div"); dates.className="dm-dates"; dates.id="ud-dates-"+destId;
   dates.textContent=fmtD(dest.dateFrom)+" \u2013 "+fmtD(dest.dateTo)+" ("+dest.nights+" night"+(dest.nights!==1?"s":"")+")";
   datesRow.appendChild(dates);
+  // Trip-wide running total, always visible so the user sees how this destination
+  // fits into the overall trip budget without having to navigate back.
+  var tripNights = (trip.destinations||[]).reduce(function(s,d){return s + (d.nights || 0);}, 0);
+  var tripDays = tripNights + (trip.destinations && trip.destinations.length ? 1 : 0);
+  var tripTotal = document.createElement("div");
+  tripTotal.style.cssText = "font-size:10px;color:#888;margin-bottom:10px;";
+  tripTotal.innerHTML = 'Trip total: <strong style="color:#444;">'+tripDays+' days</strong> \u00b7 '+tripNights+' nights \u00b7 '+(trip.destinations||[]).length+' destination'+((trip.destinations||[]).length!==1?'s':'');
 
   // Attached events row — shows must-do events anchored to this destination
   // (routes passing through, conditions viable here), plus recovery-day flag
@@ -10961,7 +10968,7 @@ function drawDestMode(destId){
   }
   var ovWarn=document.createElement("div"); ovWarn.id="ov-warn-"+dest.id; ovWarn.className="overlap-warn hidden";
 
-  hdr.appendChild(title); hdr.appendChild(datesRow);
+  hdr.appendChild(title); hdr.appendChild(datesRow); hdr.appendChild(tripTotal);
   if (dest._eventsRowEl) hdr.appendChild(dest._eventsRowEl);
   hdr.appendChild(dmActs); hdr.appendChild(dsw); hdr.appendChild(ovWarn);
   c.appendChild(hdr);
