@@ -753,7 +753,7 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .ce-title{font-size:13px;font-weight:700;flex:1;}
 .ce-sub{font-size:10px;color:#aaa;}
 .ce-body{flex:1;display:flex;min-height:0;overflow:hidden;height:0;}
-.ce-left{flex:1;min-width:0;display:flex;flex-direction:column;background:#fff;overflow:hidden;min-height:0;height:100%;}
+.ce-left{width:340px;flex-shrink:0;display:flex;flex-direction:column;border-right:1px solid #eee;background:#fff;overflow:hidden;min-height:0;height:100%;}
 .ce-shortlist{padding:7px 10px;border-bottom:1px solid #f0f0f0;background:#f9f9f7;flex-shrink:0;}
 .ce-sl-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#aaa;margin-bottom:4px;}
 .ce-sl-pills{display:flex;flex-wrap:wrap;gap:4px;min-height:20px;}
@@ -4774,9 +4774,7 @@ function showCandidateExplorer(cands, editMode){
     +'<div class="ce-cards" id="ce-cards">'
     +(cands?'':'<div class="ce-loading" id="ce-loading">'      +'<span class="ce-loading-spin">\u2736</span>'      +'<div class="max-thinking" style="font-size:12px;font-weight:600;color:#555;margin-bottom:5px;">Thinking about where you might go\u2026</div>'      +'<div id="ce-loading-detail" style="font-size:10px;color:#aaa;line-height:1.7;">This usually takes 20\u201340 seconds.<br>Max is considering required stops and places worth visiting.</div>'      +'</div>')
     +'</div></div>'
-    /* Map is hidden by default on Places — it clutters the initial look for a */
-    /* sentence-driven flow. Users who want geographic context can add it back. */
-    +'<div class="ce-right" style="display:none;"><div id="ce-map" class="ce-map"></div></div>'
+    +'<div class="ce-right"><div id="ce-map" class="ce-map"></div></div>'
     +'</div>'
     +'<div class="ce-footer">'
     +'<span style="font-size:10px;color:#888;" id="ce-cnt">0 kept</span>'
@@ -5189,6 +5187,20 @@ function renderCandidateCards(cands){
       sectionWrap.appendChild(sub);
     }
 
+    // Route direction — for route-type activities, show the route line
+    // clearly ("Zermatt → St. Moritz") so the two endpoints read as a single
+    // journey, not two separate options. "either" direction renders with ↔.
+    if (mdItem && mdItem.type === "route") {
+      var eps = mdItem.endpoints || mdItem.requiredPlaces || [];
+      if (eps.length >= 2) {
+        var arrow = mdItem.direction === "reverse" ? " \u2190 " : (mdItem.direction === "either" ? " \u2194 " : " \u2192 ");
+        var routeLine = document.createElement("div");
+        routeLine.style.cssText = "font-size:12px;font-weight:600;color:#1a5fa8;margin-top:6px;";
+        routeLine.textContent = eps.map(function(p){return p.place;}).join(arrow);
+        sectionWrap.appendChild(routeLine);
+      }
+    }
+
     // Endpoint highlights (routes) or places list (activities/conditions)
     if (mdItem && mdItem.type === "route" && mdItem.endpointHighlights && typeof mdItem.endpointHighlights === "object") {
       var ehParts = [];
@@ -5207,19 +5219,21 @@ function renderCandidateCards(cands){
     el.appendChild(sectionWrap);
 
     // Per-section expansion: global best-mode caps groups to 1, but a section's
-    // own flag can override and show all its candidates. Lets the user dig into
-    // one activity's alternatives without flipping the whole page to "Show all".
+    // own flag can override and show all its candidates. Also: route-type
+    // activities always show all endpoints — the two endpoints of a train are
+    // not two competing options, they're the two ends of the same journey.
     var sectionOpen = !!_ceSectionExpanded[mdName];
-    var showAllInSection = !_ceBestMode || sectionOpen;
+    var isRoute = mdItem && mdItem.type === "route";
+    var showAllInSection = !_ceBestMode || sectionOpen || isRoute;
     var display = showAllInSection ? group : bestPickFirst(group).slice(0, 1);
     display.forEach(function(c){ renderCard(c, el); });
-    if (_ceBestMode && group.length > 1 && !sectionOpen) {
+    if (_ceBestMode && group.length > 1 && !sectionOpen && !isRoute) {
       var more = document.createElement("button");
       more.style.cssText = "font-size:10px;color:#1a5fa8;padding:5px 10px;margin:4px 4px 10px;background:#eef4fc;border:1px solid #d4e2f5;border-radius:5px;cursor:pointer;font-family:inherit;font-weight:600;";
-      more.textContent = "+ " + (group.length - 1) + " more for " + mdName + " \u2014 show them";
+      more.textContent = "+ " + (group.length - 1) + " more place" + (group.length-1!==1?"s":"") + " for " + mdName;
       (function(n){ more.onclick = function(){ _ceSectionExpanded[n] = true; renderCandidateCards(_tb.candidates); }; })(mdName);
       el.appendChild(more);
-    } else if (_ceBestMode && sectionOpen && group.length > 1) {
+    } else if (_ceBestMode && sectionOpen && group.length > 1 && !isRoute) {
       var less = document.createElement("button");
       less.style.cssText = "font-size:10px;color:#888;padding:5px 10px;margin:4px 4px 10px;background:#fff;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;";
       less.textContent = "\u2191 Collapse " + mdName + " back to top pick";
