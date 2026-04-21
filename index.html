@@ -4855,7 +4855,7 @@ function showCandidateExplorer(cands, editMode){
     +'<span style="font-size:10px;color:#888;" id="ce-cnt">0 kept</span>'
     +(_ceEditMode
       ? '<button class="ce-build-btn" id="ce-build-btn" disabled onclick="applyCandidateChanges()">Apply changes \u2192</button>'
-      : '<button class="ce-build-btn" id="ce-build-btn" disabled onclick="buildFromCandidates()">Build trip \u2192</button>')
+      : '<button class="ce-build-btn" id="ce-build-btn" disabled onclick="showPreBuildModal()">Build trip \u2192</button>')
     +'</div>';
   setTimeout(function(){
     // Fix flex height collapse before map init
@@ -5168,7 +5168,7 @@ function renderCandidateCards(cands){
   sumBuild.style.cssText = "font-size:11px;font-weight:700;padding:7px 13px;border-radius:5px;border:1px solid #111;background:#111;color:#fff;cursor:pointer;font-family:inherit;"+(kept.length?"":"opacity:0.5;cursor:not-allowed;");
   sumBuild.textContent = _ceEditMode ? "Apply changes \u2192" : "Build trip \u2192";
   sumBuild.disabled = !kept.length;
-  sumBuild.onclick = function(){ if (!sumBuild.disabled) (_ceEditMode ? applyCandidateChanges() : buildFromCandidates()); };
+  sumBuild.onclick = function(){ if (!sumBuild.disabled) (_ceEditMode ? applyCandidateChanges() : showPreBuildModal()); };
   headerBtns.appendChild(sumBuild);
   var bestBtn = document.createElement("button");
   bestBtn.style.cssText = "font-size:10px;padding:6px 10px;border-radius:5px;border:1px solid #ddd;background:#fff;color:#333;cursor:pointer;font-family:inherit;font-weight:600;";
@@ -5955,6 +5955,79 @@ async function openCompareModal(a,b){
   }
 }
 
+// "One more thing" — collects entry/exit/date before actually building the
+// trip. Defers logistics to the moment the user has committed to their
+// picks, so the Places page can stay about experience and this step can
+// stay about how-you-arrive-and-leave.
+function showPreBuildModal(){
+  var kept = (_tb.candidates||[]).filter(function(c){return c.status === "keep";});
+  if (!kept.length) return;
+
+  // Suggest defaults from the current kept set
+  var defaultEntry = kept[0] && kept[0].place ? kept[0].place : "";
+  var defaultExit  = kept[kept.length-1] && kept[kept.length-1].place ? kept[kept.length-1].place : "";
+  var defaultDate  = (typeof parseStartDateFromBrief === "function") ? parseStartDateFromBrief(_tb.when||"") : "";
+
+  var ov = document.createElement("div");
+  ov.id = "pre-build-overlay";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:10050;display:flex;align-items:center;justify-content:center;padding:20px;";
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.25);max-width:480px;width:100%;overflow:hidden;font-family:inherit;">'
+    +'<div style="padding:18px 20px 10px;">'
+    +'<div style="font-size:14px;font-weight:700;color:#111;margin-bottom:4px;">One more thing</div>'
+    +'<div style="font-size:11px;color:#666;line-height:1.55;margin-bottom:14px;">Before Max builds your trip, it needs to know how you arrive and how you leave. You can edit any of this later.</div>'
+
+    +'<div style="margin-bottom:12px;">'
+    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Flying / arriving into</label>'
+    +'<input id="pbm-entry" type="text" value="'+(( _tb.entry || defaultEntry )||'').replace(/"/g,'&quot;')+'" placeholder="e.g. Zurich" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'<div style="font-size:10px;color:#888;margin-top:3px;">If you\u2019re booked, use the actual airport or city. Otherwise a rough city is fine.</div>'
+    +'<div style="display:flex;gap:5px;margin-top:6px;">'
+    +'<span id="pbm-entry-fixed" class="tb-toggle'+(_tb.entryFixed?' on':'')+'" onclick="_tb.entryFixed=true;document.getElementById(&quot;pbm-entry-fixed&quot;).classList.add(&quot;on&quot;);document.getElementById(&quot;pbm-entry-flex&quot;).classList.remove(&quot;on&quot;);">Booked / fixed</span>'
+    +'<span id="pbm-entry-flex" class="tb-toggle'+(!_tb.entryFixed?' on':'')+'" onclick="_tb.entryFixed=false;document.getElementById(&quot;pbm-entry-flex&quot;).classList.add(&quot;on&quot;);document.getElementById(&quot;pbm-entry-fixed&quot;).classList.remove(&quot;on&quot;);">Still flexible</span>'
+    +'</div>'
+    +'</div>'
+
+    +'<div style="margin-bottom:12px;">'
+    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Arrival date</label>'
+    +'<input id="pbm-date" type="date" value="'+defaultDate+'" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'</div>'
+
+    +'<div style="margin-bottom:16px;">'
+    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Flying / leaving from</label>'
+    +'<input id="pbm-exit" type="text" value="'+(( _tb.tbExit || defaultExit )||'').replace(/"/g,'&quot;')+'" placeholder="e.g. Geneva" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'<div style="display:flex;gap:5px;margin-top:6px;">'
+    +'<span id="pbm-exit-fixed" class="tb-toggle'+(_tb.exitFixed?' on':'')+'" onclick="_tb.exitFixed=true;document.getElementById(&quot;pbm-exit-fixed&quot;).classList.add(&quot;on&quot;);document.getElementById(&quot;pbm-exit-flex&quot;).classList.remove(&quot;on&quot;);">Booked / fixed</span>'
+    +'<span id="pbm-exit-flex" class="tb-toggle'+(!_tb.exitFixed?' on':'')+'" onclick="_tb.exitFixed=false;document.getElementById(&quot;pbm-exit-flex&quot;).classList.add(&quot;on&quot;);document.getElementById(&quot;pbm-exit-fixed&quot;).classList.remove(&quot;on&quot;);">Still flexible</span>'
+    +'</div>'
+    +'</div>'
+
+    +'</div>'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end;padding:12px 20px 18px;border-top:1px solid #f0f0f0;">'
+    +'<button id="pbm-cancel" style="font-size:11px;font-weight:600;padding:8px 14px;border:1px solid #ddd;background:#fff;color:#555;border-radius:6px;cursor:pointer;font-family:inherit;">Back</button>'
+    +'<button id="pbm-build" style="font-size:11px;font-weight:700;padding:8px 16px;border:1px solid #111;background:#111;color:#fff;border-radius:6px;cursor:pointer;font-family:inherit;">Build my trip \u2192</button>'
+    +'</div>'
+    +'</div>';
+  document.body.appendChild(ov);
+  setTimeout(function(){var i=document.getElementById("pbm-entry");if(i)i.focus();},30);
+
+  function close(){ ov.remove(); }
+  ov.querySelector("#pbm-cancel").onclick = close;
+  ov.onclick = function(e){ if(e.target === ov) close(); };
+  ov.querySelector("#pbm-build").onclick = function(){
+    var entryVal = (document.getElementById("pbm-entry")||{}).value || "";
+    var exitVal  = (document.getElementById("pbm-exit") ||{}).value || "";
+    var dateVal  = (document.getElementById("pbm-date") ||{}).value || "";
+    _tb.entry = entryVal.trim();
+    _tb.tbExit = exitVal.trim();
+    if (dateVal) {
+      // Seed `when` with the specific date so parseStartDateFromBrief picks it up
+      _tb.when = dateVal;
+    }
+    close();
+    buildFromCandidates();
+  };
+}
+
 // ─── BUILD TRIP FROM CANDIDATES ────────────────────────────
 async function buildFromCandidates(){
   var kept=(_tb.candidates||[]).filter(function(c){return c.status==="keep";});
@@ -6342,6 +6415,10 @@ function findAttachedEvents(cand, mdcItems){
 }
 
 function parseStartDateFromBrief(when){
+  // If a specific ISO date was supplied (e.g. from the pre-build modal's
+  // date picker), use it directly.
+  var iso = (when||"").match(/\b(\d{4}-\d{2}-\d{2})\b/);
+  if (iso) return iso[1];
   // Try to find a date in the when string like "August 15", "15 August", "September"
   var now=new Date();
   var months=["january","february","march","april","may","june","july","august","september","october","november","december"];
