@@ -3164,6 +3164,49 @@ function _findMatchingRequired(cand, requiredPlaces){
   return null;
 }
 
+// Ask the LLM for the major airports in the region so the Candidate Explorer
+// map can mark them — useful for seeing which candidates are accessible to
+// which air-access points. Result cached on _tb.airports.
+async function expandAirportsForRegion(){
+  if (_tb._airportsInFlight) return;
+  if (_tb.airports && _tb.airports.length) { _addAirportsToCeMap(); return; }
+  if (!_tb || !_tb.region) return;
+  _tb._airportsInFlight = true;
+  try {
+    var prompt = "List the major international and regional airports travelers commonly use to access " + _tb.region
+      + ". Return ONLY a JSON array (no markdown), max 8 airports:\n"
+      + '[{"name":"Zurich Airport","code":"ZRH","city":"Zurich","country":"Switzerland","lat":47.4647,"lng":8.5492}]\n'
+      + "Include only airports that are actually useful for reaching " + _tb.region + " — not every small regional strip. Use real IATA codes and real coordinates.";
+    var text = await callMax([{role:"user",content:prompt}], 800, 25000);
+    var cleaned = text.replace(/```json|```/g,"").trim();
+    var first = cleaned.indexOf("["), last = cleaned.lastIndexOf("]");
+    if (first > -1 && last > -1) cleaned = cleaned.substring(first, last+1);
+    var arr = JSON.parse(cleaned);
+    _tb.airports = (arr||[]).filter(function(a){return a && a.lat && a.lng;});
+    _addAirportsToCeMap();
+  } catch(e){
+    console.warn("expandAirportsForRegion failed:", e && e.message);
+  } finally {
+    _tb._airportsInFlight = false;
+  }
+}
+
+// Add airport pins to the Candidate Explorer map (if it's currently showing).
+// Distinct from candidate pins: smaller, blue-on-white ✈ icon.
+function _addAirportsToCeMap(){
+  if (!_ceMap || !_tb.airports || !_tb.airports.length) return;
+  _tb.airports.forEach(function(a){
+    if (!a.lat || !a.lng) return;
+    var iconHtml = '<div style="background:#fff;color:#1a5fa8;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:12px;border:2px solid #1a5fa8;box-shadow:0 1px 4px rgba(0,0,0,.2);">\u2708</div>';
+    var icon = L.divIcon({html:iconHtml, className:"", iconSize:[22,22], iconAnchor:[11,11]});
+    var m = L.marker([a.lat,a.lng], {icon:icon, zIndexOffset:-100});
+    var label = a.name + (a.code ? " ("+a.code+")" : "") + (a.city ? " \u2014 "+a.city : "");
+    m.bindTooltip(label, {permanent:false, direction:"top", offset:[0,-14], className:"ce-map-tooltip"});
+    m.addTo(_ceMap);
+    _ceMarkers.push(m);
+  });
+}
+
 async function runCandidateSearch(requiredPlaces) {
   // region already set from sentence in Step 1
   _tb.duration      = g("tb-duration")      ? g("tb-duration").value.trim()      : (_tb.duration||"");
@@ -3183,6 +3226,10 @@ async function runCandidateSearch(requiredPlaces) {
   // and reset the "finding places" text). Just update the subtitle to reflect
   // the new phase and hide the trip-brief overlay if anything's still showing it.
   g("trip-brief-overlay").style.display="none";
+  // Fire a parallel call for major airports in the region, so the CE map can
+  // show the air-access points while the user is picking candidates. Runs
+  // concurrently with candidate generation — no added wait.
+  expandAirportsForRegion();
   var detailNow = document.getElementById("ce-loading-detail");
   if (!detailNow) {
     // Fallback: overlay not yet up (legacy callers) — create it.
@@ -5491,6 +5538,9 @@ function renderCandidateCards(cands){
     el.appendChild(rejWrap);
   }
 
+  // Airports on the CE map — user-facing context for where they can fly in/out.
+  // Added every render so a re-render (lens toggle, status change) doesn't lose them.
+  _addAirportsToCeMap();
   if(bounds.length>1) setTimeout(function(){try{_ceMap.fitBounds(bounds,{padding:[28,28]});}catch(e){}},150);
   updateCEShortlist();
   showCandidateDisclaimer();
@@ -5985,19 +6035,24 @@ function showPreBuildModal(){
     +'<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#888;margin-top:6px;margin-bottom:8px;">Getting there</div>'
 
     +'<div style="margin-bottom:10px;">'
-    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">How you\u2019re arriving</label>'
-    +'<input id="pbm-gettingTo" type="text" value="'+q(_tb.gettingTo||"")+'" placeholder="e.g. Flying into Zurich Aug 15, Swiss 38. Or: still deciding." style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
-    +'<div style="font-size:10px;color:#aaa;margin-top:3px;">Plane, train, car \u2014 in your own words. Include flight / train numbers and times if you have them.</div>'
+    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Arriving into (city or airport)</label>'
+    +'<input id="pbm-entry" type="text" value="'+q(_tb.entry || defaultEntry)+'" placeholder="e.g. Zurich or ZRH" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
     +'</div>'
 
-    +'<div style="margin-bottom:10px;">'
-    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Arriving into (city)</label>'
-    +'<input id="pbm-entry" type="text" value="'+q(_tb.entry || defaultEntry)+'" placeholder="e.g. Zurich" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
-    +'</div>'
-
-    +'<div style="margin-bottom:10px;">'
+    +'<div style="display:flex;gap:8px;margin-bottom:10px;">'
+    +'<div style="flex:1;">'
     +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Arrival date</label>'
     +'<input id="pbm-date" type="date" value="'+defaultDate+'" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'</div>'
+    +'<div style="flex:1;">'
+    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Arrival time <span style="font-weight:400;color:#aaa;">(optional)</span></label>'
+    +'<input id="pbm-arrTime" type="time" value="'+q(_tb.arrivalTime||"")+'" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'</div>'
+    +'</div>'
+
+    +'<div style="margin-bottom:10px;">'
+    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Flight / train number <span style="font-weight:400;color:#aaa;">(optional)</span></label>'
+    +'<input id="pbm-arrNum" type="text" value="'+q(_tb.arrivalNumber||"")+'" placeholder="e.g. Swiss 38, Eurostar 9137" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
     +'</div>'
 
     +'<div style="display:flex;gap:5px;margin-bottom:18px;">'
@@ -6008,14 +6063,24 @@ function showPreBuildModal(){
     +'<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#888;margin-top:6px;margin-bottom:8px;">Getting out</div>'
 
     +'<div style="margin-bottom:10px;">'
-    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">How you\u2019re leaving</label>'
-    +'<input id="pbm-gettingOut" type="text" value="'+q(_tb.gettingOut||"")+'" placeholder="e.g. Flying out of Geneva Sep 5, Swiss 17. Or: same flight home from wherever." style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
-    +'<div style="font-size:10px;color:#aaa;margin-top:3px;">Same mode as arrival, or different (fly in, train out) \u2014 whatever fits.</div>'
+    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Leaving from (city or airport)</label>'
+    +'<input id="pbm-exit" type="text" value="'+q(_tb.tbExit || defaultExit)+'" placeholder="e.g. Geneva or GVA" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'</div>'
+
+    +'<div style="display:flex;gap:8px;margin-bottom:10px;">'
+    +'<div style="flex:1;">'
+    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Departure date <span style="font-weight:400;color:#aaa;">(optional)</span></label>'
+    +'<input id="pbm-depDate" type="date" value="'+q(_tb.departureDate||"")+'" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'</div>'
+    +'<div style="flex:1;">'
+    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Departure time <span style="font-weight:400;color:#aaa;">(optional)</span></label>'
+    +'<input id="pbm-depTime" type="time" value="'+q(_tb.departureTime||"")+'" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'</div>'
     +'</div>'
 
     +'<div style="margin-bottom:10px;">'
-    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Leaving from (city)</label>'
-    +'<input id="pbm-exit" type="text" value="'+q(_tb.tbExit || defaultExit)+'" placeholder="e.g. Geneva" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Flight / train number <span style="font-weight:400;color:#aaa;">(optional)</span></label>'
+    +'<input id="pbm-depNum" type="text" value="'+q(_tb.departureNumber||"")+'" placeholder="e.g. Swiss 17" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
     +'</div>'
 
     +'<div style="display:flex;gap:5px;margin-bottom:10px;">'
@@ -6036,15 +6101,35 @@ function showPreBuildModal(){
   ov.querySelector("#pbm-cancel").onclick = close;
   ov.onclick = function(e){ if(e.target === ov) close(); };
   ov.querySelector("#pbm-build").onclick = function(){
-    var entryVal     = (document.getElementById("pbm-entry")      ||{}).value || "";
-    var exitVal      = (document.getElementById("pbm-exit")       ||{}).value || "";
-    var dateVal      = (document.getElementById("pbm-date")       ||{}).value || "";
-    var gettingToVal = (document.getElementById("pbm-gettingTo")  ||{}).value || "";
-    var gettingOutVal= (document.getElementById("pbm-gettingOut") ||{}).value || "";
-    _tb.entry      = entryVal.trim();
-    _tb.tbExit     = exitVal.trim();
-    _tb.gettingTo  = gettingToVal.trim();
-    _tb.gettingOut = gettingOutVal.trim();
+    var entryVal    = (document.getElementById("pbm-entry")   ||{}).value || "";
+    var exitVal     = (document.getElementById("pbm-exit")    ||{}).value || "";
+    var dateVal     = (document.getElementById("pbm-date")    ||{}).value || "";
+    var arrTimeVal  = (document.getElementById("pbm-arrTime") ||{}).value || "";
+    var arrNumVal   = (document.getElementById("pbm-arrNum")  ||{}).value || "";
+    var depDateVal  = (document.getElementById("pbm-depDate") ||{}).value || "";
+    var depTimeVal  = (document.getElementById("pbm-depTime") ||{}).value || "";
+    var depNumVal   = (document.getElementById("pbm-depNum")  ||{}).value || "";
+    _tb.entry           = entryVal.trim();
+    _tb.tbExit          = exitVal.trim();
+    _tb.arrivalTime     = arrTimeVal.trim();
+    _tb.arrivalNumber   = arrNumVal.trim();
+    _tb.departureDate   = depDateVal.trim();
+    _tb.departureTime   = depTimeVal.trim();
+    _tb.departureNumber = depNumVal.trim();
+    // Build a human-readable gettingTo/gettingOut from the structured fields so
+    // the rest of the pipeline (brief block, LLM prompts) still has the summary.
+    var gtParts = [];
+    if (arrNumVal.trim()) gtParts.push(arrNumVal.trim());
+    if (arrTimeVal.trim()) gtParts.push("arriving " + arrTimeVal.trim());
+    if (entryVal.trim()) gtParts.push("into " + entryVal.trim());
+    if (dateVal) gtParts.push("on " + dateVal);
+    _tb.gettingTo = gtParts.join(", ");
+    var goParts = [];
+    if (depNumVal.trim()) goParts.push(depNumVal.trim());
+    if (depTimeVal.trim()) goParts.push("departing " + depTimeVal.trim());
+    if (exitVal.trim()) goParts.push("from " + exitVal.trim());
+    if (depDateVal.trim()) goParts.push("on " + depDateVal.trim());
+    _tb.gettingOut = goParts.join(", ");
     if (dateVal) {
       // Seed `when` with the specific date so parseStartDateFromBrief picks it up
       _tb.when = dateVal;
@@ -9817,26 +9902,35 @@ function drawTripMode(){
     if (over) {
       banner.style.cssText = "margin:6px 2px 10px;padding:10px 12px;background:#fff3ed;border:1px solid #f5ccb5;border-radius:7px;font-size:11px;line-height:1.55;";
       banner.innerHTML = '<strong style="color:#b0451a;">Your trip is '+span+' days \u2014 '+ (span - budget.max) +' over your '+tripStr+' budget.</strong>'
-        + '<br><span style="color:#555;">Open Edit candidates to drop a place, or use the pace toast to shorten a stay.</span>';
+        + '<br><span style="color:#555;">Open Edit destinations to drop a place, or open Constraints to adjust.</span>';
     } else {
       banner.style.cssText = "margin:6px 2px 10px;padding:10px 12px;background:#f0f8f2;border:1px solid #c6e0ce;border-radius:7px;font-size:11px;line-height:1.55;";
       banner.innerHTML = '<strong style="color:#2a6b3e;">Your trip is '+span+' days \u2014 '+(budget.min - span)+' under your '+tripStr+' budget.</strong>'
-        + '<br><span style="color:#555;">Room to add a place or extend a stay. Edit candidates or stretch a day with the pace toast.</span>';
+        + '<br><span style="color:#555;">Room to add a place or extend a stay. Edit destinations or adjust Constraints.</span>';
     }
     c.appendChild(banner);
   })();
 
   // Destination list
   var listSec=document.createElement("div"); listSec.className="tm-section";
-  var listHdr=document.createElement("div"); listHdr.style.cssText="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;";
+  var listHdr=document.createElement("div"); listHdr.style.cssText="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;";
   var lbl=document.createElement("div"); lbl.className="tm-sec-title"; lbl.style.marginBottom="0"; lbl.textContent="Destinations";
   listHdr.appendChild(lbl);
-  // Edit candidates — only shown if we have a saved candidate snapshot from build.
+  // Running total — always visible, updates naturally as drawTripMode re-renders
+  // when destinations are added or removed.
+  var totalNights = (trip.destinations||[]).reduce(function(s,d){return s + (d.nights || 0);}, 0);
+  var totalDays = totalNights + (trip.destinations && trip.destinations.length ? 1 : 0);
+  var totalLine = document.createElement("div");
+  totalLine.style.cssText = "font-size:11px;color:#666;margin-bottom:10px;";
+  totalLine.innerHTML = (trip.destinations||[]).length
+    ? '<strong style="color:#111;">'+totalDays+' days</strong> \u00b7 '+totalNights+' nights \u00b7 '+trip.destinations.length+' destination'+(trip.destinations.length!==1?'s':'')
+    : '<span style="color:#aaa;font-style:italic;">No destinations yet.</span>';
+  // Edit destinations — only shown if we have a saved candidate snapshot from build.
   // Styled as a proper button so the re-entry affordance is obvious.
   if (trip.candidates && trip.candidates.length) {
     var editBtn=document.createElement("button");
     editBtn.style.cssText="font-size:10px;font-weight:600;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;white-space:nowrap;";
-    editBtn.textContent="Edit candidates \u2192";
+    editBtn.textContent="Edit destinations \u2192";
     editBtn.title="Re-open the Candidate Explorer with your current keep/reject decisions";
     editBtn.onmouseover=function(){editBtn.style.background="#134a8a";};
     editBtn.onmouseout=function(){editBtn.style.background="#1a5fa8";};
@@ -9845,6 +9939,7 @@ function drawTripMode(){
   }
 
   listSec.appendChild(listHdr);
+  listSec.appendChild(totalLine);
 
   if(trip.destinations.length===0){
     var emp=document.createElement("div"); emp.style.cssText="font-size:12px;color:#ccc;font-style:italic;padding:4px 0 8px;";
@@ -10087,8 +10182,9 @@ function drawTripMode(){
   }
 
   checkAndShowOverlaps();
-  // Pace-tune toast (session-dismissable) — minimum viable stage 2 of the pace feedback loop
-  try { showPaceToast(); } catch(_pt) {}
+  // Pace toast retired — it was distracting and the trip-view duration banner
+  // plus Edit destinations / Constraints buttons cover the same need better.
+  var stale = document.getElementById("pace-toast"); if (stale) stale.remove();
   } catch(e) {
     c.innerHTML='<div style="padding:14px;font-size:11px;color:#e05050;white-space:pre-wrap;">Render error: '+e.message+'</div>';
     console.error('drawTripMode error:',e);
