@@ -2396,18 +2396,25 @@ function showMustDoConfirmation(items) {
   var ov = document.createElement("div");
   ov.id = "mdc-overlay";
   ov.className = "mdc-overlay";
-  ov.innerHTML = '<div class="mdc-header">'
-    +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="mdc-step">Step 1.5 of 3 \u00b7 Must-dos</div></div></div>'
-    +'<div class="mdc-title" style="margin-top:8px;">Based on what you told me, these are the places in '+((_tb&&_tb.region)||'the region')+' where you can do what you want to do.</div>'
-    +'<div class="mdc-sub">Uncheck anything you don\u2019t actually want. Add more below if you do.</div>'
-    +'</div>'
-    +'<div class="mdc-body" id="mdc-body">'
-    +(!items ? '<div class="mdc-loading"><div style="font-size:20px;margin-bottom:8px;animation:spin 1s linear infinite;display:inline-block">\u2736</div><div>Interpreting your must-dos\u2026</div></div>' : '')
-    +'</div>'
-    // "Add any other places" and the footer copy only appear once the must-do list
-    // has loaded — otherwise the user sees inputs before they know what's already suggested.
-    +(!items ? '' :
-      '<div style="padding:8px 24px 0;box-sizing:border-box;">'
+  // In the merged flow this overlay is only visible as a loading state between
+  // Step 2 and the Places page — items is null and we tear the overlay down
+  // once candidate generation starts. Render a minimal spinner in that case so
+  // no heading or footer buttons flash and disappear. When items is present
+  // (legacy callers), render the full interactive confirmation page.
+  if (!items) {
+    ov.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:12px;padding:20px;text-align:center;">'
+      +'<div style="font-size:28px;color:#888;animation:spin 1.2s linear infinite;">\u2736</div>'
+      +'<div style="font-size:13px;color:#555;font-weight:500;">Thinking through what you want to do\u2026</div>'
+      +'<div style="font-size:11px;color:#aaa;max-width:320px;line-height:1.55;">Interpreting your must-dos and finding places that fit. This usually takes 20\u201340 seconds.</div>'
+      +'</div>';
+  } else {
+    ov.innerHTML = '<div class="mdc-header">'
+      +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="mdc-step">Step 1.5 of 3 \u00b7 Must-dos</div></div></div>'
+      +'<div class="mdc-title" style="margin-top:8px;">Based on what you told me, these are the places in '+((_tb&&_tb.region)||'the region')+' where you can do what you want to do.</div>'
+      +'<div class="mdc-sub">Uncheck anything you don\u2019t actually want. Add more below if you do.</div>'
+      +'</div>'
+      +'<div class="mdc-body" id="mdc-body"></div>'
+      +'<div style="padding:8px 24px 0;box-sizing:border-box;">'
       +'<div style="font-size:11px;color:#555;font-weight:600;margin-bottom:4px;">Add any other places you must go to</div>'
       +'<div class="mdc-add-row" style="box-sizing:border-box;margin-top:0;padding-top:0;">'
       +'<input class="mdc-add-input" id="mdc-add-inp" placeholder="e.g. Appenzell" autocomplete="off" onkeydown="if(event.key===&#39;Enter&#39;)addManualMdcItem()" style="min-width:0;" />'
@@ -2417,11 +2424,12 @@ function showMustDoConfirmation(items) {
       +'<div id="mdc-closing" style="font-size:11px;color:#666;line-height:1.55;margin-top:12px;">'
       +'I\u2019ll include these stops with other recommendations and give you a complete list of places to consider.'
       +'</div>'
-      +'</div>')
-    +'<div class="mdc-footer">'
-    +'<button class="mdc-btn-primary" id="mdc-confirm-btn" onclick="confirmMustDos()" '+(!items?'disabled style="background:#ccc;cursor:not-allowed;"':'')+'>Places to think about \u2192</button>'
-    +'<div class="mdc-skip" onclick="runCandidateSearch([])">Skip this step \u2192</div>'
-    +'</div>';
+      +'</div>'
+      +'<div class="mdc-footer">'
+      +'<button class="mdc-btn-primary" id="mdc-confirm-btn" onclick="confirmMustDos()">Places to think about \u2192</button>'
+      +'<div class="mdc-skip" onclick="runCandidateSearch([])">Skip this step \u2192</div>'
+      +'</div>';
+  }
   document.body.appendChild(ov);
 
   if (items) renderMustDoItems(items);
