@@ -3263,6 +3263,7 @@ async function runCandidateSearch(requiredPlaces) {
     + "the major gateway cities, cultural capitals, and places most travelers regret missing regardless of trip theme. "
     + "For " + (_tb.region||"this region") + ", think about the cities that anchor the country's identity \u2014 the capital, the banking/cultural centers, "
     + "the historic trade cities. Include them even if they don't obviously fit this traveler's theme; the traveler can decide.\n"
+    + "BE SPECIFIC. Name the museums, the landmarks, the streets, the restaurants, the trains \u2014 don't hand-wave with 'major museums' or 'scenic rail.' Name them.\n"
     + "Return ONLY a JSON array of exactly " + cityCount + " places (no markdown):\n"
     + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why a traveler to this region would want to see it \u2014 specific, not generic.","tradeoffs":"One honest downside (e.g. expensive, touristy, requires rearranging the trip).","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here.","widelyRecommended":false,"lat":0.0,"lng":0.0}]\nSet widelyRecommended=true if this place appears on most standard itineraries for the region \u2014 a canonical destination \u2014 false otherwise.';
 
@@ -3275,6 +3276,7 @@ async function runCandidateSearch(requiredPlaces) {
     + "\nList " + thematicCount + " additional destinations that specifically fit the shape of this trip \u2014 places that extend, enrich, or complement what the traveler described. "
     + "These should NOT be the obvious major cities (those are handled separately). Focus on less obvious places that reward the kind of traveler this is: "
     + "scenic towns, regional hubs, natural areas, places that deepen the trip's theme.\n"
+    + "BE SPECIFIC. Name things \u2014 the trail, the hut, the train, the dish, the view. Never hand-wave with 'spectacular scenery' or 'famous for trains' if you can say what specifically.\n"
     + "Return ONLY a JSON array of exactly " + thematicCount + " places (no markdown):\n"
     + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"What makes it worth visiting for this specific trip \u2014 specific, not generic.","tradeoffs":"One honest downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here beyond the trip\u2019s stated reason.","widelyRecommended":false,"lat":0.0,"lng":0.0}]\nSet widelyRecommended=true if this is a canonical destination for the region \u2014 false otherwise.';
 
@@ -3290,9 +3292,10 @@ async function runCandidateSearch(requiredPlaces) {
       var p1b = "You are a travel expert. For each of these places, write a candidate card for a traveler visiting " + (_tb.region||"this region") + ".\n"
         + "Places: " + batchNames + "\n"
         + "Trip context: " + brief + "\n\n"
-        + "Describe why each is genuinely worth visiting — character, what to see and do, what makes it special. Trains may be one reason but not the only one.\n"
+        + "Describe why each is genuinely worth visiting — character, what to see and do, what makes it special. Trains may be one reason but not the only one.\n\n"
+        + "BE SPECIFIC. Don't write generic hand-waves like 'three major scenic railway routes converge here' or 'several famous museums' or 'a few notable cathedrals.' Name them: 'the Glacier Express, Bernina Express, and Rhaetian Railway all pass through.' If you're referring to a specific thing the traveler would want to see or do, name it. Specificity is the whole point.\n\n"
         + "Return ONLY a JSON array (no markdown):\n"
-        + '[{"place":"City","country":"Country","role":"anchor","stayRange":"2-4 nights","whyItFits":"Why worth visiting.","tradeoffs":"One downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here.","widelyRecommended":false,"lat":0.0,"lng":0.0}]\nSet widelyRecommended=true if this is a canonical destination.';
+        + '[{"place":"City","country":"Country","role":"anchor","stayRange":"2-4 nights","whyItFits":"Why worth visiting \u2014 specific, named things. Not hand-waves.","tradeoffs":"One downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here \u2014 named specifics.","widelyRecommended":false,"lat":0.0,"lng":0.0}]\nSet widelyRecommended=true if this is a canonical destination.';
       var p1bTokens = 1800 + batch.length * 220;
       calls.push(callMax([{role:"user",content:p1b}], p1bTokens, 50000).then(function(t){
         var cleaned = t.replace(/```json|```/g,"").trim();
@@ -4543,7 +4546,7 @@ async function findCandidates(){
 }
 
 // ─── CANDIDATE EXPLORER ────────────────────────────────────
-var _ceMap=null,_ceMarkers=[],_ceRejectedExpanded=false,_ceEditMode=false,_ceBestMode=true,_ceCardExpanded={},_ceLens="activity",_ceSectionExpanded={};
+var _ceMap=null,_ceMarkers=[],_ceRejectedExpanded=false,_ceEditMode=false,_ceBestMode=false,_ceCardExpanded={},_ceLens="activity",_ceSectionExpanded={};
 
 async function retryDiscoveryCandidates() {
   var existingReq = (_tb.candidates||[]).filter(function(c){ return c._required; });
@@ -5099,23 +5102,45 @@ function renderCandidateCards(cands){
       })(c);
     }
     container.appendChild(card);
-    if(c.lat&&c.lng){
-      var mc=c.status==="keep"?"#2a7a4e":c.status==="reject"?"#888":"#1a5fa8";
-      var icon=L.divIcon({html:'<div style="background:'+mc+';color:#fff;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.25);">'+(c.place||"").substring(0,2)+'</div>',className:"",iconSize:[24,24],iconAnchor:[12,12]});
-      var m=L.marker([c.lat,c.lng],{icon:icon});
-      m.bindTooltip(c.place||"", {permanent:false,direction:"top",offset:[0,-14],className:"ce-map-tooltip"});
-      (function(cand){m.on("click",function(){
-        var ce=g("ce-card-"+cand.id);
-        if(ce){
-          ce.scrollIntoView({behavior:"smooth",block:"nearest"});
-          document.querySelectorAll(".ce-card.map-selected").forEach(function(el){el.classList.remove("map-selected");});
-          ce.classList.add("map-selected");
-          setTimeout(function(){ce.classList.remove("map-selected");},2500);
-        }
-      });})(c);
-      m.addTo(_ceMap); _ceMarkers.push(m);
-      bounds.push([c.lat,c.lng]);
-    }
+    _addCandidateMarker(c, false);
+  }
+
+  // Map marker renderer — used for both visible cards (normal) and hidden
+  // candidates (grayed, when Show-me-the-best is on so the user still sees
+  // the full geography of what Max found).
+  function _addCandidateMarker(c, grayed){
+    if(!c.lat || !c.lng || !_ceMap) return;
+    var mc = grayed ? "#c8c8d0"
+                    : (c.status==="keep" ? "#2a7a4e"
+                      : c.status==="reject" ? "#888" : "#1a5fa8");
+    var opacity = grayed ? 0.55 : 1;
+    var iconHtml = '<div style="background:'+mc+';color:#fff;border-radius:50%;width:'+(grayed?20:24)+'px;height:'+(grayed?20:24)+'px;display:flex;align-items:center;justify-content:center;font-size:'+(grayed?8:9)+'px;font-weight:700;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.15);opacity:'+opacity+';">'+(c.place||"").substring(0,2)+'</div>';
+    var size = grayed ? 20 : 24;
+    var icon = L.divIcon({html:iconHtml, className:"", iconSize:[size,size], iconAnchor:[size/2,size/2]});
+    var m = L.marker([c.lat,c.lng],{icon:icon});
+    m.bindTooltip(c.place + (grayed ? " (hidden — click Show all to see)" : ""), {permanent:false,direction:"top",offset:[0,-14],className:"ce-map-tooltip"});
+    (function(cand, isGray){m.on("click",function(){
+      if (isGray) {
+        // Clicking a grayed pin flips the user out of best mode so they can
+        // see the place's card, then scrolls to it.
+        _ceBestMode = false;
+        renderCandidateCards(_tb.candidates);
+        setTimeout(function(){
+          var ce=g("ce-card-"+cand.id);
+          if(ce){ ce.scrollIntoView({behavior:"smooth",block:"nearest"}); ce.classList.add("map-selected"); setTimeout(function(){ce.classList.remove("map-selected");},2500); }
+        }, 60);
+        return;
+      }
+      var ce=g("ce-card-"+cand.id);
+      if(ce){
+        ce.scrollIntoView({behavior:"smooth",block:"nearest"});
+        document.querySelectorAll(".ce-card.map-selected").forEach(function(el){el.classList.remove("map-selected");});
+        ce.classList.add("map-selected");
+        setTimeout(function(){ce.classList.remove("map-selected");},2500);
+      }
+    });})(c, !!grayed);
+    m.addTo(_ceMap); _ceMarkers.push(m);
+    bounds.push([c.lat,c.lng]);
   }
 
   // Slim header — always visible. One line of context + a Build button + the
@@ -5307,6 +5332,12 @@ function renderCandidateCards(cands){
     var showAllInSection = !_ceBestMode || sectionOpen || isRoute;
     var display = showAllInSection ? group : bestPickFirst(group).slice(0, 1);
     display.forEach(function(c){ renderCard(c, el); });
+    // For the hidden candidates in best mode, still draw a grayed pin on the
+    // map so the user sees the absence rather than losing the geography.
+    if (!showAllInSection) {
+      var hidden = group.filter(function(c){ return display.indexOf(c) === -1; });
+      hidden.forEach(function(c){ _addCandidateMarker(c, true); });
+    }
     if (_ceBestMode && group.length > 1 && !sectionOpen && !isRoute) {
       var more = document.createElement("button");
       more.style.cssText = "font-size:10px;color:#1a5fa8;padding:5px 10px;margin:4px 4px 10px;background:#eef4fc;border:1px solid #d4e2f5;border-radius:5px;cursor:pointer;font-family:inherit;font-weight:600;";
@@ -5322,33 +5353,24 @@ function renderCandidateCards(cands){
     }
   }
 
-  // Split discovery into "Known for" (widelyRecommended) and the rest.
-  // The "Known for" section only appears when the user said they're new to the
-  // region — for experienced travelers, widelyRecommended just shows as an inline
-  // tag on the card in regular Discovery.
-  var firstTime = (_tb && _tb.familiarity === "first");
-  var knownForCands = firstTime ? discoveryCands.filter(function(c){return c.widelyRecommended;}) : [];
-  var regularDiscovery = firstTime ? discoveryCands.filter(function(c){return !c.widelyRecommended;}) : discoveryCands;
-
-  if (knownForCands.length && !_ceBestMode) {
-    var khdr = document.createElement("div");
-    khdr.style.cssText = "margin-top:14px;padding:10px 4px 4px;font-size:10px;font-weight:700;text-transform:uppercase;color:#6a4a80;letter-spacing:0.06em;border-top:1px solid #e8e8e8;";
-    khdr.textContent = "Places most travelers to " + ((_tb && _tb.region) || "the region") + " visit";
-    el.appendChild(khdr);
-    // Each Known-for card starts expanded so the reason is visible up front —
-    // first-time travelers need the context, not a row of unfamiliar names.
-    knownForCands.forEach(function(c){
-      _ceCardExpanded[c.id] = true;
-      renderCard(c, el);
-    });
-  }
-
-  if (regularDiscovery.length && !_ceBestMode) {
-    var dhdr = document.createElement("div");
-    dhdr.style.cssText = "margin-top:14px;padding:10px 4px 6px;font-size:10px;font-weight:700;text-transform:uppercase;color:#111;letter-spacing:0.06em;border-top:1px solid #e8e8e8;";
-    dhdr.textContent = "Other places worth considering";
-    el.appendChild(dhdr);
-    regularDiscovery.forEach(function(c){ renderCard(c, el); });
+  // Single discovery section — "Other places worth considering." Canonical
+  // destinations (widelyRecommended) appear here alongside thematic picks;
+  // the \u2605 marker on the compact card already signals their status. A
+  // separate "Known for" section was rejected because it reintroduced
+  // tourist-bait framing ("go because it's famous") that the philosophy
+  // explicitly moved away from. Users who want a canonical place Max didn't
+  // surface can add it via the "Heard about a place?" input at the top.
+  if (discoveryCands.length) {
+    if (!_ceBestMode) {
+      var dhdr = document.createElement("div");
+      dhdr.style.cssText = "margin-top:14px;padding:10px 4px 6px;font-size:10px;font-weight:700;text-transform:uppercase;color:#111;letter-spacing:0.06em;border-top:1px solid #e8e8e8;";
+      dhdr.textContent = "Other places worth considering";
+      el.appendChild(dhdr);
+      discoveryCands.forEach(function(c){ renderCard(c, el); });
+    } else {
+      // Best mode: hide cards, but mark these on the map in gray.
+      discoveryCands.forEach(function(c){ _addCandidateMarker(c, true); });
+    }
   }
   } else if (_ceLens === "region") {
     // Group candidates by country (fallback: "Unknown"). Within each group, sort
@@ -5512,7 +5534,8 @@ async function addPlaceToCandidates(){
   try {
     var region = (_tb && _tb.region) || "";
     var prompt = "A traveler is planning a trip to " + (region||"this region") + " and has asked you to add '" + raw + "' to the list of candidate destinations. Return ONLY a JSON object (no markdown) describing this place as a candidate card:\n"
-      + '{"place":"...","country":"...","role":"base|anchor|pass","stayRange":"2-3 nights","whyItFits":"Why worth visiting \u2014 specific.","tradeoffs":"One honest downside.","tags":["tag1","tag2"],"otherAttractions":"2-3 other things worth considering here.","widelyRecommended":false,"lat":0.0,"lng":0.0}\n'
+      + '{"place":"...","country":"...","role":"base|anchor|pass","stayRange":"2-3 nights","whyItFits":"Why worth visiting \u2014 specific, named things.","tradeoffs":"One honest downside.","tags":["tag1","tag2"],"otherAttractions":"2-3 other things worth considering here \u2014 named specifics.","widelyRecommended":false,"lat":0.0,"lng":0.0}\n'
+      + "BE SPECIFIC. Name the trains, museums, dishes, trails \u2014 don't hand-wave with 'major museums' or 'scenic rail.'\n"
       + "If '"+raw+"' isn't a real place or doesn't make sense for a trip to "+(region||"this region")+", return {\"error\":\"why\"} instead.";
     var text = await callMax([{role:"user",content:prompt}], 600, 25000);
     var cleaned = text.replace(/```json|```/g,"").trim();
