@@ -5040,22 +5040,20 @@ function renderCandidateCards(cands){
     var alsoHereHtml = alsoHere
       ? '<div style="font-size:11px;color:#555;line-height:1.5;margin-top:4px;"><strong style="color:#333;font-weight:600;">Also here:</strong> '+alsoHere+'</div>'
       : '';
-    // Compact header — always visible. Name + role/stay + status + "Also supports"
-    // badge (so you see at a glance which other activities this place covers) +
-    // Keep and expand-chevron buttons.
-    var compactAlso = (primary && otherRefs.length)
-      ? '<span style="font-size:9px;font-weight:600;color:#1a5fa8;background:#e8f0fc;padding:2px 7px;border-radius:10px;">You will also find:'+otherRefs.join(", ")+'</span>'
-      : '';
+    // Compact header — just name, role/stay/country, a subtle kept-indicator,
+    // Keep button and expand chevron. The "widely recommended" tag and the
+    // "You will also find" badge moved to the expanded view so the compact
+    // row reads as one line, not a wall of pills.
+    var keptDot = c.status === "keep" ? '<span style="color:#2a7a4e;font-weight:700;margin-right:2px;">\u2713</span>' : (c.status === "reject" ? '<span style="color:#c05020;font-weight:700;margin-right:2px;">\u00d7</span>' : '');
     var compactHtml = '<div class="ce-card-compact" style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;cursor:pointer;">'
       +'<div style="flex:1;min-width:0;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">'
+      +keptDot
       +'<span class="ce-card-name" style="font-size:13px;font-weight:700;color:#111;">'+c.place+'</span>'
-      +'<span style="font-size:10px;color:#888;">'+rIcon(c.role)+' '+(c.role||'')+(c.stayRange?' \u00b7 '+c.stayRange:'')+(c.country?' \u00b7 '+c.country:'')+'</span>'
-      +wrTag
-      +compactAlso
-      +(sl?'<span style="font-size:9px;font-weight:700;color:'+sc+';">'+sl+'</span>':'')
+      +(c.widelyRecommended?'<span style="color:#6a4a80;font-size:10px;" title="widely recommended">\u2605</span>':'')
+      +'<span style="font-size:10px;color:#888;">'+(c.role||'')+(c.stayRange?' \u00b7 '+c.stayRange:'')+'</span>'
       +'</div>'
       +'<div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">'
-      +'<button class="ce-act-compact-keep" style="font-size:10px;font-weight:600;padding:4px 9px;border-radius:5px;border:1px solid '+(c.status==="keep"?"#2a7a4e":"#ddd")+';background:'+(c.status==="keep"?"#e8f5ee":"#fff")+';color:'+(c.status==="keep"?"#2a7a4e":"#333")+';cursor:pointer;font-family:inherit;" title="'+(c.status==="keep"?"Remove from shortlist":(c.status==="reject"?"Restore":"Keep"))+'">'+(c.status==="keep"?"\u2713":(c.status==="reject"?"\u21ba":"+"))+'</button>'
+      +'<button class="ce-act-compact-keep" style="font-size:10px;font-weight:600;padding:4px 9px;border-radius:5px;border:1px solid '+(c.status==="keep"?"#2a7a4e":"#ddd")+';background:'+(c.status==="keep"?"#e8f5ee":"#fff")+';color:'+(c.status==="keep"?"#2a7a4e":"#333")+';cursor:pointer;font-family:inherit;" title="'+(c.status==="keep"?"Remove from your picks":(c.status==="reject"?"Restore":"Keep"))+'">'+(c.status==="keep"?"\u2713":(c.status==="reject"?"\u21ba":"+"))+'</button>'
       +'<button class="ce-act-compact-expand" style="font-size:12px;color:#888;background:none;border:none;cursor:pointer;font-family:inherit;padding:0 4px;" title="'+(expanded?"Hide details":"See details")+'">'+(expanded?"\u25BE":"\u25B8")+'</button>'
       +'</div>'
       +'</div>';
@@ -5152,6 +5150,16 @@ function renderCandidateCards(cands){
   bestBtn.onclick = function(){ _ceBestMode = !_ceBestMode; renderCandidateCards(_tb.candidates); };
   headerBtns.appendChild(bestBtn);
   headerWrap.appendChild(headerBtns);
+
+  // Add-a-place input — brings in destinations the user has heard about that
+  // Max didn't generate. This is where the tourist's knowledge starts sharing
+  // the lead with the traveler's planning.
+  var addRow = document.createElement("div");
+  addRow.style.cssText = "display:flex;gap:6px;margin-top:10px;padding-top:8px;border-top:1px solid #f0f0f0;";
+  addRow.innerHTML =
+    '<input id="ce-add-place-inp" placeholder="Heard about a place not on the list? Type it here\u2026" style="flex:1;min-width:0;font-size:11px;padding:7px 10px;border:1px solid #ddd;border-radius:5px;font-family:inherit;" onkeydown="if(event.key===&#39;Enter&#39;){event.preventDefault();addPlaceToCandidates();}" />'
+    +'<button onclick="addPlaceToCandidates()" style="font-size:11px;font-weight:600;padding:7px 12px;background:#fff;color:#333;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;white-space:nowrap;">+ Add</button>';
+  headerWrap.appendChild(addRow);
   // Lens bar — four different organizations of the same data. Different
   // travelers look for different things; same places, four reorderings.
   var lensBar = document.createElement("div");
@@ -5478,6 +5486,68 @@ function rIcon(r){
 // "Drop this activity" — reject every candidate under a must-do and uncheck the
 // must-do itself, so the merged Places page can serve as both the must-do curation
 // screen and the destination picker in one view.
+// Add a place the user has heard about — something that wasn't in Max's
+// generated list. Fires a focused LLM call to produce a candidate card for
+// that one place, then slots it into _tb.candidates as a discovery pick
+// (not required, not pre-kept) so the user can evaluate it alongside the rest.
+async function addPlaceToCandidates(){
+  var inp = document.getElementById("ce-add-place-inp");
+  if (!inp) return;
+  var raw = (inp.value||"").trim();
+  if (!raw) return;
+  // De-dupe: if this place already exists, just highlight it instead
+  var existing = (_tb.candidates||[]).find(function(c){
+    return (c.place||"").toLowerCase() === raw.toLowerCase();
+  });
+  if (existing) {
+    inp.value = "";
+    showSaveStatus(existing.place + " is already on the list.", 2500);
+    var el = document.getElementById("ce-card-" + existing.id);
+    if (el && el.scrollIntoView) el.scrollIntoView({behavior:"smooth", block:"center"});
+    return;
+  }
+  var btn = inp.nextElementSibling;
+  if (btn) { btn.disabled = true; btn.textContent = "Adding\u2026"; }
+  inp.disabled = true;
+  try {
+    var region = (_tb && _tb.region) || "";
+    var prompt = "A traveler is planning a trip to " + (region||"this region") + " and has asked you to add '" + raw + "' to the list of candidate destinations. Return ONLY a JSON object (no markdown) describing this place as a candidate card:\n"
+      + '{"place":"...","country":"...","role":"base|anchor|pass","stayRange":"2-3 nights","whyItFits":"Why worth visiting \u2014 specific.","tradeoffs":"One honest downside.","tags":["tag1","tag2"],"otherAttractions":"2-3 other things worth considering here.","widelyRecommended":false,"lat":0.0,"lng":0.0}\n'
+      + "If '"+raw+"' isn't a real place or doesn't make sense for a trip to "+(region||"this region")+", return {\"error\":\"why\"} instead.";
+    var text = await callMax([{role:"user",content:prompt}], 600, 25000);
+    var cleaned = text.replace(/```json|```/g,"").trim();
+    var first = cleaned.indexOf("{"), last = cleaned.lastIndexOf("}");
+    if (first > -1 && last > -1) cleaned = cleaned.substring(first, last+1);
+    var data = JSON.parse(cleaned);
+    if (data.error) throw new Error(data.error);
+    if (!data.place) throw new Error("No place returned");
+    // Generate a unique id
+    var nextN = (_tb.candidates||[]).length;
+    data.id = "c-user-" + Date.now();
+    data.status = null;
+    data._required = false;
+    data._requiredFor = [];
+    data._userAdded = true;
+    _tb.candidates = _tb.candidates || [];
+    _tb.candidates.push(data);
+    inp.value = "";
+    renderCandidateCards(_tb.candidates);
+    setTimeout(function(){
+      var card = document.getElementById("ce-card-" + data.id);
+      if (card && card.scrollIntoView) {
+        card.scrollIntoView({behavior:"smooth", block:"center"});
+        card.style.animation = "ce-fade-in 0.4s ease";
+      }
+    }, 100);
+  } catch(e) {
+    console.warn("addPlaceToCandidates failed:", e && e.message);
+    showSaveStatus("Couldn\u2019t add that place: " + (e.message||"try a more specific name"), 3500);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "+ Add"; }
+    if (inp) { inp.disabled = false; inp.focus(); }
+  }
+}
+
 function _dropActivity(mdName){
   if (!mdName) return;
   var cands = (_tb.candidates||[]).filter(function(c){
@@ -5546,7 +5616,7 @@ function showRejectRequiredModal(c, willDrop, willKeep, hasManual){
     }
     var parts=[];
     willDrop.forEach(function(n){
-      parts.push(n+" would be dropped \u2014 no other place in your shortlist can cover it.");
+      parts.push(n+" would be dropped \u2014 no other place you\u2019ve picked can cover it.");
     });
     willKeep.forEach(function(k){
       parts.push(k.name+" still works \u2014 "+joinList(k.supporters.map(function(s){return s.place+(s.country?" ("+s.country+")":"");}))+" can cover it.");
@@ -5750,15 +5820,31 @@ function renderCEStayTotal(kept){
   var rangeStr=(min===max)?(min+" nights"):(min+"\u2013"+max+" nights");
   var trip=_parseTripDuration(_tb.duration||"");
   if(trip){
-    // Flag if shortlist already exceeds or undercuts the trip length meaningfully.
-    var over=min>trip.max;
-    var under=max<trip.min;
-    var color= over?"#c05020":(under?"#888":"#2a7a4e");
-    var tripStr=(trip.min===trip.max)?(trip.min+" days"):(trip.min+"\u2013"+trip.max+" days");
-    var note=over?" \u2014 over your trip length":(under?" \u2014 room for more":"");
-    writeBoth('<span style="color:'+color+';">Shortlist: '+rangeStr+'</span> \u00b7 Trip: '+tripStr+note);
+    // Active overflow signal: name the situation in plain language, with a
+    // nudge on what to do, not just a red flag. Three cases: over (have to
+    // drop or extend), at the edge (balanced), under (room to add).
+    var over = min > trip.max;
+    var under = max < trip.min;
+    var tripStr = (trip.min===trip.max) ? (trip.min+" days") : (trip.min+"\u2013"+trip.max+" days");
+    var msg;
+    if (over) {
+      var dropLo = Math.max(1, min - trip.max);
+      var dropHi = Math.max(1, max - trip.max);
+      var dropStr = (dropLo === dropHi) ? (dropLo + " day" + (dropLo!==1?"s":"")) : (dropLo+"\u2013"+dropHi+" days");
+      msg = '<span style="color:#c05020;font-weight:600;">Over by '+dropStr+'.</span> '
+        + '<span style="color:#555;">Your picks: '+rangeStr+' \u00b7 Trip: '+tripStr+'.</span> '
+        + '<span style="color:#888;">Drop some places or extend the trip.</span>';
+    } else if (under) {
+      msg = '<span style="color:#2a7a4e;font-weight:600;">Room for more.</span> '
+        + '<span style="color:#555;">Your picks: '+rangeStr+' \u00b7 Trip: '+tripStr+'.</span> '
+        + '<span style="color:#888;">Add from below, or leave it open.</span>';
+    } else {
+      msg = '<span style="color:#555;">Your picks: '+rangeStr+' \u00b7 Trip: '+tripStr+'.</span> '
+        + '<span style="color:#888;">Right at the edge.</span>';
+    }
+    writeBoth(msg);
   } else {
-    writeBoth("Shortlist: "+rangeStr);
+    writeBoth("Your picks: "+rangeStr);
   }
 }
 
@@ -6624,7 +6710,7 @@ function showShortlistBanner(kept){
   var lpc=g("lp-content"); if(!lpc) return;
   var b=document.createElement("div");
   b.style.cssText="background:#f0f5ff;border:1px solid #c8d8f0;border-radius:7px;padding:11px 13px;margin-bottom:10px;font-size:11px;line-height:1.7;";
-  b.innerHTML='<div style="font-weight:700;color:#1a5fa8;margin-bottom:4px;">\u2713 Shortlist ready \u2014 '+kept.length+' places</div>'
+  b.innerHTML='<div style="font-weight:700;color:#1a5fa8;margin-bottom:4px;">\u2713 Your picks \u2014 '+kept.length+' places</div>'
     +'<div style="font-size:10px;color:#888;margin-bottom:6px;line-height:1.5;padding:5px 8px;background:#fff;border-radius:4px;border-left:2px solid #c8d8f0;">This is a starting structure, not a script. Dates and order will need refining once you decide how you\u2019re arriving and what\u2019s fixed.</div>'
     +kept.map(function(c){return '<div><strong>'+c.place+'</strong> \u00b7 '+c.role+' \u00b7 '+c.stayRange+'</div>';}).join("")
     +'<div style="color:#888;font-size:10px;margin-top:5px;">Add each destination below with your dates to build the trip.</div>'
