@@ -2267,7 +2267,16 @@ async function expandMustDos() {
   // No must-dos — skip straight to candidates
   if (!anchors) { runCandidateSearch([]); return; }
 
-  showMustDoConfirmation(null); // loading state
+  // Unified loading: show the Candidate Explorer overlay with its loading state
+  // immediately, instead of briefly flashing a must-do spinner overlay before it.
+  // One continuous "working" screen from Step 2 submit to the Places page.
+  g("trip-brief-overlay").style.display = "none";
+  showCandidateExplorer(null);
+  // Update the loading sub-text to reflect the phase we're in
+  setTimeout(function(){
+    var detail = document.getElementById("ce-loading-detail");
+    if (detail) detail.innerHTML = "Interpreting what you want to do and finding places that fit.<br><span style=\"color:#ccc;margin-top:4px;display:inline-block;\">This usually takes about a minute.</span>";
+  }, 60);
 
   // Fire chip-based suggestions in parallel — we wait for it below so its items
   // can merge into the activity list before candidates are generated.
@@ -3165,26 +3174,28 @@ async function runCandidateSearch(requiredPlaces) {
   _tb.intent        = g("tb-intent")        ? g("tb-intent").value.trim()        : (_tb.intent||"");
   _tb.anchors       = g("tb-anchors")       ? g("tb-anchors").value.trim()       : (_tb.anchors||"");
 
-  // Max-voiced bridge before candidates appear
-  await showMaxBridge("pre-candidates", function(){});
+  // Unified loading: expandMustDos already showed the Candidate Explorer overlay
+  // with its loading state, so we don't re-render it here (that caused a flicker
+  // and reset the "finding places" text). Just update the subtitle to reflect
+  // the new phase and hide the trip-brief overlay if anything's still showing it.
   g("trip-brief-overlay").style.display="none";
-  showCandidateExplorer(null);
-
-  // Update loading detail once we know the required count
-  setTimeout(function(){
-    var detail = document.getElementById("ce-loading-detail");
-    if (detail) {
-      var n = requiredPlaces.length;
-      if (n > 0) {
-        detail.innerHTML = 'Describing ' + n + ' required stop' + (n>1?'s':'')
-          + ' from your must-dos<br>and finding places worth visiting independently.'
-          + '<br><span style="color:#ccc;margin-top:4px;display:inline-block;">This usually takes 20–40 seconds.</span>';
-      } else {
-        detail.innerHTML = 'Searching for places that fit your trip.'
-          + '<br><span style="color:#ccc;margin-top:4px;display:inline-block;">This usually takes 15–30 seconds.</span>';
-      }
+  var detailNow = document.getElementById("ce-loading-detail");
+  if (!detailNow) {
+    // Fallback: overlay not yet up (legacy callers) — create it.
+    showCandidateExplorer(null);
+    detailNow = document.getElementById("ce-loading-detail");
+  }
+  if (detailNow) {
+    var n = requiredPlaces.length;
+    if (n > 0) {
+      detailNow.innerHTML = 'Describing ' + n + ' required stop' + (n>1?'s':'')
+        + ' from your must-dos<br>and finding places worth visiting independently.'
+        + '<br><span style="color:#ccc;margin-top:4px;display:inline-block;">This usually takes 20\u201340 seconds.</span>';
+    } else {
+      detailNow.innerHTML = 'Searching for places that fit your trip.'
+        + '<br><span style="color:#ccc;margin-top:4px;display:inline-block;">This usually takes 15\u201330 seconds.</span>';
     }
-  }, 100);
+  }
 
   var _paceDir = _paceDirective(_getPaceMode(_tb.pace));
   var brief = "Region: " + (_tb.region||"")
