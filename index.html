@@ -3040,8 +3040,8 @@ async function showMaxBridge(stage, onContinue, correctionHistory) {
     prompt = "You are Max, speaking in your own voice. The traveler has just filled out their trip. Reflect back what they told you in 2\u20134 short, natural sentences \u2014 as if you're a well-traveled friend jotting things down before thinking about where to go. Then add one short sentence about what you're looking for as you think about candidates. Be warm but spare. No bullet points, no headings, no \u201cI hear you\u201d language. Just natural reflection.\n\n"
       + "The traveler's brief:\n" + briefBlock;
   } else {
-    prompt = "You are Max, speaking in your own voice. The traveler has just chosen which places to keep, and I've already worked out an order that respects their route endpoints, conditions, and recovery needs. In 2\u20135 short, natural sentences, reflect back the shape of the trip \u2014 not as a list, but as how it flows. Weave in the ordering logic only where it matters (e.g. \"Zermatt before St. Moritz so the Glacier Express flows east, then a slow day in Lucerne after\"). If there's a tension worth naming (budget, pacing, something that might be too much), name it. End with a short sentence about what happens next (logistics/details).\n\n"
-      + "Avoid: bullet points, numbered lists, repeating the full itinerary, generic \"this will be wonderful\" language, overclaiming.\n\n"
+    prompt = "You are Max, speaking in your own voice. The traveler has just chosen which places to keep, and I've already worked out an order that respects their route endpoints, conditions, and recovery needs. In 2\u20134 short, natural sentences, reflect back the shape of the trip as it is \u2014 how it flows, any sequencing decisions that are worth noting so the traveler understands them. Do NOT critique the trip, suggest it's too much, call it 'fragmented' or 'two trips compressed,' or second-guess the traveler's picks. They made those choices on purpose; your job is to describe what they built, not to evaluate it. End with a short sentence about what happens next (logistics/details).\n\n"
+      + "Avoid: bullet points, numbered lists, repeating the full itinerary, generic \"this will be wonderful\" language, overclaiming, and any language that reads as judgment on the traveler's choices.\n\n"
       + briefBlock;
   }
 
@@ -4927,6 +4927,23 @@ function showCandidateExplorer(cands, editMode){
     // Init map
     if(_ceMap){_ceMap.remove();_ceMap=null;} _ceMarkers=[];
     _ceMap=L.map("ce-map",{zoomControl:true,scrollWheelZoom:true}).setView([48,14],4);
+    // Zoom to the stated region right away so the user sees their country/area
+    // instead of a continent. fitBounds on candidates (later, when they arrive)
+    // will refine further.
+    if (_tb && _tb.region) {
+      (function(r){
+        fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q="+encodeURIComponent(r),{headers:{"Accept-Language":"en"}})
+          .then(function(res){return res.json();})
+          .then(function(data){
+            if (data && data.length && data[0].boundingbox && _ceMap) {
+              var bb = data[0].boundingbox.map(parseFloat);
+              _ceMap.fitBounds([[bb[0],bb[2]],[bb[1],bb[3]]], {padding:[20,20], maxZoom:7});
+            } else if (data && data.length && data[0].lat && _ceMap) {
+              _ceMap.setView([parseFloat(data[0].lat), parseFloat(data[0].lon)], 6);
+            }
+          }).catch(function(){});
+      })(_tb.region);
+    }
     L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:19}).addTo(_ceMap);
     if(cands) {
       renderCandidateCards(cands);
@@ -5108,6 +5125,7 @@ function renderCandidateCards(cands){
       +'</div>'
       +'<div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">'
       +'<button class="ce-act-compact-keep" style="font-size:10px;font-weight:600;padding:4px 9px;border-radius:5px;border:1px solid '+(c.status==="keep"?"#2a7a4e":"#ddd")+';background:'+(c.status==="keep"?"#e8f5ee":"#fff")+';color:'+(c.status==="keep"?"#2a7a4e":"#333")+';cursor:pointer;font-family:inherit;" title="'+(c.status==="keep"?"Remove from your picks":(c.status==="reject"?"Restore":"Keep"))+'">'+(c.status==="keep"?"\u2713":(c.status==="reject"?"\u21ba":"+"))+'</button>'
+      +'<button class="ce-act-compact-reject" style="font-size:10px;font-weight:600;padding:4px 9px;border-radius:5px;border:1px solid '+(c.status==="reject"?"#c05020":"#ddd")+';background:'+(c.status==="reject"?"#fff0ec":"#fff")+';color:'+(c.status==="reject"?"#c05020":"#888")+';cursor:pointer;font-family:inherit;" title="'+(c.status==="reject"?"Currently rejected":"Reject")+'">\u00d7</button>'
       +'<button class="ce-act-compact-expand" style="font-size:12px;color:#888;background:none;border:none;cursor:pointer;font-family:inherit;padding:0 4px;" title="'+(expanded?"Hide details":"See details")+'">'+(expanded?"\u25BE":"\u25B8")+'</button>'
       +'</div>'
       +'</div>';
@@ -5132,10 +5150,12 @@ function renderCandidateCards(cands){
     // Wire up compact header interactions: keep button, expand chevron, whole-row
     // click (also expands).
     var keepBtn = card.querySelector(".ce-act-compact-keep");
+    var rejectBtn = card.querySelector(".ce-act-compact-reject");
     var expandBtn = card.querySelector(".ce-act-compact-expand");
     var compactRow = card.querySelector(".ce-card-compact");
     (function(cand){
       if (keepBtn) keepBtn.onclick = function(e){ e.stopPropagation(); setCS(cand.id, cand.status==="reject" ? "keep" : "keep"); };
+      if (rejectBtn) rejectBtn.onclick = function(e){ e.stopPropagation(); setCS(cand.id, "reject"); };
       if (expandBtn) expandBtn.onclick = function(e){ e.stopPropagation(); _ceCardExpanded[cand.id] = !_ceCardExpanded[cand.id]; renderCandidateCards(_tb.candidates); };
       if (compactRow) compactRow.onclick = function(e){
         // Clicks on the row (not the buttons) toggle expansion too
@@ -5170,7 +5190,8 @@ function renderCandidateCards(cands){
     var size = grayed ? 22 : 24;
     var icon = L.divIcon({html:iconHtml, className:"", iconSize:[size,size], iconAnchor:[size/2,size/2]});
     var m = L.marker([c.lat,c.lng],{icon:icon});
-    m.bindTooltip(c.place + (grayed ? " (hidden — click Show all to see)" : ""), {permanent:false,direction:"top",offset:[0,-14],className:"ce-map-tooltip"});
+    var tipStay = c.stayRange ? " \u00b7 "+c.stayRange : "";
+    m.bindTooltip(c.place + tipStay + (grayed ? " (hidden \u2014 click Show all)" : ""), {permanent:false,direction:"top",offset:[0,-14],className:"ce-map-tooltip"});
     (function(cand, isGray){m.on("click",function(){
       if (isGray) {
         // Clicking a grayed pin flips the user out of best mode so they can
@@ -5204,11 +5225,43 @@ function renderCandidateCards(cands){
   var headerWrap = document.createElement("div");
   headerWrap.style.cssText = "margin:8px 4px 10px;padding:10px 14px;background:#fff;border:1px solid #e0e8f0;border-radius:8px;";
   var headerLabel = document.createElement("div");
-  headerLabel.style.cssText = "font-size:11px;color:#555;line-height:1.55;margin-bottom:4px;";
+  headerLabel.style.cssText = "font-size:11px;color:#555;line-height:1.6;margin-bottom:6px;";
   headerLabel.innerHTML = kept.length
-    ? 'Max picked these to start: ' + kept.map(function(c){return '<strong style="color:#111;">'+c.place+'</strong>';}).join(' \u00b7 ') + '.'
+    ? 'Based on what you told me, here\u2019s a draft itinerary: the places where you can do the activities you want, ordered for transportation. As you select or reject places, the shape updates.'
     : '<em>Nothing kept yet \u2014 pick at least one place below to build a trip.</em>';
   headerWrap.appendChild(headerLabel);
+  if (kept.length) {
+    var keptLine = document.createElement("div");
+    keptLine.style.cssText = "font-size:12px;color:#111;line-height:1.6;margin-bottom:4px;";
+    keptLine.innerHTML = kept.map(function(c){return '<strong>'+c.place+'</strong>';}).join(' \u00b7 ');
+    headerWrap.appendChild(keptLine);
+  }
+  // Days scheduled line — specific and actionable. Uses parseNightRange for
+  // each kept candidate's stayRange so the number stays in sync with the
+  // underlying data.
+  var daysScheduled = document.createElement("div");
+  daysScheduled.id = "ce-days-scheduled";
+  daysScheduled.style.cssText = "font-size:11px;color:#555;margin-bottom:2px;";
+  (function(){
+    if (!kept.length) { daysScheduled.textContent = ""; return; }
+    var min = 0, max = 0, allOk = true;
+    kept.forEach(function(c){
+      var r = _parseNightRange(c.stayRange);
+      if (!r) { allOk = false; return; }
+      min += r.min; max += r.max;
+    });
+    if (!allOk) { daysScheduled.textContent = ""; return; }
+    var rangeStr = (min===max) ? (min+" days") : (min+"\u2013"+max+" days");
+    var perStay;
+    var stays = kept.map(function(c){var r=_parseNightRange(c.stayRange); return r?r:null;}).filter(Boolean);
+    if (stays.length) {
+      var lo = Math.min.apply(null, stays.map(function(r){return r.min;}));
+      var hi = Math.max.apply(null, stays.map(function(r){return r.max;}));
+      perStay = (lo===hi) ? (lo+" days each") : (lo+"\u2013"+hi+" days each");
+    }
+    daysScheduled.innerHTML = 'Right now you have <strong style="color:#111;">'+rangeStr+'</strong> scheduled across '+kept.length+' place'+(kept.length!==1?'s':'')+(perStay?' ('+perStay+')':'')+'.';
+  })();
+  headerWrap.appendChild(daysScheduled);
   var headerStay = document.createElement("div");
   headerStay.id = "ce-summary-stay";
   headerStay.style.cssText = "font-size:10px;color:#888;margin-bottom:8px;";
@@ -9883,29 +9936,25 @@ function drawTripMode(){
 
   try {
 
-  // Duration banner — now that the user can see actual destinations with real
-  // dates, surface any gap between the current trip span and the stated
-  // duration budget. More meaningful here than on the Places page, because the
-  // user can feel the consequences of a day more or less.
+  // Duration banner — uses the same sum-of-nights math as the running total
+  // below the Destinations header, so the two numbers never disagree.
   (function(){
     var budget = _parseTripDuration((trip.brief && trip.brief.duration) || "");
     if (!budget || !trip.destinations.length) return;
-    var first = trip.destinations[0];
-    var last = trip.destinations[trip.destinations.length - 1];
-    if (!first.dateFrom || !last.dateTo) return;
-    var span = Math.round((new Date(last.dateTo + "T12:00:00") - new Date(first.dateFrom + "T12:00:00")) / 86400000);
-    var over = span > budget.max;
-    var under = span < budget.min;
+    var totalNights = (trip.destinations||[]).reduce(function(s,d){return s + (d.nights || 0);}, 0);
+    var totalDays = totalNights + 1;
+    var over = totalDays > budget.max;
+    var under = totalDays < budget.min;
     if (!over && !under) return;
     var banner = document.createElement("div");
     var tripStr = (budget.min === budget.max) ? (budget.max + " days") : (budget.min + "\u2013" + budget.max + " days");
     if (over) {
       banner.style.cssText = "margin:6px 2px 10px;padding:10px 12px;background:#fff3ed;border:1px solid #f5ccb5;border-radius:7px;font-size:11px;line-height:1.55;";
-      banner.innerHTML = '<strong style="color:#b0451a;">Your trip is '+span+' days \u2014 '+ (span - budget.max) +' over your '+tripStr+' budget.</strong>'
+      banner.innerHTML = '<strong style="color:#b0451a;">Your trip is '+totalDays+' days \u2014 '+ (totalDays - budget.max) +' over your '+tripStr+' budget.</strong>'
         + '<br><span style="color:#555;">Open Edit destinations to drop a place, or open Constraints to adjust.</span>';
     } else {
       banner.style.cssText = "margin:6px 2px 10px;padding:10px 12px;background:#f0f8f2;border:1px solid #c6e0ce;border-radius:7px;font-size:11px;line-height:1.55;";
-      banner.innerHTML = '<strong style="color:#2a6b3e;">Your trip is '+span+' days \u2014 '+(budget.min - span)+' under your '+tripStr+' budget.</strong>'
+      banner.innerHTML = '<strong style="color:#2a6b3e;">Your trip is '+totalDays+' days \u2014 '+(budget.min - totalDays)+' under your '+tripStr+' budget.</strong>'
         + '<br><span style="color:#555;">Room to add a place or extend a stay. Edit destinations or adjust Constraints.</span>';
     }
     c.appendChild(banner);
