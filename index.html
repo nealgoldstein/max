@@ -5971,34 +5971,52 @@ function showPreBuildModal(){
   var ov = document.createElement("div");
   ov.id = "pre-build-overlay";
   ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:10050;display:flex;align-items:center;justify-content:center;padding:20px;";
+  var q = function(s){return (s||"").replace(/"/g,'&quot;');};
   ov.innerHTML =
-    '<div style="background:#fff;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.25);max-width:480px;width:100%;overflow:hidden;font-family:inherit;">'
+    '<div style="background:#fff;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.25);max-width:520px;width:100%;max-height:90vh;overflow-y:auto;font-family:inherit;">'
     +'<div style="padding:18px 20px 10px;">'
     +'<div style="font-size:14px;font-weight:700;color:#111;margin-bottom:4px;">One more thing</div>'
-    +'<div style="font-size:11px;color:#666;line-height:1.55;margin-bottom:14px;">Before Max builds your trip, it needs to know how you arrive and how you leave. You can edit any of this later.</div>'
+    +'<div style="font-size:11px;color:#666;line-height:1.55;margin-bottom:14px;">Before Max builds your trip, it needs to know how you arrive and how you leave. Booked details help Max respect what you\u2019ve locked in; rough plans are fine too. You can edit any of this later.</div>'
 
-    +'<div style="margin-bottom:12px;">'
-    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Flying / arriving into</label>'
-    +'<input id="pbm-entry" type="text" value="'+(( _tb.entry || defaultEntry )||'').replace(/"/g,'&quot;')+'" placeholder="e.g. Zurich" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
-    +'<div style="font-size:10px;color:#888;margin-top:3px;">If you\u2019re booked, use the actual airport or city. Otherwise a rough city is fine.</div>'
-    +'<div style="display:flex;gap:5px;margin-top:6px;">'
-    +'<span id="pbm-entry-fixed" class="tb-toggle'+(_tb.entryFixed?' on':'')+'" onclick="_tb.entryFixed=true;document.getElementById(&quot;pbm-entry-fixed&quot;).classList.add(&quot;on&quot;);document.getElementById(&quot;pbm-entry-flex&quot;).classList.remove(&quot;on&quot;);">Booked / fixed</span>'
-    +'<span id="pbm-entry-flex" class="tb-toggle'+(!_tb.entryFixed?' on':'')+'" onclick="_tb.entryFixed=false;document.getElementById(&quot;pbm-entry-flex&quot;).classList.add(&quot;on&quot;);document.getElementById(&quot;pbm-entry-fixed&quot;).classList.remove(&quot;on&quot;);">Still flexible</span>'
-    +'</div>'
+    +'<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#888;margin-top:6px;margin-bottom:8px;">Getting there</div>'
+
+    +'<div style="margin-bottom:10px;">'
+    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">How you\u2019re arriving</label>'
+    +'<input id="pbm-gettingTo" type="text" value="'+q(_tb.gettingTo||"")+'" placeholder="e.g. Flying into Zurich Aug 15, Swiss 38. Or: still deciding." style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'<div style="font-size:10px;color:#aaa;margin-top:3px;">Plane, train, car \u2014 in your own words. Include flight / train numbers and times if you have them.</div>'
     +'</div>'
 
-    +'<div style="margin-bottom:12px;">'
+    +'<div style="margin-bottom:10px;">'
+    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Arriving into (city)</label>'
+    +'<input id="pbm-entry" type="text" value="'+q(_tb.entry || defaultEntry)+'" placeholder="e.g. Zurich" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'</div>'
+
+    +'<div style="margin-bottom:10px;">'
     +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Arrival date</label>'
     +'<input id="pbm-date" type="date" value="'+defaultDate+'" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
     +'</div>'
 
-    +'<div style="margin-bottom:16px;">'
-    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Flying / leaving from</label>'
-    +'<input id="pbm-exit" type="text" value="'+(( _tb.tbExit || defaultExit )||'').replace(/"/g,'&quot;')+'" placeholder="e.g. Geneva" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
-    +'<div style="display:flex;gap:5px;margin-top:6px;">'
+    +'<div style="display:flex;gap:5px;margin-bottom:18px;">'
+    +'<span id="pbm-entry-fixed" class="tb-toggle'+(_tb.entryFixed?' on':'')+'" onclick="_tb.entryFixed=true;document.getElementById(&quot;pbm-entry-fixed&quot;).classList.add(&quot;on&quot;);document.getElementById(&quot;pbm-entry-flex&quot;).classList.remove(&quot;on&quot;);">Booked / fixed</span>'
+    +'<span id="pbm-entry-flex" class="tb-toggle'+(!_tb.entryFixed?' on':'')+'" onclick="_tb.entryFixed=false;document.getElementById(&quot;pbm-entry-flex&quot;).classList.add(&quot;on&quot;);document.getElementById(&quot;pbm-entry-fixed&quot;).classList.remove(&quot;on&quot;);">Still flexible</span>'
+    +'</div>'
+
+    +'<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#888;margin-top:6px;margin-bottom:8px;">Getting out</div>'
+
+    +'<div style="margin-bottom:10px;">'
+    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">How you\u2019re leaving</label>'
+    +'<input id="pbm-gettingOut" type="text" value="'+q(_tb.gettingOut||"")+'" placeholder="e.g. Flying out of Geneva Sep 5, Swiss 17. Or: same flight home from wherever." style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'<div style="font-size:10px;color:#aaa;margin-top:3px;">Same mode as arrival, or different (fly in, train out) \u2014 whatever fits.</div>'
+    +'</div>'
+
+    +'<div style="margin-bottom:10px;">'
+    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Leaving from (city)</label>'
+    +'<input id="pbm-exit" type="text" value="'+q(_tb.tbExit || defaultExit)+'" placeholder="e.g. Geneva" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'</div>'
+
+    +'<div style="display:flex;gap:5px;margin-bottom:10px;">'
     +'<span id="pbm-exit-fixed" class="tb-toggle'+(_tb.exitFixed?' on':'')+'" onclick="_tb.exitFixed=true;document.getElementById(&quot;pbm-exit-fixed&quot;).classList.add(&quot;on&quot;);document.getElementById(&quot;pbm-exit-flex&quot;).classList.remove(&quot;on&quot;);">Booked / fixed</span>'
     +'<span id="pbm-exit-flex" class="tb-toggle'+(!_tb.exitFixed?' on':'')+'" onclick="_tb.exitFixed=false;document.getElementById(&quot;pbm-exit-flex&quot;).classList.add(&quot;on&quot;);document.getElementById(&quot;pbm-exit-fixed&quot;).classList.remove(&quot;on&quot;);">Still flexible</span>'
-    +'</div>'
     +'</div>'
 
     +'</div>'
@@ -6014,11 +6032,15 @@ function showPreBuildModal(){
   ov.querySelector("#pbm-cancel").onclick = close;
   ov.onclick = function(e){ if(e.target === ov) close(); };
   ov.querySelector("#pbm-build").onclick = function(){
-    var entryVal = (document.getElementById("pbm-entry")||{}).value || "";
-    var exitVal  = (document.getElementById("pbm-exit") ||{}).value || "";
-    var dateVal  = (document.getElementById("pbm-date") ||{}).value || "";
-    _tb.entry = entryVal.trim();
-    _tb.tbExit = exitVal.trim();
+    var entryVal     = (document.getElementById("pbm-entry")      ||{}).value || "";
+    var exitVal      = (document.getElementById("pbm-exit")       ||{}).value || "";
+    var dateVal      = (document.getElementById("pbm-date")       ||{}).value || "";
+    var gettingToVal = (document.getElementById("pbm-gettingTo")  ||{}).value || "";
+    var gettingOutVal= (document.getElementById("pbm-gettingOut") ||{}).value || "";
+    _tb.entry      = entryVal.trim();
+    _tb.tbExit     = exitVal.trim();
+    _tb.gettingTo  = gettingToVal.trim();
+    _tb.gettingOut = gettingOutVal.trim();
     if (dateVal) {
       // Seed `when` with the specific date so parseStartDateFromBrief picks it up
       _tb.when = dateVal;
