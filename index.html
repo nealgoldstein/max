@@ -3808,13 +3808,22 @@ function renderTripStep1Recognition(){
       +'</div>';
   }
 
-  // Activity chips
+  // Activity chips — what the user naturally does, anywhere. Presets plus
+  // whatever custom ones they've added (which live in _tb.chips alongside
+  // the presets; the ones not in the preset list get an × to remove).
   var chips = ["see great art & museums","dig into history","eat and drink well","hike in nature","explore architecture","enjoy nightlife & music","get to the beach","get into the mountains","see spectacular scenery","visit magnificent gardens","explore small towns","slow down & recharge","take great photos","do something adventurous"];
   var selectedChips = _tb.chips || [];
-  var chipsHtml = chips.map(function(c){
+  var presetSet = {}; chips.forEach(function(c){presetSet[c]=true;});
+  var presetChipsHtml = chips.map(function(c){
     var on = selectedChips.indexOf(c) > -1;
     return '<span class="tb-chip'+(on?' on':'')+'" data-chip="'+c+'" onclick="toggleChip(this)">'+c+'</span>';
   }).join("");
+  var customChips = selectedChips.filter(function(c){return !presetSet[c];});
+  var customChipsHtml = customChips.map(function(c){
+    var safe = c.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;').replace(/'/g,"&#39;");
+    return '<span class="tb-chip on" style="display:inline-flex;align-items:center;gap:6px;">'+safe+'<span onclick="removeCustomChip(&quot;'+safe+'&quot;)" style="cursor:pointer;opacity:.7;">\u00d7</span></span>';
+  }).join("");
+  var chipsHtml = presetChipsHtml + customChipsHtml;
 
   // Familiarity
   var famOptions = [{id:"first",label:"Not at all"},{id:"before",label:"A passing understanding"},{id:"know",label:"Quite a bit"}];
@@ -3839,8 +3848,12 @@ function renderTripStep1Recognition(){
     +'<div style="font-size:11px;color:#aaa;margin-top:6px;">The test: could you do this at home? If you could, sharpen the sentence.</div>'
     +'</div>'
     +'<div class="tb-field">'
-    +'<label style="display:block;margin-bottom:6px;font-size:12px;color:#555;">You can also tap anything else you might want to do '+(_tb.region?'in '+_tb.region:'there')+' <span style="color:#aaa;font-weight:400;">(optional)</span></label>'
+    +'<div style="font-size:12px;color:#555;line-height:1.55;margin-bottom:8px;">You come to this trip with things you naturally do, regardless of where you are. They\u2019re part of what defines who you are. Travel can change them over time, but on the whole, they\u2019re still you. Tap any that sound right below, or add ones we haven\u2019t included.</div>'
     +'<div class="tb-chips">'+chipsHtml+'</div>'
+    +'<div style="display:flex;gap:6px;margin-top:8px;">'
+    +'<input id="tb-chip-add" placeholder="Add your own \u2014 something you notice or do regardless of where you are" style="flex:1;font-size:12px;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" onkeydown="if(event.key===&#39;Enter&#39;){event.preventDefault();addCustomChip();}" />'
+    +'<button onclick="addCustomChip()" style="font-size:11px;font-weight:600;padding:7px 12px;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;white-space:nowrap;">Add</button>'
+    +'</div>'
     +'</div>'
     +'<div class="tb-field">'
     +'<label>How familiar are you with this part of the world?</label>'
@@ -3876,6 +3889,41 @@ function toggleChip(el){
   if(idx > -1) _tb.chips.splice(idx, 1);
   else _tb.chips.push(c);
   el.classList.toggle("on");
+}
+
+// Add a custom chip the user typed. Lives alongside presets in _tb.chips;
+// the renderer knows to give it an × to remove since it's not in the preset
+// list. Preserves the sentence and any entered anchors so we don't lose them
+// on re-render.
+function addCustomChip(){
+  var inp = document.getElementById("tb-chip-add");
+  if (!inp) return;
+  var val = (inp.value||"").trim();
+  if (!val) return;
+  _tb.chips = _tb.chips || [];
+  // Case-insensitive de-dupe
+  var already = _tb.chips.some(function(c){return c.toLowerCase() === val.toLowerCase();});
+  if (!already) _tb.chips.push(val);
+  inp.value = "";
+  // Preserve any unsaved sentence before re-render
+  var st = document.getElementById("tb-sentence");
+  if (st) _tb.tripSentence = st.value;
+  renderTripStep1Recognition();
+  // Re-focus the input so the user can keep adding
+  setTimeout(function(){
+    var i = document.getElementById("tb-chip-add");
+    if (i) i.focus();
+  }, 50);
+}
+
+function removeCustomChip(chipText){
+  if (!chipText) return;
+  // Unescape HTML entities that came back from data-attr style encoding
+  var decoded = chipText.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&quot;/g,'"').replace(/&#39;/g,"'");
+  _tb.chips = (_tb.chips||[]).filter(function(c){return c !== decoded;});
+  var st = document.getElementById("tb-sentence");
+  if (st) _tb.tripSentence = st.value;
+  renderTripStep1Recognition();
 }
 
 function saveRecognitionAndContinue(){
