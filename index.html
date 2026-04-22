@@ -4755,6 +4755,28 @@ function cancelEditCandidates(){
   if(_ceMap){_ceMap.remove();_ceMap=null;}
 }
 
+// No more lock-in ceremony: closing the Places overlay IS how you step out.
+// If no trip yet but kept candidates exist, build silently (skipping the
+// pre-build modal). If a trip already exists, this is just a dismiss.
+function closePlacesOverlay(){
+  if (_ceEditMode) { applyCandidateChanges(); return; }
+  var kept = (_tb.candidates||[]).filter(function(c){return c.status==="keep";});
+  if (!kept.length) {
+    g("candidate-explorer-overlay").style.display="none";
+    if(_ceMap){_ceMap.remove();_ceMap=null;}
+    return;
+  }
+  if (!trip) {
+    // First time through — quietly materialize the trip without the modal.
+    buildFromCandidates();
+  } else {
+    g("candidate-explorer-overlay").style.display="none";
+    if(_ceMap){_ceMap.remove();_ceMap=null;}
+    if (typeof drawTripMode === "function") drawTripMode();
+    if (typeof updateMainMap === "function") updateMainMap();
+  }
+}
+
 // Reconcile the Explorer's kept set against the existing trip.destinations.
 // New keeps → append as new destinations at the end. Existing destinations whose
 // backing candidate is now rejected → confirm with user (naming any content
@@ -4906,7 +4928,7 @@ function showCandidateExplorer(cands, editMode){
     +'<span style="font-size:10px;color:#888;" id="ce-cnt">0 kept</span>'
     +(_ceEditMode
       ? '<button class="ce-build-btn" id="ce-build-btn" disabled onclick="applyCandidateChanges()">Apply changes \u2192</button>'
-      : '<button class="ce-build-btn" id="ce-build-btn" disabled onclick="showPreBuildModal()">Build trip \u2192</button>')
+      : '<button class="ce-build-btn" id="ce-build-btn" onclick="closePlacesOverlay()">Close</button>')
     +'</div>';
   setTimeout(function(){
     // Fix flex height collapse before map init
@@ -5020,6 +5042,142 @@ async function geocodeMissingCoords(cands){
   } finally {
     _geocodeInFlight = false;
   }
+}
+
+// Module-level state for the inline trip-details strip. Preserves expand/
+// collapse across re-renders without forcing the user to reopen it after
+// every keep/reject.
+var _tripDetailsExpanded = false;
+
+// Rebuild the freeform _tb.gettingTo / _tb.gettingOut summary strings from
+// the structured inline fields. The rest of the pipeline (LLM prompts, brief
+// block) still expects these summary strings, so keep them in sync.
+function _rebuildGettingToFromFields(){
+  var gtParts = [];
+  if (_tb.arrivalNumber) gtParts.push(_tb.arrivalNumber);
+  if (_tb.arrivalTime)   gtParts.push("arriving " + _tb.arrivalTime);
+  if (_tb.entry)         gtParts.push("into " + _tb.entry);
+  if (_tb.when && /\d{4}-\d{2}-\d{2}/.test(_tb.when)) gtParts.push("on " + _tb.when);
+  _tb.gettingTo = gtParts.join(", ");
+  var goParts = [];
+  if (_tb.departureNumber) goParts.push(_tb.departureNumber);
+  if (_tb.departureTime)   goParts.push("departing " + _tb.departureTime);
+  if (_tb.tbExit)          goParts.push("from " + _tb.tbExit);
+  if (_tb.departureDate)   goParts.push("on " + _tb.departureDate);
+  _tb.gettingOut = goParts.join(", ");
+}
+
+// Renders the collapsible Trip Details strip — replaces the old pre-build
+// modal. No ceremony: fill this in whenever you want. The summary line is
+// the collapsed state.
+function _renderTripDetailsStrip(kept){
+  var box = document.createElement("div");
+  box.style.cssText = "margin-top:10px;padding-top:8px;border-top:1px solid #f0f0f0;";
+
+  // Collapsed summary row — click to expand
+  var hasAny = _tb.entry || _tb.tbExit || _tb.when || _tb.arrivalNumber
+             || _tb.departureDate || _tb.departureNumber;
+  var summaryRow = document.createElement("div");
+  summaryRow.style.cssText = "display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;";
+  var chev = document.createElement("span");
+  chev.style.cssText = "font-size:9px;color:#999;";
+  chev.textContent = _tripDetailsExpanded ? "\u25be" : "\u25b8";
+  summaryRow.appendChild(chev);
+  var label = document.createElement("span");
+  label.style.cssText = "font-size:10px;color:#999;letter-spacing:0.05em;text-transform:uppercase;font-weight:700;";
+  label.textContent = "Trip details";
+  summaryRow.appendChild(label);
+  if (!_tripDetailsExpanded) {
+    var sum = document.createElement("span");
+    sum.style.cssText = "font-size:11px;color:#666;margin-left:4px;line-height:1.5;";
+    if (hasAny) {
+      var bits = [];
+      if (_tb.entry) bits.push("In: " + _tb.entry);
+      if (_tb.when && /\d{4}-\d{2}-\d{2}/.test(_tb.when)) bits.push(_tb.when);
+      if (_tb.arrivalNumber) bits.push(_tb.arrivalNumber);
+      if (_tb.tbExit) bits.push("Out: " + _tb.tbExit);
+      if (_tb.departureDate) bits.push(_tb.departureDate);
+      if (_tb.departureNumber) bits.push(_tb.departureNumber);
+      sum.textContent = bits.join(" \u00b7 ");
+    } else {
+      sum.innerHTML = '<em style="color:#aaa;">Add arrival, departure, flight numbers (optional)</em>';
+    }
+    summaryRow.appendChild(sum);
+  }
+  summaryRow.onclick = function(){
+    _tripDetailsExpanded = !_tripDetailsExpanded;
+    renderCandidateCards(_tb.candidates);
+  };
+  box.appendChild(summaryRow);
+
+  if (!_tripDetailsExpanded) return box;
+
+  // Expanded form
+  var form = document.createElement("div");
+  form.style.cssText = "margin-top:10px;padding:10px 12px;background:#fafbfc;border:1px solid #eee;border-radius:6px;";
+  var q = function(s){return (s||"").replace(/"/g,'&quot;');};
+  var defaultEntry = _tb.entry || (kept[0] && kept[0].place) || "";
+  var defaultExit  = _tb.tbExit || (kept[kept.length-1] && kept[kept.length-1].place) || "";
+  var defaultDate  = (typeof parseStartDateFromBrief === "function") ? parseStartDateFromBrief(_tb.when||"") : "";
+  form.innerHTML =
+     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 12px;">'
+    +'<div>'
+    +  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#888;margin-bottom:6px;">Getting there</div>'
+    +  '<label style="display:block;font-size:10px;color:#666;margin-bottom:2px;">City or airport</label>'
+    +  '<input id="td-entry" value="'+q(defaultEntry)+'" placeholder="e.g. Zurich or ZRH" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;margin-bottom:6px;" />'
+    +  '<div style="display:flex;gap:6px;margin-bottom:6px;">'
+    +    '<div style="flex:1;"><label style="display:block;font-size:10px;color:#666;margin-bottom:2px;">Date</label>'
+    +      '<input id="td-date" type="date" value="'+q(defaultDate)+'" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;" />'
+    +    '</div>'
+    +    '<div style="flex:1;"><label style="display:block;font-size:10px;color:#666;margin-bottom:2px;">Time</label>'
+    +      '<input id="td-arrTime" type="time" value="'+q(_tb.arrivalTime||"")+'" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;" />'
+    +    '</div>'
+    +  '</div>'
+    +  '<label style="display:block;font-size:10px;color:#666;margin-bottom:2px;">Flight / train #</label>'
+    +  '<input id="td-arrNum" value="'+q(_tb.arrivalNumber||"")+'" placeholder="Swiss 38, Eurostar 9137" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;" />'
+    +'</div>'
+    +'<div>'
+    +  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#888;margin-bottom:6px;">Getting out</div>'
+    +  '<label style="display:block;font-size:10px;color:#666;margin-bottom:2px;">City or airport</label>'
+    +  '<input id="td-exit" value="'+q(defaultExit)+'" placeholder="e.g. Geneva or GVA" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;margin-bottom:6px;" />'
+    +  '<div style="display:flex;gap:6px;margin-bottom:6px;">'
+    +    '<div style="flex:1;"><label style="display:block;font-size:10px;color:#666;margin-bottom:2px;">Date</label>'
+    +      '<input id="td-depDate" type="date" value="'+q(_tb.departureDate||"")+'" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;" />'
+    +    '</div>'
+    +    '<div style="flex:1;"><label style="display:block;font-size:10px;color:#666;margin-bottom:2px;">Time</label>'
+    +      '<input id="td-depTime" type="time" value="'+q(_tb.departureTime||"")+'" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;" />'
+    +    '</div>'
+    +  '</div>'
+    +  '<label style="display:block;font-size:10px;color:#666;margin-bottom:2px;">Flight / train #</label>'
+    +  '<input id="td-depNum" value="'+q(_tb.departureNumber||"")+'" placeholder="Swiss 17" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;" />'
+    +'</div>'
+    +'</div>';
+  box.appendChild(form);
+
+  // Wire up autosave on blur for each field
+  setTimeout(function(){
+    var bind = function(id, key){
+      var inp = document.getElementById(id); if (!inp) return;
+      inp.onblur = function(){
+        _tb[key] = inp.value.trim();
+        if (id === "td-date" && inp.value) _tb.when = inp.value;
+        _rebuildGettingToFromFields();
+        // Re-render so the time-lens day numbering and endpoint flight info
+        // pick up the new data immediately.
+        renderCandidateCards(_tb.candidates);
+      };
+    };
+    bind("td-entry",   "entry");
+    bind("td-date",    "_placeholderIgnored"); // handled via special case below
+    bind("td-arrTime", "arrivalTime");
+    bind("td-arrNum",  "arrivalNumber");
+    bind("td-exit",    "tbExit");
+    bind("td-depDate", "departureDate");
+    bind("td-depTime", "departureTime");
+    bind("td-depNum",  "departureNumber");
+  }, 10);
+
+  return box;
 }
 
 function renderCandidateCards(cands){
@@ -5260,18 +5418,27 @@ function renderCandidateCards(cands){
   headerWrap.appendChild(headerStay);
   var headerBtns = document.createElement("div");
   headerBtns.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;align-items:center;";
-  var sumBuild = document.createElement("button");
-  sumBuild.style.cssText = "font-size:11px;font-weight:700;padding:7px 13px;border-radius:5px;border:1px solid #111;background:#111;color:#fff;cursor:pointer;font-family:inherit;"+(kept.length?"":"opacity:0.5;cursor:not-allowed;");
-  sumBuild.textContent = _ceEditMode ? "Apply changes \u2192" : "Build trip \u2192";
-  sumBuild.disabled = !kept.length;
-  sumBuild.onclick = function(){ if (!sumBuild.disabled) (_ceEditMode ? applyCandidateChanges() : showPreBuildModal()); };
-  headerBtns.appendChild(sumBuild);
+  if (_ceEditMode) {
+    var sumBuild = document.createElement("button");
+    sumBuild.style.cssText = "font-size:11px;font-weight:700;padding:7px 13px;border-radius:5px;border:1px solid #111;background:#111;color:#fff;cursor:pointer;font-family:inherit;"+(kept.length?"":"opacity:0.5;cursor:not-allowed;");
+    sumBuild.textContent = "Apply changes \u2192";
+    sumBuild.disabled = !kept.length;
+    sumBuild.onclick = function(){ if (!sumBuild.disabled) applyCandidateChanges(); };
+    headerBtns.appendChild(sumBuild);
+  }
   var bestBtn = document.createElement("button");
   bestBtn.style.cssText = "font-size:10px;padding:6px 10px;border-radius:5px;border:1px solid #ddd;background:#fff;color:#333;cursor:pointer;font-family:inherit;font-weight:600;";
   bestBtn.textContent = _ceBestMode ? "Show all" : "Show me the best";
   bestBtn.onclick = function(){ _ceBestMode = !_ceBestMode; renderCandidateCards(_tb.candidates); };
   headerBtns.appendChild(bestBtn);
   headerWrap.appendChild(headerBtns);
+
+  // Trip Details — entry/exit, dates, flight numbers. Replaces the old
+  // pre-build modal; it's inline here so the user can fill in (or edit) any
+  // of this at any time without leaving the page. Collapsible to stay quiet
+  // when not needed.
+  var detailsStrip = _renderTripDetailsStrip(kept);
+  if (detailsStrip) headerWrap.appendChild(detailsStrip);
 
   // Add-a-place input — brings in destinations the user has heard about that
   // Max didn't generate. This is where the tourist's knowledge starts sharing
@@ -5533,6 +5700,27 @@ function renderCandidateCards(cands){
         el.appendChild(why);
       }
 
+      // Anchor the itinerary in real dates when the user has set an arrival
+      // date. Falls back to abstract "Stop N" numbering otherwise.
+      var _hasStartDate = !!(_tb.when && /\d{4}-\d{2}-\d{2}/.test(_tb.when));
+      var _dayCursor = 1;
+      var _dateCursor = _hasStartDate ? new Date(_tb.when + "T00:00:00") : null;
+      var _fmtDate = function(d){
+        if (!d || isNaN(d)) return "";
+        var days = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+        var mons = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+        return days[d.getDay()]+" "+mons[d.getMonth()]+" "+d.getDate();
+      };
+
+      // Arrival leg — only shown when the user has filled in any Getting There
+      // details. Sits above stop 1 like a travel leg from "outside the trip" in.
+      if (_tb.gettingTo) {
+        var arrLeg = document.createElement("div");
+        arrLeg.style.cssText = "margin:6px 12px 2px;padding:6px 10px;font-size:10px;color:#555;border-left:2px solid #c8d8ec;background:#f5f9ff;line-height:1.55;border-radius:0 4px 4px 0;";
+        arrLeg.innerHTML = '\u2708 <strong style="color:#1a5fa8;">Arrival</strong> \u00b7 '+_tb.gettingTo;
+        el.appendChild(arrLeg);
+      }
+
       ordered.forEach(function(c, i){
         // Travel leg between previous stop and this one
         if (i > 0) {
@@ -5546,12 +5734,32 @@ function renderCandidateCards(cands){
             : '\u2193 Travel: '+prev.place+' \u2192 '+c.place;
           el.appendChild(leg);
         }
+        var nights = parseNightsFromRange(c.stayRange) || 3;
         var ix = document.createElement("div");
         ix.style.cssText = "font-size:10px;color:#888;padding:6px 6px 0;font-weight:700;letter-spacing:0.03em;";
-        ix.textContent = "STOP " + (i+1);
+        if (_hasStartDate && _dateCursor && !isNaN(_dateCursor)) {
+          var endDate = new Date(_dateCursor); endDate.setDate(endDate.getDate() + nights);
+          var dayEnd = _dayCursor + nights - 1;
+          var rangeStr = (nights > 1)
+            ? ("Day "+_dayCursor+"\u2013"+dayEnd+" \u00b7 "+_fmtDate(_dateCursor)+" \u2192 "+_fmtDate(endDate))
+            : ("Day "+_dayCursor+" \u00b7 "+_fmtDate(_dateCursor));
+          ix.textContent = rangeStr;
+          _dayCursor += nights;
+          _dateCursor = endDate;
+        } else {
+          ix.textContent = "Stop " + (i+1);
+        }
         el.appendChild(ix);
         renderCard(c, el);
       });
+
+      // Departure leg — after the last stop. Mirror of the arrival leg.
+      if (_tb.gettingOut) {
+        var depLeg = document.createElement("div");
+        depLeg.style.cssText = "margin:2px 12px 6px;padding:6px 10px;font-size:10px;color:#555;border-left:2px solid #c8d8ec;background:#f5f9ff;line-height:1.55;border-radius:0 4px 4px 0;";
+        depLeg.innerHTML = '\u2708 <strong style="color:#1a5fa8;">Departure</strong> \u00b7 '+_tb.gettingOut;
+        el.appendChild(depLeg);
+      }
     }
     if (unset.length) {
       var hdr2 = document.createElement("div");
@@ -5925,7 +6133,9 @@ function updateCEShortlist(){
   // button disabled state, and refreshes the stay-total line in the summary.
   var kept=(_tb.candidates||[]).filter(function(c){return c.status==="keep";});
   var cnt=g("ce-cnt"); if(cnt) cnt.textContent=kept.length+" kept";
-  var bb=g("ce-build-btn"); if(bb) bb.disabled=kept.length<1;
+  // Only the Apply-changes variant (edit mode) disables on empty keeps;
+  // the Close button in the default flow is always clickable.
+  var bb=g("ce-build-btn"); if(bb && _ceEditMode) bb.disabled=kept.length<1;
   renderCEStayTotal(kept);
 }
 
