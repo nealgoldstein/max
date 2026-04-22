@@ -808,7 +808,13 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .ce-sl-pill{font-size:10px;padding:2px 7px;background:#111;color:#fff;border-radius:10px;display:flex;align-items:center;gap:3px;}
 .ce-sl-pill-x{cursor:pointer;opacity:.6;font-size:10px;line-height:1;}
 .ce-sl-empty{font-size:10px;color:#ccc;font-style:italic;}
-.ce-cards{flex:1;overflow-y:auto;padding:7px;min-height:0;}
+/* The left panel has a fixed 340px width and overflow:hidden. Anything
+   inside ce-cards that doesn't wrap (long place names, join()-ed lists of
+   kept places, route lines, lens button rows) was getting truncated and
+   forcing a horizontal scroll. overflow-x:hidden + overflow-wrap on the
+   inner tree means text wraps instead of pushing the column wider. */
+.ce-cards{flex:1;overflow-y:auto;overflow-x:hidden;padding:7px;min-height:0;}
+.ce-cards,.ce-cards *{overflow-wrap:break-word;min-width:0;}
 .ce-card{border:1px solid #e8e8e8;border-radius:7px;background:#fff;margin-bottom:7px;overflow:hidden;}
 .ce-card.keep{border-color:#2a7a4e;background:#f6fbf8;}
 .ce-card.map-selected{border-color:#111!important;box-shadow:0 0 0 2px #111;transition:box-shadow .15s;}
@@ -3314,10 +3320,9 @@ async function runCandidateSearch(requiredPlaces) {
   // and reset the "finding places" text). Just update the subtitle to reflect
   // the new phase and hide the trip-brief overlay if anything's still showing it.
   g("trip-brief-overlay").style.display="none";
-  // Fire a parallel call for major airports in the region, so the CE map can
-  // show the air-access points while the user is picking candidates. Runs
-  // concurrently with candidate generation — no added wait.
-  expandAirportsForRegion();
+  // Entry points (air, rail, sea, bus) are fetched lazily by
+  // _ensureEntryPointsForRegion when the candidate map initializes — no need
+  // to fire expandAirportsForRegion here anymore.
   var detailNow = document.getElementById("ce-loading-detail");
   if (!detailNow) {
     // Fallback: overlay not yet up (legacy callers) — create it.
@@ -5790,7 +5795,11 @@ async function findCandidates(){
 }
 
 // ─── CANDIDATE EXPLORER ────────────────────────────────────
-var _ceMap=null,_ceMarkers=[],_ceRejectedExpanded=false,_ceEditMode=false,_ceBestMode=false,_ceCardExpanded={},_ceLens="time",_ceSectionExpanded={};
+// Default lens is "activity" — we group by what the traveler wants to do, not
+// by a draft sequence. Sequencing (the schedule) lives on the next page,
+// after the user has picked entry/exit; ordering places before entry is known
+// just hallucinates a starting city.
+var _ceMap=null,_ceMarkers=[],_ceRejectedExpanded=false,_ceEditMode=false,_ceBestMode=false,_ceCardExpanded={},_ceLens="activity",_ceSectionExpanded={};
 
 async function retryDiscoveryCandidates() {
   var existingReq = (_tb.candidates||[]).filter(function(c){ return c._required; });
@@ -6465,14 +6474,18 @@ function _tbPlacesReRender(){
 // modal. No ceremony: fill this in whenever you want. The summary line is
 // the collapsed state.
 function _renderTripDetailsStrip(kept){
+  // This strip is intentionally narrow on this page: only "where are you
+  // arriving" and "where are you leaving from", plus the mode (fly/train/…).
+  // Dates, times, flight numbers — anything that's part of the schedule — live
+  // on the next page, after the user sees the places and picks entry/exit.
+  // Ordering a trip before the starting city is chosen just makes Max
+  // hallucinate a start.
   var box = document.createElement("div");
   box.style.cssText = "margin-top:10px;padding-top:8px;border-top:1px solid #f0f0f0;";
 
-  // Collapsed summary row — click to expand
-  var hasAny = _tb.entry || _tb.tbExit || _tb.when || _tb.arrivalNumber
-             || _tb.departureDate || _tb.departureNumber;
+  var hasAny = _tb.entry || _tb.tbExit || _tb.entryMode || _tb.exitMode;
   var summaryRow = document.createElement("div");
-  summaryRow.style.cssText = "display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;";
+  summaryRow.style.cssText = "display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;flex-wrap:wrap;";
   var chev = document.createElement("span");
   chev.style.cssText = "font-size:9px;color:#999;";
   chev.textContent = _tripDetailsExpanded ? "\u25be" : "\u25b8";
@@ -6483,18 +6496,14 @@ function _renderTripDetailsStrip(kept){
   summaryRow.appendChild(label);
   if (!_tripDetailsExpanded) {
     var sum = document.createElement("span");
-    sum.style.cssText = "font-size:11px;color:#666;margin-left:4px;line-height:1.5;";
+    sum.style.cssText = "font-size:11px;color:#666;margin-left:4px;line-height:1.5;word-break:break-word;";
     if (hasAny) {
       var bits = [];
       if (_tb.entry) bits.push("In: " + _tb.entry);
-      if (_tb.when && /\d{4}-\d{2}-\d{2}/.test(_tb.when)) bits.push(_tb.when);
-      if (_tb.arrivalNumber) bits.push(_tb.arrivalNumber);
       if (_tb.tbExit) bits.push("Out: " + _tb.tbExit);
-      if (_tb.departureDate) bits.push(_tb.departureDate);
-      if (_tb.departureNumber) bits.push(_tb.departureNumber);
       sum.textContent = bits.join(" \u00b7 ");
     } else {
-      sum.innerHTML = '<em style="color:#aaa;">Where you\u2019re flying/driving in and out \u2014 click to set</em>';
+      sum.innerHTML = '<em style="color:#aaa;">Pick a pin on the map, or click to set arrival and departure</em>';
     }
     summaryRow.appendChild(sum);
   }
@@ -6506,75 +6515,47 @@ function _renderTripDetailsStrip(kept){
 
   if (!_tripDetailsExpanded) return box;
 
-  // Expanded form
+  // Expanded form — entry/exit only. No dates, no times, no flight numbers.
   var form = document.createElement("div");
   form.style.cssText = "margin-top:10px;padding:10px 12px;background:#fafbfc;border:1px solid #eee;border-radius:6px;";
   var q = function(s){return (s||"").replace(/"/g,'&quot;');};
-  var defaultEntry = _tb.entry || (kept[0] && kept[0].place) || "";
-  var defaultExit  = _tb.tbExit || (kept[kept.length-1] && kept[kept.length-1].place) || "";
-  var defaultDate  = (typeof parseStartDateFromBrief === "function") ? parseStartDateFromBrief(_tb.when||"") : "";
+  var defaultEntry = _tb.entry || "";
+  var defaultExit  = _tb.tbExit || "";
   form.innerHTML =
-     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 12px;">'
+     '<div style="font-size:10px;color:#888;line-height:1.5;margin-bottom:10px;">'
+    +  'Pick how you\u2019ll arrive and depart. City names only here \u2014 dates, times and flight numbers come next, once you\u2019ve committed to entry and exit.'
+    +'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr;gap:10px;">'
     +'<div>'
     +  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#888;margin-bottom:6px;">Getting there</div>'
     +  '<label style="display:block;font-size:10px;color:#666;margin-bottom:3px;">How</label>'
     +  _tbPlacesModePillsHtml("entryMode")
     +  '<label style="display:block;font-size:10px;color:#666;margin-bottom:2px;">City or airport</label>'
-    +  '<input id="td-entry" value="'+q(defaultEntry)+'" placeholder="e.g. Zurich or ZRH" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;margin-bottom:6px;" />'
-    +  '<div style="display:flex;gap:6px;margin-bottom:6px;">'
-    +    '<div style="flex:1;"><label style="display:block;font-size:10px;color:#666;margin-bottom:2px;">Date</label>'
-    +      '<input id="td-date" type="date" value="'+q(defaultDate)+'" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;" />'
-    +    '</div>'
-    +    '<div style="flex:1;"><label style="display:block;font-size:10px;color:#666;margin-bottom:2px;">Time</label>'
-    +      '<input id="td-arrTime" type="time" value="'+q(_tb.arrivalTime||"")+'" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;" />'
-    +    '</div>'
-    +  '</div>'
-    +  '<label style="display:block;font-size:10px;color:#666;margin-bottom:2px;">Flight / train #</label>'
-    +  '<input id="td-arrNum" value="'+q(_tb.arrivalNumber||"")+'" placeholder="Swiss 38, Eurostar 9137" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;margin-bottom:6px;" />'
-    +  _tbPlacesFixedPillsHtml("entry")
+    +  '<input id="td-entry" value="'+q(defaultEntry)+'" placeholder="e.g. Zurich or ZRH" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;" />'
     +'</div>'
     +'<div>'
     +  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#888;margin-bottom:6px;">Getting out</div>'
     +  '<label style="display:block;font-size:10px;color:#666;margin-bottom:3px;">How</label>'
     +  _tbPlacesModePillsHtml("exitMode")
     +  '<label style="display:block;font-size:10px;color:#666;margin-bottom:2px;">City or airport</label>'
-    +  '<input id="td-exit" value="'+q(defaultExit)+'" placeholder="e.g. Geneva or GVA" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;margin-bottom:6px;" />'
-    +  '<div style="display:flex;gap:6px;margin-bottom:6px;">'
-    +    '<div style="flex:1;"><label style="display:block;font-size:10px;color:#666;margin-bottom:2px;">Date</label>'
-    +      '<input id="td-depDate" type="date" value="'+q(_tb.departureDate||"")+'" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;" />'
-    +    '</div>'
-    +    '<div style="flex:1;"><label style="display:block;font-size:10px;color:#666;margin-bottom:2px;">Time</label>'
-    +      '<input id="td-depTime" type="time" value="'+q(_tb.departureTime||"")+'" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;" />'
-    +    '</div>'
-    +  '</div>'
-    +  '<label style="display:block;font-size:10px;color:#666;margin-bottom:2px;">Flight / train #</label>'
-    +  '<input id="td-depNum" value="'+q(_tb.departureNumber||"")+'" placeholder="Swiss 17" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;margin-bottom:6px;" />'
-    +  _tbPlacesFixedPillsHtml("exit")
+    +  '<input id="td-exit" value="'+q(defaultExit)+'" placeholder="e.g. Geneva or GVA" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;" />'
     +'</div>'
     +'</div>';
   box.appendChild(form);
 
-  // Wire up autosave on blur for each field
+  // Wire up autosave on blur for the two city fields. No schedule fields live
+  // here anymore, so there's nothing else to bind.
   setTimeout(function(){
     var bind = function(id, key){
       var inp = document.getElementById(id); if (!inp) return;
       inp.onblur = function(){
         _tb[key] = inp.value.trim();
-        if (id === "td-date" && inp.value) _tb.when = inp.value;
         _rebuildGettingToFromFields();
-        // Re-render so the time-lens day numbering and endpoint flight info
-        // pick up the new data immediately.
         renderCandidateCards(_tb.candidates);
       };
     };
-    bind("td-entry",   "entry");
-    bind("td-date",    "_placeholderIgnored"); // handled via special case below
-    bind("td-arrTime", "arrivalTime");
-    bind("td-arrNum",  "arrivalNumber");
-    bind("td-exit",    "tbExit");
-    bind("td-depDate", "departureDate");
-    bind("td-depTime", "departureTime");
-    bind("td-depNum",  "departureNumber");
+    bind("td-entry", "entry");
+    bind("td-exit",  "tbExit");
   }, 10);
 
   return box;
@@ -6857,7 +6838,10 @@ function renderCandidateCards(cands){
   lensLabel.style.cssText = "font-size:9px;color:#999;letter-spacing:0.05em;text-transform:uppercase;font-weight:700;margin-right:4px;";
   lensLabel.textContent = "Organize by:";
   lensBar.appendChild(lensLabel);
-  [["activity","Activity"],["region","Region"],["time","Trip order"],["commitment","Status"]].forEach(function(pair){
+  // "Trip order" lens removed from this page — without known entry/exit, any
+  // ordering is just a guess. The schedule view appears on the next page,
+  // once the user has committed entry and exit.
+  [["activity","Activity"],["region","Region"],["commitment","Status"]].forEach(function(pair){
     var b = document.createElement("button");
     var on = _ceLens === pair[0];
     b.style.cssText = "font-size:10px;padding:4px 10px;border-radius:11px;border:1px solid "+(on?"#111":"#ddd")+";background:"+(on?"#111":"#fff")+";color:"+(on?"#fff":"#555")+";cursor:pointer;font-family:inherit;font-weight:"+(on?"700":"500")+";";
@@ -7220,9 +7204,10 @@ function renderCandidateCards(cands){
     el.appendChild(rejWrap);
   }
 
-  // Airports on the CE map — user-facing context for where they can fly in/out.
-  // Added every render so a re-render (lens toggle, status change) doesn't lose them.
-  _addAirportsToCeMap();
+  // Entry-point pins (air + rail + sea + bus) are now planted on _ceMap at
+  // map-init time via _ensureEntryPointsForRegion. We no longer call the
+  // airports-only _addAirportsToCeMap here — it was shadowing the mixed-mode
+  // system and making the map read as airports-only.
   if(bounds.length>1) setTimeout(function(){try{_ceMap.fitBounds(bounds,{padding:[28,28]});}catch(e){}},150);
   updateCEShortlist();
   showCandidateDisclaimer();
