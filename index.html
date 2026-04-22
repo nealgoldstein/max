@@ -6126,6 +6126,7 @@ function showCandidateExplorer(cands, editMode){
     +'</div>'
     +'<div class="ce-footer">'
     +'<span style="font-size:10px;color:#888;" id="ce-cnt">0 kept</span>'
+    +'<button id="ce-ep-toggle" onclick="_tbToggleEntryPoints()" style="font-size:10px;padding:4px 9px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#444;margin-left:10px;">Hide entry points</button>'
     +(_ceEditMode
       ? '<button class="ce-build-btn" id="ce-build-btn" disabled onclick="applyCandidateChanges()">Apply changes \u2192</button>'
       : '<button class="ce-build-btn" id="ce-build-btn" onclick="closePlacesOverlay()">Close</button>')
@@ -6167,6 +6168,9 @@ function showCandidateExplorer(cands, editMode){
       })(_tb.region);
     }
     L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:19}).addTo(_ceMap);
+    // Drop entry-point pins on the big map (airports, rail, sea, bus) so users
+    // can pick where to arrive/depart once they see the region.
+    if (_tb && _tb.region) _ensureEntryPointsForRegion(_tb.region);
     if(cands) {
       renderCandidateCards(cands);
       // Show notice if discovery candidates failed to load
@@ -6299,13 +6303,21 @@ async function fetchRegionEntryPoints(region){
   if (_epCache[region]) return _epCache[region];
   if (_epLoading[region]) return [];
   _epLoading[region] = true;
-  var prompt = "List the major entry points to " + region + " that an international traveler might use. Include:\n"
-    + "- airports (international gateway airports, with IATA codes)\n"
-    + "- rail stations that handle cross-border or major long-distance trains\n"
-    + "- sea ports used by ferries or cruise ships\n"
-    + "- long-distance bus terminals\n\n"
-    + "Limit to the 8\u201315 most significant entry points overall \u2014 not every regional airport or station. Return strict JSON: {\"points\":[{\"id\":\"unique-slug\",\"name\":\"Zurich Airport (ZRH)\",\"type\":\"air|rail|sea|bus\",\"city\":\"Zurich\",\"country\":\"Switzerland\",\"lat\":47.4647,\"lon\":8.5492,\"notes\":\"Main international gateway; hub for Swiss.\"}]}.\n"
-    + "Lat/lon must be accurate. Notes should be one short sentence about why this entry point matters.";
+  var prompt = "List the major entry points an international traveler might use to arrive in or depart from " + region + ". "
+    + "Think like a seasoned traveler, not an airline marketer: for many regions, trains or ferries are the realistic way in, not just flights.\n\n"
+    + "Cover ALL of these categories that genuinely apply to this region:\n"
+    + "- air: international gateway airports (include IATA code in the name)\n"
+    + "- rail: stations that handle cross-border high-speed trains, overnight sleepers, or the main domestic long-distance trunk (e.g. Eurostar, TGV, ICE, Frecciarossa, Nightjet, Shinkansen terminals)\n"
+    + "- sea: ferry terminals and cruise ports that carry real passenger volume (e.g. Dover, Piraeus, Patras, Stockholm, Helsinki)\n"
+    + "- bus: long-distance international/intercity bus terminals if they matter for this region (FlixBus hubs, cross-border terminals)\n\n"
+    + "HARD REQUIREMENTS:\n"
+    + "- Do NOT return airports only. If the region has meaningful rail entry (most of Europe, Japan, UK), include at least 3\u20135 rail stations.\n"
+    + "- If the region is island-connected or coastal with real ferry traffic, include at least 2 sea ports.\n"
+    + "- Skip categories that genuinely don't apply (e.g. no sea ports for landlocked Switzerland\u2014don't invent).\n"
+    + "- Aim for 10\u201318 entry points total, balanced across applicable modes.\n"
+    + "- Pick the ones a thoughtful traveler actually uses, not every regional airstrip.\n\n"
+    + "Return strict JSON: {\"points\":[{\"id\":\"unique-slug\",\"name\":\"Zurich Airport (ZRH)\",\"type\":\"air|rail|sea|bus\",\"city\":\"Zurich\",\"country\":\"Switzerland\",\"lat\":47.4647,\"lon\":8.5492,\"notes\":\"Main international gateway; hub for Swiss.\"}]}.\n"
+    + "Lat/lon must be accurate. Notes: one short sentence on why this entry point matters (what it connects to, what it's best for).";
   try {
     var resp = await callMax([{role:"user",content:prompt}], 3000, 30000);
     var text = resp && resp.content && resp.content[0] && resp.content[0].text ? resp.content[0].text : "";
@@ -6329,21 +6341,34 @@ function _tbUseEntryPoint(isEntry, name){
   _tbPlacesReRender();
 }
 
-function _renderEntryPointMap(region){
-  var host = document.getElementById("td-entry-map");
-  if (!host) return;
-  if (_edMap) { try { _edMap.remove(); } catch(e){} _edMap = null; _edMarkers = []; }
-  _edMap = L.map("td-entry-map",{zoomControl:true,scrollWheelZoom:false,attributionControl:false}).setView([30,0],2);
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:19}).addTo(_edMap);
-  var pts = _epCache[region] || [];
-  if (!pts.length) return;
-  var bounds = [];
+// Plant entry-point markers on the BIG candidate map (_ceMap). These live
+// alongside candidate pins so the user sees where they could enter in the
+// same geographic context as where they want to go. Show/hide via the
+// _tbEntryPointsVisible flag.
+var _tbEntryPointsVisible = true;
+
+function _tbToggleEntryPoints(){
+  _tbEntryPointsVisible = !_tbEntryPointsVisible;
+  _renderEntryPointsOnCeMap(_tb.region || "");
+  var btn = document.getElementById("ce-ep-toggle");
+  if (btn) btn.textContent = _tbEntryPointsVisible ? "Hide entry points" : "Show entry points";
+}
+
+function _renderEntryPointsOnCeMap(region){
+  if (!_ceMap) return;
+  // Clear existing entry markers
+  _edMarkers.forEach(function(rec){ if (rec.marker && _ceMap) { try { _ceMap.removeLayer(rec.marker); } catch(e){} } });
+  _edMarkers = [];
+  if (!_tbEntryPointsVisible) return;
+  var pts = (region && _epCache[region]) || [];
   pts.forEach(function(p){
-    var m = L.marker([p.lat, p.lon], {icon: _epIconFor(p.type)}).addTo(_edMap);
-    var safeName = (p.name||"").replace(/'/g,"\\'").replace(/"/g,'&quot;');
+    var m = L.marker([p.lat, p.lon], {icon: _epIconFor(p.type), zIndexOffset: 500}).addTo(_ceMap);
+    var safeName = (p.name||"").replace(/\\/g,"\\\\").replace(/"/g,'&quot;').replace(/'/g,"\\'");
     var notes = p.notes ? '<div style="font-size:10px;color:#666;margin-top:4px;line-height:1.45;">'+p.notes.replace(/</g,"&lt;")+'</div>' : '';
+    var typeLabel = {air:"Airport", rail:"Rail station", sea:"Port", bus:"Bus terminal"}[p.type] || "Entry point";
     m.bindPopup(
        '<div style="font-size:12px;font-weight:600;color:#111;">'+(p.name||"").replace(/</g,"&lt;")+'</div>'
+      +'<div style="font-size:9px;color:#aaa;text-transform:uppercase;letter-spacing:.05em;margin-top:1px;">'+typeLabel+'</div>'
       +notes
       +'<div style="display:flex;gap:4px;margin-top:6px;">'
       +  '<button onclick="_tbUseEntryPoint(true,&quot;'+safeName+'&quot;)" style="font-size:10px;padding:4px 8px;background:#111;color:#fff;border:none;border-radius:4px;cursor:pointer;font-family:inherit;">Set as entry</button>'
@@ -6353,14 +6378,23 @@ function _renderEntryPointMap(region){
     m.on("popupopen", function(){ _edActivePopupId = p.id || p.name; });
     m.on("popupclose", function(){ if (_edActivePopupId === (p.id||p.name)) _edActivePopupId = null; });
     _edMarkers.push({ep:p, marker:m});
-    bounds.push([p.lat, p.lon]);
     if (_edActivePopupId && (p.id||p.name) === _edActivePopupId) {
       setTimeout(function(){ try { m.openPopup(); } catch(e){} }, 50);
     }
   });
-  if (bounds.length) _edMap.fitBounds(bounds, {padding:[16,16], maxZoom:7});
-  // Leaflet sometimes needs a nudge after the container is sized
-  setTimeout(function(){ try { _edMap.invalidateSize(); } catch(e){} }, 60);
+}
+
+// Called after _ceMap is built; fetches entry points if needed, then plants
+// markers. Safe to call repeatedly \u2014 it de-dupes and noops without _ceMap.
+function _ensureEntryPointsForRegion(region){
+  if (!region || !_ceMap) return;
+  if (_epCache[region]) {
+    _renderEntryPointsOnCeMap(region);
+  } else if (!_epLoading[region]) {
+    fetchRegionEntryPoints(region).then(function(){
+      if (_ceMap && _tb.region === region) _renderEntryPointsOnCeMap(region);
+    });
+  }
 }
 
 // Mode pills rendered inside the Trip Details strip. These call
@@ -6479,19 +6513,8 @@ function _renderTripDetailsStrip(kept){
   var defaultEntry = _tb.entry || (kept[0] && kept[0].place) || "";
   var defaultExit  = _tb.tbExit || (kept[kept.length-1] && kept[kept.length-1].place) || "";
   var defaultDate  = (typeof parseStartDateFromBrief === "function") ? parseStartDateFromBrief(_tb.when||"") : "";
-  var region = _tb.region || "";
-  var hasPts = region && _epCache[region] && _epCache[region].length;
-  var isLoading = region && _epLoading[region];
-  var mapBlock = ''
-    + '<div style="margin-bottom:10px;">'
-    +   '<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px;">'
-    +     '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#888;">Major entry points</div>'
-    +     '<div style="font-size:10px;color:#aaa;">'+(isLoading?"Loading\u2026": (hasPts?"Tap a pin to set entry or exit":""))+'</div>'
-    +   '</div>'
-    +   '<div id="td-entry-map" style="height:200px;width:100%;border:1px solid #e8e8e8;border-radius:6px;background:#eef1f3;"></div>'
-    + '</div>';
-  form.innerHTML = mapBlock
-    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 12px;">'
+  form.innerHTML =
+     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 12px;">'
     +'<div>'
     +  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#888;margin-bottom:6px;">Getting there</div>'
     +  '<label style="display:block;font-size:10px;color:#666;margin-bottom:3px;">How</label>'
@@ -6552,24 +6575,6 @@ function _renderTripDetailsStrip(kept){
     bind("td-depDate", "departureDate");
     bind("td-depTime", "departureTime");
     bind("td-depNum",  "departureNumber");
-
-    // Entry-point map: render what we have, fetch if cache miss.
-    var r = _tb.region || "";
-    if (r) {
-      if (_epCache[r]) {
-        _renderEntryPointMap(r);
-      } else if (!_epLoading[r]) {
-        // Show empty basemap while loading so the user sees something\u2019s happening
-        _renderEntryPointMap(r);
-        fetchRegionEntryPoints(r).then(function(){
-          // Only re-render if the strip is still open and same region
-          var stillHost = document.getElementById("td-entry-map");
-          if (stillHost && _tb.region === r) _renderEntryPointMap(r);
-        });
-      } else {
-        _renderEntryPointMap(r); // another caller already fetching \u2014 render empty basemap
-      }
-    }
   }, 10);
 
   return box;
