@@ -1002,7 +1002,7 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
       </div>
       <div style="display:flex;gap:5px;align-items:center;flex-shrink:0;">
         <button class="file-btn" onclick="goHome()" title="All trips">&larr; Home</button>
-        <button class="file-btn" onclick="editConstraints()" title="Edit how you travel">&#9998; Constraints</button>
+        <button class="file-btn" onclick="editConstraints()" title="Edit trip parameters">&#9998; Parameters</button>
         <button class="file-btn" onclick="saveTrip()" title="Save">Save</button>
         <button class="file-btn" id="api-key-btn" onclick="showApiKeyForm()" title="Set API key" style="opacity:0.6;">&#x1F511;</button>
       </div>
@@ -4075,7 +4075,7 @@ function renderTripStep1Place(){
     +listHtml
     +'</div>'
     +'<div class="tb-footer">'
-    +(hasGenerated?'<button class="tb-btn-primary" id="tb-place-continue-btn" onclick="continuePlaceModeToStep2()">Continue to constraints \u2192</button>':'')
+    +(hasGenerated?'<button class="tb-btn-primary" id="tb-place-continue-btn" onclick="continuePlaceModeToStep2()">Continue to parameters \u2192</button>':'')
     +'<div style="display:flex;justify-content:space-between;margin-top:8px;">'
     +'<div class="tb-btn-back" onclick="renderTripModeSelector()">\u2190 Back</div>'
     +'<div style="font-size:10px;color:#aaa;cursor:pointer;" onclick="showBriefApiKeyForm()">\ud83d\udd11 Set API key</div>'
@@ -4330,7 +4330,7 @@ function renderTripStep1Activity(){
     +listHtml
     +'</div>'
     +'<div class="tb-footer">'
-    +(hasGenerated?'<button class="tb-btn-primary" id="tb-activity-continue-btn" onclick="continueActivityModeToStep2()">Continue to constraints \u2192</button>':'')
+    +(hasGenerated?'<button class="tb-btn-primary" id="tb-activity-continue-btn" onclick="continueActivityModeToStep2()">Continue to parameters \u2192</button>':'')
     +'<div style="display:flex;justify-content:space-between;margin-top:8px;">'
     +'<div class="tb-btn-back" onclick="renderTripModeSelector()">\u2190 Back</div>'
     +'<div style="font-size:10px;color:#aaa;cursor:pointer;" onclick="showBriefApiKeyForm()">\ud83d\udd11 Set API key</div>'
@@ -5484,7 +5484,7 @@ function renderTripBriefEdit(){
   ov.style.cssText="position:fixed;inset:0;background:#f7f7f5;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
   setTimeout(function(){ ov.scrollTop = _preserve ? _prevScroll : 0; attachScrollHint(ov); }, 0);
   ov.innerHTML='<div class="tb-header">'
-    +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Edit constraints</div></div></div>'
+    +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Edit parameters</div></div></div>'
     +'<div class="tb-title">How you travel</div>'
     +'<div class="tb-sub">Make changes below. Max will show you what needs to be revisited before anything is applied.</div>'
     +'</div>'
@@ -5705,7 +5705,7 @@ function applyConstraintChanges(){
   }
 
   autoSave();
-  showSaveStatus("Constraints updated", 3000);
+  showSaveStatus("Parameters updated", 3000);
 }
 
 // Re-run orderKeptCandidates against the current trip's destinations + _tb entry/exit,
@@ -6140,7 +6140,7 @@ function showCandidateExplorer(cands, editMode){
     +'<button id="ce-ep-toggle" onclick="_tbToggleEntryPoints()" style="font-size:10px;padding:4px 9px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#444;margin-left:10px;">Hide entry points</button>'
     +(_ceEditMode
       ? '<button class="ce-build-btn" id="ce-build-btn" disabled onclick="applyCandidateChanges()">Apply changes \u2192</button>'
-      : '<button class="ce-build-btn" id="ce-build-btn" onclick="closePlacesOverlay()">Close</button>')
+      : '<button class="ce-build-btn" id="ce-build-btn" onclick="closePlacesOverlay()">Create a plan \u2192</button>')
     +'</div>';
   setTimeout(function(){
     // Fix flex height collapse before map init
@@ -6361,8 +6361,18 @@ async function fetchRegionEntryPoints(region){
 }
 
 function _tbUseEntryPoint(isEntry, name){
+  // Update state
   if (isEntry) _tb.entry = name; else _tb.tbExit = name;
   _tbPlacesCaptureFields();
+  // Close the open popup so the user can see the map update, and give them
+  // clear feedback — the collapsed trip-details strip was too subtle and the
+  // popup covers it. Also auto-expand the strip on first use so the change is
+  // visible without them hunting for it.
+  try { if (_ceMap) _ceMap.closePopup(); } catch(e){}
+  _tripDetailsExpanded = true;
+  if (typeof showSaveStatus === "function") {
+    showSaveStatus((isEntry?"Entry":"Exit") + " set to " + name, 2200);
+  }
   _tbPlacesReRender();
 }
 
@@ -6793,14 +6803,12 @@ function renderCandidateCards(cands){
   var headerLabel = document.createElement("div");
   headerLabel.style.cssText = "font-size:11px;color:#555;line-height:1.6;margin-bottom:6px;";
   if (!kept.length) {
-    headerLabel.innerHTML = '<em>Nothing kept yet \u2014 pick at least one place below to build a trip.</em>';
+    headerLabel.innerHTML = '<em>Pick at least one place to build a trip.</em>';
   } else {
     var timeClause = _dayRangeStr
-      ? 'At your pace, it\u2019ll take about <strong style="color:#111;">' + _dayRangeStr + '</strong>. '
+      ? '\u00b7 roughly <strong style="color:#111;">' + _dayRangeStr + '</strong>'
       : '';
-    headerLabel.innerHTML = 'Here\u2019s an itinerary that will take you to the places where you can do what you want to do. '
-      + timeClause
-      + 'Now it\u2019s time to make some decisions.';
+    headerLabel.innerHTML = kept.length + ' place' + (kept.length!==1?'s':'') + ' kept ' + timeClause;
   }
   headerWrap.appendChild(headerLabel);
   if (kept.length) {
@@ -7206,15 +7214,24 @@ function renderCandidateCards(cands){
       _ceRejectedExpanded = !_ceRejectedExpanded;
       rejList.style.display = _ceRejectedExpanded?"block":"none";
       rejToggle.innerHTML = '<span>'+(_ceRejectedExpanded?"\u25BE":"\u25B8")+'  '+rejectedCands.length+' rejected</span>'+hint;
-      // Scroll the first rejected card into view so the user sees their options
-      if (_ceRejectedExpanded) {
-        setTimeout(function(){
-          var first = rejList.firstElementChild;
-          if (first && first.scrollIntoView) first.scrollIntoView({behavior:"smooth",block:"start"});
-        }, 50);
-      }
     };
-    rejectedCands.forEach(function(c){ renderCard(c, rejList); });
+    // Simple bullet list (not full cards) — one line per place with a restore link
+    rejList.style.cssText += "padding:4px 8px;background:#fafafa;border-radius:5px;";
+    rejectedCands.forEach(function(c){
+      var row = document.createElement("div");
+      row.style.cssText = "display:flex;align-items:center;justify-content:space-between;padding:4px 0;font-size:11px;color:#555;border-bottom:1px dotted #eee;";
+      var label = document.createElement("span");
+      label.innerHTML = '<strong style="color:#333;">'+c.place+'</strong>'
+        + (c.country?' <span style="color:#999;">\u00b7 '+c.country+'</span>':'')
+        + (c.role?' <span style="color:#aaa;">\u00b7 '+c.role+'</span>':'');
+      var btn = document.createElement("button");
+      btn.textContent = "Restore";
+      btn.style.cssText = "font-size:10px;padding:2px 8px;border:1px solid #cfd8e3;border-radius:4px;background:#fff;color:#1a5fa8;cursor:pointer;font-family:inherit;";
+      btn.onclick = function(){ setCS(c.id, "reject"); };
+      row.appendChild(label);
+      row.appendChild(btn);
+      rejList.appendChild(row);
+    });
     rejWrap.appendChild(rejToggle);
     rejWrap.appendChild(rejList);
     el.appendChild(rejWrap);
@@ -8602,11 +8619,9 @@ function rebalanceNights(){
 function showShortlistBanner(kept){
   var lpc=g("lp-content"); if(!lpc) return;
   var b=document.createElement("div");
-  b.style.cssText="background:#f0f5ff;border:1px solid #c8d8f0;border-radius:7px;padding:11px 13px;margin-bottom:10px;font-size:11px;line-height:1.7;";
-  b.innerHTML='<div style="font-weight:700;color:#1a5fa8;margin-bottom:4px;">\u2713 Your picks \u2014 '+kept.length+' places</div>'
-    +'<div style="font-size:10px;color:#888;margin-bottom:6px;line-height:1.5;padding:5px 8px;background:#fff;border-radius:4px;border-left:2px solid #c8d8f0;">This is a starting structure, not a script. Dates and order will need refining once you decide how you\u2019re arriving and what\u2019s fixed.</div>'
-    +kept.map(function(c){return '<div><strong>'+c.place+'</strong> \u00b7 '+c.role+' \u00b7 '+c.stayRange+'</div>';}).join("")
-    +'<div style="color:#888;font-size:10px;margin-top:5px;">Add each destination below with your dates to build the trip.</div>'
+  b.style.cssText="background:#f0f5ff;border:1px solid #c8d8f0;border-radius:7px;padding:9px 11px;margin-bottom:10px;font-size:11px;line-height:1.6;";
+  b.innerHTML='<div style="font-weight:700;color:#1a5fa8;margin-bottom:4px;">\u2713 '+kept.length+' places \u2014 draft schedule below.</div>'
+    +'<div style="color:#666;font-size:10px;">Open Parameters to adjust dates.</div>'
     +'<button style="margin-top:6px;font-size:10px;padding:2px 8px;border:1px solid #aac4e8;border-radius:4px;background:#fff;color:#1a5fa8;cursor:pointer;font-family:inherit;" onclick="this.parentNode.remove()">Dismiss</button>';
   lpc.insertBefore(b,lpc.firstChild);
 }
@@ -8998,8 +9013,13 @@ async function generateCityData(place,destId){
       updateMainMap();
       setTimeout(function(){if(_mainMap)_mainMap.invalidateSize();},100);
     } else if(_leftMode==='trip'){
-      // Re-render trip view so "Max is generating data..." label clears on the card
+      // Preserve scroll position across the re-render so the user isn't jerked
+      // around each time a destination's generation finishes.
+      var _lpc = g("lp-content");
+      var _prevScroll = _lpc ? _lpc.scrollTop : 0;
       drawTripMode();
+      var _lpc2 = g("lp-content");
+      if (_lpc2) _lpc2.scrollTop = _prevScroll;
       updateMainMap();
     } else {
       updateMainMap();
@@ -11592,11 +11612,11 @@ function drawTripMode(){
     if (over) {
       banner.style.cssText = "margin:6px 2px 10px;padding:10px 12px;background:#fff3ed;border:1px solid #f5ccb5;border-radius:7px;font-size:11px;line-height:1.55;";
       banner.innerHTML = '<strong style="color:#b0451a;">Your trip is '+totalDays+' days \u2014 '+ (totalDays - budget.max) +' over your '+tripStr+' budget.</strong>'
-        + '<br><span style="color:#555;">Open Edit destinations to drop a place, or open Constraints to adjust.</span>';
+        + '<br><span style="color:#555;">Open Parameters to adjust dates.</span>';
     } else {
       banner.style.cssText = "margin:6px 2px 10px;padding:10px 12px;background:#f0f8f2;border:1px solid #c6e0ce;border-radius:7px;font-size:11px;line-height:1.55;";
       banner.innerHTML = '<strong style="color:#2a6b3e;">Your trip is '+totalDays+' days \u2014 '+(budget.min - totalDays)+' under your '+tripStr+' budget.</strong>'
-        + '<br><span style="color:#555;">Room to add a place or extend a stay. Edit destinations or adjust Constraints.</span>';
+        + '<br><span style="color:#555;">Open Parameters to adjust dates.</span>';
     }
     c.appendChild(banner);
   })();
