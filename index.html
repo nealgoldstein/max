@@ -5971,19 +5971,21 @@ function closePlacesOverlay(){
     if (c.status !== "reject" && c.status !== "keep") c.status = "keep";
   });
   var kept = cands.filter(function(c){return c.status==="keep";});
+  g("candidate-explorer-overlay").style.display="none";
+  if(_ceMap){_ceMap.remove();_ceMap=null;} if(_edMap){try{_edMap.remove();}catch(e){}_edMap=null;_edMarkers=[];}
   if (!kept.length) {
-    g("candidate-explorer-overlay").style.display="none";
-    if(_ceMap){_ceMap.remove();_ceMap=null;} if(_edMap){try{_edMap.remove();}catch(e){}_edMap=null;_edMarkers=[];}
+    // Nothing to build — stay where we are and let the user reconsider.
     return;
   }
-  if (!trip) {
-    buildFromCandidates();
-  } else {
-    g("candidate-explorer-overlay").style.display="none";
-    if(_ceMap){_ceMap.remove();_ceMap=null;} if(_edMap){try{_edMap.remove();}catch(e){}_edMap=null;_edMarkers=[];}
-    if (typeof drawTripMode === "function") drawTripMode();
-    if (typeof updateMainMap === "function") updateMainMap();
-  }
+  // Always materialize the picks into a trip and enter the plan view.
+  // Previously, if a prior trip existed in memory (e.g. from localStorage
+  // hydration), we took an `else` branch that called drawTripMode() without
+  // enterApp() — so home-screen was still mounted underneath and the user
+  // got dropped back to home instead of the schedule. The fix: always go
+  // through buildFromCandidates(), which runs the Max bridge, calls
+  // enterApp() (hides home, shows the app shell), and then drawTripMode()
+  // to render the schedule.
+  buildFromCandidates();
 }
 
 // Reconcile the Explorer's kept set against the existing trip.destinations.
@@ -6328,16 +6330,30 @@ async function fetchRegionEntryPoints(region){
     + "Return strict JSON: {\"points\":[{\"id\":\"unique-slug\",\"name\":\"Zurich Airport (ZRH)\",\"type\":\"air|rail|sea|bus\",\"city\":\"Zurich\",\"country\":\"Switzerland\",\"lat\":47.4647,\"lon\":8.5492,\"notes\":\"Main international gateway; hub for Swiss.\"}]}.\n"
     + "Lat/lon must be accurate. Notes: one short sentence on why this entry point matters (what it connects to, what it's best for).";
   try {
-    var resp = await callMax([{role:"user",content:prompt}], 3000, 30000);
-    var text = resp && resp.content && resp.content[0] && resp.content[0].text ? resp.content[0].text : "";
+    // callMax returns the assistant text directly (not the raw API response).
+    // Earlier versions of this code treated it as { content:[{text}] } which
+    // silently made `text` empty every time — and cached [], so no pins.
+    var text = await callMax([{role:"user",content:prompt}], 3000, 30000);
+    if (typeof text !== "string") text = String(text||"");
+    text = text.replace(/```json|```/g, "").trim();
     var m = text.match(/\{[\s\S]*\}/);
-    if (!m) throw new Error("no JSON");
+    if (!m) throw new Error("no JSON in entry-points response");
     var parsed = JSON.parse(m[0]);
-    var pts = Array.isArray(parsed.points) ? parsed.points.filter(function(p){ return p && p.lat && p.lon && p.name; }) : [];
+    var pts = Array.isArray(parsed.points)
+      ? parsed.points.filter(function(p){
+          // Accept lon or lng — models return either. Normalize to lon since
+          // that's what _renderEntryPointsOnCeMap reads.
+          if (p && p.lng != null && p.lon == null) p.lon = p.lng;
+          return p && p.name && isFinite(p.lat) && isFinite(p.lon);
+        })
+      : [];
     _epCache[region] = pts;
     _epLoading[region] = false;
+    console.log("[Max] entry points for", region, "→", pts.length, "pins",
+      pts.reduce(function(acc,p){acc[p.type]=(acc[p.type]||0)+1;return acc;}, {}));
     return pts;
   } catch (e) {
+    console.warn("[Max] fetchRegionEntryPoints failed for", region, "—", e && e.message);
     _epLoading[region] = false;
     _epCache[region] = []; // cache empty to avoid infinite retries
     return [];
