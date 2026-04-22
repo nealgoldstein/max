@@ -4267,9 +4267,12 @@ function continuePlaceModeToStep2(){
 // picks the places that earn a spot. Picked places become _tb.requiredPlaces
 // and the activities become _mdcItems so the expandMustDos shortcut fires.
 var _tbActivityChipOptions = [
-  "hike","mountains","beach","museums","food","wine","history","architecture",
-  "wildlife","scenic trains","road trip","cities","small towns","islands",
-  "ruins","nightlife","diving","skiing","hot springs","art"
+  "history","museums","art","scenic trains","hike","mountains","architecture",
+  "food","meet locals","small towns","wildlife","markets","street food","wine",
+  "cities","gardens","cooking class","road trip","festivals","live music","islands",
+  "ruins","aurora","stargazing","pilgrimage","cycling","sailing","kayaking",
+  "film locations","birdwatching","hot springs","wellness","yoga","skiing",
+  "diving","beach","nightlife","watch sport","play sport","visit friends"
 ];
 
 function renderTripStep1Activity(){
@@ -4575,7 +4578,7 @@ function renderTripStep1Recognition(){
   // Activity chips — what the user naturally does, anywhere. Presets plus
   // whatever custom ones they've added (which live in _tb.chips alongside
   // the presets; the ones not in the preset list get an × to remove).
-  var chips = ["see great art & museums","dig into history","eat and drink well","hike in nature","explore architecture","enjoy nightlife & music","get to the beach","get into the mountains","see spectacular scenery","visit magnificent gardens","explore small towns","slow down & recharge","take great photos","do something adventurous"];
+  var chips = ["dig into history","see great art & museums","see spectacular scenery","ride iconic trains","hike in nature","get into the mountains","explore architecture","eat and drink well","meet locals","explore small towns","see wildlife","wander markets & street food","take a cooking class or workshop","visit magnificent gardens","catch live music or a festival","follow a literary or film trail","take great photos","chase dark skies & aurora","make a pilgrimage","get out on the water","cycle somewhere","slow down & recharge","do something adventurous","retreat, rest, heal","get to the beach","enjoy nightlife & music","watch or play a sport","visit friends or family"];
   var selectedChips = _tb.chips || [];
   var presetSet = {}; chips.forEach(function(c){presetSet[c]=true;});
   var presetChipsHtml = chips.map(function(c){
@@ -5070,7 +5073,7 @@ function _tbOnDateChange(which){
 // the prompt and trip.brief snapshot can include them verbatim.
 var _tbTransportModes = [
   {id:"fly",    label:"Fly"},
-  {id:"drive",  label:"Drive"},
+  {id:"drive",  label:"Car"},
   {id:"train",  label:"Train"},
   {id:"public", label:"Public transport"},
   {id:"none",   label:"Won\u2019t travel"}
@@ -5087,20 +5090,23 @@ function _tbModePillsHtml(which){
 }
 
 function _tbPickMode(which, id){
-  _tb[which] = id;
-  // Re-render whichever brief we're in so the pill state refreshes. Preserve
-  // any in-flight inputs first.
-  if (_tb._editMode) {
-    // Capture in-flight values before re-render
-    var e1 = document.getElementById("tb-gettingTo"); if (e1) _tb.gettingTo = e1.value.trim();
-    var e2 = document.getElementById("tb-entry"); if (e2) _tb.entry = e2.value.trim();
-    var e3 = document.getElementById("tb-gettingOut"); if (e3) _tb.gettingOut = e3.value.trim();
-    var e4 = document.getElementById("tb-exit"); if (e4) _tb.tbExit = e4.value.trim();
-    _tbCaptureDates();
-    _tbCaptureParty();
-    _tbCaptureAvoid();
-    renderTripBriefEdit();
-  }
+  // Toggle off if user taps the already-selected mode
+  _tb[which] = (_tb[which] === id) ? "" : id;
+  // Capture every in-flight input before re-render so nothing gets wiped
+  var ids = ["tb-gettingTo","tb-entry","tb-gettingOut","tb-exit","tb-transport",
+             "tb-accommodation","tb-pace","tb-compromises","tb-hardlimits","tb-region"];
+  var keys = {"tb-gettingTo":"gettingTo","tb-entry":"entry","tb-gettingOut":"gettingOut",
+              "tb-exit":"tbExit","tb-transport":"transport","tb-accommodation":"accommodation",
+              "tb-pace":"pace","tb-compromises":"compromises","tb-hardlimits":"hardlimits",
+              "tb-region":"region"};
+  ids.forEach(function(domId){
+    var el = document.getElementById(domId);
+    if (el) _tb[keys[domId]] = el.value.trim();
+  });
+  _tbCaptureDates();
+  _tbCaptureParty();
+  _tbCaptureAvoid();
+  if (_tb._editMode) renderTripBriefEdit(); else renderTripBrief();
 }
 
 function _tbEntryExitFieldsHtml(){
@@ -5114,8 +5120,8 @@ function _tbEntryExitFieldsHtml(){
     +(_tb.entryInferred ? '<div style="font-size:10px;color:#888;margin-bottom:6px;font-style:italic;">\u2728 Max suggested this starting point. Edit to set your actual arrival.</div>' : '')
     +'<input id="tb-gettingTo" value="'+(_tb.gettingTo||'').replace(/"/g,'&quot;')+'" placeholder="Optional: booked flight/train #, date, notes" />'
     +'<div style="display:flex;gap:5px;margin-top:6px;">'
-    +'<span class="tb-toggle'+(_tb.entryFixed?' on':'')+'" onclick="_tb.entryFixed=true;renderTripBriefEdit();">Booked / fixed</span>'
-    +'<span class="tb-toggle'+(!_tb.entryFixed?' on':'')+'" onclick="_tb.entryFixed=false;renderTripBriefEdit();">Still flexible</span>'
+    +'<span class="tb-toggle'+(_tb.entryFixed?' on':'')+'" onclick="_tbSetFixed(&#39;entry&#39;,true)">Booked / fixed</span>'
+    +'<span class="tb-toggle'+(!_tb.entryFixed?' on':'')+'" onclick="_tbSetFixed(&#39;entry&#39;,false)">Still flexible</span>'
     +'</div>'
     +'</div>'
     +'<div class="tb-field"><label>'+outLabel+'</label>'
@@ -5124,10 +5130,45 @@ function _tbEntryExitFieldsHtml(){
     +'<input id="tb-exit" value="'+(_tb.tbExit||'').replace(/"/g,'&quot;')+'" placeholder="Last city or airport \u2014 e.g. Geneva, GVA" style="margin-bottom:6px;" />'
     +'<input id="tb-gettingOut" value="'+(_tb.gettingOut||'').replace(/"/g,'&quot;')+'" placeholder="Optional: booked flight/train #, date, notes" />'
     +'<div style="display:flex;gap:5px;margin-top:6px;">'
-    +'<span class="tb-toggle'+(_tb.exitFixed?' on':'')+'" onclick="_tb.exitFixed=true;renderTripBriefEdit();">Booked / fixed</span>'
-    +'<span class="tb-toggle'+(!_tb.exitFixed?' on':'')+'" onclick="_tb.exitFixed=false;renderTripBriefEdit();">Still flexible</span>'
+    +'<span class="tb-toggle'+(_tb.exitFixed?' on':'')+'" onclick="_tbSetFixed(&#39;exit&#39;,true)">Booked / fixed</span>'
+    +'<span class="tb-toggle'+(!_tb.exitFixed?' on':'')+'" onclick="_tbSetFixed(&#39;exit&#39;,false)">Still flexible</span>'
     +'</div>'
     +'</div>';
+}
+
+// Compact version used on Step 2 — just the mode pills (fly/car/train/public/none)
+// for entry and exit. Specific cities get decided on the Places overlay once the
+// user has seen which candidates they\u2019re keeping.
+function _tbEntryExitModesOnlyHtml(){
+  return ''
+    +'<div class="tb-field" style="margin-top:20px;"><label>How you\u2019re arriving</label>'
+    +'<div style="font-size:10px;color:#888;margin-top:2px;margin-bottom:4px;">The specific city comes after you\u2019ve picked places \u2014 it\u2019ll be clearer then.</div>'
+    + _tbModePillsHtml("entryMode")
+    +'</div>'
+    +'<div class="tb-field"><label>How you\u2019re leaving</label>'
+    +'<div style="font-size:10px;color:#888;margin-top:2px;margin-bottom:4px;">Entry and exit can differ \u2014 that\u2019s fine, and shapes the direction.</div>'
+    + _tbModePillsHtml("exitMode")
+    +'</div>';
+}
+
+function _tbSetFixed(side, val){
+  if (side === "entry") _tb.entryFixed = !!val;
+  else _tb.exitFixed = !!val;
+  // Same in-flight capture as _tbPickMode so switching doesn't wipe typed text
+  var ids = ["tb-gettingTo","tb-entry","tb-gettingOut","tb-exit","tb-transport",
+             "tb-accommodation","tb-pace","tb-compromises","tb-hardlimits","tb-region"];
+  var keys = {"tb-gettingTo":"gettingTo","tb-entry":"entry","tb-gettingOut":"gettingOut",
+              "tb-exit":"tbExit","tb-transport":"transport","tb-accommodation":"accommodation",
+              "tb-pace":"pace","tb-compromises":"compromises","tb-hardlimits":"hardlimits",
+              "tb-region":"region"};
+  ids.forEach(function(domId){
+    var el = document.getElementById(domId);
+    if (el) _tb[keys[domId]] = el.value.trim();
+  });
+  _tbCaptureDates();
+  _tbCaptureParty();
+  _tbCaptureAvoid();
+  if (_tb._editMode) renderTripBriefEdit(); else renderTripBrief();
 }
 
 function _tbEntryExitSummary(){
@@ -5192,9 +5233,9 @@ function renderTripBrief(){
     + _tbSectionHead("When & how long")
     + _tbDatesFieldHtml()
 
-    // D — Getting in / out, + transport within
-    + _tbSectionHead("In, out, and moving around", "Arrival and departure can differ \u2014 how they differ shapes the direction of the trip.")
-    + _tbEntryExitFieldsHtml()
+    // D — Getting in / out (mode only; cities come after Places), + transport within
+    + _tbSectionHead("In, out, and moving around", "How you arrive and leave shapes the direction of the trip. Specific cities come after you pick places.")
+    + _tbEntryExitModesOnlyHtml()
     +'<div class="tb-field"><label>How you\u2019ll be moving within '+(_tb.region||'the region')+'</label>'
     +'<input id="tb-transport" value="'+(_tb.transport||'').replace(/"/g,'&quot;')+'" placeholder="e.g. Trains and walking. Swiss Travel Pass. Taxi when needed. No rental car." />'
     +'<div style="font-size:10px;color:#aaa;margin-top:3px;">Named passes, rental car, mixed \u2014 whatever fits.</div>'
@@ -5435,8 +5476,8 @@ function renderTripBriefEdit(){
     + _tbSectionHead("When & how long")
     + _tbDatesFieldHtml()
 
-    + _tbSectionHead("In, out, and moving around", "Arrival and departure can differ \u2014 how they differ shapes the direction of the trip.")
-    + _tbEntryExitFieldsHtml()
+    + _tbSectionHead("In, out, and moving around", "How you arrive and leave shapes the direction of the trip. Specific cities come after you pick places.")
+    + _tbEntryExitModesOnlyHtml()
     +'<div class="tb-field"><label>How you\u2019re moving within '+(_tb.region||'the region')+'</label>'
     +'<input id="tb-transport" value="'+(_tb.transport||'').replace(/"/g,'&quot;')+'" placeholder="e.g. Trains and walking. Swiss Travel Pass. No rental car." />'
     +'</div>'
@@ -5900,14 +5941,21 @@ function cancelEditCandidates(){
 // pre-build modal). If a trip already exists, this is just a dismiss.
 function closePlacesOverlay(){
   if (_ceEditMode) { applyCandidateChanges(); return; }
-  var kept = (_tb.candidates||[]).filter(function(c){return c.status==="keep";});
+  // Treat anything not explicitly rejected as kept on close. This matches the
+  // "trip is always definite, always fluid" model from STATE.md — closing the
+  // Places overlay should silently materialize a trip, not dump the user back
+  // to home because they didn't click a bunch of explicit keeps.
+  var cands = _tb.candidates || [];
+  cands.forEach(function(c){
+    if (c.status !== "reject" && c.status !== "keep") c.status = "keep";
+  });
+  var kept = cands.filter(function(c){return c.status==="keep";});
   if (!kept.length) {
     g("candidate-explorer-overlay").style.display="none";
     if(_ceMap){_ceMap.remove();_ceMap=null;}
     return;
   }
   if (!trip) {
-    // First time through — quietly materialize the trip without the modal.
     buildFromCandidates();
   } else {
     g("candidate-explorer-overlay").style.display="none";
@@ -6186,8 +6234,10 @@ async function geocodeMissingCoords(cands){
 
 // Module-level state for the inline trip-details strip. Preserves expand/
 // collapse across re-renders without forcing the user to reopen it after
-// every keep/reject.
-var _tripDetailsExpanded = false;
+// every keep/reject. Starts true — this is where entry/exit cities are
+// decided now (moved out of Step 2 per "where to fly into should be after
+// you select places").
+var _tripDetailsExpanded = true;
 
 // Rebuild the freeform _tb.gettingTo / _tb.gettingOut summary strings from
 // the structured inline fields. The rest of the pipeline (LLM prompts, brief
@@ -6225,7 +6275,7 @@ function _renderTripDetailsStrip(kept){
   summaryRow.appendChild(chev);
   var label = document.createElement("span");
   label.style.cssText = "font-size:10px;color:#999;letter-spacing:0.05em;text-transform:uppercase;font-weight:700;";
-  label.textContent = "Trip details";
+  label.textContent = "Entry & exit";
   summaryRow.appendChild(label);
   if (!_tripDetailsExpanded) {
     var sum = document.createElement("span");
@@ -6240,7 +6290,7 @@ function _renderTripDetailsStrip(kept){
       if (_tb.departureNumber) bits.push(_tb.departureNumber);
       sum.textContent = bits.join(" \u00b7 ");
     } else {
-      sum.innerHTML = '<em style="color:#aaa;">Add arrival, departure, flight numbers (optional)</em>';
+      sum.innerHTML = '<em style="color:#aaa;">Where you\u2019re flying/driving in and out \u2014 click to set</em>';
     }
     summaryRow.appendChild(sum);
   }
