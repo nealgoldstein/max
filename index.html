@@ -1523,12 +1523,50 @@ function makePopup(name,typeLabel,note){
   return '<div class="mp-type">'+typeLabel+'</div><div class="mp-name">'+name+'</div>'+(note?'<div class="mp-note">'+note+'</div>':"");
 }
 
+// Coarse Nominatim geocode cache, keyed by lowercased place name.
+// Used for two things: (1) giving the destination map a sensible center
+// before full city data generation completes, and (2) overriding the LLM's
+// cityCenter when it hallucinates far-off coordinates (Tirano-in-Africa).
+var _coarseGeocode = _coarseGeocode || {};        // place -> [lat,lng]
+var _coarseGeocodeInFlight = _coarseGeocodeInFlight || {};
+function ensureCoarseGeocode(place, onResolve){
+  var key = (place||"").toLowerCase().trim();
+  if (!key) return null;
+  if (_coarseGeocode[key]) { if (onResolve) onResolve(_coarseGeocode[key]); return _coarseGeocode[key]; }
+  if (_coarseGeocodeInFlight[key]) return null;
+  _coarseGeocodeInFlight[key] = true;
+  (async function(){
+    try {
+      // Bias toward the trip's region when we have one — e.g. adding ", Italy" helps
+      // disambiguate "Tirano" from unrelated places and keeps the result in the right country.
+      var region = (typeof trip !== "undefined" && trip && trip.brief && trip.brief.region) ? trip.brief.region
+                  : (typeof _tb !== "undefined" && _tb && _tb.region) ? _tb.region : "";
+      var q = place + (region ? ", " + region : "");
+      var r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(q),
+        { headers: {'Accept-Language':'en'} });
+      var res = await r.json();
+      if (res && res.length) {
+        var lat = parseFloat(res[0].lat), lon = parseFloat(res[0].lon);
+        if (isFinite(lat) && isFinite(lon)) {
+          _coarseGeocode[key] = [lat, lon];
+          if (onResolve) onResolve(_coarseGeocode[key]);
+        }
+      }
+    } catch(e) { /* ignore */ }
+    finally { delete _coarseGeocodeInFlight[key]; }
+  })();
+  return null;
+}
+
 function getCityCenter(place){
   var p=place.toLowerCase();
   if(_generatedCityData[p]&&_generatedCityData[p].cityCenter&&_generatedCityData[p].cityCenter[0])
     return _generatedCityData[p].cityCenter;
-  if(_generatedCityData[p]&&_generatedCityData[p].loading&&!_generatedCityData[p].cityCenter)
-    return null; // still loading with no geocode yet
+  if(_generatedCityData[p]&&_generatedCityData[p].loading&&!_generatedCityData[p].cityCenter){
+    // Still loading with no geocode yet — fall back to coarse Nominatim cache if we have it.
+    if (_coarseGeocode[p]) return _coarseGeocode[p];
+    return null;
+  }
   // For generated cities loaded from storage: derive center from stored suggestion coords
   // Find the destination and average its suggestion coordinates
   var dest=trip.destinations.find(function(d){return d.place.toLowerCase()===p;});
@@ -1547,6 +1585,8 @@ function getCityCenter(place){
       return [avgLat2,avgLng2];
     }
   }
+  // Last resort: the coarse Nominatim cache if populated.
+  if (_coarseGeocode[p]) return _coarseGeocode[p];
   return null;
 }
 
@@ -6206,12 +6246,24 @@ function showCandidateExplorer(cands, editMode){
 // Required stops especially often come back from p1 without real coords because the
 // example JSON shape has lat:0.0,lng:0.0 and models copy it verbatim. Runs in the
 // background after cards render; re-renders once coords land so pins appear.
+//
+// Also: verify candidates that DO have coords but whose coords look suspicious —
+// e.g. a lat/lng swap that drops Tirano (Italy) into the Indian Ocean off Africa.
+// Any candidate whose country is known and whose coord is more than ~300km from
+// the Nominatim result gets corrected.
 var _geocodeInFlight = false;
 async function geocodeMissingCoords(cands){
   if (_geocodeInFlight) return; // one pass at a time
   if (!cands || !cands.length) return;
   var need = cands.filter(function(c){
-    return (!c.lat || c.lat === 0) && !c._geocodeFailed && !c._geocodeTried;
+    if (c._geocodeFailed || c._geocodeVerified) return false;
+    // Always geocode if coords are missing / zero / out-of-range.
+    if (!isFinite(c.lat) || !isFinite(c.lng)) return true;
+    if (!c.lat || c.lat === 0) return true;
+    if (Math.abs(c.lat) > 90 || Math.abs(c.lng) > 180) return true;
+    if (Math.abs(c.lat) < 1 && Math.abs(c.lng) < 1) return true;
+    // Otherwise verify once if we already marked this tried (legacy) but not verified.
+    return !c._geocodeTried;
   });
   if (!need.length) return;
   _geocodeInFlight = true;
@@ -6240,9 +6292,17 @@ async function geocodeMissingCoords(cands){
           data = await r.json();
         }
         if (data && data.length && data[0].lat && data[0].lon) {
-          c.lat = parseFloat(data[0].lat);
-          c.lng = parseFloat(data[0].lon);
-          progressed = true;
+          var nLat = parseFloat(data[0].lat), nLon = parseFloat(data[0].lon);
+          var curLat = c.lat, curLon = c.lng;
+          var hadCoords = isFinite(curLat) && isFinite(curLon) && (curLat !== 0 || curLon !== 0);
+          var offKm = hadCoords ? Math.sqrt(Math.pow(curLat - nLat, 2) + Math.pow(curLon - nLon, 2)) * 111 : Infinity;
+          if (!hadCoords || offKm > 300) {
+            if (hadCoords) console.warn("[Max] correcting " + c.place + " — LLM coord was " + offKm.toFixed(0) + "km off, using Nominatim");
+            c.lat = nLat;
+            c.lng = nLon;
+            progressed = true;
+          }
+          c._geocodeVerified = true;
         } else {
           c._geocodeFailed = true;
         }
@@ -9031,16 +9091,33 @@ async function generateCityData(place,destId){
       updateMainMap();
     }
 
-    // Nominatim: city center if model didn't provide real coords
-    if(!data.cityCenter||!data.cityCenter[0]||Math.abs(data.cityCenter[0])<0.1){
-      try{
-        var r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(place),{headers:{'Accept-Language':'en'}});
-        var res=await r.json();
-        if(res.length)data.cityCenter=[parseFloat(res[0].lat),parseFloat(res[0].lon)];
-        // Update map with real center now
+    // City center: always verify against Nominatim. LLMs hallucinate coordinates
+    // with confidence — Tirano has landed in Africa, etc. Geocode the place,
+    // and if the LLM's guess is more than ~300km off the Nominatim result
+    // (or obviously bogus — near 0,0, non-finite), override with Nominatim.
+    try{
+      var rq = place + ((trip && trip.brief && trip.brief.region) ? ", " + trip.brief.region : "");
+      var r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(rq),{headers:{'Accept-Language':'en'}});
+      var res=await r.json();
+      if(res && res.length){
+        var nLat = parseFloat(res[0].lat), nLon = parseFloat(res[0].lon);
+        if(isFinite(nLat) && isFinite(nLon)){
+          var llmLat = data.cityCenter && data.cityCenter[0];
+          var llmLon = data.cityCenter && data.cityCenter[1];
+          var bogus = !isFinite(llmLat) || !isFinite(llmLon) || Math.abs(llmLat) < 0.5 || Math.abs(llmLon) < 0.5;
+          var offKm = (isFinite(llmLat) && isFinite(llmLon))
+            ? Math.sqrt(Math.pow(llmLat - nLat, 2) + Math.pow(llmLon - nLon, 2)) * 111
+            : Infinity;
+          if (bogus || offKm > 300) {
+            console.warn("[Max] overriding LLM cityCenter for " + place + " (off " + (isFinite(offKm)?offKm.toFixed(0):"∞") + "km) → using Nominatim");
+            data.cityCenter = [nLat, nLon];
+          }
+          // Cache it for fast re-use by getCityCenter elsewhere
+          _coarseGeocode[place.toLowerCase()] = [nLat, nLon];
+        }
         if(activeDest===destId&&_leftMode==='dest') updateMainMap();
-      }catch(ge){}
-    }
+      }
+    }catch(ge){}
 
     // Nominatim: geocode sights in background (throttled)
     if(data.sights){
@@ -10733,7 +10810,15 @@ function updateMainMap(){
     updateDaySelector();
     var center=getCityCenter(dest.place);
     if(!center){
-      // Generating or unknown — show world view with a note
+      // Generating or unknown — don't leave the user staring at a world map.
+      // Kick off a coarse Nominatim geocode; when it resolves, re-center here.
+      ensureCoarseGeocode(dest.place, function(ll){
+        if (!_mainMap) return;
+        if (activeDest !== dest.id) return; // user moved on
+        try { _mainMap.setView(ll, 12, {animate:false}); } catch(e){}
+        // Re-render so the "Generating…" chip lands on the city too.
+        if (typeof updateMainMap === "function") updateMainMap();
+      });
       _mainMap.setView([20,0],2);
       var genKey=dest.place.toLowerCase();
       var isGen=_generatedCityData[genKey]&&_generatedCityData[genKey].loading;
@@ -13439,7 +13524,7 @@ async function generateMaxNote(dest, replace){
     + "\u2022 \"The old town closes early on Sundays \u2014 worth saving errands for Monday morning.\"\n"
     + "\u2022 \"The light on the lake is best an hour before sunset, from the east shore.\"\n"
     + "\u2022 \"The short train from here to Bergen is one of the most scenic in the country \u2014 sit on the left heading north.\"\n\n"
-    + "Avoid: \"Don't miss X.\" \"Be sure to Y.\" Generic \"foodie heaven\" / \"cultural gem\" language. Explicit recommendations. Lists. Headlines.\n\n"
+    + "Avoid: \"Don't miss X.\" \"Be sure to Y.\" Generic \"foodie heaven\" / \"cultural gem\" language. Explicit recommendations. Lists. Headlines. Temporal words like \"tomorrow\", \"today\", \"this morning\", \"next week\" \u2014 you don't know the schedule, so do not invent one.\n\n"
     + "Context:\n"
     + "\u2022 Destination: " + dest.place + "\n"
     + "\u2022 Staying: " + nights + " nights\n"
