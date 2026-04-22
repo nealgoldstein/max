@@ -6516,17 +6516,55 @@ function _ensureEntryPointsForRegion(region){
 // _tbPlacesPickMode, which captures in-flight td-* fields and re-renders
 // candidate cards while preserving scroll \u2014 matches the Step 2 pattern but
 // stays on the Places overlay.
-function _tbPlacesModePillsHtml(which){
+var _tbModeIcon = {
+  fly:    "\u2708\ufe0f",     // plane
+  train:  "\ud83d\ude82",     // steam train
+  drive:  "\ud83d\ude97",     // car
+  public: "\ud83d\ude8d",     // trolleybus
+  unsure: "?",
+  none:   "\u2013"
+};
+function _tbPlacesModeIconHtml(which){
   var cur = _tb[which] || "";
-  return '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px;">'
-    + _tbTransportModes.map(function(m){
-        var on = cur === m.id;
-        var bg = on ? "#111" : "#fff";
-        var fg = on ? "#fff" : "#555";
-        var bc = on ? "#111" : "#ddd";
-        return '<span style="display:inline-block;font-size:10px;padding:3px 9px;border-radius:12px;border:1px solid '+bc+';background:'+bg+';color:'+fg+';cursor:pointer;user-select:none;" onclick="_tbPlacesPickMode(&#39;'+which+'&#39;,&#39;'+m.id+'&#39;)">'+m.label+'</span>';
-      }).join("")
-    +'</div>';
+  var icon = cur && _tbModeIcon[cur] ? _tbModeIcon[cur] : "\u2708\ufe0f";
+  var label = cur ? ((_tbTransportModes.filter(function(m){return m.id===cur;})[0]||{}).label || "") : "";
+  var popId = "tb-mode-pop-"+which;
+  return '<div style="position:relative;display:flex;align-items:center;gap:8px;margin-bottom:6px;">'
+    + '<button type="button" onclick="_tbPlacesToggleModePopover(&#39;'+which+'&#39;,event)" '
+    +   'title="'+(label||"Pick mode")+'" '
+    +   'style="font-size:18px;width:36px;height:32px;padding:0;border:1px solid '+(cur?"#111":"#ddd")+';border-radius:6px;background:#fff;cursor:pointer;line-height:1;display:inline-flex;align-items:center;justify-content:center;font-family:inherit;">'
+    +   icon
+    + '</button>'
+    + '<span style="font-size:11px;color:'+(cur?"#333":"#999")+';">'+(cur?label:"Tap to pick how")+'</span>'
+    + '<div id="'+popId+'" style="display:none;position:absolute;top:100%;left:0;z-index:1000;margin-top:4px;background:#fff;border:1px solid #ccc;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,0.1);padding:4px;min-width:160px;">'
+    +   _tbTransportModes.map(function(m){
+          var on = cur === m.id;
+          var ic = _tbModeIcon[m.id] || "\u2022";
+          return '<div onclick="_tbPlacesPickMode(&#39;'+which+'&#39;,&#39;'+m.id+'&#39;)" '
+            + 'style="padding:6px 8px;font-size:11px;cursor:pointer;border-radius:4px;display:flex;align-items:center;gap:8px;'
+            + (on?"background:#f0f5ff;color:#1a5fa8;font-weight:600;":"color:#333;")+'" '
+            + 'onmouseover="this.style.background=&#39;#f5f5f5&#39;" onmouseout="this.style.background=&#39;'+(on?"#f0f5ff":"transparent")+'&#39;">'
+            + '<span style="font-size:14px;width:18px;text-align:center;">'+ic+'</span><span>'+m.label+'</span>'
+            + '</div>';
+        }).join("")
+    + '</div></div>';
+}
+
+function _tbPlacesToggleModePopover(which, evt){
+  if (evt && evt.stopPropagation) evt.stopPropagation();
+  var pop = document.getElementById("tb-mode-pop-"+which); if (!pop) return;
+  var other = document.getElementById("tb-mode-pop-"+(which==="entryMode"?"exitMode":"entryMode"));
+  if (other) other.style.display = "none";
+  var open = pop.style.display === "block";
+  pop.style.display = open ? "none" : "block";
+  if (!open) {
+    setTimeout(function(){
+      var h = function(e){
+        if (!pop.contains(e.target)) { pop.style.display = "none"; document.removeEventListener("click", h); }
+      };
+      document.addEventListener("click", h);
+    }, 0);
+  }
 }
 
 function _tbPlacesFixedPillsHtml(side){
@@ -6554,8 +6592,26 @@ function _tbPlacesCaptureFields(){
 }
 
 function _tbPlacesPickMode(which, id){
-  _tb[which] = (_tb[which] === id) ? "" : id;
+  // Snapshot any typed text in td-* inputs BEFORE we mutate _tb — otherwise
+  // the auto-fill below would race with _tbPlacesCaptureFields' blur-save.
   _tbPlacesCaptureFields();
+  _tb[which] = (_tb[which] === id) ? "" : id;
+  // Auto-fill the airport when the user picks "fly" and the corresponding
+  // city field is empty. Uses the first air-type entry point in _epCache for
+  // the region, which tends to be the main international gateway (the LLM
+  // lists them in rough importance order). If the user has already typed a
+  // city, we leave it alone.
+  if (id === "fly" && _tb[which] === "fly") {
+    var cityKey = (which === "entryMode") ? "entry" : "tbExit";
+    if (!(_tb[cityKey] || "").trim()) {
+      var pts = _epCache[_tb.region || ""] || [];
+      var airports = pts.filter(function(p){ return p.type === "air"; });
+      if (airports.length) _tb[cityKey] = airports[0].name;
+    }
+  }
+  // Close the popover if it's open
+  var pop = document.getElementById("tb-mode-pop-"+which);
+  if (pop) pop.style.display = "none";
   _tbPlacesReRender();
 }
 
@@ -6635,14 +6691,14 @@ function _renderTripDetailsStrip(kept){
     +'<div>'
     +  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#888;margin-bottom:6px;">Getting there</div>'
     +  '<label style="display:block;font-size:10px;color:#666;margin-bottom:3px;">How</label>'
-    +  _tbPlacesModePillsHtml("entryMode")
+    +  _tbPlacesModeIconHtml("entryMode")
     +  '<label style="display:block;font-size:10px;color:#666;margin-bottom:2px;">City or airport</label>'
     +  '<input id="td-entry" value="'+q(defaultEntry)+'" placeholder="e.g. Zurich or ZRH" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;" />'
     +'</div>'
     +'<div>'
     +  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#888;margin-bottom:6px;">Getting out</div>'
     +  '<label style="display:block;font-size:10px;color:#666;margin-bottom:3px;">How</label>'
-    +  _tbPlacesModePillsHtml("exitMode")
+    +  _tbPlacesModeIconHtml("exitMode")
     +  '<label style="display:block;font-size:10px;color:#666;margin-bottom:2px;">City or airport</label>'
     +  '<input id="td-exit" value="'+q(defaultExit)+'" placeholder="e.g. Geneva or GVA" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;" />'
     +'</div>'
@@ -6675,11 +6731,18 @@ function renderCandidateCards(cands){
   // the background; will re-call this function when coords land so pins appear.
   geocodeMissingCoords(cands);
   var bounds=[];
-  // Re-check _required against _tb.requiredPlaces in case it wasn't set during generation
+  // Re-check _required against _tb.requiredPlaces in case it wasn't set during
+  // generation. Also re-fill _requiredFor when p1 marked _required=true but
+  // _findMatchingRequired couldn't match — this was causing route endpoints
+  // (Chur, Tirano for Bernina Express) to fall into the generic "Places" bucket
+  // instead of their "Trains & routes" section.
   cands.forEach(function(c){
-    if (!c._required) {
+    if (!c._required || !(c._requiredFor && c._requiredFor.length)) {
       var match = _findMatchingRequired(c, _tb.requiredPlaces);
-      if (match) { c._required=true; c._requiredFor=match.requiredFor||[]; }
+      if (match) {
+        c._required = true;
+        c._requiredFor = match.requiredFor || [];
+      }
     }
     // Required candidates are kept by default — the user already decided
     // by checking the must-do. They can still Reject to override.
