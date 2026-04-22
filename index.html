@@ -5845,7 +5845,7 @@ async function findCandidates(){
 // by a draft sequence. Sequencing (the schedule) lives on the next page,
 // after the user has picked entry/exit; ordering places before entry is known
 // just hallucinates a starting city.
-var _ceMap=null,_ceMarkers=[],_ceRejectedExpanded=false,_ceEditMode=false,_ceBestMode=false,_ceCardExpanded={},_ceLens="activity",_ceSectionExpanded={};
+var _ceMap=null,_ceMarkers=[],_ceRejectedExpanded=true,_ceEditMode=false,_ceBestMode=false,_ceCardExpanded={},_ceLens="activity",_ceSectionExpanded={};
 
 async function retryDiscoveryCandidates() {
   var existingReq = (_tb.candidates||[]).filter(function(c){ return c._required; });
@@ -5993,7 +5993,7 @@ function reopenCandidateExplorer(){
   }
   // Rehydrate must-dos so reject-cascade and required-badges work
   if (trip.mdcItems) _mdcItems = trip.mdcItems.slice();
-  _ceRejectedExpanded = false;
+  _ceRejectedExpanded = true;
   showCandidateExplorer(_tb.candidates, true);
 }
 
@@ -6426,9 +6426,20 @@ async function fetchRegionEntryPoints(region){
   }
 }
 
-function _tbUseEntryPoint(isEntry, name){
-  // Update state
-  if (isEntry) _tb.entry = name; else _tb.tbExit = name;
+// Map entry-point pin type → canonical trip mode.
+var _EP_TYPE_TO_MODE = { air:"fly", rail:"train", sea:"ferry", bus:"bus" };
+var _EP_MODE_LABEL   = { fly:"by air", train:"by train", ferry:"by ferry", bus:"by bus", drive:"by car" };
+
+function _tbUseEntryPoint(isEntry, name, mode){
+  // Update state — city name AND mode, so "Set as entry by air" actually records
+  // the arrival mode. Without this, the user had to separately set the mode pill.
+  if (isEntry) {
+    _tb.entry = name;
+    if (mode) _tb.entryMode = mode;
+  } else {
+    _tb.tbExit = name;
+    if (mode) _tb.exitMode = mode;
+  }
   _tbPlacesCaptureFields();
   // Close the open popup so the user can see the map update, and give them
   // clear feedback — the collapsed trip-details strip was too subtle and the
@@ -6437,7 +6448,8 @@ function _tbUseEntryPoint(isEntry, name){
   try { if (_ceMap) _ceMap.closePopup(); } catch(e){}
   _tripDetailsExpanded = true;
   if (typeof showSaveStatus === "function") {
-    showSaveStatus((isEntry?"Entry":"Exit") + " set to " + name, 2200);
+    var lbl = mode && _EP_MODE_LABEL[mode] ? " " + _EP_MODE_LABEL[mode] : "";
+    showSaveStatus((isEntry?"Entry":"Exit") + " set to " + name + lbl, 2200);
   }
   _tbPlacesReRender();
 }
@@ -6467,13 +6479,15 @@ function _renderEntryPointsOnCeMap(region){
     var safeName = (p.name||"").replace(/\\/g,"\\\\").replace(/"/g,'&quot;').replace(/'/g,"\\'");
     var notes = p.notes ? '<div style="font-size:10px;color:#666;margin-top:4px;line-height:1.45;">'+p.notes.replace(/</g,"&lt;")+'</div>' : '';
     var typeLabel = {air:"Airport", rail:"Rail station", sea:"Port", bus:"Bus terminal"}[p.type] || "Entry point";
+    var mode = _EP_TYPE_TO_MODE[p.type] || "";
+    var modeTag = mode && _EP_MODE_LABEL[mode] ? " " + _EP_MODE_LABEL[mode] : "";
     m.bindPopup(
        '<div style="font-size:12px;font-weight:600;color:#111;">'+(p.name||"").replace(/</g,"&lt;")+'</div>'
       +'<div style="font-size:9px;color:#aaa;text-transform:uppercase;letter-spacing:.05em;margin-top:1px;">'+typeLabel+'</div>'
       +notes
-      +'<div style="display:flex;gap:4px;margin-top:6px;">'
-      +  '<button onclick="_tbUseEntryPoint(true,&quot;'+safeName+'&quot;)" style="font-size:10px;padding:4px 8px;background:#111;color:#fff;border:none;border-radius:4px;cursor:pointer;font-family:inherit;">Set as entry</button>'
-      +  '<button onclick="_tbUseEntryPoint(false,&quot;'+safeName+'&quot;)" style="font-size:10px;padding:4px 8px;background:#fff;color:#111;border:1px solid #111;border-radius:4px;cursor:pointer;font-family:inherit;">Set as exit</button>'
+      +'<div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap;">'
+      +  '<button onclick="_tbUseEntryPoint(true,&quot;'+safeName+'&quot;,&quot;'+mode+'&quot;)" style="font-size:10px;padding:4px 8px;background:#111;color:#fff;border:none;border-radius:4px;cursor:pointer;font-family:inherit;">Enter here'+modeTag+'</button>'
+      +  '<button onclick="_tbUseEntryPoint(false,&quot;'+safeName+'&quot;,&quot;'+mode+'&quot;)" style="font-size:10px;padding:4px 8px;background:#fff;color:#111;border:1px solid #111;border-radius:4px;cursor:pointer;font-family:inherit;">Leave here'+modeTag+'</button>'
       +'</div>'
     );
     m.on("popupopen", function(){ _edActivePopupId = p.id || p.name; });
@@ -7091,18 +7105,18 @@ function renderCandidateCards(cands){
     }
   }
 
-  // Single discovery section — "Other places worth considering." Canonical
-  // destinations (widelyRecommended) appear here alongside thematic picks;
-  // the \u2605 marker on the compact card already signals their status. A
-  // separate "Known for" section was rejected because it reintroduced
-  // tourist-bait framing ("go because it's famous") that the philosophy
-  // explicitly moved away from. Users who want a canonical place Max didn't
-  // surface can add it via the "Heard about a place?" input at the top.
+  // Discovery section. Canonical destinations (widelyRecommended) appear here
+  // alongside thematic picks; the \u2605 marker on the compact card already
+  // signals their status. Header wording depends on whether any must-do sections
+  // rendered: if activity groups are showing above, these are "Other places
+  // worth considering"; if nothing rendered above (no must-dos / no matches),
+  // they ARE the list and deserve a plain "Places" header, not a secondary one.
   if (discoveryCands.length) {
     if (!_ceBestMode) {
       var dhdr = document.createElement("div");
-      dhdr.style.cssText = "margin-top:14px;padding:10px 4px 6px;font-size:10px;font-weight:700;text-transform:uppercase;color:#111;letter-spacing:0.06em;border-top:1px solid #e8e8e8;";
-      dhdr.textContent = "Other places worth considering";
+      dhdr.style.cssText = "margin-top:14px;padding:10px 4px 6px;font-size:10px;font-weight:700;text-transform:uppercase;color:#111;letter-spacing:0.06em;"
+        + (renderedAny ? "border-top:1px solid #e8e8e8;" : "");
+      dhdr.textContent = renderedAny ? "Other places worth considering" : "Places";
       el.appendChild(dhdr);
       discoveryCands.forEach(function(c){ renderCard(c, el); });
     } else {
@@ -7264,7 +7278,8 @@ function renderCandidateCards(cands){
     });
   }
 
-  // Collapsed rejected section — out of the way but one click to revisit
+  // "Maybe later" — rejected candidates. Expanded by default so a freshly
+  // rejected place visibly moves here instead of appearing to vanish.
   if (rejectedCands.length) {
     var rejWrap = document.createElement("div");
     rejWrap.style.cssText = "margin-top:14px;padding-top:10px;border-top:1px solid #eee;";
@@ -7272,14 +7287,17 @@ function renderCandidateCards(cands){
     var rejExpanded = !!_ceRejectedExpanded;
     rejToggle.style.cssText = "font-size:10px;font-weight:600;color:#888;cursor:pointer;padding:6px 8px;user-select:none;background:#f5f5f5;border-radius:5px;display:flex;align-items:center;justify-content:space-between;";
     var hint = '<span style="font-weight:400;color:#aaa;">change your mind</span>';
-    rejToggle.innerHTML = '<span>'+(rejExpanded?"\u25BE":"\u25B8")+'  '+rejectedCands.length+' rejected</span>'+hint;
+    var _rejLabel = function(expanded){
+      return '<span>'+(expanded?"\u25BE":"\u25B8")+'  Maybe later \u00b7 '+rejectedCands.length+'</span>'+hint;
+    };
+    rejToggle.innerHTML = _rejLabel(rejExpanded);
     var rejList = document.createElement("div");
     rejList.style.display = rejExpanded?"block":"none";
     rejList.style.marginTop = "6px";
     rejToggle.onclick = function(){
       _ceRejectedExpanded = !_ceRejectedExpanded;
       rejList.style.display = _ceRejectedExpanded?"block":"none";
-      rejToggle.innerHTML = '<span>'+(_ceRejectedExpanded?"\u25BE":"\u25B8")+'  '+rejectedCands.length+' rejected</span>'+hint;
+      rejToggle.innerHTML = _rejLabel(_ceRejectedExpanded);
     };
     // Simple bullet list (not full cards) — one line per place with a restore link
     rejList.style.cssText += "padding:4px 8px;background:#fafafa;border-radius:5px;";
