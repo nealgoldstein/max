@@ -3090,8 +3090,8 @@ async function showMaxBridge(stage, onContinue, correctionHistory) {
       + (_tb.region ? "\u2022 Region: " + _tb.region + "\n" : "")
       + (_tb.duration ? "\u2022 Duration: " + _tb.duration + "\n" : "")
       + (_tb.when ? "\u2022 When: " + _tb.when + "\n" : "")
-      + ((_tb.entry||_tb.entryMode) ? "\u2022 Arrival: " + (_tb.entryMode?_tb.entryMode+" ":"") + (_tb.entry||"") + (_tb.entryFixed ? " (fixed)" : " (flexible)") + "\n" : "")
-      + ((_tb.tbExit||_tb.exitMode) ? "\u2022 Departure: " + (_tb.exitMode?_tb.exitMode+" ":"") + (_tb.tbExit||"") + (_tb.exitFixed ? " (fixed)" : " (flexible)") + "\n" : "")
+      + ((_tb.entry||_tb.entryMode) ? "\u2022 Arrival: " + ((_tb.entryMode && _tb.entryMode!=="unsure")?_tb.entryMode+" ":"") + (_tb.entry||"") + (_tb.entryFixed ? " (fixed)" : " (flexible)") + "\n" : "")
+      + ((_tb.tbExit||_tb.exitMode) ? "\u2022 Departure: " + ((_tb.exitMode && _tb.exitMode!=="unsure")?_tb.exitMode+" ":"") + (_tb.tbExit||"") + (_tb.exitFixed ? " (fixed)" : " (flexible)") + "\n" : "")
       + (_tb.transport ? "\u2022 Getting around: " + _tb.transport + "\n" : "")
       + (_tb.accommodation ? "\u2022 Lodging: " + _tb.accommodation + "\n" : "")
       + (_tb.pace ? "\u2022 Pace: " + _tb.pace + "\n" : "")
@@ -3116,8 +3116,8 @@ async function showMaxBridge(stage, onContinue, correctionHistory) {
 
     briefBlock = "Their picks, ordered:\n" + orderedList + "\n\n"
       + (_tb.duration ? "Duration: " + _tb.duration + "\n" : "")
-      + ((_tb.entry||_tb.entryMode) ? "Entry: " + (_tb.entryMode?_tb.entryMode+" ":"") + (_tb.entry||"") + (_tb.entryFixed ? " (fixed)" : " (flexible)") + "\n" : "")
-      + ((_tb.tbExit||_tb.exitMode) ? "Exit: " + (_tb.exitMode?_tb.exitMode+" ":"") + (_tb.tbExit||"") + (_tb.exitFixed ? " (fixed)" : " (flexible)") + "\n" : "")
+      + ((_tb.entry||_tb.entryMode) ? "Entry: " + ((_tb.entryMode && _tb.entryMode!=="unsure")?_tb.entryMode+" ":"") + (_tb.entry||"") + (_tb.entryFixed ? " (fixed)" : " (flexible)") + "\n" : "")
+      + ((_tb.tbExit||_tb.exitMode) ? "Exit: " + ((_tb.exitMode && _tb.exitMode!=="unsure")?_tb.exitMode+" ":"") + (_tb.tbExit||"") + (_tb.exitFixed ? " (fixed)" : " (flexible)") + "\n" : "")
       + (_tb.anchors ? "Must-dos: " + _tb.anchors + "\n" : "")
       + (preview.reasoning && preview.reasoning.length ? "\nOrdering decisions I made:\n" + preview.reasoning.map(function(r){return "\u2022 " + r;}).join("\n") + "\n" : "");
   }
@@ -3340,8 +3340,8 @@ async function runCandidateSearch(requiredPlaces) {
   var brief = "Region: " + (_tb.region||"")
     + (_tb.duration      ? "\nDuration: "      + _tb.duration      : "")
     + (_tb.when         ? "\nWhen: "          + _tb.when          : "")
-    + ((_tb.entry||_tb.entryMode) ? "\nArrives: "    + (_tb.entryMode?_tb.entryMode+" ":"") + (_tb.entry||"") + (_tb.entryFixed?" (fixed)":"") : "")
-    + ((_tb.tbExit||_tb.exitMode) ? "\nDeparts from: " + (_tb.exitMode?_tb.exitMode+" ":"") + (_tb.tbExit||"") + (_tb.exitFixed?" (fixed)":"") : "")
+    + ((_tb.entry||_tb.entryMode) ? "\nArrives: "    + ((_tb.entryMode && _tb.entryMode!=="unsure")?_tb.entryMode+" ":"") + (_tb.entry||"") + (_tb.entryFixed?" (fixed)":"") : "")
+    + ((_tb.tbExit||_tb.exitMode) ? "\nDeparts from: " + ((_tb.exitMode && _tb.exitMode!=="unsure")?_tb.exitMode+" ":"") + (_tb.tbExit||"") + (_tb.exitFixed?" (fixed)":"") : "")
     + (_tb.transport     ? "\nTransport: "      + _tb.transport     : "")
     + (_tb.accommodation ? "\nStays: "          + _tb.accommodation : "")
     + (_tb.pace          ? "\nPace: "           + _tb.pace          : "")
@@ -5064,6 +5064,7 @@ function _tbOnDateChange(which){
   }
   _tbRecalcDates();
   // Re-render in place so the (auto) labels and filled fields update
+  _tb._preserveScrollOnce = true;
   if (_tb._editMode) renderTripBriefEdit(); else renderTripBrief();
 }
 
@@ -5076,6 +5077,7 @@ var _tbTransportModes = [
   {id:"drive",  label:"Car"},
   {id:"train",  label:"Train"},
   {id:"public", label:"Public transport"},
+  {id:"unsure", label:"Not sure yet"},
   {id:"none",   label:"Won\u2019t travel"}
 ];
 
@@ -5106,6 +5108,8 @@ function _tbPickMode(which, id){
   _tbCaptureDates();
   _tbCaptureParty();
   _tbCaptureAvoid();
+  // Re-render in place \u2014 preserve scroll so the page doesn\u2019t jump to top.
+  _tb._preserveScrollOnce = true;
   if (_tb._editMode) renderTripBriefEdit(); else renderTripBrief();
 }
 
@@ -5168,6 +5172,7 @@ function _tbSetFixed(side, val){
   _tbCaptureDates();
   _tbCaptureParty();
   _tbCaptureAvoid();
+  _tb._preserveScrollOnce = true;
   if (_tb._editMode) renderTripBriefEdit(); else renderTripBrief();
 }
 
@@ -5219,9 +5224,14 @@ function _tbSectionHead(title, sub){
 
 function renderTripBrief(){
   var ov=g("trip-brief-overlay"); ov.className="tb-overlay";
+  // Capture scroll position before we blow away innerHTML, so in-place
+  // re-renders (e.g. toggling a mode pill) don\u2019t yank the user back to top.
+  var _prevScroll = ov.scrollTop || 0;
+  var _preserve = !!_tb._preserveScrollOnce;
+  _tb._preserveScrollOnce = false;
   ov.style.cssText="position:fixed;inset:0;background:#f7f7f5;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
   // Reset scroll to top on render (fresh view), then attach the scroll hint
-  setTimeout(function(){ ov.scrollTop = 0; attachScrollHint(ov); }, 0);
+  setTimeout(function(){ ov.scrollTop = _preserve ? _prevScroll : 0; attachScrollHint(ov); }, 0);
   ov.innerHTML='<div class="tb-header">'
     +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Step 2 of 2</div></div></div>'
     +'<div class="tb-title">Shape the trip</div>'
@@ -5233,9 +5243,9 @@ function renderTripBrief(){
     + _tbSectionHead("When & how long")
     + _tbDatesFieldHtml()
 
-    // D — Getting in / out (mode only; cities come after Places), + transport within
-    + _tbSectionHead("In, out, and moving around", "How you arrive and leave shapes the direction of the trip. Specific cities come after you pick places.")
-    + _tbEntryExitModesOnlyHtml()
+    // D \u2014 Transport within the region only. Entry/exit (mode + city) gets
+    // decided on the Places overlay, after the map makes the geography visible.
+    + _tbSectionHead("Moving around", "How you\u2019ll get between places once you\u2019re there. Arrival and departure get decided on the next page, once you see the map.")
     +'<div class="tb-field"><label>How you\u2019ll be moving within '+(_tb.region||'the region')+'</label>'
     +'<input id="tb-transport" value="'+(_tb.transport||'').replace(/"/g,'&quot;')+'" placeholder="e.g. Trains and walking. Swiss Travel Pass. Taxi when needed. No rental car." />'
     +'<div style="font-size:10px;color:#aaa;margin-top:3px;">Named passes, rental car, mixed \u2014 whatever fits.</div>'
@@ -5463,8 +5473,11 @@ function editConstraints(){
 function renderTripBriefEdit(){
   // Same as renderTripBrief but CTA goes to previewConstraintChanges
   var ov=g("trip-brief-overlay"); ov.className="tb-overlay";
+  var _prevScroll = ov.scrollTop || 0;
+  var _preserve = !!_tb._preserveScrollOnce;
+  _tb._preserveScrollOnce = false;
   ov.style.cssText="position:fixed;inset:0;background:#f7f7f5;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
-  setTimeout(function(){ ov.scrollTop = 0; attachScrollHint(ov); }, 0);
+  setTimeout(function(){ ov.scrollTop = _preserve ? _prevScroll : 0; attachScrollHint(ov); }, 0);
   ov.innerHTML='<div class="tb-header">'
     +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Edit constraints</div></div></div>'
     +'<div class="tb-title">How you travel</div>'
@@ -5476,8 +5489,7 @@ function renderTripBriefEdit(){
     + _tbSectionHead("When & how long")
     + _tbDatesFieldHtml()
 
-    + _tbSectionHead("In, out, and moving around", "How you arrive and leave shapes the direction of the trip. Specific cities come after you pick places.")
-    + _tbEntryExitModesOnlyHtml()
+    + _tbSectionHead("Moving around", "How you\u2019ll get between places once you\u2019re there. Arrival and departure get decided on the Places page, once you see the map.")
     +'<div class="tb-field"><label>How you\u2019re moving within '+(_tb.region||'the region')+'</label>'
     +'<input id="tb-transport" value="'+(_tb.transport||'').replace(/"/g,'&quot;')+'" placeholder="e.g. Trains and walking. Swiss Travel Pass. No rental car." />'
     +'</div>'
@@ -5933,7 +5945,7 @@ function reopenCandidateExplorer(){
 function cancelEditCandidates(){
   _ceEditMode = false;
   g("candidate-explorer-overlay").style.display="none";
-  if(_ceMap){_ceMap.remove();_ceMap=null;}
+  if(_ceMap){_ceMap.remove();_ceMap=null;} if(_edMap){try{_edMap.remove();}catch(e){}_edMap=null;_edMarkers=[];}
 }
 
 // No more lock-in ceremony: closing the Places overlay IS how you step out.
@@ -5952,14 +5964,14 @@ function closePlacesOverlay(){
   var kept = cands.filter(function(c){return c.status==="keep";});
   if (!kept.length) {
     g("candidate-explorer-overlay").style.display="none";
-    if(_ceMap){_ceMap.remove();_ceMap=null;}
+    if(_ceMap){_ceMap.remove();_ceMap=null;} if(_edMap){try{_edMap.remove();}catch(e){}_edMap=null;_edMarkers=[];}
     return;
   }
   if (!trip) {
     buildFromCandidates();
   } else {
     g("candidate-explorer-overlay").style.display="none";
-    if(_ceMap){_ceMap.remove();_ceMap=null;}
+    if(_ceMap){_ceMap.remove();_ceMap=null;} if(_edMap){try{_edMap.remove();}catch(e){}_edMap=null;_edMarkers=[];}
     if (typeof drawTripMode === "function") drawTripMode();
     if (typeof updateMainMap === "function") updateMainMap();
   }
@@ -6080,7 +6092,7 @@ async function applyCandidateChanges(){
 
   _ceEditMode = false;
   g("candidate-explorer-overlay").style.display="none";
-  if(_ceMap){_ceMap.remove();_ceMap=null;}
+  if(_ceMap){_ceMap.remove();_ceMap=null;} if(_edMap){try{_edMap.remove();}catch(e){}_edMap=null;_edMarkers=[];}
   drawTripMode();
   updateMainMap();
 }
@@ -6135,7 +6147,7 @@ function showCandidateExplorer(cands, editMode){
     var cds=document.getElementById("ce-cards");
     if(cds){cds.style.flex="1";cds.style.overflowY="scroll";cds.style.minHeight="0";}
     // Init map
-    if(_ceMap){_ceMap.remove();_ceMap=null;} _ceMarkers=[];
+    if(_ceMap){_ceMap.remove();_ceMap=null;} if(_edMap){try{_edMap.remove();}catch(e){}_edMap=null;_edMarkers=[];} _ceMarkers=[];
     _ceMap=L.map("ce-map",{zoomControl:true,scrollWheelZoom:true}).setView([48,14],4);
     // Zoom to the stated region right away so the user sees their country/area
     // instead of a continent. fitBounds on candidates (later, when they arrive)
@@ -6257,6 +6269,164 @@ function _rebuildGettingToFromFields(){
   _tb.gettingOut = goParts.join(", ");
 }
 
+// ── ENTRY-POINT MAP ─────────────────────────────────────────
+// Surfaces major airports / rail termini / sea ports / long-distance bus
+// terminals for the chosen region. Lives on the Places overlay inside the
+// Trip Details strip so the user can see arrival options on a map while
+// they\u2019re deciding how and where to enter. Data is LLM-generated, cached
+// per region in _epCache for the session.
+var _epCache = {};          // region -> array of entry points
+var _epLoading = {};        // region -> bool
+var _edMap = null;          // Leaflet map instance
+var _edMarkers = [];        // active markers
+var _edActivePopupId = null; // currently-open popup's ep.id, so re-renders can re-show it
+
+function _epIconFor(type){
+  // Small emoji-based divIcon \u2014 keeps the map light, no custom tile sprites.
+  var map = {air:"\u2708\ufe0f", rail:"\ud83d\ude86", sea:"\u26f4\ufe0f", bus:"\ud83d\ude8d"};
+  var sym = map[type] || "\ud83d\udccd";
+  return L.divIcon({
+    className: "ep-pin",
+    html: '<div style="font-size:18px;line-height:1;text-align:center;filter:drop-shadow(0 1px 2px rgba(0,0,0,.3));">'+sym+'</div>',
+    iconSize: [22,22],
+    iconAnchor: [11,20],
+    popupAnchor: [0,-18]
+  });
+}
+
+async function fetchRegionEntryPoints(region){
+  if (!region) return [];
+  if (_epCache[region]) return _epCache[region];
+  if (_epLoading[region]) return [];
+  _epLoading[region] = true;
+  var prompt = "List the major entry points to " + region + " that an international traveler might use. Include:\n"
+    + "- airports (international gateway airports, with IATA codes)\n"
+    + "- rail stations that handle cross-border or major long-distance trains\n"
+    + "- sea ports used by ferries or cruise ships\n"
+    + "- long-distance bus terminals\n\n"
+    + "Limit to the 8\u201315 most significant entry points overall \u2014 not every regional airport or station. Return strict JSON: {\"points\":[{\"id\":\"unique-slug\",\"name\":\"Zurich Airport (ZRH)\",\"type\":\"air|rail|sea|bus\",\"city\":\"Zurich\",\"country\":\"Switzerland\",\"lat\":47.4647,\"lon\":8.5492,\"notes\":\"Main international gateway; hub for Swiss.\"}]}.\n"
+    + "Lat/lon must be accurate. Notes should be one short sentence about why this entry point matters.";
+  try {
+    var resp = await callMax([{role:"user",content:prompt}], 3000, 30000);
+    var text = resp && resp.content && resp.content[0] && resp.content[0].text ? resp.content[0].text : "";
+    var m = text.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error("no JSON");
+    var parsed = JSON.parse(m[0]);
+    var pts = Array.isArray(parsed.points) ? parsed.points.filter(function(p){ return p && p.lat && p.lon && p.name; }) : [];
+    _epCache[region] = pts;
+    _epLoading[region] = false;
+    return pts;
+  } catch (e) {
+    _epLoading[region] = false;
+    _epCache[region] = []; // cache empty to avoid infinite retries
+    return [];
+  }
+}
+
+function _tbUseEntryPoint(isEntry, name){
+  if (isEntry) _tb.entry = name; else _tb.tbExit = name;
+  _tbPlacesCaptureFields();
+  _tbPlacesReRender();
+}
+
+function _renderEntryPointMap(region){
+  var host = document.getElementById("td-entry-map");
+  if (!host) return;
+  if (_edMap) { try { _edMap.remove(); } catch(e){} _edMap = null; _edMarkers = []; }
+  _edMap = L.map("td-entry-map",{zoomControl:true,scrollWheelZoom:false,attributionControl:false}).setView([30,0],2);
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:19}).addTo(_edMap);
+  var pts = _epCache[region] || [];
+  if (!pts.length) return;
+  var bounds = [];
+  pts.forEach(function(p){
+    var m = L.marker([p.lat, p.lon], {icon: _epIconFor(p.type)}).addTo(_edMap);
+    var safeName = (p.name||"").replace(/'/g,"\\'").replace(/"/g,'&quot;');
+    var notes = p.notes ? '<div style="font-size:10px;color:#666;margin-top:4px;line-height:1.45;">'+p.notes.replace(/</g,"&lt;")+'</div>' : '';
+    m.bindPopup(
+       '<div style="font-size:12px;font-weight:600;color:#111;">'+(p.name||"").replace(/</g,"&lt;")+'</div>'
+      +notes
+      +'<div style="display:flex;gap:4px;margin-top:6px;">'
+      +  '<button onclick="_tbUseEntryPoint(true,&quot;'+safeName+'&quot;)" style="font-size:10px;padding:4px 8px;background:#111;color:#fff;border:none;border-radius:4px;cursor:pointer;font-family:inherit;">Set as entry</button>'
+      +  '<button onclick="_tbUseEntryPoint(false,&quot;'+safeName+'&quot;)" style="font-size:10px;padding:4px 8px;background:#fff;color:#111;border:1px solid #111;border-radius:4px;cursor:pointer;font-family:inherit;">Set as exit</button>'
+      +'</div>'
+    );
+    m.on("popupopen", function(){ _edActivePopupId = p.id || p.name; });
+    m.on("popupclose", function(){ if (_edActivePopupId === (p.id||p.name)) _edActivePopupId = null; });
+    _edMarkers.push({ep:p, marker:m});
+    bounds.push([p.lat, p.lon]);
+    if (_edActivePopupId && (p.id||p.name) === _edActivePopupId) {
+      setTimeout(function(){ try { m.openPopup(); } catch(e){} }, 50);
+    }
+  });
+  if (bounds.length) _edMap.fitBounds(bounds, {padding:[16,16], maxZoom:7});
+  // Leaflet sometimes needs a nudge after the container is sized
+  setTimeout(function(){ try { _edMap.invalidateSize(); } catch(e){} }, 60);
+}
+
+// Mode pills rendered inside the Trip Details strip. These call
+// _tbPlacesPickMode, which captures in-flight td-* fields and re-renders
+// candidate cards while preserving scroll \u2014 matches the Step 2 pattern but
+// stays on the Places overlay.
+function _tbPlacesModePillsHtml(which){
+  var cur = _tb[which] || "";
+  return '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px;">'
+    + _tbTransportModes.map(function(m){
+        var on = cur === m.id;
+        var bg = on ? "#111" : "#fff";
+        var fg = on ? "#fff" : "#555";
+        var bc = on ? "#111" : "#ddd";
+        return '<span style="display:inline-block;font-size:10px;padding:3px 9px;border-radius:12px;border:1px solid '+bc+';background:'+bg+';color:'+fg+';cursor:pointer;user-select:none;" onclick="_tbPlacesPickMode(&#39;'+which+'&#39;,&#39;'+m.id+'&#39;)">'+m.label+'</span>';
+      }).join("")
+    +'</div>';
+}
+
+function _tbPlacesFixedPillsHtml(side){
+  var cur = !!_tb[side+"Fixed"];
+  function pill(label, val){
+    var on = cur === val;
+    var bg = on ? "#111" : "#fff"; var fg = on ? "#fff" : "#555"; var bc = on ? "#111" : "#ddd";
+    return '<span style="display:inline-block;font-size:10px;padding:3px 9px;border-radius:12px;border:1px solid '+bc+';background:'+bg+';color:'+fg+';cursor:pointer;user-select:none;" onclick="_tbPlacesSetFixed(&#39;'+side+'&#39;,'+val+')">'+label+'</span>';
+  }
+  return '<div style="display:flex;gap:4px;margin-bottom:6px;">'+pill("Booked",true)+pill("Flexible",false)+'</div>';
+}
+
+function _tbPlacesCaptureFields(){
+  // Snapshot every td-* field into _tb so re-rendering doesn\u2019t wipe typed text
+  var map = {"td-entry":"entry","td-exit":"tbExit","td-arrNum":"arrivalNumber",
+             "td-depNum":"departureNumber","td-arrTime":"arrivalTime","td-depTime":"departureTime"};
+  Object.keys(map).forEach(function(id){
+    var el = document.getElementById(id); if (el) _tb[map[id]] = el.value.trim();
+  });
+  var dEl = document.getElementById("td-date");
+  if (dEl && dEl.value) _tb.when = dEl.value;
+  var ddEl = document.getElementById("td-depDate");
+  if (ddEl) _tb.departureDate = ddEl.value;
+  _rebuildGettingToFromFields();
+}
+
+function _tbPlacesPickMode(which, id){
+  _tb[which] = (_tb[which] === id) ? "" : id;
+  _tbPlacesCaptureFields();
+  _tbPlacesReRender();
+}
+
+function _tbPlacesSetFixed(side, val){
+  _tb[side+"Fixed"] = !!val;
+  _tbPlacesCaptureFields();
+  _tbPlacesReRender();
+}
+
+function _tbPlacesReRender(){
+  // Preserve scroll on the candidate list so pills don\u2019t jump the view
+  var cards = document.getElementById("ce-cards");
+  var prev = cards ? cards.scrollTop : 0;
+  renderCandidateCards(_tb.candidates);
+  setTimeout(function(){
+    var c = document.getElementById("ce-cards");
+    if (c) c.scrollTop = prev;
+  }, 0);
+}
+
 // Renders the collapsible Trip Details strip — replaces the old pre-build
 // modal. No ceremony: fill this in whenever you want. The summary line is
 // the collapsed state.
@@ -6309,10 +6479,23 @@ function _renderTripDetailsStrip(kept){
   var defaultEntry = _tb.entry || (kept[0] && kept[0].place) || "";
   var defaultExit  = _tb.tbExit || (kept[kept.length-1] && kept[kept.length-1].place) || "";
   var defaultDate  = (typeof parseStartDateFromBrief === "function") ? parseStartDateFromBrief(_tb.when||"") : "";
-  form.innerHTML =
-     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 12px;">'
+  var region = _tb.region || "";
+  var hasPts = region && _epCache[region] && _epCache[region].length;
+  var isLoading = region && _epLoading[region];
+  var mapBlock = ''
+    + '<div style="margin-bottom:10px;">'
+    +   '<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px;">'
+    +     '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#888;">Major entry points</div>'
+    +     '<div style="font-size:10px;color:#aaa;">'+(isLoading?"Loading\u2026": (hasPts?"Tap a pin to set entry or exit":""))+'</div>'
+    +   '</div>'
+    +   '<div id="td-entry-map" style="height:200px;width:100%;border:1px solid #e8e8e8;border-radius:6px;background:#eef1f3;"></div>'
+    + '</div>';
+  form.innerHTML = mapBlock
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 12px;">'
     +'<div>'
     +  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#888;margin-bottom:6px;">Getting there</div>'
+    +  '<label style="display:block;font-size:10px;color:#666;margin-bottom:3px;">How</label>'
+    +  _tbPlacesModePillsHtml("entryMode")
     +  '<label style="display:block;font-size:10px;color:#666;margin-bottom:2px;">City or airport</label>'
     +  '<input id="td-entry" value="'+q(defaultEntry)+'" placeholder="e.g. Zurich or ZRH" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;margin-bottom:6px;" />'
     +  '<div style="display:flex;gap:6px;margin-bottom:6px;">'
@@ -6324,10 +6507,13 @@ function _renderTripDetailsStrip(kept){
     +    '</div>'
     +  '</div>'
     +  '<label style="display:block;font-size:10px;color:#666;margin-bottom:2px;">Flight / train #</label>'
-    +  '<input id="td-arrNum" value="'+q(_tb.arrivalNumber||"")+'" placeholder="Swiss 38, Eurostar 9137" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;" />'
+    +  '<input id="td-arrNum" value="'+q(_tb.arrivalNumber||"")+'" placeholder="Swiss 38, Eurostar 9137" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;margin-bottom:6px;" />'
+    +  _tbPlacesFixedPillsHtml("entry")
     +'</div>'
     +'<div>'
     +  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#888;margin-bottom:6px;">Getting out</div>'
+    +  '<label style="display:block;font-size:10px;color:#666;margin-bottom:3px;">How</label>'
+    +  _tbPlacesModePillsHtml("exitMode")
     +  '<label style="display:block;font-size:10px;color:#666;margin-bottom:2px;">City or airport</label>'
     +  '<input id="td-exit" value="'+q(defaultExit)+'" placeholder="e.g. Geneva or GVA" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;margin-bottom:6px;" />'
     +  '<div style="display:flex;gap:6px;margin-bottom:6px;">'
@@ -6339,7 +6525,8 @@ function _renderTripDetailsStrip(kept){
     +    '</div>'
     +  '</div>'
     +  '<label style="display:block;font-size:10px;color:#666;margin-bottom:2px;">Flight / train #</label>'
-    +  '<input id="td-depNum" value="'+q(_tb.departureNumber||"")+'" placeholder="Swiss 17" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;" />'
+    +  '<input id="td-depNum" value="'+q(_tb.departureNumber||"")+'" placeholder="Swiss 17" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;margin-bottom:6px;" />'
+    +  _tbPlacesFixedPillsHtml("exit")
     +'</div>'
     +'</div>';
   box.appendChild(form);
@@ -6365,6 +6552,24 @@ function _renderTripDetailsStrip(kept){
     bind("td-depDate", "departureDate");
     bind("td-depTime", "departureTime");
     bind("td-depNum",  "departureNumber");
+
+    // Entry-point map: render what we have, fetch if cache miss.
+    var r = _tb.region || "";
+    if (r) {
+      if (_epCache[r]) {
+        _renderEntryPointMap(r);
+      } else if (!_epLoading[r]) {
+        // Show empty basemap while loading so the user sees something\u2019s happening
+        _renderEntryPointMap(r);
+        fetchRegionEntryPoints(r).then(function(){
+          // Only re-render if the strip is still open and same region
+          var stillHost = document.getElementById("td-entry-map");
+          if (stillHost && _tb.region === r) _renderEntryPointMap(r);
+        });
+      } else {
+        _renderEntryPointMap(r); // another caller already fetching \u2014 render empty basemap
+      }
+    }
   }, 10);
 
   return box;
@@ -7729,7 +7934,7 @@ async function buildFromCandidates(){
   _tripsIndex.push({id:tripId,name:_tb.name,destCount:kept.length,dateRange:"",savedAt:new Date().toISOString()});
   saveTripsIndex(); localSave();
   g("candidate-explorer-overlay").style.display="none";
-  if(_ceMap){_ceMap.remove();_ceMap=null;}
+  if(_ceMap){_ceMap.remove();_ceMap=null;} if(_edMap){try{_edMap.remove();}catch(e){}_edMap=null;_edMarkers=[];}
   // Max-voiced bridge before the plan opens
   await showMaxBridge("post-candidates", function(){
     g("trip-brief-overlay").style.display="none";
