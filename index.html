@@ -4187,9 +4187,53 @@ async function generateActivitiesForPlace(){
         return p;
       });
     }
+    // Build a keyword set from whatever the user said about the trip. If they
+    // wrote "ride named trains through the mountains, take walks … eat chocolate",
+    // we want the train routes, mountain walks, and chocolate stops to come
+    // pre-checked as must-dos — not hidden behind an opt-in click. Otherwise the
+    // stated intent silently fails to propagate into the schedule.
+    var intentText = ((ctx||"") + " " + (_tb.intent||"") + " " + (_tb.tripSentence||"")).toLowerCase();
+    // Generic synonym groups: if the user mentions any word in a group, all the
+    // group's tokens count as hits. Cheap and forgiving — better than exact match.
+    var _synGroups = [
+      ["train","trains","rail","railway","railroad","locomotive","sleeper","express"],
+      ["walk","walks","walking","hike","hikes","hiking","trek","trekking","trail","trails","foot"],
+      ["mountain","mountains","alpine","alps","peak","peaks","summit","ridge"],
+      ["culture","cultural","local","traditional","heritage","museum","museums","art","history","historic"],
+      ["food","eat","eating","cuisine","culinary","restaurant","restaurants","dining","taste","tasting"],
+      ["chocolate","chocolatier","cacao","cocoa"],
+      ["wine","winery","wineries","vineyard","vineyards"],
+      ["beer","brewery","breweries","pub","pubs"],
+      ["coffee","cafe","cafes","caf\u00e9"],
+      ["boat","boats","sail","sailing","ferry","cruise","cruising"],
+      ["drive","driving","road","roads","car","scenic"],
+      ["beach","beaches","coast","coastal","ocean","sea","swim","swimming","surf"],
+      ["ski","skiing","snowboard","snowboarding","snow"],
+      ["bike","biking","cycle","cycling","cyclist"],
+      ["shop","shopping","shops","market","markets","boutique"],
+      ["nightlife","bar","bars","club","clubs","party"],
+      ["temple","temples","shrine","shrines","church","churches","cathedral","cathedrals","monastery"],
+      ["garden","gardens","park","parks","nature","wildlife","birdwatching","safari"],
+      ["spa","onsen","hotspring","hot-spring","thermal","bath","baths"]
+    ];
+    var intentTokens = {};
+    _synGroups.forEach(function(g){
+      var hit = g.some(function(w){ return intentText.indexOf(w) !== -1; });
+      if (hit) g.forEach(function(w){ intentTokens[w] = true; });
+    });
+    function _itemMatchesIntent(item){
+      if (!Object.keys(intentTokens).length) return false;
+      var hay = ((item.name||"") + " " + (item.description||"") + " " + (item.type||"")).toLowerCase();
+      // Type nudge: if the user mentioned trains or rail, every route item counts.
+      if (item.type === "route" && (intentTokens["train"] || intentTokens["rail"])) return true;
+      return Object.keys(intentTokens).some(function(w){ return hay.indexOf(w) !== -1; });
+    }
     items.forEach(function(item,i){
       item.id = "plm" + i;
-      item.checked = false; // default off — user opts in per item
+      // Auto-check items that match what the user said they want. Items that
+      // don't match stay opt-in so the list doesn't pre-commit the traveler to
+      // things they never mentioned.
+      item.checked = _itemMatchesIntent(item);
       if(item.endpoints) item.endpoints = _normPlaceArr(item.endpoints);
       if(item.requiredPlaces) item.requiredPlaces = _normPlaceArr(item.requiredPlaces);
       if(item.viableLocations) item.viableLocations = _normPlaceArr(item.viableLocations);
@@ -6688,21 +6732,41 @@ function _tbPlacesPickMode(which, id){
   _tbPlacesCaptureFields();
   _tb[which] = (_tb[which] === id) ? "" : id;
   // Auto-fill the airport when the user picks "fly" and the corresponding
-  // city field is empty. Uses the first air-type entry point in _epCache for
-  // the region, which tends to be the main international gateway (the LLM
-  // lists them in rough importance order). If the user has already typed a
-  // city, we leave it alone.
+  // city field is empty. The entry-points cache is populated asynchronously,
+  // so when the user picks fly right after opening Places, _epCache may still
+  // be empty — in that case kick off a fetch and fill once it resolves.
   if (id === "fly" && _tb[which] === "fly") {
     var cityKey = (which === "entryMode") ? "entry" : "tbExit";
+    var region = _tb.region || "";
     if (!(_tb[cityKey] || "").trim()) {
-      var pts = _epCache[_tb.region || ""] || [];
+      var pts = _epCache[region] || [];
       var airports = pts.filter(function(p){ return p.type === "air"; });
-      if (airports.length) _tb[cityKey] = airports[0].name;
+      if (airports.length) {
+        _tb[cityKey] = airports[0].name;
+      } else if (region && typeof fetchRegionEntryPoints === "function") {
+        // Cache miss — fetch now and fill on resolution. Only overwrite if the
+        // field is still empty (user may have typed something while waiting).
+        fetchRegionEntryPoints(region).then(function(pts2){
+          var airs = (pts2 || []).filter(function(p){ return p.type === "air"; });
+          if (!airs.length) return;
+          if (!(_tb[cityKey] || "").trim() && _tb[which] === "fly") {
+            _tb[cityKey] = airs[0].name;
+            // Update the live input directly if the strip is still mounted,
+            // otherwise re-render to reflect the new value.
+            var inpId = (cityKey === "entry") ? "td-entry" : "td-exit";
+            var inp = document.getElementById(inpId);
+            if (inp) inp.value = _tb[cityKey];
+            else _tbPlacesReRender();
+          }
+        }).catch(function(){});
+      }
     }
   }
-  // Close the popover if it's open
+  // Close whichever popover is open (per-direction or unified transport button)
   var pop = document.getElementById("tb-mode-pop-"+which);
   if (pop) pop.style.display = "none";
+  var tpop = document.getElementById("tb-transport-pop");
+  if (tpop) tpop.style.display = "none";
   _tbPlacesReRender();
 }
 
