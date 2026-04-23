@@ -2400,8 +2400,16 @@ async function expandMustDos() {
     return;
   }
 
-  // No must-dos — skip straight to candidates
-  if (!anchors) { runCandidateSearch([]); return; }
+  // No must-dos from the anchors field, but the sentence itself may name things
+  // the traveler clearly wants (trains, chocolate, walks in the mountains). If
+  // the sentence has substance, keep going — we'll feed it to the LLM as the
+  // must-do source. Only short-circuit to candidates when we have nothing at all.
+  if (!anchors && !intent) { runCandidateSearch([]); return; }
+  // Seed the must-do source: prefer anchors, but fall back to the sentence so
+  // the prompt has real commitments to extract. This is the fix for the "I
+  // mentioned trains in my sentence but the train routes never showed up"
+  // case — the sentence carries the same intent as a comma-separated anchors list.
+  var mustDoSource = anchors || intent;
 
   // Unified loading: show the Candidate Explorer overlay with its loading state
   // immediately, instead of briefly flashing a must-do spinner overlay before it.
@@ -2419,9 +2427,9 @@ async function expandMustDos() {
   var chipPromise = expandChipSuggestions(region, intent, _tb.chips || []);
 
   var prompt = "A traveler is planning a trip to " + (region||"this region") + ".\n"
-    + (intent ? "Their goal: " + intent + "\n" : "")
-    + "They listed these must-dos: \"" + anchors + "\"\n\n"
-    + "CRITICAL: Generate at least one item for EVERY distinct thing they named. If they said 'ride the named trains, hike the mountains, explore the culture, eat chocolate' you must produce items for each of the four — not just the trains. Do not silently drop any. There are three types.\n\n"
+    + (intent ? "Their goal / full sentence: " + intent + "\n" : "")
+    + (anchors ? "They also listed these must-dos explicitly: \"" + anchors + "\"\n" : "")
+    + "\nWhether the commitments came from the sentence, the must-do list, or both, EXTRACT EVERY DISTINCT THING THE TRAVELER NAMED and produce at least one item for each. If they said 'ride the named trains, hike the mountains, explore the culture, eat chocolate' you must produce items for each of the four — not just the trains. Treat the sentence as binding even if they didn't repeat the items in the must-do field. Do not silently drop any. There are three types.\n\n"
     + "TYPE 1 \u2014 ROUTE: a fixed journey between specific places (a train, a road trip, a hiking trail). Has ordered endpoints.\n"
     + "  Required fields for routes:\n"
     + "    • endpoints: ordered array [start, end] — the traditional direction if one exists\n"
@@ -6509,6 +6517,12 @@ var _EP_TYPE_TO_MODE = { air:"fly", rail:"train", sea:"ferry", bus:"bus" };
 var _EP_MODE_LABEL   = { fly:"by air", train:"by train", ferry:"by ferry", bus:"by bus", drive:"by car" };
 
 function _tbUseEntryPoint(isEntry, name, mode){
+  // Capture any OTHER typed fields FIRST. Order matters: _tbPlacesCaptureFields
+  // reads td-entry/td-exit inputs and writes them back to _tb — if we called
+  // it after assigning _tb.entry = name below, it'd immediately overwrite the
+  // name we just set with whatever (usually empty) was in the DOM input. That
+  // was the "pin popup doesn't fill the text field" bug.
+  _tbPlacesCaptureFields();
   // Update state — city name AND mode, so "Set as entry by air" actually records
   // the arrival mode. Without this, the user had to separately set the mode pill.
   if (isEntry) {
@@ -6518,7 +6532,12 @@ function _tbUseEntryPoint(isEntry, name, mode){
     _tb.tbExit = name;
     if (mode) _tb.exitMode = mode;
   }
-  _tbPlacesCaptureFields();
+  // Mirror into the live DOM input so the user sees the change immediately,
+  // even before the re-render below (and in case the input is preserved across
+  // re-renders without being rebuilt from _tb).
+  var inpId = isEntry ? "td-entry" : "td-exit";
+  var inp = document.getElementById(inpId);
+  if (inp) inp.value = name;
   // Close the open popup so the user can see the map update, and give them
   // clear feedback — the collapsed trip-details strip was too subtle and the
   // popup covers it. Also auto-expand the strip on first use so the change is
