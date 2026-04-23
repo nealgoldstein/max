@@ -6558,13 +6558,12 @@ var _tbModeIcon = {
   unsure: "?",
   none:   "\u2013"
 };
+// Old per-direction mode button (kept for backwards compat / Step 2 brief).
+// Places overlay now uses the unified _tbPlacesTransportButtonHtml below.
 function _tbPlacesModeIconHtml(which){
   var cur = _tb[which] || "";
   var label = cur ? ((_tbTransportModes.filter(function(m){return m.id===cur;})[0]||{}).label || "") : "";
   var popId = "tb-mode-pop-"+which;
-  // Single plain button — no per-item icons inside the dropdown. "Multiple
-  // icons" confusion was caused by the six modes in the open popover each
-  // having their own icon; labels only now.
   return '<div style="position:relative;display:inline-block;margin-bottom:6px;">'
     + '<button type="button" onclick="_tbPlacesToggleModePopover(&#39;'+which+'&#39;,event)" '
     +   'style="font-size:11px;padding:6px 12px;border:1px solid '+(cur?"#111":"#ccc")+';border-radius:6px;background:#fff;color:'+(cur?"#111":"#666")+';cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:6px;min-width:140px;justify-content:space-between;">'
@@ -6582,6 +6581,64 @@ function _tbPlacesModeIconHtml(which){
             + '</div>';
         }).join("")
     + '</div></div>';
+}
+
+// Single Transportation button for Places overlay — one icon that brings up a
+// popover with both "Getting there" and "Getting out" mode pickers. Previously
+// we rendered one mode button per direction; Neal pointed out that the popup
+// should be unified, since the transportation question is "how are you moving
+// through the trip" — not two independent choices.
+function _tbPlacesTransportButtonHtml(){
+  var entryLabel = _tb.entryMode ? ((_tbTransportModes.filter(function(m){return m.id===_tb.entryMode;})[0]||{}).label || "") : "";
+  var exitLabel  = _tb.exitMode  ? ((_tbTransportModes.filter(function(m){return m.id===_tb.exitMode;})[0]||{}).label  || "") : "";
+  var buttonText;
+  if (entryLabel && exitLabel) {
+    buttonText = (entryLabel === exitLabel) ? entryLabel : (entryLabel + " in \u00b7 " + exitLabel + " out");
+  } else if (entryLabel || exitLabel) {
+    buttonText = (entryLabel ? (entryLabel + " in") : "") + (exitLabel ? (exitLabel + " out") : "");
+  } else {
+    buttonText = "Tap to pick how";
+  }
+  var set = !!(entryLabel || exitLabel);
+  var popId = "tb-transport-pop";
+  var rowHtml = function(labelText, which, cur){
+    return '<div style="margin-bottom:8px;">'
+      + '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:#888;margin-bottom:4px;">'+labelText+'</div>'
+      + '<div style="display:flex;flex-wrap:wrap;gap:4px;">'
+      + _tbTransportModes.map(function(m){
+          var on = cur === m.id;
+          return '<span onclick="_tbPlacesPickMode(&#39;'+which+'&#39;,&#39;'+m.id+'&#39;);event.stopPropagation();" '
+            + 'style="display:inline-block;font-size:10px;padding:4px 10px;border-radius:10px;border:1px solid '+(on?"#111":"#ddd")+';background:'+(on?"#111":"#fff")+';color:'+(on?"#fff":"#555")+';cursor:pointer;user-select:none;">'
+            + m.label + '</span>';
+        }).join("")
+      + '</div></div>';
+  };
+  return '<div style="position:relative;display:inline-block;margin-bottom:6px;">'
+    + '<button type="button" onclick="_tbPlacesToggleTransportPopover(event)" '
+    +   'style="font-size:11px;padding:7px 14px;border:1px solid '+(set?"#111":"#ccc")+';border-radius:6px;background:#fff;color:'+(set?"#111":"#666")+';cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:8px;">'
+    +   '<span>\u2708\ud83d\ude82\ud83d\ude97</span>'
+    +   '<span>'+buttonText+'</span>'
+    +   '<span style="font-size:9px;color:#999;">\u25BE</span>'
+    + '</button>'
+    + '<div id="'+popId+'" style="display:none;position:absolute;top:100%;left:0;z-index:1000;margin-top:4px;background:#fff;border:1px solid #ccc;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,0.1);padding:10px 12px;min-width:260px;">'
+    +   rowHtml("Getting there",  "entryMode", _tb.entryMode || "")
+    +   rowHtml("Getting out",    "exitMode",  _tb.exitMode  || "")
+    + '</div></div>';
+}
+
+function _tbPlacesToggleTransportPopover(evt){
+  if (evt && evt.stopPropagation) evt.stopPropagation();
+  var pop = document.getElementById("tb-transport-pop"); if (!pop) return;
+  var open = pop.style.display === "block";
+  pop.style.display = open ? "none" : "block";
+  if (!open) {
+    setTimeout(function(){
+      var h = function(e){
+        if (!pop.contains(e.target)) { pop.style.display = "none"; document.removeEventListener("click", h); }
+      };
+      document.addEventListener("click", h);
+    }, 0);
+  }
 }
 
 function _tbPlacesToggleModePopover(which, evt){
@@ -6719,21 +6776,19 @@ function _renderTripDetailsStrip(kept){
   var defaultExit  = _tb.tbExit || "";
   form.innerHTML =
      '<div style="font-size:10px;color:#888;line-height:1.5;margin-bottom:10px;">'
-    +  'Pick how you\u2019ll arrive and depart. City names only here \u2014 dates, times and flight numbers come next, once you\u2019ve committed to entry and exit.'
+    +  'One transportation picker for both directions \u2014 tap it for getting-there and getting-out modes. Cities below. Dates and flight numbers come after you\u2019ve committed to entry and exit.'
     +'</div>'
-    +'<div style="display:grid;grid-template-columns:1fr;gap:10px;">'
+    +'<div style="margin-bottom:12px;">'
+    +  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#888;margin-bottom:6px;">How you\u2019re moving</div>'
+    +  _tbPlacesTransportButtonHtml()
+    +'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'
     +'<div>'
-    +  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#888;margin-bottom:6px;">Getting there</div>'
-    +  '<label style="display:block;font-size:10px;color:#666;margin-bottom:3px;">How</label>'
-    +  _tbPlacesModeIconHtml("entryMode")
-    +  '<label style="display:block;font-size:10px;color:#666;margin-bottom:2px;">City or airport</label>'
+    +  '<label style="display:block;font-size:10px;color:#666;margin-bottom:3px;">Getting there \u2014 city or airport</label>'
     +  '<input id="td-entry" value="'+q(defaultEntry)+'" placeholder="e.g. Zurich or ZRH" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;" />'
     +'</div>'
     +'<div>'
-    +  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#888;margin-bottom:6px;">Getting out</div>'
-    +  '<label style="display:block;font-size:10px;color:#666;margin-bottom:3px;">How</label>'
-    +  _tbPlacesModeIconHtml("exitMode")
-    +  '<label style="display:block;font-size:10px;color:#666;margin-bottom:2px;">City or airport</label>'
+    +  '<label style="display:block;font-size:10px;color:#666;margin-bottom:3px;">Getting out \u2014 city or airport</label>'
     +  '<input id="td-exit" value="'+q(defaultExit)+'" placeholder="e.g. Geneva or GVA" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;" />'
     +'</div>'
     +'</div>';
@@ -6778,9 +6833,18 @@ function renderCandidateCards(cands){
         c._requiredFor = match.requiredFor || [];
       }
     }
-    // Required candidates are kept by default — the user already decided
-    // by checking the must-do. They can still Reject to override.
-    if (c._required && !c.status) c.status = "keep";
+    // Auto-keep required candidates ONCE per candidate — on its first render.
+    // Re-triggering on every render surprised Neal: after editing the brief,
+    // candidates that got newly promoted to required would retroactively flip
+    // to "keep", even though the user hadn't touched them on that page. The
+    // _autoKeepApplied flag prevents that — the user stays in control after
+    // the initial pass.
+    if (c._required && !c.status && !c._autoKeepApplied) {
+      c.status = "keep";
+      c._autoKeepApplied = true;
+    } else if (c._required) {
+      c._autoKeepApplied = true; // already has a status; mark as "seen" either way
+    }
   });
   // Split into active (not rejected) and rejected. Rejected render in a collapsible
   // footer so the user's attention stays on places still requiring a decision.
