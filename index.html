@@ -75,7 +75,8 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
     box-shadow:0 0 0 1px rgba(26,111,176,0.3);
   }
 }
-/* Grip icon indicates draggability — shown only on hover on desktop */
+/* Grip icon indicates draggability — shown only on hover on desktop.
+   Kept for any legacy usages; new destination cards use .tm-reorder-btn. */
 .tm-drag-handle{
   display:none;color:#bbb;font-size:12px;line-height:1;
   padding:0 4px;cursor:grab;user-select:none;
@@ -85,6 +86,27 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
   .tm-dest:hover .tm-drag-handle{display:inline-block;}
 }
 .tm-drag-handle:active{cursor:grabbing;}
+/* Up/down reorder arrows — a much more obvious affordance than a braille
+   grip glyph. On fine-pointer devices we hide them until the card is
+   hovered (matching the earlier drag-handle behavior so cards don't look
+   cluttered at rest). On touch devices we keep them always visible since
+   there's no hover to reveal them. */
+.tm-reorder-btn{
+  display:none;background:none;border:1px solid transparent;
+  color:#999;font-size:12px;line-height:1;padding:2px 5px;margin:0 1px;
+  cursor:pointer;border-radius:4px;user-select:none;font-family:inherit;
+  flex-shrink:0;
+}
+.tm-reorder-btn:hover:not(:disabled){
+  background:#f0f4fa;border-color:#c7d6ea;color:#1a5fa8;
+}
+.tm-reorder-btn:disabled{opacity:0.3;cursor:not-allowed;}
+@media (pointer:fine){
+  .tm-dest:hover .tm-reorder-btn{display:inline-block;}
+}
+@media (pointer:coarse){
+  .tm-reorder-btn{display:inline-block;}
+}
 /* Undo toast */
 .reorder-toast{
   position:fixed;bottom:24px;left:50%;transform:translateX(-50%);
@@ -2430,16 +2452,23 @@ async function expandMustDos() {
     + (intent ? "Their goal / full sentence: " + intent + "\n" : "")
     + (anchors ? "They also listed these must-dos explicitly: \"" + anchors + "\"\n" : "")
     + "\nWhether the commitments came from the sentence, the must-do list, or both, EXTRACT EVERY DISTINCT THING THE TRAVELER NAMED and produce at least one item for each. If they said 'ride the named trains, hike the mountains, explore the culture, eat chocolate' you must produce items for each of the four — not just the trains. Treat the sentence as binding even if they didn't repeat the items in the must-do field. Do not silently drop any. There are three types.\n\n"
-    + "TYPE 1 \u2014 ROUTE: a fixed journey between specific places (a train, a road trip, a hiking trail). Has ordered endpoints.\n"
+    + "TYPE 1 \u2014 ROUTE: a fixed journey between specific places (a train, a road trip, a hiking trail, or a multi-modal circuit like train+boat). Has ordered endpoints.\n"
     + "  Required fields for routes:\n"
     + "    • endpoints: ordered array [start, end] — the traditional direction if one exists\n"
-    + "    • requiredPlaces: same as endpoints (for backward compatibility)\n"
+    + "    • requiredPlaces: same as endpoints (for backward compatibility). For multi-stop circuits (train → boat → train), include every meaningful node so the scheduler reserves time in each, not just the first and last.\n"
     + "    • direction: \"either\" if the route works equally well in both directions, or \"forward\" / \"reverse\" if one direction is strongly preferred (rare)\n"
     + "    • durationHours: approximate length of the journey\n"
+    + "    • transportModes: array listing every mode the route uses end-to-end, in order. Use [\"train\"], [\"train\",\"boat\",\"train\"], [\"train\",\"cogwheel\",\"boat\"], [\"drive\"], [\"hike\"], etc. Required whenever the route is anything other than a simple single-mode train — multi-modal lake circuits, rack-railway + steamer combos, and boat-assisted hikes all need this so the scheduler and UI can surface the boat leg as more than an afterthought.\n"
     + "    • modeOptions: \"tourist\" / \"regional\" / \"both\" — whether a branded tourist version AND an ordinary public-transport version exist on the same route\n"
     + "    • alternatives: if modeOptions is \"both\", a string describing the ordinary alternative (e.g. \"Regular SBB trains cover the same Chur–St. Moritz route hourly, no reservation, standard fare covered by the Swiss Travel Pass. You can break the journey at any station.\")\n"
     + "    • reservationNotes: for tourist-train routes, a short string noting what's required (\"Seat reservation required, runs 2-3x daily depending on season, CHF 152+ supplement on top of fare or pass\")\n"
-    + "    • endpointHighlights: object keyed by endpoint place name, each value is a short comma-separated list of the OTHER things worth doing at that place — so the traveler can judge whether this route's endpoints are worth their own time, not just train stations. Example: {\"Zermatt\":\"Matterhorn views, Gornergrat Railway, high-altitude hikes\",\"St. Moritz\":\"Alpine lake, Engadin villages, winter-sports centre\"}. Keep each value under 12 words.\n\n"
+    + "    • endpointHighlights: object keyed by endpoint place name, each value is a short comma-separated list of the OTHER things worth doing at that place — so the traveler can judge whether this route's endpoints are worth their own time, not just train stations. Example: {\"Zermatt\":\"Matterhorn views, Gornergrat Railway, high-altitude hikes\",\"St. Moritz\":\"Alpine lake, Engadin villages, winter-sports centre\"}. Keep each value under 12 words.\n"
+    + "  Coverage expectations for rail-heavy regions (Switzerland, Japan, Norway, Scotland, India, etc.): when the traveler mentions \"named trains\" or \"scenic trains\" or similar, surface the FULL canonical set — not a short list of the most famous two or three. For Switzerland that means at minimum Glacier Express, Bernina Express, GoldenPass Line (Montreux–Interlaken/Zweisimmen–Lucerne), Gotthard Panorama Express, Centovalli Express, Jungfrau Railway, Pilatus cogwheel, Gornergrat, and the classic train+boat lake circuits. Analogous completeness applies to every region with a named-train culture. Err on the side of listing too many rather than too few — up to 12 routes is fine if the region supports it.\n"
+    + "  MULTI-MODAL ROUTES (important): many of the best \"train\" experiences are actually train+boat or train+cogwheel+boat circuits. ALWAYS include these when they're regionally iconic — they're often the main reason a traveler picks that place. Swiss examples that should appear whenever the traveler mentions trains or lakes: \n"
+    + "    - \"Lake Geneva Wine & Castle Circuit\" (Geneva → Lausanne → Montreux by train, then a CGN Belle Époque paddle steamer to Chillon/Vevey, return by train)\n"
+    + "    - \"Lake Lucerne Tell Route\" (Lucerne → boat across Vierwaldstättersee to Alpnachstad or Flüelen → Pilatus cogwheel or Rigi, return by train/boat)\n"
+    + "    - \"Brienzersee Steamer + Rothorn Bahn\" (Interlaken → steamer to Brienz → steam cogwheel to Brienzer Rothorn)\n"
+    + "    Set transportModes to [\"train\",\"boat\",\"train\"] (or similar), list every major node in requiredPlaces, and mention the boat operator (e.g. CGN, SGV) in the description so the user understands what they're signing up for.\n\n"
     + "TYPE 2 — CONDITION: something that depends on weather, season, daylight, or circumstance (Northern Lights, whale watching, cherry blossoms, wildflowers, migration).\n"
     + "  Required fields for conditions:\n"
     + "    • viableLocations: array of place objects where the condition can be experienced — these are the places Max should make sure the trip spends time in. NOT strict endpoints.\n"
@@ -2455,10 +2484,11 @@ async function expandMustDos() {
     + "META-REFERENCES: If the traveler uses something like \"all the named trains\", \"the scenic trains\", \"the major museums\", \"the cathedrals\", expand into every specific named instance that fits the region — do not pick one or two. If the phrase implies branded experiences (e.g. \"the named scenic trains\"), set modeOptions to \"both\" and include the ordinary alternative in the alternatives field.\n\n"
     + "Return ONLY a JSON array (no markdown):\n"
     + '[\n'
-    + '  {"name":"Glacier Express","type":"route","description":"Classic 8hr panoramic rail journey through the Swiss Alps.","endpoints":[{"place":"Zermatt","country":"Switzerland"},{"place":"St. Moritz","country":"Switzerland"}],"requiredPlaces":[{"place":"Zermatt","country":"Switzerland"},{"place":"St. Moritz","country":"Switzerland"}],"direction":"either","durationHours":8,"modeOptions":"both","alternatives":"Regular SBB trains cover the same Zermatt-Brig-Chur-St. Moritz route hourly with one or two transfers. No reservation, standard fare covered by the Swiss Travel Pass or Half-Fare Card. Windows open in many cars, and you can break the journey at any station.","reservationNotes":"Seat reservation required, 2-3 departures daily depending on season, CHF 152+ supplement on top of fare or pass.","endpointHighlights":{"Zermatt":"Matterhorn views, Gornergrat Railway, high-altitude hikes","St. Moritz":"Alpine lake, Engadin villages, winter-sports centre"},"flexibility":"low"},\n'
+    + '  {"name":"Glacier Express","type":"route","description":"Classic 8hr panoramic rail journey through the Swiss Alps.","endpoints":[{"place":"Zermatt","country":"Switzerland"},{"place":"St. Moritz","country":"Switzerland"}],"requiredPlaces":[{"place":"Zermatt","country":"Switzerland"},{"place":"St. Moritz","country":"Switzerland"}],"direction":"either","durationHours":8,"transportModes":["train"],"modeOptions":"both","alternatives":"Regular SBB trains cover the same Zermatt-Brig-Chur-St. Moritz route hourly with one or two transfers. No reservation, standard fare covered by the Swiss Travel Pass or Half-Fare Card. Windows open in many cars, and you can break the journey at any station.","reservationNotes":"Seat reservation required, 2-3 departures daily depending on season, CHF 152+ supplement on top of fare or pass.","endpointHighlights":{"Zermatt":"Matterhorn views, Gornergrat Railway, high-altitude hikes","St. Moritz":"Alpine lake, Engadin villages, winter-sports centre"},"flexibility":"low"},\n'
+    + '  {"name":"Lake Geneva Wine & Castle Circuit","type":"route","description":"Half-day lake-and-vine loop: train along the Lavaux terraces to Montreux, then a CGN Belle Époque paddle steamer to Château de Chillon, return by train. Pass covers both legs.","endpoints":[{"place":"Geneva","country":"Switzerland"},{"place":"Montreux","country":"Switzerland"}],"requiredPlaces":[{"place":"Geneva","country":"Switzerland"},{"place":"Lausanne","country":"Switzerland"},{"place":"Montreux","country":"Switzerland"},{"place":"Château de Chillon","country":"Switzerland"}],"direction":"either","durationHours":7,"transportModes":["train","boat","train"],"modeOptions":"regional","alternatives":"","reservationNotes":"No reservation needed; CGN historic steamers run most of the year with a reduced winter schedule. Swiss Travel Pass covers both the train and the boat.","endpointHighlights":{"Geneva":"Old Town, Jet d\'Eau, lakefront","Montreux":"Lakefront promenade, Chillon Castle, Freddie Mercury statue"},"flexibility":"low"},\n'
     + '  {"name":"Northern Lights","type":"condition","description":"Aurora borealis, visible on clear dark nights September-March away from light pollution.","viableLocations":[{"place":"Snæfellsnes Peninsula","country":"Iceland"},{"place":"Akureyri area","country":"Iceland"},{"place":"Westfjords","country":"Iceland"}],"requiredPlaces":[{"place":"Snæfellsnes Peninsula","country":"Iceland"},{"place":"Akureyri area","country":"Iceland"}],"recovery":"high","frequencyRequirement":3,"conditionNote":"You may be up until 2-3am on viable nights — the next morning needs to start late. Plan at least 3 nights in aurora-capable locations so weather gives you a real chance.","flexibility":"high"}\n'
     + ']\n\n'
-    + "Be specific. Use real, well-known names. For routes, note each individual route (not 'the trains' as one item). For conditions, list multiple viable locations. Max 12 items for meta-references, max 6 otherwise.\n\n"
+    + "Be specific. Use real, well-known names. For routes, note each individual route (not 'the trains' as one item). For conditions, list multiple viable locations. Aim for 8\u201314 items total; when a traveler mentions rail-heavy meta-references like \"the named trains\" or \"scenic routes,\" lean toward the upper end so the full canonical set is represented — including the multi-modal train+boat circuits described above.\n\n"
     + "CRITICAL: endpoints, requiredPlaces, and viableLocations are ARRAYS OF OBJECTS, each with {\"place\": \"...\", \"country\": \"...\"} \u2014 never plain strings. Even for a single-country trip, always include country. This matters because the consuming code looks up item.place and item.country.";
 
   try {
@@ -12074,13 +12104,43 @@ function drawTripMode(){
     var card=document.createElement("div"); card.className="tm-dest"+(dest.id===activeDest?" active":""); card.setAttribute("data-id",dest.id);
     // Draggable on fine-pointer devices (gate enforced by CSS). Listeners are safe on any device — they just won't fire without HTML5 DnD.
     card.setAttribute("draggable", "true");
+    // Tooltip signals the drag affordance now that the visible grip icon is gone.
+    card.title = "Drag to reorder, or use the \u2191\u2193 arrows";
     _wireDragHandlers(card, dest);
     // Body: name + optional label + dates
     var bodyDiv=document.createElement("div"); bodyDiv.className="tm-dest-body";
     var nameRow=document.createElement("div"); nameRow.className="tm-dest-actions";
-    // Drag grip icon — visible on hover, conveys draggability
-    var grip=document.createElement("span"); grip.className="tm-drag-handle"; grip.textContent="\u2807\u2807"; grip.title="Drag to reorder";
-    nameRow.appendChild(grip);
+    // Up/down arrow buttons — visible on hover, convey reorder-ability more
+    // clearly than the earlier braille drag-grip glyph. Drag-and-drop still
+    // works via the card itself; these arrows are the click-to-move path for
+    // people who don't discover (or can't easily use) drag-and-drop.
+    var total = (trip.destinations||[]).length;
+    var upBtn = document.createElement("button");
+    upBtn.className = "tm-reorder-btn";
+    upBtn.textContent = "\u2191";
+    upBtn.title = "Move up";
+    upBtn.disabled = (idx === 0);
+    (function(d, fromIdx){
+      upBtn.onclick = function(e){
+        e.stopPropagation();
+        if (fromIdx <= 0) return;
+        executeMoveDest(d, fromIdx, fromIdx - 1);
+      };
+    })(dest, idx);
+    var downBtn = document.createElement("button");
+    downBtn.className = "tm-reorder-btn";
+    downBtn.textContent = "\u2193";
+    downBtn.title = "Move down";
+    downBtn.disabled = (idx === total - 1);
+    (function(d, fromIdx){
+      downBtn.onclick = function(e){
+        e.stopPropagation();
+        if (fromIdx >= (trip.destinations||[]).length - 1) return;
+        executeMoveDest(d, fromIdx, fromIdx + 1);
+      };
+    })(dest, idx);
+    nameRow.appendChild(upBtn);
+    nameRow.appendChild(downBtn);
     var nameEl=document.createElement("div"); nameEl.className="tm-dest-name"; nameEl.style.flex="1"; nameEl.textContent=dest.label||dest.place;
     var renBtn=document.createElement("button"); renBtn.className="tm-rename-btn"; renBtn.textContent="rename"; renBtn.title="Rename destination";
     (function(d,nel){renBtn.onclick=function(e){e.stopPropagation();var inp=document.createElement("input");inp.className="tm-rename-inp";inp.value=d.label||d.place;nameRow.replaceChild(inp,nel);renBtn.style.display="none";inp.focus();inp.select();function sv(){var v=inp.value.trim();d.label=(v&&v!==d.place)?v:null;autoSave();drawTripMode();}inp.onblur=sv;inp.onclick=function(e2){e2.stopPropagation();};inp.onkeydown=function(e2){if(e2.key==="Enter")inp.blur();if(e2.key==="Escape"){inp.blur();}};};})(dest,nameEl);
