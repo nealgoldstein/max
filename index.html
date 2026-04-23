@@ -5132,14 +5132,51 @@ var _tbTransportModes = [
   {id:"none",   label:"Won\u2019t travel"}
 ];
 
+// Step 2 version of the mode picker. Same icon+popover design as the Places
+// overlay version (_tbPlacesModeIconHtml), just wired to _tbPickMode so
+// field-capture matches the Step 2 brief-edit form (which has extra fields).
+// Named _tbModePillsHtml for historical reasons — it no longer renders pills.
 function _tbModePillsHtml(which){
   var cur = _tb[which] || "";
-  return '<div style="display:flex;gap:5px;flex-wrap:wrap;margin:4px 0 6px;">'
-    + _tbTransportModes.map(function(m){
-        var on = cur === m.id;
-        return '<span class="tb-toggle'+(on?" on":"")+'" onclick="_tbPickMode(&#39;'+which+'&#39;,&#39;'+m.id+'&#39;)">'+m.label+'</span>';
-      }).join("")
-    +'</div>';
+  var icon = cur && _tbModeIcon && _tbModeIcon[cur] ? _tbModeIcon[cur] : "\u2708\ufe0f";
+  var label = cur ? ((_tbTransportModes.filter(function(m){return m.id===cur;})[0]||{}).label || "") : "";
+  var popId = "tb-mode2-pop-"+which;
+  return '<div style="position:relative;display:flex;align-items:center;gap:8px;margin:4px 0 6px;">'
+    + '<button type="button" onclick="_tbToggleStep2ModePopover(&#39;'+which+'&#39;,event)" '
+    +   'title="'+(label||"Pick mode")+'" '
+    +   'style="font-size:18px;width:36px;height:32px;padding:0;border:1px solid '+(cur?"#111":"#ddd")+';border-radius:6px;background:#fff;cursor:pointer;line-height:1;display:inline-flex;align-items:center;justify-content:center;font-family:inherit;">'
+    +   icon
+    + '</button>'
+    + '<span style="font-size:11px;color:'+(cur?"#333":"#999")+';">'+(cur?label:"Tap to pick how")+'</span>'
+    + '<div id="'+popId+'" style="display:none;position:absolute;top:100%;left:0;z-index:1000;margin-top:4px;background:#fff;border:1px solid #ccc;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,0.1);padding:4px;min-width:160px;">'
+    +   _tbTransportModes.map(function(m){
+          var on = cur === m.id;
+          var ic = (_tbModeIcon && _tbModeIcon[m.id]) || "\u2022";
+          return '<div onclick="_tbPickMode(&#39;'+which+'&#39;,&#39;'+m.id+'&#39;)" '
+            + 'style="padding:6px 8px;font-size:11px;cursor:pointer;border-radius:4px;display:flex;align-items:center;gap:8px;'
+            + (on?"background:#f0f5ff;color:#1a5fa8;font-weight:600;":"color:#333;")+'" '
+            + 'onmouseover="this.style.background=&#39;#f5f5f5&#39;" onmouseout="this.style.background=&#39;'+(on?"#f0f5ff":"transparent")+'&#39;">'
+            + '<span style="font-size:14px;width:18px;text-align:center;">'+ic+'</span><span>'+m.label+'</span>'
+            + '</div>';
+        }).join("")
+    + '</div></div>';
+}
+
+function _tbToggleStep2ModePopover(which, evt){
+  if (evt && evt.stopPropagation) evt.stopPropagation();
+  var pop = document.getElementById("tb-mode2-pop-"+which); if (!pop) return;
+  var other = document.getElementById("tb-mode2-pop-"+(which==="entryMode"?"exitMode":"entryMode"));
+  if (other) other.style.display = "none";
+  var open = pop.style.display === "block";
+  pop.style.display = open ? "none" : "block";
+  if (!open) {
+    setTimeout(function(){
+      var h = function(e){
+        if (!pop.contains(e.target)) { pop.style.display = "none"; document.removeEventListener("click", h); }
+      };
+      document.addEventListener("click", h);
+    }, 0);
+  }
 }
 
 function _tbPickMode(which, id){
@@ -7056,9 +7093,14 @@ function renderCandidateCards(cands){
   typeOrder.forEach(function(t){
     var names = mustDoOrderByType[t];
     if (!names || !names.length) return;
-    // Skip types whose must-dos have no candidates
+    // For routes and activities we ALWAYS render the section — the user needs
+    // to see their train routes and activity descriptions in Places even before
+    // endpoint candidates have been generated. For conditions and manual we
+    // keep the old "skip if empty" rule because those have no standalone
+    // value without candidate cards.
+    var alwaysRender = (t === "route" || t === "activity");
     var hasAnyGroup = names.some(function(n){ return candByPrimary[n] && candByPrimary[n].length; });
-    if (!hasAnyGroup) return;
+    if (!alwaysRender && !hasAnyGroup) return;
     // Umbrella type header
     var typeHdr = document.createElement("div");
     typeHdr.style.cssText = "margin-top:18px;padding:10px 4px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#111;border-top:"+(renderedAny?"1px solid #e8e8e8":"none")+";";
@@ -7071,11 +7113,16 @@ function renderCandidateCards(cands){
     });
   });
 
-  // Helper that renders a single must-do's section (header + description + cards)
+  // Helper that renders a single must-do's section (header + description + cards).
+  // For routes and activities we render even when no candidates match yet —
+  // the train route name, description and "A → B" line all carry standalone
+  // value. For other types, empty sections are skipped.
   function _renderMustDoSection(mdName, container){
-    var group = candByPrimary[mdName];
-    if (!group || !group.length) return;
+    var group = candByPrimary[mdName] || [];
     var mdItem = (_mdcItems||[]).find(function(m){ return m.name === mdName; });
+    var sectionType = (mdItem && mdItem.type) || "activity";
+    var alwaysRenderSection = (sectionType === "route" || sectionType === "activity");
+    if (!alwaysRenderSection && !group.length) return;
     var sectionWrap = document.createElement("div");
     sectionWrap.style.cssText = "margin-top:14px;padding:10px 10px 8px;background:#f7faff;border-radius:8px;border:1px solid #e8f0fc;";
 
@@ -7134,6 +7181,19 @@ function renderCandidateCards(cands){
         ehWrap.innerHTML = ehParts.join("");
         sectionWrap.appendChild(ehWrap);
       }
+    }
+
+    // Empty-state hint — when we're rendering a route/activity section with no
+    // candidates yet (first paint before p1 returns, or p1 returned nothing for
+    // this must-do) surface a note inside the section wrap so the user knows
+    // the section is live, not stuck.
+    if (alwaysRenderSection && !group.length) {
+      var empty = document.createElement("div");
+      empty.style.cssText = "font-size:10px;color:#999;font-style:italic;margin-top:6px;padding-top:6px;border-top:1px dashed #e0eaf5;";
+      empty.textContent = (sectionType === "route")
+        ? "Endpoint places will appear below as they load."
+        : "Places for this activity will appear below as they load.";
+      sectionWrap.appendChild(empty);
     }
 
     el.appendChild(sectionWrap);
