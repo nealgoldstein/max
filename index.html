@@ -309,8 +309,8 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .exp-item-name{font-size:12px;font-weight:500;color:#111;line-height:1.3;}
 .exp-item-note{font-size:10px;color:#999;margin-top:2px;line-height:1.4;}
 .exp-item-acts{display:flex;gap:4px;flex-shrink:0;}
-.exp-add-btn{font-size:10px;padding:2px 7px;border:1px solid #c8dff8;border-radius:4px;background:#fff;color:#1a6fb0;cursor:pointer;font-family:inherit;}
-.exp-add-btn:hover{background:#f0f7ff;}
+.exp-add-btn{font-size:10px;font-weight:600;padding:4px 10px;border:1px solid #1a6fb0;border-radius:5px;background:#1a6fb0;color:#fff;cursor:pointer;font-family:inherit;}
+.exp-add-btn:hover{background:#134a8a;border-color:#134a8a;}
 .exp-story-btn{font-size:10px;padding:2px 6px;border:1px solid #d8ccf0;border-radius:4px;background:#fff;color:#7c5cbf;cursor:pointer;font-family:inherit;}
 .exp-story-btn:hover{background:#f5f0ff;}
 .exp-empty{font-size:11px;color:#ccc;font-style:italic;padding:6px 0;}
@@ -9974,6 +9974,86 @@ async function fetchCityMeta(dest){
   window[lockKey]=false;
 }
 
+// Auto-seed LLM-flagged iconic sights into a destination's day plan so the
+// user lands on a plausible schedule rather than an empty grid. Non-iconic
+// sights stay in dest.suggestions for the user to opt into via the Explore
+// tab. Idempotent: skips any sight whose name already exists as a day item,
+// so Refresh doesn't double-add.
+function _autoSeedIconicSightsToDays(dest){
+  if (!dest || !Array.isArray(dest.suggestions) || !Array.isArray(dest.days) || !dest.days.length) return;
+  var iconic = dest.suggestions.filter(function(s){ return s.iconic; });
+  if (!iconic.length) return;
+
+  // Build a set of existing day-item names so we don't duplicate on regen.
+  var existingNames = {};
+  dest.days.forEach(function(day){
+    (day.items || []).forEach(function(item){
+      if (item.type === "sight" && item.n) existingNames[item.n.toLowerCase()] = true;
+    });
+  });
+  iconic = iconic.filter(function(s){ return !existingNames[(s.n || "").toLowerCase()]; });
+  if (!iconic.length) return;
+
+  // Prefer middle days for iconic sights — the user often wants lighter
+  // arrival/departure days. If there aren't many days, just use all of them.
+  var dayCount = dest.days.length;
+  var dayOrder = [];
+  if (dayCount >= 4) {
+    for (var i = 1; i < dayCount - 1; i++) dayOrder.push(i);
+    dayOrder.push(0); dayOrder.push(dayCount - 1);
+  } else {
+    for (var j = 0; j < dayCount; j++) dayOrder.push(j);
+  }
+
+  // Respect existing assignments — cap iconic at ~2 per day, less if already busy.
+  var capPerDay = {};
+  dayOrder.forEach(function(idx){
+    var cur = (dest.days[idx].items || []).filter(function(i){ return i.type === "sight"; }).length;
+    capPerDay[idx] = Math.max(0, 2 - cur);
+  });
+
+  var placedIds = {};
+  var iconicIdx = 0;
+  // Round-robin over the preferred day order until iconic sights or capacity runs out.
+  var safety = 0;
+  while (iconicIdx < iconic.length && safety++ < 100) {
+    var placedThisPass = false;
+    for (var k = 0; k < dayOrder.length && iconicIdx < iconic.length; k++) {
+      var dIdx = dayOrder[k];
+      if (capPerDay[dIdx] <= 0) continue;
+      var s = iconic[iconicIdx++];
+      var day = dest.days[dIdx];
+      if (!day.items) day.items = [];
+      sidCtr++;
+      day.items.push({
+        id: "s" + sidCtr,
+        type: "sight",
+        slot: "day",
+        n: s.n,
+        p: "must",
+        done: false,
+        st: s.st || s.n,
+        note: s.note || null,
+        timeStart: null,
+        timeEnd: null,
+        lat: s.lat || null,
+        lng: s.lng || null,
+        autoSeeded: true
+      });
+      capPerDay[dIdx]--;
+      placedIds[s.id] = true;
+      placedThisPass = true;
+    }
+    if (!placedThisPass) break;
+  }
+
+  // Remove placed sights from the dest-level suggestion list so the Explore
+  // tab stops showing them as "add to day" — they're already on days.
+  if (Object.keys(placedIds).length) {
+    dest.suggestions = dest.suggestions.filter(function(s){ return !placedIds[s.id]; });
+  }
+}
+
 // Shared helper — takes an essentials block and appends pins to dest.suggestions.
 // Skips entries whose names already exist (idempotent across re-fetches).
 function mergeEssentialsIntoSuggestions(dest,essentials){
@@ -10057,9 +10137,11 @@ async function generateCityData(place,destId){
   var _placeFraming = _regionLike
     ? 'This place is a broader area (a mountain pass, valley, alpine region, or similar), not a single city. List sights across the area — viewpoints, lakes, passes, cable-car summits, alpine huts, villages, historic sites — the things a traveler goes to see when they visit this region. Pick sights from the whole area, naming the specific village/viewpoint/summit each one belongs to in the description.'
     : 'This is a city or town. List real sights within it or its immediate surroundings.';
-  var prompt='Generate travel data for '+place+'. Return ONLY valid JSON, no markdown:\n{"cityCenter":[lat,lng],"sights":[{"name":"...","st":"...","desc":"one sentence"}],"districts":[{"name":"...","good":"...","bad":"...","hotels":[{"name":"...","desc":"...","price":"...","tier":2}]}],"practicalInfo":{"currency":"...","tipping":"...","note":"...","emergency":"..."},"transitHub":{"arrival":{"name":"...","lat":0,"lng":0},"departure":{"name":"...","lat":0,"lng":0}},"essentials":{"atms":[{"name":"...","note":"..."}],"banks":[{"name":"...","note":"..."}],"groceries":[{"name":"...","note":"..."}],"touristInfo":[{"name":"...","note":"..."}],"pharmacies":[{"name":"...","note":"..."}]}}\n'
+  var prompt='Generate travel data for '+place+'. Return ONLY valid JSON, no markdown:\n{"cityCenter":[lat,lng],"sights":[{"name":"...","st":"...","desc":"one sentence","iconic":true}],"districts":[{"name":"...","good":"...","bad":"...","hotels":[{"name":"...","desc":"...","price":"...","tier":2}]}],"practicalInfo":{"currency":"...","tipping":"...","note":"...","emergency":"..."},"transitHub":{"arrival":{"name":"...","lat":0,"lng":0},"departure":{"name":"...","lat":0,"lng":0}},"essentials":{"atms":[{"name":"...","note":"..."}],"banks":[{"name":"...","note":"..."}],"groceries":[{"name":"...","note":"..."}],"touristInfo":[{"name":"...","note":"..."}],"pharmacies":[{"name":"...","note":"..."}]}}\n'
     + _placeFraming + '\n'
-    + _sightsCountGD + ', 2 districts, 1-2 hotels each. SIGHTS must be real cultural, historical, architectural, or natural attractions a tourist visits for the experience — museums, churches, landmarks, viewpoints, gondolas, trails, squares, gardens, ruins. Do NOT include hotels, spa retreats, wellness retreats, lodges, banks, ATMs, pharmacies, grocery stores, or other everyday services as sights — those belong in hotels or essentials, not sights. Essentials are ALL required — do not omit any field. Include 2-3 ATMs, 1-2 banks (named branches — UBS, Raiffeisen, Barclays, BNP, etc. — whatever operates locally), 2-3 groceries, 1 tourist info, AND 1-2 pharmacies (chemists / drugstores / Apotheke / farmacia / pharmacie — whatever the local term). Real named places. Be concise.'
+    + _sightsCountGD + ', 2 districts, 1-2 hotels each. SIGHTS must be real cultural, historical, architectural, or natural attractions a tourist visits for the experience — museums, churches, landmarks, viewpoints, gondolas, trails, squares, gardens, ruins. Do NOT include hotels, spa retreats, wellness retreats, lodges, banks, ATMs, pharmacies, grocery stores, or other everyday services as sights — those belong in hotels or essentials, not sights. '
+    + 'ICONIC FLAG: mark 3\u20135 sights as "iconic":true — the ones a first-time visitor would be disappointed to miss (Jungfraujoch in Interlaken, Matterhorn at Gornergrat in Zermatt, Duomo in Milan, etc.). These will be auto-seeded onto the traveler\u2019s days; the rest are opt-in optional picks. All other sights get "iconic":false or omit the field. Err toward fewer iconic flags, not more — if everything is iconic, nothing is. '
+    + 'Essentials are ALL required — do not omit any field. Include 2-3 ATMs, 1-2 banks (named branches — UBS, Raiffeisen, Barclays, BNP, etc. — whatever operates locally), 2-3 groceries, 1 tourist info, AND 1-2 pharmacies (chemists / drugstores / Apotheke / farmacia / pharmacie — whatever the local term). Real named places. Be concise.'
     + (_paceDirGD ? "\n\n"+_paceDirGD : "");
 
   try{
@@ -10112,8 +10194,13 @@ async function generateCityData(place,destId){
         sidCtr++;
         var sLat=s.lat||(genCenter?genCenter[0]+(Math.random()-.5)*.025:null);
         var sLng=s.lng||(genCenter?genCenter[1]+(Math.random()-.5)*.030:null);
-        return {id:"s"+sidCtr,type:"sight",n:s.name,st:s.st||s.name,note:s.desc||null,lat:sLat,lng:sLng,approx:!s.lat};
+        return {id:"s"+sidCtr,type:"sight",n:s.name,st:s.st||s.name,note:s.desc||null,lat:sLat,lng:sLng,approx:!s.lat,iconic:!!s.iconic};
       });
+      // Auto-seed iconic sights onto days so the user lands on a plan, not
+      // an empty day grid. Non-iconic sights stay in the Explore list as
+      // opt-in picks. See design-notes.md — this is the "Option C" default
+      // that shifts the day-level from "assemble" to "curate/trim".
+      _autoSeedIconicSightsToDays(destRef);
       // Append essentials as additional suggestion pins
       if(data.essentials) mergeEssentialsIntoSuggestions(destRef,data.essentials);
       autoSave();
@@ -13101,12 +13188,31 @@ function buildExplorePane(dest){
 
   // Only true sights belong in Explore — essentials (atm/grocery/tourist-info/pharmacy/bank) live in the Practical section under Info
   var sightOnly=dest.suggestions.filter(function(s){return s.type==="sight";});
+  // Count sights already auto-seeded onto days so we can tell the user
+  // "iconic picks are already on your plan; here are the optional extras."
+  var autoOnDays = 0;
+  (dest.days||[]).forEach(function(day){
+    (day.items||[]).forEach(function(it){ if (it.type === "sight" && it.autoSeeded) autoOnDays++; });
+  });
   if(isGen){
     var genMsg=document.createElement("div"); genMsg.className="exp-generating";
     genMsg.textContent="Max is generating suggestions for "+dest.place+"\u2026"; sightsSec.appendChild(genMsg);
-  } else if(sightOnly.length===0){
+  } else if(sightOnly.length===0 && autoOnDays===0){
     var emp=document.createElement("div"); emp.className="exp-empty"; emp.textContent="No suggestions yet \u2014 click Refresh to generate."; sightsSec.appendChild(emp);
   } else {
+    if (autoOnDays > 0) {
+      var seedNote = document.createElement("div");
+      seedNote.style.cssText = "font-size:11px;color:#1a6fb0;background:#eaf3fb;border:1px solid #c8dff8;border-radius:6px;padding:7px 10px;margin:0 0 8px;line-height:1.5;";
+      seedNote.innerHTML = "\u2713 <strong>"+autoOnDays+"</strong> iconic sight"+(autoOnDays!==1?"s":"")+" added to your days. "
+        + (sightOnly.length>0 ? "The picks below are optional — add any that fit." : "No optional extras generated.");
+      sightsSec.appendChild(seedNote);
+    }
+    if (sightOnly.length > 0 && autoOnDays > 0) {
+      var optHdr = document.createElement("div");
+      optHdr.style.cssText = "font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#888;margin:10px 0 6px;";
+      optHdr.textContent = "Optional picks";
+      sightsSec.appendChild(optHdr);
+    }
     sightOnly.forEach(function(s){
       sightsSec.appendChild(mkExploreSuggestion(s,dest,"sight"));
     });
