@@ -962,6 +962,105 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .log-btn-primary{width:100%;padding:10px;font-size:12px;font-weight:600;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;margin-bottom:8px;}
 .log-btn-skip{width:100%;padding:8px;font-size:11px;color:#aaa;background:none;border:none;cursor:pointer;font-family:inherit;}
 
+/* ==== Trip gallery (template-first picker) =========================
+   Sits between the Step 2 brief submit and the Places overlay. Three
+   cards per the gallery prototype. Kept CSS self-contained under a
+   tg- prefix so we don't collide with existing styles. */
+.tg-overlay{position:fixed;inset:0;background:#f5f3ee;overflow-y:auto;z-index:980;}
+.tg-shell{max-width:1280px;margin:0 auto;padding:28px 32px 80px;}
+.tg-header h1{font-size:24px;font-weight:700;margin:0 0 6px;letter-spacing:-0.01em;color:#1a1a1a;}
+.tg-header .tg-lede{font-size:13px;color:#555;max-width:760px;line-height:1.55;margin:0 0 18px;}
+.tg-brief{background:#fff;border:1px solid #e6e2d8;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:12px;color:#555;line-height:1.6;display:flex;gap:14px;flex-wrap:wrap;align-items:center;}
+.tg-brief strong{color:#1a1a1a;font-weight:600;}
+.tg-brief .tg-chip{display:inline-block;font-size:11px;padding:3px 9px;background:#e8f0fc;color:#1a5fa8;border-radius:999px;font-weight:600;}
+.tg-brief .tg-dur{display:inline-block;font-size:11px;padding:3px 9px;background:#f5ebcf;color:#b28a2e;border-radius:999px;font-weight:700;}
+.tg-brief .tg-edit{margin-left:auto;font-size:11px;color:#1a5fa8;cursor:pointer;text-decoration:none;background:none;border:none;font-family:inherit;padding:0;}
+.tg-brief .tg-edit:hover{text-decoration:underline;}
+
+.tg-lens-row{display:flex;gap:18px;align-items:baseline;margin-bottom:14px;flex-wrap:wrap;}
+.tg-lens-row h2{font-size:15px;font-weight:700;margin:0;letter-spacing:-0.005em;color:#1a1a1a;}
+.tg-lens-sub{font-size:12px;color:#888;}
+
+.tg-loading{padding:60px 20px;text-align:center;color:#888;font-size:13px;}
+.tg-loading .tg-spin{display:inline-block;font-size:24px;animation:spin 1.2s linear infinite;margin-bottom:10px;}
+.tg-loading .tg-sub{font-size:11px;color:#aaa;margin-top:6px;}
+
+.tg-gallery{display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:18px;margin-bottom:28px;}
+@media (max-width:980px){.tg-gallery{grid-template-columns:1fr;}}
+
+.tg-card{background:#fff;border:1px solid #e6e2d8;border-radius:14px;overflow:hidden;display:flex;flex-direction:column;transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease;cursor:pointer;}
+.tg-card:hover{transform:translateY(-2px);box-shadow:0 10px 28px rgba(20,20,20,0.08);border-color:#d8d1c0;}
+.tg-card.tg-selected{border-color:#1a5fa8;box-shadow:0 0 0 3px #e8f0fc, 0 10px 28px rgba(26,95,168,0.12);}
+
+.tg-hero{position:relative;height:72px;background:linear-gradient(135deg,#1a5fa8 0%,#134a8a 100%);border-bottom:1px solid #e6e2d8;display:flex;align-items:center;padding:0 16px;color:#fff;}
+.tg-hero .tg-hero-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;opacity:0.85;}
+.tg-hero .tg-hero-sub{font-size:14px;font-weight:700;margin-top:2px;}
+.tg-hero .tg-days{position:absolute;top:10px;right:12px;font-size:11px;font-weight:700;background:#fff;color:#1a1a1a;padding:4px 10px;border-radius:999px;box-shadow:0 2px 6px rgba(0,0,0,0.08);}
+
+.tg-body{padding:16px 18px 4px;flex:1;display:flex;flex-direction:column;}
+.tg-title{font-size:17px;font-weight:700;letter-spacing:-0.01em;margin:0 0 4px;color:#1a1a1a;}
+.tg-thesis{font-size:12px;color:#555;line-height:1.55;margin:0 0 12px;}
+
+.tg-tags{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px;}
+.tg-tag{font-size:10px;padding:3px 8px;border-radius:4px;background:#f4efdf;color:#5c4a1a;font-weight:600;letter-spacing:0.02em;}
+.tg-tag.rail{background:#e8f0fc;color:#1a5fa8;}
+.tg-tag.boat{background:#e5f2f5;color:#2a7a9e;}
+.tg-tag.food{background:#f7eceb;color:#a84a36;}
+.tg-tag.hike{background:#e9f3ec;color:#2a7a4e;}
+.tg-tag.pace{background:#f0ecf5;color:#6a4a8a;}
+.tg-tag.home{background:#fcf4e4;color:#8a6a20;}
+.tg-tag.cond{background:#d4f0e2;color:#1d9c6a;}
+
+.tg-totals{display:flex;gap:14px;margin:6px 0 12px;padding:8px 10px;background:#faf7ee;border-radius:7px;font-size:11px;color:#555;flex-wrap:wrap;}
+.tg-totals span strong{color:#1a1a1a;font-weight:700;}
+.tg-totals .tg-metric-primary{background:#e8f0fc;color:#1a5fa8;padding:2px 8px;border-radius:999px;font-weight:700;}
+.tg-totals span{display:inline-flex;align-items:center;gap:4px;}
+
+.tg-weeks{display:flex;gap:4px;padding:2px 0 6px;}
+.tg-week{flex:1;min-width:0;background:#faf7ee;border:1px solid #e6e2d8;border-radius:7px;padding:6px 7px;display:flex;flex-direction:column;gap:3px;}
+.tg-week-hdr{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#888;}
+.tg-week-stops{display:flex;flex-direction:column;gap:2px;}
+.tg-week-stop{display:flex;align-items:center;gap:5px;font-size:10.5px;color:#1a1a1a;line-height:1.2;}
+.tg-week-stop .tg-dot{width:7px;height:7px;border-radius:50%;background:#1a1a1a;flex-shrink:0;}
+.tg-week-stop .tg-dot.entry{background:#1a5fa8;}
+.tg-week-stop .tg-dot.exit{background:#b28a2e;}
+.tg-week-stop .tg-dot.anchor{background:#c04820;}
+.tg-week-stop .tg-place{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.tg-week-stop .tg-nights{color:#888;font-size:9.5px;margin-left:auto;font-weight:600;}
+
+.tg-days{border-top:1px dashed #e6e2d8;padding:12px 18px 14px;font-size:11.5px;color:#555;line-height:1.55;display:none;}
+.tg-card.tg-expanded .tg-days{display:block;}
+.tg-week-block{margin-bottom:12px;}
+.tg-week-block:last-child{margin-bottom:0;}
+.tg-week-block h4{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#1a5fa8;margin:0 0 6px;}
+.tg-day{display:flex;gap:10px;padding:4px 0;border-bottom:1px dotted #eee2c8;}
+.tg-day:last-child{border-bottom:none;}
+.tg-day-num{font-size:10px;color:#888;font-weight:700;min-width:44px;flex-shrink:0;padding-top:1px;}
+.tg-day-txt{flex:1;}
+.tg-day-txt strong{color:#1a1a1a;font-weight:600;}
+
+.tg-foot{padding:12px 18px 16px;border-top:1px solid #e6e2d8;display:flex;gap:8px;align-items:center;}
+.tg-foot .tg-open{background:none;border:none;color:#1a5fa8;cursor:pointer;font-size:11px;font-weight:600;padding:4px 0;font-family:inherit;}
+.tg-foot .tg-open:hover{text-decoration:underline;}
+.tg-foot .tg-start{margin-left:auto;background:#1a5fa8;color:#fff;border:none;padding:8px 16px;font-size:12px;font-weight:700;border-radius:7px;cursor:pointer;font-family:inherit;transition:background .12s;}
+.tg-foot .tg-start:hover{background:#134a8a;}
+.tg-card.tg-selected .tg-start{background:#2a7a4e;}
+.tg-card.tg-selected .tg-start:hover{background:#1d5a38;}
+
+.tg-tray{margin-top:6px;background:#fff;border:1px solid #e6e2d8;border-radius:10px;padding:14px 18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+.tg-tray .tg-tray-lbl{font-size:12px;color:#555;}
+.tg-tray button{background:#fff;border:1px solid #e6e2d8;color:#1a1a1a;font-size:12px;font-weight:600;padding:7px 12px;border-radius:7px;cursor:pointer;font-family:inherit;}
+.tg-tray button:hover{background:#faf7ee;border-color:#d8d1c0;}
+.tg-tray .tg-scratch{margin-left:auto;color:#888;}
+.tg-tray .tg-scratch button{background:none;border:none;color:#1a5fa8;font-weight:600;padding:0;cursor:pointer;}
+.tg-tray .tg-scratch button:hover{text-decoration:underline;background:none;}
+
+.tg-sticky-cta{position:fixed;right:32px;bottom:28px;background:#1a1a1a;color:#fff;padding:14px 20px;border-radius:999px;font-size:13px;font-weight:700;box-shadow:0 10px 28px rgba(0,0,0,0.22);cursor:pointer;display:none;align-items:center;gap:10px;border:none;font-family:inherit;}
+.tg-sticky-cta.on{display:inline-flex;}
+.tg-sticky-cta:hover{background:#000;}
+
+.tg-error{background:#fff5f5;border:1px solid #f8c8c8;border-radius:8px;padding:14px 18px;margin:20px 0;color:#a83c3c;font-size:12px;line-height:1.5;}
+.tg-error button{margin-left:10px;background:#fff;border:1px solid #f8c8c8;color:#a83c3c;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;}
 
 </style>
 </head>
@@ -1014,6 +1113,7 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
     </div>
     <div id="browse-chat" style="display:none;margin-top:12px;"></div>
     <div id="trip-brief-overlay" style="display:none;"></div>
+    <div id="trip-gallery-overlay" class="tg-overlay" style="display:none;"></div>
     <div id="candidate-explorer-overlay" style="display:none;"></div>
     <input type="file" id="hs-trip-file-input" accept=".json" style="display:none;" onchange="loadTripFile(this)">
   </div>
@@ -2393,7 +2493,7 @@ async function expandMustDos() {
   // Place/Activity-mode shortcut: the user already picked concrete items on
   // the Step 1 picker, so _mdcItems is populated. Skip the LLM regen, compute
   // required places, and fire chip suggestions + candidate search directly.
-  if ((_tb.tripMode === "place" || _tb.tripMode === "activity") && Array.isArray(_mdcItems) && _mdcItems.length > 0) {
+  if ((_tb.tripMode === "place" || _tb.tripMode === "activity" || _tb.tripMode === "gallery") && Array.isArray(_mdcItems) && _mdcItems.length > 0) {
     g("trip-brief-overlay").style.display = "none";
     showCandidateExplorer(null);
     setTimeout(function(){
@@ -5923,13 +6023,382 @@ function cancelTripBrief(){
   var inp=g("ntp-name"); if(inp) inp.focus();
 }
 
+// ==== Trip gallery (template-first picker) ============================
+// After the user completes the brief, show 3 distinct trip-shape templates
+// instead of jumping straight to candidate generation. User picks one, its
+// must-dos and entry/exit pre-populate _tb, and expandMustDos' shortcut path
+// takes it from there into the existing Places overlay. See design-notes.md
+// for the "gallery-first" rationale and the 4-axis generator vocabulary.
+
+var _galleryCache = null;    // last-generated response, for re-renders
+var _gallerySelected = null; // currently selected template id
+
+function _tgEsc(s){
+  if (s == null) return "";
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+
+// Entry point from Step 2 brief submit. Replaces the direct call to
+// expandMustDos — the gallery sits between brief and candidate generation.
+async function showTripGallery(){
+  var brief = g("trip-brief-overlay");
+  if (brief) brief.style.display = "none";
+
+  var ov = g("trip-gallery-overlay");
+  if (!ov) { expandMustDos(); return; } // overlay missing — fall back to old path
+  ov.style.display = "block";
+  _gallerySelected = null;
+
+  // Loading shell
+  ov.innerHTML = '<div class="tg-shell">'
+    + '<div class="tg-loading">'
+    + '<span class="tg-spin">\u2736</span>'
+    + '<div>Shaping 3 ways to do this trip\u2026</div>'
+    + '<div class="tg-sub">Usually 20\u201340 seconds.</div>'
+    + '</div></div>';
+
+  try {
+    var data = await generateGalleryTemplates();
+    if (!data || !Array.isArray(data.templates) || data.templates.length === 0) {
+      throw new Error("No templates returned");
+    }
+    _galleryCache = data;
+    renderTripGallery(data);
+  } catch (err) {
+    console.error("Gallery generation failed:", err && err.message);
+    var msg = (err && err.message && err.message.indexOf("No API key") > -1)
+      ? "Gallery generation needs an API key \u2014 add yours in Settings, then try again."
+      : "Couldn't generate templates. You can retry, or build from scratch instead.";
+    ov.innerHTML = '<div class="tg-shell">'
+      + '<div class="tg-error">\u26a0 ' + _tgEsc(msg)
+      + ' <button onclick="showTripGallery()">Retry</button>'
+      + ' <button onclick="buildFromScratchFromGallery()">Build from scratch</button>'
+      + '</div></div>';
+  }
+}
+
+// LLM call. Returns {regionLabel, durationLabel, bindingConstraint?, templates:[...]}
+async function generateGalleryTemplates(){
+  var region = _tb.region || "";
+  var intent = _tb.intent || _tb.tripSentence || "";
+  var chips = (_tb.chips || []).filter(Boolean).join(", ");
+  var anchors = _tb.anchors || "";
+  var duration = _tb.duration || _tb.when || "";
+  var pace = _tb.pace || "";
+  var party = _tb.party || _tb.travelers || "";
+  var avoid = _tb.avoidances || _tb.constraints || "";
+
+  var prompt = "A traveler gave this brief. Produce exactly 3 DISTINCT trip-shape templates they can choose between.\n\n"
+    + "BRIEF:\n"
+    + (region ? ("Region: " + region + "\n") : "")
+    + (duration ? ("Duration: " + duration + "\n") : "")
+    + (intent ? ("Sentence / intent: " + intent + "\n") : "")
+    + (anchors ? ("Must-dos they named: " + anchors + "\n") : "")
+    + (chips ? ("General interests: " + chips + "\n") : "")
+    + (pace ? ("Pace preference: " + pace + "\n") : "")
+    + (party ? ("Travelers: " + party + "\n") : "")
+    + (avoid ? ("Avoid: " + avoid + "\n") : "")
+    + "\n"
+    + "DESIGN REQUIREMENTS (this is how the UI works):\n"
+    + "- Three templates, each with a genuinely different thesis. NOT three scale variations of the same trip. One traveler-type for each.\n"
+    + "- If the trip is condition-driven (aurora, cherry blossoms, wildlife season, weather-dependent), at least ONE template must be a probability-diversification play (e.g. split across two weather regions, or two bases with independent systems).\n"
+    + "- Identify the trip's OPTIMIZATION TARGET (what it maximizes: named-trains visited, aurora-viable nights, cherry-bloom days, etc.) and surface it as the primary number in the totals strip.\n"
+    + "- Identify any BINDING CONSTRAINT (season, weather window, visa, budget) and return it as bindingConstraint.\n"
+    + "- Each template groups its stops into WEEKS. At 2+ weeks, the week is the planning unit, not the day.\n"
+    + "- Routes (scenic trains, scenic drives, lake steamer circuits) are transportation, not activities. They connect endpoints where the traveler actually spends time; don't count them as destinations.\n\n"
+    + "Return ONLY valid JSON (no markdown, no commentary). Shape:\n"
+    + "{\n"
+    + '  "regionLabel": "Switzerland",\n'
+    + '  "durationLabel": "4 weeks",\n'
+    + '  "bindingConstraint": "Best in October for aurora + accessible roads. Sep-Mar window.",\n'
+    + '  "templates": [\n'
+    + '    {\n'
+    + '      "id": "slow",\n'
+    + '      "heroLabel": "Slow Four Weeks",\n'
+    + '      "title": "Slow Four Weeks",\n'
+    + '      "thesis": "Four home bases, roughly a week each. You unpack once per region.",\n'
+    + '      "tags": [\n'
+    + '        {"label":"4 home bases","variant":"home"},\n'
+    + '        {"label":"slow travel","variant":"pace"},\n'
+    + '        {"label":"deep hikes","variant":"hike"}\n'
+    + '      ],\n'
+    + '      "totals": [\n'
+    + '        {"label":"aurora nights","value":"10","primary":true},\n'
+    + '        {"label":"base changes","value":"4"},\n'
+    + '        {"label":"driving","value":"~850km"}\n'
+    + '      ],\n'
+    + '      "weekGroups": [\n'
+    + '        {"label":"Week 1","stops":[\n'
+    + '          {"place":"Zurich","country":"Switzerland","nights":1,"role":"entry"},\n'
+    + '          {"place":"Montreux","country":"Switzerland","nights":6,"role":"base"}\n'
+    + '        ]}\n'
+    + '      ],\n'
+    + '      "days": [\n'
+    + '        {"weekIndex":0,"weekLabel":"Week 1","dayRange":"Day 1","heading":"Zurich arrival","body":"Land, settle in, Altstadt stroll."}\n'
+    + '      ],\n'
+    + '      "mdcItems": [\n'
+    + '        {"name":"Glacier Express","type":"route","description":"Classic 8hr panoramic rail journey.","endpoints":[{"place":"Zermatt","country":"Switzerland"},{"place":"St. Moritz","country":"Switzerland"}],"requiredPlaces":[{"place":"Zermatt","country":"Switzerland"},{"place":"St. Moritz","country":"Switzerland"}],"direction":"either","durationHours":8,"modeOptions":"both"},\n'
+    + '        {"name":"Chocolate tasting","type":"activity","description":"Deep-dive Swiss chocolate at home factories.","requiredPlaces":[{"place":"Zurich","country":"Switzerland"},{"place":"Broc","country":"Switzerland"}],"durationHours":8}\n'
+    + '      ],\n'
+    + '      "entry": "Zurich",\n'
+    + '      "exit": "Zurich",\n'
+    + '      "nights": 27\n'
+    + '    }\n'
+    + '  ]\n'
+    + "}\n\n"
+    + "TAGS — variant must be one of: home, pace, hike, rail, boat, food, cond. Pick the best fit.\n"
+    + "TOTALS — up to 4 entries per template. The optimization-target metric goes first with primary:true.\n"
+    + "MDCITEMS — follow the expandMustDos shape EXACTLY. requiredPlaces are ARRAYS OF OBJECTS {place,country} \u2014 never strings. Include 6\u201312 items per template covering the routes, activities, and conditions this specific shape emphasizes. Do NOT just duplicate the same list across all three.\n"
+    + "WEEKGROUPS and DAYS must cover the full nights. Day entries can span multiple days via dayRange (e.g. \"Day 5\u20137\").";
+
+  var text = await callMax([{role:"user",content:prompt}], 5000, 70000);
+  var cleaned = String(text||"").replace(/```json|```/g, "").trim();
+  // Extract the outermost JSON object defensively
+  var s = cleaned.indexOf("{"), e = cleaned.lastIndexOf("}");
+  if (s > -1 && e > s) cleaned = cleaned.substring(s, e + 1);
+  var data;
+  try { data = JSON.parse(cleaned); }
+  catch(parseErr) {
+    // Attempt truncation recovery — find the last complete template
+    var cutIdx = cleaned.lastIndexOf("},");
+    if (cutIdx > 0) {
+      var salvaged = cleaned.substring(0, cutIdx + 1) + "]}";
+      data = JSON.parse(salvaged);
+    } else { throw parseErr; }
+  }
+  // Normalize place arrays in mdcItems (strings → {place,country})
+  var regionCountry = region || "";
+  function normPlaceArr(arr){
+    if (!Array.isArray(arr)) return arr;
+    return arr.map(function(p){
+      if (typeof p === "string") return {place: p, country: regionCountry};
+      return p;
+    });
+  }
+  (data.templates || []).forEach(function(t){
+    (t.mdcItems || []).forEach(function(m, i){
+      m.id = "gm-" + (t.id || "t") + "-" + i;
+      m.checked = true; // gallery templates arrive with all must-dos active
+      if (m.endpoints) m.endpoints = normPlaceArr(m.endpoints);
+      if (m.requiredPlaces) m.requiredPlaces = normPlaceArr(m.requiredPlaces);
+      if (m.viableLocations) m.viableLocations = normPlaceArr(m.viableLocations);
+      if (m.type === "route" && !m.requiredPlaces && m.endpoints) m.requiredPlaces = m.endpoints;
+      if (m.type === "condition" && !m.requiredPlaces && m.viableLocations) m.requiredPlaces = m.viableLocations;
+    });
+  });
+  return data;
+}
+
+function renderTripGallery(data){
+  var ov = g("trip-gallery-overlay"); if (!ov) return;
+  var regionLabel = data.regionLabel || _tb.region || "your trip";
+  var durLabel = data.durationLabel || _tb.duration || "";
+  var chips = (_tb.chips || []).filter(Boolean);
+  var sentence = _tb.tripSentence || _tb.intent || "";
+
+  var html = '<div class="tg-shell">';
+  // Header
+  html += '<header>'
+    + '<h1>3 ways to do ' + (durLabel ? _tgEsc(durLabel) + ' in ' : '') + _tgEsc(regionLabel) + '</h1>'
+    + '<p class="tg-lede">Max has shaped your trip three ways. Pick the one that feels closest \u2014 you\u2019ll edit from there. Add or drop days, swap destinations, move things around.</p>'
+    + '</header>';
+  // Brief strip
+  html += '<div class="tg-brief">'
+    + '<strong>Your brief:</strong>';
+  if (sentence) html += '<span>\u201c' + _tgEsc(sentence) + '\u201d</span>';
+  if (durLabel) html += '<span class="tg-dur">' + _tgEsc(durLabel) + '</span>';
+  chips.forEach(function(c){ html += '<span class="tg-chip">' + _tgEsc(c) + '</span>'; });
+  html += '<button class="tg-edit" onclick="backToBriefFromGallery()">edit brief</button>'
+    + '</div>';
+  // Binding constraint banner (optional)
+  if (data.bindingConstraint) {
+    html += '<div class="tg-brief" style="background:linear-gradient(90deg,#11331f 0%,#174935 100%);color:#d8f5e6;border-color:#174935;">'
+      + '<strong style="color:#5edb9c;">\u27E1 Timing note</strong>'
+      + '<span style="color:#b5dec3;">' + _tgEsc(data.bindingConstraint) + '</span>'
+      + '</div>';
+  }
+  // Lens row
+  html += '<div class="tg-lens-row">'
+    + '<h2>Suggested shapes</h2>'
+    + '<span class="tg-lens-sub">' + (data.templates.length) + ' templates \u00b7 generated from your brief</span>'
+    + '</div>';
+  // Cards
+  html += '<div class="tg-gallery">';
+  data.templates.forEach(function(t){ html += _tgRenderCardHtml(t); });
+  html += '</div>';
+  // Tray
+  html += '<div class="tg-tray">'
+    + '<span class="tg-tray-lbl">Not the right shape?</span>'
+    + '<button onclick="refreshGalleryTemplates()">Show 3 more</button>'
+    + '<span class="tg-scratch"><button onclick="buildFromScratchFromGallery()">Or build from scratch \u2192</button></span>'
+    + '</div>';
+  html += '</div>';
+  // Sticky CTA (hidden until a card is selected)
+  html += '<button class="tg-sticky-cta" id="tg-cta" onclick="proceedWithGallerySelection()">'
+    + '<span>Continue with your pick</span><span style="font-size:16px;">\u2192</span>'
+    + '</button>';
+
+  ov.innerHTML = html;
+}
+
+function _tgRenderCardHtml(t){
+  var tagsHtml = (t.tags || []).map(function(tag){
+    var v = tag.variant || "";
+    return '<span class="tg-tag ' + _tgEsc(v) + '">' + _tgEsc(tag.label || "") + '</span>';
+  }).join("");
+  var totalsHtml = (t.totals || []).map(function(m){
+    if (m.primary) {
+      return '<span class="tg-metric-primary"><strong>' + _tgEsc(m.value) + '</strong> ' + _tgEsc(m.label) + '</span>';
+    }
+    return '<span><strong>' + _tgEsc(m.value) + '</strong> ' + _tgEsc(m.label) + '</span>';
+  }).join("");
+  var weeksHtml = (t.weekGroups || []).map(function(wg){
+    var stopsHtml = (wg.stops || []).map(function(s){
+      var dotClass = "tg-dot";
+      if (s.role === "entry") dotClass += " entry";
+      else if (s.role === "exit") dotClass += " exit";
+      else if (s.role === "anchor") dotClass += " anchor";
+      return '<div class="tg-week-stop">'
+        + '<span class="' + dotClass + '"></span>'
+        + '<span class="tg-place">' + _tgEsc(s.place || "") + '</span>'
+        + '<span class="tg-nights">' + _tgEsc(s.nights != null ? (s.nights + "n") : "") + '</span>'
+        + '</div>';
+    }).join("");
+    return '<div class="tg-week">'
+      + '<div class="tg-week-hdr">' + _tgEsc(wg.label || "") + '</div>'
+      + '<div class="tg-week-stops">' + stopsHtml + '</div>'
+      + '</div>';
+  }).join("");
+  // Group days by weekLabel for the expanded panel
+  var daysByWeek = {};
+  var weekOrder = [];
+  (t.days || []).forEach(function(d){
+    var key = d.weekLabel || ("Week " + ((d.weekIndex || 0) + 1));
+    if (!daysByWeek[key]) { daysByWeek[key] = []; weekOrder.push(key); }
+    daysByWeek[key].push(d);
+  });
+  var daysHtml = weekOrder.map(function(wk){
+    var items = daysByWeek[wk].map(function(d){
+      return '<div class="tg-day">'
+        + '<div class="tg-day-num">' + _tgEsc(d.dayRange || d.day || "") + '</div>'
+        + '<div class="tg-day-txt">'
+        + (d.heading ? '<strong>' + _tgEsc(d.heading) + '.</strong> ' : '')
+        + _tgEsc(d.body || "")
+        + '</div></div>';
+    }).join("");
+    return '<div class="tg-week-block"><h4>' + _tgEsc(wk) + '</h4>' + items + '</div>';
+  }).join("");
+
+  var daysLabel = (t.nights ? (t.nights + " nights") : (_tb.duration || _tb.when || ""));
+  var id = _tgEsc(t.id || "");
+
+  return '<div class="tg-card" id="tg-card-' + id + '" onclick="_tgCardClick(event, &#39;' + id + '&#39;)">'
+    + '<div class="tg-hero">'
+    + '<div>'
+    + '<div class="tg-hero-title">' + _tgEsc(t.heroLabel || t.title || "") + '</div>'
+    + (t.thesis ? '' : '')
+    + '</div>'
+    + '<span class="tg-days">' + _tgEsc(daysLabel) + '</span>'
+    + '</div>'
+    + '<div class="tg-body">'
+    + '<h3 class="tg-title">' + _tgEsc(t.title || "") + '</h3>'
+    + '<p class="tg-thesis">' + _tgEsc(t.thesis || "") + '</p>'
+    + (tagsHtml ? '<div class="tg-tags">' + tagsHtml + '</div>' : '')
+    + (totalsHtml ? '<div class="tg-totals">' + totalsHtml + '</div>' : '')
+    + (weeksHtml ? '<div class="tg-weeks">' + weeksHtml + '</div>' : '')
+    + '</div>'
+    + (daysHtml ? '<div class="tg-days">' + daysHtml + '</div>' : '')
+    + '<div class="tg-foot">'
+    + '<button class="tg-open" onclick="_tgToggleExpand(event, &#39;' + id + '&#39;)">day-by-day</button>'
+    + '<button class="tg-start" onclick="_tgSelect(event, &#39;' + id + '&#39;)">Start with this</button>'
+    + '</div>'
+    + '</div>';
+}
+
+function _tgCardClick(ev, id){
+  if (ev && ev.target && (ev.target.closest(".tg-start") || ev.target.closest(".tg-open"))) return;
+  _tgToggleExpand(ev, id);
+}
+
+function _tgToggleExpand(ev, id){
+  if (ev && ev.stopPropagation) ev.stopPropagation();
+  var card = document.getElementById("tg-card-" + id);
+  if (!card) return;
+  card.classList.toggle("tg-expanded");
+}
+
+function _tgSelect(ev, id){
+  if (ev && ev.stopPropagation) ev.stopPropagation();
+  _gallerySelected = id;
+  // Clear previous selection, mark this one
+  document.querySelectorAll(".tg-card.tg-selected").forEach(function(c){ c.classList.remove("tg-selected"); });
+  document.querySelectorAll(".tg-card .tg-start").forEach(function(b){ b.textContent = "Start with this"; });
+  var card = document.getElementById("tg-card-" + id);
+  if (card) {
+    card.classList.add("tg-selected");
+    var btn = card.querySelector(".tg-start");
+    if (btn) btn.textContent = "\u2713 Selected";
+  }
+  var cta = g("tg-cta"); if (cta) cta.classList.add("on");
+}
+
+// User clicked the sticky CTA after selecting a template. Pre-populate _tb
+// from the chosen template and hand off to the existing expandMustDos path,
+// which will take its shortcut branch because _mdcItems is already filled.
+function proceedWithGallerySelection(){
+  if (!_gallerySelected || !_galleryCache) return;
+  var t = (_galleryCache.templates || []).find(function(x){ return x.id === _gallerySelected; });
+  if (!t) return;
+
+  // Seed must-dos from the template (already normalized during generation).
+  if (Array.isArray(t.mdcItems) && t.mdcItems.length) {
+    _mdcItems = t.mdcItems.slice();
+  }
+  // Seed entry/exit. Users can still edit these on the Places page.
+  if (t.entry) _tb.entry = t.entry;
+  if (t.exit) _tb.tbExit = t.exit;
+  // Mark the mode so expandMustDos' shortcut path activates.
+  _tb.tripMode = "gallery";
+  // Remember which template built this trip, so the editor can reference it later.
+  _tb.galleryTemplate = { id: t.id, title: t.title, thesis: t.thesis, nights: t.nights };
+
+  // Close the gallery and run the existing must-do → candidate flow.
+  var ov = g("trip-gallery-overlay"); if (ov) ov.style.display = "none";
+  expandMustDos();
+}
+
+// "Or build from scratch" — bypass the gallery, go straight to the old flow
+// so the user assembles a trip the pre-gallery way. Doesn't destroy the brief.
+function buildFromScratchFromGallery(){
+  var ov = g("trip-gallery-overlay"); if (ov) ov.style.display = "none";
+  // Ensure no stale gallery state leaks into the old path.
+  _tb.tripMode = _tb.tripMode === "gallery" ? null : _tb.tripMode;
+  _tb.galleryTemplate = null;
+  _mdcItems = [];
+  expandMustDos();
+}
+
+function refreshGalleryTemplates(){
+  // Re-run generation. The LLM is non-deterministic enough that this usually
+  // returns three different templates, which is the point of the button.
+  _gallerySelected = null;
+  showTripGallery();
+}
+
+function backToBriefFromGallery(){
+  var ov = g("trip-gallery-overlay"); if (ov) ov.style.display = "none";
+  var brief = g("trip-brief-overlay"); if (brief) brief.style.display = "block";
+}
+
 async function findCandidates(){
   _tb.region=g("tb-region")?g("tb-region").value.trim():(_tb.region||"");
   _tb.when=g("tb-when")?g("tb-when").value.trim():(_tb.when||"");
   _tb.intent=g("tb-intent")?g("tb-intent").value.trim():(_tb.intent||"");
   _tb.anchors=g("tb-anchors")?g("tb-anchors").value.trim():(_tb.anchors||"");
   _tb.constraints=g("tb-constraints")?g("tb-constraints").value.trim():(_tb.constraints||"");
-  expandMustDos(); return; // new flow: expand must-dos first
+  // Gallery-first: show 3 templates before jumping to candidate generation.
+  // The user can still "Build from scratch" to reach the old path.
+  showTripGallery(); return;
   showCandidateExplorer(null);
   var prompt="You are a travel expert. Suggest 6-8 destination candidates based on this trip brief.\n\n"
     +"Trip: "+_tb.name
