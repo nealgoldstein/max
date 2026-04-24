@@ -9580,7 +9580,18 @@ async function generateCityData(place,destId){
   var _paceModeGD = _getPaceMode((trip && trip.brief && trip.brief.pace) || (_tb && _tb.pace) || "");
   var _sightsCountGD = _paceSightCount(_paceModeGD);
   var _paceDirGD = _paceDirective(_paceModeGD);
-  var prompt='Generate travel data for '+place+'. Return ONLY valid JSON, no markdown:\n{"cityCenter":[lat,lng],"sights":[{"name":"...","st":"...","desc":"one sentence"}],"districts":[{"name":"...","good":"...","bad":"...","hotels":[{"name":"...","desc":"...","price":"...","tier":2}]}],"practicalInfo":{"currency":"...","tipping":"...","note":"...","emergency":"..."},"transitHub":{"arrival":{"name":"...","lat":0,"lng":0},"departure":{"name":"...","lat":0,"lng":0}},"essentials":{"atms":[{"name":"...","note":"..."}],"banks":[{"name":"...","note":"..."}],"groceries":[{"name":"...","note":"..."}],"touristInfo":[{"name":"...","note":"..."}],"pharmacies":[{"name":"...","note":"..."}]}}\n'+_sightsCountGD+', 2 districts, 1-2 hotels each. SIGHTS must be real cultural, historical, architectural, or natural attractions a tourist visits for the experience — museums, churches, landmarks, viewpoints, gondolas, trails, squares, gardens, ruins. Do NOT include hotels, spa retreats, wellness retreats, lodges, banks, ATMs, pharmacies, grocery stores, or other everyday services as sights — those belong in hotels or essentials, not sights. Essentials are ALL required — do not omit any field. Include 2-3 ATMs, 1-2 banks (named branches — UBS, Raiffeisen, Barclays, BNP, etc. — whatever operates locally), 2-3 groceries, 1 tourist info, AND 1-2 pharmacies (chemists / drugstores / Apotheke / farmacia / pharmacie — whatever the local term). Real named places. Be concise.'+(_paceDirGD ? "\n\n"+_paceDirGD : "");
+  // Detect region/pass/area-style destination names so the prompt can tell the
+  // model it's okay if this isn't a single city. Without this, "Bernina Pass
+  // Region" or "Engadin Valley" come back empty because the LLM was told to
+  // list sights in a city that doesn't exist by that exact name.
+  var _regionLike = /\b(region|area|pass|valley|plateau|peninsula|coast|highlands|lakes?)\b/i.test(place);
+  var _placeFraming = _regionLike
+    ? 'This place is a broader area (a mountain pass, valley, alpine region, or similar), not a single city. List sights across the area — viewpoints, lakes, passes, cable-car summits, alpine huts, villages, historic sites — the things a traveler goes to see when they visit this region. Pick sights from the whole area, naming the specific village/viewpoint/summit each one belongs to in the description.'
+    : 'This is a city or town. List real sights within it or its immediate surroundings.';
+  var prompt='Generate travel data for '+place+'. Return ONLY valid JSON, no markdown:\n{"cityCenter":[lat,lng],"sights":[{"name":"...","st":"...","desc":"one sentence"}],"districts":[{"name":"...","good":"...","bad":"...","hotels":[{"name":"...","desc":"...","price":"...","tier":2}]}],"practicalInfo":{"currency":"...","tipping":"...","note":"...","emergency":"..."},"transitHub":{"arrival":{"name":"...","lat":0,"lng":0},"departure":{"name":"...","lat":0,"lng":0}},"essentials":{"atms":[{"name":"...","note":"..."}],"banks":[{"name":"...","note":"..."}],"groceries":[{"name":"...","note":"..."}],"touristInfo":[{"name":"...","note":"..."}],"pharmacies":[{"name":"...","note":"..."}]}}\n'
+    + _placeFraming + '\n'
+    + _sightsCountGD + ', 2 districts, 1-2 hotels each. SIGHTS must be real cultural, historical, architectural, or natural attractions a tourist visits for the experience — museums, churches, landmarks, viewpoints, gondolas, trails, squares, gardens, ruins. Do NOT include hotels, spa retreats, wellness retreats, lodges, banks, ATMs, pharmacies, grocery stores, or other everyday services as sights — those belong in hotels or essentials, not sights. Essentials are ALL required — do not omit any field. Include 2-3 ATMs, 1-2 banks (named branches — UBS, Raiffeisen, Barclays, BNP, etc. — whatever operates locally), 2-3 groceries, 1 tourist info, AND 1-2 pharmacies (chemists / drugstores / Apotheke / farmacia / pharmacie — whatever the local term). Real named places. Be concise.'
+    + (_paceDirGD ? "\n\n"+_paceDirGD : "");
 
   try{
     // Add 30 second timeout to generation
@@ -9590,6 +9601,34 @@ async function generateCityData(place,destId){
     var s=json.indexOf('{'),e=json.lastIndexOf('}');
     if(s>-1&&e>-1)json=json.substring(s,e+1);
     var data=JSON.parse(json);
+
+    // Fallback when the first pass returns no sights — common for region-style
+    // destinations ("Bernina Pass Region", "Engadin Valley") where the model
+    // hedges because the name isn't a tidy city. Retry once with a stronger,
+    // more permissive prompt that gives concrete examples.
+    if (!Array.isArray(data.sights) || data.sights.length === 0) {
+      var regionRegion = (trip && trip.brief && trip.brief.region) ? trip.brief.region : ((_tb && _tb.region) ? _tb.region : "");
+      var retryPrompt = 'List real, named sights a traveler visits in ' + place
+        + (regionRegion ? ' (within ' + regionRegion + ')' : '')
+        + '. This name may refer to a broader area — a pass, a valley, a lakeshore, a coast, a cluster of alpine villages — not a single city. List sights from the whole area: scenic viewpoints, summits reached by cable car or cogwheel, alpine lakes, historic passes, named villages with something to see, churches, museums, glacier overlooks, significant trails. For each, say where in the area it is.\n\n'
+        + 'Return ONLY JSON: {"sights":[{"name":"...","st":"...","desc":"one sentence about what it is and where in ' + place + ' it sits"}]}. Aim for '
+        + (_sightsCountGD.replace(/[^\d]/g, '') || '8')
+        + ' sights.';
+      try {
+        var retryText = await Promise.race([
+          callMax([{role:'user',content:retryPrompt}], 1400),
+          new Promise(function(_,reject){setTimeout(function(){reject(new Error('Retry timed out'));},25000);})
+        ]);
+        var rj = retryText.replace(/```json\s*/g,'').replace(/```\s*/g,'').trim();
+        var rs = rj.indexOf('{'), re = rj.lastIndexOf('}');
+        if (rs > -1 && re > -1) rj = rj.substring(rs, re + 1);
+        var rdata = JSON.parse(rj);
+        if (Array.isArray(rdata.sights) && rdata.sights.length) {
+          data.sights = rdata.sights;
+        }
+      } catch(_retryErr) { /* keep the empty list, the UI's retry affordance still works */ }
+    }
+
     _generatedCityData[key]=data;
 
     // Populate suggestions — user assigns to days from Explore tab
@@ -9600,7 +9639,7 @@ async function generateCityData(place,destId){
       if(data.districts) destRef.generatedDistricts=data.districts;
       if(data.practicalInfo) destRef.generatedPracticalInfo=data.practicalInfo;
       if(data.transitHub) destRef.generatedTransitHub=data.transitHub;
-      destRef.suggestions=data.sights.map(function(s){
+      destRef.suggestions=(Array.isArray(data.sights)?data.sights:[]).map(function(s){
         sidCtr++;
         var sLat=s.lat||(genCenter?genCenter[0]+(Math.random()-.5)*.025:null);
         var sLng=s.lng||(genCenter?genCenter[1]+(Math.random()-.5)*.030:null);
