@@ -866,6 +866,12 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .ce-build-btn:disabled{background:#ccc;cursor:not-allowed;}
 .ce-loading{text-align:center;padding:48px 24px;color:#888;font-size:11px;}
 @keyframes spin{to{transform:rotate(360deg)}}
+/* Pulsing ring on the selected candidate pin — makes card→map highlight obvious. */
+@keyframes max-pin-pulse{
+  0%   { transform:scale(1);   box-shadow:0 0 10px rgba(255,179,0,0.55); }
+  50%  { transform:scale(1.08); box-shadow:0 0 14px rgba(255,179,0,0.85); }
+  100% { transform:scale(1);   box-shadow:0 0 10px rgba(255,179,0,0.55); }
+}
 .ce-loading-spin{display:block;animation:spin 1s linear infinite;font-size:20px;margin-bottom:8px;}
 /* Comparison modal */
 .cmp-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9000;display:flex;align-items:center;justify-content:center;padding:16px;}
@@ -5962,6 +5968,31 @@ async function findCandidates(){
 // after the user has picked entry/exit; ordering places before entry is known
 // just hallucinates a starting city.
 var _ceMap=null,_ceMarkers=[],_ceRejectedExpanded=true,_ceEditMode=false,_ceBestMode=false,_ceCardExpanded={},_ceLens="activity",_ceSectionExpanded={};
+// Card→pin selection: tapping a candidate card highlights its map marker so
+// the user can locate the place geographically. _ceMarkerById persists only
+// for the current render pass and is cleared at the top of renderCandidateCards.
+var _ceSelectedCandId=null, _ceMarkerById={};
+
+// Set the selected candidate and pan the map to its marker if it's off-screen.
+// The visual swap to the "selected" icon happens inside _addCandidateMarker on
+// the next render pass (which the caller triggers). Separated so selection
+// state is globally reachable from any card click handler.
+function _ceSelectCandidateOnMap(candId){
+  _ceSelectedCandId = candId;
+  // Pan into view after the re-render so the marker object exists at its new
+  // id→marker mapping. Running synchronously here would look up the stale
+  // marker from the previous render pass.
+  setTimeout(function(){
+    var m = _ceMarkerById[candId];
+    if (!m || !_ceMap) return;
+    try {
+      var ll = m.getLatLng();
+      if (!_ceMap.getBounds().contains(ll)) {
+        _ceMap.panTo(ll, {animate: true});
+      }
+    } catch(e) { /* map not ready, ignore */ }
+  }, 60);
+}
 
 async function retryDiscoveryCandidates() {
   var existingReq = (_tb.candidates||[]).filter(function(c){ return c._required; });
@@ -6322,23 +6353,61 @@ function showCandidateExplorer(cands, editMode){
     if(cds){cds.style.flex="1";cds.style.overflowY="scroll";cds.style.minHeight="0";}
     // Init map
     if(_ceMap){_ceMap.remove();_ceMap=null;} if(_edMap){try{_edMap.remove();}catch(e){}_edMap=null;_edMarkers=[];} _ceMarkers=[];
-    _ceMap=L.map("ce-map",{zoomControl:true,scrollWheelZoom:true}).setView([48,14],4);
+    // Figure out the best initial view BEFORE the map loads tiles — otherwise
+    // the user sees all of Europe for a second before we zoom. Order of truth:
+    //  1. Cached coarse geocode from a prior session or trip
+    //  2. First candidate with real coords, if we already have some
+    //  3. Fallback: Europe-ish and fire a Nominatim lookup (we'll cover the map
+    //     with a loader in the meantime so the flash isn't visible)
+    var _regionKey = ((_tb && _tb.region) || "").toLowerCase().trim();
+    var _cachedLL = _regionKey && _coarseGeocode[_regionKey] ? _coarseGeocode[_regionKey] : null;
+    var _firstCand = (cands||[]).find(function(c){return c && isFinite(c.lat) && isFinite(c.lng);});
+    var _initCenter = null, _initZoom = null;
+    if (_cachedLL) { _initCenter = _cachedLL; _initZoom = 6; }
+    else if (_firstCand) { _initCenter = [_firstCand.lat, _firstCand.lng]; _initZoom = 6; }
+    else { _initCenter = [48,14]; _initZoom = 4; }
+    _ceMap=L.map("ce-map",{zoomControl:true,scrollWheelZoom:true}).setView(_initCenter,_initZoom);
+
+    // If we started with the Europe fallback, drop a neutral loader over the
+    // map so the continent flash never hits the user's eye. Removed as soon
+    // as Nominatim or a candidate gives us a real center.
+    var _mapMask = null;
+    if (!_cachedLL && !_firstCand && _tb && _tb.region) {
+      _mapMask = document.createElement("div");
+      _mapMask.id = "ce-map-mask";
+      _mapMask.style.cssText = "position:absolute;inset:0;z-index:450;background:#f4f6f8;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:#888;font-size:11px;font-family:inherit;pointer-events:none;";
+      _mapMask.innerHTML = '<span style="font-size:18px;animation:spin 1.2s linear infinite;">\u2736</span><span>Locating '+(_tb.region||"your region")+'\u2026</span>';
+      var _mapDivEl = document.getElementById("ce-map");
+      if (_mapDivEl) { _mapDivEl.style.position = "relative"; _mapDivEl.appendChild(_mapMask); }
+    }
+
     // Zoom to the stated region right away so the user sees their country/area
     // instead of a continent. fitBounds on candidates (later, when they arrive)
-    // will refine further.
+    // will refine further. Also caches the result in _coarseGeocode so future
+    // trips to this region skip the lookup entirely.
     if (_tb && _tb.region) {
-      (function(r){
+      (function(r, regionKey){
         fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q="+encodeURIComponent(r),{headers:{"Accept-Language":"en"}})
           .then(function(res){return res.json();})
           .then(function(data){
             if (data && data.length && data[0].boundingbox && _ceMap) {
               var bb = data[0].boundingbox.map(parseFloat);
               _ceMap.fitBounds([[bb[0],bb[2]],[bb[1],bb[3]]], {padding:[20,20], maxZoom:7});
+              if (regionKey && data[0].lat) _coarseGeocode[regionKey] = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
             } else if (data && data.length && data[0].lat && _ceMap) {
-              _ceMap.setView([parseFloat(data[0].lat), parseFloat(data[0].lon)], 6);
+              var lat = parseFloat(data[0].lat), lon = parseFloat(data[0].lon);
+              _ceMap.setView([lat, lon], 6);
+              if (regionKey) _coarseGeocode[regionKey] = [lat, lon];
             }
-          }).catch(function(){});
-      })(_tb.region);
+          }).catch(function(){})
+          .finally(function(){
+            var mm = document.getElementById("ce-map-mask");
+            if (mm && mm.parentNode) mm.parentNode.removeChild(mm);
+          });
+      })(_tb.region, _regionKey);
+    } else if (_mapMask) {
+      // No region to look up — remove the mask so it doesn't linger.
+      if (_mapMask.parentNode) _mapMask.parentNode.removeChild(_mapMask);
     }
     L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:19}).addTo(_ceMap);
     // Drop entry-point pins on the big map (airports, rail, sea, bus) so users
@@ -6929,6 +6998,10 @@ function renderCandidateCards(cands){
   var el=g("ce-cards"); if(!el) return;
   el.innerHTML="";
   _ceMarkers.forEach(function(m){if(_ceMap)_ceMap.removeLayer(m);}); _ceMarkers=[];
+  // Reset marker lookup — markers are rebuilt from scratch on every render pass.
+  // Keep _ceSelectedCandId as-is so the selection survives toggles and re-renders;
+  // _addCandidateMarker will re-apply the selected icon when it sees a match.
+  _ceMarkerById = {};
   // Kick off geocoding for any candidate with placeholder coords. Runs async in
   // the background; will re-call this function when coords land so pins appear.
   geocodeMissingCoords(cands);
@@ -7077,8 +7150,11 @@ function renderCandidateCards(cands){
       if (rejectBtn) rejectBtn.onclick = function(e){ e.stopPropagation(); setCS(cand.id, "reject"); };
       if (expandBtn) expandBtn.onclick = function(e){ e.stopPropagation(); _ceCardExpanded[cand.id] = !_ceCardExpanded[cand.id]; renderCandidateCards(_tb.candidates); };
       if (compactRow) compactRow.onclick = function(e){
-        // Clicks on the row (not the buttons) toggle expansion too
+        // Clicks on the row (not the buttons) toggle expansion AND highlight
+        // the candidate's pin on the map so the user can see where this place
+        // actually is. Selection state lives in _ceSelectedCandId.
         if (e.target.closest("button")) return;
+        _ceSelectCandidateOnMap(cand.id);
         _ceCardExpanded[cand.id] = !_ceCardExpanded[cand.id];
         renderCandidateCards(_tb.candidates);
       };
@@ -7095,20 +7171,34 @@ function renderCandidateCards(cands){
     _addCandidateMarker(c, false);
   }
 
-  // Map marker renderer — used for both visible cards (normal) and hidden
-  // candidates (grayed, when Show-me-the-best is on so the user still sees
-  // the full geography of what Max found).
-  function _addCandidateMarker(c, grayed){
-    if(!c.lat || !c.lng || !_ceMap) return;
+  // Build a candidate pin icon. Factored out so the card→pin selection handler
+  // can re-render a single marker's icon without rebuilding the whole map.
+  // `selected=true` makes the pin visibly bigger with a pulsing gold ring so
+  // the user can spot it instantly after tapping its card.
+  function _makeCandidateIcon(c, grayed, selected){
     var mc = grayed ? "#7a8090"
                     : (c.status==="keep" ? "#2a7a4e"
                       : c.status==="reject" ? "#888" : "#1a5fa8");
     var opacity = grayed ? 0.85 : 1;
     var borderStyle = grayed ? "2px dashed #fff" : "2px solid #fff";
-    var iconHtml = '<div style="background:'+mc+';color:#fff;border-radius:50%;width:'+(grayed?22:24)+'px;height:'+(grayed?22:24)+'px;display:flex;align-items:center;justify-content:center;font-size:'+(grayed?9:9)+'px;font-weight:700;border:'+borderStyle+';box-shadow:0 1px 4px rgba(0,0,0,.25);opacity:'+opacity+';">'+(c.place||"").substring(0,2)+'</div>';
-    var size = grayed ? 22 : 24;
-    var icon = L.divIcon({html:iconHtml, className:"", iconSize:[size,size], iconAnchor:[size/2,size/2]});
-    var m = L.marker([c.lat,c.lng],{icon:icon});
+    var pinSize = selected ? 30 : (grayed ? 22 : 24);
+    var fontPx = selected ? 11 : 9;
+    var ring = selected
+      ? '<div style="position:absolute;top:-6px;left:-6px;width:'+(pinSize+12)+'px;height:'+(pinSize+12)+'px;border:3px solid #ffb300;border-radius:50%;box-shadow:0 0 10px rgba(255,179,0,0.55);pointer-events:none;animation:max-pin-pulse 1.6s ease-in-out infinite;"></div>'
+      : '';
+    var inner = '<div style="position:relative;background:'+mc+';color:#fff;border-radius:50%;width:'+pinSize+'px;height:'+pinSize+'px;display:flex;align-items:center;justify-content:center;font-size:'+fontPx+'px;font-weight:700;border:'+borderStyle+';box-shadow:0 1px 4px rgba(0,0,0,.25);opacity:'+opacity+';">'+(c.place||"").substring(0,2)+'</div>';
+    var html = '<div style="position:relative;width:'+pinSize+'px;height:'+pinSize+'px;">'+ring+inner+'</div>';
+    return L.divIcon({html:html, className:"", iconSize:[pinSize,pinSize], iconAnchor:[pinSize/2,pinSize/2]});
+  }
+
+  // Map marker renderer — used for both visible cards (normal) and hidden
+  // candidates (grayed, when Show-me-the-best is on so the user still sees
+  // the full geography of what Max found).
+  function _addCandidateMarker(c, grayed){
+    if(!c.lat || !c.lng || !_ceMap) return;
+    var selected = (c.id === _ceSelectedCandId);
+    var icon = _makeCandidateIcon(c, grayed, selected);
+    var m = L.marker([c.lat,c.lng],{icon:icon, zIndexOffset: selected ? 1000 : 0});
     var tipStay = c.stayRange ? " \u00b7 "+c.stayRange : "";
     m.bindTooltip(c.place + tipStay + (grayed ? " (hidden \u2014 click Show all)" : ""), {permanent:false,direction:"top",offset:[0,-14],className:"ce-map-tooltip"});
     (function(cand, isGray){m.on("click",function(){
@@ -7132,6 +7222,8 @@ function renderCandidateCards(cands){
       }
     });})(c, !!grayed);
     m.addTo(_ceMap); _ceMarkers.push(m);
+    // Track by candidate id so card→pin selection can look the marker up later.
+    _ceMarkerById[c.id] = m;
     bounds.push([c.lat,c.lng]);
   }
 
@@ -7914,6 +8006,12 @@ async function setCS(id,status){
     if (willDrop.length) {
       var dropSet = {};
       willDrop.forEach(function(n){ dropSet[n.toLowerCase()] = true; });
+      // Stash what we're dropping on behalf of this candidate so un-rejecting
+      // later can re-offer these must-dos and re-wire the required links.
+      // Without this, the only way to get a dropped route back was to edit
+      // the brief — which is what Neal ran into with Montreux + Lake Geneva.
+      c._priorRequiredFor = (c._requiredFor || []).slice();
+      c._droppedMustDos = willDrop.slice();
       if (typeof _mdcItems !== 'undefined' && _mdcItems) {
         _mdcItems.forEach(function(m){
           if (m.checked && m.name && dropSet[m.name.toLowerCase()]) {
@@ -7957,12 +8055,79 @@ async function setCS(id,status){
   }
   var prevStatus = c.status;
   c.status=(c.status===status)?null:status;
+  // Un-rejecting a candidate that previously cascaded a must-do drop? Re-wire
+  // its required links and re-check the dropped must-dos. This matters because
+  // rejecting Montreux (endpoint of the Lake Geneva circuit) drops the circuit
+  // entirely; without this block, restoring Montreux leaves the circuit off and
+  // the card lands in the generic "Other places" section instead of back under
+  // its route header. Only fires when leaving the rejected state.
+  if (prevStatus === "reject" && c.status !== "reject") {
+    if (Array.isArray(c._priorRequiredFor) && c._priorRequiredFor.length) {
+      c._requiredFor = c._priorRequiredFor.slice();
+      c._required = c._requiredFor.length > 0;
+    }
+    if (Array.isArray(c._droppedMustDos) && c._droppedMustDos.length && typeof _mdcItems !== 'undefined' && _mdcItems) {
+      var reviveSet = {};
+      c._droppedMustDos.forEach(function(n){ reviveSet[n.toLowerCase()] = true; });
+      _mdcItems.forEach(function(m){
+        if (m && m.name && reviveSet[m.name.toLowerCase()] && !m.checked) {
+          m.checked = true;
+        }
+      });
+      // Rebuild _tb.requiredPlaces so route-endpoint grouping sees the revived
+      // must-dos. Mirrors what expandMustDos does after initial generation.
+      if (_tb) {
+        var reqMap = {};
+        (_mdcItems||[]).forEach(function(item){
+          if (!item.checked) return;
+          (item.requiredPlaces||[]).forEach(function(p){
+            if (!p || !p.place) return;
+            if (!reqMap[p.place]) reqMap[p.place] = {place:p.place, country:p.country||'', requiredFor:[], flexible:false};
+            reqMap[p.place].requiredFor.push(item.type === "manual" ? "__manual__" : item.name);
+            if (item.type === "condition") reqMap[p.place].flexible = true;
+          });
+        });
+        _tb.requiredPlaces = Object.values(reqMap);
+      }
+    }
+    // Consume the stash so repeated toggles don't keep re-applying stale data
+    delete c._priorRequiredFor;
+    delete c._droppedMustDos;
+  }
   // Fire the keep-toast only on transitions INTO "keep" — not un-keeps or
   // restores from the rejected pile back to unset.
   if (c.status === "keep" && prevStatus !== "keep") {
     showKeepToast(c);
   }
+  // Re-sequence _tb.candidates so the rendering reflects the current trip
+  // order. Without this, restoring a rejected candidate leaves it at whatever
+  // index it originally occupied (or, for user-added ones, at the end of the
+  // array), which is why Neal saw Montreux land at the bottom of the list
+  // after un-rejecting it. Run on every status change so the view stays in
+  // sync with what the trip sequencer would build.
+  _tbResequenceCandidates();
   renderCandidateCards(_tb.candidates);
+}
+
+// Re-order _tb.candidates so rendering reflects the trip sequence Max would
+// build right now. Kept items go first in orderKeptCandidates' sequence;
+// unset items (not yet decided) follow in their original relative order; then
+// rejected items at the end (they render in a collapsed section anyway). Uses
+// stable ordering within each group so unrelated moves don't churn the view.
+function _tbResequenceCandidates(){
+  if (!_tb || !Array.isArray(_tb.candidates) || !_tb.candidates.length) return;
+  var all = _tb.candidates;
+  var kept = all.filter(function(c){ return c.status === "keep"; });
+  var unset = all.filter(function(c){ return !c.status; });
+  var rejected = all.filter(function(c){ return c.status === "reject"; });
+  var orderedKept = kept;
+  try {
+    var res = orderKeptCandidates(kept, _mdcItems||[], _tb.entry||"", _tb.tbExit||"");
+    if (res && Array.isArray(res.ordered) && res.ordered.length === kept.length) {
+      orderedKept = res.ordered;
+    }
+  } catch(e) { /* fall back to current order */ }
+  _tb.candidates = orderedKept.concat(unset).concat(rejected);
 }
 
 function updateCEShortlist(){
