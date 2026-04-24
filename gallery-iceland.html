@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gallery prototype — 2 weeks in Iceland, chasing the aurora</title>
+<style>
+  :root{
+    --bg:#f5f3ee;
+    --card:#ffffff;
+    --ink:#1a1a1a;
+    --ink-2:#555;
+    --ink-3:#888;
+    --hair:#e6e2d8;
+    --blue:#1a5fa8;
+    --blue-soft:#e8f0fc;
+    --blue-deep:#134a8a;
+    --gold:#b28a2e;
+    --gold-soft:#f5ebcf;
+    --green:#2a7a4e;
+    --aurora:#1d9c6a;
+    --aurora-soft:#d4f0e2;
+    --aurora-glow:#5edb9c;
+    --volcano:#3a3a3a;
+    --ocean:#a9c8dc;
+    --drive:#7a5c1a;
+    --fly:#6a4a8a;
+    --boat:#2a7a9e;
+    --hike:#2a7a4e;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased;}
+  .shell{max-width:1280px;margin:0 auto;padding:28px 32px 80px;}
+  header h1{font-size:26px;font-weight:700;margin:0 0 6px;letter-spacing:-0.01em;}
+  header .lede{font-size:13px;color:var(--ink-2);max-width:780px;line-height:1.55;margin:0 0 18px;}
+  .brief{background:#fff;border:1px solid var(--hair);border-radius:10px;padding:12px 16px;margin-bottom:12px;font-size:12px;color:var(--ink-2);line-height:1.6;display:flex;gap:14px;flex-wrap:wrap;align-items:center;}
+  .brief strong{color:var(--ink);font-weight:600;}
+  .brief .chip{display:inline-block;font-size:11px;padding:3px 9px;background:var(--blue-soft);color:var(--blue);border-radius:999px;font-weight:600;}
+  .brief .chip.aurora{background:var(--aurora-soft);color:var(--aurora);}
+  .brief .dur{display:inline-block;font-size:11px;padding:3px 9px;background:var(--gold-soft);color:var(--gold);border-radius:999px;font-weight:700;}
+  .brief .edit{margin-left:auto;font-size:11px;color:var(--blue);cursor:pointer;text-decoration:none;}
+  .brief .edit:hover{text-decoration:underline;}
+
+  /* Season banner — aurora requires a specific window, so surface it up top */
+  .season-banner{background:linear-gradient(90deg, #11331f 0%, #174935 50%, #154130 100%);color:#d8f5e6;border-radius:10px;padding:12px 16px;margin-bottom:26px;font-size:12px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;}
+  .season-banner .glow{font-size:14px;color:var(--aurora-glow);font-weight:700;letter-spacing:0.02em;}
+  .season-banner .hint{color:#b5dec3;flex:1;line-height:1.55;min-width:280px;}
+  .season-banner select{background:#0d2518;color:#e6fff2;border:1px solid #1d5a3c;border-radius:6px;padding:5px 10px;font-size:12px;font-family:inherit;cursor:pointer;}
+
+  .lens-row{display:flex;gap:18px;align-items:baseline;margin-bottom:14px;flex-wrap:wrap;}
+  .lens-row h2{font-size:15px;font-weight:700;margin:0;letter-spacing:-0.005em;}
+  .lens-row .lens-sub{font-size:12px;color:var(--ink-3);}
+  .filter-pills{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap;}
+  .pill{font-size:11px;padding:4px 10px;border-radius:999px;border:1px solid var(--hair);background:#fff;color:var(--ink-2);cursor:pointer;user-select:none;}
+  .pill.on{background:var(--ink);color:#fff;border-color:var(--ink);}
+  .pill:hover:not(.on){background:#faf7ee;}
+
+  .gallery{display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:18px;margin-bottom:28px;}
+  @media (max-width:980px){.gallery{grid-template-columns:1fr;}}
+
+  .card{background:var(--card);border:1px solid var(--hair);border-radius:14px;overflow:hidden;display:flex;flex-direction:column;transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease;cursor:pointer;}
+  .card:hover{transform:translateY(-2px);box-shadow:0 10px 28px rgba(20,20,20,0.08);border-color:#d8d1c0;}
+  .card.selected{border-color:var(--aurora);box-shadow:0 0 0 3px var(--aurora-soft), 0 10px 28px rgba(29,156,106,0.15);}
+
+  .card-map{position:relative;height:180px;background:linear-gradient(180deg,#1a2b2a 0%,#0d1f24 100%);border-bottom:1px solid var(--hair);overflow:hidden;}
+  .card-map svg{position:absolute;inset:0;width:100%;height:100%;}
+  /* Aurora shimmer in the sky portion */
+  .card-map::before{content:"";position:absolute;top:0;left:0;right:0;height:50px;background:linear-gradient(180deg, rgba(94,219,156,0.35) 0%, rgba(94,219,156,0.08) 60%, transparent 100%);animation:aurora 7s ease-in-out infinite alternate;}
+  @keyframes aurora{
+    0%{transform:translateX(-12%) scaleY(1);opacity:0.85;}
+    100%{transform:translateX(8%) scaleY(1.1);opacity:0.55;}
+  }
+  .card-mapbadge{position:absolute;top:10px;left:12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#fff;background:rgba(0,0,0,0.55);padding:4px 9px;border-radius:999px;z-index:2;}
+  .card-days{position:absolute;top:10px;right:12px;font-size:11px;font-weight:700;background:#fff;color:var(--ink);padding:4px 10px;border-radius:999px;box-shadow:0 2px 6px rgba(0,0,0,0.08);z-index:2;}
+  .card-aurora-badge{position:absolute;bottom:10px;left:12px;font-size:10px;font-weight:700;background:rgba(29,156,106,0.9);color:#fff;padding:4px 10px;border-radius:999px;z-index:2;display:inline-flex;align-items:center;gap:5px;}
+  .card-aurora-badge::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--aurora-glow);box-shadow:0 0 6px var(--aurora-glow);}
+
+  .card-body{padding:16px 18px 4px;flex:1;display:flex;flex-direction:column;}
+  .card-title{font-size:17px;font-weight:700;letter-spacing:-0.01em;margin:0 0 4px;}
+  .card-thesis{font-size:12px;color:var(--ink-2);line-height:1.55;margin:0 0 12px;}
+
+  .tags{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px;}
+  .tag{font-size:10px;padding:3px 8px;border-radius:4px;background:#f4efdf;color:#5c4a1a;font-weight:600;letter-spacing:0.02em;}
+  .tag.drive{background:#f5ebcf;color:var(--drive);}
+  .tag.aurora{background:var(--aurora-soft);color:var(--aurora);}
+  .tag.pace{background:#f0ecf5;color:#6a4a8a;}
+  .tag.base{background:#fcf4e4;color:#8a6a20;}
+  .tag.fly{background:#eae3f2;color:var(--fly);}
+  .tag.hike{background:#e9f3ec;color:var(--hike);}
+
+  .weeks{display:flex;gap:4px;padding:2px 0 6px;}
+  .week{flex:1;min-width:0;background:#faf7ee;border:1px solid var(--hair);border-radius:7px;padding:6px 7px;display:flex;flex-direction:column;gap:3px;}
+  .week-hdr{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-3);}
+  .week-stops{display:flex;flex-direction:column;gap:2px;}
+  .week-stop{display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--ink);line-height:1.2;}
+  .week-stop .dot{width:7px;height:7px;border-radius:50%;background:var(--ink);flex-shrink:0;}
+  .week-stop .dot.entry{background:var(--blue);}
+  .week-stop .dot.exit{background:var(--gold);}
+  .week-stop .dot.anchor{background:#c04820;}
+  .week-stop .dot.dark-sky{background:var(--aurora);box-shadow:0 0 0 2px var(--aurora-soft);}
+  .week-stop .dot.fly{background:var(--fly);}
+  .week-stop .place{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .week-stop .nights{color:var(--ink-3);font-size:9.5px;margin-left:auto;font-weight:600;}
+
+  .totals{display:flex;gap:14px;margin:6px 0 12px;padding:8px 10px;background:#faf7ee;border-radius:7px;font-size:11px;color:var(--ink-2);flex-wrap:wrap;}
+  .totals span strong{color:var(--ink);font-weight:700;}
+  .totals .aurora-total{background:var(--aurora-soft);color:var(--aurora);padding:2px 8px;border-radius:999px;font-weight:700;display:inline-flex;align-items:center;gap:4px;}
+  .totals .aurora-total::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--aurora-glow);box-shadow:0 0 5px var(--aurora-glow);}
+  .totals span{display:inline-flex;align-items:center;gap:4px;}
+
+  .days{border-top:1px dashed var(--hair);padding:12px 18px 14px;font-size:11.5px;color:var(--ink-2);line-height:1.55;display:none;}
+  .card.expanded .days{display:block;}
+  .week-block{margin-bottom:12px;}
+  .week-block:last-child{margin-bottom:0;}
+  .week-block h4{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--aurora);margin:0 0 6px;}
+  .day{display:flex;gap:10px;padding:4px 0;border-bottom:1px dotted #eee2c8;}
+  .day:last-child{border-bottom:none;}
+  .day-num{font-size:10px;color:var(--ink-3);font-weight:700;min-width:44px;flex-shrink:0;padding-top:1px;}
+  .day-txt{flex:1;}
+  .day-txt strong{color:var(--ink);font-weight:600;}
+  .day-txt .aurora-note{color:var(--aurora);font-weight:600;}
+
+  .card-foot{padding:12px 18px 16px;border-top:1px solid var(--hair);display:flex;gap:8px;align-items:center;}
+  .card-foot .open{background:none;border:none;color:var(--blue);cursor:pointer;font-size:11px;font-weight:600;padding:4px 0;font-family:inherit;}
+  .card-foot .open:hover{text-decoration:underline;}
+  .card-foot .start{margin-left:auto;background:var(--blue);color:#fff;border:none;padding:8px 16px;font-size:12px;font-weight:700;border-radius:7px;cursor:pointer;font-family:inherit;transition:background .12s;}
+  .card-foot .start:hover{background:var(--blue-deep);}
+  .card.selected .start{background:var(--aurora);}
+  .card.selected .start:hover{background:#17784f;}
+
+  .legend{display:flex;gap:18px;font-size:11px;color:var(--ink-3);margin:0 4px 22px;flex-wrap:wrap;align-items:center;}
+  .legend-item{display:flex;align-items:center;gap:6px;}
+
+  .tray{margin-top:6px;background:#fff;border:1px solid var(--hair);border-radius:10px;padding:14px 18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+  .tray .label{font-size:12px;color:var(--ink-2);}
+  .tray button{background:#fff;border:1px solid var(--hair);color:var(--ink);font-size:12px;font-weight:600;padding:7px 12px;border-radius:7px;cursor:pointer;font-family:inherit;}
+  .tray button:hover{background:#faf7ee;border-color:#d8d1c0;}
+  .tray .scratch{margin-left:auto;color:var(--ink-3);}
+
+  .sticky-cta{position:fixed;right:32px;bottom:28px;background:var(--ink);color:#fff;padding:14px 20px;border-radius:999px;font-size:13px;font-weight:700;box-shadow:0 10px 28px rgba(0,0,0,0.22);cursor:pointer;display:none;align-items:center;gap:10px;border:none;font-family:inherit;}
+  .sticky-cta.on{display:inline-flex;}
+  .sticky-cta:hover{background:#000;}
+  .sticky-cta .arrow{font-size:16px;}
+
+  .note{background:#f9f3e0;border:1px solid #ead7a0;border-radius:8px;padding:10px 14px;font-size:11.5px;color:#7a5c1a;margin-bottom:20px;line-height:1.55;}
+  .note strong{color:#5c4410;font-weight:700;}
+
+  .toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 18px;border-radius:8px;font-size:12px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:10;}
+  .toast.on{opacity:1;}
+</style>
+</head>
+<body>
+<div class="shell">
+  <header>
+    <h1>3 ways to spend 2 weeks in Iceland chasing the aurora</h1>
+    <p class="lede">Aurora viewing is a probability game — dark skies, cloud gaps, and your chosen latitude all matter. These three shapes trade off how much time you spend driving versus settled, and how much you diversify across Iceland's weather regions.</p>
+  </header>
+
+  <div class="brief">
+    <strong>Your brief:</strong>
+    <span>"chase the northern lights, see the landscape, be flexible for weather"</span>
+    <span class="dur">14 days</span>
+    <span class="chip aurora">northern lights</span>
+    <span class="chip">waterfalls + glaciers</span>
+    <span class="chip">geothermal</span>
+    <span class="chip">flexible pace</span>
+    <a class="edit" href="#" onclick="toast('This would reopen the brief editor.');return false;">edit brief</a>
+  </div>
+
+  <div class="season-banner">
+    <span class="glow">⟡ Aurora season</span>
+    <span class="hint"><strong style="color:#fff;">Your window is Sep 25 – Mar 20.</strong> Peak viewing is Oct and Feb (dark, cold, roads mostly open). Dec–Jan has the darkest skies but the worst weather/road closures. Mar equinox often triggers geomagnetic activity.</span>
+    <select onchange="toast('Would regenerate templates tuned to '+this.value+' (weather, road access, daylight hours)');">
+      <option>Late Sep / Oct</option>
+      <option>Late Oct / early Nov</option>
+      <option>Feb</option>
+      <option>Early Mar</option>
+      <option>Dec / deep winter</option>
+    </select>
+  </div>
+
+  <div class="note"><strong>Prototype — Iceland edition.</strong> Green dots on the week ribbon mark nights in <strong>dark-sky zones</strong> (outside light pollution, viable for aurora). Click a card to expand the day-by-day.</div>
+
+  <div class="lens-row">
+    <h2>Three shapes for 2 weeks</h2>
+    <span class="lens-sub">generated from your brief · each 13–14 nights</span>
+    <div class="filter-pills">
+      <span class="pill on" onclick="filter('all',this)">All</span>
+      <span class="pill" onclick="filter('ring',this)">Full circuit</span>
+      <span class="pill" onclick="filter('south',this)">South focus</span>
+      <span class="pill" onclick="filter('twobase',this)">Low-drive</span>
+    </div>
+  </div>
+
+  <div class="gallery" id="gallery">
+
+    <!-- Template A: Full Ring Road -->
+    <div class="card" data-tags="ring,drive" onclick="expand(this,event)">
+      <div class="card-map">
+        <svg viewBox="0 0 360 180" preserveAspectRatio="xMidYMid slice">
+          <defs>
+            <radialGradient id="seaA" cx="50%" cy="60%" r="70%">
+              <stop offset="0%" stop-color="#0d1f24" stop-opacity="0"/>
+              <stop offset="100%" stop-color="#0d1f24" stop-opacity="1"/>
+            </radialGradient>
+          </defs>
+          <!-- Iceland silhouette -->
+          <path d="M 70 95 C 60 70, 80 55, 110 55 C 140 50, 150 35, 185 38 C 220 42, 240 38, 275 50 C 305 55, 320 70, 315 95 C 305 115, 300 135, 280 140 C 250 148, 210 145, 175 148 C 140 150, 110 148, 90 135 C 65 125, 60 110, 70 95 Z" fill="#4a5e52" fill-opacity="0.7" stroke="#1d4132" stroke-width="0.8"/>
+          <!-- Ring Road route: full loop -->
+          <path d="M 105 115 L 90 95 L 130 70 L 180 60 L 225 62 L 260 70 L 295 85 L 305 110 L 285 130 L 240 135 L 200 132 L 170 130 L 140 128 Z" stroke="#f0d070" stroke-width="2.2" fill="none" stroke-dasharray="4,3"/>
+          <!-- directional arrow -->
+          <path d="M 295 85 L 300 80 L 300 85 Z" fill="#f0d070"/>
+          <!-- stops, going counterclockwise from Reykjavík -->
+          <circle cx="105" cy="115" r="5" fill="#1a5fa8" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="90" cy="95" r="5" fill="#1d9c6a" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="180" cy="60" r="5" fill="#c04820" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="225" cy="62" r="4" fill="#1d9c6a" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="295" cy="85" r="4" fill="#1d9c6a" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="285" cy="130" r="4" fill="#1d9c6a" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="200" cy="132" r="5" fill="#c04820" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="140" cy="128" r="4" fill="#1a1a1a" stroke="#fff" stroke-width="1.5"/>
+          <!-- labels -->
+          <text x="105" y="132" font-family="system-ui" font-size="9" font-weight="700" fill="#e6fff2" text-anchor="middle">Reykjavík</text>
+          <text x="85" y="86" font-family="system-ui" font-size="9" font-weight="700" fill="#5edb9c" text-anchor="middle">Snæfells.</text>
+          <text x="180" y="52" font-family="system-ui" font-size="9" font-weight="700" fill="#ffbfa0" text-anchor="middle">Akureyri</text>
+          <text x="225" y="54" font-family="system-ui" font-size="9" font-weight="700" fill="#5edb9c" text-anchor="middle">Mývatn</text>
+          <text x="310" y="80" font-family="system-ui" font-size="9" font-weight="700" fill="#5edb9c" text-anchor="end">Eastfjords</text>
+          <text x="285" y="145" font-family="system-ui" font-size="9" font-weight="700" fill="#5edb9c" text-anchor="middle">Höfn</text>
+          <text x="200" y="147" font-family="system-ui" font-size="9" font-weight="700" fill="#ffbfa0" text-anchor="middle">Vík</text>
+        </svg>
+        <span class="card-mapbadge">Full Ring Road</span>
+        <span class="card-days">14 days</span>
+        <span class="card-aurora-badge">12 dark-sky nights</span>
+      </div>
+      <div class="card-body">
+        <h3 class="card-title">Full Ring Road, counterclockwise</h3>
+        <p class="card-thesis">The canonical Iceland trip: <strong>Route 1 in a loop</strong>, Reykjavík out through Snæfellsnes, up the north coast to Akureyri and Mývatn, down the east fjords, across the glacier south, back home. Every region's weather, every major landscape.</p>
+        <div class="tags">
+          <span class="tag drive">ring road</span>
+          <span class="tag aurora">aurora across all regions</span>
+          <span class="tag pace">moves a lot</span>
+          <span class="tag hike">glacier + waterfall</span>
+        </div>
+        <div class="totals">
+          <span class="aurora-total"><strong>12</strong> aurora-viable nights</span>
+          <span><strong>7</strong> base changes</span>
+          <span><strong>~1,500km</strong> driving</span>
+          <span>4 diff. weather regions</span>
+        </div>
+        <div class="weeks">
+          <div class="week">
+            <div class="week-hdr">Week 1 · NW + N</div>
+            <div class="week-stops">
+              <div class="week-stop"><span class="dot entry"></span><span class="place">Reykjavík</span><span class="nights">2n</span></div>
+              <div class="week-stop"><span class="dot dark-sky"></span><span class="place">Snæfellsnes</span><span class="nights">1n</span></div>
+              <div class="week-stop"><span class="dot anchor"></span><span class="place">Akureyri</span><span class="nights">2n</span></div>
+              <div class="week-stop"><span class="dot dark-sky"></span><span class="place">Mývatn</span><span class="nights">2n</span></div>
+            </div>
+          </div>
+          <div class="week">
+            <div class="week-hdr">Week 2 · E + S</div>
+            <div class="week-stops">
+              <div class="week-stop"><span class="dot dark-sky"></span><span class="place">Eastfjords</span><span class="nights">2n</span></div>
+              <div class="week-stop"><span class="dot dark-sky"></span><span class="place">Höfn</span><span class="nights">1n</span></div>
+              <div class="week-stop"><span class="dot anchor"></span><span class="place">Vík</span><span class="nights">2n</span></div>
+              <div class="week-stop"><span class="dot"></span><span class="place">Golden Circle</span><span class="nights">1n</span></div>
+              <div class="week-stop"><span class="dot exit"></span><span class="place">Reykjavík</span><span class="nights">1n</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="days">
+        <div class="week-block">
+          <h4>Week 1 · Heading north and east</h4>
+          <div class="day"><div class="day-num">Day 1–2</div><div class="day-txt"><strong>Reykjavík.</strong> Land, settle, pick up the rental car. Harpa, Hallgrímskirkja, a long dinner. Sky Lagoon if you land late. <span class="aurora-note">First aurora chance on night 2 if you drive 20 min out to Reykjanes.</span></div></div>
+          <div class="day"><div class="day-num">Day 3</div><div class="day-txt"><strong>Drive to Snæfellsnes.</strong> 3h. Stop at Kirkjufell, sleep in Hellnar or Arnarstapi. <span class="aurora-note">Dark-sky night 1.</span></div></div>
+          <div class="day"><div class="day-num">Day 4</div><div class="day-txt"><strong>Across to Akureyri.</strong> Long day (6–7h) via Borgarnes. Break in Siglufjörður if you have energy.</div></div>
+          <div class="day"><div class="day-num">Day 5</div><div class="day-txt"><strong>Akureyri + Goðafoss.</strong> Town morning, waterfall afternoon, dinner back in town. <span class="aurora-note">Aurora viable just outside town.</span></div></div>
+          <div class="day"><div class="day-num">Day 6–7</div><div class="day-txt"><strong>Mývatn + Diamond Circle.</strong> Pseudocraters, Dimmuborgir lava maze, Mývatn Nature Baths, Dettifoss, Ásbyrgi canyon. Húsavík whale watching day trip. <span class="aurora-note">Two dark-sky nights in the darkest part of Iceland.</span></div></div>
+        </div>
+        <div class="week-block">
+          <h4>Week 2 · Back through the south</h4>
+          <div class="day"><div class="day-num">Day 8–9</div><div class="day-txt"><strong>Eastfjords (Seyðisfjörður / Egilsstaðir).</strong> Rainbow street, coastal drive, remote geothermal springs (Vök Baths). <span class="aurora-note">Remote and dark.</span></div></div>
+          <div class="day"><div class="day-num">Day 10</div><div class="day-txt"><strong>Höfn area.</strong> Vatnajökull views, langoustine dinner. <span class="aurora-note">Ice and sky together.</span></div></div>
+          <div class="day"><div class="day-num">Day 11</div><div class="day-txt"><strong>Jökulsárlón + Diamond Beach → Vík.</strong> Iceberg lagoon, ice on black sand. Settle in Vík.</div></div>
+          <div class="day"><div class="day-num">Day 12</div><div class="day-txt"><strong>Vík area.</strong> Reynisfjara basalt columns, Skógafoss + Seljalandsfoss, Sólheimajökull glacier walk option.</div></div>
+          <div class="day"><div class="day-num">Day 13</div><div class="day-txt"><strong>Golden Circle, overnight near Selfoss.</strong> Þingvellir, Geysir, Gullfoss. Secret Lagoon.</div></div>
+          <div class="day"><div class="day-num">Day 14</div><div class="day-txt"><strong>Reykjavík, depart.</strong></div></div>
+        </div>
+      </div>
+      <div class="card-foot">
+        <button class="open" onclick="expand(this.closest('.card'),event)">day-by-day</button>
+        <button class="start" onclick="select(this,event)">Start with this</button>
+      </div>
+    </div>
+
+    <!-- Template B: South-focused with buffer -->
+    <div class="card" data-tags="south,drive" onclick="expand(this,event)">
+      <div class="card-map">
+        <svg viewBox="0 0 360 180" preserveAspectRatio="xMidYMid slice">
+          <path d="M 70 95 C 60 70, 80 55, 110 55 C 140 50, 150 35, 185 38 C 220 42, 240 38, 275 50 C 305 55, 320 70, 315 95 C 305 115, 300 135, 280 140 C 250 148, 210 145, 175 148 C 140 150, 110 148, 90 135 C 65 125, 60 110, 70 95 Z" fill="#4a5e52" fill-opacity="0.55" stroke="#1d4132" stroke-width="0.8"/>
+          <!-- highlight southern arc -->
+          <path d="M 70 95 C 60 70, 80 55, 110 55 C 140 50, 150 35, 185 38 M 105 115 L 90 95 L 100 85 M 105 115 L 140 128 L 180 135 L 220 130 L 250 138 L 275 135" stroke-opacity="0"/>
+          <!-- Path: Reykjavík → Snæfellsnes → back → Vík → Jökulsárlón → Vík → Reykjavík -->
+          <path d="M 105 115 L 95 95 L 80 80 L 95 95 L 105 115 L 140 128 L 175 140 L 215 138 L 250 140 L 215 138 L 175 140 L 140 128 L 105 115" stroke="#f0d070" stroke-width="2.2" fill="none" stroke-dasharray="4,3"/>
+          <!-- stops -->
+          <circle cx="105" cy="115" r="6" fill="#1a5fa8" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="80" cy="80" r="5" fill="#1d9c6a" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="175" cy="140" r="5" fill="#c04820" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="250" cy="140" r="4" fill="#1a1a1a" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="140" cy="128" r="4" fill="#1a1a1a" stroke="#fff" stroke-width="1.5"/>
+          <!-- labels -->
+          <text x="105" y="132" font-family="system-ui" font-size="9" font-weight="700" fill="#e6fff2" text-anchor="middle">Reykjavík</text>
+          <text x="80" y="71" font-family="system-ui" font-size="9" font-weight="700" fill="#5edb9c" text-anchor="middle">Snæfellsnes</text>
+          <text x="175" y="155" font-family="system-ui" font-size="9" font-weight="700" fill="#ffbfa0" text-anchor="middle">Vík base</text>
+          <text x="250" y="155" font-family="system-ui" font-size="9" font-weight="700" fill="#d0e0e8" text-anchor="middle">Jökulsárlón</text>
+          <text x="140" y="118" font-family="system-ui" font-size="9" font-weight="600" fill="#d0e0e8" text-anchor="middle">Golden Circle</text>
+        </svg>
+        <span class="card-mapbadge">South + Snæfellsnes</span>
+        <span class="card-days">14 days</span>
+        <span class="card-aurora-badge">10 dark-sky nights</span>
+      </div>
+      <div class="card-body">
+        <h3 class="card-title">South Focus, with a Snæfellsnes add</h3>
+        <p class="card-thesis">Three bases — Reykjavík, Snæfellsnes, Vík — covering the southwest peninsula, the Golden Circle, and the glacier-ice-and-waterfall south. <strong>Less driving, more settled nights.</strong> Weather delays are easier to absorb because you're never far from your base.</p>
+        <div class="tags">
+          <span class="tag base">3 bases</span>
+          <span class="tag aurora">south + SW aurora</span>
+          <span class="tag pace">weather-flexible</span>
+          <span class="tag hike">waterfalls + glacier</span>
+        </div>
+        <div class="totals">
+          <span class="aurora-total"><strong>10</strong> aurora-viable nights</span>
+          <span><strong>3</strong> base changes</span>
+          <span><strong>~850km</strong> driving</span>
+          <span>2 buffer days for weather</span>
+        </div>
+        <div class="weeks">
+          <div class="week">
+            <div class="week-hdr">Week 1 · SW Iceland</div>
+            <div class="week-stops">
+              <div class="week-stop"><span class="dot entry"></span><span class="place">Reykjavík</span><span class="nights">3n</span></div>
+              <div class="week-stop"><span class="dot dark-sky"></span><span class="place">Snæfellsnes</span><span class="nights">3n</span></div>
+              <div class="week-stop"><span class="dot anchor dark-sky"></span><span class="place">Vík</span><span class="nights">1n</span></div>
+            </div>
+          </div>
+          <div class="week">
+            <div class="week-hdr">Week 2 · South coast</div>
+            <div class="week-stops">
+              <div class="week-stop"><span class="dot anchor dark-sky"></span><span class="place">Vík (cont.)</span><span class="nights">3n</span></div>
+              <div class="week-stop"><span class="dot"></span><span class="place">Golden Circle</span><span class="nights">1n</span></div>
+              <div class="week-stop"><span class="dot exit"></span><span class="place">Reykjavík</span><span class="nights">3n</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="days">
+        <div class="week-block">
+          <h4>Week 1 · Reykjavík hub + west</h4>
+          <div class="day"><div class="day-num">Day 1–3</div><div class="day-txt"><strong>Reykjavík.</strong> Land, city walk, Blue Lagoon or Sky Lagoon, Reykjanes Peninsula day trip (Seltún geothermal, Gunnuhver, Kleifarvatn). <span class="aurora-note">Short drive out of town for aurora.</span></div></div>
+          <div class="day"><div class="day-num">Day 4–6</div><div class="day-txt"><strong>Snæfellsnes.</strong> Kirkjufell, Arnarstapi coastal walk, Snæfellsjökull, Djúpalónssandur black pearl beach, Budir church. <span class="aurora-note">Three dark-sky nights; aim for clear ones.</span></div></div>
+          <div class="day"><div class="day-num">Day 7</div><div class="day-txt"><strong>Drive to Vík.</strong> Via Seljalandsfoss + Skógafoss. Check in at Vík.</div></div>
+        </div>
+        <div class="week-block">
+          <h4>Week 2 · Glaciers + south + Golden Circle</h4>
+          <div class="day"><div class="day-num">Day 8</div><div class="day-txt"><strong>Jökulsárlón day.</strong> Iceberg lagoon, Diamond Beach, sea stacks.</div></div>
+          <div class="day"><div class="day-num">Day 9</div><div class="day-txt"><strong>Reynisfjara + Skaftafell.</strong> Basalt cliffs, puffins in summer, glacier hike option (or ice cave in winter).</div></div>
+          <div class="day"><div class="day-num">Day 10</div><div class="day-txt"><strong>Buffer day.</strong> Rest, hot tub, explore or save for weather. <span class="aurora-note">If you've had bad aurora nights, push farther inland tonight.</span></div></div>
+          <div class="day"><div class="day-num">Day 11</div><div class="day-txt"><strong>Drive to Golden Circle area.</strong> Þingvellir, Geysir, Gullfoss.</div></div>
+          <div class="day"><div class="day-num">Day 12–13</div><div class="day-txt"><strong>Reykjavík.</strong> Whale watching, museum day, cafes, last Icelandic meal.</div></div>
+          <div class="day"><div class="day-num">Day 14</div><div class="day-txt"><strong>Depart.</strong></div></div>
+        </div>
+      </div>
+      <div class="card-foot">
+        <button class="open" onclick="expand(this.closest('.card'),event)">day-by-day</button>
+        <button class="start" onclick="select(this,event)">Start with this</button>
+      </div>
+    </div>
+
+    <!-- Template C: Two-base strategy Rvk + Akureyri -->
+    <div class="card" data-tags="twobase,fly" onclick="expand(this,event)">
+      <div class="card-map">
+        <svg viewBox="0 0 360 180" preserveAspectRatio="xMidYMid slice">
+          <path d="M 70 95 C 60 70, 80 55, 110 55 C 140 50, 150 35, 185 38 C 220 42, 240 38, 275 50 C 305 55, 320 70, 315 95 C 305 115, 300 135, 280 140 C 250 148, 210 145, 175 148 C 140 150, 110 148, 90 135 C 65 125, 60 110, 70 95 Z" fill="#4a5e52" fill-opacity="0.55" stroke="#1d4132" stroke-width="0.8"/>
+          <!-- Two zones: southwest cluster, north cluster -->
+          <circle cx="105" cy="115" r="24" fill="#1a5fa8" fill-opacity="0.15" stroke="#1a5fa8" stroke-width="1"/>
+          <circle cx="195" cy="58" r="26" fill="#c04820" fill-opacity="0.15" stroke="#c04820" stroke-width="1"/>
+          <!-- flight line -->
+          <path d="M 105 115 Q 150 30, 195 58" stroke="#6a4a8a" stroke-width="2" fill="none" stroke-dasharray="3,4"/>
+          <!-- plane icon mid-path -->
+          <text x="150" y="55" font-family="system-ui" font-size="14" fill="#6a4a8a" text-anchor="middle">✈</text>
+          <!-- stops -->
+          <circle cx="105" cy="115" r="6" fill="#1a5fa8" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="85" cy="90" r="4" fill="#1d9c6a" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="180" cy="60" r="6" fill="#c04820" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="215" cy="55" r="4" fill="#1d9c6a" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="165" cy="50" r="4" fill="#1d9c6a" stroke="#fff" stroke-width="1.5"/>
+          <!-- labels -->
+          <text x="105" y="132" font-family="system-ui" font-size="9" font-weight="700" fill="#e6fff2" text-anchor="middle">Reykjavík base</text>
+          <text x="85" y="82" font-family="system-ui" font-size="9" font-weight="700" fill="#5edb9c" text-anchor="middle">Snæfells.</text>
+          <text x="180" y="76" font-family="system-ui" font-size="9" font-weight="700" fill="#ffbfa0" text-anchor="middle">Akureyri base</text>
+          <text x="215" y="47" font-family="system-ui" font-size="9" font-weight="700" fill="#5edb9c" text-anchor="middle">Mývatn</text>
+          <text x="165" y="42" font-family="system-ui" font-size="9" font-weight="700" fill="#5edb9c" text-anchor="middle">Húsavík</text>
+        </svg>
+        <span class="card-mapbadge">Two-Base Aurora</span>
+        <span class="card-days">14 days</span>
+        <span class="card-aurora-badge">11 dark-sky nights · 2 weather zones</span>
+      </div>
+      <div class="card-body">
+        <h3 class="card-title">Two-base aurora strategy: Reykjavík + Akureyri</h3>
+        <p class="card-thesis">Split the trip between the southwest and the north with a <strong>domestic flight instead of a long drive</strong>. Aurora-viewing odds go up because you have two independent weather regions — if the south is clouded in for a week, the north might not be.</p>
+        <div class="tags">
+          <span class="tag fly">domestic flight</span>
+          <span class="tag aurora">two weather zones</span>
+          <span class="tag base">2 bases</span>
+          <span class="tag pace">low driving</span>
+        </div>
+        <div class="totals">
+          <span class="aurora-total"><strong>11</strong> aurora-viable nights across <strong>2</strong> weather zones</span>
+          <span><strong>2</strong> base changes</span>
+          <span><strong>~400km</strong> driving + 1 flight</span>
+          <span>Best odds of clear nights</span>
+        </div>
+        <div class="weeks">
+          <div class="week">
+            <div class="week-hdr">Week 1 · SW base</div>
+            <div class="week-stops">
+              <div class="week-stop"><span class="dot entry"></span><span class="place">Reykjavík</span><span class="nights">3n</span></div>
+              <div class="week-stop"><span class="dot dark-sky"></span><span class="place">Snæfellsnes</span><span class="nights">2n</span></div>
+              <div class="week-stop"><span class="dot"></span><span class="place">Reykjavík (back)</span><span class="nights">1n</span></div>
+              <div class="week-stop"><span class="dot fly"></span><span class="place">✈ Fly to Akureyri</span><span class="nights">travel</span></div>
+            </div>
+          </div>
+          <div class="week">
+            <div class="week-hdr">Week 2 · N base</div>
+            <div class="week-stops">
+              <div class="week-stop"><span class="dot anchor dark-sky"></span><span class="place">Akureyri</span><span class="nights">4n</span></div>
+              <div class="week-stop"><span class="dot dark-sky"></span><span class="place">Mývatn</span><span class="nights">2n</span></div>
+              <div class="week-stop"><span class="dot fly"></span><span class="place">✈ Fly back</span><span class="nights">travel</span></div>
+              <div class="week-stop"><span class="dot exit"></span><span class="place">Reykjavík</span><span class="nights">1n</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="days">
+        <div class="week-block">
+          <h4>Week 1 · Southwest</h4>
+          <div class="day"><div class="day-num">Day 1–3</div><div class="day-txt"><strong>Reykjavík.</strong> Arrival, Blue Lagoon, city, Reykjanes Peninsula day trip, Golden Circle from the city. <span class="aurora-note">3 aurora nights in the SW.</span></div></div>
+          <div class="day"><div class="day-num">Day 4–5</div><div class="day-txt"><strong>Snæfellsnes.</strong> Drive out, 2 nights. Kirkjufell, Arnarstapi, Djúpalónssandur. <span class="aurora-note">Dark-sky, few lights.</span></div></div>
+          <div class="day"><div class="day-num">Day 6</div><div class="day-txt"><strong>Return to Reykjavík.</strong> Afternoon back, hot pools + dinner.</div></div>
+          <div class="day"><div class="day-num">Day 7</div><div class="day-txt"><strong>Fly to Akureyri.</strong> 45-min domestic, remarkable approach through the fjord. Settle in.</div></div>
+        </div>
+        <div class="week-block">
+          <h4>Week 2 · North</h4>
+          <div class="day"><div class="day-num">Day 8</div><div class="day-txt"><strong>Akureyri.</strong> Botanical garden, harbor, Forest Lagoon. <span class="aurora-note">Aurora viable just outside town.</span></div></div>
+          <div class="day"><div class="day-num">Day 9</div><div class="day-txt"><strong>Húsavík + whale watching.</strong> Day trip, return to Akureyri. Húsavík hot tubs in the evening.</div></div>
+          <div class="day"><div class="day-num">Day 10</div><div class="day-txt"><strong>Goðafoss + Akureyri day.</strong> Short outing, longer evening. Ski lift option in winter.</div></div>
+          <div class="day"><div class="day-num">Day 11</div><div class="day-txt"><strong>Drive to Mývatn.</strong> Check in on the lake.</div></div>
+          <div class="day"><div class="day-num">Day 12</div><div class="day-txt"><strong>Mývatn day.</strong> Nature Baths, Dimmuborgir, pseudocraters, Dettifoss. <span class="aurora-note">Darkest sky of the trip.</span></div></div>
+          <div class="day"><div class="day-num">Day 13</div><div class="day-txt"><strong>Back to Akureyri, fly Reykjavík.</strong> Last night.</div></div>
+          <div class="day"><div class="day-num">Day 14</div><div class="day-txt"><strong>Depart Reykjavík.</strong></div></div>
+        </div>
+      </div>
+      <div class="card-foot">
+        <button class="open" onclick="expand(this.closest('.card'),event)">day-by-day</button>
+        <button class="start" onclick="select(this,event)">Start with this</button>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="legend">
+    <div class="legend-item"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#1a5fa8;"></span> arrival</div>
+    <div class="legend-item"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#b28a2e;"></span> departure</div>
+    <div class="legend-item"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#c04820;"></span> anchor stop (3+ nights)</div>
+    <div class="legend-item"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#1d9c6a;box-shadow:0 0 0 2px #d4f0e2;"></span> dark-sky aurora night</div>
+    <div class="legend-item"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#6a4a8a;"></span> domestic flight</div>
+  </div>
+
+  <div class="tray">
+    <span class="label">Not the right shape?</span>
+    <button onclick="toast('Would regenerate 3 more 14-day variations with different pacing/focus.');">Show 3 more</button>
+    <button onclick="toast('Would regenerate with pacing bias: even more settled (1-2 bases).');">Even more settled</button>
+    <button onclick="toast('Would regenerate with Westfjords emphasis (remote, darkest skies).');">Add Westfjords</button>
+    <button onclick="toast('Would regenerate in guided-tour mode (drivers, group excursions).');">Not self-drive</button>
+    <button onclick="toast('Would anchor on deep-winter strategy (Feb, storm buffer).');">Deep winter</button>
+    <span class="scratch"><a href="#" onclick="toast('Drops you into the current Places-to-think-about flow.');return false;" style="color:#1a5fa8;font-weight:600;text-decoration:none;">Or build from scratch →</a></span>
+  </div>
+</div>
+
+<button class="sticky-cta" id="cta" onclick="toast('Would open the editor with this 14-day trip pre-loaded — Places + schedule UI, filled in with aurora-aware day planning.');">
+  <span>Continue with your pick</span><span class="arrow">→</span>
+</button>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  function expand(card, ev){
+    if (ev && ev.target && ev.target.closest(".start")) return;
+    card.classList.toggle("expanded");
+  }
+  function select(btn, ev){
+    ev.stopPropagation();
+    var card = btn.closest(".card");
+    var wasSel = card.classList.contains("selected");
+    document.querySelectorAll(".card.selected").forEach(function(c){c.classList.remove("selected");});
+    if (!wasSel) {
+      card.classList.add("selected");
+      btn.textContent = "✓ Selected";
+      document.getElementById("cta").classList.add("on");
+    } else {
+      btn.textContent = "Start with this";
+      document.getElementById("cta").classList.remove("on");
+    }
+    document.querySelectorAll(".card .start").forEach(function(b){
+      if (!b.closest(".card").classList.contains("selected")) b.textContent = "Start with this";
+    });
+  }
+  function filter(tag, pill){
+    document.querySelectorAll(".filter-pills .pill").forEach(function(p){p.classList.remove("on");});
+    pill.classList.add("on");
+    document.querySelectorAll(".card").forEach(function(c){
+      var tags = c.getAttribute("data-tags") || "";
+      var show = (tag === "all") || tags.indexOf(tag) !== -1;
+      c.style.display = show ? "flex" : "none";
+    });
+  }
+  function toast(msg){
+    var t = document.getElementById("toast");
+    t.textContent = msg;
+    t.classList.add("on");
+    clearTimeout(window._toastT);
+    window._toastT = setTimeout(function(){t.classList.remove("on");}, 2600);
+  }
+</script>
+</body>
+</html>

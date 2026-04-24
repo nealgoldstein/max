@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gallery prototype — 3 ways to do 4 weeks in Switzerland</title>
+<style>
+  :root{
+    --bg:#f5f3ee;
+    --card:#ffffff;
+    --ink:#1a1a1a;
+    --ink-2:#555;
+    --ink-3:#888;
+    --hair:#e6e2d8;
+    --blue:#1a5fa8;
+    --blue-soft:#e8f0fc;
+    --blue-deep:#134a8a;
+    --gold:#b28a2e;
+    --gold-soft:#f5ebcf;
+    --green:#2a7a4e;
+    --rail:#1a5fa8;
+    --boat:#2a7a9e;
+    --drive:#7a5c1a;
+    --hike:#2a7a4e;
+    --italy:#b84a3a;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased;}
+  .shell{max-width:1280px;margin:0 auto;padding:28px 32px 80px;}
+  header h1{font-size:26px;font-weight:700;margin:0 0 6px;letter-spacing:-0.01em;}
+  header .lede{font-size:13px;color:var(--ink-2);max-width:760px;line-height:1.55;margin:0 0 18px;}
+  .brief{background:#fff;border:1px solid var(--hair);border-radius:10px;padding:12px 16px;margin-bottom:26px;font-size:12px;color:var(--ink-2);line-height:1.6;display:flex;gap:14px;flex-wrap:wrap;align-items:center;}
+  .brief strong{color:var(--ink);font-weight:600;}
+  .brief .chip{display:inline-block;font-size:11px;padding:3px 9px;background:var(--blue-soft);color:var(--blue);border-radius:999px;font-weight:600;}
+  .brief .dur{display:inline-block;font-size:11px;padding:3px 9px;background:var(--gold-soft);color:var(--gold);border-radius:999px;font-weight:700;}
+  .brief .edit{margin-left:auto;font-size:11px;color:var(--blue);cursor:pointer;text-decoration:none;}
+  .brief .edit:hover{text-decoration:underline;}
+
+  .lens-row{display:flex;gap:18px;align-items:baseline;margin-bottom:14px;flex-wrap:wrap;}
+  .lens-row h2{font-size:15px;font-weight:700;margin:0;letter-spacing:-0.005em;}
+  .lens-row .lens-sub{font-size:12px;color:var(--ink-3);}
+  .filter-pills{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap;}
+  .pill{font-size:11px;padding:4px 10px;border-radius:999px;border:1px solid var(--hair);background:#fff;color:var(--ink-2);cursor:pointer;user-select:none;}
+  .pill.on{background:var(--ink);color:#fff;border-color:var(--ink);}
+  .pill:hover:not(.on){background:#faf7ee;}
+
+  .gallery{display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:18px;margin-bottom:28px;}
+  @media (max-width:980px){.gallery{grid-template-columns:1fr;}}
+
+  .card{background:var(--card);border:1px solid var(--hair);border-radius:14px;overflow:hidden;display:flex;flex-direction:column;transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease;cursor:pointer;}
+  .card:hover{transform:translateY(-2px);box-shadow:0 10px 28px rgba(20,20,20,0.08);border-color:#d8d1c0;}
+  .card.selected{border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-soft), 0 10px 28px rgba(26,95,168,0.12);}
+
+  .card-map{position:relative;height:170px;background:linear-gradient(135deg,#e9ede0 0%,#dbe4cd 100%);border-bottom:1px solid var(--hair);}
+  .card-map svg{position:absolute;inset:0;width:100%;height:100%;}
+  .card-mapbadge{position:absolute;top:10px;left:12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#fff;background:rgba(20,20,20,0.55);padding:4px 9px;border-radius:999px;backdrop-filter:blur(3px);}
+  .card-days{position:absolute;top:10px;right:12px;font-size:11px;font-weight:700;background:#fff;color:var(--ink);padding:4px 10px;border-radius:999px;box-shadow:0 2px 6px rgba(0,0,0,0.08);}
+
+  .card-body{padding:16px 18px 4px;flex:1;display:flex;flex-direction:column;}
+  .card-title{font-size:17px;font-weight:700;letter-spacing:-0.01em;margin:0 0 4px;}
+  .card-thesis{font-size:12px;color:var(--ink-2);line-height:1.55;margin:0 0 12px;}
+
+  .tags{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px;}
+  .tag{font-size:10px;padding:3px 8px;border-radius:4px;background:#f4efdf;color:#5c4a1a;font-weight:600;letter-spacing:0.02em;}
+  .tag.rail{background:#e8f0fc;color:var(--blue);}
+  .tag.boat{background:#e5f2f5;color:var(--boat);}
+  .tag.food{background:#f7eceb;color:#a84a36;}
+  .tag.hike{background:#e9f3ec;color:var(--hike);}
+  .tag.pace{background:#f0ecf5;color:#6a4a8a;}
+  .tag.home{background:#fcf4e4;color:#8a6a20;}
+  .tag.italy{background:#fbe9e4;color:var(--italy);}
+
+  /* Week ribbon: each week is a block. Inside, stops render with night counts.
+     At 4 weeks the unit of planning is the week, not the day — the ribbon reflects that. */
+  .weeks{display:flex;gap:4px;padding:2px 0 6px;}
+  .week{flex:1;min-width:0;background:#faf7ee;border:1px solid var(--hair);border-radius:7px;padding:6px 7px;display:flex;flex-direction:column;gap:3px;}
+  .week-hdr{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-3);}
+  .week-stops{display:flex;flex-direction:column;gap:2px;}
+  .week-stop{display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--ink);line-height:1.2;}
+  .week-stop .dot{width:7px;height:7px;border-radius:50%;background:var(--ink);flex-shrink:0;}
+  .week-stop .dot.entry{background:var(--blue);}
+  .week-stop .dot.exit{background:var(--gold);}
+  .week-stop .dot.anchor{background:#c04820;}
+  .week-stop .dot.italy{background:var(--italy);}
+  .week-stop .place{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .week-stop .nights{color:var(--ink-3);font-size:9.5px;margin-left:auto;font-weight:600;}
+
+  .totals{display:flex;gap:14px;margin:6px 0 12px;padding:8px 10px;background:#faf7ee;border-radius:7px;font-size:11px;color:var(--ink-2);flex-wrap:wrap;}
+  .totals span strong{color:var(--ink);font-weight:700;}
+  .totals span{display:inline-flex;align-items:center;gap:4px;}
+
+  .days{border-top:1px dashed var(--hair);padding:12px 18px 14px;font-size:11.5px;color:var(--ink-2);line-height:1.55;display:none;}
+  .card.expanded .days{display:block;}
+  .week-block{margin-bottom:12px;}
+  .week-block:last-child{margin-bottom:0;}
+  .week-block h4{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--blue);margin:0 0 6px;}
+  .day{display:flex;gap:10px;padding:4px 0;border-bottom:1px dotted #eee2c8;}
+  .day:last-child{border-bottom:none;}
+  .day-num{font-size:10px;color:var(--ink-3);font-weight:700;min-width:44px;flex-shrink:0;padding-top:1px;}
+  .day-txt{flex:1;}
+  .day-txt strong{color:var(--ink);font-weight:600;}
+
+  .card-foot{padding:12px 18px 16px;border-top:1px solid var(--hair);display:flex;gap:8px;align-items:center;}
+  .card-foot .open{background:none;border:none;color:var(--blue);cursor:pointer;font-size:11px;font-weight:600;padding:4px 0;font-family:inherit;}
+  .card-foot .open:hover{text-decoration:underline;}
+  .card-foot .start{margin-left:auto;background:var(--blue);color:#fff;border:none;padding:8px 16px;font-size:12px;font-weight:700;border-radius:7px;cursor:pointer;font-family:inherit;transition:background .12s;}
+  .card-foot .start:hover{background:var(--blue-deep);}
+  .card.selected .start{background:var(--green);}
+  .card.selected .start:hover{background:#1d5a38;}
+
+  .legend{display:flex;gap:18px;font-size:11px;color:var(--ink-3);margin:0 4px 22px;flex-wrap:wrap;}
+  .legend-item{display:flex;align-items:center;gap:6px;}
+
+  .tray{margin-top:6px;background:#fff;border:1px solid var(--hair);border-radius:10px;padding:14px 18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+  .tray .label{font-size:12px;color:var(--ink-2);}
+  .tray button{background:#fff;border:1px solid var(--hair);color:var(--ink);font-size:12px;font-weight:600;padding:7px 12px;border-radius:7px;cursor:pointer;font-family:inherit;}
+  .tray button:hover{background:#faf7ee;border-color:#d8d1c0;}
+  .tray .scratch{margin-left:auto;color:var(--ink-3);}
+
+  .sticky-cta{position:fixed;right:32px;bottom:28px;background:var(--ink);color:#fff;padding:14px 20px;border-radius:999px;font-size:13px;font-weight:700;box-shadow:0 10px 28px rgba(0,0,0,0.22);cursor:pointer;display:none;align-items:center;gap:10px;border:none;font-family:inherit;}
+  .sticky-cta.on{display:inline-flex;}
+  .sticky-cta:hover{background:#000;}
+  .sticky-cta .arrow{font-size:16px;}
+
+  .note{background:#f9f3e0;border:1px solid #ead7a0;border-radius:8px;padding:10px 14px;font-size:11.5px;color:#7a5c1a;margin-bottom:20px;line-height:1.55;}
+  .note strong{color:#5c4410;font-weight:700;}
+
+  .toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 18px;border-radius:8px;font-size:12px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:10;}
+  .toast.on{opacity:1;}
+</style>
+</head>
+<body>
+<div class="shell">
+  <header>
+    <h1>3 ways to do 4 weeks in Switzerland</h1>
+    <p class="lede">Four weeks is a different kind of trip — not just a longer version of 10 days. These three shapes each answer a different question: how fast do you want to move, how much do you want to see, and do you want to stay entirely in Switzerland?</p>
+  </header>
+
+  <div class="brief">
+    <strong>Your brief:</strong>
+    <span>"ride named trains through the mountains, take walks in the mountains, explore the local culture, and eat chocolate"</span>
+    <span class="dur">4 weeks</span>
+    <span class="chip">named trains</span>
+    <span class="chip">mountain walks</span>
+    <span class="chip">culture</span>
+    <span class="chip">chocolate</span>
+    <a class="edit" href="#" onclick="toast('This would reopen the brief editor.');return false;">edit brief</a>
+  </div>
+
+  <div class="note"><strong>Prototype — 4-week edition.</strong> Each template is a complete 28-day shape with a distinct thesis, not a 10-day trip stretched out. Click a card to expand its day-by-day; click "Start with this" to see the selected state.</div>
+
+  <div class="lens-row">
+    <h2>Three shapes for 4 weeks</h2>
+    <span class="lens-sub">generated from your brief · each ~27–28 nights</span>
+    <div class="filter-pills">
+      <span class="pill on" onclick="filter('all',this)">All</span>
+      <span class="pill" onclick="filter('slow',this)">Slow travel</span>
+      <span class="pill" onclick="filter('ch',this)">Switzerland only</span>
+      <span class="pill" onclick="filter('extension',this)">With extension</span>
+    </div>
+  </div>
+
+  <div class="gallery" id="gallery">
+
+    <!-- Template A: Slow Four Weeks -->
+    <div class="card" data-tags="slow,ch" onclick="expand(this,event)">
+      <div class="card-map">
+        <svg viewBox="0 0 360 170" preserveAspectRatio="xMidYMid slice">
+          <defs>
+            <pattern id="gridA" width="20" height="20" patternUnits="userSpaceOnUse">
+              <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#cfd9c0" stroke-width="0.5"/>
+            </pattern>
+          </defs>
+          <rect width="360" height="170" fill="url(#gridA)"/>
+          <!-- Switzerland silhouette -->
+          <path d="M 30 85 C 50 55, 90 42, 140 52 C 190 60, 240 48, 290 58 C 320 65, 340 95, 330 115 C 310 135, 260 133, 210 127 C 160 123, 110 135, 70 125 C 40 117, 20 105, 30 85 Z" fill="#c9d5b0" fill-opacity="0.7" stroke="#90a074" stroke-width="0.8"/>
+          <!-- 4 home bases: big circles -->
+          <circle cx="80" cy="115" r="18" fill="#1a5fa8" fill-opacity="0.12" stroke="#1a5fa8" stroke-width="1"/>
+          <circle cx="165" cy="95" r="18" fill="#1a5fa8" fill-opacity="0.12" stroke="#1a5fa8" stroke-width="1"/>
+          <circle cx="230" cy="110" r="18" fill="#1a5fa8" fill-opacity="0.12" stroke="#1a5fa8" stroke-width="1"/>
+          <circle cx="300" cy="85" r="18" fill="#1a5fa8" fill-opacity="0.12" stroke="#1a5fa8" stroke-width="1"/>
+          <!-- connecting line -->
+          <path d="M 80 115 L 165 95 L 230 110 L 300 85" stroke="#1a5fa8" stroke-width="2" fill="none" stroke-dasharray="5,3"/>
+          <!-- dots -->
+          <circle cx="80" cy="115" r="5" fill="#1a5fa8" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="165" cy="95" r="5" fill="#1a5fa8" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="230" cy="110" r="5" fill="#1a5fa8" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="300" cy="85" r="5" fill="#b28a2e" stroke="#fff" stroke-width="1.5"/>
+          <!-- labels -->
+          <text x="80" y="144" font-family="system-ui" font-size="9" font-weight="700" fill="#1a5fa8" text-anchor="middle">Montreux 6n</text>
+          <text x="165" y="124" font-family="system-ui" font-size="9" font-weight="700" fill="#1a5fa8" text-anchor="middle">Interlaken 7n</text>
+          <text x="230" y="139" font-family="system-ui" font-size="9" font-weight="700" fill="#1a5fa8" text-anchor="middle">Zermatt 7n</text>
+          <text x="300" y="72" font-family="system-ui" font-size="9" font-weight="700" fill="#b28a2e" text-anchor="middle">St. Moritz 6n</text>
+        </svg>
+        <span class="card-mapbadge">Slow Four Weeks</span>
+        <span class="card-days">4 weeks</span>
+      </div>
+      <div class="card-body">
+        <h3 class="card-title">Slow Four Weeks</h3>
+        <p class="card-thesis">Four home bases, roughly a week each. You unpack once per region and let the place reveal itself through day trips instead of checking in somewhere new every two days.</p>
+        <div class="tags">
+          <span class="tag home">4 home bases</span>
+          <span class="tag pace">slow travel</span>
+          <span class="tag hike">deep hikes</span>
+          <span class="tag food">farmer's markets + chocolate</span>
+        </div>
+        <div class="totals">
+          <span><strong>4</strong> moves</span>
+          <span><strong>26</strong> nights · 2 travel days</span>
+          <span><strong>3</strong> named trains (non-mandatory)</span>
+          <span><strong>Low</strong> churn</span>
+        </div>
+        <div class="weeks">
+          <div class="week">
+            <div class="week-hdr">Week 1</div>
+            <div class="week-stops">
+              <div class="week-stop"><span class="dot entry"></span><span class="place">Zürich</span><span class="nights">1n</span></div>
+              <div class="week-stop"><span class="dot"></span><span class="place">Montreux</span><span class="nights">6n</span></div>
+            </div>
+          </div>
+          <div class="week">
+            <div class="week-hdr">Week 2</div>
+            <div class="week-stops">
+              <div class="week-stop"><span class="dot"></span><span class="place">Interlaken</span><span class="nights">7n</span></div>
+            </div>
+          </div>
+          <div class="week">
+            <div class="week-hdr">Week 3</div>
+            <div class="week-stops">
+              <div class="week-stop"><span class="dot anchor"></span><span class="place">Zermatt</span><span class="nights">7n</span></div>
+            </div>
+          </div>
+          <div class="week">
+            <div class="week-hdr">Week 4</div>
+            <div class="week-stops">
+              <div class="week-stop"><span class="dot anchor"></span><span class="place">St. Moritz</span><span class="nights">4n</span></div>
+              <div class="week-stop"><span class="dot exit"></span><span class="place">Zürich</span><span class="nights">1n</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="days">
+        <div class="week-block">
+          <h4>Week 1 · Lake Geneva base</h4>
+          <div class="day"><div class="day-num">Day 1</div><div class="day-txt"><strong>Zürich arrival, train to Montreux.</strong> Lakefront settle-in, Belle Époque stroll.</div></div>
+          <div class="day"><div class="day-num">Day 2–3</div><div class="day-txt"><strong>Lake Geneva Circuit.</strong> Train to Lausanne, CGN paddle steamer to Chillon, Lavaux wine terraces walk.</div></div>
+          <div class="day"><div class="day-num">Day 4</div><div class="day-txt"><strong>Gruyères + Maison Cailler.</strong> Chocolate factory, cheese cellar, hilltop village. Day trip by train.</div></div>
+          <div class="day"><div class="day-num">Day 5</div><div class="day-txt"><strong>Lavaux vineyards on foot.</strong> Long wine-terrace walk from St-Saphorin to Lutry. Market lunch.</div></div>
+          <div class="day"><div class="day-num">Day 6</div><div class="day-txt"><strong>Down day in Montreux.</strong> Lakeside, Queen studio museum, casino if you're curious.</div></div>
+          <div class="day"><div class="day-num">Day 7</div><div class="day-txt"><strong>GoldenPass Line to Interlaken.</strong> Scenic travel day, Belle Époque carriage.</div></div>
+        </div>
+        <div class="week-block">
+          <h4>Week 2 · Bernese Oberland base</h4>
+          <div class="day"><div class="day-num">Day 8</div><div class="day-txt"><strong>Interlaken settle-in.</strong> Walk the Aare, check out Höhematte park, plan the week.</div></div>
+          <div class="day"><div class="day-num">Day 9</div><div class="day-txt"><strong>Jungfraujoch "Top of Europe".</strong> Cogwheel up, glacier experience, back by evening.</div></div>
+          <div class="day"><div class="day-num">Day 10</div><div class="day-txt"><strong>Schynige Platte + Faulhorn walk.</strong> Cogwheel up, long panoramic ridge walk if weather.</div></div>
+          <div class="day"><div class="day-num">Day 11</div><div class="day-txt"><strong>Lauterbrunnen valley.</strong> Waterfalls, Trümmelbach, maybe Mürren funicular.</div></div>
+          <div class="day"><div class="day-num">Day 12</div><div class="day-txt"><strong>Rest day.</strong> Aare swim, read, farmer's market, Meiringen chocolate shop.</div></div>
+          <div class="day"><div class="day-num">Day 13</div><div class="day-txt"><strong>Brienzersee boat + Rothorn Bahn.</strong> Steam cogwheel up the Brienzer Rothorn; panoramic summit.</div></div>
+          <div class="day"><div class="day-num">Day 14</div><div class="day-txt"><strong>Train to Zermatt.</strong> Via Brig; afternoon walk along the Vispa.</div></div>
+        </div>
+        <div class="week-block">
+          <h4>Week 3 · Zermatt + Matter Valley base</h4>
+          <div class="day"><div class="day-num">Day 15</div><div class="day-txt"><strong>Gornergrat sunrise.</strong> Early cogwheel, Matterhorn light, breakfast up top.</div></div>
+          <div class="day"><div class="day-num">Day 16</div><div class="day-txt"><strong>Five Lakes Walk.</strong> Classic 2–3h loop with Matterhorn reflections.</div></div>
+          <div class="day"><div class="day-num">Day 17</div><div class="day-txt"><strong>Saas-Fee day.</strong> Neighboring village, glacier viewpoints, Ice Pavilion.</div></div>
+          <div class="day"><div class="day-num">Day 18</div><div class="day-txt"><strong>Klein Matterhorn + Schwarzsee.</strong> Cable car to Europe's highest viewing platform.</div></div>
+          <div class="day"><div class="day-num">Day 19</div><div class="day-txt"><strong>Down day + raclette lunch.</strong> Wander Hinterdorf (old village), shop for Valais chocolate.</div></div>
+          <div class="day"><div class="day-num">Day 20</div><div class="day-txt"><strong>Findel Glacier trail + Riffelsee.</strong> Deeper hike into the Gorner region.</div></div>
+          <div class="day"><div class="day-num">Day 21</div><div class="day-txt"><strong>Glacier Express to St. Moritz.</strong> The scenic travel day — or take regular trains and stop in Andermatt.</div></div>
+        </div>
+        <div class="week-block">
+          <h4>Week 4 · Engadin base</h4>
+          <div class="day"><div class="day-num">Day 22</div><div class="day-txt"><strong>St. Moritz + Muottas Muragl sunrise.</strong> Funicular up at dawn, long breakfast.</div></div>
+          <div class="day"><div class="day-num">Day 23</div><div class="day-txt"><strong>Bernina Express day trip.</strong> Down to Tirano and back — or break the journey in Poschiavo.</div></div>
+          <div class="day"><div class="day-num">Day 24</div><div class="day-txt"><strong>Val Fex walk.</strong> Classic Engadin high-valley hike from Sils.</div></div>
+          <div class="day"><div class="day-num">Day 25</div><div class="day-txt"><strong>Val Müstair day.</strong> UNESCO Swiss National Park, Müstair monastery frescoes.</div></div>
+          <div class="day"><div class="day-num">Day 26</div><div class="day-txt"><strong>Diavolezza high-alpine.</strong> Cable car, glacier panorama, short hike.</div></div>
+          <div class="day"><div class="day-num">Day 27</div><div class="day-txt"><strong>Train to Zürich.</strong> Via Chur; evening dinner in Niederdorf, last chocolate stops.</div></div>
+          <div class="day"><div class="day-num">Day 28</div><div class="day-txt"><strong>Depart Zürich.</strong></div></div>
+        </div>
+      </div>
+      <div class="card-foot">
+        <button class="open" onclick="expand(this.closest('.card'),event)">day-by-day</button>
+        <button class="start" onclick="select(this,event)">Start with this</button>
+      </div>
+    </div>
+
+    <!-- Template B: Grand Tour Plus -->
+    <div class="card" data-tags="ch,rail" onclick="expand(this,event)">
+      <div class="card-map">
+        <svg viewBox="0 0 360 170" preserveAspectRatio="xMidYMid slice">
+          <rect width="360" height="170" fill="url(#gridA)"/>
+          <path d="M 30 85 C 50 55, 90 42, 140 52 C 190 60, 240 48, 290 58 C 320 65, 340 95, 330 115 C 310 135, 260 133, 210 127 C 160 123, 110 135, 70 125 C 40 117, 20 105, 30 85 Z" fill="#c9d5b0" fill-opacity="0.7" stroke="#90a074" stroke-width="0.8"/>
+          <!-- grand loop — more stops -->
+          <path d="M 300 60 L 270 78 L 310 48 L 270 78 L 220 75 L 170 92 L 130 80 L 100 118 L 70 115 L 130 130 L 200 128 L 250 120 L 290 100 L 320 80 Z" stroke="#1a5fa8" stroke-width="2" fill="none" stroke-dasharray="5,3"/>
+          <circle cx="300" cy="60" r="5" fill="#1a5fa8" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="310" cy="48" r="4" fill="#1a1a1a" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="270" cy="78" r="4" fill="#1a1a1a" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="220" cy="75" r="4" fill="#1a1a1a" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="170" cy="92" r="4" fill="#1a1a1a" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="130" cy="80" r="5" fill="#c04820" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="100" cy="118" r="5" fill="#c04820" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="70" cy="115" r="4" fill="#1a1a1a" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="130" cy="130" r="4" fill="#1a1a1a" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="200" cy="128" r="5" fill="#c04820" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="250" cy="120" r="4" fill="#1a1a1a" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="320" cy="80" r="5" fill="#b28a2e" stroke="#fff" stroke-width="1.5"/>
+          <text x="300" y="52" font-family="system-ui" font-size="9" font-weight="700" fill="#1a5fa8" text-anchor="middle">Zürich</text>
+          <text x="310" y="40" font-family="system-ui" font-size="8" font-weight="600" fill="#333" text-anchor="middle">Appenzell</text>
+          <text x="130" y="72" font-family="system-ui" font-size="9" font-weight="700" fill="#c04820" text-anchor="middle">Zermatt</text>
+          <text x="100" y="135" font-family="system-ui" font-size="9" font-weight="700" fill="#c04820" text-anchor="middle">Geneva</text>
+          <text x="200" y="142" font-family="system-ui" font-size="9" font-weight="700" fill="#c04820" text-anchor="middle">Lugano</text>
+          <text x="320" y="72" font-family="system-ui" font-size="9" font-weight="700" fill="#b28a2e" text-anchor="middle">St. Moritz</text>
+        </svg>
+        <span class="card-mapbadge">Grand Tour Plus</span>
+        <span class="card-days">4 weeks</span>
+      </div>
+      <div class="card-body">
+        <h3 class="card-title">Grand Tour Plus</h3>
+        <p class="card-thesis">The full rail comprehensive — all named trains, all three language regions, plus the less-obvious places (Appenzell, Gruyères, Valais villages) that get squeezed out at 14 days. Swiss Travel Pass pays for itself twice.</p>
+        <div class="tags">
+          <span class="tag rail">all named trains</span>
+          <span class="tag pace">steady pace</span>
+          <span class="tag hike">proper hikes</span>
+          <span class="tag food">every region's food</span>
+        </div>
+        <div class="totals">
+          <span><strong>10</strong> base changes</span>
+          <span><strong>28</strong> nights</span>
+          <span><strong>6</strong> named trains</span>
+          <span>German · French · Italian CH</span>
+        </div>
+        <div class="weeks">
+          <div class="week">
+            <div class="week-hdr">Week 1</div>
+            <div class="week-stops">
+              <div class="week-stop"><span class="dot entry"></span><span class="place">Zürich</span><span class="nights">2n</span></div>
+              <div class="week-stop"><span class="dot"></span><span class="place">Appenzell</span><span class="nights">2n</span></div>
+              <div class="week-stop"><span class="dot"></span><span class="place">Lucerne</span><span class="nights">3n</span></div>
+            </div>
+          </div>
+          <div class="week">
+            <div class="week-hdr">Week 2</div>
+            <div class="week-stops">
+              <div class="week-stop"><span class="dot"></span><span class="place">Interlaken</span><span class="nights">3n</span></div>
+              <div class="week-stop"><span class="dot anchor"></span><span class="place">Zermatt</span><span class="nights">4n</span></div>
+            </div>
+          </div>
+          <div class="week">
+            <div class="week-hdr">Week 3</div>
+            <div class="week-stops">
+              <div class="week-stop"><span class="dot anchor"></span><span class="place">St. Moritz</span><span class="nights">3n</span></div>
+              <div class="week-stop"><span class="dot anchor"></span><span class="place">Lugano</span><span class="nights">3n</span></div>
+              <div class="week-stop"><span class="dot"></span><span class="place">Bellinzona</span><span class="nights">1n</span></div>
+            </div>
+          </div>
+          <div class="week">
+            <div class="week-hdr">Week 4</div>
+            <div class="week-stops">
+              <div class="week-stop"><span class="dot"></span><span class="place">Bern/Gruyères</span><span class="nights">2n</span></div>
+              <div class="week-stop"><span class="dot anchor"></span><span class="place">Geneva</span><span class="nights">3n</span></div>
+              <div class="week-stop"><span class="dot exit"></span><span class="place">Zürich</span><span class="nights">2n</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="days">
+        <div class="week-block">
+          <h4>Week 1 · German Switzerland</h4>
+          <div class="day"><div class="day-num">Day 1–2</div><div class="day-txt"><strong>Zürich.</strong> Altstadt, Kunsthaus, Sprüngli for Luxemburgerli, Uetliberg.</div></div>
+          <div class="day"><div class="day-num">Day 3–4</div><div class="day-txt"><strong>Appenzell.</strong> The picture-book Switzerland — hand-painted houses, cheese dairies, Alpstein hikes up the Ebenalp.</div></div>
+          <div class="day"><div class="day-num">Day 5–7</div><div class="day-txt"><strong>Lucerne.</strong> Lake steamer + Pilatus (Tell Route), Chapel Bridge, Lindt Home day trip.</div></div>
+        </div>
+        <div class="week-block">
+          <h4>Week 2 · Bernese Oberland + Zermatt</h4>
+          <div class="day"><div class="day-num">Day 8–10</div><div class="day-txt"><strong>Interlaken.</strong> Jungfraujoch, Schynige Platte, Brienzersee steamer to Rothorn Bahn.</div></div>
+          <div class="day"><div class="day-num">Day 11–14</div><div class="day-txt"><strong>Zermatt.</strong> Gornergrat, Matterhorn, 5 Lakes Walk, Findel Glacier, day trip to Saas-Fee.</div></div>
+        </div>
+        <div class="week-block">
+          <h4>Week 3 · Alpine east + Italian Switzerland</h4>
+          <div class="day"><div class="day-num">Day 15</div><div class="day-txt"><strong>Glacier Express → St. Moritz.</strong> 8-hour classic.</div></div>
+          <div class="day"><div class="day-num">Day 16–17</div><div class="day-txt"><strong>St. Moritz.</strong> Bernina Express day to Tirano, Muottas Muragl, Engadin walks.</div></div>
+          <div class="day"><div class="day-num">Day 18–20</div><div class="day-txt"><strong>Lugano.</strong> Via Centovalli Express (Tirano → Locarno). Monte Brè, Bellinzona UNESCO castles.</div></div>
+          <div class="day"><div class="day-num">Day 21</div><div class="day-txt"><strong>Gotthard Panorama Express → Bern.</strong> Scenic crossing back north.</div></div>
+        </div>
+        <div class="week-block">
+          <h4>Week 4 · French Switzerland</h4>
+          <div class="day"><div class="day-num">Day 22–23</div><div class="day-txt"><strong>Bern + Gruyères.</strong> Old Town UNESCO, Aare swim, chocolate at Maison Cailler, cheese in Gruyères village.</div></div>
+          <div class="day"><div class="day-num">Day 24–26</div><div class="day-txt"><strong>Geneva.</strong> Old Town, Jet d'Eau, Lake Geneva Circuit (Lausanne + Chillon on a CGN steamer), Lavaux walk.</div></div>
+          <div class="day"><div class="day-num">Day 27</div><div class="day-txt"><strong>Train to Zürich.</strong> Last-day Zürich (Bahnhofstrasse, chocolatiers, dinner).</div></div>
+          <div class="day"><div class="day-num">Day 28</div><div class="day-txt"><strong>Depart Zürich.</strong></div></div>
+        </div>
+      </div>
+      <div class="card-foot">
+        <button class="open" onclick="expand(this.closest('.card'),event)">day-by-day</button>
+        <button class="start" onclick="select(this,event)">Start with this</button>
+      </div>
+    </div>
+
+    <!-- Template C: Switzerland + Italy Finale -->
+    <div class="card" data-tags="extension" onclick="expand(this,event)">
+      <div class="card-map">
+        <svg viewBox="0 0 360 170" preserveAspectRatio="xMidYMid slice">
+          <rect width="360" height="170" fill="url(#gridA)"/>
+          <!-- Switzerland + Italy (northern portion) -->
+          <path d="M 30 80 C 50 50, 90 40, 140 50 C 190 58, 240 45, 290 55 C 320 62, 340 90, 330 110 L 320 110 L 315 120 L 300 118 L 285 128 L 255 123 L 220 130 L 180 128 Z" fill="#c9d5b0" fill-opacity="0.7" stroke="#90a074" stroke-width="0.8"/>
+          <!-- Italy section: shaded differently -->
+          <path d="M 180 128 L 220 130 L 255 123 L 285 128 L 300 118 L 315 120 L 320 110 L 330 110 L 340 130 L 340 150 L 310 160 L 270 158 L 230 160 L 190 155 L 160 150 Z" fill="#f0d0c4" fill-opacity="0.6" stroke="#b84a3a" stroke-width="0.8"/>
+          <text x="270" y="155" font-family="system-ui" font-size="8" font-style="italic" fill="#b84a3a" text-anchor="middle">Italy</text>
+          <!-- route -->
+          <path d="M 290 55 L 240 68 L 180 82 L 140 75 L 160 105 L 225 115 L 260 140 L 300 150 L 330 155" stroke="#1a5fa8" stroke-width="2" fill="none" stroke-dasharray="5,3"/>
+          <!-- crossing into Italy in different color -->
+          <path d="M 225 115 L 260 140 L 300 150 L 330 155" stroke="#b84a3a" stroke-width="2.2" fill="none" stroke-dasharray="5,3"/>
+          <!-- stops -->
+          <circle cx="290" cy="55" r="5" fill="#1a5fa8" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="240" cy="68" r="4.5" fill="#1a1a1a" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="180" cy="82" r="4.5" fill="#1a1a1a" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="140" cy="75" r="5" fill="#c04820" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="225" cy="115" r="5" fill="#c04820" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="260" cy="140" r="5" fill="#b84a3a" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="300" cy="150" r="5" fill="#b84a3a" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="330" cy="155" r="5" fill="#b28a2e" stroke="#fff" stroke-width="1.5"/>
+          <text x="290" y="47" font-family="system-ui" font-size="9" font-weight="700" fill="#1a5fa8" text-anchor="middle">Zürich</text>
+          <text x="140" y="67" font-family="system-ui" font-size="9" font-weight="700" fill="#c04820" text-anchor="middle">Zermatt</text>
+          <text x="225" y="107" font-family="system-ui" font-size="9" font-weight="700" fill="#c04820" text-anchor="middle">St. Moritz</text>
+          <text x="260" y="134" font-family="system-ui" font-size="9" font-weight="700" fill="#b84a3a" text-anchor="middle">Lake Como</text>
+          <text x="330" y="149" font-family="system-ui" font-size="9" font-weight="700" fill="#b28a2e" text-anchor="middle">Venice</text>
+        </svg>
+        <span class="card-mapbadge">Switzerland + Italy</span>
+        <span class="card-days">4 weeks</span>
+      </div>
+      <div class="card-body">
+        <h3 class="card-title">Switzerland + Italy Finale</h3>
+        <p class="card-thesis">Three weeks Switzerland, then the <strong>Bernina Express ends in Tirano</strong> — so you ride the train south and keep going. Lake Como, Milan, Venice finale. Fly home from Venice or loop back for Zürich.</p>
+        <div class="tags">
+          <span class="tag italy">multi-country</span>
+          <span class="tag rail">rail extension</span>
+          <span class="tag boat">lake + canal</span>
+          <span class="tag food">Italian food finale</span>
+        </div>
+        <div class="totals">
+          <span><strong>3</strong> weeks CH + <strong>1</strong> week IT</span>
+          <span><strong>27</strong> nights</span>
+          <span><strong>5</strong> named trains</span>
+          <span>Open-jaw: ZRH in · VCE out</span>
+        </div>
+        <div class="weeks">
+          <div class="week">
+            <div class="week-hdr">Week 1</div>
+            <div class="week-stops">
+              <div class="week-stop"><span class="dot entry"></span><span class="place">Zürich</span><span class="nights">1n</span></div>
+              <div class="week-stop"><span class="dot"></span><span class="place">Lucerne</span><span class="nights">3n</span></div>
+              <div class="week-stop"><span class="dot"></span><span class="place">Interlaken</span><span class="nights">3n</span></div>
+            </div>
+          </div>
+          <div class="week">
+            <div class="week-hdr">Week 2</div>
+            <div class="week-stops">
+              <div class="week-stop"><span class="dot anchor"></span><span class="place">Zermatt</span><span class="nights">4n</span></div>
+              <div class="week-stop"><span class="dot"></span><span class="place">Glacier Express</span><span class="nights">travel</span></div>
+              <div class="week-stop"><span class="dot anchor"></span><span class="place">St. Moritz</span><span class="nights">3n</span></div>
+            </div>
+          </div>
+          <div class="week">
+            <div class="week-hdr">Week 3 · crossing</div>
+            <div class="week-stops">
+              <div class="week-stop"><span class="dot"></span><span class="place">Bernina → Tirano</span><span class="nights">travel</span></div>
+              <div class="week-stop"><span class="dot italy"></span><span class="place">Lake Como</span><span class="nights">3n</span></div>
+              <div class="week-stop"><span class="dot italy"></span><span class="place">Milan</span><span class="nights">2n</span></div>
+              <div class="week-stop"><span class="dot italy"></span><span class="place">Verona</span><span class="nights">1n</span></div>
+            </div>
+          </div>
+          <div class="week">
+            <div class="week-hdr">Week 4</div>
+            <div class="week-stops">
+              <div class="week-stop"><span class="dot italy"></span><span class="place">Venice</span><span class="nights">4n</span></div>
+              <div class="week-stop"><span class="dot"></span><span class="place">Dolomites day</span><span class="nights">1n</span></div>
+              <div class="week-stop"><span class="dot exit"></span><span class="place">Venice → home</span><span class="nights"></span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="days">
+        <div class="week-block">
+          <h4>Week 1 · Core Switzerland</h4>
+          <div class="day"><div class="day-num">Day 1</div><div class="day-txt"><strong>Zürich.</strong> Arrival, Altstadt, Sprüngli.</div></div>
+          <div class="day"><div class="day-num">Day 2–4</div><div class="day-txt"><strong>Lucerne.</strong> Pilatus cogwheel (Tell Route), Vierwaldstättersee steamer, Lindt Home day trip.</div></div>
+          <div class="day"><div class="day-num">Day 5–7</div><div class="day-txt"><strong>Interlaken.</strong> Jungfraujoch, Schynige Platte ridge walk, Brienzersee + Rothorn Bahn.</div></div>
+        </div>
+        <div class="week-block">
+          <h4>Week 2 · Alpine anchors</h4>
+          <div class="day"><div class="day-num">Day 8–11</div><div class="day-txt"><strong>Zermatt.</strong> Matterhorn sunrise at Gornergrat, 5 Lakes Walk, Findel Glacier, Saas-Fee day.</div></div>
+          <div class="day"><div class="day-num">Day 12</div><div class="day-txt"><strong>Glacier Express → St. Moritz.</strong> 8-hour scenic.</div></div>
+          <div class="day"><div class="day-num">Day 13–14</div><div class="day-txt"><strong>St. Moritz.</strong> Muottas Muragl, Val Fex walk, Diavolezza glacier panorama.</div></div>
+        </div>
+        <div class="week-block">
+          <h4>Week 3 · Crossing into Italy</h4>
+          <div class="day"><div class="day-num">Day 15</div><div class="day-txt"><strong>Bernina Express → Tirano.</strong> Roofless open-air car if summer. Lunch in Tirano (you're in Italy).</div></div>
+          <div class="day"><div class="day-num">Day 16–18</div><div class="day-txt"><strong>Lake Como.</strong> Base in Varenna or Bellagio. Ferries between villages, Villa Carlotta, mountain views.</div></div>
+          <div class="day"><div class="day-num">Day 19–20</div><div class="day-txt"><strong>Milan.</strong> Duomo rooftop, Brera, Last Supper if you booked, aperitivo culture.</div></div>
+          <div class="day"><div class="day-num">Day 21</div><div class="day-txt"><strong>Verona.</strong> Opera in the Arena if summer, Old Town stroll.</div></div>
+        </div>
+        <div class="week-block">
+          <h4>Week 4 · Venice finale</h4>
+          <div class="day"><div class="day-num">Day 22–25</div><div class="day-txt"><strong>Venice.</strong> Canals at dawn, Cannaregio walks, Burano colors, Rialto market.</div></div>
+          <div class="day"><div class="day-num">Day 26</div><div class="day-txt"><strong>Dolomites day trip.</strong> Train to Belluno, a taste of the mountains before flying home.</div></div>
+          <div class="day"><div class="day-num">Day 27</div><div class="day-txt"><strong>Venice last day.</strong> A morning, a farewell caffè, cicchetti lunch.</div></div>
+          <div class="day"><div class="day-num">Day 28</div><div class="day-txt"><strong>Depart Venice (VCE).</strong></div></div>
+        </div>
+      </div>
+      <div class="card-foot">
+        <button class="open" onclick="expand(this.closest('.card'),event)">day-by-day</button>
+        <button class="start" onclick="select(this,event)">Start with this</button>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="legend">
+    <div class="legend-item"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#1a5fa8;"></span> arrival</div>
+    <div class="legend-item"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#b28a2e;"></span> departure</div>
+    <div class="legend-item"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#c04820;"></span> anchor stop (3+ nights)</div>
+    <div class="legend-item"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#b84a3a;"></span> Italy</div>
+    <div class="legend-item"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#1a1a1a;"></span> shorter stay</div>
+  </div>
+
+  <div class="tray">
+    <span class="label">Not the right shape?</span>
+    <button onclick="toast('Would regenerate 3 more 4-week variations with different pacing/focus.');">Show 3 more</button>
+    <button onclick="toast('Would regenerate with pacing bias: even slower (3 bases).');">Even slower</button>
+    <button onclick="toast('Would regenerate with pacing bias: faster (6 bases).');">Faster pace</button>
+    <button onclick="toast('Would anchor on Sep/Oct for the best train weather.');">Tie to season</button>
+    <button onclick="toast('Would explore Austria, France, or German extension instead of Italy.');">Other extensions</button>
+    <span class="scratch"><a href="#" onclick="toast('Drops you into the current Places-to-think-about flow.');return false;" style="color:#1a5fa8;font-weight:600;text-decoration:none;">Or build from scratch →</a></span>
+  </div>
+</div>
+
+<button class="sticky-cta" id="cta" onclick="toast('Would open the editor with this 4-week trip pre-loaded — your current Places + schedule UI, filled in.');">
+  <span>Continue with your pick</span><span class="arrow">→</span>
+</button>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  function expand(card, ev){
+    if (ev && ev.target && ev.target.closest(".start")) return;
+    card.classList.toggle("expanded");
+  }
+  function select(btn, ev){
+    ev.stopPropagation();
+    var card = btn.closest(".card");
+    var wasSel = card.classList.contains("selected");
+    document.querySelectorAll(".card.selected").forEach(function(c){c.classList.remove("selected");});
+    if (!wasSel) {
+      card.classList.add("selected");
+      btn.textContent = "✓ Selected";
+      document.getElementById("cta").classList.add("on");
+    } else {
+      btn.textContent = "Start with this";
+      document.getElementById("cta").classList.remove("on");
+    }
+    document.querySelectorAll(".card .start").forEach(function(b){
+      if (!b.closest(".card").classList.contains("selected")) b.textContent = "Start with this";
+    });
+  }
+  function filter(tag, pill){
+    document.querySelectorAll(".filter-pills .pill").forEach(function(p){p.classList.remove("on");});
+    pill.classList.add("on");
+    document.querySelectorAll(".card").forEach(function(c){
+      var tags = c.getAttribute("data-tags") || "";
+      var show = (tag === "all") || tags.indexOf(tag) !== -1;
+      c.style.display = show ? "flex" : "none";
+    });
+  }
+  function toast(msg){
+    var t = document.getElementById("toast");
+    t.textContent = msg;
+    t.classList.add("on");
+    clearTimeout(window._toastT);
+    window._toastT = setTimeout(function(){t.classList.remove("on");}, 2600);
+  }
+</script>
+</body>
+</html>
