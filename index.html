@@ -4138,7 +4138,12 @@ function renderTripStep1Place(){
     +'<label style="display:block;font-size:11px;font-weight:600;color:#333;margin-top:14px;margin-bottom:6px;">Anything shaping the trip? <span style="color:#999;font-weight:400;">(optional)</span></label>'
     +'<textarea id="tb-place-context" rows="2" class="tb-act-add-inp" placeholder="e.g. first time there, traveling with parents, want to avoid the obvious tourist stuff" style="width:100%;box-sizing:border-box;resize:vertical;min-height:52px;">'+(_tb.placeContext||"")+'</textarea>'
     +'</div>'
-    +'<button class="tb-btn-primary" id="tb-place-generate-btn" onclick="generateActivitiesForPlace()">'+(hasGenerated?"Show me different options":(pmPlaceForExample?("What you can do in "+pmPlaceForExample.replace(/"/g,'&quot;')):"See what\u2019s there"))+' \u2192</button>';
+    // Hide the generate button once activities exist \u2014 the table below is the
+    // primary surface from then on. Per-row regeneration is the future fix
+    // (Phase 2). For first-time generation, label is dynamic on place name.
+    +(hasGenerated ? '' : '<button class="tb-btn-primary" id="tb-place-generate-btn" onclick="generateActivitiesForPlace()">'
+       + (pmPlaceForExample ? ("Iconic things to see and do in "+pmPlaceForExample.replace(/"/g,'&quot;')) : "Iconic things to see and do here")
+       + ' \u2192</button>');
 
   var listHtml = '';
   if(hasGenerated){
@@ -4178,7 +4183,7 @@ function renderTripStep1Place(){
     +listHtml
     +'</div>'
     +'<div class="tb-footer">'
-    +(hasGenerated?'<button class="tb-btn-primary" id="tb-place-continue-btn" onclick="continuePlaceModeToStep2()">Continue to parameters \u2192</button>':'')
+    +(hasGenerated?'<button class="tb-btn-primary" id="tb-place-continue-btn" onclick="continuePlaceModeToStep2()">Travel details \u2192</button>':'')
     +'<div style="display:flex;justify-content:space-between;margin-top:8px;">'
     +'<div class="tb-btn-back" onclick="cancelTripBrief()">\u2190 Back</div>'
     +'<div style="font-size:10px;color:#aaa;cursor:pointer;" onclick="showBriefApiKeyForm()">\ud83d\udd11 Set API key</div>'
@@ -4227,7 +4232,7 @@ async function generateActivitiesForPlace(){
     + "TYPE 3 \u2014 ACTIVITY: anything else worth doing in this place \u2014 sights, experiences, food, culture. An activity is pursued across one or more specific places where it\u2019s especially worthwhile.\n"
     + "  Required fields: requiredPlaces: array of {place,country} where this activity is especially good; durationHours (rough total for a committed traveler); description (specific, concrete sentence).\n\n"
     + "VERB-PHRASE NAMES: every item\u2019s name reads as a thing the traveler DOES, not a noun. Use action verbs at the start: \"Visit the Rhine Falls\" not \"Rhine Falls\"; \"Walk the Five Lakes Trail\" not \"Five Lakes Walk\"; \"Taste cheese at the source\" not \"Cheese tasting\"; \"Ride the Glacier Express\" not \"Glacier Express\". The user is choosing actions, so the names should be actions.\n\n"
-    + "SECTION GROUPING: every item also gets a section field \u2014 a verb-phrased category header that groups related items. Examples (use these where they fit, invent more for what doesn\u2019t):\n"
+    + "SECTION GROUPING: every item also gets a section field \u2014 a verb-phrased category header that groups related items. UNIQUENESS: each section name must appear at most once. NEVER produce two sections with the same name (e.g. don\u2019t emit two \u201cRide mountain railways to summits\u201d sections). If two items belong together, give them the same section string and they\u2019ll group automatically. Examples (use these where they fit, invent more for what doesn\u2019t):\n"
     + "  - \"Travel on iconic trains\" \u2014 for the named scenic trains (Glacier, Bernina, GoldenPass, Gotthard, Centovalli, etc.)\n"
     + "  - \"Ride mountain railways to summits\" \u2014 for cogwheel and rack railways (Jungfraubahn, Gornergrat, Pilatus, Rigi, Brienzer Rothorn, Schynige Platte)\n"
     + "  - \"Sail scenic lake circuits\" \u2014 for the multi-modal train+boat circuits (Lake Geneva, Lake Lucerne Tell, Brienzersee + Rothorn)\n"
@@ -4239,7 +4244,11 @@ async function generateActivitiesForPlace(){
     + "  - \"Wait for weather\" \u2014 for condition items (Northern Lights, cherry blossoms)\n"
     + "Section header order should follow the trip\u2019s natural priority: routes (transit) first, condition items last, activities in the middle. Multiple items per section is the goal \u2014 DON\u2019T put one item in its own section.\n\n"
     + "ICONIC FLAG: every item gets an iconic boolean. Mark iconic:true on items a first-time visitor would be disappointed to miss \u2014 Glacier Express, Bernina Express, Jungfraujoch, Matterhorn-from-Gornergrat, Lake Geneva CGN steamer + Ch\u00e2teau de Chillon, Mt. Pilatus cogwheel, Rigi, Rhine Falls for Switzerland; analogous canonical items for other regions. These pre-check for the traveler. Err toward fewer iconic flags rather than more \u2014 over-flagging shoehorns; under-flagging at least lets the traveler opt in.\n\n"
-    + "Coverage expectations for rail-heavy regions (Switzerland, Japan, Norway, Scotland, India, Sri Lanka, etc.): surface the FULL canonical set, not a short list. For Switzerland that means Glacier Express, Bernina Express, GoldenPass Line, Gotthard Panorama Express, Centovalli Express, AND the cogwheel mountain railways (Jungfraubahn, Gornergrat, Pilatus, Rigi, Brienzer Rothorn, Schynige Platte), AND the named lake steamers (Lake Geneva CGN, Vierwaldst\u00e4ttersee SGV, Brienzersee, Thunersee). Don\u2019t silently drop the cog railways or lake steamers \u2014 they\u2019re what travelers come for.\n\n"
+    + "Coverage expectations for rail-heavy regions (Switzerland, Japan, Norway, Scotland, India, Sri Lanka, etc.): surface the FULL canonical set, not a short list. For Switzerland the MINIMUMS are:\n"
+    + "  - At least 5 items in \"Travel on iconic trains\": Glacier Express, Bernina Express, GoldenPass Line, Gotthard Panorama Express, Centovalli Express. Don\u2019t emit fewer than 5.\n"
+    + "  - At least 5 items in \"Ride mountain railways to summits\": pick from Jungfraubahn, Gornergrat Bahn, Pilatus Bahn, Rigi Bahn, Brienzer Rothorn Bahn, Schynige Platte, Klein Matterhorn, Schilthornbahn, Stanserhorn.\n"
+    + "  - At least 2 items in \"Sail scenic lake circuits\": Lake Geneva CGN with Chillon, Lake Lucerne Tell Route with Pilatus or Rigi, Brienzersee + Rothorn Bahn.\n"
+    + "If you\u2019re below those minimums, you\u2019re dropping things travelers come for \u2014 go back and add them. Don\u2019t silently shrink the list to make space for other categories.\n\n"
     + "MULTI-MODAL ROUTES: Many of the best scenic travel legs are train+boat or train+cogwheel+boat circuits. Always include these when regionally iconic. For Switzerland: Lake Geneva Wine & Castle Circuit (Geneva \u2192 Lausanne \u2192 Montreux by train, CGN paddle steamer to Ch\u00e2teau de Chillon, return); Lake Lucerne Tell Route (boat across Vierwaldst\u00e4ttersee to Alpnachstad \u2192 Pilatus cogwheel, or to Vitznau \u2192 Rigi); Brienzersee Steamer + Rothorn Bahn (Interlaken \u2192 Brienz \u2192 steam cogwheel). Use transportModes [\"train\",\"boat\",\"train\"] etc. and list every major node in requiredPlaces.\n\n"
     + "FACTUAL ACCURACY for named scenic trains \u2014 endpoints must be correct:\n"
     + "  - Glacier Express: Zermatt \u2194 St. Moritz. NOT from Zurich.\n"
