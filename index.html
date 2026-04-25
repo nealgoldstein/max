@@ -4234,12 +4234,45 @@ function renderTripStep1Place(){
 
   var hasGenerated = Array.isArray(_tb.placeActivities) && _tb.placeActivities.length > 0;
 
+  // General-interest chips \u2014 same set as sentence-mode Step 1. Lets the
+  // traveler signal what kinds of things shape any trip they take, before
+  // Max generates the place-specific activity list. Chip selections feed
+  // into _tb.chips and the LLM uses them when generating "what's there"
+  // and downstream gallery/must-do steps.
+  var pmChipPresets = ["dig into history","see great art & museums","see spectacular scenery","ride iconic trains","hike in nature","get into the mountains","explore architecture","eat and drink well","meet locals","explore small towns","see wildlife","wander markets & street food","take a cooking class or workshop","visit magnificent gardens","catch live music or a festival","follow a literary or film trail","take great photos","chase dark skies & aurora","make a pilgrimage","get out on the water","cycle somewhere","slow down & recharge","do something adventurous","retreat, rest, heal","get to the beach","enjoy nightlife & music","watch or play a sport","visit friends or family"];
+  var pmSelected = _tb.chips || [];
+  var pmPresetSet = {}; pmChipPresets.forEach(function(c){pmPresetSet[c]=true;});
+  var pmPresetChipsHtml = pmChipPresets.map(function(c){
+    var on = pmSelected.indexOf(c) > -1;
+    return '<span class="tb-chip'+(on?' on':'')+'" data-chip="'+c+'" onclick="toggleChip(this)">'+c+'</span>';
+  }).join("");
+  var pmCustomChips = pmSelected.filter(function(c){return !pmPresetSet[c];});
+  var pmCustomChipsHtml = pmCustomChips.map(function(c){
+    var safe = c.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;').replace(/'/g,"&#39;");
+    return '<span class="tb-chip on" style="display:inline-flex;align-items:center;gap:6px;">'+safe+'<span onclick="removeCustomChip(&quot;'+safe+'&quot;)" style="cursor:pointer;opacity:.7;">\u00d7</span></span>';
+  }).join("");
+  var pmChipsHtml = pmPresetChipsHtml + pmCustomChipsHtml;
+
+  // Dynamic placeholder for the "add your own" input \u2014 uses the place name
+  // when known so the example feels relevant to where the user is going.
+  // Falls back to a neutral generic when no place is set yet.
+  var pmPlaceForExample = (_tb.placeName || "").trim();
+  var pmAddPlaceholder = pmPlaceForExample
+    ? "Add your own \u2014 something specific you want to do in " + pmPlaceForExample.replace(/"/g,'&quot;')
+    : "Add your own \u2014 something specific you want to do";
+
   var formHtml = ''
     +'<div style="background:#fff;border:1px solid #e8e8e8;border-radius:10px;padding:18px 20px;margin-bottom:14px;">'
     +'<label style="display:block;font-size:11px;font-weight:600;color:#333;margin-bottom:6px;">The place</label>'
     +'<input id="tb-place-name" class="tb-act-add-inp" placeholder="e.g. Kyoto, the Scottish Highlands, Oaxaca" autocomplete="off" style="width:100%;box-sizing:border-box;" value="'+(_tb.placeName||"").replace(/"/g,'&quot;')+'" />'
     +'<div style="font-size:10px;color:#888;margin-top:6px;line-height:1.5;">Can be a city, a region, a country, a park. Anywhere Max can map out.</div>'
-    +'<label style="display:block;font-size:11px;font-weight:600;color:#333;margin-top:14px;margin-bottom:6px;">Anything shaping the trip? <span style="color:#999;font-weight:400;">(optional)</span></label>'
+    +'<label style="display:block;font-size:11px;font-weight:600;color:#333;margin-top:14px;margin-bottom:6px;">What pulls you, anywhere you go? <span style="color:#999;font-weight:400;">(tap any that apply)</span></label>'
+    +'<div class="tb-chips">'+pmChipsHtml+'</div>'
+    +'<div style="display:flex;gap:6px;margin-top:8px;">'
+    +'<input id="tb-chip-add" placeholder="Add your own \u2014 something you notice or do regardless of where you are" style="flex:1;font-size:12px;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" onkeydown="if(event.key===&#39;Enter&#39;){event.preventDefault();addCustomChipPlaceMode();}" />'
+    +'<button onclick="addCustomChipPlaceMode()" style="font-size:12px;padding:7px 12px;border:1px solid #1a5fa8;background:#1a5fa8;color:#fff;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:600;">+ Add</button>'
+    +'</div>'
+    +'<label style="display:block;font-size:11px;font-weight:600;color:#333;margin-top:14px;margin-bottom:6px;">Anything else shaping the trip? <span style="color:#999;font-weight:400;">(optional)</span></label>'
     +'<textarea id="tb-place-context" rows="2" class="tb-act-add-inp" placeholder="e.g. first time there, traveling with parents, want to avoid the obvious tourist stuff" style="width:100%;box-sizing:border-box;resize:vertical;min-height:52px;">'+(_tb.placeContext||"")+'</textarea>'
     +'</div>'
     +'<button class="tb-btn-primary" id="tb-place-generate-btn" onclick="generateActivitiesForPlace()">'+(hasGenerated?"Show me different options":"See what\u2019s there")+' \u2192</button>';
@@ -4251,7 +4284,7 @@ function renderTripStep1Place(){
       +'<div style="font-size:11px;color:#666;line-height:1.55;margin-bottom:10px;">Tap what you actually want to do. Anything you leave unchecked won\u2019t shape the trip. You can add your own below.</div>'
       +'<div class="tb-act-list" id="tb-place-act-list"></div>'
       +'<div class="tb-act-add-row">'
-      +'<input class="tb-act-add-inp" id="tb-place-add-inp" placeholder="Add your own \u2014 e.g. see the cherry blossoms" autocomplete="off" onkeydown="if(event.key===&#39;Enter&#39;){event.preventDefault();addCustomPlaceActivity();}" />'
+      +'<input class="tb-act-add-inp" id="tb-place-add-inp" placeholder="'+pmAddPlaceholder+'" autocomplete="off" onkeydown="if(event.key===&#39;Enter&#39;){event.preventDefault();addCustomPlaceActivity();}" />'
       +'<button class="tb-act-add-btn" onclick="addCustomPlaceActivity()">+ Add</button>'
       +'</div>'
       +'<div class="tb-act-summary" id="tb-place-act-summary"></div>'
@@ -4304,8 +4337,10 @@ async function generateActivitiesForPlace(){
   wrap.innerHTML = '<div class="tb-act-loading"><div style="font-size:22px;color:#888;animation:spin 1.2s linear infinite;">\u2736</div><div>Mapping out what\u2019s in '+place+'\u2026</div><div style="font-size:10px;color:#bbb;">Usually 20\u201340 seconds.</div></div>';
   body.appendChild(wrap);
 
+  var pmChips = (_tb.chips || []).filter(Boolean);
   var prompt = "A traveler wants to go to " + place + ".\n"
     + (ctx ? "Context about this trip: " + ctx + "\n" : "")
+    + (pmChips.length ? "General interests they tagged (use these to bias what you surface, but don\u2019t shoehorn): " + pmChips.join(", ") + "\n" : "")
     + "\nThey haven\u2019t told you what they want to do yet \u2014 they chose a place and want you to map out what\u2019s actually there, so they can decide what matters. Surface the routes, the condition-dependent experiences, and the activities that make this place worth the trip. Be honest about the best of what\u2019s there; don\u2019t pad with generic items.\n\n"
     + "There are three types.\n\n"
     + "TYPE 1 \u2014 ROUTE: a scenic travel leg between specific places (a named train, a scenic road, a long-distance hike, a lake steamer). IMPORTANT: routes are TRANSPORTATION, not activities. They are how the traveler MOVES between destinations while seeing great scenery — functionally the same as a car trip or a bus. A route does NOT count as a destination and does NOT eat activity time at its endpoints; the endpoints are where the real time is spent.\n"
@@ -4345,7 +4380,7 @@ async function generateActivitiesForPlace(){
     // we want the train routes, mountain walks, and chocolate stops to come
     // pre-checked as must-dos — not hidden behind an opt-in click. Otherwise the
     // stated intent silently fails to propagate into the schedule.
-    var intentText = ((ctx||"") + " " + (_tb.intent||"") + " " + (_tb.tripSentence||"")).toLowerCase();
+    var intentText = ((ctx||"") + " " + (_tb.intent||"") + " " + (_tb.tripSentence||"") + " " + (_tb.chips||[]).join(" ")).toLowerCase();
     // Generic synonym groups: if the user mentions any word in a group, all the
     // group's tokens count as hits. Cheap and forgiving — better than exact match.
     var _synGroups = [
@@ -4930,9 +4965,42 @@ function removeCustomChip(chipText){
   // Unescape HTML entities that came back from data-attr style encoding
   var decoded = chipText.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&quot;/g,'"').replace(/&#39;/g,"'");
   _tb.chips = (_tb.chips||[]).filter(function(c){return c !== decoded;});
-  var st = document.getElementById("tb-sentence");
-  if (st) _tb.tripSentence = st.value;
-  renderTripStep1Recognition();
+  // Re-render the page the user is actually on. Both sentence-mode Step 1
+  // and place-mode Step 1 host the chip row, so detect which one is mounted
+  // and preserve its inputs before redrawing.
+  if (document.getElementById("tb-place-name")) {
+    var nm = document.getElementById("tb-place-name");
+    if (nm) _tb.placeName = nm.value;
+    var ctx = document.getElementById("tb-place-context");
+    if (ctx) _tb.placeContext = ctx.value;
+    renderTripStep1Place();
+  } else {
+    var st = document.getElementById("tb-sentence");
+    if (st) _tb.tripSentence = st.value;
+    renderTripStep1Recognition();
+  }
+}
+
+// Place-mode counterpart to addCustomChip — preserves placeName/placeContext
+// instead of the sentence, then re-renders the place-mode Step 1.
+function addCustomChipPlaceMode(){
+  var inp = document.getElementById("tb-chip-add");
+  if (!inp) return;
+  var val = (inp.value || "").trim();
+  if (!val) return;
+  _tb.chips = _tb.chips || [];
+  var already = _tb.chips.some(function(c){ return c.toLowerCase() === val.toLowerCase(); });
+  if (!already) _tb.chips.push(val);
+  inp.value = "";
+  var nm = document.getElementById("tb-place-name");
+  if (nm) _tb.placeName = nm.value;
+  var ctx = document.getElementById("tb-place-context");
+  if (ctx) _tb.placeContext = ctx.value;
+  renderTripStep1Place();
+  setTimeout(function(){
+    var i = document.getElementById("tb-chip-add");
+    if (i) i.focus();
+  }, 50);
 }
 
 function saveRecognitionAndContinue(){
