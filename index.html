@@ -3413,15 +3413,22 @@ async function _verifyRouteItems(items, regionLabel){
   }).join("\n");
 
   var prompt = "These are routes proposed for a trip" + (regionLabel ? " in " + regionLabel : "") + ":\n\n" + listLines + "\n\n"
-    + "For EACH numbered route, judge whether the named service actually runs between the listed endpoints. Common failure modes to catch:\n"
-    + "  - A famous train asserted on a route it doesn’t serve (e.g. \"Glacier Express from Zurich\" — it doesn’t depart Zurich)\n"
-    + "  - A made-up route name\n"
-    + "  - Endpoints that aren’t actual termini or major stops on the named service\n"
-    + "  - A route that doesn’t exist at all\n\n"
-    + "Be strict: a route is VALID only if the named service genuinely runs the route as listed. If you’re unsure, mark it INVALID with reason \"unverified\". Errors of omission are recoverable; errors of commission undermine trust.\n\n"
+    + "There are two CATEGORIES of routes in this list. Apply different standards to each:\n\n"
+    + "CATEGORY A — Branded/named train services (e.g. \"Glacier Express\", \"Bernina Express\", \"Shinkansen\", \"Eurostar\", \"Caledonian Sleeper\"). These have EXACT, fixed endpoints assigned by the operator. INVALID if either listed endpoint isn’t a real terminus or major scheduled stop on that specific branded service.\n"
+    + "  Common errors to catch in this category:\n"
+    + "    - A famous train asserted on a route it doesn’t serve (e.g. \"Glacier Express from Zurich\" — it runs Zermatt↔St. Moritz, not from Zurich)\n"
+    + "    - A made-up branded service name\n"
+    + "    - Endpoints that aren’t actual termini on the branded service\n\n"
+    + "CATEGORY B — Themed scenic itineraries / multi-modal circuits (e.g. \"Lake Geneva wine circuit\", \"Lake Lucerne Tell Route\", \"Atlantic Road drive\", \"Romantic Road\"). These are TRAVELER-FACING NAMES for journeys that use regular existing infrastructure (lake steamers, regional trains, ordinary roads), not branded operator services. The name describes the thematic experience, not a registered service.\n"
+    + "  VALID if the underlying transport infrastructure genuinely connects the listed places — even if the named service isn’t a branded operator product. Examples that should be VALID:\n"
+    + "    - \"Lake Geneva wine circuit\" connecting Geneva ↔ Lausanne ↔ Montreux: VALID, because CGN paddle steamers and SBB trains genuinely connect those places.\n"
+    + "    - \"Lake Lucerne Tell Route\" connecting Lucerne ↔ Alpnachstad / Vitznau: VALID, because SGV boats run those segments.\n"
+    + "    - \"Atlantic Road drive\" connecting Molde ↔ Kristiansund: VALID, because the road exists.\n"
+    + "  INVALID only if the underlying infrastructure does NOT connect the listed places (e.g. a lake circuit on a non-existent lake, or a road claim where no road exists).\n\n"
+    + "Be lenient on Category B (real itineraries with descriptive names are common); be strict on Category A (branded services with wrong endpoints destroy trust). When unsure for Category B, default to VALID. When unsure for Category A, default to INVALID.\n\n"
     + "Return ONLY JSON in this shape:\n"
     + "{\"verdicts\":[{\"index\":1,\"valid\":true},{\"index\":2,\"valid\":false,\"reason\":\"Glacier Express runs Zermatt↔St. Moritz, not from Zurich\"}]}\n\n"
-    + "Index numbers correspond to the list above (1-based). One verdict per route.";
+    + "Index numbers correspond to the list above (1-based). One verdict per route. Include a short reason on every INVALID verdict.";
 
   try {
     var text = await callMax([{role:"user",content:prompt}], 1500, 30000);
@@ -13132,10 +13139,52 @@ function buildExplorePane(dest){
         + (sightOnly.length>0 ? "The picks below are optional — add any that fit." : "No optional extras generated.");
       sightsSec.appendChild(seedNote);
     }
-    if (sightOnly.length > 0 && autoOnDays > 0) {
+    // "Already on your days" — list the auto-seeded sights right here in the
+    // Explore tab so iconic sights aren't hidden from this view.
+    if (autoOnDays > 0) {
+      var onDaysHdr = document.createElement("div");
+      onDaysHdr.style.cssText = "font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#1a6fb0;margin:10px 0 6px;";
+      onDaysHdr.textContent = "Already on your days";
+      sightsSec.appendChild(onDaysHdr);
+      (dest.days||[]).forEach(function(day, dayIdx){
+        (day.items||[]).forEach(function(it){
+          if (it.type !== "sight" || !it.autoSeeded) return;
+          var row = document.createElement("div");
+          row.className = "exp-item";
+          row.style.cssText = "background:#f7faff;border:1px solid #e0eaf6;";
+          var icon = document.createElement("div"); icon.className = "exp-item-icon";
+          icon.textContent = "●"; icon.style.color = "#1a6fb0";
+          var body = document.createElement("div"); body.className = "exp-item-body";
+          var nm = document.createElement("div"); nm.className = "exp-item-name";
+          nm.textContent = it.n || "";
+          body.appendChild(nm);
+          if (it.note) {
+            var nt = document.createElement("div"); nt.className = "exp-item-note";
+            nt.textContent = it.note.length > 120 ? it.note.substring(0,118) + "…" : it.note;
+            body.appendChild(nt);
+          }
+          var acts = document.createElement("div"); acts.className = "exp-item-acts";
+          var dayBadge = document.createElement("button");
+          dayBadge.style.cssText = "font-size:10px;font-weight:600;color:#1a6fb0;background:#e8f0fc;border:1px solid #c8dff8;border-radius:5px;padding:3px 8px;cursor:pointer;font-family:inherit;white-space:nowrap;";
+          dayBadge.textContent = "On " + (day.lbl || ("Day " + (dayIdx + 1)));
+          dayBadge.title = "Jump to this day in the itinerary";
+          (function(did){
+            dayBadge.onclick = function(e){
+              e.stopPropagation();
+              _activeDmSection = "itinerary";
+              if (typeof selectDest === "function") selectDest(did);
+            };
+          })(dest.id);
+          acts.appendChild(dayBadge);
+          row.appendChild(icon); row.appendChild(body); row.appendChild(acts);
+          sightsSec.appendChild(row);
+        });
+      });
+    }
+    if (sightOnly.length > 0) {
       var optHdr = document.createElement("div");
-      optHdr.style.cssText = "font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#888;margin:10px 0 6px;";
-      optHdr.textContent = "Optional picks";
+      optHdr.style.cssText = "font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#888;margin:14px 0 6px;";
+      optHdr.textContent = autoOnDays > 0 ? "Optional picks — not on a day yet" : "Sights";
       sightsSec.appendChild(optHdr);
     }
     sightOnly.forEach(function(s){
@@ -13789,13 +13838,9 @@ function drawDestMode(destId){
   var dates=document.createElement("div"); dates.className="dm-dates"; dates.id="ud-dates-"+destId;
   dates.textContent=fmtD(dest.dateFrom)+" \u2013 "+fmtD(dest.dateTo)+" ("+dest.nights+" night"+(dest.nights!==1?"s":"")+")";
   datesRow.appendChild(dates);
-  // Trip-wide running total, always visible so the user sees how this destination
-  // fits into the overall trip budget without having to navigate back.
-  var tripNights = (trip.destinations||[]).reduce(function(s,d){return s + (d.nights || 0);}, 0);
-  var tripDays = tripNights + (trip.destinations && trip.destinations.length ? 1 : 0);
-  var tripTotal = document.createElement("div");
-  tripTotal.style.cssText = "font-size:10px;color:#888;margin-bottom:10px;";
-  tripTotal.innerHTML = 'Trip total: <strong style="color:#444;">'+tripDays+' days</strong> \u00b7 '+tripNights+' nights \u00b7 '+(trip.destinations||[]).length+' destination'+((trip.destinations||[]).length!==1?'s':'');
+  // (Trip-wide running total used to render here; removed because it duplicated
+  // the trip-level banner shown on the trip view. The destination view should
+  // be about THIS destination, not the whole trip.)
 
   // Attached events row — shows must-do events anchored to this destination
   // (routes passing through, conditions viable here), plus recovery-day flag
@@ -13877,7 +13922,7 @@ function drawDestMode(destId){
   }
   var ovWarn=document.createElement("div"); ovWarn.id="ov-warn-"+dest.id; ovWarn.className="overlap-warn hidden";
 
-  hdr.appendChild(title); hdr.appendChild(datesRow); hdr.appendChild(tripTotal);
+  hdr.appendChild(title); hdr.appendChild(datesRow);
   if (dest._eventsRowEl) hdr.appendChild(dest._eventsRowEl);
   hdr.appendChild(dmActs); hdr.appendChild(dsw); hdr.appendChild(ovWarn);
   c.appendChild(hdr);
