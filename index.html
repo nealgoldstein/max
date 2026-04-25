@@ -1018,6 +1018,10 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
     <div class="hs-welcome" id="hs-welcome">
       <div style="padding-top:14px;border-top:1px solid #eee;font-family:Georgia,serif;font-size:16px;color:#222;line-height:1.5;margin-bottom:6px;">What do you want to do today?</div>
       <div id="hs-options" style="margin-top:14px;"></div>
+      <div style="margin-top:18px;padding:10px 12px;background:#f7f4ec;border:1px solid #e6e0cf;border-radius:7px;font-size:11px;color:#776a4a;line-height:1.55;">
+        <strong style="color:#5c4a1a;">A note on what Max can and can&rsquo;t do.</strong>
+        Max suggests; you decide. Trip planning is yours &mdash; Max provides information and tools, but the choices, responsibility, and judgment stay with you. Verify times, prices, and availability before you commit.
+      </div>
     </div>
     <!-- About Max modal -->
     <div id="about-max-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9500;display:none;align-items:center;justify-content:center;padding:24px;">
@@ -11182,8 +11186,50 @@ function updateDayBtnPosition(){
 
 function initMainMap(){
   if(_mainMap)return;
+  // Pick a sensible initial center instead of the global default. Order:
+  //   1. The active destination's known cityCenter (fastest)
+  //   2. The active destination's coarse geocode cache (Nominatim)
+  //   3. Any prior trip destination's center (so we open near the trip)
+  //   4. Last resort: a high-altitude global view
+  // This avoids the "world map flashes for a second before zooming" UX that
+  // happens when the destination's city data is still being generated.
+  var initCenter = [20, 0], initZoom = 2;
+  var actDest = activeDest && trip && trip.destinations
+    ? trip.destinations.find(function(d){ return d.id === activeDest; })
+    : null;
+  function _coarseFor(place){
+    var key = (place||"").toLowerCase().trim();
+    return key && _coarseGeocode[key] ? _coarseGeocode[key] : null;
+  }
+  if (actDest) {
+    if (Array.isArray(actDest.cityCenter) && isFinite(actDest.cityCenter[0])) {
+      initCenter = actDest.cityCenter; initZoom = 11;
+    } else {
+      var c = _coarseFor(actDest.place);
+      if (c) { initCenter = c; initZoom = 8; }
+    }
+  }
+  if (initZoom === 2 && trip && Array.isArray(trip.destinations)) {
+    for (var di = 0; di < trip.destinations.length && initZoom === 2; di++) {
+      var d = trip.destinations[di];
+      if (Array.isArray(d.cityCenter) && isFinite(d.cityCenter[0])) {
+        initCenter = d.cityCenter; initZoom = 6; break;
+      }
+      var cg = _coarseFor(d.place);
+      if (cg) { initCenter = cg; initZoom = 6; break; }
+    }
+  }
   _mainMap=L.map("main-map",{zoomControl:true,worldCopyJump:true,minZoom:2,
-    scrollWheelZoom:true}).setView([20,0],2);
+    scrollWheelZoom:true}).setView(initCenter, initZoom);
+  // Kick off a coarse geocode for the active destination if we don't have one
+  // yet — once it lands, pan/zoom into place.
+  if (actDest && initZoom < 8 && typeof ensureCoarseGeocode === "function") {
+    ensureCoarseGeocode(actDest.place, function(ll){
+      if (_mainMap && Array.isArray(ll) && isFinite(ll[0])) {
+        try { _mainMap.setView(ll, 8, {animate:true}); } catch(e){}
+      }
+    });
+  }
   _mainMap.on('click',function(){closeMapPinPanel();});
   // Vector tiles (planning mode)
   _mainVectorLayer=L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{
@@ -12631,8 +12677,17 @@ function drawTripMode(){
         var bg    = isCondition ? "#fff8f0" : "#e8f0fc";
         var border= isCondition ? "#f0dcc0" : "#c8d8f0";
         chip.style.cssText="font-size:9px;font-weight:600;color:"+color+";background:"+bg+";border:1px solid "+border+";padding:2px 7px;border-radius:10px;display:inline-flex;align-items:center;gap:4px;";
-        chip.innerHTML = icon + " " + ev.name;
-        if(ev.description) chip.title = ev.description;
+        // For route badges, append " stop" to the route name so the chip reads
+        // as "this destination is a stop on Route X" rather than "you arrive
+        // on Route X." Avoids the confusion where Zermatt showed
+        // "🚂 Glacier Express" right under "Arriving from Zurich."
+        var isRouteEv = ev.type === "route";
+        var labelText = isRouteEv ? (ev.name + " stop") : ev.name;
+        chip.innerHTML = icon + " " + labelText;
+        var titleParts = [];
+        if (isRouteEv) titleParts.push(dest.place + " is a stop on the " + ev.name + ".");
+        if (ev.description) titleParts.push(ev.description);
+        if (titleParts.length) chip.title = titleParts.join(" ");
         evRow.appendChild(chip);
       });
       if(evRow.children.length) bodyDiv.appendChild(evRow);
@@ -12879,7 +12934,37 @@ function buildExplorePane(dest){
     var genMsg=document.createElement("div"); genMsg.className="exp-generating";
     genMsg.textContent="Max is generating suggestions for "+dest.place+"\u2026"; sightsSec.appendChild(genMsg);
   } else if(sightOnly.length===0 && autoOnDays===0){
-    var emp=document.createElement("div"); emp.className="exp-empty"; emp.textContent="No suggestions yet \u2014 click Refresh to generate."; sightsSec.appendChild(emp);
+    // Distinguish "never generated" from "generated and came back empty/failed."
+    // The latter usually means the LLM hedged on an unfamiliar place name or
+    // hit a token/parse problem \u2014 Round M's retry helps but isn't always enough.
+    var gd = _generatedCityData[genKey];
+    var msg, btnLbl;
+    if (gd && gd.failed) {
+      msg = "Couldn\u2019t load sights for " + dest.place + ". Try again?";
+      btnLbl = "Retry";
+    } else if (gd && !gd.loading && Array.isArray(gd.sights) && gd.sights.length === 0) {
+      msg = "Max didn\u2019t find sights for " + dest.place + " \u2014 could be the place name needs disambiguating. Try again?";
+      btnLbl = "Retry";
+    } else {
+      msg = "No suggestions yet for " + dest.place + ".";
+      btnLbl = "Generate";
+    }
+    var emp = document.createElement("div");
+    emp.className = "exp-empty";
+    emp.style.cssText = "padding:14px 16px;background:#fafafa;border:1px solid #eee;border-radius:8px;font-size:11px;color:#666;line-height:1.55;display:flex;align-items:center;gap:10px;flex-wrap:wrap;";
+    emp.innerHTML = '<span style="flex:1;min-width:0;">' + msg.replace(/&/g,"&amp;").replace(/</g,"&lt;") + '</span>';
+    var retryBtn = document.createElement("button");
+    retryBtn.style.cssText = "background:#1a6fb0;border:none;color:#fff;font-size:11px;font-weight:600;padding:6px 12px;border-radius:5px;cursor:pointer;font-family:inherit;flex-shrink:0;";
+    retryBtn.textContent = btnLbl + " \u2192";
+    (function(d){
+      retryBtn.onclick = function(){
+        delete _generatedCityData[d.place.toLowerCase()];
+        generateCityData(d.place, d.id);
+        retryBtn.disabled = true; retryBtn.textContent = "generating\u2026";
+      };
+    })(dest);
+    emp.appendChild(retryBtn);
+    sightsSec.appendChild(emp);
   } else {
     if (autoOnDays > 0) {
       var seedNote = document.createElement("div");
