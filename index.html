@@ -784,6 +784,14 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .tb-act-add-btn{padding:9px 14px;font-size:11px;font-weight:600;background:#fff;color:#111;border:1px solid #111;border-radius:6px;cursor:pointer;white-space:nowrap;}
 .tb-act-summary{font-size:11px;color:#666;margin-top:10px;padding:10px 12px;background:#fff;border:1px solid #eee;border-radius:6px;line-height:1.55;}
 
+/* Mode 2 section header — verb-phrased category title above each group of
+   activity rows ("Travel on iconic trains", "Walk in the mountains"). */
+.tb-act-section-hdr{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:18px 4px 8px;padding-bottom:5px;border-bottom:1px solid #d8d1c0;}
+.tb-act-section-hdr:first-child{margin-top:6px;}
+.tb-act-section-title{font-size:13px;font-weight:700;color:#1a1a1a;letter-spacing:-0.005em;}
+.tb-act-section-count{font-size:10.5px;color:#888;font-weight:600;}
+.tb-act-section-hdr.on .tb-act-section-title{color:#0e3a6a;}
+
 /* Activity ↔ place two-column table (Mode 2 / place-mode picker, Phase 1).
    Each row pairs an activity name on the left with the places where you'd do
    it on the right. Whole-row checkbox toggles all places; per-place chips
@@ -4260,24 +4268,13 @@ function renderTripStep1Place(){
 
   var hasGenerated = Array.isArray(_tb.placeActivities) && _tb.placeActivities.length > 0;
 
-  // General-interest chips \u2014 same set as sentence-mode Step 1. Lets the
-  // traveler signal what kinds of things shape any trip they take, before
-  // Max generates the place-specific activity list. Chip selections feed
-  // into _tb.chips and the LLM uses them when generating "what's there"
-  // and downstream gallery/must-do steps.
-  var pmChipPresets = ["dig into history","see great art & museums","see spectacular scenery","ride iconic trains","hike in nature","get into the mountains","explore architecture","eat and drink well","meet locals","explore small towns","see wildlife","wander markets & street food","take a cooking class or workshop","visit magnificent gardens","catch live music or a festival","follow a literary or film trail","take great photos","chase dark skies & aurora","make a pilgrimage","get out on the water","cycle somewhere","slow down & recharge","do something adventurous","retreat, rest, heal","get to the beach","enjoy nightlife & music","watch or play a sport","visit friends or family"];
-  var pmSelected = _tb.chips || [];
-  var pmPresetSet = {}; pmChipPresets.forEach(function(c){pmPresetSet[c]=true;});
-  var pmPresetChipsHtml = pmChipPresets.map(function(c){
-    var on = pmSelected.indexOf(c) > -1;
-    return '<span class="tb-chip'+(on?' on':'')+'" data-chip="'+c+'" onclick="toggleChip(this)">'+c+'</span>';
-  }).join("");
-  var pmCustomChips = pmSelected.filter(function(c){return !pmPresetSet[c];});
-  var pmCustomChipsHtml = pmCustomChips.map(function(c){
-    var safe = c.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;').replace(/'/g,"&#39;");
-    return '<span class="tb-chip on" style="display:inline-flex;align-items:center;gap:6px;">'+safe+'<span onclick="removeCustomChip(&quot;'+safe+'&quot;)" style="cursor:pointer;opacity:.7;">\u00d7</span></span>';
-  }).join("");
-  var pmChipsHtml = pmPresetChipsHtml + pmCustomChipsHtml;
+  // Mode 2 (place-mode) intentionally does NOT show the general-interest
+  // chip row anymore. The activity \u2194 place table that appears after "What
+  // you can do in {place}" carries the same intent more directly: the user
+  // sees concrete activities for THIS place, not abstract themes. The chip
+  // row stays on Mode 1 (sentence) and Mode 3 (activity) where it earns
+  // its keep \u2014 neither of those has a place-specific activity table to
+  // replace it.
 
   // Dynamic placeholder for the "add your own" input \u2014 uses the place name
   // when known so the example feels relevant to where the user is going.
@@ -4292,13 +4289,7 @@ function renderTripStep1Place(){
     +'<label style="display:block;font-size:11px;font-weight:600;color:#333;margin-bottom:6px;">The place</label>'
     +'<input id="tb-place-name" class="tb-act-add-inp" placeholder="e.g. Kyoto, the Scottish Highlands, Oaxaca" autocomplete="off" style="width:100%;box-sizing:border-box;" value="'+(_tb.placeName||"").replace(/"/g,'&quot;')+'" />'
     +'<div style="font-size:10px;color:#888;margin-top:6px;line-height:1.5;">Can be a city, a region, a country, a park. Anywhere Max can map out.</div>'
-    +'<label style="display:block;font-size:11px;font-weight:600;color:#333;margin-top:14px;margin-bottom:6px;">What pulls you, anywhere you go? <span style="color:#999;font-weight:400;">(tap any that apply)</span></label>'
-    +'<div class="tb-chips">'+pmChipsHtml+'</div>'
-    +'<div style="display:flex;gap:6px;margin-top:8px;">'
-    +'<input id="tb-chip-add" placeholder="Add your own \u2014 something you notice or do regardless of where you are" style="flex:1;font-size:12px;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" onkeydown="if(event.key===&#39;Enter&#39;){event.preventDefault();addCustomChipPlaceMode();}" />'
-    +'<button onclick="addCustomChipPlaceMode()" style="font-size:12px;padding:7px 12px;border:1px solid #1a5fa8;background:#1a5fa8;color:#fff;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:600;">+ Add</button>'
-    +'</div>'
-    +'<label style="display:block;font-size:11px;font-weight:600;color:#333;margin-top:14px;margin-bottom:6px;">Anything else shaping the trip? <span style="color:#999;font-weight:400;">(optional)</span></label>'
+    +'<label style="display:block;font-size:11px;font-weight:600;color:#333;margin-top:14px;margin-bottom:6px;">Anything shaping the trip? <span style="color:#999;font-weight:400;">(optional)</span></label>'
     +'<textarea id="tb-place-context" rows="2" class="tb-act-add-inp" placeholder="e.g. first time there, traveling with parents, want to avoid the obvious tourist stuff" style="width:100%;box-sizing:border-box;resize:vertical;min-height:52px;">'+(_tb.placeContext||"")+'</textarea>'
     +'</div>'
     +'<button class="tb-btn-primary" id="tb-place-generate-btn" onclick="generateActivitiesForPlace()">'+(hasGenerated?"Show me different options":(pmPlaceForExample?("What you can do in "+pmPlaceForExample.replace(/"/g,'&quot;')):"See what\u2019s there"))+' \u2192</button>';
@@ -4375,6 +4366,18 @@ async function generateActivitiesForPlace(){
     + "  Required fields: viableLocations: array of {place,country}; requiredPlaces: same; recovery (\"low\"/\"moderate\"/\"high\"); frequencyRequirement (min nights in viable locations); conditionNote (one sentence about what the traveler needs to understand).\n\n"
     + "TYPE 3 \u2014 ACTIVITY: anything else worth doing in this place \u2014 sights, experiences, food, culture. An activity is pursued across one or more specific places where it\u2019s especially worthwhile.\n"
     + "  Required fields: requiredPlaces: array of {place,country} where this activity is especially good; durationHours (rough total for a committed traveler); description (specific, concrete sentence).\n\n"
+    + "VERB-PHRASE NAMES: every item\u2019s name reads as a thing the traveler DOES, not a noun. Use action verbs at the start: \"Visit the Rhine Falls\" not \"Rhine Falls\"; \"Walk the Five Lakes Trail\" not \"Five Lakes Walk\"; \"Taste cheese at the source\" not \"Cheese tasting\"; \"Ride the Glacier Express\" not \"Glacier Express\". The user is choosing actions, so the names should be actions.\n\n"
+    + "SECTION GROUPING: every item also gets a section field \u2014 a verb-phrased category header that groups related items. Examples (use these where they fit, invent more for what doesn\u2019t):\n"
+    + "  - \"Travel on iconic trains\" \u2014 for the named scenic trains (Glacier, Bernina, GoldenPass, Gotthard, Centovalli, etc.)\n"
+    + "  - \"Ride mountain railways to summits\" \u2014 for cogwheel and rack railways (Jungfraubahn, Gornergrat, Pilatus, Rigi, Brienzer Rothorn, Schynige Platte)\n"
+    + "  - \"Sail scenic lake circuits\" \u2014 for the multi-modal train+boat circuits (Lake Geneva, Lake Lucerne Tell, Brienzersee + Rothorn)\n"
+    + "  - \"Walk in the mountains\" \u2014 for hiking activities at specific places\n"
+    + "  - \"Taste the local food\" \u2014 for cheese, chocolate, regional cuisine\n"
+    + "  - \"Visit natural wonders\" \u2014 for waterfalls, gorges, glacier-views (Rhine Falls, Aletsch Glacier viewpoint, etc.)\n"
+    + "  - \"Explore the cities\" \u2014 for urban exploration (Z\u00fcrich, Lucerne, Geneva)\n"
+    + "  - \"See historic sites\" \u2014 for castles, monasteries, UNESCO Old Towns\n"
+    + "  - \"Wait for weather\" \u2014 for condition items (Northern Lights, cherry blossoms)\n"
+    + "Section header order should follow the trip\u2019s natural priority: routes (transit) first, condition items last, activities in the middle. Multiple items per section is the goal \u2014 DON\u2019T put one item in its own section.\n\n"
     + "ICONIC FLAG: every item gets an iconic boolean. Mark iconic:true on items a first-time visitor would be disappointed to miss \u2014 Glacier Express, Bernina Express, Jungfraujoch, Matterhorn-from-Gornergrat, Lake Geneva CGN steamer + Ch\u00e2teau de Chillon, Mt. Pilatus cogwheel, Rigi, Rhine Falls for Switzerland; analogous canonical items for other regions. These pre-check for the traveler. Err toward fewer iconic flags rather than more \u2014 over-flagging shoehorns; under-flagging at least lets the traveler opt in.\n\n"
     + "Coverage expectations for rail-heavy regions (Switzerland, Japan, Norway, Scotland, India, Sri Lanka, etc.): surface the FULL canonical set, not a short list. For Switzerland that means Glacier Express, Bernina Express, GoldenPass Line, Gotthard Panorama Express, Centovalli Express, AND the cogwheel mountain railways (Jungfraubahn, Gornergrat, Pilatus, Rigi, Brienzer Rothorn, Schynige Platte), AND the named lake steamers (Lake Geneva CGN, Vierwaldst\u00e4ttersee SGV, Brienzersee, Thunersee). Don\u2019t silently drop the cog railways or lake steamers \u2014 they\u2019re what travelers come for.\n\n"
     + "MULTI-MODAL ROUTES: Many of the best scenic travel legs are train+boat or train+cogwheel+boat circuits. Always include these when regionally iconic. For Switzerland: Lake Geneva Wine & Castle Circuit (Geneva \u2192 Lausanne \u2192 Montreux by train, CGN paddle steamer to Ch\u00e2teau de Chillon, return); Lake Lucerne Tell Route (boat across Vierwaldst\u00e4ttersee to Alpnachstad \u2192 Pilatus cogwheel, or to Vitznau \u2192 Rigi); Brienzersee Steamer + Rothorn Bahn (Interlaken \u2192 Brienz \u2192 steam cogwheel). Use transportModes [\"train\",\"boat\",\"train\"] etc. and list every major node in requiredPlaces.\n\n"
@@ -4393,10 +4396,12 @@ async function generateActivitiesForPlace(){
     + "NIGHTS PER PLACE \u2014 each entry in requiredPlaces gets a nights field with a sensible default range for doing this activity well at that place. Activities: typical nights to do the activity well there. Routes: 0 (route is transit, not a stay; days are spent at the endpoints). Conditions: nights needed to give the condition a real chance.\n\n"
     + "Return ONLY a JSON array (no markdown). Aim for 10\u201316 items for rail-heavy regions; 8\u201312 for others. Cover a real range \u2014 don\u2019t silently drop a category. Include routes and condition items whenever they genuinely apply.\n\n"
     + "[\n"
-    + '  {"name":"Mountain scenery","type":"activity","description":"Alpine views from named summits and panoramic valleys.","iconic":true,"requiredPlaces":[{"place":"Zermatt","country":"Switzerland","nights":3},{"place":"Lauterbrunnen","country":"Switzerland","nights":2},{"place":"St. Moritz","country":"Switzerland","nights":2},{"place":"Appenzell","country":"Switzerland","nights":2}],"durationHours":48},\n'
-    + '  {"name":"Cheese tasting","type":"activity","description":"Visit historic dairies and try regional varieties \u2014 Gruy\u00e8re, Emmental, Appenzeller.","iconic":false,"requiredPlaces":[{"place":"Gruy\u00e8res","country":"Switzerland","nights":1},{"place":"Emmental","country":"Switzerland","nights":1},{"place":"Appenzell","country":"Switzerland","nights":1}],"durationHours":12},\n'
-    + '  {"name":"Glacier Express","type":"route","description":"Classic 8hr panoramic rail journey across 291 bridges and 91 tunnels.","iconic":true,"endpoints":[{"place":"Zermatt","country":"Switzerland"},{"place":"St. Moritz","country":"Switzerland"}],"requiredPlaces":[{"place":"Zermatt","country":"Switzerland","nights":0},{"place":"St. Moritz","country":"Switzerland","nights":0}],"direction":"either","durationHours":8,"transportModes":["train"],"modeOptions":"both"},\n'
-    + '  {"name":"Cherry Blossoms","type":"condition","description":"Peak bloom runs roughly late March to early April; timing varies year to year by a week or more.","iconic":true,"viableLocations":[{"place":"Kyoto","country":"Japan","nights":3}],"requiredPlaces":[{"place":"Kyoto","country":"Japan","nights":3}],"recovery":"low","frequencyRequirement":2,"conditionNote":"Bloom windows are short and depend on that year\u2019s weather; check forecasts a week before committing dates."}\n'
+    + '  {"name":"Walk in the mountains","type":"activity","section":"Walk in the mountains","description":"Alpine paths and panoramic ridges across the high country.","iconic":true,"requiredPlaces":[{"place":"Zermatt","country":"Switzerland","nights":3},{"place":"Lauterbrunnen","country":"Switzerland","nights":2},{"place":"St. Moritz","country":"Switzerland","nights":2},{"place":"Appenzell","country":"Switzerland","nights":2}],"durationHours":48},\n'
+    + '  {"name":"Taste cheese at the source","type":"activity","section":"Taste the local food","description":"Visit historic dairies and try regional varieties \u2014 Gruy\u00e8re, Emmental, Appenzeller.","iconic":false,"requiredPlaces":[{"place":"Gruy\u00e8res","country":"Switzerland","nights":1},{"place":"Emmental","country":"Switzerland","nights":1},{"place":"Appenzell","country":"Switzerland","nights":1}],"durationHours":12},\n'
+    + '  {"name":"Ride the Glacier Express","type":"route","section":"Travel on iconic trains","description":"Classic 8hr panoramic rail journey across 291 bridges and 91 tunnels.","iconic":true,"endpoints":[{"place":"Zermatt","country":"Switzerland"},{"place":"St. Moritz","country":"Switzerland"}],"requiredPlaces":[{"place":"Zermatt","country":"Switzerland","nights":0},{"place":"St. Moritz","country":"Switzerland","nights":0}],"direction":"either","durationHours":8,"transportModes":["train"],"modeOptions":"both"},\n'
+    + '  {"name":"Ride the Jungfraubahn to the Top of Europe","type":"route","section":"Ride mountain railways to summits","description":"Cog railway from Kleine Scheidegg up to Jungfraujoch (3,454m) \u2014 Europe\u2019s highest railway station.","iconic":true,"endpoints":[{"place":"Kleine Scheidegg","country":"Switzerland"},{"place":"Jungfraujoch","country":"Switzerland"}],"requiredPlaces":[{"place":"Kleine Scheidegg","country":"Switzerland","nights":0},{"place":"Jungfraujoch","country":"Switzerland","nights":0}],"direction":"forward","durationHours":2,"transportModes":["cogwheel"],"modeOptions":"tourist"},\n'
+    + '  {"name":"Visit the Rhine Falls","type":"activity","section":"Visit natural wonders","description":"The largest waterfall in Europe by volume, viewable from boats, platforms, and the medieval Schloss Laufen above.","iconic":true,"requiredPlaces":[{"place":"Schaffhausen","country":"Switzerland","nights":1}],"durationHours":4},\n'
+    + '  {"name":"Wait for the cherry blossoms","type":"condition","section":"Wait for weather","description":"Peak bloom runs roughly late March to early April; timing varies year to year by a week or more.","iconic":true,"viableLocations":[{"place":"Kyoto","country":"Japan","nights":3}],"requiredPlaces":[{"place":"Kyoto","country":"Japan","nights":3}],"recovery":"low","frequencyRequirement":2,"conditionNote":"Bloom windows are short and depend on that year\u2019s weather; check forecasts a week before committing dates."}\n'
     + "]\n\n"
     + "CRITICAL: requiredPlaces, endpoints, and viableLocations are ARRAYS OF OBJECTS, each with place and country strings, and a nights number on requiredPlaces entries. Even for a single-country place, always include country.";
 
@@ -4514,65 +4519,118 @@ async function generateActivitiesForPlace(){
   renderTripStep1Place();
 }
 
-// Two-column activity ↔ place picker. Each row is one activity; the right
-// column lists the places where that activity is done, each with its own
-// keep/drop checkbox and a nights estimate. Whole-row checkbox toggles all
-// places under the activity. Iconic / keyword-matched items arrive with
-// places pre-kept; other items arrive opt-in (checking the row turns them on).
+// Two-column activity ↔ place picker, grouped by section. Each section
+// header is a verb phrase ("Travel on iconic trains", "Walk in the
+// mountains"). Inside a section, each row is one activity with its places
+// listed in the right column. Section grouping replaces the individual
+// row-per-train pattern Neal flagged — Jungfraubahn now lives under
+// "Ride mountain railways to summits" alongside Gornergrat, Pilatus, etc.
 function _renderPlaceActivityItems(){
   var list = document.getElementById("tb-place-act-list");
   if(!list) return;
   list.innerHTML = "";
   var items = _tb.placeActivities || [];
+
+  // Bucket items by section, preserving the order of first appearance so
+  // the LLM's chosen ordering (routes first, conditions last) survives.
+  var sectionOrder = [];
+  var bySection = {};
   items.forEach(function(item){
+    // Recompute checked state from per-place keep flags
     var anyKept = (item.requiredPlaces||[]).some(function(p){ return p && p._keep; });
     item.checked = anyKept;
-    var div = document.createElement("div");
-    div.className = "tb-act-table-row" + (item.checked ? " on" : " off") + (item.iconic ? " iconic" : "");
-    div.id = "tb-place-act-" + item.id;
-    var typeLabel = item.type === "route" ? "🚂 Travel"
-                  : item.type === "condition" ? "⚠ Condition"
-                  : item.type === "manual" ? "📌 Added"
-                  : "✨ Activity";
-    var iconicTag = item.iconic ? '<span style="font-size:9px;color:#b28a2e;font-weight:700;margin-left:6px;">★ iconic</span>' : '';
-    var desc = item.description ? '<div class="tb-act-desc" style="margin-top:4px;">'+_tgEsc(item.description)+'</div>' : '';
-
-    // Left column: activity name + type + description + whole-row checkbox
-    var leftHtml = '<div class="tb-act-col-left">'
-      + '<div style="display:flex;align-items:flex-start;gap:8px;">'
-      + '<div class="tb-act-check'+(item.checked?" on":"")+'" onclick="togglePlaceActivity(\''+item.id+'\')" title="Toggle the whole row"></div>'
-      + '<div style="flex:1;min-width:0;cursor:pointer;" onclick="togglePlaceActivity(\''+item.id+'\')">'
-      + '<div class="tb-act-name"><span class="tb-act-type">'+typeLabel+'</span>'+_tgEsc(item.name||"")+iconicTag+'</div>'
-      + desc
-      + '</div>'
-      + '</div>'
-      + '</div>';
-
-    // Right column: place chips, each with a per-place toggle and nights
-    var places = Array.isArray(item.requiredPlaces) ? item.requiredPlaces : [];
-    var placesHtml = '<div class="tb-act-col-right">';
-    if (places.length === 0) {
-      placesHtml += '<div style="font-size:10.5px;color:#999;font-style:italic;">No specific places listed.</div>';
-    } else {
-      places.forEach(function(p, pIdx){
-        if (!p || !p.place) return;
-        var keep = !!p._keep;
-        var nightsLbl = "";
-        if (item.type !== "route" && p.nights > 0) {
-          nightsLbl = '<span class="tb-place-nights">· '+p.nights+'n</span>';
-        }
-        var chipCls = "tb-place-chip" + (keep ? " on" : " off");
-        placesHtml += '<div class="'+chipCls+'" onclick="togglePlaceInActivity(\''+item.id+'\','+pIdx+')">'
-          + '<span class="tb-place-check'+(keep?" on":"")+'"></span>'
-          + '<span class="tb-place-name">'+_tgEsc(p.place)+'</span>'
-          + nightsLbl
-          + '</div>';
-      });
+    // Items without an LLM-assigned section land in a fallback bucket so
+    // they still render — better than swallowing them silently.
+    var sec = (item.section || "").trim();
+    if (!sec) {
+      sec = item.type === "route" ? "Travel between places"
+          : item.type === "condition" ? "Wait for weather"
+          : item.type === "manual" ? "Things you added"
+          : "Other things to do";
     }
-    placesHtml += '</div>';
+    if (!bySection[sec]) {
+      bySection[sec] = [];
+      sectionOrder.push(sec);
+    }
+    bySection[sec].push(item);
+  });
 
-    div.innerHTML = leftHtml + placesHtml;
-    list.appendChild(div);
+  sectionOrder.forEach(function(sec){
+    var secItems = bySection[sec];
+    var secKept = secItems.some(function(it){ return it.checked; });
+
+    // Section header — verb-phrased, with a count + master toggle
+    var hdrWrap = document.createElement("div");
+    hdrWrap.className = "tb-act-section-hdr" + (secKept ? " on" : "");
+    hdrWrap.innerHTML = '<div class="tb-act-section-title">' + _tgEsc(sec) + '</div>'
+      + '<div class="tb-act-section-count">' + secItems.length + ' option' + (secItems.length===1?'':'s') + '</div>';
+    list.appendChild(hdrWrap);
+
+    // Items in this section
+    secItems.forEach(function(item){
+      var div = document.createElement("div");
+      div.className = "tb-act-table-row" + (item.checked ? " on" : " off") + (item.iconic ? " iconic" : "");
+      div.id = "tb-place-act-" + item.id;
+      var iconicTag = item.iconic ? '<span style="font-size:9px;color:#b28a2e;font-weight:700;margin-left:6px;">★ iconic</span>' : '';
+      var desc = item.description ? '<div class="tb-act-desc" style="margin-top:4px;">'+_tgEsc(item.description)+'</div>' : '';
+
+      // Left column: verb-phrased name + description + whole-row checkbox.
+      // Type badge dropped — section header carries the type semantics now.
+      var leftHtml = '<div class="tb-act-col-left">'
+        + '<div style="display:flex;align-items:flex-start;gap:8px;">'
+        + '<div class="tb-act-check'+(item.checked?" on":"")+'" onclick="togglePlaceActivity(\''+item.id+'\')" title="Toggle this whole row"></div>'
+        + '<div style="flex:1;min-width:0;cursor:pointer;" onclick="togglePlaceActivity(\''+item.id+'\')">'
+        + '<div class="tb-act-name">'+_tgEsc(item.name||"")+iconicTag+'</div>'
+        + desc
+        + '</div>'
+        + '</div>'
+        + '</div>';
+
+      // Right column: place chips. For routes, render endpoints with an
+      // arrow between them so the city pair reads as a single journey.
+      var places = Array.isArray(item.requiredPlaces) ? item.requiredPlaces : [];
+      var placesHtml = '<div class="tb-act-col-right">';
+      if (places.length === 0) {
+        placesHtml += '<div style="font-size:10.5px;color:#999;font-style:italic;">No specific places listed.</div>';
+      } else if (item.type === "route" && places.length >= 2) {
+        // For routes show endpoints with arrow connector, plus per-endpoint
+        // toggles (so user can drop one endpoint if they only want half).
+        var arrow = item.direction === "either" ? " ↔ " : " → ";
+        placesHtml += '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;">';
+        places.forEach(function(p, pIdx){
+          if (!p || !p.place) return;
+          var keep = !!p._keep;
+          var chipCls = "tb-place-chip" + (keep ? " on" : " off");
+          placesHtml += '<div class="'+chipCls+'" onclick="togglePlaceInActivity(\''+item.id+'\','+pIdx+')">'
+            + '<span class="tb-place-check'+(keep?" on":"")+'"></span>'
+            + '<span class="tb-place-name">'+_tgEsc(p.place)+'</span>'
+            + '</div>';
+          if (pIdx < places.length - 1) {
+            placesHtml += '<span style="color:#888;font-size:11px;">'+arrow+'</span>';
+          }
+        });
+        placesHtml += '</div>';
+      } else {
+        places.forEach(function(p, pIdx){
+          if (!p || !p.place) return;
+          var keep = !!p._keep;
+          var nightsLbl = "";
+          if (item.type !== "route" && p.nights > 0) {
+            nightsLbl = '<span class="tb-place-nights">· '+p.nights+'n</span>';
+          }
+          var chipCls = "tb-place-chip" + (keep ? " on" : " off");
+          placesHtml += '<div class="'+chipCls+'" onclick="togglePlaceInActivity(\''+item.id+'\','+pIdx+')">'
+            + '<span class="tb-place-check'+(keep?" on":"")+'"></span>'
+            + '<span class="tb-place-name">'+_tgEsc(p.place)+'</span>'
+            + nightsLbl
+            + '</div>';
+        });
+      }
+      placesHtml += '</div>';
+
+      div.innerHTML = leftHtml + placesHtml;
+      list.appendChild(div);
+    });
   });
 }
 
