@@ -2505,6 +2505,7 @@ async function expandMustDos() {
     + (intent ? "Their goal / full sentence: " + intent + "\n" : "")
     + (anchors ? "They also listed these must-dos explicitly: \"" + anchors + "\"\n" : "")
     + "\nWhether the commitments came from the sentence, the must-do list, or both, EXTRACT EVERY DISTINCT THING THE TRAVELER NAMED and produce at least one item for each. If they said 'ride the named trains, hike the mountains, explore the culture, eat chocolate' you must produce items for each of the four — not just the trains. Treat the sentence as binding even if they didn't repeat the items in the must-do field. Do not silently drop any. There are three types.\n\n"
+    + "ACCURACY RULE — overrides everything below: WRONG INFORMATION IS WORSE THAN NO INFORMATION. If you’re not certain about a route’s endpoints, a place’s location, a price, a schedule, or any other specific fact, OMIT THE ITEM rather than guess. Confident wrong claims (e.g. \"Glacier Express from Zurich\" or \"Shinkansen to Hokkaido\") destroy trust. Apply this to every region, not just the ones explicitly enumerated.\n\n"
     + "TYPE 1 \u2014 ROUTE: a scenic travel leg between specific places. IMPORTANT: routes are TRANSPORTATION, not activities. The Glacier Express, Bernina Express, Lake Geneva steamer circuit, the Atlantic Road drive, etc. — these are how the traveler MOVES between destinations while seeing great scenery. They are functionally the same as a car trip or a bus ride; the scenery is a bonus, not a standalone stop. A route does NOT eat activity time at its endpoints, and it does NOT count as a destination in itself. What counts as a destination are the endpoints, where the traveler actually spends nights and does things.\n"
     + "  Required fields for routes:\n"
     + "    • endpoints: ordered array [start, end] — the traditional direction if one exists\n"
@@ -2590,6 +2591,10 @@ async function expandMustDos() {
       if (item.type === "route" && !item.requiredPlaces && item.endpoints) item.requiredPlaces = item.endpoints;
       if (item.type === "condition" && !item.requiredPlaces && item.viableLocations) item.requiredPlaces = item.viableLocations;
     });
+    // Region-agnostic route verification — same call as place-mode. Catches
+    // confident-wrong route claims for any region. Async, so awaits before
+    // committing _mdcItems.
+    items = await _verifyRouteItems(items, region);
     _mdcItems = items;
     // Wait for chip suggestions (if any) and merge them into the activity list
     // so their places feed candidate generation and their sections render on the
@@ -3381,6 +3386,84 @@ function _normPlaceName(s){
     .replace(/[^\w\s]/g, " ")                            // punct → space
     .replace(/\s+/g, " ")
     .trim();
+}
+
+// ==== Route verification ============================================
+// Generic post-generation fact-check for route items (named trains, scenic
+// drives, lake circuits). The first-pass prompt asks the model to be careful;
+// this is a second pass that explicitly asks "is this real?" with the
+// proposed endpoints. The model is generally better at YES/NO verification
+// than at not-confidently-asserting in the first place.
+//
+// Returns the input items array with route items filtered: only verified
+// routes survive; rejected routes are removed and logged. Non-route items
+// (activities, conditions, manual) pass through untouched.
+//
+// Region-agnostic — works for any country/region. ~1 LLM call per generation,
+// small (verification only, ~600 tokens).
+async function _verifyRouteItems(items, regionLabel){
+  if (!Array.isArray(items) || items.length === 0) return items;
+  var routes = items.filter(function(m){ return m && m.type === "route"; });
+  if (routes.length === 0) return items;
+
+  // Build a compact list for the verifier
+  var listLines = routes.map(function(m, idx){
+    var eps = (m.endpoints || m.requiredPlaces || []).map(function(p){return p && p.place;}).filter(Boolean);
+    return "  " + (idx+1) + ". " + (m.name || "(unnamed)") + " — " + (eps.join(" ↔ ") || "(no endpoints listed)");
+  }).join("\n");
+
+  var prompt = "These are routes proposed for a trip" + (regionLabel ? " in " + regionLabel : "") + ":\n\n" + listLines + "\n\n"
+    + "For EACH numbered route, judge whether the named service actually runs between the listed endpoints. Common failure modes to catch:\n"
+    + "  - A famous train asserted on a route it doesn’t serve (e.g. \"Glacier Express from Zurich\" — it doesn’t depart Zurich)\n"
+    + "  - A made-up route name\n"
+    + "  - Endpoints that aren’t actual termini or major stops on the named service\n"
+    + "  - A route that doesn’t exist at all\n\n"
+    + "Be strict: a route is VALID only if the named service genuinely runs the route as listed. If you’re unsure, mark it INVALID with reason \"unverified\". Errors of omission are recoverable; errors of commission undermine trust.\n\n"
+    + "Return ONLY JSON in this shape:\n"
+    + "{\"verdicts\":[{\"index\":1,\"valid\":true},{\"index\":2,\"valid\":false,\"reason\":\"Glacier Express runs Zermatt↔St. Moritz, not from Zurich\"}]}\n\n"
+    + "Index numbers correspond to the list above (1-based). One verdict per route.";
+
+  try {
+    var text = await callMax([{role:"user",content:prompt}], 1500, 30000);
+    var cleaned = String(text||"").replace(/```json|```/g, "").trim();
+    var s = cleaned.indexOf("{"), e = cleaned.lastIndexOf("}");
+    if (s > -1 && e > s) cleaned = cleaned.substring(s, e + 1);
+    var data = JSON.parse(cleaned);
+    if (!data || !Array.isArray(data.verdicts)) return items;
+
+    var validIdxSet = {};
+    var rejections = [];
+    data.verdicts.forEach(function(v){
+      if (!v || typeof v.index !== "number") return;
+      if (v.valid) {
+        validIdxSet[v.index] = true;
+      } else {
+        rejections.push({index: v.index, reason: v.reason || "unverified"});
+      }
+    });
+
+    if (rejections.length) {
+      console.warn("[Max] route verification rejected", rejections.length, "of", routes.length, "routes:", rejections.map(function(r){
+        var rt = routes[r.index - 1];
+        return (rt && rt.name) + " — " + r.reason;
+      }).join("; "));
+    }
+
+    // Filter the original items list: keep all non-route items, plus only
+    // route items whose index made it into validIdxSet.
+    var routeIdx = 0;
+    var filtered = items.filter(function(m){
+      if (!m || m.type !== "route") return true;
+      routeIdx++;
+      return !!validIdxSet[routeIdx];
+    });
+    return filtered;
+  } catch (err) {
+    // If verification fails for any reason, fall back to returning the
+    // unverified list. Don’t block the user on a verifier outage.
+    console.warn("[Max] route verification skipped:", err && err.message);
+    return items;
+  }
 }
 
 // Does candidate match any required place?
@@ -4194,6 +4277,20 @@ function renderTripStep1Place(){
     _renderPlaceActivityItems();
     _updatePlaceActivitySummary();
   }
+  // Live-update the generate button's label as the user types the place name.
+  // Without this the button stays "Iconic things to see and do here" until the
+  // form re-renders, which feels broken when Neal types "Switzerland" and the
+  // CTA doesn't acknowledge it.
+  var placeInp = document.getElementById("tb-place-name");
+  var genBtn = document.getElementById("tb-place-generate-btn");
+  if (placeInp && genBtn) {
+    placeInp.addEventListener("input", function(){
+      var v = (this.value || "").trim().replace(/"/g, '&quot;');
+      genBtn.innerHTML = (v
+        ? "Iconic things to see and do in " + v
+        : "Iconic things to see and do here") + " →";
+    });
+  }
 }
 
 // Generate activities for the named place.
@@ -4231,6 +4328,7 @@ async function generateActivitiesForPlace(){
     + "  Required fields: viableLocations: array of {place,country}; requiredPlaces: same; recovery (\"low\"/\"moderate\"/\"high\"); frequencyRequirement (min nights in viable locations); conditionNote (one sentence about what the traveler needs to understand).\n\n"
     + "TYPE 3 \u2014 ACTIVITY: anything else worth doing in this place \u2014 sights, experiences, food, culture. An activity is pursued across one or more specific places where it\u2019s especially worthwhile.\n"
     + "  Required fields: requiredPlaces: array of {place,country} where this activity is especially good; durationHours (rough total for a committed traveler); description (specific, concrete sentence).\n\n"
+    + "ACCURACY RULE \u2014 read this first, it overrides convenience: WRONG INFORMATION IS WORSE THAN NO INFORMATION. If you\u2019re not certain about a route\u2019s endpoints, a place\u2019s exact location, a price, a schedule, or any other specific fact, OMIT THE ITEM rather than guess. A traveler who arrives at a station that doesn\u2019t exist, or boards a train that doesn\u2019t run on that route, will lose trust in everything else Max says. Confident wrong claims (e.g. saying the Glacier Express runs from Zurich, or that the Shinkansen reaches Hokkaido directly) are exactly the failure mode to avoid. Apply this to every region, not just the ones explicitly listed below.\n\n"
     + "VERB-PHRASE NAMES: every item\u2019s name reads as a thing the traveler DOES, not a noun. Use action verbs at the start: \"Visit the Rhine Falls\" not \"Rhine Falls\"; \"Walk the Five Lakes Trail\" not \"Five Lakes Walk\"; \"Taste cheese at the source\" not \"Cheese tasting\"; \"Ride the Glacier Express\" not \"Glacier Express\". The user is choosing actions, so the names should be actions.\n\n"
     + "SECTION GROUPING: every item also gets a section field \u2014 a verb-phrased category header that groups related items. UNIQUENESS: each section name must appear at most once. NEVER produce two sections with the same name (e.g. don\u2019t emit two \u201cRide mountain railways to summits\u201d sections). If two items belong together, give them the same section string and they\u2019ll group automatically. Examples (use these where they fit, invent more for what doesn\u2019t):\n"
     + "  - \"Travel on iconic trains\" \u2014 for the named scenic trains (Glacier, Bernina, GoldenPass, Gotthard, Centovalli, etc.)\n"
@@ -4345,6 +4443,13 @@ async function generateActivitiesForPlace(){
       if (item.type === "route" && (intentTokens["train"] || intentTokens["rail"])) return true;
       return Object.keys(intentTokens).some(function(w){ return hay.indexOf(w) !== -1; });
     }
+    // Region-agnostic post-generation route verification — sends the routes
+    // back through Max with explicit "is this real?" prompting, drops any
+    // that fail. Catches confident-wrong claims like Glacier-Express-from-Zurich
+    // for any region, not just the ones we've enumerated by hand.
+    var _verifyRegion = (_tb && _tb.region) || place || "";
+    items = await _verifyRouteItems(items, _verifyRegion);
+
     items.forEach(function(item,i){
       item.id = "plm" + i;
       // Pre-check rule: an item comes pre-checked if EITHER the LLM flagged it
@@ -8673,6 +8778,10 @@ async function buildFromCandidates(){
       country: (_tb.region || ""),
       role: "arrival",
       stayRange: "1 night",
+      // Force-set nights so parseNightsFromRange's quirks can't silently
+      // turn this into 3. The downstream destination builder reads stayRange
+      // first; if it doesn't match, having `nights` here as a hint helps.
+      nights: 1,
       whyItFits: "Where you arrive — Max suggests one night to recover before moving on. Adjust or drop if you'd rather push through.",
       tradeoffs: "",
       tags: ["arrival"],
@@ -8702,7 +8811,12 @@ async function buildFromCandidates(){
   ordered.forEach(function(c){
     destCtr++;
     var id="d"+destCtr;
-    var nights=parseNightsFromRange(c.stayRange)||3;
+    // If the candidate carries an explicit `nights` value (e.g. the synthetic
+    // entry stop we prepend), trust it. Otherwise parse from the stayRange
+    // string ("3-4 nights" → 3) with a 3-night fallback for missing data.
+    var nights = (typeof c.nights === "number" && c.nights >= 0)
+      ? c.nights
+      : (parseNightsFromRange(c.stayRange) || 3);
 
     // Recovery bump: if the previous destination had a high-recovery event,
     // add an easy-day note to this one. Doesn't change nights, just flags.
@@ -15404,8 +15518,15 @@ async function fetchRoutingAsync(fromPlace, toPlace, key){
     var prompt = "A traveler is going from " + fromPlace + " to " + toPlace
       + (region ? " in " + region : "") + ".\n"
       + (transportPref ? "Their transport preference: " + transportPref + "\n" : "")
-      + "\nList the realistic transport options between these two places. "
-      + "Include named scenic/branded services (like Glacier Express) AND the ordinary regional alternative if one exists. "
+      + "\nACCURACY RULE — read first: WRONG INFORMATION IS WORSE THAN NO INFORMATION. Only return options you’re certain are correct. If unsure of a route’s endpoints, schedule, or operator, OMIT IT. Better to return one verified option than three confidently-wrong ones.\n\n"
+      + "List the REALISTIC transport options between these two places. "
+      + "ONLY include a named/branded scenic service if its actual endpoints match this leg. Do NOT shoehorn a famous train onto a route it doesn’t serve. Canonical Swiss endpoints to respect:\n"
+      + "  - Glacier Express: Zermatt ↔ St. Moritz only. NOT from Zurich, Lucerne, Bern, or anywhere else.\n"
+      + "  - Bernina Express: Chur ↔ Tirano only.\n"
+      + "  - GoldenPass Line: Lucerne ↔ Montreux only.\n"
+      + "  - Gotthard Panorama Express: Lucerne ↔ Lugano only.\n"
+      + "  - Centovalli Express: Locarno ↔ Domodossola only.\n"
+      + "If the user is going Zurich→Zermatt, the realistic options are regular SBB trains (with one or two changes), NOT the Glacier Express — they’d need to be in Zermatt first to board it. Same logic in any region with named scenic services.\n"
       + "For each, give duration, approximate cost in local currency, whether a reservation is required, "
       + "and a one-sentence note about what the experience is like or any practical caveat (frequency, changes, seasonality, pass coverage).\n\n"
       + "Return ONLY a JSON object (no markdown), with an options array:\n"
