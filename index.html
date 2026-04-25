@@ -2588,6 +2588,15 @@ async function expandMustDos() {
     + "    • durationHours: rough total time a committed traveler would want to spend on this across the whole trip (e.g. 'explore Swiss culture thoroughly' might be 16 hours spread over several days; 'eat chocolate seriously' might be 6 hours across 2-3 tasting visits).\n"
     + "    • description: specific, concrete sentence about what doing this well looks like here.\n\n"
     + "META-REFERENCES: If the traveler uses something like \"all the named trains\", \"the scenic trains\", \"the major museums\", \"the cathedrals\", expand into every specific named instance that fits the region — do not pick one or two. If the phrase implies branded experiences (e.g. \"the named scenic trains\"), set modeOptions to \"both\" and include the ordinary alternative in the alternatives field.\n\n"
+    + "FACTUAL ACCURACY for named scenic trains — getting endpoints wrong undermines trust. Use these canonical endpoints when they apply:\n"
+    + "  - Glacier Express: Zermatt ↔ St. Moritz. NOT from Zurich.\n"
+    + "  - Bernina Express: Chur → Tirano (Italy).\n"
+    + "  - GoldenPass Line: Lucerne ↔ Montreux (via Interlaken/Zweisimmen). NOT from Zurich.\n"
+    + "  - Gotthard Panorama Express: Lucerne ↔ Lugano.\n"
+    + "  - Centovalli Express: Locarno ↔ Domodossola.\n"
+    + "  - Jungfraubahn: Kleine Scheidegg → Jungfraujoch.\n"
+    + "  - Gornergrat Bahn: Zermatt → Gornergrat.\n"
+    + "Travelers reach these by regular train first; do not use airport cities as a route endpoint just because that's where they fly in. If unsure, omit the route rather than guess.\n\n"
     + "Return ONLY a JSON array (no markdown):\n"
     + '[\n'
     + '  {"name":"Glacier Express","type":"route","description":"Classic 8hr panoramic rail journey through the Swiss Alps.","endpoints":[{"place":"Zermatt","country":"Switzerland"},{"place":"St. Moritz","country":"Switzerland"}],"requiredPlaces":[{"place":"Zermatt","country":"Switzerland"},{"place":"St. Moritz","country":"Switzerland"}],"direction":"either","durationHours":8,"transportModes":["train"],"modeOptions":"both","alternatives":"Regular SBB trains cover the same Zermatt-Brig-Chur-St. Moritz route hourly with one or two transfers. No reservation, standard fare covered by the Swiss Travel Pass or Half-Fare Card. Windows open in many cars, and you can break the journey at any station.","reservationNotes":"Seat reservation required, 2-3 departures daily depending on season, CHF 152+ supplement on top of fare or pass.","endpointHighlights":{"Zermatt":"Matterhorn views, Gornergrat Railway, high-altitude hikes","St. Moritz":"Alpine lake, Engadin villages, winter-sports centre"},"flexibility":"low"},\n'
@@ -6023,6 +6032,58 @@ function cancelTripBrief(){
   var inp=g("ntp-name"); if(inp) inp.focus();
 }
 
+// Rebuild _tb.requiredPlaces from the currently-checked _mdcItems. Called
+// any time a must-do is toggled on/off so candidate matching stays in sync.
+// Same logic as expandMustDos but extracted so it's reusable.
+function _rebuildRequiredPlacesFromMdcItems(){
+  if (!_tb) return;
+  var requiredMap = {};
+  (_mdcItems || []).forEach(function(item){
+    if (!item.checked) return;
+    (item.requiredPlaces||[]).forEach(function(p){
+      if (!p || !p.place) return;
+      if (!requiredMap[p.place]) requiredMap[p.place] = {place:p.place, country:p.country||'', requiredFor:[], flexible:false};
+      requiredMap[p.place].requiredFor.push(item.type === "manual" ? "__manual__" : item.name);
+      if (item.type === "condition") requiredMap[p.place].flexible = true;
+    });
+  });
+  _tb.requiredPlaces = Object.values(requiredMap);
+}
+
+// Called when the user clicks the × on a must-do in the summary panel.
+// Soft uncheck — sets m.checked=false, rebuilds requiredPlaces, demotes any
+// candidates that were ONLY required for this must-do (they stay as places to
+// consider rather than being rejected). The user can re-check from the same
+// summary if they change their mind.
+function _toggleMustDoFromSummary(name){
+  var m = (_mdcItems || []).find(function(x){ return x.name === name; });
+  if (!m) return;
+  m.checked = !m.checked;
+  _rebuildRequiredPlacesFromMdcItems();
+  // Demote candidates whose only required link was this must-do
+  if (!m.checked) {
+    (_tb.candidates || []).forEach(function(c){
+      if (!c._requiredFor) return;
+      c._requiredFor = c._requiredFor.filter(function(r){ return r !== name; });
+      if (!c._requiredFor.length) {
+        c._required = false;
+      }
+    });
+  } else {
+    // Re-checking — re-derive _required based on new requiredPlaces
+    (_tb.candidates || []).forEach(function(c){
+      if (typeof _findMatchingRequired === "function") {
+        var match = _findMatchingRequired(c, _tb.requiredPlaces);
+        if (match) {
+          c._required = true;
+          c._requiredFor = match.requiredFor || [];
+        }
+      }
+    });
+  }
+  if (typeof renderCandidateCards === "function") renderCandidateCards(_tb.candidates);
+}
+
 // ==== Trip gallery (template-first picker) ============================
 // After the user completes the brief, show 3 distinct trip-shape templates
 // instead of jumping straight to candidate generation. User picks one, its
@@ -6106,6 +6167,19 @@ async function generateGalleryTemplates(){
     + "- Identify any BINDING CONSTRAINT (season, weather window, visa, budget) and return it as bindingConstraint.\n"
     + "- Each template groups its stops into WEEKS. At 2+ weeks, the week is the planning unit, not the day.\n"
     + "- Routes (scenic trains, scenic drives, lake steamer circuits) are transportation, not activities. They connect endpoints where the traveler actually spends time; don't count them as destinations.\n\n"
+    + "FACTUAL ACCURACY (this is non-negotiable; getting routes wrong undermines trust):\n"
+    + "Named scenic trains have specific, real endpoints. Do NOT invent departure cities or terminate routes at airports just because that's where the traveler arrives. The canonical endpoints for the trains travelers most often confuse:\n"
+    + "  - Glacier Express: Zermatt ↔ St. Moritz (via Brig, Andermatt, Disentis, Chur). NOT from Zurich. Travelers reach Zermatt or St. Moritz first via regular trains.\n"
+    + "  - Bernina Express: Chur → Tirano (Italy). The reverse direction works too. NOT from Zurich.\n"
+    + "  - GoldenPass Line / GoldenPass Express: Lucerne ↔ Montreux (via Interlaken Ost, Zweisimmen). NOT from Zurich.\n"
+    + "  - Gotthard Panorama Express: Lucerne ↔ Lugano (boat segment Lucerne–Fluëllen, then train through the Gotthard). NOT from Zurich directly.\n"
+    + "  - Centovalli Express: Locarno ↔ Domodossola (Italy).\n"
+    + "  - Jungfraubahn / Jungfraujoch: Kleine Scheidegg → Jungfraujoch. Reached via Interlaken → Kleine Scheidegg.\n"
+    + "  - Gornergrat Bahn: Zermatt → Gornergrat. ONLY from Zermatt.\n"
+    + "  - Pilatus Bahn: Alpnachstad → Pilatus Kulm. Reached via boat from Lucerne or train to Alpnachstad.\n"
+    + "  - Rigi Bahn: Vitznau or Arth-Goldau → Rigi Kulm.\n"
+    + "  - Mt. Rothorn / Brienzer Rothorn Bahn: Brienz → Brienzer Rothorn. Steam, summer only.\n"
+    + "Same accuracy bar applies in any country: name only the actual endpoints. If you don't know, omit the route rather than guess. Day-by-day text must NEVER say \"take the [named train] from [a city it doesn't depart from]\" — use \"transfer to [actual departure city] via regular train, then board the [named train]\" instead.\n\n"
     + "Return ONLY valid JSON (no markdown, no commentary). Shape:\n"
     + "{\n"
     + '  "regionLabel": "Switzerland",\n'
@@ -6288,6 +6362,49 @@ function _tgRenderCardHtml(t){
     }).join("");
     return '<div class="tg-week-block"><h4>' + _tgEsc(wk) + '</h4>' + items + '</div>';
   }).join("");
+
+  // Must-dos section — shown inside the expanded panel so the user can see
+  // exactly what picking this template will commit them to. Without this,
+  // 8+ items get silently locked in on click. Group by type for readability.
+  var mdcByType = { route: [], activity: [], condition: [] };
+  (t.mdcItems || []).forEach(function(m){
+    var bucket = mdcByType[m.type] || mdcByType.activity;
+    bucket.push(m);
+  });
+  var mdcLabels = { route: "Scenic travel", activity: "Activities", condition: "Conditions" };
+  var mdcOrder = ["route", "activity", "condition"];
+  var mdcHtml = "";
+  var mdcCount = (t.mdcItems || []).length;
+  if (mdcCount) {
+    mdcHtml = '<div class="tg-week-block"><h4>Must-dos this template implies · ' + mdcCount + '</h4>';
+    mdcOrder.forEach(function(typ){
+      var items = mdcByType[typ] || [];
+      if (!items.length) return;
+      mdcHtml += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:#888;margin:6px 0 3px;">' + _tgEsc(mdcLabels[typ] || typ) + '</div>';
+      items.forEach(function(m){
+        var line = '<div style="padding:3px 0;display:flex;gap:8px;font-size:11px;line-height:1.4;">';
+        line += '<span style="color:#888;flex-shrink:0;min-width:14px;">•</span>';
+        line += '<span><strong style="color:#1a1a1a;">' + _tgEsc(m.name || "") + '</strong>';
+        if (m.type === "route") {
+          var eps = m.endpoints || m.requiredPlaces || [];
+          if (eps.length >= 2) {
+            var arrow = m.direction === "either" ? " ↔ " : " → ";
+            line += ' <span style="color:#1a5fa8;font-size:10px;">'
+              + eps.map(function(p){return _tgEsc(p.place || "");}).join(arrow)
+              + '</span>';
+          }
+        }
+        if (m.description) line += ' <span style="color:#666;">— ' + _tgEsc(m.description) + '</span>';
+        line += '</span></div>';
+        mdcHtml += line;
+      });
+    });
+    mdcHtml += '<div style="font-size:10.5px;color:#888;margin-top:8px;font-style:italic;line-height:1.5;">'
+      + 'Picking this template adds these to your must-dos. You can drop any of them on the next page.'
+      + '</div>';
+    mdcHtml += '</div>';
+  }
+  daysHtml += mdcHtml;
 
   var daysLabel = (t.nights ? (t.nights + " nights") : (_tb.duration || _tb.when || ""));
   var id = _tgEsc(t.id || "");
@@ -7831,17 +7948,31 @@ function renderCandidateCards(cands){
     sumHdr.style.cssText = "font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#666;margin-bottom:6px;";
     sumHdr.textContent = "Your must-dos \u00b7 " + allMustDos.length;
     summaryWrap.appendChild(sumHdr);
+    // Provenance line \u2014 when the trip came from a gallery template, tell the
+    // user which template seeded these must-dos. Without it, items appear
+    // under "Your must-dos" as if the user explicitly chose each one when in
+    // fact the template did. Provenance + per-item \u00d7 restores agency.
+    if (_tb && _tb.galleryTemplate && _tb.galleryTemplate.title) {
+      var provLine = document.createElement("div");
+      provLine.style.cssText = "font-size:10.5px;color:#666;background:#f0f5fb;border:1px solid #d8e4f2;border-radius:6px;padding:6px 9px;margin-bottom:8px;line-height:1.5;";
+      var safeTplTitle = String(_tb.galleryTemplate.title || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+      provLine.innerHTML = "From the <strong style=\"color:#1a5fa8;\">" + safeTplTitle + "</strong> template you picked. Don\u2019t agree with one? Tap \u00d7 to drop it.";
+      summaryWrap.appendChild(provLine);
+    }
     // Badge labels. Routes are framed as travel legs, not activities — they
     // move the traveler between real destinations and happen to be scenic.
     var typeBadge = { route:"\ud83d\ude82 Scenic travel", activity:"\u2728 Activity", condition:"\u26a0 Condition", manual:"\ud83d\udccc Place" };
     allMustDos.forEach(function(m){
       var row = document.createElement("div");
       var active = !!m.checked;
-      row.style.cssText = "padding:5px 0;font-size:11px;line-height:1.5;border-top:1px dotted #eee;color:"+(active?"#333":"#999")+";";
+      row.style.cssText = "padding:5px 0;font-size:11px;line-height:1.5;border-top:1px dotted #eee;color:"+(active?"#333":"#999")+";display:flex;align-items:flex-start;gap:6px;";
       var badge = typeBadge[m.type] || "\u2022 " + (m.type||"activity");
       var desc = m.description ? ' <span style="color:'+(active?"#666":"#aaa")+';">\u2014 '+m.description+'</span>' : '';
       var off = active ? '' : ' <span style="font-size:9px;color:#c05020;font-weight:600;">off</span>';
-      row.innerHTML = '<span style="font-size:9px;color:'+(active?"#1a5fa8":"#aaa")+';font-weight:600;margin-right:6px;">'+badge+'</span>'
+      // Body span carries the badge + name + off-flag + description, sits in
+      // the flex row alongside the toggle button on the right edge.
+      var bodyHtml = '<span style="flex:1;min-width:0;">'
+        + '<span style="font-size:9px;color:'+(active?"#1a5fa8":"#aaa")+';font-weight:600;margin-right:6px;">'+badge+'</span>'
         + '<strong style="color:'+(active?"#111":"#888")+';">'+m.name+'</strong>'
         + off + desc;
       // Route endpoints on a second line so "Chur → Tirano" is obvious at a glance
@@ -7851,8 +7982,34 @@ function renderCandidateCards(cands){
           var arrow = m.direction === "reverse" ? " \u2190 " : (m.direction === "either" ? " \u2194 " : " \u2192 ");
           var epLine = '<div style="font-size:10px;color:'+(active?"#1a5fa8":"#aaa")+';margin-top:2px;margin-left:2px;">'
             + eps.map(function(p){return p.place;}).join(arrow) + '</div>';
-          row.innerHTML += epLine;
+          bodyHtml += epLine;
         }
+      }
+      bodyHtml += '</span>';
+      // Toggle button — × when active (drop), ↺ when off (re-add).
+      // Click reaches _toggleMustDoFromSummary which reconciles _tb.requiredPlaces
+      // and any candidate _required flags before re-rendering.
+      var toggleSym = active ? "×" : "↺";
+      var toggleTitle = active ? "Drop from must-dos" : "Re-add to must-dos";
+      var btnColor = active ? "#aaa" : "#1a5fa8";
+      var safeMdName = String(m.name||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+      var btnHtml = '<button type="button" class="md-summary-toggle" '
+        + 'data-mdname="' + safeMdName + '" '
+        + 'title="' + toggleTitle + '" '
+        + 'style="background:none;border:1px solid transparent;color:' + btnColor + ';font-size:14px;line-height:1;padding:0 6px;cursor:pointer;border-radius:4px;flex-shrink:0;font-family:inherit;font-weight:bold;">'
+        + toggleSym + '</button>';
+      row.innerHTML = bodyHtml + btnHtml;
+      // Wire the click handler against the row's button
+      var mdToggleBtn = row.querySelector(".md-summary-toggle");
+      if (mdToggleBtn) {
+        (function(nm){
+          mdToggleBtn.onclick = function(ev){
+            ev.stopPropagation();
+            _toggleMustDoFromSummary(nm);
+          };
+          mdToggleBtn.onmouseover = function(){ this.style.background = "#f5f5f5"; this.style.borderColor = "#e0e6ef"; };
+          mdToggleBtn.onmouseout = function(){ this.style.background = "none"; this.style.borderColor = "transparent"; };
+        })(m.name);
       }
       summaryWrap.appendChild(row);
     });
