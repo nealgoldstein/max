@@ -8649,6 +8649,42 @@ async function buildFromCandidates(){
   var ordered = orderResult.ordered;
   trip.orderingReasoning = orderResult.reasoning;
 
+  // If the user set an entry city (e.g. "Zurich" because they're flying into
+  // ZRH) and that city isn't already at the head of the ordered trip, prepend
+  // it as a 1-night arrival stop. Without this, the user types Zurich into
+  // "Getting there" but the trip view starts with whatever the first kept
+  // destination happens to be (Basel, Lucerne, etc.) — silently dropping
+  // the arrival city and confusing anyone who actually flew in there.
+  // The user can edit nights to 1+ or drop the stop entirely.
+  (function(){
+    var entry = (_tb.entry || "").trim();
+    if (!entry) return;
+    var entryN = _normPlaceName(entry);
+    var firstMatches = ordered.length && (function(){
+      var fN = _normPlaceName(ordered[0].place);
+      return fN.indexOf(entryN) >= 0 || entryN.indexOf(fN) >= 0;
+    })();
+    if (firstMatches) return; // entry already heads the trip — nothing to do
+    // Synthesize a candidate-shaped object so the rest of buildFromCandidates
+    // treats it like any other destination.
+    var entryStop = {
+      id: "c-entry-" + Date.now(),
+      place: entry,
+      country: (_tb.region || ""),
+      role: "arrival",
+      stayRange: "1 night",
+      whyItFits: "Where you arrive — Max suggests one night to recover before moving on. Adjust or drop if you'd rather push through.",
+      tradeoffs: "",
+      tags: ["arrival"],
+      _entryStop: true,
+      lat: null, lng: null
+    };
+    ordered = [entryStop].concat(ordered);
+    if (orderResult.reasoning) {
+      orderResult.reasoning.unshift("Starting in " + entry + " — that's where you arrive. Edit or drop if you'd rather not stop here.");
+    }
+  })();
+
   // If entry was inferred (no arrival was set by the user), persist it so the
   // Step 2 form shows it filled in with a "Max suggested" marker, and the brief
   // accurately reflects what the trip is built on.
