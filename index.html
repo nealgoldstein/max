@@ -784,6 +784,32 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .tb-act-add-btn{padding:9px 14px;font-size:11px;font-weight:600;background:#fff;color:#111;border:1px solid #111;border-radius:6px;cursor:pointer;white-space:nowrap;}
 .tb-act-summary{font-size:11px;color:#666;margin-top:10px;padding:10px 12px;background:#fff;border:1px solid #eee;border-radius:6px;line-height:1.55;}
 
+/* Activity ↔ place two-column table (Mode 2 / place-mode picker, Phase 1).
+   Each row pairs an activity name on the left with the places where you'd do
+   it on the right. Whole-row checkbox toggles all places; per-place chips
+   toggle individual places. Iconic activities get a subtle gold treatment. */
+.tb-act-table-row{display:grid;grid-template-columns:minmax(0, 1fr) minmax(0, 1.4fr);gap:18px;padding:12px 14px;border:1px solid #e5e5e5;border-radius:8px;background:#fff;margin-bottom:8px;transition:border-color .18s ease, background-color .18s ease;}
+.tb-act-table-row.on{border-color:#111;background:#fff;box-shadow:0 0 0 1px #111 inset;}
+.tb-act-table-row.off{background:#fafafa;}
+.tb-act-table-row.iconic{border-left:3px solid #b28a2e;}
+.tb-act-table-row.iconic.on{border-left-color:#b28a2e;}
+@media (max-width:640px){
+  /* On narrow screens, stack the columns and let places wrap as chips below */
+  .tb-act-table-row{grid-template-columns:1fr;gap:10px;}
+}
+.tb-act-col-left{min-width:0;}
+.tb-act-col-right{display:flex;flex-direction:column;gap:5px;min-width:0;}
+.tb-place-chip{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:6px;border:1px solid #e0e0e0;background:#fff;cursor:pointer;font-size:11.5px;color:#333;line-height:1.3;transition:border-color .12s, background-color .12s;}
+.tb-place-chip:hover{border-color:#999;background:#fafafa;}
+.tb-place-chip.on{border-color:#1a5fa8;background:#f0f5fb;color:#0e3a6a;}
+.tb-place-chip.off{color:#888;}
+.tb-place-check{flex-shrink:0;width:14px;height:14px;border:1.5px solid #bbb;border-radius:3px;background:#fff;display:inline-flex;align-items:center;justify-content:center;}
+.tb-place-check.on{background:#1a5fa8;border-color:#1a5fa8;}
+.tb-place-check.on::after{content:"\2713";font-size:9px;font-weight:700;color:#fff;line-height:1;}
+.tb-place-name{flex:1;min-width:0;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.tb-place-nights{flex-shrink:0;font-size:10px;color:#888;font-weight:600;}
+.tb-place-chip.on .tb-place-nights{color:#1a5fa8;}
+
 /* Activity-mode place picker (Step 1 — Activity flow) */
 .tb-plc-list{display:flex;flex-direction:column;gap:10px;margin-top:8px;}
 .tb-plc-card{padding:14px 16px;border:1px solid #e5e5e5;border-radius:10px;background:#fff;transition:border-color .18s ease, background-color .18s ease;}
@@ -4275,7 +4301,7 @@ function renderTripStep1Place(){
     +'<label style="display:block;font-size:11px;font-weight:600;color:#333;margin-top:14px;margin-bottom:6px;">Anything else shaping the trip? <span style="color:#999;font-weight:400;">(optional)</span></label>'
     +'<textarea id="tb-place-context" rows="2" class="tb-act-add-inp" placeholder="e.g. first time there, traveling with parents, want to avoid the obvious tourist stuff" style="width:100%;box-sizing:border-box;resize:vertical;min-height:52px;">'+(_tb.placeContext||"")+'</textarea>'
     +'</div>'
-    +'<button class="tb-btn-primary" id="tb-place-generate-btn" onclick="generateActivitiesForPlace()">'+(hasGenerated?"Show me different options":"See what\u2019s there")+' \u2192</button>';
+    +'<button class="tb-btn-primary" id="tb-place-generate-btn" onclick="generateActivitiesForPlace()">'+(hasGenerated?"Show me different options":(pmPlaceForExample?("What you can do in "+pmPlaceForExample.replace(/"/g,'&quot;')):"See what\u2019s there"))+' \u2192</button>';
 
   var listHtml = '';
   if(hasGenerated){
@@ -4349,15 +4375,36 @@ async function generateActivitiesForPlace(){
     + "  Required fields: viableLocations: array of {place,country}; requiredPlaces: same; recovery (\"low\"/\"moderate\"/\"high\"); frequencyRequirement (min nights in viable locations); conditionNote (one sentence about what the traveler needs to understand).\n\n"
     + "TYPE 3 \u2014 ACTIVITY: anything else worth doing in this place \u2014 sights, experiences, food, culture. An activity is pursued across one or more specific places where it\u2019s especially worthwhile.\n"
     + "  Required fields: requiredPlaces: array of {place,country} where this activity is especially good; durationHours (rough total for a committed traveler); description (specific, concrete sentence).\n\n"
-    + "Return ONLY a JSON array (no markdown). Aim for 8\u201314 items total, covering a real range \u2014 not just the obvious. Include routes and condition items when they genuinely apply to this place; skip those types if nothing in this place fits. Prefer specific named things over generic categories.\n\n"
+    + "ICONIC FLAG: every item gets an iconic boolean. Mark iconic:true on items a first-time visitor would be disappointed to miss \u2014 Glacier Express, Bernina Express, Jungfraujoch, Matterhorn-from-Gornergrat, Lake Geneva CGN steamer + Ch\u00e2teau de Chillon, Mt. Pilatus cogwheel, Rigi, Rhine Falls for Switzerland; analogous canonical items for other regions. These pre-check for the traveler. Err toward fewer iconic flags rather than more \u2014 over-flagging shoehorns; under-flagging at least lets the traveler opt in.\n\n"
+    + "Coverage expectations for rail-heavy regions (Switzerland, Japan, Norway, Scotland, India, Sri Lanka, etc.): surface the FULL canonical set, not a short list. For Switzerland that means Glacier Express, Bernina Express, GoldenPass Line, Gotthard Panorama Express, Centovalli Express, AND the cogwheel mountain railways (Jungfraubahn, Gornergrat, Pilatus, Rigi, Brienzer Rothorn, Schynige Platte), AND the named lake steamers (Lake Geneva CGN, Vierwaldst\u00e4ttersee SGV, Brienzersee, Thunersee). Don\u2019t silently drop the cog railways or lake steamers \u2014 they\u2019re what travelers come for.\n\n"
+    + "MULTI-MODAL ROUTES: Many of the best scenic travel legs are train+boat or train+cogwheel+boat circuits. Always include these when regionally iconic. For Switzerland: Lake Geneva Wine & Castle Circuit (Geneva \u2192 Lausanne \u2192 Montreux by train, CGN paddle steamer to Ch\u00e2teau de Chillon, return); Lake Lucerne Tell Route (boat across Vierwaldst\u00e4ttersee to Alpnachstad \u2192 Pilatus cogwheel, or to Vitznau \u2192 Rigi); Brienzersee Steamer + Rothorn Bahn (Interlaken \u2192 Brienz \u2192 steam cogwheel). Use transportModes [\"train\",\"boat\",\"train\"] etc. and list every major node in requiredPlaces.\n\n"
+    + "FACTUAL ACCURACY for named scenic trains \u2014 endpoints must be correct:\n"
+    + "  - Glacier Express: Zermatt \u2194 St. Moritz. NOT from Zurich.\n"
+    + "  - Bernina Express: Chur \u2192 Tirano (Italy).\n"
+    + "  - GoldenPass Line: Lucerne \u2194 Montreux. NOT from Zurich.\n"
+    + "  - Gotthard Panorama Express: Lucerne \u2194 Lugano.\n"
+    + "  - Centovalli Express: Locarno \u2194 Domodossola.\n"
+    + "  - Jungfraubahn: Kleine Scheidegg \u2192 Jungfraujoch.\n"
+    + "  - Gornergrat Bahn: Zermatt \u2192 Gornergrat.\n"
+    + "  - Pilatus Bahn: Alpnachstad \u2192 Pilatus Kulm.\n"
+    + "  - Rigi Bahn: Vitznau or Arth-Goldau \u2192 Rigi Kulm.\n"
+    + "Travelers reach these via regular trains first; do not use airport cities as a route endpoint. If unsure of endpoints, omit the route rather than guess.\n\n"
+    + "PLACES PER ACTIVITY \u2014 better to list many than few. The traveler wants to see options, not commit to a tight set. For an activity like \u201cmountain scenery\u201d in Switzerland, list 4\u20136 places (Zermatt, Lauterbrunnen, Jungfrau region, Engadin/St. Moritz, Appenzell, etc.). For \u201ccheese tasting,\u201d list 3\u20135 spots. For routes, requiredPlaces is the endpoint pair (and any major intermediate stops on multi-modal circuits).\n\n"
+    + "NIGHTS PER PLACE \u2014 each entry in requiredPlaces gets a nights field with a sensible default range for doing this activity well at that place. Activities: typical nights to do the activity well there. Routes: 0 (route is transit, not a stay; days are spent at the endpoints). Conditions: nights needed to give the condition a real chance.\n\n"
+    + "Return ONLY a JSON array (no markdown). Aim for 10\u201316 items for rail-heavy regions; 8\u201312 for others. Cover a real range \u2014 don\u2019t silently drop a category. Include routes and condition items whenever they genuinely apply.\n\n"
     + "[\n"
-    + '  {"name":"Philosopher\'s Path","type":"activity","description":"Quiet canal-side walk connecting temples through the eastern foothills, especially good in spring and autumn.","requiredPlaces":[{"place":"Kyoto","country":"Japan"}],"durationHours":3},\n'
-    + '  {"name":"Cherry Blossoms","type":"condition","description":"Peak bloom runs roughly late March to early April; timing varies year to year by a week or more.","viableLocations":[{"place":"Kyoto","country":"Japan"}],"requiredPlaces":[{"place":"Kyoto","country":"Japan"}],"recovery":"low","frequencyRequirement":2,"conditionNote":"Bloom windows are short and depend on that year\u2019s weather; check forecasts a week before committing dates."}\n'
+    + '  {"name":"Mountain scenery","type":"activity","description":"Alpine views from named summits and panoramic valleys.","iconic":true,"requiredPlaces":[{"place":"Zermatt","country":"Switzerland","nights":3},{"place":"Lauterbrunnen","country":"Switzerland","nights":2},{"place":"St. Moritz","country":"Switzerland","nights":2},{"place":"Appenzell","country":"Switzerland","nights":2}],"durationHours":48},\n'
+    + '  {"name":"Cheese tasting","type":"activity","description":"Visit historic dairies and try regional varieties \u2014 Gruy\u00e8re, Emmental, Appenzeller.","iconic":false,"requiredPlaces":[{"place":"Gruy\u00e8res","country":"Switzerland","nights":1},{"place":"Emmental","country":"Switzerland","nights":1},{"place":"Appenzell","country":"Switzerland","nights":1}],"durationHours":12},\n'
+    + '  {"name":"Glacier Express","type":"route","description":"Classic 8hr panoramic rail journey across 291 bridges and 91 tunnels.","iconic":true,"endpoints":[{"place":"Zermatt","country":"Switzerland"},{"place":"St. Moritz","country":"Switzerland"}],"requiredPlaces":[{"place":"Zermatt","country":"Switzerland","nights":0},{"place":"St. Moritz","country":"Switzerland","nights":0}],"direction":"either","durationHours":8,"transportModes":["train"],"modeOptions":"both"},\n'
+    + '  {"name":"Cherry Blossoms","type":"condition","description":"Peak bloom runs roughly late March to early April; timing varies year to year by a week or more.","iconic":true,"viableLocations":[{"place":"Kyoto","country":"Japan","nights":3}],"requiredPlaces":[{"place":"Kyoto","country":"Japan","nights":3}],"recovery":"low","frequencyRequirement":2,"conditionNote":"Bloom windows are short and depend on that year\u2019s weather; check forecasts a week before committing dates."}\n'
     + "]\n\n"
-    + "CRITICAL: requiredPlaces, endpoints, and viableLocations are ARRAYS OF OBJECTS, each with place and country strings. Even for a single-country place, always include country.";
+    + "CRITICAL: requiredPlaces, endpoints, and viableLocations are ARRAYS OF OBJECTS, each with place and country strings, and a nights number on requiredPlaces entries. Even for a single-country place, always include country.";
 
   try {
-    var text = await callMax([{role:"user",content:prompt}], 3500, 50000);
+    // 6000 tokens — prompt now asks for up to 16 items with full route fields
+    // for rail-heavy regions; 3500 was getting truncated and cog railways
+    // were the first casualty.
+    var text = await callMax([{role:"user",content:prompt}], 6000, 70000);
     var cleaned = text.replace(/```json|```/g,"").trim();
     var items;
     try { items = JSON.parse(cleaned); }
@@ -4402,7 +4449,15 @@ async function generateActivitiesForPlace(){
       ["nightlife","bar","bars","club","clubs","party"],
       ["temple","temples","shrine","shrines","church","churches","cathedral","cathedrals","monastery"],
       ["garden","gardens","park","parks","nature","wildlife","birdwatching","safari"],
-      ["spa","onsen","hotspring","hot-spring","thermal","bath","baths"]
+      ["spa","onsen","hotspring","hot-spring","thermal","bath","baths"],
+      // New groups so chips like "see spectacular scenery" / "get out on the water"
+      // and natural wonders (Rhine Falls, fjords) properly auto-check.
+      ["scenery","scenic","spectacular","panorama","panoramic","view","views","viewpoint","viewpoints","landscape","landscapes","vista","vistas","overlook","overlooks"],
+      ["lake","lakes","lakeside","waterfront","steamer","paddle"],
+      ["waterfall","waterfalls","falls","cascade","cascades"],
+      ["fjord","fjords","glacier","glaciers","valley","valleys","gorge","gorges","canyon","canyons"],
+      ["cog","cogwheel","funicular","funiculars","tramway","cable","gondola","gondolas","aerial"],
+      ["iconic","famous","named","branded"]
     ];
     var intentTokens = {};
     _synGroups.forEach(function(g){
@@ -4418,15 +4473,33 @@ async function generateActivitiesForPlace(){
     }
     items.forEach(function(item,i){
       item.id = "plm" + i;
-      // Auto-check items that match what the user said they want. Items that
-      // don't match stay opt-in so the list doesn't pre-commit the traveler to
-      // things they never mentioned.
-      item.checked = _itemMatchesIntent(item);
+      // Pre-check rule: an item comes pre-checked if EITHER the LLM flagged it
+      // iconic (canonical things a first-timer shouldn't miss — Rhine Falls,
+      // Glacier Express, Jungfraujoch) OR it matches a keyword the traveler
+      // expressed via sentence/intent/chips. Items that fail both stay opt-in
+      // so the list doesn't pre-commit the traveler to everything.
+      item.checked = !!item.iconic || _itemMatchesIntent(item);
       if(item.endpoints) item.endpoints = _normPlaceArr(item.endpoints);
       if(item.requiredPlaces) item.requiredPlaces = _normPlaceArr(item.requiredPlaces);
       if(item.viableLocations) item.viableLocations = _normPlaceArr(item.viableLocations);
       if(item.type === "route" && !item.requiredPlaces && item.endpoints) item.requiredPlaces = item.endpoints;
       if(item.type === "condition" && !item.requiredPlaces && item.viableLocations) item.requiredPlaces = item.viableLocations;
+      // Phase 1 of activity-place table: each requiredPlaces entry gets a
+      // _keep flag so the user can opt individual places in or out. When
+      // the activity is auto-checked (iconic / keyword match), its places
+      // start kept. When the activity is opt-in, its places start unkept
+      // — checking the row will turn them all on.
+      if (Array.isArray(item.requiredPlaces)) {
+        item.requiredPlaces.forEach(function(p){
+          if (p && typeof p === "object") {
+            // Coerce nights to a sane default when the LLM omits or fumbles it
+            var n = parseInt(p.nights, 10);
+            if (!isFinite(n) || n < 0) n = (item.type === "route") ? 0 : 2;
+            p.nights = n;
+            p._keep = !!item.checked;
+          }
+        });
+      }
     });
     _tb.placeActivities = items;
   } catch(e){
@@ -4441,43 +4514,96 @@ async function generateActivitiesForPlace(){
   renderTripStep1Place();
 }
 
+// Two-column activity ↔ place picker. Each row is one activity; the right
+// column lists the places where that activity is done, each with its own
+// keep/drop checkbox and a nights estimate. Whole-row checkbox toggles all
+// places under the activity. Iconic / keyword-matched items arrive with
+// places pre-kept; other items arrive opt-in (checking the row turns them on).
 function _renderPlaceActivityItems(){
   var list = document.getElementById("tb-place-act-list");
   if(!list) return;
   list.innerHTML = "";
   var items = _tb.placeActivities || [];
   items.forEach(function(item){
+    var anyKept = (item.requiredPlaces||[]).some(function(p){ return p && p._keep; });
+    item.checked = anyKept;
     var div = document.createElement("div");
-    div.className = "tb-act-item" + (item.checked ? " on" : " off");
+    div.className = "tb-act-table-row" + (item.checked ? " on" : " off") + (item.iconic ? " iconic" : "");
     div.id = "tb-place-act-" + item.id;
-    var typeLabel = item.type === "route" ? "Route" : item.type === "condition" ? "Condition" : item.type === "manual" ? "Added" : "Activity";
-    var desc = item.description ? '<div class="tb-act-desc">'+item.description+'</div>' : '';
-    div.innerHTML =
-      '<div class="tb-act-row">'
-      +'<div class="tb-act-check'+(item.checked?" on":"")+'" onclick="togglePlaceActivity(\''+item.id+'\')"></div>'
-      +'<div class="tb-act-body" onclick="togglePlaceActivity(\''+item.id+'\')">'
-      +'<div class="tb-act-name"><span class="tb-act-type">'+typeLabel+'</span>'+(item.name||"")+'</div>'
-      +desc
-      +'</div>'
-      +'</div>';
+    var typeLabel = item.type === "route" ? "🚂 Travel"
+                  : item.type === "condition" ? "⚠ Condition"
+                  : item.type === "manual" ? "📌 Added"
+                  : "✨ Activity";
+    var iconicTag = item.iconic ? '<span style="font-size:9px;color:#b28a2e;font-weight:700;margin-left:6px;">★ iconic</span>' : '';
+    var desc = item.description ? '<div class="tb-act-desc" style="margin-top:4px;">'+_tgEsc(item.description)+'</div>' : '';
+
+    // Left column: activity name + type + description + whole-row checkbox
+    var leftHtml = '<div class="tb-act-col-left">'
+      + '<div style="display:flex;align-items:flex-start;gap:8px;">'
+      + '<div class="tb-act-check'+(item.checked?" on":"")+'" onclick="togglePlaceActivity(\''+item.id+'\')" title="Toggle the whole row"></div>'
+      + '<div style="flex:1;min-width:0;cursor:pointer;" onclick="togglePlaceActivity(\''+item.id+'\')">'
+      + '<div class="tb-act-name"><span class="tb-act-type">'+typeLabel+'</span>'+_tgEsc(item.name||"")+iconicTag+'</div>'
+      + desc
+      + '</div>'
+      + '</div>'
+      + '</div>';
+
+    // Right column: place chips, each with a per-place toggle and nights
+    var places = Array.isArray(item.requiredPlaces) ? item.requiredPlaces : [];
+    var placesHtml = '<div class="tb-act-col-right">';
+    if (places.length === 0) {
+      placesHtml += '<div style="font-size:10.5px;color:#999;font-style:italic;">No specific places listed.</div>';
+    } else {
+      places.forEach(function(p, pIdx){
+        if (!p || !p.place) return;
+        var keep = !!p._keep;
+        var nightsLbl = "";
+        if (item.type !== "route" && p.nights > 0) {
+          nightsLbl = '<span class="tb-place-nights">· '+p.nights+'n</span>';
+        }
+        var chipCls = "tb-place-chip" + (keep ? " on" : " off");
+        placesHtml += '<div class="'+chipCls+'" onclick="togglePlaceInActivity(\''+item.id+'\','+pIdx+')">'
+          + '<span class="tb-place-check'+(keep?" on":"")+'"></span>'
+          + '<span class="tb-place-name">'+_tgEsc(p.place)+'</span>'
+          + nightsLbl
+          + '</div>';
+      });
+    }
+    placesHtml += '</div>';
+
+    div.innerHTML = leftHtml + placesHtml;
     list.appendChild(div);
   });
 }
 
+// Toggle all places under an activity. If any place was kept, drops them all;
+// if none were kept, keeps them all. Drives the activity's "checked" derived
+// state, which the renderer reads on the next pass.
 function togglePlaceActivity(id){
   var items = _tb.placeActivities || [];
-  for(var i=0;i<items.length;i++){
-    if(items[i].id === id){ items[i].checked = !items[i].checked; break; }
-  }
-  var div = document.getElementById("tb-place-act-" + id);
-  if(div){
-    var on = false;
-    for(var j=0;j<items.length;j++) if(items[j].id===id) on = items[j].checked;
-    div.classList.toggle("on", on);
-    div.classList.toggle("off", !on);
-    var check = div.querySelector(".tb-act-check");
-    if(check) check.classList.toggle("on", on);
-  }
+  var item = null;
+  for(var i=0;i<items.length;i++){ if(items[i].id === id){ item = items[i]; break; } }
+  if (!item) return;
+  var anyKept = (item.requiredPlaces||[]).some(function(p){ return p && p._keep; });
+  var newKeep = !anyKept; // if anything was kept, turn all off; else turn all on
+  (item.requiredPlaces||[]).forEach(function(p){ if (p) p._keep = newKeep; });
+  item.checked = newKeep;
+  _renderPlaceActivityItems();
+  _updatePlaceActivitySummary();
+}
+
+// Toggle a single place within an activity row. Doesn't affect other places
+// in the row. The activity's master checkbox derives from "any place kept."
+function togglePlaceInActivity(itemId, placeIdx){
+  var items = _tb.placeActivities || [];
+  var item = null;
+  for(var i=0;i<items.length;i++){ if(items[i].id === itemId){ item = items[i]; break; } }
+  if (!item || !Array.isArray(item.requiredPlaces) || !item.requiredPlaces[placeIdx]) return;
+  var p = item.requiredPlaces[placeIdx];
+  p._keep = !p._keep;
+  // Recompute activity-level derived state
+  item.checked = item.requiredPlaces.some(function(pp){ return pp && pp._keep; });
+  _renderPlaceActivityItems();
   _updatePlaceActivitySummary();
 }
 
@@ -4495,7 +4621,8 @@ function addCustomPlaceActivity(){
     type: "manual",
     description: "",
     checked: true,
-    requiredPlaces: place ? [{place:place, country:place}] : []
+    iconic: false,
+    requiredPlaces: place ? [{place:place, country:place, nights:2, _keep:true}] : []
   });
   inp.value = "";
   _renderPlaceActivityItems();
@@ -4506,16 +4633,41 @@ function _updatePlaceActivitySummary(){
   var el = document.getElementById("tb-place-act-summary");
   if(!el) return;
   var items = _tb.placeActivities || [];
-  var checked = items.filter(function(i){return i.checked;});
+  var activeItems = items.filter(function(i){
+    return Array.isArray(i.requiredPlaces) && i.requiredPlaces.some(function(p){return p && p._keep;});
+  });
+  // Distinct kept places across all active activities \u2014 that's the actual
+  // destination set we'll seed the trip with. Routes contribute their endpoints
+  // but not nights (transit days, not stays).
+  var keptPlaceSet = {};
+  var totalNights = 0;
+  activeItems.forEach(function(it){
+    (it.requiredPlaces||[]).forEach(function(p){
+      if (!p || !p._keep) return;
+      var key = (p.place||"").toLowerCase();
+      if (!keptPlaceSet[key]) {
+        keptPlaceSet[key] = { place: p.place, nights: 0 };
+      }
+      // Take the max nights any activity proposes for this place \u2014 assumption:
+      // doing two activities at the same place doesn't double the stay.
+      if (it.type !== "route" && p.nights > keptPlaceSet[key].nights) {
+        keptPlaceSet[key].nights = p.nights;
+      }
+    });
+  });
+  Object.keys(keptPlaceSet).forEach(function(k){ totalNights += keptPlaceSet[k].nights; });
+  var placeCount = Object.keys(keptPlaceSet).length;
+
   var btn = document.getElementById("tb-place-continue-btn");
-  if(!checked.length){
-    el.innerHTML = '<span style="color:#999;">Pick at least one thing you want to do. That\u2019s the trip.</span>';
+  if(!activeItems.length){
+    el.innerHTML = '<span style="color:#999;">Pick at least one thing you want to do \u2014 and the place(s) you\u2019d do it. That\u2019s the trip.</span>';
     if(btn){ btn.disabled = true; btn.classList.add("tb-btn-disabled"); }
     return;
   }
-  var names = checked.map(function(i){return i.name;}).slice(0,4).join(", ");
-  if(checked.length > 4) names += ", +" + (checked.length - 4) + " more";
-  el.innerHTML = '<strong>'+checked.length+' included in your trip:</strong> ' + names;
+  var actCount = activeItems.length;
+  var totalLabel = totalNights > 0 ? (' \u00b7 about <strong>'+totalNights+' nights</strong> total') : '';
+  el.innerHTML = '<strong>'+actCount+' activit'+(actCount===1?'y':'ies')+' \u00b7 '+placeCount+' place'+(placeCount===1?'':'s')+'</strong>'+totalLabel
+    + ' <span style="color:#999;font-size:10.5px;">(you\u2019ll fine-tune later)</span>';
   if(btn){ btn.disabled = false; btn.classList.remove("tb-btn-disabled"); }
 }
 
@@ -4523,13 +4675,39 @@ function _updatePlaceActivitySummary(){
 // push the named place into _tb.region / _tb.anchors so Step 2 + candidate
 // search behave as if the user had typed them.
 function continuePlaceModeToStep2(){
-  var items = (_tb.placeActivities||[]).filter(function(i){return i.checked;});
+  // Only carry forward activities that have at least one _keep:true place.
+  // For each, narrow requiredPlaces to just the kept ones \u2014 this is the
+  // user's expressed commitment, not the full superset Max suggested.
+  var items = (_tb.placeActivities||[]).filter(function(i){
+    return Array.isArray(i.requiredPlaces) && i.requiredPlaces.some(function(p){return p && p._keep;});
+  }).map(function(i){
+    var keptPlaces = (i.requiredPlaces||[]).filter(function(p){return p && p._keep;}).map(function(p){
+      // Strip _keep before pushing into _mdcItems \u2014 the rest of the system
+      // doesn't know about it and shouldn't.
+      var clean = {place: p.place, country: p.country};
+      if (typeof p.nights === "number") clean.nights = p.nights;
+      return clean;
+    });
+    var clone = Object.assign({}, i, { checked: true, requiredPlaces: keptPlaces });
+    // For routes, also narrow endpoints to those still kept (in case the user
+    // dropped one endpoint). If only one endpoint remains, the route can't
+    // function as a route anymore \u2014 drop it back to an activity-style item.
+    if (i.type === "route" && Array.isArray(i.endpoints)) {
+      var keptKeys = {};
+      keptPlaces.forEach(function(p){ keptKeys[(p.place||"").toLowerCase()] = true; });
+      clone.endpoints = i.endpoints.filter(function(ep){ return ep && keptKeys[(ep.place||"").toLowerCase()]; });
+      if (clone.endpoints.length < 2) {
+        clone.type = "activity";
+        delete clone.endpoints;
+        delete clone.direction;
+      }
+    }
+    return clone;
+  });
   if(!items.length) return;
   // Adopt as must-dos. The guard in expandMustDos will skip the LLM regen
   // when tripMode === "place" and _mdcItems is already populated.
-  _mdcItems = items.map(function(i){
-    return Object.assign({}, i, { checked: true });
-  });
+  _mdcItems = items;
   _tb.region = _tb.placeName || _tb.region || "";
   // Derive a human anchors string so any legacy code paths that read _tb.anchors
   // have something to work with, and so the Step 2 summary shows what we picked.
