@@ -817,6 +817,13 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .tb-place-name{flex:1;min-width:0;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .tb-place-nights{flex-shrink:0;font-size:10px;color:#888;font-weight:600;}
 .tb-place-chip.on .tb-place-nights{color:#1a5fa8;}
+/* −/+ stepper for adjusting nights per place inline. Tiny so it fits in the
+   chip without breaking the line; opacity bumps on hover for clarity. */
+.tb-nights-stepper{display:inline-flex;gap:2px;margin-left:4px;flex-shrink:0;}
+.tb-nights-btn{width:18px;height:18px;padding:0;font-size:11px;line-height:1;font-weight:700;border:1px solid #d8d8d8;background:#fff;color:#666;border-radius:4px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;justify-content:center;opacity:0.75;transition:opacity .12s, border-color .12s, background-color .12s;}
+.tb-nights-btn:hover{opacity:1;border-color:#1a5fa8;color:#1a5fa8;background:#f0f5fb;}
+.tb-place-chip.on .tb-nights-btn{border-color:#c8d8ec;color:#1a5fa8;}
+.tb-place-chip.on .tb-nights-btn:hover{background:#e0eaf6;}
 
 /* Activity-mode place picker (Step 1 — Activity flow) */
 .tb-plc-list{display:flex;flex-direction:column;gap:10px;margin-top:8px;}
@@ -4463,15 +4470,23 @@ function _renderPlaceActivityItems(){
         places.forEach(function(p, pIdx){
           if (!p || !p.place) return;
           var keep = !!p._keep;
-          var nightsLbl = "";
+          var nightsBlock = "";
+          // Stepper for nights — only on non-route, non-zero items. Routes
+          // are transit (0n always); conditions and activities can be edited.
+          // event.stopPropagation() on the buttons so they don't toggle the
+          // whole place chip on click.
           if (item.type !== "route" && p.nights > 0) {
-            nightsLbl = '<span class="tb-place-nights">· '+p.nights+'n</span>';
+            nightsBlock = '<span class="tb-place-nights">· '+p.nights+'n</span>'
+              + '<span class="tb-nights-stepper" onclick="event.stopPropagation()">'
+              +   '<button type="button" class="tb-nights-btn" title="Fewer nights" onclick="_adjustPlaceNights(&#39;'+item.id+'&#39;,'+pIdx+',-1);event.stopPropagation();">−</button>'
+              +   '<button type="button" class="tb-nights-btn" title="More nights" onclick="_adjustPlaceNights(&#39;'+item.id+'&#39;,'+pIdx+',1);event.stopPropagation();">+</button>'
+              + '</span>';
           }
           var chipCls = "tb-place-chip" + (keep ? " on" : " off");
           placesHtml += '<div class="'+chipCls+'" onclick="togglePlaceInActivity(\''+item.id+'\','+pIdx+')">'
             + '<span class="tb-place-check'+(keep?" on":"")+'"></span>'
             + '<span class="tb-place-name">'+_pmEsc(p.place)+'</span>'
-            + nightsLbl
+            + nightsBlock
             + '</div>';
         });
       }
@@ -4510,6 +4525,25 @@ function togglePlaceInActivity(itemId, placeIdx){
   p._keep = !p._keep;
   // Recompute activity-level derived state
   item.checked = item.requiredPlaces.some(function(pp){ return pp && pp._keep; });
+  _renderPlaceActivityItems();
+  _updatePlaceActivitySummary();
+}
+
+// Per-place nights stepper. Adjust by delta (typically ±1), clamp to 1..14.
+// The summary recomputes from these values, so the day total updates live.
+function _adjustPlaceNights(itemId, placeIdx, delta){
+  var items = _tb.placeActivities || [];
+  var item = null;
+  for(var i=0;i<items.length;i++){ if(items[i].id === itemId){ item = items[i]; break; } }
+  if (!item || !Array.isArray(item.requiredPlaces) || !item.requiredPlaces[placeIdx]) return;
+  var p = item.requiredPlaces[placeIdx];
+  if (item.type === "route") return; // routes are transit; nights stay 0
+  var current = parseInt(p.nights, 10);
+  if (!isFinite(current) || current < 0) current = 2;
+  var next = current + delta;
+  if (next < 1) next = 1;
+  if (next > 14) next = 14;
+  p.nights = next;
   _renderPlaceActivityItems();
   _updatePlaceActivitySummary();
 }
