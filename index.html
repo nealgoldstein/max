@@ -4633,7 +4633,18 @@ function _renderPlaceActivityItems(){
   // between the trip's real destinations.
   var sectionOrder = [];
   var bySection = {};
-  var sectionKeys = {}; // normalized lowercased -> canonical display name
+  var sectionKeys = {}; // fingerprint -> canonical display name
+  // Aggressive fingerprint so "Ride mountain railways to summits",
+  // "Ride the mountain railways to summits", and "Ride mountain railways
+  // to summits." all collapse to the same section.
+  function _secFp(s){
+    return (s || "").toLowerCase()
+      .replace(/[^\w\s]/g, " ")           // punctuation → space
+      .replace(/\b(the|a|an|to|on|in|at|of|and|for|with)\b/g, " ") // strip stop words
+      .replace(/\b(railways?|trains?)\b/g, "rail")  // singular/plural collapse
+      .replace(/\s+/g, " ")
+      .trim();
+  }
   items.forEach(function(item){
     var anyKept = (item.requiredPlaces||[]).some(function(p){ return p && p._keep; });
     item.checked = anyKept;
@@ -4648,13 +4659,13 @@ function _renderPlaceActivityItems(){
     // destinations" so the user reads the section as connections, not
     // standalone destinations.
     if (/^travel on iconic trains$/i.test(sec)) sec = "Travel on iconic trains between destinations";
-    var secKey = sec.toLowerCase();
+    var secKey = _secFp(sec);
     if (!sectionKeys[secKey]) {
       sectionKeys[secKey] = sec;
       bySection[sec] = [];
       sectionOrder.push(sec);
     } else {
-      sec = sectionKeys[secKey]; // canonicalize back to the first-seen casing
+      sec = sectionKeys[secKey]; // canonicalize back to the first-seen display name
     }
     bySection[sec].push(item);
   });
@@ -5425,23 +5436,24 @@ function renderActivityPicker(){
       +'None of these fit? <a href="#" onclick="skipPickerToCandidates();return false;" style="color:#1a5fa8;text-decoration:none;font-weight:600;">Skip — go straight to the places →</a>'
       +'</div>'
       +'<div class="tb-act-list" id="tb-place-act-list"></div>'
-      // Two custom-add panels side by side: one for adding an experience,
-      // one for adding a place that's not in the list.
+      // Two custom-add panels side by side. Place comes first (it's the
+      // bigger primitive — most users add a missing destination more often
+      // than they add a custom verb).
       +'<div style="margin-top:18px;display:grid;grid-template-columns:1fr 1fr;gap:10px;">'
-      +'<div style="padding:12px;background:#fafafa;border:1px dashed #d8d8d8;border-radius:8px;">'
-      +  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:6px;">+ Add an experience</div>'
-      +  '<div style="display:flex;flex-direction:column;gap:6px;">'
-      +    '<input class="tb-act-add-inp" id="tb-place-add-inp" placeholder="What you want to do" autocomplete="off" />'
-      +    '<input class="tb-act-add-inp" id="tb-place-add-where" placeholder="Where (e.g. Zürich, Geneva)" autocomplete="off" onkeydown="if(event.key===&#39;Enter&#39;){event.preventDefault();addCustomPlaceActivity();}" />'
-      +    '<button class="tb-act-add-btn" onclick="addCustomPlaceActivity()" style="align-self:flex-start;">+ Add</button>'
-      +  '</div>'
-      +'</div>'
       +'<div style="padding:12px;background:#fafafa;border:1px dashed #d8d8d8;border-radius:8px;">'
       +  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:6px;">+ Add a place</div>'
       +  '<div style="display:flex;flex-direction:column;gap:6px;">'
       +    '<input class="tb-act-add-inp" id="tb-place-add-place-inp" placeholder="A city/town not in the list" autocomplete="off" onkeydown="if(event.key===&#39;Enter&#39;){event.preventDefault();addCustomPlaceFromPicker();}" />'
       +    '<button class="tb-act-add-btn" id="tb-place-add-place-btn" onclick="addCustomPlaceFromPicker()" style="align-self:flex-start;">+ Add place</button>'
       +    '<div id="tb-place-add-place-status" style="font-size:10px;color:#888;"></div>'
+      +  '</div>'
+      +'</div>'
+      +'<div style="padding:12px;background:#fafafa;border:1px dashed #d8d8d8;border-radius:8px;">'
+      +  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:6px;">+ Add an experience</div>'
+      +  '<div style="display:flex;flex-direction:column;gap:6px;">'
+      +    '<input class="tb-act-add-inp" id="tb-place-add-inp" placeholder="What you want to do" autocomplete="off" />'
+      +    '<input class="tb-act-add-inp" id="tb-place-add-where" placeholder="Where (e.g. Zürich, Geneva)" autocomplete="off" onkeydown="if(event.key===&#39;Enter&#39;){event.preventDefault();addCustomPlaceActivity();}" />'
+      +    '<button class="tb-act-add-btn" onclick="addCustomPlaceActivity()" style="align-self:flex-start;">+ Add</button>'
       +  '</div>'
       +'</div>'
       +'</div>'
