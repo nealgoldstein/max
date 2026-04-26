@@ -13872,6 +13872,64 @@ function drawTripMode(){
   listSec.appendChild(listHdr);
   listSec.appendChild(totalLine);
 
+  // Arriving / Departing panel — inline on the trip view so the user doesn't
+  // have to enter the candidate explorer just to set entry/exit cities.
+  // Submitting either field re-runs buildFromCandidates with the new value,
+  // which inserts a 1-night arrival/departure stop if not already present.
+  if (trip.candidates && trip.candidates.length) {
+    var aeRow = document.createElement("div");
+    aeRow.style.cssText = "display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0 14px;padding:9px 12px;background:#fafafa;border:1px solid #e6e2d8;border-radius:7px;";
+    var curEntry = (trip.brief && trip.brief.entry) || (_tb && _tb.entry) || "";
+    var curExit = (trip.brief && trip.brief.tbExit) || (_tb && _tb.tbExit) || "";
+    aeRow.innerHTML = ''
+      + '<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#777;flex-shrink:0;">Arrival / Departure</span>'
+      + '<label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px;">Arriving at'
+      +   '<input id="tm-entry-inp" placeholder="e.g. Zurich" autocomplete="off" value="'+curEntry.replace(/"/g,'&quot;')+'" style="font-size:11px;padding:4px 8px;border:1px solid #ddd;border-radius:4px;width:130px;font-family:inherit;" />'
+      + '</label>'
+      + '<label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px;">Departing from'
+      +   '<input id="tm-exit-inp" placeholder="e.g. Zurich" autocomplete="off" value="'+curExit.replace(/"/g,'&quot;')+'" style="font-size:11px;padding:4px 8px;border:1px solid #ddd;border-radius:4px;width:130px;font-family:inherit;" />'
+      + '</label>'
+      + '<button id="tm-arrdep-apply" style="font-size:10.5px;font-weight:600;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:4px;padding:4px 10px;cursor:pointer;font-family:inherit;">Apply</button>'
+      + '<span id="tm-arrdep-status" style="font-size:10px;color:#888;"></span>';
+    listSec.appendChild(aeRow);
+    setTimeout(function(){
+      var applyBtn = document.getElementById("tm-arrdep-apply");
+      var entryInp = document.getElementById("tm-entry-inp");
+      var exitInp = document.getElementById("tm-exit-inp");
+      var statusEl = document.getElementById("tm-arrdep-status");
+      function applyArrDep(){
+        var newEntry = (entryInp && entryInp.value || "").trim();
+        var newExit = (exitInp && exitInp.value || "").trim();
+        var changed = (newEntry !== curEntry) || (newExit !== curExit);
+        if (!changed) {
+          if (statusEl) { statusEl.style.color = "#888"; statusEl.textContent = "No change."; }
+          return;
+        }
+        _tb = _tb || {};
+        _tb.entry = newEntry;
+        _tb.tbExit = newExit;
+        if (trip.brief) { trip.brief.entry = newEntry; trip.brief.tbExit = newExit; }
+        if (statusEl) { statusEl.style.color = "#888"; statusEl.textContent = "Rebuilding…"; }
+        // Rebuild the trip with the new entry/exit. Hydrate _tb.candidates
+        // from the saved snapshot so buildFromCandidates has data to work with.
+        if (trip.candidates && trip.candidates.length) {
+          _tb.candidates = trip.candidates.map(function(c){ return Object.assign({}, c); });
+        }
+        try {
+          buildFromCandidates();
+        } catch(e) {
+          if (statusEl) { statusEl.style.color = "#c44"; statusEl.textContent = "Couldn’t rebuild: " + e.message; }
+        }
+      }
+      if (applyBtn) applyBtn.addEventListener("click", applyArrDep);
+      [entryInp, exitInp].forEach(function(inp){
+        if (inp) inp.addEventListener("keydown", function(e){
+          if (e.key === "Enter") { e.preventDefault(); applyArrDep(); }
+        });
+      });
+    }, 0);
+  }
+
   if(trip.destinations.length===0){
     var emp=document.createElement("div"); emp.style.cssText="font-size:12px;color:#ccc;font-style:italic;padding:4px 0 8px;";
     emp.textContent="No destinations yet."; listSec.appendChild(emp);
