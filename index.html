@@ -825,6 +825,20 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .tb-place-chip.on .tb-nights-btn{border-color:#c8d8ec;color:#1a5fa8;}
 .tb-place-chip.on .tb-nights-btn:hover{background:#e0eaf6;}
 
+/* Destination-major layout — destination on left, that section's activities
+   for that destination on the right. Same destination can appear in multiple
+   sections; nights only display on first appearance. */
+.tb-act-table-row.tb-dest-major{padding:10px 14px;background:#fff;}
+.tb-act-table-row.tb-dest-major.on{box-shadow:0 0 0 1px #1a5fa8 inset;border-color:#1a5fa8;}
+.tb-act-table-row.tb-dest-major.off{opacity:0.85;}
+.tb-act-table-row.tb-dest-major .tb-act-name{font-size:14px;font-weight:700;color:#1a1a1a;}
+.tb-dest-meta{font-size:11px;color:#888;margin-top:3px;display:flex;align-items:center;gap:4px;flex-wrap:wrap;}
+.tb-dest-nights{color:#1a5fa8;font-weight:600;}
+.tb-dest-ref-note{font-size:10px;color:#aaa;font-style:italic;}
+.tb-act-check.small{width:14px;height:14px;border-width:1.5px;border-radius:3px;}
+.tb-act-check.small.on::after{font-size:9px;}
+.tb-activity-row:first-child{border-top:none !important;}
+
 /* Activity-mode place picker (Step 1 — Activity flow) */
 .tb-plc-list{display:flex;flex-direction:column;gap:10px;margin-top:8px;}
 .tb-plc-card{padding:14px 16px;border:1px solid #e5e5e5;border-radius:10px;background:#fff;transition:border-color .18s ease, background-color .18s ease;}
@@ -4311,7 +4325,10 @@ async function generateActivitiesForPlace(){
   _tb.placeContext = ctx;
 
   var btn = document.getElementById("tb-place-generate-btn");
-  if(btn){ btn.disabled = true; btn.classList.add("tb-btn-disabled"); btn.textContent = "Navigating " + place + "\u2026"; }
+  // Title-case the place for display so "switzerland" \u2192 "Switzerland" in the
+  // loading copy. Multi-word names like "the swiss alps" \u2192 "The Swiss Alps".
+  var _placeForDisplay = (place||"").replace(/\b\w/g, function(c){ return c.toUpperCase(); });
+  if(btn){ btn.disabled = true; btn.classList.add("tb-btn-disabled"); btn.textContent = "Navigating " + _placeForDisplay + "\u2026"; }
 
   // Show the list area with a loading state
   var body = document.querySelector(".tb-body");
@@ -4320,7 +4337,7 @@ async function generateActivitiesForPlace(){
   var wrap = document.createElement("div");
   wrap.id = "tb-place-act-list-wrap";
   wrap.style.marginTop = "22px";
-  wrap.innerHTML = '<div class="tb-act-loading"><div style="font-size:22px;color:#888;animation:spin 1.2s linear infinite;">\u2736</div><div>Navigating '+place+'\u2026</div><div style="font-size:10px;color:#bbb;">Usually 20\u201340 seconds.</div></div>';
+  wrap.innerHTML = '<div class="tb-act-loading"><div style="font-size:22px;color:#888;animation:spin 1.2s linear infinite;">\u2736</div><div>Navigating '+_placeForDisplay+'\u2026</div><div style="font-size:10px;color:#bbb;">Usually 20\u201340 seconds.</div></div>';
   body.appendChild(wrap);
 
   var pmChips = (_tb.chips || []).filter(Boolean);
@@ -4536,91 +4553,173 @@ function _renderPlaceActivityItems(){
     bySection[sec].push(item);
   });
 
+  // Track which destinations have already shown their nights (so the same
+  // place appearing in multiple sections only displays "3n" on its first
+  // appearance — subsequent appearances reference back).
+  var shownIn = {}; // place.toLowerCase() -> first section name where shown
+
   sectionOrder.forEach(function(sec){
     var secItems = bySection[sec];
-    var secKept = secItems.some(function(it){ return it.checked; });
 
-    // Section header — verb-phrased, with a count + master toggle
+    // Re-group section items by destination. Each destination gets a row;
+    // its activities for THIS section sit alongside. Same destination can
+    // appear in multiple sections (Zermatt under "Travel on iconic trains"
+    // AND under "Ride mountain railways" — different reasons each time).
+    var byDest = {}; // place.toLowerCase() -> { place, nightsMax, items: [...], placeRefs: [...] }
+    var destOrder = [];
+    secItems.forEach(function(item){
+      var places = Array.isArray(item.requiredPlaces) ? item.requiredPlaces : [];
+      places.forEach(function(p){
+        if (!p || !p.place) return;
+        var key = p.place.toLowerCase();
+        if (!byDest[key]) {
+          byDest[key] = { place: p.place, nightsMax: 0, items: [], placeRefs: [] };
+          destOrder.push(key);
+        }
+        // Take the max nights across all activities at this place — assumption
+        // is that doing multiple things at the same place doesn't double the stay.
+        var n = (typeof p.nights === "number") ? p.nights : 0;
+        if (item.type !== "route" && n > byDest[key].nightsMax) byDest[key].nightsMax = n;
+        if (byDest[key].items.indexOf(item) < 0) {
+          byDest[key].items.push(item);
+          byDest[key].placeRefs.push({ item: item, placeRef: p });
+        }
+      });
+    });
+
+    var secKept = destOrder.some(function(key){
+      return byDest[key].placeRefs.some(function(r){ return r.placeRef && r.placeRef._keep; });
+    });
+
+    // Section header — verb-phrased, with a count of destinations
     var hdrWrap = document.createElement("div");
     hdrWrap.className = "tb-act-section-hdr" + (secKept ? " on" : "");
     hdrWrap.innerHTML = '<div class="tb-act-section-title">' + _pmEsc(sec) + '</div>'
-      + '<div class="tb-act-section-count">' + secItems.length + ' option' + (secItems.length===1?'':'s') + '</div>';
+      + '<div class="tb-act-section-count">' + destOrder.length + ' destination' + (destOrder.length===1?'':'s') + '</div>';
     list.appendChild(hdrWrap);
 
-    // Items in this section
-    secItems.forEach(function(item){
-      var div = document.createElement("div");
-      div.className = "tb-act-table-row" + (item.checked ? " on" : " off") + (item.iconic ? " iconic" : "");
-      div.id = "tb-place-act-" + item.id;
-      var iconicTag = item.iconic ? '<span style="font-size:9px;color:#b28a2e;font-weight:700;margin-left:6px;">★ iconic</span>' : '';
-      var desc = item.description ? '<div class="tb-act-desc" style="margin-top:4px;">'+_pmEsc(item.description)+'</div>' : '';
+    // Render each destination as a row in this section
+    destOrder.forEach(function(key){
+      var d = byDest[key];
+      // A destination is "kept" in this section if any of its placeRefs has _keep
+      var destKeptInSection = d.placeRefs.some(function(r){ return r.placeRef && r.placeRef._keep; });
 
-      // Left column: verb-phrased name + description + whole-row checkbox.
-      // Type badge dropped — section header carries the type semantics now.
+      var row = document.createElement("div");
+      row.className = "tb-act-table-row tb-dest-major" + (destKeptInSection ? " on" : " off");
+      row.id = "tb-place-act-sec-" + sec.replace(/[^a-z0-9]/gi,"_") + "-" + key.replace(/[^a-z0-9]/gi,"_");
+
+      // Whether to show nights here — only on the FIRST section where this dest appears
+      var firstAppearance = !shownIn[key];
+      var nightsLine;
+      if (firstAppearance && d.nightsMax > 0) {
+        nightsLine = '<span class="tb-dest-nights" data-place="'+_pmEsc(d.place)+'">· '+d.nightsMax+'n</span>'
+          + '<span class="tb-nights-stepper" onclick="event.stopPropagation()">'
+          +   '<button type="button" class="tb-nights-btn" title="Fewer nights" onclick="_adjustDestNights(&#39;'+_pmEsc(d.place)+'&#39;,-1);event.stopPropagation();">−</button>'
+          +   '<button type="button" class="tb-nights-btn" title="More nights" onclick="_adjustDestNights(&#39;'+_pmEsc(d.place)+'&#39;,1);event.stopPropagation();">+</button>'
+          + '</span>';
+      } else if (!firstAppearance) {
+        nightsLine = '<span class="tb-dest-ref-note" title="Nights set in '+_pmEsc(shownIn[key])+'">also in ' + _pmEsc(shownIn[key]) + '</span>';
+      } else {
+        nightsLine = "";
+      }
+      shownIn[key] = sec;
+
+      // Left column: destination name + nights/ref + master destination toggle
       var leftHtml = '<div class="tb-act-col-left">'
         + '<div style="display:flex;align-items:flex-start;gap:8px;">'
-        + '<div class="tb-act-check'+(item.checked?" on":"")+'" onclick="togglePlaceActivity(\''+item.id+'\')" title="Toggle this whole row"></div>'
-        + '<div style="flex:1;min-width:0;cursor:pointer;" onclick="togglePlaceActivity(\''+item.id+'\')">'
-        + '<div class="tb-act-name">'+_pmEsc(item.name||"")+iconicTag+'</div>'
-        + desc
+        + '<div class="tb-act-check'+(destKeptInSection?" on":"")+'" onclick="toggleDestKeep(&#39;'+_pmEsc(d.place)+'&#39;)" title="Keep / drop this destination across all activities"></div>'
+        + '<div style="flex:1;min-width:0;cursor:pointer;" onclick="toggleDestKeep(&#39;'+_pmEsc(d.place)+'&#39;)">'
+        + '<div class="tb-act-name">'+_pmEsc(d.place)+'</div>'
+        + (nightsLine ? '<div class="tb-dest-meta">'+nightsLine+'</div>' : '')
         + '</div>'
         + '</div>'
         + '</div>';
 
-      // Right column: place chips. For routes, render endpoints with an
-      // arrow between them so the city pair reads as a single journey.
-      var places = Array.isArray(item.requiredPlaces) ? item.requiredPlaces : [];
-      var placesHtml = '<div class="tb-act-col-right">';
-      if (places.length === 0) {
-        placesHtml += '<div style="font-size:10.5px;color:#999;font-style:italic;">No specific places listed.</div>';
-      } else if (item.type === "route" && places.length >= 2) {
-        // For routes show endpoints with arrow connector, plus per-endpoint
-        // toggles (so user can drop one endpoint if they only want half).
-        var arrow = item.direction === "either" ? " ↔ " : " → ";
-        placesHtml += '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;">';
-        places.forEach(function(p, pIdx){
-          if (!p || !p.place) return;
-          var keep = !!p._keep;
-          var chipCls = "tb-place-chip" + (keep ? " on" : " off");
-          placesHtml += '<div class="'+chipCls+'" onclick="togglePlaceInActivity(\''+item.id+'\','+pIdx+')">'
-            + '<span class="tb-place-check'+(keep?" on":"")+'"></span>'
-            + '<span class="tb-place-name">'+_pmEsc(p.place)+'</span>'
+      // Right column: this destination's activities for THIS section
+      var rightHtml = '<div class="tb-act-col-right">';
+      d.items.forEach(function(item){
+        var anyKept = (item.requiredPlaces||[]).some(function(p){ return p && p._keep; });
+        item.checked = anyKept;
+        var iconicTag = item.iconic ? '<span style="font-size:9px;color:#b28a2e;font-weight:700;margin-left:6px;">★ iconic</span>' : '';
+        var desc = item.description ? '<div class="tb-act-desc" style="margin-top:2px;font-size:10.5px;color:#666;">'+_pmEsc(item.description)+'</div>' : '';
+        // For routes, append the endpoint pair so the user sees the journey
+        var routeMeta = "";
+        if (item.type === "route" && Array.isArray(item.endpoints) && item.endpoints.length >= 2) {
+          var arrow = item.direction === "either" ? " ↔ " : " → ";
+          routeMeta = '<div style="font-size:10px;color:#1a5fa8;margin-top:2px;">'
+            + item.endpoints.map(function(p){return _pmEsc(p.place||"");}).join(arrow)
             + '</div>';
-          if (pIdx < places.length - 1) {
-            placesHtml += '<span style="color:#888;font-size:11px;">'+arrow+'</span>';
-          }
-        });
-        placesHtml += '</div>';
-      } else {
-        places.forEach(function(p, pIdx){
-          if (!p || !p.place) return;
-          var keep = !!p._keep;
-          var nightsBlock = "";
-          // Stepper for nights — only on non-route, non-zero items. Routes
-          // are transit (0n always); conditions and activities can be edited.
-          // event.stopPropagation() on the buttons so they don't toggle the
-          // whole place chip on click.
-          if (item.type !== "route" && p.nights > 0) {
-            nightsBlock = '<span class="tb-place-nights">· '+p.nights+'n</span>'
-              + '<span class="tb-nights-stepper" onclick="event.stopPropagation()">'
-              +   '<button type="button" class="tb-nights-btn" title="Fewer nights" onclick="_adjustPlaceNights(&#39;'+item.id+'&#39;,'+pIdx+',-1);event.stopPropagation();">−</button>'
-              +   '<button type="button" class="tb-nights-btn" title="More nights" onclick="_adjustPlaceNights(&#39;'+item.id+'&#39;,'+pIdx+',1);event.stopPropagation();">+</button>'
-              + '</span>';
-          }
-          var chipCls = "tb-place-chip" + (keep ? " on" : " off");
-          placesHtml += '<div class="'+chipCls+'" onclick="togglePlaceInActivity(\''+item.id+'\','+pIdx+')">'
-            + '<span class="tb-place-check'+(keep?" on":"")+'"></span>'
-            + '<span class="tb-place-name">'+_pmEsc(p.place)+'</span>'
-            + nightsBlock
-            + '</div>';
-        });
-      }
-      placesHtml += '</div>';
+        }
+        rightHtml += '<div class="tb-activity-row" style="display:flex;align-items:flex-start;gap:8px;padding:5px 0;border-top:1px dotted #f0f0f0;">'
+          + '<div class="tb-act-check small'+(item.checked?" on":"")+'" onclick="togglePlaceActivity(&#39;'+item.id+'&#39;)" title="Toggle this activity"></div>'
+          + '<div style="flex:1;min-width:0;cursor:pointer;" onclick="togglePlaceActivity(&#39;'+item.id+'&#39;)">'
+          +   '<div style="font-size:11.5px;font-weight:600;color:#1a1a1a;">'+_pmEsc(item.name||"")+iconicTag+'</div>'
+          +   routeMeta
+          +   desc
+          + '</div>'
+          + '</div>';
+      });
+      rightHtml += '</div>';
 
-      div.innerHTML = leftHtml + placesHtml;
-      list.appendChild(div);
+      row.innerHTML = leftHtml + rightHtml;
+      list.appendChild(row);
     });
   });
+}
+
+// Toggle destination kept/dropped across ALL activity items that include it.
+// A destination is global state — it's either on the trip or not — so the
+// toggle propagates everywhere, not just to one section.
+function toggleDestKeep(placeName){
+  var items = _tb.placeActivities || [];
+  var key = (placeName || "").toLowerCase();
+  // Are any references currently kept? If so, drop all; else keep all.
+  var anyKept = false;
+  items.forEach(function(item){
+    (item.requiredPlaces||[]).forEach(function(p){
+      if (p && p.place && p.place.toLowerCase() === key && p._keep) anyKept = true;
+    });
+  });
+  var newKeep = !anyKept;
+  items.forEach(function(item){
+    (item.requiredPlaces||[]).forEach(function(p){
+      if (p && p.place && p.place.toLowerCase() === key) p._keep = newKeep;
+    });
+    item.checked = (item.requiredPlaces||[]).some(function(p){ return p && p._keep; });
+  });
+  _renderPlaceActivityItems();
+  _updatePlaceActivitySummary();
+}
+
+// Stepper applied to a destination — bumps nights on every requiredPlaces
+// entry matching this place (across all activities). Routes are skipped
+// because routes are transit (nights stay 0).
+function _adjustDestNights(placeName, delta){
+  var items = _tb.placeActivities || [];
+  var key = (placeName || "").toLowerCase();
+  // Find current max
+  var current = 0;
+  items.forEach(function(item){
+    if (item.type === "route") return;
+    (item.requiredPlaces||[]).forEach(function(p){
+      if (p && p.place && p.place.toLowerCase() === key) {
+        var n = parseInt(p.nights, 10);
+        if (isFinite(n) && n > current) current = n;
+      }
+    });
+  });
+  if (!current) current = 2;
+  var next = current + delta;
+  if (next < 1) next = 1;
+  if (next > 14) next = 14;
+  items.forEach(function(item){
+    if (item.type === "route") return;
+    (item.requiredPlaces||[]).forEach(function(p){
+      if (p && p.place && p.place.toLowerCase() === key) p.nights = next;
+    });
+  });
+  _renderPlaceActivityItems();
+  _updatePlaceActivitySummary();
 }
 
 // Toggle all places under an activity. If any place was kept, drops them all;
@@ -4777,8 +4876,38 @@ function _updatePlaceActivitySummary(){
   }
   var actCount = activeItems.length;
   var totalLabel = totalNights > 0 ? (' \u00b7 about <strong>'+totalNights+' nights</strong> total') : '';
+
+  // Time-window indicator \u2014 compare running total to the user's stated
+  // duration. Soft friction: shows status, doesn't block continuing.
+  var budget = (typeof _parseTripDuration === "function" && (_tb.duration || _tb.when))
+    ? _parseTripDuration(_tb.duration || _tb.when) : null;
+  var fitNote = "";
+  if (budget && totalNights > 0) {
+    var budgetLbl = (budget.min === budget.max)
+      ? (budget.max + " day" + (budget.max!==1?"s":""))
+      : (budget.min + "\u2013" + budget.max + " days");
+    if (totalNights + 1 > budget.max) {
+      var over = (totalNights + 1) - budget.max;
+      fitNote = '<div style="margin-top:6px;padding:6px 9px;background:#fff3ed;border:1px solid #f5ccb5;border-radius:6px;font-size:11px;color:#b0451a;">'
+        + '<strong>'+over+' day'+(over!==1?"s":"")+' over your '+budgetLbl+' budget.</strong> '
+        + 'Drop a destination, reduce nights, or extend your dates.'
+        + '</div>';
+    } else if (totalNights + 1 < budget.min) {
+      var under = budget.min - (totalNights + 1);
+      fitNote = '<div style="margin-top:6px;padding:6px 9px;background:#f0f7ec;border:1px solid #cae0bb;border-radius:6px;font-size:11px;color:#3f6a2a;">'
+        + '<strong>'+under+' day'+(under!==1?"s":"")+' under your '+budgetLbl+' budget.</strong> '
+        + 'Room to add more \u2014 extra nights at a place, or another destination.'
+        + '</div>';
+    } else {
+      fitNote = '<div style="margin-top:6px;padding:6px 9px;background:#f0f7fc;border:1px solid #c8dde8;border-radius:6px;font-size:11px;color:#1a5fa8;">'
+        + '<strong>Fits your '+budgetLbl+' budget.</strong>'
+        + '</div>';
+    }
+  }
+
   el.innerHTML = '<strong>'+actCount+' activit'+(actCount===1?'y':'ies')+' \u00b7 '+placeCount+' place'+(placeCount===1?'':'s')+'</strong>'+totalLabel
-    + ' <span style="color:#999;font-size:10.5px;">(you\u2019ll fine-tune later)</span>';
+    + ' <span style="color:#999;font-size:10.5px;">(fine-tune nights with the \u2212/+ buttons)</span>'
+    + fitNote;
   if(btn){ btn.disabled = false; btn.classList.remove("tb-btn-disabled"); }
 }
 
