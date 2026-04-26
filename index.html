@@ -1619,6 +1619,51 @@ function makePopup(name,typeLabel,note){
 var _coarseGeocode = _coarseGeocode || {};        // place -> [lat,lng]
 var _coarseGeocodeInFlight = _coarseGeocodeInFlight || {};
 
+// Hydrate the geocode cache from localStorage on load, and persist as we
+// resolve. Without this, every reload re-fires Nominatim for every place,
+// which trips the 1 req/sec rate limit instantly.
+(function _hydrateCoarseGeocode(){
+  try {
+    var raw = localStorage.getItem("max-coarse-geocode");
+    if (raw) {
+      var parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        Object.keys(parsed).forEach(function(k){
+          if (!_coarseGeocode[k] && Array.isArray(parsed[k]) && parsed[k].length === 2) {
+            _coarseGeocode[k] = parsed[k];
+          }
+        });
+      }
+    }
+  } catch(_) {}
+})();
+function _persistCoarseGeocode(){
+  try { localStorage.setItem("max-coarse-geocode", JSON.stringify(_coarseGeocode)); } catch(_) {}
+}
+
+// Global serial queue for Nominatim. Their public service caps at ~1 req/sec
+// per IP; firing 20+ in parallel returns 429s (which the browser surfaces
+// as CORS errors because the rate-limit response lacks CORS headers).
+// Single in-flight request, with a 1.1s gap after each one.
+var _geoQueue = [];
+var _geoQueueRunning = false;
+function _runGeoQueue(){
+  if (_geoQueueRunning) return;
+  var task = _geoQueue.shift();
+  if (!task) return;
+  _geoQueueRunning = true;
+  Promise.resolve()
+    .then(task)
+    .catch(function(){ /* errors handled per-task */ })
+    .then(function(){
+      setTimeout(function(){
+        _geoQueueRunning = false;
+        _runGeoQueue();
+      }, 1100);
+    });
+}
+function _enqueueGeo(task){ _geoQueue.push(task); _runGeoQueue(); }
+
 // Country name → ISO 3166-1 alpha-2 code. Used to feed Nominatim's
 // `countrycodes` parameter, which is a STRICT filter — without it,
 // "Chillon, Switzerland" can still return Chillón in Spain because
@@ -1655,7 +1700,9 @@ function ensureCoarseGeocode(place, onResolve, country){
   if (_coarseGeocode[key]) { if (onResolve) onResolve(_coarseGeocode[key]); return _coarseGeocode[key]; }
   if (_coarseGeocodeInFlight[key]) return null;
   _coarseGeocodeInFlight[key] = true;
-  (async function(){
+  // Enqueue rather than fire immediately — avoids Nominatim rate-limit
+  // cascades when the picker requests 20+ pins at once.
+  _enqueueGeo(async function(){
     try {
       // Bias toward the trip's region when we have one — e.g. adding ", Italy" helps
       // disambiguate "Tirano" from unrelated places and keeps the result in the right country.
@@ -1672,6 +1719,7 @@ function ensureCoarseGeocode(place, onResolve, country){
         var lat = parseFloat(res[0].lat), lon = parseFloat(res[0].lon);
         if (isFinite(lat) && isFinite(lon)) {
           _coarseGeocode[key] = [lat, lon];
+          _persistCoarseGeocode();
           if (onResolve) onResolve(_coarseGeocode[key]);
         }
       } else if (iso) {
@@ -1685,13 +1733,14 @@ function ensureCoarseGeocode(place, onResolve, country){
           var lat2 = parseFloat(res2[0].lat), lon2 = parseFloat(res2[0].lon);
           if (isFinite(lat2) && isFinite(lon2)) {
             _coarseGeocode[key] = [lat2, lon2];
+            _persistCoarseGeocode();
             if (onResolve) onResolve(_coarseGeocode[key]);
           }
         }
       }
     } catch(e) { /* ignore */ }
     finally { delete _coarseGeocodeInFlight[key]; }
-  })();
+  });
   return null;
 }
 
@@ -5432,9 +5481,6 @@ function renderActivityPicker(){
     listHtml = ''
       +'<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#999;margin-bottom:6px;">What you can do in '+_pmEsc(placeLabel)+'</div>'
       +'<div style="font-size:11px;color:#666;line-height:1.55;margin-bottom:14px;">Tap what you actually want to do. Anything you leave unchecked won’t shape the trip. Add your own below.</div>'
-      +'<div style="font-size:10.5px;color:#888;margin-bottom:14px;line-height:1.5;">'
-      +'None of these fit? <a href="#" onclick="skipPickerToCandidates();return false;" style="color:#1a5fa8;text-decoration:none;font-weight:600;">Skip — go straight to the places →</a>'
-      +'</div>'
       +'<div class="tb-act-list" id="tb-place-act-list"></div>'
       // Two custom-add panels side by side. Place comes first (it's the
       // bigger primitive — most users add a missing destination more often
