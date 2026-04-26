@@ -1618,7 +1618,38 @@ function makePopup(name,typeLabel,note){
 // cityCenter when it hallucinates far-off coordinates (Tirano-in-Africa).
 var _coarseGeocode = _coarseGeocode || {};        // place -> [lat,lng]
 var _coarseGeocodeInFlight = _coarseGeocodeInFlight || {};
-function ensureCoarseGeocode(place, onResolve){
+
+// Country name → ISO 3166-1 alpha-2 code. Used to feed Nominatim's
+// `countrycodes` parameter, which is a STRICT filter — without it,
+// "Chillon, Switzerland" can still return Chillón in Spain because
+// Nominatim's fuzzy matching ranks foreign matches above local ones.
+var _countryToIso2 = {
+  "switzerland":"ch","iceland":"is","italy":"it","france":"fr","germany":"de",
+  "austria":"at","spain":"es","portugal":"pt","netherlands":"nl","belgium":"be",
+  "luxembourg":"lu","united kingdom":"gb","uk":"gb","britain":"gb","england":"gb",
+  "scotland":"gb","wales":"gb","ireland":"ie","norway":"no","sweden":"se",
+  "finland":"fi","denmark":"dk","poland":"pl","czech republic":"cz","czechia":"cz",
+  "slovakia":"sk","hungary":"hu","slovenia":"si","croatia":"hr","greece":"gr",
+  "turkey":"tr","japan":"jp","china":"cn","south korea":"kr","korea":"kr",
+  "thailand":"th","vietnam":"vn","cambodia":"kh","laos":"la","india":"in",
+  "nepal":"np","bhutan":"bt","sri lanka":"lk","myanmar":"mm","mongolia":"mn",
+  "russia":"ru","united states":"us","usa":"us","canada":"ca","mexico":"mx",
+  "brazil":"br","argentina":"ar","chile":"cl","peru":"pe","colombia":"co",
+  "ecuador":"ec","bolivia":"bo","uruguay":"uy","australia":"au","new zealand":"nz",
+  "south africa":"za","morocco":"ma","egypt":"eg","kenya":"ke","tanzania":"tz",
+  "uganda":"ug","ethiopia":"et","ghana":"gh","nigeria":"ng",
+  "uae":"ae","united arab emirates":"ae","saudi arabia":"sa","israel":"il",
+  "jordan":"jo","lebanon":"lb","iran":"ir","indonesia":"id","malaysia":"my",
+  "singapore":"sg","philippines":"ph","taiwan":"tw"
+};
+
+function _isoCodeForCountry(name){
+  if (!name) return "";
+  var k = String(name).toLowerCase().trim().replace(/\.$/,"");
+  return _countryToIso2[k] || "";
+}
+
+function ensureCoarseGeocode(place, onResolve, country){
   var key = (place||"").toLowerCase().trim();
   if (!key) return null;
   if (_coarseGeocode[key]) { if (onResolve) onResolve(_coarseGeocode[key]); return _coarseGeocode[key]; }
@@ -1630,15 +1661,32 @@ function ensureCoarseGeocode(place, onResolve){
       // disambiguate "Tirano" from unrelated places and keeps the result in the right country.
       var region = (typeof trip !== "undefined" && trip && trip.brief && trip.brief.region) ? trip.brief.region
                   : (typeof _tb !== "undefined" && _tb && _tb.region) ? _tb.region : "";
-      var q = place + (region ? ", " + region : "");
-      var r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(q),
-        { headers: {'Accept-Language':'en'} });
+      var countryHint = country || region || "";
+      var iso = _isoCodeForCountry(countryHint);
+      var q = place + (countryHint ? ", " + countryHint : "");
+      var url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(q)
+              + (iso ? '&countrycodes=' + iso : '');
+      var r = await fetch(url, { headers: {'Accept-Language':'en'} });
       var res = await r.json();
       if (res && res.length) {
         var lat = parseFloat(res[0].lat), lon = parseFloat(res[0].lon);
         if (isFinite(lat) && isFinite(lon)) {
           _coarseGeocode[key] = [lat, lon];
           if (onResolve) onResolve(_coarseGeocode[key]);
+        }
+      } else if (iso) {
+        // No result with strict country filter — retry without the filter.
+        // This handles cases where the place name + country together fool
+        // Nominatim's tokenizer (rare but happens).
+        var r2 = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='
+          + encodeURIComponent(q), { headers: {'Accept-Language':'en'} });
+        var res2 = await r2.json();
+        if (res2 && res2.length) {
+          var lat2 = parseFloat(res2[0].lat), lon2 = parseFloat(res2[0].lon);
+          if (isFinite(lat2) && isFinite(lon2)) {
+            _coarseGeocode[key] = [lat2, lon2];
+            if (onResolve) onResolve(_coarseGeocode[key]);
+          }
         }
       }
     } catch(e) { /* ignore */ }
@@ -4458,6 +4506,7 @@ async function generateActivitiesForPlace(){
     + "  - Rigi Bahn: Vitznau or Arth-Goldau \u2192 Rigi Kulm.\n"
     + "Travelers reach these via regular trains first; do not use airport cities as a route endpoint. If unsure of endpoints, omit the route rather than guess.\n\n"
     + "PLACES PER ACTIVITY \u2014 better to list many than few. The traveler wants to see options, not commit to a tight set. For an activity like \u201cmountain scenery\u201d in Switzerland, list 4\u20136 places (Zermatt, Lauterbrunnen, Jungfrau region, Engadin/St. Moritz, Appenzell, etc.). For \u201ccheese tasting,\u201d list 3\u20135 spots. For routes, requiredPlaces is the endpoint pair (and any major intermediate stops on multi-modal circuits).\n\n"
+    + "PLACE NAMES \u2014 use the full disambiguating name a map service would resolve correctly. \u201cCh\u00e2teau de Chillon\u201d not just \u201cChillon\u201d (which matches a town in Spain). \u201cMont Saint-Michel\u201d not \u201cSaint-Michel\u201d. \u201cZurich\u201d (city) not \u201cKanton Z\u00fcrich\u201d. If a landmark sits in/near a town and the town is the actual base, use the town (e.g. \u201cMontreux\u201d for Chillon-area stays); but when the landmark IS the requiredPlace, use its full name. Always set the country field correctly \u2014 the geocoder filters by it.\n\n"
     + "NIGHTS PER PLACE \u2014 each entry in requiredPlaces gets a nights field with a sensible default range for doing this activity well at that place. Activities: typical nights to do the activity well there. Routes: 0 (route is transit, not a stay; days are spent at the endpoints). Conditions: nights needed to give the condition a real chance.\n\n"
     + "Return ONLY a JSON array (no markdown). Aim for 10\u201316 items for rail-heavy regions; 8\u201312 for others. Cover a real range \u2014 don\u2019t silently drop a category. Include routes and condition items whenever they genuinely apply.\n\n"
     + "[\n"
@@ -5150,14 +5199,18 @@ function _renderPlacePickerMap(targetId){
   var _pmMap = state.map;
   var _pmMarkersByPlace = state.markers;
 
-  // Collect every distinct place across all activity items, with derived state
+  // Collect every distinct place across all activity items, with derived state.
+  // Also pick up the LLM-supplied country per place so the geocoder can use
+  // it for strict country-filtering — protects against e.g. "Chillon"
+  // resolving to a town in Spain instead of Château de Chillon, Switzerland.
   var allPlaces = {};
   (_tb.placeActivities || []).forEach(function(item){
     var iconic = !!item.iconic;
     (item.requiredPlaces || []).forEach(function(p){
       if (!p || !p.place) return;
       var key = p.place.toLowerCase();
-      if (!allPlaces[key]) allPlaces[key] = { place: p.place, kept: false, iconic: false, anyRoute: false };
+      if (!allPlaces[key]) allPlaces[key] = { place: p.place, country: p.country||"", kept: false, iconic: false, anyRoute: false };
+      if (p.country && !allPlaces[key].country) allPlaces[key].country = p.country;
       if (p._keep) allPlaces[key].kept = true;
       if (iconic) allPlaces[key].iconic = true;
       if (item.type === "route") allPlaces[key].anyRoute = true;
@@ -5216,10 +5269,11 @@ function _renderPlacePickerMap(targetId){
       placeMarker(ll);
     } else {
       // Trigger an async geocode; when it lands, re-render the map so the pin appears.
+      // Pass info.country so Nominatim can be strict-filtered to that country.
       if (typeof ensureCoarseGeocode === "function") {
         ensureCoarseGeocode(info.place, function(coords){
           if (coords && isFinite(coords[0])) _renderPlacePickerMap();
-        });
+        }, info.country);
       }
     }
   });
