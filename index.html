@@ -4291,24 +4291,11 @@ function renderTripStep1Place(){
   ov.style.cssText="position:fixed;inset:0;background:#f7f7f5;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
   setTimeout(function(){ ov.scrollTop = 0; attachScrollHint(ov); }, 0);
 
-  var hasGenerated = Array.isArray(_tb.placeActivities) && _tb.placeActivities.length > 0;
+  // The activity-place picker now lives at Step 3 (after the brief). This
+  // screen is just place + context — the smallest possible commitment before
+  // Max needs the trip's time window to make smart suggestions.
 
-  // Mode 2 (place-mode) intentionally does NOT show the general-interest
-  // chip row anymore. The activity \u2194 place table that appears after "What
-  // you can do in {place}" carries the same intent more directly: the user
-  // sees concrete activities for THIS place, not abstract themes. The chip
-  // row stays on Mode 1 (sentence) and Mode 3 (activity) where it earns
-  // its keep \u2014 neither of those has a place-specific activity table to
-  // replace it.
-
-  // Dynamic placeholder for the "add your own" input \u2014 uses the place name
-  // when known so the example feels relevant to where the user is going.
-  // Falls back to a neutral generic when no place is set yet.
   var pmPlaceForExample = (_tb.placeName || "").trim();
-  var pmAddPlaceholder = pmPlaceForExample
-    ? "Add your own \u2014 something specific you want to do in " + pmPlaceForExample.replace(/"/g,'&quot;')
-    : "Add your own \u2014 something specific you want to do";
-
   var formHtml = ''
     +'<div style="background:#fff;border:1px solid #e8e8e8;border-radius:10px;padding:18px 20px;margin-bottom:14px;">'
     +'<label style="display:block;font-size:11px;font-weight:600;color:#333;margin-bottom:6px;">The place</label>'
@@ -4316,109 +4303,49 @@ function renderTripStep1Place(){
     +'<div style="font-size:10px;color:#888;margin-top:6px;line-height:1.5;">Can be a city, a region, a country, a park. Anywhere Max can map out.</div>'
     +'<label style="display:block;font-size:11px;font-weight:600;color:#333;margin-top:14px;margin-bottom:6px;">Anything shaping the trip? <span style="color:#999;font-weight:400;">(optional)</span></label>'
     +'<textarea id="tb-place-context" rows="2" class="tb-act-add-inp" placeholder="e.g. first time there, traveling with parents, want to avoid the obvious tourist stuff" style="width:100%;box-sizing:border-box;resize:vertical;min-height:52px;">'+(_tb.placeContext||"")+'</textarea>'
-    +'</div>'
-    // Hide the generate button once activities exist \u2014 the table below is the
-    // primary surface from then on. Before generation, the button only renders
-    // once the user has typed a place name. Showing a button labeled "Iconic
-    // things to do here" when the place field is empty looked broken (it
-    // promises something Max can't deliver yet). Live oninput handler below
-    // mounts/dismounts the button as the user types.
-    +(hasGenerated ? '' :
-        (pmPlaceForExample
-          ? '<button class="tb-btn-primary" id="tb-place-generate-btn" onclick="generateActivitiesForPlace()">Iconic things to see and do in '+pmPlaceForExample.replace(/"/g,'&quot;')+' \u2192</button>'
-          : '<div id="tb-place-generate-btn-slot" style="font-size:11px;color:#999;padding:9px 12px;background:#f7f4ec;border:1px dashed #d8d1c0;border-radius:7px;text-align:center;">Type a place above and Max will surface the iconic things to do.</div>'));
+    +'</div>';
 
-  var listHtml = '';
-  if(hasGenerated){
-    var skipPlaceLabel = pmPlaceForExample ? pmPlaceForExample : "this place";
-    listHtml = '<div style="margin-top:22px;">'
-      +'<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#999;margin-bottom:6px;">What you can do in '+_pmEsc(skipPlaceLabel)+'</div>'
-      +'<div style="font-size:11px;color:#666;line-height:1.55;margin-bottom:10px;">Tap what you actually want to do. Anything you leave unchecked won\u2019t shape the trip. You can add your own below.</div>'
-      // Map at the top of the picker \u2014 shows every recommended destination
-      // pinned, with kept ones in blue and un-kept in gray. Small inline
-      // preview; click the "Open in new window" button to spawn a real
-      // separate browser window the user can move to a second monitor.
-      // Both maps update live as the user toggles.
-      +'<div style="position:relative;margin-bottom:14px;">'
-      +'<div id="tb-pm-map" style="height:180px;width:100%;border:1px solid #e6e2d8;border-radius:8px;background:#eaf0ed;"></div>'
-      +'<button type="button" onclick="openPlacePickerMapModal();event.preventDefault();" '
-      +  'style="position:absolute;top:8px;right:8px;z-index:500;background:#fff;border:1px solid #ccc;border-radius:5px;font-size:11px;padding:4px 9px;font-weight:600;color:#333;cursor:pointer;font-family:inherit;box-shadow:0 1px 4px rgba(0,0,0,0.1);" '
-      +  'title="Open map in a new window">\u2197 Open in new window</button>'
-      +'</div>'
-      // Quiet escape \u2014 for the rare user who doesn\u2019t want any of these and
-      // just wants to go straight to constraints. Hidden in plain sight; primary
-      // path is to engage with the picker.
-      +'<div style="font-size:10.5px;color:#888;margin-bottom:14px;line-height:1.5;">'
-      +'None of these fit? <a href="#" onclick="skipPlacePickerToBrief();return false;" style="color:#1a5fa8;text-decoration:none;font-weight:600;">Skip \u2014 go straight to the constraints \u2192</a>'
-      +'</div>'
-      +'<div class="tb-act-list" id="tb-place-act-list"></div>'
-      // Beefed-up "Add your own" \u2014 two fields: what you want to do AND where
-      // (one place or comma-separated list). Both required so we never end
-      // up with an experience that has no place attached to it.
-      +'<div style="margin-top:14px;padding:12px;background:#fafafa;border:1px dashed #d8d8d8;border-radius:8px;">'
-      +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:6px;">Add your own experience</div>'
-      +'<div style="display:flex;flex-direction:column;gap:6px;">'
-      +'<input class="tb-act-add-inp" id="tb-place-add-inp" placeholder="What you want to do \u2014 e.g. \u201cSee live jazz\u201d" autocomplete="off" />'
-      +'<input class="tb-act-add-inp" id="tb-place-add-where" placeholder="Where in '+_pmEsc(skipPlaceLabel)+' \u2014 e.g. \u201cZ\u00fcrich, Geneva\u201d" autocomplete="off" onkeydown="if(event.key===&#39;Enter&#39;){event.preventDefault();addCustomPlaceActivity();}" />'
-      +'<button class="tb-act-add-btn" onclick="addCustomPlaceActivity()" style="align-self:flex-start;">+ Add to your trip</button>'
-      +'</div>'
-      +'</div>'
-      +'<div class="tb-act-summary" id="tb-place-act-summary"></div>'
-      +'</div>';
-  }
+  var continueBtn = pmPlaceForExample
+    ? '<button class="tb-btn-primary" id="tb-place-continue-btn" onclick="continueFromPlaceToBrief()">Travel details →</button>'
+    : '<div id="tb-place-continue-slot" style="font-size:11px;color:#999;padding:9px 12px;background:#f7f4ec;border:1px dashed #d8d1c0;border-radius:7px;text-align:center;">Type a place above to continue.</div>';
 
   ov.innerHTML='<div class="tb-header">'
-    +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Step 1 of 2</div></div></div>'
+    +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Step 1 of 3</div></div></div>'
     +'<div class="tb-title">Where do you want to go?</div>'
     +'</div>'
     +'<div class="tb-body">'
-    +'<p style="margin:0 0 18px;font-size:12px;color:#555;line-height:1.65;">A city, country, region, national park \u2014 anywhere Max can map out. Tell Max where, and Max will surface the iconic experiences and the places where you\u2019d do them.</p>'
+    +'<p style="margin:0 0 18px;font-size:12px;color:#555;line-height:1.65;">A city, country, region, national park — anywhere Max can map out. Next we'll cover the trip's shape (dates, party, pace) so the activities Max suggests fit your time window.</p>'
     +formHtml
-    +listHtml
     +'</div>'
     +'<div class="tb-footer">'
-    +(hasGenerated?'<button class="tb-btn-primary" id="tb-place-continue-btn" onclick="continuePlaceModeToStep2()">Travel details \u2192</button>':'')
+    +continueBtn
     +'<div style="display:flex;justify-content:space-between;margin-top:8px;">'
-    +'<div class="tb-btn-back" onclick="cancelTripBrief()">\u2190 Back</div>'
-    +'<div style="font-size:10px;color:#aaa;cursor:pointer;" onclick="showBriefApiKeyForm()">\ud83d\udd11 Set API key</div>'
+    +'<div class="tb-btn-back" onclick="cancelTripBrief()">← Back</div>'
+    +'<div style="font-size:10px;color:#aaa;cursor:pointer;" onclick="showBriefApiKeyForm()">🔑 Set API key</div>'
     +'</div>'
     +'</div>';
 
-  if(hasGenerated){
-    _renderPlaceActivityItems();
-    _updatePlaceActivitySummary();
-    // Defer map init slightly so the div has its computed dimensions
-    setTimeout(function(){ if (typeof _renderPlacePickerMap === "function") _renderPlacePickerMap(); }, 50);
-  }
-  // Live: as the user types in the place input, mount the generate button
-  // (replacing the "type a place above" placeholder slot) and update its
-  // label. When they clear the input, swap back to the placeholder.
   var placeInp = document.getElementById("tb-place-name");
   if (placeInp) {
     placeInp.addEventListener("input", function(){
       var v = (this.value || "").trim();
-      var safe = v.replace(/"/g, '&quot;');
-      var slot = document.getElementById("tb-place-generate-btn-slot");
-      var btn = document.getElementById("tb-place-generate-btn");
+      var slot = document.getElementById("tb-place-continue-slot");
+      var btn = document.getElementById("tb-place-continue-btn");
       if (v) {
-        // Need a button. If we have a placeholder slot, replace it.
         if (slot && !btn) {
           var newBtn = document.createElement("button");
           newBtn.className = "tb-btn-primary";
-          newBtn.id = "tb-place-generate-btn";
-          newBtn.onclick = function(){ generateActivitiesForPlace(); };
-          newBtn.textContent = "Iconic things to see and do in " + v + " →";
+          newBtn.id = "tb-place-continue-btn";
+          newBtn.onclick = function(){ continueFromPlaceToBrief(); };
+          newBtn.textContent = "Travel details →";
           slot.parentNode.replaceChild(newBtn, slot);
-        } else if (btn) {
-          btn.textContent = "Iconic things to see and do in " + v + " →";
         }
       } else {
-        // Empty input — swap button back to the placeholder if present.
         if (btn) {
           var newSlot = document.createElement("div");
-          newSlot.id = "tb-place-generate-btn-slot";
+          newSlot.id = "tb-place-continue-slot";
           newSlot.style.cssText = "font-size:11px;color:#999;padding:9px 12px;background:#f7f4ec;border:1px dashed #d8d1c0;border-radius:7px;text-align:center;";
-          newSlot.textContent = "Type a place above and Max will surface the iconic things to do.";
+          newSlot.textContent = "Type a place above to continue.";
           btn.parentNode.replaceChild(newSlot, btn);
         }
       }
@@ -4426,6 +4353,24 @@ function renderTripStep1Place(){
   }
 }
 
+// Capture place + context, then go to the brief. The picker comes after.
+function continueFromPlaceToBrief(){
+  var nameInp = document.getElementById("tb-place-name");
+  var ctxInp = document.getElementById("tb-place-context");
+  if (nameInp) _tb.placeName = (nameInp.value || "").trim();
+  if (ctxInp) _tb.placeContext = (ctxInp.value || "").trim();
+  if (!_tb.placeName) { maxAlert("Tell Max where you want to go."); return; }
+  if (!_tb.region) _tb.region = _tb.placeName;
+  if (_tb.placeContext && !_tb.intent) _tb.intent = _tb.placeContext;
+  // If the place changed since picker last ran, blow away stale activities.
+  if (Array.isArray(_tb.placeActivities) && _tb.placeActivities.length) {
+    var lastPlace = _tb._lastGeneratedFor || "";
+    if (lastPlace !== _tb.placeName) _tb.placeActivities = [];
+  _tb._lastGeneratedFor = (_tb.placeName||"").trim();
+  }
+  renderTripBrief();
+}
+}
 // Generate activities for the named place.
 async function generateActivitiesForPlace(){
   var nameInp = document.getElementById("tb-place-name");
@@ -4453,8 +4398,27 @@ async function generateActivitiesForPlace(){
   body.appendChild(wrap);
 
   var pmChips = (_tb.chips || []).filter(Boolean);
+  // Trip-context block \u2014 pulls in the brief (dates, duration, party, pace,
+  // accommodation, hard limits, avoidances) so the picker's suggestions are
+  // tuned to the actual trip shape: aurora trips skip July, cherry-blossom
+  // trips skip November, kid-friendly trips skip 8-hour vertical hikes, etc.
+  var _briefBits = [];
+  if (_tb.duration)        _briefBits.push("Duration: " + _tb.duration);
+  if (_tb.when)            _briefBits.push("When: " + _tb.when);
+  if (_tb.startDate || _tb.endDate) _briefBits.push("Dates: " + (_tb.startDate||"?") + " to " + (_tb.endDate||"?"));
+  if (typeof _tbPartySummary === "function" && _tbPartySummary()) _briefBits.push("Party: " + _tbPartySummary());
+  if (_tb.physicalAbility) _briefBits.push("Physical ability: " + _tb.physicalAbility + (_tb.abilityNote ? " ("+_tb.abilityNote+")" : ""));
+  if (_tb.pace)            _briefBits.push("Pace: " + _tb.pace);
+  if (_tb.accommodation)   _briefBits.push("Stays: " + _tb.accommodation);
+  if (_tb.transport)       _briefBits.push("Transport within region: " + _tb.transport);
+  if (_tb.hardlimits)      _briefBits.push("Hard limits: " + _tb.hardlimits);
+  if (typeof _tbAvoidSummary === "function" && _tbAvoidSummary()) _briefBits.push("Soft avoidances: " + _tbAvoidSummary());
+  var _briefBlock = _briefBits.length
+    ? "\nTRIP CONTEXT (filter and tune suggestions to this \u2014 e.g. omit aurora outside Sep\u2013Mar, omit summer-only routes in winter, skip multi-day vertical hikes for limited-mobility parties, weight slow-pace itineraries when pace is loose):\n  - " + _briefBits.join("\n  - ") + "\n\n"
+    : "";
   var prompt = "A traveler wants to go to " + place + ".\n"
     + (ctx ? "Context about this trip: " + ctx + "\n" : "")
+    + _briefBlock
     + (pmChips.length ? "General interests they tagged (use these to bias what you surface, but don\u2019t shoehorn): " + pmChips.join(", ") + "\n" : "")
     + "\nThey haven\u2019t told you what they want to do yet \u2014 they chose a place and want you to map out what\u2019s actually there, so they can decide what matters. Surface the routes, the condition-dependent experiences, and the activities that make this place worth the trip. Be honest about the best of what\u2019s there; don\u2019t pad with generic items.\n\n"
     + "There are three types.\n\n"
@@ -4637,7 +4601,7 @@ async function generateActivitiesForPlace(){
   }
 
   // Re-render to show the full picker
-  renderTripStep1Place();
+  renderActivityPicker();
 }
 
 // Two-column activity ↔ place picker, grouped by section. Each section
@@ -5294,6 +5258,7 @@ function skipPlacePickerToBrief(){
   // Treat this like sentence-mode: clear any half-built picker state and
   // route to the constraints brief without seeding _mdcItems.
   _tb.placeActivities = [];
+  _tb._lastGeneratedFor = (_tb.placeName||"").trim();
   _mdcItems = [];
   // Push the place name into _tb.region so the brief has it pre-filled.
   if ((_tb.placeName || "").trim() && !(_tb.region || "").trim()) {
@@ -5419,6 +5384,88 @@ function _updatePlaceActivitySummary(){
 // Finalize place-mode step 1: snapshot the picked items into _mdcItems and
 // push the named place into _tb.region / _tb.anchors so Step 2 + candidate
 // search behave as if the user had typed them.
+// Step 3 — the activity ↔ place picker. Fires after the brief, so the
+// generator can use dates/duration/party for time-aware suggestions.
+function renderActivityPicker(){
+  var ov = g("trip-brief-overlay");
+  ov.className = "tb-overlay";
+  ov.style.cssText = "position:fixed;inset:0;background:#f7f7f5;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
+  setTimeout(function(){ ov.scrollTop = 0; attachScrollHint(ov); }, 0);
+
+  var hasGenerated = Array.isArray(_tb.placeActivities) && _tb.placeActivities.length > 0;
+  var placeLabel = (_tb.placeName || "this place").trim();
+
+  var bodyHtml = '';
+  if (!hasGenerated) {
+    // First entry — fire the generator immediately. The screen shows a loader
+    // until activities arrive, then re-renders.
+    bodyHtml = '<div style="text-align:center;padding:40px 20px;color:#666;font-size:12px;line-height:1.6;">'
+      + '<div style="font-size:24px;animation:spin 1.4s linear infinite;display:inline-block;margin-bottom:12px;">✶</div>'
+      + '<div>Finding the iconic things to do in <strong>'+_pmEsc(placeLabel)+'</strong>…</div>'
+      + '<div style="font-size:11px;color:#999;margin-top:6px;">Using your dates and party so suggestions fit the trip's shape.</div>'
+      + '</div>';
+  } else {
+    bodyHtml = ''
+      +'<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#999;margin-bottom:6px;">What you can do in '+_pmEsc(placeLabel)+'</div>'
+      +'<div style="font-size:11px;color:#666;line-height:1.55;margin-bottom:10px;">Tap what you actually want to do. Anything you leave unchecked won't shape the trip. You can add your own below.</div>'
+      +'<div style="position:relative;margin-bottom:14px;">'
+      +'<div id="tb-pm-map" style="height:180px;width:100%;border:1px solid #e6e2d8;border-radius:8px;background:#eaf0ed;"></div>'
+      +'<button type="button" onclick="openPlacePickerMapModal();event.preventDefault();" '
+      +  'style="position:absolute;top:8px;right:8px;z-index:500;background:#fff;border:1px solid #ccc;border-radius:5px;font-size:11px;padding:4px 9px;font-weight:600;color:#333;cursor:pointer;font-family:inherit;box-shadow:0 1px 4px rgba(0,0,0,0.1);" '
+      +  'title="Open map in a new window">↗ Open in new window</button>'
+      +'</div>'
+      +'<div style="font-size:10.5px;color:#888;margin-bottom:14px;line-height:1.5;">'
+      +'None of these fit? <a href="#" onclick="skipPickerToCandidates();return false;" style="color:#1a5fa8;text-decoration:none;font-weight:600;">Skip — go straight to the places →</a>'
+      +'</div>'
+      +'<div class="tb-act-list" id="tb-place-act-list"></div>'
+      +'<div style="margin-top:14px;padding:12px;background:#fafafa;border:1px dashed #d8d8d8;border-radius:8px;">'
+      +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:6px;">Add your own experience</div>'
+      +'<div style="display:flex;flex-direction:column;gap:6px;">'
+      +'<input class="tb-act-add-inp" id="tb-place-add-inp" placeholder="What you want to do — e.g. "See live jazz"" autocomplete="off" />'
+      +'<input class="tb-act-add-inp" id="tb-place-add-where" placeholder="Where in '+_pmEsc(placeLabel)+' — e.g. "Zürich, Geneva"" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomPlaceActivity();}" />'
+      +'<button class="tb-act-add-btn" onclick="addCustomPlaceActivity()" style="align-self:flex-start;">+ Add to your trip</button>'
+      +'</div>'
+      +'</div>'
+      +'<div class="tb-act-summary" id="tb-place-act-summary"></div>';
+  }
+
+  ov.innerHTML = '<div class="tb-header">'
+    +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Step 3 of 3</div></div></div>'
+    +'<div class="tb-title">Pick what you actually want to do</div>'
+    +'</div>'
+    +'<div class="tb-body">'
+    + bodyHtml
+    +'</div>'
+    +'<div class="tb-footer">'
+    +(hasGenerated?'<button class="tb-btn-primary" id="tb-place-continue-btn" onclick="continuePlaceModeToStep2()">Places to think about →</button>':'')
+    +'<div style="display:flex;justify-content:space-between;margin-top:8px;">'
+    +'<div class="tb-btn-back" onclick="renderTripBrief()">← Back to travel details</div>'
+    +'<div style="font-size:10px;color:#aaa;cursor:pointer;" onclick="showBriefApiKeyForm()">🔑 Set API key</div>'
+    +'</div>'
+    +'</div>';
+
+  if (hasGenerated) {
+    _renderPlaceActivityItems();
+    _updatePlaceActivitySummary();
+    setTimeout(function(){ if (typeof _renderPlacePickerMap === "function") _renderPlacePickerMap(); }, 50);
+  } else {
+    // Fire the generator. When it completes, it sets _tb.placeActivities and
+    // re-renders this screen.
+    setTimeout(function(){ generateActivitiesForPlace(); }, 60);
+  }
+}
+
+// "Skip the picker" — the rare opt-out for someone who doesn't want
+// activity-based curation. Goes straight to the candidates page using the
+// brief's region/intent as the must-do source.
+function skipPickerToCandidates(){
+  _tb.placeActivities = [];
+  _mdcItems = [];
+  if ((_tb.placeName||"").trim() && !(_tb.region||"").trim()) _tb.region = _tb.placeName.trim();
+  if ((_tb.placeContext||"").trim() && !(_tb.intent||"").trim()) _tb.intent = _tb.placeContext.trim();
+  findCandidates();
+}
+
 function continuePlaceModeToStep2(){
   // Only carry forward activities that have at least one _keep:true place.
   // For each, narrow requiredPlaces to just the kept ones \u2014 this is the
@@ -5458,7 +5505,7 @@ function continuePlaceModeToStep2(){
   // have something to work with, and so the Step 2 summary shows what we picked.
   _tb.anchors = items.map(function(i){return i.name;}).join(", ");
   if(!_tb.intent) _tb.intent = "Exploring " + (_tb.placeName||"this place") + (_tb.placeContext ? " \u2014 " + _tb.placeContext : "");
-  renderTripBrief();
+  findCandidates();
 }
 
 function renderTripStep1Recognition(){
@@ -6229,7 +6276,7 @@ function renderTripBrief(){
   // Reset scroll to top on render (fresh view), then attach the scroll hint
   setTimeout(function(){ ov.scrollTop = _preserve ? _prevScroll : 0; attachScrollHint(ov); }, 0);
   ov.innerHTML='<div class="tb-header">'
-    +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Step 2 of 2</div></div></div>'
+    +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Step 2 of 3</div></div></div>'
     +'<div class="tb-title">Shape the trip</div>'
     +'</div>'
     +'<div class="tb-body">'
@@ -6274,7 +6321,7 @@ function renderTripBrief(){
     +'<div class="tb-field"><label>Absolute requirements</label><textarea id="tb-hardlimits" rows="2" placeholder="e.g. No car rentals under any circumstances. En suite bathroom required.">'+(_tb.hardlimits||'')+'</textarea><div style="font-size:10px;color:#aaa;margin-top:3px;">Things Max won\u2019t route around \u2014 separate from the avoidances above.</div></div>'
     +'</div>'
     +'<div class="tb-footer">'
-    +'<button class="tb-btn-primary" onclick="goToTripStep2()">Places to think about \u2192</button>'
+    +'<button class="tb-btn-primary" onclick="goToTripStep2()">Pick activities \u2192</button>'
     +'<div style="display:flex;justify-content:space-between;margin-top:8px;">'
     +'<div class="tb-btn-back" onclick="renderTripStep1()">\u2190 Back</div>'
     +'<div style="font-size:10px;color:#aaa;cursor:pointer;" onclick="showBriefApiKeyForm()">\ud83d\udd11 Set API key</div>'
@@ -6301,7 +6348,7 @@ function goToTripStep2(){
   // Fallback: if sentence didn't parse cleanly into region, use the sentence itself
   if(!_tb.region && _tb.tripSentence){ _tb.region = _tb.tripSentence; }
   if(!_tb.region){ maxAlert("Please describe where you want to go and what you want to do there."); return; }
-  findCandidates();
+  renderActivityPicker();
 }
 
 function renderTripStep2(){
@@ -6335,7 +6382,7 @@ function renderTripStep2(){
   }).join("");
 
   ov.innerHTML='<div class="tb-header">'
-    +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Step 2 of 2 \u00b7 What you want</div></div></div>'
+    +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Step 2 of 3 \u00b7 What you want</div></div></div>'
     +'<div class="tb-title">What\u2019s the sentence that started this trip?</div>'
     +'<div class="tb-sub">Select as many as feel true. The way you say it reveals what\u2019s actually driving the trip.</div>'
     +'</div>'
