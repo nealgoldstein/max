@@ -7244,24 +7244,54 @@ function showCandidateExplorer(cands, editMode){
     if(_ceMap){_ceMap.remove();_ceMap=null;} if(_edMap){try{_edMap.remove();}catch(e){}_edMap=null;_edMarkers=[];} _ceMarkers=[];
     // Figure out the best initial view BEFORE the map loads tiles — otherwise
     // the user sees all of Europe for a second before we zoom. Order of truth:
-    //  1. Cached coarse geocode from a prior session or trip
-    //  2. First candidate with real coords, if we already have some
-    //  3. Fallback: Europe-ish and fire a Nominatim lookup (we'll cover the map
-    //     with a loader in the meantime so the flash isn't visible)
+    //  1. Cached coarse geocode for the trip's region
+    //  2. Bounds derived from any places already geocoded by the picker (this
+    //     gives a perfect Switzerland-shaped view when coming from place mode)
+    //  3. First candidate with real coords
+    //  4. Fallback: Europe-ish, with a mask covering the flash
     var _regionKey = ((_tb && _tb.region) || "").toLowerCase().trim();
     var _cachedLL = _regionKey && _coarseGeocode[_regionKey] ? _coarseGeocode[_regionKey] : null;
     var _firstCand = (cands||[]).find(function(c){return c && isFinite(c.lat) && isFinite(c.lng);});
-    var _initCenter = null, _initZoom = null;
-    if (_cachedLL) { _initCenter = _cachedLL; _initZoom = 6; }
+    // Pull bounds from any geocoded picker places. _tb.placeActivities (place
+    // mode) and _mdcItems (any mode after the picker) carry the candidate
+    // place names; _coarseGeocode usually has them by the time we're here
+    // because the picker map already kicked off geocodes.
+    var _pickerBounds = (function(){
+      var pts = [];
+      var pushFrom = function(items){
+        (items||[]).forEach(function(it){
+          (it.requiredPlaces||[]).forEach(function(p){
+            if (!p || !p.place) return;
+            var ll = _coarseGeocode[(p.place||"").toLowerCase()];
+            if (ll && isFinite(ll[0]) && isFinite(ll[1])) pts.push(ll);
+          });
+        });
+      };
+      pushFrom(_tb && _tb.placeActivities);
+      pushFrom(_mdcItems);
+      return pts.length >= 2 ? pts : null;
+    })();
+    var _initBounds = null, _initCenter = null, _initZoom = null;
+    if (_pickerBounds) { _initBounds = _pickerBounds; }
+    else if (_cachedLL) { _initCenter = _cachedLL; _initZoom = 6; }
     else if (_firstCand) { _initCenter = [_firstCand.lat, _firstCand.lng]; _initZoom = 6; }
     else { _initCenter = [48,14]; _initZoom = 4; }
-    _ceMap=L.map("ce-map",{zoomControl:true,scrollWheelZoom:true}).setView(_initCenter,_initZoom);
+    _ceMap = L.map("ce-map", {zoomControl:true, scrollWheelZoom:true});
+    if (_initBounds) {
+      try { _ceMap.fitBounds(_initBounds, {padding:[28,28], maxZoom:8, animate:false}); }
+      catch(_) { _ceMap.setView([48,14], 4); }
+    } else {
+      _ceMap.setView(_initCenter, _initZoom);
+    }
 
     // If we started with the Europe fallback, drop a neutral loader over the
     // map so the continent flash never hits the user's eye. Removed as soon
     // as Nominatim or a candidate gives us a real center.
+    // Mask for the brief window before the map has a real view. Skip when we
+    // already have picker bounds, the cached region, or candidates \u2014 those
+    // give us an accurate view from frame zero.
     var _mapMask = null;
-    if (!_cachedLL && !_firstCand && _tb && _tb.region) {
+    if (!_initBounds && !_cachedLL && !_firstCand && _tb && _tb.region) {
       _mapMask = document.createElement("div");
       _mapMask.id = "ce-map-mask";
       _mapMask.style.cssText = "position:absolute;inset:0;z-index:450;background:#f4f6f8;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:#888;font-size:11px;font-family:inherit;pointer-events:none;";
@@ -7270,11 +7300,25 @@ function showCandidateExplorer(cands, editMode){
       if (_mapDivEl) { _mapDivEl.style.position = "relative"; _mapDivEl.appendChild(_mapMask); }
     }
 
+    // Recompute size + view once the panel layout has settled. Without this,
+    // the map renders at its initial container size, then the cards panel
+    // pushes it smaller and the view shifts. invalidateSize + re-fit keeps
+    // the framing stable.
+    setTimeout(function(){
+      if (!_ceMap || !_ceMap.invalidateSize) return;
+      try { _ceMap.invalidateSize(); } catch(_){}
+      if (_initBounds) {
+        try { _ceMap.fitBounds(_initBounds, {padding:[28,28], maxZoom:8, animate:false}); } catch(_){}
+      }
+    }, 120);
+
     // Zoom to the stated region right away so the user sees their country/area
     // instead of a continent. fitBounds on candidates (later, when they arrive)
     // will refine further. Also caches the result in _coarseGeocode so future
-    // trips to this region skip the lookup entirely.
-    if (_tb && _tb.region) {
+    // trips to this region skip the lookup entirely. SKIP this when we already
+    // have picker bounds or a cached center \u2014 otherwise the map would pan
+    // away from the picker view to a less-tight country bounding box.
+    if (!_initBounds && !_cachedLL && _tb && _tb.region) {
       (function(r, regionKey){
         fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q="+encodeURIComponent(r),{headers:{"Accept-Language":"en"}})
           .then(function(res){return res.json();})
