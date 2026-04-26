@@ -5457,19 +5457,10 @@ function renderActivityPicker(){
       +  '</div>'
       +'</div>'
       +'</div>'
-      // Entry/exit selectors — moved here from the Places-to-think-about page.
-      +'<div style="margin-top:18px;padding:12px 14px;background:#fff;border:1px solid #e8e8e8;border-radius:8px;">'
-      +  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:8px;">Arriving and departing</div>'
-      +  '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'
-      +    '<div><label style="display:block;font-size:10.5px;color:#666;margin-bottom:4px;">Arriving at</label>'
-      +      '<input class="tb-act-add-inp" id="tb-picker-entry" placeholder="e.g. Zurich" autocomplete="off" value="'+(_tb.entry||'').replace(/"/g,'&quot;')+'" oninput="_tb.entry=this.value.trim();_refreshAllPlacePickerMaps&&_refreshAllPlacePickerMaps();" />'
-      +    '</div>'
-      +    '<div><label style="display:block;font-size:10.5px;color:#666;margin-bottom:4px;">Departing from</label>'
-      +      '<input class="tb-act-add-inp" id="tb-picker-exit" placeholder="e.g. Zurich" autocomplete="off" value="'+(_tb.tbExit||'').replace(/"/g,'&quot;')+'" oninput="_tb.tbExit=this.value.trim();_refreshAllPlacePickerMaps&&_refreshAllPlacePickerMaps();" />'
-      +    '</div>'
-      +  '</div>'
-      +  '<div style="font-size:10px;color:#999;margin-top:6px;line-height:1.5;">Where you fly/train into and out of. A 1-night arrival/departure stop will be inserted automatically if these aren’t already on your trip.</div>'
-      +'</div>'
+      // Entry/exit are NOT here — those decisions are made after the first
+      // plan pass, on the trip view, where the user can also reorder the
+      // destinations they picked. The picker is "what's worth doing here";
+      // arrival/departure logistics are a layer above.
       +'<div class="tb-act-summary" id="tb-place-act-summary" style="margin-top:14px;"></div>';
   }
 
@@ -5498,14 +5489,32 @@ function renderActivityPicker(){
     +  '</div>'
     +'</div>';
 
+  // Map render with invalidateSize — the 2-column flex layout means the
+  // map column has zero width until the browser computes flex layout, so
+  // Leaflet would init at size 0 and never paint pins correctly. Wait two
+  // animation frames, then init, then call invalidateSize so Leaflet picks
+  // up the real container dimensions before plotting markers.
+  function _kickPickerMap(){
+    requestAnimationFrame(function(){
+      requestAnimationFrame(function(){
+        if (typeof _renderPlacePickerMap === "function") _renderPlacePickerMap("tb-pm-map");
+        var st = _pmMaps && _pmMaps["tb-pm-map"];
+        if (st && st.map && st.map.invalidateSize) {
+          try { st.map.invalidateSize(); } catch(_){}
+          // Re-render once more after invalidate so pin positions match the
+          // now-correct container size.
+          if (typeof _renderPlacePickerMap === "function") _renderPlacePickerMap("tb-pm-map");
+        }
+      });
+    });
+  }
+
   if (hasGenerated) {
     _renderPlaceActivityItems();
     _updatePlaceActivitySummary();
-    setTimeout(function(){ if (typeof _renderPlacePickerMap === "function") _renderPlacePickerMap(); }, 50);
+    _kickPickerMap();
   } else {
-    // Map can paint immediately even before activities arrive — it'll show
-    // an empty map for now, fills in pins as activities populate.
-    setTimeout(function(){ if (typeof _renderPlacePickerMap === "function") _renderPlacePickerMap(); }, 50);
+    _kickPickerMap();
     setTimeout(function(){ generateActivitiesForPlace(); }, 60);
   }
 }
