@@ -4246,11 +4246,15 @@ function renderTripStep1Place(){
     +'<textarea id="tb-place-context" rows="2" class="tb-act-add-inp" placeholder="e.g. first time there, traveling with parents, want to avoid the obvious tourist stuff" style="width:100%;box-sizing:border-box;resize:vertical;min-height:52px;">'+(_tb.placeContext||"")+'</textarea>'
     +'</div>'
     // Hide the generate button once activities exist \u2014 the table below is the
-    // primary surface from then on. Per-row regeneration is the future fix
-    // (Phase 2). For first-time generation, label is dynamic on place name.
-    +(hasGenerated ? '' : '<button class="tb-btn-primary" id="tb-place-generate-btn" onclick="generateActivitiesForPlace()">'
-       + (pmPlaceForExample ? ("Iconic things to see and do in "+pmPlaceForExample.replace(/"/g,'&quot;')) : "Iconic things to see and do here")
-       + ' \u2192</button>');
+    // primary surface from then on. Before generation, the button only renders
+    // once the user has typed a place name. Showing a button labeled "Iconic
+    // things to do here" when the place field is empty looked broken (it
+    // promises something Max can't deliver yet). Live oninput handler below
+    // mounts/dismounts the button as the user types.
+    +(hasGenerated ? '' :
+        (pmPlaceForExample
+          ? '<button class="tb-btn-primary" id="tb-place-generate-btn" onclick="generateActivitiesForPlace()">Iconic things to see and do in '+pmPlaceForExample.replace(/"/g,'&quot;')+' \u2192</button>'
+          : '<div id="tb-place-generate-btn-slot" style="font-size:11px;color:#999;padding:9px 12px;background:#f7f4ec;border:1px dashed #d8d1c0;border-radius:7px;text-align:center;">Type a place above and Max will surface the iconic things to do.</div>'));
 
   var listHtml = '';
   if(hasGenerated){
@@ -4259,10 +4263,15 @@ function renderTripStep1Place(){
       +'<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#999;margin-bottom:6px;">What you can do in '+_pmEsc(skipPlaceLabel)+'</div>'
       +'<div style="font-size:11px;color:#666;line-height:1.55;margin-bottom:10px;">Tap what you actually want to do. Anything you leave unchecked won\u2019t shape the trip. You can add your own below.</div>'
       // Map at the top of the picker \u2014 shows every recommended destination
-      // pinned, with kept ones in blue and un-kept in gray. Updates live as
-      // the user toggles. Gives a geographic read of the trip alongside the
-      // section-grouped lists below.
-      +'<div id="tb-pm-map" style="height:240px;width:100%;border:1px solid #e6e2d8;border-radius:8px;margin-bottom:14px;background:#eaf0ed;"></div>'
+      // pinned, with kept ones in blue and un-kept in gray. Small inline
+      // preview; click the "Expand" button to open a fullscreen modal for
+      // detailed exploration. Both maps update live as the user toggles.
+      +'<div style="position:relative;margin-bottom:14px;">'
+      +'<div id="tb-pm-map" style="height:180px;width:100%;border:1px solid #e6e2d8;border-radius:8px;background:#eaf0ed;"></div>'
+      +'<button type="button" onclick="openPlacePickerMapModal();event.preventDefault();" '
+      +  'style="position:absolute;top:8px;right:8px;z-index:500;background:#fff;border:1px solid #ccc;border-radius:5px;font-size:11px;padding:4px 9px;font-weight:600;color:#333;cursor:pointer;font-family:inherit;box-shadow:0 1px 4px rgba(0,0,0,0.1);" '
+      +  'title="Open map fullscreen">\u2197 Expand</button>'
+      +'</div>'
       // Quiet escape \u2014 for the rare user who doesn\u2019t want any of these and
       // just wants to go straight to constraints. Hidden in plain sight; primary
       // path is to engage with the picker.
@@ -4308,18 +4317,38 @@ function renderTripStep1Place(){
     // Defer map init slightly so the div has its computed dimensions
     setTimeout(function(){ if (typeof _renderPlacePickerMap === "function") _renderPlacePickerMap(); }, 50);
   }
-  // Live-update the generate button's label as the user types the place name.
-  // Without this the button stays "Iconic things to see and do here" until the
-  // form re-renders, which feels broken when Neal types "Switzerland" and the
-  // CTA doesn't acknowledge it.
+  // Live: as the user types in the place input, mount the generate button
+  // (replacing the "type a place above" placeholder slot) and update its
+  // label. When they clear the input, swap back to the placeholder.
   var placeInp = document.getElementById("tb-place-name");
-  var genBtn = document.getElementById("tb-place-generate-btn");
-  if (placeInp && genBtn) {
+  if (placeInp) {
     placeInp.addEventListener("input", function(){
-      var v = (this.value || "").trim().replace(/"/g, '&quot;');
-      genBtn.innerHTML = (v
-        ? "Iconic things to see and do in " + v
-        : "Iconic things to see and do here") + " →";
+      var v = (this.value || "").trim();
+      var safe = v.replace(/"/g, '&quot;');
+      var slot = document.getElementById("tb-place-generate-btn-slot");
+      var btn = document.getElementById("tb-place-generate-btn");
+      if (v) {
+        // Need a button. If we have a placeholder slot, replace it.
+        if (slot && !btn) {
+          var newBtn = document.createElement("button");
+          newBtn.className = "tb-btn-primary";
+          newBtn.id = "tb-place-generate-btn";
+          newBtn.onclick = function(){ generateActivitiesForPlace(); };
+          newBtn.textContent = "Iconic things to see and do in " + v + " →";
+          slot.parentNode.replaceChild(newBtn, slot);
+        } else if (btn) {
+          btn.textContent = "Iconic things to see and do in " + v + " →";
+        }
+      } else {
+        // Empty input — swap button back to the placeholder if present.
+        if (btn) {
+          var newSlot = document.createElement("div");
+          newSlot.id = "tb-place-generate-btn-slot";
+          newSlot.style.cssText = "font-size:11px;color:#999;padding:9px 12px;background:#f7f4ec;border:1px dashed #d8d1c0;border-radius:7px;text-align:center;";
+          newSlot.textContent = "Type a place above and Max will surface the iconic things to do.";
+          btn.parentNode.replaceChild(newSlot, btn);
+        }
+      }
     });
   }
 }
@@ -4788,7 +4817,7 @@ function toggleDestKeep(placeName){
   });
   _renderPlaceActivityItems();
   _updatePlaceActivitySummary();
-  if (typeof _renderPlacePickerMap === "function") _renderPlacePickerMap();
+  if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
 }
 
 // Stepper applied to a destination — bumps nights on every requiredPlaces
@@ -4820,7 +4849,7 @@ function _adjustDestNights(placeName, delta){
   });
   _renderPlaceActivityItems();
   _updatePlaceActivitySummary();
-  if (typeof _renderPlacePickerMap === "function") _renderPlacePickerMap();
+  if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
 }
 
 // Toggle all places under an activity. If any place was kept, drops them all;
@@ -4837,7 +4866,7 @@ function togglePlaceActivity(id){
   item.checked = newKeep;
   _renderPlaceActivityItems();
   _updatePlaceActivitySummary();
-  if (typeof _renderPlacePickerMap === "function") _renderPlacePickerMap();
+  if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
 }
 
 // Toggle a single place within an activity row. Doesn't affect other places
@@ -4853,7 +4882,7 @@ function togglePlaceInActivity(itemId, placeIdx){
   item.checked = item.requiredPlaces.some(function(pp){ return pp && pp._keep; });
   _renderPlaceActivityItems();
   _updatePlaceActivitySummary();
-  if (typeof _renderPlacePickerMap === "function") _renderPlacePickerMap();
+  if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
 }
 
 // Per-place nights stepper. Adjust by delta (typically ±1), clamp to 1..14.
@@ -4873,7 +4902,7 @@ function _adjustPlaceNights(itemId, placeIdx, delta){
   p.nights = next;
   _renderPlaceActivityItems();
   _updatePlaceActivitySummary();
-  if (typeof _renderPlacePickerMap === "function") _renderPlacePickerMap();
+  if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
 }
 
 // Small HTML-escape helper used by the place-mode renderer. Replaced the
@@ -4884,27 +4913,149 @@ function _pmEsc(s){
   return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
 }
 
-// ===== Place-picker map =====
-// Small Leaflet map at the top of the activity-place picker. Shows every
-// recommended destination as a pin: kept = blue (gold border for iconic),
-// un-kept = muted gray. Persists across re-renders; markers refresh in
-// place when the user toggles keep/drop. Geocoding via the existing
-// _coarseGeocode cache + ensureCoarseGeocode async fill.
-var _pmMap = null;
-var _pmMarkersByPlace = {}; // place lowercase -> Leaflet marker
-function _renderPlacePickerMap(){
-  var mapDiv = document.getElementById("tb-pm-map");
-  if (!mapDiv) return;
-  // Initialize map once
-  if (!_pmMap || !mapDiv._initialized) {
-    // If a previous _pmMap instance is bound to a stale DOM node (overlay
-    // was rebuilt), tear it down and recreate.
-    try { if (_pmMap && _pmMap.remove) _pmMap.remove(); } catch(_){}
-    _pmMap = L.map(mapDiv, {zoomControl:true,scrollWheelZoom:false,attributionControl:false}).setView([46.8, 8.2], 6);
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {maxZoom:18}).addTo(_pmMap);
-    mapDiv._initialized = true;
-    _pmMarkersByPlace = {};
+// Re-render every active place-picker map (inline + any open modal) so a
+// single toggle updates both maps in lockstep. Skips maps whose DOM node
+// has been removed.
+function _refreshAllPlacePickerMaps(){
+  // Always nudge the inline map (might not be initialized yet on first call)
+  if (document.getElementById("tb-pm-map") && typeof _renderPlacePickerMap === "function") {
+    _renderPlacePickerMap("tb-pm-map");
   }
+  if (document.getElementById("tb-pm-map-modal") && typeof _renderPlacePickerMap === "function") {
+    _renderPlacePickerMap("tb-pm-map-modal");
+  }
+}
+
+// Open a SIDE PANEL (not full modal) with the same map data as the inline
+// preview. Default 50% width on the right, draggable left edge to resize,
+// no backdrop — the picker behind it stays interactive so the user can
+// switch focus between map and lists without dismissing one to get to the
+// other. Reuses _renderPlacePickerMap() with a different target div so
+// both maps share state and update together.
+function openPlacePickerMapModal(){
+  if (document.getElementById("tb-pm-modal-overlay")) return;
+  var panel = document.createElement("div");
+  panel.id = "tb-pm-modal-overlay";
+  panel.style.cssText = "position:fixed;top:0;right:0;bottom:0;width:50vw;min-width:320px;max-width:calc(100vw - 320px);background:#fff;z-index:11000;display:flex;flex-direction:column;box-shadow:-4px 0 20px rgba(0,0,0,0.18);border-left:1px solid #d8d1c0;";
+  // Drag handle on the left edge for resizing the panel
+  var dragHandle = document.createElement("div");
+  dragHandle.style.cssText = "position:absolute;top:0;left:-3px;width:6px;height:100%;cursor:ew-resize;background:transparent;z-index:11005;";
+  dragHandle.title = "Drag to resize";
+  // Header
+  var hdr = document.createElement("div");
+  hdr.style.cssText = "padding:12px 16px;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;background:#fafafa;";
+  var ttl = document.createElement("div");
+  ttl.style.cssText = "font-size:13px;font-weight:700;color:#1a1a1a;";
+  ttl.textContent = "Recommended destinations";
+  var legend = document.createElement("div");
+  legend.style.cssText = "font-size:10.5px;color:#666;display:flex;gap:10px;align-items:center;";
+  legend.innerHTML = '<span><span style="display:inline-block;width:9px;height:9px;background:#1a5fa8;border-radius:50%;vertical-align:middle;margin-right:3px;"></span>kept</span>'
+    + '<span><span style="display:inline-block;width:9px;height:9px;background:#bbb;border-radius:50%;vertical-align:middle;margin-right:3px;"></span>not kept</span>'
+    + '<span><span style="display:inline-block;width:9px;height:9px;background:#1a5fa8;border:2px solid #b28a2e;border-radius:50%;vertical-align:middle;margin-right:3px;box-sizing:border-box;"></span>iconic</span>';
+  var close = document.createElement("button");
+  close.style.cssText = "background:none;border:none;font-size:22px;color:#888;cursor:pointer;padding:0 4px;line-height:1;";
+  close.innerHTML = "&times;";
+  close.title = "Close";
+  close.onclick = closePlacePickerMapModal;
+  hdr.appendChild(ttl);
+  hdr.appendChild(legend);
+  hdr.appendChild(close);
+  // Map body
+  var body = document.createElement("div");
+  body.style.cssText = "flex:1;min-height:0;position:relative;";
+  var mapDiv = document.createElement("div");
+  mapDiv.id = "tb-pm-map-modal";
+  mapDiv.style.cssText = "position:absolute;inset:0;background:#eaf0ed;";
+  body.appendChild(mapDiv);
+  panel.appendChild(dragHandle);
+  panel.appendChild(hdr);
+  panel.appendChild(body);
+  // ESC-to-close (no click-outside since the page stays interactive)
+  panel._escHandler = function(e){ if (e.key === "Escape") closePlacePickerMapModal(); };
+  document.addEventListener("keydown", panel._escHandler);
+  document.body.appendChild(panel);
+
+  // Wire up the drag-to-resize. Pointer events on the left edge update the
+  // panel's width as the user drags. Updates Leaflet's size each frame so
+  // the map keeps fitting the panel.
+  (function(){
+    var dragging = false;
+    function onMove(e){
+      if (!dragging) return;
+      var x = e.clientX != null ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+      var newWidth = Math.max(320, Math.min(window.innerWidth - 320, window.innerWidth - x));
+      panel.style.width = newWidth + "px";
+      var st = _pmMaps["tb-pm-map-modal"];
+      if (st && st.map && st.map.invalidateSize) {
+        try { st.map.invalidateSize(); } catch(_){}
+      }
+    }
+    function onUp(){
+      dragging = false;
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("touchmove", onMove);
+      window.removeEventListener("touchend", onUp);
+    }
+    function onDown(e){
+      dragging = true;
+      document.body.style.userSelect = "none";
+      document.body.style.cursor = "ew-resize";
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+      window.addEventListener("touchmove", onMove);
+      window.addEventListener("touchend", onUp);
+      e.preventDefault();
+    }
+    dragHandle.addEventListener("mousedown", onDown);
+    dragHandle.addEventListener("touchstart", onDown);
+  })();
+
+  // Render after the div has dimensions
+  setTimeout(function(){
+    _renderPlacePickerMap("tb-pm-map-modal");
+    var st = _pmMaps["tb-pm-map-modal"];
+    if (st && st.map && st.map.invalidateSize) { try { st.map.invalidateSize(); } catch(_){} }
+  }, 60);
+}
+
+function closePlacePickerMapModal(){
+  var ov = document.getElementById("tb-pm-modal-overlay");
+  if (!ov) return;
+  if (_pmMaps["tb-pm-map-modal"]) {
+    try { _pmMaps["tb-pm-map-modal"].map.remove(); } catch(_){}
+    delete _pmMaps["tb-pm-map-modal"];
+  }
+  if (ov._escHandler) document.removeEventListener("keydown", ov._escHandler);
+  if (ov.parentNode) ov.parentNode.removeChild(ov);
+}
+
+// ===== Place-picker map =====
+// Hybrid: a small inline preview at the top of the picker, plus a fullscreen
+// modal you can open with the "Expand" button. Both share state — toggling
+// a destination updates both maps simultaneously. Pin colors: kept = blue
+// (gold border for iconic), un-kept = muted gray. Geocoding via the existing
+// _coarseGeocode cache + ensureCoarseGeocode async fill.
+var _pmMaps = {}; // targetId -> { map: L.Map, markers: {placeKey: marker}, scroll: bool }
+function _renderPlacePickerMap(targetId){
+  targetId = targetId || "tb-pm-map";
+  var mapDiv = document.getElementById(targetId);
+  if (!mapDiv) return;
+  var state = _pmMaps[targetId];
+  // (Re)init when the DOM node is fresh or we don't have a state record.
+  if (!state || !state.map || !mapDiv._pmInitialized) {
+    try { if (state && state.map && state.map.remove) state.map.remove(); } catch(_){}
+    var allowScroll = (targetId !== "tb-pm-map"); // modal allows scroll-wheel zoom
+    var leaflet = L.map(mapDiv, {zoomControl:true,scrollWheelZoom:allowScroll,attributionControl:false}).setView([46.8, 8.2], 6);
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {maxZoom:18}).addTo(leaflet);
+    mapDiv._pmInitialized = true;
+    state = _pmMaps[targetId] = { map: leaflet, markers: {} };
+  }
+  // Local aliases so the rest of the function reads as before
+  var _pmMap = state.map;
+  var _pmMarkersByPlace = state.markers;
 
   // Collect every distinct place across all activity items, with derived state
   var allPlaces = {};
