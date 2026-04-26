@@ -4258,6 +4258,11 @@ function renderTripStep1Place(){
     listHtml = '<div style="margin-top:22px;">'
       +'<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#999;margin-bottom:6px;">What you can do in '+_pmEsc(skipPlaceLabel)+'</div>'
       +'<div style="font-size:11px;color:#666;line-height:1.55;margin-bottom:10px;">Tap what you actually want to do. Anything you leave unchecked won\u2019t shape the trip. You can add your own below.</div>'
+      // Map at the top of the picker \u2014 shows every recommended destination
+      // pinned, with kept ones in blue and un-kept in gray. Updates live as
+      // the user toggles. Gives a geographic read of the trip alongside the
+      // section-grouped lists below.
+      +'<div id="tb-pm-map" style="height:240px;width:100%;border:1px solid #e6e2d8;border-radius:8px;margin-bottom:14px;background:#eaf0ed;"></div>'
       // Quiet escape \u2014 for the rare user who doesn\u2019t want any of these and
       // just wants to go straight to constraints. Hidden in plain sight; primary
       // path is to engage with the picker.
@@ -4300,6 +4305,8 @@ function renderTripStep1Place(){
   if(hasGenerated){
     _renderPlaceActivityItems();
     _updatePlaceActivitySummary();
+    // Defer map init slightly so the div has its computed dimensions
+    setTimeout(function(){ if (typeof _renderPlacePickerMap === "function") _renderPlacePickerMap(); }, 50);
   }
   // Live-update the generate button's label as the user types the place name.
   // Without this the button stays "Iconic things to see and do here" until the
@@ -4773,6 +4780,7 @@ function toggleDestKeep(placeName){
   });
   _renderPlaceActivityItems();
   _updatePlaceActivitySummary();
+  if (typeof _renderPlacePickerMap === "function") _renderPlacePickerMap();
 }
 
 // Stepper applied to a destination — bumps nights on every requiredPlaces
@@ -4804,6 +4812,7 @@ function _adjustDestNights(placeName, delta){
   });
   _renderPlaceActivityItems();
   _updatePlaceActivitySummary();
+  if (typeof _renderPlacePickerMap === "function") _renderPlacePickerMap();
 }
 
 // Toggle all places under an activity. If any place was kept, drops them all;
@@ -4820,6 +4829,7 @@ function togglePlaceActivity(id){
   item.checked = newKeep;
   _renderPlaceActivityItems();
   _updatePlaceActivitySummary();
+  if (typeof _renderPlacePickerMap === "function") _renderPlacePickerMap();
 }
 
 // Toggle a single place within an activity row. Doesn't affect other places
@@ -4835,6 +4845,7 @@ function togglePlaceInActivity(itemId, placeIdx){
   item.checked = item.requiredPlaces.some(function(pp){ return pp && pp._keep; });
   _renderPlaceActivityItems();
   _updatePlaceActivitySummary();
+  if (typeof _renderPlacePickerMap === "function") _renderPlacePickerMap();
 }
 
 // Per-place nights stepper. Adjust by delta (typically ±1), clamp to 1..14.
@@ -4854,6 +4865,7 @@ function _adjustPlaceNights(itemId, placeIdx, delta){
   p.nights = next;
   _renderPlaceActivityItems();
   _updatePlaceActivitySummary();
+  if (typeof _renderPlacePickerMap === "function") _renderPlacePickerMap();
 }
 
 // Small HTML-escape helper used by the place-mode renderer. Replaced the
@@ -4862,6 +4874,109 @@ function _adjustPlaceNights(itemId, placeIdx, delta){
 function _pmEsc(s){
   if (s == null) return "";
   return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+
+// ===== Place-picker map =====
+// Small Leaflet map at the top of the activity-place picker. Shows every
+// recommended destination as a pin: kept = blue (gold border for iconic),
+// un-kept = muted gray. Persists across re-renders; markers refresh in
+// place when the user toggles keep/drop. Geocoding via the existing
+// _coarseGeocode cache + ensureCoarseGeocode async fill.
+var _pmMap = null;
+var _pmMarkersByPlace = {}; // place lowercase -> Leaflet marker
+function _renderPlacePickerMap(){
+  var mapDiv = document.getElementById("tb-pm-map");
+  if (!mapDiv) return;
+  // Initialize map once
+  if (!_pmMap || !mapDiv._initialized) {
+    // If a previous _pmMap instance is bound to a stale DOM node (overlay
+    // was rebuilt), tear it down and recreate.
+    try { if (_pmMap && _pmMap.remove) _pmMap.remove(); } catch(_){}
+    _pmMap = L.map(mapDiv, {zoomControl:true,scrollWheelZoom:false,attributionControl:false}).setView([46.8, 8.2], 6);
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {maxZoom:18}).addTo(_pmMap);
+    mapDiv._initialized = true;
+    _pmMarkersByPlace = {};
+  }
+
+  // Collect every distinct place across all activity items, with derived state
+  var allPlaces = {};
+  (_tb.placeActivities || []).forEach(function(item){
+    var iconic = !!item.iconic;
+    (item.requiredPlaces || []).forEach(function(p){
+      if (!p || !p.place) return;
+      var key = p.place.toLowerCase();
+      if (!allPlaces[key]) allPlaces[key] = { place: p.place, kept: false, iconic: false, anyRoute: false };
+      if (p._keep) allPlaces[key].kept = true;
+      if (iconic) allPlaces[key].iconic = true;
+      if (item.type === "route") allPlaces[key].anyRoute = true;
+    });
+  });
+
+  // Tear down markers for places no longer in the dataset
+  Object.keys(_pmMarkersByPlace).forEach(function(k){
+    if (!allPlaces[k]) {
+      try { _pmMap.removeLayer(_pmMarkersByPlace[k]); } catch(_){}
+      delete _pmMarkersByPlace[k];
+    }
+  });
+
+  var bounds = [];
+  Object.keys(allPlaces).forEach(function(key){
+    var info = allPlaces[key];
+    var ll = _coarseGeocode[key];
+    function placeMarker(latLng){
+      bounds.push(latLng);
+      var color = info.kept ? "#1a5fa8" : "#bbb";
+      var border = info.iconic ? "#b28a2e" : "#fff";
+      var html = '<div style="background:'+color+';color:#fff;border-radius:50%;width:'
+        + (info.kept?22:16) + 'px;height:'+(info.kept?22:16)+'px;border:2px solid '+border
+        + ';box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;">'
+        + (info.kept ? _pmEsc(info.place.substring(0,2)) : "")
+        + '</div>';
+      var icon = L.divIcon({html: html, className: "", iconSize: info.kept?[22,22]:[16,16], iconAnchor: info.kept?[11,11]:[8,8]});
+      var existing = _pmMarkersByPlace[key];
+      if (existing) {
+        existing.setIcon(icon);
+        existing.setLatLng(latLng);
+      } else {
+        var m = L.marker(latLng, {icon: icon}).addTo(_pmMap);
+        m.bindTooltip(info.place + (info.iconic ? " · ★ iconic" : "") + (info.kept ? " · kept" : ""), {direction:"top", offset:[0,-10]});
+        // Click marker → scroll to that destination's row in the picker
+        (function(placeName){
+          m.on("click", function(){
+            // Find any row referencing this place and scroll to it
+            var rows = document.querySelectorAll(".tb-dest-major");
+            for (var i = 0; i < rows.length; i++) {
+              if ((rows[i].textContent || "").toLowerCase().indexOf(placeName.toLowerCase()) !== -1) {
+                rows[i].scrollIntoView({behavior:"smooth", block:"center"});
+                rows[i].style.transition = "background-color 0.4s";
+                rows[i].style.backgroundColor = "#fff7d4";
+                setTimeout(function(){ rows[i].style.backgroundColor = ""; }, 1600);
+                break;
+              }
+            }
+          });
+        })(info.place);
+        _pmMarkersByPlace[key] = m;
+      }
+    }
+    if (ll && isFinite(ll[0])) {
+      placeMarker(ll);
+    } else {
+      // Trigger an async geocode; when it lands, re-render the map so the pin appears.
+      if (typeof ensureCoarseGeocode === "function") {
+        ensureCoarseGeocode(info.place, function(coords){
+          if (coords && isFinite(coords[0])) _renderPlacePickerMap();
+        });
+      }
+    }
+  });
+
+  if (bounds.length >= 2) {
+    try { _pmMap.fitBounds(bounds, {padding:[24,24], maxZoom:9, animate:false}); } catch(_){}
+  } else if (bounds.length === 1) {
+    try { _pmMap.setView(bounds[0], 8, {animate:false}); } catch(_){}
+  }
 }
 
 // "Skip — go straight to the constraints" — the rare opt-out from inside the
