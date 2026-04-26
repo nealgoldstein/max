@@ -1619,9 +1619,64 @@ function makePopup(name,typeLabel,note){
 var _coarseGeocode = _coarseGeocode || {};        // place -> [lat,lng]
 var _coarseGeocodeInFlight = _coarseGeocodeInFlight || {};
 
-// Hydrate the geocode cache from localStorage on load, and persist as we
-// resolve. Without this, every reload re-fires Nominatim for every place,
-// which trips the 1 req/sec rate limit instantly.
+// Built-in geo table for common destinations. We pre-seed _coarseGeocode
+// from this so the picker's first paint shows pins immediately without any
+// HTTP calls — Nominatim's free service rate-limits aggressively (1 req/sec
+// per IP, IP gets blacklisted after a burst). Coordinates are approximate
+// (good enough for a strategic-overview map). Add more here as needed; the
+// localStorage cache will pick up anything Nominatim resolves at runtime.
+var _builtinGeo = {
+  // Switzerland — cities
+  "zurich":[47.3769,8.5417],"zürich":[47.3769,8.5417],
+  "geneva":[46.2044,6.1432],"genève":[46.2044,6.1432],
+  "bern":[46.9481,7.4474],"basel":[47.5596,7.5886],
+  "lucerne":[47.0502,8.3093],"luzern":[47.0502,8.3093],
+  "lausanne":[46.5197,6.6323],"lugano":[46.0037,8.9511],
+  "st. gallen":[47.4239,9.3748],"st gallen":[47.4239,9.3748],
+  "winterthur":[47.5008,8.7245],"montreux":[46.4312,6.9123],
+  "vevey":[46.4628,6.8419],"interlaken":[46.6863,7.8632],
+  "thun":[46.7580,7.6280],"spiez":[46.6845,7.6814],
+  "schaffhausen":[47.6973,8.6347],"chur":[46.8499,9.5320],
+  "davos":[46.8024,9.8369],"st. moritz":[46.4983,9.8378],"st moritz":[46.4983,9.8378],
+  "zermatt":[46.0207,7.7491],"grindelwald":[46.6242,8.0414],
+  "wengen":[46.6056,7.9219],"mürren":[46.5575,7.8927],
+  "lauterbrunnen":[46.5944,7.9081],"appenzell":[47.3308,9.4080],
+  "andermatt":[46.6383,8.5942],"kandersteg":[46.4953,7.6731],
+  "klosters":[46.8717,9.8731],"locarno":[46.1714,8.7942],
+  "ascona":[46.1551,8.7758],"bellinzona":[46.1953,9.0210],
+  "brienz":[46.7558,8.0386],"gruyères":[46.5836,7.0817],"gruyeres":[46.5836,7.0817],
+  "kilchberg":[47.3242,8.5469],"broc":[46.6055,7.0853],
+  "epesses":[46.4914,6.7325],"dezaley":[46.4858,6.7361],
+  "emmental":[46.9333,7.7333],"bettmeralp":[46.4019,8.0586],
+  "riederalp":[46.3833,8.0167],
+  // Switzerland — mountain stops
+  "jungfraujoch":[46.5474,7.9858],"kleine scheidegg":[46.5852,7.9619],
+  "gornergrat":[45.9831,7.7836],"pilatus kulm":[46.9786,8.2553],
+  "rigi kulm":[47.0567,8.4856],"rothorn kulm":[46.7872,8.0708],
+  "alpnachstad":[46.9528,8.2783],"vitznau":[47.0089,8.4836],
+  "schynige platte":[46.6589,7.9036],"first":[46.6597,8.0531],
+  // Italy adjacent (used in Bernina/Centovalli routes)
+  "tirano":[46.2206,10.1681],"domodossola":[46.1167,8.2925],
+  "milan":[45.4642,9.1900],"como":[45.8081,9.0852],
+  // France adjacent
+  "chamonix":[45.9237,6.8694],"annecy":[45.8992,6.1294],
+  // Iceland
+  "reykjavik":[64.1466,-21.9426],"reykjavík":[64.1466,-21.9426],
+  "keflavik":[63.9920,-22.5614],"keflavík":[63.9920,-22.5614],
+  "akureyri":[65.6835,-18.0878],"vik":[63.4194,-19.0064],"vík":[63.4194,-19.0064],
+  "höfn":[64.2538,-15.2058],"hofn":[64.2538,-15.2058],
+  "selfoss":[63.9333,-21.0],"þingvellir":[64.2558,-21.1296],
+  "thingvellir":[64.2558,-21.1296],"geysir":[64.3104,-20.3022],
+  "gullfoss":[64.3275,-20.1200],"jökulsárlón":[64.0784,-16.2306],
+  "jokulsarlon":[64.0784,-16.2306],"skaftafell":[64.0167,-16.9667],
+  // Châteaux + landmarks
+  "château de chillon":[46.4145,6.9275],"chateau de chillon":[46.4145,6.9275],
+  "chillon":[46.4145,6.9275]
+};
+// Hydrate from localStorage FIRST (lower-trust), then overlay the builtin
+// table (higher-trust — these are hand-verified and override any stale or
+// wrong-country entries that earlier sessions persisted, e.g. a "chillon"
+// that resolved to Spain before we added the country filter).
 (function _hydrateCoarseGeocode(){
   try {
     var raw = localStorage.getItem("max-coarse-geocode");
@@ -1637,6 +1692,9 @@ var _coarseGeocodeInFlight = _coarseGeocodeInFlight || {};
     }
   } catch(_) {}
 })();
+Object.keys(_builtinGeo).forEach(function(k){
+  _coarseGeocode[k] = _builtinGeo[k]; // builtin wins
+});
 function _persistCoarseGeocode(){
   try { localStorage.setItem("max-coarse-geocode", JSON.stringify(_coarseGeocode)); } catch(_) {}
 }
