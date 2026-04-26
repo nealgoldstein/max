@@ -4264,13 +4264,14 @@ function renderTripStep1Place(){
       +'<div style="font-size:11px;color:#666;line-height:1.55;margin-bottom:10px;">Tap what you actually want to do. Anything you leave unchecked won\u2019t shape the trip. You can add your own below.</div>'
       // Map at the top of the picker \u2014 shows every recommended destination
       // pinned, with kept ones in blue and un-kept in gray. Small inline
-      // preview; click the "Expand" button to open a fullscreen modal for
-      // detailed exploration. Both maps update live as the user toggles.
+      // preview; click the "Open in new window" button to spawn a real
+      // separate browser window the user can move to a second monitor.
+      // Both maps update live as the user toggles.
       +'<div style="position:relative;margin-bottom:14px;">'
       +'<div id="tb-pm-map" style="height:180px;width:100%;border:1px solid #e6e2d8;border-radius:8px;background:#eaf0ed;"></div>'
       +'<button type="button" onclick="openPlacePickerMapModal();event.preventDefault();" '
       +  'style="position:absolute;top:8px;right:8px;z-index:500;background:#fff;border:1px solid #ccc;border-radius:5px;font-size:11px;padding:4px 9px;font-weight:600;color:#333;cursor:pointer;font-family:inherit;box-shadow:0 1px 4px rgba(0,0,0,0.1);" '
-      +  'title="Open map fullscreen">\u2197 Expand</button>'
+      +  'title="Open map in a new window">\u2197 Open in new window</button>'
       +'</div>'
       // Quiet escape \u2014 for the rare user who doesn\u2019t want any of these and
       // just wants to go straight to constraints. Hidden in plain sight; primary
@@ -4612,9 +4613,14 @@ function _renderPlaceActivityItems(){
   });
 
   // Sort: route-type sections last, condition-type last-of-last, others in their
-  // natural order. Section type derived from the first item's type.
+  // natural order. We check the section NAME first (because the LLM sometimes
+  // emits trains as type=activity rather than type=route), then fall back to
+  // the first item's type.
   sectionOrder.sort(function(a, b){
     function rank(name){
+      // Train/route sections by name, regardless of items' types.
+      if (/iconic trains|named trains|scenic trains|between destinations/i.test(name)) return 2;
+      if (/wait for weather|aurora|seasonal/i.test(name)) return 3;
       var first = (bySection[name] || [])[0];
       var t = first ? first.type : "";
       if (t === "condition") return 3;
@@ -4638,7 +4644,11 @@ function _renderPlaceActivityItems(){
     // rendering: each row is the endpoint PAIR (Zermatt ↔ St. Moritz) rather
     // than each endpoint as a separate destination row. Trains link
     // destinations; rendering them as pairs reads as connections.
-    var isRouteSection = secItems.every(function(it){ return it && it.type === "route"; });
+    // Match by name OR by all items being type=route, since LLM sometimes
+    // mislabels trains as type=activity.
+    var nameSaysRoute = /iconic trains|named trains|scenic trains|between destinations/i.test(sec);
+    var typeSaysRoute = secItems.every(function(it){ return it && it.type === "route"; });
+    var isRouteSection = nameSaysRoute || typeSaysRoute;
 
     if (isRouteSection) {
       var secKeptR = secItems.some(function(it){
@@ -4913,123 +4923,179 @@ function _pmEsc(s){
   return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
 }
 
-// Re-render every active place-picker map (inline + any open modal) so a
-// single toggle updates both maps in lockstep. Skips maps whose DOM node
-// has been removed.
+// Re-render every active place-picker map (inline + any open standalone window)
+// so a single toggle updates both maps in lockstep. Skips maps whose DOM node
+// has been removed. The standalone window is a separate browser window —
+// notify it via a "refresh" function we attach when we open it.
 function _refreshAllPlacePickerMaps(){
-  // Always nudge the inline map (might not be initialized yet on first call)
   if (document.getElementById("tb-pm-map") && typeof _renderPlacePickerMap === "function") {
     _renderPlacePickerMap("tb-pm-map");
   }
-  if (document.getElementById("tb-pm-map-modal") && typeof _renderPlacePickerMap === "function") {
-    _renderPlacePickerMap("tb-pm-map-modal");
-  }
-}
-
-// Open a SIDE PANEL (not full modal) with the same map data as the inline
-// preview. Default 50% width on the right, draggable left edge to resize,
-// no backdrop — the picker behind it stays interactive so the user can
-// switch focus between map and lists without dismissing one to get to the
-// other. Reuses _renderPlacePickerMap() with a different target div so
-// both maps share state and update together.
-function openPlacePickerMapModal(){
-  if (document.getElementById("tb-pm-modal-overlay")) return;
-  var panel = document.createElement("div");
-  panel.id = "tb-pm-modal-overlay";
-  panel.style.cssText = "position:fixed;top:0;right:0;bottom:0;width:50vw;min-width:320px;max-width:calc(100vw - 320px);background:#fff;z-index:11000;display:flex;flex-direction:column;box-shadow:-4px 0 20px rgba(0,0,0,0.18);border-left:1px solid #d8d1c0;";
-  // Drag handle on the left edge for resizing the panel
-  var dragHandle = document.createElement("div");
-  dragHandle.style.cssText = "position:absolute;top:0;left:-3px;width:6px;height:100%;cursor:ew-resize;background:transparent;z-index:11005;";
-  dragHandle.title = "Drag to resize";
-  // Header
-  var hdr = document.createElement("div");
-  hdr.style.cssText = "padding:12px 16px;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;background:#fafafa;";
-  var ttl = document.createElement("div");
-  ttl.style.cssText = "font-size:13px;font-weight:700;color:#1a1a1a;";
-  ttl.textContent = "Recommended destinations";
-  var legend = document.createElement("div");
-  legend.style.cssText = "font-size:10.5px;color:#666;display:flex;gap:10px;align-items:center;";
-  legend.innerHTML = '<span><span style="display:inline-block;width:9px;height:9px;background:#1a5fa8;border-radius:50%;vertical-align:middle;margin-right:3px;"></span>kept</span>'
-    + '<span><span style="display:inline-block;width:9px;height:9px;background:#bbb;border-radius:50%;vertical-align:middle;margin-right:3px;"></span>not kept</span>'
-    + '<span><span style="display:inline-block;width:9px;height:9px;background:#1a5fa8;border:2px solid #b28a2e;border-radius:50%;vertical-align:middle;margin-right:3px;box-sizing:border-box;"></span>iconic</span>';
-  var close = document.createElement("button");
-  close.style.cssText = "background:none;border:none;font-size:22px;color:#888;cursor:pointer;padding:0 4px;line-height:1;";
-  close.innerHTML = "&times;";
-  close.title = "Close";
-  close.onclick = closePlacePickerMapModal;
-  hdr.appendChild(ttl);
-  hdr.appendChild(legend);
-  hdr.appendChild(close);
-  // Map body
-  var body = document.createElement("div");
-  body.style.cssText = "flex:1;min-height:0;position:relative;";
-  var mapDiv = document.createElement("div");
-  mapDiv.id = "tb-pm-map-modal";
-  mapDiv.style.cssText = "position:absolute;inset:0;background:#eaf0ed;";
-  body.appendChild(mapDiv);
-  panel.appendChild(dragHandle);
-  panel.appendChild(hdr);
-  panel.appendChild(body);
-  // ESC-to-close (no click-outside since the page stays interactive)
-  panel._escHandler = function(e){ if (e.key === "Escape") closePlacePickerMapModal(); };
-  document.addEventListener("keydown", panel._escHandler);
-  document.body.appendChild(panel);
-
-  // Wire up the drag-to-resize. Pointer events on the left edge update the
-  // panel's width as the user drags. Updates Leaflet's size each frame so
-  // the map keeps fitting the panel.
-  (function(){
-    var dragging = false;
-    function onMove(e){
-      if (!dragging) return;
-      var x = e.clientX != null ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
-      var newWidth = Math.max(320, Math.min(window.innerWidth - 320, window.innerWidth - x));
-      panel.style.width = newWidth + "px";
-      var st = _pmMaps["tb-pm-map-modal"];
-      if (st && st.map && st.map.invalidateSize) {
-        try { st.map.invalidateSize(); } catch(_){}
+  // Notify the standalone window if it's still open. The window polls
+  // anyway, but pushing on every toggle keeps it instant.
+  if (window._tbPmMapWindow && !window._tbPmMapWindow.closed) {
+    try {
+      if (typeof window._tbPmMapWindow.maxRefresh === "function") {
+        window._tbPmMapWindow.maxRefresh();
       }
-    }
-    function onUp(){
-      dragging = false;
-      document.body.style.userSelect = "";
-      document.body.style.cursor = "";
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-      window.removeEventListener("touchmove", onMove);
-      window.removeEventListener("touchend", onUp);
-    }
-    function onDown(e){
-      dragging = true;
-      document.body.style.userSelect = "none";
-      document.body.style.cursor = "ew-resize";
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
-      window.addEventListener("touchmove", onMove);
-      window.addEventListener("touchend", onUp);
-      e.preventDefault();
-    }
-    dragHandle.addEventListener("mousedown", onDown);
-    dragHandle.addEventListener("touchstart", onDown);
-  })();
-
-  // Render after the div has dimensions
-  setTimeout(function(){
-    _renderPlacePickerMap("tb-pm-map-modal");
-    var st = _pmMaps["tb-pm-map-modal"];
-    if (st && st.map && st.map.invalidateSize) { try { st.map.invalidateSize(); } catch(_){} }
-  }, 60);
+    } catch(_) {}
+  }
 }
 
-function closePlacePickerMapModal(){
-  var ov = document.getElementById("tb-pm-modal-overlay");
-  if (!ov) return;
-  if (_pmMaps["tb-pm-map-modal"]) {
-    try { _pmMaps["tb-pm-map-modal"].map.remove(); } catch(_){}
-    delete _pmMaps["tb-pm-map-modal"];
+// Open the place-picker map in a REAL separate browser window via window.open.
+// The new window loads Leaflet from CDN and polls the parent (this window)
+// for state — _tb.placeActivities and _coarseGeocode — so toggles in the
+// parent reflect immediately. This replaces the old in-page side panel,
+// which couldn't be moved to a second monitor.
+function openPlacePickerMapModal(){
+  // If the window is already open, just focus it.
+  if (window._tbPmMapWindow && !window._tbPmMapWindow.closed) {
+    try { window._tbPmMapWindow.focus(); } catch(_){}
+    return;
   }
-  if (ov._escHandler) document.removeEventListener("keydown", ov._escHandler);
-  if (ov.parentNode) ov.parentNode.removeChild(ov);
+  var w = window.open(
+    "",
+    "MaxPickerMap",
+    "width=1100,height=780,resizable=yes,scrollbars=no,menubar=no,toolbar=no,location=no,status=no"
+  );
+  if (!w) {
+    alert("Please allow pop-ups for this site so the map window can open.");
+    return;
+  }
+  window._tbPmMapWindow = w;
+
+  // Build a self-contained HTML page in the new window. It loads Leaflet
+  // from CDN, paints pins from window.opener._tb.placeActivities + the
+  // _coarseGeocode cache, and polls every 600ms to pick up parent changes.
+  var html = ''
+    + '<!DOCTYPE html><html><head><meta charset="utf-8">'
+    + '<title>Map — Recommended destinations</title>'
+    + '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />'
+    + '<style>'
+    + 'html,body{margin:0;padding:0;height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#fff;}'
+    + '#hdr{padding:10px 16px;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between;background:#fafafa;}'
+    + '#ttl{font-size:13px;font-weight:700;color:#1a1a1a;}'
+    + '#legend{font-size:10.5px;color:#666;display:flex;gap:12px;align-items:center;}'
+    + '.lg-dot{display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:middle;margin-right:4px;box-sizing:border-box;}'
+    + '#map{position:absolute;top:42px;left:0;right:0;bottom:0;background:#eaf0ed;}'
+    + '.pm-pin-iconic{box-shadow:0 0 0 2px #b28a2e,0 1px 3px rgba(0,0,0,0.3) !important;}'
+    + '</style>'
+    + '</head><body>'
+    + '<div id="hdr">'
+    +   '<div id="ttl">Recommended destinations</div>'
+    +   '<div id="legend">'
+    +     '<span><span class="lg-dot" style="background:#1a5fa8;"></span>kept</span>'
+    +     '<span><span class="lg-dot" style="background:#bbb;"></span>not kept</span>'
+    +     '<span><span class="lg-dot" style="background:#1a5fa8;border:2px solid #b28a2e;"></span>iconic</span>'
+    +   '</div>'
+    + '</div>'
+    + '<div id="map"></div>'
+    + '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""><\/script>'
+    + '<script>'
+    + '(function(){'
+    +   'var map=null,markers={},lastSig="";'
+    +   'function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"}[c];});}'
+    +   'function getState(){'
+    +     'try{'
+    +       'var op=window.opener;if(!op||op.closed)return null;'
+    +       'var items=(op._tb&&op._tb.placeActivities)||[];'
+    +       'var gc=op._coarseGeocode||{};'
+    +       'var byKey={};'
+    +       'items.forEach(function(it){'
+    +         'var iconicItem=!!it.iconic;'
+    +         '(it.requiredPlaces||[]).forEach(function(p){'
+    +           'if(!p||!p.place)return;'
+    +           'var k=p.place.toLowerCase();'
+    +           'if(!byKey[k])byKey[k]={place:p.place,lat:null,lng:null,keep:false,iconic:false};'
+    +           'if(p._keep)byKey[k].keep=true;'
+    +           'if(iconicItem||p.iconic)byKey[k].iconic=true;'
+    +           'var coords=gc[k];'
+    +           'if(coords&&isFinite(coords[0])){byKey[k].lat=coords[0];byKey[k].lng=coords[1];}'
+    +         '});'
+    +       '});'
+    +       'var out=[];'
+    +       'Object.keys(byKey).forEach(function(k){var v=byKey[k];if(v.lat!=null)out.push(v);});'
+    +       'return out;'
+    +     '}catch(e){return null;}'
+    +   '}'
+    +   'function pinHtml(info){'
+    +     'var color=info.keep?"#1a5fa8":"#bbb";'
+    +     'var border=info.iconic?"#b28a2e":"#fff";'
+    +     'var size=info.keep?22:16;'
+    +     'var label=info.keep?esc(info.place.substring(0,2)):"";'
+    +     'return \'<div style="background:\'+color+\';color:#fff;border-radius:50%;width:\'+size+\'px;height:\'+size+\'px;border:2px solid \'+border+\';box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;">\'+label+\'</div>\';'
+    +   '}'
+    +   'function tooltipText(info){'
+    +     'return info.place+(info.iconic?" · ★ iconic":"")+(info.keep?" · kept":"");'
+    +   '}'
+    +   'function scrollOpenerToPlace(name){'
+    +     'try{'
+    +       'var op=window.opener;if(!op||op.closed)return;'
+    +       'var rows=op.document.querySelectorAll(".tb-dest-major");'
+    +       'for(var i=0;i<rows.length;i++){'
+    +         'if((rows[i].textContent||"").toLowerCase().indexOf(name.toLowerCase())!==-1){'
+    +           'rows[i].scrollIntoView({behavior:"smooth",block:"center"});'
+    +           'rows[i].style.transition="background-color 0.4s";'
+    +           'rows[i].style.backgroundColor="#fff7d4";'
+    +           'setTimeout(function(){rows[i].style.backgroundColor="";},1600);'
+    +           'op.focus();'
+    +           'break;'
+    +         '}'
+    +       '}'
+    +     '}catch(_){}'
+    +   '}'
+    +   'function renderMap(){'
+    +     'if(typeof L==="undefined")return;'
+    +     'if(!map){'
+    +       'map=L.map("map",{zoomControl:true,scrollWheelZoom:true,attributionControl:false}).setView([46.8,8.2],6);'
+    +       'L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:18}).addTo(map);'
+    +     '}'
+    +     'var pts=getState();'
+    +     'if(!pts){document.getElementById("ttl").textContent="Map — parent window closed";return;}'
+    +     'var sig=pts.map(function(p){return p.place+":"+(p.keep?1:0)+":"+(p.iconic?1:0);}).join("|");'
+    +     'if(sig===lastSig)return;'
+    +     'lastSig=sig;'
+    +     'var seen={};var bounds=[];'
+    +     'pts.forEach(function(info){'
+    +       'var k=info.place.toLowerCase();seen[k]=1;'
+    +       'var size=info.keep?22:16;'
+    +       'var icon=L.divIcon({html:pinHtml(info),className:"",iconSize:[size,size],iconAnchor:[size/2,size/2]});'
+    +       'var ll=[info.lat,info.lng];bounds.push(ll);'
+    +       'if(markers[k]){markers[k].setIcon(icon);markers[k].setLatLng(ll);'
+    +         'if(markers[k].getTooltip())markers[k].setTooltipContent(tooltipText(info));'
+    +       '}else{'
+    +         'var m=L.marker(ll,{icon:icon}).addTo(map);'
+    +         'm.bindTooltip(tooltipText(info),{direction:"top",offset:[0,-10]});'
+    +         '(function(name){m.on("click",function(){scrollOpenerToPlace(name);});})(info.place);'
+    +         'markers[k]=m;'
+    +       '}'
+    +     '});'
+    +     'Object.keys(markers).forEach(function(k){if(!seen[k]){try{map.removeLayer(markers[k]);}catch(_){}delete markers[k];}});'
+    +     'if(bounds.length>=2){try{map.fitBounds(bounds,{padding:[40,40],maxZoom:9,animate:false});}catch(_){}}'
+    +     'else if(bounds.length===1){map.setView(bounds[0],8,{animate:false});}'
+    +   '}'
+    +   'window.maxRefresh=function(){lastSig="";renderMap();};'
+    +   'function tick(){renderMap();}'
+    +   'setInterval(tick,600);'
+    +   'setTimeout(renderMap,80);'
+    +   'window.addEventListener("resize",function(){if(map&&map.invalidateSize)map.invalidateSize();});'
+    +   'window.addEventListener("beforeunload",function(){'
+    +     'try{if(window.opener&&!window.opener.closed)window.opener._tbPmMapWindow=null;}catch(_){}'
+    +   '});'
+    + '})();'
+    + '<\/script>'
+    + '</body></html>';
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+}
+
+// Kept for back-compat callers (if any) — closes the standalone window if open.
+function closePlacePickerMapModal(){
+  if (window._tbPmMapWindow && !window._tbPmMapWindow.closed) {
+    try { window._tbPmMapWindow.close(); } catch(_){}
+  }
+  window._tbPmMapWindow = null;
 }
 
 // ===== Place-picker map =====
