@@ -3785,6 +3785,30 @@ async function runCandidateSearch(requiredPlaces) {
       return true;
     });
     allCands.forEach(function(c,i){ c.id="c"+i; c.status=null; });
+    // Apply user-picked nights from the activity-place picker. Without this,
+    // each candidate inherits stayRange "2-4 nights" from the LLM and
+    // buildFromCandidates parses ~3 nights × N places — completely ignoring
+    // the per-place nights the user dialed in. The picker shows "22 nights
+    // total" but the trip materializes at ~64 nights. Same dedup logic as
+    // _updatePlaceActivitySummary: take MAX nights any non-route activity
+    // proposes for a given place.
+    if (Array.isArray(_mdcItems) && _mdcItems.length) {
+      var pickedNightsByPlace = {};
+      _mdcItems.forEach(function(it){
+        if (it.type === "route") return; // routes don't claim nights
+        (it.requiredPlaces||[]).forEach(function(p){
+          if (!p || !p.place || typeof p.nights !== "number") return;
+          var k = (typeof _normPlaceName === "function" ? _normPlaceName(p.place) : p.place.toLowerCase());
+          if (pickedNightsByPlace[k] == null || p.nights > pickedNightsByPlace[k]) {
+            pickedNightsByPlace[k] = p.nights;
+          }
+        });
+      });
+      allCands.forEach(function(c){
+        var k = (typeof _normPlaceName === "function" ? _normPlaceName(c.place||"") : (c.place||"").toLowerCase());
+        if (pickedNightsByPlace[k] != null) c.nights = pickedNightsByPlace[k];
+      });
+    }
     _tb.candidates = allCands;
     _tb.p2Failed = p2Failed;
     console.log("[Max] runCandidateSearch: total candidates:", allCands.length,
@@ -4613,18 +4637,20 @@ function _renderPlaceActivityItems(){
   });
 
   // Sort: route-type sections last, condition-type last-of-last, others in their
-  // natural order. We check the section NAME first (because the LLM sometimes
-  // emits trains as type=activity rather than type=route), then fall back to
-  // the first item's type.
+  // natural order. Defensive ranking — the LLM's section names vary and its
+  // item.type fields vary too, so we OR together every signal that says
+  // "this is transit between destinations" before falling back to defaults.
   sectionOrder.sort(function(a, b){
     function rank(name){
-      // Train/route sections by name, regardless of items' types.
-      if (/iconic trains|named trains|scenic trains|between destinations/i.test(name)) return 2;
-      if (/wait for weather|aurora|seasonal/i.test(name)) return 3;
-      var first = (bySection[name] || [])[0];
-      var t = first ? first.type : "";
-      if (t === "condition") return 3;
-      if (t === "route") return 2;
+      var its = bySection[name] || [];
+      var anyRoute = its.some(function(it){ return it && it.type === "route"; });
+      var anyCondition = its.some(function(it){ return it && it.type === "condition"; });
+      // Condition trumps route (last-of-last).
+      if (anyCondition || /aurora|weather|seasonal|wait for/i.test(name)) return 3;
+      // Routes — match by item type, or by any whiff of train/rail/transit
+      // language in the section name. Be permissive on names since the LLM
+      // labels things inconsistently.
+      if (anyRoute || /\btrain|\brail|between destinations|scenic route|named.{0,15}train/i.test(name)) return 2;
       return 1; // activities, manual
     }
     var ra = rank(a), rb = rank(b);
@@ -4644,11 +4670,12 @@ function _renderPlaceActivityItems(){
     // rendering: each row is the endpoint PAIR (Zermatt ↔ St. Moritz) rather
     // than each endpoint as a separate destination row. Trains link
     // destinations; rendering them as pairs reads as connections.
-    // Match by name OR by all items being type=route, since LLM sometimes
-    // mislabels trains as type=activity.
-    var nameSaysRoute = /iconic trains|named trains|scenic trains|between destinations/i.test(sec);
-    var typeSaysRoute = secItems.every(function(it){ return it && it.type === "route"; });
-    var isRouteSection = nameSaysRoute || typeSaysRoute;
+    // Match permissively: name pattern OR any item is type=route. Even if
+    // some items are mislabeled type=activity, if the section is named like
+    // a train section, render it as routes so the user reads pairs.
+    var nameSaysRoute = /\btrain|\brail|between destinations|scenic route|named.{0,15}train/i.test(sec);
+    var anyTypeRoute = secItems.some(function(it){ return it && it.type === "route"; });
+    var isRouteSection = nameSaysRoute || anyTypeRoute;
 
     if (isRouteSection) {
       var secKeptR = secItems.some(function(it){
@@ -6958,9 +6985,18 @@ function closePlacesOverlay(){
   // "trip is always definite, always fluid" model from STATE.md — closing the
   // Places overlay should silently materialize a trip, not dump the user back
   // to home because they didn't click a bunch of explicit keeps.
+  // EXCEPTION: in place mode (Mode 2 picker), the user already curated their
+  // exact picks on the activity-place page. The candidate explorer adds
+  // discovery suggestions (major cities + thematic) on top — those should
+  // stay null unless the user explicitly keeps them. Otherwise the trip's
+  // night count balloons past what the picker promised. Only auto-keep
+  // candidates that came from the picker (_required=true).
   var cands = _tb.candidates || [];
+  var isPlaceMode = (_tb.tripMode === "place");
   cands.forEach(function(c){
-    if (c.status !== "reject" && c.status !== "keep") c.status = "keep";
+    if (c.status === "reject" || c.status === "keep") return;
+    if (isPlaceMode && !c._required) return; // discoveries stay null
+    c.status = "keep";
   });
   var kept = cands.filter(function(c){return c.status==="keep";});
   g("candidate-explorer-overlay").style.display="none";
