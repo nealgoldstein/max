@@ -827,10 +827,13 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 
 /* Destination-major layout — destination on left, that section's activities
    for that destination on the right. Same destination can appear in multiple
-   sections; nights only display on first appearance. */
-.tb-act-table-row.tb-dest-major{padding:10px 14px;background:#fff;}
-.tb-act-table-row.tb-dest-major.on{box-shadow:0 0 0 1px #1a5fa8 inset;border-color:#1a5fa8;}
-.tb-act-table-row.tb-dest-major.off{opacity:0.85;}
+   sections; nights only display on first appearance. No box around each
+   destination — it makes the page feel boxed-up, when the goal is two
+   parallel lists reading down the page. */
+.tb-act-table-row.tb-dest-major{padding:10px 4px;background:transparent;border:none;box-shadow:none;border-radius:0;border-bottom:1px solid #f0ece1;margin-bottom:0;}
+.tb-act-table-row.tb-dest-major:last-child{border-bottom:none;}
+.tb-act-table-row.tb-dest-major.on{background:transparent;box-shadow:none;border-color:#f0ece1;}
+.tb-act-table-row.tb-dest-major.off{opacity:0.65;}
 .tb-act-table-row.tb-dest-major .tb-act-name{font-size:14px;font-weight:700;color:#1a1a1a;}
 .tb-dest-meta{font-size:11px;color:#888;margin-top:3px;display:flex;align-items:center;gap:4px;flex-wrap:wrap;}
 .tb-dest-nights{color:#1a5fa8;font-weight:600;}
@@ -4370,6 +4373,8 @@ async function generateActivitiesForPlace(){
     + "  - At least 5 items in \"Travel on iconic trains\": Glacier Express, Bernina Express, GoldenPass Line, Gotthard Panorama Express, Centovalli Express. Don\u2019t emit fewer than 5.\n"
     + "  - At least 5 items in \"Ride mountain railways to summits\": pick from Jungfraubahn, Gornergrat Bahn, Pilatus Bahn, Rigi Bahn, Brienzer Rothorn Bahn, Schynige Platte, Klein Matterhorn, Schilthornbahn, Stanserhorn.\n"
     + "  - At least 2 items in \"Sail scenic lake circuits\": Lake Geneva CGN with Chillon, Lake Lucerne Tell Route with Pilatus or Rigi, Brienzersee + Rothorn Bahn.\n"
+    + "  - At least 4 items in \"Visit natural wonders\": Rhine Falls (Schaffhausen), Aletsch Glacier viewpoint (from Bettmeralp/Riederalp), Tr\u00fcmmelbach Falls (Lauterbrunnen valley), Reichenbach Falls (Meiringen), Lavaux vineyard terraces (UNESCO) \u2014 pick at least 4 of these or analogous natural sites.\n"
+    + "  - At least 4 items in \"Explore the cities\": Z\u00fcrich (Old Town + Bahnhofstrasse + Lake Z\u00fcrich), Lucerne (Chapel Bridge + Old Town + waterfront), Bern (UNESCO Old Town + Aare swim), Geneva (Old Town + Jet d'Eau + Lake L\u00e9man), Lugano (Italian Switzerland), Basel (Rheinschwimmen + art museums) \u2014 pick at least 4 of these or analogous urban experiences.\n"
     + "If you\u2019re below those minimums, you\u2019re dropping things travelers come for \u2014 go back and add them. Don\u2019t silently shrink the list to make space for other categories.\n\n"
     + "MULTI-MODAL ROUTES: Many of the best scenic travel legs are train+boat or train+cogwheel+boat circuits. Always include these when regionally iconic. For Switzerland: Lake Geneva Wine & Castle Circuit (Geneva \u2192 Lausanne \u2192 Montreux by train, CGN paddle steamer to Ch\u00e2teau de Chillon, return); Lake Lucerne Tell Route (boat across Vierwaldst\u00e4ttersee to Alpnachstad \u2192 Pilatus cogwheel, or to Vitznau \u2192 Rigi); Brienzersee Steamer + Rothorn Bahn (Interlaken \u2192 Brienz \u2192 steam cogwheel). Use transportModes [\"train\",\"boat\",\"train\"] etc. and list every major node in requiredPlaces.\n\n"
     + "FACTUAL ACCURACY for named scenic trains \u2014 endpoints must be correct:\n"
@@ -4529,28 +4534,52 @@ function _renderPlaceActivityItems(){
   list.innerHTML = "";
   var items = _tb.placeActivities || [];
 
-  // Bucket items by section, preserving the order of first appearance so
-  // the LLM's chosen ordering (routes first, conditions last) survives.
+  // Bucket items by section. Dedup by case-insensitive name so the LLM's
+  // occasional "Ride mountain railways to summits" twice (with slight
+  // capitalization differences) collapses into one section. Also reorder:
+  // route-type sections (trains) move to the END since they're transit
+  // between the trip's real destinations.
   var sectionOrder = [];
   var bySection = {};
+  var sectionKeys = {}; // normalized lowercased -> canonical display name
   items.forEach(function(item){
-    // Recompute checked state from per-place keep flags
     var anyKept = (item.requiredPlaces||[]).some(function(p){ return p && p._keep; });
     item.checked = anyKept;
-    // Items without an LLM-assigned section land in a fallback bucket so
-    // they still render — better than swallowing them silently.
     var sec = (item.section || "").trim();
     if (!sec) {
-      sec = item.type === "route" ? "Travel between places"
+      sec = item.type === "route" ? "Travel on iconic trains between destinations"
           : item.type === "condition" ? "Wait for weather"
           : item.type === "manual" ? "Things you added"
           : "Other things to do";
     }
-    if (!bySection[sec]) {
+    // Rename "Travel on iconic trains" → "Travel on iconic trains between
+    // destinations" so the user reads the section as connections, not
+    // standalone destinations.
+    if (/^travel on iconic trains$/i.test(sec)) sec = "Travel on iconic trains between destinations";
+    var secKey = sec.toLowerCase();
+    if (!sectionKeys[secKey]) {
+      sectionKeys[secKey] = sec;
       bySection[sec] = [];
       sectionOrder.push(sec);
+    } else {
+      sec = sectionKeys[secKey]; // canonicalize back to the first-seen casing
     }
     bySection[sec].push(item);
+  });
+
+  // Sort: route-type sections last, condition-type last-of-last, others in their
+  // natural order. Section type derived from the first item's type.
+  sectionOrder.sort(function(a, b){
+    function rank(name){
+      var first = (bySection[name] || [])[0];
+      var t = first ? first.type : "";
+      if (t === "condition") return 3;
+      if (t === "route") return 2;
+      return 1; // activities, manual
+    }
+    var ra = rank(a), rb = rank(b);
+    if (ra !== rb) return ra - rb;
+    return 0; // stable
   });
 
   // Track which destinations have already shown their nights (so the same
@@ -4560,6 +4589,61 @@ function _renderPlaceActivityItems(){
 
   sectionOrder.forEach(function(sec){
     var secItems = bySection[sec];
+
+    // Determine if this is a route section. Route items get a different
+    // rendering: each row is the endpoint PAIR (Zermatt ↔ St. Moritz) rather
+    // than each endpoint as a separate destination row. Trains link
+    // destinations; rendering them as pairs reads as connections.
+    var isRouteSection = secItems.every(function(it){ return it && it.type === "route"; });
+
+    if (isRouteSection) {
+      var secKeptR = secItems.some(function(it){
+        return (it.requiredPlaces||[]).some(function(p){ return p && p._keep; });
+      });
+      var hdrWrapR = document.createElement("div");
+      hdrWrapR.className = "tb-act-section-hdr" + (secKeptR ? " on" : "");
+      hdrWrapR.innerHTML = '<div class="tb-act-section-title">' + _pmEsc(sec) + '</div>'
+        + '<div class="tb-act-section-count">' + secItems.length + ' route' + (secItems.length===1?'':'s') + '</div>';
+      list.appendChild(hdrWrapR);
+
+      secItems.forEach(function(item){
+        var anyKept = (item.requiredPlaces||[]).some(function(p){ return p && p._keep; });
+        item.checked = anyKept;
+        var iconicTag = item.iconic ? '<span style="font-size:9px;color:#b28a2e;font-weight:700;margin-left:6px;">★ iconic</span>' : '';
+        var eps = item.endpoints || item.requiredPlaces || [];
+        var arrow = item.direction === "either" ? " ↔ " : " → ";
+        var pairText = eps.map(function(p){return _pmEsc(p && p.place || "");}).filter(Boolean).join(arrow);
+        var nightsRefNote = "";
+        eps.forEach(function(p){
+          if (!p || !p.place) return;
+          var k = p.place.toLowerCase();
+          if (!shownIn[k]) shownIn[k] = sec; // routes don't claim nights
+        });
+        var row = document.createElement("div");
+        row.className = "tb-act-table-row tb-dest-major" + (item.checked ? " on" : " off");
+        row.id = "tb-place-act-route-" + (item.id || ("r-" + Math.random().toString(36).substr(2,5)));
+        row.innerHTML = '<div class="tb-act-col-left">'
+          + '<div style="display:flex;align-items:flex-start;gap:8px;">'
+          + '<div class="tb-act-check'+(item.checked?" on":"")+'" onclick="togglePlaceActivity(&#39;'+item.id+'&#39;)" title="Toggle this route"></div>'
+          + '<div style="flex:1;min-width:0;cursor:pointer;" onclick="togglePlaceActivity(&#39;'+item.id+'&#39;)">'
+          + '<div class="tb-act-name">'+pairText+'</div>'
+          + '<div class="tb-dest-meta" style="color:#888;font-size:11px;">scenic travel · transit, no overnight</div>'
+          + '</div>'
+          + '</div>'
+          + '</div>'
+          + '<div class="tb-act-col-right">'
+          + '<div class="tb-activity-row" style="display:flex;align-items:flex-start;gap:8px;padding:5px 0;">'
+          + '<div class="tb-act-check small'+(item.checked?" on":"")+'" onclick="togglePlaceActivity(&#39;'+item.id+'&#39;)"></div>'
+          + '<div style="flex:1;min-width:0;cursor:pointer;" onclick="togglePlaceActivity(&#39;'+item.id+'&#39;)">'
+          +   '<div style="font-size:11.5px;font-weight:600;color:#1a1a1a;">'+_pmEsc(item.name||"")+iconicTag+'</div>'
+          +   (item.description ? '<div style="margin-top:2px;font-size:10.5px;color:#666;">'+_pmEsc(item.description)+'</div>' : '')
+          + '</div>'
+          + '</div>'
+          + '</div>';
+        list.appendChild(row);
+      });
+      return; // skip the destination-major path for this section
+    }
 
     // Re-group section items by destination. Each destination gets a row;
     // its activities for THIS section sit alongside. Same destination can
