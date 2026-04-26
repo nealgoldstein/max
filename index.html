@@ -4311,7 +4311,7 @@ async function generateActivitiesForPlace(){
   _tb.placeContext = ctx;
 
   var btn = document.getElementById("tb-place-generate-btn");
-  if(btn){ btn.disabled = true; btn.classList.add("tb-btn-disabled"); btn.textContent = "Thinking through " + place + "\u2026"; }
+  if(btn){ btn.disabled = true; btn.classList.add("tb-btn-disabled"); btn.textContent = "Navigating " + place + "\u2026"; }
 
   // Show the list area with a loading state
   var body = document.querySelector(".tb-body");
@@ -4320,7 +4320,7 @@ async function generateActivitiesForPlace(){
   var wrap = document.createElement("div");
   wrap.id = "tb-place-act-list-wrap";
   wrap.style.marginTop = "22px";
-  wrap.innerHTML = '<div class="tb-act-loading"><div style="font-size:22px;color:#888;animation:spin 1.2s linear infinite;">\u2736</div><div>Finding the iconic things to do in '+place+'\u2026</div><div style="font-size:10px;color:#bbb;">Usually 20\u201340 seconds.</div></div>';
+  wrap.innerHTML = '<div class="tb-act-loading"><div style="font-size:22px;color:#888;animation:spin 1.2s linear infinite;">\u2736</div><div>Navigating '+place+'\u2026</div><div style="font-size:10px;color:#bbb;">Usually 20\u201340 seconds.</div></div>';
   body.appendChild(wrap);
 
   var pmChips = (_tb.chips || []).filter(Boolean);
@@ -8801,6 +8801,44 @@ async function buildFromCandidates(){
     }
   })();
 
+  // Mirror the entry-stop logic for the exit city. If the user set an exit
+  // (e.g. "Zurich" because that's where they fly home from) and the LAST
+  // ordered destination isn't already that exit city, append a 1-night
+  // departure stop. Same rationale as entry: without this the trip ends at
+  // whatever the last kept destination was, leaving the return-flight city
+  // implicit and confusing.
+  (function(){
+    var exit = (_tb.tbExit || "").trim();
+    if (!exit) return;
+    var exitN = _normPlaceName(exit);
+    var lastMatches = ordered.length && (function(){
+      var lN = _normPlaceName(ordered[ordered.length - 1].place);
+      return lN.indexOf(exitN) >= 0 || exitN.indexOf(lN) >= 0;
+    })();
+    if (lastMatches) return; // exit already terminates the trip
+    var exitStop = {
+      id: "c-exit-" + Date.now(),
+      place: exit,
+      country: (_tb.region || ""),
+      role: "departure",
+      stayRange: "1 night",
+      // 1 night at the exit city — arrive late, sleep, fly out the next
+      // morning. The "next day" is the flight day; it doesn't need its own
+      // overnight slot. User can bump to 2 nights if they want a buffer
+      // day in town before flying.
+      nights: 1,
+      whyItFits: "Where you depart — Max suggests one night here so a late arrival from your last stop doesn't push you straight onto the flight. Bump to 2 nights if you want a buffer day in town before flying.",
+      tradeoffs: "",
+      tags: ["departure"],
+      _exitStop: true,
+      lat: null, lng: null
+    };
+    ordered = ordered.concat([exitStop]);
+    if (orderResult.reasoning) {
+      orderResult.reasoning.push("Ending in " + exit + " — that's where you depart from. Edit or drop if you'd rather skip the buffer night.");
+    }
+  })();
+
   // If entry was inferred (no arrival was set by the user), persist it so the
   // Step 2 form shows it filled in with a "Max suggested" marker, and the brief
   // accurately reflects what the trip is built on.
@@ -9959,9 +9997,11 @@ async function geocodeEssentials(dest){
   autoSave();
 }
 
-async function generateCityData(place,destId){
+async function generateCityData(place,destId,_isAutoRetry){
   var key=place.toLowerCase();
-  if(_generatedCityData[key]&&!_generatedCityData[key].loading)return;
+  // Skip the "already cached" guard on auto-retry — we deliberately want to
+  // regenerate after a failure.
+  if(!_isAutoRetry && _generatedCityData[key]&&!_generatedCityData[key].loading)return;
   _generatedCityData[key]={loading:true};
 
   // First: geocode the city via Nominatim so map shows correct location even with no API key
@@ -10136,11 +10176,22 @@ async function generateCityData(place,destId){
       }
     }
   }catch(err){
+    // Auto-retry once silently before showing failure to the user. The first
+    // failure is often a transient hiccup — timeout, parse glitch, brief
+    // network blip. Worth one retry before bothering the user.
+    if (!_isAutoRetry) {
+      console.warn('[Max] generateCityData first attempt failed; auto-retrying once. Error:', err && err.message);
+      // Preserve cityCenter, drop the cached entry so the retry doesn't short-circuit
+      var prev = _generatedCityData[key] || {};
+      delete _generatedCityData[key];
+      // Re-call ourselves with the retry flag set
+      return generateCityData(place, destId, true);
+    }
     // Preserve any geocoded city center, just clear the loading state
     var existingData=_generatedCityData[key]||{};
     _generatedCityData[key]={cityCenter:existingData.cityCenter||null,loading:false,failed:true};
     var errDetail=err&&err.message?err.message:'Unknown error';
-    console.error('generateCityData failed:',errDetail);
+    console.error('generateCityData failed (after auto-retry):',errDetail);
     var d2=getDest(destId);
     if(d2&&(!d2.suggestions||d2.suggestions.length===0)){
       var noKeyMsg=errDetail.indexOf('No API key')>-1?
@@ -11486,6 +11537,22 @@ function updateMainMapMarkers(){
         showMapPinPanel(it,dest,tp,e);
       });})(item,itemType);
     }
+    // Hover tooltip — name + type so the user can identify pins by hovering.
+    // Sights / hotels / restaurants / suggestions all flow through here.
+    if (item) {
+      var tipName = item.n || item.name || "";
+      if (tipName) {
+        var tipType = "";
+        if (itemType === "sight") tipType = "sight";
+        else if (itemType === "suggestion") tipType = "sight (suggested)";
+        else if (itemType === "restaurant") tipType = "restaurant";
+        else if (itemType === "restaurant-suggestion") tipType = "restaurant (suggested)";
+        else if (itemType === "hotel") tipType = "hotel";
+        else if (itemType === "info") tipType = item.type || "info";
+        var tipText = tipName + (tipType ? " · " + tipType : "");
+        m.bindTooltip(tipText, {permanent:false, direction:"top", offset:[0,-14], className:"main-map-tooltip"});
+      }
+    }
     m.addTo(_mainMap); _mainMarkers.push(m); return m;
   }
 
@@ -11822,6 +11889,15 @@ function updateMainMap(){
       });
       var m=L.marker(c,{icon:icon}).addTo(_mainMap);
       (function(did){m.on("click",function(){selectDest(did);});})(dest.id);
+      // Hover tooltip — name + dates so the user can identify the pin without clicking
+      var tipText = dest.place;
+      if (dest.dateFrom && dest.dateTo) {
+        tipText += " · " + (typeof fmtD === "function" ? fmtD(dest.dateFrom)+"–"+fmtD(dest.dateTo) : (dest.dateFrom+"–"+dest.dateTo));
+      }
+      if (typeof dest.nights === "number") {
+        tipText += " (" + dest.nights + " night" + (dest.nights!==1?"s":"") + ")";
+      }
+      m.bindTooltip(tipText, {permanent:false, direction:"top", offset:[0,-16], className:"main-map-tooltip"});
       _mainMarkers.push(m);
       bounds.push(c);
     });
@@ -13524,6 +13600,13 @@ function buildHotelChip(bk, type){
 function buildTransportChip(bookedBk,routing,label,destId,tabTarget){
   var modeMap={"train":"\uD83D\uDE82","bus":"\uD83D\uDE8C","flight":"\u2708\uFE0F","ferry":"\u26F4\uFE0F"};
   var chip=document.createElement("div"); chip.className="itin-transport";
+  // Direction prefix ("Arriving from X" / "Departing to X") — always render
+  // so the user can tell which leg this chip refers to. Without this, the
+  // May 17 departure-transport chip and a same-day train suggestion looked
+  // identical (both just "SBB Regional Train · 1h 25min · CHF 25").
+  var dir=document.createElement("span"); dir.className="itin-transport-dir";
+  dir.style.cssText="font-size:10px;font-weight:700;color:#888;margin-right:8px;text-transform:uppercase;letter-spacing:0.04em;";
+  dir.textContent=label || "";
   var icon=document.createElement("span"); icon.className="itin-transport-icon";
   var name=document.createElement("span"); name.className="itin-transport-name";
   var meta=document.createElement("span"); meta.className="itin-transport-meta";
@@ -13543,7 +13626,9 @@ function buildTransportChip(bookedBk,routing,label,destId,tabTarget){
     meta.textContent=opt.meta||"";
   } else {
     icon.textContent="\u2194"; name.textContent=label; meta.textContent="see Routing";
+    dir.textContent=""; // label already in name slot \u2014 don't double up
   }
+  if (dir.textContent) chip.appendChild(dir);
   chip.appendChild(icon); chip.appendChild(name); chip.appendChild(meta);
   (function(did,tab){chip.onclick=function(){_activeDmSection=tab;selectDest(did);};})(destId,tabTarget||"routing");
   return chip;
@@ -14029,6 +14114,33 @@ function drawDestMode(destId){
         var routing2=getRouting(dest.place,toDestX.place);
         var chip2=buildTransportChip(bookedBk2,routing2,"Departing to "+toDestX.place,dest.id,"routing");
         if(chip2)blk.appendChild(chip2);
+      } else {
+        // Final destination of the trip — render a "Flight home" marker so
+        // the user can see the flight day in context. The flight day is the
+        // date AFTER this destination's last night. Without this, a
+        // 1-night exit stay reads as "you arrive then disappear" — the
+        // flight day has nowhere to live.
+        var flightDate=new Date(dest.dateTo+'T12:00:00');
+        flightDate.setDate(flightDate.getDate()+1);
+        var flightLbl=flightDate.toLocaleDateString("en-US",{month:"short",day:"numeric",weekday:"short"});
+        var flightWrap=document.createElement("div");
+        flightWrap.className="itin-transport";
+        flightWrap.style.cssText="background:#f7f4ec;border:1px dashed #d8d1c0;";
+        var flightDir=document.createElement("span");
+        flightDir.style.cssText="font-size:10px;font-weight:700;color:#888;margin-right:8px;text-transform:uppercase;letter-spacing:0.04em;";
+        flightDir.textContent="Flight home — "+flightLbl;
+        var flightIcon=document.createElement("span"); flightIcon.className="itin-transport-icon";
+        flightIcon.textContent=(_tb && _tb.exitMode==="train")?"🚂":(_tb && _tb.exitMode==="drive")?"🚗":"✈️";
+        var flightName=document.createElement("span"); flightName.className="itin-transport-name";
+        flightName.textContent=(_tb && _tb.gettingOut) ? _tb.gettingOut : "Departure day";
+        var flightMeta=document.createElement("span"); flightMeta.className="itin-transport-meta";
+        flightMeta.style.cssText="color:#999;";
+        flightMeta.textContent="from "+dest.place;
+        flightWrap.appendChild(flightDir);
+        flightWrap.appendChild(flightIcon);
+        flightWrap.appendChild(flightName);
+        flightWrap.appendChild(flightMeta);
+        blk.appendChild(flightWrap);
       }
     }
 
