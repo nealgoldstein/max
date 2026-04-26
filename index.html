@@ -1619,6 +1619,40 @@ function makePopup(name,typeLabel,note){
 var _coarseGeocode = _coarseGeocode || {};        // place -> [lat,lng]
 var _coarseGeocodeInFlight = _coarseGeocodeInFlight || {};
 
+// Country-override table for places whose country the LLM commonly
+// hallucinates (Tirano gets put in Albania/North Macedonia, Domodossola in
+// Russia, etc.). When parsing LLM activity output we override p.country with
+// the entry from this table, which protects against the country-confusion
+// hallucination at the data-validation layer (independent of prompt).
+var _builtinCountry = {
+  "tirano":"Italy","domodossola":"Italy","como":"Italy","milan":"Italy",
+  "chamonix":"France","annecy":"France",
+  "zurich":"Switzerland","zürich":"Switzerland","geneva":"Switzerland",
+  "genève":"Switzerland","bern":"Switzerland","basel":"Switzerland",
+  "lucerne":"Switzerland","luzern":"Switzerland","lausanne":"Switzerland",
+  "lugano":"Switzerland","st. gallen":"Switzerland","st gallen":"Switzerland",
+  "winterthur":"Switzerland","montreux":"Switzerland","vevey":"Switzerland",
+  "interlaken":"Switzerland","thun":"Switzerland","spiez":"Switzerland",
+  "schaffhausen":"Switzerland","chur":"Switzerland","davos":"Switzerland",
+  "st. moritz":"Switzerland","st moritz":"Switzerland","zermatt":"Switzerland",
+  "grindelwald":"Switzerland","wengen":"Switzerland","mürren":"Switzerland",
+  "lauterbrunnen":"Switzerland","appenzell":"Switzerland","andermatt":"Switzerland",
+  "kandersteg":"Switzerland","klosters":"Switzerland","locarno":"Switzerland",
+  "ascona":"Switzerland","bellinzona":"Switzerland","brienz":"Switzerland",
+  "gruyères":"Switzerland","gruyeres":"Switzerland","kilchberg":"Switzerland",
+  "broc":"Switzerland","epesses":"Switzerland","dezaley":"Switzerland",
+  "emmental":"Switzerland","bettmeralp":"Switzerland","riederalp":"Switzerland",
+  "jungfraujoch":"Switzerland","kleine scheidegg":"Switzerland",
+  "gornergrat":"Switzerland","pilatus kulm":"Switzerland","rigi kulm":"Switzerland",
+  "rothorn kulm":"Switzerland","alpnachstad":"Switzerland","vitznau":"Switzerland",
+  "schynige platte":"Switzerland","first":"Switzerland",
+  "château de chillon":"Switzerland","chateau de chillon":"Switzerland","chillon":"Switzerland",
+  "reykjavik":"Iceland","reykjavík":"Iceland","keflavik":"Iceland","keflavík":"Iceland",
+  "akureyri":"Iceland","vik":"Iceland","vík":"Iceland","höfn":"Iceland","hofn":"Iceland",
+  "selfoss":"Iceland","þingvellir":"Iceland","thingvellir":"Iceland","geysir":"Iceland",
+  "gullfoss":"Iceland","jökulsárlón":"Iceland","jokulsarlon":"Iceland","skaftafell":"Iceland"
+};
+
 // Built-in geo table for common destinations. We pre-seed _coarseGeocode
 // from this so the picker's first paint shows pins immediately without any
 // HTTP calls — Nominatim's free service rate-limits aggressively (1 req/sec
@@ -4598,15 +4632,22 @@ async function generateActivitiesForPlace(){
     + "MULTI-MODAL ROUTES: Many of the best scenic travel legs are train+boat or train+cogwheel+boat circuits. Always include these when regionally iconic. For Switzerland: Lake Geneva Wine & Castle Circuit (Geneva \u2192 Lausanne \u2192 Montreux by train, CGN paddle steamer to Ch\u00e2teau de Chillon, return); Lake Lucerne Tell Route (boat across Vierwaldst\u00e4ttersee to Alpnachstad \u2192 Pilatus cogwheel, or to Vitznau \u2192 Rigi); Brienzersee Steamer + Rothorn Bahn (Interlaken \u2192 Brienz \u2192 steam cogwheel). Use transportModes [\"train\",\"boat\",\"train\"] etc. and list every major node in requiredPlaces.\n\n"
     + "FACTUAL ACCURACY for named scenic trains \u2014 endpoints must be correct:\n"
     + "  - Glacier Express: Zermatt \u2194 St. Moritz. NOT from Zurich.\n"
-    + "  - Bernina Express: Chur \u2192 Tirano (Italy).\n"
+    + "  - Bernina Express: Chur \u2192 Tirano (Italy, Lombardy \u2014 lat ~46.22, lng ~10.17). Tirano is in ITALY. It is NOT Tirana (capital of Albania), NOT in North Macedonia, NOT anywhere in the Balkans. The Bernina Express crosses the Alps from Switzerland into Italy at Tirano.\n"
     + "  - GoldenPass Line: Lucerne \u2194 Montreux. NOT from Zurich.\n"
     + "  - Gotthard Panorama Express: Lucerne \u2194 Lugano.\n"
-    + "  - Centovalli Express: Locarno \u2194 Domodossola.\n"
+    + "  - Centovalli Express: Locarno \u2194 Domodossola (Italy, Piedmont \u2014 lat ~46.12, lng ~8.29). Domodossola is in ITALY. NOT to be confused with Domodedovo (a Moscow airport).\n"
     + "  - Jungfraubahn: Kleine Scheidegg \u2192 Jungfraujoch.\n"
     + "  - Gornergrat Bahn: Zermatt \u2192 Gornergrat.\n"
     + "  - Pilatus Bahn: Alpnachstad \u2192 Pilatus Kulm.\n"
     + "  - Rigi Bahn: Vitznau or Arth-Goldau \u2192 Rigi Kulm.\n"
     + "Travelers reach these via regular trains first; do not use airport cities as a route endpoint. If unsure of endpoints, omit the route rather than guess.\n\n"
+    + "COMMON CONFUSIONS to guard against (set country and lat/lng accordingly):\n"
+    + "  - Tirano (Italy, Lombardy) \u2260 Tirana (Albania)\n"
+    + "  - Domodossola (Italy) \u2260 Domodedovo (Russia)\n"
+    + "  - Como (Italy) \u2260 Comoros (East Africa)\n"
+    + "  - Geneva (Switzerland) \u2260 Gen\u00e8ve is the same place; Genoa (Genova) is in Italy\n"
+    + "  - Lucerne (Switzerland, Luzern) \u2260 Lucerna (Czech Republic, a different town)\n"
+    + "If you're not 100% certain a name resolves to where you think, OMIT the item rather than guess. Confidently wrong locations are worse than no result.\n\n"
     + "PLACES PER ACTIVITY \u2014 better to list many than few. The traveler wants to see options, not commit to a tight set. For an activity like \u201cmountain scenery\u201d in Switzerland, list 4\u20136 places (Zermatt, Lauterbrunnen, Jungfrau region, Engadin/St. Moritz, Appenzell, etc.). For \u201ccheese tasting,\u201d list 3\u20135 spots. For routes, requiredPlaces is the endpoint pair (and any major intermediate stops on multi-modal circuits).\n\n"
     + "PLACE NAMES \u2014 use the full disambiguating name a map service would resolve correctly. \u201cCh\u00e2teau de Chillon\u201d not just \u201cChillon\u201d (which matches a town in Spain). \u201cMont Saint-Michel\u201d not \u201cSaint-Michel\u201d. \u201cZurich\u201d (city) not \u201cKanton Z\u00fcrich\u201d. If a landmark sits in/near a town and the town is the actual base, use the town (e.g. \u201cMontreux\u201d for Chillon-area stays); but when the landmark IS the requiredPlace, use its full name. Always set the country field correctly \u2014 the geocoder filters by it.\n\n"
     + "NIGHTS PER PLACE \u2014 each entry in requiredPlaces gets a nights field with a sensible default range for doing this activity well at that place. Activities: typical nights to do the activity well there. Routes: 0 (route is transit, not a stay; days are spent at the endpoints). Conditions: nights needed to give the condition a real chance.\n\n"
@@ -4734,12 +4775,20 @@ async function generateActivitiesForPlace(){
     // source of pin coords now — Nominatim is only the fallback for
     // places the LLM didn't return coords for. Works for any region
     // (no rate limits, no CORS), unlike Nominatim.
+    // Also corrects p.country from _builtinCountry if the LLM hallucinated
+    // (e.g. Tirano in Albania/North Macedonia instead of Italy).
     (function _seedGeoFromItems(){
-      var seeded = 0;
-      function maybeSeed(p){
+      var seeded = 0, corrected = 0;
+      function fixPlace(p){
         if (!p || !p.place) return;
         var key = p.place.toLowerCase().trim();
         if (!key) return;
+        // Country correction: if we know the canonical country and the LLM
+        // disagrees, override. Don't blow away a country if we don't know.
+        if (_builtinCountry[key] && p.country !== _builtinCountry[key]) {
+          if (p.country) corrected++;
+          p.country = _builtinCountry[key];
+        }
         var lat = parseFloat(p.lat), lng = parseFloat(p.lng);
         if (!isFinite(lat) || !isFinite(lng)) return;
         if (lat === 0 && lng === 0) return; // sentinel "unknown"
@@ -4751,14 +4800,15 @@ async function generateActivitiesForPlace(){
         seeded++;
       }
       items.forEach(function(it){
-        (it.requiredPlaces||[]).forEach(maybeSeed);
-        (it.endpoints||[]).forEach(maybeSeed);
-        (it.viableLocations||[]).forEach(maybeSeed);
+        (it.requiredPlaces||[]).forEach(fixPlace);
+        (it.endpoints||[]).forEach(fixPlace);
+        (it.viableLocations||[]).forEach(fixPlace);
       });
       if (seeded > 0) {
         try { localStorage.setItem("max-coarse-geocode", JSON.stringify(_coarseGeocode)); } catch(_){}
         console.log("[Max] seeded " + seeded + " place coords from LLM (no Nominatim needed)");
       }
+      if (corrected > 0) console.warn("[Max] corrected " + corrected + " country fields from LLM hallucination (e.g. Tirano-in-Albania)");
     })();
   } catch(e){
     console.error("generateActivitiesForPlace failed:", e && e.message);
