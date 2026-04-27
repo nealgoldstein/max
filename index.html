@@ -13404,7 +13404,18 @@ function setLeftMode(mode){
   g("mode-trip-btn").className="mode-btn"+(mode==="trip"?" on":"");
   g("mode-dest-btn").className="mode-btn"+(mode==="dest"?" on":"");
   if(mode==="trip") drawTripMode();
-  else { if(activeDest)drawDestMode(activeDest); else drawTripMode(); }
+  else {
+    // When the user clicks the Destination tab, default to the FIRST
+    // destination of the trip — not whatever was last viewed (which could
+    // be stale from a previous session via localStorage). The "last
+    // viewed" path made Zermatt persist as the default for trips that
+    // hadn't even been opened recently. Clicking a specific destination
+    // card from within the dest view still works (drawDestMode is called
+    // directly with that id).
+    var firstId = (trip && trip.destinations && trip.destinations[0]) ? trip.destinations[0].id : null;
+    if (firstId) drawDestMode(firstId);
+    else drawTripMode();
+  }
   updateMainMap();
   // Reset scroll position on view switch — fresh view should start at top
   var _lpc = g("lp-content"); if(_lpc) _lpc.scrollTop = 0;
