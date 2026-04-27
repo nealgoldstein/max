@@ -7654,6 +7654,15 @@ function reopenPickerForEdit(){
     alert("Can't open the picker — overlay element missing. Reload the page and try again.");
     return;
   }
+  // The overlay lives inside #home-screen by default. When the app shell is
+  // mounted (trip view), #home-screen has display:none — which hides ALL
+  // descendants, even position:fixed ones. So when re-opening the picker
+  // from a built trip, hoist the overlay to be a direct child of <body>
+  // so it can render over the app shell. Round BZ — fixes "Edit destinations
+  // does nothing" symptom even though the JS was firing correctly.
+  if (ov.parentElement && ov.parentElement !== document.body) {
+    document.body.appendChild(ov);
+  }
   ov.style.display = "block";
   renderActivityPicker();
 }
