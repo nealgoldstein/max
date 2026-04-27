@@ -3582,6 +3582,21 @@ async function showMaxBridge(stage, onContinue, correctionHistory) {
 // Normalise place names for matching: lowercase, strip punctuation/accents,
 // collapse whitespace, remove common prefixes. "St. Moritz" and "Saint-Moritz"
 // and "st moritz" all normalise identically.
+// Title-case a city/place name so user-typed lowercase input ("zurich")
+// becomes display-friendly ("Zurich"). Handles multi-word names, hyphenated
+// names, and "St." prefixes. Preserves intentional all-caps for short
+// abbreviations like "ZRH" or "NYC" (≤4 chars, all letters).
+function _titleCaseCity(s){
+  if (!s) return s;
+  var t = String(s).trim();
+  if (!t) return t;
+  // If it's a short all-caps token (probably an airport code), leave it alone.
+  if (t.length <= 4 && /^[A-Z]+$/.test(t)) return t;
+  return t.toLowerCase().replace(/\b([a-zà-ÿ])([a-zà-ÿ']*)/g, function(_, first, rest){
+    return first.toUpperCase() + rest;
+  }).replace(/\bSt\b\.?/g, "St.");
+}
+
 function _normPlaceName(s){
   if(!s) return "";
   return String(s)
@@ -5734,10 +5749,10 @@ function renderActivityPicker(){
       +  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:8px;">Arrival / Departure</div>'
       +  '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'
       +    '<div><label style="display:block;font-size:10.5px;color:#666;margin-bottom:4px;">Arriving at</label>'
-      +      '<input class="tb-act-add-inp" id="tb-picker-entry" placeholder="e.g. Zurich" autocomplete="off" value="'+curEntry+'" oninput="_tb.entry=this.value.trim();" />'
+      +      '<input class="tb-act-add-inp" id="tb-picker-entry" placeholder="e.g. Zurich" autocomplete="off" value="'+curEntry+'" oninput="_tb.entry=this.value.trim();" onblur="this.value=_titleCaseCity(this.value);_tb.entry=this.value.trim();" />'
       +    '</div>'
       +    '<div><label style="display:block;font-size:10.5px;color:#666;margin-bottom:4px;">Departing from</label>'
-      +      '<input class="tb-act-add-inp" id="tb-picker-exit" placeholder="e.g. Zurich" autocomplete="off" value="'+curExit+'" oninput="_tb.tbExit=this.value.trim();" />'
+      +      '<input class="tb-act-add-inp" id="tb-picker-exit" placeholder="e.g. Zurich" autocomplete="off" value="'+curExit+'" oninput="_tb.tbExit=this.value.trim();" onblur="this.value=_titleCaseCity(this.value);_tb.tbExit=this.value.trim();" />'
       +    '</div>'
       +  '</div>'
       // Default ON — based on years of experience, a buffer night before
@@ -5880,6 +5895,10 @@ function skipPickerToCandidates(){
 }
 
 function continuePlaceModeToStep2(){
+  // Title-case any user-typed entry/exit so "zurich" → "Zurich". Catches
+  // the case where the user clicks Build without blurring the input first.
+  if (_tb.entry) _tb.entry = _titleCaseCity(_tb.entry);
+  if (_tb.tbExit) _tb.tbExit = _titleCaseCity(_tb.tbExit);
   // Only carry forward activities that have at least one _keep:true place.
   // For each, narrow requiredPlaces to just the kept ones \u2014 this is the
   // user's expressed commitment, not the full superset Max suggested.
@@ -7497,9 +7516,15 @@ function cancelEditCandidates(){
 // from trip.mdcItems + trip.brief; the picker's button reads "Save changes
 // →" instead of "Build trip →" and routes through saveActivityPickerEdits.
 function reopenPickerForEdit(){
+  console.log("[Max] reopenPickerForEdit called. trip.mdcItems length:", (trip && trip.mdcItems) ? trip.mdcItems.length : "(none)");
   if (!trip || !Array.isArray(trip.mdcItems) || !trip.mdcItems.length) {
     // No mdcItems snapshot — fall back to the legacy explorer.
-    if (typeof reopenCandidateExplorer === "function") reopenCandidateExplorer();
+    console.log("[Max] reopenPickerForEdit: no mdcItems, falling back to reopenCandidateExplorer");
+    if (typeof reopenCandidateExplorer === "function") {
+      reopenCandidateExplorer();
+    } else {
+      alert("Can't edit this trip — its picker data is missing. Try building a new trip.");
+    }
     return;
   }
   _tb = _tb || {};
@@ -7574,9 +7599,15 @@ function reopenPickerForEdit(){
   // Mirror into _mdcItems too — downstream code reads from both depending
   // on the path. Keep them in sync.
   _mdcItems = trip.mdcItems.slice();
+  console.log("[Max] reopenPickerForEdit: hydrated", _tb.placeActivities.length, "activities; opening picker");
   // Ensure the trip-brief overlay container is visible.
   var ov = g("trip-brief-overlay");
-  if (ov) ov.style.display = "block";
+  if (!ov) {
+    console.error("[Max] reopenPickerForEdit: #trip-brief-overlay not found — cannot show picker");
+    alert("Can't open the picker — overlay element missing. Reload the page and try again.");
+    return;
+  }
+  ov.style.display = "block";
   renderActivityPicker();
 }
 
@@ -7587,6 +7618,9 @@ function reopenPickerForEdit(){
 // preserved by snapshotting before rebuild and restoring matched by
 // place name afterward.
 async function saveActivityPickerEdits(){
+  // Title-case any user-typed entry/exit before save (catches no-blur path).
+  if (_tb.entry) _tb.entry = _titleCaseCity(_tb.entry);
+  if (_tb.tbExit) _tb.tbExit = _titleCaseCity(_tb.tbExit);
   var items = (_tb.placeActivities||[]).filter(function(i){
     return Array.isArray(i.requiredPlaces) && i.requiredPlaces.some(function(p){return p && p._keep;});
   }).map(function(i){
@@ -14152,6 +14186,38 @@ function drawTripMode(){
   }
 
   try {
+
+  // Trip dates strip — the headline of the trip page. "Aug 15 – Sep 8, 2026
+  // · 24 days · 19 destinations". Goes BEFORE the duration banner and the
+  // destinations list because the dates are what the trip is about — the
+  // user's planning is anchored on the calendar, not the destination list.
+  (function(){
+    if (!trip.destinations.length) return;
+    var first = trip.destinations[0], last = trip.destinations[trip.destinations.length - 1];
+    if (!first || !first.dateFrom || !last || !last.dateTo) return;
+    var fmt = function(iso){
+      try {
+        var d = new Date(iso + "T12:00:00");
+        return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      } catch(_) { return iso; }
+    };
+    var year = (function(){
+      try { return new Date(last.dateTo + "T12:00:00").getFullYear(); } catch(_) { return ""; }
+    })();
+    var totalNights = trip.destinations.reduce(function(s,d){return s+(d.nights||0);},0);
+    var totalDays = totalNights + 1;
+    var datesBar = document.createElement("div");
+    datesBar.style.cssText = "margin:0 2px 12px;padding:14px 16px;background:#fff;border:1px solid #e6e2d8;border-radius:8px;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;";
+    datesBar.innerHTML = ''
+      + '<div style="font-size:18px;font-weight:700;color:#1a1a1a;">'
+      +   fmt(first.dateFrom) + ' – ' + fmt(last.dateTo) + (year ? ', ' + year : '')
+      + '</div>'
+      + '<div style="font-size:12px;color:#666;">'
+      +   '<strong>' + totalDays + ' days</strong> · ' + totalNights + ' nights · '
+      +   trip.destinations.length + ' destination' + (trip.destinations.length !== 1 ? 's' : '')
+      + '</div>';
+    c.appendChild(datesBar);
+  })();
 
   // Duration banner — uses the same sum-of-nights math as the running total
   // below the Destinations header, so the two numbers never disagree.
