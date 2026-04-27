@@ -3977,17 +3977,23 @@ async function runCandidateSearch(requiredPlaces) {
     // Apply user-picked nights from the activity-place picker. Without this,
     // each candidate inherits stayRange "2-4 nights" from the LLM and
     // buildFromCandidates parses ~3 nights × N places — completely ignoring
-    // the per-place nights the user dialed in. The picker shows "22 nights
-    // total" but the trip materializes at ~64 nights. Same dedup logic as
-    // _updatePlaceActivitySummary: take MAX nights any non-route activity
-    // proposes for a given place.
+    // the per-place nights the user dialed in.
+    // Two maps:
+    //   pickedNightsByPlace — max nights from any NON-route activity (the
+    //     picker's "max nights per place" logic).
+    //   placesUsedByActivity — set of places that appear in at least one
+    //     non-route activity (so route-only endpoints can be detected and
+    //     filtered from auto-keep).
     if (Array.isArray(_mdcItems) && _mdcItems.length) {
       var pickedNightsByPlace = {};
+      var placesUsedByActivity = {};
       _mdcItems.forEach(function(it){
         if (it.type === "route") return; // routes don't claim nights
         (it.requiredPlaces||[]).forEach(function(p){
-          if (!p || !p.place || typeof p.nights !== "number") return;
+          if (!p || !p.place) return;
           var k = (typeof _normPlaceName === "function" ? _normPlaceName(p.place) : p.place.toLowerCase());
+          placesUsedByActivity[k] = true;
+          if (typeof p.nights !== "number") return;
           if (pickedNightsByPlace[k] == null || p.nights > pickedNightsByPlace[k]) {
             pickedNightsByPlace[k] = p.nights;
           }
@@ -4016,13 +4022,28 @@ async function runCandidateSearch(requiredPlaces) {
       "· p1Failed:", p1Failed, "· p2Failed:", p2Failed);
     // PLACE-MODE FAST PATH: when the user comes through the merged picker,
     // they've already curated. Skip the Places-to-think-about overlay and
-    // build the trip directly. Auto-keep all _required candidates (they're
-    // the picker's selections); other candidates (pCities/pThematic) stay
-    // null so they don't inflate the trip.
+    // build the trip directly. Auto-keep _required candidates that appear
+    // in at least one non-route activity. Route-only endpoints (Tirano,
+    // Domodossola, Pilatus Kulm, Rigi Kulm, Jungfraujoch, etc.) are
+    // transit nodes — they should not become destinations with overnight
+    // stays. The picker's "20 places · 24 nights" doesn't count them, so
+    // including them in the trip causes the build's day count to balloon
+    // past the picker's promise.
     if (_tb.tripMode === "place" && Array.isArray(_mdcItems) && _mdcItems.length) {
+      var routeOnlySkipped = 0;
       allCands.forEach(function(c){
-        if (c._required && c.status !== "reject") c.status = "keep";
+        if (!c._required || c.status === "reject") return;
+        var k = (typeof _normPlaceName === "function" ? _normPlaceName(c.place||"") : (c.place||"").toLowerCase());
+        if (placesUsedByActivity && !placesUsedByActivity[k]) {
+          // Route-only endpoint — mark as rejected so it doesn't appear
+          // anywhere downstream (saved-snapshot, candidate explorer, etc.)
+          c.status = "reject";
+          routeOnlySkipped++;
+          return;
+        }
+        c.status = "keep";
       });
+      if (routeOnlySkipped > 0) console.log("[Max] skipped " + routeOnlySkipped + " route-only endpoint(s) from auto-keep");
       // Recover descriptions for stubbed required places (async — doesn't
       // block the build).
       var needDescFast = allCands.filter(function(c){ return c._needsDescription; });
