@@ -10234,10 +10234,20 @@ async function buildFromCandidates(){
     // late train arrivals + same-day flights are a known failure mode).
     // Only skip the buffer if the user explicitly unchecked it on the
     // picker (_tb.exitBuffer === false). Undefined/true → buffer applied.
-    var exitAlreadyInTrip = ordered.some(function(d){
+    // Find the canonical kept-destination spelling for the exit city so the
+    // buffer stop matches the start-of-trip Zurich entry by name (otherwise
+    // "Zürich" + "Zurich" appear as visually distinct cards).
+    var canonicalExit = exit;
+    var matchingKept = null;
+    ordered.forEach(function(d){
+      if (matchingKept) return;
       var dN = _normPlaceName(d.place);
-      return dN.indexOf(exitN) >= 0 || exitN.indexOf(dN) >= 0;
+      if (dN.indexOf(exitN) >= 0 || exitN.indexOf(dN) >= 0) {
+        matchingKept = d;
+        canonicalExit = d.place;
+      }
     });
+    var exitAlreadyInTrip = !!matchingKept;
     if (exitAlreadyInTrip && _tb.exitBuffer === false) {
       if (orderResult.reasoning) {
         orderResult.reasoning.push(exit + " is already a destination on the trip and you opted out of the buffer night — flying home directly from your last activity destination.");
@@ -10250,7 +10260,7 @@ async function buildFromCandidates(){
     // time spent in the city earlier.
     var exitStop = {
       id: "c-exit-" + Date.now(),
-      place: exit,
+      place: canonicalExit,
       country: (_tb.region || ""),
       role: "departure",
       stayRange: "1 night",
