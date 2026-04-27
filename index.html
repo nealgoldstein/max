@@ -14500,11 +14500,14 @@ function drawTripMode(){
     var moveBtn=document.createElement("button"); moveBtn.className="tm-move-btn"; moveBtn.textContent="move"; moveBtn.title="Move destination";
     (function(d){moveBtn.onclick=function(e){e.stopPropagation();showMoveDestDialog(d);};})(dest);
     nameRow.appendChild(nameEl); nameRow.appendChild(renBtn); nameRow.appendChild(moveBtn);
-    bodyDiv.appendChild(nameRow);
-    if(dest.label&&dest.label!==dest.place){var plLbl=document.createElement("div");plLbl.className="tm-dest-label";plLbl.textContent=dest.place;bodyDiv.appendChild(plLbl);}
-    var dates=document.createElement("div"); dates.className="tm-dest-dates";
+    // Dates FIRST \u2014 date range is the primary anchor for each leg of the
+    // trip (the user is reading this as a calendar of where they'll be
+    // when), so it leads the card. Place name and reorder controls follow.
+    var dates=document.createElement("div"); dates.className="tm-dest-dates"; dates.style.fontWeight="600"; dates.style.color="#333"; dates.style.marginBottom="4px";
     dates.textContent=fmtD(dest.dateFrom)+" \u2013 "+fmtD(dest.dateTo)+" ("+dest.nights+" night"+(dest.nights!==1?"s":"")+")";
     bodyDiv.appendChild(dates);
+    bodyDiv.appendChild(nameRow);
+    if(dest.label&&dest.label!==dest.place){var plLbl=document.createElement("div");plLbl.className="tm-dest-label";plLbl.textContent=dest.place;bodyDiv.appendChild(plLbl);}
 
     // Required-for badges: show which must-do routes this destination is an endpoint for
     // (reads from attachedEvents computed at trip build time)
