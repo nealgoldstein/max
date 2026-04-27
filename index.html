@@ -4665,7 +4665,12 @@ async function generateActivitiesForPlace(){
     // 6000 tokens — prompt now asks for up to 16 items with full route fields
     // for rail-heavy regions; 3500 was getting truncated and cog railways
     // were the first casualty.
-    var text = await callMax([{role:"user",content:prompt}], 6000, 70000);
+    // Bumped to 9000 tokens / 110s timeout. The prompt grew significantly
+    // with Round BC's per-city depth requirements + BE's confusion table +
+    // BA's lat/lng-on-every-place requirement. The output is also longer
+    // (more activities × more places per city × added coordinates).
+    // Truncated responses fail to parse and the picker hangs forever.
+    var text = await callMax([{role:"user",content:prompt}], 9000, 110000);
     var cleaned = text.replace(/```json|```/g,"").trim();
     var items;
     try { items = JSON.parse(cleaned); }
@@ -4813,8 +4818,19 @@ async function generateActivitiesForPlace(){
   } catch(e){
     console.error("generateActivitiesForPlace failed:", e && e.message);
     if(btn){ btn.disabled = false; btn.classList.remove("tb-btn-disabled"); btn.textContent = "Try again \u2192"; }
-    var w = document.getElementById("tb-place-act-list-wrap");
-    if(w) w.innerHTML = '<div class="tb-act-summary" style="color:#c44;">Couldn\u2019t reach Max. Check your API key or try again.</div>';
+    // Replace the picker's loading state with an error + retry button so
+    // the user isn't stuck staring at a forever-spinner. The new picker
+    // layout uses #tb-picker-list-pane (the left column); the older code
+    // path used #tb-place-act-list-wrap on the all-in-one screen.
+    var pane = document.getElementById("tb-picker-list-pane")
+            || document.getElementById("tb-place-act-list-wrap");
+    if (pane) {
+      pane.innerHTML = '<div style="text-align:center;padding:40px 20px;color:#c44;font-size:12px;line-height:1.6;">'
+        + '<div style="margin-bottom:10px;">Couldn\u2019t generate activities \u2014 ' + (e && e.message ? _pmEsc(e.message) : "unknown error") + '</div>'
+        + '<div style="font-size:11px;color:#999;margin-bottom:14px;">Common causes: missing API key, rate limit, or the response was truncated/malformed.</div>'
+        + '<button class="tb-btn-primary" onclick="generateActivitiesForPlace()" style="display:inline-block;">Try again \u2192</button>'
+        + '</div>';
+    }
     return;
   }
 
