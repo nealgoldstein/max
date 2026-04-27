@@ -3980,9 +3980,10 @@ async function runCandidateSearch(requiredPlaces) {
     }
     if (!allCands.length) throw new Error("No candidates returned");
     // Dedupe: both discovery calls might return the same place. Keep first occurrence.
+    // Use _normPlaceName so "Zürich" and "Zurich" (LLM emits both) dedupe.
     var seen = {};
     allCands = allCands.filter(function(c){
-      var key = (c.place||"").toLowerCase().trim();
+      var key = (typeof _normPlaceName === "function") ? _normPlaceName(c.place||"") : (c.place||"").toLowerCase().trim();
       if (!key) return true;
       if (seen[key]) return false;
       seen[key] = true;
@@ -5645,7 +5646,9 @@ function _updatePlaceActivitySummary(){
   activeItems.forEach(function(it){
     (it.requiredPlaces||[]).forEach(function(p){
       if (!p || !p._keep) return;
-      var key = (p.place||"").toLowerCase();
+      // Use _normPlaceName so umlaut/diacritic variants ("Z\u00fcrich" vs "Zurich")
+      // dedupe to one entry instead of being counted twice.
+      var key = (typeof _normPlaceName === "function") ? _normPlaceName(p.place||"") : (p.place||"").toLowerCase();
       if (!keptPlaceSet[key]) {
         keptPlaceSet[key] = { place: p.place, nights: 0 };
       }
@@ -5659,33 +5662,36 @@ function _updatePlaceActivitySummary(){
   Object.keys(keptPlaceSet).forEach(function(k){ totalNights += keptPlaceSet[k].nights; });
   var placeCount = Object.keys(keptPlaceSet).length;
 
-  // Add the buffer night when the user has the buffer toggle on AND has
-  // set a departure city. Symmetrically: an entry stop adds 1 night when
-  // the user has set an arrival city that isn't already a kept destination.
-  // This keeps the "about X nights" estimate honest about what the build
-  // will produce, so the budget banner doesn't surprise the user later.
+  // Predict what the build path will do, so the picker estimate matches
+  // the trip view's actual day count. The build adds nights when:
+  //   \u2022 Entry city is set AND not already a kept destination \u2192 +1 entry stop
+  //   \u2022 Exit city is set AND not already kept \u2192 +1 exit stop
+  //   \u2022 Round trip (entry == exit, both kept) AND buffer ON \u2192 +1 buffer
+  //     (ordering puts entry at front, last is something else, build
+  //      appends a 1-night stop at exit)
+  //   \u2022 One-way with exit-as-kept \u2192 0 (ordering puts exit at end,
+  //     lastMatches=true, no stop)
   var bufferAdds = 0;
   var entryCity = (_tb.entry || "").trim();
   var exitCity = (_tb.tbExit || "").trim();
-  function _isCityInKept(city){
-    if (!city) return false;
-    var cN = city.toLowerCase();
+  var entryNorm = (typeof _normPlaceName === "function") ? _normPlaceName(entryCity) : entryCity.toLowerCase();
+  var exitNorm  = (typeof _normPlaceName === "function") ? _normPlaceName(exitCity)  : exitCity.toLowerCase();
+  function _isCityInKept(cN){
+    if (!cN) return false;
     return Object.keys(keptPlaceSet).some(function(k){
       return k.indexOf(cN) >= 0 || cN.indexOf(k) >= 0;
     });
   }
-  if (exitCity && _tb.exitBuffer !== false) {
-    // Buffer is on: 1 extra night at the departure city before flying.
-    bufferAdds += 1;
-  } else if (exitCity && !_isCityInKept(exitCity)) {
-    // No buffer toggle, but exit city isn't already in the trip \u2014 the
-    // build will append a 1-night exit stop unconditionally.
-    bufferAdds += 1;
+  var entryInKept = _isCityInKept(entryNorm);
+  var exitInKept  = _isCityInKept(exitNorm);
+  var roundTrip = entryNorm && exitNorm && entryNorm === exitNorm;
+  if (entryCity && !entryInKept) {
+    bufferAdds += 1; // build will prepend 1-night arrival stop
   }
-  if (entryCity && !_isCityInKept(entryCity)) {
-    // Entry city isn't already a destination \u2014 the build will prepend a
-    // 1-night arrival stop.
-    bufferAdds += 1;
+  if (exitCity && !exitInKept) {
+    bufferAdds += 1; // build will append 1-night exit stop
+  } else if (roundTrip && exitInKept && _tb.exitBuffer !== false) {
+    bufferAdds += 1; // round-trip buffer night
   }
   var displayNights = totalNights + bufferAdds;
 
