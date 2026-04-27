@@ -5666,10 +5666,29 @@ function _updatePlaceActivitySummary(){
   Object.keys(keptPlaceSet).forEach(function(k){ totalNights += keptPlaceSet[k].nights; });
   var placeCount = Object.keys(keptPlaceSet).length;
 
-  // Picker night estimate is base nights only \u2014 entry/exit/buffer logistics
-  // live on the trip view now (Round BR), so the picker's prediction is
-  // independent of those.
-  var displayNights = totalNights;
+  // Predict what the build will add for entry/exit/buffer so the picker's
+  // night-total matches the trip view's day count. The build adds:
+  //   \u2022 1 night exit stop when exit city is set AND not in kept list
+  //   \u2022 1 night entry stop when entry city is set AND not in kept list
+  //   \u2022 1 night round-trip buffer when entry==exit, both in kept, buffer ON
+  var bufferAdds = 0;
+  var entryCity = (_tb.entry || "").trim();
+  var exitCity  = (_tb.tbExit || "").trim();
+  var entryNorm = (typeof _normPlaceName === "function") ? _normPlaceName(entryCity) : entryCity.toLowerCase();
+  var exitNorm  = (typeof _normPlaceName === "function") ? _normPlaceName(exitCity)  : exitCity.toLowerCase();
+  function _isCityInKept(cN){
+    if (!cN) return false;
+    return Object.keys(keptPlaceSet).some(function(k){
+      return k.indexOf(cN) >= 0 || cN.indexOf(k) >= 0;
+    });
+  }
+  var entryInKept = _isCityInKept(entryNorm);
+  var exitInKept  = _isCityInKept(exitNorm);
+  var roundTrip = entryNorm && exitNorm && entryNorm === exitNorm;
+  if (entryCity && !entryInKept) bufferAdds += 1;
+  if (exitCity && !exitInKept) bufferAdds += 1;
+  else if (roundTrip && exitInKept && _tb.exitBuffer !== false) bufferAdds += 1;
+  var displayNights = totalNights + bufferAdds;
 
   var btn = document.getElementById("tb-place-continue-btn");
   // Build button gated only on having at least one kept activity.
