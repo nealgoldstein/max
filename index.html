@@ -14295,16 +14295,60 @@ function drawTripMode(){
     if (!over && !under) return;
     var banner = document.createElement("div");
     var tripStr = (budget.min === budget.max) ? (budget.max + " days") : (budget.min + "\u2013" + budget.max + " days");
+    // Compute date range from first/last destinations so the banner reads
+    // "Sat, Aug 15 \u2013 Tue, Sep 8, 2026 \u00b7 Your trip is 29 days \u2014 1 over budget."
+    // The dedicated dates strip above lp-content was invisible in some layouts;
+    // bundling the date range into the banner that's already proven visible is
+    // the more robust placement.
+    var first = trip.destinations[0], last = trip.destinations[trip.destinations.length - 1];
+    var dateRange = "";
+    if (first && first.dateFrom && last && last.dateTo) {
+      var fmt = function(iso){
+        try {
+          var d = new Date(iso + "T12:00:00");
+          return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+        } catch(_) { return iso; }
+      };
+      var year = "";
+      try { year = new Date(last.dateTo + "T12:00:00").getFullYear(); } catch(_) {}
+      dateRange = fmt(first.dateFrom) + ' \u2013 ' + fmt(last.dateTo) + (year ? ', ' + year : '');
+    }
+    var dateRangeHtml = dateRange ? '<div style="font-size:13px;font-weight:700;color:#1a1a1a;margin-bottom:4px;">' + dateRange + '</div>' : '';
     if (over) {
       banner.style.cssText = "margin:6px 2px 10px;padding:10px 12px;background:#fff3ed;border:1px solid #f5ccb5;border-radius:7px;font-size:11px;line-height:1.55;";
-      banner.innerHTML = '<strong style="color:#b0451a;">Your trip is '+totalDays+' days \u2014 '+ (totalDays - budget.max) +' over your '+tripStr+' budget.</strong>'
+      banner.innerHTML = dateRangeHtml
+        + '<strong style="color:#b0451a;">Your trip is '+totalDays+' days \u2014 '+ (totalDays - budget.max) +' over your '+tripStr+' budget.</strong>'
         + '<br><span style="color:#555;">Open Parameters to adjust dates.</span>';
     } else {
       banner.style.cssText = "margin:6px 2px 10px;padding:10px 12px;background:#f0f8f2;border:1px solid #c6e0ce;border-radius:7px;font-size:11px;line-height:1.55;";
-      banner.innerHTML = '<strong style="color:#2a6b3e;">Your trip is '+totalDays+' days \u2014 '+(budget.min - totalDays)+' under your '+tripStr+' budget.</strong>'
+      banner.innerHTML = dateRangeHtml
+        + '<strong style="color:#2a6b3e;">Your trip is '+totalDays+' days \u2014 '+(budget.min - totalDays)+' under your '+tripStr+' budget.</strong>'
         + '<br><span style="color:#555;">Open Parameters to adjust dates.</span>';
     }
     c.appendChild(banner);
+  })();
+  // Same-budget case (trip exactly within budget): the banner above only
+  // renders when over/under. To still show the date range when trip is on
+  // budget, append a minimal date strip here.
+  (function(){
+    if (!trip.destinations.length) return;
+    var first = trip.destinations[0], last = trip.destinations[trip.destinations.length - 1];
+    if (!first || !first.dateFrom || !last || !last.dateTo) return;
+    var budget = _parseTripDuration((trip.brief && trip.brief.duration) || "");
+    var totalNights = trip.destinations.reduce(function(s,d){return s+(d.nights||0);},0);
+    var totalDays = totalNights + 1;
+    if (budget && (totalDays > budget.max || totalDays < budget.min)) return; // banner already covers it
+    var fmt = function(iso){
+      try {
+        var d = new Date(iso + "T12:00:00");
+        return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+      } catch(_) { return iso; }
+    };
+    var year = ""; try { year = new Date(last.dateTo + "T12:00:00").getFullYear(); } catch(_) {}
+    var strip = document.createElement("div");
+    strip.style.cssText = "margin:6px 2px 10px;padding:10px 12px;background:#f7f9ff;border:1px solid #d8e2ee;border-radius:7px;font-size:13px;font-weight:700;color:#1a1a1a;";
+    strip.textContent = fmt(first.dateFrom) + ' \u2013 ' + fmt(last.dateTo) + (year ? ', ' + year : '') + ' \u00b7 ' + totalDays + ' days \u00b7 ' + totalNights + ' nights';
+    c.appendChild(strip);
   })();
 
   // Destination list
