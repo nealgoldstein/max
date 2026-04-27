@@ -339,3 +339,28 @@ for users who want to push deeper into a theme.
   THIS activity is great."
 - **Item 2** ("other places worth considering") = breadth discovery.
   "Places I didn't think to ask for, anywhere in this trip."
+
+### 7. Route endpoints sneaking into the trip as destinations
+**Status:** open.
+Vitznau, Alpnachstad, Arth-Goldau, Pilatus Kulm, Rigi Kulm and similar
+train/cable-car access stations show up as standalone destinations with
+overnight stays. They're in route activities AND in some non-route
+activities (the LLM includes them in "Walk by the water" or similar),
+so Round BH's filter (which checks `placesUsedByActivity`) doesn't drop
+them. Probably needs a stronger prompt rule: "don't include train/
+cable-car access stations as destinations unless the user would actually
+stay there overnight." Or a hardcoded denylist of known transit-only
+endpoints. Or both.
+
+### 8. Picker night-count vs trip night-count mismatch by 1
+**Status:** open.
+Suspected cause: one destination's `c.nights` override in
+`runCandidateSearch` fails to match its picker key (place-name
+normalization mismatch, or the place is route-only and not in
+`pickedNightsByPlace`), so it falls back to `parseNightsFromRange(c.stayRange)`
+which defaults to ~3. Picker's per-place max-nights doesn't account for
+that fallback. Diagnostic to write: dump picker's `keptPlaceSet`
+side-by-side with trip's destination nights after build, find the
+divergent place. Once we know which place(s) drift, the fix is either
+better key normalization or making the override seed all kept places
+(including route-only ones at 0 nights).
