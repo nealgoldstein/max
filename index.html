@@ -11461,9 +11461,12 @@ async function generateCityData(place,destId,_isAutoRetry){
     + (_paceDirGD ? "\n\n"+_paceDirGD : "");
 
   try{
-    // Add 30 second timeout to generation
-    var genTimeout=new Promise(function(_,reject){setTimeout(function(){reject(new Error('Generation timed out after 30s'));},30000);});
-    var text=await Promise.race([callMax([{role:'user',content:prompt}], 1800), genTimeout]);
+    // 60 second timeout — bumped from 30s. The prompt asks for sights + districts
+    // + hotels + essentials + transit hubs all at once; on a slow API moment
+    // 30s wasn't enough, leading to immediate auto-retry that often hit the
+    // same ceiling. 60s gives the model breathing room before failing.
+    var genTimeout=new Promise(function(_,reject){setTimeout(function(){reject(new Error('Generation timed out after 60s'));},60000);});
+    var text=await Promise.race([callMax([{role:'user',content:prompt}], 2400), genTimeout]);
     var json=text.replace(/```json\s*/g,'').replace(/```\s*/g,'').trim();
     var s=json.indexOf('{'),e=json.lastIndexOf('}');
     if(s>-1&&e>-1)json=json.substring(s,e+1);
@@ -11604,12 +11607,13 @@ async function generateCityData(place,destId,_isAutoRetry){
     // Auto-retry once silently before showing failure to the user. The first
     // failure is often a transient hiccup — timeout, parse glitch, brief
     // network blip. Worth one retry before bothering the user.
+    // Wait 2 seconds before retrying so we don't hit the same rate-limit
+    // ceiling that caused the first failure (Nominatim 429s, API congestion).
     if (!_isAutoRetry) {
-      console.warn('[Max] generateCityData first attempt failed; auto-retrying once. Error:', err && err.message);
-      // Preserve cityCenter, drop the cached entry so the retry doesn't short-circuit
+      console.warn('[Max] generateCityData first attempt failed; auto-retrying once after 2s. Error:', err && err.message);
       var prev = _generatedCityData[key] || {};
       delete _generatedCityData[key];
-      // Re-call ourselves with the retry flag set
+      await new Promise(function(r){ setTimeout(r, 2000); });
       return generateCityData(place, destId, true);
     }
     // Preserve any geocoded city center, just clear the loading state
