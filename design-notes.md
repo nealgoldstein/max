@@ -271,3 +271,71 @@ Tag it so the design iteration is easy to find later:
 Start from this document's "Multi-destination trips (next step)" section.
 The four open questions at the end are the first decisions to make before
 writing any code.
+
+---
+
+## Deferred items after the picker/Places merge (Round AX)
+
+Carried forward at the end of the merge. Recommended order: 1, 6, 2, 5, 4, 3.
+
+### 1. "Edit destinations" should re-open the picker (not the legacy candidate explorer)
+**Status:** in progress (Round BK, Apr 2026).
+Currently "Edit destinations →" on the trip view calls `reopenCandidateExplorer`,
+which mounts the old "Places to think about" overlay — different layout from
+the picker, breaks the design promise that the picker is the canonical
+curation surface. Right behavior: re-open `renderActivityPicker` with state
+rehydrated from `trip.mdcItems` + `trip.brief.entry/tbExit`, button reads
+"Save changes →", on save apply diffs back rather than rebuilding from
+scratch (or rebuild and accept the data loss for early-stage trips —
+choose based on how much per-destination user data is at stake).
+
+### 2. "Other places worth considering" — breadth discovery (Phase 2 of merge)
+**Status:** deferred.
+`runCandidateSearch` already generates `pCities` (major gateway cities) and
+`pThematic` (thematic discovery picks). In place mode they're auto-rejected
+so they don't inflate the trip. To surface them as opt-in: add a section
+at the bottom of the picker — 6–10 places the brief implies but aren't
+tied to a specific activity, each with a "+ Add" button. Catches cities
+the activity-driven picks missed.
+
+### 3. Multi-destination trips
+**Status:** architectural future-work.
+See the "Multi-destination trips (next step)" section above. The merged
+picker is the right foundation for this — extend to multiple legs, add a
+transit-leg marker between legs, map shows both regions.
+
+### 4. "Plan" page day-count mismatch
+**Status:** probably resolves with item 1.
+User reported "Plan" page showed 38 days while "Trip page" showed 27 days
+(a 5-week Switzerland trip). Likely the legacy candidate explorer still
+computes from `trip.candidates` including route-only endpoints that the
+build now filters out at place-mode fast path. Once edit-mode uses the
+picker (item 1), the candidate explorer is no longer in the new-trip
+flow and this discrepancy disappears.
+
+### 5. Entry/exit field validation
+**Status:** polish, not blocking.
+Free-text inputs ("Zurich" / "ZRH" / "Zürich Airport" all behave
+differently downstream). The old Places page had an entry-points map
+that helped disambiguate; we removed it during the merge. Could add
+typeahead from the existing airport list, or restore the entry-points
+map in some form.
+
+### 6. "+ more like this" per activity row — depth discovery
+**Status:** deferred.
+Each activity row in the picker shows a fixed set of `requiredPlaces`
+(e.g., "Walk in the mountains" → Zermatt, Lauterbrunnen, St. Moritz,
+Appenzell). A "+ more like this" button per row would fire a small
+LLM call asking for additional places where the same activity is
+iconic, append them to that activity's `requiredPlaces`. Lets the
+user expand the option set for an activity they're invested in,
+without re-prompting the whole picker. Cheap to ship; high value
+for users who want to push deeper into a theme.
+
+### Item 1 vs item 6 vs item 2 — what each is for
+- **Item 1** (edit-mode picker) = workflow consistency. Every curation
+  uses the same UI, whether new trip or editing built one.
+- **Item 6** ("+ more like this") = depth discovery. "More places where
+  THIS activity is great."
+- **Item 2** ("other places worth considering") = breadth discovery.
+  "Places I didn't think to ask for, anywhere in this trip."

@@ -5743,11 +5743,20 @@ function renderActivityPicker(){
       +'<div class="tb-act-summary" id="tb-place-act-summary" style="margin-top:14px;"></div>';
   }
 
+  // Edit-mode adjusts: step counter, title, footer button text, back action.
+  var isEdit = !!_tb._editMode;
+  var stepLabel = isEdit ? "Editing your trip" : "Step 3 of 3";
+  var titleLabel = isEdit ? "Edit your picks" : "Pick what you actually want to do";
+  var primaryBtnHandler = isEdit ? "saveActivityPickerEdits()" : "continuePlaceModeToStep2()";
+  var primaryBtnLabel = isEdit ? "Save changes →" : "Build trip →";
+  var backHandler = isEdit ? "cancelPickerEdit()" : "renderTripBrief()";
+  var backLabel = isEdit ? "← Cancel" : "← Back to travel details";
+
   // Outer structure: header + 2-column body + footer
   ov.innerHTML = ''
     +'<div class="tb-header" style="flex-shrink:0;">'
-    +  '<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Step 3 of 3</div></div></div>'
-    +  '<div class="tb-title">Pick what you actually want to do</div>'
+    +  '<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">'+stepLabel+'</div></div></div>'
+    +  '<div class="tb-title">'+titleLabel+'</div>'
     +'</div>'
     +'<div class="picker-2col" style="flex:1;display:flex;min-height:0;overflow:hidden;">'
     +  '<div class="picker-list" id="tb-picker-list-pane" style="flex:1;min-width:0;overflow-y:auto;padding:18px 22px;-webkit-overflow-scrolling:touch;">'
@@ -5761,9 +5770,9 @@ function renderActivityPicker(){
     +  '</div>'
     +'</div>'
     +'<div class="tb-footer" style="flex-shrink:0;">'
-    +  (hasGenerated?'<button class="tb-btn-primary" id="tb-place-continue-btn" onclick="continuePlaceModeToStep2()">Build trip →</button>':'')
+    +  (hasGenerated?'<button class="tb-btn-primary" id="tb-place-continue-btn" onclick="'+primaryBtnHandler+'">'+primaryBtnLabel+'</button>':'')
     +  '<div style="display:flex;justify-content:space-between;margin-top:8px;">'
-    +    '<div class="tb-btn-back" onclick="renderTripBrief()">← Back to travel details</div>'
+    +    '<div class="tb-btn-back" onclick="'+backHandler+'">'+backLabel+'</div>'
     +    '<div style="font-size:10px;color:#aaa;cursor:pointer;" onclick="showBriefApiKeyForm()">🔑 Set API key</div>'
     +  '</div>'
     +'</div>';
@@ -7469,6 +7478,170 @@ function cancelEditCandidates(){
   _ceEditMode = false;
   g("candidate-explorer-overlay").style.display="none";
   if(_ceMap){_ceMap.remove();_ceMap=null;} if(_edMap){try{_edMap.remove();}catch(e){}_edMap=null;_edMarkers=[];}
+}
+
+// Re-open the merged activity-place PICKER (Step 3) on an already-built
+// trip so the user can curate inside the same UI they used to create the
+// trip. This replaces the old "Edit destinations" path that mounted the
+// legacy candidate explorer with a different layout. State is rehydrated
+// from trip.mdcItems + trip.brief; the picker's button reads "Save changes
+// →" instead of "Build trip →" and routes through saveActivityPickerEdits.
+function reopenPickerForEdit(){
+  if (!trip || !Array.isArray(trip.mdcItems) || !trip.mdcItems.length) {
+    // No mdcItems snapshot — fall back to the legacy explorer.
+    if (typeof reopenCandidateExplorer === "function") reopenCandidateExplorer();
+    return;
+  }
+  _tb = _tb || {};
+  _tb._editMode = true;
+  _tb.tripMode = "place";
+  // Rehydrate the brief so picker prompts and downstream rebuild see it.
+  if (trip.brief) {
+    _tb.region = trip.brief.region || _tb.region || "";
+    _tb.placeName = trip.brief.placeName || trip.brief.region || _tb.placeName || "";
+    _tb.placeContext = trip.brief.placeContext || _tb.placeContext || "";
+    _tb.entry = trip.brief.entry || _tb.entry || "";
+    _tb.tbExit = trip.brief.tbExit || _tb.tbExit || "";
+    _tb.intent = trip.brief.intent || _tb.intent || "";
+    _tb.duration = trip.brief.duration || _tb.duration || "";
+    _tb.when = trip.brief.when || _tb.when || "";
+    _tb.startDate = trip.brief.startDate || _tb.startDate || "";
+    _tb.endDate = trip.brief.endDate || _tb.endDate || "";
+    _tb.partyComposition = trip.brief.partyComposition || _tb.partyComposition || "";
+    _tb.partySize = trip.brief.partySize || _tb.partySize || "";
+    _tb.partyAges = trip.brief.partyAges || _tb.partyAges || "";
+    _tb.physicalAbility = trip.brief.physicalAbility || _tb.physicalAbility || "";
+    _tb.abilityNote = trip.brief.abilityNote || _tb.abilityNote || "";
+    _tb.pace = trip.brief.pace || _tb.pace || "";
+    _tb.accommodation = trip.brief.accommodation || _tb.accommodation || "";
+    _tb.transport = trip.brief.transport || _tb.transport || "";
+    _tb.compromises = trip.brief.compromises || _tb.compromises || "";
+    _tb.hardlimits = trip.brief.hardlimits || _tb.hardlimits || "";
+    _tb.avoid = Object.assign({}, trip.brief.avoid || {});
+  }
+  // Hydrate _tb.placeActivities from trip.mdcItems. Each requiredPlace is
+  // marked _keep:true since these are the user's current picks. The user
+  // can un-keep places to drop them, or add new things via "+ Add a place"
+  // / "+ Add an experience" panels in the picker.
+  _tb.placeActivities = trip.mdcItems.map(function(m){
+    return {
+      id: m.id,
+      name: m.name,
+      type: m.type,
+      section: m.section || (
+        m.type === "route" ? "Travel on iconic trains between destinations"
+        : m.type === "condition" ? "Wait for weather"
+        : "Other things to do"
+      ),
+      iconic: !!m.iconic,
+      description: m.description || "",
+      checked: true,
+      requiredPlaces: (m.requiredPlaces||[]).map(function(p){
+        return {
+          place: p.place,
+          country: p.country || "",
+          nights: typeof p.nights === "number" ? p.nights : 2,
+          lat: (typeof p.lat === "number") ? p.lat : null,
+          lng: (typeof p.lng === "number") ? p.lng : null,
+          _keep: true
+        };
+      }),
+      endpoints: (m.endpoints||[]).slice(),
+      viableLocations: (m.viableLocations||[]).slice(),
+      direction: m.direction,
+      durationHours: m.durationHours,
+      modeOptions: m.modeOptions,
+      alternatives: m.alternatives,
+      reservationNotes: m.reservationNotes,
+      recovery: m.recovery,
+      frequencyRequirement: m.frequencyRequirement,
+      conditionNote: m.conditionNote
+    };
+  });
+  // Mirror into _mdcItems too — downstream code reads from both depending
+  // on the path. Keep them in sync.
+  _mdcItems = trip.mdcItems.slice();
+  // Ensure the trip-brief overlay container is visible.
+  var ov = g("trip-brief-overlay");
+  if (ov) ov.style.display = "block";
+  renderActivityPicker();
+}
+
+// Save edits made in the picker's edit mode and return to the trip view.
+// Filters _tb.placeActivities to kept items (same shape as
+// continuePlaceModeToStep2 produces), updates trip.brief.entry/tbExit,
+// and rebuilds the trip. Per-destination user data (notes, bookings) is
+// preserved by snapshotting before rebuild and restoring matched by
+// place name afterward.
+async function saveActivityPickerEdits(){
+  var items = (_tb.placeActivities||[]).filter(function(i){
+    return Array.isArray(i.requiredPlaces) && i.requiredPlaces.some(function(p){return p && p._keep;});
+  }).map(function(i){
+    var keptPlaces = (i.requiredPlaces||[]).filter(function(p){return p && p._keep;}).map(function(p){
+      var clean = {place: p.place, country: p.country};
+      if (typeof p.nights === "number") clean.nights = p.nights;
+      if (typeof p.lat === "number") clean.lat = p.lat;
+      if (typeof p.lng === "number") clean.lng = p.lng;
+      return clean;
+    });
+    var clone = Object.assign({}, i, { checked: true, requiredPlaces: keptPlaces });
+    delete clone._keep;
+    if (i.type === "route" && Array.isArray(i.endpoints)) {
+      var keptKeys = {};
+      keptPlaces.forEach(function(p){ keptKeys[(p.place||"").toLowerCase()] = true; });
+      clone.endpoints = i.endpoints.filter(function(ep){ return ep && keptKeys[(ep.place||"").toLowerCase()]; });
+      if (clone.endpoints.length < 2) {
+        clone.type = "activity";
+        delete clone.endpoints;
+        delete clone.direction;
+      }
+    }
+    return clone;
+  });
+  if (!items.length) {
+    if (!confirm("No activities are kept. Cancel changes and return to your trip?")) return;
+    cancelPickerEdit();
+    return;
+  }
+  // Snapshot per-destination user data so it survives the rebuild. Matched
+  // back by lowercase place name. Anything that doesn't match (e.g. dropped
+  // destination) is discarded.
+  var preservedByPlace = {};
+  if (trip && Array.isArray(trip.destinations)) {
+    trip.destinations.forEach(function(d){
+      if (!d || !d.place) return;
+      preservedByPlace[d.place.toLowerCase()] = {
+        trackerItems: d.trackerItems,
+        hotelBookings: d.hotelBookings,
+        generalBookings: d.generalBookings,
+        locations: d.locations,
+        todayItems: d.todayItems,
+        discoveredItems: d.discoveredItems,
+        suggestions: d.suggestions
+      };
+    });
+  }
+  _tb._editPreservedByPlace = preservedByPlace;
+  _mdcItems = items;
+  _tb.region = _tb.placeName || _tb.region || "";
+  _tb.anchors = items.map(function(i){return i.name;}).join(", ");
+  if (trip && trip.brief) {
+    trip.brief.entry = _tb.entry || trip.brief.entry || "";
+    trip.brief.tbExit = _tb.tbExit || trip.brief.tbExit || "";
+  }
+  _tb._editMode = false;
+  // Run the same path as the new-trip flow. After buildFromCandidates lands,
+  // restore per-destination user data from the snapshot.
+  findCandidates();
+}
+
+// Bail out of edit mode without applying changes.
+function cancelPickerEdit(){
+  _tb._editMode = false;
+  delete _tb._editPreservedByPlace;
+  var ov = g("trip-brief-overlay");
+  if (ov) ov.style.display = "none";
+  if (typeof drawTripMode === "function") drawTripMode();
 }
 
 // No more lock-in ceremony: closing the Places overlay IS how you step out.
@@ -9866,6 +10039,11 @@ async function buildFromCandidates(){
       avoidDietary:_tb.avoidDietary||"",avoidSafety:_tb.avoidSafety||"",avoidOther:_tb.avoidOther||""},
     mdcItems:(_mdcItems||[]).map(function(m){return {
       id:m.id, name:m.name, type:m.type, checked:m.checked,
+      // section + iconic preserved so Round BK's reopenPickerForEdit can
+      // rehydrate the picker's section grouping and iconic flag without
+      // re-prompting the LLM.
+      section: m.section || "",
+      iconic: !!m.iconic,
       requiredPlaces:m.requiredPlaces, endpoints:m.endpoints, viableLocations:m.viableLocations,
       direction:m.direction, durationHours:m.durationHours,
       modeOptions:m.modeOptions, alternatives:m.alternatives, reservationNotes:m.reservationNotes,
@@ -10005,6 +10183,20 @@ async function buildFromCandidates(){
       execMode:false, todayItems:[], discoveredItems:[], suggestions:[],
       attachedEvents: findAttachedEvents(c, _mdcItems||[])
     };
+    // Edit-mode preservation (Round BK): if we have a snapshot of the prior
+    // trip's per-destination user data (notes, bookings, suggestions, etc.),
+    // and this destination's place name matches a preserved one, restore
+    // those fields so the user doesn't lose their work on edit.
+    var preserved = (_tb && _tb._editPreservedByPlace) ? _tb._editPreservedByPlace[(c.place||"").toLowerCase()] : null;
+    if (preserved) {
+      if (preserved.trackerItems) dest.trackerItems = preserved.trackerItems;
+      if (preserved.hotelBookings && preserved.hotelBookings.length) dest.hotelBookings = preserved.hotelBookings;
+      if (preserved.generalBookings && preserved.generalBookings.length) dest.generalBookings = preserved.generalBookings;
+      if (preserved.locations && preserved.locations.length) dest.locations = preserved.locations;
+      if (preserved.todayItems && preserved.todayItems.length) dest.todayItems = preserved.todayItems;
+      if (preserved.discoveredItems && preserved.discoveredItems.length) dest.discoveredItems = preserved.discoveredItems;
+      if (preserved.suggestions && preserved.suggestions.length) dest.suggestions = preserved.suggestions;
+    }
     trip.destinations.push(dest);
     cur=next;
   });
@@ -10025,6 +10217,11 @@ async function buildFromCandidates(){
     }
     pump();
   })(trip.destinations.slice(-kept.length),3);
+
+  // Clear edit-mode preservation snapshot now that destinations are built.
+  // Without this, _tb._editPreservedByPlace would leak into subsequent
+  // builds and try to overlay stale data onto fresh trips.
+  if (_tb && _tb._editPreservedByPlace) delete _tb._editPreservedByPlace;
 
   // Snapshot the full candidate list (kept + rejected) onto the trip so the user
   // can re-open the Candidate Explorer later and change their decisions.
@@ -13966,7 +14163,16 @@ function drawTripMode(){
     editBtn.title="Re-open the Candidate Explorer with your current keep/reject decisions";
     editBtn.onmouseover=function(){editBtn.style.background="#134a8a";};
     editBtn.onmouseout=function(){editBtn.style.background="#1a5fa8";};
-    editBtn.onclick=function(){reopenCandidateExplorer();};
+    // Re-open the merged picker for edit (Round BK). Falls back to the
+    // legacy candidate explorer if there's no mdcItems snapshot (older
+    // saved trips that pre-date the picker).
+    editBtn.onclick=function(){
+      if (typeof reopenPickerForEdit === "function" && trip && Array.isArray(trip.mdcItems) && trip.mdcItems.length) {
+        reopenPickerForEdit();
+      } else {
+        reopenCandidateExplorer();
+      }
+    };
     listHdr.appendChild(editBtn);
   }
 
