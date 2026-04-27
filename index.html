@@ -4449,7 +4449,9 @@ function showTripBrief(){
   // (renderTripStep1Recognition) is still callable for any user who
   // explicitly sets _tb.tripMode = "sentence", but it's no longer the
   // primary surface.
-  _tb={name:name,interests:[],drivers:[],tripMode:"place"};
+  // exitBuffer defaults to true — buffer night before flying home is the
+  // safer pattern, opt-out via checkbox on the picker.
+  _tb={name:name,interests:[],drivers:[],tripMode:"place",exitBuffer:true};
   hideNewTripForm();
   var ov=g("trip-brief-overlay");
   ov.style.display="block";
@@ -5738,11 +5740,15 @@ function renderActivityPicker(){
       +      '<input class="tb-act-add-inp" id="tb-picker-exit" placeholder="e.g. Zurich" autocomplete="off" value="'+curExit+'" oninput="_tb.tbExit=this.value.trim();" />'
       +    '</div>'
       +  '</div>'
+      // Default ON — based on years of experience, a buffer night before
+      // flying is the safer pattern (late trains + same-day flights have
+      // burned a lot of travelers). User can toggle off if they prefer
+      // to fly home directly from their last activity destination.
       +  '<label style="display:flex;align-items:center;gap:6px;font-size:10.5px;color:#666;margin-top:8px;cursor:pointer;line-height:1.4;">'
-      +    '<input type="checkbox" id="tb-picker-exit-buffer" '+(_tb.exitBuffer?"checked":"")+' onchange="_tb.exitBuffer=this.checked;" style="margin:0;cursor:pointer;" />'
-      +    '<span>Add a buffer night in your departure city before flying home <span style="color:#999;">(safer for late train arrivals + same-day flights — adds 1 extra night)</span></span>'
+      +    '<input type="checkbox" id="tb-picker-exit-buffer" '+((_tb.exitBuffer===false)?"":"checked")+' onchange="_tb.exitBuffer=this.checked;" style="margin:0;cursor:pointer;" />'
+      +    '<span><strong>Buffer night in your departure city before flying home</strong> <span style="color:#999;">(default — uncheck to fly directly from your last destination)</span></span>'
       +  '</label>'
-      +  '<div style="font-size:10px;color:#999;margin-top:6px;line-height:1.5;">Where you fly/train into and out of. Max plays this smart: if your departure city is already a destination on your trip, you won’t see it twice unless you check the buffer above.</div>'
+      +  '<div style="font-size:10px;color:#999;margin-top:6px;line-height:1.5;">Where you fly/train into and out of. The buffer night protects against late train arrivals colliding with same-day flights — a hard-earned lesson from years of travel.</div>'
       +'</div>'
       +'<div class="tb-act-summary" id="tb-place-act-summary" style="margin-top:14px;"></div>';
   }
@@ -7506,7 +7512,9 @@ function reopenPickerForEdit(){
     _tb.placeContext = trip.brief.placeContext || _tb.placeContext || "";
     _tb.entry = trip.brief.entry || _tb.entry || "";
     _tb.tbExit = trip.brief.tbExit || _tb.tbExit || "";
-    _tb.exitBuffer = !!trip.brief.exitBuffer;
+    // exitBuffer defaults to true — undefined on older saved trips means
+    // they were built when the buffer was unconditional, so honor that.
+    _tb.exitBuffer = (trip.brief.exitBuffer === false) ? false : true;
     _tb.intent = trip.brief.intent || _tb.intent || "";
     _tb.duration = trip.brief.duration || _tb.duration || "";
     _tb.when = trip.brief.when || _tb.when || "";
@@ -10132,16 +10140,24 @@ async function buildFromCandidates(){
       return lN.indexOf(exitN) >= 0 || exitN.indexOf(lN) >= 0;
     })();
     if (lastMatches) return; // exit already terminates the trip
+    // Buffer night is the DEFAULT (based on years of travel experience —
+    // late train arrivals + same-day flights are a known failure mode).
+    // Only skip the buffer if the user explicitly unchecked it on the
+    // picker (_tb.exitBuffer === false). Undefined/true → buffer applied.
     var exitAlreadyInTrip = ordered.some(function(d){
       var dN = _normPlaceName(d.place);
       return dN.indexOf(exitN) >= 0 || exitN.indexOf(dN) >= 0;
     });
-    if (exitAlreadyInTrip && !_tb.exitBuffer) {
+    if (exitAlreadyInTrip && _tb.exitBuffer === false) {
       if (orderResult.reasoning) {
-        orderResult.reasoning.push(exit + " is already a destination on the trip — you'll head back there for your flight without an extra night. Check the buffer-night option on the picker if you'd rather sleep in " + exit + " before flying.");
+        orderResult.reasoning.push(exit + " is already a destination on the trip and you opted out of the buffer night — flying home directly from your last activity destination.");
       }
       return;
     }
+    // If the city is already in the trip AND the buffer is desired,
+    // append the 1-night exit stop (the default). The buffer's value is
+    // a separate sleep before the flight, decoupled from the activity
+    // time spent in the city earlier.
     var exitStop = {
       id: "c-exit-" + Date.now(),
       place: exit,
