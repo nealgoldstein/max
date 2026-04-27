@@ -5662,58 +5662,24 @@ function _updatePlaceActivitySummary(){
   Object.keys(keptPlaceSet).forEach(function(k){ totalNights += keptPlaceSet[k].nights; });
   var placeCount = Object.keys(keptPlaceSet).length;
 
-  // Predict what the build path will do, so the picker estimate matches
-  // the trip view's actual day count. The build adds nights when:
-  //   \u2022 Entry city is set AND not already a kept destination \u2192 +1 entry stop
-  //   \u2022 Exit city is set AND not already kept \u2192 +1 exit stop
-  //   \u2022 Round trip (entry == exit, both kept) AND buffer ON \u2192 +1 buffer
-  //     (ordering puts entry at front, last is something else, build
-  //      appends a 1-night stop at exit)
-  //   \u2022 One-way with exit-as-kept \u2192 0 (ordering puts exit at end,
-  //     lastMatches=true, no stop)
-  var bufferAdds = 0;
-  var entryCity = (_tb.entry || "").trim();
-  var exitCity = (_tb.tbExit || "").trim();
-  var entryNorm = (typeof _normPlaceName === "function") ? _normPlaceName(entryCity) : entryCity.toLowerCase();
-  var exitNorm  = (typeof _normPlaceName === "function") ? _normPlaceName(exitCity)  : exitCity.toLowerCase();
-  function _isCityInKept(cN){
-    if (!cN) return false;
-    return Object.keys(keptPlaceSet).some(function(k){
-      return k.indexOf(cN) >= 0 || cN.indexOf(k) >= 0;
-    });
-  }
-  var entryInKept = _isCityInKept(entryNorm);
-  var exitInKept  = _isCityInKept(exitNorm);
-  var roundTrip = entryNorm && exitNorm && entryNorm === exitNorm;
-  if (entryCity && !entryInKept) {
-    bufferAdds += 1; // build will prepend 1-night arrival stop
-  }
-  if (exitCity && !exitInKept) {
-    bufferAdds += 1; // build will append 1-night exit stop
-  } else if (roundTrip && exitInKept && _tb.exitBuffer !== false) {
-    bufferAdds += 1; // round-trip buffer night
-  }
-  var displayNights = totalNights + bufferAdds;
+  // Picker night estimate is base nights only \u2014 entry/exit/buffer logistics
+  // live on the trip view now (Round BR), so the picker's prediction is
+  // independent of those.
+  var displayNights = totalNights;
 
   var btn = document.getElementById("tb-place-continue-btn");
-  // Build button is disabled until we have:
-  //   (a) at least one activity kept, and
-  //   (b) both arrival and departure city filled in.
-  var missingArrDep = !entryCity || !exitCity;
+  // Build button gated only on having at least one kept activity.
   if(!activeItems.length){
     el.innerHTML = '<span style="color:#999;">Pick at least one thing you want to do \u2014 and the place(s) you\u2019d do it. That\u2019s the trip.</span>';
     if(btn){ btn.disabled = true; btn.classList.add("tb-btn-disabled"); }
     return;
   }
-  if(missingArrDep && btn){
-    btn.disabled = true;
-    btn.classList.add("tb-btn-disabled");
-  } else if (btn) {
+  if(btn){
     btn.disabled = false;
     btn.classList.remove("tb-btn-disabled");
   }
   var actCount = activeItems.length;
-  var totalLabel = displayNights > 0 ? (' \u00b7 about <strong>'+displayNights+' nights</strong> total'+(bufferAdds>0?' (incl. arrival/departure buffer)':'')) : '';
+  var totalLabel = displayNights > 0 ? (' \u00b7 about <strong>'+displayNights+' nights</strong> total') : '';
 
   // Time-window indicator \u2014 compare running total to the user's stated
   // duration. Soft friction: shows status, doesn't block continuing.
@@ -5803,30 +5769,10 @@ function renderActivityPicker(){
       +  '</div>'
       +'</div>'
       +'</div>'
-      // Arrival / Departure — placed near the END of the picker, after the
-      // user has seen what they want to do and decided which places to keep.
-      // The trip's geometry follows from those choices; arrival/departure
-      // is the last decision before Build.
-      +'<div style="margin-top:18px;padding:12px 14px;background:#fff;border:1px solid #e8e8e8;border-radius:8px;">'
-      +  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:8px;">Arrival / Departure</div>'
-      +  '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'
-      +    '<div><label style="display:block;font-size:10.5px;color:#666;margin-bottom:4px;">Arriving at</label>'
-      +      '<input class="tb-act-add-inp" id="tb-picker-entry" placeholder="e.g. Zurich" autocomplete="off" value="'+curEntry+'" oninput="_tb.entry=this.value.trim();_pickerArrivalChanged();" onblur="this.value=_titleCaseCity(this.value);_tb.entry=this.value.trim();_pickerArrivalChanged();_updatePlaceActivitySummary&&_updatePlaceActivitySummary();" />'
-      +    '</div>'
-      +    '<div><label style="display:block;font-size:10.5px;color:#666;margin-bottom:4px;">Departing from</label>'
-      +      '<input class="tb-act-add-inp" id="tb-picker-exit" placeholder="e.g. Zurich" autocomplete="off" value="'+curExit+'" oninput="_tb.tbExit=this.value.trim();_tb._exitTouched=true;_updatePlaceActivitySummary&&_updatePlaceActivitySummary();" onblur="this.value=_titleCaseCity(this.value);_tb.tbExit=this.value.trim();_updatePlaceActivitySummary&&_updatePlaceActivitySummary();" />'
-      +    '</div>'
-      +  '</div>'
-      // Default ON — based on years of experience, a buffer night before
-      // flying is the safer pattern (late trains + same-day flights have
-      // burned a lot of travelers). User can toggle off if they prefer
-      // to fly home directly from their last activity destination.
-      +  '<label style="display:flex;align-items:center;gap:6px;font-size:10.5px;color:#666;margin-top:8px;cursor:pointer;line-height:1.4;">'
-      +    '<input type="checkbox" id="tb-picker-exit-buffer" '+((_tb.exitBuffer===false)?"":"checked")+' onchange="_tb.exitBuffer=this.checked;_updatePlaceActivitySummary&&_updatePlaceActivitySummary();" style="margin:0;cursor:pointer;" />'
-      +    '<span><strong>Buffer night in your departure city before flying home</strong> <span style="color:#999;">(default — uncheck to fly directly from your last destination)</span></span>'
-      +  '</label>'
-      +  '<div style="font-size:10px;color:#999;margin-top:6px;line-height:1.5;">Where you fly/train into and out of. The buffer night protects against late train arrivals colliding with same-day flights — a hard-earned lesson from years of travel.</div>'
-      +'</div>'
+      // Arrival / Departure + buffer-night toggle moved to the trip view
+      // (Round BR). The picker is now purely about WHAT you want to do;
+      // logistics live one layer above where the user's already in calendar
+      // mode. Build trip is enabled as soon as at least one activity is kept.
       +'<div class="tb-act-summary" id="tb-place-act-summary" style="margin-top:14px;"></div>';
   }
 
@@ -14390,35 +14336,62 @@ function drawTripMode(){
   listSec.appendChild(listHdr);
   listSec.appendChild(totalLine);
 
-  // Arriving / Departing panel — inline on the trip view so the user doesn't
-  // have to enter the candidate explorer just to set entry/exit cities.
-  // Submitting either field re-runs buildFromCandidates with the new value,
-  // which inserts a 1-night arrival/departure stop if not already present.
+  // Arriving / Departing panel — inline at the TOP of the trip view (after
+  // the dates banner), since arrival/departure shape the calendar and the
+  // user is reading top-down. The picker no longer collects these (Round
+  // BR); the trip view is the canonical place. Auto-fills departure from
+  // arrival on first input (round-trip default). Apply rebuilds the trip.
   if (trip.candidates && trip.candidates.length) {
     var aeRow = document.createElement("div");
-    aeRow.style.cssText = "display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0 14px;padding:9px 12px;background:#fafafa;border:1px solid #e6e2d8;border-radius:7px;";
     var curEntry = (trip.brief && trip.brief.entry) || (_tb && _tb.entry) || "";
     var curExit = (trip.brief && trip.brief.tbExit) || (_tb && _tb.tbExit) || "";
+    var curBuffer = (trip.brief && trip.brief.exitBuffer === false) ? false : true;
+    var missing = !curEntry || !curExit;
+    aeRow.style.cssText = "margin:0 2px 12px;padding:11px 14px;background:" + (missing ? "#fff8ee" : "#fafafa") + ";border:1px solid " + (missing ? "#f0d9aa" : "#e6e2d8") + ";border-radius:8px;";
     aeRow.innerHTML = ''
-      + '<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#777;flex-shrink:0;">Arrival / Departure</span>'
-      + '<label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px;">Arriving at'
-      +   '<input id="tm-entry-inp" placeholder="e.g. Zurich" autocomplete="off" value="'+curEntry.replace(/"/g,'&quot;')+'" style="font-size:11px;padding:4px 8px;border:1px solid #ddd;border-radius:4px;width:130px;font-family:inherit;" />'
-      + '</label>'
-      + '<label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px;">Departing from'
-      +   '<input id="tm-exit-inp" placeholder="e.g. Zurich" autocomplete="off" value="'+curExit.replace(/"/g,'&quot;')+'" style="font-size:11px;padding:4px 8px;border:1px solid #ddd;border-radius:4px;width:130px;font-family:inherit;" />'
-      + '</label>'
-      + '<button id="tm-arrdep-apply" style="font-size:10.5px;font-weight:600;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:4px;padding:4px 10px;cursor:pointer;font-family:inherit;">Apply</button>'
-      + '<span id="tm-arrdep-status" style="font-size:10px;color:#888;"></span>';
-    listSec.appendChild(aeRow);
+      + (missing
+          ? '<div style="font-size:11px;font-weight:700;color:#a06010;margin-bottom:8px;">⚠ Set arrival and departure to lock in the calendar</div>'
+          : '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:8px;">Arrival / Departure</div>'
+        )
+      + '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">'
+      +   '<label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px;">Arriving at'
+      +     '<input id="tm-entry-inp" placeholder="e.g. Zurich" autocomplete="off" value="'+curEntry.replace(/"/g,'&quot;')+'" style="font-size:12px;padding:5px 9px;border:1px solid #ccc;border-radius:4px;width:140px;font-family:inherit;" />'
+      +   '</label>'
+      +   '<label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px;">Departing from'
+      +     '<input id="tm-exit-inp" placeholder="e.g. Zurich" autocomplete="off" value="'+curExit.replace(/"/g,'&quot;')+'" style="font-size:12px;padding:5px 9px;border:1px solid #ccc;border-radius:4px;width:140px;font-family:inherit;" />'
+      +   '</label>'
+      +   '<button id="tm-arrdep-apply" style="font-size:11px;font-weight:600;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:4px;padding:5px 12px;cursor:pointer;font-family:inherit;">Apply</button>'
+      +   '<span id="tm-arrdep-status" style="font-size:10px;color:#888;"></span>'
+      + '</div>'
+      + '<label style="display:flex;align-items:center;gap:6px;font-size:10.5px;color:#666;margin-top:8px;cursor:pointer;line-height:1.4;">'
+      +   '<input type="checkbox" id="tm-exit-buffer" '+(curBuffer?"checked":"")+' style="margin:0;cursor:pointer;" />'
+      +   '<span>Buffer night in your departure city before flying home <span style="color:#999;">(default — uncheck to fly directly from your last destination)</span></span>'
+      + '</label>';
+    // Insert ABOVE the destinations list section. We're inside drawTripMode;
+    // c is the lp-content container. Append directly to c (not listSec) so it
+    // sits above the destinations header.
+    c.appendChild(aeRow);
     setTimeout(function(){
       var applyBtn = document.getElementById("tm-arrdep-apply");
       var entryInp = document.getElementById("tm-entry-inp");
       var exitInp = document.getElementById("tm-exit-inp");
+      var bufferInp = document.getElementById("tm-exit-buffer");
       var statusEl = document.getElementById("tm-arrdep-status");
+      var exitTouched = !!curExit;
+      // Auto-fill departure when arrival is typed (round-trip default).
+      if (entryInp) {
+        entryInp.addEventListener("input", function(){
+          if (!exitTouched && exitInp) exitInp.value = entryInp.value;
+        });
+      }
+      if (exitInp) exitInp.addEventListener("input", function(){ exitTouched = true; });
       function applyArrDep(){
-        var newEntry = (entryInp && entryInp.value || "").trim();
-        var newExit = (exitInp && exitInp.value || "").trim();
-        var changed = (newEntry !== curEntry) || (newExit !== curExit);
+        var newEntry = _titleCaseCity((entryInp && entryInp.value || "").trim());
+        var newExit = _titleCaseCity((exitInp && exitInp.value || "").trim());
+        var newBuffer = !!(bufferInp && bufferInp.checked);
+        if (entryInp) entryInp.value = newEntry;
+        if (exitInp) exitInp.value = newExit;
+        var changed = (newEntry !== curEntry) || (newExit !== curExit) || (newBuffer !== curBuffer);
         if (!changed) {
           if (statusEl) { statusEl.style.color = "#888"; statusEl.textContent = "No change."; }
           return;
@@ -14426,10 +14399,9 @@ function drawTripMode(){
         _tb = _tb || {};
         _tb.entry = newEntry;
         _tb.tbExit = newExit;
-        if (trip.brief) { trip.brief.entry = newEntry; trip.brief.tbExit = newExit; }
+        _tb.exitBuffer = newBuffer;
+        if (trip.brief) { trip.brief.entry = newEntry; trip.brief.tbExit = newExit; trip.brief.exitBuffer = newBuffer; }
         if (statusEl) { statusEl.style.color = "#888"; statusEl.textContent = "Rebuilding…"; }
-        // Rebuild the trip with the new entry/exit. Hydrate _tb.candidates
-        // from the saved snapshot so buildFromCandidates has data to work with.
         if (trip.candidates && trip.candidates.length) {
           _tb.candidates = trip.candidates.map(function(c){ return Object.assign({}, c); });
         }
@@ -14440,9 +14412,13 @@ function drawTripMode(){
         }
       }
       if (applyBtn) applyBtn.addEventListener("click", applyArrDep);
+      if (bufferInp) bufferInp.addEventListener("change", applyArrDep);
       [entryInp, exitInp].forEach(function(inp){
         if (inp) inp.addEventListener("keydown", function(e){
           if (e.key === "Enter") { e.preventDefault(); applyArrDep(); }
+        });
+        if (inp) inp.addEventListener("blur", function(){
+          this.value = _titleCaseCity(this.value);
         });
       });
     }, 0);
@@ -14502,11 +14478,16 @@ function drawTripMode(){
     nameRow.appendChild(nameEl); nameRow.appendChild(renBtn); nameRow.appendChild(moveBtn);
     // Dates FIRST \u2014 date range is the primary anchor for each leg of the
     // trip (the user is reading this as a calendar of where they'll be
-    // when), so it leads the card. Place name and reorder controls follow.
-    var dates=document.createElement("div"); dates.className="tm-dest-dates"; dates.style.fontWeight="600"; dates.style.color="#333"; dates.style.marginBottom="4px";
+    // when), so it leads the card visually. Larger + bolder than the city.
+    var dates=document.createElement("div"); dates.className="tm-dest-dates"; dates.style.fontSize="14px"; dates.style.fontWeight="700"; dates.style.color="#1a1a1a"; dates.style.marginBottom="2px";
     dates.textContent=fmtD(dest.dateFrom)+" \u2013 "+fmtD(dest.dateTo)+" ("+dest.nights+" night"+(dest.nights!==1?"s":"")+")";
     bodyDiv.appendChild(dates);
     bodyDiv.appendChild(nameRow);
+    // City styled smaller + lighter so it reads as a property of the dates,
+    // not the headline.
+    nameEl.style.fontSize="12px";
+    nameEl.style.fontWeight="500";
+    nameEl.style.color="#555";
     if(dest.label&&dest.label!==dest.place){var plLbl=document.createElement("div");plLbl.className="tm-dest-label";plLbl.textContent=dest.place;bodyDiv.appendChild(plLbl);}
 
     // Required-for badges: show which must-do routes this destination is an endpoint for
