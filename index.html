@@ -15729,9 +15729,15 @@ function drawDestMode(destId){
         blk.appendChild(buildHotelChip(bookedHotel,'checkin'));
       }
     }
-    // Auto-inject departure transport on last day
+    // Auto-inject departure transport on last day. Skip when the last day
+    // is ALSO the first day (1-night destination) — in that case the
+    // arrival chip already lives on this card, and the departure happens
+    // the next morning (which lives on the next destination's arrival
+    // chip). Stacking both on a 1-night card reads as "you arrive and
+    // leave the same day," which isn't true.
     var isLastDay=(dayIdx===dest.days.length-1);
-    if(isLastDay){
+    var isAlsoFirstDay=(dayIdx===0);
+    if(isLastDay && !(isAlsoFirstDay && dest.days.length===1)){
       // Hotel checkout on last day
       var bookedHotel2=dest.hotelBookings&&dest.hotelBookings.find(function(b){return b.status==="booked";});
       if(bookedHotel2&&bookedHotel2.checkOut){
