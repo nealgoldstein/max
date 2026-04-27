@@ -5738,7 +5738,11 @@ function renderActivityPicker(){
       +      '<input class="tb-act-add-inp" id="tb-picker-exit" placeholder="e.g. Zurich" autocomplete="off" value="'+curExit+'" oninput="_tb.tbExit=this.value.trim();" />'
       +    '</div>'
       +  '</div>'
-      +  '<div style="font-size:10px;color:#999;margin-top:6px;line-height:1.5;">Where you fly/train into and out of. If these aren’t already in your picks, Max adds a 1-night arrival/departure stop.</div>'
+      +  '<label style="display:flex;align-items:center;gap:6px;font-size:10.5px;color:#666;margin-top:8px;cursor:pointer;line-height:1.4;">'
+      +    '<input type="checkbox" id="tb-picker-exit-buffer" '+(_tb.exitBuffer?"checked":"")+' onchange="_tb.exitBuffer=this.checked;" style="margin:0;cursor:pointer;" />'
+      +    '<span>Add a buffer night in your departure city before flying home <span style="color:#999;">(safer for late train arrivals + same-day flights — adds 1 extra night)</span></span>'
+      +  '</label>'
+      +  '<div style="font-size:10px;color:#999;margin-top:6px;line-height:1.5;">Where you fly/train into and out of. Max plays this smart: if your departure city is already a destination on your trip, you won’t see it twice unless you check the buffer above.</div>'
       +'</div>'
       +'<div class="tb-act-summary" id="tb-place-act-summary" style="margin-top:14px;"></div>';
   }
@@ -7502,6 +7506,7 @@ function reopenPickerForEdit(){
     _tb.placeContext = trip.brief.placeContext || _tb.placeContext || "";
     _tb.entry = trip.brief.entry || _tb.entry || "";
     _tb.tbExit = trip.brief.tbExit || _tb.tbExit || "";
+    _tb.exitBuffer = !!trip.brief.exitBuffer;
     _tb.intent = trip.brief.intent || _tb.intent || "";
     _tb.duration = trip.brief.duration || _tb.duration || "";
     _tb.when = trip.brief.when || _tb.when || "";
@@ -10113,6 +10118,11 @@ async function buildFromCandidates(){
   // departure stop. Same rationale as entry: without this the trip ends at
   // whatever the last kept destination was, leaving the return-flight city
   // implicit and confusing.
+  // ROUND-TRIP SMART-SKIP (Round BL): if the exit city is already a
+  // destination ANYWHERE in the trip (not just the end — typically at the
+  // start, because the same city is also the entry), don't append a
+  // duplicate. The user can opt back into the safety buffer by checking
+  // "Add a buffer night before flying" on the picker (sets _tb.exitBuffer).
   (function(){
     var exit = (_tb.tbExit || "").trim();
     if (!exit) return;
@@ -10122,6 +10132,16 @@ async function buildFromCandidates(){
       return lN.indexOf(exitN) >= 0 || exitN.indexOf(lN) >= 0;
     })();
     if (lastMatches) return; // exit already terminates the trip
+    var exitAlreadyInTrip = ordered.some(function(d){
+      var dN = _normPlaceName(d.place);
+      return dN.indexOf(exitN) >= 0 || exitN.indexOf(dN) >= 0;
+    });
+    if (exitAlreadyInTrip && !_tb.exitBuffer) {
+      if (orderResult.reasoning) {
+        orderResult.reasoning.push(exit + " is already a destination on the trip — you'll head back there for your flight without an extra night. Check the buffer-night option on the picker if you'd rather sleep in " + exit + " before flying.");
+      }
+      return;
+    }
     var exitStop = {
       id: "c-exit-" + Date.now(),
       place: exit,
@@ -10239,6 +10259,7 @@ async function buildFromCandidates(){
     trip.brief.duration = _tb.duration || trip.brief.duration || "";
     trip.brief.entry = _tb.entry || trip.brief.entry || "";
     trip.brief.tbExit = _tb.tbExit || trip.brief.tbExit || "";
+    trip.brief.exitBuffer = !!_tb.exitBuffer;
   }
 
   // Don't re-sort — ordering was already computed event-aware
