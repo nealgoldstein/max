@@ -5769,10 +5769,26 @@ function renderActivityPicker(){
       +  '</div>'
       +'</div>'
       +'</div>'
-      // Arrival / Departure + buffer-night toggle moved to the trip view
-      // (Round BR). The picker is now purely about WHAT you want to do;
-      // logistics live one layer above where the user's already in calendar
-      // mode. Build trip is enabled as soon as at least one activity is kept.
+      // Arrival / Departure — light version on the picker (no Build gating,
+      // no rebuild trigger). Just stores _tb.entry / _tb.tbExit so the
+      // first build picks them up. Trip view has the heavier panel that
+      // rebuilds on change. Both read/write the same _tb fields, so a value
+      // set in one place displays in the other.
+      +'<div style="margin-top:18px;padding:11px 14px;background:#fff;border:1px solid #e8e8e8;border-radius:8px;">'
+      +  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:8px;">Arrival / Departure <span style="color:#aaa;font-weight:400;text-transform:none;letter-spacing:0;">— optional, you can set or change this on the trip page</span></div>'
+      +  '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'
+      +    '<div><label style="display:block;font-size:10.5px;color:#666;margin-bottom:4px;">Arriving at</label>'
+      +      '<input class="tb-act-add-inp" id="tb-picker-entry" placeholder="e.g. Zurich" autocomplete="off" value="'+curEntry+'" oninput="_tb.entry=this.value.trim();_pickerArrivalChanged&&_pickerArrivalChanged();" onblur="this.value=_titleCaseCity(this.value);_tb.entry=this.value.trim();" />'
+      +    '</div>'
+      +    '<div><label style="display:block;font-size:10.5px;color:#666;margin-bottom:4px;">Departing from</label>'
+      +      '<input class="tb-act-add-inp" id="tb-picker-exit" placeholder="e.g. Zurich" autocomplete="off" value="'+curExit+'" oninput="_tb.tbExit=this.value.trim();_tb._exitTouched=true;" onblur="this.value=_titleCaseCity(this.value);_tb.tbExit=this.value.trim();" />'
+      +    '</div>'
+      +  '</div>'
+      +  '<label style="display:flex;align-items:center;gap:6px;font-size:10.5px;color:#666;margin-top:8px;cursor:pointer;line-height:1.4;">'
+      +    '<input type="checkbox" id="tb-picker-exit-buffer" '+((_tb.exitBuffer===false)?"":"checked")+' onchange="_tb.exitBuffer=this.checked;" style="margin:0;cursor:pointer;" />'
+      +    '<span>Buffer night in your departure city before flying home <span style="color:#999;">(default — uncheck to fly directly from your last destination)</span></span>'
+      +  '</label>'
+      +'</div>'
       +'<div class="tb-act-summary" id="tb-place-act-summary" style="margin-top:14px;"></div>';
   }
 
@@ -10985,7 +11001,12 @@ function rebalanceNights(){
 
 function showShortlistBanner(kept){
   var lpc=g("lp-content"); if(!lpc) return;
+  // De-dupe: remove any prior shortlist banner before adding a new one.
+  // Without this, edit-rebuild paths stack the banner each time
+  // (Neal saw 7 of them after multiple edits).
+  Array.from(lpc.querySelectorAll('[data-shortlist-banner="1"]')).forEach(function(n){ n.remove(); });
   var b=document.createElement("div");
+  b.setAttribute("data-shortlist-banner","1");
   b.style.cssText="background:#f0f5ff;border:1px solid #c8d8f0;border-radius:7px;padding:9px 11px;margin-bottom:10px;font-size:11px;line-height:1.6;";
   b.innerHTML='<div style="font-weight:700;color:#1a5fa8;margin-bottom:4px;">\u2713 '+kept.length+' places \u2014 draft schedule below.</div>'
     +'<div style="color:#666;font-size:10px;">Open Parameters to adjust dates.</div>'
