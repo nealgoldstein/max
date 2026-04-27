@@ -5615,6 +5615,21 @@ function addCustomPlaceActivity(){
   setTimeout(function(){ var i = document.getElementById("tb-place-add-inp"); if (i) i.focus(); }, 50);
 }
 
+// When the user types in the Arrival input, mirror the value into the
+// Departure input UNLESS the user has already manually edited Departure
+// (tracked via _tb._exitTouched). Most trips are round-trips; this saves
+// typing without locking the user in.
+function _pickerArrivalChanged(){
+  if (_tb._exitTouched) { _updatePlaceActivitySummary(); return; }
+  var entryInp = document.getElementById("tb-picker-entry");
+  var exitInp = document.getElementById("tb-picker-exit");
+  if (!entryInp || !exitInp) { _updatePlaceActivitySummary(); return; }
+  var v = (entryInp.value || "").trim();
+  exitInp.value = v;
+  _tb.tbExit = v;
+  _updatePlaceActivitySummary();
+}
+
 function _updatePlaceActivitySummary(){
   var el = document.getElementById("tb-place-act-summary");
   if(!el) return;
@@ -5644,32 +5659,73 @@ function _updatePlaceActivitySummary(){
   Object.keys(keptPlaceSet).forEach(function(k){ totalNights += keptPlaceSet[k].nights; });
   var placeCount = Object.keys(keptPlaceSet).length;
 
+  // Add the buffer night when the user has the buffer toggle on AND has
+  // set a departure city. Symmetrically: an entry stop adds 1 night when
+  // the user has set an arrival city that isn't already a kept destination.
+  // This keeps the "about X nights" estimate honest about what the build
+  // will produce, so the budget banner doesn't surprise the user later.
+  var bufferAdds = 0;
+  var entryCity = (_tb.entry || "").trim();
+  var exitCity = (_tb.tbExit || "").trim();
+  function _isCityInKept(city){
+    if (!city) return false;
+    var cN = city.toLowerCase();
+    return Object.keys(keptPlaceSet).some(function(k){
+      return k.indexOf(cN) >= 0 || cN.indexOf(k) >= 0;
+    });
+  }
+  if (exitCity && _tb.exitBuffer !== false) {
+    // Buffer is on: 1 extra night at the departure city before flying.
+    bufferAdds += 1;
+  } else if (exitCity && !_isCityInKept(exitCity)) {
+    // No buffer toggle, but exit city isn't already in the trip \u2014 the
+    // build will append a 1-night exit stop unconditionally.
+    bufferAdds += 1;
+  }
+  if (entryCity && !_isCityInKept(entryCity)) {
+    // Entry city isn't already a destination \u2014 the build will prepend a
+    // 1-night arrival stop.
+    bufferAdds += 1;
+  }
+  var displayNights = totalNights + bufferAdds;
+
   var btn = document.getElementById("tb-place-continue-btn");
+  // Build button is disabled until we have:
+  //   (a) at least one activity kept, and
+  //   (b) both arrival and departure city filled in.
+  var missingArrDep = !entryCity || !exitCity;
   if(!activeItems.length){
     el.innerHTML = '<span style="color:#999;">Pick at least one thing you want to do \u2014 and the place(s) you\u2019d do it. That\u2019s the trip.</span>';
     if(btn){ btn.disabled = true; btn.classList.add("tb-btn-disabled"); }
     return;
   }
+  if(missingArrDep && btn){
+    btn.disabled = true;
+    btn.classList.add("tb-btn-disabled");
+  } else if (btn) {
+    btn.disabled = false;
+    btn.classList.remove("tb-btn-disabled");
+  }
   var actCount = activeItems.length;
-  var totalLabel = totalNights > 0 ? (' \u00b7 about <strong>'+totalNights+' nights</strong> total') : '';
+  var totalLabel = displayNights > 0 ? (' \u00b7 about <strong>'+displayNights+' nights</strong> total'+(bufferAdds>0?' (incl. arrival/departure buffer)':'')) : '';
 
   // Time-window indicator \u2014 compare running total to the user's stated
   // duration. Soft friction: shows status, doesn't block continuing.
   var budget = (typeof _parseTripDuration === "function" && (_tb.duration || _tb.when))
     ? _parseTripDuration(_tb.duration || _tb.when) : null;
   var fitNote = "";
-  if (budget && totalNights > 0) {
+  if (budget && displayNights > 0) {
     var budgetLbl = (budget.min === budget.max)
       ? (budget.max + " day" + (budget.max!==1?"s":""))
       : (budget.min + "\u2013" + budget.max + " days");
-    if (totalNights + 1 > budget.max) {
-      var over = (totalNights + 1) - budget.max;
+    if (displayNights + 1 > budget.max) {
+      var over = (displayNights + 1) - budget.max;
       fitNote = '<div style="margin-top:6px;padding:6px 9px;background:#fff3ed;border:1px solid #f5ccb5;border-radius:6px;font-size:11px;color:#b0451a;">'
         + '<strong>'+over+' day'+(over!==1?"s":"")+' over your '+budgetLbl+' budget.</strong> '
         + 'Drop a destination, reduce nights, or extend your dates.'
         + '</div>';
-    } else if (totalNights + 1 < budget.min) {
-      var under = budget.min - (totalNights + 1);
+    } else if (displayNights + 1 < budget.min) {
+      var under = budget.min - (displayNights + 1);
       fitNote = '<div style="margin-top:6px;padding:6px 9px;background:#f0f7ec;border:1px solid #cae0bb;border-radius:6px;font-size:11px;color:#3f6a2a;">'
         + '<strong>'+under+' day'+(under!==1?"s":"")+' under your '+budgetLbl+' budget.</strong> '
         + 'Room to add more \u2014 extra nights at a place, or another destination.'
@@ -5749,10 +5805,10 @@ function renderActivityPicker(){
       +  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:8px;">Arrival / Departure</div>'
       +  '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'
       +    '<div><label style="display:block;font-size:10.5px;color:#666;margin-bottom:4px;">Arriving at</label>'
-      +      '<input class="tb-act-add-inp" id="tb-picker-entry" placeholder="e.g. Zurich" autocomplete="off" value="'+curEntry+'" oninput="_tb.entry=this.value.trim();" onblur="this.value=_titleCaseCity(this.value);_tb.entry=this.value.trim();" />'
+      +      '<input class="tb-act-add-inp" id="tb-picker-entry" placeholder="e.g. Zurich" autocomplete="off" value="'+curEntry+'" oninput="_tb.entry=this.value.trim();_pickerArrivalChanged();" onblur="this.value=_titleCaseCity(this.value);_tb.entry=this.value.trim();_pickerArrivalChanged();_updatePlaceActivitySummary&&_updatePlaceActivitySummary();" />'
       +    '</div>'
       +    '<div><label style="display:block;font-size:10.5px;color:#666;margin-bottom:4px;">Departing from</label>'
-      +      '<input class="tb-act-add-inp" id="tb-picker-exit" placeholder="e.g. Zurich" autocomplete="off" value="'+curExit+'" oninput="_tb.tbExit=this.value.trim();" onblur="this.value=_titleCaseCity(this.value);_tb.tbExit=this.value.trim();" />'
+      +      '<input class="tb-act-add-inp" id="tb-picker-exit" placeholder="e.g. Zurich" autocomplete="off" value="'+curExit+'" oninput="_tb.tbExit=this.value.trim();_tb._exitTouched=true;_updatePlaceActivitySummary&&_updatePlaceActivitySummary();" onblur="this.value=_titleCaseCity(this.value);_tb.tbExit=this.value.trim();_updatePlaceActivitySummary&&_updatePlaceActivitySummary();" />'
       +    '</div>'
       +  '</div>'
       // Default ON — based on years of experience, a buffer night before
@@ -5760,7 +5816,7 @@ function renderActivityPicker(){
       // burned a lot of travelers). User can toggle off if they prefer
       // to fly home directly from their last activity destination.
       +  '<label style="display:flex;align-items:center;gap:6px;font-size:10.5px;color:#666;margin-top:8px;cursor:pointer;line-height:1.4;">'
-      +    '<input type="checkbox" id="tb-picker-exit-buffer" '+((_tb.exitBuffer===false)?"":"checked")+' onchange="_tb.exitBuffer=this.checked;" style="margin:0;cursor:pointer;" />'
+      +    '<input type="checkbox" id="tb-picker-exit-buffer" '+((_tb.exitBuffer===false)?"":"checked")+' onchange="_tb.exitBuffer=this.checked;_updatePlaceActivitySummary&&_updatePlaceActivitySummary();" style="margin:0;cursor:pointer;" />'
       +    '<span><strong>Buffer night in your departure city before flying home</strong> <span style="color:#999;">(default — uncheck to fly directly from your last destination)</span></span>'
       +  '</label>'
       +  '<div style="font-size:10px;color:#999;margin-top:6px;line-height:1.5;">Where you fly/train into and out of. The buffer night protects against late train arrivals colliding with same-day flights — a hard-earned lesson from years of travel.</div>'
