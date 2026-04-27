@@ -14497,6 +14497,29 @@ function drawTripMode(){
     var moveBtn=document.createElement("button"); moveBtn.className="tm-move-btn"; moveBtn.textContent="move"; moveBtn.title="Move destination";
     (function(d){moveBtn.onclick=function(e){e.stopPropagation();showMoveDestDialog(d);};})(dest);
     nameRow.appendChild(nameEl); nameRow.appendChild(renBtn); nameRow.appendChild(moveBtn);
+    // Arrival / Departure tags on first / last cards (Round BT). Reads as
+    // "this is where the trip starts / ends." Visible above the date row
+    // so the calendar context is established before the date itself.
+    var isFirst = (idx === 0);
+    var isLast = (idx === (trip.destinations||[]).length - 1);
+    if (isFirst || isLast) {
+      var tag = document.createElement("div");
+      tag.style.cssText = "font-size:9.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#888;margin-bottom:3px;display:flex;align-items:center;gap:5px;";
+      var entryCity = (trip.brief && trip.brief.entry) || (_tb && _tb.entry) || "";
+      var exitCity = (trip.brief && trip.brief.tbExit) || (_tb && _tb.tbExit) || "";
+      if (isFirst && isLast) {
+        // Single-destination trip \u2014 the same card is both arrival and departure.
+        tag.innerHTML = "\u2708 Arrival \u00b7 Departure";
+        tag.style.color = "#1a5fa8";
+      } else if (isFirst) {
+        tag.innerHTML = "\u2708 Arrival" + (entryCity ? ' <span style="color:#bbb;font-weight:500;">into ' + entryCity + '</span>' : '');
+        tag.style.color = "#1a5fa8";
+      } else {
+        tag.innerHTML = "\u2708 Departure" + (exitCity ? ' <span style="color:#bbb;font-weight:500;">from ' + exitCity + '</span>' : '');
+        tag.style.color = "#b05820";
+      }
+      bodyDiv.appendChild(tag);
+    }
     // Dates FIRST \u2014 date range is the primary anchor for each leg of the
     // trip (the user is reading this as a calendar of where they'll be
     // when), so it leads the card visually. Larger + bolder than the city.
