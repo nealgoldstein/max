@@ -5723,6 +5723,13 @@ function _updatePlaceActivitySummary(){
   });
   Object.keys(keptPlaceSet).forEach(function(k){ totalNights += keptPlaceSet[k].nights; });
   var placeCount = Object.keys(keptPlaceSet).length;
+  // Store picker's per-place perspective so buildFromCandidates can diff
+  // against it and surface any night-count mismatches. Round CE diagnostic.
+  _tb._pickerNightsByPlace = {};
+  Object.keys(keptPlaceSet).forEach(function(k){
+    var nk = (typeof _normPlaceName === "function") ? _normPlaceName(keptPlaceSet[k].place) : k;
+    _tb._pickerNightsByPlace[nk] = keptPlaceSet[k].nights;
+  });
 
   // Predict what the build will add for entry/exit/buffer so the picker's
   // night-total matches the trip view's day count. The build adds:
@@ -10516,6 +10523,40 @@ async function buildFromCandidates(){
   // Without this, _tb._editPreservedByPlace would leak into subsequent
   // builds and try to overlay stale data onto fresh trips.
   if (_tb && _tb._editPreservedByPlace) delete _tb._editPreservedByPlace;
+
+  // Round CE: night-count diff between picker and trip. Helps pinpoint why
+  // the picker's "X nights" estimate sometimes drifts from the trip view's
+  // "Y days" reality. Mismatches are usually one of:
+  //   • A place in trip but not in picker (entry/exit buffer stop)
+  //   • A place in picker but not in trip (route-only filtered out by BH)
+  //   • Same place, different nights (override key didn't match → fell back
+  //     to LLM stayRange)
+  if (_tb && _tb._pickerNightsByPlace) {
+    var tripByPlace = {};
+    trip.destinations.forEach(function(d){
+      var k = (typeof _normPlaceName === "function") ? _normPlaceName(d.place) : (d.place||"").toLowerCase();
+      tripByPlace[k] = (tripByPlace[k] || 0) + (d.nights || 0);
+    });
+    var mismatches = [];
+    Object.keys(_tb._pickerNightsByPlace).forEach(function(k){
+      var pN = _tb._pickerNightsByPlace[k];
+      var tN = tripByPlace[k] || 0;
+      if (pN !== tN) mismatches.push({place:k, picker:pN, trip:tN, diff:tN-pN});
+    });
+    Object.keys(tripByPlace).forEach(function(k){
+      if (!(k in _tb._pickerNightsByPlace)) {
+        mismatches.push({place:k+" (trip only)", picker:0, trip:tripByPlace[k], diff:tripByPlace[k]});
+      }
+    });
+    var pickerTotal = Object.values(_tb._pickerNightsByPlace).reduce(function(s,n){return s+n;}, 0);
+    var tripTotal = trip.destinations.reduce(function(s,d){return s+(d.nights||0);}, 0);
+    if (mismatches.length || pickerTotal !== tripTotal) {
+      console.warn("[Max night-diff] picker base:", pickerTotal, "trip base:", tripTotal, "diff:", tripTotal - pickerTotal);
+      console.table(mismatches);
+    } else {
+      console.log("[Max night-diff] picker and trip match exactly:", pickerTotal, "nights");
+    }
+  }
 
   // Snapshot the full candidate list (kept + rejected) onto the trip so the user
   // can re-open the Candidate Explorer later and change their decisions.
