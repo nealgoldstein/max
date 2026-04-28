@@ -14684,7 +14684,16 @@ function drawTripMode(){
         });
       }
       if (exitInp) exitInp.addEventListener("input", function(){ exitTouched = true; });
+      // Guard against double-clicks / concurrent rebuilds. Without this, a
+      // user clicking Apply twice quickly (or the buffer checkbox bouncing)
+      // can fire two builds whose async tails interleave and corrupt state,
+      // which presents as "Rebuilding…" stuck forever. _tb._applyInFlight
+      // is set true on entry, cleared in finally.
       async function applyArrDep(){
+        if (_tb && _tb._applyInFlight) {
+          if (statusEl) { statusEl.style.color = "#888"; statusEl.textContent = "Already rebuilding…"; }
+          return;
+        }
         var newEntry = _titleCaseCity((entryInp && entryInp.value || "").trim());
         var newExit = _titleCaseCity((exitInp && exitInp.value || "").trim());
         var newBuffer = !!(bufferInp && bufferInp.checked);
@@ -14696,6 +14705,7 @@ function drawTripMode(){
           return;
         }
         _tb = _tb || {};
+        _tb._applyInFlight = true;
         _tb.entry = newEntry;
         _tb.tbExit = newExit;
         _tb.exitBuffer = newBuffer;
@@ -14726,15 +14736,17 @@ function drawTripMode(){
           _tb.candidates = trip.candidates.map(function(c){ return Object.assign({}, c); });
         }
         try {
-          // buildFromCandidates is async — await so any thrown error is
-          // catchable. Without await, this try/catch only caught sync errors
-          // before the first await inside buildFromCandidates (rare), and
-          // the user could see "Rebuilding…" stuck on screen if anything
-          // went wrong asynchronously.
           await buildFromCandidates();
+          // Belt-and-suspenders: force re-render of the trip view in case
+          // something inside buildFromCandidates skipped the drawTripMode
+          // call. The new aeRow with fresh curEntry/curExit/curBuffer will
+          // overwrite this stale panel.
+          if (typeof drawTripMode === "function") drawTripMode();
         } catch(e) {
           console.error("[Max] applyArrDep buildFromCandidates failed:", e);
           if (statusEl) { statusEl.style.color = "#c44"; statusEl.textContent = "Couldn’t rebuild: " + (e && e.message ? e.message : "unknown error"); }
+        } finally {
+          if (_tb) _tb._applyInFlight = false;
         }
       }
       if (applyBtn) applyBtn.addEventListener("click", applyArrDep);
