@@ -14669,7 +14669,7 @@ function drawTripMode(){
         });
       }
       if (exitInp) exitInp.addEventListener("input", function(){ exitTouched = true; });
-      function applyArrDep(){
+      async function applyArrDep(){
         var newEntry = _titleCaseCity((entryInp && entryInp.value || "").trim());
         var newExit = _titleCaseCity((exitInp && exitInp.value || "").trim());
         var newBuffer = !!(bufferInp && bufferInp.checked);
@@ -14686,13 +14686,40 @@ function drawTripMode(){
         _tb.exitBuffer = newBuffer;
         if (trip.brief) { trip.brief.entry = newEntry; trip.brief.tbExit = newExit; trip.brief.exitBuffer = newBuffer; }
         if (statusEl) { statusEl.style.color = "#888"; statusEl.textContent = "Rebuilding…"; }
+        // Snapshot per-destination user data (notes, bookings, suggestions)
+        // before the rebuild blows away trip.destinations. After buildFromCandidates
+        // rebuilds destinations, the preservation logic in buildFromCandidates
+        // matches each new dest by lowercased place name and restores fields.
+        // Same mechanism as the picker's saveActivityPickerEdits (Round BK).
+        if (trip && Array.isArray(trip.destinations)) {
+          var pres = {};
+          trip.destinations.forEach(function(d){
+            if (!d || !d.place) return;
+            pres[d.place.toLowerCase()] = {
+              trackerItems: d.trackerItems,
+              hotelBookings: d.hotelBookings,
+              generalBookings: d.generalBookings,
+              locations: d.locations,
+              todayItems: d.todayItems,
+              discoveredItems: d.discoveredItems,
+              suggestions: d.suggestions
+            };
+          });
+          _tb._editPreservedByPlace = pres;
+        }
         if (trip.candidates && trip.candidates.length) {
           _tb.candidates = trip.candidates.map(function(c){ return Object.assign({}, c); });
         }
         try {
-          buildFromCandidates();
+          // buildFromCandidates is async — await so any thrown error is
+          // catchable. Without await, this try/catch only caught sync errors
+          // before the first await inside buildFromCandidates (rare), and
+          // the user could see "Rebuilding…" stuck on screen if anything
+          // went wrong asynchronously.
+          await buildFromCandidates();
         } catch(e) {
-          if (statusEl) { statusEl.style.color = "#c44"; statusEl.textContent = "Couldn’t rebuild: " + e.message; }
+          console.error("[Max] applyArrDep buildFromCandidates failed:", e);
+          if (statusEl) { statusEl.style.color = "#c44"; statusEl.textContent = "Couldn’t rebuild: " + (e && e.message ? e.message : "unknown error"); }
         }
       }
       if (applyBtn) applyBtn.addEventListener("click", applyArrDep);
