@@ -1623,29 +1623,15 @@ function makePopup(name,typeLabel,note){
 var _coarseGeocode = _coarseGeocode || {};        // place -> [lat,lng]
 var _coarseGeocodeInFlight = _coarseGeocodeInFlight || {};
 
-// Transit-only places that should NOT be standalone overnight destinations
-// (Round CB). The LLM occasionally includes mountain summits and cogwheel/
-// cable-car bases as places in non-route activities like "Walk by the
-// water" — but a traveler doesn't actually stay overnight at the summit
-// of Mt. Pilatus or in Alpnachstad train station. Used at parse time
-// (strip from non-route activities' requiredPlaces) and at build time
-// (BH filter excludes them from placesUsedByActivity even if they slip
-// through). Routes can still legitimately have these as endpoints.
-var _transitOnlyPlaces = {
-  // Swiss mountain summits (cogwheel / cable-car endpoints, no real bases)
-  "pilatus kulm":1,"rigi kulm":1,"jungfraujoch":1,"klein matterhorn":1,
-  "schilthorn":1,"piz gloria":1,"stanserhorn":1,"brienzer rothorn":1,
-  "rothorn kulm":1,"gornergrat":1,"schynige platte":1,"first":1,
-  "männlichen":1,"mannlichen":1,"diavolezza":1,"niesen":1,"harder kulm":1,
-  "rigi staffel":1,"chäserrugg":1,"chaeserrugg":1,"säntis":1,"saentis":1,
-  // Swiss cogwheel / funicular base stations that are not real towns
-  "alpnachstad":1,"arth-goldau":1,"kleine scheidegg":1,
-  // Note: Vitznau, Brienz, Wengen, Mürren are real (small) towns where
-  // travelers DO stay — not denylisted. Same for Grindelwald (large town).
-  // Iceland — none currently. Italy (Tirano, Domodossola): real towns,
-  // not transit-only — Tirano is the Bernina Express terminus and a real
-  // small town, Domodossola same.
-};
+// Round CC: transit-only flagging is now LLM-supplied per-place via the
+// `overnight: true|false` field on each requiredPlace, viableLocation, and
+// endpoint. No hardcoded denylist; the LLM (which knows whether Pilatus
+// Kulm or Mt. Fuji 5th Station or Lake Louise Gondola is a base versus
+// a transit-only summit) marks them at generation time. Parse-time
+// filtering strips overnight:false places from non-route activities;
+// build-time check excludes them from placesUsedByActivity. Routes can
+// still legitimately have overnight:false endpoints (their endpoints ARE
+// supposed to be transit nodes).
 
 // Country-override table for places whose country the LLM commonly
 // hallucinates (Tirano gets put in Albania/North Macedonia, Domodossola in
@@ -4035,15 +4021,15 @@ async function runCandidateSearch(requiredPlaces) {
         if (it.type === "route") return; // routes don't claim nights
         (it.requiredPlaces||[]).forEach(function(p){
           if (!p || !p.place) return;
-          var rawKey = p.place.toLowerCase().trim();
-          // Round CB: even if a transit-only place (Pilatus Kulm, Alpnachstad,
-          // etc.) sneaks past the parse-time filter via "+ more like this"
-          // or the picker's "+ Add a place", don't admit it to
+          // Round CC: even if a place flagged overnight:false sneaks past the
+          // parse-time filter (e.g., via "+ more like this" or "+ Add a place"
+          // where the user might add a summit by name), don't admit it to
           // placesUsedByActivity. BH uses that map to decide which _required
-          // candidates to auto-keep. Excluding transit-only places here means
-          // BH will mark them rejected.
-          if (_transitOnlyPlaces && _transitOnlyPlaces[rawKey]) return;
-          var k = (typeof _normPlaceName === "function" ? _normPlaceName(p.place) : rawKey);
+          // candidates to auto-keep. Excluding overnight:false places here
+          // means BH will mark them rejected — the LLM said they're
+          // transit-only, so don't make them overnight stops.
+          if (p.overnight === false) return;
+          var k = (typeof _normPlaceName === "function" ? _normPlaceName(p.place) : p.place.toLowerCase().trim());
           placesUsedByActivity[k] = true;
           if (typeof p.nights !== "number") return;
           if (pickedNightsByPlace[k] == null || p.nights > pickedNightsByPlace[k]) {
@@ -4725,17 +4711,17 @@ async function generateActivitiesForPlace(){
     + "If you're not 100% certain a name resolves to where you think, OMIT the item rather than guess. Confidently wrong locations are worse than no result.\n\n"
     + "PLACES PER ACTIVITY \u2014 better to list many than few. The traveler wants to see options, not commit to a tight set. For an activity like \u201cmountain scenery\u201d in Switzerland, list 4\u20136 places (Zermatt, Lauterbrunnen, Jungfrau region, Engadin/St. Moritz, Appenzell, etc.). For \u201ccheese tasting,\u201d list 3\u20135 spots. For routes, requiredPlaces is the endpoint pair (and any major intermediate stops on multi-modal circuits).\n\n"
     + "PLACE NAMES \u2014 use the full disambiguating name a map service would resolve correctly. \u201cCh\u00e2teau de Chillon\u201d not just \u201cChillon\u201d (which matches a town in Spain). \u201cMont Saint-Michel\u201d not \u201cSaint-Michel\u201d. \u201cZurich\u201d (city) not \u201cKanton Z\u00fcrich\u201d. If a landmark sits in/near a town and the town is the actual base, use the town (e.g. \u201cMontreux\u201d for Chillon-area stays); but when the landmark IS the requiredPlace, use its full name. Always set the country field correctly \u2014 the geocoder filters by it.\n\n"
-    + "TRANSIT NODES ARE NOT OVERNIGHT DESTINATIONS \u2014 IMPORTANT: requiredPlaces in non-route activities must be places where a traveler would actually spend a night. Mountain summits (Pilatus Kulm, Rigi Kulm, Jungfraujoch, Klein Matterhorn, Schilthorn, Gornergrat, Schynige Platte, First, M\u00e4nnlichen, Brienzer Rothorn, Stanserhorn, Niesen, Harder Kulm, S\u00e4ntis, etc.) and cogwheel/cable-car base stations that aren\u2019t real towns (Alpnachstad, Arth-Goldau, Kleine Scheidegg, etc.) are TRANSIT-ONLY \u2014 they belong as endpoints in route items, not as standalone places where the traveler stays. If you'd recommend visiting Pilatus Kulm, the traveler stays in LUCERNE or ALPNACH (overnight base) and rides up for the day \u2014 list Lucerne in requiredPlaces, mention Pilatus in the description, put the cogwheel railway as a separate type=route item. Same logic for any other region: name the overnight base, not the summit. Real small towns like Vitznau, Brienz, Wengen, M\u00fcrren, Grindelwald can be overnight bases; mountain-summit-only stations cannot.\n\n"
+    + "TRANSIT NODES ARE NOT OVERNIGHT DESTINATIONS \u2014 IMPORTANT: every place object (in requiredPlaces, endpoints, viableLocations) MUST include an `overnight` boolean. Set overnight:true for real overnight bases \u2014 towns and cities where a traveler genuinely stays the night. Set overnight:false for TRANSIT-ONLY nodes \u2014 mountain summits reached by cable car or cogwheel, train termini that aren't real towns, cable-car summits, scenic viewpoints with no overnight infrastructure. Examples (Switzerland): Lucerne overnight:true; Pilatus Kulm overnight:false; Vitznau overnight:true (real town); Alpnachstad overnight:false (transit hub only). Examples (Japan): Kyoto overnight:true; Mt. Fuji 5th Station overnight:false. Examples (Banff): Banff overnight:true; Lake Louise Gondola Summit overnight:false. The traveler reaches transit-only places via day trips from a real overnight base. For non-route activities (type=\"activity\" or \"condition\"), only list overnight:true places in requiredPlaces \u2014 the user shouldn't be expected to stay overnight at a cable-car summit. Routes (type=\"route\") may legitimately have overnight:false endpoints because routes ARE transit; their endpoints are the destinations the user reaches by traveling.\n\n"
     + "NIGHTS PER PLACE \u2014 each entry in requiredPlaces gets a nights field with a sensible default range for doing this activity well at that place. Activities: typical nights to do the activity well there. Routes: 0 (route is transit, not a stay; days are spent at the endpoints). Conditions: nights needed to give the condition a real chance.\n\n"
     + "COORDINATES PER PLACE \u2014 IMPORTANT: every entry in requiredPlaces (and endpoints, viableLocations) MUST include lat and lng fields with the place\u2019s approximate latitude and longitude as numbers. Use 4 decimal places. These coordinates are used to plot the place on a map without external geocoding, so they must be reasonably accurate (within ~5km is fine; do not invent coordinates for places you don\u2019t know \u2014 for those, omit the entire item). Examples: Zermatt is roughly lat 46.0207, lng 7.7491; Tokyo is roughly lat 35.6762, lng 139.6503; Reykjavik is roughly lat 64.1466, lng -21.9426. Do NOT use 0,0.\n\n"
     + "Return ONLY a JSON array (no markdown). Aim for 10\u201316 items for rail-heavy regions; 8\u201312 for others. Cover a real range \u2014 don\u2019t silently drop a category. Include routes and condition items whenever they genuinely apply.\n\n"
     + "[\n"
-    + '  {"name":"Walk in the mountains","type":"activity","section":"Walk in the mountains","description":"Alpine paths and panoramic ridges across the high country.","iconic":true,"requiredPlaces":[{"place":"Zermatt","country":"Switzerland","nights":3,"lat":46.0207,"lng":7.7491},{"place":"Lauterbrunnen","country":"Switzerland","nights":2,"lat":46.5944,"lng":7.9081},{"place":"St. Moritz","country":"Switzerland","nights":2,"lat":46.4983,"lng":9.8378},{"place":"Appenzell","country":"Switzerland","nights":2,"lat":47.3308,"lng":9.4080}],"durationHours":48},\n'
-    + '  {"name":"Taste cheese at the source","type":"activity","section":"Taste the local food","description":"Visit historic dairies and try regional varieties \u2014 Gruy\u00e8re, Emmental, Appenzeller.","iconic":false,"requiredPlaces":[{"place":"Gruy\u00e8res","country":"Switzerland","nights":1,"lat":46.5836,"lng":7.0817},{"place":"Emmental","country":"Switzerland","nights":1,"lat":46.9333,"lng":7.7333},{"place":"Appenzell","country":"Switzerland","nights":1,"lat":47.3308,"lng":9.4080}],"durationHours":12},\n'
-    + '  {"name":"Ride the Glacier Express","type":"route","section":"Travel on iconic trains","description":"Classic 8hr panoramic rail journey across 291 bridges and 91 tunnels.","iconic":true,"endpoints":[{"place":"Zermatt","country":"Switzerland","lat":46.0207,"lng":7.7491},{"place":"St. Moritz","country":"Switzerland","lat":46.4983,"lng":9.8378}],"requiredPlaces":[{"place":"Zermatt","country":"Switzerland","nights":0,"lat":46.0207,"lng":7.7491},{"place":"St. Moritz","country":"Switzerland","nights":0,"lat":46.4983,"lng":9.8378}],"direction":"either","durationHours":8,"transportModes":["train"],"modeOptions":"both"},\n'
-    + '  {"name":"Visit the Rhine Falls","type":"activity","section":"Visit natural wonders","description":"The largest waterfall in Europe by volume.","iconic":true,"requiredPlaces":[{"place":"Schaffhausen","country":"Switzerland","nights":1,"lat":47.6973,"lng":8.6347}],"durationHours":4}\n'
+    + '  {"name":"Walk in the mountains","type":"activity","section":"Walk in the mountains","description":"Alpine paths and panoramic ridges across the high country.","iconic":true,"requiredPlaces":[{"place":"Zermatt","country":"Switzerland","nights":3,"lat":46.0207,"lng":7.7491,"overnight":true},{"place":"Lauterbrunnen","country":"Switzerland","nights":2,"lat":46.5944,"lng":7.9081,"overnight":true},{"place":"St. Moritz","country":"Switzerland","nights":2,"lat":46.4983,"lng":9.8378,"overnight":true},{"place":"Appenzell","country":"Switzerland","nights":2,"lat":47.3308,"lng":9.4080,"overnight":true}],"durationHours":48},\n'
+    + '  {"name":"Ride the Pilatus cogwheel","type":"route","section":"Ride mountain railways to summits","description":"Steepest cogwheel railway in the world to the summit of Mt. Pilatus.","iconic":true,"endpoints":[{"place":"Alpnachstad","country":"Switzerland","lat":46.9528,"lng":8.2783,"overnight":false},{"place":"Pilatus Kulm","country":"Switzerland","lat":46.9786,"lng":8.2553,"overnight":false}],"requiredPlaces":[{"place":"Alpnachstad","country":"Switzerland","nights":0,"lat":46.9528,"lng":8.2783,"overnight":false},{"place":"Pilatus Kulm","country":"Switzerland","nights":0,"lat":46.9786,"lng":8.2553,"overnight":false}],"direction":"forward","durationHours":3,"transportModes":["cogwheel"],"modeOptions":"tourist"},\n'
+    + '  {"name":"Ride the Glacier Express","type":"route","section":"Travel on iconic trains","description":"Classic 8hr panoramic rail journey.","iconic":true,"endpoints":[{"place":"Zermatt","country":"Switzerland","lat":46.0207,"lng":7.7491,"overnight":true},{"place":"St. Moritz","country":"Switzerland","lat":46.4983,"lng":9.8378,"overnight":true}],"requiredPlaces":[{"place":"Zermatt","country":"Switzerland","nights":0,"lat":46.0207,"lng":7.7491,"overnight":true},{"place":"St. Moritz","country":"Switzerland","nights":0,"lat":46.4983,"lng":9.8378,"overnight":true}],"direction":"either","durationHours":8,"transportModes":["train"],"modeOptions":"both"},\n'
+    + '  {"name":"Visit the Rhine Falls","type":"activity","section":"Visit natural wonders","description":"The largest waterfall in Europe by volume.","iconic":true,"requiredPlaces":[{"place":"Schaffhausen","country":"Switzerland","nights":1,"lat":47.6973,"lng":8.6347,"overnight":true}],"durationHours":4}\n'
     + "]\n\n"
-    + "CRITICAL: requiredPlaces, endpoints, and viableLocations are ARRAYS OF OBJECTS, each with place and country strings, a nights number on requiredPlaces entries, AND lat/lng numbers (4 decimals). Even for a single-country place, always include country and coordinates.";
+    + "CRITICAL: requiredPlaces, endpoints, and viableLocations are ARRAYS OF OBJECTS. Each needs: place (string), country (string), nights (number on requiredPlaces; 0 for routes/transit), lat/lng (4 decimals), AND overnight (boolean \u2014 true for real overnight bases, false for transit-only summits / cable-car endpoints). Even for a single-country place, always include country, coordinates, and overnight.";
 
   try {
     // 6000 tokens — prompt now asks for up to 16 items with full route fields
@@ -4820,26 +4806,25 @@ async function generateActivitiesForPlace(){
     var _verifyRegion = (_tb && _tb.region) || place || "";
     items = await _verifyRouteItems(items, _verifyRegion);
 
-    // Round CB: strip transit-only places (mountain summits, cogwheel base
-    // stations) from non-route requiredPlaces. The LLM occasionally lists
-    // Pilatus Kulm or Alpnachstad as places under "Walk by the water" or
-    // similar — they don't belong there as overnight destinations. Routes
-    // can still legitimately have them as endpoints.
+    // Round CC: strip places flagged overnight:false from non-route
+    // requiredPlaces. The LLM marks transit-only summits and cable-car
+    // endpoints as overnight:false; we don't want them as overnight
+    // destinations on the user's trip. Routes can still legitimately have
+    // overnight:false endpoints because routes ARE transit.
     var _filteredFromActivities = 0;
     items.forEach(function(item){
       if (item.type === "route") return;
       if (!Array.isArray(item.requiredPlaces)) return;
       item.requiredPlaces = item.requiredPlaces.filter(function(p){
         if (!p || !p.place) return true;
-        var k = p.place.toLowerCase().trim();
-        if (_transitOnlyPlaces[k]) {
+        if (p.overnight === false) {
           _filteredFromActivities++;
           return false;
         }
         return true;
       });
     });
-    if (_filteredFromActivities > 0) console.log("[Max] filtered " + _filteredFromActivities + " transit-only place(s) from non-route activities (round CB)");
+    if (_filteredFromActivities > 0) console.log("[Max] filtered " + _filteredFromActivities + " transit-only place(s) from non-route activities (round CC)");
 
     items.forEach(function(item,i){
       item.id = "plm" + i;
