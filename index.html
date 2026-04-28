@@ -5730,6 +5730,8 @@ function _updatePlaceActivitySummary(){
     var nk = (typeof _normPlaceName === "function") ? _normPlaceName(keptPlaceSet[k].place) : k;
     _tb._pickerNightsByPlace[nk] = keptPlaceSet[k].nights;
   });
+  _tb._pickerBaseTotal = totalNights;
+  // bufferAdds is computed below; we'll store it after computing.
 
   // Predict what the build will add for entry/exit/buffer so the picker's
   // night-total matches the trip view's day count. The build adds:
@@ -5754,6 +5756,8 @@ function _updatePlaceActivitySummary(){
   if (exitCity && !exitInKept) bufferAdds += 1;
   else if (roundTrip && exitInKept && _tb.exitBuffer !== false) bufferAdds += 1;
   var displayNights = totalNights + bufferAdds;
+  _tb._pickerBufferAdds = bufferAdds;
+  _tb._pickerDisplayTotal = displayNights;
 
   var btn = document.getElementById("tb-place-continue-btn");
   // Build button gated only on having at least one kept activity.
@@ -10524,37 +10528,40 @@ async function buildFromCandidates(){
   // builds and try to overlay stale data onto fresh trips.
   if (_tb && _tb._editPreservedByPlace) delete _tb._editPreservedByPlace;
 
-  // Round CE: night-count diff between picker and trip. Helps pinpoint why
-  // the picker's "X nights" estimate sometimes drifts from the trip view's
-  // "Y days" reality. Mismatches are usually one of:
-  //   • A place in trip but not in picker (entry/exit buffer stop)
-  //   • A place in picker but not in trip (route-only filtered out by BH)
-  //   • Same place, different nights (override key didn't match → fell back
-  //     to LLM stayRange)
+  // Round CE: night-count diff between picker and trip. Compare
+  // picker's DISPLAY total (base + buffer) vs trip's actual total. The
+  // buffer night is correctly merged into an existing city in the trip
+  // (when entry/exit is a kept destination), so the per-place breakdown
+  // looks "off" but the totals match. The real bug to flag is when totals
+  // diverge after accounting for the buffer.
   if (_tb && _tb._pickerNightsByPlace) {
     var tripByPlace = {};
     trip.destinations.forEach(function(d){
       var k = (typeof _normPlaceName === "function") ? _normPlaceName(d.place) : (d.place||"").toLowerCase();
       tripByPlace[k] = (tripByPlace[k] || 0) + (d.nights || 0);
     });
-    var mismatches = [];
-    Object.keys(_tb._pickerNightsByPlace).forEach(function(k){
-      var pN = _tb._pickerNightsByPlace[k];
-      var tN = tripByPlace[k] || 0;
-      if (pN !== tN) mismatches.push({place:k, picker:pN, trip:tN, diff:tN-pN});
-    });
-    Object.keys(tripByPlace).forEach(function(k){
-      if (!(k in _tb._pickerNightsByPlace)) {
-        mismatches.push({place:k+" (trip only)", picker:0, trip:tripByPlace[k], diff:tripByPlace[k]});
-      }
-    });
-    var pickerTotal = Object.values(_tb._pickerNightsByPlace).reduce(function(s,n){return s+n;}, 0);
+    var pickerDisplay = _tb._pickerDisplayTotal || 0;
+    var pickerBufferAdds = _tb._pickerBufferAdds || 0;
     var tripTotal = trip.destinations.reduce(function(s,d){return s+(d.nights||0);}, 0);
-    if (mismatches.length || pickerTotal !== tripTotal) {
-      console.warn("[Max night-diff] picker base:", pickerTotal, "trip base:", tripTotal, "diff:", tripTotal - pickerTotal);
-      console.table(mismatches);
+    var totalsMatch = pickerDisplay === tripTotal;
+    if (totalsMatch) {
+      console.log("[Max night-diff] OK — picker " + pickerDisplay + " (base " + (pickerDisplay - pickerBufferAdds) + " + buffer " + pickerBufferAdds + ") = trip " + tripTotal);
     } else {
-      console.log("[Max night-diff] picker and trip match exactly:", pickerTotal, "nights");
+      // Real mismatch — surface per-place divergences that aren't explained
+      // by the buffer being merged into an existing city.
+      var mismatches = [];
+      Object.keys(_tb._pickerNightsByPlace).forEach(function(k){
+        var pN = _tb._pickerNightsByPlace[k];
+        var tN = tripByPlace[k] || 0;
+        if (pN !== tN) mismatches.push({place:k, picker:pN, trip:tN, diff:tN-pN});
+      });
+      Object.keys(tripByPlace).forEach(function(k){
+        if (!(k in _tb._pickerNightsByPlace)) {
+          mismatches.push({place:k+" (trip only)", picker:0, trip:tripByPlace[k], diff:tripByPlace[k]});
+        }
+      });
+      console.warn("[Max night-diff] MISMATCH — picker " + pickerDisplay + " (base " + (pickerDisplay - pickerBufferAdds) + " + buffer " + pickerBufferAdds + ") vs trip " + tripTotal + " — diff " + (tripTotal - pickerDisplay));
+      console.table(mismatches);
     }
   }
 
