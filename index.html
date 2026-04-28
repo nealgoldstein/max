@@ -4984,8 +4984,14 @@ function _renderPlaceActivityItems(){
       });
       var hdrWrapR = document.createElement("div");
       hdrWrapR.className = "tb-act-section-hdr" + (secKeptR ? " on" : "");
-      hdrWrapR.innerHTML = '<div class="tb-act-section-title">' + _pmEsc(sec) + '</div>'
-        + '<div class="tb-act-section-count">' + secItems.length + ' route' + (secItems.length===1?'':'s') + '</div>';
+      var moreBtnHtmlR = '<button type="button" class="tb-more-like-btn" '
+        + 'onclick="expandActivitySection(this.dataset.section);event.stopPropagation();" '
+        + 'data-section="'+_pmEsc(sec).replace(/"/g,'&quot;')+'" '
+        + 'style="font-size:10px;font-weight:600;color:#1a5fa8;background:#e8f0fc;border:1px solid #c8d8f0;border-radius:5px;padding:3px 8px;margin-left:8px;cursor:pointer;font-family:inherit;flex-shrink:0;" '
+        + 'title="Ask Max for more like this">+ more like this</button>';
+      hdrWrapR.innerHTML = '<div class="tb-act-section-title" style="flex:1;min-width:0;">' + _pmEsc(sec) + '</div>'
+        + '<div class="tb-act-section-count">' + secItems.length + ' route' + (secItems.length===1?'':'s') + '</div>'
+        + moreBtnHtmlR;
       list.appendChild(hdrWrapR);
 
       secItems.forEach(function(item){
@@ -5062,14 +5068,16 @@ function _renderPlaceActivityItems(){
     // LLM for additional places where this section's activity is iconic.
     var hdrWrap = document.createElement("div");
     hdrWrap.className = "tb-act-section-hdr" + (secKept ? " on" : "");
-    var moreBtnHtml = "";
-    if (!isRouteSection) {
-      moreBtnHtml = '<button type="button" class="tb-more-like-btn" '
-        + 'onclick="expandActivitySection(this.dataset.section);event.stopPropagation();" '
-        + 'data-section="'+_pmEsc(sec).replace(/"/g,'&quot;')+'" '
-        + 'style="font-size:10px;font-weight:600;color:#1a5fa8;background:#e8f0fc;border:1px solid #c8d8f0;border-radius:5px;padding:3px 8px;margin-left:8px;cursor:pointer;font-family:inherit;flex-shrink:0;" '
-        + 'title="Ask Max for more places where this is iconic">+ more like this</button>';
-    }
+    // "+ more like this" available on all sections, including routes —
+    // mountain railways and lake circuits both have iconic options beyond
+    // the most-canonical few (Schilthornbahn, Klein Matterhorn, Stanserhorn,
+    // Brienzersee + Rothorn, etc.). The LLM call adapts to the section's
+    // activity name + description, so it asks for the right kind of "more".
+    var moreBtnHtml = '<button type="button" class="tb-more-like-btn" '
+      + 'onclick="expandActivitySection(this.dataset.section);event.stopPropagation();" '
+      + 'data-section="'+_pmEsc(sec).replace(/"/g,'&quot;')+'" '
+      + 'style="font-size:10px;font-weight:600;color:#1a5fa8;background:#e8f0fc;border:1px solid #c8d8f0;border-radius:5px;padding:3px 8px;margin-left:8px;cursor:pointer;font-family:inherit;flex-shrink:0;" '
+      + 'title="Ask Max for more places where this is iconic">+ more like this</button>';
     hdrWrap.innerHTML = '<div class="tb-act-section-title" style="flex:1;min-width:0;">' + _pmEsc(sec) + '</div>'
       + '<div class="tb-act-section-count">' + destOrder.length + ' destination' + (destOrder.length===1?'':'s') + '</div>'
       + moreBtnHtml;
@@ -5894,93 +5902,92 @@ function renderActivityPicker(){
 // reuses the existing addPlaceToCandidates logic but injects into the
 // picker's _tb.placeActivities as a manual-style item so it shows up on
 // the picker list and the map.
-// "+ more like this" — depth discovery. Asks Max for additional places
-// in the region where the given section's activity is iconic, appends
-// them to the section's primary activity with _keep:false (user opts in).
-// Seeds _coarseGeocode from any LLM-supplied lat/lng. Round CA.
+// "+ more like this" — depth discovery. Asks Max for additional named
+// experiences in the same section (e.g. more cogwheel railways for "Ride
+// mountain railways to summits", more lake circuits for "Sail scenic
+// lake circuits", more places to walk for "Walk in the mountains"). Each
+// suggestion becomes a new picker item under the same section, _keep:false
+// so user opts in. Seeds _coarseGeocode from LLM-supplied lat/lng. Round CA.
 async function expandActivitySection(sectionName){
   if (!sectionName) return;
-  // Find all items in this section (case-insensitive name match).
   var items = (_tb.placeActivities || []).filter(function(i){
     return (i.section||"").trim().toLowerCase() === sectionName.toLowerCase();
   });
   if (!items.length) return;
-  // Pick the activity that will absorb the new places — first non-route item.
-  var target = items.find(function(i){ return i.type !== "route"; }) || items[0];
-  if (!target) return;
-  // Existing place names so we don't repeat.
-  var existing = {};
+  var sample = items[0]; // representative for prompt context
+  // Existing item names + place names (for de-dup).
+  var existingNames = items.map(function(i){return (i.name||"").trim();}).filter(Boolean);
+  var existingPlaces = {};
   items.forEach(function(it){
     (it.requiredPlaces||[]).forEach(function(p){
-      if (p && p.place) existing[p.place.toLowerCase()] = true;
+      if (p && p.place) existingPlaces[p.place.toLowerCase()] = true;
     });
   });
-  var existingList = Object.keys(existing).map(function(k){
-    return (target.requiredPlaces||[]).find(function(p){return p && p.place && p.place.toLowerCase() === k;});
-  }).filter(Boolean).map(function(p){ return p.place; });
-
   // Mark the button as loading
-  var btns = document.querySelectorAll('.tb-more-like-btn');
   var btn = null;
-  btns.forEach(function(b){ if(b.dataset.section === sectionName) btn = b; });
+  document.querySelectorAll('.tb-more-like-btn').forEach(function(b){ if(b.dataset.section === sectionName) btn = b; });
   if (btn) { btn.disabled = true; btn.textContent = "thinking…"; }
 
   var region = (_tb && _tb.region) || (_tb && _tb.placeName) || "this region";
-  var actName = target.name || sectionName;
-  var actDesc = target.description || "";
   var prompt = "Region: " + region + "\n"
-    + "Activity: " + actName + (actDesc ? " — " + actDesc : "") + "\n"
-    + "Section: " + sectionName + "\n"
-    + (existingList.length ? "Already considered (do NOT repeat these): " + existingList.join(", ") + "\n" : "")
-    + "\nList 4–6 ADDITIONAL specific places in " + region + " where this activity is genuinely iconic — places worth a real overnight stay, not just transit/access points. Be specific (real city/town/landmark names). Skip train stations, cable-car bases, and other transit-only stops; those aren't standalone destinations.\n\n"
-    + "ACCURACY: if you're not certain a place is real and well-suited for this activity, omit it. Better to return 3 great places than 6 fillers.\n\n"
+    + "Picker section: " + sectionName + "\n"
+    + (sample.description ? "Section flavor (sample item description): " + sample.description + "\n" : "")
+    + (existingNames.length ? "Existing items in this section (don't repeat): " + existingNames.join(", ") + "\n" : "")
+    + (Object.keys(existingPlaces).length ? "Places already considered: " + Object.keys(existingPlaces).join(", ") + "\n" : "")
+    + "\nSuggest 3–5 ADDITIONAL specific named experiences that fit this section. Each one should be a real, named experience in " + region + " (a specific train, a specific summit, a specific town's old quarter, a specific museum, etc.) — concrete, not generic. Don't repeat anything above.\n\n"
+    + "ACCURACY RULE: if you're not certain a named experience is real and matches the section, OMIT it. Better to return 3 strong items than 5 fillers. Skip transit-only stops (train stations, cable-car bases) unless they're a real overnight destination.\n\n"
     + "Return ONLY a JSON array (no markdown):\n"
-    + '[{"place":"City","country":"Country","nights":2,"lat":46.0,"lng":7.0,"why":"one short sentence why it fits"}]\n'
-    + "Coordinates must be real lat/lng (4 decimals). Nights: typical overnight stay for doing this activity well there.";
+    + '[{"name":"Verb-phrased name (e.g. \\"Ride the Schilthornbahn to Piz Gloria\\")","description":"one sentence on what it is","iconic":false,"requiredPlaces":[{"place":"Town","country":"Country","nights":2,"lat":46.5,"lng":7.9}]}]\n'
+    + "Each requiredPlace needs lat/lng (4 decimals). Nights: typical overnight stay there. iconic:true only for first-time-visitor must-dos.";
 
   try {
-    var text = await callMax([{role:"user", content: prompt}], 1200, 30000);
+    var text = await callMax([{role:"user", content: prompt}], 1500, 35000);
     var cleaned = text.replace(/```json|```/g, "").trim();
     var first = cleaned.indexOf("["), last = cleaned.lastIndexOf("]");
     if (first > -1 && last > -1) cleaned = cleaned.substring(first, last + 1);
-    var newPlaces = JSON.parse(cleaned);
-    if (!Array.isArray(newPlaces)) throw new Error("expected array");
-    // Filter out any that match existing (case-insensitive normalized).
-    var existingNorm = {};
-    Object.keys(existing).forEach(function(k){
-      var n = (typeof _normPlaceName === "function") ? _normPlaceName(k) : k;
-      existingNorm[n] = true;
-    });
+    var newItems = JSON.parse(cleaned);
+    if (!Array.isArray(newItems)) throw new Error("expected array");
+    var existingNamesLower = existingNames.map(function(n){return n.toLowerCase();});
     var added = 0;
-    newPlaces.forEach(function(np){
-      if (!np || !np.place) return;
-      var nName = (typeof _normPlaceName === "function") ? _normPlaceName(np.place) : np.place.toLowerCase();
-      if (existingNorm[nName]) return; // skip duplicate
-      // Country override + LLM-coord seed for the new place.
-      var country = np.country || "";
-      var key = np.place.toLowerCase().trim();
-      if (_builtinCountry && _builtinCountry[key]) country = _builtinCountry[key];
-      var lat = parseFloat(np.lat), lng = parseFloat(np.lng);
-      var addedPlace = {
-        place: np.place,
-        country: country,
-        nights: (typeof np.nights === "number" && np.nights >= 0) ? np.nights : 2,
-        _keep: false // opt-in; user has to check it
+    newItems.forEach(function(ni){
+      if (!ni || !ni.name) return;
+      if (existingNamesLower.indexOf(ni.name.toLowerCase()) >= 0) return; // skip duplicate name
+      var newReq = (ni.requiredPlaces || []).map(function(p){
+        if (!p || !p.place) return null;
+        var key = p.place.toLowerCase().trim();
+        var country = (_builtinCountry && _builtinCountry[key]) || p.country || "";
+        var lat = parseFloat(p.lat), lng = parseFloat(p.lng);
+        var rp = {
+          place: p.place,
+          country: country,
+          nights: (typeof p.nights === "number" && p.nights >= 0) ? p.nights : 2,
+          _keep: false
+        };
+        if (isFinite(lat) && isFinite(lng) && (lat !== 0 || lng !== 0)) {
+          rp.lat = lat; rp.lng = lng;
+          if (!_builtinGeo[key]) _coarseGeocode[key] = [lat, lng];
+        }
+        return rp;
+      }).filter(Boolean);
+      if (newReq.length === 0) return; // skip items with no usable places
+      var newItem = {
+        id: "p-more-" + Date.now() + "-" + Math.floor(Math.random()*100000),
+        name: ni.name,
+        type: "activity",
+        section: sectionName,
+        description: ni.description || "",
+        iconic: !!ni.iconic,
+        checked: false,
+        requiredPlaces: newReq
       };
-      if (isFinite(lat) && isFinite(lng) && (lat !== 0 || lng !== 0)) {
-        addedPlace.lat = lat; addedPlace.lng = lng;
-        if (!_builtinGeo[key]) _coarseGeocode[key] = [lat, lng];
-      }
-      target.requiredPlaces = target.requiredPlaces || [];
-      target.requiredPlaces.push(addedPlace);
+      _tb.placeActivities.push(newItem);
       added++;
     });
     if (added > 0) {
       try { localStorage.setItem("max-coarse-geocode", JSON.stringify(_coarseGeocode)); } catch(_) {}
-      console.log("[Max] expandActivitySection: added " + added + " new place(s) to " + sectionName);
+      console.log("[Max] expandActivitySection: added " + added + " new item(s) to " + sectionName);
     }
-    if (btn) { btn.disabled = false; btn.textContent = added > 0 ? "+ " + added + " more added" : "+ no new places found"; }
-    // Re-render so the new places show up. Restore button label after a beat.
+    if (btn) { btn.disabled = false; btn.textContent = added > 0 ? "+ " + added + " more added" : "+ no new found"; }
     _renderPlaceActivityItems();
     _updatePlaceActivitySummary();
     if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
