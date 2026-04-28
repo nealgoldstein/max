@@ -8063,12 +8063,15 @@ async function applyCandidateChanges(){
     });
   }
 
-  // Update the snapshot on the trip so next re-entry reflects the new state
+  // Update the snapshot on the trip so next re-entry reflects the new state.
+  // Includes nights (Round CG.2) so subsequent rebuilds preserve picker
+  // night counts instead of falling back to LLM stayRange.
   trip.candidates = (_tb.candidates||[]).map(function(c){
     return {
       id:c.id, place:c.place, country:c.country||null, role:c.role||null,
       whyItFits:c.whyItFits||"", tags:c.tags||[], tradeoffs:c.tradeoffs||null,
       stayRange:c.stayRange||"", lat:c.lat||null, lng:c.lng||null,
+      nights: (typeof c.nights === "number") ? c.nights : undefined,
       status:c.status||null, _required:!!c._required, _requiredFor:(c._requiredFor||[]).slice()
     };
   });
@@ -10582,11 +10585,16 @@ async function buildFromCandidates(){
 
   // Snapshot the full candidate list (kept + rejected) onto the trip so the user
   // can re-open the Candidate Explorer later and change their decisions.
+  // CRITICAL: include `nights` (Round CG.2). Without it, subsequent rebuilds
+  // (Edit destinations, change arrival/departure on trip view) lose the
+  // picker's per-place night counts and fall back to LLM stayRange, which
+  // makes the trip's day count balloon by ~5 nights per rebuild.
   trip.candidates = (_tb.candidates||[]).map(function(c){
     return {
       id:c.id, place:c.place, country:c.country||null, role:c.role||null,
       whyItFits:c.whyItFits||"", tags:c.tags||[], tradeoffs:c.tradeoffs||null,
       stayRange:c.stayRange||"", lat:c.lat||null, lng:c.lng||null,
+      nights: (typeof c.nights === "number") ? c.nights : undefined,
       status:c.status||null, _required:!!c._required, _requiredFor:(c._requiredFor||[]).slice()
     };
   });
