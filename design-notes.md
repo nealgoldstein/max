@@ -298,11 +298,30 @@ at the bottom of the picker — 6–10 places the brief implies but aren't
 tied to a specific activity, each with a "+ Add" button. Catches cities
 the activity-driven picks missed.
 
-### 3. Multi-destination trips
-**Status:** architectural future-work.
-See the "Multi-destination trips (next step)" section above. The merged
-picker is the right foundation for this — extend to multiple legs, add a
-transit-leg marker between legs, map shows both regions.
+### 3. Multi-destination — reframed as the "journey" concept
+**Status:** deferred. Solidify single-destination first.
+
+The original framing — extending a single trip to span multiple regions —
+turned out to be combinatorially expensive (every existing assumption
+breaks: trip.region, picker scope, night-budget math, edit-mode cascades).
+We discussed three patterns:
+1. **Single-region** (Switzerland 4w) — existing model handles.
+2. **Multi-city tour within a continent** (Paris/Amsterdam/Berlin/Vienna,
+   3-4 days each) — should work in the existing model with a coherent
+   region name like "Western Europe" and good prompt cooperation; needs
+   testing to confirm. NOT a journey case — this is one trip.
+3. **Two genuinely-distinct regions** (Switzerland 4w + Iceland 2w aurora) —
+   each dense enough to warrant its own picker session, transit between
+   is a significant flight. **Journey case.**
+
+The cheaper architectural extension for case 3 is a **journey concept:**
+a list of trips with optional transit legs between them, viewed as a
+stitched calendar. Each trip uses existing tooling unchanged. The journey
+is a thin layer of composition.
+
+**When to revisit:** after single-destination version is fully solid
+(remaining items 2, 5, 8). Then decide whether to test pattern 2 against
+the existing prompt + build the journey concept for pattern 3.
 
 ### 4. "Plan" page day-count mismatch
 **Status:** probably resolves with item 1.
