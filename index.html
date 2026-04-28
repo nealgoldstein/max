@@ -5760,15 +5760,30 @@ function _updatePlaceActivitySummary(){
   _tb._pickerDisplayTotal = displayNights;
 
   var btn = document.getElementById("tb-place-continue-btn");
-  // Build button gated only on having at least one kept activity.
+  // Build button gated on:
+  //   (a) at least one activity kept, AND
+  //   (b) both arrival and departure city filled.
+  // Without (b), the trip builds without proper arrival/departure stops
+  // and the user lands on a trip page with missing logistics \u2014 clearer
+  // to block here with explicit reason text.
   if(!activeItems.length){
     el.innerHTML = '<span style="color:#999;">Pick at least one thing you want to do \u2014 and the place(s) you\u2019d do it. That\u2019s the trip.</span>';
-    if(btn){ btn.disabled = true; btn.classList.add("tb-btn-disabled"); }
+    if(btn){ btn.disabled = true; btn.classList.add("tb-btn-disabled"); btn.textContent = "Build trip \u2192"; }
     return;
   }
+  var missingArrDep = !entryCity || !exitCity;
   if(btn){
-    btn.disabled = false;
-    btn.classList.remove("tb-btn-disabled");
+    if (missingArrDep) {
+      btn.disabled = true;
+      btn.classList.add("tb-btn-disabled");
+      btn.textContent = !entryCity && !exitCity ? "Add arrival and departure to build \u2192"
+                       : !entryCity ? "Add arrival city to build \u2192"
+                       : "Add departure city to build \u2192";
+    } else {
+      btn.disabled = false;
+      btn.classList.remove("tb-btn-disabled");
+      btn.textContent = "Build trip \u2192";
+    }
   }
   var actCount = activeItems.length;
   var totalLabel = displayNights > 0 ? (' \u00b7 about <strong>'+displayNights+' nights</strong> total') : '';
