@@ -1,8 +1,10 @@
-// max-v4 — network-first for HTML so users always see the latest code when
-// online, with cached fallback for offline. The previous cache-first strategy
-// (max-v3) caused stale code to persist across reloads, even hard reloads,
-// because the SW intercepted requests before the browser cache layer could.
-const CACHE = 'max-v4';
+// max-v56 — Round CU: thread the brief's personal preferences (party,
+// pace, accommodation, dietary/safety avoidances, hardlimits) into the
+// picker activity prompt, narrative + what-to-do prompts, and restaurant
+// suggestion prompts. So "vegetarian," "no hostels," "traveling with
+// elderly parents" actually shape what gets recommended at each step,
+// not just the final candidate search.
+const CACHE = 'max-v56';
 const CORE = ['/', '/manifest.json', '/icon-192.svg', '/icon-512.svg'];
 
 self.addEventListener('install', e => {

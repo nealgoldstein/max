@@ -371,6 +371,37 @@ cable-car access stations as destinations unless the user would actually
 stay there overnight." Or a hardcoded denylist of known transit-only
 endpoints. Or both.
 
+### 10. Unify picker narrative cache with destination detail story cache
+**Status:** deferred (Round CT, Apr 2026).
+The picker "?" popup uses `window._placeNarrativeCache` and
+`_generatePlaceNarrative` (3-4 sentence intro for decision-time). The
+destination detail page's existing "story: X ↗" button uses
+`_destStories` cache and the legacy `destStory` function (longer
+free-form, expandable with "Dig deeper"). Different storage, different
+prompts. If user clicks "?" on Zürich in picker then "story: Zürich ↗"
+on detail page later, LLM gets called twice for related-but-not-identical
+content.
+
+When to revisit: rename the detail page's "story:" button to use
+`_generatePlaceNarrative` with a longer-form flag, so both surfaces share
+one generator and one cache. ~30 min. Skip if the two prompts genuinely
+serve different purposes (intro vs deep-dive) and the duplication is
+worth it.
+
+### 9. Expand picker "?" popup to include "what to do here"
+**Status:** ✅ shipped (Round CT, Apr 2026).
+Currently the picker's "?" popup shows a 3-4 sentence Max-voiced narrative
+about the place — the "decide whether to keep" view. Neal wants to extend
+it with a "what to do here" section: a few activity-style suggestions
+specific to that place. Think: "Zermatt — what to do" → "Take the
+Gornergrat Bahn at sunrise; eat fondue at Whymper Stube on Bahnhofstrasse;
+walk the 5-Lakes route from Sunnegga." Reuses the same popup, just
+extends the prompt + content. Cheap addition; high decision-time value.
+
+When to revisit: after multi-destination journey concept (item 3) is
+solid, or as a quick polish round. The popup infrastructure already
+exists; this is just a bigger prompt + a section divider.
+
 ### 8. Picker night-count vs trip night-count mismatch by 1
 **Status:** open.
 Suspected cause: one destination's `c.nights` override in

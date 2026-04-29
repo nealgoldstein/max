@@ -1206,7 +1206,46 @@ function attachScrollHint(ov){
 var _apiKey = null;
 var _apiKeyPrompted = false; // only show banner after first failure
 
+// Round CV: URL-parameter key handoff. The owner can share a one-time URL
+// like ?reviewKey=sk-ant-... so a reviewer doesn't have to set up their
+// own Anthropic key. The key gets saved to their localStorage, and the
+// URL is rewritten without the parameter so the key isn't visible in
+// browser history after the first load. Pair with a $20 budget cap on
+// the owner's Anthropic account and rotate the key after review.
+function _consumeReviewKeyFromUrl(){
+  try {
+    var params = new URLSearchParams(window.location.search);
+    var rk = params.get("reviewKey") || params.get("key");
+    if (!rk) return false;
+    rk = String(rk).trim();
+    if (rk.indexOf("sk-ant-") !== 0) return false; // sanity check — only accept Anthropic keys
+    try { localStorage.setItem("max-api-key", rk); } catch(_){}
+    _apiKey = rk;
+    // Strip the parameter so it's not visible after first load
+    params.delete("reviewKey");
+    params.delete("key");
+    var qs = params.toString();
+    var clean = window.location.pathname + (qs ? "?" + qs : "") + window.location.hash;
+    try { history.replaceState({}, document.title, clean); } catch(_){}
+    // Show a transient toast so the user knows the key was loaded
+    setTimeout(function(){
+      var t = document.createElement("div");
+      t.style.cssText = "position:fixed;top:14px;right:14px;background:#1a5fa8;color:#fff;font-size:12px;font-weight:600;padding:10px 14px;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,0.18);z-index:99999;font-family:inherit;max-width:300px;line-height:1.5;";
+      t.innerHTML = "✓ Shared review key loaded.<br><span style='font-size:10.5px;font-weight:400;opacity:0.85;'>Don\'t share this URL — it had a key in it. The key is now in your browser only.</span>";
+      document.body && document.body.appendChild(t);
+      setTimeout(function(){ try { t.remove(); } catch(_){} }, 8000);
+    }, 100);
+    return true;
+  } catch(_){ return false; }
+}
+
 function loadApiKey(){
+  // Round CV: URL handoff first — overrides whatever's in localStorage so
+  // a reviewer with a fresh URL always gets the latest key.
+  if (_consumeReviewKeyFromUrl()) {
+    renderApiKeyUI();
+    return;
+  }
   try{_apiKey=localStorage.getItem("max-api-key")||null;}catch(e){_apiKey=null;}
   // Only update UI to show "key set" confirmation — never show warning banner on load
   renderApiKeyUI();
@@ -1268,6 +1307,182 @@ function maxAlert(message){
 
 var MAX_SYSTEM = "You are Max \u2014 the guide behind \"A Tourist's Guide to the Existential Universe.\" Your voice comes from five years of full-time travel across Europe, Central America, and the American West. You are not a tour operator. You are the traveler who stands in front of Klimt's Judith for forty minutes because you want to understand what he was actually thinking, not what the audio guide says he was thinking.\n\nYou work from specific historical facts \u2014 the date, the name, the decision that made a place what it is. You present those facts without commentary. The implication does its own work. You do not tell travelers what they will feel. You tell them what happened and you trust them.\n\nYour register shifts with purpose: light and observational when things are moving, something quieter when a place earns it. You know the difference between a place that matters and a place that has been told it matters. You are comfortable with uncertainty \u2014 sometimes \"I'd check locally\" is the most honest answer.\n\nHOW TO READ WHAT IS DRIVING A TRIP:\n\nEvery traveler begins with a sentence. That sentence reveals what you are actually working with.\n\n\"I've always wanted to\" \u2014 this is a stored intention, not a new idea. The destination already carries meaning. Your job is to surface the stories and history that will fulfill what has been waiting. Depth and resonance matter more than coverage.\n\n\"I want to\" \u2014 the experience comes first; the destination serves it. Lean toward logistics, sequencing, and the specific conditions that make participation possible. A hiker, a train traveler, a diver each need different things from the same place.\n\n\"I want to see\" \u2014 the traveler is responding to what a place holds. Some places draw through physical presence: landscape, light, scale. Others through what humans have made and left behind. Surface what is actually there, and why it is worth standing in front of.\n\n\"I need something different\" \u2014 this traveler is not choosing a destination yet. They are adjusting distance from their current life. Do not lead with candidates. First understand what they are moving away from and what register of difference they need. Then translate direction into places that sit at the right distance.\n\n\"We should go somewhere that\" \u2014 the group is shaping the trip. A destination that works for one person may fail another. Keep the relational constraints visible.\n\n\"It would be amazing to\" \u2014 there is a performative dimension present. Acknowledge what the trip signals as well as what it contains.\n\nFAMILIARITY SHAPES DEPTH:\n\nNot at all: orient before you go deep. The traveler needs the lay of the land before they can use detail. Do not assume prior knowledge.\n\nA passing understanding: skip basic orientation but do not assume fluency. The traveler knows some names and images but little of the underlying story. Fill in the frame as you go.\n\nQuite a bit: assume the basics are covered. Surface what even regular visitors miss, and what has changed.\n\nFOR PLACE STORIES: open with a specific fact, stay in 3\u20135 sentences, end with an open observation rather than a summary. For direct questions: be brief and concrete. For dig-deeper follow-ups: go further into the historical or cultural thread, don't repeat what you already said.\n\nNever say: hidden gem, vibrant, bustling, must-see, off the beaten path, iconic, charming, quaint, magical. Never tell the traveler how they will feel.";
 
+// Round CI: cache LLM responses keyed on a hash of the request, so identical
+// briefs produce identical plans. Anthropic's temperature=0 narrows variance
+// but doesn't eliminate it across multiple LLM calls in a build flow; the
+// cache makes the output truly deterministic for repeated runs of the same
+// inputs. Stored in localStorage so reloads still hit the cache. Wipe with
+// clearMaxCache() in the console; inspect with maxCacheStats().
+//
+// Round CI.1: TTL + prompt version. Entries expire after 30 days so
+// "iconic" recommendations refresh within a season (a new museum, a new
+// gondola line, a closure). _MAX_PROMPT_VERSION is baked into the cache
+// key — bump it when shipping any prompt change you want to re-roll for
+// everyone. Format: YYYY-MM-DD-roundLetters.
+var _MAX_CACHE_KEY = "max-llm-cache-v1";
+var _MAX_CACHE_LIMIT = 200; // cap entries; oldest evicted first
+var _MAX_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+var _MAX_PROMPT_VERSION = "2026-04-28-CI2";
+// Round CI.2: shared in-memory cache so concurrent callMax invocations
+// don't clobber each other on save.
+// Round CL.3: persistence moved from localStorage to IndexedDB.
+// localStorage is one shared 5MB bucket across the entire origin —
+// trip data fills it up and squeezes out the cache, triggering a
+// QuotaExceededError feedback loop. IndexedDB has 50MB+ per origin
+// and lives in its own bucket. _maxCacheMem mirrors what's in IDB so
+// reads stay synchronous; writes fire-and-forget to IDB.
+var _maxCacheMem = null;
+var _MAX_IDB_NAME = "max-llm-cache";
+var _MAX_IDB_STORE = "kv";
+var _maxIdbReady = null; // Promise that resolves once initial load is done
+
+function _maxIdbOpen(){
+  return new Promise(function(resolve, reject){
+    if (typeof indexedDB === "undefined") { reject(new Error("no IDB")); return; }
+    var req = indexedDB.open(_MAX_IDB_NAME, 1);
+    req.onupgradeneeded = function(){
+      try { req.result.createObjectStore(_MAX_IDB_STORE); } catch(_){}
+    };
+    req.onsuccess = function(){ resolve(req.result); };
+    req.onerror = function(){ reject(req.error); };
+  });
+}
+
+function _maxIdbGet(key){
+  return _maxIdbOpen().then(function(db){
+    return new Promise(function(resolve, reject){
+      try {
+        var tx = db.transaction(_MAX_IDB_STORE, "readonly");
+        var req = tx.objectStore(_MAX_IDB_STORE).get(key);
+        req.onsuccess = function(){ resolve(req.result); };
+        req.onerror = function(){ reject(req.error); };
+      } catch(e){ reject(e); }
+    });
+  });
+}
+
+function _maxIdbSet(key, value){
+  return _maxIdbOpen().then(function(db){
+    return new Promise(function(resolve, reject){
+      try {
+        var tx = db.transaction(_MAX_IDB_STORE, "readwrite");
+        tx.objectStore(_MAX_IDB_STORE).put(value, key);
+        tx.oncomplete = function(){ resolve(); };
+        tx.onerror = function(){ reject(tx.error); };
+      } catch(e){ reject(e); }
+    });
+  });
+}
+
+function _maxIdbDelete(key){
+  return _maxIdbOpen().then(function(db){
+    return new Promise(function(resolve, reject){
+      try {
+        var tx = db.transaction(_MAX_IDB_STORE, "readwrite");
+        tx.objectStore(_MAX_IDB_STORE).delete(key);
+        tx.oncomplete = function(){ resolve(); };
+        tx.onerror = function(){ reject(tx.error); };
+      } catch(e){ reject(e); }
+    });
+  });
+}
+
+// Initial load: fetch the persisted cache from IDB into _maxCacheMem. Also
+// migrate any stale localStorage cache entry one-time so users who already
+// had a cache there don't lose it.
+_maxIdbReady = (async function(){
+  try {
+    var fromIdb = await _maxIdbGet(_MAX_CACHE_KEY);
+    if (fromIdb && typeof fromIdb === "object") {
+      _maxCacheMem = fromIdb;
+      return;
+    }
+  } catch(_){ /* fall through */ }
+  // Migration: pull from localStorage if present, then clear it
+  try {
+    var raw = localStorage.getItem(_MAX_CACHE_KEY);
+    if (raw) {
+      _maxCacheMem = JSON.parse(raw);
+      localStorage.removeItem(_MAX_CACHE_KEY);
+      // Push to IDB
+      _maxIdbSet(_MAX_CACHE_KEY, _maxCacheMem).catch(function(){});
+      console.log("[Max cache] migrated from localStorage to IndexedDB,", Object.keys(_maxCacheMem||{}).length, "entries");
+      return;
+    }
+  } catch(_){}
+  _maxCacheMem = {};
+})();
+
+function _maxCacheLoad(){
+  // Synchronous read from in-memory mirror. The initial _maxIdbReady promise
+  // populates _maxCacheMem on page load. If a callMax fires before that
+  // resolves (rare — IDB load is fast), we return an empty object and the
+  // first call after load will get a MISS that the IDB then catches up to.
+  if (_maxCacheMem) return _maxCacheMem;
+  _maxCacheMem = {};
+  return _maxCacheMem;
+}
+
+function _maxCacheSave(c){
+  // c is always === _maxCacheMem since callers got it from _maxCacheLoad.
+  // Mutations have already happened in memory; we just need to persist.
+  // Fire-and-forget; if IDB is broken or full (it shouldn't be), we still
+  // have the data in memory for the rest of the session.
+  _maxCacheMem = c;
+  _maxIdbSet(_MAX_CACHE_KEY, _maxCacheMem).catch(function(e){
+    console.warn("[Max cache] IDB save failed:", e);
+  });
+}
+async function _maxCacheKey(messages, maxTokens){
+  // SHA-256 of stringified payload. Same input produces the same key. The
+  // model name and temperature are baked into the key so the cache
+  // invalidates automatically if either changes.
+  var payload = JSON.stringify({m:messages, t:maxTokens||1000, model:"sonnet-4-20250514", temp:0, v:_MAX_PROMPT_VERSION});
+  if (window.crypto && window.crypto.subtle && window.crypto.subtle.digest) {
+    try {
+      var enc = new TextEncoder().encode(payload);
+      var buf = await window.crypto.subtle.digest("SHA-256", enc);
+      var arr = Array.from(new Uint8Array(buf));
+      return arr.map(function(b){return b.toString(16).padStart(2,"0");}).join("");
+    } catch(_){ /* fall through to raw key */ }
+  }
+  return "raw:" + payload;
+}
+// Round CL.4: also expose the cleanup as a console helper for debugging.
+window.cleanupTrips = function(){ cleanupOrphanedTrips(); };
+window.maxStorageStats = function(){
+  var trips = 0, tripCount = 0, indexBytes = 0, otherBytes = 0;
+  for (var k in localStorage) {
+    var sz = (localStorage.getItem(k) || "").length;
+    if (k.indexOf("max-trip-") === 0) { trips += sz; tripCount++; }
+    else if (k === "max-trips-index") indexBytes = sz;
+    else otherBytes += sz;
+  }
+  console.log("[Max storage]",
+    "| trips:", tripCount, "(" + (trips/1024).toFixed(0) + "KB)",
+    "| index:", (indexBytes/1024).toFixed(1) + "KB",
+    "| other:", (otherBytes/1024).toFixed(1) + "KB",
+    "| total:", ((trips+indexBytes+otherBytes)/1024).toFixed(0) + "KB / ~5120KB");
+  return {trips: tripCount, tripBytes: trips, indexBytes: indexBytes, otherBytes: otherBytes};
+};
+
+window.clearMaxCache = function(){
+  _maxCacheMem = {};
+  try { localStorage.removeItem(_MAX_CACHE_KEY); } catch(_){}
+  _maxIdbDelete(_MAX_CACHE_KEY).then(function(){
+    console.log("[Max cache] cleared (IDB + localStorage)");
+  }).catch(function(e){
+    console.warn("[Max cache] IDB clear failed:", e);
+  });
+};
+window.maxCacheStats = function(){
+  var c = _maxCacheLoad();
+  var keys = Object.keys(c);
+  var bytes = JSON.stringify(_maxCacheMem || {}).length;
+  console.log("[Max cache] entries:", keys.length, "| ~bytes (in-mem):", bytes, "| keys (first 5):", keys.slice(0,5).map(function(k){return k.substring(0,8);}));
+  return {entries: keys.length, bytes: bytes};
+};
+
 async function callMax(messages, maxTokens, timeoutMs) {
   var headers = {"Content-Type": "application/json"};
   if (_apiKey) {
@@ -1276,6 +1491,27 @@ async function callMax(messages, maxTokens, timeoutMs) {
     headers["anthropic-dangerous-direct-browser-access"] = "true";
   }
   if(!_apiKey){throw new Error('No API key — click Settings to add your key');}
+
+  // Round CI: cache lookup. If we've seen this exact request before, return
+  // the cached response. Determinism for repeated runs of the same brief.
+  // Round CI.1: also check the entry hasn't expired past the TTL.
+  var cacheKey = await _maxCacheKey(messages, maxTokens);
+  var cache = _maxCacheLoad();
+  if (cache[cacheKey]) {
+    var age = Date.now() - (cache[cacheKey].at || 0);
+    if (age > _MAX_CACHE_TTL_MS) {
+      console.log("[Max cache] EXPIRED (age " + Math.round(age/86400000) + "d)", cacheKey.substring(0,8));
+      delete cache[cacheKey];
+      _maxCacheSave(cache);
+      // fall through to refetch
+    } else {
+      cache[cacheKey].lastUsed = Date.now();
+      _maxCacheSave(cache);
+      console.log("[Max cache] HIT (age " + Math.round(age/86400000) + "d)", cacheKey.substring(0,8));
+      return cache[cacheKey].text;
+    }
+  }
+
   var resp, data;
   try {
     var fetchTimeout=new Promise(function(_,reject){setTimeout(function(){reject(new Error('API timeout'));},timeoutMs||25000);});
@@ -1285,6 +1521,9 @@ async function callMax(messages, maxTokens, timeoutMs) {
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
         max_tokens: maxTokens||1000,
+        // Round CH: temperature=0 for deterministic output. Was unset (default 1.0),
+        // which caused different night totals on every run for the same brief.
+        temperature: 0,
         system: MAX_SYSTEM,
         messages: messages
       })
@@ -1304,7 +1543,20 @@ async function callMax(messages, maxTokens, timeoutMs) {
     }
     throw new Error(data.error.message);
   }
-  return data.content[0].text;
+  var text = data.content[0].text;
+
+  // Round CI: store in cache. Evict oldest by lastUsed if past the cap.
+  cache[cacheKey] = {text: text, lastUsed: Date.now(), at: Date.now()};
+  var cacheKeys = Object.keys(cache);
+  if (cacheKeys.length > _MAX_CACHE_LIMIT) {
+    cacheKeys.sort(function(a,b){return (cache[a].lastUsed||0) - (cache[b].lastUsed||0);});
+    var toEvict = cacheKeys.length - _MAX_CACHE_LIMIT;
+    for (var i = 0; i < toEvict; i++) delete cache[cacheKeys[i]];
+  }
+  _maxCacheSave(cache);
+  console.log("[Max cache] MISS → stored", cacheKey.substring(0,8));
+
+  return text;
 }
 
 // Context stores
@@ -1632,6 +1884,50 @@ var _coarseGeocodeInFlight = _coarseGeocodeInFlight || {};
 // build-time check excludes them from placesUsedByActivity. Routes can
 // still legitimately have overnight:false endpoints (their endpoints ARE
 // supposed to be transit nodes).
+//
+// Round CS: in practice the LLM occasionally fails to flag well-known
+// cogwheel/cable-car summits and other transit nodes. A hardcoded backup
+// denylist guards against those misses — anything in this set is forced
+// to overnight:false at parse time regardless of what the LLM said.
+var _transitOnlyDenylist = (function(){
+  var list = [
+    // Switzerland — cogwheel/cable summits and access stations
+    "pilatus kulm", "alpnachstad", "rigi kulm", "rigi staffel",
+    "vitznau", "arth-goldau", "weggis",
+    "jungfraujoch", "kleine scheidegg", "männlichen", "mannlichen",
+    "gornergrat", "rothorn", "rothorn kulm", "klein matterhorn",
+    "schynige platte", "first", "harder kulm",
+    "schilthorn", "piz gloria", "birg", "mürren bergstation",
+    "stoos", "fronalpstock",
+    "titlis", "trübsee", "trubsee", "jochpass",
+    "diavolezza", "muottas muragl", "corviglia",
+    "monte san salvatore", "monte brè", "monte bre",
+    "pizol", "saentis", "säntis",
+    // Italy adjacent — transit-only stops on Bernina/Gotthard etc.
+    "alp grüm", "alp grum", "ospizio bernina",
+    // France adjacent
+    "aiguille du midi", "le brévent", "le brevent",
+    // Japan — Mt Fuji access
+    "mt fuji 5th station", "mt. fuji 5th station", "fuji subaru line 5th station",
+    // Generic cable-car / gondola endpoints worldwide tend to follow this naming
+    // — we'll keep the list focused on real-world hits we've seen.
+  ];
+  var set = {};
+  list.forEach(function(n){ set[n] = true; });
+  return set;
+})();
+function _isTransitOnlyByDenylist(placeName){
+  if (!placeName) return false;
+  var k = String(placeName).toLowerCase().trim();
+  if (_transitOnlyDenylist[k]) return true;
+  // Loose substring match for common patterns: "X 5th Station", "Y Gondola",
+  // "Z Cable Car", "W Bergstation," "V Bahnhof" — but only when "Bahnhof"
+  // is the WHOLE place name (a station). We don't want to nuke "Zürich Bahnhof"
+  // type strings — those usually mean the city.
+  if (/\b(gondola|cable car|cogwheel|funicular)\b/i.test(placeName)) return true;
+  if (/\bbergstation\b$/i.test(placeName)) return true;
+  return false;
+}
 
 // Country-override table for places whose country the LLM commonly
 // hallucinates (Tirano gets put in Albania/North Macedonia, Domodossola in
@@ -2103,6 +2399,59 @@ function loadTripsIndex(){
   if(_inIframe)return;
   try{var s=localStorage.getItem("max-trips-index");_tripsIndex=s?JSON.parse(s):[];}
   catch(e){_tripsIndex=[];}
+  // Round CL.4: orphaned-trip GC. Before this, every test or aborted build
+  // left a max-trip-{id} entry behind. Over weeks they accumulate and fill
+  // the 5MB localStorage quota, causing trip saves to silently fail. Now
+  // we sweep on every load: drop any max-trip-* whose id isn't in the
+  // active index, plus drop empty shells (no destinations + no candidates)
+  // that aren't the current trip.
+  cleanupOrphanedTrips();
+}
+
+function cleanupOrphanedTrips(){
+  if(_inIframe)return;
+  try {
+    var indexedIds = {};
+    _tripsIndex.forEach(function(t){ if (t && t.id) indexedIds[t.id] = true; });
+    var toDelete = [];
+    var emptyShells = 0;
+    var totalReclaimed = 0;
+    for (var k in localStorage) {
+      if (k.indexOf("max-trip-") !== 0) continue;
+      var id = k.substring("max-trip-".length);
+      if (id === _currentTripId) continue; // never touch the active trip
+      var isOrphan = !indexedIds[id];
+      var isEmpty = false;
+      if (!isOrphan) {
+        // Check for empty shell: parsed trip has zero destinations and zero candidates
+        try {
+          var parsed = JSON.parse(localStorage.getItem(k));
+          var t = parsed && parsed.trip;
+          if (t && (!t.destinations || t.destinations.length === 0) && (!t.candidates || t.candidates.length === 0)) {
+            isEmpty = true;
+            emptyShells++;
+          }
+        } catch(_){ isOrphan = true; /* unparseable → treat as orphan */ }
+      }
+      if (isOrphan || isEmpty) {
+        var sz = (localStorage.getItem(k) || "").length;
+        toDelete.push({key: k, id: id, size: sz, reason: isOrphan ? "orphan" : "empty"});
+        totalReclaimed += sz;
+      }
+    }
+    toDelete.forEach(function(d){
+      localStorage.removeItem(d.key);
+      // Also remove from index if it was a stale empty-shell that happens to
+      // still be indexed.
+      _tripsIndex = _tripsIndex.filter(function(t){ return t.id !== d.id; });
+    });
+    if (toDelete.length) {
+      saveTripsIndex();
+      console.log("[Max cleanup] removed " + toDelete.length + " trip(s) (" + (toDelete.length - emptyShells) + " orphans, " + emptyShells + " empty shells), freed " + (totalReclaimed/1024).toFixed(0) + "KB");
+    }
+  } catch(e) {
+    console.warn("[Max cleanup] failed:", e);
+  }
 }
 
 function saveTripsIndex(){
@@ -2121,7 +2470,28 @@ function updateIndexEntry(){
   if(trip.destinations.length>0){
     entry.dateRange=fmtD(trip.destinations[0].dateFrom)
       +(trip.destinations.length>1?" \u2013 "+fmtD(trip.destinations[trip.destinations.length-1].dateTo):"");
-  } else { entry.dateRange=""; }
+    // Round CK.2: persist start/end dates + arrival/departure flight info
+    // on the index entry so the home screen can show countdowns and flight
+    // numbers without parsing the full trip JSON.
+    entry.startDate = trip.destinations[0].dateFrom || "";
+    entry.endDate = trip.destinations[trip.destinations.length - 1].dateTo || "";
+    var ed = (trip.brief && trip.brief.entryDetails) || {};
+    var xd = (trip.brief && trip.brief.exitDetails) || {};
+    entry.entryDetails = (ed.carrier || ed.number || ed.time) ? {
+      carrier: ed.carrier || "", number: ed.number || "", time: ed.time || ""
+    } : null;
+    entry.exitDetails = (xd.carrier || xd.number || xd.time) ? {
+      carrier: xd.carrier || "", number: xd.number || "", time: xd.time || ""
+    } : null;
+    entry.entryCity = (trip.brief && trip.brief.entry) || "";
+    entry.exitCity = (trip.brief && trip.brief.tbExit) || "";
+  } else {
+    entry.dateRange="";
+    entry.startDate = "";
+    entry.endDate = "";
+    entry.entryDetails = null;
+    entry.exitDetails = null;
+  }
   saveTripsIndex();
 }
 
@@ -2130,7 +2500,17 @@ function localSave(){
   try{
     updateIndexEntry();
     localStorage.setItem("max-trip-"+_currentTripId,serializeTrip());
-  }catch(e){console.warn("localStorage save failed:",e);}
+  }catch(e){
+    // Round CL.3: cache moved to IndexedDB so it no longer fights for
+    // localStorage space. If we still hit QuotaExceededError it's because
+    // accumulated trip data has filled the bucket — log clearly so the
+    // user knows to delete old trips.
+    if (e && (e.name === "QuotaExceededError" || (e.code && e.code === 22))) {
+      console.warn("[Max] localStorage full from accumulated trip data. Delete unused trips from the home screen, or clear localStorage trip-* keys via the console.");
+      return;
+    }
+    console.warn("localStorage save failed:",e);
+  }
 }
 
 function localLoad(tripId){
@@ -2183,13 +2563,68 @@ function renderHomeScreen(){
     var cards=g("trip-cards"); cards.innerHTML="";
     _tripsIndex.slice().reverse().forEach(function(entry){
       var card=document.createElement("div"); card.className="trip-card";
-      var info=document.createElement("div");
-      var name=document.createElement("div"); name.className="tc-name"; name.textContent=entry.name||"Untitled trip";
+      var info=document.createElement("div"); info.style.cssText="flex:1;min-width:0;";
+      // Round CK.2: countdown chip on the card if the trip is upcoming.
+      // "T-3 days" / "Today" / "In progress" / "Past" \u2014 at-a-glance status.
+      var countdownChip = (function(){
+        if (!entry.startDate || !entry.endDate) return null;
+        try {
+          var now = new Date(); now.setHours(0,0,0,0);
+          var start = new Date(entry.startDate + "T12:00:00");
+          var end = new Date(entry.endDate + "T12:00:00");
+          var msDay = 24 * 60 * 60 * 1000;
+          var startDays = Math.round((start - now) / msDay);
+          var endDays = Math.round((end - now) / msDay);
+          var label, color, bg, border;
+          if (startDays > 0) {
+            label = "T-" + startDays + (startDays === 1 ? " day" : " days");
+            if (startDays <= 7) { color = "#b05820"; bg = "#fff5ed"; border = "#f3dcc4"; }
+            else if (startDays <= 30) { color = "#1a5fa8"; bg = "#eef5ff"; border = "#cfe1f7"; }
+            else { color = "#888"; bg = "#fafafa"; border = "#e6e2d8"; }
+          } else if (startDays === 0) {
+            label = "Today!"; color = "#b05820"; bg = "#fff5ed"; border = "#f3dcc4";
+          } else if (endDays >= 0) {
+            label = "In progress \u00b7 day " + (1 - startDays); color = "#2a7a4e"; bg = "#f0f8f4"; border = "#b8dfc9";
+          } else {
+            label = "Past"; color = "#aaa"; bg = "#fafafa"; border = "#e6e2d8";
+          }
+          var chip = document.createElement("span");
+          chip.style.cssText = "display:inline-block;font-size:10px;font-weight:700;color:"+color+";background:"+bg+";border:1px solid "+border+";padding:2px 8px;border-radius:10px;margin-left:8px;vertical-align:middle;letter-spacing:.02em;";
+          chip.textContent = label;
+          return chip;
+        } catch(_){ return null; }
+      })();
+      var name=document.createElement("div"); name.className="tc-name"; name.style.display="flex"; name.style.alignItems="center"; name.style.flexWrap="wrap";
+      var nameTxt=document.createElement("span"); nameTxt.textContent=entry.name||"Untitled trip"; name.appendChild(nameTxt);
+      if (countdownChip) name.appendChild(countdownChip);
       var meta=document.createElement("div"); meta.className="tc-meta";
       var parts=[]; if(entry.dateRange)parts.push(entry.dateRange);
       if(entry.destCount)parts.push(entry.destCount+" destination"+(entry.destCount!==1?"s":""));
       meta.textContent=parts.join(" \u00b7 ");
       info.appendChild(name); info.appendChild(meta);
+
+      // Round CK.2: flight info row \u2014 carrier + number + time for arrival
+      // and departure. Only renders if at least one is set; reads from the
+      // index entry (kept in sync by updateIndexEntry).
+      if (entry.entryDetails || entry.exitDetails) {
+        var flightRow = document.createElement("div");
+        flightRow.style.cssText = "margin-top:6px;font-size:10.5px;color:#666;display:flex;flex-wrap:wrap;gap:12px;";
+        function _flightLabel(details, prefix){
+          if (!details) return "";
+          var bits = [];
+          var carrierNum = [details.carrier, details.number].filter(function(x){return !!x;}).join(" ");
+          if (carrierNum) bits.push(carrierNum);
+          if (details.time) bits.push(typeof _fmtTime12h === "function" ? _fmtTime12h(details.time) : details.time);
+          if (!bits.length) return "";
+          return '<span><strong style="color:#888;font-weight:600;">' + prefix + ':</strong> ' + bits.join(" \u00b7 ") + '</span>';
+        }
+        var arrHtml = _flightLabel(entry.entryDetails, "Arrive");
+        var depHtml = _flightLabel(entry.exitDetails, "Depart");
+        if (arrHtml || depHtml) {
+          flightRow.innerHTML = (arrHtml || "") + (depHtml || "");
+          info.appendChild(flightRow);
+        }
+      }
       var del=document.createElement("button"); del.className="tc-del"; del.textContent="\u2715";
       (function(id,c){del.onclick=function(e){
         e.stopPropagation();
@@ -4711,9 +5146,20 @@ async function generateActivitiesForPlace(){
     + "If you're not 100% certain a name resolves to where you think, OMIT the item rather than guess. Confidently wrong locations are worse than no result.\n\n"
     + "PLACES PER ACTIVITY \u2014 better to list many than few. The traveler wants to see options, not commit to a tight set. For an activity like \u201cmountain scenery\u201d in Switzerland, list 4\u20136 places (Zermatt, Lauterbrunnen, Jungfrau region, Engadin/St. Moritz, Appenzell, etc.). For \u201ccheese tasting,\u201d list 3\u20135 spots. For routes, requiredPlaces is the endpoint pair (and any major intermediate stops on multi-modal circuits).\n\n"
     + "PLACE NAMES \u2014 use the full disambiguating name a map service would resolve correctly. \u201cCh\u00e2teau de Chillon\u201d not just \u201cChillon\u201d (which matches a town in Spain). \u201cMont Saint-Michel\u201d not \u201cSaint-Michel\u201d. \u201cZurich\u201d (city) not \u201cKanton Z\u00fcrich\u201d. If a landmark sits in/near a town and the town is the actual base, use the town (e.g. \u201cMontreux\u201d for Chillon-area stays); but when the landmark IS the requiredPlace, use its full name. Always set the country field correctly \u2014 the geocoder filters by it.\n\n"
-    + "TRANSIT NODES ARE NOT OVERNIGHT DESTINATIONS \u2014 IMPORTANT: every place object (in requiredPlaces, endpoints, viableLocations) MUST include an `overnight` boolean. Set overnight:true for real overnight bases \u2014 towns and cities where a traveler genuinely stays the night. Set overnight:false for TRANSIT-ONLY nodes \u2014 mountain summits reached by cable car or cogwheel, train termini that aren't real towns, cable-car summits, scenic viewpoints with no overnight infrastructure. Examples (Switzerland): Lucerne overnight:true; Pilatus Kulm overnight:false; Vitznau overnight:true (real town); Alpnachstad overnight:false (transit hub only). Examples (Japan): Kyoto overnight:true; Mt. Fuji 5th Station overnight:false. Examples (Banff): Banff overnight:true; Lake Louise Gondola Summit overnight:false. The traveler reaches transit-only places via day trips from a real overnight base. For non-route activities (type=\"activity\" or \"condition\"), only list overnight:true places in requiredPlaces \u2014 the user shouldn't be expected to stay overnight at a cable-car summit. Routes (type=\"route\") may legitimately have overnight:false endpoints because routes ARE transit; their endpoints are the destinations the user reaches by traveling.\n\n"
+    + "OVERNIGHT FLAG \u2014 BE AGGRESSIVE ABOUT FALSE. Every place object (in requiredPlaces, endpoints, viableLocations) MUST include an `overnight` boolean. The default should be FALSE; only mark TRUE for places that are genuinely worth a multi-night base. The traveler will visit overnight:false places as day trips from a nearby hub. A region-sized trip (a country, a state) should yield ~4\u20138 overnight:true bases TOTAL across all activities you generate \u2014 not 15+. Cluster ruthlessly.\n"
+    + "  Mark overnight:false for:\n"
+    + "    \u2022 Transit-only nodes: cable-car summits, cogwheel termini, scenic viewpoints (Pilatus Kulm, Mt. Fuji 5th Station, Lake Louise Gondola Summit, Jungfraujoch, Alpnachstad).\n"
+    + "    \u2022 Small villages or single-attraction towns within ~45min of a larger hub (Schaffhausen day-trip from Z\u00fcrich; Engelberg from Lucerne; Kandersteg from Interlaken; Gruy\u00e8res from Bern or Lausanne).\n"
+    + "    \u2022 Wine villages, cheese villages, photography spots that are walking-distance from each other or from a real town \u2014 pick the ONE most logical hub and mark the rest false (Lavaux: Lausanne overnight:true; Epesses, Cully, Lutry, St-Saphorin all overnight:false).\n"
+    + "    \u2022 Sister mountain villages in the same valley/cable-car system: pick ONE as the base, mark the rest false (Aletsch: Bettmeralp overnight:true; Riederalp, Fiescheralp false. Jungfrau region: Lauterbrunnen overnight:true; Wengen, M\u00fcrren, Grindelwald can be overnight:false unless the activity specifically calls for staying there).\n"
+    + "  Mark overnight:true ONLY for:\n"
+    + "    \u2022 Major cities and proven multi-night bases with real lodging, dining, and a useful day-trip radius (Z\u00fcrich, Lucerne, Interlaken/Lauterbrunnen, Zermatt, St. Moritz, Lugano, Geneva/Lausanne).\n"
+    + "    \u2022 Remote bases that have no closer hub (Zermatt is overnight:true \u2014 no other hub serves the Matterhorn region).\n"
+    + "  When in doubt, mark FALSE. The downstream code clusters overnight:false places into day trips from the nearest overnight:true base. Marking too many places overnight:true produces a fragmented \"new bed every 1.5 nights\" trip, which is the bug we are fixing.\n"
+    + "  Routes (type=\"route\") may have overnight:false endpoints because routes ARE transit; their endpoints are reached by traveling, not stayed at.\n\n"
     + "NIGHTS PER PLACE \u2014 each entry in requiredPlaces gets a nights field with a sensible default range for doing this activity well at that place. Activities: typical nights to do the activity well there. Routes: 0 (route is transit, not a stay; days are spent at the endpoints). Conditions: nights needed to give the condition a real chance.\n\n"
     + "COORDINATES PER PLACE \u2014 IMPORTANT: every entry in requiredPlaces (and endpoints, viableLocations) MUST include lat and lng fields with the place\u2019s approximate latitude and longitude as numbers. Use 4 decimal places. These coordinates are used to plot the place on a map without external geocoding, so they must be reasonably accurate (within ~5km is fine; do not invent coordinates for places you don\u2019t know \u2014 for those, omit the entire item). Examples: Zermatt is roughly lat 46.0207, lng 7.7491; Tokyo is roughly lat 35.6762, lng 139.6503; Reykjavik is roughly lat 64.1466, lng -21.9426. Do NOT use 0,0.\n\n"
+    + (typeof _briefPersonalContext === "function" ? _briefPersonalContext() : "")
     + "Return ONLY a JSON array (no markdown). Aim for 10\u201316 items for rail-heavy regions; 8\u201312 for others. Cover a real range \u2014 don\u2019t silently drop a category. Include routes and condition items whenever they genuinely apply.\n\n"
     + "[\n"
     + '  {"name":"Walk in the mountains","type":"activity","section":"Walk in the mountains","description":"Alpine paths and panoramic ridges across the high country.","iconic":true,"requiredPlaces":[{"place":"Zermatt","country":"Switzerland","nights":3,"lat":46.0207,"lng":7.7491,"overnight":true},{"place":"Lauterbrunnen","country":"Switzerland","nights":2,"lat":46.5944,"lng":7.9081,"overnight":true},{"place":"St. Moritz","country":"Switzerland","nights":2,"lat":46.4983,"lng":9.8378,"overnight":true},{"place":"Appenzell","country":"Switzerland","nights":2,"lat":47.3308,"lng":9.4080,"overnight":true}],"durationHours":48},\n'
@@ -4806,25 +5252,67 @@ async function generateActivitiesForPlace(){
     var _verifyRegion = (_tb && _tb.region) || place || "";
     items = await _verifyRouteItems(items, _verifyRegion);
 
-    // Round CC: strip places flagged overnight:false from non-route
-    // requiredPlaces. The LLM marks transit-only summits and cable-car
-    // endpoints as overnight:false; we don't want them as overnight
-    // destinations on the user's trip. Routes can still legitimately have
-    // overnight:false endpoints because routes ARE transit.
-    var _filteredFromActivities = 0;
+    // Round CC: places flagged overnight:false (LLM-supplied) and Round
+    // CS hardcoded denylist hits get marked _transitOnly. Round CS.1: we
+    // no longer filter them out — instead the picker shows them with a
+    // warning chip and defaults to unchecked. The user can opt in if they
+    // really want to stay overnight (Hotel Bellevue at Pilatus Kulm exists,
+    // for example), with informed consent.
+    // Round CS.2: aggregate per-place across ALL references before marking
+    // transit-only. The LLM often labels Riederalp overnight:false in an
+    // activity that's about *the view from* there, and overnight:true in
+    // an activity about *staying* there — we'd previously flag the first
+    // ref and not the second, which made the chip and the checkbox
+    // disagree. Now: a place is transit-only iff (denylist hit) OR
+    // (every non-route reference says overnight:false). Then the flag
+    // is propagated to all refs of the place, so chip and checkbox stay
+    // consistent.
+    var _placeStates = {}; // normalized place → {anyOvernightTrue, anyOvernightFalse, anyDenylist}
     items.forEach(function(item){
       if (item.type === "route") return;
       if (!Array.isArray(item.requiredPlaces)) return;
-      item.requiredPlaces = item.requiredPlaces.filter(function(p){
-        if (!p || !p.place) return true;
-        if (p.overnight === false) {
-          _filteredFromActivities++;
-          return false;
+      item.requiredPlaces.forEach(function(p){
+        if (!p || !p.place) return;
+        var k = (typeof _normPlaceName === "function") ? _normPlaceName(p.place) : p.place.toLowerCase();
+        if (!_placeStates[k]) _placeStates[k] = {anyOvernightTrue:false, anyOvernightFalse:false, anyDenylist:false};
+        var st = _placeStates[k];
+        if (typeof _isTransitOnlyByDenylist === "function" && _isTransitOnlyByDenylist(p.place)) {
+          st.anyDenylist = true;
         }
-        return true;
+        if (p.overnight === false) st.anyOvernightFalse = true;
+        else if (p.overnight === true) st.anyOvernightTrue = true;
       });
     });
-    if (_filteredFromActivities > 0) console.log("[Max] filtered " + _filteredFromActivities + " transit-only place(s) from non-route activities (round CC)");
+    // Decide transit-only per place: denylist always wins; otherwise need
+    // ALL refs to say overnight:false (no ref has overnight:true).
+    var _transitPlaces = {};
+    Object.keys(_placeStates).forEach(function(k){
+      var st = _placeStates[k];
+      if (st.anyDenylist) _transitPlaces[k] = "denylist";
+      else if (st.anyOvernightFalse && !st.anyOvernightTrue) _transitPlaces[k] = "llm";
+    });
+    // Propagate the verdict to every requiredPlace ref of those places
+    var _markedTransit = 0;
+    var _denylistApplied = 0;
+    items.forEach(function(item){
+      if (item.type === "route") return;
+      if (!Array.isArray(item.requiredPlaces)) return;
+      item.requiredPlaces.forEach(function(p){
+        if (!p || !p.place) return;
+        var k = (typeof _normPlaceName === "function") ? _normPlaceName(p.place) : p.place.toLowerCase();
+        if (_transitPlaces[k]) {
+          p.overnight = false;
+          p._transitOnly = true;
+          _markedTransit++;
+          if (_transitPlaces[k] === "denylist") _denylistApplied++;
+        } else {
+          // Place has at least one overnight:true ref — clear stale flags
+          p._transitOnly = false;
+          if (p.overnight !== true) p.overnight = true;
+        }
+      });
+    });
+    if (_markedTransit > 0) console.log("[Max] marked " + Object.keys(_transitPlaces).length + " transit-only place(s) (" + _markedTransit + " refs across activities)" + (_denylistApplied > 0 ? " — " + _denylistApplied + " ref(s) caught by denylist" : ""));
 
     items.forEach(function(item,i){
       item.id = "plm" + i;
@@ -4851,7 +5339,15 @@ async function generateActivitiesForPlace(){
             var n = parseInt(p.nights, 10);
             if (!isFinite(n) || n < 0) n = (item.type === "route") ? 0 : 2;
             p.nights = n;
-            p._keep = !!item.checked;
+            // Round CS.1: transit-only places (cable-car summits, train
+            // termini, etc.) default to unchecked even if the activity is
+            // auto-checked. The user has to explicitly opt in to stay
+            // overnight there.
+            if (p._transitOnly) {
+              p._keep = false;
+            } else {
+              p._keep = !!item.checked;
+            }
           }
         });
       }
@@ -5149,11 +5645,25 @@ function _renderPlaceActivityItems(){
       shownIn[key] = sec;
 
       // Left column: destination name + nights/ref + master destination toggle
+      // Round CQ.1: "?" info button next to the place name. Round CQ.2:
+      // narrative now opens in a floating popup (not inline) so the
+      // picker's column stays compact.
+      // Round CS.1: if this destination is transit-only (cable-car summit,
+      // train terminus, etc.), show a warning chip and the row defaults
+      // to unchecked. The user can still opt in to stay overnight there.
+      var isTransitDest = d.placeRefs.some(function(r){ return r.placeRef && r.placeRef._transitOnly; });
+      var transitChip = isTransitDest
+        ? '<span style="font-size:9.5px;font-weight:700;color:#a06010;background:#fff4e3;border:1px solid #f0d9aa;padding:1px 6px;border-radius:9px;letter-spacing:.02em;" title="This stop is typically a transit point (cable-car summit, train terminus). You can still pick it, but most travelers don\'t stay overnight here.">⚠ transit</span>'
+        : '';
       var leftHtml = '<div class="tb-act-col-left">'
         + '<div style="display:flex;align-items:flex-start;gap:8px;">'
         + '<div class="tb-act-check'+(destKeptInSection?" on":"")+'" onclick="toggleDestKeep(&#39;'+_pmEsc(d.place)+'&#39;)" title="Keep / drop this destination across all activities"></div>'
         + '<div style="flex:1;min-width:0;cursor:pointer;" onclick="toggleDestKeep(&#39;'+_pmEsc(d.place)+'&#39;)">'
-        + '<div class="tb-act-name">'+_pmEsc(d.place)+'</div>'
+        + '<div class="tb-act-name" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
+        +   '<span>'+_pmEsc(d.place)+'</span>'
+        +   transitChip
+        +   '<button type="button" class="tb-act-info-btn" onclick="togglePlaceNarrative(&#39;'+_pmEsc(d.place).replace(/&#39;/g, "\\&#39;")+'&#39;,this);event.stopPropagation();" title="What is this place?" style="font-size:11px;color:#1a5fa8;background:none;border:1px solid #cfe1f7;border-radius:50%;width:18px;height:18px;line-height:1;cursor:pointer;font-family:inherit;padding:0;display:inline-flex;align-items:center;justify-content:center;font-weight:600;">?</button>'
+        + '</div>'
         + (nightsLine ? '<div class="tb-dest-meta">'+nightsLine+'</div>' : '')
         + '</div>'
         + '</div>'
@@ -5507,6 +6017,91 @@ function closePlacePickerMapModal(){
   window._tbPmMapWindow = null;
 }
 
+// Round CM.1: open the trip's hero map in a separate browser window for a
+// real survey of the route. Static snapshot — no polling — because the
+// trip view re-renders the inline hero on its own when destinations
+// change. User can drag the new window to a second monitor.
+function openTripHeroMapWindow(){
+  if (window._tripHeroMapWindow && !window._tripHeroMapWindow.closed) {
+    try { window._tripHeroMapWindow.focus(); } catch(_){}
+    return;
+  }
+  var w = window.open(
+    "",
+    "MaxTripHeroMap",
+    "width=1200,height=820,resizable=yes,scrollbars=no,menubar=no,toolbar=no,location=no,status=no"
+  );
+  if (!w) {
+    alert("Please allow pop-ups for this site so the map window can open.");
+    return;
+  }
+  window._tripHeroMapWindow = w;
+  // Snapshot the destinations + coords up-front. The new window doesn't
+  // need to re-poll; if the trip changes, the user can re-open the window.
+  var pts = [];
+  trip.destinations.forEach(function(d, i){
+    var ctr = getCityCenter(d.place);
+    if (!ctr || !isFinite(ctr[0]) || !isFinite(ctr[1])) return;
+    pts.push({
+      n: i + 1,
+      place: d.label || d.place,
+      lat: ctr[0],
+      lng: ctr[1],
+      isFirst: i === 0,
+      isLast: i === trip.destinations.length - 1,
+      dateFrom: d.dateFrom || "",
+      dateTo: d.dateTo || "",
+      nights: d.nights || 0
+    });
+  });
+  var tripName = (trip && trip.name) || "Your trip";
+  var ptsJson = JSON.stringify(pts).replace(/</g, "\\u003c");
+  var html = ''
+    + '<!DOCTYPE html><html><head><meta charset="utf-8">'
+    + '<title>' + tripName.replace(/[<>"]/g, "") + ' — route</title>'
+    + '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />'
+    + '<style>'
+    + 'html,body{margin:0;padding:0;height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#fff;}'
+    + '#hdr{padding:10px 16px;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between;background:#fafafa;}'
+    + '#ttl{font-size:14px;font-weight:700;color:#1a1a1a;}'
+    + '#sub{font-size:11px;color:#888;margin-left:10px;}'
+    + '#map{position:absolute;top:46px;left:0;right:0;bottom:0;background:#eaf0ed;}'
+    + '</style>'
+    + '</head><body>'
+    + '<div id="hdr">'
+    +   '<div><span id="ttl">' + tripName.replace(/[<>"]/g, "") + ' — route</span><span id="sub">' + pts.length + ' destination' + (pts.length !== 1 ? 's' : '') + '</span></div>'
+    + '</div>'
+    + '<div id="map"></div>'
+    + '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""><\/script>'
+    + '<script>(function(){'
+    +   'var pts = ' + ptsJson + ';'
+    +   'if (typeof L === "undefined" || !pts.length) return;'
+    +   'var map = L.map("map", {zoomControl: true, scrollWheelZoom: true, attributionControl: false}).setView([46.8, 8.2], 6);'
+    +   'L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {maxZoom: 19}).addTo(map);'
+    +   'L.tileLayer("https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png", {maxZoom: 19, opacity: 1.0}).addTo(map);'
+    +   'var coords = pts.map(function(p){return [p.lat, p.lng];});'
+    +   'if (coords.length >= 2) {'
+    +     'L.polyline(coords, {color: "#fff", weight: 7, opacity: 0.9, lineCap: "round"}).addTo(map);'
+    +     'L.polyline(coords, {color: "#1a5fa8", weight: 3, opacity: 1.0, dashArray: "1 8", lineCap: "round"}).addTo(map);'
+    +   '}'
+    +   'pts.forEach(function(p){'
+    +     'var ring = p.isFirst ? "#1a5fa8" : (p.isLast ? "#b05820" : "#222");'
+    +     'var html = \'<div style="background:#fff;border:2px solid \'+ring+\';border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:\'+ring+\';box-shadow:0 2px 5px rgba(0,0,0,0.3);">\'+p.n+\'</div>\';'
+    +     'var icon = L.divIcon({html: html, className: "", iconSize: [30, 30], iconAnchor: [15, 15]});'
+    +     'var dateLine = p.dateFrom ? p.dateFrom + " → " + p.dateTo + " (" + p.nights + " night" + (p.nights !== 1 ? "s" : "") + ")" : (p.nights + " night" + (p.nights !== 1 ? "s" : ""));'
+    +     'var popup = \'<div style="font-size:13px;font-weight:700;color:#222;margin-bottom:3px;">\'+p.place+\'</div><div style="font-size:11px;color:#777;">\'+dateLine+\'</div>\';'
+    +     'var m = L.marker([p.lat, p.lng], {icon: icon}).addTo(map);'
+    +     'm.bindTooltip(p.place, {direction: "top", offset: [0, -16]});'
+    +     'm.bindPopup(popup);'
+    +   '});'
+    +   'if (coords.length >= 2) map.fitBounds(coords, {padding: [50, 50], maxZoom: 10});'
+    + '})();<\/script>'
+    + '</body></html>';
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+}
+
 // ===== Place-picker map =====
 // Hybrid: a small inline preview at the top of the picker, plus a fullscreen
 // modal you can open with the "Expand" button. Both share state — toggling
@@ -5771,19 +6366,16 @@ function _updatePlaceActivitySummary(){
     if(btn){ btn.disabled = true; btn.classList.add("tb-btn-disabled"); btn.textContent = "Build trip \u2192"; }
     return;
   }
-  var missingArrDep = !entryCity || !exitCity;
+  // Round CL.6: arrival/departure are no longer gating \u2014 Neal moved them
+  // back to "optional on the picker, set on the trip page when ready."
+  // Build button is enabled as long as at least one activity is kept.
   if(btn){
-    if (missingArrDep) {
-      btn.disabled = true;
-      btn.classList.add("tb-btn-disabled");
-      btn.textContent = !entryCity && !exitCity ? "Add arrival and departure to build \u2192"
-                       : !entryCity ? "Add arrival city to build \u2192"
-                       : "Add departure city to build \u2192";
-    } else {
-      btn.disabled = false;
-      btn.classList.remove("tb-btn-disabled");
-      btn.textContent = "Build trip \u2192";
-    }
+    btn.disabled = false;
+    btn.classList.remove("tb-btn-disabled");
+    btn.style.background = "";
+    btn.style.color = "";
+    btn.style.cursor = "";
+    btn.textContent = "Build trip \u2192";
   }
   var actCount = activeItems.length;
   var totalLabel = displayNights > 0 ? (' \u00b7 about <strong>'+displayNights+' nights</strong> total') : '';
@@ -5855,6 +6447,19 @@ function renderActivityPicker(){
       +'<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#999;margin-bottom:6px;">What you can do in '+_pmEsc(placeLabel)+'</div>'
       +'<div style="font-size:11px;color:#666;line-height:1.55;margin-bottom:14px;">Tap what you actually want to do. Anything you leave unchecked won’t shape the trip. Add your own below.</div>'
       +'<div class="tb-act-list" id="tb-place-act-list"></div>'
+      // Round CR: breadth discovery — "Other places worth considering."
+      // Single button that fires an LLM call asking for places adjacent to
+      // the brief that the activity-driven picks may have missed. Each
+      // returned place gets a "+ Add" button that creates a manual entry,
+      // same shape as addCustomPlaceFromPicker. Cached on
+      // _tb._breadthSuggestions so re-clicks don't re-spend tokens.
+      +'<div id="tb-breadth-section" style="margin-top:18px;padding:12px 14px;background:#f7f9ff;border:1px dashed #c8d8ec;border-radius:8px;">'
+      +  '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#1a5fa8;margin-bottom:4px;">Other places worth considering</div>'
+      +  '<div style="font-size:11px;color:#555;line-height:1.55;margin-bottom:8px;">Cities or towns Max thinks fit your trip but aren\'t tied to anything you\'ve picked above. Optional.</div>'
+      +  '<div id="tb-breadth-content">'
+      +    '<button class="tb-act-add-btn" type="button" onclick="discoverBreadthPlaces()">Discover more places →</button>'
+      +  '</div>'
+      +'</div>'
       // Two custom-add panels side by side. Place comes first (it's the
       // bigger primitive — most users add a missing destination more often
       // than they add a custom verb).
@@ -5882,7 +6487,7 @@ function renderActivityPicker(){
       // rebuilds on change. Both read/write the same _tb fields, so a value
       // set in one place displays in the other.
       +'<div style="margin-top:18px;padding:11px 14px;background:#fff;border:1px solid #e8e8e8;border-radius:8px;">'
-      +  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:8px;">Arrival / Departure <span style="color:#aaa;font-weight:400;text-transform:none;letter-spacing:0;">— optional, you can set or change this on the trip page</span></div>'
+      +  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:8px;">Arrival / Departure <span style="color:#aaa;font-weight:400;text-transform:none;letter-spacing:0;">— optional, but at some point you\'ll need to set (or change) it on the trip page</span></div>'
       +  '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'
       +    '<div><label style="display:block;font-size:10.5px;color:#666;margin-bottom:4px;">Arriving at</label>'
       +      '<input class="tb-act-add-inp" id="tb-picker-entry" placeholder="e.g. Zurich" autocomplete="off" value="'+curEntry+'" oninput="_tb.entry=this.value.trim();_pickerArrivalChanged&&_pickerArrivalChanged();" onblur="this.value=_titleCaseCity(this.value);_tb.entry=this.value.trim();_updatePlaceActivitySummary&&_updatePlaceActivitySummary();" />'
@@ -5895,6 +6500,39 @@ function renderActivityPicker(){
       +    '<input type="checkbox" id="tb-picker-exit-buffer" '+((_tb.exitBuffer===false)?"":"checked")+' onchange="_tb.exitBuffer=this.checked;_updatePlaceActivitySummary&&_updatePlaceActivitySummary();" style="margin:0;cursor:pointer;" />'
       +    '<span>Buffer night in your departure city before flying home <span style="color:#999;">(default — uncheck to fly directly from your last destination)</span></span>'
       +  '</label>'
+      // Round CK.1.3: collapsible logistics form on the picker, mirrors the
+      // trip view's panel. Captures into _tb.entryDetails / _tb.exitDetails
+      // (seeded from trip.brief if editing an existing trip). On build,
+      // buildFromCandidates merges these into trip.brief.
+      + (function(){
+          var ed = (_tb.entryDetails && Object.keys(_tb.entryDetails).length)
+            ? _tb.entryDetails
+            : ((trip && trip.brief && trip.brief.entryDetails) || {});
+          var xd = (_tb.exitDetails && Object.keys(_tb.exitDetails).length)
+            ? _tb.exitDetails
+            : ((trip && trip.brief && trip.brief.exitDetails) || {});
+          // Pull seeded values back into _tb so subsequent reads use them.
+          _tb.entryDetails = Object.assign({}, ed);
+          _tb.exitDetails = Object.assign({}, xd);
+          var hasAny = Object.values(ed).some(function(v){return !!v;}) || Object.values(xd).some(function(v){return !!v;});
+          // Round CK.7: also stay expanded if the user just toggled it open
+          // or just picked a mode (_logisticsOpen flag). Round CK.9 removes
+          // the "Decide later" affordance — leaving fields blank is the
+          // implicit "decide later" state, no extra UI needed.
+          var expanded = hasAny || (_tb && _tb._logisticsOpen);
+          return '<div style="margin-top:10px;border-top:1px dashed #d8d4c8;padding-top:8px;">'
+            + '<button id="tb-picker-logistics-toggle" type="button" onclick="_toggleLogistics(&#39;picker&#39;)" style="font-size:11px;color:#1a5fa8;background:none;border:none;padding:2px 0;cursor:pointer;font-family:inherit;font-weight:600;">'
+            +   (expanded ? '▿ Hide arrival/departure details' : '▸ Add arrival/departure details')
+            + '</button>'
+            + '<div id="tb-picker-logistics-form" style="margin-top:10px;'+(expanded?'':'display:none;')+'">'
+            +   '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">'
+            +     _renderLogisticsCol("entry", "Arrival", ed, "picker")
+            +     _renderLogisticsCol("exit", "Departure", xd, "picker")
+            +   '</div>'
+            +   '<div style="font-size:10px;color:#999;margin-top:8px;">Saved as you type. You can edit these later on the trip page.</div>'
+            + '</div>'
+            + '</div>';
+        })()
       +'</div>'
       +'<div class="tb-act-summary" id="tb-place-act-summary" style="margin-top:14px;"></div>';
   }
@@ -6065,6 +6703,140 @@ async function expandActivitySection(sectionName){
     console.warn("[Max] expandActivitySection failed:", e && e.message);
     if (btn) { btn.disabled = false; btn.textContent = "+ try again"; }
   }
+}
+
+// Round CR: breadth discovery — "Other places worth considering." Fires
+// one LLM call asking for places adjacent to the brief that aren't tied
+// to any specific activity. Filters out places already shown in the
+// picker (so we don't suggest Zermatt when it's already there). Each
+// suggestion gets a "+ Add" button that creates a manual placeActivity
+// entry, same shape as addCustomPlaceFromPicker.
+async function discoverBreadthPlaces(){
+  var content = document.getElementById("tb-breadth-content");
+  if (!content) return;
+  // If we already have cached suggestions, just re-render them
+  if (_tb._breadthSuggestions && _tb._breadthSuggestions.length) {
+    _renderBreadthSuggestions();
+    return;
+  }
+  content.innerHTML = '<span class="max-thinking" style="color:#888;font-style:italic;font-size:11px;">Max is finding more places…</span>';
+  // Build a list of places already shown so we can ask the LLM to skip them
+  var shown = [];
+  (_tb.placeActivities || []).forEach(function(item){
+    (item.requiredPlaces || []).forEach(function(p){
+      if (p && p.place) shown.push(p.place);
+    });
+  });
+  // Dedupe shown
+  var shownSet = {};
+  shown = shown.filter(function(p){ var k = p.toLowerCase(); if (shownSet[k]) return false; shownSet[k] = true; return true; });
+  var region = (_tb && _tb.region) || "the region";
+  var intent = (_tb && _tb.intent) || (_tb && _tb.placeContext) || "";
+  var prompt = "A traveler is planning a trip to " + region + ".\n"
+    + (intent ? "What they care about: " + intent + "\n" : "")
+    + "They've already chosen these places: " + (shown.length ? shown.join(", ") : "(none yet)") + "\n\n"
+    + "Suggest 6 ADDITIONAL cities or towns in " + region + " that fit this kind of trip but aren't already on the list. Mix obvious major cities the traveler might regret missing with one or two less-obvious thematic picks. For each, give a one-sentence reason it's worth considering — concrete and specific, not 'charming' or 'must-see.'\n\n"
+    + "Constraints:\n"
+    + "- Only real, well-known places in " + region + ".\n"
+    + "- Don't suggest cable-car summits, train stations, or transit-only nodes — only places the traveler would actually base in or visit as a day-stop.\n"
+    + "- Each suggestion must include lat/lng (4 decimals) and country.\n\n"
+    + "Return ONLY a JSON array (no markdown):\n"
+    + '[{"place":"City","country":"Country","lat":47.3769,"lng":8.5417,"whyItFits":"One specific sentence."}]';
+  try {
+    var text = await callMax([{role: "user", content: prompt}], 1500, 35000);
+    var cleaned = text.replace(/```json|```/g, "").trim();
+    var first = cleaned.indexOf("["), last = cleaned.lastIndexOf("]");
+    if (first > -1 && last > -1) cleaned = cleaned.substring(first, last + 1);
+    var suggestions = JSON.parse(cleaned);
+    if (!Array.isArray(suggestions)) throw new Error("expected array");
+    // Filter out anything already shown (defensive — LLM might ignore the instruction)
+    var alreadyShown = {};
+    shown.forEach(function(p){ alreadyShown[p.toLowerCase()] = true; });
+    suggestions = suggestions.filter(function(s){
+      return s && s.place && !alreadyShown[s.place.toLowerCase()];
+    });
+    _tb._breadthSuggestions = suggestions;
+    _renderBreadthSuggestions();
+  } catch(e) {
+    content.innerHTML = '<span style="color:#c44;font-size:11px;">Couldn\'t fetch suggestions: ' + (e.message || "unknown error") + '</span>';
+  }
+}
+
+function _renderBreadthSuggestions(){
+  var content = document.getElementById("tb-breadth-content");
+  if (!content) return;
+  var suggestions = _tb._breadthSuggestions || [];
+  if (!suggestions.length) {
+    content.innerHTML = '<span style="font-size:11px;color:#888;">No additional suggestions found.</span>';
+    return;
+  }
+  // Render each suggestion as a card with name + reason + Add button
+  var html = '<div style="display:flex;flex-direction:column;gap:6px;">';
+  suggestions.forEach(function(s, i){
+    if (!s || !s.place) return;
+    var added = s._added;
+    html += '<div style="display:flex;align-items:flex-start;gap:8px;padding:7px 10px;background:#fff;border:1px solid #e0e8f4;border-radius:6px;">'
+      +   '<div style="flex:1;min-width:0;">'
+      +     '<div style="font-size:12px;font-weight:600;color:#1a1a1a;">'+_pmEsc(s.place)+(s.country?'<span style="font-size:10px;font-weight:400;color:#888;margin-left:6px;">'+_pmEsc(s.country)+'</span>':'')+'</div>'
+      +     (s.whyItFits ? '<div style="font-size:11px;color:#555;margin-top:2px;line-height:1.5;">'+_pmEsc(s.whyItFits)+'</div>' : '')
+      +   '</div>'
+      +   (added
+          ? '<span style="font-size:10px;color:#3a7a4a;font-weight:600;padding:5px 10px;border:1px solid #b8dfc9;background:#f0f8f4;border-radius:4px;">✓ Added</span>'
+          : '<button class="tb-act-add-btn" type="button" onclick="addBreadthSuggestion('+i+');event.stopPropagation();" style="font-size:11px;padding:5px 10px;flex-shrink:0;">+ Add</button>')
+      + '</div>';
+  });
+  html += '</div>';
+  // Subtle "regenerate" link at the bottom
+  html += '<div style="margin-top:8px;text-align:right;"><a href="#" onclick="event.preventDefault();_tb._breadthSuggestions=null;discoverBreadthPlaces();" style="font-size:10.5px;color:#1a5fa8;">↻ Get different suggestions</a></div>';
+  content.innerHTML = html;
+}
+
+function addBreadthSuggestion(idx){
+  var suggestions = _tb._breadthSuggestions || [];
+  var s = suggestions[idx];
+  if (!s || !s.place) return;
+  // Check if already added (across all activities)
+  var existsKey = s.place.toLowerCase();
+  var alreadyAdded = (_tb.placeActivities || []).some(function(item){
+    return (item.requiredPlaces || []).some(function(p){
+      return p && p.place && p.place.toLowerCase() === existsKey;
+    });
+  });
+  if (alreadyAdded) {
+    s._added = true;
+    _renderBreadthSuggestions();
+    return;
+  }
+  // Inject as a manual-style item, similar to addCustomPlaceFromPicker
+  var newItem = {
+    id: "p-breadth-" + Date.now() + "-" + idx,
+    name: "Visit " + s.place,
+    type: "manual",
+    section: "Places you added",
+    description: s.whyItFits || "",
+    iconic: false,
+    checked: true,
+    requiredPlaces: [{
+      place: s.place,
+      country: s.country || "",
+      nights: 2,
+      lat: s.lat || null,
+      lng: s.lng || null,
+      _keep: true
+    }]
+  };
+  _tb.placeActivities = _tb.placeActivities || [];
+  _tb.placeActivities.push(newItem);
+  // Seed _coarseGeocode so the picker map gets a pin immediately
+  if (s.lat && s.lng) {
+    _coarseGeocode = _coarseGeocode || {};
+    _coarseGeocode[s.place.toLowerCase()] = [s.lat, s.lng];
+  }
+  s._added = true;
+  _renderPlaceActivityItems();
+  _updatePlaceActivitySummary();
+  _renderBreadthSuggestions();
+  if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
 }
 
 async function addCustomPlaceFromPicker(){
@@ -6571,6 +7343,30 @@ function _tbPartySummary(){
   if(_tb.abilityNote) parts.push(_tb.abilityNote);
   return parts.join(", ");
 }
+// Round CU: shared helper that bundles the user's personal preferences
+// (party, pace, accommodation, dietary/safety avoidances, hardlimits) into
+// a compact prompt fragment. Used by every recommendation call — picker
+// activities, narratives, what-to-do, restaurants — so suggestions
+// respect "no hostels," "vegetarian," "traveling with elderly parents,"
+// etc. Returns "" if no preferences are set so prompts stay clean.
+function _briefPersonalContext(){
+  var lines = [];
+  var party = _tbPartySummary && _tbPartySummary();
+  if (party) lines.push("Travelers: " + party);
+  if (_tb.pace) lines.push("Pace: " + _tb.pace);
+  if (_tb.accommodation) lines.push("Lodging preferences: " + _tb.accommodation);
+  var avoid = _tbAvoidSummary && _tbAvoidSummary();
+  if (avoid) lines.push("Avoid: " + avoid);
+  if (_tb.hardlimits) lines.push("Hard limits (never violate): " + _tb.hardlimits);
+  if (_tb.compromises) lines.push("Will bend on: " + _tb.compromises);
+  if (_tb.familiarity) {
+    var famLabel = {know:"knows the region well",before:"has a passing understanding",first:"first time in the region"}[_tb.familiarity] || _tb.familiarity;
+    lines.push("Familiarity: " + famLabel);
+  }
+  if (!lines.length) return "";
+  return "\n\nTRAVELER CONTEXT (factor into your suggestions):\n" + lines.map(function(l){return "  • " + l;}).join("\n") + "\n";
+}
+
 function _tbAvoidSummary(){
   var avoid = _tb.avoid || {};
   var labels = {altitude:"high altitude",crowds:"crowds",heat:"extreme heat",cold:"extreme cold",longDrives:"long drives"};
@@ -10480,14 +11276,63 @@ async function buildFromCandidates(){
     }
   }
 
+  // Round CH: clamp total nights to the brief's duration. The picker LLM
+  // sometimes generates more requiredPlaces (each with ≥1 night) than the
+  // trip duration can accommodate — a "4 weeks" Switzerland brief with 18
+  // requiredPlaces × ~2 nights each yields 30+ nights when the budget is
+  // ~27. We shrink the largest stays one night at a time until totals fit,
+  // never letting any kept place drop below 1 night (else we'd silently
+  // drop destinations the user picked).
+  (function clampNightsToDuration(){
+    var budget = _parseTripDuration((trip.brief && trip.brief.duration) || (_tb && _tb.duration) || "");
+    if (!budget) return;
+    // budget.max is in days. Subtract 1 to convert days→nights baseline (a
+    // 28-day trip = 27 nights of accommodation; the last day is the flight
+    // out). The buffer toggle still adds 1 if the user wants a hedge night.
+    var targetNights = budget.max - 1;
+    // Sum current nights across kept candidates. Resolve each candidate's
+    // "current nights" the same way the destination loop will (explicit
+    // c.nights wins; otherwise stayRange parse; otherwise 3).
+    function resolveNights(c){
+      return (typeof c.nights === "number" && c.nights >= 0)
+        ? c.nights
+        : (parseNightsFromRange(c.stayRange) || 3);
+    }
+    ordered.forEach(function(c){ c.nights = resolveNights(c); });
+    var sumNights = ordered.reduce(function(s,c){return s+(c.nights||0);}, 0);
+    if (sumNights <= targetNights) return;
+    var overage = sumNights - targetNights;
+    var iterations = 0;
+    while (overage > 0 && iterations < 100) {
+      iterations++;
+      // Find the kept candidate with the largest current nights value (>1).
+      // Tie-break: prefer non-required candidates so the user's must-do
+      // picks keep their full intended stay when possible.
+      var biggest = null;
+      ordered.forEach(function(c){
+        if ((c.nights||0) <= 1) return;
+        if (!biggest) { biggest = c; return; }
+        if ((c.nights||0) > (biggest.nights||0)) { biggest = c; return; }
+        if ((c.nights||0) === (biggest.nights||0) && c._required && !biggest._required) return;
+        if ((c.nights||0) === (biggest.nights||0) && !c._required && biggest._required) { biggest = c; return; }
+      });
+      if (!biggest) break;
+      biggest.nights = (biggest.nights||0) - 1;
+      overage--;
+    }
+    var finalSum = ordered.reduce(function(s,c){return s+(c.nights||0);}, 0);
+    console.log("[Max night-clamp] target=" + targetNights + " (from \"" + ((trip.brief && trip.brief.duration) || _tb.duration) + "\"), original=" + sumNights + ", final=" + finalSum + (overage>0 ? " (under-clamped: " + overage + " nights still over because every kept stop is at 1 night minimum — drop a destination to fit)" : ""));
+  })();
+
   // Build destinations from ordered candidates
   var cur=new Date(startDate);
   ordered.forEach(function(c){
     destCtr++;
     var id="d"+destCtr;
     // If the candidate carries an explicit `nights` value (e.g. the synthetic
-    // entry stop we prepend), trust it. Otherwise parse from the stayRange
-    // string ("3-4 nights" → 3) with a 3-night fallback for missing data.
+    // entry stop we prepend, or the Round CH clamp), trust it. Otherwise
+    // parse from the stayRange string ("3-4 nights" → 3) with a 3-night
+    // fallback for missing data.
     var nights = (typeof c.nights === "number" && c.nights >= 0)
       ? c.nights
       : (parseNightsFromRange(c.stayRange) || 3);
@@ -10524,6 +11369,100 @@ async function buildFromCandidates(){
     cur=next;
   });
 
+  // Round CO: smart day-trip clustering. Short stays (≤2 nights) within
+  // ~60km of a longer-stay hub get absorbed into the hub as day trips,
+  // not their own bed. This collapses fragmentation (e.g. Bettmeralp into
+  // Zermatt) without losing the place — the hub gets a "while you're
+  // there" pill the user can click to ungroup. Heuristic:
+  //   - Source has ≤ 2 nights AND hub has > source.nights (so a 2-night
+  //     can be absorbed by a 3+ but not by another 2)
+  //   - Source must NOT be entry/exit stop (those bookend the calendar)
+  //   - Distance must be ≤ 60km (rough day-trip radius — buses/trains
+  //     handle ~1hr each way comfortably)
+  //   - Source's attached events move to hub's dayTrips
+  (function _autoClusterDayTrips(){
+    if (!trip.destinations.length) return;
+    function getCoord(d){
+      if (typeof d.lat === "number" && typeof d.lng === "number") return [d.lat, d.lng];
+      if (typeof getCityCenter === "function") {
+        var ctr = getCityCenter(d.place);
+        if (ctr && isFinite(ctr[0]) && isFinite(ctr[1])) return ctr;
+      }
+      return null;
+    }
+    function distKm(a, b){
+      if (!a || !b) return Infinity;
+      // Equirectangular approximation — fine at this scale (Europe-sized trips)
+      var dLat = (a[0] - b[0]) * 111;
+      var dLng = (a[1] - b[1]) * 111 * Math.cos(((a[0] + b[0]) / 2) * Math.PI / 180);
+      return Math.sqrt(dLat*dLat + dLng*dLng);
+    }
+    var DAY_TRIP_RADIUS_KM = 60;
+    // Find candidates to absorb. Don't iterate while mutating; collect
+    // (source, hub) pairs first, then apply.
+    var absorbtions = [];
+    for (var i = 0; i < trip.destinations.length; i++) {
+      var src = trip.destinations[i];
+      if (!src || src.nights > 2) continue; // only short stays are candidates
+      if (i === 0 || i === trip.destinations.length - 1) continue;
+      // Find the closest other destination with strictly more nights
+      // (so 2-night → 3+ hub absorbs, but 2 → 2 doesn't)
+      var srcCoord = getCoord(src);
+      if (!srcCoord) continue;
+      var bestHub = null;
+      var bestDist = Infinity;
+      for (var j = 0; j < trip.destinations.length; j++) {
+        if (j === i) continue;
+        var h = trip.destinations[j];
+        if (!h || h.nights <= src.nights) continue;
+        var hubCoord = getCoord(h);
+        if (!hubCoord) continue;
+        var d = distKm(srcCoord, hubCoord);
+        if (d < bestDist) { bestDist = d; bestHub = h; }
+      }
+      if (bestHub && bestDist <= DAY_TRIP_RADIUS_KM) {
+        absorbtions.push({src: src, hub: bestHub, distKm: bestDist});
+      }
+    }
+    if (!absorbtions.length) return;
+    // Apply absorbtions. Build day-trip records and attach to hubs;
+    // remove sources from trip.destinations.
+    absorbtions.forEach(function(a){
+      if (!a.hub.dayTrips) a.hub.dayTrips = [];
+      a.hub.dayTrips.push({
+        place: a.src.place,
+        country: a.src.country || "",
+        lat: (typeof a.src.lat === "number") ? a.src.lat : (getCityCenter(a.src.place) || [null,null])[0],
+        lng: (typeof a.src.lng === "number") ? a.src.lng : (getCityCenter(a.src.place) || [null,null])[1],
+        whyItFits: a.src.intent || "",
+        attachedEvents: (a.src.attachedEvents || []).slice(),
+        // Preserve the actual source nights so ungroup restores faithfully
+        sourceNights: a.src.nights || 1,
+        absorbedFromHub: a.hub.place,
+        distKm: Math.round(a.distKm),
+        clusteredAt: new Date().toISOString()
+      });
+    });
+    // Remove sources and recompute dates from the surviving destinations.
+    var absorbedIds = {};
+    absorbtions.forEach(function(a){ absorbedIds[a.src.id] = true; });
+    trip.destinations = trip.destinations.filter(function(d){ return !absorbedIds[d.id]; });
+    // Recompute dates: cur runs forward from the original start
+    var curDate = new Date(startDate);
+    trip.destinations.forEach(function(d){
+      var dateFrom = curDate.toISOString().slice(0,10);
+      var next = new Date(curDate); next.setDate(next.getDate() + (d.nights || 0));
+      var dateTo = next.toISOString().slice(0,10);
+      d.dateFrom = dateFrom;
+      d.dateTo = dateTo;
+      d.days = makeDays(d.id, d.place, d.place, dateFrom, d.nights || 0);
+      curDate = next;
+    });
+    // Log so the user (and console) can see what happened.
+    var summary = absorbtions.map(function(a){ return a.src.place + " → day trip from " + a.hub.place + " (" + Math.round(a.distKm) + "km)"; }).join("; ");
+    console.log("[Max day-trip cluster] absorbed " + absorbtions.length + ": " + summary);
+  })();
+
   // Pre-generate city data for all new destinations, throttled 3-at-a-time.
   // Fire-and-forget — the plan opens immediately and cards light up as data arrives.
   (function throttledGenerate(dests,limit){
@@ -10552,33 +11491,59 @@ async function buildFromCandidates(){
   // (when entry/exit is a kept destination), so the per-place breakdown
   // looks "off" but the totals match. The real bug to flag is when totals
   // diverge after accounting for the buffer.
+  // Round CT.1: account for day-trip absorption (Round CO). When
+  // Bettmeralp gets absorbed into Zermatt, it stays in
+  // _tb._pickerNightsByPlace but disappears from trip.destinations — that
+  // looks like a mismatch but is intentional. Treat absorbed places as
+  // "moved to hub" and rebalance the comparison.
   if (_tb && _tb._pickerNightsByPlace) {
     var tripByPlace = {};
+    var absorbedByHub = {}; // hubKey → [absorbedKeys]
     trip.destinations.forEach(function(d){
       var k = (typeof _normPlaceName === "function") ? _normPlaceName(d.place) : (d.place||"").toLowerCase();
       tripByPlace[k] = (tripByPlace[k] || 0) + (d.nights || 0);
+      // Track day-trips absorbed into this destination
+      if (d.dayTrips && d.dayTrips.length) {
+        d.dayTrips.forEach(function(dt){
+          var dtK = (typeof _normPlaceName === "function") ? _normPlaceName(dt.place) : (dt.place||"").toLowerCase();
+          if (!absorbedByHub[k]) absorbedByHub[k] = [];
+          absorbedByHub[k].push({key: dtK, nights: dt.sourceNights || 1});
+        });
+      }
     });
     var pickerDisplay = _tb._pickerDisplayTotal || 0;
     var pickerBufferAdds = _tb._pickerBufferAdds || 0;
     var tripTotal = trip.destinations.reduce(function(s,d){return s+(d.nights||0);}, 0);
-    var totalsMatch = pickerDisplay === tripTotal;
+    var absorbedTotal = 0;
+    Object.keys(absorbedByHub).forEach(function(hub){
+      absorbedByHub[hub].forEach(function(a){ absorbedTotal += a.nights; });
+    });
+    var totalsMatch = (pickerDisplay - absorbedTotal) === tripTotal;
     if (totalsMatch) {
-      console.log("[Max night-diff] OK — picker " + pickerDisplay + " (base " + (pickerDisplay - pickerBufferAdds) + " + buffer " + pickerBufferAdds + ") = trip " + tripTotal);
+      var msg = "[Max night-diff] OK — picker " + pickerDisplay + " (base " + (pickerDisplay - pickerBufferAdds) + " + buffer " + pickerBufferAdds + ")";
+      if (absorbedTotal > 0) msg += " − " + absorbedTotal + " absorbed day-trip night(s)";
+      msg += " = trip " + tripTotal;
+      console.log(msg);
     } else {
-      // Real mismatch — surface per-place divergences that aren't explained
-      // by the buffer being merged into an existing city.
+      // Real mismatch. Build a per-place report excluding absorbed places
+      // (they're expected to be missing from trip).
+      var absorbedSet = {};
+      Object.keys(absorbedByHub).forEach(function(hub){
+        absorbedByHub[hub].forEach(function(a){ absorbedSet[a.key] = true; });
+      });
       var mismatches = [];
       Object.keys(_tb._pickerNightsByPlace).forEach(function(k){
+        if (absorbedSet[k]) return; // expected to be missing
         var pN = _tb._pickerNightsByPlace[k];
         var tN = tripByPlace[k] || 0;
-        if (pN !== tN) mismatches.push({place:k, picker:pN, trip:tN, diff:tN-pN});
+        if (pN !== tN) mismatches.push({place:k, picker:pN, trip:tN, diff:tN-pN, note: tN===0 ? "missing from trip" : ""});
       });
       Object.keys(tripByPlace).forEach(function(k){
         if (!(k in _tb._pickerNightsByPlace)) {
-          mismatches.push({place:k+" (trip only)", picker:0, trip:tripByPlace[k], diff:tripByPlace[k]});
+          mismatches.push({place:k+" (trip only)", picker:0, trip:tripByPlace[k], diff:tripByPlace[k], note: "in trip but not picker"});
         }
       });
-      console.warn("[Max night-diff] MISMATCH — picker " + pickerDisplay + " (base " + (pickerDisplay - pickerBufferAdds) + " + buffer " + pickerBufferAdds + ") vs trip " + tripTotal + " — diff " + (tripTotal - pickerDisplay));
+      console.warn("[Max night-diff] MISMATCH — picker " + pickerDisplay + " (base " + (pickerDisplay - pickerBufferAdds) + " + buffer " + pickerBufferAdds + ")" + (absorbedTotal>0 ? " − " + absorbedTotal + " absorbed" : "") + " vs trip " + tripTotal + " — diff " + (tripTotal - (pickerDisplay - absorbedTotal)));
       console.table(mismatches);
     }
   }
@@ -10605,6 +11570,12 @@ async function buildFromCandidates(){
     trip.brief.entry = _tb.entry || trip.brief.entry || "";
     trip.brief.tbExit = _tb.tbExit || trip.brief.tbExit || "";
     trip.brief.exitBuffer = !!_tb.exitBuffer;
+    // Round CK.1.3: propagate logistics captured in the picker (_tb.entryDetails
+    // / _tb.exitDetails) into trip.brief on first build. The trip view's
+    // panel writes directly to trip.brief.entryDetails on edit, so that path
+    // overwrites — but the picker captures earlier, before trip.brief exists.
+    if (_tb.entryDetails) trip.brief.entryDetails = Object.assign({}, trip.brief.entryDetails || {}, _tb.entryDetails);
+    if (_tb.exitDetails) trip.brief.exitDetails = Object.assign({}, trip.brief.exitDetails || {}, _tb.exitDetails);
   }
 
   // Don't re-sort — ordering was already computed event-aware
@@ -10612,7 +11583,24 @@ async function buildFromCandidates(){
   saveTripsIndex(); localSave();
   g("candidate-explorer-overlay").style.display="none";
   if(_ceMap){_ceMap.remove();_ceMap=null;} if(_edMap){try{_edMap.remove();}catch(e){}_edMap=null;_edMarkers=[];}
-  // Max-voiced bridge before the plan opens
+
+  // Round CJ: skip the Max-voiced bridge on rebuilds. The bridge is an
+  // onboarding moment ("here's the trip you just built"); it shouldn't
+  // re-appear every time the user tweaks arrival/departure or re-edits
+  // destinations. When applyArrDep / reopenPickerForEdit triggers a
+  // rebuild, they set _tb._isRebuild = true so we know to skip the bridge
+  // and go straight to drawTripMode. Without this, the bridge overlay
+  // covers the trip view and looks like Apply is hung on "Rebuilding…"
+  // because the user doesn't see the (off-screen / overlaid) dismiss
+  // button.
+  var isRebuild = !!(_tb && _tb._isRebuild);
+  if (_tb) _tb._isRebuild = false; // consume the flag
+  if (isRebuild) {
+    g("trip-brief-overlay").style.display="none";
+    if (typeof drawTripMode === "function") drawTripMode();
+    return;
+  }
+  // Max-voiced bridge before the plan opens (first-time build)
   await showMaxBridge("post-candidates", function(){
     g("trip-brief-overlay").style.display="none";
     enterApp();
@@ -10753,7 +11741,10 @@ function orderKeptCandidates(kept, mdcItems, entryCity, exitCity){
     //   1. A major-gateway candidate (marked _cityPick by the major-cities discovery call)
     //      that's among the "remaining" non-route-block candidates
     //   2. A major-gateway candidate that's a route-block endpoint (we'll reorder blocks)
-    //   3. The first kept candidate in the list
+    //   3. Round CP.1: a kept candidate matching a hardcoded major-gateway
+    //      city for the trip's region (Zurich for Switzerland, Paris for
+    //      France, etc.) — covers the case where _cityPick wasn't set
+    //   4. The first kept candidate in the list (last resort)
     var cityPicks = kept.filter(function(c){ return c._cityPick; });
     // Prefer a gateway city that's NOT in a route block (keeps route-adjacency clean)
     cityPicks.forEach(function(c){
@@ -10764,6 +11755,64 @@ function orderKeptCandidates(kept, mdcItems, entryCity, exitCity){
       cityPicks.forEach(function(c){
         if (!entryCand && placed[c.id]) entryCand = c;
       });
+    }
+    // Round CP.1: hardcoded major-gateway lookup by region. Without this,
+    // a Switzerland trip could default to Zermatt (because it's first in
+    // the kept list) instead of Zurich, which is the obvious gateway.
+    if (!entryCand) {
+      var majorGateways = {
+        "switzerland":   ["zurich", "zürich", "geneva", "basel", "bern"],
+        "italy":         ["rome", "roma", "milan", "milano", "florence", "venice", "naples"],
+        "france":        ["paris", "lyon", "nice", "marseille"],
+        "germany":       ["berlin", "munich", "münchen", "frankfurt", "hamburg"],
+        "spain":         ["madrid", "barcelona", "seville", "sevilla"],
+        "portugal":      ["lisbon", "lisboa", "porto"],
+        "uk":            ["london", "edinburgh", "manchester"],
+        "united kingdom":["london", "edinburgh", "manchester"],
+        "england":       ["london", "manchester"],
+        "scotland":      ["edinburgh", "glasgow"],
+        "ireland":       ["dublin"],
+        "iceland":       ["reykjavik", "reykjavík"],
+        "netherlands":   ["amsterdam"],
+        "belgium":       ["brussels"],
+        "austria":       ["vienna", "wien", "salzburg"],
+        "greece":        ["athens"],
+        "turkey":        ["istanbul"],
+        "japan":         ["tokyo", "osaka"],
+        "thailand":      ["bangkok"],
+        "vietnam":       ["hanoi", "ho chi minh", "saigon"],
+        "south korea":   ["seoul"],
+        "china":         ["beijing", "shanghai", "hong kong"],
+        "australia":     ["sydney", "melbourne"],
+        "new zealand":   ["auckland", "wellington"],
+        "canada":        ["toronto", "montreal", "vancouver"],
+        "mexico":        ["mexico city", "ciudad de méxico", "cancun", "cancún"],
+        "morocco":       ["marrakech", "casablanca"],
+        "egypt":         ["cairo"],
+        "south africa":  ["cape town", "johannesburg"]
+      };
+      var regionKey = String((_tb && _tb.region) || "").toLowerCase().trim();
+      // Region might be the country name or a sub-region — check both directly
+      // and as a substring of any country key.
+      var preferred = majorGateways[regionKey];
+      if (!preferred) {
+        Object.keys(majorGateways).forEach(function(k){
+          if (!preferred && (regionKey.indexOf(k) >= 0 || k.indexOf(regionKey) >= 0)) {
+            preferred = majorGateways[k];
+          }
+        });
+      }
+      if (preferred && preferred.length) {
+        // Walk the preferred list in order — first matching kept candidate wins
+        for (var pi = 0; pi < preferred.length && !entryCand; pi++) {
+          var prefN = preferred[pi];
+          kept.forEach(function(c){
+            if (entryCand) return;
+            var cN = _normPlaceName(c.place);
+            if (cN === prefN || cN.indexOf(prefN) >= 0 || prefN.indexOf(cN) >= 0) entryCand = c;
+          });
+        }
+      }
     }
     // Last resort — first kept candidate overall
     if (!entryCand && kept.length > 0) entryCand = kept[0];
@@ -10777,6 +11826,18 @@ function orderKeptCandidates(kept, mdcItems, entryCity, exitCity){
   var exitCand = null;
   if (exitN) {
     remaining.forEach(function(c){ if (!exitCand && matchesName(c, exitN) && c !== entryCand) exitCand = c; });
+  }
+  // Round CP.1: if no exit was specified AND we inferred an entry from the
+  // major-gateway fallback, assume round trip — the user almost certainly
+  // departs from the same gateway. This avoids the trip just trailing off
+  // at "wherever the last stop is."
+  if (!exitCand && !exitN && entryInferred && entryCand) {
+    // The exit IS the entry city; we'll add an exit stop to round-trip back
+    // there. Don't reuse the same candidate object since we want a distinct
+    // exit destination at the end. Leave exitCand null — the existing
+    // exit-stop synthesis in buildFromCandidates handles inserting the exit
+    // city as a 1-night buffer when entryCity is set.
+    if (!_tb.tbExit) _tb.tbExit = entryCand.place;
   }
 
   // Place entry (if found and not in a block)
@@ -10853,6 +11914,125 @@ function orderKeptCandidates(kept, mdcItems, entryCity, exitCity){
       }
     }
   });
+
+  // Round CN: geographic re-order pass. After all the rule-based ordering
+  // (entry → blocks → free → exit, then condition bunching, then recovery),
+  // there's still often a zigzag because the "free" middle destinations are
+  // in whatever order Max suggested them. Apply nearest-neighbor on those
+  // to untangle the path. Route blocks stay glued (their endpoints must be
+  // adjacent), entry stays at index 0, exit stays at the last index. Only
+  // truly free single-destination items get reordered, so we don't break
+  // any of the constraints the earlier passes set up.
+  ordered = (function _geoReorderOrdered(){
+    if (ordered.length < 4) return ordered; // 1-3 destinations: nothing to optimize
+    function getCoord(c){
+      if (!c) return null;
+      if (typeof c.lat === "number" && typeof c.lng === "number" && isFinite(c.lat) && isFinite(c.lng)) return [c.lat, c.lng];
+      if (typeof getCityCenter === "function") {
+        var ctr = getCityCenter(c.place);
+        if (ctr && isFinite(ctr[0]) && isFinite(ctr[1])) return ctr;
+      }
+      return null;
+    }
+    function distSq(a, b){
+      if (!a || !b) return Infinity;
+      var dLat = a[0] - b[0], dLng = a[1] - b[1];
+      return dLat*dLat + dLng*dLng;
+    }
+    // Identify which candidates are part of a route block (must keep
+    // adjacency to their pair) — those are NOT movable as singletons.
+    var inRouteBlock = {};
+    routeBlocks.forEach(function(b){
+      b.candidates.forEach(function(c){ inRouteBlock[c.id] = b; });
+    });
+    // Walk `ordered` and group consecutive items into "sequences": each
+    // sequence is either a single free candidate or a route-block run.
+    var sequences = [];
+    var k = 0;
+    while (k < ordered.length) {
+      var cur = ordered[k];
+      if (inRouteBlock[cur.id]) {
+        // Gather all consecutive members of THIS block
+        var block = inRouteBlock[cur.id];
+        var seq = [cur];
+        k++;
+        while (k < ordered.length && inRouteBlock[ordered[k].id] === block) {
+          seq.push(ordered[k]);
+          k++;
+        }
+        sequences.push({items: seq, locked: true});
+      } else {
+        sequences.push({items: [cur], locked: false});
+        k++;
+      }
+    }
+    if (sequences.length < 4) return ordered; // entry + a few + exit — not enough to reorder
+    // Anchors: first sequence stays first (entry), last stays last (exit).
+    var entrySeq = sequences[0];
+    var exitSeq = sequences[sequences.length - 1];
+    var middle = sequences.slice(1, -1);
+    if (middle.length < 2) return ordered; // nothing meaningful to reorder
+    // Compute representative coord for each middle sequence (centroid).
+    middle.forEach(function(s){
+      var coords = s.items.map(getCoord).filter(Boolean);
+      if (!coords.length) { s.coord = null; return; }
+      var lat = 0, lng = 0;
+      coords.forEach(function(c){ lat += c[0]; lng += c[1]; });
+      s.coord = [lat / coords.length, lng / coords.length];
+    });
+    // Last-item coord on the entry sequence (where we'd be leaving from)
+    var lastEntryCoord = (function(){
+      for (var i = entrySeq.items.length - 1; i >= 0; i--) {
+        var c = getCoord(entrySeq.items[i]);
+        if (c) return c;
+      }
+      return null;
+    })();
+    // First-item coord on the exit sequence (where we'd be heading to)
+    var firstExitCoord = (function(){
+      for (var i = 0; i < exitSeq.items.length; i++) {
+        var c = getCoord(exitSeq.items[i]);
+        if (c) return c;
+      }
+      return null;
+    })();
+    // Nearest-neighbor: starting from the entry's last coord, pick the
+    // unvisited middle sequence whose centroid is closest, repeat.
+    var reordered = [];
+    var pool = middle.slice();
+    var current = lastEntryCoord;
+    while (pool.length) {
+      // If we're on the last pool item, prefer one near the exit so the
+      // last segment doesn't backtrack.
+      var bestIdx = 0;
+      var bestDist = Infinity;
+      for (var i = 0; i < pool.length; i++) {
+        var p = pool[i];
+        if (!p.coord) continue;
+        var d = distSq(current, p.coord);
+        // For the last placement, weight in distance-to-exit so we don't
+        // strand a far destination right before the exit.
+        if (pool.length === 1 && firstExitCoord) {
+          d = d * 0.6 + distSq(p.coord, firstExitCoord) * 0.4;
+        }
+        if (d < bestDist) { bestDist = d; bestIdx = i; }
+      }
+      var picked = pool.splice(bestIdx, 1)[0];
+      reordered.push(picked);
+      if (picked.coord) current = picked.coord;
+    }
+    // Reassemble
+    var out = [];
+    entrySeq.items.forEach(function(c){ out.push(c); });
+    reordered.forEach(function(s){ s.items.forEach(function(c){ out.push(c); }); });
+    exitSeq.items.forEach(function(c){ out.push(c); });
+    // Note in reasoning if the order actually changed
+    var orderChanged = out.some(function(c, i){ return c !== ordered[i]; });
+    if (orderChanged) {
+      reasoning.push("Reordered the middle of the trip to flow geographically — fewer long backtracks between stops. Route adjacencies kept intact.");
+    }
+    return out;
+  })();
 
   return {
     ordered: ordered,
@@ -11667,30 +12847,60 @@ function mergeEssentialsIntoSuggestions(dest,essentials){
   push("pharmacy",essentials.pharmacies);
 }
 
+// Round CL: Nominatim circuit breaker. The free Nominatim service rate-
+// limits at ~1 req/sec; bursts get 429s and the IP can be blacklisted.
+// CORS-blocked fetches also fail fast from localhost. Once we hit either,
+// stop hammering for the rest of the session — the user can refresh the
+// page to retry. Saves their browser from getting blocklisted and avoids
+// 200 console errors per page.
+var _nominatimBlocked = false;
+function _markNominatimBlocked(reason){
+  if (_nominatimBlocked) return;
+  _nominatimBlocked = true;
+  console.warn("[Max] Nominatim disabled for session: " + reason);
+}
+
 // Geocode any essential-type suggestion that's still approx via Nominatim (throttled).
 async function geocodeEssentials(dest){
+  if (_nominatimBlocked) return; // skip silently
   var types=["atm","bank","grocery","tourist-info","pharmacy"];
   var pending=(dest.suggestions||[]).filter(function(s){
     return types.indexOf(s.type)>-1 && s.approx;
   });
+  var didAnyChange = false;
   for(var i=0;i<pending.length;i++){
+    if (_nominatimBlocked) break;
     var s=pending[i];
     try{
-      await new Promise(function(r){setTimeout(r,400);});
+      // Round CL: bumped from 400ms to 1100ms — Nominatim rate limits at
+      // 1 req/sec, sub-second bursts get 429s.
+      await new Promise(function(r){setTimeout(r,1100);});
       var q=encodeURIComponent(s.n+', '+dest.place);
       var r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+q,{headers:{'Accept-Language':'en'}});
+      if (r.status === 429 || r.status === 403) {
+        _markNominatimBlocked("rate-limited (HTTP " + r.status + ")");
+        break;
+      }
+      if (!r.ok) continue;
       var res=await r.json();
       if(res.length){
         s.lat=parseFloat(res[0].lat);
         s.lng=parseFloat(res[0].lon);
         s.approx=false;
+        didAnyChange = true;
       }
-    }catch(ge){/* keep approx */}
+    }catch(ge){
+      // CORS or network error — also a circuit-breaker condition
+      _markNominatimBlocked("fetch failed (likely CORS or network)");
+      break;
+    }
     // Update map silently as coords arrive
     if(i%3===2&&activeDest===dest.id) updateMainMap();
   }
   if(activeDest===dest.id) updateMainMap();
-  autoSave();
+  // Only save if we actually changed something — avoids triggering a
+  // Quota error save when no coords were resolved.
+  if (didAnyChange) autoSave();
 }
 
 async function generateCityData(place,destId,_isAutoRetry){
@@ -11701,15 +12911,24 @@ async function generateCityData(place,destId,_isAutoRetry){
   _generatedCityData[key]={loading:true};
 
   // First: geocode the city via Nominatim so map shows correct location even with no API key
-  try{
-    var geoResp=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(place),{headers:{'Accept-Language':'en'}});
-    var geoData=await geoResp.json();
-    if(geoData.length&&_generatedCityData[key]){
-      _generatedCityData[key].cityCenter=[parseFloat(geoData[0].lat),parseFloat(geoData[0].lon)];
-      _generatedCityData[key].loading=true; // still loading full data
-      if(activeDest===destId&&_leftMode==='dest') updateMainMap();
+  // Round CL.5: gate behind the same circuit breaker as geocodeEssentials.
+  if(!_nominatimBlocked){
+    try{
+      var geoResp=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(place),{headers:{'Accept-Language':'en'}});
+      if (geoResp.status === 429 || geoResp.status === 403) {
+        _markNominatimBlocked("rate-limited (HTTP " + geoResp.status + ")");
+      } else if (geoResp.ok) {
+        var geoData=await geoResp.json();
+        if(geoData.length&&_generatedCityData[key]){
+          _generatedCityData[key].cityCenter=[parseFloat(geoData[0].lat),parseFloat(geoData[0].lon)];
+          _generatedCityData[key].loading=true; // still loading full data
+          if(activeDest===destId&&_leftMode==='dest') updateMainMap();
+        }
+      }
+    }catch(e){
+      _markNominatimBlocked("fetch failed (likely CORS or network)");
     }
-  }catch(e){ /* geocode failed — continue anyway */ }
+  }
 
   showSaveStatus('Max is generating '+place+' data\u2026',60000);
 
@@ -11819,9 +13038,13 @@ async function generateCityData(place,destId,_isAutoRetry){
     // with confidence — Tirano has landed in Africa, etc. Geocode the place,
     // and if the LLM's guess is more than ~300km off the Nominatim result
     // (or obviously bogus — near 0,0, non-finite), override with Nominatim.
+    // Round CL.5: skip if circuit breaker is tripped.
+    if(_nominatimBlocked){ /* keep LLM coords as-is */ } else
     try{
       var rq = place + ((trip && trip.brief && trip.brief.region) ? ", " + trip.brief.region : "");
       var r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(rq),{headers:{'Accept-Language':'en'}});
+      if (r.status === 429 || r.status === 403) { _markNominatimBlocked("rate-limited (HTTP " + r.status + ")"); throw new Error("blocked"); }
+      if (!r.ok) throw new Error("not ok");
       var res=await r.json();
       if(res && res.length){
         var nLat = parseFloat(res[0].lat), nLon = parseFloat(res[0].lon);
@@ -11844,12 +13067,20 @@ async function generateCityData(place,destId,_isAutoRetry){
     }catch(ge){}
 
     // Nominatim: geocode sights in background (throttled)
-    if(data.sights){
+    // Round CL.5: skip the entire sight-geocoding loop if the circuit
+    // breaker is tripped. The LLM-supplied lat/lng on each sight is good
+    // enough; Nominatim is a polish-pass.
+    if(data.sights && !_nominatimBlocked){
       for(var i=0;i<Math.min(data.sights.length,8);i++){
+        if(_nominatimBlocked) break;
         if(data.sights[i].lat&&data.sights[i].lng)continue;
         try{
-          await new Promise(function(res){setTimeout(res,350);});
+          // Round CL.5: bumped 350ms → 1100ms to respect Nominatim's 1 req/sec
+          // rate limit.
+          await new Promise(function(res){setTimeout(res,1100);});
           var sr=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(data.sights[i].name+', '+place),{headers:{'Accept-Language':'en'}});
+          if (sr.status === 429 || sr.status === 403) { _markNominatimBlocked("rate-limited (HTTP " + sr.status + ")"); break; }
+          if (!sr.ok) continue;
           var sres=await sr.json();
           if(sres.length){
             data.sights[i].lat=parseFloat(sres[0].lat);data.sights[i].lng=parseFloat(sres[0].lon);
@@ -11860,7 +13091,10 @@ async function generateCityData(place,destId,_isAutoRetry){
               if(ms){ms.lat=data.sights[i].lat;ms.lng=data.sights[i].lng;}
             }
           }
-        }catch(ge){}
+        }catch(ge){
+          _markNominatimBlocked("fetch failed (likely CORS or network)");
+          break;
+        }
       }
       // Final map update with geocoded sight pins
       if(activeDest===destId&&_leftMode==='dest') updateMainMap();
@@ -14400,6 +15634,449 @@ function showMoveDestDialog(dest){
   document.body.appendChild(overlay);
 }
 
+// Round CP: generate a Max-voiced narrative paragraph for each destination
+// in the trip, throttled 2 at a time. Cached on dest.narrativeText so
+// subsequent renders skip generation. Re-renders the trip view on each
+// completion so the user sees text fade in one destination at a time
+// rather than all-at-once after a long wait.
+async function _generateMissingNarratives(){
+  if (!trip || !trip.destinations || !trip.destinations.length) return;
+  if (window._narrativesInFlight) return; // guard against double-fire
+  var pending = trip.destinations.filter(function(d){ return !d.narrativeText && d.place; });
+  if (!pending.length) return;
+  window._narrativesInFlight = true;
+  var queue = pending.slice();
+  var inFlight = 0;
+  var LIMIT = 2;
+  function pump(){
+    while (inFlight < LIMIT && queue.length) {
+      var d = queue.shift();
+      inFlight++;
+      _generateOneNarrative(d).catch(function(){}).then(function(){
+        inFlight--;
+        // Re-render only if still on trip view + still in story mode
+        if (typeof drawTripMode === "function" && _leftMode === "trip" && trip.viewMode === "story") {
+          try { drawTripMode(); } catch(_){}
+        }
+        if (queue.length) pump();
+        else if (inFlight === 0) window._narrativesInFlight = false;
+      });
+    }
+  }
+  pump();
+}
+
+async function _generateOneNarrative(dest){
+  if (!dest || dest.narrativeText) return;
+  // Round CQ.1: check shared place cache first — if the user already
+  // expanded this place in the picker, reuse that text.
+  if (window._placeNarrativeCache && window._placeNarrativeCache[dest.place.toLowerCase()]) {
+    dest.narrativeText = window._placeNarrativeCache[dest.place.toLowerCase()];
+    if (typeof autoSave === "function") autoSave();
+    return;
+  }
+  var events = (dest.attachedEvents || []).filter(function(ev){ return ev && ev.name && ev.name !== "__manual__"; });
+  var dayTrips = (dest.dayTrips || []);
+  var text = await _generatePlaceNarrative(dest.place, {events: events.map(function(e){return e.name;}), dayTrips: dayTrips.map(function(d){return d.place;}), nights: dest.nights, dateFrom: dest.dateFrom, dateTo: dest.dateTo});
+  if (text) {
+    dest.narrativeText = text;
+    if (typeof autoSave === "function") autoSave();
+  }
+}
+
+// Round CT: generate 3-5 specific things-to-do at a place. Cached on
+// window._placeWhatToDoCache so the picker's "?" popup doesn't re-prompt.
+// Returns an array of { what, where } strings, or [] on failure.
+async function _generatePlaceWhatToDo(placeName, ctx){
+  if (!placeName) return [];
+  if (!window._placeWhatToDoCache) window._placeWhatToDoCache = {};
+  var key = String(placeName).toLowerCase();
+  if (window._placeWhatToDoCache[key]) return window._placeWhatToDoCache[key];
+  ctx = ctx || {};
+  var prompt = "You are Max — speaking as a well-traveled friend.\n\n"
+    + "Suggest 4 specific, named things a traveler should consider doing in " + placeName + ".\n"
+    + (ctx.events && ctx.events.length ? "Context: their trip already includes " + ctx.events.join(", ") + ". Don't duplicate those.\n" : "")
+    + (typeof _briefPersonalContext === "function" ? _briefPersonalContext() : "")
+    + "\n"
+    + "Each suggestion must be:\n"
+    + "- A specific named thing — a museum, a viewpoint, a route, a restaurant, a single act (\"climb to X for sunset,\" \"walk the Y promenade at dusk,\" \"order Z at place W\"). Not a category.\n"
+    + "- One short line per suggestion. No flowery language, no \"don't miss,\" no \"must-see,\" no \"hidden gem.\"\n"
+    + "- Where possible, mention a neighborhood, district, or address fragment.\n\n"
+    + "Return ONLY a JSON array of objects (no markdown):\n"
+    + '[{"what":"Climb the south tower of the Grossmünster","where":"Old Town, near Limmatquai"}, ...]';
+  try {
+    var text = await callMax([{role: "user", content: prompt}], 600, 25000);
+    var cleaned = text.replace(/```json|```/g, "").trim();
+    var first = cleaned.indexOf("["), last = cleaned.lastIndexOf("]");
+    if (first > -1 && last > -1) cleaned = cleaned.substring(first, last + 1);
+    var items = JSON.parse(cleaned);
+    if (!Array.isArray(items)) return [];
+    items = items.filter(function(it){ return it && it.what; });
+    window._placeWhatToDoCache[key] = items;
+    return items;
+  } catch(e) {
+    console.warn("[Max] what-to-do gen failed for " + placeName + ":", e && e.message);
+    return [];
+  }
+}
+
+// Round CQ.1: shared narrative generator. Used by both the trip view's
+// Story mode and the picker's "?" info button. Caches in
+// window._placeNarrativeCache so a place generated once is available
+// everywhere. Context is optional — if events/dayTrips/dates aren't
+// known (picker phase), the prompt still works.
+async function _generatePlaceNarrative(placeName, ctx){
+  if (!placeName) return "";
+  if (!window._placeNarrativeCache) window._placeNarrativeCache = {};
+  var key = String(placeName).toLowerCase();
+  if (window._placeNarrativeCache[key]) return window._placeNarrativeCache[key];
+  ctx = ctx || {};
+  var nightLine = "";
+  if (ctx.nights) {
+    nightLine = "The traveler is spending " + ctx.nights + " night" + (ctx.nights !== 1 ? "s" : "") + " in " + placeName
+      + (ctx.dateFrom ? " from " + ctx.dateFrom + " to " + ctx.dateTo : "")
+      + ".";
+  } else {
+    nightLine = "The traveler is considering " + placeName + " for their trip.";
+  }
+  var prompt = "You are Max — speaking as the well-traveled friend, in your own voice.\n\n"
+    + nightLine + "\n"
+    + (ctx.events && ctx.events.length ? "What's anchoring this stop: " + ctx.events.join(", ") + ".\n" : "")
+    + (ctx.dayTrips && ctx.dayTrips.length ? "Day trips from here: " + ctx.dayTrips.join(", ") + ".\n" : "")
+    + (typeof _briefPersonalContext === "function" ? _briefPersonalContext() : "")
+    + "\n"
+    + "Write a single paragraph of 3-4 sentences that:\n"
+    + "1. Opens with a specific historical fact about " + placeName + " — a date, a name, a decision that shaped it. NOT trivia; something that explains why the place is what it is today.\n"
+    + "2. Describes what the traveler will physically notice when they're there — light, scale, the look of a particular street or church, a sound, a smell from a particular industry.\n"
+    + "3. Points to one specific thing worth standing in front of — a building, a viewpoint, an object — and what to look for in it.\n\n"
+    + "Constraints:\n"
+    + "- Don't start with the city name. Don't repeat the city name in the first 8 words.\n"
+    + "- No 'you'll feel' or 'you'll love' — describe what's there, not how the traveler will react.\n"
+    + "- No empty modifiers: 'charming,' 'iconic,' 'must-see,' 'vibrant,' 'hidden gem,' 'magical.'\n"
+    + "- No bullet points, no markdown, no headings — just prose.\n"
+    + "- Keep it to 3-4 sentences total. End with an open observation, not a summary.";
+  try {
+    var text = await callMax([{role: "user", content: prompt}], 400, 25000);
+    if (text && text.trim()) {
+      var clean = text.trim();
+      window._placeNarrativeCache[key] = clean;
+      return clean;
+    }
+  } catch(e) {
+    console.warn("[Max] narrative gen failed for " + placeName + ":", e && e.message);
+  }
+  return "";
+}
+
+// Round CQ.2: floating popup near the clicked button instead of inline
+// expansion (which made the picker's left column awkwardly wide). Click
+// outside, the ×, or Esc to dismiss.
+async function togglePlaceNarrative(placeName, anchor){
+  if (!placeName) return;
+  // Toggle off if a popup for this same place is already open
+  var existing = document.getElementById("tb-narr-popup");
+  if (existing) {
+    var existingPlace = existing.getAttribute("data-place");
+    existing.remove();
+    if (existingPlace === placeName) return;
+  }
+  var key = String(placeName).toLowerCase();
+  var popup = document.createElement("div");
+  popup.id = "tb-narr-popup";
+  popup.setAttribute("data-place", placeName);
+  popup.style.cssText = "position:absolute;background:#fff;border:1px solid #d8d4c8;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,0.18);z-index:10000;width:360px;max-width:calc(100vw - 24px);font-family:inherit;overflow:hidden;";
+  var hdr = document.createElement("div");
+  hdr.style.cssText = "display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid #ede8db;background:#faf6f1;";
+  var title = document.createElement("div");
+  title.style.cssText = "font-size:13px;font-weight:700;color:#1a1a1a;";
+  title.textContent = placeName;
+  var closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.textContent = "×";
+  closeBtn.style.cssText = "font-size:18px;line-height:1;color:#888;background:none;border:none;cursor:pointer;font-family:inherit;padding:0 4px;";
+  closeBtn.onclick = function(){ popup.remove(); };
+  hdr.appendChild(title);
+  hdr.appendChild(closeBtn);
+  popup.appendChild(hdr);
+  var body = document.createElement("div");
+  body.style.cssText = "padding:12px 14px;font-size:13px;color:#333;line-height:1.65;font-family:Georgia,serif;max-height:60vh;overflow-y:auto;";
+  popup.appendChild(body);
+  function _renderInto(el, text){
+    el.innerHTML = text.split(/\n\n+/).map(function(p){return '<p style="margin:0 0 10px;">' + p.replace(/\n/g, '<br>') + '</p>';}).join("");
+  }
+  document.body.appendChild(popup);
+  // Position near the anchor, with viewport clamping
+  if (anchor && anchor.getBoundingClientRect) {
+    var rect = anchor.getBoundingClientRect();
+    var popupW = popup.offsetWidth;
+    var popupH = popup.offsetHeight;
+    var winW = window.innerWidth, winH = window.innerHeight;
+    var left = rect.left + window.scrollX;
+    if (left + popupW > window.scrollX + winW - 12) left = window.scrollX + winW - popupW - 12;
+    if (left < window.scrollX + 12) left = window.scrollX + 12;
+    var top = rect.bottom + window.scrollY + 6;
+    if (top + popupH > window.scrollY + winH - 12 && rect.top > popupH + 12) {
+      top = rect.top + window.scrollY - popupH - 6;
+    }
+    popup.style.left = left + "px";
+    popup.style.top = top + "px";
+  } else {
+    popup.style.left = "50%";
+    popup.style.top = "30%";
+    popup.style.transform = "translateX(-50%)";
+  }
+  // Dismiss handlers
+  setTimeout(function(){
+    var dismiss = function(e){
+      if (!popup.contains(e.target) && popup.parentNode) {
+        popup.remove();
+        document.removeEventListener("click", dismiss, true);
+      }
+    };
+    document.addEventListener("click", dismiss, true);
+  }, 50);
+  var onKey = function(e){
+    if (e.key === "Escape") {
+      popup.remove();
+      document.removeEventListener("keydown", onKey);
+    }
+  };
+  document.addEventListener("keydown", onKey);
+  // Round CT: popup body has two sections — narrative paragraph + "What
+  // to do here" suggestions. Both are independently cached and rendered
+  // as soon as their data arrives, so the user sees the narrative first
+  // and the activity list fills in shortly after.
+  function _renderFull(text, todoItems){
+    var html = "";
+    if (text) {
+      html += text.split(/\n\n+/).map(function(p){return '<p style="margin:0 0 12px;">' + p.replace(/\n/g, '<br>') + '</p>';}).join("");
+    } else {
+      html += '<p style="margin:0 0 12px;color:#999;font-style:italic;">Max couldn\'t generate a description right now.</p>';
+    }
+    if (todoItems && todoItems.length) {
+      html += '<div style="margin-top:14px;padding-top:12px;border-top:1px dashed #d8d4c8;">';
+      html += '<div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:8px;font-family:-apple-system,sans-serif;">What to do here</div>';
+      html += '<ul style="list-style:none;margin:0;padding:0;font-family:-apple-system,sans-serif;">';
+      todoItems.forEach(function(it){
+        var what = String(it.what || "").trim();
+        var where = String(it.where || "").trim();
+        if (!what) return;
+        html += '<li style="font-size:12px;color:#333;line-height:1.5;margin-bottom:7px;padding-left:14px;position:relative;">'
+          + '<span style="position:absolute;left:0;top:0;color:#1a5fa8;">·</span>'
+          + what
+          + (where ? '<span style="color:#888;font-size:10.5px;display:block;margin-top:1px;">' + where + '</span>' : '')
+          + '</li>';
+      });
+      html += '</ul>';
+      html += '</div>';
+    }
+    body.innerHTML = html;
+  }
+  var cachedNarr = (window._placeNarrativeCache || {})[key];
+  var cachedTodo = (window._placeWhatToDoCache || {})[key];
+  if (cachedNarr && cachedTodo) { _renderFull(cachedNarr, cachedTodo); return; }
+  body.innerHTML = '<span class="max-thinking" style="color:#888;font-style:italic;">Max is writing about ' + placeName + '…</span>';
+  var ctx = {};
+  try {
+    var items = (_tb && _tb.placeActivities) || [];
+    var matchingActs = [];
+    items.forEach(function(item){
+      (item.requiredPlaces || []).forEach(function(p){
+        if (p && p.place && p.place.toLowerCase() === key) matchingActs.push(item.name);
+      });
+    });
+    if (matchingActs.length) ctx.events = matchingActs.slice(0, 5);
+  } catch(_){}
+  // Fire both calls in parallel
+  var narrPromise = cachedNarr ? Promise.resolve(cachedNarr) : _generatePlaceNarrative(placeName, ctx);
+  var todoPromise = cachedTodo ? Promise.resolve(cachedTodo) : _generatePlaceWhatToDo(placeName, ctx);
+  // Render the narrative as soon as it's ready
+  var narrText = "";
+  var todoItems = [];
+  var narrDone = false, todoDone = false;
+  function _maybeRender(){
+    if (!document.body.contains(popup)) return;
+    if (narrDone || todoDone) _renderFull(narrText, todoDone ? todoItems : null);
+  }
+  narrPromise.then(function(t){ narrText = t || ""; narrDone = true; _maybeRender(); }).catch(function(){ narrDone = true; _maybeRender(); });
+  todoPromise.then(function(items){ todoItems = items || []; todoDone = true; _maybeRender(); }).catch(function(){ todoDone = true; _maybeRender(); });
+}
+
+// Round CO.3: floating menu shown when a day-trip chip is clicked. Lists
+// "Add to Day 1...N" (or "Move to Day N" if already placed) plus a
+// "Remove from itinerary" option if placed, plus an "Ungroup" option.
+function openDayTripMenu(anchor, hubDest, dayTripIdx, dayTripData, alreadyOnDay){
+  // Remove any existing menu first
+  var existing = document.getElementById("daytrip-menu");
+  if (existing) existing.remove();
+  var menu = document.createElement("div");
+  menu.id = "daytrip-menu";
+  menu.style.cssText = "position:absolute;background:#fff;border:1px solid #d8c4e8;border-radius:7px;box-shadow:0 6px 24px rgba(0,0,0,0.14);z-index:5000;padding:5px 0;min-width:200px;font-family:inherit;";
+  // Position below the chip
+  var rect = anchor.getBoundingClientRect();
+  menu.style.left = (rect.left + window.scrollX) + "px";
+  menu.style.top = (rect.bottom + window.scrollY + 4) + "px";
+  // Header
+  var hdr = document.createElement("div");
+  hdr.style.cssText = "padding:6px 12px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#888;border-bottom:1px solid #f0e8f5;";
+  hdr.textContent = dayTripData.place;
+  menu.appendChild(hdr);
+  // Day options
+  (hubDest.days || []).forEach(function(day, dayIdx){
+    var item = document.createElement("button");
+    item.type = "button";
+    var isCur = (dayIdx === alreadyOnDay);
+    var dayLbl = day.lbl || ("Day " + (dayIdx+1));
+    item.textContent = isCur ? "✓ On Day " + (dayIdx+1) + " (" + dayLbl + ")" : "Add to Day " + (dayIdx+1) + " (" + dayLbl + ")";
+    item.style.cssText = "display:block;width:100%;text-align:left;padding:7px 12px;background:" + (isCur ? "#f4eef9" : "#fff") + ";border:none;color:" + (isCur ? "#5b3f8f" : "#333") + ";font-size:12px;font-family:inherit;cursor:pointer;";
+    item.onmouseover = function(){ item.style.background = "#f4eef9"; };
+    item.onmouseout = function(){ item.style.background = isCur ? "#f4eef9" : "#fff"; };
+    item.onclick = function(){
+      addDayTripToDay(hubDest, dayTripIdx, dayIdx);
+      menu.remove();
+    };
+    menu.appendChild(item);
+  });
+  // Remove from itinerary if placed
+  if (alreadyOnDay >= 0) {
+    var rm = document.createElement("button");
+    rm.type = "button";
+    rm.textContent = "Remove from itinerary (keep as day-trip option)";
+    rm.style.cssText = "display:block;width:100%;text-align:left;padding:7px 12px;background:#fff;border:none;border-top:1px solid #f0e8f5;color:#888;font-size:11.5px;font-family:inherit;cursor:pointer;";
+    rm.onmouseover = function(){ rm.style.background = "#fafafa"; };
+    rm.onmouseout = function(){ rm.style.background = "#fff"; };
+    rm.onclick = function(){
+      removeDayTripFromDay(hubDest, dayTripData.place);
+      menu.remove();
+    };
+    menu.appendChild(rm);
+  }
+  // Ungroup option
+  var ung = document.createElement("button");
+  ung.type = "button";
+  ung.textContent = "Restore as own destination";
+  ung.style.cssText = "display:block;width:100%;text-align:left;padding:7px 12px;background:#fff;border:none;border-top:1px solid #f0e8f5;color:#1a5fa8;font-size:11.5px;font-family:inherit;cursor:pointer;";
+  ung.onmouseover = function(){ ung.style.background = "#eef5ff"; };
+  ung.onmouseout = function(){ ung.style.background = "#fff"; };
+  ung.onclick = function(){
+    ungroupDayTrip(hubDest, dayTripIdx);
+    menu.remove();
+  };
+  menu.appendChild(ung);
+  // Click outside to dismiss
+  setTimeout(function(){
+    var dismiss = function(e){
+      if (!menu.contains(e.target)) {
+        menu.remove();
+        document.removeEventListener("click", dismiss);
+      }
+    };
+    document.addEventListener("click", dismiss);
+  }, 50);
+  document.body.appendChild(menu);
+}
+
+// Round CO.3: add a day trip as an item on a specific day. The day trip
+// becomes a sight-shaped item with type="daytrip" so it renders alongside
+// other items in the day-by-day schedule, but distinguishable.
+function addDayTripToDay(hubDest, dayTripIdx, dayIdx){
+  if (!hubDest || !hubDest.days || !hubDest.days[dayIdx]) return;
+  var dt = hubDest.dayTrips[dayTripIdx];
+  if (!dt) return;
+  // First, remove any prior placement of this day trip on any other day
+  hubDest.days.forEach(function(d){
+    if (!d.items) d.items = [];
+    d.items = d.items.filter(function(it){
+      return !(it && it.type === "daytrip" && it.dayTripPlace === dt.place);
+    });
+  });
+  // Add to chosen day
+  sidCtr++;
+  var newItem = {
+    id: "s" + sidCtr,
+    type: "daytrip",
+    n: dt.place + " (day trip)",
+    st: dt.place,
+    note: "Day trip · " + dt.distKm + "km from " + hubDest.place,
+    lat: dt.lat || null,
+    lng: dt.lng || null,
+    dayTripPlace: dt.place,
+    dayTripFrom: hubDest.place,
+    slot: "day"
+  };
+  if (!hubDest.days[dayIdx].items) hubDest.days[dayIdx].items = [];
+  hubDest.days[dayIdx].items.push(newItem);
+  if (typeof autoSave === "function") autoSave();
+  if (typeof drawDestMode === "function") drawDestMode(hubDest.id);
+}
+
+// Round CO.3: remove a placed day trip from its current day (without
+// ungrouping — it stays in dayTrips for future placement).
+function removeDayTripFromDay(hubDest, dayTripPlace){
+  if (!hubDest || !hubDest.days) return;
+  hubDest.days.forEach(function(d){
+    if (!d.items) return;
+    d.items = d.items.filter(function(it){
+      return !(it && it.type === "daytrip" && it.dayTripPlace === dayTripPlace);
+    });
+  });
+  if (typeof autoSave === "function") autoSave();
+  if (typeof drawDestMode === "function") drawDestMode(hubDest.id);
+}
+
+// Round CO: undo a day-trip clustering. Pulls a day trip out of its hub
+// and restores it as its own destination right after the hub. Reuses the
+// stored sourceNights (always 1 for now) and recomputes dates so the
+// rest of the trip slides forward.
+function ungroupDayTrip(hubDest, dtIdx){
+  if (!hubDest || !hubDest.dayTrips || dtIdx < 0 || dtIdx >= hubDest.dayTrips.length) return;
+  var dt = hubDest.dayTrips[dtIdx];
+  if (!confirm('Restore "' + dt.place + '" as its own destination?\n\nIt\'ll be inserted right after ' + hubDest.place + ' with ' + (dt.sourceNights || 1) + ' night(s). Other destinations\' dates will shift forward.')) return;
+  // Remove from hub's dayTrips
+  hubDest.dayTrips.splice(dtIdx, 1);
+  if (!hubDest.dayTrips.length) delete hubDest.dayTrips;
+  // Build a fresh destination from the day-trip record
+  destCtr++;
+  var newId = "d" + destCtr;
+  var nights = dt.sourceNights || 1;
+  var newDest = {
+    id: newId,
+    place: dt.place,
+    intent: dt.place + (dt.whyItFits ? " — " + dt.whyItFits.substring(0, 60) : ""),
+    dateFrom: hubDest.dateTo, // immediately after hub
+    dateTo: "",
+    nights: nights,
+    days: makeDays(newId, dt.place, dt.place, hubDest.dateTo, nights),
+    trackerItems: {booked: [], see: [], visited: []},
+    trackerCat: "booked",
+    storyState: "idle",
+    hotelBookings: [], generalBookings: [], locations: [],
+    execMode: false, todayItems: [], discoveredItems: [], suggestions: [],
+    attachedEvents: dt.attachedEvents || [],
+    lat: dt.lat || null,
+    lng: dt.lng || null
+  };
+  // Insert after the hub
+  var hubIdx = trip.destinations.indexOf(hubDest);
+  if (hubIdx < 0) hubIdx = 0;
+  trip.destinations.splice(hubIdx + 1, 0, newDest);
+  // Recompute all dates from the trip start
+  var startDate = trip.destinations[0].dateFrom;
+  if (startDate) {
+    var cur = new Date(startDate + "T12:00:00");
+    trip.destinations.forEach(function(d){
+      d.dateFrom = cur.toISOString().slice(0, 10);
+      var next = new Date(cur); next.setDate(next.getDate() + (d.nights || 0));
+      d.dateTo = next.toISOString().slice(0, 10);
+      d.days = makeDays(d.id, d.place, d.place, d.dateFrom, d.nights || 0);
+      cur = next;
+    });
+  }
+  if (typeof autoSave === "function") autoSave();
+  if (typeof drawTripMode === "function") drawTripMode();
+  if (typeof updateMainMap === "function") updateMainMap();
+}
+
 function executeMoveDest(dest,fromIdx,toIdx){
   if(fromIdx===toIdx) return;
   // 1. Move destination in array first
@@ -14488,6 +16165,433 @@ function executeMoveDest(dest,fromIdx,toIdx){
   updateMainMap();
 }
 
+// Round CQ: city typeahead on entry/exit inputs. Suggestions pulled from
+// _builtinGeo (the hardcoded major-city table). Prefix matches rank first,
+// substring matches second. Auto-attaches to inputs whose id matches
+// known patterns (tb-entry, tb-exit, tb-picker-entry, tb-picker-exit,
+// tm-entry-inp, tm-exit-inp). Helps catch typos like "Zuriczh" at input
+// time and reduces friction for users who type a partial city name.
+function _typeaheadCities(query, regionHint){
+  if (!query) return [];
+  var q = String(query).toLowerCase().trim();
+  if (!q) return [];
+  if (typeof _builtinGeo === "undefined") return [];
+  var inRegion = {};
+  // If we know the trip's region, prefer cities from that country
+  var rk = String(regionHint || "").toLowerCase().trim();
+  if (rk && typeof _builtinCountry !== "undefined") {
+    Object.keys(_builtinCountry).forEach(function(k){
+      if (String(_builtinCountry[k]).toLowerCase() === rk) inRegion[k] = true;
+    });
+  }
+  var matches = [];
+  Object.keys(_builtinGeo).forEach(function(key){
+    if (key.length < 2) return;
+    var label = (typeof _titleCaseCity === "function") ? _titleCaseCity(key) : key;
+    var rank = -1;
+    if (key === q) rank = 0;          // exact
+    else if (key.indexOf(q) === 0) rank = 1; // prefix
+    else if (key.indexOf(q) > -1) rank = 2;  // substring
+    else return;
+    // Bonus: in-region preferred
+    if (inRegion[key]) rank -= 0.5;
+    matches.push({key: key, label: label, rank: rank});
+  });
+  // Dedupe by display label (Zürich and Zurich both end up as "Zurich")
+  var seenLabels = {};
+  matches = matches.filter(function(m){
+    if (seenLabels[m.label]) return false;
+    seenLabels[m.label] = true;
+    return true;
+  });
+  matches.sort(function(a,b){ return a.rank - b.rank || a.label.localeCompare(b.label); });
+  return matches.slice(0, 6);
+}
+
+function _attachCityTypeahead(input){
+  if (!input || input._typeaheadAttached) return;
+  input._typeaheadAttached = true;
+  input.setAttribute("autocomplete", "off");
+  var dropdown = null;
+  var activeIdx = -1;
+  function close(){
+    if (dropdown) { dropdown.remove(); dropdown = null; }
+    activeIdx = -1;
+  }
+  function render(){
+    var q = input.value;
+    var regionHint = "";
+    try { regionHint = (_tb && _tb.region) || (trip && trip.brief && trip.brief.region) || ""; } catch(_){}
+    var matches = _typeaheadCities(q, regionHint);
+    if (!matches.length) { close(); return; }
+    if (!dropdown) {
+      dropdown = document.createElement("div");
+      dropdown.style.cssText = "position:absolute;background:#fff;border:1px solid #ccc;border-radius:5px;box-shadow:0 4px 14px rgba(0,0,0,0.15);z-index:9999;min-width:140px;max-width:240px;font-family:inherit;overflow:hidden;";
+      document.body.appendChild(dropdown);
+    }
+    dropdown.innerHTML = "";
+    matches.forEach(function(m, i){
+      var item = document.createElement("button");
+      item.type = "button";
+      item.textContent = m.label;
+      item.dataset.idx = i;
+      var bg = (i === activeIdx) ? "#eef5ff" : "#fff";
+      item.style.cssText = "display:block;width:100%;text-align:left;padding:6px 10px;background:" + bg + ";border:none;border-bottom:1px solid #f0f0f0;font-size:12px;color:#222;cursor:pointer;font-family:inherit;";
+      item.onmouseover = function(){ activeIdx = i; render(); };
+      item.onmousedown = function(e){
+        e.preventDefault(); // keep input focused
+        input.value = m.label;
+        input.dispatchEvent(new Event("input", {bubbles:true}));
+        input.dispatchEvent(new Event("change", {bubbles:true}));
+        close();
+      };
+      dropdown.appendChild(item);
+    });
+    var rect = input.getBoundingClientRect();
+    dropdown.style.left = (rect.left + window.scrollX) + "px";
+    dropdown.style.top = (rect.bottom + window.scrollY + 2) + "px";
+    dropdown.style.minWidth = rect.width + "px";
+  }
+  input.addEventListener("input", function(){ activeIdx = -1; render(); });
+  input.addEventListener("focus", function(){ if (input.value) render(); });
+  input.addEventListener("blur", function(){ setTimeout(close, 150); });
+  input.addEventListener("keydown", function(e){
+    if (!dropdown) return;
+    var items = dropdown.querySelectorAll("button");
+    if (e.key === "ArrowDown") { e.preventDefault(); activeIdx = Math.min(items.length - 1, activeIdx + 1); render(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); activeIdx = Math.max(0, activeIdx - 1); render(); }
+    else if (e.key === "Enter" && activeIdx >= 0) {
+      e.preventDefault();
+      items[activeIdx].dispatchEvent(new MouseEvent("mousedown"));
+    }
+    else if (e.key === "Escape") { close(); }
+  });
+}
+
+// Auto-attach typeahead to known city inputs as they appear in the DOM.
+(function _attachTypeaheadGlobally(){
+  var TYPEAHEAD_IDS = ["tb-entry", "tb-exit", "tb-picker-entry", "tb-picker-exit", "tm-entry-inp", "tm-exit-inp"];
+  function tryAttach(root){
+    if (!root || !root.querySelectorAll) return;
+    TYPEAHEAD_IDS.forEach(function(id){
+      var el = root.querySelector ? root.querySelector("#" + id) : null;
+      if (el && !el._typeaheadAttached) _attachCityTypeahead(el);
+    });
+  }
+  if (typeof MutationObserver !== "undefined") {
+    var obs = new MutationObserver(function(muts){
+      muts.forEach(function(m){
+        if (m.addedNodes && m.addedNodes.length) {
+          m.addedNodes.forEach(function(n){
+            if (n.nodeType === 1) {
+              tryAttach(n);
+              if (TYPEAHEAD_IDS.indexOf(n.id) >= 0) _attachCityTypeahead(n);
+            }
+          });
+        }
+      });
+    });
+    function attachObs(){
+      if (document.body) obs.observe(document.body, {childList:true, subtree:true});
+      else setTimeout(attachObs, 50);
+    }
+    attachObs();
+  }
+  // Initial pass once DOM ready
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", function(){ tryAttach(document.body); });
+  } else {
+    tryAttach(document.body);
+  }
+})();
+
+// Round CL.1: enable spellcheck on text inputs and textareas globally via
+// a MutationObserver. Browsers default text inputs to spellcheck=false in
+// most cases, so typos like "Zuriczh" sail through unflagged. We turn it
+// on for everything that takes free text — text inputs, search inputs,
+// untyped inputs, and textareas. We skip type="time", type="email",
+// type="number", etc. where spellcheck makes no sense.
+(function _enableSpellcheckGlobally(){
+  if (typeof window === "undefined" || !window.MutationObserver) return;
+  function _shouldSpellcheck(el){
+    if (!el) return false;
+    var tag = (el.tagName || "").toLowerCase();
+    if (tag === "textarea") return true;
+    if (tag !== "input") return false;
+    var t = (el.getAttribute("type") || "text").toLowerCase();
+    return t === "text" || t === "search" || t === "" || t === "url";
+  }
+  function _apply(root){
+    if (!root || !root.querySelectorAll) return;
+    root.querySelectorAll("input, textarea").forEach(function(el){
+      if (_shouldSpellcheck(el) && !el.hasAttribute("spellcheck")) {
+        el.setAttribute("spellcheck", "true");
+      }
+    });
+  }
+  // Run once at startup once DOM is ready
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", function(){ _apply(document.body); });
+  } else {
+    _apply(document.body);
+  }
+  // And on every subsequent DOM mutation, catch newly-added inputs.
+  var obs = new MutationObserver(function(muts){
+    muts.forEach(function(m){
+      if (m.addedNodes && m.addedNodes.length) {
+        m.addedNodes.forEach(function(n){
+          if (n.nodeType === 1) {
+            // Element — apply to it and its descendants
+            if (n.matches && (n.tagName.toLowerCase() === "input" || n.tagName.toLowerCase() === "textarea") && _shouldSpellcheck(n)) {
+              if (!n.hasAttribute("spellcheck")) n.setAttribute("spellcheck", "true");
+            }
+            _apply(n);
+          }
+        });
+      }
+    });
+  });
+  // Defer observer hookup until body exists.
+  function _attachObs(){
+    if (document.body) obs.observe(document.body, {childList:true, subtree:true});
+    else setTimeout(_attachObs, 50);
+  }
+  _attachObs();
+})();
+
+// Round CK.4: mode-aware labels for arrival/departure chips. The user's
+// transport mode (_tb.entryMode / exitMode, or trip.brief.entryMode /
+// exitMode) drives the icon, verb, and chip title. For flights, "Lands"
+// reads naturally; for everything else, "Arrives" is correct. Title also
+// shifts so "Train home" appears when the user is taking the train back,
+// not "Flight home." Falls back to flight-style if the mode is unset or
+// unrecognized — most trips do use planes for entry/exit, so the default
+// is reasonable.
+function _modeLabels(mode, side){
+  // side is "arrival" or "departure"
+  var m = String(mode || "").toLowerCase();
+  // Round CK.5: chip header is now uniformly "Departure" — Neal preferred
+  // the simpler word over "Flight home" / "Train home" etc. Mode still
+  // drives the icon and the verb on the time line.
+  var labels = {
+    fly:   { icon: "✈️",  noun: "flight", arriveVerb: "Lands",   homeWord: "Departure" },
+    train: { icon: "🚂",  noun: "train",  arriveVerb: "Arrives", homeWord: "Departure" },
+    rail:  { icon: "🚂",  noun: "train",  arriveVerb: "Arrives", homeWord: "Departure" },
+    drive: { icon: "🚗",  noun: "drive",  arriveVerb: "Arrives", homeWord: "Departure" },
+    car:   { icon: "🚗",  noun: "drive",  arriveVerb: "Arrives", homeWord: "Departure" },
+    bus:   { icon: "🚌",  noun: "bus",    arriveVerb: "Arrives", homeWord: "Departure" },
+    boat:  { icon: "⛴️",  noun: "boat",   arriveVerb: "Arrives", homeWord: "Departure" },
+    ferry: { icon: "⛴️",  noun: "ferry",  arriveVerb: "Arrives", homeWord: "Departure" }
+  };
+  var L = labels[m] || labels.fly;
+  return {
+    icon: L.icon,
+    arrivalTitle: "Arrival " + L.noun,           // chip header on arrival day
+    departureTitle: L.homeWord,                  // chip header on departure day
+    arrivalVerb: L.arriveVerb,                   // "Lands" or "Arrives"
+    departureVerb: "Departs"                     // always "Departs"
+  };
+}
+
+// Round CK.1.1: format a 24-hour HH:MM string (from <input type="time">) to
+// a human-friendly 12-hour string with AM/PM. Returns the input unchanged if
+// it's not parseable as HH:MM (e.g. legacy free-text values like "6:30 pm").
+function _fmtTime12h(s){
+  if (!s) return "";
+  var m = String(s).match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return s;
+  var h = parseInt(m[1], 10);
+  var mm = m[2];
+  if (h < 0 || h > 23) return s;
+  var period = h >= 12 ? "PM" : "AM";
+  var h12 = h % 12; if (h12 === 0) h12 = 12;
+  return h12 + ":" + mm + " " + period;
+}
+
+// Round CK: helper to render one column of the arrival/departure logistics
+// form. side is "entry" or "exit"; ctx is "trip" (writes to trip.brief) or
+// "picker" (writes to _tb). All inputs use inline handlers so this works
+// both in the picker and the trip view without setTimeout wiring.
+// Round CK.7: mode pills (fly/train/drive/bus/boat) at the top of each
+// column so the user picks how they're getting there/leaving directly on
+// the logistics form. Driven by _tb.entryMode / exitMode (picker) or
+// trip.brief.entryMode / exitMode (trip view) — same fields the chip
+// rendering reads, so the icon and verb update immediately.
+function _renderLogisticsCol(side, label, d, ctx){
+  d = d || {};
+  ctx = ctx || "trip";
+  function _esc(s){ return String(s||"").replace(/"/g,'&quot;'); }
+  var timeLabel = side === "entry" ? "Arrives at" : "Departs at";
+  var saveAttr = 'oninput="_saveLogisticsField(this,&#39;'+ctx+'&#39;)"';
+  // Read current mode for this side from the right state bag.
+  var modeKey = side === "entry" ? "entryMode" : "exitMode";
+  var curMode = "";
+  if (ctx === "picker") {
+    curMode = (_tb && _tb[modeKey]) || ((trip && trip.brief && trip.brief[modeKey]) || "");
+  } else {
+    curMode = (trip && trip.brief && trip.brief[modeKey]) || (_tb && _tb[modeKey]) || "";
+  }
+  var modeOptions = [
+    { v: "fly",   icon: "✈️",  label: "Fly"   },
+    { v: "train", icon: "🚂", label: "Train" },
+    { v: "drive", icon: "🚗", label: "Drive" },
+    { v: "bus",   icon: "🚌", label: "Bus"   },
+    { v: "boat",  icon: "⛴️",  label: "Boat"  }
+  ];
+  var pillsHtml = '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px;">'
+    + modeOptions.map(function(opt){
+        var on = (curMode === opt.v);
+        var bg = on ? "#1a5fa8" : "#fff";
+        var color = on ? "#fff" : "#666";
+        var border = on ? "#1a5fa8" : "#d8d4c8";
+        return '<button type="button" onclick="_setLogisticsMode(&#39;'+side+'&#39;,&#39;'+opt.v+'&#39;,&#39;'+ctx+'&#39;)" style="font-size:10px;font-weight:600;padding:3px 8px;border-radius:11px;border:1px solid '+border+';background:'+bg+';color:'+color+';cursor:pointer;font-family:inherit;">'
+          + opt.icon + ' ' + opt.label
+          + '</button>';
+      }).join("")
+    + '</div>';
+  return ''
+    + '<div>'
+    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#888;margin-bottom:6px;">'+label+'</div>'
+    +   pillsHtml
+    +   '<div style="display:flex;flex-direction:column;gap:6px;">'
+    +     '<label style="font-size:10.5px;color:#666;display:flex;flex-direction:column;gap:3px;">Carrier'
+    +       '<input data-side="'+side+'" data-field="carrier" '+saveAttr+' placeholder="e.g. Lufthansa, SBB" value="'+_esc(d.carrier)+'" style="font-size:11.5px;padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;" />'
+    +     '</label>'
+    +     '<label style="font-size:10.5px;color:#666;display:flex;flex-direction:column;gap:3px;">Number'
+    +       '<input data-side="'+side+'" data-field="number" '+saveAttr+' placeholder="e.g. LH 730, IC 524, route" value="'+_esc(d.number)+'" style="font-size:11.5px;padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;" />'
+    +     '</label>'
+    +     '<label style="font-size:10.5px;color:#666;display:flex;flex-direction:column;gap:3px;">'+timeLabel
+    +       '<input type="time" data-side="'+side+'" data-field="time" '+saveAttr+' value="'+_esc(d.time)+'" style="font-size:11.5px;padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;" />'
+    +     '</label>'
+    +     '<label style="font-size:10.5px;color:#666;display:flex;flex-direction:column;gap:3px;">Confirmation #'
+    +       '<input data-side="'+side+'" data-field="confirmation" '+saveAttr+' placeholder="optional" value="'+_esc(d.confirmation)+'" style="font-size:11.5px;padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;" />'
+    +     '</label>'
+    +     '<label style="font-size:10.5px;color:#666;display:flex;flex-direction:column;gap:3px;">Notes'
+    +       '<input data-side="'+side+'" data-field="notes" '+saveAttr+' placeholder="optional, e.g. terminal, seat" value="'+_esc(d.notes)+'" style="font-size:11.5px;padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;" />'
+    +     '</label>'
+    +   '</div>'
+    + '</div>';
+}
+
+// Round CK.1.3: shared inline auto-save handler for logistics inputs in both
+// the picker and trip view. Routes to _tb (picker) or trip.brief (trip).
+function _saveLogisticsField(inp, ctx){
+  if (!inp) return;
+  var side = inp.getAttribute("data-side");
+  var field = inp.getAttribute("data-field");
+  var key = side === "entry" ? "entryDetails" : "exitDetails";
+  if (ctx === "picker") {
+    if (!_tb) return;
+    if (!_tb[key]) _tb[key] = {};
+    _tb[key][field] = inp.value;
+  } else {
+    if (!trip.brief) trip.brief = {};
+    if (!trip.brief[key]) trip.brief[key] = {};
+    trip.brief[key][field] = inp.value;
+    if (typeof localSave === "function") localSave();
+  }
+}
+
+// Round CK.5: "Decide later" — explicit way for the user to acknowledge
+// they don't have flight/train info yet without leaving the toggle in an
+// ambiguous "haven't looked at it" state. Sets a flag on _tb (picker) or
+// trip.brief (trip view); render keys off it to show "Decide later" copy
+// instead of the empty-state nudge.
+function _toggleDecideLater(ctx){
+  var key = "logisticsDecideLater";
+  if (ctx === "picker") {
+    if (!_tb) return;
+    _tb[key] = !_tb[key];
+  } else {
+    if (!trip.brief) trip.brief = {};
+    trip.brief[key] = !trip.brief[key];
+    if (typeof localSave === "function") localSave();
+  }
+  // Re-render the relevant view so the UI reflects the new state.
+  if (ctx === "picker") {
+    if (typeof renderActivityPicker === "function") renderActivityPicker();
+  } else {
+    if (typeof drawTripMode === "function") drawTripMode();
+  }
+}
+
+// Round CK.7: shared inline handler for setting transport mode from the
+// logistics form pills. Writes to the same fields the chip rendering reads
+// (_tb.entryMode/exitMode in picker, trip.brief.entryMode/exitMode in trip
+// view) so the icon + verb update immediately. Re-renders the host view
+// to reflect the new selection. Sets _logisticsOpen so the form stays
+// expanded across the re-render — otherwise picking a mode would collapse
+// the form (since the data-based "expanded if has data" rule sees no data).
+function _setLogisticsMode(side, mode, ctx){
+  var key = side === "entry" ? "entryMode" : "exitMode";
+  if (ctx === "picker") {
+    if (!_tb) return;
+    _tb[key] = mode;
+    _tb._logisticsOpen = true;
+    // Round CL.2: preserve picker scroll across the re-render. The picker
+    // pane is the .picker-list element inside the overlay; renderActivityPicker
+    // rebuilds the overlay's innerHTML which resets scroll. Capture before,
+    // restore after on the next animation frame.
+    var pickerPane = document.getElementById("tb-picker-list-pane");
+    var savedPickerScroll = pickerPane ? pickerPane.scrollTop : 0;
+    var savedWinScrollPicker = window.scrollY || window.pageYOffset || 0;
+    if (typeof renderActivityPicker === "function") renderActivityPicker();
+    requestAnimationFrame(function(){
+      var pp = document.getElementById("tb-picker-list-pane");
+      if (pp) pp.scrollTop = savedPickerScroll;
+      window.scrollTo(0, savedWinScrollPicker);
+    });
+    return;
+  }
+  // (trip view branch follows)
+  if (true) {
+    if (!trip.brief) trip.brief = {};
+    trip.brief[key] = mode;
+    if (!_tb) window._tb = _tb = {};
+    _tb._logisticsOpen = true;
+    if (typeof localSave === "function") localSave();
+    // Round CK.9: drawTripMode resets c.scrollTop and window.scrollTo to 0,
+    // which yanked the user back to the top of the trip page on every mode
+    // pick. Capture both scroll positions before the re-render and restore
+    // them after, so the form stays in view.
+    var lp = (typeof g === "function") ? g("lp-content") : document.getElementById("lp-content");
+    var savedLpScroll = lp ? lp.scrollTop : 0;
+    var savedWinScroll = window.scrollY || window.pageYOffset || 0;
+    if (typeof drawTripMode === "function") drawTripMode();
+    // Restore on the next animation frame so the new DOM has settled.
+    requestAnimationFrame(function(){
+      var lp2 = (typeof g === "function") ? g("lp-content") : document.getElementById("lp-content");
+      if (lp2) lp2.scrollTop = savedLpScroll;
+      window.scrollTo(0, savedWinScroll);
+    });
+  }
+}
+
+// Round CK.1.3: shared toggle for the logistics expand/collapse, in both
+// picker and trip-view contexts. Inline handler — no setTimeout needed.
+function _toggleLogistics(ctx){
+  var togglePrefix = ctx === "picker" ? "tb-picker-logistics" : "tm-logistics";
+  var toggleEl = document.getElementById(togglePrefix + "-toggle");
+  var formEl = document.getElementById(togglePrefix + "-form");
+  if (!toggleEl || !formEl) return;
+  var isOpen = formEl.style.display !== "none";
+  // Round CK.7: track the open state on _tb so re-renders preserve it.
+  if (!_tb) window._tb = _tb = {};
+  if (isOpen) {
+    formEl.style.display = "none";
+    toggleEl.innerHTML = "▸ Add arrival/departure details";
+    var sumEl = document.getElementById(togglePrefix + "-summary");
+    if (sumEl && sumEl.innerHTML.trim()) sumEl.style.display = "";
+    _tb._logisticsOpen = false;
+  } else {
+    formEl.style.display = "";
+    toggleEl.innerHTML = "▿ Hide arrival/departure details";
+    var sumEl2 = document.getElementById(togglePrefix + "-summary");
+    if (sumEl2) sumEl2.style.display = "none";
+    _tb._logisticsOpen = true;
+  }
+}
+
 function drawTripMode(){
   _leftMode="trip";
   var c=g("lp-content"); if(!c)return;
@@ -14534,6 +16638,122 @@ function drawTripMode(){
       +   trip.destinations.length + ' destination' + (trip.destinations.length !== 1 ? 's' : '')
       + '</div>';
     c.appendChild(datesBar);
+  })();
+
+  // Round CM: hero map at the top of the trip view. Renders all destinations
+  // as numbered pins so the user sees the trip "as a journey" — not a stack
+  // of cards. Pins clickable to jump to that destination's detail. Uses
+  // the same Esri+Carto basemap as other maps in the app. Round CM.1: drop
+  // the connecting polyline (it made geographic zigzags visually loud) and
+  // add a "View larger →" button that opens a fullscreen map in a new
+  // window for users who want a real survey of the route.
+  (function _renderTripHeroMap(){
+    if (!trip.destinations.length) return;
+    var withCoords = trip.destinations.filter(function(d){
+      var c = getCityCenter(d.place);
+      return c && isFinite(c[0]) && isFinite(c[1]);
+    });
+    if (withCoords.length < 2) return; // nothing meaningful to show
+    var heroWrap = document.createElement("div");
+    heroWrap.style.cssText = "margin:0 2px 12px;position:relative;";
+    var heroEl = document.createElement("div");
+    heroEl.id = "tm-hero-map";
+    heroEl.style.cssText = "height:240px;border-radius:8px;border:1px solid #e6e2d8;overflow:hidden;background:#eaf0ed;";
+    heroWrap.appendChild(heroEl);
+    // "View larger →" button in the top-right corner of the map.
+    var openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.textContent = "🗺 View larger →";
+    openBtn.style.cssText = "position:absolute;top:8px;right:8px;font-size:11px;font-weight:600;color:#1a5fa8;background:rgba(255,255,255,0.95);border:1px solid #cfe1f7;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;z-index:1000;box-shadow:0 1px 4px rgba(0,0,0,0.15);";
+    openBtn.onmouseover = function(){ openBtn.style.background = "#1a5fa8"; openBtn.style.color = "#fff"; };
+    openBtn.onmouseout = function(){ openBtn.style.background = "rgba(255,255,255,0.95)"; openBtn.style.color = "#1a5fa8"; };
+    openBtn.onclick = function(){ openTripHeroMapWindow(); };
+    heroWrap.appendChild(openBtn);
+    c.appendChild(heroWrap);
+    // Defer init until the element is in the DOM and laid out — Leaflet
+    // computes initial size synchronously and gets confused by 0×0 elements.
+    requestAnimationFrame(function(){
+      try {
+        if (typeof L === "undefined") return;
+        // Round CN.2: dispose any prior map instance first. drawTripMode
+        // runs many times in a session (every reorder, edit, applyArrDep);
+        // re-initing Leaflet on the same DOM node throws "Map container is
+        // already initialized."
+        if (window._tmHeroMap && window._tmHeroMap.remove) {
+          try { window._tmHeroMap.remove(); } catch(_){}
+          window._tmHeroMap = null;
+        }
+        var heroDom = document.getElementById("tm-hero-map");
+        if (heroDom && heroDom._leaflet_id) {
+          // Belt-and-suspenders: clear Leaflet's internal marker so a new
+          // L.map() call accepts the element.
+          try { delete heroDom._leaflet_id; } catch(_){}
+        }
+        var map = L.map("tm-hero-map", {
+          zoomControl: true,
+          scrollWheelZoom: false,
+          attributionControl: false,
+          dragging: true,
+          tap: true
+        });
+        window._tmHeroMap = map;
+        L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{maxZoom:19}).addTo(map);
+        L.tileLayer("https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png",{opacity:1.0,maxZoom:19}).addTo(map);
+        var coords = trip.destinations.map(function(d){ return getCityCenter(d.place); }).filter(function(c){return c && isFinite(c[0]) && isFinite(c[1]);});
+        if (coords.length < 2) return;
+        // Round CN.3: connecting polyline back on the small map. The
+        // geographic reorder pass (Round CN) untangles enough that the
+        // path now reads as a journey rather than a zigzag scribble.
+        // White halo + dashed blue line so it pops against the satellite
+        // imagery without looking like a road.
+        L.polyline(coords, {color: "#fff", weight: 6, opacity: 0.9, lineCap: "round"}).addTo(map);
+        L.polyline(coords, {color: "#1a5fa8", weight: 2.5, opacity: 1.0, dashArray: "1 6", lineCap: "round"}).addTo(map);
+        // Pins — numbered, click to drill in. First/last pins highlighted
+        // (start = blue ring, end = orange ring) so the direction reads.
+        trip.destinations.forEach(function(d, i){
+          var ctr = getCityCenter(d.place);
+          if (!ctr || !isFinite(ctr[0]) || !isFinite(ctr[1])) return;
+          var isFirst = i === 0;
+          var isLast = i === trip.destinations.length - 1;
+          var ring = isFirst ? "#1a5fa8" : (isLast ? "#b05820" : "#222");
+          var html = '<div style="background:#fff;border:2px solid '+ring+';border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:'+ring+';box-shadow:0 1px 3px rgba(0,0,0,0.3);">'+(i+1)+'</div>';
+          var icon = L.divIcon({
+            className: "tm-hero-pin",
+            html: html,
+            iconSize: [24,24],
+            iconAnchor: [12,12]
+          });
+          var popupHtml = '<div style="font-size:12px;font-weight:700;color:#222;margin-bottom:2px;">'+(d.label || d.place)+'</div>'
+            + '<div style="font-size:10.5px;color:#777;">' + (d.dateFrom ? fmtD(d.dateFrom) + ' – ' + fmtD(d.dateTo) : (d.nights+' night'+(d.nights!==1?'s':''))) + '</div>';
+          var m = L.marker(ctr, {icon: icon});
+          m.bindTooltip(d.label || d.place, {permanent: false, direction: "top", offset: [0, -14], className: "tm-hero-tip"});
+          m.bindPopup(popupHtml);
+          (function(destId){
+            m.on("click", function(){
+              setLeftMode("dest");
+              setTimeout(function(){ drawDestMode(destId); }, 0);
+            });
+          })(d.id);
+          m.addTo(map);
+          // Round CO: render day trips as smaller purple dots near the hub
+          if (d.dayTrips && d.dayTrips.length) {
+            d.dayTrips.forEach(function(dt){
+              if (typeof dt.lat !== "number" || typeof dt.lng !== "number") return;
+              var dtHtml = '<div style="background:#5b3f8f;border:2px solid #fff;border-radius:50%;width:12px;height:12px;box-shadow:0 1px 2px rgba(0,0,0,0.3);"></div>';
+              var dtIcon = L.divIcon({html: dtHtml, className: "", iconSize: [12,12], iconAnchor: [6,6]});
+              var dtM = L.marker([dt.lat, dt.lng], {icon: dtIcon});
+              dtM.bindTooltip(dt.place + " — day trip from " + d.place, {direction: "top", offset: [0, -8], className: "tm-hero-tip"});
+              dtM.addTo(map);
+            });
+          }
+        });
+        // Fit to bounds with comfortable padding
+        var bounds = L.latLngBounds(coords);
+        map.fitBounds(bounds, {padding: [28, 28], maxZoom: 9});
+      } catch(e) {
+        console.warn("[Max] hero map render failed:", e);
+      }
+    });
   })();
 
   // Duration banner — uses the same sum-of-nights math as the running total
@@ -14622,8 +16842,11 @@ function drawTripMode(){
   // Styled as a proper button so the re-entry affordance is obvious.
   if (trip.candidates && trip.candidates.length) {
     var editBtn=document.createElement("button");
-    editBtn.style.cssText="font-size:10px;font-weight:600;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;white-space:nowrap;";
-    editBtn.textContent="Edit destinations \u2192";
+    // Round CK.6: bumped from 10px to 12px and made the icon prominent so
+    // users can find their way back to the picker \u2014 the small button was
+    // easy to miss when scanning the trip page.
+    editBtn.style.cssText="font-size:12px;font-weight:600;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:7px 14px;cursor:pointer;font-family:inherit;white-space:nowrap;";
+    editBtn.textContent="\u270e Edit destinations";
     editBtn.title="Re-open the Candidate Explorer with your current keep/reject decisions";
     editBtn.onmouseover=function(){editBtn.style.background="#134a8a";};
     editBtn.onmouseout=function(){editBtn.style.background="#1a5fa8";};
@@ -14643,6 +16866,10 @@ function drawTripMode(){
   listSec.appendChild(listHdr);
   listSec.appendChild(totalLine);
 
+  // Round CQ.3: Cards/Story toggle removed. Narrative now lives on the
+  // destination detail view where it helps the user decide what to do at
+  // that stop, rather than as a separate top-level mode on the trip page.
+
   // Arriving / Departing panel — inline at the TOP of the trip view (after
   // the dates banner), since arrival/departure shape the calendar and the
   // user is reading top-down. The picker no longer collects these (Round
@@ -14653,6 +16880,37 @@ function drawTripMode(){
     var curEntry = (trip.brief && trip.brief.entry) || (_tb && _tb.entry) || "";
     var curExit = (trip.brief && trip.brief.tbExit) || (_tb && _tb.tbExit) || "";
     var curBuffer = (trip.brief && trip.brief.exitBuffer === false) ? false : true;
+    // Round CK: arrival/departure logistics (flight/train numbers, times,
+    // confirmation #s). Stored on trip.brief.entryDetails / exitDetails.
+    // Auto-saves on input — no Apply needed since these don't affect the
+    // built calendar, just record the user's bookings.
+    var entryDetails = (trip.brief && trip.brief.entryDetails) || {};
+    var exitDetails = (trip.brief && trip.brief.exitDetails) || {};
+    function _hasLogistics(d){
+      return !!(d && (d.carrier || d.number || d.time || d.confirmation || d.notes));
+    }
+    var hasEntryLogistics = _hasLogistics(entryDetails);
+    var hasExitLogistics = _hasLogistics(exitDetails);
+    // Round CK.7: also stay expanded if the user just toggled it open or
+    // picked a mode (_logisticsOpen flag). Round CK.9 removes the deferred
+    // logic — empty fields are the implicit "decide later" state.
+    var detailsExpanded = hasEntryLogistics || hasExitLogistics || (_tb && _tb._logisticsOpen);
+    function _esc(s){ return String(s||"").replace(/"/g,'&quot;'); }
+    function _summaryLine(label, d){
+      var bits = [];
+      if (d.carrier) bits.push(d.carrier);
+      if (d.number) bits.push(d.number);
+      if (d.time) bits.push(_fmtTime12h(d.time));
+      if (!bits.length) return "";
+      return '<span style="margin-right:8px;"><strong style="color:#555;">'+label+':</strong> ' + bits.join(" · ") + '</span>';
+    }
+    var summaryHtml = '';
+    if (hasEntryLogistics || hasExitLogistics) {
+      summaryHtml = '<div id="tm-logistics-summary" style="font-size:10.5px;color:#666;margin-top:6px;'+(detailsExpanded?'display:none;':'')+'">'
+        + _summaryLine("Arrive", entryDetails)
+        + _summaryLine("Depart", exitDetails)
+        + '</div>';
+    }
     var missing = !curEntry || !curExit;
     aeRow.style.cssText = "margin:0 2px 12px;padding:11px 14px;background:" + (missing ? "#fff8ee" : "#fafafa") + ";border:1px solid " + (missing ? "#f0d9aa" : "#e6e2d8") + ";border-radius:8px;";
     aeRow.innerHTML = ''
@@ -14662,10 +16920,10 @@ function drawTripMode(){
         )
       + '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">'
       +   '<label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px;">Arriving at'
-      +     '<input id="tm-entry-inp" placeholder="e.g. Zurich" autocomplete="off" value="'+curEntry.replace(/"/g,'&quot;')+'" style="font-size:12px;padding:5px 9px;border:1px solid #ccc;border-radius:4px;width:140px;font-family:inherit;" />'
+      +     '<input id="tm-entry-inp" placeholder="e.g. Zurich" autocomplete="off" value="'+_esc(curEntry)+'" style="font-size:12px;padding:5px 9px;border:1px solid #ccc;border-radius:4px;width:140px;font-family:inherit;" />'
       +   '</label>'
       +   '<label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px;">Departing from'
-      +     '<input id="tm-exit-inp" placeholder="e.g. Zurich" autocomplete="off" value="'+curExit.replace(/"/g,'&quot;')+'" style="font-size:12px;padding:5px 9px;border:1px solid #ccc;border-radius:4px;width:140px;font-family:inherit;" />'
+      +     '<input id="tm-exit-inp" placeholder="e.g. Zurich" autocomplete="off" value="'+_esc(curExit)+'" style="font-size:12px;padding:5px 9px;border:1px solid #ccc;border-radius:4px;width:140px;font-family:inherit;" />'
       +   '</label>'
       +   '<button id="tm-arrdep-apply" style="font-size:11px;font-weight:600;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:4px;padding:5px 12px;cursor:pointer;font-family:inherit;">Apply</button>'
       +   '<span id="tm-arrdep-status" style="font-size:10px;color:#888;"></span>'
@@ -14673,7 +16931,24 @@ function drawTripMode(){
       + '<label style="display:flex;align-items:center;gap:6px;font-size:10.5px;color:#666;margin-top:8px;cursor:pointer;line-height:1.4;">'
       +   '<input type="checkbox" id="tm-exit-buffer" '+(curBuffer?"checked":"")+' style="margin:0;cursor:pointer;" />'
       +   '<span>Buffer night in your departure city before flying home <span style="color:#999;">(default — uncheck to fly directly from your last destination)</span></span>'
-      + '</label>';
+      + '</label>'
+      // Round CK: logistics expand/collapse toggle + form. Auto-saves on
+      // input; no rebuild because logistics don't affect the calendar.
+      + '<div style="margin-top:10px;border-top:1px dashed #d8d4c8;padding-top:8px;">'
+      +   '<button id="tm-logistics-toggle" type="button" onclick="_toggleLogistics(&#39;trip&#39;)" style="font-size:11px;color:#1a5fa8;background:none;border:none;padding:2px 0;cursor:pointer;font-family:inherit;font-weight:600;">'
+      +     (detailsExpanded ? '▿ Hide arrival/departure details' : '▸ Add arrival/departure details')
+      +   '</button>'
+      // Round CK.9 removed the "Decide later" affordance — leaving the
+      // fields blank is the implicit decide-later state.
+      +   summaryHtml
+      +   '<div id="tm-logistics-form" style="margin-top:10px;'+(detailsExpanded?'':'display:none;')+'">'
+      +     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">'
+      +       _renderLogisticsCol("entry", "Arrival", entryDetails, "trip")
+      +       _renderLogisticsCol("exit", "Departure", exitDetails, "trip")
+      +     '</div>'
+      +     '<div style="font-size:10px;color:#999;margin-top:8px;">Saved automatically. These don\'t change the trip calendar.</div>'
+      +   '</div>'
+      + '</div>';
     // Insert ABOVE the destinations list section. We're inside drawTripMode;
     // c is the lp-content container. Append directly to c (not listSec) so it
     // sits above the destinations header.
@@ -14685,6 +16960,9 @@ function drawTripMode(){
       var bufferInp = document.getElementById("tm-exit-buffer");
       var statusEl = document.getElementById("tm-arrdep-status");
       var exitTouched = !!curExit;
+      // Round CK.1.3: logistics toggle + auto-save now use inline handlers
+      // (_toggleLogistics, _saveLogisticsField) so the same code runs in the
+      // picker too. No JS wiring needed here.
       // Auto-fill departure when arrival is typed (round-trip default).
       if (entryInp) {
         entryInp.addEventListener("input", function(){
@@ -14743,6 +17021,10 @@ function drawTripMode(){
         if (trip.candidates && trip.candidates.length) {
           _tb.candidates = trip.candidates.map(function(c){ return Object.assign({}, c); });
         }
+        // Round CJ: tell buildFromCandidates this is a rebuild, so it skips
+        // the showMaxBridge step at the tail. Without this flag the bridge
+        // overlay covers the trip view on every Apply, looking like a hang.
+        if (_tb) _tb._isRebuild = true;
         try {
           await buildFromCandidates();
           // Belt-and-suspenders: force re-render of the trip view in case
@@ -14775,6 +17057,7 @@ function drawTripMode(){
     emp.textContent="No destinations yet."; listSec.appendChild(emp);
   }
 
+  // Round CQ.3: Story-view branch removed. Cards is the only mode now.
   trip.destinations.forEach(function(dest,idx){
     var card=document.createElement("div"); card.className="tm-dest"+(dest.id===activeDest?" active":""); card.setAttribute("data-id",dest.id);
     // Draggable on fine-pointer devices (gate enforced by CSS). Listeners are safe on any device — they just won't fire without HTML5 DnD.
@@ -14844,6 +17127,40 @@ function drawTripMode(){
         tag.style.color = "#b05820";
       }
       bodyDiv.appendChild(tag);
+
+      // Round CK.1: render flight/train logistics on the first (arrival) and
+      // last (departure) cards. Pulls from trip.brief.entryDetails / exitDetails
+      // captured by the logistics form on the arrival/departure panel above.
+      // Round CK.4: verb is mode-aware ("Lands" for flights, "Arrives" for
+      // train/drive/bus/boat) so the line reads naturally regardless of how
+      // the traveler is moving.
+      (function renderLogisticsLine(){
+        var details = isFirst
+          ? (trip.brief && trip.brief.entryDetails) || null
+          : (trip.brief && trip.brief.exitDetails) || null;
+        if (!details) return;
+        var mode = isFirst
+          ? ((trip.brief && trip.brief.entryMode) || (_tb && _tb.entryMode) || "fly")
+          : ((trip.brief && trip.brief.exitMode) || (_tb && _tb.exitMode) || "fly");
+        var ml = _modeLabels(mode, isFirst ? "arrival" : "departure");
+        var verb = isFirst ? ml.arrivalVerb : ml.departureVerb;
+        var bits = [];
+        var carrierNum = [details.carrier, details.number].filter(function(x){return !!x;}).join(" ");
+        if (carrierNum) bits.push('<strong style="color:#333;">'+carrierNum+'</strong>');
+        if (details.time) bits.push(verb + " " + _fmtTime12h(details.time));
+        if (!bits.length && !details.confirmation && !details.notes) return;
+        var line = document.createElement("div");
+        line.style.cssText = "font-size:11px;color:#555;margin:1px 0 4px;line-height:1.45;";
+        var html = bits.join(' \u00b7 ');
+        if (details.confirmation) {
+          html += ' <span style="color:#888;">conf. ' + details.confirmation + '</span>';
+        }
+        if (details.notes) {
+          html += '<div style="font-size:10.5px;color:#888;margin-top:1px;">' + details.notes + '</div>';
+        }
+        line.innerHTML = html;
+        bodyDiv.appendChild(line);
+      })();
     }
     // Dates FIRST \u2014 date range is the primary anchor for each leg of the
     // trip (the user is reading this as a calendar of where they'll be
@@ -14890,6 +17207,36 @@ function drawTripMode(){
       });
       if(evRow.children.length) bodyDiv.appendChild(evRow);
     }
+
+    // Round CO: day trips clustered to this hub. Each is a soft purple chip
+    // with the place name; hover shows distance from hub. Click opens a
+    // mini-popover offering "Restore as own destination" (ungroup).
+    if (dest.dayTrips && dest.dayTrips.length) {
+      var dtRow = document.createElement("div");
+      dtRow.style.cssText = "display:flex;flex-wrap:wrap;gap:4px;margin-top:5px;align-items:center;";
+      var dtLabel = document.createElement("span");
+      dtLabel.style.cssText = "font-size:9px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.05em;margin-right:2px;";
+      dtLabel.textContent = "Day trips:";
+      dtRow.appendChild(dtLabel);
+      dest.dayTrips.forEach(function(dt, dtIdx){
+        var chip = document.createElement("button");
+        chip.type = "button";
+        chip.style.cssText = "font-size:10px;font-weight:600;color:#5b3f8f;background:#f4eef9;border:1px solid #d8c4e8;padding:2px 8px;border-radius:10px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:4px;";
+        chip.textContent = "📍 " + dt.place;
+        chip.title = dt.place + " · " + dt.distKm + "km from " + dest.place + " · click to ungroup";
+        chip.onmouseover = function(){ chip.style.background = "#e9deef"; };
+        chip.onmouseout = function(){ chip.style.background = "#f4eef9"; };
+        (function(hubDest, dayTripIdx){
+          chip.onclick = function(e){
+            e.stopPropagation();
+            ungroupDayTrip(hubDest, dayTripIdx);
+          };
+        })(dest, dtIdx);
+        dtRow.appendChild(chip);
+      });
+      bodyDiv.appendChild(dtRow);
+    }
+
     card.appendChild(bodyDiv);
     // Show generating indicator for unknown cities
     var genData=_generatedCityData[dest.place.toLowerCase()];
@@ -15352,7 +17699,7 @@ async function refreshRestaurantSuggestions(dest,btn){
   window[lockKey]=true;
   if(btn){btn.disabled=true;btn.textContent="thinking\u2026";}
   try{
-    var text=await callMax([{role:"user",content:"Suggest 6 restaurants in "+dest.place+". For each: name, neighborhood, one sentence on why it\u2019s worth going, and the one dish or drink to order. Be specific. Format: one restaurant per line, as: Name | Neighborhood | Why go | What to order"}]);
+    var text=await callMax([{role:"user",content:"Suggest 6 restaurants in "+dest.place+". For each: name, neighborhood, one sentence on why it\u2019s worth going, and the one dish or drink to order. Be specific."+(typeof _briefPersonalContext === "function" ? _briefPersonalContext() : "")+"\n\nFormat: one restaurant per line, as: Name | Neighborhood | Why go | What to order"}]);
     var suggestions=[];
     text.trim().split(/\n+/).filter(function(l){return l.trim().length>5;}).forEach(function(line){
       var parts=line.replace(/^\d+\.\s*/,"").split("|").map(function(p){return p.trim();});
@@ -15776,7 +18123,7 @@ async function suggestRestaurants(destId,dayId,slot,btn){
   var existId="itin-suggest-"+dayId+"-"+slot;
   var existing=g(existId); if(existing)existing.parentNode.removeChild(existing);
   try{
-    var text=await callMax([{role:"user",content:"Suggest 3 restaurants in "+dest.place+". For each give: name, neighborhood, one line on what makes it worth going to, and what to order. Be specific and concrete. Format as a simple list, no markdown headers."}]);
+    var text=await callMax([{role:"user",content:"Suggest 3 restaurants in "+dest.place+". For each give: name, neighborhood, one line on what makes it worth going to, and what to order. Be specific and concrete."+(typeof _briefPersonalContext === "function" ? _briefPersonalContext() : "")+"\n\nFormat as a simple list, no markdown headers."}]);
     var box=document.createElement("div"); box.className="itin-suggest-box"; box.id=existId;
     var bHdr=document.createElement("div"); bHdr.style.cssText="font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#c06820;margin-bottom:6px;"; bHdr.textContent="Restaurant suggestions";
     box.appendChild(bHdr);
@@ -15964,7 +18311,127 @@ function drawDestMode(destId){
   var ovWarn=document.createElement("div"); ovWarn.id="ov-warn-"+dest.id; ovWarn.className="overlap-warn hidden";
 
   hdr.appendChild(title); hdr.appendChild(datesRow);
+
+  // Round CK.1.2: logistics block on the destination detail view. Only on
+  // the first destination (arrival) and last destination (departure) — those
+  // are the bookends where flight/train info matters. Pulls from
+  // trip.brief.entryDetails / exitDetails. Lays out a small inline card so
+  // the user can see flight # / time / confirmation # while looking at the
+  // city, not just on the trip-list view.
+  (function renderDestLogistics(){
+    var dests = trip.destinations || [];
+    var firstId = dests.length ? dests[0].id : null;
+    var lastId = dests.length ? dests[dests.length-1].id : null;
+    var isFirst = (dest.id === firstId);
+    var isLast = (dest.id === lastId);
+    if (!isFirst && !isLast) return;
+    function _lblHtml(side){
+      var details = side === "entry"
+        ? (trip.brief && trip.brief.entryDetails) || null
+        : (trip.brief && trip.brief.exitDetails) || null;
+      if (!details) return "";
+      // Round CK.4: mode-aware verb + chip title.
+      var mode = side === "entry"
+        ? ((trip.brief && trip.brief.entryMode) || (_tb && _tb.entryMode) || "fly")
+        : ((trip.brief && trip.brief.exitMode) || (_tb && _tb.exitMode) || "fly");
+      var ml = _modeLabels(mode, side === "entry" ? "arrival" : "departure");
+      var verb = side === "entry" ? ml.arrivalVerb : ml.departureVerb;
+      var roleLabel = (side === "entry" ? ml.icon + " Arrival" : ml.icon + " Departure");
+      var color = side === "entry" ? "#1a5fa8" : "#b05820";
+      var bg = side === "entry" ? "#eef5ff" : "#fff5ed";
+      var border = side === "entry" ? "#cfe1f7" : "#f3dcc4";
+      var carrierNum = [details.carrier, details.number].filter(function(x){return !!x;}).join(" ");
+      var hasAny = !!(carrierNum || details.time || details.confirmation || details.notes);
+      if (!hasAny) {
+        // Round CK.9: simplified — empty fields is the implicit "decide
+        // later" state, single empty-state copy.
+        return '<div style="background:#fafafa;border:1px dashed #d8d4c8;border-radius:7px;padding:9px 12px;margin-bottom:8px;">'
+          + '<div style="font-size:9.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:'+color+';margin-bottom:3px;">'+roleLabel+'</div>'
+          + '<div style="font-size:11px;color:#888;">No arrival/departure details added yet. <a href="#" id="dm-edit-logistics-'+side+'" style="color:#1a5fa8;">Add them →</a></div>'
+          + '</div>';
+      }
+      var bits = [];
+      if (carrierNum) bits.push('<strong style="color:#222;">'+carrierNum+'</strong>');
+      if (details.time) bits.push(verb + " " + _fmtTime12h(details.time));
+      var sub = bits.join(' · ');
+      var confChip = details.confirmation ? '<span style="font-size:10.5px;color:'+color+';background:'+bg+';border:1px solid '+border+';padding:2px 7px;border-radius:10px;margin-left:8px;">conf. ' + details.confirmation + '</span>' : '';
+      var notesLine = details.notes ? '<div style="font-size:10.5px;color:#777;margin-top:3px;">' + details.notes + '</div>' : '';
+      return '<div style="background:'+bg+';border:1px solid '+border+';border-radius:7px;padding:9px 12px;margin-bottom:8px;">'
+        + '<div style="font-size:9.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:'+color+';margin-bottom:3px;">'+roleLabel+'</div>'
+        + '<div style="font-size:12px;color:#333;line-height:1.45;">' + sub + confChip + '</div>'
+        + notesLine
+        + '</div>';
+    }
+    var box = document.createElement("div");
+    var html = "";
+    if (isFirst) html += _lblHtml("entry");
+    if (isLast) html += _lblHtml("exit");
+    box.innerHTML = html;
+    hdr.appendChild(box);
+    // Wire the "Add them →" links to bounce back to the trip view and open
+    // the logistics form on the arrival/departure panel.
+    box.querySelectorAll("a[id^='dm-edit-logistics-']").forEach(function(a){
+      a.addEventListener("click", function(e){
+        e.preventDefault();
+        setLeftMode("trip");
+        setTimeout(function(){
+          var toggle = document.getElementById("tm-logistics-toggle");
+          var form = document.getElementById("tm-logistics-form");
+          if (toggle && form && form.style.display === "none") toggle.click();
+          var firstInp = form && form.querySelector("input[data-side]");
+          if (firstInp) firstInp.focus();
+        }, 100);
+      });
+    });
+  })();
+
   if (dest._eventsRowEl) hdr.appendChild(dest._eventsRowEl);
+
+  // Round CQ.4: removed the auto-rendered narrative block from CQ.3.
+  // The existing "story:" button on this page already produces a richer
+  // narrative on demand (see destStory) — auto-opening was redundant and
+  // intrusive. The picker's "?" popup remains for the decision-time
+  // version; this page's "story: X ↗" button covers the longer read.
+
+  // Round CO.2: render day-trip chips on the destination detail view too,
+  // not just the trip-list card.
+  // Round CO.3: each chip now opens a menu with "Add to Day 1...N" or
+  // "Restore as own destination" so the day trip can be planted on a
+  // specific day in the itinerary instead of just hovering as a sidebar.
+  if (dest.dayTrips && dest.dayTrips.length) {
+    var dtBox = document.createElement("div");
+    dtBox.style.cssText = "margin:0 0 10px;padding:9px 12px;background:#f4eef9;border:1px solid #d8c4e8;border-radius:7px;";
+    var dtHdr = document.createElement("div");
+    dtHdr.style.cssText = "font-size:9.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#5b3f8f;margin-bottom:5px;";
+    dtHdr.textContent = "📍 Day trips from " + dest.place;
+    dtBox.appendChild(dtHdr);
+    var dtList = document.createElement("div");
+    dtList.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;";
+    dest.dayTrips.forEach(function(dt, dtIdx){
+      var chip = document.createElement("button");
+      chip.type = "button";
+      // Look up if this day trip is already placed on a specific day so we
+      // can label the chip with that info.
+      var placedOnDay = -1;
+      (dest.days || []).forEach(function(day, dayIdx){
+        (day.items || []).forEach(function(it){
+          if (it && it.type === "daytrip" && it.dayTripPlace === dt.place) placedOnDay = dayIdx;
+        });
+      });
+      chip.style.cssText = "font-size:11px;font-weight:600;color:#5b3f8f;background:#fff;border:1px solid #d8c4e8;padding:4px 10px;border-radius:11px;cursor:pointer;font-family:inherit;";
+      chip.textContent = dt.place + " · " + dt.distKm + "km" + (placedOnDay >= 0 ? " · on Day " + (placedOnDay+1) : "");
+      chip.title = "Click for options";
+      chip.onmouseover = function(){ chip.style.background = "#ede0f4"; };
+      chip.onmouseout = function(){ chip.style.background = "#fff"; };
+      (function(hubDest, dayTripIdx, dayTripData, alreadyOnDay){
+        chip.onclick = function(){ openDayTripMenu(chip, hubDest, dayTripIdx, dayTripData, alreadyOnDay); };
+      })(dest, dtIdx, dt, placedOnDay);
+      dtList.appendChild(chip);
+    });
+    dtBox.appendChild(dtList);
+    hdr.appendChild(dtBox);
+  }
+
   hdr.appendChild(dmActs); hdr.appendChild(dsw); hdr.appendChild(ovWarn);
   c.appendChild(hdr);
 
@@ -16047,6 +18514,40 @@ function drawDestMode(destId){
         var routing=getRouting(fromDest.place,dest.place);
         var chip=buildTransportChip(bookedBk,routing,"Arriving from "+fromDest.place,dest.id,"routing");
         if(chip)blk.appendChild(chip);
+      } else {
+        // Round CK.3: FIRST destination of the trip — render an arrival
+        // chip from trip.brief.entryDetails so the day where the user lands
+        // shows the actual transport info, just like an "arriving from X"
+        // chip on every other destination.
+        // Round CK.4: mode-aware ("Lands" only for flights; "Arrives" for
+        // trains, drives, buses, boats; icon swaps accordingly).
+        var ad = (trip.brief && trip.brief.entryDetails) || {};
+        var hasArrInfo = !!(ad.carrier || ad.number || ad.time);
+        if (hasArrInfo) {
+          var arrMode = (trip.brief && trip.brief.entryMode) || (_tb && _tb.entryMode) || "fly";
+          var arrML = _modeLabels(arrMode, "arrival");
+          var arrivalWrap=document.createElement("div");
+          arrivalWrap.className="itin-transport";
+          arrivalWrap.style.cssText="background:#eef5ff;border:1px solid #cfe1f7;";
+          var arrDir=document.createElement("span");
+          arrDir.style.cssText="font-size:10px;font-weight:700;color:#1a5fa8;margin-right:8px;text-transform:uppercase;letter-spacing:0.04em;";
+          arrDir.textContent="Arrival";
+          var arrIcon=document.createElement("span"); arrIcon.className="itin-transport-icon";
+          arrIcon.textContent=arrML.icon;
+          var arrName=document.createElement("span"); arrName.className="itin-transport-name";
+          var arrCN = [ad.carrier, ad.number].filter(function(x){return !!x;}).join(" ");
+          arrName.textContent = arrCN
+            ? arrCN + (ad.time ? " · " + arrML.arrivalVerb + " " + (typeof _fmtTime12h === "function" ? _fmtTime12h(ad.time) : ad.time) : "")
+            : arrML.arrivalTitle;
+          var arrMeta=document.createElement("span"); arrMeta.className="itin-transport-meta";
+          arrMeta.style.cssText="color:#888;";
+          arrMeta.textContent="into "+dest.place;
+          arrivalWrap.appendChild(arrDir);
+          arrivalWrap.appendChild(arrIcon);
+          arrivalWrap.appendChild(arrName);
+          arrivalWrap.appendChild(arrMeta);
+          blk.appendChild(arrivalWrap);
+        }
       }
       // Hotel check-in on first day
       var bookedHotel=dest.hotelBookings&&dest.hotelBookings.find(function(b){return b.status==="booked";});
@@ -16054,15 +18555,21 @@ function drawDestMode(destId){
         blk.appendChild(buildHotelChip(bookedHotel,'checkin'));
       }
     }
-    // Auto-inject departure transport on last day. Skip when the last day
-    // is ALSO the first day (1-night destination) — in that case the
-    // arrival chip already lives on this card, and the departure happens
-    // the next morning (which lives on the next destination's arrival
-    // chip). Stacking both on a 1-night card reads as "you arrive and
-    // leave the same day," which isn't true.
+    // Auto-inject departure transport on last day.
+    // For 1-night INTERMEDIATE stops, skip — the departure chip would
+    // duplicate the arrival chip already on this same card, and the
+    // departure morning effectively lives on the NEXT destination's
+    // arrival chip.
+    // Round CK.2: but for the LAST destination of the trip, render the
+    // chip even on a 1-night stay — there's no next destination's arrival
+    // chip to inherit it from, so skipping leaves the departure date with
+    // nowhere to live.
     var isLastDay=(dayIdx===dest.days.length-1);
     var isAlsoFirstDay=(dayIdx===0);
-    if(isLastDay && !(isAlsoFirstDay && dest.days.length===1)){
+    var _isLastDest=(trip.destinations.indexOf(dest) === trip.destinations.length - 1);
+    var _isOneNightStop=(dest.days.length === 1);
+    var _shouldSkipDeparture = _isOneNightStop && isAlsoFirstDay && !_isLastDest;
+    if(isLastDay && !_shouldSkipDeparture){
       // Hotel checkout on last day
       var bookedHotel2=dest.hotelBookings&&dest.hotelBookings.find(function(b){return b.status==="booked";});
       if(bookedHotel2&&bookedHotel2.checkOut){
@@ -16076,34 +18583,11 @@ function drawDestMode(destId){
         var routing2=getRouting(dest.place,toDestX.place);
         var chip2=buildTransportChip(bookedBk2,routing2,"Departing to "+toDestX.place,dest.id,"routing");
         if(chip2)blk.appendChild(chip2);
-      } else {
-        // Final destination of the trip — render a "Flight home" marker so
-        // the user can see the flight day in context. The flight day is the
-        // date AFTER this destination's last night. Without this, a
-        // 1-night exit stay reads as "you arrive then disappear" — the
-        // flight day has nowhere to live.
-        var flightDate=new Date(dest.dateTo+'T12:00:00');
-        flightDate.setDate(flightDate.getDate()+1);
-        var flightLbl=flightDate.toLocaleDateString("en-US",{month:"short",day:"numeric",weekday:"short"});
-        var flightWrap=document.createElement("div");
-        flightWrap.className="itin-transport";
-        flightWrap.style.cssText="background:#f7f4ec;border:1px dashed #d8d1c0;";
-        var flightDir=document.createElement("span");
-        flightDir.style.cssText="font-size:10px;font-weight:700;color:#888;margin-right:8px;text-transform:uppercase;letter-spacing:0.04em;";
-        flightDir.textContent="Flight home — "+flightLbl;
-        var flightIcon=document.createElement("span"); flightIcon.className="itin-transport-icon";
-        flightIcon.textContent=(_tb && _tb.exitMode==="train")?"🚂":(_tb && _tb.exitMode==="drive")?"🚗":"✈️";
-        var flightName=document.createElement("span"); flightName.className="itin-transport-name";
-        flightName.textContent=(_tb && _tb.gettingOut) ? _tb.gettingOut : "Departure day";
-        var flightMeta=document.createElement("span"); flightMeta.className="itin-transport-meta";
-        flightMeta.style.cssText="color:#999;";
-        flightMeta.textContent="from "+dest.place;
-        flightWrap.appendChild(flightDir);
-        flightWrap.appendChild(flightIcon);
-        flightWrap.appendChild(flightName);
-        flightWrap.appendChild(flightMeta);
-        blk.appendChild(flightWrap);
       }
+      // Round CK.3: the flight-home marker for the trip's last destination
+      // used to render here. Now it's its own day card appended AFTER the
+      // day loop — Jul 22 (the flight day) is conceptually a separate day,
+      // not a chip stacked on top of the Jul 21 buffer-night card.
     }
 
     // Day section
@@ -16161,6 +18645,78 @@ function drawDestMode(destId){
     blk.appendChild(eveSlot);
     sightsPane.appendChild(blk);
   });
+
+  // Round CK.3: synthetic departure-day card on the LAST destination. The
+  // flight-home day (dest.dateTo) used to live as a chip stacked onto the
+  // last regular day card, which read as "you arrive and leave the same
+  // day" for 1-night buffer stops. Now it's a real day card with its own
+  // header, so the user sees Jul 21 (arrival at airport city) and Jul 22
+  // (flight home) as separate days, like every other day in the trip.
+  (function appendDepartureDayCard(){
+    var isLastDest = (trip.destinations.indexOf(dest) === trip.destinations.length - 1);
+    if (!isLastDest) return;
+    if (!dest.dateTo) return;
+    var depDate = new Date(dest.dateTo + "T12:00:00");
+    var depLbl = depDate.toLocaleDateString("en-US", {month:"short", day:"numeric"});
+    var ed = (trip.brief && trip.brief.exitDetails) || {};
+    var depBlk = document.createElement("div");
+    depBlk.className = "dm-day-block";
+
+    // Day header — same shape as a regular day card, with " · departure" note.
+    var dHdr = document.createElement("div"); dHdr.className = "dm-day-hdr";
+    var dLbl = document.createElement("span"); dLbl.textContent = depLbl;
+    dHdr.appendChild(dLbl);
+    var dn = document.createElement("span");
+    dn.style.cssText = "font-size:10px;font-weight:400;color:#ccc;";
+    dn.textContent = " · departure";
+    dHdr.appendChild(dn);
+    depBlk.appendChild(dHdr);
+
+    // Round CK.4: mode-aware. "Flight home" for flights, "Train home" for
+    // trains, "Drive home" for cars, "Bus home" for buses, "Boat home" for
+    // boat/ferry. Uses exitDetails for carrier/number/time, falling back to
+    // legacy _tb.gettingOut, then a placeholder.
+    var depMode = (trip.brief && trip.brief.exitMode) || (_tb && _tb.exitMode) || "fly";
+    var depML = _modeLabels(depMode, "departure");
+    var flightWrap = document.createElement("div");
+    flightWrap.className = "itin-transport";
+    flightWrap.style.cssText = "background:#fff5ed;border:1px solid #f3dcc4;";
+    var flightDir = document.createElement("span");
+    flightDir.style.cssText = "font-size:10px;font-weight:700;color:#b05820;margin-right:8px;text-transform:uppercase;letter-spacing:0.04em;";
+    flightDir.textContent = depML.departureTitle;
+    var flightIcon = document.createElement("span"); flightIcon.className = "itin-transport-icon";
+    flightIcon.textContent = depML.icon;
+    var flightName = document.createElement("span"); flightName.className = "itin-transport-name";
+    var carrierNum = [ed.carrier, ed.number].filter(function(x){return !!x;}).join(" ");
+    if (carrierNum) {
+      flightName.textContent = carrierNum + (ed.time ? " · " + depML.departureVerb + " " + (typeof _fmtTime12h === "function" ? _fmtTime12h(ed.time) : ed.time) : "");
+    } else if (_tb && _tb.gettingOut) {
+      flightName.textContent = _tb.gettingOut;
+    } else {
+      flightName.textContent = "Add details on the trip page";
+    }
+    var flightMeta = document.createElement("span"); flightMeta.className = "itin-transport-meta";
+    flightMeta.style.cssText = "color:#999;";
+    flightMeta.textContent = "from " + dest.place;
+    flightWrap.appendChild(flightDir);
+    flightWrap.appendChild(flightIcon);
+    flightWrap.appendChild(flightName);
+    flightWrap.appendChild(flightMeta);
+    depBlk.appendChild(flightWrap);
+
+    // Optional confirmation # / notes on a second line, smaller.
+    if (ed.confirmation || ed.notes) {
+      var ext = document.createElement("div");
+      ext.style.cssText = "font-size:10.5px;color:#777;padding:2px 12px 4px;";
+      var bits = [];
+      if (ed.confirmation) bits.push("Conf: " + ed.confirmation);
+      if (ed.notes) bits.push(ed.notes);
+      ext.textContent = bits.join(" · ");
+      depBlk.appendChild(ext);
+    }
+
+    sightsPane.appendChild(depBlk);
+  })();
 
   // If no items scheduled yet, show hint to use Explore tab
   var totalItems=dest.days.reduce(function(acc,d){return acc+(d.items?d.items.length:0);},0);
