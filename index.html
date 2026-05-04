@@ -21724,6 +21724,68 @@ function drawDestMode(destId){
     c.appendChild(pcBanner);
   }
 
+  // Notes from the road (v286 — paired with mobile/index.html).
+  // A persistent strip just above the tab bar — visible no matter
+  // which tab is active. Renders dest.travelerNotes, the same field
+  // the mobile shell writes to. Editing here also flows to mobile
+  // via storage events. Saves on blur via MaxDB.trip.write directly,
+  // bypassing the Phase 2 mutators (notes don't restructure the
+  // trip — just stamp a free-text field).
+  (function(){
+    var notesWrap = document.createElement("div");
+    notesWrap.style.cssText = "margin:8px 0 10px;padding:10px 12px;background:#fafafa;border:1px solid #ececec;border-radius:8px;";
+    var notesHdr = document.createElement("div");
+    notesHdr.style.cssText = "font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#888;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;";
+    var notesLabel = document.createElement("span");
+    notesLabel.textContent = "Notes from the road";
+    var notesStatus = document.createElement("span");
+    notesStatus.id = "dm-notes-status";
+    notesStatus.style.cssText = "font-size:9px;font-weight:500;color:#aaa;text-transform:none;letter-spacing:0;";
+    notesHdr.appendChild(notesLabel);
+    notesHdr.appendChild(notesStatus);
+    notesWrap.appendChild(notesHdr);
+    var notesTa = document.createElement("textarea");
+    notesTa.id = "dm-notes-textarea";
+    notesTa.placeholder = "Things to remember from this stop…";
+    notesTa.value = (typeof dest.travelerNotes === "string") ? dest.travelerNotes : "";
+    notesTa.style.cssText = "width:100%;min-height:48px;max-height:240px;font:inherit;font-size:12.5px;line-height:1.5;padding:6px 8px;border:1px solid #ddd;border-radius:5px;background:#fff;color:#111;resize:vertical;box-sizing:border-box;font-family:inherit;";
+    notesTa.onfocus = function(){ this.style.borderColor = "#1a5fa8"; this.style.boxShadow = "0 0 0 3px rgba(26,95,168,.12)"; };
+    notesTa.onblur = function(){
+      this.style.borderColor = "#ddd"; this.style.boxShadow = "none";
+      var prev = (typeof dest.travelerNotes === "string") ? dest.travelerNotes : "";
+      var nextVal = this.value;
+      if (prev === nextVal) return;
+      dest.travelerNotes = nextVal;
+      // Save through the documented DB API. Same path mobile uses;
+      // cross-tab storage events propagate the change to any open
+      // mobile tabs within ~1s.
+      // Save through the inline localSave path — it already handles
+      // the right key (_currentTripId, not trip.id which doesn't
+      // exist), updates the trips index, and the underlying
+      // localStorage.setItem fires the cross-tab `storage` event so
+      // mobile picks the change up. Earlier draft used
+      // MaxDB.trip.writeRaw(trip.id, …) which silently returned false
+      // because trip.id is undefined.
+      var ok = false;
+      try {
+        if (typeof localSave === "function") {
+          localSave();
+          ok = true;
+        } else if (window.MaxDB && window._currentTripId && typeof window.serializeTrip === "function") {
+          ok = MaxDB.trip.writeRaw(window._currentTripId, window.serializeTrip());
+        }
+      } catch(e) { ok = false; }
+      var st = document.getElementById("dm-notes-status");
+      if (st) {
+        st.textContent = ok ? "saved" : "save failed";
+        st.style.color = ok ? "#2a7a4e" : "#c05020";
+        if (ok) setTimeout(function(){ var s=document.getElementById("dm-notes-status"); if (s && s.textContent==="saved") s.textContent=""; }, 1800);
+      }
+    };
+    notesWrap.appendChild(notesTa);
+    c.appendChild(notesWrap);
+  })();
+
   // Section tabs.
   // Round FD: reordered to match user mental flow — Routing now sits
   // before "On the ground" because Routing is about getting to/from

@@ -1,3 +1,71 @@
+// max-v286.1 — Hotfix: desktop notes save was failing because v286
+// used trip.id (undefined; the inline script keys trips by the
+// _currentTripId global) instead of localSave(). Repointed at
+// localSave — the proven path everything else uses; underlying
+// localStorage.setItem still fires the cross-tab storage event so
+// mobile sync remains intact.
+//
+// max-v286 — Notes from the road on desktop destination view.
+//
+// Pairs with v285's mobile shell. The mobile shell wrote
+// dest.travelerNotes but desktop had no render for it — invisible
+// on the surface where the user spends their time. Now visible.
+//
+// Render: a persistent strip between the destination header and the
+// tab bar. Always visible, regardless of active tab (Itinerary /
+// Explore / Stay / Routing / On the ground / Tracking). Bordered
+// off-white panel, "Notes from the road" small-caps header,
+// textarea pre-filled with dest.travelerNotes, italic placeholder
+// when empty.
+//
+// Save: on blur. Goes through MaxDB.trip.writeRaw (same path the
+// inline serializer + saver uses), so cross-tab storage events
+// propagate to any open mobile tabs and they re-render. The save
+// path bypasses Phase 2 mutators because nothing structural is
+// changing — just a free-text field.
+//
+// Status indicator: small "saved" / "save failed" cue in the
+// header strip's right edge. Fades after 1.8s on success.
+//
+// max-v285 — Round MA.1: mobile shell (read-only trip view + notes).
+//
+// First proof-of-life for the engine extraction's whole reason to
+// exist. New file: `mobile/index.html`. Loads `db.js` and
+// `engine-trip.js` — zero imports from `index.html` or
+// `picker-ui.js`. The mobile bundle is the entire mobile bundle.
+//
+// What it does:
+//   • Lists trips from MaxDB.index.list()
+//   • Opens one trip from MaxDB.trip.read(id)
+//   • Renders destinations as a phone-first card list — place,
+//     date range, nights, an editable notes textarea
+//   • Notes save via MaxDB.trip.write on debounced input + blur
+//   • Cross-tab sync: window 'storage' event listener re-renders
+//     when desktop writes the same trip key. Status pill in the
+//     header shows "saved" / "updated" / "pending" as appropriate.
+//   • Hash-based routing (#/trip/{id}) so individual trips are
+//     bookmarkable / "Add to Home Screen"-able as deep links.
+//
+// What it deliberately does NOT do:
+//   • The picker. Decision (per architecture-engine-ui-split.md):
+//     planning stays on desktop, mobile is execution-only.
+//   • Mutations beyond notes. Anything that calls a Phase 2
+//     mutator (date edits, day-trip moves, buffer night adds)
+//     still goes through the inline drawTripMode path — those
+//     call sites would 404 from mobile. Item A's mutator
+//     conversions unblock additional mutations.
+//   • Cross-device sync. Same-origin storage events sync across
+//     tabs of the same browser only. True device-to-device sync
+//     is gated on the Supabase migration (plan-supabase-migration.md).
+//
+// New schema field: `destination.travelerNotes` — free-form string,
+// saved on the trip envelope. Independent of the existing `note`
+// field (which carries arrival/departure tags). No engine API
+// added — the field is just data the renderer reads.
+//
+// Path-to-10 progress: MA.1 ✓ (Item B's first concrete round).
+// Items A, C, D, E remain.
+//
 // max-v284 — Patch (post-HX.10): "Show me the best" dead-code removal.
 //
 // The "Show me the best" / "Show all" header toggle had been removed
@@ -3460,7 +3528,7 @@
 // entries for the same city. "removed" detection now uses claim by
 // id rather than name so dropping one of two same-city entries is
 // recognized as removal.
-const CACHE = 'max-v284';
+const CACHE = 'max-v286.1';
 const CORE = ['/', '/manifest.json', '/icon-192.svg', '/icon-512.svg', '/db.js', '/engine-trip.js', '/engine-picker.js', '/picker-ui.js'];
 
 self.addEventListener('install', e => {

@@ -67,7 +67,10 @@ needs it. State encapsulation needs it. drawTripMode removal needs
 it.
 
 ### Item B — Mobile shell as second consumer
-**State:** never started.
+**State:** **MA.1 shipped (May 2026).** Read-only trip view +
+edit-traveler-notes + cross-tab sync via storage events. Validates
+the engine API for the read path. Mutations beyond notes still
+require Phase 2 mutator conversion (Item A).
 
 Recommended sequencing: **don't wait for Item A to finish.** Start
 the mobile shell against `engine-trip.js` as soon as ~half the
@@ -75,16 +78,29 @@ mutators are converted. The mobile attempt finds Phase 2's holes
 faster than introspection does. You'll know an event is missing
 because the mobile view doesn't update.
 
-**First concrete round (MA.1):** create `mobile/index.html` —
-read-only trip view. Loads `db.js` + `engine-trip.js`. Renders
-trip name, destinations as a vertical list, dates. Subscribes to
-`Trip.on('tripChange')` and re-renders. No mutations yet — this is
-the "does the engine API even work without DOM" smoke test.
+**First concrete round (MA.1) — done:** `mobile/index.html` exists.
+Loads `db.js` + `engine-trip.js`, lists trips from
+`MaxDB.index.list()`, opens one via `MaxDB.trip.read(id)`, renders
+destinations as a vertical card list with place / dates / nights.
+Subscribes to MaxDB `tripWritten` AND `window.storage` events for
+cross-tab sync. Adds a `travelerNotes` field per destination,
+edited inline; saved via `MaxDB.trip.write`. Tested headless: trip
+view renders, note edit persists, cross-tab sync propagates.
+
+**Next concrete round (MA.2):** add a second mutation that exercises
+a Phase 2 mutator. Recommended: "mark a hotel booking as confirmed"
+or "edit destination dates" — both touch real trip state and would
+fail today because the corresponding mutator (`applyDateChange`,
+booking-state setters) still calls `drawTripMode`. The mobile-side
+failure tells you which mutator to convert in HY.N.
 
 **Done when:** `mobile/index.html` shows your active trip on a
 phone, updates within 1–2s of a change made on desktop (via Supabase
 sync — see `plan-supabase-migration.md`), and the mobile bundle
 imports zero functions from `index.html` / `picker-ui.js`.
+
+**Same-device cross-tab is already done as of MA.1 via storage events.**
+True cross-device requires Supabase (item not yet started).
 
 **Why mobile, why now:** it's the falsifiability test for the entire
 engine extraction. If you can't build a mobile view, the abstraction

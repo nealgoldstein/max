@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>Max — trip companion</title>
+  <style>
+    /* Phone-first. Black-on-white minimal — match desktop's tone but
+       optimize for thumbs (44px min hit targets, single-column flow). */
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #fafafa;
+      color: #111;
+      font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -webkit-text-size-adjust: 100%;
+    }
+    body {
+      min-height: 100vh;
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    .shell {
+      max-width: 640px;       /* tablets and landscape phones can breathe */
+      margin: 0 auto;
+      padding: 0 14px;
+    }
+    /* ── Top bar ─────────────────────────────────────────────── */
+    .topbar {
+      position: sticky; top: 0; z-index: 10;
+      background: rgba(255, 255, 255, 0.96);
+      backdrop-filter: saturate(180%) blur(8px);
+      -webkit-backdrop-filter: saturate(180%) blur(8px);
+      border-bottom: 1px solid #eee;
+      padding: 10px 14px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .topbar .back {
+      font-size: 14px; color: #1a5fa8; background: none; border: none;
+      padding: 8px 4px; min-width: 44px; min-height: 44px;
+      cursor: pointer; font-family: inherit;
+    }
+    .topbar .title {
+      font-size: 15px; font-weight: 700; flex: 1; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .topbar .sync {
+      font-size: 10px; padding: 4px 8px; border-radius: 10px;
+      background: #f0f0f0; color: #666; font-weight: 600;
+    }
+    .topbar .sync.recent { background: #e7f5ec; color: #2a7a4e; }
+    .topbar .sync.error { background: #fbeae3; color: #c05020; }
+
+    /* ── Trip list ───────────────────────────────────────────── */
+    .triplist { padding: 14px 0; }
+    .triplist .empty {
+      text-align: center; color: #999; padding: 60px 20px;
+      font-size: 14px; line-height: 1.6;
+    }
+    .triplist .empty .hint { margin-top: 14px; font-size: 12px; }
+    .triplist a.tripcard {
+      display: block; padding: 14px 16px; margin-bottom: 10px;
+      background: #fff; border: 1px solid #e8e8e8; border-radius: 10px;
+      text-decoration: none; color: inherit;
+      transition: transform 0.06s ease;
+    }
+    .triplist a.tripcard:active { transform: scale(0.98); }
+    .triplist .name { font-size: 16px; font-weight: 700; }
+    .triplist .meta {
+      font-size: 12px; color: #777; margin-top: 4px;
+      display: flex; gap: 10px; flex-wrap: wrap;
+    }
+
+    /* ── Trip view ───────────────────────────────────────────── */
+    .tripview { padding: 14px 0 80px; }
+    .tripview h1 {
+      font-size: 22px; font-weight: 800; margin: 0 0 4px; letter-spacing: -0.01em;
+    }
+    .tripview .subtitle { color: #777; font-size: 13px; margin-bottom: 18px; }
+
+    .destcard {
+      background: #fff; border: 1px solid #e8e8e8; border-radius: 10px;
+      padding: 14px 16px; margin-bottom: 12px;
+    }
+    .destcard .placerow {
+      display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+    }
+    .destcard .place {
+      font-size: 17px; font-weight: 700; flex: 1; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .destcard .nights {
+      font-size: 11px; color: #888; font-weight: 600;
+      background: #f5f5f5; padding: 3px 8px; border-radius: 8px;
+      flex-shrink: 0;
+    }
+    .destcard .dates { font-size: 12px; color: #666; margin-top: 4px; }
+    .destcard .note-label {
+      font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+      color: #888; margin: 14px 0 6px;
+    }
+    .destcard textarea.note {
+      width: 100%; min-height: 64px; max-height: 240px;
+      font: inherit; font-size: 14px; line-height: 1.5;
+      padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px;
+      background: #fafafa; color: #111;
+      resize: vertical;
+    }
+    .destcard textarea.note:focus {
+      outline: none; border-color: #1a5fa8; background: #fff;
+      box-shadow: 0 0 0 3px rgba(26, 95, 168, 0.12);
+    }
+    .destcard .note-status {
+      font-size: 10px; color: #aaa; margin-top: 4px; height: 12px;
+    }
+    .destcard .note-status.saved { color: #2a7a4e; }
+    .destcard .note-status.error { color: #c05020; }
+
+    /* ── Footer ──────────────────────────────────────────────── */
+    .footer {
+      text-align: center; padding: 24px 16px;
+      font-size: 11px; color: #aaa; line-height: 1.6;
+    }
+    .footer a { color: #888; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <button class="back" id="backBtn" style="display:none;" aria-label="Back to trip list">‹ Trips</button>
+    <div class="title" id="title">Max</div>
+    <div class="sync" id="syncStatus" title="Cross-tab sync status">…</div>
+  </div>
+  <div class="shell">
+    <div id="content" class="triplist"></div>
+  </div>
+  <div class="footer">
+    Mobile companion · changes sync to desktop in the same browser via storage events.<br>
+    Cross-device sync is gated on the Supabase migration (see plan-supabase-migration.md).
+  </div>
+
+  <!-- Shared engine modules — same files as the desktop view. -->
+  <script src="../db.js"></script>
+  <script src="../engine-trip.js"></script>
+
+  <script>
+  (function () {
+    'use strict';
+
+    // ── State ─────────────────────────────────────────────────
+    var $content = document.getElementById('content');
+    var $title   = document.getElementById('title');
+    var $back    = document.getElementById('backBtn');
+    var $sync    = document.getElementById('syncStatus');
+
+    var currentTripId = null;     // null → showing trip list
+    var currentEnvelope = null;   // raw envelope from MaxDB.trip.read
+    var pendingNoteSaves = {};    // destId → timeout handle (debounced save)
+    var lastSyncAt = 0;
+
+    // ── URL routing (?trip=ID renders trip view) ──────────────
+    function parseHash() {
+      var m = location.hash.match(/^#\/trip\/([^/]+)/);
+      return m ? decodeURIComponent(m[1]) : null;
+    }
+    function setHash(tripId) {
+      var target = tripId ? ('#/trip/' + encodeURIComponent(tripId)) : '#';
+      if (location.hash !== target) {
+        try { history.pushState(null, '', target); } catch (e) { location.hash = target; }
+      }
+    }
+
+    // ── Sync status indicator ─────────────────────────────────
+    function setSync(state, msg) {
+      $sync.className = 'sync ' + (state || '');
+      $sync.textContent = msg || '·';
+      $sync.title = msg || '';
+      lastSyncAt = Date.now();
+    }
+    setSync('', 'idle');
+
+    // ── Trip list ─────────────────────────────────────────────
+    function renderTripList() {
+      currentTripId = null;
+      currentEnvelope = null;
+      $back.style.display = 'none';
+      $title.textContent = 'Max';
+      $content.className = 'triplist';
+
+      var trips = (window.MaxDB && MaxDB.index.list()) || [];
+      if (!trips.length) {
+        $content.innerHTML =
+          '<div class="empty">' +
+            'No trips yet on this browser.' +
+            '<div class="hint">Open Max on your desktop in the same browser, build a trip, then refresh this tab.</div>' +
+          '</div>';
+        return;
+      }
+
+      // Most recently saved first.
+      trips = trips.slice().sort(function (a, b) {
+        return (b.savedAt || '').localeCompare(a.savedAt || '');
+      });
+
+      var html = '';
+      trips.forEach(function (t) {
+        var name = escapeHtml(t.name || 'Untitled trip');
+        var meta = [];
+        if (t.dateRange) meta.push(escapeHtml(t.dateRange));
+        else if (t.startDate) meta.push(escapeHtml(t.startDate));
+        if (t.destCount != null) meta.push(t.destCount + ' destination' + (t.destCount === 1 ? '' : 's'));
+        if (t.entryCity) meta.push('In: ' + escapeHtml(t.entryCity));
+        if (t.exitCity) meta.push('Out: ' + escapeHtml(t.exitCity));
+        html +=
+          '<a class="tripcard" href="#/trip/' + encodeURIComponent(t.id) + '">' +
+            '<div class="name">' + name + '</div>' +
+            (meta.length ? '<div class="meta">' + meta.map(function(b){ return '<span>' + b + '</span>'; }).join(' · ') + '</div>' : '') +
+          '</a>';
+      });
+      $content.innerHTML = html;
+    }
+
+    // ── Trip view ─────────────────────────────────────────────
+    function renderTripView(tripId) {
+      currentTripId = tripId;
+      var envelope = (window.MaxDB && MaxDB.trip.read(tripId)) || null;
+      if (!envelope || !envelope.trip) {
+        $content.className = 'triplist';
+        $back.style.display = '';
+        $title.textContent = 'Trip not found';
+        $content.innerHTML =
+          '<div class="empty">' +
+            "Couldn't find that trip on this browser." +
+            '<div class="hint">If it was made on a different device, you\'ll need cross-device sync (Supabase) to see it here.</div>' +
+          '</div>';
+        return;
+      }
+      currentEnvelope = envelope;
+      var trip = envelope.trip;
+      $back.style.display = '';
+      $title.textContent = trip.name || 'Untitled trip';
+      $content.className = 'tripview';
+
+      var dests = trip.destinations || [];
+      var totalNights = dests.reduce(function (s, d) { return s + (d.nights || 0); }, 0);
+      var startDate = dests[0] && dests[0].dateFrom ? dests[0].dateFrom : '';
+      var endDate   = dests.length && dests[dests.length - 1].dateTo ? dests[dests.length - 1].dateTo : '';
+
+      var subtitleBits = [];
+      if (startDate && endDate) subtitleBits.push(formatDateRange(startDate, endDate));
+      if (totalNights) subtitleBits.push(totalNights + ' night' + (totalNights === 1 ? '' : 's'));
+      if (dests.length) subtitleBits.push(dests.length + ' stop' + (dests.length === 1 ? '' : 's'));
+
+      var html =
+        '<h1>' + escapeHtml(trip.name || 'Untitled trip') + '</h1>' +
+        (subtitleBits.length ? '<div class="subtitle">' + subtitleBits.map(escapeHtml).join(' · ') + '</div>' : '');
+
+      if (!dests.length) {
+        html += '<div class="empty">No destinations yet. Add some on desktop, then come back.</div>';
+      } else {
+        dests.forEach(function (d, i) {
+          html += renderDestCard(d, i);
+        });
+      }
+      $content.innerHTML = html;
+
+      // Wire up note textareas.
+      Array.prototype.forEach.call($content.querySelectorAll('textarea.note'), function (ta) {
+        ta.addEventListener('input', onNoteInput);
+        ta.addEventListener('blur', onNoteBlur);
+      });
+    }
+
+    function renderDestCard(d, idx) {
+      var place   = escapeHtml(d.place || ('Stop ' + (idx + 1)));
+      var nights  = (d.nights != null ? d.nights : 0);
+      var dateStr = (d.dateFrom && d.dateTo) ? formatDateRange(d.dateFrom, d.dateTo) :
+                    d.dateFrom ? formatDate(d.dateFrom) : '';
+      var notes   = d.travelerNotes || '';
+      var destKey = d.id || ('idx-' + idx);
+      return (
+        '<div class="destcard" data-destkey="' + escapeHtml(destKey) + '">' +
+          '<div class="placerow">' +
+            '<div class="place">' + place + '</div>' +
+            (nights ? '<div class="nights">' + nights + 'n</div>' : '') +
+          '</div>' +
+          (dateStr ? '<div class="dates">' + escapeHtml(dateStr) + '</div>' : '') +
+          '<div class="note-label">Notes from the road</div>' +
+          '<textarea class="note" placeholder="What you ate, who you met, what to remember…">' +
+          escapeHtml(notes) +
+          '</textarea>' +
+          '<div class="note-status" data-status="' + escapeHtml(destKey) + '"></div>' +
+        '</div>'
+      );
+    }
+
+    // ── Note edit + debounced save ────────────────────────────
+    function onNoteInput(ev) {
+      var ta = ev.currentTarget;
+      var card = ta.closest('.destcard');
+      if (!card) return;
+      var destKey = card.getAttribute('data-destkey');
+      var status = card.querySelector('[data-status]');
+      if (status) {
+        status.className = 'note-status';
+        status.textContent = 'editing…';
+      }
+      // Debounce — save 600ms after last keystroke. Blur forces immediate.
+      if (pendingNoteSaves[destKey]) clearTimeout(pendingNoteSaves[destKey]);
+      pendingNoteSaves[destKey] = setTimeout(function () {
+        saveNote(destKey, ta.value);
+      }, 600);
+    }
+    function onNoteBlur(ev) {
+      var ta = ev.currentTarget;
+      var card = ta.closest('.destcard');
+      if (!card) return;
+      var destKey = card.getAttribute('data-destkey');
+      if (pendingNoteSaves[destKey]) {
+        clearTimeout(pendingNoteSaves[destKey]);
+        delete pendingNoteSaves[destKey];
+      }
+      saveNote(destKey, ta.value);
+    }
+
+    function saveNote(destKey, text) {
+      if (!currentTripId || !currentEnvelope) return;
+      var trip = currentEnvelope.trip;
+      if (!trip || !trip.destinations) return;
+      var dest = findDestByKey(trip.destinations, destKey);
+      if (!dest) return;
+      // No-op if unchanged.
+      var prev = dest.travelerNotes || '';
+      if (prev === text) {
+        markStatus(destKey, 'saved', text ? 'saved' : '');
+        return;
+      }
+      dest.travelerNotes = text;
+      // Persist via MaxDB. Bumps tripWritten which the desktop's
+      // own subscriber picks up (it'll re-render via its tripChange
+      // path); cross-tab catches it via the storage event below.
+      var ok = false;
+      try { ok = MaxDB.trip.write(currentTripId, currentEnvelope); }
+      catch (e) { ok = false; }
+      if (ok) {
+        markStatus(destKey, 'saved', 'saved');
+        setSync('recent', 'saved');
+      } else {
+        markStatus(destKey, 'error', 'save failed');
+        setSync('error', 'save failed');
+      }
+    }
+
+    function markStatus(destKey, kind, text) {
+      var node = $content.querySelector('[data-status="' + cssEscape(destKey) + '"]');
+      if (!node) return;
+      node.className = 'note-status ' + (kind || '');
+      node.textContent = text || '';
+      // Fade out the "saved" affordance after a moment.
+      if (kind === 'saved' && text) {
+        setTimeout(function () {
+          if (node.textContent === text) { node.textContent = ''; }
+        }, 1800);
+      }
+    }
+
+    function findDestByKey(dests, key) {
+      for (var i = 0; i < dests.length; i++) {
+        var d = dests[i];
+        var dKey = d.id || ('idx-' + i);
+        if (dKey === key) return d;
+      }
+      return null;
+    }
+
+    // ── Cross-tab sync ────────────────────────────────────────
+    // When desktop writes a trip, our same-origin storage event
+    // fires. Re-read the trip and re-render.
+    window.addEventListener('storage', function (ev) {
+      if (!ev.key) return;
+      var TRIP_PREFIX = (MaxDB && MaxDB._internal && MaxDB._internal.keys && MaxDB._internal.keys.trip) || 'max-trip-';
+      var INDEX_KEY   = (MaxDB && MaxDB._internal && MaxDB._internal.keys && MaxDB._internal.keys.index) || 'max-trips-index';
+      if (ev.key === INDEX_KEY) {
+        // Trip list metadata changed (new trip, rename, deletion).
+        if (currentTripId === null) renderTripList();
+        return;
+      }
+      if (ev.key.indexOf(TRIP_PREFIX) === 0) {
+        var changedId = ev.key.slice(TRIP_PREFIX.length);
+        if (currentTripId === changedId) {
+          // The user is currently editing notes — don't blow away
+          // their textarea content if they're mid-input. Only
+          // re-render if no field has focus on this page.
+          var active = document.activeElement;
+          var midEdit = active && active.tagName === 'TEXTAREA' && active.classList.contains('note');
+          if (!midEdit) {
+            renderTripView(currentTripId);
+            setSync('recent', 'updated');
+          } else {
+            setSync('recent', 'pending');
+          }
+        }
+      }
+    });
+
+    // Same-origin in-process events. Mostly redundant with storage
+    // events when desktop and mobile are in different tabs, but
+    // covers the same-tab case (e.g., during testing).
+    if (window.MaxDB && MaxDB.on) {
+      MaxDB.on('tripWritten', function (payload) {
+        if (!payload || payload.id !== currentTripId) return;
+        setSync('recent', 'saved');
+      });
+    }
+
+    // ── Hash routing ──────────────────────────────────────────
+    function route() {
+      var tripId = parseHash();
+      if (tripId) renderTripView(tripId);
+      else renderTripList();
+    }
+    window.addEventListener('hashchange', route);
+    window.addEventListener('popstate', route);
+    $back.addEventListener('click', function () {
+      setHash(null);
+      renderTripList();
+    });
+
+    // ── Helpers ───────────────────────────────────────────────
+    function escapeHtml(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+    function cssEscape(s) {
+      // Conservative — only quotes are an issue for our [data-status="..."] selector.
+      return String(s).replace(/"/g, '\\"');
+    }
+    function formatDate(iso) {
+      // 'YYYY-MM-DD' → 'Jul 4'
+      if (!iso) return '';
+      var parts = String(iso).split('-');
+      if (parts.length < 3) return iso;
+      var d = new Date(parts[0] + '-' + parts[1] + '-' + parts[2] + 'T12:00:00');
+      if (isNaN(d.getTime())) return iso;
+      var m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+      return m + ' ' + d.getDate();
+    }
+    function formatDateRange(a, b) {
+      var fa = formatDate(a), fb = formatDate(b);
+      if (!fa) return fb;
+      if (!fb) return fa;
+      if (fa === fb) return fa;
+      return fa + ' – ' + fb;
+    }
+
+    // ── Boot ──────────────────────────────────────────────────
+    if (!window.MaxDB) {
+      $content.innerHTML =
+        '<div class="empty">' +
+          'MaxDB module failed to load.' +
+          '<div class="hint">This page expects to be served from the same folder as <code>db.js</code>. Check the path: <code>../db.js</code>.</div>' +
+        '</div>';
+      setSync('error', 'no MaxDB');
+      return;
+    }
+    route();
+    setSync('', 'idle');
+  })();
+  </script>
+</body>
+</html>
