@@ -402,6 +402,28 @@ When to revisit: after multi-destination journey concept (item 3) is
 solid, or as a quick polish round. The popup infrastructure already
 exists; this is just a bigger prompt + a section divider.
 
+### 11. Swap Nominatim for a keyed geocoder
+**Status:** deferred (Round HX.10, May 2026).
+`generateCityData` and the picker's coord-fill path call the public
+Nominatim endpoint (`https://nominatim.openstreetmap.org/search`).
+That endpoint is rate-limited to ~1 req/sec for shared use; on a
+trip with 5+ candidates the picker hammers it and starts returning
+`429 Too Many Requests`. The 429 response also omits CORS headers,
+so the failure surfaces to the browser as a CORS error on top of
+the rate-limit error — confusing both ways.
+
+A keyed geocoder fixes both. Mapbox, Google Geocoding, and OpenCage
+all return proper CORS headers and offer free-tier limits high
+enough we'd never hit them in normal use. Mapbox is probably the
+easiest swap (key in localStorage like the Anthropic key, same
+shape of response). OpenCage is cheapest at scale. Google has the
+best coverage but the most paperwork.
+
+When to revisit: when picker flakiness on long trips becomes a real
+annoyance, or when getting Max in front of more than one person at
+a time. Until then, stay on Nominatim and accept the occasional
+missing pin.
+
 ### 8. Picker night-count vs trip night-count mismatch by 1
 **Status:** open.
 Suspected cause: one destination's `c.nights` override in
@@ -414,3 +436,149 @@ side-by-side with trip's destination nights after build, find the
 divergent place. Once we know which place(s) drift, the fix is either
 better key normalization or making the override seed all kept places
 (including route-only ones at 0 nights).
+
+---
+
+## Architecture deferred items — path to 10
+
+The HX series (Rounds HX through HX.10, plus the v283 / v284 patches
+in May 2026) extracted a lot of pure logic and cleanest-bite DOM
+helpers out of `renderCandidateCards`. The picker is meaningfully
+healthier than it was. But the architecture isn't done.
+
+A previous session called the architecture a 7. After HX.5–HX.10 +
+the post-HX.10 cleanups, the honest assessment is closer to a 6.5: we
+made the inline picker logic tested and reusable, but the larger
+goals from `architecture-engine-ui-split.md` are mostly untouched.
+
+### 12. Phase 2 — finish the trip-engine event system
+**Status:** open (the original architecture doc's Phase 2 is partly
+shipped via `replaceTrip` emitting `tripChange`, but most TE*
+mutators still call `drawTripMode` / `drawDestMode` directly).
+
+**The work:** convert each of these to mutate state, emit
+`tripChange` (and `mapDataChange` if relevant), and stop calling DOM
+renderers directly. The UI subscribes once and decides what to redraw:
+
+- `_ftSchedulePeerDayTrip`, `addDayTripToDay`, `removeDayTripFromDay`,
+  `removeDayTripFromDayItem`, `makeDayTrip`, `ungroupDayTrip`,
+  `addBufferNight`, `reverseTripOrder`, `executeMoveDest`, `delDest`,
+  `applyDateChange`.
+
+**Why it matters:** until this is done, `engine-trip.js` isn't truly
+DOM-free and **mobile can't consume it.** This is the one thing
+blocking the architecture from earning its abstraction cost.
+
+**Estimate:** 3–5 dedicated rounds of one-mutator-at-a-time work,
+with each round adding a tripChange-listener test against the trip
+view to catch missing redraws.
+
+**When to revisit:** before any mobile work. After this lands, the
+trip engine has a clean public surface and you can build a second UI.
+
+### 13. Big DOM blocks still inline in renderCandidateCards
+**Status:** open.
+
+The renderer is ~600 lines. The cleanest standalone DOM blocks moved
+into picker-ui in HX.5–HX.10. What's left is harder:
+
+- `_renderMustDoSection` (~120 lines): the per-must-do section
+  renderer. Reads `candByPrimary`, `_ceSectionExpanded` (now mostly
+  dead post-cleanup), `bestPickFirstSort`, `renderCard`. Internal
+  routes/highlights/empty-state hint logic.
+- `renderCard` (~200 lines): the per-candidate card. Compact + expanded
+  modes, badge logic, keep/reject buttons, alsoHere chip, comparison
+  link, etc.
+- `_renderTripDetailsStrip` (~150 lines): entry/exit form +
+  transportation pill row.
+- Time-lens draft-itinerary rendering (~80 lines): travel legs
+  inferred between adjacent stops, route-pair lookup table.
+
+**Why it matters:** these are the surfaces a future round (or future
+designer) most wants to change without grokking the whole picker.
+They're also the places where the next inline-only feature creeps
+in if the seam isn't drawn.
+
+**Estimate:** one dedicated round per block (HX.11 through HX.14 or
+similar). Each is ~1–2 hours of focused move-and-test.
+
+### 14. State encapsulation behind engine / picker-ui APIs
+**Status:** open.
+
+The picker still relies on a flock of file-scope globals:
+`_tb`, `_ceMap`, `_ceMarkers`, `_ceLens`, `_ceCardExpanded`,
+`_mdcItems`, `_epCache`, `_edMarkers`, `_edActivePopupId`,
+`_tbEntryPointsVisible`, `_initBounds`, `_initCenter`, `_initZoom`,
+`_ceSelectedCandId`, `_ceMarkerById`, `_ceRejectedExpanded`,
+`_tripDetailsExpanded`. They're shared mutable state across
+`index.html`, `engine-picker.js`, and `picker-ui.js`.
+
+**The work:** push them behind owners.
+- Picker draft state (`_tb`, `_mdcItems`) → `MaxEnginePicker.state`
+  (already partly true — `state` is a getter for `_tb`; tighten so
+  external code uses `MaxEnginePicker.set/getField` instead of
+  reaching into `_tb`).
+- Picker UI state (`_ceMap`, `_ceMarkers`, `_ceLens`,
+  `_ceCardExpanded`, etc.) → `MaxPickerUI.mapState` and
+  `MaxPickerUI.viewState`.
+- Entry-point cache (`_epCache`, `_edMarkers`, `_edActivePopupId`,
+  `_tbEntryPointsVisible`) → `MaxPickerUI.entryPoints`.
+
+**Why it matters:** module boundaries don't mean much when every
+module can `_ceMap.panTo(...)` directly. Encapsulation is the
+"is this engine layer real?" test.
+
+**Estimate:** three half-days. Smaller than a phase, bigger than a
+single round.
+
+### 15. Mobile UI as second consumer (Phase 4)
+**Status:** open. Never started.
+
+Per `architecture-engine-ui-split.md`, this is the abstraction's
+proof-of-life. Mobile loads `db.js` + `engine-trip.js` + a thin
+mobile UI; subscribes to `Trip.on('tripChange')`; calls
+`Trip.scheduleDayTrip(...)` etc. Same domain as desktop, same
+`sw.js`, served from a `/mobile` subdir.
+
+**Why now (or near-now):** building a real second consumer is the
+cheapest way to find out which engine APIs are actually right and
+which were extracted prematurely. Without a second consumer, you
+can't tell — every API call site is the desktop renderer, and the
+desktop renderer was structured with the engine in mind, so it can't
+falsify the design.
+
+**Recommended sequencing:**
+
+- Path A: finish item 12 (Phase 2 events) first. Then mobile.
+  Cleaner, slower.
+- **Path B (recommended):** start a tiny mobile shell now against
+  `engine-trip.js` even with its incomplete event system. The mobile
+  attempt will show you which mutators don't emit, and you'll fix
+  Phase 2 driven by a real user instead of by introspection. Faster,
+  riskier, more honest.
+
+**Estimate:** open-ended. A bare-bones mobile read-only trip view is
+a week. A mobile picker is months and probably never (per the doc:
+"never — desktop-only for the foreseeable future"). The picker stays
+desktop; mobile only consumes the trip engine.
+
+### 16. drawTripMode / drawDestMode — fold into Places page
+**Status:** open (mentioned in `STATE.md` since the original picker/
+Places merge but never landed).
+
+`drawTripMode` is still reached on first close of the picker overlay.
+~30 inline call sites. Until it's gone, there are two trip surfaces
+(the legacy day-by-day view and the Places-as-itinerary lens) and
+the user lives in both.
+
+**The work:** fold the trip view's features (per-destination city
+data, bookings, hero map, day-by-day legs) into the Places page's
+time lens. Then delete `drawTripMode` and rewire its callers to
+re-render the time lens.
+
+**Why it matters:** "one surface" was the original picker/Places
+goal. Two surfaces means twice the inline state, twice the redraw
+paths, twice the surface area for new bugs.
+
+**Estimate:** big — probably a multi-round arc on its own. Worth a
+dedicated audit doc before starting.

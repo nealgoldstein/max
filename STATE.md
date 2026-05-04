@@ -5,6 +5,14 @@
 > This document is preserved as the best single-page onboarding to the codebase's data
 > structures, working rules, and original intent.
 
+> **Update (May 2026, post-HX series):** the engine/UI split from
+> `architecture-engine-ui-split.md` is partly shipped — Phases 0, 1, 3
+> done; Phase 2 in progress; Phase 4 (mobile) not started.
+> **Open `path-to-10.md` first** when picking the codebase up after a
+> break. That file has the action plan for the remaining architecture
+> work, with concrete first-round names for each item, plus a
+> definition of "done" so we don't drift.
+
 Single-file HTML travel-planning web app. Everything lives in `index.html`. Deploys to GitHub Pages at `nealgoldstein.github.io/max`. Open the file directly in a browser to test locally.
 
 ## What's already built
