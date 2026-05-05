@@ -1,3 +1,223 @@
+// max-v292.1 — Hotfix on MA.4: I forgot to add the
+// `<script src="trip-ui.js">` tag to index.html. Mobile loaded it
+// directly; desktop didn't. The inline mkItinItem delegator threw
+// `ReferenceError: MaxTripUI is not defined` on every render, which
+// the Playwright spec caught immediately. (This is exactly why the
+// spec was paired with the lift.)
+//
+// Fix: one new <script> line. trip-ui.js loads after picker-ui.js,
+// before the inline <style>. No other code changes.
+//
+// max-v292 — Round MA.4: actual lift of mkItinItem + mkDay.
+//
+// What MA.3 promised but didn't ship — moving the ~370-line
+// mkItinItem body out of index.html — happens here. The function
+// now lives in trip-ui.js as `renderItinItemFull`. Its 17 cross-
+// references to inline globals (fS, autoSave, drawDestMode,
+// getDest, _sightExternalUrl, _openSightUrlEditor, sStory, togMov,
+// toggleSightBookForm, delS, fmtD, checkTimeConflicts,
+// removeDayTripFromDayItem, ungroupDayTrip, _generatedCityData,
+// _activeDmSection, sidCtr, highlightSightOnMap) are all prefixed
+// `global.X` so they resolve from the IIFE's scope chain.
+//
+// Inline desktop's mkItinItem and mkDay are now thin delegators —
+// 5 lines each — that route through MaxTripUI.renderItinItem and
+// MaxTripUI.renderDay. The function NAMES are preserved so the
+// dozens of inline call sites (drag-drop replacements, scheduled-
+// item rebuilds, onclick handlers in row buttons) keep working.
+//
+// index.html went from 24,174 → 23,794 lines (-380). Both desktop
+// (full mode) and mobile (compact mode) now flow through one body
+// in one file, dispatched by `opts.compact`.
+//
+// New regression spec at tests/playwright/itin-item.spec.js
+// exercises every button on every row type to catch any reference-
+// prefix typo. In-sandbox smoke (against mobile/index.html with
+// stubbed globals) confirmed:
+//   * 4 row types render (sight-must, sight-nice, restaurant, daytrip)
+//   * Priority dot toggles must ↔ nice
+//   * Done toggles s.done
+//   * Daytrip "Plan transport" + "Cancel day trip" render
+//   * All 33 `global.X` references resolve without throwing
+//   * No console / page errors
+//
+// Path-to-10 Item C: mkItinItem + mkDay both ticked.
+//
+// max-v291 — Round MA.3: unified itinerary-item entry point.
+//
+// New surface in trip-ui.js:
+//   MaxTripUI.renderItinItem(s, dayId, destId, opts)
+//     opts.compact: true  → renderItinItemCompact (mobile path)
+//     opts.compact: false → delegate to window.mkItinItem (the
+//                           inline 370-line desktop renderer; not yet
+//                           moved into trip-ui.js)
+//
+//   MaxTripUI.renderDay(day, destId, opts)
+//     Now picks the item renderer via opts.compact, routing
+//     through renderItinItem (which itself dispatches).
+//
+// Mobile updated to call renderDay({compact: true}) so the routing
+// is visible in code instead of mobile reaching directly for the
+// compact helper.
+//
+// HONEST SCOPE NOTE: this round CLAIMS the API surface but does NOT
+// move the inline mkItinItem body (~370 lines, 17 cross-references
+// to other inline globals: fS, autoSave, drawDestMode, getDest,
+// _sightExternalUrl, _openSightUrlEditor, sStory, togMov,
+// toggleSightBookForm, delS, fmtD, checkTimeConflicts,
+// removeDayTripFromDayItem, ungroupDayTrip, _generatedCityData,
+// _activeDmSection, sidCtr). MA.4 does the actual lift, in a round
+// dedicated to careful Playwright coverage. After MA.4, both
+// surfaces flow through one body in trip-ui.js, gated only by a
+// `compact` flag on the buttons/affordances.
+//
+// Why this matters even without moving code: the two surfaces now
+// have one named contract instead of two. Any future caller goes to
+// MaxTripUI.renderItinItem instead of guessing whether to call the
+// inline or the compact. MA.4's lift becomes mechanical instead of
+// API-redesigning.
+//
+// max-v290.2 — Hotfix #2 on v290's priority dot hit target: even
+// !important class style wasn't winning the cursor fight on the
+// user's browser. Set cursor:pointer INLINE on the dot button —
+// inline beats both class !important and the row's inline grab
+// without ambiguity. Also draggable=false on the button so it can't
+// participate in drag detection at all.
+//
+// max-v290.1 — Hotfix on v290's priority dot hit target: cursor
+// wasn't switching to pointer on hover. The row's inline
+// `cursor:grab` was winning over the .item-dot-wrap class rule on
+// some browsers. Added !important on the wrap's cursor + forced
+// cursor:pointer on all descendants so the affordance is visible
+// regardless of where on the wrap the user hovers.
+//
+// max-v290 — Symmetric desktop ↔ mobile sync + priority-dot hit
+// target + mobile change-flash.
+//
+// Three small things shipped together:
+//
+//   1. Desktop storage listener.
+//      Mirror of mobile's listener: window 'storage' event triggers
+//      a re-load + re-render when another tab writes the active
+//      trip's localStorage key. Mirrors mobile's mid-edit guard so
+//      an open textarea/input on desktop doesn't get clobbered;
+//      shows "Other tab edited this trip — switch focus to refresh"
+//      and waits for the next storage event after blur. Closes the
+//      mobile → desktop side of the sync that was previously
+//      manual-refresh-only.
+//
+//   2. Mobile flash on changed destination card.
+//      mobile/index.html keeps a per-render fingerprint of each
+//      destination's itinerary (day → item ids + names + done +
+//      priority). After a render, any destination whose fingerprint
+//      changed gets a 1.2s yellow flash. Lets the user see at a
+//      glance which card just updated when desktop pushed a change.
+//
+//   3. Priority-dot hit target.
+//      The 7px .item-dot-sight on each Itinerary row was too small
+//      to click reliably — and on slow clicks the row's draggable
+//      ate the event. Now wrapped in a .item-dot-wrap button with
+//      transparent ~22px hit area (padding offset by negative
+//      margin to keep layout unchanged), cursor:pointer, hover
+//      preview, focus-visible outline, stopPropagation so drag
+//      detection can't intercept.
+//
+// max-v289 — Round MA.2: shared trip-view rendering seam.
+//
+// New file: trip-ui.js. Mobile uses it; desktop will switch in MA.3.
+// Path-to-10 Item C ("big DOM blocks still inline in
+// renderCandidateCards / drawDestMode") gets its first chip out:
+// mkDay/mkItinItem now have a shared peer (renderDay/
+// renderItinItemCompact) that mobile consumes.
+//
+// Why a shared SEAM in this round, not the full lift:
+//   The desktop's mkItinItem is ~330 lines — drag handles, time
+//   editor, booking forms, day-trip sub-rows w/ transport buttons +
+//   suggestion chips. Lifting that whole + adding a `compact` flag
+//   was tempting but biggish for one round, and would put the entire
+//   destination view at risk if the lift broke. Instead this round
+//   ships:
+//
+//   • trip-ui.js — the new module, IIFE pattern matching picker-ui.js
+//   • MaxTripUI.renderItinItemCompact — minimal sight/restaurant/
+//     daytrip row: priority dot, name (with tap-to-highlight via the
+//     v287 highlightSightOnMap), optional time, done indicator,
+//     inline note. No buttons, no drag, no edit — read-mostly.
+//   • MaxTripUI.renderDay — same .dayblock/.dayhdr/.slist scaffolding
+//     desktop uses, so the visual language matches.
+//   • Mobile destination cards now show day-by-day Itinerary inline
+//     under the Notes textarea, populated via MaxTripUI.renderDay.
+//   • Empty days are skipped; a card with no item-having days shows
+//     "No items planned yet — see desktop to add some."
+//
+// MA.3 will lift the full mkItinItem here with a `compact` flag,
+// at which point both surfaces call the same code and differ only
+// in which buttons render. After that, the path-to-10 Item C list
+// for renderCandidateCards still has _renderMustDoSection,
+// renderCard, _renderTripDetailsStrip, time-lens — but the
+// destination view's biggest two functions are out.
+//
+// max-v288 — Differentiate the two "tell us about the trip" fields.
+//
+// Two textareas in the brief used to overlap heavily — both asking
+// "tell us about you / pace / prior experience / what you'd
+// compromise on" in slightly different words. Reframed each so they
+// answer different questions:
+//
+//   Field 1 — _tb.placeContext (right after picking the place,
+//   on the brief's first step):
+//     "Why this place? What's drawing you?"
+//     Examples: "always wanted to see the Alps", "my grandmother
+//     grew up there", "honeymoon", "scenic-rail trip we've put off
+//     for years". Destination framing only — the sentence behind
+//     the trip.
+//
+//   Field 2 — _tb.aboutTrip (later in brief, was "Anything else"):
+//     "Who's traveling? How do you travel?"
+//     Examples: "Couple in our 60s, slow pace, first time in the
+//     region. Would skip a touristy day-trip; wouldn't skip a
+//     unique view." Party + pace + experience + compromises.
+//
+// Both placeholder + label/section-header copy updated. The data
+// fields and engine paths are untouched — the LLM still reads both
+// as prose; this is purely UX clarity. Two callsites for Field 2
+// (regular brief at line ~8988 and place-mode brief at line ~9242).
+//
+// max-v287.3 — Hotfix #3 on the sight-tap pulse: I wired the click
+// onto the wrong renderer. Two row builders existed in this file —
+// mkSight (legacy, no longer on the live render path) and
+// mkItinItem (what the Itinerary tab actually calls). v287 wired
+// mkSight; clicking sight names did nothing because those rows
+// were built by mkItinItem. Wired correctly now.
+//
+// max-v287.2 — Hotfix #2 on the sight-tap pulse: removed the `transform:
+// scale(…)` keyframes. CSS animations override inline styles, and
+// Leaflet positions markers via inline `transform: translate3d(...)`.
+// The animating transform was snapping the marker to the pane origin
+// during the pulse, making the icon "blink" off-screen instead of
+// pulsing in place. Now box-shadow is the only animated property —
+// gold rings ripple outward from a marker that stays put.
+//
+// max-v287.1 — Hotfix on the sight-tap pulse: filter:drop-shadow gold
+// halo wasn't visible in Leaflet's marker pane (filter clipping
+// against the parent pane on some browsers). Switched to box-shadow
+// rings that ripple outward — same gold, visible everywhere.
+//
+// max-v287 — Tap a sight name in the destination view's Itinerary
+// → its pin highlights on the main map.
+//
+// Adds: a global _mainMarkerByItemId index built up inside addPin
+// (keyed by item.id), reset in clearMainMarkers. Plus a helper
+// highlightSightOnMap(sightId) that flies the map to that marker,
+// opens its tooltip briefly, and runs a CSS pulse on the pin
+// element (gold-glow filter, 1.6s).
+//
+// mkSight wires the sight-name span's onclick to call the helper.
+// The name now has a hover background and pointer cursor so it
+// reads as tappable.
+//
+// No engine API change — this is pure desktop UI plumbing.
+//
 // max-v286.1 — Hotfix: desktop notes save was failing because v286
 // used trip.id (undefined; the inline script keys trips by the
 // _currentTripId global) instead of localSave(). Repointed at
@@ -3528,7 +3748,7 @@
 // entries for the same city. "removed" detection now uses claim by
 // id rather than name so dropping one of two same-city entries is
 // recognized as removal.
-const CACHE = 'max-v286.1';
+const CACHE = 'max-v292.1';
 const CORE = ['/', '/manifest.json', '/icon-192.svg', '/icon-512.svg', '/db.js', '/engine-trip.js', '/engine-picker.js', '/picker-ui.js'];
 
 self.addEventListener('install', e => {

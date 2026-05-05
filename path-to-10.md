@@ -87,12 +87,32 @@ cross-tab sync. Adds a `travelerNotes` field per destination,
 edited inline; saved via `MaxDB.trip.write`. Tested headless: trip
 view renders, note edit persists, cross-tab sync propagates.
 
-**Next concrete round (MA.2):** add a second mutation that exercises
-a Phase 2 mutator. Recommended: "mark a hotel booking as confirmed"
-or "edit destination dates" — both touch real trip state and would
-fail today because the corresponding mutator (`applyDateChange`,
-booking-state setters) still calls `drawTripMode`. The mobile-side
-failure tells you which mutator to convert in HY.N.
+**Round MA.2 — done (May 2026).** Shared trip-view rendering seam:
+new `trip-ui.js` with `MaxTripUI.renderDay` + `renderItinItemCompact`.
+Mobile destination cards now render day-by-day Itinerary inline
+(read-mostly: priority dot, name with tap-to-highlight, time,
+done badge, inline notes). Visual language matches desktop's
+`.dayblock` / `.srow` / `.sname`. Empty days suppressed.
+
+**Round MA.3 — done (May 2026, claims-only).** Unified the API
+surface: `MaxTripUI.renderItinItem(s, dayId, destId, opts)` now
+dispatches on `opts.compact` (compact → in-file renderer; full →
+delegate to inline `window.mkItinItem`). Mobile now calls
+`renderDay({compact: true})` so the routing is explicit. The full
+~370-line mkItinItem body is still inline in `index.html` —
+**MA.3 did not move code**, just locked the contract. Honest
+scope-limit; lifting all 17 cross-references to inline globals
+(fS, autoSave, drawDestMode, getDest, etc.) is risky enough to
+warrant its own round.
+
+**Round MA.4 — done (May 2026).** Lifted. See Item C's checkbox
+above. Spec at `tests/playwright/itin-item.spec.js`.
+
+**Round MA.5 candidate:** add a second mobile mutation that drives
+a real Phase 2 mutator. Recommended: "mark item done" — exercises
+the `mDone`/`uDone` path. Or "edit destination dates" via the
+`applyDateChange` path. Either would force converting one of the
+TODO(path-to-10:A) mutators to emit `tripChange`.
 
 **Done when:** `mobile/index.html` shows your active trip on a
 phone, updates within 1–2s of a change made on desktop (via Supabase
@@ -112,6 +132,17 @@ isn't real. Better to find that out at ~50% Phase 2 done than at
 
 The renderer is ~600 lines. HX.5–HX.10 took the easy bites. The
 remaining four are bigger but each is self-contained:
+- [x] **MA.2:** `mkDay` + `mkItinItem`. Shared peer in `trip-ui.js`
+  (`renderDay` + `renderItinItemCompact`) shipped May 2026 — mobile
+  consumes; desktop still has its inline rich version. MA.3 unifies
+  via a `compact` flag.
+- [x] **MA.4 (May 2026):** Full mkItinItem body (~370 lines) lifted
+  into `trip-ui.js` as `renderItinItemFull`. 17 cross-references to
+  inline globals prefixed `global.X`. Inline desktop's `mkItinItem`
+  and `mkDay` are 5-line delegators. `index.html` shrunk by 380
+  lines. Regression spec at `tests/playwright/itin-item.spec.js`
+  covers every button on every row type. **Two of Item C's biggest
+  checkboxes — mkItinItem and mkDay — done.**
 - [ ] **HX.11:** `_renderMustDoSection` (~120 lines). Per-must-do
   section: header, drop button, route arrow, endpoint highlights,
   empty-state hint, cards. Calls `renderCard`, `_addCandidateMarker`,

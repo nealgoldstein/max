@@ -25,6 +25,11 @@
      picker's DOM rendering. Today it holds one helper
      (_renderPickerCategoryNav); future rounds move more in. -->
 <script src="picker-ui.js?v=1"></script>
+<!-- Round MA.2/MA.4: trip-view rendering shared with mobile.
+     Holds renderItinItem (full mode = the lifted mkItinItem body)
+     + renderItinItemCompact (mobile path) + renderDay. The inline
+     mkItinItem and mkDay below are 5-line delegators into here. -->
+<script src="trip-ui.js?v=1"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#e8e8e8;color:#111;font-size:14px;line-height:1.6;}
@@ -319,6 +324,22 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .item-dot-sight{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
 .item-dot-sight.must{background:#111;}
 .item-dot-sight.nice{background:transparent;border:1.5px solid #ccc;}
+/* v290: bigger hit target around the priority dot. Padding enlarges
+   the click area to ~22px; the negative margin keeps surrounding
+   layout untouched so existing rows don't shift. !important on
+   cursor because the parent row sets cursor:grab inline (drag
+   affordance) — without !important, hovers anywhere on the row
+   show grab, including over the dot wrap. */
+.item-dot-wrap{
+  background:none;border:none;padding:7px;margin:-7px -3px -7px -7px;
+  cursor:pointer !important;flex-shrink:0;font-family:inherit;line-height:0;
+  display:inline-flex;align-items:center;justify-content:center;
+  border-radius:50%;
+}
+.item-dot-wrap *{ cursor:pointer !important; }
+.item-dot-wrap:hover .item-dot-sight.nice{border-color:#1a5fa8;}
+.item-dot-wrap:hover .item-dot-sight.must{box-shadow:0 0 0 2px #ddd;}
+.item-dot-wrap:focus-visible{outline:2px solid #1a5fa8;outline-offset:1px;}
 .item-dot-restaurant{font-size:11px;flex-shrink:0;line-height:1;width:14px;text-align:center;}
 /* Add item row */
 .itin-add-row{display:flex;gap:4px;padding:3px 0 5px;align-items:center;padding-left:20px;}
@@ -498,7 +519,22 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
 .pdot{width:7px;height:7px;border-radius:50%;flex-shrink:0;cursor:pointer;}
 .pdot.must{background:#111;}
 .pdot.nice{background:transparent;border:1.5px solid #ccc;}
-.sname{font-size:12px;color:#111;flex:1;line-height:1.4;}
+.sname{font-size:12px;color:#111;flex:1;line-height:1.4;cursor:pointer;border-radius:3px;padding:1px 3px;margin:-1px -3px;transition:background 0.15s;}
+.sname:hover{background:#eef4fc;}
+/* v287.2: pulse animation for the map pin when a sight name is tapped.
+   No `transform` in the keyframes — CSS animations override inline
+   styles, and Leaflet positions every marker via inline
+   `transform: translate3d(...)`. Animating transform (even a scale)
+   would clobber Leaflet's positioning during the animation, snapping
+   the marker to the pane origin and making it look like nothing
+   happened (or worse, the icon disappears). box-shadow is the
+   highlight; it doesn't fight Leaflet for the transform property. */
+@keyframes map-pin-pulse-kf {
+  0%   { box-shadow: 0 0 0 0   rgba(255, 179, 0, 0.95); }
+  40%  { box-shadow: 0 0 0 12px rgba(255, 179, 0, 0.55); }
+  100% { box-shadow: 0 0 0 28px rgba(255, 179, 0, 0); }
+}
+.map-pin-pulse { animation: map-pin-pulse-kf 1.6s ease-out 1; }
 .sacts{display:flex;gap:2px;}
 
 .sa{font-size:10px;font-family:inherit;padding:2px 6px;border-radius:4px;border:1px solid #e8e8e8;background:#fff;color:#999;cursor:pointer;}
@@ -5762,9 +5798,9 @@ function renderTripStep1Place(){
     +'<label style="display:block;font-size:11px;font-weight:600;color:#333;margin-bottom:6px;">The place</label>'
     +'<input id="tb-place-name" class="tb-act-add-inp" placeholder="e.g. Paris, Grand Canyon, Bhutan, Southeast Asia" autocomplete="off" style="width:100%;box-sizing:border-box;" value="'+(_tb.placeName||"").replace(/"/g,'&quot;')+'" onblur="this.value=_titleCaseCity(this.value);_tb.placeName=this.value.trim();" />'
     +'<div style="font-size:10px;color:#888;margin-top:6px;line-height:1.5;">Can be a city, a region, a country, a park. Anywhere Max can map out.</div>'
-    +'<label style="display:block;font-size:11px;font-weight:600;color:#333;margin-top:14px;margin-bottom:4px;">Anything Max should know about this trip — feel, perspective, constraints.</label>'
-    +'<div style="font-size:10px;color:#888;margin-bottom:6px;line-height:1.5;">The more you share, the better the suggestions.</div>'
-    +'<textarea id="tb-place-context" rows="2" class="tb-act-add-inp" placeholder="e.g. self-drive road trip, first time there, traveling with my partner, want to avoid the obvious tourist stuff" style="width:100%;box-sizing:border-box;resize:vertical;min-height:52px;">'+(_tb.placeContext||"")+'</textarea>'
+    +'<label style="display:block;font-size:11px;font-weight:600;color:#333;margin-top:14px;margin-bottom:4px;">Why this place? What’s drawing you?</label>'
+    +'<div style="font-size:10px;color:#888;margin-bottom:6px;line-height:1.5;">The sentence that’s been sitting with you. Why now, why here, what you’re after. (How <em>you</em> travel — pace, party, what you’d skip — comes later.)</div>'
+    +'<textarea id="tb-place-context" rows="2" class="tb-act-add-inp" placeholder="e.g. always wanted to see the Alps · my grandmother grew up there · need to be somewhere completely different · honeymoon · finally taking the kids · scenic-rail trip we’ve put off for years" style="width:100%;box-sizing:border-box;resize:vertical;min-height:52px;">'+(_tb.placeContext||"")+'</textarea>'
     +'</div>';
 
   var continueBtn = pmPlaceForExample
@@ -8969,9 +9005,9 @@ function renderTripBrief(){
     // visual divider
     +'<div style="margin:32px 0 6px;border-top:1px dashed #d8d4c8;"></div>'
 
-    // 4. ANYTHING ELSE (optional, free text)
-    + _tbSectionHead("Anything else", "Optional. Pace, who you are, prior experience, what you\u2019d compromise on \u2014 in your own words.")
-    +'<div class="tb-field"><textarea id="tb-about-trip" rows="5" placeholder="e.g. Couple in our 60s. Slow pace \u2014 we\u2019d rather linger in one place than rush. First time in the region. Won\u2019t compromise on the slow pace for a day-trip; would for something genuinely unmissable." oninput="_tb.aboutTrip=this.value;">'+((_tb.aboutTrip||"").replace(/</g,"&lt;"))+'</textarea><div style="font-size:10px;color:#aaa;margin-top:4px;line-height:1.5;">The more you share, the better the suggestions. The LLM reads this as prose \u2014 write naturally.</div></div>'
+    // 4. WHO'S TRAVELING + HOW YOU TRAVEL (optional, free text)
+    + _tbSectionHead("Who\u2019s traveling? How do you travel?", "Optional. Party (count, ages, mobility), pace, prior experience, what you\u2019d skip vs. what you wouldn\u2019t miss \u2014 in your own words.")
+    +'<div class="tb-field"><textarea id="tb-about-trip" rows="5" placeholder="e.g. Couple in our 60s, both fit but slow paced \u2014 rather linger in one place than rush. First trip to this region. Would skip a famous-but-touristy day-trip to keep an extra night somewhere quieter; wouldn\u2019t skip a once-in-a-lifetime view." oninput="_tb.aboutTrip=this.value;">'+((_tb.aboutTrip||"").replace(/</g,"&lt;"))+'</textarea><div style="font-size:10px;color:#aaa;margin-top:4px;line-height:1.5;">The more you share, the better the suggestions. Max reads this as prose \u2014 write naturally.</div></div>'
 
     // 5. HARD LIMITS (optional but consequential)
     + _tbSectionHead("Hard limits", "Optional but consequential. Things Max won\u2019t route around \u2014 different from preferences above.")
@@ -9224,8 +9260,8 @@ function renderTripBriefEdit(){
 
     +'<div style="margin:32px 0 6px;border-top:1px dashed #d8d4c8;"></div>'
 
-    + _tbSectionHead("Anything else", "Optional. Pace, who you are, prior experience, what you\u2019d compromise on \u2014 in your own words.")
-    +'<div class="tb-field"><textarea id="tb-about-trip" rows="5" placeholder="e.g. Couple in our 60s. Slow pace. First time in the region." oninput="_tb.aboutTrip=this.value;">'+((_tb.aboutTrip||"").replace(/</g,"&lt;"))+'</textarea></div>'
+    + _tbSectionHead("Who\u2019s traveling? How do you travel?", "Optional. Party, pace, prior experience, what you\u2019d skip vs. what you wouldn\u2019t miss \u2014 in your own words.")
+    +'<div class="tb-field"><textarea id="tb-about-trip" rows="5" placeholder="e.g. Couple in our 60s, slow pace, first time in the region. Would skip a famous-but-touristy day-trip; wouldn\u2019t skip a unique view." oninput="_tb.aboutTrip=this.value;">'+((_tb.aboutTrip||"").replace(/</g,"&lt;"))+'</textarea></div>'
 
     + _tbSectionHead("Hard limits", "Optional but consequential. Things Max won\u2019t route around.")
     +'<div class="tb-field"><textarea id="tb-hardlimits" rows="2" placeholder="e.g. No car rentals. Vegetarian. Wheelchair access required." oninput="_tb.hardlimits=this.value;">'+(_tb.hardlimits||"")+'</textarea></div>'
@@ -12718,6 +12754,57 @@ window.addEventListener("load",function(){
   }
 });
 
+// v290 — Cross-tab sync: when another tab (mobile shell, second
+// desktop window) writes a trip we're viewing, re-read and re-render.
+// Mirrors mobile's listener so desktop ↔ mobile is symmetric.
+//
+// Mid-edit guard: don't clobber an open form. If the user has a
+// textarea / input focused, defer the re-render — the user gets a
+// stale view momentarily but doesn't lose what they were typing.
+// Their next blur/save triggers another storage event, and the
+// re-render lands then.
+window.addEventListener("storage", function(ev){
+  if (!ev || !ev.key) return;
+  if (_inIframe) return;
+  // Index changed → home-screen list refresh (only if visible).
+  if (ev.key === "max-trips-index") {
+    var hs = document.getElementById("home-screen");
+    if (hs && hs.style.display !== "none" && typeof renderHomeScreen === "function") {
+      try { loadTripsIndex(); renderHomeScreen(); } catch(e){}
+    }
+    return;
+  }
+  // Trip envelope changed → if it's the active trip, re-load + re-render.
+  if (ev.key.indexOf("max-trip-") === 0) {
+    var changedId = ev.key.slice("max-trip-".length);
+    if (!_currentTripId || changedId !== _currentTripId) return;
+    var active = document.activeElement;
+    var tag = active && active.tagName;
+    var midEdit = !!(active && (tag === "TEXTAREA" || tag === "INPUT" || (active.isContentEditable === true)));
+    if (midEdit) {
+      // Defer until the user blurs. Their blur typically saves which
+      // fires another storage event → we'll catch it then.
+      if (typeof showSaveStatus === "function") showSaveStatus("Other tab edited this trip — switch focus to refresh.", 2200);
+      return;
+    }
+    try {
+      var raw = ev.newValue || (typeof localStorage !== "undefined" ? localStorage.getItem(ev.key) : null);
+      if (!raw) return;
+      restoreTrip(raw);  // updates window.trip, activeDest, counters, etc.
+      // Re-render whichever view is active (trip list vs destination detail).
+      if (_leftMode === "dest" && activeDest) {
+        if (typeof drawDestMode === "function") drawDestMode(activeDest);
+      } else {
+        if (typeof drawTripMode === "function") drawTripMode();
+      }
+      if (typeof updateMainMap === "function") updateMainMap();
+      if (typeof showSaveStatus === "function") showSaveStatus("Synced from another tab", 1600);
+    } catch(e) {
+      console.warn("[Max] storage-event sync failed:", e && e.message);
+    }
+  }
+});
+
 
 // ── Trip object ────────────────────────────────────────────
 var trip = {
@@ -14980,6 +15067,11 @@ function mkHotelRecord(bk,destId){
 // ── Main map (persistent right panel) ─────────────────────
 var _mainMap=null;
 var _mainMarkers=[];
+// v287: Maps item.id → its Leaflet marker on the main map. Lets list-side
+// rows (sight rows in Itinerary, etc.) reach back into the map and highlight
+// the corresponding pin without re-walking _mainMarkers. Reset on every
+// clearMainMarkers; populated by addPin when an item is passed.
+var _mainMarkerByItemId={};
 var _leftMode='trip';
 var _activeDmSection='sights';
 var _mobSheetOpen=false;
@@ -15270,6 +15362,39 @@ function setMapStyle(autoStyle){
 function clearMainMarkers(){
   _mainMarkers.forEach(function(m){_mainMap.removeLayer(m);});
   _mainMarkers=[];
+  _mainMarkerByItemId={};
+}
+
+// v287: Highlight a sight's pin on the main map. Pans + zooms toward
+// the marker, opens its tooltip briefly, and runs a CSS pulse on the
+// pin element. Used when the user taps a sight name in the Itinerary
+// list. No-op if the marker isn't found (sight isn't on the current
+// map view, e.g. user opened a sight from another destination).
+function highlightSightOnMap(sightId){
+  if (!sightId || !_mainMap) return;
+  var m = _mainMarkerByItemId[sightId];
+  if (!m) return;
+  try {
+    var ll = m.getLatLng();
+    var z = Math.max(_mainMap.getZoom() || 0, 14);
+    if (typeof _mainMap.flyTo === 'function') _mainMap.flyTo([ll.lat, ll.lng], z, {duration: 0.55});
+    else _mainMap.setView([ll.lat, ll.lng], z, {animate: true});
+  } catch(e){}
+  try {
+    m.openTooltip();
+    setTimeout(function(){ try { m.closeTooltip(); } catch(_){} }, 2000);
+  } catch(e){}
+  // Pulse the marker's icon element. classList toggle + reflow
+  // restarts the CSS animation if the user taps the same sight again.
+  var icon = m._icon;
+  if (icon) {
+    icon.classList.remove('map-pin-pulse');
+    void icon.offsetWidth;
+    icon.classList.add('map-pin-pulse');
+    setTimeout(function(){
+      try { icon.classList.remove('map-pin-pulse'); } catch(_){}
+    }, 2200);
+  }
 }
 
 function _locLayerKey(loc){
@@ -15358,7 +15483,11 @@ function updateMainMapMarkers(){
         m.bindTooltip(tipText, {permanent:false, direction:"top", offset:[0,-14], className:"main-map-tooltip"});
       }
     }
-    m.addTo(_mainMap); _mainMarkers.push(m); return m;
+    m.addTo(_mainMap); _mainMarkers.push(m);
+    // v287: index by item.id so list-side rows (sight rows etc.) can
+    // find the marker to highlight when tapped.
+    if (item && item.id) _mainMarkerByItemId[item.id] = m;
+    return m;
   }
 
   // Stable offset from name — same place always same jitter, no Math.random() churn
@@ -20891,338 +21020,15 @@ function _wireItinDropTarget(listEl, dayId, slot, destId) {
   });
 }
 
-function mkItinItem(s,dayId,destId){
-  var r=document.createElement("div"); r.className="srow"+(s.done?" done":"")+(s.type==="daytrip"?" daytrip":""); r.id="sr-"+s.id;
-  var isRest=s.type==="restaurant";
-  var isDayTrip=s.type==="daytrip";
-  // Round FN.10: drag handle on every itinerary item. The whole row
-  // is draggable; on dragstart we stash the source coords (item id,
-  // day id, slot) on the dataTransfer so the drop handler in
-  // drawDestMode can move the item without re-finding it.
-  r.draggable = true;
-  r.style.cursor = "grab";
-  r.addEventListener("dragstart", function(e){
-    r.style.opacity = "0.4";
-    if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData("text/plain", JSON.stringify({
-        itemId: s.id, dayId: dayId, destId: destId, slot: s.slot || "day", isDayTrip: !!isDayTrip
-      }));
-    }
-    document.body.classList.add("itin-dragging");
-  });
-  r.addEventListener("dragend", function(){
-    r.style.opacity = "";
-    document.body.classList.remove("itin-dragging");
-    // Clean up any lingering hover styles on drop targets.
-    document.querySelectorAll(".slist.drop-target").forEach(function(el){
-      el.classList.remove("drop-target");
-    });
-  });
-  // Dot/icon
-  var dot;
-  if(isRest){
-    dot=document.createElement("span"); dot.className="item-dot-restaurant"; dot.textContent="\uD83C\uDF7D";
-    dot.title="Restaurant";
-  } else if(isDayTrip){
-    // Round FN.7.4: distinct purple pin for day-trip items so the user
-    // sees at a glance this isn't a sight at the hub but a side trip
-    // to a different town. Matches the chip-box color treatment.
-    dot=document.createElement("span"); dot.className="item-dot-daytrip"; dot.textContent="📍";
-    dot.style.cssText="color:#5b3f8f;font-size:13px;flex-shrink:0;width:14px;text-align:center;";
-    dot.title="Day trip — leaves the hub, return same day";
-  } else {
-    dot=document.createElement("div"); dot.className="item-dot-sight "+(s.p==="must"?"must":"nice");
-    (function(id,did){dot.onclick=function(){var sx=fS(id,did);if(sx){sx.p=sx.p==="must"?"nice":"must";dot.className="item-dot-sight "+(sx.p==="must"?"must":"nice");autoSave();}};})(s.id,destId);
-  }
-  var name=document.createElement("span"); name.className="sname"; name.textContent=s.n;
-  // Round DF: external-site link (LLM-supplied URL or Google search fallback)
-  var _destForS = (typeof getDest === "function" && destId) ? getDest(destId) : null;
-  var _placeForS = (_destForS && _destForS.place) || "";
-  var _extS = !isRest ? _sightExternalUrl(s, _placeForS) : null;
-  var extLink = null;
-  var extEdit = null;
-  if (_extS) {
-    extLink = document.createElement("a");
-    extLink.href = _extS.url; extLink.target = "_blank"; extLink.rel = "noopener noreferrer";
-    extLink.textContent = _extS.isOfficial ? "\u2197" : "\u2197";
-    extLink.title = _extS.isOfficial ? "Official site" : "Search the web for this sight";
-    extLink.style.cssText = "margin-left:6px;font-size:10px;color:" + (_extS.isOfficial ? "#1a5fa8" : "#999") + ";text-decoration:none;font-weight:600;";
-    extLink.onclick = function(e){ e.stopPropagation(); };
-    // Round DG: \u270e \u2014 edit the URL
-    extEdit = document.createElement("button");
-    extEdit.type = "button";
-    extEdit.textContent = "\u270e";
-    extEdit.title = s.url ? "Edit URL" : "Set a custom URL";
-    extEdit.style.cssText = "margin-left:3px;font-size:10px;color:#aaa;background:none;border:none;cursor:pointer;padding:0 2px;font-family:inherit;line-height:1;";
-    (function(item,did){extEdit.onclick = function(e){
-      e.stopPropagation();
-      _openSightUrlEditor(extEdit, item, function(){ if (did && typeof drawDestMode === "function") drawDestMode(did); });
-    };})(s, destId);
-  }
-  var acts=document.createElement("div"); acts.className="sacts";
-  // Story button
-  var stb=document.createElement("button"); stb.className="sa ssa"; stb.id="ssa-"+s.id;
-  stb.setAttribute("data-state","idle"); stb.textContent="story \u2197";
-  // Round FN.9: tooltip \u2014 bare "story" was opaque about what it did.
-  stb.title = "Story about " + (s.n || "this");
-  (function(id,did){stb.onclick=function(){sStory(id,did);};})(s.id,destId);
-  acts.appendChild(stb);
-  // Done button
-  var db=document.createElement("button"); db.className="sa "+(s.done?"usa":"dsa");
-  db.textContent=s.done?"undo":"done \u2713";
-  (function(id,did){db.onclick=function(){var sx=fS(id,did);if(!sx)return;sx.done=!sx.done;autoSave();drawDestMode(did);};})(s.id,destId);
-  acts.appendChild(db);
-  // Move button (with evening/day slot options)
-  var mb=document.createElement("button"); mb.className="sa msa"; mb.textContent="move";
-  (function(id,did,ev){mb.onclick=function(e){e.stopPropagation();togMov(id,dayId,did,e,ev);};})(s.id,destId,s.slot==="evening");
-  acts.appendChild(mb);
-  // Book button
-  var bkb=document.createElement("button"); bkb.className="sa"; bkb.textContent=s.booking?"booked \u2713":"book";
-  if(s.booking) bkb.style.cssText="color:#2a7a4e;font-weight:600;";
-  (function(item,did,dId){bkb.onclick=function(e){e.stopPropagation();toggleSightBookForm(r,item,did,dId);};})(s,destId,dayId);
-  acts.appendChild(bkb);
-  // Delete button
-  var xb=document.createElement("button"); xb.className="sa"; xb.textContent="\u2715";
-  (function(id,did){xb.onclick=function(){delS(id,dayId,did);};})(s.id,destId);
-  acts.appendChild(xb);
-  var top=document.createElement("div"); top.className="srow-top";
-  top.appendChild(dot); top.appendChild(name);
-  if (extLink) top.appendChild(extLink);
-  if (extEdit) top.appendChild(extEdit);
-  acts.className="srow-btns";
-
-  // Booking info strip if booked
-  var bkStrip=null;
-  if(s.booking){
-    bkStrip=document.createElement("div"); bkStrip.className="bk-record"; bkStrip.style.cssText="margin:3px 0 2px 12px;";
-    var bkMain=document.createElement("div"); bkMain.className="bk-rec-main";
-    var bkParts=[];
-    if(s.booking.time) bkParts.push(s.booking.time+(s.booking.timeEnd?'\u2013'+s.booking.timeEnd:''));
-    if(s.booking.confirmationNumber) bkParts.push('Conf: '+s.booking.confirmationNumber);
-    if(s.booking.pricePaid) bkParts.push((s.booking.currency||'')+" "+s.booking.pricePaid);
-    bkMain.textContent='\u2713 Reserved'+(bkParts.length?' \u00b7 '+bkParts.join(' \u00b7 '):'');
-    bkStrip.appendChild(bkMain);
-    if(s.booking.cancelDeadline){
-      var cpLine=document.createElement("div"); cpLine.className="bk-rec-meta"; cpLine.style.cssText="color:#d97706;font-weight:600;";
-      cpLine.textContent="Cancel by: "+fmtD(s.booking.cancelDeadline)+(s.booking.cancelDeadlineTime?" at "+s.booking.cancelDeadlineTime:""); bkStrip.appendChild(cpLine);
-    }
-  }
-
-  // Time display — click to edit
-  var timeRow=document.createElement("div"); timeRow.className="srow-time"; timeRow.id="stime-"+s.id;
-  function renderTimeLabel(){
-    var hasTime=s.timeStart||s.timeEnd;
-    if(hasTime){
-      timeRow.textContent=(s.timeStart||"?")+" \u2013 "+(s.timeEnd||"?");
-    } else {
-      timeRow.textContent="+ add time";
-      timeRow.style.opacity="0.4";
-    }
-  }
-  renderTimeLabel();
-  (function(item,did){timeRow.onclick=function(e){
-    e.stopPropagation();
-    var existing=r.querySelector('.stime-edit');
-    if(existing){existing.parentNode.removeChild(existing);renderTimeLabel();return;}
-    var editRow=document.createElement("div"); editRow.className="stime-edit";
-    editRow.style.cssText="display:flex;align-items:center;gap:4px;padding-left:12px;margin-top:2px;";
-    var startInp=document.createElement("input"); startInp.type="time"; startInp.className="stime-inp"; startInp.value=item.timeStart||"";
-    var sep=document.createElement("span"); sep.style.cssText="font-size:10px;color:#aaa;"; sep.textContent="\u2013";
-    var endInp=document.createElement("input"); endInp.type="time"; endInp.className="stime-inp"; endInp.value=item.timeEnd||"";
-    var saveBtn=document.createElement("button"); saveBtn.className="sa"; saveBtn.style.cssText="font-size:9px;padding:1px 5px;"; saveBtn.textContent="Save";
-    saveBtn.onclick=function(e){
-      e.stopPropagation();
-      item.timeStart=startInp.value||null;
-      item.timeEnd=endInp.value||null;
-      editRow.parentNode.removeChild(editRow);
-      renderTimeLabel();
-      autoSave();
-      checkTimeConflicts(getDest(did),dayId);
-    };
-    editRow.appendChild(startInp); editRow.appendChild(sep); editRow.appendChild(endInp); editRow.appendChild(saveBtn);
-    r.appendChild(editRow);
-    startInp.focus();
-  };})(s,destId);
-
-  r.appendChild(top);
-  // Round FN.7.4: transport sub-line for day-trips. Reminds the user
-  // this isn't a stroll at the hub — there's a round-trip in/out
-  // that needs its own transport. Estimates round-trip km from the
-  // distance baked into the item note.
-  // Round FN.7.5: include a clickable "→ Plan transport" button that
-  // jumps straight to the Routing tab on the hub, where the user can
-  // book the in/out leg without hunting for the tab.
-  if (isDayTrip) {
-    var transportLine = document.createElement("div");
-    transportLine.style.cssText = "font-size:10.5px;color:#5b3f8f;margin:2px 0 0 22px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;";
-    var hubName = s.dayTripFrom || "the hub";
-    var noteMatch = (s.note || "").match(/(\d+)\s*km/);
-    var distNote = noteMatch ? " · ~" + (parseInt(noteMatch[1], 10) * 2) + "km round trip" : "";
-    var transportTxt = document.createElement("span");
-    transportTxt.style.cssText = "font-style:italic;";
-    transportTxt.textContent = "↔ Round trip from " + hubName + distNote;
-    var transportBtn = document.createElement("button");
-    transportBtn.type = "button";
-    transportBtn.textContent = "→ Plan transport";
-    transportBtn.style.cssText = "font-size:10px;font-weight:600;color:#5b3f8f;background:#fff;border:1px solid #d8c4e8;border-radius:9px;padding:2px 7px;cursor:pointer;font-family:inherit;";
-    transportBtn.onmouseover = function(){ transportBtn.style.background = "#f4eef9"; };
-    transportBtn.onmouseout = function(){ transportBtn.style.background = "#fff"; };
-    (function(did){
-      transportBtn.onclick = function(e){
-        e.stopPropagation();
-        _activeDmSection = "routing";
-        if (typeof drawDestMode === "function") drawDestMode(did);
-      };
-    })(destId);
-    transportLine.appendChild(transportTxt);
-    transportLine.appendChild(transportBtn);
-    // Round FN.8.14: Cancel day trip button on the Itinerary item.
-    // Calls ungroupDayTrip to restore the place as a destination, so
-    // it reappears in "Could be a day trip from here" — letting the
-    // user re-add later if they change their mind. The DAY TRIPS
-    // section in Explore is now read-only (sights only); this is
-    // the canonical management surface.
-    var cancelBtn = document.createElement("button");
-    cancelBtn.type = "button";
-    cancelBtn.textContent = "Cancel day trip";
-    cancelBtn.title = "Restore this place as an option in 'Could be a day trip from here'";
-    cancelBtn.style.cssText = "font-size:10px;font-weight:500;color:#888;background:#fff;border:1px solid #d8d4c8;border-radius:9px;padding:2px 7px;cursor:pointer;font-family:inherit;";
-    cancelBtn.onmouseover = function(){ cancelBtn.style.background = "#fafafa"; };
-    cancelBtn.onmouseout = function(){ cancelBtn.style.background = "#fff"; };
-    (function(did, dtPlace, isPeer){
-      cancelBtn.onclick = function(e){
-        e.stopPropagation();
-        var hub = (typeof getDest === "function") ? getDest(did) : null;
-        if (!hub) return;
-        // Round FZ.8: handle BOTH paths. Was only chip-based — looked
-        // up the place in hub.dayTrips and called ungroupDayTrip. FT.2
-        // peer day-trips live on hub.days[*].items[] with
-        // peerDayTrip:true and don't appear in hub.dayTrips, so the
-        // chip lookup returned -1 and the button silently no-op'd.
-        // Now: peer items get removed via removeDayTripFromDayItem
-        // for every day they're placed on (each call reverses one
-        // night transfer); chip-based items use the original
-        // ungroupDayTrip path.
-        if (isPeer) {
-          // Collect all (dayIdx) where this peer place is placed.
-          var dayIdxs = [];
-          (hub.days || []).forEach(function(d, di){
-            (d.items || []).forEach(function(it){
-              if (it && it.type === "daytrip" && it.peerDayTrip && it.dayTripPlace === dtPlace) {
-                dayIdxs.push(di);
-              }
-            });
-          });
-          if (!dayIdxs.length) return;
-          if (!confirm("Cancel the day trip to " + dtPlace + "?\n\n" + dayIdxs.length + " day-trip placement" + (dayIdxs.length !== 1 ? "s" : "") + " will be removed and " + dayIdxs.length + " night" + (dayIdxs.length !== 1 ? "s" : "") + " will transfer back to " + dtPlace + ".")) return;
-          // Remove from highest day index first so indexes stay
-          // stable as we splice items out.
-          dayIdxs.sort(function(a,b){return b-a;});
-          if (typeof removeDayTripFromDayItem === "function") {
-            dayIdxs.forEach(function(di){
-              removeDayTripFromDayItem(hub, dtPlace, di);
-            });
-          }
-          return;
-        }
-        // Chip path (build-time absorbed or makeDayTrip caller).
-        if (!Array.isArray(hub.dayTrips)) return;
-        var idx = -1;
-        for (var i = 0; i < hub.dayTrips.length; i++) {
-          if (hub.dayTrips[i] && hub.dayTrips[i].place === dtPlace) { idx = i; break; }
-        }
-        if (idx < 0) return;
-        if (!confirm("Cancel the day trip to " + dtPlace + "?\n\n" + dtPlace + " will move back to 'Could be a day trip from here' so you can decide later.")) return;
-        if (typeof ungroupDayTrip === "function") ungroupDayTrip(hub, idx, {silent: true});
-      };
-    })(destId, s.dayTripPlace || "", !!s.peerDayTrip);
-    transportLine.appendChild(cancelBtn);
-    r.appendChild(transportLine);
-    // Round FN.8.15: surface the day-trip city's iconic sights as
-    // first-class quick-add chips on this day only. The day-trip
-    // city isn't in trip.destinations anymore (it's a chip), so its
-    // sights wouldn't otherwise be reachable from the Itinerary
-    // add-row. Pull from _generatedCityData[place] (LLM-cached) and
-    // render small purple chips. Click → adds as a regular sight
-    // item on the same day; chip drops out so the user sees what's
-    // left to consider.
-    var dtPlaceForSuggest = s.dayTripPlace || "";
-    var dtKey = dtPlaceForSuggest.toLowerCase();
-    var dtCityData = (typeof _generatedCityData !== "undefined") ? _generatedCityData[dtKey] : null;
-    if (dtCityData && Array.isArray(dtCityData.sights) && dtCityData.sights.length) {
-      // Skip sights already on this day (by name).
-      var dayItems = [];
-      var hubForDay = (typeof getDest === "function") ? getDest(destId) : null;
-      if (hubForDay && Array.isArray(hubForDay.days)) {
-        for (var di = 0; di < hubForDay.days.length; di++) {
-          if (hubForDay.days[di] && hubForDay.days[di].id === dayId) {
-            dayItems = hubForDay.days[di].items || [];
-            break;
-          }
-        }
-      }
-      var existingNames = {};
-      dayItems.forEach(function(it){ if (it && it.n) existingNames[it.n.toLowerCase()] = true; });
-      var availableSights = dtCityData.sights.filter(function(sg){
-        var nm = (sg && (sg.name || sg.n || "")).toLowerCase();
-        return nm && !existingNames[nm];
-      }).slice(0, 8);
-      if (availableSights.length) {
-        var sightAddRow = document.createElement("div");
-        sightAddRow.style.cssText = "margin:3px 0 0 22px;display:flex;flex-wrap:wrap;gap:4px;align-items:baseline;";
-        var sightLbl = document.createElement("span");
-        sightLbl.style.cssText = "font-size:10px;color:#888;font-weight:500;margin-right:4px;";
-        sightLbl.textContent = "Add sights at " + dtPlaceForSuggest + ":";
-        sightAddRow.appendChild(sightLbl);
-        availableSights.forEach(function(sg){
-          var chip = document.createElement("button");
-          chip.type = "button";
-          chip.textContent = "+ " + (sg.name || sg.n || "");
-          chip.title = sg.desc || sg.note || "";
-          chip.style.cssText = "font-size:10px;font-weight:500;color:#5b3f8f;background:#fff;border:1px solid #d8c4e8;border-radius:9px;padding:2px 7px;cursor:pointer;font-family:inherit;";
-          chip.onmouseover = function(){ chip.style.background = "#f4eef9"; };
-          chip.onmouseout = function(){ chip.style.background = "#fff"; };
-          (function(sgData, did, dId){
-            chip.onclick = function(e){
-              e.stopPropagation();
-              var d = (typeof getDest === "function") ? getDest(did) : null;
-              if (!d || !Array.isArray(d.days)) return;
-              var targetDay = null;
-              for (var k = 0; k < d.days.length; k++) {
-                if (d.days[k] && d.days[k].id === dId) { targetDay = d.days[k]; break; }
-              }
-              if (!targetDay) return;
-              if (typeof sidCtr !== "undefined") sidCtr++;
-              var nameStr = sgData.name || sgData.n || "";
-              var newItem = {
-                id: "s" + sidCtr,
-                type: "sight",
-                n: nameStr,
-                st: sgData.st || nameStr,
-                p: "nice",
-                done: false,
-                slot: "day",
-                note: sgData.desc || sgData.note || null,
-                lat: sgData.lat || null,
-                lng: sgData.lng || null
-              };
-              if (!Array.isArray(targetDay.items)) targetDay.items = [];
-              targetDay.items.push(newItem);
-              if (typeof autoSave === "function") autoSave();
-              if (typeof drawDestMode === "function") drawDestMode(did);
-            };
-          })(sg, destId, dayId);
-          sightAddRow.appendChild(chip);
-        });
-        r.appendChild(sightAddRow);
-      }
-    }
-  }
-  r.appendChild(timeRow);
-  r.appendChild(acts);
-  if(bkStrip) r.appendChild(bkStrip);
-  return r;
+function mkItinItem(s, dayId, destId){
+  // Round MA.4 (May 2026): the full ~370-line body lifted to
+  // trip-ui.js as MaxTripUI.renderItinItem (no opts → full mode,
+  // dispatched via renderItinItemFull). This wrapper preserves the
+  // function name so the dozens of inline call sites — mkDay, drag-
+  // drop replacements, scheduled-item rebuilds — keep working
+  // unchanged. Removing the wrapper itself is a future round; small
+  // win, large diff.
+  return MaxTripUI.renderItinItem(s, dayId, destId);
 }
 
 function toggleSightBookForm(row,item,destId,dayId){
@@ -22513,19 +22319,11 @@ function buildRoutingSection(fromDest, toDest, label){
 // ── Days and sights ────────────────────────────────────────
 // makeDays moved to engine-trip.js (Round HR).
 
-function mkDay(day,destId){
-  var w=document.createElement("div"); w.className="dayblock"; w.id="dy-"+day.id;
-  var hdr=document.createElement("div"); hdr.className="dayhdr";
-  var num=document.createElement("span"); num.className="daynum"; num.textContent=day.lbl;
-  var note=document.createElement("span"); note.className="daynote"; note.textContent=day.note;
-  hdr.appendChild(num); hdr.appendChild(note); w.appendChild(hdr);
-  var list=document.createElement("div"); list.className="slist"; list.id="sl-"+day.id;
-  day.sights.forEach(function(s){list.appendChild(mkSight(s,day.id,destId));});
-  w.appendChild(list);
-  var ar=document.createElement("div"); ar.className="addrow";
-  ar.innerHTML="<input class=\"addsi\" id=\"ai-"+day.id+"\" placeholder=\"Add a sight\u2026\" oninput=\"onAI('"+day.id+"')\" onkeydown=\"if(event.key==='Enter')doAI('"+day.id+"','"+destId+"')\"><button class=\"addsb\" id=\"ab-"+day.id+"\" onclick=\"doAI('"+day.id+"','"+destId+"')\">Add</button>";
-  w.appendChild(ar);
-  return w;
+function mkDay(day, destId){
+  // Round MA.4: mkDay routes through MaxTripUI.renderDay (no opts →
+  // full mode item renderer). Visual structure (.dayblock / .dayhdr /
+  // .slist) is identical because renderDay was modeled on this.
+  return MaxTripUI.renderDay(day, destId);
 }
 
 function mkSight(s,dayId,destId){
@@ -22534,6 +22332,10 @@ function mkSight(s,dayId,destId){
   var dot=document.createElement("div"); dot.className="pdot "+s.p;
   (function(id,did){dot.onclick=function(){togP(id,did);};})(s.id,destId);
   var name=document.createElement("span"); name.className="sname"; name.textContent=s.n;
+  // v287: tap the name to highlight the matching pin on the map
+  // (pan + zoom + open tooltip + brief pulse animation).
+  name.title = "Show on map";
+  (function(id){ name.onclick = function(){ if (typeof highlightSightOnMap === "function") highlightSightOnMap(id); }; })(s.id);
   var acts=document.createElement("div"); acts.className="sacts";
   if(s.st){
     var stb=document.createElement("button"); stb.className="sa ssa"; stb.id="ssa-"+s.id;
