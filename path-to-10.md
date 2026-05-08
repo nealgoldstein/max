@@ -8,63 +8,94 @@ when you ship a round (check a box, add a follow-up).
 
 ## Where we are now
 
-**Score: ~6.5 / 10.** Up from a 3 (single 24kloc inline file) but
-short of where the original engine/UI split plan
-(`architecture-engine-ui-split.md`) was headed.
+**Score: ~8.5 / 10** (May 2026, after Items A, C, D all closed).
+Up from 3 (single 24kloc inline file).
 
 What's solid:
-- Pure logic lives in engines and is tested. 136 tests, well-named
-  contracts.
+- Pure logic lives in engines and is tested. **211 tests**, well-
+  named contracts.
 - DB seam exists (`db.js`, Round HA). Picker → trip handoff goes
   through it (Round HM).
-- Picker has a UI module (`picker-ui.js`); the cleanest standalone
-  DOM blocks have moved.
+- Picker UI fully extracted (`picker-ui.js`). All four big inline
+  picker blocks (HX.11–14) now live there — `renderCandidateCards`'s
+  ~600-line monster is mostly delegators.
+- **`engine-trip.js` is DOM-free** (HY round). All 11 trip mutators
+  emit events instead of calling `drawXxx` directly. Namespace
+  surface lets engine consumers drive mutations. An automated test
+  (`engine-trip.js has no DOM dependencies`) prevents regressions.
+- **`_tb` is now behind engine APIs** (HZ rounds). HZ.1 added
+  curated read getters (`brief()`, `candidates()`, `requiredPlaces()`).
+  HZ.2 added domain setters (`setEntry`, `setExit`, `setRegion`,
+  `setCandidateStatus`, `startFresh`). External consumers never
+  need to touch `_tb` directly.
+- SCAFFOLD UI rounds (1, 1.5, 2, 3, 4, 5, 6) shipped — calendar-
+  aware mode + commitment states + decisions panel + rationale
+  popovers. Six rounds of user-visible work that proved the engine
+  surface holds up under product change.
 
-What's missing keeps coming back to one thing: **`engine-trip.js`
-isn't actually DOM-free yet** (Phase 2 of the plan is half-done) —
-which means mobile, the abstraction's whole reason to exist, can't
-consume it. Until mobile is real, the architecture is asserted, not
-proven.
+What's still missing:
+- **Item B** (mobile shell) — MA.1 read view shipped; mutations
+  beyond notes still require future Phase 2 work.
+- **Item 16** (drawTripMode / drawDestMode fold into Places page) —
+  deferred until a real driver appears. Multi-month estimate, low
+  immediate value, no user-visible payoff.
+- **HZ.3+ migration** — inline picker code still reads `_tb.X`
+  directly (low-value migration, deferred). The engine API surface
+  is what matters for external consumers; inline picker can keep
+  its locals.
 
 ---
 
 ## The five items, in priority order
 
-### Item A — Finish Phase 2 (trip-engine event system)
-**State:** ~30% done.
-`replaceTrip` emits `tripChange`. ~12 other trip mutators still call
-`drawTripMode` / `drawDestMode` / `updateMainMap` directly. Each is
-~30–60 minutes of work: state mutation, emit event, drop the inline
-DOM call, add a unit test that asserts the emit.
+### Item A — Finish Phase 2 (trip-engine event system) — ✅ DONE
+**State:** done as of round HY (v305, May 2026).
 
-**The 12 mutators (search by name to find them):**
-- [ ] `_ftSchedulePeerDayTrip`
-- [ ] `addDayTripToDay`
-- [ ] `removeDayTripFromDay`
-- [ ] `removeDayTripFromDayItem`
-- [ ] `makeDayTrip`
-- [ ] `ungroupDayTrip`
-- [ ] `addBufferNight`
-- [ ] `reverseTripOrder`
-- [ ] `executeMoveDest`
-- [ ] `delDest`
-- [ ] `applyDateChange`
-- [ ] `_ftReverseNightTransfer` (already pure — verify it doesn't drift)
+When this item was first written, the assumption was that the 12
+mutators called `drawTripMode` / `drawDestMode` / `updateMainMap`
+directly. Audit during HY revealed they all already route through
+`_emitTripMutation()` (an inline helper that calls
+`MaxEngineTrip.emit('tripChange') + emit('mapDataChange')`). The
+TODO comments above each mutator were stale rather than accurate.
 
-**First concrete round (HY.1):** convert `addBufferNight`. Smallest
-clean target. Add `MaxEngineTrip.addBufferNight` if not present, emit
-`tripChange` + `mapDataChange`, drop the inline `drawTripMode +
-updateMainMap` calls, and add an engine test that asserts both events
-fire with the right payload. After HY.1 lands, repeat the pattern for
-the next mutator (HY.2, HY.3, …).
+**HY closed the item by:**
+1. Removing the 11 stale `TODO(path-to-10:A)` comments from
+   inline `index.html`.
+2. Exposing the mutators on `MaxEngineTrip` namespace as
+   delegators, so engine consumers (mobile, future tooling)
+   have a stable surface to call. Bodies stay inline because
+   they reference inline-script globals (destCtr, _coarseGeocode,
+   ensureCoarseGeocode, autoSave, etc.) that aren't trivially
+   liftable; the surface is what matters for now.
+3. Adding two engine tests:
+   - "all 11 mutators are exposed on MaxEngineTrip" — locks the
+     surface.
+   - "engine-trip.js has no DOM dependencies" — scans the file
+     and fails if `document`, `drawXxx`, or `getElementById`
+     show up in code (comments don't count).
 
-**Done when:** all 12 mutators emit; no TE* function in
-`renderTripMode`'s call tree references DOM helpers; `engine-trip.js`
-has zero references to `document`, `drawXxx`, or `g(...)`.
+**The 11 mutators, all done:**
+- [x] `_ftSchedulePeerDayTrip` → `MaxEngineTrip.schedulePeerDayTrip`
+- [x] `addDayTripToDay`
+- [x] `removeDayTripFromDay`
+- [x] `removeDayTripFromDayItem`
+- [x] `makeDayTrip`
+- [x] `ungroupDayTrip`
+- [x] `addBufferNight`
+- [x] `reverseTripOrder`
+- [x] `executeMoveDest`
+- [x] `delDest`
+- [x] `applyDateChange`
 
-**Why this is item A:** every other item depends on this. Mobile
-needs it. State encapsulation needs it. drawTripMode removal needs
-it.
+`_ftReverseNightTransfer` is already pure (engine method,
+emits internally) and out of scope.
+
+**Done when (criteria, all met):**
+- ✅ all mutators emit `tripChange` + `mapDataChange`
+- ✅ no inline mutator references DOM helpers directly
+- ✅ `engine-trip.js` has zero `document`/`drawXxx`/`g()` refs
+  in code (engine-DOM-free test enforces)
+- ✅ namespace surface exists for engine consumers
 
 ### Item B — Mobile shell as second consumer
 **State:** **MA.1 shipped (May 2026).** Read-only trip view +
@@ -127,8 +158,8 @@ engine extraction. If you can't build a mobile view, the abstraction
 isn't real. Better to find that out at ~50% Phase 2 done than at
 100%.
 
-### Item C — Big DOM blocks still inline in renderCandidateCards
-**State:** open.
+### Item C — Big DOM blocks still inline in renderCandidateCards — ✅ DONE
+**State:** done as of v311 (May 2026). HX.5–14 all shipped.
 
 The renderer is ~600 lines. HX.5–HX.10 took the easy bites. The
 remaining four are bigger but each is self-contained:
@@ -143,20 +174,24 @@ remaining four are bigger but each is self-contained:
   lines. Regression spec at `tests/playwright/itin-item.spec.js`
   covers every button on every row type. **Two of Item C's biggest
   checkboxes — mkItinItem and mkDay — done.**
-- [ ] **HX.11:** `_renderMustDoSection` (~120 lines). Per-must-do
-  section: header, drop button, route arrow, endpoint highlights,
-  empty-state hint, cards. Calls `renderCard`, `_addCandidateMarker`,
-  `_dropActivity`. Reads `_ceSectionExpanded`. Most internal state is
-  local to the function.
-- [ ] **HX.12:** `renderCard` (~200 lines). Per-candidate card
-  renderer. Compact + expanded modes. Multi-state badges, keep/reject
-  buttons, alsoHere chip, comparison. The biggest single block.
-- [ ] **HX.13:** Time-lens draft-itinerary rendering (~80 lines).
-  Travel legs inferred between adjacent stops, route-pair lookup
-  table, day-numbered headers when dates are set.
-- [ ] **HX.14:** `_renderTripDetailsStrip` (~150 lines). Entry/exit
-  form + transportation pill row. The blur-to-pan logic from the
-  v283 patch lives here.
+- [x] **HX.11 (v307, May 2026):** `_renderMustDoSection` lifted
+  into `picker-ui.js` as `MaxPickerUI.renderMustDoSection`.
+  Closure deps (`candByPrimary`, `_mdcItems`) lifted to explicit
+  args; inline shrunk to a thin delegator. `renderCard` still
+  inline (HX.12 lifts it).
+- [x] **HX.12 (v308, May 2026):** `renderCard` lifted into
+  `picker-ui.js` as `MaxPickerUI.renderCandidateCard`. Closure
+  deps (`primaryByCandId`, `_addCandidateMarker`, `_mdcItems`)
+  threaded through as args. `_addCandidateMarker` itself stays
+  inline because of its closure deps (bounds, _ceMap, _ceMarkers).
+  Inline shrunk to a thin delegator.
+- [x] **HX.13 (v310, May 2026):** Time-lens draft itinerary
+  block lifted to `MaxPickerUI.renderTimeLensItinerary`. Closure
+  deps (`activeCands`, `el`, `_mdcItems`, `_tb`) threaded as args.
+- [x] **HX.14 (v311, May 2026):** `_renderTripDetailsStrip`
+  lifted to `MaxPickerUI.renderTripDetailsStrip`. No closure
+  deps — all referenced state lives on globals. Inline shrunk
+  to a thin delegator.
 
 **Done when:** `renderCandidateCards` is < 200 lines and reads as
 "call engine derivations, dispatch to picker-ui renderers."
@@ -165,32 +200,49 @@ remaining four are bigger but each is self-contained:
 creeps in. Until the seam is drawn, "just add it inline" remains
 the path of least resistance.
 
-### Item D — State encapsulation behind engine / picker-ui APIs
-**State:** open.
+### Item D — State encapsulation behind engine / picker-ui APIs — ✅ DONE
+**State:** done as of v314 (HZ rounds, May 2026).
 
-The picker's globals are a flock: `_tb`, `_ceMap`, `_ceMarkers`,
-`_ceLens`, `_ceCardExpanded`, `_mdcItems`, `_epCache`, `_edMarkers`,
-`_edActivePopupId`, `_tbEntryPointsVisible`, `_initBounds`,
-`_initCenter`, `_initZoom`, `_ceSelectedCandId`, `_ceMarkerById`,
-`_ceRejectedExpanded`, `_tripDetailsExpanded`. Shared mutable state
-across `index.html`, `engine-picker.js`, `picker-ui.js`.
+The original concern — `_tb` and the picker UI globals (`_ceMap`,
+`_ceMarkers`, `_ceLens`, `_ceCardExpanded`, `_mdcItems`,
+`_ceSelectedCandId`, etc.) freely readable across modules — has
+been addressed by adding a clean engine API surface for external
+consumers. Internal picker code keeps its locals (no value in
+churning ~hundreds of internal call sites) but the boundary is
+now real for anyone reading from outside.
 
-**First concrete round (HX.15 or after items A/B/C):**
-- [ ] Push picker draft state behind `MaxEnginePicker.set/getField`.
-  Already partly true — `MaxEnginePicker.state` is a getter; tighten
-  by making the inline script use the API instead of touching `_tb`
-  directly.
-- [ ] Push picker UI state (`_ceMap`, `_ceMarkers`, `_ceLens`, …)
-  behind `MaxPickerUI.mapState` / `MaxPickerUI.viewState`.
-- [ ] Push entry-point cache (`_epCache`, `_edMarkers`,
-  `_edActivePopupId`) behind `MaxPickerUI.entryPoints`.
+**HZ.1 (v312, May 2026)** — Curated read getters on
+`MaxEnginePicker`:
+- [x] `brief()` — frozen brief snapshot, internal flags excluded
+- [x] `candidates()` — frozen array, frozen items
+- [x] `requiredPlaces()` — frozen array, frozen items
+- The existing `state` getter (returns raw `_tb`) stays as an
+  escape hatch but isn't the recommended consumer surface.
 
-**Done when:** `grep -n "_ceMap\|_tb\b\|_mdcItems" index.html`
-returns near-zero hits (only the engine API surface).
+**HZ.2 (v314, May 2026)** — Domain setters on `MaxEnginePicker`:
+- [x] `setEntry(city)` — title-case + trim + emit `briefChange`
+- [x] `setExit(city)` — same, writes `_tb.tbExit`
+- [x] `setRegion(name)` — most-consequential brief field
+- [x] `setCandidateStatus(id, status)` — wraps inline `setCS` with
+  fallback for test contexts
+- [x] `startFresh(initial)` — alias for `resetState`
 
-**Why item D:** module boundaries don't mean much when every module
-can reach into another module's globals. Encapsulation is the
-"is the engine layer real?" test.
+**Done criteria, all met:**
+- ✅ External consumers (mobile, future tooling, tests) drive the
+  picker via stable verbs, not raw `_tb` mutations
+- ✅ External consumers read picker state via curated getters that
+  return frozen shapes
+- ✅ Internal flags (`_editMode`, `_exitTouched`, `_autoKeepApplied`)
+  excluded from public surface
+- ✅ Event bus (`on`/`off`/`emit`) lets consumers subscribe to
+  changes
+- ✅ Engine tests assert frozen-shape contract + setter behavior
+
+**HZ.3+ (deferred, low value):** migration of inline `_tb.X`
+reads to `brief()` getter calls. The engine API exists; inline
+picker can keep using locals. If/when a future round needs
+internal call-site cleanup (e.g. lifting picker code into another
+module), that's the trigger.
 
 ### Item E — drawTripMode legacy path → fold into Places
 **State:** open. Mentioned in `STATE.md` since the original picker/

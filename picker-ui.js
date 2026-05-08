@@ -71,26 +71,24 @@
     if (!nav) return;
     var activeCats = Object.keys(activeMap || {});
     if (activeCats.length < 2) { nav.style.display = "none"; nav.innerHTML = ""; return; }
-    var checkedByCat = {};
-    (items || []).forEach(function (it) {
-      if (!it.checked) return;
-      var cat = it.category;
-      if (!cat) return;
-      checkedByCat[cat] = (checkedByCat[cat] || 0) + 1;
-    });
     nav.innerHTML = "";
     var row = document.createElement("div");
-    row.style.cssText = "display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;align-items:center;-webkit-overflow-scrolling:touch;scrollbar-width:thin;padding-bottom:4px;";
-    row.style.scrollbarColor = "#d8d4c8 transparent";
+    // v294.4: was flex-wrap:nowrap + overflow-x:auto (horizontal
+    // scroll for many chips). On systems with hidden scrollbars
+    // (default macOS) this clipped chips off the right edge with
+    // no affordance that more existed. Wrap to multiple lines —
+    // every chip visible at once, sticky position still works.
+    row.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding-bottom:4px;";
     var cats = global._CATEGORIES || [];
+    // v301: count badges on each chip removed. The number was the count
+    // of items the user had just checked themselves — information they
+    // already had. Pure decoration. Chips are nav now: click to scroll.
     cats.forEach(function (c) {
       if (!activeMap[c.id]) return;
       var chip = document.createElement("button");
       chip.type = "button";
-      var n = checkedByCat[c.id] || 0;
       chip.style.cssText = "font-size:11px;font-weight:600;color:#444;background:#fff;border:1px solid #d8d4c8;padding:5px 10px;border-radius:14px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;line-height:1.2;flex-shrink:0;white-space:nowrap;";
-      chip.innerHTML = '<span style="font-size:13px;">' + c.emoji + '</span><span>' + (c.shortLabel || c.label) + '</span>'
-        + (n > 0 ? '<span style="font-size:10px;background:#1a5fa8;color:#fff;border-radius:9px;padding:0 6px;line-height:14px;font-weight:600;">' + n + '</span>' : '');
+      chip.innerHTML = '<span style="font-size:13px;">' + c.emoji + '</span><span>' + (c.shortLabel || c.label) + '</span>';
       chip.onmouseover = function () { chip.style.background = "#f5f5f5"; };
       chip.onmouseout  = function () { chip.style.background = "#fff"; };
       (function (catId) {
@@ -450,6 +448,475 @@
     }
   }
 
+  // ── HX.11 (v307): _renderMustDoSection ────────────────────
+  // Lifted from index.html's inline picker code. Renders a
+  // single must-do's section: header + description + endpoint
+  // line (for routes) + endpoint highlights + empty-state hint
+  // + per-candidate cards.
+  //
+  // Inline closure deps lifted to explicit args:
+  //   - candByPrimary  — { mdName: cand[] } map computed by caller
+  //   - mdcItems       — must-do items list (was outer _mdcItems)
+  //   - container      — DOM node to append the section to (the
+  //                      inline version had `container` as a param
+  //                      but ignored it and used outer `el`; fixed)
+  //
+  // Globals still referenced (intentionally; these are inline-
+  // only and not worth lifting in this round):
+  //   - global._dropActivity (handler for the Drop button)
+  //   - global.renderCard    (HX.12 will lift this; for now
+  //                            we read from global)
+  //   - MaxEnginePicker.mustDoSectionRenderable, mustDoSectionTitle,
+  //     routeArrow (already namespaced)
+  function _renderMustDoSection(mdName, container, candByPrimary, mdcItems) {
+    if (!container) return;
+    var group = (candByPrimary && candByPrimary[mdName]) || [];
+    var mdItem = (mdcItems || []).find(function (m) { return m.name === mdName; });
+    var sectionType = (mdItem && mdItem.type) || "activity";
+    var alwaysRenderSection = global.MaxEnginePicker.mustDoSectionRenderable(sectionType, group.length > 0);
+    if (!alwaysRenderSection) return;
+    var sectionWrap = document.createElement("div");
+    sectionWrap.style.cssText = "margin-top:14px;padding:10px 10px 8px;background:#f7faff;border-radius:8px;border:1px solid #e8f0fc;";
+
+    var hdrRow = document.createElement("div");
+    hdrRow.style.cssText = "display:flex;justify-content:space-between;align-items:baseline;gap:8px;";
+    var hdr = document.createElement("div");
+    hdr.style.cssText = "font-size:13px;font-weight:700;color:#1a5fa8;letter-spacing:0.02em;";
+    hdr.textContent = global.MaxEnginePicker.mustDoSectionTitle(mdName, mdItem);
+    hdrRow.appendChild(hdr);
+    if (mdItem && mdItem.fromChip && mdItem.interest) {
+      var chipSrc = document.createElement("div");
+      chipSrc.style.cssText = "font-size:10px;color:#888;font-style:italic;";
+      chipSrc.textContent = "from: " + mdItem.interest;
+      hdrRow.appendChild(chipSrc);
+    }
+    var drop = document.createElement("button");
+    drop.style.cssText = "font-size:10px;color:#888;background:none;border:none;cursor:pointer;font-family:inherit;padding:0;";
+    drop.textContent = mdItem && mdItem.type === "route" ? "Drop this travel leg" : "Drop this activity";
+    drop.title = mdItem && mdItem.type === "route"
+      ? "Remove this travel leg from your plan. Endpoints stay only if kept for other reasons."
+      : "Reject every destination under this activity and remove it from your trip.";
+    (function (mName) {
+      drop.onclick = function () { if (typeof global._dropActivity === "function") global._dropActivity(mName); };
+    })(mdName);
+    hdrRow.appendChild(drop);
+    sectionWrap.appendChild(hdrRow);
+
+    if (mdItem && mdItem.description) {
+      var sub = document.createElement("div");
+      sub.style.cssText = "font-size:11px;color:#555;line-height:1.55;margin-top:4px;";
+      sub.textContent = mdItem.description;
+      sectionWrap.appendChild(sub);
+    }
+
+    if (mdItem && mdItem.type === "route") {
+      var eps = mdItem.endpoints || mdItem.requiredPlaces || [];
+      if (eps.length >= 2) {
+        var arrow = global.MaxEnginePicker.routeArrow(mdItem.direction);
+        var routeLine = document.createElement("div");
+        routeLine.style.cssText = "font-size:12px;font-weight:600;color:#1a5fa8;margin-top:6px;";
+        routeLine.textContent = eps.map(function (p) { return p.place; }).join(arrow);
+        sectionWrap.appendChild(routeLine);
+      }
+    }
+
+    if (mdItem && mdItem.type === "route" && mdItem.endpointHighlights && typeof mdItem.endpointHighlights === "object") {
+      var ehParts = [];
+      (mdItem.requiredPlaces || mdItem.endpoints || []).forEach(function (p) {
+        var h = mdItem.endpointHighlights[p.place] || mdItem.endpointHighlights[(p.place || "").toLowerCase()];
+        if (h) ehParts.push('<div style="font-size:11px;color:#555;line-height:1.5;margin-top:2px;"><strong style="color:#333;">' + p.place + ':</strong> ' + h + '</div>');
+      });
+      if (ehParts.length) {
+        var ehWrap = document.createElement("div");
+        ehWrap.style.cssText = "margin-top:6px;padding-top:6px;border-top:1px dashed #d8e4f0;";
+        ehWrap.innerHTML = ehParts.join("");
+        sectionWrap.appendChild(ehWrap);
+      }
+    }
+
+    if (alwaysRenderSection && !group.length) {
+      var empty = document.createElement("div");
+      empty.style.cssText = "font-size:10px;color:#999;font-style:italic;margin-top:6px;padding-top:6px;border-top:1px dashed #e0eaf5;";
+      empty.textContent = (sectionType === "route")
+        ? "Endpoint places will appear below as they load."
+        : "Places for this activity will appear below as they load.";
+      sectionWrap.appendChild(empty);
+    }
+
+    container.appendChild(sectionWrap);
+
+    // Per-section candidate cards. renderCard is still inline (HX.12
+    // will lift it); read from global so the lift order doesn't
+    // matter.
+    if (typeof global.renderCard === "function") {
+      group.forEach(function (c) { global.renderCard(c, container); });
+    }
+  }
+
+  // ── HX.12 (v308): renderCandidateCard ─────────────────────
+  // Lifted from index.html's inline `renderCard`. Renders a
+  // single candidate's compact + expanded card: name, role,
+  // stayRange, kept/reject buttons, expand chevron, and on
+  // expand the why-it-fits / tags / tradeoffs / Compare button.
+  // Also calls back into the closure to add the marker on the
+  // picker map after the card is appended.
+  //
+  // Inline closure deps lifted to explicit args:
+  //   - primaryByCandId  — { candId: mdItem } map computed by caller
+  //   - addMarkerFn(c, grayed) — closure helper that pushes to
+  //     bounds + _ceMarkers; stays inline because of its own
+  //     locals
+  //   - mdcItems — must-do items list (defaults to global._mdcItems)
+  //
+  // Globals still referenced (read at call time so reload order
+  // doesn't matter):
+  //   - global.setCS, global.doCompare, global._ceSelectCandidateOnMap
+  //   - global.renderCandidateCards (re-renders the list when expand toggles)
+  //   - global._ceCardExpanded, global._tb (state)
+  //   - MaxEnginePicker.classifyCandidateBadge / .alsoHereText
+  function _renderCandidateCard(c, container, primaryByCandId, addMarkerFn, mdcItems) {
+    if (!c || !container) return;
+    var ME = global.MaxEnginePicker;
+    var ceCardExpanded = global._ceCardExpanded || {};
+    mdcItems = mdcItems || global._mdcItems || [];
+
+    var card = document.createElement("div");
+    card.className = "ce-card" + (c.status ? " " + c.status : "");
+    card.id = "ce-card-" + c.id;
+    var expanded = !!ceCardExpanded[c.id];
+
+    var primary = primaryByCandId ? primaryByCandId[c.id] : null;
+    var _hxBadge = ME ? ME.classifyCandidateBadge(c, primary, mdcItems) : { kind: 'none' };
+    var reqBadge = '';
+    if (_hxBadge.kind === 'manual') {
+      reqBadge = '<div style="font-size:9px;font-weight:700;color:#2a7a4e;background:#e8f5ee;padding:2px 7px;border-radius:10px;margin:2px 0 4px;display:inline-block;">📌 A must-see for you</div>';
+    } else if (_hxBadge.kind === 'also') {
+      reqBadge = '<div style="font-size:9px;font-weight:700;color:#1a5fa8;background:#e8f0fc;padding:2px 7px;border-radius:10px;margin:2px 0 4px;display:inline-block;">You will also find:' + _hxBadge.refs.join(", ") + '</div>';
+    } else if (_hxBadge.kind === 'required') {
+      var label = _hxBadge.isRoute ? "Stop on" : "Required for";
+      reqBadge = '<div style="font-size:9px;font-weight:700;color:#1a5fa8;background:#e8f0fc;padding:2px 7px;border-radius:10px;margin:2px 0 4px;display:inline-block;">🚂 ' + label + ': ' + _hxBadge.refs.join(", ") + '</div>';
+    }
+
+    var alsoHere = ME ? ME.alsoHereText(c, primary, mdcItems) : '';
+    var alsoHereHtml = alsoHere
+      ? '<div style="font-size:11px;color:#555;line-height:1.5;margin-top:4px;"><strong style="color:#333;font-weight:600;">Also here:</strong> ' + alsoHere + '</div>'
+      : '';
+
+    var keptDot = c.status === "keep"
+      ? '<span style="color:#2a7a4e;font-weight:700;margin-right:2px;">✓</span>'
+      : (c.status === "reject" ? '<span style="color:#c05020;font-weight:700;margin-right:2px;">×</span>' : '');
+    var compactHtml = '<div class="ce-card-compact" style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;cursor:pointer;">'
+      + '<div style="flex:1;min-width:0;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">'
+      + keptDot
+      + '<span class="ce-card-name" style="font-size:13px;font-weight:700;color:#111;">' + c.place + '</span>'
+      + (c.widelyRecommended ? '<span style="color:#6a4a80;font-size:10px;" title="widely recommended">★</span>' : '')
+      + '<span style="font-size:10px;color:#888;">' + (c.role || '') + (c.stayRange ? ' · ' + c.stayRange : '') + '</span>'
+      + '</div>'
+      + '<div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">'
+      + '<button class="ce-act-compact-keep" style="font-size:10px;font-weight:600;padding:4px 9px;border-radius:5px;border:1px solid ' + (c.status === "keep" ? "#2a7a4e" : "#ddd") + ';background:' + (c.status === "keep" ? "#e8f5ee" : "#fff") + ';color:' + (c.status === "keep" ? "#2a7a4e" : "#333") + ';cursor:pointer;font-family:inherit;" title="' + (c.status === "keep" ? "Remove from your picks" : (c.status === "reject" ? "Restore" : "Keep")) + '">' + (c.status === "keep" ? "✓" : (c.status === "reject" ? "↺" : "+")) + '</button>'
+      + '<button class="ce-act-compact-reject" style="font-size:10px;font-weight:600;padding:4px 9px;border-radius:5px;border:1px solid ' + (c.status === "reject" ? "#c05020" : "#ddd") + ';background:' + (c.status === "reject" ? "#fff0ec" : "#fff") + ';color:' + (c.status === "reject" ? "#c05020" : "#888") + ';cursor:pointer;font-family:inherit;" title="' + (c.status === "reject" ? "Currently rejected" : "Reject") + '">×</button>'
+      + '<button class="ce-act-compact-expand" style="font-size:12px;color:#888;background:none;border:none;cursor:pointer;font-family:inherit;padding:0 4px;" title="' + (expanded ? "Hide details" : "See details") + '">' + (expanded ? "▾" : "▸") + '</button>'
+      + '</div>'
+      + '</div>';
+
+    var detailHtml = expanded
+      ? '<div class="ce-card-details" style="padding:4px 11px 10px;border-top:1px solid #f0f0f0;">'
+        + reqBadge
+        + '<div class="ce-card-why" style="font-size:11px;color:#555;line-height:1.55;margin-top:4px;">' + (c.whyItFits || '') + '</div>'
+        + alsoHereHtml
+        + '<div class="ce-card-tags" style="margin-top:6px;">' + (c.tags || []).map(function (t) { return '<span class="ce-tag">' + t + '</span>'; }).join('') + '</div>'
+        + (c.tradeoffs ? '<div class="ce-card-tradeoff" style="margin-top:6px;">⚠ ' + c.tradeoffs + '</div>' : '')
+        + '<div class="ce-card-actions" style="margin-top:8px;border-top:none;">'
+        + '<button class="ce-act reject' + (c.status === "reject" ? " on" : '') + '">× Reject</button>'
+        + '<button class="ce-act compare">⇄ Compare</button>'
+        + '</div>'
+        + '</div>'
+      : '';
+
+    card.innerHTML = compactHtml + detailHtml;
+
+    var keepBtn    = card.querySelector(".ce-act-compact-keep");
+    var rejectBtn  = card.querySelector(".ce-act-compact-reject");
+    var expandBtn  = card.querySelector(".ce-act-compact-expand");
+    var compactRow = card.querySelector(".ce-card-compact");
+    (function (cand) {
+      if (keepBtn)   keepBtn.onclick   = function (e) { e.stopPropagation(); if (typeof global.setCS === "function") global.setCS(cand.id, "keep"); };
+      if (rejectBtn) rejectBtn.onclick = function (e) { e.stopPropagation(); if (typeof global.setCS === "function") global.setCS(cand.id, "reject"); };
+      if (expandBtn) expandBtn.onclick = function (e) {
+        e.stopPropagation();
+        global._ceCardExpanded = global._ceCardExpanded || {};
+        global._ceCardExpanded[cand.id] = !global._ceCardExpanded[cand.id];
+        if (typeof global.renderCandidateCards === "function" && global._tb) {
+          global.renderCandidateCards(global._tb.candidates);
+        }
+      };
+      if (compactRow) compactRow.onclick = function (e) {
+        if (e.target.closest("button")) return;
+        if (typeof global._ceSelectCandidateOnMap === "function") global._ceSelectCandidateOnMap(cand.id);
+        global._ceCardExpanded = global._ceCardExpanded || {};
+        global._ceCardExpanded[cand.id] = !global._ceCardExpanded[cand.id];
+        if (typeof global.renderCandidateCards === "function" && global._tb) {
+          global.renderCandidateCards(global._tb.candidates);
+        }
+      };
+    })(c);
+
+    if (expanded) {
+      var detailBtns = card.querySelectorAll(".ce-card-details .ce-act");
+      (function (cand) {
+        if (detailBtns[0]) detailBtns[0].onclick = function () { if (typeof global.setCS === "function") global.setCS(cand.id, "reject"); };
+        if (detailBtns[1]) detailBtns[1].onclick = function () { if (typeof global.doCompare === "function") global.doCompare(cand.id); };
+      })(c);
+    }
+    container.appendChild(card);
+    if (typeof addMarkerFn === "function") addMarkerFn(c, false);
+  }
+
+  // ── HX.13 (v310): renderTimeLensItinerary ─────────────────
+  // Lifted from inline renderCandidateCards' `_ceLens === "time"`
+  // branch. Renders the draft itinerary in trip order:
+  //   - Arrival leg (when gettingTo set)
+  //   - Each kept candidate as a card, with travel-leg lines
+  //     between them (route name when available, else generic
+  //     "Travel: A → B")
+  //   - Departure leg (when gettingOut set)
+  //   - "Also worth considering" section for unkept candidates
+  //
+  // Anchored in real dates when tb.when carries an ISO date;
+  // falls back to "Stop N" numbering otherwise.
+  //
+  // Closure deps lifted to explicit args:
+  //   - activeCands  — list to render
+  //   - container    — DOM target (was outer `el`)
+  //   - mdcItems     — must-do items list
+  //   - tb           — picker brief object (uses .entry, .tbExit,
+  //                    .when, .gettingTo, .gettingOut)
+  //
+  // Globals still referenced (read at call time):
+  //   - MaxEnginePicker.keptCandidates
+  //   - global.orderKeptCandidates  (engine ordering helper)
+  //   - global.parseNightsFromRange (engine helper)
+  //   - global.renderCard           (now itself a delegator into
+  //                                  MaxPickerUI.renderCandidateCard)
+  function _renderTimeLensItinerary(activeCands, container, mdcItems, tb) {
+    if (!container) return;
+    var ME = global.MaxEnginePicker;
+    var kept  = ME ? ME.keptCandidates(activeCands) : (activeCands || []).filter(function(c){return c && c.status === "keep";});
+    var unset = (activeCands || []).filter(function (c) { return c.status !== "keep"; });
+    if (kept.length) {
+      var orderRes, ordered;
+      try {
+        orderRes = (typeof global.orderKeptCandidates === "function")
+          ? global.orderKeptCandidates(kept, mdcItems || [], (tb && tb.entry) || "", (tb && tb.tbExit) || "")
+          : null;
+        ordered = (orderRes && orderRes.ordered) || kept;
+      } catch (e) { ordered = kept; }
+
+      // Route-pair lookup so adjacent stops can label their
+      // shared route by name (e.g. "Glacier Express").
+      var routeByPair = {};
+      (mdcItems || []).filter(function (m) { return m.checked && m.type === "route"; }).forEach(function (m) {
+        var eps = (m.endpoints || m.requiredPlaces || []).map(function (p) { return (p.place || "").toLowerCase(); });
+        for (var a = 0; a < eps.length; a++) {
+          for (var b = 0; b < eps.length; b++) {
+            if (a !== b) routeByPair[eps[a] + "→" + eps[b]] = m.name;
+          }
+        }
+      });
+
+      var hdr = document.createElement("div");
+      hdr.style.cssText = "margin-top:6px;padding:10px 4px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#111;";
+      hdr.textContent = "Draft itinerary — in order";
+      container.appendChild(hdr);
+      if (orderRes && orderRes.reasoning && orderRes.reasoning.length) {
+        var why = document.createElement("div");
+        why.style.cssText = "padding:4px 4px 8px;font-size:10px;color:#888;line-height:1.55;";
+        why.innerHTML = orderRes.reasoning.map(function (r) { return "• " + r; }).join("<br>");
+        container.appendChild(why);
+      }
+
+      var hasStartDate = !!(tb && tb.when && /\d{4}-\d{2}-\d{2}/.test(tb.when));
+      var dayCursor = 1;
+      var dateCursor = hasStartDate ? new Date(tb.when + "T00:00:00") : null;
+      var fmtDate = function (d) {
+        if (!d || isNaN(d)) return "";
+        var days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+        var mons = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        return days[d.getDay()] + " " + mons[d.getMonth()] + " " + d.getDate();
+      };
+
+      if (tb && tb.gettingTo) {
+        var arrLeg = document.createElement("div");
+        arrLeg.style.cssText = "margin:6px 12px 2px;padding:6px 10px;font-size:10px;color:#555;border-left:2px solid #c8d8ec;background:#f5f9ff;line-height:1.55;border-radius:0 4px 4px 0;";
+        arrLeg.innerHTML = '✈ <strong style="color:#1a5fa8;">Arrival</strong> · ' + tb.gettingTo;
+        container.appendChild(arrLeg);
+      }
+
+      ordered.forEach(function (c, i) {
+        if (i > 0) {
+          var prev = ordered[i - 1];
+          var key = (prev.place || "").toLowerCase() + "→" + (c.place || "").toLowerCase();
+          var routeName = routeByPair[key];
+          var leg = document.createElement("div");
+          leg.style.cssText = "margin:2px 12px 2px;padding:4px 8px;font-size:10px;color:#666;border-left:2px solid #e8e8e8;line-height:1.55;";
+          leg.innerHTML = routeName
+            ? '↓ <strong style="color:#1a5fa8;">' + routeName + '</strong> · ' + prev.place + ' → ' + c.place
+            : '↓ Travel: ' + prev.place + ' → ' + c.place;
+          container.appendChild(leg);
+        }
+        var nights = (typeof global.parseNightsFromRange === "function")
+          ? (global.parseNightsFromRange(c.stayRange) || 3) : 3;
+        var ix = document.createElement("div");
+        ix.style.cssText = "font-size:10px;color:#888;padding:6px 6px 0;font-weight:700;letter-spacing:0.03em;";
+        if (hasStartDate && dateCursor && !isNaN(dateCursor)) {
+          var endDate = new Date(dateCursor); endDate.setDate(endDate.getDate() + nights);
+          var dayEnd = dayCursor + nights - 1;
+          var rangeStr = (nights > 1)
+            ? ("Day " + dayCursor + "–" + dayEnd + " · " + fmtDate(dateCursor) + " → " + fmtDate(endDate))
+            : ("Day " + dayCursor + " · " + fmtDate(dateCursor));
+          ix.textContent = rangeStr;
+          dayCursor += nights;
+          dateCursor = endDate;
+        } else {
+          ix.textContent = "Stop " + (i + 1);
+        }
+        container.appendChild(ix);
+        if (typeof global.renderCard === "function") global.renderCard(c, container);
+      });
+
+      if (tb && tb.gettingOut) {
+        var depLeg = document.createElement("div");
+        depLeg.style.cssText = "margin:2px 12px 6px;padding:6px 10px;font-size:10px;color:#555;border-left:2px solid #c8d8ec;background:#f5f9ff;line-height:1.55;border-radius:0 4px 4px 0;";
+        depLeg.innerHTML = '✈ <strong style="color:#1a5fa8;">Departure</strong> · ' + tb.gettingOut;
+        container.appendChild(depLeg);
+      }
+    }
+    if (unset.length) {
+      var hdr2 = document.createElement("div");
+      hdr2.style.cssText = "margin-top:18px;padding:10px 4px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#111;border-top:1px solid #e8e8e8;";
+      hdr2.textContent = "Also worth considering";
+      container.appendChild(hdr2);
+      var hdr2Sub = document.createElement("div");
+      hdr2Sub.style.cssText = "padding:0 4px 8px;font-size:10px;color:#888;";
+      hdr2Sub.textContent = "Places not yet in the draft. Keep any that fit; they’ll slot into the order.";
+      container.appendChild(hdr2Sub);
+      unset.forEach(function (c) { if (typeof global.renderCard === "function") global.renderCard(c, container); });
+    }
+  }
+
+  // ── HX.14 (v311): renderTripDetailsStrip ──────────────────
+  // Lifted from inline _renderTripDetailsStrip. Renders a
+  // collapsible "Entry & exit" strip on the candidate explorer:
+  // a transportation pill row, two city/airport text inputs,
+  // and the blur-to-pan logic that re-centers the map when the
+  // user types a new arrival/departure city.
+  //
+  // No closure deps — all referenced state lives on globals.
+  // Returns a DOM box; caller appends it.
+  //
+  // Globals referenced (read at call time):
+  //   - global._tb (entry, tbExit, entryMode, exitMode, candidates, region)
+  //   - global._tripDetailsExpanded (toggle flag)
+  //   - global._tbPlacesTransportButtonHtml (transport pill HTML)
+  //   - global._rebuildGettingToFromFields
+  //   - global.renderCandidateCards
+  //   - global._ceMap
+  //   - global._findCityCoordsForMap
+  //   - MaxPickerUI.renderEntryPointsOnCeMap (already in this module)
+  function _renderTripDetailsStrip() {
+    var box = document.createElement("div");
+    box.style.cssText = "margin-top:10px;padding-top:8px;border-top:1px solid #f0f0f0;";
+
+    var tb = global._tb || {};
+    var hasAny = tb.entry || tb.tbExit || tb.entryMode || tb.exitMode;
+    var expanded = !!global._tripDetailsExpanded;
+
+    var summaryRow = document.createElement("div");
+    summaryRow.style.cssText = "display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;flex-wrap:wrap;";
+    var chev = document.createElement("span");
+    chev.style.cssText = "font-size:9px;color:#999;";
+    chev.textContent = expanded ? "▾" : "▸";
+    summaryRow.appendChild(chev);
+    var label = document.createElement("span");
+    label.style.cssText = "font-size:10px;color:#999;letter-spacing:0.05em;text-transform:uppercase;font-weight:700;";
+    label.textContent = "Entry & exit";
+    summaryRow.appendChild(label);
+    if (!expanded) {
+      var sum = document.createElement("span");
+      sum.style.cssText = "font-size:11px;color:#666;margin-left:4px;line-height:1.5;word-break:break-word;";
+      if (hasAny) {
+        var bits = [];
+        if (tb.entry)  bits.push("In: "  + tb.entry);
+        if (tb.tbExit) bits.push("Out: " + tb.tbExit);
+        sum.textContent = bits.join(" · ");
+      } else {
+        sum.innerHTML = '<em style="color:#aaa;">Pick a pin on the map, or click to set arrival and departure</em>';
+      }
+      summaryRow.appendChild(sum);
+    }
+    summaryRow.onclick = function () {
+      global._tripDetailsExpanded = !global._tripDetailsExpanded;
+      if (typeof global.renderCandidateCards === "function") {
+        global.renderCandidateCards(global._tb && global._tb.candidates);
+      }
+    };
+    box.appendChild(summaryRow);
+
+    if (!expanded) return box;
+
+    var form = document.createElement("div");
+    form.style.cssText = "margin-top:10px;padding:10px 12px;background:#fafbfc;border:1px solid #eee;border-radius:6px;";
+    var q = function (s) { return (s || "").replace(/"/g, '&quot;'); };
+    var defaultEntry = tb.entry || "";
+    var defaultExit  = tb.tbExit || "";
+    var transportHtml = (typeof global._tbPlacesTransportButtonHtml === "function")
+      ? global._tbPlacesTransportButtonHtml() : '';
+    form.innerHTML =
+       '<div style="font-size:10px;color:#888;line-height:1.5;margin-bottom:10px;">'
+      +  'One transportation picker for both directions — tap it for getting-there and getting-out modes. Cities below. Dates and flight numbers come after you’ve committed to entry and exit.'
+      + '</div>'
+      + '<div style="margin-bottom:12px;">'
+      +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#888;margin-bottom:6px;">How you’re moving</div>'
+      +   transportHtml
+      + '</div>'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'
+      + '<div>'
+      +   '<label style="display:block;font-size:10px;color:#666;margin-bottom:3px;">Getting there — city or airport</label>'
+      +   '<input id="td-entry" value="' + q(defaultEntry) + '" placeholder="e.g. Zurich or ZRH" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;" />'
+      + '</div>'
+      + '<div>'
+      +   '<label style="display:block;font-size:10px;color:#666;margin-bottom:3px;">Getting out — city or airport</label>'
+      +   '<input id="td-exit" value="' + q(defaultExit) + '" placeholder="e.g. Geneva or GVA" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;" />'
+      + '</div>'
+      + '</div>';
+    box.appendChild(form);
+
+    setTimeout(function () {
+      var bind = function (id, key) {
+        var inp = document.getElementById(id); if (!inp) return;
+        inp.onblur = function () {
+          var newVal = inp.value.trim();
+          var changed = newVal !== global._tb[key];
+          global._tb[key] = newVal;
+          if (typeof global._rebuildGettingToFromFields === "function") global._rebuildGettingToFromFields();
+          if (typeof global.renderCandidateCards === "function") global.renderCandidateCards(global._tb.candidates);
+          if (changed && newVal && global._ceMap) {
+            try { if (typeof global._renderEntryPointsOnCeMap === "function") global._renderEntryPointsOnCeMap(global._tb.region || ""); } catch (e) {}
+            var coords = (typeof global._findCityCoordsForMap === "function") ? global._findCityCoordsForMap(newVal) : null;
+            if (coords) {
+              try { global._ceMap.flyTo([coords[0], coords[1]], Math.max(global._ceMap.getZoom(), 8), { duration: 0.6 }); }
+              catch (e) { try { global._ceMap.setView([coords[0], coords[1]], 8); } catch (_) {} }
+            }
+          }
+        };
+      };
+      bind("td-entry", "entry");
+      bind("td-exit",  "tbExit");
+    }, 10);
+
+    return box;
+  }
+
   // ── Public surface ────────────────────────────────────────
   var MaxPickerUI = {
     renderPickerCategoryNav:    _renderPickerCategoryNav,
@@ -460,6 +927,10 @@
     renderCELensBar:            _renderCELensBar,
     renderRejectedSection:      _renderRejectedSection,
     renderMustDosSummary:       _renderMustDosSummary,
+    renderMustDoSection:        _renderMustDoSection,
+    renderCandidateCard:        _renderCandidateCard,
+    renderTimeLensItinerary:    _renderTimeLensItinerary,
+    renderTripDetailsStrip:     _renderTripDetailsStrip,
   };
 
   global.MaxPickerUI = MaxPickerUI;

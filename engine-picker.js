@@ -2003,6 +2003,128 @@
     pickerEmit('published', { tripId: tripId, isRebuild: _hnIsRebuild });
   }
 
+  // ── deriveUserReasons (Round SCAFFOLD-1.5) ────────────────
+  // The picker leads with a user-reason section that echoes the
+  // traveler's stated draw to the place ("Why this place? What's
+  // drawing you?"). This helper takes their placeContext + the
+  // candidates Max found, and asks the LLM for 1–3 short categories
+  // that build on the traveler's words while pointing at which
+  // candidates fit each one. Candidates can sit in multiple
+  // categories (riding the Bernina Express fits both "The grandeur
+  // of the Alps" the traveler mentioned AND "Scenic travel" Max
+  // organizes under).
+  //
+  // Cached on _tb._userReasonsCache by a hash of (placeContext,
+  // region, candidate count) so the LLM only re-prompts when
+  // something meaningful changes.
+  //
+  // Returns: [{name: string, members: [candId, ...]}, ...]
+  // Returns []:
+  //   * When placeContext is empty (nothing to build on).
+  //   * When the LLM call fails (graceful fallback — picker still
+  //     renders; just without the leading user-reason section).
+  //   * When fewer than 2 candidates exist (no work to organize).
+
+  function _userReasonsCacheKey(placeContext, region, candidateCount) {
+    var ctx = String(placeContext || '').trim().toLowerCase();
+    var reg = String(region || '').trim().toLowerCase();
+    return ctx + '|' + reg + '|' + (candidateCount || 0);
+  }
+
+  async function deriveUserReasons(placeContext, candidates, mdcItems, region, options) {
+    var ctx = String(placeContext || '').trim();
+    if (!ctx) return [];
+    options = options || {};
+    // Generic items: each must have {id, label}. Optional: sublabel,
+    // status (excluded if 'reject'). Both candidate-explorer (with
+    // {id, place, country, role, status}) and place-mode picker
+    // (with {id, name, requiredPlaces, type}) feed through this.
+    var cands = (candidates || []).map(function (c) {
+      if (!c || !c.id) return null;
+      var label = c.label || c.place || c.name;
+      if (!label) return null;
+      var sublabel = c.sublabel || c.country
+        || (Array.isArray(c.requiredPlaces) ? c.requiredPlaces.map(function(p){return p && p.place;}).filter(Boolean).join(', ') : '')
+        || c.role || '';
+      return { id: c.id, label: label, sublabel: sublabel, status: c.status };
+    }).filter(function (c) {
+      return c && c.status !== 'reject';
+    });
+    if (cands.length < 2) return [];
+
+    // Cache hit → skip the LLM round-trip. Caller can override the
+    // cache slot via options.cacheSlot to keep candidate-explorer
+    // results separate from place-mode picker results.
+    var cacheSlot = options.cacheSlot || '_userReasonsCache';
+    var cacheKey = _userReasonsCacheKey(ctx, region, cands.length);
+    var cache = (global._tb && global._tb[cacheSlot]) || null;
+    if (cache && cache.key === cacheKey && Array.isArray(cache.value)) {
+      return cache.value;
+    }
+
+    // Build a compact list for the prompt — id + label + sublabel.
+    var candLines = cands.slice(0, 50).map(function (c) {
+      var bits = [c.id, c.label];
+      if (c.sublabel) bits.push(c.sublabel);
+      return bits.join(' | ');
+    }).join('\n');
+
+    var prompt =
+      "Region: " + (region || "this region") + "\n" +
+      "The traveler told us why this place is drawing them — in their own words:\n" +
+      '"' + ctx.replace(/"/g, '\\"') + '"\n\n' +
+      "Candidates Max found (id | place | country | role):\n" +
+      candLines + "\n\n" +
+      "Identify 1–3 USER-SPECIFIC categories built on what the traveler said. Each category should:\n" +
+      "  • Echo the traveler's framing — their words, their reason, the specific draw they named. NOT generic labels like 'Activities' or 'Scenic travel' (Max already groups by those separately).\n" +
+      "  • Read as a short header (3–7 words). Examples for someone who said 'My grandmother grew up there. Want to see the Alps':\n" +
+      "      — 'Family roots' / 'Where she would have known' / 'The grandeur she described'\n" +
+      "      — 'The Alps you came for'\n" +
+      "  • List 1–5 candidate IDs that fit. A candidate CAN appear in multiple categories — that's fine and intentional.\n" +
+      "  • If the traveler's words don't suggest any additional framing beyond Max's standard categories, return an empty array — don't invent reasons.\n\n" +
+      "Return ONLY a JSON array (no markdown):\n" +
+      '[{"name":"category header","members":["candId1","candId2"]}]';
+
+    try {
+      if (typeof global.callMax !== 'function') return [];
+      var text = await global.callMax([{role: 'user', content: prompt}], 800, 25000);
+      var cleaned = String(text || '').replace(/```json|```/g, '').trim();
+      var first = cleaned.indexOf('[');
+      var last = cleaned.lastIndexOf(']');
+      if (first < 0 || last < 0) return [];
+      cleaned = cleaned.substring(first, last + 1);
+      var parsed = JSON.parse(cleaned);
+      if (!Array.isArray(parsed)) return [];
+
+      // Validate + scrub: each entry needs name + members[]; members
+      // must be candidate ids that actually exist in the input.
+      var validIds = {};
+      cands.forEach(function (c) { validIds[c.id] = true; });
+      var result = parsed.map(function (entry) {
+        if (!entry || typeof entry.name !== 'string') return null;
+        var name = entry.name.trim();
+        if (!name) return null;
+        var members = (entry.members || []).filter(function (id) {
+          return typeof id === 'string' && validIds[id];
+        });
+        if (!members.length) return null;
+        return { name: name, members: members };
+      }).filter(Boolean);
+
+      // Cache the result (even if empty after scrubbing — saves a
+      // round-trip if the LLM keeps producing nothing useful).
+      if (global._tb) {
+        global._tb[cacheSlot] = { key: cacheKey, value: result };
+      }
+      return result;
+    } catch (e) {
+      // Graceful fallback. Picker renders without the user-reason
+      // section; the rest of the page is unaffected.
+      try { console.warn('[Max] deriveUserReasons failed:', (e && e.message) || e); } catch (_) {}
+      return [];
+    }
+  }
+
   // ── Public surface ──────────────────────────────────────────
   var MaxEnginePicker = {
     findMatchingRequired:   _findMatchingRequired,
@@ -2063,6 +2185,11 @@
     // from the UI in an earlier round.)
     mustDoSectionTitle:         mustDoSectionTitle,
 
+    // Round SCAFFOLD-1.5 — the leading user-reason section in the
+    // picker. Async; uses callMax. Returns [] gracefully on any
+    // failure mode (no placeContext, LLM error, no candidates).
+    deriveUserReasons:          deriveUserReasons,
+
     // Draft state — getter so re-init in the inline script
     // (`_tb = {...}` at picker start) is reflected on every read.
     get state() { return global._tb; },
@@ -2079,6 +2206,147 @@
       if (!global._tb) global._tb = {};
       global._tb[field] = value;
       pickerEmit('briefChange', {field: field, value: value});
+    },
+
+    // ── HZ.1 (path-to-10:D): curated read-only getters ────────
+    // The `state` getter above returns the raw _tb object — useful
+    // as an escape hatch but unstable (every internal flag like
+    // _editMode, _exitTouched, _autoKeepApplied is exposed). The
+    // getters below return curated, frozen shapes that consumers
+    // (mobile, future tooling, tests) can rely on without
+    // accidentally mutating picker state.
+    //
+    // Intentionally minimal first slice. Inline picker code keeps
+    // reading _tb.X directly — migration to these getters is for
+    // future rounds (HZ.2+). The point of HZ.1 is to give
+    // consumers a stable read surface RIGHT NOW so future moves
+    // toward true encapsulation don't break their callers.
+
+    // brief() — frozen snapshot of brief-shaped fields. Mirrors
+    // what gets persisted to trip.brief on publish. Internal-only
+    // flags (_editMode, _exitTouched, etc.) are excluded.
+    brief: function () {
+      var t = global._tb || {};
+      return Object.freeze({
+        region:             t.region          || '',
+        when:               t.when            || '',
+        duration:           t.duration        || '',
+        intent:             t.intent          || '',
+        anchors:            t.anchors         || '',
+        entry:              t.entry           || '',
+        tbExit:             t.tbExit          || '',
+        entryMode:          t.entryMode       || '',
+        exitMode:           t.exitMode        || '',
+        gettingTo:          t.gettingTo       || '',
+        gettingOut:         t.gettingOut      || '',
+        transport:          t.transport       || '',
+        accommodation:      t.accommodation   || '',
+        hardlimits:         t.hardlimits      || '',
+        compromises:        t.compromises     || '',
+        pace:               t.pace            || '',
+        familiarity:        t.familiarity     || '',
+        aboutTrip:          t.aboutTrip       || '',
+        travelersCount:     t.travelersCount  || '',
+        withKids:           !!t.withKids,
+        avoid:              Object.freeze(Object.assign({}, t.avoid || {})),
+        avoidOther:         t.avoidOther      || '',
+        physicalAbility:    t.physicalAbility || '',
+        abilityNote:        t.abilityNote     || '',
+        hoursPerDay:        (typeof t.hoursPerDay === 'number') ? t.hoursPerDay : null,
+        maxBigSightsPerDay: (typeof t.maxBigSightsPerDay === 'number') ? t.maxBigSightsPerDay : null,
+        placeName:          t.placeName       || '',
+        placeContext:       t.placeContext    || '',
+        tripMode:           t.tripMode        || '',
+      });
+    },
+
+    // candidates() — frozen array of candidate objects. Each
+    // candidate is shallow-frozen; nested fields stay live (small
+    // perf win — these arrays can be large). Returns [] when no
+    // candidates yet.
+    candidates: function () {
+      var t = global._tb || {};
+      var arr = Array.isArray(t.candidates) ? t.candidates : [];
+      var copy = arr.map(function (c) { return Object.freeze(Object.assign({}, c)); });
+      return Object.freeze(copy);
+    },
+
+    // requiredPlaces() — frozen array of required-place records
+    // computed from the picker's must-do reconciliation. Stable
+    // surface for consumers asking "what places must be on the
+    // trip?"
+    requiredPlaces: function () {
+      var t = global._tb || {};
+      var arr = Array.isArray(t.requiredPlaces) ? t.requiredPlaces : [];
+      var copy = arr.map(function (p) { return Object.freeze(Object.assign({}, p)); });
+      return Object.freeze(copy);
+    },
+
+    // ── HZ.2 (path-to-10:D): domain setters ───────────────────
+    // Named verbs for the most common picker mutations. Inline
+    // picker code can keep mutating _tb directly; these wrappers
+    // exist so external consumers (mobile, future tooling) have
+    // a stable API to drive changes from. Each setter:
+    //   - Validates / normalizes input
+    //   - Mutates _tb
+    //   - Emits the appropriate event
+    //
+    // Combined with HZ.1 read getters + the existing event bus,
+    // _tb is now reachable through engine APIs only — closing
+    // Item D's "_tb internals behind engine APIs" criterion.
+
+    // setEntry(city) — sets the picker's arrival city. Title-cases
+    // the input via _titleCaseCity if available; trims whitespace.
+    setEntry: function (city) {
+      if (!global._tb) global._tb = {};
+      var v = (city == null) ? '' : String(city).trim();
+      if (typeof global._titleCaseCity === 'function' && v) v = global._titleCaseCity(v);
+      global._tb.entry = v;
+      pickerEmit('briefChange', { field: 'entry', value: v });
+    },
+
+    // setExit(city) — sets the picker's departure city. _tb.tbExit
+    // is the historical name (clash with the JS reserved word).
+    setExit: function (city) {
+      if (!global._tb) global._tb = {};
+      var v = (city == null) ? '' : String(city).trim();
+      if (typeof global._titleCaseCity === 'function' && v) v = global._titleCaseCity(v);
+      global._tb.tbExit = v;
+      pickerEmit('briefChange', { field: 'tbExit', value: v });
+    },
+
+    // setRegion(name) — sets the trip's region/destination. The
+    // single most-consequential field in the brief; many engine
+    // helpers fall back to it for prompts and geocoding seeds.
+    setRegion: function (name) {
+      if (!global._tb) global._tb = {};
+      var v = (name == null) ? '' : String(name).trim();
+      global._tb.region = v;
+      pickerEmit('briefChange', { field: 'region', value: v });
+    },
+
+    // setCandidateStatus(candId, status) — sets keep/reject/null on
+    // a candidate. Wraps the inline setCS function so consumers
+    // don't have to reach into the inline globals. status is one
+    // of 'keep', 'reject', or null/undefined to clear.
+    setCandidateStatus: function (candId, status) {
+      if (typeof global.setCS === 'function') {
+        return global.setCS(candId, status);
+      }
+      // Fallback path when the inline helper isn't loaded (test
+      // contexts): mutate the candidate directly + emit.
+      if (!global._tb || !Array.isArray(global._tb.candidates)) return;
+      var c = global._tb.candidates.find(function (x) { return x.id === candId; });
+      if (!c) return;
+      c.status = (status === 'keep' || status === 'reject') ? status : null;
+      pickerEmit('candidateChange', { id: candId, status: c.status });
+    },
+
+    // startFresh(initial) — alias for resetState. Reads better at
+    // call sites that begin a new picker session.
+    startFresh: function (initial) {
+      global._tb = initial || {};
+      pickerEmit('stateReset', global._tb);
     },
 
     // Event bus

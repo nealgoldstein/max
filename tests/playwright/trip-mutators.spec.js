@@ -25,14 +25,17 @@ const { ICELAND_RING } = require('./helpers/seed-trip');
 
 test.describe('Trip-engine mutators (Phase 2 refactor)', () => {
 
-  test('seeded trip loads with 3 destinations + hero map pins', async ({ page }) => {
+  test('seeded trip loads with 3 destinations + right-panel map pins', async ({ page }) => {
     await bootSeeded(page, ICELAND_RING);
     const destCards = await page.locator('.tm-dest').count();
     expect(destCards).toBe(3);
-    // Hero map pin elements (Leaflet renders divIcons as divs with the
-    // city name 2-letter prefix).
-    const heroMapVisible = await page.locator('#tm-hero-map').isVisible();
-    expect(heroMapVisible).toBe(true);
+    // v294.15: hero map deleted. The right-panel map (#main-map) now draws
+    // the trip-route pins; assert it's visible instead.
+    const mainMapVisible = await page.locator('#main-map').isVisible();
+    expect(mainMapVisible).toBe(true);
+    // Route toggle button shows in trip mode.
+    const routeBtnVisible = await page.locator('#map-route-btn').isVisible();
+    expect(routeBtnVisible).toBe(true);
   });
 
   test('addBufferNight adds an arrival buffer card AND emits tripChange', async ({ page }) => {

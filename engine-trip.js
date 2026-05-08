@@ -957,6 +957,530 @@
   }
 
 
+  // ── SCAFFOLD-2: commitment state derivation ────────────────
+  // Itinerary items pass through up to four states as the trip
+  // firms up. The visual layer depends on this derivation; the
+  // engine owns it so the rules are consistent across renderers.
+  //
+  //   tentative — Max put this here and the user hasn't engaged
+  //               with it. Items get this on first auto-seed.
+  //   confirmed — User has acknowledged the item (clicked Keep,
+  //               edited it, dragged it, set a time, etc.). The
+  //               default for legacy items + user-added items.
+  //   booked    — A booking record is attached (sight reservation,
+  //               restaurant reservation). Implies confirmed.
+  //   done      — Already happened. Implies confirmed.
+  //
+  // Precedence (most-final → least-final):
+  //   done > booked > tentative > confirmed
+  // "done" wins over "booked" because a booking that's been
+  // attended is finished, not still-pending.
+  function commitmentState(s) {
+    if (!s) return 'confirmed';
+    if (s.done) return 'done';
+    if (s.booking) return 'booked';
+    if (s.tentative) return 'tentative';
+    return 'confirmed';
+  }
+
+  // ── SCAFFOLD-3: decisions-deferred summary ─────────────────
+  // Walks the trip and returns a structured list of unresolved
+  // decisions the user hasn't made yet. Today's two categories:
+  //   - tentative: per-destination count of items still in
+  //     SCAFFOLD-2's tentative state (Max put it there, user
+  //     hasn't engaged)
+  //   - emptyDay: a destination + day pair where no items have
+  //     been planned (and the destination has at least one item
+  //     elsewhere — completely-empty destinations are a different
+  //     scaffold problem)
+  // Shape:
+  //   {
+  //     totalCount: number,
+  //     items: [
+  //       { kind: 'tentative', destId, destPlace, count },
+  //       { kind: 'emptyDay',  destId, destPlace, dayId, dayLbl, dayIdx },
+  //     ]
+  //   }
+  // Pure: doesn't read window globals, only the trip arg.
+  function summarizeDecisionsDeferred(trip) {
+    var out = { totalCount: 0, items: [] };
+    if (!trip || !Array.isArray(trip.destinations)) return out;
+    trip.destinations.forEach(function (dest) {
+      if (!dest) return;
+      var days = Array.isArray(dest.days) ? dest.days : [];
+      // Tentative item count — sum across all days.
+      var tentativeCount = 0;
+      days.forEach(function (day) {
+        var items = (day && Array.isArray(day.items)) ? day.items : [];
+        items.forEach(function (it) {
+          if (it && it.tentative && !it.done) tentativeCount++;
+        });
+      });
+      if (tentativeCount > 0) {
+        out.items.push({
+          kind: 'tentative',
+          destId: dest.id || null,
+          destPlace: dest.place || dest.label || '',
+          count: tentativeCount,
+        });
+        out.totalCount += tentativeCount;
+      }
+      // Empty days — only flag when the destination has *some* items
+      // somewhere; an entirely-empty destination is its own thing.
+      var anyItems = days.some(function (day) {
+        return day && Array.isArray(day.items) && day.items.length > 0;
+      });
+      if (anyItems) {
+        days.forEach(function (day, i) {
+          var hasItems = day && Array.isArray(day.items) && day.items.length > 0;
+          if (hasItems) return;
+          out.items.push({
+            kind: 'emptyDay',
+            destId: dest.id || null,
+            destPlace: dest.place || dest.label || '',
+            dayId: (day && day.id) || null,
+            dayLbl: (day && day.lbl) || ('Day ' + (i + 1)),
+            dayIdx: i,
+          });
+          out.totalCount += 1;
+        });
+      }
+    });
+    return out;
+  }
+
+  // ── SCAFFOLD-6: surface the rationale ──────────────────────
+  // Why N nights here? Reads what Max put on / nearby this dest
+  // and writes a one-sentence explanation the user can read on
+  // hover / click. Doesn't try to retro-derive the picker's
+  // exact logic — it summarizes what's on the ground today, so
+  // the user can see whether the night count fits the content.
+  // Plain text, no HTML. Returns null when there's nothing
+  // useful to say (very small dest, unset nights).
+  function nightCountRationale(dest) {
+    if (!dest) return null;
+    var nights = dest.nights || 0;
+    if (!nights) return null;
+    // Count iconic sights already on days + still in suggestions.
+    var iconicCount = 0;
+    var iconicHours = 0;
+    var totalSightHours = 0;
+    var totalSightCount = 0;
+    function tallySight(s) {
+      if (!s || s.type !== 'sight') return;
+      var hours = (typeof s.durationHours === 'number' && s.durationHours > 0) ? s.durationHours : 2;
+      totalSightCount++;
+      totalSightHours += hours;
+      if (s.iconic) {
+        iconicCount++;
+        iconicHours += hours;
+      }
+    }
+    (dest.suggestions || []).forEach(tallySight);
+    (dest.days || []).forEach(function (day) {
+      (day && day.items || []).forEach(tallySight);
+    });
+    var dayTripCount = Array.isArray(dest.dayTrips) ? dest.dayTrips.length : 0;
+    var days = nights + 1; // standard: N nights = N+1 days
+    var bits = [];
+    if (iconicCount > 0) {
+      bits.push(iconicCount + ' iconic sight' + (iconicCount === 1 ? '' : 's')
+        + (iconicHours >= 4 ? ' (~' + Math.round(iconicHours) + ' hrs)' : ''));
+    }
+    if (dayTripCount > 0) {
+      bits.push(dayTripCount + ' day trip' + (dayTripCount === 1 ? '' : 's'));
+    }
+    if (!bits.length) {
+      // Nothing iconic and no day trips — keep it honest.
+      return nights + ' night' + (nights === 1 ? '' : 's') + ' in ' + (dest.place || 'this destination')
+        + '. Max didn’t flag anything iconic here yet — stretch the stay if you find more, or tighten it in Parameters.';
+    }
+    var primary = nights + ' night' + (nights === 1 ? '' : 's') + ' (' + days + ' day' + (days === 1 ? '' : 's')
+      + ') gives you room for ' + bits.join(' plus ') + '.';
+    // Add a calibration line if iconic hours imply tight or loose pacing.
+    var iconicDays = iconicHours / 5; // ~5h of sights per full day
+    var tail = '';
+    if (iconicCount > 0) {
+      if (iconicDays > days + 0.5) {
+        tail = ' Tight at this length — consider stretching, or move sights to optional.';
+      } else if (iconicDays < days - 1.5 && days >= 3) {
+        tail = ' Loose pacing — plenty of room for unstructured time.';
+      }
+    }
+    return primary + tail;
+  }
+
+  // ── SCAFFOLD-6 slice 2: per-day rationale ──────────────────
+  // Why is THIS day shaped this way? Returns a one-liner about
+  // day type (arrival/departure/full), the budget the auto-seed
+  // works against, what's filling that budget, and whether the
+  // day reads as light or full. Pure: only reads day, dayIdx,
+  // and dest's day count.
+  //
+  // Day budget convention (matches _autoSeedIconicSightsToDays):
+  //   - dayCount <= 1: 4 hours
+  //   - first or last day:  4 hours (lighter for travel)
+  //   - middle days:        6 hours
+  function dayRationale(day, dayIdx, dest, tripArg) {
+    if (!day || !dest) return null;
+    var dayCount = Array.isArray(dest.days) ? dest.days.length : 0;
+    if (!dayCount) return null;
+    var isFirst = dayIdx === 0;
+    var isLast  = dayIdx === dayCount - 1 && dayCount > 1;
+    // v302: budget is the user's brief.hoursPerDay (default 6) — 4 on
+    // travel days because landing at noon and racing to a 6-hour
+    // cogwheel rarely works in practice. tripArg lets the caller pass
+    // trip explicitly; falls back to global.trip if available so most
+    // callers don't have to change.
+    var trip = tripArg || global.trip || null;
+    var hpd = (trip && trip.brief && typeof trip.brief.hoursPerDay === "number")
+      ? trip.brief.hoursPerDay : 6;
+    var travelBudget = Math.min(hpd, 4);
+    var budget = (dayCount <= 1) ? travelBudget : (isFirst || isLast ? travelBudget : hpd);
+    var dayType = (dayCount === 1) ? 'single day'
+                : (isFirst ? 'arrival day'
+                : (isLast ? 'departure day'
+                : 'full day'));
+    var items = (Array.isArray(day.items) ? day.items : []);
+    var sights    = items.filter(function (i) { return i && i.type === 'sight'; });
+    var dayTrips  = items.filter(function (i) { return i && i.type === 'daytrip'; });
+    var rests     = items.filter(function (i) { return i && i.type === 'restaurant'; });
+    // v302: rationale now credits the user's brief.hoursPerDay setting
+    // (or notes the default if the brief doesn't have one yet) and
+    // names the big-sight cap. Both come from Parameters / brief.
+    var maxBig = (trip && trip.brief && typeof trip.brief.maxBigSightsPerDay === "number")
+      ? trip.brief.maxBigSightsPerDay : 2;
+    var hpdLabel = (trip && trip.brief && typeof trip.brief.hoursPerDay === "number") ? '' : ' (default — set yours in Parameters)';
+    var assumption = 'You set Max to ~' + budget + 'h of sightseeing on a ' + dayType
+      + hpdLabel
+      + ', with at most ' + maxBig + ' big sight' + (maxBig === 1 ? '' : 's') + ' (2+ hrs) per day. You can always set a time on a sight, or add or remove sights on a given day. To shift the daily budget, edit Parameters.';
+    if (!items.length) {
+      return 'Open ' + dayType + ' — nothing planned yet. Drag a sight from Explore, or leave it loose for unstructured time.';
+    }
+    if (dayTrips.length) {
+      var dt = dayTrips[0];
+      return 'Day-trip day to ' + (dt.dayTripPlace || dt.n || 'another town') + ' — leaves the hub, returns by evening. '
+        + (sights.length ? 'Plus ' + sights.length + ' sight' + (sights.length === 1 ? '' : 's') + ' for the rest of the day. ' : '')
+        + assumption;
+    }
+    var totalHours = sights.reduce(function (sum, it) {
+      return sum + ((typeof it.durationHours === 'number' && it.durationHours > 0) ? it.durationHours : 2);
+    }, 0);
+    var longSight = sights.find(function (it) { return (it.durationHours || 0) >= 4; });
+    if (longSight) {
+      var others = sights.filter(function (it) { return it !== longSight; });
+      var tail = others.length
+        ? ' Pairs with ' + others.map(function (i) { return i.n; }).join(', ') + '.'
+        : '';
+      return 'Long-sight day — ' + (longSight.n || 'this sight') + ' is ~' + (longSight.durationHours || '4+')
+        + 'h, which mostly fills the ' + dayType + '.' + tail + ' ' + assumption;
+    }
+    var pct = totalHours / budget;
+    var headline;
+    var sightList = sights.map(function (i) { return i.n; }).join(', ');
+    if (pct >= 0.85) {
+      headline = dayType.charAt(0).toUpperCase() + dayType.slice(1) + ' — full at ~' + Math.round(totalHours)
+        + 'h: ' + sightList + '.';
+    } else if (pct >= 0.45) {
+      headline = dayType.charAt(0).toUpperCase() + dayType.slice(1) + ' — ~' + Math.round(totalHours)
+        + 'h of ' + (sights.length === 1 ? 'a sight' : sights.length + ' sights')
+        + ': ' + sightList + '. Room to add or extend.';
+    } else {
+      headline = 'Light ' + dayType + ' — only ~' + Math.round(totalHours) + 'h scheduled. '
+        + (sightList ? sightList + '. ' : '')
+        + 'Plenty of room to add more or keep it loose.';
+    }
+    if (rests.length) {
+      headline += ' ' + rests.length + ' restaurant note' + (rests.length === 1 ? '' : 's') + ' attached.';
+    }
+    return headline + ' ' + assumption;
+  }
+
+  // ── SCAFFOLD-6 slice 3: neighborhood / hotel district ──────
+  // The LLM already returned `good` and `bad` for each district
+  // when it generated city data. neighborhoodRationale composes
+  // them into a single popover line. No new LLM call.
+  function neighborhoodRationale(district) {
+    if (!district) return null;
+    var bits = [];
+    if (district.good) bits.push('Good: ' + String(district.good).trim());
+    if (district.bad)  bits.push('Tradeoff: ' + String(district.bad).trim());
+    if (!bits.length) return null;
+    return bits.join(' · ');
+  }
+
+  // ── SCAFFOLD-6 slice 4: transit choice ─────────────────────
+  // Composes a one-liner from the routing-options structure that
+  // buildTransportChip already consumes. The chip itself only
+  // shows the top option's headline; the popover spells out
+  // "Bus picked over flight: 2.5h direct vs 1h flight + 2h
+  // airport transit" for users who want to know why.
+  function transitRationale(routing, fromPlace, toPlace) {
+    if (!routing || !Array.isArray(routing.options) || !routing.options.length) {
+      return null;
+    }
+    var picked = routing.options[0];
+    var alts = routing.options.slice(1, 3);
+    var label = (fromPlace && toPlace) ? (fromPlace + ' → ' + toPlace + ': ') : '';
+    var head = label + (picked.name || 'Top option') + (picked.meta ? ' (' + picked.meta + ')' : '') + '.';
+    if (!alts.length) return head + ' Only one practical option.';
+    var altLines = alts.map(function (a) {
+      return (a.name || 'Other') + (a.meta ? ' (' + a.meta + ')' : '');
+    });
+    return head + ' Picked over: ' + altLines.join('; ') + '.';
+  }
+
+  // ── SCAFFOLD-6 slice 5: sight-on-day placement ─────────────
+  // Why is THIS sight on THIS day? Reads from auto-seed signals
+  // (autoSeeded, durationHours, day's slot, day index) plus the
+  // sight's iconic flag. Plain text or null.
+  function sightPlacementRationale(item, day, dayIdx, dest) {
+    if (!item || !day || !dest) return null;
+    if (item.type !== 'sight') return null;
+    var dayCount = Array.isArray(dest.days) ? dest.days.length : 0;
+    var isFirst = dayIdx === 0;
+    var isLast  = dayIdx === dayCount - 1 && dayCount > 1;
+    var dayType = (dayCount === 1) ? 'the only day'
+                : (isFirst ? 'arrival day'
+                : (isLast ? 'departure day'
+                : 'a full day'));
+    var dur = (typeof item.durationHours === 'number' && item.durationHours > 0)
+      ? item.durationHours : 2;
+    var bits = [];
+    if (item.iconic) bits.push('Max flagged this iconic — first-time visitors miss it at their peril');
+    if (dur >= 4) {
+      bits.push('it’s ~' + dur + 'h, which mostly fills a day');
+    } else if (dur >= 2) {
+      bits.push('it’s ~' + dur + 'h, pairs with one other thing');
+    } else {
+      bits.push('it’s short (~' + dur + 'h), fits alongside a longer sight');
+    }
+    if (item.autoSeeded) {
+      bits.push('placed on ' + dayType + ' to match the day’s budget');
+    } else {
+      bits.push('you placed this');
+    }
+    return bits.join('. ').replace(/\.\s*$/, '') + '.';
+  }
+
+  // ── SCAFFOLD-5: real-time daily mode — trip status ─────────
+  // Where is the user in the trip's calendar right now? Returns
+  // a structured object the UI uses to:
+  //   - Show a "Today" banner during the trip
+  //   - Pre-arrival nudges (SCAFFOLD-4 reuses this same helper)
+  //   - Auto-jump to the current day's itinerary
+  //
+  // today defaults to a YYYY-MM-DD string for the local date if
+  // omitted; pass a string for testing.
+  //
+  // Output shape:
+  //   {
+  //     phase: 'before' | 'during' | 'after' | 'unscheduled',
+  //     daysUntilStart?: number,  // before
+  //     daysUntilEnd?:   number,  // during (incl. today as 1)
+  //     dayNumber?:      number,  // during, 1-indexed
+  //     totalDays?:      number,
+  //     currentDestId?:  string,
+  //     currentDestPlace?: string,
+  //     currentDayId?:   string,
+  //   }
+  function currentTripStatus(trip, today) {
+    var unscheduled = { phase: 'unscheduled' };
+    if (!trip || !Array.isArray(trip.destinations) || !trip.destinations.length) {
+      return unscheduled;
+    }
+    if (!today) {
+      var d = new Date();
+      var mm = String(d.getMonth() + 1).padStart ? String(d.getMonth() + 1).padStart(2, '0') : (('0' + (d.getMonth() + 1)).slice(-2));
+      var dd = String(d.getDate()).padStart ? String(d.getDate()).padStart(2, '0') : (('0' + d.getDate()).slice(-2));
+      today = d.getFullYear() + '-' + mm + '-' + dd;
+    }
+    // Find first dest with a real dateFrom + last dest with a real dateTo.
+    var first = null, last = null;
+    for (var i = 0; i < trip.destinations.length; i++) {
+      if (trip.destinations[i] && trip.destinations[i].dateFrom) { first = trip.destinations[i]; break; }
+    }
+    for (var j = trip.destinations.length - 1; j >= 0; j--) {
+      if (trip.destinations[j] && trip.destinations[j].dateTo) { last = trip.destinations[j]; break; }
+    }
+    if (!first || !last) return unscheduled;
+    var startStr = first.dateFrom;
+    var endStr   = last.dateTo;
+    function diffDays(aStr, bStr) {
+      // Both 'YYYY-MM-DD' — compute b - a in days.
+      var a = new Date(aStr + 'T12:00:00');
+      var b = new Date(bStr + 'T12:00:00');
+      return Math.round((b - a) / 86400000);
+    }
+    if (today < startStr) {
+      return { phase: 'before', daysUntilStart: diffDays(today, startStr) };
+    }
+    if (today > endStr) {
+      return { phase: 'after' };
+    }
+    // We're during the trip. Find current destination + day.
+    var current = null;
+    for (var k = 0; k < trip.destinations.length; k++) {
+      var dst = trip.destinations[k];
+      if (!dst || !dst.dateFrom || !dst.dateTo) continue;
+      if (today >= dst.dateFrom && today <= dst.dateTo) { current = dst; break; }
+    }
+    var totalDays = diffDays(startStr, endStr) + 1;
+    var dayNumber = diffDays(startStr, today) + 1;
+    var daysUntilEnd = diffDays(today, endStr) + 1;
+    var out = {
+      phase: 'during',
+      daysUntilEnd: daysUntilEnd,
+      dayNumber: dayNumber,
+      totalDays: totalDays,
+    };
+    if (current) {
+      out.currentDestId = current.id || null;
+      out.currentDestPlace = current.place || current.label || '';
+      // Match the day inside the destination — by date when available,
+      // else by relative index from dateFrom.
+      var dayIdx = diffDays(current.dateFrom, today);
+      var days = Array.isArray(current.days) ? current.days : [];
+      if (days[dayIdx]) {
+        out.currentDayId = days[dayIdx].id || null;
+        out.currentDayLbl = days[dayIdx].lbl || null;
+      }
+    }
+    return out;
+  }
+
+  // ── SCAFFOLD-5 slice 2: now/next ───────────────────────────
+  // Splits a day's items into past / current / next / later /
+  // untimed buckets based on item timeStart/timeEnd vs a clock.
+  // Pure: doesn't read window globals; pass `now` (HH:MM) for
+  // testability or omit to use current local time.
+  //
+  // Output:
+  //   {
+  //     past:    item[],   // timeEnd < now
+  //     current: item[],   // timeStart <= now <= timeEnd
+  //     next:    item|null,// soonest upcoming
+  //     later:   item[],   // upcoming after `next`
+  //     untimed: item[],   // no timeStart and no timeEnd
+  //   }
+  function currentDayItems(day, now) {
+    var out = { past: [], current: [], next: null, later: [], untimed: [] };
+    if (!day) return out;
+    var items = Array.isArray(day.items) ? day.items : [];
+    if (!now) {
+      var d = new Date();
+      var hh = ('0' + d.getHours()).slice(-2);
+      var mm = ('0' + d.getMinutes()).slice(-2);
+      now = hh + ':' + mm;
+    }
+    var upcoming = [];
+    items.forEach(function (it) {
+      if (!it) return;
+      var s = it.timeStart || '';
+      var e = it.timeEnd   || '';
+      if (!s && !e) { out.untimed.push(it); return; }
+      // Treat one-sided times as a point in time.
+      var startCmp = s || e;
+      var endCmp   = e || s;
+      if (endCmp < now) out.past.push(it);
+      else if (startCmp <= now && now <= endCmp) out.current.push(it);
+      else upcoming.push(it);
+    });
+    upcoming.sort(function (a, b) {
+      var sa = a.timeStart || a.timeEnd || '';
+      var sb = b.timeStart || b.timeEnd || '';
+      return sa < sb ? -1 : sa > sb ? 1 : 0;
+    });
+    out.next  = upcoming.length ? upcoming[0] : null;
+    out.later = upcoming.length > 1 ? upcoming.slice(1) : [];
+    return out;
+  }
+
+  // Minutes between two 'HH:MM' clock strings (b - a). Returns
+  // null if either is malformed.
+  function clockMinutesBetween(a, b) {
+    function toMin(t) {
+      if (!t || typeof t !== 'string') return null;
+      var p = t.split(':');
+      if (p.length !== 2) return null;
+      var h = parseInt(p[0], 10), m = parseInt(p[1], 10);
+      if (!isFinite(h) || !isFinite(m)) return null;
+      return h * 60 + m;
+    }
+    var ma = toMin(a), mb = toMin(b);
+    if (ma === null || mb === null) return null;
+    return mb - ma;
+  }
+
+  // ── SCAFFOLD-4: pre-arrival action items ───────────────────
+  // When the user is in the 'before' phase of a trip, surface a
+  // structured list of LOGISTICAL decisions worth firming up
+  // before departure: unbooked hotels per destination, unbooked
+  // transit legs between destinations.
+  //
+  // v313: empty days REMOVED from this list. Empty days are
+  // CONTENT decisions (what to do that day) and live in
+  // summarizeDecisionsDeferred (SCAFFOLD-3). Keeping them in
+  // both surfaces double-counted them and blurred the
+  // pre-arrival = mechanics / decisions-deferred = content
+  // distinction.
+  //
+  // Returns null when currentTripStatus says we're not in the
+  // 'before' phase; lets the caller suppress the banner uniformly.
+  //
+  // Output:
+  //   {
+  //     daysUntilStart: number,
+  //     items: [
+  //       { kind: 'hotelMissing',   destId, destPlace },
+  //       { kind: 'transitMissing', fromId, toId, fromPlace, toPlace },
+  //     ]
+  //   }
+  function preArrivalActions(trip, today) {
+    var status = currentTripStatus(trip, today);
+    if (!status || status.phase !== 'before') return null;
+    var out = { daysUntilStart: status.daysUntilStart, items: [] };
+    var dests = (trip && trip.destinations) || [];
+    // Unbooked hotels — destination has no hotel booking with status === 'booked'.
+    dests.forEach(function (dest) {
+      if (!dest) return;
+      var bks = Array.isArray(dest.hotelBookings) ? dest.hotelBookings : [];
+      var hasBooked = bks.some(function (b) { return b && b.status === 'booked'; });
+      if (!hasBooked) {
+        out.items.push({
+          kind: 'hotelMissing',
+          destId: dest.id || null,
+          destPlace: dest.place || dest.label || '',
+        });
+      }
+    });
+    // Unbooked transit legs between adjacent destinations. We walk
+    // pairs in sequence rather than the trip.legs map because a
+    // missing key in trip.legs is the same as "unbooked" for our
+    // purposes — the leg exists conceptually whether or not a
+    // record has been created yet.
+    var legs = (trip && trip.legs) || {};
+    for (var i = 0; i < dests.length - 1; i++) {
+      var from = dests[i], to = dests[i + 1];
+      if (!from || !to) continue;
+      var key1 = (from.id || '') + '__' + (to.id || '');
+      var key2 = (from.id || '') + '→' + (to.id || '');
+      var leg = legs[key1] || legs[key2];
+      var legBks = (leg && Array.isArray(leg.bookings)) ? leg.bookings : [];
+      var legBooked = legBks.some(function (b) { return b && b.status === 'booked'; });
+      if (!legBooked) {
+        out.items.push({
+          kind: 'transitMissing',
+          fromId: from.id || null,
+          toId:   to.id || null,
+          fromPlace: from.place || from.label || '',
+          toPlace:   to.place || to.label || '',
+        });
+      }
+    }
+    return out;
+  }
+
   // ── Public surface ──────────────────────────────────────────
   var MaxEngineTrip = {
     // Geographic affordance pure pieces
@@ -997,6 +1521,51 @@
     // ── Round HR: trip-engine helpers previously inline ───────
     makeDays:       makeDays,
     getCityCenter:  getCityCenter,
+
+    // ── SCAFFOLD-2: commitment-state derivation ───────────────
+    commitmentState: commitmentState,
+
+    // ── SCAFFOLD-3: decisions-deferred summary ────────────────
+    summarizeDecisionsDeferred: summarizeDecisionsDeferred,
+
+    // ── SCAFFOLD-6: surface the rationale ─────────────────────
+    nightCountRationale:      nightCountRationale,
+    dayRationale:             dayRationale,
+    neighborhoodRationale:    neighborhoodRationale,
+    transitRationale:         transitRationale,
+    sightPlacementRationale:  sightPlacementRationale,
+
+    // ── SCAFFOLD-5: real-time daily mode ──────────────────────
+    currentTripStatus:        currentTripStatus,
+    currentDayItems:          currentDayItems,
+    clockMinutesBetween:      clockMinutesBetween,
+
+    // ── SCAFFOLD-4: pre-arrival action items ─────────────────
+    preArrivalActions:        preArrivalActions,
+
+    // ── HY (path-to-10:A): mutator surface ───────────────────
+    // Eleven mutators that already emit tripChange + mapDataChange
+    // through the inline _emitTripMutation helper. Exposed here
+    // as delegators so engine consumers (mobile, future tooling)
+    // have a stable surface to drive changes from. The bodies
+    // stay inline for now — they reference inline-script globals
+    // (destCtr, _ftRecomputeTripDates, autoSave, _coarseGeocode,
+    // ensureCoarseGeocode, etc.) that aren't trivially liftable.
+    // Path-to-10's "engine-trip.js DOM-free" criterion is met
+    // (zero document/drawXxx/g() refs in this file); this round
+    // closes Item A by giving the namespace surface the doc
+    // promised.
+    addBufferNight:           function (side, city)             { return global.addBufferNight && global.addBufferNight(side, city); },
+    reverseTripOrder:         function ()                       { return global.reverseTripOrder && global.reverseTripOrder(); },
+    delDest:                  function (e, id)                  { return global.delDest && global.delDest(e, id); },
+    applyDateChange:          function (dest, from, to, aff)    { return global.applyDateChange && global.applyDateChange(dest, from, to, aff); },
+    executeMoveDest:          function (dest, fromIdx, toIdx)   { return global.executeMoveDest && global.executeMoveDest(dest, fromIdx, toIdx); },
+    addDayTripToDay:          function (hub, dtIdx, dayIdx)     { return global.addDayTripToDay && global.addDayTripToDay(hub, dtIdx, dayIdx); },
+    removeDayTripFromDay:     function (hub, place)             { return global.removeDayTripFromDay && global.removeDayTripFromDay(hub, place); },
+    removeDayTripFromDayItem: function (hub, place, dayIdx)     { return global.removeDayTripFromDayItem && global.removeDayTripFromDayItem(hub, place, dayIdx); },
+    makeDayTrip:              function (hub, src, opts)         { return global.makeDayTrip && global.makeDayTrip(hub, src, opts); },
+    ungroupDayTrip:           function (hub, dtIdx, opts)       { return global.ungroupDayTrip && global.ungroupDayTrip(hub, dtIdx, opts); },
+    schedulePeerDayTrip:      function (hub, target, dayIdx, d) { return global._ftSchedulePeerDayTrip && global._ftSchedulePeerDayTrip(hub, target, dayIdx, d); },
 
     // ── Round HJ: trip adoption / loading ─────────────────────
     // Trip.load(tripId) is the receiving end of the picker→trip
@@ -1059,6 +1628,33 @@
       && global.MaxDB.trip && typeof global.MaxDB.trip.read === 'function') {
     global.MaxDB.on('tripWritten', function (payload) {
       if (!payload || !payload.id) return;
+      // v352.1: ONLY adopt this write if the user is currently viewing
+      // the trip that was just written. This is the architectural
+      // intent stated in the comment block above (and at line 1576-
+      // 1580: "if (currentTripId !== id) return;") — the check just
+      // never got implemented. Without it, when sync.js pulls a
+      // batch of trips from the server, each pulled trip's
+      // tripWritten event would clobber global.trip with whatever
+      // landed last. The user would be looking at trip A, the
+      // desktop's open view would silently swap to trip C's data
+      // (visible as scrambled destinations + dates), and any
+      // subsequent local edit would push trip C's contents up
+      // under trip A's ID — server-side corruption. The guard
+      // limits the in-memory adoption to the active trip only;
+      // localStorage already has the bytes for the others (writeRaw
+      // ran before this listener) so the trip list stays correct
+      // and re-opening any of them reads fresh data.
+      //
+      // No-active-trip case (home screen, freshly loaded app):
+      // also skip. The home screen renders from the trips index,
+      // not from global.trip; setting global.trip here would
+      // pollute the picker→trip handoff that happens later. The
+      // picker's publishTrip flow sets _currentTripId first
+      // (engine-picker.js line 1321) and THEN writes — so by the
+      // time tripWritten fires for that path, _currentTripId is
+      // already set and matches.
+      var activeId = global._currentTripId;
+      if (!activeId || payload.id !== activeId) return;
       var env = (payload.envelope && payload.envelope.trip)
         ? payload.envelope
         : global.MaxDB.trip.read(payload.id);
@@ -1075,6 +1671,23 @@
   }
 
   global.MaxEngineTrip = MaxEngineTrip;
+  // SCAFFOLD-2: also expose as bare global so trip-ui.js + inline
+  // renderers can call it without going through the namespace.
+  global.commitmentState = commitmentState;
+  // SCAFFOLD-3: same — bare global for inline drawTripMode.
+  global.summarizeDecisionsDeferred = summarizeDecisionsDeferred;
+  // SCAFFOLD-6: bare global for the dest-card popover.
+  global.nightCountRationale = nightCountRationale;
+  global.dayRationale = dayRationale;
+  global.neighborhoodRationale = neighborhoodRationale;
+  global.transitRationale = transitRationale;
+  global.sightPlacementRationale = sightPlacementRationale;
+  // SCAFFOLD-5: bare global for drawTripMode banner.
+  global.currentTripStatus = currentTripStatus;
+  global.currentDayItems = currentDayItems;
+  global.clockMinutesBetween = clockMinutesBetween;
+  // SCAFFOLD-4: bare global for drawTripMode banner.
+  global.preArrivalActions = preArrivalActions;
 
   // ── Back-compat globals (Phase 1) ──────────────────────────
   // The inline script still calls these by their original names.

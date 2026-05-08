@@ -562,6 +562,32 @@ a week. A mobile picker is months and probably never (per the doc:
 "never — desktop-only for the foreseeable future"). The picker stays
 desktop; mobile only consumes the trip engine.
 
+### 17. Editable per-sight `durationHours` field (uncertain)
+**Status:** deferred. Worth flagging but not obviously worth building.
+
+Today, every sight carries a `durationHours` number from the LLM
+that's used in two places: (a) auto-seeding sights onto days at
+trip-build time (long sights → own day, short ones can pair),
+and (b) the SCAFFOLD-6 day-shape rationale popover ("~6h of
+sights, budget 6h"). When the LLM is wrong about a specific
+sight (e.g. it says "Museum X = 2h" but the user knows it's
+really a half-day), the duration is just wrong everywhere it
+flows.
+
+**Possible fix:** surface `durationHours` as an editable field
+on each sight (a small `2h ✎` chip on the row, click to edit).
+
+**Why it might not be worth it:** a user who knows the LLM is
+off can already work around it — they're free to ignore the
+day-shape popover, override the pace mode, or just stop reading
+the rationale. Adding an editable field surfaces a knob most
+users won't touch and adds clutter for everyone.
+
+**Revisit if:** duration errors come up repeatedly in real use,
+or if SCAFFOLD-5's now/next widget makes per-sight time
+estimates more visible (and therefore more important to get
+right). For now, the prompt at index.html:13737 is the lever.
+
 ### 16. drawTripMode / drawDestMode — fold into Places page
 **Status:** open (mentioned in `STATE.md` since the original picker/
 Places merge but never landed).

@@ -186,6 +186,510 @@ describe('engine-trip.js — pure helpers', () => {
   });
 });
 
+// ── Suite: SCAFFOLD-2 commitmentState ────────────────────────────
+
+describe('engine-trip.js — commitmentState', () => {
+  test('null/undefined item → confirmed (defensive default)', () => {
+    assert.strictEqual(MaxEngineTrip.commitmentState(null), 'confirmed');
+    assert.strictEqual(MaxEngineTrip.commitmentState(undefined), 'confirmed');
+  });
+  test('plain item with no flags → confirmed', () => {
+    assert.strictEqual(MaxEngineTrip.commitmentState({n: 'X'}), 'confirmed');
+  });
+  test('tentative:true → tentative', () => {
+    assert.strictEqual(MaxEngineTrip.commitmentState({tentative: true}), 'tentative');
+  });
+  test('booking present → booked, even with tentative:true', () => {
+    assert.strictEqual(
+      MaxEngineTrip.commitmentState({tentative: true, booking: {time: '12:00'}}),
+      'booked'
+    );
+  });
+  test('done:true → done, regardless of booking', () => {
+    assert.strictEqual(
+      MaxEngineTrip.commitmentState({done: true, booking: {time: '12:00'}}),
+      'done'
+    );
+  });
+  test('exposed as bare global commitmentState too', () => {
+    assert.strictEqual(typeof global.commitmentState, 'function');
+    assert.strictEqual(global.commitmentState({tentative: true}), 'tentative');
+  });
+});
+
+// ── Suite: SCAFFOLD-3 summarizeDecisionsDeferred ─────────────────
+
+describe('engine-trip.js — summarizeDecisionsDeferred', () => {
+  test('null/undefined trip → zero, empty list', () => {
+    var r = MaxEngineTrip.summarizeDecisionsDeferred(null);
+    assert.strictEqual(r.totalCount, 0);
+    assert.deepStrictEqual(r.items, []);
+  });
+  test('trip with no destinations → zero', () => {
+    var r = MaxEngineTrip.summarizeDecisionsDeferred({destinations: []});
+    assert.strictEqual(r.totalCount, 0);
+  });
+  test('counts tentative items per destination', () => {
+    var trip = {destinations: [{
+      id: 'd1', place: 'Reykjavik',
+      days: [
+        {id: 'dy1', items: [
+          {id: 's1', tentative: true},
+          {id: 's2', tentative: true},
+          {id: 's3'},  // confirmed
+        ]},
+        {id: 'dy2', items: [
+          {id: 's4', tentative: true},
+        ]},
+      ],
+    }]};
+    var r = MaxEngineTrip.summarizeDecisionsDeferred(trip);
+    assert.strictEqual(r.totalCount, 3);
+    assert.strictEqual(r.items[0].kind, 'tentative');
+    assert.strictEqual(r.items[0].count, 3);
+    assert.strictEqual(r.items[0].destPlace, 'Reykjavik');
+  });
+  test('done items do not count as tentative', () => {
+    var trip = {destinations: [{
+      id: 'd1', place: 'X',
+      days: [{id: 'dy1', items: [
+        {id: 's1', tentative: true, done: true},  // done wins
+        {id: 's2', tentative: true},
+      ]}],
+    }]};
+    var r = MaxEngineTrip.summarizeDecisionsDeferred(trip);
+    assert.strictEqual(r.totalCount, 1);
+    assert.strictEqual(r.items[0].count, 1);
+  });
+  test('flags empty days when dest has items elsewhere', () => {
+    var trip = {destinations: [{
+      id: 'd1', place: 'Vík',
+      days: [
+        {id: 'dy1', lbl: 'Day 1', items: [{id: 's1'}]},
+        {id: 'dy2', lbl: 'Day 2', items: []},
+      ],
+    }]};
+    var r = MaxEngineTrip.summarizeDecisionsDeferred(trip);
+    assert.strictEqual(r.totalCount, 1);
+    assert.strictEqual(r.items[0].kind, 'emptyDay');
+    assert.strictEqual(r.items[0].dayLbl, 'Day 2');
+    assert.strictEqual(r.items[0].destPlace, 'Vík');
+  });
+  test('does NOT flag empty days when dest has no items at all', () => {
+    var trip = {destinations: [{
+      id: 'd1', place: 'X',
+      days: [
+        {id: 'dy1', items: []},
+        {id: 'dy2', items: []},
+      ],
+    }]};
+    var r = MaxEngineTrip.summarizeDecisionsDeferred(trip);
+    assert.strictEqual(r.totalCount, 0);
+  });
+  test('combined: tentative + empty days from same dest', () => {
+    var trip = {destinations: [{
+      id: 'd1', place: 'Reykjavik',
+      days: [
+        {id: 'dy1', lbl: 'Day 1', items: [{id: 's1', tentative: true}]},
+        {id: 'dy2', lbl: 'Day 2', items: []},
+        {id: 'dy3', lbl: 'Day 3', items: []},
+      ],
+    }]};
+    var r = MaxEngineTrip.summarizeDecisionsDeferred(trip);
+    assert.strictEqual(r.totalCount, 3);  // 1 tentative + 2 empty days
+  });
+  test('exposed as bare global summarizeDecisionsDeferred', () => {
+    assert.strictEqual(typeof global.summarizeDecisionsDeferred, 'function');
+  });
+});
+
+// ── Suite: SCAFFOLD-6 nightCountRationale ────────────────────────
+
+describe('engine-trip.js — nightCountRationale', () => {
+  test('null/undefined dest → null', () => {
+    assert.strictEqual(MaxEngineTrip.nightCountRationale(null), null);
+    assert.strictEqual(MaxEngineTrip.nightCountRationale(undefined), null);
+  });
+  test('dest without nights → null', () => {
+    assert.strictEqual(MaxEngineTrip.nightCountRationale({place: 'X'}), null);
+  });
+  test('dest with iconic sights mentions count + hours', () => {
+    var r = MaxEngineTrip.nightCountRationale({
+      place: 'Reykjavik', nights: 3,
+      suggestions: [
+        {type: 'sight', iconic: true, durationHours: 4},
+        {type: 'sight', iconic: true, durationHours: 3},
+        {type: 'sight', iconic: false, durationHours: 2},
+      ],
+    });
+    assert.match(r, /3 nights/);
+    assert.match(r, /2 iconic sights/);
+    assert.match(r, /~7 hrs/);
+  });
+  test('dest with day trips mentions them', () => {
+    var r = MaxEngineTrip.nightCountRationale({
+      place: 'Vík', nights: 2,
+      suggestions: [{type:'sight', iconic:true, durationHours: 5}],
+      dayTrips: [{place: 'Vatnajökull'}],
+    });
+    assert.match(r, /1 day trip/);
+  });
+  test('dest with no iconic or daytrips → honest fallback', () => {
+    var r = MaxEngineTrip.nightCountRationale({place: 'X', nights: 2});
+    assert.match(r, /didn’t flag anything iconic/);
+  });
+  test('tight pacing flagged when iconic-hours/5 > days+0.5', () => {
+    var r = MaxEngineTrip.nightCountRationale({
+      place: 'X', nights: 1, // 2 days
+      suggestions: [{type:'sight', iconic:true, durationHours: 20}], // 4 days of content
+    });
+    assert.match(r, /Tight at this length/);
+  });
+  test('exposed as bare global', () => {
+    assert.strictEqual(typeof global.nightCountRationale, 'function');
+  });
+});
+
+// ── Suite: SCAFFOLD-6 slice 2 dayRationale ───────────────────────
+
+describe('engine-trip.js — dayRationale', () => {
+  test('null inputs → null', () => {
+    assert.strictEqual(MaxEngineTrip.dayRationale(null, 0, {}), null);
+    assert.strictEqual(MaxEngineTrip.dayRationale({}, 0, null), null);
+  });
+  test('empty day → "Open day" message', () => {
+    var dest = {days: [{items:[]}, {items:[]}]};
+    var r = MaxEngineTrip.dayRationale({items:[]}, 0, dest);
+    assert.match(r, /Open arrival day/);
+    assert.match(r, /nothing planned/);
+  });
+  test('long sight (4+ hrs) → long-sight day phrasing', () => {
+    var day = {items:[{type:'sight', n:'Jungfraujoch', durationHours: 6}]};
+    var dest = {days: [{items:[]}, day, {items:[]}]};
+    var r = MaxEngineTrip.dayRationale(day, 1, dest);
+    assert.match(r, /Long-sight day/);
+    assert.match(r, /Jungfraujoch is ~6h/);
+  });
+  test('day-trip day → leaves the hub', () => {
+    var day = {items:[{type:'daytrip', dayTripPlace:'Vík'}]};
+    var dest = {days: [{items:[]}, day, {items:[]}]};
+    var r = MaxEngineTrip.dayRationale(day, 1, dest);
+    assert.match(r, /Day-trip day to Vík/);
+    assert.match(r, /leaves the hub/);
+  });
+  test('full day at budget → "Full day — full" + budget assumption', () => {
+    var day = {items:[
+      {type:'sight', n:'A', durationHours: 3},
+      {type:'sight', n:'B', durationHours: 3},
+    ]};
+    var dest = {days: [{items:[{type:'sight'}]}, day, {items:[]}]};
+    var trip = {brief:{hoursPerDay: 6, maxBigSightsPerDay: 2}};
+    var r = MaxEngineTrip.dayRationale(day, 1, dest, trip);
+    assert.match(r, /Full day — full/);
+    assert.match(r, /6h/);
+    assert.match(r, /You set Max to ~6h/);
+  });
+  test('respects user hoursPerDay = 4', () => {
+    var day = {items:[{type:'sight', n:'X', durationHours: 3}]};
+    var dest = {days: [{items:[{type:'sight'}]}, day, {items:[]}]};
+    var trip = {brief:{hoursPerDay: 4, maxBigSightsPerDay: 2}};
+    var r = MaxEngineTrip.dayRationale(day, 1, dest, trip);
+    assert.match(r, /You set Max to ~4h/);
+  });
+  test('arrival day light → "Light arrival day" + budget assumption', () => {
+    var day = {items:[{type:'sight', n:'X', durationHours: 1}]};
+    var dest = {days: [day, {items:[{type:'sight'}]}, {items:[]}]};
+    // v302: pass a trip explicitly so the assumption uses the user's
+    // hoursPerDay (here defaulted via empty brief).
+    var trip = {brief:{hoursPerDay: 6, maxBigSightsPerDay: 2}};
+    var r = MaxEngineTrip.dayRationale(day, 0, dest, trip);
+    assert.match(r, /Light arrival day/);
+    // v302: budget surfaced as "You set Max to ~4h" (4 = min(6,4) on
+    // a travel day).
+    assert.match(r, /You set Max to ~4h/);
+    assert.match(r, /at most 2 big sights/);
+  });
+  test('exposed as bare global', () => {
+    assert.strictEqual(typeof global.dayRationale, 'function');
+  });
+});
+
+// ── Suite: SCAFFOLD-6 slices 3-5 rationale helpers ───────────────
+
+describe('engine-trip.js — neighborhoodRationale', () => {
+  test('null/no good/no bad → null', () => {
+    assert.strictEqual(MaxEngineTrip.neighborhoodRationale(null), null);
+    assert.strictEqual(MaxEngineTrip.neighborhoodRationale({name:'X'}), null);
+  });
+  test('good only → Good prefix', () => {
+    var r = MaxEngineTrip.neighborhoodRationale({good:'walkable to old town'});
+    assert.match(r, /Good: walkable to old town/);
+    assert.doesNotMatch(r, /Tradeoff/);
+  });
+  test('good + bad → both lines', () => {
+    var r = MaxEngineTrip.neighborhoodRationale({good:'central', bad:'noisy at night'});
+    assert.match(r, /Good: central/);
+    assert.match(r, /Tradeoff: noisy at night/);
+  });
+});
+
+describe('engine-trip.js — transitRationale', () => {
+  test('no routing → null', () => {
+    assert.strictEqual(MaxEngineTrip.transitRationale(null), null);
+    assert.strictEqual(MaxEngineTrip.transitRationale({options:[]}), null);
+  });
+  test('one option → "Only one practical option" suffix', () => {
+    var r = MaxEngineTrip.transitRationale(
+      {options:[{name:'SBB Train', meta:'2h'}]},
+      'Zürich', 'Bern'
+    );
+    assert.match(r, /Zürich → Bern/);
+    assert.match(r, /SBB Train/);
+    assert.match(r, /Only one practical option/);
+  });
+  test('multiple options → top vs alternatives', () => {
+    var r = MaxEngineTrip.transitRationale(
+      {options:[
+        {name:'Train', meta:'2h'},
+        {name:'Bus',   meta:'3h'},
+        {name:'Drive', meta:'2h30'},
+      ]},
+      'A', 'B'
+    );
+    assert.match(r, /A → B/);
+    assert.match(r, /Train/);
+    assert.match(r, /Picked over.*Bus.*Drive/);
+  });
+});
+
+describe('engine-trip.js — sightPlacementRationale', () => {
+  test('non-sight → null', () => {
+    assert.strictEqual(
+      MaxEngineTrip.sightPlacementRationale({type:'restaurant'}, {}, 0, {days:[{}]}),
+      null
+    );
+  });
+  test('iconic + long → mentions both', () => {
+    var dest = {days:[{}, {}, {}]};
+    var r = MaxEngineTrip.sightPlacementRationale(
+      {type:'sight', n:'X', iconic:true, durationHours:6, autoSeeded:true},
+      {}, 1, dest
+    );
+    assert.match(r, /flagged this iconic/);
+    assert.match(r, /~6h/);
+    assert.match(r, /full day/);
+  });
+  test('user-placed → "you placed this"', () => {
+    var dest = {days:[{}, {}, {}]};
+    var r = MaxEngineTrip.sightPlacementRationale(
+      {type:'sight', durationHours:2},
+      {}, 1, dest
+    );
+    assert.match(r, /you placed this/);
+  });
+  test('exposed as bare globals', () => {
+    assert.strictEqual(typeof global.neighborhoodRationale,    'function');
+    assert.strictEqual(typeof global.transitRationale,         'function');
+    assert.strictEqual(typeof global.sightPlacementRationale,  'function');
+  });
+});
+
+// ── Suite: SCAFFOLD-5 currentTripStatus ──────────────────────────
+
+describe('engine-trip.js — currentTripStatus', () => {
+  test('null/empty trip → unscheduled', () => {
+    assert.strictEqual(MaxEngineTrip.currentTripStatus(null).phase, 'unscheduled');
+    assert.strictEqual(MaxEngineTrip.currentTripStatus({destinations:[]}).phase, 'unscheduled');
+  });
+  test('trip without dateFrom/dateTo → unscheduled', () => {
+    assert.strictEqual(
+      MaxEngineTrip.currentTripStatus({destinations:[{place:'X'}]}).phase,
+      'unscheduled'
+    );
+  });
+  test('today before trip → "before" + daysUntilStart', () => {
+    var trip = {destinations:[
+      {dateFrom:'2026-06-10', dateTo:'2026-06-12', days:[{},{}]},
+    ]};
+    var r = MaxEngineTrip.currentTripStatus(trip, '2026-06-01');
+    assert.strictEqual(r.phase, 'before');
+    assert.strictEqual(r.daysUntilStart, 9);
+  });
+  test('today after trip → "after"', () => {
+    var trip = {destinations:[
+      {dateFrom:'2026-06-10', dateTo:'2026-06-12'},
+    ]};
+    var r = MaxEngineTrip.currentTripStatus(trip, '2026-07-01');
+    assert.strictEqual(r.phase, 'after');
+  });
+  test('today on day 1 → during, dayNumber=1', () => {
+    var trip = {destinations:[
+      {id:'d1', place:'Reykjavik', dateFrom:'2026-06-10', dateTo:'2026-06-12',
+       days:[{id:'dy1',lbl:'Day 1'},{id:'dy2',lbl:'Day 2'},{id:'dy3',lbl:'Day 3'}]},
+    ]};
+    var r = MaxEngineTrip.currentTripStatus(trip, '2026-06-10');
+    assert.strictEqual(r.phase, 'during');
+    assert.strictEqual(r.dayNumber, 1);
+    assert.strictEqual(r.totalDays, 3);
+    assert.strictEqual(r.currentDestId, 'd1');
+    assert.strictEqual(r.currentDayId, 'dy1');
+  });
+  test('today on day 2 of multi-dest trip → finds dest 2', () => {
+    var trip = {destinations:[
+      {id:'d1', place:'Reykjavik', dateFrom:'2026-06-10', dateTo:'2026-06-11',
+       days:[{id:'r1',lbl:'R1'},{id:'r2',lbl:'R2'}]},
+      {id:'d2', place:'Vík', dateFrom:'2026-06-12', dateTo:'2026-06-14',
+       days:[{id:'v1',lbl:'V1'},{id:'v2',lbl:'V2'},{id:'v3',lbl:'V3'}]},
+    ]};
+    var r = MaxEngineTrip.currentTripStatus(trip, '2026-06-13');
+    assert.strictEqual(r.phase, 'during');
+    assert.strictEqual(r.currentDestId, 'd2');
+    assert.strictEqual(r.currentDestPlace, 'Vík');
+    assert.strictEqual(r.currentDayId, 'v2');
+    assert.strictEqual(r.dayNumber, 4); // 4th day overall
+  });
+  test('exposed as bare global', () => {
+    assert.strictEqual(typeof global.currentTripStatus, 'function');
+  });
+});
+
+// ── Suite: SCAFFOLD-5 slice 2 currentDayItems ────────────────────
+
+describe('engine-trip.js — currentDayItems', () => {
+  test('null/empty day → all empty buckets', () => {
+    var r = MaxEngineTrip.currentDayItems(null, '12:00');
+    assert.deepStrictEqual(r, {past:[], current:[], next:null, later:[], untimed:[]});
+    var r2 = MaxEngineTrip.currentDayItems({items:[]}, '12:00');
+    assert.deepStrictEqual(r2.past, []);
+    assert.deepStrictEqual(r2.untimed, []);
+  });
+  test('untimed items go to the untimed bucket', () => {
+    var day = {items:[{id:'s1', n:'X'}, {id:'s2', n:'Y'}]};
+    var r = MaxEngineTrip.currentDayItems(day, '12:00');
+    assert.strictEqual(r.untimed.length, 2);
+  });
+  test('past / current / next / later — mixed day at 12:00', () => {
+    var day = {items:[
+      {id:'a', n:'A', timeStart:'09:00', timeEnd:'10:00'}, // past
+      {id:'b', n:'B', timeStart:'11:30', timeEnd:'12:30'}, // current
+      {id:'c', n:'C', timeStart:'13:00', timeEnd:'14:00'}, // next
+      {id:'d', n:'D', timeStart:'15:00', timeEnd:'16:00'}, // later
+      {id:'e', n:'E'},                                       // untimed
+    ]};
+    var r = MaxEngineTrip.currentDayItems(day, '12:00');
+    assert.deepStrictEqual(r.past.map(function(i){return i.id;}), ['a']);
+    assert.deepStrictEqual(r.current.map(function(i){return i.id;}), ['b']);
+    assert.strictEqual(r.next.id, 'c');
+    assert.deepStrictEqual(r.later.map(function(i){return i.id;}), ['d']);
+    assert.deepStrictEqual(r.untimed.map(function(i){return i.id;}), ['e']);
+  });
+  test('one-sided times (timeStart only) treated as point in time', () => {
+    var day = {items:[{id:'a', n:'A', timeStart:'14:00'}]};
+    var rBefore = MaxEngineTrip.currentDayItems(day, '13:00');
+    assert.strictEqual(rBefore.next && rBefore.next.id, 'a');
+    var rAfter = MaxEngineTrip.currentDayItems(day, '14:01');
+    assert.strictEqual(rAfter.past[0].id, 'a');
+  });
+  test('exposed as bare global', () => {
+    assert.strictEqual(typeof global.currentDayItems, 'function');
+  });
+});
+
+describe('engine-trip.js — clockMinutesBetween', () => {
+  test('happy path', () => {
+    assert.strictEqual(MaxEngineTrip.clockMinutesBetween('10:00', '11:30'), 90);
+    assert.strictEqual(MaxEngineTrip.clockMinutesBetween('11:30', '10:00'), -90);
+  });
+  test('malformed → null', () => {
+    assert.strictEqual(MaxEngineTrip.clockMinutesBetween('xx:00', '11:30'), null);
+    assert.strictEqual(MaxEngineTrip.clockMinutesBetween(null, '11:30'), null);
+  });
+});
+
+// ── Suite: SCAFFOLD-4 preArrivalActions ──────────────────────────
+
+describe('engine-trip.js — preArrivalActions', () => {
+  test('not in before phase → null', () => {
+    var trip = {destinations: [{dateFrom:'2026-06-10', dateTo:'2026-06-12'}]};
+    // today during the trip
+    assert.strictEqual(MaxEngineTrip.preArrivalActions(trip, '2026-06-11'), null);
+    // today after
+    assert.strictEqual(MaxEngineTrip.preArrivalActions(trip, '2026-07-01'), null);
+  });
+  test('before phase + unbooked hotel + unbooked transit (no empty days, those live in decisions-deferred)', () => {
+    var trip = {destinations: [
+      { id:'d1', place:'Reykjavik', dateFrom:'2026-06-10', dateTo:'2026-06-11',
+        days:[{id:'r1', items:[{type:'sight'}]}, {id:'r2', items:[]}],
+        hotelBookings:[] },
+      { id:'d2', place:'Vík', dateFrom:'2026-06-12', dateTo:'2026-06-13',
+        days:[{id:'v1', items:[{type:'sight'}]}],
+        hotelBookings:[{status:'booked'}] },
+    ], legs: {}};
+    var r = MaxEngineTrip.preArrivalActions(trip, '2026-06-01');
+    assert.strictEqual(r.daysUntilStart, 9);
+    var kinds = r.items.map(function(i){return i.kind;});
+    // v313: empty days no longer in preArrival output (they're content,
+    // not logistics — see summarizeDecisionsDeferred).
+    assert.ok(kinds.indexOf('hotelMissing') >= 0, 'hotelMissing present');
+    assert.ok(kinds.indexOf('transitMissing') >= 0, 'transitMissing present');
+    assert.strictEqual(kinds.indexOf('emptyDay'), -1, 'emptyDay should NOT be in preArrivalActions');
+  });
+  test('booked transit → not flagged', () => {
+    var trip = {
+      destinations: [
+        {id:'d1', dateFrom:'2026-06-10', dateTo:'2026-06-11',
+         hotelBookings:[{status:'booked'}], days:[{id:'r1', items:[{}]}]},
+        {id:'d2', dateFrom:'2026-06-12', dateTo:'2026-06-13',
+         hotelBookings:[{status:'booked'}], days:[{id:'v1', items:[{}]}]},
+      ],
+      legs: { 'd1__d2': { bookings: [{status:'booked'}] } },
+    };
+    var r = MaxEngineTrip.preArrivalActions(trip, '2026-06-01');
+    assert.strictEqual(r.items.length, 0);
+  });
+  test('exposed as bare global', () => {
+    assert.strictEqual(typeof global.preArrivalActions, 'function');
+  });
+});
+
+// ── Suite: HY (path-to-10:A) — mutator surface ──────────────────
+
+describe('engine-trip.js — mutator namespace surface', () => {
+  test('all 11 trip mutators are exposed on MaxEngineTrip', () => {
+    var names = [
+      'addBufferNight',
+      'reverseTripOrder',
+      'delDest',
+      'applyDateChange',
+      'executeMoveDest',
+      'addDayTripToDay',
+      'removeDayTripFromDay',
+      'removeDayTripFromDayItem',
+      'makeDayTrip',
+      'ungroupDayTrip',
+      'schedulePeerDayTrip',
+    ];
+    names.forEach(function(n){
+      assert.strictEqual(typeof MaxEngineTrip[n], 'function', n + ' should be a function');
+    });
+  });
+  test('engine-trip.js has no DOM dependencies', () => {
+    var fs = require('fs');
+    var src = fs.readFileSync(__dirname + '/../engine-trip.js', 'utf8');
+    // Strip out comments (line + block) before scanning.
+    src = src.replace(/\/\*[\s\S]*?\*\//g, '');
+    src = src.replace(/\/\/.*$/gm, '');
+    // Now check that no real code references DOM APIs.
+    var bad = [];
+    if (/\bdocument\./.test(src))       bad.push('document.');
+    if (/\bgetElementById\b/.test(src)) bad.push('getElementById');
+    if (/\bdrawTripMode\b/.test(src))   bad.push('drawTripMode');
+    if (/\bdrawDestMode\b/.test(src))   bad.push('drawDestMode');
+    if (/\bupdateMainMap\b/.test(src))  bad.push('updateMainMap');
+    assert.deepStrictEqual(bad, [], 'engine-trip.js should be DOM-free; found: ' + bad.join(', '));
+  });
+});
+
 // ── Suite: event bus ─────────────────────────────────────────────
 
 describe('engine-trip.js — event bus', () => {
@@ -386,6 +890,134 @@ describe('engine-picker.js — state sharing', () => {
     // Simulates the inline script's `_tb = {...}` re-init pattern.
     window._tb = { region: 'Switzerland' };
     assert.strictEqual(MaxEnginePicker.state.region, 'Switzerland');
+  });
+});
+
+// ── Suite: HZ.1 (path-to-10 D) — curated read-only getters ───────
+
+describe('engine-picker.js — brief() getter', () => {
+  test('returns frozen object', () => {
+    window._tb = { entry: 'Zurich' };
+    var b = MaxEnginePicker.brief();
+    assert.strictEqual(Object.isFrozen(b), true);
+    assert.throws(function(){ b.entry = 'mutated'; });
+  });
+  test('mirrors _tb fields', () => {
+    window._tb = {
+      region: 'Iceland', entry: 'Reykjavik', tbExit: 'Keflavik',
+      hoursPerDay: 6, maxBigSightsPerDay: 2,
+      withKids: true,
+    };
+    var b = MaxEnginePicker.brief();
+    assert.strictEqual(b.region, 'Iceland');
+    assert.strictEqual(b.entry, 'Reykjavik');
+    assert.strictEqual(b.tbExit, 'Keflavik');
+    assert.strictEqual(b.hoursPerDay, 6);
+    assert.strictEqual(b.maxBigSightsPerDay, 2);
+    assert.strictEqual(b.withKids, true);
+  });
+  test('excludes internal flags (_editMode, _exitTouched)', () => {
+    window._tb = { region: 'X', _editMode: true, _exitTouched: true };
+    var b = MaxEnginePicker.brief();
+    assert.strictEqual(b._editMode, undefined);
+    assert.strictEqual(b._exitTouched, undefined);
+  });
+  test('returns defaults when _tb is empty', () => {
+    window._tb = {};
+    var b = MaxEnginePicker.brief();
+    assert.strictEqual(b.region, '');
+    assert.strictEqual(b.hoursPerDay, null);
+    assert.strictEqual(b.withKids, false);
+  });
+  test('avoid object is also frozen', () => {
+    window._tb = { avoid: { altitude: true } };
+    var b = MaxEnginePicker.brief();
+    assert.strictEqual(Object.isFrozen(b.avoid), true);
+    assert.strictEqual(b.avoid.altitude, true);
+  });
+});
+
+describe('engine-picker.js — candidates() getter', () => {
+  test('returns frozen array of frozen candidates', () => {
+    window._tb = { candidates: [
+      {id: 'c1', place: 'A'},
+      {id: 'c2', place: 'B'},
+    ]};
+    var c = MaxEnginePicker.candidates();
+    assert.strictEqual(Object.isFrozen(c), true);
+    assert.strictEqual(c.length, 2);
+    assert.strictEqual(Object.isFrozen(c[0]), true);
+    assert.throws(function(){ c[0].place = 'mutated'; });
+  });
+  test('returns empty array when no candidates', () => {
+    window._tb = {};
+    var c = MaxEnginePicker.candidates();
+    assert.deepStrictEqual(c, []);
+  });
+});
+
+describe('engine-picker.js — requiredPlaces() getter', () => {
+  test('returns frozen array', () => {
+    window._tb = { requiredPlaces: [{place: 'A'}, {place: 'B'}] };
+    var r = MaxEnginePicker.requiredPlaces();
+    assert.strictEqual(Object.isFrozen(r), true);
+    assert.strictEqual(r.length, 2);
+    assert.strictEqual(Object.isFrozen(r[0]), true);
+  });
+  test('empty when none', () => {
+    window._tb = {};
+    assert.deepStrictEqual(MaxEnginePicker.requiredPlaces(), []);
+  });
+});
+
+// ── Suite: HZ.2 (path-to-10 D) — domain setters ─────────────────
+
+describe('engine-picker.js — domain setters', () => {
+  test('setEntry trims + emits briefChange', () => {
+    window._tb = {};
+    let captured = null;
+    const off = MaxEnginePicker.on('briefChange', p => captured = p);
+    MaxEnginePicker.setEntry('  Reykjavik  ');
+    off();
+    assert.strictEqual(window._tb.entry, 'Reykjavik');
+    assert.deepStrictEqual(captured, { field: 'entry', value: 'Reykjavik' });
+  });
+  test('setEntry handles null/undefined as empty string', () => {
+    window._tb = { entry: 'old' };
+    MaxEnginePicker.setEntry(null);
+    assert.strictEqual(window._tb.entry, '');
+  });
+  test('setExit writes to _tb.tbExit (historical name)', () => {
+    window._tb = {};
+    MaxEnginePicker.setExit('Keflavik');
+    assert.strictEqual(window._tb.tbExit, 'Keflavik');
+  });
+  test('setRegion mutates + emits', () => {
+    window._tb = {};
+    let captured = null;
+    const off = MaxEnginePicker.on('briefChange', p => captured = p);
+    MaxEnginePicker.setRegion('Iceland');
+    off();
+    assert.strictEqual(window._tb.region, 'Iceland');
+    assert.deepStrictEqual(captured, { field: 'region', value: 'Iceland' });
+  });
+  test('setCandidateStatus fallback path (no inline setCS)', () => {
+    delete global.setCS;
+    window._tb = { candidates: [
+      { id: 'c1', place: 'A', status: null },
+      { id: 'c2', place: 'B', status: null },
+    ]};
+    MaxEnginePicker.setCandidateStatus('c1', 'keep');
+    assert.strictEqual(window._tb.candidates[0].status, 'keep');
+    MaxEnginePicker.setCandidateStatus('c1', 'reject');
+    assert.strictEqual(window._tb.candidates[0].status, 'reject');
+    MaxEnginePicker.setCandidateStatus('c1', null);
+    assert.strictEqual(window._tb.candidates[0].status, null);
+  });
+  test('startFresh replaces draft', () => {
+    window._tb = { region: 'old' };
+    MaxEnginePicker.startFresh({ region: 'fresh' });
+    assert.strictEqual(window._tb.region, 'fresh');
   });
 });
 
