@@ -1,37 +1,45 @@
 #!/usr/bin/env bash
-# v353: deploy.sh — single-command deploy with automatic cache busting.
+# v353: deploy.sh — single-command deploy with cache-busting and
+# optional git commit+push.
 #
 # Why this exists
 # ----------------
-# The hardcoded ?v=NNN query strings on script tags in index.html
-# served as the de-facto cache-busting mechanism because sw.js was
-# never registered as a real service worker. Bumping ?v=NNN by hand
-# every deploy is the kind of step that gets skipped on the rounds it
-# matters most — exactly what happened across ~300 release notes
-# where the live JS had been ?v=1 for who-knows-how-long while the
-# CDN files kept changing.
-#
-# This script flips that around: in source the string is ?v=DEV, and
-# the deploy substitutes a fresh epoch timestamp at deploy time, then
-# runs `wrangler pages deploy`. The repo never carries a version
-# string at all, so there's nothing to forget.
+# Hardcoded ?v=NNN query strings on script tags in index.html are
+# what bust the browser HTTP cache. There's no real service worker
+# (sw.js was retired in v353), so this query-string version is the
+# only mechanism. Bumping it by hand every deploy is the kind of
+# step that gets skipped exactly when it matters most. This script
+# substitutes ?v=DEV with a fresh epoch on every deploy so source
+# never carries a version string, and the working tree is reverted
+# to ?v=DEV after the deploy via a cleanup trap.
 #
 # Usage
 # -----
-#   bash deploy.sh             # frontend only
-#   bash deploy.sh --server    # frontend + worker (api.travelingwithmax.app)
-#   bash deploy.sh --dry       # show what would be replaced, don't deploy
+#   bash deploy.sh                                    # frontend only, no commit
+#   bash deploy.sh --server                           # frontend + worker
+#   bash deploy.sh --commit                           # also git add+commit+push
+#   bash deploy.sh --commit --message="round X.Y"     # custom commit message
+#   bash deploy.sh --dry                              # show substitution, no deploy
+#   bash deploy.sh --keep-stamp                       # don't revert ?v= after deploy
+#
+# Combine flags freely:
+#   bash deploy.sh --commit --server --message="ship FN.7.8"
 #
 # Notes
 # -----
-# - Substitutes ?v=DEV → ?v=<epoch> in index.html only. Skips all
-#   other files (sw.js, the docx README, etc.).
-# - The substitution is in-place on the source file; the file ends
-#   up with the timestamp committed. Next deploy bumps it again.
-#   If you want the DEV marker to come back on disk after deploy,
-#   change `--in-place` below to a tempfile dance.
-# - `commit-dirty=true` lets wrangler ship without a clean git tree.
-# - Does NOT run any test suite. Add a step here if/when you have one.
+# - In --commit mode the cache-buster substitution is reverted
+#   BEFORE the commit so git history records only your real code
+#   changes. After the commit + push, the substitution is
+#   re-applied for the wrangler deploy. After deploy, the cleanup
+#   trap reverts again so your working tree is clean. Net effect:
+#   git is clean, deploys are timestamped, you don't think about it.
+# - Default mode (no --commit) does NOT touch git. Substitutes for
+#   the deploy, reverts after. Working tree returns to ?v=DEV.
+# - --keep-stamp leaves the substitution in the source file. Useful
+#   if you want to verify the deployed version locally without git
+#   muddying it.
+# - --commit-dirty=true on wrangler deploy lets it ship even if
+#   git is dirty (which it usually is mid-substitution).
 
 set -euo pipefail
 
@@ -44,54 +52,108 @@ fi
 
 DRY_RUN=0
 DEPLOY_SERVER=0
+COMMIT_MODE=0
+KEEP_STAMP=0
+COMMIT_MESSAGE=""
+
 for arg in "$@"; do
   case "$arg" in
-    --dry)    DRY_RUN=1 ;;
-    --server) DEPLOY_SERVER=1 ;;
-    *)        echo "Unknown arg: $arg" >&2; exit 1 ;;
+    --dry)         DRY_RUN=1 ;;
+    --server)      DEPLOY_SERVER=1 ;;
+    --commit)      COMMIT_MODE=1 ;;
+    --keep-stamp)  KEEP_STAMP=1 ;;
+    --message=*)   COMMIT_MESSAGE="${arg#--message=}" ;;
+    *)             echo "Unknown arg: $arg" >&2; exit 1 ;;
   esac
 done
 
 STAMP="$(date +%s)"
 echo "→ stamp: $STAMP"
 
-# In-place sed. macOS sed needs the -i '' empty arg; Linux sed doesn't.
-# Detect by trying GNU style first.
+# Cross-platform sed -i. macOS BSD sed needs the empty '' arg; GNU
+# sed (Linux) doesn't.
 if sed --version >/dev/null 2>&1; then
   SED_INPLACE=(-i)
 else
   SED_INPLACE=(-i "")
 fi
 
-if grep -lq '?v=DEV' index.html 2>/dev/null; then
-  echo "→ replacing ?v=DEV with ?v=$STAMP in index.html"
-  if [ "$DRY_RUN" -eq 1 ]; then
-    grep -n '?v=DEV' index.html | sed "s/?v=DEV/?v=$STAMP/" | head
-  else
-    sed "${SED_INPLACE[@]}" "s/?v=DEV/?v=$STAMP/g" index.html
+# Cleanup trap: revert the cache-buster substitution on exit (success,
+# failure, or interrupt). --keep-stamp opts out.
+SUBSTITUTED=0
+cleanup() {
+  if [ "$SUBSTITUTED" -eq 1 ] && [ "$KEEP_STAMP" -eq 0 ]; then
+    sed "${SED_INPLACE[@]}" -E "s/\\?v=$STAMP/?v=DEV/g" index.html 2>/dev/null || true
   fi
-else
-  # Already-substituted from a previous deploy — bump again.
-  if grep -qE '\?v=[0-9]+' index.html; then
-    echo "→ rotating existing ?v=<num> to ?v=$STAMP in index.html"
-    if [ "$DRY_RUN" -eq 1 ]; then
-      grep -nE '\?v=[0-9]+' index.html | sed -E "s/\?v=[0-9]+/?v=$STAMP/" | head
-    else
+}
+trap cleanup EXIT
+
+substitute() {
+  if grep -q '?v=DEV' index.html; then
+    echo "→ substituting ?v=DEV with ?v=$STAMP"
+    if [ "$DRY_RUN" -eq 0 ]; then
+      sed "${SED_INPLACE[@]}" "s/?v=DEV/?v=$STAMP/g" index.html
+      SUBSTITUTED=1
+    fi
+  elif grep -qE '\?v=[0-9]+' index.html; then
+    # Leftover from a previous --keep-stamp run; rotate it.
+    echo "→ rotating existing ?v=<num> to ?v=$STAMP"
+    if [ "$DRY_RUN" -eq 0 ]; then
       sed "${SED_INPLACE[@]}" -E "s/\?v=[0-9]+/?v=$STAMP/g" index.html
+      SUBSTITUTED=1
     fi
   else
-    echo "  (no ?v=DEV or ?v=<num> markers found; skipping)" >&2
+    echo "  (no ?v= markers found; skipping substitution)" >&2
   fi
-fi
+}
 
+# Step 1: substitute (or in dry-run, just preview).
+substitute
 if [ "$DRY_RUN" -eq 1 ]; then
-  echo "→ dry run — skipping wrangler deploys"
+  grep -nE '\?v=' index.html | head -10 || true
+  echo "→ dry run — exiting before deploy"
   exit 0
 fi
 
+# Step 2: optional git commit + push, BEFORE deploy.
+# Reverting the substitution first keeps git history clean of the
+# timestamp; we re-apply it for the deploy. The order is:
+#   substitute → revert → commit → push → re-substitute → deploy
+# so GitHub records exactly the source that the deploy contains
+# (modulo the timestamp), and the deploy itself has a fresh number.
+if [ "$COMMIT_MODE" -eq 1 ]; then
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "✗ --commit requires a git repo" >&2
+    exit 1
+  fi
+
+  # Revert the cache-buster substitution so the commit is clean.
+  if [ "$SUBSTITUTED" -eq 1 ]; then
+    sed "${SED_INPLACE[@]}" -E "s/\\?v=$STAMP/?v=DEV/g" index.html
+  fi
+
+  if [ -z "$(git status --porcelain)" ]; then
+    echo "→ no code changes to commit; skipping git commit"
+  else
+    msg="${COMMIT_MESSAGE:-deploy $STAMP}"
+    echo "→ git add -A && commit: \"$msg\""
+    git add -A
+    git commit -m "$msg"
+    echo "→ git push origin main"
+    git push origin main
+  fi
+
+  # Re-apply the substitution for the wrangler deploy that follows.
+  if [ "$SUBSTITUTED" -eq 1 ]; then
+    sed "${SED_INPLACE[@]}" "s/?v=DEV/?v=$STAMP/g" index.html
+  fi
+fi
+
+# Step 3: deploy frontend to Cloudflare Pages.
 echo "→ wrangler pages deploy ."
 wrangler pages deploy . --project-name=max-app --commit-dirty=true
 
+# Step 4 (optional): deploy worker.
 if [ "$DEPLOY_SERVER" -eq 1 ]; then
   echo "→ wrangler deploy (server)"
   ( cd server && wrangler deploy )
