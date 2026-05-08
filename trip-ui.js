@@ -1867,17 +1867,75 @@
     var saveBtn = document.createElement("button");
     saveBtn.type = "button";
     saveBtn.textContent = "Save note";
-    saveBtn.style.cssText = "font-size:11px;font-weight:600;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:5px;padding:5px 12px;cursor:pointer;font-family:inherit;";
+    saveBtn.style.cssText = "font-size:11px;font-weight:600;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:5px;padding:5px 12px;cursor:pointer;font-family:inherit;transition:opacity 0.18s ease, background 0.12s ease;";
     saveBtn.onmouseover = function(){ saveBtn.style.background = "#134a8a"; };
     saveBtn.onmouseout  = function(){ saveBtn.style.background = "#1a5fa8"; };
+    // v353.2: button visibility tied to "is there an unsaved change?"
+    // On load, the textarea matches the persisted value, so no save
+    // affordance is needed — start hidden. The 'input' listener below
+    // shows it as soon as the user types. On save: brief "✓ Saved"
+    // confirmation, then hide.
+    var _savedSnapshot = (typeof dest.travelerNotes === "string") ? dest.travelerNotes : "";
+    function _showSaveBtn() {
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Save note";
+      saveBtn.style.background = "#1a5fa8";
+      saveBtn.style.borderColor = "#1a5fa8";
+      saveBtn.style.opacity = "1";
+      saveBtn.style.display = "";
+    }
+    function _hideSaveBtn() {
+      saveBtn.style.display = "none";
+    }
+    function _showSavedThenHide() {
+      saveBtn.disabled = true;
+      saveBtn.textContent = "✓ Saved";
+      saveBtn.style.background = "#2a7a4e";
+      saveBtn.style.borderColor = "#2a7a4e";
+      saveBtn.style.opacity = "1";
+      setTimeout(function () {
+        saveBtn.style.opacity = "0";
+        setTimeout(function () {
+          // Only hide if the textarea is still in sync (user hasn't
+          // started typing in the 800ms window).
+          if (notesTa.value === _savedSnapshot) _hideSaveBtn();
+          else _showSaveBtn();
+        }, 200);
+      }, 800);
+    }
+    // Initial state: hidden because textarea matches saved value.
+    _hideSaveBtn();
+    // Re-show on any input. Cheap; listener fires per keystroke but
+    // the work is just a string compare.
+    notesTa.addEventListener('input', function () {
+      if (notesTa.value !== _savedSnapshot) _showSaveBtn();
+      else _hideSaveBtn();
+    });
     saveBtn.onclick = function(){
       _saveNote();
+      // Update the snapshot to the just-saved value, then run the
+      // confirmation animation.
+      _savedSnapshot = (typeof dest.travelerNotes === "string") ? dest.travelerNotes : "";
+      _showSavedThenHide();
       // Blur the textarea too so the focus ring goes away — feels
       // like a "done" gesture.
       try { notesTa.blur(); } catch(_){}
     };
     saveRow.appendChild(saveBtn);
     notesWrap.appendChild(saveRow);
+
+    // Also catch the blur-save path: when the user blurs (focus
+    // leaves the textarea), _saveNote runs. Update the snapshot so
+    // the button doesn't sit there asking to save what's already
+    // saved. We can't easily reach _saveNote's success/failure flag
+    // from here, but a simple "if textarea matches dest.travelerNotes
+    // post-blur, hide the button" does the right thing.
+    notesTa.addEventListener('blur', function () {
+      // _saveNote already ran via the existing onblur handler above.
+      // Re-read what was persisted and sync our snapshot.
+      _savedSnapshot = (typeof dest.travelerNotes === "string") ? dest.travelerNotes : "";
+      if (notesTa.value === _savedSnapshot) _hideSaveBtn();
+    });
 
     container.appendChild(notesWrap);
   }
