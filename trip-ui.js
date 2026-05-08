@@ -80,6 +80,33 @@
     top.className = 'srow-top';
     top.appendChild(dot);
     top.appendChild(name);
+    // v353.2: Open in Maps. Hands off to the user's preferred maps
+    // app via the universal Google Maps URL — iOS opens Apple Maps
+    // via Universal Link, Android opens Google Maps app, desktop
+    // opens google.com/maps. Coords win when present; fall back to
+    // a name+place text search.
+    if (s && (typeof s.lat === 'number' && typeof s.lng === 'number') ||
+        (s && s.n)) {
+      var _dest = (typeof global.getDest === 'function' && destId) ? global.getDest(destId) : null;
+      var _place = (_dest && _dest.place) || '';
+      var _href;
+      if (typeof s.lat === 'number' && typeof s.lng === 'number') {
+        _href = 'https://www.google.com/maps/search/?api=1&query=' +
+          encodeURIComponent(s.lat + ',' + s.lng);
+      } else {
+        _href = 'https://www.google.com/maps/search/?api=1&query=' +
+          encodeURIComponent(s.n + (_place ? ', ' + _place : ''));
+      }
+      var ml = document.createElement('a');
+      ml.href = _href;
+      ml.target = '_blank';
+      ml.rel = 'noopener noreferrer';
+      ml.textContent = '📍';
+      ml.title = 'Get directions in Maps';
+      ml.style.cssText = 'margin-left:4px;font-size:11px;text-decoration:none;line-height:1;';
+      ml.onclick = function (e) { if (e && e.stopPropagation) e.stopPropagation(); };
+      top.appendChild(ml);
+    }
     r.appendChild(top);
 
     // Optional time (read-only in compact).
@@ -250,6 +277,36 @@
         global._openSightUrlEditor(extEdit, item, function(){ if (did && typeof global.drawDestMode === "function") global.drawDestMode(did); });
       };})(s, destId);
     }
+    // v353.2: "Open in Maps" link. Hands off to the user's preferred
+    // maps app (Apple Maps on iOS, Google Maps elsewhere) with the
+    // item's location pre-filled. Uses the universal Google Maps URL
+    // (https://www.google.com/maps/search/?api=1&query=...) which on
+    // iOS opens Apple Maps via Universal Link, on Android opens Google
+    // Maps app, and on desktop opens google.com/maps. Falls back to
+    // a name+place text search when lat/lng aren't set.
+    var mapsLink = null;
+    var hasCoords = (typeof s.lat === "number" && typeof s.lng === "number");
+    if (hasCoords || (s.n && _placeForS)) {
+      var mapsHref;
+      if (hasCoords) {
+        // Coords win when present — most accurate.
+        mapsHref = "https://www.google.com/maps/search/?api=1&query=" +
+          encodeURIComponent(s.lat + "," + s.lng);
+      } else {
+        // Search by name + place; the maps app picks the best match.
+        var q = s.n + (_placeForS ? ", " + _placeForS : "");
+        mapsHref = "https://www.google.com/maps/search/?api=1&query=" +
+          encodeURIComponent(q);
+      }
+      mapsLink = document.createElement("a");
+      mapsLink.href = mapsHref;
+      mapsLink.target = "_blank";
+      mapsLink.rel = "noopener noreferrer";
+      mapsLink.textContent = "📍";
+      mapsLink.title = "Get directions in Maps";
+      mapsLink.style.cssText = "margin-left:4px;font-size:11px;text-decoration:none;cursor:pointer;line-height:1;";
+      mapsLink.onclick = function(e){ e.stopPropagation(); };
+    }
     var acts=document.createElement("div"); acts.className="sacts";
     // Story button
     var stb=document.createElement("button"); stb.className="sa ssa"; stb.id="ssa-"+s.id;
@@ -297,6 +354,7 @@
     top.appendChild(dot); top.appendChild(name);
     if (extLink) top.appendChild(extLink);
     if (extEdit) top.appendChild(extEdit);
+    if (mapsLink) top.appendChild(mapsLink);  // v353.2: Open in Maps
     // SCAFFOLD-2: Keep button on tentative items. Sits between the name
     // and the action buttons so it reads as "the answer to: is this
     // staying?" Click flips s.tentative to false (advances to confirmed)
@@ -1733,8 +1791,79 @@
     // weren't sure when blur fired, so the note appeared "lost" until
     // they realized they had to tap somewhere else. The button is the
     // unambiguous "I'm done, save it" affordance.
+    // v353.2: voice input lives next to the save button. Web Speech
+    // API recognition pipes recognized text into the textarea —
+    // useful for in-the-moment capture on phone without typing.
+    // Feature-detect: only show the mic when the API is available.
     var saveRow = document.createElement("div");
-    saveRow.style.cssText = "margin-top:6px;display:flex;justify-content:flex-end;";
+    saveRow.style.cssText = "margin-top:6px;display:flex;justify-content:flex-end;align-items:center;gap:6px;";
+    var SR = global.SpeechRecognition || global.webkitSpeechRecognition;
+    if (typeof SR === 'function') {
+      var micBtn = document.createElement('button');
+      micBtn.type = 'button';
+      micBtn.textContent = '🎤';
+      micBtn.title = 'Dictate';
+      micBtn.style.cssText = 'font-size:14px;background:#fff;border:1px solid #ddd;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;line-height:1;min-height:28px;';
+      var rec = null;
+      var listening = false;
+      micBtn.onclick = function () {
+        if (listening) {
+          // Tap again to stop early. onend fires below to clean up.
+          if (rec) try { rec.stop(); } catch (_) {}
+          return;
+        }
+        try {
+          rec = new SR();
+          rec.lang = (navigator.language || 'en-US');
+          rec.interimResults = true;
+          rec.continuous = true;
+          var startLen = notesTa.value.length;
+          var leadingSpace = (startLen > 0 && !/\s$/.test(notesTa.value)) ? ' ' : '';
+          var finalText = '';
+          rec.onstart = function () {
+            listening = true;
+            micBtn.textContent = '🎙';
+            micBtn.style.background = '#fbeae3';
+            micBtn.style.borderColor = '#c05020';
+            micBtn.title = 'Listening — tap to stop';
+            notesTa.focus();
+          };
+          rec.onresult = function (ev) {
+            var interim = '';
+            for (var i = ev.resultIndex; i < ev.results.length; i++) {
+              var r = ev.results[i];
+              if (r.isFinal) finalText += r[0].transcript;
+              else interim += r[0].transcript;
+            }
+            // Re-render the textarea: original prefix + leading space
+            // + finalized + (interim, will be replaced as it firms up).
+            notesTa.value = notesTa.value.substring(0, startLen) +
+              leadingSpace + finalText + interim;
+          };
+          rec.onerror = function () { /* swallow; onend handles cleanup */ };
+          rec.onend = function () {
+            listening = false;
+            micBtn.textContent = '🎤';
+            micBtn.style.background = '#fff';
+            micBtn.style.borderColor = '#ddd';
+            micBtn.title = 'Dictate';
+            // Trim any still-interim text by setting the textarea to
+            // prefix + final only.
+            notesTa.value = notesTa.value.substring(0, startLen) +
+              (finalText ? leadingSpace + finalText : '');
+            _saveNote();
+          };
+          rec.start();
+        } catch (e) {
+          listening = false;
+          micBtn.textContent = '🎤';
+          // Permission denied or unsupported — best-effort feedback.
+          notesStatus.textContent = 'mic unavailable';
+          notesStatus.style.color = '#c05020';
+        }
+      };
+      saveRow.appendChild(micBtn);
+    }
     var saveBtn = document.createElement("button");
     saveBtn.type = "button";
     saveBtn.textContent = "Save note";

@@ -1506,6 +1506,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
         <button class="file-btn" onclick="goHome()" title="All trips">&larr; Home</button>
         <button class="file-btn" onclick="editConstraints()" title="Edit trip parameters">&#9998; Parameters</button>
         <button class="file-btn" onclick="saveTrip()" title="Save">Save</button>
+        <button class="file-btn" id="trip-search-btn" onclick="openTripSearch()" title="Search this trip">&#x1F50D;</button>
         <button class="file-btn" id="api-key-btn" onclick="showApiKeyForm()" title="Set API key" style="opacity:0.6;">&#x1F511;</button>
         <button class="file-btn" id="sync-btn" onclick="MaxSync.showSignInModal()" title="Sync with server" style="opacity:0.6;">&#x21C4;</button>
         <span id="max-sync-status" style="font-size:11px;font-weight:600;color:#888;margin-left:8px;display:inline-flex;align-items:center;min-width:80px;"></span>
@@ -3781,6 +3782,217 @@ function renderHomeDashboard(){
   if (pendSec) card.appendChild(pendSec);
 
   host.appendChild(card);
+}
+
+// v353.2: trip-wide search. Opens a fullscreen-on-mobile, modal-on-
+// desktop overlay with an input that substring-matches across:
+//   - destination place + label + day labels
+//   - itinerary item names + notes
+//   - laterItems / maybeItems names
+//   - traveler notes
+// Results show "Dest > Day > Item" context. Clicking a result calls
+// selectDest(destId) to drill into that destination, then scrolls
+// the matching day into view + flashes it.
+function openTripSearch() {
+  if (!trip || !trip.destinations) return;
+  // If an overlay already exists (rapid double-tap), reuse it.
+  var existing = document.getElementById('trip-search-overlay');
+  if (existing) { var inp = existing.querySelector('input'); if (inp) inp.focus(); return; }
+
+  var ov = document.createElement('div');
+  ov.id = 'trip-search-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:11000;' +
+    'display:flex;align-items:flex-start;justify-content:center;padding:60px 20px 20px;';
+
+  var box = document.createElement('div');
+  box.style.cssText = 'background:#fff;border-radius:10px;width:100%;max-width:520px;' +
+    'box-shadow:0 12px 40px rgba(0,0,0,0.25);display:flex;flex-direction:column;max-height:80vh;';
+
+  var hdr = document.createElement('div');
+  hdr.style.cssText = 'padding:14px 16px 10px;border-bottom:1px solid #eee;display:flex;align-items:center;gap:10px;';
+  hdr.innerHTML =
+    '<div style="font-size:14px;font-weight:700;flex:1;">🔍 Search this trip</div>' +
+    '<button id="trip-search-close" style="background:none;border:none;font-size:18px;color:#999;cursor:pointer;padding:0 4px;line-height:1;">✕</button>';
+  box.appendChild(hdr);
+
+  var inp = document.createElement('input');
+  inp.type = 'text';
+  inp.placeholder = 'Place, sight, day, note…';
+  inp.autocomplete = 'off';
+  inp.style.cssText = 'margin:10px 16px;padding:10px 12px;font-size:14px;border:1px solid #ddd;border-radius:6px;outline:none;font-family:inherit;';
+  box.appendChild(inp);
+
+  var resultsHost = document.createElement('div');
+  resultsHost.style.cssText = 'overflow-y:auto;flex:1;padding:0 6px 12px;';
+  box.appendChild(resultsHost);
+
+  var emptyHint = document.createElement('div');
+  emptyHint.style.cssText = 'padding:24px 16px;text-align:center;color:#aaa;font-size:12px;';
+  emptyHint.textContent = 'Start typing to search.';
+  resultsHost.appendChild(emptyHint);
+
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  setTimeout(function () { inp.focus(); }, 30);
+
+  function close() {
+    if (ov.parentNode) ov.parentNode.removeChild(ov);
+  }
+  hdr.querySelector('#trip-search-close').onclick = close;
+  ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+  document.addEventListener('keydown', function escClose(e) {
+    if (e.key === 'Escape') {
+      close();
+      document.removeEventListener('keydown', escClose);
+    }
+  });
+
+  function highlight(text, q) {
+    if (!text) return '';
+    var idx = text.toLowerCase().indexOf(q);
+    if (idx < 0) return _esc(text);
+    return _esc(text.substring(0, idx)) +
+      '<mark style="background:#fff7d4;padding:0 1px;">' + _esc(text.substring(idx, idx + q.length)) + '</mark>' +
+      _esc(text.substring(idx + q.length));
+  }
+  function _esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function search() {
+    var q = inp.value.trim().toLowerCase();
+    resultsHost.innerHTML = '';
+    if (q.length < 2) {
+      resultsHost.appendChild(emptyHint);
+      emptyHint.textContent = q.length === 1 ? 'Keep typing…' : 'Start typing to search.';
+      return;
+    }
+    var results = [];
+    (trip.destinations || []).forEach(function (dest) {
+      var destLabel = dest.label || dest.place || '';
+      // Destination name itself
+      if ((dest.place || '').toLowerCase().indexOf(q) >= 0 ||
+          (dest.label || '').toLowerCase().indexOf(q) >= 0) {
+        results.push({
+          kind: 'dest',
+          destId: dest.id,
+          dayId: null,
+          context: destLabel,
+          line: '<strong>Destination:</strong> ' + highlight(destLabel, q),
+        });
+      }
+      // Traveler notes on the destination
+      if ((dest.travelerNotes || '').toLowerCase().indexOf(q) >= 0) {
+        var nt = dest.travelerNotes;
+        if (nt.length > 100) {
+          var i = nt.toLowerCase().indexOf(q);
+          var s2 = Math.max(0, i - 30), e2 = Math.min(nt.length, i + q.length + 50);
+          nt = (s2 > 0 ? '…' : '') + nt.substring(s2, e2) + (e2 < dest.travelerNotes.length ? '…' : '');
+        }
+        results.push({
+          kind: 'note',
+          destId: dest.id,
+          dayId: null,
+          context: destLabel + ' · note',
+          line: highlight(nt, q),
+        });
+      }
+      // Day labels and items
+      (dest.days || []).forEach(function (day) {
+        if ((day.lbl || '').toLowerCase().indexOf(q) >= 0) {
+          results.push({
+            kind: 'day',
+            destId: dest.id,
+            dayId: day.id,
+            context: destLabel + ' · day',
+            line: '<strong>Day:</strong> ' + highlight(day.lbl, q),
+          });
+        }
+        (day.items || []).forEach(function (it) {
+          if ((it.n || '').toLowerCase().indexOf(q) >= 0) {
+            results.push({
+              kind: 'item',
+              destId: dest.id,
+              dayId: day.id,
+              context: destLabel + ' · ' + (day.lbl || ''),
+              line: highlight(it.n, q) + (it.timeStart ? ' <span style="color:#aaa;font-size:10px;">' + it.timeStart + '</span>' : ''),
+            });
+          }
+          if ((it.note || '').toLowerCase().indexOf(q) >= 0) {
+            results.push({
+              kind: 'item-note',
+              destId: dest.id,
+              dayId: day.id,
+              context: destLabel + ' · ' + (day.lbl || '') + ' · ' + (it.n || ''),
+              line: '<em style="color:#777;">' + highlight(it.note, q) + '</em>',
+            });
+          }
+        });
+      });
+      // Later / Maybe buckets
+      ['laterItems', 'maybeItems'].forEach(function (bucket) {
+        (dest[bucket] || []).forEach(function (it) {
+          if ((it.n || '').toLowerCase().indexOf(q) >= 0) {
+            results.push({
+              kind: 'bucket',
+              destId: dest.id,
+              dayId: null,
+              context: destLabel + ' · ' + (bucket === 'laterItems' ? 'Later' : 'Maybe'),
+              line: highlight(it.n, q),
+            });
+          }
+        });
+      });
+    });
+
+    if (results.length === 0) {
+      var none = document.createElement('div');
+      none.style.cssText = 'padding:24px 16px;text-align:center;color:#aaa;font-size:12px;';
+      none.textContent = 'No matches.';
+      resultsHost.appendChild(none);
+      return;
+    }
+    results.forEach(function (r) {
+      var row = document.createElement('div');
+      row.style.cssText = 'padding:9px 12px;cursor:pointer;border-radius:6px;margin:2px 6px;';
+      row.onmouseover = function () { row.style.background = '#f5f5f5'; };
+      row.onmouseout = function () { row.style.background = ''; };
+      row.innerHTML =
+        '<div style="font-size:9.5px;color:#aaa;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:2px;">' +
+        _esc(r.context) + '</div>' +
+        '<div style="font-size:13px;color:#222;line-height:1.45;">' + r.line + '</div>';
+      row.onclick = function () {
+        close();
+        if (typeof selectDest === 'function' && r.destId) {
+          selectDest(r.destId);
+          if (r.dayId) {
+            // Scroll to the day after the dest-mode renders.
+            setTimeout(function () {
+              var el = document.getElementById('dy-' + r.dayId);
+              if (el && el.scrollIntoView) {
+                try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+                catch (_) { el.scrollIntoView(); }
+                el.style.transition = 'background-color 0.4s';
+                el.style.backgroundColor = '#fff7d4';
+                setTimeout(function () { el.style.backgroundColor = ''; }, 1800);
+              }
+            }, 120);
+          }
+        }
+      };
+      resultsHost.appendChild(row);
+    });
+  }
+
+  inp.addEventListener('input', search);
+  inp.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      var first = resultsHost.querySelector('div[style*="cursor:pointer"]');
+      if (first) first.click();
+    }
+  });
 }
 
 // v353: keep the sync-related buttons in sync with sign-in state.

@@ -1,4 +1,4 @@
-# Max — current state & target architecture
+# Max — current state & target architecture. 
 > **Update (gallery-v1):** See also `design-notes.md` for the gallery-first template direction,
 > which supersedes parts of the "Target architecture" section below. Some items in "Known gaps"
 > have shipped since this was written (pick-any-two for dates, Who's traveling, Avoidances).
