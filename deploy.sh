@@ -84,6 +84,7 @@ SUBSTITUTED=0
 cleanup() {
   if [ "$SUBSTITUTED" -eq 1 ] && [ "$KEEP_STAMP" -eq 0 ]; then
     sed "${SED_INPLACE[@]}" -E "s/\\?v=$STAMP/?v=DEV/g" index.html 2>/dev/null || true
+    sed "${SED_INPLACE[@]}" -E "s/max-sw-$STAMP/max-sw-DEV/g" sw.js 2>/dev/null || true
   fi
 }
 trap cleanup EXIT
@@ -104,6 +105,21 @@ substitute() {
     fi
   else
     echo "  (no ?v= markers found; skipping substitution)" >&2
+  fi
+  # v353.1: also bump the service-worker CACHE constant so a deploy
+  # invalidates the SW's stored app shell. Without this, the SW
+  # would keep serving the previous bundle from cache even after the
+  # ?v= URLs changed (cache-first strategy).
+  if grep -q 'max-sw-DEV' sw.js 2>/dev/null; then
+    echo "→ bumping sw.js CACHE: max-sw-DEV → max-sw-$STAMP"
+    if [ "$DRY_RUN" -eq 0 ]; then
+      sed "${SED_INPLACE[@]}" "s/max-sw-DEV/max-sw-$STAMP/g" sw.js
+    fi
+  elif grep -qE 'max-sw-[0-9]+' sw.js 2>/dev/null; then
+    echo "→ rotating sw.js CACHE → max-sw-$STAMP"
+    if [ "$DRY_RUN" -eq 0 ]; then
+      sed "${SED_INPLACE[@]}" -E "s/max-sw-[0-9]+/max-sw-$STAMP/g" sw.js
+    fi
   fi
 }
 
@@ -127,9 +143,10 @@ if [ "$COMMIT_MODE" -eq 1 ]; then
     exit 1
   fi
 
-  # Revert the cache-buster substitution so the commit is clean.
+  # Revert the cache-buster substitutions so the commit is clean.
   if [ "$SUBSTITUTED" -eq 1 ]; then
     sed "${SED_INPLACE[@]}" -E "s/\\?v=$STAMP/?v=DEV/g" index.html
+    sed "${SED_INPLACE[@]}" -E "s/max-sw-$STAMP/max-sw-DEV/g" sw.js 2>/dev/null || true
   fi
 
   if [ -z "$(git status --porcelain)" ]; then
@@ -143,9 +160,10 @@ if [ "$COMMIT_MODE" -eq 1 ]; then
     git push origin main
   fi
 
-  # Re-apply the substitution for the wrangler deploy that follows.
+  # Re-apply the substitutions for the wrangler deploy that follows.
   if [ "$SUBSTITUTED" -eq 1 ]; then
     sed "${SED_INPLACE[@]}" "s/?v=DEV/?v=$STAMP/g" index.html
+    sed "${SED_INPLACE[@]}" "s/max-sw-DEV/max-sw-$STAMP/g" sw.js 2>/dev/null || true
   fi
 fi
 

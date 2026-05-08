@@ -9,6 +9,51 @@
      desktop. v352 inverted the redirect (phones run the full
      desktop UI now); v353 deletes the shell entirely. The
      redirect block here is gone with it. -->
+<!-- v353.1: register the service worker. Caches the app shell so
+     phones with patchy signal can still open Max and read trips
+     (trip bodies live in localStorage already, so they're available
+     offline once cached). On a new deploy, the SW activates and
+     posts a "sw-updated" message back; the listener below shows
+     a small toast prompting reload. -->
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('/sw.js').catch(function (err) {
+        // Registration failures shouldn't break the app — just log.
+        console.warn('[sw] registration failed:', err);
+      });
+      // Listen for the activate-time message that tells us a new SW
+      // is in control. Show a non-blocking toast that, when tapped,
+      // reloads the page to pick up the new bundle. We don't auto-
+      // reload because that's startling if the user is mid-edit.
+      navigator.serviceWorker.addEventListener('message', function (e) {
+        if (!e.data || e.data.type !== 'sw-updated') return;
+        // Don't show on the very first install (no previous SW means
+        // no "update" — just first cache).
+        if (!e.data.previous) {
+          // Heuristic: if there's no controller AND this is the
+          // first message, it's a fresh install, skip the toast.
+          if (!navigator.serviceWorker.controller) return;
+        }
+        var t = document.createElement('div');
+        t.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);' +
+          'background:#1a5fa8;color:#fff;padding:12px 18px;border-radius:8px;' +
+          'font:600 13px -apple-system,BlinkMacSystemFont,sans-serif;' +
+          'box-shadow:0 4px 18px rgba(0,0,0,0.25);z-index:9999;cursor:pointer;' +
+          'display:flex;align-items:center;gap:10px;max-width:calc(100vw - 40px);';
+        t.innerHTML = '<span>New version of Max available</span>' +
+          '<button style="background:#fff;color:#1a5fa8;border:none;padding:5px 10px;' +
+          'border-radius:5px;font:600 12px inherit;cursor:pointer;">Reload</button>';
+        t.onclick = function () { try { location.reload(); } catch (_) {} };
+        document.body.appendChild(t);
+        // Auto-dismiss after 30s if the user hasn't acted on it.
+        setTimeout(function () {
+          if (t.parentNode) t.parentNode.removeChild(t);
+        }, 30000);
+      });
+    });
+  }
+</script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pikaday/css/pikaday.css"/>
@@ -3362,7 +3407,25 @@ function localSave(){
     // Cross-tab sync within the same browser doesn't need it either,
     // because localStorage.setItem fires the storage event for other
     // tabs regardless of writeRaw vs. setItem.
-    localStorage.setItem("max-trip-"+_currentTripId,serializeTrip());
+    //
+    // v353.1: stamp the serialized envelope with __saved__ so
+    // sync.js's pullAll() correctly identifies freshly-edited local
+    // data as "newer than the last pull." Without this, the local
+    // envelope's __saved__ stayed at the timestamp of the LAST PULL
+    // — so during the 1.5s scheduleSave debounce window (between
+    // localSave and the actual PUT to server), if a poll fired,
+    // pullAll's `serverTimestamp > localTimestamp` check thought
+    // the server was newer (because local timestamp was minutes
+    // old) and clobbered the local edit. Setting __saved__ to now
+    // makes the "is local newer?" comparison correct.
+    var envelopeJson = serializeTrip();
+    try {
+      var env = JSON.parse(envelopeJson);
+      env.__saved__ = Date.now();
+      envelopeJson = JSON.stringify(env);
+    } catch (_) { /* if parse fails, fall back to unstamped — better
+                    than throwing out of localSave */ }
+    localStorage.setItem("max-trip-"+_currentTripId, envelopeJson);
   }catch(e){
     // Round CL.3: cache moved to IndexedDB so it no longer fights for
     // localStorage space. If we still hit QuotaExceededError it's because
@@ -3783,10 +3846,10 @@ function renderHomeScreen(){
   // v353: context-aware sync button labels. Both the home-screen
   // pill and the trip-view header icon now reflect the actual state
   // (signed in vs signed out), and the BYOK 🔑 button is hidden
-  // when signed in since the proxy means it's not needed. Defined
-  // as a helper rather than inlined so it can be re-run from the
-  // sign-in/out flows too — see the post-MaxSync wiring just below
-  // the function definition.
+  // when signed in since the proxy means it's not needed.
+  // v353.1: also wired up to MaxSync's max-sync-signedIn /
+  // max-sync-signedOut window events (see listener at end of file)
+  // so the buttons update on actual sign-in/out without polling.
   if (typeof updateSyncButtons === "function") updateSyncButtons();
 
   // Round DI: welcome card removed. Trip list and dashboard answer
@@ -20797,6 +20860,18 @@ function _wireItinDropTarget(listEl, dayId, slot, destId) {
     tgtDay.items.push(item);
     if (typeof autoSave === "function") autoSave();
     if (typeof drawDestMode === "function") drawDestMode(destId);
+    // v353.1: explicit conflict check on the target day. The redraw
+    // above already triggers _renderDestItineraryPane's
+    // setTimeout(checkTimeConflicts, 0), so this is technically
+    // redundant — but having it inline at the drop site means a
+    // future refactor of the render path can't accidentally drop
+    // the conflict surfacing for touch drops. The mobile-drag-drop
+    // polyfill goes through this same handler via a synthesized
+    // drop event, so this fires on phone too.
+    if (typeof checkTimeConflicts === "function") {
+      checkTimeConflicts(dest, dayId);
+      if (data.dayId !== dayId) checkTimeConflicts(dest, data.dayId);
+    }
   });
 }
 
@@ -23012,40 +23087,74 @@ function getDistricts(place,intent,dest){
     };
     document.body.appendChild(btn);
 
-    // v353: hide the toggle whenever a fullscreen overlay is up.
-    // Sets body[data-overlay="1"] when the home screen, picker, or
-    // candidate explorer is visible; the CSS rule below uses that
-    // attribute to suppress .mob-map-toggle. Cheap polling (every
-    // 250ms) is simpler than chaining MutationObservers on multiple
-    // elements with different visibility mechanics.
+    // v353.1: overlay visibility tracked via MutationObserver
+    // instead of a 4Hz busy-wait. The home-screen element always
+    // exists in the DOM and toggles via style.display, so we observe
+    // its style attribute. The picker (.tb-overlay) and candidate
+    // explorer (.ce-overlay) are appended/removed from the DOM, so
+    // we observe body's childList for those. Combined, every
+    // visibility transition fires recompute() exactly once — far
+    // cheaper than polling at 250ms intervals.
     function isShown(el) {
       if (!el) return false;
       var d = el.style.display;
-      // Convention in this codebase: explicit "block"/"flex" when shown,
-      // "none" or empty when hidden. Compute style only as a fallback.
       if (d === 'none' || d === '') {
         var cs = (window.getComputedStyle && getComputedStyle(el).display) || '';
         return cs !== 'none';
       }
       return true;
     }
-    function tickOverlay() {
+    function recompute() {
       var hs = document.getElementById('home-screen');
-      var tb = document.querySelector('.tb-overlay');     // picker (trip-builder)
-      var ce = document.querySelector('.ce-overlay');     // candidate explorer
+      var tb = document.querySelector('.tb-overlay');
+      var ce = document.querySelector('.ce-overlay');
       var anyOverlay = isShown(hs) || isShown(tb) || isShown(ce);
       if (anyOverlay) document.body.setAttribute('data-overlay', '1');
       else document.body.removeAttribute('data-overlay');
-      // v353: also catch sign-in/sign-out state changes here. Cheap
-      // idempotent call; updateSyncButtons sets text/color/title
-      // based on MaxSync.isSignedIn(), so re-running it after a
-      // sign-in modal closes (or a session expires) keeps the
-      // home-screen pill and trip-view icon labeled correctly
-      // without each call site needing to remember to update them.
-      if (typeof updateSyncButtons === 'function') updateSyncButtons();
     }
-    tickOverlay();
-    setInterval(tickOverlay, 250);
+    recompute();
+
+    // Observer A: home-screen style attribute (display: block / none).
+    var hs = document.getElementById('home-screen');
+    if (hs && typeof MutationObserver === 'function') {
+      new MutationObserver(recompute).observe(hs, {
+        attributes: true,
+        attributeFilter: ['style']
+      });
+    }
+    // Observer B: body childList — catches the picker and candidate
+    // explorer being appended/removed. Filtering to those classes in
+    // the callback keeps the work cheap; we don't actually need to
+    // inspect the mutation records since recompute reads current
+    // DOM state directly.
+    if (typeof MutationObserver === 'function') {
+      new MutationObserver(function(mutations) {
+        for (var i = 0; i < mutations.length; i++) {
+          var m = mutations[i];
+          var nodes = (m.addedNodes && m.addedNodes.length) ? m.addedNodes : m.removedNodes;
+          for (var j = 0; j < nodes.length; j++) {
+            var n = nodes[j];
+            if (n && n.classList && (n.classList.contains('tb-overlay') ||
+                                     n.classList.contains('ce-overlay'))) {
+              recompute();
+              return;
+            }
+          }
+        }
+      }).observe(document.body, { childList: true });
+    }
+
+    // v353.1: hook MaxSync sign-in/out events. updateSyncButtons
+    // updates the home-screen pill ("Sign in" / "✓ Signed in"), the
+    // trip-view ⇄ icon's title and opacity, and toggles the 🔑
+    // BYOK button visibility. Firing these from explicit events
+    // instead of polling means the UI updates exactly once per
+    // state change — no redundant work, no laggy reactivity.
+    var onSyncChange = function () {
+      if (typeof updateSyncButtons === 'function') updateSyncButtons();
+    };
+    window.addEventListener('max-sync-signedIn', onSyncChange);
+    window.addEventListener('max-sync-signedOut', onSyncChange);
   })();
   </script>
 </body>

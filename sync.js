@@ -163,7 +163,25 @@
     });
     setToken(data.token);
     setEmail(data.user && data.user.email);
+    _emitMaxSyncEvent('signedIn');
     return data;
+  }
+
+  // v353.1: dispatch a window event whenever the sign-in state
+  // changes. Listeners (e.g., updateSyncButtons in index.html)
+  // can hook these instead of polling MaxSync.isSignedIn() on a
+  // timer. Using a custom event on window keeps the API surface
+  // small — no MaxSync.on(...) bus to maintain.
+  function _emitMaxSyncEvent(name) {
+    try {
+      if (typeof window === 'undefined' || typeof CustomEvent !== 'function') return;
+      window.dispatchEvent(new CustomEvent('max-sync-' + name, {
+        detail: {
+          signedIn: isSignedIn(),
+          email: getEmail() || null,
+        },
+      }));
+    } catch (_) { /* event dispatch failures are not fatal */ }
   }
 
   // Legacy alias — old callers expect signIn(email) to log in
@@ -191,6 +209,10 @@
       // Clear the hash so the URL is clean.
       try { history.replaceState(null, '', location.pathname + location.search); }
       catch (_) { location.hash = ''; }
+      // v353.1: fire the same signedIn event the dev-login path does
+      // so listeners (sync buttons, banners) update for the magic-
+      // link path too.
+      _emitMaxSyncEvent('signedIn');
       return true;
     } catch (_) { return false; }
   }
@@ -198,6 +220,7 @@
   function signOut() {
     setToken(null);
     setEmail(null);
+    _emitMaxSyncEvent('signedOut');
   }
 
   // ── Trip endpoints ─────────────────────────────────────────
