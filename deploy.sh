@@ -21,6 +21,7 @@
 #   bash deploy.sh --commit --message="round X.Y"     # custom commit message
 #   bash deploy.sh --dry                              # show substitution, no deploy
 #   bash deploy.sh --keep-stamp                       # don't revert ?v= after deploy
+#   bash deploy.sh --skip-tests                       # bypass Playwright (emergency only)
 #
 # Combine flags freely:
 #   bash deploy.sh --commit --server --message="ship FN.7.8"
@@ -54,6 +55,7 @@ DRY_RUN=0
 DEPLOY_SERVER=0
 COMMIT_MODE=0
 KEEP_STAMP=0
+SKIP_TESTS=0
 COMMIT_MESSAGE=""
 
 for arg in "$@"; do
@@ -62,6 +64,7 @@ for arg in "$@"; do
     --server)      DEPLOY_SERVER=1 ;;
     --commit)      COMMIT_MODE=1 ;;
     --keep-stamp)  KEEP_STAMP=1 ;;
+    --skip-tests)  SKIP_TESTS=1 ;;
     --message=*)   COMMIT_MESSAGE="${arg#--message=}" ;;
     *)             echo "Unknown arg: $arg" >&2; exit 1 ;;
   esac
@@ -131,7 +134,35 @@ if [ "$DRY_RUN" -eq 1 ]; then
   exit 0
 fi
 
-# Step 2: optional git commit + push, BEFORE deploy.
+# Step 2: run Playwright tests against the substituted source.
+# The tests boot Chromium against a Python static server in
+# tests/playwright/playwright.config.js, so they test exactly the
+# bytes we're about to deploy. Failing tests block the deploy.
+#
+# --skip-tests bypasses this for emergency hotfixes when you've
+# reviewed the failures and know they're acceptable. Use sparingly;
+# the whole point of this gate is that it's never bypassed.
+if [ "$SKIP_TESTS" -eq 0 ]; then
+  if [ ! -d tests/playwright/node_modules ]; then
+    echo "✗ Playwright deps not installed." >&2
+    echo "  Run once:" >&2
+    echo "    cd tests/playwright && npm install && npm run install:browsers" >&2
+    echo "  Then retry. (Or use --skip-tests to bypass for this deploy.)" >&2
+    exit 1
+  fi
+  echo "→ running Playwright tests"
+  if ! ( cd tests/playwright && npm test --silent ); then
+    echo "" >&2
+    echo "✗ tests failed — deploy aborted." >&2
+    echo "  Fix the failures, or use --skip-tests if you've reviewed and accepted them." >&2
+    exit 1
+  fi
+  echo "→ tests passed"
+else
+  echo "→ skipping tests (--skip-tests)"
+fi
+
+# Step 3: optional git commit + push, BEFORE deploy.
 # Reverting the substitution first keeps git history clean of the
 # timestamp; we re-apply it for the deploy. The order is:
 #   substitute → revert → commit → push → re-substitute → deploy
@@ -167,11 +198,11 @@ if [ "$COMMIT_MODE" -eq 1 ]; then
   fi
 fi
 
-# Step 3: deploy frontend to Cloudflare Pages.
+# Step 4: deploy frontend to Cloudflare Pages.
 echo "→ wrangler pages deploy ."
 wrangler pages deploy . --project-name=max-app --commit-dirty=true
 
-# Step 4 (optional): deploy worker.
+# Step 5 (optional): deploy worker.
 if [ "$DEPLOY_SERVER" -eq 1 ]; then
   echo "→ wrangler deploy (server)"
   ( cd server && wrangler deploy )
