@@ -32,20 +32,34 @@ export async function sendEmail(
     return;
   }
 
-  const resp = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: 'Bearer ' + apiKey,
-    },
-    body: JSON.stringify({
-      from,
-      to: opts.to,
-      subject: opts.subject,
-      html: opts.html,
-      text: opts.text,
-    }),
-  });
+  // 8-second timeout. If Resend hangs (or our key is bad and they
+  // stall the connection), we want to fail fast so the magic-link
+  // route falls back to returning the directLink. A hung fetch with
+  // no abort signal would burn the worker's wall budget and trip
+  // Cloudflare's "code hung" cancellation — which surfaces as
+  // "Server unreachable" on the client.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 8000);
+  let resp: Response;
+  try {
+    resp = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + apiKey,
+      },
+      body: JSON.stringify({
+        from,
+        to: opts.to,
+        subject: opts.subject,
+        html: opts.html,
+        text: opts.text,
+      }),
+      signal: ctrl.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!resp.ok) {
     const detail = await resp.text().catch(() => '');
