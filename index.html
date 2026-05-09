@@ -108,16 +108,21 @@
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#e8e8e8;color:#111;font-size:14px;line-height:1.6;}
 .app{display:flex;height:100vh;}
 /* v353.2: kill the 1-pixel tile gaps that show as a lat/lon-style
-   grid covering Leaflet maps. Tiles are 256×256; on certain zooms
-   and DPI ratios the seams between adjacent tiles render visibly,
-   especially over satellite imagery. Forcing each tile to 257px
-   gives adjacent tiles a 1-pixel overlap that hides the seam.
-   GPU-promote the tile container to keep sub-pixel positioning
-   from wobbling between integer boundaries. Same fix as the
-   larger-map popup; this version applies to every Leaflet map on
-   the main page (trip-overview, dest-mode, picker, etc.). */
-.leaflet-container .leaflet-tile-pane img{width:257px !important;height:257px !important;}
-.leaflet-tile-container{will-change:transform;}
+   grid covering Leaflet maps. The visible seams come from sub-pixel
+   positioning rounding on retina + certain zoom levels. Earlier I
+   tried `width:257px !important` to force overlap, but that broke
+   retina rendering where Leaflet ships 512×512 detail tiles —
+   shrinking those to 257 made them either tiny or invisible (which
+   is why the larger-map popup went blank).
+   The right fix is to GPU-promote the whole tile pane so every tile
+   inside it uses sub-pixel-correct compositing. Doesn't touch tile
+   sizing, doesn't override Leaflet's own per-tile transforms. */
+.leaflet-container .leaflet-tile-pane{
+  transform:translate3d(0,0,0);
+  -webkit-transform:translate3d(0,0,0);
+  -webkit-backface-visibility:hidden;
+  backface-visibility:hidden;
+}
 /* v294.7: bump default panel width (was 340px) so the destination
    list reads comfortably without pinching, and add native CSS
    `resize: horizontal` so the user can drag the right edge to give
@@ -7940,7 +7945,11 @@ function openPlacePickerMapModal(){
     +     'if(typeof L==="undefined")return;'
     +     'if(!map){'
     +       'map=L.map("map",{zoomControl:true,scrollWheelZoom:true,attributionControl:false}).setView([46.8,8.2],6);'
-    +       'L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:18}).addTo(map);'
+    /* v353.2: this popup map (place-picker "Open in new window")
+       was on Carto vector tiles. Switched to satellite to match
+       the rest of the app. */
+    +       'L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{attribution:"© Esri",maxZoom:19}).addTo(map);'
+    +       'L.tileLayer("https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png",{opacity:1.0,maxZoom:19}).addTo(map);'
     +     '}'
     +     'var pts=getState();'
     +     'if(!pts){document.getElementById("ttl").textContent="Map — parent window closed";return;}'
@@ -8108,16 +8117,19 @@ function openTripHeroMapWindow(){
     + '#routeBtn.off:hover{background:#fafafa;}'
     + '#map{position:absolute;top:56px;left:0;right:0;bottom:0;background:#eaf0ed;}'
     /* v353.2: kill the 1-pixel tile gaps that read as a lat/lon
-       grid covering the whole map. Leaflet renders 256x256 tiles
-       and on certain zooms / DPI ratios the seams between
-       adjacent tiles are visible — especially over the dark
-       satellite imagery. Forcing each tile to 257x257 gives
-       adjacent tiles a 1-pixel overlap that hides the seam. */
-    + '.leaflet-container .leaflet-tile-pane img{width:257px !important;height:257px !important;}'
-    /* GPU-promote the tile container so sub-pixel positioning
-       doesn't wobble between integer pixel boundaries — another
-       contributor to the visible grid on retina displays. */
-    + '.leaflet-tile-container{will-change:transform;}'
+       grid covering the whole map. The visible seams come from
+       sub-pixel positioning rounding on retina + certain zooms.
+       Earlier I tried `width:257px !important` to force overlap,
+       but that broke retina rendering — Leaflet ships 512×512
+       detail tiles and shrinking those to 257 made the popup go
+       blank. Using GPU promotion of the tile pane instead — every
+       tile composites sub-pixel-correctly without touching size. */
+    + '.leaflet-container .leaflet-tile-pane{'
+    +   'transform:translate3d(0,0,0);'
+    +   '-webkit-transform:translate3d(0,0,0);'
+    +   '-webkit-backface-visibility:hidden;'
+    +   'backface-visibility:hidden;'
+    + '}'
     // Round FA: stale-data toast. Shown for ~2s before the popup
     // auto-closes when the opener posts a "maxTripStale" message.
     // Centered on the header for visibility above the map.
@@ -11491,7 +11503,12 @@ function showCandidateExplorer(cands, editMode){
       // No region to look up — remove the mask so it doesn't linger.
       if (_mapMask.parentNode) _mapMask.parentNode.removeChild(_mapMask);
     }
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:19}).addTo(_ceMap);
+    // v353.2: candidate-explorer ("Building your trip…") map now uses
+    // satellite imagery to match the rest of the app. Same Esri
+    // World_Imagery + Carto light_only_labels stack used by the
+    // trip-overview map, larger-map popup, and place-picker map.
+    L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{attribution:"© Esri",maxZoom:19}).addTo(_ceMap);
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png",{opacity:1.0,maxZoom:19}).addTo(_ceMap);
     // Drop entry-point pins on the big map (airports, rail, sea, bus) so users
     // can pick where to arrive/depart once they see the region.
     if (_tb && _tb.region) _ensureEntryPointsForRegion(_tb.region);
