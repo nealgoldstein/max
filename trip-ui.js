@@ -1010,7 +1010,20 @@
     if (expanded) caretSpan.style.transform = "rotate(90deg)";
     var labelSpan = document.createElement("span");
     labelSpan.style.cssText = "flex:1;";
-    labelSpan.innerHTML = "🔧 <strong>" + summary.totalCount + "</strong> suggestion" + (summary.totalCount !== 1 ? "s" : "") + " to review (keep, edit, or skip)"
+    // v353.2: header reworded. Was "N suggestions to review" which
+    // (a) conflicts with the Explore tab's actual "suggestions"
+    // section (LLM-generated places to consider) and (b) collapsed
+    // two unrelated things — placeholder items vs empty days —
+    // into one ambiguous count. Now shows the breakdown explicitly.
+    var tCount = 0, eCount = 0;
+    (summary.items || []).forEach(function (it) {
+      if (it.kind === 'tentative') tCount += (it.count || 0);
+      else if (it.kind === 'emptyDay') eCount += 1;
+    });
+    var bits = [];
+    if (tCount) bits.push('<strong>' + tCount + '</strong> placeholder' + (tCount !== 1 ? 's' : ''));
+    if (eCount) bits.push('<strong>' + eCount + '</strong> empty day' + (eCount !== 1 ? 's' : ''));
+    labelSpan.innerHTML = '🔧 ' + bits.join(' · ') + ' to decide'
       + (anyGenerating ? ' <span style="font-weight:500;color:#a89055;font-style:italic;font-size:11px;">(still gathering…)</span>' : '');
     var hintSpan = document.createElement("span");
     hintSpan.style.cssText = "font-size:10px;font-weight:500;color:#a89055;font-style:italic;";
@@ -1031,13 +1044,46 @@
       line.style.cssText = "display:block;width:100%;text-align:left;padding:7px 10px;margin-bottom:4px;font-family:inherit;font-size:11.5px;color:#5a4520;background:#fff;border:1px solid #ead7a3;border-radius:5px;cursor:pointer;line-height:1.45;";
       line.onmouseover = function () { line.style.background = "#fdf3cf"; };
       line.onmouseout  = function () { line.style.background = "#fff"; };
+      // v353.2: each line leads with a date reference so the panel
+      // reads like a calendar — chronological order (already in the
+      // shape returned by summarizeDecisionsDeferred), date-first
+      // entries, dest name as secondary context.
+      //
+      // Tentative items are per-dest aggregates (no specific day),
+      // so we use the dest's date range as the lead. Empty days
+      // already carry a day label which is usually "Jul 8" or
+      // similar (set in mkDay), perfect for the calendar voice.
       var text;
+      var _esc = function (s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;'); };
+      // Pull date context from the trip when the engine summary
+      // doesn't include it directly.
+      var _destObj = null;
+      if (trip && Array.isArray(trip.destinations)) {
+        for (var di = 0; di < trip.destinations.length; di++) {
+          if (trip.destinations[di] && trip.destinations[di].id === item.destId) {
+            _destObj = trip.destinations[di];
+            break;
+          }
+        }
+      }
+      var fmtD = global.fmtD;
+      function _destRange(d) {
+        if (!d || !fmtD) return '';
+        if (d.dateFrom && d.dateTo && d.dateFrom !== d.dateTo) {
+          return fmtD(d.dateFrom) + ' – ' + fmtD(d.dateTo);
+        }
+        if (d.dateFrom) return fmtD(d.dateFrom);
+        return '';
+      }
       if (item.kind === "tentative") {
-        text = "<strong>" + item.count + "</strong> placeholder" + (item.count !== 1 ? "s" : "")
-             + " in <strong>" + (item.destPlace || "this destination").replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</strong> need a yes/no";
+        var range = _destRange(_destObj);
+        text = (range ? "<strong>" + _esc(range) + "</strong> · " : "")
+             + _esc(item.destPlace || "this destination") + ' — '
+             + "<strong>" + item.count + "</strong> placeholder"
+             + (item.count !== 1 ? "s" : "") + " to keep or skip";
       } else if (item.kind === "emptyDay") {
-        text = "<strong>" + (item.dayLbl || "A day").replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</strong> in <strong>"
-             + (item.destPlace || "this destination").replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</strong> — nothing planned yet";
+        text = "<strong>" + _esc(item.dayLbl || "a day") + "</strong> · "
+             + _esc(item.destPlace || "this destination") + ' — empty';
       }
       line.innerHTML = (text || "") + " <span style=\"color:#a89055;font-size:10px;\">→</span>";
       (function (it) {
