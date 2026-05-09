@@ -6393,7 +6393,16 @@ function showAIDisclaimer(onContinue) {
       '</ul>' +
       '<p style="margin:0 0 12px;">Treat what Max tells you as a first pass. Verify anything you\'re going to book against a primary source.</p>' +
       '<p style="margin:0 0 12px;">What you can rely on: a fast overview good enough to help you decide whether somewhere is worth your time. After that, the research is yours.</p>' +
-      '<p style="margin:0;"><span id="ai-disclaimer-howitworks" style="color:#1a5fa8;cursor:pointer;text-decoration:underline;">Read more in How it works →</span></p>' +
+      '<p style="margin:0;"><span id="ai-disclaimer-howitworks" style="color:#1a5fa8;cursor:pointer;text-decoration:underline;">Read more about how Max works ↓</span></p>' +
+      '<div id="ai-disclaimer-howitworks-body" style="display:none;margin-top:14px;padding-top:12px;border-top:1px solid #eee;">' +
+        '<p style="margin:0 0 12px;">I traveled continuously for almost five years — sold the house and cars, gave most of what we owned to charity, lived out of a couple of bags. Until COVID. Since the world opened again, several trips a year. I\'ve gotten reasonably good at planning.</p>' +
+        '<p style="margin:0 0 12px;">The problem was never the planning itself. The problem was the tools. A spreadsheet for logistics. A text document and Google Maps for what we\'d gathered. A calendar for deadlines. Reminders for to-dos. An endless tab graveyard of bookmarks. Five tools, none of them speaking to each other.</p>' +
+        '<p style="margin:0 0 12px;">When AI got widely usable, I was planning a two-month trip. I built Max to consolidate that mess.</p>' +
+        '<p style="margin:0 0 12px;"><strong>How Max thinks about a trip.</strong> A trip is a scaffold, not a script. Max gives you a starting plan to react to — destinations, durations, candidate sights — and you adjust as you learn. The point isn\'t to be right out of the gate; the point is to give you something concrete enough to push back against.</p>' +
+        '<p style="margin:0 0 12px;"><strong>Destinations vs. sights.</strong> A destination is somewhere you sleep. A sight is somewhere you visit during the day. If a place doesn\'t have lodging within reasonable distance (~5 km), Max routes it as a day trip from the nearest city, not a destination of its own. This is why Diamond Beach is a sight near Höfn, not a destination.</p>' +
+        '<p style="margin:0 0 12px;"><strong>Pace.</strong> The hours/day and sights/day numbers you set up front shape how Max allocates the time at each destination. They\'re not hard rules — Max nudges, doesn\'t enforce.</p>' +
+        '<p style="margin:0;"><strong>Sync and the source of truth.</strong> Trips and your top-level preferences sync between devices automatically. UI state that\'s purely about the device (panel widths, expanded/collapsed sections) stays local.</p>' +
+      '</div>' +
     '</div>' +
     '<div style="padding:14px 22px;border-top:1px solid #eee;flex-shrink:0;">' +
       '<button id="ai-disclaimer-continue" type="button" style="width:100%;padding:10px;font-size:13px;font-weight:600;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;">Got it — let\'s plan a trip →</button>' +
@@ -6407,26 +6416,30 @@ function showAIDisclaimer(onContinue) {
     if (typeof onContinue === "function") onContinue();
   }
   document.getElementById("ai-disclaimer-continue").onclick = dismiss;
-  // "Read more in How it works" link — closes this disclaimer and
-  // advances to the picker (same as the Got-it button), then opens
-  // the longer About Max essay over the picker. The user reads,
-  // closes About Max, and is in the picker ready to plan. Avoids
-  // stacking the two overlays — earlier attempts to show About Max
-  // OVER the disclaimer ran into z-index/stacking-context oddities
-  // on iOS Safari that intermittently left About Max invisible.
+  // "Read more" link — expands the longer essay inline within this
+  // same modal (no second overlay). Earlier attempts to open the
+  // About Max overlay on top ran into z-index / stacking-context
+  // issues on iOS Safari and were unreliable. Inline expansion is
+  // bulletproof: same modal, scrolls naturally.
   var hiwLink = document.getElementById("ai-disclaimer-howitworks");
-  if (hiwLink) {
-    var openAbout = function (e) {
+  var hiwBody = document.getElementById("ai-disclaimer-howitworks-body");
+  if (hiwLink && hiwBody) {
+    hiwLink.addEventListener("click", function (e) {
       if (e) { e.preventDefault(); e.stopPropagation(); }
-      // Dismiss disclaimer + run onContinue (advances to picker).
-      dismiss();
-      // Defer showAboutMax one tick so the picker has time to mount;
-      // showAboutMax will then sit cleanly over the picker.
-      setTimeout(function () {
-        if (typeof showAboutMax === "function") showAboutMax();
-      }, 50);
-    };
-    hiwLink.addEventListener("click", openAbout);
+      var hidden = hiwBody.style.display === "none";
+      hiwBody.style.display = hidden ? "block" : "none";
+      hiwLink.textContent = hidden
+        ? "Hide ↑"
+        : "Read more about how Max works ↓";
+      if (hidden) {
+        // Scroll the newly-revealed content into view inside the
+        // modal's overflow container.
+        setTimeout(function () {
+          try { hiwBody.scrollIntoView({ behavior: "smooth", block: "start" }); }
+          catch (_) {}
+        }, 50);
+      }
+    });
   }
   // Allow Escape or click-outside to dismiss too.
   document.addEventListener("keydown", function escHandler(e) {
