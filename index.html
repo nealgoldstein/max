@@ -4155,7 +4155,41 @@ function renderHomeScreen(){
     // Round DI.2: show all trips; the .trip-cards container is
     // scrollable (max-height:280px;overflow-y:auto in CSS) so a long
     // list collapses naturally without a "show all" toggle.
-    _tripsIndex.slice().reverse().forEach(function(entry){
+    //
+    // v353.2: sort chronologically — "what's happening soon" floats
+    // to the top, past trips sink to the bottom. Specifically:
+    //   1. In-progress trips first (start ≤ today ≤ end)
+    //   2. Upcoming next, soonest first
+    //   3. Untimed trips (no startDate yet — still being planned)
+    //   4. Past, most recently completed first
+    // Was just reverse() of save order, which surfaced "the trip I
+    // most recently edited" instead of "the trip I'm about to take."
+    var _todayIso = (function(){
+      var d = new Date();
+      var m = String(d.getMonth() + 1).padStart(2, '0');
+      var dd = String(d.getDate()).padStart(2, '0');
+      return d.getFullYear() + '-' + m + '-' + dd;
+    })();
+    function _bucket(entry) {
+      // 0=in-progress, 1=upcoming, 2=untimed, 3=past
+      if (!entry.startDate) return 2;
+      if (entry.endDate && entry.endDate < _todayIso) return 3;
+      if (entry.startDate <= _todayIso && (!entry.endDate || _todayIso <= entry.endDate)) return 0;
+      return 1;
+    }
+    _tripsIndex.slice().sort(function(a, b){
+      var ba = _bucket(a), bb = _bucket(b);
+      if (ba !== bb) return ba - bb;
+      // Within a bucket:
+      //   in-progress + upcoming + untimed → ascending by startDate
+      //     (soonest first; untimed compares as "" which falls to end
+      //      among themselves, doesn't matter)
+      //   past → descending by endDate (most recent past first)
+      if (ba === 3) {
+        return (b.endDate || '').localeCompare(a.endDate || '');
+      }
+      return (a.startDate || '').localeCompare(b.startDate || '');
+    }).forEach(function(entry){
       var card=document.createElement("div"); card.className="trip-card";
       var info=document.createElement("div"); info.style.cssText="flex:1;min-width:0;";
       // Round CK.2: countdown chip on the card if the trip is upcoming.
@@ -8041,6 +8075,17 @@ function openTripHeroMapWindow(){
     + '#closeBtn:hover{background:#0e3a6a;}'
     + '#closeBtn:active{transform:scale(0.97);}'
     + '#map{position:absolute;top:56px;left:0;right:0;bottom:0;background:#eaf0ed;}'
+    /* v353.2: kill the 1-pixel tile gaps that read as a lat/lon
+       grid covering the whole map. Leaflet renders 256x256 tiles
+       and on certain zooms / DPI ratios the seams between
+       adjacent tiles are visible — especially over the dark
+       satellite imagery. Forcing each tile to 257x257 gives
+       adjacent tiles a 1-pixel overlap that hides the seam. */
+    + '.leaflet-container .leaflet-tile-pane img{width:257px !important;height:257px !important;}'
+    /* GPU-promote the tile container so sub-pixel positioning
+       doesn't wobble between integer pixel boundaries — another
+       contributor to the visible grid on retina displays. */
+    + '.leaflet-tile-container{will-change:transform;}'
     // Round FA: stale-data toast. Shown for ~2s before the popup
     // auto-closes when the opener posts a "maxTripStale" message.
     // Centered on the header for visibility above the map.
@@ -17018,7 +17063,16 @@ function updateMainMap(){
   var routeBtn = document.getElementById('map-route-btn');
   var largerBtn = document.getElementById('map-larger-btn');
   if(_leftMode==="trip"){
-    setMapStyle('vector');
+    // v353.2: trip-overview map now uses satellite to match the
+    // "View larger →" popup (which has always been satellite via
+    // World_Imagery tiles). The two views were inconsistent —
+    // popup was satellite, inline was vector — and the user
+    // expectation is that the popup is just a bigger version of
+    // the same map. Setting both to satellite makes the
+    // relationship obvious. Dest-mode keeps its existing vector
+    // default (separate decision; satellite is loud at
+    // street-level zooms where dest-mode lives).
+    setMapStyle('satellite');
     var styleBtn=document.getElementById('map-style-btn');
     if(styleBtn) styleBtn.style.display='none';
     buildMainLegend("trip");
