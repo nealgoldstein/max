@@ -522,6 +522,16 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .undo-btn:hover{background:#555;}
 /* Main map layer toggles */
 .mlt-panel{position:absolute;top:8px;right:8px;z-index:500;background:rgba(255,255,255,.95);border:1px solid #ddd;border-radius:8px;padding:7px 8px;box-shadow:0 2px 8px rgba(0,0,0,.1);display:none;max-width:160px;}
+/* v353.2: collapsed state — show just the title pill, hide toggle
+   buttons. Tap the title pill to expand. State is persisted in
+   localStorage (max-mlt-collapsed). On phones the panel was eating
+   ~25% of the visible map area; collapsing drops it to a thin chip. */
+.mlt-panel.mlt-collapsed{padding:4px 8px;max-width:none;}
+.mlt-panel.mlt-collapsed .mlt-btn{display:none;}
+.mlt-panel.mlt-collapsed .mlt-title{margin-bottom:0;cursor:pointer;}
+.mlt-panel .mlt-title{cursor:pointer;user-select:none;display:flex;align-items:center;gap:5px;}
+.mlt-panel .mlt-title .mlt-caret{font-size:8px;color:#bbb;display:inline-block;transition:transform 0.12s ease;}
+.mlt-panel.mlt-collapsed .mlt-title .mlt-caret{transform:rotate(-90deg);}
 /* Day selector */
 #map-day-btn{position:absolute;top:8px;right:8px;z-index:499;background:#fff;border:1px solid #ddd;border-radius:8px;padding:5px 10px 5px 8px;box-shadow:0 2px 8px rgba(0,0,0,.12);font-size:11px;font-weight:600;color:#111;cursor:pointer;font-family:inherit;display:none;align-items:center;gap:5px;white-space:nowrap;}
 #map-day-btn:hover{border-color:#999;}
@@ -16017,7 +16027,39 @@ function renderMainLayerToggles(mode){
   var panel=g("mlt-panel"); if(!panel)return;
   if(mode==="trip"){panel.style.display="none";return;}
   panel.style.display="block";
-  panel.innerHTML="<div class='mlt-title'>Map layers</div>";
+  // v353.2: collapsed-by-default on phones (where the panel covered
+  // ~25% of the map), expanded on desktop. User's choice persists
+  // via localStorage so the next dest-mode entry remembers.
+  var collapsed;
+  try {
+    var saved = localStorage.getItem('max-mlt-collapsed');
+    if (saved === '1') collapsed = true;
+    else if (saved === '0') collapsed = false;
+    else {
+      // No saved choice — default by viewport. matchMedia is the
+      // honest "is this a small screen" check; lines up with the
+      // @media(max-width:700px) responsive breakpoint elsewhere.
+      collapsed = window.matchMedia &&
+        window.matchMedia('(max-width: 700px)').matches;
+    }
+  } catch (_) { collapsed = false; }
+  panel.classList.toggle('mlt-collapsed', !!collapsed);
+
+  panel.innerHTML = "";
+  // Clickable title acts as the collapse/expand toggle. Caret
+  // glyph rotates via CSS based on the .mlt-collapsed class.
+  var title = document.createElement('div');
+  title.className = 'mlt-title';
+  title.innerHTML = '<span class="mlt-caret">▾</span><span>Map layers</span>';
+  title.onclick = function () {
+    var nowCollapsed = !panel.classList.contains('mlt-collapsed');
+    panel.classList.toggle('mlt-collapsed', nowCollapsed);
+    try { localStorage.setItem('max-mlt-collapsed', nowCollapsed ? '1' : '0'); } catch (_) {}
+    // Days-button position is anchored relative to the panel's
+    // bottom edge — recompute when the panel size changes.
+    if (typeof updateDayBtnPosition === 'function') updateDayBtnPosition();
+  };
+  panel.appendChild(title);
   MAIN_LAYER_DEFS.forEach(function(def){
     var btn=document.createElement("button");
     btn.className="mlt-btn"+(_mainActiveLayers[def.key]?" on":"");
