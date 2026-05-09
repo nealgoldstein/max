@@ -6481,12 +6481,14 @@ function showWelcomeOnboarding(onContinue) {
   // short" traveler does 8 sights × 0.75 hrs each = 6 hrs. Same
   // total time, very different days. Both go to the LLM.
   var startingPace = 6;
-  var startingSights = 4;
+  var startingSights = 2;
   try {
     var savedP = (window.MaxDB && MaxDB.prefs) ? MaxDB.prefs.get("paceHours", 6) : 6;
     if (isFinite(savedP) && savedP >= 2 && savedP <= 10) startingPace = savedP;
-    var savedS = (window.MaxDB && MaxDB.prefs) ? MaxDB.prefs.get("sightsPerDay", 4) : 4;
-    if (isFinite(savedS) && savedS >= 2 && savedS <= 10) startingSights = savedS;
+    // v353.4: sightsPerDay now means "max big (2+ hr) sights per day".
+    // Range 1-6 to match the picker brief's input range.
+    var savedS = (window.MaxDB && MaxDB.prefs) ? MaxDB.prefs.get("sightsPerDay", 2) : 2;
+    if (isFinite(savedS) && savedS >= 1 && savedS <= 6) startingSights = savedS;
   } catch (_) {}
 
   var ov = document.createElement("div");
@@ -6522,13 +6524,13 @@ function showWelcomeOnboarding(onContinue) {
         '<div style="font-size:13px;color:#666;">hrs/day (2–10)</div>' +
       '</div>' +
       '<p style="margin:0 0 16px;font-size:12px;color:#666;line-height:1.55;">Max will use about <span id="welcome-pace-readout-2">' + startingPace + '</span> hours of sightseeing on a full day (lighter on travel days, fuller in the middle).</p>' +
-      '<p style="margin:0 0 8px;font-weight:600;font-size:12.5px;">Number of sights per day</p>' +
-      '<p style="margin:0 0 8px;font-size:12.5px;">A different question from hours. "Few but deep" (3 sights, 2 hrs each) and "lots but short" (8 quick stops) can both fill the same day.</p>' +
+      '<p style="margin:0 0 8px;font-weight:600;font-size:12.5px;">Max big sights per day</p>' +
+      '<p style="margin:0 0 8px;font-size:12.5px;">Big sights = the 2+ hour ones (a major museum, a mountain railway, a long hike). Capping how many you do per day keeps the trip from turning into a forced march.</p>' +
       '<div style="display:flex;align-items:center;gap:10px;margin:0 0 8px;">' +
-        '<input type="number" id="welcome-sights-slider" min="2" max="10" step="1" value="' + startingSights + '" inputmode="numeric" style="width:80px;font-size:14px;font-weight:700;padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-family:inherit;text-align:center;">' +
-        '<div style="font-size:13px;color:#666;">sights/day (2–10)</div>' +
+        '<input type="number" id="welcome-sights-slider" min="1" max="6" step="1" value="' + startingSights + '" inputmode="numeric" style="width:80px;font-size:14px;font-weight:700;padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-family:inherit;text-align:center;">' +
+        '<div style="font-size:13px;color:#666;">big sights/day (1–6)</div>' +
       '</div>' +
-      '<p style="margin:0 0 12px;font-size:12px;color:#666;line-height:1.55;">Max will aim for about <span id="welcome-sights-readout-2">' + startingSights + '</span> sights on a full day.</p>' +
+      '<p style="margin:0 0 12px;font-size:12px;color:#666;line-height:1.55;">Max won\'t schedule more than <span id="welcome-sights-readout-2">' + startingSights + '</span> big sight(s) on any one day.</p>' +
       '<p style="margin:0;font-size:11.5px;color:#888;line-height:1.55;">A note on accuracy: there\'s no travel-time database behind this. If the LLM is wrong about a sight\'s duration, the allocation will be off. The prompt assumes a "committed traveler." If you\'re a slow museum-goer, lean on hours; if you\'re "look-and-go," lean on sights count.</p>' +
     '</div>' +
     '<div style="padding:14px 22px;border-top:1px solid #eee;flex-shrink:0;">' +
@@ -6564,7 +6566,7 @@ function showWelcomeOnboarding(onContinue) {
     var paceVal = parseInt(slider && slider.value, 10);
     if (!isFinite(paceVal) || paceVal < 2 || paceVal > 10) paceVal = 6;
     var sightsVal = parseInt(sightsSlider && sightsSlider.value, 10);
-    if (!isFinite(sightsVal) || sightsVal < 2 || sightsVal > 10) sightsVal = 4;
+    if (!isFinite(sightsVal) || sightsVal < 1 || sightsVal > 6) sightsVal = 2;
     try {
       // v353.2: pace lives in the unified prefs blob; max-onboarded
       // stays as a standalone flag (it's a one-time UI marker, not
@@ -13719,14 +13721,15 @@ function _defaultHoursPerDay(){
   return 6;
 }
 function _defaultMaxBigSightsPerDay(){
-  // "Big" sights (2+ hrs) are a subset of total sights. If the
-  // user said e.g. sightsPerDay=4, half-rounded-up = 2 big sights
-  // is a sensible cap. Constrain to [1,6] to match the input range.
+  // v353.4: direct mapping. Welcome's "sights per day" pref IS the
+  // max big sights cap. Earlier ceil(sp/2) derivation was confusing
+  // — changing the pref by 1 often looked like "nothing changed"
+  // because adjacent values rounded to the same number. Constrained
+  // to [1,6] to match the picker brief's input range.
   try {
     var sp = (window.MaxDB && MaxDB.prefs) ? parseInt(MaxDB.prefs.get("sightsPerDay"), 10) : NaN;
-    if (isFinite(sp) && sp >= 2 && sp <= 10) {
-      return Math.max(1, Math.min(6, Math.ceil(sp / 2)));
-    }
+    if (isFinite(sp) && sp >= 1 && sp <= 6) return sp;
+    if (isFinite(sp) && sp > 6) return 6;
   } catch (_) {}
   return 2;
 }
@@ -13754,11 +13757,10 @@ function _paceDirective(mode){
         "assuming a committed traveler. ";
     }
     var sp = (window.MaxDB && MaxDB.prefs) ? parseInt(MaxDB.prefs.get("sightsPerDay"), 10) : NaN;
-    if (isFinite(sp) && sp >= 2 && sp <= 10) {
-      hourPrefix += "SIGHTS-PER-DAY: The traveler prefers about " + sp +
-        " sights on a full day (fewer on travel days). This shapes the breadth/depth tradeoff: " +
-        "if low (e.g., 3-4), prefer fewer but longer/deeper experiences; if high (e.g., 7-9), " +
-        "prefer more but shorter/quicker stops. Use this together with the hours budget. ";
+    if (isFinite(sp) && sp >= 1 && sp <= 6) {
+      hourPrefix += "MAX-BIG-SIGHTS-PER-DAY: The traveler caps big (2+ hour) sights at " + sp +
+        " per day. A 'big' sight is a major museum, a long hike, a mountain railway — anything that anchors a day. Don't pack more than " + sp +
+        " of these into one day; if you suggest one, surround it with smaller items (1-hour stops, walks, food, scenic detours) so the day doesn't turn into a forced march. ";
     }
   } catch (_) {}
   if (mode === "loose") {
@@ -14556,9 +14558,10 @@ function _autoSeedIconicSightsToDays(dest){
   function _liveMaxBigSights() {
     try {
       var sp = (window.MaxDB && MaxDB.prefs) ? parseInt(MaxDB.prefs.get("sightsPerDay"), 10) : NaN;
-      if (isFinite(sp) && sp >= 2 && sp <= 10) {
-        return Math.max(1, Math.min(6, Math.ceil(sp / 2)));
-      }
+      // v353.4: direct mapping — welcome's "sights" pref IS the max
+      // big sights cap. Clamp to [1,6] to match the picker brief.
+      if (isFinite(sp) && sp >= 1 && sp <= 6) return sp;
+      if (isFinite(sp) && sp > 6) return 6;
     } catch (_) {}
     return 2;
   }
