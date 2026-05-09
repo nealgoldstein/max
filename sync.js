@@ -769,7 +769,7 @@
       '<div style="font-size:12px;color:#555;line-height:1.55;margin-bottom:14px;">' +
       (isSignedIn()
         ? '<strong>Signed in as ' + (getEmail() || 'user') + '</strong>.'
-        : 'Sign in to share trips between devices. We\'ll email you a one-time link — no password.') +
+        : 'Sign in to share trips between devices. Enter your email and we\'ll generate a one-time sign-in link — no password.') +
       '</div>' +
       '<label style="display:block;font-size:11px;color:#666;font-weight:600;margin-bottom:6px;">Server URL</label>' +
       '<input id="max-sync-url" type="text" value="' +
@@ -784,7 +784,7 @@
       (isSignedIn()
         ? '<button id="max-sync-pull" style="flex:1;padding:8px;font-size:12px;font-weight:600;background:#fff;color:#1a5fa8;border:1px solid #1a5fa8;border-radius:5px;cursor:pointer;font-family:inherit;">Pull trips from server</button>' +
           '<button id="max-sync-out" style="flex:1;padding:8px;font-size:12px;font-weight:600;background:#fff;color:#c44;border:1px solid #c44;border-radius:5px;cursor:pointer;font-family:inherit;">Sign out</button>'
-        : '<button id="max-sync-in" style="flex:1;padding:8px;font-size:12px;font-weight:600;background:#1a5fa8;color:#fff;border:1px solid #1a5fa8;border-radius:5px;cursor:pointer;font-family:inherit;">Email me a sign-in link</button>') +
+        : '<button id="max-sync-in" style="flex:1;padding:8px;font-size:12px;font-weight:600;background:#1a5fa8;color:#fff;border:1px solid #1a5fa8;border-radius:5px;cursor:pointer;font-family:inherit;">Get sign-in link</button>') +
       '<button id="max-sync-close" style="padding:8px 14px;font-size:12px;font-weight:600;background:#fff;color:#666;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;">Close</button>' +
       '</div>';
 
@@ -826,13 +826,13 @@
           var resp = await requestMagicLink(email);
           if (resp && resp.directLink) {
             // v350.1: server didn't send an email (no provider
-            // configured) but returned the link directly. Show it
-            // as a clickable element so the user can sign in
-            // anyway.
+            // configured) but returned the link directly. Render
+            // as a big tappable button instead of raw URL text so
+            // it looks like an action, not a typo.
             if (msg) {
               msg.innerHTML =
-                '<div style="color:#888;margin-bottom:6px;">No email service set up yet. Click this link to sign in:</div>' +
-                '<a href="' + _esc(resp.directLink) + '" style="color:#1a5fa8;font-weight:600;text-decoration:none;word-break:break-all;font-size:11px;">' + _esc(resp.directLink) + '</a>';
+                '<div style="color:#555;margin-bottom:10px;font-size:12px;line-height:1.55;">Click below to sign in. (Email delivery is not configured for this build, so we\'re skipping the inbox step.)</div>' +
+                '<a href="' + _esc(resp.directLink) + '" style="display:block;background:#1a5fa8;color:#fff;padding:11px 14px;border-radius:6px;text-decoration:none;font-weight:600;font-size:13px;text-align:center;">Sign in →</a>';
             }
           } else {
             _msg(
