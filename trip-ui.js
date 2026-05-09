@@ -879,15 +879,26 @@
         jumpBtn.onclick = function () {
           if (typeof global.selectDest === "function") global.selectDest(destId);
           if (dayId) {
-            setTimeout(function () {
+            // v353.2: retry until the day block actually mounts.
+            // selectDest → drawDestMode renders synchronously, but
+            // subsequent layout (Leaflet invalidate, tab pane swap,
+            // image loads) can shift things; the previous 250ms
+            // setTimeout sometimes fired BEFORE dy-<id> appeared
+            // and silently no-op'd. Now we poll every 80ms for up
+            // to 1.5s and scroll the moment the element exists.
+            var attempts = 0;
+            var maxAttempts = 18; // 18 × 80ms ≈ 1.5s
+            (function tryScroll() {
               var el = document.getElementById("dy-" + dayId);
               if (el && el.scrollIntoView) {
                 try { el.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (_) {}
                 el.style.transition = "background-color 0.4s";
                 el.style.backgroundColor = "#fff7d4";
                 setTimeout(function () { el.style.backgroundColor = ""; }, 1800);
+                return;
               }
-            }, 250);
+              if (++attempts < maxAttempts) setTimeout(tryScroll, 80);
+            })();
           }
         };
       })(status.currentDestId, status.currentDayId);
@@ -2068,15 +2079,68 @@
   function _renderResearch(dest, container) {
     var wrap = document.createElement("div");
     wrap.style.cssText = "margin:0 0 10px;padding:10px 12px;background:#f7f4ec;border:1px solid #e6e0cc;border-radius:8px;";
+
+    // v353.2: collapsible. Research is a less-frequently-used
+    // surface than Notes from the road; collapsed by default keeps
+    // dest-mode quieter, but the user can expand it any time. State
+    // persists per-destination in localStorage so a research-heavy
+    // destination stays expanded across page loads.
+    var collapsedKey = "max-research-collapsed-" + (dest.id || dest.place || "x");
+    var collapsed;
+    try {
+      var sv = localStorage.getItem(collapsedKey);
+      if (sv === "0") collapsed = false;
+      else if (sv === "1") collapsed = true;
+      else {
+        // No saved choice: default to collapsed if empty, expanded
+        // if there's already research (so the user sees it).
+        collapsed = !((typeof dest.research === "string") && dest.research.length > 0);
+      }
+    } catch (_) { collapsed = true; }
+
     var hdr = document.createElement("div");
-    hdr.style.cssText = "font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#8a7440;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;";
+    hdr.style.cssText = "font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#8a7440;display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none;";
+    var hdrLeft = document.createElement("span");
+    hdrLeft.style.cssText = "display:inline-flex;align-items:center;gap:6px;";
+    var caret = document.createElement("span");
+    caret.style.cssText = "font-size:8px;display:inline-block;transition:transform 0.12s ease;";
+    caret.textContent = "▾";
     var lbl = document.createElement("span");
     lbl.textContent = "Research";
+    var meta = document.createElement("span");
+    meta.style.cssText = "font-size:9px;font-weight:500;color:#bbb;text-transform:none;letter-spacing:0;margin-left:4px;";
+    hdrLeft.appendChild(caret);
+    hdrLeft.appendChild(lbl);
+    hdrLeft.appendChild(meta);
     var status = document.createElement("span");
     status.style.cssText = "font-size:9px;font-weight:500;color:#aaa;text-transform:none;letter-spacing:0;";
-    hdr.appendChild(lbl);
+    hdr.appendChild(hdrLeft);
     hdr.appendChild(status);
     wrap.appendChild(hdr);
+
+    // Body container — everything that lives inside the collapsible
+    // region. Header stays visible; body's display toggles.
+    var body = document.createElement("div");
+    body.style.cssText = "margin-top:8px;";
+    wrap.appendChild(body);
+
+    function _applyCollapsed() {
+      caret.style.transform = collapsed ? "rotate(-90deg)" : "rotate(0deg)";
+      body.style.display = collapsed ? "none" : "block";
+      // Update the meta hint with a length cue when collapsed.
+      var s = (typeof dest.research === "string") ? dest.research : "";
+      if (collapsed) {
+        meta.textContent = s ? "(" + s.length + " chars)" : "(empty — tap to add)";
+      } else {
+        meta.textContent = "";
+      }
+    }
+    hdr.onclick = function () {
+      collapsed = !collapsed;
+      try { localStorage.setItem(collapsedKey, collapsed ? "1" : "0"); } catch (_){}
+      _applyCollapsed();
+    };
+    _applyCollapsed();
 
     var saved = (typeof dest.research === "string") ? dest.research : "";
     var view = document.createElement("div"); // Read-only view: text + clickable URLs.
@@ -2157,9 +2221,15 @@
       if (e && e.target && e.target.tagName === "A") return;
       enterEdit();
     };
-    ta.addEventListener("blur", exitEdit);
-    wrap.appendChild(view);
-    wrap.appendChild(ta);
+    ta.addEventListener("blur", function(){
+      exitEdit();
+      // After saving, refresh the collapsed-state meta hint so it
+      // shows the new char count if user collapses.
+      var s = (typeof dest.research === "string") ? dest.research : "";
+      if (collapsed) meta.textContent = s ? "(" + s.length + " chars)" : "(empty — tap to add)";
+    });
+    body.appendChild(view);
+    body.appendChild(ta);
 
     // Voice input row (shown only when SpeechRecognition is available).
     var SR = global.SpeechRecognition || global.webkitSpeechRecognition;
@@ -2214,7 +2284,7 @@
         }
       };
       micRow.appendChild(micBtn);
-      wrap.appendChild(micRow);
+      body.appendChild(micRow);
     }
 
     container.appendChild(wrap);
