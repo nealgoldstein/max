@@ -748,12 +748,19 @@
 
     var ov = document.createElement('div');
     ov.id = 'max-sync-modal';
+    // v353.4: overflow-y on the overlay so on phone (where the modal
+    // can be taller than the viewport because of server-trip list +
+    // preferences link) the user can scroll the whole sheet. align-
+    // items:flex-start keeps the modal at the top so the upper part
+    // is always visible.
     ov.style.cssText =
-      'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:11000;display:flex;align-items:center;justify-content:center;padding:24px;';
+      'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:11000;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto;';
 
     var box = document.createElement('div');
+    // max-height on the box itself plus overflow-y as a fallback in
+    // case the overlay scroll is suppressed by some UA.
     box.style.cssText =
-      'background:#fff;border-radius:12px;max-width:420px;width:100%;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);';
+      'background:#fff;border-radius:12px;max-width:420px;width:100%;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);max-height:calc(100vh - 48px);overflow-y:auto;-webkit-overflow-scrolling:touch;';
 
     // v353: title is context-aware. When signed in the modal is a
     // sync-management surface (pull, sign out, list server trips);
