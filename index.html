@@ -13609,7 +13609,13 @@ function showMapPinPanel(item,dest,itemType,mapEvent){
   var storyTypes=['suggestion','restaurant-suggestion','sight','restaurant'];
   if(storyTypes.indexOf(itemType)>-1){
     var stb=document.createElement('button'); stb.className='mpp-btn'; stb.textContent='Story \u2197';
-    (function(sid,did){stb.onclick=function(){sStory(sid,did);panel.style.display='none';};})(item.id,dest.id);
+    // v353.2: id required so sStory's `g("ssa-" + sid)` lookup
+    // succeeds \u2014 without it the function bailed silently and the
+    // tap did nothing. Also: keep the popup OPEN after the tap
+    // (was hidden immediately after click, which meant the LLM
+    // would respond into a hidden popup the user never saw).
+    stb.id = 'ssa-' + item.id;
+    (function(sid,did){stb.onclick=function(){sStory(sid,did);};})(item.id,dest.id);
     acts.appendChild(stb);
   }
   if(isUtility){ /* no actions for hotel/transit/utility pins */ } else if(isUnscheduled){
@@ -22009,15 +22015,32 @@ async function sStory(sid, destId) {
     var deepDiv = document.createElement("div"); deepDiv.id = deepContId;
     box.appendChild(deepDiv);
 
+    // v353.2: when sStory is called from the map-pin popup, there's
+    // no sr-<sid> in the DOM (the suggestion isn't placed on a day),
+    // and the button isn't inside .ex-sight/.srow/.exp-item either \u2014
+    // it's inside #map-pin-popup. Fall back to inserting the story
+    // box inside the popup itself so the user sees it.
     var sr = g("sr-" + sid) || btn.closest(".ex-sight") || btn.closest(".srow") || btn.closest(".exp-item");
-    if (sr) sr.parentNode.insertBefore(box, sr.nextSibling);
+    var inPopup = btn.closest("#map-pin-popup");
+    if (sr) {
+      sr.parentNode.insertBefore(box, sr.nextSibling);
+    } else if (inPopup) {
+      // Append at the bottom of the popup so the action buttons
+      // stay above the story text. Style the box to fit popup width
+      // and constrain its height so the story scrolls if long.
+      box.style.cssText = (box.style.cssText || "") +
+        ";margin-top:10px;max-height:240px;overflow-y:auto;font-size:12px;";
+      inPopup.appendChild(box);
+    }
   } catch(e) {
     btn.setAttribute("data-state", "idle"); btn.textContent = "story \u2197";
     var errBox=document.createElement("div");
     errBox.style.cssText="font-size:11px;color:#b04020;padding:3px 6px;";
     errBox.textContent="Couldn't reach Max \u2014 try again.";
     var sr2=g("sr-"+sid)||btn.closest(".ex-sight")||btn.closest(".srow")||btn.closest(".exp-item");
-    if(sr2)sr2.parentNode.insertBefore(errBox,sr2.nextSibling);
+    var inPopup2 = btn.closest("#map-pin-popup");
+    if (sr2) sr2.parentNode.insertBefore(errBox, sr2.nextSibling);
+    else if (inPopup2) inPopup2.appendChild(errBox);
     setTimeout(function(){if(errBox.parentNode)errBox.parentNode.removeChild(errBox);},4000);
     console.error("sStory error:", e);
   }
