@@ -11389,9 +11389,16 @@ function showCandidateExplorer(cands, editMode){
     +'<div class="ce-footer">'
     +'<span style="font-size:10px;color:#888;" id="ce-cnt">0 kept</span>'
     +'<button id="ce-ep-toggle" onclick="_tbToggleEntryPoints()" style="font-size:10px;padding:4px 9px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#444;margin-left:10px;">Hide entry points</button>'
+    // v353.2: only show the commit button after candidates have loaded.
+    // Previously it was visible during the "Building your trip\u2026"
+    // loading state \u2014 looked tappable but committed nothing useful,
+    // since there were no candidates to commit. Now it appears only
+    // when there's something to act on.
     +(_ceEditMode
       ? '<button class="ce-build-btn" id="ce-build-btn" disabled onclick="applyCandidateChanges()">Apply changes \u2192</button>'
-      : '<button class="ce-build-btn" id="ce-build-btn" onclick="closePlacesOverlay()">Create a plan \u2192</button>')
+      : (cands
+          ? '<button class="ce-build-btn" id="ce-build-btn" onclick="closePlacesOverlay()">Create a plan \u2192</button>'
+          : ''))
     +'</div>';
   setTimeout(function(){
     // Fix flex height collapse before map init
@@ -14696,10 +14703,61 @@ function delDestWithUndo(e, id) {
   var snapStory = _destStories[id] ? JSON.parse(JSON.stringify(_destStories[id])) : null;
   var snapNotes = _destNotes[id] ? JSON.parse(JSON.stringify(_destNotes[id])) : null;
   var snapOverBudget = trip.overBudgetNotice ? JSON.parse(JSON.stringify(trip.overBudgetNotice)) : null;
+
+  // v353.2: if the destination being removed has attached
+  // activities, move them to the closest remaining destination
+  // before deletion. Otherwise the user loses the reason they
+  // wanted that place — e.g., removing Diamond Beach (a sight-
+  // level destination the LLM mistakenly elevated) wipes the
+  // "Walk on black sand beaches" activity along with it. With
+  // relocation, the activity reattaches to Höfn (or whichever
+  // remaining stay is closest by haversine), where it can
+  // legitimately happen as a day-trip from the new base.
+  // Snapshot is taken BEFORE this mutation so undo restores both
+  // the deletion and the attachment shift.
+  var attached = (dest.attachedEvents && dest.attachedEvents.length) ? dest.attachedEvents : [];
+  var relocatedTo = null;
+  var relocatedCount = 0;
+  if (attached.length && typeof _fqHaversineKm === "function" &&
+      typeof dest.lat === "number" && typeof dest.lng === "number") {
+    // Find closest other destination with coords.
+    var nearest = null, nearestKm = Infinity;
+    trip.destinations.forEach(function (d) {
+      if (!d || d.id === id) return;
+      if (typeof d.lat !== "number" || typeof d.lng !== "number") return;
+      var km = _fqHaversineKm(dest.lat, dest.lng, d.lat, d.lng);
+      if (km < nearestKm) { nearestKm = km; nearest = d; }
+    });
+    if (nearest) {
+      if (!Array.isArray(nearest.attachedEvents)) nearest.attachedEvents = [];
+      attached.forEach(function (ev) {
+        // Avoid duplicating an event that's already there by name.
+        var dup = nearest.attachedEvents.some(function (existing) {
+          return existing && existing.name && ev && ev.name &&
+                 existing.name.toLowerCase() === ev.name.toLowerCase();
+        });
+        if (!dup) {
+          nearest.attachedEvents.push(JSON.parse(JSON.stringify(ev)));
+          relocatedCount++;
+        }
+      });
+      if (relocatedCount > 0) relocatedTo = nearest;
+    }
+  }
+
   delDest(null, id);
+
+  // Compose the toast message based on whether we relocated.
+  var toastMsg = "Removed <strong>" + dName + "</strong>";
+  if (relocatedTo && relocatedCount > 0) {
+    toastMsg += " — moved " + relocatedCount + " activit" +
+                (relocatedCount === 1 ? "y" : "ies") +
+                " to <strong>" + (relocatedTo.label || relocatedTo.place) + "</strong>";
+  }
+
   if (typeof _showDayTripToast === "function") {
     _showDayTripToast(
-      "Removed <strong>" + dName + "</strong> from this trip",
+      toastMsg,
       function(){
         trip.destinations = snapDestinations;
         trip.pendingActions = snapPendingActions;
