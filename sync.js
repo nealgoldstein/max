@@ -786,6 +786,13 @@
           '<button id="max-sync-out" style="flex:1;padding:8px;font-size:12px;font-weight:600;background:#fff;color:#c44;border:1px solid #c44;border-radius:5px;cursor:pointer;font-family:inherit;">Sign out</button>'
         : '<button id="max-sync-in" style="flex:1;padding:8px;font-size:12px;font-weight:600;background:#1a5fa8;color:#fff;border:1px solid #1a5fa8;border-radius:5px;cursor:pointer;font-family:inherit;">Get sign-in link</button>') +
       '<button id="max-sync-close" style="padding:8px 14px;font-size:12px;font-weight:600;background:#fff;color:#666;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;">Close</button>' +
+      '</div>' +
+      // v353.4: Preferences link — opens the welcome modal so the
+      // user can change pace / sights without leaving the trip view
+      // (the home-screen "Welcome" link is invisible from inside a
+      // trip).
+      '<div style="margin-top:14px;padding-top:12px;border-top:1px solid #eee;text-align:center;">' +
+        '<span id="max-sync-prefs" style="font-size:12px;color:#1a5fa8;cursor:pointer;text-decoration:underline;">⚙ Preferences (pace, sights)</span>' +
       '</div>';
 
     ov.appendChild(box);
@@ -892,6 +899,25 @@
     if (closeBtn) {
       closeBtn.onclick = function () {
         ov.remove();
+      };
+    }
+    // v353.4: Preferences link — opens the welcome modal (which
+    // hosts the pace + sights sliders) on top. Closes the sync
+    // modal first so the welcome modal isn't fighting it for focus.
+    var prefsLink = document.getElementById('max-sync-prefs');
+    if (prefsLink) {
+      prefsLink.onclick = function (e) {
+        if (e) { e.preventDefault(); e.stopPropagation(); }
+        ov.remove();
+        try {
+          if (typeof global.showWelcomeOnboarding === 'function') {
+            global.showWelcomeOnboarding();
+          } else {
+            alert('Preferences screen unavailable.');
+          }
+        } catch (err) {
+          console.warn('[max-sync] preferences open failed:', err);
+        }
       };
     }
     ov.addEventListener('click', function (e) {
