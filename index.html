@@ -8074,6 +8074,14 @@ function openTripHeroMapWindow(){
     + '#closeBtn{font-size:13px;font-weight:600;color:#fff;background:#1a5fa8;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;flex-shrink:0;min-height:36px;}'
     + '#closeBtn:hover{background:#0e3a6a;}'
     + '#closeBtn:active{transform:scale(0.97);}'
+    /* v353.2: route toggle. The dashed blue line connecting
+       destinations is useful for understanding trip flow but
+       sometimes covers terrain the user wants to see. Toggle
+       button mirrors the inline trip-overview "Route" button. */
+    + '#routeBtn{font-size:13px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;flex-shrink:0;min-height:36px;margin-right:6px;}'
+    + '#routeBtn:hover{background:#eef5ff;}'
+    + '#routeBtn.off{color:#888;border-color:#ddd;}'
+    + '#routeBtn.off:hover{background:#fafafa;}'
     + '#map{position:absolute;top:56px;left:0;right:0;bottom:0;background:#eaf0ed;}'
     /* v353.2: kill the 1-pixel tile gaps that read as a lat/lon
        grid covering the whole map. Leaflet renders 256x256 tiles
@@ -8095,7 +8103,10 @@ function openTripHeroMapWindow(){
     + '</head><body>'
     + '<div id="hdr">'
     +   '<div><span id="ttl">' + tripName.replace(/[<>"]/g, "") + ' — route</span><span id="sub">' + pts.length + ' destination' + (pts.length !== 1 ? 's' : '') + '</span></div>'
-    +   '<button type="button" id="closeBtn" title="Back to trip">✕ Close</button>'
+    +   '<div style="display:flex;align-items:center;flex-shrink:0;">'
+    +     '<button type="button" id="routeBtn" title="Show or hide the trip route line">Route ✓</button>'
+    +     '<button type="button" id="closeBtn" title="Back to trip">✕ Close</button>'
+    +   '</div>'
     + '</div>'
     + '<div id="map"></div>'
     + '<div id="stale-toast">Trip changed — closing this window. Re-open for fresh data.</div>'
@@ -8111,10 +8122,31 @@ function openTripHeroMapWindow(){
     +   'L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {maxZoom: 19}).addTo(map);'
     +   'L.tileLayer("https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png", {maxZoom: 19, opacity: 1.0}).addTo(map);'
     +   'var coords = pts.map(function(p){return [p.lat, p.lng];});'
-    +   'if (coords.length >= 2) {'
-    +     'L.polyline(coords, {color: "#fff", weight: 7, opacity: 0.9, lineCap: "round"}).addTo(map);'
-    +     'L.polyline(coords, {color: "#1a5fa8", weight: 3, opacity: 1.0, dashArray: "1 8", lineCap: "round"}).addTo(map);'
+    +   /* v353.2: keep references to the route polylines so the Route
+         toggle button below can show/hide them on demand. */
+    +   'var routeHalo = null, routeLine = null;'
+    +   'function _drawRoute(){'
+    +     'if (coords.length < 2) return;'
+    +     'routeHalo = L.polyline(coords, {color: "#fff", weight: 7, opacity: 0.9, lineCap: "round"}).addTo(map);'
+    +     'routeLine = L.polyline(coords, {color: "#1a5fa8", weight: 3, opacity: 1.0, dashArray: "1 8", lineCap: "round"}).addTo(map);'
     +   '}'
+    +   'function _eraseRoute(){'
+    +     'if (routeHalo) { try { map.removeLayer(routeHalo); } catch(_){} routeHalo = null; }'
+    +     'if (routeLine) { try { map.removeLayer(routeLine); } catch(_){} routeLine = null; }'
+    +   '}'
+    +   '_drawRoute();'
+    +   /* Wire the Route toggle. Persist user choice across re-opens
+         via localStorage so the popup remembers their preference. */
+    +   'var rb = document.getElementById("routeBtn");'
+    +   'var routeOff = false;'
+    +   'try { routeOff = localStorage.getItem("max-popup-route-off") === "1"; } catch(_){}'
+    +   'if (routeOff) { _eraseRoute(); rb.textContent = "Route"; rb.classList.add("off"); }'
+    +   'rb.onclick = function(){'
+    +     'routeOff = !routeOff;'
+    +     'if (routeOff) { _eraseRoute(); rb.textContent = "Route"; rb.classList.add("off"); }'
+    +     'else { _drawRoute(); rb.textContent = "Route ✓"; rb.classList.remove("off"); }'
+    +     'try { localStorage.setItem("max-popup-route-off", routeOff ? "1" : "0"); } catch(_){}'
+    +   '};'
     +   'var pinGroups = []; var pinByKey = {};'
     +   'pts.forEach(function(p){'
     +     'var key = (p.place||"").toLowerCase().replace(/[^a-z0-9]/g, "");'
@@ -8248,7 +8280,15 @@ function _renderPlacePickerMap(targetId){
     var _pmSeed = (_pmRegionKey && typeof _coarseGeocode !== "undefined" && _coarseGeocode[_pmRegionKey]) || null;
     var _pmInitView = (_pmSeed && isFinite(_pmSeed[0]) && isFinite(_pmSeed[1])) ? _pmSeed : [46.8, 8.2];
     var leaflet = L.map(mapDiv, {zoomControl:true,scrollWheelZoom:allowScroll,attributionControl:false}).setView(_pmInitView, 6);
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {maxZoom:18}).addTo(leaflet);
+    // v353.2: place-picker map ("What to see and do in {place}") now
+    // uses satellite imagery to match the trip-overview map and the
+    // larger-map popup. Carto's voyager vector tiles previously used
+    // here were the only place-picker holdout. Same Esri
+    // World_Imagery + Carto light_only_labels stack the other maps
+    // use, so attribution + label-overlay treatment is consistent
+    // across surfaces.
+    L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {attribution:"© Esri", maxZoom:19}).addTo(leaflet);
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png", {opacity:1.0, maxZoom:19}).addTo(leaflet);
     mapDiv._pmInitialized = true;
     state = _pmMaps[targetId] = { map: leaflet, markers: {} };
   }
