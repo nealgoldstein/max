@@ -6407,15 +6407,26 @@ function showAIDisclaimer(onContinue) {
     if (typeof onContinue === "function") onContinue();
   }
   document.getElementById("ai-disclaimer-continue").onclick = dismiss;
-  // "Read more in How it works" link — opens the longer About Max
-  // essay over this disclaimer. Doesn't dismiss the disclaimer
-  // since the user might want to come back to it after reading.
+  // "Read more in How it works" link — closes this disclaimer and
+  // advances to the picker (same as the Got-it button), then opens
+  // the longer About Max essay over the picker. The user reads,
+  // closes About Max, and is in the picker ready to plan. Avoids
+  // stacking the two overlays — earlier attempts to show About Max
+  // OVER the disclaimer ran into z-index/stacking-context oddities
+  // on iOS Safari that intermittently left About Max invisible.
   var hiwLink = document.getElementById("ai-disclaimer-howitworks");
   if (hiwLink) {
-    hiwLink.onclick = function (e) {
-      e.preventDefault();
-      if (typeof showAboutMax === "function") showAboutMax();
+    var openAbout = function (e) {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      // Dismiss disclaimer + run onContinue (advances to picker).
+      dismiss();
+      // Defer showAboutMax one tick so the picker has time to mount;
+      // showAboutMax will then sit cleanly over the picker.
+      setTimeout(function () {
+        if (typeof showAboutMax === "function") showAboutMax();
+      }, 50);
     };
+    hiwLink.addEventListener("click", openAbout);
   }
   // Allow Escape or click-outside to dismiss too.
   document.addEventListener("keydown", function escHandler(e) {
