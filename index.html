@@ -8456,7 +8456,91 @@ function _pushHeroMapUpdate(){
   window._tripHeroMapWindow = null;
 }
 
+// v353.4: phone-width "View larger" — full-screen DOM overlay with
+// trip destinations rendered as numbered pins on a satellite basemap.
+// Mirrors what the popup window shows (route line + numbered pins +
+// active-dest highlight) but rendered in the parent page so it has
+// a clear ✕ Close button and works under Safari's popup restrictions.
+function _openTripHeroMapOverlay(){
+  var existing = document.getElementById("trip-hero-mobile-overlay");
+  if (existing) existing.remove();
+  var ov = document.createElement("div");
+  ov.id = "trip-hero-mobile-overlay";
+  ov.style.cssText = "position:fixed;inset:0;background:#fff;z-index:11800;display:flex;flex-direction:column;";
+  var tripName = (trip && trip.name) || "Your trip";
+  ov.innerHTML =
+    '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid #eee;background:#fafafa;flex-shrink:0;">' +
+      '<div style="font-size:13px;font-weight:700;color:#1a1a1a;">' + tripName.replace(/[<>"]/g, "") + ' — route</div>' +
+      '<button type="button" id="trip-hero-mobile-close" style="background:#fff;border:1px solid #ddd;border-radius:6px;font-size:13px;font-weight:600;color:#333;padding:6px 12px;cursor:pointer;font-family:inherit;">✕ Close</button>' +
+    '</div>' +
+    '<div id="trip-hero-mobile-map" style="flex:1;min-height:0;background:#eaf0ed;"></div>';
+  document.body.appendChild(ov);
+  function close(){
+    if (ov.parentNode) ov.parentNode.removeChild(ov);
+    document.removeEventListener("keydown", escClose);
+  }
+  function escClose(e){ if (e.key === "Escape") close(); }
+  document.getElementById("trip-hero-mobile-close").onclick = close;
+  document.addEventListener("keydown", escClose);
+  if (typeof L === "undefined") {
+    document.getElementById("trip-hero-mobile-map").innerHTML =
+      '<div style="padding:30px 20px;text-align:center;color:#888;font-size:12px;">Map library not loaded.</div>';
+    return;
+  }
+  var pts = _buildHeroMapPoints();
+  if (!pts.length) {
+    document.getElementById("trip-hero-mobile-map").innerHTML =
+      '<div style="padding:30px 20px;text-align:center;color:#888;font-size:12px;">No destinations to show on the map yet.</div>';
+    return;
+  }
+  var map = L.map("trip-hero-mobile-map", { zoomControl: true });
+  // Satellite basemap (Esri World Imagery) — matches the popup window.
+  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+    attribution: 'Tiles &copy; Esri',
+    maxZoom: 18,
+  }).addTo(map);
+  // Light label overlay so cities are readable.
+  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", {
+    maxZoom: 18,
+    opacity: 0.8,
+  }).addTo(map);
+  var bounds = L.latLngBounds([]);
+  // Route line connecting destinations in order.
+  var line = pts.map(function(p){ return [p.lat, p.lng]; });
+  L.polyline(line, { color: "#fff", weight: 4, opacity: 0.85, dashArray: "6,4" }).addTo(map);
+  pts.forEach(function(p, i){
+    var isActive = !!p.isActive;
+    var color = isActive ? "#c44" : "#1a5fa8";
+    var size = isActive ? 30 : 26;
+    var html = '<div style="width:' + size + 'px;height:' + size + 'px;border-radius:50%;background:' + color +
+      ';color:#fff;font-weight:700;font-size:' + (isActive ? 13 : 12) + 'px;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4);">' + (i + 1) + '</div>';
+    var icon = L.divIcon({ html: html, className: "", iconSize: [size, size], iconAnchor: [size/2, size/2] });
+    var m = L.marker([p.lat, p.lng], { icon: icon }).addTo(map);
+    m.bindTooltip(p.place, { direction: "top", offset: [0, -size/2] });
+    bounds.extend([p.lat, p.lng]);
+  });
+  if (bounds.isValid()) {
+    // If there's an active dest, focus on it; else fit all.
+    var active = pts.find(function(p){ return p.isActive; });
+    if (active) {
+      map.setView([active.lat, active.lng], 9);
+    } else {
+      map.fitBounds(bounds, { padding: [40, 40] });
+    }
+  }
+}
+
 function openTripHeroMapWindow(){
+  // v353.4: phone-width path uses an in-page full-screen overlay
+  // instead of window.open. Same reasoning as the picker map: iOS
+  // Safari blocks popups silently or opens them in a way the user
+  // can't return from.
+  try {
+    if (window.innerWidth && window.innerWidth <= 700) {
+      _openTripHeroMapOverlay();
+      return;
+    }
+  } catch (_) {}
   if (window._tripHeroMapWindow && !window._tripHeroMapWindow.closed) {
     try { window._tripHeroMapWindow.focus(); } catch(_){}
     return;
