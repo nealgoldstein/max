@@ -10970,8 +10970,29 @@ function applyConstraintChanges(){
     if (typeof p.accommodation !== "undefined") trip.brief.accommodation = p.accommodation;
     // v302: structured pace fields mirrored to trip.brief so the
     // engine reads them after Parameters saves.
-    if (typeof p.hoursPerDay !== "undefined") trip.brief.hoursPerDay = p.hoursPerDay;
-    if (typeof p.maxBigSightsPerDay !== "undefined") trip.brief.maxBigSightsPerDay = p.maxBigSightsPerDay;
+    // v353.4: only persist as a per-trip OVERRIDE when the value
+    // differs from the user's current welcome-modal pref. If the
+    // user accepted the default (or didn't touch the field), we
+    // leave trip.brief.hoursPerDay unset and the engine falls back
+    // to the live pref (MaxDB.prefs.paceHours). Means changing the
+    // welcome-modal pace later will flow into trips that didn't
+    // explicitly override; trips that did override stay overridden.
+    if (typeof p.hoursPerDay !== "undefined") {
+      var _prefHpd = (typeof _defaultHoursPerDay === "function") ? _defaultHoursPerDay() : 6;
+      if (p.hoursPerDay === _prefHpd) {
+        delete trip.brief.hoursPerDay;
+      } else {
+        trip.brief.hoursPerDay = p.hoursPerDay;
+      }
+    }
+    if (typeof p.maxBigSightsPerDay !== "undefined") {
+      var _prefBig = (typeof _defaultMaxBigSightsPerDay === "function") ? _defaultMaxBigSightsPerDay() : 2;
+      if (p.maxBigSightsPerDay === _prefBig) {
+        delete trip.brief.maxBigSightsPerDay;
+      } else {
+        trip.brief.maxBigSightsPerDay = p.maxBigSightsPerDay;
+      }
+    }
     // v306: mobility mirrored to trip.brief.
     if (typeof p.physicalAbility !== "undefined") trip.brief.physicalAbility = p.physicalAbility;
     if (typeof p.abilityNote !== "undefined") trip.brief.abilityNote = p.abilityNote;
@@ -14434,10 +14455,30 @@ function _autoSeedIconicSightsToDays(dest){
   // (default 6 for trips that pre-date the structured fields). Travel
   // days (arrival + departure) get min(hoursPerDay, 4) since landing at
   // noon and racing to a 6-hour cogwheel rarely works.
+  // v353.4: per-trip override if set, else live MaxDB.prefs.paceHours,
+  // else legacy default 6. Same fallback chain for maxBigSightsPerDay.
+  // Means changing the welcome-modal pace flows into trips that didn't
+  // explicitly override their pace at brief time.
+  function _livePaceHours() {
+    try {
+      var p = (window.MaxDB && MaxDB.prefs) ? parseInt(MaxDB.prefs.get("paceHours"), 10) : NaN;
+      if (isFinite(p) && p >= 2 && p <= 10) return p;
+    } catch (_) {}
+    return 6;
+  }
+  function _liveMaxBigSights() {
+    try {
+      var sp = (window.MaxDB && MaxDB.prefs) ? parseInt(MaxDB.prefs.get("sightsPerDay"), 10) : NaN;
+      if (isFinite(sp) && sp >= 2 && sp <= 10) {
+        return Math.max(1, Math.min(6, Math.ceil(sp / 2)));
+      }
+    } catch (_) {}
+    return 2;
+  }
   var _briefHpd = (trip && trip.brief && typeof trip.brief.hoursPerDay === "number")
-    ? trip.brief.hoursPerDay : 6;
+    ? trip.brief.hoursPerDay : _livePaceHours();
   var _briefMaxBig = (trip && trip.brief && typeof trip.brief.maxBigSightsPerDay === "number")
-    ? trip.brief.maxBigSightsPerDay : 2;
+    ? trip.brief.maxBigSightsPerDay : _liveMaxBigSights();
   var _travelBudget = Math.min(_briefHpd, 4);
   function budgetForDay(dIdx) {
     if (dayCount <= 1) return _travelBudget;
