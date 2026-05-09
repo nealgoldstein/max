@@ -27,6 +27,107 @@
 (function (global) {
   'use strict';
 
+  // v353.2: per-sight research panel. Inserted as a sibling of
+  // the .srow when the user taps the 📚 button. Read-only view
+  // shows text with auto-detected URLs as clickable links; tap
+  // anywhere outside an <a> to enter edit mode (textarea); blur
+  // saves and re-renders the view. Stored on s.research, persists
+  // through the standard autoSave path.
+  function _buildSightResearchPanel(s, destId) {
+    var wrap = document.createElement("div");
+    wrap.className = "sight-research-panel";
+    wrap.style.cssText = "margin:4px 0 10px 18px;padding:8px 10px;background:#f7f4ec;border:1px solid #e6e0cc;border-radius:6px;";
+    var hdr = document.createElement("div");
+    hdr.style.cssText = "font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#8a7440;margin-bottom:5px;display:flex;align-items:center;justify-content:space-between;";
+    var lbl = document.createElement("span");
+    lbl.textContent = "Research · " + (s.n || "this sight");
+    var status = document.createElement("span");
+    status.style.cssText = "font-size:8px;font-weight:500;color:#aaa;text-transform:none;letter-spacing:0;";
+    hdr.appendChild(lbl);
+    hdr.appendChild(status);
+    wrap.appendChild(hdr);
+
+    var saved = (typeof s.research === "string") ? s.research : "";
+    var view = document.createElement("div");
+    view.style.cssText = "font-size:12px;line-height:1.55;color:#333;min-height:30px;padding:5px 7px;background:#fff;border:1px solid #e8e1c8;border-radius:4px;cursor:text;white-space:pre-wrap;word-wrap:break-word;";
+    view.title = "Tap to edit";
+
+    function _esc(x) {
+      return String(x == null ? "" : x)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    }
+    function renderViewMode() {
+      if (!saved) {
+        view.innerHTML = '<span style="color:#bbb;">Tap to add research, links, hours, reservation notes…</span>';
+        return;
+      }
+      var html = "";
+      var lastIdx = 0;
+      var urlRe = /(https?:\/\/[^\s<>"']+)/g;
+      var m;
+      while ((m = urlRe.exec(saved)) !== null) {
+        html += _esc(saved.substring(lastIdx, m.index));
+        var u = m[1], trail = "";
+        while (/[)\.,;:!?]$/.test(u)) { trail = u.charAt(u.length - 1) + trail; u = u.substring(0, u.length - 1); }
+        var safe = _esc(u);
+        html += '<a href="' + safe + '" target="_blank" rel="noopener noreferrer" style="color:#1a5fa8;text-decoration:underline;word-break:break-all;">' + safe + '</a>' + _esc(trail);
+        lastIdx = m.index + m[1].length;
+      }
+      html += _esc(saved.substring(lastIdx));
+      view.innerHTML = html;
+    }
+    renderViewMode();
+
+    var ta = document.createElement("textarea");
+    ta.placeholder = "Hours, reservation URL, friend's tip, the side entrance…";
+    ta.style.cssText = "width:100%;min-height:60px;max-height:200px;font:inherit;font-size:12px;line-height:1.5;padding:5px 7px;border:1px solid #1a5fa8;border-radius:4px;background:#fff;color:#111;resize:vertical;box-sizing:border-box;font-family:inherit;display:none;outline:none;box-shadow:0 0 0 3px rgba(26,95,168,.12);";
+
+    function enterEdit() {
+      ta.value = saved;
+      view.style.display = "none";
+      ta.style.display = "block";
+      setTimeout(function(){ ta.focus(); }, 30);
+    }
+    function exitEdit() {
+      var nextVal = ta.value;
+      if (nextVal !== saved) {
+        s.research = nextVal;
+        saved = nextVal;
+        var ok = false;
+        try {
+          if (typeof global.localSave === "function") { global.localSave(); ok = true; }
+          else if (global.MaxDB && global._currentTripId && typeof global.serializeTrip === "function") {
+            ok = global.MaxDB.trip.writeRaw(global._currentTripId, global.serializeTrip());
+          }
+        } catch (e) { ok = false; }
+        if (ok && typeof global.MaxSync !== "undefined" &&
+            typeof global.MaxSync.scheduleSave === "function") {
+          global.MaxSync.scheduleSave();
+        }
+        status.textContent = ok ? "saved" : "save failed";
+        status.style.color = ok ? "#2a7a4e" : "#c05020";
+        if (ok) setTimeout(function(){
+          if (status.textContent === "saved") status.textContent = "";
+        }, 1800);
+        // Update the 📚• indicator on the action button.
+        var btn = document.querySelector('#sr-' + s.id + ' .sa[title="Research notes for this sight"]');
+        if (btn) btn.textContent = saved ? "📚•" : "📚";
+      }
+      ta.style.display = "none";
+      view.style.display = "block";
+      renderViewMode();
+    }
+    view.onclick = function (e) {
+      if (e && e.target && e.target.tagName === "A") return;
+      enterEdit();
+    };
+    ta.addEventListener("blur", exitEdit);
+    wrap.appendChild(view);
+    wrap.appendChild(ta);
+    return wrap;
+  }
+
   // ── renderItinItemCompact (Round MA.2) ─────────────────────
   // Minimal sight / restaurant / day-trip row for mobile. Reads:
   //   s.id, s.n, s.p (must|nice), s.type (sight|restaurant|daytrip),
@@ -315,6 +416,35 @@
     stb.title = "Story about " + (s.n || "this");
     (function(id,did){stb.onclick=function(){global.sStory(id,did);};})(s.id,destId);
     acts.appendChild(stb);
+    // v353.2: per-sight Research button. Toggles an inline research
+    // panel below this row — distinct from the destination-level
+    // Research strip (which is for whole-city research). This one
+    // captures sight-specific notes: opening hours, reservation URLs,
+    // friend's tip about the side entrance, etc. Stored on s.research.
+    // Same URL auto-detection + voice input as the dest-level version.
+    var resBtn = document.createElement("button");
+    resBtn.className = "sa";
+    resBtn.textContent = (s.research && s.research.length) ? "📚•" : "📚";
+    resBtn.title = "Research notes for this sight";
+    (function (item, did) {
+      resBtn.onclick = function (e) {
+        if (e && e.stopPropagation) e.stopPropagation();
+        var rowEl = document.getElementById("sr-" + item.id);
+        if (!rowEl) return;
+        var existing = rowEl.parentNode.querySelector('.sight-research-panel[data-for="' + item.id + '"]');
+        if (existing) {
+          existing.parentNode.removeChild(existing);
+          return;
+        }
+        var panel = _buildSightResearchPanel(item, did);
+        panel.setAttribute("data-for", item.id);
+        rowEl.parentNode.insertBefore(panel, rowEl.nextSibling);
+        // Focus the textarea (or the view, then click into it).
+        var ta = panel.querySelector("textarea");
+        if (ta) setTimeout(function(){ ta.focus(); }, 30);
+      };
+    })(s, destId);
+    acts.appendChild(resBtn);
     // Done button
     var db=document.createElement("button"); db.className="sa "+(s.done?"usa":"dsa");
     db.textContent=s.done?"undo":"done \u2713";

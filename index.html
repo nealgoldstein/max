@@ -1484,7 +1484,8 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
     <div class="hs-logo">
       <div class="hs-av">M</div>
       <div class="hs-logo-text"><p>Max</p><span>Tourist's Guide Travel Agent</span></div>
-      <div onclick="showAboutMax()" id="hs-how-it-works" style="font-size:11px;color:#999;cursor:pointer;margin-left:auto;padding:3px 10px;border:1px solid #ddd;border-radius:10px;white-space:nowrap;" title="How Max works">How it works</div>
+      <div onclick="showWelcomeOnboarding()" id="hs-welcome-link" style="font-size:11px;color:#999;cursor:pointer;margin-left:auto;padding:3px 10px;border:1px solid #ddd;border-radius:10px;white-space:nowrap;" title="Re-read the welcome + change your pace setting">Welcome</div>
+      <div onclick="showAboutMax()" id="hs-how-it-works" style="font-size:11px;color:#999;cursor:pointer;margin-left:8px;padding:3px 10px;border:1px solid #ddd;border-radius:10px;white-space:nowrap;" title="How Max works">How it works</div>
       <div onclick="MaxSync.showSignInModal()" id="hs-sync-btn" style="font-size:11px;color:#999;cursor:pointer;margin-left:8px;padding:3px 10px;border:1px solid #ddd;border-radius:10px;white-space:nowrap;" title="Sync with server">⇄ Sync</div>
     </div>
     <!-- Round DI: the heavy welcome card was removed. The question
@@ -6397,6 +6398,125 @@ function showAIDisclaimer(onContinue) {
   });
   ov.addEventListener("click", function (e) { if (e.target === ov) dismiss(); });
 }
+
+// v353.2: first-sign-in welcome modal. Combines a brief personal
+// "why I built this" with the AI disclaimer and a one-time pace
+// question (hours of sightseeing per day, used to allocate days).
+// Triggered automatically the first time the user signs in
+// (via the max-sync-signedIn window event, gated on
+// localStorage.max-onboarded). Also re-accessible via the home-
+// screen "Welcome" link for users who want to re-read.
+function showWelcomeOnboarding(onContinue) {
+  // Prevent stacking if event fires more than once.
+  var existing = document.getElementById("welcome-onboarding-overlay");
+  if (existing) existing.parentNode.removeChild(existing);
+
+  // Read existing pace preference if any (so re-opens prefill).
+  var startingPace = 6;
+  try {
+    var saved = parseInt(localStorage.getItem("max-default-pace-hours"), 10);
+    if (isFinite(saved) && saved >= 2 && saved <= 10) startingPace = saved;
+  } catch (_) {}
+
+  var ov = document.createElement("div");
+  ov.id = "welcome-onboarding-overlay";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9800;display:flex;align-items:center;justify-content:center;padding:24px;";
+
+  var box = document.createElement("div");
+  box.style.cssText = "background:#fff;border-radius:12px;width:580px;max-width:100%;max-height:88vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,0.25);";
+
+  box.innerHTML =
+    '<div style="padding:18px 22px 0;flex-shrink:0;">' +
+      '<div style="font-size:16px;font-weight:700;margin-bottom:4px;">Before you start</div>' +
+      '<div style="font-size:11px;color:#aaa;padding-bottom:14px;border-bottom:1px solid #eee;">A note from Neal — and one question</div>' +
+    '</div>' +
+    '<div style="flex:1;overflow-y:auto;padding:18px 22px;font-size:13px;color:#333;line-height:1.65;">' +
+      '<p style="margin:0 0 12px;">I traveled continuously for almost five years — sold the house and cars, gave most of what we owned to charity, lived out of a couple of bags. Until COVID. Since the world opened again, several trips a year. I\'ve gotten reasonably good at planning.</p>' +
+      '<p style="margin:0 0 12px;">The problem was never the planning itself. The problem was the tools. A spreadsheet for logistics. A text document and Google Maps for what we\'d gathered. A calendar for deadlines. Reminders for to-dos. An endless tab graveyard of bookmarks. Five tools, none of them speaking to each other.</p>' +
+      '<p style="margin:0 0 14px;">When AI got widely usable, I was planning a two-month trip. I built Max to consolidate that mess. What I learned was clear fast.</p>' +
+      '<p style="margin:0 0 8px;"><strong>Where Max excels:</strong> organizing the information you gather. Notes, links, decisions about each place — that part is reliable.</p>' +
+      '<p style="margin:0 0 8px;"><strong>Where Max is a starting point, not the last word.</strong> Max strives for <em>existential</em> accuracy, but it can fall short in three ways:</p>' +
+      '<ul style="margin:0 0 12px 18px;padding:0;">' +
+        '<li style="margin-bottom:4px;"><strong>Flat-out wrong.</strong> Its sources may be wrong, and in an effort to please, it sometimes invents plausible-sounding but fake places, names, or facts.</li>' +
+        '<li style="margin-bottom:4px;"><strong>Incomplete.</strong> Max may not surface every restaurant, sight, complete information about a sight, or option that\'s actually relevant. There\'s always more to find.</li>' +
+        '<li><strong>Out of date.</strong> Flight prices, hotel availability, opening hours — all change. Max can\'t see the world today.</li>' +
+      '</ul>' +
+      '<p style="margin:0 0 18px;">Verify anything you\'re going to book against a primary source. <a href="#" id="welcome-howitworks" style="color:#1a5fa8;">Read more in How it works →</a></p>' +
+      '<div style="border-top:1px solid #eee;margin:0 0 14px;"></div>' +
+      '<p style="margin:0 0 6px;font-weight:700;">One question Max needs from you up front: pace.</p>' +
+      '<p style="margin:0 0 12px;">How many hours per day do you actually spend on sights and activities? Not what you think you "should" — what you actually do.</p>' +
+      '<div style="display:flex;align-items:center;gap:14px;margin:0 0 8px;">' +
+        '<input type="range" id="welcome-pace-slider" min="2" max="10" step="1" value="' + startingPace + '" style="flex:1;accent-color:#1a5fa8;">' +
+        '<div id="welcome-pace-readout" style="font-size:14px;font-weight:700;color:#111;min-width:62px;text-align:right;">' + startingPace + ' hrs/day</div>' +
+      '</div>' +
+      '<p style="margin:0 0 12px;font-size:12px;color:#666;line-height:1.55;">Max will use about <span id="welcome-pace-readout-2">' + startingPace + '</span> hours of sightseeing on a full day (lighter on travel days, fuller in the middle).</p>' +
+      '<p style="margin:0;font-size:11.5px;color:#888;line-height:1.55;">A note on accuracy: there\'s no travel-time database behind this. If the LLM is wrong about a sight\'s duration, the allocation will be off. The prompt assumes a "committed traveler." If you\'re a slow museum-goer, double the number. If you\'re "look-and-go," halve it.</p>' +
+    '</div>' +
+    '<div style="padding:14px 22px;border-top:1px solid #eee;flex-shrink:0;">' +
+      '<button id="welcome-continue" type="button" style="width:100%;padding:10px;font-size:13px;font-weight:600;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;">Got it — let\'s plan →</button>' +
+    '</div>';
+
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+
+  var slider = document.getElementById("welcome-pace-slider");
+  var readout = document.getElementById("welcome-pace-readout");
+  var readout2 = document.getElementById("welcome-pace-readout-2");
+  if (slider) {
+    slider.oninput = function () {
+      readout.textContent = slider.value + " hrs/day";
+      readout2.textContent = slider.value;
+    };
+  }
+
+  function dismiss() {
+    var paceVal = parseInt(slider && slider.value, 10);
+    if (!isFinite(paceVal) || paceVal < 2 || paceVal > 10) paceVal = 6;
+    try {
+      localStorage.setItem("max-default-pace-hours", String(paceVal));
+      localStorage.setItem("max-onboarded", "1");
+    } catch (_){}
+    if (ov.parentNode) ov.parentNode.removeChild(ov);
+    if (typeof onContinue === "function") onContinue(paceVal);
+  }
+  document.getElementById("welcome-continue").onclick = dismiss;
+  // "Read more in How it works" link.
+  var hiwLink = document.getElementById("welcome-howitworks");
+  if (hiwLink) {
+    hiwLink.onclick = function (e) {
+      e.preventDefault();
+      // Don't dismiss — open the essay over the welcome so the user
+      // can read both then close back to here.
+      if (typeof showAboutMax === "function") showAboutMax();
+    };
+  }
+}
+
+// v353.2: hook the welcome modal to first-sign-in. Listens for the
+// max-sync-signedIn window event (fired by sync.js after a
+// successful sign-in / magic-link consume) and shows the welcome
+// once. Idempotent — once max-onboarded is '1', subsequent sign-ins
+// don't re-trigger. Users who want to re-read can hit the
+// "Welcome" link on the home screen.
+(function () {
+  if (typeof window === "undefined") return;
+  function maybeShowWelcome() {
+    try {
+      if (localStorage.getItem("max-onboarded") === "1") return;
+    } catch (_){}
+    // Defer slightly so the home screen has time to render.
+    setTimeout(function () {
+      if (typeof showWelcomeOnboarding === "function") showWelcomeOnboarding();
+    }, 600);
+  }
+  window.addEventListener("max-sync-signedIn", maybeShowWelcome);
+  // Also check on initial load — if the user was already signed in
+  // from a previous session and never saw the welcome (legacy
+  // accounts), show it now.
+  if (typeof MaxSync !== "undefined" && typeof MaxSync.isSignedIn === "function" && MaxSync.isSignedIn()) {
+    maybeShowWelcome();
+  }
+})();
 
 function showAboutMax(){
   var ov=document.getElementById("about-max-overlay");
@@ -13288,16 +13408,32 @@ function _getPaceMode(paceText){
 // city-data generation prompts so the model shapes stay lengths, sight counts,
 // and evening suggestions to match what the user actually wants.
 function _paceDirective(mode){
+  // v353.2: prepend the user's numeric pace preference if set.
+  // The mode-string directive below stays as a fallback / context;
+  // the numeric hours/day is more precise and is what the user
+  // explicitly chose in the welcome modal. Both flow into the same
+  // LLM prompt so the model has both the rough shape and the
+  // specific number.
+  var hourPrefix = "";
+  try {
+    var ph = parseInt(localStorage.getItem("max-default-pace-hours"), 10);
+    if (isFinite(ph) && ph >= 2 && ph <= 10) {
+      hourPrefix = "PACE-HOURS: The traveler prefers about " + ph +
+        " hours of sightseeing on a full day (lighter on travel days, fuller in the middle). " +
+        "Allocate sights and evening suggestions to fit roughly that hour budget per day, " +
+        "assuming a committed traveler. ";
+    }
+  } catch (_) {}
   if (mode === "loose") {
-    return "PACE: Loose. The traveler wants white space. Prefer LONGER stays (nudge stayRange up by 1 night where reasonable). Recommend FEWER sights per destination (5-6). Leave evenings open. Optimize for sitting in cafes, people-watching, unscheduled discovery.";
+    return hourPrefix + "PACE: Loose. The traveler wants white space. Prefer LONGER stays (nudge stayRange up by 1 night where reasonable). Recommend FEWER sights per destination (5-6). Leave evenings open. Optimize for sitting in cafes, people-watching, unscheduled discovery.";
   }
   if (mode === "notmuch") {
-    return "PACE: Not much. The traveler has limited time and wants high throughput. Prefer SHORTER stays (minimum that makes sense). Recommend MORE sights per destination (8-10). Include evening suggestions. Pack the days.";
+    return hourPrefix + "PACE: Not much. The traveler has limited time and wants high throughput. Prefer SHORTER stays (minimum that makes sense). Recommend MORE sights per destination (8-10). Include evening suggestions. Pack the days.";
   }
   if (mode === "enough") {
-    return "PACE: Enough. Balanced. Moderate stays, 6-8 sights per destination, deliberate gaps for unexpected opportunities.";
+    return hourPrefix + "PACE: Enough. Balanced. Moderate stays, 6-8 sights per destination, deliberate gaps for unexpected opportunities.";
   }
-  return "";
+  return hourPrefix;
 }
 
 // Pick a sights-count string appropriate for the pace mode
