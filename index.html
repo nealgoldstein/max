@@ -17064,15 +17064,29 @@ function updateMainMap(){
   var largerBtn = document.getElementById('map-larger-btn');
   if(_leftMode==="trip"){
     // v353.2: trip-overview map now uses satellite to match the
-    // "View larger →" popup (which has always been satellite via
+    // "View larger →" popup (always satellite via Esri's
     // World_Imagery tiles). The two views were inconsistent —
-    // popup was satellite, inline was vector — and the user
-    // expectation is that the popup is just a bigger version of
-    // the same map. Setting both to satellite makes the
-    // relationship obvious. Dest-mode keeps its existing vector
-    // default (separate decision; satellite is loud at
-    // street-level zooms where dest-mode lives).
-    setMapStyle('satellite');
+    // popup satellite, inline vector — and the user expectation
+    // is that the popup is just a bigger version of the same
+    // map. Dest-mode keeps its existing vector default (separate
+    // decision; satellite is loud at street-level zooms where
+    // dest-mode lives).
+    //
+    // setMapStyle() respects _mapStylePref and ignores its
+    // argument, so calling setMapStyle('satellite') was a no-op.
+    // Instead, swap layers directly here in trip-mode without
+    // disturbing _mapStylePref — that way dest-mode's preference
+    // (vector by default, user-toggleable via the 🗺/🛰 button)
+    // is unchanged.
+    if (_mainMap.hasLayer(_mainVectorLayer)) _mainMap.removeLayer(_mainVectorLayer);
+    if (!_mainMap.hasLayer(_mainSatLayer)) _mainSatLayer.addTo(_mainMap);
+    if (!_mainMap.hasLayer(_mainSatLabels)) _mainSatLabels.addTo(_mainMap);
+    // Update the current-style tracker so dest-mode's setMapStyle()
+    // sees a mismatch with _mapStylePref ('vector' by default) and
+    // actually swaps back to vector — without this, the early
+    // "_currentMapStyle === style" return would leave satellite on
+    // when entering dest-mode.
+    _currentMapStyle = 'satellite';
     var styleBtn=document.getElementById('map-style-btn');
     if(styleBtn) styleBtn.style.display='none';
     buildMainLegend("trip");
