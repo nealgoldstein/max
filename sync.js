@@ -354,6 +354,13 @@
   var _prefsPushPending = null;
   var _prefsPushTimer = null;
   var _prefsPushInFlight = false;
+  // v353.4: circuit-breaker. After repeated failures (e.g., server
+  // doesn't accept PATCH because of CORS), back off exponentially
+  // and eventually stop retrying until the next sign-in / page load.
+  // Prevents the runaway "retry every 200ms forever" storm we saw
+  // when the worker's CORS allowlist was missing PATCH.
+  var _prefsPushFails = 0;
+  var _prefsPushBackoff = 0;
 
   function _schedulePrefsPush(key, value) {
     if (!isSignedIn()) return;
@@ -388,6 +395,8 @@
     _prefsPushInFlight = true;
     try {
       await pushPrefsPatchRemote(patch);
+      _prefsPushFails = 0;
+      _prefsPushBackoff = 0;
     } catch (e) {
       // Best-effort. If the network is down the local cache still
       // has the new value; next sign-in (or next successful push)
@@ -396,7 +405,21 @@
       if (e.code === 'AUTH') {
         console.warn('[max-sync] prefs push: signed out, dropping patch');
       } else {
-        console.warn('[max-sync] prefs push failed:', e);
+        _prefsPushFails++;
+        // Exponential backoff capped at 30s. After 6 consecutive
+        // failures (~1 min), stop trying — the next sign-in or
+        // page load will reset and try again.
+        _prefsPushBackoff = Math.min(30000, 500 * Math.pow(2, _prefsPushFails));
+        if (_prefsPushFails === 1 || _prefsPushFails % 5 === 0) {
+          console.warn('[max-sync] prefs push failed (attempt ' +
+            _prefsPushFails + ', next retry in ' + _prefsPushBackoff + 'ms):', e.message);
+        }
+        if (_prefsPushFails >= 6) {
+          console.warn('[max-sync] prefs push: giving up after 6 failures; ' +
+            'will retry on next sign-in or page load');
+          _prefsPushPending = null;
+          return;
+        }
         // Re-queue so a future flush retries. Merge with anything
         // that landed during the failed call.
         _prefsPushPending = Object.assign({}, patch, _prefsPushPending || {});
@@ -404,9 +427,9 @@
     } finally {
       _prefsPushInFlight = false;
       // If something accumulated during the in-flight call, kick
-      // another flush.
+      // another flush — using the backoff if we just failed.
       if (_prefsPushPending && Object.keys(_prefsPushPending).length) {
-        _prefsPushTimer = setTimeout(_flushPrefsPush, 200);
+        _prefsPushTimer = setTimeout(_flushPrefsPush, _prefsPushBackoff || 200);
       }
     }
   }
