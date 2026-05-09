@@ -16865,13 +16865,39 @@ function updateMainMapMarkers(){
     addPin([loc.lat,loc.lng],makeMapIcon(loc.type),1,{id:'util-'+loc.name,n:loc.name,note:loc.note||loc.type,done:false,slot:'day'},'info');
   });
 
-  // Current destination city pin — always show even when sights are present
+  // Current destination city pin — always show even when sights are present.
+  // v353.2: switched the current-destination marker from black (#111) to
+  // a saturated red (#d92f2f). The black pin blended into other dark
+  // map symbols and didn't read as "you are here." Red is the universal
+  // "this is the place" cue. Pin is also slightly larger (32px vs 28px)
+  // and font bumped to match. Bound a permanent tooltip with the
+  // destination's display name so a tap (or hover on desktop) shows
+  // exactly which city this is — useful when the 2-letter abbrev
+  // ("Li" for Lisbon) is ambiguous.
   if(center){
     var curIcon=L.divIcon({
-      html:'<div style="background:#111;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.35);">'+dest.place.substring(0,2)+'</div>',
-      className:'',iconSize:[28,28],iconAnchor:[14,14],popupAnchor:[0,-16]
+      html:'<div style="background:#d92f2f;color:#fff;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;border:2px solid #fff;box-shadow:0 2px 6px rgba(217,47,47,0.45),0 0 0 2px rgba(217,47,47,0.18);">'+dest.place.substring(0,2)+'</div>',
+      className:'',iconSize:[32,32],iconAnchor:[16,16],popupAnchor:[0,-18]
     });
     var cm=L.marker(center,{icon:curIcon,zIndexOffset:100});
+    var _curLabel = (dest.label && dest.label !== dest.place)
+      ? (dest.label + ' (' + dest.place + ')')
+      : dest.place;
+    cm.bindTooltip(_curLabel, {
+      permanent: false,
+      direction: 'top',
+      offset: [0, -18],
+      className: 'main-map-tooltip'
+    });
+    cm.on('click', function(){
+      // Open the tooltip on tap. By default Leaflet's tooltip opens
+      // on hover only; on touch devices that hover never fires, so
+      // the tap is the user's only path. openTooltip is idempotent
+      // and the close on the next tap-elsewhere is automatic.
+      try { cm.openTooltip(); } catch(_){}
+      // Auto-close after a beat so the tooltip doesn't linger.
+      setTimeout(function(){ try { cm.closeTooltip(); } catch(_){} }, 2200);
+    });
     cm.addTo(_mainMap); _mainMarkers.push(cm);
   }
 
