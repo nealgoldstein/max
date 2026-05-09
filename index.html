@@ -4303,6 +4303,23 @@ function renderHomeScreen(){
           _tripsIndex=_tripsIndex.filter(function(t){return t.id!==id;});
           saveTripsIndex();
           try{localStorage.removeItem("max-trip-"+id);}catch(ex){}
+          // v353.2: also delete from the server. Without this, the
+          // next 60s poll (sync.js _maybePull → pullAll) sees the
+          // trip still on the server and writes it back into local
+          // storage — looking like the delete "didn't work" because
+          // the trip resurrects within a minute. Fire-and-forget so
+          // a slow / failed server delete doesn't block the local
+          // UI; if the server delete fails, the trip stays remote
+          // and the next pull will repopulate it locally — a real
+          // edge case the user can handle by retrying delete.
+          if (typeof MaxSync !== "undefined" &&
+              typeof MaxSync.isSignedIn === "function" &&
+              MaxSync.isSignedIn() &&
+              typeof MaxSync.deleteTrip === "function") {
+            MaxSync.deleteTrip(id).catch(function (err) {
+              console.warn("[Max] server delete failed for trip", id, err);
+            });
+          }
           c.parentNode.removeChild(c);
           // Regenerate the option list so "Pick up where you left off" is removed if no trips remain
           if(typeof renderHomeOptions === "function") renderHomeOptions();
@@ -6441,7 +6458,7 @@ function showWelcomeOnboarding(onContinue) {
         '<li style="margin-bottom:4px;"><strong>Incomplete.</strong> Max may not surface every restaurant, sight, complete information about a sight, or option that\'s actually relevant. There\'s always more to find.</li>' +
         '<li><strong>Out of date.</strong> Flight prices, hotel availability, opening hours — all change. Max can\'t see the world today.</li>' +
       '</ul>' +
-      '<p style="margin:0 0 18px;">Verify anything you\'re going to book against a primary source. <a href="#" id="welcome-howitworks" style="color:#1a5fa8;">Read more in How it works →</a></p>' +
+      '<p style="margin:0 0 18px;">Verify anything you\'re going to book against a primary source. <span id="welcome-howitworks" style="color:#1a5fa8;cursor:pointer;text-decoration:underline;">Read more in How it works →</span></p>' +
       '<div style="border-top:1px solid #eee;margin:0 0 14px;"></div>' +
       '<p style="margin:0 0 6px;font-weight:700;">One question Max needs from you up front: pace.</p>' +
       '<p style="margin:0 0 12px;">How many hours per day do you actually spend on sights and activities? Not what you think you "should" — what you actually do.</p>' +
