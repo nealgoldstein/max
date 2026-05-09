@@ -703,7 +703,31 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
   .tm-dest-actions{flex-wrap:wrap;}
   /* Itinerary card padding shrinks so usable text width grows. */
   .ic{padding:14px 12px;}
+  /* v353.4: picker (place-picker overlay) on phone. The desktop layout
+     splits the screen into a list + map side-by-side, with the map
+     fixed at 46% / min 280px. On a 380-px-wide phone that leaves the
+     list ~90px — unreadable. Hide the inline map entirely on phone
+     and let the list take the full width; the user can tap the
+     "↗ Open in new window" button (which calls openPlacePickerMapModal)
+     to see the map full-screen when they want. */
+  #picker-2col{flex-direction:column;}
+  #picker-map, #picker-divider{display:none !important;}
+  #tb-picker-list-pane{flex:1 1 auto !important;width:100% !important;padding:14px 14px !important;}
+  /* Surface a "Show map" affordance on the picker header so the user
+     knows the map is one tap away. The desktop layout puts a button
+     inside the (now-hidden) map pane; on phone we render an
+     equivalent fixed-position button that calls the same function. */
+  .picker-mobile-map-btn{
+    display:flex !important;position:fixed;right:12px;bottom:78px;z-index:11200;
+    width:46px;height:46px;border-radius:50%;background:#1a5fa8;color:#fff;
+    border:none;font-size:18px;align-items:center;justify-content:center;
+    box-shadow:0 2px 8px rgba(0,0,0,0.2);cursor:pointer;font-family:inherit;
+  }
 }
+/* Hide the floating mobile-map button on desktop (where the inline
+   map is visible). It only renders on phone via the media query
+   above. */
+.picker-mobile-map-btn{display:none;}
 /* v352: default state for the mobile map toggle — hidden until a
    narrow viewport pulls it into view via the @media(max-width:700px)
    block above. Kept outside the media query so the button stays out
@@ -9125,6 +9149,12 @@ function renderActivityPicker(){
     +      'title="Open map in a new window">↗ Open in new window</button>'
     +  '</div>'
     +'</div>'
+    // v353.4: floating "show map" button — visible only on phone via
+    // CSS (.picker-mobile-map-btn). On desktop the inline map already
+    // shows; hiding it via @media (max-width:700px) on phone freed
+    // the list to take full width, and this FAB gives users one-tap
+    // access to the same fullscreen map modal the desktop button uses.
+    +'<button type="button" class="picker-mobile-map-btn" onclick="openPlacePickerMapModal();event.preventDefault();" title="Show map">🗺</button>'
     +'<div class="tb-footer" style="flex-shrink:0;">'
     +  (hasGenerated?'<button class="tb-btn-primary" id="tb-place-continue-btn" onclick="'+primaryBtnHandler+'">'+primaryBtnLabel+'</button>':'')
     +  '<div style="display:flex;justify-content:space-between;margin-top:8px;">'
