@@ -938,6 +938,26 @@
 
     var list = document.createElement("div");
     list.style.cssText = "padding:10px 14px 12px;border-top:1px solid #e6d5a0;display:" + (expanded ? "block" : "none") + ";";
+    // v353.2: enrich each line with the destination's date range so
+    // the user can prioritize "what to book first." preArrivalActions
+    // doesn't include dates, so we look up the dest by id from the
+    // trip object that was passed in to this render.
+    var fmtD = global.fmtD;
+    function _destById(id) {
+      if (!id || !trip || !Array.isArray(trip.destinations)) return null;
+      for (var i = 0; i < trip.destinations.length; i++) {
+        if (trip.destinations[i] && trip.destinations[i].id === id) return trip.destinations[i];
+      }
+      return null;
+    }
+    function _destRange(d) {
+      if (!d || !fmtD) return '';
+      if (d.dateFrom && d.dateTo && d.dateFrom !== d.dateTo) {
+        return fmtD(d.dateFrom) + ' – ' + fmtD(d.dateTo);
+      }
+      if (d.dateFrom) return fmtD(d.dateFrom);
+      return '';
+    }
     actions.items.forEach(function (item) {
       var line = document.createElement("button");
       line.type = "button";
@@ -945,11 +965,20 @@
       line.onmouseover = function () { line.style.background = "#fdf3cf"; };
       line.onmouseout  = function () { line.style.background = "#fff"; };
       var text = "";
+      var _esc = function (s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;'); };
       if (item.kind === "hotelMissing") {
-        text = "No hotel booked for <strong>" + (item.destPlace || "this destination").replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</strong>";
+        var d = _destById(item.destId);
+        var rng = _destRange(d);
+        text = (rng ? "<strong>" + _esc(rng) + "</strong> · " : "")
+             + "No hotel booked for <strong>" + _esc(item.destPlace || "this destination") + "</strong>";
       } else if (item.kind === "transitMissing") {
-        text = "Transit not booked: <strong>" + (item.fromPlace || "").replace(/&/g, "&amp;").replace(/</g, "&lt;")
-             + " → " + (item.toPlace || "").replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</strong>";
+        // For transit between A and B, the relevant date is A's
+        // dateTo (the day you're leaving A, also when you'd take
+        // the transit to arrive at B).
+        var fromD = _destById(item.fromId);
+        var transitDate = (fromD && fromD.dateTo && fmtD) ? fmtD(fromD.dateTo) : '';
+        text = (transitDate ? "<strong>" + _esc(transitDate) + "</strong> · " : "")
+             + "Transit not booked: <strong>" + _esc(item.fromPlace || "") + " → " + _esc(item.toPlace || "") + "</strong>";
       }
       line.innerHTML = text + ' <span style="color:#a89055;font-size:10px;">→</span>';
       (function (it) {

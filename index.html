@@ -107,6 +107,17 @@
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#e8e8e8;color:#111;font-size:14px;line-height:1.6;}
 .app{display:flex;height:100vh;}
+/* v353.2: kill the 1-pixel tile gaps that show as a lat/lon-style
+   grid covering Leaflet maps. Tiles are 256×256; on certain zooms
+   and DPI ratios the seams between adjacent tiles render visibly,
+   especially over satellite imagery. Forcing each tile to 257px
+   gives adjacent tiles a 1-pixel overlap that hides the seam.
+   GPU-promote the tile container to keep sub-pixel positioning
+   from wobbling between integer boundaries. Same fix as the
+   larger-map popup; this version applies to every Leaflet map on
+   the main page (trip-overview, dest-mode, picker, etc.). */
+.leaflet-container .leaflet-tile-pane img{width:257px !important;height:257px !important;}
+.leaflet-tile-container{will-change:transform;}
 /* v294.7: bump default panel width (was 340px) so the destination
    list reads comfortably without pinching, and add native CSS
    `resize: horizontal` so the user can drag the right edge to give
