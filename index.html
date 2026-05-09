@@ -8239,7 +8239,13 @@ function _buildHeroMapPoints(){
       isLast: i === trip.destinations.length - 1,
       dateFrom: d.dateFrom || "",
       dateTo: d.dateTo || "",
-      nights: d.nights || 0
+      nights: d.nights || 0,
+      // v353.2: flag the currently-active destination so the popup
+      // can focus on it instead of doing a generic fitBounds across
+      // every destination. When you tap "View larger →" while
+      // looking at Reykjavik, the popup should open zoomed on
+      // Reykjavik, not on the entire trip.
+      isActive: (typeof activeDest !== "undefined" && d.id === activeDest)
     });
   });
   return pts;
@@ -8442,7 +8448,21 @@ function openTripHeroMapWindow(){
     +       '});'
     +     '})(g);'
     +   '});'
-    +   'if (coords.length >= 2) map.fitBounds(coords, {padding: [50, 50], maxZoom: 10});'
+    +   /* v353.2: focus on the active destination if one was open
+         when the popup launched, instead of always fitting all
+         destinations. setView with a city-level zoom (12) feels
+         right for "show me where this place is" — close enough to
+         see the surrounding terrain, far enough to give context.
+         If there's no active dest (popup opened from trip
+         overview), fall back to the original fit-all behavior. */
+    +   'var activePt = pts.filter(function(p){return p.isActive;})[0];'
+    +   'if (activePt) {'
+    +     'map.setView([activePt.lat, activePt.lng], 12, {animate: false});'
+    +   '} else if (coords.length >= 2) {'
+    +     'map.fitBounds(coords, {padding: [50, 50], maxZoom: 10});'
+    +   '} else if (coords.length === 1) {'
+    +     'map.setView(coords[0], 12, {animate: false});'
+    +   '}'
     +   'window.addEventListener("message", function(e){'
     +     'if (e && e.data && e.data.type === "maxTripStale") {'
     +       'var t = document.getElementById("stale-toast");'
