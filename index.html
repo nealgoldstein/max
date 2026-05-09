@@ -6429,9 +6429,11 @@ function showWelcomeOnboarding(onContinue) {
   if (existing) existing.parentNode.removeChild(existing);
 
   // Read existing pace preference if any (so re-opens prefill).
+  // v353.2: now via MaxDB.prefs so all user prefs live in one
+  // unified blob instead of per-pref localStorage keys.
   var startingPace = 6;
   try {
-    var saved = parseInt(localStorage.getItem("max-default-pace-hours"), 10);
+    var saved = (window.MaxDB && MaxDB.prefs) ? MaxDB.prefs.get("paceHours", 6) : 6;
     if (isFinite(saved) && saved >= 2 && saved <= 10) startingPace = saved;
   } catch (_) {}
 
@@ -6490,7 +6492,10 @@ function showWelcomeOnboarding(onContinue) {
     var paceVal = parseInt(slider && slider.value, 10);
     if (!isFinite(paceVal) || paceVal < 2 || paceVal > 10) paceVal = 6;
     try {
-      localStorage.setItem("max-default-pace-hours", String(paceVal));
+      // v353.2: pace lives in the unified prefs blob; max-onboarded
+      // stays as a standalone flag (it's a one-time UI marker, not
+      // a user preference, and doesn't need to follow the account).
+      if (window.MaxDB && MaxDB.prefs) MaxDB.prefs.set("paceHours", paceVal);
       localStorage.setItem("max-onboarded", "1");
     } catch (_){}
     if (ov.parentNode) ov.parentNode.removeChild(ov);
@@ -13450,10 +13455,10 @@ function _paceDirective(mode){
   // the numeric hours/day is more precise and is what the user
   // explicitly chose in the welcome modal. Both flow into the same
   // LLM prompt so the model has both the rough shape and the
-  // specific number.
+  // specific number. Pace lives in the unified MaxDB.prefs blob.
   var hourPrefix = "";
   try {
-    var ph = parseInt(localStorage.getItem("max-default-pace-hours"), 10);
+    var ph = (window.MaxDB && MaxDB.prefs) ? parseInt(MaxDB.prefs.get("paceHours"), 10) : NaN;
     if (isFinite(ph) && ph >= 2 && ph <= 10) {
       hourPrefix = "PACE-HOURS: The traveler prefers about " + ph +
         " hours of sightseeing on a full day (lighter on travel days, fuller in the middle). " +
@@ -24242,6 +24247,30 @@ function getDistricts(place,intent,dest){
     };
     window.addEventListener('max-sync-signedIn', onSyncChange);
     window.addEventListener('max-sync-signedOut', onSyncChange);
+
+    // v353.2: when sync.js wipes the local trip cache (on sign-out
+    // or account-switch sign-in), reload the in-memory trips
+    // index and re-render the home screen so the user sees an
+    // empty list immediately instead of stale cards from the
+    // previous account.
+    window.addEventListener('max-sync-signedOut', function () {
+      try {
+        if (typeof loadTripsIndex === 'function') loadTripsIndex();
+        var hs = document.getElementById('home-screen');
+        if (hs && hs.style.display !== 'none' && typeof renderHomeScreen === 'function') {
+          renderHomeScreen();
+        }
+      } catch (_) {}
+    });
+    window.addEventListener('max-sync-signedIn', function () {
+      try {
+        if (typeof loadTripsIndex === 'function') loadTripsIndex();
+        var hs = document.getElementById('home-screen');
+        if (hs && hs.style.display !== 'none' && typeof renderHomeScreen === 'function') {
+          renderHomeScreen();
+        }
+      } catch (_) {}
+    });
   })();
   </script>
 </body>

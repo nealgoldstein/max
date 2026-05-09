@@ -161,10 +161,45 @@
       skipAuth: true,
       body: { email: email.trim() },
     });
+    // v353.2: wipe stale local trip cache before adopting the new
+    // session. Otherwise trips from a previous account leak into
+    // the new account's view (privacy + correctness issue). UI
+    // prefs and onboarded flag are device-level and stay.
+    var newEmail = data.user && data.user.email;
+    if (newEmail && newEmail !== getEmail()) _wipeLocalTripCache();
     setToken(data.token);
-    setEmail(data.user && data.user.email);
+    setEmail(newEmail);
+    // v353.3: hydrate prefs from server into MaxDB. Fire-and-forget;
+    // the local cache (whatever's left from the previous account or
+    // empty for fresh sign-in) is the fallback if the network fails.
+    pullPrefs().catch(function () {});
     _emitMaxSyncEvent('signedIn');
     return data;
+  }
+
+  // v353.2: clear all max-trip-* and the trips index from
+  // localStorage. Used on account-switch (sign-out, or sign-in as
+  // a different account) so the next user doesn't see the
+  // previous user's data. Per-device UI prefs (legend collapsed,
+  // research-collapsed-*, popup-route, prefs blob, onboarded
+  // flag, SW cache) are intentionally NOT cleared — those follow
+  // the device, not the account.
+  function _wipeLocalTripCache() {
+    try {
+      var keys = [];
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (!k) continue;
+        if (k.indexOf('max-trip-') === 0) keys.push(k);
+        if (k === 'max-trips-index') keys.push(k);
+      }
+      keys.forEach(function (k) { try { localStorage.removeItem(k); } catch (_) {} });
+      // Also reset the in-memory index that index.html holds — done
+      // by the caller via location.reload or a manual loadTripsIndex
+      // call after signedIn fires. We only handle the storage layer.
+    } catch (e) {
+      console.warn('[max-sync] wipe local trip cache failed:', e);
+    }
   }
 
   // v353.1: dispatch a window event whenever the sign-in state
@@ -204,11 +239,19 @@
       var emailMatch = hash.match(/email=([^&]+)/);
       var email = emailMatch ? decodeURIComponent(emailMatch[1]) : null;
       if (!token) return false;
+      // v353.2: wipe stale local trip cache when the email differs
+      // from what we previously stored — i.e., this magic link is
+      // for a different account than was last signed in. Prevents
+      // trips from leaking across accounts.
+      if (email && email !== getEmail()) _wipeLocalTripCache();
       setToken(token);
       if (email) setEmail(email);
       // Clear the hash so the URL is clean.
       try { history.replaceState(null, '', location.pathname + location.search); }
       catch (_) { location.hash = ''; }
+      // v353.3: hydrate prefs from server. Best-effort — if the
+      // network's down we keep using the local cache.
+      pullPrefs().catch(function () {});
       // v353.1: fire the same signedIn event the dev-login path does
       // so listeners (sync buttons, banners) update for the magic-
       // link path too.
@@ -218,6 +261,10 @@
   }
 
   function signOut() {
+    // v353.2: clear local trip cache so the next user (or the same
+    // user signing in as a different account) doesn't see this
+    // user's trips. UI prefs / onboarded flag / SW cache stay.
+    _wipeLocalTripCache();
     setToken(null);
     setEmail(null);
     _emitMaxSyncEvent('signedOut');
@@ -242,6 +289,164 @@
   }
   async function deleteTrip(id) {
     return request('/trips/' + encodeURIComponent(id), { method: 'DELETE' });
+  }
+
+  // ── Prefs endpoints ────────────────────────────────────────
+  //
+  // v353.3 (Path B): user-level prefs (paceHours, future cross-device
+  // settings) live on the server at /user/prefs. localStorage holds
+  // only an offline cache. Hydration order: on sign-in, we pull from
+  // the server and call MaxDB.prefs.replace(...) — that's the source
+  // of truth for the session. Local writes (MaxDB.prefs.set(...)
+  // emits 'prefsChanged' with source='local') get write-through-PATCHed
+  // back here.
+
+  async function getPrefsRemote() {
+    return request('/user/prefs');
+  }
+  async function pushPrefsPatchRemote(patch) {
+    return request('/user/prefs', { method: 'PATCH', body: { patch: patch } });
+  }
+  async function replacePrefsRemote(prefs) {
+    return request('/user/prefs', { method: 'PUT', body: { prefs: prefs } });
+  }
+
+  // pullPrefs — fetch from server, push into MaxDB. Source='remote'
+  // so listeners (e.g., the welcome modal's slider) re-render without
+  // echoing the just-fetched values back to the server.
+  async function pullPrefs() {
+    if (!isSignedIn()) return null;
+    // Flush any pending local pushes before pulling — otherwise a
+    // pull racing ahead of a debounced push would overwrite the
+    // user's just-changed value with stale server state. At boot
+    // and at sign-in this is a no-op (no local sets have queued
+    // anything); the safety matters when pull becomes a periodic
+    // trigger.
+    if (_prefsPushPending && Object.keys(_prefsPushPending).length) {
+      try { await _flushPrefsPush(); } catch (_) {}
+    }
+    try {
+      var resp = await getPrefsRemote();
+      var remotePrefs = (resp && resp.prefs) || {};
+      // If we have local prefs that the server doesn't (e.g., user
+      // changed paceHours offline), the server is the source of
+      // truth here — but that's fine, because the local change
+      // would have been pushed before sign-out, and on sign-in
+      // we trust the server. If we want to merge in the future,
+      // the right place is here.
+      if (global.MaxDB && global.MaxDB.prefs &&
+          typeof global.MaxDB.prefs.replace === 'function') {
+        global.MaxDB.prefs.replace(remotePrefs);
+      }
+      return remotePrefs;
+    } catch (e) {
+      // Network unreachable / 401 — keep using local cache. Prefs
+      // sync is best-effort; the UI must work offline.
+      console.warn('[max-sync] pullPrefs failed:', e);
+      return null;
+    }
+  }
+
+  // Push queue: prefsChanged events fire one key at a time, but we
+  // debounce so rapid back-to-back sets coalesce into one PATCH.
+  // The pending object accumulates the latest value for each key
+  // touched during the debounce window.
+  var _prefsPushPending = null;
+  var _prefsPushTimer = null;
+  var _prefsPushInFlight = false;
+
+  function _schedulePrefsPush(key, value) {
+    if (!isSignedIn()) return;
+    if (!_prefsPushPending) _prefsPushPending = {};
+    if (value === undefined) {
+      // MaxDB.prefs.set(key, undefined) deletes — but the server's
+      // PATCH endpoint shallow-merges and has no concept of "delete
+      // a key." For now we send `null`; the server stores it as
+      // null. If we ever need true delete-keys-from-blob, switch to
+      // a PUT with the full prefs minus the key.
+      _prefsPushPending[key] = null;
+    } else {
+      _prefsPushPending[key] = value;
+    }
+    if (_prefsPushTimer) clearTimeout(_prefsPushTimer);
+    _prefsPushTimer = setTimeout(_flushPrefsPush, 600);
+  }
+
+  async function _flushPrefsPush() {
+    _prefsPushTimer = null;
+    if (_prefsPushInFlight) {
+      // Another push is already running — re-arm so the next tick
+      // catches up. Don't drop the pending object; it gets flushed
+      // when the in-flight push returns.
+      _prefsPushTimer = setTimeout(_flushPrefsPush, 400);
+      return;
+    }
+    if (!_prefsPushPending || !Object.keys(_prefsPushPending).length) return;
+    if (!isSignedIn()) return;
+    var patch = _prefsPushPending;
+    _prefsPushPending = null;
+    _prefsPushInFlight = true;
+    try {
+      await pushPrefsPatchRemote(patch);
+    } catch (e) {
+      // Best-effort. If the network is down the local cache still
+      // has the new value; next sign-in (or next successful push)
+      // will reconcile. For 401 we drop the patch — the user is
+      // signed out and prefs sync isn't meaningful.
+      if (e.code === 'AUTH') {
+        console.warn('[max-sync] prefs push: signed out, dropping patch');
+      } else {
+        console.warn('[max-sync] prefs push failed:', e);
+        // Re-queue so a future flush retries. Merge with anything
+        // that landed during the failed call.
+        _prefsPushPending = Object.assign({}, patch, _prefsPushPending || {});
+      }
+    } finally {
+      _prefsPushInFlight = false;
+      // If something accumulated during the in-flight call, kick
+      // another flush.
+      if (_prefsPushPending && Object.keys(_prefsPushPending).length) {
+        _prefsPushTimer = setTimeout(_flushPrefsPush, 200);
+      }
+    }
+  }
+
+  // Wire MaxDB → MaxSync. db.js doesn't know about HTTP; we listen
+  // for its 'prefsChanged' event and write through. Source='local'
+  // means the user just changed something; source='remote' means we
+  // just hydrated and there's nothing to push.
+  function _wirePrefsBridge() {
+    if (!global.MaxDB || typeof global.MaxDB.on !== 'function') return;
+    global.MaxDB.on('prefsChanged', function (e) {
+      if (!e || e.source !== 'local') return;
+      // Wholesale clear (key === null) — push the full empty blob.
+      if (e.key == null) {
+        _prefsPushPending = null;
+        if (_prefsPushTimer) { clearTimeout(_prefsPushTimer); _prefsPushTimer = null; }
+        replacePrefsRemote({}).catch(function (err) {
+          console.warn('[max-sync] prefs clear push failed:', err);
+        });
+        return;
+      }
+      _schedulePrefsPush(e.key, e.value);
+    });
+  }
+  _wirePrefsBridge();
+
+  // ── Per-trip UI state ──────────────────────────────────────
+  //
+  // PATCH /trips/:id/ui-state for cheap UI flips that should follow
+  // the trip across devices but don't change trip content. Used by
+  // banners-expanded, research-collapsed-{destId}, hide-trip-intro.
+  // Server merges keys into trip.ui_state without bumping
+  // trip.updated_at, so it doesn't trigger a full pull-down of body
+  // on the other device.
+  async function patchTripUiStateRemote(tripId, patch) {
+    if (!tripId || !patch) return null;
+    return request('/trips/' + encodeURIComponent(tripId) + '/ui-state', {
+      method: 'PATCH',
+      body: { patch: patch },
+    });
   }
 
   // ── Push (debounced save) ──────────────────────────────────
@@ -775,6 +980,11 @@
         console.warn('[max-sync] boot pull failed:', e);
       },
     );
+    // v353.3: also hydrate prefs on boot so a returning device picks
+    // up changes another device pushed (e.g., paceHours bumped on
+    // the laptop, opened the phone next morning). Independent of
+    // pullAll so a trip-pull failure doesn't block prefs.
+    pullPrefs().catch(function () {});
   }
 
   // v343: re-render the home screen / trip list after a pull so
@@ -815,6 +1025,17 @@
     listTrips: listTrips,
     getTrip: getTrip,
     deleteTrip: deleteTrip,
+    // v353.3: prefs sync. UI shouldn't need to call these directly
+    // — MaxDB.prefs.set() auto-pushes via the prefsChanged bridge,
+    // and pullPrefs runs on sign-in/boot. Exposed for tests and for
+    // the welcome modal's "load my pace before showing the slider"
+    // case.
+    pullPrefs: pullPrefs,
+    // v353.3: per-trip UI state. Use for cheap UI flips (banners
+    // expanded, research collapsed) that should follow a trip
+    // across devices but don't change trip content. Server merges
+    // the patch into trip.ui_state without bumping trip.updatedAt.
+    patchTripUiState: patchTripUiStateRemote,
     // For the LLM proxy round — exposed now so callMax can switch
     // over without another file edit.
     _request: request,

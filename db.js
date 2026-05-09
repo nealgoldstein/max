@@ -546,6 +546,112 @@
     };
   }
 
+  // ── User preferences ─────────────────────────────────────────
+  // v353.2: single JSON blob holds all user-level preferences
+  // (paceHours and anything that comes later — defaultTripDuration,
+  // preferredCurrency, language, etc.). Single seam so future prefs
+  // don't each invent their own localStorage key.
+  //
+  // v353.3 (Path B): server is the source of truth. localStorage is
+  // an offline cache. MaxSync drives the network: on sign-in it calls
+  // prefs.replace(obj, 'remote') to hydrate from /user/prefs; on every
+  // local set() this layer emits 'prefsChanged' with source='local',
+  // and MaxSync write-through-PATCHes the server. We do NOT call the
+  // network from db.js — db.js has no tokens, no base URL, and we
+  // want it usable in tests without a server.
+  //
+  // Migration: on first read, if any legacy standalone preference
+  // keys exist (max-default-pace-hours), fold them into the blob
+  // and remove the standalone. Idempotent — runs once per page
+  // load via a memo flag.
+  var KEY_PREFS = 'max-prefs';
+  var _prefsCache = null;
+  var _prefsMigrated = false;
+
+  function _prefsLoad() {
+    if (_prefsCache) return _prefsCache;
+    var obj = {};
+    try {
+      var raw = localStorage.getItem(KEY_PREFS);
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') obj = parsed;
+      }
+    } catch (_) {}
+    if (!_prefsMigrated) {
+      _prefsMigrated = true;
+      // Legacy migration: fold standalone keys into the blob.
+      try {
+        var legacyPace = localStorage.getItem('max-default-pace-hours');
+        if (legacyPace != null) {
+          var n = parseInt(legacyPace, 10);
+          if (isFinite(n) && obj.paceHours == null) obj.paceHours = n;
+          // Remove the legacy key so we don't double-store.
+          localStorage.removeItem('max-default-pace-hours');
+          // Persist immediately so the migration sticks even if the
+          // app crashes before the next set().
+          try { localStorage.setItem(KEY_PREFS, JSON.stringify(obj)); } catch (_) {}
+        }
+      } catch (_) {}
+    }
+    _prefsCache = obj;
+    return obj;
+  }
+  function _prefsPersist(obj) {
+    try { localStorage.setItem(KEY_PREFS, JSON.stringify(obj)); }
+    catch (e) { console.warn('[MaxDB] prefs save failed:', e); }
+  }
+  function prefsGet(key, defaultValue) {
+    var o = _prefsLoad();
+    if (key == null) return o; // dump everything when called with no key
+    return (key in o) ? o[key] : defaultValue;
+  }
+  // prefsSet — write one key. Default source='local' fires the
+  // 'prefsChanged' event with source='local' so MaxSync pushes to
+  // server. Pass source='remote' from inside the sync layer when
+  // we're applying a value we just fetched (no echo back to server).
+  function prefsSet(key, value, source) {
+    var o = _prefsLoad();
+    var prev = o[key];
+    if (value === undefined) delete o[key];
+    else o[key] = value;
+    _prefsPersist(o);
+    _prefsCache = o;
+    // Skip emit if nothing actually changed — avoids needless server
+    // pushes when UI re-saves the same value (e.g., welcome modal
+    // re-opened with the slider already at the saved pace).
+    var changed = (value !== prev);
+    if (changed) {
+      emit('prefsChanged', {
+        prefs: o,
+        key: key,
+        value: value,
+        source: source || 'local',
+      });
+    }
+    return o;
+  }
+  // prefsReplace — wholesale replace the local cache. Used by MaxSync
+  // when hydrating from /user/prefs on sign-in. Always emits with
+  // source='remote' so listeners can re-render without echo-pushing
+  // the just-fetched values back to the server.
+  function prefsReplace(obj) {
+    _prefsCache = (obj && typeof obj === 'object') ? obj : {};
+    _prefsPersist(_prefsCache);
+    emit('prefsChanged', {
+      prefs: _prefsCache,
+      key: null,
+      value: null,
+      source: 'remote',
+    });
+    return _prefsCache;
+  }
+  function prefsClear() {
+    _prefsCache = {};
+    try { localStorage.removeItem(KEY_PREFS); } catch (_) {}
+    emit('prefsChanged', { prefs: {}, key: null, value: null, source: 'local' });
+  }
+
   // ── Public surface ──────────────────────────────────────────
 
   var MaxDB = {
@@ -572,6 +678,18 @@
       read:   draftRead,
       write:  draftWrite,
       delete: draftDelete,
+    },
+
+    // v353.2: unified user preferences. Single blob in localStorage
+    // (KEY_PREFS), set up to grow as we add more prefs without
+    // inventing new top-level keys for each one.
+    // v353.3 (Path B): server-backed via MaxSync. db.js owns local
+    // cache + change events; sync.js drives the network.
+    prefs: {
+      get:     prefsGet,
+      set:     prefsSet,
+      replace: prefsReplace,
+      clear:   prefsClear,
     },
 
     cache: {

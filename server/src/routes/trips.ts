@@ -60,6 +60,7 @@ const createSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1).max(200),
   body: z.record(z.unknown()),
+  uiState: z.record(z.unknown()).optional(),
   updatedAt: z.number().int().optional(),
 });
 
@@ -69,7 +70,7 @@ tripsApi.post('/', async (c) => {
   if (!parsed.success) {
     return c.json({ error: 'Invalid body', issues: parsed.error.issues }, 400);
   }
-  const { id, name, body, updatedAt } = parsed.data;
+  const { id, name, body, uiState, updatedAt } = parsed.data;
 
   const existing = await db
     .select()
@@ -88,6 +89,7 @@ tripsApi.post('/', async (c) => {
       userId: user.id,
       name,
       body,
+      uiState: uiState ?? {},
       updatedAt: ts,
       createdAt: ts,
     })
@@ -105,6 +107,7 @@ tripsApi.post('/', async (c) => {
 const updateSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   body: z.record(z.unknown()),
+  uiState: z.record(z.unknown()).optional(),
   updatedAt: z.number().int(), // client's local timestamp (ms)
   force: z.boolean().optional(), // client overrides server-newer guard
 });
@@ -116,7 +119,7 @@ tripsApi.put('/:id', async (c) => {
   if (!parsed.success) {
     return c.json({ error: 'Invalid body', issues: parsed.error.issues }, 400);
   }
-  const { name, body, updatedAt, force } = parsed.data;
+  const { name, body, uiState, updatedAt, force } = parsed.data;
 
   const existing = await db
     .select()
@@ -145,6 +148,10 @@ tripsApi.put('/:id', async (c) => {
     .set({
       name: name ?? existing.name,
       body,
+      // If client didn't send uiState, preserve what's on the row.
+      // Most full-trip writes don't touch UI state — those use
+      // PATCH /:id/ui-state instead.
+      uiState: uiState ?? existing.uiState ?? {},
       updatedAt: new Date(updatedAt),
     })
     .where(eq(schema.trips.id, id))
@@ -156,6 +163,45 @@ tripsApi.put('/:id', async (c) => {
     .where(eq(schema.trips.id, id))
     .get();
   return c.json({ trip: row });
+});
+
+// Cheap UI-state writes — merge keys into trip.uiState without
+// touching `body`. Use for "expanded this banner," "collapsed that
+// research panel" — UI flips that should follow the trip across
+// devices but don't change trip content. Doesn't bump trip.updatedAt
+// (trip content is unchanged); we keep its own timestamp in the
+// blob if the client cares.
+const uiStatePatchSchema = z.object({
+  patch: z.record(z.unknown()),
+});
+
+tripsApi.patch('/:id/ui-state', async (c) => {
+  const user = c.get('user');
+  const id = c.req.param('id');
+  const parsed = uiStatePatchSchema.safeParse(
+    await c.req.json().catch(() => null),
+  );
+  if (!parsed.success) {
+    return c.json({ error: 'Invalid body', issues: parsed.error.issues }, 400);
+  }
+  const { patch } = parsed.data;
+
+  const existing = await db
+    .select()
+    .from(schema.trips)
+    .where(and(eq(schema.trips.id, id), eq(schema.trips.userId, user.id)))
+    .get();
+  if (!existing) return c.json({ error: 'Not found' }, 404);
+
+  const next = Object.assign({}, existing.uiState ?? {}, patch);
+
+  await db
+    .update(schema.trips)
+    .set({ uiState: next })
+    .where(eq(schema.trips.id, id))
+    .run();
+
+  return c.json({ uiState: next });
 });
 
 // Delete

@@ -50,6 +50,15 @@ export const trips = sqliteTable(
     // server treats it as opaque payload. Mobile and desktop both
     // round-trip the same shape.
     body: text('body', { mode: 'json' }).notNull().$type<Record<string, unknown>>(),
+    // v353.2: per-trip UI state (which banners are expanded, which
+    // dest's Research panel is collapsed, etc.). Separate column
+    // from `body` so it can be updated independently of the trip
+    // content — small UI flips don't have to round-trip the full
+    // trip payload through the wire. Sync follows the trip via
+    // existing GET/PUT /trips/:id routes.
+    uiState: text('ui_state', { mode: 'json' })
+      .$type<Record<string, unknown>>()
+      .default(sql`'{}'`),
     // updatedAt drives sync. Client compares its local timestamp to
     // remote; newer wins. For now last-write-wins is fine; we'll
     // add per-field merge in a later round if conflicts get common.
@@ -65,6 +74,28 @@ export const trips = sqliteTable(
     updatedAtIdx: index('trips_updated_at_idx').on(table.updatedAt),
   }),
 );
+
+// v353.2: user-level preferences. Single JSON blob per user — paceHours
+// and any future cross-device pref (defaultTripDuration, currency,
+// language, etc.). Distinct from per-trip UI state (lives on trips
+// table) and from device-local UI state (stays in localStorage).
+// One row per user; updatedAt drives last-write-wins between devices
+// — same model as trips, simpler since the blob is small.
+export const userPrefs = sqliteTable('user_prefs', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  prefs: text('prefs', { mode: 'json' })
+    .$type<Record<string, unknown>>()
+    .notNull()
+    .default(sql`'{}'`),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(strftime('%s', 'now') * 1000)`),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(strftime('%s', 'now') * 1000)`),
+});
 
 // Per-user, per-month LLM usage. One row per (user, month).
 // LLM proxy increments after every successful Anthropic call so we
@@ -111,3 +142,5 @@ export type Trip = typeof trips.$inferSelect;
 export type NewTrip = typeof trips.$inferInsert;
 export type Usage = typeof usage.$inferSelect;
 export type MagicToken = typeof magicTokens.$inferSelect;
+export type UserPrefs = typeof userPrefs.$inferSelect;
+export type NewUserPrefs = typeof userPrefs.$inferInsert;
