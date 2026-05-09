@@ -1352,11 +1352,12 @@
     global._wireDragHandlers(card, dest);
     // Body: name + optional label + dates
     var bodyDiv=document.createElement("div"); bodyDiv.className="tm-dest-body";
-    var nameRow=document.createElement("div"); nameRow.className="tm-dest-actions";
-    // Up/down arrow buttons — visible on hover, convey reorder-ability more
-    // clearly than the earlier braille drag-grip glyph. Drag-and-drop still
-    // works via the card itself; these arrows are the click-to-move path for
-    // people who don't discover (or can't easily use) drag-and-drop.
+    // Up/down arrow buttons — visible on hover (or always on touch),
+    // convey reorder-ability more clearly than a drag-grip glyph.
+    // v353.2: arrows moved out of the top "name row" into the dates
+    // row below. The card's primary visual is now the destination
+    // name; the arrows live alongside the smaller dates row where
+    // they read as "this is the order, here's how to change it."
     var total = (trip.destinations||[]).length;
     var upBtn = document.createElement("button");
     upBtn.className = "tm-reorder-btn";
@@ -1382,18 +1383,22 @@
         global.executeMoveDest(d, fromIdx, fromIdx + 1);
       };
     })(dest, idx);
-    nameRow.appendChild(upBtn);
-    nameRow.appendChild(downBtn);
-    var nameEl=document.createElement("div"); nameEl.className="tm-dest-name"; nameEl.style.flex="1"; nameEl.textContent=dest.label||dest.place;
-    // v353.2: rename pencil moved out of the trip-view destination
-    // card and into the dest-mode header. Reasoning: the rename
-    // affordance creates an accidental-tap target while you're
-    // dragging cards to reorder, and the trip-view card's job is
-    // "navigate / reorder," not "edit this destination's metadata."
-    // Editing belongs in the destination view (drilled in), where
-    // the destination is your sole focus. See drawDestMode's title
-    // handler for the new tap-to-rename behavior.
+    // v353.2: prominent destination-name row. The whole card is
+    // tappable to drill in; this row is the visual anchor for that
+    // affordance — large bold name on the left, chevron on the
+    // right hinting "tap to open." Rename moved out of trip-view
+    // entirely (now lives on the dest-mode title); arrows moved
+    // down to the dates row.
+    var nameRow = document.createElement("div");
+    nameRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-bottom:4px;";
+    var nameEl=document.createElement("div"); nameEl.className="tm-dest-name";
+    nameEl.style.cssText = "flex:1;min-width:0;font-size:17px;font-weight:700;color:#111;line-height:1.25;letter-spacing:-0.005em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+    nameEl.textContent = dest.label || dest.place;
+    var chev = document.createElement("span");
+    chev.textContent = "›";
+    chev.style.cssText = "color:#bbb;font-size:20px;font-weight:400;line-height:1;flex-shrink:0;padding-right:2px;";
     nameRow.appendChild(nameEl);
+    nameRow.appendChild(chev);
     // Arrival / Departure tags on first / last cards (Round BT).
     var isFirst = (idx === 0);
     var isLast = (idx === (trip.destinations||[]).length - 1);
@@ -1455,15 +1460,33 @@
         bodyDiv.appendChild(line);
       })();
     }
-    // Dates FIRST. v327: wide click target restored — narrowing it
-    // to the pencil in v326 made aiming hard (a miss bubbled to
-    // card.onclick → opened the destination). Now the whole date row
-    // is the click target again, but with its own hover treatment
-    // (light blue bg + slight inset padding) so it reads as a
-    // distinct clickable region, not "another part of the
-    // everything-is-clickable card." The pencil is a visual cue
-    // inside the row; clicking anywhere on the row works.
-    var dates=document.createElement("div"); dates.className="tm-dest-dates tm-dest-dates-clickable"; dates.style.fontSize="14px"; dates.style.fontWeight="700"; dates.style.color="#1a1a1a"; dates.style.marginBottom="2px"; dates.style.cursor="pointer"; dates.style.padding="3px 6px"; dates.style.margin="-3px -6px 4px"; dates.style.borderRadius="4px"; dates.style.transition="background .12s ease"; dates.title="Click to edit dates";
+    // v353.2: name comes FIRST now (was below dates). The
+    // destination's name is the primary identifier — what the user
+    // is reading on each card to find the right one. Arrows and
+    // dates are secondary metadata.
+    bodyDiv.appendChild(nameRow);
+    // If the user gave the destination a custom label, show the
+    // canonical place name in small grey text below the label so
+    // the connection ("My birthday weekend → Lisbon") is visible.
+    if (dest.label && dest.label !== dest.place) {
+      var plLbl = document.createElement("div");
+      plLbl.className = "tm-dest-label";
+      plLbl.style.cssText = "font-size:11px;color:#888;margin-top:-2px;margin-bottom:4px;";
+      plLbl.textContent = dest.place;
+      bodyDiv.appendChild(plLbl);
+    }
+    // Dates row — flex container holding the dates+pencil click
+    // target on the left and the ↑↓ reorder arrows on the right.
+    // v327: dates row has its own hover treatment (light blue bg +
+    // slight inset padding) so it reads as a distinct clickable
+    // region for date editing. v353.2: arrows moved into this row
+    // on the right; dates click target now has flex:1 so it fills
+    // remaining space and the arrows stay anchored right.
+    var dateLineWrap = document.createElement("div");
+    dateLineWrap.style.cssText = "display:flex;align-items:center;gap:6px;";
+    var dates=document.createElement("div"); dates.className="tm-dest-dates tm-dest-dates-clickable";
+    dates.style.cssText = "flex:1;min-width:0;font-size:13px;font-weight:600;color:#444;cursor:pointer;padding:3px 6px;margin:-3px -6px;border-radius:4px;transition:background .12s ease;";
+    dates.title="Click to edit dates";
     dates.onmouseover = function(){ dates.style.background = "#f0f6fc"; };
     dates.onmouseout  = function(){ dates.style.background = "transparent"; };
     (function(did){ dates.onclick=function(e){ e.stopPropagation(); global.toggleListDateEdit(did); }; })(dest.id);
@@ -1476,19 +1499,14 @@
     _nightsLabel += ")";
     var fmtDFn = global.fmtD;
     dates.textContent=fmtDFn(dest.dateFrom)+" – "+fmtDFn(dest.dateTo)+" "+_nightsLabel;
-    // v327: pencil is a visual cue inside the row, not its own click
-    // target — the entire row catches the click via dates.onclick.
     var datePencil = document.createElement("span");
     datePencil.textContent = "✎";
-    datePencil.style.cssText = "font-size:12px;color:#888;font-weight:400;margin-left:6px;";
+    datePencil.style.cssText = "font-size:11px;color:#888;font-weight:400;margin-left:6px;";
     dates.appendChild(datePencil);
-    bodyDiv.appendChild(dates);
-    bodyDiv.appendChild(nameRow);
-    // City styled smaller + lighter so it reads as a property of the dates.
-    nameEl.style.fontSize="12px";
-    nameEl.style.fontWeight="500";
-    nameEl.style.color="#555";
-    if(dest.label&&dest.label!==dest.place){var plLbl=document.createElement("div");plLbl.className="tm-dest-label";plLbl.textContent=dest.place;bodyDiv.appendChild(plLbl);}
+    dateLineWrap.appendChild(dates);
+    dateLineWrap.appendChild(upBtn);
+    dateLineWrap.appendChild(downBtn);
+    bodyDiv.appendChild(dateLineWrap);
 
     // Required-for badges
     if(dest.attachedEvents && dest.attachedEvents.length){
