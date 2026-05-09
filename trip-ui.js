@@ -924,10 +924,24 @@
     var when = dCount === 0 ? "Trip starts today"
              : dCount === 1 ? "Trip starts tomorrow"
              : (dCount + " days until your trip starts");
-    var n = actions.items.length;
-    var preTail = (n === 1 ? "1</strong> thing to firm up"
-                            : "" + n + "</strong> bookings & logistics to firm up");
-    labelSpan.innerHTML = "📅 " + when + " — <strong>" + preTail;
+    // v353.2: explicit category. "Bookings" = real-world
+    // reservations with a provider (hotel rooms, train tickets,
+    // flights). They cost money. Each one is a separate
+    // transaction outside the app. Distinct from the
+    // Decisions-deferred panel below, which is about your
+    // itinerary plan (no money — just "do I want to do this?").
+    // Break out hotels vs transit in the count so it's obvious
+    // what's actually missing.
+    var hotelN = 0, transitN = 0;
+    actions.items.forEach(function (it) {
+      if (it.kind === "hotelMissing") hotelN++;
+      else if (it.kind === "transitMissing") transitN++;
+    });
+    var bookBits = [];
+    if (hotelN) bookBits.push('<strong>' + hotelN + '</strong> hotel' + (hotelN !== 1 ? 's' : ''));
+    if (transitN) bookBits.push('<strong>' + transitN + '</strong> transit leg' + (transitN !== 1 ? 's' : ''));
+    var preTail = bookBits.join(' · ') + ' to reserve';
+    labelSpan.innerHTML = "📅 " + when + " — Bookings: " + preTail;
     var hintSpan = document.createElement("span");
     hintSpan.style.cssText = "font-size:10px;font-weight:500;color:#a89055;font-style:italic;";
     hintSpan.textContent = expanded ? "Hide" : "Show";
@@ -1050,9 +1064,14 @@
       else if (it.kind === 'emptyDay') eCount += 1;
     });
     var bits = [];
-    if (tCount) bits.push('<strong>' + tCount + '</strong> placeholder' + (tCount !== 1 ? 's' : ''));
+    if (tCount) bits.push('<strong>' + tCount + '</strong> sight' + (tCount !== 1 ? 's' : '') + ' to keep or skip');
     if (eCount) bits.push('<strong>' + eCount + '</strong> empty day' + (eCount !== 1 ? 's' : ''));
-    labelSpan.innerHTML = '🔧 ' + bits.join(' · ') + ' to decide'
+    // v353.2: explicit category. "Itinerary" = the plan of what
+    // you're going to do day-by-day. No money involved. Distinct
+    // from the Bookings banner above (which is about reservations
+    // with money + providers). "Sights to keep or skip" is the
+    // plain-English version of "tentative placeholders."
+    labelSpan.innerHTML = '🔧 Itinerary: ' + bits.join(' · ')
       + (anyGenerating ? ' <span style="font-weight:500;color:#a89055;font-style:italic;font-size:11px;">(still gathering…)</span>' : '');
     var hintSpan = document.createElement("span");
     hintSpan.style.cssText = "font-size:10px;font-weight:500;color:#a89055;font-style:italic;";
