@@ -8171,6 +8171,17 @@ function _refreshAllPlacePickerMaps(){
 // parent reflect immediately. This replaces the old in-page side panel,
 // which couldn't be moved to a second monitor.
 function openPlacePickerMapModal(){
+  // v353.4: on phone widths, use an in-page full-screen overlay
+  // instead of window.open. Popups on iOS Safari don't always open,
+  // and when they do there's no obvious way back to the picker.
+  // The overlay has a clear ✕ close button and uses the same map
+  // markup the popup uses, just rendered in the parent document.
+  try {
+    if (window.innerWidth && window.innerWidth <= 700) {
+      _openPlacePickerMapOverlay();
+      return;
+    }
+  } catch (_) {}
   // If the window is already open, just focus it.
   if (window._tbPmMapWindow && !window._tbPmMapWindow.closed) {
     try { window._tbPmMapWindow.focus(); } catch(_){}
@@ -8323,6 +8334,91 @@ function closePlacePickerMapModal(){
     try { window._tbPmMapWindow.close(); } catch(_){}
   }
   window._tbPmMapWindow = null;
+}
+
+// v353.4: in-page full-screen map overlay for the picker on phone.
+// Mirror of the popup window's purpose (showing recommended-place
+// pins) but rendered as a DOM overlay in the same document, with a
+// clear close button. The popup version (window.open) doesn't play
+// nicely on iOS Safari — sometimes blocked, sometimes opens but
+// the user can't get back to the picker. This is reliable.
+function _openPlacePickerMapOverlay(){
+  // Avoid stacking multiples.
+  var existing = document.getElementById("pm-mobile-overlay");
+  if (existing) existing.remove();
+  var ov = document.createElement("div");
+  ov.id = "pm-mobile-overlay";
+  ov.style.cssText = "position:fixed;inset:0;background:#fff;z-index:11800;display:flex;flex-direction:column;";
+  ov.innerHTML =
+    '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid #eee;background:#fafafa;flex-shrink:0;">' +
+      '<div style="font-size:13px;font-weight:700;color:#1a1a1a;">Recommended destinations</div>' +
+      '<button type="button" id="pm-mobile-close" style="background:#fff;border:1px solid #ddd;border-radius:6px;font-size:13px;font-weight:600;color:#333;padding:6px 12px;cursor:pointer;font-family:inherit;">✕ Close</button>' +
+    '</div>' +
+    '<div id="pm-mobile-legend" style="font-size:10.5px;color:#666;display:flex;gap:12px;align-items:center;padding:6px 14px;border-bottom:1px solid #eee;background:#fafafa;flex-shrink:0;">' +
+      '<span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:middle;margin-right:4px;background:#1a5fa8;"></span>kept</span>' +
+      '<span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:middle;margin-right:4px;background:#bbb;"></span>not kept</span>' +
+      '<span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:middle;margin-right:4px;background:#1a5fa8;border:2px solid #b28a2e;box-sizing:border-box;"></span>iconic</span>' +
+    '</div>' +
+    '<div id="pm-mobile-map" style="flex:1;min-height:0;background:#eaf0ed;"></div>';
+  document.body.appendChild(ov);
+  // Close button + Escape key + back-button gesture (history popstate)
+  // all close the overlay.
+  function close(){
+    if (ov.parentNode) ov.parentNode.removeChild(ov);
+    document.removeEventListener("keydown", escClose);
+  }
+  function escClose(e){ if (e.key === "Escape") close(); }
+  document.getElementById("pm-mobile-close").onclick = close;
+  document.addEventListener("keydown", escClose);
+
+  // Build the map. Reuses the same data shape as the popup window —
+  // a list of {place, lat, lng, keep, iconic} pulled from
+  // _tb.placeActivities + _coarseGeocode.
+  if (typeof L === "undefined") {
+    document.getElementById("pm-mobile-map").innerHTML =
+      '<div style="padding:30px 20px;text-align:center;color:#888;font-size:12px;">Map library not loaded.</div>';
+    return;
+  }
+  var map = L.map("pm-mobile-map", { zoomControl: true });
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: '&copy; OpenStreetMap',
+    maxZoom: 18,
+  }).addTo(map);
+  var items = (window._tb && _tb.placeActivities) || [];
+  var gc = window._coarseGeocode || {};
+  var byKey = {};
+  items.forEach(function(it){
+    var iconicItem = !!it.iconic;
+    (it.requiredPlaces || []).forEach(function(p){
+      if (!p || !p.place) return;
+      var k = p.place.toLowerCase();
+      if (!byKey[k]) byKey[k] = { place: p.place, lat: null, lng: null, keep: false, iconic: false };
+      if (p._keep) byKey[k].keep = true;
+      if (iconicItem || p.iconic) byKey[k].iconic = true;
+      var coords = gc[k];
+      if (coords && isFinite(coords[0])) { byKey[k].lat = coords[0]; byKey[k].lng = coords[1]; }
+    });
+  });
+  var pts = [];
+  Object.keys(byKey).forEach(function(k){ var v = byKey[k]; if (v.lat != null) pts.push(v); });
+  if (!pts.length) {
+    document.getElementById("pm-mobile-map").innerHTML =
+      '<div style="padding:30px 20px;text-align:center;color:#888;font-size:12px;">No places to show on the map yet.</div>';
+    return;
+  }
+  var bounds = L.latLngBounds([]);
+  pts.forEach(function(info){
+    var color = info.keep ? "#1a5fa8" : "#bbb";
+    var border = info.iconic ? "#b28a2e" : "#fff";
+    var size = info.keep ? 22 : 16;
+    var html = '<div style="width:' + size + 'px;height:' + size + 'px;border-radius:50%;background:' + color +
+      ';border:' + (info.iconic ? 3 : 2) + 'px solid ' + border + ';box-shadow:0 1px 3px rgba(0,0,0,0.3);"></div>';
+    var icon = L.divIcon({ html: html, className: "", iconSize: [size, size], iconAnchor: [size/2, size/2] });
+    var m = L.marker([info.lat, info.lng], { icon: icon }).addTo(map);
+    m.bindTooltip(info.place, { direction: "top", offset: [0, -size/2] });
+    bounds.extend([info.lat, info.lng]);
+  });
+  if (bounds.isValid()) map.fitBounds(bounds, { padding: [30, 30] });
 }
 
 // Round CM.1: open the trip's hero map in a separate browser window for a
