@@ -5942,6 +5942,19 @@ async function runCandidateSearch(requiredPlaces) {
   var cityCount = Math.min(5, Math.max(3, Math.ceil(extraCount / 2)));
   var thematicCount = Math.max(5, extraCount - cityCount);
 
+  // v353.2: prevent the LLM from picking single sights (beaches,
+  // waterfalls, viewpoints, summits) as full destinations. A place
+  // only qualifies as a destination if a traveler can ACTUALLY
+  // STAY OVERNIGHT there (hotels, B&Bs, vacation rentals \u2014 real
+  // lodging, not "the closest hotel is 40 minutes away"). Sight-
+  // level places belong inside the closest city/town's itinerary,
+  // not as their own destination card. Symptom this prevents:
+  // Diamond Beach showing up as a 1-night destination instead of
+  // as a sight at H\u00f6fn or V\u00edk.
+  var pStayConstraint = "Only include places where a traveler can ACTUALLY STAY OVERNIGHT \u2014 hotels, inns, vacation rentals, etc. WITHIN that place. "
+    + "Do NOT include sight-level places that are visited as day-trips: beaches, waterfalls, glaciers, viewpoints, summits, individual museums, single attractions, or transit hubs without lodging. "
+    + "Those belong as sights in the closest town/city that DOES have stays. If a place's primary draw is a single attraction and there's no real lodging within ~5 km, it's a SIGHT, not a destination \u2014 recommend the closest city/town instead and mention the attraction in otherAttractions.\n";
+
   var pCities = "You are a travel expert helping plan a trip to " + (_tb.region||"this region") + ".\n"
     + "Trip context: " + brief + "\n"
     + (skipList ? "These stops are already confirmed: " + skipList + ". Do NOT include them again.\n" : "")
@@ -5949,6 +5962,7 @@ async function runCandidateSearch(requiredPlaces) {
     + "the major gateway cities, cultural capitals, and places most travelers regret missing regardless of trip theme. "
     + "For " + (_tb.region||"this region") + ", think about the cities that anchor the country's identity \u2014 the capital, the banking/cultural centers, "
     + "the historic trade cities. Include them even if they don't obviously fit this traveler's theme; the traveler can decide.\n"
+    + pStayConstraint
     + "BE SPECIFIC. Name the museums, the landmarks, the streets, the restaurants, the trains \u2014 don't hand-wave with 'major museums' or 'scenic rail.' Name them.\n"
     + "Return ONLY a JSON array of exactly " + cityCount + " places (no markdown):\n"
     + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why a traveler to this region would want to see it \u2014 specific, not generic.","tradeoffs":"One honest downside (e.g. expensive, touristy, requires rearranging the trip).","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here.","widelyRecommended":false,"lat":0.0,"lng":0.0}]\nSet widelyRecommended=true if this place appears on most standard itineraries for the region \u2014 a canonical destination \u2014 false otherwise.';
@@ -5962,6 +5976,7 @@ async function runCandidateSearch(requiredPlaces) {
     + "\nList " + thematicCount + " additional destinations that specifically fit the shape of this trip \u2014 places that extend, enrich, or complement what the traveler described. "
     + "These should NOT be the obvious major cities (those are handled separately). Focus on less obvious places that reward the kind of traveler this is: "
     + "scenic towns, regional hubs, natural areas, places that deepen the trip's theme.\n"
+    + pStayConstraint
     + "BE SPECIFIC. Name things \u2014 the trail, the hut, the train, the dish, the view. Never hand-wave with 'spectacular scenery' or 'famous for trains' if you can say what specifically.\n"
     + "Return ONLY a JSON array of exactly " + thematicCount + " places (no markdown):\n"
     + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"What makes it worth visiting for this specific trip \u2014 specific, not generic.","tradeoffs":"One honest downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here beyond the trip\u2019s stated reason.","widelyRecommended":false,"lat":0.0,"lng":0.0}]\nSet widelyRecommended=true if this is a canonical destination for the region \u2014 false otherwise.';

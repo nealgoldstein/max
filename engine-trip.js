@@ -1025,26 +1025,33 @@
         });
         out.totalCount += tentativeCount;
       }
-      // Empty days — only flag when the destination has *some* items
-      // somewhere; an entirely-empty destination is its own thing.
-      var anyItems = days.some(function (day) {
-        return day && Array.isArray(day.items) && day.items.length > 0;
-      });
-      if (anyItems) {
-        days.forEach(function (day, i) {
-          var hasItems = day && Array.isArray(day.items) && day.items.length > 0;
-          if (hasItems) return;
-          out.items.push({
-            kind: 'emptyDay',
-            destId: dest.id || null,
-            destPlace: dest.place || dest.label || '',
-            dayId: (day && day.id) || null,
-            dayLbl: (day && day.lbl) || ('Day ' + (i + 1)),
-            dayIdx: i,
-          });
-          out.totalCount += 1;
+      // v353.2: previously skipped empty days for destinations with
+      // ZERO items anywhere (comment said "entirely-empty
+      // destination is its own thing"). That dropped legitimate
+      // empty-day signals — e.g., a 1-day destination whose
+      // suggestions failed to load is now invisible to the panel,
+      // even though the user can see the empty day right in the
+      // itinerary. Now we always count empty days, so dests with
+      // failed loads or genuinely-blank itineraries surface for
+      // attention. Cap per-dest at 5 so a never-loaded destination
+      // with 10 nights doesn't bury the panel; a count of 5+ is
+      // already enough to signal "this whole dest needs attention."
+      var emptyForThisDest = 0;
+      days.forEach(function (day, i) {
+        var hasItems = day && Array.isArray(day.items) && day.items.length > 0;
+        if (hasItems) return;
+        if (emptyForThisDest >= 5) return;
+        emptyForThisDest++;
+        out.items.push({
+          kind: 'emptyDay',
+          destId: dest.id || null,
+          destPlace: dest.place || dest.label || '',
+          dayId: (day && day.id) || null,
+          dayLbl: (day && day.lbl) || ('Day ' + (i + 1)),
+          dayIdx: i,
         });
-      }
+        out.totalCount += 1;
+      });
     });
     return out;
   }
