@@ -1385,12 +1385,15 @@
     nameRow.appendChild(upBtn);
     nameRow.appendChild(downBtn);
     var nameEl=document.createElement("div"); nameEl.className="tm-dest-name"; nameEl.style.flex="1"; nameEl.textContent=dest.label||dest.place;
-    // Round EZ: rename demoted from "rename" text button to a small ✎
-    // pencil icon (matches the convention used for URL editing on
-    // bookings / sights). Still hover-revealed, but visually quieter at rest.
-    var renBtn=document.createElement("button"); renBtn.className="tm-rename-btn"; renBtn.textContent="✎"; renBtn.title="Rename destination";
-    (function(d,nel){renBtn.onclick=function(e){e.stopPropagation();var inp=document.createElement("input");inp.className="tm-rename-inp";inp.value=d.label||d.place;nameRow.replaceChild(inp,nel);renBtn.style.display="none";inp.focus();inp.select();function sv(){var v=inp.value.trim();d.label=(v&&v!==d.place)?v:null;global.autoSave();global.drawTripMode();}inp.onblur=sv;inp.onclick=function(e2){e2.stopPropagation();};inp.onkeydown=function(e2){if(e2.key==="Enter")inp.blur();if(e2.key==="Escape"){inp.blur();}};};})(dest,nameEl);
-    nameRow.appendChild(nameEl); nameRow.appendChild(renBtn);
+    // v353.2: rename pencil moved out of the trip-view destination
+    // card and into the dest-mode header. Reasoning: the rename
+    // affordance creates an accidental-tap target while you're
+    // dragging cards to reorder, and the trip-view card's job is
+    // "navigate / reorder," not "edit this destination's metadata."
+    // Editing belongs in the destination view (drilled in), where
+    // the destination is your sole focus. See drawDestMode's title
+    // handler for the new tap-to-rename behavior.
+    nameRow.appendChild(nameEl);
     // Arrival / Departure tags on first / last cards (Round BT).
     var isFirst = (idx === 0);
     var isLast = (idx === (trip.destinations||[]).length - 1);

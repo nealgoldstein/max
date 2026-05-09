@@ -618,6 +618,16 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
   /* When the user collapses the map via the toggle, .rp gets
      .rp-collapsed; trip content takes the full viewport. */
   .rp.rp-collapsed{display:none;}
+  /* v353.2: fullscreen mode for the map. In landscape on phone,
+     38vh of map is only ~150px — too small to be useful. The
+     fullscreen toggle promotes .rp to overlay the entire viewport.
+     z-index above the trip-search overlay (11000) so it doesn't
+     get covered by other surfaces. */
+  .rp.rp-fullscreen{
+    position:fixed !important;inset:0 !important;width:100vw !important;
+    height:100vh !important;z-index:11500 !important;border:none !important;
+    top:0 !important;
+  }
   /* lp-content fills the remaining viewport height inside the lp
      so the destination list still scrolls inside the panel rather
      than the page. */
@@ -640,6 +650,29 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
   .rp.rp-collapsed ~ .mob-map-toggle{
     top:8px;background:#1a5fa8;color:#fff;border-color:#1a5fa8;
   }
+  /* v353.2: fullscreen toggle. Sits left of the collapse toggle so
+     they read as a pair. Same FAB shape and shadow. Hidden when the
+     map is collapsed (then there's nothing to expand) or when an
+     overlay is up (handled by the [data-overlay] rule below). */
+  .mob-map-fullscreen{
+    display:flex !important;position:fixed;right:62px;top:calc(38vh - 24px);z-index:11550;
+    width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,0.95);
+    color:#1a5fa8;border:1px solid #c8d8f0;font-size:14px;align-items:center;
+    justify-content:center;cursor:pointer;
+    box-shadow:0 2px 6px rgba(0,0,0,0.15);font-family:inherit;
+  }
+  /* When fullscreen, dock the fullscreen toggle to top-right (over
+     the map) — collapse toggle is hidden, since collapse and
+     fullscreen are mutually exclusive. */
+  .rp.rp-fullscreen ~ .mob-map-fullscreen{
+    top:max(env(safe-area-inset-top, 8px), 8px);
+    right:max(env(safe-area-inset-right, 12px), 12px);
+    background:#1a5fa8;color:#fff;border-color:#1a5fa8;
+  }
+  .rp.rp-fullscreen ~ .mob-map-toggle{display:none !important;}
+  /* When the map is collapsed, hide the fullscreen toggle — show
+     the docked map first. */
+  .rp.rp-collapsed ~ .mob-map-fullscreen{display:none !important;}
   /* Hover-revealed affordances become always-visible on touch.
      The .tm-reorder-btn rule already keys off pointer:fine for the
      hover bump, but the rename pencil and date-edit pencil were
@@ -664,6 +697,8 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
    of those is visible (set by the script that creates the toggle). */
 .mob-map-toggle{display:none;}
 body[data-overlay="1"] .mob-map-toggle{display:none !important;}
+.mob-map-fullscreen{display:none;}
+body[data-overlay="1"] .mob-map-fullscreen{display:none !important;}
 
 /* v352: tighter rules for actual phone widths. Anything <=520px is
    almost certainly a phone, not a narrow desktop window. */
@@ -21471,7 +21506,55 @@ function drawDestMode(destId){
   addDestBtn.onclick=function(){setLeftMode("trip");setTimeout(function(){var b=document.getElementById("tm-add-btn");if(b)b.click();},80);};
   navRow.appendChild(back); navRow.appendChild(addDestBtn);
   hdr.appendChild(navRow);
-  var title=document.createElement("div"); title.className="dm-title"; title.textContent=dest.place;
+  // v353.2: dest-mode title is the canonical rename surface (was in
+  // the trip-view destination card; relocated here so trip-view
+  // stays clean for navigation/reorder). Title shows the user's
+  // chosen label (dest.label) when set, falling back to the place
+  // name. A small ✎ pencil sits to the right; tapping the pencil
+  // OR the title swaps in an inline input. Saving clears
+  // dest.label if the input matches the original place (so
+  // "Lisbon" → "Lisbon" stops being a custom label).
+  var titleWrap = document.createElement("div");
+  titleWrap.style.cssText = "display:flex;align-items:baseline;gap:6px;cursor:text;";
+  var title=document.createElement("div"); title.className="dm-title"; title.textContent = dest.label || dest.place;
+  title.style.flex = "1";
+  title.style.minWidth = "0";
+  var renPen = document.createElement("button");
+  renPen.type = "button";
+  renPen.textContent = "✎";
+  renPen.title = "Rename destination";
+  renPen.style.cssText = "background:none;border:none;color:#999;font-size:14px;cursor:pointer;padding:2px 6px;font-family:inherit;line-height:1;flex-shrink:0;";
+  function _startRename() {
+    var inp = document.createElement("input");
+    inp.type = "text";
+    inp.className = "tm-rename-inp";
+    inp.value = dest.label || dest.place;
+    inp.style.cssText = "font-size:18px;font-weight:600;color:#111;background:#fff;border:1px solid #1a5fa8;border-radius:5px;padding:3px 7px;width:100%;font-family:inherit;outline:none;box-shadow:0 0 0 3px rgba(26,95,168,0.12);";
+    titleWrap.replaceChild(inp, title);
+    renPen.style.display = "none";
+    inp.focus();
+    inp.select();
+    function commit() {
+      var v = inp.value.trim();
+      dest.label = (v && v !== dest.place) ? v : null;
+      // Re-render the dest-mode header so the new label shows.
+      // drawDestMode is the entry — it rebuilds the header.
+      autoSave();
+      drawDestMode(destId);
+    }
+    inp.onblur = commit;
+    inp.onkeydown = function (e) {
+      if (e.key === "Enter") inp.blur();
+      else if (e.key === "Escape") {
+        // Discard: just re-render with the original label.
+        drawDestMode(destId);
+      }
+    };
+  }
+  title.onclick = _startRename;
+  renPen.onclick = function (e) { e.stopPropagation(); _startRename(); };
+  titleWrap.appendChild(title);
+  titleWrap.appendChild(renPen);
   var datesRow=document.createElement("div"); datesRow.style.cssText="display:flex;align-items:center;gap:8px;margin-bottom:8px;";
   var dates=document.createElement("div"); dates.className="dm-dates"; dates.id="ud-dates-"+destId;
   dates.textContent=fmtD(dest.dateFrom)+" \u2013 "+fmtD(dest.dateTo)+" ("+dest.nights+" night"+(dest.nights!==1?"s":"")+")";
@@ -21588,7 +21671,9 @@ function drawDestMode(destId){
   }
   var ovWarn=document.createElement("div"); ovWarn.id="ov-warn-"+dest.id; ovWarn.className="overlap-warn hidden";
 
-  hdr.appendChild(title); hdr.appendChild(datesRow);
+  // v353.2: append the title WRAP (which holds title + ✎ pencil) so
+  // tapping either opens the inline rename input. See _startRename.
+  hdr.appendChild(titleWrap); hdr.appendChild(datesRow);
 
   // TM.7.4 (v332): logistics block (arrival on first dest, departure
   // on last) lifted into MaxTripUI.renderDestLogistics. Same DOM,
@@ -23481,6 +23566,43 @@ function getDistricts(place,intent,dest){
       }
     };
     document.body.appendChild(btn);
+
+    // v353.2: fullscreen toggle. Promotes .rp to overlay the entire
+    // viewport (position:fixed inset:0 z-index:high). Useful in
+    // landscape on phone where 38vh is only ~150px tall — too
+    // small to actually navigate with. Collapse and fullscreen are
+    // mutually exclusive states; fullscreen-while-collapsed makes
+    // no sense (you'd see a fullscreen empty container).
+    var fsBtn = document.createElement('button');
+    fsBtn.type = 'button';
+    fsBtn.className = 'mob-map-fullscreen';
+    fsBtn.title = 'Full-screen map';
+    fsBtn.setAttribute('aria-label', 'Toggle fullscreen map');
+    fsBtn.textContent = '⛶';
+    fsBtn.onclick = function () {
+      var rp = document.querySelector('.rp');
+      if (!rp) return;
+      var goingFs = !rp.classList.contains('rp-fullscreen');
+      rp.classList.toggle('rp-fullscreen', goingFs);
+      // Drop the collapse class — they're mutually exclusive, and
+      // entering fullscreen from a previously-collapsed map (which
+      // isn't supposed to be reachable, but defense in depth) needs
+      // to reset that.
+      if (goingFs) rp.classList.remove('rp-collapsed');
+      fsBtn.textContent = goingFs ? '✕' : '⛶';
+      fsBtn.title = goingFs ? 'Exit full-screen' : 'Full-screen map';
+      // Leaflet caches its container size. After the size changes,
+      // nudge it to re-layout tiles + recompute fitBounds.
+      setTimeout(function () {
+        try {
+          if (typeof updateMainMap === 'function') updateMainMap();
+          if (window._mainMap && typeof window._mainMap.invalidateSize === 'function') {
+            window._mainMap.invalidateSize();
+          }
+        } catch (_) {}
+      }, 60);
+    };
+    document.body.appendChild(fsBtn);
 
     // v353.1: overlay visibility tracked via MutationObserver
     // instead of a 4Hz busy-wait. The home-screen element always
