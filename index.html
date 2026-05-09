@@ -6392,7 +6392,8 @@ function showAIDisclaimer(onContinue) {
         '<li><strong>Out of date.</strong> Flight prices, hotel availability, opening hours, trail conditions — all change. Max can\'t see the world today.</li>' +
       '</ul>' +
       '<p style="margin:0 0 12px;">Treat what Max tells you as a first pass. Verify anything you\'re going to book against a primary source.</p>' +
-      '<p style="margin:0;">What you can rely on: a fast overview good enough to help you decide whether somewhere is worth your time. After that, the research is yours.</p>' +
+      '<p style="margin:0 0 12px;">What you can rely on: a fast overview good enough to help you decide whether somewhere is worth your time. After that, the research is yours.</p>' +
+      '<p style="margin:0;"><span id="ai-disclaimer-howitworks" style="color:#1a5fa8;cursor:pointer;text-decoration:underline;">Read more in How it works →</span></p>' +
     '</div>' +
     '<div style="padding:14px 22px;border-top:1px solid #eee;flex-shrink:0;">' +
       '<button id="ai-disclaimer-continue" type="button" style="width:100%;padding:10px;font-size:13px;font-weight:600;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;">Got it — let\'s plan a trip →</button>' +
@@ -6406,6 +6407,16 @@ function showAIDisclaimer(onContinue) {
     if (typeof onContinue === "function") onContinue();
   }
   document.getElementById("ai-disclaimer-continue").onclick = dismiss;
+  // "Read more in How it works" link — opens the longer About Max
+  // essay over this disclaimer. Doesn't dismiss the disclaimer
+  // since the user might want to come back to it after reading.
+  var hiwLink = document.getElementById("ai-disclaimer-howitworks");
+  if (hiwLink) {
+    hiwLink.onclick = function (e) {
+      e.preventDefault();
+      if (typeof showAboutMax === "function") showAboutMax();
+    };
+  }
   // Allow Escape or click-outside to dismiss too.
   document.addEventListener("keydown", function escHandler(e) {
     if (e.key === "Escape") {
@@ -6470,7 +6481,7 @@ function showWelcomeOnboarding(onContinue) {
       '</ul>' +
       '<p style="margin:0 0 18px;">Verify anything you\'re going to book against a primary source. <span id="welcome-howitworks" style="color:#1a5fa8;cursor:pointer;text-decoration:underline;">Read more in How it works →</span></p>' +
       '<div style="border-top:1px solid #eee;margin:0 0 14px;"></div>' +
-      '<p style="margin:0 0 6px;font-weight:700;">Two questions Max needs from you up front.</p>' +
+      '<p style="margin:0 0 6px;font-weight:700;">Your preferences</p>' +
       '<p style="margin:0 0 12px;font-weight:600;font-size:12.5px;">Hours of sightseeing per day</p>' +
       '<p style="margin:0 0 8px;font-size:12.5px;">How many hours per day do you actually spend on sights and activities? Not what you think you "should" — what you actually do.</p>' +
       '<div style="display:flex;align-items:center;gap:14px;margin:0 0 8px;">' +
@@ -10325,16 +10336,16 @@ function renderTripBrief(){
     +'<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-top:6px;">'
     +'<div style="display:flex;align-items:center;gap:8px;">'
     +'<label style="font-size:10px;color:#888;font-weight:500;text-transform:none;letter-spacing:0;margin:0;">Hours/day:</label>'
-    +'<input id="tb-hours-per-day" type="number" min="1" max="12" inputmode="numeric" value="'+((_tb.hoursPerDay||6)+"")+'" oninput="_tb.hoursPerDay=this.value;" style="width:72px;padding:5px 8px;font-size:12px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'<input id="tb-hours-per-day" type="number" min="1" max="12" inputmode="numeric" value="'+((_tb.hoursPerDay||_defaultHoursPerDay())+"")+'" oninput="_tb.hoursPerDay=this.value;" style="width:72px;padding:5px 8px;font-size:12px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
     +'</div>'
     +'<div style="display:flex;align-items:center;gap:8px;">'
     +'<label style="font-size:10px;color:#888;font-weight:500;text-transform:none;letter-spacing:0;margin:0;">Max \u201cbig\u201d sights (2+ hrs) per day:</label>'
-    +'<input id="tb-max-big-sights" type="number" min="1" max="6" inputmode="numeric" value="'+((_tb.maxBigSightsPerDay||2)+"")+'" oninput="_tb.maxBigSightsPerDay=this.value;" style="width:72px;padding:5px 8px;font-size:12px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'<input id="tb-max-big-sights" type="number" min="1" max="6" inputmode="numeric" value="'+((_tb.maxBigSightsPerDay||_defaultMaxBigSightsPerDay())+"")+'" oninput="_tb.maxBigSightsPerDay=this.value;" style="width:72px;padding:5px 8px;font-size:12px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
     +'</div>'
     +'</div>'
     +'<div style="font-size:10.5px;color:#777;margin-top:8px;line-height:1.6;">'
-    +'Max will use about <strong>'+((_tb.hoursPerDay||6)+"")+' hrs</strong> of sightseeing on a full day (lighter on travel days, fuller in the middle), and won\u2019t schedule more than '
-    +'<strong>'+((_tb.maxBigSightsPerDay||2)+"")+'</strong> big sight'+((_tb.maxBigSightsPerDay||2)==1?"":"s")+' per day so a single day doesn\u2019t turn into a forced march.'
+    +'Max will use about <strong>'+((_tb.hoursPerDay||_defaultHoursPerDay())+"")+' hrs</strong> of sightseeing on a full day (lighter on travel days, fuller in the middle), and won\u2019t schedule more than '
+    +'<strong>'+((_tb.maxBigSightsPerDay||_defaultMaxBigSightsPerDay())+"")+'</strong> big sight'+((_tb.maxBigSightsPerDay||_defaultMaxBigSightsPerDay())==1?"":"s")+' per day so a single day doesn\u2019t turn into a forced march.'
     +'</div>'
     +'<div style="font-size:10.5px;color:#b05820;font-style:italic;margin-top:6px;line-height:1.55;">'
     +'A note on duration: Max\u2019s per-sight time estimates are LLM best-guesses, not measured data. They assume a committed traveler. If you\u2019re a slower museum-goer, expect to fit less per day; if you\u2019re a look-and-go type, you may want to bump the hours up.'
@@ -10378,8 +10389,8 @@ function goToTripStep2(){
   // v302: structured pace fields.
   var _hpdEl = g("tb-hours-per-day");
   var _bigEl = g("tb-max-big-sights");
-  _tb.hoursPerDay        = _hpdEl ? Math.max(1, Math.min(12, parseInt(_hpdEl.value, 10) || 6)) : (_tb.hoursPerDay || 6);
-  _tb.maxBigSightsPerDay = _bigEl ? Math.max(1, Math.min(6,  parseInt(_bigEl.value, 10) || 2)) : (_tb.maxBigSightsPerDay || 2);
+  _tb.hoursPerDay        = _hpdEl ? Math.max(1, Math.min(12, parseInt(_hpdEl.value, 10) || _defaultHoursPerDay())) : (_tb.hoursPerDay || _defaultHoursPerDay());
+  _tb.maxBigSightsPerDay = _bigEl ? Math.max(1, Math.min(6,  parseInt(_bigEl.value, 10) || _defaultMaxBigSightsPerDay())) : (_tb.maxBigSightsPerDay || _defaultMaxBigSightsPerDay());
   // v306: mobility note. _tb.physicalAbility is set by _tbPickAbility on
   // chip click; the note input has its own oninput. Re-read here to be
   // safe across keyboard nav / paste.
@@ -10644,14 +10655,14 @@ function renderTripBriefEdit(){
     +'<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-top:6px;">'
     +'<div style="display:flex;align-items:center;gap:8px;">'
     +'<label style="font-size:10px;color:#888;font-weight:500;text-transform:none;letter-spacing:0;margin:0;">Hours/day:</label>'
-    +'<input id="tb-hours-per-day" type="number" min="1" max="12" inputmode="numeric" value="'+((_tb.hoursPerDay||6)+"")+'" oninput="_tb.hoursPerDay=this.value;" style="width:72px;padding:5px 8px;font-size:12px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'<input id="tb-hours-per-day" type="number" min="1" max="12" inputmode="numeric" value="'+((_tb.hoursPerDay||_defaultHoursPerDay())+"")+'" oninput="_tb.hoursPerDay=this.value;" style="width:72px;padding:5px 8px;font-size:12px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
     +'</div>'
     +'<div style="display:flex;align-items:center;gap:8px;">'
     +'<label style="font-size:10px;color:#888;font-weight:500;text-transform:none;letter-spacing:0;margin:0;">Max \u201cbig\u201d sights (2+ hrs) per day:</label>'
-    +'<input id="tb-max-big-sights" type="number" min="1" max="6" inputmode="numeric" value="'+((_tb.maxBigSightsPerDay||2)+"")+'" oninput="_tb.maxBigSightsPerDay=this.value;" style="width:72px;padding:5px 8px;font-size:12px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'<input id="tb-max-big-sights" type="number" min="1" max="6" inputmode="numeric" value="'+((_tb.maxBigSightsPerDay||_defaultMaxBigSightsPerDay())+"")+'" oninput="_tb.maxBigSightsPerDay=this.value;" style="width:72px;padding:5px 8px;font-size:12px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
     +'</div>'
     +'</div>'
-    +'<div style="font-size:10.5px;color:#777;margin-top:8px;line-height:1.6;">Max will use about <strong>'+((_tb.hoursPerDay||6)+"")+' hrs</strong> of sightseeing on a full day (lighter on travel days, fuller in the middle), and won\u2019t schedule more than <strong>'+((_tb.maxBigSightsPerDay||2)+"")+'</strong> big sight'+((_tb.maxBigSightsPerDay||2)==1?"":"s")+' per day.</div>'
+    +'<div style="font-size:10.5px;color:#777;margin-top:8px;line-height:1.6;">Max will use about <strong>'+((_tb.hoursPerDay||_defaultHoursPerDay())+"")+' hrs</strong> of sightseeing on a full day (lighter on travel days, fuller in the middle), and won\u2019t schedule more than <strong>'+((_tb.maxBigSightsPerDay||_defaultMaxBigSightsPerDay())+"")+'</strong> big sight'+((_tb.maxBigSightsPerDay||_defaultMaxBigSightsPerDay())==1?"":"s")+' per day.</div>'
     +'<div style="font-size:10.5px;color:#b05820;font-style:italic;margin-top:6px;line-height:1.55;">A note on duration: Max\u2019s per-sight time estimates are LLM best-guesses, not measured data. They assume a committed traveler. If you\u2019re a slower museum-goer, expect to fit less per day; if you\u2019re a look-and-go type, you may want to bump the hours up.</div>'
     +'</div>'
 
@@ -10698,8 +10709,8 @@ async function previewConstraintChanges(){
     withKids:       g("tb-with-kids") ? !!g("tb-with-kids").checked : !!_tb.withKids,
     aboutTrip:      g("tb-about-trip") ? g("tb-about-trip").value.trim() : (_tb.aboutTrip||""),
     // v302: structured pace fields. Same min/max clamp as goToTripStep2.
-    hoursPerDay:        g("tb-hours-per-day") ? Math.max(1, Math.min(12, parseInt(g("tb-hours-per-day").value, 10) || 6)) : (_tb.hoursPerDay || 6),
-    maxBigSightsPerDay: g("tb-max-big-sights") ? Math.max(1, Math.min(6,  parseInt(g("tb-max-big-sights").value, 10) || 2)) : (_tb.maxBigSightsPerDay || 2),
+    hoursPerDay:        g("tb-hours-per-day") ? Math.max(1, Math.min(12, parseInt(g("tb-hours-per-day").value, 10) || _defaultHoursPerDay())) : (_tb.hoursPerDay || _defaultHoursPerDay()),
+    maxBigSightsPerDay: g("tb-max-big-sights") ? Math.max(1, Math.min(6,  parseInt(g("tb-max-big-sights").value, 10) || _defaultMaxBigSightsPerDay())) : (_tb.maxBigSightsPerDay || _defaultMaxBigSightsPerDay()),
     // v306: mobility chips + note. _tb.physicalAbility is mutated by
     // _tbPickAbility on chip click; the note has its own oninput.
     physicalAbility:    _tb.physicalAbility || "",
@@ -13476,6 +13487,32 @@ function _getPaceMode(paceText){
   // "not much" — special case because head would be just "not"
   if (t.indexOf("not much") === 0 || t.indexOf("notmuch") === 0) return "notmuch";
   return null;
+}
+
+// v353.3: defaults for the picker brief's per-trip pace fields.
+// Pre-fill from the user's saved welcome-modal prefs (paceHours,
+// sightsPerDay). Falls back to the historical hardcoded defaults
+// (6 hrs/day, 2 big sights/day) if no pref is set or invalid.
+// The picker brief lets the user override per-trip — these are
+// just the seeds.
+function _defaultHoursPerDay(){
+  try {
+    var pref = (window.MaxDB && MaxDB.prefs) ? parseInt(MaxDB.prefs.get("paceHours"), 10) : NaN;
+    if (isFinite(pref) && pref >= 2 && pref <= 10) return pref;
+  } catch (_) {}
+  return 6;
+}
+function _defaultMaxBigSightsPerDay(){
+  // "Big" sights (2+ hrs) are a subset of total sights. If the
+  // user said e.g. sightsPerDay=4, half-rounded-up = 2 big sights
+  // is a sensible cap. Constrain to [1,6] to match the input range.
+  try {
+    var sp = (window.MaxDB && MaxDB.prefs) ? parseInt(MaxDB.prefs.get("sightsPerDay"), 10) : NaN;
+    if (isFinite(sp) && sp >= 2 && sp <= 10) {
+      return Math.max(1, Math.min(6, Math.ceil(sp / 2)));
+    }
+  } catch (_) {}
+  return 2;
 }
 
 // LLM-readable directive for a given pace mode. Appended to candidate and
