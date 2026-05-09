@@ -2055,6 +2055,171 @@
     container.appendChild(notesWrap);
   }
 
+  // v353.2: per-destination research surface. Distinct from
+  // traveler notes (which is the on-the-road diary). Research
+  // is the homework — what the user read about the place,
+  // links they found useful, opening hours / reservation
+  // requirements / friend's recommendations they don't want to
+  // forget. Rendered in dest-mode below the traveler-notes
+  // strip. URLs in the saved text are auto-detected and
+  // displayed as clickable links when not in edit mode; when
+  // editing, the textarea shows raw text so the user can paste
+  // and edit URLs naturally.
+  function _renderResearch(dest, container) {
+    var wrap = document.createElement("div");
+    wrap.style.cssText = "margin:0 0 10px;padding:10px 12px;background:#f7f4ec;border:1px solid #e6e0cc;border-radius:8px;";
+    var hdr = document.createElement("div");
+    hdr.style.cssText = "font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#8a7440;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;";
+    var lbl = document.createElement("span");
+    lbl.textContent = "Research";
+    var status = document.createElement("span");
+    status.style.cssText = "font-size:9px;font-weight:500;color:#aaa;text-transform:none;letter-spacing:0;";
+    hdr.appendChild(lbl);
+    hdr.appendChild(status);
+    wrap.appendChild(hdr);
+
+    var saved = (typeof dest.research === "string") ? dest.research : "";
+    var view = document.createElement("div"); // Read-only view: text + clickable URLs.
+    view.style.cssText = "font-size:12.5px;line-height:1.55;color:#333;min-height:36px;padding:6px 8px;background:#fff;border:1px solid #e8e1c8;border-radius:5px;cursor:text;white-space:pre-wrap;word-wrap:break-word;";
+    view.title = "Tap to edit";
+
+    function renderViewMode() {
+      if (!saved) {
+        view.innerHTML = '<span style="color:#bbb;">Tap to add research, links, opening hours, reservations…</span>';
+        return;
+      }
+      // URL auto-detection. Plain text + clickable <a> for any
+      // http(s):// substring. Escape everything else so HTML in
+      // the saved text isn't interpreted.
+      var html = "";
+      var lastIdx = 0;
+      var urlRe = /(https?:\/\/[^\s<>"']+)/g;
+      var m;
+      while ((m = urlRe.exec(saved)) !== null) {
+        html += _esc(saved.substring(lastIdx, m.index));
+        var u = m[1];
+        // Trim common trailing punctuation that isn't part of a URL.
+        var trail = "";
+        while (/[)\.,;:!?]$/.test(u)) { trail = u.charAt(u.length - 1) + trail; u = u.substring(0, u.length - 1); }
+        var safe = _esc(u);
+        html += '<a href="' + safe + '" target="_blank" rel="noopener noreferrer" style="color:#1a5fa8;text-decoration:underline;word-break:break-all;">' + safe + '</a>' + _esc(trail);
+        lastIdx = m.index + m[1].length;
+      }
+      html += _esc(saved.substring(lastIdx));
+      view.innerHTML = html;
+    }
+    function _esc(s) {
+      return String(s == null ? "" : s)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    }
+    renderViewMode();
+
+    var ta = document.createElement("textarea");
+    ta.placeholder = "What you've read, links, opening hours, reservation deadlines…";
+    ta.style.cssText = "width:100%;min-height:80px;max-height:320px;font:inherit;font-size:12.5px;line-height:1.5;padding:6px 8px;border:1px solid #1a5fa8;border-radius:5px;background:#fff;color:#111;resize:vertical;box-sizing:border-box;font-family:inherit;display:none;outline:none;box-shadow:0 0 0 3px rgba(26,95,168,.12);";
+
+    function enterEdit() {
+      ta.value = saved;
+      view.style.display = "none";
+      ta.style.display = "block";
+      setTimeout(function(){ ta.focus(); }, 30);
+    }
+    function exitEdit() {
+      // Save if changed, then re-render the view.
+      var nextVal = ta.value;
+      if (nextVal !== saved) {
+        dest.research = nextVal;
+        saved = nextVal;
+        var ok = false;
+        try {
+          if (typeof global.localSave === "function") { global.localSave(); ok = true; }
+          else if (global.MaxDB && global._currentTripId && typeof global.serializeTrip === "function") {
+            ok = global.MaxDB.trip.writeRaw(global._currentTripId, global.serializeTrip());
+          }
+        } catch(e) { ok = false; }
+        if (ok && typeof global.MaxSync !== "undefined" &&
+            typeof global.MaxSync.scheduleSave === "function") {
+          global.MaxSync.scheduleSave();
+        }
+        status.textContent = ok ? "saved" : "save failed";
+        status.style.color = ok ? "#2a7a4e" : "#c05020";
+        if (ok) setTimeout(function(){
+          if (status.textContent === "saved") status.textContent = "";
+        }, 1800);
+      }
+      ta.style.display = "none";
+      view.style.display = "block";
+      renderViewMode();
+    }
+    view.onclick = function (e) {
+      // Don't open edit when the user clicks an inner <a> link.
+      if (e && e.target && e.target.tagName === "A") return;
+      enterEdit();
+    };
+    ta.addEventListener("blur", exitEdit);
+    wrap.appendChild(view);
+    wrap.appendChild(ta);
+
+    // Voice input row (shown only when SpeechRecognition is available).
+    var SR = global.SpeechRecognition || global.webkitSpeechRecognition;
+    if (typeof SR === "function") {
+      var micRow = document.createElement("div");
+      micRow.style.cssText = "margin-top:6px;display:flex;justify-content:flex-end;";
+      var micBtn = document.createElement("button");
+      micBtn.type = "button";
+      micBtn.textContent = "🎤 Dictate research";
+      micBtn.title = "Dictate (Web Speech API)";
+      micBtn.style.cssText = "font-size:11px;background:#fff;border:1px solid #e6e0cc;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;color:#8a7440;";
+      var rec = null, listening = false;
+      micBtn.onclick = function () {
+        if (listening) { if (rec) try { rec.stop(); } catch(_){} return; }
+        try {
+          rec = new SR();
+          rec.lang = (navigator.language || "en-US");
+          rec.interimResults = true;
+          rec.continuous = true;
+          if (ta.style.display === "none") enterEdit();
+          var startLen = ta.value.length;
+          var leadingSpace = (startLen > 0 && !/\s$/.test(ta.value)) ? " " : "";
+          var finalText = "";
+          rec.onstart = function () {
+            listening = true;
+            micBtn.textContent = "🎙 Listening — tap to stop";
+            micBtn.style.background = "#fbeae3";
+          };
+          rec.onresult = function (ev) {
+            var interim = "";
+            for (var i = ev.resultIndex; i < ev.results.length; i++) {
+              if (ev.results[i].isFinal) finalText += ev.results[i][0].transcript;
+              else interim += ev.results[i][0].transcript;
+            }
+            ta.value = ta.value.substring(0, startLen) + leadingSpace + finalText + interim;
+          };
+          rec.onerror = function () {};
+          rec.onend = function () {
+            listening = false;
+            micBtn.textContent = "🎤 Dictate research";
+            micBtn.style.background = "#fff";
+            ta.value = ta.value.substring(0, startLen) + (finalText ? leadingSpace + finalText : "");
+            // Stay in edit mode after dictation ends — user may
+            // want to clean up. They commit by tapping outside.
+          };
+          rec.start();
+        } catch (e) {
+          listening = false;
+          micBtn.textContent = "🎤 Dictate research";
+          status.textContent = "mic unavailable";
+          status.style.color = "#c05020";
+        }
+      };
+      micRow.appendChild(micBtn);
+      wrap.appendChild(micRow);
+    }
+
+    container.appendChild(wrap);
+  }
+
   // ── TM.7.3 (v332): pending-cancellations banner ────────────
   // Renders only if dest.pendingCancellations.items has entries.
   // Click of "View checklist" calls global.showCancellationChecklist.
@@ -2934,6 +3099,8 @@
     renderTripDestinationCard:   _renderTripDestinationCard,
     // TM.7.2 (v331) — dest-mode pieces lifted from drawDestMode:
     renderTravelerNotes:         _renderTravelerNotes,
+    // v353.2 — research surface (per-destination homework + links).
+    renderResearch:              _renderResearch,
     // TM.7.3 (v332):
     renderPendingCancellationsBanner: _renderPendingCancellationsBanner,
     // TM.7.4 (v332):
