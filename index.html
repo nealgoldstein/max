@@ -91,8 +91,13 @@
       return;
     }
     if (wasInstalled) { _hideInstallPill(); return; }
-    if (_isIOS()) _showInstallPill();
-    // Android/Chrome: pill stays hidden until beforeinstallprompt fires.
+    // Show the pill in every other case. On Android/Chrome the
+    // beforeinstallprompt event will populate _pwaDeferredPrompt
+    // by the time the user clicks; if it hasn't fired yet, the
+    // click handler falls back to showing instructions. Desktop
+    // Safari has no install API but does support "Add to Dock"
+    // since macOS Sonoma — instructions cover that case too.
+    _showInstallPill();
   });
   // Handler used by the pill's onclick. Routes to the native prompt
   // on Android, or to an instructions overlay on iOS.
@@ -113,25 +118,57 @@
       });
       return;
     }
-    // No native prompt available → show iOS instructions (works as
-    // a fallback for any unsupported browser too).
-    _showIosInstallInstructions();
+    // No native prompt → show platform-appropriate instructions.
+    _showInstallInstructions();
   };
-  function _showIosInstallInstructions() {
+  function _showInstallInstructions() {
     var existing = document.getElementById('pwa-ios-overlay');
     if (existing) existing.remove();
     var ov = document.createElement('div');
     ov.id = 'pwa-ios-overlay';
     ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:11900;display:flex;align-items:center;justify-content:center;padding:24px;font:13px/1.5 -apple-system,sans-serif;';
+    var ua = navigator.userAgent || '';
+    var isMac = /Macintosh/.test(ua);
+    var isSafari = /Safari/.test(ua) && !/Chrome|CriOS|FxiOS|Edg/.test(ua);
+    var isChromium = /Chrome|CriOS|Edg/.test(ua);
+    var title, steps, footer;
+    if (_isIOS()) {
+      title = 'Install Max on your iPhone';
+      steps = [
+        'Tap the <strong>Share</strong> icon at the bottom of Safari (the square with the upward arrow).',
+        'Scroll and tap <strong>Add to Home Screen</strong>.',
+        'Tap <strong>Add</strong> in the top-right.',
+      ];
+      footer = 'Max will appear as an app icon on your home screen.';
+    } else if (isMac && isSafari) {
+      title = 'Install Max on your Mac (Safari)';
+      steps = [
+        'In Safari\'s menu bar, click <strong>File</strong>.',
+        'Choose <strong>Add to Dock…</strong> (requires macOS Sonoma or later).',
+        'Click <strong>Add</strong> in the dialog.',
+      ];
+      footer = 'Max will live in your Dock and open in its own window — no Safari chrome.';
+    } else if (isChromium) {
+      title = 'Install Max on your computer';
+      steps = [
+        'Click the install icon in the address bar (a small computer with a downward arrow), or open the <strong>⋮</strong> menu and choose <strong>Install Max…</strong>.',
+        'Confirm the install in the dialog that appears.',
+      ];
+      footer = 'Max will open in its own window with no browser chrome and appear in your app launcher.';
+    } else {
+      title = 'Install Max as an app';
+      steps = [
+        'Your browser doesn\'t expose a programmatic install. Use your browser\'s "Add to Home Screen", "Install App", or "Add to Dock" menu — usually under the share or main menu.',
+      ];
+      footer = '';
+    }
     ov.innerHTML =
-      '<div style="background:#fff;border-radius:12px;width:380px;max-width:100%;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);">' +
-        '<div style="font-size:15px;font-weight:700;margin-bottom:10px;">Install Max on your iPhone</div>' +
+      '<div style="background:#fff;border-radius:12px;width:420px;max-width:100%;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);">' +
+        '<div style="font-size:15px;font-weight:700;margin-bottom:10px;">' + title + '</div>' +
         '<ol style="margin:0 0 14px;padding-left:20px;color:#333;line-height:1.7;">' +
-          '<li>Tap the <strong>Share</strong> icon at the bottom of Safari (the square with the upward arrow).</li>' +
-          '<li>Scroll and tap <strong>Add to Home Screen</strong>.</li>' +
-          '<li>Tap <strong>Add</strong> in the top-right.</li>' +
+          steps.map(function(s){ return '<li style="margin-bottom:6px;">' + s + '</li>'; }).join('') +
         '</ol>' +
-        '<div style="font-size:11px;color:#888;margin-bottom:16px;">Max will appear as an app icon on your home screen — open it for a full-screen, app-like experience.</div>' +
+        (footer ? '<div style="font-size:11px;color:#888;margin-bottom:16px;">' + footer + '</div>' : '<div style="margin-bottom:16px;"></div>') +
         '<button onclick="document.getElementById(\'pwa-ios-overlay\').remove()" style="width:100%;padding:9px;background:#111;color:#fff;border:none;border-radius:6px;font-weight:600;font-size:13px;cursor:pointer;font-family:inherit;">Got it</button>' +
       '</div>';
     document.body.appendChild(ov);
@@ -188,13 +225,13 @@
      reorder, picker shortlist) work on phones with no code change.
      iconDraggingClass keeps the visual layer consistent — same
      styling rule used by hover-on-desktop applies during touch drag. -->
-<!-- v353.6: switched from jsdelivr to unpkg. jsdelivr started
-     returning 404 + nosniff blocking for the 2.3.0-rc.2 release/
-     bundle (their cache may have evicted RC versions). unpkg
-     serves the same npm package reliably. Same version pinned
-     so behavior is unchanged. -->
-<link rel="stylesheet" href="https://unpkg.com/mobile-drag-drop@2.3.0-rc.2/default.min.css"/>
-<script src="https://unpkg.com/mobile-drag-drop@2.3.0-rc.2/release/index.min.js"></script>
+<!-- v353.6: vendored mobile-drag-drop 2.3.0-rc.2 into /vendor/.
+     jsdelivr + unpkg both 404'd on release/index.min.js — turns out
+     the npm package files are at the package root, not in release/.
+     Rather than chase the right CDN path, the polyfill (8KB) is
+     now bundled with the app. No external dependency, instant load. -->
+<link rel="stylesheet" href="/vendor/mobile-drag-drop/default.css"/>
+<script src="/vendor/mobile-drag-drop/index.min.js"></script>
 <script>
   // Polyfill is no-op on devices that already have native HTML5 DnD
   // (i.e., desktop). On touch devices, this hooks touchstart/move/end
