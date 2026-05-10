@@ -9,6 +9,7 @@ import { authApi } from './routes/auth.js';
 import { tripsApi } from './routes/trips.js';
 import { llmApi } from './routes/llm.js';
 import { prefsApi } from './routes/prefs.js';
+import { shareApi } from './routes/share.js';
 
 export function createApp() {
   const app = new Hono();
@@ -34,6 +35,7 @@ export function createApp() {
   app.route('/trips', tripsApi);
   app.route('/llm', llmApi);
   app.route('/user/prefs', prefsApi);
+  app.route('/share', shareApi);
 
   app.notFound((c) => c.json({ error: 'Not found' }, 404));
   app.onError((err, c) => {

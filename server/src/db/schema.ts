@@ -136,6 +136,30 @@ export const magicTokens = sqliteTable('magic_tokens', {
     .default(sql`(strftime('%s', 'now') * 1000)`),
 });
 
+// v353.5: trip share tokens. One row per (trip, share-link).
+// Shareable read-only URL = https://app/?share=<token>. Recipient
+// fetches the trip via GET /trips/share/:token (no auth — the
+// token IS the auth). Owner can revoke any time → revokedAt set,
+// downstream reads check revokedAt IS NULL. Multiple active tokens
+// per trip allowed (rotate by minting a new one without revoking
+// the old).
+export const shareTokens = sqliteTable(
+  'share_tokens',
+  {
+    token: text('token').primaryKey(),
+    tripId: text('trip_id')
+      .notNull()
+      .references(() => trips.id, { onDelete: 'cascade' }),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(strftime('%s', 'now') * 1000)`),
+    revokedAt: integer('revoked_at', { mode: 'timestamp_ms' }),
+  },
+  (t) => ({
+    tripIdx: index('share_tokens_trip_id_idx').on(t.tripId),
+  }),
+);
+
 export type User = typeof users.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
 export type Trip = typeof trips.$inferSelect;
@@ -144,3 +168,5 @@ export type Usage = typeof usage.$inferSelect;
 export type MagicToken = typeof magicTokens.$inferSelect;
 export type UserPrefs = typeof userPrefs.$inferSelect;
 export type NewUserPrefs = typeof userPrefs.$inferInsert;
+export type ShareToken = typeof shareTokens.$inferSelect;
+export type NewShareToken = typeof shareTokens.$inferInsert;

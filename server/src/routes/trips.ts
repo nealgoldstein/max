@@ -17,8 +17,9 @@
 //   round if conflicts get common.
 
 import { Hono } from 'hono';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, isNull } from 'drizzle-orm';
 import { z } from 'zod';
+import { randomUUID } from 'node:crypto';
 import { db, schema } from '../db/client.js';
 import { requireAuth, type AuthContext } from '../lib/auth.js';
 
@@ -214,6 +215,88 @@ tripsApi.delete('/:id', async (c) => {
     .run();
   if (result.rowsAffected === 0) return c.json({ error: 'Not found' }, 404);
   return c.json({ ok: true });
+});
+
+// v353.5: Share-link minting + revocation. The public read endpoint
+// for a share token is GET /share/:token and lives in its own
+// router (no auth) — this file only handles owner-side operations.
+
+// Mint a new share token for a trip the caller owns. Returns the
+// token; the client builds the share URL as
+// `https://travelingwithmax.app/?share=<token>`. Multiple active
+// tokens per trip are allowed (rotating doesn't auto-revoke older
+// ones — call DELETE first if you want exclusive rotation).
+tripsApi.post('/:id/share', async (c) => {
+  const user = c.get('user');
+  const id = c.req.param('id');
+  const trip = await db
+    .select()
+    .from(schema.trips)
+    .where(and(eq(schema.trips.id, id), eq(schema.trips.userId, user.id)))
+    .get();
+  if (!trip) return c.json({ error: 'Not found' }, 404);
+  const token = randomUUID() + '-' + randomUUID();
+  await db
+    .insert(schema.shareTokens)
+    .values({ token, tripId: id })
+    .run();
+  return c.json({ ok: true, token, tripId: id });
+});
+
+// Revoke ALL active (non-revoked) share tokens for a trip. Returns
+// how many were revoked. We mark revoked rather than delete so
+// audit / debug history is preserved.
+tripsApi.delete('/:id/share', async (c) => {
+  const user = c.get('user');
+  const id = c.req.param('id');
+  // Verify ownership first.
+  const trip = await db
+    .select()
+    .from(schema.trips)
+    .where(and(eq(schema.trips.id, id), eq(schema.trips.userId, user.id)))
+    .get();
+  if (!trip) return c.json({ error: 'Not found' }, 404);
+  const result = await db
+    .update(schema.shareTokens)
+    .set({ revokedAt: new Date() })
+    .where(
+      and(
+        eq(schema.shareTokens.tripId, id),
+        isNull(schema.shareTokens.revokedAt),
+      ),
+    )
+    .run();
+  return c.json({ ok: true, revoked: result.rowsAffected });
+});
+
+// List active share tokens for a trip the caller owns. Useful for
+// the share modal to show "this trip already has 1 active share
+// link" with a copy button.
+tripsApi.get('/:id/share', async (c) => {
+  const user = c.get('user');
+  const id = c.req.param('id');
+  const trip = await db
+    .select()
+    .from(schema.trips)
+    .where(and(eq(schema.trips.id, id), eq(schema.trips.userId, user.id)))
+    .get();
+  if (!trip) return c.json({ error: 'Not found' }, 404);
+  const rows = await db
+    .select()
+    .from(schema.shareTokens)
+    .where(
+      and(
+        eq(schema.shareTokens.tripId, id),
+        isNull(schema.shareTokens.revokedAt),
+      ),
+    )
+    .all();
+  return c.json({
+    tokens: rows.map((r) => ({
+      token: r.token,
+      createdAt: r.createdAt.getTime(),
+    })),
+  });
 });
 
 export { tripsApi };
