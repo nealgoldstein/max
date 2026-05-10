@@ -25250,6 +25250,7 @@ async function _parseBookingConfirmation(text) {
     "}\n\n" +
     "Rules:\n" +
     "- Use 24-hour time. Convert AM/PM if needed (3:00 PM → 15:00, 11:00 AM → 11:00).\n" +
+    "- TIME RANGES: hotels often state check-in/out as a window ('Check-in: 3:00 PM - 10:00 PM', 'Check-out: 7:00 AM - 11:00 AM'). Collapse to a single time: for check-in, use the EARLIEST time in the range (when the room becomes available — depTime=15:00 for '3 PM - 10 PM'). For check-out, use the LATEST time (the deadline by which to leave — arrTime=11:00 for '7 AM - 11 AM'). For transport time ranges (rare), use the scheduled time, not the boarding window.\n" +
     "- Dates: if year is missing, infer from context (recent emails are usually for upcoming travel). If truly unknowable, leave null.\n" +
     "- Type detection: be decisive. Words like 'Check-in / Check-out', 'X nights', 'Standard Room' → hotel. 'Flight #', airport codes, gate, terminal → flight. 'Train', PNR, station-to-station → train. Only return 'unknown' if there's truly no booking-shaped content at all.\n" +
     "- Missing fields are normal — set them to null. Don't refuse the whole extraction just because one or two fields aren't present. A hotel booking without a visible hotel name (sometimes the name lives at the top of the email and got cut off) should still be type='hotel' with name=null and the dates filled in.\n" +
@@ -25259,8 +25260,8 @@ async function _parseBookingConfirmation(text) {
     "- For 'notes', keep it short — one phrase only (e.g. 'Standard Double Room, 2 adults' or 'Gate B12, Terminal 2'). Long descriptions don't belong in any field.\n" +
     "- Cancellation: emails often state policy in prose ('Free cancellation until 7 days before arrival', 'until September 24, 2026 11:59 PM: € 0', 'Non-refundable'). Resolve to a concrete cancelDeadline date. If two dates are shown ('until X: € 0' and 'from Y: € N'), the deadline is X.\n" +
     "- URL: look for 'Manage booking', 'View reservation', 'Modify reservation', any clickable link, or domains like booking.com/account, hotels.com/reservation. Even partial URLs help — extract them.\n\n" +
-    "EXAMPLE INPUT (hotel):\n" +
-    "Reservation details\nCheck-in: Friday, October 2, 2026 (3:00 PM)\nCheck-out: Monday, October 5, 2026 (11:00 AM)\n3 nights, Standard Double Room, 2 adults\nLocation: Adalgata 2, 340 Stykkishólmur, Iceland\nTotal: € 586.50\nCancellation policy: You can cancel for free until 7 days before arrival. Cancellation cost until September 24, 2026 11:59 PM: € 0; from September 25, 2026 12:00 AM: € 586.50.\nManage your booking: https://www.booking.com/mybooking?token=abc123\n\n" +
+    "EXAMPLE INPUT (hotel, with time ranges):\n" +
+    "Reservation details\nCheck-in: Friday, October 2, 2026 (3:00 PM - 10:00 PM)\nCheck-out: Monday, October 5, 2026 (7:00 AM - 11:00 AM)\n3 nights, Standard Double Room, 2 adults\nLocation: Adalgata 2, 340 Stykkishólmur, Iceland\nTotal: € 586.50\nCancellation policy: You can cancel for free until 7 days before arrival. Cancellation cost until September 24, 2026 11:59 PM: € 0; from September 25, 2026 12:00 AM: € 586.50.\nManage your booking: https://www.booking.com/mybooking?token=abc123\n\n" +
     "EXAMPLE OUTPUT for that input:\n" +
     '{"type":"hotel","carrier":null,"number":null,"name":null,"address":"Adalgata 2, 340 Stykkishólmur, Iceland","from":null,"to":null,"depDate":"2026-10-02","depTime":"15:00","arrDate":"2026-10-05","arrTime":"11:00","confirmationNumber":null,"price":586.50,"currency":"EUR","url":"https://www.booking.com/mybooking?token=abc123","cancelType":"deadline","cancelDeadline":"2026-09-24","notes":"Standard Double Room, 2 adults"}\n\n' +
     "EXAMPLE INPUT (flight):\n" +
@@ -25290,6 +25291,46 @@ async function _parseBookingConfirmation(text) {
     throw new Error("LLM returned malformed JSON");
   }
   return _normalizeBookingExtraction(raw);
+}
+
+// Best-effort time-range parser. Hotels frequently state check-in /
+// check-out as windows: "3:00 PM - 10:00 PM", "7:00 AM - 11:00 AM",
+// "15:00-22:00", etc. Even when the LLM should be collapsing these
+// per the prompt, sometimes it returns the raw range. Returns the
+// chosen endpoint as "HH:MM" (start for check-in, end for check-out).
+function _parseTimeRange(s, prefer) {
+  if (!s || typeof s !== "string") return null;
+  // Already a clean HH:MM? leave it.
+  if (/^\d{2}:\d{2}$/.test(s.trim())) return s.trim();
+  function to24(h, m, ampm) {
+    h = parseInt(h, 10);
+    if (ampm) {
+      ampm = ampm.toLowerCase();
+      if (ampm === "pm" && h < 12) h += 12;
+      if (ampm === "am" && h === 12) h = 0;
+    }
+    var hh = h < 10 ? "0" + h : String(h);
+    var mm = m ? (m.length === 1 ? "0" + m : m) : "00";
+    return hh + ":" + mm;
+  }
+  // Try to find two time tokens in the string. Pattern allows "3:00 PM",
+  // "3 PM", "15:00", "15", separated by - or –.
+  var re = /(\d{1,2})(?::(\d{2}))?\s*(am|pm|AM|PM)?\s*[-–—]\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm|AM|PM)?/;
+  var m = s.match(re);
+  if (m) {
+    var startH = m[1], startMin = m[2], startAp = m[3];
+    var endH   = m[4], endMin   = m[5], endAp   = m[6];
+    // If only one side has am/pm, infer the other (assume same period).
+    if (!startAp && endAp) startAp = endAp;
+    if (!endAp && startAp) endAp = startAp;
+    var start = to24(startH, startMin, startAp);
+    var end   = to24(endH, endMin, endAp);
+    return prefer === "end" ? end : start;
+  }
+  // Single time fallback.
+  var single = s.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm|AM|PM)?/);
+  if (single) return to24(single[1], single[2], single[3]);
+  return null;
 }
 
 // Best-effort date-range parser. Handles common formats the LLM
@@ -25366,6 +25407,17 @@ function _normalizeBookingExtraction(p) {
   pick("depTime",    ["checkInTime", "departureTime", "startTime", "time"]);
   pick("arrDate",    ["checkOut", "checkOutDate", "checkout", "arrivalDate", "arrival", "endDate"]);
   pick("arrTime",    ["checkOutTime", "arrivalTime", "endTime"]);
+  // If depTime/arrTime came back as a range string ("3:00 PM - 10:00 PM"),
+  // collapse to a single time. Check-in uses the START of the range
+  // (when the room opens up); check-out uses the END (the deadline).
+  if (out.depTime && /[-–—]/.test(String(out.depTime))) {
+    var dt = _parseTimeRange(out.depTime, "start");
+    if (dt) out.depTime = dt;
+  }
+  if (out.arrTime && /[-–—]/.test(String(out.arrTime))) {
+    var at = _parseTimeRange(out.arrTime, "end");
+    if (at) out.arrTime = at;
+  }
   pick("confirmationNumber", ["confirmation", "confirmationCode", "bookingNumber", "bookingReference", "reservationNumber", "reservationCode", "code"]);
   pick("price",      ["total", "totalPrice", "totalCost", "amount", "amountPaid", "pricePaid", "cost"]);
   pick("currency",   ["currencyCode", "currencySymbol"]);
