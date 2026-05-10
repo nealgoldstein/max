@@ -4635,7 +4635,12 @@ function duplicateTrip(srcId, openAfter){
     newIdx.name = newName;
     newIdx.savedAt = new Date().toISOString();
     if (!Array.isArray(_tripsIndex)) _tripsIndex = [];
-    _tripsIndex.unshift(newIdx);
+    // v353.5: append rather than unshift so the duplicate appears
+    // below the original. The home-screen list sorts chronologically
+    // by start date in renderHomeDashboard, so this just affects the
+    // initial unsorted order; if dates are identical the original
+    // shows above the copy, which is the right mental model.
+    _tripsIndex.push(newIdx);
     if (typeof saveTripsIndex === "function") saveTripsIndex();
   }
 
