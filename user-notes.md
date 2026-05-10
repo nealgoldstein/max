@@ -214,11 +214,16 @@ average doesn't vary day-to-day, so per-day chips would just be
 noise. Same Open-Meteo cache as the dest strip, so adding day chips
 costs zero extra API calls.
 
-The same chip also appears in the **Today widget** (the blue now/next
-panel that shows up only on the current day during an in-progress
-trip): a "TODAY · 🌤️ 18°/9°" row at the top of the panel, so the
-person actually on the trip can see today's conditions without
-hunting for the day card.
+The same chip also appears in two more places when a trip is
+in-progress (status.phase === 'during'):
+
+- **Today banner** at the top of the trip view ("📍 You're on day X
+  of Y · In Reykjavik · May 10 · 🌤️ 18°/9° · 45 days left after
+  today"). Inline with the location and day-count, so it's the first
+  thing the traveler sees on opening the app each morning.
+- **Today widget** (the blue now/next panel that shows up only
+  inside the current day's card): "TODAY · 🌤️ 18°/9°" row at the
+  top of the panel, alongside the now/next/later breakdown.
 
 ## Cross-device sync
 

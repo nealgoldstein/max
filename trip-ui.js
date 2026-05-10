@@ -1002,12 +1002,48 @@
     topLine.style.cssText = "font-size:11px;font-weight:700;color:#1a5fa8;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:2px;";
     topLine.textContent = "📍 You're on day " + status.dayNumber + " of " + status.totalDays;
     var bottomLine = document.createElement("div");
-    bottomLine.style.cssText = "font-size:13px;font-weight:600;color:#0e3a6a;";
+    bottomLine.style.cssText = "font-size:13px;font-weight:600;color:#0e3a6a;display:flex;flex-wrap:wrap;align-items:baseline;gap:6px;";
     if (status.currentDestPlace) {
-      bottomLine.textContent = "In " + status.currentDestPlace
-        + (status.currentDayLbl ? " · " + status.currentDayLbl : "")
-        + (status.daysUntilEnd > 1 ? " · " + (status.daysUntilEnd - 1) + " day"
-            + (status.daysUntilEnd === 2 ? "" : "s") + " left after today" : " · last day of the trip");
+      var locSpan = document.createElement("span");
+      locSpan.textContent = "In " + status.currentDestPlace
+        + (status.currentDayLbl ? " · " + status.currentDayLbl : "");
+      bottomLine.appendChild(locSpan);
+      // v353.6: weather chip inline. Uses the current dest's coords +
+      // today's date. renderDayWeatherChip handles the cache, the
+      // forecast-vs-climate branch, and silently bails when there's
+      // no data — same behavior as the per-day chips.
+      if (status.currentDestId && typeof global.getDest === 'function'
+          && typeof global.renderDayWeatherChip === 'function') {
+        try {
+          var _destForBanner = global.getDest(status.currentDestId);
+          if (_destForBanner) {
+            // Find the day object that matches today; we need its .date
+            // for renderDayWeatherChip's lookup against the daily array.
+            var _todayDay = null;
+            if (status.currentDayId && Array.isArray(_destForBanner.days)) {
+              for (var _di = 0; _di < _destForBanner.days.length; _di++) {
+                if (_destForBanner.days[_di] && _destForBanner.days[_di].id === status.currentDayId) {
+                  _todayDay = _destForBanner.days[_di];
+                  break;
+                }
+              }
+            }
+            if (_todayDay && _todayDay.date) {
+              var _wxSpan = document.createElement("span");
+              _wxSpan.style.cssText = "font-weight:500;";
+              global.renderDayWeatherChip(_destForBanner, _todayDay, _wxSpan);
+              bottomLine.appendChild(_wxSpan);
+            }
+          }
+        } catch (_) {}
+      }
+      var tailSpan = document.createElement("span");
+      tailSpan.style.cssText = "font-weight:500;color:#3a5a80;";
+      tailSpan.textContent = (status.daysUntilEnd > 1
+        ? "· " + (status.daysUntilEnd - 1) + " day"
+            + (status.daysUntilEnd === 2 ? "" : "s") + " left after today"
+        : "· last day of the trip");
+      bottomLine.appendChild(tailSpan);
     } else {
       bottomLine.textContent = "Between destinations";
     }
@@ -2699,6 +2735,13 @@
     var dHdr=document.createElement("div"); dHdr.className="dm-day-hdr";
     var dLbl=document.createElement("span"); dLbl.textContent=day.lbl; dHdr.appendChild(dLbl);
     if(day.note){var dn=document.createElement("span");dn.style.cssText="font-size:10px;font-weight:400;color:#ccc;";dn.textContent=" \u00b7 "+day.note;dHdr.appendChild(dn);}
+    // v353.6: per-day weather chip on the destination-view day header.
+    // Same renderer + cache as the trip-view day cards and the Today
+    // banner \u2014 silently bails if no coords / no day.date / beyond the
+    // 16-day forecast horizon.
+    if (day && day.date && typeof global.renderDayWeatherChip === 'function') {
+      try { global.renderDayWeatherChip(dest, day, dHdr); } catch (_) {}
+    }
     blk.appendChild(dHdr);
 
     // Auto-inject arrival transport on first day
