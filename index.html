@@ -25219,7 +25219,10 @@ async function _parseBookingConfirmation(text) {
     '  "confirmationNumber": string | null,\n' +
     '  "price": number | null,          // total paid, decimal\n' +
     '  "currency": string | null,       // ISO code: USD, EUR, GBP, ISK, etc\n' +
-    '  "url": string | null,            // booking management URL if present\n' +
+    '  "url": string | null,            // booking management URL if present (often labeled "Manage booking", "View reservation", or a domain like booking.com/account)\n' +
+    '  "cancelType": "deadline" | "non-cancellable" | null,  // "deadline" if the policy gives a date you can cancel by; "non-cancellable" if explicitly non-refundable; null if no policy is stated\n' +
+    '  "cancelDeadline": "YYYY-MM-DD" | null, // the LAST date the user can cancel for free (so for "free until 7 days before arrival, arrival Oct 2" → 2026-09-25 is when penalty starts → use 2026-09-24 as the deadline)\n' +
+    '  "cancelDeadlineTime": "HH:MM" | null,  // 24h, time component of the deadline if specified\n' +
     '  "notes": string | null           // anything notable that doesn\'t fit a field (gate, terminal, room type, party size, etc.)\n' +
     "}\n\n" +
     "Rules:\n" +
@@ -25230,15 +25233,17 @@ async function _parseBookingConfirmation(text) {
     "- Don't invent values for fields that aren't in the source.\n" +
     "- If price is shown with a symbol ($, €, £, ¥), populate currency accordingly (USD, EUR, GBP, JPY). The cancellation cost / 'no-show fee' shown for hotel bookings is NOT the price paid — only use 'price' for what the user actually paid (often labeled 'Total' or 'Amount paid').\n" +
     "- 'address' is the physical location (hotel street address, restaurant address). Don't put airport codes or city names there — those go in 'from' / 'to' for transport.\n" +
-    "- For 'notes', keep it short — one phrase only (e.g. 'Standard Double Room, 2 adults' or 'Gate B12, Terminal 2'). Long descriptions don't belong in any field.\n\n" +
+    "- For 'notes', keep it short — one phrase only (e.g. 'Standard Double Room, 2 adults' or 'Gate B12, Terminal 2'). Long descriptions don't belong in any field.\n" +
+    "- Cancellation: emails often state policy in prose ('Free cancellation until 7 days before arrival', 'until September 24, 2026 11:59 PM: € 0', 'Non-refundable'). Resolve to a concrete cancelDeadline date. If two dates are shown ('until X: € 0' and 'from Y: € N'), the deadline is X.\n" +
+    "- URL: look for 'Manage booking', 'View reservation', 'Modify reservation', any clickable link, or domains like booking.com/account, hotels.com/reservation. Even partial URLs help — extract them.\n\n" +
     "EXAMPLE INPUT (hotel):\n" +
-    "Reservation details\nCheck-in: Friday, October 2, 2026 (3:00 PM)\nCheck-out: Monday, October 5, 2026 (11:00 AM)\n3 nights, Standard Double Room, 2 adults\nLocation: Adalgata 2, 340 Stykkishólmur, Iceland\nTotal: € 586.50\n\n" +
+    "Reservation details\nCheck-in: Friday, October 2, 2026 (3:00 PM)\nCheck-out: Monday, October 5, 2026 (11:00 AM)\n3 nights, Standard Double Room, 2 adults\nLocation: Adalgata 2, 340 Stykkishólmur, Iceland\nTotal: € 586.50\nCancellation policy: You can cancel for free until 7 days before arrival. Cancellation cost until September 24, 2026 11:59 PM: € 0; from September 25, 2026 12:00 AM: € 586.50.\nManage your booking: https://www.booking.com/mybooking?token=abc123\n\n" +
     "EXAMPLE OUTPUT for that input:\n" +
-    '{"type":"hotel","carrier":null,"number":null,"name":null,"address":"Adalgata 2, 340 Stykkishólmur, Iceland","from":null,"to":null,"depDate":"2026-10-02","depTime":"15:00","arrDate":"2026-10-05","arrTime":"11:00","confirmationNumber":null,"price":586.50,"currency":"EUR","url":null,"notes":"Standard Double Room, 2 adults"}\n\n' +
+    '{"type":"hotel","carrier":null,"number":null,"name":null,"address":"Adalgata 2, 340 Stykkishólmur, Iceland","from":null,"to":null,"depDate":"2026-10-02","depTime":"15:00","arrDate":"2026-10-05","arrTime":"11:00","confirmationNumber":null,"price":586.50,"currency":"EUR","url":"https://www.booking.com/mybooking?token=abc123","cancelType":"deadline","cancelDeadline":"2026-09-24","cancelDeadlineTime":"23:59","notes":"Standard Double Room, 2 adults"}\n\n' +
     "EXAMPLE INPUT (flight):\n" +
-    "Lufthansa LH 414\nDeparture: JFK 9:25 PM Wed Oct 1, 2026\nArrival: FRA 11:00 AM Thu Oct 2, 2026\nConfirmation: ABC123\nTotal $842.00\n\n" +
+    "Lufthansa LH 414\nDeparture: JFK 9:25 PM Wed Oct 1, 2026\nArrival: FRA 11:00 AM Thu Oct 2, 2026\nConfirmation: ABC123\nTotal $842.00\nNon-refundable\nManage booking: https://lufthansa.com/booking/ABC123\n\n" +
     "EXAMPLE OUTPUT for that input:\n" +
-    '{"type":"flight","carrier":"Lufthansa","number":"LH 414","name":null,"address":null,"from":"JFK","to":"FRA","depDate":"2026-10-01","depTime":"21:25","arrDate":"2026-10-02","arrTime":"11:00","confirmationNumber":"ABC123","price":842.00,"currency":"USD","url":null,"notes":null}\n\n' +
+    '{"type":"flight","carrier":"Lufthansa","number":"LH 414","name":null,"address":null,"from":"JFK","to":"FRA","depDate":"2026-10-01","depTime":"21:25","arrDate":"2026-10-02","arrTime":"11:00","confirmationNumber":"ABC123","price":842.00,"currency":"USD","url":"https://lufthansa.com/booking/ABC123","cancelType":"non-cancellable","cancelDeadline":null,"cancelDeadlineTime":null,"notes":null}\n\n' +
     "Now extract the user's confirmation in the same shape.";
   var user = "CONFIRMATION TEXT:\n\n" + text + "\n\nReturn the JSON.";
   var resp = await callMax(
@@ -25292,8 +25297,21 @@ function _normalizeBookingExtraction(p) {
   pick("confirmationNumber", ["confirmation", "confirmationCode", "bookingNumber", "bookingReference", "reservationNumber", "reservationCode", "code"]);
   pick("price",      ["total", "totalPrice", "totalCost", "amount", "amountPaid", "pricePaid", "cost"]);
   pick("currency",   ["currencyCode", "currencySymbol"]);
-  pick("url",        ["bookingUrl", "managementUrl", "link", "href"]);
+  pick("url",        ["bookingUrl", "managementUrl", "link", "href", "manageBooking", "manageReservation", "viewReservation"]);
   pick("notes",      ["description", "details", "additionalInfo", "remarks"]);
+  pick("cancelType", ["cancellationType", "cancellation", "cancelPolicy", "cancellationPolicy", "refundPolicy"]);
+  pick("cancelDeadline",     ["cancelBy", "cancellationDeadline", "freeCancellationUntil", "refundDeadline"]);
+  pick("cancelDeadlineTime", ["cancelByTime", "cancellationDeadlineTime"]);
+  // Normalize cancelType to one of the canonical values our save
+  // path accepts: "deadline" or "non-cancellable" (or null).
+  if (out.cancelType) {
+    var ct = String(out.cancelType).toLowerCase();
+    if (/non.?refund|non.?cancel|no.?cancel|no.?refund/.test(ct)) out.cancelType = "non-cancellable";
+    else if (/free|deadline|until|by/.test(ct) || out.cancelDeadline) out.cancelType = "deadline";
+    else out.cancelType = null;
+  } else if (out.cancelDeadline) {
+    out.cancelType = "deadline";
+  }
   // If the LLM jammed multiple things into a 'dates' string like
   // "October 2-5, 2026", we can't reliably split here — leave the
   // user to fill via the preview's date pickers. But we can at least
@@ -25434,8 +25452,32 @@ function _showBookingPreviewModal(destId, p, originalText) {
       inp("pcfp-currency", "Currency", p.currency || "", "USD") +
       '</div>';
     html += inp("pcfp-url", "Booking URL", p.url || "", "https://…", "url");
+    // Cancellation policy block — concrete deadline date+time, or
+    // a "non-cancellable" flag, or neither. The save path mirrors
+    // mkCancelField's contract: cancelType "deadline" with date+time,
+    // or cancelType "non-cancellable" with nulls, or cancelType ""
+    // when nothing is known.
+    var ctVal = p.cancelType || "";
+    html += '<div style="margin-top:6px;padding:8px 10px;background:#fff8e6;border:1px solid #f1d77a;border-radius:5px;">' +
+      '<div style="font-size:10px;font-weight:700;color:#a06d00;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:5px;">Cancellation policy</div>' +
+      '<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;margin-bottom:6px;">' +
+        '<label style="cursor:pointer;"><input type="radio" name="pcfp-ctype" value="deadline"' + (ctVal === "deadline" ? " checked" : "") + ' style="margin-right:4px;"/>Cancel by date</label>' +
+        '<label style="cursor:pointer;"><input type="radio" name="pcfp-ctype" value="non-cancellable"' + (ctVal === "non-cancellable" ? " checked" : "") + ' style="margin-right:4px;"/>Non-cancellable</label>' +
+        '<label style="cursor:pointer;"><input type="radio" name="pcfp-ctype" value=""' + (!ctVal ? " checked" : "") + ' style="margin-right:4px;"/>Unknown</label>' +
+      '</div>' +
+      '<div id="pcfp-cdeadline-wrap" style="display:' + (ctVal === "deadline" ? "grid" : "none") + ';grid-template-columns:1fr 1fr;gap:8px;">' +
+        inp("pcfp-cancel-date", "Cancel by date", p.cancelDeadline || "", "", "date") +
+        inp("pcfp-cancel-time", "Cancel by time", p.cancelDeadlineTime || "", "", "time") +
+      '</div>' +
+    '</div>';
     html += inp("pcfp-notes", "Notes", p.notes || "", "Optional");
     fieldsHost.innerHTML = html;
+    // Toggle the deadline date/time visibility based on the radio.
+    var ctRadios = document.querySelectorAll('input[name="pcfp-ctype"]');
+    var cwrap = document.getElementById("pcfp-cdeadline-wrap");
+    ctRadios.forEach(function(r){ r.onchange = function(){
+      if (cwrap) cwrap.style.display = r.value === "deadline" && r.checked ? "grid" : (r.checked ? "none" : cwrap.style.display);
+    };});
   }
   renderFields();
   typeSel.onchange = renderFields;
@@ -25455,6 +25497,12 @@ function _showBookingPreviewModal(destId, p, originalText) {
     var num = function(s){ var n = parseFloat(s); return isFinite(n) ? n : null; };
     var freshDest = getDest(destId);
     if (!freshDest) { maxAlert("Destination is gone — close this and reopen the tracker."); return; }
+    // Read cancellation policy from the radio + date/time inputs.
+    var ctEl = document.querySelector('input[name="pcfp-ctype"]:checked');
+    var cancelType = ctEl ? ctEl.value : "";
+    var cancelDeadline = cancelType === "deadline" ? (v("pcfp-cancel-date") || null) : null;
+    var cancelDeadlineTime = cancelType === "deadline" ? (v("pcfp-cancel-time") || null) : null;
+    if (!cancelType) cancelType = "unknown"; // keeps schema consistent with manual-entry path
 
     if (t === "hotel") {
       if (!freshDest.hotelBookings) freshDest.hotelBookings = [];
@@ -25473,9 +25521,9 @@ function _showBookingPreviewModal(destId, p, originalText) {
         url: v("pcfp-url") || null,
         status: "booked",
         source: "paste",
-        cancelType: "unknown",
-        cancelDeadline: null,
-        cancelDeadlineTime: null,
+        cancelType: cancelType,
+        cancelDeadline: cancelDeadline,
+        cancelDeadlineTime: cancelDeadlineTime,
         lat: null,
         lng: null,
       });
@@ -25519,9 +25567,9 @@ function _showBookingPreviewModal(destId, p, originalText) {
         url: v("pcfp-url") || null,
         status: "booked",
         source: "paste",
-        cancelType: "unknown",
-        cancelDeadline: null,
-        cancelDeadlineTime: null,
+        cancelType: cancelType,
+        cancelDeadline: cancelDeadline,
+        cancelDeadlineTime: cancelDeadlineTime,
       });
     } else {
       // restaurant / tour / ticket / other → generalBookings
@@ -25540,9 +25588,9 @@ function _showBookingPreviewModal(destId, p, originalText) {
         url: v("pcfp-url") || null,
         status: "booked",
         source: "paste",
-        cancelType: "unknown",
-        cancelDeadline: null,
-        cancelDeadlineTime: null,
+        cancelType: cancelType,
+        cancelDeadline: cancelDeadline,
+        cancelDeadlineTime: cancelDeadlineTime,
       });
     }
     if (typeof autoSave === "function") autoSave();
