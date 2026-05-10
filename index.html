@@ -321,7 +321,16 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 #main-map{flex:1;min-height:0;width:100%;touch-action:none;}
 
 /* Left panel */
-.lp-hdr{padding:12px 14px;border-bottom:1px solid #eee;display:flex;align-items:center;gap:8px;flex-shrink:0;}
+/* v353.6: flex-wrap:wrap unconditionally. The trip-view header has
+   8+ buttons (Home, Parameters, Save, Copy, Share, Export, Paste,
+   search, key, sync) plus the trip-name column — even at the default
+   420px lp width that overflows the panel, and overflow:hidden on
+   .lp was clipping the right-hand buttons (looked like the map was
+   "covering" them). Wrapping is graceful: the trip name stays on
+   row 1, buttons drop to row 2 when needed. The mobile media query
+   already had this rule; we just promote it to the base style. */
+.lp-hdr{padding:12px 14px;border-bottom:1px solid #eee;display:flex;align-items:center;gap:8px;flex-shrink:0;flex-wrap:wrap;}
+.lp-hdr > div:nth-child(2){flex-wrap:wrap;}
 .av{width:30px;height:30px;border-radius:50%;background:#f0f0f0;border:1px solid #ddd;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#666;flex-shrink:0;}
 .lp-hdr p{font-size:13px;font-weight:600;}
 .lp-hdr span{font-size:11px;color:#999;}
@@ -25283,6 +25292,55 @@ async function _parseBookingConfirmation(text) {
   return _normalizeBookingExtraction(raw);
 }
 
+// Best-effort date-range parser. Handles common formats the LLM
+// might return when it inlines dates into a single string instead
+// of using depDate/arrDate. Returns {start, end} as YYYY-MM-DD or
+// null if it can't make sense of it.
+function _parseDateRangeString(s) {
+  if (!s) return null;
+  s = String(s).trim();
+  // ISO range: "2026-10-02 to 2026-10-05" or "2026-10-02 - 2026-10-05"
+  var iso = s.match(/(\d{4}-\d{2}-\d{2})\s*(?:to|-|–|—)\s*(\d{4}-\d{2}-\d{2})/);
+  if (iso) return { start: iso[1], end: iso[2] };
+  // Slash range: "10/2/2026 - 10/5/2026"
+  var slash = s.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})\s*(?:to|-|–|—)\s*(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (slash) {
+    var pad = function(n){ return n.length === 1 ? "0" + n : n; };
+    return {
+      start: slash[3] + "-" + pad(slash[1]) + "-" + pad(slash[2]),
+      end: slash[6] + "-" + pad(slash[4]) + "-" + pad(slash[5]),
+    };
+  }
+  // English month range: "October 2-5, 2026" or "October 2 - October 5, 2026" or "Oct 2 - Oct 5, 2026"
+  var months = { jan:"01", feb:"02", mar:"03", apr:"04", may:"05", jun:"06", jul:"07", aug:"08", sep:"09", oct:"10", nov:"11", dec:"12" };
+  // Try compact form first: "October 2-5, 2026"
+  var compact = s.match(/^([A-Za-z]+)\s+(\d{1,2})\s*[-–—]\s*(\d{1,2}),?\s+(\d{4})$/);
+  if (compact) {
+    var mc = months[compact[1].slice(0,3).toLowerCase()];
+    if (mc) {
+      var yc = compact[4];
+      return {
+        start: yc + "-" + mc + "-" + (compact[2].length === 1 ? "0" + compact[2] : compact[2]),
+        end:   yc + "-" + mc + "-" + (compact[3].length === 1 ? "0" + compact[3] : compact[3]),
+      };
+    }
+  }
+  // Try expanded form: "October 2 - October 5, 2026"
+  var expanded = s.match(/^([A-Za-z]+)\s+(\d{1,2})\s*[-–—]\s*([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})$/);
+  if (expanded) {
+    var m1 = months[expanded[1].slice(0,3).toLowerCase()];
+    var m2 = months[expanded[3].slice(0,3).toLowerCase()];
+    var ye = expanded[5];
+    if (m1 && m2) {
+      return {
+        start: ye + "-" + m1 + "-" + (expanded[2].length === 1 ? "0" + expanded[2] : expanded[2]),
+        end:   ye + "-" + m2 + "-" + (expanded[4].length === 1 ? "0" + expanded[4] : expanded[4]),
+      };
+    }
+  }
+  return null;
+}
+
 // Belt-and-braces normalizer: even when the LLM ignores the prompt
 // and returns its own shape (destination/accommodation/checkIn/total/
 // etc.), map the common variant keys to our canonical schema so the
@@ -25329,11 +25387,22 @@ function _normalizeBookingExtraction(p) {
     out.cancelType = "deadline";
   }
   // If the LLM jammed multiple things into a 'dates' string like
-  // "October 2-5, 2026", we can't reliably split here — leave the
-  // user to fill via the preview's date pickers. But we can at least
-  // surface it via notes so they don't lose the info.
+  // "October 2-5, 2026", attempt to parse it into proper depDate /
+  // arrDate. Common patterns we handle:
+  //   "October 2-5, 2026"
+  //   "October 2 - October 5, 2026"
+  //   "Oct 2 - Oct 5, 2026"
+  //   "10/2/2026 - 10/5/2026"
+  //   "2026-10-02 to 2026-10-05"
+  // Fallback if we can't parse: surface via notes so the info isn't lost.
   if (!out.depDate && typeof p.dates === "string") {
-    out.notes = (out.notes ? out.notes + " · " : "") + "Dates: " + p.dates;
+    var parsed = _parseDateRangeString(p.dates);
+    if (parsed) {
+      if (!out.depDate) out.depDate = parsed.start;
+      if (!out.arrDate) out.arrDate = parsed.end;
+    } else {
+      out.notes = (out.notes ? out.notes + " · " : "") + "Dates: " + p.dates;
+    }
   }
   if (typeof p.travelers === "string") {
     out.notes = (out.notes ? out.notes + " · " : "") + p.travelers;
