@@ -33,6 +33,111 @@
      posts a "sw-updated" message back; the listener below shows
      a small toast prompting reload. -->
 <script>
+  // v353.6: PWA install detection + prompt. Three states:
+  //   1. Already running standalone (installed) → hide install pill,
+  //      remember it via localStorage so future browser-tab visits
+  //      also hide it.
+  //   2. Chrome / Android: 'beforeinstallprompt' fires → stash event,
+  //      show pill; click triggers native prompt.
+  //   3. iOS Safari: no prompt API. Show pill anyway (unless we've
+  //      seen them in standalone before); click opens an instructions
+  //      overlay walking through Share → Add to Home Screen.
+  window._pwaDeferredPrompt = null;
+  function _isPwaStandalone() {
+    try {
+      if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) return true;
+      if (window.navigator && window.navigator.standalone === true) return true;
+    } catch (_) {}
+    return false;
+  }
+  function _isIOS() {
+    try {
+      var ua = navigator.userAgent || '';
+      return /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
+    } catch (_) { return false; }
+  }
+  function _showInstallPill() {
+    var el = document.getElementById('hs-install-link');
+    if (el) el.style.display = '';
+  }
+  function _hideInstallPill() {
+    var el = document.getElementById('hs-install-link');
+    if (el) el.style.display = 'none';
+  }
+  // Stash the deferred prompt and reveal the pill on Android/Chrome.
+  window.addEventListener('beforeinstallprompt', function (e) {
+    e.preventDefault();
+    window._pwaDeferredPrompt = e;
+    _showInstallPill();
+  });
+  // Confirm install — clear the deferred prompt and persist a flag
+  // so we know not to show the pill again even from the regular tab.
+  window.addEventListener('appinstalled', function () {
+    window._pwaDeferredPrompt = null;
+    try { localStorage.setItem('max-pwa-installed', '1'); } catch (_) {}
+    _hideInstallPill();
+  });
+  // On boot: hide if running standalone, or if we've previously seen
+  // standalone (the persistent flag). Otherwise on iOS Safari show
+  // the pill so the user has an entry point.
+  window.addEventListener('load', function () {
+    var wasInstalled = false;
+    try { wasInstalled = localStorage.getItem('max-pwa-installed') === '1'; } catch (_) {}
+    if (_isPwaStandalone()) {
+      // Mark once-and-for-all so a regular-tab visit later doesn't
+      // re-show the install pill.
+      try { localStorage.setItem('max-pwa-installed', '1'); } catch (_) {}
+      _hideInstallPill();
+      return;
+    }
+    if (wasInstalled) { _hideInstallPill(); return; }
+    if (_isIOS()) _showInstallPill();
+    // Android/Chrome: pill stays hidden until beforeinstallprompt fires.
+  });
+  // Handler used by the pill's onclick. Routes to the native prompt
+  // on Android, or to an instructions overlay on iOS.
+  window.showInstallPrompt = function () {
+    if (window._pwaDeferredPrompt) {
+      var p = window._pwaDeferredPrompt;
+      window._pwaDeferredPrompt = null;
+      p.prompt();
+      p.userChoice && p.userChoice.then(function (choice) {
+        if (choice && choice.outcome === 'accepted') {
+          try { localStorage.setItem('max-pwa-installed', '1'); } catch (_) {}
+          _hideInstallPill();
+        } else {
+          // User declined — re-stash so they can try again later.
+          window._pwaDeferredPrompt = p;
+          _showInstallPill();
+        }
+      });
+      return;
+    }
+    // No native prompt available → show iOS instructions (works as
+    // a fallback for any unsupported browser too).
+    _showIosInstallInstructions();
+  };
+  function _showIosInstallInstructions() {
+    var existing = document.getElementById('pwa-ios-overlay');
+    if (existing) existing.remove();
+    var ov = document.createElement('div');
+    ov.id = 'pwa-ios-overlay';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:11900;display:flex;align-items:center;justify-content:center;padding:24px;font:13px/1.5 -apple-system,sans-serif;';
+    ov.innerHTML =
+      '<div style="background:#fff;border-radius:12px;width:380px;max-width:100%;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);">' +
+        '<div style="font-size:15px;font-weight:700;margin-bottom:10px;">Install Max on your iPhone</div>' +
+        '<ol style="margin:0 0 14px;padding-left:20px;color:#333;line-height:1.7;">' +
+          '<li>Tap the <strong>Share</strong> icon at the bottom of Safari (the square with the upward arrow).</li>' +
+          '<li>Scroll and tap <strong>Add to Home Screen</strong>.</li>' +
+          '<li>Tap <strong>Add</strong> in the top-right.</li>' +
+        '</ol>' +
+        '<div style="font-size:11px;color:#888;margin-bottom:16px;">Max will appear as an app icon on your home screen — open it for a full-screen, app-like experience.</div>' +
+        '<button onclick="document.getElementById(\'pwa-ios-overlay\').remove()" style="width:100%;padding:9px;background:#111;color:#fff;border:none;border-radius:6px;font-weight:600;font-size:13px;cursor:pointer;font-family:inherit;">Got it</button>' +
+      '</div>';
+    document.body.appendChild(ov);
+    ov.addEventListener('click', function (e) { if (e.target === ov) ov.remove(); });
+  }
+
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('/sw.js').catch(function (err) {
@@ -1587,6 +1692,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
     <div class="hs-logo">
       <div class="hs-av">M</div>
       <div class="hs-logo-text"><p>Max</p><span>Tourist's Guide Travel Agent</span></div>
+      <div onclick="showInstallPrompt()" id="hs-install-link" style="display:none;font-size:11px;color:#1a5fa8;cursor:pointer;margin-left:auto;padding:3px 10px;border:1px solid #c8d8f0;border-radius:10px;white-space:nowrap;font-weight:600;" title="Install Max as an app on your home screen">⊕ Install</div>
       <div onclick="showWelcomeOnboarding()" id="hs-welcome-link" style="font-size:11px;color:#999;cursor:pointer;margin-left:auto;padding:3px 10px;border:1px solid #ddd;border-radius:10px;white-space:nowrap;" title="Re-read the welcome + change your pace setting">Welcome</div>
       <div onclick="showAboutMax()" id="hs-how-it-works" style="font-size:11px;color:#999;cursor:pointer;margin-left:8px;padding:3px 10px;border:1px solid #ddd;border-radius:10px;white-space:nowrap;" title="How Max works">How it works</div>
       <div onclick="MaxSync.showSignInModal()" id="hs-sync-btn" style="font-size:11px;color:#999;cursor:pointer;margin-left:8px;padding:3px 10px;border:1px solid #ddd;border-radius:10px;white-space:nowrap;" title="Sync with server">⇄ Sync</div>
