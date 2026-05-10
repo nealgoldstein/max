@@ -4988,26 +4988,13 @@ function enterApp(){
   g("app").style.display="flex";
   var tn=g("trip-name-display"); if(tn){
     tn.textContent=trip.name||"Untitled trip";
-    tn.title="Double-click to rename";
-    tn.ondblclick=function(e){
-      e.stopPropagation();
-      var inp=document.createElement("input");
-      inp.value=trip.name||""; inp.style.cssText="font-size:11px;color:#111;background:transparent;border:none;border-bottom:1px solid #999;outline:none;font-family:inherit;width:120px;";
-      tn.parentNode.replaceChild(inp,tn);
-      inp.focus(); inp.select();
-      function saveName(){
-        var v=inp.value.trim()||"Untitled trip";
-        trip.name=v; autoSave();
-        var span=document.createElement("span"); span.id="trip-name-display";
-        span.style.cssText="font-size:11px;color:#999;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px;cursor:default;";
-        span.title="Double-click to rename"; span.textContent=v;
-        inp.parentNode.replaceChild(span,inp);
-        span.ondblclick=tn.ondblclick;
-        var hsTc=document.querySelectorAll(".tc-name"); hsTc.forEach(function(el){if(trip.name)el.textContent=trip.name;});
-      }
-      inp.onblur=saveName;
-      inp.onkeydown=function(e){if(e.key==="Enter")inp.blur();if(e.key==="Escape"){trip.name=trip.name;inp.blur();}};
-    };
+    tn.title="Click to rename";
+    // Rename is already wired via inline onclick="editTripName()" on
+    // the span itself (HTML line ~1824). The previous ondblclick
+    // handler here built a fresh span with much smaller, lighter
+    // inline styles (font-size:11px;color:#999) that made the trip
+    // name visually disappear after every rename. Removed in favor
+    // of the single canonical rename path in editTripName().
   }
   // Wire up map controls
   var closeBtn=document.getElementById('mpp-close-btn');
@@ -15034,26 +15021,9 @@ function restoreTripUI(){
   }
   var tn=g("trip-name-display"); if(tn){
     tn.textContent=trip.name||"Untitled trip";
-    tn.title="Double-click to rename";
-    tn.ondblclick=function(e){
-      e.stopPropagation();
-      var inp=document.createElement("input");
-      inp.value=trip.name||""; inp.style.cssText="font-size:11px;color:#111;background:transparent;border:none;border-bottom:1px solid #999;outline:none;font-family:inherit;width:120px;";
-      tn.parentNode.replaceChild(inp,tn);
-      inp.focus(); inp.select();
-      function saveName(){
-        var v=inp.value.trim()||"Untitled trip";
-        trip.name=v; autoSave();
-        var span=document.createElement("span"); span.id="trip-name-display";
-        span.style.cssText="font-size:11px;color:#999;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px;cursor:default;";
-        span.title="Double-click to rename"; span.textContent=v;
-        inp.parentNode.replaceChild(span,inp);
-        span.ondblclick=tn.ondblclick;
-        var hsTc=document.querySelectorAll(".tc-name"); hsTc.forEach(function(el){if(trip.name)el.textContent=trip.name;});
-      }
-      inp.onblur=saveName;
-      inp.onkeydown=function(e){if(e.key==="Enter")inp.blur();if(e.key==="Escape"){trip.name=trip.name;inp.blur();}};
-    };
+    tn.title="Click to rename";
+    // See note above (in the other trip-load path): ondblclick handler
+    // removed; editTripName() (inline onclick) is the canonical rename.
   }
   var stBtn=g("spend-toggle-btn"); if(stBtn)stBtn.className=trip.trackSpending?"spend-toggle on":"spend-toggle";
 }
@@ -25437,18 +25407,28 @@ function _doTIInline(destId, cat, inpEl, btnEl){
 // ── Trip name editing ──────────────────────────────────────
 function editTripName(){
   var span=g("trip-name-display"); if(!span)return;
+  // Cache the original span and its inline styles so we can restore
+  // them verbatim after save. Previous implementation built a fresh
+  // span with smaller/lighter styles (font-size:11px;color:#999) which
+  // made the trip name visually disappear after every rename. We now
+  // keep the same span node — just hide it during edit and restore.
+  var savedDisplay = span.style.display || "block";
   var inp=document.createElement("input"); inp.className="trip-name-inp";
   inp.value=trip.name||""; inp.placeholder="Trip name";
-  span.parentNode.replaceChild(inp,span);
+  // Match the visual weight of the trip-name-display span so the swap
+  // doesn't jiggle the layout.
+  inp.style.cssText="font-size:13px;font-weight:600;color:#222;background:transparent;border:none;border-bottom:1px solid #999;outline:none;font-family:inherit;width:100%;display:block;padding:0;";
+  span.style.display="none";
+  span.parentNode.insertBefore(inp, span);
   inp.focus(); inp.select();
+  var saved = false;
   function save(){
+    if (saved) return; saved = true;
     var val=inp.value.trim()||trip.name||"Untitled trip";
     trip.name=val;
-    var newSpan=document.createElement("span"); newSpan.id="trip-name-display";
-    newSpan.style.cssText="font-size:11px;color:#999;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;";
-    newSpan.title="Click to rename"; newSpan.textContent=val;
-    newSpan.onclick=editTripName;
-    inp.parentNode.replaceChild(newSpan,inp);
+    span.textContent=val;
+    span.style.display=savedDisplay;
+    if (inp.parentNode) inp.parentNode.removeChild(inp);
     updateIndexEntry(); autoSave();
   }
   inp.onblur=save;
