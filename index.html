@@ -742,6 +742,9 @@ body.readonly-share #sync-btn,
 body.readonly-share .item-del,
 body.readonly-share .ic-add-btn,
 body.readonly-share .tm-rename-btn,
+body.readonly-share .tm-reorder-btn,
+body.readonly-share .tm-add-dest,
+body.readonly-share .tm-dest-actions button,
 body.readonly-share .di-add,
 body.readonly-share .di-del,
 body.readonly-share .item-dot-wrap,
@@ -751,7 +754,15 @@ body.readonly-share .tb-btn,
 body.readonly-share .tc-del,
 body.readonly-share .tc-dup,
 body.readonly-share .ic .ic-edit-btn,
-body.readonly-share .lp-resize{display:none !important;}
+body.readonly-share .lp-resize,
+/* Catch-all: any button whose onclick mutates trip state. The
+   global localSave guard would no-op the persistence, but the
+   in-memory mutation would still re-render and look interactive.
+   Disabling pointer-events on every button under #app except
+   ones that opt back in below is safer. */
+body.readonly-share #app button:not(.readonly-allowed):not(.file-btn),
+body.readonly-share #app .di button,
+body.readonly-share #app .ic button{pointer-events:none !important;opacity:0.4 !important;}
 /* Show Home button so the recipient can return to their own trips
    if signed in. Re-show .file-btn for it specifically by class. */
 body.readonly-share #app .file-btn[onclick*="goHome"]{display:inline-block !important;}
@@ -761,6 +772,17 @@ body.readonly-share #app .file-btn[onclick*="goHome"]{display:inline-block !impo
 body.readonly-share .ic .item-row{cursor:default !important;}
 body.readonly-share .item-handle,
 body.readonly-share .ic-drag-handle{display:none !important;}
+/* HTML5 native drag uses the [draggable=true] attribute on dest
+   cards (.tm-dest) and itinerary rows. CSS can't strip the attr,
+   but it can suppress the visual cue and intercept pointer events
+   on the drag-grabbable areas. We also strip the attribute via JS
+   in _stripDraggableForReadOnly() once #app is rendered, but the
+   CSS gives an immediate visual / cursor signal even before that
+   runs. */
+body.readonly-share .tm-dest[draggable="true"],
+body.readonly-share [draggable="true"]{
+  cursor:default !important;
+}
 /* Mute the look slightly so it's clear nothing is editable. */
 body.readonly-share textarea,
 body.readonly-share input[type="text"],
@@ -14527,12 +14549,49 @@ function openSharedTrip(token){
     // Inject the read-only banner once.
     _injectReadOnlyBanner();
     enterApp();
+    // Strip native HTML5 draggable from anything that has it. Without
+    // this the recipient can drag-reorder dest cards / itinerary
+    // rows; the localSave guard would no-op the persistence, but
+    // the in-memory mutation still re-renders and looks like the
+    // edit "took." MutationObserver catches future re-renders too.
+    _stripDraggableForReadOnly();
   }).catch(function(e){
     var splash = document.getElementById("share-loading");
     if (splash) splash.remove();
     maxAlert("Couldn't load shared trip: " + (e && e.message || "unknown"));
     _backToHomeFromShare();
   });
+}
+
+function _stripDraggableForReadOnly(){
+  if (!_readOnlyShare) return;
+  function strip(root){
+    if (!root) return;
+    var nodes = root.querySelectorAll('[draggable="true"]');
+    nodes.forEach(function(n){
+      n.setAttribute("draggable", "false");
+      n.draggable = false;
+      // Defensively kill the dragstart so even if some code re-flips
+      // draggable later, the drag never actually begins.
+      n.addEventListener("dragstart", function(e){ e.preventDefault(); }, true);
+    });
+  }
+  strip(document.getElementById("app") || document.body);
+  // The trip view re-renders on dest changes (drawTripMode, etc.).
+  // Watch for new draggable elements and strip them. Cheap because
+  // we only react when actual mutations happen, not on every frame.
+  if (window._roShareStripObserver) return;
+  try {
+    window._roShareStripObserver = new MutationObserver(function(muts){
+      muts.forEach(function(m){
+        if (m.target && m.target.nodeType === 1) strip(m.target);
+      });
+    });
+    window._roShareStripObserver.observe(document.getElementById("app") || document.body, {
+      childList: true, subtree: true, attributes: true,
+      attributeFilter: ["draggable"],
+    });
+  } catch (_) {}
 }
 
 function _backToHomeFromShare(){
