@@ -114,7 +114,7 @@ Same pattern as the trip-view map:
 
 ## Export trip (PDF + .ics)
 
-**Trip view header → Export** opens a small modal with two options:
+**Trip view header → Export** opens a small modal with three options:
 
 - **📄 Print / Save as PDF** → opens a clean print-formatted view
   in a new window and triggers the print dialog. User picks
@@ -128,22 +128,63 @@ Same pattern as the trip-view map:
   - One timed event per tracker/booking item with a date
     (✈ prefix, duration falls back to 3h for flights, 1h
     otherwise)
+  - One timed event per planned item in the per-day itinerary
+    (🎯 sight, 🍽 restaurant, 🚐 daytrip, 🏨 hotel, 📌 fallback).
+    Items the user hasn't explicitly timed get a slot-based default
+    (morning=09:00, afternoon=14:00, evening=19:00, day=10:00).
+    Default duration: 1.5h for restaurants, 4h for day-trips, 1h
+    for everything else.
   Drops into Apple Calendar, Google Calendar, Outlook, etc.
   via double-click. **One-shot:** re-export to update events;
   destinations you've since deleted in Max will linger in your
   calendar.
 - **🔄 Subscribe in calendar (recommended)** → live link your
-  calendar app polls every few hours. Edits in Max — adding sights,
+  calendar app polls automatically. Edits in Max — adding sights,
   changing dates, removing destinations — flow into your calendar
-  automatically; deletes too. Re-uses the trip's existing share
+  on the next poll; deletes too. Re-uses the trip's existing share
   token (mints one if none exists), so the same capability covers
-  both the read-only viewer and the calendar feed. The modal
-  surfaces a `webcal://` URL that Apple Calendar (Mac/iOS) and
-  Outlook claim on click; Google Calendar requires the
-  `https://` form (Settings → Add calendar → From URL), and
-  the modal includes manual-instructions for all four major
-  apps. Server endpoint:
+  both the read-only viewer and the calendar feed. Same event
+  contents as the .ics download. Server endpoint:
   `https://api.travelingwithmax.app/share/<token>/calendar.ics`.
+
+### Subscription setup, per calendar app
+
+The Subscribe modal surfaces a `webcal://` URL plus a "📅 Subscribe
+in calendar app" button that hands the URL to the OS handler.
+Different apps need different setup:
+
+- **Apple Calendar (Mac)** — click the Subscribe button → Calendar.app
+  opens its subscription dialog → click Subscribe → done. The trip
+  appears as a new calendar in the sidebar. By default Apple Calendar
+  honors the `X-PUBLISHED-TTL:PT6H` hint Max sends and polls every
+  6 hours. **For faster updates**, right-click the subscribed calendar →
+  **Subscription Settings…** → **Auto-refresh** → set to **Every 15
+  minutes** (or Every 5 minutes for near-real-time during active
+  trip planning).
+- **Apple Calendar (iPhone/iPad)** — open the modal in Safari on the
+  phone, tap the Subscribe button → iOS prompts to add the calendar
+  → confirm. Auto-refresh setting lives in Settings → Calendar →
+  Accounts → the new subscription → Refresh Calendars.
+- **Google Calendar** — `webcal://` doesn't work; use the `https://`
+  form. Settings → Add calendar → From URL → paste the link with
+  `webcal://` swapped for `https://`. Google polls on its own
+  schedule (typically every several hours, sometimes up to 24h).
+  No way for the user to speed it up — this is a Google limitation.
+- **Outlook (desktop)** — Add calendar → Subscribe from web → paste
+  the link. Right-click the calendar → Update Folder for manual
+  refresh.
+
+### Manual refresh during testing
+
+`⌘R` in Calendar.app refreshes all subscriptions on the spot. Useful
+when you've just made an edit in Max and want to see the change
+immediately without waiting for the auto-poll.
+
+Note: the server caches the .ics response at the Cloudflare edge for
+60 seconds. So after editing in Max, wait ~2 seconds for auto-save
+to land server-side, plus up to 60 seconds for any cached response
+to expire, then ⌘R to see the change. For curl-based debugging,
+add a `?nocache=$(date +%s)` query param to bypass the edge cache.
 
 The .ics download and the printable PDF work entirely client-side.
 The subscription URL hits the server (it has to, so calendar apps
