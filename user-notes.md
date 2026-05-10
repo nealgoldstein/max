@@ -225,6 +225,46 @@ in-progress (status.phase === 'during'):
   inside the current day's card): "TODAY · 🌤️ 18°/9°" row at the
   top of the panel, alongside the now/next/later breakdown.
 
+## Paste a confirmation (booking parser)
+
+In a destination's **Tracking** tab, the top row is a **📋 Paste a
+confirmation** affordance. Click → big textarea → paste the booking
+email or web confirmation (any length) → **Parse →**.
+
+Max calls the LLM with a strict JSON-extraction prompt and pulls
+out:
+
+- **Type** — flight, hotel, train, bus, ferry, restaurant, tour, ticket
+- Carrier / operator / hotel name
+- Dates and times (24h, converted from AM/PM if needed)
+- From/to (transport) or address (hotel/restaurant)
+- Confirmation number, price, currency, booking URL, notes
+
+The next modal previews every field in editable inputs — the user
+can correct anything the LLM got wrong before saving. The **Type**
+dropdown is editable too, in case the LLM guessed wrong.
+
+For **transport** (flight/train/bus/ferry), an extra "This trip is
+arriving at … / departing from …" radio appears. Default is picked
+by date proximity — closer to dest.dateFrom → arrival, closer to
+dest.dateTo → departure. The user can override.
+
+Where saved bookings land:
+
+- **Hotel** → `dest.hotelBookings` (shows in Stay tab + Tracker
+  Bookings + day-card check-in/out chips)
+- **Restaurant / tour / ticket** → `dest.generalBookings` (shows in
+  Tracker Activities)
+- **Flight / train / bus / ferry** → `leg.bookings` on the chosen
+  arrival or departure leg (shows in Routing tab + auto-injected
+  arrival/departure chip on the appropriate day card)
+
+All bookings get `source: "paste"` so we can later distinguish
+manually-entered vs LLM-extracted records. If the LLM returns
+`type: "unknown"` or extracts no useful fields, the user gets a
+"couldn't pull useful fields out — try a clearer paste" message
+and the textarea stays put so they can edit and retry.
+
 ## Cross-device sync
 
 - **Trips** sync via POST/PUT /trips on every change (1.5s debounce).

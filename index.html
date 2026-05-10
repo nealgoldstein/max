@@ -25072,6 +25072,376 @@ function checkDeadlineAlert(){
   }
 }
 
+// ── Booking confirmation parser (v353.6, task #118) ───────
+//
+// Two-step flow:
+//   1. User pastes raw confirmation text (email body, web confirmation
+//      page, etc.) into a textarea.
+//   2. Max calls the LLM with a strict JSON-extraction prompt, returns
+//      a structured booking object.
+//   3. Preview modal shows the extracted fields in editable inputs
+//      (varies by detected type) so the user can correct anything the
+//      LLM got wrong before saving.
+//   4. Save routes the result to the right per-dest collection:
+//        hotel                    → dest.hotelBookings
+//        restaurant/tour/ticket   → dest.generalBookings
+//        flight/train/bus/ferry   → leg.bookings, choosing arrival
+//                                   leg (prevDest→thisDest) or
+//                                   departure leg (thisDest→nextDest)
+//                                   based on user's radio selection
+//                                   (defaulted via date proximity)
+//
+// Confidence handling: if the LLM returns type:"unknown" or no fields
+// at all, we surface "couldn't extract anything — try a clearer paste"
+// and keep the textarea visible so the user can edit and retry.
+
+function showPasteConfirmationModal(destId) {
+  var dest = (typeof getDest === "function") ? getDest(destId) : null;
+  if (!dest) { maxAlert("Open a destination first."); return; }
+
+  var existing = document.getElementById("paste-confirm-overlay");
+  if (existing) existing.remove();
+  var ov = document.createElement("div");
+  ov.id = "paste-confirm-overlay";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:11900;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto;";
+  var box = document.createElement("div");
+  box.style.cssText = "background:#fff;border-radius:12px;width:560px;max-width:100%;max-height:calc(100vh - 48px);overflow:auto;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);";
+  box.innerHTML =
+    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">' +
+      '<div style="width:28px;height:28px;border-radius:50%;background:#1a5fa8;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;">📋</div>' +
+      '<div style="font-size:14px;font-weight:700;">Paste a booking confirmation</div>' +
+    '</div>' +
+    '<div style="font-size:12px;color:#555;line-height:1.55;margin-bottom:10px;">Paste the email or confirmation page below. Max will pull out the carrier, dates, times, location, confirmation # — whatever it can find. You\'ll get a chance to review before saving.</div>' +
+    '<textarea id="pcf-input" placeholder="Paste your confirmation here…" style="width:100%;min-height:200px;padding:10px 12px;border:1px solid #ccc;border-radius:6px;font-family:-apple-system,sans-serif;font-size:12px;line-height:1.5;box-sizing:border-box;resize:vertical;"></textarea>' +
+    '<div id="pcf-status" style="font-size:11px;color:#888;min-height:14px;margin:6px 0 10px;"></div>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;">' +
+      '<button id="pcf-cancel" style="padding:8px 14px;font-size:12px;font-weight:600;background:#fff;color:#666;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;">Cancel</button>' +
+      '<button id="pcf-parse" style="padding:8px 16px;font-size:12px;font-weight:700;background:#1a5fa8;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Parse →</button>' +
+    '</div>';
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+
+  var inputEl = document.getElementById("pcf-input");
+  var statusEl = document.getElementById("pcf-status");
+  var parseBtn = document.getElementById("pcf-parse");
+  var cancelBtn = document.getElementById("pcf-cancel");
+  inputEl.focus();
+
+  cancelBtn.onclick = function(){ ov.remove(); };
+  ov.addEventListener("click", function(e){ if (e.target === ov) ov.remove(); });
+
+  parseBtn.onclick = async function(){
+    var text = (inputEl.value || "").trim();
+    if (!text) { statusEl.textContent = "Paste something first."; statusEl.style.color = "#c44"; return; }
+    if (text.length < 30) { statusEl.textContent = "That looks too short to be a confirmation."; statusEl.style.color = "#c44"; return; }
+    parseBtn.disabled = true; cancelBtn.disabled = true;
+    parseBtn.textContent = "Parsing…";
+    statusEl.textContent = "Extracting fields…";
+    statusEl.style.color = "#888";
+    try {
+      var parsed = await _parseBookingConfirmation(text);
+      if (!parsed || parsed.type === "unknown" || (!parsed.name && !parsed.carrier && !parsed.confirmationNumber && !parsed.depDate && !parsed.checkIn)) {
+        statusEl.textContent = "Couldn't pull useful fields out of that. Try pasting a clearer version (the full email body usually works best).";
+        statusEl.style.color = "#c44";
+        parseBtn.disabled = false; cancelBtn.disabled = false;
+        parseBtn.textContent = "Parse →";
+        return;
+      }
+      ov.remove();
+      _showBookingPreviewModal(destId, parsed, text);
+    } catch (e) {
+      statusEl.textContent = "Parse failed: " + (e && e.message || "unknown error");
+      statusEl.style.color = "#c44";
+      parseBtn.disabled = false; cancelBtn.disabled = false;
+      parseBtn.textContent = "Parse →";
+    }
+  };
+}
+
+// LLM call. Strict JSON-only extraction prompt. Country-agnostic;
+// no examples that bias toward a specific carrier or hotel chain.
+async function _parseBookingConfirmation(text) {
+  var system =
+    "You extract booking details from raw confirmation text (emails, web pages, screenshots transcribed). " +
+    "Return ONLY a single JSON object — no prose, no markdown fences. " +
+    "Schema:\n" +
+    "{\n" +
+    '  "type": "flight" | "hotel" | "train" | "bus" | "ferry" | "restaurant" | "tour" | "ticket" | "unknown",\n' +
+    '  "carrier": string | null,        // airline / rail operator / bus company / hotel brand / restaurant name\n' +
+    '  "number": string | null,         // flight number, train number — null for hotels\n' +
+    '  "name": string | null,           // hotel/restaurant/tour/ticket name (use carrier for transport)\n' +
+    '  "address": string | null,        // hotel/restaurant address — null for transport\n' +
+    '  "from": string | null,           // departure city or airport code (transport only)\n' +
+    '  "to": string | null,             // arrival city or airport code (transport only)\n' +
+    '  "depDate": "YYYY-MM-DD" | null,  // transport: departure date; hotel: check-in; restaurant/tour: event date\n' +
+    '  "depTime": "HH:MM" | null,       // 24h. transport: departure; hotel: check-in time; restaurant/tour: start time\n' +
+    '  "arrDate": "YYYY-MM-DD" | null,  // transport: arrival date; hotel: check-out\n' +
+    '  "arrTime": "HH:MM" | null,       // 24h. transport: arrival; hotel: check-out time; restaurant/tour: end time\n' +
+    '  "confirmationNumber": string | null,\n' +
+    '  "price": number | null,          // total paid, decimal\n' +
+    '  "currency": string | null,       // ISO code: USD, EUR, GBP, ISK, etc\n' +
+    '  "url": string | null,            // booking management URL if present\n' +
+    '  "notes": string | null           // anything notable that doesn\'t fit a field (gate, terminal, room type, party size, etc.)\n' +
+    "}\n\n" +
+    "Rules:\n" +
+    "- Use 24-hour time. Convert AM/PM if needed.\n" +
+    "- Dates: if year is missing, infer from context (recent emails are usually for upcoming travel). If truly unknowable, leave null.\n" +
+    "- Set type to 'unknown' if you can't identify it; do NOT guess.\n" +
+    "- Set fields to null when not present — don't invent values.\n" +
+    "- If price is shown with a symbol ($, €, £), populate currency accordingly. If only an amount is shown, leave currency null.\n" +
+    "- For 'notes', keep it short (one short clause) — long descriptions belong in their dedicated fields.";
+  var user = "CONFIRMATION TEXT:\n\n" + text + "\n\nReturn the JSON.";
+  var resp = await callMax(
+    [{ role: "user", content: user }],
+    1500, 30000
+  );
+  // Strip code-fence wrappers if the model added them despite instructions.
+  var clean = String(resp || "").trim();
+  clean = clean.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+  // Find the first { ... } block in case there's any preamble.
+  var firstBrace = clean.indexOf("{");
+  var lastBrace = clean.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    clean = clean.slice(firstBrace, lastBrace + 1);
+  }
+  try {
+    return JSON.parse(clean);
+  } catch (e) {
+    console.warn("[paste-confirm] JSON parse failed:", clean.slice(0, 200));
+    throw new Error("LLM returned malformed JSON");
+  }
+}
+
+// Preview modal — editable form keyed by detected type. User can
+// override the type via a dropdown if the LLM guessed wrong.
+function _showBookingPreviewModal(destId, p, originalText) {
+  var dest = (typeof getDest === "function") ? getDest(destId) : null;
+  if (!dest) return;
+  var ov = document.createElement("div");
+  ov.id = "paste-confirm-preview-overlay";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:11900;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto;";
+  var box = document.createElement("div");
+  box.style.cssText = "background:#fff;border-radius:12px;width:600px;max-width:100%;max-height:calc(100vh - 48px);overflow:auto;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);";
+
+  // Determine arrival vs departure for transport types based on date
+  // proximity to the destination's stay window.
+  var isTransport = (p.type === "flight" || p.type === "train" || p.type === "bus" || p.type === "ferry");
+  var defaultDirection = "arrival";
+  if (isTransport && p.depDate && dest.dateFrom && dest.dateTo) {
+    var msFrom = Math.abs(new Date(p.depDate + "T12:00:00") - new Date(dest.dateFrom + "T12:00:00"));
+    var msTo = Math.abs(new Date(p.depDate + "T12:00:00") - new Date(dest.dateTo + "T12:00:00"));
+    if (msTo < msFrom) defaultDirection = "departure";
+  }
+
+  function inp(id, label, value, placeholder, type) {
+    return '<label style="display:block;margin-bottom:8px;">' +
+      '<span style="display:block;font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:2px;">' + label + '</span>' +
+      '<input id="' + id + '" type="' + (type || "text") + '" value="' + (value == null ? "" : String(value).replace(/"/g, "&quot;")) + '" placeholder="' + (placeholder || "") + '" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid #ccc;border-radius:4px;font-family:inherit;box-sizing:border-box;" />' +
+      '</label>';
+  }
+
+  var typeOptions = ["flight","hotel","train","bus","ferry","restaurant","tour","ticket"];
+  var typeSelHtml = '<label style="display:block;margin-bottom:8px;">' +
+    '<span style="display:block;font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:2px;">Type</span>' +
+    '<select id="pcfp-type" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid #ccc;border-radius:4px;font-family:inherit;box-sizing:border-box;background:#fff;">' +
+    typeOptions.map(function(t){ return '<option value="' + t + '"' + (t === p.type ? ' selected' : '') + '>' + t.charAt(0).toUpperCase() + t.slice(1) + '</option>'; }).join("") +
+    '</select></label>';
+
+  var directionHtml = '';
+  if (isTransport) {
+    directionHtml =
+      '<div id="pcfp-direction-wrap" style="margin-bottom:8px;padding:8px 10px;background:#f7f9fc;border:1px solid #e2e7ee;border-radius:5px;">' +
+        '<span style="display:block;font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">This trip is</span>' +
+        '<label style="font-size:12px;margin-right:14px;cursor:pointer;"><input type="radio" name="pcfp-dir" value="arrival"' + (defaultDirection === "arrival" ? " checked" : "") + ' style="margin-right:4px;"/>Arriving at ' + (dest.place || "this destination") + '</label>' +
+        '<label style="font-size:12px;cursor:pointer;"><input type="radio" name="pcfp-dir" value="departure"' + (defaultDirection === "departure" ? " checked" : "") + ' style="margin-right:4px;"/>Departing from ' + (dest.place || "this destination") + '</label>' +
+      '</div>';
+  }
+
+  box.innerHTML =
+    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">' +
+      '<div style="width:28px;height:28px;border-radius:50%;background:#2a7a4e;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">✓</div>' +
+      '<div style="font-size:14px;font-weight:700;">Review extracted details</div>' +
+    '</div>' +
+    '<div style="font-size:12px;color:#555;line-height:1.55;margin-bottom:14px;">Edit anything Max got wrong, then save. Empty fields stay empty — you can fill them in later.</div>' +
+    typeSelHtml +
+    directionHtml +
+    '<div id="pcfp-fields"></div>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px;">' +
+      '<button id="pcfp-back" style="padding:8px 14px;font-size:12px;font-weight:600;background:#fff;color:#666;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;">← Back</button>' +
+      '<button id="pcfp-save" style="padding:8px 16px;font-size:12px;font-weight:700;background:#1a5fa8;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Save to tracker</button>' +
+    '</div>';
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+
+  var typeSel = document.getElementById("pcfp-type");
+  var fieldsHost = document.getElementById("pcfp-fields");
+
+  function renderFields(){
+    var t = typeSel.value;
+    var html = '';
+    if (t === "hotel") {
+      html += inp("pcfp-name", "Hotel name", p.name || p.carrier || "", "e.g. Reykjavik Konsulat");
+      html += inp("pcfp-address", "Address", p.address || "", "Optional");
+      html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+        inp("pcfp-checkin", "Check-in date", p.depDate || "", "", "date") +
+        inp("pcfp-checkin-time", "Check-in time", p.depTime || "", "", "time") +
+        '</div>';
+      html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+        inp("pcfp-checkout", "Check-out date", p.arrDate || "", "", "date") +
+        inp("pcfp-checkout-time", "Check-out time", p.arrTime || "", "", "time") +
+        '</div>';
+    } else if (t === "flight" || t === "train" || t === "bus" || t === "ferry") {
+      html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+        inp("pcfp-carrier", t === "flight" ? "Airline" : t === "train" ? "Operator" : "Operator", p.carrier || "", "") +
+        inp("pcfp-number", t === "flight" ? "Flight #" : "Number", p.number || "", "") +
+        '</div>';
+      html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+        inp("pcfp-from", "From", p.from || "", "City or code") +
+        inp("pcfp-to", "To", p.to || "", "City or code") +
+        '</div>';
+      html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+        inp("pcfp-dep-date", "Departure date", p.depDate || "", "", "date") +
+        inp("pcfp-dep-time", "Departure time", p.depTime || "", "", "time") +
+        '</div>';
+      html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+        inp("pcfp-arr-date", "Arrival date", p.arrDate || "", "", "date") +
+        inp("pcfp-arr-time", "Arrival time", p.arrTime || "", "", "time") +
+        '</div>';
+    } else {
+      // restaurant / tour / ticket / other
+      html += inp("pcfp-name", "Name", p.name || p.carrier || "", "e.g. Dinner at Dill");
+      html += inp("pcfp-address", "Location", p.address || "", "Optional");
+      html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">' +
+        inp("pcfp-date", "Date", p.depDate || "", "", "date") +
+        inp("pcfp-time", "Start time", p.depTime || "", "", "time") +
+        inp("pcfp-time-end", "End time", p.arrTime || "", "", "time") +
+        '</div>';
+    }
+    // Universal fields
+    html += '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;">' +
+      inp("pcfp-conf", "Confirmation #", p.confirmationNumber || "", "") +
+      inp("pcfp-price", "Price paid", p.price != null ? p.price : "", "", "number") +
+      inp("pcfp-currency", "Currency", p.currency || "", "USD") +
+      '</div>';
+    html += inp("pcfp-url", "Booking URL", p.url || "", "https://…", "url");
+    html += inp("pcfp-notes", "Notes", p.notes || "", "Optional");
+    fieldsHost.innerHTML = html;
+  }
+  renderFields();
+  typeSel.onchange = renderFields;
+
+  document.getElementById("pcfp-back").onclick = function(){
+    ov.remove();
+    showPasteConfirmationModal(destId);
+    // Restore the textarea content so the user can re-edit and re-parse.
+    var ta = document.getElementById("pcf-input");
+    if (ta) ta.value = originalText || "";
+  };
+  ov.addEventListener("click", function(e){ if (e.target === ov) ov.remove(); });
+
+  document.getElementById("pcfp-save").onclick = function(){
+    var t = typeSel.value;
+    var v = function(id){ var el = document.getElementById(id); return el ? el.value.trim() : ""; };
+    var num = function(s){ var n = parseFloat(s); return isFinite(n) ? n : null; };
+    var freshDest = getDest(destId);
+    if (!freshDest) { maxAlert("Destination is gone — close this and reopen the tracker."); return; }
+
+    if (t === "hotel") {
+      if (!freshDest.hotelBookings) freshDest.hotelBookings = [];
+      freshDest.hotelBookings.push({
+        id: (typeof newBkId === "function" ? newBkId() : "bk-" + Date.now()),
+        name: v("pcfp-name") || "Untitled hotel",
+        area: "",
+        checkIn: v("pcfp-checkin") || null,
+        checkInTime: v("pcfp-checkin-time") || null,
+        checkOut: v("pcfp-checkout") || null,
+        checkOutTime: v("pcfp-checkout-time") || null,
+        confirmationNumber: v("pcfp-conf"),
+        pricePaid: num(v("pcfp-price")),
+        currency: v("pcfp-currency") || "USD",
+        notes: v("pcfp-notes") + (v("pcfp-address") ? "\nAddress: " + v("pcfp-address") : ""),
+        url: v("pcfp-url") || null,
+        status: "booked",
+        source: "paste",
+        cancelType: "unknown",
+        cancelDeadline: null,
+        cancelDeadlineTime: null,
+        lat: null,
+        lng: null,
+      });
+    } else if (t === "flight" || t === "train" || t === "bus" || t === "ferry") {
+      var dirEl = document.querySelector('input[name="pcfp-dir"]:checked');
+      var direction = dirEl ? dirEl.value : "arrival";
+      var destIdx = trip.destinations.indexOf(freshDest);
+      var fromId, toId;
+      if (direction === "arrival") {
+        if (destIdx <= 0) {
+          maxAlert("This is the first destination — there's no previous leg to attach an arrival booking to. Edit Trip Parameters → Entry to set arrival info.");
+          return;
+        }
+        fromId = trip.destinations[destIdx - 1].id;
+        toId = freshDest.id;
+      } else {
+        if (destIdx >= trip.destinations.length - 1) {
+          maxAlert("This is the last destination — there's no next leg to attach a departure booking to. Edit Trip Parameters → Exit to set departure info.");
+          return;
+        }
+        fromId = freshDest.id;
+        toId = trip.destinations[destIdx + 1].id;
+      }
+      var leg = (typeof getLeg === "function") ? getLeg(fromId, toId) : null;
+      if (!leg) { maxAlert("Couldn't find the transport leg. Try saving manually from the Routing tab."); return; }
+      if (!leg.bookings) leg.bookings = [];
+      leg.bookings.push({
+        id: (typeof newBkId === "function" ? newBkId() : "bk-" + Date.now()),
+        mode: t,
+        operator: v("pcfp-carrier") || "",
+        from: v("pcfp-from") || "",
+        to: v("pcfp-to") || "",
+        departure: v("pcfp-dep-date") || null,
+        departureTime: v("pcfp-dep-time") || null,
+        arrival: v("pcfp-arr-date") || null,
+        arrivalTime: v("pcfp-arr-time") || null,
+        confirmationNumber: v("pcfp-conf"),
+        pricePaid: num(v("pcfp-price")),
+        currency: v("pcfp-currency") || "USD",
+        notes: v("pcfp-notes") + (v("pcfp-number") ? "\n" + (t === "flight" ? "Flight " : "") + v("pcfp-number") : ""),
+        url: v("pcfp-url") || null,
+        status: "booked",
+        source: "paste",
+        cancelType: "unknown",
+        cancelDeadline: null,
+        cancelDeadlineTime: null,
+      });
+    } else {
+      // restaurant / tour / ticket / other → generalBookings
+      if (!freshDest.generalBookings) freshDest.generalBookings = [];
+      freshDest.generalBookings.push({
+        id: (typeof newBkId === "function" ? newBkId() : "bk-" + Date.now()),
+        type: t,
+        label: v("pcfp-name") || "Untitled booking",
+        date: v("pcfp-date") || null,
+        time: v("pcfp-time") || null,
+        timeEnd: v("pcfp-time-end") || null,
+        confirmationNumber: v("pcfp-conf"),
+        pricePaid: num(v("pcfp-price")),
+        currency: v("pcfp-currency") || "USD",
+        notes: v("pcfp-notes") + (v("pcfp-address") ? "\nLocation: " + v("pcfp-address") : ""),
+        url: v("pcfp-url") || null,
+        status: "booked",
+        source: "paste",
+        cancelType: "unknown",
+        cancelDeadline: null,
+        cancelDeadlineTime: null,
+      });
+    }
+    if (typeof autoSave === "function") autoSave();
+    if (typeof _emitTripMutation === "function") _emitTripMutation();
+    ov.remove();
+    if (typeof drawDestMode === "function") drawDestMode(freshDest.id);
+  };
+}
+
 // ── Tracker ────────────────────────────────────────────────
 // Round FJ: reorganized into two clearly-labeled temporal sections —
 // "Coming up" (forward-facing: to-dos, bookings, want to see) and
@@ -25082,6 +25452,30 @@ function checkDeadlineAlert(){
 // (live, ongoing) to better fit the temporal split.
 function mkTrackerInner(dest){
   var wrap=document.createElement("div");
+
+  // v353.6: Paste-confirmation row at the top of the tracker pane.
+  // User pastes a flight/hotel/train/etc confirmation → callMax
+  // extracts structured fields → preview modal lets them edit →
+  // routes the result into the right collection (hotelBookings,
+  // generalBookings, or leg.bookings) for this destination. See
+  // showPasteConfirmationModal below.
+  var pasteRow=document.createElement("div");
+  pasteRow.style.cssText="margin-bottom:12px;padding:10px 12px;background:linear-gradient(135deg,#f7f9fc 0%,#eef3fb 100%);border:1px solid #d8e3f0;border-radius:8px;display:flex;align-items:center;gap:10px;";
+  var pasteIcon=document.createElement("div");
+  pasteIcon.style.cssText="font-size:18px;flex-shrink:0;";
+  pasteIcon.textContent="📋";
+  var pasteText=document.createElement("div");
+  pasteText.style.cssText="flex:1;min-width:0;font-size:11.5px;color:#444;line-height:1.45;";
+  pasteText.innerHTML='<div style="font-weight:700;color:#1a5fa8;margin-bottom:1px;">Paste a confirmation</div>'
+    + '<div style="color:#666;">Flight, hotel, train, restaurant — Max extracts the details.</div>';
+  var pasteBtn=document.createElement("button");
+  pasteBtn.style.cssText="padding:7px 14px;font-size:11.5px;font-weight:700;background:#1a5fa8;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;flex-shrink:0;";
+  pasteBtn.textContent="Paste →";
+  (function(destId){ pasteBtn.onclick=function(){ showPasteConfirmationModal(destId); }; })(dest.id);
+  pasteRow.appendChild(pasteIcon);
+  pasteRow.appendChild(pasteText);
+  pasteRow.appendChild(pasteBtn);
+  wrap.appendChild(pasteRow);
 
   // ============================================================
   // COMING UP — forward-facing
