@@ -728,6 +728,46 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
    map is visible). It only renders on phone via the media query
    above. */
 .picker-mobile-map-btn{display:none;}
+/* v353.5: read-only shared-trip viewer. body.readonly-share is
+   added when boot detects ?share=<token>. Suppress every
+   interactive affordance so the recipient sees a clean static
+   view — no edit/save/sync/LLM controls. The "Duplicate to my
+   account" CTA in the banner is the only action surface.
+   Best-effort blanket coverage; some controls might leak through
+   unstyled — they'll fail at the localSave guard if clicked,
+   so worst case is a no-op. */
+body.readonly-share #app .file-btn,
+body.readonly-share #api-key-btn,
+body.readonly-share #sync-btn,
+body.readonly-share .item-del,
+body.readonly-share .ic-add-btn,
+body.readonly-share .tm-rename-btn,
+body.readonly-share .di-add,
+body.readonly-share .di-del,
+body.readonly-share .item-dot-wrap,
+body.readonly-share #spend-toggle-btn,
+body.readonly-share #trip-search-btn,
+body.readonly-share .tb-btn,
+body.readonly-share .tc-del,
+body.readonly-share .tc-dup,
+body.readonly-share .ic .ic-edit-btn,
+body.readonly-share .lp-resize{display:none !important;}
+/* Show Home button so the recipient can return to their own trips
+   if signed in. Re-show .file-btn for it specifically by class. */
+body.readonly-share #app .file-btn[onclick*="goHome"]{display:inline-block !important;}
+/* Disable drag handles + clickable item edits (we leave the
+   item rows visible because that's the content; we just stop
+   the click from opening the editor). */
+body.readonly-share .ic .item-row{cursor:default !important;}
+body.readonly-share .item-handle,
+body.readonly-share .ic-drag-handle{display:none !important;}
+/* Mute the look slightly so it's clear nothing is editable. */
+body.readonly-share textarea,
+body.readonly-share input[type="text"],
+body.readonly-share input[type="number"]{
+  background:#fafafa !important;pointer-events:none !important;
+}
+
 /* v352: default state for the mobile map toggle — hidden until a
    narrow viewport pulls it into view via the @media(max-width:700px)
    block above. Kept outside the media query so the button stays out
@@ -3512,6 +3552,10 @@ function updateIndexEntry(){
 
 function localSave(){
   if(_inIframe||!_currentTripId)return;
+  // v353.5: shared-trip viewer never writes — the trip belongs to
+  // someone else. The Duplicate button is the only way to materialize
+  // edits. Bail before any storage / sync side-effect.
+  if (typeof _readOnlyShare !== "undefined" && _readOnlyShare) return;
   try{
     updateIndexEntry();
     // localSave is intentionally a raw localStorage.setItem rather
@@ -14405,6 +14449,20 @@ function restoreTripUI(){
 // On load
 window.addEventListener("load",function(){
   loadApiKey();
+  // v353.5: shared-trip path. ?share=<token> in the URL means we're
+  // viewing someone else's trip read-only. Detect early and route
+  // to the read-only viewer instead of the normal home/app flow.
+  // The viewer fetches via /share/:token (no auth required), sets
+  // a global _readOnlyShare flag, and renders the trip with edit
+  // affordances suppressed via the body.readonly-share CSS hook.
+  try {
+    var qs = new URLSearchParams(location.search);
+    var shareTok = qs.get("share");
+    if (shareTok && typeof openSharedTrip === "function") {
+      openSharedTrip(shareTok);
+      return;
+    }
+  } catch (_) { /* fall through to normal boot */ }
   if(_inIframe){
     g("home-screen").style.display="none";
     g("app").style.display="flex";
@@ -14416,6 +14474,146 @@ window.addEventListener("load",function(){
     renderHomeScreen();
   }
 });
+
+// v353.5: read-only shared-trip viewer. Boot detects ?share=<token>
+// and calls this. Fetches the trip via the unauthenticated public
+// endpoint, renders it via enterApp (which already knows how to draw
+// any trip), and sets _readOnlyShare so write paths (localSave,
+// scheduleSave, edit affordances via CSS) become no-ops.
+var _readOnlyShare = false;
+var _readOnlyShareToken = null;
+function openSharedTrip(token){
+  if (typeof MaxSync === "undefined" || !MaxSync.fetchSharedTrip) {
+    document.body.innerHTML = '<div style="padding:40px;font:14px/1.6 sans-serif;text-align:center;color:#c44;">Share viewer unavailable — sync layer not loaded.</div>';
+    return;
+  }
+  // Show a loading splash instead of the empty home screen flash.
+  g("home-screen").style.display = "none";
+  document.body.insertAdjacentHTML("beforeend",
+    '<div id="share-loading" style="position:fixed;inset:0;background:#fff;z-index:9999;display:flex;align-items:center;justify-content:center;font:13px/1.5 sans-serif;color:#666;">' +
+      'Loading shared trip…' +
+    '</div>'
+  );
+  MaxSync.fetchSharedTrip(token).then(function(resp){
+    var splash = document.getElementById("share-loading");
+    if (splash) splash.remove();
+    if (!resp || !resp.trip || !resp.trip.body) {
+      maxAlert("Shared trip not found or revoked.");
+      _backToHomeFromShare();
+      return;
+    }
+    var envelope = resp.trip.body;
+    // Adopt the trip into the global. Counters from envelope so
+    // dest/sight ID minting is consistent if the user duplicates.
+    if (envelope.trip) {
+      window.trip = envelope.trip;
+      if (typeof envelope.destCtr === "number") window.destCtr = envelope.destCtr;
+      if (typeof envelope.sidCtr  === "number") window.sidCtr  = envelope.sidCtr;
+      if (typeof envelope.bkCtr   === "number") window.bkCtr   = envelope.bkCtr;
+      if (typeof envelope.activeDest === "string") window.activeDest = envelope.activeDest;
+    } else {
+      // Old envelopes might be the trip object directly.
+      window.trip = envelope;
+    }
+    if (!window.trip || !window.trip.destinations) {
+      maxAlert("Shared trip has no content to display.");
+      _backToHomeFromShare();
+      return;
+    }
+    _readOnlyShare = true;
+    _readOnlyShareToken = token;
+    _currentTripId = null; // not in user's local list
+    document.body.classList.add("readonly-share");
+    // Inject the read-only banner once.
+    _injectReadOnlyBanner();
+    enterApp();
+  }).catch(function(e){
+    var splash = document.getElementById("share-loading");
+    if (splash) splash.remove();
+    maxAlert("Couldn't load shared trip: " + (e && e.message || "unknown"));
+    _backToHomeFromShare();
+  });
+}
+
+function _backToHomeFromShare(){
+  // Strip ?share= from the URL and reload into the normal app.
+  try {
+    history.replaceState(null, "", location.pathname);
+  } catch (_) { location.search = ""; }
+  location.reload();
+}
+
+function _injectReadOnlyBanner(){
+  if (document.getElementById("readonly-share-banner")) return;
+  var b = document.createElement("div");
+  b.id = "readonly-share-banner";
+  b.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:11900;background:#fff8e0;border-bottom:1px solid #e8d878;padding:8px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px;font:12px/1.4 -apple-system,sans-serif;color:#5a4818;box-shadow:0 1px 4px rgba(0,0,0,0.08);";
+  b.innerHTML =
+    '<div><strong>Shared trip — read-only.</strong> Sign in and tap Duplicate to copy this trip into your own account.</div>' +
+    '<button id="rosb-dup" style="background:#1a5fa8;color:#fff;border:none;padding:6px 14px;border-radius:5px;font-weight:600;font-size:12px;cursor:pointer;font-family:inherit;flex-shrink:0;">Duplicate to my account</button>';
+  document.body.appendChild(b);
+  // Push the app down so the banner doesn't cover the trip-view header.
+  document.body.style.paddingTop = (b.offsetHeight + 2) + "px";
+  document.getElementById("rosb-dup").onclick = _duplicateSharedTripToMyAccount;
+}
+
+function _duplicateSharedTripToMyAccount(){
+  if (typeof MaxSync === "undefined" || !MaxSync.isSignedIn || !MaxSync.isSignedIn()) {
+    if (confirm("You need to sign in first. Open the sign-in form?")) {
+      MaxSync.showSignInModal();
+    }
+    return;
+  }
+  if (!window.trip) { maxAlert("No trip loaded."); return; }
+  // Mint a fresh ID, deep clone, and POST to /trips. After success,
+  // navigate to the new trip in the user's account (drops ?share=).
+  var newId = "trip-" + Date.now() + "-" + Math.floor(Math.random() * 9999);
+  var srcName = (window.trip.name || "Shared trip");
+  var newName = /\(copy\)$/i.test(srcName) ? srcName + " 2" : srcName + " (copy)";
+  var clone;
+  try { clone = JSON.parse(JSON.stringify(window.trip)); }
+  catch (_) { maxAlert("Couldn't copy trip body."); return; }
+  clone.id = newId;
+  clone.name = newName;
+  clone._dupedFromShare = _readOnlyShareToken;
+  // Build envelope shape that the rest of the app expects.
+  var envelope = {
+    trip: clone,
+    activeDest: window.activeDest || null,
+    destCtr: window.destCtr || 0,
+    sidCtr: window.sidCtr || 0,
+    bkCtr: window.bkCtr || 0,
+    __saved__: Date.now(),
+  };
+  var btn = document.getElementById("rosb-dup");
+  if (btn) { btn.disabled = true; btn.textContent = "Duplicating…"; }
+  MaxSync._request("/trips", {
+    method: "POST",
+    body: { id: newId, name: newName, body: envelope, updatedAt: Date.now() },
+  }).then(function(){
+    // Persist locally too so the user immediately sees it on home.
+    try {
+      localStorage.setItem("max-trip-" + newId, JSON.stringify(envelope));
+      // Index entry — minimal; pullAll will fill in dates etc.
+      var idxEntry = {
+        id: newId, name: newName,
+        savedAt: new Date().toISOString(),
+        destCount: (clone.destinations || []).length,
+      };
+      var idx = [];
+      try { idx = JSON.parse(localStorage.getItem("max-trips-index") || "[]"); } catch (_) {}
+      idx.push(idxEntry);
+      localStorage.setItem("max-trips-index", JSON.stringify(idx));
+    } catch (_) {}
+    // Navigate: drop ?share=, reload, the app will pull and show the new trip.
+    try { history.replaceState(null, "", location.pathname); }
+    catch (_) { location.search = ""; }
+    location.reload();
+  }).catch(function(e){
+    if (btn) { btn.disabled = false; btn.textContent = "Duplicate to my account"; }
+    maxAlert("Couldn't save the duplicate: " + (e && e.message || "unknown"));
+  });
+}
 
 // v290 — Cross-tab sync: when another tab (mobile shell, second
 // desktop window) writes a trip we're viewing, re-read and re-render.
