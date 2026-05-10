@@ -1835,6 +1835,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
         <button class="file-btn" onclick="if(_currentTripId&&confirm('Duplicate this trip? A copy will be created on the home screen.'))duplicateTrip(_currentTripId,false);" title="Duplicate this trip">Copy</button>
         <button class="file-btn" onclick="showShareTripModal()" title="Share a read-only link to this trip">Share</button>
         <button class="file-btn" onclick="showExportTripModal()" title="Print, save as PDF, or download as a calendar file">Export</button>
+        <button class="file-btn" onclick="showGlobalPasteConfirmationModal()" title="Paste a flight, hotel, or other booking confirmation — Max routes it to the right destination automatically">&#128203; Paste</button>
         <button class="file-btn" id="trip-search-btn" onclick="openTripSearch()" title="Search this trip">&#x1F50D;</button>
         <button class="file-btn" id="api-key-btn" onclick="showApiKeyForm()" title="Set API key" style="opacity:0.6;">&#x1F511;</button>
         <button class="file-btn" id="sync-btn" onclick="MaxSync.showSignInModal()" title="Sync with server" style="opacity:0.6;">&#x21C4;</button>
@@ -25095,6 +25096,20 @@ function checkDeadlineAlert(){
 // at all, we surface "couldn't extract anything — try a clearer paste"
 // and keep the textarea visible so the user can edit and retry.
 
+// Trip-level entry point. The user clicks 📋 Paste from the trip
+// header — they don't need to be in any particular destination's
+// tracker tab. We pass the first destination as a placeholder; the
+// preview modal's destination dropdown + verification logic then
+// auto-routes to whichever destination actually matches the booking
+// (by address + dates).
+function showGlobalPasteConfirmationModal() {
+  if (!trip || !trip.destinations || !trip.destinations.length) {
+    maxAlert("Add a destination to this trip first.");
+    return;
+  }
+  showPasteConfirmationModal(trip.destinations[0].id);
+}
+
 function showPasteConfirmationModal(destId) {
   var dest = (typeof getDest === "function") ? getDest(destId) : null;
   if (!dest) { maxAlert("Open a destination first."); return; }
@@ -25341,11 +25356,63 @@ function _normalizeBookingExtraction(p) {
   return out;
 }
 
+// Score how well a parsed booking matches a destination. Returns
+// 0..3: 1 point for place-name match (any 3+ char token from the
+// booking's address/from/to substrings into dest.place or dest.label),
+// 1 point for date overlap (booking date falls within dest.dateFrom
+// .. dest.dateTo, inclusive), 1 point if BOTH match (a tiebreaker
+// boost so a pure date-only match doesn't win over a place+date match).
+function _scoreDestMatch(p, dest) {
+  if (!dest) return 0;
+  var score = 0;
+  // Place match — token-by-token substring. We tokenize the booking's
+  // address (and from/to for transport) to catch "340 Stykkishólmur,
+  // Iceland" matching dest.place "Stykkishólmur".
+  var bookingPlaceText = [p.address, p.from, p.to, p.name]
+    .filter(function(s){ return s; })
+    .join(" ")
+    .toLowerCase();
+  var destPlaceText = ((dest.place || "") + " " + (dest.label || "")).toLowerCase();
+  if (bookingPlaceText && destPlaceText) {
+    // Tokenize on non-alphanumeric, keep tokens >= 3 chars (skip "in",
+    // "at", country codes that'd give too many false positives).
+    var tokens = bookingPlaceText.split(/[^a-záéíóúýðþæöA-ZÁÉÍÓÚÝÐÞÆÖ]+/i).filter(function(t){ return t.length >= 3; });
+    var matched = false;
+    for (var i = 0; i < tokens.length; i++) {
+      if (destPlaceText.indexOf(tokens[i]) >= 0) { matched = true; break; }
+    }
+    if (matched) score++;
+  }
+  // Date match — does any booking date fall within dest's range?
+  var bookingDates = [p.depDate, p.arrDate].filter(function(d){ return d; });
+  if (bookingDates.length && dest.dateFrom && dest.dateTo) {
+    var df = dest.dateFrom; // "YYYY-MM-DD" string compares correctly lex.
+    var dt = dest.dateTo;
+    for (var j = 0; j < bookingDates.length; j++) {
+      var bd = bookingDates[j];
+      if (bd >= df && bd <= dt) { score++; break; }
+    }
+  }
+  if (score === 2) score++; // place AND date match → tiebreaker boost
+  return score;
+}
+
 // Preview modal — editable form keyed by detected type. User can
 // override the type via a dropdown if the LLM guessed wrong.
 function _showBookingPreviewModal(destId, p, originalText) {
   var dest = (typeof getDest === "function") ? getDest(destId) : null;
   if (!dest) return;
+  // v353.6: pick the best-matching destination based on the parsed
+  // booking's address + dates. If a different destination matches
+  // better than the current one, pre-select it (the user clicked
+  // Paste from the wrong tab) — and show a warning. If no destination
+  // matches at all, show a different warning.
+  var allDests = (trip && trip.destinations) || [];
+  var matchScores = allDests.map(function(d){ return { dest: d, score: _scoreDestMatch(p, d) }; });
+  var bestMatch = matchScores.slice().sort(function(a,b){ return b.score - a.score; })[0];
+  var initialDestId = (bestMatch && bestMatch.score > 0) ? bestMatch.dest.id : destId;
+  var noMatchAtAll = !bestMatch || bestMatch.score === 0;
+  var routedAway = !noMatchAtAll && initialDestId !== destId;
   var ov = document.createElement("div");
   ov.id = "paste-confirm-preview-overlay";
   ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:11900;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto;";
@@ -25386,12 +25453,43 @@ function _showBookingPreviewModal(destId, p, originalText) {
       '</div>';
   }
 
+  // Destination dropdown — every dest on the trip, with the
+  // best-matching one (by date+place score) pre-selected.
+  var destSelHtml = '<label style="display:block;margin-bottom:8px;">' +
+    '<span style="display:block;font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:2px;">Destination</span>' +
+    '<select id="pcfp-dest" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid #ccc;border-radius:4px;font-family:inherit;box-sizing:border-box;background:#fff;">' +
+    allDests.map(function(d){
+      var lbl = (d.place || d.label || "Untitled");
+      if (d.dateFrom && d.dateTo) lbl += " (" + d.dateFrom + " → " + d.dateTo + ")";
+      return '<option value="' + d.id + '"' + (d.id === initialDestId ? ' selected' : '') + '>' + lbl.replace(/&/g,"&amp;").replace(/</g,"&lt;") + '</option>';
+    }).join("") +
+    '</select></label>';
+
+  // Warning banner — "this looks like it belongs somewhere else" or
+  // "no match found at all". Both cases nudge the user without
+  // blocking the save (they may have a legitimate reason).
+  var warningHtml = '';
+  if (noMatchAtAll) {
+    warningHtml =
+      '<div id="pcfp-warning" style="margin:0 0 10px;padding:9px 11px;background:#fff3cd;border:1px solid #f1d77a;border-radius:5px;font-size:11px;color:#7a5800;line-height:1.5;">' +
+        '<b>Heads up:</b> the booking\'s dates and location don\'t match any destination on this trip. Double-check the destination dropdown above before saving.' +
+      '</div>';
+  } else if (routedAway) {
+    var matchedDest = bestMatch.dest;
+    warningHtml =
+      '<div id="pcfp-warning" style="margin:0 0 10px;padding:9px 11px;background:#dcebf8;border:1px solid #a4c7ec;border-radius:5px;font-size:11px;color:#154774;line-height:1.5;">' +
+        '<b>Routed to ' + (matchedDest.place || matchedDest.label || "another destination").replace(/&/g,"&amp;").replace(/</g,"&lt;") + '.</b> The booking\'s dates and location match it better than ' + (dest.place || "where you clicked").replace(/&/g,"&amp;").replace(/</g,"&lt;") + '. Change the destination dropdown above if Max guessed wrong.' +
+      '</div>';
+  }
+
   box.innerHTML =
     '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">' +
       '<div style="width:28px;height:28px;border-radius:50%;background:#2a7a4e;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">✓</div>' +
       '<div style="font-size:14px;font-weight:700;">Review extracted details</div>' +
     '</div>' +
     '<div style="font-size:12px;color:#555;line-height:1.55;margin-bottom:14px;">Edit anything Max got wrong, then save. Empty fields stay empty — you can fill them in later.</div>' +
+    destSelHtml +
+    warningHtml +
     typeSelHtml +
     directionHtml +
     '<div id="pcfp-fields"></div>' +
@@ -25494,11 +25592,41 @@ function _showBookingPreviewModal(destId, p, originalText) {
   };
   ov.addEventListener("click", function(e){ if (e.target === ov) ov.remove(); });
 
+  // Live-update the warning banner when the user changes the
+  // destination dropdown. They might pick the right dest after Max
+  // guessed wrong (warning should clear), or they might pick one
+  // Max didn't suggest (warning should turn yellow).
+  var destSel = document.getElementById("pcfp-dest");
+  if (destSel) {
+    destSel.onchange = function(){
+      var chosen = getDest(destSel.value);
+      var w = document.getElementById("pcfp-warning");
+      if (!chosen) return;
+      var s = _scoreDestMatch(p, chosen);
+      if (s === 0) {
+        if (!w) {
+          var holder = destSel.closest("label").parentNode;
+          w = document.createElement("div");
+          w.id = "pcfp-warning";
+          holder.insertBefore(w, destSel.closest("label").nextSibling);
+        }
+        w.style.cssText = "margin:0 0 10px;padding:9px 11px;background:#fff3cd;border:1px solid #f1d77a;border-radius:5px;font-size:11px;color:#7a5800;line-height:1.5;";
+        w.innerHTML = "<b>Heads up:</b> the booking’s dates and location don’t match this destination. Save anyway only if you know it belongs here.";
+      } else if (w) {
+        w.parentNode.removeChild(w);
+      }
+    };
+  }
+
   document.getElementById("pcfp-save").onclick = function(){
     var t = typeSel.value;
     var v = function(id){ var el = document.getElementById(id); return el ? el.value.trim() : ""; };
     var num = function(s){ var n = parseFloat(s); return isFinite(n) ? n : null; };
-    var freshDest = getDest(destId);
+    // Use whichever destination the user selected from the dropdown,
+    // not the one they originally clicked Paste on. This is the whole
+    // point of the verification — let the user route to the right place.
+    var chosenDestId = destSel ? destSel.value : destId;
+    var freshDest = getDest(chosenDestId);
     if (!freshDest) { maxAlert("Destination is gone — close this and reopen the tracker."); return; }
     // Read cancellation policy from the radio + date input.
     // cancelDeadlineTime is intentionally always null on new entries
@@ -25616,29 +25744,12 @@ function _showBookingPreviewModal(destId, p, originalText) {
 function mkTrackerInner(dest){
   var wrap=document.createElement("div");
 
-  // v353.6: Paste-confirmation row at the top of the tracker pane.
-  // User pastes a flight/hotel/train/etc confirmation → callMax
-  // extracts structured fields → preview modal lets them edit →
-  // routes the result into the right collection (hotelBookings,
-  // generalBookings, or leg.bookings) for this destination. See
-  // showPasteConfirmationModal below.
-  var pasteRow=document.createElement("div");
-  pasteRow.style.cssText="margin-bottom:12px;padding:10px 12px;background:linear-gradient(135deg,#f7f9fc 0%,#eef3fb 100%);border:1px solid #d8e3f0;border-radius:8px;display:flex;align-items:center;gap:10px;";
-  var pasteIcon=document.createElement("div");
-  pasteIcon.style.cssText="font-size:18px;flex-shrink:0;";
-  pasteIcon.textContent="📋";
-  var pasteText=document.createElement("div");
-  pasteText.style.cssText="flex:1;min-width:0;font-size:11.5px;color:#444;line-height:1.45;";
-  pasteText.innerHTML='<div style="font-weight:700;color:#1a5fa8;margin-bottom:1px;">Paste a confirmation</div>'
-    + '<div style="color:#666;">Flight, hotel, train, restaurant — Max extracts the details.</div>';
-  var pasteBtn=document.createElement("button");
-  pasteBtn.style.cssText="padding:7px 14px;font-size:11.5px;font-weight:700;background:#1a5fa8;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;flex-shrink:0;";
-  pasteBtn.textContent="Paste →";
-  (function(destId){ pasteBtn.onclick=function(){ showPasteConfirmationModal(destId); }; })(dest.id);
-  pasteRow.appendChild(pasteIcon);
-  pasteRow.appendChild(pasteText);
-  pasteRow.appendChild(pasteBtn);
-  wrap.appendChild(pasteRow);
+  // Paste-confirmation flow lives at the trip-view header now (📋
+  // Paste). Per-destination paste was removed in v353.6 once the
+  // preview modal's destination dropdown + verification could
+  // auto-route bookings — the per-dest button was giving false
+  // implication of routing-by-context that the parser doesn't
+  // actually need.
 
   // ============================================================
   // COMING UP — forward-facing

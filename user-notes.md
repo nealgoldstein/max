@@ -227,9 +227,14 @@ in-progress (status.phase === 'during'):
 
 ## Paste a confirmation (booking parser)
 
-In a destination's **Tracking** tab, the top row is a **📋 Paste a
-confirmation** affordance. Click → big textarea → paste the booking
-email or web confirmation (any length) → **Parse →**.
+**Trip-view header → 📋 Paste**. Click → big textarea → paste the
+booking email or web confirmation (any length) → **Parse →**.
+
+The button lives at the trip level rather than per-destination
+because Max routes the booking to the right destination automatically
+based on the parsed address + dates. There's no point making the
+user click from a specific destination's tab when the parser figures
+out where it belongs anyway.
 
 Max calls the LLM with a strict JSON-extraction prompt and pulls
 out:
@@ -264,6 +269,25 @@ manually-entered vs LLM-extracted records. If the LLM returns
 `type: "unknown"` or extracts no useful fields, the user gets a
 "couldn't pull useful fields out — try a clearer paste" message
 and the textarea stays put so they can edit and retry.
+
+**Destination verification.** The preview modal shows a Destination
+dropdown listing every destination on the trip. On extraction, Max
+scores each destination by how well the booking's address + dates
+match (place-name token overlap and date range overlap), and
+pre-selects the best match. Three cases:
+
+- **Best match equals where you clicked Paste** — no warning, the
+  dropdown just confirms the implicit choice.
+- **Best match is a different destination** — blue banner: "Routed
+  to <dest>. The booking matches it better than <where you clicked>."
+  Save lands at the new destination.
+- **No destination matches at all** (booking's dates and location
+  don't fit any dest on this trip) — yellow warning: "Heads up: the
+  booking doesn't match any destination on this trip. Double-check
+  the destination dropdown before saving."
+
+The user can override the dropdown freely; the warning updates live
+as they change it.
 
 **Cancellation policy:** the parser captures the deadline DATE only.
 We deliberately don't capture deadline times — property-local vs
