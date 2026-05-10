@@ -25140,16 +25140,42 @@ function showPasteConfirmationModal(destId) {
     statusEl.style.color = "#888";
     try {
       var parsed = await _parseBookingConfirmation(text);
-      if (!parsed || parsed.type === "unknown" || (!parsed.name && !parsed.carrier && !parsed.confirmationNumber && !parsed.depDate && !parsed.checkIn)) {
-        statusEl.textContent = "Couldn't pull useful fields out of that. Try pasting a clearer version (the full email body usually works best).";
+      // Log the raw extraction so debugging is one console line away —
+      // the LLM occasionally returns partial fields and the failure
+      // mode used to be a silent generic message that gave the user
+      // nothing to act on.
+      console.log("[paste-confirm] LLM extracted:", parsed);
+      // Lenient pass: as long as the LLM gave us SOMETHING actionable,
+      // hand off to the preview. The user can fix anything wrong; an
+      // empty preview is better than a hard failure when the LLM
+      // returned, say, only an address + dates without a hotel name.
+      var anyField = parsed && (
+        parsed.name || parsed.carrier || parsed.address ||
+        parsed.depDate || parsed.arrDate ||
+        parsed.depTime || parsed.arrTime ||
+        parsed.confirmationNumber ||
+        parsed.from || parsed.to || parsed.price
+      );
+      if (!parsed || !anyField) {
+        statusEl.textContent = "Couldn't pull useful fields out of that. Try pasting more of the email — the part with the hotel/airline/restaurant name and the dates usually works best.";
         statusEl.style.color = "#c44";
         parseBtn.disabled = false; cancelBtn.disabled = false;
         parseBtn.textContent = "Parse →";
         return;
       }
+      // If type came back "unknown" but we have fields, default to
+      // hotel (most common booking shape) so the preview has SOME
+      // structure. The user can change it via the Type dropdown.
+      if (!parsed.type || parsed.type === "unknown") {
+        // Heuristic: from/to → transport; checkOut-style fields → hotel; else best guess.
+        if (parsed.from || parsed.to || parsed.number) parsed.type = "flight";
+        else if (parsed.address || parsed.arrDate) parsed.type = "hotel";
+        else parsed.type = "hotel"; // safe fallback
+      }
       ov.remove();
       _showBookingPreviewModal(destId, parsed, text);
     } catch (e) {
+      console.warn("[paste-confirm] parse failed:", e);
       statusEl.textContent = "Parse failed: " + (e && e.message || "unknown error");
       statusEl.style.color = "#c44";
       parseBtn.disabled = false; cancelBtn.disabled = false;
@@ -25184,12 +25210,14 @@ async function _parseBookingConfirmation(text) {
     '  "notes": string | null           // anything notable that doesn\'t fit a field (gate, terminal, room type, party size, etc.)\n' +
     "}\n\n" +
     "Rules:\n" +
-    "- Use 24-hour time. Convert AM/PM if needed.\n" +
+    "- Use 24-hour time. Convert AM/PM if needed (3:00 PM → 15:00, 11:00 AM → 11:00).\n" +
     "- Dates: if year is missing, infer from context (recent emails are usually for upcoming travel). If truly unknowable, leave null.\n" +
-    "- Set type to 'unknown' if you can't identify it; do NOT guess.\n" +
-    "- Set fields to null when not present — don't invent values.\n" +
-    "- If price is shown with a symbol ($, €, £), populate currency accordingly. If only an amount is shown, leave currency null.\n" +
-    "- For 'notes', keep it short (one short clause) — long descriptions belong in their dedicated fields.";
+    "- Type detection: be decisive. Words like 'Check-in / Check-out', 'X nights', 'Standard Room' → hotel. 'Flight #', airport codes, gate, terminal → flight. 'Train', PNR, station-to-station → train. Only return 'unknown' if there's truly no booking-shaped content at all.\n" +
+    "- Missing fields are normal — set them to null. Don't refuse the whole extraction just because one or two fields aren't present. A hotel booking without a visible hotel name (sometimes the name lives at the top of the email and got cut off) should still be type='hotel' with name=null and the dates filled in.\n" +
+    "- Don't invent values for fields that aren't in the source.\n" +
+    "- If price is shown with a symbol ($, €, £, ¥), populate currency accordingly (USD, EUR, GBP, JPY). The cancellation cost / 'no-show fee' shown for hotel bookings is NOT the price paid — only use 'price' for what the user actually paid (often labeled 'Total' or 'Amount paid').\n" +
+    "- 'address' is the physical location (hotel street address, restaurant address). Don't put airport codes or city names there — those go in 'from' / 'to' for transport.\n" +
+    "- For 'notes', keep it short — one phrase only (e.g. 'Standard Double Room, 2 adults' or 'Gate B12, Terminal 2'). Long descriptions don't belong in any field.";
   var user = "CONFIRMATION TEXT:\n\n" + text + "\n\nReturn the JSON.";
   var resp = await callMax(
     [{ role: "user", content: user }],
