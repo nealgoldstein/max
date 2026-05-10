@@ -25186,10 +25186,23 @@ function showPasteConfirmationModal(destId) {
 
 // LLM call. Strict JSON-only extraction prompt. Country-agnostic;
 // no examples that bias toward a specific carrier or hotel chain.
+//
+// IMPORTANT: the LLM has a strong tendency to invent its own JSON
+// shape (destination, accommodation, dates, etc.) instead of
+// following an unfamiliar schema. Two countermeasures:
+//   1. The system prompt below shows a complete worked example so
+//      the model has a concrete pattern to copy from, not just a
+//      type definition to interpret.
+//   2. _normalizeBookingExtraction (below) maps common alternative
+//      keys (accommodation→name, checkIn→depDate, total→price, etc.)
+//      to our canonical schema as a belt-and-braces second line of
+//      defense. Even if the LLM ignores the prompt, the normalizer
+//      catches the most common drift patterns.
 async function _parseBookingConfirmation(text) {
   var system =
     "You extract booking details from raw confirmation text (emails, web pages, screenshots transcribed). " +
-    "Return ONLY a single JSON object — no prose, no markdown fences. " +
+    "Return ONLY a single JSON object — no prose, no markdown fences, no explanation. " +
+    "Use EXACTLY the field names below. Do NOT invent your own field names like 'destination', 'accommodation', 'dates', 'travelers' — use the canonical names listed.\n\n" +
     "Schema:\n" +
     "{\n" +
     '  "type": "flight" | "hotel" | "train" | "bus" | "ferry" | "restaurant" | "tour" | "ticket" | "unknown",\n' +
@@ -25217,7 +25230,16 @@ async function _parseBookingConfirmation(text) {
     "- Don't invent values for fields that aren't in the source.\n" +
     "- If price is shown with a symbol ($, €, £, ¥), populate currency accordingly (USD, EUR, GBP, JPY). The cancellation cost / 'no-show fee' shown for hotel bookings is NOT the price paid — only use 'price' for what the user actually paid (often labeled 'Total' or 'Amount paid').\n" +
     "- 'address' is the physical location (hotel street address, restaurant address). Don't put airport codes or city names there — those go in 'from' / 'to' for transport.\n" +
-    "- For 'notes', keep it short — one phrase only (e.g. 'Standard Double Room, 2 adults' or 'Gate B12, Terminal 2'). Long descriptions don't belong in any field.";
+    "- For 'notes', keep it short — one phrase only (e.g. 'Standard Double Room, 2 adults' or 'Gate B12, Terminal 2'). Long descriptions don't belong in any field.\n\n" +
+    "EXAMPLE INPUT (hotel):\n" +
+    "Reservation details\nCheck-in: Friday, October 2, 2026 (3:00 PM)\nCheck-out: Monday, October 5, 2026 (11:00 AM)\n3 nights, Standard Double Room, 2 adults\nLocation: Adalgata 2, 340 Stykkishólmur, Iceland\nTotal: € 586.50\n\n" +
+    "EXAMPLE OUTPUT for that input:\n" +
+    '{"type":"hotel","carrier":null,"number":null,"name":null,"address":"Adalgata 2, 340 Stykkishólmur, Iceland","from":null,"to":null,"depDate":"2026-10-02","depTime":"15:00","arrDate":"2026-10-05","arrTime":"11:00","confirmationNumber":null,"price":586.50,"currency":"EUR","url":null,"notes":"Standard Double Room, 2 adults"}\n\n' +
+    "EXAMPLE INPUT (flight):\n" +
+    "Lufthansa LH 414\nDeparture: JFK 9:25 PM Wed Oct 1, 2026\nArrival: FRA 11:00 AM Thu Oct 2, 2026\nConfirmation: ABC123\nTotal $842.00\n\n" +
+    "EXAMPLE OUTPUT for that input:\n" +
+    '{"type":"flight","carrier":"Lufthansa","number":"LH 414","name":null,"address":null,"from":"JFK","to":"FRA","depDate":"2026-10-01","depTime":"21:25","arrDate":"2026-10-02","arrTime":"11:00","confirmationNumber":"ABC123","price":842.00,"currency":"USD","url":null,"notes":null}\n\n' +
+    "Now extract the user's confirmation in the same shape.";
   var user = "CONFIRMATION TEXT:\n\n" + text + "\n\nReturn the JSON.";
   var resp = await callMax(
     [{ role: "user", content: user }],
@@ -25232,12 +25254,72 @@ async function _parseBookingConfirmation(text) {
   if (firstBrace >= 0 && lastBrace > firstBrace) {
     clean = clean.slice(firstBrace, lastBrace + 1);
   }
+  var raw;
   try {
-    return JSON.parse(clean);
+    raw = JSON.parse(clean);
   } catch (e) {
     console.warn("[paste-confirm] JSON parse failed:", clean.slice(0, 200));
     throw new Error("LLM returned malformed JSON");
   }
+  return _normalizeBookingExtraction(raw);
+}
+
+// Belt-and-braces normalizer: even when the LLM ignores the prompt
+// and returns its own shape (destination/accommodation/checkIn/total/
+// etc.), map the common variant keys to our canonical schema so the
+// preview modal gets useful data. Any truly canonical key already
+// present takes precedence — this only fills gaps.
+function _normalizeBookingExtraction(p) {
+  if (!p || typeof p !== "object") return p;
+  var out = Object.assign({}, p);
+  function pick(canonical, aliases) {
+    if (out[canonical] != null && out[canonical] !== "") return;
+    for (var i = 0; i < aliases.length; i++) {
+      var v = out[aliases[i]];
+      if (v != null && v !== "") { out[canonical] = v; return; }
+    }
+  }
+  pick("name",       ["accommodation", "hotel", "hotelName", "property", "propertyName", "venue", "restaurantName", "tourName", "ticketName"]);
+  pick("carrier",    ["airline", "operator", "company", "provider"]);
+  pick("number",     ["flightNumber", "flight", "trainNumber", "train", "busNumber", "ferryNumber", "pnr", "reference"]);
+  pick("address",    ["location", "destination", "venueAddress", "hotelAddress", "fullAddress"]);
+  pick("from",       ["origin", "departureCity", "departureAirport", "fromCity", "fromAirport"]);
+  pick("to",         ["destinationCity", "arrivalAirport", "toCity", "toAirport"]);
+  pick("depDate",    ["checkIn", "checkInDate", "checkin", "departureDate", "departure", "startDate", "date"]);
+  pick("depTime",    ["checkInTime", "departureTime", "startTime", "time"]);
+  pick("arrDate",    ["checkOut", "checkOutDate", "checkout", "arrivalDate", "arrival", "endDate"]);
+  pick("arrTime",    ["checkOutTime", "arrivalTime", "endTime"]);
+  pick("confirmationNumber", ["confirmation", "confirmationCode", "bookingNumber", "bookingReference", "reservationNumber", "reservationCode", "code"]);
+  pick("price",      ["total", "totalPrice", "totalCost", "amount", "amountPaid", "pricePaid", "cost"]);
+  pick("currency",   ["currencyCode", "currencySymbol"]);
+  pick("url",        ["bookingUrl", "managementUrl", "link", "href"]);
+  pick("notes",      ["description", "details", "additionalInfo", "remarks"]);
+  // If the LLM jammed multiple things into a 'dates' string like
+  // "October 2-5, 2026", we can't reliably split here — leave the
+  // user to fill via the preview's date pickers. But we can at least
+  // surface it via notes so they don't lose the info.
+  if (!out.depDate && typeof p.dates === "string") {
+    out.notes = (out.notes ? out.notes + " · " : "") + "Dates: " + p.dates;
+  }
+  if (typeof p.travelers === "string") {
+    out.notes = (out.notes ? out.notes + " · " : "") + p.travelers;
+  }
+  if (typeof p.duration === "string" && !out.notes) {
+    out.notes = p.duration;
+  }
+  // Type detection: many alt schemas don't include type at all.
+  if (!out.type || out.type === "unknown") {
+    if (out.from || out.to || out.number || /flight|airline|airport/i.test(JSON.stringify(p))) out.type = "flight";
+    else if (out.address || out.arrDate || /hotel|check.?in|check.?out|nights|room/i.test(JSON.stringify(p))) out.type = "hotel";
+    else if (/restaurant|reservation.*table|dinner|lunch/i.test(JSON.stringify(p))) out.type = "restaurant";
+    else out.type = "hotel";
+  }
+  // Currency normalization: turn symbols into ISO codes.
+  if (out.currency === "$") out.currency = "USD";
+  else if (out.currency === "€") out.currency = "EUR";
+  else if (out.currency === "£") out.currency = "GBP";
+  else if (out.currency === "¥") out.currency = "JPY";
+  return out;
 }
 
 // Preview modal — editable form keyed by detected type. User can
