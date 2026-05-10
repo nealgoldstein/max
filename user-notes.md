@@ -129,9 +129,25 @@ Same pattern as the trip-view map:
     (✈ prefix, duration falls back to 3h for flights, 1h
     otherwise)
   Drops into Apple Calendar, Google Calendar, Outlook, etc.
-  via double-click.
+  via double-click. **One-shot:** re-export to update events;
+  destinations you've since deleted in Max will linger in your
+  calendar.
+- **🔄 Subscribe in calendar (recommended)** → live link your
+  calendar app polls every few hours. Edits in Max — adding sights,
+  changing dates, removing destinations — flow into your calendar
+  automatically; deletes too. Re-uses the trip's existing share
+  token (mints one if none exists), so the same capability covers
+  both the read-only viewer and the calendar feed. The modal
+  surfaces a `webcal://` URL that Apple Calendar (Mac/iOS) and
+  Outlook claim on click; Google Calendar requires the
+  `https://` form (Settings → Add calendar → From URL), and
+  the modal includes manual-instructions for all four major
+  apps. Server endpoint:
+  `https://api.travelingwithmax.app/share/<token>/calendar.ics`.
 
-Both work entirely client-side — no data leaves your device.
+The .ics download and the printable PDF work entirely client-side.
+The subscription URL hits the server (it has to, so calendar apps
+can refetch on their own schedule).
 
 ## Weather per destination
 

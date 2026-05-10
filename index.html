@@ -7015,7 +7015,11 @@ function showExportTripModal(){
       '</button>' +
       '<button id="exp-ics" style="text-align:left;padding:14px 16px;font-size:13px;background:#fff;color:#111;border:1px solid #ddd;border-radius:8px;cursor:pointer;font-family:inherit;">' +
         '<div style="font-weight:700;margin-bottom:3px;">📅 Download calendar (.ics)</div>' +
-        '<div style="font-size:11px;color:#888;">One event per destination + each booked item with a date. Drops into Apple, Google, or any standard calendar.</div>' +
+        '<div style="font-size:11px;color:#888;">One-shot file. Re-export to update events; deleted destinations stay in your calendar.</div>' +
+      '</button>' +
+      '<button id="exp-sub" style="text-align:left;padding:14px 16px;font-size:13px;background:#fff;color:#1a5fa8;border:1px solid #cfe1f7;border-radius:8px;cursor:pointer;font-family:inherit;">' +
+        '<div style="font-weight:700;margin-bottom:3px;">🔄 Subscribe in calendar (recommended)</div>' +
+        '<div style="font-size:11px;color:#666;">Live link your calendar refreshes every few hours. Edits in Max → updates in your calendar automatically. Deletes too.</div>' +
       '</button>' +
     '</div>' +
     '<div style="margin-top:14px;text-align:right;">' +
@@ -7025,6 +7029,7 @@ function showExportTripModal(){
   document.body.appendChild(ov);
   document.getElementById("exp-pdf").onclick = function(){ ov.remove(); _exportTripPrintable(); };
   document.getElementById("exp-ics").onclick = function(){ ov.remove(); _exportTripIcs(); };
+  document.getElementById("exp-sub").onclick = function(){ ov.remove(); _exportTripSubscribe(); };
   document.getElementById("exp-close").onclick = function(){ ov.remove(); };
   ov.addEventListener("click", function(e){ if (e.target === ov) ov.remove(); });
 }
@@ -7141,10 +7146,14 @@ function _exportTripIcs(){
   function nowStamp(){
     return new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
   }
-  function uid(){
-    return "max-" + Date.now() + "-" + Math.floor(Math.random() * 100000) + "@travelingwithmax.app";
+  // STABLE UIDs — keyed off the trip ID + dest/tracker ID. Same
+  // event in two re-exports gets the same UID, so calendar apps
+  // update the existing entry instead of duplicating it. This is
+  // the "right" iCal pattern per RFC 5545.
+  function uidFor(kind, id){
+    return "max-" + kind + "-" + (trip.id || _currentTripId || "trip") + "-" + id + "@travelingwithmax.app";
   }
-  function pushDateOnly(summary, location, dateFrom, dateTo, description){
+  function pushDateOnly(uid, summary, location, dateFrom, dateTo, description){
     if (!dateFrom) return;
     // iCal DTEND for all-day events is exclusive — add a day.
     var endIso = dateTo || dateFrom;
@@ -7152,16 +7161,19 @@ function _exportTripIcs(){
     endD.setUTCDate(endD.getUTCDate() + 1);
     var endStr = endD.toISOString().slice(0,10).replace(/-/g, "");
     lines.push("BEGIN:VEVENT");
-    lines.push("UID:" + uid());
+    lines.push("UID:" + uid);
     lines.push("DTSTAMP:" + nowStamp());
     lines.push("DTSTART;VALUE=DATE:" + fmtIcsDate(dateFrom));
     lines.push("DTEND;VALUE=DATE:" + endStr);
     lines.push("SUMMARY:" + _icsEsc(summary));
     if (location) lines.push("LOCATION:" + _icsEsc(location));
     if (description) lines.push("DESCRIPTION:" + _icsEsc(description));
+    // SEQUENCE bumps each export so calendar apps honor updates
+    // over the previous version with the same UID.
+    lines.push("SEQUENCE:" + Math.floor(Date.now() / 1000));
     lines.push("END:VEVENT");
   }
-  function pushDateTime(summary, location, dateIso, time, durationHours, description){
+  function pushDateTime(uid, summary, location, dateIso, time, durationHours, description){
     if (!dateIso) return;
     var dur = isFinite(durationHours) && durationHours > 0 ? durationHours : 1;
     var startStr = fmtIcsDateTime(dateIso, time || "09:00");
@@ -7169,13 +7181,14 @@ function _exportTripIcs(){
     var endD = new Date(startD.getTime() + dur * 3600 * 1000);
     var endStr = endD.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "").replace(/Z$/, "");
     lines.push("BEGIN:VEVENT");
-    lines.push("UID:" + uid());
+    lines.push("UID:" + uid);
     lines.push("DTSTAMP:" + nowStamp());
     lines.push("DTSTART:" + startStr);
     lines.push("DTEND:" + endStr);
     lines.push("SUMMARY:" + _icsEsc(summary));
     if (location) lines.push("LOCATION:" + _icsEsc(location));
     if (description) lines.push("DESCRIPTION:" + _icsEsc(description));
+    lines.push("SEQUENCE:" + Math.floor(Date.now() / 1000));
     lines.push("END:VEVENT");
   }
   // One all-day event per destination spanning its date range.
@@ -7185,17 +7198,16 @@ function _exportTripIcs(){
     var loc = d.place || "";
     var desc = "";
     if (d.lodging || d.lodgingNotes) desc += "Lodging: " + (d.lodging || d.lodgingNotes) + "\\n";
-    pushDateOnly("📍 " + summary, loc, d.dateFrom, d.dateTo, desc);
+    pushDateOnly(uidFor("dest", d.id || (d.place || "x")), "📍 " + summary, loc, d.dateFrom, d.dateTo, desc);
   });
   // Tracker / booking items with explicit dates+times become point events.
-  // The trip's tracker lives on dest.tracker — entries with .date.
   (trip.destinations || []).forEach(function(d){
     (d.tracker || []).forEach(function(t){
       if (!t || !t.date) return;
       var summary = t.summary || t.label || t.kind || "Booking";
       var loc = t.location || d.place || "";
       var dur = (t.durationHours || (t.kind === "flight" ? 3 : 1));
-      pushDateTime("✈ " + summary, loc, t.date, t.time, dur, t.notes || "");
+      pushDateTime(uidFor("tracker", t.id || (d.id + "-" + summary)), "✈ " + summary, loc, t.date, t.time, dur, t.notes || "");
     });
   });
   lines.push("END:VCALENDAR");
@@ -7209,6 +7221,120 @@ function _exportTripIcs(){
   document.body.appendChild(a);
   a.click();
   setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); }, 100);
+}
+
+// v353.6: live calendar subscription. Re-uses (or mints) the trip's
+// share token and surfaces a webcal:// URL. Calendar apps poll this
+// URL every few hours and reconcile by stable UID — so adding,
+// editing, or deleting destinations/bookings in Max propagates into
+// the user's calendar automatically. Clicking the subscribe button
+// hands the URL to the OS handler for webcal:// (Apple Calendar on
+// Mac/iOS, the user's chosen handler on Win/Linux). Same trust model
+// as the read-only share link: the token IS the auth.
+function _exportTripSubscribe(){
+  if (!_currentTripId || !trip) { maxAlert("Open a trip first."); return; }
+  if (typeof MaxSync === "undefined" || !MaxSync.isSignedIn || !MaxSync.isSignedIn()) {
+    maxAlert("Sign in first — subscription links live on the server.");
+    return;
+  }
+  var existing = document.getElementById("subscribe-trip-overlay");
+  if (existing) existing.remove();
+  var ov = document.createElement("div");
+  ov.id = "subscribe-trip-overlay";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:11900;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto;";
+  var box = document.createElement("div");
+  box.style.cssText = "background:#fff;border-radius:12px;width:520px;max-width:100%;max-height:calc(100vh - 48px);overflow:auto;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);";
+  box.innerHTML =
+    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">' +
+      '<div style="width:28px;height:28px;border-radius:50%;background:#1a5fa8;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">🔄</div>' +
+      '<div style="font-size:14px;font-weight:700;">Subscribe in your calendar</div>' +
+    '</div>' +
+    '<div style="font-size:12px;color:#555;line-height:1.55;margin-bottom:12px;">Your calendar app will refresh this link every few hours. Edits to this trip in Max — adding sights, changing dates, removing destinations — flow into your calendar automatically.</div>' +
+    '<div id="sub-trip-status" style="font-size:12px;color:#888;min-height:14px;margin-bottom:10px;">Loading…</div>' +
+    '<div id="sub-trip-body" style="display:none;">' +
+      '<div style="font-size:11px;color:#666;font-weight:600;margin-bottom:4px;">Subscription link:</div>' +
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">' +
+        '<input id="sub-trip-link" type="text" readonly style="flex:1;font-size:11px;padding:7px 9px;border:1px solid #ddd;border-radius:5px;font-family:monospace;box-sizing:border-box;" />' +
+        '<button id="sub-trip-copy" style="padding:7px 12px;font-size:12px;font-weight:600;background:#1a5fa8;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Copy</button>' +
+      '</div>' +
+      '<a id="sub-trip-go" href="#" style="display:block;text-align:center;padding:11px 14px;font-size:13px;font-weight:700;background:#1a5fa8;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;text-decoration:none;margin-bottom:14px;">📅 Subscribe in calendar app</a>' +
+      '<div style="font-size:11px;color:#666;line-height:1.6;background:#f7f9fc;border:1px solid #e2e7ee;border-radius:6px;padding:10px 12px;">' +
+        '<div style="font-weight:700;color:#333;margin-bottom:4px;">How to add it manually</div>' +
+        '<div><b>Apple Calendar (Mac):</b> File → New Calendar Subscription → paste link.</div>' +
+        '<div><b>Apple Calendar (iPhone):</b> open the link in Safari and confirm.</div>' +
+        '<div><b>Google Calendar:</b> Settings → Add calendar → From URL → paste an https:// version of the link (replace <code>webcal://</code> with <code>https://</code>).</div>' +
+        '<div><b>Outlook:</b> Add calendar → Subscribe from web → paste link.</div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="margin-top:14px;text-align:right;">' +
+      '<button id="sub-trip-close" style="padding:8px 14px;font-size:12px;font-weight:600;background:#fff;color:#666;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;">Close</button>' +
+    '</div>';
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+
+  var statusEl = document.getElementById("sub-trip-status");
+  var bodyEl = document.getElementById("sub-trip-body");
+  var linkEl = document.getElementById("sub-trip-link");
+  var copyBtn = document.getElementById("sub-trip-copy");
+  var goBtn = document.getElementById("sub-trip-go");
+  var closeBtn = document.getElementById("sub-trip-close");
+
+  function showLink(token){
+    // Rewrite the configured server URL (https://api.travelingwithmax.app)
+    // to webcal:// so calendar clients claim it on click. The plain
+    // https:// form is in the manual-instructions block for Google
+    // Calendar, which doesn't accept webcal://.
+    var apiBase = (MaxSync.getServerUrl && MaxSync.getServerUrl()) || "https://api.travelingwithmax.app";
+    var httpsUrl = apiBase.replace(/\/$/, "") + "/share/" + encodeURIComponent(token) + "/calendar.ics";
+    var webcalUrl = httpsUrl.replace(/^https?:/, "webcal:");
+    linkEl.value = webcalUrl;
+    goBtn.href = webcalUrl;
+    bodyEl.style.display = "block";
+    statusEl.textContent = "Active subscription link:";
+    statusEl.style.color = "#2a7a4e";
+  }
+
+  // Reuse the trip's existing share token if there is one; otherwise
+  // mint a fresh one. Same token doubles as the read-only-view link
+  // and the calendar subscription URL — that's by design (one
+  // capability, both surfaces).
+  MaxSync.listShareTokens(_currentTripId).then(function(resp){
+    var tokens = (resp && resp.tokens) || [];
+    if (tokens.length) {
+      showLink(tokens[0].token);
+    } else {
+      statusEl.textContent = "Generating link…";
+      MaxSync.mintShareToken(_currentTripId).then(function(r){
+        if (r && r.token) showLink(r.token);
+        else { statusEl.textContent = "Could not generate link."; statusEl.style.color = "#c44"; }
+      }).catch(function(e){
+        statusEl.textContent = "Could not generate link: " + (e && e.message || "unknown");
+        statusEl.style.color = "#c44";
+      });
+    }
+  }).catch(function(e){
+    statusEl.textContent = "Could not load subscription state: " + (e && e.message || "unknown");
+    statusEl.style.color = "#c44";
+  });
+
+  copyBtn.onclick = function(){
+    try {
+      linkEl.select();
+      linkEl.setSelectionRange(0, 99999);
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(linkEl.value).then(function(){
+          copyBtn.textContent = "Copied ✓";
+          setTimeout(function(){ copyBtn.textContent = "Copy"; }, 1500);
+        });
+      } else {
+        document.execCommand("copy");
+        copyBtn.textContent = "Copied ✓";
+        setTimeout(function(){ copyBtn.textContent = "Copy"; }, 1500);
+      }
+    } catch (_) {}
+  };
+  closeBtn.onclick = function(){ ov.remove(); };
+  ov.addEventListener("click", function(e){ if (e.target === ov) ov.remove(); });
 }
 
 function _icsEsc(s){
