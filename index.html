@@ -25259,7 +25259,7 @@ async function _parseBookingConfirmation(text) {
     "- 'address' is the physical location (hotel street address, restaurant address). Don't put airport codes or city names there — those go in 'from' / 'to' for transport.\n" +
     "- For 'notes', keep it short — one phrase only (e.g. 'Standard Double Room, 2 adults' or 'Gate B12, Terminal 2'). Long descriptions don't belong in any field.\n" +
     "- Cancellation: emails often state policy in prose ('Free cancellation until 7 days before arrival', 'until September 24, 2026 11:59 PM: € 0', 'Non-refundable'). Resolve to a concrete cancelDeadline date. If two dates are shown ('until X: € 0' and 'from Y: € N'), the deadline is X.\n" +
-    "- URL: look for 'Manage booking', 'View reservation', 'Modify reservation', any clickable link, or domains like booking.com/account, hotels.com/reservation. Even partial URLs help — extract them.\n\n" +
+    "- URL: look for 'Manage booking', 'View reservation', 'Modify reservation', 'Modify or cancel', any clickable link, or domains like booking.com, hotels.com, airbnb.com, marriott.com, hilton.com, etc. URLs are often wrapped in MARKDOWN syntax like '[modify or cancel](https://secure.booking.com/...)' — extract the URL inside the parens, not the visible label. Same for HTML <a href=\"...\"> tags. Even very long URLs with tracking parameters are fine — copy them verbatim.\n\n" +
     "EXAMPLE INPUT (hotel, with time ranges):\n" +
     "Reservation details\nCheck-in: Friday, October 2, 2026 (3:00 PM - 10:00 PM)\nCheck-out: Monday, October 5, 2026 (7:00 AM - 11:00 AM)\n3 nights, Standard Double Room, 2 adults\nLocation: Adalgata 2, 340 Stykkishólmur, Iceland\nTotal: € 586.50\nCancellation policy: You can cancel for free until 7 days before arrival. Cancellation cost until September 24, 2026 11:59 PM: € 0; from September 25, 2026 12:00 AM: € 586.50.\nManage your booking: https://www.booking.com/mybooking?token=abc123\n\n" +
     "EXAMPLE OUTPUT for that input:\n" +
@@ -25290,7 +25290,74 @@ async function _parseBookingConfirmation(text) {
     console.warn("[paste-confirm] JSON parse failed:", clean.slice(0, 200));
     throw new Error("LLM returned malformed JSON");
   }
-  return _normalizeBookingExtraction(raw);
+  var normalized = _normalizeBookingExtraction(raw);
+  // Belt-and-braces: if no URL was extracted (or the LLM grabbed the
+  // visible label "modify or cancel" instead of the actual https://
+  // URL), fall back to a regex scan of the original text. This is
+  // generic — works for any booking-confirmation email format that
+  // has a URL somewhere in the body, regardless of how it's formatted.
+  if (!normalized.url || !/^https?:\/\//i.test(normalized.url)) {
+    var fallback = _extractBookingUrl(text);
+    if (fallback) normalized.url = fallback;
+  }
+  return normalized;
+}
+
+// Extract the most plausible booking-management URL from raw email
+// or web-confirmation text. Handles three common formats: markdown
+// '[label](url)' (Booking.com style), HTML '<a href="url">label</a>',
+// and bare URLs. Then scores each by booking-relevance keywords so
+// we don't return a tracking pixel or an unsubscribe link when a
+// real management URL is present.
+function _extractBookingUrl(text) {
+  if (!text) return null;
+  var urls = [];
+  var m;
+  // Markdown links: [label](url) — Booking.com confirmation emails
+  // routinely format CTAs this way when copied from rendered output.
+  var mdRe = /\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g;
+  while ((m = mdRe.exec(text)) !== null) {
+    urls.push({ url: m[2], label: (m[1] || "").toLowerCase() });
+  }
+  // HTML anchors: <a href="url">label</a>
+  var htmlRe = /<a[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  while ((m = htmlRe.exec(text)) !== null) {
+    if (/^https?:\/\//i.test(m[1])) {
+      urls.push({ url: m[1], label: m[2].replace(/<[^>]+>/g, "").toLowerCase().trim() });
+    }
+  }
+  // Bare URLs — but only AFTER stripping the structured ones so we
+  // don't double-count. We also strip query strings to a max length
+  // when scoring (very long URLs are usually tracking).
+  var stripped = text.replace(mdRe, " ").replace(htmlRe, " ");
+  var bareRe = /https?:\/\/[^\s<>"')\]]+/g;
+  while ((m = bareRe.exec(stripped)) !== null) {
+    urls.push({ url: m[0], label: "" });
+  }
+  if (!urls.length) return null;
+
+  // Score each candidate by how booking-relevant it looks. Negative
+  // signals (tracking, unsubscribe, image hosts) push URLs out;
+  // positive signals (booking.com, manage, reservation, etc.) pull
+  // them in. The top non-negative score wins.
+  var positive = /booking\.com|hotels\.com|airbnb\.com|expedia\.com|marriott|hilton|hyatt|ihg|accor|trip\.com|agoda|priceline|kayak|skyscanner|opentable|resy|tock|viator|getyourguide|tickets|ticketmaster|amtrak|trainline|sncf|bahn|rail|airlines|airways|lufthansa|united|delta|aa\.com|jetblue|britishairways|southwest|ryanair|easyjet/i;
+  var positiveLabels = /manage|modify|cancel|reservation|confirmation|booking|view|access|details/i;
+  var negative = /unsubscribe|preferences|tracking|pixel|click\.|track\.|stat\.|analytic|facebook|twitter|linkedin|instagram|youtube|email\.|footer|optout/i;
+  var imageExt = /\.(?:gif|png|jpg|jpeg|svg|webp|ico|css|js|woff|woff2|ttf)(\?|$)/i;
+
+  function score(u) {
+    var s = 0;
+    var domain = u.url.toLowerCase();
+    if (positive.test(domain)) s += 3;
+    if (positiveLabels.test(u.label) || positiveLabels.test(domain)) s += 2;
+    if (negative.test(domain) || negative.test(u.label)) s -= 6;
+    if (imageExt.test(domain)) s -= 6;
+    return s;
+  }
+  urls.forEach(function(u){ u.score = score(u); });
+  urls.sort(function(a,b){ return b.score - a.score; });
+  // Return the top candidate as long as it's not actively bad.
+  return urls[0].score >= 0 ? urls[0].url : null;
 }
 
 // Best-effort time-range parser. Hotels frequently state check-in /
