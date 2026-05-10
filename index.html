@@ -25291,6 +25291,7 @@ async function _parseBookingConfirmation(text) {
     throw new Error("LLM returned malformed JSON");
   }
   var normalized = _normalizeBookingExtraction(raw);
+  console.log("[paste-confirm] LLM url field:", normalized.url);
   // Belt-and-braces: if no URL was extracted (or the LLM grabbed the
   // visible label "modify or cancel" instead of the actual https://
   // URL), fall back to a regex scan of the original text. This is
@@ -25298,6 +25299,7 @@ async function _parseBookingConfirmation(text) {
   // has a URL somewhere in the body, regardless of how it's formatted.
   if (!normalized.url || !/^https?:\/\//i.test(normalized.url)) {
     var fallback = _extractBookingUrl(text);
+    console.log("[paste-confirm] URL fallback ran. found:", fallback);
     if (fallback) normalized.url = fallback;
   }
   return normalized;
@@ -25356,6 +25358,7 @@ function _extractBookingUrl(text) {
   }
   urls.forEach(function(u){ u.score = score(u); });
   urls.sort(function(a,b){ return b.score - a.score; });
+  console.log("[paste-confirm] URL candidates (top 5):", urls.slice(0, 5).map(function(u){ return { score: u.score, url: u.url.slice(0, 80), label: u.label.slice(0, 30) }; }));
   // Return the top candidate as long as it's not actively bad.
   return urls[0].score >= 0 ? urls[0].url : null;
 }
