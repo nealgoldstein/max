@@ -1605,6 +1605,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
         <button class="file-btn" onclick="goHome()" title="All trips">&larr; Home</button>
         <button class="file-btn" onclick="editConstraints()" title="Edit trip parameters">&#9998; Parameters</button>
         <button class="file-btn" onclick="saveTrip()" title="Save">Save</button>
+        <button class="file-btn" onclick="if(_currentTripId&&confirm('Duplicate this trip? A copy will be created on the home screen.'))duplicateTrip(_currentTripId,false);" title="Duplicate this trip">Copy</button>
         <button class="file-btn" id="trip-search-btn" onclick="openTripSearch()" title="Search this trip">&#x1F50D;</button>
         <button class="file-btn" id="api-key-btn" onclick="showApiKeyForm()" title="Set API key" style="opacity:0.6;">&#x1F511;</button>
         <button class="file-btn" id="sync-btn" onclick="MaxSync.showSignInModal()" title="Sync with server" style="opacity:0.6;">&#x21C4;</button>
@@ -4318,9 +4319,13 @@ function renderHomeScreen(){
       // it to enter.
       var dup = document.createElement("button");
       dup.className = "tc-dup";
-      dup.textContent = "\u29c9"; // \u29c9 (overlapping squares; renders as duplicate icon)
-      dup.title = "Duplicate trip";
-      dup.style.cssText = "background:transparent;border:none;color:#888;font-size:14px;padding:6px 8px;cursor:pointer;font-family:inherit;line-height:1;";
+      // v353.5: text "Copy" instead of a glyph \u2014 \u29c9 falls back to a
+      // hollow square in some font stacks (the user couldn't see it).
+      // Plain text is universally readable and tells users what
+      // happens before they click.
+      dup.textContent = "Copy";
+      dup.title = "Duplicate this trip";
+      dup.style.cssText = "background:#fff;border:1px solid #cfe1f7;color:#1a5fa8;font-size:11px;font-weight:600;padding:4px 10px;cursor:pointer;font-family:inherit;border-radius:5px;margin-right:6px;";
       (function(id, c){
         dup.onclick = function(e){
           e.stopPropagation();
