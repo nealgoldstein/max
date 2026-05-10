@@ -291,6 +291,28 @@
     return request('/trips/' + encodeURIComponent(id), { method: 'DELETE' });
   }
 
+  // v353.5: share-link endpoints. Mint creates a fresh token bound
+  // to a trip. List returns active (non-revoked) tokens. Revoke
+  // marks all active tokens revoked. Public read uses /share/:token
+  // and bypasses the bearer-token auth header (the share token IS
+  // the auth).
+  async function mintShareToken(tripId) {
+    return request('/trips/' + encodeURIComponent(tripId) + '/share', {
+      method: 'POST',
+    });
+  }
+  async function listShareTokens(tripId) {
+    return request('/trips/' + encodeURIComponent(tripId) + '/share');
+  }
+  async function revokeShareTokens(tripId) {
+    return request('/trips/' + encodeURIComponent(tripId) + '/share', {
+      method: 'DELETE',
+    });
+  }
+  async function fetchSharedTrip(token) {
+    return request('/share/' + encodeURIComponent(token), { skipAuth: true });
+  }
+
   // ── Prefs endpoints ────────────────────────────────────────
   //
   // v353.3 (Path B): user-level prefs (paceHours, future cross-device
@@ -1092,6 +1114,11 @@
     // across devices but don't change trip content. Server merges
     // the patch into trip.ui_state without bumping trip.updatedAt.
     patchTripUiState: patchTripUiStateRemote,
+    // v353.5: share-link operations.
+    mintShareToken: mintShareToken,
+    listShareTokens: listShareTokens,
+    revokeShareTokens: revokeShareTokens,
+    fetchSharedTrip: fetchSharedTrip,
     // For the LLM proxy round — exposed now so callMax can switch
     // over without another file edit.
     _request: request,

@@ -1606,6 +1606,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
         <button class="file-btn" onclick="editConstraints()" title="Edit trip parameters">&#9998; Parameters</button>
         <button class="file-btn" onclick="saveTrip()" title="Save">Save</button>
         <button class="file-btn" onclick="if(_currentTripId&&confirm('Duplicate this trip? A copy will be created on the home screen.'))duplicateTrip(_currentTripId,false);" title="Duplicate this trip">Copy</button>
+        <button class="file-btn" onclick="showShareTripModal()" title="Share a read-only link to this trip">Share</button>
         <button class="file-btn" id="trip-search-btn" onclick="openTripSearch()" title="Search this trip">&#x1F50D;</button>
         <button class="file-btn" id="api-key-btn" onclick="showApiKeyForm()" title="Set API key" style="opacity:0.6;">&#x1F511;</button>
         <button class="file-btn" id="sync-btn" onclick="MaxSync.showSignInModal()" title="Sync with server" style="opacity:0.6;">&#x21C4;</button>
@@ -6747,6 +6748,116 @@ function showWelcomeOnboarding(onContinue) {
     maybeShowWelcome();
   }
 })();
+
+// v353.5: share-trip modal. On open, asks the server for any
+// existing active share tokens for this trip; if none, mints one.
+// Shows the resulting URL with a Copy button. Revoke clears all
+// active tokens (the URL stops working immediately).
+function showShareTripModal(){
+  if (!_currentTripId) { maxAlert("Open a trip first."); return; }
+  if (typeof MaxSync === "undefined" || !MaxSync.isSignedIn || !MaxSync.isSignedIn()) {
+    maxAlert("Sign in first — share links live on the server.");
+    return;
+  }
+  // Build the modal shell
+  var existing = document.getElementById("share-trip-overlay");
+  if (existing) existing.remove();
+  var ov = document.createElement("div");
+  ov.id = "share-trip-overlay";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:11900;display:flex;align-items:center;justify-content:center;padding:24px;";
+  var box = document.createElement("div");
+  box.style.cssText = "background:#fff;border-radius:12px;width:480px;max-width:100%;max-height:88vh;overflow:auto;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);";
+  box.innerHTML =
+    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">' +
+      '<div style="width:28px;height:28px;border-radius:50%;background:#1a5fa8;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">↗</div>' +
+      '<div style="font-size:14px;font-weight:700;">Share a read-only link</div>' +
+    '</div>' +
+    '<div style="font-size:12px;color:#555;line-height:1.55;margin-bottom:14px;">Anyone with this link can view this trip — they can\'t edit it. They\'ll see a "Duplicate to my account" button to copy it as their own.</div>' +
+    '<div id="share-trip-status" style="font-size:12px;color:#888;min-height:14px;margin-bottom:10px;">Loading…</div>' +
+    '<div id="share-trip-link-row" style="display:none;align-items:center;gap:8px;margin-bottom:14px;">' +
+      '<input id="share-trip-link" type="text" readonly style="flex:1;font-size:11px;padding:7px 9px;border:1px solid #ddd;border-radius:5px;font-family:monospace;box-sizing:border-box;" />' +
+      '<button id="share-trip-copy" style="padding:7px 12px;font-size:12px;font-weight:600;background:#1a5fa8;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Copy</button>' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;">' +
+      '<button id="share-trip-revoke" style="flex:1;padding:8px;font-size:12px;font-weight:600;background:#fff;color:#c44;border:1px solid #c44;border-radius:5px;cursor:pointer;font-family:inherit;display:none;">Revoke link</button>' +
+      '<button id="share-trip-close" style="padding:8px 14px;font-size:12px;font-weight:600;background:#fff;color:#666;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;">Close</button>' +
+    '</div>';
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+
+  var statusEl = document.getElementById("share-trip-status");
+  var linkRow = document.getElementById("share-trip-link-row");
+  var linkEl = document.getElementById("share-trip-link");
+  var copyBtn = document.getElementById("share-trip-copy");
+  var revokeBtn = document.getElementById("share-trip-revoke");
+  var closeBtn = document.getElementById("share-trip-close");
+
+  function showLink(token){
+    var url = location.origin + location.pathname + "?share=" + encodeURIComponent(token);
+    linkEl.value = url;
+    linkRow.style.display = "flex";
+    revokeBtn.style.display = "block";
+    statusEl.textContent = "Active share link:";
+    statusEl.style.color = "#2a7a4e";
+  }
+
+  // First, ask the server if any active token exists. If yes, reuse.
+  // If no, mint one. Avoids piling up tokens every time the modal opens.
+  MaxSync.listShareTokens(_currentTripId).then(function(resp){
+    var tokens = (resp && resp.tokens) || [];
+    if (tokens.length) {
+      showLink(tokens[0].token);
+    } else {
+      statusEl.textContent = "Generating link…";
+      MaxSync.mintShareToken(_currentTripId).then(function(r){
+        if (r && r.token) showLink(r.token);
+        else { statusEl.textContent = "Could not generate link."; statusEl.style.color = "#c44"; }
+      }).catch(function(e){
+        statusEl.textContent = "Could not generate link: " + (e && e.message || "unknown");
+        statusEl.style.color = "#c44";
+      });
+    }
+  }).catch(function(e){
+    statusEl.textContent = "Could not load share state: " + (e && e.message || "unknown");
+    statusEl.style.color = "#c44";
+  });
+
+  copyBtn.onclick = function(){
+    try {
+      linkEl.select();
+      linkEl.setSelectionRange(0, 99999);
+      // Modern API first, fall back to deprecated execCommand for
+      // older browsers / restricted contexts.
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(linkEl.value).then(function(){
+          copyBtn.textContent = "Copied ✓";
+          setTimeout(function(){ copyBtn.textContent = "Copy"; }, 1500);
+        });
+      } else {
+        document.execCommand("copy");
+        copyBtn.textContent = "Copied ✓";
+        setTimeout(function(){ copyBtn.textContent = "Copy"; }, 1500);
+      }
+    } catch (_) {}
+  };
+  revokeBtn.onclick = function(){
+    if (!confirm("Revoke this share link? The URL will stop working for anyone who has it.")) return;
+    revokeBtn.disabled = true;
+    revokeBtn.textContent = "Revoking…";
+    MaxSync.revokeShareTokens(_currentTripId).then(function(){
+      statusEl.textContent = "Revoked. The link no longer works.";
+      statusEl.style.color = "#888";
+      linkRow.style.display = "none";
+      revokeBtn.style.display = "none";
+    }).catch(function(e){
+      revokeBtn.disabled = false;
+      revokeBtn.textContent = "Revoke link";
+      maxAlert("Revoke failed: " + (e && e.message || "unknown"));
+    });
+  };
+  closeBtn.onclick = function(){ ov.remove(); };
+  ov.addEventListener("click", function(e){ if (e.target === ov) ov.remove(); });
+}
 
 function showAboutMax(){
   var ov=document.getElementById("about-max-overlay");
