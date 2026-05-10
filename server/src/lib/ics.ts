@@ -56,14 +56,65 @@ function nowStamp(): string {
   return new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
 }
 
+type DayItem = {
+  id?: string;
+  type?: string;     // 'sight' | 'restaurant' | 'daytrip' | 'hotel' | …
+  n?: string;        // name (single-letter keys are the on-disk shape)
+  note?: string;
+  slot?: string;     // 'day' | 'morning' | 'afternoon' | 'evening'
+  time?: string;     // 'HH:MM' if user set one
+  durationHours?: number;
+};
+type Day = {
+  id?: string;
+  date?: string;     // ISO YYYY-MM-DD — populated by _ftRecomputeTripDates
+  items?: Array<DayItem>;
+};
 type TripShape = {
   name?: string;
   destinations?: Array<{
     id?: string; place?: string; label?: string; dateFrom?: string; dateTo?: string;
     lodging?: string; lodgingNotes?: string;
+    days?: Array<Day>;
     tracker?: Array<{ id?: string; kind?: string; summary?: string; label?: string; date?: string; time?: string; location?: string; notes?: string; durationHours?: number; }>;
   }>;
 };
+
+// Default time-of-day for items the user hasn't explicitly timed.
+// Reads from item.slot which Max sets to 'morning' / 'afternoon' /
+// 'evening' / 'day'. Falls back to a mid-morning slot for anything
+// unrecognized so events at least don't all stack at midnight.
+function defaultTimeForSlot(slot: string | undefined): string {
+  switch ((slot || '').toLowerCase()) {
+    case 'morning':   return '09:00';
+    case 'afternoon': return '14:00';
+    case 'evening':   return '19:00';
+    default:          return '10:00';
+  }
+}
+
+// Default duration when item.durationHours isn't set. Restaurants
+// get 1.5h, day-trips get 4h (they often eat the full afternoon),
+// everything else 1h.
+function defaultDurationForType(type: string | undefined): number {
+  switch ((type || '').toLowerCase()) {
+    case 'restaurant': return 1.5;
+    case 'daytrip':    return 4;
+    default:           return 1;
+  }
+}
+
+// Emoji prefix on the SUMMARY makes the calendar legible at a
+// glance. Matches the trip-view chip iconography roughly.
+function iconForType(type: string | undefined): string {
+  switch ((type || '').toLowerCase()) {
+    case 'restaurant': return '🍽';
+    case 'daytrip':    return '🚐';
+    case 'hotel':      return '🏨';
+    case 'sight':      return '🎯';
+    default:           return '📌';
+  }
+}
 
 export function generateIcs(body: TripBody, tripId: string): string {
   // body may be a flat trip OR an envelope { trip: {...}, ... }
@@ -181,6 +232,32 @@ export function generateIcs(body: TripBody, tripId: string): string {
         dur,
         t.notes || '',
       );
+    }
+  }
+
+  // Planned items: per-day sights, restaurants, day-trips, hotels.
+  // These live at dest.days[i].items; the day's `date` is the ISO
+  // string we attach the event to. Items the user hasn't explicitly
+  // timed get a slot-based default (morning/afternoon/evening) so
+  // they don't all stack at midnight in the calendar view.
+  for (const d of dests as Array<{ id?: string; place?: string; days?: Array<Day>; }>) {
+    for (const day of d.days || []) {
+      if (!day || !day.date) continue;
+      for (const it of day.items || []) {
+        if (!it || !it.n) continue;
+        const time = (it.time && /\d/.test(it.time)) ? it.time : defaultTimeForSlot(it.slot);
+        const dur = it.durationHours || defaultDurationForType(it.type);
+        const icon = iconForType(it.type);
+        pushDateTime(
+          uidFor('item', it.id || ((d.id || 'd') + '-' + (day.id || day.date) + '-' + it.n)),
+          icon + ' ' + it.n,
+          d.place || '',
+          day.date,
+          time,
+          dur,
+          it.note || '',
+        );
+      }
     }
   }
 

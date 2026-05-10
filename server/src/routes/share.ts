@@ -87,9 +87,13 @@ shareApi.get('/:token/calendar.ics', async (c) => {
   return new Response(ics, {
     headers: {
       'Content-Type': 'text/calendar; charset=utf-8',
-      // 1 hour cache. Calendar apps usually refresh every few hours
-      // anyway; this gives the worker some breathing room.
-      'Cache-Control': 'public, max-age=3600',
+      // 60s cache. Originally 3600 ("calendar apps refresh every
+      // few hours anyway") but that made testing edit-and-refresh
+      // confusing — Cloudflare's edge happily served a stale .ics
+      // for an hour. 60s is short enough that a manual refresh in
+      // Calendar.app picks up changes, long enough that ten clients
+      // hitting refresh in the same minute don't all reach the worker.
+      'Cache-Control': 'public, max-age=60',
       'Access-Control-Allow-Origin': '*',
     },
   });

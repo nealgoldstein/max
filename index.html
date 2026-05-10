@@ -7210,6 +7210,55 @@ function _exportTripIcs(){
       pushDateTime(uidFor("tracker", t.id || (d.id + "-" + summary)), "✈ " + summary, loc, t.date, t.time, dur, t.notes || "");
     });
   });
+  // Planned items in the per-day itinerary — sights, restaurants,
+  // day-trips, hotels. day.date is set by _ftRecomputeTripDates.
+  // Items the user hasn't explicitly timed get a slot-based default
+  // (morning=09:00, afternoon=14:00, evening=19:00, day=10:00) so
+  // they don't all stack at midnight in the calendar.
+  function _slotTime(slot){
+    switch (String(slot || "").toLowerCase()) {
+      case "morning":   return "09:00";
+      case "afternoon": return "14:00";
+      case "evening":   return "19:00";
+      default:          return "10:00";
+    }
+  }
+  function _typeDur(type){
+    switch (String(type || "").toLowerCase()) {
+      case "restaurant": return 1.5;
+      case "daytrip":    return 4;
+      default:           return 1;
+    }
+  }
+  function _typeIcon(type){
+    switch (String(type || "").toLowerCase()) {
+      case "restaurant": return "🍽";
+      case "daytrip":    return "🚐";
+      case "hotel":      return "🏨";
+      case "sight":      return "🎯";
+      default:           return "📌";
+    }
+  }
+  (trip.destinations || []).forEach(function(d){
+    (d.days || []).forEach(function(day){
+      if (!day || !day.date) return;
+      (day.items || []).forEach(function(it){
+        if (!it || !it.n) return;
+        var time = (it.time && /\d/.test(it.time)) ? it.time : _slotTime(it.slot);
+        var dur = it.durationHours || _typeDur(it.type);
+        var icon = _typeIcon(it.type);
+        pushDateTime(
+          uidFor("item", it.id || ((d.id || "d") + "-" + (day.id || day.date) + "-" + it.n)),
+          icon + " " + it.n,
+          d.place || "",
+          day.date,
+          time,
+          dur,
+          it.note || ""
+        );
+      });
+    });
+  });
   lines.push("END:VCALENDAR");
   // Lines longer than 75 octets should be folded per RFC 5545,
   // but most calendar apps tolerate long lines. Skip for simplicity.
