@@ -15892,6 +15892,169 @@ function extractCityName(txt){
   return fw ? fw.charAt(0).toUpperCase()+fw.slice(1).toLowerCase() : null;
 }
 
+// v353.6: weather per destination (Open-Meteo, no API key).
+// Forecast for dates within ~16 days from today; climate
+// normals (averaged from same month across recent years) for
+// dates further out. Cached in localStorage with a 6-hour TTL
+// for forecast and 30-day TTL for climate to avoid hammering
+// the API every render.
+//
+// Public surface:
+//   getDestWeather(lat,lng,fromISO,toISO) → Promise<{kind, summary, daily?}>
+//     kind: "forecast" | "climate" | "none"
+//     summary: short string ("avg 18°/9°C · 30% rain") for the strip
+//     daily: array of {date, tMax, tMin, precipPct, code} when forecast
+//
+// Render hook: renderDestWeatherStrip(destObj, container) appends a
+// .dest-weather-strip element and asynchronously populates it.
+var _weatherCache = (function(){
+  try { return JSON.parse(localStorage.getItem("max-weather-cache") || "{}"); }
+  catch(_){ return {}; }
+})();
+function _saveWeatherCache(){
+  try { localStorage.setItem("max-weather-cache", JSON.stringify(_weatherCache)); } catch(_){}
+}
+function _weatherKey(lat, lng, fromISO, toISO){
+  // Round coords to 2 decimals so nearby places share cache.
+  var rl = function(n){ return (Math.round(n * 100) / 100).toFixed(2); };
+  return rl(lat) + "," + rl(lng) + "|" + (fromISO||"") + "|" + (toISO||"");
+}
+function _weatherCacheTtl(kind){
+  return kind === "forecast" ? 6 * 3600 * 1000 : 30 * 86400 * 1000;
+}
+function _wxCodeIcon(c){
+  // WMO weather codes → emoji. Subset; defaults to a sun.
+  if (c == null) return "☀️";
+  if (c === 0) return "☀️";
+  if (c <= 2) return "🌤️";
+  if (c === 3) return "☁️";
+  if (c >= 45 && c <= 48) return "🌫️";
+  if (c >= 51 && c <= 67) return "🌦️";
+  if (c >= 71 && c <= 77) return "🌨️";
+  if (c >= 80 && c <= 82) return "🌧️";
+  if (c >= 85 && c <= 86) return "❄️";
+  if (c >= 95) return "⛈️";
+  return "☁️";
+}
+async function getDestWeather(lat, lng, fromISO, toISO){
+  if (!isFinite(lat) || !isFinite(lng) || !fromISO) {
+    return { kind: "none", summary: "" };
+  }
+  var key = _weatherKey(lat, lng, fromISO, toISO);
+  var cached = _weatherCache[key];
+  if (cached && (Date.now() - cached.fetchedAt) < _weatherCacheTtl(cached.kind)) {
+    return cached.data;
+  }
+  // Decide forecast vs climate based on distance from today.
+  var today = new Date(); today.setHours(12,0,0,0);
+  var msDay = 86400 * 1000;
+  var startDays = Math.round((new Date(fromISO+"T12:00:00") - today) / msDay);
+  var endDays   = toISO ? Math.round((new Date(toISO+"T12:00:00") - today) / msDay) : startDays;
+  var data;
+  try {
+    if (endDays >= 0 && startDays <= 16) {
+      // Forecast (clamp to 0..16 days from today).
+      var forecastStart = startDays < 0 ? 0 : startDays;
+      var forecastEnd   = Math.min(endDays, 16);
+      var startISO = new Date(today.getTime() + forecastStart * msDay).toISOString().slice(0,10);
+      var endISOFc = new Date(today.getTime() + forecastEnd * msDay).toISOString().slice(0,10);
+      var url = "https://api.open-meteo.com/v1/forecast"
+        + "?latitude=" + lat + "&longitude=" + lng
+        + "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code"
+        + "&start_date=" + startISO + "&end_date=" + endISOFc
+        + "&timezone=auto";
+      var r = await fetch(url);
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      var j = await r.json();
+      var d = j.daily || {};
+      var days = [];
+      var tMaxs = [], tMins = [], pps = [];
+      (d.time || []).forEach(function(date, i){
+        var tx = d.temperature_2m_max && d.temperature_2m_max[i];
+        var tn = d.temperature_2m_min && d.temperature_2m_min[i];
+        var pp = d.precipitation_probability_max && d.precipitation_probability_max[i];
+        var wc = d.weather_code && d.weather_code[i];
+        days.push({ date: date, tMax: tx, tMin: tn, precipPct: pp, code: wc });
+        if (isFinite(tx)) tMaxs.push(tx);
+        if (isFinite(tn)) tMins.push(tn);
+        if (isFinite(pp)) pps.push(pp);
+      });
+      var avgMax = tMaxs.length ? Math.round(tMaxs.reduce(function(a,b){return a+b;}, 0) / tMaxs.length) : null;
+      var avgMin = tMins.length ? Math.round(tMins.reduce(function(a,b){return a+b;}, 0) / tMins.length) : null;
+      var avgPp  = pps.length   ? Math.round(pps.reduce(function(a,b){return a+b;}, 0) / pps.length)   : null;
+      var summary = (avgMax != null && avgMin != null)
+        ? "Forecast " + avgMax + "°/" + avgMin + "°C" + (avgPp != null ? " · " + avgPp + "% rain" : "")
+        : "Forecast unavailable";
+      data = { kind: "forecast", summary: summary, daily: days };
+    } else {
+      // Climate normals — average the same month across the past 5 years.
+      var month = (new Date(fromISO + "T12:00:00")).getUTCMonth() + 1;
+      var year = new Date().getUTCFullYear() - 1;
+      var startISOh = (year - 4) + "-" + String(month).padStart(2,"0") + "-01";
+      // Use a safe end-of-month: 28 covers every month.
+      var endISOh   = year + "-" + String(month).padStart(2,"0") + "-28";
+      var urlH = "https://archive-api.open-meteo.com/v1/archive"
+        + "?latitude=" + lat + "&longitude=" + lng
+        + "&start_date=" + startISOh + "&end_date=" + endISOh
+        + "&daily=temperature_2m_max,temperature_2m_min,precipitation_sum"
+        + "&timezone=auto";
+      var rh = await fetch(urlH);
+      if (!rh.ok) throw new Error("HTTP " + rh.status);
+      var jh = await rh.json();
+      var dh = jh.daily || {};
+      var allMax = (dh.temperature_2m_max || []).filter(function(v){return isFinite(v);});
+      var allMin = (dh.temperature_2m_min || []).filter(function(v){return isFinite(v);});
+      var allPr  = (dh.precipitation_sum   || []).filter(function(v){return isFinite(v);});
+      var avgMaxC = allMax.length ? Math.round(allMax.reduce(function(a,b){return a+b;},0) / allMax.length) : null;
+      var avgMinC = allMin.length ? Math.round(allMin.reduce(function(a,b){return a+b;},0) / allMin.length) : null;
+      // Days with measurable rain (>= 1mm) as a % of total days.
+      var rainDays = (dh.precipitation_sum || []).filter(function(v){return v >= 1;}).length;
+      var totalDays = (dh.precipitation_sum || []).length || 1;
+      var rainPct = Math.round((rainDays / totalDays) * 100);
+      var summaryC = (avgMaxC != null && avgMinC != null)
+        ? "Typical " + avgMaxC + "°/" + avgMinC + "°C · " + rainPct + "% rainy days"
+        : "Climate unavailable";
+      data = { kind: "climate", summary: summaryC };
+    }
+  } catch (e) {
+    data = { kind: "none", summary: "" };
+  }
+  _weatherCache[key] = { fetchedAt: Date.now(), data: data };
+  _saveWeatherCache();
+  return data;
+}
+
+// Render hook called from trip-ui's dest card render. Inserts a
+// small strip below the dates row. Async fetch fills it in once
+// the data lands; meanwhile the strip shows a faint placeholder.
+function renderDestWeatherStrip(dest, container){
+  if (!container || !dest) return;
+  // Remove any prior strip if re-rendering.
+  var existing = container.querySelector(".dest-weather-strip");
+  if (existing) existing.remove();
+  // Need lat/lng. Try the geocode cache via getCityCenter if present.
+  var coords = null;
+  if (typeof getCityCenter === "function") {
+    coords = getCityCenter(dest.place || dest.label);
+  }
+  if (!coords || !isFinite(coords[0]) || !isFinite(coords[1])) return;
+  if (!dest.dateFrom) return;
+  var strip = document.createElement("div");
+  strip.className = "dest-weather-strip";
+  strip.style.cssText = "margin-top:6px;font-size:11px;color:#666;display:flex;align-items:center;gap:6px;";
+  strip.innerHTML = '<span style="opacity:0.5;">Loading weather…</span>';
+  container.appendChild(strip);
+  getDestWeather(coords[0], coords[1], dest.dateFrom, dest.dateTo || dest.dateFrom).then(function(w){
+    if (w.kind === "none" || !w.summary) {
+      strip.remove();
+      return;
+    }
+    var icon = (w.daily && w.daily[0]) ? _wxCodeIcon(w.daily[0].code) : "🌤️";
+    strip.innerHTML = '<span>' + icon + '</span><span>' + w.summary + '</span>'
+      + (w.kind === "climate" ? '<span style="font-size:9px;color:#aaa;margin-left:4px;">(climate avg)</span>' : '');
+  }).catch(function(){ strip.remove(); });
+}
+
 function fmtD(s){
   if(!s)return"";
   var d=new Date(s+"T12:00:00");

@@ -1743,6 +1743,14 @@
     dateLineWrap.appendChild(downBtn);
     bodyDiv.appendChild(dateLineWrap);
 
+    // v353.6: weather strip — quick forecast (within 16 days) or
+    // climate normals (further out) so the user can see at a
+    // glance what the trip will be like at this destination on
+    // these dates. Async fetch via Open-Meteo, cached locally.
+    if (typeof global.renderDestWeatherStrip === "function") {
+      try { global.renderDestWeatherStrip(dest, bodyDiv); } catch (_) {}
+    }
+
     // Required-for badges
     if(dest.attachedEvents && dest.attachedEvents.length){
       var evRow=document.createElement("div");
