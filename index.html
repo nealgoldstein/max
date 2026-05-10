@@ -17597,15 +17597,17 @@ function mkField(labelText,inputEl){
 }
 
 function mkCancelField(formId){
+  // v353.6: dropped the deadline-time input. Property-local vs
+  // user-local time zones, ambiguous AM/PM in raw text, and the
+  // rarity of cases where minute precision actually mattered made
+  // the time field more confusing than useful. We now capture the
+  // date only. cancelDeadlineTime stays in the data shape (the
+  // field is preserved on already-saved bookings for legacy display)
+  // but new entries via this form always pass deadlineTime:null.
   var wrap=document.createElement('div'); wrap.className='cancel-row';
   var lbl=document.createElement('span'); lbl.className='cancel-lbl'; lbl.textContent='Enter cancellation policy'; lbl.style.color='#c0392b';
   var optsDiv=document.createElement('div'); optsDiv.className='cancel-opts';
   var dateInp=document.createElement('input'); dateInp.type='date'; dateInp.className='cancel-date-inp'; dateInp.id=formId+'-cancel-date';
-  // Round FN: hotels often spell cancellation deadlines as a date + time
-  // ("free cancellation until July 12 at 18:00 local"). Adding a time
-  // input alongside the date so the user can capture it accurately.
-  var timeInp=document.createElement('input'); timeInp.type='time'; timeInp.className='cancel-date-inp'; timeInp.id=formId+'-cancel-time';
-  timeInp.style.marginLeft='4px';
   var selected='';
   [{val:'deadline',lbl:'Cancel by date'},{val:'non-cancellable',lbl:'Non-cancellable'}].forEach(function(o){
     var btn=document.createElement('button'); btn.className='cancel-opt '+o.val.replace(/-/g,'');
@@ -17615,20 +17617,18 @@ function mkCancelField(formId){
       selected=o.val;
       optsDiv.querySelectorAll('.cancel-opt').forEach(function(b){b.classList.remove('selected');});
       btn.classList.add('selected');
-      var show=o.val==='deadline'?'inline-block':'none';
-      dateInp.style.display=show;
-      timeInp.style.display=show;
+      dateInp.style.display=o.val==='deadline'?'inline-block':'none';
     };
     optsDiv.appendChild(btn);
   });
-  // Hide the time input by default (matches the date input)
-  timeInp.style.display='none';
   dateInp.style.display='none';
-  wrap.appendChild(lbl); wrap.appendChild(optsDiv); wrap.appendChild(dateInp); wrap.appendChild(timeInp);
+  wrap.appendChild(lbl); wrap.appendChild(optsDiv); wrap.appendChild(dateInp);
   wrap.getCancelPolicy=function(){return {
     type:selected,
     deadline:selected==='deadline'?(dateInp.value||null):null,
-    deadlineTime:selected==='deadline'?(timeInp.value||null):null
+    // Always null on new entries — see comment above. Existing saved
+    // bookings keep their original cancelDeadlineTime untouched.
+    deadlineTime:null
   };};
   return wrap;
 }
@@ -25221,8 +25221,7 @@ async function _parseBookingConfirmation(text) {
     '  "currency": string | null,       // ISO code: USD, EUR, GBP, ISK, etc\n' +
     '  "url": string | null,            // booking management URL if present (often labeled "Manage booking", "View reservation", or a domain like booking.com/account)\n' +
     '  "cancelType": "deadline" | "non-cancellable" | null,  // "deadline" if the policy gives a date you can cancel by; "non-cancellable" if explicitly non-refundable; null if no policy is stated\n' +
-    '  "cancelDeadline": "YYYY-MM-DD" | null, // the LAST date the user can cancel for free (so for "free until 7 days before arrival, arrival Oct 2" → 2026-09-25 is when penalty starts → use 2026-09-24 as the deadline)\n' +
-    '  "cancelDeadlineTime": "HH:MM" | null,  // 24h, time component of the deadline if specified\n' +
+    '  "cancelDeadline": "YYYY-MM-DD" | null, // the LAST date the user can cancel for free. Date only — we deliberately do NOT capture the time. For "free until 7 days before arrival, arrival Oct 2" → 2026-09-24 (the day before the penalty starts).\n' +
     '  "notes": string | null           // anything notable that doesn\'t fit a field (gate, terminal, room type, party size, etc.)\n' +
     "}\n\n" +
     "Rules:\n" +
@@ -25239,11 +25238,11 @@ async function _parseBookingConfirmation(text) {
     "EXAMPLE INPUT (hotel):\n" +
     "Reservation details\nCheck-in: Friday, October 2, 2026 (3:00 PM)\nCheck-out: Monday, October 5, 2026 (11:00 AM)\n3 nights, Standard Double Room, 2 adults\nLocation: Adalgata 2, 340 Stykkishólmur, Iceland\nTotal: € 586.50\nCancellation policy: You can cancel for free until 7 days before arrival. Cancellation cost until September 24, 2026 11:59 PM: € 0; from September 25, 2026 12:00 AM: € 586.50.\nManage your booking: https://www.booking.com/mybooking?token=abc123\n\n" +
     "EXAMPLE OUTPUT for that input:\n" +
-    '{"type":"hotel","carrier":null,"number":null,"name":null,"address":"Adalgata 2, 340 Stykkishólmur, Iceland","from":null,"to":null,"depDate":"2026-10-02","depTime":"15:00","arrDate":"2026-10-05","arrTime":"11:00","confirmationNumber":null,"price":586.50,"currency":"EUR","url":"https://www.booking.com/mybooking?token=abc123","cancelType":"deadline","cancelDeadline":"2026-09-24","cancelDeadlineTime":"23:59","notes":"Standard Double Room, 2 adults"}\n\n' +
+    '{"type":"hotel","carrier":null,"number":null,"name":null,"address":"Adalgata 2, 340 Stykkishólmur, Iceland","from":null,"to":null,"depDate":"2026-10-02","depTime":"15:00","arrDate":"2026-10-05","arrTime":"11:00","confirmationNumber":null,"price":586.50,"currency":"EUR","url":"https://www.booking.com/mybooking?token=abc123","cancelType":"deadline","cancelDeadline":"2026-09-24","notes":"Standard Double Room, 2 adults"}\n\n' +
     "EXAMPLE INPUT (flight):\n" +
     "Lufthansa LH 414\nDeparture: JFK 9:25 PM Wed Oct 1, 2026\nArrival: FRA 11:00 AM Thu Oct 2, 2026\nConfirmation: ABC123\nTotal $842.00\nNon-refundable\nManage booking: https://lufthansa.com/booking/ABC123\n\n" +
     "EXAMPLE OUTPUT for that input:\n" +
-    '{"type":"flight","carrier":"Lufthansa","number":"LH 414","name":null,"address":null,"from":"JFK","to":"FRA","depDate":"2026-10-01","depTime":"21:25","arrDate":"2026-10-02","arrTime":"11:00","confirmationNumber":"ABC123","price":842.00,"currency":"USD","url":"https://lufthansa.com/booking/ABC123","cancelType":"non-cancellable","cancelDeadline":null,"cancelDeadlineTime":null,"notes":null}\n\n' +
+    '{"type":"flight","carrier":"Lufthansa","number":"LH 414","name":null,"address":null,"from":"JFK","to":"FRA","depDate":"2026-10-01","depTime":"21:25","arrDate":"2026-10-02","arrTime":"11:00","confirmationNumber":"ABC123","price":842.00,"currency":"USD","url":"https://lufthansa.com/booking/ABC123","cancelType":"non-cancellable","cancelDeadline":null,"notes":null}\n\n' +
     "Now extract the user's confirmation in the same shape.";
   var user = "CONFIRMATION TEXT:\n\n" + text + "\n\nReturn the JSON.";
   var resp = await callMax(
@@ -25301,7 +25300,9 @@ function _normalizeBookingExtraction(p) {
   pick("notes",      ["description", "details", "additionalInfo", "remarks"]);
   pick("cancelType", ["cancellationType", "cancellation", "cancelPolicy", "cancellationPolicy", "refundPolicy"]);
   pick("cancelDeadline",     ["cancelBy", "cancellationDeadline", "freeCancellationUntil", "refundDeadline"]);
-  pick("cancelDeadlineTime", ["cancelByTime", "cancellationDeadlineTime"]);
+  // cancelDeadlineTime intentionally not normalized — we don't
+  // capture deadline times anymore (timezone confusion outweighs
+  // the value). Field stays in the schema for legacy data only.
   // Normalize cancelType to one of the canonical values our save
   // path accepts: "deadline" or "non-cancellable" (or null).
   if (out.cancelType) {
@@ -25452,11 +25453,14 @@ function _showBookingPreviewModal(destId, p, originalText) {
       inp("pcfp-currency", "Currency", p.currency || "", "USD") +
       '</div>';
     html += inp("pcfp-url", "Booking URL", p.url || "", "https://…", "url");
-    // Cancellation policy block — concrete deadline date+time, or
-    // a "non-cancellable" flag, or neither. The save path mirrors
-    // mkCancelField's contract: cancelType "deadline" with date+time,
-    // or cancelType "non-cancellable" with nulls, or cancelType ""
-    // when nothing is known.
+    // Cancellation policy block — date-only.
+    //
+    // We deliberately don't capture deadline time. Property-local
+    // vs user-local time zones, ambiguous AM/PM in raw confirmation
+    // text, and the rarity of cases where minute-precision actually
+    // matters made the time field more confusing than useful.
+    // Already-saved bookings that have a cancelDeadlineTime keep it
+    // for display elsewhere; we just stop asking for it on new entries.
     var ctVal = p.cancelType || "";
     html += '<div style="margin-top:6px;padding:8px 10px;background:#fff8e6;border:1px solid #f1d77a;border-radius:5px;">' +
       '<div style="font-size:10px;font-weight:700;color:#a06d00;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:5px;">Cancellation policy</div>' +
@@ -25465,18 +25469,17 @@ function _showBookingPreviewModal(destId, p, originalText) {
         '<label style="cursor:pointer;"><input type="radio" name="pcfp-ctype" value="non-cancellable"' + (ctVal === "non-cancellable" ? " checked" : "") + ' style="margin-right:4px;"/>Non-cancellable</label>' +
         '<label style="cursor:pointer;"><input type="radio" name="pcfp-ctype" value=""' + (!ctVal ? " checked" : "") + ' style="margin-right:4px;"/>Unknown</label>' +
       '</div>' +
-      '<div id="pcfp-cdeadline-wrap" style="display:' + (ctVal === "deadline" ? "grid" : "none") + ';grid-template-columns:1fr 1fr;gap:8px;">' +
-        inp("pcfp-cancel-date", "Cancel by date", p.cancelDeadline || "", "", "date") +
-        inp("pcfp-cancel-time", "Cancel by time", p.cancelDeadlineTime || "", "", "time") +
+      '<div id="pcfp-cdeadline-wrap" style="display:' + (ctVal === "deadline" ? "block" : "none") + ';">' +
+        inp("pcfp-cancel-date", "Cancel by", p.cancelDeadline || "", "", "date") +
       '</div>' +
     '</div>';
     html += inp("pcfp-notes", "Notes", p.notes || "", "Optional");
     fieldsHost.innerHTML = html;
-    // Toggle the deadline date/time visibility based on the radio.
+    // Toggle the deadline date visibility based on the radio.
     var ctRadios = document.querySelectorAll('input[name="pcfp-ctype"]');
     var cwrap = document.getElementById("pcfp-cdeadline-wrap");
     ctRadios.forEach(function(r){ r.onchange = function(){
-      if (cwrap) cwrap.style.display = r.value === "deadline" && r.checked ? "grid" : (r.checked ? "none" : cwrap.style.display);
+      if (cwrap && r.checked) cwrap.style.display = r.value === "deadline" ? "block" : "none";
     };});
   }
   renderFields();
@@ -25497,11 +25500,13 @@ function _showBookingPreviewModal(destId, p, originalText) {
     var num = function(s){ var n = parseFloat(s); return isFinite(n) ? n : null; };
     var freshDest = getDest(destId);
     if (!freshDest) { maxAlert("Destination is gone — close this and reopen the tracker."); return; }
-    // Read cancellation policy from the radio + date/time inputs.
+    // Read cancellation policy from the radio + date input.
+    // cancelDeadlineTime is intentionally always null on new entries
+    // — see preview-modal comment about timezone confusion.
     var ctEl = document.querySelector('input[name="pcfp-ctype"]:checked');
     var cancelType = ctEl ? ctEl.value : "";
     var cancelDeadline = cancelType === "deadline" ? (v("pcfp-cancel-date") || null) : null;
-    var cancelDeadlineTime = cancelType === "deadline" ? (v("pcfp-cancel-time") || null) : null;
+    var cancelDeadlineTime = null;
     if (!cancelType) cancelType = "unknown"; // keeps schema consistent with manual-entry path
 
     if (t === "hotel") {

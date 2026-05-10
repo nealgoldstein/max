@@ -265,6 +265,15 @@ manually-entered vs LLM-extracted records. If the LLM returns
 "couldn't pull useful fields out — try a clearer paste" message
 and the textarea stays put so they can edit and retry.
 
+**Cancellation policy:** the parser captures the deadline DATE only.
+We deliberately don't capture deadline times — property-local vs
+user-local time zones, ambiguous AM/PM in raw confirmation text,
+and the rarity of cases where minute-precision actually mattered
+made the time field more confusing than useful. Same applies to the
+manual booking forms (`mkCancelField`). The `cancelDeadlineTime`
+field stays in the data shape so already-saved bookings with times
+still display correctly, but new entries always set it to null.
+
 ## Cross-device sync
 
 - **Trips** sync via POST/PUT /trips on every change (1.5s debounce).
