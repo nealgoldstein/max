@@ -4312,6 +4312,48 @@ function renderHomeScreen(){
           info.appendChild(flightRow);
         }
       }
+      // v353.5: duplicate button (\ud83d\udccb) sits between info and delete.
+      // Click \u2192 confirm inline \u2192 call duplicateTrip \u2192 new card slides
+      // in at the top. Doesn't open the duplicate; the user can click
+      // it to enter.
+      var dup = document.createElement("button");
+      dup.className = "tc-dup";
+      dup.textContent = "\u29c9"; // \u29c9 (overlapping squares; renders as duplicate icon)
+      dup.title = "Duplicate trip";
+      dup.style.cssText = "background:transparent;border:none;color:#888;font-size:14px;padding:6px 8px;cursor:pointer;font-family:inherit;line-height:1;";
+      (function(id, c){
+        dup.onclick = function(e){
+          e.stopPropagation();
+          if (c.querySelector(".tc-confirm")) return;
+          var cf = document.createElement("div");
+          cf.className = "tc-confirm";
+          cf.style.cssText = "display:flex;align-items:center;gap:8px;width:100%;padding:4px 0 2px;";
+          var msg = document.createElement("span");
+          msg.style.cssText = "font-size:11px;color:#666;flex:1;";
+          msg.textContent = "Make a copy of \"" + (entry.name || "this trip") + "\"?";
+          var yes = document.createElement("button");
+          yes.style.cssText = "font-size:11px;padding:3px 10px;border:1px solid #1a5fa8;border-radius:4px;background:#1a5fa8;color:#fff;cursor:pointer;font-family:inherit;";
+          yes.textContent = "Duplicate";
+          var no = document.createElement("button");
+          no.style.cssText = "font-size:11px;padding:3px 8px;border:1px solid #ddd;border-radius:4px;background:#fff;color:#666;cursor:pointer;font-family:inherit;";
+          no.textContent = "Cancel";
+          yes.onclick = function(e2){
+            e2.stopPropagation();
+            c.parentNode.removeChild(c); // remove this card; re-render will show both
+            duplicateTrip(id, false);
+          };
+          no.onclick = function(e2){
+            e2.stopPropagation();
+            c.removeChild(cf);
+            info.style.display = "";
+            dup.style.display = "";
+            del.style.display = "";
+          };
+          cf.appendChild(msg); cf.appendChild(yes); cf.appendChild(no);
+          info.style.display = "none"; dup.style.display = "none"; del.style.display = "none";
+          c.appendChild(cf);
+        };
+      })(entry.id, card);
       var del=document.createElement("button"); del.className="tc-del"; del.textContent="\u2715";
       (function(id,c){del.onclick=function(e){
         e.stopPropagation();
@@ -4363,8 +4405,8 @@ function renderHomeScreen(){
         info.style.display="none"; del.style.display="none";
         c.appendChild(cf);
       };})(entry.id,card);
-      card.appendChild(info); card.appendChild(del);
-      (function(id){card.onclick=function(e){if(e.target===del)return;selectTrip(id);};})(entry.id);
+      card.appendChild(info); card.appendChild(dup); card.appendChild(del);
+      (function(id){card.onclick=function(e){if(e.target===del||e.target===dup)return;selectTrip(id);};})(entry.id);
       cards.appendChild(card);
     });
   }
@@ -4537,6 +4579,81 @@ function selectTrip(id){
     _currentTripId=id;
     enterApp();
   }
+}
+
+// v353.5: duplicate a trip locally + push to server. Clones the entire
+// trip envelope (trip body, counters, dest IDs all unchanged — IDs are
+// trip-scoped so reusing them in a new trip is fine) under a fresh
+// trip ID and " (copy)" name. The original is untouched. Sync layer
+// POSTs the clone to the server so it shows up on other devices.
+function duplicateTrip(srcId, openAfter){
+  if (!srcId) return null;
+  var srcRaw;
+  try { srcRaw = localStorage.getItem("max-trip-" + srcId); } catch (_) {}
+  if (!srcRaw) { maxAlert("Couldn't read source trip."); return null; }
+  var env;
+  try { env = JSON.parse(srcRaw); } catch (_) { return null; }
+  if (!env || !env.trip) return null;
+
+  var newId = "trip-" + Date.now() + "-" + Math.floor(Math.random() * 9999);
+  var srcName = (env.trip.name || "Untitled trip");
+  var newName = /\(copy\)$/i.test(srcName) ? srcName + " 2" : srcName + " (copy)";
+
+  // Deep clone + patch identity fields. _dupedFrom kept for debugging /
+  // future "open original" affordances; not used by render code today.
+  var clone;
+  try { clone = JSON.parse(JSON.stringify(env)); }
+  catch (_) { maxAlert("Couldn't clone the trip body."); return null; }
+  clone.trip.id = newId;
+  clone.trip.name = newName;
+  clone.trip._dupedFrom = srcId;
+  clone.__saved__ = Date.now();
+  // Per-trip UI state (banners expanded etc.) is intentionally cloned
+  // so the new trip lands looking the same as the original. If we
+  // ever want a fresh-look duplicate, delete clone._uiState here.
+
+  try { localStorage.setItem("max-trip-" + newId, JSON.stringify(clone)); }
+  catch (e) {
+    console.warn("[Max] duplicate save failed:", e);
+    maxAlert("Out of storage. Delete some old trips and try again.");
+    return null;
+  }
+
+  // Index entry — clone the source's metadata so dates / destCount /
+  // flight info are preserved on the new card without re-derivation.
+  var srcIdx = (_tripsIndex || []).find(function(t){ return t && t.id === srcId; });
+  if (srcIdx) {
+    var newIdx;
+    try { newIdx = JSON.parse(JSON.stringify(srcIdx)); }
+    catch (_) { newIdx = { id: newId, name: newName }; }
+    newIdx.id = newId;
+    newIdx.name = newName;
+    newIdx.savedAt = new Date().toISOString();
+    if (!Array.isArray(_tripsIndex)) _tripsIndex = [];
+    _tripsIndex.unshift(newIdx);
+    if (typeof saveTripsIndex === "function") saveTripsIndex();
+  }
+
+  // Push to server. Fire-and-forget — local copy already persisted, so
+  // worst case the trip is local-only until next sync.
+  if (typeof MaxSync !== "undefined" &&
+      typeof MaxSync.isSignedIn === "function" && MaxSync.isSignedIn() &&
+      typeof MaxSync._request === "function") {
+    MaxSync._request("/trips", {
+      method: "POST",
+      body: { id: newId, name: newName, body: clone, updatedAt: Date.now() },
+    }).catch(function (err) {
+      console.warn("[Max] server duplicate failed:", err);
+    });
+  }
+
+  if (openAfter) {
+    selectTrip(newId);
+  } else {
+    // Re-render the home-screen trip list so the new card appears.
+    if (typeof renderHomeDashboard === "function") renderHomeDashboard();
+  }
+  return newId;
 }
 
 // One-time migration: pull car rentals out of the legacy trip.logistics.carRentals

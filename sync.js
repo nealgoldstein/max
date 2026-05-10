@@ -1127,6 +1127,12 @@
       },
       function () { /* silent on poll failures */ },
     );
+    // v353.4: also pull prefs so changes made on another device
+    // (e.g. paceHours bumped on the phone) flow into the desktop
+    // when the tab regains focus or after each 60s tick. Without
+    // this, the desktop's pref is whatever was loaded at boot —
+    // it never picks up cross-device changes mid-session.
+    pullPrefs().catch(function () { /* silent */ });
   }
   function _startPolling() {
     if (_pollTimer) return;
