@@ -16480,6 +16480,52 @@ function renderDestWeatherStrip(dest, container){
   }).catch(function(){ strip.remove(); });
 }
 
+// v353.6: per-day weather chip. Smaller than the dest strip — just
+// icon + high/low for that single day. Re-uses getDestWeather's
+// cache (range query for the whole dest already populated by
+// renderDestWeatherStrip), then picks the matching entry from
+// w.daily by date. For dates beyond the 16-day forecast horizon we
+// silently skip — the climate avg is on the dest strip and doesn't
+// vary day-to-day, so per-day chips would be redundant noise.
+function renderDayWeatherChip(dest, day, container){
+  if (!container || !dest || !day || !day.date) return;
+  // Don't double-render if a chip is already there.
+  var existing = container.querySelector(".day-weather-chip");
+  if (existing) existing.remove();
+  var coords = null;
+  if (typeof getCityCenter === "function") {
+    coords = getCityCenter(dest.place || dest.label);
+  }
+  if (!coords || !isFinite(coords[0]) || !isFinite(coords[1])) return;
+  if (!dest.dateFrom) return;
+  var chip = document.createElement("span");
+  chip.className = "day-weather-chip";
+  chip.style.cssText = "margin-left:8px;font-size:10px;color:#666;display:inline-flex;align-items:center;gap:3px;font-weight:500;opacity:0.85;";
+  chip.innerHTML = '<span style="opacity:0.4;">…</span>';
+  container.appendChild(chip);
+  getDestWeather(coords[0], coords[1], dest.dateFrom, dest.dateTo || dest.dateFrom).then(function(w){
+    if (w.kind !== "forecast" || !w.daily || !w.daily.length) {
+      // Climate-only or no data — drop the chip rather than show
+      // the dest-wide average on every day card.
+      chip.remove();
+      return;
+    }
+    var match = null;
+    for (var i = 0; i < w.daily.length; i++) {
+      if (w.daily[i] && w.daily[i].date === day.date) { match = w.daily[i]; break; }
+    }
+    if (!match) { chip.remove(); return; }
+    var icon = _wxCodeIcon(match.code);
+    var tx = isFinite(match.tMax) ? Math.round(match.tMax) + "°" : "";
+    var tn = isFinite(match.tMin) ? Math.round(match.tMin) + "°" : "";
+    var temps = (tx && tn) ? (tx + "/" + tn) : (tx || tn || "");
+    var rain = isFinite(match.precipPct) && match.precipPct >= 30
+      ? '<span style="color:#3a7ab8;margin-left:3px;">' + match.precipPct + '% rain</span>'
+      : '';
+    chip.innerHTML = '<span>' + icon + '</span>' + (temps ? '<span>' + temps + '</span>' : '') + rain;
+  }).catch(function(){ chip.remove(); });
+}
+
 function fmtD(s){
   if(!s)return"";
   var d=new Date(s+"T12:00:00");
@@ -24214,7 +24260,16 @@ function _buildNowNextWidgetHtml(split) {
       + '</div>');
   }
   if (!lines.length) return "";
+  // v353.6: Today's weather slot — empty placeholder span that
+  // renderDay populates asynchronously via renderDayWeatherChip.
+  // Sits inside the widget header row so it reads "Today, May 10
+  // 🌤️ 18°/9°" at a glance.
+  var wxRow = '<div class="now-next-wx-row" style="font-size:10.5px;color:#5a7a9a;margin-bottom:4px;display:flex;align-items:center;gap:6px;">'
+    + '<span style="font-weight:700;text-transform:uppercase;letter-spacing:0.05em;font-size:9.5px;color:#1a5fa8;">Today</span>'
+    + '<span class="now-next-wx-slot"></span>'
+    + '</div>';
   return '<div class="now-next-widget" style="margin:6px 0 8px;padding:8px 11px;background:linear-gradient(135deg,#eaf3fb 0%,#dcecf8 100%);border:1px solid #c8dff8;border-radius:6px;">'
+    + wxRow
     + lines.join("")
     + '</div>';
 }

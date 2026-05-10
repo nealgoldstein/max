@@ -811,6 +811,14 @@
     note.textContent = (day && day.note) || '';
     hdr.appendChild(num);
     hdr.appendChild(note);
+    // v353.6: per-day weather chip. Appended inline next to the day
+    // number; renderDayWeatherChip handles the async fetch via the
+    // shared getDestWeather cache and silently skips for climate-only
+    // dates (>16 days out) where day-by-day data isn't meaningful.
+    var _destForDayWx = (typeof global.getDest === 'function' && destId) ? global.getDest(destId) : null;
+    if (_destForDayWx && day && day.date && typeof global.renderDayWeatherChip === 'function') {
+      try { global.renderDayWeatherChip(_destForDayWx, day, hdr); } catch (_) {}
+    }
     // SCAFFOLD-6 slice 2: per-day "?" rationale popover. Shown when
     // opts.rationale is non-null; mkDay (in index.html) computes the
     // rationale via dayRationale() and passes it through. Same
@@ -896,6 +904,14 @@
       // Append the children, not the wrapper, so we don't add an extra div layer.
       while (todayWrap.firstChild) {
         w.appendChild(todayWrap.firstChild);
+      }
+      // v353.6: populate the today-widget weather slot. _buildNowNextWidgetHtml
+      // emits an empty .now-next-wx-slot span; we hand it to renderDayWeatherChip
+      // which fills in icon + high/low for today by reading the same Open-Meteo
+      // cache the per-day chips use.
+      var _wxSlot = w.querySelector('.now-next-wx-slot');
+      if (_wxSlot && _destForDayWx && day && day.date && typeof global.renderDayWeatherChip === 'function') {
+        try { global.renderDayWeatherChip(_destForDayWx, day, _wxSlot); } catch (_) {}
       }
     }
 

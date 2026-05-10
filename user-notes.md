@@ -205,6 +205,21 @@ below the dates row (when the dest has lat/lng + dateFrom):
 Source: Open-Meteo (free, no API key). Cached locally — forecast
 6h TTL, climate 30 days — so re-renders don't re-fetch every time.
 
+In addition to the dest-card strip, **each per-day card** in the
+itinerary shows a tiny weather chip inline next to the day number:
+icon + high/low (e.g. "🌤️ 18°/9°"), plus a blue "30% rain"
+indicator when the precipitation probability is ≥30%. Day chips only
+appear inside the 16-day forecast horizon — beyond that the climate
+average doesn't vary day-to-day, so per-day chips would just be
+noise. Same Open-Meteo cache as the dest strip, so adding day chips
+costs zero extra API calls.
+
+The same chip also appears in the **Today widget** (the blue now/next
+panel that shows up only on the current day during an in-progress
+trip): a "TODAY · 🌤️ 18°/9°" row at the top of the panel, so the
+person actually on the trip can see today's conditions without
+hunting for the day card.
+
 ## Cross-device sync
 
 - **Trips** sync via POST/PUT /trips on every change (1.5s debounce).
