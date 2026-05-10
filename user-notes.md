@@ -112,6 +112,42 @@ Same pattern as the trip-view map:
 - **Phone** → list takes full width, floating 🗺 button at
   bottom-right opens a full-screen overlay.
 
+## Export trip (PDF + .ics)
+
+**Trip view header → Export** opens a small modal with two options:
+
+- **📄 Print / Save as PDF** → opens a clean print-formatted view
+  in a new window and triggers the print dialog. User picks
+  "Save as PDF" in their browser's print dialog to make a file.
+  Includes: trip name, date range, brief summary, every destination
+  (place + label + lodging + day-by-day items).
+- **📅 Download calendar (.ics)** → builds a standard iCalendar
+  file and downloads it. Contains:
+  - One all-day event per destination (📍 prefix, location set
+    to the city name)
+  - One timed event per tracker/booking item with a date
+    (✈ prefix, duration falls back to 3h for flights, 1h
+    otherwise)
+  Drops into Apple Calendar, Google Calendar, Outlook, etc.
+  via double-click.
+
+Both work entirely client-side — no data leaves your device.
+
+## Weather per destination
+
+Each destination card in the trip view shows a small weather strip
+below the dates row (when the dest has lat/lng + dateFrom):
+
+- **Within 16 days from today** → forecast: "🌤️ Forecast 22°/14°C
+  · 30% rain" (averages over the dest's date range)
+- **Beyond 16 days** → climate normal: "🌤️ Typical 18°/9°C · 35%
+  rainy days (climate avg)" — calculated from the same calendar
+  month over the past 5 years
+- **No coords / no dates / fetch fails** → strip is silently absent
+
+Source: Open-Meteo (free, no API key). Cached locally — forecast
+6h TTL, climate 30 days — so re-renders don't re-fetch every time.
+
 ## Cross-device sync
 
 - **Trips** sync via POST/PUT /trips on every change (1.5s debounce).

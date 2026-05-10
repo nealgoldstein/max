@@ -1834,6 +1834,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
         <button class="file-btn" onclick="saveTrip()" title="Save">Save</button>
         <button class="file-btn" onclick="if(_currentTripId&&confirm('Duplicate this trip? A copy will be created on the home screen.'))duplicateTrip(_currentTripId,false);" title="Duplicate this trip">Copy</button>
         <button class="file-btn" onclick="showShareTripModal()" title="Share a read-only link to this trip">Share</button>
+        <button class="file-btn" onclick="showExportTripModal()" title="Print, save as PDF, or download as a calendar file">Export</button>
         <button class="file-btn" id="trip-search-btn" onclick="openTripSearch()" title="Search this trip">&#x1F50D;</button>
         <button class="file-btn" id="api-key-btn" onclick="showApiKeyForm()" title="Set API key" style="opacity:0.6;">&#x1F511;</button>
         <button class="file-btn" id="sync-btn" onclick="MaxSync.showSignInModal()" title="Sync with server" style="opacity:0.6;">&#x21C4;</button>
@@ -6984,6 +6985,252 @@ function showWelcomeOnboarding(onContinue) {
 // existing active share tokens for this trip; if none, mints one.
 // Shows the resulting URL with a Copy button. Revoke clears all
 // active tokens (the URL stops working immediately).
+// v353.6: trip export — printable PDF + .ics calendar download.
+// PDF: opens a clean print-formatted view of the trip in a new
+// window and triggers the print dialog. The user picks Save as
+// PDF in the dialog if they want a file (built into every modern
+// OS print dialog).
+// .ics: builds an iCalendar file with one VEVENT per destination
+// (multi-day) plus one per tracker/booking item that has a date.
+// Triggers a download via Blob.
+function showExportTripModal(){
+  if (!_currentTripId || !trip) { maxAlert("Open a trip first."); return; }
+  var existing = document.getElementById("export-trip-overlay");
+  if (existing) existing.remove();
+  var ov = document.createElement("div");
+  ov.id = "export-trip-overlay";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:11900;display:flex;align-items:center;justify-content:center;padding:24px;";
+  var box = document.createElement("div");
+  box.style.cssText = "background:#fff;border-radius:12px;width:420px;max-width:100%;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);";
+  box.innerHTML =
+    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">' +
+      '<div style="width:28px;height:28px;border-radius:50%;background:#1a5fa8;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">↓</div>' +
+      '<div style="font-size:14px;font-weight:700;">Export this trip</div>' +
+    '</div>' +
+    '<div style="font-size:12px;color:#555;line-height:1.55;margin-bottom:14px;">Pick a format. Both work offline — no data leaves your device.</div>' +
+    '<div style="display:flex;flex-direction:column;gap:10px;">' +
+      '<button id="exp-pdf" style="text-align:left;padding:14px 16px;font-size:13px;background:#fff;color:#111;border:1px solid #ddd;border-radius:8px;cursor:pointer;font-family:inherit;">' +
+        '<div style="font-weight:700;margin-bottom:3px;">📄 Print / Save as PDF</div>' +
+        '<div style="font-size:11px;color:#888;">Opens a print-formatted view. Use your browser\'s print dialog → "Save as PDF" to make a file.</div>' +
+      '</button>' +
+      '<button id="exp-ics" style="text-align:left;padding:14px 16px;font-size:13px;background:#fff;color:#111;border:1px solid #ddd;border-radius:8px;cursor:pointer;font-family:inherit;">' +
+        '<div style="font-weight:700;margin-bottom:3px;">📅 Download calendar (.ics)</div>' +
+        '<div style="font-size:11px;color:#888;">One event per destination + each booked item with a date. Drops into Apple, Google, or any standard calendar.</div>' +
+      '</button>' +
+    '</div>' +
+    '<div style="margin-top:14px;text-align:right;">' +
+      '<button id="exp-close" style="padding:8px 14px;font-size:12px;font-weight:600;background:#fff;color:#666;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;">Close</button>' +
+    '</div>';
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  document.getElementById("exp-pdf").onclick = function(){ ov.remove(); _exportTripPrintable(); };
+  document.getElementById("exp-ics").onclick = function(){ ov.remove(); _exportTripIcs(); };
+  document.getElementById("exp-close").onclick = function(){ ov.remove(); };
+  ov.addEventListener("click", function(e){ if (e.target === ov) ov.remove(); });
+}
+
+function _exportTripPrintable(){
+  if (!trip) return;
+  var w = window.open("", "MaxPrint", "width=900,height=1100");
+  if (!w) { maxAlert("Please allow pop-ups so the print view can open."); return; }
+  var name = (trip.name || "Trip").replace(/[<>"]/g, "");
+  var html = ['<!DOCTYPE html><html><head><meta charset="utf-8">'];
+  html.push('<title>' + name + ' — Max</title>');
+  html.push('<style>',
+    'body{font:13px/1.6 -apple-system,sans-serif;color:#222;max-width:760px;margin:24px auto;padding:0 24px;}',
+    'h1{font-size:22px;margin:0 0 6px;}',
+    'h2{font-size:16px;margin:24px 0 6px;border-bottom:1px solid #ccc;padding-bottom:4px;}',
+    'h3{font-size:13px;margin:12px 0 4px;color:#444;}',
+    '.meta{color:#666;font-size:12px;margin-bottom:18px;}',
+    '.dest{margin-bottom:24px;page-break-inside:avoid;}',
+    '.dest-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:4px;}',
+    '.dest-place{font-size:17px;font-weight:700;}',
+    '.dest-dates{color:#666;font-size:12px;}',
+    '.dest-nights{color:#888;font-size:11px;}',
+    '.day{margin:8px 0 6px 0;}',
+    '.day-label{font-weight:700;color:#555;font-size:12px;margin-bottom:2px;}',
+    '.item{margin-left:10px;font-size:12px;color:#333;line-height:1.5;}',
+    '.item.travel{color:#1a5fa8;}',
+    '.item.sight{color:#222;}',
+    '.item-meta{color:#888;font-size:10.5px;margin-left:6px;}',
+    '.brief{background:#fafaf6;border:1px solid #eee;border-radius:6px;padding:10px 14px;font-size:12px;color:#444;margin-bottom:18px;}',
+    '.brief-row{margin:3px 0;}',
+    '.brief-label{font-weight:600;color:#666;display:inline-block;min-width:90px;}',
+    '@media print{body{margin:0;padding:0 16px;font-size:11px;}h1{font-size:18px;}h2{font-size:14px;}}',
+    '@page{margin:14mm;}',
+  '</style></head><body>');
+  html.push('<h1>' + _esc(trip.name || "Trip") + '</h1>');
+  // Header meta line
+  var brief = trip.brief || {};
+  var startDate = (trip.destinations && trip.destinations[0] && trip.destinations[0].dateFrom) || "";
+  var endDate = (trip.destinations && trip.destinations.length && trip.destinations[trip.destinations.length-1].dateTo) || "";
+  html.push('<div class="meta">');
+  if (startDate || endDate) html.push(_esc(_fmtDateLong(startDate)) + ' – ' + _esc(_fmtDateLong(endDate)) + ' · ');
+  html.push((trip.destinations || []).length + ' destination' + ((trip.destinations || []).length !== 1 ? 's' : ''));
+  html.push('</div>');
+  // Brief block (compact)
+  var bb = [];
+  if (brief.entry) bb.push(['Arriving', brief.entry]);
+  if (brief.tbExit) bb.push(['Departing', brief.tbExit]);
+  if (brief.transport) bb.push(['Transport', brief.transport]);
+  if (brief.accommodation) bb.push(['Stays', brief.accommodation]);
+  if (brief.aboutTrip) bb.push(['About', brief.aboutTrip]);
+  if (brief.hardlimits) bb.push(['Hard limits', brief.hardlimits]);
+  if (bb.length) {
+    html.push('<div class="brief">');
+    bb.forEach(function(r){
+      html.push('<div class="brief-row"><span class="brief-label">' + _esc(r[0]) + '</span> ' + _esc(r[1]) + '</div>');
+    });
+    html.push('</div>');
+  }
+  // Destinations
+  (trip.destinations || []).forEach(function(d){
+    html.push('<div class="dest">');
+    html.push('<div class="dest-head">');
+    html.push('<span class="dest-place">' + _esc(d.label || d.place || "Destination") + '</span>');
+    html.push('<span class="dest-dates">' + _esc(_fmtDateLong(d.dateFrom)) + ' – ' + _esc(_fmtDateLong(d.dateTo)) + '</span>');
+    html.push('<span class="dest-nights">(' + (d.nights || 0) + ' night' + ((d.nights||0) !== 1 ? 's' : '') + ')</span>');
+    html.push('</div>');
+    if (d.label && d.label !== d.place) html.push('<div style="color:#888;font-size:11px;margin-bottom:4px;">' + _esc(d.place) + '</div>');
+    if (d.lodging || d.lodgingNotes) {
+      html.push('<div style="font-size:11px;color:#666;margin-bottom:4px;">🏨 ' + _esc(d.lodging || d.lodgingNotes || "") + '</div>');
+    }
+    (d.days || []).forEach(function(day, i){
+      html.push('<div class="day">');
+      html.push('<div class="day-label">Day ' + (i + 1) + (day.date ? ' · ' + _esc(_fmtDateLong(day.date)) : '') + '</div>');
+      (day.items || []).forEach(function(it){
+        var cls = (it.type === "travel") ? "item travel" : "item sight";
+        html.push('<div class="' + cls + '">');
+        html.push('• ' + _esc(it.n || it.label || "(item)"));
+        if (it.durationHours) html.push('<span class="item-meta">' + it.durationHours + 'h</span>');
+        html.push('</div>');
+      });
+      html.push('</div>');
+    });
+    html.push('</div>');
+  });
+  html.push('<div style="margin-top:32px;font-size:10px;color:#aaa;border-top:1px solid #eee;padding-top:8px;">Exported from Max — travelingwithmax.app</div>');
+  html.push('<script>setTimeout(function(){window.print();},300);<' + '/script>');
+  html.push('</body></html>');
+  w.document.open();
+  w.document.write(html.join(""));
+  w.document.close();
+}
+
+function _exportTripIcs(){
+  if (!trip) return;
+  var name = trip.name || "Trip";
+  var lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Max//travelingwithmax.app//EN",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    "X-WR-CALNAME:" + _icsEsc(name),
+  ];
+  function fmtIcsDate(iso){
+    // YYYY-MM-DD → YYYYMMDD (date-only event)
+    return (iso || "").replace(/-/g, "");
+  }
+  function fmtIcsDateTime(iso, time){
+    // ISO date + HH:MM → YYYYMMDDTHHMMSS local floating time
+    var d = (iso || "").replace(/-/g, "");
+    var t = (time || "00:00").replace(":", "") + "00";
+    return d + "T" + t;
+  }
+  function nowStamp(){
+    return new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+  }
+  function uid(){
+    return "max-" + Date.now() + "-" + Math.floor(Math.random() * 100000) + "@travelingwithmax.app";
+  }
+  function pushDateOnly(summary, location, dateFrom, dateTo, description){
+    if (!dateFrom) return;
+    // iCal DTEND for all-day events is exclusive — add a day.
+    var endIso = dateTo || dateFrom;
+    var endD = new Date(endIso + "T12:00:00");
+    endD.setUTCDate(endD.getUTCDate() + 1);
+    var endStr = endD.toISOString().slice(0,10).replace(/-/g, "");
+    lines.push("BEGIN:VEVENT");
+    lines.push("UID:" + uid());
+    lines.push("DTSTAMP:" + nowStamp());
+    lines.push("DTSTART;VALUE=DATE:" + fmtIcsDate(dateFrom));
+    lines.push("DTEND;VALUE=DATE:" + endStr);
+    lines.push("SUMMARY:" + _icsEsc(summary));
+    if (location) lines.push("LOCATION:" + _icsEsc(location));
+    if (description) lines.push("DESCRIPTION:" + _icsEsc(description));
+    lines.push("END:VEVENT");
+  }
+  function pushDateTime(summary, location, dateIso, time, durationHours, description){
+    if (!dateIso) return;
+    var dur = isFinite(durationHours) && durationHours > 0 ? durationHours : 1;
+    var startStr = fmtIcsDateTime(dateIso, time || "09:00");
+    var startD = new Date(dateIso + "T" + (time || "09:00") + ":00");
+    var endD = new Date(startD.getTime() + dur * 3600 * 1000);
+    var endStr = endD.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "").replace(/Z$/, "");
+    lines.push("BEGIN:VEVENT");
+    lines.push("UID:" + uid());
+    lines.push("DTSTAMP:" + nowStamp());
+    lines.push("DTSTART:" + startStr);
+    lines.push("DTEND:" + endStr);
+    lines.push("SUMMARY:" + _icsEsc(summary));
+    if (location) lines.push("LOCATION:" + _icsEsc(location));
+    if (description) lines.push("DESCRIPTION:" + _icsEsc(description));
+    lines.push("END:VEVENT");
+  }
+  // One all-day event per destination spanning its date range.
+  (trip.destinations || []).forEach(function(d){
+    if (!d.dateFrom) return;
+    var summary = (d.label && d.label !== d.place) ? d.label + " — " + d.place : (d.place || d.label || "Destination");
+    var loc = d.place || "";
+    var desc = "";
+    if (d.lodging || d.lodgingNotes) desc += "Lodging: " + (d.lodging || d.lodgingNotes) + "\\n";
+    pushDateOnly("📍 " + summary, loc, d.dateFrom, d.dateTo, desc);
+  });
+  // Tracker / booking items with explicit dates+times become point events.
+  // The trip's tracker lives on dest.tracker — entries with .date.
+  (trip.destinations || []).forEach(function(d){
+    (d.tracker || []).forEach(function(t){
+      if (!t || !t.date) return;
+      var summary = t.summary || t.label || t.kind || "Booking";
+      var loc = t.location || d.place || "";
+      var dur = (t.durationHours || (t.kind === "flight" ? 3 : 1));
+      pushDateTime("✈ " + summary, loc, t.date, t.time, dur, t.notes || "");
+    });
+  });
+  lines.push("END:VCALENDAR");
+  // Lines longer than 75 octets should be folded per RFC 5545,
+  // but most calendar apps tolerate long lines. Skip for simplicity.
+  var blob = new Blob([lines.join("\r\n")], { type: "text/calendar;charset=utf-8" });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url;
+  a.download = (name.replace(/[^a-z0-9-_]/gi, "_") || "trip") + ".ics";
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); }, 100);
+}
+
+function _icsEsc(s){
+  return String(s == null ? "" : s)
+    .replace(/\\/g, "\\\\")
+    .replace(/;/g, "\\;")
+    .replace(/,/g, "\\,")
+    .replace(/\n/g, "\\n");
+}
+function _fmtDateLong(iso){
+  if (!iso) return "";
+  try {
+    var d = new Date(iso + "T12:00:00");
+    return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+  } catch (_) { return iso; }
+}
+function _esc(s){
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
 function showShareTripModal(){
   if (!_currentTripId) { maxAlert("Open a trip first."); return; }
   if (typeof MaxSync === "undefined" || !MaxSync.isSignedIn || !MaxSync.isSignedIn()) {
