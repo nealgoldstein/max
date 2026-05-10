@@ -14485,6 +14485,22 @@ window.addEventListener("load",function(){
       return;
     }
   } catch (_) { /* fall through to normal boot */ }
+  // v353.5: resume pending share-duplicate after a sign-in round-trip.
+  // The recipient clicked "Duplicate to my account" while signed
+  // out, was sent through magic-link auth, and is now back on the
+  // app — but the original ?share=<token> URL was lost in the
+  // redirect. We stashed the token in localStorage; if it's still
+  // there AND we're signed in, fetch the shared trip and duplicate.
+  try {
+    var pending = localStorage.getItem("max-pending-share-dup");
+    if (pending && typeof MaxSync !== "undefined" &&
+        MaxSync.isSignedIn && MaxSync.isSignedIn()) {
+      // Defer one tick so MaxSync etc. have time to finish init,
+      // and so the home screen renders briefly before we navigate
+      // to the duplicate (looks intentional, not flickery).
+      setTimeout(function () { _resumePendingShareDuplicate(pending); }, 200);
+    }
+  } catch (_) {}
   if(_inIframe){
     g("home-screen").style.display="none";
     g("app").style.display="flex";
@@ -14563,6 +14579,87 @@ function openSharedTrip(token){
   });
 }
 
+// v353.5: invoked from the load-handler when localStorage has a
+// pending share-duplicate from before a sign-in round-trip. Pulls
+// the shared trip down again (we don't trust localStorage to hold
+// the body — it might be a multi-MB blob), then runs the same
+// duplicate logic. Clears the pending flag whether we succeed or
+// fail so the user doesn't loop on a bad token.
+function _resumePendingShareDuplicate(token){
+  try { localStorage.removeItem("max-pending-share-dup"); } catch (_) {}
+  if (!token || typeof MaxSync === "undefined" || !MaxSync.fetchSharedTrip) return;
+  // Splash so the user sees something is happening — we're about to
+  // reload them into a fresh trip view.
+  document.body.insertAdjacentHTML("beforeend",
+    '<div id="dup-pending" style="position:fixed;inset:0;background:rgba(255,255,255,0.92);z-index:11999;display:flex;align-items:center;justify-content:center;font:13px/1.5 sans-serif;color:#1a5fa8;">' +
+      'Duplicating shared trip into your account…' +
+    '</div>'
+  );
+  MaxSync.fetchSharedTrip(token).then(function(resp){
+    if (!resp || !resp.trip || !resp.trip.body) {
+      var s = document.getElementById("dup-pending"); if (s) s.remove();
+      maxAlert("The shared link is no longer valid.");
+      return;
+    }
+    var envelope = resp.trip.body;
+    var srcTrip = envelope.trip || envelope;
+    if (!srcTrip || !srcTrip.destinations) {
+      var s2 = document.getElementById("dup-pending"); if (s2) s2.remove();
+      maxAlert("The shared trip has no content.");
+      return;
+    }
+    var newId = "trip-" + Date.now() + "-" + Math.floor(Math.random() * 9999);
+    var srcName = srcTrip.name || "Shared trip";
+    var newName = /\(copy\)$/i.test(srcName) ? srcName + " 2" : srcName + " (copy)";
+    var clone;
+    try { clone = JSON.parse(JSON.stringify(srcTrip)); }
+    catch (_) {
+      var s3 = document.getElementById("dup-pending"); if (s3) s3.remove();
+      maxAlert("Couldn't copy the trip body.");
+      return;
+    }
+    clone.id = newId;
+    clone.name = newName;
+    clone._dupedFromShare = token;
+    var newEnv = {
+      trip: clone,
+      activeDest: envelope.activeDest || null,
+      destCtr: envelope.destCtr || 0,
+      sidCtr: envelope.sidCtr || 0,
+      bkCtr: envelope.bkCtr || 0,
+      __saved__: Date.now(),
+    };
+    MaxSync._request("/trips", {
+      method: "POST",
+      body: { id: newId, name: newName, body: newEnv, updatedAt: Date.now() },
+    }).then(function(){
+      try {
+        localStorage.setItem("max-trip-" + newId, JSON.stringify(newEnv));
+        var idx = [];
+        try { idx = JSON.parse(localStorage.getItem("max-trips-index") || "[]"); } catch (_) {}
+        idx.push({
+          id: newId, name: newName,
+          savedAt: new Date().toISOString(),
+          destCount: (clone.destinations || []).length,
+        });
+        localStorage.setItem("max-trips-index", JSON.stringify(idx));
+      } catch (_) {}
+      // Hard reload so the app boots cleanly into the home screen
+      // with the new trip in the index. Cleaner than trying to
+      // splice the new trip into the in-flight session state.
+      try { history.replaceState(null, "", location.pathname); }
+      catch (_) {}
+      location.reload();
+    }).catch(function(e){
+      var s4 = document.getElementById("dup-pending"); if (s4) s4.remove();
+      maxAlert("Server save failed: " + (e && e.message || "unknown"));
+    });
+  }).catch(function(e){
+    var s5 = document.getElementById("dup-pending"); if (s5) s5.remove();
+    maxAlert("Couldn't fetch shared trip: " + (e && e.message || "unknown"));
+  });
+}
+
 function _stripDraggableForReadOnly(){
   if (!_readOnlyShare) return;
   function strip(root){
@@ -14618,6 +14715,14 @@ function _injectReadOnlyBanner(){
 
 function _duplicateSharedTripToMyAccount(){
   if (typeof MaxSync === "undefined" || !MaxSync.isSignedIn || !MaxSync.isSignedIn()) {
+    // Persist the share token so the sign-in round-trip (magic link
+    // hits /verify, redirects back to /, sets cookie, reloads) doesn't
+    // drop it. After auth lands, _resumePendingShareDuplicate picks
+    // it up and runs the duplicate. localStorage outlives the
+    // page navigation; the entry is cleared as soon as the dupe runs.
+    if (_readOnlyShareToken) {
+      try { localStorage.setItem("max-pending-share-dup", _readOnlyShareToken); } catch (_) {}
+    }
     if (confirm("You need to sign in first. Open the sign-in form?")) {
       MaxSync.showSignInModal();
     }
