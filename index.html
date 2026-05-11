@@ -13716,6 +13716,14 @@ function renderPickerSidebar(cands){
   // Auto-keep required candidates (idempotent thanks to _autoKeepApplied)
   MaxEnginePicker.applyRequiredAndAutoKeep(cands, _tb.requiredPlaces);
 
+  // Round HZ (picker hero map) — initial-open fix: _tbResequenceCandidates
+  // only fires from setCS on status changes, so on a fresh picker open
+  // every candidate has c.order=null and the polyline + sidebar list both
+  // come up empty. Run it here so the order field is populated before we
+  // filter the active set. Idempotent — re-running on subsequent renders
+  // just re-uses the same orderKeptCandidates result on the same input.
+  if (typeof _tbResequenceCandidates === "function") _tbResequenceCandidates();
+
   // Computed sets — active (in route) sorted by candidate.order,
   // rejected (set aside) in their original order.
   var active = MaxEnginePicker.activeCandidates(cands)
