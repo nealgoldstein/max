@@ -1488,6 +1488,134 @@
     return out;
   }
 
+  // ── v356.1: pending-actions scanner for reminders ──────────
+  // Returns { daysUntilDeparture, items } for a trip:
+  //   daysUntilDeparture: integer days from `now` to first
+  //     destination's dateFrom. Negative if past, null if no dates.
+  //   items: array of { kind, summary, severity }, sorted high→
+  //     low severity then by kind so identical inputs produce
+  //     identical output (de-dupe-friendly at email-send time).
+  //
+  // This powers (a) the home-screen "X days, Y to do" banner and
+  // (b) the daily server cron's reminder emails. Pure — `now` is
+  // a Date argument so tests are deterministic. The helper does
+  // not mutate the trip and does not call the LLM.
+  function computePendingActions(trip, now) {
+    now = now || new Date();
+    var dests = (trip && trip.destinations) || [];
+
+    // ── days-until-departure ─────────────────────────────────
+    var daysUntilDeparture = null;
+    var first = dests[0];
+    var firstFrom = first && first.dateFrom;
+    if (firstFrom) {
+      var depDate = new Date(firstFrom);
+      if (!isNaN(depDate.getTime())) {
+        daysUntilDeparture = Math.floor((depDate - now) / 86400000);
+      }
+    }
+
+    var items = [];
+
+    // ── hotel gaps ───────────────────────────────────────────
+    dests.forEach(function (dest) {
+      if (!dest) return;
+      var nights = (typeof dest.nights === 'number') ? dest.nights : 0;
+      if (nights < 1) return; // skip transit / day-trip-only stops
+      var bks = Array.isArray(dest.hotelBookings) ? dest.hotelBookings : [];
+      var hasBooked = bks.some(function (b) { return b && b.status === 'booked'; });
+      if (!hasBooked) {
+        var place = dest.place || dest.label || 'unknown';
+        items.push({
+          kind: 'hotel',
+          summary: 'Book hotel for ' + place + ' (' + nights + ' night' + (nights === 1 ? '' : 's') + ')',
+          severity: 'high',
+        });
+      }
+    });
+
+    // ── transport gaps between adjacent destinations ─────────
+    var legs = (trip && trip.legs) || {};
+    for (var i = 0; i < dests.length - 1; i++) {
+      var from = dests[i], to = dests[i + 1];
+      if (!from || !to) continue;
+      var key = (from.id || '') + '>' + (to.id || '');
+      var leg = legs[key];
+      if (!leg || !leg.mode) {
+        items.push({
+          kind: 'transport',
+          summary: 'Plan how to get from ' + (from.place || from.label || 'previous') +
+                   ' to ' + (to.place || to.label || 'next'),
+          severity: 'high',
+        });
+      }
+    }
+
+    // ── day-trip arrangements ────────────────────────────────
+    dests.forEach(function (dest) {
+      if (!dest) return;
+      var dts = Array.isArray(dest.dayTrips) ? dest.dayTrips : [];
+      dts.forEach(function (dt) {
+        if (!dt) return;
+        var hasNote = !!(dt.note && String(dt.note).trim().length);
+        var hasBooking = !!(dt.booking || (Array.isArray(dt.bookings) && dt.bookings.length));
+        if (!hasNote && !hasBooking) {
+          var dtName = dt.place || dt.name || dt.n || 'destination';
+          var hub = dest.place || dest.label || 'hub';
+          items.push({
+            kind: 'daytrip',
+            summary: 'Arrange day trip to ' + dtName + ' from ' + hub,
+            severity: 'medium',
+          });
+        }
+      });
+    });
+
+    // ── open pending actions ─────────────────────────────────
+    var pending = (trip && Array.isArray(trip.pendingActions)) ? trip.pendingActions : [];
+    pending.forEach(function (pa) {
+      if (!pa || pa.cleared) return;
+      var actionType = pa.actionType || 'review';
+      var eventName = pa.eventName || pa.name || 'item';
+      items.push({
+        kind: 'pending',
+        summary: actionType.charAt(0).toUpperCase() + actionType.slice(1) + ' — ' + eventName,
+        severity: 'high',
+      });
+    });
+
+    // ── iconic + approx-address sights — bundled ─────────────
+    var approxIconic = 0;
+    dests.forEach(function (dest) {
+      if (!dest) return;
+      var sugs = Array.isArray(dest.suggestions) ? dest.suggestions : [];
+      sugs.forEach(function (s) {
+        if (s && s.iconic && s.approx) approxIconic++;
+      });
+    });
+    if (approxIconic > 0) {
+      items.push({
+        kind: 'sights',
+        summary: approxIconic + ' must-see sight' + (approxIconic === 1 ? '' : 's') +
+                 ' still missing an address',
+        severity: 'low',
+      });
+    }
+
+    // ── stable sort: severity (high→medium→low) then kind ────
+    var sevRank = { high: 0, medium: 1, low: 2 };
+    items.sort(function (a, b) {
+      var da = sevRank[a.severity] != null ? sevRank[a.severity] : 99;
+      var db = sevRank[b.severity] != null ? sevRank[b.severity] : 99;
+      if (da !== db) return da - db;
+      if (a.kind < b.kind) return -1;
+      if (a.kind > b.kind) return 1;
+      return 0;
+    });
+
+    return { daysUntilDeparture: daysUntilDeparture, items: items };
+  }
+
   // ── Public surface ──────────────────────────────────────────
   var MaxEngineTrip = {
     // Geographic affordance pure pieces
@@ -1549,6 +1677,9 @@
 
     // ── SCAFFOLD-4: pre-arrival action items ─────────────────
     preArrivalActions:        preArrivalActions,
+
+    // ── v356.1: pending-actions scanner (banner + email) ─────
+    computePendingActions:    computePendingActions,
 
     // ── HY (path-to-10:A): mutator surface ───────────────────
     // Eleven mutators that already emit tripChange + mapDataChange
@@ -1695,6 +1826,7 @@
   global.clockMinutesBetween = clockMinutesBetween;
   // SCAFFOLD-4: bare global for drawTripMode banner.
   global.preArrivalActions = preArrivalActions;
+  global.computePendingActions = computePendingActions;
 
   // ── Back-compat globals (Phase 1) ──────────────────────────
   // The inline script still calls these by their original names.

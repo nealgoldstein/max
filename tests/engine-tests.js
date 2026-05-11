@@ -2305,6 +2305,212 @@ describe('engine-trip.js — replaceTrip', () => {
   });
 });
 
+// ── Suite: computePendingActions (v356.1) ───────────────────────
+
+describe('engine-trip.js — computePendingActions', () => {
+  // Fixed reference now so `daysUntilDeparture` is deterministic.
+  const NOW = new Date('2026-06-01T00:00:00Z');
+  // Helper: build an ISO date offset N days from NOW.
+  const dayOffset = (n) => {
+    const d = new Date(NOW.getTime() + n * 86400000);
+    return d.toISOString().slice(0, 10);
+  };
+
+  test('returns null daysUntilDeparture for trip with no dates', () => {
+    const out = MaxEngineTrip.computePendingActions(
+      { destinations: [{ id: 'd1', place: 'Reykjavik' }] },
+      NOW,
+    );
+    assert.strictEqual(out.daysUntilDeparture, null);
+  });
+
+  test('returns negative days for trip in the past', () => {
+    const out = MaxEngineTrip.computePendingActions(
+      { destinations: [{ id: 'd1', place: 'Reykjavik', dateFrom: dayOffset(-10) }] },
+      NOW,
+    );
+    assert(out.daysUntilDeparture < 0,
+      'expected negative daysUntilDeparture, got ' + out.daysUntilDeparture);
+  });
+
+  test('detects hotel gap on dest with nights but no booking', () => {
+    const out = MaxEngineTrip.computePendingActions(
+      { destinations: [
+        { id: 'd1', place: 'Reykjavik', nights: 3, hotelBookings: [] },
+      ] },
+      NOW,
+    );
+    const hotels = out.items.filter(i => i.kind === 'hotel');
+    assert.strictEqual(hotels.length, 1);
+    assert(/Reykjavik/.test(hotels[0].summary));
+    assert(/3 night/.test(hotels[0].summary));
+    assert.strictEqual(hotels[0].severity, 'high');
+  });
+
+  test('skips hotel gap on dest with nights === 0', () => {
+    const out = MaxEngineTrip.computePendingActions(
+      { destinations: [
+        { id: 'd1', place: 'Vík', nights: 0, hotelBookings: [] },
+      ] },
+      NOW,
+    );
+    assert.strictEqual(out.items.filter(i => i.kind === 'hotel').length, 0);
+  });
+
+  test('skips hotel gap when a booking is status:booked', () => {
+    const out = MaxEngineTrip.computePendingActions(
+      { destinations: [
+        { id: 'd1', place: 'Reykjavik', nights: 2,
+          hotelBookings: [{ status: 'booked', name: 'Edition' }] },
+      ] },
+      NOW,
+    );
+    assert.strictEqual(out.items.filter(i => i.kind === 'hotel').length, 0);
+  });
+
+  test('detects transport gap between adjacent dests with no leg', () => {
+    const out = MaxEngineTrip.computePendingActions(
+      {
+        destinations: [
+          { id: 'a', place: 'Reykjavik', nights: 2, hotelBookings: [{ status: 'booked' }] },
+          { id: 'b', place: 'Vík',       nights: 2, hotelBookings: [{ status: 'booked' }] },
+        ],
+        legs: {},
+      },
+      NOW,
+    );
+    const tx = out.items.filter(i => i.kind === 'transport');
+    assert.strictEqual(tx.length, 1);
+    assert(/Reykjavik/.test(tx[0].summary) && /Vík/.test(tx[0].summary));
+    assert.strictEqual(tx[0].severity, 'high');
+  });
+
+  test('skips transport gap when leg has a mode', () => {
+    const out = MaxEngineTrip.computePendingActions(
+      {
+        destinations: [
+          { id: 'a', place: 'Reykjavik', nights: 2, hotelBookings: [{ status: 'booked' }] },
+          { id: 'b', place: 'Vík',       nights: 2, hotelBookings: [{ status: 'booked' }] },
+        ],
+        legs: { 'a>b': { mode: 'drive' } },
+      },
+      NOW,
+    );
+    assert.strictEqual(out.items.filter(i => i.kind === 'transport').length, 0);
+  });
+
+  test('detects day-trip chip with no note', () => {
+    const out = MaxEngineTrip.computePendingActions(
+      { destinations: [
+        { id: 'd1', place: 'Reykjavik', nights: 3,
+          hotelBookings: [{ status: 'booked' }],
+          dayTrips: [{ place: 'Vík' }],
+        },
+      ] },
+      NOW,
+    );
+    const dt = out.items.filter(i => i.kind === 'daytrip');
+    assert.strictEqual(dt.length, 1);
+    assert(/Vík/.test(dt[0].summary));
+    assert(/Reykjavik/.test(dt[0].summary));
+    assert.strictEqual(dt[0].severity, 'medium');
+  });
+
+  test('skips day-trip chip with a note', () => {
+    const out = MaxEngineTrip.computePendingActions(
+      { destinations: [
+        { id: 'd1', place: 'Reykjavik', nights: 3,
+          hotelBookings: [{ status: 'booked' }],
+          dayTrips: [{ place: 'Vík', note: 'Booked through Reykjavik Excursions' }],
+        },
+      ] },
+      NOW,
+    );
+    assert.strictEqual(out.items.filter(i => i.kind === 'daytrip').length, 0);
+  });
+
+  test('surfaces open pendingActions, skips cleared ones', () => {
+    const out = MaxEngineTrip.computePendingActions(
+      {
+        destinations: [{ id: 'd1', place: 'Reykjavik', nights: 2,
+          hotelBookings: [{ status: 'booked' }] }],
+        pendingActions: [
+          { eventName: 'Reykjavik Edition', actionType: 'Confirm hotel rebooking' },
+          { eventName: 'Old item', actionType: 'review', cleared: true },
+        ],
+      },
+      NOW,
+    );
+    const pa = out.items.filter(i => i.kind === 'pending');
+    assert.strictEqual(pa.length, 1);
+    assert(/Reykjavik Edition/.test(pa[0].summary));
+    assert.strictEqual(pa[0].severity, 'high');
+  });
+
+  test('bundles iconic+approx sights into a single low-severity item', () => {
+    const out = MaxEngineTrip.computePendingActions(
+      { destinations: [
+        { id: 'd1', place: 'Reykjavik', nights: 2,
+          hotelBookings: [{ status: 'booked' }],
+          suggestions: [
+            { name: 'Hallgrimskirkja', iconic: true,  approx: true },
+            { name: 'Sun Voyager',     iconic: true,  approx: true },
+            { name: 'Harpa',           iconic: true,  approx: true },
+            { name: 'Some cafe',       iconic: false, approx: true },
+            { name: 'Blue Lagoon',     iconic: true,  approx: false },
+          ],
+        },
+      ] },
+      NOW,
+    );
+    const sights = out.items.filter(i => i.kind === 'sights');
+    assert.strictEqual(sights.length, 1, 'one bundled item');
+    assert(/^3 must-see sight/.test(sights[0].summary));
+    assert.strictEqual(sights[0].severity, 'low');
+  });
+
+  test('skips sights bundle when zero iconic+approx', () => {
+    const out = MaxEngineTrip.computePendingActions(
+      { destinations: [
+        { id: 'd1', place: 'Reykjavik', nights: 2,
+          hotelBookings: [{ status: 'booked' }],
+          suggestions: [{ name: 'Whatever', iconic: false, approx: true }],
+        },
+      ] },
+      NOW,
+    );
+    assert.strictEqual(out.items.filter(i => i.kind === 'sights').length, 0);
+  });
+
+  test('stable sort: same trip produces identical item order on repeat calls', () => {
+    const trip = {
+      destinations: [
+        { id: 'a', place: 'Reykjavik', nights: 3, hotelBookings: [],
+          dayTrips: [{ place: 'Vík' }],
+          suggestions: [{ name: 'Hallgrimskirkja', iconic: true, approx: true }],
+        },
+        { id: 'b', place: 'Akureyri', nights: 2, hotelBookings: [] },
+      ],
+      legs: {},
+      pendingActions: [{ eventName: 'X', actionType: 'confirm' }],
+    };
+    const a = MaxEngineTrip.computePendingActions(trip, NOW);
+    const b = MaxEngineTrip.computePendingActions(trip, NOW);
+    assert.strictEqual(a.items.length, b.items.length);
+    a.items.forEach((it, i) => {
+      assert.strictEqual(it.kind, b.items[i].kind, 'kind at ' + i);
+      assert.strictEqual(it.severity, b.items[i].severity, 'severity at ' + i);
+      assert.strictEqual(it.summary, b.items[i].summary, 'summary at ' + i);
+    });
+    // Highs come before mediums before lows.
+    const sevRank = { high: 0, medium: 1, low: 2 };
+    for (let i = 1; i < a.items.length; i++) {
+      assert(sevRank[a.items[i].severity] >= sevRank[a.items[i - 1].severity],
+        'severity must be non-decreasing in sorted output');
+    }
+  });
+});
+
 // ── Run async tests ─────────────────────────────────────────────
 // The describe blocks above schedule async tests; we collect them into
 // a final flush block.

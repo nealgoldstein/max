@@ -139,7 +139,14 @@
         'Scroll and tap <strong>Add to Home Screen</strong>.',
         'Tap <strong>Add</strong> in the top-right.',
       ];
-      footer = 'Max will appear as an app icon on your home screen.';
+      // v355.13: spell out the iOS-specific notification requirement.
+      // On iPhone, Apple only delivers web push to apps that have
+      // been added to the home screen — so without this step, the
+      // pre-trip reminders and during-trip alerts can't reach the
+      // user at all. The other platforms (macOS, Android, desktop
+      // Chromium) deliver push to regular browser tabs, so the
+      // requirement is iOS-only and worth surfacing here.
+      footer = 'Max will appear as an app icon on your home screen. <strong>Required on iPhone for trip reminders and alerts</strong> &mdash; Apple only delivers notifications to web apps that have been added to the home screen.';
     } else if (isMac && isSafari) {
       title = 'Install Max on your Mac (Safari)';
       steps = [
@@ -1752,7 +1759,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
     <div class="hs-logo">
       <div class="hs-av">M</div>
       <div class="hs-logo-text"><p>Max</p><span>The Existential Traveler</span></div>
-      <div onclick="showInstallPrompt()" id="hs-install-link" style="display:none;font-size:11px;color:#1a5fa8;cursor:pointer;margin-left:auto;padding:3px 10px;border:1px solid #c8d8f0;border-radius:10px;white-space:nowrap;font-weight:600;" title="Install Max as an app on your home screen">⊕ Install</div>
+      <div onclick="showInstallPrompt()" id="hs-install-link" style="display:none;font-size:11px;color:#1a5fa8;cursor:pointer;margin-left:auto;padding:3px 10px;border:1px solid #c8d8f0;border-radius:10px;white-space:nowrap;font-weight:600;" title="Install Max as an app — required on iPhone to receive trip reminders and alerts">⊕ Install</div>
       <div onclick="showWelcomeOnboarding()" id="hs-welcome-link" style="font-size:11px;color:#999;cursor:pointer;margin-left:auto;padding:3px 10px;border:1px solid #ddd;border-radius:10px;white-space:nowrap;" title="Re-read the welcome + change your pace setting">Welcome</div>
       <div onclick="showAboutMax()" id="hs-how-it-works" style="font-size:11px;color:#999;cursor:pointer;margin-left:8px;padding:3px 10px;border:1px solid #ddd;border-radius:10px;white-space:nowrap;" title="How Max works">How it works</div>
       <div onclick="MaxSync.showSignInModal()" id="hs-sync-btn" style="font-size:11px;color:#999;cursor:pointer;margin-left:8px;padding:3px 10px;border:1px solid #ddd;border-radius:10px;white-space:nowrap;" title="Sync with server">⇄ Sync</div>
@@ -4708,6 +4715,53 @@ function renderHomeScreen(){
       card.appendChild(info); card.appendChild(dup); card.appendChild(del);
       (function(id){card.onclick=function(e){if(e.target===del||e.target===dup)return;selectTrip(id);};})(entry.id);
       cards.appendChild(card);
+
+      // ── v356.3: pre-trip pending-actions banner ──────────────
+      // For trips departing within 14 days with at least one
+      // pending-actions item, render a small amber banner under
+      // the card. Quiet style — the dashboard is the loud surface;
+      // this just nudges users who haven't opened a specific trip
+      // recently. Click jumps into the trip. Wrapped in try/catch
+      // so a malformed local trip body never breaks the home list.
+      try {
+        if (typeof computePendingActions === "function") {
+          var _bTrip = _readTripById(entry.id);
+          if (_bTrip) {
+            var pa = computePendingActions(_bTrip, new Date());
+            if (pa && pa.daysUntilDeparture !== null
+                  && pa.daysUntilDeparture >= 0
+                  && pa.daysUntilDeparture <= 14
+                  && pa.items && pa.items.length > 0) {
+              var banner = document.createElement("div");
+              banner.style.cssText =
+                "background:#fff5ed;border:1px solid #f3dcc4;color:#7a3f10;" +
+                "border-radius:8px;padding:8px 12px;margin:6px 0 12px;" +
+                "font-size:12px;line-height:1.45;cursor:pointer;" +
+                "display:flex;align-items:center;gap:10px;";
+              var dN = pa.daysUntilDeparture;
+              var depTxt = dN === 0 ? "Departing TODAY"
+                          : dN === 1 ? "Departing tomorrow"
+                          : "Departing in " + dN + " days";
+              var kN = pa.items.length;
+              var todoTxt = kN + " thing" + (kN === 1 ? "" : "s") + " to do";
+              banner.innerHTML =
+                '<span style="font-weight:700;">' + depTxt + '</span>' +
+                '<span style="color:#a05a25;">· ' + todoTxt + '</span>' +
+                '<span style="margin-left:auto;color:#a05a25;font-size:11px;">' +
+                'click to see ›</span>';
+              (function(id){
+                banner.onclick = function(e){
+                  e.stopPropagation();
+                  if (typeof selectTrip === "function") selectTrip(id);
+                };
+              })(entry.id);
+              cards.appendChild(banner);
+            }
+          }
+        }
+      } catch (_bErr) {
+        // Non-fatal — banner is opportunistic.
+      }
     });
   }
 }
@@ -8524,6 +8578,184 @@ function _categoryFromSection(sec){
   return "culture-history"; // safe default — most ambiguous things are cultural
 }
 
+// Round v358: inline story preview under each place row. Lazy-fetches
+// the first ~2 sentences of _generatePlaceNarrative when the row scrolls
+// into view, throttles to ≤3 concurrent generations, reuses
+// window._placeNarrativeCache so picker + trip view share work.
+// v358.1: the legacy "?" floating popup (togglePlaceNarrative) was
+// removed — the inline preview + expand replaces it, with the
+// "What to do here" bullets surfacing in the expand.
+var _pmStoryInFlight = 0;
+var _pmStoryQueue = [];
+var _PM_STORY_MAX = 3;
+var _pmStoryObserver = null;
+function _pmEnqueueStoryGen(placeName, onReady){
+  _pmStoryQueue.push({ placeName: placeName, onReady: onReady });
+  _pmDrainStoryQueue();
+}
+function _pmDrainStoryQueue(){
+  while (_pmStoryInFlight < _PM_STORY_MAX && _pmStoryQueue.length) {
+    var job = _pmStoryQueue.shift();
+    _pmStoryInFlight++;
+    (function(j){
+      _generatePlaceNarrative(j.placeName, {}).then(function(text){
+        _pmStoryInFlight--;
+        try { j.onReady(text); } catch(e) {}
+        _pmDrainStoryQueue();
+      }, function(){
+        _pmStoryInFlight--;
+        _pmDrainStoryQueue();
+      });
+    })(job);
+  }
+}
+// Sentence-boundary truncation. Take 1–2 sentences, cap ~40 words,
+// re-attach the punctuation we split on, append " …" if we trimmed.
+function _pmTruncateStory(text){
+  if (!text) return "";
+  var clean = String(text).trim();
+  // Split keeping the trailing punctuation per sentence.
+  var parts = clean.match(/[^.!?]+[.!?]+(\s+|$)/g);
+  if (!parts || !parts.length) {
+    // No sentence terminators — just word-cap.
+    var words = clean.split(/\s+/);
+    if (words.length <= 40) return clean;
+    return words.slice(0, 40).join(" ") + " …";
+  }
+  var picked = parts[0].trim();
+  var truncated = parts.length > 1 || picked.length < clean.length;
+  // Add a second sentence only if the first is short enough that the
+  // pair still fits the ~40-word budget.
+  if (parts.length >= 2) {
+    var firstWords = picked.split(/\s+/).length;
+    if (firstWords < 30) {
+      var two = (picked + " " + parts[1].trim()).trim();
+      var twoWords = two.split(/\s+/);
+      if (twoWords.length <= 40) {
+        picked = two;
+        truncated = parts.length > 2 || picked.length < clean.length;
+      }
+    }
+  }
+  // Hard 40-word cap even on a runaway first sentence.
+  var pickedWords = picked.split(/\s+/);
+  if (pickedWords.length > 40) {
+    picked = pickedWords.slice(0, 40).join(" ");
+    truncated = true;
+  }
+  if (truncated) {
+    // Strip trailing period before " …" so we don't end with ". …".
+    picked = picked.replace(/[.!?]+$/, "");
+    picked += " …";
+  }
+  return picked;
+}
+// Hydrate one preview slot — cache hit renders immediately, miss enqueues.
+function _pmHydratePreview(slot){
+  if (!slot || slot._pmHydrated) return;
+  slot._pmHydrated = true;
+  var placeName = slot.getAttribute("data-place") || "";
+  if (!placeName) return;
+  var key = placeName.toLowerCase();
+  var cache = window._placeNarrativeCache || {};
+  var textSpan = slot.querySelector(".pm-row-story-text");
+  var fullDiv = slot.querySelector(".pm-row-story-full");
+  var toggle = slot.querySelector(".pm-row-story-toggle");
+  function applyText(full){
+    if (!full || !textSpan) return;
+    var preview = _pmTruncateStory(full);
+    textSpan.textContent = preview;
+    // v358.1: structured full content. Narrative paragraph first;
+    // a placeholder div for the "what to do here" bullets gets
+    // populated on first expand by _pmToggleStoryFull. Splitting
+    // markup from data lets the toggle hide/show without losing
+    // the lazy-loaded todo list.
+    if (fullDiv) {
+      var narrPara = '<p style="margin:0 0 8px;line-height:1.65;">'
+        + _pmEsc(full)
+        + '</p>';
+      fullDiv.innerHTML = narrPara
+        + '<div class="pm-row-story-todo" style="display:none;"></div>';
+    }
+    // Only show the toggle if there's actually more to read OR a
+    // todo list might add value (always true if narrative loaded).
+    if (toggle) toggle.style.display = "inline";
+  }
+  if (cache[key]) {
+    applyText(cache[key]);
+    return;
+  }
+  _pmEnqueueStoryGen(placeName, function(text){
+    if (!text) {
+      // Generation failed/empty — clear the placeholder rather than leave "…".
+      if (textSpan) textSpan.textContent = "";
+      return;
+    }
+    applyText(text);
+  });
+}
+// Toggle preview ↔ full paragraph + things-to-do. Things-to-do
+// (_generatePlaceWhatToDo) lazy-loads on first expand — we don't
+// pay for it unless the user actually wants the deeper read.
+function _pmToggleStoryFull(linkEl){
+  var slot = linkEl && linkEl.closest ? linkEl.closest(".pm-row-story") : null;
+  if (!slot) return;
+  var textSpan = slot.querySelector(".pm-row-story-text");
+  var fullDiv = slot.querySelector(".pm-row-story-full");
+  if (!textSpan || !fullDiv) return;
+  var expanded = fullDiv.style.display !== "none";
+  if (expanded) {
+    fullDiv.style.display = "none";
+    textSpan.style.display = "inline";
+    linkEl.textContent = "more →";
+    return;
+  }
+  fullDiv.style.display = "block";
+  textSpan.style.display = "none";
+  linkEl.textContent = "less ←";
+  // Lazy-load the things-to-do bullets on first expand. Cache hit
+  // renders synchronously; miss kicks off _generatePlaceWhatToDo.
+  var placeName = slot.getAttribute("data-place") || "";
+  var todoDiv = fullDiv.querySelector(".pm-row-story-todo");
+  if (!placeName || !todoDiv || todoDiv._pmTodoHydrated) return;
+  todoDiv._pmTodoHydrated = true;
+  var key = placeName.toLowerCase();
+  var todoCache = window._placeWhatToDoCache || {};
+  function renderTodo(items){
+    if (!items || !items.length) return; // silent on empty/failure
+    var html = '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed #d8d4c8;">'
+      + '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#888;margin-bottom:5px;">What to do here</div>'
+      + '<ul style="list-style:none;padding:0;margin:0;">';
+    items.forEach(function(it){
+      var what = String(it && it.what || "").trim();
+      var where = String(it && it.where || "").trim();
+      if (!what) return;
+      html += '<li style="font-size:11.5px;color:#333;line-height:1.5;margin-bottom:5px;padding-left:12px;position:relative;">'
+        + '<span style="position:absolute;left:0;top:0;color:#1a5fa8;">·</span>'
+        + _pmEsc(what)
+        + (where ? '<span style="color:#888;font-size:10.5px;display:block;margin-top:1px;">' + _pmEsc(where) + '</span>' : '')
+        + '</li>';
+    });
+    html += '</ul></div>';
+    todoDiv.innerHTML = html;
+    todoDiv.style.display = "block";
+  }
+  if (todoCache[key]) {
+    renderTodo(todoCache[key]);
+    return;
+  }
+  todoDiv.innerHTML = '<div style="margin-top:8px;font-size:11px;color:#999;font-style:italic;">Loading suggestions…</div>';
+  todoDiv.style.display = "block";
+  if (typeof _generatePlaceWhatToDo === "function") {
+    _generatePlaceWhatToDo(placeName, {}).then(function(items){
+      renderTodo(items || []);
+    }, function(){
+      todoDiv.innerHTML = ""; // clear placeholder on failure
+    });
+  }
+}
+window._pmToggleStoryFull = _pmToggleStoryFull;
+
 // Two-column activity ↔ place picker, grouped by section. Each section
 // header is a verb phrase ("Travel on iconic trains", "Walk in the
 // mountains"). Inside a section, each row is one activity with its places
@@ -9066,6 +9298,24 @@ function _renderPlaceActivityItems(){
         // Day-trip row: hub's ordinal + arrow.
         _ordHtml = '<span class="pm-row-ord pm-row-ord-dt" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;color:#666;font-weight:600;letter-spacing:.02em;flex-shrink:0;" title="Day trip from stay #' + _ordMap[userHubKey] + '">' + _ordMap[userHubKey] + '→</span>';
       }
+      // Round v358: inline story preview, only on the place's first
+      // appearance in this render (later rows reference back via "also in").
+      // Renders a placeholder; the IntersectionObserver below hydrates it
+      // from cache or kicks off a throttled _generatePlaceNarrative.
+      var storyHtml = "";
+      if (firstAppearance) {
+        var _placeAttr = _pmEsc(d.place);
+        storyHtml = '<div class="pm-row-story" data-place="'+_placeAttr+'" '
+          + 'style="margin-top:3px;font-style:italic;font-size:11.5px;color:#666;line-height:1.5;" '
+          + 'onclick="event.stopPropagation();">'
+          +   '<span class="pm-row-story-text">…</span>'
+          +   ' '
+          +   '<a class="pm-row-story-toggle" '
+          +      'style="display:none;color:#1a5fa8;text-decoration:none;cursor:pointer;font-style:normal;font-weight:600;margin-left:4px;" '
+          +      'onclick="_pmToggleStoryFull(this);event.stopPropagation();">more →</a>'
+          +   '<div class="pm-row-story-full" style="display:none;margin-top:2px;"></div>'
+          + '</div>';
+      }
       var leftHtml = '<div class="tb-act-col-left">'
         + '<div style="display:flex;align-items:flex-start;gap:8px;">'
         + '<div class="tb-act-check'+(destKeptInSection?" on":"")+'" onclick="toggleDestKeep(&#39;'+_pmEsc(d.place)+'&#39;)" title="Keep / drop this destination across all activities"></div>'
@@ -9074,9 +9324,14 @@ function _renderPlaceActivityItems(){
         +   _ordHtml
         +   '<span>'+_pmEsc(d.place)+'</span>'
         +   transitChip
-        +   '<button type="button" class="tb-act-info-btn" onclick="togglePlaceNarrative(&#39;'+_pmEsc(d.place).replace(/&#39;/g, "\\&#39;")+'&#39;,this);event.stopPropagation();" title="What is this place?" style="font-size:11px;color:#1a5fa8;background:none;border:1px solid #cfe1f7;border-radius:50%;width:18px;height:18px;line-height:1;cursor:pointer;font-family:inherit;padding:0;display:inline-flex;align-items:center;justify-content:center;font-weight:600;">?</button>'
+        // v358.1: removed the floating-popup "?" button. Story info
+        // now lives inline as a preview + expand under the place name
+        // (see _pmHydratePreview / _pmToggleStoryFull). Less hidden,
+        // no popup chrome, and the things-to-do list moved into the
+        // expand instead of being a separate popup section.
         + '</div>'
         + (nightsLine ? '<div class="tb-dest-meta">'+nightsLine+'</div>' : '')
+        + storyHtml
         + '</div>'
         + '</div>'
         + '</div>';
@@ -9139,6 +9394,36 @@ function _renderPlaceActivityItems(){
       list.appendChild(row);
     });
   });
+  // Round v358: hydrate inline story previews. Tear down any prior
+  // observer so we don't leak across re-renders (this function is
+  // called many times per session). For each preview slot in the
+  // freshly rendered DOM: if IntersectionObserver is unsupported,
+  // hydrate immediately; otherwise observe and let visibility drive
+  // generation. threshold 0.1 = any sliver visible.
+  (function _pmAttachStoryObserver(){
+    var slots = list.querySelectorAll(".pm-row-story");
+    if (!slots.length) return;
+    if (_pmStoryObserver && _pmStoryObserver.disconnect) {
+      try { _pmStoryObserver.disconnect(); } catch(e) {}
+      _pmStoryObserver = null;
+    }
+    if (typeof IntersectionObserver !== "function") {
+      // Fallback: hydrate everything that's reasonably likely to be
+      // looked at. Cheap enough — and the cache will dedupe anyway.
+      Array.prototype.forEach.call(slots, function(s){ _pmHydratePreview(s); });
+      return;
+    }
+    _pmStoryObserver = new IntersectionObserver(function(entries){
+      entries.forEach(function(entry){
+        if (entry.isIntersecting) {
+          _pmHydratePreview(entry.target);
+          if (_pmStoryObserver) _pmStoryObserver.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.1 });
+    Array.prototype.forEach.call(slots, function(s){ _pmStoryObserver.observe(s); });
+  })();
+
   // Round DN.1: build the sticky category nav from the categories that
   // actually rendered headers above. Empty categories don't show up.
   _renderPickerCategoryNav(printedCategoryHeaders, items);
@@ -22340,139 +22625,12 @@ async function _renderExecutionGroups(dest, host){
   }
 }
 
-// Round CQ.2: floating popup near the clicked button instead of inline
-// expansion (which made the picker's left column awkwardly wide). Click
-// outside, the ×, or Esc to dismiss.
-async function togglePlaceNarrative(placeName, anchor){
-  if (!placeName) return;
-  // Toggle off if a popup for this same place is already open
-  var existing = document.getElementById("tb-narr-popup");
-  if (existing) {
-    var existingPlace = existing.getAttribute("data-place");
-    existing.remove();
-    if (existingPlace === placeName) return;
-  }
-  var key = String(placeName).toLowerCase();
-  var popup = document.createElement("div");
-  popup.id = "tb-narr-popup";
-  popup.setAttribute("data-place", placeName);
-  popup.style.cssText = "position:absolute;background:#fff;border:1px solid #d8d4c8;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,0.18);z-index:10000;width:360px;max-width:calc(100vw - 24px);font-family:inherit;overflow:hidden;";
-  var hdr = document.createElement("div");
-  hdr.style.cssText = "display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid #ede8db;background:#faf6f1;";
-  var title = document.createElement("div");
-  title.style.cssText = "font-size:13px;font-weight:700;color:#1a1a1a;";
-  title.textContent = placeName;
-  var closeBtn = document.createElement("button");
-  closeBtn.type = "button";
-  closeBtn.textContent = "×";
-  closeBtn.style.cssText = "font-size:18px;line-height:1;color:#888;background:none;border:none;cursor:pointer;font-family:inherit;padding:0 4px;";
-  closeBtn.onclick = function(){ popup.remove(); };
-  hdr.appendChild(title);
-  hdr.appendChild(closeBtn);
-  popup.appendChild(hdr);
-  var body = document.createElement("div");
-  body.style.cssText = "padding:12px 14px;font-size:13px;color:#333;line-height:1.65;font-family:Georgia,serif;max-height:60vh;overflow-y:auto;";
-  popup.appendChild(body);
-  function _renderInto(el, text){
-    el.innerHTML = text.split(/\n\n+/).map(function(p){return '<p style="margin:0 0 10px;">' + p.replace(/\n/g, '<br>') + '</p>';}).join("");
-  }
-  document.body.appendChild(popup);
-  // Position near the anchor, with viewport clamping
-  if (anchor && anchor.getBoundingClientRect) {
-    var rect = anchor.getBoundingClientRect();
-    var popupW = popup.offsetWidth;
-    var popupH = popup.offsetHeight;
-    var winW = window.innerWidth, winH = window.innerHeight;
-    var left = rect.left + window.scrollX;
-    if (left + popupW > window.scrollX + winW - 12) left = window.scrollX + winW - popupW - 12;
-    if (left < window.scrollX + 12) left = window.scrollX + 12;
-    var top = rect.bottom + window.scrollY + 6;
-    if (top + popupH > window.scrollY + winH - 12 && rect.top > popupH + 12) {
-      top = rect.top + window.scrollY - popupH - 6;
-    }
-    popup.style.left = left + "px";
-    popup.style.top = top + "px";
-  } else {
-    popup.style.left = "50%";
-    popup.style.top = "30%";
-    popup.style.transform = "translateX(-50%)";
-  }
-  // Dismiss handlers
-  setTimeout(function(){
-    var dismiss = function(e){
-      if (!popup.contains(e.target) && popup.parentNode) {
-        popup.remove();
-        document.removeEventListener("click", dismiss, true);
-      }
-    };
-    document.addEventListener("click", dismiss, true);
-  }, 50);
-  var onKey = function(e){
-    if (e.key === "Escape") {
-      popup.remove();
-      document.removeEventListener("keydown", onKey);
-    }
-  };
-  document.addEventListener("keydown", onKey);
-  // Round CT: popup body has two sections — narrative paragraph + "What
-  // to do here" suggestions. Both are independently cached and rendered
-  // as soon as their data arrives, so the user sees the narrative first
-  // and the activity list fills in shortly after.
-  function _renderFull(text, todoItems){
-    var html = "";
-    if (text) {
-      html += text.split(/\n\n+/).map(function(p){return '<p style="margin:0 0 12px;">' + p.replace(/\n/g, '<br>') + '</p>';}).join("");
-    } else {
-      html += '<p style="margin:0 0 12px;color:#999;font-style:italic;">Max couldn\'t generate a description right now.</p>';
-    }
-    if (todoItems && todoItems.length) {
-      html += '<div style="margin-top:14px;padding-top:12px;border-top:1px dashed #d8d4c8;">';
-      html += '<div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:8px;font-family:-apple-system,sans-serif;">What to do here</div>';
-      html += '<ul style="list-style:none;margin:0;padding:0;font-family:-apple-system,sans-serif;">';
-      todoItems.forEach(function(it){
-        var what = String(it.what || "").trim();
-        var where = String(it.where || "").trim();
-        if (!what) return;
-        html += '<li style="font-size:12px;color:#333;line-height:1.5;margin-bottom:7px;padding-left:14px;position:relative;">'
-          + '<span style="position:absolute;left:0;top:0;color:#1a5fa8;">·</span>'
-          + what
-          + (where ? '<span style="color:#888;font-size:10.5px;display:block;margin-top:1px;">' + where + '</span>' : '')
-          + '</li>';
-      });
-      html += '</ul>';
-      html += '</div>';
-    }
-    body.innerHTML = html;
-  }
-  var cachedNarr = (window._placeNarrativeCache || {})[key];
-  var cachedTodo = (window._placeWhatToDoCache || {})[key];
-  if (cachedNarr && cachedTodo) { _renderFull(cachedNarr, cachedTodo); return; }
-  body.innerHTML = '<span class="max-thinking" style="color:#888;font-style:italic;">Max is writing about ' + placeName + '…</span>';
-  var ctx = {};
-  try {
-    var items = (_tb && _tb.placeActivities) || [];
-    var matchingActs = [];
-    items.forEach(function(item){
-      (item.requiredPlaces || []).forEach(function(p){
-        if (p && p.place && p.place.toLowerCase() === key) matchingActs.push(item.name);
-      });
-    });
-    if (matchingActs.length) ctx.events = matchingActs.slice(0, 5);
-  } catch(_){}
-  // Fire both calls in parallel
-  var narrPromise = cachedNarr ? Promise.resolve(cachedNarr) : _generatePlaceNarrative(placeName, ctx);
-  var todoPromise = cachedTodo ? Promise.resolve(cachedTodo) : _generatePlaceWhatToDo(placeName, ctx);
-  // Render the narrative as soon as it's ready
-  var narrText = "";
-  var todoItems = [];
-  var narrDone = false, todoDone = false;
-  function _maybeRender(){
-    if (!document.body.contains(popup)) return;
-    if (narrDone || todoDone) _renderFull(narrText, todoDone ? todoItems : null);
-  }
-  narrPromise.then(function(t){ narrText = t || ""; narrDone = true; _maybeRender(); }).catch(function(){ narrDone = true; _maybeRender(); });
-  todoPromise.then(function(items){ todoItems = items || []; todoDone = true; _maybeRender(); }).catch(function(){ todoDone = true; _maybeRender(); });
-}
+// v358.1: togglePlaceNarrative removed. The picker's "?" floating
+// popup was replaced by an inline preview + expand on each row (see
+// _pmHydratePreview / _pmToggleStoryFull near the top of this file).
+// _generatePlaceNarrative and _generatePlaceWhatToDo are still
+// exported and used by the inline expand. Original implementation
+// preserved in git history (Round CQ.1 / CQ.2 / CT).
 
 // Round CO.3: floating menu shown when a day-trip chip is clicked. Lists
 // "Add to Day 1...N" (or "Move to Day N" if already placed) plus a

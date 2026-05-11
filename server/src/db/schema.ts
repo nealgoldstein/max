@@ -14,7 +14,7 @@
 // Why SQLite for dev: zero-config, file on disk, dump it whenever.
 // Postgres lands when we deploy — same Drizzle schema, same queries.
 
-import { sqliteTable, text, integer, index } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, index, primaryKey } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 
 export const users = sqliteTable('users', {
@@ -160,6 +160,26 @@ export const shareTokens = sqliteTable(
   }),
 );
 
+// v356.6: reminders sent per (user, trip, days_before) so the daily
+// cron's "send if departing in 7/3/1" check is idempotent. Without
+// this row the cron would re-send every day inside each window.
+// Composite PK = (user_id, trip_id, days_before); insert fails on
+// duplicate, which is the cheap "already sent" guard.
+export const remindersSent = sqliteTable(
+  'reminders_sent',
+  {
+    userId: text('user_id').notNull(),
+    tripId: text('trip_id').notNull(),
+    daysBefore: integer('days_before').notNull(),
+    sentAt: integer('sent_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(strftime('%s', 'now') * 1000)`),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.userId, t.tripId, t.daysBefore] }),
+  }),
+);
+
 export type User = typeof users.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
 export type Trip = typeof trips.$inferSelect;
@@ -170,3 +190,5 @@ export type UserPrefs = typeof userPrefs.$inferSelect;
 export type NewUserPrefs = typeof userPrefs.$inferInsert;
 export type ShareToken = typeof shareTokens.$inferSelect;
 export type NewShareToken = typeof shareTokens.$inferInsert;
+export type ReminderSent = typeof remindersSent.$inferSelect;
+export type NewReminderSent = typeof remindersSent.$inferInsert;

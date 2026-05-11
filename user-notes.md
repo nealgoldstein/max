@@ -42,10 +42,18 @@ Surface: a blue **⊕ Install** pill in the home-screen header
 (top right). Hidden once the app is detected running in standalone
 mode (i.e. you've already installed and opened it that way).
 
+**On iPhone, installing is required for notifications.** Apple
+only delivers web push to apps that have been added to the home
+screen — without the install, pre-trip reminders and during-trip
+alerts can't reach the user at all. The install copy on the iOS
+overlay calls this out in bold so the value is visible at the
+moment the user is deciding whether to do it.
+
 Click behavior is platform-aware:
 
 - **iPhone Safari** → instructions overlay walks through
-  Share → Add to Home Screen → Add.
+  Share → Add to Home Screen → Add. Footer flags the iOS-only
+  notification requirement.
 - **Mac Safari (Sonoma+)** → instructions for File → Add to Dock…
 - **Mac/Windows Chrome / Edge** → fires the native install
   prompt directly. If the prompt isn't yet ready (Chrome's
