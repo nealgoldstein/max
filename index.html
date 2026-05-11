@@ -2406,15 +2406,32 @@ async function callMax(messages, maxTokens, timeoutMs, opts) {
     // 401 mean their session token expired \u2014 clear it and route to
     // the sign-in modal, NOT the api-key form. BYOK users on 401
     // get the existing "key rejected, paste a fresh one" path.
+    //
+    // v355.1 (Playwright MA.4 fix): only pop the sign-in modal when
+    // the user was ACTUALLY signed in. A 401 for someone who was
+    // never signed in (typical of test envs and first-time visitors
+    // who land on a screen that quietly fires a callMax) is not a
+    // "session expired" event \u2014 it's just "not authenticated."
+    // Surfacing the modal in that case interrupts unrelated UI
+    // (was breaking itin-item.spec.js by intercepting pointer events
+    // on adjacent buttons) and is the wrong message besides.
     if (useProxy && (data.error.type === "authentication_error" || resp.status === 401)) {
-      try { localStorage.removeItem("max-server-token"); } catch(_) {}
-      if (typeof MaxSync !== "undefined" && typeof MaxSync.signOut === "function") {
-        try { MaxSync.signOut(); } catch(_) {}
+      var _wasSignedIn = (typeof MaxSync !== "undefined" && typeof MaxSync.isSignedIn === "function")
+        ? !!MaxSync.isSignedIn() : false;
+      if (_wasSignedIn) {
+        try { localStorage.removeItem("max-server-token"); } catch(_) {}
+        if (typeof MaxSync !== "undefined" && typeof MaxSync.signOut === "function") {
+          try { MaxSync.signOut(); } catch(_) {}
+        }
+        if (typeof MaxSync !== "undefined" && typeof MaxSync.showSignInModal === "function") {
+          try { MaxSync.showSignInModal(); } catch(_) {}
+        }
+        throw new Error("Session expired \u2014 sign in again to continue.");
       }
-      if (typeof MaxSync !== "undefined" && typeof MaxSync.showSignInModal === "function") {
-        try { MaxSync.showSignInModal(); } catch(_) {}
-      }
-      throw new Error("Session expired \u2014 sign in again to continue.");
+      // Not signed in to begin with \u2014 throw a quieter error so callers
+      // (refreshRestaurantSuggestions etc.) can degrade silently
+      // rather than triggering the modal flow.
+      throw new Error("Sign in to use this feature.");
     }
     if (!useProxy && !_apiKey && (data.error.type === "authentication_error" || resp.status === 401)) {
       showApiKeyForm();
@@ -8381,6 +8398,12 @@ async function generateActivitiesForPlace(){
       }
     });
     _tb.placeActivities = items;
+    // v355: place-picker map "Start from" hint. Default to "" (auto =
+    // northernmost-stay seed) on fresh trips. Mirrors the _isDayTrip
+    // rehydrate pattern above. The user-set value persists across
+    // re-renders (and re-edits via reopenPickerForEdit, which sets
+    // its own default below).
+    if (typeof _tb._placePickerStart !== "string") _tb._placePickerStart = "";
     // Seed _coarseGeocode from any lat/lng the LLM included on each
     // requiredPlace / endpoint / viableLocation. This is the primary
     // source of pin coords now — Nominatim is only the fallback for
@@ -9003,11 +9026,31 @@ function _renderPlaceActivityItems(){
       var transitChip = routeStops.length
         ? '<span style="font-size:9.5px;font-weight:700;color:#5b3f8f;background:#f4eef9;border:1px solid #d8c4e8;padding:1px 6px;border-radius:9px;letter-spacing:.02em;" title="'+_pmEsc(routeStops.length>1 ? "Also on: " + routeStops.slice(1).join(", ") : "Endpoint of an iconic route experience.")+'">📍 stop on '+_pmEsc(routeStops[0])+'</span>'
         : '';
+      // v355: sidebar ordinal badge — mirrors the pin number on the
+      // map. Stays show their own ordinal; day trips show the hub's
+      // ordinal with an arrow ("3→ Vík"). Reads from
+      // _tb._placePickerOrdinals (a map populated by
+      // _renderPlacePickerMap on every map paint). Falls back to
+      // empty when ordinals haven't computed yet (first paint
+      // ordering: sidebar before map). The map's first paint
+      // triggers a sidebar re-render via the diff-check in
+      // _renderPlacePickerMap.
+      var _ordKey = (d.place || "").toLowerCase();
+      var _ordMap = (_tb && _tb._placePickerOrdinals) || {};
+      var _ordHtml = "";
+      if (_ordMap[_ordKey]) {
+        // Stay row: own ordinal.
+        _ordHtml = '<span class="pm-row-ord" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;color:#666;font-weight:600;letter-spacing:.02em;flex-shrink:0;">' + _ordMap[_ordKey] + '.</span>';
+      } else if (userIsDayTrip && userHubKey && _ordMap[userHubKey]) {
+        // Day-trip row: hub's ordinal + arrow.
+        _ordHtml = '<span class="pm-row-ord pm-row-ord-dt" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;color:#666;font-weight:600;letter-spacing:.02em;flex-shrink:0;" title="Day trip from stay #' + _ordMap[userHubKey] + '">' + _ordMap[userHubKey] + '→</span>';
+      }
       var leftHtml = '<div class="tb-act-col-left">'
         + '<div style="display:flex;align-items:flex-start;gap:8px;">'
         + '<div class="tb-act-check'+(destKeptInSection?" on":"")+'" onclick="toggleDestKeep(&#39;'+_pmEsc(d.place)+'&#39;)" title="Keep / drop this destination across all activities"></div>'
         + '<div style="flex:1;min-width:0;cursor:pointer;" onclick="toggleDestKeep(&#39;'+_pmEsc(d.place)+'&#39;)">'
         + '<div class="tb-act-name" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
+        +   _ordHtml
         +   '<span>'+_pmEsc(d.place)+'</span>'
         +   transitChip
         +   '<button type="button" class="tb-act-info-btn" onclick="togglePlaceNarrative(&#39;'+_pmEsc(d.place).replace(/&#39;/g, "\\&#39;")+'&#39;,this);event.stopPropagation();" title="What is this place?" style="font-size:11px;color:#1a5fa8;background:none;border:1px solid #cfe1f7;border-radius:50%;width:18px;height:18px;line-height:1;cursor:pointer;font-family:inherit;padding:0;display:inline-flex;align-items:center;justify-content:center;font-weight:600;">?</button>'
@@ -9224,6 +9267,47 @@ function _refreshAllPlacePickerMaps(){
   }
 }
 
+// v355: rebuild the "Start from" dropdown options from the current
+// allPlaces snapshot. Called from inside _renderPlacePickerMap on
+// every paint so newly-kept stays appear and removed ones disappear.
+// keptStays is an array of {key, place} pairs (lowercased key,
+// display name). We sort alphabetically so the dropdown is stable
+// regardless of map ordering.
+function _pmRefreshStartDropdown(keptStays){
+  var sel = document.getElementById("tb-pm-start-sel");
+  if (!sel) return;
+  var current = (_tb && typeof _tb._placePickerStart === "string") ? _tb._placePickerStart : "";
+  var sorted = (keptStays || []).slice().sort(function(a,b){
+    return String(a.place||"").localeCompare(String(b.place||""));
+  });
+  var html = '<option value="">Auto (geographic)</option>';
+  sorted.forEach(function(s){
+    var sel2 = (s.key === current) ? " selected" : "";
+    html += '<option value="' + _pmEsc(s.key) + '"' + sel2 + '>' + _pmEsc(s.place) + '</option>';
+  });
+  sel.innerHTML = html;
+  // Defensive: if the current hint references a stay that no longer
+  // exists in the dropdown, the <select> falls back to the empty
+  // "Auto" option visually — but the underlying _tb value still
+  // points at a stale key. Clear it so future renders agree.
+  if (current && !sorted.some(function(s){ return s.key === current; })) {
+    if (_tb) _tb._placePickerStart = "";
+  }
+}
+
+// v355: handler for the "Start from" dropdown's change event.
+// Persists the choice and re-renders the map (which will re-seed
+// the polyline) and the sidebar (so ordinals match).
+function _pmOnStartChange(newValue){
+  if (!_tb) _tb = {};
+  _tb._placePickerStart = String(newValue || "");
+  if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
+  // Sidebar re-render is also triggered by the map's ordinal-diff
+  // logic, but call here too in case ordinals didn't change (e.g.
+  // user picked the same starting stay the auto-seed already chose).
+  if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
+}
+
 // place-picker hero map (Step 6): pin popup with stay/day-trip toggle.
 // Opens a small Leaflet popup on click. Inside: a radio for "Stay
 // the night" (default) vs "Day trip from …", a hub dropdown for the
@@ -9313,6 +9397,30 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
   var noHubs = hubs.length === 0;
   var currentHub = info._dayTripHub || (hubs[0] ? hubs[0].key : "");
 
+  // v355: "Set as starting point" control. Available on any stay
+  // (kept or not), since the picker map shows the route as if every
+  // pin were checked — so the start choice informs that view too.
+  // Day trips can't be the start (they're branches off a hub).
+  // When already the start, the button toggles to "clear" so the
+  // user can revert to auto.
+  var _isStayCandidate = !info._isDayTrip;
+  var _curStart = (_tb && typeof _tb._placePickerStart === "string") ? _tb._placePickerStart : "";
+  var _isStart = _isStayCandidate && _curStart && _curStart === canon;
+  var startBtnHtml = "";
+  if (_isStayCandidate) {
+    if (_isStart) {
+      startBtnHtml = ''
+        + '  <div style="margin-top:8px;padding-top:8px;border-top:1px dotted #ddd;">'
+        + '    <button type="button" class="pm-start-btn" style="font-family:inherit;font-size:11.5px;font-weight:600;padding:4px 10px;background:#fff7d4;color:#5a4a10;border:1px solid #d8c66a;border-radius:4px;cursor:pointer;width:100%;text-align:center;" title="Revert to auto-ordering (northernmost stay seeds the route).">★ This is the start (clear)</button>'
+        + '  </div>';
+    } else {
+      startBtnHtml = ''
+        + '  <div style="margin-top:8px;padding-top:8px;border-top:1px dotted #ddd;">'
+        + '    <button type="button" class="pm-start-btn" style="font-family:inherit;font-size:11.5px;font-weight:600;padding:4px 10px;background:#eef5ff;color:#1a5fa8;border:1px solid #cfe1f7;border-radius:4px;cursor:pointer;width:100%;text-align:center;" title="Use this stay as the route\'s starting point.">Set as starting point ★</button>'
+        + '  </div>';
+    }
+  }
+
   // Build the popup HTML. Inline form with two radios + a hub
   // dropdown that toggles disabled with the day-trip radio.
   var popupId = "pm-pop-" + Date.now();
@@ -9340,6 +9448,7 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
     +       hubOptions
     + '    </select>'
     + '  </label>'
+    +   startBtnHtml
     + '  <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:8px;">'
     + '    <button type="button" class="pm-cancel" style="font-family:inherit;font-size:11.5px;padding:3px 10px;background:#eee;border:1px solid #ccc;border-radius:4px;cursor:pointer;">Cancel</button>'
     + '    <button type="button" class="pm-save" style="font-family:inherit;font-size:11.5px;font-weight:600;padding:3px 10px;background:#1a5fa8;color:#fff;border:1px solid #144a86;border-radius:4px;cursor:pointer;">Save</button>'
@@ -9359,6 +9468,7 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
     var cancel = root.querySelector(".pm-cancel");
     var hubSel = root.querySelector(".pm-hub-sel");
     var radios = root.querySelectorAll('input[name="pm-mode"]');
+    var startBtn = root.querySelector(".pm-start-btn");
     function syncDisabled(){
       var v = root.querySelector('input[name="pm-mode"]:checked');
       var isDT = v && v.value === "daytrip";
@@ -9373,6 +9483,16 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
       var hub = (mode === "daytrip" && hubSel) ? hubSel.value : "";
       mapInstance.closePopup(popup);
       _pmSetPlaceDayTrip(canon, mode === "daytrip", hub);
+    });
+    // v355: "Set as starting point" / "clear" toggle. Mutates the
+    // _placePickerStart hint on _tb and re-renders. Closes the popup
+    // first so the re-render isn't fighting an open Leaflet popup.
+    if (startBtn) startBtn.addEventListener("click", function(){
+      if (!_tb) _tb = {};
+      _tb._placePickerStart = _isStart ? "" : canon;
+      mapInstance.closePopup(popup);
+      if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
+      if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
     });
   }, 0);
 }
@@ -9439,40 +9559,72 @@ function openPlacePickerMapModal(){
     + '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""><\/script>'
     + '<script>'
     + '(function(){'
-    +   'var map=null,markers={},lastSig="";'
+    +   'var map=null,markers={},routeLine=null,spurs={},lastSig="";'
     +   'function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"}[c];});}'
     +   'function getState(){'
     +     'try{'
     +       'var op=window.opener;if(!op||op.closed)return null;'
     +       'var items=(op._tb&&op._tb.placeActivities)||[];'
     +       'var gc=op._coarseGeocode||{};'
+    +       /* v355: read the parent's "Start from" hint so the route
+         seed in the popout matches what the inline picker map shows. */
+    +       'var startHint=(op._tb&&typeof op._tb._placePickerStart==="string")?op._tb._placePickerStart:"";'
     +       'var byKey={};'
     +       'items.forEach(function(it){'
     +         'var iconicItem=!!it.iconic;'
     +         '(it.requiredPlaces||[]).forEach(function(p){'
     +           'if(!p||!p.place)return;'
     +           'var k=p.place.toLowerCase();'
-    +           'if(!byKey[k])byKey[k]={place:p.place,lat:null,lng:null,keep:false,iconic:false};'
+    +           'if(!byKey[k])byKey[k]={place:p.place,lat:null,lng:null,keep:false,iconic:false,_isDayTrip:false,_dayTripHub:""};'
     +           'if(p._keep)byKey[k].keep=true;'
     +           'if(iconicItem||p.iconic)byKey[k].iconic=true;'
+    +           'if(p._isDayTrip===true){byKey[k]._isDayTrip=true;if(p._dayTripHub&&!byKey[k]._dayTripHub)byKey[k]._dayTripHub=p._dayTripHub;}'
     +           'var coords=gc[k];'
     +           'if(coords&&isFinite(coords[0])){byKey[k].lat=coords[0];byKey[k].lng=coords[1];}'
     +         '});'
     +       '});'
     +       'var out=[];'
     +       'Object.keys(byKey).forEach(function(k){var v=byKey[k];if(v.lat!=null)out.push(v);});'
+    +       'out._byKey=byKey;'
+    +       'out._startHint=startHint;'
     +       'return out;'
     +     '}catch(e){return null;}'
     +   '}'
+    +   /* v354: nearest-neighbor ordering of stays for the route polyline.
+       Inlined here because the popout runs in its own document and
+       can\'t reach engine-picker.js\'s orderPlacePickerStays. Same
+       contract: northernmost stay seeds, then nearest-neighbor. */
+    +   /* v355: third arg startKey mirrors orderPlacePickerStays —
+       seed at the user-chosen stay when it matches a geocoded stay,
+       else fall back to the northernmost-stay seed. */
+    +   'function orderStays(byKey,startKey){'
+    +     'var stays=[];var keys=[];'
+    +     'Object.keys(byKey).forEach(function(k){var v=byKey[k];if(!v._isDayTrip&&v.lat!=null){stays.push(v);keys.push(k);}});'
+    +     'if(stays.length<=1)return stays;'
+    +     'var seed=-1;'
+    +     'if(typeof startKey==="string"&&startKey){'
+    +       'for(var s=0;s<keys.length;s++){if(keys[s]===startKey){seed=s;break;}}'
+    +     '}'
+    +     'if(seed<0){seed=0;for(var i=1;i<stays.length;i++){if(stays[i].lat>stays[seed].lat)seed=i;}}'
+    +     'var ord=[stays[seed]];var rem=stays.slice(0,seed).concat(stays.slice(seed+1));'
+    +     'function ds(a,b){var dx=a.lat-b.lat,dy=a.lng-b.lng;return dx*dx+dy*dy;}'
+    +     'while(rem.length){var last=ord[ord.length-1],bI=0,bD=ds(last,rem[0]);'
+    +       'for(var j=1;j<rem.length;j++){var d=ds(last,rem[j]);if(d<bD){bD=d;bI=j;}}'
+    +       'ord.push(rem[bI]);rem.splice(bI,1);'
+    +     '}'
+    +     'return ord;'
+    +   '}'
     +   'function pinHtml(info){'
-    +     'var color=info.keep?"#1a5fa8":"#bbb";'
+    +     'var isStay=info.keep&&!info._isDayTrip;'
+    +     'var isDayTrip=info.keep&&info._isDayTrip;'
+    +     'var color=isStay?"#1a5fa8":(isDayTrip?"#e6700f":"#bbb");'
     +     'var border=info.iconic?"#b28a2e":"#fff";'
     +     'var size=info.keep?22:16;'
     +     'var label=info.keep?esc(info.place.substring(0,2)):"";'
     +     'return \'<div style="background:\'+color+\';color:#fff;border-radius:50%;width:\'+size+\'px;height:\'+size+\'px;border:2px solid \'+border+\';box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;">\'+label+\'</div>\';'
     +   '}'
     +   'function tooltipText(info){'
-    +     'return info.place+(info.iconic?" · ★ iconic":"")+(info.keep?" · kept":"");'
+    +     'return info.place+(info.iconic?" · ★ iconic":"")+(info._isDayTrip?" · day trip":info.keep?" · stay":"");'
     +   '}'
     +   'function scrollOpenerToPlace(name){'
     +     'try{'
@@ -9502,7 +9654,10 @@ function openPlacePickerMapModal(){
     +     '}'
     +     'var pts=getState();'
     +     'if(!pts){document.getElementById("ttl").textContent="Map — parent window closed";return;}'
-    +     'var sig=pts.map(function(p){return p.place+":"+(p.keep?1:0)+":"+(p.iconic?1:0);}).join("|");'
+    +     /* v354: include day-trip flags in the change signature so the
+       popout repaints when the user toggles a place between stay and
+       day trip in the parent window. */
+    +     'var sig=pts.map(function(p){return p.place+":"+(p.keep?1:0)+":"+(p.iconic?1:0)+":"+(p._isDayTrip?1:0)+":"+(p._dayTripHub||"");}).join("|")+"@"+(pts._startHint||"");'
     +     'if(sig===lastSig)return;'
     +     'lastSig=sig;'
     +     'var seen={};var bounds=[];'
@@ -9521,6 +9676,27 @@ function openPlacePickerMapModal(){
     +       '}'
     +     '});'
     +     'Object.keys(markers).forEach(function(k){if(!seen[k]){try{map.removeLayer(markers[k]);}catch(_){}delete markers[k];}});'
+    +     /* v354: main route polyline through every stay (kept or not),
+       in geographic order. Forest green, weight 5, opacity 0.95 —
+       matches the inline picker map. Re-drawn from scratch on every
+       repaint so order/membership stay in sync without bookkeeping. */
+    +     'if(routeLine){try{map.removeLayer(routeLine);}catch(_){}routeLine=null;}'
+    +     'var byKey=pts._byKey||{};'
+    +     'var ordered=orderStays(byKey,pts._startHint||"");'
+    +     'var routeCoords=[];ordered.forEach(function(v){routeCoords.push([v.lat,v.lng]);});'
+    +     'if(routeCoords.length>=2){routeLine=L.polyline(routeCoords,{color:"#1f7a3a",weight:5,opacity:0.95}).addTo(map);try{routeLine.bringToBack();}catch(_){}}'
+    +     /* Day-trip spurs: dashed orange line from each kept day-trip\'s
+       hub stay out to the day-trip place. Same colors/weights as the
+       inline map for visual parity. */
+    +     'Object.keys(spurs).forEach(function(k){try{map.removeLayer(spurs[k]);}catch(_){}delete spurs[k];});'
+    +     'pts.forEach(function(info){'
+    +       'if(!info._isDayTrip||!info._dayTripHub)return;'
+    +       'var hub=byKey[String(info._dayTripHub).toLowerCase()];'
+    +       'if(!hub||!hub.keep||hub._isDayTrip||hub.lat==null)return;'
+    +       'var sk=info.place.toLowerCase();'
+    +       'spurs[sk]=L.polyline([[hub.lat,hub.lng],[info.lat,info.lng]],{color:"#e6700f",weight:4,opacity:0.95,dashArray:"10,6"}).addTo(map);'
+    +       'try{spurs[sk].bringToBack();}catch(_){}'
+    +     '});'
     +     'if(bounds.length>=2){try{map.fitBounds(bounds,{padding:[40,40],maxZoom:9,animate:false});}catch(_){}}'
     +     'else if(bounds.length===1){map.setView(bounds[0],8,{animate:false});}'
     +   '}'
@@ -9604,9 +9780,15 @@ function _openPlacePickerMapOverlay(){
     (it.requiredPlaces || []).forEach(function(p){
       if (!p || !p.place) return;
       var k = p.place.toLowerCase();
-      if (!byKey[k]) byKey[k] = { place: p.place, lat: null, lng: null, keep: false, iconic: false };
+      if (!byKey[k]) byKey[k] = { place: p.place, lat: null, lng: null, keep: false, iconic: false, _isDayTrip: false, _dayTripHub: "" };
       if (p._keep) byKey[k].keep = true;
       if (iconicItem || p.iconic) byKey[k].iconic = true;
+      // v354: thread day-trip flags through so the mobile overlay
+      // renders the same hero-map spurs the inline picker map shows.
+      if (p._isDayTrip === true) {
+        byKey[k]._isDayTrip = true;
+        if (p._dayTripHub && !byKey[k]._dayTripHub) byKey[k]._dayTripHub = p._dayTripHub;
+      }
       var coords = gc[k];
       if (coords && isFinite(coords[0])) { byKey[k].lat = coords[0]; byKey[k].lng = coords[1]; }
     });
@@ -9618,17 +9800,54 @@ function _openPlacePickerMapOverlay(){
       '<div style="padding:30px 20px;text-align:center;color:#888;font-size:12px;">No places to show on the map yet.</div>';
     return;
   }
+  // v354: order kept stays (kept && !_isDayTrip) for the main route
+  // polyline. Mirror of orderPlacePickerStays' contract — the helper
+  // is on engine-picker.js; if it isn't loaded for some reason we
+  // fall back to insertion order so the map still draws.
+  var allByKey = {};
+  pts.forEach(function(p){ allByKey[p.place.toLowerCase()] = p; });
+  function _mobCoord(name){
+    var v = allByKey[(name||"").toLowerCase()];
+    return (v && v.lat != null) ? [v.lat, v.lng] : null;
+  }
+  // v355: pass through the user's "Start from" hint so the mobile
+  // overlay's polyline seed matches the inline picker map.
+  var _mobStart = (window._tb && typeof _tb._placePickerStart === "string") ? _tb._placePickerStart : "";
+  var ordered = (typeof orderPlacePickerStays === "function")
+    ? orderPlacePickerStays(allByKey, _mobCoord, _mobStart)
+    : pts.filter(function(p){ return !p._isDayTrip; });
   var bounds = L.latLngBounds([]);
   pts.forEach(function(info){
-    var color = info.keep ? "#1a5fa8" : "#bbb";
+    var isStay   = info.keep && !info._isDayTrip;
+    var isDayTrip = info.keep && info._isDayTrip;
+    var color = isStay ? "#1a5fa8" : (isDayTrip ? "#e6700f" : "#bbb");
     var border = info.iconic ? "#b28a2e" : "#fff";
     var size = info.keep ? 22 : 16;
     var html = '<div style="width:' + size + 'px;height:' + size + 'px;border-radius:50%;background:' + color +
       ';border:' + (info.iconic ? 3 : 2) + 'px solid ' + border + ';box-shadow:0 1px 3px rgba(0,0,0,0.3);"></div>';
     var icon = L.divIcon({ html: html, className: "", iconSize: [size, size], iconAnchor: [size/2, size/2] });
     var m = L.marker([info.lat, info.lng], { icon: icon }).addTo(map);
-    m.bindTooltip(info.place, { direction: "top", offset: [0, -size/2] });
+    m.bindTooltip(info.place + (isDayTrip ? " · day trip" : isStay ? " · stay" : ""), { direction: "top", offset: [0, -size/2] });
     bounds.extend([info.lat, info.lng]);
+  });
+  // Main route polyline through every stay, in geographic order.
+  var routeCoords = [];
+  ordered.forEach(function(info){
+    if (info && info.lat != null) routeCoords.push([info.lat, info.lng]);
+  });
+  if (routeCoords.length >= 2) {
+    L.polyline(routeCoords, {color:"#1f7a3a", weight:5, opacity:0.95}).addTo(map).bringToBack();
+  }
+  // Day-trip spurs: dashed orange line from each kept day-trip's
+  // hub stay out to the day-trip place.
+  pts.forEach(function(info){
+    if (!info._isDayTrip || !info._dayTripHub) return;
+    var hub = allByKey[String(info._dayTripHub).toLowerCase()];
+    if (!hub || !hub.keep || hub._isDayTrip) return;
+    if (hub.lat == null || info.lat == null) return;
+    L.polyline([[hub.lat, hub.lng], [info.lat, info.lng]], {
+      color:"#e6700f", weight:4, opacity:0.95, dashArray:"10,6"
+    }).addTo(map).bringToBack();
   });
   if (bounds.isValid()) map.fitBounds(bounds, { padding: [30, 30] });
 }
@@ -10121,13 +10340,50 @@ function _renderPlacePickerMap(targetId){
   // Per Neal-confirmed decision (1) the polyline runs through every
   // stay regardless of kept/not-kept state — orderPlacePickerStays
   // already ignores _isDayTrip and the call here passes ALL stays.
+  // v355: thread the user-chosen "Start from" hint so the polyline
+  // seeds at the user's pick instead of always northernmost.
+  var _pmStartHint = (_tb && typeof _tb._placePickerStart === "string") ? _tb._placePickerStart : "";
   var orderedStays = (typeof orderPlacePickerStays === "function")
-    ? orderPlacePickerStays(allPlaces, _pmCoord)
+    ? orderPlacePickerStays(allPlaces, _pmCoord, _pmStartHint)
     : [];
   var ordinalByKey = {};
   orderedStays.forEach(function(info, idx){
     if (info && info.place) ordinalByKey[info.place.toLowerCase()] = idx + 1;
   });
+  // v355: hoist ordinals onto _tb so the sidebar (renders separately
+  // from the map) can show matching numbers/arrows. Re-render the
+  // sidebar when the ordinal set changed — keeps stay numbers in
+  // sync with pin numbers even when the user toggles a place.
+  var _prevOrdinals = (_tb && _tb._placePickerOrdinals) || {};
+  var _ordSig = Object.keys(ordinalByKey).sort().map(function(k){return k+":"+ordinalByKey[k];}).join("|");
+  var _prevSig = Object.keys(_prevOrdinals).sort().map(function(k){return k+":"+_prevOrdinals[k];}).join("|");
+  if (_tb) _tb._placePickerOrdinals = ordinalByKey;
+  if (_ordSig !== _prevSig && typeof _renderPlaceActivityItems === "function") {
+    // Defer to next tick so the current map render finishes first
+    // and we don't reenter mid-paint.
+    setTimeout(function(){ _renderPlaceActivityItems(); }, 0);
+  }
+  // v355: sync the "Start from" dropdown options to the current
+  // kept-stays set. Built from allPlaces (not orderedStays) so the
+  // option list is the full set of stays — kept and not-kept are
+  // both seedable, matching the polyline's "all stays" intent.
+  // Limit to kept stays only — the picker UI treats "kept" as the
+  // user's commitment to the place, and only kept stays appear in
+  // the LLM brief downstream. A non-kept place can\'t be the start.
+  // v355.1: list every stay (kept or not) in the start dropdown.
+  // The route polyline runs through ALL stays per the "show me what
+  // it'd look like if everything were checked" intent (Neal-confirmed
+  // decision 1 on place-picker-hero-map.md), so the start choice
+  // applies regardless of whether the user has kept the place yet.
+  // The variable name stays `_keptStays` for diff continuity but is
+  // really "all stays."
+  var _keptStays = [];
+  Object.keys(allPlaces).forEach(function(k){
+    var info = allPlaces[k];
+    if (!info || info._isDayTrip) return;
+    _keptStays.push({ key: k, place: info.place || k });
+  });
+  if (typeof _pmRefreshStartDropdown === "function") _pmRefreshStartDropdown(_keptStays);
 
   var bounds = [];
   Object.keys(allPlaces).forEach(function(key){
@@ -10151,7 +10407,7 @@ function _renderPlacePickerMap(targetId){
         label = String(ordinalByKey[key] || "");
         size = 22;
       } else if (isDayTrip) {
-        color = "#c97a1a"; // muted amber-orange, matches spur color
+        color = "#e6700f"; // saturated orange, matches spur color (v354 tune)
         label = _pmEsc((info.place || "").substring(0, 2));
         size = 20;
       } else {
@@ -10230,15 +10486,19 @@ function _renderPlacePickerMap(targetId){
     if (c) routeCoords.push(c);
   });
   if (routeCoords.length >= 2) {
-    state.polyline = L.polyline(routeCoords, {color: "#5e8c63", weight: 3, opacity: 0.75}).addTo(_pmMap);
+    // Round v354 tune: bumped weight 3→5 and color from desaturated
+    // green (#5e8c63) to a richer forest green (#1f7a3a) so the
+    // route reads clearly against satellite tiles. Opacity stays high.
+    state.polyline = L.polyline(routeCoords, {color: "#1f7a3a", weight: 5, opacity: 0.95}).addTo(_pmMap);
     try { state.polyline.bringToBack(); } catch(_){}
   }
 
   // Step 5: day-trip spurs. For each kept day trip with a valid
   // _dayTripHub that resolves to a kept stay, draw a dashed amber-
-  // orange line from hub coord → day-trip coord. Color: #c97a1a (a
-  // muted amber-orange ~70% saturation), dashArray 6,6, weight 2,
-  // opacity 0.85.
+  // orange line from hub coord → day-trip coord. Round v354 tune:
+  // bumped weight 2→4 and color from muted amber (#c97a1a) to a
+  // richer orange (#e6700f); dashes lengthened so the branch reads
+  // distinctly from the solid main route.
   Object.keys(state.spurs).forEach(function(k){
     try { _pmMap.removeLayer(state.spurs[k]); } catch(_){}
     delete state.spurs[k];
@@ -10255,10 +10515,10 @@ function _renderPlacePickerMap(targetId){
     var hubCoord = _pmCoord(hubInfo.place);
     if (!dayCoord || !hubCoord) return; // geocode race — defer
     state.spurs[key] = L.polyline([hubCoord, dayCoord], {
-      color: "#c97a1a",
-      weight: 2,
-      opacity: 0.85,
-      dashArray: "6,6"
+      color: "#e6700f",
+      weight: 4,
+      opacity: 0.95,
+      dashArray: "10,6"
     }).addTo(_pmMap);
     try { state.spurs[key].bringToBack(); } catch(_){}
   });
@@ -10648,11 +10908,26 @@ function renderActivityPicker(){
     // mousedown handler is wired in initPickerDivider (called after render).
     // Width persists in localStorage as "max-picker-map-width" (% of container).
     +  '<div id="picker-divider" style="width:8px;flex:0 0 8px;cursor:col-resize;background:transparent;position:relative;z-index:50;user-select:none;border-left:1px solid #d8d1c0;border-right:1px solid #d8d1c0;" title="Drag to resize · double-click to reset"></div>'
-    +  '<div class="picker-map" id="picker-map" style="flex:0 0 46%;min-width:280px;background:#eaf0ed;position:relative;">'
-    +    '<div id="tb-pm-map" style="position:absolute;inset:0;"></div>'
-    +    '<button type="button" onclick="openPlacePickerMapModal();event.preventDefault();" '
-    +      'style="position:absolute;top:10px;right:10px;z-index:500;background:#fff;border:1px solid #ccc;border-radius:5px;font-size:11px;padding:4px 9px;font-weight:600;color:#333;cursor:pointer;font-family:inherit;box-shadow:0 1px 4px rgba(0,0,0,0.1);" '
-    +      'title="Open map in a new window">↗ Open in new window</button>'
+    +  '<div class="picker-map" id="picker-map" style="flex:0 0 46%;min-width:280px;background:#eaf0ed;position:relative;display:flex;flex-direction:column;">'
+    // v355: header strip above the map carries the "Start from"
+    // dropdown + the framing-disclaimer caption. Sits OUTSIDE the
+    // absolute-positioned map div so it doesn\'t intercept Leaflet
+    // pointer events. The map div fills the remaining flex space.
+    +    '<div id="tb-pm-header" style="flex-shrink:0;display:flex;flex-direction:column;gap:4px;padding:8px 10px 6px;background:#f5f3ec;border-bottom:1px solid #e3dfd0;">'
+    +      '<div style="display:flex;align-items:center;gap:6px;">'
+    +        '<label for="tb-pm-start-sel" style="font-size:11px;color:#555;font-weight:600;flex-shrink:0;">Start from:</label>'
+    +        '<select id="tb-pm-start-sel" onchange="_pmOnStartChange(this.value)" style="font-family:inherit;font-size:11px;padding:2px 6px;border:1px solid #c9c2ac;background:#fff;border-radius:4px;max-width:200px;flex:1;min-width:0;">'
+    +          '<option value="">Auto (geographic)</option>'
+    +        '</select>'
+    +      '</div>'
+    +      '<div style="font-size:11px;color:#777;font-style:italic;line-height:1.35;">These numbers show a sensible visit order. You\'ll set the real sequence next.</div>'
+    +    '</div>'
+    +    '<div style="position:relative;flex:1;min-height:0;">'
+    +      '<div id="tb-pm-map" style="position:absolute;inset:0;"></div>'
+    +      '<button type="button" onclick="openPlacePickerMapModal();event.preventDefault();" '
+    +        'style="position:absolute;top:10px;right:10px;z-index:500;background:#fff;border:1px solid #ccc;border-radius:5px;font-size:11px;padding:4px 9px;font-weight:600;color:#333;cursor:pointer;font-family:inherit;box-shadow:0 1px 4px rgba(0,0,0,0.1);" '
+    +        'title="Open map in a new window">↗ Open in new window</button>'
+    +    '</div>'
     +  '</div>'
     +'</div>'
     // v353.4: floating "show map" button — visible only on phone via
@@ -13028,6 +13303,12 @@ function reopenPickerForEdit(){
       conditionNote: m.conditionNote
     };
   });
+  // v355: reset the place-picker map "Start from" hint on rehydrate.
+  // We don't persist this on the trip envelope (it's a picker-time
+  // ephemeral preference, not part of the committed sequence), so a
+  // re-edit always starts in auto mode. Mirrors the _isDayTrip
+  // rehydrate pattern above.
+  _tb._placePickerStart = "";
   // Mirror into _mdcItems too — downstream code reads from both depending
   // on the path. Keep them in sync.
   _mdcItems = trip.mdcItems.slice();

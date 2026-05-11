@@ -1151,6 +1151,76 @@ describe('engine-picker.js — orderPlacePickerStays', () => {
     // Both ungeocoded — preserve insertion order, no crash.
     assert.strictEqual(r.length, 2);
   });
+
+  // v355.1 — startKey hint: user-chosen seed for the nearest-neighbor walk.
+  test('start hint matches a stay → that stay is first', () => {
+    // Same Iceland-ish set; northernmost would be Hofn, but we ask
+    // for Reykjavik as the start.
+    const all = {
+      'vik': { place: 'Vik', kept: true, _isDayTrip: false },
+      'reykjavik': { place: 'Reykjavik', kept: true, _isDayTrip: false },
+      'hofn': { place: 'Hofn', kept: true, _isDayTrip: false },
+    };
+    const coords = {
+      'Reykjavik': [64.14, -21.94],
+      'Vik':       [63.42, -19.01],
+      'Hofn':      [64.25, -15.21],
+    };
+    const r = MaxEnginePicker.orderPlacePickerStays(all, n => coords[n], 'reykjavik');
+    assert.strictEqual(r.length, 3);
+    assert.strictEqual(r[0].place, 'Reykjavik');
+    // Nearest from Reykjavik is Vik, then Hofn.
+    assert.strictEqual(r[1].place, 'Vik');
+    assert.strictEqual(r[2].place, 'Hofn');
+  });
+  test('empty start hint falls back to northernmost seed', () => {
+    const all = {
+      'vik': { place: 'Vik', kept: true, _isDayTrip: false },
+      'reykjavik': { place: 'Reykjavik', kept: true, _isDayTrip: false },
+      'hofn': { place: 'Hofn', kept: true, _isDayTrip: false },
+    };
+    const coords = {
+      'Reykjavik': [64.14, -21.94],
+      'Vik':       [63.42, -19.01],
+      'Hofn':      [64.25, -15.21],
+    };
+    const r = MaxEnginePicker.orderPlacePickerStays(all, n => coords[n], '');
+    assert.strictEqual(r.length, 3);
+    // Northernmost is Hofn — same as the no-hint baseline.
+    assert.strictEqual(r[0].place, 'Hofn');
+  });
+  test('start hint matching a non-stay (day trip) falls back to northernmost', () => {
+    const all = {
+      'reykjavik': { place: 'Reykjavik', kept: true, _isDayTrip: false },
+      'vik': { place: 'Vik', kept: true, _isDayTrip: false },
+      'grindavik': { place: 'Grindavik', kept: true, _isDayTrip: true, _dayTripHub: 'reykjavik' },
+    };
+    const coords = {
+      'Reykjavik': [64.14, -21.94],
+      'Vik':       [63.42, -19.01],
+      'Grindavik': [63.84, -22.43],
+    };
+    // Day trip is filtered out before seed selection — fall back to
+    // northernmost (Reykjavik), don't crash.
+    const r = MaxEnginePicker.orderPlacePickerStays(all, n => coords[n], 'grindavik');
+    assert.strictEqual(r.length, 2);
+    assert.strictEqual(r[0].place, 'Reykjavik');
+  });
+  test('start hint matching a stay with no coord falls back to northernmost', () => {
+    const all = {
+      'reykjavik': { place: 'Reykjavik', kept: true, _isDayTrip: false },
+      'vik': { place: 'Vik', kept: true, _isDayTrip: false },
+      'mystery': { place: 'Mystery', kept: true, _isDayTrip: false },
+    };
+    const coords = { 'Reykjavik': [64.14, -21.94], 'Vik': [63.42, -19.01] };
+    const r = MaxEnginePicker.orderPlacePickerStays(all, n => coords[n] || null, 'mystery');
+    // Mystery has no coord so it's not a candidate seed; fall back to
+    // northernmost geocoded stay (Reykjavik). Mystery still appears at
+    // the end via the no-geo append.
+    assert.strictEqual(r.length, 3);
+    assert.strictEqual(r[0].place, 'Reykjavik');
+    assert.strictEqual(r[r.length - 1].place, 'Mystery');
+  });
 });
 
 // ── Suite: buildDayTripNote (place-picker hero map: Step 8) ─────

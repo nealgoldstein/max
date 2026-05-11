@@ -2216,6 +2216,12 @@
   //   allPlaces   — map { lowercaseKey: { place, kept, _isDayTrip, ... } }
   //                 as built inside _renderPlacePickerMap
   //   coordLookup — function(placeName) → [lat,lng] | null
+  //   startKey    — optional lowercased place key. If provided AND
+  //                 it matches a geocoded stay in allPlaces, that
+  //                 stay is used as the nearest-neighbor seed
+  //                 instead of the northernmost. Otherwise we fall
+  //                 back to the northernmost-seed behavior (no
+  //                 crash on missing/non-stay/no-coord keys).
   //
   // Returns an array of the SAME entries (by reference) in nearest-
   // neighbor order starting from the geographically northernmost
@@ -2231,7 +2237,7 @@
   // hero-map view filters to !_isDayTrip and orders them — the
   // "all pins" intent is satisfied because not-kept and kept stays
   // BOTH flow through here when the call site passes them all.
-  function orderPlacePickerStays(allPlaces, coordLookup) {
+  function orderPlacePickerStays(allPlaces, coordLookup, startKey) {
     if (!allPlaces || typeof allPlaces !== 'object') return [];
     var stays = [];
     Object.keys(allPlaces).forEach(function (key) {
@@ -2250,10 +2256,20 @@
       return geo.concat(nogeo).map(function (s) { return s.info; });
     }
 
-    // Seed with the northernmost stay (highest lat). Stable across renders.
-    var seedIdx = 0;
-    for (var i = 1; i < geo.length; i++) {
-      if (geo[i].coord[0] > geo[seedIdx].coord[0]) seedIdx = i;
+    // Seed selection: prefer the user-supplied startKey when it
+    // matches a geocoded stay; otherwise fall back to the stable
+    // northernmost-stay seed.
+    var seedIdx = -1;
+    if (typeof startKey === 'string' && startKey) {
+      for (var k = 0; k < geo.length; k++) {
+        if (geo[k].key === startKey) { seedIdx = k; break; }
+      }
+    }
+    if (seedIdx < 0) {
+      seedIdx = 0;
+      for (var i = 1; i < geo.length; i++) {
+        if (geo[i].coord[0] > geo[seedIdx].coord[0]) seedIdx = i;
+      }
     }
     var ordered = [geo[seedIdx]];
     var remaining = geo.slice(0, seedIdx).concat(geo.slice(seedIdx + 1));

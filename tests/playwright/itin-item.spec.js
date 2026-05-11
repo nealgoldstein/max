@@ -115,8 +115,15 @@ test.describe('MA.4 — itinerary item buttons', () => {
     // the "No API key" error that refreshRestaurantSuggestions throws
     // every time drawDestMode renders without a saved API key. That's
     // an unrelated guard in callMax; not what this spec tests.
+    // v355.1: also tolerate "Sign in to use" — proxy-mode 401s for
+    // unsigned users now throw this quieter message instead of popping
+    // the sign-in modal (the modal-pop path was breaking this spec
+    // by intercepting pointer events on adjacent buttons).
     var realErrors = errors.filter(function(e){
-      return !/No API key/.test(e) && !/Failed to load resource/.test(e);
+      return !/No API key/.test(e)
+          && !/Failed to load resource/.test(e)
+          && !/Sign in to use/.test(e)
+          && !/Session expired/.test(e);
     });
     expect(realErrors, realErrors.join('\n')).toEqual([]);
   });
