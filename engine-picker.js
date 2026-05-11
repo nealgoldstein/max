@@ -1875,15 +1875,25 @@
         console.log(DBG, "skip: no pairs to apply (collectUserDayTripPairs returned {})");
         return;
       }
-      // Locate the corresponding destinations.
+      // Locate the corresponding destinations. Prefer exact normalized
+      // match; fall back to bidirectional substring match the way
+      // _findMatchingRequired does (covers cases like the LLM
+      // returning "Vík í Mýrdal" when the picker has "Vík", or vice
+      // versa). v355.8.
       function findDest(key){
         if (!key) return null;
+        var exact = null;
+        var substringMatch = null;
         for (var i = 0; i < trip.destinations.length; i++) {
           var d = trip.destinations[i];
           if (!d || !d.place) continue;
-          if (_normPlaceName(d.place) === key) return d;
+          var dN = _normPlaceName(d.place);
+          if (dN === key) { exact = d; break; }
+          if (!substringMatch && (dN.indexOf(key) >= 0 || key.indexOf(dN) >= 0)) {
+            substringMatch = d;
+          }
         }
-        return null;
+        return exact || substringMatch;
       }
       var absorbtions = [];
       srcKeys.forEach(function(srcKey){

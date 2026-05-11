@@ -9369,6 +9369,25 @@ function _pmClearDayTripFlag(placeName){
   _pmSetPlaceDayTrip(canon, false, "");
 }
 
+// v355.8: callable from the popout window. Looks up the parent's
+// marker for the given place key on the inline picker map and invokes
+// the day-trip popup there. The popout doesn't host its own popup
+// (would require re-implementing the radio + hub-dropdown UI inside
+// the popout's inlined script); instead it asks the parent window
+// to open the popup and then focuses the parent so the user sees it.
+// Returns true on success so the popout can fall back to its
+// scroll-to-row behavior if the parent isn't ready.
+function _pmOpenPlacePopupByKey(placeKey, targetId){
+  targetId = targetId || "tb-pm-map";
+  var state = _pmMaps && _pmMaps[targetId];
+  if (!state || !state.map || !state.markers) return false;
+  var key = String(placeKey || "").toLowerCase();
+  var marker = state.markers[key];
+  if (!marker || typeof _pmOpenPlacePopup !== "function") return false;
+  _pmOpenPlacePopup(key, marker, state.map);
+  return true;
+}
+
 function _pmOpenPlacePopup(placeKey, marker, mapInstance){
   if (!marker || !mapInstance) return;
   // Recompute allPlaces snapshot — same shape as _renderPlacePickerMap
@@ -9708,7 +9727,21 @@ function openPlacePickerMapModal(){
     +       '}else{'
     +         'var m=L.marker(ll,{icon:icon}).addTo(map);'
     +         'm.bindTooltip(tooltipText(info),{direction:"top",offset:[0,-10]});'
-    +         '(function(name){m.on("click",function(){scrollOpenerToPlace(name);});})(info.place);'
+          /* v355.8: clicking a pin in the popout opens the day-trip
+             popup on the PARENT window's inline picker map (where the
+             popup logic + state lives) and focuses the parent so the
+             user can see and interact with it. Falls back to the
+             original scroll-to-row behavior if the parent helper
+             isn't available. (No leading "+" — see unary-plus note
+             above.) */
+    +         '(function(name){m.on("click",function(){'
+    +           'try{var op=window.opener;'
+    +             'if(op&&!op.closed&&typeof op._pmOpenPlacePopupByKey==="function"){'
+    +               'if(op._pmOpenPlacePopupByKey(name.toLowerCase(),"tb-pm-map")){try{op.focus();}catch(_){};return;}'
+    +             '}'
+    +           '}catch(_){}'
+    +           'scrollOpenerToPlace(name);'
+    +         '});})(info.place);'
     +         'markers[k]=m;'
     +       '}'
     +     '});'
@@ -10996,7 +11029,7 @@ function renderActivityPicker(){
     var curExit  = (_tb.tbExit || "").replace(/"/g,'&quot;');
     listHtml = ''
       +'<div style="font-size:12px;color:#555;line-height:1.65;margin-bottom:16px;max-width:680px;">There are a lot of things to do and see in '+_pmEsc(placeLabel)+'. Max has included the things that intrigued you, and pre-checked those as well as the things most first-time visitors don’t want to miss. Uncheck what doesn’t appeal to you, check anything else that does, and add anything Max has missed as well. Planning is an iterative process, so you’ll probably be coming back here as you learn more about '+_pmEsc(placeLabel)+' and as you think about your trip.</div>'
-      +'<div id="tb-cat-nav" style="display:none;position:sticky;top:0;z-index:20;background:#f7f7f5;padding:8px 0;margin:6px -2px 4px;border-bottom:1px solid #e6e2d8;"></div>'
+      +'<div id="tb-cat-nav" style="display:none;background:#f7f7f5;padding:8px 0;margin:6px -2px 4px;border-bottom:1px solid #e6e2d8;"></div>'
       +'<div class="tb-act-list" id="tb-place-act-list"></div>'
       // Round CR: breadth discovery — "Other places worth considering."
       // Single button that fires an LLM call asking for places adjacent to
