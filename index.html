@@ -5874,12 +5874,33 @@ function toggleMdcItem(id) {
   if (!item) return;
   var wasChecked = item.checked;
   item.checked = !item.checked;
+  // v355.3: propagate the new checked state to each requiredPlace's
+  // _keep flag, mirroring the LLM-seed logic at the placeActivities
+  // build site. Without this, toggling an activity (e.g. checking a
+  // route after the initial render) flipped the chip on the row but
+  // left the route's endpoint places with _keep:false, so the picker
+  // map kept rendering them as greyed not-kept pins. The picker map
+  // surfaces this loudly now that kept/not-kept is a clear visual.
+  // _transitOnly + !iconic stays unkept on either path (matches the
+  // LLM-seed branching exactly).
+  (item.requiredPlaces || []).forEach(function(p){
+    if (!p) return;
+    if (p._transitOnly && !item.iconic) {
+      p._keep = false;
+    } else {
+      p._keep = !!item.checked;
+    }
+  });
   var div = document.getElementById("mdc-item-"+id);
   if (div) {
     div.className = "mdc-item" + (item.checked ? " checked" : "");
     var check = div.querySelector(".mdc-check");
     if (check) check.textContent = item.checked ? "\u2713" : "";
   }
+  // Re-paint the picker map(s) so the freshly-kept (or freshly-not-kept)
+  // pins update to their new style without waiting for the next full
+  // re-render. Cheap \u2014 markers diff by key inside the renderer.
+  if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
 
   // When unchecking: figure out which places just lost their "required" status
   // (places that were required ONLY by this item). Show a brief signal.
@@ -9559,15 +9580,18 @@ function openPlacePickerMapModal(){
     + '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""><\/script>'
     + '<script>'
     + '(function(){'
-    +   'var map=null,markers={},routeLine=null,spurs={},lastSig="";'
+    +   'var map=null,markers={},routeHalo=null,routeLine=null,spurs={},lastSig="";'
     +   'function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"}[c];});}'
     +   'function getState(){'
     +     'try{'
     +       'var op=window.opener;if(!op||op.closed)return null;'
     +       'var items=(op._tb&&op._tb.placeActivities)||[];'
     +       'var gc=op._coarseGeocode||{};'
-    +       /* v355: read the parent's "Start from" hint so the route
-         seed in the popout matches what the inline picker map shows. */
+            /* v355: read the parent's "Start from" hint so the route
+               seed in the popout matches what the inline picker map shows.
+               (Leading "+" intentionally OMITTED here — see v355.x note
+               above the function. JS would otherwise parse the next "+"
+               as unary, turning the string into NaN.) */
     +       'var startHint=(op._tb&&typeof op._tb._placePickerStart==="string")?op._tb._placePickerStart:"";'
     +       'var byKey={};'
     +       'items.forEach(function(it){'
@@ -9590,13 +9614,18 @@ function openPlacePickerMapModal(){
     +       'return out;'
     +     '}catch(e){return null;}'
     +   '}'
-    +   /* v354: nearest-neighbor ordering of stays for the route polyline.
-       Inlined here because the popout runs in its own document and
-       can\'t reach engine-picker.js\'s orderPlacePickerStays. Same
-       contract: northernmost stay seeds, then nearest-neighbor. */
-    +   /* v355: third arg startKey mirrors orderPlacePickerStays —
-       seed at the user-chosen stay when it matches a geocoded stay,
-       else fall back to the northernmost-stay seed. */
+        /* v354: nearest-neighbor ordering of stays for the route polyline.
+           Inlined here because the popout runs in its own document and
+           can\'t reach engine-picker.js\'s orderPlacePickerStays. Same
+           contract: northernmost stay seeds, then nearest-neighbor.
+           v355: third arg startKey mirrors orderPlacePickerStays — seed
+           at the user-chosen stay when it matches a geocoded stay, else
+           fall back to the northernmost-stay seed.
+
+           NB: comment block has NO leading "+" because doing so would
+           make the next line\'s "+" parse as unary plus on the string,
+           yielding NaN and breaking the popout entirely. (Found this
+           the hard way — the page came up blank.) */
     +   'function orderStays(byKey,startKey){'
     +     'var stays=[];var keys=[];'
     +     'Object.keys(byKey).forEach(function(k){var v=byKey[k];if(!v._isDayTrip&&v.lat!=null){stays.push(v);keys.push(k);}});'
@@ -9654,9 +9683,10 @@ function openPlacePickerMapModal(){
     +     '}'
     +     'var pts=getState();'
     +     'if(!pts){document.getElementById("ttl").textContent="Map — parent window closed";return;}'
-    +     /* v354: include day-trip flags in the change signature so the
-       popout repaints when the user toggles a place between stay and
-       day trip in the parent window. */
+          /* v354: include day-trip flags in the change signature so the
+             popout repaints when the user toggles a place between stay
+             and day trip in the parent window. (No leading "+" — see
+             unary-plus note above.) */
     +     'var sig=pts.map(function(p){return p.place+":"+(p.keep?1:0)+":"+(p.iconic?1:0)+":"+(p._isDayTrip?1:0)+":"+(p._dayTripHub||"");}).join("|")+"@"+(pts._startHint||"");'
     +     'if(sig===lastSig)return;'
     +     'lastSig=sig;'
@@ -9676,18 +9706,27 @@ function openPlacePickerMapModal(){
     +       '}'
     +     '});'
     +     'Object.keys(markers).forEach(function(k){if(!seen[k]){try{map.removeLayer(markers[k]);}catch(_){}delete markers[k];}});'
-    +     /* v354: main route polyline through every stay (kept or not),
-       in geographic order. Forest green, weight 5, opacity 0.95 —
-       matches the inline picker map. Re-drawn from scratch on every
-       repaint so order/membership stay in sync without bookkeeping. */
+          /* v354: main route polyline through every stay (kept or not),
+             in geographic order. Forest green, weight 5, opacity 0.95 —
+             matches the inline picker map. Re-drawn from scratch on every
+             repaint so order/membership stay in sync without bookkeeping.
+             (No leading "+" — see unary-plus note above.) */
     +     'if(routeLine){try{map.removeLayer(routeLine);}catch(_){}routeLine=null;}'
+    +     'if(routeHalo){try{map.removeLayer(routeHalo);}catch(_){}routeHalo=null;}'
     +     'var byKey=pts._byKey||{};'
     +     'var ordered=orderStays(byKey,pts._startHint||"");'
     +     'var routeCoords=[];ordered.forEach(function(v){routeCoords.push([v.lat,v.lng]);});'
-    +     'if(routeCoords.length>=2){routeLine=L.polyline(routeCoords,{color:"#1f7a3a",weight:5,opacity:0.95}).addTo(map);try{routeLine.bringToBack();}catch(_){}}'
-    +     /* Day-trip spurs: dashed orange line from each kept day-trip\'s
-       hub stay out to the day-trip place. Same colors/weights as the
-       inline map for visual parity. */
+          /* v355.2: white-halo + dotted-blue overlay (matches the trip-view
+             popup map style). No leading "+" — see unary-plus note above. */
+    +     'if(routeCoords.length>=2){'
+    +       'routeHalo=L.polyline(routeCoords,{color:"#fff",weight:7,opacity:0.9,lineCap:"round"}).addTo(map);'
+    +       'routeLine=L.polyline(routeCoords,{color:"#1a5fa8",weight:3,opacity:1.0,dashArray:"1 8",lineCap:"round"}).addTo(map);'
+    +       'try{routeHalo.bringToBack();}catch(_){}'
+    +     '}'
+          /* Day-trip spurs: dashed orange line from each kept day-trip\'s
+             hub stay out to the day-trip place. Same colors/weights as
+             the inline map for visual parity. (No leading "+" — see
+             unary-plus note above.) */
     +     'Object.keys(spurs).forEach(function(k){try{map.removeLayer(spurs[k]);}catch(_){}delete spurs[k];});'
     +     'pts.forEach(function(info){'
     +       'if(!info._isDayTrip||!info._dayTripHub)return;'
@@ -9836,7 +9875,10 @@ function _openPlacePickerMapOverlay(){
     if (info && info.lat != null) routeCoords.push([info.lat, info.lng]);
   });
   if (routeCoords.length >= 2) {
-    L.polyline(routeCoords, {color:"#1f7a3a", weight:5, opacity:0.95}).addTo(map).bringToBack();
+    // v355.2: matches the inline picker map and trip-view popup —
+    // white halo underlay + dotted blue overlay.
+    L.polyline(routeCoords, {color:"#fff", weight:7, opacity:0.9, lineCap:"round"}).addTo(map).bringToBack();
+    L.polyline(routeCoords, {color:"#1a5fa8", weight:3, opacity:1.0, dashArray:"1 8", lineCap:"round"}).addTo(map);
   }
   // Day-trip spurs: dashed orange line from each kept day-trip's
   // hub stay out to the day-trip place.
@@ -10283,7 +10325,7 @@ function _renderPlacePickerMap(targetId){
     L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {attribution:"© Esri", maxZoom:19}).addTo(leaflet);
     L.tileLayer("https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png", {opacity:1.0, maxZoom:19}).addTo(leaflet);
     mapDiv._pmInitialized = true;
-    state = _pmMaps[targetId] = { map: leaflet, markers: {}, polyline: null, spurs: {} };
+    state = _pmMaps[targetId] = { map: leaflet, markers: {}, polyline: null, polylineHalo: null, spurs: {} };
   }
   // Local aliases so the rest of the function reads as before
   var _pmMap = state.map;
@@ -10480,17 +10522,27 @@ function _renderPlacePickerMap(targetId){
     try { _pmMap.removeLayer(state.polyline); } catch(_){}
     state.polyline = null;
   }
+  if (state.polylineHalo) {
+    try { _pmMap.removeLayer(state.polylineHalo); } catch(_){}
+    state.polylineHalo = null;
+  }
   var routeCoords = [];
   orderedStays.forEach(function(info){
     var c = _pmCoord(info.place);
     if (c) routeCoords.push(c);
   });
   if (routeCoords.length >= 2) {
-    // Round v354 tune: bumped weight 3→5 and color from desaturated
-    // green (#5e8c63) to a richer forest green (#1f7a3a) so the
-    // route reads clearly against satellite tiles. Opacity stays high.
-    state.polyline = L.polyline(routeCoords, {color: "#1f7a3a", weight: 5, opacity: 0.95}).addTo(_pmMap);
-    try { state.polyline.bringToBack(); } catch(_){}
+    // Round v355.2: route style switched to the trip-view popup's
+    // proven "white halo + dotted accent" pattern. Two polylines
+    // stacked: a thick white underlay reads cleanly against any
+    // basemap (satellite tiles especially), and a thin dotted blue
+    // overlay on top gives it the distinctive "trail of blue dots
+    // inside a white tube" look. Same color/weights/dashArray as
+    // _openTripHeroMapWindow so the picker map and the trip-view
+    // popout match visually.
+    state.polylineHalo = L.polyline(routeCoords, {color: "#fff", weight: 7, opacity: 0.9, lineCap: "round"}).addTo(_pmMap);
+    state.polyline     = L.polyline(routeCoords, {color: "#1a5fa8", weight: 3, opacity: 1.0, dashArray: "1 8", lineCap: "round"}).addTo(_pmMap);
+    try { state.polylineHalo.bringToBack(); } catch(_){}
   }
 
   // Step 5: day-trip spurs. For each kept day trip with a valid

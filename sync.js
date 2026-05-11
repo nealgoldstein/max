@@ -1032,6 +1032,20 @@
         var qs = new URLSearchParams(location.search);
         if (qs.get('signin') === 'skip') return;
       } catch (_) {}
+      // v355.4: only auto-prompt for truly first-time visitors. If the
+      // user has any local trips already, they've used the app before
+      // and don't need to be greeted by a sign-in modal every visit —
+      // they know where the Sync button is. This also fixes the
+      // Playwright MA.4 spec: bootSeeded loads a trip into
+      // max-trips-index, and the 600ms timer was popping the modal
+      // mid-interaction and intercepting pointer events on adjacent
+      // buttons (a real UX bug, not just a test artifact).
+      var hasLocalTrips = false;
+      try {
+        var idx = JSON.parse(localStorage.getItem('max-trips-index') || '[]');
+        hasLocalTrips = Array.isArray(idx) && idx.length > 0;
+      } catch (_) {}
+      if (hasLocalTrips) return;
       // Wait until the page has rendered something, then offer
       // sign-in. 600ms gives enough time for the home screen to
       // mount but not so long the user starts wondering what
