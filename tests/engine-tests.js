@@ -1289,6 +1289,88 @@ describe('engine-picker.js — buildDayTripNote', () => {
   });
 });
 
+// ── Suite: collectUserDayTripPairs (place-picker hero map: 8b) ───
+//
+// Pair extractor used by publishTrip's user-day-trip absorption pass.
+// Both keys are normalized via _normPlaceName so callers can match
+// against destinations directly.
+
+describe('engine-picker.js — collectUserDayTripPairs', () => {
+  test('returns {} for missing input', () => {
+    assert.deepStrictEqual(MaxEnginePicker.collectUserDayTripPairs(null), {});
+    assert.deepStrictEqual(MaxEnginePicker.collectUserDayTripPairs(undefined), {});
+    assert.deepStrictEqual(MaxEnginePicker.collectUserDayTripPairs([]), {});
+  });
+  test('returns {} when no _isDayTrip flags are set', () => {
+    const items = [
+      { requiredPlaces: [
+          { place: 'Reykjavik' },
+          { place: 'Vík',       _isDayTrip: false, _dayTripHub: 'reykjavik' },
+        ] },
+    ];
+    assert.deepStrictEqual(MaxEnginePicker.collectUserDayTripPairs(items), {});
+  });
+  test('extracts a single pair, normalizing both keys', () => {
+    const items = [
+      { requiredPlaces: [
+          { place: 'Vík',       _isDayTrip: true,  _dayTripHub: 'Reykjavik' },
+        ] },
+    ];
+    const pairs = MaxEnginePicker.collectUserDayTripPairs(items);
+    assert.strictEqual(Object.keys(pairs).length, 1);
+    // _normPlaceName strips diacritics and lowercases — both source and
+    // hub should be normalized identically so callers don't have to.
+    const srcKey = Object.keys(pairs)[0];
+    assert.strictEqual(srcKey, srcKey.toLowerCase(), 'source key is lowercased');
+    assert.ok(srcKey.indexOf('vik') >= 0, 'diacritics stripped from source');
+    assert.strictEqual(pairs[srcKey], pairs[srcKey].toLowerCase(), 'hub key is lowercased');
+    assert.strictEqual(pairs[srcKey], 'reykjavik');
+  });
+  test('dedupes when the same place appears in multiple activities', () => {
+    const items = [
+      { requiredPlaces: [{ place: 'Vík', _isDayTrip: true, _dayTripHub: 'Reykjavik' }] },
+      { requiredPlaces: [{ place: 'Vík', _isDayTrip: true, _dayTripHub: 'Selfoss' }] },
+    ];
+    const pairs = MaxEnginePicker.collectUserDayTripPairs(items);
+    assert.strictEqual(Object.keys(pairs).length, 1, 'one entry per source');
+    // First hub seen wins (stable for re-runs).
+    assert.strictEqual(pairs['vik'], 'reykjavik');
+  });
+  test('skips entries missing a hub', () => {
+    const items = [
+      { requiredPlaces: [
+          { place: 'Mystery', _isDayTrip: true, _dayTripHub: '' },
+          { place: 'Other',   _isDayTrip: true /* hub omitted */ },
+        ] },
+    ];
+    assert.deepStrictEqual(MaxEnginePicker.collectUserDayTripPairs(items), {});
+  });
+  test('drops self-referential pairs (source same as hub)', () => {
+    const items = [
+      { requiredPlaces: [
+          { place: 'Reykjavik', _isDayTrip: true, _dayTripHub: 'reykjavik' },
+        ] },
+    ];
+    assert.deepStrictEqual(MaxEnginePicker.collectUserDayTripPairs(items), {});
+  });
+  test('handles multiple distinct sources to different hubs', () => {
+    const items = [
+      { requiredPlaces: [
+          { place: 'Vík',       _isDayTrip: true, _dayTripHub: 'Reykjavik' },
+          { place: 'Geirangerfjord', _isDayTrip: true, _dayTripHub: 'Ålesund' },
+        ] },
+    ];
+    const pairs = MaxEnginePicker.collectUserDayTripPairs(items);
+    assert.strictEqual(Object.keys(pairs).length, 2);
+    assert.ok(pairs['vik'] === 'reykjavik');
+    // Both keys normalized — find by substring match in case _normPlaceName
+    // does something specific with the special characters.
+    const norwayKeys = Object.keys(pairs).filter(k => k.indexOf('geiranger') >= 0);
+    assert.strictEqual(norwayKeys.length, 1);
+    assert.ok(pairs[norwayKeys[0]].indexOf('alesund') >= 0 || pairs[norwayKeys[0]].indexOf('ålesund') >= 0);
+  });
+});
+
 // ── Suite: groupCandidatesByMustDo (Round HX) ───────────────────
 //
 // Pure derivation extracted from renderCandidateCards. Verifies the

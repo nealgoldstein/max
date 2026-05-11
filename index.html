@@ -11563,6 +11563,32 @@ function continuePlaceModeToStep2(){
   // the case where the user clicks Build without blurring the input first.
   if (_tb.entry) _tb.entry = _titleCaseCity(_tb.entry);
   if (_tb.tbExit) _tb.tbExit = _titleCaseCity(_tb.tbExit);
+  // v355.7: Promote predictor-based day-trip chips to real user-set
+  // flags before we hand off to candidate generation. The picker
+  // shows "· day trip from X" chips driven by _tb._dayTripPreds
+  // (geographic proximity + nights heuristic) AS WELL AS user-toggled
+  // flags (_isDayTrip:true on requiredPlace). Without this promotion
+  // only the user-toggled flags survived to publishTrip's day-trip
+  // absorption pass — but the user reasonably expects "what I saw on
+  // the picker is what I get on the trip." A chip the user saw and
+  // didn't override is implicit acceptance. The "user decides" rule
+  // still holds: an explicit toggle (popup, "+ stay the night"
+  // button) wins over the predictor on the same place.
+  if (_tb._dayTripPreds && typeof _tb._dayTripPreds === "object") {
+    (_tb.placeActivities || []).forEach(function(item){
+      if (!item || !Array.isArray(item.requiredPlaces)) return;
+      item.requiredPlaces.forEach(function(p){
+        if (!p || !p.place) return;
+        if (p._isDayTrip) return; // explicit user-set wins; don't override
+        var key = p.place.toLowerCase();
+        var predictedHub = _tb._dayTripPreds[key];
+        if (predictedHub) {
+          p._isDayTrip = true;
+          p._dayTripHub = String(predictedHub).toLowerCase();
+        }
+      });
+    });
+  }
   // Only carry forward activities that have at least one _keep:true place.
   // For each, narrow requiredPlaces to just the kept ones \u2014 this is the
   // user's expressed commitment, not the full superset Max suggested.
@@ -11574,6 +11600,14 @@ function continuePlaceModeToStep2(){
       // doesn't know about it and shouldn't.
       var clean = {place: p.place, country: p.country};
       if (typeof p.nights === "number") clean.nights = p.nights;
+      // v355.7: preserve _isDayTrip / _dayTripHub through the
+      // _keep-strip so re-edit rehydration restores the user's
+      // day-trip choices, and so any future code reading from
+      // mdcItems instead of placeActivities can see them too.
+      if (p._isDayTrip === true) {
+        clean._isDayTrip = true;
+        clean._dayTripHub = p._dayTripHub || "";
+      }
       return clean;
     });
     var clone = Object.assign({}, i, { checked: true, requiredPlaces: keptPlaces });

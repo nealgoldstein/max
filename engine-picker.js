@@ -1815,6 +1815,182 @@
       }
     })();
 
+    // ── v355.7: user-driven day-trip absorption ───────────────
+    // The picker collects explicit day-trip choices via the pin
+    // popup and sidebar chips (place-picker hero map, Step 6/7),
+    // stored as _isDayTrip + _dayTripHub on
+    // _tb.placeActivities[*].requiredPlaces[*]. The previous round
+    // wired this through to the LLM as a soft hint (Step 8's
+    // dayTripNote in the candidate-generation prompt), but the
+    // hard guarantee — the place actually lands as a chip on the
+    // hub destination's dayTrips, not as a standalone destination —
+    // was missing. This pass enforces the user's choice
+    // deterministically after _reconcileDestinations has produced
+    // trip.destinations from the kept candidates.
+    //
+    // Mirrors the disabled _autoClusterDayTrips structure (chip
+    // shape, hub.nights += src.nights, dest.dayTrips push, source
+    // filtered from trip.destinations, dates recomputed). Diff from
+    // the auto path: no distance / nights heuristics — the user
+    // already decided. Idempotent on rebuild via the existing-chip
+    // check that mirrors Round EA.
+    (function _applyUserDayTripChoices(){
+      // v355.7-debug: noisy console traces gated behind a single tag
+      // so they're easy to grep in dev tools and easy to strip later.
+      // The day-trip absorption pass has multiple silent early-return
+      // paths; without these logs, "day trips don't persist" is hard
+      // to diagnose without instrumenting locally.
+      var DBG = "[Max picker→trip day-trip]";
+      if (!Array.isArray(trip.destinations) || !trip.destinations.length) {
+        console.log(DBG, "skip: no destinations on the built trip");
+        return;
+      }
+      if (!_tb) {
+        console.log(DBG, "skip: _tb missing at publishTrip");
+        return;
+      }
+      var paLen = Array.isArray(_tb.placeActivities) ? _tb.placeActivities.length : "(not-array)";
+      console.log(DBG, "_tb.placeActivities length:", paLen);
+      // Surface raw flag presence so we can see if the picker actually
+      // landed any _isDayTrip / _dayTripHub on requiredPlaces.
+      var rawFlagged = [];
+      (Array.isArray(_tb.placeActivities) ? _tb.placeActivities : []).forEach(function(item){
+        (item && item.requiredPlaces || []).forEach(function(p){
+          if (p && p._isDayTrip) {
+            rawFlagged.push((p.place || "?") + " → " + (p._dayTripHub || "(no hub)"));
+          }
+        });
+      });
+      console.log(DBG, "raw _isDayTrip flags found:", rawFlagged.length, rawFlagged);
+      // Pair extraction is the testable piece — see
+      // collectUserDayTripPairs above. Returns {sourceKey: hubKey},
+      // both normalized via _normPlaceName so we can match against
+      // destinations directly below.
+      var pairs = collectUserDayTripPairs(_tb.placeActivities);
+      var srcKeys = Object.keys(pairs);
+      console.log(DBG, "normalized pairs:", pairs);
+      console.log(DBG, "trip.destinations places (normalized):",
+        trip.destinations.map(function(d){ return _normPlaceName(d.place || "") + " [" + (d.place || "") + "]"; }));
+      if (!srcKeys.length) {
+        console.log(DBG, "skip: no pairs to apply (collectUserDayTripPairs returned {})");
+        return;
+      }
+      // Locate the corresponding destinations.
+      function findDest(key){
+        if (!key) return null;
+        for (var i = 0; i < trip.destinations.length; i++) {
+          var d = trip.destinations[i];
+          if (!d || !d.place) continue;
+          if (_normPlaceName(d.place) === key) return d;
+        }
+        return null;
+      }
+      var absorbtions = [];
+      srcKeys.forEach(function(srcKey){
+        var hubKey = pairs[srcKey];
+        if (!hubKey || hubKey === srcKey) return;
+        var src = findDest(srcKey);
+        var hub = findDest(hubKey);
+        if (!src) {
+          console.log(DBG, "no destination matches source", srcKey, "— picker flagged a day trip but the LLM didn't make it a candidate");
+          return;
+        }
+        if (!hub) {
+          console.log(DBG, "no destination matches hub", hubKey, "for source", srcKey);
+          return;
+        }
+        if (src === hub) return;
+        // Don't absorb into a destination that itself is being absorbed —
+        // would create an orphan chip.
+        if (pairs[hubKey] && pairs[hubKey] !== hubKey) {
+          console.log(DBG, "skipping", srcKey, "— hub", hubKey, "is itself being absorbed");
+          return;
+        }
+        absorbtions.push({ src: src, hub: hub });
+      });
+      if (!absorbtions.length) {
+        console.log(DBG, "no absorbtions matched destinations after pair lookup");
+        return;
+      }
+      console.log(DBG, "applying", absorbtions.length, "absorbtions:",
+        absorbtions.map(function(a){ return a.src.place + " → " + a.hub.place; }));
+      absorbtions.forEach(function(a){
+        if (!Array.isArray(a.hub.dayTrips)) a.hub.dayTrips = [];
+        var srcKey = _normPlaceName(a.src.place || "");
+        var alreadyChip = a.hub.dayTrips.some(function(dt){
+          return dt && dt.place && _normPlaceName(dt.place) === srcKey;
+        });
+        if (alreadyChip) {
+          // Idempotent: the chip already represents this absorption,
+          // but the source dest still needs to be filtered out below.
+          return;
+        }
+        a.hub.dayTrips.push({
+          place: a.src.place,
+          country: a.src.country || "",
+          lat: (typeof a.src.lat === "number") ? a.src.lat
+                : (typeof getCityCenter === "function" ? (getCityCenter(a.src.place) || [null, null])[0] : null),
+          lng: (typeof a.src.lng === "number") ? a.src.lng
+                : (typeof getCityCenter === "function" ? (getCityCenter(a.src.place) || [null, null])[1] : null),
+          whyItFits: a.src.intent || "",
+          attachedEvents: (a.src.attachedEvents || []).slice(),
+          sourceNights: a.src.nights || 1,
+          absorbedFromHub: a.hub.place,
+          userChosen: true, // marks as picker-driven (vs. auto-cluster)
+          clusteredAt: new Date().toISOString()
+        });
+        // Roll absorbed nights into hub (Round DA semantics — the
+        // traveler is still "at" the hub for N+chip nights total;
+        // the chip is just a daytime visit during that stay).
+        a.hub.nights = (a.hub.nights || 0) + (a.src.nights || 1);
+      });
+      // Remove absorbed sources and recompute dates trip-wide.
+      var absorbedIds = {};
+      absorbtions.forEach(function(a){ absorbedIds[a.src.id] = true; });
+      trip.destinations = trip.destinations.filter(function(d){ return !absorbedIds[d.id]; });
+      // Recompute dates from the original startDate. Mirrors the
+      // auto-cluster's date-recompute block: rebuild days with the
+      // new range, replay items by clamped index so the user's
+      // sights/restaurants survive the night-rollup.
+      var curDate = new Date(startDate);
+      trip.destinations.forEach(function(d){
+        var dateFrom = curDate.toISOString().slice(0, 10);
+        var next = new Date(curDate); next.setDate(next.getDate() + (d.nights || 0));
+        var dateTo = next.toISOString().slice(0, 10);
+        d.dateFrom = dateFrom;
+        d.dateTo = dateTo;
+        var savedItemsByIdx = (Array.isArray(d.days) ? d.days : []).map(function(day){
+          return Array.isArray(day && day.items) ? day.items.slice() : [];
+        });
+        if (typeof makeDays === "function") {
+          d.days = makeDays(d.id, d.place, d.place, dateFrom, d.nights || 0);
+          if (savedItemsByIdx.length && d.days.length) {
+            var lastNew = d.days.length - 1;
+            savedItemsByIdx.forEach(function(items, oldIdx){
+              if (!items || !items.length) return;
+              var targetIdx = Math.min(oldIdx, lastNew);
+              var targetDay = d.days[targetIdx];
+              if (!targetDay) return;
+              if (!Array.isArray(targetDay.items)) targetDay.items = [];
+              var existing = {};
+              targetDay.items.forEach(function(it){ if (it && it.n) existing[it.n.toLowerCase()] = true; });
+              items.forEach(function(it){
+                if (!it) return;
+                if (it.type === "transport" || it.type === "transit") return;
+                var k = (it.n || "").toLowerCase();
+                if (k && existing[k]) return;
+                targetDay.items.push(it);
+                if (k) existing[k] = true;
+              });
+            });
+          }
+        }
+        curDate = next;
+      });
+      var summary = absorbtions.map(function(a){ return a.src.place + " → day trip from " + a.hub.place; }).join("; ");
+      console.log("[Max] picker day-trip choices applied (" + absorbtions.length + "): " + summary);
+    })();
+
     // Pre-generate city data for all new destinations, throttled 3-at-a-time.
     // Fire-and-forget — the plan opens immediately and cards light up as data arrives.
     (function throttledGenerate(dests,limit){
@@ -2206,6 +2382,42 @@
     return "\nUSER DAY-TRIP DECISIONS: The traveler has pre-flagged the following places as day trips on the picker, not stand-alone overnight stops. Treat them accordingly when shaping candidates and any narrative around lodging — " + parts.join("; ") + ".\n";
   }
 
+  // ── collectUserDayTripPairs (place-picker hero map: Step 8b) ───
+  // Walk _tb.placeActivities[*].requiredPlaces[*] and extract the
+  // user's explicit day-trip designations as a {sourceKey: hubKey}
+  // map. Both keys are canonicalized via _normPlaceName so callers
+  // can match against destinations / candidates without re-normalizing.
+  //
+  // Used by publishTrip's _applyUserDayTripChoices pass to absorb
+  // the user's choices into the built trip's destinations. Pure —
+  // no side effects, no global reads beyond the helper itself.
+  //
+  // Behavior:
+  //   * Same place appearing in multiple activities is deduped to
+  //     the FIRST non-empty hub seen (stable across re-runs).
+  //   * Self-referential entries (sourceKey === hubKey) are dropped
+  //     as defensive — would create a no-op absorption.
+  //   * Entries missing a place name OR a hub are skipped.
+  //   * Entries with _isDayTrip but no _dayTripHub are skipped — no
+  //     hub means there's nothing to absorb the place into.
+  function collectUserDayTripPairs(placeActivities) {
+    var pairs = {};
+    if (!Array.isArray(placeActivities)) return pairs;
+    placeActivities.forEach(function (item) {
+      if (!item || !Array.isArray(item.requiredPlaces)) return;
+      item.requiredPlaces.forEach(function (p) {
+        if (!p || !p._isDayTrip || !p._dayTripHub || !p.place) return;
+        var srcKey = _normPlaceName(p.place);
+        if (!srcKey) return;
+        if (srcKey in pairs) return; // dedupe to first hub seen
+        var hubKey = _normPlaceName(p._dayTripHub);
+        if (!hubKey || hubKey === srcKey) return;
+        pairs[srcKey] = hubKey;
+      });
+    });
+    return pairs;
+  }
+
   // ── orderPlacePickerStays (place-picker hero map: Step 2) ──────
   // Order the kept "stay" places (kept && !_isDayTrip) for the
   // place-picker map's main route polyline. Simpler than
@@ -2304,6 +2516,9 @@
     orderPlacePickerStays:  orderPlacePickerStays,
     // place-picker hero map (Step 8)
     buildDayTripNote:        buildDayTripNote,
+    // place-picker hero map (Step 8b) — pair extractor used by
+    // publishTrip's user-day-trip absorption pass + by tests.
+    collectUserDayTripPairs: collectUserDayTripPairs,
     buildBrief:             buildBrief,
     cloneMdcItems:          cloneMdcItems,
     deriveTripName:         deriveTripName,
@@ -2594,5 +2809,6 @@
   global.orderKeptCandidates     = orderKeptCandidates;
   global.orderPlacePickerStays   = orderPlacePickerStays;
   global.buildDayTripNote        = buildDayTripNote;
+  global.collectUserDayTripPairs = collectUserDayTripPairs;
 
 })(typeof window !== 'undefined' ? window : this);
