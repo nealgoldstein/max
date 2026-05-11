@@ -8674,8 +8674,17 @@ function _pmHydratePreview(slot){
       var narrPara = '<p style="margin:0 0 8px;line-height:1.65;">'
         + _pmEsc(full)
         + '</p>';
+      // v358.2: include the trip-view's "Dig deeper" affordance —
+      // same content surface available in both places, so the user
+      // can keep digging from either the picker or the trip view.
+      var digBtn = '<a class="pm-row-story-dig" href="#"'
+        + ' style="font-size:11px;color:#1a5fa8;text-decoration:none;cursor:pointer;display:inline-block;margin-top:4px;"'
+        + ' onclick="_pmDigDeeper(this);event.preventDefault();event.stopPropagation();return false;"'
+        + '>Tell me more →</a>';
       fullDiv.innerHTML = narrPara
-        + '<div class="pm-row-story-todo" style="display:none;"></div>';
+        + '<div class="pm-row-story-todo" style="display:none;"></div>'
+        + digBtn
+        + '<div class="pm-row-story-deep" style="display:none;margin-top:6px;font-style:normal;color:#333;line-height:1.65;"></div>';
     }
     // Only show the toggle if there's actually more to read OR a
     // todo list might add value (always true if narrative loaded).
@@ -8755,6 +8764,66 @@ function _pmToggleStoryFull(linkEl){
   }
 }
 window._pmToggleStoryFull = _pmToggleStoryFull;
+
+// v358.2: "Tell me more →" handler. Mirrors the trip view's
+// "Dig deeper" — sends the existing narrative back to the LLM with
+// "go further into the history or cultural significance" appended,
+// renders the longer continuation inline below the original.
+function _pmDigDeeper(linkEl){
+  var slot = linkEl && linkEl.closest ? linkEl.closest(".pm-row-story") : null;
+  if (!slot) return;
+  var placeName = slot.getAttribute("data-place") || "";
+  var fullDiv = slot.querySelector(".pm-row-story-full");
+  if (!placeName || !fullDiv) return;
+  var deepDiv = fullDiv.querySelector(".pm-row-story-deep");
+  if (!deepDiv) return;
+  // If we've already loaded a deeper read for this place, just toggle
+  // it. Subsequent clicks add another layer (chain digging) — match
+  // the trip view's behavior of appending more content.
+  var alreadyHasContent = deepDiv.children.length > 0;
+  if (alreadyHasContent && deepDiv.style.display === "none") {
+    deepDiv.style.display = "block";
+    linkEl.textContent = "Hide ←";
+    return;
+  }
+  if (alreadyHasContent && deepDiv.style.display === "block") {
+    deepDiv.style.display = "none";
+    linkEl.textContent = "Tell me more →";
+    return;
+  }
+  // First-time fetch.
+  deepDiv.style.display = "block";
+  deepDiv.innerHTML = '<span style="color:#888;font-style:italic;">Max is thinking…</span>';
+  linkEl.textContent = "thinking…";
+  linkEl.style.pointerEvents = "none";
+  var cache = window._placeNarrativeCache || {};
+  var key = placeName.toLowerCase();
+  var storyText = cache[key] || "";
+  // Synthesize a minimal originalPrompt so digDeeper can build a
+  // plausible conversation context. The LLM doesn't actually need
+  // the original prompt to be byte-equivalent — it just needs the
+  // user message to set context.
+  var originalPrompt = "Tell me the story of " + placeName + ".";
+  // Reuse a per-place container id so re-expanding the row doesn't
+  // create duplicates. digDeeper appends; we own the lifecycle here.
+  var containerId = "pm-deep-" + key.replace(/[^a-z0-9]/g, "");
+  deepDiv.id = containerId;
+  if (typeof digDeeper === "function") {
+    digDeeper(placeName, null, originalPrompt, storyText, containerId).then(function(){
+      linkEl.textContent = "Hide ←";
+      linkEl.style.pointerEvents = "";
+    }, function(){
+      deepDiv.innerHTML = '<span style="color:#b04020;font-size:11px;">Couldn\'t reach Max — try again.</span>';
+      linkEl.textContent = "Tell me more →";
+      linkEl.style.pointerEvents = "";
+    });
+  } else {
+    deepDiv.innerHTML = "";
+    linkEl.textContent = "Tell me more →";
+    linkEl.style.pointerEvents = "";
+  }
+}
+window._pmDigDeeper = _pmDigDeeper;
 
 // Two-column activity ↔ place picker, grouped by section. Each section
 // header is a verb phrase ("Travel on iconic trains", "Walk in the
