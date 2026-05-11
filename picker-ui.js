@@ -906,6 +906,17 @@
           var changed = newVal !== global._tb[key];
           global._tb[key] = newVal;
           if (typeof global._rebuildGettingToFromFields === "function") global._rebuildGettingToFromFields();
+          // v355.12: anchor the route to the new entry/exit. Without
+          // this, changing the arrival/departure city on the trip-
+          // details strip captured the new value but left the
+          // numbered candidate sequence (and pin numbers) frozen on
+          // the old ordering. _tbResequenceCandidates re-runs
+          // orderKeptCandidates against the active set + the new
+          // entry/exit, then renderCandidateCards picks up the fresh
+          // `order` fields for each card and pin.
+          if (changed && typeof global._tbResequenceCandidates === "function") {
+            try { global._tbResequenceCandidates(); } catch (e) {}
+          }
           if (typeof global.renderCandidateCards === "function") global.renderCandidateCards(global._tb.candidates);
           if (changed && newVal && global._ceMap) {
             try { if (typeof global._renderEntryPointsOnCeMap === "function") global._renderEntryPointsOnCeMap(global._tb.region || ""); } catch (e) {}
