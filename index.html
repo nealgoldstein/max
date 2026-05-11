@@ -11605,6 +11605,27 @@ function continuePlaceModeToStep2(){
   // the case where the user clicks Build without blurring the input first.
   if (_tb.entry) _tb.entry = _titleCaseCity(_tb.entry);
   if (_tb.tbExit) _tb.tbExit = _titleCaseCity(_tb.tbExit);
+  // v355.11: Promote the picker map's "Start from" choice into
+  // _tb.entry so the built trip's destination order reflects it.
+  // _placePickerStart was previously picker-map-only (seeded the
+  // preview polyline). publishTrip → orderKeptCandidates anchors
+  // the first destination to _tb.entry; without this promotion
+  // the trip rebuild ignored the start choice and the cards/pin
+  // numbers stayed in geographic-default order. The dropdown is
+  // a deliberate user action, so it overrides any prior _tb.entry
+  // value (typed into the brief, hydrated from a previous build).
+  if (_tb._placePickerStart && typeof _tb._placePickerStart === "string") {
+    var startKey = _tb._placePickerStart;
+    var startName = "";
+    (_tb.placeActivities || []).forEach(function(item){
+      if (!item || !Array.isArray(item.requiredPlaces)) return;
+      item.requiredPlaces.forEach(function(p){
+        if (startName) return;
+        if (p && p.place && p.place.toLowerCase() === startKey) startName = p.place;
+      });
+    });
+    if (startName) _tb.entry = startName;
+  }
   // v355.7: Promote predictor-based day-trip chips to real user-set
   // flags before we hand off to candidate generation. The picker
   // shows "· day trip from X" chips driven by _tb._dayTripPreds
