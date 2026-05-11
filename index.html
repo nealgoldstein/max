@@ -17391,8 +17391,11 @@ function mergeEssentialsIntoSuggestions(dest,essentials){
       if(!item||!item.name) return;
       if(existingNames[item.name.toLowerCase()]) return;
       sidCtr++;
-      var lat=center?center[0]+(Math.random()-.5)*.018:null;
-      var lng=center?center[1]+(Math.random()-.5)*.022:null;
+      // v355.10: tightened scatter — see generateCityData for the why
+      // (coastal cities had ATM/grocery/etc. pins drifting into the
+      // ocean). Tight halo until Nominatim resolves real coords.
+      var lat=center?center[0]+(Math.random()-.5)*.003:null;
+      var lng=center?center[1]+(Math.random()-.5)*.004:null;
       dest.suggestions.push({
         id:"s"+sidCtr,type:type,n:item.name,st:item.name,
         note:item.note||null,lat:lat,lng:lng,approx:true
@@ -17480,8 +17483,15 @@ async function generateCityData(place,destId,_isAutoRetry){
       var _genCenter = _cached.cityCenter && _cached.cityCenter[0] ? _cached.cityCenter : (typeof getCityCenter === "function" ? getCityCenter(_destRef.place) : null);
       _destRef.suggestions = (Array.isArray(_cached.sights) ? _cached.sights : []).map(function(s){
         sidCtr++;
-        var sLat = s.lat || (_genCenter ? _genCenter[0] + (Math.random() - .5) * .025 : null);
-        var sLng = s.lng || (_genCenter ? _genCenter[1] + (Math.random() - .5) * .030 : null);
+        // v355.10: random scatter dropped from ±0.025/0.030 deg
+        // (~2-3 km radius) to ±0.003/0.004 deg (~300-400 m). The
+        // wider radius was throwing approx-coord pins into the
+        // ocean for coastal cities (Vík south coast: half the
+        // random pins landed offshore). Tight halo keeps sights
+        // distinguishable visually while staying inside the city
+        // footprint until Nominatim resolves real coords.
+        var sLat = s.lat || (_genCenter ? _genCenter[0] + (Math.random() - .5) * .003 : null);
+        var sLng = s.lng || (_genCenter ? _genCenter[1] + (Math.random() - .5) * .004 : null);
         return {id:"s"+sidCtr, type:"sight", n:s.name, st:s.st||s.name, note:s.desc||null, lat:sLat, lng:sLng, approx:!s.lat, iconic:!!s.iconic, durationHours:(typeof s.durationHours==="number"&&s.durationHours>0)?s.durationHours:null, url:s.url||null};
       });
       if (_cached.districts && !_destRef.generatedDistricts) _destRef.generatedDistricts = _cached.districts;
@@ -17590,8 +17600,10 @@ async function generateCityData(place,destId,_isAutoRetry){
       if(data.transitHub) destRef.generatedTransitHub=data.transitHub;
       destRef.suggestions=(Array.isArray(data.sights)?data.sights:[]).map(function(s){
         sidCtr++;
-        var sLat=s.lat||(genCenter?genCenter[0]+(Math.random()-.5)*.025:null);
-        var sLng=s.lng||(genCenter?genCenter[1]+(Math.random()-.5)*.030:null);
+        // v355.10: tightened scatter — see twin block above for the
+        // why (coastal-city pins were drifting into the ocean).
+        var sLat=s.lat||(genCenter?genCenter[0]+(Math.random()-.5)*.003:null);
+        var sLng=s.lng||(genCenter?genCenter[1]+(Math.random()-.5)*.004:null);
         return {id:"s"+sidCtr,type:"sight",n:s.name,st:s.st||s.name,note:s.desc||null,lat:sLat,lng:sLng,approx:!s.lat,iconic:!!s.iconic,durationHours:(typeof s.durationHours==="number"&&s.durationHours>0)?s.durationHours:null,url:s.url||null};
       });
       // Auto-seed iconic sights onto days so the user lands on a plan, not
@@ -25370,9 +25382,11 @@ function drawDestMode(destId){
         var gc=getCityCenter(dest.place)||cached.cityCenter;
         dest.suggestions=cached.sights.map(function(s){
           sidCtr++;
+          // v355.10: tightened scatter — see generateCityData for the why
+          // (coastal-city pins were drifting into the ocean).
           return {id:"s"+sidCtr,type:"sight",n:s.name,st:s.st||s.name,note:s.desc||null,
-            lat:s.lat||(gc?gc[0]+(Math.random()-.5)*.025:null),
-            lng:s.lng||(gc?gc[1]+(Math.random()-.5)*.030:null),approx:!s.lat,iconic:!!s.iconic,durationHours:(typeof s.durationHours==="number"&&s.durationHours>0)?s.durationHours:null,url:s.url||null};
+            lat:s.lat||(gc?gc[0]+(Math.random()-.5)*.003:null),
+            lng:s.lng||(gc?gc[1]+(Math.random()-.5)*.004:null),approx:!s.lat,iconic:!!s.iconic,durationHours:(typeof s.durationHours==="number"&&s.durationHours>0)?s.durationHours:null,url:s.url||null};
         });
       }
     }
@@ -26394,8 +26408,9 @@ function migrateDest(dest){
             sidCtr++;
             var mc=getCityCenter(dest.place);
             dest.suggestions.push({id:"s"+sidCtr,type:"sight",n:s.n,st:s.st||s.n,note:null,
-              lat:mc?mc[0]+(Math.random()-.5)*.025:null,
-              lng:mc?mc[1]+(Math.random()-.5)*.030:null,approx:true});
+              // v355.10: tightened scatter — see generateCityData for the why.
+              lat:mc?mc[0]+(Math.random()-.5)*.003:null,
+              lng:mc?mc[1]+(Math.random()-.5)*.004:null,approx:true});
           }
         });
         day.items=[];
