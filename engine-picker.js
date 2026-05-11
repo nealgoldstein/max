@@ -432,6 +432,22 @@
     return cands.filter(function (c) { return c && c.status === 'keep'; });
   }
 
+  // ── activeCandidates (Round HZ: picker hero map) ─────────
+  // Returns candidates that are "in the route" — accepted plus
+  // unchecked (status === null) — but not rejected. The hero-map
+  // picker renders the route polyline and numbered ordinals
+  // across this set rather than just the kept subset, so the
+  // unchecked LLM suggestions show up as tentative stops the
+  // user is reacting to. See picker-hero-map.md for the three-
+  // state model.
+  //
+  // Pure filter. Returns a new array; tolerates null/undefined
+  // input by returning [].
+  function activeCandidates(cands) {
+    if (!cands || !cands.length) return [];
+    return cands.filter(function (c) { return c && c.status !== 'reject'; });
+  }
+
   // ── groupByCountry (Round HX.7) ──────────────────────────
   // Region-lens primary grouping. Buckets candidates by their
   // `country` field (with "Unknown" as the fallback) and returns the
@@ -1271,6 +1287,35 @@
   async function publishTrip(){
     var kept=(_tb.candidates||[]).filter(function(c){return c.status==="keep";});
     if(!kept.length) return;
+
+    // Round HZ (picker hero map, step 7): entry/exit validation.
+    // During the picker phase, orderKeptCandidates runs on the ACTIVE
+    // set (accepted + unchecked) and can infer _tb.tbExit from an
+    // unchecked major-gateway candidate (round-trip heuristic at the
+    // top of orderKeptCandidates). At publish time we order only the
+    // accepted set; if _tb.entry or _tb.tbExit references a non-accepted
+    // place, it's stale and the substring-match in orderKeptCandidates
+    // will silently fail to find an entry/exit anchor. Clearer to blank
+    // it explicitly so the inference path runs from a clean slate —
+    // first kept in geographic order becomes the implicit arrival, last
+    // becomes the implicit departure. The user's typed entry/exit on
+    // the Trip Details strip survives if it matches a kept candidate.
+    if (_tb.entry) {
+      var entryMatchesKept = kept.some(function(c){
+        var cN = _normPlaceName(c.place||"");
+        var eN = _normPlaceName(_tb.entry||"");
+        return cN && eN && (cN.indexOf(eN) >= 0 || eN.indexOf(cN) >= 0);
+      });
+      if (!entryMatchesKept) _tb.entry = "";
+    }
+    if (_tb.tbExit) {
+      var exitMatchesKept = kept.some(function(c){
+        var cN = _normPlaceName(c.place||"");
+        var xN = _normPlaceName(_tb.tbExit||"");
+        return cN && xN && (cN.indexOf(xN) >= 0 || xN.indexOf(cN) >= 0);
+      });
+      if (!exitMatchesKept) _tb.tbExit = "";
+    }
 
     // Round DW: detect rebuild vs fresh build. Rebuilds preserve the
     // existing trip object — and its destinations array — so
@@ -2159,6 +2204,10 @@
     // Round HX.5 — kept-list filter + stay-total summary computation.
     keptCandidates:           keptCandidates,
     computeStayTotalSummary:  computeStayTotalSummary,
+
+    // Round HZ — picker hero map redesign: active (non-rejected)
+    // candidates participate in route rendering.
+    activeCandidates:         activeCandidates,
 
     // Round HX.6 — pure sort behind the "best pick first" inline
     // function (groupCandidatesByMustDo also gains `mustDoOrder` in

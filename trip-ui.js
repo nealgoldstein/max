@@ -1591,6 +1591,32 @@
       listHdr.appendChild(revBtn);
     }
 
+    // Round HZ (picker hero map, step 8): "Considered (N)" button.
+    // Surfaces the carry-forward set — candidates Max suggested that
+    // the user neither accepted nor rejected at picker time. Only
+    // shows when there's at least one such candidate. Clicking opens
+    // a modal listing them with one-click Add; Add promotes to keep
+    // and reopens the picker for confirmation/commit.
+    if (trip && Array.isArray(trip.candidates) && trip.candidates.length) {
+      var consideredCount = trip.candidates.filter(function(c){
+        return c && c.status !== "keep" && c.status !== "reject";
+      }).length;
+      if (consideredCount > 0) {
+        var conBtn = document.createElement("button");
+        conBtn.style.cssText = "font-size:11px;font-weight:500;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:6px;padding:6px 11px;cursor:pointer;font-family:inherit;margin-right:6px;white-space:nowrap;";
+        conBtn.textContent = "Considered (" + consideredCount + ")";
+        conBtn.title = "Places Max suggested that you didn't accept or reject — add any of them to this trip";
+        conBtn.onmouseover = function () { conBtn.style.background = "#f0f5fc"; };
+        conBtn.onmouseout  = function () { conBtn.style.background = "#fff"; };
+        conBtn.onclick = function () {
+          if (typeof global.showConsideredCandidatesModal === "function") {
+            global.showConsideredCandidatesModal();
+          }
+        };
+        listHdr.appendChild(conBtn);
+      }
+    }
+
     // Edit destinations — only when there's a saved candidate snapshot.
     if (trip && trip.candidates && trip.candidates.length) {
       var editBtn = document.createElement("button");

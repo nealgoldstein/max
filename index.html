@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Max - Tourist's Guide Travel Agent</title>
+<title>Max — The Existential Traveler</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!-- v353.6: PWA install. manifest.json declares the app name +
      icons + display:standalone so Chrome/Edge/Safari know we're
@@ -1294,8 +1294,17 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
 .hs-wrap{width:360px;padding:0 20px;}
 .hs-logo{display:flex;align-items:center;gap:10px;margin-bottom:32px;}
 .hs-av{width:38px;height:38px;border-radius:50%;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;flex-shrink:0;}
+.hs-logo-text{min-width:0;}
 .hs-logo-text p{font-size:16px;font-weight:700;color:#111;line-height:1;}
-.hs-logo-text span{font-size:12px;color:#999;}
+.hs-logo-text span{
+  font-size:12px;color:#999;display:block;
+  /* v353.7: keep the tagline on one line. The previous "Tourist's
+     Guide Travel Agent" string was wrapping into 4 lines whenever
+     the header buttons (Install, Welcome, How it works, Signed in)
+     squeezed the title column. nowrap + ellipsis means it just
+     truncates gracefully on narrow widths. */
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
 .hs-welcome{font-size:13px;color:#666;line-height:1.65;margin-bottom:28px;padding-bottom:28px;border-bottom:1px solid #e8e8e8;}
 .hs-section-lbl{font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#bbb;margin-bottom:10px;}
 .trip-cards{display:flex;flex-direction:column;gap:8px;margin-bottom:16px;max-height:190px;overflow-y:auto;}
@@ -1742,7 +1751,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
   <div class="hs-wrap">
     <div class="hs-logo">
       <div class="hs-av">M</div>
-      <div class="hs-logo-text"><p>Max</p><span>Tourist's Guide Travel Agent</span></div>
+      <div class="hs-logo-text"><p>Max</p><span>The Existential Traveler</span></div>
       <div onclick="showInstallPrompt()" id="hs-install-link" style="display:none;font-size:11px;color:#1a5fa8;cursor:pointer;margin-left:auto;padding:3px 10px;border:1px solid #c8d8f0;border-radius:10px;white-space:nowrap;font-weight:600;" title="Install Max as an app on your home screen">⊕ Install</div>
       <div onclick="showWelcomeOnboarding()" id="hs-welcome-link" style="font-size:11px;color:#999;cursor:pointer;margin-left:auto;padding:3px 10px;border:1px solid #ddd;border-radius:10px;white-space:nowrap;" title="Re-read the welcome + change your pace setting">Welcome</div>
       <div onclick="showAboutMax()" id="hs-how-it-works" style="font-size:11px;color:#999;cursor:pointer;margin-left:8px;padding:3px 10px;border:1px solid #ddd;border-radius:10px;white-space:nowrap;" title="How Max works">How it works</div>
@@ -1845,6 +1854,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
         <button class="file-btn" onclick="showShareTripModal()" title="Share a read-only link to this trip">Share</button>
         <button class="file-btn" onclick="showExportTripModal()" title="Print, save as PDF, or download as a calendar file">Export</button>
         <button class="file-btn" onclick="showGlobalPasteConfirmationModal()" title="Paste a flight, hotel, or other booking confirmation — Max routes it to the right destination automatically">&#128203; Paste</button>
+        <button class="file-btn" onclick="showAskMaxModal()" title="Chat with an AI about this trip — ask anything: weather, food, logistics, things to do">&#128172; Ask</button>
         <button class="file-btn" id="trip-search-btn" onclick="openTripSearch()" title="Search this trip">&#x1F50D;</button>
         <button class="file-btn" id="api-key-btn" onclick="showApiKeyForm()" title="Set API key" style="opacity:0.6;">&#x1F511;</button>
         <button class="file-btn" id="sync-btn" onclick="MaxSync.showSignInModal()" title="Sync with server" style="opacity:0.6;">&#x21C4;</button>
@@ -2289,14 +2299,33 @@ window.maxCacheStats = function(){
   return {entries: keys.length, bytes: bytes};
 };
 
-async function callMax(messages, maxTokens, timeoutMs) {
+async function callMax(messages, maxTokens, timeoutMs, opts) {
   // v345: route through MaxSync's LLM proxy when the user is signed
   // in. The server holds the Anthropic API key — testers no longer
   // need to paste their own. Falls back to direct API + user-pasted
   // key when not signed in (legacy path; keeps local dev working).
+  //
+  // v353.7: opts.system overrides the default MAX_SYSTEM prompt
+  // (used by the chat surface, which has its own context-aware
+  // system prompt). opts.noCache bypasses the response cache —
+  // chat messages should always be fresh, never a cached answer
+  // from a prior session.
+  opts = opts || {};
+  var systemOverride = opts.system || null;
+  var noCache = !!opts.noCache;
+  // v353.7: chat-only BYOK. opts.useOwnKey forces the direct-API
+  // path with the user's local _apiKey, bypassing the server proxy
+  // even when signed in. The chat surface always passes this; other
+  // features (picker, ICS, candidate cities, etc.) leave it
+  // unset and ride on the shared server key. Cost split: operator
+  // pays for bounded calls, user pays for unbounded chat.
   var useProxy = (typeof MaxSync !== "undefined" &&
                   typeof MaxSync.isSignedIn === "function" &&
-                  MaxSync.isSignedIn());
+                  MaxSync.isSignedIn() &&
+                  !opts.useOwnKey);
+  if (opts.useOwnKey && !_apiKey) {
+    throw new Error("Chat needs your Anthropic API key — open the ⇄ Sync modal to add one, or click 💬 Ask and follow the prompt.");
+  }
   var headers = {"Content-Type": "application/json"};
   if (useProxy) {
     var token = "";
@@ -2314,9 +2343,13 @@ async function callMax(messages, maxTokens, timeoutMs) {
   // Round CI: cache lookup. If we've seen this exact request before, return
   // the cached response. Determinism for repeated runs of the same brief.
   // Round CI.1: also check the entry hasn't expired past the TTL.
-  var cacheKey = await _maxCacheKey(messages, maxTokens);
+  // v353.7: noCache opt skips the cache entirely (used by the chat
+  // surface — chat replies should always be fresh). The cache key
+  // also incorporates the system override so a different prompt
+  // doesn't pull a stale answer from a different request.
+  var cacheKey = await _maxCacheKey(messages, maxTokens + ":" + (systemOverride ? "sys:" + systemOverride.slice(0, 200) : ""));
   var cache = _maxCacheLoad();
-  if (cache[cacheKey]) {
+  if (!noCache && cache[cacheKey]) {
     var age = Date.now() - (cache[cacheKey].at || 0);
     if (age > _MAX_CACHE_TTL_MS) {
       console.log("[Max cache] EXPIRED (age " + Math.round(age/86400000) + "d)", cacheKey.substring(0,8));
@@ -2346,8 +2379,10 @@ async function callMax(messages, maxTokens, timeoutMs) {
         max_tokens: maxTokens||1000,
         // Round CH: temperature=0 for deterministic output. Was unset (default 1.0),
         // which caused different night totals on every run for the same brief.
-        temperature: 0,
-        system: MAX_SYSTEM,
+        // v353.7: chat callers (opts.system override) want a more
+        // natural-sounding reply, so they get a non-zero temperature.
+        temperature: systemOverride ? 0.7 : 0,
+        system: systemOverride || MAX_SYSTEM,
         messages: messages
       })
     }), fetchTimeout]);
@@ -6495,7 +6530,13 @@ async function runCandidateSearch(requiredPlaces) {
       seen[key] = true;
       return true;
     });
-    allCands.forEach(function(c,i){ c.id="c"+i; c.status=null; });
+    // Round HZ (picker hero map, step 6): LLM-supplied `accepted` decides
+    // initial status. accepted=true → keep (green ✓), accepted=false →
+    // null (blue/unchecked). Missing accepted defaults to keep so legacy
+    // prompts and saved drafts behave like before (everything kept-eligible,
+    // user rejects what they don't want). Required must-dos get a second
+    // pass via applyRequiredAndAutoKeep regardless of the LLM's call.
+    allCands.forEach(function(c,i){ c.id="c"+i; c.status=(c.accepted===false?null:"keep"); c.order=null; c.manuallyOrdered=false; });
     // Apply user-picked nights from the activity-place picker. Without this,
     // each candidate inherits stayRange "2-4 nights" from the LLM and
     // buildFromCandidates parses ~3 nights × N places — completely ignoring
@@ -7031,6 +7072,99 @@ function showExportTripModal(){
   ov.addEventListener("click", function(e){ if (e.target === ov) ov.remove(); });
 }
 
+// Round HZ (picker hero map, step 8): "candidates considered" surface.
+// Lists trip.candidates that the user neither accepted nor rejected at
+// picker time — the carry-forward set. Each row has an "Add to trip"
+// button that promotes the candidate to status="keep" in _tb.candidates
+// (and trip.candidates if hydrated), then reopens the picker so the
+// user can refine pacing/ordering and commit via the picker's footer
+// button. This delivers the carry-forward promise — nothing Max
+// suggested vanishes silently; a few days later you can still pull
+// one of the considered stops into the trip with one click.
+function showConsideredCandidatesModal(){
+  if (!trip || !Array.isArray(trip.candidates)) {
+    maxAlert("No candidate history on this trip yet.");
+    return;
+  }
+  var considered = trip.candidates.filter(function(c){
+    return c && c.status !== "keep" && c.status !== "reject";
+  });
+  if (!considered.length) {
+    maxAlert("Nothing was set aside — every candidate is either in the trip or rejected.");
+    return;
+  }
+
+  var existing = document.getElementById("considered-candidates-overlay");
+  if (existing) existing.remove();
+  var ov = document.createElement("div");
+  ov.id = "considered-candidates-overlay";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:11900;display:flex;align-items:center;justify-content:center;padding:24px;";
+  var box = document.createElement("div");
+  box.style.cssText = "background:#fff;border-radius:12px;width:480px;max-width:100%;max-height:80vh;display:flex;flex-direction:column;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);";
+
+  var hdr = document.createElement("div");
+  hdr.style.cssText = "display:flex;align-items:center;gap:10px;margin-bottom:6px;";
+  hdr.innerHTML = '<div style="width:28px;height:28px;border-radius:50%;background:#1a5fa8;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">?</div>'
+    + '<div style="font-size:14px;font-weight:700;">Candidates you considered</div>';
+  box.appendChild(hdr);
+
+  var sub = document.createElement("div");
+  sub.style.cssText = "font-size:12px;color:#555;line-height:1.55;margin-bottom:14px;";
+  sub.textContent = "Places Max suggested that you didn't accept or reject. Add any of them back to the trip — Max slots them in geographically.";
+  box.appendChild(sub);
+
+  var list = document.createElement("div");
+  list.style.cssText = "flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:8px;min-height:0;";
+  considered.forEach(function(c){
+    var row = document.createElement("div");
+    row.style.cssText = "display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:#fafbfc;border:1px solid #e0e6ef;border-radius:7px;font-size:12px;";
+
+    var body = document.createElement("div");
+    body.style.cssText = "flex:1;min-width:0;";
+    var country = c.country ? '<span style="color:#888;font-weight:400;"> · ' + _escapeHtml(c.country) + '</span>' : "";
+    var why = c.whyItFits ? '<div style="margin-top:4px;color:#666;font-size:11px;line-height:1.45;">' + _escapeHtml(c.whyItFits) + '</div>' : "";
+    body.innerHTML = '<div style="color:#222;"><span style="font-weight:600;">' + _escapeHtml(c.place || "(unnamed)") + '</span>' + country + '</div>' + why;
+    row.appendChild(body);
+
+    var add = document.createElement("button");
+    add.style.cssText = "background:#1a5fa8;color:#fff;border:none;border-radius:5px;padding:7px 13px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;flex-shrink:0;align-self:center;";
+    add.textContent = "+ Add";
+    add.onclick = function(){
+      // Promote the candidate's status in trip.candidates (which is the
+      // serialized snapshot). If _tb.candidates is hydrated, sync it too
+      // so the reopened picker shows the change. Then reopen the picker.
+      c.status = "keep";
+      if (typeof _tb !== "undefined" && _tb && Array.isArray(_tb.candidates)) {
+        var hydrated = _tb.candidates.find(function(x){ return x && x.id === c.id; });
+        if (hydrated) hydrated.status = "keep";
+      }
+      ov.remove();
+      // Open the picker so the user sees the change and can commit.
+      // Prefer reopenPickerForEdit when mdcItems exist (newer trips);
+      // fall back to reopenCandidateExplorer for legacy trips.
+      if (typeof reopenPickerForEdit === "function" && trip && Array.isArray(trip.mdcItems) && trip.mdcItems.length) {
+        reopenPickerForEdit();
+      } else if (typeof reopenCandidateExplorer === "function") {
+        reopenCandidateExplorer();
+      }
+    };
+    row.appendChild(add);
+
+    list.appendChild(row);
+  });
+  box.appendChild(list);
+
+  var ftr = document.createElement("div");
+  ftr.style.cssText = "margin-top:14px;text-align:right;";
+  ftr.innerHTML = '<button id="cc-close" style="padding:8px 14px;font-size:12px;font-weight:600;background:#fff;color:#666;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;">Close</button>';
+  box.appendChild(ftr);
+
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  document.getElementById("cc-close").onclick = function(){ ov.remove(); };
+  ov.addEventListener("click", function(e){ if (e.target === ov) ov.remove(); });
+}
+
 function _exportTripPrintable(){
   if (!trip) return;
   var w = window.open("", "MaxPrint", "width=900,height=1100");
@@ -7431,6 +7565,10 @@ function showShareTripModal(){
       '<input id="share-trip-link" type="text" readonly style="flex:1;font-size:11px;padding:7px 9px;border:1px solid #ddd;border-radius:5px;font-family:monospace;box-sizing:border-box;" />' +
       '<button id="share-trip-copy" style="padding:7px 12px;font-size:12px;font-weight:600;background:#1a5fa8;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Copy</button>' +
     '</div>' +
+    // v353.7: empty container that showLink() populates with a QR
+    // code once a token is in hand. Lives between the URL row and
+    // the Revoke/Close button row.
+    '<div id="share-trip-qr" style="margin-bottom:14px;"></div>' +
     '<div style="display:flex;gap:8px;">' +
       '<button id="share-trip-revoke" style="flex:1;padding:8px;font-size:12px;font-weight:600;background:#fff;color:#c44;border:1px solid #c44;border-radius:5px;cursor:pointer;font-family:inherit;display:none;">Revoke link</button>' +
       '<button id="share-trip-close" style="padding:8px 14px;font-size:12px;font-weight:600;background:#fff;color:#666;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;">Close</button>' +
@@ -7452,6 +7590,25 @@ function showShareTripModal(){
     revokeBtn.style.display = "block";
     statusEl.textContent = "Active share link:";
     statusEl.style.color = "#2a7a4e";
+    // v353.7: render the share URL as a QR code so the recipient
+    // can scan it with their phone camera instead of typing or
+    // emailing the long URL. Using qrserver.com's stateless image
+    // API — no JS library to vendor. Future swap: bundle a local
+    // QR encoder if we want zero external deps. Privacy: the share
+    // token is an opaque random string and the recipient is about
+    // to open it via the link anyway, so the privacy delta is small.
+    var qrWrap = document.getElementById("share-trip-qr");
+    if (qrWrap) {
+      var qrSrc = "https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=8&data=" + encodeURIComponent(url);
+      qrWrap.innerHTML =
+        '<div style="display:flex;align-items:center;gap:14px;padding:12px;background:#f7f9fc;border:1px solid #e2e7ee;border-radius:8px;margin-top:6px;">' +
+          '<img src="' + qrSrc + '" alt="QR code for share link" style="width:90px;height:90px;flex-shrink:0;background:#fff;border:1px solid #ddd;border-radius:4px;" />' +
+          '<div style="font-size:11.5px;color:#444;line-height:1.5;">' +
+            '<div style="font-weight:700;color:#1a5fa8;margin-bottom:2px;">Scan to open on phone</div>' +
+            'Point your phone\'s camera at this QR code. The viewer opens directly — no need to copy-paste the long URL.' +
+          '</div>' +
+        '</div>';
+    }
   }
 
   // First, ask the server if any active token exists. If yes, reuse.
@@ -12151,12 +12308,15 @@ async function findCandidates(){
     +(_tb.interests&&_tb.interests.length?"\nInterests: "+_tb.interests.join(", "):"")
     +(_tb.constraints?"\nConstraints: "+_tb.constraints:"")
     +"\n\nReturn ONLY a valid JSON array (no markdown):\n"
-    +'[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why.","tradeoffs":"Downside.","tags":["tag1","tag2"],"otherAttractions":"2-3 other things worth considering here.","widelyRecommended":false,"lat":48.2,"lng":16.4}]\nSet widelyRecommended=true for canonical destinations.'
-    +"\nMix roles: base, anchor, pass-through. Include real lat/lng.";
+    +'[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why.","tradeoffs":"Downside.","tags":["tag1","tag2"],"otherAttractions":"2-3 other things worth considering here.","widelyRecommended":false,"accepted":true,"lat":48.2,"lng":16.4}]\nSet widelyRecommended=true for canonical destinations.'
+    +"\nMix roles: base, anchor, pass-through. Include real lat/lng."
+    +"\nMark accepted=true for places a reasonable traveler with this brief would almost certainly include — the trip's core. Mark accepted=false for alternatives worth surfacing but that the traveler might reasonably skip. Aim for roughly 60-70% accepted on average; vary by trip ambition.";
   try{
     var text=await callMax([{role:"user",content:prompt}],2000);
     var cands=JSON.parse(text.replace(/```json|```/g,"").trim());
-    cands.forEach(function(c,i){c.id="c"+i;c.status=null;});
+    // Round HZ (picker hero map, step 6): see allCands forEach above for
+    // the accepted→status mapping rationale.
+    cands.forEach(function(c,i){c.id="c"+i;c.status=(c.accepted===false?null:"keep");c.order=null;c.manuallyOrdered=false;});
     _tb.candidates=cands;
     showCandidateExplorer(cands);
   }catch(e){
@@ -12174,11 +12334,24 @@ async function findCandidates(){
 }
 
 // ─── CANDIDATE EXPLORER ────────────────────────────────────
-// Default lens is "activity" — we group by what the traveler wants to do, not
-// by a draft sequence. Sequencing (the schedule) lives on the next page,
-// after the user has picked entry/exit; ordering places before entry is known
-// just hallucinates a starting city.
-var _ceMap=null,_ceMarkers=[],_ceRejectedExpanded=true,_ceEditMode=false,_ceCardExpanded={},_ceLens="activity",_ceSectionExpanded={};
+// Round HZ (picker hero map): sequence is now a first-class picker
+// concern, not a downstream consequence of clicking Build. The default
+// renderer is the map-led sidebar (renderPickerSidebar) which mirrors
+// the route polyline on _ceMap; the legacy lens-based card grid lives
+// in renderCandidateCards as a fallback for window._pickerUseHeroSidebar
+// === false.
+//
+// Entry/exit isn't a separate decision anymore — the first kept dot in
+// the route is the implicit arrival, the last is the implicit departure.
+// orderKeptCandidates runs live on every status toggle via
+// _tbResequenceCandidates, ordering the active set (accepted + unchecked)
+// uniformly. publishTrip then narrows to accepted only; unchecked
+// candidates carry forward on trip.candidates as the "considered, not
+// added" set surfaced via the Considered (N) button on the trip view.
+//
+// The _ceLens variable below is retained for the legacy renderer.
+// See picker-hero-map.md for the full model.
+var _ceMap=null,_ceMarkers=[],_ceRejectedExpanded=true,_ceEditMode=false,_ceCardExpanded={},_ceLens="activity",_ceSectionExpanded={},_cePolyline=null;
 // Card→pin selection: tapping a candidate card highlights its map marker so
 // the user can locate the place geographically. _ceMarkerById persists only
 // for the current render pass and is cleared at the top of renderCandidateCards.
@@ -12203,6 +12376,44 @@ function _ceSelectCandidateOnMap(candId){
       }
     } catch(e) { /* map not ready, ignore */ }
   }, 60);
+}
+
+// Round HZ (picker hero map): draw a polyline through the trip's sequence
+// on the candidate-explorer map. Renders the route the user is shaping —
+// connects active (non-rejected) candidates that have an `order` set by
+// _tbResequenceCandidates, in ascending order. Called from
+// renderCandidateCards (so the route refreshes on every status toggle) and
+// from geocodeMissingCandidates (so late-arriving coords extend the line).
+// Idempotent: each call removes the previous polyline before drawing the
+// new one. Quiet no-op when the map isn't mounted or fewer than 2 points
+// are placed.
+function _redrawCePolyline(){
+  if (_cePolyline && _ceMap) {
+    try { _ceMap.removeLayer(_cePolyline); } catch(e) {}
+  }
+  _cePolyline = null;
+  if (!_ceMap || !_tb || !Array.isArray(_tb.candidates)) return;
+  var route = MaxEnginePicker.activeCandidates(_tb.candidates)
+    .filter(function(c){
+      return c && typeof c.order === "number" && isFinite(c.order)
+        && isFinite(c.lat) && isFinite(c.lng)
+        && !(c.lat === 0 && c.lng === 0);
+    })
+    .sort(function(a, b){ return a.order - b.order; });
+  if (route.length < 2) return;
+  var coords = route.map(function(c){ return [c.lat, c.lng]; });
+  // Desaturated green — sits behind the dots so the numbered pins
+  // dominate visually but the path reads as a single continuous shape.
+  // No mode-specific styling in v1; journey-class edges (Glacier Express,
+  // ferries, etc.) get their own line styles when that work lands.
+  _cePolyline = L.polyline(coords, {
+    color: "#5a8a6a",
+    weight: 3,
+    opacity: 0.75,
+    lineCap: "round",
+    lineJoin: "round",
+    interactive: false
+  }).addTo(_ceMap);
 }
 
 async function retryDiscoveryCandidates() {
@@ -12245,14 +12456,17 @@ async function retryDiscoveryCandidates() {
     + "A traveler doing this trip would almost certainly regret missing: the major gateway cities, the cultural capitals, the places everyone who has been there mentions. Include those. "
     + "Then add less obvious places that specifically fit what this traveler wants.\n"
     + "Return ONLY a JSON array of exactly " + extraCount + " places (no markdown):\n"
-    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"What makes it worth visiting — specific, not generic.","tradeoffs":"One honest downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here.","widelyRecommended":false,"lat":0.0,"lng":0.0}]\nSet widelyRecommended=true for canonical destinations.';
+    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"What makes it worth visiting — specific, not generic.","tradeoffs":"One honest downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here.","widelyRecommended":false,"accepted":true,"lat":0.0,"lng":0.0}]\nSet widelyRecommended=true for canonical destinations.'
+    + "\nMark accepted=true for places a reasonable traveler with this brief would almost certainly include — the trip's core. Mark accepted=false for alternatives worth surfacing but that the traveler might reasonably skip. Aim for 60-70% accepted on average.";
   try {
     var t = await callMax([{role:"user",content:p2}], 2000, 45000);
     var newCands = JSON.parse(t.replace(/```json|```/g,"").trim());
     newCands.forEach(function(c){ c._required=false; c._requiredFor=[]; });
     var allCands = existingReq.concat(newCands);
     var nextId = allCands.length;
-    newCands.forEach(function(c,i){ c.id="c"+(existingReq.length+i); c.status=null; });
+    // Round HZ (picker hero map, step 6): see allCands forEach above for
+    // the accepted→status mapping rationale.
+    newCands.forEach(function(c,i){ c.id="c"+(existingReq.length+i); c.status=(c.accepted===false?null:"keep"); c.order=null; c.manuallyOrdered=false; });
     _tb.candidates = existingReq.concat(newCands);
     _tb.p2Failed = false;
     showCandidateExplorer(_tb.candidates);
@@ -12282,9 +12496,23 @@ async function geocodeMissingCandidates(missing, allCands) {
         match.lat = r.lat; match.lng = r.lng;
         // Add marker to map
         if (_ceMap && r.lat && r.lng) {
-          var mc = match.status==="keep"?"#2a7a4e":match.status==="reject"?"#888":"#1a5fa8";
-          var icon = L.divIcon({html:'<div style="background:'+mc+';color:#fff;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.25);">'+
-            (match.place||"").substring(0,2)+'</div>',className:"",iconSize:[24,24],iconAnchor:[12,12]});
+          // Round HZ (picker hero map, step 3): use the shared icon factory
+          // so geocoded-late candidates get the sequence ordinal (1, 2, 3 …)
+          // and the three-state color encoding instead of the previous
+          // place-initials-only inline divIcon. The factory reads c.order
+          // and c.status, matching what _addCandidateMarker does on the
+          // normal render path.
+          var icon = (typeof _makeCandidateIcon === "function")
+            ? _makeCandidateIcon(match, false, _ceSelectedCandId === match.id)
+            : null;
+          if (!icon) {
+            // Defensive fallback — should never fire since picker-ui.js
+            // loads before this script and aliases _makeCandidateIcon
+            // onto window. Keep the old inline construction for safety.
+            var mc = match.status==="keep"?"#2a7a4e":match.status==="reject"?"#888":"#1a5fa8";
+            icon = L.divIcon({html:'<div style="background:'+mc+';color:#fff;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.25);">'+
+              (match.place||"").substring(0,2)+'</div>',className:"",iconSize:[24,24],iconAnchor:[12,12]});
+          }
           var m = L.marker([r.lat, r.lng], {icon:icon});
           m.bindTooltip(match.place||"", {permanent:false,direction:"top",offset:[0,-14]});
           m.addTo(_ceMap);
@@ -12298,6 +12526,9 @@ async function geocodeMissingCandidates(missing, allCands) {
     if (allBounds.length > 1) {
       try { _ceMap.fitBounds(allBounds, {padding:[28,28]}); } catch(e) {}
     }
+    // Round HZ (picker hero map): newly-geocoded candidates may now have
+    // valid coords for the polyline — redraw so the route line extends.
+    _redrawCePolyline();
   } catch(e) { console.warn("Geocoding failed:", e.message); }
 }
 
@@ -12334,7 +12565,12 @@ function reopenCandidateExplorer(){
       id:c.id, place:c.place, country:c.country||null, role:c.role||null,
       whyItFits:c.whyItFits||"", tags:c.tags||[], tradeoffs:c.tradeoffs||null,
       stayRange:c.stayRange||"", lat:c.lat||null, lng:c.lng||null,
-      status:c.status||null, _required:!!c._required, _requiredFor:(c._requiredFor||[]).slice()
+      status:c.status||null, _required:!!c._required, _requiredFor:(c._requiredFor||[]).slice(),
+      // Round HZ (picker hero map): persist explicit sequence position +
+      // manual-pin flag so a reopened picker re-acquires the user's order.
+      // Missing on legacy trips → null/false, which the next
+      // _tbResequenceCandidates pass repopulates from orderKeptCandidates.
+      order:(typeof c.order==="number"?c.order:null), manuallyOrdered:!!c.manuallyOrdered
     };
   });
   _tb.requiredPlaces = (trip.requiredPlaces||[]).slice();
@@ -12358,7 +12594,7 @@ function reopenCandidateExplorer(){
 function cancelEditCandidates(){
   _ceEditMode = false;
   g("candidate-explorer-overlay").style.display="none";
-  if(_ceMap){_ceMap.remove();_ceMap=null;} if(_edMap){try{_edMap.remove();}catch(e){}_edMap=null;_edMarkers=[];}
+  if(_ceMap){_ceMap.remove();_ceMap=null;} _cePolyline=null; if(_edMap){try{_edMap.remove();}catch(e){}_edMap=null;_edMarkers=[];}
 }
 
 // Re-open the merged activity-place PICKER (Step 3) on an already-built
@@ -12605,7 +12841,7 @@ function closePlacesOverlay(){
   });
   var kept = MaxEnginePicker.keptCandidates(cands);
   g("candidate-explorer-overlay").style.display="none";
-  if(_ceMap){_ceMap.remove();_ceMap=null;} if(_edMap){try{_edMap.remove();}catch(e){}_edMap=null;_edMarkers=[];}
+  if(_ceMap){_ceMap.remove();_ceMap=null;} _cePolyline=null; if(_edMap){try{_edMap.remove();}catch(e){}_edMap=null;_edMarkers=[];}
   if (!kept.length) {
     // Nothing to build — stay where we are and let the user reconsider.
     return;
@@ -12727,7 +12963,12 @@ async function applyCandidateChanges(){
       whyItFits:c.whyItFits||"", tags:c.tags||[], tradeoffs:c.tradeoffs||null,
       stayRange:c.stayRange||"", lat:c.lat||null, lng:c.lng||null,
       nights: (typeof c.nights === "number") ? c.nights : undefined,
-      status:c.status||null, _required:!!c._required, _requiredFor:(c._requiredFor||[]).slice()
+      status:c.status||null, _required:!!c._required, _requiredFor:(c._requiredFor||[]).slice(),
+      // Round HZ (picker hero map): persist explicit sequence position +
+      // manual-pin flag so a reopened picker re-acquires the user's order.
+      // Missing on legacy trips → null/false, which the next
+      // _tbResequenceCandidates pass repopulates from orderKeptCandidates.
+      order:(typeof c.order==="number"?c.order:null), manuallyOrdered:!!c.manuallyOrdered
     };
   });
   trip.mdcItems = (_mdcItems||[]).map(function(m){return {
@@ -12744,7 +12985,7 @@ async function applyCandidateChanges(){
 
   _ceEditMode = false;
   g("candidate-explorer-overlay").style.display="none";
-  if(_ceMap){_ceMap.remove();_ceMap=null;} if(_edMap){try{_edMap.remove();}catch(e){}_edMap=null;_edMarkers=[];}
+  if(_ceMap){_ceMap.remove();_ceMap=null;} _cePolyline=null; if(_edMap){try{_edMap.remove();}catch(e){}_edMap=null;_edMarkers=[];}
   _emitTripMutation();
 }
 
@@ -12809,7 +13050,7 @@ function showCandidateExplorer(cands, editMode){
     var cds=document.getElementById("ce-cards");
     if(cds){cds.style.flex="1";cds.style.overflowY="scroll";cds.style.minHeight="0";}
     // Init map
-    if(_ceMap){_ceMap.remove();_ceMap=null;} if(_edMap){try{_edMap.remove();}catch(e){}_edMap=null;_edMarkers=[];} _ceMarkers=[];
+    if(_ceMap){_ceMap.remove();_ceMap=null;} _cePolyline=null; if(_edMap){try{_edMap.remove();}catch(e){}_edMap=null;_edMarkers=[];} _ceMarkers=[];
     // Figure out the best initial view BEFORE the map loads tiles — otherwise
     // the user sees all of Europe for a second before we zoom. Order of truth:
     //  1. Cached coarse geocode for the trip's region
@@ -13438,7 +13679,294 @@ function _renderTripDetailsStrip(kept){
   return MaxPickerUI.renderTripDetailsStrip();
 }
 
+// ── Round HZ (picker hero map, step 4): sidebar list renderer ─────
+// Replaces the must-do-grouped cards with a flat ordered list that
+// mirrors the sequence visible on the map. Each row shows the
+// ordinal badge (matching the map dot's number), place + country,
+// an accept checkbox (✓ for status="keep", unchecked for status=null),
+// and a ✕ reject button. The user reacts to the proposed itinerary
+// rather than opting into stops one by one. Rejected candidates
+// collect in a collapsible "Set aside" tray below.
+//
+// Drag-reorder is deferred to step 4.5 — for now the order comes
+// straight from _tbResequenceCandidates (which already runs
+// orderKeptCandidates across the active set on every status change).
+//
+// Side effects preserved from the legacy renderCandidateCards path:
+//   * Clears + re-adds map markers
+//   * Auto-keeps required candidates via applyRequiredAndAutoKeep
+//   * Kicks off geocodeMissingCoords + geocodeMissingCandidates
+//   * Fits map bounds to the active set
+//   * Redraws the route polyline
+//   * Updates the footer counter (updateCEShortlist)
+//   * Shows the candidate disclaimer once per session
+//   * Renders the Trip Details strip (entry/exit/dates)
+//   * Renders the FQ two-destinations banner
+function renderPickerSidebar(cands){
+  var el = g("ce-cards"); if (!el) return;
+  el.innerHTML = "";
+
+  // Clear and reset map markers + selection map
+  _ceMarkers.forEach(function(m){
+    if (_ceMap) { try { _ceMap.removeLayer(m); } catch(e){} }
+  });
+  _ceMarkers = [];
+  _ceMarkerById = {};
+
+  // Auto-keep required candidates (idempotent thanks to _autoKeepApplied)
+  MaxEnginePicker.applyRequiredAndAutoKeep(cands, _tb.requiredPlaces);
+
+  // Computed sets — active (in route) sorted by candidate.order,
+  // rejected (set aside) in their original order.
+  var active = MaxEnginePicker.activeCandidates(cands)
+    .filter(function(c){ return c && typeof c.order === "number"; })
+    .sort(function(a, b){ return a.order - b.order; });
+  var rejected = (cands || []).filter(function(c){ return c && c.status === "reject"; });
+
+  // Kick off Nominatim background geocoding for placeholder coords —
+  // it re-calls this function when coords land so pins + the polyline
+  // extend automatically.
+  geocodeMissingCoords(cands);
+
+  // Header: Trip Details strip + Add-a-place input
+  var headerWrap = document.createElement("div");
+  headerWrap.style.cssText = "padding:4px 4px 8px;border-bottom:1px solid #eee;margin-bottom:8px;";
+
+  var detailsStrip = _renderTripDetailsStrip(MaxEnginePicker.keptCandidates(cands));
+  if (detailsStrip) headerWrap.appendChild(detailsStrip);
+
+  var addRow = document.createElement("div");
+  addRow.style.cssText = "display:flex;gap:6px;margin-top:10px;";
+  addRow.innerHTML = '<input id="ce-add-place-inp" placeholder="Heard about a place not on the list? Type it here…" style="flex:1;min-width:0;font-size:11px;padding:7px 10px;border:1px solid #ddd;border-radius:5px;font-family:inherit;" onkeydown="if(event.key===&#39;Enter&#39;){event.preventDefault();addPlaceToCandidates();}" />';
+  headerWrap.appendChild(addRow);
+
+  el.appendChild(headerWrap);
+
+  // FQ banner when 2+ kept — existing two-destinations note
+  (function(){
+    var keptCount = MaxEnginePicker.keptCandidates(cands).length;
+    if (keptCount < 2) return;
+    var banner = document.createElement("div");
+    banner.id = "fq-picker-banner";
+    banner.style.cssText = "margin:0 0 10px;padding:10px 12px;background:#eaf3fb;border:1px solid #c8dff8;border-radius:7px;font-size:11px;line-height:1.55;color:#1a3f6f;";
+    banner.innerHTML = _fqBannerInnerHtml();
+    el.appendChild(banner);
+  })();
+
+  // Ordered sequence list — accepted + unchecked, both in the route
+  if (active.length === 0) {
+    var empty = document.createElement("div");
+    empty.style.cssText = "padding:24px 12px;text-align:center;font-size:11px;color:#888;";
+    empty.textContent = (cands && cands.length) ? "Resolving sequence…" : "Building your trip…";
+    el.appendChild(empty);
+  } else {
+    var listWrap = document.createElement("div");
+    listWrap.style.cssText = "padding:0;";
+    active.forEach(function(c){
+      listWrap.appendChild(_makePickerSidebarRow(c));
+      _addPickerSidebarMarker(c);
+    });
+    el.appendChild(listWrap);
+  }
+
+  // "Set aside" — rejected candidates in a collapsible tray
+  if (rejected.length) {
+    el.appendChild(_makePickerRejectedSection(rejected));
+  }
+
+  // Map bounds — fit to active candidates that have real coords +
+  // a sane location relative to the seeded region.
+  var bounds = [];
+  active.forEach(function(c){
+    if (!isFinite(c.lat) || !isFinite(c.lng)) return;
+    if (c.lat === 0 && c.lng === 0) return;
+    if (typeof _fuCoordSane === "function" && !_fuCoordSane(c.lat, c.lng)) return;
+    bounds.push([c.lat, c.lng]);
+  });
+  if (bounds.length > 1 && _ceMap) {
+    setTimeout(function(){ try { _ceMap.fitBounds(bounds, {padding:[28,28]}); } catch(e){} }, 150);
+  }
+
+  updateCEShortlist();
+  showCandidateDisclaimer();
+
+  // LLM-based geocoding fallback for candidates Nominatim couldn't fill
+  var missingCoords = cands.filter(function(c){ return !c.lat || !c.lng || c.lat === 0; });
+  if (missingCoords.length > 0) {
+    geocodeMissingCandidates(missingCoords, cands);
+  }
+
+  // Route polyline through the active sequence
+  _redrawCePolyline();
+}
+
+// Build one row of the picker sidebar. Pure DOM construction — no
+// state mutation beyond click-handlers that delegate to setCS /
+// _ceSelectCandidateOnMap / re-render.
+function _makePickerSidebarRow(c){
+  var row = document.createElement("div");
+  row.className = "ce-sidebar-row";
+  row.dataset.candId = c.id;
+  var selectedRow = (c.id === _ceSelectedCandId);
+  row.style.cssText = "display:flex;align-items:flex-start;gap:8px;padding:8px 10px;background:" + (selectedRow ? "#fff8e1" : "#fff") + ";border:1px solid " + (selectedRow ? "#f0d264" : "#e0e6ef") + ";border-radius:7px;margin-bottom:6px;font-size:12px;cursor:pointer;transition:background 120ms ease,border-color 120ms ease;";
+
+  // Ordinal badge — color matches the map dot for the same candidate
+  var badge = document.createElement("span");
+  var badgeColor = (c.status === "keep") ? "#2a7a4e" : "#1a5fa8";
+  badge.style.cssText = "background:" + badgeColor + ";color:#fff;border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;margin-top:1px;";
+  badge.textContent = String((typeof c.order === "number" ? c.order : 0) + 1);
+  row.appendChild(badge);
+
+  // Main body — name + optional expanded rationale
+  var body = document.createElement("div");
+  body.style.cssText = "flex:1;min-width:0;";
+
+  var nameLine = document.createElement("div");
+  nameLine.style.cssText = "color:#333;line-height:1.4;";
+  var country = c.country ? '<span style="color:#888;font-weight:400;"> · ' + _escapeHtml(c.country) + '</span>' : "";
+  var req = c._required ? '<span title="Required by a must-do" style="margin-left:6px;color:#b05820;font-size:10px;">★</span>' : "";
+  nameLine.innerHTML = '<span style="font-weight:600;">' + _escapeHtml(c.place || "(unnamed)") + '</span>' + country + req;
+  body.appendChild(nameLine);
+
+  // Expand for rationale on click — _ceCardExpanded carries state
+  var expanded = !!(_ceCardExpanded && _ceCardExpanded[c.id]);
+  if (expanded && (c.whyItFits || c.tradeoffs)) {
+    var detail = document.createElement("div");
+    detail.style.cssText = "margin-top:6px;font-size:11px;color:#555;line-height:1.5;";
+    var html = "";
+    if (c.whyItFits) html += '<div>' + _escapeHtml(c.whyItFits) + '</div>';
+    if (c.tradeoffs) html += '<div style="margin-top:4px;color:#888;">⚠ ' + _escapeHtml(c.tradeoffs) + '</div>';
+    if (c.stayRange) html += '<div style="margin-top:4px;color:#777;font-size:10px;">' + _escapeHtml(c.stayRange) + '</div>';
+    detail.innerHTML = html;
+    body.appendChild(detail);
+  }
+  row.appendChild(body);
+
+  // Actions — accept checkbox + reject ✕
+  var actions = document.createElement("div");
+  actions.style.cssText = "display:flex;align-items:center;gap:6px;flex-shrink:0;margin-top:1px;";
+
+  var cb = document.createElement("input");
+  cb.type = "checkbox";
+  cb.checked = (c.status === "keep");
+  cb.title = (c.status === "keep") ? "Accepted — click to uncheck" : "Click to accept";
+  cb.style.cssText = "cursor:pointer;margin:0;width:16px;height:16px;";
+  cb.onclick = function(e){ e.stopPropagation(); setCS(c.id, "keep"); };
+  actions.appendChild(cb);
+
+  var rej = document.createElement("button");
+  rej.style.cssText = "background:none;border:none;color:#bbb;font-size:14px;cursor:pointer;padding:0 4px;line-height:1;";
+  rej.textContent = "✕";
+  rej.title = "Set aside";
+  rej.onclick = function(e){ e.stopPropagation(); setCS(c.id, "reject"); };
+  actions.appendChild(rej);
+
+  row.appendChild(actions);
+
+  // Clicking the body region (not the actions) toggles the rationale
+  // expansion and highlights the marker on the map.
+  body.addEventListener("click", function(){
+    if (!_ceCardExpanded) _ceCardExpanded = {};
+    _ceCardExpanded[c.id] = !_ceCardExpanded[c.id];
+    _ceSelectedCandId = c.id;
+    _ceSelectCandidateOnMap(c.id);
+    renderPickerSidebar(_tb.candidates);
+  });
+
+  return row;
+}
+
+// Add the candidate's map marker. Mirrors the legacy _addCandidateMarker
+// closure inside renderCandidateCards, but the marker's click handler
+// scrolls the SIDEBAR row into view + flashes its background instead of
+// targeting the (now-gone) #ce-card-* DOM nodes.
+function _addPickerSidebarMarker(c){
+  if (!c || !c.lat || !c.lng || !_ceMap) return;
+  if (c.lat === 0 && c.lng === 0) return;
+  var selected = (c.id === _ceSelectedCandId);
+  var icon = (typeof _makeCandidateIcon === "function") ? _makeCandidateIcon(c, false, selected) : null;
+  if (!icon) return;
+  var m = L.marker([c.lat, c.lng], { icon: icon, zIndexOffset: selected ? 1000 : 0 });
+  var tipStay = c.stayRange ? " · " + c.stayRange : "";
+  m.bindTooltip((c.place || "") + tipStay, { permanent: false, direction: "top", offset: [0, -14], className: "ce-map-tooltip" });
+  (function(cand){
+    m.on("click", function(){
+      _ceSelectedCandId = cand.id;
+      _ceSelectCandidateOnMap(cand.id);
+      var row = document.querySelector('.ce-sidebar-row[data-cand-id="' + cand.id + '"]');
+      if (row) {
+        row.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        var prevBg = row.style.background;
+        row.style.background = "#fff3c0";
+        setTimeout(function(){
+          if (row) row.style.background = prevBg || "";
+        }, 1500);
+      }
+    });
+  })(c);
+  m.addTo(_ceMap);
+  _ceMarkers.push(m);
+  _ceMarkerById[c.id] = m;
+}
+
+// "Set aside" — collapsible tray of rejected candidates with a Restore
+// action that un-rejects (toggle setCS off → status becomes null →
+// candidate returns to the active sequence as unchecked).
+function _makePickerRejectedSection(rejected){
+  var wrap = document.createElement("div");
+  wrap.style.cssText = "margin-top:14px;padding:8px 10px;background:#f6f7f9;border:1px solid #e0e6ef;border-radius:7px;";
+  var collapsed = !_ceRejectedExpanded;
+  var hdr = document.createElement("div");
+  hdr.style.cssText = "font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#888;margin-bottom:" + (collapsed ? "0" : "6px") + ";cursor:pointer;display:flex;justify-content:space-between;align-items:center;";
+  hdr.innerHTML = '<span>Set aside · ' + rejected.length + '</span><span style="font-size:11px;">' + (collapsed ? "▸" : "▾") + '</span>';
+  hdr.onclick = function(){
+    _ceRejectedExpanded = !_ceRejectedExpanded;
+    renderPickerSidebar(_tb.candidates);
+  };
+  wrap.appendChild(hdr);
+  if (!collapsed) {
+    rejected.forEach(function(c){
+      var rRow = document.createElement("div");
+      rRow.style.cssText = "display:flex;align-items:center;gap:8px;padding:5px 6px;font-size:11px;color:#888;";
+      var n = document.createElement("span");
+      n.style.flex = "1";
+      n.textContent = (c.place || "(unnamed)") + (c.country ? " · " + c.country : "");
+      rRow.appendChild(n);
+      var undo = document.createElement("button");
+      undo.style.cssText = "background:none;border:1px solid #d0d0d0;color:#555;font-size:10px;cursor:pointer;padding:3px 8px;border-radius:4px;font-family:inherit;";
+      undo.textContent = "Restore";
+      undo.onclick = function(){ setCS(c.id, "reject"); /* toggles off — status becomes null */ };
+      rRow.appendChild(undo);
+      wrap.appendChild(rRow);
+      // Add the gray marker too so rejected candidates remain visible
+      // on the map (just dropped from the polyline + numbered set).
+      _addPickerSidebarMarker(c);
+    });
+  }
+  return wrap;
+}
+
+// Small HTML-escape helper — used in the sidebar to prevent place
+// names or rationale strings with `<` or `&` from breaking the markup.
+// Cheap textContent round-trip; avoids pulling in a dependency.
+function _escapeHtml(s){
+  if (s == null) return "";
+  var d = document.createElement("div");
+  d.textContent = String(s);
+  return d.innerHTML;
+}
+
 function renderCandidateCards(cands){
+  // Round HZ (picker hero map, step 4): dispatch to the new map-led
+  // sidebar renderer when hero mode is on (default). The legacy card
+  // body below stays in place as a fallback in case renderPickerSidebar
+  // throws — and so reopenCandidateExplorer / any code path we
+  // haven't migrated still has something to fall back on if hero mode
+  // is explicitly disabled via window._pickerUseHeroSidebar = false.
+  if (window._pickerUseHeroSidebar !== false && typeof renderPickerSidebar === "function") {
+    try { return renderPickerSidebar(cands); }
+    catch (e) { console.warn("[Max] picker sidebar render failed, falling back to legacy cards:", e); }
+  }
   var el=g("ce-cards"); if(!el) return;
   el.innerHTML="";
   _ceMarkers.forEach(function(m){if(_ceMap)_ceMap.removeLayer(m);}); _ceMarkers=[];
@@ -13882,6 +14410,10 @@ function renderCandidateCards(cands){
   if (missingCoords.length > 0) {
     geocodeMissingCandidates(missingCoords, cands);
   }
+  // Round HZ (picker hero map): draw the route polyline through the
+  // ordered sequence. Late-arriving geocodes call this again themselves
+  // so the line extends when coords land.
+  _redrawCePolyline();
 }
 
 function rIcon(r){
@@ -13900,54 +14432,168 @@ function rIcon(r){
 // generated list. Fires a focused LLM call to produce a candidate card for
 // that one place, then slots it into _tb.candidates as a discovery pick
 // (not required, not pre-kept) so the user can evaluate it alongside the rest.
+// Round HZ (picker hero map, step 5): add-by-name now Nominatim-first.
+// Fast path: geocode via Nominatim (~300\u2013500ms), insert the candidate
+// immediately with real coords + status="keep" so the new pin lands on
+// the map and the row appears in the ordered sequence right away. A
+// background LLM call then fills in the rationale (whyItFits, tradeoffs,
+// tags) and a follow-up re-render slots them into the sidebar row.
+//
+// Slow path (Nominatim returns nothing): falls back to a single LLM
+// call that returns the full candidate shape \u2014 preserves the original
+// flow's "is this a real place" validation via the {error:"..."} sentinel.
+//
+// User-added candidates default to status="keep" (accepted \u2713): the
+// user already showed intent by typing the name, so we don't make
+// them check a box afterwards. They can still uncheck or reject.
 async function addPlaceToCandidates(){
   var inp = document.getElementById("ce-add-place-inp");
   if (!inp) return;
   var raw = (inp.value||"").trim();
   if (!raw) return;
-  // De-dupe: if this place already exists, just highlight it instead
+
+  // De-dupe: place already on the list \u2192 just highlight it.
   var existing = (_tb.candidates||[]).find(function(c){
     return (c.place||"").toLowerCase() === raw.toLowerCase();
   });
   if (existing) {
     inp.value = "";
     showSaveStatus(existing.place + " is already on the list.", 2500);
-    var el = document.getElementById("ce-card-" + existing.id);
-    if (el && el.scrollIntoView) el.scrollIntoView({behavior:"smooth", block:"center"});
+    var existingRow = document.querySelector('.ce-sidebar-row[data-cand-id="' + existing.id + '"]')
+                   || document.getElementById("ce-card-" + existing.id);
+    if (existingRow && existingRow.scrollIntoView) existingRow.scrollIntoView({behavior:"smooth", block:"center"});
     return;
   }
+
   var btn = inp.nextElementSibling;
   if (btn) { btn.disabled = true; btn.textContent = "Adding\u2026"; }
   inp.disabled = true;
+  var prevPh = inp.placeholder;
+  inp.placeholder = "Locating " + raw + "\u2026";
+
+  var region = (_tb && _tb.region) || "";
+
+  // \u2500\u2500 Step 5a: Nominatim geocode for fast coord placement \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  // Mirrors the pattern in geocodeMissingCoords \u2014 region-biased first,
+  // bare-name retry as fallback. Country comes from address.country
+  // in jsonv2 (cleaner than parsing display_name).
+  var geocoded = null;
   try {
-    var region = (_tb && _tb.region) || "";
+    var qBiased = raw + (region ? ", " + region : "");
+    var url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=1&q=' + encodeURIComponent(qBiased);
+    var r = await fetch(url, {headers:{'Accept-Language':'en'}});
+    var data = await r.json();
+    if ((!data || !data.length) && region) {
+      url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=1&q=' + encodeURIComponent(raw);
+      r = await fetch(url, {headers:{'Accept-Language':'en'}});
+      data = await r.json();
+    }
+    if (data && data.length && data[0].lat) {
+      geocoded = {
+        place: raw,
+        lat: parseFloat(data[0].lat),
+        lng: parseFloat(data[0].lon),
+        country: (data[0].address && data[0].address.country) || ""
+      };
+    }
+  } catch(e) { /* fall through to LLM-only slow path */ }
+
+  // \u2500\u2500 Fast path: Nominatim found it \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  if (geocoded) {
+    var candidate = {
+      id: "c-user-" + Date.now(),
+      place: geocoded.place,
+      country: geocoded.country || "",
+      lat: geocoded.lat,
+      lng: geocoded.lng,
+      role: "base",
+      stayRange: "2-3 nights",
+      whyItFits: "",
+      tradeoffs: null,
+      tags: [],
+      status: "keep",          // user-added \u2192 accepted \u2713 by default
+      _required: false,
+      _requiredFor: [],
+      _userAdded: true,
+      order: null,
+      manuallyOrdered: false
+    };
+    _tb.candidates = _tb.candidates || [];
+    _tb.candidates.push(candidate);
+    if (typeof _tbResequenceCandidates === "function") _tbResequenceCandidates();
+    inp.value = "";
+    inp.placeholder = prevPh;
+    inp.disabled = false;
+    if (btn) { btn.disabled = false; btn.textContent = "+ Add"; }
+    inp.focus();
+    renderCandidateCards(_tb.candidates);
+    setTimeout(function(){
+      var row = document.querySelector('.ce-sidebar-row[data-cand-id="' + candidate.id + '"]');
+      if (row && row.scrollIntoView) row.scrollIntoView({behavior:"smooth", block:"center"});
+    }, 100);
+
+    // Background rationale fetch \u2014 focused prompt, no need to re-geocode.
+    try {
+      var ratPrompt = "A traveler is going to " + (region || "this region") + " and just added "
+        + candidate.place + " to their candidate list. Give the rationale fields that a candidate card needs. "
+        + "Be specific \u2014 name a museum, a dish, a railway, a view; don't hand-wave with 'major museums' or 'scenic rail.' "
+        + "Return ONLY a JSON object (no markdown): "
+        + '{"role":"base|anchor|pass","stayRange":"2-3 nights","whyItFits":"why worth visiting","tradeoffs":"one honest downside","tags":["tag1","tag2"]}';
+      var t = await callMax([{role:"user", content:ratPrompt}], 400, 20000);
+      var cleaned = t.replace(/```json|```/g, "").trim();
+      var first = cleaned.indexOf("{"), last = cleaned.lastIndexOf("}");
+      if (first > -1 && last > -1) cleaned = cleaned.substring(first, last+1);
+      var d = JSON.parse(cleaned);
+      if (d.role) candidate.role = d.role;
+      if (d.stayRange) candidate.stayRange = d.stayRange;
+      if (d.whyItFits) candidate.whyItFits = d.whyItFits;
+      if (d.tradeoffs) candidate.tradeoffs = d.tradeoffs;
+      if (Array.isArray(d.tags)) candidate.tags = d.tags;
+      renderCandidateCards(_tb.candidates);
+    } catch(e) {
+      // Rationale failed \u2014 the candidate is still on the list with
+      // empty whyItFits. The user typed the name so they know why
+      // they added it; the row stays usable.
+      console.warn("addPlace rationale failed:", e && e.message);
+    }
+    return;
+  }
+
+  // \u2500\u2500 Slow path: Nominatim couldn't find it \u2014 defer to LLM \u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  // Single-shot LLM call that returns the full candidate shape OR an
+  // {error:"..."} sentinel for nonsense input. This preserves the
+  // pre-step-5 validation behavior.
+  inp.placeholder = "Adding " + raw + "\u2026";
+  try {
     var prompt = "A traveler is planning a trip to " + (region||"this region") + " and has asked you to add '" + raw + "' to the list of candidate destinations. Return ONLY a JSON object (no markdown) describing this place as a candidate card:\n"
       + '{"place":"...","country":"...","role":"base|anchor|pass","stayRange":"2-3 nights","whyItFits":"Why worth visiting \u2014 specific, named things.","tradeoffs":"One honest downside.","tags":["tag1","tag2"],"otherAttractions":"2-3 other things worth considering here \u2014 named specifics.","widelyRecommended":false,"lat":0.0,"lng":0.0}\n'
       + "BE SPECIFIC. Name the trains, museums, dishes, trails \u2014 don't hand-wave with 'major museums' or 'scenic rail.'\n"
       + "If '"+raw+"' isn't a real place or doesn't make sense for a trip to "+(region||"this region")+", return {\"error\":\"why\"} instead.";
     var text = await callMax([{role:"user",content:prompt}], 600, 25000);
-    var cleaned = text.replace(/```json|```/g,"").trim();
-    var first = cleaned.indexOf("{"), last = cleaned.lastIndexOf("}");
-    if (first > -1 && last > -1) cleaned = cleaned.substring(first, last+1);
-    var data = JSON.parse(cleaned);
-    if (data.error) throw new Error(data.error);
-    if (!data.place) throw new Error("No place returned");
-    // Generate a unique id
-    var nextN = (_tb.candidates||[]).length;
-    data.id = "c-user-" + Date.now();
-    data.status = null;
-    data._required = false;
-    data._requiredFor = [];
-    data._userAdded = true;
+    var cleaned2 = text.replace(/```json|```/g,"").trim();
+    var f2 = cleaned2.indexOf("{"), l2 = cleaned2.lastIndexOf("}");
+    if (f2 > -1 && l2 > -1) cleaned2 = cleaned2.substring(f2, l2+1);
+    var data2 = JSON.parse(cleaned2);
+    if (data2.error) throw new Error(data2.error);
+    if (!data2.place) throw new Error("No place returned");
+    data2.id = "c-user-" + Date.now();
+    data2.status = "keep";    // user-added \u2192 accepted \u2713
+    data2._required = false;
+    data2._requiredFor = [];
+    data2._userAdded = true;
+    data2.order = null;
+    data2.manuallyOrdered = false;
     _tb.candidates = _tb.candidates || [];
-    _tb.candidates.push(data);
+    _tb.candidates.push(data2);
+    if (typeof _tbResequenceCandidates === "function") _tbResequenceCandidates();
     inp.value = "";
     renderCandidateCards(_tb.candidates);
     setTimeout(function(){
-      var card = document.getElementById("ce-card-" + data.id);
-      if (card && card.scrollIntoView) {
-        card.scrollIntoView({behavior:"smooth", block:"center"});
-        card.style.animation = "ce-fade-in 0.4s ease";
+      var row2 = document.querySelector('.ce-sidebar-row[data-cand-id="' + data2.id + '"]')
+              || document.getElementById("ce-card-" + data2.id);
+      if (row2 && row2.scrollIntoView) {
+        row2.scrollIntoView({behavior:"smooth", block:"center"});
+        row2.style.animation = "ce-fade-in 0.4s ease";
       }
     }, 100);
   } catch(e) {
@@ -13955,7 +14601,7 @@ async function addPlaceToCandidates(){
     showSaveStatus("Couldn\u2019t add that place: " + (e.message||"try a more specific name"), 3500);
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = "+ Add"; }
-    if (inp) { inp.disabled = false; inp.focus(); }
+    if (inp) { inp.disabled = false; inp.placeholder = prevPh; inp.focus(); }
   }
 }
 
@@ -14239,17 +14885,31 @@ async function setCS(id,status){
 function _tbResequenceCandidates(){
   if (!_tb || !Array.isArray(_tb.candidates) || !_tb.candidates.length) return;
   var all = _tb.candidates;
-  var kept = MaxEnginePicker.keptCandidates(all);
-  var unset = all.filter(function(c){ return !c.status; });
-  var rejected = all.filter(function(c){ return c.status === "reject"; });
-  var orderedKept = kept;
+  // Round HZ (picker hero map, step 3): order the active set —
+  // accepted (status === "keep") + unchecked (status === null) — as a
+  // single sequence. Both classes are "in the route" the user is
+  // shaping, so they share a sequence and both get numbered dots +
+  // the polyline drawn through them. Pre-redesign this was kept-only
+  // because the route was a kept-only concept; the three-state hero
+  // map promotes unchecked candidates to in-route members of the
+  // proposal the user is reacting to. Rejected candidates fall out
+  // entirely (order = null, no polyline segment). See picker-hero-map.md.
+  var active = MaxEnginePicker.activeCandidates(all);
+  var rejected = all.filter(function(c){ return c && c.status === "reject"; });
+  var orderedActive = active;
   try {
-    var res = orderKeptCandidates(kept, _mdcItems||[], _tb.entry||"", _tb.tbExit||"");
-    if (res && Array.isArray(res.ordered) && res.ordered.length === kept.length) {
-      orderedKept = res.ordered;
+    var res = orderKeptCandidates(active, _mdcItems||[], _tb.entry||"", _tb.tbExit||"");
+    if (res && Array.isArray(res.ordered) && res.ordered.length === active.length) {
+      orderedActive = res.ordered;
     }
   } catch(e) { /* fall back to current order */ }
-  _tb.candidates = orderedKept.concat(unset).concat(rejected);
+  // Write the explicit `order` field on every active candidate.
+  // Rejected get null so _redrawCePolyline + _makeCandidateIcon skip
+  // them cleanly. manuallyOrdered is preserved but not yet acted on —
+  // that lands in step 4 (drag-reorder).
+  orderedActive.forEach(function(c, i){ if (c) c.order = i; });
+  rejected.forEach(function(c){ if (c) c.order = null; });
+  _tb.candidates = orderedActive.concat(rejected);
 }
 
 function updateCEShortlist(){
@@ -18133,6 +18793,7 @@ if (typeof MaxEnginePicker !== "undefined" && typeof MaxEnginePicker.on === "fun
       try { _ceMap.remove(); } catch (e) {}
       _ceMap = null;
     }
+    if (typeof _cePolyline !== "undefined") _cePolyline = null;
     if (typeof _edMap !== "undefined" && _edMap) {
       try { _edMap.remove(); } catch (e) {}
       _edMap = null;
@@ -25111,6 +25772,419 @@ function checkDeadlineAlert(){
 // preview modal's destination dropdown + verification logic then
 // auto-routes to whichever destination actually matches the booking
 // (by address + dates).
+// ─── In-app AI chat (v353.7, task #151) ───────────────────────
+//
+// "💬 Ask" button in the trip-view header opens this modal. Anyone
+// signed in with a trip loaded can have a conversation with an AI
+// about the trip. Phase 1 ships with Claude wired (via the existing
+// callMax proxy); GPT and Gemini are placeholders until their API
+// keys are added as Cloudflare Worker secrets in phases 2 and 3.
+//
+// Conversation persists per-trip on the server (via MaxSync
+// pull/push), so the chat follows the user across devices.
+//
+// Context model: the system prompt auto-includes whatever
+// destination the user is currently viewing (current dest + dates
+// when in dest mode; trip overview otherwise) so the AI can answer
+// "where's a good breakfast spot?" without the user having to
+// re-explain where they are.
+
+var _askModalState = {
+  messages: [],         // [{role, content, model, ts}]
+  loading: false,       // request in flight?
+  model: "claude",      // "claude" | "openai" | "gemini" — only claude is wired in Phase 1
+  tripId: null,
+};
+
+// v353.7: chat-key onboarding modal. Shown when the user clicks
+// 💬 Ask without an API key on file, or when they explicitly choose
+// to swap their key. Walks them through getting an Anthropic key
+// from console.anthropic.com (which is a separate signup from the
+// claude.ai consumer chat product) and gives them a paste field to
+// stash the result locally.
+//
+// opts.mode: "intro" (first time, with rationale) | "edit" (already
+//   have one, just want to swap)
+// opts.onSaved: callback fired after the user pastes a valid key
+//   and clicks Save — used by showAskMaxModal to proceed straight
+//   into the chat after onboarding.
+function showAskMaxKeyModal(opts) {
+  opts = opts || {};
+  var mode = opts.mode || (_apiKey ? "edit" : "intro");
+  var existing = document.getElementById("askmax-key-overlay");
+  if (existing) existing.remove();
+
+  var ov = document.createElement("div");
+  ov.id = "askmax-key-overlay";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:11950;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto;";
+  var box = document.createElement("div");
+  box.style.cssText = "background:#fff;border-radius:12px;width:560px;max-width:100%;max-height:calc(100vh - 48px);overflow:auto;padding:24px 26px;box-shadow:0 12px 40px rgba(0,0,0,.25);";
+
+  var introBlock = mode === "intro"
+    ? '<div style="font-size:13px;color:#444;line-height:1.6;margin-bottom:16px;">' +
+        '<p style="margin:0 0 10px;"><strong>Max\'s chat needs your own Anthropic API key.</strong></p>' +
+        '<p style="margin:0 0 10px;">Everything else in Max — picker suggestions, candidate cities, calendar export — runs on a shared budget. Chat is open-ended, so we ask you to bring your own key for that one feature. Your key stays in your browser only and is never sent to Max\'s servers.</p>' +
+        '<div style="background:#eef5fb;border:1px solid #c8dff8;border-radius:6px;padding:12px 14px;margin:12px 0;">' +
+          '<div style="font-size:11px;font-weight:700;color:#1a5fa8;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">Why use Claude inside Max instead of in a separate tab?</div>' +
+          '<div style="font-size:12.5px;color:#333;line-height:1.6;">' +
+            'You can absolutely keep using <a href="https://claude.ai" target="_blank" rel="noopener noreferrer" style="color:#1a5fa8;">claude.ai</a> (or ChatGPT, or any other AI) on its own. Using it <em>inside Max</em> just adds three things:' +
+            '<ol style="margin:6px 0 0;padding-left:20px;">' +
+              '<li><b>It already knows your trip.</b> Your destinations, dates, lodging, what\'s planned per day, the weather forecast — all auto-loaded into the conversation. No re-explaining "I\'m going to Iceland May 10–13, three nights in Reykjavik then…" every single time.</li>' +
+              '<li><b>The conversation stays with the trip.</b> Open it tomorrow, next week, on your phone — the same thread is right where you left it. Generic chat windows lose this.</li>' +
+              '<li><b>It\'s right next to the plan.</b> Ask "what\'s typical service charge in Iceland?" or "anything good for breakfast near where I\'m staying in Reykjavik?", get an answer, edit your day — no tab-switching or copy-pasting context back and forth.</li>' +
+            '</ol>' +
+          '</div>' +
+        '</div>' +
+        '<p style="margin:0;"><b>Important:</b> claude.ai (the consumer chat) is a separate product from the Anthropic API. Your claude.ai login does NOT give you API access. You need to create a key from the API console (free signup, pay-as-you-go for actual usage — typical chat costs cents per session).</p>' +
+      '</div>'
+    : '<div style="font-size:13px;color:#444;line-height:1.55;margin-bottom:16px;">' +
+        'Replace your current Anthropic API key. The new key is stored locally in this browser only.' +
+      '</div>';
+
+  box.innerHTML =
+    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">' +
+      '<div style="width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#1a5fa8,#2a7a4e);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;">🔑</div>' +
+      '<div style="font-size:15px;font-weight:700;">' + (mode === "edit" ? "Update your chat API key" : "Set up Max chat") + '</div>' +
+    '</div>' +
+    introBlock +
+    (mode === "intro"
+      ? '<div style="background:#f7f9fc;border:1px solid #e2e7ee;border-radius:7px;padding:14px 16px;margin-bottom:16px;">' +
+          '<div style="font-size:11px;font-weight:700;color:#1a5fa8;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">How to get a key (2 minutes)</div>' +
+          '<ol style="margin:0;padding-left:20px;font-size:12.5px;color:#333;line-height:1.7;">' +
+            '<li>Open <a href="https://console.anthropic.com/" target="_blank" rel="noopener noreferrer" style="color:#1a5fa8;font-weight:600;">console.anthropic.com</a> and sign up (or sign in if you already have a developer account — different from claude.ai).</li>' +
+            '<li>Go to <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer" style="color:#1a5fa8;font-weight:600;">Settings → API Keys</a>.</li>' +
+            '<li>Click <b>Create Key</b>. Name it something like "Max chat". Copy the long <code style="background:#fff;padding:1px 5px;border-radius:3px;border:1px solid #ddd;font-size:11px;">sk-ant-…</code> string immediately — you can\'t view it again.</li>' +
+            '<li>You may need to add a payment method on the <a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noopener noreferrer" style="color:#1a5fa8;font-weight:600;">Billing tab</a> for the key to work. Anthropic gives you free credits to start.</li>' +
+            '<li>Paste the key below.</li>' +
+          '</ol>' +
+        '</div>'
+      : '') +
+    '<label style="display:block;font-size:11px;font-weight:700;color:#444;margin-bottom:6px;">Anthropic API key</label>' +
+    '<input id="askmax-key-input" type="password" placeholder="sk-ant-…" value="' + (_apiKey || "").replace(/"/g, "&quot;") + '" style="width:100%;font-size:12px;padding:9px 11px;border:1px solid #ccc;border-radius:5px;font-family:monospace;box-sizing:border-box;margin-bottom:10px;" />' +
+    '<div id="askmax-key-msg" style="font-size:11px;color:#888;min-height:14px;margin-bottom:12px;"></div>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;">' +
+      '<button id="askmax-key-cancel" style="padding:9px 14px;font-size:12px;font-weight:600;background:#fff;color:#666;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;">Cancel</button>' +
+      '<button id="askmax-key-save" style="padding:9px 18px;font-size:12px;font-weight:700;background:#1a5fa8;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Save & continue →</button>' +
+    '</div>';
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+
+  var keyInput = document.getElementById("askmax-key-input");
+  var msg = document.getElementById("askmax-key-msg");
+  var saveBtn = document.getElementById("askmax-key-save");
+  var cancelBtn = document.getElementById("askmax-key-cancel");
+
+  cancelBtn.onclick = function(){ ov.remove(); };
+  ov.addEventListener("click", function(e){ if (e.target === ov) ov.remove(); });
+
+  saveBtn.onclick = function(){
+    var v = (keyInput.value || "").trim();
+    if (!v) { msg.textContent = "Paste your key first."; msg.style.color = "#c44"; return; }
+    if (!/^sk-ant-/.test(v)) {
+      msg.textContent = "That doesn't look like an Anthropic key (should start with sk-ant-).";
+      msg.style.color = "#c44";
+      return;
+    }
+    try { localStorage.setItem("max-api-key", v); } catch (_) {}
+    _apiKey = v;  // module-scope variable used by callMax
+    ov.remove();
+    if (typeof opts.onSaved === "function") opts.onSaved();
+  };
+
+  // Make sure the modal opens scrolled to the top. Reset all
+  // possible scroll containers (overlay, box, document) and re-reset
+  // in the next frame in case layout reflow shifts something.
+  function _scrollAllToTop() {
+    ov.scrollTop = 0;
+    box.scrollTop = 0;
+    if (document && document.documentElement) document.documentElement.scrollTop = 0;
+  }
+  _scrollAllToTop();
+  requestAnimationFrame(_scrollAllToTop);
+  setTimeout(_scrollAllToTop, 100);
+
+  // Auto-focus is intentionally skipped in intro mode. The modal
+  // has reading material at the top (rationale + value-prop) that
+  // must be visible on open; auto-focusing the input would scroll-
+  // into-view past the explanation. In edit mode the modal is short
+  // and the input IS the main UI, so we focus there.
+  if (mode === "edit") {
+    setTimeout(function(){
+      try { keyInput.focus({ preventScroll: true }); }
+      catch (_) { keyInput.focus(); }
+      if (keyInput.value) {
+        try { keyInput.select(); } catch (_) {}
+      }
+    }, 50);
+  }
+}
+// Expose so the sync-modal "change" link can call it.
+window.showAskMaxKeyModal = showAskMaxKeyModal;
+
+function showAskMaxModal() {
+  if (!_currentTripId || !trip) { maxAlert("Open a trip first."); return; }
+  if (typeof MaxSync === "undefined" || !MaxSync.isSignedIn || !MaxSync.isSignedIn()) {
+    maxAlert("Sign in first — chat history syncs across devices via the server.");
+    return;
+  }
+  // v353.7: chat-only BYOK gate. Without an API key on file we
+  // can't run the chat, so route the user through the onboarding
+  // modal first, then proceed once they've pasted a key.
+  if (!_apiKey) {
+    showAskMaxKeyModal({
+      mode: "intro",
+      onSaved: function(){ showAskMaxModal(); },
+    });
+    return;
+  }
+  var existing = document.getElementById("ask-max-overlay");
+  if (existing) existing.remove();
+
+  _askModalState.tripId = _currentTripId;
+
+  var ov = document.createElement("div");
+  ov.id = "ask-max-overlay";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:11900;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto;";
+  var box = document.createElement("div");
+  box.style.cssText = "background:#fff;border-radius:12px;width:680px;max-width:100%;height:calc(100vh - 48px);max-height:760px;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,.25);";
+  box.innerHTML =
+    // Header — title + model picker + close.
+    '<div style="padding:14px 18px;border-bottom:1px solid #eee;display:flex;align-items:center;gap:10px;flex-shrink:0;">' +
+      '<div style="width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#1a5fa8,#2a7a4e);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;">💬</div>' +
+      '<div style="flex:1;min-width:0;">' +
+        '<div style="font-size:14px;font-weight:700;color:#222;">Ask about this trip</div>' +
+        '<div id="askmax-context-line" style="font-size:11px;color:#888;line-height:1.3;"></div>' +
+      '</div>' +
+      '<select id="askmax-model" style="font-size:11.5px;font-weight:600;padding:5px 8px;border:1px solid #ccc;border-radius:5px;font-family:inherit;background:#fff;cursor:pointer;">' +
+        '<option value="claude" selected>Claude (Anthropic)</option>' +
+        '<option value="openai" disabled>GPT-4 (set OPENAI_API_KEY) — coming soon</option>' +
+        '<option value="gemini" disabled>Gemini (set GEMINI_API_KEY) — coming soon</option>' +
+      '</select>' +
+      '<button id="askmax-close" style="margin-left:6px;padding:6px 10px;font-size:11.5px;background:#fff;color:#666;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;">Close</button>' +
+    '</div>' +
+    // Conversation pane.
+    '<div id="askmax-pane" style="flex:1;overflow-y:auto;padding:16px 18px;background:#fafafa;display:flex;flex-direction:column;gap:10px;"></div>' +
+    // Input row.
+    '<div style="padding:12px 18px;border-top:1px solid #eee;flex-shrink:0;background:#fff;">' +
+      '<div style="display:flex;gap:8px;align-items:flex-end;">' +
+        '<textarea id="askmax-input" placeholder="Ask anything about this trip — weather, places to eat, logistics, what to pack…" style="flex:1;font-size:13px;padding:9px 11px;border:1px solid #ccc;border-radius:6px;font-family:-apple-system,sans-serif;resize:none;min-height:40px;max-height:140px;line-height:1.4;box-sizing:border-box;"></textarea>' +
+        '<button id="askmax-send" style="padding:9px 16px;font-size:12.5px;font-weight:700;background:#1a5fa8;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;flex-shrink:0;height:40px;">Send</button>' +
+      '</div>' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;gap:10px;flex-wrap:wrap;">' +
+        '<div style="font-size:10px;color:#999;">Cmd/Ctrl+Enter to send · Shift+Enter for newline · <span id="askmax-keystate"></span></div>' +
+        '<button id="askmax-clear" style="font-size:10.5px;background:none;color:#888;border:none;cursor:pointer;font-family:inherit;text-decoration:underline;">Clear conversation</button>' +
+      '</div>' +
+    '</div>';
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+
+  // Wire close + clear.
+  document.getElementById("askmax-close").onclick = function(){ ov.remove(); };
+  ov.addEventListener("click", function(e){ if (e.target === ov) ov.remove(); });
+
+  // Compute the context line shown under the title — what the AI
+  // is "looking at" when the user asks a question.
+  var ctxLine = document.getElementById("askmax-context-line");
+  var ctxDest = (typeof activeDest !== "undefined" && activeDest && _leftMode === "dest") ? getDest(activeDest) : null;
+  ctxLine.textContent = ctxDest
+    ? "Context: " + (ctxDest.place || ctxDest.label || "current destination") + (ctxDest.dateFrom ? " (" + ctxDest.dateFrom + " → " + (ctxDest.dateTo || ctxDest.dateFrom) + ")" : "")
+    : "Context: " + (trip.name || "this trip") + (trip.destinations ? " — " + trip.destinations.length + " destinations" : "");
+
+  // Pull existing conversation from server. While loading, show a
+  // ghost placeholder; on success render the messages.
+  var pane = document.getElementById("askmax-pane");
+  pane.innerHTML = '<div style="font-size:11px;color:#999;text-align:center;padding:20px;">Loading conversation…</div>';
+  MaxSync.pullConversation(_currentTripId).then(function(resp){
+    _askModalState.messages = (resp && resp.messages) || [];
+    _renderAskMaxPane();
+  }).catch(function(e){
+    console.warn("[askmax] pull failed:", e);
+    _askModalState.messages = [];
+    _renderAskMaxPane();
+  });
+
+  var input = document.getElementById("askmax-input");
+  var sendBtn = document.getElementById("askmax-send");
+  var clearBtn = document.getElementById("askmax-clear");
+
+  sendBtn.onclick = function(){ _askMaxSend(); };
+  input.onkeydown = function(e){
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      _askMaxSend();
+    }
+  };
+  clearBtn.onclick = function(){
+    if (!confirm("Clear this conversation? You'll start fresh next time.")) return;
+    MaxSync.clearConversation(_currentTripId).then(function(){
+      _askModalState.messages = [];
+      _renderAskMaxPane();
+    }).catch(function(e){
+      maxAlert("Couldn't clear: " + (e && e.message || "unknown"));
+    });
+  };
+
+  // Footer: chat is always running on the user's own Anthropic key
+  // (chat-only BYOK model, v353.7). Surface a small link to swap
+  // the key in case the user wants to rotate or replace.
+  var keystateEl = document.getElementById("askmax-keystate");
+  if (keystateEl) {
+    keystateEl.innerHTML = 'Powered by <a href="#" id="askmax-keystate-link" style="color:#1a5fa8;text-decoration:none;font-weight:600;">your Anthropic key ↗</a>';
+    var link = document.getElementById("askmax-keystate-link");
+    if (link) {
+      link.onclick = function(e){
+        e.preventDefault();
+        showAskMaxKeyModal({ mode: "edit" });
+      };
+    }
+  }
+
+  setTimeout(function(){ input.focus(); }, 100);
+}
+
+function _renderAskMaxPane() {
+  var pane = document.getElementById("askmax-pane");
+  if (!pane) return;
+  var msgs = _askModalState.messages || [];
+  if (!msgs.length && !_askModalState.loading) {
+    pane.innerHTML = '<div style="text-align:center;padding:40px 20px;color:#888;">' +
+      '<div style="font-size:30px;margin-bottom:10px;">💬</div>' +
+      '<div style="font-size:13px;font-weight:600;color:#444;margin-bottom:6px;">Ask anything about this trip</div>' +
+      '<div style="font-size:11.5px;line-height:1.5;max-width:380px;margin:0 auto;">Try: "What\'s a good breakfast spot near my Reykjavik hotel?" · "Will I be cold in May?" · "Translate \'where\'s the bathroom\' to Icelandic" · "What should I pack for the trip?"</div>' +
+    '</div>';
+    return;
+  }
+  pane.innerHTML = "";
+  msgs.forEach(function(m){
+    var row = document.createElement("div");
+    var isUser = m.role === "user";
+    row.style.cssText = "max-width:84%;align-self:" + (isUser ? "flex-end" : "flex-start") + ";";
+    var bubble = document.createElement("div");
+    bubble.style.cssText = "padding:9px 13px;border-radius:14px;font-size:13px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word;" +
+      (isUser
+        ? "background:#1a5fa8;color:#fff;border-bottom-right-radius:4px;"
+        : "background:#fff;color:#222;border:1px solid #e2e6ea;border-bottom-left-radius:4px;");
+    bubble.textContent = m.content || "";
+    row.appendChild(bubble);
+    var meta = document.createElement("div");
+    meta.style.cssText = "font-size:9.5px;color:#aaa;margin-top:3px;text-align:" + (isUser ? "right" : "left") + ";";
+    var when = m.ts ? new Date(m.ts).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"}) : "";
+    meta.textContent = (isUser ? "you" : (m.model || "assistant")) + (when ? " · " + when : "");
+    row.appendChild(meta);
+    pane.appendChild(row);
+  });
+  if (_askModalState.loading) {
+    var thinking = document.createElement("div");
+    thinking.style.cssText = "max-width:84%;align-self:flex-start;";
+    thinking.innerHTML = '<div style="padding:9px 13px;border-radius:14px;font-size:13px;background:#fff;border:1px solid #e2e6ea;color:#888;border-bottom-left-radius:4px;">Thinking…</div>';
+    pane.appendChild(thinking);
+  }
+  pane.scrollTop = pane.scrollHeight;
+}
+
+async function _askMaxSend() {
+  var input = document.getElementById("askmax-input");
+  var sendBtn = document.getElementById("askmax-send");
+  if (!input || _askModalState.loading) return;
+  var text = (input.value || "").trim();
+  if (!text) return;
+
+  // Append user message + render immediately.
+  var now = Date.now();
+  _askModalState.messages.push({ role: "user", content: text, ts: now });
+  input.value = "";
+  _askModalState.loading = true;
+  sendBtn.disabled = true; sendBtn.textContent = "…";
+  _renderAskMaxPane();
+
+  try {
+    var system = _buildAskMaxSystemPrompt();
+    // Build the messages array for the LLM. Drop the leading
+    // "ts/model" metadata fields — the API only cares about role +
+    // content. Trim to the last 30 messages to keep token counts
+    // bounded; older context is implicit in the trip JSON.
+    var apiMessages = _askModalState.messages
+      .slice(-30)
+      .map(function(m){ return { role: m.role, content: m.content }; });
+    var resp = await callMax(apiMessages, 1500, 30000, { system: system, noCache: true, useOwnKey: true });
+    var reply = String(resp || "").trim();
+    if (!reply) reply = "(no response)";
+    _askModalState.messages.push({ role: "assistant", content: reply, model: "claude-sonnet-4", ts: Date.now() });
+  } catch (e) {
+    console.warn("[askmax] send failed:", e);
+    _askModalState.messages.push({
+      role: "assistant",
+      content: "Sorry — that didn't go through. " + (e && e.message ? "(" + e.message + ")" : "") + " Try again, or check your connection.",
+      model: "error",
+      ts: Date.now(),
+    });
+  } finally {
+    _askModalState.loading = false;
+    sendBtn.disabled = false; sendBtn.textContent = "Send";
+    _renderAskMaxPane();
+  }
+
+  // Persist after every send. Fire-and-forget; if it fails the
+  // local state still has the messages (next pull will reconcile).
+  try {
+    await MaxSync.pushConversation(_askModalState.tripId, _askModalState.messages);
+  } catch (e) {
+    console.warn("[askmax] push failed:", e);
+  }
+}
+
+function _buildAskMaxSystemPrompt() {
+  // The system prompt establishes the AI's role + auto-prepends
+  // current trip context. Per the user's pref (#151 scoping), we
+  // include the CURRENT DESTINATION + dates if the user is viewing
+  // a destination, otherwise the trip overview.
+  var ctxBlock = "";
+  var ctxDest = (typeof activeDest !== "undefined" && activeDest && _leftMode === "dest") ? getDest(activeDest) : null;
+  if (ctxDest) {
+    var dest = ctxDest;
+    var bits = [];
+    bits.push("CURRENT DESTINATION: " + (dest.place || dest.label || "Untitled"));
+    if (dest.dateFrom && dest.dateTo) bits.push("Dates: " + dest.dateFrom + " to " + dest.dateTo + " (" + (dest.nights || "") + " nights)");
+    if (dest.lodging || dest.lodgingNotes) bits.push("Lodging: " + (dest.lodging || dest.lodgingNotes));
+    if (dest.label && dest.label !== dest.place) bits.push("Label: " + dest.label);
+    var planned = [];
+    (dest.days || []).forEach(function(d){
+      (d.items || []).forEach(function(it){ if (it && it.n) planned.push(it.n); });
+    });
+    if (planned.length) bits.push("Planned: " + planned.slice(0, 20).join(", ") + (planned.length > 20 ? "…" : ""));
+    if (trip && trip.name) bits.push("Part of trip: " + trip.name);
+    ctxBlock = bits.join("\n");
+  } else if (trip) {
+    var tBits = [];
+    tBits.push("TRIP: " + (trip.name || "Untitled"));
+    if (trip.destinations && trip.destinations.length) {
+      var d0 = trip.destinations[0], dN = trip.destinations[trip.destinations.length - 1];
+      if (d0.dateFrom && dN.dateTo) tBits.push("Overall dates: " + d0.dateFrom + " to " + dN.dateTo);
+      // Per-destination breakdown — place, dates, lodging if any. This
+      // is what enables questions like "what's a good breakfast near
+      // my hotel?" at the trip level: Claude can see lodging exists
+      // for each leg and either pick the right one by today's date
+      // (mid-trip) or ask which leg.
+      tBits.push("Destinations (in order):");
+      trip.destinations.forEach(function(d, i){
+        var line = "  " + (i + 1) + ". " + (d.place || d.label || "?");
+        if (d.dateFrom && d.dateTo) line += " · " + d.dateFrom + "–" + d.dateTo;
+        if (d.lodging || d.lodgingNotes) line += " · stay: " + (d.lodging || d.lodgingNotes);
+        tBits.push(line);
+      });
+    }
+    if (trip.brief && trip.brief.brief) tBits.push("Brief: " + String(trip.brief.brief).slice(0, 400));
+    ctxBlock = tBits.join("\n");
+  }
+  return "You are a knowledgeable, friendly travel assistant embedded inside the user's trip-planning app (Max). " +
+    "The user is planning or actively on a trip. Help them with anything trip-related: places to eat, things to see, " +
+    "logistics, packing, weather, language tips, cultural context, opening hours, transit options. Be specific and " +
+    "concrete — name actual places, give real walking distances, mention real opening hours when you know them. " +
+    "When you don't know something specific (current opening hours, pricing, availability), say so and suggest where to verify. " +
+    "Keep responses focused and skim-able — short paragraphs, lists when relevant. Don't invent facts.\n\n" +
+    "Here is what the user is currently looking at:\n\n" + ctxBlock;
+}
+
 function showGlobalPasteConfirmationModal() {
   if (!trip || !trip.destinations || !trip.destinations.length) {
     maxAlert("Add a destination to this trip first.");
@@ -25151,6 +26225,22 @@ function showPasteConfirmationModal(destId) {
   var cancelBtn = document.getElementById("pcf-cancel");
   inputEl.focus();
 
+  // v353.7: stash the HTML version of the clipboard alongside the
+  // plain text. When a user copies a selection from a rendered email
+  // (Apple Mail, Gmail web), the textarea only gets text/plain — the
+  // URLs behind hyperlinks get stripped because hrefs only live in
+  // text/html. We grab both channels on paste so the URL extractor
+  // can see what the user couldn't see in the textarea.
+  var _pastedHtml = null;
+  inputEl.addEventListener("paste", function(e){
+    if (e.clipboardData) {
+      try {
+        var h = e.clipboardData.getData("text/html");
+        if (h && h.trim()) _pastedHtml = h;
+      } catch(_) {}
+    }
+  });
+
   cancelBtn.onclick = function(){ ov.remove(); };
   ov.addEventListener("click", function(e){ if (e.target === ov) ov.remove(); });
 
@@ -25163,7 +26253,7 @@ function showPasteConfirmationModal(destId) {
     statusEl.textContent = "Extracting fields…";
     statusEl.style.color = "#888";
     try {
-      var parsed = await _parseBookingConfirmation(text);
+      var parsed = await _parseBookingConfirmation(text, _pastedHtml);
       // Log the raw extraction so debugging is one console line away —
       // the LLM occasionally returns partial fields and the failure
       // mode used to be a silent generic message that gave the user
@@ -25222,7 +26312,7 @@ function showPasteConfirmationModal(destId) {
 //      to our canonical schema as a belt-and-braces second line of
 //      defense. Even if the LLM ignores the prompt, the normalizer
 //      catches the most common drift patterns.
-async function _parseBookingConfirmation(text) {
+async function _parseBookingConfirmation(text, html) {
   var system =
     "You extract booking details from raw confirmation text (emails, web pages, screenshots transcribed). " +
     "Return ONLY a single JSON object — no prose, no markdown fences, no explanation. " +
@@ -25298,8 +26388,13 @@ async function _parseBookingConfirmation(text) {
   // generic — works for any booking-confirmation email format that
   // has a URL somewhere in the body, regardless of how it's formatted.
   if (!normalized.url || !/^https?:\/\//i.test(normalized.url)) {
-    var fallback = _extractBookingUrl(text);
-    console.log("[paste-confirm] URL fallback ran. found:", fallback);
+    // Scan both the plain-text paste AND the captured HTML clipboard
+    // payload (when available). Most rendered emails put the visible
+    // text in text/plain and the link hrefs in text/html; we want
+    // both signals.
+    var combined = (text || "") + (html ? "\n\n" + html : "");
+    var fallback = _extractBookingUrl(combined);
+    console.log("[paste-confirm] URL fallback ran. found:", fallback, "(html available:", !!html, ")");
     if (fallback) normalized.url = fallback;
   }
   return normalized;
@@ -25338,22 +26433,46 @@ function _extractBookingUrl(text) {
   }
   if (!urls.length) return null;
 
-  // Score each candidate by how booking-relevant it looks. Negative
-  // signals (tracking, unsubscribe, image hosts) push URLs out;
-  // positive signals (booking.com, manage, reservation, etc.) pull
-  // them in. The top non-negative score wins.
+  // Score each candidate by how booking-relevant it looks.
+  //
+  // The scoring split between HOST and PATH/QUERY matters: a real
+  // management URL like
+  //   https://secure.booking.com/confirmation.en-us.html?…&from_conf_email_tracking=1
+  // has the word "tracking" in a query param, but it's not a
+  // tracking URL — it's a confirmation page that happens to carry
+  // tracking analytics. We check tracking-y signals on HOST only.
   var positive = /booking\.com|hotels\.com|airbnb\.com|expedia\.com|marriott|hilton|hyatt|ihg|accor|trip\.com|agoda|priceline|kayak|skyscanner|opentable|resy|tock|viator|getyourguide|tickets|ticketmaster|amtrak|trainline|sncf|bahn|rail|airlines|airways|lufthansa|united|delta|aa\.com|jetblue|britishairways|southwest|ryanair|easyjet/i;
-  var positiveLabels = /manage|modify|cancel|reservation|confirmation|booking|view|access|details/i;
-  var negative = /unsubscribe|preferences|tracking|pixel|click\.|track\.|stat\.|analytic|facebook|twitter|linkedin|instagram|youtube|email\.|footer|optout/i;
+  var positiveLabels = /manage|modify|cancel|reservation|confirmation|booking|view|access|details|mybooking/i;
+  // Host-level negatives: a URL served BY one of these subdomains is
+  // probably tracking infra, not the actual management page.
+  var negativeHost = /^(?:click|track|tracking|stat|stats|analytics?|pixel|email|emails|t|r|link|links)\./i;
+  // Label-level negatives: the visible link text indicates the URL
+  // is footer/legal/social, not a management CTA.
+  var negativeLabel = /unsubscribe|preferences|privacy|terms|footer|optout|opt out|facebook|twitter|linkedin|instagram|youtube|tiktok/i;
   var imageExt = /\.(?:gif|png|jpg|jpeg|svg|webp|ico|css|js|woff|woff2|ttf)(\?|$)/i;
 
   function score(u) {
     var s = 0;
-    var domain = u.url.toLowerCase();
-    if (positive.test(domain)) s += 3;
-    if (positiveLabels.test(u.label) || positiveLabels.test(domain)) s += 2;
-    if (negative.test(domain) || negative.test(u.label)) s -= 6;
-    if (imageExt.test(domain)) s -= 6;
+    var url = u.url;
+    var hostMatch = url.match(/^https?:\/\/([^\/]+)/i);
+    var host = hostMatch ? hostMatch[1].toLowerCase() : "";
+    var pathQuery = hostMatch ? url.slice(hostMatch[0].length).toLowerCase() : "";
+
+    // Positive: known travel/booking domain anywhere in the URL.
+    if (positive.test(host)) s += 3;
+    // Positive: management-CTA keywords in the visible label OR
+    // anywhere in the URL (host or path).
+    if (positiveLabels.test(u.label)) s += 2;
+    if (positiveLabels.test(host) || positiveLabels.test(pathQuery)) s += 1;
+    // Tiebreaker: URLs with an actual path/query are real pages,
+    // bare domain links are usually footer logos. Boost the former.
+    if (pathQuery.length > 1) s += 1;
+
+    // Negatives — host-only for tracking signals so we don't
+    // mis-penalize legit URLs with analytics query params.
+    if (negativeHost.test(host)) s -= 6;
+    if (negativeLabel.test(u.label)) s -= 6;
+    if (imageExt.test(host) || imageExt.test(pathQuery)) s -= 6;
     return s;
   }
   urls.forEach(function(u){ u.score = score(u); });
@@ -25741,7 +26860,17 @@ function _showBookingPreviewModal(destId, p, originalText) {
       inp("pcfp-price", "Price paid", p.price != null ? p.price : "", "", "number") +
       inp("pcfp-currency", "Currency", p.currency || "", "USD") +
       '</div>';
-    html += inp("pcfp-url", "Booking URL", p.url || "", "https://…", "url");
+    // Booking URL with an inline "↗ Open" button — saves the user
+    // from selecting and copying the long management URL just to
+    // try the link. Disabled when the field is empty; re-enabled
+    // live as the user types or pastes.
+    html += '<label style="display:block;margin-bottom:8px;">' +
+      '<span style="display:block;font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:2px;">Booking URL</span>' +
+      '<div style="display:flex;gap:6px;align-items:stretch;">' +
+        '<input id="pcfp-url" type="url" value="' + (p.url == null ? "" : String(p.url).replace(/"/g, "&quot;")) + '" placeholder="https://…" style="flex:1;padding:6px 9px;font-size:12px;border:1px solid #ccc;border-radius:4px;font-family:inherit;box-sizing:border-box;min-width:0;" />' +
+        '<button type="button" id="pcfp-url-open" title="Open this link in a new tab" style="padding:0 12px;font-size:11.5px;font-weight:600;background:#fff;color:#1a5fa8;border:1px solid #1a5fa8;border-radius:4px;cursor:pointer;font-family:inherit;flex-shrink:0;white-space:nowrap;">↗ Open</button>' +
+      '</div>' +
+    '</label>';
     // Cancellation policy block — date-only.
     //
     // We deliberately don't capture deadline time. Property-local
@@ -25770,6 +26899,32 @@ function _showBookingPreviewModal(destId, p, originalText) {
     ctRadios.forEach(function(r){ r.onchange = function(){
       if (cwrap && r.checked) cwrap.style.display = r.value === "deadline" ? "block" : "none";
     };});
+
+    // Booking URL: live-toggle the Open button's disabled state, and
+    // wire its click to open the (current, possibly user-edited) URL
+    // in a new tab. We re-bind every time renderFields runs because
+    // the type-switch dropdown rebuilds the DOM.
+    var urlInput = document.getElementById("pcfp-url");
+    var urlBtn = document.getElementById("pcfp-url-open");
+    function _refreshUrlBtn(){
+      if (!urlInput || !urlBtn) return;
+      var v = (urlInput.value || "").trim();
+      var ok = /^https?:\/\//i.test(v);
+      urlBtn.disabled = !ok;
+      urlBtn.style.opacity = ok ? "1" : "0.4";
+      urlBtn.style.cursor = ok ? "pointer" : "not-allowed";
+    }
+    if (urlInput) urlInput.oninput = _refreshUrlBtn;
+    if (urlBtn) {
+      urlBtn.onclick = function(){
+        if (!urlInput) return;
+        var v = (urlInput.value || "").trim();
+        if (/^https?:\/\//i.test(v)) {
+          window.open(v, "_blank", "noopener,noreferrer");
+        }
+      };
+    }
+    _refreshUrlBtn();
   }
   renderFields();
   typeSel.onchange = renderFields;

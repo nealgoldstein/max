@@ -197,12 +197,19 @@
                       : c.status === "reject" ? "#888" : "#1a5fa8");
     var opacity = grayed ? 0.85 : 1;
     var borderStyle = grayed ? "2px dashed #fff" : "2px solid #fff";
+    // Round HZ (picker hero map): render the candidate's sequence ordinal
+    // (1, 2, 3 …) instead of the place-initials when it's in the route —
+    // i.e. has an `order` set by _tbResequenceCandidates and isn't rejected.
+    // Falls back to place-initials for rejected candidates and any
+    // candidate not yet placed in a sequence.
+    var hasOrdinal = (typeof c.order === "number" && isFinite(c.order) && c.status !== "reject");
     var pinSize = selected ? 30 : (grayed ? 22 : 24);
-    var fontPx = selected ? 11 : 9;
+    var fontPx = selected ? 11 : (hasOrdinal ? 11 : 9);
+    var label = hasOrdinal ? String(c.order + 1) : (c.place || "").substring(0, 2);
     var ring = selected
       ? '<div style="position:absolute;top:-6px;left:-6px;width:' + (pinSize + 12) + 'px;height:' + (pinSize + 12) + 'px;border:3px solid #ffb300;border-radius:50%;box-shadow:0 0 10px rgba(255,179,0,0.55);pointer-events:none;animation:max-pin-pulse 1.6s ease-in-out infinite;"></div>'
       : '';
-    var inner = '<div style="position:relative;background:' + mc + ';color:#fff;border-radius:50%;width:' + pinSize + 'px;height:' + pinSize + 'px;display:flex;align-items:center;justify-content:center;font-size:' + fontPx + 'px;font-weight:700;border:' + borderStyle + ';box-shadow:0 1px 4px rgba(0,0,0,.25);opacity:' + opacity + ';">' + (c.place || "").substring(0, 2) + '</div>';
+    var inner = '<div style="position:relative;background:' + mc + ';color:#fff;border-radius:50%;width:' + pinSize + 'px;height:' + pinSize + 'px;display:flex;align-items:center;justify-content:center;font-size:' + fontPx + 'px;font-weight:700;border:' + borderStyle + ';box-shadow:0 1px 4px rgba(0,0,0,.25);opacity:' + opacity + ';">' + label + '</div>';
     var html = '<div style="position:relative;width:' + pinSize + 'px;height:' + pinSize + 'px;">' + ring + inner + '</div>';
     return L.divIcon({ html: html, className: "", iconSize: [pinSize, pinSize], iconAnchor: [pinSize / 2, pinSize / 2] });
   }

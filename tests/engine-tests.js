@@ -1875,6 +1875,43 @@ describe('engine-picker.js — keptCandidates', () => {
   });
 });
 
+// ── Suite: activeCandidates (Round HZ: picker hero map) ────────
+
+describe('engine-picker.js — activeCandidates', () => {
+  test('returns kept + unchecked, excludes rejected', () => {
+    const cands = [
+      { place: 'A', status: 'keep' },
+      { place: 'B', status: 'reject' },
+      { place: 'C', status: null },
+      { place: 'D', status: 'keep' },
+      { place: 'E' }, // status undefined → unchecked
+    ];
+    assert.deepStrictEqual(
+      MaxEnginePicker.activeCandidates(cands).map(c => c.place),
+      ['A', 'C', 'D', 'E']);
+  });
+
+  test('null/undefined/empty input → []', () => {
+    assert.deepStrictEqual(MaxEnginePicker.activeCandidates(null),      []);
+    assert.deepStrictEqual(MaxEnginePicker.activeCandidates(undefined), []);
+    assert.deepStrictEqual(MaxEnginePicker.activeCandidates([]),        []);
+  });
+
+  test('all-rejected returns []', () => {
+    assert.deepStrictEqual(
+      MaxEnginePicker.activeCandidates([
+        { status: 'reject' }, { status: 'reject' },
+      ]), []);
+  });
+
+  test('tolerates null entries inside the array', () => {
+    const cands = [null, { status: 'keep', place: 'A' }, undefined, { place: 'B' }];
+    assert.deepStrictEqual(
+      MaxEnginePicker.activeCandidates(cands).map(c => c.place),
+      ['A', 'B']);
+  });
+});
+
 // ── Suite: computeStayTotalSummary (Round HX.5) ────────────────
 
 describe('engine-picker.js — computeStayTotalSummary', () => {
