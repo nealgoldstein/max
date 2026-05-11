@@ -9580,7 +9580,7 @@ function openPlacePickerMapModal(){
     + '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""><\/script>'
     + '<script>'
     + '(function(){'
-    +   'var map=null,markers={},routeHalo=null,routeLine=null,spurs={},lastSig="";'
+    +   'var map=null,markers={},routeHalo=null,routeLine=null,spurs={},entryMarkers=[],lastSig="";'
     +   'function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"}[c];});}'
     +   'function getState(){'
     +     'try{'
@@ -9611,6 +9611,13 @@ function openPlacePickerMapModal(){
     +       'Object.keys(byKey).forEach(function(k){var v=byKey[k];if(v.lat!=null)out.push(v);});'
     +       'out._byKey=byKey;'
     +       'out._startHint=startHint;'
+          /* v355.6: thread the parent's entry-point cache + region into
+             the popout so it can render airport/rail/sea/bus pins for
+             the current region. (No leading "+" — see unary-plus note
+             above.) */
+    +       'var region=(op._tb&&op._tb.region)||"";'
+    +       'out._region=region;'
+    +       'out._entryPoints=(region&&op._epCache&&op._epCache[region])||[];'
     +       'return out;'
     +     '}catch(e){return null;}'
     +   '}'
@@ -9687,7 +9694,7 @@ function openPlacePickerMapModal(){
              popout repaints when the user toggles a place between stay
              and day trip in the parent window. (No leading "+" — see
              unary-plus note above.) */
-    +     'var sig=pts.map(function(p){return p.place+":"+(p.keep?1:0)+":"+(p.iconic?1:0)+":"+(p._isDayTrip?1:0)+":"+(p._dayTripHub||"");}).join("|")+"@"+(pts._startHint||"");'
+    +     'var sig=pts.map(function(p){return p.place+":"+(p.keep?1:0)+":"+(p.iconic?1:0)+":"+(p._isDayTrip?1:0)+":"+(p._dayTripHub||"");}).join("|")+"@"+(pts._startHint||"")+"#"+(pts._region||"")+"~"+((pts._entryPoints||[]).length);'
     +     'if(sig===lastSig)return;'
     +     'lastSig=sig;'
     +     'var seen={};var bounds=[];'
@@ -9738,6 +9745,37 @@ function openPlacePickerMapModal(){
              halo so they read cleanly all the way to the hub pin. No
              leading "+" — see unary-plus note above. */
     +     '});'
+          /* v355.6: entry-point pins (airports / rail / sea / bus) for
+             the current region. Reuses the parent's _epIconFor and
+             _tbUseEntryPoint via window.opener so click actions affect
+             the parent's state directly. Re-built from scratch on every
+             repaint so a region change clears stale icons. */
+    +     'entryMarkers.forEach(function(rec){if(rec&&rec.marker){try{map.removeLayer(rec.marker);}catch(_){}}});'
+    +     'entryMarkers=[];'
+    +     'var op2=window.opener;'
+    +     'if(op2&&!op2.closed&&typeof op2._epIconFor==="function"){'
+    +       'var typeLabelMap={air:"Airport",rail:"Rail station",sea:"Port",bus:"Bus terminal"};'
+    +       'var typeToMode2=op2._EP_TYPE_TO_MODE||{};'
+    +       'var modeLabel2=op2._EP_MODE_LABEL||{};'
+    +       '(pts._entryPoints||[]).forEach(function(p){'
+    +         'var mep=L.marker([p.lat,p.lon],{icon:op2._epIconFor(p.type),zIndexOffset:500}).addTo(map);'
+    +         'var safeName=(p.name||"").replace(/\\\\/g,"\\\\\\\\").replace(/"/g,"&quot;").replace(/\\\'/g,"\\\\\\\'");'
+    +         'var notes=p.notes?\'<div style="font-size:10px;color:#666;margin-top:4px;line-height:1.45;">\'+p.notes.replace(/</g,"&lt;")+\'</div>\':"";'
+    +         'var typeLabel=typeLabelMap[p.type]||"Entry point";'
+    +         'var mode=typeToMode2[p.type]||"";'
+    +         'var modeTag=mode&&modeLabel2[mode]?" "+modeLabel2[mode]:"";'
+    +         'mep.bindPopup('
+    +           '\'<div style="font-size:12px;font-weight:600;color:#111;">\'+(p.name||"").replace(/</g,"&lt;")+\'</div>\''
+    +           '+\'<div style="font-size:9px;color:#aaa;text-transform:uppercase;letter-spacing:.05em;margin-top:1px;">\'+typeLabel+\'</div>\''
+    +           '+notes'
+    +           '+\'<div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap;">\''
+    +           '+\'<button onclick="window.opener._tbUseEntryPoint(true,&quot;\'+safeName+\'&quot;,&quot;\'+mode+\'&quot;);try{window.opener.focus();}catch(_){}" style="font-size:10px;padding:4px 8px;background:#111;color:#fff;border:none;border-radius:4px;cursor:pointer;font-family:inherit;">Enter here\'+modeTag+\'</button>\''
+    +           '+\'<button onclick="window.opener._tbUseEntryPoint(false,&quot;\'+safeName+\'&quot;,&quot;\'+mode+\'&quot;);try{window.opener.focus();}catch(_){}" style="font-size:10px;padding:4px 8px;background:#fff;color:#111;border:1px solid #111;border-radius:4px;cursor:pointer;font-family:inherit;">Leave here\'+modeTag+\'</button>\''
+    +           '+\'</div>\''
+    +         ');'
+    +         'entryMarkers.push({ep:p,marker:mep});'
+    +       '});'
+    +     '}'
     +     'if(bounds.length>=2){try{map.fitBounds(bounds,{padding:[40,40],maxZoom:9,animate:false});}catch(_){}}'
     +     'else if(bounds.length===1){map.setView(bounds[0],8,{animate:false});}'
     +   '}'
@@ -9895,6 +9933,47 @@ function _openPlacePickerMapOverlay(){
       color:"#e6700f", weight:4, opacity:0.95, dashArray:"10,6"
     }).addTo(map);
   });
+  // v355.6: entry-point pins on the mobile overlay too. Same data
+  // source as the inline / candidate-explorer maps (_epCache). If
+  // the cache is cold, kick off the fetch and re-render when it
+  // lands so the overlay isn't empty on a brand-new region.
+  function _drawMobileEntryPoints(){
+    var region = (window._tb && _tb.region) || "";
+    if (!region) return;
+    var pts = (typeof _epCache !== "undefined" && _epCache[region]) || [];
+    if (typeof _epIconFor !== "function") return;
+    var typeToMode = (typeof _EP_TYPE_TO_MODE !== "undefined") ? _EP_TYPE_TO_MODE : {};
+    var modeLabel  = (typeof _EP_MODE_LABEL !== "undefined") ? _EP_MODE_LABEL : {};
+    pts.forEach(function(p){
+      var m = L.marker([p.lat, p.lon], { icon: _epIconFor(p.type), zIndexOffset: 500 }).addTo(map);
+      var safeName = (p.name || "").replace(/\\/g, "\\\\").replace(/"/g, '&quot;').replace(/'/g, "\\'");
+      var notes = p.notes ? '<div style="font-size:10px;color:#666;margin-top:4px;line-height:1.45;">' + p.notes.replace(/</g, "&lt;") + '</div>' : '';
+      var typeLabel = { air: "Airport", rail: "Rail station", sea: "Port", bus: "Bus terminal" }[p.type] || "Entry point";
+      var mode = typeToMode[p.type] || "";
+      var modeTag = mode && modeLabel[mode] ? " " + modeLabel[mode] : "";
+      m.bindPopup(
+        '<div style="font-size:12px;font-weight:600;color:#111;">' + (p.name || "").replace(/</g, "&lt;") + '</div>'
+        + '<div style="font-size:9px;color:#aaa;text-transform:uppercase;letter-spacing:.05em;margin-top:1px;">' + typeLabel + '</div>'
+        + notes
+        + '<div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap;">'
+        +   '<button onclick="_tbUseEntryPoint(true,&quot;' + safeName + '&quot;,&quot;' + mode + '&quot;)" style="font-size:10px;padding:4px 8px;background:#111;color:#fff;border:none;border-radius:4px;cursor:pointer;font-family:inherit;">Enter here' + modeTag + '</button>'
+        +   '<button onclick="_tbUseEntryPoint(false,&quot;' + safeName + '&quot;,&quot;' + mode + '&quot;)" style="font-size:10px;padding:4px 8px;background:#fff;color:#111;border:1px solid #111;border-radius:4px;cursor:pointer;font-family:inherit;">Leave here' + modeTag + '</button>'
+        + '</div>'
+      );
+    });
+  }
+  var _mobRegion = (window._tb && _tb.region) || "";
+  if (_mobRegion) {
+    if (typeof _epCache !== "undefined" && _epCache[_mobRegion]) {
+      _drawMobileEntryPoints();
+    } else if (typeof fetchRegionEntryPoints === "function") {
+      fetchRegionEntryPoints(_mobRegion).then(function(){
+        // Re-check the overlay still exists before drawing — user may
+        // have closed it during the fetch.
+        if (document.getElementById("pm-mobile-overlay")) _drawMobileEntryPoints();
+      });
+    }
+  }
   if (bounds.isValid()) map.fitBounds(bounds, { padding: [30, 30] });
 }
 
@@ -10329,7 +10408,7 @@ function _renderPlacePickerMap(targetId){
     L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {attribution:"© Esri", maxZoom:19}).addTo(leaflet);
     L.tileLayer("https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png", {opacity:1.0, maxZoom:19}).addTo(leaflet);
     mapDiv._pmInitialized = true;
-    state = _pmMaps[targetId] = { map: leaflet, markers: {}, polyline: null, polylineHalo: null, spurs: {} };
+    state = _pmMaps[targetId] = { map: leaflet, markers: {}, polyline: null, polylineHalo: null, spurs: {}, entryMarkers: [] };
   }
   // Local aliases so the rest of the function reads as before
   var _pmMap = state.map;
@@ -10583,11 +10662,80 @@ function _renderPlacePickerMap(targetId){
     // the visual distinction between main route and day-trip branches.
   });
 
+  // v355.6: render airport / rail / sea / bus entry-point pins on the
+  // picker map for parity with the candidate-explorer (and trip view).
+  // Reads the same _epCache the candidate-explorer uses so a region
+  // already fetched there doesn't trigger a second LLM call. If the
+  // cache is empty for this region, kicks off a background fetch and
+  // re-renders when it lands. Markers are tracked per-targetId on
+  // state.entryMarkers so cleanup doesn't bleed across maps.
+  _renderEntryPointsOnPmMap(targetId, _tb && _tb.region);
+
   if (bounds.length >= 2) {
     try { _pmMap.fitBounds(bounds, {padding:[24,24], maxZoom:9, animate:false}); } catch(_){}
   } else if (bounds.length === 1) {
     try { _pmMap.setView(bounds[0], 8, {animate:false}); } catch(_){}
   }
+}
+
+// v355.6: parallel of _renderEntryPointsOnCeMap (picker-ui.js) but
+// targeting a place-picker map (_pmMaps[targetId]) instead of the
+// candidate-explorer map. Reuses the shared _epCache + _epIconFor +
+// _tbUseEntryPoint plumbing, so the user can click an airport here
+// and have it set _tb.entry exactly as on the candidate-explorer.
+//
+// Markers live on state.entryMarkers (per-map) so they can be torn
+// down on the next render without disturbing the candidate-explorer's
+// _edMarkers global (which is the candidate-explorer's bookkeeping).
+function _renderEntryPointsOnPmMap(targetId, region){
+  var state = _pmMaps && _pmMaps[targetId];
+  if (!state || !state.map) return;
+  var map = state.map;
+  // Clear prior entry markers
+  if (Array.isArray(state.entryMarkers)) {
+    state.entryMarkers.forEach(function(rec){
+      if (rec && rec.marker) { try { map.removeLayer(rec.marker); } catch(_){} }
+    });
+  }
+  state.entryMarkers = [];
+  if (!region) return;
+  // If the cache is cold for this region, kick off a fetch and
+  // re-render on completion. Mirrors _ensureEntryPointsForRegion's
+  // logic but doesn't require _ceMap.
+  if (!_epCache[region]) {
+    if (!_epLoading[region] && typeof fetchRegionEntryPoints === "function") {
+      fetchRegionEntryPoints(region).then(function(){
+        // Re-render only if the user is still in the same region —
+        // a region change while the fetch was in flight would make
+        // the late-arriving pins stale.
+        if (_tb && _tb.region === region) _renderEntryPointsOnPmMap(targetId, region);
+      });
+    }
+    return;
+  }
+  var pts = _epCache[region] || [];
+  var typeToMode = (typeof _EP_TYPE_TO_MODE !== "undefined") ? _EP_TYPE_TO_MODE : {};
+  var modeLabel  = (typeof _EP_MODE_LABEL !== "undefined") ? _EP_MODE_LABEL : {};
+  var iconFor    = _epIconFor;
+  pts.forEach(function(p){
+    if (typeof iconFor !== "function") return;
+    var m = L.marker([p.lat, p.lon], { icon: iconFor(p.type), zIndexOffset: 500 }).addTo(map);
+    var safeName = (p.name || "").replace(/\\/g, "\\\\").replace(/"/g, '&quot;').replace(/'/g, "\\'");
+    var notes = p.notes ? '<div style="font-size:10px;color:#666;margin-top:4px;line-height:1.45;">' + p.notes.replace(/</g, "&lt;") + '</div>' : '';
+    var typeLabel = { air: "Airport", rail: "Rail station", sea: "Port", bus: "Bus terminal" }[p.type] || "Entry point";
+    var mode = typeToMode[p.type] || "";
+    var modeTag = mode && modeLabel[mode] ? " " + modeLabel[mode] : "";
+    m.bindPopup(
+      '<div style="font-size:12px;font-weight:600;color:#111;">' + (p.name || "").replace(/</g, "&lt;") + '</div>'
+      + '<div style="font-size:9px;color:#aaa;text-transform:uppercase;letter-spacing:.05em;margin-top:1px;">' + typeLabel + '</div>'
+      + notes
+      + '<div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap;">'
+      +   '<button onclick="_tbUseEntryPoint(true,&quot;' + safeName + '&quot;,&quot;' + mode + '&quot;)" style="font-size:10px;padding:4px 8px;background:#111;color:#fff;border:none;border-radius:4px;cursor:pointer;font-family:inherit;">Enter here' + modeTag + '</button>'
+      +   '<button onclick="_tbUseEntryPoint(false,&quot;' + safeName + '&quot;,&quot;' + mode + '&quot;)" style="font-size:10px;padding:4px 8px;background:#fff;color:#111;border:1px solid #111;border-radius:4px;cursor:pointer;font-family:inherit;">Leave here' + modeTag + '</button>'
+      + '</div>'
+    );
+    state.entryMarkers.push({ ep: p, marker: m });
+  });
 }
 
 // "Skip — go straight to the constraints" — the rare opt-out from inside the
