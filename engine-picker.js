@@ -2170,12 +2170,124 @@
     }
   }
 
+  // ── buildDayTripNote (place-picker hero map: Step 8) ──────────
+  // Derive a brief paragraph naming any places the user pre-flagged
+  // as day trips on the place-picker. Returns "" when no flags are
+  // set so the inline candidate-generation prompts keep their
+  // pre-feature shape on the legacy path.
+  //
+  // Per Neal-confirmed decision (3): the note rides on the same
+  // candidate-generation prompts the picker has been firing, so the
+  // candidate explorer's built itinerary stays aligned with the
+  // user's pre-LLM day-trip decisions.
+  function buildDayTripNote(placeActivities) {
+    if (!Array.isArray(placeActivities)) return "";
+    var pairs = {}; // canonKey → hubKey
+    var displayNames = {}; // canonKey → place display name
+    placeActivities.forEach(function (it) {
+      if (!it || !Array.isArray(it.requiredPlaces)) return;
+      it.requiredPlaces.forEach(function (p) {
+        if (!p || !p.place) return;
+        var k = p.place.toLowerCase();
+        displayNames[k] = displayNames[k] || p.place;
+        if (p._isDayTrip === true) {
+          if (!(k in pairs)) pairs[k] = p._dayTripHub || "";
+        }
+      });
+    });
+    var keys = Object.keys(pairs);
+    if (!keys.length) return "";
+    var parts = keys.map(function (k) {
+      var hub = pairs[k];
+      var hubName = hub ? (displayNames[hub] || hub) : "";
+      var pName = displayNames[k] || k;
+      return hubName ? (pName + " as a day trip from " + hubName) : (pName + " as a day trip");
+    });
+    return "\nUSER DAY-TRIP DECISIONS: The traveler has pre-flagged the following places as day trips on the picker, not stand-alone overnight stops. Treat them accordingly when shaping candidates and any narrative around lodging — " + parts.join("; ") + ".\n";
+  }
+
+  // ── orderPlacePickerStays (place-picker hero map: Step 2) ──────
+  // Order the kept "stay" places (kept && !_isDayTrip) for the
+  // place-picker map's main route polyline. Simpler than
+  // orderKeptCandidates: no route-block adjacency, no condition
+  // bunching, no entry/exit anchoring (the place-picker doesn't
+  // own the entry/exit yet — that's a candidate-explorer concern).
+  //
+  //   allPlaces   — map { lowercaseKey: { place, kept, _isDayTrip, ... } }
+  //                 as built inside _renderPlacePickerMap
+  //   coordLookup — function(placeName) → [lat,lng] | null
+  //
+  // Returns an array of the SAME entries (by reference) in nearest-
+  // neighbor order starting from the geographically northernmost
+  // stay (a stable seed across re-renders). Day trips are excluded
+  // — the polyline runs through stays only; spurs handle day trips.
+  // Stays without coords are appended at the end so the polyline
+  // still renders for the geocoded portion (matches the candidate-
+  // explorer's geocode-race behavior).
+  //
+  // Per Neal-confirmed decision (1) the polyline includes ALL pins
+  // regardless of kept/not-kept state. We honor that at the call
+  // site: pass in {kept: true} for stays the user kept, but the
+  // hero-map view filters to !_isDayTrip and orders them — the
+  // "all pins" intent is satisfied because not-kept and kept stays
+  // BOTH flow through here when the call site passes them all.
+  function orderPlacePickerStays(allPlaces, coordLookup) {
+    if (!allPlaces || typeof allPlaces !== 'object') return [];
+    var stays = [];
+    Object.keys(allPlaces).forEach(function (key) {
+      var info = allPlaces[key];
+      if (!info) return;
+      if (info._isDayTrip) return; // day trips travel on spurs
+      stays.push({ key: key, info: info, coord: (typeof coordLookup === 'function') ? coordLookup(info.place) : null });
+    });
+    if (stays.length <= 1) return stays.map(function (s) { return s.info; });
+
+    // Partition geocoded vs not.
+    var geo = stays.filter(function (s) { return s.coord && isFinite(s.coord[0]) && isFinite(s.coord[1]); });
+    var nogeo = stays.filter(function (s) { return !(s.coord && isFinite(s.coord[0]) && isFinite(s.coord[1])); });
+    if (geo.length <= 1) {
+      // Not enough geocoded — preserve insertion order, with no-geo at end.
+      return geo.concat(nogeo).map(function (s) { return s.info; });
+    }
+
+    // Seed with the northernmost stay (highest lat). Stable across renders.
+    var seedIdx = 0;
+    for (var i = 1; i < geo.length; i++) {
+      if (geo[i].coord[0] > geo[seedIdx].coord[0]) seedIdx = i;
+    }
+    var ordered = [geo[seedIdx]];
+    var remaining = geo.slice(0, seedIdx).concat(geo.slice(seedIdx + 1));
+
+    function distSq(a, b) {
+      var dLat = a[0] - b[0], dLng = a[1] - b[1];
+      return dLat * dLat + dLng * dLng;
+    }
+
+    while (remaining.length) {
+      var last = ordered[ordered.length - 1].coord;
+      var bestI = 0;
+      var bestD = distSq(last, remaining[0].coord);
+      for (var j = 1; j < remaining.length; j++) {
+        var d = distSq(last, remaining[j].coord);
+        if (d < bestD) { bestD = d; bestI = j; }
+      }
+      ordered.push(remaining[bestI]);
+      remaining.splice(bestI, 1);
+    }
+
+    return ordered.concat(nogeo).map(function (s) { return s.info; });
+  }
+
   // ── Public surface ──────────────────────────────────────────
   var MaxEnginePicker = {
     findMatchingRequired:   _findMatchingRequired,
     parseStartDateFromBrief: parseStartDateFromBrief,
     parseNightsFromRange:   parseNightsFromRange,
     orderKeptCandidates:    orderKeptCandidates,
+    // place-picker hero map (Step 2)
+    orderPlacePickerStays:  orderPlacePickerStays,
+    // place-picker hero map (Step 8)
+    buildDayTripNote:        buildDayTripNote,
     buildBrief:             buildBrief,
     cloneMdcItems:          cloneMdcItems,
     deriveTripName:         deriveTripName,
@@ -2464,5 +2576,7 @@
   global.parseStartDateFromBrief = parseStartDateFromBrief;
   global.parseNightsFromRange    = parseNightsFromRange;
   global.orderKeptCandidates     = orderKeptCandidates;
+  global.orderPlacePickerStays   = orderPlacePickerStays;
+  global.buildDayTripNote        = buildDayTripNote;
 
 })(typeof window !== 'undefined' ? window : this);

@@ -6347,6 +6347,17 @@ async function runCandidateSearch(requiredPlaces) {
   var extraCount = Math.max(8, 12 - Math.min(requiredPlaces.length, 4));
   var skipList = requiredPlaces.map(function(p){ return p.place; }).join(", ");
 
+  // place-picker hero map (Step 8): if the user pre-flagged any
+  // places as day trips on the place-picker, surface those as a
+  // brief note appended to every candidate-generation prompt below.
+  // Per Neal-confirmed decision (3): keeps candidate-explorer aligned
+  // with the user's pre-LLM day-trip decisions instead of re-deriving
+  // them from clustering. Engine helper returns "" when no flags are
+  // set, so the existing prompt shape is preserved on the legacy path.
+  var dayTripNote = (typeof buildDayTripNote === "function")
+    ? buildDayTripNote(_tb && _tb.placeActivities)
+    : "";
+
   // p1 is generated in batched calls below (was a single call; 20+ places
   // consistently timed out).
 
@@ -6394,6 +6405,7 @@ async function runCandidateSearch(requiredPlaces) {
 
   var pCities = "You are a travel expert helping plan a trip to " + (_tb.region||"this region") + ".\n"
     + "Trip context: " + brief + "\n"
+    + dayTripNote
     + (skipList ? "These stops are already confirmed: " + skipList + ". Do NOT include them again.\n" : "")
     + "\nList the " + cityCount + " most significant cities in " + (_tb.region||"this region") + " that a well-traveled visitor would consider \u2014 "
     + "the major gateway cities, cultural capitals, and places most travelers regret missing regardless of trip theme. "
@@ -6409,6 +6421,7 @@ async function runCandidateSearch(requiredPlaces) {
     + driverInstruction
     + famNote
     + releasedNote
+    + dayTripNote
     + (skipList ? "These stops are already confirmed: " + skipList + ". Do NOT include them again.\n" : "")
     + "\nList " + thematicCount + " additional destinations that specifically fit the shape of this trip \u2014 places that extend, enrich, or complement what the traveler described. "
     + "These should NOT be the obvious major cities (those are handled separately). Focus on less obvious places that reward the kind of traveler this is: "
@@ -6429,7 +6442,8 @@ async function runCandidateSearch(requiredPlaces) {
       var batchNames = batch.map(function(p){ return p.place+", "+p.country; }).join("; ");
       var p1b = "You are a travel expert. For each of these places, write a candidate card for a traveler visiting " + (_tb.region||"this region") + ".\n"
         + "Places: " + batchNames + "\n"
-        + "Trip context: " + brief + "\n\n"
+        + "Trip context: " + brief + "\n"
+        + dayTripNote + "\n"
         + "Describe why each is genuinely worth visiting — character, what to see and do, what makes it special. Trains may be one reason but not the only one.\n\n"
         + "BE SPECIFIC. Don't write generic hand-waves like 'three major scenic railway routes converge here' or 'several famous museums' or 'a few notable cathedrals.' Name them: 'the Glacier Express, Bernina Express, and Rhaetian Railway all pass through.' If you're referring to a specific thing the traveler would want to see or do, name it. Specificity is the whole point.\n\n"
         + "Return ONLY a JSON array (no markdown):\n"
@@ -8354,6 +8368,14 @@ async function generateActivitiesForPlace(){
             } else {
               p._keep = !!item.checked;
             }
+            // place-picker hero map: user-toggleable day-trip flags.
+            // Default to false / "" so brand-new picker items behave
+            // like before. Set when the user clicks a pin → "Day trip
+            // from <hub>" in the popup, or via the sidebar "+ stay the
+            // night" / "day trip from X" chips. Carried through
+            // serialization so a re-edit restores the user's choice.
+            if (typeof p._isDayTrip !== "boolean") p._isDayTrip = false;
+            if (typeof p._dayTripHub !== "string") p._dayTripHub = "";
           }
         });
       }
@@ -8903,8 +8925,34 @@ function _renderPlaceActivityItems(){
       var firstAppearance = !shownIn[key];
       var isTransitDestForNights = d.placeRefs.some(function(r){ return r.placeRef && r.placeRef._transitOnly; });
       var dayTripHub = _dayTripPreds && _dayTripPreds[key];
+      // place-picker hero map (Step 7): user-set _isDayTrip wins over
+      // the auto-predictor. If any requiredPlace ref of this dest has
+      // _isDayTrip=true, treat it as a user-flagged day trip — the
+      // chip's "+ stay the night" button clears _isDayTrip via
+      // _pmClearDayTripFlag and the map re-renders in sync.
+      var userIsDayTrip = false;
+      var userHubKey = "";
+      d.placeRefs.forEach(function(r){
+        if (r.placeRef && r.placeRef._isDayTrip === true) {
+          userIsDayTrip = true;
+          if (r.placeRef._dayTripHub && !userHubKey) userHubKey = r.placeRef._dayTripHub;
+        }
+      });
+      // Resolve the hub key → display name from any place with that key.
+      var userHubName = userHubKey;
+      if (userHubKey) {
+        for (var _ui = 0; _ui < items.length && userHubName === userHubKey; _ui++) {
+          var _it = items[_ui];
+          (_it.requiredPlaces || []).forEach(function(_p){
+            if (_p && _p.place && _p.place.toLowerCase() === userHubKey) userHubName = _p.place;
+          });
+        }
+      }
       var nightsLine;
-      if (firstAppearance && dayTripHub) {
+      if (firstAppearance && userIsDayTrip) {
+        nightsLine = '<span class="tb-dest-nights" data-place="'+_pmEsc(d.place)+'" style="color:#c97a1a;font-style:italic;">· day trip from '+_pmEsc(userHubName || "?")+'</span>'
+          + '<button type="button" class="tb-stay-night-btn" onclick="_pmClearDayTripFlag(&#39;'+_pmEsc(d.place)+'&#39;);event.stopPropagation();" title="Stay overnight here instead" style="margin-left:8px;font-size:10.5px;font-weight:600;color:#1a5fa8;background:#eef5ff;border:1px solid #cfe1f7;padding:2px 8px;border-radius:11px;cursor:pointer;font-family:inherit;line-height:1.4;">+ stay the night</button>';
+      } else if (firstAppearance && dayTripHub) {
         nightsLine = '<span class="tb-dest-nights" data-place="'+_pmEsc(d.place)+'" style="color:#5b3f8f;font-style:italic;">· day trip from '+_pmEsc(dayTripHub)+'</span>'
           + '<button type="button" class="tb-stay-night-btn" onclick="_adjustDestNights(&#39;'+_pmEsc(d.place)+'&#39;,1);event.stopPropagation();" title="Make this an overnight stop instead" style="margin-left:8px;font-size:10.5px;font-weight:600;color:#1a5fa8;background:#eef5ff;border:1px solid #cfe1f7;padding:2px 8px;border-radius:11px;cursor:pointer;font-family:inherit;line-height:1.4;">+ stay the night</button>';
       } else if (firstAppearance && isTransitDestForNights && !destKeptInSection) {
@@ -9174,6 +9222,159 @@ function _refreshAllPlacePickerMaps(){
       }
     } catch(_) {}
   }
+}
+
+// place-picker hero map (Step 6): pin popup with stay/day-trip toggle.
+// Opens a small Leaflet popup on click. Inside: a radio for "Stay
+// the night" (default) vs "Day trip from …", a hub dropdown for the
+// day-trip option (kept stays only, sorted by geographic distance
+// nearest first per Neal-confirmed decision 2), and a Save button
+// that mutates _isDayTrip / _dayTripHub on every requiredPlace ref
+// of this place across _tb.placeActivities and re-renders.
+//
+// Empty-hub edge case: if there are no other kept stays, the day-
+// trip option is disabled with a tooltip explaining why.
+function _pmSetPlaceDayTrip(placeKey, isDayTrip, hubKey){
+  if (!_tb || !Array.isArray(_tb.placeActivities)) return;
+  var canon = String(placeKey || "").toLowerCase();
+  var hub = String(hubKey || "").toLowerCase();
+  _tb.placeActivities.forEach(function(item){
+    if (!item || !Array.isArray(item.requiredPlaces)) return;
+    item.requiredPlaces.forEach(function(p){
+      if (!p || !p.place) return;
+      if (p.place.toLowerCase() !== canon) return;
+      p._isDayTrip = !!isDayTrip;
+      p._dayTripHub = isDayTrip ? hub : "";
+    });
+  });
+  if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
+  if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
+}
+
+// Sidebar "+ stay the night" companion to _pmSetPlaceDayTrip.
+// Clears the user-set day-trip flag on every requiredPlace ref of
+// the named place. The auto-predictor (`_dayTripPreds`) may still
+// produce a "day trip from X" chip on the next render if the place
+// is short-stay near a hub — that's intentional, the predictor is
+// the LLM's read on the brief, separate from the user's explicit
+// override. To suppress the predictor too, the user can bump nights.
+function _pmClearDayTripFlag(placeName){
+  if (typeof _pmSetPlaceDayTrip !== "function") return;
+  var canon = String(placeName || "").toLowerCase();
+  _pmSetPlaceDayTrip(canon, false, "");
+}
+
+function _pmOpenPlacePopup(placeKey, marker, mapInstance){
+  if (!marker || !mapInstance) return;
+  // Recompute allPlaces snapshot — same shape as _renderPlacePickerMap
+  // builds, but we only need it here for the popup logic so we keep
+  // it inline rather than exporting from the renderer.
+  var allPlaces = {};
+  (_tb.placeActivities || []).forEach(function(item){
+    (item.requiredPlaces || []).forEach(function(p){
+      if (!p || !p.place) return;
+      var k = p.place.toLowerCase();
+      if (!allPlaces[k]) allPlaces[k] = { place: p.place, kept: false, _isDayTrip: false, _dayTripHub: "" };
+      if (p._keep) allPlaces[k].kept = true;
+      if (p._isDayTrip === true) {
+        allPlaces[k]._isDayTrip = true;
+        if (p._dayTripHub && !allPlaces[k]._dayTripHub) allPlaces[k]._dayTripHub = p._dayTripHub;
+      }
+    });
+  });
+  var canon = String(placeKey || "").toLowerCase();
+  var info = allPlaces[canon];
+  if (!info) return;
+
+  // Candidate hubs: kept stays (kept && !_isDayTrip), excluding self.
+  // Sort by geographic distance nearest first (Neal decision 2). Fall
+  // back to alphabetical when one or both lack coords.
+  var selfCoord = (_coarseGeocode && _coarseGeocode[canon]) || null;
+  function distSq(a, b){
+    if (!a || !b) return Infinity;
+    var dLat = a[0] - b[0], dLng = a[1] - b[1];
+    return dLat*dLat + dLng*dLng;
+  }
+  var hubs = [];
+  Object.keys(allPlaces).forEach(function(k){
+    if (k === canon) return;
+    var h = allPlaces[k];
+    if (!h.kept) return;
+    if (h._isDayTrip) return;
+    var coord = (_coarseGeocode && _coarseGeocode[k]) || null;
+    var d = (selfCoord && coord) ? distSq(selfCoord, coord) : Infinity;
+    hubs.push({ key: k, place: h.place, dist: d });
+  });
+  hubs.sort(function(a, b){
+    if (a.dist !== b.dist) return a.dist - b.dist;
+    return a.place.localeCompare(b.place);
+  });
+
+  var noHubs = hubs.length === 0;
+  var currentHub = info._dayTripHub || (hubs[0] ? hubs[0].key : "");
+
+  // Build the popup HTML. Inline form with two radios + a hub
+  // dropdown that toggles disabled with the day-trip radio.
+  var popupId = "pm-pop-" + Date.now();
+  var stayChecked = info._isDayTrip ? "" : "checked";
+  var dtChecked = info._isDayTrip ? "checked" : "";
+  var dtDisabled = noHubs ? "disabled" : "";
+  var dtTitle = noHubs ? 'title="Pick a hub stay first — no other kept stays exist yet."' : "";
+  var hubOptions = hubs.map(function(h){
+    var sel = (h.key === currentHub) ? "selected" : "";
+    return '<option value="' + _pmEsc(h.key) + '" ' + sel + '>' + _pmEsc(h.place) + '</option>';
+  }).join("");
+  if (noHubs) hubOptions = '<option value="">(no other kept stays)</option>';
+
+  var html = ''
+    + '<div id="' + popupId + '" style="font-family:inherit;font-size:12.5px;min-width:200px;">'
+    + '  <div style="font-weight:700;margin-bottom:6px;">' + _pmEsc(info.place) + '</div>'
+    + '  <label style="display:flex;align-items:center;gap:6px;margin:4px 0;cursor:pointer;">'
+    + '    <input type="radio" name="pm-mode" value="stay" ' + stayChecked + ' />'
+    + '    <span>Stay the night</span>'
+    + '  </label>'
+    + '  <label style="display:flex;align-items:center;gap:6px;margin:4px 0;' + (noHubs ? 'opacity:0.55;cursor:not-allowed;' : 'cursor:pointer;') + '" ' + dtTitle + '>'
+    + '    <input type="radio" name="pm-mode" value="daytrip" ' + dtChecked + ' ' + dtDisabled + ' />'
+    + '    <span>Day trip from</span>'
+    + '    <select class="pm-hub-sel" ' + dtDisabled + ' style="font-family:inherit;font-size:12px;padding:2px 4px;">'
+    +       hubOptions
+    + '    </select>'
+    + '  </label>'
+    + '  <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:8px;">'
+    + '    <button type="button" class="pm-cancel" style="font-family:inherit;font-size:11.5px;padding:3px 10px;background:#eee;border:1px solid #ccc;border-radius:4px;cursor:pointer;">Cancel</button>'
+    + '    <button type="button" class="pm-save" style="font-family:inherit;font-size:11.5px;font-weight:600;padding:3px 10px;background:#1a5fa8;color:#fff;border:1px solid #144a86;border-radius:4px;cursor:pointer;">Save</button>'
+    + '  </div>'
+    + '</div>';
+
+  marker.unbindPopup();
+  var popup = L.popup({maxWidth: 280, autoClose: true, closeButton: true})
+    .setLatLng(marker.getLatLng())
+    .setContent(html);
+  popup.openOn(mapInstance);
+  // Wire the buttons after Leaflet inserts the DOM.
+  setTimeout(function(){
+    var root = document.getElementById(popupId);
+    if (!root) return;
+    var save = root.querySelector(".pm-save");
+    var cancel = root.querySelector(".pm-cancel");
+    var hubSel = root.querySelector(".pm-hub-sel");
+    var radios = root.querySelectorAll('input[name="pm-mode"]');
+    function syncDisabled(){
+      var v = root.querySelector('input[name="pm-mode"]:checked');
+      var isDT = v && v.value === "daytrip";
+      if (hubSel) hubSel.disabled = !isDT || noHubs;
+    }
+    radios.forEach(function(r){ r.addEventListener("change", syncDisabled); });
+    syncDisabled();
+    if (cancel) cancel.addEventListener("click", function(){ mapInstance.closePopup(popup); });
+    if (save) save.addEventListener("click", function(){
+      var v = root.querySelector('input[name="pm-mode"]:checked');
+      var mode = v ? v.value : "stay";
+      var hub = (mode === "daytrip" && hubSel) ? hubSel.value : "";
+      mapInstance.closePopup(popup);
+      _pmSetPlaceDayTrip(canon, mode === "daytrip", hub);
+    });
+  }, 0);
 }
 
 // Open the place-picker map in a REAL separate browser window via window.open.
@@ -9833,7 +10034,7 @@ function openTripHeroMapWindow(){
 // a destination updates both maps simultaneously. Pin colors: kept = blue
 // (gold border for iconic), un-kept = muted gray. Geocoding via the existing
 // _coarseGeocode cache + ensureCoarseGeocode async fill.
-var _pmMaps = {}; // targetId -> { map: L.Map, markers: {placeKey: marker}, scroll: bool }
+var _pmMaps = {}; // targetId -> { map: L.Map, markers: {placeKey: marker}, polyline, spurs:{key:line} }
 function _renderPlacePickerMap(targetId){
   targetId = targetId || "tb-pm-map";
   var mapDiv = document.getElementById(targetId);
@@ -9863,27 +10064,37 @@ function _renderPlacePickerMap(targetId){
     L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {attribution:"© Esri", maxZoom:19}).addTo(leaflet);
     L.tileLayer("https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png", {opacity:1.0, maxZoom:19}).addTo(leaflet);
     mapDiv._pmInitialized = true;
-    state = _pmMaps[targetId] = { map: leaflet, markers: {} };
+    state = _pmMaps[targetId] = { map: leaflet, markers: {}, polyline: null, spurs: {} };
   }
   // Local aliases so the rest of the function reads as before
   var _pmMap = state.map;
   var _pmMarkersByPlace = state.markers;
+  if (!state.spurs) state.spurs = {};
 
   // Collect every distinct place across all activity items, with derived state.
   // Also pick up the LLM-supplied country per place so the geocoder can use
   // it for strict country-filtering — protects against e.g. "Chillon"
   // resolving to a town in Spain instead of Château de Chillon, Switzerland.
+  // place-picker hero map: also surface the user-set _isDayTrip /
+  // _dayTripHub flags so the marker factory + polyline/spur passes
+  // can distinguish stays from day trips.
   var allPlaces = {};
   (_tb.placeActivities || []).forEach(function(item){
     var iconic = !!item.iconic;
     (item.requiredPlaces || []).forEach(function(p){
       if (!p || !p.place) return;
       var key = p.place.toLowerCase();
-      if (!allPlaces[key]) allPlaces[key] = { place: p.place, country: p.country||"", kept: false, iconic: false, anyRoute: false };
+      if (!allPlaces[key]) allPlaces[key] = { place: p.place, country: p.country||"", kept: false, iconic: false, anyRoute: false, _isDayTrip: false, _dayTripHub: "" };
       if (p.country && !allPlaces[key].country) allPlaces[key].country = p.country;
       if (p._keep) allPlaces[key].kept = true;
       if (iconic) allPlaces[key].iconic = true;
       if (item.type === "route") allPlaces[key].anyRoute = true;
+      // Any requiredPlace ref that flips _isDayTrip on wins — a place
+      // is a day trip if the user set it as one anywhere.
+      if (p._isDayTrip === true) {
+        allPlaces[key]._isDayTrip = true;
+        if (p._dayTripHub && !allPlaces[key]._dayTripHub) allPlaces[key]._dayTripHub = p._dayTripHub;
+      }
     });
   });
 
@@ -9895,31 +10106,87 @@ function _renderPlacePickerMap(targetId){
     }
   });
 
+  // Coord lookup that consults _coarseGeocode (the same source the
+  // marker pass uses). Returns null when the place hasn't geocoded
+  // yet; orderPlacePickerStays + the polyline/spur pass handle the
+  // race by deferring un-geocoded segments until a re-render.
+  function _pmCoord(placeName){
+    if (!placeName) return null;
+    var k = placeName.toLowerCase();
+    var ll = _coarseGeocode && _coarseGeocode[k];
+    return (ll && isFinite(ll[0]) && isFinite(ll[1])) ? ll : null;
+  }
+
+  // Step 2/3: ordered stays (skipping day trips) → ordinal map.
+  // Per Neal-confirmed decision (1) the polyline runs through every
+  // stay regardless of kept/not-kept state — orderPlacePickerStays
+  // already ignores _isDayTrip and the call here passes ALL stays.
+  var orderedStays = (typeof orderPlacePickerStays === "function")
+    ? orderPlacePickerStays(allPlaces, _pmCoord)
+    : [];
+  var ordinalByKey = {};
+  orderedStays.forEach(function(info, idx){
+    if (info && info.place) ordinalByKey[info.place.toLowerCase()] = idx + 1;
+  });
+
   var bounds = [];
   Object.keys(allPlaces).forEach(function(key){
     var info = allPlaces[key];
     var ll = _coarseGeocode[key];
     function placeMarker(latLng){
       bounds.push(latLng);
-      var color = info.kept ? "#1a5fa8" : "#bbb";
+      // Step 3: pin styling.
+      //   • Kept stay (kept && !_isDayTrip): the dominant pin. Shows
+      //     its ordinal number from orderedStays; gold border if iconic.
+      //   • Kept day trip (kept && _isDayTrip): same pin size as a
+      //     stay but tinted amber-orange to read as a branch endpoint;
+      //     shows place initials (no ordinal — day trips aren't on
+      //     the main route).
+      //   • Not-kept (any): small muted dot, no label.
+      var isStay = info.kept && !info._isDayTrip;
+      var isDayTrip = info.kept && info._isDayTrip;
+      var color, label, size;
+      if (isStay) {
+        color = "#1a5fa8";
+        label = String(ordinalByKey[key] || "");
+        size = 22;
+      } else if (isDayTrip) {
+        color = "#c97a1a"; // muted amber-orange, matches spur color
+        label = _pmEsc((info.place || "").substring(0, 2));
+        size = 20;
+      } else {
+        color = "#bbb";
+        label = "";
+        size = 16;
+      }
       var border = info.iconic ? "#b28a2e" : "#fff";
       var html = '<div style="background:'+color+';color:#fff;border-radius:50%;width:'
-        + (info.kept?22:16) + 'px;height:'+(info.kept?22:16)+'px;border:2px solid '+border
-        + ';box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;">'
-        + (info.kept ? _pmEsc(info.place.substring(0,2)) : "")
+        + size + 'px;height:'+size+'px;border:2px solid '+border
+        + ';box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;font-size:'
+        + (isStay ? 11 : 9) + 'px;font-weight:700;">'
+        + label
         + '</div>';
-      var icon = L.divIcon({html: html, className: "", iconSize: info.kept?[22,22]:[16,16], iconAnchor: info.kept?[11,11]:[8,8]});
+      var icon = L.divIcon({html: html, className: "", iconSize: [size,size], iconAnchor: [size/2,size/2]});
       var existing = _pmMarkersByPlace[key];
       if (existing) {
         existing.setIcon(icon);
         existing.setLatLng(latLng);
       } else {
         var m = L.marker(latLng, {icon: icon}).addTo(_pmMap);
-        m.bindTooltip(info.place + (info.iconic ? " · ★ iconic" : "") + (info.kept ? " · kept" : ""), {direction:"top", offset:[0,-10]});
-        // Click marker → scroll to that destination's row in the picker
-        (function(placeName){
+        var ttBits = info.place
+          + (info.iconic ? " · ★ iconic" : "")
+          + (isStay ? " · stay" : isDayTrip ? " · day trip" : info.kept ? " · kept" : "");
+        m.bindTooltip(ttBits, {direction:"top", offset:[0,-10]});
+        // Step 6: clicking a pin opens the stay/day-trip popup.
+        // Falls back to the legacy scroll-to-row behavior when the
+        // popup helper isn't available (e.g. pre-init paint).
+        (function(placeName, placeKey){
           m.on("click", function(){
-            // Find any row referencing this place and scroll to it
+            if (typeof _pmOpenPlacePopup === "function") {
+              _pmOpenPlacePopup(placeKey, m, _pmMap);
+              return;
+            }
+            // Fallback: scroll to the place's row in the picker
             var rows = document.querySelectorAll(".tb-dest-major");
             for (var i = 0; i < rows.length; i++) {
               if ((rows[i].textContent || "").toLowerCase().indexOf(placeName.toLowerCase()) !== -1) {
@@ -9931,7 +10198,7 @@ function _renderPlacePickerMap(targetId){
               }
             }
           });
-        })(info.place);
+        })(info.place, key);
         _pmMarkersByPlace[key] = m;
       }
     }
@@ -9946,6 +10213,54 @@ function _renderPlacePickerMap(targetId){
         }, info.country);
       }
     }
+  });
+
+  // Step 4: main route polyline through every stay (kept or not),
+  // in geographic order. Desaturated green, weight 3, opacity 0.75 —
+  // matches the candidate-explorer route. Skip stays whose coords
+  // haven't landed yet (geocode race); a re-render fires from the
+  // async geocode callback above and fills in the missing segments.
+  if (state.polyline) {
+    try { _pmMap.removeLayer(state.polyline); } catch(_){}
+    state.polyline = null;
+  }
+  var routeCoords = [];
+  orderedStays.forEach(function(info){
+    var c = _pmCoord(info.place);
+    if (c) routeCoords.push(c);
+  });
+  if (routeCoords.length >= 2) {
+    state.polyline = L.polyline(routeCoords, {color: "#5e8c63", weight: 3, opacity: 0.75}).addTo(_pmMap);
+    try { state.polyline.bringToBack(); } catch(_){}
+  }
+
+  // Step 5: day-trip spurs. For each kept day trip with a valid
+  // _dayTripHub that resolves to a kept stay, draw a dashed amber-
+  // orange line from hub coord → day-trip coord. Color: #c97a1a (a
+  // muted amber-orange ~70% saturation), dashArray 6,6, weight 2,
+  // opacity 0.85.
+  Object.keys(state.spurs).forEach(function(k){
+    try { _pmMap.removeLayer(state.spurs[k]); } catch(_){}
+    delete state.spurs[k];
+  });
+  Object.keys(allPlaces).forEach(function(key){
+    var info = allPlaces[key];
+    if (!info._isDayTrip) return;
+    if (!info._dayTripHub) return;
+    var hubKey = String(info._dayTripHub).toLowerCase();
+    var hubInfo = allPlaces[hubKey];
+    if (!hubInfo) return; // hub no longer in dataset
+    if (!hubInfo.kept || hubInfo._isDayTrip) return; // hub must be a kept stay
+    var dayCoord = _pmCoord(info.place);
+    var hubCoord = _pmCoord(hubInfo.place);
+    if (!dayCoord || !hubCoord) return; // geocode race — defer
+    state.spurs[key] = L.polyline([hubCoord, dayCoord], {
+      color: "#c97a1a",
+      weight: 2,
+      opacity: 0.85,
+      dashArray: "6,6"
+    }).addTo(_pmMap);
+    try { state.spurs[key].bringToBack(); } catch(_){}
   });
 
   if (bounds.length >= 2) {
@@ -10005,7 +10320,7 @@ function addCustomPlaceActivity(){
     description: "",
     checked: true,
     iconic: false,
-    requiredPlaces: placeList.map(function(p){ return {place:p, country:country, nights:2, _keep:true}; })
+    requiredPlaces: placeList.map(function(p){ return {place:p, country:country, nights:2, _keep:true, _isDayTrip:false, _dayTripHub:""}; })
   });
   inpExp.value = "";
   inpWhere.value = "";
@@ -10518,7 +10833,9 @@ async function expandActivitySection(sectionName){
           place: p.place,
           country: country,
           nights: (typeof p.nights === "number" && p.nights >= 0) ? p.nights : 2,
-          _keep: false
+          _keep: false,
+          _isDayTrip: false,
+          _dayTripHub: ""
         };
         if (isFinite(lat) && isFinite(lng) && (lat !== 0 || lng !== 0)) {
           rp.lat = lat; rp.lng = lng;
@@ -10680,7 +10997,9 @@ function addBreadthSuggestion(idx){
       nights: 2,
       lat: s.lat || null,
       lng: s.lng || null,
-      _keep: true
+      _keep: true,
+      _isDayTrip: false,
+      _dayTripHub: ""
     }]
   };
   _tb.placeActivities = _tb.placeActivities || [];
@@ -10728,7 +11047,7 @@ async function addCustomPlaceFromPicker(){
       description: data.whyItFits || "",
       iconic: false,
       checked: true,
-      requiredPlaces: [{ place: data.place, country: data.country || "", nights: 2, _keep: true }]
+      requiredPlaces: [{ place: data.place, country: data.country || "", nights: 2, _keep: true, _isDayTrip: false, _dayTripHub: "" }]
     };
     _tb.placeActivities = _tb.placeActivities || [];
     _tb.placeActivities.push(newItem);
@@ -12689,7 +13008,12 @@ function reopenPickerForEdit(){
           nights: typeof p.nights === "number" ? p.nights : 2,
           lat: (typeof p.lat === "number") ? p.lat : null,
           lng: (typeof p.lng === "number") ? p.lng : null,
-          _keep: (p._keep !== false)
+          _keep: (p._keep !== false),
+          // place-picker hero map: restore the user's day-trip toggle
+          // from the trip envelope. Legacy data without these fields
+          // defaults to false / "" — same as a fresh place.
+          _isDayTrip: (p._isDayTrip === true),
+          _dayTripHub: (typeof p._dayTripHub === "string") ? p._dayTripHub : ""
         };
       }),
       endpoints: (m.endpoints||[]).slice(),

@@ -1083,6 +1083,142 @@ describe('engine-picker.js — orderKeptCandidates', () => {
   });
 });
 
+// ── Suite: orderPlacePickerStays (place-picker hero map) ────────
+//
+// Mirror of orderKeptCandidates' geo-reorder, simpler — no route
+// blocks, no condition bunching, no entry/exit anchors. Just a
+// nearest-neighbor walk seeded at the northernmost stay. Day trips
+// (_isDayTrip) are excluded; un-geocoded stays append at the end.
+
+describe('engine-picker.js — orderPlacePickerStays', () => {
+  test('returns [] for empty input', () => {
+    const r = MaxEnginePicker.orderPlacePickerStays({}, () => null);
+    assert.deepStrictEqual(r, []);
+  });
+  test('single stay returns that stay', () => {
+    const all = { 'reykjavik': { place: 'Reykjavik', kept: true, _isDayTrip: false } };
+    const r = MaxEnginePicker.orderPlacePickerStays(all, () => [64.14, -21.94]);
+    assert.strictEqual(r.length, 1);
+    assert.strictEqual(r[0].place, 'Reykjavik');
+  });
+  test('excludes _isDayTrip places from the polyline', () => {
+    const all = {
+      'reykjavik': { place: 'Reykjavik', kept: true, _isDayTrip: false },
+      'grindavik': { place: 'Grindavik', kept: true, _isDayTrip: true, _dayTripHub: 'reykjavik' },
+    };
+    const coords = { 'Reykjavik': [64.14, -21.94], 'Grindavik': [63.84, -22.43] };
+    const r = MaxEnginePicker.orderPlacePickerStays(all, n => coords[n]);
+    assert.strictEqual(r.length, 1);
+    assert.strictEqual(r[0].place, 'Reykjavik');
+  });
+  test('orders three stays by nearest-neighbor from northernmost seed', () => {
+    // Iceland-ish: Reykjavik (north-west), Vík (south), Höfn (south-east)
+    const all = {
+      'vik': { place: 'Vik', kept: true, _isDayTrip: false },
+      'reykjavik': { place: 'Reykjavik', kept: true, _isDayTrip: false },
+      'hofn': { place: 'Hofn', kept: true, _isDayTrip: false },
+    };
+    const coords = {
+      'Reykjavik': [64.14, -21.94],
+      'Vik':       [63.42, -19.01],
+      'Hofn':      [64.25, -15.21],
+    };
+    const r = MaxEnginePicker.orderPlacePickerStays(all, n => coords[n]);
+    assert.strictEqual(r.length, 3);
+    // Northernmost seed is Hofn (64.25) or Reykjavik (64.14). Hofn wins
+    // by a hair, then nearest is Vík, then Reykjavik.
+    assert.strictEqual(r[0].place, 'Hofn');
+    assert.strictEqual(r[1].place, 'Vik');
+    assert.strictEqual(r[2].place, 'Reykjavik');
+  });
+  test('un-geocoded stays append at the end (geocode race)', () => {
+    const all = {
+      'reykjavik': { place: 'Reykjavik', kept: true, _isDayTrip: false },
+      'mystery': { place: 'Mystery', kept: true, _isDayTrip: false },
+      'vik': { place: 'Vik', kept: true, _isDayTrip: false },
+    };
+    const coords = { 'Reykjavik': [64.14, -21.94], 'Vik': [63.42, -19.01] };
+    const r = MaxEnginePicker.orderPlacePickerStays(all, n => coords[n] || null);
+    assert.strictEqual(r.length, 3);
+    assert.strictEqual(r[r.length - 1].place, 'Mystery');
+  });
+  test('handles missing coordLookup gracefully', () => {
+    const all = {
+      'a': { place: 'A', kept: true, _isDayTrip: false },
+      'b': { place: 'B', kept: true, _isDayTrip: false },
+    };
+    const r = MaxEnginePicker.orderPlacePickerStays(all);
+    // Both ungeocoded — preserve insertion order, no crash.
+    assert.strictEqual(r.length, 2);
+  });
+});
+
+// ── Suite: buildDayTripNote (place-picker hero map: Step 8) ─────
+//
+// Empty when no _isDayTrip flags are set. Otherwise produces a brief
+// paragraph that the runCandidateSearch prompts append, naming each
+// flagged place with its hub. The note IS the carry-through from
+// the place-picker's user decisions to the LLM candidate brief.
+
+describe('engine-picker.js — buildDayTripNote', () => {
+  test('returns "" for missing input', () => {
+    assert.strictEqual(MaxEnginePicker.buildDayTripNote(null), '');
+    assert.strictEqual(MaxEnginePicker.buildDayTripNote(undefined), '');
+    assert.strictEqual(MaxEnginePicker.buildDayTripNote([]), '');
+  });
+  test('returns "" when no _isDayTrip flags are set', () => {
+    const items = [
+      { requiredPlaces: [{ place: 'Reykjavik', _isDayTrip: false }, { place: 'Vík' }] },
+    ];
+    assert.strictEqual(MaxEnginePicker.buildDayTripNote(items), '');
+  });
+  test('produces a note for one flagged place + hub', () => {
+    const items = [
+      { requiredPlaces: [
+          { place: 'Reykjavik', _isDayTrip: false },
+          { place: 'Grindavik', _isDayTrip: true, _dayTripHub: 'reykjavik' },
+        ] },
+    ];
+    const note = MaxEnginePicker.buildDayTripNote(items);
+    assert.ok(note.indexOf('USER DAY-TRIP DECISIONS') >= 0, 'note carries the marker');
+    assert.ok(note.indexOf('Grindavik') >= 0, 'names the day-trip place');
+    assert.ok(note.indexOf('Reykjavik') >= 0, 'resolves hub display name from another ref');
+    assert.ok(note.indexOf('day trip from Reykjavik') >= 0, 'phrases the hub correctly');
+  });
+  test('produces a note even when the hub display name is not separately listed', () => {
+    const items = [
+      { requiredPlaces: [
+          { place: 'Grindavik', _isDayTrip: true, _dayTripHub: 'reykjavik' },
+        ] },
+    ];
+    const note = MaxEnginePicker.buildDayTripNote(items);
+    // Hub key "reykjavik" should still appear as the hub name (lowercase fallback).
+    assert.ok(note.indexOf('day trip from reykjavik') >= 0);
+  });
+  test('handles a flagged place with no hub gracefully', () => {
+    const items = [
+      { requiredPlaces: [
+          { place: 'Mystery', _isDayTrip: true, _dayTripHub: '' },
+        ] },
+    ];
+    const note = MaxEnginePicker.buildDayTripNote(items);
+    assert.ok(note.indexOf('Mystery as a day trip') >= 0);
+  });
+  test('joins multiple flagged places with semicolons', () => {
+    const items = [
+      { requiredPlaces: [
+          { place: 'Reykjavik', _isDayTrip: false },
+          { place: 'Grindavik', _isDayTrip: true, _dayTripHub: 'reykjavik' },
+          { place: 'Þingvellir', _isDayTrip: true, _dayTripHub: 'reykjavik' },
+        ] },
+    ];
+    const note = MaxEnginePicker.buildDayTripNote(items);
+    assert.ok(note.indexOf(';') >= 0, 'multiple entries are joined with semicolons');
+    assert.ok(note.indexOf('Grindavik') >= 0);
+    assert.ok(note.indexOf('Þingvellir') >= 0);
+  });
+});
+
 // ── Suite: groupCandidatesByMustDo (Round HX) ───────────────────
 //
 // Pure derivation extracted from renderCandidateCards. Verifies the
