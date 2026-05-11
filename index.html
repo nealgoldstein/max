@@ -9734,7 +9734,9 @@ function openPlacePickerMapModal(){
     +       'if(!hub||!hub.keep||hub._isDayTrip||hub.lat==null)return;'
     +       'var sk=info.place.toLowerCase();'
     +       'spurs[sk]=L.polyline([[hub.lat,hub.lng],[info.lat,info.lng]],{color:"#e6700f",weight:4,opacity:0.95,dashArray:"10,6"}).addTo(map);'
-    +       'try{spurs[sk].bringToBack();}catch(_){}'
+          /* v355.5: no bringToBack — spurs sit ABOVE the main-route
+             halo so they read cleanly all the way to the hub pin. No
+             leading "+" — see unary-plus note above. */
     +     '});'
     +     'if(bounds.length>=2){try{map.fitBounds(bounds,{padding:[40,40],maxZoom:9,animate:false});}catch(_){}}'
     +     'else if(bounds.length===1){map.setView(bounds[0],8,{animate:false});}'
@@ -9887,9 +9889,11 @@ function _openPlacePickerMapOverlay(){
     var hub = allByKey[String(info._dayTripHub).toLowerCase()];
     if (!hub || !hub.keep || hub._isDayTrip) return;
     if (hub.lat == null || info.lat == null) return;
+    // v355.5: no bringToBack on spurs — they need to sit ABOVE the
+    // main-route white halo so the orange reads cleanly to the hub pin.
     L.polyline([[hub.lat, hub.lng], [info.lat, info.lng]], {
       color:"#e6700f", weight:4, opacity:0.95, dashArray:"10,6"
-    }).addTo(map).bringToBack();
+    }).addTo(map);
   });
   if (bounds.isValid()) map.fitBounds(bounds, { padding: [30, 30] });
 }
@@ -10572,7 +10576,11 @@ function _renderPlacePickerMap(targetId){
       opacity: 0.95,
       dashArray: "10,6"
     }).addTo(_pmMap);
-    try { state.spurs[key].bringToBack(); } catch(_){}
+    // v355.5: do NOT bringToBack the spurs — the main route now has
+    // a white halo (weight 7) that was burying the orange spur where
+    // it meets the hub. Letting spurs sit above the halo keeps the
+    // orange reading cleanly all the way to the hub pin and restores
+    // the visual distinction between main route and day-trip branches.
   });
 
   if (bounds.length >= 2) {
