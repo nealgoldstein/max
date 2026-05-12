@@ -1885,9 +1885,13 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
       </div>
     </div>
 
-    <!-- Mode toggle -->
+    <!-- Mode toggle. v359.1: Picker is now a peer of Trip / Destination —
+         third pill flips _leftMode to "picker" and opens the picker
+         overlay over the app shell. Free-swap (no confirmation): autoSave
+         covers persistence on either side of the toggle. -->
     <div class="lp-mode-row">
       <div class="mode-toggle" style="flex:1;display:flex;border-radius:6px;overflow:hidden;border:1px solid #e0e0e0;">
+        <button class="mode-btn" id="mode-picker-btn" onclick="setLeftMode('picker')">Picker</button>
         <button class="mode-btn on" id="mode-trip-btn" onclick="setLeftMode('trip')">Trip</button>
         <button class="mode-btn" id="mode-dest-btn" onclick="setLeftMode('dest')">Destination</button>
       </div>
@@ -6636,13 +6640,22 @@ async function runCandidateSearch(requiredPlaces) {
       seen[key] = true;
       return true;
     });
-    // Round HZ (picker hero map, step 6): LLM-supplied `accepted` decides
-    // initial status. accepted=true → keep (green ✓), accepted=false →
-    // null (blue/unchecked). Missing accepted defaults to keep so legacy
-    // prompts and saved drafts behave like before (everything kept-eligible,
-    // user rejects what they don't want). Required must-dos get a second
-    // pass via applyRequiredAndAutoKeep regardless of the LLM's call.
-    allCands.forEach(function(c,i){ c.id="c"+i; c.status=(c.accepted===false?null:"keep"); c.order=null; c.manuallyOrdered=false; });
+    // v358.8: every candidate starts at status:null (unchecked /
+    // "considered, not added"). Only `_required:true` matches against
+    // the user's must-do anchors get bumped to status:"keep" by the
+    // applyRequiredAndAutoKeep pass below. The picker is the contract:
+    // what you picked is what builds. LLM-volunteered "accepted"
+    // candidates (Borgarnes, Mývatn, Húsavík etc.) still appear in
+    // the candidate-explorer for opt-in, but they no longer roll
+    // into the built trip without user intent.
+    //
+    // Pre-v358.8 the rule was `c.accepted === false ? null : "keep"`
+    // — accepted=true defaulted to keep, missing-accepted defaulted
+    // to keep. That made the explorer feel like "react to the LLM's
+    // proposal," which Neal saw as the LLM padding trips with extras
+    // the user never asked for. Reverting to "user picks are the
+    // contract; LLM suggestions are opt-in."
+    allCands.forEach(function(c,i){ c.id="c"+i; c.status=null; c.order=null; c.manuallyOrdered=false; });
     // Apply user-picked nights from the activity-place picker. Without this,
     // each candidate inherits stayRange "2-4 nights" from the LLM and
     // buildFromCandidates parses ~3 nights × N places — completely ignoring
@@ -8762,6 +8775,27 @@ function _pmToggleStoryFull(linkEl){
 }
 window._pmToggleStoryFull = _pmToggleStoryFull;
 
+// v358.7: button-driven story trigger. Replaces the v358
+// IntersectionObserver auto-hydration. User clicks "Story →" → we
+// hide the trigger, reveal the (placeholder) preview text, and call
+// _pmHydratePreview which fills it from cache or fires a single
+// _generatePlaceNarrative. From there the existing flow continues:
+// "more →" expands to full narrative + things-to-do (lazy-loaded
+// on first expand), "Tell me more →" digs deeper.
+function _pmTriggerStory(linkEl){
+  var slot = linkEl && linkEl.closest ? linkEl.closest(".pm-row-story") : null;
+  if (!slot) return;
+  var trigger = slot.querySelector(".pm-row-story-trigger");
+  var textSpan = slot.querySelector(".pm-row-story-text");
+  if (trigger) trigger.style.display = "none";
+  if (textSpan) {
+    textSpan.style.display = "inline";
+    textSpan.textContent = "…"; // placeholder while generating
+  }
+  _pmHydratePreview(slot);
+}
+window._pmTriggerStory = _pmTriggerStory;
+
 // v358.2: "Tell me more →" handler. Mirrors the trip view's
 // "Dig deeper" — sends the existing narrative back to the LLM with
 // "go further into the history or cultural significance" appended,
@@ -8822,6 +8856,52 @@ function _pmDigDeeper(linkEl){
 }
 window._pmDigDeeper = _pmDigDeeper;
 
+// v359.1: read sync — destinations added in the trip view that don't
+// originate from a picker activity should still appear in the picker.
+// Walks trip.destinations, returns synthetic placeActivity items for the
+// ones whose place name is not already present in _tb.placeActivities.
+// Pure: no mutation of _tb.placeActivities (write sync is v359.2). The
+// items are tagged section "Places you added" so they bucket alongside
+// addCustomPlaceFromPicker / addBreadthSuggestion entries — same row
+// shape, same toggle semantics. Returns [] when there's no built trip
+// or no extra destinations.
+function _pickerSyntheticItemsFromTripDestinations(){
+  if (typeof trip === "undefined" || !trip || !Array.isArray(trip.destinations) || !trip.destinations.length) return [];
+  var existing = {};
+  ((typeof _tb !== "undefined" && _tb && _tb.placeActivities) || []).forEach(function(it){
+    (it.requiredPlaces || []).forEach(function(p){
+      if (p && p.place) existing[(p.place || "").toLowerCase()] = true;
+    });
+  });
+  var out = [];
+  trip.destinations.forEach(function(dest){
+    if (!dest || !dest.place) return;
+    var key = (dest.place || "").toLowerCase();
+    if (existing[key]) return; // already in picker via an activity
+    out.push({
+      id: "p-trip-" + (dest.id || dest.place),
+      name: "Visit " + dest.place,
+      type: "manual",
+      category: "culture-history",
+      section: "Places you added",
+      description: dest.intent || "",
+      iconic: false,
+      checked: true,
+      requiredPlaces: [{
+        place: dest.place,
+        country: dest.country || "",
+        nights: (typeof dest.nights === "number") ? dest.nights : 2,
+        lat: (typeof dest.lat === "number") ? dest.lat : null,
+        lng: (typeof dest.lng === "number") ? dest.lng : null,
+        _keep: true,
+        _isDayTrip: false,
+        _dayTripHub: ""
+      }]
+    });
+  });
+  return out;
+}
+
 // Two-column activity ↔ place picker, grouped by section. Each section
 // header is a verb phrase ("Travel on iconic trains", "Walk in the
 // mountains"). Inside a section, each row is one activity with its places
@@ -8834,7 +8914,15 @@ function _renderPlaceActivityItems(){
   var list = document.getElementById("tb-place-act-list");
   if(!list) return;
   list.innerHTML = "";
-  var items = _tb.placeActivities || [];
+  // v359.1 read sync: union _tb.placeActivities with synthetic items
+  // mirrored from trip.destinations that don't yet have a picker
+  // activity. Render-time only — _tb.placeActivities itself is not
+  // mutated (write sync lands in v359.2). The synthetics are tagged
+  // section "Places you added" so the existing bucketing path drops
+  // them next to manual-add entries.
+  var _syntheticTripDests = (typeof _pickerSyntheticItemsFromTripDestinations === "function")
+    ? _pickerSyntheticItemsFromTripDestinations() : [];
+  var items = (_tb.placeActivities || []).concat(_syntheticTripDests);
 
   // Round DN.7: predict day-trip absorption at picker time. Mirror the
   // build-time clustering rule (Round CO/DA): a kept place with ≤2
@@ -9348,22 +9436,27 @@ function _renderPlaceActivityItems(){
       // v357: sidebar ordinal badge removed — sequencing is a trip-view
       // concern. The picker is about WHAT places to include; ordering
       // gets committed in the trip view.
-      // Round v358: inline story preview, only on the place's first
-      // appearance in this render (later rows reference back via "also in").
-      // Renders a placeholder; the IntersectionObserver below hydrates it
-      // from cache or kicks off a throttled _generatePlaceNarrative.
+      // v358.7: button-driven story. Earlier rounds auto-loaded the
+      // preview via IntersectionObserver — Neal pushed back: too eager,
+      // wastes LLM calls on places the user wasn't curious about, and
+      // the auto-loaded text felt like noise on rows the user was
+      // scanning past. The button version only fires when the user
+      // explicitly asks. Cache + expand + "Tell me more" all still
+      // work; the trigger is just the button now, not visibility.
       var storyHtml = "";
       if (firstAppearance) {
         var _placeAttr = _pmEsc(d.place);
         storyHtml = '<div class="pm-row-story" data-place="'+_placeAttr+'" '
-          + 'style="margin-top:3px;font-style:italic;font-size:11.5px;color:#666;line-height:1.5;" '
+          + 'style="margin-top:3px;font-size:11.5px;line-height:1.5;" '
           + 'onclick="event.stopPropagation();">'
-          +   '<span class="pm-row-story-text">…</span>'
-          +   ' '
+          +   '<a class="pm-row-story-trigger" '
+          +      'style="color:#1a5fa8;text-decoration:none;cursor:pointer;font-weight:600;" '
+          +      'onclick="_pmTriggerStory(this);event.stopPropagation();return false;" href="#">Story →</a>'
+          +   '<span class="pm-row-story-text" style="display:none;font-style:italic;color:#666;"></span>'
           +   '<a class="pm-row-story-toggle" '
-          +      'style="display:none;color:#1a5fa8;text-decoration:none;cursor:pointer;font-style:normal;font-weight:600;margin-left:4px;" '
-          +      'onclick="_pmToggleStoryFull(this);event.stopPropagation();">more →</a>'
-          +   '<div class="pm-row-story-full" style="display:none;margin-top:2px;"></div>'
+          +      'style="display:none;color:#1a5fa8;text-decoration:none;cursor:pointer;font-weight:600;margin-left:4px;" '
+          +      'onclick="_pmToggleStoryFull(this);event.stopPropagation();return false;" href="#">more →</a>'
+          +   '<div class="pm-row-story-full" style="display:none;margin-top:2px;font-style:normal;color:#333;"></div>'
           + '</div>';
       }
       var leftHtml = '<div class="tb-act-col-left">'
@@ -9443,35 +9536,15 @@ function _renderPlaceActivityItems(){
       list.appendChild(row);
     });
   });
-  // Round v358: hydrate inline story previews. Tear down any prior
-  // observer so we don't leak across re-renders (this function is
-  // called many times per session). For each preview slot in the
-  // freshly rendered DOM: if IntersectionObserver is unsupported,
-  // hydrate immediately; otherwise observe and let visibility drive
-  // generation. threshold 0.1 = any sliver visible.
-  (function _pmAttachStoryObserver(){
-    var slots = list.querySelectorAll(".pm-row-story");
-    if (!slots.length) return;
-    if (_pmStoryObserver && _pmStoryObserver.disconnect) {
-      try { _pmStoryObserver.disconnect(); } catch(e) {}
-      _pmStoryObserver = null;
-    }
-    if (typeof IntersectionObserver !== "function") {
-      // Fallback: hydrate everything that's reasonably likely to be
-      // looked at. Cheap enough — and the cache will dedupe anyway.
-      Array.prototype.forEach.call(slots, function(s){ _pmHydratePreview(s); });
-      return;
-    }
-    _pmStoryObserver = new IntersectionObserver(function(entries){
-      entries.forEach(function(entry){
-        if (entry.isIntersecting) {
-          _pmHydratePreview(entry.target);
-          if (_pmStoryObserver) _pmStoryObserver.unobserve(entry.target);
-        }
-      });
-    }, { threshold: 0.1 });
-    Array.prototype.forEach.call(slots, function(s){ _pmStoryObserver.observe(s); });
-  })();
+  // v358.7: IntersectionObserver auto-hydration removed. Each story
+  // slot now has its own "Story →" button that fires _pmTriggerStory
+  // on click. No automatic LLM calls; no work done for places the
+  // user didn't ask about. Tear down any leftover observer from a
+  // previous build so it doesn't keep firing on stale DOM nodes.
+  if (_pmStoryObserver && _pmStoryObserver.disconnect) {
+    try { _pmStoryObserver.disconnect(); } catch(e) {}
+    _pmStoryObserver = null;
+  }
 
   // Round DN.1: build the sticky category nav from the categories that
   // actually rendered headers above. Empty categories don't show up.
@@ -10670,7 +10743,14 @@ function _renderPlacePickerMap(targetId){
   // _dayTripHub flags so the marker factory + polyline/spur passes
   // can distinguish stays from day trips.
   var allPlaces = {};
-  (_tb.placeActivities || []).forEach(function(item){
+  // v359.1 read sync: include trip.destinations that aren't yet in
+  // _tb.placeActivities so the picker map shows them as pins too. Same
+  // helper feeds _renderPlaceActivityItems above; pinning here keeps
+  // the map and sidebar showing the same set of places.
+  var _syntheticForMap = (typeof _pickerSyntheticItemsFromTripDestinations === "function")
+    ? _pickerSyntheticItemsFromTripDestinations() : [];
+  var _allActItems = (_tb.placeActivities || []).concat(_syntheticForMap);
+  _allActItems.forEach(function(item){
     var iconic = !!item.iconic;
     (item.requiredPlaces || []).forEach(function(p){
       if (!p || !p.place) return;
@@ -10746,9 +10826,19 @@ function _renderPlacePickerMap(targetId){
         label = "";
         size = 16;
       }
-      var border = info.iconic ? "#b28a2e" : "#fff";
+      // v358.6: no map-level "iconic" decoration. The earlier gold
+      // border and the v358.5 ★ overlay both fired only on places
+      // whose source activity carried iconic:true, which made them
+      // visually distinct from other genuinely-kept places that just
+      // happened to come from non-iconic activities — confusing
+      // because the user reads the difference as "this matters more"
+      // when really the LLM was just inconsistent in tagging. The
+      // picker map now shows three clean states only: blue stay /
+      // orange day-trip / grey not-kept. Iconic still appears in the
+      // pin tooltip ("Akureyri · ★ iconic · stay") and in the
+      // sidebar; just not as a colored decoration on the pin.
       var html = '<div style="background:'+color+';color:#fff;border-radius:50%;width:'
-        + size + 'px;height:'+size+'px;border:2px solid '+border
+        + size + 'px;height:'+size+'px;border:2px solid #fff'
         + ';box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;">'
         + label
         + '</div>';
@@ -11289,8 +11379,50 @@ function renderActivityPicker(){
   var backHandler = isEdit ? "cancelPickerEdit()" : "renderTripBrief()";
   var backLabel = isEdit ? "← Cancel" : "← Shape the trip";
 
+  // v359.1: when editing an existing trip (the peer-of-trip-view case),
+  // the picker overlay grows the same .file-btn chrome row + three-pill
+  // mode toggle that the trip view has. This lets the user swap freely
+  // between picker and trip view, and exposes Home / Save / Copy /
+  // Share / Export / Paste / Ask / Search / API-key on the picker
+  // surface — same hooks the trip view uses, no reimplementation. The
+  // initial new-trip flow keeps the simpler header (no built trip yet,
+  // so Save/Copy/Share don't apply).
+  var _pickerChromeRow = '';
+  if (isEdit) {
+    _pickerChromeRow = ''
+      + '<div class="lp-hdr" style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid #eee;background:#fff;flex-shrink:0;">'
+      +   '<div style="flex:1;min-width:0;font-size:13px;font-weight:600;color:#222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'
+      +     _pmEsc(((trip && trip.name) || "Trip"))
+      +   '</div>'
+      +   '<div style="display:flex;gap:5px;align-items:center;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;">'
+      +     '<button class="file-btn" onclick="goHome()" title="All trips">&larr; Home</button>'
+      +     '<button class="file-btn" onclick="editConstraints()" title="Edit trip parameters">&#9998; Parameters</button>'
+      +     '<button class="file-btn" onclick="saveTrip()" title="Save">Save</button>'
+      +     '<button class="file-btn" onclick="if(_currentTripId&&confirm(\'Duplicate this trip? A copy will be created on the home screen.\'))duplicateTrip(_currentTripId,false);" title="Duplicate this trip">Copy</button>'
+      +     '<button class="file-btn" onclick="showShareTripModal()" title="Share a read-only link to this trip">Share</button>'
+      +     '<button class="file-btn" onclick="showExportTripModal()" title="Print, save as PDF, or download as a calendar file">Export</button>'
+      +     '<button class="file-btn" onclick="showGlobalPasteConfirmationModal()" title="Paste a flight, hotel, or other booking confirmation">&#128203; Paste</button>'
+      +     '<button class="file-btn" onclick="showAskMaxModal()" title="Chat with an AI about this trip">&#128172; Ask</button>'
+      +     '<button class="file-btn" onclick="openTripSearch()" title="Search this trip">&#x1F50D;</button>'
+      +     '<button class="file-btn" onclick="showApiKeyForm()" title="Set API key" style="opacity:0.6;">&#x1F511;</button>'
+      +   '</div>'
+      + '</div>'
+      // Three-pill mode row mirroring the trip view. Clicking Trip /
+      // Destination here is the free-swap exit: hide the overlay and
+      // call the same setLeftMode the trip-view pills use. Picker pill
+      // is the active one.
+      + '<div class="lp-mode-row" style="background:#fff;">'
+      +   '<div class="mode-toggle" style="flex:1;display:flex;border-radius:6px;overflow:hidden;border:1px solid #e0e0e0;">'
+      +     '<button class="mode-btn on" type="button" onclick="setLeftMode(\'picker\')">Picker</button>'
+      +     '<button class="mode-btn" type="button" onclick="setLeftMode(\'trip\')">Trip</button>'
+      +     '<button class="mode-btn" type="button" onclick="setLeftMode(\'dest\')">Destination</button>'
+      +   '</div>'
+      + '</div>';
+  }
+
   // Outer structure: header + 2-column body + footer
   ov.innerHTML = ''
+    + _pickerChromeRow
     +'<div class="tb-header" style="flex-shrink:0;">'
     +  '<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div>'+(stepLabel?'<div class="tb-step">'+stepLabel+'</div>':'')+'</div></div>'
     +  '<div class="tb-title">'+titleLabel+'</div>'
@@ -13333,9 +13465,11 @@ async function findCandidates(){
   try{
     var text=await callMax([{role:"user",content:prompt}],2000);
     var cands=JSON.parse(text.replace(/```json|```/g,"").trim());
-    // Round HZ (picker hero map, step 6): see allCands forEach above for
-    // the accepted→status mapping rationale.
-    cands.forEach(function(c,i){c.id="c"+i;c.status=(c.accepted===false?null:"keep");c.order=null;c.manuallyOrdered=false;});
+    // v358.8: every candidate starts at status:null. See the
+    // allCands.forEach in findCandidates above for the rationale —
+    // user picks are the contract; LLM extras are opt-in via the
+    // candidate-explorer.
+    cands.forEach(function(c,i){c.id="c"+i;c.status=null;c.order=null;c.manuallyOrdered=false;});
     _tb.candidates=cands;
     showCandidateExplorer(cands);
   }catch(e){
@@ -13483,9 +13617,11 @@ async function retryDiscoveryCandidates() {
     newCands.forEach(function(c){ c._required=false; c._requiredFor=[]; });
     var allCands = existingReq.concat(newCands);
     var nextId = allCands.length;
-    // Round HZ (picker hero map, step 6): see allCands forEach above for
-    // the accepted→status mapping rationale.
-    newCands.forEach(function(c,i){ c.id="c"+(existingReq.length+i); c.status=(c.accepted===false?null:"keep"); c.order=null; c.manuallyOrdered=false; });
+    // v358.8: every candidate starts at status:null. See the
+    // allCands.forEach in findCandidates above for the rationale —
+    // user picks are the contract; LLM extras are opt-in via the
+    // candidate-explorer.
+    newCands.forEach(function(c,i){ c.id="c"+(existingReq.length+i); c.status=null; c.order=null; c.manuallyOrdered=false; });
     _tb.candidates = existingReq.concat(newCands);
     _tb.p2Failed = false;
     showCandidateExplorer(_tb.candidates);
@@ -13752,6 +13888,12 @@ function reopenPickerForEdit(){
     document.body.appendChild(ov);
   }
   ov.style.display = "block";
+  // v359.1: reflect picker mode in the three-pill toggle so when the
+  // user comes back to the trip view, the pill state is consistent.
+  if (typeof _leftMode !== "undefined") _leftMode = "picker";
+  var _pkBtn = g("mode-picker-btn"); if (_pkBtn) _pkBtn.className = "mode-btn on";
+  var _trBtn = g("mode-trip-btn"); if (_trBtn) _trBtn.className = "mode-btn";
+  var _deBtn = g("mode-dest-btn"); if (_deBtn) _deBtn.className = "mode-btn";
   renderActivityPicker();
 }
 
@@ -13841,6 +13983,11 @@ function cancelPickerEdit(){
   delete _tb._editPreservedByPlace;
   var ov = g("trip-brief-overlay");
   if (ov) ov.style.display = "none";
+  // v359.1: keep mode toggle in sync when leaving the picker overlay.
+  _leftMode = "trip";
+  var _pkBtn = g("mode-picker-btn"); if (_pkBtn) _pkBtn.className = "mode-btn";
+  var _trBtn = g("mode-trip-btn"); if (_trBtn) _trBtn.className = "mode-btn on";
+  var _deBtn = g("mode-dest-btn"); if (_deBtn) _deBtn.className = "mode-btn";
   if (typeof drawTripMode === "function") drawTripMode();
 }
 
@@ -19853,6 +20000,14 @@ if (typeof MaxEnginePicker !== "undefined" && typeof MaxEnginePicker.on === "fun
     if (isRebuild) {
       var briefOv = g("trip-brief-overlay");
       if (briefOv) briefOv.style.display = "none";
+      // v359.1: when leaving the picker after a rebuild, reset the
+      // mode pill state so the trip view's three-pill toggle reflects
+      // "Trip" (not the stale "Picker" highlight from when the user
+      // opened the picker).
+      _leftMode = "trip";
+      var _pkBtn = g("mode-picker-btn"); if (_pkBtn) _pkBtn.className = "mode-btn";
+      var _trBtn = g("mode-trip-btn"); if (_trBtn) _trBtn.className = "mode-btn on";
+      var _deBtn = g("mode-dest-btn"); if (_deBtn) _deBtn.className = "mode-btn";
       if (typeof drawTripMode === "function") drawTripMode();
       return;
     }
@@ -21184,8 +21339,34 @@ function updateMainMap(){
 function setLeftMode(mode){
   var prevMode = _leftMode;
   _leftMode=mode;
+  // v359.1: third pill "Picker" — sit alongside Trip / Destination as a
+  // first-class peer. The picker UI is a fullscreen overlay
+  // (#trip-brief-overlay) layered over the app shell rather than a panel
+  // inside #lp; the toggle pill flips _leftMode and shows/hides the
+  // overlay. Free-swap: no confirmation, autoSave handles persistence.
+  var pickerBtn = g("mode-picker-btn");
+  if (pickerBtn) pickerBtn.className = "mode-btn" + (mode === "picker" ? " on" : "");
   g("mode-trip-btn").className="mode-btn"+(mode==="trip"?" on":"");
   g("mode-dest-btn").className="mode-btn"+(mode==="dest"?" on":"");
+  if (mode === "picker") {
+    // Open the picker overlay over the app shell. reopenPickerForEdit
+    // hydrates _tb from trip.mdcItems / trip.brief and renders. If the
+    // user is leaving the picker for trip view and back again, the
+    // hydrate is cheap (re-reads trip.mdcItems) and avoids stale state
+    // from earlier picker sessions.
+    if (typeof reopenPickerForEdit === "function") {
+      reopenPickerForEdit();
+    }
+    // Don't redraw trip-mode UI; the overlay covers it.
+    return;
+  }
+  // Leaving picker mode: hide the overlay so the trip / dest view is
+  // visible underneath. Picker overlay was reparented to <body> for
+  // z-index reasons; keep it there but hidden.
+  if (prevMode === "picker") {
+    var pkOv = g("trip-brief-overlay");
+    if (pkOv) pkOv.style.display = "none";
+  }
   if(mode==="trip") drawTripMode();
   else {
     // When the user clicks the Destination tab, default to the FIRST
