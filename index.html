@@ -8775,6 +8775,12 @@ function _pmHydratePreview(slot){
   function applyText(full){
     if (!full || !textSpan) return;
     var preview = _pmTruncateStory(full);
+    // v359.5.3: reset any error-state styling that the failure path
+    // may have applied (red text, normal font-style). Without this,
+    // a retry that succeeds would still show in red — the textSpan
+    // node is reused across attempts.
+    textSpan.style.fontStyle = "italic";
+    textSpan.style.color = "#666";
     textSpan.textContent = preview;
     // v358.1: structured full content. Narrative paragraph first;
     // a placeholder div for the "what to do here" bullets gets
@@ -8807,8 +8813,27 @@ function _pmHydratePreview(slot){
   }
   _pmEnqueueStoryGen(placeName, function(text){
     if (!text) {
-      // Generation failed/empty — clear the placeholder rather than leave "…".
-      if (textSpan) textSpan.textContent = "";
+      // v359.5.3: when the LLM call returns nothing (auth missing,
+      // proxy down, timeout, parse failure) the previous behavior
+      // just cleared the "…" placeholder — leaving the user with a
+      // blank slot and no clue why. Neal's report: "open story just
+      // flashes but no story." Surface a clear failure message and
+      // restore the trigger so they can retry once the underlying
+      // issue is fixed; also reset _pmHydrated so the retry actually
+      // fires a fresh LLM call instead of early-returning.
+      if (textSpan) {
+        textSpan.style.fontStyle = "normal";
+        textSpan.style.color = "#b04040";
+        textSpan.textContent = "(couldn't load story — check sign-in or API key, then click Story → again)";
+      }
+      // Re-show the trigger and the close X so the user can dismiss
+      // the error and try again.
+      var triggerEl = slot.querySelector(".pm-row-story-trigger");
+      if (triggerEl) {
+        triggerEl.style.display = "inline";
+        triggerEl.textContent = "Retry →";
+      }
+      slot._pmHydrated = false;
       return;
     }
     applyText(text);
@@ -8888,8 +8913,16 @@ function _pmTriggerStory(linkEl){
   if (!slot) return;
   var trigger = slot.querySelector(".pm-row-story-trigger");
   var textSpan = slot.querySelector(".pm-row-story-text");
-  if (trigger) trigger.style.display = "none";
+  if (trigger) {
+    // v359.5.3: reset trigger label in case the previous attempt
+    // ended in the "Retry →" state.
+    trigger.textContent = "Story →";
+    trigger.style.display = "none";
+  }
   if (textSpan) {
+    // v359.5.3: reset any error-state styling from a prior failure.
+    textSpan.style.fontStyle = "italic";
+    textSpan.style.color = "#666";
     textSpan.style.display = "inline";
     textSpan.textContent = "…"; // placeholder while generating
   }
