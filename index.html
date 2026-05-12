@@ -8893,9 +8893,40 @@ function _pmTriggerStory(linkEl){
     textSpan.style.display = "inline";
     textSpan.textContent = "…"; // placeholder while generating
   }
+  // v359.5.1: reveal the close × so the story can be dismissed.
+  // Neal's report: "I added a place, Egilsstaðir, and when I
+  // selected the story, there was no way to close it." The trigger
+  // was hidden on click and never came back; "less ←" only collapses
+  // the FULL story, not the preview. The close affordance returns
+  // the slot to its initial state (trigger visible, preview hidden).
+  var closeLink = slot.querySelector(".pm-row-story-close");
+  if (closeLink) closeLink.style.display = "inline";
   _pmHydratePreview(slot);
 }
 window._pmTriggerStory = _pmTriggerStory;
+
+// v359.5.1: dismiss the story preview and return the slot to its
+// initial state. Inverse of _pmTriggerStory + _pmToggleStoryFull
+// combined — collapses any expanded state and shows the "Story →"
+// trigger again, so the user can re-open later without confusion.
+function _pmCloseStory(linkEl){
+  var slot = linkEl && linkEl.closest ? linkEl.closest(".pm-row-story") : null;
+  if (!slot) return;
+  var trigger = slot.querySelector(".pm-row-story-trigger");
+  var textSpan = slot.querySelector(".pm-row-story-text");
+  var toggle = slot.querySelector(".pm-row-story-toggle");
+  var fullDiv = slot.querySelector(".pm-row-story-full");
+  var closeLink = slot.querySelector(".pm-row-story-close");
+  if (textSpan) textSpan.style.display = "none";
+  if (toggle) {
+    toggle.style.display = "none";
+    toggle.textContent = "more →"; // reset
+  }
+  if (fullDiv) fullDiv.style.display = "none";
+  if (closeLink) closeLink.style.display = "none";
+  if (trigger) trigger.style.display = "inline";
+}
+window._pmCloseStory = _pmCloseStory;
 
 // v358.2: "Tell me more →" handler. Mirrors the trip view's
 // "Dig deeper" — sends the existing narrative back to the LLM with
@@ -9567,6 +9598,13 @@ function _renderPlaceActivityItems(){
           +   '<a class="pm-row-story-toggle" '
           +      'style="display:none;color:#1a5fa8;text-decoration:none;cursor:pointer;font-weight:600;margin-left:4px;" '
           +      'onclick="_pmToggleStoryFull(this);event.stopPropagation();return false;" href="#">more →</a>'
+          // v359.5.1: close × — dismisses the story and brings the
+          // "Story →" trigger back. Without this the user has no way
+          // to undo opening the story; the previous "less ←" inside
+          // _pmToggleStoryFull only collapses the EXPANDED state.
+          +   '<a class="pm-row-story-close" '
+          +      'style="display:none;color:#999;text-decoration:none;cursor:pointer;font-weight:600;margin-left:8px;" '
+          +      'onclick="_pmCloseStory(this);event.stopPropagation();return false;" href="#" title="Close story">× close</a>'
           +   '<div class="pm-row-story-full" style="display:none;margin-top:2px;font-style:normal;color:#333;"></div>'
           + '</div>';
       }
@@ -11078,9 +11116,23 @@ function _renderPlacePickerMap(targetId){
     } else {
       // Trigger an async geocode; when it lands, re-render the map so the pin appears.
       // Pass info.country so Nominatim can be strict-filtered to that country.
+      // v359.5.2: re-render ALL active picker maps (inline + popout +
+      // modal) instead of only the default `tb-pm-map`. Neal reported
+      // "Jökulsárlón is suggested as a day trip, but doesn't show on
+      // the map." The likely cause: the popout window's map went
+      // stale because `_renderPlacePickerMap()` with no targetId only
+      // refreshed the inline target, and the geocoded coords landed
+      // only after the user had opened a different map view. The
+      // unified refresh hits every map every time.
       if (typeof ensureCoarseGeocode === "function") {
         ensureCoarseGeocode(info.place, function(coords){
-          if (coords && isFinite(coords[0])) _renderPlacePickerMap();
+          if (coords && isFinite(coords[0])) {
+            if (typeof _refreshAllPlacePickerMaps === "function") {
+              _refreshAllPlacePickerMaps();
+            } else {
+              _renderPlacePickerMap();
+            }
+          }
         }, info.country);
       }
     }
