@@ -1694,11 +1694,17 @@
     }
 
     // Edit destinations — only when there's a saved candidate snapshot.
+    // v359.5: bumped from a 12px secondary button to a 14px primary
+    // CTA. With all mode pills removed (v359.2.3), this is the only
+    // path back to the picker — it should look like the heaviest
+    // action in the destinations header, not an afterthought tucked
+    // next to "Considered (N)" and "Reverse order". Dropped the ✎
+    // glyph per Neal's call: just "Edit destinations", plain.
     if (trip && trip.candidates && trip.candidates.length) {
       var editBtn = document.createElement("button");
-      editBtn.style.cssText = "font-size:12px;font-weight:600;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:7px 14px;cursor:pointer;font-family:inherit;white-space:nowrap;";
-      editBtn.textContent = "✎ Edit destinations";
-      editBtn.title = "Re-open the Candidate Explorer with your current keep/reject decisions";
+      editBtn.style.cssText = "font-size:14px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:8px;padding:10px 18px;cursor:pointer;font-family:inherit;white-space:nowrap;box-shadow:0 1px 3px rgba(26,95,168,0.18);";
+      editBtn.textContent = "Edit destinations";
+      editBtn.title = "Re-open the picker with your current keep/reject decisions";
       editBtn.onmouseover = function () { editBtn.style.background = "#134a8a"; };
       editBtn.onmouseout  = function () { editBtn.style.background = "#1a5fa8"; };
       editBtn.onclick = function () {
