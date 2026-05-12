@@ -9130,13 +9130,23 @@ function _renderPlaceActivityItems(){
       var its = bySection[name] || [];
       var anyRoute = its.some(function(it){ return it && it.type === "route"; });
       var anyCondition = its.some(function(it){ return it && it.type === "condition"; });
-      // Condition trumps route (last-of-last).
+      // v359.4: user-added picks sink to the very bottom of the list.
+      // Neal's call: "For places you add, that section should go at
+      // the end." The user already saw the LLM's suggestions and
+      // supplemented them — their adds are a personal addendum that
+      // belongs after activities, after transit, after wait-states.
+      // Match by both the canonical section name ("Places you added"
+      // / "Things you added") and by item type=manual as a backstop
+      // for older items that may carry different section labels.
+      var anyManual = its.some(function(it){ return it && it.type === "manual"; });
+      if (anyManual || /\b(places|things)\s+you\s+added\b/i.test(name)) return 4;
+      // Condition trumps route (was last-of-last; now second-to-last).
       if (anyCondition || /aurora|weather|seasonal|wait for/i.test(name)) return 3;
       // Routes — match by item type, or by any whiff of train/rail/transit
       // language in the section name. Be permissive on names since the LLM
       // labels things inconsistently.
       if (anyRoute || /\btrain|\brail|between destinations|scenic route|named.{0,15}train/i.test(name)) return 2;
-      return 1; // activities, manual
+      return 1; // activities
     }
     var ra = rank(a), rb = rank(b);
     if (ra !== rb) return ra - rb;
@@ -27373,7 +27383,19 @@ function showAskMaxKeyModal(opts) {
 window.showAskMaxKeyModal = showAskMaxKeyModal;
 
 function showAskMaxModal() {
-  if (!_currentTripId || !trip) { maxAlert("Open a trip first."); return; }
+  // v359.4: Ask works in the picker too. Was gated on a published
+  // trip; now falls back to _tb (trip-being-built) — region, brief,
+  // picks. Neal's call: "When you select ask in the picker view, it
+  // tells you to open a trip first." The picker IS planning; Ask
+  // should be useful for "what else should I consider", "how should
+  // I order these", "how many days in each place" before publishing.
+  var _hasTrip = !!(_currentTripId && trip);
+  var _hasPicker = (typeof _tb !== "undefined" && _tb && (_tb.region || _tb.placeName || _tb.brief
+                    || (Array.isArray(_tb.placeActivities) && _tb.placeActivities.length)));
+  if (!_hasTrip && !_hasPicker) {
+    maxAlert("Open a trip or start the picker first.");
+    return;
+  }
   if (typeof MaxSync === "undefined" || !MaxSync.isSignedIn || !MaxSync.isSignedIn()) {
     maxAlert("Sign in first — chat history syncs across devices via the server.");
     return;
@@ -27391,7 +27413,12 @@ function showAskMaxModal() {
   var existing = document.getElementById("ask-max-overlay");
   if (existing) existing.remove();
 
-  _askModalState.tripId = _currentTripId;
+  // v359.4: in picker mode we don't have a trip id, so the server
+  // conversation pull/push is skipped — chat is in-memory only for
+  // the planning session. Once the trip is published, future chats
+  // get a real per-trip conversation.
+  _askModalState.tripId = _currentTripId || null;
+  _askModalState.pickerMode = !_hasTrip && _hasPicker;
 
   var ov = document.createElement("div");
   ov.id = "ask-max-overlay";
@@ -27437,22 +27464,42 @@ function showAskMaxModal() {
   // is "looking at" when the user asks a question.
   var ctxLine = document.getElementById("askmax-context-line");
   var ctxDest = (typeof activeDest !== "undefined" && activeDest && _leftMode === "dest") ? getDest(activeDest) : null;
-  ctxLine.textContent = ctxDest
-    ? "Context: " + (ctxDest.place || ctxDest.label || "current destination") + (ctxDest.dateFrom ? " (" + ctxDest.dateFrom + " → " + (ctxDest.dateTo || ctxDest.dateFrom) + ")" : "")
-    : "Context: " + (trip.name || "this trip") + (trip.destinations ? " — " + trip.destinations.length + " destinations" : "");
+  if (ctxDest) {
+    ctxLine.textContent = "Context: " + (ctxDest.place || ctxDest.label || "current destination")
+      + (ctxDest.dateFrom ? " (" + ctxDest.dateFrom + " → " + (ctxDest.dateTo || ctxDest.dateFrom) + ")" : "");
+  } else if (_hasTrip) {
+    ctxLine.textContent = "Context: " + (trip.name || "this trip")
+      + (trip.destinations ? " — " + trip.destinations.length + " destinations" : "");
+  } else {
+    // v359.4: picker-mode context.
+    var _region = (_tb && _tb.region) || (_tb && _tb.placeName) || "your trip";
+    var _picksCount = 0;
+    (_tb && _tb.placeActivities || []).forEach(function(it){
+      (it.requiredPlaces || []).forEach(function(p){ if (p && p._keep) _picksCount++; });
+    });
+    ctxLine.textContent = "Context: Planning " + _region + (_picksCount ? " — " + _picksCount + " picks so far" : " — picking places");
+  }
 
   // Pull existing conversation from server. While loading, show a
   // ghost placeholder; on success render the messages.
   var pane = document.getElementById("askmax-pane");
-  pane.innerHTML = '<div style="font-size:11px;color:#999;text-align:center;padding:20px;">Loading conversation…</div>';
-  MaxSync.pullConversation(_currentTripId).then(function(resp){
-    _askModalState.messages = (resp && resp.messages) || [];
-    _renderAskMaxPane();
-  }).catch(function(e){
-    console.warn("[askmax] pull failed:", e);
+  // v359.4: in picker mode there's no trip id to pull from. Start
+  // with an empty in-memory conversation; once the trip is published
+  // a per-trip conversation will exist on the server.
+  if (_askModalState.pickerMode || !_currentTripId) {
     _askModalState.messages = [];
     _renderAskMaxPane();
-  });
+  } else {
+    pane.innerHTML = '<div style="font-size:11px;color:#999;text-align:center;padding:20px;">Loading conversation…</div>';
+    MaxSync.pullConversation(_currentTripId).then(function(resp){
+      _askModalState.messages = (resp && resp.messages) || [];
+      _renderAskMaxPane();
+    }).catch(function(e){
+      console.warn("[askmax] pull failed:", e);
+      _askModalState.messages = [];
+      _renderAskMaxPane();
+    });
+  }
 
   var input = document.getElementById("askmax-input");
   var sendBtn = document.getElementById("askmax-send");
@@ -27577,10 +27624,14 @@ async function _askMaxSend() {
 
   // Persist after every send. Fire-and-forget; if it fails the
   // local state still has the messages (next pull will reconcile).
-  try {
-    await MaxSync.pushConversation(_askModalState.tripId, _askModalState.messages);
-  } catch (e) {
-    console.warn("[askmax] push failed:", e);
+  // v359.4: skip persistence in picker mode (no trip id yet — the
+  // session is in-memory until the trip is published).
+  if (_askModalState.tripId) {
+    try {
+      await MaxSync.pushConversation(_askModalState.tripId, _askModalState.messages);
+    } catch (e) {
+      console.warn("[askmax] push failed:", e);
+    }
   }
 }
 
@@ -27626,6 +27677,27 @@ function _buildAskMaxSystemPrompt() {
     }
     if (trip.brief && trip.brief.brief) tBits.push("Brief: " + String(trip.brief.brief).slice(0, 400));
     ctxBlock = tBits.join("\n");
+  } else if (typeof _tb !== "undefined" && _tb && (_tb.region || _tb.placeName || _tb.brief)) {
+    // v359.4: picker-mode context. No published trip exists yet; the
+    // user is in the activity-picker shaping what the trip will be.
+    // Hand the model the brief + region + kept-picks so it can answer
+    // "what should I add?", "how should I order these?", etc.
+    var pBits = [];
+    pBits.push("PLANNING (no trip published yet — user is in the picker)");
+    if (_tb.region) pBits.push("Region: " + _tb.region);
+    if (_tb.placeName && _tb.placeName !== _tb.region) pBits.push("Focus: " + _tb.placeName);
+    if (_tb.startDate || _tb.endDate) pBits.push("Dates: " + (_tb.startDate || "?") + " → " + (_tb.endDate || "?"));
+    if (_tb.entry) pBits.push("Entry (arrival): " + _tb.entry);
+    if (_tb.tbExit) pBits.push("Exit (departure): " + _tb.tbExit);
+    if (_tb.brief) pBits.push("Brief: " + String(_tb.brief).slice(0, 600));
+    var _keptPlaces = [];
+    (_tb.placeActivities || []).forEach(function(it){
+      (it.requiredPlaces || []).forEach(function(p){
+        if (p && p._keep && p.place && _keptPlaces.indexOf(p.place) < 0) _keptPlaces.push(p.place);
+      });
+    });
+    if (_keptPlaces.length) pBits.push("Kept picks (" + _keptPlaces.length + "): " + _keptPlaces.join(", "));
+    ctxBlock = pBits.join("\n");
   }
   return "You are a knowledgeable, friendly travel assistant embedded inside the user's trip-planning app (Max). " +
     "The user is planning or actively on a trip. Help them with anything trip-related: places to eat, things to see, " +
