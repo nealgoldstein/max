@@ -18218,14 +18218,62 @@ async function generateCityData(place,destId,_isAutoRetry){
     if(!alreadyHasData&&d2&&activeDest===destId&&_leftMode==='dest'){
       var explPane=document.getElementById('dm-pane-explore');
       if(explPane){
+        // v359.3.1: classify the failure so the user gets something
+        // actionable. "Failed to fetch" is the browser's network-level
+        // rejection — meaning the POST never reached the server at all
+        // (offline, DNS, CORS, server down). Before this, the user
+        // just saw "Could not load X data: Failed to fetch" and had
+        // no idea whether to check their connection, sign in again,
+        // or paste a fresh API key.
+        var _useProxyForDiag = (typeof MaxSync !== "undefined"
+          && typeof MaxSync.isSignedIn === "function"
+          && MaxSync.isSignedIn());
+        var _endpoint = _useProxyForDiag
+          ? (typeof MaxSync !== "undefined" && typeof MaxSync.getServerUrl === "function"
+              ? MaxSync.getServerUrl() : "the sync server")
+          : "api.anthropic.com";
+        var _short = "", _hint = "";
+        var _det = (errDetail || "").toString();
+        if (/failed to fetch/i.test(_det) || _det === "Load failed") {
+          // Load failed = Safari's variant of TypeError: Failed to fetch.
+          _short = "Couldn't reach " + _endpoint + ".";
+          _hint = _useProxyForDiag
+            ? "Check your network connection. If the sync server is down, you can fall back to your own API key from the 🔑 button on the home screen."
+            : "Check your network connection, or pop into the 🔑 settings to confirm your API key is still valid.";
+        } else if (/API timeout|timed out/i.test(_det)) {
+          _short = "Request took longer than 90 seconds.";
+          _hint = "The model is likely overloaded — wait a moment and click Retry.";
+        } else if (/Session expired|Sign in to use/i.test(_det)) {
+          _short = "You're signed out.";
+          _hint = "Sign in via the ⇄ button to use the shared key, or add your own via 🔑.";
+        } else if (/API key/i.test(_det)) {
+          _short = _det;
+          _hint = "Open 🔑 to add or refresh your Anthropic API key.";
+        } else {
+          _short = _det || "Unknown error.";
+          _hint = "Click Retry. If it keeps failing, check the browser console for details.";
+        }
         var errMsg=document.createElement('div');
-        errMsg.style.cssText='margin:12px 14px;padding:10px;background:#fff5f5;border:1px solid #f8c8c8;border-radius:7px;font-size:11px;color:#b04040;line-height:1.5;';
-        errMsg.textContent='Could not load '+place+' data: '+(errDetail||'')+' ';
+        errMsg.style.cssText='margin:12px 14px;padding:10px 12px;background:#fff5f5;border:1px solid #f8c8c8;border-radius:7px;font-size:12px;color:#b04040;line-height:1.5;';
+        var head=document.createElement('div');
+        head.style.cssText='font-weight:700;margin-bottom:3px;';
+        head.textContent='Could not load '+place+' data';
+        errMsg.appendChild(head);
+        var line1=document.createElement('div');
+        line1.textContent=_short;
+        errMsg.appendChild(line1);
+        var line2=document.createElement('div');
+        line2.style.cssText='font-size:11px;color:#7a5050;margin-top:4px;';
+        line2.textContent=_hint;
+        errMsg.appendChild(line2);
+        var actions=document.createElement('div');
+        actions.style.cssText='margin-top:7px;display:flex;gap:6px;flex-wrap:wrap;';
         var retryBtn=document.createElement('button');
-        retryBtn.style.cssText='font-size:11px;padding:2px 8px;border:1px solid #f8c8c8;border-radius:4px;background:#fff;color:#b04040;cursor:pointer;margin-left:4px;';
+        retryBtn.style.cssText='font-size:11px;padding:3px 10px;border:1px solid #f8c8c8;border-radius:11px;background:#fff;color:#b04040;cursor:pointer;font-family:inherit;font-weight:600;';
         retryBtn.textContent='Retry';
         (function(p,did){retryBtn.onclick=function(){delete _generatedCityData[p.toLowerCase()];generateCityData(p,did);drawDestMode(did);};})(place,destId);
-        errMsg.appendChild(retryBtn);
+        actions.appendChild(retryBtn);
+        errMsg.appendChild(actions);
         explPane.insertBefore(errMsg,explPane.firstChild);
       }
     }
@@ -22861,6 +22909,24 @@ function openDayTripMenu(anchor, hubDest, dayTripIdx, dayTripData, alreadyOnDay)
   hdr.style.cssText = "padding:6px 12px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#888;border-bottom:1px solid #f0e8f5;";
   hdr.textContent = dayTripData.place;
   menu.appendChild(hdr);
+  // v359.3: surface "Stay overnight here" as the FIRST option in the
+  // menu, not buried under the day-add buttons. Neal's feedback:
+  // "Max is automatically creating day trips … there needs to be a
+  // way to convert them back to a stay." It existed; it just wasn't
+  // findable. Promote it visually with the blue pill style used
+  // elsewhere for the same semantic action.
+  var ungTop = document.createElement("button");
+  ungTop.type = "button";
+  ungTop.textContent = "🛏 Stay overnight here";
+  ungTop.title = "Convert this day trip into its own destination (a stay) inserted after " + (hubDest.place || "the hub");
+  ungTop.style.cssText = "display:block;width:100%;text-align:left;padding:9px 12px;background:#eef5ff;border:none;border-bottom:1px solid #f0e8f5;color:#1a5fa8;font-size:12px;font-weight:600;font-family:inherit;cursor:pointer;";
+  ungTop.onmouseover = function(){ ungTop.style.background = "#dceaf8"; };
+  ungTop.onmouseout = function(){ ungTop.style.background = "#eef5ff"; };
+  ungTop.onclick = function(){
+    ungroupDayTrip(hubDest, dayTripIdx);
+    menu.remove();
+  };
+  menu.appendChild(ungTop);
   // Day options
   (hubDest.days || []).forEach(function(day, dayIdx){
     var item = document.createElement("button");
@@ -22891,21 +22957,11 @@ function openDayTripMenu(anchor, hubDest, dayTripIdx, dayTripData, alreadyOnDay)
     };
     menu.appendChild(rm);
   }
-  // Ungroup option. Round FB: "Stay overnight here" reads as the
-  // semantic inverse of "Make day trip" — both describe what kind of
-  // visit the place is, not how the data shape changes. The
-  // ungroupDayTrip implementation is unchanged.
-  var ung = document.createElement("button");
-  ung.type = "button";
-  ung.textContent = "Stay overnight here";
-  ung.style.cssText = "display:block;width:100%;text-align:left;padding:7px 12px;background:#fff;border:none;border-top:1px solid #f0e8f5;color:#1a5fa8;font-size:11.5px;font-family:inherit;cursor:pointer;";
-  ung.onmouseover = function(){ ung.style.background = "#eef5ff"; };
-  ung.onmouseout = function(){ ung.style.background = "#fff"; };
-  ung.onclick = function(){
-    ungroupDayTrip(hubDest, dayTripIdx);
-    menu.remove();
-  };
-  menu.appendChild(ung);
+  // v359.3: bottom "Stay overnight here" removed — the same option is
+  // now the FIRST item in the menu (above the day-add buttons), where
+  // it's actually findable. Round FB's reasoning still holds: the
+  // label reads as the semantic inverse of "Make day trip" (what
+  // kind of visit it is), not the data shape ("ungroup").
   // Click outside to dismiss
   setTimeout(function(){
     var dismiss = function(e){
@@ -24762,6 +24818,34 @@ function buildExplorePane(dest){
       metaLine.innerHTML = schedTxt + ' &nbsp;·&nbsp; ' + (dt.distKm||"?") + 'km away &nbsp;·&nbsp; sights and transport below';
       cHdr.appendChild(titleLine);
       cHdr.appendChild(metaLine);
+      // v359.3.2: "Stay overnight here" button at the top of every
+      // day-trip section in Explore. Neal's call: "Any day trip, auto
+      // generated or not, needs to be able to be removed and restored
+      // as a destination." This was the missing surface — the Itinerary
+      // row, the chip menu, and the trip-overview chip all had it, but
+      // the Explore-tab section (which is the FIRST place a user lands
+      // when looking at what a day-trip means) didn't. Same blue pill
+      // styling used elsewhere for the same action; calls ungroupDayTrip
+      // directly with no confirm() because the action is undoable via
+      // the toast and clearly labeled.
+      var convertRow = document.createElement("div");
+      convertRow.style.cssText = "margin-top:5px;";
+      var convertBtn = document.createElement("button");
+      convertBtn.type = "button";
+      convertBtn.textContent = "🛏 Stay overnight here";
+      convertBtn.title = "Convert this day trip into its own destination (a stay) inserted after " + (dest.place || "the hub");
+      convertBtn.style.cssText = "font-size:11px;font-weight:600;color:#1a5fa8;background:#eef5ff;border:1px solid #cfe1f7;border-radius:11px;padding:3px 10px;cursor:pointer;font-family:inherit;";
+      convertBtn.onmouseover = function(){ convertBtn.style.background = "#dceaf8"; };
+      convertBtn.onmouseout = function(){ convertBtn.style.background = "#eef5ff"; };
+      (function(hubDest, dayTripIdx, dtName){
+        convertBtn.onclick = function(e){
+          e.stopPropagation();
+          if (typeof ungroupDayTrip !== "function") return;
+          ungroupDayTrip(hubDest, dayTripIdx);
+        };
+      })(dest, dtIdx, dt.place);
+      convertRow.appendChild(convertBtn);
+      cHdr.appendChild(convertRow);
       chipSec.appendChild(cHdr);
       // Round FT.3: assignRow ALWAYS renders. Each day capsule shows
       // ✓ if this day-trip is already on that day. Clicking a

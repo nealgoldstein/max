@@ -81,9 +81,14 @@ test.describe('MA.4 — itinerary item buttons', () => {
     // Time row renders.
     await expect(day1.locator('#stime-s1')).toBeVisible();
 
-    // Day-trip row carries its transport sub-line + Cancel button.
+    // Day-trip row carries its transport sub-line + "Stay overnight here"
+    // button. v359.3 renamed "Cancel day trip" → "🛏 Stay overnight here"
+    // because the action actually CREATES a new standalone destination
+    // (via ungroupDayTrip), not destroys anything. Match on the
+    // distinctive "Stay overnight here" text fragment so the emoji
+    // doesn't trip the matcher.
     await expect(day1.locator('#sr-dt1 button', { hasText: 'Plan transport' })).toBeVisible();
-    await expect(day1.locator('#sr-dt1 button', { hasText: 'Cancel day trip' })).toBeVisible();
+    await expect(day1.locator('#sr-dt1 button', { hasText: 'Stay overnight here' })).toBeVisible();
 
     // ── Click priority dot — flips must ↔ nice without throwing ──
     await page.locator('#sr-s1 .item-dot-wrap').click();

@@ -602,19 +602,24 @@
       })(destId);
       transportLine.appendChild(transportTxt);
       transportLine.appendChild(transportBtn);
-      // Round FN.8.14: Cancel day trip button on the Itinerary item.
-      // Calls global.ungroupDayTrip to restore the place as a destination, so
-      // it reappears in "Could be a day trip from here" — letting the
-      // user re-add later if they change their mind. The DAY TRIPS
-      // section in Explore is now read-only (sights only); this is
-      // the canonical management surface.
+      // v359.3: "Stay overnight here" button on the Itinerary day-trip
+      // item. Previously labeled "Cancel day trip" — which read as
+      // delete, not convert — and the confirm message said the place
+      // "will move back to 'Could be a day trip from here'", which is
+      // misleading. ungroupDayTrip actually creates a new standalone
+      // destination (a real stay) inserted after the hub. This button
+      // is the canonical day-trip → stay conversion path, and the
+      // label/copy/style now match that semantic.
       var cancelBtn = document.createElement("button");
       cancelBtn.type = "button";
-      cancelBtn.textContent = "Cancel day trip";
-      cancelBtn.title = "Restore this place as an option in 'Could be a day trip from here'";
-      cancelBtn.style.cssText = "font-size:10px;font-weight:500;color:#888;background:#fff;border:1px solid #d8d4c8;border-radius:9px;padding:2px 7px;cursor:pointer;font-family:inherit;";
-      cancelBtn.onmouseover = function(){ cancelBtn.style.background = "#fafafa"; };
-      cancelBtn.onmouseout = function(){ cancelBtn.style.background = "#fff"; };
+      cancelBtn.textContent = "🛏 Stay overnight here";
+      // v359.3.3: `dest` isn't in scope here — only `destId`. Use a
+      // generic title rather than looking up the hub name (would
+      // require getDest + null guard for a tooltip not worth it).
+      cancelBtn.title = "Convert this day trip into its own destination (a stay) inserted after the hub";
+      cancelBtn.style.cssText = "font-size:11px;font-weight:600;color:#1a5fa8;background:#eef5ff;border:1px solid #cfe1f7;border-radius:11px;padding:3px 10px;cursor:pointer;font-family:inherit;";
+      cancelBtn.onmouseover = function(){ cancelBtn.style.background = "#dceaf8"; };
+      cancelBtn.onmouseout = function(){ cancelBtn.style.background = "#eef5ff"; };
       (function(did, dtPlace, isPeer){
         cancelBtn.onclick = function(e){
           e.stopPropagation();
@@ -640,7 +645,7 @@
               });
             });
             if (!dayIdxs.length) return;
-            if (!confirm("Cancel the day trip to " + dtPlace + "?\n\n" + dayIdxs.length + " day-trip placement" + (dayIdxs.length !== 1 ? "s" : "") + " will be removed and " + dayIdxs.length + " night" + (dayIdxs.length !== 1 ? "s" : "") + " will transfer back to " + dtPlace + ".")) return;
+            if (!confirm("Stay overnight in " + dtPlace + "?\n\n" + dtPlace + " will become its own destination. " + dayIdxs.length + " day-trip placement" + (dayIdxs.length !== 1 ? "s" : "") + " will be removed and " + dayIdxs.length + " night" + (dayIdxs.length !== 1 ? "s" : "") + " will transfer to the new stay.")) return;
             // Remove from highest day index first so indexes stay
             // stable as we splice items out.
             dayIdxs.sort(function(a,b){return b-a;});
@@ -658,7 +663,7 @@
             if (hub.dayTrips[i] && hub.dayTrips[i].place === dtPlace) { idx = i; break; }
           }
           if (idx < 0) return;
-          if (!confirm("Cancel the day trip to " + dtPlace + "?\n\n" + dtPlace + " will move back to 'Could be a day trip from here' so you can decide later.")) return;
+          if (!confirm("Stay overnight in " + dtPlace + "?\n\n" + dtPlace + " will become its own destination, inserted after " + (hub.place || "the hub") + ".")) return;
           if (typeof global.ungroupDayTrip === "function") global.ungroupDayTrip(hub, idx, {silent: true});
         };
       })(destId, s.dayTripPlace || "", !!s.peerDayTrip);
