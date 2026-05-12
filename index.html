@@ -342,6 +342,88 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .lp-hdr p{font-size:13px;font-weight:600;}
 .lp-hdr span{font-size:11px;color:#999;}
 
+/* v359.2: Unified header — trip name | mode pills (centered) | action buttons.
+   Replaces the two-row .lp-hdr + .lp-mode-row stack. Grid layout gives true
+   centering of the pills regardless of the side-column widths. Inside the
+   picker overlay this header is the first child and sits above the scrollable
+   picker body (z-index:5 to stay over any sibling that might overlap). */
+.lp-hdr-unified{
+  display:grid;
+  grid-template-columns:1fr auto 1fr;
+  align-items:center;
+  gap:16px;
+  padding:10px 14px;
+  border-bottom:1px solid #eee;
+  background:#fff;
+  flex-shrink:0;
+  min-height:48px;
+  position:relative;
+  z-index:5;
+}
+.lp-hdr-unified > .trip-name-block{
+  justify-self:start;
+  min-width:0;
+  max-width:240px;
+  overflow:hidden;
+}
+.lp-hdr-unified > .mode-pills{
+  justify-self:center;
+}
+.lp-hdr-unified > .mode-pills .mode-toggle{
+  display:flex;
+  border:1px solid #d8d8d8;
+  border-radius:7px;
+  overflow:hidden;
+  box-shadow:0 1px 2px rgba(0,0,0,0.04);
+}
+.lp-hdr-unified > .mode-pills .mode-btn{
+  font-size:12px;
+  padding:7px 18px;
+  min-width:100px;
+  border:none;
+  background:#f5f5f5;
+  color:#888;
+  cursor:pointer;
+  font-family:inherit;
+  text-align:center;
+}
+.lp-hdr-unified > .mode-pills .mode-btn:hover:not(:disabled):not(.on){
+  background:#ececec;
+  color:#222;
+}
+.lp-hdr-unified > .mode-pills .mode-btn.on{
+  background:#111;
+  color:#fff;
+  box-shadow:inset 0 1px 2px rgba(0,0,0,0.25);
+}
+.lp-hdr-unified > .mode-pills .mode-btn:disabled{
+  opacity:0.45;
+  cursor:not-allowed;
+}
+.lp-hdr-unified > .action-buttons{
+  justify-self:end;
+  display:flex;
+  gap:4px;
+  align-items:center;
+  flex-wrap:wrap;
+  justify-content:flex-end;
+}
+/* On narrow viewports the grid degrades into a single column to keep the
+   pills readable. Trip name stays on row 1, pills row 2, actions row 3. */
+@media (max-width:900px){
+  .lp-hdr-unified{
+    grid-template-columns:1fr;
+    gap:8px;
+  }
+  .lp-hdr-unified > .trip-name-block,
+  .lp-hdr-unified > .mode-pills,
+  .lp-hdr-unified > .action-buttons{
+    justify-self:stretch;
+  }
+  .lp-hdr-unified > .mode-pills{justify-self:center;}
+  .lp-hdr-unified > .action-buttons{justify-self:flex-start;}
+}
+
 .lp-sec{padding:12px 14px;border-bottom:1px solid #eee;flex-shrink:0;}
 .lp-sec-title{font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#bbb;margin-bottom:8px;}
 .ql{font-size:11px;color:#666;margin-bottom:5px;}
@@ -1854,8 +1936,14 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
 
   <!-- LEFT PANEL -->
   <div class="lp" id="lp">
-    <div class="lp-hdr">
-      <div style="flex:1;min-width:0;" id="trip-name-wrap">
+    <!-- v359.2: unified header — trip name (left) | mode pills (center) |
+         action buttons (right). Replaces the prior stacked .lp-hdr +
+         .lp-mode-row layout. The pills are the visual anchor (centered,
+         12px font, 100px min-width) because they're the PRIMARY navigation
+         between the app's three views. The picker overlay mirrors this
+         exact structure so the chrome is consistent across surfaces. -->
+    <div class="lp-hdr-unified">
+      <div class="trip-name-block" id="trip-name-wrap">
         <span id="trip-name-display" style="font-size:13px;font-weight:600;color:#222;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;" onclick="editTripName()" title="Click to rename">Trip</span>
         <!-- SCAFFOLD-1: persistent reminder that the trip is a working
              scaffold, not a final plan. Click opens the "How Max works"
@@ -1863,7 +1951,18 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
              present on every desktop page that has a trip loaded. -->
         <span id="scaffold-chip" onclick="showAboutMax()" style="display:inline-block;font-size:9.5px;color:#888;background:#f5f5f5;border:1px solid #e8e8e8;border-radius:9px;padding:1px 7px;margin-top:3px;cursor:pointer;font-weight:500;line-height:1.4;letter-spacing:0.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;vertical-align:bottom;" title="The trip is a scaffold — meant to flex. Click for how Max works.">Scaffold — adjust as you learn</span>
       </div>
-      <div style="display:flex;gap:5px;align-items:center;flex-shrink:0;">
+      <!-- Mode toggle. v359.1: Picker is a peer of Trip / Destination —
+           third pill flips _leftMode to "picker" and opens the picker
+           overlay over the app shell. v359.2: moved into the unified
+           header as the center column. -->
+      <div class="mode-pills">
+        <div class="mode-toggle">
+          <button class="mode-btn" id="mode-picker-btn" onclick="setLeftMode('picker')">Picker</button>
+          <button class="mode-btn on" id="mode-trip-btn" onclick="setLeftMode('trip')">Trip</button>
+          <button class="mode-btn" id="mode-dest-btn" onclick="setLeftMode('dest')">Destination</button>
+        </div>
+      </div>
+      <div class="action-buttons">
         <button class="file-btn" onclick="goHome()" title="All trips">&larr; Home</button>
         <button class="file-btn" onclick="editConstraints()" title="Edit trip parameters">&#9998; Parameters</button>
         <button class="file-btn" onclick="saveTrip()" title="Save">Save</button>
@@ -1895,17 +1994,9 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
       </div>
     </div>
 
-    <!-- Mode toggle. v359.1: Picker is now a peer of Trip / Destination —
-         third pill flips _leftMode to "picker" and opens the picker
-         overlay over the app shell. Free-swap (no confirmation): autoSave
-         covers persistence on either side of the toggle. -->
-    <div class="lp-mode-row">
-      <div class="mode-toggle" style="flex:1;display:flex;border-radius:6px;overflow:hidden;border:1px solid #e0e0e0;">
-        <button class="mode-btn" id="mode-picker-btn" onclick="setLeftMode('picker')">Picker</button>
-        <button class="mode-btn on" id="mode-trip-btn" onclick="setLeftMode('trip')">Trip</button>
-        <button class="mode-btn" id="mode-dest-btn" onclick="setLeftMode('dest')">Destination</button>
-      </div>
-    </div>
+    <!-- v359.2: .lp-mode-row was merged into .lp-hdr-unified above. The
+         three-pill mode toggle now lives in the center column of the
+         unified header so it's the visual anchor of the chrome. -->
 
     <!-- Scrollable content — JS populates -->
     <div id="lp-content" class="lp-content"></div>
@@ -11473,49 +11564,54 @@ function renderActivityPicker(){
   var backHandler = isEdit ? "cancelPickerEdit()" : "renderTripBrief()";
   var backLabel = isEdit ? "← Cancel" : "← Shape the trip";
 
-  // v359.1: when editing an existing trip (the peer-of-trip-view case),
-  // the picker overlay grows a chrome row + three-pill mode toggle that
-  // mirror the trip view. Trimmed list (per Neal v359.1.1): Copy /
-  // Share / Export / Paste only make sense on a built trip — there's
-  // nothing to share or paste INTO during the place-picking phase, so
-  // they'd be dead controls in the picker. Ask + Search are also trip-
-  // centric but can be useful while picking ("ask Max about this
-  // region"), so they stay. Picker chrome is now: Home, Parameters,
-  // Save, Ask, Search, API-key.
-  var _pickerChromeRow = '';
-  if (isEdit) {
-    _pickerChromeRow = ''
-      + '<div class="lp-hdr" style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid #eee;background:#fff;flex-shrink:0;">'
-      +   '<div style="flex:1;min-width:0;font-size:13px;font-weight:600;color:#222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'
-      +     _pmEsc(((trip && trip.name) || "Trip"))
-      +   '</div>'
-      +   '<div style="display:flex;gap:5px;align-items:center;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;">'
-      +     '<button class="file-btn" onclick="goHome()" title="All trips">&larr; Home</button>'
-      +     '<button class="file-btn" onclick="editConstraints()" title="Edit trip parameters">&#9998; Parameters</button>'
-      +     '<button class="file-btn" onclick="saveTrip()" title="Save">Save</button>'
-      +     '<button class="file-btn" onclick="showAskMaxModal()" title="Chat with an AI about this trip">&#128172; Ask</button>'
-      +     '<button class="file-btn" onclick="openTripSearch()" title="Search this trip">&#x1F50D;</button>'
-      +     '<button class="file-btn" onclick="showApiKeyForm()" title="Set API key" style="opacity:0.6;">&#x1F511;</button>'
-      +   '</div>'
-      + '</div>'
-      // Three-pill mode row mirroring the trip view. Clicking Trip /
-      // Destination here is the free-swap exit: hide the overlay and
-      // call the same setLeftMode the trip-view pills use. Picker pill
-      // is the active one.
-      + '<div class="lp-mode-row" style="background:#fff;">'
-      +   '<div class="mode-toggle" style="flex:1;display:flex;border-radius:6px;overflow:hidden;border:1px solid #e0e0e0;">'
-      +     '<button class="mode-btn on" type="button" onclick="setLeftMode(\'picker\')">Picker</button>'
-      +     '<button class="mode-btn" type="button" onclick="setLeftMode(\'trip\')">Trip</button>'
-      +     '<button class="mode-btn" type="button" onclick="setLeftMode(\'dest\')">Destination</button>'
-      +   '</div>'
-      + '</div>';
+  // v359.2: Unified header is rendered on BOTH fresh-build flow AND
+  // re-edit flow (previously only isEdit). Detect whether a built trip
+  // exists — if not, only Home / Parameters / API-key are meaningful
+  // (Save/Copy/Share/Export/Paste/Ask/Search all assume a built trip);
+  // and the Trip / Destination pills are disabled with a tooltip until
+  // the trip is built. The chrome mirrors the trip view's unified header
+  // (same .lp-hdr-unified class) so layout and styling stay in sync.
+  var _hasTrip = !!(trip && trip.id);
+  var _tripLabel = _pmEsc(((trip && trip.name) || (_tb && _tb.placeName) || "Trip"));
+  var _disPills = _hasTrip ? '' : ' disabled title="Build the trip first."';
+  var _pickerActionBtns = ''
+    + '<button class="file-btn" onclick="goHome()" title="All trips">&larr; Home</button>'
+    + '<button class="file-btn" onclick="editConstraints()" title="Edit trip parameters">&#9998; Parameters</button>';
+  if (_hasTrip) {
+    _pickerActionBtns += ''
+      + '<button class="file-btn" onclick="saveTrip()" title="Save">Save</button>'
+      + '<button class="file-btn" onclick="showAskMaxModal()" title="Chat with an AI about this trip">&#128172; Ask</button>'
+      + '<button class="file-btn" onclick="openTripSearch()" title="Search this trip">&#x1F50D;</button>';
   }
+  _pickerActionBtns += '<button class="file-btn" onclick="showApiKeyForm()" title="Set API key" style="opacity:0.6;">&#x1F511;</button>';
+  var _pickerChromeRow = ''
+    + '<div class="lp-hdr-unified">'
+    +   '<div class="trip-name-block">'
+    +     '<span style="font-size:13px;font-weight:600;color:#222;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'
+    +       _tripLabel
+    +     '</span>'
+    +   '</div>'
+    +   '<div class="mode-pills">'
+    +     '<div class="mode-toggle">'
+    +       '<button class="mode-btn on" type="button" onclick="setLeftMode(\'picker\')">Picker</button>'
+    +       '<button class="mode-btn" type="button" onclick="setLeftMode(\'trip\')"' + _disPills + '>Trip</button>'
+    +       '<button class="mode-btn" type="button" onclick="setLeftMode(\'dest\')"' + _disPills + '>Destination</button>'
+    +     '</div>'
+    +   '</div>'
+    +   '<div class="action-buttons">'
+    +     _pickerActionBtns
+    +   '</div>'
+    + '</div>';
 
-  // Outer structure: header + 2-column body + footer
+  // Outer structure: unified header + page title + 2-column body + footer.
+  // v359.2: the .tb-logo block ("M Max — Editing your trip") was dropped —
+  // the active "Picker" mode pill above already says what surface we're on,
+  // and the trip name lives in the unified header. The .tb-title page
+  // heading ("Edit your picks" / "What to see and do in …") stays — it's
+  // the page title and useful context.
   ov.innerHTML = ''
     + _pickerChromeRow
     +'<div class="tb-header" style="flex-shrink:0;">'
-    +  '<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div>'+(stepLabel?'<div class="tb-step">'+stepLabel+'</div>':'')+'</div></div>'
     +  '<div class="tb-title">'+titleLabel+'</div>'
     +'</div>'
     +'<div class="picker-2col" id="picker-2col" style="flex:1;display:flex;min-height:0;overflow:hidden;">'
