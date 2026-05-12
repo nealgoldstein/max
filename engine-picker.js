@@ -1202,6 +1202,14 @@
       startDate: s.startDate || '',
       endDate: s.endDate || '',
       days: (typeof s.days === 'number' ? s.days : null),
+      // v358.3: include entry/tbExit/buffers in the brief so a rebuild
+      // (trip.brief = newBrief at publishTrip line ~1352) preserves
+      // the user's arrival/departure choices. Without these the
+      // trip-view's "Apply" path silently wiped the typed values.
+      entry: s.entry || '',
+      tbExit: s.tbExit || '',
+      entryBuffer: (s.entryBuffer === false) ? false : true,
+      exitBuffer: (s.exitBuffer === false) ? false : true,
       entryMode: s.entryMode || '',
       exitMode: s.exitMode || '',
       partyComposition: s.partyComposition || '',
@@ -1300,6 +1308,14 @@
     // first kept in geographic order becomes the implicit arrival, last
     // becomes the implicit departure. The user's typed entry/exit on
     // the Trip Details strip survives if it matches a kept candidate.
+    // v358.3: preserve the user's typed entry/exit on a separate
+    // _tb._typedEntry / _tb._typedExit BEFORE the validator may clear
+    // _tb.entry / _tb.tbExit, then restore at end of publishTrip
+    // (after buildBrief runs). The "fall back to geographic inference"
+    // behavior of orderKeptCandidates depends on _tb.entry being ""
+    // when it doesn't match a kept candidate — keeping that semantic.
+    if (_tb.entry) _tb._typedEntry = _tb.entry; else _tb._typedEntry = "";
+    if (_tb.tbExit) _tb._typedExit = _tb.tbExit; else _tb._typedExit = "";
     if (_tb.entry) {
       var entryMatchesKept = kept.some(function(c){
         var cN = _normPlaceName(c.place||"");
@@ -1377,6 +1393,33 @@
     var orderResult = orderKeptCandidates(kept, _mdcItems||[], _tb.entry||"", _tb.tbExit||"");
     var ordered = orderResult.ordered;
     trip.orderingReasoning = orderResult.reasoning;
+
+    // v358.3: now that orderKeptCandidates has run with the validated
+    // (possibly-cleared) entry/exit — letting it fall back to
+    // geographic inference when the user typed something not in the
+    // kept set — restore the typed value on _tb AND on newBrief so the
+    // typed value flows through the rest of publishTrip:
+    //   * the "prepend arrival stop" pass below sees it (line ~1422)
+    //   * trip.brief gets it via the OR fallback at line ~2178
+    //   * the trip-view's editable arrival/departure form re-renders
+    //     with the typed value preserved
+    // Without this restore the user's "I'm flying into Keflavík" gets
+    // wiped because Keflavík isn't itself a kept overnight stop.
+    if (_tb._typedEntry) {
+      _tb.entry = _tb._typedEntry;
+      newBrief.entry = _tb._typedEntry;
+    }
+    if (_tb._typedExit) {
+      _tb.tbExit = _tb._typedExit;
+      newBrief.tbExit = _tb._typedExit;
+    }
+    // Also patch trip.brief if we're in a rebuild and it already
+    // points at the new brief object (publishTrip's else-branch at
+    // ~1361 may not have run yet, so guard).
+    if (trip && trip.brief === newBrief) {
+      if (_tb._typedEntry) trip.brief.entry = _tb._typedEntry;
+      if (_tb._typedExit) trip.brief.tbExit = _tb._typedExit;
+    }
     // Round FG: trip.reorderNotice stash removed. See comment in
     // drawTripMode where the banner used to render — short version:
     // the picker doesn't define an order, so there's no user

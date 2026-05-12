@@ -1451,17 +1451,61 @@
     var missing = !curEntry || !curExit;
     aeRow.style.cssText = "margin:0 2px 12px;padding:11px 14px;background:" + (missing ? "#fff8ee" : "#fafafa") + ";border:1px solid " + (missing ? "#f0d9aa" : "#e6e2d8") + ";border-radius:8px;";
     var renderLogisticsColFn = (typeof global._renderLogisticsCol === "function") ? global._renderLogisticsCol : function () { return ''; };
+    // v358.3: build a datalist of cities / airports / rail stations /
+    // ports / bus terminals for the current region so the entry/exit
+    // inputs autocomplete as the user types. Sources: trip.destinations
+    // (the actual stops on this trip — most likely matches) +
+    // global._epCache[region] (LLM-fetched entry points like KEF /
+    // Zurich HB / Dover). Falls back to an empty datalist if entry
+    // points haven't been fetched yet, then kicks off the fetch and
+    // re-renders when they land.
+    var _region = (trip && trip.brief && trip.brief.region) || "";
+    var _epCacheLocal = (typeof global._epCache !== "undefined") ? global._epCache : {};
+    // v358.3.1: gate the cold-cache fetch on KEY PRESENCE in the
+    // cache (not on emptiness of the value). fetchRegionEntryPoints
+    // sets _epCache[region] = [] on failure / no-results — checking
+    // ".length" alone caused an infinite render loop in regions
+    // with no entry points: render → fetch returns [] → .then fires
+    // drawTripMode → render checks empty array → fetches again.
+    var _hasFetched = _region && _epCacheLocal && (_region in _epCacheLocal);
+    var _epLoadingLocal = (typeof global._epLoading !== "undefined") ? global._epLoading : {};
+    var _epPts = (_hasFetched && _epCacheLocal[_region]) || [];
+    var _datalistOpts = [];
+    var _seenOpts = {};
+    function _addOpt(label, hint){
+      if (!label) return;
+      var k = String(label).toLowerCase();
+      if (_seenOpts[k]) return;
+      _seenOpts[k] = true;
+      _datalistOpts.push('<option value="' + esc(label) + '"' + (hint ? ' label="' + esc(hint) + '"' : '') + '>');
+    }
+    (trip.destinations || []).forEach(function(d){ _addOpt(d.place, "destination on this trip"); });
+    _epPts.forEach(function(p){
+      var typeLbl = ({air:"airport", rail:"rail", sea:"port", bus:"bus"})[p.type] || "";
+      _addOpt(p.name, typeLbl);
+    });
+    var _datalistHtml = '<datalist id="tm-arrdep-suggestions">' + _datalistOpts.join('') + '</datalist>';
+    // Cold-cache fetch: only fire if we haven't fetched for this
+    // region yet (key-presence check above) AND no in-flight fetch
+    // is already running. This makes the fetch one-shot per region.
+    if (_region && !_hasFetched && !_epLoadingLocal[_region]
+        && typeof global.fetchRegionEntryPoints === "function") {
+      global.fetchRegionEntryPoints(_region).then(function(){
+        if (typeof global.drawTripMode === "function") global.drawTripMode();
+      });
+    }
     aeRow.innerHTML = ''
       + (missing
           ? '<div style="font-size:11px;font-weight:700;color:#a06010;margin-bottom:8px;">⚠ Set arrival and departure to lock in the calendar</div>'
           : '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:8px;">Arrival / Departure</div>'
         )
+      + _datalistHtml
       + '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">'
       +   '<label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px;">Arriving at'
-      +     '<input id="tm-entry-inp" placeholder="e.g. Zurich" autocomplete="off" value="' + esc(curEntry) + '" style="font-size:12px;padding:5px 9px;border:1px solid #ccc;border-radius:4px;width:140px;font-family:inherit;" />'
+      +     '<input id="tm-entry-inp" placeholder="e.g. Zurich" list="tm-arrdep-suggestions" autocomplete="off" value="' + esc(curEntry) + '" style="font-size:12px;padding:5px 9px;border:1px solid #ccc;border-radius:4px;width:160px;font-family:inherit;" />'
       +   '</label>'
       +   '<label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px;">Departing from'
-      +     '<input id="tm-exit-inp" placeholder="e.g. Zurich" autocomplete="off" value="' + esc(curExit) + '" style="font-size:12px;padding:5px 9px;border:1px solid #ccc;border-radius:4px;width:140px;font-family:inherit;" />'
+      +     '<input id="tm-exit-inp" placeholder="e.g. Zurich" list="tm-arrdep-suggestions" autocomplete="off" value="' + esc(curExit) + '" style="font-size:12px;padding:5px 9px;border:1px solid #ccc;border-radius:4px;width:160px;font-family:inherit;" />'
       +   '</label>'
       +   '<button id="tm-arrdep-apply" style="font-size:11px;font-weight:600;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:4px;padding:5px 12px;cursor:pointer;font-family:inherit;">Apply</button>'
       +   '<span id="tm-arrdep-status" style="font-size:10px;color:#888;"></span>'
