@@ -9095,13 +9095,13 @@ function _renderPlaceActivityItems(){
   // nights becomes a day trip from that hub. Compute once per render
   // and stash on _tb._dayTripPreds so the row-render code can label.
   var _dayTripPreds = (function _computeDayTripPreds(){
-    var places = {}; // key -> { place, lat, lng, nights, kept }
+    var places = {}; // key -> { place, lat, lng, nights, kept, userChoseStay }
     items.forEach(function(it){
       var rps = Array.isArray(it.requiredPlaces) ? it.requiredPlaces : [];
       rps.forEach(function(p){
         if (!p || !p.place) return;
         var key = p.place.toLowerCase();
-        if (!places[key]) places[key] = { place: p.place, lat: null, lng: null, nights: 0, kept: false };
+        if (!places[key]) places[key] = { place: p.place, lat: null, lng: null, nights: 0, kept: false, userChoseStay: false };
         if (typeof p.lat === "number" && typeof p.lng === "number") {
           places[key].lat = p.lat; places[key].lng = p.lng;
         }
@@ -9109,6 +9109,10 @@ function _renderPlaceActivityItems(){
         var n = (typeof p.nights === "number") ? p.nights : 0;
         if (it.type !== "route" && n > places[key].nights) places[key].nights = n;
         if (p._keep) places[key].kept = true;
+        // v359.5.4: respect the user's explicit "stay the night"
+        // choice from _pmMakeStay — don't re-predict day-trip status
+        // for places the user already committed to as stays.
+        if (p._userChoseStay) places[key].userChoseStay = true;
       });
     });
     // Distance (km) — equirectangular approximation, fine at this scale.
@@ -9124,6 +9128,8 @@ function _renderPlaceActivityItems(){
       if (!src.kept) return;
       if (src.nights > 2) return;
       if (!isFinite(src.lat)) return;
+      // v359.5.4: user-chose-stay is sticky. Skip the prediction.
+      if (src.userChoseStay) return;
       var bestHub = null;
       var bestDist = Infinity;
       Object.keys(places).forEach(function(hubKey){
@@ -9558,17 +9564,40 @@ function _renderPlaceActivityItems(){
         nightsLine = '<span class="tb-dest-nights" data-place="'+_pmEsc(d.place)+'" style="color:#c97a1a;font-style:italic;">· day trip from '+_pmEsc(userHubName || "?")+'</span>'
           + '<button type="button" class="tb-stay-night-btn" onclick="_pmClearDayTripFlag(&#39;'+_pmEsc(d.place)+'&#39;);event.stopPropagation();" title="Stay overnight here instead" style="margin-left:8px;font-size:10.5px;font-weight:600;color:#1a5fa8;background:#eef5ff;border:1px solid #cfe1f7;padding:2px 8px;border-radius:11px;cursor:pointer;font-family:inherit;line-height:1.4;">+ stay the night</button>';
       } else if (firstAppearance && dayTripHub) {
+        // v359.5.4: route the "+ stay the night" button through
+        // _pmMakeStay (defined below) instead of _adjustDestNights.
+        // _adjustDestNights just adds 1 night, which doesn't suppress
+        // the day-trip predictor on the next render (it just fires
+        // again if nights stays ≤ 2 + nearby hub still has more).
+        // _pmMakeStay sets nights to max(1, current) AND clears any
+        // day-trip flags AND sets a sticky "user chose stay" mark
+        // that the predictor respects — so the user's choice
+        // actually locks in.
         nightsLine = '<span class="tb-dest-nights" data-place="'+_pmEsc(d.place)+'" style="color:#5b3f8f;font-style:italic;">· day trip from '+_pmEsc(dayTripHub)+'</span>'
-          + '<button type="button" class="tb-stay-night-btn" onclick="_adjustDestNights(&#39;'+_pmEsc(d.place)+'&#39;,1);event.stopPropagation();" title="Make this an overnight stop instead" style="margin-left:8px;font-size:10.5px;font-weight:600;color:#1a5fa8;background:#eef5ff;border:1px solid #cfe1f7;padding:2px 8px;border-radius:11px;cursor:pointer;font-family:inherit;line-height:1.4;">+ stay the night</button>';
+          + '<button type="button" class="tb-stay-night-btn" onclick="_pmMakeStay(&#39;'+_pmEsc(d.place)+'&#39;);event.stopPropagation();" title="Make this an overnight stop instead" style="margin-left:8px;font-size:10.5px;font-weight:600;color:#1a5fa8;background:#eef5ff;border:1px solid #cfe1f7;padding:2px 8px;border-radius:11px;cursor:pointer;font-family:inherit;line-height:1.4;">+ stay the night</button>'
+          + '<button type="button" class="tb-lock-daytrip-btn" '
+          +   'onclick="(typeof _pmOpenPlacePopupByKey===&#39;function&#39;)&amp;&amp;_pmOpenPlacePopupByKey(&#39;'+_pmEsc((d.place||"").toLowerCase())+'&#39;);event.stopPropagation();" '
+          +   'title="Lock this in as a day trip — pick the hub to attach to" '
+          +   'style="margin-left:6px;font-size:10.5px;font-weight:600;color:#c97a1a;background:#fff7eb;border:1px solid #e8d0a8;padding:2px 8px;border-radius:11px;cursor:pointer;font-family:inherit;line-height:1.4;">✓ lock in day trip</button>';
       } else if (firstAppearance && isTransitDestForNights && !destKeptInSection) {
         nightsLine = '<span class="tb-dest-nights" data-place="'+_pmEsc(d.place)+'" style="color:#888;font-style:italic;">· day trip</span>'
           + '<button type="button" class="tb-stay-night-btn" onclick="_adjustDestNights(&#39;'+_pmEsc(d.place)+'&#39;,1);event.stopPropagation();" title="Stay overnight here instead" style="margin-left:8px;font-size:10.5px;font-weight:600;color:#1a5fa8;background:#eef5ff;border:1px solid #cfe1f7;padding:2px 8px;border-radius:11px;cursor:pointer;font-family:inherit;line-height:1.4;">+ stay the night</button>';
       } else if (firstAppearance && d.nightsMax > 0) {
+        // v359.5.4: stays now get a "↩ make day trip" pill alongside
+        // the nights stepper. Was: the only way to convert a stay to
+        // a day trip was via the map pin popup, which Neal couldn't
+        // find. The pill routes to the same popup (so the user picks
+        // the hub from kept-stay candidates) — but the entry point is
+        // now visible in the sidebar where it belongs.
         nightsLine = '<span class="tb-dest-nights" data-place="'+_pmEsc(d.place)+'">· '+d.nightsMax+'n</span>'
           + '<span class="tb-nights-stepper" onclick="event.stopPropagation()">'
           +   '<button type="button" class="tb-nights-btn" title="Fewer nights" onclick="_adjustDestNights(&#39;'+_pmEsc(d.place)+'&#39;,-1);event.stopPropagation();">−</button>'
           +   '<button type="button" class="tb-nights-btn" title="More nights" onclick="_adjustDestNights(&#39;'+_pmEsc(d.place)+'&#39;,1);event.stopPropagation();">+</button>'
-          + '</span>';
+          + '</span>'
+          + '<button type="button" class="tb-make-daytrip-btn" '
+          +   'onclick="(typeof _pmOpenPlacePopupByKey===&#39;function&#39;)&amp;&amp;_pmOpenPlacePopupByKey(&#39;'+_pmEsc((d.place||"").toLowerCase())+'&#39;);event.stopPropagation();" '
+          +   'title="Make this a day trip from a nearby stay instead" '
+          +   'style="margin-left:8px;font-size:10.5px;font-weight:600;color:#c97a1a;background:#fff7eb;border:1px solid #e8d0a8;padding:2px 8px;border-radius:11px;cursor:pointer;font-family:inherit;line-height:1.4;">↩ make day trip</button>';
       } else if (!firstAppearance) {
         nightsLine = '<span class="tb-dest-ref-note" title="Nights set in '+_pmEsc(shownIn[key])+'">also in ' + _pmEsc(shownIn[key]) + '</span>';
       } else {
@@ -9929,6 +9958,38 @@ function _pmClearDayTripFlag(placeName){
   var canon = String(placeName || "").toLowerCase();
   _pmSetPlaceDayTrip(canon, false, "");
 }
+
+// v359.5.4: commit a place as a stay. Used by the "+ stay the night"
+// button on PREDICTED day-trips, where just bumping nights doesn't
+// suppress the next prediction cycle (predictor fires again on the
+// re-rendered ≤2-night row). This:
+//   1. Sets nights to max(1, current) — without this, a 0-night
+//      predicted day-trip would still be 0 after the click, which
+//      doesn't read as "stay" to the rest of the pipeline.
+//   2. Clears _isDayTrip / _dayTripHub on every requiredPlace ref.
+//   3. Marks p._userChoseStay:true so a future predictor pass can
+//      respect the user's choice and not re-flag this place as a
+//      day-trip from the same hub.
+//   4. Re-renders maps + sidebar.
+function _pmMakeStay(placeName){
+  if (!_tb || !Array.isArray(_tb.placeActivities)) return;
+  var canon = String(placeName || "").toLowerCase();
+  _tb.placeActivities.forEach(function(item){
+    if (!item || !Array.isArray(item.requiredPlaces)) return;
+    item.requiredPlaces.forEach(function(p){
+      if (!p || !p.place) return;
+      if (p.place.toLowerCase() !== canon) return;
+      p._isDayTrip = false;
+      p._dayTripHub = "";
+      p._keep = true;
+      p._userChoseStay = true;
+      if (typeof p.nights !== "number" || p.nights < 1) p.nights = 1;
+    });
+  });
+  if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
+  if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
+}
+window._pmMakeStay = _pmMakeStay;
 
 // v355.8: callable from the popout window. Looks up the parent's
 // marker for the given place key on the inline picker map and invokes
@@ -11033,6 +11094,24 @@ function _renderPlacePickerMap(targetId){
         if (p._dayTripHub && !allPlaces[key]._dayTripHub) allPlaces[key]._dayTripHub = p._dayTripHub;
       }
     });
+  });
+  // v359.5.4: fold the day-trip PREDICTOR into the map dataset. The
+  // sidebar already shows "· day trip from {hub}" for predicted day
+  // trips (purple text, _tb._dayTripPreds), but the map only honored
+  // explicit user-flagged day trips — predicted ones rendered as
+  // blue stays with no spur line. Neal's report: "if it is [a day
+  // trip], it needs to be flagged as one and appear that way on the
+  // map with a line for the city it is a day trip from." Treat
+  // predicted == user-flagged for map purposes; the user can still
+  // override either way via the pin popup. User flag wins if both
+  // exist for the same place.
+  var _preds = (_tb && _tb._dayTripPreds) || {};
+  Object.keys(_preds).forEach(function(srcKey){
+    var hubName = _preds[srcKey];
+    if (!allPlaces[srcKey]) return; // predictor saw a place that's no longer in the activity items
+    if (allPlaces[srcKey]._isDayTrip) return; // explicit user flag already set; don't overwrite
+    allPlaces[srcKey]._isDayTrip = true;
+    if (!allPlaces[srcKey]._dayTripHub && hubName) allPlaces[srcKey]._dayTripHub = hubName.toLowerCase();
   });
 
   // Tear down markers for places no longer in the dataset
