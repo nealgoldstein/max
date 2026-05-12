@@ -1547,8 +1547,17 @@
       if (exitInp) exitInp.addEventListener("input", function () { exitTouched = true; });
 
       async function applyArrDep() {
+        // v359.5.5: more verbose console logging + ensure trip.brief
+        // exists before mutating. Neal's report: "On the trip view
+        // changing the arrival does not work." Trip.brief was assumed
+        // to exist; on older trips or after certain rebuild paths it
+        // can be null/undefined, which silently dropped the brief
+        // update (publishTrip's _typedEntry restore relied on the new
+        // value already being in trip.brief).
+        var DBG = "[Max arr/dep]";
         var tb2 = global._tb || (global._tb = {});
         if (tb2._applyInFlight) {
+          console.log(DBG, "skipped — already in flight");
           if (statusEl) { statusEl.style.color = "#888"; statusEl.textContent = "Already rebuilding…"; }
           return;
         }
@@ -1557,6 +1566,7 @@
         var newBuffer = !!(bufferInp && bufferInp.checked);
         if (entryInp) entryInp.value = newEntry;
         if (exitInp)  exitInp.value  = newExit;
+        console.log(DBG, "Apply", { newEntry: newEntry, newExit: newExit, curEntry: curEntry, curExit: curExit });
         var changed = (newEntry !== curEntry) || (newExit !== curExit) || (newBuffer !== curBuffer);
         if (!changed) {
           if (statusEl) { statusEl.style.color = "#888"; statusEl.textContent = "No change."; }
@@ -1566,7 +1576,16 @@
         tb2.entry  = newEntry;
         tb2.tbExit = newExit;
         tb2.exitBuffer = newBuffer;
-        if (trip.brief) { trip.brief.entry = newEntry; trip.brief.tbExit = newExit; trip.brief.exitBuffer = newBuffer; }
+        // v359.5.5: initialize trip.brief if it's missing so the
+        // brief-level entry/tbExit also get the new value. Without
+        // this, publishTrip's restore step (which copies
+        // _tb._typedEntry → trip.brief.entry) was the only place
+        // trip.brief got touched — and if trip.brief itself was
+        // missing on entry, the restore was a silent no-op.
+        if (!trip.brief) trip.brief = {};
+        trip.brief.entry = newEntry;
+        trip.brief.tbExit = newExit;
+        trip.brief.exitBuffer = newBuffer;
         if (statusEl) { statusEl.style.color = "#888"; statusEl.textContent = "Rebuilding…"; }
         if (trip.candidates && trip.candidates.length) {
           tb2.candidates = trip.candidates.map(function (c) { return Object.assign({}, c); });
@@ -1600,11 +1619,22 @@
         }
         tb2._isRebuild = true;
         try {
+          console.log(DBG, "buildFromCandidates: starting", { entry: tb2.entry, exit: tb2.tbExit, candidateCount: (tb2.candidates||[]).length });
           if (typeof global.buildFromCandidates === "function") await global.buildFromCandidates();
+          console.log(DBG, "buildFromCandidates: done; rendering trip view");
           if (typeof global.drawTripMode === "function") global.drawTripMode();
+          // v359.5.5: visible success status. Without this the user
+          // had no confirmation the rebuild ran — just the trip view
+          // redrew silently. If the typed entry didn't change the
+          // visible destinations (because it doesn't match a kept
+          // candidate), the silent redraw read as "nothing happened."
+          if (statusEl) {
+            statusEl.style.color = "#3a7a4a";
+            statusEl.textContent = "✓ Trip rebuilt — arrival is now " + (newEntry || "unset") + (newExit ? ", departure " + newExit : "");
+          }
         } catch (e) {
           console.error("[Max] applyArrDep buildFromCandidates failed:", e);
-          if (statusEl) { statusEl.style.color = "#c44"; statusEl.textContent = "Couldn’t rebuild: " + (e && e.message ? e.message : "unknown error"); }
+          if (statusEl) { statusEl.style.color = "#c44"; statusEl.textContent = "Couldn't rebuild: " + (e && e.message ? e.message : "unknown error"); }
         } finally {
           tb2._applyInFlight = false;
         }

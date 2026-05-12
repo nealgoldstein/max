@@ -1098,42 +1098,41 @@
         }
         return null;
       })();
-      // Round DO: detect round-trip vs linear. If entry and exit are
-      // essentially the same place (within ~30km), use angular sort
-      // around the trip centroid — that produces a clean counter-
-      // clockwise loop instead of nearest-neighbor zigzags. Linear
-      // trips (entry far from exit) keep NN, which is better at
-      // point-to-point sequencing.
-      var reordered = [];
+      // Round DO + v359.5.6: pick the better of TWO orderings:
+      //   • Nearest-neighbor walk from entry's last coord (good at
+      //     point-to-point sequencing along a line)
+      //   • Angular sort around the trip centroid (good at perimeter
+      //     sweeps — ring roads, coastline loops, Wild Atlantic Way,
+      //     South Island NZ, Sri Lanka coastal circles, etc.)
+      // Compute the total path length under each and use whichever is
+      // shorter. This generalizes the v359.5.6 ring-road heuristic
+      // (which was keyword-driven and only caught explicit "ring road"
+      // mentions) into a domain-free rule: angular sort wins on
+      // perimeter-shaped trips, NN wins on linear ones, no country
+      // list or vocabulary mapping required.
+      // Round-trip detection (entry within ~30km of exit) is still
+      // useful as a hint for the reasoning blurb, but the path-choice
+      // logic doesn't depend on it.
       var isRoundTrip = lastEntryCoord && firstExitCoord
         && Math.sqrt(distSq(lastEntryCoord, firstExitCoord)) < (30/111); // ~30km in degrees
-      if (isRoundTrip) {
-        // Compute centroid across entry + middle + exit so the angle is
-        // measured from a stable center (not biased by entry position).
-        var allCoords = [lastEntryCoord];
-        middle.forEach(function(s){ if (s.coord) allCoords.push(s.coord); });
-        if (firstExitCoord) allCoords.push(firstExitCoord);
-        var cLat = 0, cLng = 0;
-        allCoords.forEach(function(c){ cLat += c[0]; cLng += c[1]; });
-        cLat /= allCoords.length;
-        cLng /= allCoords.length;
-        // Entry's angle from centroid — the sweep starts from there.
-        var entryAngle = Math.atan2(lastEntryCoord[0] - cLat, lastEntryCoord[1] - cLng);
-        // Sort middle by angle, normalized so the sweep starts just past
-        // the entry and proceeds counter-clockwise back to it.
-        middle.forEach(function(s){
-          if (!s.coord) { s.angle = Infinity; return; }
-          var a = Math.atan2(s.coord[0] - cLat, s.coord[1] - cLng);
-          // Normalize so the sweep starts just past entry
-          var rel = a - entryAngle;
-          while (rel < 0) rel += 2 * Math.PI;
-          s.angle = rel;
+
+      function _totalPathLen(seqList, startCoord, endCoord){
+        if (!seqList.length) return 0;
+        var total = 0;
+        var cur = startCoord;
+        seqList.forEach(function(s){
+          if (s.coord && cur) total += Math.sqrt(distSq(cur, s.coord));
+          if (s.coord) cur = s.coord;
         });
-        reordered = middle.slice().sort(function(a, b){ return a.angle - b.angle; });
-      } else {
-        // Linear trip: nearest-neighbor from entry's last coord.
+        if (cur && endCoord) total += Math.sqrt(distSq(cur, endCoord));
+        return total;
+      }
+
+      // ── Candidate ordering A: nearest-neighbor from entry ────────
+      var nnOrder = (function _nnSort(){
         var pool = middle.slice();
         var current = lastEntryCoord;
+        var out = [];
         while (pool.length) {
           var bestIdx = 0;
           var bestDist = Infinity;
@@ -1149,9 +1148,60 @@
             if (d < bestDist) { bestDist = d; bestIdx = i; }
           }
           var picked = pool.splice(bestIdx, 1)[0];
-          reordered.push(picked);
+          out.push(picked);
           if (picked.coord) current = picked.coord;
         }
+        return out;
+      })();
+
+      // ── Candidate ordering B: angular sweep around centroid ─────
+      var angOrder = (function _angSort(){
+        // Centroid across entry + middle + exit so the angle is measured
+        // from a stable center (not biased by entry position).
+        var allCoords = [lastEntryCoord];
+        middle.forEach(function(s){ if (s.coord) allCoords.push(s.coord); });
+        if (firstExitCoord) allCoords.push(firstExitCoord);
+        if (!allCoords.length) return middle.slice();
+        var cLat = 0, cLng = 0;
+        allCoords.forEach(function(c){ cLat += c[0]; cLng += c[1]; });
+        cLat /= allCoords.length;
+        cLng /= allCoords.length;
+        // Entry's angle from centroid — the sweep starts from there.
+        var entryAngle = Math.atan2(lastEntryCoord[0] - cLat, lastEntryCoord[1] - cLng);
+        // Try both directions (CCW and CW) and use whichever ends
+        // closer to the exit. Without this, the sweep is locked to one
+        // direction and may leave the exit on the wrong side of the
+        // loop.
+        var middleWithAngle = middle.map(function(s){
+          if (!s.coord) return { seq: s, angle: Infinity };
+          var a = Math.atan2(s.coord[0] - cLat, s.coord[1] - cLng);
+          var rel = a - entryAngle;
+          while (rel < 0) rel += 2 * Math.PI;
+          return { seq: s, angle: rel };
+        });
+        var ccw = middleWithAngle.slice().sort(function(a,b){ return a.angle - b.angle; });
+        var cw  = middleWithAngle.slice().sort(function(a,b){ return b.angle - a.angle; });
+        function pathFromOrdering(arr){ return arr.map(function(x){ return x.seq; }); }
+        var ccwSeq = pathFromOrdering(ccw);
+        var cwSeq  = pathFromOrdering(cw);
+        var ccwLen = _totalPathLen(ccwSeq, lastEntryCoord, firstExitCoord);
+        var cwLen  = _totalPathLen(cwSeq,  lastEntryCoord, firstExitCoord);
+        return (cwLen < ccwLen) ? cwSeq : ccwSeq;
+      })();
+
+      // Pick whichever is shorter overall.
+      var nnLen  = _totalPathLen(nnOrder,  lastEntryCoord, firstExitCoord);
+      var angLen = _totalPathLen(angOrder, lastEntryCoord, firstExitCoord);
+      var reordered;
+      if (angLen < nnLen) {
+        reordered = angOrder;
+        if (isRoundTrip) {
+          reasoning.push("Entry and exit are the same area, so I swept the destinations around the perimeter — shorter than visiting them in arrival order.");
+        } else {
+          reasoning.push("Ordered the destinations around the perimeter rather than point-to-point — total drive is shorter that way (" + Math.round(angLen * 111) + "km vs " + Math.round(nnLen * 111) + "km).");
+        }
+      } else {
+        reordered = nnOrder;
       }
       // Reassemble
       var out = [];

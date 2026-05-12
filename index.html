@@ -9892,11 +9892,42 @@ function _pmEsc(s){
 // has been removed. The standalone window is a separate browser window —
 // notify it via a "refresh" function we attach when we open it.
 function _refreshAllPlacePickerMaps(){
-  if (document.getElementById("tb-pm-map") && typeof _renderPlacePickerMap === "function") {
+  // v359.5.5: iterate EVERY registered picker map, not just the
+  // default `tb-pm-map`. Neal's report: "When I return to picker
+  // from trip and try to make a day trip a destination on the map,
+  // the dialog shows but does not work on the map, although the
+  // list does update." The previous implementation only refreshed
+  // the inline map by id; any other map instance (modal overlay,
+  // alternate targetId) stayed stale because they were never told
+  // to re-render. Drop dead targets along the way so we don't pile
+  // up orphan state references.
+  if (typeof _pmMaps === "object" && _pmMaps) {
+    Object.keys(_pmMaps).forEach(function(targetId){
+      var div = document.getElementById(targetId);
+      if (!div) {
+        // DOM gone — drop the stale state record.
+        try {
+          var dead = _pmMaps[targetId];
+          if (dead && dead.map && dead.map.remove) dead.map.remove();
+        } catch(_){}
+        delete _pmMaps[targetId];
+        return;
+      }
+      if (typeof _renderPlacePickerMap === "function") {
+        _renderPlacePickerMap(targetId);
+      }
+    });
+  }
+  // Belt-and-suspenders: if no _pmMaps entry exists for the inline
+  // target but the div is present (first render path), kick it off
+  // explicitly.
+  if (document.getElementById("tb-pm-map") && (!_pmMaps || !_pmMaps["tb-pm-map"])
+      && typeof _renderPlacePickerMap === "function") {
     _renderPlacePickerMap("tb-pm-map");
   }
-  // Notify the standalone window if it's still open. The window polls
-  // anyway, but pushing on every toggle keeps it instant.
+  // Notify the standalone popout window if it's still open. The
+  // window polls anyway, but pushing on every toggle keeps it
+  // instant.
   if (window._tbPmMapWindow && !window._tbPmMapWindow.closed) {
     try {
       if (typeof window._tbPmMapWindow.maxRefresh === "function") {
@@ -10780,8 +10811,18 @@ function openTripHeroMapWindow(){
   // instead of window.open. Same reasoning as the picker map: iOS
   // Safari blocks popups silently or opens them in a way the user
   // can't return from.
+  // v359.5.6 (corrected): put the PWA-standalone detection back.
+  // Distribution will be PWA, and window.open inside a PWA either
+  // opens nothing visible or pops a new app instance. matchMedia
+  // only matches when actually launched standalone — it does NOT
+  // leak in a regular Chrome tab even if the app was previously
+  // installed (my earlier worry was wrong). The Blob URL approach
+  // below fixes the regular-Chrome bug; this PWA path serves the
+  // distribution case.
   try {
-    if (window.innerWidth && window.innerWidth <= 700) {
+    var isStandalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+                       || window.navigator.standalone === true;
+    if ((window.innerWidth && window.innerWidth <= 700) || isStandalone) {
       _openTripHeroMapOverlay();
       return;
     }
@@ -10798,7 +10839,10 @@ function openTripHeroMapWindow(){
     "width=1200,height=820,resizable=yes,scrollbars=no,menubar=no,toolbar=no,location=no,status=no"
   );
   if (!w) {
-    alert("Please allow pop-ups for this site so the map window can open.");
+    // v359.5.5: instead of alerting and bailing (which leaves the
+    // user stuck), fall through to the in-page overlay. Popup blockers
+    // are common; the overlay always works.
+    _openTripHeroMapOverlay();
     return;
   }
   window._tripHeroMapWindow = w;
@@ -10968,9 +11012,40 @@ function openTripHeroMapWindow(){
     +   '});'
     + '})();<\/script>'
     + '</body></html>';
-  w.document.open();
-  w.document.write(html);
-  w.document.close();
+  // v359.5.6: use a Blob URL instead of document.write. Neal's
+  // report: "Opening a new large window for the map on the trip view
+  // does not work" in desktop Chrome (not PWA). Chrome's window.open
+  // with an empty URL followed by document.write can fall into a
+  // state where the write doesn't render — the popup opens to
+  // about:blank, then document.write swaps content but the page
+  // never executes scripts properly (the timing race between
+  // Leaflet's CDN load and the inline init script is fragile when
+  // triggered via document.write). Navigating the popup to a Blob
+  // URL gives Chrome a real document with the HTML baked in, scripts
+  // run normally, and the popup behaves like any other navigated
+  // window. Falls back to document.write if Blob isn't available,
+  // and falls back to the in-page overlay if both fail.
+  try {
+    var blob = new Blob([html], { type: 'text/html' });
+    var url = URL.createObjectURL(blob);
+    w.location.href = url;
+    // Release the object URL after the new page has had a chance to
+    // load. Don't revoke immediately — Chrome would invalidate the
+    // navigation in flight.
+    setTimeout(function(){ try { URL.revokeObjectURL(url); } catch(_){} }, 30000);
+  } catch (e) {
+    console.warn("[Max] Blob-URL popup failed, falling back to document.write:", e);
+    try {
+      w.document.open();
+      w.document.write(html);
+      w.document.close();
+    } catch (e2) {
+      console.error("[Max] popup document.write also failed; closing and routing to overlay:", e2);
+      try { w.close(); } catch(_){}
+      window._tripHeroMapWindow = null;
+      _openTripHeroMapOverlay();
+    }
+  }
 }
 
 // Round FZ: listen for pin-click messages from the larger map window
