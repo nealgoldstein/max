@@ -1565,6 +1565,33 @@
         if (statusEl) { statusEl.style.color = "#888"; statusEl.textContent = "Rebuilding…"; }
         if (trip.candidates && trip.candidates.length) {
           tb2.candidates = trip.candidates.map(function (c) { return Object.assign({}, c); });
+        } else if (trip.destinations && trip.destinations.length) {
+          // v358.4: synthesize pseudo-candidates from existing
+          // destinations when trip.candidates is empty (which happens
+          // when the trip was built without a candidate-explorer phase
+          // OR after a previous rebuild drained it). Without this,
+          // publishTrip's `kept` filter returns [], orderKeptCandidates
+          // returns ordered=[], and _reconcileDestinations strips every
+          // surviving destination because nothing in the new ordered
+          // list matches them — wiping the user's trip on what should
+          // be a benign "I changed my arrival/departure city" edit.
+          // Same shape as resequenceWithCurrentBrief at index.html
+          // ~13095 (the Parameters-edit path that uses pseudo-candidates
+          // for exactly this reason).
+          tb2.candidates = trip.destinations.map(function (d) {
+            var rf = (d.attachedEvents || []).map(function (e) { return e.name; });
+            return {
+              id: d.id, place: d.place, country: d.country || "",
+              lat: (typeof d.lat === "number") ? d.lat : null,
+              lng: (typeof d.lng === "number") ? d.lng : null,
+              _required: !!(d.attachedEvents && d.attachedEvents.length),
+              _requiredFor: rf,
+              stayRange: (d.nights || 3) + " nights",
+              nights: d.nights || 3,
+              status: "keep",
+              whyItFits: d.intent || ""
+            };
+          });
         }
         tb2._isRebuild = true;
         try {
