@@ -1955,13 +1955,13 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
            third pill flips _leftMode to "picker" and opens the picker
            overlay over the app shell. v359.2: moved into the unified
            header as the center column. -->
-      <div class="mode-pills">
-        <div class="mode-toggle">
-          <button class="mode-btn" id="mode-picker-btn" onclick="setLeftMode('picker')">Picker</button>
-          <button class="mode-btn on" id="mode-trip-btn" onclick="setLeftMode('trip')">Trip</button>
-          <button class="mode-btn" id="mode-dest-btn" onclick="setLeftMode('dest')">Destination</button>
-        </div>
-      </div>
+      <!-- v359.2.3 (per Neal): all mode pills removed. The path
+           between picker and trip is the existing "Choreograph my
+           trip →" CTA at the bottom of the picker. Destination
+           navigation happens via card click on the trip view. The
+           empty .mode-pills div stays so the CSS grid keeps the
+           trip-name on the left and action-buttons on the right. -->
+      <div class="mode-pills"></div>
       <div class="action-buttons">
         <button class="file-btn" onclick="goHome()" title="All trips">&larr; Home</button>
         <button class="file-btn" onclick="editConstraints()" title="Edit trip parameters">&#9998; Parameters</button>
@@ -11573,17 +11573,27 @@ function renderActivityPicker(){
   // (same .lp-hdr-unified class) so layout and styling stay in sync.
   var _hasTrip = !!(trip && trip.id);
   var _tripLabel = _pmEsc(((trip && trip.name) || (_tb && _tb.placeName) || "Trip"));
-  var _disPills = _hasTrip ? '' : ' disabled title="Build the trip first."';
+  // v359.2.1 (per Neal): fresh-build picker (no trip yet) shows Home,
+  // Parameters, Ask, 🔑. Mode pills are HIDDEN entirely (not just
+  // disabled) — there's nothing to switch to before a trip is built,
+  // so showing greyed Trip / Destination pills is confusing rather
+  // than informative. When a trip exists (re-edit flow), all three
+  // pills appear and Save / 🔍 Search join the action set.
   var _pickerActionBtns = ''
     + '<button class="file-btn" onclick="goHome()" title="All trips">&larr; Home</button>'
-    + '<button class="file-btn" onclick="editConstraints()" title="Edit trip parameters">&#9998; Parameters</button>';
+    + '<button class="file-btn" onclick="editConstraints()" title="Edit trip parameters">&#9998; Parameters</button>'
+    + '<button class="file-btn" onclick="showAskMaxModal()" title="Chat with an AI about this trip / region">&#128172; Ask</button>';
   if (_hasTrip) {
     _pickerActionBtns += ''
       + '<button class="file-btn" onclick="saveTrip()" title="Save">Save</button>'
-      + '<button class="file-btn" onclick="showAskMaxModal()" title="Chat with an AI about this trip">&#128172; Ask</button>'
       + '<button class="file-btn" onclick="openTripSearch()" title="Search this trip">&#x1F50D;</button>';
   }
   _pickerActionBtns += '<button class="file-btn" onclick="showApiKeyForm()" title="Set API key" style="opacity:0.6;">&#x1F511;</button>';
+  // v359.2.3: all mode pills removed from picker chrome too. The
+  // "Choreograph my trip →" CTA at the bottom of the picker is the
+  // picker → trip exit. The empty .mode-pills div keeps the CSS
+  // grid layout (trip-name left, action-buttons right).
+  var _pickerModePills = '<div class="mode-pills"></div>';
   var _pickerChromeRow = ''
     + '<div class="lp-hdr-unified">'
     +   '<div class="trip-name-block">'
@@ -11591,13 +11601,7 @@ function renderActivityPicker(){
     +       _tripLabel
     +     '</span>'
     +   '</div>'
-    +   '<div class="mode-pills">'
-    +     '<div class="mode-toggle">'
-    +       '<button class="mode-btn on" type="button" onclick="setLeftMode(\'picker\')">Picker</button>'
-    +       '<button class="mode-btn" type="button" onclick="setLeftMode(\'trip\')"' + _disPills + '>Trip</button>'
-    +       '<button class="mode-btn" type="button" onclick="setLeftMode(\'dest\')"' + _disPills + '>Destination</button>'
-    +     '</div>'
-    +   '</div>'
+    +   _pickerModePills
     +   '<div class="action-buttons">'
     +     _pickerActionBtns
     +   '</div>'
@@ -21531,10 +21535,16 @@ function setLeftMode(mode){
   // (#trip-brief-overlay) layered over the app shell rather than a panel
   // inside #lp; the toggle pill flips _leftMode and shows/hides the
   // overlay. Free-swap: no confirmation, autoSave handles persistence.
+  // v359.2.3: mode pills removed from the markup, so guard all
+  // className updates. Without these guards, setLeftMode throws
+  // "Cannot set className of null" the moment it runs — which
+  // broke the MA.4 Playwright spec because drawDestMode triggers
+  // a setLeftMode path that errors out before the destination
+  // can render.
   var pickerBtn = g("mode-picker-btn");
   if (pickerBtn) pickerBtn.className = "mode-btn" + (mode === "picker" ? " on" : "");
-  g("mode-trip-btn").className="mode-btn"+(mode==="trip"?" on":"");
-  g("mode-dest-btn").className="mode-btn"+(mode==="dest"?" on":"");
+  var _trBtn = g("mode-trip-btn"); if (_trBtn) _trBtn.className = "mode-btn" + (mode === "trip" ? " on" : "");
+  var _deBtn = g("mode-dest-btn"); if (_deBtn) _deBtn.className = "mode-btn" + (mode === "dest" ? " on" : "");
   if (mode === "picker") {
     // Open the picker overlay over the app shell. reopenPickerForEdit
     // hydrates _tb from trip.mdcItems / trip.brief and renders. If the
@@ -25730,8 +25740,9 @@ function drawDestMode(destId){
   if (_dNow) { try { ensureSuggestions(_dNow); } catch(_){} }
   if (_isFreshArrival) window.scrollTo(0, 0);
   document.querySelectorAll('.bk-form').forEach(function(f){if(f.parentNode)f.parentNode.removeChild(f);});
-  g("mode-trip-btn").className="mode-btn";
-  g("mode-dest-btn").className="mode-btn on";
+  // v359.2.3: guarded — mode pills removed from the markup.
+  var _trBtn = g("mode-trip-btn"); if (_trBtn) _trBtn.className = "mode-btn";
+  var _deBtn = g("mode-dest-btn"); if (_deBtn) _deBtn.className = "mode-btn on";
   var sb=document.getElementById('map-style-btn'); if(sb) sb.style.display='block';
   var dest=getDest(destId); if(!dest)return;
   // Reset transient states that shouldn't persist across reloads
