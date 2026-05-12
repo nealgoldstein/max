@@ -10016,6 +10016,89 @@ function openPlacePickerMapModal(){
     +       '}'
     +     '}catch(_){}'
     +   '}'
+          /* v359.1.2: host the day-trip popup directly in the popout
+             window — no more delegate-to-parent / parent-focus dance.
+             Mirrors the parent\'s _pmOpenPlacePopup: stay/day-trip
+             radios, hub <select> sorted by squared lat/lng distance
+             nearest-first (alphabetical fallback), Cancel/Save. On
+             Save we mutate parent state via opener._pmSetPlaceDayTrip;
+             the 600ms poll repaints pin colors. (No leading "+" — see
+             unary-plus note above.) */
+    +   'function openLocalPlacePopup(canon,info,marker){'
+    +     'if(!marker||!map)return;'
+    +     'var state=getState();if(!state)return;'
+    +     'var byKey=state._byKey||{};'
+    +     'var selfRec=byKey[canon];'
+    +     'var selfLat=selfRec?selfRec.lat:null,selfLng=selfRec?selfRec.lng:null;'
+    +     'function distSq(aLat,aLng,bLat,bLng){'
+    +       'if(aLat==null||bLat==null)return Infinity;'
+    +       'var dLat=aLat-bLat,dLng=aLng-bLng;return dLat*dLat+dLng*dLng;'
+    +     '}'
+    +     'var hubs=[];'
+    +     'Object.keys(byKey).forEach(function(k){'
+    +       'if(k===canon)return;'
+    +       'var h=byKey[k];'
+    +       'if(!h.keep||h._isDayTrip)return;'
+    +       'var d=distSq(selfLat,selfLng,h.lat,h.lng);'
+    +       'hubs.push({key:k,place:h.place,dist:d});'
+    +     '});'
+    +     'hubs.sort(function(a,b){if(a.dist!==b.dist)return a.dist-b.dist;return a.place.localeCompare(b.place);});'
+    +     'var noHubs=hubs.length===0;'
+    +     'var currentHub=info._dayTripHub||(hubs[0]?hubs[0].key:"");'
+    +     'var popupId="pm-pop-"+Date.now();'
+    +     'var stayChecked=info._isDayTrip?"":"checked";'
+    +     'var dtChecked=info._isDayTrip?"checked":"";'
+    +     'var dtDisabled=noHubs?"disabled":"";'
+    +     'var dtTitle=noHubs?\'title="Pick a hub stay first — no other kept stays exist yet."\':"";'
+    +     'var hubOptions=hubs.map(function(h){'
+    +       'var sel=(h.key===currentHub)?"selected":"";'
+    +       'return \'<option value="\'+esc(h.key)+\'" \'+sel+\'>\'+esc(h.place)+\'</option>\';'
+    +     '}).join("");'
+    +     'if(noHubs)hubOptions=\'<option value="">(no other kept stays)</option>\';'
+    +     'var html=\'\''
+    +       '+\'<div id="\'+popupId+\'" style="font-family:inherit;font-size:12.5px;min-width:200px;">\''
+    +       '+\'<div style="font-weight:700;margin-bottom:6px;">\'+esc(info.place)+\'</div>\''
+    +       '+\'<label style="display:flex;align-items:center;gap:6px;margin:4px 0;cursor:pointer;">\''
+    +         '+\'<input type="radio" name="pm-mode" value="stay" \'+stayChecked+\' />\''
+    +         '+\'<span>Stay the night</span>\''
+    +       '+\'</label>\''
+    +       '+\'<label style="display:flex;align-items:center;gap:6px;margin:4px 0;\'+(noHubs?\'opacity:0.55;cursor:not-allowed;\':\'cursor:pointer;\')+\'" \'+dtTitle+\'>\''
+    +         '+\'<input type="radio" name="pm-mode" value="daytrip" \'+dtChecked+\' \'+dtDisabled+\' />\''
+    +         '+\'<span>Day trip from</span>\''
+    +         '+\'<select class="pm-hub-sel" \'+dtDisabled+\' style="font-family:inherit;font-size:12px;padding:2px 4px;">\'+hubOptions+\'</select>\''
+    +       '+\'</label>\''
+    +       '+\'<div style="display:flex;justify-content:flex-end;gap:6px;margin-top:8px;">\''
+    +         '+\'<button type="button" class="pm-cancel" style="font-family:inherit;font-size:11.5px;padding:3px 10px;background:#eee;border:1px solid #ccc;border-radius:4px;cursor:pointer;">Cancel</button>\''
+    +         '+\'<button type="button" class="pm-save" style="font-family:inherit;font-size:11.5px;font-weight:600;padding:3px 10px;background:#1a5fa8;color:#fff;border:1px solid #144a86;border-radius:4px;cursor:pointer;">Save</button>\''
+    +       '+\'</div>\''
+    +     '+\'</div>\';'
+    +     'try{marker.unbindPopup();}catch(_){}'
+    +     'var popup=L.popup({maxWidth:280,autoClose:true,closeButton:true}).setLatLng(marker.getLatLng()).setContent(html);'
+    +     'popup.openOn(map);'
+    +     'setTimeout(function(){'
+    +       'var root=document.getElementById(popupId);'
+    +       'if(!root)return;'
+    +       'var save=root.querySelector(".pm-save");'
+    +       'var cancel=root.querySelector(".pm-cancel");'
+    +       'var hubSel=root.querySelector(".pm-hub-sel");'
+    +       'var radios=root.querySelectorAll(\'input[name="pm-mode"]\');'
+    +       'function syncDisabled(){'
+    +         'var v=root.querySelector(\'input[name="pm-mode"]:checked\');'
+    +         'var isDT=v&&v.value==="daytrip";'
+    +         'if(hubSel)hubSel.disabled=!isDT||noHubs;'
+    +       '}'
+    +       'for(var i=0;i<radios.length;i++){radios[i].addEventListener("change",syncDisabled);}'
+    +       'syncDisabled();'
+    +       'if(cancel)cancel.addEventListener("click",function(){map.closePopup(popup);});'
+    +       'if(save)save.addEventListener("click",function(){'
+    +         'var v=root.querySelector(\'input[name="pm-mode"]:checked\');'
+    +         'var mode=v?v.value:"stay";'
+    +         'var hub=(mode==="daytrip"&&hubSel)?hubSel.value:"";'
+    +         'try{var op=window.opener;if(op&&!op.closed&&typeof op._pmSetPlaceDayTrip==="function"){op._pmSetPlaceDayTrip(canon,mode==="daytrip",hub);}}catch(_){}'
+    +         'map.closePopup(popup);'
+    +       '});'
+    +     '},0);'
+    +   '}'
     +   'function renderMap(){'
     +     'if(typeof L==="undefined")return;'
     +     'if(!map){'
@@ -10047,21 +10130,22 @@ function openPlacePickerMapModal(){
     +       '}else{'
     +         'var m=L.marker(ll,{icon:icon}).addTo(map);'
     +         'm.bindTooltip(tooltipText(info),{direction:"top",offset:[0,-10]});'
-          /* v355.8: clicking a pin in the popout opens the day-trip
-             popup on the PARENT window's inline picker map (where the
-             popup logic + state lives) and focuses the parent so the
-             user can see and interact with it. Falls back to the
-             original scroll-to-row behavior if the parent helper
-             isn't available. (No leading "+" — see unary-plus note
-             above.) */
-    +         '(function(name){m.on("click",function(){'
-    +           'try{var op=window.opener;'
-    +             'if(op&&!op.closed&&typeof op._pmOpenPlacePopupByKey==="function"){'
-    +               'if(op._pmOpenPlacePopupByKey(name.toLowerCase(),"tb-pm-map")){try{op.focus();}catch(_){};return;}'
-    +             '}'
+          /* v359.1.2: clicking a pin in the popout opens the day-trip
+             popup LOCALLY in this window via openLocalPlacePopup. On
+             Save we call window.opener._pmSetPlaceDayTrip so the
+             parent's state mutates; the 600ms poll re-renders the
+             pin colors. We no longer focus the parent — the popup is
+             local now. Falls back to scrollOpenerToPlace only if
+             local-popup setup throws. (No leading "+" — see
+             unary-plus note above.) */
+    +         '(function(name,marker){marker.on("click",function(){'
+    +           'try{'
+    +             'var state=getState();'
+    +             'var info=state&&state._byKey&&state._byKey[name.toLowerCase()];'
+    +             'if(info){openLocalPlacePopup(name.toLowerCase(),info,marker);return;}'
     +           '}catch(_){}'
     +           'scrollOpenerToPlace(name);'
-    +         '});})(info.place);'
+    +         '});})(info.place,m);'
     +         'markers[k]=m;'
     +       '}'
     +     '});'
