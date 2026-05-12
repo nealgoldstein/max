@@ -10807,6 +10807,19 @@ function _openTripHeroMapOverlay(){
 }
 
 function openTripHeroMapWindow(){
+  // v359.5.7-debug: noisy console logging so Neal can paste the
+  // browser log if the path still misbehaves. Report (v359.5.6
+  // follow-up): "large map in trip still doesn't open." The function
+  // has three exit paths (PWA → overlay, existing window → focus,
+  // window.open + Blob URL) and any of them can fail silently. Tag
+  // every step so the post-deploy trace is unambiguous.
+  var DBG = "[Max view-larger]";
+  console.log(DBG, "openTripHeroMapWindow invoked", {
+    innerWidth: window.innerWidth,
+    hasMatchMedia: !!window.matchMedia,
+    standaloneNav: window.navigator.standalone,
+    hasExistingWindow: !!(window._tripHeroMapWindow && !window._tripHeroMapWindow.closed)
+  });
   // v353.4: phone-width path uses an in-page full-screen overlay
   // instead of window.open. Same reasoning as the picker map: iOS
   // Safari blocks popups silently or opens them in a way the user
@@ -10820,28 +10833,43 @@ function openTripHeroMapWindow(){
   // below fixes the regular-Chrome bug; this PWA path serves the
   // distribution case.
   try {
-    var isStandalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
-                       || window.navigator.standalone === true;
-    if ((window.innerWidth && window.innerWidth <= 700) || isStandalone) {
+    var isStandaloneMM = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+    var isStandaloneNav = window.navigator.standalone === true;
+    var isNarrow = (window.innerWidth && window.innerWidth <= 700);
+    console.log(DBG, "overlay-trigger checks", { matchMediaStandalone: isStandaloneMM, navStandalone: isStandaloneNav, narrow: isNarrow });
+    if (isNarrow || isStandaloneMM || isStandaloneNav) {
+      console.log(DBG, "→ routing to in-page overlay");
       _openTripHeroMapOverlay();
       return;
     }
-  } catch (_) {}
+  } catch (e) {
+    console.warn(DBG, "overlay-check threw, falling through:", e);
+  }
   if (window._tripHeroMapWindow && !window._tripHeroMapWindow.closed) {
+    console.log(DBG, "→ focusing existing window");
     try { window._tripHeroMapWindow.focus(); } catch(_){}
     return;
   }
   // Stash the data fingerprint so _pushHeroMapUpdate can detect drift.
   window._heroMapLastHash = _heroMapDataHash();
-  var w = window.open(
-    "",
-    "MaxTripHeroMap",
-    "width=1200,height=820,resizable=yes,scrollbars=no,menubar=no,toolbar=no,location=no,status=no"
-  );
+  console.log(DBG, "→ calling window.open");
+  var w;
+  try {
+    w = window.open(
+      "",
+      "MaxTripHeroMap",
+      "width=1200,height=820,resizable=yes,scrollbars=no,menubar=no,toolbar=no,location=no,status=no"
+    );
+  } catch (e) {
+    console.error(DBG, "window.open threw:", e);
+    w = null;
+  }
+  console.log(DBG, "window.open returned:", w ? "window object" : w);
   if (!w) {
     // v359.5.5: instead of alerting and bailing (which leaves the
     // user stuck), fall through to the in-page overlay. Popup blockers
     // are common; the overlay always works.
+    console.log(DBG, "→ popup blocked or returned null, falling back to in-page overlay");
     _openTripHeroMapOverlay();
     return;
   }
@@ -11025,22 +11053,41 @@ function openTripHeroMapWindow(){
   // run normally, and the popup behaves like any other navigated
   // window. Falls back to document.write if Blob isn't available,
   // and falls back to the in-page overlay if both fail.
+  var DBG2 = "[Max view-larger]";
   try {
     var blob = new Blob([html], { type: 'text/html' });
     var url = URL.createObjectURL(blob);
+    console.log(DBG2, "→ navigating popup to Blob URL:", url);
     w.location.href = url;
     // Release the object URL after the new page has had a chance to
     // load. Don't revoke immediately — Chrome would invalidate the
     // navigation in flight.
     setTimeout(function(){ try { URL.revokeObjectURL(url); } catch(_){} }, 30000);
+    // v359.5.7: verify the popup actually rendered. Some Chrome
+    // popup-blocker settings return a Window object but never load
+    // its document. Check after 1s; if the popup is closed, fall
+    // back to overlay (the user closed it OR Chrome cancelled it).
+    setTimeout(function(){
+      try {
+        if (!w || w.closed) {
+          console.warn(DBG2, "popup window closed after 1s — falling back to overlay");
+          window._tripHeroMapWindow = null;
+          _openTripHeroMapOverlay();
+          return;
+        }
+        console.log(DBG2, "popup window still open after 1s (good)");
+      } catch (_) {
+        console.warn(DBG2, "couldn't probe popup after 1s — likely cross-origin / detached");
+      }
+    }, 1000);
   } catch (e) {
-    console.warn("[Max] Blob-URL popup failed, falling back to document.write:", e);
+    console.warn(DBG2, "Blob-URL popup failed, falling back to document.write:", e);
     try {
       w.document.open();
       w.document.write(html);
       w.document.close();
     } catch (e2) {
-      console.error("[Max] popup document.write also failed; closing and routing to overlay:", e2);
+      console.error(DBG2, "popup document.write also failed; closing and routing to overlay:", e2);
       try { w.close(); } catch(_){}
       window._tripHeroMapWindow = null;
       _openTripHeroMapOverlay();
@@ -20796,9 +20843,17 @@ function initMapRouteBtn(){
 
 function initMapLargerBtn(){
   var btn = document.getElementById('map-larger-btn');
-  if (!btn) return;
+  if (!btn) {
+    console.warn("[Max view-larger] initMapLargerBtn: #map-larger-btn not found");
+    return;
+  }
   btn.onclick = function(){
-    if (typeof openTripHeroMapWindow === 'function') openTripHeroMapWindow();
+    console.log("[Max view-larger] button clicked");
+    if (typeof openTripHeroMapWindow === 'function') {
+      openTripHeroMapWindow();
+    } else {
+      console.error("[Max view-larger] openTripHeroMapWindow is not defined!");
+    }
   };
 }
 
