@@ -17986,6 +17986,14 @@ function showSettingsPanel(){
     +   '</div>'
 
     + '</div>'
+    // v359.12: "Reset all preferences" link tucked into the footer.
+    // Wipes every Bucket A/C pref, the briefSeenOnce flag, and the
+    // welcome-onboarded localStorage marker so the next session
+    // looks like a fresh new-user install. Confirms first; harm
+    // reversibility is "type your prefs back in," not catastrophic.
+    + '<div style="padding:10px 22px 12px;border-top:1px solid #eee;background:#fff;font-size:11px;text-align:center;">'
+    +   '<a href="#" id="sp-reset-all" style="color:#c44;text-decoration:none;font-weight:600;cursor:pointer;">Reset all preferences (start over as a new user)</a>'
+    + '</div>'
     // Footer
     + '<div style="padding:14px 22px;border-top:1px solid #eee;display:flex;justify-content:space-between;align-items:center;gap:10px;background:#fafafa;">'
     +   '<div id="sp-status" style="font-size:11px;color:#888;flex:1;"></div>'
@@ -18023,6 +18031,38 @@ function showSettingsPanel(){
       c.classList.add("on");
     };
   });
+
+  // v359.12: Reset all preferences. Clears every Bucket A + Bucket C
+  // pref, the briefSeenOnce flag, and the welcome-onboarded marker
+  // so the next "Start a new trip" lands on the full first-time
+  // brief. Trips and trip data are NOT touched — only user prefs.
+  var resetLink = document.getElementById("sp-reset-all");
+  if (resetLink) {
+    resetLink.onclick = function(e){
+      e.preventDefault();
+      if (!confirm("Reset all your preferences?\n\nThis clears every default you've set — pace, day-trip threshold, transport, accommodation, mobility, dietary, languages, units, and display preferences. Your TRIPS are not touched.\n\nThe next time you start a trip, you'll see the full first-time brief.\n\nContinue?")) return;
+      try {
+        if (window.MaxDB && MaxDB.prefs) {
+          var keysToClear = [
+            "paceHours", "sightsPerDay", "paceMode", "dayTripHours",
+            "travelersCount", "withKids", "transport", "accommodation",
+            "mobility", "dietary", "languages",
+            "distanceUnits", "temperatureUnits", "dateFormat", "currency",
+            "briefSeenOnce"
+          ];
+          keysToClear.forEach(function(k){
+            try { MaxDB.prefs.set(k, null); } catch(_){}
+            // MaxDB.prefs might not have a delete method; setting to
+            // null + the helper functions' "null check" handles it.
+          });
+        }
+      } catch(_){}
+      try { localStorage.removeItem("max-onboarded"); } catch(_){}
+      var status = document.getElementById("sp-status");
+      if (status) { status.style.color = "#c44"; status.textContent = "Preferences cleared. Reloading…"; }
+      setTimeout(function(){ location.reload(); }, 800);
+    };
+  }
 
   // Save: validate, write to prefs, close.
   document.getElementById("sp-save").onclick = function(){
@@ -19899,8 +19939,14 @@ async function getDestWeather(lat, lng, fromISO, toISO){
       var avgMax = tMaxs.length ? Math.round(tMaxs.reduce(function(a,b){return a+b;}, 0) / tMaxs.length) : null;
       var avgMin = tMins.length ? Math.round(tMins.reduce(function(a,b){return a+b;}, 0) / tMins.length) : null;
       var avgPp  = pps.length   ? Math.round(pps.reduce(function(a,b){return a+b;}, 0) / pps.length)   : null;
+      // v359.12: respect user's temperature pref. The Open-Meteo response
+      // is in Celsius (the default), so convert at display time. The
+      // _fmtTempUnit() suffix swaps °C/°F to match.
+      var displayMax = (typeof _fmtTemp === "function" && avgMax != null) ? _fmtTemp(avgMax).replace(/°[CF]$/,"") : avgMax;
+      var displayMin = (typeof _fmtTemp === "function" && avgMin != null) ? _fmtTemp(avgMin).replace(/°[CF]$/,"") : avgMin;
+      var unitSuffix = (typeof _fmtTempUnit === "function") ? _fmtTempUnit() : "°C";
       var summary = (avgMax != null && avgMin != null)
-        ? "Forecast " + avgMax + "°/" + avgMin + "°C" + (avgPp != null ? " · " + avgPp + "% rain" : "")
+        ? "Forecast " + displayMax + "°/" + displayMin + unitSuffix + (avgPp != null ? " · " + avgPp + "% rain" : "")
         : "Forecast unavailable";
       data = { kind: "forecast", summary: summary, daily: days };
     } else {
@@ -19928,8 +19974,11 @@ async function getDestWeather(lat, lng, fromISO, toISO){
       var rainDays = (dh.precipitation_sum || []).filter(function(v){return v >= 1;}).length;
       var totalDays = (dh.precipitation_sum || []).length || 1;
       var rainPct = Math.round((rainDays / totalDays) * 100);
+      var displayMaxC = (typeof _fmtTemp === "function" && avgMaxC != null) ? _fmtTemp(avgMaxC).replace(/°[CF]$/,"") : avgMaxC;
+      var displayMinC = (typeof _fmtTemp === "function" && avgMinC != null) ? _fmtTemp(avgMinC).replace(/°[CF]$/,"") : avgMinC;
+      var unitSuffixC = (typeof _fmtTempUnit === "function") ? _fmtTempUnit() : "°C";
       var summaryC = (avgMaxC != null && avgMinC != null)
-        ? "Typical " + avgMaxC + "°/" + avgMinC + "°C · " + rainPct + "% rainy days"
+        ? "Typical " + displayMaxC + "°/" + displayMinC + unitSuffixC + " · " + rainPct + "% rainy days"
         : "Climate unavailable";
       data = { kind: "climate", summary: summaryC };
     }
@@ -20021,9 +20070,47 @@ function renderDayWeatherChip(dest, day, container){
 function fmtD(s){
   if(!s)return"";
   var d=new Date(s+"T12:00:00");
-  // Includes day-of-week so per-leg dates on the trip plan read like
-  // "Sat, Aug 15" — matching the trip-level dates strip at the top.
-  return d.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
+  // v359.12: respect the user's dateFormat preference.
+  //   - "iso"    → 2026-05-12 (raw ISO, no formatting)
+  //   - "us"     → Sat, May 12 (current default, US locale, en-US)
+  //   - "locale" → browser locale (toLocaleDateString with no locale arg)
+  // Includes day-of-week so per-leg dates on the trip plan read
+  // consistently with the trip-level dates strip at the top.
+  var fmt = (typeof _defaultDateFormat === "function") ? _defaultDateFormat() : "us";
+  if (fmt === "iso") return s;
+  if (fmt === "locale") return d.toLocaleDateString(undefined, {weekday:"short", month:"short", day:"numeric"});
+  return d.toLocaleDateString("en-US", {weekday:"short", month:"short", day:"numeric"});
+}
+
+// v359.12: distance/temperature formatters honoring user prefs.
+function _fmtDistance(km){
+  if (km == null || !isFinite(km)) return "";
+  var pref = (typeof _defaultDistanceUnits === "function") ? _defaultDistanceUnits() : "metric";
+  if (pref === "imperial") {
+    var mi = Math.round(km * 0.621371);
+    return mi + " mi";
+  }
+  return Math.round(km) + " km";
+}
+function _fmtTemp(c){
+  if (c == null || !isFinite(c)) return "";
+  var pref = (typeof _defaultTemperatureUnits === "function") ? _defaultTemperatureUnits() : "celsius";
+  if (pref === "fahrenheit") {
+    var f = Math.round((c * 9/5) + 32);
+    return f + "°F";
+  }
+  return Math.round(c) + "°C";
+}
+// Returns just the unit suffix ("°C" or "°F") — used when two temps
+// share one suffix as in "18°/9°C".
+function _fmtTempUnit(){
+  var pref = (typeof _defaultTemperatureUnits === "function") ? _defaultTemperatureUnits() : "celsius";
+  return pref === "fahrenheit" ? "°F" : "°C";
+}
+// API parameter for Open-Meteo so it returns temps in user's unit.
+function _fmtTempApiUnit(){
+  var pref = (typeof _defaultTemperatureUnits === "function") ? _defaultTemperatureUnits() : "celsius";
+  return pref === "fahrenheit" ? "fahrenheit" : "celsius";
 }
 
 // Round DF — return a {url, label, isOfficial} for a sight or restaurant.
@@ -26242,7 +26329,7 @@ function buildExplorePane(dest){
       } else {
         schedTxt = '<span style="color:#b05820;font-weight:600;">⚠ not yet scheduled</span>';
       }
-      metaLine.innerHTML = schedTxt + ' &nbsp;·&nbsp; ' + (dt.distKm||"?") + 'km away &nbsp;·&nbsp; sights and transport below';
+      metaLine.innerHTML = schedTxt + ' &nbsp;·&nbsp; ' + (dt.distKm != null ? _fmtDistance(dt.distKm) + ' away' : '? km away') + ' &nbsp;·&nbsp; sights and transport below';
       cHdr.appendChild(titleLine);
       cHdr.appendChild(metaLine);
       // v359.3.2: "Stay overnight here" button at the top of every
@@ -26480,7 +26567,7 @@ function buildExplorePane(dest){
         rowHdr.appendChild(rowName);
         var rowMeta = document.createElement("div");
         rowMeta.style.cssText = "font-size:10.5px;color:#666;";
-        var noteTxt = (cand.info && cand.info.note) ? cand.info.note : "~" + Math.round(cand.distKm) + "km · est. " + _ftFormatHours(cand.fastestH);
+        var noteTxt = (cand.info && cand.info.note) ? cand.info.note : "~" + _fmtDistance(cand.distKm) + " · est. " + _ftFormatHours(cand.fastestH);
         rowMeta.textContent = noteTxt;
         rowHdr.appendChild(rowMeta);
         rowSec.appendChild(rowHdr);
@@ -28482,7 +28569,7 @@ function doAI(dayId,destId,type,slot){
       // Always update the sight's note with the distance so the user
       // sees how far it is, regardless of whether they convert.
       if (distKm !== null) {
-        ns.note = distKm + " km from " + freshDest.place;
+        ns.note = _fmtDistance(distKm) + " from " + freshDest.place;
       }
       autoSave();
       if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.emit === "function") {
@@ -28513,7 +28600,7 @@ function _showDayTripConversionToast(dest, sightItem, dayId, distKm){
   var toast = document.createElement("div");
   toast.id = "dt-convert-toast";
   toast.style.cssText = "position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#fff;border:1px solid #d8c4e8;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.12);padding:14px 16px;font-size:12px;line-height:1.5;color:#333;max-width:420px;z-index:9999;font-family:inherit;";
-  toast.innerHTML = '<div style="margin-bottom:10px;"><strong>' + sightItem.n + '</strong> is ' + distKm + ' km from ' + dest.place + ' — that\'s usually day-trip distance.</div>';
+  toast.innerHTML = '<div style="margin-bottom:10px;"><strong>' + sightItem.n + '</strong> is ' + _fmtDistance(distKm) + ' from ' + dest.place + ' — that\'s usually day-trip distance.</div>';
   var btnRow = document.createElement("div");
   btnRow.style.cssText = "display:flex;gap:8px;justify-content:flex-end;";
   var convertBtn = document.createElement("button");

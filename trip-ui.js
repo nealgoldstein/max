@@ -1987,7 +1987,7 @@
         actionSpan.textContent = "↩ stay overnight";
         chip.appendChild(placeSpan);
         chip.appendChild(actionSpan);
-        chip.title = "Day trip from " + dest.place + " · " + dt.distKm + "km away · Click to make this an overnight stay instead.";
+        chip.title = "Day trip from " + dest.place + " · " + (typeof global._fmtDistance === "function" ? global._fmtDistance(dt.distKm) + " away" : dt.distKm + "km away") + " · Click to make this an overnight stay instead.";
         (function(hubDest, dayTripIdx){
           chip.onclick = function(e){
             e.stopPropagation();
@@ -2751,7 +2751,7 @@
         var pLbl = pDay && pDay.lbl;
         placedLbl = " · on " + (pLbl || ("Day " + (placedOnDay+1)));
       }
-      chip.textContent = dt.place + " · " + dt.distKm + "km" + placedLbl;
+      chip.textContent = dt.place + " · " + (typeof global._fmtDistance === "function" ? global._fmtDistance(dt.distKm) : dt.distKm + "km") + placedLbl;
       chip.title = "Click for options";
       chip.onmouseover = function(){ chip.style.background = "#ede0f4"; };
       chip.onmouseout = function(){ chip.style.background = "#fff"; };
