@@ -10990,8 +10990,28 @@ function openTripHeroMapWindow(){
        the popup's own document because the opener can't reach into
        cross-document button DOM via simple onclick attributes. */
     + '<script>document.getElementById("closeBtn").onclick=function(){try{window.close();}catch(_){}};<\/script>'
+    + '<script>'
+    +   /* v359.5.17: surface errors visibly. Neal: "still does not
+         work" / "map opens but window is blank." Silent failure
+         modes have been the recurring problem — the popup opens
+         (so document.write succeeded) but nothing renders inside.
+         A try/catch around the init body, plus an onerror handler
+         on window, captures whatever\'s actually throwing and
+         shows it in the popup (and posts it back to the parent
+         console, where DevTools is likely already open). */
+    +   'window.addEventListener("error", function(e){'
+    +     'var msg = "Popup error: " + (e && e.message ? e.message : "(unknown)") + " @ " + (e && e.filename ? e.filename : "?") + ":" + (e && e.lineno ? e.lineno : "?");'
+    +     'try { if (window.opener && !window.opener.closed) window.opener.console.error("[Max view-larger popup]", msg, e && e.error); } catch(_){}'
+    +     'try { document.body.insertAdjacentHTML("beforeend", \'<div style="position:fixed;left:10px;right:10px;bottom:10px;padding:10px 14px;background:#fee;border:1px solid #c44;border-radius:6px;color:#700;font-size:11px;font-family:monospace;z-index:9999;white-space:pre-wrap;word-break:break-word;">\' + msg.replace(/[&<>]/g, function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;"}[c];}) + \'</div>\'); } catch(_){}'
+    +   '});'
+    + '<\/script>'
     + '<script>(function(){'
+    +   'function _logBack(tag, msg){'
+    +     'try { if (window.opener && !window.opener.closed) window.opener.console.log("[Max view-larger popup] " + tag, msg); } catch(_){}'
+    +   '}'
+    +   '_logBack("init", "IIFE started");'
     +   'var pts = ' + ptsJson + ';'
+    +   '_logBack("pts", pts.length + " destinations");'
     +   /* v359.5.16: wait for Leaflet to finish loading before
          initializing. The synchronous-after-script tag pattern was
          racing the async CDN load — when Leaflet wasn\'t ready, the
@@ -11105,14 +11125,24 @@ function openTripHeroMapWindow(){
     + '}'
     + 'var _waitTries = 0;'
     + 'function _waitForLeaflet(){'
-    +   'if (typeof L !== "undefined") { _runInit(); return; }'
+    +   'if (typeof L !== "undefined") {'
+    +     '_logBack("leaflet", "ready after " + _waitTries + " polls; calling _runInit");'
+    +     'try { _runInit(); _logBack("init", "_runInit completed cleanly"); }'
+    +     'catch(e){'
+    +       '_logBack("init-throw", e && e.message);'
+    +       'document.body.insertAdjacentHTML("beforeend", \'<div style="position:fixed;left:10px;right:10px;bottom:10px;padding:10px 14px;background:#fee;border:1px solid #c44;border-radius:6px;color:#700;font-size:11px;font-family:monospace;z-index:9999;white-space:pre-wrap;">Init failed: \' + ((e && e.message) || "(unknown error)").replace(/[&<>]/g, function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;"}[c];}) + \'</div>\');'
+    +     '}'
+    +     'return;'
+    +   '}'
     +   '_waitTries++;'
     +   'if (_waitTries > 50) {'
+    +     '_logBack("leaflet-timeout", "Leaflet never loaded after 2.5s");'
     +     'document.body.insertAdjacentHTML("beforeend", \'<div style="position:fixed;inset:42px 0 0 0;display:flex;align-items:center;justify-content:center;color:#c44;font-size:13px;text-align:center;padding:30px;">Map library failed to load.<br>Check your internet connection, close this window, and try again.</div>\');'
     +     'return;'
     +   '}'
     +   'setTimeout(_waitForLeaflet, 50);'
     + '}'
+    + '_logBack("starting", "calling _waitForLeaflet");'
     + '_waitForLeaflet();'
     + '})();<\/script>'
     + '</body></html>';
