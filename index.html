@@ -8568,6 +8568,30 @@ function renderTripStep1Place(){
   // keeps the variable in scope for the template ternary below
   // without ripping that surgery up.
   var _briefCollapsed = false;
+
+  // v359.14: shared helpers for the locked-with-override-link pattern
+  // — now used across all Bucket C sections (Travelers, How, Shape).
+  // A field is "locked" when (1) a global default is saved for it
+  // and (2) the user hasn't explicitly clicked Override for this
+  // field. Locked → render summary + Override link. Unlocked →
+  // render the editable input as today.
+  function _briefIsLocked(prefKey, overrideKey){
+    if (!window.MaxDB || !MaxDB.prefs) return false;
+    var pref = MaxDB.prefs.get(prefKey);
+    if (pref == null || pref === "") return false;
+    return !(_tb._overrides && _tb._overrides[overrideKey]);
+  }
+  function _briefRenderLocked(label, displayValue, overrideKey){
+    return '<div class="tb-field" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">'
+      + '<label style="font-weight:500;color:#222;flex:0 0 240px;margin:0;font-size:12.5px;text-transform:none;letter-spacing:0;">' + label + '</label>'
+      + '<span style="font-size:13px;font-weight:600;color:#222;flex:1;min-width:200px;">' + displayValue + '</span>'
+      + '<a href="#" onclick="_tbUnlockShape(\'' + overrideKey + '\');event.preventDefault();" style="font-size:11px;font-weight:600;color:#1a5fa8;text-decoration:none;cursor:pointer;">Override for this trip</a>'
+      + '</div>';
+  }
+  function _briefTrunc(s, n){
+    s = String(s||"").trim();
+    return s.length > n ? s.substring(0, n-1) + "…" : s;
+  }
   // v359.11.3: log each value as a separate arg so they show up in
   // the console without needing to expand an object.
   console.log("[Max brief] render — _briefCollapsed:", _briefCollapsed, "_briefExpanded:", !!_tb._briefExpanded, "_tb keys:", Object.keys(_tb || {}).join(","));
@@ -8636,43 +8660,71 @@ function renderTripStep1Place(){
     + (_briefCollapsed ? _briefCollapsedSummaryHTML : (''
 
     // ── 2. THE TRAVELERS ────────────────────────────────
-    // v359.9: travelers count + with-kids prefill from Settings defaults
-    // and show Default/Override badges. Same wiring pattern as the
-    // Shape fields below; helpers live in _tbSetupBriefBadges.
+    // v359.14: travelers (count + with-kids) and mobility now follow
+    // the same locked-when-default pattern as the Shape fields.
     + _tbSectionHead("The travelers", "Who’s going.")
-    + '<div class="tb-field"><label>How many travelers?</label>'
-    +   '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">'
-    +     '<input id="tb-travelers-count" type="number" min="1" max="40" inputmode="numeric" value="' + ((_tb.travelersCount||_tb.partySize||_defaultTravelersCount())+"").replace(/"/g,"&quot;") + '" placeholder="e.g. 2" oninput="_tb.travelersCount=this.value;" style="max-width:120px;" />'
-    +     '<label style="display:flex;align-items:center;gap:8px;font-weight:500;cursor:pointer;font-size:13px;margin:0;text-transform:none;letter-spacing:0;color:#222;">'
-    +       '<input id="tb-with-kids" type="checkbox" ' + (((typeof _tb.withKids === "boolean" ? _tb.withKids : _defaultWithKids())||_tb.partyComposition==="family-kids")?"checked":"") + ' onchange="_tb.withKids=this.checked;" style="width:auto;margin:0;" /> Traveling with kids?'
-    +     '</label>'
-    +     '<span id="tb-trav-badge"></span>'
-    +     '<a href="#" id="tb-trav-promote" style="display:none;">↑ Apply to defaults</a>'
-    +   '</div>'
-    + '</div>'
-    + mobilityBlock
+    + (function(){
+        // Travelers compound: lock when travelersCount has a saved
+        // default. Display includes "with kids" if set.
+        if (_briefIsLocked("travelersCount", "travelersCount")) {
+          var dCt = _defaultTravelersCount();
+          var dKids = _defaultWithKids();
+          var lbl = dCt + " traveler" + (dCt === 1 ? "" : "s") + (dKids ? ", with kids" : "") + " (your default)";
+          return _briefRenderLocked("How many travelers?", lbl, "travelersCount");
+        }
+        return '<div class="tb-field"><label>How many travelers?</label>'
+          + '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">'
+          +   '<input id="tb-travelers-count" type="number" min="1" max="40" inputmode="numeric" value="' + ((_tb.travelersCount||_tb.partySize||_defaultTravelersCount())+"").replace(/"/g,"&quot;") + '" placeholder="e.g. 2" oninput="_tb.travelersCount=this.value;" style="max-width:120px;" />'
+          +   '<label style="display:flex;align-items:center;gap:8px;font-weight:500;cursor:pointer;font-size:13px;margin:0;text-transform:none;letter-spacing:0;color:#222;">'
+          +     '<input id="tb-with-kids" type="checkbox" ' + (((typeof _tb.withKids === "boolean" ? _tb.withKids : _defaultWithKids())||_tb.partyComposition==="family-kids")?"checked":"") + ' onchange="_tb.withKids=this.checked;" style="width:auto;margin:0;" /> Traveling with kids?'
+          +   '</label>'
+          +   '<span id="tb-trav-badge"></span>'
+          +   '<a href="#" id="tb-trav-promote" style="display:none;">↑ Apply to defaults</a>'
+          + '</div>'
+          + '</div>';
+      })()
+    + (function(){
+        // Mobility: lock when "mobility" pref is saved.
+        if (_briefIsLocked("mobility", "mobility")) {
+          var dMob = _defaultMobility();
+          var labels = {fit:"Fit and active", moderate:"Moderate", limited:"Limited walking", elderly:"Elderly", mobility:"Mobility aid", other:"Other"};
+          var lbl = (labels[dMob] || dMob) + " (your default)";
+          return _briefRenderLocked("Mobility of the slowest member", lbl, "mobility");
+        }
+        return mobilityBlock;
+      })()
 
     // ── 3. THE HOW ────────────────────────────────
-    // v359.9: transport + accommodation prefill from Settings defaults
-    // when no per-trip value is set. Default/Override badges shown
-    // when the typed value diverges from the saved default.
+    // v359.14: transport + accommodation also follow the locked-when-
+    // default pattern. Long defaults get truncated in the locked
+    // display; the full value is preserved in MaxDB.prefs.
     + _tbSectionHead("How you want to travel", "Transport, lodging, anything else Max should know.")
-    + '<div class="tb-field"><label>How you’d like to get around in ' + _pmEsc(regionLabel) + '</label>'
-    +   '<input id="tb-transport" value="' + (_tb.transport || _defaultTransport()).replace(/"/g,"&quot;") + '" placeholder="e.g. Trains and walking only — no rental car. Swiss Travel Pass." oninput="_tb.transport=this.value;" />'
-    +   '<div style="display:flex;align-items:center;gap:10px;margin-top:4px;flex-wrap:wrap;">'
-    +     '<span id="tb-transport-badge"></span>'
-    +     '<a href="#" id="tb-transport-promote" style="display:none;">↑ Apply to defaults</a>'
-    +   '</div>'
-    +   '<div style="font-size:10.5px;color:#b05820;font-style:italic;margin-top:4px;line-height:1.55;">This shapes everything. Easy to skip even though you wouldn’t want to.</div>'
-    + '</div>'
-    + '<div class="tb-field"><label>Where you’d like to stay</label>'
-    +   '<textarea id="tb-accommodation" rows="2" placeholder="e.g. Small family hotels, en suite required, no hostels, no shared bathrooms." oninput="_tb.accommodation=this.value;" style="resize:vertical;min-height:54px;">' + (_tb.accommodation || _defaultAccommodation()).replace(/</g,"&lt;").replace(/>/g,"&gt;") + '</textarea>'
-    +   '<div style="display:flex;align-items:center;gap:10px;margin-top:4px;flex-wrap:wrap;">'
-    +     '<span id="tb-accom-badge"></span>'
-    +     '<a href="#" id="tb-accom-promote" style="display:none;">↑ Apply to defaults</a>'
-    +   '</div>'
-    +   '<div style="font-size:10.5px;color:#b05820;font-style:italic;margin-top:4px;line-height:1.55;">Be explicit even if it feels obvious.</div>'
-    + '</div>'
+    + (function(){
+        if (_briefIsLocked("transport", "transport")) {
+          return _briefRenderLocked("How you’d like to get around in " + _pmEsc(regionLabel), _pmEsc(_briefTrunc(_defaultTransport(), 60)) + " (your default)", "transport");
+        }
+        return '<div class="tb-field"><label>How you’d like to get around in ' + _pmEsc(regionLabel) + '</label>'
+          + '<input id="tb-transport" value="' + (_tb.transport || _defaultTransport()).replace(/"/g,"&quot;") + '" placeholder="e.g. Trains and walking only — no rental car. Swiss Travel Pass." oninput="_tb.transport=this.value;" />'
+          + '<div style="display:flex;align-items:center;gap:10px;margin-top:4px;flex-wrap:wrap;">'
+          +   '<span id="tb-transport-badge"></span>'
+          +   '<a href="#" id="tb-transport-promote" style="display:none;">↑ Apply to defaults</a>'
+          + '</div>'
+          + '<div style="font-size:10.5px;color:#b05820;font-style:italic;margin-top:4px;line-height:1.55;">This shapes everything. Easy to skip even though you wouldn’t want to.</div>'
+          + '</div>';
+      })()
+    + (function(){
+        if (_briefIsLocked("accommodation", "accommodation")) {
+          return _briefRenderLocked("Where you’d like to stay", _pmEsc(_briefTrunc(_defaultAccommodation(), 60)) + " (your default)", "accommodation");
+        }
+        return '<div class="tb-field"><label>Where you’d like to stay</label>'
+          + '<textarea id="tb-accommodation" rows="2" placeholder="e.g. Small family hotels, en suite required, no hostels, no shared bathrooms." oninput="_tb.accommodation=this.value;" style="resize:vertical;min-height:54px;">' + (_tb.accommodation || _defaultAccommodation()).replace(/</g,"&lt;").replace(/>/g,"&gt;") + '</textarea>'
+          + '<div style="display:flex;align-items:center;gap:10px;margin-top:4px;flex-wrap:wrap;">'
+          +   '<span id="tb-accom-badge"></span>'
+          +   '<a href="#" id="tb-accom-promote" style="display:none;">↑ Apply to defaults</a>'
+          + '</div>'
+          + '<div style="font-size:10.5px;color:#b05820;font-style:italic;margin-top:4px;line-height:1.55;">Be explicit even if it feels obvious.</div>'
+          + '</div>';
+      })()
     + '<div class="tb-field"><label>Anything else Max should know <span style="font-weight:400;color:#aaa;font-size:11px;">(optional)</span></label>'
     +   '<textarea id="tb-about-trip" rows="4" placeholder="e.g. Couple in our 60s, first trip to this region. Would skip a famous-but-touristy day-trip; wouldn’t skip a once-in-a-lifetime view." oninput="_tb.aboutTrip=this.value;">' + ((_tb.aboutTrip||"").replace(/</g,"&lt;")) + '</textarea>'
     +   '<div style="font-size:10px;color:#aaa;margin-top:4px;line-height:1.5;">The more you share, the better the suggestions. Max reads this as prose — write naturally.</div>'
