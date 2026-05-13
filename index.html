@@ -19724,23 +19724,13 @@ async function generateCityData(place,destId,_isAutoRetry){
     + 'DURATION HOURS: every sight gets a `durationHours` integer for how long a committed traveler spends there from arrival to departure. Include the round trip for peripheral mountain railways / cable cars / boat rides: a Pilatus or Rigi cogwheel-summit-return is 5-6 hours; Jungfraujoch is 6-7 (long railway up + altitude time + descent). A major museum (Uffizi, Louvre, Met) is 3-4 hours. A cathedral interior + climb is 1-2. A landmark like the Chapel Bridge or Lion Monument is 30 minutes - round to 1 hour. A scenic train ride that IS the activity (Glacier Express, Bernina Express) is 6-8. Auto-seeding uses this so a half-day-or-longer sight (4+ hours) takes the whole day; two short sights can pair on one day. Round to whole hours; minimum 1, never 0. '
     + 'URL: include `url` ONLY when you are confident of the canonical official site (the museum\'s own domain, the railway operator\'s booking page, the cable car company, the official tourism site for a specific landmark). For famous, well-known sights (Louvre louvre.fr, Tate Modern tate.org.uk, Glacier Express glacierexpress.ch, Jungfraubahn jungfrau.ch, Uffizi uffizi.it) you should know these. For obscure or small sights — small chapels, village viewpoints, generic city squares — OMIT the url field rather than guess. Wrong URLs are worse than no URLs because they send the traveler to dead pages and erode trust. When you omit, the app falls back to a Google search for the sight name, which always works. Use https:// (not http), and the canonical domain (not a third-party aggregator like TripAdvisor or Wikipedia — only the official owner of the sight). '
     + 'Essentials are ALL required — do not omit any field. Include 2-3 ATMs, 1-2 banks (named branches — UBS, Raiffeisen, Barclays, BNP, etc. — whatever operates locally), 2-3 groceries, 1 tourist info, AND 1-2 pharmacies (chemists / drugstores / Apotheke / farmacia / pharmacie — whatever the local term). Real named places. Be concise.'
-    + (_paceDirGD ? "\n\n"+_paceDirGD : "")
-    // v359.16: detect route-trip intent from the user's brief. When
-    // the user has said something like "drive the entire ring road"
-    // or "Wild Atlantic Way," tell the LLM to include road-stop
-    // sights (scenic overlooks, roadside waterfalls, etc.) in
-    // addition to the city's own attractions. Without this, sights
-    // come back as a list of museums and landmarks IN the city,
-    // missing the "what you pull over for between cities" stops.
-    + (function(){
-        var briefText = ((trip && trip.brief && trip.brief.intent) || (_tb && _tb.intent) || "") + " "
-          + ((trip && trip.brief && trip.brief.placeContext) || (_tb && _tb.placeContext) || "") + " "
-          + ((trip && trip.brief && trip.brief.whySpecifically) || (_tb && _tb.whySpecifically) || "") + " "
-          + ((trip && trip.brief && trip.brief.whyGenerally) || (_tb && _tb.whyGenerally) || "");
-        var routeRegex = /\bring\s*road\b|\bring\s*trip\b|\bloop\b|\bcircular\b|\bcircumnavigat|\bwild\s+atlantic\s+way\b|\bpacific\s+coast\s+highway\b|\bcoast(?:al|line)\s+drive\b|\bdrive\s+(?:entire|around|the\s+(?:whole|entire))\b|\broad\s+trip\b|\bscenic\s+drive\b|\boverland\b/i;
-        if (!routeRegex.test(briefText)) return "";
-        return "\n\nROUTE-TRIP CONTEXT: The traveler has explicitly said this is a route/driving trip (e.g., the Ring Road, the Wild Atlantic Way, a coastal drive). IN ADDITION TO sights inside " + place + " itself, include 3-5 scenic ROAD-STOP sights along the routes that approach or leave " + place + " — roadside waterfalls, scenic overlooks, named viewpoints, small villages with a single notable feature, geothermal features by the highway. The kind of place a driver pulls over for, not city-center attractions. For each road-stop sight, name the specific named feature (e.g., Seljalandsfoss, Reynisfjara, Vatnshellir cave) — never use generic placeholders like 'scenic overlook' or 'roadside stop.' In the `desc` field, note that it's a road-stop and which direction (e.g., \"Roadside waterfall on the Ring Road approaching " + place + " from the south.\"). Mark genuinely-famous ones as iconic — but only the ones a first-time route traveler would be disappointed to miss.";
-      })();
+    + (_paceDirGD ? "\n\n"+_paceDirGD : "");
+    // v359.16 (reverted in v359.17): the ROUTE-TRIP CONTEXT block
+    // crowded out non-route iconics (Northern Lights, Blue Lagoon,
+    // etc.) and missed destinations. Reverting; if we want route
+    // stops as a first-class feature, build them as a separate
+    // generateRouteStops(prevDest, nextDest) LLM call so they live
+    // in their own dataset and don't compete with city sights.
 
   try{
     // Round DR: bumped to 90s timeout AND threaded into callMax so it
