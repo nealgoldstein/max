@@ -14065,6 +14065,16 @@ function goToTripStep2(){
       // Settings-only for now — no brief field to capture from yet.
       var validMob = ["fit","moderate","limited","elderly","mobility","other"];
       _saveIfUnset("mobility", _tb.physicalAbility, typeof _tb.physicalAbility === "string" && validMob.indexOf(_tb.physicalAbility) >= 0);
+      // v359.15.2: also auto-save avoidances on first submit. If user
+      // has toggled any chips OR typed in avoidOther, those become
+      // the global defaults — same model as the other Bucket C fields.
+      // Object equality: any key set to true counts as "has values."
+      var _hasAvoidChips = false;
+      if (_tb.avoid && typeof _tb.avoid === "object") {
+        for (var _k in _tb.avoid) { if (_tb.avoid[_k]) { _hasAvoidChips = true; break; } }
+      }
+      _saveIfUnset("avoidDefaults", _tb.avoid || {}, _hasAvoidChips);
+      _saveIfUnset("avoidOtherDefaults", (_tb.avoidOther || "").trim(), (_tb.avoidOther || "").trim().length > 0);
       // v359.11: flag that the user has now submitted a brief, so
       // subsequent briefs collapse the Bucket-C sections by default
       // (progressive disclosure). Setting unconditionally is fine —

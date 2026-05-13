@@ -1968,6 +1968,45 @@
       if(evRow.children.length) bodyDiv.appendChild(evRow);
     }
 
+    // v359.15.1: surface the user's accommodation preference + (if
+    // set) avoidances on each destination card. Reminder of what
+    // Max is filtering for when generating hotel suggestions, etc.
+    // Only renders when the prefs are actually set; never empty.
+    (function(){
+      var prefsLines = [];
+      try {
+        if (window.MaxDB && MaxDB.prefs) {
+          var acc = MaxDB.prefs.get("accommodation");
+          if (typeof acc === "string" && acc.trim().length) {
+            var accShort = acc.trim();
+            if (accShort.length > 70) accShort = accShort.substring(0, 67) + "…";
+            prefsLines.push({ label: "Stay preference", value: accShort });
+          }
+          var avoidObj = MaxDB.prefs.get("avoidDefaults");
+          var avoidOther = MaxDB.prefs.get("avoidOtherDefaults");
+          var picks = [];
+          if (avoidObj && typeof avoidObj === "object") {
+            var labels = { altitude:"high altitude", crowds:"crowds", heat:"extreme heat", cold:"extreme cold", longDrives:"long drives" };
+            Object.keys(avoidObj).forEach(function(k){ if (avoidObj[k] && labels[k]) picks.push(labels[k]); });
+          }
+          if (typeof avoidOther === "string" && avoidOther.trim().length) {
+            var aoShort = avoidOther.trim();
+            if (aoShort.length > 50) aoShort = aoShort.substring(0, 47) + "…";
+            picks.push(aoShort);
+          }
+          if (picks.length) prefsLines.push({ label: "Avoiding", value: picks.join(", ") });
+        }
+      } catch(_){}
+      if (prefsLines.length) {
+        var prefBox = document.createElement("div");
+        prefBox.style.cssText = "margin:4px 0 6px;padding:6px 10px;background:#fafafa;border:1px solid #ececec;border-radius:5px;font-size:10.5px;color:#555;line-height:1.55;";
+        prefBox.innerHTML = prefsLines.map(function(p){
+          return '<div><strong style="color:#777;font-weight:600;">' + p.label + ':</strong> ' + p.value.replace(/</g, "&lt;").replace(/>/g, "&gt;") + '</div>';
+        }).join("");
+        bodyDiv.appendChild(prefBox);
+      }
+    })();
+
     // Round CO: day trips clustered to this hub.
     if (dest.dayTrips && dest.dayTrips.length) {
       var dtRow = document.createElement("div");
