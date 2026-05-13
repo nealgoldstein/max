@@ -8548,6 +8548,7 @@ function renderTripStep1Place(){
   // and the next render shows the full layout (the flag is per-trip
   // local state, not persisted).
   var _briefCollapsed = _isReturningUser() && !_tb._briefExpanded;
+  console.log("[Max brief] render", { _briefCollapsed: _briefCollapsed, _briefExpanded: !!_tb._briefExpanded });
   var _briefCollapsedSummaryHTML = "";
   if (_briefCollapsed) {
     var _tc = _tb.travelersCount || _defaultTravelersCount();
@@ -17673,18 +17674,34 @@ function _defaultAccommodation(){
 // collapsed summary of their defaults instead of every C-bucket
 // field. Flag is set on first brief submission. To override for
 // a specific trip, click "Change them just for this trip."
-// v359.11.1: also treat a user with existing trips as returning,
-// so people who already have a trip index from before this commit
-// land on the collapsed view immediately instead of having to
-// publish ONE MORE brief to flip the flag.
+// v359.11.2: three checks (any positive returns true):
+//   1. The explicit briefSeenOnce flag (set on every brief submit)
+//   2. Existing trip count > 0 (user clearly isn't fresh)
+//   3. ANY Settings pref already saved (the user has been around
+//      long enough to set defaults)
+// Plus a console log so we can see in DevTools what the detection
+// found if it's not behaving as expected.
 function _isReturningUser(){
+  var DBG = "[Max returning-user]";
+  var sawFlag = false, sawTrips = false, sawPref = false;
   try {
-    if (window.MaxDB && MaxDB.prefs && MaxDB.prefs.get("briefSeenOnce")) return true;
+    sawFlag = !!(window.MaxDB && MaxDB.prefs && MaxDB.prefs.get("briefSeenOnce"));
   } catch(_){}
   try {
-    if (typeof _tripsIndex !== "undefined" && Array.isArray(_tripsIndex) && _tripsIndex.length > 0) return true;
+    sawTrips = (typeof _tripsIndex !== "undefined" && Array.isArray(_tripsIndex) && _tripsIndex.length > 0);
   } catch(_){}
-  return false;
+  try {
+    if (window.MaxDB && MaxDB.prefs) {
+      var keys = ["paceHours","sightsPerDay","paceMode","dayTripHours","travelersCount","transport","accommodation","mobility"];
+      for (var i = 0; i < keys.length; i++) {
+        var v = MaxDB.prefs.get(keys[i]);
+        if (v != null && v !== "" && v !== false) { sawPref = true; break; }
+      }
+    }
+  } catch(_){}
+  var ret = sawFlag || sawTrips || sawPref;
+  console.log(DBG, { returning: ret, sawFlag: sawFlag, sawTrips: sawTrips, sawPref: sawPref });
+  return ret;
 }
 
 // v359.10 (Bucket A): personal + display preferences. These are
