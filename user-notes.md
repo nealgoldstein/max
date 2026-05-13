@@ -129,7 +129,7 @@ Same pattern as the trip-view map:
   "Save as PDF" in their browser's print dialog to make a file.
   Includes: trip name, date range, brief summary, every destination
   (place + label + lodging + day-by-day items).
-- **📅 Download calendar (.ics)** → builds a standard iCalendar
+- **📅 Download to calendar (.ics)** → builds a standard iCalendar
   file and downloads it. Contains:
   - One all-day event per destination (📍 prefix, location set
     to the city name)

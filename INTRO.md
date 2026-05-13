@@ -196,7 +196,7 @@ auto-selects the right destination based on the booking's address
   new window. Includes the trip overview, every destination, every
   day's plan.
 
-- **📅 Download calendar (.ics)** — one-shot iCal file with every
+- **📅 Download to calendar (.ics)** — one-shot iCal file with every
   destination as an all-day event (📍 prefix), every booked
   transport item as a timed event (✈ prefix), and every planned
   sight/restaurant/day-trip as a timed event with a slot-aware
