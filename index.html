@@ -12543,13 +12543,27 @@ function _makeItFit(){
     _updatePlaceActivitySummary();
   }
 
-  // Log the result so the user sees something in the console even
-  // without a toast helper. The summary line itself flips from amber
-  // to blue/green when the trim succeeded \u2014 that's the user-visible
-  // confirmation.
+  // User feedback: the summary line itself flips from amber to
+  // blue/green when the trim succeeded \u2014 that's the silent visual
+  // confirmation. For the partial case (too many overnight bases
+  // to fit even at 1 night each), we need to be louder, otherwise
+  // the user clicks Make it fit, the gate barely changes, and they
+  // think nothing happened.
   var fullyFits = (trimmed >= overage);
   var paceLbl = ({loose:"Relaxed", enough:"Balanced", notmuch:"Intense"})[_tb.paceMode] || _tb.paceMode;
   console.log("[Max makeItFit] result \u2014 trimmed " + trimmed + " night(s), pace \u2192 " + paceLbl + (fullyFits ? ", fits budget." : ", still " + (overage - trimmed) + " over."));
+  if (!fullyFits) {
+    var stillOver = overage - trimmed;
+    alert(
+      "Max trimmed " + trimmed + " night" + (trimmed!==1?"s":"") +
+      " and bumped pace to " + paceLbl + ", but you\u2019re still " +
+      stillOver + " day" + (stillOver!==1?"s":"") +
+      " over your budget.\n\n" +
+      "You have too many overnight places to fit even at 1 night each. " +
+      "Drop a destination above, or click \u2018Extend to " +
+      ((budget.max + stillOver)) + " days\u2019 to extend your dates."
+    );
+  }
   } catch(err) {
     console.error("[Max makeItFit] threw:", err);
   }
