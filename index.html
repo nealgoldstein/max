@@ -8402,6 +8402,69 @@ function _tbSetupShapeBadges(){
     update();
   }
 
+  // v359.10: mobility chips setup — same Default/Override pattern but
+  // driven by chip clicks (which update _tb.physicalAbility via
+  // _tbPickAbility) rather than input/change events.
+  function setupMobilityChips(){
+    var chips = document.querySelectorAll('[data-ability-id]');
+    var badge = document.getElementById("tb-mob-badge");
+    var promote = document.getElementById("tb-mob-promote");
+    if (!chips.length || !badge) return;
+    var labelMap = {fit:"Fit and active", moderate:"Moderate", limited:"Limited walking", elderly:"Elderly", mobility:"Mobility aid", other:"Other"};
+    function readPref(){
+      try {
+        if (!window.MaxDB || !MaxDB.prefs) return null;
+        var v = MaxDB.prefs.get("mobility");
+        return (v == null || v === "") ? null : v;
+      } catch(_) { return null; }
+    }
+    function readCurrent(){
+      // _tb.physicalAbility is the source of truth — _tbPickAbility
+      // writes there. Fall back to looking for the .on chip.
+      if (typeof _tb !== "undefined" && _tb && _tb.physicalAbility) return _tb.physicalAbility;
+      var onChip = document.querySelector('[data-ability-id].on');
+      return onChip ? onChip.getAttribute("data-ability-id") : "";
+    }
+    function update(){
+      var pref = readPref();
+      var cur = readCurrent();
+      if (!pref && !cur) { badge.style.cssText = "display:none;"; if (promote) promote.style.display = "none"; return; }
+      if (!pref && cur) {
+        badge.style.cssText = BADGE_DEFAULT;
+        badge.textContent = "Not saved as default";
+        if (promote) { promote.style.cssText = PROMOTE_LINK; promote.textContent = "↑ Save as default"; }
+        return;
+      }
+      if (cur === pref) {
+        badge.style.cssText = BADGE_DEFAULT;
+        badge.textContent = "Default · " + (labelMap[cur] || cur);
+        if (promote) promote.style.display = "none";
+      } else {
+        badge.style.cssText = BADGE_OVERRIDE;
+        badge.textContent = "Override · " + (labelMap[cur] || cur || "(none)") + " (default " + (labelMap[pref] || pref) + ")";
+        if (promote) { promote.style.cssText = PROMOTE_LINK; promote.textContent = "↑ Apply to defaults"; }
+      }
+    }
+    // Hook chip clicks. The existing inline onclick already calls
+    // _tbPickAbility which updates _tb.physicalAbility AND re-renders
+    // the brief. Since re-render rebuilds the chips fresh, the badge
+    // wires up again via _tbSetupShapeBadges → setupMobilityChips →
+    // update(). For the user-initiated click during normal flow,
+    // attach a delayed update too.
+    chips.forEach(function(c){
+      c.addEventListener("click", function(){ setTimeout(update, 0); });
+    });
+    if (promote) {
+      promote.onclick = function(e){
+        e.preventDefault();
+        var cur = readCurrent();
+        try { if (window.MaxDB && MaxDB.prefs && cur) MaxDB.prefs.set("mobility", cur); } catch(_){}
+        update();
+      };
+    }
+    update();
+  }
+
   setupNumberField("tb-hours-per-day", "tb-hpd-badge", "tb-hpd-promote", "paceHours", "hrs", 6);
   setupNumberField("tb-max-big-sights", "tb-spd-badge", "tb-spd-promote", "sightsPerDay", "", 2);
   setupRadioField("tb-pace-mode", "tb-pace-badge", "tb-pace-promote", "paceMode", {loose:"Relaxed", enough:"Balanced", notmuch:"Intense"}, "enough");
@@ -8409,6 +8472,7 @@ function _tbSetupShapeBadges(){
   setupCompoundTravelers();
   setupTextField("tb-transport", "tb-transport-badge", "tb-transport-promote", "transport");
   setupTextField("tb-accommodation", "tb-accom-badge", "tb-accom-promote", "accommodation");
+  setupMobilityChips();
 }
 
 // Place-first flow (Stage C). User names a place; Max surfaces what's there;
@@ -8447,8 +8511,10 @@ function renderTripStep1Place(){
 
   // Build the mobility chips block as an IIFE — same pattern the old
   // page-2 used; just keeps the chips list close to its rendering.
+  // v359.10: pre-select from the global default (MaxDB.prefs.mobility)
+  // when no per-trip value is set, and surface a badge under the chips.
   var mobilityBlock = (function(){
-    var ab = _tb.physicalAbility || "";
+    var ab = _tb.physicalAbility || _defaultMobility() || "";
     var opts = [
       {id:"fit",label:"Fit and active"},
       {id:"moderate",label:"Moderate"},
@@ -8462,10 +8528,17 @@ function renderTripStep1Place(){
     }).join("");
     return '<div class="tb-field"><label>Mobility of the slowest member</label>'
       + '<div style="font-size:10.5px;color:#777;margin-top:2px;margin-bottom:6px;line-height:1.55;">Max shapes the trip around what the slowest or least-mobile traveler can manage comfortably.</div>'
-      + '<div style="display:flex;gap:6px;flex-wrap:wrap;">' + chips + '</div>'
+      + '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' + chips
+      + '<span id="tb-mob-badge" style="margin-left:8px;"></span>'
+      + '<a href="#" id="tb-mob-promote" style="display:none;margin-left:6px;">↑ Apply to defaults</a>'
+      + '</div>'
       + '<input id="tb-ability-note" value="' + ((_tb.abilityNote||"").replace(/"/g,"&quot;")) + '" placeholder="Anything specific Max should know — bad knees, pregnant, strollers, etc." oninput="_tb.abilityNote=this.value;" style="margin-top:8px;" />'
       + '</div>';
   })();
+  // v359.10: also pre-set _tb.physicalAbility from default so the
+  // capture in goToTripStep2 has the right value if user doesn't
+  // touch the chips.
+  if (!_tb.physicalAbility && _defaultMobility()) _tb.physicalAbility = _defaultMobility();
 
   ov.innerHTML = ''
     + '<div class="tb-header">'
@@ -13795,6 +13868,11 @@ function goToTripStep2(){
       _saveIfUnset("withKids", !!_tb.withKids, true);
       _saveIfUnset("transport", (_tb.transport || "").trim(), (_tb.transport || "").trim().length > 0);
       _saveIfUnset("accommodation", (_tb.accommodation || "").trim(), (_tb.accommodation || "").trim().length > 0);
+      // v359.10: mobility too. Display preferences (units/temp/date/
+      // currency) and Personal preferences (dietary/languages) are
+      // Settings-only for now — no brief field to capture from yet.
+      var validMob = ["fit","moderate","limited","elderly","mobility","other"];
+      _saveIfUnset("mobility", _tb.physicalAbility, typeof _tb.physicalAbility === "string" && validMob.indexOf(_tb.physicalAbility) >= 0);
     }
   } catch(_){}
   // v306: mobility note. _tb.physicalAbility is set by _tbPickAbility on
@@ -17531,6 +17609,64 @@ function _defaultAccommodation(){
   return "";
 }
 
+// v359.10 (Bucket A): personal + display preferences. These are
+// "rarely change, ask once" settings — mobility, dietary, languages,
+// and four display preferences (distance units, temperature, date
+// format, currency). Today they live only in Settings; the brief
+// reads mobility's default. Display preferences will get wired into
+// the rest of the UI in follow-up commits — for now they collect
+// the user's intent.
+function _defaultMobility(){
+  try {
+    var m = (window.MaxDB && MaxDB.prefs) ? MaxDB.prefs.get("mobility") : null;
+    var valid = ["fit","moderate","limited","elderly","mobility","other"];
+    if (typeof m === "string" && valid.indexOf(m) >= 0) return m;
+  } catch(_){}
+  return "";
+}
+function _defaultDietary(){
+  try {
+    var d = (window.MaxDB && MaxDB.prefs) ? MaxDB.prefs.get("dietary") : null;
+    if (typeof d === "string" && d.length) return d;
+  } catch(_){}
+  return "";
+}
+function _defaultLanguages(){
+  try {
+    var l = (window.MaxDB && MaxDB.prefs) ? MaxDB.prefs.get("languages") : null;
+    if (typeof l === "string" && l.length) return l;
+  } catch(_){}
+  return "";
+}
+function _defaultDistanceUnits(){
+  try {
+    var u = (window.MaxDB && MaxDB.prefs) ? MaxDB.prefs.get("distanceUnits") : null;
+    if (u === "imperial") return "imperial";
+  } catch(_){}
+  return "metric";
+}
+function _defaultTemperatureUnits(){
+  try {
+    var u = (window.MaxDB && MaxDB.prefs) ? MaxDB.prefs.get("temperatureUnits") : null;
+    if (u === "fahrenheit") return "fahrenheit";
+  } catch(_){}
+  return "celsius";
+}
+function _defaultDateFormat(){
+  try {
+    var f = (window.MaxDB && MaxDB.prefs) ? MaxDB.prefs.get("dateFormat") : null;
+    if (f === "us" || f === "locale") return f;
+  } catch(_){}
+  return "iso";
+}
+function _defaultCurrency(){
+  try {
+    var c = (window.MaxDB && MaxDB.prefs) ? MaxDB.prefs.get("currency") : null;
+    if (typeof c === "string" && c.length) return c;
+  } catch(_){}
+  return "";
+}
+
 // v359.6: Settings panel — global trip-defaults editor. Opens from
 // the ⚙ button in any of three headers (home, picker, trip-view).
 // Writes to MaxDB.prefs so changes sync across devices via the
@@ -17549,6 +17685,8 @@ function showSettingsPanel(){
   // Read current values.
   var curHours = 6, curSights = 2, curPace = "enough", curDtHours = 3;
   var curTravelers = 2, curWithKids = false, curTransport = "", curAccom = "";
+  var curMobility = "", curDietary = "", curLanguages = "";
+  var curDistUnits = "metric", curTempUnits = "celsius", curDateFmt = "iso", curCurrency = "";
   try {
     if (window.MaxDB && MaxDB.prefs) {
       var ph = parseInt(MaxDB.prefs.get("paceHours"), 10);
@@ -17568,6 +17706,21 @@ function showSettingsPanel(){
       if (typeof tr === "string") curTransport = tr;
       var ac = MaxDB.prefs.get("accommodation");
       if (typeof ac === "string") curAccom = ac;
+      // v359.10: Bucket A (personal + display) preferences.
+      var mob = MaxDB.prefs.get("mobility");
+      if (typeof mob === "string" && ["fit","moderate","limited","elderly","mobility","other"].indexOf(mob) >= 0) curMobility = mob;
+      var di = MaxDB.prefs.get("dietary");
+      if (typeof di === "string") curDietary = di;
+      var lg = MaxDB.prefs.get("languages");
+      if (typeof lg === "string") curLanguages = lg;
+      var du = MaxDB.prefs.get("distanceUnits");
+      if (du === "imperial") curDistUnits = "imperial";
+      var tu = MaxDB.prefs.get("temperatureUnits");
+      if (tu === "fahrenheit") curTempUnits = "fahrenheit";
+      var df = MaxDB.prefs.get("dateFormat");
+      if (df === "us" || df === "locale") curDateFmt = df;
+      var cu = MaxDB.prefs.get("currency");
+      if (typeof cu === "string") curCurrency = cu;
     }
   } catch(_){}
 
@@ -17672,6 +17825,67 @@ function showSettingsPanel(){
     +     '<div style="font-size:11px;color:#777;line-height:1.5;margin-top:4px;">Same idea — your usual lodging style.</div>'
     +   '</div>'
 
+    // v359.10: PERSONAL — mobility, dietary, languages.
+    +   '<div style="margin:18px 0 10px;border-top:1px dashed #d8d4c8;"></div>'
+    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:10px;">Personal</div>'
+    +   '<div style="margin-bottom:14px;">'
+    +     '<label style="font-weight:600;color:#222;display:block;margin-bottom:6px;">Default mobility</label>'
+    +     (function(){
+        var opts = [
+          {id:"fit",label:"Fit and active"},
+          {id:"moderate",label:"Moderate"},
+          {id:"limited",label:"Limited walking"},
+          {id:"elderly",label:"Elderly"},
+          {id:"mobility",label:"Mobility aid"},
+          {id:"other",label:"Other"}
+        ];
+        return '<div style="display:flex;gap:6px;flex-wrap:wrap;">' + opts.map(function(o){
+          return '<span class="tb-toggle' + (curMobility===o.id?' on':'') + '" data-sp-mob="' + o.id + '" style="cursor:pointer;">' + o.label + '</span>';
+        }).join("") + '</div>';
+      })()
+    +     '<div style="font-size:11px;color:#777;line-height:1.5;margin-top:4px;">Of the slowest traveler in your usual party. Override per trip if it changes.</div>'
+    +   '</div>'
+    +   '<div style="margin-bottom:14px;">'
+    +     '<label for="sp-dietary" style="font-weight:600;color:#222;display:block;margin-bottom:4px;">Dietary restrictions</label>'
+    +     '<input id="sp-dietary" type="text" value="'+curDietary.replace(/"/g,"&quot;")+'" placeholder="e.g. vegetarian; tree-nut allergy" style="width:100%;font-size:12.5px;padding:6px 9px;border:1px solid #ccc;border-radius:5px;font-family:inherit;box-sizing:border-box;" />'
+    +     '<div style="font-size:11px;color:#777;line-height:1.5;margin-top:4px;">Affects restaurant suggestions.</div>'
+    +   '</div>'
+    +   '<div style="margin-bottom:6px;">'
+    +     '<label for="sp-languages" style="font-weight:600;color:#222;display:block;margin-bottom:4px;">Languages you speak</label>'
+    +     '<input id="sp-languages" type="text" value="'+curLanguages.replace(/"/g,"&quot;")+'" placeholder="e.g. English, conversational French" style="width:100%;font-size:12.5px;padding:6px 9px;border:1px solid #ccc;border-radius:5px;font-family:inherit;box-sizing:border-box;" />'
+    +     '<div style="font-size:11px;color:#777;line-height:1.5;margin-top:4px;">Helps Max gauge how off-the-beaten-path is realistic.</div>'
+    +   '</div>'
+
+    // v359.10: DISPLAY — units, temperature, date format, currency.
+    +   '<div style="margin:18px 0 10px;border-top:1px dashed #d8d4c8;"></div>'
+    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:4px;">Display</div>'
+    +   '<div style="font-size:11px;color:#aaa;font-style:italic;margin-bottom:10px;line-height:1.5;">Collected here now; the rest of the UI will pick them up in a follow-up pass.</div>'
+    +   '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">'
+    +     '<div>'
+    +       '<label style="font-weight:600;color:#222;display:block;margin-bottom:6px;">Distance units</label>'
+    +       '<label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;cursor:pointer;font-size:12px;font-weight:500;color:#222;text-transform:none;letter-spacing:0;"><input type="radio" name="sp-dist" value="metric" '+(curDistUnits==="metric"?"checked":"")+' style="margin:0;width:auto;" /> Metric (km)</label>'
+    +       '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:500;color:#222;text-transform:none;letter-spacing:0;"><input type="radio" name="sp-dist" value="imperial" '+(curDistUnits==="imperial"?"checked":"")+' style="margin:0;width:auto;" /> Imperial (mi)</label>'
+    +     '</div>'
+    +     '<div>'
+    +       '<label style="font-weight:600;color:#222;display:block;margin-bottom:6px;">Temperature</label>'
+    +       '<label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;cursor:pointer;font-size:12px;font-weight:500;color:#222;text-transform:none;letter-spacing:0;"><input type="radio" name="sp-temp" value="celsius" '+(curTempUnits==="celsius"?"checked":"")+' style="margin:0;width:auto;" /> Celsius (°C)</label>'
+    +       '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:500;color:#222;text-transform:none;letter-spacing:0;"><input type="radio" name="sp-temp" value="fahrenheit" '+(curTempUnits==="fahrenheit"?"checked":"")+' style="margin:0;width:auto;" /> Fahrenheit (°F)</label>'
+    +     '</div>'
+    +   '</div>'
+    +   '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:6px;">'
+    +     '<div>'
+    +       '<label style="font-weight:600;color:#222;display:block;margin-bottom:6px;">Date format</label>'
+    +       '<label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;cursor:pointer;font-size:12px;font-weight:500;color:#222;text-transform:none;letter-spacing:0;"><input type="radio" name="sp-date" value="iso" '+(curDateFmt==="iso"?"checked":"")+' style="margin:0;width:auto;" /> ISO (2026-05-12)</label>'
+    +       '<label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;cursor:pointer;font-size:12px;font-weight:500;color:#222;text-transform:none;letter-spacing:0;"><input type="radio" name="sp-date" value="us" '+(curDateFmt==="us"?"checked":"")+' style="margin:0;width:auto;" /> US (May 12, 2026)</label>'
+    +       '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:500;color:#222;text-transform:none;letter-spacing:0;"><input type="radio" name="sp-date" value="locale" '+(curDateFmt==="locale"?"checked":"")+' style="margin:0;width:auto;" /> Locale (browser default)</label>'
+    +     '</div>'
+    +     '<div>'
+    +       '<label for="sp-currency" style="font-weight:600;color:#222;display:block;margin-bottom:6px;">Currency</label>'
+    +       '<input id="sp-currency" type="text" value="'+curCurrency.replace(/"/g,"&quot;")+'" placeholder="e.g. USD, EUR, GBP" style="width:100%;font-size:12.5px;padding:6px 9px;border:1px solid #ccc;border-radius:5px;font-family:inherit;box-sizing:border-box;" />'
+    +       '<div style="font-size:11px;color:#777;line-height:1.5;margin-top:4px;">Three-letter code. For cost displays.</div>'
+    +     '</div>'
+    +   '</div>'
+
     + '</div>'
     // Footer
     + '<div style="padding:14px 22px;border-top:1px solid #eee;display:flex;justify-content:space-between;align-items:center;gap:10px;background:#fafafa;">'
@@ -17701,6 +17915,16 @@ function showSettingsPanel(){
     });
   });
 
+  // v359.10: wire mobility chips. Single-select; clicking a chip
+  // toggles 'on' state on that chip and clears all others.
+  var mobChips = box.querySelectorAll('[data-sp-mob]');
+  mobChips.forEach(function(c){
+    c.onclick = function(){
+      mobChips.forEach(function(o){ o.classList.remove("on"); });
+      c.classList.add("on");
+    };
+  });
+
   // Save: validate, write to prefs, close.
   document.getElementById("sp-save").onclick = function(){
     var hpd = parseInt(document.getElementById("sp-hpd").value, 10);
@@ -17711,6 +17935,18 @@ function showSettingsPanel(){
     var wk = !!document.getElementById("sp-with-kids").checked;
     var tr = (document.getElementById("sp-transport").value || "").trim();
     var ac = (document.getElementById("sp-accom").value || "").trim();
+    // v359.10: Bucket A reads.
+    var mobChip = box.querySelector('[data-sp-mob].on');
+    var mob = mobChip ? mobChip.getAttribute("data-sp-mob") : "";
+    var di = (document.getElementById("sp-dietary").value || "").trim();
+    var lg = (document.getElementById("sp-languages").value || "").trim();
+    var distR = box.querySelector('input[name="sp-dist"]:checked');
+    var du = distR ? distR.value : "metric";
+    var tempR = box.querySelector('input[name="sp-temp"]:checked');
+    var tu = tempR ? tempR.value : "celsius";
+    var dateR = box.querySelector('input[name="sp-date"]:checked');
+    var df = dateR ? dateR.value : "iso";
+    var cu = (document.getElementById("sp-currency").value || "").trim().toUpperCase();
     if (!isFinite(hpd) || hpd < 2 || hpd > 10) hpd = 6;
     if (!isFinite(spd) || spd < 1 || spd > 6) spd = 2;
     if (pm !== "loose" && pm !== "enough" && pm !== "notmuch") pm = "enough";
@@ -17726,6 +17962,13 @@ function showSettingsPanel(){
         MaxDB.prefs.set("withKids", wk);
         MaxDB.prefs.set("transport", tr);
         MaxDB.prefs.set("accommodation", ac);
+        MaxDB.prefs.set("mobility", mob);
+        MaxDB.prefs.set("dietary", di);
+        MaxDB.prefs.set("languages", lg);
+        MaxDB.prefs.set("distanceUnits", du);
+        MaxDB.prefs.set("temperatureUnits", tu);
+        MaxDB.prefs.set("dateFormat", df);
+        MaxDB.prefs.set("currency", cu);
       }
     } catch(_){}
     var status = document.getElementById("sp-status");
