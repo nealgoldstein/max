@@ -8540,6 +8540,44 @@ function renderTripStep1Place(){
   // touch the chips.
   if (!_tb.physicalAbility && _defaultMobility()) _tb.physicalAbility = _defaultMobility();
 
+  // v359.11 (v5 — progressive disclosure). Returning users — those who
+  // have submitted a brief before, so MaxDB.prefs.briefSeenOnce is set
+  // — see a collapsed summary of their Bucket-C defaults instead of
+  // every field. An "Change them just for this trip" button expands
+  // the full sections. Once expanded, the click sets _tb._briefExpanded
+  // and the next render shows the full layout (the flag is per-trip
+  // local state, not persisted).
+  var _briefCollapsed = _isReturningUser() && !_tb._briefExpanded;
+  var _briefCollapsedSummaryHTML = "";
+  if (_briefCollapsed) {
+    var _tc = _tb.travelersCount || _defaultTravelersCount();
+    var _wk = (typeof _tb.withKids === "boolean") ? _tb.withKids : _defaultWithKids();
+    var _mob = _tb.physicalAbility || _defaultMobility();
+    var _tr = (_tb.transport || _defaultTransport() || "").trim();
+    var _ac = (_tb.accommodation || _defaultAccommodation() || "").trim();
+    var _hpd = _tb.hoursPerDay || _defaultHoursPerDay();
+    var _spd = _tb.maxBigSightsPerDay || _defaultMaxBigSightsPerDay();
+    var _pm = _tb.paceMode || _defaultPaceMode();
+    var _dth = _tb.dayTripHours || _defaultDayTripHours();
+    var _mobLbl = ({fit:"Fit", moderate:"Moderate", limited:"Limited walking", elderly:"Elderly", mobility:"Mobility aid", other:"Other"})[_mob] || "not set";
+    var _pmLbl = ({loose:"Relaxed", enough:"Balanced", notmuch:"Intense"})[_pm] || _pm;
+    var _trShort = _tr ? (_tr.length > 60 ? _pmEsc(_tr.substring(0,57)) + "…" : _pmEsc(_tr)) : "not set";
+    var _acShort = _ac ? (_ac.length > 60 ? _pmEsc(_ac.substring(0,57)) + "…" : _pmEsc(_ac)) : "";
+    _briefCollapsedSummaryHTML = ''
+      + '<div class="tb-field">'
+      +   '<div style="background:#f7f9fc;border:1px solid #d8dfe8;border-radius:8px;padding:14px 18px;margin:14px 0;">'
+      +     '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#1a5fa8;margin-bottom:10px;">Your defaults apply for this trip</div>'
+      +     '<ul style="margin:0 0 12px 18px;padding:0;font-size:12.5px;color:#444;line-height:1.75;">'
+      +       '<li><strong>Travelers:</strong> ' + _tc + (_wk ? ', with kids' : '') + ' · ' + _mobLbl + ' mobility</li>'
+      +       '<li><strong>Travel:</strong> ' + _trShort + (_acShort ? '; ' + _acShort : '') + '</li>'
+      +       '<li><strong>Shape:</strong> ' + _hpd + ' hrs/day · ' + _spd + ' big sight' + (_spd==1?'':'s') + '/day · ' + _pmLbl + ' pace · ' + _dth + '-hr day-trip threshold</li>'
+      +     '</ul>'
+      +     '<button type="button" onclick="_tb._briefExpanded=true;renderTripStep1Place();" style="font-size:11.5px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:6px;padding:6px 12px;cursor:pointer;font-family:inherit;">▸ Change them just for this trip</button>'
+      +     '<div style="font-size:10.5px;color:#888;margin-top:6px;line-height:1.5;">Or update your defaults globally in <strong>⚙ Settings</strong>.</div>'
+      +   '</div>'
+      + '</div>';
+  }
+
   ov.innerHTML = ''
     + '<div class="tb-header">'
     +   '<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div></div></div>'
@@ -8563,6 +8601,14 @@ function renderTripStep1Place(){
     +   '<input id="tb-why-generally" placeholder="e.g. see the spectacular scenery" autocomplete="off" value="' + (_tb.whyGenerally||"").replace(/"/g,'&quot;') + '" oninput="_tb.whyGenerally=this.value;" />'
     +   '<div style="font-size:10.5px;color:#777;margin-top:6px;line-height:1.5;">The broader pull — what’s drawing you there.</div>'
     + '</div>'
+
+    // v359.11: collapse the next three Bucket-C sections (TRAVELERS, HOW,
+    // SHAPE) into a single "Your defaults apply" summary for returning
+    // users. The IIFE pattern below is a ternary that returns either
+    // the collapsed summary OR the empty-string-seeded concatenation
+    // of all three full sections. Empty string seed is a defensive
+    // belt-and-suspenders against the unary-plus trap we hit earlier.
+    + (_briefCollapsed ? _briefCollapsedSummaryHTML : (''
 
     // ── 2. THE TRAVELERS ────────────────────────────────
     // v359.9: travelers count + with-kids prefill from Settings defaults
@@ -8666,6 +8712,10 @@ function renderTripStep1Place(){
     +     '<a href="#" id="tb-dth-promote" style="display:none;">↑ Apply to defaults</a>'
     +   '</div>'
     + '</div>'
+
+    // v359.11: close the (_briefCollapsed ? ... : ('') ternary that
+    // wraps the three Bucket-C sections.
+    ))
 
     // ── 5. HARD LIMITS ────────────────────────────────
     + _tbSectionHead("Hard limits", "Optional but consequential. Things Max won’t route around.")
@@ -13821,12 +13871,17 @@ function goToTripStep2(){
   _tb.entry         = g("tb-entry")         ? g("tb-entry").value.trim()         : (_tb.entry||"");
   _tb.gettingOut    = g("tb-gettingOut")    ? g("tb-gettingOut").value.trim()    : (_tb.gettingOut||"");
   _tb.tbExit        = g("tb-exit")          ? g("tb-exit").value.trim()          : (_tb.tbExit||"");
-  _tb.transport     = g("tb-transport")     ? g("tb-transport").value.trim()     : (_tb.transport||"");
-  _tb.accommodation = g("tb-accommodation") ? g("tb-accommodation").value.trim() : (_tb.accommodation||"");
+  // v359.11: when the brief is in collapsed mode, the per-field inputs
+  // aren't in the DOM. Fall through to the global default in that
+  // case so the engine sees the user's saved Settings values, not
+  // empty strings. Same pattern as the existing hoursPerDay capture
+  // below.
+  _tb.transport     = g("tb-transport")     ? g("tb-transport").value.trim()     : (_tb.transport || _defaultTransport() || "");
+  _tb.accommodation = g("tb-accommodation") ? g("tb-accommodation").value.trim() : (_tb.accommodation || _defaultAccommodation() || "");
   _tb.hardlimits    = g("tb-hardlimits")    ? g("tb-hardlimits").value.trim()    : (_tb.hardlimits||"");
   // Round DM: new fields from the rebuilt Step 2.
-  _tb.travelersCount = g("tb-travelers-count") ? g("tb-travelers-count").value.trim() : (_tb.travelersCount||"");
-  _tb.withKids       = g("tb-with-kids") ? !!g("tb-with-kids").checked : !!_tb.withKids;
+  _tb.travelersCount = g("tb-travelers-count") ? g("tb-travelers-count").value.trim() : (_tb.travelersCount || _defaultTravelersCount());
+  _tb.withKids       = g("tb-with-kids") ? !!g("tb-with-kids").checked : ((typeof _tb.withKids === "boolean") ? _tb.withKids : _defaultWithKids());
   _tb.aboutTrip      = g("tb-about-trip") ? g("tb-about-trip").value.trim() : (_tb.aboutTrip||"");
   // v302: structured pace fields.
   // v359.8: also capture the two new Settings-backed fields added in
@@ -13873,6 +13928,11 @@ function goToTripStep2(){
       // Settings-only for now — no brief field to capture from yet.
       var validMob = ["fit","moderate","limited","elderly","mobility","other"];
       _saveIfUnset("mobility", _tb.physicalAbility, typeof _tb.physicalAbility === "string" && validMob.indexOf(_tb.physicalAbility) >= 0);
+      // v359.11: flag that the user has now submitted a brief, so
+      // subsequent briefs collapse the Bucket-C sections by default
+      // (progressive disclosure). Setting unconditionally is fine —
+      // re-setting on every submit is idempotent.
+      MaxDB.prefs.set("briefSeenOnce", true);
     }
   } catch(_){}
   // v306: mobility note. _tb.physicalAbility is set by _tbPickAbility on
@@ -17607,6 +17667,17 @@ function _defaultAccommodation(){
     if (typeof s === "string" && s.length) return s;
   } catch(_){}
   return "";
+}
+
+// v359.11 (v5 — progressive disclosure). Returning users see a
+// collapsed summary of their defaults instead of every C-bucket
+// field. Flag is set on first brief submission. To override for
+// a specific trip, click "Change them just for this trip."
+function _isReturningUser(){
+  try {
+    if (!window.MaxDB || !MaxDB.prefs) return false;
+    return !!MaxDB.prefs.get("briefSeenOnce");
+  } catch(_) { return false; }
 }
 
 // v359.10 (Bucket A): personal + display preferences. These are
