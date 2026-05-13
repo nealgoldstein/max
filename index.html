@@ -8678,63 +8678,92 @@ function renderTripStep1Place(){
     + '</div>'
 
     // ── 4. THE SHAPE ────────────────────────────────
-    // v359.8: four Settings-backed fields (hours/day, big sights/day,
-    // default pace, day-trip drive time). Each shows a small badge:
-    //   • Grey "Default · X" when matching the saved global default
-    //   • Blue "Override · X (default Y)" when different
-    // Plus an "↑ Apply to defaults" link when overridden, to promote
-    // the per-trip value to the user's global Settings. Wire-up runs
-    // in _tbSetupShapeBadges() after the render.
+    // v359.13: each Shape field renders LOCKED when a global default
+    // exists and the user hasn't explicitly chosen to override.
+    // Locked = bold value + "Override for this trip" link. Click
+    // the link → _tb._overrides[key] = true → re-render → field
+    // becomes editable (input + badges + apply-link as before).
+    // Fresh users (no pref saved) get the editable view directly
+    // since there's nothing to "default" to.
     + _tbSectionHead("The shape", "How long each day, how many sights — and how to think about day trips.")
     + '<div class="tb-field" id="tb-shape-fields">'
-    +   '<div style="font-size:10.5px;color:#777;margin-bottom:14px;font-style:italic;line-height:1.55;">These come from your <strong>⚙ Settings</strong> — change them here just for this trip. Click <strong>↑ Apply to defaults</strong> on any override to update your defaults globally.</div>'
-    // Row: hours/day
-    +   '<div class="tb-shape-row" style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;">'
-    +     '<label style="font-weight:500;color:#222;flex:0 0 240px;margin:0;font-size:12.5px;text-transform:none;letter-spacing:0;">Hours of sightseeing per day</label>'
-    +     '<input id="tb-hours-per-day" type="number" min="2" max="10" inputmode="numeric" value="' + (_tb.hoursPerDay || _defaultHoursPerDay()) + '" oninput="_tb.hoursPerDay=this.value;" style="width:64px;padding:5px 8px;font-size:12px;border:1px solid #ddd;border-radius:6px;font-family:inherit;text-align:center;" />'
-    +     '<span id="tb-hpd-badge"></span>'
-    +     '<a href="#" id="tb-hpd-promote" style="display:none;">↑ Apply to defaults</a>'
-    +   '</div>'
-    // Row: max big sights
-    +   '<div class="tb-shape-row" style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;">'
-    +     '<label style="font-weight:500;color:#222;flex:0 0 240px;margin:0;font-size:12.5px;text-transform:none;letter-spacing:0;">Max big sights per day</label>'
-    +     '<input id="tb-max-big-sights" type="number" min="1" max="6" inputmode="numeric" value="' + (_tb.maxBigSightsPerDay || _defaultMaxBigSightsPerDay()) + '" oninput="_tb.maxBigSightsPerDay=this.value;" style="width:64px;padding:5px 8px;font-size:12px;border:1px solid #ddd;border-radius:6px;font-family:inherit;text-align:center;" />'
-    +     '<span id="tb-spd-badge"></span>'
-    +     '<a href="#" id="tb-spd-promote" style="display:none;">↑ Apply to defaults</a>'
-    +   '</div>'
-    // Row: default pace (radio)
-    +   '<div class="tb-shape-row" style="display:flex;align-items:flex-start;gap:10px;margin-bottom:14px;flex-wrap:wrap;">'
-    +     '<label style="font-weight:500;color:#222;flex:0 0 240px;margin:0;font-size:12.5px;text-transform:none;letter-spacing:0;padding-top:4px;">Default pace</label>'
-    +     '<div style="display:flex;flex-direction:column;gap:6px;flex:1;min-width:260px;">'
-    +       (function(){
-            var cur = _tb.paceMode || _defaultPaceMode();
-            function rb(value, label, desc) {
-              var checked = (cur === value) ? "checked" : "";
-              return '<label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:12px;font-weight:500;color:#222;text-transform:none;letter-spacing:0;line-height:1.45;margin:0;padding:0;">'
-                + '<input type="radio" name="tb-pace-mode" value="' + value + '" ' + checked + ' onchange="_tb.paceMode=this.value;" style="margin-top:2px;flex-shrink:0;width:auto;" />'
-                + '<span><strong>' + label + '</strong><span style="font-weight:400;color:#666;font-size:11px;"> — ' + desc + '</span></span>'
-                + '</label>';
-            }
-            return rb("loose", "Relaxed", "Longer stays, fewer sights, open evenings.")
-              + rb("enough", "Balanced", "Moderate stays, 6–8 sights per destination.")
-              + rb("notmuch", "Intense", "Shorter stays, more sights, full evenings.");
-          })()
-    +       '<div style="display:flex;align-items:center;gap:10px;margin-top:4px;">'
-    +         '<span id="tb-pace-badge"></span>'
-    +         '<a href="#" id="tb-pace-promote" style="display:none;">↑ Apply to defaults</a>'
-    +       '</div>'
-    +     '</div>'
-    +   '</div>'
-    // Row: day-trip drive time
-    +   '<div class="tb-shape-row" style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;">'
-    +     '<label style="font-weight:500;color:#222;flex:0 0 240px;margin:0;font-size:12.5px;text-transform:none;letter-spacing:0;">Max drive time for a day trip</label>'
-    +     '<div style="display:flex;align-items:center;gap:5px;">'
-    +       '<input id="tb-day-trip-hours" type="number" min="1" max="6" step="0.5" inputmode="decimal" value="' + (_tb.dayTripHours || _defaultDayTripHours()) + '" oninput="_tb.dayTripHours=this.value;" style="width:64px;padding:5px 8px;font-size:12px;border:1px solid #ddd;border-radius:6px;font-family:inherit;text-align:center;" />'
-    +       '<span style="font-size:11px;color:#666;">hours</span>'
-    +     '</div>'
-    +     '<span id="tb-dth-badge"></span>'
-    +     '<a href="#" id="tb-dth-promote" style="display:none;">↑ Apply to defaults</a>'
-    +   '</div>'
+    +   (function(){
+        // Helper: locked vs unlocked check for one field.
+        function isLocked(prefKey, overrideKey){
+          if (!window.MaxDB || !MaxDB.prefs) return false;
+          var pref = MaxDB.prefs.get(prefKey);
+          if (pref == null || pref === "") return false; // no default → editable
+          return !(_tb._overrides && _tb._overrides[overrideKey]);
+        }
+        function renderLocked(label, displayValue, overrideKey){
+          return '<div class="tb-shape-row" style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap;">'
+            + '<label style="font-weight:500;color:#222;flex:0 0 240px;margin:0;font-size:12.5px;text-transform:none;letter-spacing:0;">' + label + '</label>'
+            + '<span style="font-size:13px;font-weight:600;color:#222;">' + displayValue + '</span>'
+            + '<a href="#" onclick="_tbUnlockShape(\'' + overrideKey + '\');event.preventDefault();" style="font-size:11px;font-weight:600;color:#1a5fa8;text-decoration:none;cursor:pointer;">Override for this trip</a>'
+            + '</div>';
+        }
+        // — Hours/day —
+        var hpdLocked = isLocked("paceHours", "hoursPerDay");
+        var hpdHTML = hpdLocked
+          ? renderLocked("Hours of sightseeing per day", _defaultHoursPerDay() + " hrs (your default)", "hoursPerDay")
+          : '<div class="tb-shape-row" style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;">'
+              + '<label style="font-weight:500;color:#222;flex:0 0 240px;margin:0;font-size:12.5px;text-transform:none;letter-spacing:0;">Hours of sightseeing per day</label>'
+              + '<input id="tb-hours-per-day" type="number" min="2" max="10" inputmode="numeric" value="' + (_tb.hoursPerDay || _defaultHoursPerDay()) + '" oninput="_tb.hoursPerDay=this.value;" style="width:64px;padding:5px 8px;font-size:12px;border:1px solid #ddd;border-radius:6px;font-family:inherit;text-align:center;" />'
+              + '<span id="tb-hpd-badge"></span>'
+              + '<a href="#" id="tb-hpd-promote" style="display:none;">↑ Apply to defaults</a>'
+              + '</div>';
+        // — Big sights —
+        var spdLocked = isLocked("sightsPerDay", "maxBigSightsPerDay");
+        var spdHTML = spdLocked
+          ? renderLocked("Max big sights per day", _defaultMaxBigSightsPerDay() + " (your default)", "maxBigSightsPerDay")
+          : '<div class="tb-shape-row" style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;">'
+              + '<label style="font-weight:500;color:#222;flex:0 0 240px;margin:0;font-size:12.5px;text-transform:none;letter-spacing:0;">Max big sights per day</label>'
+              + '<input id="tb-max-big-sights" type="number" min="1" max="6" inputmode="numeric" value="' + (_tb.maxBigSightsPerDay || _defaultMaxBigSightsPerDay()) + '" oninput="_tb.maxBigSightsPerDay=this.value;" style="width:64px;padding:5px 8px;font-size:12px;border:1px solid #ddd;border-radius:6px;font-family:inherit;text-align:center;" />'
+              + '<span id="tb-spd-badge"></span>'
+              + '<a href="#" id="tb-spd-promote" style="display:none;">↑ Apply to defaults</a>'
+              + '</div>';
+        // — Pace radio —
+        var paceLocked = isLocked("paceMode", "paceMode");
+        var paceLabelMap = {loose:"Relaxed", enough:"Balanced", notmuch:"Intense"};
+        var paceHTML = paceLocked
+          ? renderLocked("Default pace", paceLabelMap[_defaultPaceMode()] + " (your default)", "paceMode")
+          : '<div class="tb-shape-row" style="display:flex;align-items:flex-start;gap:10px;margin-bottom:14px;flex-wrap:wrap;">'
+              + '<label style="font-weight:500;color:#222;flex:0 0 240px;margin:0;font-size:12.5px;text-transform:none;letter-spacing:0;padding-top:4px;">Default pace</label>'
+              + '<div style="display:flex;flex-direction:column;gap:6px;flex:1;min-width:260px;">'
+              + (function(){
+                  var cur = _tb.paceMode || _defaultPaceMode();
+                  function rb(value, label, desc) {
+                    var checked = (cur === value) ? "checked" : "";
+                    return '<label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:12px;font-weight:500;color:#222;text-transform:none;letter-spacing:0;line-height:1.45;margin:0;padding:0;">'
+                      + '<input type="radio" name="tb-pace-mode" value="' + value + '" ' + checked + ' onchange="_tb.paceMode=this.value;" style="margin-top:2px;flex-shrink:0;width:auto;" />'
+                      + '<span><strong>' + label + '</strong><span style="font-weight:400;color:#666;font-size:11px;"> — ' + desc + '</span></span>'
+                      + '</label>';
+                  }
+                  return rb("loose", "Relaxed", "Longer stays, fewer sights, open evenings.")
+                    + rb("enough", "Balanced", "Moderate stays, 6–8 sights per destination.")
+                    + rb("notmuch", "Intense", "Shorter stays, more sights, full evenings.");
+                })()
+              + '<div style="display:flex;align-items:center;gap:10px;margin-top:4px;">'
+              + '<span id="tb-pace-badge"></span>'
+              + '<a href="#" id="tb-pace-promote" style="display:none;">↑ Apply to defaults</a>'
+              + '</div>'
+              + '</div>'
+              + '</div>';
+        // — Day-trip threshold —
+        var dthLocked = isLocked("dayTripHours", "dayTripHours");
+        var dthHTML = dthLocked
+          ? renderLocked("Max drive time for a day trip", _defaultDayTripHours() + " hours (your default)", "dayTripHours")
+          : '<div class="tb-shape-row" style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;">'
+              + '<label style="font-weight:500;color:#222;flex:0 0 240px;margin:0;font-size:12.5px;text-transform:none;letter-spacing:0;">Max drive time for a day trip</label>'
+              + '<div style="display:flex;align-items:center;gap:5px;">'
+              + '<input id="tb-day-trip-hours" type="number" min="1" max="6" step="0.5" inputmode="decimal" value="' + (_tb.dayTripHours || _defaultDayTripHours()) + '" oninput="_tb.dayTripHours=this.value;" style="width:64px;padding:5px 8px;font-size:12px;border:1px solid #ddd;border-radius:6px;font-family:inherit;text-align:center;" />'
+              + '<span style="font-size:11px;color:#666;">hours</span>'
+              + '</div>'
+              + '<span id="tb-dth-badge"></span>'
+              + '<a href="#" id="tb-dth-promote" style="display:none;">↑ Apply to defaults</a>'
+              + '</div>';
+        return hpdHTML + spdHTML + paceHTML + dthHTML;
+      })()
     + '</div>'
 
     // v359.11: close the (_briefCollapsed ? ... : ('') ternary that
@@ -8749,40 +8778,10 @@ function renderTripStep1Place(){
     + _tbSectionHead("Anything you’d like to avoid?", "Optional. Soft preferences Max will weigh.")
     + _tbAvoidFieldHtml()
 
-    // ── DISPLAY PREFERENCES ──
-    // v359.12.3 → v359.12.4: inline-editable rather than read-only.
-    // Neal's report on the read-only version: "there is no
-    // opportunity for user to set these." Each pick saves to
-    // MaxDB.prefs immediately and applies globally — display prefs
-    // genuinely are global (you don't want km this trip and mi
-    // next). Single-source-of-truth: setting here is exactly the
-    // same as setting in ⚙ Settings → Display.
-    + _tbSectionHead("How Max should display this trip", "Distance units, temperature scale, date format. Applies to every trip — pick once here, change anytime in ⚙ Settings.")
-    + (function(){
-        var u = (typeof _defaultDistanceUnits === "function") ? _defaultDistanceUnits() : "metric";
-        var t = (typeof _defaultTemperatureUnits === "function") ? _defaultTemperatureUnits() : "celsius";
-        var d = (typeof _defaultDateFormat === "function") ? _defaultDateFormat() : "iso";
-        function rg(name, val, options){
-          return options.map(function(o){
-            var on = (val === o.v);
-            return '<label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;font-weight:500;color:#222;text-transform:none;letter-spacing:0;margin:0 14px 0 0;">'
-              + '<input type="radio" name="' + name + '" value="' + o.v + '" ' + (on?'checked':'') + ' style="margin:0;width:auto;" onchange="_tbSetDisplayPref(\'' + name + '\', this.value);" />'
-              + '<span>' + o.l + '</span>'
-              + '</label>';
-          }).join("");
-        }
-        return '<div class="tb-field">'
-          + '<div style="margin-bottom:10px;"><label style="font-size:11px;color:#777;font-weight:600;text-transform:none;letter-spacing:0;display:inline-block;width:120px;">Distance:</label>'
-          +   rg("tb-dist-units", u, [{v:"metric",l:"Metric (km)"},{v:"imperial",l:"Imperial (mi)"}])
-          + '</div>'
-          + '<div style="margin-bottom:10px;"><label style="font-size:11px;color:#777;font-weight:600;text-transform:none;letter-spacing:0;display:inline-block;width:120px;">Temperature:</label>'
-          +   rg("tb-temp-units", t, [{v:"celsius",l:"°C"},{v:"fahrenheit",l:"°F"}])
-          + '</div>'
-          + '<div style="margin-bottom:4px;"><label style="font-size:11px;color:#777;font-weight:600;text-transform:none;letter-spacing:0;display:inline-block;width:120px;vertical-align:top;">Date format:</label>'
-          +   rg("tb-date-fmt", d, [{v:"iso",l:"2026-05-12"},{v:"us",l:"May 12, 2026"},{v:"locale",l:"Locale"}])
-          + '</div>'
-          + '</div>';
-      })()
+    // v359.13: Display preferences (units, temperature, date format)
+    // moved OUT of the brief and back into ⚙ Settings only. Neal:
+    // "no default setting, don't show them." The brief is about
+    // planning the trip; display chrome belongs in Settings.
 
     + '</div>'
 
@@ -17746,6 +17745,20 @@ function _defaultAccommodation(){
 //     fallback in defeated the whole "test as a new user" flow.
 // briefSeenOnce is set ONLY when the user submits a brief (any
 // brief — first or refresh). That's the right trigger.
+// v359.13: per-field "Override for this trip" toggle. When a global
+// default exists, the brief renders the field as locked (display
+// value + override link). Click the link → flip a flag on _tb →
+// re-render → field becomes editable. Same flag is checked at
+// goToTripStep2 submission time: locked fields fall through to the
+// default; unlocked fields use the typed value.
+function _tbUnlockShape(overrideKey){
+  if (!_tb._overrides) _tb._overrides = {};
+  _tb._overrides[overrideKey] = true;
+  _tb._preserveScrollOnce = true;
+  renderTripStep1Place();
+}
+window._tbUnlockShape = _tbUnlockShape;
+
 // v359.12.4: inline display-prefs handler. Wired onto the radios at
 // the bottom of the brief. Writes the chosen value to MaxDB.prefs
 // immediately so it applies to this trip and persists globally.
@@ -18118,7 +18131,11 @@ function showSettingsPanel(){
       } catch(e2) {
         console.warn("[Max settings] prefs.clear failed:", e2);
       }
-      try { localStorage.removeItem("max-onboarded"); } catch(_){}
+      // v359.12.5: do NOT clear max-onboarded. Welcome onboarding
+      // (which saves paceHours + sightsPerDay) was re-firing after
+      // Reset and partially re-populating prefs — defeating the
+      // "test as a fresh user" goal. Welcome stays a one-time
+      // first-install experience.
       var status = document.getElementById("sp-status");
       if (status) { status.style.color = "#c44"; status.textContent = "Preferences cleared. Reloading…"; }
       setTimeout(function(){ location.reload(); }, 800);
