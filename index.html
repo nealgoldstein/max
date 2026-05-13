@@ -12468,21 +12468,18 @@ function _updatePlaceActivitySummary(){
 // trimming (e.g. too many overnight bases for the days), the toast
 // surfaces what's left and the user trims places manually.
 function _makeItFit(){
-  console.log("[Max makeItFit] called");
+  try {
   // Parse the budget. No budget = nothing to fit against.
   var budget = (typeof _parseTripDuration === "function" && (_tb.duration || _tb.when))
     ? _parseTripDuration(_tb.duration || _tb.when) : null;
-  console.log("[Max makeItFit] budget:", budget, "_tb.duration:", _tb && _tb.duration, "_tb.when:", _tb && _tb.when);
-  if (!budget || !budget.max) { console.log("[Max makeItFit] bail: no budget"); return; }
+  if (!budget || !budget.max) return;
   var displayNights = _tb._pickerDisplayTotal || 0;
   var bufferAdds = _tb._pickerBufferAdds || 0;
-  console.log("[Max makeItFit] displayNights:", displayNights, "bufferAdds:", bufferAdds);
   // Target nights = budget.max - 1 (days\u2192nights). Subtract bufferAdds
   // because they're calculated separately by the picker \u2014 what we can
   // trim is the per-place nights inside placeActivities.
   var targetNights = (budget.max - 1) - bufferAdds;
   if (targetNights < 1) targetNights = 1;
-  console.log("[Max makeItFit] targetNights:", targetNights);
 
   // Aggregate kept place nights with refs back to placeActivities so
   // we can write changes back. Same key strategy as
@@ -12504,15 +12501,13 @@ function _makeItFit(){
       entry.refs.push({ actIdx: actIdx, plcIdx: plcIdx });
     });
   });
-  console.log("[Max makeItFit] keepRefs count:", keepRefs.length, "keepRefs:", JSON.parse(JSON.stringify(keepRefs)));
-  if (!keepRefs.length) { console.log("[Max makeItFit] bail: no keepRefs"); return; }
+  if (!keepRefs.length) return;
 
   // Greedy trim \u2014 always shave from the place with the most remaining
   // nights. Floor at 1 night per place.
   var MIN_NIGHTS = 1;
   var curTotal = keepRefs.reduce(function(t, e){ return t + e.nights; }, 0);
   var overage = curTotal - targetNights;
-  console.log("[Max makeItFit] curTotal:", curTotal, "targetNights:", targetNights, "overage:", overage);
   var trimmed = 0;
   while (trimmed < overage) {
     keepRefs.sort(function(a, b){ return b.nights - a.nights; });
@@ -12548,14 +12543,15 @@ function _makeItFit(){
     _updatePlaceActivitySummary();
   }
 
+  // Log the result so the user sees something in the console even
+  // without a toast helper. The summary line itself flips from amber
+  // to blue/green when the trim succeeded \u2014 that's the user-visible
+  // confirmation.
   var fullyFits = (trimmed >= overage);
   var paceLbl = ({loose:"Relaxed", enough:"Balanced", notmuch:"Intense"})[_tb.paceMode] || _tb.paceMode;
-  if (typeof showToast === "function") {
-    if (fullyFits) {
-      showToast("Trimmed " + trimmed + " night" + (trimmed!==1?"s":"") + " \u00b7 pace \u2192 " + paceLbl + ". Fits your budget.");
-    } else {
-      showToast("Trimmed " + trimmed + " night" + (trimmed!==1?"s":"") + " \u00b7 pace \u2192 " + paceLbl + ". Still " + (overage - trimmed) + " over \u2014 drop a destination above to finish.");
-    }
+  console.log("[Max makeItFit] result \u2014 trimmed " + trimmed + " night(s), pace \u2192 " + paceLbl + (fullyFits ? ", fits budget." : ", still " + (overage - trimmed) + " over."));
+  } catch(err) {
+    console.error("[Max makeItFit] threw:", err);
   }
 }
 
