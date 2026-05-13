@@ -8559,14 +8559,15 @@ function renderTripStep1Place(){
   // touch the chips.
   if (!_tb.physicalAbility && _defaultMobility()) _tb.physicalAbility = _defaultMobility();
 
-  // v359.11 (v5 — progressive disclosure). Returning users — those who
-  // have submitted a brief before, so MaxDB.prefs.briefSeenOnce is set
-  // — see a collapsed summary of their Bucket-C defaults instead of
-  // every field. An "Change them just for this trip" button expands
-  // the full sections. Once expanded, the click sets _tb._briefExpanded
-  // and the next render shows the full layout (the flag is per-trip
-  // local state, not persisted).
-  var _briefCollapsed = _isReturningUser() && !_tb._briefExpanded;
+  // v359.13.1: collapsed view killed. With per-field "Override for
+  // this trip" locked rendering (v359.13), each default shows up
+  // already at-a-glance ("6 hrs (your default)") with its own
+  // override link. The collapsed summary card duplicated that read
+  // but forced an all-or-nothing expand — wrong granularity per
+  // Neal's "each individual default" feedback. Always-false here
+  // keeps the variable in scope for the template ternary below
+  // without ripping that surgery up.
+  var _briefCollapsed = false;
   // v359.11.3: log each value as a separate arg so they show up in
   // the console without needing to expand an object.
   console.log("[Max brief] render — _briefCollapsed:", _briefCollapsed, "_briefExpanded:", !!_tb._briefExpanded, "_tb keys:", Object.keys(_tb || {}).join(","));
