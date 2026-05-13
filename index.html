@@ -10992,15 +10992,14 @@ function openTripHeroMapWindow(){
        the popup's own document because the opener can't reach into
        cross-document button DOM via simple onclick attributes. */
     + '<script>document.getElementById("closeBtn").onclick=function(){try{window.close();}catch(_){}};<\/script>'
+    // v359.5.20 (corrected from v359.5.17): popup-side onerror
+    // handler. Surfaces errors visibly inside the popup AND posts
+    // them back to the parent console. Earlier version had the
+    // explanatory comment between `+ ... +` operators in the string
+    // concat — JS unary-plus trap turned the next string into NaN
+    // and broke the whole popup script. Comment is now a // line
+    // comment on its own row so it doesn't sit between two +s.
     + '<script>'
-    +   /* v359.5.17: surface errors visibly. Neal: "still does not
-         work" / "map opens but window is blank." Silent failure
-         modes have been the recurring problem — the popup opens
-         (so document.write succeeded) but nothing renders inside.
-         A try/catch around the init body, plus an onerror handler
-         on window, captures whatever\'s actually throwing and
-         shows it in the popup (and posts it back to the parent
-         console, where DevTools is likely already open). */
     +   'window.addEventListener("error", function(e){'
     +     'var msg = "Popup error: " + (e && e.message ? e.message : "(unknown)") + " @ " + (e && e.filename ? e.filename : "?") + ":" + (e && e.lineno ? e.lineno : "?");'
     +     'try { if (window.opener && !window.opener.closed) window.opener.console.error("[Max view-larger popup]", msg, e && e.error); } catch(_){}'
@@ -11014,19 +11013,18 @@ function openTripHeroMapWindow(){
     +   '_logBack("init", "IIFE started");'
     +   'var pts = ' + ptsJson + ';'
     +   '_logBack("pts", pts.length + " destinations");'
-    +   /* v359.5.16: wait for Leaflet to finish loading before
-         initializing. The synchronous-after-script tag pattern was
-         racing the async CDN load — when Leaflet wasn\'t ready, the
-         old `if (typeof L === "undefined") return;` silently bailed
-         and the popup stayed blank. Retry up to 50 times with 50ms
-         spacing (≈2.5s total budget) before giving up. */
+    // v359.5.20: wait for Leaflet to finish loading before init.
+    // Earlier version had this as /* block comment */ between two +
+    // operators in the string-concat chain — unary-plus trap turned
+    // the next string into NaN and broke parsing. Line comment now.
     +   'function _runInit(){'
     +     'var map = L.map("map", {zoomControl: true, scrollWheelZoom: true, attributionControl: false}).setView([46.8, 8.2], 6);'
     +   'L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {maxZoom: 19}).addTo(map);'
     +   'L.tileLayer("https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png", {maxZoom: 19, opacity: 1.0}).addTo(map);'
     +   'var coords = pts.map(function(p){return [p.lat, p.lng];});'
-    +   /* v353.2: keep references to the route polylines so the Route
-         toggle button below can show/hide them on demand. */
+    // v353.2: route polylines kept on closure refs so the Route
+    // toggle button can show/hide them. Comment is OUT of the +
+    // chain (unary-plus trap; see v359.5.20).
     +   'var routeHalo = null, routeLine = null;'
     +   'function _drawRoute(){'
     +     'if (coords.length < 2) return;'
@@ -11038,8 +11036,8 @@ function openTripHeroMapWindow(){
     +     'if (routeLine) { try { map.removeLayer(routeLine); } catch(_){} routeLine = null; }'
     +   '}'
     +   '_drawRoute();'
-    +   /* Wire the Route toggle. Persist user choice across re-opens
-         via localStorage so the popup remembers their preference. */
+    // Wire the Route toggle. Persist user choice across re-opens
+    // via localStorage so the popup remembers their preference.
     +   'var rb = document.getElementById("routeBtn");'
     +   'var routeOff = false;'
     +   'try { routeOff = localStorage.getItem("max-popup-route-off") === "1"; } catch(_){}'
@@ -11096,13 +11094,8 @@ function openTripHeroMapWindow(){
     +       '});'
     +     '})(g);'
     +   '});'
-    +   /* v353.2: focus on the active destination if one was open
-         when the popup launched, instead of always fitting all
-         destinations. setView with a city-level zoom (12) feels
-         right for "show me where this place is" — close enough to
-         see the surrounding terrain, far enough to give context.
-         If there's no active dest (popup opened from trip
-         overview), fall back to the original fit-all behavior. */
+    // v353.2: focus on the active destination if one was open when
+    // the popup launched, instead of always fitting all destinations.
     +   'var activePt = pts.filter(function(p){return p.isActive;})[0];'
     +   'if (activePt) {'
     +     'map.setView([activePt.lat, activePt.lng], 12, {animate: false});'
@@ -11118,8 +11111,8 @@ function openTripHeroMapWindow(){
     +       'setTimeout(function(){ try { window.close(); } catch(_){} }, 5000);'
     +     '}'
     +   '});'
-    +   /* v359.5.16: close the _runInit function and add the
-         wait-for-Leaflet wrapper. */
+    // v359.5.20: close _runInit; the next + '}' lands on a STRING,
+    // not a comment between +s — safe from the unary-plus trap.
     + '}'
     + 'if (!pts.length) {'
     +   'document.body.insertAdjacentHTML("beforeend", \'<div style="position:fixed;inset:42px 0 0 0;display:flex;align-items:center;justify-content:center;color:#888;font-size:13px;">No destinations to show on the map yet.</div>\');'
