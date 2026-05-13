@@ -1852,6 +1852,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
         <div onclick="showInstallPrompt()" id="hs-install-link" style="display:none;font-size:11px;color:#1a5fa8;cursor:pointer;padding:3px 10px;border:1px solid #c8d8f0;border-radius:10px;white-space:nowrap;font-weight:600;" title="Install Max as an app — required on iPhone to receive trip reminders and alerts">⊕ Install</div>
         <div onclick="showWelcomeOnboarding()" id="hs-welcome-link" style="font-size:11px;color:#999;cursor:pointer;padding:3px 10px;border:1px solid #ddd;border-radius:10px;white-space:nowrap;" title="Re-read the welcome + change your pace setting">Welcome</div>
         <div onclick="showAboutMax()" id="hs-how-it-works" style="font-size:11px;color:#999;cursor:pointer;padding:3px 10px;border:1px solid #ddd;border-radius:10px;white-space:nowrap;" title="How Max works">How it works</div>
+        <div onclick="showSettingsPanel()" id="hs-settings-btn" style="font-size:11px;color:#999;cursor:pointer;padding:3px 10px;border:1px solid #ddd;border-radius:10px;white-space:nowrap;" title="Trip defaults — hours per day, pace, day-trip threshold">⚙ Settings</div>
         <div onclick="showHomeApiKeyForm()" id="hs-apikey-btn" style="font-size:11px;color:#999;cursor:pointer;padding:3px 10px;border:1px solid #ddd;border-radius:10px;white-space:nowrap;" title="Set your Anthropic API key (BYOK) — alternative to signing in">🔑 API key</div>
         <div onclick="MaxSync.showSignInModal()" id="hs-sync-btn" style="font-size:11px;color:#999;cursor:pointer;padding:3px 10px;border:1px solid #ddd;border-radius:10px;white-space:nowrap;" title="Sync with server">⇄ Sync</div>
       </div>
@@ -1972,6 +1973,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
         <button class="file-btn" onclick="showGlobalPasteConfirmationModal()" title="Paste a flight, hotel, or other booking confirmation — Max routes it to the right destination automatically">&#128203; Paste</button>
         <button class="file-btn" onclick="showAskMaxModal()" title="Chat with an AI about this trip — ask anything: weather, food, logistics, things to do">&#128172; Ask</button>
         <button class="file-btn" id="trip-search-btn" onclick="openTripSearch()" title="Search this trip">&#x1F50D;</button>
+        <button class="file-btn" onclick="showSettingsPanel()" title="Trip defaults — hours per day, pace, day-trip threshold">&#9881;</button>
         <button class="file-btn" id="api-key-btn" onclick="showApiKeyForm()" title="Set API key" style="opacity:0.6;">&#x1F511;</button>
         <button class="file-btn" id="sync-btn" onclick="MaxSync.showSignInModal()" title="Sync with server" style="opacity:0.6;">&#x21C4;</button>
         <span id="max-sync-status" style="font-size:11px;font-weight:600;color:#888;margin-left:8px;display:inline-flex;align-items:center;min-width:80px;"></span>
@@ -2669,9 +2671,16 @@ function _fqBannerInnerHtml(){
 // _ftParseHoursInput, _ftFormatHours moved to engine-trip.js (Round HB / Phase 1).
 
 function _ftGetThresholdHours(){
-  if (typeof trip === "undefined" || !trip) return 3;
+  // v359.6: fall through to the new MaxDB.prefs.dayTripHours global
+  // default before the hardcoded 3. Per-trip trip.dayTripThreshold
+  // still wins if it's set — the Settings panel only defines defaults.
+  var globalDefault = 3;
+  try {
+    if (typeof _defaultDayTripHours === "function") globalDefault = _defaultDayTripHours();
+  } catch(_){}
+  if (typeof trip === "undefined" || !trip) return globalDefault;
   var v = _ftParseHoursInput(trip.dayTripThreshold);
-  return (v && v > 0) ? v : 3;
+  return (v && v > 0) ? v : globalDefault;
 }
 
 // Recompute every destination's dateFrom/dateTo by walking forward
@@ -6515,7 +6524,10 @@ async function runCandidateSearch(requiredPlaces) {
     }
   }
 
-  var _paceDir = _paceDirective(_getPaceMode(_tb.pace));
+  // v359.6: fall back to the global paceMode pref when no per-trip
+  // pace text is set. _getPaceMode parses free-text input from the
+  // brief; if that returns null, the Settings-panel default kicks in.
+  var _paceDir = _paceDirective(_getPaceMode(_tb.pace) || _defaultPaceMode());
   var brief = "Region: " + (_tb.region||"")
     + (_tb.duration      ? "\nDuration: "      + _tb.duration      : "")
     + (_tb.when         ? "\nWhen: "          + _tb.when          : "")
@@ -11977,6 +11989,10 @@ function renderActivityPicker(){
       + '<button class="file-btn" onclick="saveTrip()" title="Save">Save</button>'
       + '<button class="file-btn" onclick="openTripSearch()" title="Search this trip">&#x1F50D;</button>';
   }
+  // v359.6: ⚙ Settings gear — opens the global trip-defaults panel.
+  // Sits before the 🔑 API-key button so it falls inside the main
+  // action group rather than getting tucked next to the dim BYOK key.
+  _pickerActionBtns += '<button class="file-btn" onclick="showSettingsPanel()" title="Trip defaults — hours per day, pace, day-trip threshold">&#9881;</button>';
   _pickerActionBtns += '<button class="file-btn" onclick="showApiKeyForm()" title="Set API key" style="opacity:0.6;">&#x1F511;</button>';
   // v359.2.3: all mode pills removed from picker chrome too. The
   // "Choreograph my trip →" CTA at the bottom of the picker is the
@@ -17046,6 +17062,178 @@ function _defaultMaxBigSightsPerDay(){
   } catch (_) {}
   return 2;
 }
+
+// v359.6: two new defaults added to the Settings panel. Pace mode
+// ("loose"/"enough"/"notmuch" — labeled Relaxed/Balanced/Intense in
+// UI) and day-trip drive-time threshold (hours). Both fall through
+// to historical hardcoded defaults so older trips keep working when
+// the prefs are absent.
+function _defaultPaceMode(){
+  try {
+    var m = (window.MaxDB && MaxDB.prefs) ? MaxDB.prefs.get("paceMode") : null;
+    if (m === "loose" || m === "enough" || m === "notmuch") return m;
+  } catch(_){}
+  return "enough";
+}
+function _defaultDayTripHours(){
+  try {
+    var h = (window.MaxDB && MaxDB.prefs) ? parseFloat(MaxDB.prefs.get("dayTripHours")) : NaN;
+    if (isFinite(h) && h > 0 && h <= 6) return h;
+  } catch(_){}
+  return 3;
+}
+
+// v359.6: Settings panel — global trip-defaults editor. Opens from
+// the ⚙ button in any of three headers (home, picker, trip-view).
+// Writes to MaxDB.prefs so changes sync across devices via the
+// existing prefs bridge. Four fields in v1:
+//   - paceHours:    hours of sightseeing on a full day (2-10)
+//   - sightsPerDay: max big (2+ hr) sights per day (1-6)
+//   - paceMode:     loose / enough / notmuch
+//   - dayTripHours: max drive time for a day trip (1-5 hours)
+// Per-trip override UI lands in a later commit (Shape B + badges
+// + apply-to-defaults links). For now this panel just edits the
+// globals — any existing per-trip override still wins.
+function showSettingsPanel(){
+  var existing = document.getElementById("settings-panel-overlay");
+  if (existing) existing.remove();
+
+  // Read current values.
+  var curHours = 6, curSights = 2, curPace = "enough", curDtHours = 3;
+  try {
+    if (window.MaxDB && MaxDB.prefs) {
+      var ph = parseInt(MaxDB.prefs.get("paceHours"), 10);
+      if (isFinite(ph) && ph >= 2 && ph <= 10) curHours = ph;
+      var sp = parseInt(MaxDB.prefs.get("sightsPerDay"), 10);
+      if (isFinite(sp) && sp >= 1 && sp <= 6) curSights = sp;
+      var pm = MaxDB.prefs.get("paceMode");
+      if (pm === "loose" || pm === "enough" || pm === "notmuch") curPace = pm;
+      var dh = parseFloat(MaxDB.prefs.get("dayTripHours"));
+      if (isFinite(dh) && dh > 0 && dh <= 6) curDtHours = dh;
+    }
+  } catch(_){}
+
+  var ov = document.createElement("div");
+  ov.id = "settings-panel-overlay";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:11900;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto;";
+  var box = document.createElement("div");
+  box.style.cssText = "background:#fff;border-radius:12px;width:520px;max-width:100%;max-height:calc(100vh - 48px);overflow:auto;padding:0;box-shadow:0 12px 40px rgba(0,0,0,.25);";
+
+  function _paceRadio(value, label, desc){
+    var checked = (curPace === value) ? "checked" : "";
+    return ''
+      + '<label style="display:flex;align-items:flex-start;gap:10px;padding:9px 11px;border:1px solid #ddd;border-radius:7px;cursor:pointer;margin-bottom:6px;background:'+(curPace===value?"#eef5ff":"#fff")+';transition:background 0.15s;">'
+      +   '<input type="radio" name="sp-pace" value="'+value+'" '+checked+' style="margin-top:2px;flex-shrink:0;" />'
+      +   '<div>'
+      +     '<div style="font-size:12.5px;font-weight:600;color:#222;">'+label+'</div>'
+      +     '<div style="font-size:11px;color:#666;margin-top:2px;line-height:1.45;">'+desc+'</div>'
+      +   '</div>'
+      + '</label>';
+  }
+
+  box.innerHTML = ''
+    // Header
+    + '<div style="padding:18px 22px 14px;border-bottom:1px solid #eee;display:flex;align-items:center;gap:10px;">'
+    +   '<div style="width:30px;height:30px;border-radius:50%;background:#1a5fa8;color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;">&#9881;</div>'
+    +   '<div style="flex:1;">'
+    +     '<div style="font-size:15px;font-weight:700;color:#222;">Trip defaults</div>'
+    +     '<div style="font-size:11.5px;color:#888;margin-top:1px;">These shape every trip Max builds. Override them per-trip from the &#9998; Parameters button.</div>'
+    +   '</div>'
+    +   '<button id="sp-close-x" type="button" style="background:#fff;border:1px solid #ddd;border-radius:6px;font-size:13px;color:#666;padding:5px 9px;cursor:pointer;font-family:inherit;" title="Close">&times;</button>'
+    + '</div>'
+    // Body
+    + '<div style="padding:18px 22px;font-size:12.5px;color:#333;line-height:1.55;">'
+    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:10px;">Pace &amp; duration</div>'
+
+    +   '<div style="margin-bottom:14px;">'
+    +     '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">'
+    +       '<label for="sp-hpd" style="font-weight:600;color:#222;flex:1;">Hours of sightseeing per day</label>'
+    +       '<input id="sp-hpd" type="number" min="2" max="10" step="1" value="'+curHours+'" inputmode="numeric" style="width:64px;text-align:center;font-size:13px;font-weight:600;padding:5px 7px;border:1px solid #ccc;border-radius:5px;font-family:inherit;" />'
+    +     '</div>'
+    +     '<div style="font-size:11px;color:#777;line-height:1.5;">How many hours you actually spend on sights — not what you &ldquo;should.&rdquo; Range 2&ndash;10.</div>'
+    +   '</div>'
+
+    +   '<div style="margin-bottom:14px;">'
+    +     '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">'
+    +       '<label for="sp-spd" style="font-weight:600;color:#222;flex:1;">Max big sights per day</label>'
+    +       '<input id="sp-spd" type="number" min="1" max="6" step="1" value="'+curSights+'" inputmode="numeric" style="width:64px;text-align:center;font-size:13px;font-weight:600;padding:5px 7px;border:1px solid #ccc;border-radius:5px;font-family:inherit;" />'
+    +     '</div>'
+    +     '<div style="font-size:11px;color:#777;line-height:1.5;">A &ldquo;big&rdquo; sight is a 2+ hour anchor &mdash; major museum, mountain railway, long hike. The cap keeps days from becoming a forced march.</div>'
+    +   '</div>'
+
+    +   '<div style="margin-bottom:16px;">'
+    +     '<div style="font-weight:600;color:#222;margin-bottom:6px;">Default pace</div>'
+    +     _paceRadio("loose",   "Relaxed", "Longer stays, fewer sights, open evenings. Optimize for sitting in cafes and unscheduled discovery.")
+    +     _paceRadio("enough",  "Balanced", "Moderate stays, 6&ndash;8 sights per destination, deliberate gaps for unexpected opportunities.")
+    +     _paceRadio("notmuch", "Intense", "Shorter stays, more sights, full evenings. Pack the days.")
+    +   '</div>'
+
+    +   '<div style="margin:18px 0 10px;border-top:1px dashed #d8d4c8;"></div>'
+    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:10px;">Day trips</div>'
+
+    +   '<div style="margin-bottom:6px;">'
+    +     '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">'
+    +       '<label for="sp-dth" style="font-weight:600;color:#222;flex:1;">Max drive time for a day trip</label>'
+    +       '<div style="display:flex;align-items:center;gap:5px;">'
+    +         '<input id="sp-dth" type="number" min="1" max="6" step="0.5" value="'+curDtHours+'" inputmode="decimal" style="width:64px;text-align:center;font-size:13px;font-weight:600;padding:5px 7px;border:1px solid #ccc;border-radius:5px;font-family:inherit;" />'
+    +         '<span style="font-size:12px;color:#666;">hours</span>'
+    +       '</div>'
+    +     '</div>'
+    +     '<div style="font-size:11px;color:#777;line-height:1.5;">Anything within this drive time from a hub can be a day trip instead of its own overnight stop. Total round-trip; one hour each way is fine, two hours each way is the upper end.</div>'
+    +   '</div>'
+    + '</div>'
+    // Footer
+    + '<div style="padding:14px 22px;border-top:1px solid #eee;display:flex;justify-content:space-between;align-items:center;gap:10px;background:#fafafa;">'
+    +   '<div id="sp-status" style="font-size:11px;color:#888;flex:1;"></div>'
+    +   '<button id="sp-cancel" type="button" style="font-size:12px;font-weight:600;padding:7px 14px;background:#fff;border:1px solid #ddd;border-radius:6px;color:#666;cursor:pointer;font-family:inherit;">Cancel</button>'
+    +   '<button id="sp-save" type="button" style="font-size:12px;font-weight:700;padding:7px 16px;background:#1a5fa8;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;">Save</button>'
+    + '</div>';
+
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+
+  // Wire close + cancel.
+  function close(){ if (ov.parentNode) ov.parentNode.removeChild(ov); }
+  document.getElementById("sp-close-x").onclick = close;
+  document.getElementById("sp-cancel").onclick = close;
+  ov.addEventListener("click", function(e){ if (e.target === ov) close(); });
+
+  // Highlight selected radio's pill background as user clicks.
+  var radioLabels = box.querySelectorAll('label[style*="border-radius:7px"]');
+  box.querySelectorAll('input[name="sp-pace"]').forEach(function(rb){
+    rb.addEventListener("change", function(){
+      radioLabels.forEach(function(lbl){
+        var inp = lbl.querySelector('input[name="sp-pace"]');
+        if (inp && inp.checked) lbl.style.background = "#eef5ff";
+        else if (lbl.style.background) lbl.style.background = "#fff";
+      });
+    });
+  });
+
+  // Save: validate, write to prefs, close.
+  document.getElementById("sp-save").onclick = function(){
+    var hpd = parseInt(document.getElementById("sp-hpd").value, 10);
+    var spd = parseInt(document.getElementById("sp-spd").value, 10);
+    var pm  = (box.querySelector('input[name="sp-pace"]:checked') || {}).value || "enough";
+    var dth = parseFloat(document.getElementById("sp-dth").value);
+    if (!isFinite(hpd) || hpd < 2 || hpd > 10) hpd = 6;
+    if (!isFinite(spd) || spd < 1 || spd > 6) spd = 2;
+    if (pm !== "loose" && pm !== "enough" && pm !== "notmuch") pm = "enough";
+    if (!isFinite(dth) || dth <= 0 || dth > 6) dth = 3;
+    try {
+      if (window.MaxDB && MaxDB.prefs) {
+        MaxDB.prefs.set("paceHours", hpd);
+        MaxDB.prefs.set("sightsPerDay", spd);
+        MaxDB.prefs.set("paceMode", pm);
+        MaxDB.prefs.set("dayTripHours", dth);
+      }
+    } catch(_){}
+    var status = document.getElementById("sp-status");
+    if (status) { status.style.color = "#3a7a4a"; status.textContent = "Saved &#10003;"; }
+    setTimeout(close, 600);
+  };
+}
+window.showSettingsPanel = showSettingsPanel;
 
 // LLM-readable directive for a given pace mode. Appended to candidate and
 // city-data generation prompts so the model shapes stay lengths, sight counts,
