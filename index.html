@@ -10821,17 +10821,16 @@ function _openTripHeroMapOverlay(){
       ';color:#fff;font-weight:700;font-size:' + (isActive ? 13 : 12) + 'px;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4);cursor:pointer;">' + (i + 1) + '</div>';
     var icon = L.divIcon({ html: html, className: "", iconSize: [size, size], iconAnchor: [size/2, size/2] });
     var m = L.marker([p.lat, p.lng], { icon: icon }).addTo(map);
-    m.bindTooltip(p.place + " · click to jump to itinerary card", { direction: "top", offset: [0, -size/2] });
-    // v359.5.12: clicking a pin closes the overlay and scrolls the
-    // trip list to the matching destination card. Neal's report:
-    // "clicking a destination on the larger map doesn't scroll to
-    // the place on the trip list." Same affordance the popup-window
-    // version had (via postMessage); now wired locally because the
-    // overlay lives in the same document.
+    m.bindTooltip(p.place + " · click to scroll trip list", { direction: "top", offset: [0, -size/2] });
+    // v359.5.14: pin click scrolls the trip list IN THE BACKGROUND
+    // but leaves the overlay open. Neal's report: "ok it does scroll,
+    // but then the window closes." The v359.5.12 auto-close meant
+    // the user had to re-open the overlay to inspect another pin.
+    // Now the overlay sticks around so you can hop between pins;
+    // closing is the ✕ button or Escape.
     (function(destId, placeName){
       m.on("click", function(){
         console.log("[Max view-larger overlay] pin clicked:", placeName, "destId:", destId);
-        if (typeof close === "function") { try { close(); } catch(_){} }
         if (destId && typeof _scrollToTripDest === "function") {
           _scrollToTripDest([destId]);
         } else {
