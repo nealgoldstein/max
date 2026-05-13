@@ -1181,6 +1181,151 @@
     return box;
   }
 
+  // ── v359.25: realism check at commit ──────────────────────
+  // Quick pre-Choreograph pass that flags rough spots in the kept
+  // candidate set before the trip materializes. Pure JS, no LLM —
+  // <50ms over the kept set. Returns an array of issues; empty array
+  // means the trip looks reasonable and Choreograph proceeds silently.
+  //
+  // Each issue: { severity: "amber"|"red", title, detail, places: [] }
+  //
+  // v1 checks:
+  //   1. Stacked long segments — 2+ consecutive >250km hops
+  //   2. Pace mismatch — relaxed pace but <2 nights/stop on average
+  //   3. Fragmentation — >40% of overnight stops are 1-nighters
+  //   4. Density — more destinations than (totalNights / 2)
+  //
+  // Checks are intentionally conservative: false-positives are worse
+  // than false-negatives here. A modal that fires on every trip
+  // becomes background noise.
+  function _runRealismCheck(orderedKeeps, tb) {
+    if (!Array.isArray(orderedKeeps) || orderedKeeps.length < 2) return [];
+    var issues = [];
+
+    // Filter to overnight stops only (day trips don't count toward
+    // segment distance; they're absorbed into hubs).
+    var overnights = orderedKeeps.filter(function(c){
+      return c && c.intent !== "dayTrip";
+    });
+
+    // ── 1. Stacked long segments ──────────────────────────────
+    // Compute pairwise distances between consecutive overnights.
+    function _dKm(a, b) {
+      if (!a || !b || a.lat == null || a.lng == null || b.lat == null || b.lng == null) return null;
+      var dLat = (a.lat - b.lat) * 111;
+      var dLng = (a.lng - b.lng) * 111 * Math.cos(((a.lat + b.lat) / 2) * Math.PI / 180);
+      return Math.sqrt(dLat*dLat + dLng*dLng);
+    }
+    var segs = [];
+    for (var i = 1; i < overnights.length; i++) {
+      var d = _dKm(overnights[i-1], overnights[i]);
+      if (d != null) segs.push({ from: overnights[i-1], to: overnights[i], km: d });
+    }
+    // Find runs of 2+ consecutive segments > 250km.
+    var STACK_THRESHOLD_KM = 250;
+    var runs = [];
+    var curRun = [];
+    segs.forEach(function(s){
+      if (s.km > STACK_THRESHOLD_KM) curRun.push(s);
+      else { if (curRun.length >= 2) runs.push(curRun.slice()); curRun = []; }
+    });
+    if (curRun.length >= 2) runs.push(curRun);
+    if (runs.length) {
+      runs.forEach(function(run){
+        var places = [run[0].from.place].concat(run.map(function(s){ return s.to.place; }));
+        var totalKm = run.reduce(function(t,s){ return t + s.km; }, 0);
+        issues.push({
+          severity: "amber",
+          title: run.length + " long hops in a row",
+          detail: places.join(" → ") + " — " + Math.round(totalKm) + " km of transit across " + run.length + " consecutive legs. Consider a buffer night between long hauls, or dropping a stop.",
+          places: places
+        });
+      });
+    }
+
+    // ── 2. Pace mismatch ──────────────────────────────────────
+    var pace = (tb && tb.paceMode) || (typeof global._defaultPaceMode === "function" ? global._defaultPaceMode() : null);
+    var totalNights = overnights.reduce(function(t,c){ return t + (typeof c.nights === "number" ? c.nights : 0); }, 0);
+    if (pace === "loose" && overnights.length >= 3 && totalNights > 0) {
+      var avgNightsPerStop = totalNights / overnights.length;
+      if (avgNightsPerStop < 2) {
+        issues.push({
+          severity: "amber",
+          title: "Relaxed pace, but a packed itinerary",
+          detail: "You set a relaxed pace, but this trip averages " + avgNightsPerStop.toFixed(1) + " nights per stop across " + overnights.length + " destinations. Most relaxed trips run 2–3+ nights per stop.",
+          places: overnights.map(function(c){ return c.place; })
+        });
+      }
+    }
+
+    // ── 3. Single-night fragmentation ─────────────────────────
+    var oneNighters = overnights.filter(function(c){ return c.nights === 1; });
+    if (overnights.length >= 4 && oneNighters.length / overnights.length > 0.4) {
+      issues.push({
+        severity: "amber",
+        title: oneNighters.length + " single-night stops",
+        detail: oneNighters.map(function(c){ return c.place; }).join(", ") + " — that's " + Math.round(100 * oneNighters.length / overnights.length) + "% of your overnight stops. Single nights mean you arrive, sleep, leave — most regions reward a second night.",
+        places: oneNighters.map(function(c){ return c.place; })
+      });
+    }
+
+    // ── 4. Density check ──────────────────────────────────────
+    // More destinations than (totalNights / 2) → less than 2 nights
+    // per stop on average. Flagged independently of pace so it shows
+    // even on intense-pace trips.
+    if (totalNights >= 4 && overnights.length > Math.ceil(totalNights / 2) + 1) {
+      issues.push({
+        severity: "red",
+        title: "More stops than the calendar comfortably supports",
+        detail: overnights.length + " destinations in " + totalNights + " nights — that's " + (totalNights / overnights.length).toFixed(1) + " nights per stop. Even at an intense pace, the math gets tight.",
+        places: overnights.map(function(c){ return c.place; })
+      });
+    }
+
+    return issues;
+  }
+
+  function _showRealismCheckModal(issues, onProceed, onBack) {
+    var existing = document.getElementById("realism-check-modal");
+    if (existing) existing.remove();
+
+    var ov = document.createElement("div");
+    ov.id = "realism-check-modal";
+    ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.32);z-index:10800;display:flex;align-items:center;justify-content:center;padding:20px;";
+
+    var issuesHtml = issues.map(function(iss){
+      var dotColor = iss.severity === "red" ? "#c44" : "#d59030";
+      return ''
+        + '<div style="padding:12px 14px;border:1px solid #eee;border-left:3px solid ' + dotColor + ';border-radius:6px;background:#fafafa;margin-bottom:8px;">'
+        +   '<div style="font-size:13px;font-weight:700;color:#222;margin-bottom:4px;">' + iss.title + '</div>'
+        +   '<div style="font-size:11.5px;color:#555;line-height:1.55;">' + iss.detail + '</div>'
+        + '</div>';
+    }).join("");
+
+    ov.innerHTML = ''
+      + '<div style="background:#fff;border-radius:12px;max-width:520px;width:100%;max-height:80vh;overflow-y:auto;box-shadow:0 8px 30px rgba(0,0,0,0.18);">'
+      +   '<div style="padding:20px 22px 4px;">'
+      +     '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">Before Max choreographs</div>'
+      +     '<div style="font-size:17px;font-weight:700;color:#111;margin-top:4px;">A few rough spots to consider</div>'
+      +     '<div style="font-size:12px;color:#666;margin-top:6px;line-height:1.55;">Max spotted some patterns in your picks that might be worth a second look. None of these are deal-breakers — just things travelers usually wish they\'d caught earlier.</div>'
+      +   '</div>'
+      +   '<div style="padding:14px 22px 8px;">' + issuesHtml + '</div>'
+      +   '<div style="padding:8px 22px 18px;display:flex;justify-content:flex-end;gap:8px;">'
+      +     '<button id="realism-back" style="font-size:13px;font-weight:500;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">← Back to picker</button>'
+      +     '<button id="realism-proceed" style="font-size:13px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 16px;cursor:pointer;font-family:inherit;">Choreograph anyway →</button>'
+      +   '</div>'
+      + '</div>';
+
+    document.body.appendChild(ov);
+
+    function close() { if (ov && ov.parentNode) ov.parentNode.removeChild(ov); }
+    ov.onclick = function(e){ if (e.target === ov) { close(); if (typeof onBack === "function") onBack(); } };
+    var backBtn = ov.querySelector("#realism-back");
+    if (backBtn) backBtn.onclick = function(){ close(); if (typeof onBack === "function") onBack(); };
+    var procBtn = ov.querySelector("#realism-proceed");
+    if (procBtn) procBtn.onclick = function(){ close(); if (typeof onProceed === "function") onProceed(); };
+  }
+
   // ── Public surface ────────────────────────────────────────
   var MaxPickerUI = {
     renderPickerCategoryNav:    _renderPickerCategoryNav,
@@ -1195,6 +1340,8 @@
     renderCandidateCard:        _renderCandidateCard,
     renderTimeLensItinerary:    _renderTimeLensItinerary,
     renderTripDetailsStrip:     _renderTripDetailsStrip,
+    runRealismCheck:            _runRealismCheck,
+    showRealismCheckModal:      _showRealismCheckModal,
   };
 
   global.MaxPickerUI = MaxPickerUI;

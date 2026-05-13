@@ -15315,15 +15315,53 @@ function closePlacesOverlay(){
     // Nothing to build — stay where we are and let the user reconsider.
     return;
   }
-  // Always materialize the picks into a trip and enter the plan view.
-  // Previously, if a prior trip existed in memory (e.g. from localStorage
-  // hydration), we took an `else` branch that called drawTripMode() without
-  // enterApp() — so home-screen was still mounted underneath and the user
-  // got dropped back to home instead of the schedule. The fix: always go
-  // through buildFromCandidates(), which runs the Max bridge, calls
-  // enterApp() (hides home, shows the app shell), and then drawTripMode()
-  // to render the schedule.
-  buildFromCandidates();
+
+  // v359.25: realism check at commit. Pre-publish pass over the kept
+  // candidates for rough spots (stacked long hops, fragmentation, pace
+  // mismatch, density). If issues are found, modal asks user to
+  // proceed-anyway or back-to-picker. If clean, build silently.
+  // Reopens the picker overlay on "back" so the user can edit
+  // (closePlacesOverlay already hid it above).
+  (function _realismGate(){
+    if (!window.MaxPickerUI || typeof MaxPickerUI.runRealismCheck !== "function") {
+      buildFromCandidates();
+      return;
+    }
+    var ordered;
+    try {
+      var orderRes = (typeof orderKeptCandidates === "function" || typeof MaxEnginePicker.orderKeptCandidates === "function")
+        ? (MaxEnginePicker.orderKeptCandidates || orderKeptCandidates)(kept, _mdcItems || [], _tb.entry || "", _tb.tbExit || "")
+        : null;
+      ordered = (orderRes && Array.isArray(orderRes.ordered)) ? orderRes.ordered : kept.slice();
+    } catch(e) {
+      console.warn("[Max] realism-check: ordering failed, using raw kept order:", e);
+      ordered = kept.slice();
+    }
+    var issues;
+    try {
+      issues = MaxPickerUI.runRealismCheck(ordered, _tb);
+    } catch(e) {
+      console.warn("[Max] realism-check: evaluator threw:", e);
+      issues = [];
+    }
+    if (!issues || !issues.length) {
+      buildFromCandidates();
+      return;
+    }
+    console.log("[Max] realism-check: " + issues.length + " issue(s)", issues);
+    MaxPickerUI.showRealismCheckModal(
+      issues,
+      function onProceed(){ buildFromCandidates(); },
+      function onBack(){
+        // Re-open the picker overlay so the user can edit.
+        var ov = g("candidate-explorer-overlay");
+        if (ov) ov.style.display = "block";
+        if (typeof renderCandidateCards === "function") {
+          renderCandidateCards(_tb && _tb.candidates ? _tb.candidates : []);
+        }
+      }
+    );
+  })();
 }
 
 // Reconcile the Explorer's kept set against the existing trip.destinations.
