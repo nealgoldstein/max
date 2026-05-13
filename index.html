@@ -8582,10 +8582,18 @@ function renderTripStep1Place(){
     return !(_tb._overrides && _tb._overrides[overrideKey]);
   }
   function _briefRenderLocked(label, displayValue, overrideKey){
-    return '<div class="tb-field" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">'
-      + '<label style="font-weight:500;color:#222;flex:0 0 240px;margin:0;font-size:12.5px;text-transform:none;letter-spacing:0;">' + label + '</label>'
-      + '<span style="font-size:13px;font-weight:600;color:#222;flex:1;min-width:200px;">' + displayValue + '</span>'
-      + '<a href="#" onclick="_tbUnlockShape(\'' + overrideKey + '\');event.preventDefault();" style="font-size:11px;font-weight:600;color:#1a5fa8;text-decoration:none;cursor:pointer;">Override for this trip</a>'
+    // v359.14.1: don't let the value's flex push the override link
+    // off the visible row. Earlier version used flex:1 + min-width:
+    // 200px on the value <span>, which on long defaults wrapped the
+    // Override link below the truncated text where it was invisible.
+    // New layout: label on its own row, then a single line with
+    // the value and override link side-by-side.
+    return '<div class="tb-field" style="margin-bottom:14px;">'
+      + '<label style="font-weight:500;color:#222;margin:0 0 4px;font-size:12.5px;text-transform:none;letter-spacing:0;display:block;">' + label + '</label>'
+      + '<div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;">'
+      +   '<span style="font-size:13px;font-weight:600;color:#222;">' + displayValue + '</span>'
+      +   '<a href="#" onclick="_tbUnlockShape(\'' + overrideKey + '\');event.preventDefault();" style="font-size:11.5px;font-weight:600;color:#1a5fa8;text-decoration:none;cursor:pointer;white-space:nowrap;">Override for this trip ↻</a>'
+      + '</div>'
       + '</div>';
   }
   function _briefTrunc(s, n){
@@ -8741,20 +8749,11 @@ function renderTripStep1Place(){
     + _tbSectionHead("The shape", "How long each day, how many sights — and how to think about day trips.")
     + '<div class="tb-field" id="tb-shape-fields">'
     +   (function(){
-        // Helper: locked vs unlocked check for one field.
-        function isLocked(prefKey, overrideKey){
-          if (!window.MaxDB || !MaxDB.prefs) return false;
-          var pref = MaxDB.prefs.get(prefKey);
-          if (pref == null || pref === "") return false; // no default → editable
-          return !(_tb._overrides && _tb._overrides[overrideKey]);
-        }
-        function renderLocked(label, displayValue, overrideKey){
-          return '<div class="tb-shape-row" style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap;">'
-            + '<label style="font-weight:500;color:#222;flex:0 0 240px;margin:0;font-size:12.5px;text-transform:none;letter-spacing:0;">' + label + '</label>'
-            + '<span style="font-size:13px;font-weight:600;color:#222;">' + displayValue + '</span>'
-            + '<a href="#" onclick="_tbUnlockShape(\'' + overrideKey + '\');event.preventDefault();" style="font-size:11px;font-weight:600;color:#1a5fa8;text-decoration:none;cursor:pointer;">Override for this trip</a>'
-            + '</div>';
-        }
+        // v359.14.1: use the lifted helpers so all eight Bucket C
+        // fields share the same locked-row layout (label above, then
+        // value + override link side-by-side).
+        var isLocked = _briefIsLocked;
+        var renderLocked = _briefRenderLocked;
         // — Hours/day —
         var hpdLocked = isLocked("paceHours", "hoursPerDay");
         var hpdHTML = hpdLocked
