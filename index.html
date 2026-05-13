@@ -12485,6 +12485,8 @@ function _makeItFit(){
   // we can write changes back. Same key strategy as
   // _updatePlaceActivitySummary: normalize, take MAX nights across
   // activities for each place.
+  // v359.30: also track activityCount (how many activities this place
+  // unlocks) so the drop phase can target least-essential places.
   var keepRefs = [];
   (_tb.placeActivities || []).forEach(function(it, actIdx){
     (it.requiredPlaces || []).forEach(function(p, plcIdx){
@@ -12494,34 +12496,70 @@ function _makeItFit(){
       var key = (typeof _normPlaceName === "function") ? _normPlaceName(p.place||"") : (p.place||"").toLowerCase();
       var entry = keepRefs.find(function(e){ return e.key === key; });
       if (!entry) {
-        entry = { key: key, place: p.place, nights: p.nights || 1, refs: [] };
+        entry = { key: key, place: p.place, nights: p.nights || 1, refs: [], activityCount: 0 };
         keepRefs.push(entry);
       }
       if ((p.nights || 0) > entry.nights) entry.nights = p.nights;
       entry.refs.push({ actIdx: actIdx, plcIdx: plcIdx });
+      entry.activityCount += 1;
     });
   });
   if (!keepRefs.length) return;
 
-  // Greedy trim \u2014 always shave from the place with the most remaining
-  // nights. Floor at 1 night per place.
+  // Tag entry/exit places \u2014 these are NEVER auto-dropped.
+  var entryNorm = (typeof _normPlaceName === "function") ? _normPlaceName((_tb.entry||"").trim()) : ((_tb.entry||"").trim().toLowerCase());
+  var exitNorm  = (typeof _normPlaceName === "function") ? _normPlaceName((_tb.tbExit||"").trim()) : ((_tb.tbExit||"").trim().toLowerCase());
+  keepRefs.forEach(function(e){
+    e.isEntryExit = (entryNorm && e.key === entryNorm) || (exitNorm && e.key === exitNorm);
+  });
+
+  // \u2500\u2500 Phase 1: greedy trim \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  // Always shave from the place with the most remaining nights.
+  // Floor at 1 night per kept place.
   var MIN_NIGHTS = 1;
-  var curTotal = keepRefs.reduce(function(t, e){ return t + e.nights; }, 0);
-  var overage = curTotal - targetNights;
+  function _sumNights(){ return keepRefs.reduce(function(t, e){ return e.dropped ? t : t + e.nights; }, 0); }
+  var initialTotal = _sumNights();
   var trimmed = 0;
-  while (trimmed < overage) {
+  while (_sumNights() > targetNights) {
     keepRefs.sort(function(a, b){ return b.nights - a.nights; });
-    var top = keepRefs[0];
+    var top = keepRefs.find(function(e){ return !e.dropped; });
     if (!top || top.nights <= MIN_NIGHTS) break;
     top.nights -= 1;
     trimmed++;
   }
-  // Write back the trimmed nights to every contributing requiredPlace
-  // so the picker's summary recompute sees the new max consistently.
+
+  // \u2500\u2500 Phase 2: drop places (v359.30) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  // If trimming to MIN_NIGHTS still doesn't fit, drop the
+  // least-essential overnight places one at a time. "Least
+  // essential" = unlocks the fewest activities. Entry/exit are
+  // never dropped.
+  var dropped = [];
+  while (_sumNights() > targetNights) {
+    var candidates = keepRefs.filter(function(e){
+      return !e.dropped && !e.isEntryExit;
+    });
+    if (!candidates.length) break;
+    // Sort: lowest activityCount first; ties broken by name ASC for
+    // determinism.
+    candidates.sort(function(a, b){
+      if (a.activityCount !== b.activityCount) return a.activityCount - b.activityCount;
+      return (a.place || "").localeCompare(b.place || "");
+    });
+    var victim = candidates[0];
+    victim.dropped = true;
+    dropped.push(victim.place);
+  }
+
+  // Write back: trimmed nights for survivors, _keep:false for dropped.
   keepRefs.forEach(function(entry){
     entry.refs.forEach(function(ref){
       var p = _tb.placeActivities[ref.actIdx] && _tb.placeActivities[ref.actIdx].requiredPlaces[ref.plcIdx];
-      if (p) p.nights = entry.nights;
+      if (!p) return;
+      if (entry.dropped) {
+        p._keep = false;
+      } else {
+        p.nights = entry.nights;
+      }
     });
   });
 
@@ -12542,26 +12580,35 @@ function _makeItFit(){
     _updatePlaceActivitySummary();
   }
 
-  // User feedback: the summary line itself flips from amber to
-  // blue/green when the trim succeeded \u2014 that's the silent visual
-  // confirmation. For the partial case (too many overnight bases
-  // to fit even at 1 night each), we need to be louder, otherwise
-  // the user clicks Make it fit, the gate barely changes, and they
-  // think nothing happened.
-  var fullyFits = (trimmed >= overage);
+  // v359.30: user feedback \u2014 surface trim count AND any auto-dropped
+  // places. If we dropped places, the user needs to know about it
+  // explicitly (otherwise destinations vanish without explanation).
+  // If we STILL can't fit after dropping (entry+exit alone > budget),
+  // tell them they need to extend the budget.
+  var finalTotal = _sumNights();
+  var fullyFits = (finalTotal <= targetNights);
   var paceLbl = ({loose:"Relaxed", enough:"Balanced", notmuch:"Intense"})[_tb.paceMode] || _tb.paceMode;
-  console.log("[Max makeItFit] result \u2014 trimmed " + trimmed + " night(s), pace \u2192 " + paceLbl + (fullyFits ? ", fits budget." : ", still " + (overage - trimmed) + " over."));
-  if (!fullyFits) {
-    var stillOver = overage - trimmed;
-    alert(
-      "Max trimmed " + trimmed + " night" + (trimmed!==1?"s":"") +
-      " and bumped pace to " + paceLbl + ", but you\u2019re still " +
-      stillOver + " day" + (stillOver!==1?"s":"") +
-      " over your budget.\n\n" +
-      "You have too many overnight places to fit even at 1 night each. " +
-      "Drop a destination above, or click \u2018Extend to " +
-      ((budget.max + stillOver)) + " days\u2019 to extend your dates."
-    );
+  console.log("[Max makeItFit] trimmed " + trimmed + " night(s), dropped [" + dropped.join(", ") + "], pace \u2192 " + paceLbl + (fullyFits ? ", fits budget." : ", still over."));
+
+  // Build a single summary message.
+  var msgLines = [];
+  if (trimmed > 0) {
+    msgLines.push("Trimmed " + trimmed + " night" + (trimmed!==1?"s":"") + " from longest stays.");
+  }
+  if (dropped.length > 0) {
+    msgLines.push("Dropped destination" + (dropped.length!==1?"s":"") + ": " + dropped.join(", ") + ".");
+  }
+  msgLines.push("Pace set to " + paceLbl + ".");
+  if (fullyFits) {
+    msgLines.push("\nTrip now fits your " + budget.max + "-day budget.");
+  } else {
+    var stillOver = finalTotal - targetNights;
+    msgLines.push("\nStill " + stillOver + " day" + (stillOver!==1?"s":"") + " over \u2014 only entry/exit cities remain and they alone exceed your budget. Click \u2018Extend to " + (budget.max + stillOver) + " days\u2019 to fit.");
+  }
+  // Only alert when something material happened or when stuck. If the
+  // gate fired but Make it fit had nothing to do, stay silent.
+  if (trimmed > 0 || dropped.length > 0 || !fullyFits) {
+    alert(msgLines.join("\n"));
   }
   } catch(err) {
     console.error("[Max makeItFit] threw:", err);
