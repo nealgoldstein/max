@@ -10807,13 +10807,25 @@ function _openTripHeroMapOverlay(){
 }
 
 function openTripHeroMapWindow(){
-  // v359.5.7-debug: noisy console logging so Neal can paste the
-  // browser log if the path still misbehaves. Report (v359.5.6
-  // follow-up): "large map in trip still doesn't open." The function
-  // has three exit paths (PWA → overlay, existing window → focus,
-  // window.open + Blob URL) and any of them can fail silently. Tag
-  // every step so the post-deploy trace is unambiguous.
+  // v359.5.11: just use the in-page overlay for everyone. Neal's
+  // report after v359.5.6/.7/.8: "large map in trip still doesn't
+  // open." The window.open path was failing somewhere and the trace
+  // logging wasn't enough to isolate the cause across the device
+  // matrix (Chrome desktop, PWA, Safari, etc.). The overlay path is
+  // proven reliable everywhere — it's already what mobile and PWA
+  // users get, and there's no functional loss for desktop users:
+  // the overlay fills the entire viewport with the same satellite
+  // map and pin set. If anyone genuinely wants a free-floating
+  // browser window later (e.g., second-monitor setup), we can add a
+  // "↗ Pop out" button inside the overlay header that opens
+  // window.open from a real user gesture inside the overlay.
   var DBG = "[Max view-larger]";
+  console.log(DBG, "→ routing to in-page overlay (single-path)");
+  _openTripHeroMapOverlay();
+  return;
+  /* eslint-disable no-unreachable */
+  // Legacy popup-window path kept below for reference; not reachable
+  // until/unless we add the pop-out option mentioned above.
   console.log(DBG, "openTripHeroMapWindow invoked", {
     innerWidth: window.innerWidth,
     hasMatchMedia: !!window.matchMedia,
