@@ -8299,10 +8299,116 @@ function _tbSetupShapeBadges(){
 
   // Pass the hardcoded fallback as the last arg so the badge can
   // compare against it when no pref has been saved yet.
+  // v359.9: text-field setup. Free-text inputs (transport, accommodation)
+  // can't show their full value in a 10-line badge so we use a truncated
+  // form: "Override (default 'short text…')". The full input shows the
+  // user's typed value as usual.
+  function setupTextField(inputId, badgeId, promoteId, prefKey){
+    var input = document.getElementById(inputId);
+    var badge = document.getElementById(badgeId);
+    var promote = document.getElementById(promoteId);
+    if (!input || !badge) return;
+    function effectiveDefault(){
+      var pref = readPref(prefKey);
+      return (pref != null && pref !== "") ? pref : null;
+    }
+    function trunc(s){
+      s = String(s || "");
+      return s.length > 36 ? s.substring(0, 33) + "…" : s;
+    }
+    function update(){
+      var def = effectiveDefault();
+      var cur = (input.value || "").trim();
+      // No saved default AND no typed value → nothing to show.
+      if (!def && !cur) { badge.style.cssText = "display:none;"; if (promote) promote.style.display = "none"; return; }
+      // Typed value present but no saved default → offer "Save as default."
+      if (!def && cur) {
+        badge.style.cssText = BADGE_DEFAULT;
+        badge.textContent = "Not saved as default";
+        if (promote) { promote.style.cssText = PROMOTE_LINK; promote.textContent = "↑ Save as default"; }
+        return;
+      }
+      if (cur === def) {
+        badge.style.cssText = BADGE_DEFAULT;
+        badge.textContent = "Default";
+        if (promote) promote.style.display = "none";
+      } else {
+        badge.style.cssText = BADGE_OVERRIDE;
+        badge.textContent = "Override (default: " + trunc(def) + ")";
+        if (promote) { promote.style.cssText = PROMOTE_LINK; promote.textContent = "↑ Apply to defaults"; }
+      }
+    }
+    input.addEventListener("input", update);
+    if (promote) {
+      promote.onclick = function(e){
+        e.preventDefault();
+        try { if (window.MaxDB && MaxDB.prefs) MaxDB.prefs.set(prefKey, (input.value||"").trim()); } catch(_){}
+        update();
+      };
+    }
+    update();
+  }
+
+  // v359.9: checkbox setup. Compares boolean state to the saved pref.
+  // Used by the with-kids checkbox alongside the travelersCount number
+  // (their badge is shared at "tb-trav-badge").
+  function setupCompoundTravelers(){
+    var inp = document.getElementById("tb-travelers-count");
+    var chk = document.getElementById("tb-with-kids");
+    var badge = document.getElementById("tb-trav-badge");
+    var promote = document.getElementById("tb-trav-promote");
+    if (!inp || !chk || !badge) return;
+    function effectiveDefaults(){
+      var n = readPref("travelersCount");
+      n = (n != null) ? parseInt(n, 10) : 2;
+      if (!isFinite(n) || n < 1 || n > 40) n = 2;
+      var k = readPref("withKids");
+      k = (k === true || k === "true" || k === 1 || k === "1");
+      return { count: n, kids: k };
+    }
+    function update(){
+      var def = effectiveDefaults();
+      var cur = { count: parseInt(inp.value, 10), kids: !!chk.checked };
+      var sameC = cur.count === def.count;
+      var sameK = cur.kids === def.kids;
+      if (sameC && sameK) {
+        badge.style.cssText = BADGE_DEFAULT;
+        badge.textContent = "Default · " + def.count + (def.kids ? ", with kids" : "");
+        if (promote) promote.style.display = "none";
+      } else {
+        var defLabel = def.count + (def.kids ? ", with kids" : "");
+        var curLabel = cur.count + (cur.kids ? ", with kids" : "");
+        badge.style.cssText = BADGE_OVERRIDE;
+        badge.textContent = "Override · " + curLabel + " (default " + defLabel + ")";
+        if (promote) promote.style.cssText = PROMOTE_LINK;
+      }
+    }
+    inp.addEventListener("input", update);
+    chk.addEventListener("change", update);
+    if (promote) {
+      promote.onclick = function(e){
+        e.preventDefault();
+        var n = parseInt(inp.value, 10);
+        if (!isFinite(n) || n < 1 || n > 40) n = 2;
+        try {
+          if (window.MaxDB && MaxDB.prefs) {
+            MaxDB.prefs.set("travelersCount", n);
+            MaxDB.prefs.set("withKids", !!chk.checked);
+          }
+        } catch(_){}
+        update();
+      };
+    }
+    update();
+  }
+
   setupNumberField("tb-hours-per-day", "tb-hpd-badge", "tb-hpd-promote", "paceHours", "hrs", 6);
   setupNumberField("tb-max-big-sights", "tb-spd-badge", "tb-spd-promote", "sightsPerDay", "", 2);
   setupRadioField("tb-pace-mode", "tb-pace-badge", "tb-pace-promote", "paceMode", {loose:"Relaxed", enough:"Balanced", notmuch:"Intense"}, "enough");
   setupNumberField("tb-day-trip-hours", "tb-dth-badge", "tb-dth-promote", "dayTripHours", "hrs", 3);
+  setupCompoundTravelers();
+  setupTextField("tb-transport", "tb-transport-badge", "tb-transport-promote", "transport");
+  setupTextField("tb-accommodation", "tb-accom-badge", "tb-accom-promote", "accommodation");
 }
 
 // Place-first flow (Stage C). User names a place; Max surfaces what's there;
@@ -8386,25 +8492,41 @@ function renderTripStep1Place(){
     + '</div>'
 
     // ── 2. THE TRAVELERS ────────────────────────────────
+    // v359.9: travelers count + with-kids prefill from Settings defaults
+    // and show Default/Override badges. Same wiring pattern as the
+    // Shape fields below; helpers live in _tbSetupBriefBadges.
     + _tbSectionHead("The travelers", "Who’s going.")
     + '<div class="tb-field"><label>How many travelers?</label>'
-    +   '<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;">'
-    +     '<input id="tb-travelers-count" type="number" min="1" max="40" inputmode="numeric" value="' + ((_tb.travelersCount||_tb.partySize||"2")+"").replace(/"/g,"&quot;") + '" placeholder="e.g. 2" oninput="_tb.travelersCount=this.value;" style="max-width:120px;" />'
+    +   '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">'
+    +     '<input id="tb-travelers-count" type="number" min="1" max="40" inputmode="numeric" value="' + ((_tb.travelersCount||_tb.partySize||_defaultTravelersCount())+"").replace(/"/g,"&quot;") + '" placeholder="e.g. 2" oninput="_tb.travelersCount=this.value;" style="max-width:120px;" />'
     +     '<label style="display:flex;align-items:center;gap:8px;font-weight:500;cursor:pointer;font-size:13px;margin:0;text-transform:none;letter-spacing:0;color:#222;">'
-    +       '<input id="tb-with-kids" type="checkbox" ' + ((_tb.withKids||_tb.partyComposition==="family-kids")?"checked":"") + ' onchange="_tb.withKids=this.checked;" style="width:auto;margin:0;" /> Traveling with kids?'
+    +       '<input id="tb-with-kids" type="checkbox" ' + (((typeof _tb.withKids === "boolean" ? _tb.withKids : _defaultWithKids())||_tb.partyComposition==="family-kids")?"checked":"") + ' onchange="_tb.withKids=this.checked;" style="width:auto;margin:0;" /> Traveling with kids?'
     +     '</label>'
+    +     '<span id="tb-trav-badge"></span>'
+    +     '<a href="#" id="tb-trav-promote" style="display:none;">↑ Apply to defaults</a>'
     +   '</div>'
     + '</div>'
     + mobilityBlock
 
     // ── 3. THE HOW ────────────────────────────────
+    // v359.9: transport + accommodation prefill from Settings defaults
+    // when no per-trip value is set. Default/Override badges shown
+    // when the typed value diverges from the saved default.
     + _tbSectionHead("How you want to travel", "Transport, lodging, anything else Max should know.")
     + '<div class="tb-field"><label>How you’d like to get around in ' + _pmEsc(regionLabel) + '</label>'
-    +   '<input id="tb-transport" value="' + (_tb.transport||"").replace(/"/g,"&quot;") + '" placeholder="e.g. Trains and walking only — no rental car. Swiss Travel Pass." oninput="_tb.transport=this.value;" />'
+    +   '<input id="tb-transport" value="' + (_tb.transport || _defaultTransport()).replace(/"/g,"&quot;") + '" placeholder="e.g. Trains and walking only — no rental car. Swiss Travel Pass." oninput="_tb.transport=this.value;" />'
+    +   '<div style="display:flex;align-items:center;gap:10px;margin-top:4px;flex-wrap:wrap;">'
+    +     '<span id="tb-transport-badge"></span>'
+    +     '<a href="#" id="tb-transport-promote" style="display:none;">↑ Apply to defaults</a>'
+    +   '</div>'
     +   '<div style="font-size:10.5px;color:#b05820;font-style:italic;margin-top:4px;line-height:1.55;">This shapes everything. Easy to skip even though you wouldn’t want to.</div>'
     + '</div>'
     + '<div class="tb-field"><label>Where you’d like to stay</label>'
-    +   '<textarea id="tb-accommodation" rows="2" placeholder="e.g. Small family hotels, en suite required, no hostels, no shared bathrooms." oninput="_tb.accommodation=this.value;" style="resize:vertical;min-height:54px;">' + (_tb.accommodation||"").replace(/</g,"&lt;").replace(/>/g,"&gt;") + '</textarea>'
+    +   '<textarea id="tb-accommodation" rows="2" placeholder="e.g. Small family hotels, en suite required, no hostels, no shared bathrooms." oninput="_tb.accommodation=this.value;" style="resize:vertical;min-height:54px;">' + (_tb.accommodation || _defaultAccommodation()).replace(/</g,"&lt;").replace(/>/g,"&gt;") + '</textarea>'
+    +   '<div style="display:flex;align-items:center;gap:10px;margin-top:4px;flex-wrap:wrap;">'
+    +     '<span id="tb-accom-badge"></span>'
+    +     '<a href="#" id="tb-accom-promote" style="display:none;">↑ Apply to defaults</a>'
+    +   '</div>'
     +   '<div style="font-size:10.5px;color:#b05820;font-style:italic;margin-top:4px;line-height:1.55;">Be explicit even if it feels obvious.</div>'
     + '</div>'
     + '<div class="tb-field"><label>Anything else Max should know <span style="font-weight:400;color:#aaa;font-size:11px;">(optional)</span></label>'
@@ -13667,6 +13789,12 @@ function goToTripStep2(){
       _saveIfUnset("sightsPerDay", _tb.maxBigSightsPerDay, isFinite(_tb.maxBigSightsPerDay) && _tb.maxBigSightsPerDay >= 1 && _tb.maxBigSightsPerDay <= 6);
       _saveIfUnset("paceMode", _tb.paceMode, _tb.paceMode === "loose" || _tb.paceMode === "enough" || _tb.paceMode === "notmuch");
       _saveIfUnset("dayTripHours", _tb.dayTripHours, isFinite(_tb.dayTripHours) && _tb.dayTripHours > 0 && _tb.dayTripHours <= 6);
+      // v359.9: also auto-save these on first publish.
+      var _tc = parseInt(_tb.travelersCount, 10);
+      _saveIfUnset("travelersCount", _tc, isFinite(_tc) && _tc >= 1 && _tc <= 40);
+      _saveIfUnset("withKids", !!_tb.withKids, true);
+      _saveIfUnset("transport", (_tb.transport || "").trim(), (_tb.transport || "").trim().length > 0);
+      _saveIfUnset("accommodation", (_tb.accommodation || "").trim(), (_tb.accommodation || "").trim().length > 0);
     }
   } catch(_){}
   // v306: mobility note. _tb.physicalAbility is set by _tbPickAbility on
@@ -17369,6 +17497,40 @@ function _defaultDayTripHours(){
   return 3;
 }
 
+// v359.9: four more Settings-backed defaults (Bucket C completion).
+// Travelers count + with-kids are C1 (frequently varies — show on brief);
+// transport preference + accommodation preference are C2 (rarely varies —
+// today still on the brief, will collapse behind an expander in v5).
+function _defaultTravelersCount(){
+  try {
+    var n = (window.MaxDB && MaxDB.prefs) ? parseInt(MaxDB.prefs.get("travelersCount"), 10) : NaN;
+    if (isFinite(n) && n >= 1 && n <= 40) return n;
+  } catch(_){}
+  return 2;
+}
+function _defaultWithKids(){
+  try {
+    var v = (window.MaxDB && MaxDB.prefs) ? MaxDB.prefs.get("withKids") : null;
+    if (v === true || v === "true" || v === 1 || v === "1") return true;
+    if (v === false || v === "false" || v === 0 || v === "0") return false;
+  } catch(_){}
+  return false;
+}
+function _defaultTransport(){
+  try {
+    var s = (window.MaxDB && MaxDB.prefs) ? MaxDB.prefs.get("transport") : null;
+    if (typeof s === "string" && s.length) return s;
+  } catch(_){}
+  return "";
+}
+function _defaultAccommodation(){
+  try {
+    var s = (window.MaxDB && MaxDB.prefs) ? MaxDB.prefs.get("accommodation") : null;
+    if (typeof s === "string" && s.length) return s;
+  } catch(_){}
+  return "";
+}
+
 // v359.6: Settings panel — global trip-defaults editor. Opens from
 // the ⚙ button in any of three headers (home, picker, trip-view).
 // Writes to MaxDB.prefs so changes sync across devices via the
@@ -17386,6 +17548,7 @@ function showSettingsPanel(){
 
   // Read current values.
   var curHours = 6, curSights = 2, curPace = "enough", curDtHours = 3;
+  var curTravelers = 2, curWithKids = false, curTransport = "", curAccom = "";
   try {
     if (window.MaxDB && MaxDB.prefs) {
       var ph = parseInt(MaxDB.prefs.get("paceHours"), 10);
@@ -17396,6 +17559,15 @@ function showSettingsPanel(){
       if (pm === "loose" || pm === "enough" || pm === "notmuch") curPace = pm;
       var dh = parseFloat(MaxDB.prefs.get("dayTripHours"));
       if (isFinite(dh) && dh > 0 && dh <= 6) curDtHours = dh;
+      // v359.9: four more settings-backed defaults.
+      var tc = parseInt(MaxDB.prefs.get("travelersCount"), 10);
+      if (isFinite(tc) && tc >= 1 && tc <= 40) curTravelers = tc;
+      var wk = MaxDB.prefs.get("withKids");
+      curWithKids = (wk === true || wk === "true" || wk === 1 || wk === "1");
+      var tr = MaxDB.prefs.get("transport");
+      if (typeof tr === "string") curTransport = tr;
+      var ac = MaxDB.prefs.get("accommodation");
+      if (typeof ac === "string") curAccom = ac;
     }
   } catch(_){}
 
@@ -17467,6 +17639,39 @@ function showSettingsPanel(){
     +     '</div>'
     +     '<div style="font-size:11px;color:#777;line-height:1.5;">Anything within this drive time from a hub can be a day trip instead of its own overnight stop. Total round-trip; one hour each way is fine, two hours each way is the upper end.</div>'
     +   '</div>'
+
+    // v359.9: travelers section.
+    +   '<div style="margin:18px 0 10px;border-top:1px dashed #d8d4c8;"></div>'
+    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:10px;">Travelers</div>'
+    +   '<div style="margin-bottom:14px;">'
+    +     '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">'
+    +       '<label for="sp-travelers" style="font-weight:600;color:#222;flex:1;">Default travelers count</label>'
+    +       '<input id="sp-travelers" type="number" min="1" max="40" value="'+curTravelers+'" inputmode="numeric" style="width:64px;text-align:center;font-size:13px;font-weight:600;padding:5px 7px;border:1px solid #ccc;border-radius:5px;font-family:inherit;" />'
+    +     '</div>'
+    +     '<div style="font-size:11px;color:#777;line-height:1.5;">Your usual party size. Most people travel solo, as a couple, or as a family — pick whichever you do most. You can change it for any specific trip.</div>'
+    +   '</div>'
+    +   '<div style="margin-bottom:6px;">'
+    +     '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;color:#222;">'
+    +       '<input id="sp-with-kids" type="checkbox" '+(curWithKids?"checked":"")+' style="margin:0;width:auto;" />'
+    +       '<span>Default to traveling with kids</span>'
+    +     '</label>'
+    +     '<div style="font-size:11px;color:#777;line-height:1.5;margin-top:4px;margin-left:24px;">Pre-checks the "with kids" box on every brief. Adjust per trip when needed.</div>'
+    +   '</div>'
+
+    // v359.9: travel style section.
+    +   '<div style="margin:18px 0 10px;border-top:1px dashed #d8d4c8;"></div>'
+    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:10px;">Travel style</div>'
+    +   '<div style="margin-bottom:14px;">'
+    +     '<label for="sp-transport" style="font-weight:600;color:#222;display:block;margin-bottom:4px;">Default transport preference</label>'
+    +     '<input id="sp-transport" type="text" value="'+curTransport.replace(/"/g,"&quot;")+'" placeholder="e.g. Trains and walking only — no rental car" style="width:100%;font-size:12.5px;padding:6px 9px;border:1px solid #ccc;border-radius:5px;font-family:inherit;box-sizing:border-box;" />'
+    +     '<div style="font-size:11px;color:#777;line-height:1.5;margin-top:4px;">How you usually like to get around. The brief\'s "How you\'d like to get around" field pre-fills from this; override there per trip when a destination demands something different.</div>'
+    +   '</div>'
+    +   '<div style="margin-bottom:6px;">'
+    +     '<label for="sp-accom" style="font-weight:600;color:#222;display:block;margin-bottom:4px;">Default accommodation preference</label>'
+    +     '<textarea id="sp-accom" rows="2" placeholder="e.g. Small family hotels, en suite required, no hostels" style="width:100%;font-size:12.5px;padding:6px 9px;border:1px solid #ccc;border-radius:5px;font-family:inherit;box-sizing:border-box;resize:vertical;min-height:54px;">'+curAccom.replace(/</g,"&lt;").replace(/>/g,"&gt;")+'</textarea>'
+    +     '<div style="font-size:11px;color:#777;line-height:1.5;margin-top:4px;">Same idea — your usual lodging style.</div>'
+    +   '</div>'
+
     + '</div>'
     // Footer
     + '<div style="padding:14px 22px;border-top:1px solid #eee;display:flex;justify-content:space-between;align-items:center;gap:10px;background:#fafafa;">'
@@ -17502,16 +17707,25 @@ function showSettingsPanel(){
     var spd = parseInt(document.getElementById("sp-spd").value, 10);
     var pm  = (box.querySelector('input[name="sp-pace"]:checked') || {}).value || "enough";
     var dth = parseFloat(document.getElementById("sp-dth").value);
+    var trav = parseInt(document.getElementById("sp-travelers").value, 10);
+    var wk = !!document.getElementById("sp-with-kids").checked;
+    var tr = (document.getElementById("sp-transport").value || "").trim();
+    var ac = (document.getElementById("sp-accom").value || "").trim();
     if (!isFinite(hpd) || hpd < 2 || hpd > 10) hpd = 6;
     if (!isFinite(spd) || spd < 1 || spd > 6) spd = 2;
     if (pm !== "loose" && pm !== "enough" && pm !== "notmuch") pm = "enough";
     if (!isFinite(dth) || dth <= 0 || dth > 6) dth = 3;
+    if (!isFinite(trav) || trav < 1 || trav > 40) trav = 2;
     try {
       if (window.MaxDB && MaxDB.prefs) {
         MaxDB.prefs.set("paceHours", hpd);
         MaxDB.prefs.set("sightsPerDay", spd);
         MaxDB.prefs.set("paceMode", pm);
         MaxDB.prefs.set("dayTripHours", dth);
+        MaxDB.prefs.set("travelersCount", trav);
+        MaxDB.prefs.set("withKids", wk);
+        MaxDB.prefs.set("transport", tr);
+        MaxDB.prefs.set("accommodation", ac);
       }
     } catch(_){}
     var status = document.getElementById("sp-status");
