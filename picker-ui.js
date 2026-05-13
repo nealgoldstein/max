@@ -443,15 +443,27 @@
       sumHost.innerHTML = '';
       return;
     }
+    // v359.27: budget meter — clearer status pill + tooltip-like context
+    // so the constraint is legible at a glance, not buried in prose.
+    // Same status colors as the place-mode summary for consistency.
     if (s.tripStr) {
-      var color = s.status === 'over' ? '#c05020'
-                : s.status === 'under' ? '#2a7a4e'
-                : '#555';
+      var bg = s.status === 'over' ? '#fff3ed'
+             : s.status === 'under' ? '#f0f7ec'
+             : '#f0f7fc';
+      var bd = s.status === 'over' ? '#f5ccb5'
+             : s.status === 'under' ? '#cae0bb'
+             : '#c8dde8';
+      var fg = s.status === 'over' ? '#b0451a'
+             : s.status === 'under' ? '#3f6a2a'
+             : '#1a5fa8';
+      var label = s.status === 'over' ? 'Over budget' : (s.status === 'under' ? 'Under budget' : 'Fits budget');
       sumHost.innerHTML =
-        '<span style="color:' + color + ';">Your picks: ' + s.rangeStr + '</span>'
-        + ' · Trip: ' + s.tripStr;
+        '<span style="display:inline-block;padding:3px 9px;border-radius:11px;background:' + bg + ';border:1px solid ' + bd + ';color:' + fg + ';font-weight:600;font-size:10.5px;letter-spacing:.01em;">'
+          + label
+        + '</span>'
+        + ' <span style="color:#666;">' + s.rangeStr + ' · ' + s.tripStr + '</span>';
     } else {
-      sumHost.innerHTML = 'Your picks: ' + s.rangeStr;
+      sumHost.innerHTML = '<span style="color:#666;">Your picks: ' + s.rangeStr + '</span>';
     }
   }
 
@@ -1282,6 +1294,37 @@
         detail: overnights.length + " destinations in " + totalNights + " nights — that's " + (totalNights / overnights.length).toFixed(1) + " nights per stop. Even at an intense pace, the math gets tight.",
         places: overnights.map(function(c){ return c.place; })
       });
+    }
+
+    // ── 5. Budget mismatch (v359.25.2) ────────────────────────
+    // The picker already shows an inline "N days over your X-day
+    // budget" note, but the user can ignore it and Choreograph
+    // anyway. This rule surfaces the same mismatch in the modal so
+    // it's a deliberate decision, not a missed warning. Uses the
+    // same _parseTripDuration helper as the inline note for parity.
+    // Day trips don't add to the calendar (absorbed into hubs), so
+    // tripDays is overnights' nights + 1.
+    try {
+      var _parseFn = global._parseTripDuration;
+      var _durStr = (tb && (tb.duration || tb.when)) || "";
+      var _budget = (typeof _parseFn === "function" && _durStr) ? _parseFn(_durStr) : null;
+      if (_budget && _budget.max && totalNights > 0) {
+        var tripDays = totalNights + 1;
+        if (tripDays > _budget.max) {
+          var over = tripDays - _budget.max;
+          var budgetLbl = (_budget.min === _budget.max)
+            ? (_budget.max + " day" + (_budget.max !== 1 ? "s" : ""))
+            : (_budget.min + "–" + _budget.max + " days");
+          issues.push({
+            severity: "red",
+            title: over + " day" + (over !== 1 ? "s" : "") + " over your " + budgetLbl + " budget",
+            detail: "Your picks add up to " + tripDays + " days, but you told Max you have " + budgetLbl + ". Drop a destination, reduce nights on a long stay, or extend your dates before locking this in.",
+            places: overnights.map(function(c){ return c.place; })
+          });
+        }
+      }
+    } catch(e) {
+      console.warn("[Max] realism-check: budget rule threw:", e);
     }
 
     return issues;

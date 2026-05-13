@@ -8927,6 +8927,29 @@ async function generateActivitiesForPlace(){
   var _briefBlock = _briefBits.length
     ? "\nTRIP CONTEXT (filter and tune suggestions to this \u2014 e.g. omit aurora outside Sep\u2013Mar, omit summer-only routes in winter, skip multi-day vertical hikes for limited-mobility parties, weight slow-pace itineraries when pace is loose):\n  - " + _briefBits.join("\n  - ") + "\n\n"
     : "";
+
+  // v359.28: BUDGET CONSTRAINT \u2014 the user's stated trip length is a
+  // contract, not a hint. The LLM should propose a candidate set that
+  // can actually fit. We give 30% headroom (1.3\u00d7) so the user has
+  // genuine keep/reject choices, but no more \u2014 over-proposing leads
+  // to a built trip that silently extends past the user's budget,
+  // which is the failure mode this round eliminates.
+  var _budgetBlock = "";
+  try {
+    if (typeof _parseTripDuration === "function" && (_tb.duration || _tb.when)) {
+      var _bdg = _parseTripDuration(_tb.duration || _tb.when);
+      if (_bdg && _bdg.max) {
+        var _budgetDays = _bdg.max;
+        var _budgetNights = Math.max(1, _budgetDays - 1);
+        var _targetUniqueNights = Math.round(_budgetNights * 1.3);
+        _budgetBlock = "\nHARD BUDGET CONSTRAINT \u2014 read this carefully:\n"
+          + "  - The traveler has " + _budgetDays + " day" + (_budgetDays !== 1 ? "s" : "") + " (" + _budgetNights + " night" + (_budgetNights !== 1 ? "s" : "") + ") for this trip. This is a CEILING, not a target.\n"
+          + "  - The sum of nights across all UNIQUE overnight:true places in your output should be approximately " + _budgetNights + "\u2013" + _targetUniqueNights + " nights \u2014 not more. Headroom (~30%) lets the user accept/reject, but exceeding it forces the user to either drop content or extend their dates.\n"
+          + "  - If you cannot honestly fit the iconic experiences this region offers within that budget, SAY SO in your output: include one activity-style item with name 'This trip is tight on time' and a description explaining what would have to drop or what dates would need to extend. Don't pad the list to hide the constraint; tell the user the truth.\n"
+          + "  - Day trips (overnight:false places) do NOT count toward the budget \u2014 they absorb into hubs. Use them liberally where geography allows.\n\n";
+      }
+    }
+  } catch(e) { console.warn("[Max] budget block build failed:", e); }
   // v353.4: prompt is region-agnostic. Earlier versions had hard-coded
   // Switzerland knowledge (must-include cities, named-train endpoints,
   // Swiss JSON examples) that pulled non-Swiss outputs toward Swiss
@@ -8940,6 +8963,7 @@ async function generateActivitiesForPlace(){
   var prompt = "A traveler wants to go to " + place + ".\n"
     + (ctx ? "Context about this trip: " + ctx + "\n" : "")
     + _briefBlock
+    + _budgetBlock
     + (pmChips.length ? "General interests they tagged (use these to bias what you surface, but don\u2019t shoehorn): " + pmChips.join(", ") + "\n" : "")
     + "\nThey haven\u2019t told you what they want to do yet \u2014 they chose a place and want you to map out what\u2019s actually there, so they can decide what matters. Surface the routes, the condition-dependent experiences, and the activities that make this place worth the trip. Be honest about the best of what\u2019s there; don\u2019t pad with generic items.\n\n"
     + "There are three types.\n\n"
@@ -12381,19 +12405,29 @@ function _updatePlaceActivitySummary(){
   var totalLabel = displayNights > 0 ? (' \u00b7 about <strong>'+displayDays+' days</strong> total') : '';
 
   // Time-window indicator \u2014 compare running total to the user's stated
-  // duration. Soft friction: shows status, doesn't block continuing.
+  // duration. v359.26: now a HARD constraint, not soft friction. When
+  // picks exceed budget, the Choreograph button is disabled until the
+  // user either trims picks or extends dates. The user said "5 days" \u2014
+  // Max honors it instead of silently extending the trip.
   var budget = (typeof _parseTripDuration === "function" && (_tb.duration || _tb.when))
     ? _parseTripDuration(_tb.duration || _tb.when) : null;
   var fitNote = "";
+  var _overBudget = false;
   if (budget && displayNights > 0) {
     var budgetLbl = (budget.min === budget.max)
       ? (budget.max + " day" + (budget.max!==1?"s":""))
       : (budget.min + "\u2013" + budget.max + " days");
     if (displayNights + 1 > budget.max) {
+      _overBudget = true;
       var over = (displayNights + 1) - budget.max;
-      fitNote = '<div style="margin-top:6px;padding:6px 9px;background:#fff3ed;border:1px solid #f5ccb5;border-radius:6px;font-size:11px;color:#b0451a;">'
-        + '<strong>'+over+' day'+(over!==1?"s":"")+' over your '+budgetLbl+' budget.</strong> '
-        + 'Drop a destination, reduce nights, or extend your dates.'
+      var extendDays = displayNights + 1;
+      fitNote = '<div style="margin-top:6px;padding:9px 11px;background:#fff3ed;border:1px solid #f5ccb5;border-radius:6px;font-size:11.5px;color:#b0451a;line-height:1.55;">'
+        + '<div style="font-weight:700;margin-bottom:5px;">'+over+' day'+(over!==1?"s":"")+' over your '+budgetLbl+' budget</div>'
+        + '<div style="font-size:11px;color:#94381a;">Max won\u2019t silently extend your trip. Trim some picks here, or extend your budget to fit.</div>'
+        + '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">'
+        +   '<button type="button" onclick="_extendBudgetToFit(' + extendDays + ')" style="font-size:10.5px;font-weight:600;color:#b0451a;background:#fff;border:1px solid #e6b89c;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;">Extend to '+extendDays+' days</button>'
+        +   '<span style="font-size:10.5px;color:#94381a;align-self:center;">or trim picks above</span>'
+        + '</div>'
         + '</div>';
     } else if (displayNights + 1 < budget.min) {
       var under = budget.min - (displayNights + 1);
@@ -12411,7 +12445,51 @@ function _updatePlaceActivitySummary(){
   el.innerHTML = '<strong>'+actCount+' activit'+(actCount===1?'y':'ies')+' \u00b7 '+placeCount+' place'+(placeCount===1?'':'s')+'</strong>'+totalLabel
     + ' <span style="color:#999;font-size:10.5px;">(fine-tune nights with the \u2212/+ buttons)</span>'
     + fitNote;
-  if(btn){ btn.disabled = false; btn.classList.remove("tb-btn-disabled"); }
+  // v359.26: gate the button on budget. The summary line above
+  // explains the gate; the button just sits disabled until resolved.
+  if(btn){
+    if (_overBudget) {
+      btn.disabled = true;
+      btn.classList.add("tb-btn-disabled");
+      btn.title = "Trim picks or extend your budget to continue";
+    } else {
+      btn.disabled = false;
+      btn.classList.remove("tb-btn-disabled");
+      btn.title = "";
+    }
+  }
+}
+
+// v359.26: one-click "extend budget to fit" \u2014 sets _tb.duration to the
+// current pick total and re-renders the picker so the gate clears.
+// Doesn't touch start/end dates directly; _parseTripDuration reads
+// _tb.duration as the source of truth, and the trip build pipeline
+// computes dates from the candidate nights anyway.
+function _extendBudgetToFit(targetDays){
+  if (!targetDays || targetDays < 1) return;
+  _tb.duration = targetDays + " days";
+  // The brief may also have explicit startDate/endDate \u2014 if so, push
+  // the end out so they stay consistent with the new duration.
+  if (_tb.startDate) {
+    try {
+      var start = new Date(_tb.startDate);
+      if (!isNaN(start.getTime())) {
+        var end = new Date(start);
+        end.setDate(end.getDate() + (targetDays - 1));
+        _tb.endDate = end.toISOString().slice(0, 10);
+      }
+    } catch(_) {}
+  }
+  // Recompute the picker summary so the gate clears immediately.
+  if (typeof _updatePlaceActivitySummary === "function") {
+    _updatePlaceActivitySummary();
+  } else if (typeof renderActivityPicker === "function") {
+    renderActivityPicker();
+  }
+  // Toast so the user sees what happened.
+  if (typeof showToast === "function") {
+    showToast("Budget extended to " + targetDays + " days.");
+  }
 }
 
 // Finalize place-mode step 1: snapshot the picked items into _mdcItems and
@@ -17434,7 +17512,28 @@ function updateCEShortlist(){
   var cnt=g("ce-cnt"); if(cnt) cnt.textContent=kept.length+" kept";
   // Only the Apply-changes variant (edit mode) disables on empty keeps;
   // the Close button in the default flow is always clickable.
-  var bb=g("ce-build-btn"); if(bb && _ceEditMode) bb.disabled=kept.length<1;
+  var bb=g("ce-build-btn");
+  // v359.27: also gate the Create-a-plan button on budget. If the user
+  // is over their stated duration here, they need to trim before
+  // proceeding. Same firm-budget principle as the place-mode picker.
+  var _budgetStatus = null;
+  if (MaxEnginePicker && MaxEnginePicker.computeStayTotalSummary && _tb) {
+    try {
+      var _ss = MaxEnginePicker.computeStayTotalSummary(kept, _tb.duration || '');
+      _budgetStatus = _ss && _ss.status;
+    } catch(_){}
+  }
+  if (bb) {
+    var disabled = false;
+    if (_ceEditMode && kept.length < 1) disabled = true;
+    if (_budgetStatus === "over") disabled = true;
+    bb.disabled = disabled;
+    bb.title = (_budgetStatus === "over")
+      ? "Trim picks or extend your dates first — Max won't silently extend your trip."
+      : "";
+    if (disabled) bb.classList.add("ce-build-btn-disabled");
+    else bb.classList.remove("ce-build-btn-disabled");
+  }
   renderCEStayTotal(kept);
 }
 
