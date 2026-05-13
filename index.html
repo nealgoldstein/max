@@ -8218,27 +8218,31 @@ function _tbSetupShapeBadges(){
     } catch(_) { return null; }
   }
 
-  function setupNumberField(inputId, badgeId, promoteId, prefKey, unit){
+  function setupNumberField(inputId, badgeId, promoteId, prefKey, unit, fallback){
     var input = document.getElementById(inputId);
     var badge = document.getElementById(badgeId);
     var promote = document.getElementById(promoteId);
     if (!input || !badge) return;
     function fmt(v){ return v + (unit ? " " + unit : ""); }
-    function update(){
+    function effectiveDefault(){
       var pref = readPref(prefKey);
+      // v359.8.1: use the hardcoded fallback when no pref has been
+      // saved yet. Without this, brand-new users (whose prefs blob
+      // is empty) saw no badges at all — confusing inconsistency.
+      // Now every Settings-backed field always shows a badge,
+      // comparing against the saved value or the hardcoded fallback.
+      return (pref != null) ? pref : fallback;
+    }
+    function update(){
+      var def = effectiveDefault();
       var cur = input.value;
-      if (pref == null) {
-        badge.style.cssText = "display:none;";
-        if (promote) promote.style.display = "none";
-        return;
-      }
-      if (String(cur) === String(pref)) {
+      if (String(cur) === String(def)) {
         badge.style.cssText = BADGE_DEFAULT;
         badge.textContent = "Default · " + fmt(cur);
         if (promote) promote.style.display = "none";
       } else {
         badge.style.cssText = BADGE_OVERRIDE;
-        badge.textContent = "Override · " + fmt(cur) + " (default " + fmt(pref) + ")";
+        badge.textContent = "Override · " + fmt(cur) + " (default " + fmt(def) + ")";
         if (promote) promote.style.cssText = PROMOTE_LINK;
       }
     }
@@ -8253,7 +8257,7 @@ function _tbSetupShapeBadges(){
     update();
   }
 
-  function setupRadioField(name, badgeId, promoteId, prefKey, labelMap){
+  function setupRadioField(name, badgeId, promoteId, prefKey, labelMap, fallback){
     var radios = document.querySelectorAll('input[name="' + name + '"]');
     var badge = document.getElementById(badgeId);
     var promote = document.getElementById(promoteId);
@@ -8264,21 +8268,20 @@ function _tbSetupShapeBadges(){
       }
       return null;
     }
-    function update(){
+    function effectiveDefault(){
       var pref = readPref(prefKey);
+      return (pref != null) ? pref : fallback;
+    }
+    function update(){
+      var def = effectiveDefault();
       var cur = readCurrent();
-      if (pref == null) {
-        badge.style.cssText = "display:none;";
-        if (promote) promote.style.display = "none";
-        return;
-      }
-      if (String(cur) === String(pref)) {
+      if (String(cur) === String(def)) {
         badge.style.cssText = BADGE_DEFAULT;
         badge.textContent = "Default · " + (labelMap[cur] || cur);
         if (promote) promote.style.display = "none";
       } else {
         badge.style.cssText = BADGE_OVERRIDE;
-        badge.textContent = "Override · " + (labelMap[cur] || cur) + " (default " + (labelMap[pref] || pref) + ")";
+        badge.textContent = "Override · " + (labelMap[cur] || cur) + " (default " + (labelMap[def] || def) + ")";
         if (promote) promote.style.cssText = PROMOTE_LINK;
       }
     }
@@ -8294,10 +8297,12 @@ function _tbSetupShapeBadges(){
     update();
   }
 
-  setupNumberField("tb-hours-per-day", "tb-hpd-badge", "tb-hpd-promote", "paceHours", "hrs");
-  setupNumberField("tb-max-big-sights", "tb-spd-badge", "tb-spd-promote", "sightsPerDay", "");
-  setupRadioField("tb-pace-mode", "tb-pace-badge", "tb-pace-promote", "paceMode", {loose:"Relaxed", enough:"Balanced", notmuch:"Intense"});
-  setupNumberField("tb-day-trip-hours", "tb-dth-badge", "tb-dth-promote", "dayTripHours", "hrs");
+  // Pass the hardcoded fallback as the last arg so the badge can
+  // compare against it when no pref has been saved yet.
+  setupNumberField("tb-hours-per-day", "tb-hpd-badge", "tb-hpd-promote", "paceHours", "hrs", 6);
+  setupNumberField("tb-max-big-sights", "tb-spd-badge", "tb-spd-promote", "sightsPerDay", "", 2);
+  setupRadioField("tb-pace-mode", "tb-pace-badge", "tb-pace-promote", "paceMode", {loose:"Relaxed", enough:"Balanced", notmuch:"Intense"}, "enough");
+  setupNumberField("tb-day-trip-hours", "tb-dth-badge", "tb-dth-promote", "dayTripHours", "hrs", 3);
 }
 
 // Place-first flow (Stage C). User names a place; Max surfaces what's there;
