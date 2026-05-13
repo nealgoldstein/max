@@ -10852,25 +10852,20 @@ function _openTripHeroMapOverlay(){
 }
 
 function openTripHeroMapWindow(){
-  // v359.5.11: just use the in-page overlay for everyone. Neal's
-  // report after v359.5.6/.7/.8: "large map in trip still doesn't
-  // open." The window.open path was failing somewhere and the trace
-  // logging wasn't enough to isolate the cause across the device
-  // matrix (Chrome desktop, PWA, Safari, etc.). The overlay path is
-  // proven reliable everywhere — it's already what mobile and PWA
-  // users get, and there's no functional loss for desktop users:
-  // the overlay fills the entire viewport with the same satellite
-  // map and pin set. If anyone genuinely wants a free-floating
-  // browser window later (e.g., second-monitor setup), we can add a
-  // "↗ Pop out" button inside the overlay header that opens
-  // window.open from a real user gesture inside the overlay.
+  // v359.5.15: restored the popup-window path. Neal's report on the
+  // v359.5.11/.14 overlay-only build: "in trip the window is not
+  // separate so you can't see the scroll in trip list." Pin-click
+  // → scroll-trip-list only works if the user can SEE the trip list
+  // while the map is open — which means it has to be a real
+  // separate window (or at minimum a non-fullscreen panel). The
+  // overlay covered the trip list, so scrolling was invisible.
+  //
+  // Implementation: same pattern as the picker map's popout (which
+  // Neal confirmed works). Plain window.open + document.write — no
+  // Blob URLs, no PWA-standalone detour. Mobile widths still get the
+  // overlay; PWA standalone still gets the overlay (window.open in
+  // PWA is unreliable). Everywhere else: real separate window.
   var DBG = "[Max view-larger]";
-  console.log(DBG, "→ routing to in-page overlay (single-path)");
-  _openTripHeroMapOverlay();
-  return;
-  /* eslint-disable no-unreachable */
-  // Legacy popup-window path kept below for reference; not reachable
-  // until/unless we add the pop-out option mentioned above.
   console.log(DBG, "openTripHeroMapWindow invoked", {
     innerWidth: window.innerWidth,
     hasMatchMedia: !!window.matchMedia,
@@ -11097,58 +11092,23 @@ function openTripHeroMapWindow(){
     +   '});'
     + '})();<\/script>'
     + '</body></html>';
-  // v359.5.6: use a Blob URL instead of document.write. Neal's
-  // report: "Opening a new large window for the map on the trip view
-  // does not work" in desktop Chrome (not PWA). Chrome's window.open
-  // with an empty URL followed by document.write can fall into a
-  // state where the write doesn't render — the popup opens to
-  // about:blank, then document.write swaps content but the page
-  // never executes scripts properly (the timing race between
-  // Leaflet's CDN load and the inline init script is fragile when
-  // triggered via document.write). Navigating the popup to a Blob
-  // URL gives Chrome a real document with the HTML baked in, scripts
-  // run normally, and the popup behaves like any other navigated
-  // window. Falls back to document.write if Blob isn't available,
-  // and falls back to the in-page overlay if both fail.
+  // v359.5.15: plain document.write — same pattern the picker map
+  // popout uses (which Neal confirmed works). Dropped the v359.5.6
+  // Blob URL detour: it didn't actually fix anything in Neal's
+  // setup and added complexity. Wrap in try/catch with overlay
+  // fallback so a popup that opens-but-can't-write still gives the
+  // user something useful.
   var DBG2 = "[Max view-larger]";
   try {
-    var blob = new Blob([html], { type: 'text/html' });
-    var url = URL.createObjectURL(blob);
-    console.log(DBG2, "→ navigating popup to Blob URL:", url);
-    w.location.href = url;
-    // Release the object URL after the new page has had a chance to
-    // load. Don't revoke immediately — Chrome would invalidate the
-    // navigation in flight.
-    setTimeout(function(){ try { URL.revokeObjectURL(url); } catch(_){} }, 30000);
-    // v359.5.7: verify the popup actually rendered. Some Chrome
-    // popup-blocker settings return a Window object but never load
-    // its document. Check after 1s; if the popup is closed, fall
-    // back to overlay (the user closed it OR Chrome cancelled it).
-    setTimeout(function(){
-      try {
-        if (!w || w.closed) {
-          console.warn(DBG2, "popup window closed after 1s — falling back to overlay");
-          window._tripHeroMapWindow = null;
-          _openTripHeroMapOverlay();
-          return;
-        }
-        console.log(DBG2, "popup window still open after 1s (good)");
-      } catch (_) {
-        console.warn(DBG2, "couldn't probe popup after 1s — likely cross-origin / detached");
-      }
-    }, 1000);
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+    console.log(DBG2, "popup written via document.write");
   } catch (e) {
-    console.warn(DBG2, "Blob-URL popup failed, falling back to document.write:", e);
-    try {
-      w.document.open();
-      w.document.write(html);
-      w.document.close();
-    } catch (e2) {
-      console.error(DBG2, "popup document.write also failed; closing and routing to overlay:", e2);
-      try { w.close(); } catch(_){}
-      window._tripHeroMapWindow = null;
-      _openTripHeroMapOverlay();
-    }
+    console.error(DBG2, "popup document.write failed; closing and routing to overlay:", e);
+    try { w.close(); } catch(_){}
+    window._tripHeroMapWindow = null;
+    _openTripHeroMapOverlay();
   }
 }
 
