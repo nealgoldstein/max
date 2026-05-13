@@ -12525,13 +12525,12 @@ function _makeItFit(){
     });
   });
 
-  // Bump pace one notch denser. Signals the user's intent (denser
-  // trip) and means downstream prompts/render honor it.
-  var paceProgression = { loose: "enough", enough: "notmuch", notmuch: "notmuch" };
-  var curPace = _tb.paceMode
-    || (typeof _defaultPaceMode === "function" ? _defaultPaceMode() : null)
-    || "enough";
-  _tb.paceMode = paceProgression[curPace] || "notmuch";
+  // v359.29.4: bump pace straight to Intense, not one notch at a
+  // time. "Make it fit" is the user explicitly asking to compress
+  // the trip — meting out the pace change in steps doesn't match
+  // that intent. Going straight to Intense (notmuch) is consistent
+  // with the trim-aggressively semantics.
+  _tb.paceMode = "notmuch";
   // Mirror onto pace string used by LLM context if needed.
   if (typeof _tb.pace === "string" && _tb.pace !== _tb.paceMode) {
     _tb.pace = _tb.paceMode;
