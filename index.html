@@ -17673,11 +17673,18 @@ function _defaultAccommodation(){
 // collapsed summary of their defaults instead of every C-bucket
 // field. Flag is set on first brief submission. To override for
 // a specific trip, click "Change them just for this trip."
+// v359.11.1: also treat a user with existing trips as returning,
+// so people who already have a trip index from before this commit
+// land on the collapsed view immediately instead of having to
+// publish ONE MORE brief to flip the flag.
 function _isReturningUser(){
   try {
-    if (!window.MaxDB || !MaxDB.prefs) return false;
-    return !!MaxDB.prefs.get("briefSeenOnce");
-  } catch(_) { return false; }
+    if (window.MaxDB && MaxDB.prefs && MaxDB.prefs.get("briefSeenOnce")) return true;
+  } catch(_){}
+  try {
+    if (typeof _tripsIndex !== "undefined" && Array.isArray(_tripsIndex) && _tripsIndex.length > 0) return true;
+  } catch(_){}
+  return false;
 }
 
 // v359.10 (Bucket A): personal + display preferences. These are
