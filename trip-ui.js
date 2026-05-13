@@ -2089,6 +2089,42 @@
       bodyDiv.appendChild(bufRow);
     }
 
+    // v359.23: "Change role" deep-link — opens the picker focused on
+    // this destination so the user can switch overnight ↔ day trip.
+    // Role changes cascade (nights redistribute, day-trip hub
+    // assignment, etc.), so they live in the picker rather than in
+    // the trip view itself. This link is the discoverability surface.
+    // Only shown when there's a candidate snapshot to re-enter into;
+    // arrival/departure structural stops don't get the link (their
+    // role is structural, not a user decision).
+    (function(){
+      if (!trip || !Array.isArray(trip.candidates) || !trip.candidates.length) return;
+      if (isFirst || isLast) return; // arrival/departure: skip
+      var roleRow = document.createElement("div");
+      roleRow.style.cssText = "display:flex;justify-content:flex-end;margin-top:6px;";
+      var link = document.createElement("a");
+      link.href = "#";
+      link.textContent = "↺ Change role";
+      link.title = "Open the picker to switch overnight ↔ day trip";
+      link.style.cssText = "font-size:10.5px;font-weight:500;color:#1a5fa8;text-decoration:none;cursor:pointer;";
+      (function(destPlace){
+        link.onclick = function(e){
+          e.preventDefault();
+          e.stopPropagation();
+          // Stash the candidate name so picker-ui can auto-scroll +
+          // pop the role popover for it on render.
+          if (global._tb) global._tb._focusCandidateName = destPlace;
+          if (typeof global.reopenPickerForEdit === "function" && trip && Array.isArray(trip.mdcItems) && trip.mdcItems.length) {
+            global.reopenPickerForEdit();
+          } else if (typeof global.reopenCandidateExplorer === "function") {
+            global.reopenCandidateExplorer();
+          }
+        };
+      })(dest.place);
+      roleRow.appendChild(link);
+      bodyDiv.appendChild(roleRow);
+    })();
+
     card.appendChild(bodyDiv);
     // Show generating indicator for unknown cities
     var genData=(global._generatedCityData||{})[dest.place.toLowerCase()];

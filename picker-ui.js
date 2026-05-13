@@ -560,6 +560,72 @@
     }
   }
 
+  // ── v359.20: role-chip model — overnight vs day-trip-from-hub ──
+  // Each candidate has a *role* on the trip: an overnight stop, or
+  // a day trip from some overnight hub. The chip on the card shows
+  // Max's suggested role; the popover (v359.21) lets the user
+  // override. Required stops, arrival/departure structural stops,
+  // and candidates with no hub-in-range get no chip — "what isn't
+  // there is also information" (Neal).
+  //
+  // Persisted on the candidate:
+  //   c.intent       "stay" | "dayTrip" | undefined  (user override)
+  //   c.dayTripHub   <candidate.id of hub>           (when intent="dayTrip")
+  // If neither is set, the default is computed from geometry +
+  // kept-overnights set.
+  var DAY_TRIP_RADIUS_KM = 60;
+  function _pickerDistKm(a, b) {
+    if (!a || !b || a[0] == null || a[1] == null || b[0] == null || b[1] == null) return Infinity;
+    // Equirectangular approx — fine at Europe scale.
+    var dLat = (a[0] - b[0]) * 111;
+    var dLng = (a[1] - b[1]) * 111 * Math.cos(((a[0] + b[0]) / 2) * Math.PI / 180);
+    return Math.sqrt(dLat * dLat + dLng * dLng);
+  }
+  function _computeCandidateRole(c, allCands) {
+    if (!c) return null;
+    // Structural / required stops have a predetermined role — chip hidden.
+    if (c._required) return null;
+    if (c.role === "arrival" || c.role === "departure") return null;
+
+    // User override takes precedence.
+    if (c.intent === "stay") {
+      return { intent: "stay", hub: null, hubAuto: false };
+    }
+    if (c.intent === "dayTrip") {
+      var hubId = c.dayTripHub;
+      var hub = (hubId && allCands) ? allCands.find(function(o){ return o && o.id === hubId; }) : null;
+      return { intent: "dayTrip", hub: hub || null, hubAuto: false };
+    }
+
+    // Compute default. Candidates that want ≥2 nights → stay.
+    var wantsLongStay = (typeof c.nights === "number" && c.nights >= 2);
+    if (wantsLongStay) {
+      return { intent: "stay", hub: null, hubAuto: true };
+    }
+    // Otherwise look for closest kept-overnight hub within radius.
+    if (!allCands || !Array.isArray(allCands) || c.lat == null || c.lng == null) {
+      return { intent: "stay", hub: null, hubAuto: true };
+    }
+    var bestHub = null;
+    var bestDist = Infinity;
+    for (var i = 0; i < allCands.length; i++) {
+      var h = allCands[i];
+      if (!h || h.id === c.id) continue;
+      if (h.status !== "keep") continue;
+      if (h.intent === "dayTrip") continue;  // day trips can't be hubs
+      if (h.lat == null || h.lng == null) continue;
+      var d = _pickerDistKm([c.lat, c.lng], [h.lat, h.lng]);
+      if (d < bestDist && d <= DAY_TRIP_RADIUS_KM) {
+        bestDist = d;
+        bestHub = h;
+      }
+    }
+    if (bestHub) {
+      return { intent: "dayTrip", hub: bestHub, hubAuto: true };
+    }
+    return { intent: "stay", hub: null, hubAuto: true };
+  }
+
   // ── HX.12 (v308): renderCandidateCard ─────────────────────
   // Lifted from index.html's inline `renderCard`. Renders a
   // single candidate's compact + expanded card: name, role,
@@ -612,15 +678,53 @@
     var keptDot = c.status === "keep"
       ? '<span style="color:#2a7a4e;font-weight:700;margin-right:2px;">✓</span>'
       : (c.status === "reject" ? '<span style="color:#c05020;font-weight:700;margin-right:2px;">×</span>' : '');
+
+    // v359.20: role chip — shows Max's suggested role (overnight or
+    // day-trip-from-X) and signals whether it's auto or user-set.
+    // Hidden when role doesn't apply (required / arrival / departure).
+    var _allCands = (global._tb && Array.isArray(global._tb.candidates)) ? global._tb.candidates : [];
+    var _roleInfo = _computeCandidateRole(c, _allCands);
+    var _roleChip = '';
+    if (_roleInfo) {
+      var _chipBg = _roleInfo.intent === "dayTrip" ? "#fff4e6" : "#eef4fb";
+      var _chipBd = _roleInfo.intent === "dayTrip" ? "#f0c98a" : "#bcd2ea";
+      var _chipFg = _roleInfo.intent === "dayTrip" ? "#a36500" : "#1a5fa8";
+      var _chipText = _roleInfo.intent === "dayTrip"
+        ? "Day trip from " + (_roleInfo.hub ? _roleInfo.hub.place : "?")
+        : "Overnight";
+      var _chipTitle = _roleInfo.hubAuto
+        ? "Max's suggested role — click to change"
+        : "You set this role — click to change";
+      _roleChip = '<span class="ce-role-chip" data-cand-id="' + c.id + '" title="' + _chipTitle + '" style="font-size:10px;font-weight:600;color:' + _chipFg
+        + ';background:' + _chipBg + ';border:1px solid ' + _chipBd + ';padding:2px 7px;border-radius:10px;display:inline-block;white-space:nowrap;cursor:pointer;">'
+        + _chipText
+        + '</span>';
+    }
+
+    // v359.22: keep-button tooltip reflects the current role so the
+    // commit action couples to the chip. Visual glyph stays compact;
+    // the chip carries the visible role context.
+    var _roleLabel = _roleInfo
+      ? (_roleInfo.intent === "dayTrip"
+          ? "as a day trip from " + (_roleInfo.hub ? _roleInfo.hub.place : "?")
+          : "as an overnight stop")
+      : "";
+    var _keepTitle = c.status === "keep"
+      ? "Remove from your picks"
+      : (c.status === "reject"
+          ? "Restore"
+          : (_roleLabel ? "Keep " + _roleLabel : "Keep"));
+
     var compactHtml = '<div class="ce-card-compact" style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;cursor:pointer;">'
       + '<div style="flex:1;min-width:0;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">'
       + keptDot
       + '<span class="ce-card-name" style="font-size:13px;font-weight:700;color:#111;">' + c.place + '</span>'
       + (c.widelyRecommended ? '<span style="color:#6a4a80;font-size:10px;" title="widely recommended">★</span>' : '')
       + '<span style="font-size:10px;color:#888;">' + (c.role || '') + (c.stayRange ? ' · ' + c.stayRange : '') + '</span>'
+      + _roleChip
       + '</div>'
       + '<div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">'
-      + '<button class="ce-act-compact-keep" style="font-size:10px;font-weight:600;padding:4px 9px;border-radius:5px;border:1px solid ' + (c.status === "keep" ? "#2a7a4e" : "#ddd") + ';background:' + (c.status === "keep" ? "#e8f5ee" : "#fff") + ';color:' + (c.status === "keep" ? "#2a7a4e" : "#333") + ';cursor:pointer;font-family:inherit;" title="' + (c.status === "keep" ? "Remove from your picks" : (c.status === "reject" ? "Restore" : "Keep")) + '">' + (c.status === "keep" ? "✓" : (c.status === "reject" ? "↺" : "+")) + '</button>'
+      + '<button class="ce-act-compact-keep" style="font-size:10px;font-weight:600;padding:4px 9px;border-radius:5px;border:1px solid ' + (c.status === "keep" ? "#2a7a4e" : "#ddd") + ';background:' + (c.status === "keep" ? "#e8f5ee" : "#fff") + ';color:' + (c.status === "keep" ? "#2a7a4e" : "#333") + ';cursor:pointer;font-family:inherit;" title="' + _keepTitle + '">' + (c.status === "keep" ? "✓" : (c.status === "reject" ? "↺" : "+")) + '</button>'
       + '<button class="ce-act-compact-reject" style="font-size:10px;font-weight:600;padding:4px 9px;border-radius:5px;border:1px solid ' + (c.status === "reject" ? "#c05020" : "#ddd") + ';background:' + (c.status === "reject" ? "#fff0ec" : "#fff") + ';color:' + (c.status === "reject" ? "#c05020" : "#888") + ';cursor:pointer;font-family:inherit;" title="' + (c.status === "reject" ? "Currently rejected" : "Reject") + '">×</button>'
       + '<button class="ce-act-compact-expand" style="font-size:12px;color:#888;background:none;border:none;cursor:pointer;font-family:inherit;padding:0 4px;" title="' + (expanded ? "Hide details" : "See details") + '">' + (expanded ? "▾" : "▸") + '</button>'
       + '</div>'
@@ -646,9 +750,14 @@
     var rejectBtn  = card.querySelector(".ce-act-compact-reject");
     var expandBtn  = card.querySelector(".ce-act-compact-expand");
     var compactRow = card.querySelector(".ce-card-compact");
+    var roleChipEl = card.querySelector(".ce-role-chip");
     (function (cand) {
       if (keepBtn)   keepBtn.onclick   = function (e) { e.stopPropagation(); if (typeof global.setCS === "function") global.setCS(cand.id, "keep"); };
       if (rejectBtn) rejectBtn.onclick = function (e) { e.stopPropagation(); if (typeof global.setCS === "function") global.setCS(cand.id, "reject"); };
+      if (roleChipEl) roleChipEl.onclick = function (e) {
+        e.stopPropagation();
+        _openRoleChangePopover(cand.id);
+      };
       if (expandBtn) expandBtn.onclick = function (e) {
         e.stopPropagation();
         global._ceCardExpanded = global._ceCardExpanded || {};
@@ -677,6 +786,143 @@
     }
     container.appendChild(card);
     if (typeof addMarkerFn === "function") addMarkerFn(c, false);
+
+    // v359.23: trip-view deep-link landing. If the user clicked
+    // "Change role" on a destination card, _focusCandidateName was
+    // stashed in _tb. When the matching candidate's card renders,
+    // scroll it into view and open the role popover, then clear
+    // the flag so it doesn't re-trigger on every re-render.
+    if (global._tb && global._tb._focusCandidateName
+        && c.place && c.place === global._tb._focusCandidateName) {
+      var _focusName = global._tb._focusCandidateName;
+      delete global._tb._focusCandidateName;
+      setTimeout(function(){
+        try {
+          if (card && typeof card.scrollIntoView === "function") {
+            card.scrollIntoView({ behavior: "smooth", block: "center" });
+          }
+          _openRoleChangePopover(c.id);
+        } catch (e) {
+          console.warn("[Max] focus-candidate deep-link failed for", _focusName, e);
+        }
+      }, 220);
+    }
+  }
+
+  // ── v359.21: Change role popover ──────────────────────────
+  // Opens when the user clicks the role chip on a candidate card.
+  // Lets them switch between Overnight stay and Day trip from
+  // {hub}, with the hub dropdown auto-populated from kept-overnight
+  // candidates ranked by distance. Persists the choice to
+  // c.intent / c.dayTripHub and re-renders the picker list.
+  function _openRoleChangePopover(candId) {
+    var allCands = (global._tb && Array.isArray(global._tb.candidates)) ? global._tb.candidates : [];
+    var cand = allCands.find(function(c){ return c && c.id === candId; });
+    if (!cand) return;
+
+    // Compute hub options: kept candidates that aren't themselves day trips,
+    // sorted by distance from this candidate. Within radius → preferred;
+    // outside radius → still listed but flagged as "stretch."
+    var hubOptions = [];
+    if (cand.lat != null && cand.lng != null) {
+      hubOptions = allCands
+        .filter(function(h){
+          return h && h.id !== cand.id
+            && h.status === "keep"
+            && h.intent !== "dayTrip"
+            && h.lat != null && h.lng != null;
+        })
+        .map(function(h){
+          var d = _pickerDistKm([cand.lat, cand.lng], [h.lat, h.lng]);
+          return { hub: h, distKm: d, inRange: d <= DAY_TRIP_RADIUS_KM };
+        })
+        .sort(function(a, b){ return a.distKm - b.distKm; });
+    }
+    var inRangeHubs = hubOptions.filter(function(o){ return o.inRange; });
+    var stretchHubs = hubOptions.filter(function(o){ return !o.inRange; });
+    var dayTripAvailable = inRangeHubs.length > 0 || stretchHubs.length > 0;
+
+    // Current state.
+    var curRole = _computeCandidateRole(cand, allCands);
+    var curIntent = curRole ? curRole.intent : "stay";
+    var curHubId = curRole && curRole.hub ? curRole.hub.id : (inRangeHubs[0] ? inRangeHubs[0].hub.id : (stretchHubs[0] ? stretchHubs[0].hub.id : null));
+
+    // Build the overlay.
+    var existing = document.getElementById("role-popover");
+    if (existing) existing.remove();
+
+    var ov = document.createElement("div");
+    ov.id = "role-popover";
+    ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.32);z-index:10500;display:flex;align-items:center;justify-content:center;padding:20px;";
+
+    var hubOpts = hubOptions.map(function(o){
+      var label = o.hub.place + " (" + Math.round(o.distKm) + " km)" + (o.inRange ? "" : " — stretch");
+      var sel = o.hub.id === curHubId ? " selected" : "";
+      return '<option value="' + o.hub.id + '"' + sel + '>' + label + '</option>';
+    }).join("");
+
+    var dayTripRow = dayTripAvailable
+      ? ('<label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid ' + (curIntent === "dayTrip" ? "#a36500" : "#e0e0e0") + ';border-radius:8px;cursor:pointer;background:' + (curIntent === "dayTrip" ? "#fff4e6" : "#fff") + ';">'
+          + '<input type="radio" name="role-pick" value="dayTrip"' + (curIntent === "dayTrip" ? " checked" : "") + ' style="margin:0;" />'
+          + '<div style="flex:1;">'
+          +   '<div style="font-size:13px;font-weight:600;color:#222;">Day trip from</div>'
+          +   '<select id="role-hub-select" style="margin-top:6px;width:100%;padding:6px 8px;font-size:12.5px;border:1px solid #ccc;border-radius:6px;font-family:inherit;">' + hubOpts + '</select>'
+          + '</div>'
+        + '</label>')
+      : ('<div style="padding:10px;border:1px dashed #ddd;border-radius:8px;background:#fafafa;font-size:12px;color:#888;line-height:1.5;">'
+          + 'No overnight hub in range for a day trip. Keep an overnight closer than '
+          + DAY_TRIP_RADIUS_KM + ' km first.'
+        + '</div>');
+
+    ov.innerHTML = ''
+      + '<div style="background:#fff;border-radius:12px;max-width:420px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,0.18);">'
+      +   '<div style="padding:18px 20px 4px;">'
+      +     '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">Role on this trip</div>'
+      +     '<div style="font-size:17px;font-weight:700;color:#111;margin-top:4px;">' + cand.place + '</div>'
+      +   '</div>'
+      +   '<div style="padding:14px 20px;display:flex;flex-direction:column;gap:10px;">'
+      +     '<label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid ' + (curIntent === "stay" ? "#1a5fa8" : "#e0e0e0") + ';border-radius:8px;cursor:pointer;background:' + (curIntent === "stay" ? "#eef4fb" : "#fff") + ';">'
+      +       '<input type="radio" name="role-pick" value="stay"' + (curIntent === "stay" ? " checked" : "") + ' style="margin:0;" />'
+      +       '<div style="flex:1;">'
+      +         '<div style="font-size:13px;font-weight:600;color:#222;">Overnight stay</div>'
+      +         '<div style="font-size:11px;color:#777;margin-top:2px;">Its own stop on the trip with hotels and meals.</div>'
+      +       '</div>'
+      +     '</label>'
+      +     dayTripRow
+      +   '</div>'
+      +   '<div style="padding:8px 20px 18px;display:flex;justify-content:flex-end;gap:8px;">'
+      +     '<button id="role-cancel" style="font-size:13px;font-weight:500;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Cancel</button>'
+      +     '<button id="role-save" style="font-size:13px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 16px;cursor:pointer;font-family:inherit;">Apply</button>'
+      +   '</div>'
+      + '</div>';
+
+    document.body.appendChild(ov);
+
+    function close() { if (ov && ov.parentNode) ov.parentNode.removeChild(ov); }
+
+    ov.onclick = function(e){ if (e.target === ov) close(); };
+    var cancelBtn = ov.querySelector("#role-cancel");
+    if (cancelBtn) cancelBtn.onclick = close;
+
+    var saveBtn = ov.querySelector("#role-save");
+    if (saveBtn) saveBtn.onclick = function(){
+      var picked = ov.querySelector('input[name="role-pick"]:checked');
+      var newIntent = picked ? picked.value : "stay";
+      if (newIntent === "dayTrip") {
+        var sel = ov.querySelector("#role-hub-select");
+        var newHubId = sel ? sel.value : null;
+        if (!newHubId) { close(); return; }
+        cand.intent = "dayTrip";
+        cand.dayTripHub = newHubId;
+      } else {
+        cand.intent = "stay";
+        delete cand.dayTripHub;
+      }
+      close();
+      if (typeof global.renderCandidateCards === "function" && global._tb) {
+        global.renderCandidateCards(global._tb.candidates);
+      }
+    };
   }
 
   // ── HX.13 (v310): renderTimeLensItinerary ─────────────────

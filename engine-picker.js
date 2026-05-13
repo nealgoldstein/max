@@ -1726,15 +1726,122 @@
     //   - Source's attached events move to hub's dayTrips
     (function _autoClusterDayTrips(){
       if (!trip.destinations.length) return;
-      // Round EV: auto-clustering disabled entirely. The user decides
-      // which short stays become day trips via the Explore tab on each
-      // destination, not the algorithm. Neal's design call: "I don't
-      // think it is a good idea that you decide on the day trips. That
-      // should be up to the user." Existing chips on rebuilt trips are
-      // preserved by reconcile (EF); converting between standalone and
-      // day-trip is a manual user action via Explore (forward) or
-      // "Restore as own destination" (reverse). No auto-cluster on
-      // first build either.
+      // Round EV: auto-clustering on a geometric heuristic disabled
+      // ("user decides, not the algorithm"). v359.24 reactivates this
+      // function but rewires it to the user's explicit role-chip
+      // decisions in the picker (c.intent === "dayTrip" with c.dayTripHub
+      // pointing at the hub candidate). The absorption mechanics —
+      // build dayTrip chip on the hub, roll source nights into hub,
+      // remove source destination, recompute dates — are unchanged.
+      // Only the source-of-pairs flipped: explicit user intent rather
+      // than distance/nights heuristic.
+      var _pickerCands = (_tb && Array.isArray(_tb.candidates)) ? _tb.candidates : [];
+      if (!_pickerCands.length) return;
+      function _norm(s){
+        return (typeof _normPlaceName === "function") ? _normPlaceName(s||"") : String(s||"").toLowerCase().trim();
+      }
+      // Build place→candidate index so we can match destinations to
+      // their source candidates by name (destinations don't carry a
+      // candidate-id reference).
+      var candByPlace = {};
+      _pickerCands.forEach(function(c){
+        if (c && c.place) candByPlace[_norm(c.place)] = c;
+      });
+      // Build (source dest, hub dest) absorbtion pairs from explicit
+      // intent. Skip if hub's destination wasn't built (e.g. hub
+      // candidate got rejected, edge cases).
+      var absorbtions = [];
+      var _alreadyAbsorbedSrcIds = {};
+      trip.destinations.forEach(function(src){
+        if (!src) return;
+        var srcCand = candByPlace[_norm(src.place)];
+        if (!srcCand) return;
+        if (srcCand.intent !== "dayTrip") return;
+        if (!srcCand.dayTripHub) return;
+        var hubCand = _pickerCands.find(function(o){ return o && o.id === srcCand.dayTripHub; });
+        if (!hubCand) return;
+        var hub = trip.destinations.find(function(d){ return d && _norm(d.place) === _norm(hubCand.place); });
+        if (!hub || hub === src) return;
+        if (_alreadyAbsorbedSrcIds[src.id]) return;
+        _alreadyAbsorbedSrcIds[src.id] = true;
+        // distKm not strictly needed here (user chose), but we record
+        // it so the dayTrip chip carries the same shape as before.
+        var srcCoord = (typeof src.lat === "number" && typeof src.lng === "number") ? [src.lat, src.lng] : null;
+        var hubCoord = (typeof hub.lat === "number" && typeof hub.lng === "number") ? [hub.lat, hub.lng] : null;
+        var dKm = 0;
+        if (srcCoord && hubCoord) {
+          var dLat = (srcCoord[0] - hubCoord[0]) * 111;
+          var dLng = (srcCoord[1] - hubCoord[1]) * 111 * Math.cos(((srcCoord[0] + hubCoord[0]) / 2) * Math.PI / 180);
+          dKm = Math.sqrt(dLat*dLat + dLng*dLng);
+        }
+        absorbtions.push({ src: src, hub: hub, distKm: dKm });
+      });
+      if (!absorbtions.length) return;
+      console.log("[Max day-trip cluster v359.24] user-intent absorbtions:", absorbtions.map(function(a){
+        return a.src.place + " → " + a.hub.place + " (" + Math.round(a.distKm) + "km)";
+      }).join("; "));
+      // Skip past the legacy heuristic code below; apply absorbtions
+      // directly using the same chip-building mechanics as before.
+      absorbtions.forEach(function(a){
+        if (!a.hub.dayTrips) a.hub.dayTrips = [];
+        var srcKey = _norm(a.src.place);
+        var alreadyChip = a.hub.dayTrips.some(function(dt){
+          return dt && dt.place && _norm(dt.place) === srcKey;
+        });
+        if (alreadyChip) return; // idempotent on rebuild
+        a.hub.dayTrips.push({
+          place: a.src.place,
+          country: a.src.country || "",
+          lat: (typeof a.src.lat === "number") ? a.src.lat : null,
+          lng: (typeof a.src.lng === "number") ? a.src.lng : null,
+          whyItFits: a.src.intent || "",
+          attachedEvents: (a.src.attachedEvents || []).slice(),
+          sourceNights: a.src.nights || 1,
+          absorbedFromHub: a.hub.place,
+          distKm: Math.round(a.distKm),
+          clusteredAt: new Date().toISOString()
+        });
+        // Roll absorbed nights into hub (Round DA semantics).
+        a.hub.nights = (a.hub.nights || 0) + (a.src.nights || 1);
+      });
+      // Remove absorbed sources, recompute dates trip-wide.
+      var absorbedIds = {};
+      absorbtions.forEach(function(a){ absorbedIds[a.src.id] = true; });
+      trip.destinations = trip.destinations.filter(function(d){ return !absorbedIds[d.id]; });
+      var curDate = new Date(startDate);
+      trip.destinations.forEach(function(d){
+        var dateFrom = curDate.toISOString().slice(0,10);
+        var next = new Date(curDate); next.setDate(next.getDate() + (d.nights || 0));
+        var dateTo = next.toISOString().slice(0,10);
+        d.dateFrom = dateFrom;
+        d.dateTo = dateTo;
+        var savedItemsByIdx = (Array.isArray(d.days) ? d.days : []).map(function(day){
+          return Array.isArray(day && day.items) ? day.items.slice() : [];
+        });
+        d.days = makeDays(d.id, d.place, d.place, dateFrom, d.nights || 0);
+        if (savedItemsByIdx.length && d.days.length) {
+          var lastNew = d.days.length - 1;
+          savedItemsByIdx.forEach(function(items, oldIdx){
+            if (!items || !items.length) return;
+            var targetIdx = Math.min(oldIdx, lastNew);
+            var targetDay = d.days[targetIdx];
+            if (!targetDay) return;
+            if (!Array.isArray(targetDay.items)) targetDay.items = [];
+            var existing = {};
+            targetDay.items.forEach(function(it){ if (it && it.n) existing[it.n.toLowerCase()] = true; });
+            items.forEach(function(it){
+              if (!it) return;
+              if (it.type === "transport" || it.type === "transit") return;
+              var k = (it.n || "").toLowerCase();
+              if (k && existing[k]) return;
+              targetDay.items.push(it);
+              if (k) existing[k] = true;
+            });
+          });
+        }
+        curDate = next;
+      });
+      // Early-return so the legacy heuristic code below never runs.
       return;
       function getCoord(d){
         if (typeof d.lat === "number" && typeof d.lng === "number") return [d.lat, d.lng];
@@ -2245,7 +2352,12 @@
         whyItFits:c.whyItFits||"", tags:c.tags||[], tradeoffs:c.tradeoffs||null,
         stayRange:c.stayRange||"", lat:c.lat||null, lng:c.lng||null,
         nights: (typeof c.nights === "number") ? c.nights : undefined,
-        status:c.status||null, _required:!!c._required, _requiredFor:(c._requiredFor||[]).slice()
+        status:c.status||null, _required:!!c._required, _requiredFor:(c._requiredFor||[]).slice(),
+        // v359.24: preserve user's role decision so re-opens of the
+        // picker (Edit destinations) rehydrate the intent/hub the user
+        // set, instead of falling back to the auto-suggestion.
+        intent: c.intent || undefined,
+        dayTripHub: c.dayTripHub || undefined
       };
     });
     trip.requiredPlaces = (_tb.requiredPlaces||[]).slice();
