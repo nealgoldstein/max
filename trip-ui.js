@@ -2094,12 +2094,16 @@
     // Role changes cascade (nights redistribute, day-trip hub
     // assignment, etc.), so they live in the picker rather than in
     // the trip view itself. This link is the discoverability surface.
-    // Only shown when there's a candidate snapshot to re-enter into;
-    // arrival/departure structural stops don't get the link (their
-    // role is structural, not a user decision).
+    //
+    // v359.24.1: shown on every destination, including first/last.
+    // For arrival/departure candidates the picker's role chip is
+    // already hidden (per _computeCandidateRole) — the popover will
+    // simply have nothing meaningful to change. Better to over-show
+    // than under-show, since "where's the change role link?" is a
+    // worse failure than "the popover doesn't apply here." Falls
+    // back to reopenCandidateExplorer if there's no candidate
+    // snapshot on the trip.
     (function(){
-      if (!trip || !Array.isArray(trip.candidates) || !trip.candidates.length) return;
-      if (isFirst || isLast) return; // arrival/departure: skip
       var roleRow = document.createElement("div");
       roleRow.style.cssText = "display:flex;justify-content:flex-end;margin-top:6px;";
       var link = document.createElement("a");
