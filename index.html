@@ -8195,6 +8195,111 @@ function renderTripStep1(){
   return renderTripStep1Place();
 }
 
+// v359.8: wire up the four Settings-backed Shape fields on the brief
+// with Default/Override badges + "Apply to defaults" promote links.
+//   • If MaxDB.prefs has no value for a key → badge hidden, no promote
+//     (no default exists to override against; the value will become
+//     the default on first publish, see goToTripStep2)
+//   • Current matches saved default → grey "Default · X" pill
+//   • Current differs from saved default → blue "Override · X (default Y)"
+//     pill plus a visible "↑ Apply to defaults" link
+// Called via setTimeout after renderTripStep1Place sets innerHTML so
+// the badge nodes exist in the DOM by the time we attach handlers.
+function _tbSetupShapeBadges(){
+  var BADGE_DEFAULT = "display:inline-block;font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:#eee;color:#888;text-transform:none;letter-spacing:.02em;";
+  var BADGE_OVERRIDE = "display:inline-block;font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:#e8f1fb;color:#1a5fa8;text-transform:none;letter-spacing:.02em;";
+  var PROMOTE_LINK = "font-size:10.5px;font-weight:600;color:#1a5fa8;text-decoration:none;cursor:pointer;display:inline-block;";
+
+  function readPref(key){
+    try {
+      if (!window.MaxDB || !MaxDB.prefs) return null;
+      var v = MaxDB.prefs.get(key);
+      return (v == null || v === "") ? null : v;
+    } catch(_) { return null; }
+  }
+
+  function setupNumberField(inputId, badgeId, promoteId, prefKey, unit){
+    var input = document.getElementById(inputId);
+    var badge = document.getElementById(badgeId);
+    var promote = document.getElementById(promoteId);
+    if (!input || !badge) return;
+    function fmt(v){ return v + (unit ? " " + unit : ""); }
+    function update(){
+      var pref = readPref(prefKey);
+      var cur = input.value;
+      if (pref == null) {
+        badge.style.cssText = "display:none;";
+        if (promote) promote.style.display = "none";
+        return;
+      }
+      if (String(cur) === String(pref)) {
+        badge.style.cssText = BADGE_DEFAULT;
+        badge.textContent = "Default · " + fmt(cur);
+        if (promote) promote.style.display = "none";
+      } else {
+        badge.style.cssText = BADGE_OVERRIDE;
+        badge.textContent = "Override · " + fmt(cur) + " (default " + fmt(pref) + ")";
+        if (promote) promote.style.cssText = PROMOTE_LINK;
+      }
+    }
+    input.addEventListener("input", update);
+    if (promote) {
+      promote.onclick = function(e){
+        e.preventDefault();
+        try { if (window.MaxDB && MaxDB.prefs) MaxDB.prefs.set(prefKey, input.value); } catch(_){}
+        update();
+      };
+    }
+    update();
+  }
+
+  function setupRadioField(name, badgeId, promoteId, prefKey, labelMap){
+    var radios = document.querySelectorAll('input[name="' + name + '"]');
+    var badge = document.getElementById(badgeId);
+    var promote = document.getElementById(promoteId);
+    if (!radios.length || !badge) return;
+    function readCurrent(){
+      for (var i = 0; i < radios.length; i++) {
+        if (radios[i].checked) return radios[i].value;
+      }
+      return null;
+    }
+    function update(){
+      var pref = readPref(prefKey);
+      var cur = readCurrent();
+      if (pref == null) {
+        badge.style.cssText = "display:none;";
+        if (promote) promote.style.display = "none";
+        return;
+      }
+      if (String(cur) === String(pref)) {
+        badge.style.cssText = BADGE_DEFAULT;
+        badge.textContent = "Default · " + (labelMap[cur] || cur);
+        if (promote) promote.style.display = "none";
+      } else {
+        badge.style.cssText = BADGE_OVERRIDE;
+        badge.textContent = "Override · " + (labelMap[cur] || cur) + " (default " + (labelMap[pref] || pref) + ")";
+        if (promote) promote.style.cssText = PROMOTE_LINK;
+      }
+    }
+    radios.forEach(function(rb){ rb.addEventListener("change", update); });
+    if (promote) {
+      promote.onclick = function(e){
+        e.preventDefault();
+        var cur = readCurrent();
+        try { if (window.MaxDB && MaxDB.prefs && cur) MaxDB.prefs.set(prefKey, cur); } catch(_){}
+        update();
+      };
+    }
+    update();
+  }
+
+  setupNumberField("tb-hours-per-day", "tb-hpd-badge", "tb-hpd-promote", "paceHours", "hrs");
+  setupNumberField("tb-max-big-sights", "tb-spd-badge", "tb-spd-promote", "sightsPerDay", "");
+  setupRadioField("tb-pace-mode", "tb-pace-badge", "tb-pace-promote", "paceMode", {loose:"Relaxed", enough:"Balanced", notmuch:"Intense"});
+  setupNumberField("tb-day-trip-hours", "tb-dth-badge", "tb-dth-promote", "dayTripHours", "hrs");
+}
+
 // Place-first flow (Stage C). User names a place; Max surfaces what's there;
 // user picks what's must-do vs skip. The picked items populate _mdcItems so
 // Step 2 → candidate search can run without a second LLM regen.
@@ -8303,20 +8408,63 @@ function renderTripStep1Place(){
     + '</div>'
 
     // ── 4. THE SHAPE ────────────────────────────────
-    // (override badges + global-default surfacing land in v2.)
-    + _tbSectionHead("The shape", "How long each day, how many sights.")
-    + '<div class="tb-field"><label>Pace</label>'
-    +   '<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-top:6px;">'
-    +     '<div style="display:flex;align-items:center;gap:8px;">'
-    +       '<label style="font-size:10px;color:#888;font-weight:500;text-transform:none;letter-spacing:0;margin:0;">Hours/day:</label>'
-    +       '<input id="tb-hours-per-day" type="number" min="1" max="12" inputmode="numeric" value="' + ((_tb.hoursPerDay||_defaultHoursPerDay())+"") + '" oninput="_tb.hoursPerDay=this.value;" style="width:72px;padding:5px 8px;font-size:12px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
-    +     '</div>'
-    +     '<div style="display:flex;align-items:center;gap:8px;">'
-    +       '<label style="font-size:10px;color:#888;font-weight:500;text-transform:none;letter-spacing:0;margin:0;">Max “big” sights (2+ hrs) per day:</label>'
-    +       '<input id="tb-max-big-sights" type="number" min="1" max="6" inputmode="numeric" value="' + ((_tb.maxBigSightsPerDay||_defaultMaxBigSightsPerDay())+"") + '" oninput="_tb.maxBigSightsPerDay=this.value;" style="width:72px;padding:5px 8px;font-size:12px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    // v359.8: four Settings-backed fields (hours/day, big sights/day,
+    // default pace, day-trip drive time). Each shows a small badge:
+    //   • Grey "Default · X" when matching the saved global default
+    //   • Blue "Override · X (default Y)" when different
+    // Plus an "↑ Apply to defaults" link when overridden, to promote
+    // the per-trip value to the user's global Settings. Wire-up runs
+    // in _tbSetupShapeBadges() after the render.
+    + _tbSectionHead("The shape", "How long each day, how many sights — and how to think about day trips.")
+    + '<div class="tb-field" id="tb-shape-fields">'
+    +   '<div style="font-size:10.5px;color:#777;margin-bottom:14px;font-style:italic;line-height:1.55;">These come from your <strong>⚙ Settings</strong> — change them here just for this trip. Click <strong>↑ Apply to defaults</strong> on any override to update your defaults globally.</div>'
+    // Row: hours/day
+    +   '<div class="tb-shape-row" style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;">'
+    +     '<label style="font-weight:500;color:#222;flex:0 0 240px;margin:0;font-size:12.5px;text-transform:none;letter-spacing:0;">Hours of sightseeing per day</label>'
+    +     '<input id="tb-hours-per-day" type="number" min="2" max="10" inputmode="numeric" value="' + (_tb.hoursPerDay || _defaultHoursPerDay()) + '" oninput="_tb.hoursPerDay=this.value;" style="width:64px;padding:5px 8px;font-size:12px;border:1px solid #ddd;border-radius:6px;font-family:inherit;text-align:center;" />'
+    +     '<span id="tb-hpd-badge"></span>'
+    +     '<a href="#" id="tb-hpd-promote" style="display:none;">↑ Apply to defaults</a>'
+    +   '</div>'
+    // Row: max big sights
+    +   '<div class="tb-shape-row" style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;">'
+    +     '<label style="font-weight:500;color:#222;flex:0 0 240px;margin:0;font-size:12.5px;text-transform:none;letter-spacing:0;">Max big sights per day</label>'
+    +     '<input id="tb-max-big-sights" type="number" min="1" max="6" inputmode="numeric" value="' + (_tb.maxBigSightsPerDay || _defaultMaxBigSightsPerDay()) + '" oninput="_tb.maxBigSightsPerDay=this.value;" style="width:64px;padding:5px 8px;font-size:12px;border:1px solid #ddd;border-radius:6px;font-family:inherit;text-align:center;" />'
+    +     '<span id="tb-spd-badge"></span>'
+    +     '<a href="#" id="tb-spd-promote" style="display:none;">↑ Apply to defaults</a>'
+    +   '</div>'
+    // Row: default pace (radio)
+    +   '<div class="tb-shape-row" style="display:flex;align-items:flex-start;gap:10px;margin-bottom:14px;flex-wrap:wrap;">'
+    +     '<label style="font-weight:500;color:#222;flex:0 0 240px;margin:0;font-size:12.5px;text-transform:none;letter-spacing:0;padding-top:4px;">Default pace</label>'
+    +     '<div style="display:flex;flex-direction:column;gap:6px;flex:1;min-width:260px;">'
+    +       (function(){
+            var cur = _tb.paceMode || _defaultPaceMode();
+            function rb(value, label, desc) {
+              var checked = (cur === value) ? "checked" : "";
+              return '<label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:12px;font-weight:500;color:#222;text-transform:none;letter-spacing:0;line-height:1.45;margin:0;padding:0;">'
+                + '<input type="radio" name="tb-pace-mode" value="' + value + '" ' + checked + ' onchange="_tb.paceMode=this.value;" style="margin-top:2px;flex-shrink:0;width:auto;" />'
+                + '<span><strong>' + label + '</strong><span style="font-weight:400;color:#666;font-size:11px;"> — ' + desc + '</span></span>'
+                + '</label>';
+            }
+            return rb("loose", "Relaxed", "Longer stays, fewer sights, open evenings.")
+              + rb("enough", "Balanced", "Moderate stays, 6–8 sights per destination.")
+              + rb("notmuch", "Intense", "Shorter stays, more sights, full evenings.");
+          })()
+    +       '<div style="display:flex;align-items:center;gap:10px;margin-top:4px;">'
+    +         '<span id="tb-pace-badge"></span>'
+    +         '<a href="#" id="tb-pace-promote" style="display:none;">↑ Apply to defaults</a>'
+    +       '</div>'
     +     '</div>'
     +   '</div>'
-    +   '<div style="font-size:10.5px;color:#777;margin-top:8px;line-height:1.6;">Max will use about <strong>' + ((_tb.hoursPerDay||_defaultHoursPerDay())+"") + ' hrs</strong> of sightseeing on a full day (lighter on travel days, fuller in the middle), and won’t schedule more than <strong>' + ((_tb.maxBigSightsPerDay||_defaultMaxBigSightsPerDay())+"") + '</strong> big sight' + ((_tb.maxBigSightsPerDay||_defaultMaxBigSightsPerDay())==1?"":"s") + ' per day.</div>'
+    // Row: day-trip drive time
+    +   '<div class="tb-shape-row" style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;">'
+    +     '<label style="font-weight:500;color:#222;flex:0 0 240px;margin:0;font-size:12.5px;text-transform:none;letter-spacing:0;">Max drive time for a day trip</label>'
+    +     '<div style="display:flex;align-items:center;gap:5px;">'
+    +       '<input id="tb-day-trip-hours" type="number" min="1" max="6" step="0.5" inputmode="decimal" value="' + (_tb.dayTripHours || _defaultDayTripHours()) + '" oninput="_tb.dayTripHours=this.value;" style="width:64px;padding:5px 8px;font-size:12px;border:1px solid #ddd;border-radius:6px;font-family:inherit;text-align:center;" />'
+    +       '<span style="font-size:11px;color:#666;">hours</span>'
+    +     '</div>'
+    +     '<span id="tb-dth-badge"></span>'
+    +     '<a href="#" id="tb-dth-promote" style="display:none;">↑ Apply to defaults</a>'
+    +   '</div>'
     + '</div>'
 
     // ── 5. HARD LIMITS ────────────────────────────────
@@ -8337,6 +8485,14 @@ function renderTripStep1Place(){
     +     '<div style="font-size:10px;color:#aaa;cursor:pointer;" onclick="showBriefApiKeyForm()">🔑 Set API key</div>'
     +   '</div>'
     + '</div>';
+
+  // v359.8: wire up Default/Override badges + Apply-to-defaults links
+  // on the Shape section's four Settings-backed fields. Has to run
+  // AFTER innerHTML is set; using setTimeout(..., 0) keeps it
+  // consistent with the existing attachScrollHint pattern above.
+  setTimeout(function(){
+    if (typeof _tbSetupShapeBadges === "function") _tbSetupShapeBadges();
+  }, 0);
 }
 
 // v359.7: legacy two-page transition. The two pages are now one,
@@ -13473,10 +13629,41 @@ function goToTripStep2(){
   _tb.withKids       = g("tb-with-kids") ? !!g("tb-with-kids").checked : !!_tb.withKids;
   _tb.aboutTrip      = g("tb-about-trip") ? g("tb-about-trip").value.trim() : (_tb.aboutTrip||"");
   // v302: structured pace fields.
+  // v359.8: also capture the two new Settings-backed fields added in
+  // the consolidated brief — paceMode (radio) and dayTripHours.
   var _hpdEl = g("tb-hours-per-day");
   var _bigEl = g("tb-max-big-sights");
   _tb.hoursPerDay        = _hpdEl ? Math.max(1, Math.min(12, parseInt(_hpdEl.value, 10) || _defaultHoursPerDay())) : (_tb.hoursPerDay || _defaultHoursPerDay());
   _tb.maxBigSightsPerDay = _bigEl ? Math.max(1, Math.min(6,  parseInt(_bigEl.value, 10) || _defaultMaxBigSightsPerDay())) : (_tb.maxBigSightsPerDay || _defaultMaxBigSightsPerDay());
+  var _pmRadio = document.querySelector('input[name="tb-pace-mode"]:checked');
+  if (_pmRadio && _pmRadio.value) _tb.paceMode = _pmRadio.value;
+  else if (!_tb.paceMode) _tb.paceMode = (typeof _defaultPaceMode === "function") ? _defaultPaceMode() : "enough";
+  var _dthEl = g("tb-day-trip-hours");
+  if (_dthEl) {
+    var _dth = parseFloat(_dthEl.value);
+    if (isFinite(_dth) && _dth > 0 && _dth <= 6) _tb.dayTripHours = _dth;
+  }
+  if (!_tb.dayTripHours) _tb.dayTripHours = (typeof _defaultDayTripHours === "function") ? _defaultDayTripHours() : 3;
+
+  // v359.8: first-time auto-save. If a Settings pref key is still
+  // unset, treat the user's typed value as their new default. This
+  // makes the system organic — the very first trip's values become
+  // the user's defaults, subsequent trips show them as defaults with
+  // an override option. Skip when MaxDB.prefs is unavailable (test
+  // env) or the value didn't validate.
+  try {
+    if (window.MaxDB && MaxDB.prefs) {
+      function _saveIfUnset(key, value, isValid){
+        if (!isValid) return;
+        var cur = MaxDB.prefs.get(key);
+        if (cur == null || cur === "") MaxDB.prefs.set(key, value);
+      }
+      _saveIfUnset("paceHours", _tb.hoursPerDay, isFinite(_tb.hoursPerDay) && _tb.hoursPerDay >= 2 && _tb.hoursPerDay <= 10);
+      _saveIfUnset("sightsPerDay", _tb.maxBigSightsPerDay, isFinite(_tb.maxBigSightsPerDay) && _tb.maxBigSightsPerDay >= 1 && _tb.maxBigSightsPerDay <= 6);
+      _saveIfUnset("paceMode", _tb.paceMode, _tb.paceMode === "loose" || _tb.paceMode === "enough" || _tb.paceMode === "notmuch");
+      _saveIfUnset("dayTripHours", _tb.dayTripHours, isFinite(_tb.dayTripHours) && _tb.dayTripHours > 0 && _tb.dayTripHours <= 6);
+    }
+  } catch(_){}
   // v306: mobility note. _tb.physicalAbility is set by _tbPickAbility on
   // chip click; the note input has its own oninput. Re-read here to be
   // safe across keyboard nav / paste.
