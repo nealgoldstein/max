@@ -1273,7 +1273,9 @@
     // More destinations than (totalNights / 2) → less than 2 nights
     // per stop on average. Flagged independently of pace so it shows
     // even on intense-pace trips.
-    if (totalNights >= 4 && overnights.length > Math.ceil(totalNights / 2) + 1) {
+    // v359.25.1: dropped the "+1" leeway. 7 nights + 5 stops needs to
+    // fire (1.4 nights/stop), and the leeway swallowed it.
+    if (totalNights >= 4 && overnights.length > Math.ceil(totalNights / 2)) {
       issues.push({
         severity: "red",
         title: "More stops than the calendar comfortably supports",
