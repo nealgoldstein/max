@@ -8199,95 +8199,152 @@ function renderTripStep1(){
 // user picks what's must-do vs skip. The picked items populate _mdcItems so
 // Step 2 → candidate search can run without a second LLM regen.
 function renderTripStep1Place(){
-  // Preserve in-flight inputs across re-renders
+  // v359.7: consolidated single-page brief. Replaces the old two-page
+  // flow ("Where do you want to go?" → "Shape the trip") with one
+  // scrolling page organized by the new section structure: destination,
+  // travelers, how, shape, hard limits, avoidances. The CTA goes
+  // straight to the picker. renderTripBrief() and renderTripStep1()
+  // are now thin aliases pointed at this function.
+  //
+  // Preserve in-flight inputs across re-renders so the user doesn't
+  // lose what they typed when the page redraws (e.g., toggling a chip).
   var _pl = document.getElementById("tb-place-name");
   if(_pl) _tb.placeName = _pl.value;
-  var _ctx = document.getElementById("tb-place-context");
-  if(_ctx) _tb.placeContext = _ctx.value;
+  var _whySp = document.getElementById("tb-why-specifically");
+  if(_whySp) _tb.whySpecifically = _whySp.value;
+  var _whyGen = document.getElementById("tb-why-generally");
+  if(_whyGen) _tb.whyGenerally = _whyGen.value;
 
-  var ov=g("trip-brief-overlay"); ov.className="tb-overlay";
-  ov.style.cssText="position:fixed;inset:0;background:#f7f7f5;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
-  setTimeout(function(){ ov.scrollTop = 0; attachScrollHint(ov); }, 0);
+  // Migrate legacy placeContext → whyGenerally on first encounter so
+  // older trips don't lose their "why" text.
+  if (!_tb.whyGenerally && _tb.placeContext) _tb.whyGenerally = _tb.placeContext;
 
-  // The activity-place picker now lives at Step 3 (after the brief). This
-  // screen is just place + context — the smallest possible commitment before
-  // Max needs the trip's time window to make smart suggestions.
+  var ov = g("trip-brief-overlay");
+  ov.className = "tb-overlay";
+  var _prevScroll = ov.scrollTop || 0;
+  var _preserve = !!_tb._preserveScrollOnce;
+  _tb._preserveScrollOnce = false;
+  ov.style.cssText = "position:fixed;inset:0;background:#f7f7f5;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
+  setTimeout(function(){ ov.scrollTop = _preserve ? _prevScroll : 0; attachScrollHint(ov); }, 0);
 
-  var pmPlaceForExample = (_tb.placeName || "").trim();
-  var formHtml = ''
-    +'<div style="background:#fff;border:1px solid #e8e8e8;border-radius:10px;padding:18px 20px;margin-bottom:14px;">'
-    +'<label style="display:block;font-size:11px;font-weight:600;color:#333;margin-bottom:6px;">The place</label>'
-    +'<input id="tb-place-name" class="tb-act-add-inp" placeholder="e.g. Paris, Grand Canyon, Bhutan, Southeast Asia" autocomplete="off" style="width:100%;box-sizing:border-box;" value="'+(_tb.placeName||"").replace(/"/g,'&quot;')+'" onblur="this.value=_titleCaseCity(this.value);_tb.placeName=this.value.trim();" />'
-    +'<div style="font-size:10px;color:#888;margin-top:6px;line-height:1.5;">Can be a city, a region, a country, a park. Anywhere worth mapping — Max gathers a starting point for you to evaluate.</div>'
-    +'<label style="display:block;font-size:16px;font-weight:700;font-style:italic;color:#1a1a1a;margin-top:18px;margin-bottom:4px;letter-spacing:-0.005em;">Why this place? What’s drawing you?</label>'
-    +'<div style="font-size:10px;color:#888;margin-bottom:6px;line-height:1.5;">The sentence that’s been sitting with you. Why now, why here, what you’re after. (How <em>you</em> travel — pace, party, what you’d skip — comes later.)</div>'
-    +'<textarea id="tb-place-context" rows="4" class="tb-act-add-inp" placeholder="e.g. always wanted to see the Alps · my grandmother grew up there · need to be somewhere completely different · honeymoon · finally taking the kids · scenic-rail trip we’ve put off for years" style="width:100%;box-sizing:border-box;resize:vertical;min-height:96px;">'+(_tb.placeContext||"")+'</textarea>'
-    +'</div>';
+  var regionLabel = ((_tb.region || _tb.placeName || "").trim()) || "the region";
 
-  var continueBtn = pmPlaceForExample
-    ? '<button class="tb-btn-primary" id="tb-place-continue-btn" onclick="continueFromPlaceToBrief()">Travel details →</button>'
-    : '<div id="tb-place-continue-slot" style="font-size:11px;color:#999;padding:9px 12px;background:#f7f4ec;border:1px dashed #d8d1c0;border-radius:7px;text-align:center;">Type a place above to continue.</div>';
+  // Build the mobility chips block as an IIFE — same pattern the old
+  // page-2 used; just keeps the chips list close to its rendering.
+  var mobilityBlock = (function(){
+    var ab = _tb.physicalAbility || "";
+    var opts = [
+      {id:"fit",label:"Fit and active"},
+      {id:"moderate",label:"Moderate"},
+      {id:"limited",label:"Limited walking"},
+      {id:"elderly",label:"Elderly"},
+      {id:"mobility",label:"Mobility aid"},
+      {id:"other",label:"Other"}
+    ];
+    var chips = opts.map(function(o){
+      return '<span class="tb-toggle' + (ab===o.id?" on":"") + '" data-ability-id="' + o.id + '" onclick="_tbPickAbility(\'' + o.id + '\')">' + o.label + '</span>';
+    }).join("");
+    return '<div class="tb-field"><label>Mobility of the slowest member</label>'
+      + '<div style="font-size:10.5px;color:#777;margin-top:2px;margin-bottom:6px;line-height:1.55;">Max shapes the trip around what the slowest or least-mobile traveler can manage comfortably.</div>'
+      + '<div style="display:flex;gap:6px;flex-wrap:wrap;">' + chips + '</div>'
+      + '<input id="tb-ability-note" value="' + ((_tb.abilityNote||"").replace(/"/g,"&quot;")) + '" placeholder="Anything specific Max should know — bad knees, pregnant, strollers, etc." oninput="_tb.abilityNote=this.value;" style="margin-top:8px;" />'
+      + '</div>';
+  })();
 
-  ov.innerHTML='<div class="tb-header">'
-    +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div></div></div>'
-    +'<div class="tb-title">Where do you want to go?</div>'
-    +'</div>'
-    +'<div class="tb-body">'
-    +'<p style="margin:0 0 10px;font-size:11.5px;color:#777;line-height:1.6;font-style:italic;">Max is your research assistant. It gathers what it can — you evaluate, edit, and add what’s missing.</p>'
-    +'<p style="margin:0 0 18px;font-size:12px;color:#555;line-height:1.65;">A city, country, region, national park — anywhere worth mapping. Next we’ll cover the trip’s shape (dates, party, pace) so the information Max gathers fits your time window. You evaluate, edit, and add.</p>'
-    +formHtml
-    +'</div>'
-    +'<div class="tb-footer">'
-    +continueBtn
-    +'<div style="display:flex;justify-content:space-between;margin-top:8px;">'
-    +'<div class="tb-btn-back" onclick="cancelTripBrief()">← Back</div>'
-    +'<div style="font-size:10px;color:#aaa;cursor:pointer;" onclick="showBriefApiKeyForm()">🔑 Set API key</div>'
-    +'</div>'
-    +'</div>';
+  ov.innerHTML = ''
+    + '<div class="tb-header">'
+    +   '<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div></div></div>'
+    +   '<div class="tb-title">Tell Max about your trip</div>'
+    +   '<div class="tb-sub">One page. Fill in what matters, skip what doesn’t.</div>'
+    + '</div>'
+    + '<div class="tb-body">'
 
-  var placeInp = document.getElementById("tb-place-name");
-  if (placeInp) {
-    placeInp.addEventListener("input", function(){
-      var v = (this.value || "").trim();
-      var slot = document.getElementById("tb-place-continue-slot");
-      var btn = document.getElementById("tb-place-continue-btn");
-      if (v) {
-        if (slot && !btn) {
-          var newBtn = document.createElement("button");
-          newBtn.className = "tb-btn-primary";
-          newBtn.id = "tb-place-continue-btn";
-          newBtn.onclick = function(){ continueFromPlaceToBrief(); };
-          newBtn.textContent = "Travel details →";
-          slot.parentNode.replaceChild(newBtn, slot);
-        }
-      } else {
-        if (btn) {
-          var newSlot = document.createElement("div");
-          newSlot.id = "tb-place-continue-slot";
-          newSlot.style.cssText = "font-size:11px;color:#999;padding:9px 12px;background:#f7f4ec;border:1px dashed #d8d1c0;border-radius:7px;text-align:center;";
-          newSlot.textContent = "Type a place above to continue.";
-          btn.parentNode.replaceChild(newSlot, btn);
-        }
-      }
-    });
-  }
+    // ── 1. THE DESTINATION ────────────────────────────────
+    + _tbSectionHead("The destination", "Where you’re going, when, and why.")
+    + '<div class="tb-field"><label>Where do you want to go?</label>'
+    +   '<input id="tb-place-name" placeholder="e.g. Iceland, Paris, Bhutan, Southeast Asia" autocomplete="off" value="' + (_tb.placeName||"").replace(/"/g,'&quot;') + '" onblur="this.value=_titleCaseCity(this.value);_tb.placeName=this.value.trim();" />'
+    +   '<div style="font-size:10.5px;color:#777;margin-top:6px;line-height:1.5;">Country, region, city, park — anywhere worth mapping.</div>'
+    + '</div>'
+    + _tbDatesFieldHtml()
+    + '<div class="tb-field" style="margin-top:14px;"><label>Why this place, specifically?</label>'
+    +   '<input id="tb-why-specifically" placeholder="e.g. drive the entire ring road" autocomplete="off" value="' + (_tb.whySpecifically||"").replace(/"/g,'&quot;') + '" oninput="_tb.whySpecifically=this.value;" />'
+    +   '<div style="font-size:10.5px;color:#777;margin-top:6px;line-height:1.5;">The concrete thing you want to do.</div>'
+    + '</div>'
+    + '<div class="tb-field"><label>Why this place, generally?</label>'
+    +   '<input id="tb-why-generally" placeholder="e.g. see the spectacular scenery" autocomplete="off" value="' + (_tb.whyGenerally||"").replace(/"/g,'&quot;') + '" oninput="_tb.whyGenerally=this.value;" />'
+    +   '<div style="font-size:10.5px;color:#777;margin-top:6px;line-height:1.5;">The broader pull — what’s drawing you there.</div>'
+    + '</div>'
+
+    // ── 2. THE TRAVELERS ────────────────────────────────
+    + _tbSectionHead("The travelers", "Who’s going.")
+    + '<div class="tb-field"><label>How many travelers?</label>'
+    +   '<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;">'
+    +     '<input id="tb-travelers-count" type="number" min="1" max="40" inputmode="numeric" value="' + ((_tb.travelersCount||_tb.partySize||"2")+"").replace(/"/g,"&quot;") + '" placeholder="e.g. 2" oninput="_tb.travelersCount=this.value;" style="max-width:120px;" />'
+    +     '<label style="display:flex;align-items:center;gap:8px;font-weight:500;cursor:pointer;font-size:13px;margin:0;text-transform:none;letter-spacing:0;color:#222;">'
+    +       '<input id="tb-with-kids" type="checkbox" ' + ((_tb.withKids||_tb.partyComposition==="family-kids")?"checked":"") + ' onchange="_tb.withKids=this.checked;" style="width:auto;margin:0;" /> Traveling with kids?'
+    +     '</label>'
+    +   '</div>'
+    + '</div>'
+    + mobilityBlock
+
+    // ── 3. THE HOW ────────────────────────────────
+    + _tbSectionHead("How you want to travel", "Transport, lodging, anything else Max should know.")
+    + '<div class="tb-field"><label>How you’d like to get around in ' + _pmEsc(regionLabel) + '</label>'
+    +   '<input id="tb-transport" value="' + (_tb.transport||"").replace(/"/g,"&quot;") + '" placeholder="e.g. Trains and walking only — no rental car. Swiss Travel Pass." oninput="_tb.transport=this.value;" />'
+    +   '<div style="font-size:10.5px;color:#b05820;font-style:italic;margin-top:4px;line-height:1.55;">This shapes everything. Easy to skip even though you wouldn’t want to.</div>'
+    + '</div>'
+    + '<div class="tb-field"><label>Where you’d like to stay</label>'
+    +   '<textarea id="tb-accommodation" rows="2" placeholder="e.g. Small family hotels, en suite required, no hostels, no shared bathrooms." oninput="_tb.accommodation=this.value;" style="resize:vertical;min-height:54px;">' + (_tb.accommodation||"").replace(/</g,"&lt;").replace(/>/g,"&gt;") + '</textarea>'
+    +   '<div style="font-size:10.5px;color:#b05820;font-style:italic;margin-top:4px;line-height:1.55;">Be explicit even if it feels obvious.</div>'
+    + '</div>'
+    + '<div class="tb-field"><label>Anything else Max should know <span style="font-weight:400;color:#aaa;font-size:11px;">(optional)</span></label>'
+    +   '<textarea id="tb-about-trip" rows="4" placeholder="e.g. Couple in our 60s, first trip to this region. Would skip a famous-but-touristy day-trip; wouldn’t skip a once-in-a-lifetime view." oninput="_tb.aboutTrip=this.value;">' + ((_tb.aboutTrip||"").replace(/</g,"&lt;")) + '</textarea>'
+    +   '<div style="font-size:10px;color:#aaa;margin-top:4px;line-height:1.5;">The more you share, the better the suggestions. Max reads this as prose — write naturally.</div>'
+    + '</div>'
+
+    // ── 4. THE SHAPE ────────────────────────────────
+    // (override badges + global-default surfacing land in v2.)
+    + _tbSectionHead("The shape", "How long each day, how many sights.")
+    + '<div class="tb-field"><label>Pace</label>'
+    +   '<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-top:6px;">'
+    +     '<div style="display:flex;align-items:center;gap:8px;">'
+    +       '<label style="font-size:10px;color:#888;font-weight:500;text-transform:none;letter-spacing:0;margin:0;">Hours/day:</label>'
+    +       '<input id="tb-hours-per-day" type="number" min="1" max="12" inputmode="numeric" value="' + ((_tb.hoursPerDay||_defaultHoursPerDay())+"") + '" oninput="_tb.hoursPerDay=this.value;" style="width:72px;padding:5px 8px;font-size:12px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +     '</div>'
+    +     '<div style="display:flex;align-items:center;gap:8px;">'
+    +       '<label style="font-size:10px;color:#888;font-weight:500;text-transform:none;letter-spacing:0;margin:0;">Max “big” sights (2+ hrs) per day:</label>'
+    +       '<input id="tb-max-big-sights" type="number" min="1" max="6" inputmode="numeric" value="' + ((_tb.maxBigSightsPerDay||_defaultMaxBigSightsPerDay())+"") + '" oninput="_tb.maxBigSightsPerDay=this.value;" style="width:72px;padding:5px 8px;font-size:12px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +     '</div>'
+    +   '</div>'
+    +   '<div style="font-size:10.5px;color:#777;margin-top:8px;line-height:1.6;">Max will use about <strong>' + ((_tb.hoursPerDay||_defaultHoursPerDay())+"") + ' hrs</strong> of sightseeing on a full day (lighter on travel days, fuller in the middle), and won’t schedule more than <strong>' + ((_tb.maxBigSightsPerDay||_defaultMaxBigSightsPerDay())+"") + '</strong> big sight' + ((_tb.maxBigSightsPerDay||_defaultMaxBigSightsPerDay())==1?"":"s") + ' per day.</div>'
+    + '</div>'
+
+    // ── 5. HARD LIMITS ────────────────────────────────
+    + _tbSectionHead("Hard limits", "Optional but consequential. Things Max won’t route around.")
+    + '<div class="tb-field"><textarea id="tb-hardlimits" rows="2" placeholder="e.g. No car rentals under any circumstances. Vegetarian. Wheelchair access required." oninput="_tb.hardlimits=this.value;">' + (_tb.hardlimits||"") + '</textarea></div>'
+
+    // ── 6. AVOIDANCES ────────────────────────────────
+    + _tbSectionHead("Anything you’d like to avoid?", "Optional. Soft preferences Max will weigh.")
+    + _tbAvoidFieldHtml()
+
+    + '</div>'
+
+    // ── FOOTER ────────────────────────────────
+    + '<div class="tb-footer">'
+    +   '<button class="tb-btn-primary" id="tb-place-continue-btn" onclick="goToTripStep2()">What to see and do →</button>'
+    +   '<div style="display:flex;justify-content:space-between;margin-top:8px;">'
+    +     '<div class="tb-btn-back" onclick="cancelTripBrief()">← Cancel</div>'
+    +     '<div style="font-size:10px;color:#aaa;cursor:pointer;" onclick="showBriefApiKeyForm()">🔑 Set API key</div>'
+    +   '</div>'
+    + '</div>';
 }
 
-// Capture place + context, then go to the brief. The picker comes after.
+// v359.7: legacy two-page transition. The two pages are now one,
+// so this function is just a passthrough to goToTripStep2 — captures
+// every field on the unified brief and proceeds to the picker.
+// Kept callable in case anything still references it.
 function continueFromPlaceToBrief(){
-  var nameInp = document.getElementById("tb-place-name");
-  var ctxInp = document.getElementById("tb-place-context");
-  if (nameInp) _tb.placeName = (nameInp.value || "").trim();
-  if (ctxInp) _tb.placeContext = (ctxInp.value || "").trim();
-  if (!_tb.placeName) { maxAlert("Tell Max where you want to go."); return; }
-  if (!_tb.region) _tb.region = _tb.placeName;
-  if (_tb.placeContext && !_tb.intent) _tb.intent = _tb.placeContext;
-  // If the place changed since picker last ran, blow away stale activities.
-  if (Array.isArray(_tb.placeActivities) && _tb.placeActivities.length) {
-    var lastPlace = _tb._lastGeneratedFor || "";
-    if (lastPlace !== _tb.placeName) _tb.placeActivities = [];
-  }
-  renderTripBrief();
+  return goToTripStep2();
 }
 
 // Generate activities for the named place.
@@ -13229,7 +13286,17 @@ function _tbSectionHead(title, sub){
     +'</div>';
 }
 
+// v359.7: renderTripBrief used to render the second of two brief
+// pages ("Shape the trip"). With the consolidation it's now a thin
+// alias to the single unified page below \u2014 every call site funnels
+// to renderTripStep1Place. Kept callable so external onclick refs
+// (and the back-button paths) keep working without rewriting them.
 function renderTripBrief(){
+  return renderTripStep1Place();
+}
+
+// Legacy two-page renderer kept for reference only. Not called.
+function _legacyRenderTripBrief(){
   var ov=g("trip-brief-overlay"); ov.className="tb-overlay";
   // Capture scroll position before we blow away innerHTML, so in-place
   // re-renders (e.g. toggling a mode pill) don\u2019t yank the user back to top.
@@ -13363,7 +13430,34 @@ function renderTripBrief(){
 }
 
 function goToTripStep2(){
-  // region already set from sentence in Step 1
+  // v359.7: now the SINGLE brief's submit handler (after the old
+  // page-1 → page-2 split was consolidated). Captures the destination
+  // / why fields that used to live on page 1, plus everything from
+  // the old page 2.
+  var _pl = g("tb-place-name");
+  if (_pl) _tb.placeName = (_pl.value || "").trim();
+  var _whySp = g("tb-why-specifically");
+  if (_whySp) _tb.whySpecifically = (_whySp.value || "").trim();
+  var _whyGen = g("tb-why-generally");
+  if (_whyGen) _tb.whyGenerally = (_whyGen.value || "").trim();
+  // Mirror placeContext for back-compat with prompts that haven't
+  // been updated yet to read the new whySpecifically / whyGenerally
+  // fields. The two-line "specifically + generally" reads better in
+  // a prompt than either field alone.
+  var _ctxBits = [];
+  if (_tb.whySpecifically) _ctxBits.push("Specifically: " + _tb.whySpecifically);
+  if (_tb.whyGenerally)    _ctxBits.push("Generally: " + _tb.whyGenerally);
+  if (_ctxBits.length) _tb.placeContext = _ctxBits.join(". ");
+  // Promote placeName → region/intent so downstream flow still
+  // works (same logic the deleted continueFromPlaceToBrief had).
+  if (!_tb.region && _tb.placeName) _tb.region = _tb.placeName;
+  if (_tb.placeContext && !_tb.intent) _tb.intent = _tb.placeContext;
+  // If the place changed since picker last ran, blow away stale activities.
+  if (Array.isArray(_tb.placeActivities) && _tb.placeActivities.length) {
+    var lastPlace = _tb._lastGeneratedFor || "";
+    if (lastPlace && _tb.placeName && lastPlace !== _tb.placeName) _tb.placeActivities = [];
+  }
+
   _tbCaptureDates();
   _tb.duration      = g("tb-duration")      ? g("tb-duration").value.trim()      : (_tb.duration||"");
   _tb.when          = g("tb-when")          ? g("tb-when").value.trim()          : (_tb.when||"");
