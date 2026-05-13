@@ -17678,21 +17678,18 @@ function _defaultAccommodation(){
 // collapsed summary of their defaults instead of every C-bucket
 // field. Flag is set on first brief submission. To override for
 // a specific trip, click "Change them just for this trip."
-// v359.11.2: three checks (any positive returns true):
-//   1. The explicit briefSeenOnce flag (set on every brief submit)
-//   2. Existing trip count > 0 (user clearly isn't fresh)
-//   3. ANY Settings pref already saved (the user has been around
-//      long enough to set defaults)
-// Plus a console log so we can see in DevTools what the detection
-// found if it's not behaving as expected.
+// v359.12.1: dropped the "trips index" fallback that v359.11.1
+// added. Trips persist across a Reset preferences action (only
+// prefs and the briefSeenOnce flag are cleared), so leaving the
+// trips fallback in defeated the whole "test as a new user" flow
+// — a user with one trip would always read as returning. The flag
+// + any-saved-pref checks remain. After reset, no prefs are set,
+// the flag is cleared → fresh-user brief renders.
 function _isReturningUser(){
   var DBG = "[Max returning-user]";
-  var sawFlag = false, sawTrips = false, sawPref = false;
+  var sawFlag = false, sawPref = false;
   try {
     sawFlag = !!(window.MaxDB && MaxDB.prefs && MaxDB.prefs.get("briefSeenOnce"));
-  } catch(_){}
-  try {
-    sawTrips = (typeof _tripsIndex !== "undefined" && Array.isArray(_tripsIndex) && _tripsIndex.length > 0);
   } catch(_){}
   try {
     if (window.MaxDB && MaxDB.prefs) {
@@ -17703,8 +17700,8 @@ function _isReturningUser(){
       }
     }
   } catch(_){}
-  var ret = sawFlag || sawTrips || sawPref;
-  console.log(DBG, { returning: ret, sawFlag: sawFlag, sawTrips: sawTrips, sawPref: sawPref });
+  var ret = sawFlag || sawPref;
+  console.log(DBG, { returning: ret, sawFlag: sawFlag, sawPref: sawPref });
   return ret;
 }
 
@@ -18032,31 +18029,24 @@ function showSettingsPanel(){
     };
   });
 
-  // v359.12: Reset all preferences. Clears every Bucket A + Bucket C
-  // pref, the briefSeenOnce flag, and the welcome-onboarded marker
-  // so the next "Start a new trip" lands on the full first-time
-  // brief. Trips and trip data are NOT touched — only user prefs.
+  // v359.12: Reset all preferences. Uses MaxDB.prefs.clear() which
+  // wipes the entire prefs blob (much cleaner than setting each key
+  // to null — earlier version did that and it didn't fully reset
+  // because some prefs were never being null-comparable). Also
+  // removes the local "max-onboarded" marker so the welcome modal
+  // re-fires on the next session. Trips are NOT touched.
   var resetLink = document.getElementById("sp-reset-all");
   if (resetLink) {
     resetLink.onclick = function(e){
       e.preventDefault();
       if (!confirm("Reset all your preferences?\n\nThis clears every default you've set — pace, day-trip threshold, transport, accommodation, mobility, dietary, languages, units, and display preferences. Your TRIPS are not touched.\n\nThe next time you start a trip, you'll see the full first-time brief.\n\nContinue?")) return;
       try {
-        if (window.MaxDB && MaxDB.prefs) {
-          var keysToClear = [
-            "paceHours", "sightsPerDay", "paceMode", "dayTripHours",
-            "travelersCount", "withKids", "transport", "accommodation",
-            "mobility", "dietary", "languages",
-            "distanceUnits", "temperatureUnits", "dateFormat", "currency",
-            "briefSeenOnce"
-          ];
-          keysToClear.forEach(function(k){
-            try { MaxDB.prefs.set(k, null); } catch(_){}
-            // MaxDB.prefs might not have a delete method; setting to
-            // null + the helper functions' "null check" handles it.
-          });
+        if (window.MaxDB && MaxDB.prefs && typeof MaxDB.prefs.clear === "function") {
+          MaxDB.prefs.clear();
         }
-      } catch(_){}
+      } catch(e2) {
+        console.warn("[Max settings] prefs.clear failed:", e2);
+      }
       try { localStorage.removeItem("max-onboarded"); } catch(_){}
       var status = document.getElementById("sp-status");
       if (status) { status.style.color = "#c44"; status.textContent = "Preferences cleared. Reloading…"; }
