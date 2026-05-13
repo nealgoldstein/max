@@ -10878,18 +10878,20 @@ function openTripHeroMapWindow(){
   // can't return from.
   // v359.5.6 (corrected): put the PWA-standalone detection back.
   // Distribution will be PWA, and window.open inside a PWA either
-  // opens nothing visible or pops a new app instance. matchMedia
-  // only matches when actually launched standalone — it does NOT
-  // leak in a regular Chrome tab even if the app was previously
-  // installed (my earlier worry was wrong). The Blob URL approach
-  // below fixes the regular-Chrome bug; this PWA path serves the
-  // distribution case.
+  // opens nothing visible or pops a new app instance.
+  // v359.5.18 (corrected): route to overlay on real TOUCH devices,
+  // not just narrow viewports. Neal\'s console paste showed his
+  // 406px-wide desktop Chrome was incorrectly triggering the narrow-
+  // viewport branch and getting overlay (which covers the trip list).
+  // `pointer: coarse` matches phones and tablets but stays false on
+  // desktop Chrome regardless of window size, which is the right
+  // line to draw.
   try {
     var isStandaloneMM = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
     var isStandaloneNav = window.navigator.standalone === true;
-    var isNarrow = (window.innerWidth && window.innerWidth <= 700);
-    console.log(DBG, "overlay-trigger checks", { matchMediaStandalone: isStandaloneMM, navStandalone: isStandaloneNav, narrow: isNarrow });
-    if (isNarrow || isStandaloneMM || isStandaloneNav) {
+    var isTouch = (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+    console.log(DBG, "overlay-trigger checks", { matchMediaStandalone: isStandaloneMM, navStandalone: isStandaloneNav, touch: isTouch });
+    if (isTouch || isStandaloneMM || isStandaloneNav) {
       console.log(DBG, "→ routing to in-page overlay");
       _openTripHeroMapOverlay();
       return;
