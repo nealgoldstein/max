@@ -12423,8 +12423,9 @@ function _updatePlaceActivitySummary(){
       var extendDays = displayNights + 1;
       fitNote = '<div style="margin-top:6px;padding:9px 11px;background:#fff3ed;border:1px solid #f5ccb5;border-radius:6px;font-size:11.5px;color:#b0451a;line-height:1.55;">'
         + '<div style="font-weight:700;margin-bottom:5px;">'+over+' day'+(over!==1?"s":"")+' over your '+budgetLbl+' budget</div>'
-        + '<div style="font-size:11px;color:#94381a;">Max won\u2019t silently extend your trip. Trim some picks here, or extend your budget to fit.</div>'
+        + '<div style="font-size:11px;color:#94381a;">Max won\u2019t silently extend your trip. Pick one:</div>'
         + '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">'
+        +   '<button type="button" onclick="_makeItFit()" style="font-size:10.5px;font-weight:600;color:#fff;background:#b0451a;border:1px solid #b0451a;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;" title="Trim the longest stays and bump pace denser to fit your budget">Make it fit</button>'
         +   '<button type="button" onclick="_extendBudgetToFit(' + extendDays + ')" style="font-size:10.5px;font-weight:600;color:#b0451a;background:#fff;border:1px solid #e6b89c;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;">Extend to '+extendDays+' days</button>'
         +   '<span style="font-size:10.5px;color:#94381a;align-self:center;">or trim picks above</span>'
         + '</div>'
@@ -12456,6 +12457,98 @@ function _updatePlaceActivitySummary(){
       btn.disabled = false;
       btn.classList.remove("tb-btn-disabled");
       btn.title = "";
+    }
+  }
+}
+
+// v359.29: one-click "make it fit" \u2014 auto-trim the longest kept stays
+// one night at a time until the running total fits the user's stated
+// budget, then bump pace one notch denser. Honors a minimum of 1 night
+// per overnight place. If the picks STILL can't fit after maxing out
+// trimming (e.g. too many overnight bases for the days), the toast
+// surfaces what's left and the user trims places manually.
+function _makeItFit(){
+  // Parse the budget. No budget = nothing to fit against.
+  var budget = (typeof _parseTripDuration === "function" && (_tb.duration || _tb.when))
+    ? _parseTripDuration(_tb.duration || _tb.when) : null;
+  if (!budget || !budget.max) return;
+  var displayNights = _tb._pickerDisplayTotal || 0;
+  var bufferAdds = _tb._pickerBufferAdds || 0;
+  // Target nights = budget.max - 1 (days\u2192nights). Subtract bufferAdds
+  // because they're calculated separately by the picker \u2014 what we can
+  // trim is the per-place nights inside placeActivities.
+  var targetNights = (budget.max - 1) - bufferAdds;
+  if (targetNights < 1) targetNights = 1;
+
+  // Aggregate kept place nights with refs back to placeActivities so
+  // we can write changes back. Same key strategy as
+  // _updatePlaceActivitySummary: normalize, take MAX nights across
+  // activities for each place.
+  var keepRefs = [];
+  (_tb.placeActivities || []).forEach(function(it, actIdx){
+    (it.requiredPlaces || []).forEach(function(p, plcIdx){
+      if (!p || !p._keep) return;
+      // Routes don't contribute nights (transit, not stay).
+      if (it.type === "route") return;
+      var key = (typeof _normPlaceName === "function") ? _normPlaceName(p.place||"") : (p.place||"").toLowerCase();
+      var entry = keepRefs.find(function(e){ return e.key === key; });
+      if (!entry) {
+        entry = { key: key, place: p.place, nights: p.nights || 1, refs: [] };
+        keepRefs.push(entry);
+      }
+      if ((p.nights || 0) > entry.nights) entry.nights = p.nights;
+      entry.refs.push({ actIdx: actIdx, plcIdx: plcIdx });
+    });
+  });
+  if (!keepRefs.length) return;
+
+  // Greedy trim \u2014 always shave from the place with the most remaining
+  // nights. Floor at 1 night per place.
+  var MIN_NIGHTS = 1;
+  var curTotal = keepRefs.reduce(function(t, e){ return t + e.nights; }, 0);
+  var overage = curTotal - targetNights;
+  var trimmed = 0;
+  while (trimmed < overage) {
+    keepRefs.sort(function(a, b){ return b.nights - a.nights; });
+    var top = keepRefs[0];
+    if (!top || top.nights <= MIN_NIGHTS) break;
+    top.nights -= 1;
+    trimmed++;
+  }
+  // Write back the trimmed nights to every contributing requiredPlace
+  // so the picker's summary recompute sees the new max consistently.
+  keepRefs.forEach(function(entry){
+    entry.refs.forEach(function(ref){
+      var p = _tb.placeActivities[ref.actIdx] && _tb.placeActivities[ref.actIdx].requiredPlaces[ref.plcIdx];
+      if (p) p.nights = entry.nights;
+    });
+  });
+
+  // Bump pace one notch denser. Signals the user's intent (denser
+  // trip) and means downstream prompts/render honor it.
+  var paceProgression = { loose: "enough", enough: "notmuch", notmuch: "notmuch" };
+  var curPace = _tb.paceMode
+    || (typeof _defaultPaceMode === "function" ? _defaultPaceMode() : null)
+    || "enough";
+  _tb.paceMode = paceProgression[curPace] || "notmuch";
+  // Mirror onto pace string used by LLM context if needed.
+  if (typeof _tb.pace === "string" && _tb.pace !== _tb.paceMode) {
+    _tb.pace = _tb.paceMode;
+  }
+
+  // Recompute the picker summary so the gate clears (or surfaces
+  // residual overage if trimming alone wasn't enough).
+  if (typeof _updatePlaceActivitySummary === "function") {
+    _updatePlaceActivitySummary();
+  }
+
+  var fullyFits = (trimmed >= overage);
+  var paceLbl = ({loose:"Relaxed", enough:"Balanced", notmuch:"Intense"})[_tb.paceMode] || _tb.paceMode;
+  if (typeof showToast === "function") {
+    if (fullyFits) {
+      showToast("Trimmed " + trimmed + " night" + (trimmed!==1?"s":"") + " \u00b7 pace \u2192 " + paceLbl + ". Fits your budget.");
+    } else {
+      showToast("Trimmed " + trimmed + " night" + (trimmed!==1?"s":"") + " \u00b7 pace \u2192 " + paceLbl + ". Still " + (overage - trimmed) + " over \u2014 drop a destination above to finish.");
     }
   }
 }
