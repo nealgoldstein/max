@@ -10738,8 +10738,24 @@ function _pushHeroMapUpdate(){
 // active-dest highlight) but rendered in the parent page so it has
 // a clear ✕ Close button and works under Safari's popup restrictions.
 function _openTripHeroMapOverlay(){
+  // v359.5.13: noisy diagnostics. Neal: "nothing happens in the
+  // large map in the trip view" after v359.5.11 routed every click
+  // straight here. Either the overlay doesn't open, or it opens but
+  // the inner Leaflet map fails silently (missing tiles, missing
+  // pts, Leaflet not loaded). Log every step so the failure shows
+  // up in the console.
+  var DBG = "[Max view-larger overlay]";
+  console.log(DBG, "open called", {
+    hasTrip: !!(typeof trip !== "undefined" && trip),
+    destCount: (typeof trip !== "undefined" && trip && trip.destinations) ? trip.destinations.length : "(no trip)",
+    hasLeaflet: typeof L !== "undefined",
+    z: window.innerWidth + "x" + window.innerHeight
+  });
   var existing = document.getElementById("trip-hero-mobile-overlay");
-  if (existing) existing.remove();
+  if (existing) {
+    console.log(DBG, "removing existing overlay before re-opening");
+    existing.remove();
+  }
   var ov = document.createElement("div");
   ov.id = "trip-hero-mobile-overlay";
   ov.style.cssText = "position:fixed;inset:0;background:#fff;z-index:11800;display:flex;flex-direction:column;";
@@ -10751,6 +10767,7 @@ function _openTripHeroMapOverlay(){
     '</div>' +
     '<div id="trip-hero-mobile-map" style="flex:1;min-height:0;background:#eaf0ed;"></div>';
   document.body.appendChild(ov);
+  console.log(DBG, "overlay appended to body, ov in DOM:", !!document.getElementById("trip-hero-mobile-overlay"));
   function close(){
     if (ov.parentNode) ov.parentNode.removeChild(ov);
     document.removeEventListener("keydown", escClose);
@@ -10759,17 +10776,29 @@ function _openTripHeroMapOverlay(){
   document.getElementById("trip-hero-mobile-close").onclick = close;
   document.addEventListener("keydown", escClose);
   if (typeof L === "undefined") {
+    console.warn(DBG, "Leaflet (L) is undefined — early-returning with notice");
     document.getElementById("trip-hero-mobile-map").innerHTML =
       '<div style="padding:30px 20px;text-align:center;color:#888;font-size:12px;">Map library not loaded.</div>';
     return;
   }
   var pts = _buildHeroMapPoints();
+  console.log(DBG, "pts count:", pts.length, "first:", pts[0] || "(none)");
   if (!pts.length) {
+    console.warn(DBG, "no points returned — early-returning with notice");
     document.getElementById("trip-hero-mobile-map").innerHTML =
       '<div style="padding:30px 20px;text-align:center;color:#888;font-size:12px;">No destinations to show on the map yet.</div>';
     return;
   }
-  var map = L.map("trip-hero-mobile-map", { zoomControl: true });
+  var map;
+  try {
+    map = L.map("trip-hero-mobile-map", { zoomControl: true });
+  } catch (e) {
+    console.error(DBG, "L.map threw:", e);
+    document.getElementById("trip-hero-mobile-map").innerHTML =
+      '<div style="padding:30px 20px;text-align:center;color:#c44;font-size:12px;">Map failed to initialize. Check console for details.</div>';
+    return;
+  }
+  console.log(DBG, "Leaflet map initialized");
   // Satellite basemap (Esri World Imagery) — matches the popup window.
   L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
     attribution: 'Tiles &copy; Esri',
@@ -10789,10 +10818,27 @@ function _openTripHeroMapOverlay(){
     var color = isActive ? "#c44" : "#1a5fa8";
     var size = isActive ? 30 : 26;
     var html = '<div style="width:' + size + 'px;height:' + size + 'px;border-radius:50%;background:' + color +
-      ';color:#fff;font-weight:700;font-size:' + (isActive ? 13 : 12) + 'px;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4);">' + (i + 1) + '</div>';
+      ';color:#fff;font-weight:700;font-size:' + (isActive ? 13 : 12) + 'px;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4);cursor:pointer;">' + (i + 1) + '</div>';
     var icon = L.divIcon({ html: html, className: "", iconSize: [size, size], iconAnchor: [size/2, size/2] });
     var m = L.marker([p.lat, p.lng], { icon: icon }).addTo(map);
-    m.bindTooltip(p.place, { direction: "top", offset: [0, -size/2] });
+    m.bindTooltip(p.place + " · click to jump to itinerary card", { direction: "top", offset: [0, -size/2] });
+    // v359.5.12: clicking a pin closes the overlay and scrolls the
+    // trip list to the matching destination card. Neal's report:
+    // "clicking a destination on the larger map doesn't scroll to
+    // the place on the trip list." Same affordance the popup-window
+    // version had (via postMessage); now wired locally because the
+    // overlay lives in the same document.
+    (function(destId, placeName){
+      m.on("click", function(){
+        console.log("[Max view-larger overlay] pin clicked:", placeName, "destId:", destId);
+        if (typeof close === "function") { try { close(); } catch(_){} }
+        if (destId && typeof _scrollToTripDest === "function") {
+          _scrollToTripDest([destId]);
+        } else {
+          console.warn("[Max view-larger overlay] missing destId or _scrollToTripDest helper", {hasDestId: !!destId, hasHelper: typeof _scrollToTripDest});
+        }
+      });
+    })(p.destId || "", p.place || "");
     bounds.extend([p.lat, p.lng]);
   });
   if (bounds.isValid()) {
@@ -11107,49 +11153,60 @@ function openTripHeroMapWindow(){
   }
 }
 
+// v359.5.12: lifted the scroll-to-dest logic out of the postMessage
+// listener so the in-page overlay (which can't postMessage to itself
+// usefully) can call it directly when its pins are clicked. Neal's
+// report: "clicking a destination on the larger map doesn't scroll
+// to the place on the trip list." The popup-window had this wired
+// via postMessage; the overlay pin click had no handler at all.
+function _scrollToTripDest(destIds){
+  var ids = (destIds || []).filter(Boolean);
+  if (!ids.length) return;
+  // If we're not on the trip view, switch to it first.
+  if (typeof _leftMode !== "undefined" && _leftMode !== "trip" && typeof drawTripMode === "function") {
+    _leftMode = "trip";
+    try { drawTripMode(); } catch(_){}
+  }
+  setTimeout(function(){
+    var firstScrolled = false;
+    ids.forEach(function(id){
+      var card = document.querySelector('.tm-dest[data-id="' + id + '"]');
+      if (!card) return;
+      if (!firstScrolled) {
+        try { card.scrollIntoView({behavior: "smooth", block: "center"}); }
+        catch(_) { card.scrollIntoView(); }
+        firstScrolled = true;
+      }
+      // Amber pulse on every matching card so the user sees how
+      // many instances of this place exist on the trip.
+      var prevBg = card.style.backgroundColor;
+      var prevTrans = card.style.transition;
+      card.style.transition = "background-color 0.4s";
+      card.style.backgroundColor = "#fff7d4";
+      setTimeout(function(){
+        card.style.backgroundColor = prevBg || "";
+        card.style.transition = prevTrans || "";
+      }, 1600);
+    });
+  }, 60);
+}
+window._scrollToTripDest = _scrollToTripDest;
+
 // Round FZ: listen for pin-click messages from the larger map window
 // (Round CM.1's hero-map pop-out). When the user clicks a pin in the
 // separate window, the map posts {type: "maxScrollToDest", destIds:
-// [...]} back to this window — we scroll the matching trip-view
-// destination card into view and pulse it amber so the user sees
-// where they landed. Round-trip cities have multiple destIds (entry
-// + return + exit-buffer); we scroll to the first match found and
-// briefly highlight the others so the user can see all instances.
+// [...]} back to this window — we route to _scrollToTripDest, which
+// scrolls the matching trip-view destination card into view and
+// pulses it amber so the user sees where they landed. Round-trip
+// cities have multiple destIds (entry + return + exit-buffer); we
+// scroll to the first match found and briefly highlight the others
+// so the user can see all instances.
 (function _wireFzMapClickListener(){
   if (window._fzMapClickWired) return;
   window._fzMapClickWired = true;
   window.addEventListener("message", function(e){
     if (!e || !e.data || e.data.type !== "maxScrollToDest") return;
-    var ids = (e.data.destIds || []).filter(Boolean);
-    if (!ids.length) return;
-    // Try to scroll to the first matching card. If we're not on the
-    // trip view, first switch to it.
-    if (typeof _leftMode !== "undefined" && _leftMode !== "trip" && typeof drawTripMode === "function") {
-      _leftMode = "trip";
-      try { drawTripMode(); } catch(_){}
-    }
-    setTimeout(function(){
-      var firstScrolled = false;
-      ids.forEach(function(id){
-        var card = document.querySelector('.tm-dest[data-id="' + id + '"]');
-        if (!card) return;
-        if (!firstScrolled) {
-          try { card.scrollIntoView({behavior: "smooth", block: "center"}); }
-          catch(_) { card.scrollIntoView(); }
-          firstScrolled = true;
-        }
-        // Amber pulse on every matching card so the user sees how
-        // many instances of this place exist on the trip.
-        var prevBg = card.style.backgroundColor;
-        var prevTrans = card.style.transition;
-        card.style.transition = "background-color 0.4s";
-        card.style.backgroundColor = "#fff7d4";
-        setTimeout(function(){
-          card.style.backgroundColor = prevBg || "";
-          card.style.transition = prevTrans || "";
-        }, 1600);
-      });
-    }, 60);
+    _scrollToTripDest(e.data.destIds || []);
   });
 })();
 
