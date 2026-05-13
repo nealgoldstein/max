@@ -10992,8 +10992,14 @@ function openTripHeroMapWindow(){
     + '<script>document.getElementById("closeBtn").onclick=function(){try{window.close();}catch(_){}};<\/script>'
     + '<script>(function(){'
     +   'var pts = ' + ptsJson + ';'
-    +   'if (typeof L === "undefined" || !pts.length) return;'
-    +   'var map = L.map("map", {zoomControl: true, scrollWheelZoom: true, attributionControl: false}).setView([46.8, 8.2], 6);'
+    +   /* v359.5.16: wait for Leaflet to finish loading before
+         initializing. The synchronous-after-script tag pattern was
+         racing the async CDN load — when Leaflet wasn\'t ready, the
+         old `if (typeof L === "undefined") return;` silently bailed
+         and the popup stayed blank. Retry up to 50 times with 50ms
+         spacing (≈2.5s total budget) before giving up. */
+    +   'function _runInit(){'
+    +     'var map = L.map("map", {zoomControl: true, scrollWheelZoom: true, attributionControl: false}).setView([46.8, 8.2], 6);'
     +   'L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {maxZoom: 19}).addTo(map);'
     +   'L.tileLayer("https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png", {maxZoom: 19, opacity: 1.0}).addTo(map);'
     +   'var coords = pts.map(function(p){return [p.lat, p.lng];});'
@@ -11090,6 +11096,24 @@ function openTripHeroMapWindow(){
     +       'setTimeout(function(){ try { window.close(); } catch(_){} }, 5000);'
     +     '}'
     +   '});'
+    +   /* v359.5.16: close the _runInit function and add the
+         wait-for-Leaflet wrapper. */
+    + '}'
+    + 'if (!pts.length) {'
+    +   'document.body.insertAdjacentHTML("beforeend", \'<div style="position:fixed;inset:42px 0 0 0;display:flex;align-items:center;justify-content:center;color:#888;font-size:13px;">No destinations to show on the map yet.</div>\');'
+    +   'return;'
+    + '}'
+    + 'var _waitTries = 0;'
+    + 'function _waitForLeaflet(){'
+    +   'if (typeof L !== "undefined") { _runInit(); return; }'
+    +   '_waitTries++;'
+    +   'if (_waitTries > 50) {'
+    +     'document.body.insertAdjacentHTML("beforeend", \'<div style="position:fixed;inset:42px 0 0 0;display:flex;align-items:center;justify-content:center;color:#c44;font-size:13px;text-align:center;padding:30px;">Map library failed to load.<br>Check your internet connection, close this window, and try again.</div>\');'
+    +     'return;'
+    +   '}'
+    +   'setTimeout(_waitForLeaflet, 50);'
+    + '}'
+    + '_waitForLeaflet();'
     + '})();<\/script>'
     + '</body></html>';
   // v359.5.15: plain document.write — same pattern the picker map
