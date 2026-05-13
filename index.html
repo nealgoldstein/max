@@ -7003,6 +7003,20 @@ var MAX_ABOUT_TEXT = "Most trips begin as a sentence.\n\nNot a destination. A se
 // places). The modal is visually small and quick to dismiss but
 // the substance is real and worth reading once per trip-creation.
 function showAIDisclaimer(onContinue) {
+  // v359.12.3: skip the disclaimer if the user has already been
+  // through the Welcome onboarding (which has the same AI-caveats
+  // content). Without this gate, fresh installs after a Reset see
+  // the welcome modal AND then the disclaimer modal in immediate
+  // sequence — Neal called this "Max is an AI agent — read this
+  // before you start pops up twice." Same content, different
+  // titles. The max-onboarded flag is set when welcome dismisses.
+  // First-time-ever users (never onboarded) still see the modal.
+  try {
+    if (localStorage.getItem("max-onboarded") === "1") {
+      if (typeof onContinue === "function") onContinue();
+      return;
+    }
+  } catch(_){}
   // Prevent stacking if user double-taps "+ Start a new trip".
   var existing = document.getElementById("ai-disclaimer-overlay");
   if (existing) existing.parentNode.removeChild(existing);
@@ -8224,25 +8238,27 @@ function _tbSetupShapeBadges(){
     var promote = document.getElementById(promoteId);
     if (!input || !badge) return;
     function fmt(v){ return v + (unit ? " " + unit : ""); }
-    function effectiveDefault(){
-      var pref = readPref(prefKey);
-      // v359.8.1: use the hardcoded fallback when no pref has been
-      // saved yet. Without this, brand-new users (whose prefs blob
-      // is empty) saw no badges at all — confusing inconsistency.
-      // Now every Settings-backed field always shows a badge,
-      // comparing against the saved value or the hardcoded fallback.
-      return (pref != null) ? pref : fallback;
-    }
     function update(){
-      var def = effectiveDefault();
+      // v359.12.3 (reverts v359.8.1): only show a badge when there's
+      // an ACTUAL saved default. Showing a badge for the hardcoded
+      // fallback made it look like the user had saved a default they
+      // hadn't — confusing after Reset. First-trip flow: field shows
+      // input only, no badge. After submit the auto-save fires and
+      // the pref is saved, so the badge appears on subsequent renders.
+      var pref = readPref(prefKey);
       var cur = input.value;
-      if (String(cur) === String(def)) {
+      if (pref == null) {
+        badge.style.cssText = "display:none;";
+        if (promote) promote.style.display = "none";
+        return;
+      }
+      if (String(cur) === String(pref)) {
         badge.style.cssText = BADGE_DEFAULT;
         badge.textContent = "Default · " + fmt(cur);
         if (promote) promote.style.display = "none";
       } else {
         badge.style.cssText = BADGE_OVERRIDE;
-        badge.textContent = "Override · " + fmt(cur) + " (default " + fmt(def) + ")";
+        badge.textContent = "Override · " + fmt(cur) + " (default " + fmt(pref) + ")";
         if (promote) promote.style.cssText = PROMOTE_LINK;
       }
     }
@@ -8268,20 +8284,23 @@ function _tbSetupShapeBadges(){
       }
       return null;
     }
-    function effectiveDefault(){
-      var pref = readPref(prefKey);
-      return (pref != null) ? pref : fallback;
-    }
     function update(){
-      var def = effectiveDefault();
+      // v359.12.3: same reversal as setupNumberField — no badge when
+      // no pref is saved.
+      var pref = readPref(prefKey);
       var cur = readCurrent();
-      if (String(cur) === String(def)) {
+      if (pref == null) {
+        badge.style.cssText = "display:none;";
+        if (promote) promote.style.display = "none";
+        return;
+      }
+      if (String(cur) === String(pref)) {
         badge.style.cssText = BADGE_DEFAULT;
         badge.textContent = "Default · " + (labelMap[cur] || cur);
         if (promote) promote.style.display = "none";
       } else {
         badge.style.cssText = BADGE_OVERRIDE;
-        badge.textContent = "Override · " + (labelMap[cur] || cur) + " (default " + (labelMap[def] || def) + ")";
+        badge.textContent = "Override · " + (labelMap[cur] || cur) + " (default " + (labelMap[pref] || pref) + ")";
         if (promote) promote.style.cssText = PROMOTE_LINK;
       }
     }
@@ -8729,6 +8748,41 @@ function renderTripStep1Place(){
     // ── 6. AVOIDANCES ────────────────────────────────
     + _tbSectionHead("Anything you’d like to avoid?", "Optional. Soft preferences Max will weigh.")
     + _tbAvoidFieldHtml()
+
+    // ── DISPLAY PREFERENCES ──
+    // v359.12.3 → v359.12.4: inline-editable rather than read-only.
+    // Neal's report on the read-only version: "there is no
+    // opportunity for user to set these." Each pick saves to
+    // MaxDB.prefs immediately and applies globally — display prefs
+    // genuinely are global (you don't want km this trip and mi
+    // next). Single-source-of-truth: setting here is exactly the
+    // same as setting in ⚙ Settings → Display.
+    + _tbSectionHead("How Max should display this trip", "Distance units, temperature scale, date format. Applies to every trip — pick once here, change anytime in ⚙ Settings.")
+    + (function(){
+        var u = (typeof _defaultDistanceUnits === "function") ? _defaultDistanceUnits() : "metric";
+        var t = (typeof _defaultTemperatureUnits === "function") ? _defaultTemperatureUnits() : "celsius";
+        var d = (typeof _defaultDateFormat === "function") ? _defaultDateFormat() : "iso";
+        function rg(name, val, options){
+          return options.map(function(o){
+            var on = (val === o.v);
+            return '<label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;font-weight:500;color:#222;text-transform:none;letter-spacing:0;margin:0 14px 0 0;">'
+              + '<input type="radio" name="' + name + '" value="' + o.v + '" ' + (on?'checked':'') + ' style="margin:0;width:auto;" onchange="_tbSetDisplayPref(\'' + name + '\', this.value);" />'
+              + '<span>' + o.l + '</span>'
+              + '</label>';
+          }).join("");
+        }
+        return '<div class="tb-field">'
+          + '<div style="margin-bottom:10px;"><label style="font-size:11px;color:#777;font-weight:600;text-transform:none;letter-spacing:0;display:inline-block;width:120px;">Distance:</label>'
+          +   rg("tb-dist-units", u, [{v:"metric",l:"Metric (km)"},{v:"imperial",l:"Imperial (mi)"}])
+          + '</div>'
+          + '<div style="margin-bottom:10px;"><label style="font-size:11px;color:#777;font-weight:600;text-transform:none;letter-spacing:0;display:inline-block;width:120px;">Temperature:</label>'
+          +   rg("tb-temp-units", t, [{v:"celsius",l:"°C"},{v:"fahrenheit",l:"°F"}])
+          + '</div>'
+          + '<div style="margin-bottom:4px;"><label style="font-size:11px;color:#777;font-weight:600;text-transform:none;letter-spacing:0;display:inline-block;width:120px;vertical-align:top;">Date format:</label>'
+          +   rg("tb-date-fmt", d, [{v:"iso",l:"2026-05-12"},{v:"us",l:"May 12, 2026"},{v:"locale",l:"Locale"}])
+          + '</div>'
+          + '</div>';
+      })()
 
     + '</div>'
 
@@ -17692,6 +17746,26 @@ function _defaultAccommodation(){
 //     fallback in defeated the whole "test as a new user" flow.
 // briefSeenOnce is set ONLY when the user submits a brief (any
 // brief — first or refresh). That's the right trigger.
+// v359.12.4: inline display-prefs handler. Wired onto the radios at
+// the bottom of the brief. Writes the chosen value to MaxDB.prefs
+// immediately so it applies to this trip and persists globally.
+// Validates the key/value pair so radio markup mistakes can't poison
+// the prefs blob.
+function _tbSetDisplayPref(name, value){
+  if (!window.MaxDB || !MaxDB.prefs) return;
+  var keyMap = { "tb-dist-units": "distanceUnits", "tb-temp-units": "temperatureUnits", "tb-date-fmt": "dateFormat" };
+  var validMap = {
+    "tb-dist-units": ["metric", "imperial"],
+    "tb-temp-units": ["celsius", "fahrenheit"],
+    "tb-date-fmt": ["iso", "us", "locale"]
+  };
+  var prefKey = keyMap[name];
+  var valid = validMap[name];
+  if (!prefKey || !valid || valid.indexOf(value) < 0) return;
+  try { MaxDB.prefs.set(prefKey, value); } catch(_){}
+}
+window._tbSetDisplayPref = _tbSetDisplayPref;
+
 function _isReturningUser(){
   var DBG = "[Max returning-user]";
   var sawFlag = false;
