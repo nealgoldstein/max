@@ -8827,8 +8827,35 @@ function renderTripStep1Place(){
     + '<div class="tb-field"><textarea id="tb-hardlimits" rows="2" placeholder="e.g. No car rentals under any circumstances. Vegetarian. Wheelchair access required." oninput="_tb.hardlimits=this.value;">' + (_tb.hardlimits||"") + '</textarea></div>'
 
     // ── 6. AVOIDANCES ────────────────────────────────
-    + _tbSectionHead("Anything you’d like to avoid?", "Optional. Soft preferences Max will weigh.")
-    + _tbAvoidFieldHtml()
+    // v359.15: avoidances follow the same locked-on-default pattern.
+    // When user has avoidance defaults set in Settings AND hasn't
+    // unlocked this trip, show summary + Override link. Otherwise
+    // show chips + textarea, pre-filled from defaults when _tb has
+    // no per-trip avoid state yet.
+    + (function(){
+        // Migrate defaults into _tb if not already populated for this trip.
+        if (!_tb.avoid || Object.keys(_tb.avoid).length === 0) {
+          var dAvoid = _defaultAvoid();
+          if (dAvoid && Object.keys(dAvoid).length) _tb.avoid = Object.assign({}, dAvoid);
+        }
+        if (!_tb.avoidOther && _defaultAvoidOther()) _tb.avoidOther = _defaultAvoidOther();
+
+        if (_briefIsLocked("avoidDefaults", "avoid") && _hasAvoidDefaults()) {
+          var labels = {
+            altitude:"high altitude", crowds:"crowds", heat:"extreme heat",
+            cold:"extreme cold", longDrives:"long drives"
+          };
+          var dA = _defaultAvoid();
+          var picks = Object.keys(dA).filter(function(k){return dA[k];}).map(function(k){ return labels[k] || k; });
+          var dOther = _defaultAvoidOther();
+          if (dOther) picks.push(_pmEsc(_briefTrunc(dOther, 60)));
+          var summary = picks.length ? "Avoiding: " + picks.join(", ") + " (your defaults)" : "(none — no avoidances set)";
+          return _tbSectionHead("Anything you’d like to avoid?", "Optional. Soft preferences Max will weigh.")
+            + _briefRenderLocked("Soft avoidances", summary, "avoid");
+        }
+        return _tbSectionHead("Anything you’d like to avoid?", "Optional. Soft preferences Max will weigh.")
+          + _tbAvoidFieldHtml();
+      })()
 
     // v359.13: Display preferences (units, temperature, date format)
     // moved OUT of the brief and back into ⚙ Settings only. Neal:
@@ -17899,6 +17926,35 @@ function _defaultCurrency(){
   return "";
 }
 
+// v359.15: avoidances default. The user's soft avoidances live in
+// _tb.avoid (object of {avoidanceId: bool}) plus _tb.avoidOther (text).
+// Saved globally as avoidDefaults / avoidOtherDefaults so every new
+// trip pre-fills from them. Per-trip override (the brief's locked
+// row + "Override for this trip" link) lets the user diverge.
+function _defaultAvoid(){
+  try {
+    var v = (window.MaxDB && MaxDB.prefs) ? MaxDB.prefs.get("avoidDefaults") : null;
+    if (v && typeof v === "object") return v;
+  } catch(_){}
+  return {};
+}
+function _defaultAvoidOther(){
+  try {
+    var s = (window.MaxDB && MaxDB.prefs) ? MaxDB.prefs.get("avoidOtherDefaults") : null;
+    if (typeof s === "string" && s.length) return s;
+  } catch(_){}
+  return "";
+}
+// Whether ANY avoidance default is configured — used by the brief to
+// decide whether to render the row locked-with-override.
+function _hasAvoidDefaults(){
+  var v = _defaultAvoid();
+  if (v && typeof v === "object") {
+    for (var k in v) if (v[k]) return true;
+  }
+  return !!_defaultAvoidOther();
+}
+
 // v359.6: Settings panel — global trip-defaults editor. Opens from
 // the ⚙ button in any of three headers (home, picker, trip-view).
 // Writes to MaxDB.prefs so changes sync across devices via the
@@ -17919,6 +17975,8 @@ function showSettingsPanel(){
   var curTravelers = 2, curWithKids = false, curTransport = "", curAccom = "";
   var curMobility = "", curDietary = "", curLanguages = "";
   var curDistUnits = "metric", curTempUnits = "celsius", curDateFmt = "iso", curCurrency = "";
+  // v359.15: avoidance defaults.
+  var curAvoidDefaults = {}, curAvoidOtherDefaults = "";
   try {
     if (window.MaxDB && MaxDB.prefs) {
       var ph = parseInt(MaxDB.prefs.get("paceHours"), 10);
@@ -17953,6 +18011,11 @@ function showSettingsPanel(){
       if (df === "us" || df === "locale") curDateFmt = df;
       var cu = MaxDB.prefs.get("currency");
       if (typeof cu === "string") curCurrency = cu;
+      // v359.15: avoid defaults.
+      var av = MaxDB.prefs.get("avoidDefaults");
+      if (av && typeof av === "object") curAvoidDefaults = av;
+      var avO = MaxDB.prefs.get("avoidOtherDefaults");
+      if (typeof avO === "string") curAvoidOtherDefaults = avO;
     }
   } catch(_){}
 
@@ -18023,6 +18086,32 @@ function showSettingsPanel(){
     +       '</div>'
     +     '</div>'
     +     '<div style="font-size:11px;color:#777;line-height:1.5;">Anything within this drive time from a hub can be a day trip instead of its own overnight stop. Total round-trip; one hour each way is fine, two hours each way is the upper end.</div>'
+    +   '</div>'
+
+    // v359.15: AVOIDANCES — soft preferences that apply to every trip
+    // unless overridden on the brief.
+    +   '<div style="margin:18px 0 10px;border-top:1px dashed #d8d4c8;"></div>'
+    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:10px;">Avoidances</div>'
+    +   '<div style="margin-bottom:14px;">'
+    +     '<label style="font-weight:600;color:#222;display:block;margin-bottom:6px;">Default soft avoidances</label>'
+    +     (function(){
+        var opts = [
+          {id:"altitude",   label:"High altitude"},
+          {id:"crowds",     label:"Crowds / tourist density"},
+          {id:"heat",       label:"Extreme heat"},
+          {id:"cold",       label:"Extreme cold"},
+          {id:"longDrives", label:"Long drives"}
+        ];
+        return '<div style="display:flex;gap:6px;flex-wrap:wrap;">' + opts.map(function(o){
+          return '<span class="tb-chip' + (curAvoidDefaults[o.id]?' on':'') + '" data-sp-avoid="' + o.id + '" style="cursor:pointer;">' + o.label + '</span>';
+        }).join("") + '</div>';
+      })()
+    +     '<div style="font-size:11px;color:#777;line-height:1.5;margin-top:6px;">Things you’d like Max to weigh against any suggestion. Soft — not hard limits.</div>'
+    +   '</div>'
+    +   '<div style="margin-bottom:6px;">'
+    +     '<label for="sp-avoid-other" style="font-weight:600;color:#222;display:block;margin-bottom:4px;">Anything else to avoid</label>'
+    +     '<textarea id="sp-avoid-other" rows="2" placeholder="e.g. group tours, chain restaurants, cruise-ship ports" style="width:100%;font-size:12.5px;padding:6px 9px;border:1px solid #ccc;border-radius:5px;font-family:inherit;box-sizing:border-box;resize:vertical;min-height:54px;">'+curAvoidOtherDefaults.replace(/</g,"&lt;").replace(/>/g,"&gt;")+'</textarea>'
+    +     '<div style="font-size:11px;color:#777;line-height:1.5;margin-top:4px;">Free-form preferences that aren’t in the chip list above.</div>'
     +   '</div>'
 
     // v359.9: travelers section.
@@ -18165,6 +18254,12 @@ function showSettingsPanel(){
     };
   });
 
+  // v359.15: wire avoidance chips. Multi-select; each click toggles
+  // its own .on state.
+  box.querySelectorAll('[data-sp-avoid]').forEach(function(c){
+    c.onclick = function(){ c.classList.toggle("on"); };
+  });
+
   // v359.12: Reset all preferences. Uses MaxDB.prefs.clear() which
   // wipes the entire prefs blob (much cleaner than setting each key
   // to null — earlier version did that and it didn't fully reset
@@ -18216,6 +18311,13 @@ function showSettingsPanel(){
     var dateR = box.querySelector('input[name="sp-date"]:checked');
     var df = dateR ? dateR.value : "iso";
     var cu = (document.getElementById("sp-currency").value || "").trim().toUpperCase();
+    // v359.15: avoid defaults.
+    var avoidObj = {};
+    box.querySelectorAll('[data-sp-avoid].on').forEach(function(c){
+      var id = c.getAttribute("data-sp-avoid");
+      if (id) avoidObj[id] = true;
+    });
+    var avoidOther = (document.getElementById("sp-avoid-other").value || "").trim();
     if (!isFinite(hpd) || hpd < 2 || hpd > 10) hpd = 6;
     if (!isFinite(spd) || spd < 1 || spd > 6) spd = 2;
     if (pm !== "loose" && pm !== "enough" && pm !== "notmuch") pm = "enough";
@@ -18238,6 +18340,8 @@ function showSettingsPanel(){
         MaxDB.prefs.set("temperatureUnits", tu);
         MaxDB.prefs.set("dateFormat", df);
         MaxDB.prefs.set("currency", cu);
+        MaxDB.prefs.set("avoidDefaults", avoidObj);
+        MaxDB.prefs.set("avoidOtherDefaults", avoidOther);
       }
     } catch(_){}
     var status = document.getElementById("sp-status");
