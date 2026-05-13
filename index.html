@@ -17678,31 +17678,28 @@ function _defaultAccommodation(){
 // collapsed summary of their defaults instead of every C-bucket
 // field. Flag is set on first brief submission. To override for
 // a specific trip, click "Change them just for this trip."
-// v359.12.1: dropped the "trips index" fallback that v359.11.1
-// added. Trips persist across a Reset preferences action (only
-// prefs and the briefSeenOnce flag are cleared), so leaving the
-// trips fallback in defeated the whole "test as a new user" flow
-// — a user with one trip would always read as returning. The flag
-// + any-saved-pref checks remain. After reset, no prefs are set,
-// the flag is cleared → fresh-user brief renders.
+// v359.12.2: ONLY the briefSeenOnce flag now signals "returning."
+// Earlier versions also counted "any saved pref" and "any trip in
+// the index" but both produced wrong-feeling behavior:
+//   - Welcome onboarding sets paceHours + sightsPerDay immediately
+//     on first sign-in. With sawPref counting as "returning," a
+//     brand-new user would land on the collapsed brief on their
+//     very first trip, before they'd ever even seen the full
+//     layout. The full brief is part of how users learn the
+//     system; the collapsed view earns its place by showing on
+//     the SECOND and subsequent trips, not the first.
+//   - Trips persist across Reset preferences, so leaving the trip
+//     fallback in defeated the whole "test as a new user" flow.
+// briefSeenOnce is set ONLY when the user submits a brief (any
+// brief — first or refresh). That's the right trigger.
 function _isReturningUser(){
   var DBG = "[Max returning-user]";
-  var sawFlag = false, sawPref = false;
+  var sawFlag = false;
   try {
     sawFlag = !!(window.MaxDB && MaxDB.prefs && MaxDB.prefs.get("briefSeenOnce"));
   } catch(_){}
-  try {
-    if (window.MaxDB && MaxDB.prefs) {
-      var keys = ["paceHours","sightsPerDay","paceMode","dayTripHours","travelersCount","transport","accommodation","mobility"];
-      for (var i = 0; i < keys.length; i++) {
-        var v = MaxDB.prefs.get(keys[i]);
-        if (v != null && v !== "" && v !== false) { sawPref = true; break; }
-      }
-    }
-  } catch(_){}
-  var ret = sawFlag || sawPref;
-  console.log(DBG, { returning: ret, sawFlag: sawFlag, sawPref: sawPref });
-  return ret;
+  console.log(DBG, "sawFlag:", sawFlag);
+  return sawFlag;
 }
 
 // v359.10 (Bucket A): personal + display preferences. These are
