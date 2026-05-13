@@ -11148,23 +11148,39 @@ function openTripHeroMapWindow(){
     + '_waitForLeaflet();'
     + '})();<\/script>'
     + '</body></html>';
-  // v359.5.15: plain document.write — same pattern the picker map
-  // popout uses (which Neal confirmed works). Dropped the v359.5.6
-  // Blob URL detour: it didn't actually fix anything in Neal's
-  // setup and added complexity. Wrap in try/catch with overlay
-  // fallback so a popup that opens-but-can't-write still gives the
-  // user something useful.
+  // v359.5.19: Blob URL navigation. Neal's v359.5.17 logging
+  // revealed that NO popup-side scripts logged back to the parent
+  // console — meaning the inline scripts inside the document.write'd
+  // HTML never executed. Chrome\'s popup-on-about:blank +
+  // document.write path silently drops inline scripts in some
+  // configurations (likely a COOP/CORP interaction with the
+  // travelingwithmax.app parent). A Blob URL navigation gives the
+  // popup a real document with its own origin and runs scripts
+  // normally. Falls back to document.write if Blob isn\'t supported,
+  // and the new popup-side window.onerror handler (also in this
+  // file) surfaces any runtime failure visibly inside the popup.
   var DBG2 = "[Max view-larger]";
   try {
-    w.document.open();
-    w.document.write(html);
-    w.document.close();
-    console.log(DBG2, "popup written via document.write");
+    var blob = new Blob([html], { type: 'text/html' });
+    var url = URL.createObjectURL(blob);
+    console.log(DBG2, "popup navigating to Blob URL:", url);
+    w.location.href = url;
+    // Revoke after 30s — by then the document has loaded and the
+    // blob ref can be released. Revoking sooner can cancel the
+    // in-flight navigation in some browsers.
+    setTimeout(function(){ try { URL.revokeObjectURL(url); } catch(_){} }, 30000);
   } catch (e) {
-    console.error(DBG2, "popup document.write failed; closing and routing to overlay:", e);
-    try { w.close(); } catch(_){}
-    window._tripHeroMapWindow = null;
-    _openTripHeroMapOverlay();
+    console.warn(DBG2, "Blob URL failed, falling back to document.write:", e);
+    try {
+      w.document.open();
+      w.document.write(html);
+      w.document.close();
+    } catch (e2) {
+      console.error(DBG2, "document.write also failed; routing to overlay:", e2);
+      try { w.close(); } catch(_){}
+      window._tripHeroMapWindow = null;
+      _openTripHeroMapOverlay();
+    }
   }
 }
 
