@@ -638,6 +638,79 @@
     return { intent: "stay", hub: null, hubAuto: true };
   }
 
+  // ── v359.31: Wikipedia summary fetch ──────────────────────
+  // Cheap visual-triage assist for candidate cards. Wikipedia's REST
+  // summary API returns a thumbnail + short factual description per
+  // page; we use both as a structural anchor under the LLM prose.
+  // 7-day localStorage cache keeps this graceful — re-renders are
+  // instant, and a single picker session makes at most N fetches
+  // (one per unique candidate place).
+  //
+  // No API key needed. CORS-enabled. Polite usage: caching + < ~20
+  // requests per picker open.
+  var WIKI_CACHE_PREFIX = "max-wiki:";
+  var WIKI_CACHE_TTL_MS = 7 * 24 * 3600 * 1000;
+  function _wikiCacheKey(place, country) {
+    return WIKI_CACHE_PREFIX
+      + (place||"").trim().toLowerCase()
+      + ":"
+      + (country||"").trim().toLowerCase();
+  }
+  function _wikiCacheGet(place, country) {
+    try {
+      var raw = localStorage.getItem(_wikiCacheKey(place, country));
+      if (!raw) return null;
+      var entry = JSON.parse(raw);
+      if (!entry || !entry.ts) return null;
+      if (Date.now() - entry.ts > WIKI_CACHE_TTL_MS) return null;
+      return entry.data || null;
+    } catch(_) { return null; }
+  }
+  function _wikiCacheSet(place, country, data) {
+    try {
+      localStorage.setItem(
+        _wikiCacheKey(place, country),
+        JSON.stringify({ ts: Date.now(), data: data })
+      );
+    } catch(_) {}
+  }
+  function _fetchWikiSummary(place, country) {
+    if (!place) return Promise.resolve(null);
+    var cached = _wikiCacheGet(place, country);
+    if (cached !== null) return Promise.resolve(cached);
+    // Try the place name verbatim first — Wikipedia handles redirects
+    // and accent variants well. The summary endpoint returns a small
+    // JSON: { title, description, thumbnail: { source, width, height } }
+    var title = encodeURIComponent(place.trim().replace(/ /g, "_"));
+    var url = "https://en.wikipedia.org/api/rest_v1/page/summary/" + title;
+    return fetch(url, { headers: { "accept": "application/json" } })
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(j){
+        if (!j) {
+          _wikiCacheSet(place, country, null);
+          return null;
+        }
+        // Skip disambiguation pages — they have no useful place info.
+        if (j.type === "disambiguation") {
+          _wikiCacheSet(place, country, null);
+          return null;
+        }
+        var data = {
+          thumbUrl: (j.thumbnail && j.thumbnail.source) || null,
+          description: j.description || null,
+          extract: (j.extract && j.extract.length > 240)
+            ? j.extract.substring(0, 237) + "…"
+            : (j.extract || null),
+        };
+        _wikiCacheSet(place, country, data);
+        return data;
+      })
+      .catch(function(err){
+        console.warn("[Max wiki] fetch failed for", place, err && err.message);
+        return null;
+      });
+  }
+
   // ── HX.12 (v308): renderCandidateCard ─────────────────────
   // Lifted from index.html's inline `renderCard`. Renders a
   // single candidate's compact + expanded card: name, role,
@@ -727,13 +800,22 @@
           ? "Restore"
           : (_roleLabel ? "Keep " + _roleLabel : "Keep"));
 
+    // v359.31: Wikipedia thumbnail placeholder. Starts as a small
+    // colored square; gets a background-image once the fetch
+    // resolves. If Wikipedia returns nothing, stays as the
+    // placeholder (still gives the card a consistent left rhythm).
+    var _thumbHtml = '<div class="ce-card-thumb" data-place="' + (c.place||"").replace(/"/g,"&quot;") + '" style="width:36px;height:36px;border-radius:6px;background:#eef2f7;background-size:cover;background-position:center;flex-shrink:0;margin-right:2px;"></div>';
+
     var compactHtml = '<div class="ce-card-compact" style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;cursor:pointer;">'
+      + '<div style="flex:1;min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
+      + _thumbHtml
       + '<div style="flex:1;min-width:0;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">'
       + keptDot
       + '<span class="ce-card-name" style="font-size:13px;font-weight:700;color:#111;">' + c.place + '</span>'
       + (c.widelyRecommended ? '<span style="color:#6a4a80;font-size:10px;" title="widely recommended">★</span>' : '')
       + '<span style="font-size:10px;color:#888;">' + (c.role || '') + (c.stayRange ? ' · ' + c.stayRange : '') + '</span>'
       + _roleChip
+      + '</div>'
       + '</div>'
       + '<div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">'
       + '<button class="ce-act-compact-keep" style="font-size:10px;font-weight:600;padding:4px 9px;border-radius:5px;border:1px solid ' + (c.status === "keep" ? "#2a7a4e" : "#ddd") + ';background:' + (c.status === "keep" ? "#e8f5ee" : "#fff") + ';color:' + (c.status === "keep" ? "#2a7a4e" : "#333") + ';cursor:pointer;font-family:inherit;" title="' + _keepTitle + '">' + (c.status === "keep" ? "✓" : (c.status === "reject" ? "↺" : "+")) + '</button>'
@@ -745,6 +827,10 @@
     var detailHtml = expanded
       ? '<div class="ce-card-details" style="padding:4px 11px 10px;border-top:1px solid #f0f0f0;">'
         + reqBadge
+        // v359.31: Wikipedia factual anchor — short, structural, sits
+        // ABOVE the LLM whyItFits. Empty/hidden until the fetch
+        // resolves; replaced/filled in by _fetchWikiSummary below.
+        + '<div class="ce-card-wiki-desc" style="display:none;font-size:10.5px;color:#888;font-style:italic;margin-top:4px;letter-spacing:.01em;"></div>'
         + '<div class="ce-card-why" style="font-size:11px;color:#555;line-height:1.55;margin-top:4px;">' + (c.whyItFits || '') + '</div>'
         + alsoHereHtml
         + '<div class="ce-card-tags" style="margin-top:6px;">' + (c.tags || []).map(function (t) { return '<span class="ce-tag">' + t + '</span>'; }).join('') + '</div>'
@@ -798,6 +884,25 @@
     }
     container.appendChild(card);
     if (typeof addMarkerFn === "function") addMarkerFn(c, false);
+
+    // v359.31: Wikipedia thumbnail + factual description. Fires async
+    // after the card is in the DOM so the placeholder layout is already
+    // settled. localStorage cache means subsequent renders (toggle
+    // expand, keep/reject re-renders) hit cache instantly.
+    _fetchWikiSummary(c.place, c.country).then(function(data){
+      if (!data) return;
+      if (data.thumbUrl) {
+        var thumbEl = card.querySelector(".ce-card-thumb");
+        if (thumbEl) thumbEl.style.backgroundImage = "url('" + data.thumbUrl.replace(/'/g, "%27") + "')";
+      }
+      if (data.description) {
+        var descEl = card.querySelector(".ce-card-wiki-desc");
+        if (descEl) {
+          descEl.textContent = data.description;
+          descEl.style.display = "";
+        }
+      }
+    });
 
     // v359.23: trip-view deep-link landing. If the user clicked
     // "Change role" on a destination card, _focusCandidateName was
