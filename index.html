@@ -12362,6 +12362,10 @@ function _renderPlacePickerMap(targetId){
     if (!allPlaces[srcKey]) return; // predictor saw a place that's no longer in the activity items
     if (allPlaces[srcKey]._isDayTrip) return; // explicit user flag already set; don't overwrite
     allPlaces[srcKey]._isDayTrip = true;
+    // v359.51.8: tag predictor-derived flags so the spur-render pass
+    // below can distinguish them from user-committed day trips and
+    // render them with a dashed line (vs solid for committed).
+    allPlaces[srcKey]._isDayTripPredicted = true;
     if (!allPlaces[srcKey]._dayTripHub && hubName) allPlaces[srcKey]._dayTripHub = hubName.toLowerCase();
   });
 
@@ -12536,13 +12540,18 @@ function _renderPlacePickerMap(targetId){
     var dayCoord = _pmCoord(info.place);
     var hubCoord = _pmCoord(hubInfo.place);
     if (!dayCoord || !hubCoord) return; // geocode race — defer
-    // v359.51.7: committed day-trip spurs render as a SOLID line.
-    // Was dashed (dashArray:"10,6"), but dashes read as "tentative"
-    // and gave Neal no visual signal that his "Add as day trip"
-    // click had locked anything in. Solid = committed. If we later
-    // want to surface uncommitted predictor suggestions on the map,
-    // those should be the dashed/lighter style.
-    state.spurs[key] = L.polyline([hubCoord, dayCoord], {
+    // v359.51.8: dashed + lighter for PREDICTED day trips (the picker
+    // is suggesting it, user hasn't confirmed); solid + full-opacity
+    // for COMMITTED day trips (user clicked "✓ Add as day trip"). This
+    // is the visual feedback Neal asked for: "before committed it
+    // should be dashed, then after committed make it solid".
+    var _isPred = !!info._isDayTripPredicted;
+    state.spurs[key] = L.polyline([hubCoord, dayCoord], _isPred ? {
+      color: "#e6700f",
+      weight: 3,
+      opacity: 0.55,
+      dashArray: "8,5"
+    } : {
       color: "#e6700f",
       weight: 4,
       opacity: 0.95
@@ -24082,13 +24091,23 @@ function updateMainMap(){
           var dtMarker = L.marker(dtCtr, {icon:dtIcon}).addTo(_mainMap);
           dtMarker.bindTooltip(dtName + " · day trip from " + (hubDest.place || ""),
             {permanent:false, direction:"top", offset:[0,-dtSize/2-2], className:"main-map-tooltip"});
-          // Click → drill into the hub so the user lands where the day
-          // trip is anchored (and where the chip surfaces in the UI).
-          (function(hubId){
+          // v359.51.9: day-trip pin tap → role popover, same as the
+          // overnight-destination tap. The popover offers two actions:
+          //   • "Make this an overnight stop" — ungroup the PlanItem
+          //     back into trip.destinations (uses the existing
+          //     ungroupDayTripByPlanItem writer)
+          //   • "Open hub destination" — drill into the hub the day
+          //     trip is anchored on
+          (function(hubId, hubRef, piRef, placeName){
             dtMarker.on("click", function(){
-              if (typeof selectDest === "function") selectDest(hubId);
+              try { dtMarker.closeTooltip(); } catch(_){}
+              if (typeof _openTripDayTripPopover === "function") {
+                _openTripDayTripPopover(hubRef, piRef, placeName);
+              } else if (typeof selectDest === "function") {
+                selectDest(hubId);
+              }
             });
-          })(hubDest.id);
+          })(hubDest.id, hubDest, pi, dtName);
           _mainMarkers.push(dtMarker);
         } catch(_){}
       });
@@ -26214,6 +26233,71 @@ function _openTripDestRolePopover(destId){
     } else {
       // "Overnight" is the current state — apply is a no-op.
       close();
+    }
+  };
+}
+
+// v359.51.9: trip-view day-trip pin popover. Counterpart to
+// _openTripDestRolePopover but for the orange day-trip pins. Offers
+// two actions:
+//   • "Make this an overnight stop" — calls ungroupDayTripByPlanItem
+//     (the existing reverse-of-cluster writer) to promote the day
+//     trip back to its own destination
+//   • "Open hub destination" — drills into the hub via selectDest
+//     so the user can see the day-trip chip in context
+function _openTripDayTripPopover(hubDest, planItem, dayTripName){
+  if (!hubDest || !planItem) return;
+  var existing = document.getElementById("trip-daytrip-popover");
+  if (existing) existing.remove();
+
+  var ov = document.createElement("div");
+  ov.id = "trip-daytrip-popover";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.32);z-index:10500;display:flex;align-items:center;justify-content:center;padding:20px;";
+
+  var dtName = dayTripName || (trip.places && trip.places[planItem.placeId] && trip.places[planItem.placeId].name) || planItem.placeId || "Day trip";
+  var hubName = hubDest.place || "";
+  var srcNights = (planItem.legacy && planItem.legacy.sourceNights) || 1;
+
+  ov.innerHTML = ''
+    + '<div style="background:#fff;border-radius:12px;max-width:420px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,0.18);">'
+    +   '<div style="padding:18px 20px 4px;">'
+    +     '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">Day trip</div>'
+    +     '<div style="font-size:17px;font-weight:700;color:#111;margin-top:4px;">' + dtName + '</div>'
+    +     '<div style="font-size:12px;color:#666;margin-top:2px;">from <strong>' + hubName + '</strong></div>'
+    +   '</div>'
+    +   '<div style="padding:14px 20px;display:flex;flex-direction:column;gap:10px;">'
+    +     '<button id="trip-dt-open-hub" style="text-align:left;padding:12px;border:1px solid #cfe1f7;background:#eef5ff;border-radius:8px;cursor:pointer;font-family:inherit;">'
+    +       '<div style="font-size:13px;font-weight:600;color:#1a5fa8;">&rarr; Open ' + hubName + '</div>'
+    +       '<div style="font-size:11px;color:#5a7a99;margin-top:3px;">View the hub destination where this day trip lives.</div>'
+    +     '</button>'
+    +     '<button id="trip-dt-promote" style="text-align:left;padding:12px;border:1px solid #e8d0a8;background:#fff7eb;border-radius:8px;cursor:pointer;font-family:inherit;">'
+    +       '<div style="font-size:13px;font-weight:600;color:#c97a1a;">&#9881; Make ' + dtName + ' an overnight stop</div>'
+    +       '<div style="font-size:11px;color:#9b6017;margin-top:3px;">Promote back to its own destination &mdash; adds ' + srcNights + ' night' + (srcNights === 1 ? '' : 's') + ' (' + hubName + ' loses those nights).</div>'
+    +     '</button>'
+    +   '</div>'
+    +   '<div style="padding:0 20px 18px;display:flex;justify-content:flex-end;">'
+    +     '<button id="trip-dt-cancel" style="font-size:13px;font-weight:500;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Cancel</button>'
+    +   '</div>'
+    + '</div>';
+
+  document.body.appendChild(ov);
+
+  function close(){ if (ov && ov.parentNode) ov.parentNode.removeChild(ov); }
+  ov.onclick = function(e){ if (e.target === ov) close(); };
+  var cancelBtn = ov.querySelector("#trip-dt-cancel");
+  if (cancelBtn) cancelBtn.onclick = close;
+
+  var openBtn = ov.querySelector("#trip-dt-open-hub");
+  if (openBtn) openBtn.onclick = function(){
+    close();
+    if (typeof selectDest === "function") selectDest(hubDest.id);
+  };
+
+  var promoteBtn = ov.querySelector("#trip-dt-promote");
+  if (promoteBtn) promoteBtn.onclick = function(){
+    close();
+    if (typeof ungroupDayTripByPlanItem === "function") {
+      ungroupDayTripByPlanItem(hubDest, planItem);
     }
   };
 }
