@@ -23965,45 +23965,24 @@ function updateMainMap(){
     });
     pinGroups.forEach(function(group){
       var indices = group.dests.map(function(x){ return x.idx + 1; });
-      var labels = indices.join("·");
-      var hasFirst = group.dests.some(function(x){ return x.idx === 0; });
-      var hasLast = group.dests.some(function(x){ return x.idx === lastIdx; });
-      // v294.17: pin shows index AND a 2-letter place abbreviation stacked.
-      // Earlier (v294.15) the pin showed only the index ("1") which lost
-      // the place identification the prior right-panel map had ("Re" for
-      // Reykjavik). Now: top line is the index (the journey order — what
-      // makes the route legible at a glance), bottom line is the abbrev
-      // (so you know which city without a click). Use 2 chars from the
-      // primary place; round-trip pins ("1·9") squeeze that into one line.
+      // v359.51.11: marker style unified with the picker map. Neal:
+      // "I like the markers on the picker map." Was: 40-44px white
+      // circles with stacked ordinal+abbreviation, first/last/round-
+      // trip ring coloring. Now: 22px solid-blue circle with 2-letter
+      // place initials, 9px bold white text, white border + soft
+      // shadow. The journey sequence + arrival/departure info still
+      // lives on the destination cards in the left panel (and the
+      // tooltip names the visit indices for round-trip places).
       var primaryPlace = (group.dests[0].dest.place || "").trim();
-      // v294.19: fall back to "?" when place is missing (was empty string,
-      // making the abbrev line invisible — user saw "only the number").
       var abbrev = primaryPlace ? primaryPlace.substring(0, 2) : "·";
-      // v294.19: pins grew (40/44 vs 34/38) and font sizes bumped so both
-      // index and abbrev are unmistakably legible at the right-panel map's
-      // typical zoom levels. The earlier 10/12px stack was tight enough
-      // that the index could be missed at a glance.
-      var size = labels.length > 3 ? 44 : 40;
-      var ring; // resolved below based on hasFirst/hasLast
-      var contentColor = "#222";
-      var html;
-      var indexFs = labels.length > 3 ? 11 : 12;
-      var abbrevFs = labels.length > 3 ? 13 : 14;
-      var stack =
-          '<span style="font-size:'+indexFs+'px;font-weight:700;line-height:1;letter-spacing:-0.02em;">'+labels+'</span>'
-        + '<span style="font-size:'+abbrevFs+'px;font-weight:700;line-height:1;margin-top:2px;letter-spacing:-0.02em;">'+abbrev+'</span>';
-      if (hasFirst && hasLast && lastIdx > 0) {
-        // Round-trip — split blue/orange ring + stacked text.
-        html = '<div style="position:relative;background:#fff;border-radius:50%;width:'+size+'px;height:'+size+'px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#222;box-shadow:0 1px 4px rgba(0,0,0,.3);overflow:hidden;">'
-             + '<div style="position:absolute;inset:0;border-radius:50%;border:2px solid transparent;border-top-color:#1a5fa8;border-left-color:#1a5fa8;border-right-color:#b05820;border-bottom-color:#b05820;transform:rotate(45deg);"></div>'
-             + '<div style="position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;">'+stack+'</div>'
-             + '</div>';
-      } else {
-        ring = hasFirst ? "#1a5fa8" : (hasLast ? "#b05820" : "#222");
-        contentColor = ring;
-        var coloredStack = stack.replace(/color:[^;"]*;?/g, '');
-        html = '<div style="background:#fff;border:2px solid '+ring+';border-radius:50%;width:'+size+'px;height:'+size+'px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:'+contentColor+';box-shadow:0 1px 4px rgba(0,0,0,.3);">'+coloredStack+'</div>';
-      }
+      var size = 22;
+      var color = "#1a5fa8"; // matches picker's stay-pin blue
+      var html = '<div style="background:'+color+';color:#fff;border-radius:50%;width:'
+        + size + 'px;height:' + size + 'px;border:2px solid #fff;'
+        + 'box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;'
+        + 'font-size:9px;font-weight:700;letter-spacing:-0.02em;">'
+        + abbrev
+        + '</div>';
       var icon = L.divIcon({className:"main-trip-pin", html: html, iconSize:[size,size], iconAnchor:[size/2,size/2], popupAnchor:[0,-size/2]});
       var m = L.marker(group.ctr, {icon: icon}).addTo(_mainMap);
       // v353.2: register this marker against every dest id in the
@@ -24118,13 +24097,15 @@ function updateMainMap(){
           }).addTo(_mainMap);
           _mainMarkers.push(spur);
         } catch(_){}
-        // Small orange pin with the day-trip place's initials.
+        // v359.51.11: day-trip pin sized + styled to match the picker
+        // map exactly: 20px orange circle, 2-letter initials, 9px bold
+        // white text, 2px white border + soft shadow.
         var dtAbbrev = dtName.trim().substring(0, 2) || "·";
-        var dtSize = 26;
+        var dtSize = 20;
         var dtHtml = '<div style="background:#e6700f;color:#fff;border-radius:50%;width:'
           + dtSize + 'px;height:' + dtSize + 'px;border:2px solid #fff;'
-          + 'box-shadow:0 1px 4px rgba(0,0,0,.3);display:flex;align-items:center;'
-          + 'justify-content:center;font-size:11px;font-weight:700;letter-spacing:-0.02em;">'
+          + 'box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;'
+          + 'justify-content:center;font-size:9px;font-weight:700;letter-spacing:-0.02em;">'
           + dtAbbrev + '</div>';
         var dtIcon = L.divIcon({className:"main-trip-daytrip-pin", html:dtHtml,
           iconSize:[dtSize,dtSize], iconAnchor:[dtSize/2,dtSize/2], popupAnchor:[0,-dtSize/2]});
