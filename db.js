@@ -260,6 +260,11 @@
     }
   }
 
+  // v359.45 Phase 1 — HARD CUT: no on-read migration. New code writes
+  // the new shape (PlanItems with type:dayTrip); legacy trips that
+  // never get re-built lose their day-trip chips. Acceptable per
+  // Neal's "no need to preserve existing trips." Keeps tripRead
+  // simple and predictable: just return whatever's stored.
   function tripRead(id) {
     if (!canPersist || !id) return null;
     try {
@@ -268,7 +273,6 @@
     } catch (e) {
       console.warn('[MaxDB] tripRead failed for', id, e);
     }
-    // v359.43 Phase 3: fall back to IDB mirror.
     if (_tripIdbMirror[id]) return _tripIdbMirror[id];
     return null;
   }

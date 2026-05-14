@@ -1342,6 +1342,53 @@
   // thin delegator that calls this. Existing callers (the picker's
   // Build button, the brief-edit Apply path, etc.) work unchanged.
 
+  // v359.45 Phase 1 helpers — used by the day-trip clustering below.
+  // Mirror the logic in migration.js so writers produce shapes that
+  // match the read-time expectations. Local to engine-picker because
+  // this is the only writer in the active path; if a second writer
+  // shows up, lift these into a shared module.
+  function _ensurePlace(trip, p) {
+    if (!p || !p.place) return null;
+    if (!trip.places) trip.places = {};
+    var slug = String(p.place || '').trim().toLowerCase()
+      .replace(/þ/g, 'th').replace(/ð/g, 'd')
+      .replace(/æ/g, 'ae').replace(/œ/g, 'oe')
+      .replace(/ø/g, 'o').replace(/ß/g, 'ss')
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    var placeId = 'pl-' + (slug || 'unknown');
+    if (!trip.places[placeId]) {
+      trip.places[placeId] = {
+        id: placeId, name: p.place, country: p.country || null,
+        lat: (typeof p.lat === 'number') ? p.lat : null,
+        lng: (typeof p.lng === 'number') ? p.lng : null,
+        type: p.type || 'place'
+      };
+    } else {
+      var ex = trip.places[placeId];
+      if (ex.lat == null && typeof p.lat === 'number') ex.lat = p.lat;
+      if (ex.lng == null && typeof p.lng === 'number') ex.lng = p.lng;
+      if (!ex.country && p.country) ex.country = p.country;
+    }
+    return placeId;
+  }
+  function _buildDaysShim(dest) {
+    var days = [];
+    if (dest.dateFrom && dest.dateTo) {
+      var s = new Date(dest.dateFrom + 'T00:00:00Z');
+      var e = new Date(dest.dateTo + 'T00:00:00Z');
+      var d = new Date(s);
+      while (d < e) {
+        days.push({ date: d.toISOString().slice(0,10), planItems: [] });
+        d.setUTCDate(d.getUTCDate() + 1);
+      }
+    } else {
+      var n = (typeof dest.nights === 'number') ? dest.nights : 0;
+      for (var i = 0; i < n; i++) days.push({ date: null, planItems: [] });
+    }
+    return days;
+  }
+
   async function publishTrip(){
     var kept=(_tb.candidates||[]).filter(function(c){return c.status==="keep";});
     if(!kept.length) return;
@@ -1780,27 +1827,59 @@
       console.log("[Max day-trip cluster v359.24] user-intent absorbtions:", absorbtions.map(function(a){
         return a.src.place + " → " + a.hub.place + " (" + Math.round(a.distKm) + "km)";
       }).join("; "));
-      // Skip past the legacy heuristic code below; apply absorbtions
-      // directly using the same chip-building mechanics as before.
+      // v359.45 Phase 1 (hard cut): write PlanItems with type:dayTrip,
+      // not dest.dayTrips chips. The PlanItem lands on the hub's
+      // day[0]; the Place is created in trip.places{}. Night-rollup
+      // semantics (Round DA) unchanged — absorbed nights still merge
+      // into the hub's total.
+      if (!trip.places || typeof trip.places !== 'object') trip.places = {};
       absorbtions.forEach(function(a){
-        if (!a.hub.dayTrips) a.hub.dayTrips = [];
-        var srcKey = _norm(a.src.place);
-        var alreadyChip = a.hub.dayTrips.some(function(dt){
-          return dt && dt.place && _norm(dt.place) === srcKey;
+        // Ensure the hub destination has a placeId + days
+        if (!a.hub.placeId) {
+          a.hub.placeId = _ensurePlace(trip, {
+            place: a.hub.place, country: a.hub.country,
+            lat: a.hub.lat, lng: a.hub.lng, type: 'city'
+          });
+        }
+        if (!Array.isArray(a.hub.days) || a.hub.days.length === 0) {
+          a.hub.days = _buildDaysShim(a.hub);
+        }
+        var day0 = a.hub.days[0];
+        if (!day0) return;
+        if (!Array.isArray(day0.planItems)) day0.planItems = [];
+
+        // Place entry for the absorbed destination
+        var srcPlaceId = _ensurePlace(trip, {
+          place: a.src.place, country: a.src.country,
+          lat: a.src.lat, lng: a.src.lng, type: 'sight'
         });
-        if (alreadyChip) return; // idempotent on rebuild
-        a.hub.dayTrips.push({
-          place: a.src.place,
-          country: a.src.country || "",
-          lat: (typeof a.src.lat === "number") ? a.src.lat : null,
-          lng: (typeof a.src.lng === "number") ? a.src.lng : null,
-          whyItFits: a.src.intent || "",
-          attachedEvents: (a.src.attachedEvents || []).slice(),
-          sourceNights: a.src.nights || 1,
-          absorbedFromHub: a.hub.place,
-          distKm: Math.round(a.distKm),
-          clusteredAt: new Date().toISOString()
+
+        // Idempotency: skip if PlanItem already exists
+        var existing = day0.planItems.find(function(pi){
+          return pi && pi.type === 'dayTrip' && pi.placeId === srcPlaceId;
         });
+        if (existing) {
+          // Still roll nights up — caller expectation
+          a.hub.nights = (a.hub.nights || 0) + (a.src.nights || 1);
+          return;
+        }
+
+        day0.planItems.push({
+          id: 'pi-dt-' + (a.hub.id || a.hub.placeId) + '-' + srcPlaceId,
+          type: 'dayTrip',
+          state: 'suggestion',
+          placeId: srcPlaceId,
+          notes: a.src.intent || '',
+          source: 'auto-cluster',
+          legacy: {
+            sourceNights: a.src.nights || 1,
+            absorbedFromHub: a.hub.place,
+            distKm: Math.round(a.distKm),
+            clusteredAt: new Date().toISOString(),
+            attachedEvents: (a.src.attachedEvents || []).slice()
+          }
+        });
+
         // Roll absorbed nights into hub (Round DA semantics).
         a.hub.nights = (a.hub.nights || 0) + (a.src.nights || 1);
       });
@@ -2124,34 +2203,67 @@
       }
       console.log(DBG, "applying", absorbtions.length, "absorbtions:",
         absorbtions.map(function(a){ return a.src.place + " → " + a.hub.place; }));
+      // v359.45 Phase 1 (hard cut): write PlanItems on the hub's
+      // day[0] instead of dest.dayTrips chips. Mirrors the auto-cluster
+      // path above; the difference is source='user-cluster' to mark
+      // picker-driven (vs auto-cluster).
+      if (!trip.places || typeof trip.places !== 'object') trip.places = {};
       absorbtions.forEach(function(a){
-        if (!Array.isArray(a.hub.dayTrips)) a.hub.dayTrips = [];
-        var srcKey = _normPlaceName(a.src.place || "");
-        var alreadyChip = a.hub.dayTrips.some(function(dt){
-          return dt && dt.place && _normPlaceName(dt.place) === srcKey;
-        });
-        if (alreadyChip) {
-          // Idempotent: the chip already represents this absorption,
-          // but the source dest still needs to be filtered out below.
+        // Ensure hub has placeId + days
+        if (!a.hub.placeId) {
+          a.hub.placeId = _ensurePlace(trip, {
+            place: a.hub.place, country: a.hub.country,
+            lat: a.hub.lat, lng: a.hub.lng, type: 'city'
+          });
+        }
+        if (!Array.isArray(a.hub.days) || a.hub.days.length === 0) {
+          a.hub.days = _buildDaysShim(a.hub);
+        }
+        var day0 = a.hub.days[0];
+        if (!day0) {
+          // Even without a day to land on, still roll nights up so the
+          // calendar accounting matches what users saw.
+          a.hub.nights = (a.hub.nights || 0) + (a.src.nights || 1);
           return;
         }
-        a.hub.dayTrips.push({
-          place: a.src.place,
-          country: a.src.country || "",
-          lat: (typeof a.src.lat === "number") ? a.src.lat
-                : (typeof getCityCenter === "function" ? (getCityCenter(a.src.place) || [null, null])[0] : null),
-          lng: (typeof a.src.lng === "number") ? a.src.lng
-                : (typeof getCityCenter === "function" ? (getCityCenter(a.src.place) || [null, null])[1] : null),
-          whyItFits: a.src.intent || "",
-          attachedEvents: (a.src.attachedEvents || []).slice(),
-          sourceNights: a.src.nights || 1,
-          absorbedFromHub: a.hub.place,
-          userChosen: true, // marks as picker-driven (vs. auto-cluster)
-          clusteredAt: new Date().toISOString()
+        if (!Array.isArray(day0.planItems)) day0.planItems = [];
+
+        // Place entry for absorbed source
+        var srcLat = (typeof a.src.lat === "number") ? a.src.lat
+                    : (typeof getCityCenter === "function" ? (getCityCenter(a.src.place) || [null, null])[0] : null);
+        var srcLng = (typeof a.src.lng === "number") ? a.src.lng
+                    : (typeof getCityCenter === "function" ? (getCityCenter(a.src.place) || [null, null])[1] : null);
+        var srcPlaceId = _ensurePlace(trip, {
+          place: a.src.place, country: a.src.country,
+          lat: srcLat, lng: srcLng, type: 'sight'
         });
-        // Roll absorbed nights into hub (Round DA semantics — the
-        // traveler is still "at" the hub for N+chip nights total;
-        // the chip is just a daytime visit during that stay).
+
+        // Idempotency
+        var existing = day0.planItems.find(function(pi){
+          return pi && pi.type === 'dayTrip' && pi.placeId === srcPlaceId;
+        });
+        if (existing) {
+          a.hub.nights = (a.hub.nights || 0) + (a.src.nights || 1);
+          return;
+        }
+
+        day0.planItems.push({
+          id: 'pi-dt-' + (a.hub.id || a.hub.placeId) + '-' + srcPlaceId,
+          type: 'dayTrip',
+          state: 'suggestion',
+          placeId: srcPlaceId,
+          notes: a.src.intent || '',
+          source: 'user-cluster',
+          legacy: {
+            sourceNights: a.src.nights || 1,
+            absorbedFromHub: a.hub.place,
+            userChosen: true,
+            clusteredAt: new Date().toISOString(),
+            attachedEvents: (a.src.attachedEvents || []).slice()
+          }
+        });
+
+        // Roll absorbed nights into hub (Round DA semantics)
         a.hub.nights = (a.hub.nights || 0) + (a.src.nights || 1);
       });
       // Remove absorbed sources and recompute dates trip-wide.

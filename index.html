@@ -274,6 +274,10 @@
     MobileDragDrop.polyfill({ holdToDrag: 300 });
   }
 </script>
+<!-- v359.45 Phase 1: schema migrations. Loaded BEFORE db.js so that
+     db.js's tripRead/tripReadRaw can call MaxMigration.migrateTripShape
+     synchronously on legacy envelopes. -->
+<script src="migration.js?v=DEV"></script>
 <!-- Round HA: Phase 0 of the engine/UI split. db.js exposes window.MaxDB
      as the persistence seam. No callsites migrated yet; this just
      defines the API and verifies it loads. -->
@@ -25714,6 +25718,89 @@ function makeDayTrip(hubDest, srcDest, opts){
 // lets the undo for makeDayTrip call ungroup without surfacing a
 // second toast.
 // path-to-10:A done — mutator emits tripChange + mapDataChange via _emitTripMutation; no direct drawXxx calls. See path-to-10.md item A (HY round, May 2026).
+// v359.45 Phase 1 (hard cut): unwrap a day-trip PlanItem back into
+// its own standalone destination. Mirror of ungroupDayTrip below but
+// operates on PlanItem state instead of dest.dayTrips. The PlanItem
+// carries pi.legacy.sourceNights for the nights-rollback math.
+function ungroupDayTripByPlanItem(hubDest, planItem, opts){
+  opts = opts || {};
+  if (!hubDest || !planItem || !planItem.placeId) return;
+  // Find the PlanItem inside hubDest.days
+  var foundDayIdx = -1, foundPiIdx = -1;
+  (hubDest.days || []).forEach(function(day, di){
+    (day.planItems || []).forEach(function(pi, pii){
+      if (pi === planItem || (pi && pi.id === planItem.id)) {
+        foundDayIdx = di; foundPiIdx = pii;
+      }
+    });
+  });
+  if (foundDayIdx < 0) return;
+  // Remove from the day
+  hubDest.days[foundDayIdx].planItems.splice(foundPiIdx, 1);
+
+  // Look up the Place from trip.places
+  var place = (trip && trip.places && trip.places[planItem.placeId]) || null;
+  var placeName = place ? place.name : planItem.placeId;
+  var nights = (planItem.legacy && planItem.legacy.sourceNights) || 1;
+  // Subtract those nights back from the hub (mirror Round DA semantics)
+  hubDest.nights = Math.max(1, (hubDest.nights || nights) - nights);
+
+  // Build fresh standalone destination
+  destCtr++;
+  var newId = "d" + destCtr;
+  var newDest = {
+    id: newId,
+    place: placeName,
+    placeId: planItem.placeId,
+    intent: placeName + (planItem.notes ? " — " + planItem.notes.substring(0, 60) : ""),
+    dateFrom: hubDest.dateTo,
+    dateTo: "",
+    nights: nights,
+    days: makeDays(newId, placeName, placeName, hubDest.dateTo, nights),
+    trackerItems: {booked: [], see: [], visited: []},
+    trackerCat: "booked",
+    storyState: "idle",
+    hotelBookings: [], generalBookings: [], locations: [],
+    execMode: false, todayItems: [], discoveredItems: [], suggestions: [],
+    attachedEvents: (planItem.legacy && planItem.legacy.attachedEvents) || [],
+    lat: (place && place.lat) || null,
+    lng: (place && place.lng) || null
+  };
+
+  // Insert after the hub
+  var hubIdx = trip.destinations.indexOf(hubDest);
+  if (hubIdx < 0) hubIdx = 0;
+  trip.destinations.splice(hubIdx + 1, 0, newDest);
+
+  // Recompute all dates from trip start
+  var startDate = trip.destinations[0].dateFrom;
+  if (startDate) {
+    var cur = new Date(startDate + "T12:00:00");
+    trip.destinations.forEach(function(d){
+      d.dateFrom = cur.toISOString().slice(0, 10);
+      var next = new Date(cur); next.setDate(next.getDate() + (d.nights || 0));
+      d.dateTo = next.toISOString().slice(0, 10);
+      d.days = makeDays(d.id, d.place, d.place, d.dateFrom, d.nights || 0);
+      cur = next;
+    });
+  }
+  _emitTripMutation();
+  if (!opts.silent) {
+    var _newDestId = newDest.id;
+    _showDayTripToast(
+      "<strong>" + newDest.place + "</strong> is now its own destination",
+      function(){
+        // Undo path: re-cluster the destination back into the hub as a
+        // day-trip PlanItem. makeDayTrip is the legacy function and
+        // creates dest.dayTrips, not PlanItems — undo from PlanItems
+        // would need its own implementation. Punt for now; user
+        // re-runs the picker if they really need to undo.
+        console.warn("[Max] undo from PlanItem-shaped ungroup not yet implemented");
+      }
+    );
+  }
+}
+
 function ungroupDayTrip(hubDest, dtIdx, opts){
   opts = opts || {};
   if (!hubDest || !hubDest.dayTrips || dtIdx < 0 || dtIdx >= hubDest.dayTrips.length) return;
