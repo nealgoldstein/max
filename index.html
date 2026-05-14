@@ -15937,12 +15937,16 @@ async function applyCandidateChanges(){
   }
 
   // Append new destinations at the end, continuing dates from the last one
+  // v359.47: track the first newly-added dest so we can scroll to it
+  // post-render.
+  var _firstAddedDestId = null;
   if (toAdd.length) {
     var lastDest = trip.destinations[trip.destinations.length-1];
     var cur = lastDest ? new Date(lastDest.dateTo) : new Date(parseStartDateFromBrief(_tb.when||""));
     toAdd.forEach(function(c){
       destCtr++;
       var id="d"+destCtr;
+      if (!_firstAddedDestId) _firstAddedDestId = id;
       var nights=parseNightsFromRange(c.stayRange)||3;
       var dateFrom = cur.toISOString().slice(0,10);
       var next = new Date(cur); next.setDate(next.getDate()+nights);
@@ -15966,6 +15970,17 @@ async function applyCandidateChanges(){
       // Kick off city data generation
       Promise.resolve().then(function(){return generateCityData(c.place, id);}).catch(function(){});
     });
+    // Scroll to first newly-added destination after re-render.
+    if (_firstAddedDestId) {
+      requestAnimationFrame(function(){
+        try {
+          var el = document.querySelector('.tm-dest[data-id="'+_firstAddedDestId+'"]');
+          if (el && typeof el.scrollIntoView === "function") {
+            el.scrollIntoView({behavior: "smooth", block: "center"});
+          }
+        } catch(_){}
+      });
+    }
   }
 
   // Update the snapshot on the trip so next re-entry reflects the new state.
@@ -25785,6 +25800,15 @@ function ungroupDayTripByPlanItem(hubDest, planItem, opts){
     });
   }
   _emitTripMutation();
+  // v359.47: scroll the newly promoted destination into view.
+  requestAnimationFrame(function(){
+    try {
+      var el = document.querySelector('.tm-dest[data-id="'+newDest.id+'"]');
+      if (el && typeof el.scrollIntoView === "function") {
+        el.scrollIntoView({behavior: "smooth", block: "center"});
+      }
+    } catch(_){}
+  });
   if (!opts.silent) {
     var _newDestId = newDest.id;
     _showDayTripToast(
@@ -25851,6 +25875,15 @@ function ungroupDayTrip(hubDest, dtIdx, opts){
     });
   }
   _emitTripMutation();  // Round HD (ungroupDayTrip)
+  // v359.47: scroll the newly promoted destination into view.
+  requestAnimationFrame(function(){
+    try {
+      var el = document.querySelector('.tm-dest[data-id="'+newDest.id+'"]');
+      if (el && typeof el.scrollIntoView === "function") {
+        el.scrollIntoView({behavior: "smooth", block: "center"});
+      }
+    } catch(_){}
+  });
   // Round FC: undo toast. Captures the new dest's id so undo can
   // find it in trip.destinations even after subsequent reorders.
   if (!opts.silent) {
@@ -26645,6 +26678,16 @@ function addBufferNight(side, city){
   // Round HC: emit instead of direct drawXxx. autoSave + render +
   // map refresh all happen via the central trip-engine subscription.
   _emitTripMutation();
+  // v359.47: scroll the newly added destination into view so the
+  // user can see what was added. Same pattern as executeMoveDest.
+  requestAnimationFrame(function(){
+    try {
+      var el = document.querySelector('.tm-dest[data-id="'+newDest.id+'"]');
+      if (el && typeof el.scrollIntoView === "function") {
+        el.scrollIntoView({behavior: "smooth", block: "center"});
+      }
+    } catch(_){}
+  });
 }
 
 // path-to-10:A done — mutator emits tripChange + mapDataChange via _emitTripMutation; no direct drawXxx calls. See path-to-10.md item A (HY round, May 2026).
