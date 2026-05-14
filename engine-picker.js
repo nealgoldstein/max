@@ -2288,8 +2288,12 @@
       trip.destinations = trip.destinations.filter(function(d){ return !absorbedIds[d.id]; });
       // Recompute dates from the original startDate. Mirrors the
       // auto-cluster's date-recompute block: rebuild days with the
-      // new range, replay items by clamped index so the user's
-      // sights/restaurants survive the night-rollup.
+      // new range, replay items + planItems by clamped index so the
+      // user's sights, restaurants, AND the day-trip PlanItems we
+      // just pushed survive the night-rollup. v359.51.5: also
+      // preserve planItems[] — without this, the PlanItems we just
+      // wrote into hubDest.days[0].planItems get erased by makeDays,
+      // and the trip-view map renders nothing for day trips.
       var curDate = new Date(startDate);
       trip.destinations.forEach(function(d){
         var dateFrom = curDate.toISOString().slice(0, 10);
@@ -2299,6 +2303,10 @@
         d.dateTo = dateTo;
         var savedItemsByIdx = (Array.isArray(d.days) ? d.days : []).map(function(day){
           return Array.isArray(day && day.items) ? day.items.slice() : [];
+        });
+        // v359.51.5: snapshot planItems too.
+        var savedPlanItemsByIdx = (Array.isArray(d.days) ? d.days : []).map(function(day){
+          return Array.isArray(day && day.planItems) ? day.planItems.slice() : [];
         });
         if (typeof makeDays === "function") {
           d.days = makeDays(d.id, d.place, d.place, dateFrom, d.nights || 0);
@@ -2319,6 +2327,26 @@
                 if (k && existing[k]) return;
                 targetDay.items.push(it);
                 if (k) existing[k] = true;
+              });
+            });
+            // v359.51.5: restore planItems by clamped index. Same
+            // shape as the items restore above but on the new
+            // PlanItem array. De-dupe by id so a re-run doesn't
+            // double-add. This is what makes the absorbed day-trip
+            // PlanItems actually survive into trip.destinations.
+            savedPlanItemsByIdx.forEach(function(planItems, oldIdx){
+              if (!planItems || !planItems.length) return;
+              var targetIdx = Math.min(oldIdx, d.days.length - 1);
+              var targetDay = d.days[targetIdx];
+              if (!targetDay) return;
+              if (!Array.isArray(targetDay.planItems)) targetDay.planItems = [];
+              var existingIds = {};
+              targetDay.planItems.forEach(function(pi){ if (pi && pi.id) existingIds[pi.id] = true; });
+              planItems.forEach(function(pi){
+                if (!pi) return;
+                if (pi.id && existingIds[pi.id]) return;
+                targetDay.planItems.push(pi);
+                if (pi.id) existingIds[pi.id] = true;
               });
             });
           }
