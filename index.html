@@ -22055,8 +22055,10 @@ function pendingCount(){
 
 function updateTrackerBadge(){
   var n=pendingCount();
-  // Update all tracker tab buttons (one per dest render)
-  document.querySelectorAll('#dm-tab-tracker').forEach(function(btn){
+  // v359.50: tracker badge moved from #dm-tab-tracker (no longer exists
+  // as its own tab) to #dm-tab-onTheGround. Same per-render pattern
+  // (querySelectorAll covers any duplicated dest renders).
+  document.querySelectorAll('#dm-tab-onTheGround').forEach(function(btn){
     var badge=btn.querySelector('.dm-tab-badge');
     if(n>0){
       if(!badge){badge=document.createElement('span');badge.className='dm-tab-badge';btn.appendChild(badge);}
@@ -28765,9 +28767,10 @@ function drawDestMode(destId){
   // buckets, same delayed checkTimeConflicts pass.
   MaxTripUI.renderDestItineraryPane(trip, dest, paneWrap);
 
-  // EXPLORE pane
+  // EXPLORE pane — visibility now driven by Plan tab membership
+  // (v359.50); Explore lives under "Plan" alongside Itinerary + Routing.
   var explorePane=document.createElement("div"); explorePane.id="dm-pane-explore";
-  explorePane.style.display=_activeDmSection==="explore"?"block":"none";
+  explorePane.style.display=(typeof MaxTripUI!=="undefined"&&MaxTripUI._isPaneInActiveGroup&&MaxTripUI._isPaneInActiveGroup("explore"))?"block":"none";
   explorePane.appendChild(buildExplorePane(dest));
   paneWrap.appendChild(explorePane);
   // TM.7.8 (v333): stay pane lifted into MaxTripUI.renderDestStayPane.
@@ -31294,8 +31297,9 @@ function mkTrackerInner(dest){
         row.classList.add("cleared");
         check.classList.add("done"); check.textContent="\u2713";
         var typEl=row.querySelector(".tk-action-type"); if(typEl)typEl.classList.add("cleared");
-        // Refresh badge
-        var badge=g("dm-tab-tracker")&&g("dm-tab-tracker").querySelector(".dm-tab-badge");
+        // v359.50: badge now lives on dm-tab-onTheGround instead of
+        // the (now-retired) dm-tab-tracker button.
+        var badge=g("dm-tab-onTheGround")&&g("dm-tab-onTheGround").querySelector(".dm-tab-badge");
         if(badge){var n=pendingCount();if(n>0)badge.textContent=n;else badge.parentNode&&badge.parentNode.removeChild(badge);}
       };})(a);
       var body=document.createElement("div"); body.className="tk-action-body";

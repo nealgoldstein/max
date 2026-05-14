@@ -2882,70 +2882,99 @@
     hdr.appendChild(dtBox);
   }
 
-  // ── TM.7.6 (v332): destination tab bar ──────────────────────
-  // The 6-tab switcher (Itinerary / Explore / Stay / Routing / On the
-  // ground / Tracking…) above the dest detail panes. Reads/writes
-  // `global._activeDmSection` for active-tab tracking; pendingCount()
-  // drives the tracker badge. On-click toggles tab classes + pane
-  // visibility, lazy-renders execution-mode info, refreshes the map
-  // when switching to map-relevant tabs.
+  // ── v359.50: destination tab bar — 3 architecture-aligned tabs ──
+  // Refactor of the prior 6-tab strip (Itinerary / Explore / Stay /
+  // Routing / On the ground / Tracking…) into three groups that mirror
+  // the data model (see data-model.md):
+  //
+  //   • Plan        → days[].planItems[] + routes[] segments
+  //                   (panes: sights, explore, routing)
+  //   • Stay & Eat  → hotels (future: dedicated restaurants surface)
+  //                   (panes: stay)
+  //   • On the ground → practical context + pendingActions[]
+  //                   (panes: info, tracker)
+  //
+  // `global._activeDmSection` retains its legacy values (sights/explore/
+  // stay/routing/info/tracker) so existing deep-link assignments
+  // ("set section to 'routing' and re-render") still work; the active
+  // tab group is derived from the section via TAB_OF_PANE. Pane DOM
+  // ids are unchanged — visibility now flips on group membership
+  // (multiple panes can be visible at once within the active tab).
+  //
+  // Tracker badge moves from its own tab to the On-the-ground tab.
+  var TAB_GROUPS = [
+    {id:"plan",        lbl:"Plan",          panes:["sights","explore","routing"]},
+    {id:"stayEat",     lbl:"Stay & Eat",    panes:["stay"]},
+    {id:"onTheGround", lbl:"On the ground", panes:["info","tracker"]}
+  ];
+  var TAB_OF_PANE = {};
+  TAB_GROUPS.forEach(function(grp){ grp.panes.forEach(function(p){ TAB_OF_PANE[p] = grp.id; }); });
+
+  function _activeDmTab(){
+    return TAB_OF_PANE[global._activeDmSection] || "plan";
+  }
+  function _isPaneInActiveGroup(paneId){
+    return TAB_OF_PANE[paneId] === _activeDmTab();
+  }
+  // Expose helpers so the pane render functions (in this file + the
+  // explore-pane append in index.html) can call them.
+  global._activeDmTab = _activeDmTab;
+  global._isPaneInActiveGroup = _isPaneInActiveGroup;
+
   function _renderDestTabBar(dest, container) {
     var tabs = document.createElement("div");
     tabs.className = "dm-tabs";
-    var sections = [
-      {id:"sights", lbl:"Itinerary"},
-      {id:"explore",lbl:"Explore"},
-      {id:"stay",   lbl:"Stay"},
-      {id:"routing",lbl:"Routing"},
-      {id:"info",   lbl:"On the ground"},
-      {id:"tracker",lbl:"Tracking…"},
-    ];
     var g = global.g || function(id){ return document.getElementById(id); };
-    sections.forEach(function(s){
+    var activeTab = _activeDmTab();
+    var pendingN = (typeof global.pendingCount === "function") ? global.pendingCount() : 0;
+
+    TAB_GROUPS.forEach(function(grp){
       var btn = document.createElement("button");
-      btn.className = "dm-tab" + (s.id === global._activeDmSection ? " on" : "");
-      btn.id = "dm-tab-" + s.id;
-      btn.textContent = s.lbl;
-      if (s.id === "tracker") {
-        var n = (typeof global.pendingCount === "function") ? global.pendingCount() : 0;
-        if (n > 0) {
-          var badge = document.createElement("span");
-          badge.className = "dm-tab-badge";
-          badge.textContent = n;
-          btn.appendChild(badge);
-          btn.classList.add("has-attention");
-        }
+      btn.className = "dm-tab" + (grp.id === activeTab ? " on" : "");
+      btn.id = "dm-tab-" + grp.id;
+      btn.textContent = grp.lbl;
+      // Tracker badge now lives on the On-the-ground tab — pendingCount
+      // covers booking-confirmation and other action items regardless
+      // of which sub-pane will render them.
+      if (grp.id === "onTheGround" && pendingN > 0) {
+        var badge = document.createElement("span");
+        badge.className = "dm-tab-badge";
+        badge.textContent = pendingN;
+        btn.appendChild(badge);
+        btn.classList.add("has-attention");
       }
-      (function(sid){
+      (function(gid, firstPane){
         btn.onclick = function(){
-          global._activeDmSection = sid;
+          // Default to the first pane in the clicked group. If the
+          // user was previously in this group, prefer their last pane
+          // — but we don't track that yet, so first-pane is fine.
+          global._activeDmSection = firstPane;
           var _pw = g("dm-pane-wrap"); if (_pw) _pw.scrollTop = 0;
           var _lpc2 = document.querySelector(".lp-content"); if (_lpc2) _lpc2.scrollTop = 0;
-          sections.forEach(function(x){
+          // Update tab .on classes
+          TAB_GROUPS.forEach(function(x){
             var b = g("dm-tab-" + x.id);
             if (b) {
               var wasAttn = b.classList.contains("has-attention");
-              b.className = "dm-tab" + (x.id === sid ? " on" : "") + (wasAttn ? " has-attention" : "");
+              b.className = "dm-tab" + (x.id === gid ? " on" : "") + (wasAttn ? " has-attention" : "");
             }
-            var p = g("dm-pane-" + x.id); if (p) p.style.display = (x.id === sid ? "block" : "none");
           });
-          if (sid === "stay") {
-            setTimeout(function(){
-              var _sp = document.querySelector("#dm-pane-stay .bk-log-btn");
-              if (_sp) _sp.scrollIntoView({block:"nearest", behavior:"instant"});
-            }, 50);
-          }
-          if (sid === "info") {
+          // Show every pane in the active group; hide every other pane.
+          Object.keys(TAB_OF_PANE).forEach(function(paneId){
+            var p = g("dm-pane-" + paneId);
+            if (p) p.style.display = (TAB_OF_PANE[paneId] === gid ? "block" : "none");
+          });
+          // Lazy-render the on-the-ground execution groups on first view.
+          if (gid === "onTheGround") {
             var _execHost = g("dm-exec-groups-" + dest.id);
             if (_execHost && !_execHost._cyRendered && typeof global._renderExecutionGroups === "function") {
               global._renderExecutionGroups(dest, _execHost);
             }
           }
-          if (sid === "sights" || sid === "tracker" || sid === "stay" || sid === "explore") {
-            if (typeof global.updateMainMap === "function") global.updateMainMap();
-          }
+          // Most tabs touch map-relevant panes — refresh the main map.
+          if (typeof global.updateMainMap === "function") global.updateMainMap();
         };
-      })(s.id);
+      })(grp.id, grp.panes[0]);
       tabs.appendChild(btn);
     });
     container.appendChild(tabs);
@@ -2975,7 +3004,10 @@
     var suggestRestaurants = global.suggestRestaurants;
     var addRestaurantToDay = global.addRestaurantToDay;
   var sightsPane=document.createElement("div"); sightsPane.id="dm-pane-sights";
-  sightsPane.style.display=_activeDmSection==="sights"?"block":"none";
+  // v359.50: visibility now flows from tab GROUP membership, not exact
+  // section match — multiple panes (sights/explore/routing) live under
+  // the same "Plan" tab and show together.
+  sightsPane.style.display=global._isPaneInActiveGroup("sights")?"block":"none";
 
   dest.days.forEach(function(day,dayIdx){
     var items=day.items||[];
@@ -3265,7 +3297,7 @@
     var toggleHotelForm = global.toggleHotelForm;
     var _emitTripMutation = global._emitTripMutation;
   var stayPane2=document.createElement("div"); stayPane2.id="dm-pane-stay";
-  stayPane2.style.cssText="padding:0 14px 12px;display:"+(_activeDmSection==="stay"?"block":"none")+";";
+  stayPane2.style.cssText="padding:0 14px 12px;display:"+(global._isPaneInActiveGroup("stay")?"block":"none")+";";
 
   // Round FD: Stay/Eat sub-tabs gone. Restaurants moved to the Explore
   // tab (where they belong as discovery content), so this pane now
@@ -3415,7 +3447,7 @@
     // synchronously, so the placeholder flashed for ~1 frame in
     // practice; an empty container is fine before activation.
     var infoPane2=document.createElement("div"); infoPane2.id="dm-pane-info";
-    infoPane2.style.display=_activeDmSection==="info"?"block":"none";
+    infoPane2.style.display=global._isPaneInActiveGroup("info")?"block":"none";
     infoPane2.style.padding="12px 14px";
 
     // ── Quick reference: currency / tipping / emergency ──────
@@ -3444,7 +3476,7 @@
     var execHost=document.createElement("div");
     execHost.id="dm-exec-groups-"+dest.id;
     infoPane2.appendChild(execHost);
-    if (_activeDmSection==="info") {
+    if (global._isPaneInActiveGroup("info")) {
       setTimeout(function(){ _renderExecutionGroups(dest, execHost); }, 0);
     }
     // Round FK: dropped the idle placeholder. Empty container is fine.
@@ -3536,7 +3568,7 @@
     var mkTrackerInner = global.mkTrackerInner;
     // ROUTING pane
     var routePane2=document.createElement("div"); routePane2.id="dm-pane-routing";
-    routePane2.style.display=_activeDmSection==="routing"?"block":"none";
+    routePane2.style.display=global._isPaneInActiveGroup("routing")?"block":"none";
     routePane2.style.padding="12px 14px";
     var destIdx2=trip.destinations.indexOf(dest);
     var prevDest2=destIdx2>0?trip.destinations[destIdx2-1]:null;
@@ -3577,7 +3609,7 @@
 
     // TRACKER pane
     var trackPane2=document.createElement("div"); trackPane2.id="dm-pane-tracker";
-    trackPane2.style.display=_activeDmSection==="tracker"?"block":"none";
+    trackPane2.style.display=global._isPaneInActiveGroup("tracker")?"block":"none";
     trackPane2.style.padding="12px 14px";
     trackPane2.appendChild(mkTrackerInner(dest));
     paneWrap.appendChild(trackPane2);
@@ -3644,6 +3676,11 @@
     renderDestInfoPane:               _renderDestInfoPane,
     // TM.7.10 (v333):
     renderDestRoutingAndTrackerPanes: _renderDestRoutingAndTrackerPanes,
+    // v359.50: 3-tab grouping helpers — used by the explore pane in
+    // index.html and any future call sites that need to know which
+    // tab group a pane belongs to.
+    _activeDmTab:                     _activeDmTab,
+    _isPaneInActiveGroup:             _isPaneInActiveGroup,
     // TM.5 final (v333): single dispatcher entry point.
     renderTripPage:                   _renderTripPage,
   };
