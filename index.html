@@ -23943,33 +23943,22 @@ function updateMainMap(){
       group.dests.forEach(function(d){
         if (d && d.dest && d.dest.id) _mainMarkerByDestId[d.dest.id] = m;
       });
-      // v359.51: click → Leaflet popup with two actions: Open the
-      // destination (existing behavior) and Change role… (opens the
-      // trip-view role popover so the user can convert the dest to
-      // a day trip without leaving the map). Round-trip cities still
-      // anchor on stop #1; switching visits stays on the dest cards.
-      (function(did, destPlace){
-        var popupHtml = ''
-          + '<div style="font-size:13px;font-weight:700;color:#111;margin-bottom:8px;">' + destPlace + '</div>'
-          + '<div style="display:flex;flex-direction:column;gap:6px;">'
-          +   '<button class="map-pin-open" style="font-size:12px;padding:6px 10px;border:1px solid #1a5fa8;background:#1a5fa8;color:#fff;border-radius:6px;cursor:pointer;font-family:inherit;text-align:left;">Open destination</button>'
-          +   '<button class="map-pin-role" style="font-size:12px;padding:6px 10px;border:1px solid #ddd;background:#fff;color:#333;border-radius:6px;cursor:pointer;font-family:inherit;text-align:left;">&#x21BA; Change role (make day trip…)</button>'
-          + '</div>';
-        m.bindPopup(popupHtml, {closeButton:true, autoClose:true, className:"main-pin-popup"});
+      // v359.51.1: click → open the role popover directly. The
+      // previous intermediate Leaflet popup was getting eaten by the
+      // marker's tooltip (and added a friction step Neal didn't want).
+      // The role popover itself carries both affordances ("Open this
+      // destination" link + the Overnight / Day-trip choices) so the
+      // dropped Open-destination shortcut isn't lost.
+      (function(did){
         m.on("click", function(){
-          m.openPopup();
-          // Defer button wiring until the popup DOM is in place.
-          setTimeout(function(){
-            var pop = m.getPopup();
-            var el = pop && pop.getElement && pop.getElement();
-            if (!el) return;
-            var openBtn = el.querySelector(".map-pin-open");
-            var roleBtn = el.querySelector(".map-pin-role");
-            if (openBtn) openBtn.onclick = function(){ m.closePopup(); selectDest(did); };
-            if (roleBtn) roleBtn.onclick = function(){ m.closePopup(); _openTripDestRolePopover(did); };
-          }, 10);
+          try { m.closeTooltip(); } catch(_){}
+          if (typeof _openTripDestRolePopover === "function") {
+            _openTripDestRolePopover(did);
+          } else {
+            selectDest(did); // ultra-defensive fallback
+          }
         });
-      })(group.dests[0].dest.id, group.dests[0].dest.place);
+      })(group.dests[0].dest.id);
       var primary = group.dests[0].dest;
       var tipParts = [primary.place];
       if (group.dests.length > 1) {
@@ -26051,25 +26040,47 @@ function _openTripDestRolePopover(destId){
   var src = trip.destinations.find(function(d){ return d.id === destId; });
   if (!src) return;
 
+  // v359.51.1: resolve coordinates with a getCityCenter fallback so
+  // destinations that never had explicit lat/lng on the object (e.g.
+  // Selfoss in Neal's Iceland trip) still participate. _coordsFor
+  // returns [lat, lng] or null.
+  function _coordsFor(d){
+    if (!d) return null;
+    if (typeof d.lat === "number" && typeof d.lng === "number") return [d.lat, d.lng];
+    if (typeof getCityCenter === "function") {
+      var c = getCityCenter(d.place);
+      if (Array.isArray(c) && isFinite(c[0]) && isFinite(c[1])) return c;
+      if (c && typeof c.lat === "number") return [c.lat, c.lng];
+    }
+    return null;
+  }
+  var srcCoords = _coordsFor(src);
+
   // Hub options = the OTHER destinations, sorted by distance from src.
   // Within 60 km → preferred ("in range"); beyond → flagged as stretch.
+  // Destinations whose coords we can't resolve are still listed
+  // (distKm shown as "?") so the user isn't blocked.
   var DAY_TRIP_RADIUS_KM = 60;
-  var hubOptions = [];
-  if (typeof src.lat === "number" && typeof src.lng === "number") {
-    hubOptions = trip.destinations
-      .filter(function(h){
-        return h && h.id !== src.id
-          && typeof h.lat === "number" && typeof h.lng === "number";
-      })
-      .map(function(h){
-        var d = null;
-        if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.haversineKm === "function") {
-          d = MaxEngineTrip.haversineKm(src.lat, src.lng, h.lat, h.lng);
-        }
-        return { hub: h, distKm: (d == null ? 9999 : d), inRange: (d != null && d <= DAY_TRIP_RADIUS_KM) };
-      })
-      .sort(function(a, b){ return a.distKm - b.distKm; });
-  }
+  var hubOptions = trip.destinations
+    .filter(function(h){ return h && h.id !== src.id; })
+    .map(function(h){
+      var hc = _coordsFor(h);
+      var d = null;
+      if (srcCoords && hc
+          && typeof MaxEngineTrip !== "undefined"
+          && typeof MaxEngineTrip.haversineKm === "function") {
+        d = MaxEngineTrip.haversineKm(srcCoords[0], srcCoords[1], hc[0], hc[1]);
+      }
+      return { hub: h, distKm: d, inRange: (d != null && d <= DAY_TRIP_RADIUS_KM) };
+    })
+    .sort(function(a, b){
+      // Known distances first (sorted ascending), unknowns last in
+      // trip order — better than swallowing them.
+      if (a.distKm == null && b.distKm == null) return 0;
+      if (a.distKm == null) return 1;
+      if (b.distKm == null) return -1;
+      return a.distKm - b.distKm;
+    });
   var dayTripAvailable = hubOptions.length > 0;
   var defaultHubId = hubOptions[0] ? hubOptions[0].hub.id : null;
 
@@ -26082,7 +26093,11 @@ function _openTripDestRolePopover(destId){
   ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.32);z-index:10500;display:flex;align-items:center;justify-content:center;padding:20px;";
 
   var hubOpts = hubOptions.map(function(o){
-    var label = o.hub.place + " (" + Math.round(o.distKm) + " km)" + (o.inRange ? "" : " — stretch");
+    var distLbl = (o.distKm == null)
+      ? "? km"
+      : (Math.round(o.distKm) + " km");
+    var rangeLbl = (o.distKm == null) ? "" : (o.inRange ? "" : " — stretch");
+    var label = o.hub.place + " (" + distLbl + ")" + rangeLbl;
     var sel = o.hub.id === defaultHubId ? " selected" : "";
     return '<option value="' + o.hub.id + '"' + sel + '>' + label + '</option>';
   }).join("");
@@ -26106,7 +26121,10 @@ function _openTripDestRolePopover(destId){
     + '<div style="background:#fff;border-radius:12px;max-width:420px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,0.18);">'
     +   '<div style="padding:18px 20px 4px;">'
     +     '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">Role on this trip</div>'
-    +     '<div style="font-size:17px;font-weight:700;color:#111;margin-top:4px;">' + src.place + '</div>'
+    +     '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-top:4px;">'
+    +       '<div style="font-size:17px;font-weight:700;color:#111;">' + src.place + '</div>'
+    +       '<a href="#" id="trip-role-open" style="font-size:11.5px;font-weight:500;color:#1a5fa8;text-decoration:none;cursor:pointer;">Open destination &rarr;</a>'
+    +     '</div>'
     +   '</div>'
     +   '<div style="padding:14px 20px;display:flex;flex-direction:column;gap:10px;">'
     +     '<label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #1a5fa8;border-radius:8px;cursor:pointer;background:#eef4fb;">'
@@ -26130,6 +26148,13 @@ function _openTripDestRolePopover(destId){
   ov.onclick = function(e){ if (e.target === ov) close(); };
   var cancelBtn = ov.querySelector("#trip-role-cancel");
   if (cancelBtn) cancelBtn.onclick = close;
+
+  var openLink = ov.querySelector("#trip-role-open");
+  if (openLink) openLink.onclick = function(e){
+    e.preventDefault();
+    close();
+    if (typeof selectDest === "function") selectDest(src.id);
+  };
 
   var saveBtn = ov.querySelector("#trip-role-save");
   if (saveBtn) saveBtn.onclick = function(){
