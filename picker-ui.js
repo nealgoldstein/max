@@ -658,38 +658,27 @@
   //
   // No API key needed. CORS-enabled. Polite usage: caching + < ~20
   // requests per picker open.
-  // v359.37: cache prefix bumped to v2 so pre-search-fallback entries
-  // (which cached null results for disambig-page places like "Vik")
-  // are invalidated and re-tried with the new search behavior.
-  // v359.38: bumped to v3 so existing entries get re-fetched with
-  // the new attribution field (Artist + License). Without this bump,
-  // already-cached photos would show no credit and we'd stay
-  // technically non-compliant until 7-day TTL expired.
-  var WIKI_CACHE_PREFIX = "max-wiki:v3:";
-  var WIKI_CACHE_TTL_MS = 7 * 24 * 3600 * 1000;
+  // v359.42: wiki cache moved to IDB via MaxDB.cache.wiki. localStorage
+  // was filling up under user trip load and pushing trip writes out;
+  // wiki cache is purely a performance optimization (re-fetchable) so
+  // it doesn't belong in scarce sync storage. Helpers below delegate
+  // to MaxDB and return Promises. _fetchWikiSummary chain awaits them.
   function _wikiCacheKey(place, country) {
-    return WIKI_CACHE_PREFIX
-      + (place||"").trim().toLowerCase()
+    return (place||"").trim().toLowerCase()
       + ":"
       + (country||"").trim().toLowerCase();
   }
   function _wikiCacheGet(place, country) {
-    try {
-      var raw = localStorage.getItem(_wikiCacheKey(place, country));
-      if (!raw) return null;
-      var entry = JSON.parse(raw);
-      if (!entry || !entry.ts) return null;
-      if (Date.now() - entry.ts > WIKI_CACHE_TTL_MS) return null;
-      return entry.data || null;
-    } catch(_) { return null; }
+    if (window.MaxDB && MaxDB.cache && MaxDB.cache.wiki) {
+      return MaxDB.cache.wiki.get(_wikiCacheKey(place, country));
+    }
+    return Promise.resolve(null);
   }
   function _wikiCacheSet(place, country, data) {
-    try {
-      localStorage.setItem(
-        _wikiCacheKey(place, country),
-        JSON.stringify({ ts: Date.now(), data: data })
-      );
-    } catch(_) {}
+    if (window.MaxDB && MaxDB.cache && MaxDB.cache.wiki) {
+      return MaxDB.cache.wiki.set(_wikiCacheKey(place, country), data);
+    }
+    return Promise.resolve();
   }
   // v359.38: image attribution helpers. The Wikimedia file page
   // carries license + author metadata in `extmetadata`. We fetch
@@ -801,8 +790,15 @@
 
   function _fetchWikiSummary(place, country) {
     if (!place) return Promise.resolve(null);
-    var cached = _wikiCacheGet(place, country);
-    if (cached !== null) return Promise.resolve(cached);
+    // v359.42: cache is async now (IDB). Wrap the entire fetch chain
+    // in the cache-lookup promise.
+    return _wikiCacheGet(place, country).then(function (cached) {
+      if (cached !== null && cached !== undefined) return cached;
+      return _fetchWikiSummaryUncached(place, country);
+    });
+  }
+
+  function _fetchWikiSummaryUncached(place, country) {
     var title = encodeURIComponent(place.trim().replace(/ /g, "_"));
 
     // Step 1: try the place name verbatim.

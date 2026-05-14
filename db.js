@@ -154,22 +154,55 @@
 
   // ── Trip persistence ────────────────────────────────────────
 
+  // v359.43: in-memory mirror of trips that live in IDB (not
+  // localStorage). Populated by hydrateTripIdbMirror() on init.
+  // tripRead/tripReadRaw consult this when localStorage misses.
+  // tripWrite updates it on every write so reads stay consistent
+  // even before the async IDB write completes.
+  var _tripIdbMirror = {};       // id → envelope (parsed)
+  var _tripIdbMirrorRaw = {};    // id → JSON string
+  var _tripIdbReady = false;     // set true after first hydration completes
+
+  function _writeTripToIdb(id, jsonStr) {
+    // Fire-and-forget write to IDB. Updates the mirror synchronously
+    // so subsequent reads see the new value even if IDB lags.
+    _tripIdbMirrorRaw[id] = jsonStr;
+    try { _tripIdbMirror[id] = JSON.parse(jsonStr); } catch (_) {}
+    return idbSet(KEY_TRIP_PREFIX + id, jsonStr).catch(function (err) {
+      console.warn('[MaxDB] trip IDB write failed for', id, err);
+    });
+  }
+
   function tripWrite(id, envelope) {
     if (!canPersist || !id) return false;
+    var jsonStr;
+    try { jsonStr = JSON.stringify(envelope); }
+    catch (e) { console.warn('[MaxDB] tripWrite stringify failed:', e); return false; }
+
+    // Try localStorage first (sync, fast).
     try {
-      localStorage.setItem(KEY_TRIP_PREFIX + id, JSON.stringify(envelope));
-      // Round HS: include the envelope in the payload so in-process
-      // subscribers (e.g., the trip engine's HQ subscriber) can adopt
-      // without a JSON re-parse that would lose dest object identity.
+      localStorage.setItem(KEY_TRIP_PREFIX + id, jsonStr);
       emit('tripWritten', { id: id, envelope: envelope });
       return true;
     } catch (e) {
       if (e && (e.name === 'QuotaExceededError' || (e.code && e.code === 22))) {
-        // Round CL.3 + GA: caller should surface this so the user knows
-        // to delete old trips. We log and return false; we never throw
-        // out of the storage layer.
-        console.warn('[MaxDB] localStorage full when writing trip', id);
-        return false;
+        // v359.42 Phase 2: evict low-priority caches and retry.
+        var evicted = _evictLowPriorityKeys();
+        if (evicted > 0) {
+          try {
+            localStorage.setItem(KEY_TRIP_PREFIX + id, jsonStr);
+            emit('tripWritten', { id: id, envelope: envelope });
+            return true;
+          } catch (e2) { /* still over quota — fall through to IDB */ }
+        }
+        // v359.43 Phase 3: localStorage is full. Fall through to IDB.
+        // We optimistically return true and fire the event — the
+        // trip IS persisted (just via IDB), and the in-memory mirror
+        // is updated synchronously above for subsequent reads.
+        _writeTripToIdb(id, jsonStr);
+        console.warn('[MaxDB] localStorage full — trip', id, 'written to IDB');
+        emit('tripWritten', { id: id, envelope: envelope });
+        return true;
       }
       console.warn('[MaxDB] tripWrite failed:', e);
       return false;
@@ -177,25 +210,31 @@
   }
 
   function tripWriteRaw(id, json) {
-    // Convenience for callers that already have a serialized JSON
-    // string (e.g., the existing serializeTrip()). Functionally the
-    // same as tripWrite but skips a parse + re-stringify.
     if (!canPersist || !id) return false;
     try {
       localStorage.setItem(KEY_TRIP_PREFIX + id, json);
-      // Round HS: parse once here so the in-process subscriber gets the
-      // envelope object instead of having to re-read+parse from storage.
-      // If the JSON is malformed we still emit (without envelope) so
-      // tripWritten remains a reliable "something landed in storage"
-      // signal — subscribers fall back to MaxDB.trip.read().
       var envelope = null;
       try { envelope = JSON.parse(json); } catch (_) {}
       emit('tripWritten', { id: id, envelope: envelope });
       return true;
     } catch (e) {
       if (e && (e.name === 'QuotaExceededError' || (e.code && e.code === 22))) {
-        console.warn('[MaxDB] localStorage full when writing trip', id);
-        return false;
+        var evicted = _evictLowPriorityKeys();
+        if (evicted > 0) {
+          try {
+            localStorage.setItem(KEY_TRIP_PREFIX + id, json);
+            var env2 = null;
+            try { env2 = JSON.parse(json); } catch (_) {}
+            emit('tripWritten', { id: id, envelope: env2 });
+            return true;
+          } catch (e2) { /* fall through */ }
+        }
+        _writeTripToIdb(id, json);
+        var env3 = null;
+        try { env3 = JSON.parse(json); } catch (_) {}
+        console.warn('[MaxDB] localStorage full — trip', id, 'written to IDB (raw)');
+        emit('tripWritten', { id: id, envelope: env3 });
+        return true;
       }
       console.warn('[MaxDB] tripWriteRaw failed:', e);
       return false;
@@ -206,34 +245,79 @@
     if (!canPersist || !id) return null;
     try {
       var raw = localStorage.getItem(KEY_TRIP_PREFIX + id);
-      if (!raw) return null;
-      return JSON.parse(raw);
+      if (raw) return JSON.parse(raw);
     } catch (e) {
       console.warn('[MaxDB] tripRead failed for', id, e);
-      return null;
     }
+    // v359.43 Phase 3: fall back to IDB mirror.
+    if (_tripIdbMirror[id]) return _tripIdbMirror[id];
+    return null;
   }
 
   function tripReadRaw(id) {
-    // Returns the raw JSON string. Callers like the existing
-    // restoreTrip() take a string directly; this lets them keep
-    // their current shape during migration.
     if (!canPersist || !id) return null;
     try {
-      return localStorage.getItem(KEY_TRIP_PREFIX + id);
-    } catch (e) { return null; }
+      var raw = localStorage.getItem(KEY_TRIP_PREFIX + id);
+      if (raw) return raw;
+    } catch (_) {}
+    return _tripIdbMirrorRaw[id] || null;
   }
 
   function tripDelete(id) {
     if (!canPersist || !id) return false;
-    try {
-      localStorage.removeItem(KEY_TRIP_PREFIX + id);
-      emit('tripDeleted', { id: id });
-      return true;
-    } catch (e) {
-      console.warn('[MaxDB] tripDelete failed:', e);
-      return false;
-    }
+    try { localStorage.removeItem(KEY_TRIP_PREFIX + id); } catch (_) {}
+    // v359.43: also remove from IDB mirror + storage. Fire-and-forget.
+    delete _tripIdbMirror[id];
+    delete _tripIdbMirrorRaw[id];
+    idbDelete(KEY_TRIP_PREFIX + id).catch(function () {});
+    emit('tripDeleted', { id: id });
+    return true;
+  }
+
+  // v359.43: hydrate the in-memory trip mirror from IDB on init.
+  // Walks all IDB keys, picks the ones with the trip prefix, and
+  // populates _tripIdbMirror so tripRead can find IDB-only trips
+  // synchronously. Async; tripRead before this finishes will miss
+  // IDB-only trips (extremely rare — only matters right after
+  // localStorage quota was hit on a write).
+  function hydrateTripIdbMirror() {
+    if (!canPersist || typeof indexedDB === 'undefined') return Promise.resolve();
+    return idbOpen().then(function (db) {
+      return new Promise(function (resolve) {
+        try {
+          var tx = db.transaction(IDB_STORE, 'readonly');
+          var store = tx.objectStore(IDB_STORE);
+          var req = store.openCursor();
+          var loaded = 0;
+          req.onsuccess = function (e) {
+            var cursor = e.target.result;
+            if (!cursor) {
+              _tripIdbReady = true;
+              if (loaded > 0) console.log('[MaxDB] hydrated', loaded, 'trip(s) from IDB');
+              resolve();
+              return;
+            }
+            var k = cursor.key;
+            if (typeof k === 'string' && k.indexOf(KEY_TRIP_PREFIX) === 0) {
+              var id = k.substring(KEY_TRIP_PREFIX.length);
+              var val = cursor.value;
+              try {
+                if (typeof val === 'string') {
+                  _tripIdbMirrorRaw[id] = val;
+                  _tripIdbMirror[id] = JSON.parse(val);
+                } else if (val) {
+                  _tripIdbMirror[id] = val;
+                  _tripIdbMirrorRaw[id] = JSON.stringify(val);
+                }
+                loaded++;
+              } catch (_) {}
+            }
+            cursor.continue();
+          };
+          req.onerror = function () { _tripIdbReady = true; resolve(); };
+        } catch (e) { _tripIdbReady = true; resolve(); }
+      });
+    }).catch(function () { _tripIdbReady = true; });
   }
 
   // ── Trips index ─────────────────────────────────────────────
@@ -437,6 +521,96 @@
     idbDelete(KEY_LLM_CACHE).catch(function (e) {
       console.warn('[MaxDB] LLM cache clear failed:', e);
     });
+  }
+
+  // ── Wiki cache (v359.42: IDB-backed) ──────────────────────
+  // Per-place Wikipedia summary cache used by the picker thumbnails
+  // and lightbox. Previously lived in localStorage with prefix
+  // "max-wiki:v3:" which contributed to quota pressure once a user
+  // accumulated many trips. Moved to IDB (same kv store as the LLM
+  // cache; namespaced via key prefix) so localStorage has room for
+  // trip envelopes.
+  //
+  // 7-day TTL applied on read; expired entries surface as misses.
+  // wikiCacheMigrate() runs once on module init — copies any
+  // existing localStorage entries to IDB then deletes them.
+  var KEY_WIKI_PREFIX = 'max-wiki:v3:';
+  var WIKI_TTL_MS = 7 * 24 * 3600 * 1000;
+  var KEY_WIKI_MIGRATED = 'max-wiki-migrated-to-idb';
+
+  function wikiCacheGet(key) {
+    if (!key) return Promise.resolve(null);
+    return idbGet(KEY_WIKI_PREFIX + key).then(function (entry) {
+      if (!entry || !entry.ts) return null;
+      if (Date.now() - entry.ts > WIKI_TTL_MS) return null;
+      return entry.data;
+    }).catch(function () { return null; });
+  }
+
+  function wikiCacheSet(key, data) {
+    if (!key) return Promise.resolve();
+    return idbSet(KEY_WIKI_PREFIX + key, { ts: Date.now(), data: data })
+      .catch(function () {});
+  }
+
+  function wikiCacheMigrate() {
+    if (!canPersist) return Promise.resolve();
+    try {
+      if (localStorage.getItem(KEY_WIKI_MIGRATED) === '1') return Promise.resolve();
+    } catch (_) {}
+    var keys = [];
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k && k.indexOf('max-wiki:') === 0) keys.push(k);
+      }
+    } catch (_) {}
+    if (!keys.length) {
+      try { localStorage.setItem(KEY_WIKI_MIGRATED, '1'); } catch (_) {}
+      return Promise.resolve();
+    }
+    var moves = keys.map(function (k) {
+      var raw;
+      try { raw = localStorage.getItem(k); } catch (_) { raw = null; }
+      var entry = null;
+      try { entry = raw ? JSON.parse(raw) : null; } catch (_) {}
+      // Strip any "max-wiki:vN:" prefix to get the bare cache key
+      var bareKey = k.replace(/^max-wiki:v?\d*:/, '');
+      if (!entry) {
+        try { localStorage.removeItem(k); } catch (_) {}
+        return Promise.resolve();
+      }
+      return idbSet(KEY_WIKI_PREFIX + bareKey, entry)
+        .then(function () { try { localStorage.removeItem(k); } catch (_) {} })
+        .catch(function () {});
+    });
+    return Promise.all(moves).then(function () {
+      try { localStorage.setItem(KEY_WIKI_MIGRATED, '1'); } catch (_) {}
+      console.log('[MaxDB] migrated', keys.length, 'wiki cache entries to IDB');
+    });
+  }
+
+  // v359.42: low-priority eviction helper. Called when a trip write
+  // hits QuotaExceededError. Clears localStorage keys that are pure
+  // performance caches (and may not have been migrated yet) so the
+  // trip write retry has room. Trip data is never touched here.
+  function _evictLowPriorityKeys() {
+    if (!canPersist) return 0;
+    var removed = 0;
+    try {
+      var toRemove = [];
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (!k) continue;
+        // Wiki cache (pre-migration) — safe to drop, regenerates on demand
+        if (k.indexOf('max-wiki:') === 0) toRemove.push(k);
+      }
+      toRemove.forEach(function (k) {
+        try { localStorage.removeItem(k); removed++; } catch (_) {}
+      });
+    } catch (_) {}
+    if (removed) console.warn('[MaxDB] evicted', removed, 'low-priority keys on quota error');
+    return removed;
   }
 
   // ── Geocode cache (sync, localStorage-backed) ──────────────
@@ -701,6 +875,14 @@
         clear:   llmCacheClear,
         ready:   llmReady,
       },
+      // v359.42: IDB-backed Wikipedia summary cache. Async API
+      // (get/set return Promises). Migration from old localStorage
+      // entries runs once on module init.
+      wiki: {
+        get:     wikiCacheGet,
+        set:     wikiCacheSet,
+        migrate: wikiCacheMigrate,
+      },
       geocode: {
         get:     geocodeGet,
         set:     geocodeSet,
@@ -752,4 +934,14 @@
   };
 
   global.MaxDB = MaxDB;
+
+  // v359.42 + v359.43: kick off async migrations + IDB hydration on
+  // module init. Both run fire-and-forget; consumers don't await
+  // them. Wiki migration moves stale localStorage entries into IDB
+  // (freeing space); trip IDB hydration populates the in-memory
+  // mirror so tripRead can find IDB-only trips synchronously.
+  if (canPersist) {
+    try { wikiCacheMigrate(); } catch (_) {}
+    try { hydrateTripIdbMirror(); } catch (_) {}
+  }
 })(typeof window !== 'undefined' ? window : this);
