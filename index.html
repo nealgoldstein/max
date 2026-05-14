@@ -23943,10 +23943,33 @@ function updateMainMap(){
       group.dests.forEach(function(d){
         if (d && d.dest && d.dest.id) _mainMarkerByDestId[d.dest.id] = m;
       });
-      // Click → drill into the (first) destination in this group. For round-
-      // trip cities the user lands on stop #1; switching between visits is
-      // already handled by the destination cards.
-      (function(did){ m.on("click", function(){ selectDest(did); }); })(group.dests[0].dest.id);
+      // v359.51: click → Leaflet popup with two actions: Open the
+      // destination (existing behavior) and Change role… (opens the
+      // trip-view role popover so the user can convert the dest to
+      // a day trip without leaving the map). Round-trip cities still
+      // anchor on stop #1; switching visits stays on the dest cards.
+      (function(did, destPlace){
+        var popupHtml = ''
+          + '<div style="font-size:13px;font-weight:700;color:#111;margin-bottom:8px;">' + destPlace + '</div>'
+          + '<div style="display:flex;flex-direction:column;gap:6px;">'
+          +   '<button class="map-pin-open" style="font-size:12px;padding:6px 10px;border:1px solid #1a5fa8;background:#1a5fa8;color:#fff;border-radius:6px;cursor:pointer;font-family:inherit;text-align:left;">Open destination</button>'
+          +   '<button class="map-pin-role" style="font-size:12px;padding:6px 10px;border:1px solid #ddd;background:#fff;color:#333;border-radius:6px;cursor:pointer;font-family:inherit;text-align:left;">&#x21BA; Change role (make day trip…)</button>'
+          + '</div>';
+        m.bindPopup(popupHtml, {closeButton:true, autoClose:true, className:"main-pin-popup"});
+        m.on("click", function(){
+          m.openPopup();
+          // Defer button wiring until the popup DOM is in place.
+          setTimeout(function(){
+            var pop = m.getPopup();
+            var el = pop && pop.getElement && pop.getElement();
+            if (!el) return;
+            var openBtn = el.querySelector(".map-pin-open");
+            var roleBtn = el.querySelector(".map-pin-role");
+            if (openBtn) openBtn.onclick = function(){ m.closePopup(); selectDest(did); };
+            if (roleBtn) roleBtn.onclick = function(){ m.closePopup(); _openTripDestRolePopover(did); };
+          }, 10);
+        });
+      })(group.dests[0].dest.id, group.dests[0].dest.place);
       var primary = group.dests[0].dest;
       var tipParts = [primary.place];
       if (group.dests.length > 1) {
@@ -25892,6 +25915,239 @@ function makeDayTrip(hubDest, srcDest, opts){
 }
 
 // Round FC: dropped the JS confirm() on ungroup, added an inline
+// v359.51: in-place "convert this overnight destination to a day trip"
+// of a chosen hub. Counterpart to ungroupDayTripByPlanItem (which
+// goes the OTHER way: PlanItem → standalone dest). Used by the
+// trip-view map pin tap and the Change-role popover so the user
+// no longer has to round-trip through the picker.
+//
+// Mutation:
+//   - Remove src from trip.destinations
+//   - Add a type:"dayTrip" PlanItem on hub.days[0].planItems
+//   - hub.nights += src.nights (hub absorbs the source's nights —
+//     mirrors the picker-flow semantics where day-trip candidates
+//     don't take overnights of their own)
+//   - Recompute every dest's dateFrom/dateTo from trip start
+//   - Emit a trip mutation so the UI + map re-render
+//
+// Limitations (v1):
+//   - Source's hotelBookings / generalBookings / day items are dropped.
+//     The caller (popover) is responsible for warning the user.
+//   - Undo path lives only as a toast warning for now (the
+//     ungroupDayTripByPlanItem reverse path is symmetric, but wiring
+//     a real undo is follow-on work).
+function convertDestToDayTrip(destId, hubDestId, opts){
+  opts = opts || {};
+  if (!trip || !Array.isArray(trip.destinations)) return;
+  var srcIdx = trip.destinations.findIndex(function(d){ return d.id === destId; });
+  var hubIdx = trip.destinations.findIndex(function(d){ return d.id === hubDestId; });
+  if (srcIdx < 0 || hubIdx < 0 || srcIdx === hubIdx) {
+    console.warn("[Max] convertDestToDayTrip: invalid src/hub", destId, hubDestId);
+    return;
+  }
+  var src = trip.destinations[srcIdx];
+  var hub = trip.destinations[hubIdx];
+
+  // Resolve / mint a placeId for the source.
+  var placeId = src.placeId;
+  if (!placeId && typeof MaxMigration !== "undefined" && MaxMigration._makePlaceId) {
+    placeId = MaxMigration._makePlaceId(src.place || "", src.country || "");
+  }
+  if (!placeId) {
+    placeId = (src.place || "unknown").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  }
+
+  // Make sure trip.places has an entry.
+  if (!trip.places) trip.places = {};
+  if (!trip.places[placeId]) {
+    trip.places[placeId] = {
+      id:      placeId,
+      name:    src.place,
+      country: src.country || null,
+      lat:     (typeof src.lat === "number") ? src.lat : null,
+      lng:     (typeof src.lng === "number") ? src.lng : null
+    };
+  }
+
+  // Distance from hub for chip metadata + future sort.
+  var distKm = null;
+  if (typeof hub.lat === "number" && typeof hub.lng === "number"
+      && typeof src.lat === "number" && typeof src.lng === "number"
+      && typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.haversineKm === "function") {
+    distKm = Math.round(MaxEngineTrip.haversineKm(hub.lat, hub.lng, src.lat, src.lng));
+  }
+
+  // Append PlanItem to hub.days[0].
+  if (!Array.isArray(hub.days) || !hub.days.length) {
+    console.warn("[Max] convertDestToDayTrip: hub has no days; aborting");
+    return;
+  }
+  var day0 = hub.days[0];
+  if (!Array.isArray(day0.planItems)) day0.planItems = [];
+  var srcNights = src.nights || 1;
+  day0.planItems.push({
+    id:      "pi-dt-" + hubDestId + "-" + placeId + "-" + Date.now(),
+    type:    "dayTrip",
+    state:   "suggestion",
+    placeId: placeId,
+    notes:   src.intent || "",
+    source:  "manual-trip-view",
+    legacy: {
+      sourceNights:     srcNights,
+      absorbedFromHub:  hub.place,
+      distKm:           distKm,
+      attachedEvents:   (src.attachedEvents || []).slice()
+    }
+  });
+
+  // Hub absorbs the source's nights so total trip duration is preserved.
+  hub.nights = (hub.nights || 0) + srcNights;
+
+  // Drop source from trip.destinations.
+  trip.destinations.splice(srcIdx, 1);
+
+  // Recompute every dest's dateFrom/dateTo + day shells from start.
+  var startDate = trip.destinations[0] ? trip.destinations[0].dateFrom : null;
+  if (startDate) {
+    var cur = new Date(startDate + "T12:00:00");
+    trip.destinations.forEach(function(d){
+      d.dateFrom = cur.toISOString().slice(0, 10);
+      var next = new Date(cur); next.setDate(next.getDate() + (d.nights || 0));
+      d.dateTo = next.toISOString().slice(0, 10);
+      if (typeof makeDays === "function") {
+        // Rebuild the day-shells but try to preserve planItems we just
+        // added — the hub's day[0] still has the PlanItem we pushed.
+        var preservedDay0Items = [];
+        if (d === hub && d.days && d.days[0]) {
+          preservedDay0Items = (d.days[0].planItems || []).slice();
+        }
+        d.days = makeDays(d.id, d.place, d.place, d.dateFrom, d.nights || 0);
+        if (d === hub && d.days[0] && preservedDay0Items.length) {
+          d.days[0].planItems = preservedDay0Items;
+        }
+      }
+      cur = next;
+    });
+  }
+  _emitTripMutation();
+
+  if (!opts.silent && typeof _showDayTripToast === "function") {
+    _showDayTripToast(
+      "<strong>" + src.place + "</strong> is now a day trip from <strong>" + hub.place + "</strong>",
+      function(){
+        console.warn("[Max] convertDestToDayTrip: undo not yet wired");
+      }
+    );
+  }
+}
+
+// v359.51: trip-view role popover. Modelled on picker-ui's
+// _openRoleChangePopover but operates on trip.destinations[] (post-
+// build) and routes "Day trip" through convertDestToDayTrip rather
+// than mutating candidate.intent. Opened from the map pin tap and
+// the destination card's Change-role link.
+function _openTripDestRolePopover(destId){
+  if (!trip || !Array.isArray(trip.destinations)) return;
+  var src = trip.destinations.find(function(d){ return d.id === destId; });
+  if (!src) return;
+
+  // Hub options = the OTHER destinations, sorted by distance from src.
+  // Within 60 km → preferred ("in range"); beyond → flagged as stretch.
+  var DAY_TRIP_RADIUS_KM = 60;
+  var hubOptions = [];
+  if (typeof src.lat === "number" && typeof src.lng === "number") {
+    hubOptions = trip.destinations
+      .filter(function(h){
+        return h && h.id !== src.id
+          && typeof h.lat === "number" && typeof h.lng === "number";
+      })
+      .map(function(h){
+        var d = null;
+        if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.haversineKm === "function") {
+          d = MaxEngineTrip.haversineKm(src.lat, src.lng, h.lat, h.lng);
+        }
+        return { hub: h, distKm: (d == null ? 9999 : d), inRange: (d != null && d <= DAY_TRIP_RADIUS_KM) };
+      })
+      .sort(function(a, b){ return a.distKm - b.distKm; });
+  }
+  var dayTripAvailable = hubOptions.length > 0;
+  var defaultHubId = hubOptions[0] ? hubOptions[0].hub.id : null;
+
+  // Build the overlay (mirrors picker's _openRoleChangePopover).
+  var existing = document.getElementById("trip-role-popover");
+  if (existing) existing.remove();
+
+  var ov = document.createElement("div");
+  ov.id = "trip-role-popover";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.32);z-index:10500;display:flex;align-items:center;justify-content:center;padding:20px;";
+
+  var hubOpts = hubOptions.map(function(o){
+    var label = o.hub.place + " (" + Math.round(o.distKm) + " km)" + (o.inRange ? "" : " — stretch");
+    var sel = o.hub.id === defaultHubId ? " selected" : "";
+    return '<option value="' + o.hub.id + '"' + sel + '>' + label + '</option>';
+  }).join("");
+
+  var dayTripRow = dayTripAvailable
+    ? ('<label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #e0e0e0;border-radius:8px;cursor:pointer;background:#fff;">'
+        + '<input type="radio" name="trip-role-pick" value="dayTrip" style="margin:0;" />'
+        + '<div style="flex:1;">'
+        +   '<div style="font-size:13px;font-weight:600;color:#222;">Day trip from</div>'
+        +   '<select id="trip-role-hub-select" style="margin-top:6px;width:100%;padding:6px 8px;font-size:12.5px;border:1px solid #ccc;border-radius:6px;font-family:inherit;">' + hubOpts + '</select>'
+        +   '<div style="font-size:11px;color:#a36500;margin-top:6px;line-height:1.5;">Heads up: the hub will absorb '
+        + (src.nights || 1) + ' night' + ((src.nights || 1) === 1 ? "" : "s")
+        + '. Hotel and other bookings tied to ' + src.place + ' will be dropped — confirm only if there are none yet.</div>'
+        + '</div>'
+      + '</label>')
+    : ('<div style="padding:10px;border:1px dashed #ddd;border-radius:8px;background:#fafafa;font-size:12px;color:#888;line-height:1.5;">'
+        + 'No other destination has coordinates yet, so there\'s nothing to hang a day trip on.'
+      + '</div>');
+
+  ov.innerHTML = ''
+    + '<div style="background:#fff;border-radius:12px;max-width:420px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,0.18);">'
+    +   '<div style="padding:18px 20px 4px;">'
+    +     '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">Role on this trip</div>'
+    +     '<div style="font-size:17px;font-weight:700;color:#111;margin-top:4px;">' + src.place + '</div>'
+    +   '</div>'
+    +   '<div style="padding:14px 20px;display:flex;flex-direction:column;gap:10px;">'
+    +     '<label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #1a5fa8;border-radius:8px;cursor:pointer;background:#eef4fb;">'
+    +       '<input type="radio" name="trip-role-pick" value="stay" checked style="margin:0;" />'
+    +       '<div style="flex:1;">'
+    +         '<div style="font-size:13px;font-weight:600;color:#222;">Overnight stay (current)</div>'
+    +         '<div style="font-size:11px;color:#777;margin-top:2px;">Its own stop with ' + (src.nights || 1) + ' night' + ((src.nights || 1) === 1 ? "" : "s") + '.</div>'
+    +       '</div>'
+    +     '</label>'
+    +     dayTripRow
+    +   '</div>'
+    +   '<div style="padding:8px 20px 18px;display:flex;justify-content:flex-end;gap:8px;">'
+    +     '<button id="trip-role-cancel" style="font-size:13px;font-weight:500;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Cancel</button>'
+    +     '<button id="trip-role-save" style="font-size:13px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 16px;cursor:pointer;font-family:inherit;">Apply</button>'
+    +   '</div>'
+    + '</div>';
+
+  document.body.appendChild(ov);
+
+  function close(){ if (ov && ov.parentNode) ov.parentNode.removeChild(ov); }
+  ov.onclick = function(e){ if (e.target === ov) close(); };
+  var cancelBtn = ov.querySelector("#trip-role-cancel");
+  if (cancelBtn) cancelBtn.onclick = close;
+
+  var saveBtn = ov.querySelector("#trip-role-save");
+  if (saveBtn) saveBtn.onclick = function(){
+    var picked = ov.querySelector('input[name="trip-role-pick"]:checked');
+    var pickedIntent = picked ? picked.value : "stay";
+    if (pickedIntent === "dayTrip") {
+      var sel = ov.querySelector("#trip-role-hub-select");
+      var hubId = sel ? sel.value : null;
+      if (!hubId) { close(); return; }
+      close();
+      convertDestToDayTrip(src.id, hubId);
+    } else {
+      // "Overnight" is the current state — apply is a no-op.
+      close();
+    }
+  };
+}
+
 // undo toast (matches the makeDayTrip path). The opts.silent flag
 // lets the undo for makeDayTrip call ungroup without surfacing a
 // second toast.

@@ -2118,42 +2118,38 @@
       bodyDiv.appendChild(bufRow);
     }
 
-    // v359.23: "Change role" deep-link — opens the picker focused on
-    // this destination so the user can switch overnight ↔ day trip.
-    // Role changes cascade (nights redistribute, day-trip hub
-    // assignment, etc.), so they live in the picker rather than in
-    // the trip view itself. This link is the discoverability surface.
-    //
-    // v359.24.1: shown on every destination, including first/last.
-    // For arrival/departure candidates the picker's role chip is
-    // already hidden (per _computeCandidateRole) — the popover will
-    // simply have nothing meaningful to change. Better to over-show
-    // than under-show, since "where's the change role link?" is a
-    // worse failure than "the popover doesn't apply here." Falls
-    // back to reopenCandidateExplorer if there's no candidate
-    // snapshot on the trip.
+    // v359.51: "Change role" link now opens the in-place trip-view
+    // role popover (same surface as the map-pin tap) instead of
+    // re-routing through the picker. The conversion mutates trip
+    // state directly via convertDestToDayTrip — the picker is no
+    // longer required for overnight ↔ day-trip swaps once a trip
+    // exists.
     (function(){
       var roleRow = document.createElement("div");
       roleRow.style.cssText = "display:flex;justify-content:flex-end;margin-top:6px;";
       var link = document.createElement("a");
       link.href = "#";
       link.textContent = "↺ Change role";
-      link.title = "Open the picker to switch overnight ↔ day trip";
+      link.title = "Switch overnight ↔ day trip without leaving the trip view";
       link.style.cssText = "font-size:10.5px;font-weight:500;color:#1a5fa8;text-decoration:none;cursor:pointer;";
-      (function(destPlace){
+      (function(destId, destPlace){
         link.onclick = function(e){
           e.preventDefault();
           e.stopPropagation();
-          // Stash the candidate name so picker-ui can auto-scroll +
-          // pop the role popover for it on render.
-          if (global._tb) global._tb._focusCandidateName = destPlace;
-          if (typeof global.reopenPickerForEdit === "function" && trip && Array.isArray(trip.mdcItems) && trip.mdcItems.length) {
-            global.reopenPickerForEdit();
-          } else if (typeof global.reopenCandidateExplorer === "function") {
-            global.reopenCandidateExplorer();
+          if (typeof global._openTripDestRolePopover === "function") {
+            global._openTripDestRolePopover(destId);
+          } else {
+            // Fallback: legacy picker route (kept until the popover
+            // is verified across surfaces; safe to drop in v359.52+).
+            if (global._tb) global._tb._focusCandidateName = destPlace;
+            if (typeof global.reopenPickerForEdit === "function" && trip && Array.isArray(trip.mdcItems) && trip.mdcItems.length) {
+              global.reopenPickerForEdit();
+            } else if (typeof global.reopenCandidateExplorer === "function") {
+              global.reopenCandidateExplorer();
+            }
           }
         };
-      })(dest.place);
+      })(dest.id, dest.place);
       roleRow.appendChild(link);
       bodyDiv.appendChild(roleRow);
     })();
