@@ -1372,6 +1372,17 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
    border so they read as menu items. */
 .trip-more-item{font-size:12px !important;padding:8px 14px !important;color:#222 !important;background:transparent !important;border-radius:0 !important;border:none !important;display:block !important;width:100% !important;text-align:left !important;cursor:pointer !important;}
 .trip-more-item:hover{background:#f0f0f0 !important;color:#111 !important;}
+
+/* v359.49.4: Mac-style menu bar. Labels are flat text; the active
+   menu's label gets a darker background; dropdowns hang below. */
+.mac-menubar{display:flex;align-items:center;gap:0;}
+.mw-menu{font-size:12px;padding:5px 11px;border:none;background:transparent;color:#222;cursor:pointer;font-family:inherit;line-height:1.3;border-radius:4px;white-space:nowrap;flex-shrink:0;}
+.mw-menu:hover{background:#eee;}
+.mw-menu.is-open{background:#2563eb;color:#fff;}
+.mw-dropdown{position:absolute;top:100%;margin-top:2px;background:#fff;border:1px solid #c8c4b8;border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,0.18);min-width:240px;z-index:200;padding:4px 0;font-family:inherit;}
+.mw-item{font-size:12px;padding:6px 16px;color:#222;background:transparent;border:none;display:block;width:100%;text-align:left;cursor:pointer;font-family:inherit;white-space:nowrap;}
+.mw-item:hover{background:#2563eb;color:#fff;}
+.mw-sep{height:1px;background:#e5e2d8;margin:4px 0;}
 /* Tracker structured sections.
    Round FJ: added .tk-major-section and .tk-major-hdr for the
    "Coming up" / "Trip diary" temporal split. Major header is
@@ -2007,28 +2018,38 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
            empty .mode-pills div stays so the CSS grid keeps the
            trip-name on the left and action-buttons on the right. -->
       <div class="mode-pills"></div>
-      <!-- v359.48: trip-view header simplified from 12 buttons → 6
-           visible + 1 popover. Removed manual Save (auto-save covers
-           it; status indicator shows state). Folded Copy/Export/Paste
-           into the ⋯ More menu. Sync sign-in moves to the status
-           indicator's click handler. API key moves into Settings
-           panel. -->
-      <div class="action-buttons" style="position:relative;">
-        <button class="file-btn" onclick="goHome()" title="All trips">&larr; Home</button>
-        <button class="file-btn" onclick="editConstraints()" title="Edit trip inputs — dates, party, pace, transport, accommodation, avoidances, etc.">&#9998; Edit</button>
-        <button class="file-btn" onclick="showAskMaxModal()" title="Chat with an AI about this trip — ask anything: weather, food, logistics, things to do">&#128172; Ask</button>
-        <button class="file-btn" id="trip-search-btn" onclick="openTripSearch()" title="Search this trip">&#x1F50D;</button>
-        <button class="file-btn" onclick="showShareTripModal()" title="Share a read-only link to this trip">&#x2197; Share</button>
-        <button class="file-btn" onclick="showSettingsPanel()" title="Trip defaults — hours per day, pace, day-trip threshold">&#9881;</button>
-        <button class="file-btn" id="trip-more-btn" onclick="_toggleTripMoreMenu()" title="More actions">&#x22EF;</button>
-        <span id="max-sync-status" onclick="if(typeof MaxSync!=='undefined'&&MaxSync.showSignInModal)MaxSync.showSignInModal();" style="font-size:11px;font-weight:600;color:#888;margin-left:8px;display:inline-flex;align-items:center;min-width:80px;cursor:pointer;" title="Server sync — click to sign in / sync settings"></span>
-        <div id="trip-more-menu" style="display:none;position:absolute;top:100%;right:0;margin-top:6px;background:#fff;border:1px solid #d8d4c8;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.15);min-width:220px;z-index:200;padding:4px 0;">
-          <button class="trip-more-item" onclick="_closeTripMoreMenu();saveTrip();">Save now</button>
-          <button class="trip-more-item" onclick="_closeTripMoreMenu();if(_currentTripId&&confirm('Duplicate this trip? A copy will be created on the home screen.'))duplicateTrip(_currentTripId,false);">Copy this trip</button>
-          <button class="trip-more-item" onclick="_closeTripMoreMenu();showExportTripModal();">Export (PDF, calendar…)</button>
-          <button class="trip-more-item" onclick="_closeTripMoreMenu();showGlobalPasteConfirmationModal();">&#128203; Paste booking confirmation</button>
-          <div style="height:1px;background:#eee;margin:4px 0;"></div>
-          <button class="trip-more-item" onclick="_closeTripMoreMenu();showApiKeyForm();" style="color:#888 !important;">&#x1F511; Set API key</button>
+      <!-- v359.49.4: trip-view header chrome reworked as a Mac-style
+           menu bar (Neal: "make it like a window menu on the mac").
+           Three top-level menus — File / Edit / Settings — each is a
+           plain text label that opens a dropdown below. Mousing across
+           labels while one is open switches focus (like macOS). -->
+      <div class="action-buttons mac-menubar" style="position:relative;">
+        <button class="mw-menu" data-menu="file"     onclick="_mwToggle('file')"     onmouseenter="_mwHoverSwitch('file')"     title="File">File</button>
+        <button class="mw-menu" data-menu="edit"     onclick="_mwToggle('edit')"     onmouseenter="_mwHoverSwitch('edit')"     title="Edit">Edit</button>
+        <button class="mw-menu" data-menu="settings" onclick="_mwToggle('settings')" onmouseenter="_mwHoverSwitch('settings')" title="Settings">Settings</button>
+        <span id="max-sync-status" onclick="if(typeof MaxSync!=='undefined'&&MaxSync.showSignInModal)MaxSync.showSignInModal();" style="font-size:11px;font-weight:600;color:#888;margin-left:10px;display:inline-flex;align-items:center;min-width:80px;cursor:pointer;" title="Server sync — click to sign in / sync settings"></span>
+
+        <div id="mw-file" class="mw-dropdown" style="display:none;">
+          <button class="mw-item" onclick="_mwClose();saveTrip();">Save now</button>
+          <button class="mw-item" onclick="_mwClose();if(_currentTripId&&confirm('Duplicate this trip? A copy will be created on the home screen.'))duplicateTrip(_currentTripId,false);">Copy this trip</button>
+          <button class="mw-item" onclick="_mwClose();showExportTripModal();">Export (PDF, calendar…)</button>
+          <button class="mw-item" onclick="_mwClose();showGlobalPasteConfirmationModal();">&#128203;&nbsp; Paste booking confirmation</button>
+          <button class="mw-item" onclick="_mwClose();showShareTripModal();">&#x2197;&nbsp; Share trip</button>
+          <div class="mw-sep"></div>
+          <button class="mw-item" onclick="_mwClose();goHome();">&larr;&nbsp; All trips</button>
+        </div>
+
+        <div id="mw-edit" class="mw-dropdown" style="display:none;">
+          <button class="mw-item" onclick="_mwClose();editConstraints();">&#9998;&nbsp; Edit trip inputs…</button>
+          <div class="mw-sep"></div>
+          <button class="mw-item" onclick="_mwClose();openTripSearch();">&#x1F50D;&nbsp; Search this trip</button>
+          <button class="mw-item" onclick="_mwClose();showAskMaxModal();">&#128172;&nbsp; Ask Max…</button>
+        </div>
+
+        <div id="mw-settings" class="mw-dropdown" style="display:none;">
+          <button class="mw-item" onclick="_mwClose();showSettingsPanel();">&#9881;&nbsp; Trip defaults…</button>
+          <div class="mw-sep"></div>
+          <button class="mw-item" onclick="_mwClose();showApiKeyForm();" style="color:#888;">&#x1F511;&nbsp; Set API key…</button>
         </div>
       </div>
     </div>
@@ -5324,6 +5345,64 @@ function _tripMoreOutsideClick(e){
     return;
   }
   _closeTripMoreMenu();
+}
+
+// ─── v359.49.4: Mac-style menu bar (File / Edit / Settings) ─────────
+// One menu open at a time. Clicking a label opens its dropdown; clicking
+// the same label again, an outside click, or any item action closes it.
+// While any menu is open, mousing across the sibling labels switches
+// which dropdown is shown — matches macOS menu-bar behavior.
+var _mwOpenName = null;
+function _mwToggle(name){
+  if (_mwOpenName === name) { _mwClose(); return; }
+  _mwOpen(name);
+}
+function _mwHoverSwitch(name){
+  if (_mwOpenName && _mwOpenName !== name) _mwOpen(name);
+}
+function _mwOpen(name){
+  _mwCloseAllNoListenerReset();
+  var btn = document.querySelector('.mw-menu[data-menu="'+name+'"]');
+  var dd  = document.getElementById('mw-' + name);
+  if (!btn || !dd) return;
+  btn.classList.add('is-open');
+  // Anchor dropdown's left edge under the button so each menu's
+  // popout lines up beneath its own label.
+  var hdr = btn.closest('.mac-menubar');
+  if (hdr) {
+    var br = btn.getBoundingClientRect();
+    var hr = hdr.getBoundingClientRect();
+    dd.style.left  = (br.left - hr.left) + 'px';
+    dd.style.right = 'auto';
+  }
+  dd.style.display = 'block';
+  _mwOpenName = name;
+  setTimeout(function(){
+    document.addEventListener('click', _mwOutsideClick, { once: true, capture: true });
+  }, 0);
+}
+function _mwClose(){
+  _mwCloseAllNoListenerReset();
+  _mwOpenName = null;
+}
+function _mwCloseAllNoListenerReset(){
+  var btns = document.querySelectorAll('.mw-menu');
+  for (var i = 0; i < btns.length; i++) btns[i].classList.remove('is-open');
+  var dds = document.querySelectorAll('.mw-dropdown');
+  for (var j = 0; j < dds.length; j++) dds[j].style.display = 'none';
+}
+function _mwOutsideClick(e){
+  // If the click is inside any dropdown or on any menu label, let it
+  // handle itself (item onclick → _mwClose; label onclick → _mwToggle).
+  // Re-arm the listener for the next click. Anything else closes.
+  var t = e.target;
+  var inDd  = t && t.closest && t.closest('.mw-dropdown');
+  var onBtn = t && t.closest && t.closest('.mw-menu');
+  if (inDd || onBtn) {
+    document.addEventListener('click', _mwOutsideClick, { once: true, capture: true });
+    return;
+  }
+  _mwClose();
 }
 
 function goHome(){
@@ -14807,8 +14886,20 @@ function editConstraints(){
   // Snapshot current values before editing
   var ov = g("trip-brief-overlay");
   if(ov) ov.style.zIndex = "10000";
+  // v359.49.3: mirror _tbCaptureDates' canonicalization so the
+  // snapshot stores the SAME serialized when/duration the form
+  // will read back. Without this, opening Edit with no changes
+  // and clicking Preview produced a phantom "(legacy free-form when)
+  // → (ISO startDate)" diff, which fired applyConstraintChanges
+  // → drawTripMode + (occasionally) resequenceWithCurrentBrief.
+  var _snapWhen     = _tb.when||"";
+  var _snapDuration = _tb.duration||"";
+  if (_tb.dateMode === "specific") {
+    if (_tb.startDate) _snapWhen = _tb.startDate;
+    if (_tb.days)      _snapDuration = _tb.days + " days";
+  }
   _tb._snapshot = {
-    region:_tb.region||"", duration:_tb.duration||"", when:_tb.when||"",
+    region:_tb.region||"", duration:_snapDuration, when:_snapWhen,
     // Dates (E) — structured pick-any-two
     dateMode:_tb.dateMode||"", startDate:_tb.startDate||"", endDate:_tb.endDate||"",
     days:(typeof _tb.days === "number" ? _tb.days : null), dateDerived:_tb.dateDerived||"",
