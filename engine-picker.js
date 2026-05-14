@@ -2147,11 +2147,27 @@
       // destinations directly below.
       var pairs = collectUserDayTripPairs(_tb.placeActivities);
       var srcKeys = Object.keys(pairs);
-      console.log(DBG, "normalized pairs:", pairs);
+      console.log(DBG, "explicit pairs:", pairs);
+      // v359.51.4: if no explicit _isDayTrip flags were set, fall
+      // back to the same proximity predictor the picker UI uses to
+      // RENDER day-trip suggestions (orange pins + "day trip from
+      // X" label). The picker showed these to the user; the user
+      // kept those candidates expecting the trip view to honor what
+      // it visually promised. Without this fallback, the user has
+      // to click the explicit "✓ Add as day trip" button on every
+      // suggestion to commit it — which was the bug Neal hit.
+      // _userChoseStay still wins (sticky override from "+ stay the
+      // night").
+      if (!srcKeys.length) {
+        console.log(DBG, "no explicit flags; running implied-pair fallback");
+        pairs = collectImpliedDayTripPairs(_tb.placeActivities);
+        srcKeys = Object.keys(pairs);
+        console.log(DBG, "implied pairs:", pairs);
+      }
       console.log(DBG, "trip.destinations places (normalized):",
         trip.destinations.map(function(d){ return _normPlaceName(d.place || "") + " [" + (d.place || "") + "]"; }));
       if (!srcKeys.length) {
-        console.log(DBG, "skip: no pairs to apply (collectUserDayTripPairs returned {})");
+        console.log(DBG, "skip: no pairs to apply (explicit + implied both empty)");
         return;
       }
       // Locate the corresponding destinations. Prefer exact normalized
@@ -2745,6 +2761,88 @@
     return pairs;
   }
 
+  // v359.51.4: implied day-trip pairs — mirrors the picker UI's
+  // _dayTripPreds predictor (index.html ~9937). Returns the SAME
+  // {sourceKey: hubKey} shape as collectUserDayTripPairs so the
+  // absorption pass can fall back to it transparently when the user
+  // didn't explicitly click "✓ Add as day trip".
+  //
+  // Rule (matches the picker's render-time logic):
+  //   - source: a kept place with ≤2 nights, has coords, NOT marked
+  //     _userChoseStay (sticky override from "+ stay the night")
+  //   - hub:    a kept place within 60 km with strictly more nights
+  //             (so a 2-night can be absorbed by a 3+ but not by
+  //             another 2; matches Round CO/DA)
+  //   - tie-break: nearest qualifying hub wins
+  //
+  // Without this, the picker visually labels Blue Lagoon as
+  // "day trip from Reykjavik" (the predictor fired) but the trip
+  // build path treats it as an overnight because the explicit
+  // _isDayTrip flag never got set. WYSIWYG is what users expect.
+  function collectImpliedDayTripPairs(placeActivities) {
+    var pairs = {};
+    if (!Array.isArray(placeActivities)) return pairs;
+
+    // Collapse requiredPlaces across activities into a single
+    // entry per place (max nights, kept-if-any, sticky stay-if-any).
+    var places = {}; // normKey -> {place, lat, lng, nights, kept, userChoseStay}
+    placeActivities.forEach(function (item) {
+      if (!item || !Array.isArray(item.requiredPlaces)) return;
+      item.requiredPlaces.forEach(function (p) {
+        if (!p || !p.place) return;
+        var key = _normPlaceName(p.place);
+        if (!key) return;
+        if (!places[key]) {
+          places[key] = {
+            place: p.place,
+            lat: (typeof p.lat === "number") ? p.lat : null,
+            lng: (typeof p.lng === "number") ? p.lng : null,
+            nights: 0,
+            kept: false,
+            userChoseStay: false
+          };
+        }
+        if (places[key].lat == null && typeof p.lat === "number") {
+          places[key].lat = p.lat; places[key].lng = p.lng;
+        }
+        var n = (typeof p.nights === "number") ? p.nights : 0;
+        // "route" activities don't contribute nights — same as the
+        // picker UI's predictor (which ignores it.type === "route").
+        if (item.type !== "route" && n > places[key].nights) places[key].nights = n;
+        if (p._keep) places[key].kept = true;
+        if (p._userChoseStay) places[key].userChoseStay = true;
+      });
+    });
+
+    function distKm(a, b) {
+      if (!a || !b || a.lat == null || b.lat == null) return Infinity;
+      var dLat = (a.lat - b.lat) * 111;
+      var dLng = (a.lng - b.lng) * 111 * Math.cos(((a.lat + b.lat) / 2) * Math.PI / 180);
+      return Math.sqrt(dLat * dLat + dLng * dLng);
+    }
+
+    Object.keys(places).forEach(function (srcKey) {
+      var src = places[srcKey];
+      if (!src.kept) return;
+      if (src.nights > 2) return;
+      if (src.lat == null) return;
+      if (src.userChoseStay) return;
+      var bestHub = null;
+      var bestDist = Infinity;
+      Object.keys(places).forEach(function (hubKey) {
+        if (hubKey === srcKey) return;
+        var hub = places[hubKey];
+        if (!hub.kept) return;
+        if (hub.nights <= src.nights) return;
+        if (hub.lat == null) return;
+        var d = distKm(src, hub);
+        if (d < bestDist) { bestDist = d; bestHub = hub; bestHub._key = hubKey; }
+      });
+      if (bestHub && bestDist <= 60) pairs[srcKey] = bestHub._key;
+    });
+    return pairs;
+  }
+
   // ── orderPlacePickerStays (place-picker hero map: Step 2) ──────
   // Order the kept "stay" places (kept && !_isDayTrip) for the
   // place-picker map's main route polyline. Simpler than
@@ -2846,6 +2944,8 @@
     // place-picker hero map (Step 8b) — pair extractor used by
     // publishTrip's user-day-trip absorption pass + by tests.
     collectUserDayTripPairs: collectUserDayTripPairs,
+    // v359.51.4 — fallback predictor for the absorption pass.
+    collectImpliedDayTripPairs: collectImpliedDayTripPairs,
     buildBrief:             buildBrief,
     cloneMdcItems:          cloneMdcItems,
     deriveTripName:         deriveTripName,
