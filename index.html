@@ -2015,7 +2015,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
            panel. -->
       <div class="action-buttons" style="position:relative;">
         <button class="file-btn" onclick="goHome()" title="All trips">&larr; Home</button>
-        <button class="file-btn" onclick="editConstraints()" title="Edit the brief — change pace, transport, dates, party, etc.">&#9998; Brief</button>
+        <button class="file-btn" onclick="editConstraints()" title="Edit trip inputs — dates, party, pace, transport, accommodation, avoidances, etc.">&#9998; Edit</button>
         <button class="file-btn" onclick="showAskMaxModal()" title="Chat with an AI about this trip — ask anything: weather, food, logistics, things to do">&#128172; Ask</button>
         <button class="file-btn" id="trip-search-btn" onclick="openTripSearch()" title="Search this trip">&#x1F50D;</button>
         <button class="file-btn" onclick="showShareTripModal()" title="Share a read-only link to this trip">&#x2197; Share</button>
@@ -13120,7 +13120,7 @@ function renderActivityPicker(){
   var primaryBtnHandler = isEdit ? "saveActivityPickerEdits()" : "continuePlaceModeToStep2()";
   var primaryBtnLabel = isEdit ? "Update my trip →" : "Choreograph my trip →";
   var backHandler = isEdit ? "cancelPickerEdit()" : "renderTripBrief()";
-  var backLabel = isEdit ? "← Cancel" : "← Trip brief";
+  var backLabel = isEdit ? "← Cancel" : "← Back to inputs";
 
   // v359.2: Unified header is rendered on BOTH fresh-build flow AND
   // re-edit flow (previously only isEdit). Detect whether a built trip
@@ -13153,7 +13153,7 @@ function renderActivityPicker(){
   // when _mdcItems is already populated. Edit-mode hides it (the
   // edit flow already has its own cancel path).
   if (!isEdit) {
-    _pickerActionBtns += '<button class="file-btn" onclick="renderTripBrief()" title="Edit the brief — change pace, transport, dates, etc. without losing your picks">&#x270E; Brief</button>';
+    _pickerActionBtns += '<button class="file-btn" onclick="renderTripBrief()" title="Edit trip inputs — dates, pace, transport, etc. without losing your picks">&#x270E; Edit</button>';
   }
   // v359.6: ⚙ Settings gear — opens the global trip-defaults panel.
   // Sits before the 🔑 API-key button so it falls inside the main
@@ -14830,8 +14830,12 @@ function editConstraints(){
     // showed a phantom "(not set) → current value" diff for the
     // already-saved value.
     gettingTo:_tb.gettingTo||"", gettingOut:_tb.gettingOut||"",
-    travelersCount:_tb.travelersCount||"",
-    withKids:!!_tb.withKids,
+    // v359.49.2: snapshot must mirror the form's prefill fallback,
+    // otherwise an empty travelersCount/withKids snapshot vs a
+    // partySize/partyComposition-derived form value reads as a
+    // diff and Brief→no-changes still routes through apply.
+    travelersCount:(_tb.travelersCount||_tb.partySize||""),
+    withKids:!!(_tb.withKids||_tb.partyComposition==="family-kids"),
     aboutTrip:_tb.aboutTrip||"",
     // v302: structured pace fields. Snapshot mirrors the form so the
     // diff doesn't fire spurious "(not set) → 6" phantoms when nothing
@@ -15177,28 +15181,26 @@ function applyConstraintChanges(){
 
   autoSave();
 
-  // v294.11: after Parameters apply, return the user to the picker —
-  // the normal flow after the brief. They edited inputs; now they
-  // re-confirm what those inputs produced. For place-mode trips
-  // that's the activity-place table (renderActivityPicker); for
-  // traditional flow, the candidate explorer (showCandidateExplorer)
-  // — using existing candidates rather than re-running the LLM,
-  // since the user can manually regenerate via "+ Add a place"
-  // or by reopening Parameters again.
+  // v359.49.2: After Parameters apply, just close the overlay and
+  // leave the user where they were. Previously (v294.11) this
+  // redirected to the picker / candidate explorer on every apply,
+  // which felt punitive — touch one field, get dumped back into
+  // re-curating destinations. Brief from the trip view should
+  // return to the trip view; Brief from the picker should return
+  // to the picker (it's still visible underneath). drawTripMode
+  // already runs when duration changes (above), so the trip view
+  // reflects any new dates.
   showSaveStatus("Parameters updated", 1800);
-  setTimeout(function(){
-    if (_tb && _tb.tripMode === "place" && typeof renderActivityPicker === "function") {
-      renderActivityPicker();
-    } else if ((_tb && _tb.candidates && _tb.candidates.length) && typeof showCandidateExplorer === "function") {
-      g("trip-brief-overlay").style.display="none";
-      showCandidateExplorer(_tb.candidates);
-    } else if (typeof findCandidates === "function") {
-      g("trip-brief-overlay").style.display="none";
-      findCandidates();
-    } else {
-      g("trip-brief-overlay").style.display="none";
-    }
-  }, 200);  // brief delay so the user sees the "Parameters updated" status
+  g("trip-brief-overlay").style.display="none";
+  // If the user came from the candidate explorer (mid-curation) and
+  // candidates exist, re-render it so any edited inputs are reflected.
+  // No-op when the explorer overlay isn't visible.
+  var _ceOv = document.getElementById("candidate-explorer-overlay");
+  if (_ceOv && _ceOv.style.display !== "none" &&
+      _tb && _tb.candidates && _tb.candidates.length &&
+      typeof renderCandidateCards === "function") {
+    try { renderCandidateCards(_tb.candidates); } catch(e){}
+  }
 }
 
 // Round EW.2: re-evaluate trip.overBudgetNotice based on current
