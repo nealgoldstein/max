@@ -674,6 +674,25 @@
       );
     } catch(_) {}
   }
+  // v359.34: when the REST summary has no thumbnail, fall back to the
+  // Action API's pageimages endpoint — the same image Wikipedia search
+  // uses. Catches places whose article has no infobox image but does
+  // have photos elsewhere on the page. Keeps the existing description
+  // + extract from summary; only fills in thumbUrl on the second hop.
+  function _fetchPageImage(title) {
+    // origin=* required for CORS on the Action API
+    var url = "https://en.wikipedia.org/w/api.php?action=query&prop=pageimages&format=json&piprop=thumbnail&pithumbsize=400&titles=" + title + "&origin=*";
+    return fetch(url, { headers: { "accept": "application/json" } })
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(j){
+        if (!j || !j.query || !j.query.pages) return null;
+        var pages = j.query.pages;
+        var first = Object.keys(pages).map(function(k){ return pages[k]; })[0];
+        return (first && first.thumbnail && first.thumbnail.source) || null;
+      })
+      .catch(function(){ return null; });
+  }
+
   function _fetchWikiSummary(place, country) {
     if (!place) return Promise.resolve(null);
     var cached = _wikiCacheGet(place, country);
@@ -702,8 +721,19 @@
             ? j.extract.substring(0, 237) + "…"
             : (j.extract || null),
         };
-        _wikiCacheSet(place, country, data);
-        return data;
+        if (data.thumbUrl) {
+          _wikiCacheSet(place, country, data);
+          return data;
+        }
+        // v359.34: no thumbnail from summary — try the broader Action
+        // API pageimages endpoint. If that also returns nothing, we
+        // still cache the description + extract so the lightbox has
+        // something to show; the row falls back to the letter avatar.
+        return _fetchPageImage(title).then(function(altThumb){
+          if (altThumb) data.thumbUrl = altThumb;
+          _wikiCacheSet(place, country, data);
+          return data;
+        });
       })
       .catch(function(err){
         console.warn("[Max wiki] fetch failed for", place, err && err.message);
