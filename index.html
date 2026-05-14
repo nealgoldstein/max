@@ -12536,11 +12536,16 @@ function _renderPlacePickerMap(targetId){
     var dayCoord = _pmCoord(info.place);
     var hubCoord = _pmCoord(hubInfo.place);
     if (!dayCoord || !hubCoord) return; // geocode race — defer
+    // v359.51.7: committed day-trip spurs render as a SOLID line.
+    // Was dashed (dashArray:"10,6"), but dashes read as "tentative"
+    // and gave Neal no visual signal that his "Add as day trip"
+    // click had locked anything in. Solid = committed. If we later
+    // want to surface uncommitted predictor suggestions on the map,
+    // those should be the dashed/lighter style.
     state.spurs[key] = L.polyline([hubCoord, dayCoord], {
       color: "#e6700f",
       weight: 4,
-      opacity: 0.95,
-      dashArray: "10,6"
+      opacity: 0.95
     }).addTo(_pmMap);
     // v355.5: do NOT bringToBack the spurs — the main route now has
     // a white halo (weight 7) that was burying the orange spur where
@@ -24054,10 +24059,12 @@ function updateMainMap(){
           return;
         }
         bounds.push(dtCtr);
-        // Dashed orange spur from hub → day trip (matches picker map).
+        // v359.51.7: SOLID orange spur from hub → day trip (matches
+        // picker map; dashed style retired — dashes implied "tentative"
+        // even when the trip had already been committed).
         try {
           var spur = L.polyline([hubCtr, dtCtr], {
-            color:"#e6700f", weight:3, opacity:0.95, dashArray:"10,6"
+            color:"#e6700f", weight:3, opacity:0.95
           }).addTo(_mainMap);
           _mainMarkers.push(spur);
         } catch(_){}
