@@ -23547,21 +23547,30 @@ function updateMainMapMarkers(){
     });
   }
 
-  // Round EU: day-trip chip pins. Each chip is a place the user picked
-  // that got absorbed as a day trip from this hub. Pin them with a
-  // purple marker matching the chip styling on the dest card so the
-  // user sees where they'd go if they took the day trip.
-  (dest.dayTrips||[]).forEach(function(dt){
-    if (!dt || typeof dt.lat !== "number" || typeof dt.lng !== "number") return;
-    var dtItem = {
-      id: "dt-" + (dt.place || "").toLowerCase().replace(/\s+/g, "-"),
-      n: dt.place,
-      note: dt.distKm ? (dt.distKm + "km from " + dest.place + " · " + (dt.sourceNights||1) + "-night day trip") : ((dt.sourceNights||1) + "-night day trip"),
-      lat: dt.lat,
-      lng: dt.lng,
-      type: "daytrip"
-    };
-    addPin([dt.lat, dt.lng], makeMapIcon("daytrip"), 0.85, dtItem, "daytrip");
+  // Round EU (v359.51.2 rewrite): day-trip chip pins on the dest-view
+  // map. Iterates the new PlanItem shape — every type:"dayTrip" entry
+  // across this dest's days[].planItems[]. Place name + coords come
+  // from trip.places[planItem.placeId]. Visual unchanged: purple
+  // marker matching the chip styling on the dest card.
+  (dest.days || []).forEach(function(day){
+    (day.planItems || []).forEach(function(pi){
+      if (!pi || pi.type !== "dayTrip") return;
+      var place = (trip.places && trip.places[pi.placeId]) || null;
+      if (!place || typeof place.lat !== "number" || typeof place.lng !== "number") return;
+      var srcNights = (pi.legacy && pi.legacy.sourceNights) || 1;
+      var distKm    = pi.legacy && pi.legacy.distKm;
+      var dtItem = {
+        id:   pi.id || ("dt-" + (place.name || "").toLowerCase().replace(/\s+/g, "-")),
+        n:    place.name,
+        note: distKm
+          ? (distKm + "km from " + dest.place + " · " + srcNights + "-night day trip")
+          : (srcNights + "-night day trip"),
+        lat:  place.lat,
+        lng:  place.lng,
+        type: "daytrip"
+      };
+      addPin([place.lat, place.lng], makeMapIcon("daytrip"), 0.85, dtItem, "daytrip");
+    });
   });
   // Round FZ.7: pins for FT.2 peer day-trips (items placed via the
   // gradual-shrink mechanic). These items live on dest.days[*].items
@@ -23992,24 +24001,46 @@ function updateMainMap(){
     // the user's day-trip choices in the picker were silently
     // invisible on the trip view (data was correct, rendering was
     // missing).
+    // v359.51.2: day-trip render rebuilt against the PlanItem shape
+    // (post-migration). For each hub destination, iterate every day's
+    // planItems[] and pin every type:"dayTrip" entry. Place names +
+    // coords are pulled from trip.places[planItem.placeId]; falls back
+    // to getCityCenter / Nominatim geocode if coords aren't on the
+    // Place yet. Visual matches the picker map and the previous
+    // dest.dayTrips render: dashed orange spur from hub + small
+    // orange pin with the day-trip place's initials.
     trip.destinations.forEach(function(hubDest){
-      if (!hubDest || !Array.isArray(hubDest.dayTrips) || !hubDest.dayTrips.length) return;
+      if (!hubDest || !Array.isArray(hubDest.days) || !hubDest.days.length) return;
+      // Collect every dayTrip PlanItem on this hub across all its days.
+      var dayTripPlanItems = [];
+      hubDest.days.forEach(function(day){
+        (day.planItems || []).forEach(function(pi){
+          if (pi && pi.type === "dayTrip") dayTripPlanItems.push(pi);
+        });
+      });
+      if (!dayTripPlanItems.length) return;
+
       var hubCtr = (typeof hubDest.lat === "number" && typeof hubDest.lng === "number")
         ? [hubDest.lat, hubDest.lng]
         : getCityCenter(hubDest.place);
       if (!hubCtr || !isFinite(hubCtr[0])) return;
-      hubDest.dayTrips.forEach(function(dt){
-        if (!dt || !dt.place) return;
-        var dtCtr = (typeof dt.lat === "number" && typeof dt.lng === "number")
-          ? [dt.lat, dt.lng]
-          : getCityCenter(dt.place);
+
+      dayTripPlanItems.forEach(function(pi){
+        var place = (trip.places && trip.places[pi.placeId]) || null;
+        // Place name: from the Place dict, with a last-ditch fallback
+        // to the placeId itself so something always renders.
+        var dtName = (place && place.name) || pi.placeId || "";
+        if (!dtName) return;
+        var dtCtr = (place && typeof place.lat === "number" && typeof place.lng === "number")
+          ? [place.lat, place.lng]
+          : getCityCenter(dtName);
         if (!dtCtr || !isFinite(dtCtr[0])) {
-          // Coord not yet known — kick a Nominatim geocode and re-render
-          // when it lands. Same pattern other map paths use.
           if (typeof ensureCoarseGeocode === "function") {
-            ensureCoarseGeocode(dt.place, function(ll){
-              if (ll && isFinite(ll[0]) && _mainMap && typeof updateMainMap === "function") {
-                updateMainMap();
+            ensureCoarseGeocode(dtName, function(ll){
+              if (ll && isFinite(ll[0])) {
+                // Backfill onto the Place so the next render hits cache.
+                if (place) { place.lat = ll[0]; place.lng = ll[1]; }
+                if (_mainMap && typeof updateMainMap === "function") updateMainMap();
               }
             });
           }
@@ -24023,10 +24054,8 @@ function updateMainMap(){
           }).addTo(_mainMap);
           _mainMarkers.push(spur);
         } catch(_){}
-        // Small orange pin at the day-trip place. Place initials
-        // (no ordinal — day trips aren't on the main route's number
-        // sequence). Tooltip names the hub for context.
-        var dtAbbrev = (dt.place || "").trim().substring(0, 2) || "·";
+        // Small orange pin with the day-trip place's initials.
+        var dtAbbrev = dtName.trim().substring(0, 2) || "·";
         var dtSize = 26;
         var dtHtml = '<div style="background:#e6700f;color:#fff;border-radius:50%;width:'
           + dtSize + 'px;height:' + dtSize + 'px;border:2px solid #fff;'
@@ -24037,12 +24066,14 @@ function updateMainMap(){
           iconSize:[dtSize,dtSize], iconAnchor:[dtSize/2,dtSize/2], popupAnchor:[0,-dtSize/2]});
         try {
           var dtMarker = L.marker(dtCtr, {icon:dtIcon}).addTo(_mainMap);
-          dtMarker.bindTooltip(dt.place + " · day trip from " + (hubDest.place || ""),
+          dtMarker.bindTooltip(dtName + " · day trip from " + (hubDest.place || ""),
             {permanent:false, direction:"top", offset:[0,-dtSize/2-2], className:"main-map-tooltip"});
-          // Click → drill into the hub destination so the user can see
-          // the chip in context (where they'll be staying overnight).
+          // Click → drill into the hub so the user lands where the day
+          // trip is anchored (and where the chip surfaces in the UI).
           (function(hubId){
-            dtMarker.on("click", function(){ if (typeof selectDest === "function") selectDest(hubId); });
+            dtMarker.on("click", function(){
+              if (typeof selectDest === "function") selectDest(hubId);
+            });
           })(hubDest.id);
           _mainMarkers.push(dtMarker);
         } catch(_){}
