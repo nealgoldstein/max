@@ -10453,84 +10453,34 @@ function _renderPlaceActivityItems(){
         }
       }
       var nightsLine;
-      if (firstAppearance && userIsDayTrip) {
-        // v359.51.6: COMMITTED state. Previously this rendered as a bare
-        // italic label "· day trip from X" with only the "+ stay the
-        // night" affordance, visually almost indistinguishable from the
-        // SUGGESTED state below. Neal couldn't tell whether his click
-        // had stuck. Now: a solid orange pill with a leading ✓ so the
-        // commitment is unmistakable, and the "Suggested" badge on the
-        // other branch makes the distinction read at a glance.
+      // v359.51.17: picker no longer commits day-trip status. Decisions
+      // live in the trip view (tap a destination pin → role popover →
+      // Make it an overnight stop / pick a hub). The picker just hints
+      // at the possibility via a purple informational badge — no
+      // "Add as day trip" button, no "+ stay the night" override.
+      // Both formerly-distinct states (USER-COMMITTED via _isDayTrip,
+      // PREDICTOR-SUGGESTED via _dayTripPreds) now collapse into one
+      // "Could be a day trip from <hub>" badge so the user knows the
+      // possibility exists without being asked to choose yet.
+      if (firstAppearance && (userIsDayTrip || dayTripHub)) {
+        var _badgeHub = userIsDayTrip ? (userHubName || "?") : dayTripHub;
         nightsLine = '<span class="tb-dest-nights" data-place="'+_pmEsc(d.place)+'" '
-          +   'title="This place is set as a day trip from '+_pmEsc(userHubName || "?")+'. Click + stay the night to undo." '
-          +   'style="display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;color:#fff;background:#c97a1a;border:1px solid #b06914;padding:3px 9px;border-radius:11px;line-height:1.4;letter-spacing:0.01em;">'
-          +   '<span style="font-size:11px;line-height:1;">✓</span>'
-          +   '<span>Day trip from '+_pmEsc(userHubName || "?")+'</span>'
-          + '</span>'
-          + '<button type="button" class="tb-stay-night-btn" onclick="_pmClearDayTripFlag(&#39;'+_pmEsc(d.place)+'&#39;);event.stopPropagation();" title="Stay overnight here instead" style="margin-left:8px;font-size:10.5px;font-weight:600;color:#1a5fa8;background:#eef5ff;border:1px solid #cfe1f7;padding:2px 8px;border-radius:11px;cursor:pointer;font-family:inherit;line-height:1.4;">+ stay the night</button>';
-      } else if (firstAppearance && dayTripHub) {
-        // v359.5.4: route the "+ stay the night" button through
-        // _pmMakeStay (defined below) instead of _adjustDestNights.
-        // _adjustDestNights just adds 1 night, which doesn't suppress
-        // the day-trip predictor on the next render (it just fires
-        // again if nights stays ≤ 2 + nearby hub still has more).
-        // _pmMakeStay sets nights to max(1, current) AND clears any
-        // day-trip flags AND sets a sticky "user chose stay" mark
-        // that the predictor respects — so the user's choice
-        // actually locks in.
-        //
-        // v359.51.6: SUGGESTED state. Now reads "Suggested:" so the
-        // user knows the picker is offering a recommendation that
-        // requires explicit confirmation. Pairs with the new
-        // committed pill above so the two states are visually distinct.
-        nightsLine = '<span class="tb-dest-nights" data-place="'+_pmEsc(d.place)+'" '
-          +   'title="Suggested role — click Add as day trip to confirm" '
-          +   'style="display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:500;color:#5b3f8f;background:#f4ecfa;border:1px dashed #cfb3e0;padding:3px 9px;border-radius:11px;line-height:1.4;font-style:italic;">'
-          +   '<span style="font-style:normal;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;font-size:9px;">Suggested</span>'
-          +   '<span>day trip from '+_pmEsc(dayTripHub)+'</span>'
-          + '</span>'
-          + '<button type="button" class="tb-stay-night-btn" onclick="_pmMakeStay(&#39;'+_pmEsc(d.place)+'&#39;);event.stopPropagation();" title="Make this an overnight stop instead" style="margin-left:8px;font-size:10.5px;font-weight:600;color:#1a5fa8;background:#eef5ff;border:1px solid #cfe1f7;padding:2px 8px;border-radius:11px;cursor:pointer;font-family:inherit;line-height:1.4;">+ stay the night</button>'
-          + '<button type="button" class="tb-lock-daytrip-btn" '
-          +   'onclick="(typeof _pmOpenPlacePopupByKey===&#39;function&#39;)&amp;&amp;_pmOpenPlacePopupByKey(&#39;'+_pmEsc((d.place||"").toLowerCase())+'&#39;);event.stopPropagation();" '
-          +   'title="Add this as a day trip — pick the hub to attach to" '
-          +   'style="margin-left:6px;font-size:10.5px;font-weight:600;color:#c97a1a;background:#fff7eb;border:1px solid #e8d0a8;padding:2px 8px;border-radius:11px;cursor:pointer;font-family:inherit;line-height:1.4;">✓ Add as day trip</button>';
+          +   'title="Max thinks this could be a day trip from '+_pmEsc(_badgeHub)+'. You decide on the trip view." '
+          +   'style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:#fff;background:#5b3f8f;border:1px solid #4a3275;padding:3px 9px;border-radius:11px;line-height:1.4;">'
+          +   '<span>Could be a day trip from '+_pmEsc(_badgeHub)+'</span>'
+          + '</span>';
       } else if (firstAppearance && isTransitDestForNights && !destKeptInSection) {
         nightsLine = '<span class="tb-dest-nights" data-place="'+_pmEsc(d.place)+'" style="color:#888;font-style:italic;">· day trip</span>'
           + '<button type="button" class="tb-stay-night-btn" onclick="_adjustDestNights(&#39;'+_pmEsc(d.place)+'&#39;,1);event.stopPropagation();" title="Stay overnight here instead" style="margin-left:8px;font-size:10.5px;font-weight:600;color:#1a5fa8;background:#eef5ff;border:1px solid #cfe1f7;padding:2px 8px;border-radius:11px;cursor:pointer;font-family:inherit;line-height:1.4;">+ stay the night</button>';
       } else if (firstAppearance && d.nightsMax > 0) {
-        // v359.5.4: stays now get a "↩ make day trip" pill alongside
-        // the nights stepper. Was: the only way to convert a stay to
-        // a day trip was via the map pin popup, which Neal couldn't
-        // find. The pill routes to the same popup (so the user picks
-        // the hub from kept-stay candidates) — but the entry point is
-        // now visible in the sidebar where it belongs.
-        //
-        // v359.51.12: disable the pill when no eligible hub exists
-        // (no kept overnight with more nights within 60 km), and
-        // surface why via the title attribute. Saves the user a
-        // click-into-empty-popup discovery.
-        var _eligKey = (d.place || "").toLowerCase();
-        var _eligHub = (_tb._dayTripEligible || {})[_eligKey];
-        var _dtPillHtml;
-        if (_eligHub) {
-          _dtPillHtml = '<button type="button" class="tb-make-daytrip-btn" '
-            +   'onclick="(typeof _pmOpenPlacePopupByKey===&#39;function&#39;)&amp;&amp;_pmOpenPlacePopupByKey(&#39;'+_pmEsc((d.place||"").toLowerCase())+'&#39;);event.stopPropagation();" '
-            +   'title="Make this a day trip from '+_pmEsc(_eligHub)+' or another nearby stay" '
-            +   'style="margin-left:8px;font-size:10.5px;font-weight:600;color:#c97a1a;background:#fff7eb;border:1px solid #e8d0a8;padding:2px 8px;border-radius:11px;cursor:pointer;font-family:inherit;line-height:1.4;">↩ make day trip</button>';
-        } else {
-          // v359.51.15: tooltip distance reflects the user's pref.
-          var _eligR = (typeof _defaultDayTripRadiusKm === "function") ? _defaultDayTripRadiusKm() : 60;
-          var _eligLbl = (typeof _fmtDistance === "function") ? _fmtDistance(_eligR) : (_eligR + " km");
-          _dtPillHtml = '<button type="button" class="tb-make-daytrip-btn" disabled '
-            +   'title="No nearby overnight has more nights than '+_pmEsc(d.place)+' &mdash; add a longer-stay hub within '+_eligLbl+' first." '
-            +   'style="margin-left:8px;font-size:10.5px;font-weight:600;color:#bbb;background:#f7f5f0;border:1px solid #e6e2d8;padding:2px 8px;border-radius:11px;cursor:not-allowed;font-family:inherit;line-height:1.4;">↩ make day trip</button>';
-        }
+        // v359.51.17: overnight row — nights stepper only. The "↩ make
+        // day trip" pill is gone; day-trip role decisions now happen
+        // in the trip view (tap the destination pin → role popover).
         nightsLine = '<span class="tb-dest-nights" data-place="'+_pmEsc(d.place)+'">· '+d.nightsMax+'n</span>'
           + '<span class="tb-nights-stepper" onclick="event.stopPropagation()">'
           +   '<button type="button" class="tb-nights-btn" title="Fewer nights" onclick="_adjustDestNights(&#39;'+_pmEsc(d.place)+'&#39;,-1);event.stopPropagation();">−</button>'
           +   '<button type="button" class="tb-nights-btn" title="More nights" onclick="_adjustDestNights(&#39;'+_pmEsc(d.place)+'&#39;,1);event.stopPropagation();">+</button>'
-          + '</span>'
-          + _dtPillHtml;
+          + '</span>';
       } else if (!firstAppearance) {
         nightsLine = '<span class="tb-dest-ref-note" title="Nights set in '+_pmEsc(shownIn[key])+'">also in ' + _pmEsc(shownIn[key]) + '</span>';
       } else {
@@ -12489,9 +12439,14 @@ function _renderPlacePickerMap(targetId){
         label = _pmEsc((info.place || "").substring(0, 2));
         size = 22;
       } else if (isDayTrip) {
-        color = "#e6700f"; // saturated orange, matches spur color (v354 tune)
+        // v359.51.17: PURPLE for "could be a day trip" (no longer the
+        // orange used for committed day trips). Day-trip role decisions
+        // happen in the trip view; the picker only hints at the
+        // possibility. Same purple as the sidebar "Could be a day trip
+        // from X" badge so the two affordances are visually paired.
+        color = "#5b3f8f";
         label = _pmEsc((info.place || "").substring(0, 2));
-        size = 20;
+        size = 22;
       } else {
         color = "#bbb";
         label = "";
@@ -12590,62 +12545,14 @@ function _renderPlacePickerMap(targetId){
     state.polylineHalo = null;
   }
 
-  // Step 5: day-trip spurs. For each kept day trip with a valid
-  // _dayTripHub that resolves to a kept stay, draw a dashed amber-
-  // orange line from hub coord → day-trip coord. Round v354 tune:
-  // bumped weight 2→4 and color from muted amber (#c97a1a) to a
-  // richer orange (#e6700f); dashes lengthened so the branch reads
-  // distinctly from the solid main route.
+  // v359.51.17: day-trip spurs removed from the picker map. The picker
+  // now hints at day-trip possibilities via purple pins + a "Could be
+  // a day trip from X" sidebar badge; the actual role decision happens
+  // in the trip view. Existing spur state is torn down so a hot-reload
+  // from an older build clears cleanly.
   Object.keys(state.spurs).forEach(function(k){
     try { _pmMap.removeLayer(state.spurs[k]); } catch(_){}
     delete state.spurs[k];
-  });
-  Object.keys(allPlaces).forEach(function(key){
-    var info = allPlaces[key];
-    if (!info._isDayTrip) return;
-    if (!info._dayTripHub) return;
-    // v359.51.13: resolve the hub chain. If the target hub is itself
-    // marked as a day trip, walk up to ITS hub (and so on) until we
-    // find a real kept overnight stay. Without this, Diamond Beach
-    // (day-trip → Jökulsárlón) renders without a spur because its
-    // direct hub Jökulsárlón is also a day-trip (→ Höfn). Same bug
-    // skipped Diamond Beach during trip-build clustering.
-    // Cap chain depth at 5 to defend against accidental cycles.
-    var hubKey = String(info._dayTripHub).toLowerCase();
-    var hubInfo = allPlaces[hubKey];
-    var hops = 0;
-    while (hubInfo && hubInfo._isDayTrip && hubInfo._dayTripHub && hops < 5) {
-      hops++;
-      hubKey = String(hubInfo._dayTripHub).toLowerCase();
-      hubInfo = allPlaces[hubKey];
-    }
-    if (!hubInfo) return; // hub chain dead-ended
-    if (!hubInfo.kept) return; // ultimate hub must be a kept stay
-    if (hubInfo._isDayTrip) return; // chain didn't resolve to a non-daytrip
-    var dayCoord = _pmCoord(info.place);
-    var hubCoord = _pmCoord(hubInfo.place);
-    if (!dayCoord || !hubCoord) return; // geocode race — defer
-    // v359.51.8: dashed + lighter for PREDICTED day trips (the picker
-    // is suggesting it, user hasn't confirmed); solid + full-opacity
-    // for COMMITTED day trips (user clicked "✓ Add as day trip"). This
-    // is the visual feedback Neal asked for: "before committed it
-    // should be dashed, then after committed make it solid".
-    var _isPred = !!info._isDayTripPredicted;
-    state.spurs[key] = L.polyline([hubCoord, dayCoord], _isPred ? {
-      color: "#e6700f",
-      weight: 3,
-      opacity: 0.55,
-      dashArray: "8,5"
-    } : {
-      color: "#e6700f",
-      weight: 4,
-      opacity: 0.95
-    }).addTo(_pmMap);
-    // v355.5: do NOT bringToBack the spurs — the main route now has
-    // a white halo (weight 7) that was burying the orange spur where
-    // it meets the hub. Letting spurs sit above the halo keeps the
-    // orange reading cleanly all the way to the hub pin and restores
-    // the visual distinction between main route and day-trip branches.
   });
 
   // v355.6: render airport / rail / sea / bus entry-point pins on the

@@ -2152,26 +2152,20 @@
       var pairs = collectUserDayTripPairs(_tb.placeActivities);
       var srcKeys = Object.keys(pairs);
       console.log(DBG, "explicit pairs:", pairs);
-      // v359.51.4: if no explicit _isDayTrip flags were set, fall
-      // back to the same proximity predictor the picker UI uses to
-      // RENDER day-trip suggestions (orange pins + "day trip from
-      // X" label). The picker showed these to the user; the user
-      // kept those candidates expecting the trip view to honor what
-      // it visually promised. Without this fallback, the user has
-      // to click the explicit "✓ Add as day trip" button on every
-      // suggestion to commit it — which was the bug Neal hit.
-      // _userChoseStay still wins (sticky override from "+ stay the
-      // night").
-      if (!srcKeys.length) {
-        console.log(DBG, "no explicit flags; running implied-pair fallback");
-        pairs = collectImpliedDayTripPairs(_tb.placeActivities);
-        srcKeys = Object.keys(pairs);
-        console.log(DBG, "implied pairs:", pairs);
-      }
+      // v359.51.16: implied-pair fallback REMOVED. Neal: "suggestions
+      // = Max recommends this; if you didn't confirm, treat it as
+      // overnight." Predictor-only suggestions now flow through the
+      // trip as regular overnight stays on the route, NOT as
+      // automatically-absorbed day trips. The picker still PAINTS
+      // suggestions (dashed orange spurs) as a hint, but the
+      // commitment threshold is now strictly the explicit
+      // "✓ Add as day trip" click. collectImpliedDayTripPairs is
+      // kept exported in case we want it as an opt-in "accept all
+      // suggestions" affordance later.
       console.log(DBG, "trip.destinations places (normalized):",
         trip.destinations.map(function(d){ return _normPlaceName(d.place || "") + " [" + (d.place || "") + "]"; }));
       if (!srcKeys.length) {
-        console.log(DBG, "skip: no pairs to apply (explicit + implied both empty)");
+        console.log(DBG, "skip: no explicit day-trip pairs to apply");
         return;
       }
       // Locate the corresponding destinations. Prefer exact normalized
