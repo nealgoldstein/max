@@ -179,6 +179,15 @@
     try { jsonStr = JSON.stringify(envelope); }
     catch (e) { console.warn('[MaxDB] tripWrite stringify failed:', e); return false; }
 
+    // v359.43.1: if this trip is already known to live in IDB (from a
+    // prior quota failure), skip the localStorage attempt. Saves a
+    // doomed setItem() + repeated warning logs on every sync poll.
+    if (_tripIdbMirrorRaw[id]) {
+      _writeTripToIdb(id, jsonStr);
+      emit('tripWritten', { id: id, envelope: envelope });
+      return true;
+    }
+
     // Try localStorage first (sync, fast).
     try {
       localStorage.setItem(KEY_TRIP_PREFIX + id, jsonStr);
@@ -196,11 +205,11 @@
           } catch (e2) { /* still over quota — fall through to IDB */ }
         }
         // v359.43 Phase 3: localStorage is full. Fall through to IDB.
-        // We optimistically return true and fire the event — the
-        // trip IS persisted (just via IDB), and the in-memory mirror
-        // is updated synchronously above for subsequent reads.
         _writeTripToIdb(id, jsonStr);
-        console.warn('[MaxDB] localStorage full — trip', id, 'written to IDB');
+        // One-time log: only when this trip wasn't already in IDB.
+        // After v359.43.1 the mirror check above short-circuits this
+        // path on subsequent writes, so each trip logs at most once.
+        console.warn('[MaxDB] localStorage full — trip', id, 'now in IDB');
         emit('tripWritten', { id: id, envelope: envelope });
         return true;
       }
@@ -211,6 +220,16 @@
 
   function tripWriteRaw(id, json) {
     if (!canPersist || !id) return false;
+
+    // v359.43.1: short-circuit for trips already in IDB.
+    if (_tripIdbMirrorRaw[id]) {
+      _writeTripToIdb(id, json);
+      var envEarly = null;
+      try { envEarly = JSON.parse(json); } catch (_) {}
+      emit('tripWritten', { id: id, envelope: envEarly });
+      return true;
+    }
+
     try {
       localStorage.setItem(KEY_TRIP_PREFIX + id, json);
       var envelope = null;
@@ -232,7 +251,7 @@
         _writeTripToIdb(id, json);
         var env3 = null;
         try { env3 = JSON.parse(json); } catch (_) {}
-        console.warn('[MaxDB] localStorage full — trip', id, 'written to IDB (raw)');
+        console.warn('[MaxDB] localStorage full — trip', id, 'now in IDB (raw)');
         emit('tripWritten', { id: id, envelope: env3 });
         return true;
       }
