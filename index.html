@@ -1355,6 +1355,11 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
 .ff-err{font-size:12px;color:#c05050;padding:4px 0;}
 .file-btn{font-size:10px;padding:3px 8px;border:1px solid #ddd;border-radius:4px;background:#f5f5f5;color:#666;cursor:pointer;font-family:inherit;}
 .file-btn:hover{background:#eee;border-color:#bbb;color:#111;}
+/* v359.48: trip-view header "⋯ More" popover items. Plain rows that
+   adopt file-btn typography but with a wider hit area and no
+   border so they read as menu items. */
+.trip-more-item{font-size:12px !important;padding:8px 14px !important;color:#222 !important;background:transparent !important;border-radius:0 !important;border:none !important;display:block !important;width:100% !important;text-align:left !important;cursor:pointer !important;}
+.trip-more-item:hover{background:#f0f0f0 !important;color:#111 !important;}
 /* Tracker structured sections.
    Round FJ: added .tk-major-section and .tk-major-hdr for the
    "Coming up" / "Trip diary" temporal split. Major header is
@@ -1991,20 +1996,29 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
            empty .mode-pills div stays so the CSS grid keeps the
            trip-name on the left and action-buttons on the right. -->
       <div class="mode-pills"></div>
-      <div class="action-buttons">
+      <!-- v359.48: trip-view header simplified from 12 buttons → 6
+           visible + 1 popover. Removed manual Save (auto-save covers
+           it; status indicator shows state). Folded Copy/Export/Paste
+           into the ⋯ More menu. Sync sign-in moves to the status
+           indicator's click handler. API key moves into Settings
+           panel. -->
+      <div class="action-buttons" style="position:relative;">
         <button class="file-btn" onclick="goHome()" title="All trips">&larr; Home</button>
-        <button class="file-btn" onclick="editConstraints()" title="Edit trip parameters">&#9998; Parameters</button>
-        <button class="file-btn" onclick="saveTrip()" title="Save">Save</button>
-        <button class="file-btn" onclick="if(_currentTripId&&confirm('Duplicate this trip? A copy will be created on the home screen.'))duplicateTrip(_currentTripId,false);" title="Duplicate this trip">Copy</button>
-        <button class="file-btn" onclick="showShareTripModal()" title="Share a read-only link to this trip">Share</button>
-        <button class="file-btn" onclick="showExportTripModal()" title="Print, save as PDF, or download as a calendar file">Export</button>
-        <button class="file-btn" onclick="showGlobalPasteConfirmationModal()" title="Paste a flight, hotel, or other booking confirmation — Max routes it to the right destination automatically">&#128203; Paste</button>
+        <button class="file-btn" onclick="editConstraints()" title="Edit the brief — change pace, transport, dates, party, etc.">&#9998; Brief</button>
         <button class="file-btn" onclick="showAskMaxModal()" title="Chat with an AI about this trip — ask anything: weather, food, logistics, things to do">&#128172; Ask</button>
         <button class="file-btn" id="trip-search-btn" onclick="openTripSearch()" title="Search this trip">&#x1F50D;</button>
+        <button class="file-btn" onclick="showShareTripModal()" title="Share a read-only link to this trip">&#x2197; Share</button>
         <button class="file-btn" onclick="showSettingsPanel()" title="Trip defaults — hours per day, pace, day-trip threshold">&#9881;</button>
-        <button class="file-btn" id="api-key-btn" onclick="showApiKeyForm()" title="Set API key" style="opacity:0.6;">&#x1F511;</button>
-        <button class="file-btn" id="sync-btn" onclick="MaxSync.showSignInModal()" title="Sync with server" style="opacity:0.6;">&#x21C4;</button>
-        <span id="max-sync-status" style="font-size:11px;font-weight:600;color:#888;margin-left:8px;display:inline-flex;align-items:center;min-width:80px;"></span>
+        <button class="file-btn" id="trip-more-btn" onclick="_toggleTripMoreMenu()" title="More actions">&#x22EF;</button>
+        <span id="max-sync-status" onclick="if(typeof MaxSync!=='undefined'&&MaxSync.showSignInModal)MaxSync.showSignInModal();" style="font-size:11px;font-weight:600;color:#888;margin-left:8px;display:inline-flex;align-items:center;min-width:80px;cursor:pointer;" title="Server sync — click to sign in / sync settings"></span>
+        <div id="trip-more-menu" style="display:none;position:absolute;top:100%;right:0;margin-top:6px;background:#fff;border:1px solid #d8d4c8;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.15);min-width:220px;z-index:200;padding:4px 0;">
+          <button class="trip-more-item" onclick="_closeTripMoreMenu();saveTrip();">Save now</button>
+          <button class="trip-more-item" onclick="_closeTripMoreMenu();if(_currentTripId&&confirm('Duplicate this trip? A copy will be created on the home screen.'))duplicateTrip(_currentTripId,false);">Copy this trip</button>
+          <button class="trip-more-item" onclick="_closeTripMoreMenu();showExportTripModal();">Export (PDF, calendar…)</button>
+          <button class="trip-more-item" onclick="_closeTripMoreMenu();showGlobalPasteConfirmationModal();">&#128203; Paste booking confirmation</button>
+          <div style="height:1px;background:#eee;margin:4px 0;"></div>
+          <button class="trip-more-item" onclick="_closeTripMoreMenu();showApiKeyForm();" style="color:#888 !important;">&#x1F511; Set API key</button>
+        </div>
       </div>
     </div>
     <!-- v339: save-status moved from position:fixed top-right of the
@@ -5265,6 +5279,40 @@ function enterApp(){
     _leftMode="trip"; drawTripMode(); updateMainMap();
     checkDeadlineAlert();
   },50);
+}
+
+// v359.48: trip-view "⋯ More" popover toggle. Lives next to goHome
+// because it's a peer header-affordance helper. Click outside the
+// menu closes it via a one-shot capture-phase listener attached
+// after open (deferred a tick so the opening click doesn't fire it).
+function _toggleTripMoreMenu(){
+  var menu = document.getElementById('trip-more-menu');
+  if (!menu) return;
+  var isOpen = menu.style.display === 'block';
+  if (isOpen) { _closeTripMoreMenu(); return; }
+  menu.style.display = 'block';
+  setTimeout(function(){
+    document.addEventListener('click', _tripMoreOutsideClick, { once: true, capture: true });
+  }, 0);
+}
+function _closeTripMoreMenu(){
+  var menu = document.getElementById('trip-more-menu');
+  if (menu) menu.style.display = 'none';
+}
+function _tripMoreOutsideClick(e){
+  var menu = document.getElementById('trip-more-menu');
+  var btn = document.getElementById('trip-more-btn');
+  if (!menu) return;
+  // Clicks INSIDE the menu let the item's own handler run (which
+  // closes the menu itself). Clicks on the toggle button are also
+  // ignored — the button has its own onclick that toggles. Anything
+  // else closes.
+  if (menu.contains(e.target) || (btn && btn.contains(e.target))) {
+    // Re-arm the outside-click listener for the next outside click.
+    document.addEventListener('click', _tripMoreOutsideClick, { once: true, capture: true });
+    return;
+  }
+  _closeTripMoreMenu();
 }
 
 function goHome(){
