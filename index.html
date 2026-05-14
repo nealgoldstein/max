@@ -7903,11 +7903,13 @@ function showShareTripModal(){
   });
 
   copyBtn.onclick = function(){
-    // v359.41: prefer navigator.share() when available — that's the
-    // native OS share sheet (Messages, Mail, Notes, AirDrop on iOS;
-    // similar on Android). Falls back to clipboard copy on desktop
-    // and older browsers. The Web Share API requires a user-activation
-    // context (a click handler), which we're in, so it should work.
+    // v359.41 / v359.41.1: prefer navigator.share() when available
+    // — that's the native OS share sheet (Messages, Mail, Notes,
+    // AirDrop on iOS; similar on Android). The earlier guard required
+    // BOTH navigator.share AND navigator.canShare(data) to be truthy,
+    // which fails closed on Safari versions that ship .share but not
+    // .canShare. Looser guard: try .share if it exists, fall back on
+    // any error other than user cancel.
     var url = linkEl.value;
     var tripName = (trip && trip.name) || "my Max trip";
     var shareData = {
@@ -7915,14 +7917,20 @@ function showShareTripModal(){
       text: "Check out " + tripName + " on Max.",
       url: url
     };
-    var canNativeShare = navigator.share && navigator.canShare && navigator.canShare(shareData);
-    if (canNativeShare) {
+    if (typeof navigator.share === "function") {
+      // canShare is optional; if it returns false explicitly, fall
+      // back. If it doesn't exist, just try .share() — Safari < 14.1
+      // doesn't expose canShare but does support share for {url}.
+      if (typeof navigator.canShare === "function" && !navigator.canShare(shareData)) {
+        _copyShareUrlFallback(linkEl, copyBtn);
+        return;
+      }
       navigator.share(shareData).then(function(){
         copyBtn.textContent = "Shared ✓";
         setTimeout(function(){ copyBtn.textContent = (navigator.share && navigator.canShare) ? "Share" : "Copy"; }, 1500);
       }).catch(function(err){
-        // User cancelled, or share failed — fall back to clipboard.
         if (err && err.name === "AbortError") return; // silent on cancel
+        console.warn("[Max share] navigator.share failed, falling back:", err && err.message);
         _copyShareUrlFallback(linkEl, copyBtn);
       });
       return;
