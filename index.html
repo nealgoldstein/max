@@ -24022,6 +24022,49 @@ function updateMainMap(){
         pinGroups.push(g);
       }
     });
+
+    // v359.51.18: carry the picker's "could be a day trip" hint into
+    // the trip view. For each overnight ≤2 nights, if another overnight
+    // within the Settings-backed radius has strictly more nights, mark
+    // it as a day-trip CANDIDATE. The pin still renders blue (it IS
+    // currently an overnight); we add a purple outer ring so the user
+    // can spot the option without having to remember which places were
+    // purple in the picker. Tapping the ring opens the same role
+    // popover that converts to a day trip.
+    var _couldBeDayTripDestIds = (function(){
+      var out = {};
+      var radius = (typeof _defaultDayTripRadiusKm === "function") ? _defaultDayTripRadiusKm() : 60;
+      function _coord(d){
+        if (!d) return null;
+        if (typeof d.lat === "number" && typeof d.lng === "number") return [d.lat, d.lng];
+        if (typeof getCityCenter === "function") {
+          var ctr = getCityCenter(d.place);
+          if (Array.isArray(ctr) && isFinite(ctr[0])) return ctr;
+        }
+        return null;
+      }
+      var coords = trip.destinations.map(_coord);
+      trip.destinations.forEach(function(src, i){
+        if (!src) return;
+        var srcN = src.nights || 0;
+        if (srcN > 2) return;
+        var sc = coords[i];
+        if (!sc) return;
+        for (var j = 0; j < trip.destinations.length; j++) {
+          if (j === i) continue;
+          var hub = trip.destinations[j];
+          if (!hub || (hub.nights || 0) <= srcN) continue;
+          var hc = coords[j];
+          if (!hc) continue;
+          var d = (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.haversineKm === "function")
+            ? MaxEngineTrip.haversineKm(sc[0], sc[1], hc[0], hc[1])
+            : Infinity;
+          if (d <= radius) { out[src.id] = true; break; }
+        }
+      });
+      return out;
+    })();
+
     pinGroups.forEach(function(group){
       var indices = group.dests.map(function(x){ return x.idx + 1; });
       // v359.51.11: marker style unified with the picker map. Neal:
@@ -24036,9 +24079,20 @@ function updateMainMap(){
       var abbrev = primaryPlace ? primaryPlace.substring(0, 2) : "·";
       var size = 22;
       var color = "#1a5fa8"; // matches picker's stay-pin blue
+      // v359.51.18: if ANY dest in this group is a day-trip candidate,
+      // add a purple outer ring via box-shadow. The pin still reads
+      // as a blue overnight (because that's what it currently is) but
+      // the purple halo telegraphs "you could convert this to a day
+      // trip" so the picker's purple hint carries through.
+      var _isCandidate = group.dests.some(function(x){
+        return x && x.dest && _couldBeDayTripDestIds[x.dest.id];
+      });
+      var _ringShadow = _isCandidate
+        ? "0 0 0 2px #5b3f8f, 0 0 0 4px rgba(91,63,143,0.18), 0 1px 4px rgba(0,0,0,0.25)"
+        : "0 1px 4px rgba(0,0,0,0.25)";
       var html = '<div style="background:'+color+';color:#fff;border-radius:50%;width:'
         + size + 'px;height:' + size + 'px;border:2px solid #fff;'
-        + 'box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;'
+        + 'box-shadow:'+_ringShadow+';display:flex;align-items:center;justify-content:center;'
         + 'font-size:9px;font-weight:700;letter-spacing:-0.02em;">'
         + abbrev
         + '</div>';
@@ -24080,6 +24134,10 @@ function updateMainMap(){
           tipParts.push(primary.nights + " night" + (primary.nights!==1?"s":""));
         }
       }
+      // v359.51.18: append "could be a day trip" hint to the tooltip
+      // when the purple ring is active. Helps the user understand why
+      // the pin is ringed without having to tap.
+      if (_isCandidate) tipParts.push("could be a day trip — tap to convert");
       m.bindTooltip(tipParts.join(" · "), {permanent:false, direction:"top", offset:[0,-size/2-2], className:"main-map-tooltip"});
       _mainMarkers.push(m);
     });
