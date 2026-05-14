@@ -10516,12 +10516,14 @@ function _pmOpenWikiLightbox(thumbEl){
       var desc = ov.querySelector("#pm-wiki-lightbox-desc");
       var extract = ov.querySelector("#pm-wiki-lightbox-extract");
       var empty = ov.querySelector("#pm-wiki-lightbox-empty");
-      if (data && data.thumbUrl) {
-        // Bump to a bigger photo by manipulating the Wikipedia URL —
-        // their thumbnail URLs end in /SIZEpx-FILENAME, so we
-        // substitute a larger size.
-        var bigUrl = data.thumbUrl.replace(/\/\d+px-/, "/640px-");
-        photo.style.backgroundImage = "url('" + bigUrl.replace(/'/g, "%27") + "')";
+      // v359.35: pick the best available image. Prefer originalimage
+      // (full-res from Wikipedia REST summary), then thumbUrl. No
+      // URL-size munging — that was 404'ing for some places where
+      // /640px- doesn't exist for the underlying file.
+      var bestUrl = data && (data.originalUrl || data.thumbUrl);
+      if (bestUrl && photo) {
+        photo.style.backgroundImage = "url('" + bestUrl.replace(/'/g, "%27") + "')";
+        photo.textContent = "";
       } else if (photo) {
         // Avatar in the big photo slot
         photo.style.backgroundColor = _pmHashColor(place);
@@ -12570,6 +12572,7 @@ function _updatePlaceActivitySummary(){
         + '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">'
         +   '<button type="button" onclick="_makeItFit()" style="font-size:10.5px;font-weight:600;color:#fff;background:#b0451a;border:1px solid #b0451a;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;" title="Trim the longest stays and bump pace denser to fit your budget">Make it fit</button>'
         +   '<button type="button" onclick="_extendBudgetToFit(' + extendDays + ')" style="font-size:10.5px;font-weight:600;color:#b0451a;background:#fff;border:1px solid #e6b89c;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;">Extend to '+extendDays+' days</button>'
+        +   '<button type="button" onclick="_skipBudgetGate()" style="font-size:10.5px;font-weight:500;color:#94381a;background:#fff;border:1px dashed #e6b89c;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;" title="Proceed anyway \u2014 reconcile in the trip view later">Skip for now</button>'
         +   '<span style="font-size:10.5px;color:#94381a;align-self:center;">or trim picks above</span>'
         + '</div>'
         + '</div>';
@@ -12591,8 +12594,11 @@ function _updatePlaceActivitySummary(){
     + fitNote;
   // v359.26: gate the button on budget. The summary line above
   // explains the gate; the button just sits disabled until resolved.
+  // v359.35: "Skip for now" unblocks the button without changing the
+  // budget — for users who want to reconcile in the trip view.
   if(btn){
-    if (_overBudget) {
+    var skipped = !!(_tb && _tb._budgetGateSkipped);
+    if (_overBudget && !skipped) {
       btn.disabled = true;
       btn.classList.add("tb-btn-disabled");
       btn.title = "Trim picks or extend your budget to continue";
@@ -12755,6 +12761,27 @@ function _makeItFit(){
   }
   } catch(err) {
     console.error("[Max makeItFit] threw:", err);
+  }
+}
+
+// v359.35: skip the over-budget gate \u2014 proceed to Choreograph despite
+// being over budget. Sets a per-trip flag the gate check reads so the
+// Choreograph button enables; the user reconciles in the trip view
+// later. Does NOT change the budget itself \u2014 distinct from "Extend to
+// N days" (which rewrites _tb.duration). This is "I know it's over,
+// build anyway."
+function _skipBudgetGate(){
+  if (!_tb) return;
+  _tb._budgetGateSkipped = true;
+  // Confirm so the user knows what they're committing to.
+  var ok = confirm("Skip the budget check?\n\nMax will build the trip even though it's over your stated budget. You can fix it in the trip view afterward by dropping destinations or extending dates.");
+  if (!ok) {
+    _tb._budgetGateSkipped = false;
+    return;
+  }
+  // Recompute the summary so the Choreograph button enables.
+  if (typeof _updatePlaceActivitySummary === "function") {
+    _updatePlaceActivitySummary();
   }
 }
 

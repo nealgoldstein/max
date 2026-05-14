@@ -716,6 +716,11 @@
         }
         var data = {
           thumbUrl: (j.thumbnail && j.thumbnail.source) || null,
+          // v359.35: also cache the originalimage so the lightbox can
+          // show a high-res version without doing URL-size guesswork.
+          // Wikipedia's REST summary includes both thumbnail (~320px)
+          // and originalimage (full resolution).
+          originalUrl: (j.originalimage && j.originalimage.source) || null,
           description: j.description || null,
           extract: (j.extract && j.extract.length > 240)
             ? j.extract.substring(0, 237) + "…"
