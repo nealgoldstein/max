@@ -788,6 +788,20 @@
       .then(function(r){ return r.ok ? r.json() : null; });
   }
 
+  // v359.46: detect "looks-like-a-place-not-a-film" from the summary
+  // description. Catches the Blue-Lagoon-as-1980-movie case where
+  // Wikipedia's direct title lookup returns a non-place article that
+  // happens to share the name. When this fires we fall through to
+  // _wikiSearch which biases by country and reliably returns the
+  // geographic article.
+  function _looksLikePlace(j) {
+    if (!j || !j.description) return true; // no description — accept (rare)
+    var d = j.description.toLowerCase();
+    var nonPlace = /\b(film|movie|song|album|book|novel|tv series|video game|comic|band|musician|composer|episode|fictional|character|video|game|series)\b/;
+    if (nonPlace.test(d)) return false;
+    return true;
+  }
+
   function _fetchWikiSummary(place, country) {
     if (!place) return Promise.resolve(null);
     // v359.42: cache is async now (IDB). Wrap the entire fetch chain
@@ -804,14 +818,15 @@
     // Step 1: try the place name verbatim.
     return _fetchSummaryByTitle(title)
       .then(function(j){
-        if (j && j.type !== "disambiguation") return j;
-        // Step 2: summary returned 404 or disambig — search for the
-        // right article title and re-fetch summary.
+        // Accept only if it's a real place article (not a disambig,
+        // not a film/book/etc that shares the name).
+        if (j && j.type !== "disambiguation" && _looksLikePlace(j)) return j;
+        // Otherwise search with country bias.
         return _wikiSearch(place, country).then(function(altTitle){
           if (!altTitle) return null;
           var altEncoded = encodeURIComponent(altTitle.replace(/ /g, "_"));
           return _fetchSummaryByTitle(altEncoded).then(function(j2){
-            if (j2 && j2.type !== "disambiguation") return j2;
+            if (j2 && j2.type !== "disambiguation" && _looksLikePlace(j2)) return j2;
             return null;
           });
         });

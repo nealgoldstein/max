@@ -557,7 +557,10 @@
   // 7-day TTL applied on read; expired entries surface as misses.
   // wikiCacheMigrate() runs once on module init — copies any
   // existing localStorage entries to IDB then deletes them.
-  var KEY_WIKI_PREFIX = 'max-wiki:v3:';
+  // v359.46: bumped to v4 so the non-place detector reruns on
+  // already-cached entries (Blue Lagoon → 1980 movie, etc.) and
+  // they get re-fetched as the actual geographic article.
+  var KEY_WIKI_PREFIX = 'max-wiki:v4:';
   var WIKI_TTL_MS = 7 * 24 * 3600 * 1000;
   var KEY_WIKI_MIGRATED = 'max-wiki-migrated-to-idb';
 
