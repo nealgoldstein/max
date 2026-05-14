@@ -585,6 +585,16 @@
   //   c.dayTripHub   <candidate.id of hub>           (when intent="dayTrip")
   // If neither is set, the default is computed from geometry +
   // kept-overnights set.
+  // v359.40 CLEANUP NOTE: the helpers below (_pickerDistKm,
+  // _computeCandidateRole) and the popover (_openRoleChangePopover
+  // further down) are referenced ONLY by _renderCandidateCard, which
+  // is itself a dead code path now — the candidate-explorer surface
+  // that rendered chips is no longer in the active flow (replaced by
+  // the place-mode/destination-view picker). Left in place so the
+  // function references resolve if any edge path still invokes them,
+  // but new work should NOT touch this block. The build-time
+  // clustering in engine-picker.js (v359.24) is the live piece that
+  // still honors c.intent / c.dayTripHub.
   var DAY_TRIP_RADIUS_KM = 60;
   function _pickerDistKm(a, b) {
     if (!a || !b || a[0] == null || a[1] == null || b[0] == null || b[1] == null) return Infinity;
@@ -849,6 +859,19 @@
   }
 
   // ── HX.12 (v308): renderCandidateCard ─────────────────────
+  // v359.40 CLEANUP NOTE: this card renderer is for the
+  // candidate-explorer overlay which is no longer in the active
+  // flow. The live picker is the place-mode/destination-view
+  // (_renderPlaceActivityItems in index.html), and it does not call
+  // this function. Kept as-is so MaxPickerUI.renderCandidateCard
+  // still resolves if anything reaches for it.
+  //
+  // Everything from v359.20 onward inside this function (role chip,
+  // thumbnail placeholder, Wikipedia fetch, focus-deep-link) is dead
+  // code by association — none of it executes when the function
+  // isn't called. New work should target the place-mode picker
+  // surfaces instead.
+  //
   // Lifted from index.html's inline `renderCard`. Renders a
   // single candidate's compact + expanded card: name, role,
   // stayRange, kept/reject buttons, expand chevron, and on
@@ -1064,6 +1087,10 @@
   }
 
   // ── v359.21: Change role popover ──────────────────────────
+  // v359.40 CLEANUP NOTE: dead code. Only invoked from the role
+  // chip inside _renderCandidateCard above, which is itself in a
+  // surface that's no longer active. Kept for reference.
+  //
   // Opens when the user clicks the role chip on a candidate card.
   // Lets them switch between Overnight stay and Day trip from
   // {hub}, with the hub dropdown auto-populated from kept-overnight
