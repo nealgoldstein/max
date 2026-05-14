@@ -4,6 +4,30 @@
 <meta charset="utf-8">
 <title>Max — The Existential Traveler</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="A thinking tool for trip planning, not a booking tool. Max helps you shape a trip you'll actually want to take.">
+
+<!-- v359.41: Open Graph + Twitter Card tags. Controls how Max links
+     unfurl when pasted into iMessage, Slack, WhatsApp, Twitter, etc.
+     Without these tags, links show up as bare URLs. With them, they
+     render as preview cards with title, description, and image. The
+     tags here are GENERIC (same Max-brand preview for every URL).
+     Trip-specific OG tags (e.g. the trip's name and destinations on
+     a share link) would require server-side rendering to inject
+     per-trip values into the HTML response — separate work. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Max — The Existential Traveler">
+<meta property="og:title" content="Max — The Existential Traveler">
+<meta property="og:description" content="A thinking tool for trip planning, not a booking tool. Max helps you shape a trip you'll actually want to take.">
+<meta property="og:url" content="https://travelingwithmax.app/">
+<meta property="og:image" content="https://travelingwithmax.app/icon-512.png">
+<meta property="og:image:width" content="512">
+<meta property="og:image:height" content="512">
+<meta property="og:image:alt" content="Max — The Existential Traveler">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Max — The Existential Traveler">
+<meta name="twitter:description" content="A thinking tool for trip planning, not a booking tool.">
+<meta name="twitter:image" content="https://travelingwithmax.app/icon-512.png">
+
 <!-- v353.6: PWA install. manifest.json declares the app name +
      icons + display:standalone so Chrome/Edge/Safari know we're
      installable. The iOS-specific apple-* meta tags exist because
@@ -7753,12 +7777,12 @@ function _exportTripSubscribe(){
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(linkEl.value).then(function(){
           copyBtn.textContent = "Copied ✓";
-          setTimeout(function(){ copyBtn.textContent = "Copy"; }, 1500);
+          setTimeout(function(){ copyBtn.textContent = (navigator.share && navigator.canShare) ? "Share" : "Copy"; }, 1500);
         });
       } else {
         document.execCommand("copy");
         copyBtn.textContent = "Copied ✓";
-        setTimeout(function(){ copyBtn.textContent = "Copy"; }, 1500);
+        setTimeout(function(){ copyBtn.textContent = (navigator.share && navigator.canShare) ? "Share" : "Copy"; }, 1500);
       }
     } catch (_) {}
   };
@@ -7809,7 +7833,7 @@ function showShareTripModal(){
     '<div id="share-trip-status" style="font-size:12px;color:#888;min-height:14px;margin-bottom:10px;">Loading…</div>' +
     '<div id="share-trip-link-row" style="display:none;align-items:center;gap:8px;margin-bottom:14px;">' +
       '<input id="share-trip-link" type="text" readonly style="flex:1;font-size:11px;padding:7px 9px;border:1px solid #ddd;border-radius:5px;font-family:monospace;box-sizing:border-box;" />' +
-      '<button id="share-trip-copy" style="padding:7px 12px;font-size:12px;font-weight:600;background:#1a5fa8;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Copy</button>' +
+      '<button id="share-trip-copy" style="padding:7px 12px;font-size:12px;font-weight:600;background:#1a5fa8;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">' + ((navigator.share && navigator.canShare) ? "Share" : "Copy") + '</button>' +
     '</div>' +
     // v353.7: empty container that showLink() populates with a QR
     // code once a token is in hand. Lives between the URL row and
@@ -7879,23 +7903,48 @@ function showShareTripModal(){
   });
 
   copyBtn.onclick = function(){
+    // v359.41: prefer navigator.share() when available — that's the
+    // native OS share sheet (Messages, Mail, Notes, AirDrop on iOS;
+    // similar on Android). Falls back to clipboard copy on desktop
+    // and older browsers. The Web Share API requires a user-activation
+    // context (a click handler), which we're in, so it should work.
+    var url = linkEl.value;
+    var tripName = (trip && trip.name) || "my Max trip";
+    var shareData = {
+      title: "Max — " + tripName,
+      text: "Check out " + tripName + " on Max.",
+      url: url
+    };
+    var canNativeShare = navigator.share && navigator.canShare && navigator.canShare(shareData);
+    if (canNativeShare) {
+      navigator.share(shareData).then(function(){
+        copyBtn.textContent = "Shared ✓";
+        setTimeout(function(){ copyBtn.textContent = (navigator.share && navigator.canShare) ? "Share" : "Copy"; }, 1500);
+      }).catch(function(err){
+        // User cancelled, or share failed — fall back to clipboard.
+        if (err && err.name === "AbortError") return; // silent on cancel
+        _copyShareUrlFallback(linkEl, copyBtn);
+      });
+      return;
+    }
+    _copyShareUrlFallback(linkEl, copyBtn);
+  };
+  function _copyShareUrlFallback(linkEl, copyBtn){
     try {
       linkEl.select();
       linkEl.setSelectionRange(0, 99999);
-      // Modern API first, fall back to deprecated execCommand for
-      // older browsers / restricted contexts.
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(linkEl.value).then(function(){
           copyBtn.textContent = "Copied ✓";
-          setTimeout(function(){ copyBtn.textContent = "Copy"; }, 1500);
+          setTimeout(function(){ copyBtn.textContent = (navigator.share && navigator.canShare) ? "Share" : "Copy"; }, 1500);
         });
       } else {
         document.execCommand("copy");
         copyBtn.textContent = "Copied ✓";
-        setTimeout(function(){ copyBtn.textContent = "Copy"; }, 1500);
+        setTimeout(function(){ copyBtn.textContent = (navigator.share && navigator.canShare) ? "Share" : "Copy"; }, 1500);
       }
     } catch (_) {}
-  };
+  }
   revokeBtn.onclick = function(){
     if (!confirm("Revoke this share link? The URL will stop working for anyone who has it.")) return;
     revokeBtn.disabled = true;
