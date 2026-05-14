@@ -15851,6 +15851,47 @@ function reopenPickerForEdit(){
   // v357: removed the _tb._placePickerStart reset — the picker map
   // no longer carries a "Start from" hint (sequencing is trip-view-
   // only), so there's nothing to reset on rehydrate.
+
+  // v359.51.10: mark every current overnight destination as
+  // _userChoseStay: true on its corresponding requiredPlaces. Without
+  // this, the picker's day-trip predictor re-fires on re-entry and
+  // re-marks short-stay overnight destinations (Geysir 1-night near
+  // Reykjavik, Landmannalaugar, etc.) as predicted day trips — Neal's
+  // report: "when i go back to edit destinations, everything becomes
+  // day trips". The user committed these as overnight stays via
+  // Choreograph; their stay status should survive re-entry.
+  //
+  // Places that were ABSORBED as day-trip PlanItems aren't in
+  // trip.destinations[] anymore, so they don't get _userChoseStay
+  // marked — their existing _isDayTrip flag carries through.
+  (function _markCommittedStaysSticky(){
+    if (!Array.isArray(trip.destinations) || !trip.destinations.length) return;
+    var stayPlaces = {};
+    var norm = function(s){ return (typeof _normPlaceName === "function") ? _normPlaceName(s||"") : String(s||"").toLowerCase().trim(); };
+    trip.destinations.forEach(function(d){
+      if (d && d.place) stayPlaces[norm(d.place)] = true;
+    });
+    var marked = 0;
+    _tb.placeActivities.forEach(function(item){
+      if (!item || !Array.isArray(item.requiredPlaces)) return;
+      item.requiredPlaces.forEach(function(p){
+        if (!p || !p.place) return;
+        if (stayPlaces[norm(p.place)]) {
+          p._userChoseStay = true;
+          // Also clear any stale day-trip flag — the user CHOSE stay,
+          // so the picker shouldn't render the orange spur for this
+          // place even if it had a leftover _isDayTrip from a prior
+          // round. (Won't affect day-trip PlanItems on the hub, since
+          // those aren't in trip.destinations as stays.)
+          p._isDayTrip = false;
+          p._dayTripHub = "";
+          marked++;
+        }
+      });
+    });
+    if (marked) console.log("[Max] reopenPickerForEdit: marked", marked, "requiredPlaces as _userChoseStay (committed overnight)");
+  })();
+
   // Mirror into _mdcItems too — downstream code reads from both depending
   // on the path. Keep them in sync.
   _mdcItems = trip.mdcItems.slice();
