@@ -1492,6 +1492,7 @@
     renderTripDetailsStrip:     _renderTripDetailsStrip,
     runRealismCheck:            _runRealismCheck,
     showRealismCheckModal:      _showRealismCheckModal,
+    _fetchWikiSummary:          _fetchWikiSummary,
   };
 
   global.MaxPickerUI = MaxPickerUI;

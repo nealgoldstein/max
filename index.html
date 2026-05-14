@@ -16565,6 +16565,15 @@ function _makePickerSidebarRow(c){
   badge.textContent = String((typeof c.order === "number" ? c.order : 0) + 1);
   row.appendChild(badge);
 
+  // v359.31.1: Wikipedia thumbnail. Small (32x32) so it slots between
+  // the ordinal badge and the name without bloating the row. Starts
+  // as a grey placeholder; the async fetch below fills the
+  // background-image and the expanded-view factual description.
+  var thumb = document.createElement("div");
+  thumb.className = "ce-sidebar-thumb";
+  thumb.style.cssText = "width:32px;height:32px;border-radius:5px;background:#eef2f7;background-size:cover;background-position:center;flex-shrink:0;margin-top:0;";
+  row.appendChild(thumb);
+
   // Main body — name + optional expanded rationale
   var body = document.createElement("div");
   body.style.cssText = "flex:1;min-width:0;";
@@ -16575,6 +16584,14 @@ function _makePickerSidebarRow(c){
   var req = c._required ? '<span title="Required by a must-do" style="margin-left:6px;color:#b05820;font-size:10px;">★</span>' : "";
   nameLine.innerHTML = '<span style="font-weight:600;">' + _escapeHtml(c.place || "(unnamed)") + '</span>' + country + req;
   body.appendChild(nameLine);
+
+  // v359.31.1: Wikipedia factual line. Hidden until fetch resolves.
+  // Sits between the name and the rationale so it grounds whatever
+  // LLM prose follows.
+  var wikiDesc = document.createElement("div");
+  wikiDesc.className = "ce-sidebar-wiki-desc";
+  wikiDesc.style.cssText = "display:none;font-size:10.5px;color:#888;font-style:italic;line-height:1.4;margin-top:2px;";
+  body.appendChild(wikiDesc);
 
   // Expand for rationale on click — _ceCardExpanded carries state
   var expanded = !!(_ceCardExpanded && _ceCardExpanded[c.id]);
@@ -16589,6 +16606,22 @@ function _makePickerSidebarRow(c){
     body.appendChild(detail);
   }
   row.appendChild(body);
+
+  // v359.31.1: kick off Wikipedia fetch and fill thumbnail +
+  // description when it lands. MaxPickerUI exposes the helper from
+  // picker-ui.js; bail silently if not loaded.
+  if (window.MaxPickerUI && typeof MaxPickerUI._fetchWikiSummary === "function") {
+    MaxPickerUI._fetchWikiSummary(c.place, c.country).then(function(data){
+      if (!data) return;
+      if (data.thumbUrl) {
+        thumb.style.backgroundImage = "url('" + data.thumbUrl.replace(/'/g, "%27") + "')";
+      }
+      if (data.description) {
+        wikiDesc.textContent = data.description;
+        wikiDesc.style.display = "";
+      }
+    });
+  }
 
   // Actions — accept checkbox + reject ✕
   var actions = document.createElement("div");
