@@ -7927,6 +7927,16 @@ function showShareTripModal(){
         if (err && err.name === "AbortError") return; // user cancelled — silent
         console.warn("[Max share] navigator.share failed:", err && (err.name + ': ' + err.message));
         _copyShareUrlFallback(linkEl, copyBtn);
+        // v359.41.3: Safari's "InvalidStateError: An earlier share has
+        // not yet completed" can stick until page reload. Surface a
+        // clearer message so the user knows the share sheet didn't
+        // show and the URL is in their clipboard instead.
+        if (err && err.name === "InvalidStateError") {
+          setTimeout(function(){
+            copyBtn.textContent = "URL copied — paste it";
+            setTimeout(function(){ copyBtn.textContent = navigator.share ? "Share" : "Copy"; }, 2200);
+          }, 50);
+        }
       });
       return;
     }
