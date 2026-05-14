@@ -9987,6 +9987,56 @@ function _renderPlaceActivityItems(){
   })();
   _tb._dayTripPreds = _dayTripPreds;
 
+  // v359.51.12: hub-eligibility map — for every KEPT place (not just
+  // short-stay candidates), record whether at least one kept hub
+  // qualifies as a day-trip target: same kept-status filters as the
+  // predictor (kept, not _isDayTrip, strictly more nights, within
+  // 60km). Used by the "↩ make day trip" pill on long-stay rows so
+  // we can disable it (with an explanatory tooltip) when there's no
+  // valid hub, instead of letting the user click and discover via
+  // the popup.
+  var _dayTripEligible = (function _computeDayTripEligibility(){
+    var elig = {};
+    var places = {};
+    items.forEach(function(it){
+      (it.requiredPlaces || []).forEach(function(p){
+        if (!p || !p.place) return;
+        var key = p.place.toLowerCase();
+        if (!places[key]) places[key] = { place:p.place, lat:null, lng:null, nights:0, kept:false };
+        if (typeof p.lat === "number" && typeof p.lng === "number") {
+          places[key].lat = p.lat; places[key].lng = p.lng;
+        }
+        var n = (typeof p.nights === "number") ? p.nights : 0;
+        if (it.type !== "route" && n > places[key].nights) places[key].nights = n;
+        if (p._keep) places[key].kept = true;
+      });
+    });
+    function distKm(a, b){
+      if (!a || !b || !isFinite(a.lat) || !isFinite(b.lat)) return Infinity;
+      var dLat = (a.lat - b.lat) * 111;
+      var dLng = (a.lng - b.lng) * 111 * Math.cos(((a.lat + b.lat) / 2) * Math.PI / 180);
+      return Math.sqrt(dLat*dLat + dLng*dLng);
+    }
+    Object.keys(places).forEach(function(srcKey){
+      var src = places[srcKey];
+      if (!src.kept) return;
+      if (!isFinite(src.lat)) return;
+      var hubName = null;
+      Object.keys(places).forEach(function(hubKey){
+        if (hubName) return; // already found a qualifying hub
+        if (hubKey === srcKey) return;
+        var hub = places[hubKey];
+        if (!hub.kept) return;
+        if (hub.nights <= src.nights) return;
+        if (!isFinite(hub.lat)) return;
+        if (distKm(src, hub) <= 60) hubName = hub.place;
+      });
+      elig[srcKey] = hubName; // either a hub place name or null
+    });
+    return elig;
+  })();
+  _tb._dayTripEligible = _dayTripEligible;
+
   // Bucket items by section. Dedup by case-insensitive name so the LLM's
   // occasional "Ride mountain railways to summits" twice (with slight
   // capitalization differences) collapses into one section. Also reorder:
@@ -10451,15 +10501,30 @@ function _renderPlaceActivityItems(){
         // find. The pill routes to the same popup (so the user picks
         // the hub from kept-stay candidates) — but the entry point is
         // now visible in the sidebar where it belongs.
+        //
+        // v359.51.12: disable the pill when no eligible hub exists
+        // (no kept overnight with more nights within 60 km), and
+        // surface why via the title attribute. Saves the user a
+        // click-into-empty-popup discovery.
+        var _eligKey = (d.place || "").toLowerCase();
+        var _eligHub = (_tb._dayTripEligible || {})[_eligKey];
+        var _dtPillHtml;
+        if (_eligHub) {
+          _dtPillHtml = '<button type="button" class="tb-make-daytrip-btn" '
+            +   'onclick="(typeof _pmOpenPlacePopupByKey===&#39;function&#39;)&amp;&amp;_pmOpenPlacePopupByKey(&#39;'+_pmEsc((d.place||"").toLowerCase())+'&#39;);event.stopPropagation();" '
+            +   'title="Make this a day trip from '+_pmEsc(_eligHub)+' or another nearby stay" '
+            +   'style="margin-left:8px;font-size:10.5px;font-weight:600;color:#c97a1a;background:#fff7eb;border:1px solid #e8d0a8;padding:2px 8px;border-radius:11px;cursor:pointer;font-family:inherit;line-height:1.4;">↩ make day trip</button>';
+        } else {
+          _dtPillHtml = '<button type="button" class="tb-make-daytrip-btn" disabled '
+            +   'title="No nearby overnight has more nights than '+_pmEsc(d.place)+' &mdash; add a longer-stay hub within 60 km first." '
+            +   'style="margin-left:8px;font-size:10.5px;font-weight:600;color:#bbb;background:#f7f5f0;border:1px solid #e6e2d8;padding:2px 8px;border-radius:11px;cursor:not-allowed;font-family:inherit;line-height:1.4;">↩ make day trip</button>';
+        }
         nightsLine = '<span class="tb-dest-nights" data-place="'+_pmEsc(d.place)+'">· '+d.nightsMax+'n</span>'
           + '<span class="tb-nights-stepper" onclick="event.stopPropagation()">'
           +   '<button type="button" class="tb-nights-btn" title="Fewer nights" onclick="_adjustDestNights(&#39;'+_pmEsc(d.place)+'&#39;,-1);event.stopPropagation();">−</button>'
           +   '<button type="button" class="tb-nights-btn" title="More nights" onclick="_adjustDestNights(&#39;'+_pmEsc(d.place)+'&#39;,1);event.stopPropagation();">+</button>'
           + '</span>'
-          + '<button type="button" class="tb-make-daytrip-btn" '
-          +   'onclick="(typeof _pmOpenPlacePopupByKey===&#39;function&#39;)&amp;&amp;_pmOpenPlacePopupByKey(&#39;'+_pmEsc((d.place||"").toLowerCase())+'&#39;);event.stopPropagation();" '
-          +   'title="Make this a day trip from a nearby stay instead" '
-          +   'style="margin-left:8px;font-size:10.5px;font-weight:600;color:#c97a1a;background:#fff7eb;border:1px solid #e8d0a8;padding:2px 8px;border-radius:11px;cursor:pointer;font-family:inherit;line-height:1.4;">↩ make day trip</button>';
+          + _dtPillHtml;
       } else if (!firstAppearance) {
         nightsLine = '<span class="tb-dest-ref-note" title="Nights set in '+_pmEsc(shownIn[key])+'">also in ' + _pmEsc(shownIn[key]) + '</span>';
       } else {
