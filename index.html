@@ -27546,6 +27546,8 @@ function drawTripMode(){
         delete trip.overBudgetNotice;
         autoSave();
         if (typeof drawTripMode === "function") drawTripMode();
+        // v359.51.19: visual feedback so the user knows the action took.
+        if (typeof showSaveStatus === "function") showSaveStatus("✓ Trip extended to " + n.pickerDays + " days", 2800);
       }
     ));
 
@@ -27602,6 +27604,12 @@ function drawTripMode(){
           delete trip.overBudgetNotice;
           autoSave();
           if (typeof drawTripMode === "function") drawTripMode();
+          // v359.51.19: visual feedback. Sum the trimmed nights so the
+          // toast names what just happened concretely.
+          if (typeof showSaveStatus === "function") {
+            var trimmedNights = (n.proposedDeltas || []).reduce(function(s, d){ return s + Math.max(0, (d.before||0) - (d.after||0)); }, 0);
+            showSaveStatus("✓ Trimmed " + trimmedNights + " night" + (trimmedNights === 1 ? "" : "s") + " — fits your " + n.budgetDays + "-day budget", 3200);
+          }
         }
       ));
     }
@@ -27621,6 +27629,9 @@ function drawTripMode(){
         trip.overBudgetNotice.dismissed = true;
         autoSave();
         nb.parentNode && nb.parentNode.removeChild(nb);
+        // v359.51.19: visual feedback so dismissing doesn't feel like
+        // nothing happened. Reminds the user the trip is over budget.
+        if (typeof showSaveStatus === "function") showSaveStatus("✓ Keeping picks — trip is " + n.overage + " day" + (n.overage !== 1 ? "s" : "") + " over your " + n.budgetDays + "-day budget", 3200);
       }
     ));
 
