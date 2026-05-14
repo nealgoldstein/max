@@ -10401,7 +10401,19 @@ function _renderPlaceActivityItems(){
       }
       var nightsLine;
       if (firstAppearance && userIsDayTrip) {
-        nightsLine = '<span class="tb-dest-nights" data-place="'+_pmEsc(d.place)+'" style="color:#c97a1a;font-style:italic;">· day trip from '+_pmEsc(userHubName || "?")+'</span>'
+        // v359.51.6: COMMITTED state. Previously this rendered as a bare
+        // italic label "· day trip from X" with only the "+ stay the
+        // night" affordance, visually almost indistinguishable from the
+        // SUGGESTED state below. Neal couldn't tell whether his click
+        // had stuck. Now: a solid orange pill with a leading ✓ so the
+        // commitment is unmistakable, and the "Suggested" badge on the
+        // other branch makes the distinction read at a glance.
+        nightsLine = '<span class="tb-dest-nights" data-place="'+_pmEsc(d.place)+'" '
+          +   'title="This place is set as a day trip from '+_pmEsc(userHubName || "?")+'. Click + stay the night to undo." '
+          +   'style="display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;color:#fff;background:#c97a1a;border:1px solid #b06914;padding:3px 9px;border-radius:11px;line-height:1.4;letter-spacing:0.01em;">'
+          +   '<span style="font-size:11px;line-height:1;">✓</span>'
+          +   '<span>Day trip from '+_pmEsc(userHubName || "?")+'</span>'
+          + '</span>'
           + '<button type="button" class="tb-stay-night-btn" onclick="_pmClearDayTripFlag(&#39;'+_pmEsc(d.place)+'&#39;);event.stopPropagation();" title="Stay overnight here instead" style="margin-left:8px;font-size:10.5px;font-weight:600;color:#1a5fa8;background:#eef5ff;border:1px solid #cfe1f7;padding:2px 8px;border-radius:11px;cursor:pointer;font-family:inherit;line-height:1.4;">+ stay the night</button>';
       } else if (firstAppearance && dayTripHub) {
         // v359.5.4: route the "+ stay the night" button through
@@ -10413,7 +10425,17 @@ function _renderPlaceActivityItems(){
         // day-trip flags AND sets a sticky "user chose stay" mark
         // that the predictor respects — so the user's choice
         // actually locks in.
-        nightsLine = '<span class="tb-dest-nights" data-place="'+_pmEsc(d.place)+'" style="color:#5b3f8f;font-style:italic;">· day trip from '+_pmEsc(dayTripHub)+'</span>'
+        //
+        // v359.51.6: SUGGESTED state. Now reads "Suggested:" so the
+        // user knows the picker is offering a recommendation that
+        // requires explicit confirmation. Pairs with the new
+        // committed pill above so the two states are visually distinct.
+        nightsLine = '<span class="tb-dest-nights" data-place="'+_pmEsc(d.place)+'" '
+          +   'title="Suggested role — click Add as day trip to confirm" '
+          +   'style="display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:500;color:#5b3f8f;background:#f4ecfa;border:1px dashed #cfb3e0;padding:3px 9px;border-radius:11px;line-height:1.4;font-style:italic;">'
+          +   '<span style="font-style:normal;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;font-size:9px;">Suggested</span>'
+          +   '<span>day trip from '+_pmEsc(dayTripHub)+'</span>'
+          + '</span>'
           + '<button type="button" class="tb-stay-night-btn" onclick="_pmMakeStay(&#39;'+_pmEsc(d.place)+'&#39;);event.stopPropagation();" title="Make this an overnight stop instead" style="margin-left:8px;font-size:10.5px;font-weight:600;color:#1a5fa8;background:#eef5ff;border:1px solid #cfe1f7;padding:2px 8px;border-radius:11px;cursor:pointer;font-family:inherit;line-height:1.4;">+ stay the night</button>'
           + '<button type="button" class="tb-lock-daytrip-btn" '
           +   'onclick="(typeof _pmOpenPlacePopupByKey===&#39;function&#39;)&amp;&amp;_pmOpenPlacePopupByKey(&#39;'+_pmEsc((d.place||"").toLowerCase())+'&#39;);event.stopPropagation();" '
