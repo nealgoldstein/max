@@ -7777,12 +7777,12 @@ function _exportTripSubscribe(){
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(linkEl.value).then(function(){
           copyBtn.textContent = "Copied ✓";
-          setTimeout(function(){ copyBtn.textContent = (navigator.share && navigator.canShare) ? "Share" : "Copy"; }, 1500);
+          setTimeout(function(){ copyBtn.textContent = (typeof navigator.share === "function") ? "Share" : "Copy"; }, 1500);
         });
       } else {
         document.execCommand("copy");
         copyBtn.textContent = "Copied ✓";
-        setTimeout(function(){ copyBtn.textContent = (navigator.share && navigator.canShare) ? "Share" : "Copy"; }, 1500);
+        setTimeout(function(){ copyBtn.textContent = (typeof navigator.share === "function") ? "Share" : "Copy"; }, 1500);
       }
     } catch (_) {}
   };
@@ -7833,7 +7833,7 @@ function showShareTripModal(){
     '<div id="share-trip-status" style="font-size:12px;color:#888;min-height:14px;margin-bottom:10px;">Loading…</div>' +
     '<div id="share-trip-link-row" style="display:none;align-items:center;gap:8px;margin-bottom:14px;">' +
       '<input id="share-trip-link" type="text" readonly style="flex:1;font-size:11px;padding:7px 9px;border:1px solid #ddd;border-radius:5px;font-family:monospace;box-sizing:border-box;" />' +
-      '<button id="share-trip-copy" style="padding:7px 12px;font-size:12px;font-weight:600;background:#1a5fa8;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">' + ((navigator.share && navigator.canShare) ? "Share" : "Copy") + '</button>' +
+      '<button id="share-trip-copy" style="padding:7px 12px;font-size:12px;font-weight:600;background:#1a5fa8;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">' + ((typeof navigator.share === "function") ? "Share" : "Copy") + '</button>' +
     '</div>' +
     // v353.7: empty container that showLink() populates with a QR
     // code once a token is in hand. Lives between the URL row and
@@ -7903,13 +7903,15 @@ function showShareTripModal(){
   });
 
   copyBtn.onclick = function(){
-    // v359.41 / v359.41.1: prefer navigator.share() when available
-    // — that's the native OS share sheet (Messages, Mail, Notes,
-    // AirDrop on iOS; similar on Android). The earlier guard required
-    // BOTH navigator.share AND navigator.canShare(data) to be truthy,
-    // which fails closed on Safari versions that ship .share but not
-    // .canShare. Looser guard: try .share if it exists, fall back on
-    // any error other than user cancel.
+    // v359.41 / v359.41.1 / v359.41.2: native OS share sheet path.
+    // The earlier canShare(data) guard silently fell back to clipboard
+    // when Safari returned false for valid shareData — common because
+    // canShare implementations are inconsistent across Safari
+    // versions. New behavior: ALWAYS try navigator.share if it exists.
+    // If Safari rejects the call, the .catch falls back to clipboard
+    // and logs the reason. User-cancellations (AbortError) stay
+    // silent. This trades a possible no-op for actually invoking the
+    // share sheet when it works.
     var url = linkEl.value;
     var tripName = (trip && trip.name) || "my Max trip";
     var shareData = {
@@ -7918,19 +7920,12 @@ function showShareTripModal(){
       url: url
     };
     if (typeof navigator.share === "function") {
-      // canShare is optional; if it returns false explicitly, fall
-      // back. If it doesn't exist, just try .share() — Safari < 14.1
-      // doesn't expose canShare but does support share for {url}.
-      if (typeof navigator.canShare === "function" && !navigator.canShare(shareData)) {
-        _copyShareUrlFallback(linkEl, copyBtn);
-        return;
-      }
       navigator.share(shareData).then(function(){
         copyBtn.textContent = "Shared ✓";
-        setTimeout(function(){ copyBtn.textContent = (navigator.share && navigator.canShare) ? "Share" : "Copy"; }, 1500);
+        setTimeout(function(){ copyBtn.textContent = navigator.share ? "Share" : "Copy"; }, 1500);
       }).catch(function(err){
-        if (err && err.name === "AbortError") return; // silent on cancel
-        console.warn("[Max share] navigator.share failed, falling back:", err && err.message);
+        if (err && err.name === "AbortError") return; // user cancelled — silent
+        console.warn("[Max share] navigator.share failed:", err && (err.name + ': ' + err.message));
         _copyShareUrlFallback(linkEl, copyBtn);
       });
       return;
@@ -7944,12 +7939,12 @@ function showShareTripModal(){
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(linkEl.value).then(function(){
           copyBtn.textContent = "Copied ✓";
-          setTimeout(function(){ copyBtn.textContent = (navigator.share && navigator.canShare) ? "Share" : "Copy"; }, 1500);
+          setTimeout(function(){ copyBtn.textContent = (typeof navigator.share === "function") ? "Share" : "Copy"; }, 1500);
         });
       } else {
         document.execCommand("copy");
         copyBtn.textContent = "Copied ✓";
-        setTimeout(function(){ copyBtn.textContent = (navigator.share && navigator.canShare) ? "Share" : "Copy"; }, 1500);
+        setTimeout(function(){ copyBtn.textContent = (typeof navigator.share === "function") ? "Share" : "Copy"; }, 1500);
       }
     } catch (_) {}
   }
