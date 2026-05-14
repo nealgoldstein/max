@@ -1937,7 +1937,11 @@
         var dLng = (a[1] - b[1]) * 111 * Math.cos(((a[0] + b[0]) / 2) * Math.PI / 180);
         return Math.sqrt(dLat*dLat + dLng*dLng);
       }
-      var DAY_TRIP_RADIUS_KM = 60;
+      // v359.51.14: radius from Settings (default 60). Even though this
+      // legacy auto-clusterer is disabled (early-return above keeps it
+      // dormant), kept in lockstep so a future re-enable picks up the
+      // user pref automatically.
+      var DAY_TRIP_RADIUS_KM = (typeof _defaultDayTripRadiusKm === "function") ? _defaultDayTripRadiusKm() : 60;
       // Find candidates to absorb. Don't iterate while mutating; collect
       // (source, hub) pairs first, then apply.
       var absorbtions = [];
@@ -2866,7 +2870,11 @@
         var d = distKm(src, hub);
         if (d < bestDist) { bestDist = d; bestHub = hub; bestHub._key = hubKey; }
       });
-      if (bestHub && bestDist <= 60) pairs[srcKey] = bestHub._key;
+      // v359.51.14: radius from Settings (default 60 km). Reads via the
+      // shared global helper; falls back to 60 km if it's not loaded
+      // yet (e.g. tests).
+      var _radius = (typeof _defaultDayTripRadiusKm === "function") ? _defaultDayTripRadiusKm() : 60;
+      if (bestHub && bestDist <= _radius) pairs[srcKey] = bestHub._key;
     });
     return pairs;
   }

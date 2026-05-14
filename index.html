@@ -9981,7 +9981,9 @@ function _renderPlaceActivityItems(){
         var d = distKm(src, hub);
         if (d < bestDist) { bestDist = d; bestHub = hub; }
       });
-      if (bestHub && bestDist <= 60) preds[srcKey] = bestHub.place;
+      // v359.51.14: radius now Settings-backed (defaults to 60 km).
+      var _radius = (typeof _defaultDayTripRadiusKm === "function") ? _defaultDayTripRadiusKm() : 60;
+      if (bestHub && bestDist <= _radius) preds[srcKey] = bestHub.place;
     });
     return preds;
   })();
@@ -10017,6 +10019,7 @@ function _renderPlaceActivityItems(){
       var dLng = (a.lng - b.lng) * 111 * Math.cos(((a.lat + b.lat) / 2) * Math.PI / 180);
       return Math.sqrt(dLat*dLat + dLng*dLng);
     }
+    var _elRadius = (typeof _defaultDayTripRadiusKm === "function") ? _defaultDayTripRadiusKm() : 60;
     Object.keys(places).forEach(function(srcKey){
       var src = places[srcKey];
       if (!src.kept) return;
@@ -10029,7 +10032,7 @@ function _renderPlaceActivityItems(){
         if (!hub.kept) return;
         if (hub.nights <= src.nights) return;
         if (!isFinite(hub.lat)) return;
-        if (distKm(src, hub) <= 60) hubName = hub.place;
+        if (distKm(src, hub) <= _elRadius) hubName = hub.place;
       });
       elig[srcKey] = hubName; // either a hub place name or null
     });
@@ -10515,8 +10518,11 @@ function _renderPlaceActivityItems(){
             +   'title="Make this a day trip from '+_pmEsc(_eligHub)+' or another nearby stay" '
             +   'style="margin-left:8px;font-size:10.5px;font-weight:600;color:#c97a1a;background:#fff7eb;border:1px solid #e8d0a8;padding:2px 8px;border-radius:11px;cursor:pointer;font-family:inherit;line-height:1.4;">↩ make day trip</button>';
         } else {
+          // v359.51.15: tooltip distance reflects the user's pref.
+          var _eligR = (typeof _defaultDayTripRadiusKm === "function") ? _defaultDayTripRadiusKm() : 60;
+          var _eligLbl = (typeof _fmtDistance === "function") ? _fmtDistance(_eligR) : (_eligR + " km");
           _dtPillHtml = '<button type="button" class="tb-make-daytrip-btn" disabled '
-            +   'title="No nearby overnight has more nights than '+_pmEsc(d.place)+' &mdash; add a longer-stay hub within 60 km first." '
+            +   'title="No nearby overnight has more nights than '+_pmEsc(d.place)+' &mdash; add a longer-stay hub within '+_eligLbl+' first." '
             +   'style="margin-left:8px;font-size:10.5px;font-weight:600;color:#bbb;background:#f7f5f0;border:1px solid #e6e2d8;padding:2px 8px;border-radius:11px;cursor:not-allowed;font-family:inherit;line-height:1.4;">↩ make day trip</button>';
         }
         nightsLine = '<span class="tb-dest-nights" data-place="'+_pmEsc(d.place)+'">· '+d.nightsMax+'n</span>'
@@ -12598,10 +12604,24 @@ function _renderPlacePickerMap(targetId){
     var info = allPlaces[key];
     if (!info._isDayTrip) return;
     if (!info._dayTripHub) return;
+    // v359.51.13: resolve the hub chain. If the target hub is itself
+    // marked as a day trip, walk up to ITS hub (and so on) until we
+    // find a real kept overnight stay. Without this, Diamond Beach
+    // (day-trip → Jökulsárlón) renders without a spur because its
+    // direct hub Jökulsárlón is also a day-trip (→ Höfn). Same bug
+    // skipped Diamond Beach during trip-build clustering.
+    // Cap chain depth at 5 to defend against accidental cycles.
     var hubKey = String(info._dayTripHub).toLowerCase();
     var hubInfo = allPlaces[hubKey];
-    if (!hubInfo) return; // hub no longer in dataset
-    if (!hubInfo.kept || hubInfo._isDayTrip) return; // hub must be a kept stay
+    var hops = 0;
+    while (hubInfo && hubInfo._isDayTrip && hubInfo._dayTripHub && hops < 5) {
+      hops++;
+      hubKey = String(hubInfo._dayTripHub).toLowerCase();
+      hubInfo = allPlaces[hubKey];
+    }
+    if (!hubInfo) return; // hub chain dead-ended
+    if (!hubInfo.kept) return; // ultimate hub must be a kept stay
+    if (hubInfo._isDayTrip) return; // chain didn't resolve to a non-daytrip
     var dayCoord = _pmCoord(info.place);
     var hubCoord = _pmCoord(hubInfo.place);
     if (!dayCoord || !hubCoord) return; // geocode race — defer
@@ -18690,6 +18710,18 @@ function _defaultDayTripHours(){
   } catch(_){}
   return 3;
 }
+// v359.51.14: day-trip radius now Settings-backed. Was hardcoded to
+// 60 km in five places (engine-picker.js, picker-ui.js, this file's
+// predictor + eligibility + role popover). All callers route through
+// this function so a single Settings change moves everything in
+// lockstep. Clamped to a sane range (10–250 km).
+function _defaultDayTripRadiusKm(){
+  try {
+    var r = (window.MaxDB && MaxDB.prefs) ? parseFloat(MaxDB.prefs.get("dayTripRadiusKm")) : NaN;
+    if (isFinite(r) && r >= 10 && r <= 250) return r;
+  } catch(_){}
+  return 60;
+}
 
 // v359.9: four more Settings-backed defaults (Bucket C completion).
 // Travelers count + with-kids are C1 (frequently varies — show on brief);
@@ -18890,7 +18922,7 @@ function showSettingsPanel(){
   if (existing) existing.remove();
 
   // Read current values.
-  var curHours = 6, curSights = 2, curPace = "enough", curDtHours = 3;
+  var curHours = 6, curSights = 2, curPace = "enough", curDtHours = 3, curDtRadius = 60;
   var curTravelers = 2, curWithKids = false, curTransport = "", curAccom = "";
   var curMobility = "", curDietary = "", curLanguages = "";
   var curDistUnits = "metric", curTempUnits = "celsius", curDateFmt = "iso", curCurrency = "";
@@ -18906,6 +18938,9 @@ function showSettingsPanel(){
       if (pm === "loose" || pm === "enough" || pm === "notmuch") curPace = pm;
       var dh = parseFloat(MaxDB.prefs.get("dayTripHours"));
       if (isFinite(dh) && dh > 0 && dh <= 6) curDtHours = dh;
+      // v359.51.14: day-trip radius preference.
+      var drk = parseFloat(MaxDB.prefs.get("dayTripRadiusKm"));
+      if (isFinite(drk) && drk >= 10 && drk <= 250) curDtRadius = drk;
       // v359.9: four more settings-backed defaults.
       var tc = parseInt(MaxDB.prefs.get("travelersCount"), 10);
       if (isFinite(tc) && tc >= 1 && tc <= 40) curTravelers = tc;
@@ -18996,7 +19031,7 @@ function showSettingsPanel(){
     +   '<div style="margin:18px 0 10px;border-top:1px dashed #d8d4c8;"></div>'
     +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:10px;">Day trips</div>'
 
-    +   '<div style="margin-bottom:6px;">'
+    +   '<div style="margin-bottom:14px;">'
     +     '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">'
     +       '<label for="sp-dth" style="font-weight:600;color:#222;flex:1;">Max drive time for a day trip</label>'
     +       '<div style="display:flex;align-items:center;gap:5px;">'
@@ -19006,6 +19041,41 @@ function showSettingsPanel(){
     +     '</div>'
     +     '<div style="font-size:11px;color:#777;line-height:1.5;">Anything within this drive time from a hub can be a day trip instead of its own overnight stop. Total round-trip; one hour each way is fine, two hours each way is the upper end.</div>'
     +   '</div>'
+
+    // v359.51.14: day-trip radius. Drives the picker's predictor,
+    // hub-eligibility check, role popover, AND the engine-picker
+    // clustering writer. Set in one place; flows everywhere.
+    // v359.51.15: input unit follows the user's distanceUnits pref
+    // (km vs miles). Internal storage stays km (canonical) — the
+    // input is converted to km on save, and the displayed value is
+    // converted from km on load.
+    +   (function(){
+        var imp = (typeof _defaultDistanceUnits === "function" && _defaultDistanceUnits() === "imperial");
+        // Convert km → display unit for the field's initial value,
+        // and pick range/step that feels natural in that unit.
+        var displayVal, minDisp, maxDisp, stepDisp, unitLbl, defaultLbl;
+        if (imp) {
+          displayVal = Math.round(curDtRadius * 0.621371);
+          minDisp = 6; maxDisp = 155; stepDisp = 5;
+          unitLbl = "miles";
+          defaultLbl = "~37 miles (60 km)";
+        } else {
+          displayVal = curDtRadius;
+          minDisp = 10; maxDisp = 250; stepDisp = 5;
+          unitLbl = "km";
+          defaultLbl = "60 km";
+        }
+        return '<div style="margin-bottom:6px;">'
+          +     '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">'
+          +       '<label for="sp-dt-radius" style="font-weight:600;color:#222;flex:1;">Day-trip radius from a hub</label>'
+          +       '<div style="display:flex;align-items:center;gap:5px;">'
+          +         '<input id="sp-dt-radius" type="number" min="'+minDisp+'" max="'+maxDisp+'" step="'+stepDisp+'" value="'+displayVal+'" inputmode="numeric" data-unit="'+(imp?"imperial":"metric")+'" style="width:64px;text-align:center;font-size:13px;font-weight:600;padding:5px 7px;border:1px solid #ccc;border-radius:5px;font-family:inherit;" />'
+          +         '<span style="font-size:12px;color:#666;">'+unitLbl+'</span>'
+          +       '</div>'
+          +     '</div>'
+          +     '<div style="font-size:11px;color:#777;line-height:1.5;">Straight-line distance from a hub a place must be within to qualify as a day trip. Default is '+defaultLbl+' (urban / Europe-style trips). Bump it up for long-range road trips, down for dense city clusters.</div>'
+          +   '</div>';
+      })()
 
     // v359.15: AVOIDANCES — soft preferences that apply to every trip
     // unless overridden on the brief.
@@ -19214,6 +19284,19 @@ function showSettingsPanel(){
     var spd = parseInt(document.getElementById("sp-spd").value, 10);
     var pm  = (box.querySelector('input[name="sp-pace"]:checked') || {}).value || "enough";
     var dth = parseFloat(document.getElementById("sp-dth").value);
+    // v359.51.14: day-trip radius pref. v359.51.15: convert from
+    // input unit (km or miles, per data-unit attribute) to km
+    // before persisting — storage is canonical km.
+    var drkEl = document.getElementById("sp-dt-radius");
+    var drk = NaN;
+    if (drkEl) {
+      var raw = parseFloat(drkEl.value);
+      if (drkEl.getAttribute("data-unit") === "imperial") {
+        drk = raw * 1.609344; // miles → km
+      } else {
+        drk = raw;
+      }
+    }
     var trav = parseInt(document.getElementById("sp-travelers").value, 10);
     var wk = !!document.getElementById("sp-with-kids").checked;
     var tr = (document.getElementById("sp-transport").value || "").trim();
@@ -19241,6 +19324,8 @@ function showSettingsPanel(){
     if (!isFinite(spd) || spd < 1 || spd > 6) spd = 2;
     if (pm !== "loose" && pm !== "enough" && pm !== "notmuch") pm = "enough";
     if (!isFinite(dth) || dth <= 0 || dth > 6) dth = 3;
+    // v359.51.14: clamp radius into the same range _defaultDayTripRadiusKm uses.
+    if (!isFinite(drk) || drk < 10 || drk > 250) drk = 60;
     if (!isFinite(trav) || trav < 1 || trav > 40) trav = 2;
     try {
       if (window.MaxDB && MaxDB.prefs) {
@@ -19248,6 +19333,8 @@ function showSettingsPanel(){
         MaxDB.prefs.set("sightsPerDay", spd);
         MaxDB.prefs.set("paceMode", pm);
         MaxDB.prefs.set("dayTripHours", dth);
+        // v359.51.14: persist day-trip radius (km).
+        MaxDB.prefs.set("dayTripRadiusKm", drk);
         MaxDB.prefs.set("travelersCount", trav);
         MaxDB.prefs.set("withKids", wk);
         MaxDB.prefs.set("transport", tr);
@@ -26208,10 +26295,11 @@ function _openTripDestRolePopover(destId){
   var srcCoords = _coordsFor(src);
 
   // Hub options = the OTHER destinations, sorted by distance from src.
-  // Within 60 km → preferred ("in range"); beyond → flagged as stretch.
+  // Within radius → preferred ("in range"); beyond → flagged as stretch.
   // Destinations whose coords we can't resolve are still listed
   // (distKm shown as "?") so the user isn't blocked.
-  var DAY_TRIP_RADIUS_KM = 60;
+  // v359.51.14: radius pulled from Settings (default 60 km).
+  var DAY_TRIP_RADIUS_KM = (typeof _defaultDayTripRadiusKm === "function") ? _defaultDayTripRadiusKm() : 60;
   var hubOptions = trip.destinations
     .filter(function(h){ return h && h.id !== src.id; })
     .map(function(h){
@@ -26244,9 +26332,16 @@ function _openTripDestRolePopover(destId){
   ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.32);z-index:10500;display:flex;align-items:center;justify-content:center;padding:20px;";
 
   var hubOpts = hubOptions.map(function(o){
-    var distLbl = (o.distKm == null)
-      ? "? km"
-      : (Math.round(o.distKm) + " km");
+    // v359.51.15: distances honor the user's km/miles pref via the
+    // shared _fmtDistance formatter.
+    var distLbl;
+    if (o.distKm == null) {
+      distLbl = "?";
+    } else if (typeof _fmtDistance === "function") {
+      distLbl = _fmtDistance(o.distKm);
+    } else {
+      distLbl = Math.round(o.distKm) + " km";
+    }
     var rangeLbl = (o.distKm == null) ? "" : (o.inRange ? "" : " — stretch");
     var label = o.hub.place + " (" + distLbl + ")" + rangeLbl;
     var sel = o.hub.id === defaultHubId ? " selected" : "";

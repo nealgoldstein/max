@@ -595,7 +595,17 @@
   // but new work should NOT touch this block. The build-time
   // clustering in engine-picker.js (v359.24) is the live piece that
   // still honors c.intent / c.dayTripHub.
-  var DAY_TRIP_RADIUS_KM = 60;
+  //
+  // v359.51.14: pulled from the global Settings helper so the value
+  // is consistent across picker, engine, and trip-view. Read lazily
+  // (via a getter) so user edits in Settings take effect on the next
+  // call without needing to re-render the picker module. Falls back
+  // to 60 km when the helper isn't loaded (tests / early boot).
+  function _dayTripRadiusKm(){
+    return (typeof global._defaultDayTripRadiusKm === "function")
+      ? global._defaultDayTripRadiusKm()
+      : 60;
+  }
   function _pickerDistKm(a, b) {
     if (!a || !b || a[0] == null || a[1] == null || b[0] == null || b[1] == null) return Infinity;
     // Equirectangular approx — fine at Europe scale.
@@ -637,7 +647,7 @@
       if (h.intent === "dayTrip") continue;  // day trips can't be hubs
       if (h.lat == null || h.lng == null) continue;
       var d = _pickerDistKm([c.lat, c.lng], [h.lat, h.lng]);
-      if (d < bestDist && d <= DAY_TRIP_RADIUS_KM) {
+      if (d < bestDist && d <= _dayTripRadiusKm()) {
         bestDist = d;
         bestHub = h;
       }
@@ -1126,7 +1136,7 @@
         })
         .map(function(h){
           var d = _pickerDistKm([cand.lat, cand.lng], [h.lat, h.lng]);
-          return { hub: h, distKm: d, inRange: d <= DAY_TRIP_RADIUS_KM };
+          return { hub: h, distKm: d, inRange: d <= _dayTripRadiusKm() };
         })
         .sort(function(a, b){ return a.distKm - b.distKm; });
     }
@@ -1147,8 +1157,16 @@
     ov.id = "role-popover";
     ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.32);z-index:10500;display:flex;align-items:center;justify-content:center;padding:20px;";
 
+    // v359.51.15: distances respect the user's km/miles pref via the
+    // shared formatter on the global. Falls back to "<n> km" when the
+    // formatter isn't loaded.
+    function _distLbl(km){
+      if (km == null) return "?";
+      if (global._fmtDistance) return global._fmtDistance(km);
+      return Math.round(km) + " km";
+    }
     var hubOpts = hubOptions.map(function(o){
-      var label = o.hub.place + " (" + Math.round(o.distKm) + " km)" + (o.inRange ? "" : " — stretch");
+      var label = o.hub.place + " (" + _distLbl(o.distKm) + ")" + (o.inRange ? "" : " — stretch");
       var sel = o.hub.id === curHubId ? " selected" : "";
       return '<option value="' + o.hub.id + '"' + sel + '>' + label + '</option>';
     }).join("");
@@ -1163,7 +1181,7 @@
         + '</label>')
       : ('<div style="padding:10px;border:1px dashed #ddd;border-radius:8px;background:#fafafa;font-size:12px;color:#888;line-height:1.5;">'
           + 'No overnight hub in range for a day trip. Keep an overnight closer than '
-          + DAY_TRIP_RADIUS_KM + ' km first.'
+          + _distLbl(_dayTripRadiusKm()) + ' first.'
         + '</div>');
 
     ov.innerHTML = ''
