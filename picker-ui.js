@@ -648,7 +648,10 @@
   //
   // No API key needed. CORS-enabled. Polite usage: caching + < ~20
   // requests per picker open.
-  var WIKI_CACHE_PREFIX = "max-wiki:";
+  // v359.37: cache prefix bumped to v2 so pre-search-fallback entries
+  // (which cached null results for disambig-page places like "Vik")
+  // are invalidated and re-tried with the new search behavior.
+  var WIKI_CACHE_PREFIX = "max-wiki:v2:";
   var WIKI_CACHE_TTL_MS = 7 * 24 * 3600 * 1000;
   function _wikiCacheKey(place, country) {
     return WIKI_CACHE_PREFIX
@@ -693,49 +696,82 @@
       .catch(function(){ return null; });
   }
 
+  // v359.37: Wikipedia search — for places whose verbatim summary
+  // returns 404 or a disambiguation page (e.g. "Vik" → disambig,
+  // canonical is "Vík í Mýrdal"; "Hofn" → no article, canonical is
+  // "Höfn"). Returns the best-match article title, or null.
+  function _wikiSearch(place, country) {
+    var query = encodeURIComponent((place + (country ? " " + country : "")).trim());
+    var url = "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=" + query + "&srlimit=3&format=json&origin=*";
+    return fetch(url, { headers: { "accept": "application/json" } })
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(j){
+        if (!j || !j.query || !Array.isArray(j.query.search) || !j.query.search.length) return null;
+        // Skip search results that look like disambiguation pages by
+        // name — the summary endpoint will filter those too, but this
+        // saves us a roundtrip.
+        for (var i = 0; i < j.query.search.length; i++) {
+          var title = j.query.search[i].title;
+          if (!title) continue;
+          if (/\(disambiguation\)$/i.test(title)) continue;
+          return title;
+        }
+        return null;
+      })
+      .catch(function(){ return null; });
+  }
+
+  // Build the cached data shape from a REST summary response.
+  function _buildWikiData(j) {
+    return {
+      thumbUrl: (j.thumbnail && j.thumbnail.source) || null,
+      originalUrl: (j.originalimage && j.originalimage.source) || null,
+      description: j.description || null,
+      extract: j.extract || null,
+    };
+  }
+
+  function _fetchSummaryByTitle(title) {
+    var url = "https://en.wikipedia.org/api/rest_v1/page/summary/" + title;
+    return fetch(url, { headers: { "accept": "application/json" } })
+      .then(function(r){ return r.ok ? r.json() : null; });
+  }
+
   function _fetchWikiSummary(place, country) {
     if (!place) return Promise.resolve(null);
     var cached = _wikiCacheGet(place, country);
     if (cached !== null) return Promise.resolve(cached);
-    // Try the place name verbatim first — Wikipedia handles redirects
-    // and accent variants well. The summary endpoint returns a small
-    // JSON: { title, description, thumbnail: { source, width, height } }
     var title = encodeURIComponent(place.trim().replace(/ /g, "_"));
-    var url = "https://en.wikipedia.org/api/rest_v1/page/summary/" + title;
-    return fetch(url, { headers: { "accept": "application/json" } })
-      .then(function(r){ return r.ok ? r.json() : null; })
+
+    // Step 1: try the place name verbatim.
+    return _fetchSummaryByTitle(title)
+      .then(function(j){
+        if (j && j.type !== "disambiguation") return j;
+        // Step 2: summary returned 404 or disambig — search for the
+        // right article title and re-fetch summary.
+        return _wikiSearch(place, country).then(function(altTitle){
+          if (!altTitle) return null;
+          var altEncoded = encodeURIComponent(altTitle.replace(/ /g, "_"));
+          return _fetchSummaryByTitle(altEncoded).then(function(j2){
+            if (j2 && j2.type !== "disambiguation") return j2;
+            return null;
+          });
+        });
+      })
       .then(function(j){
         if (!j) {
           _wikiCacheSet(place, country, null);
           return null;
         }
-        // Skip disambiguation pages — they have no useful place info.
-        if (j.type === "disambiguation") {
-          _wikiCacheSet(place, country, null);
-          return null;
-        }
-        var data = {
-          thumbUrl: (j.thumbnail && j.thumbnail.source) || null,
-          // v359.35: also cache the originalimage so the lightbox can
-          // show a high-res version without doing URL-size guesswork.
-          // Wikipedia's REST summary includes both thumbnail (~320px)
-          // and originalimage (full resolution).
-          originalUrl: (j.originalimage && j.originalimage.source) || null,
-          description: j.description || null,
-          // v359.36: keep the full extract — the lightbox has its own
-          // scrollable container, so the 237-char cut was just arbitrary
-          // visual truncation. Cache the whole first paragraph.
-          extract: j.extract || null,
-        };
+        var data = _buildWikiData(j);
         if (data.thumbUrl) {
           _wikiCacheSet(place, country, data);
           return data;
         }
-        // v359.34: no thumbnail from summary — try the broader Action
-        // API pageimages endpoint. If that also returns nothing, we
-        // still cache the description + extract so the lightbox has
-        // something to show; the row falls back to the letter avatar.
-        return _fetchPageImage(title).then(function(altThumb){
+        // Step 3: no thumbnail in summary — try the Action API
+        // pageimages endpoint as a last-resort image source.
+        var resolvedTitle = encodeURIComponent((j.title || place).replace(/ /g, "_"));
+        return _fetchPageImage(resolvedTitle).then(function(altThumb){
           if (altThumb) data.thumbUrl = altThumb;
           _wikiCacheSet(place, country, data);
           return data;
