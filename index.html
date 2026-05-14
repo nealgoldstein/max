@@ -10500,6 +10500,9 @@ function _pmOpenWikiLightbox(thumbEl){
   ov.innerHTML = ''
     + '<div style="background:#fff;border-radius:12px;max-width:560px;width:100%;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,0.3);">'
     +   '<div id="pm-wiki-lightbox-photo" style="width:100%;height:280px;background:#eef2f7;background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;color:#fff;font-size:64px;font-weight:700;"></div>'
+    // v359.38: attribution line under the photo. Hidden by default;
+    // fetch populates it. Required for CC-BY / CC-BY-SA compliance.
+    +   '<div id="pm-wiki-lightbox-attribution" style="display:none;padding:6px 22px 0;font-size:10.5px;color:#999;line-height:1.5;"></div>'
     +   '<div style="padding:18px 22px 8px;">'
     +     '<div style="font-size:20px;font-weight:700;color:#111;">' + (place.replace(/</g,"&lt;")) + '</div>'
     +     '<div id="pm-wiki-lightbox-desc" style="font-size:13px;color:#888;font-style:italic;margin-top:4px;display:none;"></div>'
@@ -10544,6 +10547,26 @@ function _pmOpenWikiLightbox(thumbEl){
         extract.style.display = "";
       } else if (!data && empty) {
         empty.style.display = "";
+      }
+      // v359.38: attribution display. Only shown when we have a
+      // real photo (data.thumbUrl) AND extmetadata returned author
+      // or license info.
+      var attrEl = ov.querySelector("#pm-wiki-lightbox-attribution");
+      if (attrEl && data && data.attribution && (data.thumbUrl || data.originalUrl)) {
+        var a = data.attribution;
+        var artist = a.artist ? a.artist.replace(/</g, "&lt;").replace(/>/g, "&gt;") : "Unknown";
+        var html = "Photo: " + artist;
+        if (a.licenseShort) {
+          var lic = a.licenseShort.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+          if (a.licenseUrl) {
+            html += ' — <a href="' + a.licenseUrl + '" target="_blank" rel="noopener noreferrer" style="color:#888;text-decoration:underline;">' + lic + '</a>';
+          } else {
+            html += " — " + lic;
+          }
+        }
+        html += ' · <a href="https://en.wikipedia.org/wiki/' + encodeURIComponent((data.title || place).replace(/ /g, "_")) + '" target="_blank" rel="noopener noreferrer" style="color:#888;text-decoration:underline;">Wikipedia</a>';
+        attrEl.innerHTML = html;
+        attrEl.style.display = "";
       }
     });
   }

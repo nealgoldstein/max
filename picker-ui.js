@@ -651,7 +651,11 @@
   // v359.37: cache prefix bumped to v2 so pre-search-fallback entries
   // (which cached null results for disambig-page places like "Vik")
   // are invalidated and re-tried with the new search behavior.
-  var WIKI_CACHE_PREFIX = "max-wiki:v2:";
+  // v359.38: bumped to v3 so existing entries get re-fetched with
+  // the new attribution field (Artist + License). Without this bump,
+  // already-cached photos would show no credit and we'd stay
+  // technically non-compliant until 7-day TTL expired.
+  var WIKI_CACHE_PREFIX = "max-wiki:v3:";
   var WIKI_CACHE_TTL_MS = 7 * 24 * 3600 * 1000;
   function _wikiCacheKey(place, country) {
     return WIKI_CACHE_PREFIX
@@ -677,6 +681,54 @@
       );
     } catch(_) {}
   }
+  // v359.38: image attribution helpers. The Wikimedia file page
+  // carries license + author metadata in `extmetadata`. We fetch
+  // these so the lightbox can show "Photo: {Artist} — {License}"
+  // and comply with CC-BY / CC-BY-SA terms.
+  function _stripHtml(s) {
+    if (!s) return "";
+    try {
+      var d = document.createElement("div");
+      d.innerHTML = s;
+      return (d.textContent || d.innerText || "").trim();
+    } catch(_) {
+      return String(s).replace(/<[^>]+>/g, "").trim();
+    }
+  }
+  // Extract the underlying file name from a Wikipedia upload URL.
+  // /thumb/X/XX/{filename}/NNNpx-...  → filename
+  // /commons/X/XX/{filename}          → filename
+  function _wikiFilenameFromUrl(url) {
+    if (!url) return null;
+    var m = url.match(/\/thumb\/[a-f0-9]\/[a-f0-9]{2}\/([^/]+)\//);
+    if (m) return decodeURIComponent(m[1]);
+    m = url.match(/\/commons\/[a-f0-9]\/[a-f0-9]{2}\/([^/]+)$/);
+    if (m) return decodeURIComponent(m[1]);
+    return null;
+  }
+  function _fetchImageAttribution(thumbUrl) {
+    var filename = _wikiFilenameFromUrl(thumbUrl);
+    if (!filename) return Promise.resolve(null);
+    var fileTitle = encodeURIComponent("File:" + filename);
+    var url = "https://en.wikipedia.org/w/api.php?action=query&titles=" + fileTitle + "&prop=imageinfo&iiprop=extmetadata&format=json&origin=*";
+    return fetch(url, { headers: { "accept": "application/json" } })
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(j){
+        if (!j || !j.query || !j.query.pages) return null;
+        var pages = j.query.pages;
+        var first = Object.keys(pages).map(function(k){ return pages[k]; })[0];
+        var info = first && first.imageinfo && first.imageinfo[0];
+        var meta = info && info.extmetadata;
+        if (!meta) return null;
+        var artist = _stripHtml((meta.Artist && meta.Artist.value) || "");
+        var licenseShort = (meta.LicenseShortName && meta.LicenseShortName.value) || "";
+        var licenseUrl = (meta.LicenseUrl && meta.LicenseUrl.value) || "";
+        if (!artist && !licenseShort) return null;
+        return { artist: artist, licenseShort: licenseShort, licenseUrl: licenseUrl };
+      })
+      .catch(function(){ return null; });
+  }
+
   // v359.34: when the REST summary has no thumbnail, fall back to the
   // Action API's pageimages endpoint — the same image Wikipedia search
   // uses. Catches places whose article has no infobox image but does
@@ -765,7 +817,6 @@
         }
         var data = _buildWikiData(j);
         if (data.thumbUrl) {
-          _wikiCacheSet(place, country, data);
           return data;
         }
         // Step 3: no thumbnail in summary — try the Action API
@@ -773,6 +824,20 @@
         var resolvedTitle = encodeURIComponent((j.title || place).replace(/ /g, "_"));
         return _fetchPageImage(resolvedTitle).then(function(altThumb){
           if (altThumb) data.thumbUrl = altThumb;
+          return data;
+        });
+      })
+      .then(function(data){
+        if (!data) return null;
+        // v359.38: attribution fetch — only when we have an image.
+        // Adds ~150ms per place on first fetch; cached afterward.
+        var attrSrc = data.thumbUrl || data.originalUrl;
+        if (!attrSrc) {
+          _wikiCacheSet(place, country, data);
+          return data;
+        }
+        return _fetchImageAttribution(attrSrc).then(function(attr){
+          if (attr) data.attribution = attr;
           _wikiCacheSet(place, country, data);
           return data;
         });
