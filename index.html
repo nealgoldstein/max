@@ -10311,8 +10311,13 @@ function _renderPlaceActivityItems(){
       // function (see _pmHydrateWikiThumbs); placeholders here are
       // keyed by lowercase place name so the post-render loop can
       // populate every matching row across sections.
+      // v359.33: bumped from 34→44px for legibility; click opens a
+      // lightbox via _pmOpenWikiLightbox. data-place keeps the
+      // original capitalization so the lightbox can show the right
+      // place name and re-fetch the cached Wikipedia summary.
       var _placeKey = (d.place || "").toLowerCase().replace(/"/g, "&quot;");
-      var _thumbHtml = '<div class="tb-act-thumb" data-place-key="' + _placeKey + '" style="width:34px;height:34px;border-radius:5px;background:#eef2f7;background-size:cover;background-position:center;flex-shrink:0;margin-top:1px;"></div>';
+      var _placeDisplay = _pmEsc(d.place || "").replace(/"/g, "&quot;");
+      var _thumbHtml = '<div class="tb-act-thumb" data-place-key="' + _placeKey + '" data-place="' + _placeDisplay + '" onclick="_pmOpenWikiLightbox(this);event.stopPropagation();" style="width:44px;height:44px;border-radius:6px;background:#eef2f7;background-size:cover;background-position:center;flex-shrink:0;margin-top:1px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px;font-weight:700;letter-spacing:.02em;"></div>';
 
       var leftHtml = '<div class="tb-act-col-left">'
         + '<div style="display:flex;align-items:flex-start;gap:8px;">'
@@ -10413,6 +10418,10 @@ function _renderPlaceActivityItems(){
   // dedupe by lowercase place key and update ALL matching placeholder
   // elements at once. localStorage cache (7-day) makes re-renders
   // (toggle keep, stepper, etc.) hit cache instantly.
+  // v359.33: when Wikipedia returns no photo, render a letter avatar
+  // (colored circle with first 1–2 letters of place name) so the row
+  // stays visually balanced. Color hashed from the place name so the
+  // same place is always the same color.
   (function _pmHydrateWikiThumbs(){
     if (!window.MaxPickerUI || typeof MaxPickerUI._fetchWikiSummary !== "function") return;
     var seen = {};
@@ -10421,26 +10430,27 @@ function _renderPlaceActivityItems(){
       var key = el.getAttribute("data-place-key");
       if (!key || seen[key]) return;
       seen[key] = true;
-      // Reconstruct a usable place name. data-place-key is lowercased
-      // for matching; for the Wikipedia title we want the original
-      // capitalization, which we look up from byDest (or fall back to
-      // the lowercased key if not found).
-      var displayName = key;
-      // Look up the original case from the rendered row's name span.
-      var srcRow = el.closest(".tb-dest-major");
-      if (srcRow) {
-        var nameSpan = srcRow.querySelector(".tb-act-name span");
-        if (nameSpan && nameSpan.textContent) displayName = nameSpan.textContent.trim();
-      }
+      var displayName = el.getAttribute("data-place") || key;
       MaxPickerUI._fetchWikiSummary(displayName, "").then(function(data){
-        if (!data) return;
-        if (data.thumbUrl) {
-          list.querySelectorAll('.tb-act-thumb[data-place-key="' + key.replace(/"/g, '\\"') + '"]').forEach(function(t){
+        var selKey = key.replace(/"/g, '\\"');
+        if (data && data.thumbUrl) {
+          // Photo path
+          list.querySelectorAll('.tb-act-thumb[data-place-key="' + selKey + '"]').forEach(function(t){
             t.style.backgroundImage = "url('" + data.thumbUrl.replace(/'/g, "%27") + "')";
+            t.style.background = t.style.background; // keep cursor/borders
+            t.textContent = ""; // strip any avatar fallback
+          });
+        } else {
+          // Avatar fallback — color hashed from place name, first 1-2 letters
+          var avatarBg = _pmHashColor(displayName);
+          var initial = _pmInitials(displayName);
+          list.querySelectorAll('.tb-act-thumb[data-place-key="' + selKey + '"]').forEach(function(t){
+            t.style.backgroundColor = avatarBg;
+            t.textContent = initial;
           });
         }
-        if (data.description) {
-          list.querySelectorAll('.tb-act-wiki-desc[data-place-key="' + key.replace(/"/g, '\\"') + '"]').forEach(function(d){
+        if (data && data.description) {
+          list.querySelectorAll('.tb-act-wiki-desc[data-place-key="' + selKey + '"]').forEach(function(d){
             d.textContent = data.description;
             d.style.display = "";
           });
@@ -10448,6 +10458,87 @@ function _renderPlaceActivityItems(){
       });
     });
   })();
+}
+
+// v359.33: pleasant-palette color hash for avatar fallback.
+function _pmHashColor(s){
+  var palette = ["#7a8aa8","#8a7aa8","#6b8e9b","#a8826b","#8a9b6b","#9b6b8a","#6b9b8a","#8e6b9b"];
+  var h = 0;
+  s = String(s || "");
+  for (var i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  return palette[Math.abs(h) % palette.length];
+}
+function _pmInitials(s){
+  s = String(s || "").trim();
+  if (!s) return "·";
+  var parts = s.split(/\s+/);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return s.substring(0, 2).toUpperCase();
+}
+
+// v359.33: thumbnail lightbox — click any thumbnail to see the
+// full-size Wikipedia photo + factual description + extract. Graceful
+// fallback when there's no Wikipedia entry: shows the place name,
+// avatar, and a search link.
+function _pmOpenWikiLightbox(thumbEl){
+  if (!thumbEl) return;
+  var place = thumbEl.getAttribute("data-place") || thumbEl.getAttribute("data-place-key") || "";
+  if (!place) return;
+  // Pull cached data via the same helper (cache hit returns instantly,
+  // miss kicks off a fetch and resolves later).
+  var existing = document.getElementById("pm-wiki-lightbox");
+  if (existing) existing.remove();
+  var ov = document.createElement("div");
+  ov.id = "pm-wiki-lightbox";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:11000;display:flex;align-items:center;justify-content:center;padding:24px;";
+  ov.innerHTML = ''
+    + '<div style="background:#fff;border-radius:12px;max-width:560px;width:100%;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,0.3);">'
+    +   '<div id="pm-wiki-lightbox-photo" style="width:100%;height:280px;background:#eef2f7;background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;color:#fff;font-size:64px;font-weight:700;"></div>'
+    +   '<div style="padding:18px 22px 8px;">'
+    +     '<div style="font-size:20px;font-weight:700;color:#111;">' + (place.replace(/</g,"&lt;")) + '</div>'
+    +     '<div id="pm-wiki-lightbox-desc" style="font-size:13px;color:#888;font-style:italic;margin-top:4px;display:none;"></div>'
+    +   '</div>'
+    +   '<div id="pm-wiki-lightbox-extract" style="padding:0 22px 14px;font-size:12.5px;line-height:1.6;color:#444;overflow-y:auto;max-height:240px;display:none;"></div>'
+    +   '<div id="pm-wiki-lightbox-empty" style="padding:0 22px 14px;font-size:12.5px;line-height:1.6;color:#888;display:none;">No Wikipedia summary available. <a href="https://en.wikipedia.org/wiki/Special:Search/' + encodeURIComponent(place) + '" target="_blank" rel="noopener" style="color:#1a5fa8;">Search Wikipedia →</a></div>'
+    +   '<div style="padding:8px 22px 18px;display:flex;justify-content:flex-end;">'
+    +     '<button id="pm-wiki-lightbox-close" style="font-size:13px;font-weight:500;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Close</button>'
+    +   '</div>'
+    + '</div>';
+  document.body.appendChild(ov);
+  function close(){ if (ov && ov.parentNode) ov.parentNode.removeChild(ov); }
+  ov.onclick = function(e){ if (e.target === ov) close(); };
+  var closeBtn = ov.querySelector("#pm-wiki-lightbox-close");
+  if (closeBtn) closeBtn.onclick = close;
+  // Fetch and populate.
+  if (window.MaxPickerUI && typeof MaxPickerUI._fetchWikiSummary === "function") {
+    MaxPickerUI._fetchWikiSummary(place, "").then(function(data){
+      var photo = ov.querySelector("#pm-wiki-lightbox-photo");
+      var desc = ov.querySelector("#pm-wiki-lightbox-desc");
+      var extract = ov.querySelector("#pm-wiki-lightbox-extract");
+      var empty = ov.querySelector("#pm-wiki-lightbox-empty");
+      if (data && data.thumbUrl) {
+        // Bump to a bigger photo by manipulating the Wikipedia URL —
+        // their thumbnail URLs end in /SIZEpx-FILENAME, so we
+        // substitute a larger size.
+        var bigUrl = data.thumbUrl.replace(/\/\d+px-/, "/640px-");
+        photo.style.backgroundImage = "url('" + bigUrl.replace(/'/g, "%27") + "')";
+      } else if (photo) {
+        // Avatar in the big photo slot
+        photo.style.backgroundColor = _pmHashColor(place);
+        photo.textContent = _pmInitials(place);
+      }
+      if (data && data.description && desc) {
+        desc.textContent = data.description;
+        desc.style.display = "";
+      }
+      if (data && data.extract && extract) {
+        extract.textContent = data.extract;
+        extract.style.display = "";
+      } else if (!data && empty) {
+        empty.style.display = "";
+      }
+    });
+  }
 }
 
 // Round DN.1: render a horizontal sticky chip row that jumps to each
