@@ -15504,32 +15504,17 @@ function _ceSelectCandidateOnMap(candId){
 // new one. Quiet no-op when the map isn't mounted or fewer than 2 points
 // are placed.
 function _redrawCePolyline(){
+  // v359.51.3: route polyline removed from the candidate-explorer map
+  // — same call Neal made for the place-mode picker (_pmMap) in v357:
+  // the picker is about WHICH places to include; the visit sequence
+  // gets committed in the trip view. Day-trip dashed spurs stay.
+  // Function kept as a no-op so existing call sites don't need to be
+  // hunted down; any pre-existing polyline state on the map gets torn
+  // down here so a hot-reload from an older build clears cleanly.
   if (_cePolyline && _ceMap) {
     try { _ceMap.removeLayer(_cePolyline); } catch(e) {}
   }
   _cePolyline = null;
-  if (!_ceMap || !_tb || !Array.isArray(_tb.candidates)) return;
-  var route = MaxEnginePicker.activeCandidates(_tb.candidates)
-    .filter(function(c){
-      return c && typeof c.order === "number" && isFinite(c.order)
-        && isFinite(c.lat) && isFinite(c.lng)
-        && !(c.lat === 0 && c.lng === 0);
-    })
-    .sort(function(a, b){ return a.order - b.order; });
-  if (route.length < 2) return;
-  var coords = route.map(function(c){ return [c.lat, c.lng]; });
-  // Desaturated green — sits behind the dots so the numbered pins
-  // dominate visually but the path reads as a single continuous shape.
-  // No mode-specific styling in v1; journey-class edges (Glacier Express,
-  // ferries, etc.) get their own line styles when that work lands.
-  _cePolyline = L.polyline(coords, {
-    color: "#5a8a6a",
-    weight: 3,
-    opacity: 0.75,
-    lineCap: "round",
-    lineJoin: "round",
-    interactive: false
-  }).addTo(_ceMap);
 }
 
 async function retryDiscoveryCandidates() {
