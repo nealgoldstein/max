@@ -722,9 +722,10 @@
           // and originalimage (full resolution).
           originalUrl: (j.originalimage && j.originalimage.source) || null,
           description: j.description || null,
-          extract: (j.extract && j.extract.length > 240)
-            ? j.extract.substring(0, 237) + "…"
-            : (j.extract || null),
+          // v359.36: keep the full extract — the lightbox has its own
+          // scrollable container, so the 237-char cut was just arbitrary
+          // visual truncation. Cache the whole first paragraph.
+          extract: j.extract || null,
         };
         if (data.thumbUrl) {
           _wikiCacheSet(place, country, data);
