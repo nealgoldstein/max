@@ -24076,21 +24076,19 @@ function updateMainMap(){
       var primaryPlace = (group.dests[0].dest.place || "").trim();
       var abbrev = primaryPlace ? primaryPlace.substring(0, 2) : "·";
       var size = 22;
-      var color = "#1a5fa8"; // matches picker's stay-pin blue
-      // v359.51.18: if ANY dest in this group is a day-trip candidate,
-      // add a purple outer ring via box-shadow. The pin still reads
-      // as a blue overnight (because that's what it currently is) but
-      // the purple halo telegraphs "you could convert this to a day
-      // trip" so the picker's purple hint carries through.
+      // v359.51.23: "could be a day trip" overnights are now FULL
+      // purple, not a purple-ring-over-blue. Neal: "purple ring is
+      // hard to see, I'd leave them purple." Distinguishes from
+      // committed day trips by size (22px vs 20px) and by spur
+      // (committed has a purple line to its hub; the candidate
+      // overnight is still on the main route polyline).
       var _isCandidate = group.dests.some(function(x){
         return x && x.dest && _couldBeDayTripDestIds[x.dest.id];
       });
-      var _ringShadow = _isCandidate
-        ? "0 0 0 2px #5b3f8f, 0 0 0 4px rgba(91,63,143,0.18), 0 1px 4px rgba(0,0,0,0.25)"
-        : "0 1px 4px rgba(0,0,0,0.25)";
+      var color = _isCandidate ? "#5b3f8f" : "#1a5fa8";
       var html = '<div style="background:'+color+';color:#fff;border-radius:50%;width:'
         + size + 'px;height:' + size + 'px;border:2px solid #fff;'
-        + 'box-shadow:'+_ringShadow+';display:flex;align-items:center;justify-content:center;'
+        + 'box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;'
         + 'font-size:9px;font-weight:700;letter-spacing:-0.02em;">'
         + abbrev
         + '</div>';
