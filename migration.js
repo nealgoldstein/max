@@ -18,6 +18,14 @@
 //        Migrates: dest.dayTrips[] → PlanItems with type:dayTrip
 //                  on the hub destination's day[0]
 //
+//   v2 — DayTrip PlanItem → Route. Day-trips become first-class
+//        Routes with kind:"dayTrip" (from === to === hub destId),
+//        the source place attached as a {type:"stop", priority:"iconic"}
+//        PlanItem on the route's planItems[], and the hub day's
+//        {type:"dayTrip"} PlanItem replaced with {type:"route", routeId}.
+//        Also backfills stable day ids when missing (the route↔day
+//        bidirectional reference needs them).
+//
 // Trip envelopes that don't carry _schemaVersion are treated as
 // version 0 (pre-migration). After migration, _schemaVersion is
 // bumped so subsequent reads short-circuit.
@@ -25,7 +33,7 @@
 (function (global) {
   'use strict';
 
-  var CURRENT_SCHEMA_VERSION = 1;
+  var CURRENT_SCHEMA_VERSION = 2;
 
   // ── Helpers ─────────────────────────────────────────────────
 
@@ -56,6 +64,22 @@
   // produces the same IDs (idempotency).
   function _makeDayTripPlanItemId(destId, placeId) {
     return 'pi-dt-' + destId + '-' + placeId;
+  }
+
+  // Deterministic Route ID for v2-migrated day-trip routes. Derived
+  // from the hub destination id + the day-trip's target placeId so
+  // re-running v2 migration produces the same id (idempotency).
+  function _makeDayTripRouteId(hubDestId, stopPlaceId) {
+    return 'r-dt-' + hubDestId + '-' + stopPlaceId;
+  }
+
+  // Deterministic Day ID — built from the destination id + the index
+  // of the day within that destination. Stable as long as the
+  // destination's date range doesn't change. (When dates DO change,
+  // existing references would point to a now-different calendar day;
+  // _applyConstraintChanges-style flows must rebuild day ids too.)
+  function _makeDayId(destId, dayIdx) {
+    return 'd-' + destId + '-' + dayIdx;
   }
 
   // Get-or-create an entry in trip.places{} for the given place
@@ -215,6 +239,123 @@
     return envelope;
   }
 
+  // ── Migration: schema v1 → v2 ───────────────────────────────
+  //
+  // Day-trips were v1 PlanItems on a hub's day[0]. In v2 they
+  // become first-class Routes with kind:"dayTrip" (from === to ===
+  // hubDestId), and the target place is carried as a {type:"stop",
+  // priority:"iconic"} PlanItem inside the route's planItems[].
+  // The hub day's planItems[] gets a {type:"route", routeId}
+  // reference in place of the original dayTrip PlanItem.
+  //
+  // Also backfills stable day ids when missing — the bidirectional
+  // route.transitDays[] ↔ day.id reference needs every day to have
+  // a stable identifier.
+  function _migrateV1toV2(envelope) {
+    if (!envelope || !envelope.trip) return envelope;
+    var trip = envelope.trip;
+
+    if (!Array.isArray(trip.routes)) trip.routes = [];
+
+    var destinations = Array.isArray(trip.destinations) ? trip.destinations : [];
+
+    // Pass 1: backfill day ids. Existing legacy data uses {id,lbl,
+    // note,items}; newer _buildDaysForDest output uses {date,
+    // planItems} with no id. Normalize so every day has an id.
+    destinations.forEach(function (dest) {
+      if (!dest || !Array.isArray(dest.days)) return;
+      var destKey = dest.id || dest.placeId || 'unknown';
+      dest.days.forEach(function (day, idx) {
+        if (day && !day.id) day.id = _makeDayId(destKey, idx);
+      });
+    });
+
+    // Pass 2: lift every {type:"dayTrip"} PlanItem out of its day,
+    // mint a Route for it, replace with a {type:"route"} reference.
+    // Idempotent: if a route for (hubDestId, stopPlaceId) already
+    // exists, add this day to its transitDays instead of duplicating.
+    destinations.forEach(function (dest) {
+      if (!dest || !Array.isArray(dest.days)) return;
+      var hubDestId = dest.id || dest.placeId;
+      if (!hubDestId) return;
+
+      dest.days.forEach(function (day) {
+        if (!day || !Array.isArray(day.planItems)) return;
+
+        var nextPlanItems = [];
+        day.planItems.forEach(function (pi) {
+          if (!pi || pi.type !== 'dayTrip') {
+            nextPlanItems.push(pi);
+            return;
+          }
+          var stopPlaceId = pi.placeId;
+          if (!stopPlaceId) {
+            // Malformed — no place to point at. Drop the PlanItem
+            // silently; the place dictionary entry (if any) is
+            // unaffected.
+            return;
+          }
+          var routeId = _makeDayTripRouteId(hubDestId, stopPlaceId);
+
+          // Find or create the route for this (hub, target) pair.
+          var route = trip.routes.find(function (r) { return r && r.id === routeId; });
+          if (!route) {
+            var stopPlanItem = {
+              id: 'pi-stop-' + routeId,
+              type: 'stop',
+              state: pi.state || 'suggestion',
+              placeId: stopPlaceId,
+              priority: 'iconic',  // day-trip target — the point of the loop
+              recommendedMin: null,
+              notes: pi.notes || '',
+              source: pi.source === 'legacy-daytrip' ? 'legacy-daytrip' : (pi.source || 'llm-suggestion'),
+              // Carry the legacy bookkeeping along so the engine can
+              // still do sourceNights math during the transition.
+              legacy: pi.legacy || null
+            };
+            route = {
+              id: routeId,
+              kind: 'dayTrip',
+              fromDestId: hubDestId,
+              toDestId: hubDestId,
+              modeOptions: [],
+              modeChosen: null,
+              transitDays: day.id ? [day.id] : [],
+              durationHours: null,
+              distKm: (pi.legacy && typeof pi.legacy.distKm === 'number') ? pi.legacy.distKm : null,
+              character: 'dayTrip',
+              fuelStops: [],
+              planItems: [stopPlanItem],
+              bookings: [],
+              notes: ''
+            };
+            trip.routes.push(route);
+          } else if (day.id && route.transitDays.indexOf(day.id) < 0) {
+            // Route exists already (rare: same hub+target attached
+            // to multiple days). Add this day to its transitDays.
+            route.transitDays.push(day.id);
+          }
+
+          // Replace the dayTrip PlanItem with a route reference on
+          // this day. Multiple day-references to the same route are
+          // fine (a multi-day day-trip — also rare).
+          nextPlanItems.push({
+            id: 'pi-rt-' + routeId + '-' + (day.id || 'na'),
+            type: 'route',
+            state: 'scheduled',
+            routeId: routeId,
+            source: 'migration-v1-v2'
+          });
+        });
+
+        day.planItems = nextPlanItems;
+      });
+    });
+
+    trip._schemaVersion = 2;
+    return envelope;
+  }
+
   // ── Public entry point ──────────────────────────────────────
 
   // Migrate an envelope to the current schema version. Idempotent —
@@ -232,6 +373,7 @@
     if (version >= CURRENT_SCHEMA_VERSION) return envelope;
 
     if (version < 1) envelope = _migrateV0toV1(envelope);
+    if (version < 2) envelope = _migrateV1toV2(envelope);
 
     return envelope;
   }
@@ -257,8 +399,12 @@
     _internal: {
       makePlaceId: _makePlaceId,
       makeDayTripPlanItemId: _makeDayTripPlanItemId,
+      makeDayTripRouteId: _makeDayTripRouteId,
+      makeDayId: _makeDayId,
       buildDaysForDest: _buildDaysForDest,
       getOrCreatePlace: _getOrCreatePlace,
+      migrateV0toV1: _migrateV0toV1,
+      migrateV1toV2: _migrateV1toV2,
     },
   };
 })(typeof window !== 'undefined' ? window : this);

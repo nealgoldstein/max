@@ -161,11 +161,11 @@ describe('buildDaysForDest — calendar days from dateFrom/dateTo', () => {
 // ── Suite: migrateTripShape (v0 → v1) ──────────────────────────
 
 describe('migrateTripShape — sets schema version', () => {
-  test('legacy envelope (no _schemaVersion) gets bumped to 1', () => {
+  test('legacy envelope (no _schemaVersion) gets bumped to current', () => {
     const env = legacyEnvelope();
     assert.strictEqual(env.trip._schemaVersion, undefined);
     MaxMigration.migrateTripShape(env);
-    assert.strictEqual(env.trip._schemaVersion, 1);
+    assert.strictEqual(env.trip._schemaVersion, MaxMigration.CURRENT_SCHEMA_VERSION);
   });
 
   test('null envelope is a no-op (no throw)', () => {
@@ -365,10 +365,17 @@ describe('migrateTripShape — dest.placeId + dest.days[]', () => {
   });
 });
 
-describe('migrateTripShape — dest.dayTrips → PlanItems', () => {
+// These tests use the per-version migrator _migrateV0toV1 so they
+// can assert the v1 intermediate state (dayTrip-typed PlanItems on
+// day[0]). The full pipeline goes v0 → v1 → v2; v2 converts those
+// PlanItems into route references, asserted in a separate suite below.
+const _migrateV0toV1 = MaxMigration._internal.migrateV0toV1;
+const _migrateV1toV2 = MaxMigration._internal.migrateV1toV2;
+
+describe('migrateTripShape v0→v1 — dest.dayTrips → PlanItems on day[0]', () => {
   test('legacy dayTrip becomes a PlanItem on day[0]', () => {
     const env = legacyEnvelope();
-    MaxMigration.migrateTripShape(env);
+    _migrateV0toV1(env);
     const day0 = env.trip.destinations[0].days[0];
     assert.strictEqual(day0.planItems.length, 1);
     const pi = day0.planItems[0];
@@ -380,7 +387,7 @@ describe('migrateTripShape — dest.dayTrips → PlanItems', () => {
 
   test('PlanItem carries legacy bookkeeping (sourceNights, hub)', () => {
     const env = legacyEnvelope();
-    MaxMigration.migrateTripShape(env);
+    _migrateV0toV1(env);
     const pi = env.trip.destinations[0].days[0].planItems[0];
     assert.strictEqual(pi.legacy.sourceNights, 1);
     assert.strictEqual(pi.legacy.absorbedFromHub, 'Reykjavík');
@@ -389,7 +396,7 @@ describe('migrateTripShape — dest.dayTrips → PlanItems', () => {
 
   test('PlanItem notes come from whyItFits', () => {
     const env = legacyEnvelope();
-    MaxMigration.migrateTripShape(env);
+    _migrateV0toV1(env);
     const pi = env.trip.destinations[0].days[0].planItems[0];
     assert.strictEqual(pi.notes, 'Iconic geothermal spa');
   });
@@ -412,20 +419,20 @@ describe('migrateTripShape — dest.dayTrips → PlanItems', () => {
         }]
       }
     });
-    MaxMigration.migrateTripShape(env);
+    _migrateV0toV1(env);
     const day0 = env.trip.destinations[0].days[0];
     assert.strictEqual(day0.planItems.length, 3);
     const places = day0.planItems.map(pi => pi.placeId).sort();
     assert.deepStrictEqual(places, ['pl-blue-lagoon', 'pl-geysir', 'pl-thingvellir']);
   });
 
-  test('idempotent — second migration does not duplicate PlanItems', () => {
+  test('idempotent — second v0→v1 migration does not duplicate PlanItems', () => {
     const env = legacyEnvelope();
-    MaxMigration.migrateTripShape(env);
+    _migrateV0toV1(env);
     const countAfterFirst = env.trip.destinations[0].days[0].planItems.length;
     // Reset schema version to force a re-run (simulates a partial earlier migration)
     delete env.trip._schemaVersion;
-    MaxMigration.migrateTripShape(env);
+    _migrateV0toV1(env);
     const countAfterSecond = env.trip.destinations[0].days[0].planItems.length;
     assert.strictEqual(countAfterSecond, countAfterFirst,
       'PlanItems should not duplicate on re-migration');
@@ -450,7 +457,7 @@ describe('migrateTripShape — dest.dayTrips → PlanItems', () => {
         }]
       }
     });
-    MaxMigration.migrateTripShape(env);
+    _migrateV0toV1(env);
     const planItems = env.trip.destinations[0].days[0].planItems;
     assert.strictEqual(planItems.length, 1,
       'only the valid dayTrip should become a PlanItem');
@@ -482,7 +489,7 @@ describe('migrateTripShape — empty / edge inputs', () => {
   test('trip with no destinations is migrated (just sets places + version)', () => {
     const env = { trip: { id: 't1', destinations: [] } };
     MaxMigration.migrateTripShape(env);
-    assert.strictEqual(env.trip._schemaVersion, 1);
+    assert.strictEqual(env.trip._schemaVersion, MaxMigration.CURRENT_SCHEMA_VERSION);
     assert.deepStrictEqual(env.trip.places, {});
   });
 
@@ -497,12 +504,166 @@ describe('migrateTripShape — empty / edge inputs', () => {
       }
     };
     MaxMigration.migrateTripShape(env);
-    assert.strictEqual(env.trip._schemaVersion, 1);
+    assert.strictEqual(env.trip._schemaVersion, MaxMigration.CURRENT_SCHEMA_VERSION);
     assert(env.trip.places['pl-paris']);
     assert.strictEqual(env.trip.destinations[0].placeId, 'pl-paris');
     assert.strictEqual(env.trip.destinations[0].days.length, 3);
     env.trip.destinations[0].days.forEach(d => {
       assert.deepStrictEqual(d.planItems, []);
+    });
+    // v2 also adds an empty routes[] when none exist.
+    assert.deepStrictEqual(env.trip.routes, []);
+    // v2 backfills day ids.
+    env.trip.destinations[0].days.forEach((d, idx) => {
+      assert.strictEqual(d.id, 'd-d1-' + idx);
+    });
+  });
+});
+
+// ── Suite: v1 → v2 (dayTrip PlanItems → Routes) ────────────────
+
+// Build a v1-shaped envelope (places{}, dest.placeId, dest.days[],
+// at least one {type:"dayTrip"} PlanItem on day[0]). This is what
+// the v0→v1 migration produces; v1→v2 takes it from here.
+function v1EnvelopeWithDayTrip(overrides) {
+  const env = legacyEnvelope(overrides);
+  _migrateV0toV1(env);
+  return env;
+}
+
+describe('migrateTripShape v1→v2 — dayTrip PlanItems → Routes', () => {
+  test('dayTrip PlanItem becomes a route reference + a routes[] entry', () => {
+    const env = v1EnvelopeWithDayTrip();
+    _migrateV1toV2(env);
+
+    // The route was created.
+    assert.strictEqual(env.trip.routes.length, 1);
+    const route = env.trip.routes[0];
+    assert.strictEqual(route.kind, 'dayTrip');
+    assert.strictEqual(route.fromDestId, 'dest-1');
+    assert.strictEqual(route.toDestId, 'dest-1');
+    assert.strictEqual(route.id, 'r-dt-dest-1-pl-blue-lagoon');
+
+    // The route has a single stop PlanItem, marked iconic.
+    assert.strictEqual(route.planItems.length, 1);
+    const stop = route.planItems[0];
+    assert.strictEqual(stop.type, 'stop');
+    assert.strictEqual(stop.priority, 'iconic');
+    assert.strictEqual(stop.placeId, 'pl-blue-lagoon');
+
+    // The legacy bookkeeping rode along on the stop.
+    assert.strictEqual(stop.legacy.sourceNights, 1);
+    assert.strictEqual(stop.legacy.distKm, 39);
+
+    // The hub day's planItems now has a single route reference,
+    // replacing the original dayTrip PlanItem.
+    const day0 = env.trip.destinations[0].days[0];
+    assert.strictEqual(day0.planItems.length, 1);
+    assert.strictEqual(day0.planItems[0].type, 'route');
+    assert.strictEqual(day0.planItems[0].routeId, route.id);
+
+    // The route's transitDays points back at this day.
+    assert.strictEqual(route.transitDays.length, 1);
+    assert.strictEqual(route.transitDays[0], day0.id);
+  });
+
+  test('multiple dayTrip PlanItems → multiple routes + multiple route refs', () => {
+    const env = v1EnvelopeWithDayTrip({
+      trip: {
+        destinations: [{
+          id: 'dest-1', place: 'Reykjavík', country: 'Iceland', nights: 3,
+          dateFrom: '2026-06-01', dateTo: '2026-06-04',
+          dayTrips: [
+            { place: 'Blue Lagoon', country: 'Iceland' },
+            { place: 'Þingvellir', country: 'Iceland' },
+            { place: 'Geysir', country: 'Iceland' }
+          ]
+        }]
+      }
+    });
+    _migrateV1toV2(env);
+
+    assert.strictEqual(env.trip.routes.length, 3);
+    env.trip.routes.forEach(r => {
+      assert.strictEqual(r.kind, 'dayTrip');
+      assert.strictEqual(r.fromDestId, 'dest-1');
+      assert.strictEqual(r.toDestId, 'dest-1');
+      assert.strictEqual(r.planItems.length, 1);
+      assert.strictEqual(r.planItems[0].priority, 'iconic');
+    });
+
+    const day0 = env.trip.destinations[0].days[0];
+    assert.strictEqual(day0.planItems.length, 3);
+    day0.planItems.forEach(pi => {
+      assert.strictEqual(pi.type, 'route');
+      assert(pi.routeId);
+    });
+  });
+
+  test('idempotent — running v1→v2 twice does not duplicate routes', () => {
+    const env = v1EnvelopeWithDayTrip();
+    _migrateV1toV2(env);
+    const routesAfterFirst = env.trip.routes.length;
+    const dayItemsAfterFirst = env.trip.destinations[0].days[0].planItems.length;
+
+    // Reset version flag and re-run; the route already exists so v1→v2
+    // should be a no-op on the second pass (no dayTrip PlanItems left
+    // to convert).
+    delete env.trip._schemaVersion;
+    _migrateV1toV2(env);
+
+    assert.strictEqual(env.trip.routes.length, routesAfterFirst);
+    assert.strictEqual(env.trip.destinations[0].days[0].planItems.length, dayItemsAfterFirst);
+  });
+
+  test('every day gets a backfilled id (route↔day bidirectional ref needs them)', () => {
+    const env = v1EnvelopeWithDayTrip();
+    // The v0→v1 step builds days without ids; v1→v2 must backfill.
+    env.trip.destinations[0].days.forEach(d => assert.strictEqual(d.id, undefined));
+    _migrateV1toV2(env);
+    env.trip.destinations[0].days.forEach((d, idx) => {
+      assert.strictEqual(d.id, 'd-dest-1-' + idx);
+    });
+  });
+
+  test('full pipeline v0→v1→v2 produces routes (no dayTrip PlanItems remain)', () => {
+    const env = legacyEnvelope();
+    MaxMigration.migrateTripShape(env);
+    // No dayTrip PlanItems anywhere.
+    env.trip.destinations.forEach(d => {
+      (d.days || []).forEach(day => {
+        (day.planItems || []).forEach(pi => {
+          assert.notStrictEqual(pi.type, 'dayTrip');
+        });
+      });
+    });
+    // Route should exist.
+    assert.strictEqual(env.trip.routes.length, 1);
+    assert.strictEqual(env.trip.routes[0].kind, 'dayTrip');
+  });
+
+  test('v2 with no dayTrip PlanItems is a no-op (just bumps version + ensures routes[])', () => {
+    const env = {
+      trip: {
+        id: 't1',
+        _schemaVersion: 1,
+        places: { 'pl-paris': { id: 'pl-paris', name: 'Paris', type: 'city' } },
+        destinations: [{
+          id: 'd1', place: 'Paris', country: 'France', nights: 2, placeId: 'pl-paris',
+          dateFrom: '2026-09-01', dateTo: '2026-09-03',
+          days: [
+            { date: '2026-09-01', planItems: [] },
+            { date: '2026-09-02', planItems: [] }
+          ]
+        }]
+      }
+    };
+    _migrateV1toV2(env);
+    assert.strictEqual(env.trip._schemaVersion, 2);
+    assert.deepStrictEqual(env.trip.routes, []);
+    // Day ids were backfilled.
+    env.trip.destinations[0].days.forEach((d, idx) => {
+      assert.strictEqual(d.id, 'd-d1-' + idx);
     });
   });
 });

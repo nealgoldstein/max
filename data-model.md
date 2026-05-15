@@ -28,17 +28,32 @@ Trip
 │   ├── pois[]               placeIds of POIs visited from this destination
 │   └── days[]               one per calendar day at this destination
 │       └── planItems[]      what happens on this day
-├── routes[]                 transit between consecutive destinations
+│           ├── {type:"sight" | "meal" | "stop" | …, placeId}      → trip.places
+│           └── {type:"route", routeId}                            → trip.routes
+├── routes[]                 first-class container objects, peer to Destinations
+│   ├── id, kind             "transit" | "dayTrip" (loop, from === to)
 │   ├── fromDestId, toDestId
 │   ├── modeOptions[]        train | car | flight | bus | ferry | walk
 │   ├── modeChosen
-│   └── transitDays[]        calendar days while moving
+│   ├── durationHours, distKm, character, fuelStops[]
+│   ├── transitDays[]        day IDs this route spans (back-ref to destinations[].days[].id)
+│   └── planItems[]          stops on this route (waysides for transit; the
+│                            destination of the loop for dayTrip)
+│       └── {type:"stop", placeId, note, recommendedMin, priority}
 ├── pendingActions[]         Max's nudges to the user
 ├── candidates[]             picker carry-forward (working set)
 └── notes                    freeform trip-level notes
 ```
 
 The **Calendar** is *not* in this tree. It's a **computed view** over `destinations[].days[].planItems[]` and `routes[].transitDays[]`, sliced by date instead of by destination. There is no separate Calendar storage.
+
+The **graph** is intentional. Place is always the leaf. PlanItems are the universal joining type — sights, meals, stops, AND route references all share the same shape. Days contain PlanItems; Routes contain PlanItems; both are time-bound containers, differing only in what they *are* (a sleeping stop vs. a moving segment).
+
+The **Day ↔ Route relationship is bidirectional**:
+- A day's `planItems[]` can contain `{type:"route", routeId}` — the drive appears on that day's plan as a real item.
+- The route's `transitDays[]` lists the day IDs it spans (a multi-day drive lists multiple days).
+
+Both sides hold the same fact. Writers that add/remove/reorder a drive must update both — there's a `attachRouteToDays(route, dayIds)` / `detachRouteFromDays(route)` helper pair to maintain consistency, and a consistency check on save.
 
 ---
 
@@ -137,20 +152,30 @@ Days are also created on **Routes** (`route.transitDays[]`) for days where the u
 
 ### PlanItem
 
-A single thing happening on a Day. Unified type with a state machine. Replaces the older split between "Booking / Suggestion / Scheduled Place".
+A single thing happening on a Day or along a Route. Unified type with a state machine. Replaces the older split between "Booking / Suggestion / Scheduled Place" and now also serves as the type that joins Days to Routes (`type:"route"`) and as the wayside / day-trip-target stop type on routes (`type:"stop"`).
 
 | Field | Type | Notes |
 |---|---|---|
 | `id` | string | Stable |
 | `state` | enum | `suggestion` / `scheduled` / `booked` — state machine below |
-| `placeId` | string | ref → `trip.places[placeId]` |
-| `type` | enum | `sight` / `meal` / `transit` / `hotel-checkin` / `hotel-checkout` / `dayTrip` / `event` / `freeTime` / `other` |
+| `placeId` | string | ref → `trip.places[placeId]` — required for place-anchored types (`sight`, `meal`, `stop`, `hotel-checkin`/`out`, `event`) |
+| `routeId` | string | ref → `trip.routes[routeId]` — required for `type:"route"` and forbidden on other types |
+| `type` | enum | `sight` / `meal` / `transit` / `hotel-checkin` / `hotel-checkout` / `stop` / `route` / `event` / `freeTime` / `other` |
 | `startTime` | time | Optional; absent for state=suggestion |
 | `endTime` | time | Optional |
 | `duration` | number | Minutes; optional, derived if start+end set |
+| `recommendedMin` | number | For `type:"stop"` — Max's suggested stop duration (different from `duration`, which is the user's chosen time-allocation if any) |
+| `priority` | enum | For `type:"stop"` — `iconic` (must / strongly recommended) / `if-time` (worth stopping if time allows) / `optional` (placeholder) |
 | `booking` | object | Present when state=booked: `{ confirmation, vendor, price, modifyUrl, cancelUrl }` |
 | `notes` | string | User notes |
 | `source` | enum | `llm-suggestion` / `user-added` / `imported` |
+
+**Type semantics (when each is used):**
+- `sight` / `meal` / `event` / `freeTime` — placed on a Day's `planItems[]`. Anchored to a Place.
+- `stop` — placed on a Route's `planItems[]`. Anchored to a Place. The wayside POI on a transit route, or the destination of a day-trip loop. `priority` distinguishes "stop if time" from "iconic / the point of this trip."
+- `route` — placed on a Day's `planItems[]`. References a route. Lets the drive itself appear as a real item in the day plan.
+- `transit` — legacy; specific transit-leg items (a train segment, a flight) inside a route's transit-day plan. May get folded into `stop` or stay as its own type — TBD.
+- `hotel-checkin` / `hotel-checkout` — placed on Day boundary days; tied to a Destination's accommodation.
 
 **State machine:**
 
@@ -168,9 +193,11 @@ A single thing happening on a Day. Unified type with a state machine. Replaces t
 
 Demotion paths (`scheduled → suggestion`, `booked → scheduled` after cancel) handle the "I changed my mind" case.
 
-A `dayTrip` is a PlanItem of `type: dayTrip` that takes most/all of a Day on the **hub destination**. Don't make it a separate Destination. Don't keep a separate `dest.dayTrips[]` chip list — the PlanItem (in `suggestion` state until scheduled) is the single source of truth.
+**A day-trip is a Route, not a PlanItem.** A trip from Reykjavik to the Blue Lagoon and back is a `Route` with `kind:"dayTrip"`, `fromDestId === toDestId === Reykjavik`, `transitDays:["d3"]` (the day the loop happens on), and the day-trip's destination (Blue Lagoon) as a `{type:"stop", priority:"iconic"}` PlanItem in the route's `planItems[]`. The hub destination's day plan references it: `hubDest.days[someDayIdx].planItems = [..., {type:"route", routeId}, ...]`.
 
-The legacy `dest.dayTrips[]` storage is being migrated out. Until the migration completes, both representations may coexist; code that reads day trips should prefer PlanItems with `type: dayTrip` and fall back to `dest.dayTrips[]` only for un-migrated trips.
+This is the same data shape as a transit route (Reykjavik → Vík with waysides along the way); only the `kind` field and `from === to` distinguish them. Unifying the two means the picker, the trip-view map, the day plan, and the LLM all reason about one concept (Route-with-Stops) instead of two.
+
+The earlier representations — `dest.dayTrips[]` chips, then `{type:"dayTrip", placeId}` PlanItems on the hub's `day[0]` — are both legacy. The schema-version migration walks every trip on read, lifts those PlanItems out into `trip.routes[]` entries with `kind:"dayTrip"`, and replaces them with `{type:"route", routeId}` references on the same day.
 
 **Time ownership.** PlanItems own their times absolutely — `startTime` and `endTime` are clock times on a 24-hour day, not offsets from the Day. There is no Day-level "start time" field. This keeps the model simple: a booked flight at 08:00 is 08:00, period, regardless of how the rest of the day shakes out.
 
@@ -195,23 +222,39 @@ The exception: a **single PlanItem with `placeIds[]`** when the operator binds t
 
 ### Route
 
-Connects two consecutive destinations. Owns the transit days.
+A **first-class container**, peer to Destination. Holds the geography and semantics of a single transit segment OR a day-trip loop, owns its transit days, owns its own ordered PlanItems (stops along the way).
 
 | Field | Type | Notes |
 |---|---|---|
-| `id` | string | Stable |
-| `fromDestId`, `toDestId` | string | refs → `trip.destinations[].id` |
-| `modeOptions` | array | `['train', 'car']` etc.; populated by the LLM in the Destination Selector |
-| `modeChosen` | enum | Single mode the user committed to — set in the trip view, not the Destination Selector |
-| `transitDays` | array | Calendar days while in transit; each has its own `planItems[]` (e.g., "train 8:00–11:30") |
-| `bookings` | array | Multi-leg booking refs |
+| `id` | string | Stable; derived from endpoints (`r-${fromDestId}-${toDestId}` for transit, `r-dt-${hubDestId}-${stopPlaceId}` for day-trips). Regenerates naturally when destinations reorder. |
+| `kind` | enum | `transit` (point-to-point, `from !== to`) / `dayTrip` (loop, `from === to`) |
+| `fromDestId`, `toDestId` | string | refs → `trip.destinations[].id`. Same value for day-trip loops. |
+| `modeOptions` | array | `['train', 'car', 'flight', 'bus', 'ferry', 'walk']` — populated by LLM in the Destination Selector |
+| `modeChosen` | enum | Single mode the user committed to — set in the trip view |
+| `transitDays` | array | Day IDs this route spans. Bidirectional with `day.planItems[{type:"route", routeId}]` — keep in sync. |
+| `durationHours` | number | Total movement time (drive / train / flight). Drives the "is this an easy or exhausting day?" math. |
+| `distKm` | number | Distance, useful for day-trip-radius and for the realism check |
+| `character` | enum | `transit` / `scenic` / `ferry-leg` / `urban` — surfaces "is the drive itself worth time?" on the map |
+| `fuelStops` | array | Place IDs of suggested gas/charging stops (self-drive routes only) |
+| `planItems` | array | Stops along the route — see *PlanItem* (`type:"stop"`). For a transit route, these are waysides; for a day-trip route, they include the destination-of-the-loop with `priority:"iconic"`. |
+| `bookings` | array | Multi-leg booking refs (train ticket numbers, ferry reservations) |
 | `notes` | string | |
 
-A Route's `transitDays` reuse the same Day shape as Destination days. The day "belongs" to the Route, not to either endpoint Destination — solves the awkwardness of "which destination does the travel day count against?"
+**Two kinds of route, same shape.**
+- `kind:"transit"` — Reykjavik → Vík. `planItems[]` holds waysides (Seljalandsfoss as a 20-min stop, Skógafoss as a 30-min stop, …).
+- `kind:"dayTrip"` — Reykjavik → Blue Lagoon → back to Reykjavik. `from === to`, `planItems[]` holds at minimum the destination of the loop (Blue Lagoon as a `priority:"iconic"` stop), plus any side-trip waysides on the way.
 
-**When `modeChosen` gets set.** The Destination Selector gathers `modeOptions[]` per route but doesn't commit a mode. The trip view is where the user actually picks — each Route card shows the options as a chip group, pre-selected to the trip's default transport (carried from the brief: "trains and walking" → `train` default). One click swaps. Time / booking / drive-time math reads `modeChosen` only.
+The picker surfaces `planItems[]` candidates per route. The map renders the polyline AND the stops as beaded dots along it. The trip-view day plan references the whole route via a `{type:"route", routeId}` PlanItem on the day it occurs.
 
-Picking a mode in the trip view doesn't re-build the trip — it just retunes that one Route's transit days and any drive-time math.
+**The Day's day plan vs the Route's stops list.** Two different orderings:
+- `day.planItems[]` — what happens on this calendar day, by time of day. Includes things at the destination AND a route-reference for any drive on this day.
+- `route.planItems[]` — stops on this route, in geographic order along the path (driving direction). Doesn't carry time-of-day; the time falls out of `durationHours` + start-of-drive + the user's pace.
+
+**When `modeChosen` gets set.** The Destination Selector gathers `modeOptions[]` per route but doesn't commit a mode. The trip view is where the user picks — each Route card shows the options as a chip group, pre-selected to the trip's default transport (carried from the brief). One click swaps. Time / booking / drive-time math reads `modeChosen` only. Picking a mode doesn't re-build the trip — it retunes that one route's transit days, drive-time math, and any predicted waysides whose categories depend on mode (gas stops only when driving, etc.).
+
+**Wayside source.** The LLM populates `route.planItems[]` with `type:"stop"` candidates on Choreograph, given the from / to / mode / character. The picker presents them grouped by route ("Reykjavik → Vík · 3.5 h drive · 4 stops suggested") for keep/reject. Same `_keep`-ish semantics as destinations.
+
+**Bidirectional sync with Day.** `route.transitDays[]` and `day.planItems[{type:"route", routeId}]` are two indexes of the same fact (which days this route occupies). Writers that attach / detach / reorder a drive must update both. Helpers: `attachRouteToDays(route, dayIds)` and `detachRouteFromDays(route)`. Consistency check on save flags any drift.
 
 ### PendingAction
 
@@ -288,7 +331,11 @@ The Trip object is the unit of persistence. When anything inside it changes, the
 - **Multi-place plan items:** Default is one PlanItem per stop, linked by `groupId`. Use a single PlanItem with `placeIds[]` only when the operator binds the stops as one inseparable unit. See *PlanItem → Multi-place tours and routes* above.
 - **Route mode commitment:** Destination Selector gathers `modeOptions[]`; the trip view commits `modeChosen`. Default carries from the brief's `transport` field. See *Route → When `modeChosen` gets set* above.
 - **Naming — Destination Selector vs Picker:** "Destination Selector" is the canonical name. "Picker" remains a valid code-level alias.
-- **Day-trip representation:** PlanItem with `type: dayTrip` on the hub's day is the canonical form. Legacy `dest.dayTrips[]` chips are being migrated out. See *PlanItem → dayTrip* above.
+- **Day-trip representation:** Day-trips are **Routes**, not PlanItems. A `kind:"dayTrip"` route with `from === to`, the destination of the loop carried as a `{type:"stop", priority:"iconic"}` PlanItem in the route's `planItems[]`. Day plan references via `{type:"route", routeId}`. Legacy `{type:"dayTrip"}` PlanItems and earlier `dest.dayTrips[]` chips are both migrated out on read. See *Route → Two kinds of route* above.
+- **Routes as first-class containers:** Routes peer to Destinations. Both hold ordered `planItems[]`. Routes own their own transit days, mode, character, distance. The picker selects waysides on routes alongside destinations to sleep in. See *Route* above.
+- **Day ↔ Route bidirectional reference:** A day's `planItems[]` can contain `{type:"route", routeId}`; the route's `transitDays[]` lists day IDs. Two indexes of the same fact, maintained by `attachRouteToDays` / `detachRouteFromDays`. Verified by a consistency check on save.
+- **Wayside source:** LLM populates route `planItems[]` on Choreograph from the (from, to, mode, character) tuple. User keeps / rejects in the picker. No manual-only path required (though `source:"user-added"` stays available).
+- **Wayside priority:** Three levels: `iconic` (don't skip — the point of the route's character / the destination of a day-trip loop) / `if-time` (stop if time allows; default for waysides on transit routes) / `optional` (placeholder). All waysides are inherently optional in execution; `priority` ranks them.
 
 ---
 

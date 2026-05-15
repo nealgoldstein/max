@@ -24079,29 +24079,18 @@ function updateMainMap(){
       // v359.51.23: "could be a day trip" overnights are now FULL
       // purple, not a purple-ring-over-blue. Distinguishes from
       // committed day trips by size (22px vs 20px) and by spur.
+      // (v359.51.24 added a gold-border "booked" indicator here;
+      // reverted because the signal was vacuous for real Max trips
+      // that rarely have status:"booked" set at planning time. The
+      // proper commitment-state work needs a per-destination
+      // commitmentRole field with a vocabulary, not just a booking
+      // bit — see Phase 2+ planning notes.)
       var _isCandidate = group.dests.some(function(x){
         return x && x.dest && _couldBeDayTripDestIds[x.dest.id];
       });
       var color = _isCandidate ? "#5b3f8f" : "#1a5fa8";
-      // v359.51.24: commitment state on the pin. ANY confirmed
-      // booking (hotel or general, status==="booked") promotes the
-      // pin from "draft" (thin white border) to "booked" (thicker
-      // gold border). Most travel apps treat every pin as equally
-      // committed; surfacing the booked/unbooked split lets the
-      // user see at a glance which stops are financially locked-in
-      // and which are still flexible.
-      var _isBooked = group.dests.some(function(x){
-        if (!x || !x.dest) return false;
-        var hbs = Array.isArray(x.dest.hotelBookings) ? x.dest.hotelBookings : [];
-        var gbs = Array.isArray(x.dest.generalBookings) ? x.dest.generalBookings : [];
-        return hbs.some(function(b){ return b && b.status === "booked"; })
-            || gbs.some(function(b){ return b && b.status === "booked"; });
-      });
-      var _borderCss = _isBooked
-        ? "3px solid #d4a017" // gold = booked / locked in
-        : "2px solid #fff";   // white = draft / flexible
       var html = '<div style="background:'+color+';color:#fff;border-radius:50%;width:'
-        + size + 'px;height:' + size + 'px;border:'+_borderCss+';'
+        + size + 'px;height:' + size + 'px;border:2px solid #fff;'
         + 'box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;'
         + 'font-size:9px;font-weight:700;letter-spacing:-0.02em;">'
         + abbrev
@@ -24145,10 +24134,11 @@ function updateMainMap(){
         }
       }
       // v359.51.18: append "could be a day trip" hint to the tooltip
-      // when the pin is purple. v359.51.24: append a booked indicator
-      // when there's at least one confirmed booking on the dest.
+      // when the pin is purple. Helps the user understand why the
+      // pin is differently coloured without having to tap.
+      // (v359.51.24's "✓ booked" tooltip line reverted along with
+      // the gold-border — see pin-render comment above.)
       if (_isCandidate) tipParts.push("could be a day trip — tap to convert");
-      if (_isBooked) tipParts.push("✓ booked");
       m.bindTooltip(tipParts.join(" · "), {permanent:false, direction:"top", offset:[0,-size/2-2], className:"main-map-tooltip"});
       _mainMarkers.push(m);
     });
