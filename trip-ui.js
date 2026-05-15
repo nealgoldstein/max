@@ -3292,9 +3292,9 @@
     var hint=document.createElement("div");
     hint.style.cssText="margin:12px 14px 4px;padding:10px 12px;background:#f0f5ff;border:1px solid #c8d8f8;border-radius:7px;font-size:11px;color:#2056b0;line-height:1.5;";
     var isGenerating=_generatedCityData[dest.place.toLowerCase()]&&_generatedCityData[dest.place.toLowerCase()].loading;
-    hint.textContent=isGenerating
-      ?"⌛ Max is generating suggestions for "+dest.place+" — see the Explore tab once ready."
-      :"→ Go to the Explore tab to browse sights and restaurants, then add them to your days.";
+    hint.innerHTML=isGenerating
+      ?"⌛ Max is generating suggestions for "+String(dest.place||"").replace(/&/g,"&amp;").replace(/</g,"&lt;")+" — sights show up under Plan, places to stay and restaurants under Stay &amp; Eat once ready."
+      :"→ Stay in the <b>Plan</b> tab to browse sights, switch to <b>Stay &amp; Eat</b> for places to stay and restaurants — then add them to your days.";
     sightsPane.insertBefore(hint,sightsPane.firstChild);
   }
 
