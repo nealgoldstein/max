@@ -11871,11 +11871,16 @@ function _openTripHeroMapOverlay(){
   var line = pts.map(function(p){ return [p.lat, p.lng]; });
   L.polyline(line, { color: "#fff", weight: 4, opacity: 0.85, dashArray: "6,4" }).addTo(map);
   pts.forEach(function(p, i){
+    // v359.51.20: View-larger overlay marker style matches the inline
+    // trip map (v359.51.11): 22 px blue circle with 2-letter place
+    // initials, white border, soft shadow. Active destination keeps
+    // the red highlight ring at 26 px so the user can spot it.
     var isActive = !!p.isActive;
     var color = isActive ? "#c44" : "#1a5fa8";
-    var size = isActive ? 30 : 26;
+    var size = isActive ? 26 : 22;
+    var abbrev = (p.place || "").trim().substring(0, 2) || "·";
     var html = '<div style="width:' + size + 'px;height:' + size + 'px;border-radius:50%;background:' + color +
-      ';color:#fff;font-weight:700;font-size:' + (isActive ? 13 : 12) + 'px;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4);cursor:pointer;">' + (i + 1) + '</div>';
+      ';color:#fff;font-weight:700;font-size:9px;letter-spacing:-0.02em;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.25);cursor:pointer;">' + abbrev + '</div>';
     var icon = L.divIcon({ html: html, className: "", iconSize: [size, size], iconAnchor: [size/2, size/2] });
     var m = L.marker([p.lat, p.lng], { icon: icon }).addTo(map);
     m.bindTooltip(p.place + " · click to scroll trip list", { direction: "top", offset: [0, -size/2] });
@@ -12113,23 +12118,16 @@ function openTripHeroMapWindow(){
     +   '});'
     +   'pinGroups.forEach(function(g){'
     +     'var primary = g.pts[0];'
-    +     'var labels = g.pts.map(function(p){ return p.n; }).join("\\u00b7");'
     +     'var abbrev = primary.abbrev || (primary.place||"").substring(0,2);'
-    +     'var hasFirst = g.pts.some(function(p){return p.isFirst;});'
-    +     'var hasLast = g.pts.some(function(p){return p.isLast;});'
-    // v294.18: stacked num+abbrev pins matching the right-panel map.
-    +     'var size = labels.length > 3 ? 44 : 40;'
-    +     'var indexFs = labels.length > 3 ? 11 : 12;'
-    +     'var abbrevFs = labels.length > 3 ? 13 : 14;'
-    +     'var stack = \'<span style="font-size:\'+indexFs+\'px;font-weight:700;line-height:1;letter-spacing:-0.02em;">\'+labels+\'</span>\''
-    +       '+ \'<span style="font-size:\'+abbrevFs+\'px;font-weight:700;line-height:1;margin-top:2px;letter-spacing:-0.02em;">\'+abbrev+\'</span>\';'
-    +     'var html;'
-    +     'if (hasFirst && hasLast) {'
-    +       'html = \'<div style="position:relative;background:#fff;border-radius:50%;width:\'+size+\'px;height:\'+size+\'px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#222;box-shadow:0 2px 5px rgba(0,0,0,0.3);overflow:hidden;"><div style="position:absolute;inset:0;border-radius:50%;border:3px solid transparent;border-top-color:#1a5fa8;border-left-color:#1a5fa8;border-right-color:#b05820;border-bottom-color:#b05820;transform:rotate(45deg);"></div><div style="position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;">\'+stack+\'</div></div>\';'
-    +     '} else {'
-    +       'var ring = hasFirst ? "#1a5fa8" : (hasLast ? "#b05820" : "#222");'
-    +       'html = \'<div style="background:#fff;border:2px solid \'+ring+\';border-radius:50%;width:\'+size+\'px;height:\'+size+\'px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:\'+ring+\';box-shadow:0 2px 5px rgba(0,0,0,0.3);">\'+stack+\'</div>\';'
-    +     '}'
+    // v359.51.20: popup-window markers match the inline trip map
+    // (v359.51.11): 22 px solid blue circle with 2-letter place
+    // initials, 9 px bold white text, white border + soft shadow.
+    // Drop the old 40-44px ringed style and the first/last/round-
+    // trip ring coloring — that complexity is no longer the visual
+    // language anywhere else, and "orange circles and orange routes"
+    // is the wrong-looking thing it produced.
+    +     'var size = 22;'
+    +     'var html = \'<div style="background:#1a5fa8;color:#fff;border-radius:50%;width:\'+size+\'px;height:\'+size+\'px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;letter-spacing:-0.02em;">\'+abbrev+\'</div>\';'
     +     'var icon = L.divIcon({html: html, className: "", iconSize: [size, size], iconAnchor: [size/2, size/2]});'
     +     'var popupBits = g.pts.map(function(p){'
     +       'var role = p.isFirst ? "Arrival" : (p.isLast ? "Departure" : "Stop " + p.n);'
