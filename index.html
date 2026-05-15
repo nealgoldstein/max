@@ -25641,6 +25641,261 @@ async function _renderExecutionGroups(dest, host){
 // Round CO.3: floating menu shown when a day-trip chip is clicked. Lists
 // "Add to Day 1...N" (or "Move to Day N" if already placed) plus a
 // "Remove from itinerary" option if placed, plus an "Ungroup" option.
+// v359.52.7: v2-aware day-trip schedule menu. Opens from the drill-in
+// view's day-trip chip click. Lets the user pick which day of the
+// hub stay the day-trip happens on, or convert the day-trip back to
+// an overnight stop. Maintains the bidirectional Day↔Route reference
+// (route.transitDays[] + day.planItems[{type:"route", routeId}]).
+function openDayTripMenuV2(anchor, hubDest, route, stop){
+  if (!anchor || !hubDest || !route || !stop) return;
+  var existing = document.getElementById("daytrip-menu");
+  if (existing) existing.remove();
+
+  var place = (trip.places && trip.places[stop.placeId]) || null;
+  var placeName = (place && place.name) || stop.placeId || "Day trip";
+
+  // Which day is the route currently scheduled on? route.transitDays
+  // is a list of day ids; for a day-trip route this is typically one.
+  var currentDayId = (route.transitDays && route.transitDays[0]) || null;
+  var currentDayIdx = -1;
+  (hubDest.days || []).forEach(function(day, idx){
+    if (day && day.id === currentDayId) currentDayIdx = idx;
+  });
+
+  var menu = document.createElement("div");
+  menu.id = "daytrip-menu";
+  menu.style.cssText = "position:absolute;background:#fff;border:1px solid #d8c4e8;border-radius:7px;box-shadow:0 6px 24px rgba(0,0,0,0.14);z-index:5000;padding:5px 0;min-width:220px;font-family:inherit;";
+  var rect = anchor.getBoundingClientRect();
+  menu.style.left = (rect.left + window.scrollX) + "px";
+  menu.style.top = (rect.bottom + window.scrollY + 4) + "px";
+
+  var hdr = document.createElement("div");
+  hdr.style.cssText = "padding:6px 12px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#888;border-bottom:1px solid #f0e8f5;";
+  hdr.textContent = placeName;
+  menu.appendChild(hdr);
+
+  // Top option: stay overnight (ungroup the route's stop).
+  var ungTop = document.createElement("button");
+  ungTop.type = "button";
+  ungTop.textContent = "🛏 Stay overnight here";
+  ungTop.title = "Convert this day trip into its own destination (a stay) inserted after " + (hubDest.place || "the hub");
+  ungTop.style.cssText = "display:block;width:100%;text-align:left;padding:9px 12px;background:#eef5ff;border:none;border-bottom:1px solid #f0e8f5;color:#1a5fa8;font-size:12px;font-weight:600;font-family:inherit;cursor:pointer;";
+  ungTop.onmouseover = function(){ ungTop.style.background = "#dceaf8"; };
+  ungTop.onmouseout = function(){ ungTop.style.background = "#eef5ff"; };
+  ungTop.onclick = function(){
+    if (typeof ungroupDayTripByRouteStop === "function") {
+      ungroupDayTripByRouteStop(hubDest, route, stop);
+    }
+    menu.remove();
+  };
+  menu.appendChild(ungTop);
+
+  // v359.52.8: when the trip visits the same place more than once
+  // (round-trip cities), surface all matching destinations as hub
+  // options — not just the current hub. Lets the user move a day-trip
+  // from Reykjavik #1 to Reykjavik #2 (departure stop), or back, etc.
+  // Eligibility for now: any destination whose place name matches the
+  // current hub's. Moving to a totally different city is out of scope
+  // for this menu — the trip-view map's role popover handles that.
+  var eligibleHubs = (trip && Array.isArray(trip.destinations))
+    ? trip.destinations.filter(function(d){
+        return d && d.place && hubDest.place && d.place === hubDest.place;
+      })
+    : [hubDest];
+  if (!eligibleHubs.length) eligibleHubs = [hubDest];
+
+  eligibleHubs.forEach(function(h, hubIdx){
+    // Section header per hub when there are multiple — names the stop
+    // by its trip-order index so "Reykjavik #1" vs "Reykjavik #16" reads.
+    if (eligibleHubs.length > 1) {
+      var hubHdr = document.createElement("div");
+      var tripIdx = trip.destinations.indexOf(h);
+      hubHdr.textContent = h.place + " · stop " + (tripIdx + 1)
+        + (h.nights ? " · " + h.nights + " night" + (h.nights === 1 ? "" : "s") : "");
+      hubHdr.style.cssText = "padding:7px 12px 3px;font-size:9.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#999;background:#fafafa;border-top:" + (hubIdx === 0 ? "none" : "1px solid #f0e8f5") + ";";
+      menu.appendChild(hubHdr);
+    }
+    (h.days || []).forEach(function(day, dayIdx){
+      if (!day) return;
+      var item = document.createElement("button");
+      item.type = "button";
+      var isCur = (h === hubDest && dayIdx === currentDayIdx);
+      var dayLbl = day.lbl || ("Day " + (dayIdx + 1));
+      var label;
+      if (isCur) {
+        label = "✓ On Day " + (dayIdx + 1) + " (" + dayLbl + ")";
+      } else if (h === hubDest) {
+        label = "Move to Day " + (dayIdx + 1) + " (" + dayLbl + ")";
+      } else {
+        label = "→ Day " + (dayIdx + 1) + " (" + dayLbl + ")";
+      }
+      item.textContent = label;
+      item.style.cssText = "display:block;width:100%;text-align:left;padding:7px 12px;background:" + (isCur ? "#f4eef9" : "#fff") + ";border:none;color:" + (isCur ? "#5b3f8f" : "#333") + ";font-size:12px;font-family:inherit;cursor:" + (isCur ? "default" : "pointer") + ";";
+      if (!isCur) {
+        item.onmouseover = function(){ item.style.background = "#f4eef9"; };
+        item.onmouseout  = function(){ item.style.background = "#fff"; };
+        (function(newHub, newDay){
+          item.onclick = function(){
+            _moveDayTripRouteToHubDay(hubDest, route, newHub, newDay);
+            menu.remove();
+          };
+        })(h, day);
+      } else {
+        item.disabled = true;
+      }
+      menu.appendChild(item);
+    });
+  });
+
+  // Click outside to dismiss.
+  setTimeout(function(){
+    var dismiss = function(e){
+      if (!menu.contains(e.target)) {
+        menu.remove();
+        document.removeEventListener("click", dismiss);
+      }
+    };
+    document.addEventListener("click", dismiss);
+  }, 50);
+  document.body.appendChild(menu);
+}
+
+// v359.52.8: move a day-trip route to a new (hub, day) tuple. The
+// "hub" may be different from the route's current fromDestId — that
+// covers the case where the trip visits the same place more than
+// once (e.g. Reykjavik as both the arrival and departure stop) and
+// the user wants the day-trip on the OTHER stop. Maintains:
+//   • route.fromDestId / toDestId (a day-trip is a loop, both ===
+//     the new hub's id)
+//   • route.transitDays (single-element array, the new day's id)
+//   • old hub day's planItems[] (remove the {type:"route"} reference)
+//   • new hub day's planItems[] (add the {type:"route"} reference)
+//   • old hub.nights += stopNights — give the nights back, since the
+//     day-trip is no longer absorbed here
+//   • new hub.nights -= stopNights — new hub takes them on
+function _moveDayTripRouteToHubDay(oldHub, route, newHub, newDay){
+  if (!oldHub || !route || !newHub || !newDay || !newDay.id) return;
+  if (oldHub === newHub) {
+    // Same hub, just a different day. Delegate to the simpler helper.
+    return _moveDayTripRouteToDay(oldHub, route, newDay);
+  }
+  // Compute nights to shuffle from the stop's legacy bookkeeping.
+  // (If absent, assume 1 night.)
+  var stopNights = 1;
+  (route.planItems || []).forEach(function(pi){
+    if (pi && pi.type === "stop" && pi.legacy && typeof pi.legacy.sourceNights === "number") {
+      stopNights = pi.legacy.sourceNights;
+    }
+  });
+
+  // 1. Strip the route reference out of every day in the OLD hub.
+  (oldHub.days || []).forEach(function(day){
+    if (!day || !Array.isArray(day.planItems)) return;
+    day.planItems = day.planItems.filter(function(pi){
+      return !(pi && pi.type === "route" && pi.routeId === route.id);
+    });
+  });
+  // 2. Add the route reference to the NEW day on the NEW hub.
+  if (!Array.isArray(newDay.planItems)) newDay.planItems = [];
+  var hasRef = newDay.planItems.some(function(pi){
+    return pi && pi.type === "route" && pi.routeId === route.id;
+  });
+  if (!hasRef) {
+    newDay.planItems.push({
+      id:      "pi-rt-" + route.id + "-" + newDay.id,
+      type:    "route",
+      state:   "scheduled",
+      routeId: route.id,
+      source:  "user-rescheduled"
+    });
+  }
+  // 3. Update the route's hub + transitDays.
+  route.fromDestId = newHub.id;
+  route.toDestId = newHub.id;
+  route.transitDays = [newDay.id];
+  // 4. Reallocate the absorbed nights from old hub to new hub.
+  oldHub.nights = Math.max(1, (oldHub.nights || stopNights) - stopNights);
+  newHub.nights = (newHub.nights || 0) + stopNights;
+  // 5. Recompute dates trip-wide (nights changed on two destinations).
+  var startDate = trip.destinations[0] ? trip.destinations[0].dateFrom : null;
+  if (startDate && typeof makeDays === "function") {
+    var cur = new Date(startDate + "T12:00:00");
+    trip.destinations.forEach(function(d){
+      d.dateFrom = cur.toISOString().slice(0, 10);
+      var next = new Date(cur); next.setDate(next.getDate() + (d.nights || 0));
+      d.dateTo = next.toISOString().slice(0, 10);
+      // Preserve planItems across the day-shell rebuild — same
+      // pattern as convertDestToDayTrip uses.
+      var preservedPlanItemsByIdx = (Array.isArray(d.days) ? d.days : []).map(function(day){
+        return Array.isArray(day && day.planItems) ? day.planItems.slice() : [];
+      });
+      d.days = makeDays(d.id, d.place, d.place, d.dateFrom, d.nights || 0);
+      if (preservedPlanItemsByIdx.length && d.days.length) {
+        preservedPlanItemsByIdx.forEach(function(items, oldIdx){
+          if (!items.length) return;
+          var targetIdx = Math.min(oldIdx, d.days.length - 1);
+          if (!d.days[targetIdx]) return;
+          if (!Array.isArray(d.days[targetIdx].planItems)) d.days[targetIdx].planItems = [];
+          items.forEach(function(pi){
+            if (pi && !d.days[targetIdx].planItems.some(function(x){ return x.id === pi.id; })) {
+              d.days[targetIdx].planItems.push(pi);
+            }
+          });
+        });
+      }
+      cur = next;
+    });
+  }
+  // 6. The new day's id may have been regenerated by makeDays. Re-link
+  //    transitDays to whatever day in newHub.days currently contains
+  //    the route reference, so the bidirectional invariant holds.
+  (newHub.days || []).forEach(function(day){
+    if (!day || !Array.isArray(day.planItems)) return;
+    var hit = day.planItems.some(function(pi){
+      return pi && pi.type === "route" && pi.routeId === route.id;
+    });
+    if (hit && day.id) route.transitDays = [day.id];
+  });
+
+  if (typeof _emitTripMutation === "function") _emitTripMutation();
+}
+
+// v359.52.7: move a day-trip route's day reference from its current
+// day to a new one. Maintains both sides of the bidirectional
+// reference (route.transitDays[] and day.planItems[{type:"route"}]).
+function _moveDayTripRouteToDay(hubDest, route, newDay){
+  if (!hubDest || !route || !newDay || !newDay.id) return;
+  var oldDayIds = (route.transitDays || []).slice();
+  // 1. Remove the route reference from any day's planItems where it
+  //    currently lives.
+  (hubDest.days || []).forEach(function(day){
+    if (!day || !Array.isArray(day.planItems)) return;
+    day.planItems = day.planItems.filter(function(pi){
+      return !(pi && pi.type === "route" && pi.routeId === route.id);
+    });
+  });
+  // 2. Add the route reference to the new day.
+  if (!Array.isArray(newDay.planItems)) newDay.planItems = [];
+  var hasRef = newDay.planItems.some(function(pi){
+    return pi && pi.type === "route" && pi.routeId === route.id;
+  });
+  if (!hasRef) {
+    newDay.planItems.push({
+      id:      "pi-rt-" + route.id + "-" + newDay.id,
+      type:    "route",
+      state:   "scheduled",
+      routeId: route.id,
+      source:  "user-scheduled"
+    });
+  }
+  // 3. Update route.transitDays to point at the new day.
+  route.transitDays = [newDay.id];
+
+  if (typeof _emitTripMutation === "function") _emitTripMutation();
+}
+
+// Legacy v0 menu — still bound to dest.dayTrips[] (now empty post-
+// migration). Kept temporarily so any stragglers don't break.
 function openDayTripMenu(anchor, hubDest, dayTripIdx, dayTripData, alreadyOnDay){
   // Remove any existing menu first
   var existing = document.getElementById("daytrip-menu");

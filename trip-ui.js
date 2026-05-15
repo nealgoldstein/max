@@ -2861,21 +2861,37 @@
         var chip = document.createElement("button");
         chip.type = "button";
         chip.style.cssText = "font-size:11px;font-weight:600;color:#5b3f8f;background:#fff;border:1px solid #d8c4e8;padding:4px 10px;border-radius:11px;cursor:pointer;font-family:inherit;";
+        // v359.52.7: chip click opens the scheduling menu (pick a day
+        // or convert to overnight). Was: chip click directly ungrouped,
+        // with no way to pick which day of the hub stay the day trip
+        // happens on.
+        var dayOf = "";
+        if (route.transitDays && route.transitDays[0]) {
+          (dest.days || []).forEach(function(d, idx){
+            if (d && d.id === route.transitDays[0]) {
+              dayOf = " · on Day " + (idx + 1);
+            }
+          });
+        }
         chip.textContent = "📍 " + placeName
           + (distKm ? " · " + (typeof global._fmtDistance === "function" ? global._fmtDistance(distKm) : distKm + "km") : "")
-          + " · ↩ stay overnight";
-        chip.title = "Click to make " + placeName + " an overnight stop instead of a day trip from " + dest.place;
+          + dayOf;
+        chip.title = "Click to schedule on a specific day or convert " + placeName + " back to an overnight stop";
         chip.onmouseover = function(){ chip.style.background = "#ede0f4"; };
         chip.onmouseout = function(){ chip.style.background = "#fff"; };
-        (function(hubDest, routeRef, stopRef){
-          chip.onclick = function(){
-            if (typeof global.ungroupDayTripByRouteStop === "function") {
+        (function(hubDest, routeRef, stopRef, chipEl){
+          chip.onclick = function(e){
+            e.stopPropagation();
+            if (typeof global.openDayTripMenuV2 === "function") {
+              global.openDayTripMenuV2(chipEl, hubDest, routeRef, stopRef);
+            } else if (typeof global.ungroupDayTripByRouteStop === "function") {
+              // Fallback if menu helper isn't loaded yet.
               global.ungroupDayTripByRouteStop(hubDest, routeRef, stopRef);
             } else {
-              console.warn("[Max] ungroupDayTripByRouteStop not defined");
+              console.warn("[Max] no day-trip menu/ungroup helper defined");
             }
           };
-        })(dest, route, stop);
+        })(dest, route, stop, chip);
         dtList.appendChild(chip);
       });
     });
