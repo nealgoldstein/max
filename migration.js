@@ -26,6 +26,17 @@
 //        Also backfills stable day ids when missing (the route↔day
 //        bidirectional reference needs them).
 //
+//   v3 — Segment polymorphic base. Trip, Stay, Route, Day all extend
+//        Segment with shared fields (kind, startsAt, endsAt). Routes
+//        gain subKind (transit/dayTrip/arrival/departure); v2's
+//        route.kind moves to route.subKind, route.kind becomes "route".
+//        Day gets refs[] mirroring v2's day.planItems[type:"route"]
+//        — Reference is now its own type, distinct from PlanItem.
+//        trip.brief.entry / trip.brief.tbExit are lifted into arrival/
+//        departure Routes referenced via trip.arrival / trip.departure.
+//        Old fields preserved so v2 readers still work — Phase 2 of v3
+//        switches readers to the new shape, Phase 3 drops legacy fields.
+//
 // Trip envelopes that don't carry _schemaVersion are treated as
 // version 0 (pre-migration). After migration, _schemaVersion is
 // bumped so subsequent reads short-circuit.
@@ -33,7 +44,7 @@
 (function (global) {
   'use strict';
 
-  var CURRENT_SCHEMA_VERSION = 2;
+  var CURRENT_SCHEMA_VERSION = 3;
 
   // ── Helpers ─────────────────────────────────────────────────
 
@@ -356,6 +367,174 @@
     return envelope;
   }
 
+  // ── Migration: schema v2 → v3 ───────────────────────────────
+  //
+  // Adds the Segment polymorphic base on Trip, Stays (destinations),
+  // Routes, and Days. Adds Reference entries in day.refs[] mirroring
+  // v2's day.planItems[type:"route"] (the new shape). Lifts route.kind
+  // → route.subKind (route.kind becomes "route" — the Segment kind
+  // discriminator). Synthesizes arrival + departure Routes from
+  // trip.brief.entry / trip.brief.tbExit.
+  //
+  // v3 is additive in this phase — old fields (trip.destinations,
+  // route.kind === "transit"|"dayTrip", day.planItems[type:"route"])
+  // stay in place so v2 readers continue to work. Phase 2 of v3
+  // switches readers to the new shape; Phase 3 drops the legacy
+  // fields. Same staging the v1→v2 migration used.
+  function _migrateV2toV3(envelope) {
+    if (!envelope || !envelope.trip) return envelope;
+    var trip = envelope.trip;
+
+    // 1. Trip envelope as a Segment.
+    trip.kind = "trip";
+    if (!trip.routes || !Array.isArray(trip.routes)) trip.routes = [];
+    var destinations = Array.isArray(trip.destinations) ? trip.destinations : [];
+    var firstDest = destinations[0];
+    var lastDest = destinations[destinations.length - 1];
+    if (firstDest && firstDest.dateFrom) {
+      trip.startsAt = { date: firstDest.dateFrom, placeId: firstDest.placeId || null };
+    } else {
+      trip.startsAt = trip.startsAt || null;
+    }
+    if (lastDest && lastDest.dateTo) {
+      trip.endsAt = { date: lastDest.dateTo, placeId: lastDest.placeId || null };
+    } else {
+      trip.endsAt = trip.endsAt || null;
+    }
+
+    // 2. Each destination (Stay) gets Segment fields.
+    destinations.forEach(function (dest) {
+      if (!dest) return;
+      dest.kind = "stay";
+      if (dest.dateFrom) {
+        dest.startsAt = { date: dest.dateFrom, placeId: dest.placeId || null };
+      }
+      if (dest.dateTo) {
+        dest.endsAt = { date: dest.dateTo, placeId: dest.placeId || null };
+      }
+      // 2a. Each Day gets Segment fields + refs[] mirroring route-typed
+      //     PlanItems.
+      (dest.days || []).forEach(function (day) {
+        if (!day) return;
+        day.kind = "day";
+        if (day.date) {
+          day.startsAt = { date: day.date };
+          var d = new Date(day.date + "T00:00:00Z");
+          d.setUTCDate(d.getUTCDate() + 1);
+          day.endsAt = { date: d.toISOString().slice(0, 10) };
+        }
+        if (!Array.isArray(day.refs)) day.refs = [];
+        (day.planItems || []).forEach(function (pi) {
+          if (!pi || pi.type !== "route" || !pi.routeId) return;
+          var hasRef = day.refs.some(function (r) {
+            return r && r.targetKind === "route" && r.targetId === pi.routeId;
+          });
+          if (hasRef) return;
+          day.refs.push({
+            id: "ref-" + (day.id || "anon") + "-" + pi.routeId,
+            kind: "reference",
+            targetKind: "route",
+            targetId: pi.routeId,
+            startTime: pi.startTime || null,
+            endTime: pi.endTime || null,
+            source: "migration-v2-v3"
+          });
+        });
+      });
+    });
+
+    // 3. Each Route: v2 kind ("transit"/"dayTrip") moves to subKind,
+    //    kind becomes "route" (the Segment discriminator).
+    (trip.routes || []).forEach(function (route) {
+      if (!route) return;
+      if (!route.subKind) {
+        if (route.kind === "transit" || route.kind === "dayTrip"
+            || route.kind === "arrival" || route.kind === "departure") {
+          route.subKind = route.kind;
+        } else {
+          // Default: assume transit if we can't tell.
+          route.subKind = "transit";
+        }
+      }
+      route.kind = "route";
+      // startsAt/endsAt for routes derive from their endpoints (the
+      // fromDestId stay's endsAt and the toDestId stay's startsAt).
+      // Leave them undefined; they're computable on read.
+    });
+
+    // 4. Synthesize arrival / departure Routes from the brief's
+    //    entry / exit strings, if not already present.
+    if (trip.brief && firstDest) {
+      var entry = (trip.brief.entry || "").trim();
+      if (entry && !trip.arrival) {
+        var entryPlaceId = _getOrCreatePlace(trip, {
+          place: entry, country: null, lat: null, lng: null, type: 'city'
+        });
+        var arrivalRouteId = "r-arrival-" + (entryPlaceId || "unknown") + "-" + (firstDest.id || firstDest.placeId || "first");
+        var existingArrival = trip.routes.find(function (r) {
+          return r && r.id === arrivalRouteId;
+        });
+        if (!existingArrival) {
+          trip.routes.push({
+            id: arrivalRouteId,
+            kind: "route",
+            subKind: "arrival",
+            fromDestId: null,     // from outside the trip
+            toDestId: firstDest.id || null,
+            entryPlaceId: entryPlaceId || null,
+            modeOptions: [],
+            modeChosen: null,
+            transitDays: [],
+            durationHours: null,
+            distKm: null,
+            character: null,
+            fuelStops: [],
+            planItems: [],
+            bookings: [],
+            notes: ""
+          });
+        }
+        trip.arrival = arrivalRouteId;
+      }
+    }
+    if (trip.brief && lastDest) {
+      var exit = (trip.brief.tbExit || "").trim();
+      if (exit && !trip.departure) {
+        var exitPlaceId = _getOrCreatePlace(trip, {
+          place: exit, country: null, lat: null, lng: null, type: 'city'
+        });
+        var departureRouteId = "r-departure-" + (lastDest.id || lastDest.placeId || "last") + "-" + (exitPlaceId || "unknown");
+        var existingDeparture = trip.routes.find(function (r) {
+          return r && r.id === departureRouteId;
+        });
+        if (!existingDeparture) {
+          trip.routes.push({
+            id: departureRouteId,
+            kind: "route",
+            subKind: "departure",
+            fromDestId: lastDest.id || null,
+            toDestId: null,        // to outside the trip
+            exitPlaceId: exitPlaceId || null,
+            modeOptions: [],
+            modeChosen: null,
+            transitDays: [],
+            durationHours: null,
+            distKm: null,
+            character: null,
+            fuelStops: [],
+            planItems: [],
+            bookings: [],
+            notes: ""
+          });
+        }
+        trip.departure = departureRouteId;
+      }
+    }
+
+    trip._schemaVersion = 3;
+    return envelope;
+  }
+
   // ── Public entry point ──────────────────────────────────────
 
   // Migrate an envelope to the current schema version. Idempotent —
@@ -374,6 +553,7 @@
 
     if (version < 1) envelope = _migrateV0toV1(envelope);
     if (version < 2) envelope = _migrateV1toV2(envelope);
+    if (version < 3) envelope = _migrateV2toV3(envelope);
 
     return envelope;
   }
@@ -405,6 +585,7 @@
       getOrCreatePlace: _getOrCreatePlace,
       migrateV0toV1: _migrateV0toV1,
       migrateV1toV2: _migrateV1toV2,
+      migrateV2toV3: _migrateV2toV3,
     },
   };
 })(typeof window !== 'undefined' ? window : this);

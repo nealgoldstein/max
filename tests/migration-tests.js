@@ -626,10 +626,10 @@ describe('migrateTripShape v1→v2 — dayTrip PlanItems → Routes', () => {
     });
   });
 
-  test('full pipeline v0→v1→v2 produces routes (no dayTrip PlanItems remain)', () => {
+  test('full pipeline v0→v1→v2→v3 produces routes (no dayTrip PlanItems remain)', () => {
     const env = legacyEnvelope();
     MaxMigration.migrateTripShape(env);
-    // No dayTrip PlanItems anywhere.
+    // No dayTrip-typed PlanItems anywhere.
     env.trip.destinations.forEach(d => {
       (d.days || []).forEach(day => {
         (day.planItems || []).forEach(pi => {
@@ -637,9 +637,14 @@ describe('migrateTripShape v1→v2 — dayTrip PlanItems → Routes', () => {
         });
       });
     });
-    // Route should exist.
-    assert.strictEqual(env.trip.routes.length, 1);
-    assert.strictEqual(env.trip.routes[0].kind, 'dayTrip');
+    // The dayTrip Route exists. Post-v3, kind:"route" is the Segment
+    // discriminator and subKind:"dayTrip" identifies the loop. (The
+    // legacy entry/exit strings on the test fixture also synthesize
+    // arrival + departure routes, so we don't assert on routes.length.)
+    const dayTripRoute = env.trip.routes.find(r => r && r.subKind === 'dayTrip');
+    assert(dayTripRoute, 'expected a kind:"route" subKind:"dayTrip" route to exist');
+    assert.strictEqual(dayTripRoute.kind, 'route');
+    assert.strictEqual(dayTripRoute.subKind, 'dayTrip');
   });
 
   test('v2 with no dayTrip PlanItems is a no-op (just bumps version + ensures routes[])', () => {
@@ -665,6 +670,154 @@ describe('migrateTripShape v1→v2 — dayTrip PlanItems → Routes', () => {
     env.trip.destinations[0].days.forEach((d, idx) => {
       assert.strictEqual(d.id, 'd-d1-' + idx);
     });
+  });
+});
+
+// ── Suite: v2 → v3 (Segment polymorphic base + Reference + arrival/departure routes) ──
+
+function v2EnvelopeReady(overrides) {
+  // Build a v2-shaped envelope: legacy + v0→v1 + v1→v2.
+  const env = legacyEnvelope(overrides);
+  _migrateV0toV1(env);
+  _migrateV1toV2(env);
+  return env;
+}
+
+const _migrateV2toV3 = MaxMigration._internal.migrateV2toV3;
+
+describe('migrateTripShape v2→v3 — Segment polymorphic base', () => {
+  test('Trip envelope gets kind:"trip", startsAt, endsAt', () => {
+    const env = v2EnvelopeReady();
+    _migrateV2toV3(env);
+    assert.strictEqual(env.trip.kind, 'trip');
+    assert.strictEqual(env.trip.startsAt.date, '2026-06-01');
+    // Legacy envelope has one destination with dateTo 2026-06-04, so endsAt matches.
+    assert.strictEqual(env.trip.endsAt.date, '2026-06-04');
+  });
+
+  test('Each Stay (destination) gets kind:"stay", startsAt, endsAt', () => {
+    const env = v2EnvelopeReady();
+    _migrateV2toV3(env);
+    env.trip.destinations.forEach(d => {
+      assert.strictEqual(d.kind, 'stay');
+      if (d.dateFrom) assert.strictEqual(d.startsAt.date, d.dateFrom);
+      if (d.dateTo)   assert.strictEqual(d.endsAt.date,   d.dateTo);
+    });
+  });
+
+  test('Each Day gets kind:"day", startsAt, endsAt (next-day)', () => {
+    const env = v2EnvelopeReady();
+    _migrateV2toV3(env);
+    const day0 = env.trip.destinations[0].days[0];
+    assert.strictEqual(day0.kind, 'day');
+    assert.strictEqual(day0.startsAt.date, day0.date);
+    // endsAt.date is date+1
+    const expectEnd = new Date(day0.date + 'T00:00:00Z');
+    expectEnd.setUTCDate(expectEnd.getUTCDate() + 1);
+    assert.strictEqual(day0.endsAt.date, expectEnd.toISOString().slice(0, 10));
+  });
+
+  test('Routes: v2 kind moves to subKind, kind becomes "route"', () => {
+    const env = v2EnvelopeReady();
+    // Pre-v3: route.kind === "dayTrip" (v2 shape)
+    assert.strictEqual(env.trip.routes[0].kind, 'dayTrip');
+    _migrateV2toV3(env);
+    // Post-v3: route.kind === "route", subKind === "dayTrip"
+    assert.strictEqual(env.trip.routes[0].kind, 'route');
+    assert.strictEqual(env.trip.routes[0].subKind, 'dayTrip');
+  });
+
+  test('Day gets refs[] mirroring planItems[type:"route"]', () => {
+    const env = v2EnvelopeReady();
+    // Sanity: v2 produced a {type:"route", routeId} PlanItem on day[0].
+    const day0 = env.trip.destinations[0].days[0];
+    const routeRefPi = day0.planItems.find(pi => pi.type === 'route');
+    assert(routeRefPi, 'v2 fixture should have a type:"route" PlanItem');
+
+    _migrateV2toV3(env);
+    // After v3 the Reference exists in day.refs[].
+    assert(Array.isArray(day0.refs));
+    assert.strictEqual(day0.refs.length, 1);
+    const ref = day0.refs[0];
+    assert.strictEqual(ref.kind, 'reference');
+    assert.strictEqual(ref.targetKind, 'route');
+    assert.strictEqual(ref.targetId, routeRefPi.routeId);
+    // The legacy PlanItem stays in place (Phase 1 of v3 is additive).
+    const stillThere = day0.planItems.find(pi => pi.type === 'route');
+    assert(stillThere, 'v3 keeps the legacy type:"route" PlanItem alongside the new Reference');
+  });
+
+  test('arrival + departure routes are synthesized from brief.entry / tbExit', () => {
+    const env = v2EnvelopeReady({
+      trip: {
+        brief: {
+          entry:  'Keflavík Airport',
+          tbExit: 'Keflavík Airport'
+        }
+      }
+    });
+    _migrateV2toV3(env);
+    assert(env.trip.arrival,   'trip.arrival routeId should be set');
+    assert(env.trip.departure, 'trip.departure routeId should be set');
+    const arrivalRoute = env.trip.routes.find(r => r.id === env.trip.arrival);
+    const departureRoute = env.trip.routes.find(r => r.id === env.trip.departure);
+    assert(arrivalRoute,   'arrival route should exist in trip.routes');
+    assert(departureRoute, 'departure route should exist in trip.routes');
+    assert.strictEqual(arrivalRoute.kind,    'route');
+    assert.strictEqual(arrivalRoute.subKind, 'arrival');
+    assert.strictEqual(departureRoute.kind,    'route');
+    assert.strictEqual(departureRoute.subKind, 'departure');
+    // Endpoints: arrival has no fromDestId (from outside), departure has no toDestId.
+    assert.strictEqual(arrivalRoute.fromDestId, null);
+    assert.strictEqual(arrivalRoute.toDestId, env.trip.destinations[0].id);
+    assert.strictEqual(departureRoute.fromDestId,
+      env.trip.destinations[env.trip.destinations.length - 1].id);
+    assert.strictEqual(departureRoute.toDestId, null);
+  });
+
+  test('arrival/departure routes are NOT synthesized when brief.entry/tbExit are empty', () => {
+    const env = v2EnvelopeReady();
+    // Legacy fixture has no brief.entry/tbExit set.
+    delete env.trip.brief;
+    _migrateV2toV3(env);
+    assert.strictEqual(env.trip.arrival,   undefined);
+    assert.strictEqual(env.trip.departure, undefined);
+  });
+
+  test('idempotent — running v2→v3 twice does not duplicate refs[], routes[], or fields', () => {
+    const env = v2EnvelopeReady({
+      trip: { brief: { entry: 'Keflavík Airport', tbExit: 'Keflavík Airport' } }
+    });
+    _migrateV2toV3(env);
+    const day0 = env.trip.destinations[0].days[0];
+    const routesBefore = env.trip.routes.length;
+    const refsBefore = day0.refs.length;
+
+    // Reset version flag and re-run.
+    delete env.trip._schemaVersion;
+    _migrateV2toV3(env);
+
+    assert.strictEqual(env.trip.routes.length, routesBefore);
+    assert.strictEqual(day0.refs.length, refsBefore);
+  });
+
+  test('full pipeline v0→v1→v2→v3 produces a coherent v3 envelope', () => {
+    const env = legacyEnvelope({
+      trip: { brief: { entry: 'Keflavík Airport', tbExit: 'Keflavík Airport' } }
+    });
+    MaxMigration.migrateTripShape(env);
+    assert.strictEqual(env.trip._schemaVersion, 3);
+    assert.strictEqual(env.trip.kind, 'trip');
+    // The Iceland fixture has dayTrips on the destination + brief entry/exit,
+    // so v3 ends with: 1 dayTrip route + 1 arrival + 1 departure = 3 routes.
+    assert.strictEqual(env.trip.routes.length, 3);
+    const subKinds = env.trip.routes.map(r => r.subKind).sort();
+    assert.deepStrictEqual(subKinds, ['arrival', 'dayTrip', 'departure']);
+    // All routes have kind:"route" now.
+    env.trip.routes.forEach(r => assert.strictEqual(r.kind, 'route'));
+    // Day has both refs[] (v3) and planItems[type:"route"] (v2 legacy).
+    const day0 = env.trip.destinations[0].days[0];
+    assert(day0.refs.length >= 1);
   });
 });
 
