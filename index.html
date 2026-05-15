@@ -12846,9 +12846,15 @@ function _updatePlaceActivitySummary(){
     }
   }
 
-  el.innerHTML = '<strong>'+actCount+' activit'+(actCount===1?'y':'ies')+' \u00b7 '+placeCount+' place'+(placeCount===1?'':'s')+'</strong>'+totalLabel
-    + ' <span style="color:#999;font-size:10.5px;">(fine-tune nights with the \u2212/+ buttons)</span>'
-    + fitNote;
+  // v359.53.5: when over budget, the warning banner leads \u2014 it's the
+  // only actionable thing on this surface and was getting buried under
+  // the summary count. Under/fits notes stay below the summary since
+  // they're informational and don't require action.
+  var summaryLine = '<strong>'+actCount+' activit'+(actCount===1?'y':'ies')+' \u00b7 '+placeCount+' place'+(placeCount===1?'':'s')+'</strong>'+totalLabel
+    + ' <span style="color:#999;font-size:10.5px;">(fine-tune nights with the \u2212/+ buttons)</span>';
+  el.innerHTML = _overBudget
+    ? (fitNote + '<div style="margin-top:8px;">' + summaryLine + '</div>')
+    : (summaryLine + fitNote);
   // v359.26: gate the button on budget. The summary line above
   // explains the gate; the button just sits disabled until resolved.
   // v359.35: "Skip for now" unblocks the button without changing the
@@ -29650,15 +29656,16 @@ function drawDestMode(destId){
   c.innerHTML="";
 
   // Header
+  // v359.53.4: "+ Destination" removed from the dest drill-in \u2014 adding
+  // a NEW destination is a trip-level action; cluttering the drill-in
+  // with it conflated "I'm editing THIS destination" with "I want to
+  // create another one." The button still lives on the trip view.
   var hdr=document.createElement("div"); hdr.className="dm-hdr";
   var navRow=document.createElement("div"); navRow.className="dm-hdr-nav";
   var back=document.createElement("button"); back.className="dm-back";
   back.innerHTML="\u2190 Destinations";
   back.onclick=function(){setLeftMode("trip");};
-  var addDestBtn=document.createElement("button"); addDestBtn.className="dm-add-dest-btn";
-  addDestBtn.textContent="+ Destination";
-  addDestBtn.onclick=function(){setLeftMode("trip");setTimeout(function(){var b=document.getElementById("tm-add-btn");if(b)b.click();},80);};
-  navRow.appendChild(back); navRow.appendChild(addDestBtn);
+  navRow.appendChild(back);
   hdr.appendChild(navRow);
   // v353.2: dest-mode title is the canonical rename surface (was in
   // the trip-view destination card; relocated here so trip-view
