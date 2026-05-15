@@ -11871,16 +11871,16 @@ function _openTripHeroMapOverlay(){
   var line = pts.map(function(p){ return [p.lat, p.lng]; });
   L.polyline(line, { color: "#fff", weight: 4, opacity: 0.85, dashArray: "6,4" }).addTo(map);
   pts.forEach(function(p, i){
-    // v359.51.20: View-larger overlay marker style matches the inline
-    // trip map (v359.51.11): 22 px blue circle with 2-letter place
-    // initials, white border, soft shadow. Active destination keeps
-    // the red highlight ring at 26 px so the user can spot it.
+    // v359.52.4: View-larger overlay shows sequence numbers (matches
+    // updateMainMap). Active destination keeps the red highlight ring
+    // at 26 px so the user can spot it.
     var isActive = !!p.isActive;
     var color = isActive ? "#c44" : "#1a5fa8";
     var size = isActive ? 26 : 22;
-    var abbrev = (p.place || "").trim().substring(0, 2) || "·";
+    var label = String(i + 1);
+    var fontSize = label.length > 1 ? (isActive ? 12 : 10) : (isActive ? 13 : 11);
     var html = '<div style="width:' + size + 'px;height:' + size + 'px;border-radius:50%;background:' + color +
-      ';color:#fff;font-weight:700;font-size:9px;letter-spacing:-0.02em;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.25);cursor:pointer;">' + abbrev + '</div>';
+      ';color:#fff;font-weight:700;font-size:' + fontSize + 'px;letter-spacing:-0.02em;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.25);cursor:pointer;">' + label + '</div>';
     var icon = L.divIcon({ html: html, className: "", iconSize: [size, size], iconAnchor: [size/2, size/2] });
     var m = L.marker([p.lat, p.lng], { icon: icon }).addTo(map);
     m.bindTooltip(p.place + " · click to scroll trip list", { direction: "top", offset: [0, -size/2] });
@@ -12118,16 +12118,13 @@ function openTripHeroMapWindow(){
     +   '});'
     +   'pinGroups.forEach(function(g){'
     +     'var primary = g.pts[0];'
-    +     'var abbrev = primary.abbrev || (primary.place||"").substring(0,2);'
-    // v359.51.20: popup-window markers match the inline trip map
-    // (v359.51.11): 22 px solid blue circle with 2-letter place
-    // initials, 9 px bold white text, white border + soft shadow.
-    // Drop the old 40-44px ringed style and the first/last/round-
-    // trip ring coloring — that complexity is no longer the visual
-    // language anywhere else, and "orange circles and orange routes"
-    // is the wrong-looking thing it produced.
+    +     'var label = g.pts.map(function(p){ return p.n; }).join("\\u00b7");'
+    // v359.52.4: popup-window markers show sequence numbers (matches
+    // updateMainMap). Round-trip cities dot-join their indices.
+    // Long labels get a smaller font so they still fit at 22 px.
     +     'var size = 22;'
-    +     'var html = \'<div style="background:#1a5fa8;color:#fff;border-radius:50%;width:\'+size+\'px;height:\'+size+\'px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;letter-spacing:-0.02em;">\'+abbrev+\'</div>\';'
+    +     'var fontSize = label.length > 3 ? 8 : (label.length > 2 ? 10 : 11);'
+    +     'var html = \'<div style="background:#1a5fa8;color:#fff;border-radius:50%;width:\'+size+\'px;height:\'+size+\'px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;font-size:\'+fontSize+\'px;font-weight:700;letter-spacing:-0.02em;">\'+label+\'</div>\';'
     +     'var icon = L.divIcon({html: html, className: "", iconSize: [size, size], iconAnchor: [size/2, size/2]});'
     +     'var popupBits = g.pts.map(function(p){'
     +       'var role = p.isFirst ? "Arrival" : (p.isLast ? "Departure" : "Stop " + p.n);'
@@ -24071,26 +24068,18 @@ function updateMainMap(){
 
     pinGroups.forEach(function(group){
       var indices = group.dests.map(function(x){ return x.idx + 1; });
-      // v359.51.11: marker style unified with the picker map. Neal:
-      // "I like the markers on the picker map." Was: 40-44px white
-      // circles with stacked ordinal+abbreviation, first/last/round-
-      // trip ring coloring. Now: 22px solid-blue circle with 2-letter
-      // place initials, 9px bold white text, white border + soft
-      // shadow. The journey sequence + arrival/departure info still
-      // lives on the destination cards in the left panel (and the
-      // tooltip names the visit indices for round-trip places).
-      var primaryPlace = (group.dests[0].dest.place || "").trim();
-      var abbrev = primaryPlace ? primaryPlace.substring(0, 2) : "·";
+      // v359.52.4: sequence number on the pin (was 2-letter abbrev
+      // in v359.51.11). The trip view has order, the picker doesn't —
+      // putting the visit number on the trip pin is the cleanest way
+      // to convey "you're at stop 4 of 11." Round-trip cities still
+      // collapse into one pin; the label dot-joins their indices
+      // (e.g. "1·11"). Font size adapts so longer labels still fit.
+      var label = indices.join("·");
       var size = 22;
-      // v359.51.23: "could be a day trip" overnights are now FULL
-      // purple, not a purple-ring-over-blue. Distinguishes from
-      // committed day trips by size (22px vs 20px) and by spur.
-      // (v359.51.24 added a gold-border "booked" indicator here;
-      // reverted because the signal was vacuous for real Max trips
-      // that rarely have status:"booked" set at planning time. The
-      // proper commitment-state work needs a per-destination
-      // commitmentRole field with a vocabulary, not just a booking
-      // bit — see Phase 2+ planning notes.)
+      // Long labels (round-trip cities visited 3+ times, or any
+      // route that puts a 2-digit number into the label) get a
+      // smaller font so they still read.
+      var fontSize = label.length > 3 ? 8 : (label.length > 2 ? 10 : 11);
       var _isCandidate = group.dests.some(function(x){
         return x && x.dest && _couldBeDayTripDestIds[x.dest.id];
       });
@@ -24098,8 +24087,8 @@ function updateMainMap(){
       var html = '<div style="background:'+color+';color:#fff;border-radius:50%;width:'
         + size + 'px;height:' + size + 'px;border:2px solid #fff;'
         + 'box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;'
-        + 'font-size:9px;font-weight:700;letter-spacing:-0.02em;">'
-        + abbrev
+        + 'font-size:' + fontSize + 'px;font-weight:700;letter-spacing:-0.02em;">'
+        + label
         + '</div>';
       var icon = L.divIcon({className:"main-trip-pin", html: html, iconSize:[size,size], iconAnchor:[size/2,size/2], popupAnchor:[0,-size/2]});
       var m = L.marker(group.ctr, {icon: icon}).addTo(_mainMap);
