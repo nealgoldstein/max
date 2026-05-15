@@ -2124,6 +2124,18 @@
       // paths; without these logs, "day trips don't persist" is hard
       // to diagnose without instrumenting locally.
       var DBG = "[Max picker→trip day-trip]";
+      // v359.51.22: pass DISABLED. Day-trip decisions live exclusively
+      // in the trip view now (tap a destination pin → role popover →
+      // Make this a day trip from <hub>). On Choreograph, ALL kept
+      // places land as overnight stops on the route; the user then
+      // chooses which ones to convert. Legacy _isDayTrip flags from
+      // earlier rounds are ignored — Neal: "Those should not be
+      // daytrips, yet. They should just be part of the route."
+      // The function body is kept (collectUserDayTripPairs is still
+      // exported, tests still reference it, and we may re-enable as
+      // an opt-in surface later), but it short-circuits here.
+      console.log(DBG, "v359.51.22: skip — day-trip role is set on the trip view only");
+      return;
       if (!Array.isArray(trip.destinations) || !trip.destinations.length) {
         console.log(DBG, "skip: no destinations on the built trip");
         return;
