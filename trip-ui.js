@@ -1666,50 +1666,88 @@
   //     (picker-edit re-entry path; falls back to legacy explorer
   //      when the trip pre-dates the place-mode picker)
   function _renderDestinationsListHeader(trip) {
+    // v359.53.6: two-row header.
+    //   Row 1 — "Destinations" title (left), "+ Destination" primary
+    //           CTA (right). One clean line, one action that matters
+    //           most for forward motion on a trip.
+    //   Row 2 — totals line (left), secondary chips: "Reverse order",
+    //           "Considered (N)", "Edit destinations" (right). These
+    //           are sometimes-relevant; they shouldn't compete with
+    //           the primary add affordance.
     var listSec = document.createElement("div");
     listSec.className = "tm-section";
-    var listHdr = document.createElement("div");
-    listHdr.style.cssText = "display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;";
-    var lbl = document.createElement("div");
-    lbl.className = "tm-sec-title";
-    lbl.style.marginBottom = "0";
-    lbl.textContent = "Destinations";
-    listHdr.appendChild(lbl);
 
     var dests = (trip && trip.destinations) || [];
     var totalNights = dests.reduce(function (s, d) { return s + (d.nights || 0); }, 0);
     var totalDays = totalNights + (dests.length ? 1 : 0);
+
+    // ── Row 1: title + primary "+ Destination" ──
+    var listHdr = document.createElement("div");
+    listHdr.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;";
+    var lbl = document.createElement("div");
+    lbl.className = "tm-sec-title";
+    lbl.style.cssText = "margin:0;font-size:18px;font-weight:700;color:#111;letter-spacing:-.01em;";
+    lbl.textContent = "Destinations";
+    listHdr.appendChild(lbl);
+
+    var addDestBtn = document.createElement("button");
+    addDestBtn.style.cssText = "font-size:14px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:7px;padding:9px 16px;cursor:pointer;font-family:inherit;white-space:nowrap;letter-spacing:-.01em;box-shadow:0 1px 3px rgba(26,95,168,0.18);";
+    addDestBtn.textContent = "+ Destination";
+    addDestBtn.title = "Add another destination to this trip";
+    addDestBtn.onmouseover = function(){ addDestBtn.style.background = "#134a8a"; };
+    addDestBtn.onmouseout  = function(){ addDestBtn.style.background = "#1a5fa8"; };
+    addDestBtn.onclick = function(){
+      // Reuse the existing inline-form trigger at the bottom of the
+      // destinations list (`#tm-add-btn`). Scrolls into view, opens
+      // the form, focuses the intent textarea.
+      var b = document.getElementById("tm-add-btn");
+      if (b) {
+        try { b.scrollIntoView({behavior:"smooth", block:"center"}); } catch(_) {}
+        b.click();
+        setTimeout(function(){
+          var f = document.getElementById("dest-intent-vis");
+          if (f) f.focus();
+        }, 120);
+      }
+    };
+    listHdr.appendChild(addDestBtn);
+
+    // ── Row 2: totals line + secondary chips ──
+    var subRow = document.createElement("div");
+    subRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;flex-wrap:wrap;";
+
     var totalLine = document.createElement("div");
-    totalLine.style.cssText = "font-size:11px;color:#666;margin-bottom:10px;";
+    totalLine.style.cssText = "font-size:11px;color:#666;";
     totalLine.innerHTML = dests.length
       ? '<strong style="color:#111;">' + totalDays + ' days</strong> · ' + totalNights + ' nights · ' + dests.length + ' destination' + (dests.length !== 1 ? 's' : '')
       : '<span style="color:#aaa;font-style:italic;">No destinations yet.</span>';
+    subRow.appendChild(totalLine);
+
+    var chipRow = document.createElement("div");
+    chipRow.style.cssText = "display:flex;align-items:center;gap:6px;flex-wrap:wrap;";
+
+    var _chipStyle = "font-size:11px;font-weight:500;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:6px;padding:5px 10px;cursor:pointer;font-family:inherit;white-space:nowrap;";
 
     // Reverse-order button — only on trips with 3+ destinations.
     if (dests.length >= 3) {
       var revBtn = document.createElement("button");
-      revBtn.style.cssText = "font-size:11px;font-weight:500;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:6px;padding:6px 11px;cursor:pointer;font-family:inherit;margin-right:6px;white-space:nowrap;";
+      revBtn.style.cssText = _chipStyle;
       revBtn.textContent = "↺ Reverse order";
       revBtn.title = "Flip the order of destinations on this trip";
       revBtn.onmouseover = function () { revBtn.style.background = "#f0f5fc"; };
       revBtn.onmouseout  = function () { revBtn.style.background = "#fff"; };
       revBtn.onclick = function () { if (typeof global.reverseTripOrder === "function") global.reverseTripOrder(); };
-      listHdr.appendChild(revBtn);
+      chipRow.appendChild(revBtn);
     }
 
-    // Round HZ (picker hero map, step 8): "Considered (N)" button.
-    // Surfaces the carry-forward set — candidates Max suggested that
-    // the user neither accepted nor rejected at picker time. Only
-    // shows when there's at least one such candidate. Clicking opens
-    // a modal listing them with one-click Add; Add promotes to keep
-    // and reopens the picker for confirmation/commit.
+    // "Considered (N)" — only when carry-forward candidates exist.
     if (trip && Array.isArray(trip.candidates) && trip.candidates.length) {
       var consideredCount = trip.candidates.filter(function(c){
         return c && c.status !== "keep" && c.status !== "reject";
       }).length;
       if (consideredCount > 0) {
         var conBtn = document.createElement("button");
-        conBtn.style.cssText = "font-size:11px;font-weight:500;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:6px;padding:6px 11px;cursor:pointer;font-family:inherit;margin-right:6px;white-space:nowrap;";
+        conBtn.style.cssText = _chipStyle;
         conBtn.textContent = "Considered (" + consideredCount + ")";
         conBtn.title = "Places Max suggested that you didn't accept or reject — add any of them to this trip";
         conBtn.onmouseover = function () { conBtn.style.background = "#f0f5fc"; };
@@ -1719,24 +1757,20 @@
             global.showConsideredCandidatesModal();
           }
         };
-        listHdr.appendChild(conBtn);
+        chipRow.appendChild(conBtn);
       }
     }
 
-    // Edit destinations — only when there's a saved candidate snapshot.
-    // v359.5: bumped from a 12px secondary button to a 14px primary
-    // CTA. With all mode pills removed (v359.2.3), this is the only
-    // path back to the picker — it should look like the heaviest
-    // action in the destinations header, not an afterthought tucked
-    // next to "Considered (N)" and "Reverse order". Dropped the ✎
-    // glyph per Neal's call: just "Edit destinations", plain.
+    // "Edit destinations" — re-open the picker. Demoted from primary
+    // (v359.5 styling) to a secondary chip now that "+ Destination"
+    // is the lead CTA; bulk-edit-in-picker is the less-common path.
     if (trip && trip.candidates && trip.candidates.length) {
       var editBtn = document.createElement("button");
-      editBtn.style.cssText = "font-size:14px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:8px;padding:10px 18px;cursor:pointer;font-family:inherit;white-space:nowrap;box-shadow:0 1px 3px rgba(26,95,168,0.18);";
-      editBtn.textContent = "Edit destinations";
-      editBtn.title = "Re-open the picker with your current keep/reject decisions";
-      editBtn.onmouseover = function () { editBtn.style.background = "#134a8a"; };
-      editBtn.onmouseout  = function () { editBtn.style.background = "#1a5fa8"; };
+      editBtn.style.cssText = _chipStyle;
+      editBtn.textContent = "✎ Edit in selector";
+      editBtn.title = "Re-open the destination selector with your current keep/reject decisions";
+      editBtn.onmouseover = function () { editBtn.style.background = "#f0f5fc"; };
+      editBtn.onmouseout  = function () { editBtn.style.background = "#fff"; };
       editBtn.onclick = function () {
         if (typeof global.reopenPickerForEdit === "function" && trip && Array.isArray(trip.mdcItems) && trip.mdcItems.length) {
           global.reopenPickerForEdit();
@@ -1744,11 +1778,13 @@
           global.reopenCandidateExplorer();
         }
       };
-      listHdr.appendChild(editBtn);
+      chipRow.appendChild(editBtn);
     }
 
+    subRow.appendChild(chipRow);
+
     listSec.appendChild(listHdr);
-    listSec.appendChild(totalLine);
+    listSec.appendChild(subRow);
 
     // v359.19: single trip-level banner surfacing the user's
     // accommodation preference + avoidances. Replaces both the
