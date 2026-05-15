@@ -26125,13 +26125,19 @@ function convertDestToDayTrip(destId, hubDestId, opts){
   var src = trip.destinations[srcIdx];
   var hub = trip.destinations[hubIdx];
 
-  // Resolve / mint a placeId for the source.
+  // Resolve / mint a placeId for the source. v359.52.5: the helper
+  // lives at MaxMigration._internal.makePlaceId, not at the top
+  // level — the prior typo caused this writer to fall through to a
+  // local slug that produced "blue-lagoon" while migration produced
+  // "pl-blue-lagoon". Different keys split the Place dict and broke
+  // downstream lookups.
   var placeId = src.placeId;
-  if (!placeId && typeof MaxMigration !== "undefined" && MaxMigration._makePlaceId) {
-    placeId = MaxMigration._makePlaceId(src.place || "", src.country || "");
+  if (!placeId && typeof MaxMigration !== "undefined"
+      && MaxMigration._internal && typeof MaxMigration._internal.makePlaceId === "function") {
+    placeId = MaxMigration._internal.makePlaceId(src.place || "");
   }
   if (!placeId) {
-    placeId = (src.place || "unknown").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    placeId = "pl-" + (src.place || "unknown").toLowerCase().replace(/[^a-z0-9]+/g, "-");
   }
 
   // Make sure trip.places has an entry.

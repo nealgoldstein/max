@@ -2828,51 +2828,59 @@
   // Round CO.3 chip menu lives in `global.openDayTripMenu`. Round
   // FN.7.3 filter: only chips for day-trips not yet placed on a day.
   function _renderDayTripChips(dest, hdr) {
-    function _isPlaced(d){
-      return (dest.days || []).some(function(day){
-        return (day.items || []).some(function(it){
-          return it && it.type === "daytrip" && it.dayTripPlace === d.place;
-        });
-      });
-    }
-    var unplacedDayTrips = (dest.dayTrips || []).filter(function(d){ return !_isPlaced(d); });
-    if (!unplacedDayTrips.length) return;
+    // v359.52.6: drill-in view day-trip chips rebuilt to read v2 routes.
+    // Was reading dest.dayTrips[] (legacy v0 shape, empty post-migration).
+    // Walks trip.routes[] for kind:"dayTrip" routes whose fromDestId
+    // matches this dest; each route's planItems[] holds the target
+    // stop(s). Render one chip per stop with "Make this an overnight"
+    // wired to the v2 writer (ungroupDayTripByRouteStop).
+    var trip = global.trip;
+    if (!trip || !Array.isArray(trip.routes) || !trip.routes.length) return;
+    var places = (trip && trip.places) || {};
+    var hubRoutes = trip.routes.filter(function(r){
+      return r && r.kind === "dayTrip" && r.fromDestId === dest.id;
+    });
+    if (!hubRoutes.length) return;
+
     var dtBox = document.createElement("div");
     dtBox.style.cssText = "margin:0 0 10px;padding:9px 12px;background:#f4eef9;border:1px solid #d8c4e8;border-radius:7px;";
     var dtHdr = document.createElement("div");
     dtHdr.style.cssText = "font-size:12px;font-weight:700;color:#5b3f8f;margin-bottom:5px;";
-    dtHdr.textContent = "Day trips from " + dest.place + " · not yet scheduled";
+    dtHdr.textContent = "Day trips from " + dest.place;
     dtBox.appendChild(dtHdr);
     var dtList = document.createElement("div");
     dtList.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;";
-    unplacedDayTrips.forEach(function(dt){
-      var dtIdx = dest.dayTrips.indexOf(dt);
-      var chip = document.createElement("button");
-      chip.type = "button";
-      var placedOnDay = -1;
-      (dest.days || []).forEach(function(day, dayIdx){
-        (day.items || []).forEach(function(it){
-          if (it && it.type === "daytrip" && it.dayTripPlace === dt.place) placedOnDay = dayIdx;
-        });
+
+    hubRoutes.forEach(function(route){
+      (route.planItems || []).forEach(function(stop){
+        if (!stop || stop.type !== "stop") return;
+        var place = places[stop.placeId];
+        var placeName = (place && place.name) || stop.placeId || "(unknown)";
+        var distKm = (stop.legacy && stop.legacy.distKm)
+          || (typeof route.distKm === "number" ? route.distKm : 0);
+        var chip = document.createElement("button");
+        chip.type = "button";
+        chip.style.cssText = "font-size:11px;font-weight:600;color:#5b3f8f;background:#fff;border:1px solid #d8c4e8;padding:4px 10px;border-radius:11px;cursor:pointer;font-family:inherit;";
+        chip.textContent = "📍 " + placeName
+          + (distKm ? " · " + (typeof global._fmtDistance === "function" ? global._fmtDistance(distKm) : distKm + "km") : "")
+          + " · ↩ stay overnight";
+        chip.title = "Click to make " + placeName + " an overnight stop instead of a day trip from " + dest.place;
+        chip.onmouseover = function(){ chip.style.background = "#ede0f4"; };
+        chip.onmouseout = function(){ chip.style.background = "#fff"; };
+        (function(hubDest, routeRef, stopRef){
+          chip.onclick = function(){
+            if (typeof global.ungroupDayTripByRouteStop === "function") {
+              global.ungroupDayTripByRouteStop(hubDest, routeRef, stopRef);
+            } else {
+              console.warn("[Max] ungroupDayTripByRouteStop not defined");
+            }
+          };
+        })(dest, route, stop);
+        dtList.appendChild(chip);
       });
-      chip.style.cssText = "font-size:11px;font-weight:600;color:#5b3f8f;background:#fff;border:1px solid #d8c4e8;padding:4px 10px;border-radius:11px;cursor:pointer;font-family:inherit;";
-      var placedLbl = "";
-      if (placedOnDay >= 0) {
-        var pDay = (dest.days || [])[placedOnDay];
-        var pLbl = pDay && pDay.lbl;
-        placedLbl = " · on " + (pLbl || ("Day " + (placedOnDay+1)));
-      }
-      chip.textContent = dt.place + " · " + (typeof global._fmtDistance === "function" ? global._fmtDistance(dt.distKm) : dt.distKm + "km") + placedLbl;
-      chip.title = "Click for options";
-      chip.onmouseover = function(){ chip.style.background = "#ede0f4"; };
-      chip.onmouseout = function(){ chip.style.background = "#fff"; };
-      (function(hubDest, dayTripIdx, dayTripData, alreadyOnDay){
-        chip.onclick = function(){
-          if (typeof global.openDayTripMenu === "function") global.openDayTripMenu(chip, hubDest, dayTripIdx, dayTripData, alreadyOnDay);
-        };
-      })(dest, dtIdx, dt, placedOnDay);
-      dtList.appendChild(chip);
     });
+
+    if (!dtList.children.length) return; // every route had zero usable stops
     dtBox.appendChild(dtList);
     hdr.appendChild(dtBox);
   }
