@@ -690,10 +690,10 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .tm-submit.on{background:#111;color:#fff;border-color:#111;cursor:pointer;}
 /* Destination mode */
 .dm-hdr{padding:12px 14px 0;flex-shrink:0;}
-.dm-hdr-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:10px;}
-.dm-back{font-size:12px;color:#1a5fa8;background:none;border:none;cursor:pointer;font-family:inherit;padding:2px 0;display:flex;align-items:center;gap:4px;font-weight:600;}
+.dm-hdr-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:10px;}
+.dm-back{font-size:15px;color:#1a5fa8;background:none;border:none;cursor:pointer;font-family:inherit;padding:6px 10px 6px 0;display:flex;align-items:center;gap:6px;font-weight:700;}
 .dm-back:hover{color:#0e3a6e;text-decoration:underline;}
-.dm-add-dest-btn{font-size:12px;font-weight:600;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;cursor:pointer;font-family:inherit;padding:6px 12px;}
+.dm-add-dest-btn{font-size:14px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:7px;cursor:pointer;font-family:inherit;padding:9px 16px;letter-spacing:-.01em;}
 .dm-add-dest-btn:hover{background:#0e3a6e;border-color:#0e3a6e;}
 
 .dm-back:hover{color:#333;}
@@ -23668,10 +23668,15 @@ function updateMainMapMarkers(){
   // v2 routes (kind:"dayTrip") whose fromDestId === this dest. Each
   // route's planItems[] holds the day-trip target(s) as type:"stop"
   // entries; render a purple pin for each.
+  // v3 Phase 2: route.kind === "route"; the dayTrip discriminator
+  // moved to route.subKind. MaxMigration.isDayTripRoute reads either.
   (function _renderDestViewDayTripPins(){
     var routes = Array.isArray(trip.routes) ? trip.routes : [];
+    var _isDT = (typeof MaxMigration !== "undefined" && MaxMigration.isDayTripRoute)
+      ? MaxMigration.isDayTripRoute
+      : function(r){ return r && (r.subKind === "dayTrip" || r.kind === "dayTrip"); };
     routes.forEach(function(route){
-      if (!route || route.kind !== "dayTrip") return;
+      if (!_isDT(route)) return;
       if (route.fromDestId !== dest.id) return;
       (route.planItems || []).forEach(function(stop){
         if (!stop || stop.type !== "stop") return;
@@ -24163,9 +24168,14 @@ function updateMainMap(){
     // kind:"dayTrip" routes whose fromDestId matches a destination on
     // this trip; render each stop in the route's planItems[] as a
     // purple pin with a purple spur back to the hub.
+    // v3 Phase 2: route.kind is now "route"; the dayTrip discriminator
+    // is route.subKind. MaxMigration.isDayTripRoute handles both.
     var _routes = Array.isArray(trip.routes) ? trip.routes : [];
+    var _isDTRoute = (typeof MaxMigration !== "undefined" && MaxMigration.isDayTripRoute)
+      ? MaxMigration.isDayTripRoute
+      : function(r){ return r && (r.subKind === "dayTrip" || r.kind === "dayTrip"); };
     _routes.forEach(function(route){
-      if (!route || route.kind !== "dayTrip") return;
+      if (!_isDTRoute(route)) return;
       var hubDestId = route.fromDestId;
       if (!hubDestId) return;
       var hubDest = trip.destinations.find(function(d){ return d && d.id === hubDestId; });
@@ -25795,31 +25805,47 @@ function _moveDayTripRouteToHubDay(oldHub, route, newHub, newDay){
     }
   });
 
+  // v3 Phase 3: use the schema helpers to keep day.refs[] + legacy
+  // day.planItems[type:"route"] mirror in sync on both ends.
+  var _addRef = (typeof MaxMigration !== "undefined" && MaxMigration.addRouteRefToDay)
+    ? MaxMigration.addRouteRefToDay : null;
+  var _rmRef = (typeof MaxMigration !== "undefined" && MaxMigration.removeRouteRefFromDay)
+    ? MaxMigration.removeRouteRefFromDay : null;
+
   // 1. Strip the route reference out of every day in the OLD hub.
   (oldHub.days || []).forEach(function(day){
-    if (!day || !Array.isArray(day.planItems)) return;
-    day.planItems = day.planItems.filter(function(pi){
-      return !(pi && pi.type === "route" && pi.routeId === route.id);
-    });
+    if (!day) return;
+    if (_rmRef) {
+      _rmRef(day, route.id);
+    } else if (Array.isArray(day.planItems)) {
+      day.planItems = day.planItems.filter(function(pi){
+        return !(pi && pi.type === "route" && pi.routeId === route.id);
+      });
+    }
   });
   // 2. Add the route reference to the NEW day on the NEW hub.
-  if (!Array.isArray(newDay.planItems)) newDay.planItems = [];
-  var hasRef = newDay.planItems.some(function(pi){
-    return pi && pi.type === "route" && pi.routeId === route.id;
-  });
-  if (!hasRef) {
-    newDay.planItems.push({
-      id:      "pi-rt-" + route.id + "-" + newDay.id,
-      type:    "route",
-      state:   "scheduled",
-      routeId: route.id,
-      source:  "user-rescheduled"
+  if (_addRef) {
+    _addRef(newDay, route.id, "user-rescheduled");
+  } else {
+    if (!Array.isArray(newDay.planItems)) newDay.planItems = [];
+    var hasRef = newDay.planItems.some(function(pi){
+      return pi && pi.type === "route" && pi.routeId === route.id;
     });
+    if (!hasRef) {
+      newDay.planItems.push({
+        id:      "pi-rt-" + route.id + "-" + newDay.id,
+        type:    "route",
+        state:   "scheduled",
+        routeId: route.id,
+        source:  "user-rescheduled"
+      });
+    }
   }
-  // 3. Update the route's hub + transitDays.
+  // 3. Update the route's hub + transitDays + Segment dates.
   route.fromDestId = newHub.id;
   route.toDestId = newHub.id;
   route.transitDays = [newDay.id];
+  if (newDay.date) { route.startsAt = newDay.date; route.endsAt = newDay.date; }
   // 4. Reallocate the absorbed nights from old hub to new hub.
   oldHub.nights = Math.max(1, (oldHub.nights || stopNights) - stopNights);
   newHub.nights = (newHub.nights || 0) + stopNights;
@@ -25856,12 +25882,24 @@ function _moveDayTripRouteToHubDay(oldHub, route, newHub, newDay){
   // 6. The new day's id may have been regenerated by makeDays. Re-link
   //    transitDays to whatever day in newHub.days currently contains
   //    the route reference, so the bidirectional invariant holds.
+  //    v3 Phase 2: check day.refs[] first; fall back to legacy planItems mirror.
   (newHub.days || []).forEach(function(day){
-    if (!day || !Array.isArray(day.planItems)) return;
-    var hit = day.planItems.some(function(pi){
-      return pi && pi.type === "route" && pi.routeId === route.id;
-    });
-    if (hit && day.id) route.transitDays = [day.id];
+    if (!day) return;
+    var hit = false;
+    if (Array.isArray(day.refs)) {
+      hit = day.refs.some(function(ref){
+        return ref && ref.targetKind === "route" && ref.targetId === route.id;
+      });
+    }
+    if (!hit && Array.isArray(day.planItems)) {
+      hit = day.planItems.some(function(pi){
+        return pi && pi.type === "route" && pi.routeId === route.id;
+      });
+    }
+    if (hit && day.id) {
+      route.transitDays = [day.id];
+      if (day.date) { route.startsAt = day.date; route.endsAt = day.date; }
+    }
   });
 
   if (typeof _emitTripMutation === "function") _emitTripMutation();
@@ -25872,31 +25910,43 @@ function _moveDayTripRouteToHubDay(oldHub, route, newHub, newDay){
 // reference (route.transitDays[] and day.planItems[{type:"route"}]).
 function _moveDayTripRouteToDay(hubDest, route, newDay){
   if (!hubDest || !route || !newDay || !newDay.id) return;
-  var oldDayIds = (route.transitDays || []).slice();
-  // 1. Remove the route reference from any day's planItems where it
-  //    currently lives.
+  // v3 Phase 3: use schema helpers; keep day.refs[] + legacy mirror in sync.
+  var _addRef = (typeof MaxMigration !== "undefined" && MaxMigration.addRouteRefToDay)
+    ? MaxMigration.addRouteRefToDay : null;
+  var _rmRef = (typeof MaxMigration !== "undefined" && MaxMigration.removeRouteRefFromDay)
+    ? MaxMigration.removeRouteRefFromDay : null;
+  // 1. Remove the route reference from any day where it currently lives.
   (hubDest.days || []).forEach(function(day){
-    if (!day || !Array.isArray(day.planItems)) return;
-    day.planItems = day.planItems.filter(function(pi){
-      return !(pi && pi.type === "route" && pi.routeId === route.id);
-    });
+    if (!day) return;
+    if (_rmRef) {
+      _rmRef(day, route.id);
+    } else if (Array.isArray(day.planItems)) {
+      day.planItems = day.planItems.filter(function(pi){
+        return !(pi && pi.type === "route" && pi.routeId === route.id);
+      });
+    }
   });
   // 2. Add the route reference to the new day.
-  if (!Array.isArray(newDay.planItems)) newDay.planItems = [];
-  var hasRef = newDay.planItems.some(function(pi){
-    return pi && pi.type === "route" && pi.routeId === route.id;
-  });
-  if (!hasRef) {
-    newDay.planItems.push({
-      id:      "pi-rt-" + route.id + "-" + newDay.id,
-      type:    "route",
-      state:   "scheduled",
-      routeId: route.id,
-      source:  "user-scheduled"
+  if (_addRef) {
+    _addRef(newDay, route.id, "user-scheduled");
+  } else {
+    if (!Array.isArray(newDay.planItems)) newDay.planItems = [];
+    var hasRef = newDay.planItems.some(function(pi){
+      return pi && pi.type === "route" && pi.routeId === route.id;
     });
+    if (!hasRef) {
+      newDay.planItems.push({
+        id:      "pi-rt-" + route.id + "-" + newDay.id,
+        type:    "route",
+        state:   "scheduled",
+        routeId: route.id,
+        source:  "user-scheduled"
+      });
+    }
   }
-  // 3. Update route.transitDays to point at the new day.
+  // 3. Update route.transitDays + Segment dates to point at the new day.
   route.transitDays = [newDay.id];
+  if (newDay.date) { route.startsAt = newDay.date; route.endsAt = newDay.date; }
 
   if (typeof _emitTripMutation === "function") _emitTripMutation();
 }
@@ -26439,6 +26489,9 @@ function convertDestToDayTrip(destId, hubDestId, opts){
   var existingRoute = trip.routes.find(function(r){ return r && r.id === routeId; });
   var srcNights = src.nights || 1;
 
+  // v3 Phase 3: write the native Segment shape — route gets
+  // kind:"route" + subKind:"dayTrip", Day gets refs[] alongside the
+  // legacy planItems[type:"route"] mirror (Phase 4 drops the mirror).
   if (!existingRoute) {
     var stopPlanItem = {
       id:             "pi-stop-" + routeId,
@@ -26456,42 +26509,43 @@ function convertDestToDayTrip(destId, hubDestId, opts){
         attachedEvents:  (src.attachedEvents || []).slice()
       }
     };
-    var newRoute = {
-      id:             routeId,
-      kind:           "dayTrip",
-      fromDestId:     hubDestId,
-      toDestId:       hubDestId,
-      modeOptions:    [],
-      modeChosen:     null,
-      transitDays:    [day0.id],
-      durationHours:  null,
-      distKm:         distKm,
-      character:      "dayTrip",
-      fuelStops:      [],
-      planItems:      [stopPlanItem],
-      bookings:       [],
-      notes:          ""
-    };
-    trip.routes.push(newRoute);
-    // Reference the route from the hub's day plan.
-    day0.planItems.push({
-      id:      "pi-rt-" + routeId + "-" + day0.id,
-      type:    "route",
-      state:   "scheduled",
-      routeId: routeId,
-      source:  "manual-trip-view"
-    });
-  } else {
-    // Rare: a day-trip route for this (hub, target) already exists.
-    // Make sure the day is in its transitDays + the hub day has the
-    // route reference.
-    if (existingRoute.transitDays.indexOf(day0.id) < 0) {
-      existingRoute.transitDays.push(day0.id);
+    var newRoute;
+    if (typeof MaxMigration !== "undefined" && MaxMigration.newRouteSegment) {
+      newRoute = MaxMigration.newRouteSegment(routeId, "dayTrip", hubDestId, hubDestId, {
+        transitDays: [day0.id],
+        distKm:      distKm,
+        character:   "dayTrip",
+        planItems:   [stopPlanItem],
+        startsAt:    day0.date || null,
+        endsAt:      day0.date || null
+      });
+    } else {
+      newRoute = {
+        id:             routeId,
+        kind:           "route",
+        subKind:        "dayTrip",
+        fromDestId:     hubDestId,
+        toDestId:       hubDestId,
+        modeOptions:    [],
+        modeChosen:     null,
+        transitDays:    [day0.id],
+        durationHours:  null,
+        distKm:         distKm,
+        character:      "dayTrip",
+        fuelStops:      [],
+        planItems:      [stopPlanItem],
+        bookings:       [],
+        notes:          "",
+        startsAt:       day0.date || null,
+        endsAt:         day0.date || null
+      };
     }
-    var hasRef = day0.planItems.some(function(pi){
-      return pi && pi.type === "route" && pi.routeId === routeId;
-    });
-    if (!hasRef) {
+    trip.routes.push(newRoute);
+    // Reference the route from the hub's day plan (v3 day.refs[] +
+    // legacy planItems[type:"route"] mirror).
+    if (typeof MaxMigration !== "undefined" && MaxMigration.addRouteRefToDay) {
+      MaxMigration.addRouteRefToDay(day0, routeId, "manual-trip-view");
+    } else {
       day0.planItems.push({
         id:      "pi-rt-" + routeId + "-" + day0.id,
         type:    "route",
@@ -26499,6 +26553,34 @@ function convertDestToDayTrip(destId, hubDestId, opts){
         routeId: routeId,
         source:  "manual-trip-view"
       });
+    }
+  } else {
+    // Rare: a day-trip route for this (hub, target) already exists.
+    // Make sure the day is in its transitDays + the hub day has the
+    // route reference. Migrate legacy kind="dayTrip" → subKind on
+    // the fly so older trips don't get stuck behind the v3 reader.
+    if (!existingRoute.subKind && existingRoute.kind === "dayTrip") {
+      existingRoute.subKind = "dayTrip";
+      existingRoute.kind    = "route";
+    }
+    if (existingRoute.transitDays.indexOf(day0.id) < 0) {
+      existingRoute.transitDays.push(day0.id);
+    }
+    if (typeof MaxMigration !== "undefined" && MaxMigration.addRouteRefToDay) {
+      MaxMigration.addRouteRefToDay(day0, routeId, "manual-trip-view");
+    } else {
+      var hasRef = day0.planItems.some(function(pi){
+        return pi && pi.type === "route" && pi.routeId === routeId;
+      });
+      if (!hasRef) {
+        day0.planItems.push({
+          id:      "pi-rt-" + routeId + "-" + day0.id,
+          type:    "route",
+          state:   "scheduled",
+          routeId: routeId,
+          source:  "manual-trip-view"
+        });
+      }
     }
   }
 
@@ -26519,13 +26601,33 @@ function convertDestToDayTrip(destId, hubDestId, opts){
       if (typeof makeDays === "function") {
         // Rebuild the day-shells but try to preserve planItems we just
         // added — the hub's day[0] still has the PlanItem we pushed.
+        // v3 Phase 3: also preserve day.refs[] so the route ref is
+        // alive in the v3 surface, not just the legacy planItems mirror.
         var preservedDay0Items = [];
+        var preservedDay0Refs = [];
         if (d === hub && d.days && d.days[0]) {
           preservedDay0Items = (d.days[0].planItems || []).slice();
+          preservedDay0Refs = (d.days[0].refs || []).slice();
         }
         d.days = makeDays(d.id, d.place, d.place, d.dateFrom, d.nights || 0);
-        if (d === hub && d.days[0] && preservedDay0Items.length) {
-          d.days[0].planItems = preservedDay0Items;
+        if (d === hub && d.days[0]) {
+          if (preservedDay0Items.length) d.days[0].planItems = preservedDay0Items;
+          if (preservedDay0Refs.length)  d.days[0].refs = preservedDay0Refs;
+          // The new day's id may differ; re-link route.transitDays
+          // (and route.startsAt/endsAt) so the bidirectional ref holds.
+          if (d === hub && d.days[0].id !== day0.id) {
+            (trip.routes || []).forEach(function(rt){
+              if (!rt || !Array.isArray(rt.transitDays)) return;
+              var idx = rt.transitDays.indexOf(day0.id);
+              if (idx >= 0) {
+                rt.transitDays[idx] = d.days[0].id;
+                if (d.days[0].date) {
+                  rt.startsAt = d.days[0].date;
+                  rt.endsAt   = d.days[0].date;
+                }
+              }
+            });
+          }
         }
       }
       cur = next;
@@ -26809,18 +26911,24 @@ function ungroupDayTripByRouteStop(hubDest, route, stop, opts){
   route.planItems.splice(stopIdx, 1);
 
   // 2. If the route has no stops left, delete the route AND remove
-  //    every day-planItem reference to it. Otherwise leave the route
-  //    in place (it still holds other day-trip targets on the same
-  //    hub — unusual but supported).
+  //    every day reference to it (both v3 day.refs[] and the legacy
+  //    planItems[type:"route"] mirror). Otherwise leave the route in
+  //    place — it may still hold other day-trip targets on the same hub.
   var routeNowEmpty = !route.planItems.length;
   if (routeNowEmpty) {
     var rIdx = trip.routes.indexOf(route);
     if (rIdx >= 0) trip.routes.splice(rIdx, 1);
+    var _rmRef = (typeof MaxMigration !== "undefined" && MaxMigration.removeRouteRefFromDay)
+      ? MaxMigration.removeRouteRefFromDay : null;
     (hubDest.days || []).forEach(function(day){
-      if (!day || !Array.isArray(day.planItems)) return;
-      day.planItems = day.planItems.filter(function(pi){
-        return !(pi && pi.type === "route" && pi.routeId === route.id);
-      });
+      if (!day) return;
+      if (_rmRef) {
+        _rmRef(day, route.id);
+      } else if (Array.isArray(day.planItems)) {
+        day.planItems = day.planItems.filter(function(pi){
+          return !(pi && pi.type === "route" && pi.routeId === route.id);
+        });
+      }
     });
   }
 

@@ -569,12 +569,189 @@
     return version < CURRENT_SCHEMA_VERSION;
   }
 
+  // ── v3 Segment helpers ──────────────────────────────────────
+  //
+  // Used by readers + writers to walk and mutate the post-v3 envelope
+  // without sprinkling shape-checks across the codebase. Each helper
+  // reads v3 first, then falls back to v2 (so a freshly-loaded but
+  // not-yet-migrated envelope still works during the milliseconds
+  // between db.get and migrateTripShape).
+  //
+  // Writers SHOULD emit both v3 and v2 fields during Phase 2/3 so
+  // any straggler v2 reader keeps working; Phase 4 will drop the
+  // legacy mirrors.
+
+  // route.subKind on v3; for v2 envelopes, route.kind held the
+  // discriminator. After migration route.kind === "route" — never
+  // read route.kind for the discriminator on v3+ data.
+  function routeSubKind(route) {
+    if (!route) return null;
+    if (route.subKind) return route.subKind;
+    if (route.kind && route.kind !== 'route') return route.kind;
+    return null;
+  }
+
+  function isDayTripRoute(route) {
+    return routeSubKind(route) === 'dayTrip';
+  }
+
+  function isTransitRoute(route) {
+    return routeSubKind(route) === 'transit';
+  }
+
+  // All routes scheduled on a given day. Prefers v3 day.refs[] over
+  // v2 day.planItems[type:"route"]. Returns Route objects (resolved
+  // through trip.routes[]) — callers don't have to do the lookup.
+  function routesForDay(trip, day) {
+    if (!trip || !day) return [];
+    var routesById = {};
+    (trip.routes || []).forEach(function (r) {
+      if (r && r.id) routesById[r.id] = r;
+    });
+    var ids = {};
+    if (Array.isArray(day.refs) && day.refs.length) {
+      day.refs.forEach(function (ref) {
+        if (ref && ref.targetKind === 'route' && ref.targetId) {
+          ids[ref.targetId] = true;
+        }
+      });
+    } else if (Array.isArray(day.planItems)) {
+      day.planItems.forEach(function (pi) {
+        if (pi && pi.type === 'route' && pi.routeId) {
+          ids[pi.routeId] = true;
+        }
+      });
+    }
+    return Object.keys(ids)
+      .map(function (id) { return routesById[id]; })
+      .filter(Boolean);
+  }
+
+  // ISO date string (YYYY-MM-DD) + integer offset → ISO date string.
+  // Day startsAt = day.date, endsAt = day.date + 1 day (per v3 spec).
+  function _shiftIsoDate(iso, days) {
+    if (!iso) return null;
+    var d = new Date(iso + 'T12:00:00');
+    d.setDate(d.getDate() + days);
+    return d.toISOString().slice(0, 10);
+  }
+
+  // Build a v3 Day-segment from minimal inputs. Used by writers
+  // creating a fresh Day (e.g. when rebuilding day-shells inside
+  // convertDestToDayTrip).
+  function newDaySegment(id, dateISO, label) {
+    return {
+      id:        id,
+      kind:      'day',
+      date:      dateISO,
+      lbl:       label || null,
+      startsAt:  dateISO,
+      endsAt:    _shiftIsoDate(dateISO, 1),
+      planItems: [],
+      refs:      [],
+    };
+  }
+
+  // Build a v3 Route-segment. `subKind` is the discriminator
+  // ("transit"/"dayTrip"/"arrival"/"departure"). `extras` is merged
+  // on top so callers can pass mode/duration/etc.
+  function newRouteSegment(id, subKind, fromDestId, toDestId, extras) {
+    var base = {
+      id:            id,
+      kind:          'route',
+      subKind:       subKind,
+      fromDestId:    fromDestId || null,
+      toDestId:      toDestId || null,
+      modeOptions:   [],
+      modeChosen:    null,
+      transitDays:   [],
+      durationHours: null,
+      distKm:        null,
+      character:     null,
+      fuelStops:     [],
+      planItems:     [],
+      bookings:      [],
+      notes:         '',
+      startsAt:      null,
+      endsAt:        null,
+    };
+    if (extras && typeof extras === 'object') {
+      Object.keys(extras).forEach(function (k) { base[k] = extras[k]; });
+    }
+    return base;
+  }
+
+  // Reference object for a Day's refs[]. v3 separates Reference
+  // from PlanItem; this is the canonical factory.
+  function newReference(targetKind, targetId, source) {
+    return {
+      id:         (targetKind || 'ref') + '-' + (targetId || '?') + '-' + Date.now(),
+      targetKind: targetKind,
+      targetId:   targetId,
+      startTime:  null,
+      endTime:    null,
+      source:     source || 'user-scheduled',
+    };
+  }
+
+  // Add a route reference to a day. Maintains BOTH v3 (day.refs)
+  // and v2 (day.planItems[type:"route"]) for back-compat during
+  // Phase 2/3. Idempotent — re-adding the same route is a no-op.
+  function addRouteRefToDay(day, routeId, source) {
+    if (!day || !routeId) return;
+    if (!Array.isArray(day.refs)) day.refs = [];
+    if (!Array.isArray(day.planItems)) day.planItems = [];
+    var hasRef = day.refs.some(function (ref) {
+      return ref && ref.targetKind === 'route' && ref.targetId === routeId;
+    });
+    if (!hasRef) {
+      day.refs.push(newReference('route', routeId, source));
+    }
+    var hasPi = day.planItems.some(function (pi) {
+      return pi && pi.type === 'route' && pi.routeId === routeId;
+    });
+    if (!hasPi) {
+      day.planItems.push({
+        id:      'pi-rt-' + routeId + '-' + day.id,
+        type:    'route',
+        state:   'scheduled',
+        routeId: routeId,
+        source:  source || 'user-scheduled',
+      });
+    }
+  }
+
+  // Remove a route reference from a day, in BOTH v3 and v2 stores.
+  function removeRouteRefFromDay(day, routeId) {
+    if (!day || !routeId) return;
+    if (Array.isArray(day.refs)) {
+      day.refs = day.refs.filter(function (ref) {
+        return !(ref && ref.targetKind === 'route' && ref.targetId === routeId);
+      });
+    }
+    if (Array.isArray(day.planItems)) {
+      day.planItems = day.planItems.filter(function (pi) {
+        return !(pi && pi.type === 'route' && pi.routeId === routeId);
+      });
+    }
+  }
+
   // ── Public surface ──────────────────────────────────────────
 
   global.MaxMigration = {
     CURRENT_SCHEMA_VERSION: CURRENT_SCHEMA_VERSION,
     migrateTripShape: migrateTripShape,
     needsMigration: needsMigration,
+    // v3 Segment helpers — readers + writers throughout the app.
+    routeSubKind: routeSubKind,
+    isDayTripRoute: isDayTripRoute,
+    isTransitRoute: isTransitRoute,
+    routesForDay: routesForDay,
+    newDaySegment: newDaySegment,
+    newRouteSegment: newRouteSegment,
+    newReference: newReference,
+    addRouteRefToDay: addRouteRefToDay,
+    removeRouteRefFromDay: removeRouteRefFromDay,
     // Internal — exposed for tests; not for engine consumers.
     _internal: {
       makePlaceId: _makePlaceId,
@@ -586,6 +763,7 @@
       migrateV0toV1: _migrateV0toV1,
       migrateV1toV2: _migrateV1toV2,
       migrateV2toV3: _migrateV2toV3,
+      shiftIsoDate: _shiftIsoDate,
     },
   };
 })(typeof window !== 'undefined' ? window : this);

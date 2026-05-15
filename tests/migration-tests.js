@@ -821,6 +821,118 @@ describe('migrateTripShape v2→v3 — Segment polymorphic base', () => {
   });
 });
 
+// ── Suite: v3 Segment helpers (Phase 2+3 surface) ────────────
+
+describe('v3 Segment helpers — read/write surface for engine consumers', () => {
+
+  test('isDayTripRoute matches v3 subKind', () => {
+    assert.strictEqual(MaxMigration.isDayTripRoute({ kind: 'route', subKind: 'dayTrip' }), true);
+    assert.strictEqual(MaxMigration.isDayTripRoute({ kind: 'route', subKind: 'transit' }), false);
+  });
+
+  test('isDayTripRoute falls back to v2 route.kind', () => {
+    // Pre-migration v2 envelope: route.kind held the discriminator.
+    assert.strictEqual(MaxMigration.isDayTripRoute({ kind: 'dayTrip' }), true);
+    assert.strictEqual(MaxMigration.isDayTripRoute({ kind: 'transit' }), false);
+  });
+
+  test('routeSubKind returns null for unknown routes', () => {
+    assert.strictEqual(MaxMigration.routeSubKind(null), null);
+    assert.strictEqual(MaxMigration.routeSubKind({ kind: 'route' }), null);
+  });
+
+  test('routesForDay walks v3 day.refs[]', () => {
+    const trip = {
+      routes: [
+        { id: 'r1', kind: 'route', subKind: 'dayTrip' },
+        { id: 'r2', kind: 'route', subKind: 'transit' },
+      ],
+    };
+    const day = {
+      refs: [
+        { id: 'ref-1', targetKind: 'route', targetId: 'r1', source: 'user' },
+        { id: 'ref-2', targetKind: 'route', targetId: 'r2', source: 'user' },
+      ],
+    };
+    const routes = MaxMigration.routesForDay(trip, day);
+    assert.strictEqual(routes.length, 2);
+    assert(routes.find(r => r.id === 'r1'));
+    assert(routes.find(r => r.id === 'r2'));
+  });
+
+  test('routesForDay falls back to day.planItems[type:"route"]', () => {
+    const trip = { routes: [{ id: 'r1', kind: 'route' }] };
+    const day = {
+      // No refs[] — use legacy planItems mirror.
+      planItems: [{ type: 'route', routeId: 'r1' }],
+    };
+    const routes = MaxMigration.routesForDay(trip, day);
+    assert.strictEqual(routes.length, 1);
+    assert.strictEqual(routes[0].id, 'r1');
+  });
+
+  test('addRouteRefToDay writes both day.refs and legacy day.planItems', () => {
+    const day = { id: 'd1' };
+    MaxMigration.addRouteRefToDay(day, 'r1', 'user-scheduled');
+    assert.strictEqual(day.refs.length, 1);
+    assert.strictEqual(day.refs[0].targetKind, 'route');
+    assert.strictEqual(day.refs[0].targetId, 'r1');
+    assert.strictEqual(day.planItems.length, 1);
+    assert.strictEqual(day.planItems[0].type, 'route');
+    assert.strictEqual(day.planItems[0].routeId, 'r1');
+  });
+
+  test('addRouteRefToDay is idempotent', () => {
+    const day = { id: 'd1' };
+    MaxMigration.addRouteRefToDay(day, 'r1', 'user-scheduled');
+    MaxMigration.addRouteRefToDay(day, 'r1', 'user-scheduled');
+    assert.strictEqual(day.refs.length, 1);
+    assert.strictEqual(day.planItems.length, 1);
+  });
+
+  test('removeRouteRefFromDay clears both day.refs and day.planItems', () => {
+    const day = { id: 'd1' };
+    MaxMigration.addRouteRefToDay(day, 'r1', 'user');
+    MaxMigration.addRouteRefToDay(day, 'r2', 'user');
+    MaxMigration.removeRouteRefFromDay(day, 'r1');
+    assert.strictEqual(day.refs.length, 1);
+    assert.strictEqual(day.refs[0].targetId, 'r2');
+    assert.strictEqual(day.planItems.length, 1);
+    assert.strictEqual(day.planItems[0].routeId, 'r2');
+  });
+
+  test('newDaySegment produces a valid v3 Day', () => {
+    const day = MaxMigration.newDaySegment('d-test', '2026-06-01', 'Jun 1');
+    assert.strictEqual(day.kind, 'day');
+    assert.strictEqual(day.date, '2026-06-01');
+    assert.strictEqual(day.startsAt, '2026-06-01');
+    assert.strictEqual(day.endsAt, '2026-06-02');
+    assert(Array.isArray(day.refs) && day.refs.length === 0);
+    assert(Array.isArray(day.planItems) && day.planItems.length === 0);
+  });
+
+  test('newRouteSegment produces a valid v3 Route with subKind', () => {
+    const route = MaxMigration.newRouteSegment('r-test', 'dayTrip', 'dest-a', 'dest-a', {
+      distKm: 40,
+    });
+    assert.strictEqual(route.kind, 'route');
+    assert.strictEqual(route.subKind, 'dayTrip');
+    assert.strictEqual(route.fromDestId, 'dest-a');
+    assert.strictEqual(route.toDestId, 'dest-a');
+    assert.strictEqual(route.distKm, 40);
+    assert(Array.isArray(route.planItems));
+    assert(Array.isArray(route.transitDays));
+  });
+
+  test('newReference shape', () => {
+    const ref = MaxMigration.newReference('route', 'r-1', 'migration');
+    assert.strictEqual(ref.targetKind, 'route');
+    assert.strictEqual(ref.targetId, 'r-1');
+    assert.strictEqual(ref.source, 'migration');
+    assert(ref.id);
+  });
+});
+
 describe('needsMigration', () => {
   test('legacy envelope needs migration', () => {
     assert.strictEqual(MaxMigration.needsMigration(legacyEnvelope()), true);

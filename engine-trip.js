@@ -951,7 +951,23 @@
     for(var i=0;i<count;i++){
       var d=new Date(dateFrom+"T12:00:00"); d.setDate(d.getDate()+i);
       var lbl=d.toLocaleDateString("en-US",{month:"short",day:"numeric"});
-      days.push({id:"dy"+destId+"_"+i,lbl:lbl,note:i===0?"arrival":"",items:[]});
+      var dateISO=d.toISOString().slice(0,10);
+      var nextISO=new Date(d.getTime()+86400000).toISOString().slice(0,10);
+      // v3 Phase 3: Day is a Segment — emit kind/startsAt/endsAt/date/refs
+      // alongside the legacy id/lbl/note/items shape used by older readers.
+      days.push({
+        id:"dy"+destId+"_"+i,
+        lbl:lbl,
+        note:i===0?"arrival":"",
+        items:[],
+        // v3 Segment fields
+        kind:"day",
+        date:dateISO,
+        startsAt:dateISO,
+        endsAt:nextISO,
+        planItems:[],
+        refs:[]
+      });
     }
     return days;
   }

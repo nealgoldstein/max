@@ -2022,12 +2022,17 @@
     // and render a chip per stop. Click → ungroupDayTripByRouteStop
     // (v2 writer; see index.html). Legacy distance bookkeeping rides
     // on stop.legacy or route.distKm.
+    // v3 Phase 2: use MaxMigration.isDayTripRoute (handles both v2's
+    // route.kind === "dayTrip" and v3's route.subKind === "dayTrip").
     (function _renderDayTripChips(){
       var routes = (trip && Array.isArray(trip.routes)) ? trip.routes : [];
       if (!routes.length) return;
       var places = (trip && trip.places) || {};
+      var _isDT = (typeof MaxMigration !== "undefined" && MaxMigration.isDayTripRoute)
+        ? MaxMigration.isDayTripRoute
+        : function(r){ return r && (r.subKind === "dayTrip" || r.kind === "dayTrip"); };
       var hubRoutes = routes.filter(function(r){
-        return r && r.kind === "dayTrip" && r.fromDestId === dest.id;
+        return _isDT(r) && r.fromDestId === dest.id;
       });
       if (!hubRoutes.length) return;
 
@@ -2834,11 +2839,15 @@
     // matches this dest; each route's planItems[] holds the target
     // stop(s). Render one chip per stop with "Make this an overnight"
     // wired to the v2 writer (ungroupDayTripByRouteStop).
+    // v3 Phase 2: use MaxMigration.isDayTripRoute (handles both v2 and v3 shapes).
     var trip = global.trip;
     if (!trip || !Array.isArray(trip.routes) || !trip.routes.length) return;
     var places = (trip && trip.places) || {};
+    var _isDT = (typeof MaxMigration !== "undefined" && MaxMigration.isDayTripRoute)
+      ? MaxMigration.isDayTripRoute
+      : function(r){ return r && (r.subKind === "dayTrip" || r.kind === "dayTrip"); };
     var hubRoutes = trip.routes.filter(function(r){
-      return r && r.kind === "dayTrip" && r.fromDestId === dest.id;
+      return _isDT(r) && r.fromDestId === dest.id;
     });
     if (!hubRoutes.length) return;
 
