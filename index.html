@@ -23666,31 +23666,37 @@ function updateMainMapMarkers(){
     });
   }
 
-  // Round EU (v359.51.2 rewrite): day-trip chip pins on the dest-view
-  // map. Iterates the new PlanItem shape — every type:"dayTrip" entry
-  // across this dest's days[].planItems[]. Place name + coords come
-  // from trip.places[planItem.placeId]. Visual unchanged: purple
-  // marker matching the chip styling on the dest card.
-  (dest.days || []).forEach(function(day){
-    (day.planItems || []).forEach(function(pi){
-      if (!pi || pi.type !== "dayTrip") return;
-      var place = (trip.places && trip.places[pi.placeId]) || null;
-      if (!place || typeof place.lat !== "number" || typeof place.lng !== "number") return;
-      var srcNights = (pi.legacy && pi.legacy.sourceNights) || 1;
-      var distKm    = pi.legacy && pi.legacy.distKm;
-      var dtItem = {
-        id:   pi.id || ("dt-" + (place.name || "").toLowerCase().replace(/\s+/g, "-")),
-        n:    place.name,
-        note: distKm
-          ? (distKm + "km from " + dest.place + " · " + srcNights + "-night day trip")
-          : (srcNights + "-night day trip"),
-        lat:  place.lat,
-        lng:  place.lng,
-        type: "daytrip"
-      };
-      addPin([place.lat, place.lng], makeMapIcon("daytrip"), 0.85, dtItem, "daytrip");
+  // v359.52.2: day-trip chip pins on the dest-view map, sourced from
+  // v2 routes (kind:"dayTrip") whose fromDestId === this dest. Each
+  // route's planItems[] holds the day-trip target(s) as type:"stop"
+  // entries; render a purple pin for each.
+  (function _renderDestViewDayTripPins(){
+    var routes = Array.isArray(trip.routes) ? trip.routes : [];
+    routes.forEach(function(route){
+      if (!route || route.kind !== "dayTrip") return;
+      if (route.fromDestId !== dest.id) return;
+      (route.planItems || []).forEach(function(stop){
+        if (!stop || stop.type !== "stop") return;
+        var place = (trip.places && trip.places[stop.placeId]) || null;
+        if (!place || typeof place.lat !== "number" || typeof place.lng !== "number") return;
+        var srcNights = (stop.legacy && stop.legacy.sourceNights) || 1;
+        var distKm = (stop.legacy && typeof stop.legacy.distKm === "number")
+          ? stop.legacy.distKm
+          : (typeof route.distKm === "number" ? route.distKm : null);
+        var dtItem = {
+          id:   stop.id || ("dt-" + (place.name || "").toLowerCase().replace(/\s+/g, "-")),
+          n:    place.name,
+          note: distKm
+            ? (distKm + "km from " + dest.place + " · " + srcNights + "-night day trip")
+            : (srcNights + "-night day trip"),
+          lat:  place.lat,
+          lng:  place.lng,
+          type: "daytrip"
+        };
+        addPin([place.lat, place.lng], makeMapIcon("daytrip"), 0.85, dtItem, "daytrip");
+      });
     });
-  });
+  })();
   // Round FZ.7: pins for FT.2 peer day-trips (items placed via the
   // gradual-shrink mechanic). These items live on dest.days[*].items
   // with type==="daytrip" and peerDayTrip:true, NOT in dest.dayTrips —
@@ -24160,35 +24166,29 @@ function updateMainMap(){
     // the user's day-trip choices in the picker were silently
     // invisible on the trip view (data was correct, rendering was
     // missing).
-    // v359.51.2: day-trip render rebuilt against the PlanItem shape
-    // (post-migration). For each hub destination, iterate every day's
-    // planItems[] and pin every type:"dayTrip" entry. Place names +
-    // coords are pulled from trip.places[planItem.placeId]; falls back
-    // to getCityCenter / Nominatim geocode if coords aren't on the
-    // Place yet. Visual matches the picker map and the previous
-    // dest.dayTrips render: dashed orange spur from hub + small
-    // orange pin with the day-trip place's initials.
-    trip.destinations.forEach(function(hubDest){
-      if (!hubDest || !Array.isArray(hubDest.days) || !hubDest.days.length) return;
-      // Collect every dayTrip PlanItem on this hub across all its days.
-      var dayTripPlanItems = [];
-      hubDest.days.forEach(function(day){
-        (day.planItems || []).forEach(function(pi){
-          if (pi && pi.type === "dayTrip") dayTripPlanItems.push(pi);
-        });
-      });
-      if (!dayTripPlanItems.length) return;
-
+    // v359.52.2: day-trip render rebuilt against the v2 schema —
+    // day-trips are now first-class Routes (kind:"dayTrip") with the
+    // target place carried as a {type:"stop", priority:"iconic"}
+    // PlanItem in the route's planItems[]. Walk trip.routes[] for
+    // kind:"dayTrip" routes whose fromDestId matches a destination on
+    // this trip; render each stop in the route's planItems[] as a
+    // purple pin with a purple spur back to the hub.
+    var _routes = Array.isArray(trip.routes) ? trip.routes : [];
+    _routes.forEach(function(route){
+      if (!route || route.kind !== "dayTrip") return;
+      var hubDestId = route.fromDestId;
+      if (!hubDestId) return;
+      var hubDest = trip.destinations.find(function(d){ return d && d.id === hubDestId; });
+      if (!hubDest) return;
       var hubCtr = (typeof hubDest.lat === "number" && typeof hubDest.lng === "number")
         ? [hubDest.lat, hubDest.lng]
         : getCityCenter(hubDest.place);
       if (!hubCtr || !isFinite(hubCtr[0])) return;
 
-      dayTripPlanItems.forEach(function(pi){
-        var place = (trip.places && trip.places[pi.placeId]) || null;
-        // Place name: from the Place dict, with a last-ditch fallback
-        // to the placeId itself so something always renders.
-        var dtName = (place && place.name) || pi.placeId || "";
+      (route.planItems || []).forEach(function(stop){
+        if (!stop || stop.type !== "stop") return;
+        var place = (trip.places && trip.places[stop.placeId]) || null;
+        var dtName = (place && place.name) || stop.placeId || "";
         if (!dtName) return;
         var dtCtr = (place && typeof place.lat === "number" && typeof place.lng === "number")
           ? [place.lat, place.lng]
@@ -24197,7 +24197,6 @@ function updateMainMap(){
           if (typeof ensureCoarseGeocode === "function") {
             ensureCoarseGeocode(dtName, function(ll){
               if (ll && isFinite(ll[0])) {
-                // Backfill onto the Place so the next render hits cache.
                 if (place) { place.lat = ll[0]; place.lng = ll[1]; }
                 if (_mainMap && typeof updateMainMap === "function") updateMainMap();
               }
@@ -24206,21 +24205,15 @@ function updateMainMap(){
           return;
         }
         bounds.push(dtCtr);
-        // v359.51.21: committed day-trip spur is PURPLE — the same
-        // colour family as the picker's "could be a day trip" hints
-        // and the trip-view's purple-ring suggestion pins. Orange
-        // retired across the app; the visual now reads as
-        // blue=overnight / purple=day-trip-related everywhere.
+        // v359.51.21: committed day-trip spur is PURPLE — unified
+        // visual with the picker (blue=overnight, purple=day-trip-related).
         try {
           var spur = L.polyline([hubCtr, dtCtr], {
             color:"#5b3f8f", weight:3, opacity:0.95
           }).addTo(_mainMap);
           _mainMarkers.push(spur);
         } catch(_){}
-        // v359.51.21: committed day-trip pin is PURPLE (was orange in
-        // v359.51.11). Still 20px circle with place initials + white
-        // border + soft shadow — same size/shape language, new colour
-        // to align with the picker.
+        // 20 px purple circle with place initials.
         var dtAbbrev = dtName.trim().substring(0, 2) || "·";
         var dtSize = 20;
         var dtHtml = '<div style="background:#5b3f8f;color:#fff;border-radius:50%;width:'
@@ -24234,23 +24227,22 @@ function updateMainMap(){
           var dtMarker = L.marker(dtCtr, {icon:dtIcon}).addTo(_mainMap);
           dtMarker.bindTooltip(dtName + " · day trip from " + (hubDest.place || ""),
             {permanent:false, direction:"top", offset:[0,-dtSize/2-2], className:"main-map-tooltip"});
-          // v359.51.9: day-trip pin tap → role popover, same as the
-          // overnight-destination tap. The popover offers two actions:
-          //   • "Make this an overnight stop" — ungroup the PlanItem
-          //     back into trip.destinations (uses the existing
-          //     ungroupDayTripByPlanItem writer)
-          //   • "Open hub destination" — drill into the hub the day
-          //     trip is anchored on
-          (function(hubId, hubRef, piRef, placeName){
+          // v359.52.2: pass the route + stop refs to the popover so
+          // the writer (ungroupDayTripByRouteStop, also new in v2)
+          // has everything it needs to detach the stop, optionally
+          // remove the empty route, drop the route reference from
+          // the hub day's planItems, and re-create the standalone
+          // destination.
+          (function(hubId, hubRef, routeRef, stopRef, placeName){
             dtMarker.on("click", function(){
               try { dtMarker.closeTooltip(); } catch(_){}
               if (typeof _openTripDayTripPopover === "function") {
-                _openTripDayTripPopover(hubRef, piRef, placeName);
+                _openTripDayTripPopover(hubRef, routeRef, stopRef, placeName);
               } else if (typeof selectDest === "function") {
                 selectDest(hubId);
               }
             });
-          })(hubDest.id, hubDest, pi, dtName);
+          })(hubDest.id, hubDest, route, stop, dtName);
           _mainMarkers.push(dtMarker);
         } catch(_){}
       });
@@ -26173,28 +26165,85 @@ function convertDestToDayTrip(destId, hubDestId, opts){
     distKm = Math.round(MaxEngineTrip.haversineKm(hub.lat, hub.lng, src.lat, src.lng));
   }
 
-  // Append PlanItem to hub.days[0].
+  // v359.52.3: write v2 shape — mint a route, attach the source as a
+  // stop on the route, push a route reference onto hub.days[0].
+  // Previously this wrote {type:"dayTrip"} PlanItems directly; that's
+  // gone now.
   if (!Array.isArray(hub.days) || !hub.days.length) {
     console.warn("[Max] convertDestToDayTrip: hub has no days; aborting");
     return;
   }
+  if (!Array.isArray(trip.routes)) trip.routes = [];
   var day0 = hub.days[0];
+  if (!day0.id) day0.id = "d-" + hubDestId + "-0"; // backfill if missing
   if (!Array.isArray(day0.planItems)) day0.planItems = [];
+
+  var routeId = "r-dt-" + hubDestId + "-" + placeId;
+  var existingRoute = trip.routes.find(function(r){ return r && r.id === routeId; });
   var srcNights = src.nights || 1;
-  day0.planItems.push({
-    id:      "pi-dt-" + hubDestId + "-" + placeId + "-" + Date.now(),
-    type:    "dayTrip",
-    state:   "suggestion",
-    placeId: placeId,
-    notes:   src.intent || "",
-    source:  "manual-trip-view",
-    legacy: {
-      sourceNights:     srcNights,
-      absorbedFromHub:  hub.place,
-      distKm:           distKm,
-      attachedEvents:   (src.attachedEvents || []).slice()
+
+  if (!existingRoute) {
+    var stopPlanItem = {
+      id:             "pi-stop-" + routeId,
+      type:           "stop",
+      state:          "scheduled",
+      placeId:        placeId,
+      priority:       "iconic",
+      recommendedMin: null,
+      notes:          src.intent || "",
+      source:         "manual-trip-view",
+      legacy: {
+        sourceNights:    srcNights,
+        absorbedFromHub: hub.place,
+        distKm:          distKm,
+        attachedEvents:  (src.attachedEvents || []).slice()
+      }
+    };
+    var newRoute = {
+      id:             routeId,
+      kind:           "dayTrip",
+      fromDestId:     hubDestId,
+      toDestId:       hubDestId,
+      modeOptions:    [],
+      modeChosen:     null,
+      transitDays:    [day0.id],
+      durationHours:  null,
+      distKm:         distKm,
+      character:      "dayTrip",
+      fuelStops:      [],
+      planItems:      [stopPlanItem],
+      bookings:       [],
+      notes:          ""
+    };
+    trip.routes.push(newRoute);
+    // Reference the route from the hub's day plan.
+    day0.planItems.push({
+      id:      "pi-rt-" + routeId + "-" + day0.id,
+      type:    "route",
+      state:   "scheduled",
+      routeId: routeId,
+      source:  "manual-trip-view"
+    });
+  } else {
+    // Rare: a day-trip route for this (hub, target) already exists.
+    // Make sure the day is in its transitDays + the hub day has the
+    // route reference.
+    if (existingRoute.transitDays.indexOf(day0.id) < 0) {
+      existingRoute.transitDays.push(day0.id);
     }
-  });
+    var hasRef = day0.planItems.some(function(pi){
+      return pi && pi.type === "route" && pi.routeId === routeId;
+    });
+    if (!hasRef) {
+      day0.planItems.push({
+        id:      "pi-rt-" + routeId + "-" + day0.id,
+        type:    "route",
+        state:   "scheduled",
+        routeId: routeId,
+        source:  "manual-trip-view"
+      });
+    }
+  }
 
   // Hub absorbs the source's nights so total trip duration is preserved.
   hub.nights = (hub.nights || 0) + srcNights;
@@ -26396,8 +26445,14 @@ function _openTripDestRolePopover(destId){
 //     trip back to its own destination
 //   • "Open hub destination" — drills into the hub via selectDest
 //     so the user can see the day-trip chip in context
-function _openTripDayTripPopover(hubDest, planItem, dayTripName){
-  if (!hubDest || !planItem) return;
+// v359.52.3: signature updated for v2 schema. Popover now receives
+// (hubDest, route, stop, dayTripName) — `route` is the kind:"dayTrip"
+// route in trip.routes[]; `stop` is the {type:"stop"} PlanItem inside
+// route.planItems[] that represents this specific day-trip target.
+// "Make this an overnight" calls ungroupDayTripByRouteStop(hubDest,
+// route, stop) instead of the v1 ungroupDayTripByPlanItem.
+function _openTripDayTripPopover(hubDest, route, stop, dayTripName){
+  if (!hubDest || !route || !stop) return;
   var existing = document.getElementById("trip-daytrip-popover");
   if (existing) existing.remove();
 
@@ -26405,9 +26460,9 @@ function _openTripDayTripPopover(hubDest, planItem, dayTripName){
   ov.id = "trip-daytrip-popover";
   ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.32);z-index:10500;display:flex;align-items:center;justify-content:center;padding:20px;";
 
-  var dtName = dayTripName || (trip.places && trip.places[planItem.placeId] && trip.places[planItem.placeId].name) || planItem.placeId || "Day trip";
+  var dtName = dayTripName || (trip.places && trip.places[stop.placeId] && trip.places[stop.placeId].name) || stop.placeId || "Day trip";
   var hubName = hubDest.place || "";
-  var srcNights = (planItem.legacy && planItem.legacy.sourceNights) || 1;
+  var srcNights = (stop.legacy && stop.legacy.sourceNights) || 1;
 
   ov.innerHTML = ''
     + '<div style="background:#fff;border-radius:12px;max-width:420px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,0.18);">'
@@ -26447,10 +26502,119 @@ function _openTripDayTripPopover(hubDest, planItem, dayTripName){
   var promoteBtn = ov.querySelector("#trip-dt-promote");
   if (promoteBtn) promoteBtn.onclick = function(){
     close();
-    if (typeof ungroupDayTripByPlanItem === "function") {
-      ungroupDayTripByPlanItem(hubDest, planItem);
+    if (typeof ungroupDayTripByRouteStop === "function") {
+      ungroupDayTripByRouteStop(hubDest, route, stop);
+    } else {
+      console.warn("[Max] ungroupDayTripByRouteStop not defined");
     }
   };
+}
+
+// v359.52.3: v2-schema ungroup. Promotes a day-trip route's stop
+// back into its own standalone destination. Mirrors the v1
+// ungroupDayTripByPlanItem (kept below as fallback for code paths
+// that haven't migrated their refs yet), but operates on the new
+// shape: (hubDest, route, stop) → removes the stop from the route's
+// planItems[]; if the route has no stops left, deletes the route
+// entirely AND removes the {type:"route"} reference from the hub's
+// days[].planItems[]; subtracts the stop's sourceNights back from
+// the hub; spawns a new destination at the appropriate place.
+function ungroupDayTripByRouteStop(hubDest, route, stop, opts){
+  opts = opts || {};
+  if (!hubDest || !route || !stop || !stop.placeId) return;
+
+  // 1. Remove the stop from the route's planItems[].
+  var stopIdx = (route.planItems || []).indexOf(stop);
+  if (stopIdx < 0) {
+    // Fall back to id match in case the caller passed a stale ref.
+    stopIdx = (route.planItems || []).findIndex(function(s){ return s && s.id === stop.id; });
+  }
+  if (stopIdx < 0) {
+    console.warn("[Max] ungroupDayTripByRouteStop: stop not found on route");
+    return;
+  }
+  route.planItems.splice(stopIdx, 1);
+
+  // 2. If the route has no stops left, delete the route AND remove
+  //    every day-planItem reference to it. Otherwise leave the route
+  //    in place (it still holds other day-trip targets on the same
+  //    hub — unusual but supported).
+  var routeNowEmpty = !route.planItems.length;
+  if (routeNowEmpty) {
+    var rIdx = trip.routes.indexOf(route);
+    if (rIdx >= 0) trip.routes.splice(rIdx, 1);
+    (hubDest.days || []).forEach(function(day){
+      if (!day || !Array.isArray(day.planItems)) return;
+      day.planItems = day.planItems.filter(function(pi){
+        return !(pi && pi.type === "route" && pi.routeId === route.id);
+      });
+    });
+  }
+
+  // 3. Look up the Place + nights metadata; subtract from the hub.
+  var place = (trip && trip.places && trip.places[stop.placeId]) || null;
+  var placeName = place ? place.name : stop.placeId;
+  var nights = (stop.legacy && stop.legacy.sourceNights) || 1;
+  hubDest.nights = Math.max(1, (hubDest.nights || nights) - nights);
+
+  // 4. Spawn a fresh standalone destination right after the hub.
+  destCtr++;
+  var newId = "d" + destCtr;
+  var newDest = {
+    id:        newId,
+    place:     placeName,
+    placeId:   stop.placeId,
+    intent:    placeName + (stop.notes ? " — " + stop.notes.substring(0, 60) : ""),
+    dateFrom:  hubDest.dateTo,
+    dateTo:    "",
+    nights:    nights,
+    days:      makeDays(newId, placeName, placeName, hubDest.dateTo, nights),
+    trackerItems: {booked: [], see: [], visited: []},
+    trackerCat:   "booked",
+    storyState:   "idle",
+    hotelBookings: [], generalBookings: [], locations: [],
+    execMode: false, todayItems: [], discoveredItems: [], suggestions: [],
+    attachedEvents: (stop.legacy && stop.legacy.attachedEvents) || [],
+    lat: (place && place.lat) || null,
+    lng: (place && place.lng) || null
+  };
+  var hubIdx = trip.destinations.indexOf(hubDest);
+  if (hubIdx < 0) hubIdx = 0;
+  trip.destinations.splice(hubIdx + 1, 0, newDest);
+
+  // 5. Recompute all dates from trip start (same logic as v1).
+  var startDate = trip.destinations[0].dateFrom;
+  if (startDate) {
+    var cur = new Date(startDate + "T12:00:00");
+    trip.destinations.forEach(function(d){
+      d.dateFrom = cur.toISOString().slice(0, 10);
+      var next = new Date(cur); next.setDate(next.getDate() + (d.nights || 0));
+      d.dateTo = next.toISOString().slice(0, 10);
+      d.days = makeDays(d.id, d.place, d.place, d.dateFrom, d.nights || 0);
+      cur = next;
+    });
+  }
+
+  _emitTripMutation();
+
+  // 6. Scroll the new destination card into view.
+  requestAnimationFrame(function(){
+    try {
+      var el = document.querySelector('.tm-dest[data-id="'+newDest.id+'"]');
+      if (el && typeof el.scrollIntoView === "function") {
+        el.scrollIntoView({behavior: "smooth", block: "center"});
+      }
+    } catch(_){}
+  });
+
+  if (!opts.silent && typeof _showDayTripToast === "function") {
+    _showDayTripToast(
+      "<strong>" + newDest.place + "</strong> is now its own destination",
+      function(){
+        console.warn("[Max] ungroupDayTripByRouteStop: undo not yet wired");
+      }
+    );
+  }
 }
 
 // undo toast (matches the makeDayTrip path). The opts.silent flag
@@ -26461,6 +26625,9 @@ function _openTripDayTripPopover(hubDest, planItem, dayTripName){
 // its own standalone destination. Mirror of ungroupDayTrip below but
 // operates on PlanItem state instead of dest.dayTrips. The PlanItem
 // carries pi.legacy.sourceNights for the nights-rollback math.
+// v359.52.3: kept as a fallback for any call sites that still pass
+// v1-shaped PlanItems (search for `ungroupDayTripByPlanItem` to find
+// them). New code should use `ungroupDayTripByRouteStop` above.
 function ungroupDayTripByPlanItem(hubDest, planItem, opts){
   opts = opts || {};
   if (!hubDest || !planItem || !planItem.placeId) return;

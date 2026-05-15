@@ -2015,62 +2015,61 @@
     // which is the relevant context for accommodation + avoidance
     // signals. Keeping it on every card was visual noise.
 
-    // v359.45 Phase 1 (hard cut): render day-trip chips from
-    // PlanItems with type:dayTrip instead of dest.dayTrips. Walks
-    // every day's planItems[] and collects dayTrip entries. The
-    // place name comes from trip.places[placeId].name, and the
-    // legacy bookkeeping (distKm, sourceNights) is on pi.legacy.
+    // v359.52.2: day-trip chips on the dest card now sourced from v2
+    // routes (kind:"dayTrip" with fromDestId === dest.id). Each
+    // route's planItems[] is a list of type:"stop" entries — one per
+    // day-trip target. Walk trip.routes[] for the relevant routes
+    // and render a chip per stop. Click → ungroupDayTripByRouteStop
+    // (v2 writer; see index.html). Legacy distance bookkeeping rides
+    // on stop.legacy or route.distKm.
     (function _renderDayTripChips(){
-      if (!Array.isArray(dest.days) || !dest.days.length) return;
-      var dayTripItems = [];
-      dest.days.forEach(function(day, dayIdx){
-        (day.planItems || []).forEach(function(pi, piIdx){
-          if (pi && pi.type === 'dayTrip') {
-            dayTripItems.push({ pi: pi, dayIdx: dayIdx, piIdx: piIdx });
-          }
-        });
-      });
-      if (!dayTripItems.length) return;
+      var routes = (trip && Array.isArray(trip.routes)) ? trip.routes : [];
+      if (!routes.length) return;
       var places = (trip && trip.places) || {};
+      var hubRoutes = routes.filter(function(r){
+        return r && r.kind === "dayTrip" && r.fromDestId === dest.id;
+      });
+      if (!hubRoutes.length) return;
+
       var dtRow = document.createElement("div");
       dtRow.style.cssText = "display:flex;flex-wrap:wrap;gap:4px;margin-top:5px;align-items:center;";
       var dtLabel = document.createElement("span");
       dtLabel.style.cssText = "font-size:9px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.05em;margin-right:2px;";
       dtLabel.textContent = "Day trips:";
       dtRow.appendChild(dtLabel);
-      dayTripItems.forEach(function(entry){
-        var pi = entry.pi;
-        var place = places[pi.placeId];
-        var placeName = (place && place.name) || pi.placeId || "(unknown)";
-        var distKm = (pi.legacy && pi.legacy.distKm) || 0;
-        var chip = document.createElement("button");
-        chip.type = "button";
-        chip.className = "tm-day-trip-chip";
-        var placeSpan = document.createElement("span");
-        placeSpan.textContent = "📍 " + placeName;
-        var actionSpan = document.createElement("span");
-        actionSpan.className = "dtc-action";
-        actionSpan.textContent = "↩ stay overnight";
-        chip.appendChild(placeSpan);
-        chip.appendChild(actionSpan);
-        chip.title = "Day trip from " + dest.place
-          + (distKm ? " · " + (typeof global._fmtDistance === "function" ? global._fmtDistance(distKm) + " away" : distKm + "km away") : "")
-          + " · Click to make this an overnight stay instead.";
-        (function(hubDest, planItem){
-          chip.onclick = function(e){
-            e.stopPropagation();
-            if (typeof global.ungroupDayTripByPlanItem === "function") {
-              global.ungroupDayTripByPlanItem(hubDest, planItem);
-            } else if (typeof global.ungroupDayTrip === "function") {
-              // Legacy path — kept temporarily for trips that still
-              // have dest.dayTrips populated. New PlanItem-based
-              // ungroup function will be added when the trip-view
-              // refactor lands.
-              console.warn("[Max] ungroupDayTripByPlanItem not defined; legacy ungroup may not work");
-            }
-          };
-        })(dest, pi);
-        dtRow.appendChild(chip);
+
+      hubRoutes.forEach(function(route){
+        (route.planItems || []).forEach(function(stop){
+          if (!stop || stop.type !== "stop") return;
+          var place = places[stop.placeId];
+          var placeName = (place && place.name) || stop.placeId || "(unknown)";
+          var distKm = (stop.legacy && stop.legacy.distKm)
+            || (typeof route.distKm === "number" ? route.distKm : 0);
+          var chip = document.createElement("button");
+          chip.type = "button";
+          chip.className = "tm-day-trip-chip";
+          var placeSpan = document.createElement("span");
+          placeSpan.textContent = "📍 " + placeName;
+          var actionSpan = document.createElement("span");
+          actionSpan.className = "dtc-action";
+          actionSpan.textContent = "↩ stay overnight";
+          chip.appendChild(placeSpan);
+          chip.appendChild(actionSpan);
+          chip.title = "Day trip from " + dest.place
+            + (distKm ? " · " + (typeof global._fmtDistance === "function" ? global._fmtDistance(distKm) + " away" : distKm + "km away") : "")
+            + " · Click to make this an overnight stay instead.";
+          (function(hubDest, routeRef, stopRef){
+            chip.onclick = function(e){
+              e.stopPropagation();
+              if (typeof global.ungroupDayTripByRouteStop === "function") {
+                global.ungroupDayTripByRouteStop(hubDest, routeRef, stopRef);
+              } else {
+                console.warn("[Max] ungroupDayTripByRouteStop not defined; chip click is a no-op");
+              }
+            };
+          })(dest, route, stop);
+          dtRow.appendChild(chip);
+        });
       });
       bodyDiv.appendChild(dtRow);
     })();
