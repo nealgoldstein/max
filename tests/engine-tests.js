@@ -217,6 +217,122 @@ describe('engine-trip.js — commitmentState', () => {
   });
 });
 
+// ── Suite: syncTransitRoutes (Wayside Phase 1) ───────────────────
+
+describe('engine-trip.js — syncTransitRoutes', () => {
+  // Build a 3-destination trip skeleton with stable ids.
+  function tripWith(dests, routes) {
+    return {
+      destinations: dests,
+      routes: routes || [],
+    };
+  }
+  function dest(id, place, dateFrom, dateTo) {
+    return { id: id, place: place, dateFrom: dateFrom || null, dateTo: dateTo || null };
+  }
+
+  test('creates one transit route per adjacent pair', () => {
+    var trip = tripWith([
+      dest('d1', 'Reykjavik', '2026-06-01', '2026-06-04'),
+      dest('d2', 'Vík',       '2026-06-04', '2026-06-06'),
+      dest('d3', 'Höfn',      '2026-06-06', '2026-06-08'),
+    ]);
+    MaxEngineTrip.syncTransitRoutes(trip);
+    var transitRoutes = trip.routes.filter(function(r){ return r.subKind === 'transit'; });
+    assert.strictEqual(transitRoutes.length, 2);
+    var pairs = transitRoutes.map(function(r){ return r.fromDestId + '→' + r.toDestId; }).sort();
+    assert.deepStrictEqual(pairs, ['d1→d2', 'd2→d3']);
+  });
+
+  test('routes have kind:"route" and subKind:"transit"', () => {
+    var trip = tripWith([dest('d1', 'A'), dest('d2', 'B')]);
+    MaxEngineTrip.syncTransitRoutes(trip);
+    var r = trip.routes[0];
+    assert.strictEqual(r.kind, 'route');
+    assert.strictEqual(r.subKind, 'transit');
+  });
+
+  test('idempotent — second call is a no-op', () => {
+    var trip = tripWith([dest('d1', 'A'), dest('d2', 'B'), dest('d3', 'C')]);
+    MaxEngineTrip.syncTransitRoutes(trip);
+    var firstSnap = JSON.stringify(trip.routes);
+    MaxEngineTrip.syncTransitRoutes(trip);
+    assert.strictEqual(JSON.stringify(trip.routes), firstSnap);
+  });
+
+  test('preserves planItems[] on existing transit routes across re-sync', () => {
+    var trip = tripWith([dest('d1', 'A'), dest('d2', 'B')]);
+    MaxEngineTrip.syncTransitRoutes(trip);
+    // Add a wayside to the route.
+    trip.routes[0].planItems.push({ id: 'pi-stop-1', type: 'stop', placeId: 'pl-x' });
+    trip.routes[0].modeChosen = 'drive';
+    trip.routes[0].durationHours = 3;
+    MaxEngineTrip.syncTransitRoutes(trip);
+    assert.strictEqual(trip.routes[0].planItems.length, 1);
+    assert.strictEqual(trip.routes[0].modeChosen, 'drive');
+    assert.strictEqual(trip.routes[0].durationHours, 3);
+  });
+
+  test('removes transit routes whose endpoints no longer match adjacency', () => {
+    var trip = tripWith([
+      dest('d1', 'A'), dest('d2', 'B'), dest('d3', 'C'),
+    ]);
+    MaxEngineTrip.syncTransitRoutes(trip);
+    assert.strictEqual(trip.routes.filter(function(r){return r.subKind==='transit';}).length, 2);
+    // Remove d2.
+    trip.destinations = [trip.destinations[0], trip.destinations[2]];
+    MaxEngineTrip.syncTransitRoutes(trip);
+    var transitRoutes = trip.routes.filter(function(r){ return r.subKind === 'transit'; });
+    assert.strictEqual(transitRoutes.length, 1);
+    assert.strictEqual(transitRoutes[0].fromDestId, 'd1');
+    assert.strictEqual(transitRoutes[0].toDestId, 'd3');
+  });
+
+  test('leaves dayTrip / arrival / departure routes alone', () => {
+    var trip = tripWith(
+      [dest('d1', 'A'), dest('d2', 'B')],
+      [
+        { id: 'r-dt-d1', kind: 'route', subKind: 'dayTrip',   fromDestId: 'd1', toDestId: 'd1', planItems: [{type:'stop'}] },
+        { id: 'r-arr',   kind: 'route', subKind: 'arrival',   fromDestId: null, toDestId: 'd1' },
+        { id: 'r-dep',   kind: 'route', subKind: 'departure', fromDestId: 'd2', toDestId: null },
+      ]
+    );
+    MaxEngineTrip.syncTransitRoutes(trip);
+    var ids = trip.routes.map(function(r){return r.id;});
+    assert(ids.indexOf('r-dt-d1') >= 0, 'dayTrip route should survive');
+    assert(ids.indexOf('r-arr')   >= 0, 'arrival route should survive');
+    assert(ids.indexOf('r-dep')   >= 0, 'departure route should survive');
+    // And one new transit route for d1→d2.
+    var transitRoutes = trip.routes.filter(function(r){ return r.subKind === 'transit'; });
+    assert.strictEqual(transitRoutes.length, 1);
+  });
+
+  test('single-destination trip produces zero transit routes', () => {
+    var trip = tripWith([dest('d1', 'A')]);
+    MaxEngineTrip.syncTransitRoutes(trip);
+    assert.strictEqual(trip.routes.filter(function(r){return r.subKind==='transit';}).length, 0);
+  });
+
+  test('empty / null trip is a no-op (no throw)', () => {
+    assert.doesNotThrow(function(){ MaxEngineTrip.syncTransitRoutes(null); });
+    assert.doesNotThrow(function(){ MaxEngineTrip.syncTransitRoutes({}); });
+    assert.doesNotThrow(function(){ MaxEngineTrip.syncTransitRoutes({destinations: []}); });
+  });
+
+  test('reversing destination order swaps transit routes', () => {
+    var trip = tripWith([
+      dest('d1', 'A'), dest('d2', 'B'), dest('d3', 'C'),
+    ]);
+    MaxEngineTrip.syncTransitRoutes(trip);
+    // Reverse.
+    trip.destinations.reverse();
+    MaxEngineTrip.syncTransitRoutes(trip);
+    var transitRoutes = trip.routes.filter(function(r){ return r.subKind === 'transit'; });
+    var pairs = transitRoutes.map(function(r){ return r.fromDestId + '→' + r.toDestId; }).sort();
+    assert.deepStrictEqual(pairs, ['d2→d1', 'd3→d2']);
+  });
+});
+
 // ── Suite: SCAFFOLD-3 summarizeDecisionsDeferred ─────────────────
 
 describe('engine-trip.js — summarizeDecisionsDeferred', () => {
@@ -275,7 +391,9 @@ describe('engine-trip.js — summarizeDecisionsDeferred', () => {
     assert.strictEqual(r.items[0].dayLbl, 'Day 2');
     assert.strictEqual(r.items[0].destPlace, 'Vík');
   });
-  test('does NOT flag empty days when dest has no items at all', () => {
+  test('flags empty days even when dest has no items at all (v353.2 onward)', () => {
+    // v353.2 changed the rule: dests with zero items still surface their
+    // empty days, so a 1-day stay whose generation failed isn't invisible.
     var trip = {destinations: [{
       id: 'd1', place: 'X',
       days: [
@@ -284,7 +402,9 @@ describe('engine-trip.js — summarizeDecisionsDeferred', () => {
       ],
     }]};
     var r = MaxEngineTrip.summarizeDecisionsDeferred(trip);
-    assert.strictEqual(r.totalCount, 0);
+    assert.strictEqual(r.totalCount, 2);
+    assert.strictEqual(r.items.length, 2);
+    r.items.forEach(function(it){ assert.strictEqual(it.kind, 'emptyDay'); });
   });
   test('combined: tentative + empty days from same dest', () => {
     var trip = {destinations: [{

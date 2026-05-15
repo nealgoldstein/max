@@ -2543,6 +2543,16 @@
       if (_tb.exitDetails) trip.brief.exitDetails = Object.assign({}, trip.brief.exitDetails || {}, _tb.exitDetails);
     }
 
+    // v359.54 Wayside Phase 1: synthesize transit Routes between
+    // every adjacent (A → B) destination pair. Idempotent — existing
+    // transit routes' planItems[] (waysides), modeChosen, etc. survive.
+    // Day-trip / arrival / departure routes are untouched (different
+    // subKind). See MaxEngineTrip.syncTransitRoutes for the contract.
+    if (typeof MaxEngineTrip !== 'undefined' && typeof MaxEngineTrip.syncTransitRoutes === 'function') {
+      try { MaxEngineTrip.syncTransitRoutes(trip); }
+      catch (e) { console.warn('[Max] syncTransitRoutes failed:', e && e.message); }
+    }
+
     // Don't re-sort — ordering was already computed event-aware. Use
     // trip.name (resolved to placeName/region above) so the home
     // screen's trip list shows "Switzerland" instead of "Untitled —

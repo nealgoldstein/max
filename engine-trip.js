@@ -973,6 +973,118 @@
   }
 
 
+  // ── v359.54: transit route synthesis ──────────────────────
+  // Idempotent rebuild of the subKind:"transit" entries in
+  // trip.routes[]. For every adjacent (A → B) pair in
+  // trip.destinations[], ensures a Route segment exists with
+  // subKind:"transit", fromDestId:A.id, toDestId:B.id. Removes
+  // transit routes whose endpoints are no longer adjacent (e.g.
+  // after a reverse or a destination removal).
+  //
+  // Why this lives here: publishTrip (engine-picker) and any
+  // post-build mutator (reverseTripOrder, addDestination, etc.)
+  // can call this to keep trip.routes consistent with the
+  // destinations array. Bidirectional with route.transitDays[]
+  // is owned by downstream writers — this helper only manages
+  // route existence + from/to identity.
+  //
+  // Does NOT touch dayTrip / arrival / departure routes. Those
+  // have their own lifecycle (convertDestToDayTrip, brief.entry/
+  // tbExit migration).
+  //
+  // Preserves route metadata across rebuilds: if a transit
+  // route with the same (fromId, toId) already exists, its
+  // planItems[] (waysides), modeChosen, durationHours, distKm,
+  // bookings, notes survive. Only the segment-identity fields
+  // are touched.
+  function syncTransitRoutes(trip) {
+    if (!trip || !Array.isArray(trip.destinations)) return;
+    if (!Array.isArray(trip.routes)) trip.routes = [];
+
+    var dests = trip.destinations;
+    // Compute the expected (fromId, toId) pairs from adjacency.
+    var expected = [];
+    for (var i = 0; i < dests.length - 1; i++) {
+      var from = dests[i];
+      var to   = dests[i + 1];
+      if (!from || !to || !from.id || !to.id) continue;
+      expected.push({ fromId: from.id, toId: to.id, fromDate: from.dateTo, toDate: to.dateFrom });
+    }
+
+    // Index existing transit routes by (fromId, toId).
+    var existingByKey = {};
+    trip.routes.forEach(function (r) {
+      if (!r) return;
+      var sub = (typeof MaxMigration !== 'undefined' && MaxMigration.routeSubKind)
+        ? MaxMigration.routeSubKind(r)
+        : (r.subKind || (r.kind && r.kind !== 'route' ? r.kind : null));
+      if (sub !== 'transit') return;
+      var key = (r.fromDestId || '') + '|' + (r.toDestId || '');
+      existingByKey[key] = r;
+    });
+
+    // Mark existing transit routes that are still expected; create
+    // missing ones. Each expected pair gets a stable route id derived
+    // from the endpoints so rebuilds don't churn.
+    var keepIds = {};
+    expected.forEach(function (pair) {
+      var key = pair.fromId + '|' + pair.toId;
+      var route = existingByKey[key];
+      var routeId = 'r-tr-' + pair.fromId + '-' + pair.toId;
+      if (!route) {
+        if (typeof MaxMigration !== 'undefined' && MaxMigration.newRouteSegment) {
+          route = MaxMigration.newRouteSegment(routeId, 'transit', pair.fromId, pair.toId, {
+            startsAt: pair.fromDate || null,
+            endsAt:   pair.toDate   || null
+          });
+        } else {
+          route = {
+            id:            routeId,
+            kind:          'route',
+            subKind:       'transit',
+            fromDestId:    pair.fromId,
+            toDestId:      pair.toId,
+            modeOptions:   [],
+            modeChosen:    null,
+            transitDays:   [],
+            durationHours: null,
+            distKm:        null,
+            character:     null,
+            fuelStops:     [],
+            planItems:     [],
+            bookings:      [],
+            notes:         '',
+            startsAt:      pair.fromDate || null,
+            endsAt:        pair.toDate   || null,
+          };
+        }
+        trip.routes.push(route);
+      } else {
+        // Existing route — update segment date bounds in case the
+        // destinations' dates shifted. Don't touch route.id (callers
+        // may have references to it) and don't touch planItems[].
+        if (pair.fromDate) route.startsAt = pair.fromDate;
+        if (pair.toDate)   route.endsAt   = pair.toDate;
+        // Force the canonical id so existence-by-key checks work in
+        // future passes. (No-op on already-canonical ids.)
+        // NOTE: not changing route.id mid-cycle — only on creation —
+        // so this branch leaves it alone.
+      }
+      keepIds[route.id] = true;
+    });
+
+    // Drop transit routes whose (fromId, toId) is no longer adjacent.
+    // (dayTrip / arrival / departure routes are immune — different subKind.)
+    trip.routes = trip.routes.filter(function (r) {
+      if (!r) return false;
+      var sub = (typeof MaxMigration !== 'undefined' && MaxMigration.routeSubKind)
+        ? MaxMigration.routeSubKind(r)
+        : (r.subKind || (r.kind && r.kind !== 'route' ? r.kind : null));
+      if (sub !== 'transit') return true;
+      return !!keepIds[r.id];
+    });
+  }
+
   // ── SCAFFOLD-2: commitment state derivation ────────────────
   // Itinerary items pass through up to four states as the trip
   // firms up. The visual layer depends on this derivation; the
@@ -1668,6 +1780,7 @@
     reconcileDestinations:       _reconcileDestinations,
     addPendingAction:            addPendingAction,
     mergeAdjacentSamePlaceDests: _mergeAdjacentSamePlaceDests,
+    syncTransitRoutes:           syncTransitRoutes,
 
     // ── Round HR: trip-engine helpers previously inline ───────
     makeDays:       makeDays,
