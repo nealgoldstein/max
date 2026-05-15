@@ -24264,23 +24264,82 @@ function updateMainMap(){
     // pins along the route. Same color family as day-trip pins
     // (purple = day-trip-related) but smaller / no spur — the pin sits
     // ON the existing transit polyline rather than off to the side.
+    // v359.54.4: draw a purple "detour" polyline through each wayside,
+    // connecting prev → wayside → next, so users can SEE that the
+    // wayside is part of a route (a floating pin alone reads as just
+    // another place). White halo for contrast on satellite tiles.
     var _isTransitRoute = function(r){
       var sub = (typeof MaxMigration !== "undefined" && MaxMigration.routeSubKind)
         ? MaxMigration.routeSubKind(r)
         : (r && (r.subKind || (r.kind && r.kind !== "route" ? r.kind : null)));
       return sub === "transit";
     };
+    function _resolveDestCtr(d) {
+      if (!d) return null;
+      if (typeof d.lat === "number" && typeof d.lng === "number") return [d.lat, d.lng];
+      if (d.place) {
+        var c = getCityCenter(d.place);
+        if (c && isFinite(c[0])) return c;
+      }
+      return null;
+    }
+    function _resolveStopCtr(stop) {
+      var place = stop && trip.places && trip.places[stop.placeId];
+      if (place && typeof place.lat === "number" && typeof place.lng === "number") return [place.lat, place.lng];
+      if (place && place.name) {
+        var c = getCityCenter(place.name);
+        if (c && isFinite(c[0])) return c;
+      }
+      return null;
+    }
     _routes.forEach(function(route){
       if (!_isTransitRoute(route)) return;
-      (route.planItems || []).forEach(function(stop){
-        if (!stop || stop.type !== "stop" || !stop.placeId) return;
+      var fromDest = trip.destinations.find(function(d){return d.id===route.fromDestId;});
+      var toDest   = trip.destinations.find(function(d){return d.id===route.toDestId;});
+      var fromCtr = _resolveDestCtr(fromDest);
+      var toCtr   = _resolveDestCtr(toDest);
+      var fromName = (fromDest && fromDest.place) || "?";
+      var toName   = (toDest && toDest.place)   || "?";
+
+      // Collect stops with valid coords, sorted by distance from `from`
+      // so the detour polyline bends naturally through them in
+      // travel order.
+      var stops = (route.planItems || [])
+        .filter(function(s){ return s && s.type === "stop" && s.placeId; })
+        .map(function(s){
+          var ctr = _resolveStopCtr(s);
+          if (!ctr) return null;
+          var dKm = (fromCtr && typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.haversineKm === "function")
+            ? MaxEngineTrip.haversineKm(fromCtr[0], fromCtr[1], ctr[0], ctr[1])
+            : 0;
+          return { stop: s, ctr: ctr, dKm: dKm };
+        })
+        .filter(Boolean);
+      if (!stops.length) return;
+      stops.sort(function(a, b){ return a.dKm - b.dKm; });
+
+      // Draw the detour polyline if we have anchor points on both ends.
+      if (fromCtr && toCtr) {
+        var path = [fromCtr].concat(stops.map(function(s){return s.ctr;})).concat([toCtr]);
+        try {
+          var detourHalo = L.polyline(path, {
+            color:"#fff", weight:7, opacity:0.85, lineCap:"round", lineJoin:"round"
+          }).addTo(_mainMap);
+          _mainMarkers.push(detourHalo);
+          var detourLine = L.polyline(path, {
+            color:"#7a4fbf", weight:4, opacity:1.0, lineCap:"round", lineJoin:"round"
+          }).addTo(_mainMap);
+          _mainMarkers.push(detourLine);
+        } catch(_){}
+      }
+
+      // Now render the pin for each stop.
+      stops.forEach(function(s){
+        var stop = s.stop;
+        var wsCtr = s.ctr;
         var place = (trip.places && trip.places[stop.placeId]) || null;
         var wsName = (place && place.name) || stop.placeId || "";
         if (!wsName) return;
-        var wsCtr = (place && typeof place.lat === "number" && typeof place.lng === "number")
-          ? [place.lat, place.lng]
-          : getCityCenter(wsName);
-        if (!wsCtr || !isFinite(wsCtr[0])) return;
         bounds.push(wsCtr);
         // 16 px pin — smaller than overnight pins (22) and day-trip pins
         // (20) to communicate "this is a stop, not a sleep."
@@ -24295,8 +24354,6 @@ function updateMainMap(){
           iconSize:[wsSize,wsSize], iconAnchor:[wsSize/2,wsSize/2], popupAnchor:[0,-wsSize/2]});
         try {
           var wsMarker = L.marker(wsCtr, {icon:wsIcon}).addTo(_mainMap);
-          var fromName = (trip.destinations.find(function(d){return d.id===route.fromDestId;}) || {}).place || "?";
-          var toName   = (trip.destinations.find(function(d){return d.id===route.toDestId;})   || {}).place || "?";
           wsMarker.bindTooltip(wsName + " · wayside on " + fromName + " → " + toName,
             {permanent:false, direction:"top", offset:[0,-wsSize/2-2], className:"main-map-tooltip"});
           // v359.54.3: tap the pin → wayside popover with promote /
