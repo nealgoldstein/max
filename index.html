@@ -26767,31 +26767,38 @@ function convertDestToDayTrip(destId, hubDestId, opts){
   }
 }
 
-// v359.54.2: convert a destination into a wayside on the transit
-// route between its prev and next destinations. Counterpart to
-// convertDestToDayTrip (which absorbs into a hub for a same-day
-// loop). Wayside is the "pass-through" semantics — you stop, you
-// see it, you keep driving.
+// v359.54.5: convert a destination into a wayside on the existing
+// transit route(s) between its prev and next destinations. Model 2
+// (Neal's choice): don't compute or invent a new route — keep the
+// existing prev→src + src→next route metadata alive by FOLDING
+// src→next's data into prev→src, then retargeting it to prev→next.
+// The original src→next is snapshotted on the wayside stop so the
+// reverse writer can split the legs back apart on promote.
 //
 // Eligibility:
-//   - destination must not be the first or last in the chain (no
-//     transit route exists "before" the first or "after" the last)
+//   - dest must not be first or last (need both prev and next)
 //   - both neighbors must have ids
 //
 // Mutations:
 //   - mint/resolve placeId for the source
-//   - get-or-create a transit Route between prev and next (uses
-//     syncTransitRoutes; the route id is r-tr-{prev.id}-{next.id})
-//   - push the source as a {type:"stop", priority:"if-time"}
-//     PlanItem onto route.planItems[]
-//   - absorb source nights into the destination specified by
-//     opts.absorbInto ("next" default, "prev" optional). The wayside
-//     itself doesn't claim nights — it's a same-day pass-through.
+//   - find prev→src and src→next routes by canonical id
+//     (r-tr-{from}-{to}); both should exist post-Phase-1 sync
+//   - snapshot src→next state on the wayside stop's legacy field
+//   - retarget prev→src: toDestId → next.id, id → r-tr-prev-next,
+//     merge metadata from src→next (sum durationHours + distKm,
+//     concat transitDays/fuelStops/bookings/modeOptions, inherit
+//     modeChosen if missing, append second leg's planItems[])
+//   - drop src→next from trip.routes (its state is preserved on the
+//     wayside stop)
+//   - append the wayside stop to the (now merged) prev→next route
 //   - splice source out of trip.destinations
-//   - recompute dates trip-wide; re-sync transit routes
+//   - absorb source nights into prev or next (opts.absorbInto)
+//   - recompute dates trip-wide
+//   - DO NOT call syncTransitRoutes — we did surgery manually; sync
+//     would rebuild from scratch and lose our merge.
 //
-// Reversible via ungroupWaysideByRouteStop (TODO — same shape as
-// ungroupDayTripByRouteStop).
+// Reversible via ungroupWaysideByRouteStop, which uses the legacy
+// snapshot to split the legs back apart.
 function convertDestToWayside(destId, opts){
   opts = opts || {};
   if (!trip || !Array.isArray(trip.destinations)) return;
@@ -26834,22 +26841,39 @@ function convertDestToWayside(destId, opts){
     };
   }
 
-  // Build the stop PlanItem with legacy bookkeeping so a future
-  // ungroup writer can restore the destination's nights.
+  // Find the existing prev→src and src→next transit routes.
+  // syncTransitRoutes (called on every previous build / reorder)
+  // guarantees they exist with canonical ids. Defensive: tolerate
+  // missing routes — the merge logic is a no-op in that case.
+  if (!Array.isArray(trip.routes)) trip.routes = [];
+  var prevRouteId = "r-tr-" + prev.id + "-" + src.id;
+  var nextRouteId = "r-tr-" + src.id + "-" + next.id;
+  var prevRoute = trip.routes.find(function(r){ return r && r.id === prevRouteId; });
+  var nextRoute = trip.routes.find(function(r){ return r && r.id === nextRouteId; });
+
+  // Snapshot the FULL state of both legs so the reverse writer can
+  // split them back apart. JSON-clone is fine; routes are plain data.
+  var preservedFirstLeg = prevRoute ? JSON.parse(JSON.stringify(prevRoute)) : null;
+  var preservedSecondLeg = nextRoute ? JSON.parse(JSON.stringify(nextRoute)) : null;
+
+  // Build the stop PlanItem. legacy.preservedFirstLeg/preservedSecondLeg
+  // hold full route snapshots so the reverse writer can re-split.
   var srcNights = src.nights || 1;
   var stopPlanItem = {
     id:             "pi-stop-w-" + placeId,
     type:           "stop",
     state:          "scheduled",
     placeId:        placeId,
-    priority:       "if-time",     // wayside default — not the iconic target of the route
+    priority:       "if-time",     // wayside default — not the iconic target
     recommendedMin: null,
     notes:          src.intent || "",
     source:         "manual-trip-view",
     legacy: {
-      sourceNights:    srcNights,
-      absorbedFromHub: null,
-      attachedEvents:  (src.attachedEvents || []).slice()
+      sourceNights:       srcNights,
+      absorbedFromHub:    null,
+      attachedEvents:     (src.attachedEvents || []).slice(),
+      preservedFirstLeg:  preservedFirstLeg,
+      preservedSecondLeg: preservedSecondLeg
     }
   };
 
@@ -26859,15 +26883,77 @@ function convertDestToWayside(destId, opts){
   var absorbDir = (opts.absorbInto === "prev") ? "prev" : "next";
   var absorber = (absorbDir === "prev") ? prev : next;
   absorber.nights = (absorber.nights || 0) + srcNights;
-  // Record the absorber so the reverse writer (ungroupWaysideByRouteStop)
-  // knows where to take the night back from. Stable enough as long as
-  // the absorber doesn't get deleted before the user promotes — uncommon
-  // and handled with a graceful fallback in the reverse writer.
   stopPlanItem.legacy.absorberDestId = absorber.id;
 
-  // Splice source out, then sync transit routes (creates the new
-  // prev→next route id r-tr-prev-next and drops the now-orphan
-  // prev→src and src→next routes).
+  // Manual route surgery: retarget prevRoute (prev→src) to prev→next,
+  // merge in nextRoute's metadata, append the wayside stop, drop nextRoute.
+  // If prevRoute doesn't exist, mint a new one via MaxMigration.newRouteSegment.
+  if (!prevRoute) {
+    if (typeof MaxMigration !== "undefined" && MaxMigration.newRouteSegment) {
+      prevRoute = MaxMigration.newRouteSegment(
+        "r-tr-" + prev.id + "-" + next.id, "transit", prev.id, next.id, {}
+      );
+      trip.routes.push(prevRoute);
+    } else {
+      console.warn("[Max] convertDestToWayside: cannot create transit route — MaxMigration.newRouteSegment unavailable");
+      return;
+    }
+  } else {
+    // Retarget. Update id to match the new (prev, next) pair so future
+    // syncTransitRoutes calls find it by canonical key.
+    prevRoute.id = "r-tr-" + prev.id + "-" + next.id;
+    prevRoute.toDestId = next.id;
+    // Merge nextRoute metadata (sum + concat + inherit).
+    if (nextRoute) {
+      if (typeof nextRoute.durationHours === "number") {
+        prevRoute.durationHours = (prevRoute.durationHours || 0) + nextRoute.durationHours;
+      }
+      if (typeof nextRoute.distKm === "number") {
+        prevRoute.distKm = (prevRoute.distKm || 0) + nextRoute.distKm;
+      }
+      if (Array.isArray(nextRoute.transitDays) && nextRoute.transitDays.length) {
+        var existingTd = prevRoute.transitDays || [];
+        nextRoute.transitDays.forEach(function(dId){
+          if (existingTd.indexOf(dId) < 0) existingTd.push(dId);
+        });
+        prevRoute.transitDays = existingTd;
+      }
+      if (Array.isArray(nextRoute.fuelStops) && nextRoute.fuelStops.length) {
+        prevRoute.fuelStops = (prevRoute.fuelStops || []).concat(nextRoute.fuelStops);
+      }
+      if (Array.isArray(nextRoute.bookings) && nextRoute.bookings.length) {
+        prevRoute.bookings = (prevRoute.bookings || []).concat(nextRoute.bookings);
+      }
+      if (!prevRoute.modeChosen && nextRoute.modeChosen) {
+        prevRoute.modeChosen = nextRoute.modeChosen;
+      }
+      if (Array.isArray(nextRoute.modeOptions) && nextRoute.modeOptions.length) {
+        prevRoute.modeOptions = prevRoute.modeOptions || [];
+        nextRoute.modeOptions.forEach(function(m){
+          if (prevRoute.modeOptions.indexOf(m) < 0) prevRoute.modeOptions.push(m);
+        });
+      }
+      if (Array.isArray(nextRoute.planItems) && nextRoute.planItems.length) {
+        prevRoute.planItems = (prevRoute.planItems || []).concat(nextRoute.planItems);
+      }
+      if (nextRoute.endsAt) prevRoute.endsAt = nextRoute.endsAt;
+    }
+  }
+
+  // Append the wayside stop.
+  if (!Array.isArray(prevRoute.planItems)) prevRoute.planItems = [];
+  var alreadyOnRoute = prevRoute.planItems.some(function(pi){
+    return pi && pi.type === "stop" && pi.placeId === placeId;
+  });
+  if (!alreadyOnRoute) prevRoute.planItems.push(stopPlanItem);
+
+  // Drop nextRoute (its state lives on the wayside's legacy snapshot).
+  if (nextRoute) {
+    var nri = trip.routes.indexOf(nextRoute);
+    if (nri >= 0) trip.routes.splice(nri, 1);
+  }
+
+  // Splice source out of trip.destinations.
   trip.destinations.splice(srcIdx, 1);
 
   // Recompute every dest's dateFrom/dateTo from the start.
@@ -26885,27 +26971,9 @@ function convertDestToWayside(destId, opts){
     });
   }
 
-  // Re-sync transit routes so prev→next exists. Returns synchronously;
-  // existing route metadata (planItems, mode, etc.) preserved by-key.
-  if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
-    try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
-  }
-
-  // Locate the (now-existing) prev→next transit route and add the
-  // wayside stop. Route id is canonical: r-tr-{prev.id}-{next.id}.
-  var routeId = "r-tr-" + prev.id + "-" + next.id;
-  var route = (trip.routes || []).find(function(r){ return r && r.id === routeId; });
-  if (!route) {
-    console.warn("[Max] convertDestToWayside: expected transit route missing after sync", routeId);
-    return;
-  }
-  if (!Array.isArray(route.planItems)) route.planItems = [];
-  var alreadyOnRoute = route.planItems.some(function(pi){
-    return pi && pi.type === "stop" && pi.placeId === placeId;
-  });
-  if (!alreadyOnRoute) {
-    route.planItems.push(stopPlanItem);
-  }
+  // DO NOT call syncTransitRoutes here — we already did the surgery
+  // manually and any rebuild would replace our merged route with a
+  // fresh one (losing the merged duration/distance/etc).
 
   if (typeof _emitTripMutation === "function") _emitTripMutation();
 
@@ -27278,12 +27346,11 @@ function _openTripWaysidePopover(route, stop, waysideName){
   };
 }
 
-// v359.54.3: reverse of convertDestToWayside. Promotes a wayside stop
-// back into its own standalone destination, inserted between the
-// route's fromDestId and toDestId in trip.destinations. Subtracts
-// sourceNights from the recorded absorber (legacy.absorberDestId)
-// and gives them to the new destination. If the absorber is gone,
-// the night comes off the route's toDestId as a fallback.
+// v359.54.5: reverse of convertDestToWayside (Model 2). Splits the
+// merged prev→next route back into prev→src + src→next using the
+// snapshots stored on stop.legacy.preservedFirstLeg/preservedSecondLeg.
+// Subtracts sourceNights from the recorded absorber and gives them
+// back to the resurrected destination.
 function ungroupWaysideByRouteStop(route, stop, opts){
   opts = opts || {};
   if (!route || !stop || !stop.placeId || !trip) return;
@@ -27303,6 +27370,8 @@ function ungroupWaysideByRouteStop(route, stop, opts){
     console.warn("[Max] ungroupWaysideByRouteStop: route endpoints not found in trip.destinations");
     return;
   }
+  var fromDest = trip.destinations[fromIdx];
+  var toDest   = trip.destinations[toIdx];
 
   // Resolve the place + how many nights to give back.
   var place = (trip.places && trip.places[stop.placeId]) || null;
@@ -27313,17 +27382,17 @@ function ungroupWaysideByRouteStop(route, stop, opts){
   // the route's toDestId (the default direction at conversion time).
   var absorberId = stop.legacy && stop.legacy.absorberDestId;
   var absorber = absorberId ? trip.destinations.find(function(d){ return d.id === absorberId; }) : null;
-  if (!absorber) absorber = trip.destinations[toIdx];
+  if (!absorber) absorber = toDest;
   absorber.nights = Math.max(1, (absorber.nights || nights) - nights);
 
   // Remove the stop from the route's planItems[].
   route.planItems.splice(stopIdx, 1);
 
-  // Spawn the new destination at the insert position (between
-  // fromIdx and toIdx in trip.destinations).
+  // Spawn the new destination at the insert position (between fromIdx
+  // and toIdx in trip.destinations).
   destCtr++;
   var newId = "d" + destCtr;
-  var insertAt = Math.min(toIdx, trip.destinations.length);  // before the toDest
+  var insertAt = Math.min(toIdx, trip.destinations.length);
   var newDest = {
     id:        newId,
     place:     placeName,
@@ -27344,10 +27413,38 @@ function ungroupWaysideByRouteStop(route, stop, opts){
   };
   trip.destinations.splice(insertAt, 0, newDest);
 
+  // v359.54.5: split the merged route back into two legs using the
+  // snapshots captured at conversion time. If snapshots are missing
+  // (older trips, manual mutations), fall back to syncTransitRoutes
+  // which will synthesize fresh empty legs.
+  var preservedFirstLeg  = stop.legacy && stop.legacy.preservedFirstLeg;
+  var preservedSecondLeg = stop.legacy && stop.legacy.preservedSecondLeg;
+  var canRestore = !!(preservedFirstLeg && preservedSecondLeg);
+  if (canRestore) {
+    // Replace the merged route with a clone of preservedFirstLeg
+    // (prev→src). Reuse the same object slot so existing UI refs to
+    // `route` keep working in this tick — overwrite its fields in place.
+    var firstSnap = JSON.parse(JSON.stringify(preservedFirstLeg));
+    // Update id/toDestId to point at the new dest (src is the newDest).
+    firstSnap.id = "r-tr-" + fromDest.id + "-" + newDest.id;
+    firstSnap.toDestId = newDest.id;
+    Object.keys(route).forEach(function(k){ delete route[k]; });
+    Object.keys(firstSnap).forEach(function(k){ route[k] = firstSnap[k]; });
+
+    // Build src→next from preservedSecondLeg (full snapshot).
+    var secondSnap = JSON.parse(JSON.stringify(preservedSecondLeg));
+    secondSnap.id = "r-tr-" + newDest.id + "-" + toDest.id;
+    secondSnap.fromDestId = newDest.id;
+    secondSnap.toDestId   = toDest.id;
+    // Avoid duplicate id (defensive — pre-v3 envelopes may have it).
+    var existingSecondIdx = trip.routes.findIndex(function(r){ return r && r.id === secondSnap.id; });
+    if (existingSecondIdx >= 0) trip.routes.splice(existingSecondIdx, 1);
+    trip.routes.push(secondSnap);
+  }
+
   // Recompute all dates from the trip start.
   var startDate = trip.destinations[0] && trip.destinations[0].dateFrom;
   if (!startDate) {
-    // First-dest dateFrom may have been blanked; default to today.
     startDate = new Date().toISOString().slice(0, 10);
     trip.destinations[0].dateFrom = startDate;
   }
@@ -27360,10 +27457,10 @@ function ungroupWaysideByRouteStop(route, stop, opts){
     cur = nx;
   });
 
-  // Re-sync transit routes — the chain just grew by one, so the
-  // old (from → to) route gets dropped or repurposed, and new
-  // (from → new) and (new → to) routes are synthesized.
-  if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
+  // If we couldn't restore from snapshots, fall back to a sync so
+  // there's still a route structure for the new adjacency. Skips the
+  // sync on the happy path — we already wrote both legs above.
+  if (!canRestore && typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
     try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
   }
 
