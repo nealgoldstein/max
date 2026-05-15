@@ -801,23 +801,98 @@ describe('migrateTripShape v2→v3 — Segment polymorphic base', () => {
     assert.strictEqual(day0.refs.length, refsBefore);
   });
 
-  test('full pipeline v0→v1→v2→v3 produces a coherent v3 envelope', () => {
+  test('full pipeline v0→v1→v2→v3→v4 produces a coherent v4 envelope', () => {
     const env = legacyEnvelope({
       trip: { brief: { entry: 'Keflavík Airport', tbExit: 'Keflavík Airport' } }
     });
     MaxMigration.migrateTripShape(env);
-    assert.strictEqual(env.trip._schemaVersion, 3);
+    assert.strictEqual(env.trip._schemaVersion, 4);
     assert.strictEqual(env.trip.kind, 'trip');
     // The Iceland fixture has dayTrips on the destination + brief entry/exit,
-    // so v3 ends with: 1 dayTrip route + 1 arrival + 1 departure = 3 routes.
+    // so end state is: 1 dayTrip route + 1 arrival + 1 departure = 3 routes.
     assert.strictEqual(env.trip.routes.length, 3);
     const subKinds = env.trip.routes.map(r => r.subKind).sort();
     assert.deepStrictEqual(subKinds, ['arrival', 'dayTrip', 'departure']);
     // All routes have kind:"route" now.
     env.trip.routes.forEach(r => assert.strictEqual(r.kind, 'route'));
-    // Day has both refs[] (v3) and planItems[type:"route"] (v2 legacy).
+    // Day has refs[] (v3 surface); v4 dropped the planItems[type:"route"]
+    // mirror so route refs live exclusively on day.refs[].
     const day0 = env.trip.destinations[0].days[0];
-    assert(day0.refs.length >= 1);
+    assert(day0.refs.length >= 1, 'day.refs should hold the dayTrip route ref');
+    const hasRoutePi = (day0.planItems || []).some(pi => pi && pi.type === 'route');
+    assert.strictEqual(hasRoutePi, false,
+      'v4 should have stripped {type:"route"} PlanItems from day.planItems');
+  });
+});
+
+// ── Suite: migrateTripShape v3→v4 — drop legacy planItems mirror ──
+
+describe('migrateTripShape v3→v4 — drop legacy day.planItems[type:"route"] mirror', () => {
+  const { migrateV0toV1, migrateV1toV2, migrateV2toV3, migrateV3toV4 } = MaxMigration._internal;
+
+  // Build a v3-ready envelope (v0→v1→v2→v3).
+  function v3EnvelopeReady(overrides) {
+    const env = legacyEnvelope(overrides);
+    migrateV0toV1(env);
+    migrateV1toV2(env);
+    migrateV2toV3(env);
+    return env;
+  }
+
+  test('strips {type:"route"} entries from day.planItems[]', () => {
+    const env = v3EnvelopeReady();
+    const day0 = env.trip.destinations[0].days[0];
+    // Pre-v4: route mirror is present.
+    assert(day0.planItems.some(pi => pi.type === 'route'),
+      'fixture should have a route PlanItem before v3→v4');
+    migrateV3toV4(env);
+    assert.strictEqual(day0.planItems.filter(pi => pi.type === 'route').length, 0,
+      'route PlanItems should be gone after v3→v4');
+  });
+
+  test('day.refs[] is unchanged after v3→v4 (route refs live there now)', () => {
+    const env = v3EnvelopeReady();
+    const day0 = env.trip.destinations[0].days[0];
+    const refsBefore = day0.refs.slice();
+    migrateV3toV4(env);
+    assert.deepStrictEqual(day0.refs, refsBefore);
+    assert(day0.refs.some(r => r.targetKind === 'route'),
+      'route ref should remain on day.refs[]');
+  });
+
+  test('non-route planItems are preserved (sights, meals, stops)', () => {
+    const env = v3EnvelopeReady();
+    const day0 = env.trip.destinations[0].days[0];
+    day0.planItems.push(
+      { id: 'pi-s1', type: 'sight', placeId: 'pl-something' },
+      { id: 'pi-m1', type: 'meal', placeId: 'pl-restaurant' }
+    );
+    migrateV3toV4(env);
+    const types = day0.planItems.map(pi => pi.type);
+    assert(types.includes('sight'));
+    assert(types.includes('meal'));
+    assert(!types.includes('route'));
+  });
+
+  test('idempotent — running v3→v4 twice is a no-op on the second pass', () => {
+    const env = v3EnvelopeReady();
+    migrateV3toV4(env);
+    const snap = JSON.stringify(env.trip);
+    migrateV3toV4(env);
+    assert.strictEqual(JSON.stringify(env.trip), snap);
+  });
+
+  test('bumps _schemaVersion to 4', () => {
+    const env = v3EnvelopeReady();
+    assert.strictEqual(env.trip._schemaVersion, 3);
+    migrateV3toV4(env);
+    assert.strictEqual(env.trip._schemaVersion, 4);
+  });
+
+  test('empty envelope is a no-op', () => {
+    assert.doesNotThrow(() => migrateV3toV4(null));
+    assert.doesNotThrow(() => migrateV3toV4({}));
+    assert.doesNotThrow(() => migrateV3toV4({ trip: null }));
   });
 });
 
@@ -871,15 +946,15 @@ describe('v3 Segment helpers — read/write surface for engine consumers', () =>
     assert.strictEqual(routes[0].id, 'r1');
   });
 
-  test('addRouteRefToDay writes both day.refs and legacy day.planItems', () => {
+  test('addRouteRefToDay writes day.refs (v4: no legacy planItems mirror)', () => {
     const day = { id: 'd1' };
     MaxMigration.addRouteRefToDay(day, 'r1', 'user-scheduled');
     assert.strictEqual(day.refs.length, 1);
     assert.strictEqual(day.refs[0].targetKind, 'route');
     assert.strictEqual(day.refs[0].targetId, 'r1');
-    assert.strictEqual(day.planItems.length, 1);
-    assert.strictEqual(day.planItems[0].type, 'route');
-    assert.strictEqual(day.planItems[0].routeId, 'r1');
+    // v4: day.planItems is NOT touched — route refs live exclusively on day.refs.
+    assert(!day.planItems || !day.planItems.some(pi => pi.type === 'route'),
+      'addRouteRefToDay should no longer write a {type:"route"} PlanItem');
   });
 
   test('addRouteRefToDay is idempotent', () => {
@@ -887,18 +962,21 @@ describe('v3 Segment helpers — read/write surface for engine consumers', () =>
     MaxMigration.addRouteRefToDay(day, 'r1', 'user-scheduled');
     MaxMigration.addRouteRefToDay(day, 'r1', 'user-scheduled');
     assert.strictEqual(day.refs.length, 1);
-    assert.strictEqual(day.planItems.length, 1);
   });
 
-  test('removeRouteRefFromDay clears both day.refs and day.planItems', () => {
+  test('removeRouteRefFromDay clears day.refs (and any legacy planItems mirror)', () => {
     const day = { id: 'd1' };
     MaxMigration.addRouteRefToDay(day, 'r1', 'user');
     MaxMigration.addRouteRefToDay(day, 'r2', 'user');
+    // Defensive: simulate a pre-v4 envelope that still has the legacy
+    // planItems mirror for one of the routes — removeRouteRefFromDay
+    // should clean it up too.
+    day.planItems = [{ id: 'pi-rt-r1', type: 'route', routeId: 'r1' }];
     MaxMigration.removeRouteRefFromDay(day, 'r1');
     assert.strictEqual(day.refs.length, 1);
     assert.strictEqual(day.refs[0].targetId, 'r2');
-    assert.strictEqual(day.planItems.length, 1);
-    assert.strictEqual(day.planItems[0].routeId, 'r2');
+    // Legacy mirror entry for r1 was cleaned up.
+    assert.strictEqual(day.planItems.filter(pi => pi.routeId === 'r1').length, 0);
   });
 
   test('newDaySegment produces a valid v3 Day', () => {

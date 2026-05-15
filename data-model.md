@@ -259,11 +259,11 @@ A Reference is **not** a copy. It's a typed pointer. The referenced Segment's da
 
 Demotion paths (`scheduled → suggestion`, `booked → scheduled` after cancel) handle the "I changed my mind" case.
 
-**A day-trip is a Route, not a PlanItem.** A trip from Reykjavik to the Blue Lagoon and back is a `Route` with `kind:"dayTrip"`, `fromDestId === toDestId === Reykjavik`, `transitDays:["d3"]` (the day the loop happens on), and the day-trip's destination (Blue Lagoon) as a `{type:"stop", priority:"iconic"}` PlanItem in the route's `planItems[]`. The hub destination's day plan references it: `hubDest.days[someDayIdx].planItems = [..., {type:"route", routeId}, ...]`.
+**A day-trip is a Route, not a PlanItem.** A trip from Reykjavik to the Blue Lagoon and back is a `Route` with `kind:"route"` + `subKind:"dayTrip"`, `fromDestId === toDestId === Reykjavik`, `transitDays:["d3"]` (the day the loop happens on), and the day-trip's destination (Blue Lagoon) as a `{type:"stop", priority:"iconic"}` PlanItem in the route's `planItems[]`. The hub destination's day references it via `hubDest.days[someDayIdx].refs = [..., {targetKind:"route", targetId}, ...]`.
 
-This is the same data shape as a transit route (Reykjavik → Vík with waysides along the way); only the `kind` field and `from === to` distinguish them. Unifying the two means the picker, the trip-view map, the day plan, and the LLM all reason about one concept (Route-with-Stops) instead of two.
+This is the same data shape as a transit route (Reykjavik → Vík with waysides along the way); only `subKind` and `from === to` distinguish them. Unifying the two means the picker, the trip-view map, the day plan, and the LLM all reason about one concept (Route-with-Stops) instead of two.
 
-The earlier representations — `dest.dayTrips[]` chips, then `{type:"dayTrip", placeId}` PlanItems on the hub's `day[0]` — are both legacy. The schema-version migration walks every trip on read, lifts those PlanItems out into `trip.routes[]` entries with `kind:"dayTrip"`, and replaces them with `{type:"route", routeId}` references on the same day.
+The earlier representations — `dest.dayTrips[]` chips, then `{type:"dayTrip", placeId}` PlanItems on the hub's `day[0]`, then `{type:"route", routeId}` PlanItems alongside `day.refs[]` — are all legacy. The schema-version migration walks every trip on read, lifts those PlanItems out into `trip.routes[]` entries, mirrors them as `Reference` entries on `day.refs[]`, and finally (v4) strips the `{type:"route"}` PlanItems from `day.planItems[]` entirely. **`day.refs[]` is the canonical surface; `day.planItems[]` holds only leaf content.**
 
 **Time ownership.** PlanItems own their times absolutely — `startTime` and `endTime` are clock times on a 24-hour day, not offsets from the Day. There is no Day-level "start time" field. This keeps the model simple: a booked flight at 08:00 is 08:00, period, regardless of how the rest of the day shakes out.
 

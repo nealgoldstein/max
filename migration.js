@@ -34,8 +34,16 @@
 //        — Reference is now its own type, distinct from PlanItem.
 //        trip.brief.entry / trip.brief.tbExit are lifted into arrival/
 //        departure Routes referenced via trip.arrival / trip.departure.
-//        Old fields preserved so v2 readers still work — Phase 2 of v3
-//        switches readers to the new shape, Phase 3 drops legacy fields.
+//        Phase 1 of v3 was the migration itself (additive — legacy
+//        fields preserved); Phase 2/3 switched readers + writers to
+//        the new shape.
+//
+//   v4 — Drop the legacy day.planItems[type:"route"] mirror. After v4,
+//        day.refs[] is the only place route references live; day.planItems[]
+//        is leaf content only (sights, meals, stops). The Segment +
+//        subKind discriminator survive unchanged; readers that used
+//        MaxMigration.routesForDay keep working because that helper
+//        already prefers day.refs[].
 //
 // Trip envelopes that don't carry _schemaVersion are treated as
 // version 0 (pre-migration). After migration, _schemaVersion is
@@ -44,7 +52,7 @@
 (function (global) {
   'use strict';
 
-  var CURRENT_SCHEMA_VERSION = 3;
+  var CURRENT_SCHEMA_VERSION = 4;
 
   // ── Helpers ─────────────────────────────────────────────────
 
@@ -535,6 +543,38 @@
     return envelope;
   }
 
+  // ── Migration: schema v3 → v4 ───────────────────────────────
+  //
+  // Drops the legacy day.planItems[type:"route"] mirror that v3 kept
+  // alongside day.refs[]. After v4:
+  //   • day.refs[] is the canonical "what routes does this day
+  //     participate in" surface (already true for all live readers,
+  //     which use MaxMigration.routesForDay → prefers refs[]).
+  //   • day.planItems[] holds ONLY leaf content — sights, meals,
+  //     stops. No more route-reference PlanItems.
+  //
+  // route.kind === "route" is preserved (Segment discriminator) and
+  // route.subKind keeps the dayTrip/transit/arrival/departure value.
+  // No code path reads route.kind for the dayTrip discriminator after
+  // Phase 2/3 — the few remaining writer fallback branches still
+  // accept it but no longer write it.
+  function _migrateV3toV4(envelope) {
+    if (!envelope || !envelope.trip) return envelope;
+    var trip = envelope.trip;
+    (trip.destinations || []).forEach(function (dest) {
+      if (!dest || !Array.isArray(dest.days)) return;
+      dest.days.forEach(function (day) {
+        if (!day || !Array.isArray(day.planItems)) return;
+        // Keep only non-route PlanItems. Route refs live on day.refs[].
+        day.planItems = day.planItems.filter(function (pi) {
+          return !(pi && pi.type === 'route');
+        });
+      });
+    });
+    trip._schemaVersion = 4;
+    return envelope;
+  }
+
   // ── Public entry point ──────────────────────────────────────
 
   // Migrate an envelope to the current schema version. Idempotent —
@@ -554,6 +594,7 @@
     if (version < 1) envelope = _migrateV0toV1(envelope);
     if (version < 2) envelope = _migrateV1toV2(envelope);
     if (version < 3) envelope = _migrateV2toV3(envelope);
+    if (version < 4) envelope = _migrateV3toV4(envelope);
 
     return envelope;
   }
@@ -694,34 +735,25 @@
     };
   }
 
-  // Add a route reference to a day. Maintains BOTH v3 (day.refs)
-  // and v2 (day.planItems[type:"route"]) for back-compat during
-  // Phase 2/3. Idempotent — re-adding the same route is a no-op.
+  // Add a route reference to a day. v4: writes ONLY day.refs[].
+  // (Earlier versions also pushed a legacy {type:"route"} PlanItem
+  // onto day.planItems[]; that mirror was dropped in v3→v4.)
+  // Idempotent — re-adding the same route is a no-op.
   function addRouteRefToDay(day, routeId, source) {
     if (!day || !routeId) return;
     if (!Array.isArray(day.refs)) day.refs = [];
-    if (!Array.isArray(day.planItems)) day.planItems = [];
     var hasRef = day.refs.some(function (ref) {
       return ref && ref.targetKind === 'route' && ref.targetId === routeId;
     });
     if (!hasRef) {
       day.refs.push(newReference('route', routeId, source));
     }
-    var hasPi = day.planItems.some(function (pi) {
-      return pi && pi.type === 'route' && pi.routeId === routeId;
-    });
-    if (!hasPi) {
-      day.planItems.push({
-        id:      'pi-rt-' + routeId + '-' + day.id,
-        type:    'route',
-        state:   'scheduled',
-        routeId: routeId,
-        source:  source || 'user-scheduled',
-      });
-    }
   }
 
-  // Remove a route reference from a day, in BOTH v3 and v2 stores.
+  // Remove a route reference from a day. Cleans both day.refs[] AND
+  // any legacy day.planItems[type:"route"] entry — defensive against
+  // trips that haven't yet been migrated to v4 (the on-load migration
+  // strips them, but we may mutate before that hook runs).
   function removeRouteRefFromDay(day, routeId) {
     if (!day || !routeId) return;
     if (Array.isArray(day.refs)) {
@@ -763,6 +795,7 @@
       migrateV0toV1: _migrateV0toV1,
       migrateV1toV2: _migrateV1toV2,
       migrateV2toV3: _migrateV2toV3,
+      migrateV3toV4: _migrateV3toV4,
       shiftIsoDate: _shiftIsoDate,
     },
   };
