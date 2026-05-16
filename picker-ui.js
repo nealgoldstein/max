@@ -875,6 +875,13 @@
       })
       .catch(function(err){
         console.warn("[Max wiki] fetch failed for", place, err && err.message);
+        // v359.60.7: cache the failure (null) so the next render
+        // doesn't re-fire the same Wikipedia request — that's the
+        // path that produces hundreds of 429 errors when the network
+        // is down OR Wikipedia is rate-limiting us. The user can
+        // refresh the page to retry once conditions improve; without
+        // this cache, each render attempt re-fetches and re-fails.
+        try { _wikiCacheSet(place, country, null); } catch(_){}
         return null;
       });
   }

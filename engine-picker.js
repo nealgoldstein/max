@@ -2801,6 +2801,15 @@
       // Graceful fallback. Picker renders without the user-reason
       // section; the rest of the page is unaffected.
       try { console.warn('[Max] deriveUserReasons failed:', (e && e.message) || e); } catch (_) {}
+      // v359.60.7: cache the EMPTY result on failure too. Otherwise
+      // the render path sees no cache and re-fires deriveUserReasons,
+      // which fails again, which re-renders, which re-fires... an
+      // infinite loop the moment the worker is offline. Caching the
+      // failure prevents the loop; user can refresh the page to retry
+      // once their network is back.
+      if (global._tb) {
+        global._tb[cacheSlot] = { key: cacheKey, value: [] };
+      }
       return [];
     }
   }
