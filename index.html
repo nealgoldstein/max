@@ -10400,6 +10400,37 @@ function _renderPlaceActivityItems(){
   function _pmSectionSlug(sec){
     return "tb-sec-" + String(sec || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   }
+  // v359.55.15: search/filter across notes, links, and place names.
+  // Query lives on _tb._researchSearch so it survives re-renders.
+  var _searchQ = (_tb && typeof _tb._researchSearch === "string") ? _tb._researchSearch.toLowerCase() : "";
+  function _pmRowMatchesSearch(d, secName){
+    if (!_searchQ) return true;
+    // Place name(s) on this destination
+    if (d.place && d.place.toLowerCase().indexOf(_searchQ) >= 0) return true;
+    // Section name
+    if (secName && secName.toLowerCase().indexOf(_searchQ) >= 0) return true;
+    // Activity names referencing this destination
+    var activityHit = (d.placeRefs || []).some(function(r){
+      return r && r.item && r.item.name && r.item.name.toLowerCase().indexOf(_searchQ) >= 0;
+    });
+    if (activityHit) return true;
+    // Notes / links from placeMeta
+    var meta = (_tb && _tb.placeMeta) ? _tb.placeMeta[_pmMetaKey(d.place)] : null;
+    if (meta) {
+      if (meta.notes && meta.notes.toLowerCase().indexOf(_searchQ) >= 0) return true;
+      if (Array.isArray(meta.links)) {
+        var linkHit = meta.links.some(function(l){
+          return l && (
+            (l.url    && l.url.toLowerCase().indexOf(_searchQ) >= 0) ||
+            (l.domain && l.domain.toLowerCase().indexOf(_searchQ) >= 0)
+          );
+        });
+        if (linkHit) return true;
+      }
+    }
+    return false;
+  }
+
   (function _renderSectionTOC(){
     if (!sectionOrder.length) return;
     var toc = document.createElement("div");
@@ -10407,12 +10438,25 @@ function _renderPlaceActivityItems(){
     // v359.55.13: header row carries the "Trip notes" button — a
     // trip-level research card for notes/links not tied to a single
     // place (gear, timing, weather, general guides).
+    // v359.55.15: also adds Export and Search affordances — research
+    // tool ergonomics.
     var tocHdr = document.createElement("div");
-    tocHdr.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;";
+    tocHdr.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap;";
     var tocHdrLabel = document.createElement("div");
     tocHdrLabel.style.cssText = "font-size:10px;font-weight:700;color:#888;letter-spacing:.05em;text-transform:uppercase;";
     tocHdrLabel.textContent = "What's here";
     tocHdr.appendChild(tocHdrLabel);
+
+    var hdrActions = document.createElement("div");
+    hdrActions.style.cssText = "display:flex;align-items:center;gap:6px;";
+    // Export button
+    var exportBtn = document.createElement("button");
+    exportBtn.type = "button";
+    exportBtn.style.cssText = "font-size:11px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;";
+    exportBtn.innerHTML = "⤓ Export";
+    exportBtn.title = "Copy research as markdown to clipboard";
+    exportBtn.onclick = function(e){ e.stopPropagation(); _pmExportResearchAsMarkdown(); };
+    hdrActions.appendChild(exportBtn);
     var tripMeta = (_tb && _tb.tripMeta) ? _tb.tripMeta : null;
     var _tripHasMeta = !!(tripMeta && (
       (tripMeta.notes && tripMeta.notes.trim())
@@ -10427,8 +10471,39 @@ function _renderPlaceActivityItems(){
       ? "Trip-wide notes and " + tripLinkCount + " link" + (tripLinkCount === 1 ? "" : "s") + " — click to edit"
       : "Add notes and source links that apply to the whole trip";
     tripNotesBtn.onclick = function(e){ e.stopPropagation(); _pmOpenTripResearchCard(); };
-    tocHdr.appendChild(tripNotesBtn);
+    hdrActions.appendChild(tripNotesBtn);
+    tocHdr.appendChild(hdrActions);
     toc.appendChild(tocHdr);
+
+    // Search input — live filter across place names, activity names,
+    // notes, and link URLs/domains.
+    var searchWrap = document.createElement("div");
+    searchWrap.style.cssText = "display:flex;align-items:center;gap:6px;margin:6px 0 8px;";
+    var searchInp = document.createElement("input");
+    searchInp.type = "search";
+    searchInp.placeholder = "Search places, notes, links…";
+    searchInp.value = (_tb && _tb._researchSearch) || "";
+    searchInp.style.cssText = "flex:1;font:inherit;font-size:12.5px;padding:5px 9px;border:1px solid #d8dde5;border-radius:5px;background:#fff;color:#111;box-sizing:border-box;outline:none;";
+    var searchClear = document.createElement("button");
+    searchClear.type = "button";
+    searchClear.style.cssText = "font-size:11px;color:#888;background:#fff;border:1px solid #ddd;border-radius:5px;padding:4px 8px;cursor:pointer;font-family:inherit;" + (searchInp.value ? "" : "visibility:hidden;");
+    searchClear.textContent = "× Clear";
+    searchInp.oninput = function(){
+      _tb._researchSearch = searchInp.value;
+      // Debounce slightly so each keystroke doesn't blow away the cursor.
+      clearTimeout(_tb._researchSearchTimer);
+      _tb._researchSearchTimer = setTimeout(function(){
+        if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
+      }, 180);
+    };
+    searchClear.onclick = function(){
+      _tb._researchSearch = "";
+      if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
+    };
+    searchWrap.appendChild(searchInp);
+    searchWrap.appendChild(searchClear);
+    toc.appendChild(searchWrap);
+
     var tocList = document.createElement("div");
     tocList.style.cssText = "display:flex;flex-wrap:wrap;gap:4px 8px;";
     sectionOrder.forEach(function(sec){
@@ -10492,6 +10567,18 @@ function _renderPlaceActivityItems(){
     var isRouteSection = nameSaysRoute || anyTypeRoute;
 
     if (isRouteSection) {
+      // v359.55.15: search filter for route sections too.
+      if (_searchQ) {
+        var secNameMatch = sec.toLowerCase().indexOf(_searchQ) >= 0;
+        if (!secNameMatch) {
+          secItems = secItems.filter(function(item){
+            if (item.name && item.name.toLowerCase().indexOf(_searchQ) >= 0) return true;
+            var eps = item.endpoints || item.requiredPlaces || [];
+            return eps.some(function(p){ return p && p.place && p.place.toLowerCase().indexOf(_searchQ) >= 0; });
+          });
+          if (!secItems.length) return;
+        }
+      }
       var secKeptR = secItems.some(function(it){
         return (it.requiredPlaces||[]).some(function(p){ return p && p._keep; });
       });
@@ -10600,6 +10687,13 @@ function _renderPlaceActivityItems(){
     // a one-word-per-line stack at narrow widths instead of wrapping cleanly.
     // With min-width as the natural content width, the row triggers
     // flex-wrap (set on .tb-act-section-hdr) when there's no room.
+    // v359.55.15: search filter — drop destinations that don't match.
+    if (_searchQ) {
+      destOrder = destOrder.filter(function(key){
+        return _pmRowMatchesSearch(byDest[key], sec);
+      });
+      if (!destOrder.length) return; // skip the entire section
+    }
     hdrWrap.innerHTML = '<div class="tb-act-section-title" style="flex:1;">' + _pmEsc(sec) + '</div>'
       + '<div class="tb-act-section-count">' + destOrder.length + ' destination' + (destOrder.length===1?'':'s') + '</div>'
       + moreBtnHtml;
@@ -11379,6 +11473,73 @@ function _pmMoveUserAddedToSection(activityId, newSection){
   if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
 }
 
+// v359.55.16: inline TODO checkboxes in notes. Any line starting with
+// "[ ]" or "[x]" is rendered as a clickable checkbox below the
+// textarea. Toggling flips the corresponding character in the text.
+// Lets notes double as a working checklist.
+function _pmParseTodos(text){
+  if (!text) return [];
+  var todos = [];
+  text.split("\n").forEach(function(line, idx){
+    var m = line.match(/^(\s*)\[([ xX])\]\s*(.*)$/);
+    if (m) todos.push({ lineIdx: idx, checked: m[2] !== " ", label: m[3] || "" });
+  });
+  return todos;
+}
+function _pmToggleTodoLine(text, lineIdx){
+  if (!text) return text;
+  var lines = text.split("\n");
+  if (lineIdx < 0 || lineIdx >= lines.length) return text;
+  var m = lines[lineIdx].match(/^(\s*)\[([ xX])\](.*)$/);
+  if (!m) return text;
+  var newChar = (m[2] === " ") ? "x" : " ";
+  lines[lineIdx] = m[1] + "[" + newChar + "]" + m[3];
+  return lines.join("\n");
+}
+function _pmRenderTodoList(text, idPrefix){
+  var todos = _pmParseTodos(text);
+  if (!todos.length) return "";
+  var rows = todos.map(function(t, i){
+    var safeLabel = String(t.label || "").replace(/</g, "&lt;").replace(/&/g, "&amp;");
+    return '<label style="display:flex;align-items:center;gap:6px;padding:3px 0;cursor:pointer;">'
+      + '<input type="checkbox" class="' + idPrefix + '-todo" data-todo-line="' + t.lineIdx + '" ' + (t.checked ? "checked" : "") + ' style="margin:0;cursor:pointer;" />'
+      + '<span style="font-size:12.5px;color:' + (t.checked ? "#888" : "#111") + ';' + (t.checked ? "text-decoration:line-through;" : "") + 'line-height:1.5;">' + safeLabel + '</span>'
+      + '</label>';
+  }).join("");
+  return '<div style="margin-top:8px;padding:8px 10px;background:#f5f7fa;border:1px solid #e2e6ec;border-radius:5px;">'
+    + '<div style="font-size:10px;font-weight:700;color:#888;letter-spacing:.04em;text-transform:uppercase;margin-bottom:5px;">To-dos from notes</div>'
+    + rows
+    + '</div>';
+}
+// Bind checkbox toggles on the rendered TODO list. Mutates the
+// textarea in place + updates only the affected row's visual state
+// so the user's cursor + active typing isn't disturbed.
+function _pmBindTodoCheckboxes(scope, textareaSel, todoClass, metaObj){
+  scope.querySelectorAll('input[type="checkbox"].' + todoClass).forEach(function(cb){
+    cb.onchange = function(e){
+      e.stopPropagation();
+      var idx = parseInt(cb.getAttribute("data-todo-line"), 10);
+      if (isNaN(idx)) return;
+      var ta = scope.querySelector(textareaSel);
+      if (!ta) return;
+      var newText = _pmToggleTodoLine(ta.value, idx);
+      ta.value = newText;
+      if (metaObj) metaObj.notes = newText;
+      // Update just this row's visual state without a full re-render.
+      var label = cb.parentNode && cb.parentNode.querySelector("span");
+      if (label) {
+        if (cb.checked) {
+          label.style.color = "#888";
+          label.style.textDecoration = "line-through";
+        } else {
+          label.style.color = "#111";
+          label.style.textDecoration = "none";
+        }
+      }
+    };
+  });
+}
+
 // v359.55.14: voice input for notes textareas via Web Speech API.
 // Wired to both research cards (per-place + trip-level). Falls back
 // to hiding the button on browsers without SpeechRecognition.
@@ -11458,6 +11619,134 @@ function _pmAttachDictation(button, textarea){
   };
 }
 
+// v359.55.15: export the full research surface as markdown and copy
+// to clipboard. Walks _tb.placeActivities + _tb.placeMeta + _tb.tripMeta
+// and assembles a structured document the user can paste anywhere.
+// Lock-in is the enemy of trust — research should be portable.
+function _pmExportResearchAsMarkdown(){
+  var lines = [];
+  var tripTitle = (_tb && (_tb.placeName || _tb.region)) || "Trip";
+  lines.push("# " + tripTitle);
+  lines.push("");
+
+  // Trip-level meta first, if it has content.
+  var trMeta = (_tb && _tb.tripMeta) || null;
+  if (trMeta && ((trMeta.notes && trMeta.notes.trim()) || (Array.isArray(trMeta.links) && trMeta.links.length))) {
+    lines.push("## Trip notes");
+    lines.push("");
+    if (trMeta.notes && trMeta.notes.trim()) {
+      // Notes already use "[ ]" / "[x]" syntax for TODOs — that IS
+      // GitHub-flavored markdown for task lists, so it renders natively
+      // in any GFM viewer (Notion, GitHub, Obsidian, etc.). Pass through.
+      lines.push(trMeta.notes.trim());
+      lines.push("");
+    }
+    if (Array.isArray(trMeta.links) && trMeta.links.length) {
+      lines.push("### Source links");
+      lines.push("");
+      trMeta.links.forEach(function(l){
+        if (!l || !l.url) return;
+        var dom = l.domain || _pmExtractDomain(l.url) || l.url;
+        lines.push("- [" + dom + "](" + l.url + ")");
+      });
+      lines.push("");
+    }
+  }
+
+  // Per-place: walk kept candidates grouped by section.
+  var bySection = {};
+  var sectionOrder = [];
+  (_tb && _tb.placeActivities || []).forEach(function(it){
+    if (!it || !it.section) return;
+    if (!bySection[it.section]) { bySection[it.section] = []; sectionOrder.push(it.section); }
+    (it.requiredPlaces || []).forEach(function(p){
+      if (!p || !p.place) return;
+      if (!bySection[it.section].some(function(x){ return x.place === p.place; })) {
+        bySection[it.section].push(p);
+      }
+    });
+  });
+
+  var placeMeta = (_tb && _tb.placeMeta) || {};
+  function _placeMetaFor(name){ return placeMeta[_pmMetaKey(name)] || null; }
+
+  var anyPlaceContent = false;
+  sectionOrder.forEach(function(sec){
+    var places = bySection[sec] || [];
+    if (!places.length) return;
+    // Only include places that have user-attached research OR a kept flag.
+    var includable = places.filter(function(p){
+      if (p._keep) return true;
+      var meta = _placeMetaFor(p.place);
+      return !!(meta && ((meta.notes && meta.notes.trim()) || (Array.isArray(meta.links) && meta.links.length)));
+    });
+    if (!includable.length) return;
+    anyPlaceContent = true;
+    lines.push("## " + sec);
+    lines.push("");
+    includable.forEach(function(p){
+      var meta = _placeMetaFor(p.place);
+      var stayLabel = "";
+      if (meta && meta.stayOverride === true) stayLabel = " (Stay)";
+      else if (meta && meta.stayOverride === false) stayLabel = " (See)";
+      else if (p.overnight !== false) stayLabel = " (Stay)";
+      else stayLabel = " (See)";
+      lines.push("### " + p.place + stayLabel);
+      lines.push("");
+      if (meta && meta.notes && meta.notes.trim()) {
+        lines.push(meta.notes.trim());
+        lines.push("");
+      }
+      if (meta && Array.isArray(meta.links) && meta.links.length) {
+        lines.push("**Source links:**");
+        lines.push("");
+        meta.links.forEach(function(l){
+          if (!l || !l.url) return;
+          var dom = l.domain || _pmExtractDomain(l.url) || l.url;
+          lines.push("- [" + dom + "](" + l.url + ")");
+        });
+        lines.push("");
+      }
+    });
+  });
+
+  if (!trMeta && !anyPlaceContent) {
+    lines.push("*No research notes or source links yet — add some via the 📓 buttons.*");
+  }
+
+  var md = lines.join("\n");
+
+  // Copy to clipboard. Modern Clipboard API where available; fallback
+  // textarea + execCommand for older browsers.
+  function _toast(msg){
+    if (typeof showSaveStatus === "function") { showSaveStatus(msg, 2500); return; }
+    try { alert(msg); } catch(_){}
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(md).then(function(){
+      _toast("✓ Research copied to clipboard (markdown)");
+    }).catch(function(err){
+      console.warn("[Max] clipboard write failed:", err && err.message);
+      _toast("Couldn't copy — your browser blocked clipboard access");
+    });
+  } else {
+    try {
+      var ta = document.createElement("textarea");
+      ta.value = md;
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+      _toast("✓ Research copied to clipboard (markdown)");
+    } catch(err) {
+      console.warn("[Max] clipboard fallback failed:", err && err.message);
+      _toast("Couldn't copy to clipboard");
+    }
+  }
+}
+
 // v359.55.13: trip-level research metadata. Mirrors _pmPlaceMeta but
 // for the trip as a whole — overall thoughts, gear lists, general
 // travel guides, anything that isn't tied to a single destination.
@@ -11508,7 +11797,8 @@ function _pmOpenTripResearchCard(){
       +       '<span style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;">Notes</span>'
       +       '<button type="button" id="pm-trc-dictate" style="font-size:11px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:3px 8px;cursor:pointer;font-family:inherit;">🎤 Dictate</button>'
       +     '</div>'
-      +     '<textarea id="pm-trc-notes" placeholder="What you\'ve learned, timing concerns, gear, things to pack, general questions to resolve…" style="width:100%;min-height:100px;font:inherit;font-size:12.5px;line-height:1.5;padding:6px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;color:#111;resize:vertical;box-sizing:border-box;font-family:inherit;">' + String(m.notes || "").replace(/</g, "&lt;") + '</textarea>'
+      +     '<textarea id="pm-trc-notes" placeholder="What you\'ve learned, timing concerns, gear, things to pack, general questions to resolve…  Tip: lines starting with [ ] become checkboxes." style="width:100%;min-height:100px;font:inherit;font-size:12.5px;line-height:1.5;padding:6px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;color:#111;resize:vertical;box-sizing:border-box;font-family:inherit;">' + String(m.notes || "").replace(/</g, "&lt;") + '</textarea>'
+      +     _pmRenderTodoList(m.notes, "pm-trc")
       +   '</div>'
       +   '<div>'
       +     '<div style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;margin-bottom:5px;">Source links</div>'
@@ -11549,6 +11839,8 @@ function _pmOpenTripResearchCard(){
       ov.querySelector("#pm-trc-close").onclick = close;
       bindLinkActions();
       bindDictation();
+      bindTodos();
+      bindNotesBlurRefresh();
     };
     ov.querySelectorAll(".pm-trc-del-link").forEach(function(btn){
       btn.onclick = function(){
@@ -11561,14 +11853,39 @@ function _pmOpenTripResearchCard(){
         ov.querySelector("#pm-trc-close").onclick = close;
         bindLinkActions();
         bindDictation();
+        bindTodos();
+        bindNotesBlurRefresh();
       };
     });
   }
   function bindDictation(){
     _pmAttachDictation(ov.querySelector("#pm-trc-dictate"), ov.querySelector("#pm-trc-notes"));
   }
+  function bindTodos(){
+    _pmBindTodoCheckboxes(ov, "#pm-trc-notes", "pm-trc-todo", m);
+  }
+  // v359.55.16: refresh on textarea blur so newly-typed "[ ]" lines
+  // become checkboxes without requiring close/reopen.
+  function bindNotesBlurRefresh(){
+    var ta = ov.querySelector("#pm-trc-notes");
+    if (!ta) return;
+    ta.addEventListener("blur", function(){
+      var prev = m.notes || "";
+      m.notes = ta.value;
+      if (_pmParseTodos(prev).length !== _pmParseTodos(m.notes).length) {
+        ov.innerHTML = renderBody();
+        ov.querySelector("#pm-trc-close").onclick = close;
+        bindLinkActions();
+        bindDictation();
+        bindTodos();
+        bindNotesBlurRefresh();
+      }
+    });
+  }
   bindLinkActions();
   bindDictation();
+  bindTodos();
+  bindNotesBlurRefresh();
 }
 
 // v359.55.3: per-place research metadata. The picker is becoming a
@@ -11678,7 +11995,8 @@ function _pmOpenResearchCard(placeName){
       +       '<span style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;">Notes</span>'
       +       '<button type="button" id="pm-rc-dictate" style="font-size:11px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:3px 8px;cursor:pointer;font-family:inherit;">🎤 Dictate</button>'
       +     '</div>'
-      +     '<textarea id="pm-rc-notes" placeholder="What you\'ve heard, links to come back to, things to verify…" style="width:100%;min-height:80px;font:inherit;font-size:12.5px;line-height:1.5;padding:6px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;color:#111;resize:vertical;box-sizing:border-box;font-family:inherit;">' + String(m.notes || "").replace(/</g, "&lt;") + '</textarea>'
+      +     '<textarea id="pm-rc-notes" placeholder="What you\'ve heard, links to come back to, things to verify…  Tip: lines starting with [ ] become checkboxes." style="width:100%;min-height:80px;font:inherit;font-size:12.5px;line-height:1.5;padding:6px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;color:#111;resize:vertical;box-sizing:border-box;font-family:inherit;">' + String(m.notes || "").replace(/</g, "&lt;") + '</textarea>'
+      +     _pmRenderTodoList(m.notes, "pm-rc")
       +   '</div>'
       // Source links
       +   '<div>'
@@ -11721,6 +12039,8 @@ function _pmOpenResearchCard(placeName){
       bindLinkActions();
       bindStayButtons();
       bindDictation();
+      bindTodos();
+      bindNotesBlurRefresh();
     };
   });
   function bindStayButtons(){
@@ -11737,6 +12057,8 @@ function _pmOpenResearchCard(placeName){
         bindLinkActions();
         bindStayButtons();
         bindDictation();
+        bindTodos();
+        bindNotesBlurRefresh();
       };
     });
   }
@@ -11771,15 +12093,42 @@ function _pmOpenResearchCard(placeName){
         bindLinkActions();
         bindStayButtons();
         bindDictation();
+        bindTodos();
+        bindNotesBlurRefresh();
       };
     });
   }
   function bindDictation(){
     _pmAttachDictation(ov.querySelector("#pm-rc-dictate"), ov.querySelector("#pm-rc-notes"));
   }
+  function bindTodos(){
+    _pmBindTodoCheckboxes(ov, "#pm-rc-notes", "pm-rc-todo", m);
+  }
+  // v359.55.16: also refresh the TODO list when the user blurs the
+  // textarea, so newly-typed "[ ]" lines render as checkboxes.
+  function bindNotesBlurRefresh(){
+    var ta = ov.querySelector("#pm-rc-notes");
+    if (!ta) return;
+    ta.addEventListener("blur", function(){
+      var prev = m.notes || "";
+      m.notes = ta.value;
+      // Only re-render if the parsed TODO list could have changed.
+      if (_pmParseTodos(prev).length !== _pmParseTodos(m.notes).length) {
+        ov.innerHTML = renderBody();
+        ov.querySelector("#pm-rc-close").onclick = close;
+        bindLinkActions();
+        bindStayButtons();
+        bindDictation();
+        bindTodos();
+        bindNotesBlurRefresh();
+      }
+    });
+  }
   bindLinkActions();
   bindStayButtons();
   bindDictation();
+  bindTodos();
+  bindNotesBlurRefresh();
 }
 
 // v359.5.4: commit a place as a stay. Used by the "+ stay the night"
