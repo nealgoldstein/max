@@ -10497,6 +10497,23 @@ function _renderPlaceActivityItems(){
       var transitChip = routeStops.length
         ? '<span style="font-size:9.5px;font-weight:700;color:#5b3f8f;background:#f4eef9;border:1px solid #d8c4e8;padding:1px 6px;border-radius:9px;letter-spacing:.02em;" title="'+_pmEsc(routeStops.length>1 ? "Also on: " + routeStops.slice(1).join(", ") : "Endpoint of an iconic route experience.")+'">📍 stop on '+_pmEsc(routeStops[0])+'</span>'
         : '';
+
+      // v359.55.1: stay/see flag. The LLM marks each requiredPlace with
+      // overnight:true|false to signal "city with lodging" vs "standalone
+      // attraction." A small chip on stay-eligible places lets the user
+      // see at a glance which candidates would anchor as a sleep stop
+      // vs. which are pure see-it places (likely candidates for wayside
+      // or day-trip later in the trip view). Absence of the chip means
+      // "see" — quieter for the typical lots-of-sights case.
+      var _isStayCandidate = d.placeRefs.some(function(r){
+        // Treat overnight:true OR an unset flag as "stay-eligible."
+        // (Routes' endpoints with overnight:false are explicitly travel-
+        // through; the LLM marks them.)
+        return r.placeRef && r.placeRef.overnight !== false;
+      });
+      var stayChip = _isStayCandidate
+        ? '<span style="font-size:9.5px;font-weight:700;color:#1a5fa8;background:#eef4fb;border:1px solid #c8d8f0;padding:1px 6px;border-radius:9px;letter-spacing:.02em;" title="A place to stay — sleep here while exploring its sights. Adjust nights in the trip view.">🛏 Stay</span>'
+        : '';
       // v357: sidebar ordinal badge removed — sequencing is a trip-view
       // concern. The picker is about WHAT places to include; ordering
       // gets committed in the trip view.
@@ -10556,6 +10573,7 @@ function _renderPlaceActivityItems(){
         + '<div style="flex:1;min-width:0;cursor:pointer;" onclick="toggleDestKeep(&#39;'+_pmEsc(d.place)+'&#39;)">'
         + '<div class="tb-act-name" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
         +   '<span>'+_pmEsc(d.place)+'</span>'
+        +   stayChip
         +   transitChip
         // v358.1: removed the floating-popup "?" button. Story info
         // now lives inline as a preview + expand under the place name
