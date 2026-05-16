@@ -10541,14 +10541,11 @@ function _renderPlaceActivityItems(){
           + 'style="font-size:10px;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:2px 4px;margin-left:6px;font-family:inherit;cursor:pointer;max-width:160px;">' + _opts + '</select>';
       }
 
-      // v359.55.1: stay/see flag. The LLM marks each requiredPlace with
-      // overnight:true|false. v359.55.4: asymmetric chip pattern:
-      //   • See state (default for most candidates) → dashed "+ Stay"
-      //     affordance only. Click promotes to Stay.
-      //   • Stay state → solid "🛏 Stay" pill with a small "− See"
-      //     demote button next to it. Click "− See" demotes.
-      // No tri-state on the chip; "use Max's guess" reset is in the
-      // research card popover.
+      // v359.55.6: stay/see as a symmetric two-button toggle. Always
+      // shows both options; the current state is filled (blue for stay,
+      // purple for see) and the alternative is greyed with a "+" prefix.
+      // Click the inactive one to switch. No asymmetric promote/demote;
+      // no tri-state reset.
       var _llmIsStay = d.placeRefs.some(function(r){
         return r.placeRef && r.placeRef.overnight !== false;
       });
@@ -10557,35 +10554,41 @@ function _renderPlaceActivityItems(){
         ? _placeMeta.stayOverride : null;
       var _isStayCandidate = (_stayOverride !== null) ? _stayOverride : _llmIsStay;
       var _placeArg = _pmEsc(d.place);
-      var stayChip;
-      if (_isStayCandidate) {
-        stayChip = '<span class="pm-stay-pill" style="display:inline-flex;align-items:center;gap:4px;">'
-          + '<span style="font-size:9.5px;font-weight:700;color:#1a5fa8;background:#eef4fb;border:1px solid #c8d8f0;padding:1px 6px;border-radius:9px;letter-spacing:.02em;">🛏 Stay</span>'
-          + '<button type="button" class="pm-stay-demote" '
-          +   'onclick="_pmSetStayOverride(&#39;' + _placeArg + '&#39;, false);event.stopPropagation();" '
-          +   'title="Mark as a place to see only — not a stay" '
-          +   'style="font-size:9.5px;font-weight:600;color:#888;background:#fff;border:1px solid #ddd;padding:1px 6px;border-radius:9px;letter-spacing:.02em;cursor:pointer;font-family:inherit;line-height:1.3;">− See</button>'
-          + '</span>';
-      } else {
-        stayChip = '<button type="button" class="pm-stay-promote" '
-          + 'onclick="_pmSetStayOverride(&#39;' + _placeArg + '&#39;, true);event.stopPropagation();" '
-          + 'title="Mark as a place to stay — sleep here while exploring its sights" '
-          + 'style="font-size:9.5px;font-weight:600;color:#888;background:#fafafa;border:1px dashed #ccc;padding:1px 6px;border-radius:9px;letter-spacing:.02em;cursor:pointer;font-family:inherit;line-height:1.3;">+ Stay</button>';
-      }
+      // Active styles: stay = blue, see = purple. Inactive: muted with "+".
+      var _stayBtnStyle = _isStayCandidate
+        ? 'font-size:9.5px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;padding:1px 7px;border-radius:9px;letter-spacing:.02em;cursor:default;font-family:inherit;line-height:1.3;'
+        : 'font-size:9.5px;font-weight:600;color:#888;background:#fff;border:1px solid #ddd;padding:1px 7px;border-radius:9px;letter-spacing:.02em;cursor:pointer;font-family:inherit;line-height:1.3;';
+      var _seeBtnStyle = !_isStayCandidate
+        ? 'font-size:9.5px;font-weight:700;color:#fff;background:#5b3f8f;border:1px solid #5b3f8f;padding:1px 7px;border-radius:9px;letter-spacing:.02em;cursor:default;font-family:inherit;line-height:1.3;'
+        : 'font-size:9.5px;font-weight:600;color:#888;background:#fff;border:1px solid #ddd;padding:1px 7px;border-radius:9px;letter-spacing:.02em;cursor:pointer;font-family:inherit;line-height:1.3;';
+      var _stayLabel = _isStayCandidate ? '🛏 Stay' : '+ Stay';
+      var _seeLabel  = _isStayCandidate ? '+ See'  : '👁 See';
+      var _stayClick = _isStayCandidate ? '' : 'onclick="_pmSetStayOverride(&#39;' + _placeArg + '&#39;, true);event.stopPropagation();"';
+      var _seeClick  = _isStayCandidate ? 'onclick="_pmSetStayOverride(&#39;' + _placeArg + '&#39;, false);event.stopPropagation();"' : '';
+      var stayChip = '<span class="pm-stay-toggle" style="display:inline-flex;align-items:center;gap:3px;">'
+        + '<button type="button" ' + _stayClick + ' style="' + _stayBtnStyle + '" title="' + (_isStayCandidate ? 'Currently set as a stay' : 'Mark as a place to stay') + '">' + _stayLabel + '</button>'
+        + '<button type="button" ' + _seeClick + ' style="' + _seeBtnStyle + '" title="' + (_isStayCandidate ? 'Mark as a see-only place' : 'Currently set as see only') + '">' + _seeLabel + '</button>'
+        + '</span>';
 
-      // v359.55.3: research card affordance. Small "📓" button per
-      // place. If meta has any content (notes, links, override), show
-      // a tiny dot so the user knows there's research attached.
-      var _hasMeta = !!(_placeMeta && (
+      // v359.55.6: research card affordance. When meta has content
+      // (notes or links), the 📓 button is filled blue. Empty stays
+      // hollow grey. No dot — the fill/no-fill distinction tells the
+      // user "this has research" without the unexplained marker.
+      // (Role override no longer counts as "meta content" since the
+      // stay/see toggle already conveys that state on the chip.)
+      var _hasMetaContent = !!(_placeMeta && (
         (_placeMeta.notes && _placeMeta.notes.trim())
         || (Array.isArray(_placeMeta.links) && _placeMeta.links.length)
-        || (_placeMeta.stayOverride !== null && _placeMeta.stayOverride !== undefined)
       ));
+      var _linkCount = (_placeMeta && Array.isArray(_placeMeta.links)) ? _placeMeta.links.length : 0;
+      var _researchTitle = _hasMetaContent
+        ? "Notes and " + _linkCount + " link" + (_linkCount === 1 ? "" : "s") + " — click to edit"
+        : "Add notes and source links for this place";
       var researchBtn = '<button type="button" class="pm-research-btn" '
         + 'onclick="_pmOpenResearchCard(&#39;' + _pmEsc(d.place) + '&#39;);event.stopPropagation();" '
-        + 'title="Notes, source links, role override" '
-        + 'style="font-size:10.5px;color:' + (_hasMeta ? '#1a5fa8' : '#888') + ';background:' + (_hasMeta ? '#eef4fb' : '#fff') + ';border:1px solid ' + (_hasMeta ? '#c8d8f0' : '#ddd') + ';border-radius:9px;padding:1px 6px;cursor:pointer;font-family:inherit;line-height:1.3;">'
-        + '📓' + (_hasMeta ? '<span style="margin-left:2px;font-size:8px;">●</span>' : '')
+        + 'title="' + _researchTitle + '" '
+        + 'style="font-size:11px;color:' + (_hasMetaContent ? '#fff' : '#888') + ';background:' + (_hasMetaContent ? '#1a5fa8' : '#fff') + ';border:1px solid ' + (_hasMetaContent ? '#1a5fa8' : '#ddd') + ';border-radius:9px;padding:1px 7px;cursor:pointer;font-family:inherit;line-height:1.3;">'
+        + '📓'
         + '</button>';
       // v357: sidebar ordinal badge removed — sequencing is a trip-view
       // concern. The picker is about WHAT places to include; ordering
