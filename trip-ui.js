@@ -1711,9 +1711,32 @@
       }
     };
 
-    // v359.55.17: Trip-level research button. Same popover the picker
-    // uses; ensures the picker's _tb.tripMeta is sync'd from
-    // trip.brief.tripMeta first.
+    // v359.58: two distinct buttons — operational "Trip notes"
+    // (lives on trip.notes, trip-time stuff) and "Research" (lives on
+    // trip.brief.tripMeta, planning-stage). The previous single
+    // "Trip notes" button confusingly conflated the two surfaces.
+    var tripNotesBtn = document.createElement("button");
+    tripNotesBtn.type = "button";
+    var _tripNotes = (trip && trip.notes) || null;
+    var _tripNotesHas = !!(_tripNotes && (
+      (typeof _tripNotes.text === "string" && _tripNotes.text.trim())
+      || (Array.isArray(_tripNotes.links) && _tripNotes.links.length)
+    ));
+    var _tripNotesLinkN = (_tripNotes && Array.isArray(_tripNotes.links)) ? _tripNotes.links.length : 0;
+    var _tripNotesBadge = _tripNotesLinkN > 0 ? ' <span style="opacity:.85;font-size:10px;">(' + _tripNotesLinkN + ')</span>' : "";
+    tripNotesBtn.innerHTML = "📋 Trip notes" + _tripNotesBadge;
+    tripNotesBtn.title = _tripNotesHas
+      ? "Trip-time notes" + (_tripNotesLinkN ? " and " + _tripNotesLinkN + " link" + (_tripNotesLinkN === 1 ? "" : "s") : "") + " — click to edit"
+      : "Confirmations, packing list, contacts — anything you'll want at trip time";
+    tripNotesBtn.style.cssText = "font-size:12px;font-weight:600;color:" + (_tripNotesHas ? "#fff" : "#1a5fa8") + ";background:" + (_tripNotesHas ? "#1a5fa8" : "#fff") + ";border:1px solid #1a5fa8;border-radius:6px;padding:6px 11px;cursor:pointer;font-family:inherit;margin-right:6px;white-space:nowrap;";
+    tripNotesBtn.onclick = function(e){
+      e.stopPropagation();
+      if (typeof global._openTripNotesPopover === "function") global._openTripNotesPopover();
+    };
+    listHdr.appendChild(tripNotesBtn);
+
+    // Research notes (was: "Trip notes" before the split). Same picker
+    // popover the per-dest 📓 button uses.
     var tripResearchBtn = document.createElement("button");
     tripResearchBtn.type = "button";
     var _tripBriefMeta = (trip && trip.brief && trip.brief.tripMeta) || null;
@@ -1722,14 +1745,12 @@
       || (Array.isArray(_tripBriefMeta.links) && _tripBriefMeta.links.length)
     ));
     var _tripLinkN = (_tripBriefMeta && Array.isArray(_tripBriefMeta.links)) ? _tripBriefMeta.links.length : 0;
-    // v359.56.4: badge "(N)" only when there are links; fill conveys
-    // "any content" so notes-only doesn't render as "(0)".
     var _tripLinkBadgeTV = _tripLinkN > 0 ? ' <span style="opacity:.85;font-size:10px;">(' + _tripLinkN + ')</span>' : "";
-    tripResearchBtn.innerHTML = "📓 Trip notes" + _tripLinkBadgeTV;
+    tripResearchBtn.innerHTML = "🔬 Research" + _tripLinkBadgeTV;
     tripResearchBtn.title = _tripHasMeta
-      ? "Trip-wide notes" + (_tripLinkN ? " and " + _tripLinkN + " link" + (_tripLinkN === 1 ? "" : "s") : "") + " — click to edit"
-      : "Add notes and source links that apply to the whole trip";
-    tripResearchBtn.style.cssText = "font-size:12px;font-weight:600;color:" + (_tripHasMeta ? "#fff" : "#1a5fa8") + ";background:" + (_tripHasMeta ? "#1a5fa8" : "#fff") + ";border:1px solid #1a5fa8;border-radius:6px;padding:6px 11px;cursor:pointer;font-family:inherit;margin-right:8px;white-space:nowrap;";
+      ? "Planning-stage notes" + (_tripLinkN ? " and " + _tripLinkN + " link" + (_tripLinkN === 1 ? "" : "s") : "") + " — click to edit"
+      : "Planning-stage notes and links — what to read, candidate places, things to figure out";
+    tripResearchBtn.style.cssText = "font-size:12px;font-weight:600;color:" + (_tripHasMeta ? "#fff" : "#5b3f8f") + ";background:" + (_tripHasMeta ? "#5b3f8f" : "#fff") + ";border:1px solid #5b3f8f;border-radius:6px;padding:6px 11px;cursor:pointer;font-family:inherit;margin-right:8px;white-space:nowrap;";
     tripResearchBtn.onclick = function(e){
       e.stopPropagation();
       if (typeof global._pmEnsureResearchMeta === "function") global._pmEnsureResearchMeta();

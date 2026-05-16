@@ -11972,9 +11972,10 @@ function _pmOpenTripResearchCard(){
 
     return '<div style="background:#fff;border-radius:12px;max-width:500px;width:100%;box-shadow:0 12px 36px rgba(0,0,0,0.22);">'
       + '<div style="padding:18px 20px 6px;">'
-      +   '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">Trip research</div>'
+      +   '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">Research notes</div>'
       +   '<div style="font-size:17px;font-weight:700;color:#111;margin-top:4px;">' + String(tripLabel).replace(/</g, "&lt;") + '</div>'
-      +   '<div style="font-size:11.5px;color:#777;margin-top:3px;line-height:1.5;">Notes and source links that apply to the whole trip — gear, timing, weather, general guides.</div>'
+      +   '<div style="font-size:11.5px;color:#777;margin-top:3px;line-height:1.5;">Planning-stage notes and links &mdash; gear thoughts, timing, weather research, general guides. For trip-time stuff (confirmations, packing, contacts), see Trip notes.</div>'
+      +   '<a href="#" id="pm-trc-to-trip-notes" style="display:inline-block;margin-top:8px;font-size:11.5px;font-weight:600;color:#1a5fa8;text-decoration:none;">&#128203; Trip notes &rarr;</a>'
       + '</div>'
       + '<div style="padding:10px 20px;display:flex;flex-direction:column;gap:14px;">'
       +   '<div>'
@@ -12018,6 +12019,19 @@ function _pmOpenTripResearchCard(){
   ov.onclick = function(e){ if (e.target === ov) close(); };
   ov.querySelector("#pm-trc-close").onclick = close;
 
+  // v359.58: cross-link to operational trip notes. Closes this
+  // popover and opens the other so the two surfaces feel connected.
+  function bindCrossLink(){
+    var lnk = ov.querySelector("#pm-trc-to-trip-notes");
+    if (lnk) lnk.onclick = function(e){
+      e.preventDefault();
+      close();
+      if (typeof _openTripNotesPopover === "function") _openTripNotesPopover();
+      else if (typeof globalThis !== "undefined" && typeof globalThis._openTripNotesPopover === "function") globalThis._openTripNotesPopover();
+    };
+  }
+  bindCrossLink();
+
   function bindLinkActions(){
     var addBtn = ov.querySelector("#pm-trc-add-link");
     if (addBtn) addBtn.onclick = function(){
@@ -12032,6 +12046,7 @@ function _pmOpenTripResearchCard(){
       ov.innerHTML = renderBody();
       ov.querySelector("#pm-trc-close").onclick = close;
       bindLinkActions();
+      bindCrossLink();
       bindDictation();
       bindTodos();
       bindNotesBlurRefresh();
@@ -12046,6 +12061,7 @@ function _pmOpenTripResearchCard(){
         ov.innerHTML = renderBody();
         ov.querySelector("#pm-trc-close").onclick = close;
         bindLinkActions();
+        bindCrossLink();
         bindDictation();
         bindTodos();
         bindNotesBlurRefresh();
@@ -28603,6 +28619,76 @@ function _openTripDestRolePopover(destId){
   var waysideNext = (srcTripIdx < trip.destinations.length - 1) ? trip.destinations[srcTripIdx + 1] : null;
   var waysideAvailable = !!(waysidePrev && waysideNext);
 
+  // v359.57.3: compute the "suggested role" so the popover can lead
+  // with the algorithm's recommendation instead of always defaulting
+  // to "stay." Three signals:
+  //
+  //   • dayTripCandidate — src has ≤2 nights AND there's a hub with
+  //     strictly more nights within the day-trip radius. Mirrors the
+  //     purple-ring logic in updateMainMap.
+  //   • waysideCandidate — src sits between prev and next overnights,
+  //     with low perpendicular distance to the prev→next line. Uses
+  //     an equirectangular projection (flat-earth, fine at country
+  //     scale).
+  //   • If both fire: pick the one with smaller "off-route" cost —
+  //     i.e., compare distance-to-best-hub against perp-to-line. The
+  //     closer fit wins.
+  function _perpKm(a, b, p) {
+    if (!a || !b || !p) return Infinity;
+    var meanLat = (a[0] + b[0] + p[0]) / 3 * Math.PI / 180;
+    var kx = Math.cos(meanLat) * 111.32;
+    var ky = 111.32;
+    var ax = a[1] * kx, ay = a[0] * ky;
+    var bx = b[1] * kx, by = b[0] * ky;
+    var px = p[1] * kx, py = p[0] * ky;
+    var dx = bx - ax, dy = by - ay;
+    var len2 = dx*dx + dy*dy;
+    if (len2 < 1e-6) return Math.sqrt((px-ax)*(px-ax) + (py-ay)*(py-ay));
+    var t = ((px - ax) * dx + (py - ay) * dy) / len2;
+    var tC = Math.max(-0.1, Math.min(1.1, t));
+    var cx = ax + tC * dx, cy = ay + tC * dy;
+    return Math.sqrt((px-cx)*(px-cx) + (py-cy)*(py-cy));
+  }
+  var _srcNights = src.nights || 0;
+  var _bestHubOpt = null;
+  hubOptions.forEach(function(o){
+    if (!o.hub) return;
+    var hN = o.hub.nights || 0;
+    if (hN <= _srcNights) return;
+    if (!o.inRange) return;
+    if (!_bestHubOpt || o.distKm < _bestHubOpt.distKm) _bestHubOpt = o;
+  });
+  var dayTripCandidate = !!(_bestHubOpt && _srcNights <= 2);
+  var dayTripSuggestedHubId = _bestHubOpt ? _bestHubOpt.hub.id : defaultHubId;
+
+  var waysidePerpKm = Infinity;
+  if (waysideAvailable && srcCoords) {
+    var _prevC = _coordsFor(waysidePrev);
+    var _nextC = _coordsFor(waysideNext);
+    if (_prevC && _nextC) {
+      waysidePerpKm = _perpKm(_prevC, _nextC, srcCoords);
+    }
+  }
+  var waysideCandidate = waysideAvailable && waysidePerpKm <= 40;
+
+  // Pick suggested role.
+  var suggestedRole = "stay";
+  var suggestedRoleHubName = "";
+  if (dayTripCandidate && waysideCandidate) {
+    // Both viable — pick whichever costs less "off-route" distance.
+    if (_bestHubOpt.distKm <= waysidePerpKm) {
+      suggestedRole = "dayTrip";
+      suggestedRoleHubName = _bestHubOpt.hub.place;
+    } else {
+      suggestedRole = "wayside";
+    }
+  } else if (dayTripCandidate) {
+    suggestedRole = "dayTrip";
+    suggestedRoleHubName = _bestHubOpt.hub.place;
+  } else if (waysideCandidate) {
+    suggestedRole = "wayside";
+  }
+
   // Build the overlay (mirrors picker's _openRoleChangePopover).
   var existing = document.getElementById("trip-role-popover");
   if (existing) existing.remove();
@@ -28640,13 +28726,34 @@ function _openTripDestRolePopover(destId){
     var dateLbl = _hubDateLbl(o.hub);
     var datePart = dateLbl ? (" · " + dateLbl) : "";
     var label = o.hub.place + datePart + " (" + distLbl + ")" + rangeLbl;
-    var sel = o.hub.id === defaultHubId ? " selected" : "";
+    // v359.57.3: prefer the suggested hub (best within-range hub with
+    // more nights) over the raw nearest. Falls back to defaultHubId.
+    var sel = o.hub.id === (dayTripSuggestedHubId || defaultHubId) ? " selected" : "";
     return '<option value="' + o.hub.id + '"' + sel + '>' + label + '</option>';
   }).join("");
 
+  // v359.57.3: helpers — the suggested row gets blue highlight + the
+  // checked attribute; the others render plain so the user sees the
+  // recommendation at a glance.
+  function _sugChecked(role){ return suggestedRole === role ? " checked" : ""; }
+  function _sugRowStyle(role){
+    var on = suggestedRole === role;
+    return on
+      ? "display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #1a5fa8;border-radius:8px;cursor:pointer;background:#eef4fb;"
+      : "display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #e0e0e0;border-radius:8px;cursor:pointer;background:#fff;";
+  }
+  // Stay-row subtitle — when stay is NOT the suggestion, surface what
+  // Max thinks would fit better.
+  var staySubtitle = "Its own stop with " + (src.nights || 1) + " night" + ((src.nights || 1) === 1 ? "" : "s") + ".";
+  if (suggestedRole === "dayTrip" && suggestedRoleHubName) {
+    staySubtitle += " <span style=\"color:#5b3f8f;\">Max suggests making this a day trip from " + suggestedRoleHubName + ".</span>";
+  } else if (suggestedRole === "wayside" && waysidePrev && waysideNext) {
+    staySubtitle += " <span style=\"color:#5b3f8f;\">Max suggests making this a stop along the way between " + waysidePrev.place + " and " + waysideNext.place + ".</span>";
+  }
+
   var dayTripRow = dayTripAvailable
-    ? ('<label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #e0e0e0;border-radius:8px;cursor:pointer;background:#fff;">'
-        + '<input type="radio" name="trip-role-pick" value="dayTrip" style="margin:0;" />'
+    ? ('<label style="' + _sugRowStyle("dayTrip") + '">'
+        + '<input type="radio" name="trip-role-pick" value="dayTrip"' + _sugChecked("dayTrip") + ' style="margin:0;" />'
         + '<div style="flex:1;">'
         +   '<div style="font-size:13px;font-weight:600;color:#222;">Day trip from</div>'
         +   '<select id="trip-role-hub-select" style="margin-top:6px;width:100%;padding:6px 8px;font-size:12.5px;border:1px solid #ccc;border-radius:6px;font-family:inherit;">' + hubOpts + '</select>'
@@ -28668,8 +28775,8 @@ function _openTripDestRolePopover(destId){
   var _wsNightsN = src.nights || 1;
   var _wsNightsLbl = _wsNightsN + ' night' + (_wsNightsN === 1 ? '' : 's');
   var waysideRow = waysideAvailable
-    ? ('<label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #e0e0e0;border-radius:8px;cursor:pointer;background:#fff;">'
-        + '<input type="radio" name="trip-role-pick" value="wayside" style="margin:0;" />'
+    ? ('<label style="' + _sugRowStyle("wayside") + '">'
+        + '<input type="radio" name="trip-role-pick" value="wayside"' + _sugChecked("wayside") + ' style="margin:0;" />'
         + '<div style="flex:1;">'
         +   '<div style="font-size:13px;font-weight:600;color:#222;">Along the way</div>'
         +   '<div style="font-size:11.5px;color:#444;margin-top:3px;line-height:1.5;">'
@@ -28712,11 +28819,11 @@ function _openTripDestRolePopover(destId){
     +   '</div>'
     +   '<div style="padding:14px 20px;display:flex;flex-direction:column;gap:10px;">'
     +     roleDirsRow
-    +     '<label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #1a5fa8;border-radius:8px;cursor:pointer;background:#eef4fb;">'
-    +       '<input type="radio" name="trip-role-pick" value="stay" checked style="margin:0;" />'
+    +     '<label style="' + _sugRowStyle("stay") + '">'
+    +       '<input type="radio" name="trip-role-pick" value="stay"' + _sugChecked("stay") + ' style="margin:0;" />'
     +       '<div style="flex:1;">'
     +         '<div style="font-size:13px;font-weight:600;color:#222;">Overnight stay (current)</div>'
-    +         '<div style="font-size:11px;color:#777;margin-top:2px;">Its own stop with ' + (src.nights || 1) + ' night' + ((src.nights || 1) === 1 ? "" : "s") + '.</div>'
+    +         '<div style="font-size:11px;color:#777;margin-top:2px;line-height:1.5;">' + staySubtitle + '</div>'
     +       '</div>'
     +     '</label>'
     +     dayTripRow
@@ -28778,6 +28885,120 @@ function _openTripDestRolePopover(destId){
 // route.planItems[] that represents this specific day-trip target.
 // "Make this an overnight" calls ungroupDayTripByRouteStop(hubDest,
 // route, stop) instead of the v1 ungroupDayTripByPlanItem.
+// v359.58: operational trip notes — distinct from the picker's
+// research notes. Lives on `trip.notes` (not `trip.brief.tripMeta`).
+// "Research notes" is for planning (links to read, candidate places,
+// notes-to-self about what to keep). "Trip notes" is for execution —
+// hotel confirmations, packing list, flight times, contacts. Each
+// popover carries a link to the other so the user can jump.
+function _openTripNotesPopover(){
+  if (!trip) return;
+  var existing = document.getElementById("trip-notes-popover");
+  if (existing) existing.remove();
+
+  // Lazily-initialize trip.notes. Tolerate older trips with a bare
+  // string by coercing into the object shape.
+  if (!trip.notes) trip.notes = { text: "", links: [] };
+  else if (typeof trip.notes !== "object") trip.notes = { text: String(trip.notes), links: [] };
+  if (!Array.isArray(trip.notes.links)) trip.notes.links = [];
+  var n = trip.notes;
+
+  var ov = document.createElement("div");
+  ov.id = "trip-notes-popover";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.32);z-index:11500;display:flex;align-items:center;justify-content:center;padding:20px;";
+
+  function renderBody(){
+    var linksHtml = (n.links || []).map(function(l, i){
+      var safeUrl = String(l.url || "").replace(/"/g, "&quot;");
+      var safeDom = String(l.domain || (typeof _pmExtractDomain === "function" ? _pmExtractDomain(l.url) : "") || "link").replace(/</g, "&lt;");
+      return '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;">'
+        + '<a href="' + safeUrl + '" target="_blank" rel="noopener noreferrer" style="flex:1;color:#1a5fa8;text-decoration:none;font-size:12px;word-break:break-all;">' + safeDom + '</a>'
+        + '<button type="button" data-link-idx="' + i + '" class="trip-notes-del-link" style="font-size:11px;color:#999;background:none;border:1px solid #ddd;border-radius:4px;padding:2px 7px;cursor:pointer;font-family:inherit;" title="Remove this link">&times;</button>'
+        + '</div>';
+    }).join("");
+    if (!linksHtml) linksHtml = '<div style="font-size:11.5px;color:#999;font-style:italic;padding:4px 0;">No links yet.</div>';
+
+    var tripLabel = (trip && trip.name) || "this trip";
+
+    return '<div style="background:#fff;border-radius:12px;max-width:500px;width:100%;box-shadow:0 12px 36px rgba(0,0,0,0.22);">'
+      + '<div style="padding:18px 20px 6px;">'
+      +   '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">Trip notes</div>'
+      +   '<div style="font-size:17px;font-weight:700;color:#111;margin-top:4px;">' + String(tripLabel).replace(/</g, "&lt;") + '</div>'
+      +   '<div style="font-size:11.5px;color:#777;margin-top:3px;line-height:1.5;">Trip-time stuff &mdash; hotel confirmations, packing list, flight info, contacts. For planning-stage research, see Research notes.</div>'
+      +   '<a href="#" id="trip-notes-to-research" style="display:inline-block;margin-top:8px;font-size:11.5px;font-weight:600;color:#5b3f8f;text-decoration:none;">&#128300; Research notes &rarr;</a>'
+      + '</div>'
+      + '<div style="padding:10px 20px;display:flex;flex-direction:column;gap:14px;">'
+      +   '<div>'
+      +     '<div style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;margin-bottom:5px;">Notes</div>'
+      +     '<textarea id="trip-notes-text" placeholder="Hotel confirmation numbers, flight times, packing list, contacts &mdash; anything you\'ll want at trip time. Lines starting with [ ] become checkboxes." style="width:100%;min-height:160px;font:inherit;font-size:12.5px;line-height:1.5;padding:6px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;color:#111;resize:vertical;box-sizing:border-box;font-family:inherit;">' + String(n.text || "").replace(/</g, "&lt;") + '</textarea>'
+      +   '</div>'
+      +   '<div>'
+      +     '<div style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;margin-bottom:5px;">Links</div>'
+      +     '<div id="trip-notes-links">' + linksHtml + '</div>'
+      +     '<button type="button" id="trip-notes-add-link" style="margin-top:6px;font-size:11.5px;font-weight:600;color:#1a5fa8;background:#fff;border:1px dashed #c8d8f0;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;">+ Add link</button>'
+      +   '</div>'
+      + '</div>'
+      + '<div style="padding:10px 20px 18px;display:flex;justify-content:flex-end;gap:8px;">'
+      +   '<button id="trip-notes-close" style="font-size:13px;font-weight:600;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 16px;cursor:pointer;font-family:inherit;">Done</button>'
+      + '</div>'
+      + '</div>';
+  }
+
+  ov.innerHTML = renderBody();
+  document.body.appendChild(ov);
+
+  function close(){
+    var ta = ov.querySelector("#trip-notes-text");
+    if (ta) n.text = ta.value;
+    n.updatedAt = Date.now();
+    if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+    if (typeof autoSave === "function") autoSave();
+    if (typeof _leftMode !== "undefined" && _leftMode === "trip" && typeof drawTripMode === "function") drawTripMode();
+  }
+  ov.onclick = function(e){ if (e.target === ov) close(); };
+
+  function bindAll(){
+    var closeBtn = ov.querySelector("#trip-notes-close");
+    if (closeBtn) closeBtn.onclick = close;
+
+    var toResearch = ov.querySelector("#trip-notes-to-research");
+    if (toResearch) toResearch.onclick = function(e){
+      e.preventDefault();
+      close();
+      if (typeof _pmEnsureResearchMeta === "function") _pmEnsureResearchMeta();
+      if (typeof _pmOpenTripResearchCard === "function") _pmOpenTripResearchCard();
+    };
+
+    var addBtn = ov.querySelector("#trip-notes-add-link");
+    if (addBtn) addBtn.onclick = function(){
+      var url = prompt("Paste a URL:", "https://");
+      if (!url || !url.trim() || url.trim() === "https://") return;
+      var clean = url.trim();
+      if (!/^https?:\/\//i.test(clean)) clean = "https://" + clean;
+      n.links = n.links || [];
+      var dom = (typeof _pmExtractDomain === "function") ? _pmExtractDomain(clean) : "";
+      n.links.push({ url: clean, domain: dom, addedAt: new Date().toISOString() });
+      var ta = ov.querySelector("#trip-notes-text");
+      if (ta) n.text = ta.value;
+      ov.innerHTML = renderBody();
+      bindAll();
+    };
+    ov.querySelectorAll(".trip-notes-del-link").forEach(function(btn){
+      btn.onclick = function(){
+        var idx = parseInt(btn.getAttribute("data-link-idx"), 10);
+        if (isNaN(idx)) return;
+        n.links.splice(idx, 1);
+        var ta = ov.querySelector("#trip-notes-text");
+        if (ta) n.text = ta.value;
+        ov.innerHTML = renderBody();
+        bindAll();
+      };
+    });
+  }
+  bindAll();
+}
+if (typeof globalThis !== "undefined") globalThis._openTripNotesPopover = _openTripNotesPopover;
+
 function _openTripDayTripPopover(hubDest, route, stop, dayTripName){
   if (!hubDest || !route || !stop) return;
   var existing = document.getElementById("trip-daytrip-popover");
