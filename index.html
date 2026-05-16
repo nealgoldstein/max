@@ -10453,39 +10453,15 @@ function _renderPlaceActivityItems(){
           });
         }
       }
-      var nightsLine;
-      // v359.51.17: picker no longer commits day-trip status. Decisions
-      // live in the trip view (tap a destination pin → role popover →
-      // Make it an overnight stop / pick a hub). The picker just hints
-      // at the possibility via a purple informational badge — no
-      // "Add as day trip" button, no "+ stay the night" override.
-      // Both formerly-distinct states (USER-COMMITTED via _isDayTrip,
-      // PREDICTOR-SUGGESTED via _dayTripPreds) now collapse into one
-      // "Could be a day trip from <hub>" badge so the user knows the
-      // possibility exists without being asked to choose yet.
-      if (firstAppearance && (userIsDayTrip || dayTripHub)) {
-        var _badgeHub = userIsDayTrip ? (userHubName || "?") : dayTripHub;
-        nightsLine = '<span class="tb-dest-nights" data-place="'+_pmEsc(d.place)+'" '
-          +   'title="Max thinks this could be a day trip from '+_pmEsc(_badgeHub)+'. You decide on the trip view." '
-          +   'style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:#fff;background:#5b3f8f;border:1px solid #4a3275;padding:3px 9px;border-radius:11px;line-height:1.4;">'
-          +   '<span>Could be a day trip from '+_pmEsc(_badgeHub)+'</span>'
-          + '</span>';
-      } else if (firstAppearance && isTransitDestForNights && !destKeptInSection) {
-        nightsLine = '<span class="tb-dest-nights" data-place="'+_pmEsc(d.place)+'" style="color:#888;font-style:italic;">· day trip</span>'
-          + '<button type="button" class="tb-stay-night-btn" onclick="_adjustDestNights(&#39;'+_pmEsc(d.place)+'&#39;,1);event.stopPropagation();" title="Stay overnight here instead" style="margin-left:8px;font-size:10.5px;font-weight:600;color:#1a5fa8;background:#eef5ff;border:1px solid #cfe1f7;padding:2px 8px;border-radius:11px;cursor:pointer;font-family:inherit;line-height:1.4;">+ stay the night</button>';
-      } else if (firstAppearance && d.nightsMax > 0) {
-        // v359.51.17: overnight row — nights stepper only. The "↩ make
-        // day trip" pill is gone; day-trip role decisions now happen
-        // in the trip view (tap the destination pin → role popover).
-        nightsLine = '<span class="tb-dest-nights" data-place="'+_pmEsc(d.place)+'">· '+d.nightsMax+'n</span>'
-          + '<span class="tb-nights-stepper" onclick="event.stopPropagation()">'
-          +   '<button type="button" class="tb-nights-btn" title="Fewer nights" onclick="_adjustDestNights(&#39;'+_pmEsc(d.place)+'&#39;,-1);event.stopPropagation();">−</button>'
-          +   '<button type="button" class="tb-nights-btn" title="More nights" onclick="_adjustDestNights(&#39;'+_pmEsc(d.place)+'&#39;,1);event.stopPropagation();">+</button>'
-          + '</span>';
-      } else if (!firstAppearance) {
-        nightsLine = '<span class="tb-dest-ref-note" title="Nights set in '+_pmEsc(shownIn[key])+'">also in ' + _pmEsc(shownIn[key]) + '</span>';
-      } else {
-        nightsLine = "";
+      // v359.55: picker is keep/reject only. Night counts, day-trip
+      // role badges, and the "+ stay the night" pill are all gone —
+      // every per-destination decision moves to the trip view (tap
+      // pin → role popover; -/+ on dest card). The picker now just
+      // tells you what's on the table; the trip view shows you how
+      // it fits together.
+      var nightsLine = "";
+      if (!firstAppearance) {
+        nightsLine = '<span class="tb-dest-ref-note" title="Also appears in '+_pmEsc(shownIn[key])+'">also in ' + _pmEsc(shownIn[key]) + '</span>';
       }
       shownIn[key] = sec;
 
@@ -12819,18 +12795,9 @@ function _updatePlaceActivitySummary(){
     var budgetLbl = (budget.min === budget.max)
       ? (budget.max + " day" + (budget.max!==1?"s":""))
       : (budget.min + "\u2013" + budget.max + " days");
-    if (displayNights + 1 > budget.max) {
+    if (false /* v359.55: budget never gates the picker — decisions move to trip view */) {
       _overBudget = true;
-      var over = (displayNights + 1) - budget.max;
-      // v359.54.8: heavy inline banner retired. The over-budget gate
-      // now fires as a modal at Choreograph click time (see
-      // _showBudgetGateModal). Keep a small informational pill here so
-      // the user knows what to expect — but no action buttons inline.
-      fitNote = '<div style="margin-top:6px;padding:6px 9px;background:#fff3ed;border:1px solid #f5ccb5;border-radius:6px;font-size:11px;color:#b0451a;">'
-        + '<strong>' + over + ' day' + (over!==1?"s":"") + ' over your ' + budgetLbl + ' budget.</strong> '
-        + 'Choreograph will ask how to fit.'
-        + '</div>';
-    } else if (false) { // v359.54.8: old over-budget inline banner — replaced by modal gate
+    } else if (false) {
       _OBSOLETE_DEAD_BLOCK_REMOVED = '<div style="display:none;">'
         + '<div>'+over+' day'+(over!==1?"s":"")+' over your '+budgetLbl+' budget</div>'
         + '<div style="font-size:11px;color:#94381a;">Max won\u2019t silently extend your trip. Pick one:</div>'
@@ -18510,92 +18477,14 @@ function showPreBuildModal(){
 // MaxEnginePicker.publishTrip() in engine-picker.js. The picker
 // engine now owns the full build flow; the inline-script entry
 // point delegates so all existing callsites keep working unchanged.
-// v359.54.8: pre-Choreograph budget gate. Replaces the v359.26 inline
-// banner + disabled-button mechanism. If the user's kept picks total
-// more days than their stated budget, a modal pops asking how to fit
-// — "Make it fit" or "Extend the budget." No "Skip for now" — the
-// user must pick one before the trip is built.
-//
-// Returns true if the modal fired (build is gated); false if the user
-// is within budget and the build should proceed immediately.
-function _maybeShowBudgetGate(onProceed){
-  if (!_tb) return false;
-  var budget = (typeof _parseTripDuration === "function" && (_tb.duration || _tb.when))
-    ? _parseTripDuration(_tb.duration || _tb.when) : null;
-  if (!budget || !budget.max) return false;
-  var displayNights = _tb._pickerDisplayTotal || 0;
-  if (displayNights <= 0) return false;
-  if (displayNights + 1 <= budget.max) return false;
-
-  // Over budget — build the modal.
-  var existing = document.getElementById("budget-gate-modal");
-  if (existing) existing.remove();
-
-  var over = (displayNights + 1) - budget.max;
-  var budgetLbl = (budget.min === budget.max)
-    ? (budget.max + " day" + (budget.max!==1?"s":""))
-    : (budget.min + "–" + budget.max + " days");
-  var extendDays = displayNights + 1;
-
-  var ov = document.createElement("div");
-  ov.id = "budget-gate-modal";
-  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.42);z-index:11000;display:flex;align-items:center;justify-content:center;padding:20px;";
-  ov.innerHTML = ''
-    + '<div style="background:#fff;border-radius:12px;max-width:460px;width:100%;box-shadow:0 12px 36px rgba(0,0,0,0.25);">'
-    +   '<div style="padding:20px 22px 6px;">'
-    +     '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#b0451a;">Over your budget</div>'
-    +     '<div style="font-size:18px;font-weight:700;color:#111;margin-top:4px;line-height:1.25;">Your picks total ' + extendDays + ' days &mdash; ' + over + ' over your ' + budgetLbl + ' budget.</div>'
-    +     '<div style="font-size:13px;color:#555;margin-top:6px;line-height:1.5;">Max won&rsquo;t silently extend your trip. Pick how to fit before Choreograph builds it.</div>'
-    +   '</div>'
-    +   '<div style="padding:14px 22px;display:flex;flex-direction:column;gap:10px;">'
-    +     '<button id="bg-fit" style="text-align:left;padding:12px 14px;border:1px solid #b0451a;background:#fff5ed;border-radius:8px;cursor:pointer;font-family:inherit;">'
-    +       '<div style="font-size:14px;font-weight:700;color:#b0451a;">Make it fit</div>'
-    +       '<div style="font-size:12px;color:#7a3815;margin-top:3px;line-height:1.5;">Trim the longest stays and bump pace one notch denser to fit your ' + budgetLbl + ' budget.</div>'
-    +     '</button>'
-    +     '<button id="bg-extend" style="text-align:left;padding:12px 14px;border:1px solid #c8d8f0;background:#eef4fb;border-radius:8px;cursor:pointer;font-family:inherit;">'
-    +       '<div style="font-size:14px;font-weight:700;color:#1a5fa8;">Extend the trip to ' + extendDays + ' days</div>'
-    +       '<div style="font-size:12px;color:#3a5d8a;margin-top:3px;line-height:1.5;">Keep every pick. Your budget grows to match.</div>'
-    +     '</button>'
-    +   '</div>'
-    +   '<div style="padding:6px 22px 18px;display:flex;justify-content:flex-end;">'
-    +     '<button id="bg-cancel" style="font-size:13px;font-weight:500;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Back to picks</button>'
-    +   '</div>'
-    + '</div>';
-  document.body.appendChild(ov);
-
-  function close(){ if (ov && ov.parentNode) ov.parentNode.removeChild(ov); }
-  ov.onclick = function(e){ if (e.target === ov) close(); };
-  var cancelBtn = ov.querySelector("#bg-cancel");
-  if (cancelBtn) cancelBtn.onclick = close;
-  var fitBtn = ov.querySelector("#bg-fit");
-  if (fitBtn) fitBtn.onclick = function(){
-    close();
-    if (typeof _makeItFit === "function") _makeItFit();
-    // _makeItFit reduces nights to fit. After it runs, the build can
-    // proceed without re-triggering the gate (now within budget).
-    if (typeof onProceed === "function") onProceed();
-  };
-  var extBtn = ov.querySelector("#bg-extend");
-  if (extBtn) extBtn.onclick = function(){
-    close();
-    if (typeof _extendBudgetToFit === "function") _extendBudgetToFit(extendDays);
-    if (typeof onProceed === "function") onProceed();
-  };
-
-  return true;
-}
+// v359.55: picker no longer gates Choreograph on budget. ALL
+// per-destination decisions (nights, role, day-trip / wayside)
+// happen in the trip view, which has the reshape banner + the
+// destination role popover for those calls. The pre-Choreograph
+// modal (v359.54.8) and its earlier inline banner (v359.26) are
+// gone; _makeItFit / _extendBudgetToFit / _skipBudgetGate retired.
 
 async function buildFromCandidates(){
-  // v359.54.8: budget gate runs before the publish. If over budget,
-  // the modal opens and this call exits early; the modal's action
-  // buttons re-invoke buildFromCandidates after applying their fix.
-  if (_maybeShowBudgetGate(function(){
-    // Defer slightly so _makeItFit's mutations + summary re-render
-    // settle before publishTrip runs.
-    setTimeout(function(){ buildFromCandidates(); }, 50);
-  })) {
-    return;
-  }
   return await MaxEnginePicker.publishTrip();
 }
 
