@@ -29116,28 +29116,34 @@ function _tidyTripScan(){
   return { conversions: conversions, skipped: skipped, hubs: hubs.map(function(h){return h.dest;}), sights: sights.map(function(s){return s.dest;}) };
 }
 
-function _tidyTripApply(scanResult){
+function _tidyTripApply(scanResult, selectedDestIds){
   if (!scanResult || !Array.isArray(scanResult.conversions)) return 0;
+  // selectedDestIds is a Set/object map of destIds the user opted to
+  // apply. If omitted, apply all (legacy behavior).
+  var keep = null;
+  if (selectedDestIds) {
+    keep = {};
+    if (Array.isArray(selectedDestIds)) selectedDestIds.forEach(function(id){ keep[id] = true; });
+    else keep = selectedDestIds;
+  }
+  function _selected(c){
+    if (!keep) return true;
+    return !!keep[c.src && c.src.id];
+  }
   var applied = 0;
-  // Apply day-trip conversions FIRST. Each removes its src from
-  // trip.destinations, shrinking the array. Wayside conversions
-  // depend on the array's adjacency, so doing them after means the
-  // array contains only the survivors (hubs + still-to-be-waysided
-  // sights) — closer to the final structure but still walkable by
-  // destId. Each converter is tolerant of the dest being already
-  // moved, so this ordering is robust.
+  // Day trips first (each removes src from trip.destinations); waysides
+  // after, since they depend on array adjacency. Each call is wrapped
+  // so a single failure doesn't poison the rest.
   scanResult.conversions.forEach(function(c){
-    if (c.type !== "dayTrip") return;
+    if (c.type !== "dayTrip" || !_selected(c)) return;
     if (typeof convertDestToDayTrip === "function" && c.src && c.hub) {
       try { convertDestToDayTrip(c.src.id, c.hub.id); applied++; }
       catch(_){ /* swallow per-item; report aggregate */ }
     }
   });
   scanResult.conversions.forEach(function(c){
-    if (c.type !== "wayside") return;
+    if (c.type !== "wayside" || !_selected(c)) return;
     if (typeof convertDestToWayside === "function" && c.src) {
-      // Default absorber: next hub (so the night the sight was
-      // holding shifts forward, preserving date alignment).
       try { convertDestToWayside(c.src.id, { absorbInto: "next" }); applied++; }
       catch(_){ /* swallow */ }
     }
@@ -29145,6 +29151,11 @@ function _tidyTripApply(scanResult){
   return applied;
 }
 
+// v359.60: working-session UX. Each conversion gets a checkbox. The
+// user's unchecked-row decisions persist on trip.tidyState across
+// sessions until they Apply (which clears state). They can close the
+// modal and come back; their selections stay. A Reset link clears all
+// pending unchecks.
 function _openTidyTripPreview(){
   var scan = _tidyTripScan();
   if (!scan.conversions.length && !scan.skipped.length) {
@@ -29152,73 +29163,162 @@ function _openTidyTripPreview(){
     return;
   }
 
+  if (!trip.tidyState || typeof trip.tidyState !== "object") trip.tidyState = {};
+  if (!trip.tidyState.unselected || typeof trip.tidyState.unselected !== "object") trip.tidyState.unselected = {};
+  // Garbage-collect: drop unselected entries whose destId is no
+  // longer in the current scan (the dest may have been removed or
+  // converted via another path).
+  var validIds = {};
+  scan.conversions.forEach(function(c){ if (c.src) validIds[c.src.id] = true; });
+  Object.keys(trip.tidyState.unselected).forEach(function(id){
+    if (!validIds[id]) delete trip.tidyState.unselected[id];
+  });
+
   var existing = document.getElementById("trip-tidy-popover");
   if (existing) existing.remove();
   var ov = document.createElement("div");
   ov.id = "trip-tidy-popover";
   ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.32);z-index:11500;display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto;";
 
+  function _isSelected(destId){ return !trip.tidyState.unselected[destId]; }
+  function _setSelected(destId, sel){
+    if (sel) delete trip.tidyState.unselected[destId];
+    else trip.tidyState.unselected[destId] = true;
+    if (typeof autoSave === "function") autoSave();
+  }
+
+  function _rowHtml(c, kind){
+    var sub;
+    if (kind === "wayside") {
+      sub = "wayside on " + (c.from.place || "?") + " &rarr; " + (c.to.place || "?") + " &middot; " + Math.round(c.perpKm) + " km off route";
+    } else {
+      sub = "day trip from " + (c.hub.place || "?") + " &middot; " + Math.round(c.distKm) + " km";
+    }
+    var sel = _isSelected(c.src.id);
+    return '<label class="tidy-row" data-dest-id="' + c.src.id + '" style="display:flex;align-items:flex-start;gap:10px;padding:9px 4px;border-bottom:1px solid #f0f0f0;cursor:pointer;' + (sel ? '' : 'opacity:0.4;') + '">'
+      + '<input type="checkbox" class="tidy-row-check" data-dest-id="' + c.src.id + '"' + (sel ? ' checked' : '') + ' style="margin:2px 0 0;flex-shrink:0;" />'
+      + '<div style="flex:1;line-height:1.45;">'
+      +   '<div style="font-size:13px;font-weight:600;color:' + (sel ? '#111' : '#888') + ';">' + c.src.place + '</div>'
+      +   '<div style="font-size:11.5px;color:#666;margin-top:1px;">&rarr; ' + sub + '</div>'
+      + '</div>'
+    + '</label>';
+  }
+
   var waysides = scan.conversions.filter(function(c){return c.type === "wayside";});
   var dayTrips = scan.conversions.filter(function(c){return c.type === "dayTrip";});
-
-  function _row(label, sub){
-    return '<li style="margin-bottom:4px;line-height:1.5;">'
-      + '<strong style="color:#111;">' + label + '</strong>'
-      + (sub ? ' <span style="color:#666;font-size:11.5px;">' + sub + '</span>' : '')
-      + '</li>';
-  }
   var waysideHtml = waysides.length
-    ? '<ul style="margin:6px 0 0 18px;padding:0;font-size:12.5px;">'
-        + waysides.map(function(c){
-            return _row(c.src.place, "&rarr; wayside on " + (c.from.place || "?") + " &rarr; " + (c.to.place || "?") + " (" + Math.round(c.perpKm) + " km off route)");
-          }).join("")
-        + '</ul>'
-    : '<div style="font-size:12px;color:#888;font-style:italic;">None</div>';
+    ? '<div>' + waysides.map(function(c){return _rowHtml(c, "wayside");}).join("") + '</div>'
+    : '<div style="font-size:12px;color:#888;font-style:italic;padding:6px 0;">None.</div>';
   var dayTripHtml = dayTrips.length
-    ? '<ul style="margin:6px 0 0 18px;padding:0;font-size:12.5px;">'
-        + dayTrips.map(function(c){
-            return _row(c.src.place, "&rarr; day trip from " + (c.hub.place || "?") + " (" + Math.round(c.distKm) + " km)");
-          }).join("")
-        + '</ul>'
-    : '<div style="font-size:12px;color:#888;font-style:italic;">None</div>';
+    ? '<div>' + dayTrips.map(function(c){return _rowHtml(c, "dayTrip");}).join("") + '</div>'
+    : '<div style="font-size:12px;color:#888;font-style:italic;padding:6px 0;">None.</div>';
   var skippedHtml = scan.skipped.length
-    ? '<ul style="margin:6px 0 0 18px;padding:0;font-size:12.5px;">'
-        + scan.skipped.map(function(s){
-            return _row(s.src.place, "&rarr; left as a standalone stop (" + (s.reason === "no-hub-in-range" ? "no overnight hub within range" : "no coords") + ")");
-          }).join("")
-        + '</ul>'
-    : '<div style="font-size:12px;color:#888;font-style:italic;">None</div>';
+    ? '<div>' + scan.skipped.map(function(s){
+        return '<div style="padding:9px 4px;border-bottom:1px solid #f0f0f0;line-height:1.45;">'
+          + '<div style="font-size:13px;font-weight:600;color:#666;">' + s.src.place + '</div>'
+          + '<div style="font-size:11.5px;color:#888;margin-top:1px;">left as a standalone stop (' + (s.reason === "no-hub-in-range" ? "no overnight hub within range" : "no coords") + ')</div>'
+        + '</div>';
+      }).join("") + '</div>'
+    : '';
+
+  function _renderHeader(){
+    var n = scan.conversions.filter(function(c){ return _isSelected(c.src.id); }).length;
+    var nUnsel = scan.conversions.length - n;
+    return '<div style="font-size:12px;color:#666;margin-top:6px;line-height:1.5;">'
+      + '<strong>' + n + '</strong> of <strong>' + scan.conversions.length + '</strong> selected to apply'
+      + (nUnsel ? ' &middot; <a href="#" id="tidy-reset" style="color:#1a5fa8;text-decoration:none;font-weight:600;">Reset</a>' : '')
+      + '</div>';
+  }
 
   ov.innerHTML = ''
-    + '<div style="background:#fff;border-radius:12px;max-width:560px;width:100%;box-shadow:0 12px 36px rgba(0,0,0,0.22);max-height:85vh;display:flex;flex-direction:column;">'
-    +   '<div style="padding:18px 20px 6px;border-bottom:1px solid #eee;">'
-    +     '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">Tidy trip preview</div>'
+    + '<div style="background:#fff;border-radius:12px;max-width:600px;width:100%;box-shadow:0 12px 36px rgba(0,0,0,0.22);max-height:88vh;display:flex;flex-direction:column;">'
+    +   '<div style="padding:18px 20px 12px;border-bottom:1px solid #eee;">'
+    +     '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">Tidy trip</div>'
     +     '<div style="font-size:17px;font-weight:700;color:#111;margin-top:4px;">Reshape sights into day trips and waysides</div>'
     +     '<div style="font-size:12px;color:#666;margin-top:6px;line-height:1.5;">'
-    +       'Max found <strong>' + scan.hubs.length + ' overnight hubs</strong> and <strong>' + scan.sights.length + ' sight stops</strong>. Each sight gets attached to its best hub (day trip) or route corridor (wayside). Your overnight stays don\'t change.'
+    +       'Max found <strong>' + scan.hubs.length + ' overnight hubs</strong> and <strong>' + scan.sights.length + ' sight stops</strong>. Uncheck anything you want to leave alone. Close and come back any time — your choices stick.'
     +     '</div>'
+    +     '<div id="tidy-header-summary">' + _renderHeader() + '</div>'
     +   '</div>'
-    +   '<div style="padding:14px 20px;overflow-y:auto;flex:1;">'
-    +     '<div style="font-size:11px;font-weight:700;color:#5b3f8f;letter-spacing:.04em;text-transform:uppercase;margin-bottom:4px;">Waysides &middot; ' + waysides.length + '</div>'
-    +     waysideHtml
-    +     '<div style="font-size:11px;font-weight:700;color:#5b3f8f;letter-spacing:.04em;text-transform:uppercase;margin:14px 0 4px;">Day trips &middot; ' + dayTrips.length + '</div>'
-    +     dayTripHtml
-    +     (scan.skipped.length ? '<div style="font-size:11px;font-weight:700;color:#b06000;letter-spacing:.04em;text-transform:uppercase;margin:14px 0 4px;">Left alone &middot; ' + scan.skipped.length + '</div>' + skippedHtml : '')
+    +   '<div style="padding:6px 20px 14px;overflow-y:auto;flex:1;">'
+    +     (waysides.length ? '<div style="font-size:11px;font-weight:700;color:#5b3f8f;letter-spacing:.04em;text-transform:uppercase;margin:10px 0 2px;">Waysides &middot; ' + waysides.length + '</div>' + waysideHtml : '')
+    +     (dayTrips.length ? '<div style="font-size:11px;font-weight:700;color:#5b3f8f;letter-spacing:.04em;text-transform:uppercase;margin:14px 0 2px;">Day trips &middot; ' + dayTrips.length + '</div>' + dayTripHtml : '')
+    +     (scan.skipped.length ? '<div style="font-size:11px;font-weight:700;color:#b06000;letter-spacing:.04em;text-transform:uppercase;margin:14px 0 2px;">Left alone &middot; ' + scan.skipped.length + '</div>' + skippedHtml : '')
     +   '</div>'
-    +   '<div style="padding:12px 20px 18px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid #eee;">'
-    +     '<button id="trip-tidy-cancel" style="font-size:13px;font-weight:500;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Cancel</button>'
-    +     '<button id="trip-tidy-apply" style="font-size:13px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 18px;cursor:pointer;font-family:inherit;">Apply (' + scan.conversions.length + ')</button>'
+    +   '<div style="padding:12px 20px 18px;display:flex;justify-content:space-between;align-items:center;gap:8px;border-top:1px solid #eee;">'
+    +     '<div style="font-size:11.5px;color:#888;">Close to come back later &mdash; your selections persist.</div>'
+    +     '<div style="display:flex;gap:8px;">'
+    +       '<button id="trip-tidy-cancel" style="font-size:13px;font-weight:500;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Close</button>'
+    +       '<button id="trip-tidy-apply" style="font-size:13px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 18px;cursor:pointer;font-family:inherit;">Apply selected</button>'
+    +     '</div>'
     +   '</div>'
     + '</div>';
 
   document.body.appendChild(ov);
+
   function close(){ if (ov && ov.parentNode) ov.parentNode.removeChild(ov); }
   ov.onclick = function(e){ if (e.target === ov) close(); };
-  var cancelBtn = ov.querySelector("#trip-tidy-cancel");
-  if (cancelBtn) cancelBtn.onclick = close;
-  var applyBtn = ov.querySelector("#trip-tidy-apply");
-  if (applyBtn) applyBtn.onclick = function(){
-    var n = _tidyTripApply(scan);
+  ov.querySelector("#trip-tidy-cancel").onclick = close;
+
+  function _refreshHeader(){
+    var hdr = ov.querySelector("#tidy-header-summary");
+    if (hdr) hdr.innerHTML = _renderHeader();
+    _bindResetLink();
+    _refreshApplyLabel();
+  }
+  function _refreshApplyLabel(){
+    var n = scan.conversions.filter(function(c){ return _isSelected(c.src.id); }).length;
+    var btn = ov.querySelector("#trip-tidy-apply");
+    if (btn) {
+      btn.textContent = n > 0 ? ("Apply " + n) : "Apply selected";
+      btn.disabled = n === 0;
+      btn.style.opacity = n === 0 ? "0.5" : "1";
+      btn.style.cursor = n === 0 ? "default" : "pointer";
+    }
+  }
+  function _bindResetLink(){
+    var link = ov.querySelector("#tidy-reset");
+    if (link) link.onclick = function(e){
+      e.preventDefault();
+      trip.tidyState.unselected = {};
+      if (typeof autoSave === "function") autoSave();
+      ov.querySelectorAll(".tidy-row-check").forEach(function(cb){
+        cb.checked = true;
+        var row = cb.closest(".tidy-row");
+        if (row) row.style.opacity = "1";
+        var label = row && row.querySelector("div > div");
+        if (label) label.style.color = "#111";
+      });
+      _refreshHeader();
+    };
+  }
+  _bindResetLink();
+  _refreshApplyLabel();
+
+  ov.querySelectorAll(".tidy-row-check").forEach(function(cb){
+    cb.addEventListener("change", function(e){
+      e.stopPropagation();
+      var destId = cb.getAttribute("data-dest-id");
+      _setSelected(destId, cb.checked);
+      var row = cb.closest(".tidy-row");
+      if (row) row.style.opacity = cb.checked ? "1" : "0.4";
+      var label = row && row.querySelector("div > div");
+      if (label) label.style.color = cb.checked ? "#111" : "#888";
+      _refreshHeader();
+    });
+  });
+
+  ov.querySelector("#trip-tidy-apply").onclick = function(){
+    var btn = ov.querySelector("#trip-tidy-apply");
+    if (btn && btn.disabled) return;
+    // Build selected-id map from current state.
+    var sel = {};
+    scan.conversions.forEach(function(c){ if (_isSelected(c.src.id)) sel[c.src.id] = true; });
+    var n = _tidyTripApply(scan, sel);
+    // Clear the working state — applied items are gone; uncheckeds
+    // remain in the trip as standalone stops, ready for a fresh scan
+    // next time.
+    trip.tidyState = {};
     close();
     if (typeof autoSave === "function") autoSave();
     if (typeof drawTripMode === "function") drawTripMode();
