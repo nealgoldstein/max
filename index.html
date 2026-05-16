@@ -11663,6 +11663,65 @@ function _pmAttachDictation(button, textarea){
 // to clipboard. Walks _tb.placeActivities + _tb.placeMeta + _tb.tripMeta
 // and assembles a structured document the user can paste anywhere.
 // Lock-in is the enemy of trust — research should be portable.
+// v359.56.2: markdown → HTML conversion for the rich-text clipboard
+// path. Word and Pages don't render markdown — they need HTML on the
+// clipboard. We copy BOTH (`text/plain` + `text/html`) and let the
+// receiving app pick: Notion/Obsidian read plain, Word/Pages read
+// html and produce real styled headings.
+function _pmEscapeHtml(s){
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+function _pmRenderInline(text){
+  // Links: [label](url) → <a href="url">label</a>. Escape the label
+  // first to avoid breaking the link tag.
+  return _pmEscapeHtml(text).replace(
+    /\[([^\]]+)\]\(([^)]+)\)/g,
+    function(_full, label, url){
+      // Re-decode &amp; in URL since we escaped above
+      var safeUrl = String(url).replace(/&amp;/g, "&");
+      return '<a href="' + safeUrl.replace(/"/g, "&quot;") + '">' + label + '</a>';
+    }
+  ).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+}
+function _pmMarkdownToHtml(md){
+  var lines = String(md || "").split("\n");
+  var html = [];
+  var inList = false;
+  function closeList(){ if (inList) { html.push("</ul>"); inList = false; } }
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    var m;
+    if ((m = line.match(/^# (.*)$/)))      { closeList(); html.push("<h1>" + _pmRenderInline(m[1]) + "</h1>"); continue; }
+    if ((m = line.match(/^## (.*)$/)))     { closeList(); html.push("<h2>" + _pmRenderInline(m[1]) + "</h2>"); continue; }
+    if ((m = line.match(/^### (.*)$/)))    { closeList(); html.push("<h3>" + _pmRenderInline(m[1]) + "</h3>"); continue; }
+    if ((m = line.match(/^#### (.*)$/)))   { closeList(); html.push("<h4>" + _pmRenderInline(m[1]) + "</h4>"); continue; }
+    // GFM task list: - [ ] item / - [x] item
+    if ((m = line.match(/^- \[([ xX])\] (.*)$/))) {
+      if (!inList) { html.push("<ul>"); inList = true; }
+      var checked = m[1] !== " ";
+      var checkbox = checked ? "☑" : "☐";
+      html.push("<li>" + checkbox + " " + _pmRenderInline(m[2]) + "</li>");
+      continue;
+    }
+    if ((m = line.match(/^- (.*)$/))) {
+      if (!inList) { html.push("<ul>"); inList = true; }
+      html.push("<li>" + _pmRenderInline(m[1]) + "</li>");
+      continue;
+    }
+    if (line.trim() === "") { closeList(); continue; }
+    closeList();
+    html.push("<p>" + _pmRenderInline(line) + "</p>");
+  }
+  closeList();
+  // Wrap so Word/Pages get a coherent document context.
+  return '<div style="font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;">'
+    + html.join("\n")
+    + '</div>';
+}
+
 function _pmExportResearchAsMarkdown(triggerBtn){
   var lines = [];
   var tripTitle = (_tb && (_tb.placeName || _tb.region)) || "Trip";
@@ -11755,7 +11814,8 @@ function _pmExportResearchAsMarkdown(triggerBtn){
   }
 
   var md = lines.join("\n");
-  console.log("[Max] export: generated " + md.length + " chars of markdown");
+  var html = _pmMarkdownToHtml(md);
+  console.log("[Max] export: generated " + md.length + " chars of markdown + " + html.length + " chars of HTML");
 
   // v359.56.1: feedback lives on the button itself + a fallback toast.
   // The picker overlay (z-index 10000) hides the trip-view save-status
@@ -11782,24 +11842,49 @@ function _pmExportResearchAsMarkdown(triggerBtn){
     if (typeof showSaveStatus === "function") { try { showSaveStatus(msg, 2500); } catch(_){}}
   }
 
-  // Modern Clipboard API where available; fallback textarea + execCommand.
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(md).then(function(){
-      console.log("[Max] export: clipboard write OK");
-      _toast("✓ Research copied to clipboard (markdown)", true);
-    }).catch(function(err){
-      console.warn("[Max] clipboard write failed:", err && err.message);
-      // Try the legacy path as a backup.
-      _fallbackCopy(md);
-    });
-  } else {
-    _fallbackCopy(md);
+  // v359.56.2: write BOTH text/plain (markdown) AND text/html so
+  // Word/Pages pick HTML and render styled headings, while
+  // Notion/Obsidian still get the markdown. Uses the ClipboardItem
+  // API (Chrome 76+, Safari 13.1+, Firefox 90+). Falls back to
+  // markdown-only writeText if ClipboardItem isn't available.
+  if (navigator.clipboard && window.ClipboardItem && navigator.clipboard.write) {
+    try {
+      var item = new ClipboardItem({
+        "text/plain": new Blob([md],   { type: "text/plain" }),
+        "text/html":  new Blob([html], { type: "text/html" })
+      });
+      navigator.clipboard.write([item]).then(function(){
+        console.log("[Max] export: clipboard.write OK (md + html)");
+        _toast("✓ Research copied (formatted for Word/Pages, markdown for Notion)", true);
+      }).catch(function(err){
+        console.warn("[Max] clipboard.write failed:", err && err.message);
+        _fallbackWriteText();
+      });
+      return;
+    } catch(err) {
+      console.warn("[Max] ClipboardItem ctor failed:", err && err.message);
+    }
+  }
+  _fallbackWriteText();
+
+  function _fallbackWriteText(){
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(md).then(function(){
+        console.log("[Max] export: writeText fallback OK (markdown only)");
+        _toast("✓ Copied as markdown", true);
+      }).catch(function(err){
+        console.warn("[Max] writeText fallback failed:", err && err.message);
+        _execCopy();
+      });
+    } else {
+      _execCopy();
+    }
   }
 
-  function _fallbackCopy(text){
+  function _execCopy(){
     try {
       var ta = document.createElement("textarea");
-      ta.value = text;
+      ta.value = md;
       ta.style.position = "fixed";
       ta.style.top = "0";
       ta.style.left = "0";
@@ -11811,17 +11896,13 @@ function _pmExportResearchAsMarkdown(triggerBtn){
       ta.select();
       var ok = document.execCommand("copy");
       ta.remove();
-      console.log("[Max] export: fallback copy", ok ? "OK" : "returned false");
-      _toast(ok ? "✓ Copied (markdown)" : "Couldn't copy", !!ok);
-      if (!ok) {
-        // Last resort: open a textarea with the markdown so the user
-        // can copy manually.
-        _pmShowExportFallbackPopup(text);
-      }
+      console.log("[Max] export: execCommand copy", ok ? "OK" : "returned false");
+      _toast(ok ? "✓ Copied as markdown" : "Couldn't copy", !!ok);
+      if (!ok) _pmShowExportFallbackPopup(md);
     } catch(err) {
-      console.warn("[Max] export fallback failed:", err && err.message);
+      console.warn("[Max] export execCopy failed:", err && err.message);
       _toast("Couldn't copy", false);
-      _pmShowExportFallbackPopup(text);
+      _pmShowExportFallbackPopup(md);
     }
   }
 }
