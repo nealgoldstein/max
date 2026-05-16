@@ -313,11 +313,14 @@
     else verdict = 'mixed';
     var summary;
     if (verdict === 'dense') {
-      summary = "As you explore these places, you'll find opportunities for day trips between them.";
+      // v359.60.6: mention waysides alongside day trips. Same
+      // sibling concept — both are ways to fold one place into
+      // another instead of treating it as its own overnight.
+      summary = "As you explore these places, you'll find opportunities for day trips between them and waysides to stop at on the way.";
     } else if (verdict === 'spread') {
       summary = 'These places are spread out. Expect real travel time between stops, and plan time to resettle when you arrive.';
     } else {
-      summary = 'Mixed geography. Some hops are short; others are longer hauls. Sequence will matter.';
+      summary = 'Mixed geography. Some hops are short; others are longer hauls. Sequence will matter. Watch for waysides — places worth a stop on the drive from one base to the next.';
     }
     return {verdict: verdict, pairs: pairs, summary: summary, ready: true};
   }
