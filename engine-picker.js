@@ -1274,6 +1274,10 @@
       // this data needs to survive Choreograph + re-edit. Keyed by
       // normalized place name — see _pmMetaKey in index.html.
       placeMeta: Object.assign({}, s.placeMeta || {}),
+      // v359.55.13: trip-level notes/links — a single object for the
+      // whole trip (gear, weather, general guides). Mirrors placeMeta
+      // but isn't keyed by place.
+      tripMeta: s.tripMeta ? { notes: s.tripMeta.notes || "", links: (s.tripMeta.links || []).slice() } : null,
     };
   }
 

@@ -10404,19 +10404,59 @@ function _renderPlaceActivityItems(){
     if (!sectionOrder.length) return;
     var toc = document.createElement("div");
     toc.style.cssText = "margin:0 0 14px;padding:12px 14px;background:#fafafa;border:1px solid #e8e6df;border-radius:8px;";
+    // v359.55.13: header row carries the "Trip notes" button — a
+    // trip-level research card for notes/links not tied to a single
+    // place (gear, timing, weather, general guides).
     var tocHdr = document.createElement("div");
-    tocHdr.style.cssText = "font-size:10px;font-weight:700;color:#888;letter-spacing:.05em;text-transform:uppercase;margin-bottom:8px;";
-    tocHdr.textContent = "What's here";
+    tocHdr.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;";
+    var tocHdrLabel = document.createElement("div");
+    tocHdrLabel.style.cssText = "font-size:10px;font-weight:700;color:#888;letter-spacing:.05em;text-transform:uppercase;";
+    tocHdrLabel.textContent = "What's here";
+    tocHdr.appendChild(tocHdrLabel);
+    var tripMeta = (_tb && _tb.tripMeta) ? _tb.tripMeta : null;
+    var _tripHasMeta = !!(tripMeta && (
+      (tripMeta.notes && tripMeta.notes.trim())
+      || (Array.isArray(tripMeta.links) && tripMeta.links.length)
+    ));
+    var tripLinkCount = (tripMeta && Array.isArray(tripMeta.links)) ? tripMeta.links.length : 0;
+    var tripNotesBtn = document.createElement("button");
+    tripNotesBtn.type = "button";
+    tripNotesBtn.style.cssText = "font-size:11px;font-weight:600;color:" + (_tripHasMeta ? "#fff" : "#1a5fa8") + ";background:" + (_tripHasMeta ? "#1a5fa8" : "#fff") + ";border:1px solid #1a5fa8;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;";
+    tripNotesBtn.innerHTML = '📓 Trip notes' + (_tripHasMeta ? ' <span style="font-size:9.5px;opacity:.85;">(' + tripLinkCount + ')</span>' : '');
+    tripNotesBtn.title = _tripHasMeta
+      ? "Trip-wide notes and " + tripLinkCount + " link" + (tripLinkCount === 1 ? "" : "s") + " — click to edit"
+      : "Add notes and source links that apply to the whole trip";
+    tripNotesBtn.onclick = function(e){ e.stopPropagation(); _pmOpenTripResearchCard(); };
+    tocHdr.appendChild(tripNotesBtn);
     toc.appendChild(tocHdr);
     var tocList = document.createElement("div");
     tocList.style.cssText = "display:flex;flex-wrap:wrap;gap:4px 8px;";
     sectionOrder.forEach(function(sec){
       var secItems = bySection[sec] || [];
-      var countText = secItems.length + (secItems.length === 1 ? "" : "");
+      // v359.55.13: TOC count matches the section header's count.
+      // For route sections, the header reports "N routes" (one per
+      // activity item). For everything else, it reports "N destinations"
+      // (unique requiredPlaces). Use the same logic so the TOC and
+      // header agree — earlier the TOC counted activities and looked
+      // wrong against sections where one activity unlocked many places.
+      var nameSaysRouteTOC = /\btrain|\brail|between destinations|scenic route|named.{0,15}train/i.test(sec);
+      var anyTypeRouteTOC = secItems.some(function(it){ return it && it.type === "route"; });
+      var count;
+      if (nameSaysRouteTOC || anyTypeRouteTOC) {
+        count = secItems.length;
+      } else {
+        var seenPlaces = {};
+        secItems.forEach(function(it){
+          (it.requiredPlaces || []).forEach(function(p){
+            if (p && p.place) seenPlaces[p.place.toLowerCase()] = true;
+          });
+        });
+        count = Object.keys(seenPlaces).length;
+      }
       var link = document.createElement("a");
       link.href = "#" + _pmSectionSlug(sec);
       link.style.cssText = "font-size:12px;color:#1a5fa8;text-decoration:none;padding:3px 8px;border-radius:5px;background:#fff;border:1px solid #d8e3f0;cursor:pointer;line-height:1.4;";
-      link.textContent = sec + " (" + secItems.length + ")";
+      link.textContent = sec + " (" + count + ")";
       link.onmouseover = function(){ link.style.background = "#eef4fb"; };
       link.onmouseout  = function(){ link.style.background = "#fff"; };
       (function(secName){
@@ -11337,6 +11377,110 @@ function _pmMoveUserAddedToSection(activityId, newSection){
   if (act.section === newSection) return;
   act.section = newSection;
   if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
+}
+
+// v359.55.13: trip-level research metadata. Mirrors _pmPlaceMeta but
+// for the trip as a whole — overall thoughts, gear lists, general
+// travel guides, anything that isn't tied to a single destination.
+// Lives on _tb.tripMeta during the picker session; persisted via
+// trip.brief.tripMeta on Choreograph.
+function _pmTripMeta(opts){
+  opts = opts || {};
+  if (!_tb) return null;
+  if (!_tb.tripMeta) {
+    if (!opts.create) return _tb.tripMeta || null;
+    _tb.tripMeta = { notes: "", links: [] };
+  }
+  return _tb.tripMeta;
+}
+
+function _pmOpenTripResearchCard(){
+  var existing = document.getElementById("pm-trip-research-card");
+  if (existing) existing.remove();
+  var m = _pmTripMeta({ create: true });
+  if (!m) return;
+
+  var ov = document.createElement("div");
+  ov.id = "pm-trip-research-card";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.32);z-index:11500;display:flex;align-items:center;justify-content:center;padding:20px;";
+
+  function renderBody(){
+    var linksHtml = (m.links || []).map(function(l, i){
+      var safeUrl = String(l.url || "").replace(/"/g, "&quot;");
+      var safeDom = String(l.domain || _pmExtractDomain(l.url) || "link").replace(/</g, "&lt;");
+      return '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;">'
+        + '<a href="' + safeUrl + '" target="_blank" rel="noopener noreferrer" style="flex:1;color:#1a5fa8;text-decoration:none;font-size:12px;word-break:break-all;">' + safeDom + '</a>'
+        + '<button type="button" data-link-idx="' + i + '" class="pm-trc-del-link" style="font-size:11px;color:#999;background:none;border:1px solid #ddd;border-radius:4px;padding:2px 7px;cursor:pointer;font-family:inherit;" title="Remove this link">×</button>'
+        + '</div>';
+    }).join("");
+    if (!linksHtml) linksHtml = '<div style="font-size:11.5px;color:#999;font-style:italic;padding:4px 0;">No links yet.</div>';
+
+    var tripLabel = (_tb && (_tb.placeName || _tb.region)) || "this trip";
+
+    return '<div style="background:#fff;border-radius:12px;max-width:500px;width:100%;box-shadow:0 12px 36px rgba(0,0,0,0.22);">'
+      + '<div style="padding:18px 20px 6px;">'
+      +   '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">Trip research</div>'
+      +   '<div style="font-size:17px;font-weight:700;color:#111;margin-top:4px;">' + String(tripLabel).replace(/</g, "&lt;") + '</div>'
+      +   '<div style="font-size:11.5px;color:#777;margin-top:3px;line-height:1.5;">Notes and source links that apply to the whole trip — gear, timing, weather, general guides.</div>'
+      + '</div>'
+      + '<div style="padding:10px 20px;display:flex;flex-direction:column;gap:14px;">'
+      +   '<div>'
+      +     '<div style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;margin-bottom:5px;">Notes</div>'
+      +     '<textarea id="pm-trc-notes" placeholder="What you\'ve learned, timing concerns, gear, things to pack, general questions to resolve…" style="width:100%;min-height:100px;font:inherit;font-size:12.5px;line-height:1.5;padding:6px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;color:#111;resize:vertical;box-sizing:border-box;font-family:inherit;">' + String(m.notes || "").replace(/</g, "&lt;") + '</textarea>'
+      +   '</div>'
+      +   '<div>'
+      +     '<div style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;margin-bottom:5px;">Source links</div>'
+      +     '<div id="pm-trc-links">' + linksHtml + '</div>'
+      +     '<button type="button" id="pm-trc-add-link" style="margin-top:6px;font-size:11.5px;font-weight:600;color:#1a5fa8;background:#fff;border:1px dashed #c8d8f0;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;">+ Add link</button>'
+      +   '</div>'
+      + '</div>'
+      + '<div style="padding:10px 20px 18px;display:flex;justify-content:flex-end;gap:8px;">'
+      +   '<button id="pm-trc-close" style="font-size:13px;font-weight:600;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 16px;cursor:pointer;font-family:inherit;">Done</button>'
+      + '</div>'
+      + '</div>';
+  }
+
+  ov.innerHTML = renderBody();
+  document.body.appendChild(ov);
+
+  function close(){
+    var ta = ov.querySelector("#pm-trc-notes");
+    if (ta) m.notes = ta.value;
+    if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+    if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
+  }
+  ov.onclick = function(e){ if (e.target === ov) close(); };
+  ov.querySelector("#pm-trc-close").onclick = close;
+
+  function bindLinkActions(){
+    var addBtn = ov.querySelector("#pm-trc-add-link");
+    if (addBtn) addBtn.onclick = function(){
+      var url = prompt("Paste a URL (a source you want to remember for this trip):", "https://");
+      if (!url || !url.trim() || url.trim() === "https://") return;
+      var clean = url.trim();
+      if (!/^https?:\/\//i.test(clean)) clean = "https://" + clean;
+      m.links = m.links || [];
+      m.links.push({ url: clean, domain: _pmExtractDomain(clean), addedAt: new Date().toISOString() });
+      var ta = ov.querySelector("#pm-trc-notes");
+      if (ta) m.notes = ta.value;
+      ov.innerHTML = renderBody();
+      ov.querySelector("#pm-trc-close").onclick = close;
+      bindLinkActions();
+    };
+    ov.querySelectorAll(".pm-trc-del-link").forEach(function(btn){
+      btn.onclick = function(){
+        var idx = parseInt(btn.getAttribute("data-link-idx"), 10);
+        if (isNaN(idx)) return;
+        m.links.splice(idx, 1);
+        var ta = ov.querySelector("#pm-trc-notes");
+        if (ta) m.notes = ta.value;
+        ov.innerHTML = renderBody();
+        ov.querySelector("#pm-trc-close").onclick = close;
+        bindLinkActions();
+      };
+    });
+  }
+  bindLinkActions();
 }
 
 // v359.55.3: per-place research metadata. The picker is becoming a
@@ -16303,6 +16447,13 @@ function reopenPickerForEdit(){
     // v359.55.3: hydrate the research-card data (notes, source links,
     // stay/see overrides) so it survives picker reopens after Choreograph.
     _tb.placeMeta = Object.assign({}, trip.brief.placeMeta || {});
+    // v359.55.13: hydrate trip-level meta too.
+    if (trip.brief.tripMeta) {
+      _tb.tripMeta = {
+        notes: trip.brief.tripMeta.notes || "",
+        links: (trip.brief.tripMeta.links || []).slice()
+      };
+    }
   }
   // Hydrate _tb.placeActivities from trip.mdcItems. Round DX: restore
   // each place's _keep state from the saved record so previously-rejected
