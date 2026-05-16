@@ -1722,9 +1722,12 @@
       || (Array.isArray(_tripBriefMeta.links) && _tripBriefMeta.links.length)
     ));
     var _tripLinkN = (_tripBriefMeta && Array.isArray(_tripBriefMeta.links)) ? _tripBriefMeta.links.length : 0;
-    tripResearchBtn.innerHTML = "📓 Trip notes" + (_tripHasMeta ? ' <span style="opacity:.85;font-size:10px;">(' + _tripLinkN + ')</span>' : "");
+    // v359.56.4: badge "(N)" only when there are links; fill conveys
+    // "any content" so notes-only doesn't render as "(0)".
+    var _tripLinkBadgeTV = _tripLinkN > 0 ? ' <span style="opacity:.85;font-size:10px;">(' + _tripLinkN + ')</span>' : "";
+    tripResearchBtn.innerHTML = "📓 Trip notes" + _tripLinkBadgeTV;
     tripResearchBtn.title = _tripHasMeta
-      ? "Trip-wide notes and " + _tripLinkN + " link" + (_tripLinkN === 1 ? "" : "s") + " — click to edit"
+      ? "Trip-wide notes" + (_tripLinkN ? " and " + _tripLinkN + " link" + (_tripLinkN === 1 ? "" : "s") : "") + " — click to edit"
       : "Add notes and source links that apply to the whole trip";
     tripResearchBtn.style.cssText = "font-size:12px;font-weight:600;color:" + (_tripHasMeta ? "#fff" : "#1a5fa8") + ";background:" + (_tripHasMeta ? "#1a5fa8" : "#fff") + ";border:1px solid #1a5fa8;border-radius:6px;padding:6px 11px;cursor:pointer;font-family:inherit;margin-right:8px;white-space:nowrap;";
     tripResearchBtn.onclick = function(e){
@@ -2209,9 +2212,11 @@
         || (Array.isArray(_researchMeta.links) && _researchMeta.links.length)
       ));
       var _linkN = (_researchMeta && Array.isArray(_researchMeta.links)) ? _researchMeta.links.length : 0;
-      researchBtn.innerHTML = "📓 Research" + (_hasResearch ? ' <span style="opacity:.8;font-size:9.5px;">(' + _linkN + ')</span>' : "");
+      // v359.56.4: link-count badge only; fill state conveys "any content".
+      var _resLinkBadge = _linkN > 0 ? ' <span style="opacity:.8;font-size:9.5px;">(' + _linkN + ')</span>' : "";
+      researchBtn.innerHTML = "📓 Research" + _resLinkBadge;
       researchBtn.title = _hasResearch
-        ? "Notes and " + _linkN + " link" + (_linkN === 1 ? "" : "s") + " for " + dest.place
+        ? "Notes" + (_linkN ? " and " + _linkN + " link" + (_linkN === 1 ? "" : "s") : "") + " for " + dest.place
         : "Add notes / source links for " + dest.place;
       researchBtn.style.cssText = "font-size:10.5px;font-weight:600;color:" + (_hasResearch ? "#fff" : "#1a5fa8") + ";background:" + (_hasResearch ? "#1a5fa8" : "#fff") + ";border:1px solid #c8d8f0;border-radius:5px;padding:3px 9px;cursor:pointer;font-family:inherit;";
       (function(placeName){

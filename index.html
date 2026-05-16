@@ -10463,12 +10463,16 @@ function _renderPlaceActivityItems(){
       || (Array.isArray(tripMeta.links) && tripMeta.links.length)
     ));
     var tripLinkCount = (tripMeta && Array.isArray(tripMeta.links)) ? tripMeta.links.length : 0;
+    // v359.56.4: fill = "any content" (notes or links); badge "(N)"
+    // only when there are links to count. Was showing "(0)" when notes
+    // existed but no links, which read like the count wasn't updating.
     var tripNotesBtn = document.createElement("button");
     tripNotesBtn.type = "button";
     tripNotesBtn.style.cssText = "font-size:11px;font-weight:600;color:" + (_tripHasMeta ? "#fff" : "#1a5fa8") + ";background:" + (_tripHasMeta ? "#1a5fa8" : "#fff") + ";border:1px solid #1a5fa8;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;";
-    tripNotesBtn.innerHTML = '📓 Trip notes' + (_tripHasMeta ? ' <span style="font-size:9.5px;opacity:.85;">(' + tripLinkCount + ')</span>' : '');
+    var _tripLinkBadge = tripLinkCount > 0 ? ' <span style="font-size:9.5px;opacity:.85;">(' + tripLinkCount + ')</span>' : '';
+    tripNotesBtn.innerHTML = '📓 Trip notes' + _tripLinkBadge;
     tripNotesBtn.title = _tripHasMeta
-      ? "Trip-wide notes and " + tripLinkCount + " link" + (tripLinkCount === 1 ? "" : "s") + " — click to edit"
+      ? "Trip-wide notes" + (tripLinkCount ? " and " + tripLinkCount + " link" + (tripLinkCount === 1 ? "" : "s") : "") + " — click to edit"
       : "Add notes and source links that apply to the whole trip";
     tripNotesBtn.onclick = function(e){ e.stopPropagation(); _pmOpenTripResearchCard(); };
     hdrActions.appendChild(tripNotesBtn);
@@ -25521,7 +25525,19 @@ function updateMainMap(){
       // pin is differently coloured without having to tap.
       // (v359.51.24's "✓ booked" tooltip line reverted along with
       // the gold-border — see pin-render comment above.)
-      if (_isCandidate) tipParts.push("could be a day trip — tap to convert");
+      // v359.56.5: also mention "stop along the way" when this dest
+      // has both a prev and a next destination — the role popover
+      // offers wayside in that case, so the tooltip should preview
+      // it. First/last destinations only get the day-trip hint.
+      if (_isCandidate) {
+        var _primIdx = trip.destinations.indexOf(primary);
+        var _waysideEligible = _primIdx > 0 && _primIdx < trip.destinations.length - 1;
+        tipParts.push(
+          _waysideEligible
+            ? "could be a day trip or stop along the way — tap to convert"
+            : "could be a day trip — tap to convert"
+        );
+      }
       m.bindTooltip(tipParts.join(" · "), {permanent:false, direction:"top", offset:[0,-size/2-2], className:"main-map-tooltip"});
       _mainMarkers.push(m);
     });
