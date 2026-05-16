@@ -24152,10 +24152,44 @@ function updateMainMap(){
 
     // v294.15: trip-route polyline (white halo + dashed blue), opt-in via
     // the Route button. Only worth drawing with ≥2 distinct destinations.
+    // v359.54.6: draw per-segment instead of one continuous polyline so
+    // segments covered by a wayside-detour (purple line bending through
+    // the wayside) don't ALSO get the direct blue-dashed line drawn on
+    // top, creating a confusing "triangle" of two routes. Index the
+    // transit routes that already carry waysides and skip those segments.
     if (_routeShown && bounds.length >= 2) {
+      // Build the set of (fromId, toId) pairs that have waysides — those
+      // segments are covered by the purple detour rendered below.
+      var _waysideCovered = {};
+      (Array.isArray(trip.routes) ? trip.routes : []).forEach(function(r){
+        if (!r) return;
+        var sub = (typeof MaxMigration !== "undefined" && MaxMigration.routeSubKind)
+          ? MaxMigration.routeSubKind(r)
+          : (r.subKind || (r.kind && r.kind !== "route" ? r.kind : null));
+        if (sub !== "transit") return;
+        if (!Array.isArray(r.planItems) || !r.planItems.some(function(pi){return pi && pi.type === "stop";})) return;
+        _waysideCovered[(r.fromDestId || "") + "|" + (r.toDestId || "")] = true;
+      });
+      // bounds[] is in destination order at this point — the day-trip and
+      // wayside passes push their coords AFTER this block. So bounds.length
+      // equals the destination count, and bounds[i] aligns with
+      // trip.destinations[i].
       try {
-        _mainRouteHalo = L.polyline(bounds, {color:"#fff", weight:6, opacity:0.9, lineCap:"round"}).addTo(_mainMap);
-        _mainRoutePoly = L.polyline(bounds, {color:"#1a5fa8", weight:2.5, opacity:1.0, dashArray:"1 6", lineCap:"round"}).addTo(_mainMap);
+        var _destSeq = trip.destinations || [];
+        for (var _bi = 0; _bi < bounds.length - 1; _bi++) {
+          var _fromD = _destSeq[_bi];
+          var _toD   = _destSeq[_bi + 1];
+          if (_fromD && _toD && _waysideCovered[_fromD.id + "|" + _toD.id]) continue;
+          var _seg = [bounds[_bi], bounds[_bi + 1]];
+          var _halo = L.polyline(_seg, {color:"#fff", weight:6, opacity:0.9, lineCap:"round"}).addTo(_mainMap);
+          var _poly = L.polyline(_seg, {color:"#1a5fa8", weight:2.5, opacity:1.0, dashArray:"1 6", lineCap:"round"}).addTo(_mainMap);
+          _mainMarkers.push(_halo);
+          _mainMarkers.push(_poly);
+        }
+        // Keep the legacy refs pointing at *something* so the cleanup
+        // path in updateMainMap doesn't error trying to removeLayer(null).
+        _mainRouteHalo = null;
+        _mainRoutePoly = null;
       } catch(_){}
     }
 
@@ -26981,7 +27015,7 @@ function convertDestToWayside(destId, opts){
     _showDayTripToast(
       "<strong>" + src.place + "</strong> is now a wayside on the route " +
       prev.place + " → " + next.place +
-      ". " + absorber.place + " absorbs " + srcNights + " night" + (srcNights === 1 ? "" : "s") + ".",
+      ". " + srcNights + " night" + (srcNights === 1 ? "" : "s") + " shifted to " + absorber.place + ".",
       function(){
         console.warn("[Max] convertDestToWayside: undo not yet wired");
       }
@@ -27111,24 +27145,29 @@ function _openTripDestRolePopover(destId){
       + '</div>');
 
   // v359.54.2: "Along the way" — wayside on the transit route between
-  // the source's prev and next destinations. Default: nights absorb into
-  // the next destination (the place you're heading to sleep at).
+  // the source's prev and next destinations.
+  // v359.54.7: language no longer says "add 1 night to ___." The wayside
+  // doesn't claim a night; the night it WAS holding has to go somewhere,
+  // and the dropdown picks the receiver. Phrased as "shifts to" rather
+  // than "adds" so it reads as a re-allocation, not a stretch of the trip.
+  var _wsNightsN = src.nights || 1;
+  var _wsNightsLbl = _wsNightsN + ' night' + (_wsNightsN === 1 ? '' : 's');
   var waysideRow = waysideAvailable
     ? ('<label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #e0e0e0;border-radius:8px;cursor:pointer;background:#fff;">'
         + '<input type="radio" name="trip-role-pick" value="wayside" style="margin:0;" />'
         + '<div style="flex:1;">'
         +   '<div style="font-size:13px;font-weight:600;color:#222;">Along the way</div>'
         +   '<div style="font-size:11.5px;color:#444;margin-top:3px;line-height:1.5;">'
-        +     'A stop on the route from <strong>' + waysidePrev.place + '</strong> &rarr; <strong>' + waysideNext.place + '</strong>.'
+        +     'A stop on the route from <strong>' + waysidePrev.place + '</strong> &rarr; <strong>' + waysideNext.place + '</strong> — same trip length, just no sleep here.'
         +   '</div>'
         +   '<label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11.5px;color:#444;">'
-        +     '<span>Add ' + (src.nights || 1) + ' night' + ((src.nights || 1) === 1 ? "" : "s") + ' to</span>'
+        +     '<span>' + _wsNightsLbl + ' shifts to</span>'
         +     '<select id="trip-role-wayside-absorber" style="padding:3px 6px;font-size:11.5px;border:1px solid #ccc;border-radius:5px;font-family:inherit;">'
         +       '<option value="next" selected>' + waysideNext.place + ' (next)</option>'
         +       '<option value="prev">' + waysidePrev.place + ' (previous)</option>'
         +     '</select>'
         +   '</label>'
-        +   '<div style="font-size:11px;color:#a36500;margin-top:6px;line-height:1.5;">Heads up: the wayside doesn\'t claim its own nights. Hotel and other bookings tied to ' + src.place + ' will be dropped — confirm only if there are none yet.</div>'
+        +   '<div style="font-size:11px;color:#a36500;margin-top:6px;line-height:1.5;">Heads up: any hotel or bookings tied to ' + src.place + ' will be dropped — confirm only if there are none yet.</div>'
         + '</div>'
       + '</label>')
     : '';
@@ -27306,7 +27345,7 @@ function _openTripWaysidePopover(route, stop, waysideName){
     +   '<div style="padding:14px 20px;display:flex;flex-direction:column;gap:10px;">'
     +     '<button id="trip-ws-promote" style="text-align:left;padding:12px;border:1px solid #cfe1f7;background:#eef5ff;border-radius:8px;cursor:pointer;font-family:inherit;">'
     +       '<div style="font-size:13px;font-weight:600;color:#1a5fa8;">&#9881; Make ' + wsName + ' an overnight stop</div>'
-    +       '<div style="font-size:11px;color:#5a7a99;margin-top:3px;">Promote back to its own destination between ' + fromName + ' and ' + toName + ' &mdash; takes back ' + srcNights + ' night' + (srcNights === 1 ? '' : 's') + ' from ' + absorberName + '.</div>'
+    +       '<div style="font-size:11px;color:#5a7a99;margin-top:3px;">Promote back to its own destination between ' + fromName + ' and ' + toName + ' &mdash; ' + srcNights + ' night' + (srcNights === 1 ? '' : 's') + ' shifts back from ' + absorberName + '.</div>'
     +     '</button>'
     +     '<button id="trip-ws-remove" style="text-align:left;padding:12px;border:1px solid #e8d0a8;background:#fff7eb;border-radius:8px;cursor:pointer;font-family:inherit;">'
     +       '<div style="font-size:13px;font-weight:600;color:#c97a1a;">&times; Remove from route</div>'
@@ -28828,7 +28867,14 @@ function drawTripMode(){
     ));
 
     nb.appendChild(btnWrap);
-    c.appendChild(nb);
+    // v359.54.6: over-budget banner moves to the TOP of the trip-view
+    // content. Previously appended at the bottom where it sat below
+    // the destinations list — easy to miss on long trips. The banner
+    // is the most actionable thing on this screen when it fires;
+    // it should lead.
+    nb.style.marginTop = "0";
+    if (c.firstChild) c.insertBefore(nb, c.firstChild);
+    else c.appendChild(nb);
   })();
 
   // TM.3c (v319): two dead `if (false) (function(){...})()`
