@@ -10542,9 +10542,13 @@ function _renderPlaceActivityItems(){
       }
 
       // v359.55.1: stay/see flag. The LLM marks each requiredPlace with
-      // overnight:true|false. v359.55.3: the user can override via the
-      // research card (or by clicking the chip). _tb.placeMeta carries
-      // the override; null/undefined falls back to LLM's flag.
+      // overnight:true|false. v359.55.4: asymmetric chip pattern:
+      //   • See state (default for most candidates) → dashed "+ Stay"
+      //     affordance only. Click promotes to Stay.
+      //   • Stay state → solid "🛏 Stay" pill with a small "− See"
+      //     demote button next to it. Click "− See" demotes.
+      // No tri-state on the chip; "use Max's guess" reset is in the
+      // research card popover.
       var _llmIsStay = d.placeRefs.some(function(r){
         return r.placeRef && r.placeRef.overnight !== false;
       });
@@ -10552,35 +10556,21 @@ function _renderPlaceActivityItems(){
       var _stayOverride = _placeMeta && (_placeMeta.stayOverride === true || _placeMeta.stayOverride === false)
         ? _placeMeta.stayOverride : null;
       var _isStayCandidate = (_stayOverride !== null) ? _stayOverride : _llmIsStay;
-      // Distinguish "user override" visually with a tiny dot prefix so
-      // the user knows their choice is winning. Pure LLM-default looks
-      // the same as before.
-      var _stayChipBg = (_stayOverride !== null) ? "#dbe9f5" : "#eef4fb";
-      var _stayChipBorder = (_stayOverride !== null) ? "#94b8d8" : "#c8d8f0";
-      var _stayChipTitle = (_stayOverride !== null)
-        ? "You marked this as a stay. Click to cycle: stay → see → use Max's guess."
-        : "Max thinks this is a place to stay. Click to override.";
-      var _seeChipBg = "#f4eef9";
-      var _seeChipBorder = "#d8c4e8";
-      var _seeChipTitle = (_stayOverride !== null)
-        ? "You marked this as a see-only place. Click to cycle: see → use Max's guess → stay."
-        : "Click to mark this as a place to stay.";
-      var stayChip = '';
+      var _placeArg = _pmEsc(d.place);
+      var stayChip;
       if (_isStayCandidate) {
-        stayChip = '<span class="pm-stay-chip" onclick="_pmCycleStayOverride(&#39;' + _pmEsc(d.place) + '&#39;);event.stopPropagation();" '
-          + 'style="font-size:9.5px;font-weight:700;color:#1a5fa8;background:' + _stayChipBg + ';border:1px solid ' + _stayChipBorder + ';padding:1px 6px;border-radius:9px;letter-spacing:.02em;cursor:pointer;" '
-          + 'title="' + _stayChipTitle + '">🛏 Stay</span>';
-      } else if (_stayOverride === false) {
-        // User explicitly said "see" — show a chip so they can see + cycle off it.
-        stayChip = '<span class="pm-stay-chip" onclick="_pmCycleStayOverride(&#39;' + _pmEsc(d.place) + '&#39;);event.stopPropagation();" '
-          + 'style="font-size:9.5px;font-weight:700;color:#5b3f8f;background:' + _seeChipBg + ';border:1px solid ' + _seeChipBorder + ';padding:1px 6px;border-radius:9px;letter-spacing:.02em;cursor:pointer;" '
-          + 'title="' + _seeChipTitle + '">👁 See</span>';
+        stayChip = '<span class="pm-stay-pill" style="display:inline-flex;align-items:center;gap:4px;">'
+          + '<span style="font-size:9.5px;font-weight:700;color:#1a5fa8;background:#eef4fb;border:1px solid #c8d8f0;padding:1px 6px;border-radius:9px;letter-spacing:.02em;">🛏 Stay</span>'
+          + '<button type="button" class="pm-stay-demote" '
+          +   'onclick="_pmSetStayOverride(&#39;' + _placeArg + '&#39;, false);event.stopPropagation();" '
+          +   'title="Mark as a place to see only — not a stay" '
+          +   'style="font-size:9.5px;font-weight:600;color:#888;background:#fff;border:1px solid #ddd;padding:1px 6px;border-radius:9px;letter-spacing:.02em;cursor:pointer;font-family:inherit;line-height:1.3;">− See</button>'
+          + '</span>';
       } else {
-        // LLM said "see" and user hasn't overridden — show a discreet
-        // "mark as stay" affordance so the user can promote it.
-        stayChip = '<span class="pm-stay-chip" onclick="_pmCycleStayOverride(&#39;' + _pmEsc(d.place) + '&#39;);event.stopPropagation();" '
-          + 'style="font-size:9.5px;font-weight:600;color:#888;background:#fafafa;border:1px dashed #ddd;padding:1px 6px;border-radius:9px;letter-spacing:.02em;cursor:pointer;" '
-          + 'title="' + _seeChipTitle + '">+ Stay</span>';
+        stayChip = '<button type="button" class="pm-stay-promote" '
+          + 'onclick="_pmSetStayOverride(&#39;' + _placeArg + '&#39;, true);event.stopPropagation();" '
+          + 'title="Mark as a place to stay — sleep here while exploring its sights" '
+          + 'style="font-size:9.5px;font-weight:600;color:#888;background:#fafafa;border:1px dashed #ccc;padding:1px 6px;border-radius:9px;letter-spacing:.02em;cursor:pointer;font-family:inherit;line-height:1.3;">+ Stay</button>';
       }
 
       // v359.55.3: research card affordance. Small "📓" button per
@@ -11193,17 +11183,13 @@ function _pmExtractDomain(url){
   }
 }
 
-// v359.55.3: stay/see cycle on chip click. Tri-state walk:
-//   null (use LLM) → true (stay) → false (see) → null …
-// This way the chip is a discoverable affordance for promote / demote
-// without an extra menu; the research card popover offers the same
-// three states as labeled buttons for users who want explicit choice.
-function _pmCycleStayOverride(placeName){
+// v359.55.4: explicit stay/see writer. Click "+ Stay" → promote;
+// click "− See" → demote. Tri-state reset (back to "use Max's
+// guess") lives in the research card popover, not on the chip.
+function _pmSetStayOverride(placeName, value){
   var m = _pmPlaceMeta(placeName, { create: true });
   if (!m) return;
-  if (m.stayOverride === null || m.stayOverride === undefined) m.stayOverride = true;
-  else if (m.stayOverride === true)  m.stayOverride = false;
-  else /* false */                    m.stayOverride = null;
+  m.stayOverride = !!value;
   if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
 }
 
