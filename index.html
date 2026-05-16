@@ -10455,7 +10455,7 @@ function _renderPlaceActivityItems(){
     exportBtn.style.cssText = "font-size:11px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;";
     exportBtn.innerHTML = "⤓ Export";
     exportBtn.title = "Copy research as markdown to clipboard";
-    exportBtn.onclick = function(e){ e.stopPropagation(); _pmExportResearchAsMarkdown(); };
+    exportBtn.onclick = function(e){ e.stopPropagation(); _pmExportResearchAsMarkdown(exportBtn); };
     hdrActions.appendChild(exportBtn);
     var tripMeta = (_tb && _tb.tripMeta) ? _tb.tripMeta : null;
     var _tripHasMeta = !!(tripMeta && (
@@ -11663,7 +11663,7 @@ function _pmAttachDictation(button, textarea){
 // to clipboard. Walks _tb.placeActivities + _tb.placeMeta + _tb.tripMeta
 // and assembles a structured document the user can paste anywhere.
 // Lock-in is the enemy of trust — research should be portable.
-function _pmExportResearchAsMarkdown(){
+function _pmExportResearchAsMarkdown(triggerBtn){
   var lines = [];
   var tripTitle = (_tb && (_tb.placeName || _tb.region)) || "Trip";
   lines.push("# " + tripTitle);
@@ -11755,36 +11755,96 @@ function _pmExportResearchAsMarkdown(){
   }
 
   var md = lines.join("\n");
+  console.log("[Max] export: generated " + md.length + " chars of markdown");
 
-  // Copy to clipboard. Modern Clipboard API where available; fallback
-  // textarea + execCommand for older browsers.
-  function _toast(msg){
-    if (typeof showSaveStatus === "function") { showSaveStatus(msg, 2500); return; }
-    try { alert(msg); } catch(_){}
+  // v359.56.1: feedback lives on the button itself + a fallback toast.
+  // The picker overlay (z-index 10000) hides the trip-view save-status
+  // banner, so a button-text change is the most reliable signal.
+  function _btnFeedback(text, ok){
+    if (!triggerBtn) return;
+    var orig = triggerBtn.innerHTML;
+    var origBg = triggerBtn.style.background;
+    var origColor = triggerBtn.style.color;
+    var origBorder = triggerBtn.style.borderColor;
+    triggerBtn.innerHTML = text;
+    triggerBtn.style.background = ok ? "#1a5fa8" : "#c44";
+    triggerBtn.style.color = "#fff";
+    triggerBtn.style.borderColor = ok ? "#1a5fa8" : "#c44";
+    setTimeout(function(){
+      triggerBtn.innerHTML = orig;
+      triggerBtn.style.background = origBg;
+      triggerBtn.style.color = origColor;
+      triggerBtn.style.borderColor = origBorder;
+    }, 2200);
   }
+  function _toast(msg, ok){
+    _btnFeedback(ok ? "✓ Copied!" : "✗ Failed", ok);
+    if (typeof showSaveStatus === "function") { try { showSaveStatus(msg, 2500); } catch(_){}}
+  }
+
+  // Modern Clipboard API where available; fallback textarea + execCommand.
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(md).then(function(){
-      _toast("✓ Research copied to clipboard (markdown)");
+      console.log("[Max] export: clipboard write OK");
+      _toast("✓ Research copied to clipboard (markdown)", true);
     }).catch(function(err){
       console.warn("[Max] clipboard write failed:", err && err.message);
-      _toast("Couldn't copy — your browser blocked clipboard access");
+      // Try the legacy path as a backup.
+      _fallbackCopy(md);
     });
   } else {
+    _fallbackCopy(md);
+  }
+
+  function _fallbackCopy(text){
     try {
       var ta = document.createElement("textarea");
-      ta.value = md;
+      ta.value = text;
       ta.style.position = "fixed";
-      ta.style.left = "-9999px";
+      ta.style.top = "0";
+      ta.style.left = "0";
+      ta.style.width = "1px";
+      ta.style.height = "1px";
+      ta.style.opacity = "0";
       document.body.appendChild(ta);
+      ta.focus();
       ta.select();
-      document.execCommand("copy");
+      var ok = document.execCommand("copy");
       ta.remove();
-      _toast("✓ Research copied to clipboard (markdown)");
+      console.log("[Max] export: fallback copy", ok ? "OK" : "returned false");
+      _toast(ok ? "✓ Copied (markdown)" : "Couldn't copy", !!ok);
+      if (!ok) {
+        // Last resort: open a textarea with the markdown so the user
+        // can copy manually.
+        _pmShowExportFallbackPopup(text);
+      }
     } catch(err) {
-      console.warn("[Max] clipboard fallback failed:", err && err.message);
-      _toast("Couldn't copy to clipboard");
+      console.warn("[Max] export fallback failed:", err && err.message);
+      _toast("Couldn't copy", false);
+      _pmShowExportFallbackPopup(text);
     }
   }
+}
+
+// v359.56.1: last-resort popup with the markdown text in a focused
+// textarea, so the user can ⌘-A / ⌘-C even when clipboard APIs fail.
+function _pmShowExportFallbackPopup(md){
+  var existing = document.getElementById("pm-export-fallback");
+  if (existing) existing.remove();
+  var ov = document.createElement("div");
+  ov.id = "pm-export-fallback";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:12000;display:flex;align-items:center;justify-content:center;padding:20px;";
+  ov.innerHTML = '<div style="background:#fff;border-radius:10px;max-width:600px;width:100%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 12px 36px rgba(0,0,0,0.25);">'
+    + '<div style="padding:16px 18px;border-bottom:1px solid #eee;font-size:13px;font-weight:600;color:#111;">Copy your research below (⌘A then ⌘C)</div>'
+    + '<textarea id="pm-export-fallback-ta" style="flex:1;width:100%;min-height:280px;font:inherit;font-size:11.5px;line-height:1.45;padding:12px 16px;border:none;background:#fafafa;color:#111;resize:none;box-sizing:border-box;font-family:ui-monospace,Menlo,Consolas,monospace;outline:none;"></textarea>'
+    + '<div style="padding:10px 18px;display:flex;justify-content:flex-end;"><button id="pm-export-fallback-close" style="font-size:12.5px;font-weight:600;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:5px;padding:7px 14px;cursor:pointer;font-family:inherit;">Done</button></div>'
+    + '</div>';
+  document.body.appendChild(ov);
+  var ta = ov.querySelector("#pm-export-fallback-ta");
+  if (ta) { ta.value = md; setTimeout(function(){ ta.focus(); ta.select(); }, 30); }
+  function close(){ if (ov && ov.parentNode) ov.parentNode.removeChild(ov); }
+  ov.onclick = function(e){ if (e.target === ov) close(); };
+  ov.querySelector("#pm-export-fallback-close").onclick = close;
 }
 
 // v359.55.13: trip-level research metadata. Mirrors _pmPlaceMeta but
@@ -12331,7 +12391,7 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
     // daytrip
     return '<label style="display:flex;align-items:center;gap:6px;margin:3px 0;padding:5px 8px;background:' + bg + ';border:' + border + ';border-radius:5px;' + (noHubs ? 'opacity:0.55;cursor:not-allowed;' : 'cursor:pointer;') + 'font-weight:' + weight + ';" ' + dtTitle + '>'
       + '<input type="radio" name="pm-mode" value="daytrip" ' + checked + ' ' + dtDisabled + ' />'
-      + '<span>📍 Day trip from</span>'
+      + '<span>📍 Day trip / On the way from</span>'
       + '<select class="pm-hub-sel" ' + dtDisabled + ' style="font-family:inherit;font-size:12px;padding:2px 4px;margin-left:auto;">'
       +   hubOptions
       + '</select>'
@@ -12565,7 +12625,7 @@ function openPlacePickerMapModal(){
     +       '+\'</label>\''
     +       '+\'<label style="display:flex;align-items:center;gap:6px;margin:4px 0;\'+(noHubs?\'opacity:0.55;cursor:not-allowed;\':\'cursor:pointer;\')+\'" \'+dtTitle+\'>\''
     +         '+\'<input type="radio" name="pm-mode" value="daytrip" \'+dtChecked+\' \'+dtDisabled+\' />\''
-    +         '+\'<span>Day trip from</span>\''
+    +         '+\'<span>Day trip / On the way from</span>\''
     +         '+\'<select class="pm-hub-sel" \'+dtDisabled+\' style="font-family:inherit;font-size:12px;padding:2px 4px;">\'+hubOptions+\'</select>\''
     +       '+\'</label>\''
     +       '+\'<div style="display:flex;justify-content:flex-end;gap:6px;margin-top:8px;">\''
@@ -17063,7 +17123,7 @@ function reopenPickerForEdit(){
   var ov = g("trip-brief-overlay");
   if (!ov) {
     console.error("[Max] reopenPickerForEdit: #trip-brief-overlay not found — cannot show picker");
-    alert("Can't open the picker — overlay element missing. Reload the page and try again.");
+    alert("Can't open research — overlay element missing. Reload the page and try again.");
     return;
   }
   // The overlay lives inside #home-screen by default. When the app shell is
@@ -24143,8 +24203,67 @@ if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.on === "functio
 // dismiss) is the mutator's responsibility AFTER this returns —
 // emit is synchronous so the DOM is already updated by the time
 // _emitTripMutation returns.
+// v359.56: bidirectional sync trip-view → picker (research). When
+// the user drops a destination on the trip view, the picker should
+// know about it (so re-opening shows it unchecked). Walks
+// trip.destinations and updates _keep flags on _tb.placeActivities;
+// also persists to trip.mdcItems so the re-edit rehydration path
+// picks up the changes.
+function _syncPickerToTrip(){
+  if (typeof _tb === "undefined" || !_tb || !Array.isArray(_tb.placeActivities)) {
+    // Picker state not initialized; synthetic-items path on next render
+    // will reconstruct from trip.destinations.
+    return;
+  }
+  if (typeof trip === "undefined" || !trip || !Array.isArray(trip.destinations)) return;
+  var keptKeys = {};
+  trip.destinations.forEach(function(d){
+    if (d && d.place) keptKeys[String(d.place).toLowerCase()] = d;
+  });
+  _tb.placeActivities.forEach(function(item){
+    if (!item || !Array.isArray(item.requiredPlaces)) return;
+    var anyKept = false;
+    item.requiredPlaces.forEach(function(p){
+      if (!p || !p.place) return;
+      var inTrip = !!keptKeys[String(p.place).toLowerCase()];
+      p._keep = inTrip;
+      if (inTrip) {
+        anyKept = true;
+        // Mirror current nights so re-opening picker reflects trip-view edits.
+        var d = keptKeys[String(p.place).toLowerCase()];
+        if (d && typeof d.nights === "number") p.nights = d.nights;
+      }
+    });
+    // Activity is "checked" if any of its required places is kept.
+    item.checked = anyKept;
+  });
+  // Mirror to trip.mdcItems so a future re-edit rehydration picks up
+  // the synced state. trip.mdcItems is the persisted snapshot; _tb is
+  // the in-memory working copy.
+  if (Array.isArray(trip.mdcItems)) {
+    trip.mdcItems.forEach(function(m){
+      if (!m || !Array.isArray(m.requiredPlaces)) return;
+      var sourceItem = _tb.placeActivities.find(function(a){ return a && a.id === m.id; });
+      if (!sourceItem) return;
+      m.checked = !!sourceItem.checked;
+      m.requiredPlaces.forEach(function(p){
+        if (!p || !p.place) return;
+        var sp = sourceItem.requiredPlaces.find(function(x){ return x && x.place === p.place; });
+        if (sp) {
+          p._keep = !!sp._keep;
+          if (typeof sp.nights === "number") p.nights = sp.nights;
+        }
+      });
+    });
+  }
+}
+
 function _emitTripMutation(){
   if (typeof autoSave === "function") autoSave();
+  // v359.56: keep the picker's keep/reject state aligned with the trip
+  // view. Has to run BEFORE autoSave so the persisted state reflects
+  // the synced flags (autoSave reads from in-memory state).
+  try { _syncPickerToTrip(); } catch(_){}
   if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.emit === "function") {
     MaxEngineTrip.emit("tripChange");
     MaxEngineTrip.emit("mapDataChange");
@@ -33150,7 +33269,7 @@ function showAskMaxModal() {
   var _hasPicker = (typeof _tb !== "undefined" && _tb && (_tb.region || _tb.placeName || _tb.brief
                     || (Array.isArray(_tb.placeActivities) && _tb.placeActivities.length)));
   if (!_hasTrip && !_hasPicker) {
-    maxAlert("Open a trip or start the picker first.");
+    maxAlert("Open a trip or start research first.");
     return;
   }
   if (typeof MaxSync === "undefined" || !MaxSync.isSignedIn || !MaxSync.isSignedIn()) {

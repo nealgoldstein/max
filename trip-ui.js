@@ -1791,8 +1791,8 @@
     if (trip && trip.candidates && trip.candidates.length) {
       var editBtn = document.createElement("button");
       editBtn.style.cssText = _chipStyle;
-      editBtn.textContent = "✎ Edit in selector";
-      editBtn.title = "Re-open the destination selector with your current keep/reject decisions";
+      editBtn.textContent = "✎ Open research";
+      editBtn.title = "Re-open the research surface with your current keep/reject decisions, notes, and links";
       editBtn.onmouseover = function () { editBtn.style.background = "#f0f5fc"; };
       editBtn.onmouseout  = function () { editBtn.style.background = "#fff"; };
       editBtn.onclick = function () {
