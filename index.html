@@ -10643,21 +10643,30 @@ function _renderPlaceActivityItems(){
         ? _placeMeta.stayOverride : null;
       var _isStayCandidate = (_stayOverride !== null) ? _stayOverride : _llmIsStay;
       var _placeArg = _pmEsc(d.place);
-      // Active styles: stay = blue, see = purple. Inactive: muted with "+".
-      var _stayBtnStyle = _isStayCandidate
-        ? 'font-size:9.5px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;padding:1px 7px;border-radius:9px;letter-spacing:.02em;cursor:default;font-family:inherit;line-height:1.3;'
-        : 'font-size:9.5px;font-weight:600;color:#888;background:#fff;border:1px solid #ddd;padding:1px 7px;border-radius:9px;letter-spacing:.02em;cursor:pointer;font-family:inherit;line-height:1.3;';
-      var _seeBtnStyle = !_isStayCandidate
-        ? 'font-size:9.5px;font-weight:700;color:#fff;background:#5b3f8f;border:1px solid #5b3f8f;padding:1px 7px;border-radius:9px;letter-spacing:.02em;cursor:default;font-family:inherit;line-height:1.3;'
-        : 'font-size:9.5px;font-weight:600;color:#888;background:#fff;border:1px solid #ddd;padding:1px 7px;border-radius:9px;letter-spacing:.02em;cursor:pointer;font-family:inherit;line-height:1.3;';
-      var _stayLabel = _isStayCandidate ? '🛏 Stay' : '+ Stay';
-      var _seeLabel  = _isStayCandidate ? '+ See'  : '👁 See';
-      var _stayClick = _isStayCandidate ? '' : 'onclick="_pmSetStayOverride(&#39;' + _placeArg + '&#39;, true);event.stopPropagation();"';
-      var _seeClick  = _isStayCandidate ? 'onclick="_pmSetStayOverride(&#39;' + _placeArg + '&#39;, false);event.stopPropagation();"' : '';
-      var stayChip = '<span class="pm-stay-toggle" style="display:inline-flex;align-items:center;gap:3px;">'
-        + '<button type="button" ' + _stayClick + ' style="' + _stayBtnStyle + '" title="' + (_isStayCandidate ? 'Currently set as a stay' : 'Mark as a place to stay') + '">' + _stayLabel + '</button>'
-        + '<button type="button" ' + _seeClick + ' style="' + _seeBtnStyle + '" title="' + (_isStayCandidate ? 'Mark as a see-only place' : 'Currently set as see only') + '">' + _seeLabel + '</button>'
-        + '</span>';
+      // v359.55.10: active role renders as plain colored text (not a
+      // button — it's a status label, not a click target). Inactive
+      // renders as a "+ Role" button to switch. Reads as "this is what
+      // it is now" + "click here to change."
+      var _activeLabelStyle = 'font-size:10px;font-weight:700;padding:1px 2px;letter-spacing:.02em;font-family:inherit;line-height:1.3;cursor:default;';
+      var _inactiveBtnStyle = 'font-size:9.5px;font-weight:600;color:#888;background:#fff;border:1px solid #ddd;padding:1px 7px;border-radius:9px;letter-spacing:.02em;cursor:pointer;font-family:inherit;line-height:1.3;';
+      var stayChip;
+      if (_isStayCandidate) {
+        stayChip = '<span class="pm-stay-toggle" style="display:inline-flex;align-items:center;gap:6px;">'
+          + '<span style="' + _activeLabelStyle + 'color:#1a5fa8;" title="Currently set as a stay">🛏 Stay</span>'
+          + '<button type="button" '
+          +   'onclick="_pmSetStayOverride(&#39;' + _placeArg + '&#39;, false);event.stopPropagation();" '
+          +   'style="' + _inactiveBtnStyle + '" '
+          +   'title="Switch to see-only">+ See</button>'
+          + '</span>';
+      } else {
+        stayChip = '<span class="pm-stay-toggle" style="display:inline-flex;align-items:center;gap:6px;">'
+          + '<button type="button" '
+          +   'onclick="_pmSetStayOverride(&#39;' + _placeArg + '&#39;, true);event.stopPropagation();" '
+          +   'style="' + _inactiveBtnStyle + '" '
+          +   'title="Switch to a place to stay">+ Stay</button>'
+          + '<span style="' + _activeLabelStyle + 'color:#5b3f8f;" title="Currently see-only">👁 See</span>'
+          + '</span>';
+      }
 
       // v359.55.6: research card affordance. When meta has content
       // (notes or links), the 📓 button is filled blue. Empty stays
