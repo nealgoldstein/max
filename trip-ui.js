@@ -1711,6 +1711,32 @@
       }
     };
 
+    // v359.59: "Tidy trip" button — runs the reclassifier. Only
+    // shows when there are sight stops to reshape (i.e., at least one
+    // destination with ≤1 night exists alongside ≥1 overnight hub).
+    // Hidden when the trip is already clean so the header doesn't
+    // carry dead buttons.
+    var _hubCount = 0, _sightCount = 0;
+    (Array.isArray(dests) ? dests : []).forEach(function(d){
+      if (!d) return;
+      if ((d.nights || 0) >= 2) _hubCount++;
+      else _sightCount++;
+    });
+    if (_hubCount >= 1 && _sightCount >= 1) {
+      var tidyBtn = document.createElement("button");
+      tidyBtn.type = "button";
+      tidyBtn.innerHTML = "🪄 Tidy trip";
+      tidyBtn.title = "Reshape " + _sightCount + " sight stop" + (_sightCount === 1 ? "" : "s") + " into day trips and waysides attached to your " + _hubCount + " overnight hub" + (_hubCount === 1 ? "" : "s") + ".";
+      tidyBtn.style.cssText = "font-size:12px;font-weight:600;color:#b06000;background:#fff;border:1px solid #e8c08a;border-radius:6px;padding:6px 11px;cursor:pointer;font-family:inherit;margin-right:6px;white-space:nowrap;";
+      tidyBtn.onmouseover = function(){ tidyBtn.style.background = "#fff5e6"; };
+      tidyBtn.onmouseout  = function(){ tidyBtn.style.background = "#fff"; };
+      tidyBtn.onclick = function(e){
+        e.stopPropagation();
+        if (typeof global._openTidyTripPreview === "function") global._openTidyTripPreview();
+      };
+      listHdr.appendChild(tidyBtn);
+    }
+
     // v359.58: two distinct buttons — operational "Trip notes"
     // (lives on trip.notes, trip-time stuff) and "Research" (lives on
     // trip.brief.tripMeta, planning-stage). The previous single

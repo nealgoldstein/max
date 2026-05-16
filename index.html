@@ -28841,17 +28841,63 @@ function _openTripDestRolePopover(destId){
       + '</label>')
     : '';
 
-  // v359.57.2: directions link from the previous overnight to here.
-  // If src is the first destination, link from the trip's entry
-  // logistics (airport/port) when set; otherwise no row.
+  // v359.59: directions row now walks the incoming transit route and
+  // includes any waysides as waypoints. Origin = prev destination,
+  // destination = current, waypoints = wayside stops in order. The
+  // label uses the last stop before src (which is a wayside if one
+  // exists, otherwise the prev hub) so the route reads naturally.
   var _prevDest = (srcTripIdx > 0) ? trip.destinations[srcTripIdx - 1] : null;
   var _prevC = _prevDest ? _destDirCoord(_prevDest) : null;
   var _srcC = _destDirCoord(src);
-  var _roleDirsUrl = (_prevC && _srcC) ? _directionsUrl([_prevC, _srcC]) : null;
+
+  // Find the transit route from prev → src and pull its stops in
+  // travel order (sorted by distance from `from`, matching the
+  // wayside renderer's logic in updateMainMap).
+  var _wsStops = [];
+  var _wsStopNames = [];
+  if (_prevDest && Array.isArray(trip.routes)) {
+    var _incoming = trip.routes.find(function(r){
+      if (!r || r.fromDestId !== _prevDest.id || r.toDestId !== src.id) return false;
+      var sub = (typeof MaxMigration !== "undefined" && MaxMigration.routeSubKind)
+        ? MaxMigration.routeSubKind(r)
+        : (r.subKind || (r.kind && r.kind !== "route" ? r.kind : null));
+      return sub === "transit";
+    });
+    if (_incoming && Array.isArray(_incoming.planItems) && _prevC) {
+      var _annotated = _incoming.planItems
+        .filter(function(s){ return s && s.type === "stop" && s.placeId; })
+        .map(function(s){
+          var c = _stopDirCoord(s);
+          if (!c) return null;
+          var pName = (trip.places && trip.places[s.placeId] && trip.places[s.placeId].name) || s.placeId;
+          var dKm = (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.haversineKm === "function")
+            ? MaxEngineTrip.haversineKm(_prevC.lat, _prevC.lng, c.lat, c.lng) : 0;
+          return { coord: c, name: pName, dKm: dKm };
+        })
+        .filter(Boolean)
+        .sort(function(a, b){ return a.dKm - b.dKm; });
+      _wsStops = _annotated.map(function(a){ return a.coord; });
+      _wsStopNames = _annotated.map(function(a){ return a.name; });
+    }
+  }
+
+  var _stops = (_prevC && _srcC) ? [_prevC].concat(_wsStops).concat([_srcC]) : null;
+  var _roleDirsUrl = _stops ? _directionsUrl(_stops) : null;
+  // Label: prev → [last wayside →] src. If there are waysides, the
+  // last one immediately preceeds src and reads as the "from" of the
+  // final leg, which matches user intuition driving in.
+  var _routeLabel = "";
+  if (_prevDest) {
+    if (_wsStopNames.length) {
+      _routeLabel = _prevDest.place + " &rarr; " + _wsStopNames.join(" &rarr; ") + " &rarr; " + src.place;
+    } else {
+      _routeLabel = _prevDest.place + " &rarr; " + src.place;
+    }
+  }
   var roleDirsRow = _roleDirsUrl
     ? ('<a id="trip-role-dirs" href="' + _roleDirsUrl + '" target="_blank" rel="noopener" style="text-align:left;padding:10px 12px;border:1px solid #d8e6d0;background:#f3faec;border-radius:8px;cursor:pointer;font-family:inherit;text-decoration:none;display:block;">'
         + '<div style="font-size:12.5px;font-weight:600;color:#3a7a1a;">&#129517; Driving directions to ' + src.place + '</div>'
-        + '<div style="font-size:11px;color:#5a8a3a;margin-top:2px;">' + _prevDest.place + ' &rarr; ' + src.place + ' &mdash; opens ' + (/Mac|iPhone|iPad|iPod/.test((navigator.platform || navigator.userAgent || "")) ? 'Apple' : 'Google') + ' Maps.</div>'
+        + '<div style="font-size:11px;color:#5a8a3a;margin-top:2px;">' + _routeLabel + ' &mdash; opens ' + (/Mac|iPhone|iPad|iPod/.test((navigator.platform || navigator.userAgent || "")) ? 'Apple' : 'Google') + ' Maps.</div>'
       + '</a>')
     : '';
 
@@ -28938,6 +28984,249 @@ function _openTripDestRolePopover(destId){
 // notes-to-self about what to keep). "Trip notes" is for execution —
 // hotel confirmations, packing list, flight times, contacts. Each
 // popover carries a link to the other so the user can jump.
+// v359.59: trip reclassifier. Walks trip.destinations[] and reshapes
+// non-overnight entries (nights ≤ 1) into day trips or waysides
+// attached to the surviving overnight hubs.
+//
+// Why this exists: the LLM marks places overnight:false, but
+// Choreograph currently creates a trip.destinations[] entry for every
+// kept place — so 28 sights end up as standalone overnight stops on
+// the route line, which produces the spaghetti map. This pass
+// reorganizes them according to geography:
+//
+//   • Hub = destination with nights ≥ 2 (the "real" overnight bases).
+//   • Sight = destination with nights ≤ 1.
+//
+// For each sight, in order of preference:
+//   1. WAYSIDE — if it sits between two consecutive hubs in the
+//      itinerary with perp distance ≤ 30 km and parametric t in
+//      [0.15, 0.85]. The sight gets absorbed into the route between
+//      those hubs (existing convertDestToWayside).
+//   2. DAY TRIP — if a hub with strictly more nights lies within
+//      DAY_TRIP_RADIUS_KM. The sight becomes a day trip from that
+//      hub (existing convertDestToDayTrip).
+//   3. SKIP — neither fits. Sight stays as a destination; user
+//      handles manually.
+//
+// The scan is pure (no mutation). Apply runs the existing converters
+// against a snapshot of destIds so subsequent iterations don't
+// re-evaluate the moving array — each iteration uses the originally-
+// scanned src/hub/route identity.
+function _tidyTripScan(){
+  if (!trip || !Array.isArray(trip.destinations)) return { conversions: [], skipped: [], hubs: [], sights: [] };
+  var HUB_NIGHTS_MIN = 2;
+  var DAY_TRIP_RADIUS_KM = (typeof _defaultDayTripRadiusKm === "function") ? _defaultDayTripRadiusKm() : 60;
+  var WAYSIDE_PERP_MAX = 30;
+  var WAYSIDE_T_LO = 0.15, WAYSIDE_T_HI = 0.85;
+
+  function _coordsFor(d){
+    if (!d) return null;
+    if (typeof d.lat === "number" && typeof d.lng === "number") return [d.lat, d.lng];
+    if (typeof getCityCenter === "function" && d.place) {
+      var c = getCityCenter(d.place);
+      if (Array.isArray(c) && isFinite(c[0]) && isFinite(c[1])) return c;
+    }
+    return null;
+  }
+  function _hav(a, b){
+    if (!a || !b || typeof MaxEngineTrip === "undefined" || typeof MaxEngineTrip.haversineKm !== "function") return Infinity;
+    return MaxEngineTrip.haversineKm(a[0], a[1], b[0], b[1]);
+  }
+  function _perpKm(a, b, p){
+    if (!a || !b || !p) return Infinity;
+    var meanLat = (a[0] + b[0] + p[0]) / 3 * Math.PI / 180;
+    var kx = Math.cos(meanLat) * 111.32, ky = 111.32;
+    var ax = a[1] * kx, ay = a[0] * ky;
+    var bx = b[1] * kx, by = b[0] * ky;
+    var px = p[1] * kx, py = p[0] * ky;
+    var dx = bx - ax, dy = by - ay;
+    var len2 = dx*dx + dy*dy;
+    if (len2 < 1e-6) return Math.sqrt((px-ax)*(px-ax) + (py-ay)*(py-ay));
+    var t = ((px - ax) * dx + (py - ay) * dy) / len2;
+    var tC = Math.max(-0.1, Math.min(1.1, t));
+    return { perp: Math.sqrt((px-(ax+tC*dx))*(px-(ax+tC*dx)) + (py-(ay+tC*dy))*(py-(ay+tC*dy))), t: t };
+  }
+
+  // Identify hubs (in array order, since trip.destinations is
+  // chronological) and sights.
+  var hubs = [], sights = [];
+  trip.destinations.forEach(function(d, i){
+    if (!d) return;
+    var rec = { dest: d, idx: i, coords: _coordsFor(d) };
+    if ((d.nights || 0) >= HUB_NIGHTS_MIN) hubs.push(rec);
+    else sights.push(rec);
+  });
+
+  // For each consecutive hub pair, this is a "route corridor."
+  var corridors = [];
+  for (var i = 0; i < hubs.length - 1; i++) {
+    corridors.push({ from: hubs[i], to: hubs[i + 1] });
+  }
+
+  var conversions = []; // [{src, type: 'wayside'|'dayTrip', target, distKm?, perpKm?, t?}]
+  var skipped = [];
+
+  sights.forEach(function(s){
+    if (!s.coords) {
+      skipped.push({ src: s.dest, reason: "no-coords" });
+      return;
+    }
+
+    // 1) Wayside check — find the corridor (consecutive hub pair) the
+    //    sight best fits. Only consider corridors whose hubs flank the
+    //    sight in chronological order.
+    var bestWayside = null;
+    corridors.forEach(function(c){
+      // Sight must be between from and to in array order to be a
+      // proper wayside on THIS corridor.
+      if (s.idx < c.from.idx || s.idx > c.to.idx) return;
+      if (!c.from.coords || !c.to.coords) return;
+      var pp = _perpKm(c.from.coords, c.to.coords, s.coords);
+      if (!pp || pp.perp > WAYSIDE_PERP_MAX) return;
+      if (pp.t < WAYSIDE_T_LO || pp.t > WAYSIDE_T_HI) return;
+      if (!bestWayside || pp.perp < bestWayside.perp) {
+        bestWayside = { from: c.from.dest, to: c.to.dest, perp: pp.perp, t: pp.t };
+      }
+    });
+    if (bestWayside) {
+      conversions.push({ src: s.dest, type: "wayside", from: bestWayside.from, to: bestWayside.to, perpKm: bestWayside.perp });
+      return;
+    }
+
+    // 2) Day-trip check — nearest hub with strictly more nights, in
+    //    range.
+    var bestHub = null;
+    hubs.forEach(function(h){
+      if (h.dest.id === s.dest.id) return;
+      if ((h.dest.nights || 0) <= (s.dest.nights || 0)) return;
+      if (!h.coords) return;
+      var km = _hav(s.coords, h.coords);
+      if (km > DAY_TRIP_RADIUS_KM) return;
+      if (!bestHub || km < bestHub.km) bestHub = { hub: h.dest, km: km };
+    });
+    if (bestHub) {
+      conversions.push({ src: s.dest, type: "dayTrip", hub: bestHub.hub, distKm: bestHub.km });
+      return;
+    }
+
+    // 3) Skip — no fit.
+    skipped.push({ src: s.dest, reason: "no-hub-in-range" });
+  });
+
+  return { conversions: conversions, skipped: skipped, hubs: hubs.map(function(h){return h.dest;}), sights: sights.map(function(s){return s.dest;}) };
+}
+
+function _tidyTripApply(scanResult){
+  if (!scanResult || !Array.isArray(scanResult.conversions)) return 0;
+  var applied = 0;
+  // Apply day-trip conversions FIRST. Each removes its src from
+  // trip.destinations, shrinking the array. Wayside conversions
+  // depend on the array's adjacency, so doing them after means the
+  // array contains only the survivors (hubs + still-to-be-waysided
+  // sights) — closer to the final structure but still walkable by
+  // destId. Each converter is tolerant of the dest being already
+  // moved, so this ordering is robust.
+  scanResult.conversions.forEach(function(c){
+    if (c.type !== "dayTrip") return;
+    if (typeof convertDestToDayTrip === "function" && c.src && c.hub) {
+      try { convertDestToDayTrip(c.src.id, c.hub.id); applied++; }
+      catch(_){ /* swallow per-item; report aggregate */ }
+    }
+  });
+  scanResult.conversions.forEach(function(c){
+    if (c.type !== "wayside") return;
+    if (typeof convertDestToWayside === "function" && c.src) {
+      // Default absorber: next hub (so the night the sight was
+      // holding shifts forward, preserving date alignment).
+      try { convertDestToWayside(c.src.id, { absorbInto: "next" }); applied++; }
+      catch(_){ /* swallow */ }
+    }
+  });
+  return applied;
+}
+
+function _openTidyTripPreview(){
+  var scan = _tidyTripScan();
+  if (!scan.conversions.length && !scan.skipped.length) {
+    if (typeof showSaveStatus === "function") showSaveStatus("Nothing to tidy — every destination is already a hub or already attached.", 3000);
+    return;
+  }
+
+  var existing = document.getElementById("trip-tidy-popover");
+  if (existing) existing.remove();
+  var ov = document.createElement("div");
+  ov.id = "trip-tidy-popover";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.32);z-index:11500;display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto;";
+
+  var waysides = scan.conversions.filter(function(c){return c.type === "wayside";});
+  var dayTrips = scan.conversions.filter(function(c){return c.type === "dayTrip";});
+
+  function _row(label, sub){
+    return '<li style="margin-bottom:4px;line-height:1.5;">'
+      + '<strong style="color:#111;">' + label + '</strong>'
+      + (sub ? ' <span style="color:#666;font-size:11.5px;">' + sub + '</span>' : '')
+      + '</li>';
+  }
+  var waysideHtml = waysides.length
+    ? '<ul style="margin:6px 0 0 18px;padding:0;font-size:12.5px;">'
+        + waysides.map(function(c){
+            return _row(c.src.place, "&rarr; wayside on " + (c.from.place || "?") + " &rarr; " + (c.to.place || "?") + " (" + Math.round(c.perpKm) + " km off route)");
+          }).join("")
+        + '</ul>'
+    : '<div style="font-size:12px;color:#888;font-style:italic;">None</div>';
+  var dayTripHtml = dayTrips.length
+    ? '<ul style="margin:6px 0 0 18px;padding:0;font-size:12.5px;">'
+        + dayTrips.map(function(c){
+            return _row(c.src.place, "&rarr; day trip from " + (c.hub.place || "?") + " (" + Math.round(c.distKm) + " km)");
+          }).join("")
+        + '</ul>'
+    : '<div style="font-size:12px;color:#888;font-style:italic;">None</div>';
+  var skippedHtml = scan.skipped.length
+    ? '<ul style="margin:6px 0 0 18px;padding:0;font-size:12.5px;">'
+        + scan.skipped.map(function(s){
+            return _row(s.src.place, "&rarr; left as a standalone stop (" + (s.reason === "no-hub-in-range" ? "no overnight hub within range" : "no coords") + ")");
+          }).join("")
+        + '</ul>'
+    : '<div style="font-size:12px;color:#888;font-style:italic;">None</div>';
+
+  ov.innerHTML = ''
+    + '<div style="background:#fff;border-radius:12px;max-width:560px;width:100%;box-shadow:0 12px 36px rgba(0,0,0,0.22);max-height:85vh;display:flex;flex-direction:column;">'
+    +   '<div style="padding:18px 20px 6px;border-bottom:1px solid #eee;">'
+    +     '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">Tidy trip preview</div>'
+    +     '<div style="font-size:17px;font-weight:700;color:#111;margin-top:4px;">Reshape sights into day trips and waysides</div>'
+    +     '<div style="font-size:12px;color:#666;margin-top:6px;line-height:1.5;">'
+    +       'Max found <strong>' + scan.hubs.length + ' overnight hubs</strong> and <strong>' + scan.sights.length + ' sight stops</strong>. Each sight gets attached to its best hub (day trip) or route corridor (wayside). Your overnight stays don\'t change.'
+    +     '</div>'
+    +   '</div>'
+    +   '<div style="padding:14px 20px;overflow-y:auto;flex:1;">'
+    +     '<div style="font-size:11px;font-weight:700;color:#5b3f8f;letter-spacing:.04em;text-transform:uppercase;margin-bottom:4px;">Waysides &middot; ' + waysides.length + '</div>'
+    +     waysideHtml
+    +     '<div style="font-size:11px;font-weight:700;color:#5b3f8f;letter-spacing:.04em;text-transform:uppercase;margin:14px 0 4px;">Day trips &middot; ' + dayTrips.length + '</div>'
+    +     dayTripHtml
+    +     (scan.skipped.length ? '<div style="font-size:11px;font-weight:700;color:#b06000;letter-spacing:.04em;text-transform:uppercase;margin:14px 0 4px;">Left alone &middot; ' + scan.skipped.length + '</div>' + skippedHtml : '')
+    +   '</div>'
+    +   '<div style="padding:12px 20px 18px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid #eee;">'
+    +     '<button id="trip-tidy-cancel" style="font-size:13px;font-weight:500;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Cancel</button>'
+    +     '<button id="trip-tidy-apply" style="font-size:13px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 18px;cursor:pointer;font-family:inherit;">Apply (' + scan.conversions.length + ')</button>'
+    +   '</div>'
+    + '</div>';
+
+  document.body.appendChild(ov);
+  function close(){ if (ov && ov.parentNode) ov.parentNode.removeChild(ov); }
+  ov.onclick = function(e){ if (e.target === ov) close(); };
+  var cancelBtn = ov.querySelector("#trip-tidy-cancel");
+  if (cancelBtn) cancelBtn.onclick = close;
+  var applyBtn = ov.querySelector("#trip-tidy-apply");
+  if (applyBtn) applyBtn.onclick = function(){
+    var n = _tidyTripApply(scan);
+    close();
+    if (typeof autoSave === "function") autoSave();
+    if (typeof drawTripMode === "function") drawTripMode();
+    if (typeof showSaveStatus === "function") showSaveStatus("✓ Reshaped " + n + " destination" + (n === 1 ? "" : "s"), 3200);
+  };
+}
+if (typeof globalThis !== "undefined") globalThis._openTidyTripPreview = _openTidyTripPreview;
+
 function _openTripNotesPopover(){
   if (!trip) return;
   var existing = document.getElementById("trip-notes-popover");
