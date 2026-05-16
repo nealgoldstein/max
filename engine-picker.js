@@ -1400,6 +1400,65 @@
 
   async function publishTrip(){
     var kept=(_tb.candidates||[]).filter(function(c){return c.status==="keep";});
+
+    // v359.60.5: reconcile placeActivities → candidates. Completeness-pass
+    // additions (and any other path that adds places to placeActivities
+    // without going through runCandidateSearch) end up checked in
+    // research but invisible here. Walk every checked activity's
+    // requiredPlaces; for each kept place that has NO matching kept
+    // candidate, append a synthetic candidate so it makes it into the
+    // trip. Backstop, not a primary path — the warning logs so we
+    // know when it fires.
+    try {
+      var keptKeys = {};
+      kept.forEach(function(c){
+        if (c && c.place) {
+          var k = _normPlaceName(c.place);
+          if (k) keptKeys[k] = true;
+        }
+      });
+      var injected = [];
+      (Array.isArray(_tb.placeActivities) ? _tb.placeActivities : []).forEach(function(it){
+        if (!it || it.checked === false) return;
+        (it.requiredPlaces || []).forEach(function(p){
+          if (!p || !p.place) return;
+          if (p._keep === false) return;
+          var k = _normPlaceName(p.place);
+          if (!k || keptKeys[k]) return;
+          // No kept candidate exists for this place — synthesize one
+          // and mark kept. Shape matches the stub at runCandidateSearch
+          // line ~6912 so downstream code treats it as a normal
+          // required-anchor candidate.
+          var synth = {
+            place: p.place,
+            country: p.country || "",
+            role: "anchor",
+            stayRange: (typeof p.nights === "number" && p.nights > 0)
+              ? (p.nights + (p.nights === 1 ? " night" : " nights"))
+              : "1-2 nights",
+            whyItFits: it.description || "Added to round out the route.",
+            tradeoffs: "",
+            tags: ["reconciled"],
+            lat: (typeof p.lat === "number") ? p.lat : 0,
+            lng: (typeof p.lng === "number") ? p.lng : 0,
+            nights: (typeof p.nights === "number") ? p.nights : 1,
+            _required: true,
+            _requiredFor: ["reconciled"],
+            status: "keep"
+          };
+          kept.push(synth);
+          keptKeys[k] = true;
+          if (Array.isArray(_tb.candidates)) _tb.candidates.push(synth);
+          injected.push(p.place);
+        });
+      });
+      if (injected.length) {
+        console.log("[Max publishTrip] reconciled " + injected.length + " place(s) from placeActivities into candidates:", injected.join(", "));
+      }
+    } catch(e) {
+      console.warn("[Max publishTrip] placeActivities reconciliation failed (non-fatal):", e && e.message);
+    }
+
     if(!kept.length) return;
 
     // Round HZ (picker hero map, step 7): entry/exit validation.
