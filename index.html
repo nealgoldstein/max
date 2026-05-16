@@ -26873,6 +26873,11 @@ function convertDestToDayTrip(destId, hubDestId, opts){
   if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
     try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
   }
+  // v359.54.9: recompute the over-budget notice — the trip just got
+  // one night shorter (the absorbed dest's nights stayed on the hub
+  // but the total count of distinct stays dropped, and the algorithm
+  // may now find a different proposal). Banner disappears if we fit.
+  if (typeof _reEvaluateOverBudget === "function") _reEvaluateOverBudget();
   _emitTripMutation();
 
   if (!opts.silent && typeof _showDayTripToast === "function") {
@@ -27092,6 +27097,10 @@ function convertDestToWayside(destId, opts){
   // DO NOT call syncTransitRoutes here — we already did the surgery
   // manually and any rebuild would replace our merged route with a
   // fresh one (losing the merged duration/distance/etc).
+
+  // v359.54.9: recompute the over-budget notice so the trip-view
+  // banner clears (or updates) once the wayside conversion lands.
+  if (typeof _reEvaluateOverBudget === "function") _reEvaluateOverBudget();
 
   if (typeof _emitTripMutation === "function") _emitTripMutation();
 
@@ -27587,6 +27596,8 @@ function ungroupWaysideByRouteStop(route, stop, opts){
     try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
   }
 
+  // v359.54.9: trip just gained a destination — recompute over-budget.
+  if (typeof _reEvaluateOverBudget === "function") _reEvaluateOverBudget();
   _emitTripMutation();
 
   // Scroll the new card into view.
@@ -27732,6 +27743,8 @@ function ungroupDayTripByRouteStop(hubDest, route, stop, opts){
     try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
   }
 
+  // v359.54.9: trip just gained a destination — recompute over-budget.
+  if (typeof _reEvaluateOverBudget === "function") _reEvaluateOverBudget();
   _emitTripMutation();
 
   // 6. Scroll the new destination card into view.
@@ -28929,14 +28942,15 @@ function drawTripMode(){
       ));
     }
 
-    // v359.54.8: per-destination reshape suggestions. For each dest
-    // in proposedDeltas (the ones Max would trim), surface ONE-CLICK
-    // conversions to day-trip (absorb into nearest hub) or wayside
-    // (drop a sleep onto the transit route between its neighbors).
-    // Both retain the place on the trip but free up the night —
-    // often what the user actually wants when they're over budget.
+    // v359.54.9: per-destination reshape suggestions. Walks EVERY
+    // destination (not just the ones Max's auto-trim algorithm would
+    // touch) so 1-night stays — the classic wayside candidates —
+    // show up too. Eligibility:
+    //   • Day-trip: any other destination within DAY_TRIP_RADIUS_KM
+    //   • Wayside: has both a prev and a next neighbor in the chain
+    // Each row offers one-click conversion. Banner re-evaluates after.
     (function _waysideAndDayTripSuggestions(){
-      if (!Array.isArray(n.proposedDeltas) || !n.proposedDeltas.length) return;
+      if (!Array.isArray(trip.destinations) || trip.destinations.length < 2) return;
       var DAY_TRIP_RADIUS_KM = (typeof _defaultDayTripRadiusKm === "function") ? _defaultDayTripRadiusKm() : 60;
       // Resolve coordinates: lat/lng on the dest, or geocode by place name.
       function _coordsFor(d){
@@ -28965,24 +28979,32 @@ function drawTripMode(){
         return best;
       }
 
-      var hdr = document.createElement("div");
-      hdr.style.cssText = "margin-top:10px;padding-top:8px;border-top:1px dashed #d8c4a4;font-size:11px;font-weight:700;color:#5c4520;";
-      hdr.textContent = "Or reshape destinations (keep them, free up nights):";
-      btnWrap.appendChild(hdr);
-
-      n.proposedDeltas.forEach(function(d){
-        var dest = trip.destinations.find(function(x){
-          if (!x || !x.place) return false;
-          var k = (typeof _normPlaceName === "function") ? _normPlaceName(x.place) : (x.place||"").toLowerCase();
-          return k === d.key;
-        });
-        if (!dest) return;
-        var destIdx = trip.destinations.indexOf(dest);
+      // First pass: build the list of eligible destinations + their
+      // reshape options. Skip if no destination is eligible (otherwise
+      // we'd render an empty header).
+      var rows = [];
+      trip.destinations.forEach(function(dest, destIdx){
+        if (!dest || !dest.place) return;
         var prev = (destIdx > 0) ? trip.destinations[destIdx - 1] : null;
         var next = (destIdx < trip.destinations.length - 1) ? trip.destinations[destIdx + 1] : null;
         var hubMatch = _bestHubFor(dest);
         var waysideEligible = !!(prev && next);
         if (!hubMatch && !waysideEligible) return;
+        rows.push({ dest: dest, prev: prev, next: next, hubMatch: hubMatch, waysideEligible: waysideEligible });
+      });
+      if (!rows.length) return;
+
+      var hdr = document.createElement("div");
+      hdr.style.cssText = "margin-top:10px;padding-top:8px;border-top:1px dashed #d8c4a4;font-size:11px;font-weight:700;color:#5c4520;";
+      hdr.textContent = "Or reshape destinations (keep them, free up nights):";
+      btnWrap.appendChild(hdr);
+
+      rows.forEach(function(r){
+        var dest = r.dest;
+        var prev = r.prev;
+        var next = r.next;
+        var hubMatch = r.hubMatch;
+        var waysideEligible = r.waysideEligible;
 
         var row = document.createElement("div");
         row.style.cssText = "margin-top:6px;padding:7px 9px;background:#fff;border:1px solid #ead9bb;border-radius:5px;";
