@@ -1269,6 +1269,11 @@
       abilityNote: s.abilityNote || '',
       avoid: Object.assign({}, s.avoid || {}),
       avoidOther: s.avoidOther || '',
+      // v359.55.3: per-place research card data (notes, source links,
+      // stay/see override). Picker is becoming a research document;
+      // this data needs to survive Choreograph + re-edit. Keyed by
+      // normalized place name — see _pmMetaKey in index.html.
+      placeMeta: Object.assign({}, s.placeMeta || {}),
     };
   }
 

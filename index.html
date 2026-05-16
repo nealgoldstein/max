@@ -10156,6 +10156,23 @@ function _renderPlaceActivityItems(){
     if (ra !== rb) return ra - rb;
     return origIdx[a] - origIdx[b];
   });
+  // v359.55.2: user-added section pinned LAST regardless of category
+  // sorting. The earlier categoryRank sort can pull "Places you added"
+  // toward the top when its items don't carry a recognized category;
+  // do a final pass that splits out user-added sections and appends
+  // them after everything else.
+  (function _pinUserAddedSectionsLast(){
+    var userAdded = [];
+    var others = [];
+    sectionOrder.forEach(function(sec){
+      var its = bySection[sec] || [];
+      var isUserAdded = its.some(function(it){ return it && it.type === "manual"; })
+        || /\b(places|things)\s+you\s+added\b/i.test(sec);
+      if (isUserAdded) userAdded.push(sec);
+      else others.push(sec);
+    });
+    sectionOrder = others.concat(userAdded);
+  })();
   // Track which categories we've already printed a header for during
   // the section forEach below.
   var printedCategoryHeaders = {};
@@ -10498,22 +10515,88 @@ function _renderPlaceActivityItems(){
         ? '<span style="font-size:9.5px;font-weight:700;color:#5b3f8f;background:#f4eef9;border:1px solid #d8c4e8;padding:1px 6px;border-radius:9px;letter-spacing:.02em;" title="'+_pmEsc(routeStops.length>1 ? "Also on: " + routeStops.slice(1).join(", ") : "Endpoint of an iconic route experience.")+'">📍 stop on '+_pmEsc(routeStops[0])+'</span>'
         : '';
 
+      // v359.55.2: section-reassignment affordance for user-added places.
+      // The picker treats user-added items as a personal addendum (section
+      // pinned to the end), but users may want to re-file them under one
+      // of Max's themes ("Coastal towns I want to overnight in," etc.) so
+      // the picker becomes a research document, not a stash. A small
+      // "Move to: ▾" select lists every other section.
+      var manualRefs = d.placeRefs.filter(function(r){ return r.item && r.item.type === "manual"; });
+      var moveSelect = "";
+      if (manualRefs.length && sectionOrder.length > 1) {
+        var _actId = manualRefs[0].item.id;
+        var _opts = sectionOrder.map(function(s){
+          var _safe = _pmEsc(s).replace(/"/g, '&quot;');
+          var _selected = (s === sec) ? ' selected' : '';
+          return '<option value="' + _safe + '"' + _selected + '>' + _safe + '</option>';
+        }).join("");
+        // v359.55.3: also offer "+ New section…" so the user can spin
+        // up custom theme labels (matches the picker-as-research-doc
+        // direction — Max's category names aren't the only frame).
+        _opts += '<option value="__new__">+ New section…</option>';
+        moveSelect = '<select class="pm-move-section" '
+          + 'onchange="_pmMoveUserAddedToSection(&#39;' + _pmEsc(_actId) + '&#39;, this.value);event.stopPropagation();" '
+          + 'onclick="event.stopPropagation();" '
+          + 'title="Move this place to a different section" '
+          + 'style="font-size:10px;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:2px 4px;margin-left:6px;font-family:inherit;cursor:pointer;max-width:160px;">' + _opts + '</select>';
+      }
+
       // v359.55.1: stay/see flag. The LLM marks each requiredPlace with
-      // overnight:true|false to signal "city with lodging" vs "standalone
-      // attraction." A small chip on stay-eligible places lets the user
-      // see at a glance which candidates would anchor as a sleep stop
-      // vs. which are pure see-it places (likely candidates for wayside
-      // or day-trip later in the trip view). Absence of the chip means
-      // "see" — quieter for the typical lots-of-sights case.
-      var _isStayCandidate = d.placeRefs.some(function(r){
-        // Treat overnight:true OR an unset flag as "stay-eligible."
-        // (Routes' endpoints with overnight:false are explicitly travel-
-        // through; the LLM marks them.)
+      // overnight:true|false. v359.55.3: the user can override via the
+      // research card (or by clicking the chip). _tb.placeMeta carries
+      // the override; null/undefined falls back to LLM's flag.
+      var _llmIsStay = d.placeRefs.some(function(r){
         return r.placeRef && r.placeRef.overnight !== false;
       });
-      var stayChip = _isStayCandidate
-        ? '<span style="font-size:9.5px;font-weight:700;color:#1a5fa8;background:#eef4fb;border:1px solid #c8d8f0;padding:1px 6px;border-radius:9px;letter-spacing:.02em;" title="A place to stay — sleep here while exploring its sights. Adjust nights in the trip view.">🛏 Stay</span>'
-        : '';
+      var _placeMeta = (_tb && _tb.placeMeta) ? _tb.placeMeta[_pmMetaKey(d.place)] : null;
+      var _stayOverride = _placeMeta && (_placeMeta.stayOverride === true || _placeMeta.stayOverride === false)
+        ? _placeMeta.stayOverride : null;
+      var _isStayCandidate = (_stayOverride !== null) ? _stayOverride : _llmIsStay;
+      // Distinguish "user override" visually with a tiny dot prefix so
+      // the user knows their choice is winning. Pure LLM-default looks
+      // the same as before.
+      var _stayChipBg = (_stayOverride !== null) ? "#dbe9f5" : "#eef4fb";
+      var _stayChipBorder = (_stayOverride !== null) ? "#94b8d8" : "#c8d8f0";
+      var _stayChipTitle = (_stayOverride !== null)
+        ? "You marked this as a stay. Click to cycle: stay → see → use Max's guess."
+        : "Max thinks this is a place to stay. Click to override.";
+      var _seeChipBg = "#f4eef9";
+      var _seeChipBorder = "#d8c4e8";
+      var _seeChipTitle = (_stayOverride !== null)
+        ? "You marked this as a see-only place. Click to cycle: see → use Max's guess → stay."
+        : "Click to mark this as a place to stay.";
+      var stayChip = '';
+      if (_isStayCandidate) {
+        stayChip = '<span class="pm-stay-chip" onclick="_pmCycleStayOverride(&#39;' + _pmEsc(d.place) + '&#39;);event.stopPropagation();" '
+          + 'style="font-size:9.5px;font-weight:700;color:#1a5fa8;background:' + _stayChipBg + ';border:1px solid ' + _stayChipBorder + ';padding:1px 6px;border-radius:9px;letter-spacing:.02em;cursor:pointer;" '
+          + 'title="' + _stayChipTitle + '">🛏 Stay</span>';
+      } else if (_stayOverride === false) {
+        // User explicitly said "see" — show a chip so they can see + cycle off it.
+        stayChip = '<span class="pm-stay-chip" onclick="_pmCycleStayOverride(&#39;' + _pmEsc(d.place) + '&#39;);event.stopPropagation();" '
+          + 'style="font-size:9.5px;font-weight:700;color:#5b3f8f;background:' + _seeChipBg + ';border:1px solid ' + _seeChipBorder + ';padding:1px 6px;border-radius:9px;letter-spacing:.02em;cursor:pointer;" '
+          + 'title="' + _seeChipTitle + '">👁 See</span>';
+      } else {
+        // LLM said "see" and user hasn't overridden — show a discreet
+        // "mark as stay" affordance so the user can promote it.
+        stayChip = '<span class="pm-stay-chip" onclick="_pmCycleStayOverride(&#39;' + _pmEsc(d.place) + '&#39;);event.stopPropagation();" '
+          + 'style="font-size:9.5px;font-weight:600;color:#888;background:#fafafa;border:1px dashed #ddd;padding:1px 6px;border-radius:9px;letter-spacing:.02em;cursor:pointer;" '
+          + 'title="' + _seeChipTitle + '">+ Stay</span>';
+      }
+
+      // v359.55.3: research card affordance. Small "📓" button per
+      // place. If meta has any content (notes, links, override), show
+      // a tiny dot so the user knows there's research attached.
+      var _hasMeta = !!(_placeMeta && (
+        (_placeMeta.notes && _placeMeta.notes.trim())
+        || (Array.isArray(_placeMeta.links) && _placeMeta.links.length)
+        || (_placeMeta.stayOverride !== null && _placeMeta.stayOverride !== undefined)
+      ));
+      var researchBtn = '<button type="button" class="pm-research-btn" '
+        + 'onclick="_pmOpenResearchCard(&#39;' + _pmEsc(d.place) + '&#39;);event.stopPropagation();" '
+        + 'title="Notes, source links, role override" '
+        + 'style="font-size:10.5px;color:' + (_hasMeta ? '#1a5fa8' : '#888') + ';background:' + (_hasMeta ? '#eef4fb' : '#fff') + ';border:1px solid ' + (_hasMeta ? '#c8d8f0' : '#ddd') + ';border-radius:9px;padding:1px 6px;cursor:pointer;font-family:inherit;line-height:1.3;">'
+        + '📓' + (_hasMeta ? '<span style="margin-left:2px;font-size:8px;">●</span>' : '')
+        + '</button>';
       // v357: sidebar ordinal badge removed — sequencing is a trip-view
       // concern. The picker is about WHAT places to include; ordering
       // gets committed in the trip view.
@@ -10575,6 +10658,8 @@ function _renderPlaceActivityItems(){
         +   '<span>'+_pmEsc(d.place)+'</span>'
         +   stayChip
         +   transitChip
+        +   researchBtn
+        +   moveSelect
         // v358.1: removed the floating-popup "?" button. Story info
         // now lives inline as a preview + expand under the place name
         // (see _pmHydratePreview / _pmToggleStoryFull). Less hidden,
@@ -11040,6 +11125,228 @@ function _pmClearDayTripFlag(placeName){
   if (typeof _pmSetPlaceDayTrip !== "function") return;
   var canon = String(placeName || "").toLowerCase();
   _pmSetPlaceDayTrip(canon, false, "");
+}
+
+// v359.55.2: re-file a user-added activity into a different section.
+// The picker exposes a "Move to: ▾" select on user-added rows; this is
+// the writer it calls. Section is just a string label on the activity
+// in _tb.placeActivities; we set it and re-render the list. Idempotent.
+// v359.55.3: if newSection is the magic value "__new__", prompt for a
+// fresh custom section name. Custom names appear alongside LLM
+// sections on the next render (the section-iteration logic just walks
+// unique act.section values).
+function _pmMoveUserAddedToSection(activityId, newSection){
+  if (!_tb || !Array.isArray(_tb.placeActivities)) return;
+  if (!activityId || !newSection) return;
+  var act = _tb.placeActivities.find(function(a){ return a && a.id === activityId; });
+  if (!act) return;
+  if (newSection === "__new__") {
+    var customName = prompt("Name for the new section:", "");
+    if (!customName || !customName.trim()) {
+      // User cancelled or empty — re-render so the select snaps back.
+      if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
+      return;
+    }
+    newSection = customName.trim();
+  }
+  if (act.section === newSection) return;
+  act.section = newSection;
+  if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
+}
+
+// v359.55.3: per-place research metadata. The picker is becoming a
+// research tool (Neal's framing): the user collects places, takes
+// notes on them, saves source links, and decides whether each is a
+// stay or a see. This data lives alongside the LLM's view in _tb so
+// it survives session edits via the same trip.candidates carry-forward
+// that already persists _tb state. Keyed by normalized place name so
+// the same place across multiple activities shares one meta record.
+//
+// Shape:
+//   _tb.placeMeta[normKey] = {
+//     notes: "free text",
+//     links: [{url, domain, addedAt}],
+//     stayOverride: true | false | null   // null = use LLM's overnight flag
+//   }
+function _pmMetaKey(placeName){
+  if (typeof _normPlaceName === "function") return _normPlaceName(placeName || "");
+  return String(placeName || "").trim().toLowerCase();
+}
+function _pmPlaceMeta(placeName, opts){
+  opts = opts || {};
+  if (!_tb) return null;
+  if (!_tb.placeMeta) _tb.placeMeta = {};
+  var key = _pmMetaKey(placeName);
+  if (!key) return null;
+  if (!_tb.placeMeta[key]) {
+    if (!opts.create) return null;
+    _tb.placeMeta[key] = { notes: "", links: [], stayOverride: null };
+  }
+  return _tb.placeMeta[key];
+}
+function _pmExtractDomain(url){
+  try {
+    var u = new URL(url);
+    return u.hostname.replace(/^www\./, "");
+  } catch(_) {
+    return (url || "").replace(/^https?:\/\//, "").replace(/^www\./, "").split(/[\/?#]/)[0] || url;
+  }
+}
+
+// v359.55.3: stay/see cycle on chip click. Tri-state walk:
+//   null (use LLM) → true (stay) → false (see) → null …
+// This way the chip is a discoverable affordance for promote / demote
+// without an extra menu; the research card popover offers the same
+// three states as labeled buttons for users who want explicit choice.
+function _pmCycleStayOverride(placeName){
+  var m = _pmPlaceMeta(placeName, { create: true });
+  if (!m) return;
+  if (m.stayOverride === null || m.stayOverride === undefined) m.stayOverride = true;
+  else if (m.stayOverride === true)  m.stayOverride = false;
+  else /* false */                    m.stayOverride = null;
+  if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
+}
+
+// v359.55.3: open the research card popover for a place. Shows the
+// notes textarea, source-link list, and stay/see override toggle.
+function _pmOpenResearchCard(placeName){
+  var existing = document.getElementById("pm-research-card");
+  if (existing) existing.remove();
+  var m = _pmPlaceMeta(placeName, { create: true });
+  if (!m) return;
+
+  var ov = document.createElement("div");
+  ov.id = "pm-research-card";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.32);z-index:11500;display:flex;align-items:center;justify-content:center;padding:20px;";
+
+  function renderBody(){
+    var linksHtml = (m.links || []).map(function(l, i){
+      var safeUrl = String(l.url || "").replace(/"/g, "&quot;");
+      var safeDom = String(l.domain || _pmExtractDomain(l.url) || "link").replace(/</g, "&lt;");
+      return '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;">'
+        + '<a href="' + safeUrl + '" target="_blank" rel="noopener noreferrer" style="flex:1;color:#1a5fa8;text-decoration:none;font-size:12px;word-break:break-all;">' + safeDom + '</a>'
+        + '<button type="button" data-link-idx="' + i + '" class="pm-rc-del-link" style="font-size:11px;color:#999;background:none;border:1px solid #ddd;border-radius:4px;padding:2px 7px;cursor:pointer;font-family:inherit;" title="Remove this link">×</button>'
+        + '</div>';
+    }).join("");
+    if (!linksHtml) linksHtml = '<div style="font-size:11.5px;color:#999;font-style:italic;padding:4px 0;">No links yet.</div>';
+
+    var stayState = (m.stayOverride !== null && m.stayOverride !== undefined) ? m.stayOverride : null;
+    var stayLbl = stayState === true ? "Stay (override)" : (stayState === false ? "See (override)" : "Use Max's guess");
+
+    return '<div style="background:#fff;border-radius:12px;max-width:460px;width:100%;box-shadow:0 12px 36px rgba(0,0,0,0.22);">'
+      + '<div style="padding:18px 20px 6px;">'
+      +   '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">Research</div>'
+      +   '<div style="font-size:17px;font-weight:700;color:#111;margin-top:4px;">' + (placeName || "").replace(/</g, "&lt;") + '</div>'
+      + '</div>'
+      + '<div style="padding:10px 20px;display:flex;flex-direction:column;gap:14px;">'
+      // Stay/see override
+      +   '<div>'
+      +     '<div style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;margin-bottom:5px;">Role</div>'
+      +     '<div style="display:flex;gap:6px;flex-wrap:wrap;">'
+      +       '<button type="button" data-stay="default" class="pm-rc-stay-btn" style="font-size:11.5px;font-weight:' + (stayState === null ? '700' : '500') + ';color:' + (stayState === null ? '#1a5fa8' : '#555') + ';background:' + (stayState === null ? '#eef4fb' : '#fff') + ';border:1px solid ' + (stayState === null ? '#1a5fa8' : '#ccc') + ';border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;">Use Max\'s guess</button>'
+      +       '<button type="button" data-stay="true" class="pm-rc-stay-btn" style="font-size:11.5px;font-weight:' + (stayState === true ? '700' : '500') + ';color:' + (stayState === true ? '#1a5fa8' : '#555') + ';background:' + (stayState === true ? '#eef4fb' : '#fff') + ';border:1px solid ' + (stayState === true ? '#1a5fa8' : '#ccc') + ';border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;">🛏 Stay</button>'
+      +       '<button type="button" data-stay="false" class="pm-rc-stay-btn" style="font-size:11.5px;font-weight:' + (stayState === false ? '700' : '500') + ';color:' + (stayState === false ? '#5b3f8f' : '#555') + ';background:' + (stayState === false ? '#f4eef9' : '#fff') + ';border:1px solid ' + (stayState === false ? '#5b3f8f' : '#ccc') + ';border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;">👁 See</button>'
+      +     '</div>'
+      +   '</div>'
+      // Notes
+      +   '<div>'
+      +     '<div style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;margin-bottom:5px;">Notes</div>'
+      +     '<textarea id="pm-rc-notes" placeholder="What you\'ve heard, links to come back to, things to verify…" style="width:100%;min-height:80px;font:inherit;font-size:12.5px;line-height:1.5;padding:6px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;color:#111;resize:vertical;box-sizing:border-box;font-family:inherit;">' + String(m.notes || "").replace(/</g, "&lt;") + '</textarea>'
+      +   '</div>'
+      // Source links
+      +   '<div>'
+      +     '<div style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;margin-bottom:5px;">Source links</div>'
+      +     '<div id="pm-rc-links">' + linksHtml + '</div>'
+      +     '<button type="button" id="pm-rc-add-link" style="margin-top:6px;font-size:11.5px;font-weight:600;color:#1a5fa8;background:#fff;border:1px dashed #c8d8f0;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;">+ Add link</button>'
+      +   '</div>'
+      + '</div>'
+      + '<div style="padding:10px 20px 18px;display:flex;justify-content:flex-end;gap:8px;">'
+      +   '<button id="pm-rc-close" style="font-size:13px;font-weight:600;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 16px;cursor:pointer;font-family:inherit;">Done</button>'
+      + '</div>'
+      + '</div>';
+  }
+
+  ov.innerHTML = renderBody();
+  document.body.appendChild(ov);
+
+  function close(){
+    // Save notes on close.
+    var ta = ov.querySelector("#pm-rc-notes");
+    if (ta) m.notes = ta.value;
+    if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+    if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
+  }
+  ov.onclick = function(e){ if (e.target === ov) close(); };
+  ov.querySelector("#pm-rc-close").onclick = close;
+
+  // Stay/see buttons
+  ov.querySelectorAll(".pm-rc-stay-btn").forEach(function(btn){
+    btn.onclick = function(){
+      var v = btn.getAttribute("data-stay");
+      if (v === "default") m.stayOverride = null;
+      else if (v === "true") m.stayOverride = true;
+      else if (v === "false") m.stayOverride = false;
+      // Re-render the popover body in place; keep textarea content.
+      var ta = ov.querySelector("#pm-rc-notes");
+      if (ta) m.notes = ta.value;
+      ov.innerHTML = renderBody();
+      // Rebind handlers — easiest path; popover is small.
+      ov.querySelector("#pm-rc-close").onclick = close;
+      bindLinkActions();
+      bindStayButtons();
+    };
+  });
+  function bindStayButtons(){
+    ov.querySelectorAll(".pm-rc-stay-btn").forEach(function(btn){
+      btn.onclick = function(){
+        var v = btn.getAttribute("data-stay");
+        if (v === "default") m.stayOverride = null;
+        else if (v === "true") m.stayOverride = true;
+        else if (v === "false") m.stayOverride = false;
+        var ta = ov.querySelector("#pm-rc-notes");
+        if (ta) m.notes = ta.value;
+        ov.innerHTML = renderBody();
+        ov.querySelector("#pm-rc-close").onclick = close;
+        bindLinkActions();
+        bindStayButtons();
+      };
+    });
+  }
+
+  function bindLinkActions(){
+    var addBtn = ov.querySelector("#pm-rc-add-link");
+    if (addBtn) addBtn.onclick = function(){
+      var url = prompt("Paste a URL (the source you want to remember for this place):", "https://");
+      if (!url || !url.trim() || url.trim() === "https://") return;
+      var clean = url.trim();
+      // Auto-add scheme if user forgot.
+      if (!/^https?:\/\//i.test(clean)) clean = "https://" + clean;
+      m.links = m.links || [];
+      m.links.push({ url: clean, domain: _pmExtractDomain(clean), addedAt: new Date().toISOString() });
+      // Save notes too before re-render.
+      var ta = ov.querySelector("#pm-rc-notes");
+      if (ta) m.notes = ta.value;
+      ov.innerHTML = renderBody();
+      ov.querySelector("#pm-rc-close").onclick = close;
+      bindLinkActions();
+      bindStayButtons();
+    };
+    ov.querySelectorAll(".pm-rc-del-link").forEach(function(btn){
+      btn.onclick = function(){
+        var idx = parseInt(btn.getAttribute("data-link-idx"), 10);
+        if (isNaN(idx)) return;
+        m.links.splice(idx, 1);
+        var ta = ov.querySelector("#pm-rc-notes");
+        if (ta) m.notes = ta.value;
+        ov.innerHTML = renderBody();
+        ov.querySelector("#pm-rc-close").onclick = close;
+        bindLinkActions();
+        bindStayButtons();
+      };
+    });
+  }
+  bindLinkActions();
+  bindStayButtons();
 }
 
 // v359.5.4: commit a place as a stay. Used by the "+ stay the night"
@@ -15770,6 +16077,9 @@ function reopenPickerForEdit(){
     // v302: hydrate structured pace fields from trip.brief.
     if (typeof trip.brief.hoursPerDay === "number") _tb.hoursPerDay = trip.brief.hoursPerDay;
     if (typeof trip.brief.maxBigSightsPerDay === "number") _tb.maxBigSightsPerDay = trip.brief.maxBigSightsPerDay;
+    // v359.55.3: hydrate the research-card data (notes, source links,
+    // stay/see overrides) so it survives picker reopens after Choreograph.
+    _tb.placeMeta = Object.assign({}, trip.brief.placeMeta || {});
   }
   // Hydrate _tb.placeActivities from trip.mdcItems. Round DX: restore
   // each place's _keep state from the saved record so previously-rejected
