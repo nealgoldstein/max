@@ -11473,6 +11473,46 @@ function _pmMoveUserAddedToSection(activityId, newSection){
   if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
 }
 
+// v359.55.17: research-meta access from any surface (picker OR trip
+// view). _tb is the picker's transient state; trip.brief is the
+// canonical post-Choreograph store. These helpers keep them aligned
+// so the per-place 📓 button on the trip view writes through
+// correctly even when the user never opens the picker this session.
+function _pmEnsureResearchMeta(){
+  if (typeof _tb === "undefined") return;
+  if (!_tb) { /* _tb is declared globally; defensive */ }
+  if (!_tb.placeMeta) _tb.placeMeta = {};
+  if (!_tb.tripMeta)  _tb.tripMeta  = { notes: "", links: [] };
+  // Pull from trip.brief if it has values _tb doesn't.
+  if (typeof trip !== "undefined" && trip && trip.brief) {
+    if (trip.brief.placeMeta) {
+      Object.keys(trip.brief.placeMeta).forEach(function(k){
+        if (!_tb.placeMeta[k]) _tb.placeMeta[k] = trip.brief.placeMeta[k];
+      });
+    }
+    if (trip.brief.tripMeta && !(_tb.tripMeta.notes || (_tb.tripMeta.links || []).length)) {
+      _tb.tripMeta = {
+        notes: trip.brief.tripMeta.notes || "",
+        links: (trip.brief.tripMeta.links || []).slice()
+      };
+    }
+  }
+}
+function _pmPersistResearchToTrip(){
+  if (typeof trip === "undefined" || !trip) return;
+  if (!trip.brief) trip.brief = {};
+  if (typeof _tb !== "undefined" && _tb) {
+    if (_tb.placeMeta) trip.brief.placeMeta = JSON.parse(JSON.stringify(_tb.placeMeta));
+    if (_tb.tripMeta) {
+      trip.brief.tripMeta = {
+        notes: _tb.tripMeta.notes || "",
+        links: (_tb.tripMeta.links || []).slice()
+      };
+    }
+  }
+  if (typeof autoSave === "function") autoSave();
+}
+
 // v359.55.16: inline TODO checkboxes in notes. Any line starting with
 // "[ ]" or "[x]" is rendered as a clickable checkbox below the
 // textarea. Toggling flips the corresponding character in the text.
@@ -11819,7 +11859,16 @@ function _pmOpenTripResearchCard(){
     var ta = ov.querySelector("#pm-trc-notes");
     if (ta) m.notes = ta.value;
     if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+    // v359.55.17: persist to trip.brief + autoSave so trip-view edits
+    // survive reload (the picker re-render hook below is a no-op when
+    // the user is on the trip view; the persistence is the load-bearing
+    // step on that surface).
+    _pmPersistResearchToTrip();
     if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
+    // Also nudge the trip view to refresh if that's where we are.
+    if (typeof _leftMode !== "undefined" && _leftMode === "trip" && typeof drawTripMode === "function") {
+      drawTripMode();
+    }
   }
   ov.onclick = function(e){ if (e.target === ov) close(); };
   ov.querySelector("#pm-trc-close").onclick = close;
@@ -12015,9 +12064,14 @@ function _pmOpenResearchCard(placeName){
   document.body.appendChild(ov);
 
   function close(){
-    // Save notes on close.
+    // Save notes on close. v359.55.17: persist to trip.brief +
+    // autoSave + refresh the active surface (picker or trip view).
     var ta = ov.querySelector("#pm-rc-notes");
     if (ta) m.notes = ta.value;
+    _pmPersistResearchToTrip();
+    setTimeout(function(){
+      if (typeof _leftMode !== "undefined" && _leftMode === "trip" && typeof drawTripMode === "function") drawTripMode();
+    }, 0);
     if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
     if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
   }

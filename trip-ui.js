@@ -1710,6 +1710,30 @@
         }, 120);
       }
     };
+
+    // v359.55.17: Trip-level research button. Same popover the picker
+    // uses; ensures the picker's _tb.tripMeta is sync'd from
+    // trip.brief.tripMeta first.
+    var tripResearchBtn = document.createElement("button");
+    tripResearchBtn.type = "button";
+    var _tripBriefMeta = (trip && trip.brief && trip.brief.tripMeta) || null;
+    var _tripHasMeta = !!(_tripBriefMeta && (
+      (_tripBriefMeta.notes && _tripBriefMeta.notes.trim())
+      || (Array.isArray(_tripBriefMeta.links) && _tripBriefMeta.links.length)
+    ));
+    var _tripLinkN = (_tripBriefMeta && Array.isArray(_tripBriefMeta.links)) ? _tripBriefMeta.links.length : 0;
+    tripResearchBtn.innerHTML = "📓 Trip notes" + (_tripHasMeta ? ' <span style="opacity:.85;font-size:10px;">(' + _tripLinkN + ')</span>' : "");
+    tripResearchBtn.title = _tripHasMeta
+      ? "Trip-wide notes and " + _tripLinkN + " link" + (_tripLinkN === 1 ? "" : "s") + " — click to edit"
+      : "Add notes and source links that apply to the whole trip";
+    tripResearchBtn.style.cssText = "font-size:12px;font-weight:600;color:" + (_tripHasMeta ? "#fff" : "#1a5fa8") + ";background:" + (_tripHasMeta ? "#1a5fa8" : "#fff") + ";border:1px solid #1a5fa8;border-radius:6px;padding:6px 11px;cursor:pointer;font-family:inherit;margin-right:8px;white-space:nowrap;";
+    tripResearchBtn.onclick = function(e){
+      e.stopPropagation();
+      if (typeof global._pmEnsureResearchMeta === "function") global._pmEnsureResearchMeta();
+      if (typeof global._pmOpenTripResearchCard === "function") global._pmOpenTripResearchCard();
+    };
+    listHdr.appendChild(tripResearchBtn);
+
     listHdr.appendChild(addDestBtn);
 
     // ── Row 2: totals line + secondary chips ──
@@ -2166,7 +2190,39 @@
     // exists.
     (function(){
       var roleRow = document.createElement("div");
-      roleRow.style.cssText = "display:flex;justify-content:flex-end;margin-top:6px;";
+      roleRow.style.cssText = "display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:6px;";
+      // v359.55.17: per-destination research card affordance on the
+      // trip-view card. Opens the same popover the picker uses, but
+      // makes sure _tb.placeMeta is populated from trip.brief first
+      // (the user may not have entered the picker this session).
+      var researchBtn = document.createElement("button");
+      researchBtn.type = "button";
+      var _researchMeta = null;
+      try {
+        var brief = (global.trip && global.trip.brief) || null;
+        var meta = brief && brief.placeMeta && typeof global._pmMetaKey === "function"
+          ? brief.placeMeta[global._pmMetaKey(dest.place)] : null;
+        _researchMeta = meta || null;
+      } catch(_){}
+      var _hasResearch = !!(_researchMeta && (
+        (_researchMeta.notes && _researchMeta.notes.trim())
+        || (Array.isArray(_researchMeta.links) && _researchMeta.links.length)
+      ));
+      var _linkN = (_researchMeta && Array.isArray(_researchMeta.links)) ? _researchMeta.links.length : 0;
+      researchBtn.innerHTML = "📓 Research" + (_hasResearch ? ' <span style="opacity:.8;font-size:9.5px;">(' + _linkN + ')</span>' : "");
+      researchBtn.title = _hasResearch
+        ? "Notes and " + _linkN + " link" + (_linkN === 1 ? "" : "s") + " for " + dest.place
+        : "Add notes / source links for " + dest.place;
+      researchBtn.style.cssText = "font-size:10.5px;font-weight:600;color:" + (_hasResearch ? "#fff" : "#1a5fa8") + ";background:" + (_hasResearch ? "#1a5fa8" : "#fff") + ";border:1px solid #c8d8f0;border-radius:5px;padding:3px 9px;cursor:pointer;font-family:inherit;";
+      (function(placeName){
+        researchBtn.onclick = function(e){
+          e.preventDefault();
+          e.stopPropagation();
+          if (typeof global._pmEnsureResearchMeta === "function") global._pmEnsureResearchMeta();
+          if (typeof global._pmOpenResearchCard === "function") global._pmOpenResearchCard(placeName);
+        };
+      })(dest.place);
+      roleRow.appendChild(researchBtn);
       var link = document.createElement("a");
       link.href = "#";
       link.textContent = "↺ Change role";
