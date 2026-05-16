@@ -9294,7 +9294,9 @@ async function generateActivitiesForPlace(){
     if (_completenessBlock) {
       try {
         var _existingPlaces = [];
+        var _existingSections = [];
         items.forEach(function(it){
+          if (it && it.section && _existingSections.indexOf(it.section) < 0) _existingSections.push(it.section);
           (it.requiredPlaces || it.endpoints || it.viableLocations || []).forEach(function(p){
             if (p && p.place && _existingPlaces.indexOf(p.place) < 0) _existingPlaces.push(p.place);
           });
@@ -9304,9 +9306,12 @@ async function generateActivitiesForPlace(){
           + "They explicitly asked for COMPLETENESS — every major stop along the route/loop.\n\n"
           + "Here's my current list of places I'd surface to them:\n"
           + _existingPlaces.map(function(p){ return "  - " + p; }).join("\n") + "\n\n"
+          + "And here are the sections I'm using to organize them (pick from these — or invent a new one if nothing fits):\n"
+          + _existingSections.map(function(s){ return "  - " + s; }).join("\n") + "\n\n"
           + "Are there any MAJOR towns or stops along the geographic route they're asking about that I'm missing? Focus on regional hub towns, gateway towns, fjord bases, ring-road stopovers — places travelers would legitimately want to consider as a base or stop, even if they're not on the canonical tourist circuit.\n\n"
-          + "Return ONLY a JSON array (no markdown). Be honest — if my list is already complete, return []. If you DO add places, each one needs full data:\n"
-          + '[{"place":"<Town name>","country":"<Country>","lat":0.0,"lng":0.0,"overnight":true,"nights":1,"reason":"<one sentence why this belongs>"}]\n\n'
+          + "Return ONLY a JSON array (no markdown). Be honest — if my list is already complete, return []. If you DO add places, each one needs full data INCLUDING which section it belongs in:\n"
+          + '[{"place":"<Town name>","country":"<Country>","lat":0.0,"lng":0.0,"nights":1,"category":"<one of the six categories>","section":"<section name — prefer existing>","reason":"<one sentence why this belongs"}]\n\n'
+          + "Categories: outdoors-active, scenery-nature, culture-history, food-drink, connection-gatherings, wellness-growth.\n"
           + "Don't add places I already have. Don't pad — add only genuine gaps.";
         var checkText = await callMax([{role:"user", content: checkPrompt}], 1500, 60000);
         var checkClean = checkText.replace(/```json|```/g, "").trim();
@@ -9314,18 +9319,26 @@ async function generateActivitiesForPlace(){
         try { missing = JSON.parse(checkClean); } catch(_){ missing = []; }
         if (Array.isArray(missing) && missing.length) {
           console.log("[Max] completeness pass added " + missing.length + " place(s):",
-            missing.map(function(p){return p.place;}).join(", "));
-          // Wrap each missing place into a synthesized "activity" item
-          // so it flows through the normal picker pipeline (renders as
-          // a row in its own section, supports keep/reject, etc.).
+            missing.map(function(p){return p.place + " (→ " + (p.section || "no section") + ")";}).join(", "));
+          // v359.55.12: file each completeness-pass place under the
+          // LLM-provided section so it integrates with the regular
+          // picker structure. Default overnight:false → renders as
+          // See; user promotes via the chip if they actually want to
+          // sleep there.
           missing.forEach(function(p, i){
             if (!p || !p.place) return;
+            var _section = (p.section && typeof p.section === "string" && p.section.trim())
+              ? p.section.trim()
+              : "Other places to consider";
+            var _category = (p.category && typeof p.category === "string" && p.category.trim())
+              ? p.category.trim()
+              : "scenery-nature";
             items.push({
               id: "mit_" + Date.now() + "_" + i,
               name: "Visit " + p.place,
               type: "activity",
-              category: "scenery-nature",
-              section: "Stops along the way",
+              category: _category,
+              section: _section,
               description: p.reason || "A stop along the route worth considering.",
               iconic: false,
               checked: false,
@@ -9335,7 +9348,7 @@ async function generateActivitiesForPlace(){
                 nights: (typeof p.nights === "number") ? p.nights : 1,
                 lat: (typeof p.lat === "number") ? p.lat : 0,
                 lng: (typeof p.lng === "number") ? p.lng : 0,
-                overnight: (p.overnight !== false)
+                overnight: false
               }],
               durationHours: 2
             });
@@ -10377,23 +10390,54 @@ function _renderPlaceActivityItems(){
     list.appendChild(trans);
   })();
 
+  // v359.55.12: section TOC at the top of the picker. Replaces the
+  // static 6-category nav chips (_renderPickerCategoryNav) and the
+  // category-divider headers that used to render between section
+  // groups. Reasoning: the LLM's section names ARE the meaningful
+  // organizing unit; the 6 canonical categories were a hidden
+  // intermediate axis the user didn't navigate by. Click any TOC
+  // entry to scroll to that section.
+  function _pmSectionSlug(sec){
+    return "tb-sec-" + String(sec || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  }
+  (function _renderSectionTOC(){
+    if (!sectionOrder.length) return;
+    var toc = document.createElement("div");
+    toc.style.cssText = "margin:0 0 14px;padding:12px 14px;background:#fafafa;border:1px solid #e8e6df;border-radius:8px;";
+    var tocHdr = document.createElement("div");
+    tocHdr.style.cssText = "font-size:10px;font-weight:700;color:#888;letter-spacing:.05em;text-transform:uppercase;margin-bottom:8px;";
+    tocHdr.textContent = "What's here";
+    toc.appendChild(tocHdr);
+    var tocList = document.createElement("div");
+    tocList.style.cssText = "display:flex;flex-wrap:wrap;gap:4px 8px;";
+    sectionOrder.forEach(function(sec){
+      var secItems = bySection[sec] || [];
+      var countText = secItems.length + (secItems.length === 1 ? "" : "");
+      var link = document.createElement("a");
+      link.href = "#" + _pmSectionSlug(sec);
+      link.style.cssText = "font-size:12px;color:#1a5fa8;text-decoration:none;padding:3px 8px;border-radius:5px;background:#fff;border:1px solid #d8e3f0;cursor:pointer;line-height:1.4;";
+      link.textContent = sec + " (" + secItems.length + ")";
+      link.onmouseover = function(){ link.style.background = "#eef4fb"; };
+      link.onmouseout  = function(){ link.style.background = "#fff"; };
+      (function(secName){
+        link.onclick = function(e){
+          e.preventDefault();
+          var anchor = document.getElementById(_pmSectionSlug(secName));
+          if (anchor && anchor.scrollIntoView) anchor.scrollIntoView({behavior:"smooth", block:"start"});
+        };
+      })(sec);
+      tocList.appendChild(link);
+    });
+    toc.appendChild(tocList);
+    list.appendChild(toc);
+  })();
+
   sectionOrder.forEach(function(sec){
-    // Round CZ: emit a category header before the first section of each
-    // category. Categories with no sections are skipped naturally
-    // because we only print on first-encounter.
-    var cat = sectionCategoryMap[sec];
-    if (cat && !printedCategoryHeaders[cat]) {
-      var catDef = _CATEGORIES.find(function(c){return c.id === cat;});
-      if (catDef) {
-        var catHdr = document.createElement("div");
-        catHdr.className = "tb-act-category-hdr";
-        catHdr.id = "tb-cat-anchor-" + cat;
-        catHdr.style.cssText = "font-size:13px;font-weight:700;color:#1a1a1a;margin:18px 0 4px;padding:8px 0 6px;border-bottom:1px solid #e6e2d8;display:flex;align-items:center;gap:8px;scroll-margin-top:80px;";
-        catHdr.innerHTML = '<span style="font-size:16px;">' + catDef.emoji + '</span><span>' + catDef.label + '</span>';
-        list.appendChild(catHdr);
-      }
-      printedCategoryHeaders[cat] = true;
-    }
+    // v359.55.12: category header rendering retired — the section TOC
+    // above replaces this affordance. The old code emitted a divider
+    // header before the first section of each canonical category;
+    // sections now flow uncategorized, with the TOC giving the user
+    // an at-a-glance index.
     var secItems = bySection[sec];
 
     // Determine if this is a route section. Route items get a different
@@ -10413,6 +10457,8 @@ function _renderPlaceActivityItems(){
       });
       var hdrWrapR = document.createElement("div");
       hdrWrapR.className = "tb-act-section-hdr" + (secKeptR ? " on" : "");
+      hdrWrapR.id = _pmSectionSlug(sec);
+      hdrWrapR.style.scrollMarginTop = "80px";
       var moreBtnHtmlR = '<button type="button" class="tb-more-like-btn" '
         + 'onclick="expandActivitySection(this.dataset.section);event.stopPropagation();" '
         + 'data-section="'+_pmEsc(sec).replace(/"/g,'&quot;')+'" '
@@ -10497,6 +10543,8 @@ function _renderPlaceActivityItems(){
     // LLM for additional places where this section's activity is iconic.
     var hdrWrap = document.createElement("div");
     hdrWrap.className = "tb-act-section-hdr" + (secKept ? " on" : "");
+    hdrWrap.id = _pmSectionSlug(sec);
+    hdrWrap.style.scrollMarginTop = "80px";
     // "+ more like this" available on all sections, including routes —
     // mountain railways and lake circuits both have iconic options beyond
     // the most-canonical few (Schilthornbahn, Klein Matterhorn, Stanserhorn,
@@ -10837,9 +10885,12 @@ function _renderPlaceActivityItems(){
     _pmStoryObserver = null;
   }
 
-  // Round DN.1: build the sticky category nav from the categories that
-  // actually rendered headers above. Empty categories don't show up.
-  _renderPickerCategoryNav(printedCategoryHeaders, items);
+  // v359.55.12: category nav retired in favor of the section TOC
+  // rendered at the top of the list (_renderSectionTOC above).
+  // _renderPickerCategoryNav is still defined; called with an empty
+  // map it self-hides, so this is functionally a no-op even if some
+  // CSS or test references the #tb-cat-nav element.
+  _renderPickerCategoryNav({}, items);
 
   // v359.32: hydrate Wikipedia thumbnails + factual descriptions on
   // every destination row. Same place can appear in multiple section
