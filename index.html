@@ -11216,8 +11216,20 @@ function _pmOpenResearchCard(placeName){
     }).join("");
     if (!linksHtml) linksHtml = '<div style="font-size:11.5px;color:#999;font-style:italic;padding:4px 0;">No links yet.</div>';
 
-    var stayState = (m.stayOverride !== null && m.stayOverride !== undefined) ? m.stayOverride : null;
-    var stayLbl = stayState === true ? "Stay (override)" : (stayState === false ? "See (override)" : "Use Max's guess");
+    // v359.55.5: two-button role toggle. "Use Max's guess" reset
+    // dropped — once the user makes a choice, reverting is the same
+    // as making the opposite choice. Effective stay state combines
+    // user override with LLM default for highlighting.
+    var _llmStayForPopover = false;
+    try {
+      var _key = _pmMetaKey(placeName);
+      (_tb.placeActivities || []).forEach(function(a){
+        (a.requiredPlaces || []).forEach(function(p){
+          if (p && _pmMetaKey(p.place) === _key && p.overnight !== false) _llmStayForPopover = true;
+        });
+      });
+    } catch(_){}
+    var stayActive = (m.stayOverride === true) || (m.stayOverride !== false && _llmStayForPopover);
 
     return '<div style="background:#fff;border-radius:12px;max-width:460px;width:100%;box-shadow:0 12px 36px rgba(0,0,0,0.22);">'
       + '<div style="padding:18px 20px 6px;">'
@@ -11225,13 +11237,12 @@ function _pmOpenResearchCard(placeName){
       +   '<div style="font-size:17px;font-weight:700;color:#111;margin-top:4px;">' + (placeName || "").replace(/</g, "&lt;") + '</div>'
       + '</div>'
       + '<div style="padding:10px 20px;display:flex;flex-direction:column;gap:14px;">'
-      // Stay/see override
+      // Stay/see — two buttons; current state highlighted.
       +   '<div>'
       +     '<div style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;margin-bottom:5px;">Role</div>'
       +     '<div style="display:flex;gap:6px;flex-wrap:wrap;">'
-      +       '<button type="button" data-stay="default" class="pm-rc-stay-btn" style="font-size:11.5px;font-weight:' + (stayState === null ? '700' : '500') + ';color:' + (stayState === null ? '#1a5fa8' : '#555') + ';background:' + (stayState === null ? '#eef4fb' : '#fff') + ';border:1px solid ' + (stayState === null ? '#1a5fa8' : '#ccc') + ';border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;">Use Max\'s guess</button>'
-      +       '<button type="button" data-stay="true" class="pm-rc-stay-btn" style="font-size:11.5px;font-weight:' + (stayState === true ? '700' : '500') + ';color:' + (stayState === true ? '#1a5fa8' : '#555') + ';background:' + (stayState === true ? '#eef4fb' : '#fff') + ';border:1px solid ' + (stayState === true ? '#1a5fa8' : '#ccc') + ';border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;">🛏 Stay</button>'
-      +       '<button type="button" data-stay="false" class="pm-rc-stay-btn" style="font-size:11.5px;font-weight:' + (stayState === false ? '700' : '500') + ';color:' + (stayState === false ? '#5b3f8f' : '#555') + ';background:' + (stayState === false ? '#f4eef9' : '#fff') + ';border:1px solid ' + (stayState === false ? '#5b3f8f' : '#ccc') + ';border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;">👁 See</button>'
+      +       '<button type="button" data-stay="true" class="pm-rc-stay-btn" style="font-size:11.5px;font-weight:' + (stayActive ? '700' : '500') + ';color:' + (stayActive ? '#1a5fa8' : '#555') + ';background:' + (stayActive ? '#eef4fb' : '#fff') + ';border:1px solid ' + (stayActive ? '#1a5fa8' : '#ccc') + ';border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;">🛏 Stay</button>'
+      +       '<button type="button" data-stay="false" class="pm-rc-stay-btn" style="font-size:11.5px;font-weight:' + (!stayActive ? '700' : '500') + ';color:' + (!stayActive ? '#5b3f8f' : '#555') + ';background:' + (!stayActive ? '#f4eef9' : '#fff') + ';border:1px solid ' + (!stayActive ? '#5b3f8f' : '#ccc') + ';border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;">👁 See</button>'
       +     '</div>'
       +   '</div>'
       // Notes
@@ -11269,8 +11280,7 @@ function _pmOpenResearchCard(placeName){
   ov.querySelectorAll(".pm-rc-stay-btn").forEach(function(btn){
     btn.onclick = function(){
       var v = btn.getAttribute("data-stay");
-      if (v === "default") m.stayOverride = null;
-      else if (v === "true") m.stayOverride = true;
+      if (v === "true") m.stayOverride = true;
       else if (v === "false") m.stayOverride = false;
       // Re-render the popover body in place; keep textarea content.
       var ta = ov.querySelector("#pm-rc-notes");
