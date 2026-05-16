@@ -9155,6 +9155,33 @@ async function generateActivitiesForPlace(){
       }
     }
   } catch(e) { console.warn("[Max] budget block build failed:", e); }
+
+  // v359.55.9: geographic-completeness signal detection. When the
+  // traveler explicitly asks for "every stop on the X" / "complete the
+  // ring road" / "all the way around," the LLM's tendency to pick
+  // headliner cities + iconic sights silently drops waypoint towns
+  // that aren't internationally famous (e.g. Egilsstaðir on Iceland's
+  // Route 1). This block tells the model that the user's words are a
+  // hard constraint to enumerate against, not a vague preference.
+  var _completenessBlock = "";
+  try {
+    var _completenessHay = [
+      ctx || "",
+      _tb.intent || "",
+      _tb.placeContext || "",
+      _tb.activityDesc || ""
+    ].join(" ").toLowerCase();
+    var _completenessRe = /(complete|every stop|all the way|all the stops|whole loop|entire loop|whole circuit|entire circuit|every town|all towns|ring road|grand tour|full circuit|loop the|round trip the|cover the entire|every major)/;
+    if (_completenessRe.test(_completenessHay)) {
+      _completenessBlock = "\nGEOGRAPHIC COMPLETENESS — HARD CONSTRAINT, read carefully:\n"
+        + "  - The traveler explicitly asked for a complete / every-stop / whole-loop trip. This is NOT a vague preference; it's a list-every-major-town requirement.\n"
+        + "  - Enumerate EVERY major town, gateway, and waypoint along the route or loop they're asking about — not just the iconic headliners. Include regional hubs, fjord-base towns, ring-road stopovers, and gateway villages that travelers actually sleep in along the route, even if they aren't on the canonical tourist circuit.\n"
+        + "  - For Iceland's Route 1 specifically, that means including (at minimum) every major town with lodging that's a legitimate overnight base along the ring — west, north, east, and south. Don't skip the east-fjord gateway or any other multi-hour-drive-from-the-next-town hub.\n"
+        + "  - Mark these waypoint towns overnight:true ONLY if they're real multi-night bases. For pass-through towns that the traveler will actually stop at for a meal / photo / break, mark overnight:false but still include them.\n"
+        + "  - The traveler's words override the usual 'cluster ruthlessly' rule. They've explicitly chosen breadth over selectivity.\n\n";
+    }
+  } catch(e) { console.warn("[Max] completeness block build failed:", e); }
+
   // v353.4: prompt is region-agnostic. Earlier versions had hard-coded
   // Switzerland knowledge (must-include cities, named-train endpoints,
   // Swiss JSON examples) that pulled non-Swiss outputs toward Swiss
@@ -9169,6 +9196,7 @@ async function generateActivitiesForPlace(){
     + (ctx ? "Context about this trip: " + ctx + "\n" : "")
     + _briefBlock
     + _budgetBlock
+    + _completenessBlock
     + (pmChips.length ? "General interests they tagged (use these to bias what you surface, but don\u2019t shoehorn): " + pmChips.join(", ") + "\n" : "")
     + "\nThey haven\u2019t told you what they want to do yet \u2014 they chose a place and want you to map out what\u2019s actually there, so they can decide what matters. Surface the routes, the condition-dependent experiences, and the activities that make this place worth the trip. Be honest about the best of what\u2019s there; don\u2019t pad with generic items.\n\n"
     + "There are three types.\n\n"
@@ -9255,6 +9283,67 @@ async function generateActivitiesForPlace(){
         if(p && typeof p === "object" && p.place) return p;
         return p;
       });
+    }
+
+    // v359.55.9: post-LLM completeness check. When the user said
+    // "complete the ring road" / "every stop" etc., the first
+    // candidate-gen pass tends to favor headliner cities and miss
+    // legitimate waypoint towns. Run a second LLM call asking
+    // explicitly: "given this list, are there major route waypoints
+    // missing?" Append any returned places as a new section.
+    if (_completenessBlock) {
+      try {
+        var _existingPlaces = [];
+        items.forEach(function(it){
+          (it.requiredPlaces || it.endpoints || it.viableLocations || []).forEach(function(p){
+            if (p && p.place && _existingPlaces.indexOf(p.place) < 0) _existingPlaces.push(p.place);
+          });
+        });
+        var checkPrompt = "A traveler is planning a trip to " + place + ".\n"
+          + "Their context: " + (ctx || _tb.intent || "[no context]") + "\n\n"
+          + "They explicitly asked for COMPLETENESS — every major stop along the route/loop.\n\n"
+          + "Here's my current list of places I'd surface to them:\n"
+          + _existingPlaces.map(function(p){ return "  - " + p; }).join("\n") + "\n\n"
+          + "Are there any MAJOR towns or stops along the geographic route they're asking about that I'm missing? Focus on regional hub towns, gateway towns, fjord bases, ring-road stopovers — places travelers would legitimately want to consider as a base or stop, even if they're not on the canonical tourist circuit.\n\n"
+          + "Return ONLY a JSON array (no markdown). Be honest — if my list is already complete, return []. If you DO add places, each one needs full data:\n"
+          + '[{"place":"<Town name>","country":"<Country>","lat":0.0,"lng":0.0,"overnight":true,"nights":1,"reason":"<one sentence why this belongs>"}]\n\n'
+          + "Don't add places I already have. Don't pad — add only genuine gaps.";
+        var checkText = await callMax([{role:"user", content: checkPrompt}], 1500, 60000);
+        var checkClean = checkText.replace(/```json|```/g, "").trim();
+        var missing = [];
+        try { missing = JSON.parse(checkClean); } catch(_){ missing = []; }
+        if (Array.isArray(missing) && missing.length) {
+          console.log("[Max] completeness pass added " + missing.length + " place(s):",
+            missing.map(function(p){return p.place;}).join(", "));
+          // Wrap each missing place into a synthesized "activity" item
+          // so it flows through the normal picker pipeline (renders as
+          // a row in its own section, supports keep/reject, etc.).
+          missing.forEach(function(p, i){
+            if (!p || !p.place) return;
+            items.push({
+              id: "mit_" + Date.now() + "_" + i,
+              name: "Visit " + p.place,
+              type: "activity",
+              category: "scenery-nature",
+              section: "Stops along the way",
+              description: p.reason || "A stop along the route worth considering.",
+              iconic: false,
+              checked: false,
+              requiredPlaces: [{
+                place: p.place,
+                country: p.country || regionCountry,
+                nights: (typeof p.nights === "number") ? p.nights : 1,
+                lat: (typeof p.lat === "number") ? p.lat : 0,
+                lng: (typeof p.lng === "number") ? p.lng : 0,
+                overnight: (p.overnight !== false)
+              }],
+              durationHours: 2
+            });
+          });
+        }
+      } catch(e) {
+        console.warn("[Max] completeness check pass failed (non-fatal):", e && e.message);
+      }
     }
     // Build a keyword set from whatever the user said about the trip. If they
     // wrote "ride named trains through the mountains, take walks … eat chocolate",
