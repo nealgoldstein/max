@@ -28606,14 +28606,29 @@ function _openTripDestRolePopover(destId){
       return { hub: h, distKm: d, inRange: (d != null && d <= DAY_TRIP_RADIUS_KM) };
     })
     .sort(function(a, b){
-      // Known distances first (sorted ascending), unknowns last in
-      // trip order — better than swallowing them.
+      // v359.58.3: hubs with strictly more nights come first — they
+      // are the only ones that can legitimately ABSORB the src as a
+      // day trip. A nearby destination with same-or-fewer nights at
+      // the top of the dropdown was suggesting Goðafoss as a hub for
+      // Akureyri, which is nonsense (Goðafoss is a waterfall, not a
+      // base). Same-nights / fewer-nights hubs are still listed
+      // afterward so the user can manually pick one if they have a
+      // reason to.
+      var srcN = src.nights || 0;
+      var aValid = (a.hub.nights || 0) > srcN ? 0 : 1;
+      var bValid = (b.hub.nights || 0) > srcN ? 0 : 1;
+      if (aValid !== bValid) return aValid - bValid;
+      // Within the same validity tier, sort by distance (known first).
       if (a.distKm == null && b.distKm == null) return 0;
       if (a.distKm == null) return 1;
       if (b.distKm == null) return -1;
       return a.distKm - b.distKm;
     });
-  var dayTripAvailable = hubOptions.length > 0;
+  // Only treat as "day-trip-available" if at least one hub has MORE
+  // nights than src. The dropdown still lists all destinations so the
+  // user can pick a same-nights hub if they want, but the day-trip
+  // ROW itself only shows when there's a real hub option.
+  var dayTripAvailable = hubOptions.some(function(o){ return (o.hub.nights || 0) > (src.nights || 0); });
   var defaultHubId = hubOptions[0] ? hubOptions[0].hub.id : null;
 
   // v359.54.2: wayside eligibility — source must have both a previous
@@ -28668,15 +28683,40 @@ function _openTripDestRolePopover(destId){
   var dayTripCandidate = !!(_bestHubOpt && _srcNights <= 2);
   var dayTripSuggestedHubId = _bestHubOpt ? _bestHubOpt.hub.id : defaultHubId;
 
+  // v359.58.3: tighter wayside test. Geometric "on the line" isn't
+  // enough — when next is co-located with src (e.g. Goðafoss sitting
+  // 26 km from Akureyri), src ends up 92% of the way along the line
+  // and the algorithm misreads src as "along the way" when really
+  // next should be the wayside. Add two constraints:
+  //   • Both legs ≥ 25 km (rules out trivially-short next)
+  //   • Parametric t between 0.15 and 0.85 (src is genuinely between,
+  //     not jammed up against either endpoint)
+  function _hav(a, b) {
+    if (!a || !b || typeof MaxEngineTrip === "undefined" || typeof MaxEngineTrip.haversineKm !== "function") return Infinity;
+    return MaxEngineTrip.haversineKm(a[0], a[1], b[0], b[1]);
+  }
   var waysidePerpKm = Infinity;
+  var waysideRouteKm = Infinity;
+  var waysideT = 0.5;
+  var prevToSrcKm = Infinity;
+  var srcToNextKm = Infinity;
   if (waysideAvailable && srcCoords) {
     var _prevC = _coordsFor(waysidePrev);
     var _nextC = _coordsFor(waysideNext);
     if (_prevC && _nextC) {
       waysidePerpKm = _perpKm(_prevC, _nextC, srcCoords);
+      waysideRouteKm = _hav(_prevC, _nextC);
+      prevToSrcKm = _hav(_prevC, srcCoords);
+      srcToNextKm = _hav(srcCoords, _nextC);
+      if (waysideRouteKm > 0.001) waysideT = prevToSrcKm / waysideRouteKm;
     }
   }
-  var waysideCandidate = waysideAvailable && waysidePerpKm <= 40;
+  var waysideCandidate = waysideAvailable
+    && waysidePerpKm <= 40
+    && prevToSrcKm >= 25
+    && srcToNextKm >= 25
+    && waysideT >= 0.15
+    && waysideT <= 0.85;
 
   // Pick suggested role.
   var suggestedRole = "stay";
