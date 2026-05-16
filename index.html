@@ -11379,6 +11379,85 @@ function _pmMoveUserAddedToSection(activityId, newSection){
   if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
 }
 
+// v359.55.14: voice input for notes textareas via Web Speech API.
+// Wired to both research cards (per-place + trip-level). Falls back
+// to hiding the button on browsers without SpeechRecognition.
+function _pmSupportsDictation(){
+  return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+}
+function _pmAttachDictation(button, textarea){
+  if (!button || !textarea) return;
+  if (!_pmSupportsDictation()) {
+    button.style.display = "none";
+    return;
+  }
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var recog = null;
+  var baseText = "";
+  var finalRun = "";
+
+  function setIdle(){
+    button.innerHTML = '🎤 Dictate';
+    button.style.background = "#fff";
+    button.style.color = "#1a5fa8";
+    button.style.borderColor = "#c8d8f0";
+    button.title = "Start voice dictation — tap, speak, tap again to stop";
+    button.dataset.listening = "false";
+  }
+  function setListening(){
+    button.innerHTML = '⏹ Stop';
+    button.style.background = "#fff0f0";
+    button.style.color = "#c44";
+    button.style.borderColor = "#e09090";
+    button.title = "Listening — tap to stop";
+    button.dataset.listening = "true";
+  }
+  setIdle();
+
+  button.onclick = function(e){
+    if (e && e.preventDefault) e.preventDefault();
+    if (e && e.stopPropagation) e.stopPropagation();
+    if (button.dataset.listening === "true" && recog) {
+      try { recog.stop(); } catch(_){}
+      return;
+    }
+    try {
+      recog = new SR();
+      recog.continuous = true;
+      recog.interimResults = true;
+      recog.lang = (navigator.language || "en-US");
+      // Append (don't replace): remember existing text + add a space
+      // separator if needed so dictation flows from where the user was.
+      baseText = textarea.value || "";
+      if (baseText && !/\s$/.test(baseText)) baseText += " ";
+      finalRun = "";
+
+      recog.onresult = function(ev){
+        var finalText = "", interimText = "";
+        for (var i = 0; i < ev.results.length; i++) {
+          var res = ev.results[i];
+          if (res.isFinal) finalText += res[0].transcript;
+          else interimText += res[0].transcript;
+        }
+        if (finalText) finalRun += finalText;
+        textarea.value = baseText + finalRun + interimText;
+      };
+      recog.onend = function(){ setIdle(); recog = null; };
+      recog.onerror = function(err){
+        console.warn("[Max] dictation error:", err && err.error);
+        setIdle();
+        recog = null;
+      };
+
+      setListening();
+      recog.start();
+    } catch(err) {
+      console.warn("[Max] dictation start failed:", err);
+      setIdle();
+    }
+  };
+}
+
 // v359.55.13: trip-level research metadata. Mirrors _pmPlaceMeta but
 // for the trip as a whole — overall thoughts, gear lists, general
 // travel guides, anything that isn't tied to a single destination.
@@ -11425,7 +11504,10 @@ function _pmOpenTripResearchCard(){
       + '</div>'
       + '<div style="padding:10px 20px;display:flex;flex-direction:column;gap:14px;">'
       +   '<div>'
-      +     '<div style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;margin-bottom:5px;">Notes</div>'
+      +     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;gap:8px;">'
+      +       '<span style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;">Notes</span>'
+      +       '<button type="button" id="pm-trc-dictate" style="font-size:11px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:3px 8px;cursor:pointer;font-family:inherit;">🎤 Dictate</button>'
+      +     '</div>'
       +     '<textarea id="pm-trc-notes" placeholder="What you\'ve learned, timing concerns, gear, things to pack, general questions to resolve…" style="width:100%;min-height:100px;font:inherit;font-size:12.5px;line-height:1.5;padding:6px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;color:#111;resize:vertical;box-sizing:border-box;font-family:inherit;">' + String(m.notes || "").replace(/</g, "&lt;") + '</textarea>'
       +   '</div>'
       +   '<div>'
@@ -11466,6 +11548,7 @@ function _pmOpenTripResearchCard(){
       ov.innerHTML = renderBody();
       ov.querySelector("#pm-trc-close").onclick = close;
       bindLinkActions();
+      bindDictation();
     };
     ov.querySelectorAll(".pm-trc-del-link").forEach(function(btn){
       btn.onclick = function(){
@@ -11477,10 +11560,15 @@ function _pmOpenTripResearchCard(){
         ov.innerHTML = renderBody();
         ov.querySelector("#pm-trc-close").onclick = close;
         bindLinkActions();
+        bindDictation();
       };
     });
   }
+  function bindDictation(){
+    _pmAttachDictation(ov.querySelector("#pm-trc-dictate"), ov.querySelector("#pm-trc-notes"));
+  }
   bindLinkActions();
+  bindDictation();
 }
 
 // v359.55.3: per-place research metadata. The picker is becoming a
@@ -11586,7 +11674,10 @@ function _pmOpenResearchCard(placeName){
       +   '</div>'
       // Notes
       +   '<div>'
-      +     '<div style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;margin-bottom:5px;">Notes</div>'
+      +     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;gap:8px;">'
+      +       '<span style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;">Notes</span>'
+      +       '<button type="button" id="pm-rc-dictate" style="font-size:11px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:3px 8px;cursor:pointer;font-family:inherit;">🎤 Dictate</button>'
+      +     '</div>'
       +     '<textarea id="pm-rc-notes" placeholder="What you\'ve heard, links to come back to, things to verify…" style="width:100%;min-height:80px;font:inherit;font-size:12.5px;line-height:1.5;padding:6px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;color:#111;resize:vertical;box-sizing:border-box;font-family:inherit;">' + String(m.notes || "").replace(/</g, "&lt;") + '</textarea>'
       +   '</div>'
       // Source links
@@ -11629,6 +11720,7 @@ function _pmOpenResearchCard(placeName){
       ov.querySelector("#pm-rc-close").onclick = close;
       bindLinkActions();
       bindStayButtons();
+      bindDictation();
     };
   });
   function bindStayButtons(){
@@ -11644,6 +11736,7 @@ function _pmOpenResearchCard(placeName){
         ov.querySelector("#pm-rc-close").onclick = close;
         bindLinkActions();
         bindStayButtons();
+        bindDictation();
       };
     });
   }
@@ -11677,11 +11770,16 @@ function _pmOpenResearchCard(placeName){
         ov.querySelector("#pm-rc-close").onclick = close;
         bindLinkActions();
         bindStayButtons();
+        bindDictation();
       };
     });
   }
+  function bindDictation(){
+    _pmAttachDictation(ov.querySelector("#pm-rc-dictate"), ov.querySelector("#pm-rc-notes"));
+  }
   bindLinkActions();
   bindStayButtons();
+  bindDictation();
 }
 
 // v359.5.4: commit a place as a stay. Used by the "+ stay the night"
