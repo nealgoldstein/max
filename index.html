@@ -12644,7 +12644,7 @@ function openPlacePickerMapModal(){
     +     'return \'<div style="background:\'+color+\';color:#fff;border-radius:50%;width:\'+size+\'px;height:\'+size+\'px;border:2px solid \'+border+\';box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;">\'+label+\'</div>\';'
     +   '}'
     +   'function tooltipText(info){'
-    +     'return info.place+(info.iconic?" · ★ iconic":"")+(info._isDayTrip?" · day trip / on the way":info.keep?" · stay":"");'
+    +     'return info.place+(info._isDayTrip?" · day trip / on the way":info.keep?" · stay":"");'
     +   '}'
     +   'function scrollOpenerToPlace(name){'
     +     'try{'
@@ -13785,8 +13785,11 @@ function _renderPlacePickerMap(targetId){
         existing.setLatLng(latLng);
       } else {
         var m = L.marker(latLng, {icon: icon}).addTo(_pmMap);
+        // v359.56.6: drop "★ iconic" from research-map tooltips — the
+        // label is research metadata, not navigation; the tooltip
+        // should answer "what is this and what role is it playing on
+        // the trip," nothing more.
         var ttBits = info.place
-          + (info.iconic ? " · ★ iconic" : "")
           + (isStay ? " · stay" : isDayTrip ? " · day trip / on the way" : info.kept ? " · kept" : "");
         m.bindTooltip(ttBits, {direction:"top", offset:[0,-10]});
         // Step 6: clicking a pin opens the stay/day-trip popup.
@@ -24663,25 +24666,52 @@ function initLpResize(){
 }
 
 var _mainVectorLayer=null, _mainSatLayer=null, _mainSatLabels=null, _currentMapStyle='vector';
-var _mapStylePref='vector'; // 'auto' | 'vector' | 'satellite'
+var _mapStylePref='vector'; // 'auto' | 'vector' | 'satellite' — dest-mode default
+// v359.57.1: trip-mode keeps its own pref so the two contexts can have
+// different defaults — satellite is more evocative for "look at the
+// whole trip," vector is more useful for "where am I sleeping in this
+// city." Persisted under a separate localStorage key.
+var _tripMapStylePref='satellite';
 
 function initMapStyleBtn(){
   var btn=document.getElementById('map-style-btn');
   if(!btn) return;
   var styles=['vector','satellite'];
   var labels={'vector':'🗺 Street','satellite':'🛰 Satellite'};
+  // v359.57.1: render reads the pref for the CURRENT mode so the
+  // button label tracks which view you're toggling. Trip mode and
+  // dest mode have separate prefs; the button drives whichever is
+  // active.
+  function _inTripMode(){
+    return typeof _leftMode !== "undefined" && _leftMode === "trip";
+  }
+  function _currentPref(){
+    return _inTripMode() ? _tripMapStylePref : _mapStylePref;
+  }
   function render(){
-    btn.textContent=labels[_mapStylePref];
-    try{localStorage.setItem('max-map-style',_mapStylePref);}catch(e){}
+    btn.textContent=labels[_currentPref()];
   }
   btn.onclick=function(){
-    var idx=(styles.indexOf(_mapStylePref)+1)%styles.length;
-    _mapStylePref=styles[idx];
+    var inTrip = _inTripMode();
+    var pref = _currentPref();
+    var idx=(styles.indexOf(pref)+1)%styles.length;
+    var next = styles[idx];
+    if (inTrip) {
+      _tripMapStylePref = next;
+      try{localStorage.setItem('max-trip-map-style', next);}catch(e){}
+    } else {
+      _mapStylePref = next;
+      try{localStorage.setItem('max-map-style', next);}catch(e){}
+    }
     render();
     updateMainMap();
   };
-  // Restore saved preference
+  // Expose render so trip-mode rendering can refresh the label
+  // when it shows the button.
+  initMapStyleBtn._renderLabel = render;
+  // Restore saved preferences
   try{var saved=localStorage.getItem('max-map-style');if(saved&&styles.indexOf(saved)>-1)_mapStylePref=saved;}catch(e){}
+  try{var savedT=localStorage.getItem('max-trip-map-style');if(savedT&&styles.indexOf(savedT)>-1)_tripMapStylePref=savedT;}catch(e){}
   render();
 }
 
@@ -25352,23 +25382,29 @@ function updateMainMap(){
     // decision; satellite is loud at street-level zooms where
     // dest-mode lives).
     //
-    // setMapStyle() respects _mapStylePref and ignores its
-    // argument, so calling setMapStyle('satellite') was a no-op.
-    // Instead, swap layers directly here in trip-mode without
-    // disturbing _mapStylePref — that way dest-mode's preference
-    // (vector by default, user-toggleable via the 🗺/🛰 button)
-    // is unchanged.
-    if (_mainMap.hasLayer(_mainVectorLayer)) _mainMap.removeLayer(_mainVectorLayer);
-    if (!_mainMap.hasLayer(_mainSatLayer)) _mainSatLayer.addTo(_mainMap);
-    if (!_mainMap.hasLayer(_mainSatLabels)) _mainSatLabels.addTo(_mainMap);
-    // Update the current-style tracker so dest-mode's setMapStyle()
-    // sees a mismatch with _mapStylePref ('vector' by default) and
-    // actually swaps back to vector — without this, the early
-    // "_currentMapStyle === style" return would leave satellite on
-    // when entering dest-mode.
-    _currentMapStyle = 'satellite';
+    // v359.57.1: trip-mode now has its own basemap toggle. Reads
+    // _tripMapStylePref (default 'satellite', persisted separately
+    // from dest-mode's _mapStylePref). The 🗺/🛰 button is shown in
+    // trip mode and its onclick is context-aware — it updates
+    // whichever pref matches the current _leftMode.
+    var _tripStyle = (_tripMapStylePref === 'vector') ? 'vector' : 'satellite';
+    if (_tripStyle === 'satellite') {
+      if (_mainMap.hasLayer(_mainVectorLayer)) _mainMap.removeLayer(_mainVectorLayer);
+      if (!_mainMap.hasLayer(_mainSatLayer)) _mainSatLayer.addTo(_mainMap);
+      if (!_mainMap.hasLayer(_mainSatLabels)) _mainSatLabels.addTo(_mainMap);
+    } else {
+      if (_mainMap.hasLayer(_mainSatLayer)) _mainMap.removeLayer(_mainSatLayer);
+      if (_mainMap.hasLayer(_mainSatLabels)) _mainMap.removeLayer(_mainSatLabels);
+      if (!_mainMap.hasLayer(_mainVectorLayer)) _mainVectorLayer.addTo(_mainMap);
+    }
+    // Keep _currentMapStyle in sync so dest-mode's setMapStyle sees
+    // a mismatch with _mapStylePref and swaps correctly on re-entry.
+    _currentMapStyle = _tripStyle;
     var styleBtn=document.getElementById('map-style-btn');
-    if(styleBtn) styleBtn.style.display='none';
+    if(styleBtn) {
+      styleBtn.style.display='block';
+      if (typeof initMapStyleBtn._renderLabel === "function") initMapStyleBtn._renderLabel();
+    }
     buildMainLegend("trip");
     var overlay=g("no-dest-overlay");
     var dayBtn=document.getElementById('map-day-btn');
@@ -25813,7 +25849,12 @@ function updateMainMap(){
     var overlay2=g("no-dest-overlay");
     if(overlay2)overlay2.style.display="none";
     var styleBtn2=document.getElementById('map-style-btn');
-    if(styleBtn2) styleBtn2.style.display='block';
+    if(styleBtn2) {
+      styleBtn2.style.display='block';
+      // v359.57.1: refresh label so it reflects the dest-mode pref
+      // when re-entering dest mode from trip mode.
+      if (typeof initMapStyleBtn._renderLabel === "function") initMapStyleBtn._renderLabel();
+    }
     buildMainLegend("dest");
     updateDaySelector();
     var center=getCityCenter(dest.place);
@@ -28424,6 +28465,79 @@ function convertDestToWayside(destId, opts){
   }
 }
 
+// v359.57.2: platform-aware driving-directions URL. Accepts an array
+// of {lat, lng, name?} stops (min 2; first is origin, last is
+// destination, anything in between is a waypoint). Returns an Apple
+// Maps URL on Apple platforms (so the native Maps app opens), Google
+// Maps elsewhere. Apple's multi-stop syntax is daddr=A+to:B+to:C;
+// Google's is origin/destination + a waypoints param. Returns null
+// if the input is missing required fields.
+function _directionsUrl(stops){
+  if (!Array.isArray(stops) || stops.length < 2) return null;
+  for (var i = 0; i < stops.length; i++) {
+    var s = stops[i];
+    if (!s || typeof s.lat !== "number" || typeof s.lng !== "number"
+        || !isFinite(s.lat) || !isFinite(s.lng)) return null;
+  }
+  function pair(p){ return p.lat + "," + p.lng; }
+  var ua = (typeof navigator !== "undefined" && (navigator.platform || navigator.userAgent)) || "";
+  var isApple = /Mac|iPhone|iPad|iPod/.test(ua);
+  if (isApple) {
+    var saddr = pair(stops[0]);
+    var rest = stops.slice(1).map(pair);
+    var daddr = rest.join("+to:");
+    return "https://maps.apple.com/?saddr=" + encodeURIComponent(saddr)
+         + "&daddr=" + encodeURIComponent(daddr) + "&dirflg=d";
+  }
+  var origin = pair(stops[0]);
+  var dest = pair(stops[stops.length - 1]);
+  var url = "https://www.google.com/maps/dir/?api=1"
+          + "&origin=" + encodeURIComponent(origin)
+          + "&destination=" + encodeURIComponent(dest)
+          + "&travelmode=driving";
+  if (stops.length > 2) {
+    var waypoints = stops.slice(1, -1).map(pair).join("|");
+    url += "&waypoints=" + encodeURIComponent(waypoints);
+  }
+  return url;
+}
+
+// Resolve a destination object → {lat, lng} for _directionsUrl.
+// Uses dest.lat/dest.lng if set, otherwise falls back to
+// getCityCenter(dest.place). Returns null if neither resolves.
+function _destDirCoord(d){
+  if (!d) return null;
+  if (typeof d.lat === "number" && typeof d.lng === "number"
+      && isFinite(d.lat) && isFinite(d.lng)) {
+    return { lat: d.lat, lng: d.lng };
+  }
+  if (d.place && typeof getCityCenter === "function") {
+    var c = getCityCenter(d.place);
+    if (Array.isArray(c) && isFinite(c[0]) && isFinite(c[1])) {
+      return { lat: c[0], lng: c[1] };
+    }
+  }
+  return null;
+}
+
+// Resolve a route stop (placeId-pointer) → {lat, lng}.
+function _stopDirCoord(stop){
+  if (!stop || !stop.placeId || !trip || !trip.places) return null;
+  var p = trip.places[stop.placeId];
+  if (!p) return null;
+  if (typeof p.lat === "number" && typeof p.lng === "number"
+      && isFinite(p.lat) && isFinite(p.lng)) {
+    return { lat: p.lat, lng: p.lng };
+  }
+  if (p.name && typeof getCityCenter === "function") {
+    var c = getCityCenter(p.name);
+    if (Array.isArray(c) && isFinite(c[0]) && isFinite(c[1])) {
+      return { lat: c[0], lng: c[1] };
+    }
+  }
+  return null;
+}
+
 // v359.51: trip-view role popover. Modelled on picker-ui's
 // _openRoleChangePopover but operates on trip.destinations[] (post-
 // build) and routes "Day trip" through convertDestToDayTrip rather
@@ -28573,6 +28687,20 @@ function _openTripDestRolePopover(destId){
       + '</label>')
     : '';
 
+  // v359.57.2: directions link from the previous overnight to here.
+  // If src is the first destination, link from the trip's entry
+  // logistics (airport/port) when set; otherwise no row.
+  var _prevDest = (srcTripIdx > 0) ? trip.destinations[srcTripIdx - 1] : null;
+  var _prevC = _prevDest ? _destDirCoord(_prevDest) : null;
+  var _srcC = _destDirCoord(src);
+  var _roleDirsUrl = (_prevC && _srcC) ? _directionsUrl([_prevC, _srcC]) : null;
+  var roleDirsRow = _roleDirsUrl
+    ? ('<a id="trip-role-dirs" href="' + _roleDirsUrl + '" target="_blank" rel="noopener" style="text-align:left;padding:10px 12px;border:1px solid #d8e6d0;background:#f3faec;border-radius:8px;cursor:pointer;font-family:inherit;text-decoration:none;display:block;">'
+        + '<div style="font-size:12.5px;font-weight:600;color:#3a7a1a;">&#129517; Driving directions to ' + src.place + '</div>'
+        + '<div style="font-size:11px;color:#5a8a3a;margin-top:2px;">' + _prevDest.place + ' &rarr; ' + src.place + ' &mdash; opens ' + (/Mac|iPhone|iPad|iPod/.test((navigator.platform || navigator.userAgent || "")) ? 'Apple' : 'Google') + ' Maps.</div>'
+      + '</a>')
+    : '';
+
   ov.innerHTML = ''
     + '<div style="background:#fff;border-radius:12px;max-width:420px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,0.18);">'
     +   '<div style="padding:18px 20px 4px;">'
@@ -28583,6 +28711,7 @@ function _openTripDestRolePopover(destId){
     +     '</div>'
     +   '</div>'
     +   '<div style="padding:14px 20px;display:flex;flex-direction:column;gap:10px;">'
+    +     roleDirsRow
     +     '<label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #1a5fa8;border-radius:8px;cursor:pointer;background:#eef4fb;">'
     +       '<input type="radio" name="trip-role-pick" value="stay" checked style="margin:0;" />'
     +       '<div style="flex:1;">'
@@ -28662,6 +28791,19 @@ function _openTripDayTripPopover(hubDest, route, stop, dayTripName){
   var hubName = hubDest.place || "";
   var srcNights = (stop.legacy && stop.legacy.sourceNights) || 1;
 
+  // v359.57.2: directions link (hub → day-trip target). Built only
+  // when both coords resolve; rendered as an opt-in row that opens
+  // Apple/Google Maps in a new tab.
+  var _hubC = _destDirCoord(hubDest);
+  var _dtC  = _stopDirCoord(stop);
+  var _dirsUrl = (_hubC && _dtC) ? _directionsUrl([_hubC, _dtC]) : null;
+  var dirsRow = _dirsUrl
+    ? ('<a id="trip-dt-dirs" href="' + _dirsUrl + '" target="_blank" rel="noopener" style="text-align:left;padding:12px;border:1px solid #d8e6d0;background:#f3faec;border-radius:8px;cursor:pointer;font-family:inherit;text-decoration:none;display:block;">'
+        + '<div style="font-size:13px;font-weight:600;color:#3a7a1a;">&#129517; Driving directions to ' + dtName + '</div>'
+        + '<div style="font-size:11px;color:#5a8a3a;margin-top:3px;">Opens ' + (/Mac|iPhone|iPad|iPod/.test((navigator.platform || navigator.userAgent || "")) ? 'Apple' : 'Google') + ' Maps with ' + hubName + ' &rarr; ' + dtName + '.</div>'
+      + '</a>')
+    : '';
+
   ov.innerHTML = ''
     + '<div style="background:#fff;border-radius:12px;max-width:420px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,0.18);">'
     +   '<div style="padding:18px 20px 4px;">'
@@ -28670,6 +28812,7 @@ function _openTripDayTripPopover(hubDest, route, stop, dayTripName){
     +     '<div style="font-size:12px;color:#666;margin-top:2px;">from <strong>' + hubName + '</strong></div>'
     +   '</div>'
     +   '<div style="padding:14px 20px;display:flex;flex-direction:column;gap:10px;">'
+    +     dirsRow
     +     '<button id="trip-dt-open-hub" style="text-align:left;padding:12px;border:1px solid #cfe1f7;background:#eef5ff;border-radius:8px;cursor:pointer;font-family:inherit;">'
     +       '<div style="font-size:13px;font-weight:600;color:#1a5fa8;">&rarr; Open ' + hubName + '</div>'
     +       '<div style="font-size:11px;color:#5a7a99;margin-top:3px;">View the hub destination where this day trip lives.</div>'
@@ -28736,6 +28879,20 @@ function _openTripWaysidePopover(route, stop, waysideName){
   ov.id = "trip-wayside-popover";
   ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.32);z-index:10500;display:flex;align-items:center;justify-content:center;padding:20px;";
 
+  // v359.57.2: directions link — prev → wayside → next as a multi-stop
+  // route. Lets the user open Apple/Google Maps with the wayside as a
+  // waypoint between the two real overnight hubs.
+  var _fromC = _destDirCoord(fromDest);
+  var _toC   = _destDirCoord(toDest);
+  var _wsC   = _stopDirCoord(stop);
+  var _wsDirsUrl = (_fromC && _wsC && _toC) ? _directionsUrl([_fromC, _wsC, _toC]) : null;
+  var wsDirsRow = _wsDirsUrl
+    ? ('<a id="trip-ws-dirs" href="' + _wsDirsUrl + '" target="_blank" rel="noopener" style="text-align:left;padding:12px;border:1px solid #d8e6d0;background:#f3faec;border-radius:8px;cursor:pointer;font-family:inherit;text-decoration:none;display:block;">'
+        + '<div style="font-size:13px;font-weight:600;color:#3a7a1a;">&#129517; Driving directions through ' + wsName + '</div>'
+        + '<div style="font-size:11px;color:#5a8a3a;margin-top:3px;">Opens ' + (/Mac|iPhone|iPad|iPod/.test((navigator.platform || navigator.userAgent || "")) ? 'Apple' : 'Google') + ' Maps with ' + fromName + ' &rarr; ' + wsName + ' &rarr; ' + toName + '.</div>'
+      + '</a>')
+    : '';
+
   ov.innerHTML = ''
     + '<div style="background:#fff;border-radius:12px;max-width:420px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,0.18);">'
     +   '<div style="padding:18px 20px 4px;">'
@@ -28744,6 +28901,7 @@ function _openTripWaysidePopover(route, stop, waysideName){
     +     '<div style="font-size:12px;color:#666;margin-top:2px;">on the route <strong>' + fromName + '</strong> &rarr; <strong>' + toName + '</strong></div>'
     +   '</div>'
     +   '<div style="padding:14px 20px;display:flex;flex-direction:column;gap:10px;">'
+    +     wsDirsRow
     +     '<button id="trip-ws-promote" style="text-align:left;padding:12px;border:1px solid #cfe1f7;background:#eef5ff;border-radius:8px;cursor:pointer;font-family:inherit;">'
     +       '<div style="font-size:13px;font-weight:600;color:#1a5fa8;">&#9881; Make ' + wsName + ' an overnight stop</div>'
     +       '<div style="font-size:11px;color:#5a7a99;margin-top:3px;">Promote back to its own destination between ' + fromName + ' and ' + toName + ' &mdash; ' + srcNights + ' night' + (srcNights === 1 ? '' : 's') + ' shifts back from ' + absorberName + '.</div>'
