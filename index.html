@@ -25483,9 +25483,18 @@ function updateMainMap(){
     // can spot the option without having to remember which places were
     // purple in the picker. Tapping the ring opens the same role
     // popover that converts to a day trip.
+    // v359.60.2: tightened firing so the ring is a SIGNAL, not noise.
+    //   • Only 1-night stays get the ring (was ≤2). 2-night stops are
+    //     real enough stays not to be flagged as candidates.
+    //   • Hub must be within 30 km (was 60). 60 km gave too many false
+    //     positives in clustered trips; 30 km is the geographic
+    //     definition of a day-trip "close-by hub."
+    //   • Suppress the ring entirely if it would fire on > 40% of
+    //     destinations — at that point everything is purple, so the
+    //     ring is no longer a useful visual signal.
     var _couldBeDayTripDestIds = (function(){
       var out = {};
-      var radius = (typeof _defaultDayTripRadiusKm === "function") ? _defaultDayTripRadiusKm() : 60;
+      var radius = 30; // v359.60.2: tightened from 60 km.
       function _coord(d){
         if (!d) return null;
         if (typeof d.lat === "number" && typeof d.lng === "number") return [d.lat, d.lng];
@@ -25499,7 +25508,7 @@ function updateMainMap(){
       trip.destinations.forEach(function(src, i){
         if (!src) return;
         var srcN = src.nights || 0;
-        if (srcN > 2) return;
+        if (srcN > 1) return; // v359.60.2: was > 2.
         var sc = coords[i];
         if (!sc) return;
         for (var j = 0; j < trip.destinations.length; j++) {
@@ -25514,6 +25523,14 @@ function updateMainMap(){
           if (d <= radius) { out[src.id] = true; break; }
         }
       });
+      // v359.60.2: noise-suppression — if the ring would fire on more
+      // than 40% of destinations, the ring is no longer signal. Drop
+      // it entirely. User can still tap any pin and see "could be a
+      // day trip" in the role popover; we just don't decorate every
+      // pin on the map.
+      var totalDests = trip.destinations.length;
+      var candidateCount = Object.keys(out).length;
+      if (totalDests > 0 && candidateCount / totalDests > 0.4) return {};
       return out;
     })();
 
@@ -30981,7 +30998,13 @@ function drawTripMode(){
   c.innerHTML="";
   c.scrollTop = 0;
   window.scrollTo(0, 0);
-  var sb=document.getElementById('map-style-btn'); if(sb) sb.style.display='none';
+  // v359.60.2: don't hide the basemap toggle here — trip-mode now
+  // wants it visible. updateMainMap's trip branch (v359.57.1) sets
+  // display='block' but a re-render path that runs drawTripMode
+  // WITHOUT immediately following with updateMainMap would otherwise
+  // leave the button hidden. Just ensure it shows.
+  var sb=document.getElementById('map-style-btn');
+  if(sb) sb.style.display = 'block';
 
   // Round EX.4 (rev 2): close the larger map window if the trip data
   // drifted since it was opened. Lifted out of the hero-map IIFE so
