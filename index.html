@@ -12822,9 +12822,17 @@ function _updatePlaceActivitySummary(){
     if (displayNights + 1 > budget.max) {
       _overBudget = true;
       var over = (displayNights + 1) - budget.max;
-      var extendDays = displayNights + 1;
-      fitNote = '<div style="margin-top:6px;padding:9px 11px;background:#fff3ed;border:1px solid #f5ccb5;border-radius:6px;font-size:11.5px;color:#b0451a;line-height:1.55;">'
-        + '<div style="font-weight:700;margin-bottom:5px;">'+over+' day'+(over!==1?"s":"")+' over your '+budgetLbl+' budget</div>'
+      // v359.54.8: heavy inline banner retired. The over-budget gate
+      // now fires as a modal at Choreograph click time (see
+      // _showBudgetGateModal). Keep a small informational pill here so
+      // the user knows what to expect — but no action buttons inline.
+      fitNote = '<div style="margin-top:6px;padding:6px 9px;background:#fff3ed;border:1px solid #f5ccb5;border-radius:6px;font-size:11px;color:#b0451a;">'
+        + '<strong>' + over + ' day' + (over!==1?"s":"") + ' over your ' + budgetLbl + ' budget.</strong> '
+        + 'Choreograph will ask how to fit.'
+        + '</div>';
+    } else if (false) { // v359.54.8: old over-budget inline banner — replaced by modal gate
+      _OBSOLETE_DEAD_BLOCK_REMOVED = '<div style="display:none;">'
+        + '<div>'+over+' day'+(over!==1?"s":"")+' over your '+budgetLbl+' budget</div>'
         + '<div style="font-size:11px;color:#94381a;">Max won\u2019t silently extend your trip. Pick one:</div>'
         + '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">'
         +   '<button type="button" onclick="_makeItFit()" style="font-size:10.5px;font-weight:600;color:#fff;background:#b0451a;border:1px solid #b0451a;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;" title="Trim the longest stays and bump pace denser to fit your budget">Make it fit</button>'
@@ -12855,21 +12863,12 @@ function _updatePlaceActivitySummary(){
   el.innerHTML = _overBudget
     ? (fitNote + '<div style="margin-top:8px;">' + summaryLine + '</div>')
     : (summaryLine + fitNote);
-  // v359.26: gate the button on budget. The summary line above
-  // explains the gate; the button just sits disabled until resolved.
-  // v359.35: "Skip for now" unblocks the button without changing the
-  // budget — for users who want to reconcile in the trip view.
+  // v359.54.8: Choreograph is no longer disabled on over-budget. The
+  // modal gate runs at click time instead — see _maybeShowBudgetGate.
   if(btn){
-    var skipped = !!(_tb && _tb._budgetGateSkipped);
-    if (_overBudget && !skipped) {
-      btn.disabled = true;
-      btn.classList.add("tb-btn-disabled");
-      btn.title = "Trim picks or extend your budget to continue";
-    } else {
-      btn.disabled = false;
-      btn.classList.remove("tb-btn-disabled");
-      btn.title = "";
-    }
+    btn.disabled = false;
+    btn.classList.remove("tb-btn-disabled");
+    btn.title = "";
   }
 }
 
@@ -18511,7 +18510,92 @@ function showPreBuildModal(){
 // MaxEnginePicker.publishTrip() in engine-picker.js. The picker
 // engine now owns the full build flow; the inline-script entry
 // point delegates so all existing callsites keep working unchanged.
+// v359.54.8: pre-Choreograph budget gate. Replaces the v359.26 inline
+// banner + disabled-button mechanism. If the user's kept picks total
+// more days than their stated budget, a modal pops asking how to fit
+// — "Make it fit" or "Extend the budget." No "Skip for now" — the
+// user must pick one before the trip is built.
+//
+// Returns true if the modal fired (build is gated); false if the user
+// is within budget and the build should proceed immediately.
+function _maybeShowBudgetGate(onProceed){
+  if (!_tb) return false;
+  var budget = (typeof _parseTripDuration === "function" && (_tb.duration || _tb.when))
+    ? _parseTripDuration(_tb.duration || _tb.when) : null;
+  if (!budget || !budget.max) return false;
+  var displayNights = _tb._pickerDisplayTotal || 0;
+  if (displayNights <= 0) return false;
+  if (displayNights + 1 <= budget.max) return false;
+
+  // Over budget — build the modal.
+  var existing = document.getElementById("budget-gate-modal");
+  if (existing) existing.remove();
+
+  var over = (displayNights + 1) - budget.max;
+  var budgetLbl = (budget.min === budget.max)
+    ? (budget.max + " day" + (budget.max!==1?"s":""))
+    : (budget.min + "–" + budget.max + " days");
+  var extendDays = displayNights + 1;
+
+  var ov = document.createElement("div");
+  ov.id = "budget-gate-modal";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.42);z-index:11000;display:flex;align-items:center;justify-content:center;padding:20px;";
+  ov.innerHTML = ''
+    + '<div style="background:#fff;border-radius:12px;max-width:460px;width:100%;box-shadow:0 12px 36px rgba(0,0,0,0.25);">'
+    +   '<div style="padding:20px 22px 6px;">'
+    +     '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#b0451a;">Over your budget</div>'
+    +     '<div style="font-size:18px;font-weight:700;color:#111;margin-top:4px;line-height:1.25;">Your picks total ' + extendDays + ' days &mdash; ' + over + ' over your ' + budgetLbl + ' budget.</div>'
+    +     '<div style="font-size:13px;color:#555;margin-top:6px;line-height:1.5;">Max won&rsquo;t silently extend your trip. Pick how to fit before Choreograph builds it.</div>'
+    +   '</div>'
+    +   '<div style="padding:14px 22px;display:flex;flex-direction:column;gap:10px;">'
+    +     '<button id="bg-fit" style="text-align:left;padding:12px 14px;border:1px solid #b0451a;background:#fff5ed;border-radius:8px;cursor:pointer;font-family:inherit;">'
+    +       '<div style="font-size:14px;font-weight:700;color:#b0451a;">Make it fit</div>'
+    +       '<div style="font-size:12px;color:#7a3815;margin-top:3px;line-height:1.5;">Trim the longest stays and bump pace one notch denser to fit your ' + budgetLbl + ' budget.</div>'
+    +     '</button>'
+    +     '<button id="bg-extend" style="text-align:left;padding:12px 14px;border:1px solid #c8d8f0;background:#eef4fb;border-radius:8px;cursor:pointer;font-family:inherit;">'
+    +       '<div style="font-size:14px;font-weight:700;color:#1a5fa8;">Extend the trip to ' + extendDays + ' days</div>'
+    +       '<div style="font-size:12px;color:#3a5d8a;margin-top:3px;line-height:1.5;">Keep every pick. Your budget grows to match.</div>'
+    +     '</button>'
+    +   '</div>'
+    +   '<div style="padding:6px 22px 18px;display:flex;justify-content:flex-end;">'
+    +     '<button id="bg-cancel" style="font-size:13px;font-weight:500;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Back to picks</button>'
+    +   '</div>'
+    + '</div>';
+  document.body.appendChild(ov);
+
+  function close(){ if (ov && ov.parentNode) ov.parentNode.removeChild(ov); }
+  ov.onclick = function(e){ if (e.target === ov) close(); };
+  var cancelBtn = ov.querySelector("#bg-cancel");
+  if (cancelBtn) cancelBtn.onclick = close;
+  var fitBtn = ov.querySelector("#bg-fit");
+  if (fitBtn) fitBtn.onclick = function(){
+    close();
+    if (typeof _makeItFit === "function") _makeItFit();
+    // _makeItFit reduces nights to fit. After it runs, the build can
+    // proceed without re-triggering the gate (now within budget).
+    if (typeof onProceed === "function") onProceed();
+  };
+  var extBtn = ov.querySelector("#bg-extend");
+  if (extBtn) extBtn.onclick = function(){
+    close();
+    if (typeof _extendBudgetToFit === "function") _extendBudgetToFit(extendDays);
+    if (typeof onProceed === "function") onProceed();
+  };
+
+  return true;
+}
+
 async function buildFromCandidates(){
+  // v359.54.8: budget gate runs before the publish. If over budget,
+  // the modal opens and this call exits early; the modal's action
+  // buttons re-invoke buildFromCandidates after applying their fix.
+  if (_maybeShowBudgetGate(function(){
+    // Defer slightly so _makeItFit's mutations + summary re-render
+    // settle before publishTrip runs.
+    setTimeout(function(){ buildFromCandidates(); }, 50);
+  })) {
+    return;
+  }
   return await MaxEnginePicker.publishTrip();
 }
 
@@ -28845,11 +28929,113 @@ function drawTripMode(){
       ));
     }
 
-    // Option 3: pointer to manual fixes (Make day trip / × Remove).
-    var pointerNote = document.createElement("div");
-    pointerNote.style.cssText = "margin-top:6px;font-size:10.5px;color:#7a6043;line-height:1.5;";
-    pointerNote.innerHTML = '<strong>Or do it yourself:</strong> Make a short stay a day trip from Explore on a hub, or × Remove a destination card. This banner re-evaluates automatically.';
-    btnWrap.appendChild(pointerNote);
+    // v359.54.8: per-destination reshape suggestions. For each dest
+    // in proposedDeltas (the ones Max would trim), surface ONE-CLICK
+    // conversions to day-trip (absorb into nearest hub) or wayside
+    // (drop a sleep onto the transit route between its neighbors).
+    // Both retain the place on the trip but free up the night —
+    // often what the user actually wants when they're over budget.
+    (function _waysideAndDayTripSuggestions(){
+      if (!Array.isArray(n.proposedDeltas) || !n.proposedDeltas.length) return;
+      var DAY_TRIP_RADIUS_KM = (typeof _defaultDayTripRadiusKm === "function") ? _defaultDayTripRadiusKm() : 60;
+      // Resolve coordinates: lat/lng on the dest, or geocode by place name.
+      function _coordsFor(d){
+        if (!d) return null;
+        if (typeof d.lat === "number" && typeof d.lng === "number") return [d.lat, d.lng];
+        if (typeof getCityCenter === "function" && d.place) {
+          var c = getCityCenter(d.place);
+          if (Array.isArray(c) && isFinite(c[0])) return c;
+        }
+        return null;
+      }
+      function _bestHubFor(srcDest){
+        var srcC = _coordsFor(srcDest);
+        if (!srcC) return null;
+        var best = null;
+        trip.destinations.forEach(function(other){
+          if (!other || other.id === srcDest.id) return;
+          var oC = _coordsFor(other);
+          if (!oC) return;
+          var dKm = (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.haversineKm === "function")
+            ? MaxEngineTrip.haversineKm(srcC[0], srcC[1], oC[0], oC[1]) : null;
+          if (dKm == null) return;
+          if (dKm > DAY_TRIP_RADIUS_KM) return;
+          if (!best || dKm < best.dKm) best = { hub: other, dKm: dKm };
+        });
+        return best;
+      }
+
+      var hdr = document.createElement("div");
+      hdr.style.cssText = "margin-top:10px;padding-top:8px;border-top:1px dashed #d8c4a4;font-size:11px;font-weight:700;color:#5c4520;";
+      hdr.textContent = "Or reshape destinations (keep them, free up nights):";
+      btnWrap.appendChild(hdr);
+
+      n.proposedDeltas.forEach(function(d){
+        var dest = trip.destinations.find(function(x){
+          if (!x || !x.place) return false;
+          var k = (typeof _normPlaceName === "function") ? _normPlaceName(x.place) : (x.place||"").toLowerCase();
+          return k === d.key;
+        });
+        if (!dest) return;
+        var destIdx = trip.destinations.indexOf(dest);
+        var prev = (destIdx > 0) ? trip.destinations[destIdx - 1] : null;
+        var next = (destIdx < trip.destinations.length - 1) ? trip.destinations[destIdx + 1] : null;
+        var hubMatch = _bestHubFor(dest);
+        var waysideEligible = !!(prev && next);
+        if (!hubMatch && !waysideEligible) return;
+
+        var row = document.createElement("div");
+        row.style.cssText = "margin-top:6px;padding:7px 9px;background:#fff;border:1px solid #ead9bb;border-radius:5px;";
+        var label = document.createElement("div");
+        label.style.cssText = "font-size:11px;font-weight:600;color:#5c4520;margin-bottom:5px;";
+        label.textContent = dest.place + " — " + (dest.nights || 0) + " night" + ((dest.nights || 0) === 1 ? "" : "s");
+        row.appendChild(label);
+
+        var actions = document.createElement("div");
+        actions.style.cssText = "display:flex;flex-wrap:wrap;gap:5px;";
+
+        if (hubMatch) {
+          var distLbl = (typeof _fmtDistance === "function") ? _fmtDistance(hubMatch.dKm) : (Math.round(hubMatch.dKm) + " km");
+          var dtBtn = document.createElement("button");
+          dtBtn.style.cssText = "font-size:10.5px;font-weight:600;color:#5b3f8f;background:#f4eef9;border:1px solid #d8c4e8;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;";
+          dtBtn.textContent = "Day trip from " + hubMatch.hub.place + " (" + distLbl + ")";
+          dtBtn.title = "Absorb " + dest.place + " as a day trip from " + hubMatch.hub.place;
+          dtBtn.onmouseover = function(){ dtBtn.style.background = "#ede0f4"; };
+          dtBtn.onmouseout  = function(){ dtBtn.style.background = "#f4eef9"; };
+          (function(destId, hubId){
+            dtBtn.onclick = function(){
+              if (typeof convertDestToDayTrip === "function") {
+                convertDestToDayTrip(destId, hubId);
+              }
+              // The mutation will re-render trip mode and rerun
+              // _reEvaluateOverBudget, which deletes the banner if the
+              // trip now fits.
+            };
+          })(dest.id, hubMatch.hub.id);
+          actions.appendChild(dtBtn);
+        }
+
+        if (waysideEligible) {
+          var wsBtn = document.createElement("button");
+          wsBtn.style.cssText = "font-size:10.5px;font-weight:600;color:#5b3f8f;background:#fff;border:1px solid #d8c4e8;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;";
+          wsBtn.textContent = "Wayside on " + prev.place + " → " + next.place;
+          wsBtn.title = "Drop the sleep at " + dest.place + " and keep it as a stop along the way";
+          wsBtn.onmouseover = function(){ wsBtn.style.background = "#f4eef9"; };
+          wsBtn.onmouseout  = function(){ wsBtn.style.background = "#fff"; };
+          (function(destId){
+            wsBtn.onclick = function(){
+              if (typeof convertDestToWayside === "function") {
+                convertDestToWayside(destId, { absorbInto: "next" });
+              }
+            };
+          })(dest.id);
+          actions.appendChild(wsBtn);
+        }
+
+        row.appendChild(actions);
+        btnWrap.appendChild(row);
+      });
+    })();
 
     // Option 4: keep over budget.
     btnWrap.appendChild(_mkChoice(
