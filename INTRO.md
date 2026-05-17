@@ -72,16 +72,94 @@ ChatGPT conversation — you can paste it in and skip the brief +
 candidate-picking steps. Two entry points:
 
 - **Home screen → Paste a list.** Sits next to *Start a new trip*.
-  Opens a paste box; on Build, mints a fresh trip with the parsed
-  destinations and drops you straight into the trip view.
+  Opens a paste box. On Build, Max mints a stub trip, drops the
+  pasted text into the trip's Research notes, and opens that modal.
+  You review the list inline, then click **🪄 Make destinations
+  from this list** to commit. The intermediate step gives you an
+  editing pass before destinations actually land.
+- **Home screen → Load from file.** Same flow, but the source is
+  a `.txt` or `.md` file you have on disk. The file's content
+  becomes the Research notes textarea; Max routes through the
+  same review → commit path.
 - **Research notes → 🪄 Make destinations from this list.** Inside
   any trip's Research notes modal, parses the current notes text
   and appends the destinations to the trip you already have open.
   Your notes stay put.
 
-The parser is forgiving — both surfaces share it. What it
-understands:
+#### Format
 
+The first line is the **trip name** plus an optional **region** in
+parentheses. The region is what Max hands the candidate-generation
+LLM as its geographic scope — get it right and out-of-region
+suggestions get rejected automatically.
+
+Optional frontmatter lines can sit between the trip name and the
+first section. The **easiest** form is a single natural-language
+line — Max pulls the date and the duration out of it:
+
+```
+September 17, 17 nights
+Aug 1 for 2 weeks
+2026-08-01, 14 days
+```
+
+A bare month + day (no year) inherits the year from the trip
+name ("Iceland Road Trip 2026" → 2026), otherwise the current
+year.
+
+If you'd rather be explicit, the same fields are available as
+`Key: value` lines. Use **one** of `Start` / `When` / `Dates`
+(whichever matches what you know), plus an optional `Duration`:
+
+- **`Start: YYYY-MM-DD`** — exact start date. Drives the date
+  cascade for every destination. If you set this, you don't need
+  `When:` too — Max auto-derives the rough month/year for the
+  LLM's context ("2026-08-01" → "August 2026").
+- **`When: <free text>`** — rough timing ("August 2026", "second
+  week of July") when you don't know the exact date yet.
+  Populates `trip.brief.when` but doesn't drive the cascade
+  (Max falls back to today's date when committing destinations).
+- **`Dates: <free text>`** — combined form. If an ISO date is
+  present anywhere in the value, it's pulled into `Start`; the
+  whole string also goes to `When` for context.
+- **`Duration: <free text>`** — "14 days", "2 weeks". Populates
+  `trip.brief.duration`. If you put night counts on every stay
+  (e.g. `* Reykjavík 3`), Max auto-derives this from the total —
+  you only need `Duration:` when you don't have a full list yet
+  and want to tell the LLM the rough budget.
+
+```
+Iceland Road Trip 2026 (Iceland)
+Start: 2026-08-01
+Duration: 14 days
+
+1. Overnight hubs
+* Reykjavík (Arrival/Departure point)
+* Vík 2
+* Höfn
+
+2. Sights, Waterfalls, Points of Interest
+Golden Circle Area:
+* Þingvellir (Thingvellir National Park)
+* Geysir
+* Gullfoss
+South Coast:
+* Seljalandsfoss
+* Skógafoss
+* Diamond Beach
+```
+
+What the parser understands:
+
+- **First line — trip name (and region).** Non-bullet, non-header
+  line at the top. If it ends with `(Country)`, that becomes
+  `trip.brief.region` exactly; otherwise the whole line is used
+  as the region (with a trailing year stripped). If the first line
+  is missing, Max falls back to "Imported — date" and no region —
+  candidate generation will be unscoped, so this is worth doing.
+- **Frontmatter block** — `Key: value` lines after the trip name
+  but before any section header / bullet (see above). All
+  optional; case-insensitive keys; unknown keys end the block.
 - **One place per line.** Bullets (`*`, `-`, `•`) are optional and
   stripped.
 - **Section headers** like `1. Overnight hubs` or `2. Sights &
@@ -104,28 +182,9 @@ understands:
   Mývatn` → `Mývatn`).
 - Lines starting with `#` and blank lines are skipped.
 
-Example that works:
-
-```
-1. Primary Overnight Hubs
-* Reykjavík (Arrival/Departure point)
-* Vík
-* Höfn 2
-
-2. Sights, Waterfalls, Points of Interest
-Golden Circle Area:
-* Þingvellir (Thingvellir National Park)
-* Geysir
-* Gullfoss
-South Coast:
-* Seljalandsfoss
-* Skógafoss
-* Diamond Beach
-```
-
-Once the trip is built you adjust like normal: bump nights with
-the +/- spinner, change a stay to a see (or remove it) via the
-role popover on each destination, drag the order, etc.
+Once the destinations land you adjust like normal: bump nights
+with the +/- spinner, change a stay to a see (or remove it) via
+the role popover on each destination, drag the order, etc.
 
 ---
 

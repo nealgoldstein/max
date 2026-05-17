@@ -1970,7 +1970,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
       <button onclick="selectHomeOption('new')" style="font-size:12.5px;font-weight:600;padding:8px 16px;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;">+ Start a new trip</button>
       <button onclick="selectHomeOption('browse')" style="font-size:12px;font-weight:500;padding:8px 12px;background:#fff;color:#1a5fa8;border:1px solid #d8d4c8;border-radius:6px;cursor:pointer;font-family:inherit;">Just browsing →</button>
       <button onclick="selectHomeOption('paste')" style="font-size:11px;font-weight:500;padding:8px 12px;background:#fff;color:#888;border:1px solid #d8d4c8;border-radius:6px;cursor:pointer;font-family:inherit;" title="Already have a list of places you want to visit? Paste it in.">Paste a list</button>
-      <button onclick="selectHomeOption('import')" style="font-size:11px;font-weight:500;padding:8px 12px;background:#fff;color:#888;border:1px solid #d8d4c8;border-radius:6px;cursor:pointer;font-family:inherit;">Load from file</button>
+      <button onclick="selectHomeOption('import')" style="font-size:11px;font-weight:500;padding:8px 12px;background:#fff;color:#888;border:1px solid #d8d4c8;border-radius:6px;cursor:pointer;font-family:inherit;" title="Open a saved Max trip (.json) or a text list (.txt / .md). Text files route through Research notes for review.">Load from file</button>
       <span style="margin-left:auto;font-size:10.5px;color:#bbb;">Max gathers; you evaluate, edit, add. <span onclick="showAboutMax()" style="color:#1a5fa8;cursor:pointer;">How it works →</span></span>
     </div>
     <div id="new-trip-form" style="margin-top:12px;display:none;">
@@ -1985,7 +1985,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
     <div id="browse-chat" style="display:none;margin-top:12px;"></div>
     <div id="trip-brief-overlay" style="display:none;"></div>
     <div id="candidate-explorer-overlay" style="display:none;"></div>
-    <input type="file" id="hs-trip-file-input" accept=".json" style="display:none;" onchange="loadTripFile(this)">
+    <input type="file" id="hs-trip-file-input" accept=".json,.txt,.md" style="display:none;" onchange="loadTripFile(this)">
   </div>
 </div>
 
@@ -3090,10 +3090,36 @@ function openTripFile(){
 function loadTripFile(input){
   var file=input.files&&input.files[0];
   if(!file) return;
+  // v359.60.23: dispatch on extension. .json keeps the legacy
+  // restore path (full trip envelope). .txt / .md route through
+  // parsePlacesList → _buildStubTripFromPastedList, same path the
+  // home-screen "Paste a list" uses — drops the file's content
+  // into Research notes and auto-opens the modal so the user can
+  // review before committing destinations. Falls back to JSON if
+  // we can't tell from the name (e.g. no extension).
+  var fname = (file.name || "").toLowerCase();
+  var isText = /\.(txt|md)$/.test(fname);
   var reader=new FileReader();
   reader.onload=function(e){
+    var raw = e.target.result;
+    if (isText) {
+      try {
+        if (typeof parsePlacesList !== "function" || typeof _buildStubTripFromPastedList !== "function") {
+          throw new Error("Paste-list importer not available.");
+        }
+        var parsed = parsePlacesList(raw);
+        if (!parsed.tripName && !parsed.destinations.length) {
+          throw new Error("No trip name or destinations found in the file. The first line should be the trip name (e.g. \"Iceland Road Trip 2026 (Iceland)\"); subsequent lines should be places.");
+        }
+        _buildStubTripFromPastedList(parsed, raw);
+      } catch(err) {
+        alert("Could not load list file: " + err.message);
+      }
+      input.value = "";
+      return;
+    }
     try{
-      var data=JSON.parse(e.target.result);
+      var data=JSON.parse(raw);
       if(!data.trip||!data.trip.destinations) throw new Error("Not a valid trip file");
       trip=data.trip; activeDest=data.activeDest||null;
       if(!trip.pendingActions) trip.pendingActions=[];
@@ -5016,7 +5042,7 @@ function renderHomeOptions(){
 //   { destinations: [{place, nights, isStay, intent}], entry, exit,
 //     warnings: [string] }
 function parsePlacesList(text) {
-  var out = { destinations: [], entry: null, exit: null, warnings: [] };
+  var out = { destinations: [], entry: null, exit: null, tripName: null, region: null, startDate: null, when: null, duration: null, warnings: [] };
   if (!text || typeof text !== "string") return out;
   var lines = text.split(/\r?\n/);
   var mode = "stay"; // default before we see a section header
@@ -5029,7 +5055,170 @@ function parsePlacesList(text) {
     return null; // unknown — keep current mode
   }
 
-  for (var li = 0; li < lines.length; li++) {
+  // v359.60.23: first non-blank, non-bullet, non-section-header,
+  // non-sub-header line is the trip name (and region hint). Format:
+  //   "Iceland Road Trip 2026"            → tripName = whole line
+  //                                          region = whole line (LLM
+  //                                          interprets it)
+  //   "Iceland Road Trip 2026 (Iceland)"  → tripName = whole line
+  //                                          region = "Iceland"
+  // The region is used as trip.brief.region and is what the picker
+  // candidate-generation LLM gets as its scope constraint. Explicit
+  // parenthetical takes precedence over the inferred whole-line.
+  var firstLineIdx = -1;
+  for (var fi = 0; fi < lines.length; fi++) {
+    var fl = lines[fi].replace(/\s+$/g, "").replace(/^\s+/, "");
+    if (!fl) continue;
+    if (/^#/.test(fl)) continue;
+    // Section header `N. <title>` — skip
+    if (/^\d+\.\s+/.test(fl) && !/^[\*\-•▪◦+]/.test(fl)) continue;
+    // Sub-header (ends with ":", no bullet) — skip
+    if (/:$/.test(fl) && !/^[\*\-•▪◦+]/.test(fl)) continue;
+    // Bullet — skip
+    if (/^[\*\-•▪◦+]/.test(fl)) continue;
+    // Found the first "free" line — this is the trip name.
+    firstLineIdx = fi;
+    var rawName = fl.trim();
+    var nameParen = rawName.match(/\(([^)]+)\)\s*$/);
+    if (nameParen) {
+      out.region = nameParen[1].trim();
+      out.tripName = rawName.replace(/\s*\([^)]+\)\s*$/, "").trim();
+    } else {
+      out.tripName = rawName;
+      // Region defaults to the trip name with the trailing year
+      // (4-digit) stripped — "Iceland Road Trip 2026" → "Iceland Road Trip".
+      out.region = rawName.replace(/\s+(19|20)\d{2}\s*$/, "").trim();
+    }
+    break;
+  }
+
+  // v359.60.23: optional frontmatter block between the trip-name
+  // line and the first section header / bullet. Lines of the form
+  // `Key: value` populate fields on the parse result. Recognized
+  // keys (case-insensitive):
+  //   Start / Starts / From  → out.startDate (ISO YYYY-MM-DD only;
+  //                            free-text falls through to .when)
+  //   When                   → out.when     (free-text)
+  //   Duration               → out.duration (free-text)
+  //   Dates                  → both .startDate (if ISO leading) AND
+  //                            .when (full text, for context)
+  // First non-frontmatter line ends the block. Frontmatter is
+  // entirely optional — old paste lists still parse fine.
+  var bodyStartIdx = (firstLineIdx >= 0) ? firstLineIdx + 1 : 0;
+  for (var fi2 = bodyStartIdx; fi2 < lines.length; fi2++) {
+    var fl2 = lines[fi2].replace(/\s+$/g, "").replace(/^\s+/, "");
+    if (!fl2) { bodyStartIdx = fi2 + 1; continue; }
+    if (/^#/.test(fl2)) { bodyStartIdx = fi2 + 1; continue; }
+    var kv = fl2.match(/^([A-Za-z][A-Za-z _-]{0,20})\s*:\s*(.+)$/);
+    if (!kv) break; // first non-frontmatter line — stop scanning
+    // Sub-headers like "Golden Circle Area:" have NO value after `:`,
+    // so the regex above won't match them (it requires `.+` after).
+    // But a bare "key: " with empty value would slip through; skip
+    // those too.
+    var key   = kv[1].toLowerCase().replace(/[\s_-]/g, "");
+    var value = kv[2].trim();
+    if (!value) break;
+    // Don't mistake a section header like "Day 2: Sights" for
+    // frontmatter — keys with digits aren't frontmatter.
+    if (/\d/.test(kv[1])) break;
+    if (key === "start" || key === "starts" || key === "from") {
+      var isoStart = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (isoStart) out.startDate = isoStart[0];
+      else out.when = out.when || value;
+    } else if (key === "when") {
+      out.when = value;
+    } else if (key === "duration") {
+      out.duration = value;
+    } else if (key === "dates") {
+      // Try to pull an ISO date out of the front; whole string also
+      // captured into .when for context.
+      var isoIn = value.match(/(\d{4})-(\d{2})-(\d{2})/);
+      if (isoIn) out.startDate = isoIn[0];
+      out.when = out.when || value;
+    } else if (key === "end" || key === "ends" || key === "to" || key === "until") {
+      // Recognized but not stored separately — trip end is derived
+      // from start + total nights. Skip silently so we don't bail
+      // out of the frontmatter block.
+    } else {
+      // Unknown key — stop scanning so we don't accidentally swallow
+      // a real destination line that happens to look like Key: Value
+      // (e.g. "Höfn: gateway to glacier lagoon").
+      break;
+    }
+    bodyStartIdx = fi2 + 1;
+    continue;
+  }
+  // v359.60.23: natural-language date/duration line. The user said
+  // "Start: 2026-08-01" + "Duration: 14 days" was redundant — and
+  // also stiff. Allow a free-text frontmatter line like
+  //   September 17, 17 nights
+  //   Aug 1 for 2 weeks
+  //   2026-08-01, 14 days
+  // We extract both a date (Month Day [Year] or ISO) AND a
+  // "N nights|days|weeks" duration. Anything left over that's not
+  // either of those terminates the frontmatter scan (so a real
+  // destination line that happens to have a number doesn't get
+  // swallowed). Year for bare "September 17" defaults to the year
+  // in the trip name ("Iceland Road Trip 2026" → 2026), else
+  // current year.
+  for (var fi3 = bodyStartIdx; fi3 < lines.length; fi3++) {
+    var fl3 = lines[fi3].replace(/\s+$/g, "").replace(/^\s+/, "");
+    if (!fl3) { bodyStartIdx = fi3 + 1; continue; }
+    if (/^#/.test(fl3)) { bodyStartIdx = fi3 + 1; continue; }
+    // Section headers / sub-headers / bullets are body — stop here.
+    if (/^\d+\.\s+/.test(fl3) && !/^[\*\-•▪◦+]/.test(fl3)) break;
+    if (/:$/.test(fl3) && !/^[\*\-•▪◦+]/.test(fl3)) break;
+    if (/^[\*\-•▪◦+]/.test(fl3)) break;
+    // Try to pull a date and/or a duration out of this line.
+    var beforeS = out.startDate;
+    var beforeD = out.duration;
+    // Duration first — "N nights|days|weeks" anywhere in the line.
+    var durMatch = fl3.match(/(\d+)\s*(nights?|days?|weeks?)\b/i);
+    if (durMatch && !out.duration) {
+      var dn = parseInt(durMatch[1], 10);
+      var unit = durMatch[2].toLowerCase().replace(/s$/, "");
+      out.duration = dn + " " + unit + (dn === 1 ? "" : "s");
+    }
+    if (!out.startDate) {
+      var isoM = fl3.match(/(\d{4})-(\d{2})-(\d{2})/);
+      if (isoM) {
+        out.startDate = isoM[0];
+      } else {
+        var monthsRe = "jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec";
+        var monthRegex = new RegExp("\\b(" + monthsRe + ")[a-z]*\\.?\\s+(\\d{1,2})(?:(?:[\\s,]+)(\\d{4}))?", "i");
+        var mm = fl3.match(monthRegex);
+        if (mm) {
+          var yearHint = ((out.tripName || "").match(/\b(20\d{2})\b/) || [])[1];
+          var yyyy = mm[3] ? parseInt(mm[3], 10) : (yearHint ? parseInt(yearHint, 10) : new Date().getFullYear());
+          var ts = Date.parse(mm[1] + " " + mm[2] + " " + yyyy);
+          if (!isNaN(ts)) {
+            out.startDate = new Date(ts).toISOString().slice(0, 10);
+          }
+        }
+      }
+    }
+    if (out.startDate !== beforeS || out.duration !== beforeD) {
+      bodyStartIdx = fi3 + 1;
+      continue;
+    }
+    // Line didn't yield a date or a duration — end frontmatter.
+    break;
+  }
+
+  // v359.60.23: if Start was provided but When wasn't, auto-derive
+  // a humane When ("August 2026") from the start date — it's what
+  // the LLM uses for rough-timing context and the user shouldn't
+  // have to write it twice.
+  if (out.startDate && !out.when) {
+    try {
+      var _sd = new Date(out.startDate + "T12:00:00");
+      if (!isNaN(_sd.getTime())) {
+        out.when = _sd.toLocaleString("en-US", { month: "long" }) + " " + _sd.getFullYear();
+      }
+    } catch(_){}
+  }
+
+  for (var li = bodyStartIdx; li < lines.length; li++) {
     var raw = lines[li];
     var trimmed = raw.replace(/\s+$/g, "").replace(/^\s+/, "");
     if (!trimmed) continue;
@@ -5116,6 +5305,26 @@ function parsePlacesList(text) {
       intent: intent
     });
   }
+  // v359.60.23: if nights per destination are all present and the
+  // user didn't explicitly set Duration, derive it from the total.
+  // Same shape as the Start→When auto-derive earlier — avoids the
+  // user having to write a number that's already implicit from
+  // their list. Falls back to nothing if no destinations carry
+  // explicit nights (so the LLM still gets a free-text hint from
+  // a manually-typed Duration in that case).
+  if (!out.duration && out.destinations.length) {
+    var totalNights = 0;
+    var anyExplicitStay = false;
+    out.destinations.forEach(function(d){
+      var n = d.nights || 0;
+      totalNights += n;
+      if (d.isStay && n > 0) anyExplicitStay = true;
+    });
+    if (anyExplicitStay && totalNights > 0) {
+      out.duration = totalNights + " night" + (totalNights === 1 ? "" : "s");
+    }
+  }
+
   return out;
 }
 if (typeof globalThis !== "undefined") globalThis.parsePlacesList = parsePlacesList;
@@ -5203,6 +5412,73 @@ function _buildTripFromPastedList(parseResult, opts) {
 }
 if (typeof globalThis !== "undefined") globalThis._buildTripFromPastedList = _buildTripFromPastedList;
 
+// v359.60.23: research-first variant. Mints a STUB trip (no
+// destinations yet), drops the raw pasted text into trip.brief.tripMeta.notes
+// so the user can review it in the Research notes modal, and auto-opens
+// that modal on the trip view. The user then clicks "🪄 Make destinations
+// from this list" inside the modal to commit. This replaces the
+// build-immediately path for the home-screen Paste flow so imports get
+// an editing pass before they alter the trip.
+function _buildStubTripFromPastedList(parseResult, rawText, opts) {
+  opts = opts || {};
+  if (!parseResult) return null;
+  destCtr = 0;
+  sidCtr = 100;
+  bkCtr = 0;
+  var name = parseResult.tripName || opts.name
+    || ("Imported — " + new Date().toLocaleDateString("en-US", {month:"short", day:"numeric", year:"numeric"}));
+  trip = {
+    name: name,
+    destinations: [],
+    legs: {},
+    trackSpending: false,
+    pendingActions: [],
+    brief: {
+      region:   parseResult.region || "",
+      entry:    parseResult.entry  || "",
+      tbExit:   parseResult.exit   || "",
+      exitBuffer: true,
+      // v359.60.23: frontmatter from the paste — `When`/`Duration`
+      // land directly on the brief; `Start` (ISO date) is stashed
+      // separately so the cascade in _addPastedListToCurrentTrip
+      // can use it as origin.
+      when:     parseResult.when     || "",
+      duration: parseResult.duration || "",
+      _pendingStartDate: parseResult.startDate || null,
+      tripMeta: { notes: rawText || "", links: [] }
+    }
+  };
+  activeDest = null;
+  _currentTripId = "trip-" + Date.now();
+  _fileHandle = null;
+  if (typeof _tripsIndex === "undefined" || !Array.isArray(_tripsIndex)) _tripsIndex = [];
+  _tripsIndex.push({
+    id: _currentTripId,
+    name: trip.name,
+    dateRange: "",
+    destCount: 0,
+    startDate: "",
+    endDate: "",
+    savedAt: new Date().toISOString()
+  });
+  if (typeof saveTripsIndex === "function") saveTripsIndex();
+  if (typeof localSave === "function") localSave();
+  if (typeof enterApp === "function") enterApp();
+  // Auto-open the Research notes modal after enterApp's drawTripMode
+  // settles. The modal has the pasted text and the "🪄 Make destinations
+  // from this list" button — the user reviews + commits from there.
+  setTimeout(function () {
+    if (typeof _pmEnsureResearchMeta === "function") {
+      try { _pmEnsureResearchMeta(); } catch(_){}
+    }
+    if (typeof _pmOpenTripResearchCard === "function") {
+      try { _pmOpenTripResearchCard(); } catch(_){}
+    }
+  }, 250);
+  return { tripId: _currentTripId };
+}
+if (typeof globalThis !== "undefined") globalThis._buildStubTripFromPastedList = _buildStubTripFromPastedList;
+
 // v359.60.22: append parsed paste-list destinations to the CURRENT
 // trip (used by the Research notes "Make destinations from this list"
 // button). Dates cascade from the last existing destination's dateTo
@@ -5218,7 +5494,21 @@ function _addPastedListToCurrentTrip(parseResult) {
     var lastTo = trip.destinations[trip.destinations.length - 1].dateTo;
     cur = lastTo ? new Date(lastTo + "T12:00:00") : new Date();
   } else {
-    cur = new Date();
+    // v359.60.23: empty-trip cascade origin — prefer (in order):
+    //   1. parseResult.startDate (frontmatter `Start: YYYY-MM-DD`)
+    //   2. trip.brief._pendingStartDate (set when the stub trip was
+    //      minted from a paste; once consumed we clear it below)
+    //   3. today
+    var pending = (trip.brief && trip.brief._pendingStartDate) || null;
+    var seed = parseResult.startDate || pending || "";
+    if (seed) {
+      cur = new Date(seed + "T12:00:00");
+    } else {
+      cur = new Date();
+    }
+    if (trip.brief && trip.brief._pendingStartDate) {
+      try { delete trip.brief._pendingStartDate; } catch(_){}
+    }
   }
   var added = 0;
   parseResult.destinations.forEach(function(p) {
@@ -5269,14 +5559,14 @@ function _openPasteListModal(opts) {
   var box = document.createElement("div");
   box.style.cssText = "background:#fff;border-radius:12px;width:560px;max-width:100%;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 36px rgba(0,0,0,0.22);";
   var title = opts.title || "Paste a list of places";
-  var subtitle = opts.subtitle || "One place per line. Use a section header like \"Overnight hubs\" or \"Sights\" to switch between stays and see-only stops. Trailing numbers set nights (\"Reykjavik 3\"). Parentheticals become destination intent — \"(Arrival/Departure point)\" auto-wires the round-trip entry/exit.";
+  var subtitle = opts.subtitle || "First line is the trip name + region — e.g. <em>Iceland Road Trip 2026 (Iceland)</em>. Optional second line: just write it naturally — <em>September 17, 17 nights</em> works; so does <em>Start: 2026-09-17</em> or <em>When: August 2026</em>. Then one place per line. Section headers like \"Overnight hubs\" or \"Sights\" switch between stays and see-only stops. Trailing numbers set nights (\"Reykjavik 3\"). Parentheticals become destination intent — \"(Arrival/Departure point)\" auto-wires round-trip entry/exit. After Build you'll land in Research notes to review.";
   box.innerHTML = ''
     + '<div style="padding:16px 20px 10px;border-bottom:1px solid #eee;">'
     +   '<div style="font-size:15px;font-weight:700;color:#111;">' + title + '</div>'
     +   '<div style="font-size:11.5px;color:#777;margin-top:5px;line-height:1.5;">' + subtitle + '</div>'
     + '</div>'
     + '<div style="flex:1;overflow-y:auto;padding:14px 20px;display:flex;flex-direction:column;gap:10px;">'
-    +   '<textarea id="paste-list-ta" placeholder="1. Overnight hubs&#10;* Reykjavík (Arrival/Departure point)&#10;* Vík 2&#10;* Akureyri 3&#10;&#10;2. Sights&#10;* Gullfoss&#10;* Skógafoss" style="width:100%;min-height:240px;font:inherit;font-size:12.5px;line-height:1.5;padding:8px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;color:#111;resize:vertical;font-family:inherit;"></textarea>'
+    +   '<textarea id="paste-list-ta" placeholder="Iceland Road Trip 2026 (Iceland)&#10;September 17, 17 nights&#10;&#10;1. Overnight hubs&#10;* Reykjavík (Arrival/Departure point)&#10;* Vík 2&#10;* Akureyri 3&#10;&#10;2. Sights&#10;* Gullfoss&#10;* Skógafoss" style="width:100%;min-height:260px;font:inherit;font-size:12.5px;line-height:1.5;padding:8px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;color:#111;resize:vertical;font-family:inherit;"></textarea>'
     +   '<div id="paste-list-preview" style="font-size:11.5px;color:#555;line-height:1.55;min-height:18px;"></div>'
     + '</div>'
     + '<div style="padding:12px 20px;border-top:1px solid #eee;display:flex;justify-content:flex-end;gap:8px;">'
@@ -5296,22 +5586,36 @@ function _openPasteListModal(opts) {
     var nStay = parsed.destinations.filter(function(d){ return d.isStay; }).length;
     var nSee  = parsed.destinations.filter(function(d){ return !d.isStay; }).length;
     var bits = [];
+    if (parsed.tripName) {
+      bits.push('trip: <strong>' + parsed.tripName + '</strong>');
+    }
+    if (parsed.region && parsed.region !== parsed.tripName) {
+      bits.push('region: <strong>' + parsed.region + '</strong>');
+    }
     if (parsed.destinations.length) {
       bits.push('<strong>' + parsed.destinations.length + '</strong> destination' + (parsed.destinations.length === 1 ? '' : 's') + ' (' + nStay + ' stay, ' + nSee + ' see)');
     }
+    if (parsed.startDate) bits.push('starts <strong>' + parsed.startDate + '</strong>');
+    else if (parsed.when) bits.push('when: <strong>' + parsed.when + '</strong>');
+    if (parsed.duration) bits.push('duration: <strong>' + parsed.duration + '</strong>');
     if (parsed.entry) bits.push('entry: <strong>' + parsed.entry + '</strong>');
     if (parsed.exit && parsed.exit !== parsed.entry) bits.push('exit: <strong>' + parsed.exit + '</strong>');
     if (parsed.entry && parsed.exit === parsed.entry) bits.push('round trip via <strong>' + parsed.entry + '</strong>');
-    prev.innerHTML = bits.length ? ('Will create: ' + bits.join(' · ')) : '<span style="color:#aaa;">Paste a list above to see a preview.</span>';
-    buildBtn.disabled = !parsed.destinations.length;
+    prev.innerHTML = bits.length
+      ? ('Will create: ' + bits.join(' · ') + (parsed.destinations.length ? '' : '<br><span style="color:#888;">No destinations parsed yet — you can add them in Research after the trip opens.</span>'))
+      : '<span style="color:#aaa;">Paste a list above to see a preview.</span>';
+    // Allow Build with just a trip name (no destinations) — the
+    // research-notes editing pass is where the user actually commits.
+    buildBtn.disabled = !(parsed.tripName || parsed.destinations.length);
   }
   ta.addEventListener("input", refresh);
   refresh();
   buildBtn.onclick = function() {
-    var parsed = parsePlacesList(ta.value);
-    if (!parsed.destinations.length) return;
+    var raw = ta.value;
+    var parsed = parsePlacesList(raw);
+    if (!parsed.tripName && !parsed.destinations.length) return;
     close();
-    if (typeof opts.onBuild === "function") opts.onBuild(parsed);
+    if (typeof opts.onBuild === "function") opts.onBuild(parsed, raw);
   };
   setTimeout(function() { try { ta.focus(); } catch(_){} }, 30);
 }
@@ -5357,15 +5661,19 @@ function selectHomeOption(id){
   } else if(id === "import"){
     openTripFile();
   } else if(id === "paste"){
-    // v359.60.22: paste-a-list flow. Opens the shared paste modal;
-    // on Build, parses and mints a fresh trip via the same disclaimer
-    // gate as "+ Start a new trip" so first-time users still see the
-    // AI caveat once.
+    // v359.60.22 / .23: paste-a-list flow. Opens the shared paste
+    // modal; on Build, mints a stub trip (name + region from first
+    // line, raw text into Research notes) and auto-opens the
+    // Research notes modal — the user reviews + commits via the
+    // existing "🪄 Make destinations from this list" button in the
+    // modal. Same AI-disclaimer gate as "+ Start a new trip."
     var _runPaste = function () {
       _openPasteListModal({
         title: "Paste a list of places",
-        buildLabel: "Build trip →",
-        onBuild: function(parsed) { _buildTripFromPastedList(parsed); }
+        buildLabel: "Open in research →",
+        onBuild: function(parsed, rawText) {
+          _buildStubTripFromPastedList(parsed, rawText);
+        }
       });
     };
     if (typeof showAIDisclaimer === "function") {
@@ -7172,8 +7480,25 @@ async function runCandidateSearch(requiredPlaces) {
     + "Do NOT include sight-level places that are visited as day-trips: beaches, waterfalls, glaciers, viewpoints, summits, individual museums, single attractions, or transit hubs without lodging. "
     + "Those belong as sights in the closest town/city that DOES have stays. If a place's primary draw is a single attraction and there's no real lodging within ~5 km, it's a SIGHT, not a destination \u2014 recommend the closest city/town instead and mention the attraction in otherAttractions.\n";
 
+  // v359.60.23: explicit region constraint. The brief already includes
+  // "Region: X" but the LLM occasionally wandered out of region anyway
+  // (Neal's Iceland trip got a France pin from candidate generation).
+  // This clause is appended to the open-ended city / thematic prompts
+  // \u2014 NOT to the required-places hydration, because the user already
+  // declared those places by name. Paired with the backstop filter
+  // (_candInRegion) below that drops any returned candidate whose
+  // country still doesn't match.
+  var regionGuard = (_tb.region)
+    ? "\nABSOLUTELY CRITICAL: every place you return must be physically located in " + _tb.region + ". "
+      + "Do NOT include places outside " + _tb.region + ", even if they\u2019re thematically related. "
+      + "If a place name is ambiguous (e.g. shared between countries), use the one in " + _tb.region + ". "
+      + "Cross-border picks are only allowed within ~100 km of " + _tb.region + "'s border, and you must say so explicitly in tradeoffs. "
+      + "Out-of-region picks will be discarded.\n"
+    : "";
+
   var pCities = "You are a travel expert helping plan a trip to " + (_tb.region||"this region") + ".\n"
     + "Trip context: " + brief + "\n"
+    + regionGuard
     + dayTripNote
     + (skipList ? "These stops are already confirmed: " + skipList + ". Do NOT include them again.\n" : "")
     + "\nList the " + cityCount + " most significant cities in " + (_tb.region||"this region") + " that a well-traveled visitor would consider \u2014 "
@@ -7187,6 +7512,7 @@ async function runCandidateSearch(requiredPlaces) {
 
   var pThematic = "You are a travel expert helping plan a trip to " + (_tb.region||"this region") + ".\n"
     + "Trip context: " + brief + "\n"
+    + regionGuard
     + driverInstruction
     + famNote
     + releasedNote
@@ -7199,6 +7525,22 @@ async function runCandidateSearch(requiredPlaces) {
     + "BE SPECIFIC. Name things \u2014 the trail, the hut, the train, the dish, the view. Never hand-wave with 'spectacular scenery' or 'famous for trains' if you can say what specifically.\n"
     + "Return ONLY a JSON array of exactly " + thematicCount + " places (no markdown):\n"
     + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"What makes it worth visiting for this specific trip \u2014 specific, not generic.","tradeoffs":"One honest downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here beyond the trip\u2019s stated reason.","widelyRecommended":false,"lat":0.0,"lng":0.0}]\nSet widelyRecommended=true if this is a canonical destination for the region \u2014 false otherwise.';
+
+  // v359.60.23: backstop filter for the region guard above. If the
+  // LLM still returns a candidate whose `country` doesn't overlap with
+  // _tb.region (token-level case-insensitive), drop it. Required
+  // places skip this check (user named them explicitly). Logged so
+  // we can see how often the LLM is being naughty.
+  function _candInRegion(c) {
+    if (!_tb.region) return true;       // nothing to filter against
+    var country = String((c && c.country) || "").toLowerCase();
+    if (!country) return true;          // LLM didn't claim a country \u2014 keep
+    var regionTokens = String(_tb.region).toLowerCase().split(/[\s,&\/+\-]+/).filter(function(t){ return t.length >= 3; });
+    if (!regionTokens.length) return true;
+    return regionTokens.some(function(t){
+      return country.indexOf(t) >= 0 || t.indexOf(country) >= 0;
+    });
+  }
 
   // Run p1 in batches for reliability. One big call for 20+ required places
   // regularly times out; splitting into batches of ~8 lets them run in parallel
@@ -7239,12 +7581,26 @@ async function runCandidateSearch(requiredPlaces) {
   calls.push(callMax([{role:"user",content:pCities}], 1500, 45000).then(function(t){
     var cands = JSON.parse(t.replace(/```json|```/g,"").trim());
     cands.forEach(function(c){ c._required=false; c._requiredFor=[]; c._cityPick=true; });
+    // v359.60.23: drop any candidate that wandered outside the
+    // trip's region. The prompt's regionGuard tells the LLM to
+    // stay in-region; this is the backstop when it doesn't listen.
+    var beforeN = cands.length;
+    cands = cands.filter(_candInRegion);
+    if (cands.length < beforeN) {
+      console.warn("[Max picker] pCities: dropped " + (beforeN - cands.length) + " out-of-region candidate(s) for region: " + _tb.region);
+    }
     return cands;
   }).catch(function(e){ console.warn("Major-cities call failed:", e.message); return []; }));
 
   calls.push(callMax([{role:"user",content:pThematic}], 2000, 45000).then(function(t){
     var cands = JSON.parse(t.replace(/```json|```/g,"").trim());
     cands.forEach(function(c){ c._required=false; c._requiredFor=[]; });
+    // v359.60.23: same region backstop as pCities.
+    var beforeN = cands.length;
+    cands = cands.filter(_candInRegion);
+    if (cands.length < beforeN) {
+      console.warn("[Max picker] pThematic: dropped " + (beforeN - cands.length) + " out-of-region candidate(s) for region: " + _tb.region);
+    }
     return cands;
   }).catch(function(){ return []; }));
 
