@@ -3104,14 +3104,14 @@ function loadTripFile(input){
     var raw = e.target.result;
     if (isText) {
       try {
-        if (typeof parsePlacesList !== "function" || typeof _buildStubTripFromPastedList !== "function") {
+        if (typeof parsePlacesList !== "function" || typeof _buildTripFromPastedList !== "function") {
           throw new Error("Paste-list importer not available.");
         }
         var parsed = parsePlacesList(raw);
-        if (!parsed.tripName && !parsed.destinations.length) {
-          throw new Error("No trip name or destinations found in the file. The first line should be the trip name (e.g. \"Iceland Road Trip 2026 (Iceland)\"); subsequent lines should be places.");
+        if (!parsed.destinations.length) {
+          throw new Error("No destinations found in the file. Each place should be on its own line, ideally under a section header like \"1. Overnight hubs\" or \"2. Sights\".");
         }
-        _buildStubTripFromPastedList(parsed, raw);
+        _buildTripFromPastedList(parsed);
       } catch(err) {
         alert("Could not load list file: " + err.message);
       }
@@ -5335,17 +5335,22 @@ function parsePlacesList(text) {
 }
 if (typeof globalThis !== "undefined") globalThis.parsePlacesList = parsePlacesList;
 
-// v359.60.22: mint a fresh trip from a parsed paste-list result and
-// enter the trip view. The paste flow is a power-user shortcut that
-// bypasses the picker entirely — the user already has their list, so
-// we skip discovery and go straight to a populated trip.
+// v359.60.22 (rev v359.60.23): mint a fresh trip from a parsed
+// paste-list result and enter the trip view. The paste flow is a
+// power-user shortcut that bypasses the picker entirely — the user
+// already has their list, so we skip discovery and go straight to a
+// populated trip. (Earlier rev .23 routed through Research notes
+// first for a review beat; reverted on Neal's request — pasting is
+// already deliberate enough, the extra click was friction.)
 //
-// Date handling: start = today; dateFrom/dateTo cascade by accumulated
-// nights. 0-night entries occupy a single day (dateFrom === dateTo).
+// Date handling: start = parseResult.startDate (from frontmatter
+// `Start:` or a natural-language date line); else opts.startDate;
+// else today. dateFrom/dateTo cascade by accumulated nights.
+// 0-night entries occupy a single day (dateFrom === dateTo).
 function _buildTripFromPastedList(parseResult, opts) {
   opts = opts || {};
   if (!parseResult || !Array.isArray(parseResult.destinations) || !parseResult.destinations.length) return null;
-  var startStr = opts.startDate || new Date().toISOString().slice(0, 10);
+  var startStr = parseResult.startDate || opts.startDate || new Date().toISOString().slice(0, 10);
   var cur = new Date(startStr + "T12:00:00");
   destCtr = 0;
   sidCtr = 100;
@@ -5380,7 +5385,7 @@ function _buildTripFromPastedList(parseResult, opts) {
       suggestions: []
     };
   });
-  var name = opts.name || ("Imported — " + new Date().toLocaleDateString("en-US", {month:"short", day:"numeric", year:"numeric"}));
+  var name = parseResult.tripName || opts.name || ("Imported — " + new Date().toLocaleDateString("en-US", {month:"short", day:"numeric", year:"numeric"}));
   trip = {
     name: name,
     destinations: dests,
@@ -5388,6 +5393,12 @@ function _buildTripFromPastedList(parseResult, opts) {
     trackSpending: false,
     pendingActions: [],
     brief: {
+      // v359.60.23: also propagate region / when / duration from the
+      // parse so the picker LLM gets scope context if the user later
+      // expands the trip via "Add destinations" or rebuild.
+      region:   parseResult.region   || "",
+      when:     parseResult.when     || "",
+      duration: parseResult.duration || "",
       entry: parseResult.entry || "",
       tbExit: parseResult.exit || "",
       exitBuffer: true
@@ -5396,6 +5407,25 @@ function _buildTripFromPastedList(parseResult, opts) {
   activeDest = null;
   _currentTripId = "trip-" + Date.now();
   _fileHandle = null;
+  // v359.60.23: initialize _tb so a later picker re-entry / Research
+  // notes button on this trip doesn't bail out on `if (!_tb) return
+  // null` (the same gate that broke the stub-trip flow). Mirror the
+  // trip's brief fields onto _tb so the picker brief renders with
+  // the right region / name on re-open.
+  if (typeof _tb === "undefined" || !_tb) {
+    window._tb = _tb = {};
+  }
+  _tb.name      = name;
+  _tb.region    = parseResult.region || "";
+  _tb.placeName = parseResult.region || "";
+  if (parseResult.when)     _tb.when     = parseResult.when;
+  if (parseResult.duration) _tb.duration = parseResult.duration;
+  if (!_tb.tripMeta) _tb.tripMeta = { notes: "", links: [] };
+  if (!_tb.interests) _tb.interests = [];
+  if (!_tb.drivers)   _tb.drivers   = [];
+  if (!_tb.tripMode)  _tb.tripMode  = "place";
+  if (_tb.entryBuffer === undefined) _tb.entryBuffer = false;
+  if (_tb.exitBuffer  === undefined) _tb.exitBuffer  = false;
   // Push into the trips index + persist.
   if (typeof _tripsIndex === "undefined" || !Array.isArray(_tripsIndex)) _tripsIndex = [];
   _tripsIndex.push({
@@ -5410,6 +5440,9 @@ function _buildTripFromPastedList(parseResult, opts) {
   if (typeof saveTripsIndex === "function") saveTripsIndex();
   if (typeof localSave === "function") localSave();
   // Fire generateCityData for each place so suggestions / coords land.
+  // brief.region is already set above so the Nominatim query in
+  // generateCityData scopes correctly (no more rogue France pin for
+  // "Selfoss" etc.).
   if (typeof generateCityData === "function") {
     dests.forEach(function(d) { try { generateCityData(d.place, d.id); } catch(_){} });
   }
@@ -5586,7 +5619,7 @@ function _openPasteListModal(opts) {
   var box = document.createElement("div");
   box.style.cssText = "background:#fff;border-radius:12px;width:560px;max-width:100%;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 36px rgba(0,0,0,0.22);";
   var title = opts.title || "Paste a list of places";
-  var subtitle = opts.subtitle || "First line is the trip name + region — e.g. <em>Iceland Road Trip 2026 (Iceland)</em>. Optional second line: just write it naturally — <em>September 17, 17 nights</em> works; so does <em>Start: 2026-09-17</em> or <em>When: August 2026</em>. Then one place per line. Section headers like \"Overnight hubs\" or \"Sights\" switch between stays and see-only stops. Trailing numbers set nights (\"Reykjavik 3\"). Parentheticals become destination intent — \"(Arrival/Departure point)\" auto-wires round-trip entry/exit. After Build you'll land in Research notes to review.";
+  var subtitle = opts.subtitle || "First line is the trip name + region — e.g. <em>Iceland Road Trip 2026 (Iceland)</em>. Optional second line: just write it naturally — <em>September 17, 17 nights</em> works; so does <em>Start: 2026-09-17</em> or <em>When: August 2026</em>. Then one place per line. Section headers like \"Overnight hubs\" or \"Sights\" switch between stays and see-only stops. Trailing numbers set nights (\"Reykjavik 3\"). Parentheticals become destination intent — \"(Arrival/Departure point)\" auto-wires round-trip entry/exit.";
   box.innerHTML = ''
     + '<div style="padding:16px 20px 10px;border-bottom:1px solid #eee;">'
     +   '<div style="font-size:15px;font-weight:700;color:#111;">' + title + '</div>'
@@ -5689,17 +5722,17 @@ function selectHomeOption(id){
     openTripFile();
   } else if(id === "paste"){
     // v359.60.22 / .23: paste-a-list flow. Opens the shared paste
-    // modal; on Build, mints a stub trip (name + region from first
-    // line, raw text into Research notes) and auto-opens the
-    // Research notes modal — the user reviews + commits via the
-    // existing "🪄 Make destinations from this list" button in the
-    // modal. Same AI-disclaimer gate as "+ Start a new trip."
+    // modal; on Build, parses the list and mints the trip with
+    // destinations directly (the earlier "land in Research first"
+    // detour was reverted — pasting is deliberate enough; the
+    // intermediate-review step was friction the user didn't want).
+    // Same AI-disclaimer gate as "+ Start a new trip."
     var _runPaste = function () {
       _openPasteListModal({
         title: "Paste a list of places",
-        buildLabel: "Open in research →",
+        buildLabel: "Build trip →",
         onBuild: function(parsed, rawText) {
-          _buildStubTripFromPastedList(parsed, rawText);
+          _buildTripFromPastedList(parsed);
         }
       });
     };

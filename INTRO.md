@@ -72,19 +72,17 @@ ChatGPT conversation — you can paste it in and skip the brief +
 candidate-picking steps. Two entry points:
 
 - **Home screen → Paste a list.** Sits next to *Start a new trip*.
-  Opens a paste box. On Build, Max mints a stub trip, drops the
-  pasted text into the trip's Research notes, and opens that modal.
-  You review the list inline, then click **🪄 Make destinations
-  from this list** to commit. The intermediate step gives you an
-  editing pass before destinations actually land.
+  Opens a paste box. On Build, Max parses the list and mints a
+  fresh trip with destinations already populated — you land
+  straight on the trip view.
 - **Home screen → Load from file.** Same flow, but the source is
-  a `.txt` or `.md` file you have on disk. The file's content
-  becomes the Research notes textarea; Max routes through the
-  same review → commit path.
+  a `.txt` or `.md` file on disk. Max reads the file, parses it
+  the same way, and builds the trip.
 - **Research notes → 🪄 Make destinations from this list.** Inside
   any trip's Research notes modal, parses the current notes text
   and appends the destinations to the trip you already have open.
-  Your notes stay put.
+  Useful when you've been collecting places in research and want
+  to promote them to the trip without leaving the modal.
 
 #### Format
 
