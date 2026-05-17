@@ -31506,6 +31506,12 @@ function drawTripMode(){
     var _entry = (trip && trip.brief && trip.brief.entry)  || (window._tb && window._tb.entry)  || "";
     var _exit  = (trip && trip.brief && trip.brief.tbExit) || (window._tb && window._tb.tbExit) || "";
     var _movedTotal = 0;
+    // v359.60.19: dedupe FIRST so the order-healing passes don't waste
+    // work shuffling duplicate Blue Lagoons around. Returns # of
+    // entries removed.
+    if (window.MaxTripUI && typeof window.MaxTripUI.dedupeTripDestinations === "function") {
+      _movedTotal += window.MaxTripUI.dedupeTripDestinations(trip);
+    }
     if ((_entry || _exit) && window.MaxTripUI && typeof window.MaxTripUI.reorderTripByEntryExit === "function") {
       _movedTotal += window.MaxTripUI.reorderTripByEntryExit(_entry, _exit);
     }

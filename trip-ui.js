@@ -1499,6 +1499,137 @@
     return moved;
   }
 
+  // v359.60.19: self-heal duplicate destinations. trip.destinations
+  // can land with the same place twice — e.g. Iceland trip where
+  // Blue Lagoon appeared at both position 2 (placeId: pl-blue-lagoon)
+  // and position 9 (no placeId). Same name + identical coords,
+  // different objects. We don't know what specifically introduced the
+  // dupe (possibly a wayside promote-back path, possibly a stale
+  // candidate that got synthesized twice), so this is a backstop:
+  // catch it at render time, merge the entries, log loudly.
+  //
+  // Merge rules:
+  //   • Key by normalized place name. Coord proximity (<0.01° ≈ 1km)
+  //     also counts as a match for places with name variants.
+  //   • Keeper = the entry with a placeId if exactly one has one;
+  //     otherwise the FIRST occurrence in trip.destinations order
+  //     (preserves user-visible numbering for the canonical stop).
+  //   • Nights = sum across all duplicates. Avoids silent loss of
+  //     overnight count if the user explicitly extended one of them.
+  //   • bookings / locations / suggestions / trackerItems / etc.
+  //     concat from removed entries into the keeper.
+  //
+  // Returns number of duplicates removed (0 = no duplicates).
+  function _dedupeTripDestinations(trip) {
+    if (!trip || !Array.isArray(trip.destinations)) return 0;
+    var dests = trip.destinations;
+    if (dests.length < 2) return 0;
+    var normFn = (typeof global._normPlaceName === "function")
+      ? global._normPlaceName
+      : function(s){ return String(s||"").toLowerCase().trim(); };
+
+    // First pass: group by normalized name. Track first index seen.
+    var groups = {};
+    var order = [];
+    dests.forEach(function(d, i){
+      if (!d || !d.place) return;
+      var k = normFn(d.place);
+      if (!k) return;
+      if (!groups[k]) {
+        groups[k] = [];
+        order.push(k);
+      }
+      groups[k].push({ idx: i, dest: d });
+    });
+
+    // Identify groups with > 1 entry.
+    var hasDupes = false;
+    order.forEach(function(k){
+      if (groups[k].length > 1) hasDupes = true;
+    });
+    if (!hasDupes) return 0;
+
+    // Merge each group with > 1 entry. Build a new destinations array.
+    var toRemoveIds = {};
+    var mergeLog = [];
+    order.forEach(function(k){
+      var grp = groups[k];
+      if (grp.length < 2) return;
+      // Pick keeper: prefer one with placeId; else first by idx.
+      var keeperEntry = null;
+      grp.forEach(function(e){
+        if (e.dest.placeId && !keeperEntry) keeperEntry = e;
+      });
+      if (!keeperEntry) {
+        keeperEntry = grp.slice().sort(function(a,b){ return a.idx - b.idx; })[0];
+      }
+      var keeper = keeperEntry.dest;
+      grp.forEach(function(e){
+        if (e === keeperEntry) return;
+        // Sum nights into the keeper.
+        keeper.nights = (keeper.nights || 0) + (e.dest.nights || 0);
+        // Concat list-type fields.
+        ["hotelBookings","generalBookings","locations","attachedEvents","suggestions","todayItems","discoveredItems"].forEach(function(field){
+          if (Array.isArray(e.dest[field]) && e.dest[field].length) {
+            if (!Array.isArray(keeper[field])) keeper[field] = [];
+            keeper[field] = keeper[field].concat(e.dest[field]);
+          }
+        });
+        // Merge trackerItems by category.
+        if (e.dest.trackerItems && typeof e.dest.trackerItems === "object") {
+          if (!keeper.trackerItems || typeof keeper.trackerItems !== "object") {
+            keeper.trackerItems = { booked: [], see: [], visited: [] };
+          }
+          Object.keys(e.dest.trackerItems).forEach(function(cat){
+            var src = e.dest.trackerItems[cat];
+            if (Array.isArray(src) && src.length) {
+              if (!Array.isArray(keeper.trackerItems[cat])) keeper.trackerItems[cat] = [];
+              keeper.trackerItems[cat] = keeper.trackerItems[cat].concat(src);
+            }
+          });
+        }
+        if (e.dest.id) toRemoveIds[e.dest.id] = true;
+        mergeLog.push(e.dest.place + " (idx " + e.idx + " merged into idx " + keeperEntry.idx + ")");
+      });
+    });
+
+    if (!mergeLog.length) return 0;
+
+    // Rebuild destinations array, dropping the merged-away entries.
+    var removed = 0;
+    trip.destinations = dests.filter(function(d){
+      if (!d || !d.id) return true;
+      if (toRemoveIds[d.id]) { removed++; return false; }
+      return true;
+    });
+
+    // Cascade dates from the (preserved) start date.
+    var startDate = trip.destinations[0] && trip.destinations[0].dateFrom;
+    if (!startDate) {
+      for (var n = 0; n < trip.destinations.length; n++) {
+        if (trip.destinations[n] && trip.destinations[n].dateFrom) {
+          startDate = trip.destinations[n].dateFrom;
+          break;
+        }
+      }
+    }
+    if (startDate) {
+      var cur = new Date(startDate + "T12:00:00");
+      trip.destinations.forEach(function(d){
+        if (!d) return;
+        d.dateFrom = cur.toISOString().slice(0, 10);
+        var nx = new Date(cur); nx.setDate(nx.getDate() + (d.nights || 0));
+        d.dateTo = nx.toISOString().slice(0, 10);
+        if (typeof global.makeDays === "function" && d.id && d.place) {
+          d.days = global.makeDays(d.id, d.place, d.intent || d.place, d.dateFrom, d.nights || 0);
+        }
+        cur = nx;
+      });
+    }
+    console.log("[Max dedupe] merged " + removed + " duplicate destination(s):", mergeLog.join("; "));
+    return removed;
+  }
+
   // v359.60.18: self-heal "criss-cross" trip-destination order.
   // The geo-reorder pass in orderKeptCandidates is supposed to produce
   // a sane geographic walk through the trip, but it depends on every
@@ -4158,6 +4289,11 @@
     // path is meaningfully shorter (< 60% of current), so user
     // manual reorderings on saner trips aren't disturbed.
     geoHealTripOrder:                 _geoHealTripOrder,
+    // v359.60.19: merge duplicate destinations (same place name)
+    // into a single keeper, summing nights and concatenating
+    // bookings/locations/etc. Runs before geo-heal so the NN sort
+    // doesn't waste effort on dupes.
+    dedupeTripDestinations:           _dedupeTripDestinations,
   };
 
   // No back-compat aliases yet — desktop still uses its inline
