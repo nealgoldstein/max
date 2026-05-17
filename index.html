@@ -13258,7 +13258,11 @@ function _openTripHeroMapOverlay(){
     // updateMainMap). Active destination keeps the red highlight ring
     // at 26 px so the user can spot it.
     var isActive = !!p.isActive;
-    var color = isActive ? "#c44" : "#1a5fa8";
+    // v359.60.21: 0-night ("see") destinations render purple to match
+    // the main trip map. Active state still wins (red ring) so the user
+    // can locate the currently-open dest at a glance.
+    var _isZeroNight = (p.nights || 0) === 0;
+    var color = isActive ? "#c44" : (_isZeroNight ? "#5b3f8f" : "#1a5fa8");
     var size = isActive ? 26 : 22;
     var label = String(i + 1);
     var fontSize = label.length > 1 ? (isActive ? 12 : 10) : (isActive ? 13 : 11);
@@ -13507,7 +13511,12 @@ function openTripHeroMapWindow(){
     // Long labels get a smaller font so they still fit at 22 px.
     +     'var size = 22;'
     +     'var fontSize = label.length > 3 ? 8 : (label.length > 2 ? 10 : 11);'
-    +     'var html = \'<div style="background:#1a5fa8;color:#fff;border-radius:50%;width:\'+size+\'px;height:\'+size+\'px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;font-size:\'+fontSize+\'px;font-weight:700;letter-spacing:-0.02em;">\'+label+\'</div>\';'
+    // v359.60.21: 0-night ("see") destinations render purple to match the
+    // main trip map. Round-trip group only goes purple when EVERY visit
+    // is 0-night; mixed groups stay blue so the overnight context wins.
+    +     'var _allZeroNight = g.pts.every(function(p){ return (p.nights || 0) === 0; });'
+    +     'var _bg = _allZeroNight ? "#5b3f8f" : "#1a5fa8";'
+    +     'var html = \'<div style="background:\'+_bg+\';color:#fff;border-radius:50%;width:\'+size+\'px;height:\'+size+\'px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;font-size:\'+fontSize+\'px;font-weight:700;letter-spacing:-0.02em;">\'+label+\'</div>\';'
     +     'var icon = L.divIcon({html: html, className: "", iconSize: [size, size], iconAnchor: [size/2, size/2]});'
     +     'var popupBits = g.pts.map(function(p){'
     +       'var role = p.isFirst ? "Arrival" : (p.isLast ? "Departure" : "Stop " + p.n);'
@@ -24350,6 +24359,15 @@ if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.on === "functio
     } else if (_leftMode === "dest" && activeDest && typeof drawDestMode === "function") {
       drawDestMode(activeDest);
     }
+    // v359.60.21: any tripChange now also refreshes the trip map. The
+    // map's pin color depends on dest.nights (purple for 0-night "see"
+    // stops, blue for overnights) — and nights mutations were reaching
+    // this listener via tripChange but NOT through the separate
+    // mapDataChange path used to drive updateMainMap. Coupling them
+    // here means a nights flip (overnight ↔ see) repaints the pin
+    // even on code paths that emit only tripChange (or that go
+    // through drawTripMode without an explicit mapDataChange).
+    if (typeof updateMainMap === "function") updateMainMap();
   });
   MaxEngineTrip.on("mapDataChange", function () {
     if (typeof updateMainMap === "function") updateMainMap();
@@ -25606,7 +25624,18 @@ function updateMainMap(){
       var _isCandidate = group.dests.some(function(x){
         return x && x.dest && _couldBeDayTripDestIds[x.dest.id];
       });
-      var color = _isCandidate ? "#5b3f8f" : "#1a5fa8";
+      // v359.60.21: 0-night ("see") destinations always render purple so
+      // the user can tell at a glance which stops they sleep at vs. which
+      // are pass-through day-trip / wayside visits. The existing
+      // candidate-purple (1-night-near-hub HINT) reuses the same color
+      // because both states are day-trip-adjacent — the tooltip handles
+      // disambiguation. Round-trip collapsed groups (same place visited
+      // multiple times) only go purple when EVERY visit is 0-night;
+      // mixed groups stay blue so the overnight context wins.
+      var _allZeroNight = group.dests.every(function(x){
+        return x && x.dest && (x.dest.nights || 0) === 0;
+      });
+      var color = (_allZeroNight || _isCandidate) ? "#5b3f8f" : "#1a5fa8";
       var html = '<div style="background:'+color+';color:#fff;border-radius:50%;width:'
         + size + 'px;height:' + size + 'px;border:2px solid #fff;'
         + 'box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;'
@@ -31720,8 +31749,14 @@ function drawTripMode(){
             }
           }
           delete trip.overBudgetNotice;
-          autoSave();
-          if (typeof drawTripMode === "function") drawTripMode();
+          // v359.60.21: route through _emitTripMutation so the trip
+          // map redraws too — the trim can drop a destination to 0
+          // nights ("see"), which should flip the pin from blue to
+          // purple. The previous autoSave + drawTripMode pair persisted
+          // the change and rebuilt the left panel but skipped the map
+          // (no mapDataChange emit, no updateMainMap call).
+          if (typeof _emitTripMutation === "function") _emitTripMutation();
+          else { autoSave(); if (typeof drawTripMode === "function") drawTripMode(); }
           // v359.51.19: visual feedback. Sum the trimmed nights so the
           // toast names what just happened concretely.
           if (typeof showSaveStatus === "function") {
