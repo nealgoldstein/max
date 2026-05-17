@@ -5571,6 +5571,29 @@ async function expandMustDos() {
   var region  = (g("tb-region")  ? g("tb-region").value.trim()  : "") || _tb.region  || "";
   var intent  = (g("tb-intent")  ? g("tb-intent").value.trim()  : "") || _tb.intent  || _tb.tripSentence || "";
 
+  // v359.60.8: sync _tb.placeActivities → _mdcItems before Choreograph.
+  // The picker UI mutates _tb.placeActivities (toggling activity checked,
+  // adding completeness-pass items, manual adds), but _mdcItems was
+  // populated separately at LLM-generation time and didn't pick up
+  // those additions. Result: unchecked activities that exist in
+  // placeActivities aren't in _mdcItems, so they get lost on save
+  // and disappear when the user returns to research. Merging here
+  // means trip.mdcItems carries the full menu (checked + unchecked)
+  // so re-edit preserves "things you considered but didn't pick."
+  if (Array.isArray(_tb.placeActivities) && _tb.placeActivities.length) {
+    if (!Array.isArray(_mdcItems)) _mdcItems = [];
+    var _mdcIds = {};
+    _mdcItems.forEach(function(m){ if (m && m.id) _mdcIds[m.id] = true; });
+    var _added = 0;
+    _tb.placeActivities.forEach(function(pa){
+      if (!pa || !pa.id) return;
+      if (_mdcIds[pa.id]) return;
+      _mdcItems.push(pa);
+      _added++;
+    });
+    if (_added > 0) console.log("[Max expandMustDos] merged " + _added + " placeActivities into _mdcItems (preserves unchecked items through Choreograph)");
+  }
+
   // Place/Activity-mode shortcut: the user already picked concrete items on
   // the Step 1 picker, so _mdcItems is populated. Skip the LLM regen, compute
   // required places, and fire chip suggestions + candidate search directly.
