@@ -31505,12 +31505,19 @@ function drawTripMode(){
   try {
     var _entry = (trip && trip.brief && trip.brief.entry)  || (window._tb && window._tb.entry)  || "";
     var _exit  = (trip && trip.brief && trip.brief.tbExit) || (window._tb && window._tb.tbExit) || "";
+    var _movedTotal = 0;
     if ((_entry || _exit) && window.MaxTripUI && typeof window.MaxTripUI.reorderTripByEntryExit === "function") {
-      var _moved = window.MaxTripUI.reorderTripByEntryExit(_entry, _exit);
-      if (_moved > 0 && typeof autoSave === "function") {
-        // Persist the silent fix so it doesn't redo on every render.
-        try { autoSave(); } catch(_) {}
-      }
+      _movedTotal += window.MaxTripUI.reorderTripByEntryExit(_entry, _exit);
+    }
+    // v359.60.18: also self-heal criss-cross middle orderings produced
+    // by trips built before the (0,0)-coord filter. Only fires when
+    // the new path is < 60% of the current, so user manual reorderings
+    // aren't disturbed.
+    if (window.MaxTripUI && typeof window.MaxTripUI.geoHealTripOrder === "function") {
+      _movedTotal += window.MaxTripUI.geoHealTripOrder(trip);
+    }
+    if (_movedTotal > 0 && typeof autoSave === "function") {
+      try { autoSave(); } catch(_) {}
     }
   } catch(_) {}
   var c=g("lp-content"); if(!c)return;

@@ -1029,10 +1029,20 @@
       if (ordered.length < 4) return ordered; // 1-3 destinations: nothing to optimize
       function getCoord(c){
         if (!c) return null;
-        if (typeof c.lat === "number" && typeof c.lng === "number" && isFinite(c.lat) && isFinite(c.lng)) return [c.lat, c.lng];
+        // v359.60.18: reject (0,0). isFinite(0) is true but (0°N, 0°E)
+        // is in the Atlantic off Africa — when even one candidate has
+        // garbage 0,0 coords the centroid + nearest-neighbor walk gets
+        // dragged thousands of miles, producing the criss-cross trip
+        // layouts we saw on the Iceland trip (Reykjadalur, Reynisfjara,
+        // Stokksnes, Geysir, Reykjanes Peninsula were all 0,0).
+        var hasRealLatLng =
+          typeof c.lat === "number" && typeof c.lng === "number"
+          && isFinite(c.lat) && isFinite(c.lng)
+          && !(c.lat === 0 && c.lng === 0);
+        if (hasRealLatLng) return [c.lat, c.lng];
         if (typeof getCityCenter === "function") {
           var ctr = getCityCenter(c.place);
-          if (ctr && isFinite(ctr[0]) && isFinite(ctr[1])) return ctr;
+          if (ctr && isFinite(ctr[0]) && isFinite(ctr[1]) && !(ctr[0] === 0 && ctr[1] === 0)) return ctr;
         }
         return null;
       }
@@ -1429,6 +1439,12 @@
           // and mark kept. Shape matches the stub at runCandidateSearch
           // line ~6912 so downstream code treats it as a normal
           // required-anchor candidate.
+          // v359.60.18: lat/lng default to null (not 0). (0,0) is the
+          // Atlantic off Africa — it satisfies isFinite checks but
+          // poisons the geo-reorder centroid. Null lets getCoord fall
+          // through to getCityCenter, which knows most Iceland places.
+          var _pLat = (typeof p.lat === "number" && (p.lat !== 0 || p.lng !== 0)) ? p.lat : null;
+          var _pLng = (typeof p.lng === "number" && (p.lat !== 0 || p.lng !== 0)) ? p.lng : null;
           var synth = {
             place: p.place,
             country: p.country || "",
@@ -1439,8 +1455,8 @@
             whyItFits: it.description || "Added to round out the route.",
             tradeoffs: "",
             tags: ["reconciled"],
-            lat: (typeof p.lat === "number") ? p.lat : 0,
-            lng: (typeof p.lng === "number") ? p.lng : 0,
+            lat: _pLat,
+            lng: _pLng,
             nights: (typeof p.nights === "number") ? p.nights : 1,
             _required: true,
             _requiredFor: ["reconciled"],
@@ -1548,6 +1564,47 @@
 
     // Parse start date from brief
     var startDate=parseStartDateFromBrief(_tb.when||"");
+
+    // v359.60.18: backfill missing / (0,0) coords on kept candidates
+    // BEFORE orderKeptCandidates runs. The geo-reorder pass uses
+    // candidate.lat/lng to sort the middle of the trip. If even one
+    // candidate has 0,0 (the Atlantic off Africa), the centroid +
+    // nearest-neighbor walk get dragged thousands of miles and the
+    // trip ends up criss-crossing the map. The reconciliation pass
+    // above defaulted to lat:0,lng:0 on synthesized candidates; LLM
+    // candidates can also arrive without coords. getCityCenter
+    // (engine-trip.js, exposed via window) reads _generatedCityData
+    // which the picker populates as the user browses, so most named
+    // hubs resolve. For places it doesn't know we leave coords null —
+    // getCoord then skips that candidate cleanly instead of poisoning.
+    try {
+      var _backfilled = [];
+      kept.forEach(function(c){
+        if (!c || !c.place) return;
+        var hasReal = typeof c.lat === "number" && typeof c.lng === "number"
+          && isFinite(c.lat) && isFinite(c.lng)
+          && !(c.lat === 0 && c.lng === 0);
+        if (hasReal) return;
+        if (typeof window !== "undefined" && typeof window.getCityCenter === "function") {
+          var ctr = null;
+          try { ctr = window.getCityCenter(c.place); } catch(_){}
+          if (ctr && isFinite(ctr[0]) && isFinite(ctr[1]) && !(ctr[0] === 0 && ctr[1] === 0)) {
+            c.lat = ctr[0];
+            c.lng = ctr[1];
+            _backfilled.push(c.place);
+            return;
+          }
+        }
+        // Still no coord — null them out so getCoord skips cleanly
+        // rather than treating 0,0 as valid.
+        if (c.lat === 0 && c.lng === 0) { c.lat = null; c.lng = null; }
+      });
+      if (_backfilled.length) {
+        console.log("[Max publishTrip] backfilled coords for " + _backfilled.length + " place(s):", _backfilled.join(", "));
+      }
+    } catch(e) {
+      console.warn("[Max publishTrip] coord backfill failed (non-fatal):", e && e.message);
+    }
 
     // ── Event-aware ordering ──────────────────────────────────
     // Order kept candidates so that:

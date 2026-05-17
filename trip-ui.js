@@ -1499,6 +1499,172 @@
     return moved;
   }
 
+  // v359.60.18: self-heal "criss-cross" trip-destination order.
+  // The geo-reorder pass in orderKeptCandidates is supposed to produce
+  // a sane geographic walk through the trip, but it depends on every
+  // candidate having a real lat/lng. Trips built before the (0,0)
+  // filter (v359.60.18) often shipped with garbage coords on
+  // synthesized completeness-pass places, which poisoned the centroid
+  // / nearest-neighbor walk and produced trips that bounce all over
+  // the country.
+  //
+  // This helper runs at drawTripMode time. Two phases:
+  //
+  //   1. Sanitize: any dest with lat===0 && lng===0 gets coords
+  //      nulled out — these are sentinel "no coord" values, not the
+  //      Atlantic. Then try to backfill from global.getCityCenter.
+  //
+  //   2. Reorder: compute the current trip total path length using
+  //      what coords are available. Then compute a nearest-neighbor
+  //      walk through the MIDDLE destinations (keeping entry at 0
+  //      and exit at last). If the NN path is meaningfully shorter
+  //      (< 60% of current), swap in the new order and cascade dates.
+  //
+  // The 60% threshold is deliberately conservative: a small zigzag
+  // shouldn't override the user's manual reordering. Only true
+  // criss-cross trips clear that bar.
+  //
+  // Returns the number of destinations whose position changed.
+  function _geoHealTripOrder(trip) {
+    if (!trip || !Array.isArray(trip.destinations)) return 0;
+    var dests = trip.destinations;
+    if (dests.length < 4) return 0; // 1-3 dests: nothing to optimize
+
+    // Phase 1: sanitize + backfill.
+    dests.forEach(function(d){
+      if (!d) return;
+      if (d.lat === 0 && d.lng === 0) { d.lat = null; d.lng = null; }
+      var hasReal = typeof d.lat === "number" && typeof d.lng === "number"
+        && isFinite(d.lat) && isFinite(d.lng)
+        && !(d.lat === 0 && d.lng === 0);
+      if (hasReal) return;
+      if (typeof global.getCityCenter === "function" && d.place) {
+        var ctr = null;
+        try { ctr = global.getCityCenter(d.place); } catch(_){}
+        if (ctr && isFinite(ctr[0]) && isFinite(ctr[1]) && !(ctr[0] === 0 && ctr[1] === 0)) {
+          d.lat = ctr[0];
+          d.lng = ctr[1];
+        }
+      }
+    });
+
+    // Phase 2: NN reorder, anchored.
+    function getCoord(d){
+      if (!d) return null;
+      if (typeof d.lat === "number" && typeof d.lng === "number"
+          && isFinite(d.lat) && isFinite(d.lng)
+          && !(d.lat === 0 && d.lng === 0)) {
+        return [d.lat, d.lng];
+      }
+      return null;
+    }
+    function distSq(a, b){
+      if (!a || !b) return Infinity;
+      var dLat = a[0] - b[0], dLng = a[1] - b[1];
+      return dLat*dLat + dLng*dLng;
+    }
+    function pathLen(arr){
+      var total = 0;
+      for (var i = 1; i < arr.length; i++) {
+        var a = getCoord(arr[i-1]);
+        var b = getCoord(arr[i]);
+        if (a && b) total += Math.sqrt(distSq(a, b));
+      }
+      return total;
+    }
+
+    var entry = dests[0];
+    var exit  = dests[dests.length - 1];
+    var middle = dests.slice(1, -1);
+    // Need at least 2 middle dests with coords for the reorder to mean anything.
+    var middleWithCoords = middle.filter(function(d){ return getCoord(d) != null; });
+    if (middleWithCoords.length < 2) return 0;
+
+    var entryCoord = getCoord(entry);
+    var exitCoord  = getCoord(exit);
+    if (!entryCoord) return 0; // can't sort without an anchor
+
+    var current = entryCoord;
+    var pool = middle.slice();
+    var nnMiddle = [];
+    while (pool.length) {
+      var bestIdx = -1;
+      var bestDist = Infinity;
+      for (var i = 0; i < pool.length; i++) {
+        var p = pool[i];
+        var pc = getCoord(p);
+        if (!pc) continue;
+        var d = distSq(current, pc);
+        // For the last placement, factor distance-to-exit so we don't
+        // strand a far destination right before the exit.
+        if (pool.length === 1 && exitCoord) {
+          d = d * 0.6 + distSq(pc, exitCoord) * 0.4;
+        }
+        if (d < bestDist) { bestDist = d; bestIdx = i; }
+      }
+      if (bestIdx < 0) {
+        // No coord-bearing remainder — append the rest in original order.
+        nnMiddle = nnMiddle.concat(pool);
+        break;
+      }
+      var picked = pool.splice(bestIdx, 1)[0];
+      nnMiddle.push(picked);
+      var pickedCoord = getCoord(picked);
+      if (pickedCoord) current = pickedCoord;
+    }
+
+    var newOrder = [entry].concat(nnMiddle).concat([exit]);
+    // Did the order actually change?
+    var changed = false;
+    for (var k = 0; k < newOrder.length; k++) {
+      if (newOrder[k] !== dests[k]) { changed = true; break; }
+    }
+    if (!changed) return 0;
+
+    var curLen = pathLen(dests);
+    var newLen = pathLen(newOrder);
+    // Only swap if the new path is meaningfully shorter. 60% threshold
+    // avoids overruling user manual reordering on small zigzags.
+    if (curLen <= 0 || newLen >= curLen * 0.60) {
+      return 0;
+    }
+
+    var beforeOrder = dests.map(function(d){ return d && d.place; }).join(" → ");
+    trip.destinations = newOrder;
+    // Count moves.
+    var moved = 0;
+    for (var m = 0; m < newOrder.length; m++) {
+      if (dests[m] && newOrder[m] && dests[m].id !== newOrder[m].id) moved++;
+    }
+    // Cascade dates from the new index 0.
+    var startDate = trip.destinations[0] && trip.destinations[0].dateFrom;
+    if (!startDate) {
+      // Find any dateFrom in the array.
+      for (var n = 0; n < trip.destinations.length; n++) {
+        if (trip.destinations[n] && trip.destinations[n].dateFrom) {
+          startDate = trip.destinations[n].dateFrom;
+          break;
+        }
+      }
+    }
+    if (startDate) {
+      var cur = new Date(startDate + "T12:00:00");
+      trip.destinations.forEach(function(d){
+        if (!d) return;
+        d.dateFrom = cur.toISOString().slice(0, 10);
+        var nx = new Date(cur); nx.setDate(nx.getDate() + (d.nights || 0));
+        d.dateTo = nx.toISOString().slice(0, 10);
+        if (typeof global.makeDays === "function" && d.id && d.place) {
+          d.days = global.makeDays(d.id, d.place, d.intent || d.place, d.dateFrom, d.nights || 0);
+        }
+        cur = nx;
+      });
+    }
+    console.log("[Max geo-heal] re-sorted middle (" + Math.round(curLen*111) + "km → " + Math.round(newLen*111) + "km). Was: " + beforeOrder);
+    console.log("[Max geo-heal] new order: " + trip.destinations.map(function(d){return d.place;}).join(" → "));
+    return moved;
+  }
+
   function _renderArrivalDeparturePanel(trip, container) {
     if (!container) return;
     if (!trip || !trip.candidates || !trip.candidates.length) return;
@@ -3986,6 +4152,12 @@
     // destination order whenever entry/exit cities are out of place.
     // Returns # of moves; 0 means order was already correct.
     reorderTripByEntryExit:           _reorderTripByEntryExit,
+    // v359.60.18: coord-aware middle re-sort. Catches trips built
+    // before the (0,0)-coord filter where criss-cross orderings
+    // shipped from buildFromCandidates. Only fires when the new
+    // path is meaningfully shorter (< 60% of current), so user
+    // manual reorderings on saner trips aren't disturbed.
+    geoHealTripOrder:                 _geoHealTripOrder,
   };
 
   // No back-compat aliases yet — desktop still uses its inline
