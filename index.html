@@ -5386,9 +5386,37 @@ function _buildTripFromPastedList(parseResult, opts) {
     };
   });
   var name = parseResult.tripName || opts.name || ("Imported — " + new Date().toLocaleDateString("en-US", {month:"short", day:"numeric", year:"numeric"}));
+  // v359.60.23: mirror the parsed places as `trip.candidates` so the
+  // candidate explorer (reopenCandidateExplorer) has something to
+  // render. The auto-open below drops the user into that view right
+  // after the trip lands, so they can evaluate day-trip / wayside
+  // conversions before refining. status="keep" for every one — the
+  // user already pasted them in; the explorer is for evaluation,
+  // not initial picking.
+  var pasteCands = parseResult.destinations.map(function(p, ci) {
+    var slug = String(p.place || "place").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    return {
+      id:        "c-paste-" + slug + "-" + ci,
+      place:     p.place,
+      country:   parseResult.region || null,
+      role:      p.isStay ? "base" : "stop",
+      whyItFits: p.intent || "",
+      tags:      [],
+      tradeoffs: "",
+      stayRange: (p.nights || 0) + " night" + ((p.nights || 0) === 1 ? "" : "s"),
+      lat:       null,
+      lng:       null,
+      status:    "keep",
+      _required: true,
+      _requiredFor: [],
+      order:     ci,
+      manuallyOrdered: true
+    };
+  });
   trip = {
     name: name,
     destinations: dests,
+    candidates: pasteCands,
     legs: {},
     trackSpending: false,
     pendingActions: [],
@@ -5447,6 +5475,19 @@ function _buildTripFromPastedList(parseResult, opts) {
     dests.forEach(function(d) { try { generateCityData(d.place, d.id); } catch(_){} });
   }
   if (typeof enterApp === "function") enterApp();
+  // v359.60.23: drop the user into the candidate explorer right
+  // after the trip view renders, so they can evaluate day-trip /
+  // wayside conversions on their pasted list before committing.
+  // The explorer is overlaid on the trip view; Cancel = keep the
+  // trip as built; Apply changes = reconcile keep/reject with the
+  // existing destinations (existing applyCandidateChanges path).
+  // 350ms gives enterApp's setTimeout(50)+initMainMap+drawTripMode
+  // chain time to settle so the explorer doesn't fight for layout.
+  setTimeout(function() {
+    if (typeof reopenCandidateExplorer === "function") {
+      try { reopenCandidateExplorer(); } catch(_){}
+    }
+  }, 350);
   return { tripId: _currentTripId, destCount: dests.length };
 }
 if (typeof globalThis !== "undefined") globalThis._buildTripFromPastedList = _buildTripFromPastedList;
@@ -5619,7 +5660,7 @@ function _openPasteListModal(opts) {
   var box = document.createElement("div");
   box.style.cssText = "background:#fff;border-radius:12px;width:560px;max-width:100%;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 36px rgba(0,0,0,0.22);";
   var title = opts.title || "Paste a list of places";
-  var subtitle = opts.subtitle || "First line is the trip name + region — e.g. <em>Iceland Road Trip 2026 (Iceland)</em>. Optional second line: just write it naturally — <em>September 17, 17 nights</em> works; so does <em>Start: 2026-09-17</em> or <em>When: August 2026</em>. Then one place per line. Section headers like \"Overnight hubs\" or \"Sights\" switch between stays and see-only stops. Trailing numbers set nights (\"Reykjavik 3\"). Parentheticals become destination intent — \"(Arrival/Departure point)\" auto-wires round-trip entry/exit.";
+  var subtitle = opts.subtitle || "First line is the trip name + region — e.g. <em>Iceland Road Trip 2026 (Iceland)</em>. Optional second line: just write it naturally — <em>September 17, 17 nights</em> works; so does <em>Start: 2026-09-17</em> or <em>When: August 2026</em>. Then one place per line. Section headers like \"Overnight hubs\" or \"Sights\" switch between stays and see-only stops. Trailing numbers set nights (\"Reykjavik 3\"). Parentheticals become destination intent — \"(Arrival/Departure point)\" auto-wires round-trip entry/exit. After Build, you'll land in the candidate explorer to evaluate day-trip / wayside conversions before committing.";
   box.innerHTML = ''
     + '<div style="padding:16px 20px 10px;border-bottom:1px solid #eee;">'
     +   '<div style="font-size:15px;font-weight:700;color:#111;">' + title + '</div>'
