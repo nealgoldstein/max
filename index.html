@@ -1969,6 +1969,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
     <div id="hs-actions" style="margin-top:20px;padding-top:14px;border-top:1px solid #eee;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
       <button onclick="selectHomeOption('new')" style="font-size:12.5px;font-weight:600;padding:8px 16px;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;">+ Start a new trip</button>
       <button onclick="selectHomeOption('browse')" style="font-size:12px;font-weight:500;padding:8px 12px;background:#fff;color:#1a5fa8;border:1px solid #d8d4c8;border-radius:6px;cursor:pointer;font-family:inherit;">Just browsing →</button>
+      <button onclick="selectHomeOption('paste')" style="font-size:11px;font-weight:500;padding:8px 12px;background:#fff;color:#888;border:1px solid #d8d4c8;border-radius:6px;cursor:pointer;font-family:inherit;" title="Already have a list of places you want to visit? Paste it in.">Paste a list</button>
       <button onclick="selectHomeOption('import')" style="font-size:11px;font-weight:500;padding:8px 12px;background:#fff;color:#888;border:1px solid #d8d4c8;border-radius:6px;cursor:pointer;font-family:inherit;">Load from file</button>
       <span style="margin-left:auto;font-size:10.5px;color:#bbb;">Max gathers; you evaluate, edit, add. <span onclick="showAboutMax()" style="color:#1a5fa8;cursor:pointer;">How it works →</span></span>
     </div>
@@ -4985,6 +4986,337 @@ function renderHomeOptions(){
   }).join("");
 }
 
+// v359.60.22: paste-a-list importer. Parses a user's research-style
+// text block (numbered sections, bullets, sub-headers, parentheticals)
+// into a structured list of destinations. Used by two surfaces:
+// (1) the home screen "Paste a list" entry that mints a fresh trip,
+// (2) the Research notes modal's "Make destinations from this list"
+// button that appends to the current trip.
+//
+// Format the parser understands (best-effort, forgiving):
+//   • Section header `N. <title>` — keyword sniff on <title> sets
+//     stay/see mode for everything beneath until the next header.
+//       "overnight|hub|stay|base|lodging"        → stay (default 1 night)
+//       "landmark|sight|see|stop|waterfall|poi"  → see  (0 nights)
+//   • Sub-header (line ending with ":", no bullet) — ignored.
+//   • Bullet items (lines starting with *, -, •, ▪, ◦, +) — entries.
+//   • Plain non-header lines after a section header — also entries.
+//   • Parentheticals on an entry — captured as dest.intent.
+//   • "(Arrival/Departure point)" auto-wires both trip.brief.entry
+//     AND trip.brief.tbExit to that place (round trip).
+//     "(Arrival point)" / "(Entry)" → entry only.
+//     "(Departure point)" / "(Exit)" → exit only.
+//   • Trailing `<N> nights?` or just `<N>` on an entry → nights override.
+//   • Trailing "stay" or "see" tag → mode override for that entry.
+//   • "A / B" alias on a place — the shorter half wins
+//     ("Lake Mývatn / Mývatn" → "Mývatn").
+//   • Lines starting with "#" or blank → ignored.
+//
+// Returns:
+//   { destinations: [{place, nights, isStay, intent}], entry, exit,
+//     warnings: [string] }
+function parsePlacesList(text) {
+  var out = { destinations: [], entry: null, exit: null, warnings: [] };
+  if (!text || typeof text !== "string") return out;
+  var lines = text.split(/\r?\n/);
+  var mode = "stay"; // default before we see a section header
+  var seenAnyHeader = false;
+
+  function classifyHeader(headerText) {
+    var h = String(headerText || "").toLowerCase();
+    if (/\b(overnight|hub|stay|base|lodging|sleep)\b/.test(h)) return "stay";
+    if (/\b(landmark|sight|see|stop|waterfall|point|poi|attraction|along the way)\b/.test(h)) return "see";
+    return null; // unknown — keep current mode
+  }
+
+  for (var li = 0; li < lines.length; li++) {
+    var raw = lines[li];
+    var trimmed = raw.replace(/\s+$/g, "").replace(/^\s+/, "");
+    if (!trimmed) continue;
+    if (/^#/.test(trimmed)) continue; // comment
+
+    // Section header: starts with "N." optionally followed by space + title.
+    // Must NOT be a bullet line (some lists use "1." for ordered items).
+    var sectionMatch = trimmed.match(/^(\d+)\.\s+(.+)$/);
+    if (sectionMatch && !/^[\*\-•▪◦+]/.test(trimmed)) {
+      var inferred = classifyHeader(sectionMatch[2]);
+      if (inferred) { mode = inferred; seenAnyHeader = true; continue; }
+      // Numbered line but no mode keyword — treat as an entry below.
+    }
+
+    // Sub-header: ends with ":" and not a bullet. Used to GROUP entries
+    // ("Golden Circle Area:", "South Coast / Southeast Region:") but
+    // not destinations themselves.
+    if (/:$/.test(trimmed) && !/^[\*\-•▪◦+]/.test(trimmed)) {
+      continue;
+    }
+
+    // Entry: strip bullet marker if present.
+    var item = trimmed.replace(/^[\*\-•▪◦+]\s*/, "").trim();
+    if (!item) continue;
+
+    // Optional trailing tag "stay" or "see" — case-insensitive, with
+    // optional surrounding whitespace.
+    var thisMode = mode;
+    var tagMatch = item.match(/[\s,;]+(stay|see)\s*$/i);
+    if (tagMatch) {
+      thisMode = tagMatch[1].toLowerCase();
+      item = item.slice(0, tagMatch.index).trim();
+    }
+
+    // Optional trailing nights — "Reykjavik 3" / "Reykjavik 3 nights".
+    var nights = (thisMode === "see") ? 0 : 1;
+    var nightsExplicit = false;
+    var nightsMatch = item.match(/[\s,;]+(\d+)\s*(nights?|nts?|nt)?\s*$/i);
+    if (nightsMatch) {
+      nights = parseInt(nightsMatch[1], 10);
+      nightsExplicit = true;
+      item = item.slice(0, nightsMatch.index).trim();
+      // If nights = 0 and no explicit tag, infer see.
+      if (nights === 0 && !tagMatch) thisMode = "see";
+      // If nights > 0 and no explicit tag, treat as stay.
+      if (nights > 0 && !tagMatch) thisMode = "stay";
+    }
+
+    // Capture FIRST parenthetical as intent. "(Arrival/Departure point)"
+    // is the round-trip flag — recognize before stripping.
+    var intent = null;
+    var parenMatch = item.match(/\(([^)]*)\)/);
+    if (parenMatch) {
+      intent = parenMatch[1].trim();
+      item = item.replace(/\s*\([^)]*\)\s*/, " ").trim();
+    }
+
+    // Place-alias "A / B" — keep the shorter half (handles
+    // "Lake Mývatn / Mývatn" → "Mývatn"). Skip if either half is
+    // empty after split.
+    if (item.indexOf("/") >= 0) {
+      var parts = item.split("/").map(function(s){ return s.trim(); }).filter(Boolean);
+      if (parts.length >= 2) {
+        parts.sort(function(a,b){ return a.length - b.length; });
+        item = parts[0];
+      }
+    }
+
+    if (!item) continue;
+
+    // Round-trip / entry / exit auto-wire from the parenthetical.
+    if (intent) {
+      var iLower = intent.toLowerCase();
+      var hasArrival   = /\b(arrival|entry|start|begin)\b/.test(iLower);
+      var hasDeparture = /\b(departure|exit|end|finish)\b/.test(iLower);
+      if (hasArrival && !out.entry) out.entry = item;
+      if (hasDeparture && !out.exit) out.exit = item;
+    }
+
+    out.destinations.push({
+      place: item,
+      nights: nights,
+      isStay: thisMode === "stay",
+      intent: intent
+    });
+  }
+  return out;
+}
+if (typeof globalThis !== "undefined") globalThis.parsePlacesList = parsePlacesList;
+
+// v359.60.22: mint a fresh trip from a parsed paste-list result and
+// enter the trip view. The paste flow is a power-user shortcut that
+// bypasses the picker entirely — the user already has their list, so
+// we skip discovery and go straight to a populated trip.
+//
+// Date handling: start = today; dateFrom/dateTo cascade by accumulated
+// nights. 0-night entries occupy a single day (dateFrom === dateTo).
+function _buildTripFromPastedList(parseResult, opts) {
+  opts = opts || {};
+  if (!parseResult || !Array.isArray(parseResult.destinations) || !parseResult.destinations.length) return null;
+  var startStr = opts.startDate || new Date().toISOString().slice(0, 10);
+  var cur = new Date(startStr + "T12:00:00");
+  destCtr = 0;
+  sidCtr = 100;
+  bkCtr = 0;
+  var dests = parseResult.destinations.map(function(p, i) {
+    destCtr++;
+    var id = "d" + destCtr;
+    var dateFromStr = cur.toISOString().slice(0, 10);
+    var nx = new Date(cur); nx.setDate(nx.getDate() + (p.nights || 0));
+    var dateToStr = nx.toISOString().slice(0, 10);
+    var days = (typeof makeDays === "function")
+      ? makeDays(id, p.place, p.intent || p.place, dateFromStr, p.nights || 0)
+      : [];
+    cur = nx;
+    return {
+      id: id,
+      place: p.place,
+      intent: p.intent || p.place,
+      dateFrom: dateFromStr,
+      dateTo: dateToStr,
+      nights: p.nights || 0,
+      days: days,
+      trackerItems: { booked: [], see: [], visited: [] },
+      trackerCat: "booked",
+      storyState: "idle",
+      hotelBookings: [],
+      generalBookings: [],
+      locations: [],
+      execMode: false,
+      todayItems: [],
+      discoveredItems: [],
+      suggestions: []
+    };
+  });
+  var name = opts.name || ("Imported — " + new Date().toLocaleDateString("en-US", {month:"short", day:"numeric", year:"numeric"}));
+  trip = {
+    name: name,
+    destinations: dests,
+    legs: {},
+    trackSpending: false,
+    pendingActions: [],
+    brief: {
+      entry: parseResult.entry || "",
+      tbExit: parseResult.exit || "",
+      exitBuffer: true
+    }
+  };
+  activeDest = null;
+  _currentTripId = "trip-" + Date.now();
+  _fileHandle = null;
+  // Push into the trips index + persist.
+  if (typeof _tripsIndex === "undefined" || !Array.isArray(_tripsIndex)) _tripsIndex = [];
+  _tripsIndex.push({
+    id: _currentTripId,
+    name: trip.name,
+    dateRange: dests[0].dateFrom + " – " + dests[dests.length-1].dateTo,
+    destCount: dests.length,
+    startDate: dests[0].dateFrom,
+    endDate: dests[dests.length-1].dateTo,
+    savedAt: new Date().toISOString()
+  });
+  if (typeof saveTripsIndex === "function") saveTripsIndex();
+  if (typeof localSave === "function") localSave();
+  // Fire generateCityData for each place so suggestions / coords land.
+  if (typeof generateCityData === "function") {
+    dests.forEach(function(d) { try { generateCityData(d.place, d.id); } catch(_){} });
+  }
+  if (typeof enterApp === "function") enterApp();
+  return { tripId: _currentTripId, destCount: dests.length };
+}
+if (typeof globalThis !== "undefined") globalThis._buildTripFromPastedList = _buildTripFromPastedList;
+
+// v359.60.22: append parsed paste-list destinations to the CURRENT
+// trip (used by the Research notes "Make destinations from this list"
+// button). Dates cascade from the last existing destination's dateTo
+// — or from today if the trip has no destinations yet. Entry/exit
+// hints from the parse only apply if the trip's brief doesn't have
+// them set already (don't clobber user choices).
+function _addPastedListToCurrentTrip(parseResult) {
+  if (!parseResult || !Array.isArray(parseResult.destinations) || !parseResult.destinations.length) return 0;
+  if (!trip) return 0;
+  if (!Array.isArray(trip.destinations)) trip.destinations = [];
+  var cur;
+  if (trip.destinations.length) {
+    var lastTo = trip.destinations[trip.destinations.length - 1].dateTo;
+    cur = lastTo ? new Date(lastTo + "T12:00:00") : new Date();
+  } else {
+    cur = new Date();
+  }
+  var added = 0;
+  parseResult.destinations.forEach(function(p) {
+    if (typeof destCtr !== "number") destCtr = 0;
+    destCtr++;
+    var id = "d" + destCtr;
+    var dateFromStr = cur.toISOString().slice(0, 10);
+    var nx = new Date(cur); nx.setDate(nx.getDate() + (p.nights || 0));
+    var dateToStr = nx.toISOString().slice(0, 10);
+    var days = (typeof makeDays === "function")
+      ? makeDays(id, p.place, p.intent || p.place, dateFromStr, p.nights || 0)
+      : [];
+    trip.destinations.push({
+      id: id, place: p.place, intent: p.intent || p.place,
+      dateFrom: dateFromStr, dateTo: dateToStr, nights: p.nights || 0,
+      days: days,
+      trackerItems: { booked: [], see: [], visited: [] },
+      trackerCat: "booked", storyState: "idle",
+      hotelBookings: [], generalBookings: [], locations: [],
+      execMode: false, todayItems: [], discoveredItems: [], suggestions: []
+    });
+    if (typeof generateCityData === "function") {
+      try { generateCityData(p.place, id); } catch(_){}
+    }
+    cur = nx;
+    added++;
+  });
+  // Auto-wire entry/exit if the brief doesn't already have them.
+  if (!trip.brief) trip.brief = {};
+  if (parseResult.entry && !trip.brief.entry) trip.brief.entry = parseResult.entry;
+  if (parseResult.exit && !trip.brief.tbExit) trip.brief.tbExit = parseResult.exit;
+  if (typeof _emitTripMutation === "function") _emitTripMutation();
+  return added;
+}
+if (typeof globalThis !== "undefined") globalThis._addPastedListToCurrentTrip = _addPastedListToCurrentTrip;
+
+// v359.60.22: paste-list modal — shared between home-screen and any
+// other surface that wants to accept a free-text list. opts.onBuild
+// receives the parsed result; the caller decides what to do with it
+// (new trip vs. append to current).
+function _openPasteListModal(opts) {
+  opts = opts || {};
+  var existing = document.getElementById("paste-list-overlay");
+  if (existing) existing.remove();
+  var ov = document.createElement("div");
+  ov.id = "paste-list-overlay";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:10800;display:flex;align-items:center;justify-content:center;padding:24px;";
+  var box = document.createElement("div");
+  box.style.cssText = "background:#fff;border-radius:12px;width:560px;max-width:100%;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 36px rgba(0,0,0,0.22);";
+  var title = opts.title || "Paste a list of places";
+  var subtitle = opts.subtitle || "One place per line. Use a section header like \"Overnight hubs\" or \"Sights\" to switch between stays and see-only stops. Trailing numbers set nights (\"Reykjavik 3\"). Parentheticals become destination intent — \"(Arrival/Departure point)\" auto-wires the round-trip entry/exit.";
+  box.innerHTML = ''
+    + '<div style="padding:16px 20px 10px;border-bottom:1px solid #eee;">'
+    +   '<div style="font-size:15px;font-weight:700;color:#111;">' + title + '</div>'
+    +   '<div style="font-size:11.5px;color:#777;margin-top:5px;line-height:1.5;">' + subtitle + '</div>'
+    + '</div>'
+    + '<div style="flex:1;overflow-y:auto;padding:14px 20px;display:flex;flex-direction:column;gap:10px;">'
+    +   '<textarea id="paste-list-ta" placeholder="1. Overnight hubs&#10;* Reykjavík (Arrival/Departure point)&#10;* Vík 2&#10;* Akureyri 3&#10;&#10;2. Sights&#10;* Gullfoss&#10;* Skógafoss" style="width:100%;min-height:240px;font:inherit;font-size:12.5px;line-height:1.5;padding:8px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;color:#111;resize:vertical;font-family:inherit;"></textarea>'
+    +   '<div id="paste-list-preview" style="font-size:11.5px;color:#555;line-height:1.55;min-height:18px;"></div>'
+    + '</div>'
+    + '<div style="padding:12px 20px;border-top:1px solid #eee;display:flex;justify-content:flex-end;gap:8px;">'
+    +   '<button id="paste-list-cancel" type="button" style="font-size:13px;font-weight:500;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Cancel</button>'
+    +   '<button id="paste-list-build" type="button" style="font-size:13px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 18px;cursor:pointer;font-family:inherit;" disabled>' + (opts.buildLabel || "Build trip →") + '</button>'
+    + '</div>';
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  function close() { if (ov && ov.parentNode) ov.parentNode.removeChild(ov); }
+  ov.onclick = function(e) { if (e.target === ov) close(); };
+  document.getElementById("paste-list-cancel").onclick = close;
+  var ta = document.getElementById("paste-list-ta");
+  var buildBtn = document.getElementById("paste-list-build");
+  var prev = document.getElementById("paste-list-preview");
+  function refresh() {
+    var parsed = parsePlacesList(ta.value);
+    var nStay = parsed.destinations.filter(function(d){ return d.isStay; }).length;
+    var nSee  = parsed.destinations.filter(function(d){ return !d.isStay; }).length;
+    var bits = [];
+    if (parsed.destinations.length) {
+      bits.push('<strong>' + parsed.destinations.length + '</strong> destination' + (parsed.destinations.length === 1 ? '' : 's') + ' (' + nStay + ' stay, ' + nSee + ' see)');
+    }
+    if (parsed.entry) bits.push('entry: <strong>' + parsed.entry + '</strong>');
+    if (parsed.exit && parsed.exit !== parsed.entry) bits.push('exit: <strong>' + parsed.exit + '</strong>');
+    if (parsed.entry && parsed.exit === parsed.entry) bits.push('round trip via <strong>' + parsed.entry + '</strong>');
+    prev.innerHTML = bits.length ? ('Will create: ' + bits.join(' · ')) : '<span style="color:#aaa;">Paste a list above to see a preview.</span>';
+    buildBtn.disabled = !parsed.destinations.length;
+  }
+  ta.addEventListener("input", refresh);
+  refresh();
+  buildBtn.onclick = function() {
+    var parsed = parsePlacesList(ta.value);
+    if (!parsed.destinations.length) return;
+    close();
+    if (typeof opts.onBuild === "function") opts.onBuild(parsed);
+  };
+  setTimeout(function() { try { ta.focus(); } catch(_){} }, 30);
+}
+if (typeof globalThis !== "undefined") globalThis._openPasteListModal = _openPasteListModal;
+
 function selectHomeOption(id){
   // Round DI: the trip list is always visible now; only the modal-style
   // surfaces (new-trip-form, browse-chat) toggle in response to action
@@ -5024,6 +5356,23 @@ function selectHomeOption(id){
     setTimeout(function(){ g("hs-trips-section").scrollIntoView({behavior:"smooth",block:"nearest"}); }, 80);
   } else if(id === "import"){
     openTripFile();
+  } else if(id === "paste"){
+    // v359.60.22: paste-a-list flow. Opens the shared paste modal;
+    // on Build, parses and mints a fresh trip via the same disclaimer
+    // gate as "+ Start a new trip" so first-time users still see the
+    // AI caveat once.
+    var _runPaste = function () {
+      _openPasteListModal({
+        title: "Paste a list of places",
+        buildLabel: "Build trip →",
+        onBuild: function(parsed) { _buildTripFromPastedList(parsed); }
+      });
+    };
+    if (typeof showAIDisclaimer === "function") {
+      showAIDisclaimer(_runPaste);
+    } else {
+      _runPaste();
+    }
   } else if(id === "browse"){
     // v353.2: same AI-disclaimer modal that fires on "+ Start a new
     // trip." Browse is the chat-with-Max surface where the user is
@@ -12036,6 +12385,9 @@ function _pmOpenTripResearchCard(){
       +       '<button type="button" id="pm-trc-dictate" style="font-size:11px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:3px 8px;cursor:pointer;font-family:inherit;">🎤 Dictate</button>'
       +     '</div>'
       +     '<textarea id="pm-trc-notes" placeholder="What you\'ve learned, timing concerns, gear, things to pack, general questions to resolve…  Tip: lines starting with [ ] become checkboxes." style="width:100%;min-height:100px;font:inherit;font-size:12.5px;line-height:1.5;padding:6px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;color:#111;resize:vertical;box-sizing:border-box;font-family:inherit;">' + String(m.notes || "").replace(/</g, "&lt;") + '</textarea>'
+      +     '<div style="margin-top:6px;display:flex;justify-content:flex-end;">'
+      +       '<button type="button" id="pm-trc-make-dests" style="font-size:11px;font-weight:600;color:#1a5fa8;background:#fff;border:1px dashed #c8d8f0;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;" title="Parse your notes as a list of places (sections, bullets, parentheticals, trailing nights) and add them as destinations on the current trip.">🪄 Make destinations from this list</button>'
+      +     '</div>'
       +     _pmRenderTodoList(m.notes, "pm-trc")
       +   '</div>'
       +   '<div>'
@@ -12102,6 +12454,7 @@ function _pmOpenTripResearchCard(){
       bindDictation();
       bindTodos();
       bindNotesBlurRefresh();
+      bindMakeDests();
     };
     ov.querySelectorAll(".pm-trc-del-link").forEach(function(btn){
       btn.onclick = function(){
@@ -12126,6 +12479,48 @@ function _pmOpenTripResearchCard(){
   function bindTodos(){
     _pmBindTodoCheckboxes(ov, "#pm-trc-notes", "pm-trc-todo", m);
   }
+  // v359.60.22: "🪄 Make destinations from this list" — parses the
+  // current notes textarea content via parsePlacesList and appends
+  // the result to the current trip's destinations. Confirms first
+  // with the destination count + entry/exit summary, then closes
+  // this modal so the user lands on the (now-updated) trip view.
+  function bindMakeDests(){
+    var btn = ov.querySelector("#pm-trc-make-dests");
+    if (!btn) return;
+    btn.onclick = function(){
+      var ta = ov.querySelector("#pm-trc-notes");
+      var text = ta ? ta.value : "";
+      if (!text || !text.trim()) {
+        alert("Paste a list into the notes above first.\n\nFormat: one place per line. Use a section header like \"Overnight hubs\" or \"Sights\" to switch between stays and see-only stops.");
+        return;
+      }
+      var parsed = parsePlacesList(text);
+      if (!parsed.destinations.length) {
+        alert("Couldn't find any places in those notes.\n\nMake sure each place is on its own line (bullets * - • optional). Section headers like \"1. Overnight hubs\" or \"Sights:\" help — without one, every line is treated as a stay.");
+        return;
+      }
+      var nStay = parsed.destinations.filter(function(d){ return d.isStay; }).length;
+      var nSee  = parsed.destinations.length - nStay;
+      var msg = "Add " + parsed.destinations.length + " destination" + (parsed.destinations.length === 1 ? "" : "s") + " (" + nStay + " stay, " + nSee + " see) to this trip?";
+      if (parsed.entry && parsed.exit && parsed.entry === parsed.exit) {
+        msg += "\n\nRound trip via " + parsed.entry + ".";
+      } else {
+        if (parsed.entry) msg += "\n\nEntry: " + parsed.entry + ".";
+        if (parsed.exit)  msg += "\nExit: " + parsed.exit + ".";
+      }
+      msg += "\n\nDates cascade from " + ((trip.destinations && trip.destinations.length) ? "the end of your current itinerary" : "today") + ". Your notes here stay put.";
+      if (!confirm(msg)) return;
+      // Persist the current notes BEFORE we close, so the user keeps
+      // their working text (close() also writes m.notes but we want
+      // belt-and-suspenders here in case _addPastedListToCurrentTrip
+      // re-renders the trip view before close runs).
+      if (ta) m.notes = ta.value;
+      _pmPersistResearchToTrip();
+      _addPastedListToCurrentTrip(parsed);
+      // Close the modal so the user sees the populated trip view.
+      if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+    };
+  }
   // v359.55.16: refresh on textarea blur so newly-typed "[ ]" lines
   // become checkboxes without requiring close/reopen.
   function bindNotesBlurRefresh(){
@@ -12141,6 +12536,7 @@ function _pmOpenTripResearchCard(){
         bindDictation();
         bindTodos();
         bindNotesBlurRefresh();
+        bindMakeDests();
       }
     });
   }
@@ -12148,6 +12544,7 @@ function _pmOpenTripResearchCard(){
   bindDictation();
   bindTodos();
   bindNotesBlurRefresh();
+  bindMakeDests();
 }
 
 // v359.55.3: per-place research metadata. The picker is becoming a

@@ -64,6 +64,69 @@ forecasts, in-app Q&A) and stays out of the way everywhere else.
    section for what you actually did, what was worth it, what
    you'd skip.
 
+### Shortcut: already have a list?
+
+If you've already done your research and have a list of places
+written down somewhere — your own notes, a friend's email, a
+ChatGPT conversation — you can paste it in and skip the brief +
+candidate-picking steps. Two entry points:
+
+- **Home screen → Paste a list.** Sits next to *Start a new trip*.
+  Opens a paste box; on Build, mints a fresh trip with the parsed
+  destinations and drops you straight into the trip view.
+- **Research notes → 🪄 Make destinations from this list.** Inside
+  any trip's Research notes modal, parses the current notes text
+  and appends the destinations to the trip you already have open.
+  Your notes stay put.
+
+The parser is forgiving — both surfaces share it. What it
+understands:
+
+- **One place per line.** Bullets (`*`, `-`, `•`) are optional and
+  stripped.
+- **Section headers** like `1. Overnight hubs` or `2. Sights &
+  landmarks` flip the mode for everything beneath:
+  `overnight|hub|stay|base|lodging` → stay (1 night each by
+  default); `landmark|sight|see|stop|waterfall|point` → see
+  (0 nights, grey pin on the map).
+- **Sub-headers** (lines ending with `:`, no bullet) — used to
+  group ("Golden Circle Area:", "East Fjords:") and ignored.
+- **Parentheticals** become each destination's `intent`:
+  `Fjallsárlón (Glacier lagoon)` → place `Fjallsárlón`, intent
+  "Glacier lagoon". The special parenthetical `(Arrival/Departure
+  point)` auto-wires the trip's entry/exit cities — useful for
+  round-trips like Reykjavík ↔ Reykjavík.
+- **Trailing numbers** set nights for that entry: `Akureyri 3`,
+  `Reykjavík 2 nights`.
+- **Trailing `stay` or `see`** overrides the section's default for
+  one line.
+- **Aliases with `/`** — the shorter half wins (`Lake Mývatn /
+  Mývatn` → `Mývatn`).
+- Lines starting with `#` and blank lines are skipped.
+
+Example that works:
+
+```
+1. Primary Overnight Hubs
+* Reykjavík (Arrival/Departure point)
+* Vík
+* Höfn 2
+
+2. Sights, Waterfalls, Points of Interest
+Golden Circle Area:
+* Þingvellir (Thingvellir National Park)
+* Geysir
+* Gullfoss
+South Coast:
+* Seljalandsfoss
+* Skógafoss
+* Diamond Beach
+```
+
+Once the trip is built you adjust like normal: bump nights with
+the +/- spinner, change a stay to a see (or remove it) via the
+role popover on each destination, drag the order, etc.
+
 ---
 
 ## The major surfaces
