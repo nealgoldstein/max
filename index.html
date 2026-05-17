@@ -31336,6 +31336,26 @@ function reverseTripOrder(){
 
 function drawTripMode(){
   _leftMode="trip";
+  // v359.60.16: self-heal destination order on every render. If the
+  // user has set arrival/departure cities (trip.brief.entry /
+  // trip.brief.tbExit) but the destinations array doesn't reflect that
+  // (e.g. arrival city is not at index 0), silently fix it before
+  // rendering. This means existing trips with broken order get
+  // repaired the first time they're opened — no manual button, no
+  // user intervention. The helper is a no-op if the order is already
+  // correct, so the cost when there's nothing to fix is one array
+  // walk + two normalized-name comparisons.
+  try {
+    var _entry = (trip && trip.brief && trip.brief.entry)  || (window._tb && window._tb.entry)  || "";
+    var _exit  = (trip && trip.brief && trip.brief.tbExit) || (window._tb && window._tb.tbExit) || "";
+    if ((_entry || _exit) && window.MaxTripUI && typeof window.MaxTripUI.reorderTripByEntryExit === "function") {
+      var _moved = window.MaxTripUI.reorderTripByEntryExit(_entry, _exit);
+      if (_moved > 0 && typeof autoSave === "function") {
+        // Persist the silent fix so it doesn't redo on every render.
+        try { autoSave(); } catch(_) {}
+      }
+    }
+  } catch(_) {}
   var c=g("lp-content"); if(!c)return;
   c.innerHTML="";
   c.scrollTop = 0;

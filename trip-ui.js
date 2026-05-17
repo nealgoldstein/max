@@ -1420,6 +1420,85 @@
   //   - global._renderLogisticsCol (column HTML helper)
   //   - global.buildFromCandidates (rebuild action)
   //   - global.drawTripMode (post-rebuild re-render fallback)
+  // v359.60.16: reorder trip.destinations so the entry city is at
+  // index 0 and (for round trips) at the end too. Returns the number
+  // of destinations that moved (0 if everything was already in the
+  // right place). Called from the arrival/departure Apply handler so
+  // the user can re-assert the gateway city without rebuilding the
+  // whole trip.
+  //
+  // Cascades dates: the moved trip starts at the same dateFrom as
+  // whoever WAS at index 0, and each subsequent destination's dates
+  // are recomputed based on its nights count. Trip total length
+  // doesn't change.
+  function _reorderTripByEntryExit(entryCity, exitCity) {
+    if (!trip || !Array.isArray(trip.destinations) || trip.destinations.length < 2) return 0;
+    var normFn = (typeof global._normPlaceName === "function") ? global._normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
+    var entryKey = entryCity ? normFn(entryCity) : "";
+    var exitKey  = exitCity  ? normFn(exitCity)  : "";
+    if (!entryKey && !exitKey) return 0;
+    var before = trip.destinations.map(function(d){ return d && d.id; });
+    var newOrder = trip.destinations.slice();
+    var moved = 0;
+    // Step 1: move entry city to index 0 (first match wins).
+    if (entryKey) {
+      var entryIdx = newOrder.findIndex(function(d){ return d && d.place && normFn(d.place) === entryKey; });
+      if (entryIdx > 0) {
+        var entryDest = newOrder.splice(entryIdx, 1)[0];
+        newOrder.unshift(entryDest);
+      }
+    }
+    // Step 2: move exit city to the END (last match wins). Skip if
+    // exit === entry AND there's only one occurrence — the round-trip
+    // shape lives in trip.brief, not as a duplicate destination.
+    if (exitKey && exitKey !== entryKey) {
+      var exitIdx = -1;
+      for (var i = newOrder.length - 1; i >= 0; i--) {
+        if (newOrder[i] && newOrder[i].place && normFn(newOrder[i].place) === exitKey) { exitIdx = i; break; }
+      }
+      if (exitIdx >= 0 && exitIdx < newOrder.length - 1) {
+        var exitDest = newOrder.splice(exitIdx, 1)[0];
+        newOrder.push(exitDest);
+      }
+    }
+    // Count moves.
+    for (var j = 0; j < newOrder.length; j++) {
+      if (newOrder[j].id !== before[j]) moved++;
+    }
+    if (!moved) return 0;
+    trip.destinations = newOrder;
+    // Cascade dates from the new index 0. Use the original trip start
+    // (whichever destination was first before the reorder).
+    var startDate = null;
+    for (var k = 0; k < trip.destinations.length; k++) {
+      var d = trip.destinations[k];
+      if (d && d.dateFrom) { startDate = d.dateFrom; break; }
+    }
+    if (!startDate && before.length) {
+      // Fallback: find earliest dateFrom across destinations.
+      trip.destinations.forEach(function(d){
+        if (d && d.dateFrom && (!startDate || d.dateFrom < startDate)) startDate = d.dateFrom;
+      });
+    }
+    if (startDate) {
+      var cur = new Date(startDate + "T12:00:00");
+      trip.destinations.forEach(function(d){
+        if (!d) return;
+        d.dateFrom = cur.toISOString().slice(0, 10);
+        var nx = new Date(cur);
+        nx.setDate(nx.getDate() + (d.nights || 0));
+        d.dateTo = nx.toISOString().slice(0, 10);
+        cur = nx;
+        // Rebuild days[] if a generator is available.
+        if (typeof global.makeDays === "function" && d.id && d.place) {
+          d.days = global.makeDays(d.id, d.place, d.intent || d.place, d.dateFrom, d.nights || 0);
+        }
+      });
+    }
+    console.log("[Max reorder] moved " + moved + " destination(s); new order:", trip.destinations.map(function(d){return d.place;}).join(" → "));
+    return moved;
+  }
+
   function _renderArrivalDeparturePanel(trip, container) {
     if (!container) return;
     if (!trip || !trip.candidates || !trip.candidates.length) return;
@@ -1574,13 +1653,31 @@
           // button — easy to miss, reads as broken. Now show a
           // friendly green confirmation so the user knows the action
           // was registered AND that the current value is correct.
+          // v359.60.16: Apply with unchanged values ALSO ensures the
+          // arrival city is destination #1 and the departure city is
+          // last (or first AND last for a round trip). Previously the
+          // ordering was set once at Choreograph time and could drift
+          // (e.g., user added destinations afterward, or the LLM put
+          // a south-coast town at #1 instead of the gateway city).
+          // Apply re-asserts the order without needing a full rebuild.
+          var reorderedCount = 0;
+          if (typeof _reorderTripByEntryExit === "function") {
+            reorderedCount = _reorderTripByEntryExit(newEntry, newExit);
+          }
+          if (reorderedCount > 0) {
+            if (typeof global.autoSave === "function") global.autoSave();
+            if (typeof global.drawTripMode === "function") global.drawTripMode();
+          }
           if (statusEl) {
             statusEl.style.color = "#1a8a3a";
             statusEl.style.fontWeight = "600";
             var parts = [];
             if (newEntry) parts.push("arrival " + newEntry);
             if (newExit && newExit !== newEntry) parts.push("departure " + newExit);
-            statusEl.textContent = "✓ Confirmed — " + (parts.length ? parts.join(" + ") : "(no city set)");
+            var baseMsg = "✓ Confirmed — " + (parts.length ? parts.join(" + ") : "(no city set)");
+            statusEl.textContent = reorderedCount > 0
+              ? baseMsg + " (reordered " + reorderedCount + " stop" + (reorderedCount === 1 ? "" : "s") + ")"
+              : baseMsg;
             // Fade after 4s so subsequent edits don't compete with a
             // stale confirmation message.
             setTimeout(function(){
@@ -1643,6 +1740,14 @@
           console.log(DBG, "buildFromCandidates: starting", { entry: tb2.entry, exit: tb2.tbExit, candidateCount: (tb2.candidates||[]).length });
           if (typeof global.buildFromCandidates === "function") await global.buildFromCandidates();
           console.log(DBG, "buildFromCandidates: done; rendering trip view");
+          // v359.60.16: enforce entry/exit ordering after rebuild. The
+          // rebuild path through orderKeptCandidates is SUPPOSED to put
+          // the entry city first, but in practice it sometimes drifts
+          // (date-sorted output beats the entry hint). Explicit reorder
+          // as a safety net.
+          if (typeof _reorderTripByEntryExit === "function") {
+            _reorderTripByEntryExit(newEntry, newExit);
+          }
           if (typeof global.drawTripMode === "function") global.drawTripMode();
           // v359.5.5: visible success status. Without this the user
           // had no confirmation the rebuild ran — just the trip view
@@ -3876,6 +3981,11 @@
     _isPaneInActiveGroup:             _isPaneInActiveGroup,
     // TM.5 final (v333): single dispatcher entry point.
     renderTripPage:                   _renderTripPage,
+    // v359.60.16: self-heal helper — exposed so drawTripMode (in
+    // index.html) can call it at render time to silently fix trip
+    // destination order whenever entry/exit cities are out of place.
+    // Returns # of moves; 0 means order was already correct.
+    reorderTripByEntryExit:           _reorderTripByEntryExit,
   };
 
   // No back-compat aliases yet — desktop still uses its inline
