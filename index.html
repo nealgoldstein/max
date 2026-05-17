@@ -26832,40 +26832,67 @@ function updateMainMap(){
         : getCityCenter(hubDest.place);
       if (!hubCtr || !isFinite(hubCtr[0])) return;
 
-      (route.planItems || []).forEach(function(stop){
-        if (!stop || stop.type !== "stop") return;
-        var place = (trip.places && trip.places[stop.placeId]) || null;
-        var dtName = (place && place.name) || stop.placeId || "";
-        if (!dtName) return;
-        var dtCtr = (place && typeof place.lat === "number" && typeof place.lng === "number")
-          ? [place.lat, place.lng]
-          : getCityCenter(dtName);
-        if (!dtCtr || !isFinite(dtCtr[0])) {
-          if (typeof ensureCoarseGeocode === "function") {
-            ensureCoarseGeocode(dtName, function(ll){
-              if (ll && isFinite(ll[0])) {
-                if (place) { place.lat = ll[0]; place.lng = ll[1]; }
-                if (_mainMap && typeof updateMainMap === "function") updateMainMap();
-              }
-            });
+      // v359.60.23: multi-stop day-trip support. Collect every stop
+      // with resolved coords first, then draw ONE polyline loop
+      // hub → stop1 → stop2 → … → hub (sorted by distance from hub
+      // for a sensible drive sequence). Previously each stop got its
+      // own spur from the hub, which looked correct for single-stop
+      // routes but cluttered for multi-stop "Golden Circle" patterns.
+      var dtStops = (route.planItems || [])
+        .filter(function(stop){ return stop && stop.type === "stop"; })
+        .map(function(stop){
+          var place = (trip.places && trip.places[stop.placeId]) || null;
+          var dtName = (place && place.name) || stop.placeId || "";
+          if (!dtName) return null;
+          var dtCtr = (place && typeof place.lat === "number" && typeof place.lng === "number")
+            ? [place.lat, place.lng]
+            : getCityCenter(dtName);
+          if (!dtCtr || !isFinite(dtCtr[0])) {
+            if (typeof ensureCoarseGeocode === "function") {
+              ensureCoarseGeocode(dtName, function(ll){
+                if (ll && isFinite(ll[0])) {
+                  if (place) { place.lat = ll[0]; place.lng = ll[1]; }
+                  if (_mainMap && typeof updateMainMap === "function") updateMainMap();
+                }
+              });
+            }
+            return null;
           }
-          return;
-        }
+          return { stop: stop, place: place, dtName: dtName, dtCtr: dtCtr };
+        })
+        .filter(Boolean);
+
+      if (!dtStops.length) return;
+
+      // Sort by distance from hub so the loop reads naturally.
+      if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.haversineKm === "function") {
+        dtStops.sort(function(a, b){
+          var aD = MaxEngineTrip.haversineKm(hubCtr[0], hubCtr[1], a.dtCtr[0], a.dtCtr[1]);
+          var bD = MaxEngineTrip.haversineKm(hubCtr[0], hubCtr[1], b.dtCtr[0], b.dtCtr[1]);
+          return aD - bD;
+        });
+      }
+
+      // Draw the multi-stop loop: hub → stop1 → stop2 → … → hub.
+      // Single-stop falls out as a simple there-and-back: hub → A → hub.
+      try {
+        var loopPath = [hubCtr].concat(dtStops.map(function(s){ return s.dtCtr; })).concat([hubCtr]);
+        var loopHalo = L.polyline(loopPath, {
+          color:"#fff", weight:8, opacity:0.85, lineCap:"round", lineJoin:"round"
+        }).addTo(_mainMap);
+        _mainMarkers.push(loopHalo);
+        var loopLine = L.polyline(loopPath, {
+          color:"#7a4fbf", weight:5, opacity:1.0, lineCap:"round", lineJoin:"round"
+        }).addTo(_mainMap);
+        _mainMarkers.push(loopLine);
+      } catch(_){}
+
+      dtStops.forEach(function(s){
+        var stop = s.stop;
+        var place = s.place;
+        var dtName = s.dtName;
+        var dtCtr = s.dtCtr;
         bounds.push(dtCtr);
-        // v359.51.21: committed day-trip spur is PURPLE — unified
-        // visual with the picker (blue=overnight, purple=day-trip-related).
-        // v359.53.3: thicker stroke + white halo so it reads against
-        // the satellite tiles (previous weight 3 was too thin).
-        try {
-          var spurHalo = L.polyline([hubCtr, dtCtr], {
-            color:"#fff", weight:8, opacity:0.85, lineCap:"round"
-          }).addTo(_mainMap);
-          _mainMarkers.push(spurHalo);
-          var spur = L.polyline([hubCtr, dtCtr], {
-            color:"#7a4fbf", weight:5, opacity:1.0, lineCap:"round"
-          }).addTo(_mainMap);
-          _mainMarkers.push(spur);
-        } catch(_){}
         // 20 px purple circle with place initials.
         var dtAbbrev = dtName.trim().substring(0, 2) || "·";
         var dtSize = 20;
@@ -30506,16 +30533,53 @@ function _openTripStopPopover(ctx) {
       : "Promote to its own destination on the trip with a night to sleep."
   );
 
+  // Helper: list existing dayTrip routes for a given hub (used by the
+  // "combine with existing" picker below).
+  function _dayTripRoutesForHub(hubId) {
+    if (!hubId) return [];
+    var isDT = (typeof MaxMigration !== "undefined" && MaxMigration.isDayTripRoute)
+      ? MaxMigration.isDayTripRoute
+      : function(r){ return r && (r.subKind === "dayTrip" || r.kind === "dayTrip"); };
+    return (trip.routes || []).filter(function(r){
+      if (!r || !isDT(r) || r.fromDestId !== hubId) return false;
+      // Skip the route this stop is already on (no self-combine).
+      if (ctx.kind === "dayTrip" && ctx.route && ctx.route.id === r.id) return false;
+      return true;
+    });
+  }
+  function _dayTripRouteLabel(r) {
+    var stops = (r.planItems || []).filter(function(pi){ return pi && pi.type === "stop"; });
+    var names = stops.map(function(s){
+      var p = trip.places && trip.places[s.placeId];
+      return (p && p.name) || s.placeId || "?";
+    });
+    if (!names.length) return "(empty route)";
+    if (names.length === 1) return names[0];
+    if (names.length <= 3) return names.join(", ");
+    return names.slice(0, 2).join(", ") + " +" + (names.length - 2);
+  }
+  // Initial hub selection: current hub for dayTrip context, else
+  // first overnight in trip.destinations.
+  var _initHubId = currentHubId || (hubOpts[0] && hubOpts[0].id) || null;
+  var _initRoutes = _dayTripRoutesForHub(_initHubId);
+  var _initRouteOptsHtml = '<option value="">— New day trip —</option>'
+    + _initRoutes.map(function(r){
+        return '<option value="' + r.id + '">Add to: ' + _dayTripRouteLabel(r) + '</option>';
+      }).join("");
+
   var dayTripRow = hubOpts.length
     ? _row(
         "dayTrip",
         "Day trip",
         currentRole === "dayTrip"
-          ? "From " + ((ctx.hubDest && ctx.hubDest.place) || "?") + ". Pick another hub below to move it."
-          : "Visit while based at one of your overnight hubs.",
-        '<div style="margin-top:6px;">'
+          ? "From " + ((ctx.hubDest && ctx.hubDest.place) || "?") + ". Pick another hub below to move it, or combine with an existing day trip."
+          : "Visit while based at one of your overnight hubs. Combine with an existing day trip from that hub (e.g. Golden Circle) or start a new one.",
+        '<div style="margin-top:6px;display:flex;flex-direction:column;gap:5px;">'
         + '<select id="trip-stop-hub" style="width:100%;padding:5px 8px;font-size:12px;border:1px solid #ccc;border-radius:5px;font-family:inherit;">'
         +   hubOptsHtml
+        + '</select>'
+        + '<select id="trip-stop-dt-route" style="width:100%;padding:5px 8px;font-size:12px;border:1px solid #ccc;border-radius:5px;font-family:inherit;">'
+        +   _initRouteOptsHtml
         + '</select>'
         + '</div>'
       )
@@ -30580,9 +30644,24 @@ function _openTripStopPopover(ctx) {
     if (radio) radio.checked = true;
   }
   var hubSel = ov.querySelector("#trip-stop-hub");
+  var dtRouteSel = ov.querySelector("#trip-stop-dt-route");
+  function _refreshDtRoutesForHub() {
+    if (!hubSel || !dtRouteSel) return;
+    var hubId = hubSel.value;
+    var routes = _dayTripRoutesForHub(hubId);
+    var html = '<option value="">— New day trip —</option>'
+      + routes.map(function(r){
+          return '<option value="' + r.id + '">Add to: ' + _dayTripRouteLabel(r) + '</option>';
+        }).join("");
+    dtRouteSel.innerHTML = html;
+  }
   if (hubSel) {
-    hubSel.onchange = function(){ _autoCheck("dayTrip"); };
+    hubSel.onchange = function(){ _autoCheck("dayTrip"); _refreshDtRoutesForHub(); };
     hubSel.onclick  = function(){ _autoCheck("dayTrip"); };
+  }
+  if (dtRouteSel) {
+    dtRouteSel.onchange = function(){ _autoCheck("dayTrip"); };
+    dtRouteSel.onclick  = function(){ _autoCheck("dayTrip"); };
   }
   var routeSel = ov.querySelector("#trip-stop-route");
   if (routeSel) {
@@ -30602,10 +30681,11 @@ function _openTripStopPopover(ctx) {
   ov.querySelector("#trip-stop-apply").onclick = function(){
     var picked = ov.querySelector('input[name="trip-stop-pick"]:checked');
     var selectedRole = picked ? picked.value : currentRole;
-    var hubId   = (ov.querySelector("#trip-stop-hub")   || {}).value || null;
-    var routeId = (ov.querySelector("#trip-stop-route") || {}).value || null;
+    var hubId      = (ov.querySelector("#trip-stop-hub")      || {}).value || null;
+    var routeId    = (ov.querySelector("#trip-stop-route")    || {}).value || null;
+    var dtRouteId  = (ov.querySelector("#trip-stop-dt-route") || {}).value || null;
     close();
-    _applyStopRoleChange(ctx, currentRole, selectedRole, { hubId: hubId, routeId: routeId });
+    _applyStopRoleChange(ctx, currentRole, selectedRole, { hubId: hubId, routeId: routeId, dtRouteId: dtRouteId });
   };
 }
 if (typeof globalThis !== "undefined") globalThis._openTripStopPopover = _openTripStopPopover;
@@ -30637,7 +30717,14 @@ function _applyStopRoleChange(ctx, currentRole, selectedRole, opts) {
     // ── From destination (overnight or see) ──────────────────────
     case "overnight->dayTrip":
     case "see->dayTrip":
-      if (opts.hubId) convertDestToDayTrip(ctx.destId, opts.hubId);
+      // v359.60.23: if user picked "Add to existing day trip" from
+      // the sub-dropdown, append to that route. Else mint a new
+      // dayTrip route via the existing converter.
+      if (opts.dtRouteId) {
+        addDestToExistingDayTripRoute(ctx.destId, opts.dtRouteId);
+      } else if (opts.hubId) {
+        convertDestToDayTrip(ctx.destId, opts.hubId);
+      }
       return;
     case "overnight->wayside":
     case "see->wayside":
@@ -32022,6 +32109,151 @@ function moveWaysideToRoute(srcRoute, stop, targetRoute, opts){
 // resurrect a destination. Doesn't refund the absorbed nights —
 // those live with the absorber and stay there. If the user wants
 // to drop a night, they edit the absorber directly.
+// v359.60.23: add a destination as another stop on an EXISTING
+// day-trip route (multi-stop day trip — Golden Circle pattern:
+// Reykjavík → Þingvellir → Geysir → Gullfoss → Reykjavík, one
+// route, three stops). Counterpart to convertDestToDayTrip which
+// always mints a new route. Stops auto-sort by distance from the
+// hub for a sensible drive sequence; user can drag-reorder on the
+// day card later (future work).
+//
+// Night accounting: the existing hub absorbs the source's nights,
+// same as convertDestToDayTrip. The day-trip route already exists
+// so we just append a stop.
+function addDestToExistingDayTripRoute(destId, routeId, opts) {
+  opts = opts || {};
+  if (!trip || !Array.isArray(trip.destinations)) return;
+  var srcIdx = trip.destinations.findIndex(function(d){ return d.id === destId; });
+  if (srcIdx < 0) {
+    console.warn("[Max] addDestToExistingDayTripRoute: dest not found", destId);
+    return;
+  }
+  var src = trip.destinations[srcIdx];
+  var route = (trip.routes || []).find(function(r){ return r && r.id === routeId; });
+  if (!route) {
+    console.warn("[Max] addDestToExistingDayTripRoute: route not found", routeId);
+    return;
+  }
+  var isDayTrip = (typeof MaxMigration !== "undefined" && MaxMigration.isDayTripRoute)
+    ? MaxMigration.isDayTripRoute(route)
+    : (route.subKind === "dayTrip" || route.kind === "dayTrip");
+  if (!isDayTrip) {
+    console.warn("[Max] addDestToExistingDayTripRoute: route is not a dayTrip route");
+    return;
+  }
+  var hubDest = trip.destinations.find(function(d){ return d.id === route.fromDestId; });
+  if (!hubDest) {
+    console.warn("[Max] addDestToExistingDayTripRoute: hub not found");
+    return;
+  }
+
+  // Resolve placeId for the source.
+  var placeId = src.placeId;
+  if (!placeId && typeof MaxMigration !== "undefined"
+      && MaxMigration._internal && typeof MaxMigration._internal.makePlaceId === "function") {
+    placeId = MaxMigration._internal.makePlaceId(src.place || "");
+  }
+  if (!placeId) {
+    placeId = "pl-" + (src.place || "unknown").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  }
+  if (!trip.places) trip.places = {};
+  if (!trip.places[placeId]) {
+    trip.places[placeId] = {
+      id:      placeId,
+      name:    src.place,
+      country: src.country || null,
+      lat:     (typeof src.lat === "number") ? src.lat : null,
+      lng:     (typeof src.lng === "number") ? src.lng : null
+    };
+  }
+
+  // Build the new stop PlanItem.
+  var srcNights = src.nights || 0;
+  var distKm = null;
+  if (typeof hubDest.lat === "number" && typeof hubDest.lng === "number"
+      && typeof src.lat === "number" && typeof src.lng === "number"
+      && typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.haversineKm === "function") {
+    distKm = Math.round(MaxEngineTrip.haversineKm(hubDest.lat, hubDest.lng, src.lat, src.lng));
+  }
+  var newStop = {
+    id:             "pi-stop-" + routeId + "-" + placeId,
+    type:           "stop",
+    state:          "scheduled",
+    placeId:        placeId,
+    priority:       "iconic",
+    recommendedMin: null,
+    notes:          src.intent || "",
+    source:         "manual-multi-stop-day-trip",
+    legacy: {
+      sourceNights:    srcNights,
+      absorbedFromHub: hubDest.place,
+      distKm:          distKm,
+      attachedEvents:  (src.attachedEvents || []).slice()
+    }
+  };
+
+  // Don't add duplicate stops for the same place.
+  if (!Array.isArray(route.planItems)) route.planItems = [];
+  var alreadyOnRoute = route.planItems.some(function(pi){
+    return pi && pi.type === "stop" && pi.placeId === placeId;
+  });
+  if (!alreadyOnRoute) {
+    route.planItems.push(newStop);
+    // Re-sort stops by distance from the hub so the polyline drawn
+    // through them (hub → A → B → C → hub) makes geographic sense.
+    // Non-stop items (route refs, etc.) stay at the front.
+    var hubLat = hubDest.lat, hubLng = hubDest.lng;
+    var canSort = (typeof hubLat === "number" && typeof hubLng === "number"
+                   && typeof MaxEngineTrip !== "undefined"
+                   && typeof MaxEngineTrip.haversineKm === "function");
+    if (canSort) {
+      var nonStops = route.planItems.filter(function(pi){ return !pi || pi.type !== "stop"; });
+      var stops    = route.planItems.filter(function(pi){ return pi && pi.type === "stop"; });
+      stops.sort(function(a, b){
+        var aPlace = trip.places && trip.places[a.placeId];
+        var bPlace = trip.places && trip.places[b.placeId];
+        var aD = (aPlace && typeof aPlace.lat === "number") ? MaxEngineTrip.haversineKm(hubLat, hubLng, aPlace.lat, aPlace.lng) : Infinity;
+        var bD = (bPlace && typeof bPlace.lat === "number") ? MaxEngineTrip.haversineKm(hubLat, hubLng, bPlace.lat, bPlace.lng) : Infinity;
+        return aD - bD;
+      });
+      route.planItems = nonStops.concat(stops);
+    }
+  }
+
+  // Hub absorbs the source's nights.
+  if (srcNights > 0) {
+    hubDest.nights = (hubDest.nights || 0) + srcNights;
+  }
+
+  // Splice source out of trip.destinations + cascade dates.
+  trip.destinations.splice(srcIdx, 1);
+  var startDate = trip.destinations[0] ? trip.destinations[0].dateFrom : null;
+  if (startDate) {
+    var cur = new Date(startDate + "T12:00:00");
+    trip.destinations.forEach(function(d){
+      d.dateFrom = cur.toISOString().slice(0, 10);
+      var nx = new Date(cur); nx.setDate(nx.getDate() + (d.nights || 0));
+      d.dateTo = nx.toISOString().slice(0, 10);
+      if (typeof makeDays === "function" && d.id && d.place) {
+        d.days = makeDays(d.id, d.place, d.intent || d.place, d.dateFrom, d.nights || 0);
+      }
+      cur = nx;
+    });
+  }
+
+  if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
+    try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
+  }
+  _emitTripMutation();
+
+  if (!opts.silent && typeof _showDayTripToast === "function") {
+    _showDayTripToast(
+      "<strong>" + src.place + "</strong> added to the day trip from <strong>" + hubDest.place + "</strong>",
+      function(){ console.warn("[Max] addDestToExistingDayTripRoute: undo not wired"); }
+    );
+  }
+}
+
 // v359.60.23: convert a destination to a wayside on a SPECIFIC
 // transit route, not the natural prev→next route. Used when the
 // user picks a route from the unified popover's dropdown that
