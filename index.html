@@ -30641,7 +30641,25 @@ function _applyStopRoleChange(ctx, currentRole, selectedRole, opts) {
       return;
     case "overnight->wayside":
     case "see->wayside":
-      convertDestToWayside(ctx.destId, { absorbInto: "next" });
+      // v359.60.23: if the user picked a route from the dropdown,
+      // honor it via convertDestToWaysideOnRoute (drops the dest in
+      // as a stop on that specific route). If they didn't pick (or
+      // the route happens to be the natural prev→next route), fall
+      // back to convertDestToWayside which merges the dest's own
+      // neighboring routes — the "Along the way between Dyrhólaey
+      // and Jökulsárlón" case.
+      var _srcIdx = trip.destinations.findIndex(function(d){ return d.id === ctx.destId; });
+      var _naturalRouteId = null;
+      if (_srcIdx > 0 && _srcIdx < trip.destinations.length - 1) {
+        var _prevId = trip.destinations[_srcIdx - 1].id;
+        var _nextId = trip.destinations[_srcIdx + 1].id;
+        _naturalRouteId = "r-tr-" + _prevId + "-" + _nextId;
+      }
+      if (opts.routeId && opts.routeId !== _naturalRouteId) {
+        convertDestToWaysideOnRoute(ctx.destId, opts.routeId);
+      } else {
+        convertDestToWayside(ctx.destId, { absorbInto: "next" });
+      }
       return;
     case "overnight->see":
       convertDestToSee(ctx.destId);
@@ -32004,6 +32022,130 @@ function moveWaysideToRoute(srcRoute, stop, targetRoute, opts){
 // resurrect a destination. Doesn't refund the absorbed nights —
 // those live with the absorber and stay there. If the user wants
 // to drop a night, they edit the absorber directly.
+// v359.60.23: convert a destination to a wayside on a SPECIFIC
+// transit route, not the natural prev→next route. Used when the
+// user picks a route from the unified popover's dropdown that
+// isn't the destination's own immediate neighbor route.
+//
+// Unlike convertDestToWayside (which merges the dest's prev→src
+// and src→next routes into a single prev→next route with the
+// dest as a wayside), this function leaves the chosen route alone
+// structurally and just adds the dest as a stop on it. The dest's
+// prev→src and src→next routes get cleaned up by syncTransitRoutes
+// because the dest is removed from trip.destinations.
+//
+// Night accounting: absorber defaults to the target route's `to`
+// dest; pass opts.absorbInto = "from" to redirect to `from`.
+function convertDestToWaysideOnRoute(destId, targetRouteId, opts) {
+  opts = opts || {};
+  if (!trip || !Array.isArray(trip.destinations)) return;
+  var srcIdx = trip.destinations.findIndex(function(d){ return d.id === destId; });
+  if (srcIdx < 0) {
+    console.warn("[Max] convertDestToWaysideOnRoute: dest not found", destId);
+    return;
+  }
+  var src = trip.destinations[srcIdx];
+  var targetRoute = (trip.routes || []).find(function(r){ return r && r.id === targetRouteId; });
+  if (!targetRoute) {
+    console.warn("[Max] convertDestToWaysideOnRoute: target route not found", targetRouteId);
+    return;
+  }
+  // Can't put a dest as a wayside on a route whose endpoint IS the dest.
+  if (targetRoute.fromDestId === destId || targetRoute.toDestId === destId) {
+    console.warn("[Max] convertDestToWaysideOnRoute: target route ends at this dest");
+    return;
+  }
+
+  // Resolve placeId.
+  var placeId = src.placeId;
+  if (!placeId && typeof MaxMigration !== "undefined"
+      && MaxMigration._internal && typeof MaxMigration._internal.makePlaceId === "function") {
+    placeId = MaxMigration._internal.makePlaceId(src.place || "");
+  }
+  if (!placeId) {
+    placeId = "pl-" + (src.place || "unknown").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  }
+  if (!trip.places) trip.places = {};
+  if (!trip.places[placeId]) {
+    trip.places[placeId] = {
+      id:      placeId,
+      name:    src.place,
+      country: src.country || null,
+      lat:     (typeof src.lat === "number") ? src.lat : null,
+      lng:     (typeof src.lng === "number") ? src.lng : null
+    };
+  }
+
+  var absorberId = (opts.absorbInto === "from") ? targetRoute.fromDestId : targetRoute.toDestId;
+  var absorber = trip.destinations.find(function(d){ return d.id === absorberId; });
+  var srcNights = src.nights || 0;
+
+  var stopPlanItem = {
+    id:             "pi-stop-w-" + placeId,
+    type:           "stop",
+    state:          "scheduled",
+    placeId:        placeId,
+    priority:       "if-time",
+    recommendedMin: null,
+    notes:          src.intent || "",
+    source:         "manual-dest-to-wayside-on-route",
+    legacy: {
+      sourceNights:    srcNights,
+      absorbedFromHub: null,
+      absorberDestId:  absorberId,
+      attachedEvents:  (src.attachedEvents || []).slice()
+    }
+  };
+
+  // Transfer nights to absorber (only if source had any).
+  if (absorber && srcNights > 0) {
+    absorber.nights = (absorber.nights || 0) + srcNights;
+  }
+
+  // Add stop to target route.
+  if (!Array.isArray(targetRoute.planItems)) targetRoute.planItems = [];
+  var alreadyOnRoute = targetRoute.planItems.some(function(pi){
+    return pi && pi.type === "stop" && pi.placeId === placeId;
+  });
+  if (!alreadyOnRoute) targetRoute.planItems.push(stopPlanItem);
+
+  // Splice source out of trip.destinations.
+  trip.destinations.splice(srcIdx, 1);
+
+  // Cascade dates from the start.
+  var startDate = trip.destinations[0] ? trip.destinations[0].dateFrom : null;
+  if (startDate) {
+    var cur = new Date(startDate + "T12:00:00");
+    trip.destinations.forEach(function(d){
+      d.dateFrom = cur.toISOString().slice(0, 10);
+      var nx = new Date(cur); nx.setDate(nx.getDate() + (d.nights || 0));
+      d.dateTo = nx.toISOString().slice(0, 10);
+      if (typeof makeDays === "function" && d.id && d.place) {
+        d.days = makeDays(d.id, d.place, d.intent || d.place, d.dateFrom, d.nights || 0);
+      }
+      cur = nx;
+    });
+  }
+
+  // Adjacency changed (src is gone from trip.destinations) — re-sync
+  // transit routes so the now-missing prev→src and src→next routes
+  // get reconciled (typically merged into prev→next).
+  if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
+    try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
+  }
+
+  _emitTripMutation();
+
+  if (!opts.silent && typeof _showDayTripToast === "function") {
+    var fromName = (trip.destinations.find(function(d){ return d.id === targetRoute.fromDestId; }) || {}).place || "?";
+    var toName   = (trip.destinations.find(function(d){ return d.id === targetRoute.toDestId;   }) || {}).place || "?";
+    _showDayTripToast(
+      "<strong>" + src.place + "</strong> is now a wayside on " + fromName + " → " + toName,
+      function(){ console.warn("[Max] convertDestToWaysideOnRoute: undo not wired"); }
+    );
+  }
+}
+
 // v359.60.23: move a day-trip stop to a different hub. Removes from
 // the current day-trip route, adds to a new dayTrip route on the
 // target hub, transfers the absorbed sourceNights from the old hub
