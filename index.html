@@ -26955,15 +26955,25 @@ function updateMainMap(){
       stops.sort(function(a, b){ return a.dKm - b.dKm; });
 
       // Draw the detour polyline if we have anchor points on both ends.
+      // v359.60.23: wayside-bearing transit segments now render with
+      // the transit-route DASHED pattern (just in purple instead of
+      // the default blue) — so they read as "a transit route, but
+      // there's a wayside on it." The old solid-purple stroke made
+      // wayside routes look identical to day-trip spurs, which they
+      // aren't conceptually (a wayside is a stop on the way; a
+      // day-trip is a there-and-back from a hub).
+      // Style matched to regular transit (weight 2.5, dashArray "1 6",
+      // weight-6 white halo) so wayside routes visually belong to
+      // the transit family.
       if (fromCtr && toCtr) {
         var path = [fromCtr].concat(stops.map(function(s){return s.ctr;})).concat([toCtr]);
         try {
           var detourHalo = L.polyline(path, {
-            color:"#fff", weight:7, opacity:0.85, lineCap:"round", lineJoin:"round"
+            color:"#fff", weight:6, opacity:0.9, lineCap:"round", lineJoin:"round"
           }).addTo(_mainMap);
           _mainMarkers.push(detourHalo);
           var detourLine = L.polyline(path, {
-            color:"#7a4fbf", weight:4, opacity:1.0, lineCap:"round", lineJoin:"round"
+            color:"#7a4fbf", weight:2.5, opacity:1.0, dashArray:"1 6", lineCap:"round", lineJoin:"round"
           }).addTo(_mainMap);
           _mainMarkers.push(detourLine);
         } catch(_){}
