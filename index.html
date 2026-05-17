@@ -30570,6 +30570,26 @@ function _openTripStopPopover(ctx) {
   ov.onclick = function(e){ if (e.target === ov) close(); };
   ov.querySelector("#trip-stop-cancel").onclick = close;
 
+  // v359.60.23: when the user opens a sub-dropdown (hub picker for
+  // day-trip, route picker for wayside) we want to auto-check the
+  // radio for that row. Without this, picking a route in the wayside
+  // dropdown leaves the previous radio selected — Apply sees no role
+  // change and dispatches to a no-op. Same trick for the hub picker.
+  function _autoCheck(radioValue) {
+    var radio = ov.querySelector('input[name="trip-stop-pick"][value="' + radioValue + '"]');
+    if (radio) radio.checked = true;
+  }
+  var hubSel = ov.querySelector("#trip-stop-hub");
+  if (hubSel) {
+    hubSel.onchange = function(){ _autoCheck("dayTrip"); };
+    hubSel.onclick  = function(){ _autoCheck("dayTrip"); };
+  }
+  var routeSel = ov.querySelector("#trip-stop-route");
+  if (routeSel) {
+    routeSel.onchange = function(){ _autoCheck("wayside"); };
+    routeSel.onclick  = function(){ _autoCheck("wayside"); };
+  }
+
   ov.querySelector("#trip-stop-remove").onclick = function(){
     var confirmMsg = "Remove " + placeName + " from this trip?";
     if (!confirm(confirmMsg)) return;
