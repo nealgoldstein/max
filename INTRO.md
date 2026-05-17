@@ -76,10 +76,13 @@ candidate-picking steps. Two entry points:
   pasted text into the trip's Research notes, opening that modal
   right away. The trip has no destinations yet — review the text
   in Research, then click **🪄 Make destinations from this list**
-  when you're ready to commit. Notes stay put.
-- **Home screen → Load from file.** Same flow, but the source is
-  a `.txt` or `.md` file on disk. The file's content lands in
-  Research notes; you commit on your schedule.
+  when you're ready to commit. Pasting is for when you're still
+  thinking.
+- **Home screen → Load from file.** Loading a `.txt` / `.md` file
+  goes the other way: Max parses it and commits destinations
+  directly, landing you on the trip view with everything
+  populated. Loading a file implies you've already curated; no
+  intermediate review step.
 - **Research notes → 🪄 Make destinations from this list.** Inside
   any trip's Research notes modal, parses the current notes text
   and appends the destinations to the trip you already have open.
