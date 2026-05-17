@@ -5050,8 +5050,14 @@ function parsePlacesList(text) {
 
   function classifyHeader(headerText) {
     var h = String(headerText || "").toLowerCase();
-    if (/\b(overnight|hub|stay|base|lodging|sleep)\b/.test(h)) return "stay";
-    if (/\b(landmark|sight|see|stop|waterfall|point|poi|attraction|along the way)\b/.test(h)) return "see";
+    // v359.60.23 bugfix: keywords need optional trailing "s" to match
+    // the way users actually write section titles. "Specific Landmarks,
+    // Waterfalls, and Points of Interest" never matched landmark|
+    // waterfall|point because `\b...\b` required a word boundary
+    // immediately after, and the trailing "s" defeated it. Result: every
+    // line in that section parsed as stay (default mode) instead of see.
+    if (/\b(overnight|hub|stay|base|lodging|sleep|hotel|accommodation)s?\b/.test(h)) return "stay";
+    if (/\b(landmark|sight|see|stop|waterfall|point|poi|attraction|along the way)s?\b/.test(h)) return "see";
     return null; // unknown — keep current mode
   }
 
@@ -13043,7 +13049,23 @@ function _pmOpenTripResearchCard(){
         if (parsed.entry) msg += "\n\nEntry: " + parsed.entry + ".";
         if (parsed.exit)  msg += "\nExit: " + parsed.exit + ".";
       }
-      msg += "\n\nDates cascade from " + ((trip.destinations && trip.destinations.length) ? "the end of your current itinerary" : "today") + ". Your notes here stay put.";
+      // v359.60.23 bugfix: the dialog used to always say "from today"
+      // even when the user provided a Start: date or natural-language
+      // date in the paste. Now mirrors what _addPastedListToCurrentTrip
+      // will actually use as the cascade origin (parsed.startDate,
+      // then trip.brief._pendingStartDate from the original stub mint,
+      // then the existing trip tail, then today).
+      var _cascadeOrigin;
+      if (trip.destinations && trip.destinations.length) {
+        _cascadeOrigin = "the end of your current itinerary";
+      } else if (parsed.startDate) {
+        _cascadeOrigin = parsed.startDate;
+      } else if (trip.brief && trip.brief._pendingStartDate) {
+        _cascadeOrigin = trip.brief._pendingStartDate;
+      } else {
+        _cascadeOrigin = "today";
+      }
+      msg += "\n\nDates cascade from " + _cascadeOrigin + ". Your notes here stay put.";
       if (!confirm(msg)) return;
       // Persist the current notes BEFORE we close, so the user keeps
       // their working text (close() also writes m.notes but we want
@@ -22927,9 +22949,17 @@ async function generateCityData(place,destId,_isAutoRetry){
 
   // First: geocode the city via Nominatim so map shows correct location even with no API key
   // Round CL.5: gate behind the same circuit breaker as geocodeEssentials.
+  // v359.60.23: scope the Nominatim query to the trip's region so
+  // ambiguous place names ("Selfoss" exists in both Iceland and
+  // France, "Húsavík" exists in Iceland and the Faroe Islands)
+  // disambiguate to the correct hit. The bare-name query was
+  // landing one Iceland-list destination in southern France. Falls
+  // back to the unscoped query if no region is set on the brief.
   if(!_nominatimBlocked){
     try{
-      var geoResp=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(place),{headers:{'Accept-Language':'en'}});
+      var _gcRegion = (trip && trip.brief && trip.brief.region) ? trip.brief.region : "";
+      var _gcQuery = _gcRegion ? (place + ", " + _gcRegion) : place;
+      var geoResp=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(_gcQuery),{headers:{'Accept-Language':'en'}});
       if (geoResp.status === 429 || geoResp.status === 403) {
         _markNominatimBlocked("rate-limited (HTTP " + geoResp.status + ")");
       } else if (geoResp.ok) {
@@ -23014,7 +23044,18 @@ async function generateCityData(place,destId,_isAutoRetry){
       } catch(_retryErr) { /* keep the empty list, the UI's retry affordance still works */ }
     }
 
+    // v359.60.23: preserve the Nominatim-fetched cityCenter across
+    // the LLM cache replacement. Nominatim is a real geocoder grounded
+    // in OpenStreetMap; the LLM's `cityCenter` is whatever it
+    // remembered, and can be hundreds of km off (Neal's Iceland trip
+    // had one place coord land in southern France). Nominatim wins
+    // when it succeeded; the LLM's value is fallback only.
+    var _nomCenter = (_generatedCityData[key] && _generatedCityData[key].cityCenter) || null;
     _generatedCityData[key]=data;
+    if (_nomCenter && Array.isArray(_nomCenter) && isFinite(_nomCenter[0]) && isFinite(_nomCenter[1])
+        && !(_nomCenter[0] === 0 && _nomCenter[1] === 0)) {
+      _generatedCityData[key].cityCenter = _nomCenter;
+    }
 
     // Populate suggestions — user assigns to days from Explore tab
     var destRef=getDest(destId);
