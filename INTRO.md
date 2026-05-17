@@ -253,11 +253,22 @@ auto-selects the right destination based on the booking's address
 
 ### Trip export
 
-**Export** in the trip header offers three options:
+**Export** in the trip header offers four options:
 
 - **📄 Print / Save as PDF** — opens a clean printable view in a
   new window. Includes the trip overview, every destination, every
-  day's plan.
+  day's plan. Leads with a **paste-back-compatible shareable list**
+  block (see next bullet) so the PDF itself round-trips: anyone with
+  the printout can recreate the destination skeleton in their own
+  Max by copying the top section.
+
+- **📋 Copy as shareable list** — plain-text destination list in
+  the same format Max's "Paste a list" (home screen) and "🪄 Make
+  destinations from this list" (Research notes) accept. Numbered
+  sections for overnight hubs vs sights, trailing nights per stay,
+  `(Arrival/Departure point)` annotation for round-trips. Copies
+  to clipboard, or downloads as `.txt`. Useful for sharing via
+  email/Slack, or seeding a second trip from a first.
 
 - **📅 Download to calendar (.ics)** — one-shot iCal file with every
   destination as an all-day event (📍 prefix), every booked

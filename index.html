@@ -7856,7 +7856,11 @@ function showExportTripModal(){
     '<div style="display:flex;flex-direction:column;gap:10px;">' +
       '<button id="exp-pdf" style="text-align:left;padding:14px 16px;font-size:13px;background:#fff;color:#111;border:1px solid #ddd;border-radius:8px;cursor:pointer;font-family:inherit;">' +
         '<div style="font-weight:700;margin-bottom:3px;">📄 Print / Save as PDF</div>' +
-        '<div style="font-size:11px;color:#888;">Opens a print-formatted view. Use your browser\'s print dialog → "Save as PDF" to make a file.</div>' +
+        '<div style="font-size:11px;color:#888;">Opens a print-formatted view. Use your browser\'s print dialog → "Save as PDF" to make a file. Now leads with a paste-back-compatible shareable list.</div>' +
+      '</button>' +
+      '<button id="exp-share-list" style="text-align:left;padding:14px 16px;font-size:13px;background:#fff;color:#111;border:1px solid #ddd;border-radius:8px;cursor:pointer;font-family:inherit;">' +
+        '<div style="font-weight:700;margin-bottom:3px;">📋 Copy as shareable list</div>' +
+        '<div style="font-size:11px;color:#888;">Plain-text destination list someone can paste into their own Max via &ldquo;Paste a list&rdquo;. Round trip wired via &ldquo;(Arrival/Departure point)&rdquo;.</div>' +
       '</button>' +
       '<button id="exp-ics" style="text-align:left;padding:14px 16px;font-size:13px;background:#fff;color:#111;border:1px solid #ddd;border-radius:8px;cursor:pointer;font-family:inherit;">' +
         '<div style="font-weight:700;margin-bottom:3px;">📅 Download to calendar (.ics)</div>' +
@@ -7873,6 +7877,7 @@ function showExportTripModal(){
   ov.appendChild(box);
   document.body.appendChild(ov);
   document.getElementById("exp-pdf").onclick = function(){ ov.remove(); _exportTripPrintable(); };
+  document.getElementById("exp-share-list").onclick = function(){ ov.remove(); _exportTripShareableList(); };
   document.getElementById("exp-ics").onclick = function(){ ov.remove(); _exportTripIcs(); };
   document.getElementById("exp-sub").onclick = function(){ ov.remove(); _exportTripSubscribe(); };
   document.getElementById("exp-close").onclick = function(){ ov.remove(); };
@@ -7972,6 +7977,166 @@ function showConsideredCandidatesModal(){
   ov.addEventListener("click", function(e){ if (e.target === ov) ov.remove(); });
 }
 
+// v359.60.22: serialize a trip back to paste-list format — the inverse
+// of parsePlacesList. Used by both (a) the new "Copy as shareable
+// list" export and (b) the top-of-PDF shareable-seed block. Round-
+// trip handling: when trip.destinations starts and ends with the
+// same place (and brief.entry === brief.tbExit), we emit just ONE
+// line for that place with "(Arrival/Departure point)" — paste-back
+// regenerates the round-trip via brief.entry/tbExit.
+//
+// Format guarantees:
+//   • Sections 1 (Overnight Hubs) and 2 (Sights & Stops) — keyword
+//     sniff matches what parsePlacesList expects.
+//   • Within each section, destinations stay in their trip order
+//     so the geographic walk is preserved.
+//   • Bullet `*`, then place name, then "(intent)" if present
+//     (auto-promoted to "Arrival/Departure point" when the dest
+//     matches brief.entry/tbExit), then trailing nights for stays.
+//   • Trailing nights only on stays — sees stay implicit-0.
+function serializeTripToPasteList(trip) {
+  if (!trip || !Array.isArray(trip.destinations) || !trip.destinations.length) return "";
+  var dests = trip.destinations.slice();
+  var entry = (trip.brief && trip.brief.entry)  || "";
+  var exit  = (trip.brief && trip.brief.tbExit) || "";
+
+  // Detect explicit round trip: first + last destinations are the
+  // same place (and at least one is a stay), AND brief signals it.
+  var first = dests[0];
+  var last  = dests[dests.length - 1];
+  var roundTrip =
+    dests.length >= 2
+    && first && last
+    && first.place && last.place
+    && String(first.place).toLowerCase() === String(last.place).toLowerCase()
+    && ((first.nights || 0) > 0 || (last.nights || 0) > 0);
+  // Drop the duplicate last stay so we don't emit Reykjavík twice.
+  // The round-trip-back leg is reconstructed from brief.entry/exit
+  // at parse time, not from a literal second entry.
+  var working = roundTrip ? dests.slice(0, -1) : dests;
+
+  function _norm(s){ return String(s || "").trim().toLowerCase(); }
+  function annotationFor(place) {
+    if (entry && exit && _norm(entry) === _norm(exit) && _norm(entry) === _norm(place)) {
+      return "Arrival/Departure point";
+    }
+    if (entry && _norm(entry) === _norm(place)) return "Arrival point";
+    if (exit  && _norm(exit)  === _norm(place)) return "Departure point";
+    return null;
+  }
+  function lineFor(d) {
+    var s = "* " + (d.place || "Untitled");
+    var ann = annotationFor(d.place);
+    if (ann) {
+      s += " (" + ann + ")";
+    } else if (d.intent && d.intent !== d.place) {
+      s += " (" + d.intent + ")";
+    }
+    if ((d.nights || 0) > 0) s += " " + d.nights;
+    return s;
+  }
+
+  var stays = working.filter(function(d){ return (d.nights || 0) > 0; });
+  var sees  = working.filter(function(d){ return (d.nights || 0) === 0; });
+
+  var out = [];
+  if (stays.length) {
+    out.push("1. Overnight Hubs");
+    stays.forEach(function(d){ out.push(lineFor(d)); });
+  }
+  if (sees.length) {
+    if (stays.length) out.push("");
+    out.push("2. Sights & Stops");
+    sees.forEach(function(d){ out.push(lineFor(d)); });
+  }
+  return out.join("\n");
+}
+if (typeof globalThis !== "undefined") globalThis.serializeTripToPasteList = serializeTripToPasteList;
+
+// v359.60.22: "Copy as shareable list" export. Opens a small modal
+// showing the generated paste-list, with Copy + Download buttons.
+// The user can also edit before copying (e.g. trim a section, add
+// a comment, fix a name). Pairs with the importer at the home
+// screen + research notes — copy out of one trip, paste into
+// another to seed it.
+function _exportTripShareableList() {
+  if (!trip) return;
+  var listText = serializeTripToPasteList(trip);
+  if (!listText) { maxAlert("Open a trip with at least one destination first."); return; }
+  var existing = document.getElementById("share-list-overlay");
+  if (existing) existing.remove();
+  var ov = document.createElement("div");
+  ov.id = "share-list-overlay";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:11900;display:flex;align-items:center;justify-content:center;padding:24px;";
+  var box = document.createElement("div");
+  box.style.cssText = "background:#fff;border-radius:12px;width:520px;max-width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 12px 36px rgba(0,0,0,0.22);";
+  box.innerHTML = ''
+    + '<div style="padding:16px 20px 10px;border-bottom:1px solid #eee;">'
+    +   '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">'
+    +     '<div style="width:28px;height:28px;border-radius:50%;background:#1a5fa8;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">📋</div>'
+    +     '<div style="font-size:15px;font-weight:700;color:#111;">Shareable list</div>'
+    +   '</div>'
+    +   '<div style="font-size:11.5px;color:#777;margin-top:4px;line-height:1.5;">Paste this into Max\'s &ldquo;Paste a list&rdquo; (home screen) or any trip\'s Research notes &rarr; &ldquo;🪄 Make destinations from this list&rdquo; to recreate the destination skeleton.</div>'
+    + '</div>'
+    + '<div style="flex:1;overflow-y:auto;padding:14px 20px;">'
+    +   '<textarea id="share-list-ta" style="width:100%;min-height:260px;font:inherit;font-size:12.5px;line-height:1.55;padding:10px 12px;border:1px solid #ccc;border-radius:6px;background:#fafaf6;color:#111;font-family:ui-monospace,Menlo,Consolas,monospace;resize:vertical;box-sizing:border-box;">' + listText.replace(/</g, "&lt;") + '</textarea>'
+    + '</div>'
+    + '<div style="padding:12px 20px;border-top:1px solid #eee;display:flex;justify-content:flex-end;gap:8px;">'
+    +   '<button id="share-list-download" type="button" style="font-size:13px;font-weight:500;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Download .txt</button>'
+    +   '<button id="share-list-close" type="button" style="font-size:13px;font-weight:500;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Close</button>'
+    +   '<button id="share-list-copy" type="button" style="font-size:13px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 18px;cursor:pointer;font-family:inherit;">Copy</button>'
+    + '</div>';
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  function close() { if (ov && ov.parentNode) ov.parentNode.removeChild(ov); }
+  ov.onclick = function(e) { if (e.target === ov) close(); };
+  document.getElementById("share-list-close").onclick = close;
+  document.getElementById("share-list-copy").onclick = function() {
+    var ta = document.getElementById("share-list-ta");
+    var text = ta ? ta.value : listText;
+    function _afterCopy() {
+      var btn = document.getElementById("share-list-copy");
+      if (btn) {
+        var orig = btn.textContent;
+        btn.textContent = "Copied ✓";
+        btn.style.background = "#2a7a4e";
+        btn.style.borderColor = "#2a7a4e";
+        setTimeout(function(){
+          btn.textContent = orig;
+          btn.style.background = "#1a5fa8";
+          btn.style.borderColor = "#1a5fa8";
+        }, 1400);
+      }
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(_afterCopy, function(){
+        // Fallback: select + execCommand
+        if (ta) { ta.select(); try { document.execCommand("copy"); _afterCopy(); } catch(_){} }
+      });
+    } else if (ta) {
+      ta.select();
+      try { document.execCommand("copy"); _afterCopy(); } catch(_){}
+    }
+  };
+  document.getElementById("share-list-download").onclick = function() {
+    var ta = document.getElementById("share-list-ta");
+    var text = ta ? ta.value : listText;
+    var fname = (trip.name || "trip").replace(/[^a-z0-9\- ]/gi, "").trim().replace(/\s+/g, "-") || "trip";
+    fname += "-list.txt";
+    var blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = fname;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ try { URL.revokeObjectURL(url); } catch(_){} }, 2000);
+  };
+  setTimeout(function() {
+    var ta = document.getElementById("share-list-ta");
+    if (ta) { ta.focus(); ta.select(); }
+  }, 30);
+}
+if (typeof globalThis !== "undefined") globalThis._exportTripShareableList = _exportTripShareableList;
+
 function _exportTripPrintable(){
   if (!trip) return;
   var w = window.open("", "MaxPrint", "width=900,height=1100");
@@ -7999,6 +8164,9 @@ function _exportTripPrintable(){
     '.brief{background:#fafaf6;border:1px solid #eee;border-radius:6px;padding:10px 14px;font-size:12px;color:#444;margin-bottom:18px;}',
     '.brief-row{margin:3px 0;}',
     '.brief-label{font-weight:600;color:#666;display:inline-block;min-width:90px;}',
+    '.share-list-label{font-size:11px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:.05em;margin:18px 0 4px;}',
+    '.share-list-note{font-size:10.5px;color:#777;margin-bottom:8px;line-height:1.5;}',
+    '.share-list{background:#fafaf6;border:1px solid #d8d4c8;border-radius:6px;padding:12px 14px;margin-bottom:18px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;line-height:1.55;white-space:pre-wrap;color:#333;page-break-inside:avoid;}',
     '@media print{body{margin:0;padding:0 16px;font-size:11px;}h1{font-size:18px;}h2{font-size:14px;}}',
     '@page{margin:14mm;}',
   '</style></head><body>');
@@ -8025,6 +8193,17 @@ function _exportTripPrintable(){
       html.push('<div class="brief-row"><span class="brief-label">' + _esc(r[0]) + '</span> ' + _esc(r[1]) + '</div>');
     });
     html.push('</div>');
+  }
+  // v359.60.22: shareable-list block. Sits between brief and the
+  // day-by-day so a recipient can copy this section into Max's
+  // "Paste a list" (home) or "Make destinations from this list"
+  // (research notes) and reconstruct the destination skeleton. The
+  // full schedule below is for execution; this block is the seed.
+  var _shareList = (typeof serializeTripToPasteList === "function") ? serializeTripToPasteList(trip) : "";
+  if (_shareList) {
+    html.push('<div class="share-list-label">📋 Shareable list</div>');
+    html.push('<div class="share-list-note">Paste this into Max’s &ldquo;Paste a list&rdquo; (home screen) or any trip’s Research notes &rarr; &ldquo;🪄 Make destinations from this list&rdquo; to recreate the destination skeleton.</div>');
+    html.push('<div class="share-list">' + _esc(_shareList) + '</div>');
   }
   // Destinations
   (trip.destinations || []).forEach(function(d){
