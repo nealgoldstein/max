@@ -2729,7 +2729,13 @@
       var _linkN = (_researchMeta && Array.isArray(_researchMeta.links)) ? _researchMeta.links.length : 0;
       // v359.56.4: link-count badge only; fill state conveys "any content".
       var _resLinkBadge = _linkN > 0 ? ' <span style="opacity:.8;font-size:9.5px;">(' + _linkN + ')</span>' : "";
-      researchBtn.innerHTML = "📓 Research" + _resLinkBadge;
+      // v359.60.21: was "📓 Research" — now reads "📓 {place} notes"
+      // so the button names what it opens. On a destination card the
+      // place context is already visible right above, but pairing the
+      // name with the noun "notes" matches the vocabulary set by
+      // "🔬 Research notes" + "📋 Trip notes" at the trip level —
+      // every writable-notes surface ends in "notes."
+      researchBtn.innerHTML = "📓 " + dest.place + " notes" + _resLinkBadge;
       researchBtn.title = _hasResearch
         ? "Notes" + (_linkN ? " and " + _linkN + " link" + (_linkN === 1 ? "" : "s") : "") + " for " + dest.place
         : "Add notes / source links for " + dest.place;
