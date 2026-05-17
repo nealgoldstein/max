@@ -2758,11 +2758,15 @@
         link.onclick = function(e){
           e.preventDefault();
           e.stopPropagation();
-          if (typeof global._openTripDestRolePopover === "function") {
+          // v359.60.23: route through the unified _openTripStopPopover.
+          // Same dialog for every stop type (destination / day-trip /
+          // wayside); current role is marked and you can transition to
+          // any of the others in one click.
+          if (typeof global._openTripStopPopover === "function") {
+            global._openTripStopPopover({ kind: "destination", destId: destId });
+          } else if (typeof global._openTripDestRolePopover === "function") {
             global._openTripDestRolePopover(destId);
           } else {
-            // Fallback: legacy picker route (kept until the popover
-            // is verified across surfaces; safe to drop in v359.52+).
             if (global._tb) global._tb._focusCandidateName = destPlace;
             if (typeof global.reopenPickerForEdit === "function" && trip && Array.isArray(trip.mdcItems) && trip.mdcItems.length) {
               global.reopenPickerForEdit();

@@ -26708,13 +26708,18 @@ function updateMainMap(){
       // The role popover itself carries both affordances ("Open this
       // destination" link + the Overnight / Day-trip choices) so the
       // dropped Open-destination shortcut isn't lost.
+      // v359.60.23: route through the unified _openTripStopPopover
+      // (same dialog for destinations / day-trips / waysides) so
+      // every stop offers the full transition set.
       (function(did){
         m.on("click", function(){
           try { m.closeTooltip(); } catch(_){}
-          if (typeof _openTripDestRolePopover === "function") {
+          if (typeof _openTripStopPopover === "function") {
+            _openTripStopPopover({ kind: "destination", destId: did });
+          } else if (typeof _openTripDestRolePopover === "function") {
             _openTripDestRolePopover(did);
           } else {
-            selectDest(did); // ultra-defensive fallback
+            selectDest(did);
           }
         });
       })(group.dests[0].dest.id);
@@ -26881,10 +26886,14 @@ function updateMainMap(){
           // remove the empty route, drop the route reference from
           // the hub day's planItems, and re-create the standalone
           // destination.
+          // v359.60.23: route through the unified popover so day-trip
+          // pins get the same role-change menu as destination + wayside.
           (function(hubId, hubRef, routeRef, stopRef, placeName){
             dtMarker.on("click", function(){
               try { dtMarker.closeTooltip(); } catch(_){}
-              if (typeof _openTripDayTripPopover === "function") {
+              if (typeof _openTripStopPopover === "function") {
+                _openTripStopPopover({ kind: "dayTrip", hubDest: hubRef, route: routeRef, stop: stopRef });
+              } else if (typeof _openTripDayTripPopover === "function") {
                 _openTripDayTripPopover(hubRef, routeRef, stopRef, placeName);
               } else if (typeof selectDest === "function") {
                 selectDest(hubId);
@@ -27004,10 +27013,13 @@ function updateMainMap(){
             {permanent:false, direction:"top", offset:[0,-wsSize/2-2], className:"main-map-tooltip"});
           // v359.54.3: tap the pin → wayside popover with promote /
           // remove actions. Closures capture the route + stop refs.
+          // v359.60.23: route through the unified popover.
           (function(routeRef, stopRef, placeName){
             wsMarker.on("click", function(){
               try { wsMarker.closeTooltip(); } catch(_){}
-              if (typeof _openTripWaysidePopover === "function") {
+              if (typeof _openTripStopPopover === "function") {
+                _openTripStopPopover({ kind: "wayside", route: routeRef, stop: stopRef });
+              } else if (typeof _openTripWaysidePopover === "function") {
                 _openTripWaysidePopover(routeRef, stopRef, placeName);
               }
             });
@@ -30400,6 +30412,280 @@ function _openTripDestRolePopover(destId){
   };
 }
 
+// v359.60.23: UNIFIED stop popover. Replaces _openTripDestRolePopover
+// (destinations) + _openTripDayTripPopover (day-trip stops) +
+// _openTripWaysidePopover (wayside stops) with one consistent dialog
+// that shows the same 4 role options every time — Overnight / Day
+// trip from <hub> / Wayside on <route> / See — plus a Remove
+// destructive action. The current role is marked with "(current)"
+// and the row gets the highlight-suggestion border. The Apply
+// handler dispatches to the right conversion helper based on the
+// (currentRole, selectedRole) pair.
+//
+// Context shapes:
+//   { kind: "destination", destId }                — entry in trip.destinations
+//   { kind: "dayTrip", hubDest, route, stop }      — stop on a kind=dayTrip route
+//   { kind: "wayside", route, stop }               — stop on a kind=transit route
+function _openTripStopPopover(ctx) {
+  if (!ctx || !trip) return;
+
+  // ── Resolve place + current role from context ──────────────────
+  var placeName = "?", placeId = null, currentRole = "overnight";
+  var currentHubId = null, currentRouteId = null;
+  if (ctx.kind === "destination") {
+    var srcDest = trip.destinations.find(function(d){ return d.id === ctx.destId; });
+    if (!srcDest) return;
+    placeName = srcDest.place;
+    placeId = srcDest.placeId || null;
+    currentRole = (srcDest.nights || 0) > 0 ? "overnight" : "see";
+  } else if (ctx.kind === "dayTrip") {
+    if (!ctx.hubDest || !ctx.route || !ctx.stop) return;
+    placeId = ctx.stop.placeId;
+    placeName = (trip.places && trip.places[placeId] && trip.places[placeId].name) || placeId || "Stop";
+    currentRole = "dayTrip";
+    currentHubId = ctx.hubDest.id;
+  } else if (ctx.kind === "wayside") {
+    if (!ctx.route || !ctx.stop) return;
+    placeId = ctx.stop.placeId;
+    placeName = (trip.places && trip.places[placeId] && trip.places[placeId].name) || placeId || "Stop";
+    currentRole = "wayside";
+    currentRouteId = ctx.route.id;
+  } else {
+    return;
+  }
+
+  // ── Hub options for the Day-trip dropdown (overnight dests) ─────
+  var hubOpts = (trip.destinations || []).filter(function(d){ return d && d.id && (d.nights || 0) > 0; });
+  var hubOptsHtml = hubOpts.map(function(h){
+    var sel = h.id === currentHubId ? " selected" : "";
+    return '<option value="' + h.id + '"' + sel + '>' + (h.place || "?") + '</option>';
+  }).join("");
+
+  // ── Transit-route options for the Wayside dropdown ──────────────
+  var transitRoutes = (trip.routes || []).filter(function(r){
+    var sub = (typeof MaxMigration !== "undefined" && MaxMigration.routeSubKind)
+      ? MaxMigration.routeSubKind(r)
+      : (r && (r.subKind || (r.kind && r.kind !== "route" ? r.kind : null)));
+    return sub === "transit";
+  });
+  var routeOptsHtml = transitRoutes.map(function(r){
+    var rf = trip.destinations.find(function(d){ return d.id === r.fromDestId; });
+    var rt = trip.destinations.find(function(d){ return d.id === r.toDestId; });
+    var lbl = (rf && rf.place ? rf.place : "?") + " → " + (rt && rt.place ? rt.place : "?");
+    var sel = r.id === currentRouteId ? " selected" : "";
+    return '<option value="' + r.id + '"' + sel + '>' + lbl + '</option>';
+  }).join("");
+
+  // ── Build the modal ─────────────────────────────────────────────
+  var existing = document.getElementById("trip-stop-popover");
+  if (existing) existing.remove();
+  var ov = document.createElement("div");
+  ov.id = "trip-stop-popover";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.32);z-index:10500;display:flex;align-items:center;justify-content:center;padding:20px;";
+
+  function _row(value, label, sub, extraHtml) {
+    var isCurrent = (value === currentRole);
+    var rowStyle = isCurrent
+      ? "display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid #1a5fa8;border-radius:8px;cursor:pointer;background:#eef4fb;"
+      : "display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid #e0e0e0;border-radius:8px;cursor:pointer;background:#fff;";
+    return '<label style="' + rowStyle + '">'
+      + '<input type="radio" name="trip-stop-pick" value="' + value + '"' + (isCurrent ? " checked" : "") + ' style="margin:3px 0 0;" />'
+      + '<div style="flex:1;">'
+      +   '<div style="font-size:13px;font-weight:600;color:#222;">' + label + (isCurrent ? ' <span style="color:#1a5fa8;font-weight:500;">(current)</span>' : '') + '</div>'
+      +   (sub ? '<div style="font-size:11px;color:#777;margin-top:2px;line-height:1.5;">' + sub + '</div>' : '')
+      +   (extraHtml || '')
+      + '</div>'
+      + '</label>';
+  }
+
+  var overnightRow = _row(
+    "overnight",
+    "Overnight stay",
+    currentRole === "overnight"
+      ? "A real stop with at least one night."
+      : "Promote to its own destination on the trip with a night to sleep."
+  );
+
+  var dayTripRow = hubOpts.length
+    ? _row(
+        "dayTrip",
+        "Day trip",
+        currentRole === "dayTrip"
+          ? "From " + ((ctx.hubDest && ctx.hubDest.place) || "?") + ". Pick another hub below to move it."
+          : "Visit while based at one of your overnight hubs.",
+        '<div style="margin-top:6px;">'
+        + '<select id="trip-stop-hub" style="width:100%;padding:5px 8px;font-size:12px;border:1px solid #ccc;border-radius:5px;font-family:inherit;">'
+        +   hubOptsHtml
+        + '</select>'
+        + '</div>'
+      )
+    : '';
+
+  var waysideRow = transitRoutes.length
+    ? _row(
+        "wayside",
+        "Wayside (along the way)",
+        currentRole === "wayside"
+          ? "On a transit route. Pick another route below to move it."
+          : "A stop on the way between two hubs — no overnight here.",
+        '<div style="margin-top:6px;">'
+        + '<select id="trip-stop-route" style="width:100%;padding:5px 8px;font-size:12px;border:1px solid #ccc;border-radius:5px;font-family:inherit;">'
+        +   routeOptsHtml
+        + '</select>'
+        + '</div>'
+      )
+    : '';
+
+  var seeRow = _row(
+    "see",
+    "👁 See",
+    currentRole === "see"
+      ? "Currently a 0-night stop on the trip."
+      : "Drop the overnight, but keep on the trip as a 0-night stop."
+  );
+
+  ov.innerHTML = ''
+    + '<div style="background:#fff;border-radius:12px;max-width:440px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,0.18);max-height:90vh;overflow-y:auto;">'
+    +   '<div style="padding:18px 20px 4px;">'
+    +     '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">Role on this trip</div>'
+    +     '<div style="font-size:17px;font-weight:700;color:#111;margin-top:4px;">' + String(placeName).replace(/</g, "&lt;") + '</div>'
+    +   '</div>'
+    +   '<div style="padding:14px 20px;display:flex;flex-direction:column;gap:10px;">'
+    +     overnightRow
+    +     dayTripRow
+    +     waysideRow
+    +     seeRow
+    +     '<button id="trip-stop-remove" type="button" style="margin-top:4px;padding:9px 12px;font-size:12px;font-weight:600;color:#222;background:#fff;border:1px solid #e0e0e0;border-radius:8px;cursor:pointer;font-family:inherit;text-align:left;">'
+    +       '<span style="color:#888;margin-right:6px;font-weight:700;">✖</span>Remove from trip'
+    +     '</button>'
+    +   '</div>'
+    +   '<div style="padding:8px 20px 18px;display:flex;justify-content:flex-end;gap:8px;">'
+    +     '<button id="trip-stop-cancel" type="button" style="font-size:13px;font-weight:500;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Cancel</button>'
+    +     '<button id="trip-stop-apply" type="button" style="font-size:13px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 16px;cursor:pointer;font-family:inherit;">Apply</button>'
+    +   '</div>'
+    + '</div>';
+
+  document.body.appendChild(ov);
+  function close(){ if (ov && ov.parentNode) ov.parentNode.removeChild(ov); }
+  ov.onclick = function(e){ if (e.target === ov) close(); };
+  ov.querySelector("#trip-stop-cancel").onclick = close;
+
+  ov.querySelector("#trip-stop-remove").onclick = function(){
+    var confirmMsg = "Remove " + placeName + " from this trip?";
+    if (!confirm(confirmMsg)) return;
+    close();
+    if (ctx.kind === "destination") removeDestFromTrip(ctx.destId);
+    else if (ctx.kind === "dayTrip") removeDayTripFromRoute(ctx.hubDest, ctx.route, ctx.stop);
+    else if (ctx.kind === "wayside") removeWaysideFromRoute(ctx.route, ctx.stop);
+  };
+
+  ov.querySelector("#trip-stop-apply").onclick = function(){
+    var picked = ov.querySelector('input[name="trip-stop-pick"]:checked');
+    var selectedRole = picked ? picked.value : currentRole;
+    var hubId   = (ov.querySelector("#trip-stop-hub")   || {}).value || null;
+    var routeId = (ov.querySelector("#trip-stop-route") || {}).value || null;
+    close();
+    _applyStopRoleChange(ctx, currentRole, selectedRole, { hubId: hubId, routeId: routeId });
+  };
+}
+if (typeof globalThis !== "undefined") globalThis._openTripStopPopover = _openTripStopPopover;
+
+// v359.60.23: dispatcher for the unified stop popover's Apply. Maps
+// (currentRole, selectedRole) → the appropriate conversion helper.
+// No-op when the selection equals the current role unless a sub-
+// option (different hub for day-trip, different route for wayside)
+// changes — those treat as "move to <new target>".
+function _applyStopRoleChange(ctx, currentRole, selectedRole, opts) {
+  opts = opts || {};
+  var key = currentRole + "->" + selectedRole;
+
+  // Same role + same sub-target = no-op.
+  if (currentRole === selectedRole) {
+    if (currentRole === "dayTrip" && opts.hubId && opts.hubId !== ctx.hubDest.id) {
+      return moveDayTripToHub(ctx.hubDest, ctx.route, ctx.stop, opts.hubId);
+    }
+    if (currentRole === "wayside" && opts.routeId && opts.routeId !== ctx.route.id) {
+      var targetRoute = (trip.routes || []).find(function(r){ return r && r.id === opts.routeId; });
+      if (targetRoute && typeof moveWaysideToRoute === "function") {
+        return moveWaysideToRoute(ctx.route, ctx.stop, targetRoute);
+      }
+    }
+    return; // truly no-op
+  }
+
+  switch (key) {
+    // ── From destination (overnight or see) ──────────────────────
+    case "overnight->dayTrip":
+    case "see->dayTrip":
+      if (opts.hubId) convertDestToDayTrip(ctx.destId, opts.hubId);
+      return;
+    case "overnight->wayside":
+    case "see->wayside":
+      convertDestToWayside(ctx.destId, { absorbInto: "next" });
+      return;
+    case "overnight->see":
+      convertDestToSee(ctx.destId);
+      return;
+    case "see->overnight":
+      _convertSeeToOvernight(ctx.destId, 1);
+      return;
+
+    // ── From day-trip stop ────────────────────────────────────────
+    case "dayTrip->overnight":
+      ungroupDayTripByRouteStop(ctx.hubDest, ctx.route, ctx.stop);
+      return;
+    case "dayTrip->wayside":
+      if (opts.routeId) convertDayTripToWayside(ctx.hubDest, ctx.route, ctx.stop, opts.routeId);
+      return;
+    case "dayTrip->see":
+      convertDayTripToSee(ctx.hubDest, ctx.route, ctx.stop);
+      return;
+
+    // ── From wayside stop ────────────────────────────────────────
+    case "wayside->overnight":
+      ungroupWaysideByRouteStop(ctx.route, ctx.stop);
+      return;
+    case "wayside->dayTrip":
+      if (opts.hubId) convertWaysideToDayTrip(ctx.route, ctx.stop, opts.hubId);
+      return;
+    case "wayside->see":
+      convertWaysideToSee(ctx.route, ctx.stop);
+      return;
+
+    default:
+      console.warn("[Max] _applyStopRoleChange: unsupported transition", key);
+  }
+}
+
+// v359.60.23: helper extracted from the legacy role popover —
+// promotes a 0-night "see" destination back to an overnight with
+// the given nights count, cascading dates trip-wide.
+function _convertSeeToOvernight(destId, newNights) {
+  if (!trip || !Array.isArray(trip.destinations)) return;
+  var src = trip.destinations.find(function(d){ return d.id === destId; });
+  if (!src) return;
+  newNights = Math.max(1, parseInt(newNights, 10) || 1);
+  src.nights = newNights;
+  src.dateTo = _shiftDate(src.dateFrom, newNights);
+  if (typeof makeDays === "function") {
+    src.days = makeDays(src.id, src.place, src.intent || src.place, src.dateFrom, newNights);
+  }
+  var srcIdx = trip.destinations.indexOf(src);
+  for (var i = srcIdx + 1; i < trip.destinations.length; i++) {
+    var d = trip.destinations[i];
+    d.dateFrom = _shiftDate(d.dateFrom, newNights);
+    d.dateTo   = _shiftDate(d.dateTo,   newNights);
+    (d.days || []).forEach(function(day, di){
+      var dd = new Date(d.dateFrom + "T12:00:00"); dd.setDate(dd.getDate() + di);
+      day.lbl = dd.toLocaleDateString("en-US", {month:"short", day:"numeric"});
+    });
+  }
+  if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
+    try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
+  }
+  _emitTripMutation();
+}
+
 // v359.51.9: trip-view day-trip pin popover. Counterpart to
 // _openTripDestRolePopover but for the orange day-trip pins. Offers
 // two actions:
@@ -31698,6 +31984,286 @@ function moveWaysideToRoute(srcRoute, stop, targetRoute, opts){
 // resurrect a destination. Doesn't refund the absorbed nights —
 // those live with the absorber and stay there. If the user wants
 // to drop a night, they edit the absorber directly.
+// v359.60.23: move a day-trip stop to a different hub. Removes from
+// the current day-trip route, adds to a new dayTrip route on the
+// target hub, transfers the absorbed sourceNights from the old hub
+// to the new one. Same shape as convertWaysideToDayTrip but the
+// source is a day-trip stop, not a wayside stop.
+function moveDayTripToHub(oldHubDest, route, stop, newHubDestId, opts){
+  opts = opts || {};
+  if (!oldHubDest || !route || !stop || !newHubDestId || !trip) return;
+  if (oldHubDest.id === newHubDestId) return; // no-op
+  var newHub = trip.destinations.find(function(d){ return d.id === newHubDestId; });
+  if (!newHub) return;
+  if (!Array.isArray(newHub.days) || !newHub.days.length) {
+    console.warn("[Max] moveDayTripToHub: new hub has no days");
+    return;
+  }
+  var stopIdx = (route.planItems || []).indexOf(stop);
+  if (stopIdx < 0) stopIdx = (route.planItems || []).findIndex(function(s){ return s && s.id === stop.id; });
+  if (stopIdx < 0) return;
+
+  var place = (trip.places && trip.places[stop.placeId]) || null;
+  var dtName = (place && place.name) || stop.placeId || "Day trip";
+  var srcNights = (stop.legacy && stop.legacy.sourceNights) || 0;
+
+  // 1. Remove from current day-trip route.
+  route.planItems.splice(stopIdx, 1);
+  var hasStopsLeft = (route.planItems || []).some(function(p){ return p && p.type === "stop"; });
+  if (!hasStopsLeft) {
+    var rIdx = (trip.routes || []).indexOf(route);
+    if (rIdx >= 0) trip.routes.splice(rIdx, 1);
+    (oldHubDest.days || []).forEach(function(day){
+      if (Array.isArray(day.planItems)) day.planItems = day.planItems.filter(function(pi){ return !(pi && pi.type === "route" && pi.routeId === route.id); });
+      if (Array.isArray(day.refs))      day.refs      = day.refs.filter(function(ref){ return !(ref && ref.routeId === route.id); });
+    });
+  }
+
+  // 2. Transfer nights from old hub to new hub.
+  if (srcNights > 0) {
+    oldHubDest.nights = Math.max(0, (oldHubDest.nights || 0) - srcNights);
+    newHub.nights = (newHub.nights || 0) + srcNights;
+    // Cascade dates trip-wide.
+    var startDate = trip.destinations[0] && trip.destinations[0].dateFrom;
+    if (startDate) {
+      var cur = new Date(startDate + "T12:00:00");
+      trip.destinations.forEach(function(d){
+        d.dateFrom = cur.toISOString().slice(0, 10);
+        var nx = new Date(cur); nx.setDate(nx.getDate() + (d.nights || 0));
+        d.dateTo = nx.toISOString().slice(0, 10);
+        if (typeof makeDays === "function" && d.id && d.place) {
+          d.days = makeDays(d.id, d.place, d.intent || d.place, d.dateFrom, d.nights || 0);
+        }
+        cur = nx;
+      });
+    }
+  }
+
+  // 3. Create or extend a dayTrip route on the new hub.
+  if (!Array.isArray(trip.routes)) trip.routes = [];
+  var day0 = newHub.days[0];
+  if (!day0.id) day0.id = "d-" + newHubDestId + "-0";
+  if (!Array.isArray(day0.planItems)) day0.planItems = [];
+  var routeId = "r-dt-" + newHubDestId + "-" + stop.placeId;
+  var existingRoute = trip.routes.find(function(r){ return r && r.id === routeId; });
+  var newStop = {
+    id: "pi-stop-" + routeId, type: "stop", state: "scheduled",
+    placeId: stop.placeId, priority: stop.priority || "iconic",
+    recommendedMin: stop.recommendedMin || null, notes: stop.notes || "",
+    source: "moveDayTripToHub",
+    legacy: { sourceNights: srcNights, absorbedFromHub: newHub.place, distKm: null,
+      attachedEvents: (stop.legacy && stop.legacy.attachedEvents) || [] }
+  };
+  if (!existingRoute) {
+    var newRoute = (typeof MaxMigration !== "undefined" && MaxMigration.newRouteSegment)
+      ? MaxMigration.newRouteSegment(routeId, "dayTrip", newHubDestId, newHubDestId, {
+          transitDays: [day0.id], character: "dayTrip", planItems: [newStop],
+          startsAt: day0.date || null, endsAt: day0.date || null })
+      : { id: routeId, kind: "route", subKind: "dayTrip",
+          fromDestId: newHubDestId, toDestId: newHubDestId,
+          modeOptions: [], modeChosen: null, transitDays: [day0.id],
+          durationHours: null, distKm: null, character: "dayTrip",
+          fuelStops: [], planItems: [newStop], bookings: [], notes: "",
+          startsAt: day0.date || null, endsAt: day0.date || null };
+    trip.routes.push(newRoute);
+    if (typeof MaxMigration !== "undefined" && MaxMigration.addRouteRefToDay) {
+      MaxMigration.addRouteRefToDay(day0, routeId, "moveDayTripToHub");
+    } else {
+      day0.planItems.push({ id: "pi-rt-" + routeId + "-" + day0.id, type: "route",
+        state: "scheduled", routeId: routeId, source: "moveDayTripToHub" });
+    }
+  } else {
+    existingRoute.planItems.push(newStop);
+  }
+
+  _emitTripMutation();
+  if (!opts.silent && typeof _showDayTripToast === "function") {
+    _showDayTripToast("<strong>" + dtName + "</strong> moved to a day trip from <strong>" + newHub.place + "</strong>",
+      function(){ console.warn("[Max] moveDayTripToHub: undo not wired"); });
+  }
+}
+
+// v359.60.23: convert a day-trip stop to a wayside on a chosen
+// transit route. Removes from the day-trip route, adds as a stop on
+// the target transit route, transfers sourceNights from old hub to
+// the wayside's new absorber (defaults to the route's `to` dest).
+function convertDayTripToWayside(oldHubDest, route, stop, targetRouteId, opts){
+  opts = opts || {};
+  if (!oldHubDest || !route || !stop || !targetRouteId || !trip) return;
+  var targetRoute = (trip.routes || []).find(function(r){ return r && r.id === targetRouteId; });
+  if (!targetRoute) return;
+  var stopIdx = (route.planItems || []).indexOf(stop);
+  if (stopIdx < 0) stopIdx = (route.planItems || []).findIndex(function(s){ return s && s.id === stop.id; });
+  if (stopIdx < 0) return;
+  var place = (trip.places && trip.places[stop.placeId]) || null;
+  var dtName = (place && place.name) || stop.placeId || "Stop";
+  var srcNights = (stop.legacy && stop.legacy.sourceNights) || 0;
+
+  // 1. Remove from day-trip route.
+  route.planItems.splice(stopIdx, 1);
+  var hasStopsLeft = (route.planItems || []).some(function(p){ return p && p.type === "stop"; });
+  if (!hasStopsLeft) {
+    var rIdx = (trip.routes || []).indexOf(route);
+    if (rIdx >= 0) trip.routes.splice(rIdx, 1);
+    (oldHubDest.days || []).forEach(function(day){
+      if (Array.isArray(day.planItems)) day.planItems = day.planItems.filter(function(pi){ return !(pi && pi.type === "route" && pi.routeId === route.id); });
+      if (Array.isArray(day.refs))      day.refs      = day.refs.filter(function(ref){ return !(ref && ref.routeId === route.id); });
+    });
+  }
+
+  // 2. Transfer nights from old hub to target route's absorber.
+  var absorberId = targetRoute.toDestId; // default absorber = `to` dest
+  var absorber = trip.destinations.find(function(d){ return d.id === absorberId; });
+  if (srcNights > 0 && absorber && oldHubDest.id !== absorberId) {
+    oldHubDest.nights = Math.max(0, (oldHubDest.nights || 0) - srcNights);
+    absorber.nights = (absorber.nights || 0) + srcNights;
+    var startDate = trip.destinations[0] && trip.destinations[0].dateFrom;
+    if (startDate) {
+      var cur = new Date(startDate + "T12:00:00");
+      trip.destinations.forEach(function(d){
+        d.dateFrom = cur.toISOString().slice(0, 10);
+        var nx = new Date(cur); nx.setDate(nx.getDate() + (d.nights || 0));
+        d.dateTo = nx.toISOString().slice(0, 10);
+        if (typeof makeDays === "function" && d.id && d.place) {
+          d.days = makeDays(d.id, d.place, d.intent || d.place, d.dateFrom, d.nights || 0);
+        }
+        cur = nx;
+      });
+    }
+  }
+
+  // 3. Add as wayside on target transit route.
+  if (!Array.isArray(targetRoute.planItems)) targetRoute.planItems = [];
+  targetRoute.planItems.push({
+    id: "pi-stop-ws-" + targetRoute.id + "-" + stop.placeId,
+    type: "stop", state: "scheduled", placeId: stop.placeId,
+    priority: stop.priority || "iconic",
+    recommendedMin: stop.recommendedMin || null, notes: stop.notes || "",
+    source: "dayTripToWayside",
+    legacy: { sourceNights: srcNights, absorberDestId: absorberId,
+      attachedEvents: (stop.legacy && stop.legacy.attachedEvents) || [] }
+  });
+
+  _emitTripMutation();
+  if (!opts.silent && typeof _showDayTripToast === "function") {
+    var fromName = (trip.destinations.find(function(d){return d.id===targetRoute.fromDestId;}) || {}).place || "?";
+    var toName   = (trip.destinations.find(function(d){return d.id===targetRoute.toDestId;}) || {}).place || "?";
+    _showDayTripToast("<strong>" + dtName + "</strong> is now a wayside on " + fromName + " → " + toName,
+      function(){ console.warn("[Max] convertDayTripToWayside: undo not wired"); });
+  }
+}
+
+// v359.60.23: convert a day-trip stop to a standalone 0-night
+// destination on the trip (a "see" stop). Removes from the day-trip
+// route, inserts a new 0-night destination after the hub in
+// trip.destinations[]. Hub gives back the absorbed sourceNights to
+// keep total trip length stable — but the new see stop has 0
+// nights of its own, so the net effect is: trip is 1 day shorter
+// (or whatever sourceNights was).
+//
+// Wait — actually keeping trip length stable means hub KEEPS the
+// nights (mirrors the existing remove-from-route semantics). The
+// new see stop slots in with 0 nights. Trip length unchanged.
+function convertDayTripToSee(hubDest, route, stop, opts){
+  opts = opts || {};
+  if (!hubDest || !route || !stop || !trip) return;
+  var stopIdx = (route.planItems || []).indexOf(stop);
+  if (stopIdx < 0) stopIdx = (route.planItems || []).findIndex(function(s){ return s && s.id === stop.id; });
+  if (stopIdx < 0) return;
+  var place = (trip.places && trip.places[stop.placeId]) || null;
+  var dtName = (place && place.name) || stop.placeId || "Stop";
+
+  // 1. Remove from day-trip route (cleanup empty route as needed).
+  route.planItems.splice(stopIdx, 1);
+  var hasStopsLeft = (route.planItems || []).some(function(p){ return p && p.type === "stop"; });
+  if (!hasStopsLeft) {
+    var rIdx = (trip.routes || []).indexOf(route);
+    if (rIdx >= 0) trip.routes.splice(rIdx, 1);
+    (hubDest.days || []).forEach(function(day){
+      if (Array.isArray(day.planItems)) day.planItems = day.planItems.filter(function(pi){ return !(pi && pi.type === "route" && pi.routeId === route.id); });
+      if (Array.isArray(day.refs))      day.refs      = day.refs.filter(function(ref){ return !(ref && ref.routeId === route.id); });
+    });
+  }
+
+  // 2. Insert a new 0-night destination right after the hub.
+  destCtr = (typeof destCtr === "number" ? destCtr : 0) + 1;
+  var newDest = {
+    id: "d" + destCtr,
+    place: dtName,
+    intent: stop.notes || dtName,
+    nights: 0,
+    days: (typeof makeDays === "function") ? makeDays("d" + destCtr, dtName, dtName, hubDest.dateTo || hubDest.dateFrom || "", 0) : [],
+    dateFrom: hubDest.dateTo || hubDest.dateFrom || "",
+    dateTo:   hubDest.dateTo || hubDest.dateFrom || "",
+    trackerItems: { booked: [], see: [], visited: [] },
+    trackerCat: "booked", storyState: "idle",
+    hotelBookings: [], generalBookings: [], locations: [],
+    execMode: false, todayItems: [], discoveredItems: [], suggestions: [],
+    lat: (place && typeof place.lat === "number") ? place.lat : null,
+    lng: (place && typeof place.lng === "number") ? place.lng : null,
+    placeId: stop.placeId || null
+  };
+  var hubIdx = trip.destinations.findIndex(function(d){ return d.id === hubDest.id; });
+  if (hubIdx >= 0) trip.destinations.splice(hubIdx + 1, 0, newDest);
+  else trip.destinations.push(newDest);
+
+  if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
+    try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
+  }
+  _emitTripMutation();
+  if (!opts.silent && typeof _showDayTripToast === "function") {
+    _showDayTripToast("<strong>" + dtName + "</strong> is now a see stop",
+      function(){ console.warn("[Max] convertDayTripToSee: undo not wired"); });
+  }
+}
+
+// v359.60.23: convert a wayside stop to a standalone 0-night
+// destination on the trip (a "see" stop). Mirrors convertDayTripToSee
+// but the source is a wayside on a transit route, not a day-trip
+// stop. Inserts the new dest between the wayside's route's `from`
+// and `to`. Absorber keeps its absorbed nights (mirrors
+// removeWaysideFromRoute's semantics — trip length stable, user
+// can drop a night separately).
+function convertWaysideToSee(route, stop, opts){
+  opts = opts || {};
+  if (!route || !stop || !trip) return;
+  var stopIdx = (route.planItems || []).indexOf(stop);
+  if (stopIdx < 0) stopIdx = (route.planItems || []).findIndex(function(s){ return s && s.id === stop.id; });
+  if (stopIdx < 0) return;
+  var place = (trip.places && trip.places[stop.placeId]) || null;
+  var wsName = (place && place.name) || stop.placeId || "Stop";
+
+  route.planItems.splice(stopIdx, 1);
+
+  var fromIdx = trip.destinations.findIndex(function(d){ return d.id === route.fromDestId; });
+  destCtr = (typeof destCtr === "number" ? destCtr : 0) + 1;
+  var fromDest = fromIdx >= 0 ? trip.destinations[fromIdx] : null;
+  var seedDate = (fromDest && fromDest.dateTo) || (fromDest && fromDest.dateFrom) || "";
+  var newDest = {
+    id: "d" + destCtr, place: wsName, intent: stop.notes || wsName, nights: 0,
+    days: (typeof makeDays === "function") ? makeDays("d" + destCtr, wsName, wsName, seedDate, 0) : [],
+    dateFrom: seedDate, dateTo: seedDate,
+    trackerItems: { booked: [], see: [], visited: [] },
+    trackerCat: "booked", storyState: "idle",
+    hotelBookings: [], generalBookings: [], locations: [],
+    execMode: false, todayItems: [], discoveredItems: [], suggestions: [],
+    lat: (place && typeof place.lat === "number") ? place.lat : null,
+    lng: (place && typeof place.lng === "number") ? place.lng : null,
+    placeId: stop.placeId || null
+  };
+  if (fromIdx >= 0) trip.destinations.splice(fromIdx + 1, 0, newDest);
+  else trip.destinations.push(newDest);
+
+  if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
+    try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
+  }
+  _emitTripMutation();
+  if (!opts.silent && typeof _showDayTripToast === "function") {
+    _showDayTripToast("<strong>" + wsName + "</strong> is now a see stop",
+      function(){ console.warn("[Max] convertWaysideToSee: undo not wired"); });
+  }
+}
+
 // v359.60.23: convert a wayside (stop on a transit route) directly
 // into a day trip from a chosen hub. Previously the only path was
 // wayside → overnight → day-trip via two role-popover clicks; this
