@@ -72,17 +72,14 @@ ChatGPT conversation — you can paste it in and skip the brief +
 candidate-picking steps. Two entry points:
 
 - **Home screen → Paste a list.** Sits next to *Start a new trip*.
-  Opens a paste box. On Build, Max parses the list, mints a fresh
-  trip with destinations populated, *and opens the candidate
-  explorer over the trip view* — the same review surface the
-  picker drops you into after candidate generation. From there
-  you can evaluate each place: keep / reject, see day-trip /
-  wayside hints based on geography, change roles. Click **Apply
-  changes** to commit refinements; **Cancel** keeps the trip as
-  built.
+  Opens a paste box. On Open, Max mints a stub trip and drops the
+  pasted text into the trip's Research notes, opening that modal
+  right away. The trip has no destinations yet — review the text
+  in Research, then click **🪄 Make destinations from this list**
+  when you're ready to commit. Notes stay put.
 - **Home screen → Load from file.** Same flow, but the source is
-  a `.txt` or `.md` file on disk. Max reads the file, parses it
-  the same way, builds the trip, and opens the explorer over it.
+  a `.txt` or `.md` file on disk. The file's content lands in
+  Research notes; you commit on your schedule.
 - **Research notes → 🪄 Make destinations from this list.** Inside
   any trip's Research notes modal, parses the current notes text
   and appends the destinations to the trip you already have open.
