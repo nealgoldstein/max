@@ -32,6 +32,14 @@ module.exports = defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
+    // v359.60.12: block service workers in tests. The app's SW caches
+    // index.html aggressively, which means tests can hit a stale
+    // snapshot of index.html even after a fresh deploy. Newly-added
+    // window.X exports / function declarations weren't appearing on
+    // window in the test, because Playwright was getting served the
+    // cached version. Blocking SWs forces every test to fetch fresh
+    // bytes from the http.server we boot.
+    serviceWorkers: 'block',
   },
 
   // Boot a tiny static server before the suite. Python's built-in

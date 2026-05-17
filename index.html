@@ -5292,6 +5292,17 @@ function migrateCarRentalsIntoTracker(){
   }
 }
 
+// v359.60.10: expose entry functions on globalThis so Playwright
+// tests can invoke them via page.evaluate(window.X). Without this,
+// the picker-flow / trip-mutators specs hit "X is not on window"
+// and fail before exercising the actual logic. These are function
+// declarations so they're hoisted; assigning to globalThis here
+// just makes them addressable as window.X. No runtime cost.
+if (typeof globalThis !== "undefined") {
+  if (typeof localLoad === "function") globalThis.localLoad = localLoad;
+  if (typeof enterApp === "function") globalThis.enterApp = enterApp;
+}
+
 function enterApp(){
   // Restore _mdcItems from saved trip for route sequencing
   if(trip && trip.mdcItems) _mdcItems = trip.mdcItems;
@@ -19881,6 +19892,9 @@ function showPreBuildModal(){
 // list.
 // _reconcileDestinations moved to engine-trip.js (Round HO).
 
+// v359.60.10: prior setTimeout-based exports moved to end-of-script
+// (v359.60.11) where direct assignment works reliably.
+
 // Round HL.X: buildFromCandidates body lifted into
 // MaxEnginePicker.publishTrip() in engine-picker.js. The picker
 // engine now owns the full build flow; the inline-script entry
@@ -25914,6 +25928,79 @@ function updateMainMap(){
       });
     });
 
+    // v359.60.9: render "considered but not picked" places as faded
+    // gray pins on the trip map. These are places that appeared in
+    // the picker (mdcItems) but the user didn't keep — kept on the
+    // trip object so the user can see them and tap to add later
+    // without going back to research. Skips places that are already
+    // a destination, a day-trip target, or a wayside. Pins are small,
+    // gray, dashed, and below other layers (zIndexOffset -100).
+    (function _renderConsideredPins(){
+      var src = Array.isArray(trip.mdcItems) ? trip.mdcItems : [];
+      if (!src.length) return;
+      function _normKey(name){
+        if (!name) return "";
+        return (typeof _normPlaceName === "function") ? _normPlaceName(name) : name.toLowerCase().trim();
+      }
+      // Build set of place names ALREADY in the trip — destinations,
+      // day-trip stops, and wayside stops all count.
+      var includedKeys = {};
+      trip.destinations.forEach(function(d){ if (d && d.place) includedKeys[_normKey(d.place)] = true; });
+      (trip.routes || []).forEach(function(r){
+        if (!r || !Array.isArray(r.planItems)) return;
+        r.planItems.forEach(function(pi){
+          if (!pi || pi.type !== "stop" || !pi.placeId) return;
+          var p = trip.places && trip.places[pi.placeId];
+          if (p && p.name) includedKeys[_normKey(p.name)] = true;
+          if (pi.placeId) includedKeys[_normKey(pi.placeId)] = true;
+        });
+      });
+      // Collect unique considered places.
+      var considered = {};
+      src.forEach(function(it){
+        if (!it || !Array.isArray(it.requiredPlaces)) return;
+        it.requiredPlaces.forEach(function(p){
+          if (!p || !p.place) return;
+          var k = _normKey(p.place);
+          if (!k || includedKeys[k] || considered[k]) return;
+          var coords = null;
+          if (typeof p.lat === "number" && typeof p.lng === "number"
+              && isFinite(p.lat) && isFinite(p.lng)) {
+            coords = [p.lat, p.lng];
+          } else if (typeof getCityCenter === "function") {
+            var c = getCityCenter(p.place);
+            if (Array.isArray(c) && isFinite(c[0])) coords = c;
+          }
+          if (!coords) return;
+          considered[k] = { place: p.place, coords: coords };
+        });
+      });
+      Object.keys(considered).forEach(function(k){
+        var c = considered[k];
+        var html = '<div style="background:#aaa;color:#fff;border-radius:50%;width:14px;height:14px;'
+          + 'border:2px dashed #fff;box-shadow:0 1px 3px rgba(0,0,0,0.22);opacity:0.78;"></div>';
+        var icon = L.divIcon({
+          html: html, className: "main-trip-considered-pin",
+          iconSize: [14, 14], iconAnchor: [7, 7], popupAnchor: [0, -8]
+        });
+        try {
+          var m = L.marker(c.coords, { icon: icon, zIndexOffset: -100 }).addTo(_mainMap);
+          m.bindTooltip(c.place + " · considered &middot; tap to add", {
+            permanent: false, direction: "top", offset: [0, -8], className: "main-map-tooltip"
+          });
+          (function(placeName, coords){
+            m.on("click", function(){
+              try { m.closeTooltip(); } catch(_){}
+              if (typeof _openTripConsideredAddPopover === "function") {
+                _openTripConsideredAddPopover(placeName, coords);
+              }
+            });
+          })(c.place, c.coords);
+          _mainMarkers.push(m);
+        } catch(_){}
+      });
+    })();
+
     if(bounds.length===1){_mainMap.setView(bounds[0],10,{animate:false});}
     else if(bounds.length>1){try{_mainMap.fitBounds(bounds,{padding:[40,40],animate:false});}catch(e){}}
     // Round ED: clear the cached "last dest the map zoomed to" so that
@@ -29214,6 +29301,220 @@ function _tidyTripApply(scanResult, selectedDestIds){
 // sessions until they Apply (which clears state). They can close the
 // modal and come back; their selections stay. A Reset link clears all
 // pending unchecks.
+// v359.60.9: tap-to-add popover for "considered but not picked"
+// places that the user sees as gray pins on the trip map. Lets them
+// pull a place into the trip without bouncing back to research. Three
+// roles: overnight stay, day trip from a hub, or "along the way" on
+// a route between two hubs. Mirrors _openTripDestRolePopover but the
+// source is a (placeName, coords) pair rather than an existing dest.
+function _openTripConsideredAddPopover(placeName, coords){
+  if (!trip || !placeName || !coords) return;
+  var existing = document.getElementById("trip-considered-popover");
+  if (existing) existing.remove();
+
+  // Suggest a nearest hub (more nights, within DAY_TRIP_RADIUS_KM).
+  function _coordsFor(d){
+    if (!d) return null;
+    if (typeof d.lat === "number" && typeof d.lng === "number") return [d.lat, d.lng];
+    if (d.place && typeof getCityCenter === "function") {
+      var c = getCityCenter(d.place);
+      if (Array.isArray(c) && isFinite(c[0])) return c;
+    }
+    return null;
+  }
+  var DAY_TRIP_RADIUS_KM = (typeof _defaultDayTripRadiusKm === "function") ? _defaultDayTripRadiusKm() : 60;
+  var hubOptions = (trip.destinations || [])
+    .filter(function(h){ return h && h.id; })
+    .map(function(h){
+      var hc = _coordsFor(h);
+      var dKm = null;
+      if (hc && typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.haversineKm === "function") {
+        dKm = MaxEngineTrip.haversineKm(coords[0], coords[1], hc[0], hc[1]);
+      }
+      return { hub: h, distKm: dKm, inRange: (dKm != null && dKm <= DAY_TRIP_RADIUS_KM) };
+    })
+    .sort(function(a, b){
+      if (a.distKm == null && b.distKm == null) return 0;
+      if (a.distKm == null) return 1;
+      if (b.distKm == null) return -1;
+      return a.distKm - b.distKm;
+    });
+  var defaultHubId = hubOptions[0] ? hubOptions[0].hub.id : null;
+  var dayTripAvailable = hubOptions.length > 0;
+
+  var hubOpts = hubOptions.map(function(o){
+    var distLbl;
+    if (o.distKm == null) distLbl = "?";
+    else if (typeof _fmtDistance === "function") distLbl = _fmtDistance(o.distKm);
+    else distLbl = Math.round(o.distKm) + " km";
+    var rangeLbl = (o.distKm == null) ? "" : (o.inRange ? "" : " — stretch");
+    return '<option value="' + o.hub.id + '"' + (o.hub.id === defaultHubId ? ' selected' : '') + '>'
+      + o.hub.place + ' (' + distLbl + ')' + rangeLbl + '</option>';
+  }).join("");
+
+  // v359.60.14: build the day-trip row as a string variable up front
+  // so the main innerHTML concat chain doesn't trip on the multi-line
+  // ternary. (Inline `+ (cond ? '...' + '...' : '')` was parsing as
+  // `+ ?` between the open paren and the ternary, throwing
+  // SyntaxError and killing the entire inline script — which in turn
+  // meant localLoad / enterApp / etc. never got declared at runtime
+  // and Playwright tests timed out waiting for window.localLoad.)
+  var dayTripRowHtml = '';
+  if (dayTripAvailable) {
+    dayTripRowHtml = '<label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #e0e0e0;border-radius:8px;cursor:pointer;background:#fff;">'
+      + '<input type="radio" name="trip-cons-role" value="dayTrip" style="margin:0;" />'
+      + '<div style="flex:1;">'
+      +   '<div style="font-size:13px;font-weight:600;color:#222;">Day trip from</div>'
+      +   '<select id="trip-cons-hub" style="margin-top:6px;width:100%;padding:6px 8px;font-size:12.5px;border:1px solid #ccc;border-radius:6px;font-family:inherit;">' + hubOpts + '</select>'
+      +   '<div style="font-size:11px;color:#777;margin-top:4px;line-height:1.5;">Attaches as a satellite of the chosen hub. No new night.</div>'
+      + '</div>'
+      + '</label>';
+  }
+
+  var ov = document.createElement("div");
+  ov.id = "trip-considered-popover";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.32);z-index:10500;display:flex;align-items:center;justify-content:center;padding:20px;";
+
+  ov.innerHTML = ''
+    + '<div style="background:#fff;border-radius:12px;max-width:420px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,0.18);">'
+    +   '<div style="padding:18px 20px 4px;">'
+    +     '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">Add to trip</div>'
+    +     '<div style="font-size:17px;font-weight:700;color:#111;margin-top:4px;">' + placeName + '</div>'
+    +     '<div style="font-size:11.5px;color:#777;margin-top:3px;line-height:1.5;">You considered this earlier but didn\'t pick it. Pick a role and it joins the trip.</div>'
+    +   '</div>'
+    +   '<div style="padding:14px 20px;display:flex;flex-direction:column;gap:10px;">'
+    +     '<label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #1a5fa8;border-radius:8px;cursor:pointer;background:#eef4fb;">'
+    +       '<input type="radio" name="trip-cons-role" value="stay" checked style="margin:0;" />'
+    +       '<div style="flex:1;">'
+    +         '<div style="font-size:13px;font-weight:600;color:#222;">Overnight stay</div>'
+    +         '<div style="font-size:11px;color:#777;margin-top:2px;">Adds as a new destination, 1 night, at the end of the trip. You can reorder afterward.</div>'
+    +       '</div>'
+    +     '</label>'
+    +     dayTripRowHtml
+    +   '</div>'
+    +   '<div style="padding:8px 20px 18px;display:flex;justify-content:flex-end;gap:8px;">'
+    +     '<button id="trip-cons-cancel" style="font-size:13px;font-weight:500;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Cancel</button>'
+    +     '<button id="trip-cons-add" style="font-size:13px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 16px;cursor:pointer;font-family:inherit;">Add</button>'
+    +   '</div>'
+    + '</div>';
+
+  document.body.appendChild(ov);
+  function close(){ if (ov && ov.parentNode) ov.parentNode.removeChild(ov); }
+  ov.onclick = function(e){ if (e.target === ov) close(); };
+  ov.querySelector("#trip-cons-cancel").onclick = close;
+
+  ov.querySelector("#trip-cons-add").onclick = function(){
+    var picked = ov.querySelector('input[name="trip-cons-role"]:checked');
+    var role = picked ? picked.value : "stay";
+    close();
+    if (role === "dayTrip") {
+      var sel = document.getElementById("trip-cons-hub");
+      var hubId = sel ? sel.value : null;
+      var hub = hubId ? trip.destinations.find(function(d){ return d.id === hubId; }) : null;
+      if (hub) {
+        _addConsideredAsDayTrip(placeName, coords, hub);
+      } else {
+        _addConsideredAsDestination(placeName, coords);
+      }
+    } else {
+      _addConsideredAsDestination(placeName, coords);
+    }
+  };
+}
+
+// Add a considered place as a 1-night destination at the end of the
+// trip. User can reorder / change role via existing UI afterward.
+function _addConsideredAsDestination(placeName, coords){
+  if (!trip || !Array.isArray(trip.destinations)) return;
+  if (typeof destCtr !== "number") destCtr = 0;
+  destCtr++;
+  var id = "d" + destCtr;
+  var newDest = {
+    id: id,
+    place: placeName,
+    intent: placeName,
+    nights: 1,
+    lat: coords[0],
+    lng: coords[1],
+    days: [],
+    trackerItems: { booked: [], see: [], visited: [] },
+    trackerCat: "booked",
+    storyState: "idle",
+    hotelBookings: [], generalBookings: [], locations: [],
+    execMode: false, todayItems: [], discoveredItems: [], suggestions: [],
+    attachedEvents: []
+  };
+  // Place at end, sequence dates from previous dest's dateTo.
+  var oldLast = trip.destinations[trip.destinations.length - 1];
+  if (oldLast && oldLast.dateTo) {
+    newDest.dateFrom = oldLast.dateTo;
+    var d = new Date(oldLast.dateTo + "T12:00:00");
+    d.setDate(d.getDate() + 1);
+    newDest.dateTo = d.toISOString().slice(0, 10);
+  }
+  // Build the days[] array now that dates are set.
+  if (typeof makeDays === "function") {
+    newDest.days = makeDays(id, placeName, placeName, newDest.dateFrom || "", 1);
+  }
+  trip.destinations.push(newDest);
+  if (typeof _ftRecomputeTripDates === "function") _ftRecomputeTripDates();
+  if (typeof autoSave === "function") autoSave();
+  if (typeof drawTripMode === "function") drawTripMode();
+  if (typeof showSaveStatus === "function") showSaveStatus("✓ Added " + placeName + " as overnight stop", 2800);
+}
+
+// Add a considered place as a day-trip target from an existing hub.
+// Uses the same transit-route-of-route structure as the user-converted
+// day trips so it integrates with the existing rendering + role popover.
+function _addConsideredAsDayTrip(placeName, coords, hubDest){
+  if (!trip || !hubDest) return;
+  // Ensure trip.places dict and create the place entry.
+  if (!trip.places || typeof trip.places !== "object") trip.places = {};
+  var placeId = "p_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5);
+  trip.places[placeId] = {
+    id: placeId,
+    name: placeName,
+    lat: coords[0],
+    lng: coords[1]
+  };
+  // Find or create a dayTrip route from this hub.
+  if (!Array.isArray(trip.routes)) trip.routes = [];
+  var route = trip.routes.find(function(r){
+    if (!r) return false;
+    var sub = (typeof MaxMigration !== "undefined" && MaxMigration.routeSubKind)
+      ? MaxMigration.routeSubKind(r) : (r.subKind || r.kind);
+    return sub === "dayTrip" && r.fromDestId === hubDest.id;
+  });
+  if (!route) {
+    var routeId = "r_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5);
+    route = {
+      id: routeId,
+      kind: "route",
+      subKind: "dayTrip",
+      fromDestId: hubDest.id,
+      toDestId: hubDest.id,
+      planItems: [],
+      transitDays: []
+    };
+    trip.routes.push(route);
+  }
+  if (!Array.isArray(route.planItems)) route.planItems = [];
+  var stopId = "s_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5);
+  route.planItems.push({
+    id: stopId,
+    type: "stop",
+    placeId: placeId,
+    priority: "iconic"
+  });
+  if (typeof autoSave === "function") autoSave();
+  if (typeof drawTripMode === "function") drawTripMode();
+  if (typeof showSaveStatus === "function") showSaveStatus("✓ Added " + placeName + " as day trip from " + hubDest.place, 2800);
+}
+
+if (typeof globalThis !== "undefined") {
+  globalThis._openTripConsideredAddPopover = _openTripConsideredAddPopover;
+}
+
 function _openTidyTripPreview(){
   var scan = _tidyTripScan();
   if (!scan.conversions.length && !scan.skipped.length) {
@@ -36271,6 +36572,29 @@ function getDistricts(place,intent,dest){
   if(dest&&dest.generatedDistricts&&dest.generatedDistricts.length) return dest.generatedDistricts;
   return[];
 }
+
+// v359.60.11: explicit window exports at end-of-script so Playwright
+// tests can find these functions via page.evaluate(window.X). Top-
+// level function declarations in this script SHOULD auto-attach to
+// window, but they don't reliably for the test harness — possibly
+// because the script is so large that Playwright's wait condition
+// fires before everything has settled. Doing the assignment HERE
+// guarantees the functions are fully parsed and addressable. Direct
+// assignment (no setTimeout, no eval indirection).
+try {
+  if (typeof window !== "undefined") {
+    if (typeof localLoad === "function")             window.localLoad = localLoad;
+    if (typeof enterApp === "function")              window.enterApp = enterApp;
+    if (typeof buildFromCandidates === "function")   window.buildFromCandidates = buildFromCandidates;
+    if (typeof addBufferNight === "function")        window.addBufferNight = addBufferNight;
+    if (typeof reverseTripOrder === "function")      window.reverseTripOrder = reverseTripOrder;
+    if (typeof delDest === "function")               window.delDest = delDest;
+    if (typeof delS === "function")                  window.delS = delS;
+    if (typeof makeDayTrip === "function")           window.makeDayTrip = makeDayTrip;
+    if (typeof addDayTripPlace === "function")       window.addDayTripPlace = addDayTripPlace;
+    if (typeof addDayTripToDay === "function")       window.addDayTripToDay = addDayTripToDay;
+  }
+} catch(_){}
 </script>
 <!-- MAP OVERLAY (dual-tile comparison) -->
 <div id="map-overlay">

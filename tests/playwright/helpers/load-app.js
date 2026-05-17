@@ -57,12 +57,20 @@ async function bootSeeded(page, seed) {
     }
   }, seed);
   await page.goto('/index.html');
-  // Wait for the engines to be on window — they load before the inline
-  // script runs.
+  // Wait for the engines AND the inline-script exports to be on
+  // window. v359.60.13: previously only checked MaxEngineTrip /
+  // Picker / DB (external scripts). Those load before the inline
+  // script in index.html finishes parsing, so the test would proceed
+  // and immediately fail on window.localLoad which is defined inside
+  // the inline script. Adding localLoad / enterApp to the wait
+  // condition guarantees the inline script has fully run before the
+  // test continues.
   await page.waitForFunction(() =>
     typeof window.MaxEngineTrip !== 'undefined' &&
     typeof window.MaxEnginePicker !== 'undefined' &&
-    typeof window.MaxDB !== 'undefined'
+    typeof window.MaxDB !== 'undefined' &&
+    typeof window.localLoad === 'function' &&
+    typeof window.enterApp === 'function'
   );
   // Open the trip programmatically using the same sequence the home-
   // screen card click uses (see index.html line ~3620): localLoad(id)
