@@ -13258,11 +13258,11 @@ function _openTripHeroMapOverlay(){
     // updateMainMap). Active destination keeps the red highlight ring
     // at 26 px so the user can spot it.
     var isActive = !!p.isActive;
-    // v359.60.21: 0-night ("see") destinations render purple to match
+    // v359.60.21: 0-night ("see") destinations render grey to match
     // the main trip map. Active state still wins (red ring) so the user
     // can locate the currently-open dest at a glance.
     var _isZeroNight = (p.nights || 0) === 0;
-    var color = isActive ? "#c44" : (_isZeroNight ? "#5b3f8f" : "#1a5fa8");
+    var color = isActive ? "#c44" : (_isZeroNight ? "#888" : "#1a5fa8");
     var size = isActive ? 26 : 22;
     var label = String(i + 1);
     var fontSize = label.length > 1 ? (isActive ? 12 : 10) : (isActive ? 13 : 11);
@@ -13511,11 +13511,11 @@ function openTripHeroMapWindow(){
     // Long labels get a smaller font so they still fit at 22 px.
     +     'var size = 22;'
     +     'var fontSize = label.length > 3 ? 8 : (label.length > 2 ? 10 : 11);'
-    // v359.60.21: 0-night ("see") destinations render purple to match the
-    // main trip map. Round-trip group only goes purple when EVERY visit
+    // v359.60.21: 0-night ("see") destinations render grey to match the
+    // main trip map. Round-trip group only goes grey when EVERY visit
     // is 0-night; mixed groups stay blue so the overnight context wins.
     +     'var _allZeroNight = g.pts.every(function(p){ return (p.nights || 0) === 0; });'
-    +     'var _bg = _allZeroNight ? "#5b3f8f" : "#1a5fa8";'
+    +     'var _bg = _allZeroNight ? "#888" : "#1a5fa8";'
     +     'var html = \'<div style="background:\'+_bg+\';color:#fff;border-radius:50%;width:\'+size+\'px;height:\'+size+\'px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;font-size:\'+fontSize+\'px;font-weight:700;letter-spacing:-0.02em;">\'+label+\'</div>\';'
     +     'var icon = L.divIcon({html: html, className: "", iconSize: [size, size], iconAnchor: [size/2, size/2]});'
     +     'var popupBits = g.pts.map(function(p){'
@@ -25624,18 +25624,21 @@ function updateMainMap(){
       var _isCandidate = group.dests.some(function(x){
         return x && x.dest && _couldBeDayTripDestIds[x.dest.id];
       });
-      // v359.60.21: 0-night ("see") destinations always render purple so
-      // the user can tell at a glance which stops they sleep at vs. which
-      // are pass-through day-trip / wayside visits. The existing
-      // candidate-purple (1-night-near-hub HINT) reuses the same color
-      // because both states are day-trip-adjacent — the tooltip handles
-      // disambiguation. Round-trip collapsed groups (same place visited
-      // multiple times) only go purple when EVERY visit is 0-night;
-      // mixed groups stay blue so the overnight context wins.
+      // v359.60.21: 0-night ("see") destinations render GREY so they
+      // read as a quieter, lower-commitment state than the purple
+      // candidate ring (1-night-near-hub HINT, which is "consider
+      // making this a day trip"). Grey reads as "stop here without
+      // sleeping" — distinct from both the blue overnight stays and
+      // the purple "could become a day trip" candidates. Round-trip
+      // collapsed groups (same place visited multiple times) only go
+      // grey when EVERY visit is 0-night; mixed groups stay blue so
+      // the overnight context wins. (v359.60.21 first shipped this as
+      // purple; the in-app role popover added a separate Remove action
+      // and we wanted See to read as quieter than the candidate hint.)
       var _allZeroNight = group.dests.every(function(x){
         return x && x.dest && (x.dest.nights || 0) === 0;
       });
-      var color = (_allZeroNight || _isCandidate) ? "#5b3f8f" : "#1a5fa8";
+      var color = _allZeroNight ? "#888" : (_isCandidate ? "#5b3f8f" : "#1a5fa8");
       var html = '<div style="background:'+color+';color:#fff;border-radius:50%;width:'
         + size + 'px;height:' + size + 'px;border:2px solid #fff;'
         + 'box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;'
@@ -28735,6 +28738,100 @@ function _stopDirCoord(stop){
   return null;
 }
 
+// v359.60.21: convert a destination to "See" — drop the overnight
+// stay but keep the place in trip.destinations[] as a 0-night stop.
+// Distinct from convertDestToDayTrip (which absorbs into a hub) and
+// convertDestToWayside (which folds onto a transit route): the place
+// stays standalone, just without nights.
+//
+// Mutations:
+//   - dest.nights = 0
+//   - dest.days = [] (no day shells; lost items are warned about up
+//     in the dialog's saveBtn handler so the popover can confirm)
+//   - dest.dateTo = dest.dateFrom (zero-length range)
+//   - hotelBookings cleared (no overnight means no hotel)
+//   - subsequent destinations shift earlier by oldNights days
+//
+// Reversible by setting nights back to >0 (same path as the +/-
+// spinner on the destination card).
+function convertDestToSee(destId){
+  if (!trip || !Array.isArray(trip.destinations)) return;
+  var idx = trip.destinations.findIndex(function(d){ return d.id === destId; });
+  if (idx < 0) {
+    console.warn("[Max] convertDestToSee: dest not found", destId);
+    return;
+  }
+  var dest = trip.destinations[idx];
+  var oldNights = dest.nights || 0;
+  if (oldNights === 0) return; // already a See stop
+
+  dest.nights = 0;
+  dest.days = [];
+  if (Array.isArray(dest.hotelBookings)) dest.hotelBookings = [];
+  dest.dateTo = dest.dateFrom;
+
+  // Cascade subsequent destinations back by oldNights days.
+  for (var i = idx + 1; i < trip.destinations.length; i++) {
+    var d = trip.destinations[i];
+    d.dateFrom = _shiftDate(d.dateFrom, -oldNights);
+    d.dateTo   = _shiftDate(d.dateTo,   -oldNights);
+    (d.days || []).forEach(function(day, di){
+      var dd = new Date(d.dateFrom + "T12:00:00"); dd.setDate(dd.getDate() + di);
+      day.lbl = dd.toLocaleDateString("en-US", {month:"short", day:"numeric"});
+    });
+  }
+
+  // Adjacency unchanged (dest stays in trip.destinations), but route
+  // sync is cheap and defensive — covers any edge case where the
+  // route between prev/this or this/next assumed nights > 0.
+  if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
+    try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
+  }
+  _emitTripMutation();
+}
+
+// v359.60.21: remove a destination from the trip entirely. Splices
+// from trip.destinations[] and cascades subsequent dates back by its
+// former nights. The picker's research listings reflect this
+// automatically — _emitTripMutation runs _syncPickerToTrip, which
+// walks _tb.placeActivities and clears _keep on any requiredPlaces
+// entry that no longer appears in trip.destinations. So the place
+// stays visible in the picker as an unchecked candidate, and the
+// user can bring it back later by re-checking.
+function removeDestFromTrip(destId){
+  if (!trip || !Array.isArray(trip.destinations)) return;
+  var idx = trip.destinations.findIndex(function(d){ return d.id === destId; });
+  if (idx < 0) {
+    console.warn("[Max] removeDestFromTrip: dest not found", destId);
+    return;
+  }
+  var dest = trip.destinations[idx];
+  var oldNights = dest.nights || 0;
+
+  trip.destinations.splice(idx, 1);
+
+  // Cascade subsequent dates earlier by oldNights (only if there's
+  // anything after; first-dest removals shift the whole trip start).
+  if (oldNights > 0 && idx < trip.destinations.length) {
+    for (var i = idx; i < trip.destinations.length; i++) {
+      var d = trip.destinations[i];
+      d.dateFrom = _shiftDate(d.dateFrom, -oldNights);
+      d.dateTo   = _shiftDate(d.dateTo,   -oldNights);
+      (d.days || []).forEach(function(day, di){
+        var dd = new Date(d.dateFrom + "T12:00:00"); dd.setDate(dd.getDate() + di);
+        day.lbl = dd.toLocaleDateString("en-US", {month:"short", day:"numeric"});
+      });
+    }
+  }
+
+  // Adjacency changed — re-sync transit routes so prev/next stitches
+  // up correctly (mirrors convertDestToDayTrip post-splice handling).
+  if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
+    try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
+  }
+  _emitTripMutation();
+}
+
 // v359.51: trip-view role popover. Modelled on picker-ui's
 // _openRoleChangePopover but operates on trip.destinations[] (post-
 // build) and routes "Day trip" through convertDestToDayTrip rather
@@ -28909,6 +29006,12 @@ function _openTripDestRolePopover(destId){
   } else if (waysideCandidate) {
     suggestedRole = "wayside";
   }
+  // v359.60.21: if dest is already 0-night (See), that IS the current
+  // state — override suggestedRole so the See radio defaults to
+  // checked + the row gets the highlight-suggestion border. Also
+  // flips the "(current)" label off the Stay row and onto See below.
+  var _isCurrentlySee = (src.nights || 0) === 0;
+  if (_isCurrentlySee) suggestedRole = "see";
 
   // Build the overlay (mirrors picker's _openRoleChangePopover).
   var existing = document.getElementById("trip-role-popover");
@@ -29075,6 +29178,45 @@ function _openTripDestRolePopover(destId){
       + '</a>')
     : '';
 
+  // v359.60.21: See row — convert overnight to a 0-night stop that
+  // stays on the trip and on the map (grey numbered pin). Distinct
+  // from Day-trip (absorbed into a hub) and Wayside (folded onto a
+  // transit route). Grey eye icon signals quieter state than the
+  // blue stay or the day-trip purple. "(current)" floats here when
+  // dest.nights === 0 on open.
+  //
+  // The subtitle is computed up front (not inlined via a ternary
+  // across `+`-continuation lines) — that pattern broke the inline
+  // script in v359.60.14 (see "fix SyntaxError in considered-pins
+  // ternary"). JS reads `+ ? 'a'` as binary +, then ?, which is a
+  // syntax error and silently kills every window.* assignment below.
+  var seeSubtitle = _isCurrentlySee
+    ? 'No overnight here — just a stop on the trip. Renders as a grey numbered pin on the map.'
+    : 'Drop the overnight. ' + src.place + ' stays on the trip + map as a 0-night stop (grey pin). Hotel bookings tied here will be cleared.';
+  var seeRow = ''
+    + '<label style="' + _sugRowStyle("see") + '">'
+    +   '<input type="radio" name="trip-role-pick" value="see"' + _sugChecked("see") + ' style="margin:0;" />'
+    +   '<div style="flex:1;">'
+    +     '<div style="font-size:13px;font-weight:600;color:#222;"><span style="color:#888;margin-right:5px;filter:grayscale(1);opacity:.75;">👁</span>See' + (_isCurrentlySee ? ' (current)' : '') + '</div>'
+    +     '<div style="font-size:11px;color:#777;margin-top:2px;line-height:1.5;">' + seeSubtitle + '</div>'
+    +   '</div>'
+    + '</label>';
+
+  // v359.60.21: Remove row — drop the destination from this trip
+  // entirely. _emitTripMutation runs _syncPickerToTrip which clears
+  // _keep on the matching requiredPlaces entry, so the place stays
+  // visible in the picker's research as an unchecked candidate (the
+  // user can re-check to bring it back). Grey ✕ icon signals
+  // destructive-but-soft (not a hard delete from research).
+  var removeRow = ''
+    + '<label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #e0e0e0;border-radius:8px;cursor:pointer;background:#fff;">'
+    +   '<input type="radio" name="trip-role-pick" value="remove" style="margin:0;" />'
+    +   '<div style="flex:1;">'
+    +     '<div style="font-size:13px;font-weight:600;color:#222;"><span style="color:#888;margin-right:5px;font-weight:700;">✖</span>Remove from trip</div>'
+    +     '<div style="font-size:11px;color:#777;margin-top:2px;line-height:1.5;">Drop ' + src.place + ' from this trip. It stays unchecked in your research so you can add it back any time. Day items and bookings on this stop will be dropped.</div>'
+    +   '</div>'
+    + '</label>';
+
   ov.innerHTML = ''
     + '<div style="background:#fff;border-radius:12px;max-width:420px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,0.18);">'
     +   '<div style="padding:18px 20px 4px;">'
@@ -29089,12 +29231,14 @@ function _openTripDestRolePopover(destId){
     +     '<label style="' + _sugRowStyle("stay") + '">'
     +       '<input type="radio" name="trip-role-pick" value="stay"' + _sugChecked("stay") + ' style="margin:0;" />'
     +       '<div style="flex:1;">'
-    +         '<div style="font-size:13px;font-weight:600;color:#222;">Overnight stay (current)</div>'
+    +         '<div style="font-size:13px;font-weight:600;color:#222;">Overnight stay' + (_isCurrentlySee ? '' : ' (current)') + '</div>'
     +         '<div style="font-size:11px;color:#777;margin-top:2px;line-height:1.5;">' + staySubtitle + '</div>'
     +       '</div>'
     +     '</label>'
     +     dayTripRow
     +     waysideRow
+    +     seeRow
+    +     removeRow
     +   '</div>'
     +   '<div style="padding:8px 20px 18px;display:flex;justify-content:flex-end;gap:8px;">'
     +     '<button id="trip-role-cancel" style="font-size:13px;font-weight:500;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Cancel</button>'
@@ -29131,8 +29275,56 @@ function _openTripDestRolePopover(destId){
       var absorbInto = absSel ? absSel.value : "next";
       close();
       convertDestToWayside(src.id, { absorbInto: absorbInto });
+    } else if (pickedIntent === "see") {
+      // v359.60.21: convert overnight → see (0-night standalone stop).
+      // If already see, no-op — the user just confirmed the current
+      // state.
+      close();
+      if (!_isCurrentlySee) convertDestToSee(src.id);
+    } else if (pickedIntent === "remove") {
+      // v359.60.21: remove dest from trip. Confirm here (not in the
+      // helper) so the role popover stays the single confirmation
+      // surface — same pattern as the day-trip / wayside heads-ups
+      // baked into their row subtitles. _syncPickerToTrip (called
+      // from _emitTripMutation inside the helper) handles unchecking
+      // in the research listings automatically.
+      close();
+      if (confirm("Remove " + src.place + " from this trip?\n\nIt will stay in your research as unchecked so you can add it back later. Day items and hotel bookings on this stop will be dropped.")) {
+        removeDestFromTrip(src.id);
+      }
+    } else if (pickedIntent === "stay" && _isCurrentlySee) {
+      // v359.60.21: reverse See → Stay. Default to 1 night; user can
+      // adjust via the +/- spinner on the destination card. Pushes
+      // every subsequent destination forward by 1 day.
+      close();
+      var newNights = 1;
+      src.nights = newNights;
+      src.dateTo = _shiftDate(src.dateFrom, newNights);
+      if (typeof makeDays === "function") {
+        src.days = makeDays(src.id, src.place, src.intent || src.place, src.dateFrom, newNights);
+      } else {
+        src.days = [];
+        for (var _n = 0; _n < newNights; _n++) {
+          var _dd = new Date(src.dateFrom + "T12:00:00"); _dd.setDate(_dd.getDate() + _n);
+          src.days.push({ id: "dy" + src.id + "_" + Date.now() + "_" + _n, lbl: _dd.toLocaleDateString("en-US", {month:"short", day:"numeric"}), note: "", items: [] });
+        }
+      }
+      var _srcIdx = trip.destinations.indexOf(src);
+      for (var _i = _srcIdx + 1; _i < trip.destinations.length; _i++) {
+        var _d = trip.destinations[_i];
+        _d.dateFrom = _shiftDate(_d.dateFrom, newNights);
+        _d.dateTo   = _shiftDate(_d.dateTo,   newNights);
+        (_d.days || []).forEach(function(day, di){
+          var _ddd = new Date(_d.dateFrom + "T12:00:00"); _ddd.setDate(_ddd.getDate() + di);
+          day.lbl = _ddd.toLocaleDateString("en-US", {month:"short", day:"numeric"});
+        });
+      }
+      if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
+        try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
+      }
+      _emitTripMutation();
     } else {
-      // "Overnight" is the current state — apply is a no-op.
+      // "Overnight" while not currently see — apply is a no-op.
       close();
     }
   };

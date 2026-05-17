@@ -2235,7 +2235,12 @@
     ));
     var _tripLinkN = (_tripBriefMeta && Array.isArray(_tripBriefMeta.links)) ? _tripBriefMeta.links.length : 0;
     var _tripLinkBadgeTV = _tripLinkN > 0 ? ' <span style="opacity:.85;font-size:10px;">(' + _tripLinkN + ')</span>' : "";
-    tripResearchBtn.innerHTML = "🔬 Research" + _tripLinkBadgeTV;
+    // v359.60.21: was "🔬 Research" — added "notes" for consistency
+    // with the picker's "🔬 Research notes" and the sibling "📋 Trip
+    // notes" button. The noun "notes" is the through-line for every
+    // writable-notes surface; without it, "Research" alone reads
+    // ambiguously (research view? research suggestions?).
+    tripResearchBtn.innerHTML = "🔬 Research notes" + _tripLinkBadgeTV;
     tripResearchBtn.title = _tripHasMeta
       ? "Planning-stage notes" + (_tripLinkN ? " and " + _tripLinkN + " link" + (_tripLinkN === 1 ? "" : "s") : "") + " — click to edit"
       : "Planning-stage notes and links — what to read, candidate places, things to figure out";
