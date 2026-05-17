@@ -5457,6 +5457,27 @@ function _buildStubTripFromPastedList(parseResult, rawText, opts) {
   activeDest = null;
   _currentTripId = "trip-" + Date.now();
   _fileHandle = null;
+  // v359.60.23: initialize _tb (the picker's in-flight brief state)
+  // so the Research-notes modal helpers can find tripMeta. Without
+  // this, _pmTripMeta returns null (it gates on `if (!_tb) return
+  // null;`) and _pmOpenTripResearchCard silently early-exits —
+  // which is why the auto-open landed the user on the bare trip
+  // view instead of the modal.
+  if (typeof _tb === "undefined" || !_tb) {
+    window._tb = _tb = {};
+  }
+  _tb.name      = name;
+  _tb.region    = parseResult.region || "";
+  _tb.placeName = parseResult.region || "";
+  _tb.tripMeta  = { notes: rawText || "", links: [] };
+  // Initialize fields the picker UI expects so it doesn't trip on
+  // re-entry. These default to the same values renderTripStep1Place
+  // would set on a fresh brief.
+  if (!_tb.interests)    _tb.interests = [];
+  if (!_tb.drivers)      _tb.drivers   = [];
+  if (!_tb.tripMode)     _tb.tripMode  = "place";
+  if (_tb.entryBuffer === undefined) _tb.entryBuffer = false;
+  if (_tb.exitBuffer  === undefined) _tb.exitBuffer  = false;
   if (typeof _tripsIndex === "undefined" || !Array.isArray(_tripsIndex)) _tripsIndex = [];
   _tripsIndex.push({
     id: _currentTripId,
