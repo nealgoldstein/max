@@ -1569,7 +1569,28 @@
         console.log(DBG, "Apply", { newEntry: newEntry, newExit: newExit, curEntry: curEntry, curExit: curExit });
         var changed = (newEntry !== curEntry) || (newExit !== curExit) || (newBuffer !== curBuffer);
         if (!changed) {
-          if (statusEl) { statusEl.style.color = "#888"; statusEl.textContent = "No change."; }
+          // v359.60.15: clicking Apply with the same values used to
+          // print a near-invisible "No change." in gray under the
+          // button — easy to miss, reads as broken. Now show a
+          // friendly green confirmation so the user knows the action
+          // was registered AND that the current value is correct.
+          if (statusEl) {
+            statusEl.style.color = "#1a8a3a";
+            statusEl.style.fontWeight = "600";
+            var parts = [];
+            if (newEntry) parts.push("arrival " + newEntry);
+            if (newExit && newExit !== newEntry) parts.push("departure " + newExit);
+            statusEl.textContent = "✓ Confirmed — " + (parts.length ? parts.join(" + ") : "(no city set)");
+            // Fade after 4s so subsequent edits don't compete with a
+            // stale confirmation message.
+            setTimeout(function(){
+              if (statusEl && statusEl.textContent.indexOf("Confirmed") === 0) {
+                statusEl.style.color = "";
+                statusEl.style.fontWeight = "";
+                statusEl.textContent = "";
+              }
+            }, 4000);
+          }
           return;
         }
         tb2._applyInFlight = true;
