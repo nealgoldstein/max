@@ -29988,8 +29988,42 @@ function _openTripWaysidePopover(route, stop, waysideName){
       + '</a>')
     : '';
 
+  // v359.60.17: build a list of OTHER transit routes the user could
+  // move this wayside onto. A route is moveable-to if it (a) isn't
+  // the current route, (b) has both endpoints in trip.destinations,
+  // and (c) is transit (subKind === "transit" or undefined — auto-
+  // generated route legs default to transit). Use trip.routes; if
+  // it's empty, fall back to consecutive trip.destinations pairs.
+  var moveTargets = [];
+  if (Array.isArray(trip.routes)) {
+    trip.routes.forEach(function(r){
+      if (!r || r.id === route.id) return;
+      if (r.subKind && r.subKind !== "transit") return;
+      var rf = trip.destinations.find(function(d){ return d.id === r.fromDestId; });
+      var rt = trip.destinations.find(function(d){ return d.id === r.toDestId; });
+      if (!rf || !rt) return;
+      moveTargets.push({ route: r, fromName: rf.place, toName: rt.place });
+    });
+  }
+  var moveSection = '';
+  if (moveTargets.length) {
+    var moveOptionsHtml = moveTargets.map(function(t, i){
+      return '<button class="trip-ws-move-target" data-idx="' + i + '" '
+        + 'style="text-align:left;padding:10px 12px;border:1px solid #e0d4ea;background:#faf7fe;'
+        + 'border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px;color:#5a3a8a;">'
+        + '&rarr; ' + t.fromName + ' &rarr; ' + t.toName
+        + '</button>';
+    }).join('');
+    moveSection = ''
+      + '<div style="padding:10px 12px;border:1px solid #e0d4ea;background:#faf7fe;border-radius:8px;">'
+      +   '<div style="font-size:13px;font-weight:600;color:#5a3a8a;margin-bottom:8px;">&#8645; Move to a different route</div>'
+      +   '<div style="font-size:11px;color:#7a5fa8;margin-bottom:8px;">Useful if ' + wsName + ' landed on the wrong leg. The night ' + absorberName + ' absorbed will shift to the new route’s destination.</div>'
+      +   '<div style="display:flex;flex-direction:column;gap:6px;">' + moveOptionsHtml + '</div>'
+      + '</div>';
+  }
+
   ov.innerHTML = ''
-    + '<div style="background:#fff;border-radius:12px;max-width:420px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,0.18);">'
+    + '<div style="background:#fff;border-radius:12px;max-width:420px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,0.18);max-height:90vh;overflow-y:auto;">'
     +   '<div style="padding:18px 20px 4px;">'
     +     '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">Wayside</div>'
     +     '<div style="font-size:17px;font-weight:700;color:#111;margin-top:4px;">' + wsName + '</div>'
@@ -30001,6 +30035,7 @@ function _openTripWaysidePopover(route, stop, waysideName){
     +       '<div style="font-size:13px;font-weight:600;color:#1a5fa8;">&#9881; Make ' + wsName + ' an overnight stop</div>'
     +       '<div style="font-size:11px;color:#5a7a99;margin-top:3px;">Promote back to its own destination between ' + fromName + ' and ' + toName + ' &mdash; ' + srcNights + ' night' + (srcNights === 1 ? '' : 's') + ' shifts back from ' + absorberName + '.</div>'
     +     '</button>'
+    +     moveSection
     +     '<button id="trip-ws-remove" style="text-align:left;padding:12px;border:1px solid #e8d0a8;background:#fff7eb;border-radius:8px;cursor:pointer;font-family:inherit;">'
     +       '<div style="font-size:13px;font-weight:600;color:#c97a1a;">&times; Remove from route</div>'
     +       '<div style="font-size:11px;color:#9b6017;margin-top:3px;">Drop ' + wsName + ' off the ' + fromName + ' &rarr; ' + toName + ' route. ' + absorberName + ' keeps the night it absorbed &mdash; edit it separately if you want to drop a night.</div>'
@@ -30037,6 +30072,25 @@ function _openTripWaysidePopover(route, stop, waysideName){
       console.warn("[Max] removeWaysideFromRoute not defined");
     }
   };
+
+  // v359.60.17: wire the Move-to-route buttons.
+  var moveBtns = ov.querySelectorAll(".trip-ws-move-target");
+  moveBtns.forEach(function(btn){
+    btn.onclick = function(){
+      var idx = parseInt(btn.getAttribute("data-idx"), 10);
+      var target = moveTargets[idx];
+      close();
+      if (!target || !target.route) {
+        console.warn("[Max] move target not found at idx", idx);
+        return;
+      }
+      if (typeof moveWaysideToRoute === "function") {
+        moveWaysideToRoute(route, stop, target.route);
+      } else {
+        console.warn("[Max] moveWaysideToRoute not defined");
+      }
+    };
+  });
 }
 
 // v359.54.5: reverse of convertDestToWayside (Model 2). Splits the
@@ -30175,6 +30229,109 @@ function ungroupWaysideByRouteStop(route, stop, opts){
     _showDayTripToast(
       "<strong>" + newDest.place + "</strong> is now its own destination",
       function(){ console.warn("[Max] ungroupWaysideByRouteStop: undo not yet wired"); }
+    );
+  }
+}
+
+// v359.60.17: move a wayside from one transit route to another.
+// Useful when an LLM-suggested or auto-clustered wayside landed on
+// the wrong leg (e.g. Diamond Beach absorbed onto Stokksnes →
+// Godafoss when it's actually between Vík and Höfn).
+//
+// Mechanics:
+//   • Restore the night on the OLD absorber (the dest on the source
+//     route that took the wayside's nights at conversion time).
+//   • Remove the stop from the source route's planItems.
+//   • Pick a new absorber on the target route — default is the
+//     toDest, mirroring convertDestToWayside's "sleep at next" rule.
+//     Caller can pass opts.absorbInto = "prev" to flip it.
+//   • Subtract the wayside's sourceNights from the new absorber.
+//   • Append the stop to the target route's planItems, with
+//     legacy.absorberDestId updated to the new absorber.
+//   • Recompute all dest dateFrom/dateTo from the trip start.
+//
+// Note: this does NOT touch preservedFirstLeg / preservedSecondLeg
+// on stop.legacy — those snapshot the routes around the wayside's
+// ORIGINAL home, which the user might still want to "promote back
+// to" later. The user-facing semantic is "I'm putting this stop on a
+// different segment", not "I'm un-converting".
+function moveWaysideToRoute(srcRoute, stop, targetRoute, opts){
+  opts = opts || {};
+  if (!srcRoute || !stop || !targetRoute || !trip) return;
+  if (srcRoute === targetRoute || srcRoute.id === targetRoute.id) {
+    console.warn("[Max] moveWaysideToRoute: src and target are the same route");
+    return;
+  }
+  var stopIdx = (srcRoute.planItems || []).indexOf(stop);
+  if (stopIdx < 0) {
+    stopIdx = (srcRoute.planItems || []).findIndex(function(s){ return s && s.id === stop.id; });
+  }
+  if (stopIdx < 0) {
+    console.warn("[Max] moveWaysideToRoute: stop not found on source route");
+    return;
+  }
+
+  var srcNights = (stop.legacy && stop.legacy.sourceNights) || 1;
+
+  // Restore the night on the old absorber.
+  var oldAbsorberId = stop.legacy && stop.legacy.absorberDestId;
+  var oldAbsorber = oldAbsorberId ? trip.destinations.find(function(d){ return d.id === oldAbsorberId; }) : null;
+  if (oldAbsorber) {
+    oldAbsorber.nights = Math.max(1, (oldAbsorber.nights || srcNights) - srcNights);
+  }
+
+  // Remove from source route.
+  srcRoute.planItems.splice(stopIdx, 1);
+
+  // Pick new absorber on the target route.
+  var newAbsorberId = (opts.absorbInto === "prev") ? targetRoute.fromDestId : targetRoute.toDestId;
+  var newAbsorber = trip.destinations.find(function(d){ return d.id === newAbsorberId; });
+  if (!newAbsorber) {
+    console.warn("[Max] moveWaysideToRoute: target route has no resolvable absorber dest");
+    return;
+  }
+  newAbsorber.nights = (newAbsorber.nights || 0) + srcNights;
+
+  // Update stop's legacy.absorberDestId so a future promote-back
+  // refunds the night to the correct hub.
+  if (!stop.legacy) stop.legacy = {};
+  stop.legacy.absorberDestId = newAbsorber.id;
+
+  // Append to the target route.
+  if (!Array.isArray(targetRoute.planItems)) targetRoute.planItems = [];
+  var alreadyOnTarget = targetRoute.planItems.some(function(pi){
+    return pi && pi.type === "stop" && pi.placeId === stop.placeId;
+  });
+  if (!alreadyOnTarget) targetRoute.planItems.push(stop);
+
+  // Recompute all dates from trip start.
+  var startDate = trip.destinations[0] && trip.destinations[0].dateFrom;
+  if (startDate) {
+    var cur = new Date(startDate + "T12:00:00");
+    trip.destinations.forEach(function(d){
+      d.dateFrom = cur.toISOString().slice(0, 10);
+      var nx = new Date(cur); nx.setDate(nx.getDate() + (d.nights || 0));
+      d.dateTo = nx.toISOString().slice(0, 10);
+      if (typeof makeDays === "function") {
+        d.days = makeDays(d.id, d.place, d.place, d.dateFrom, d.nights || 0);
+      }
+      cur = nx;
+    });
+  }
+
+  if (typeof _reEvaluateOverBudget === "function") _reEvaluateOverBudget();
+  _emitTripMutation();
+
+  var place = (trip.places && trip.places[stop.placeId]) || null;
+  var wsName = (place && place.name) || stop.placeId || "Wayside";
+  var fromDest = trip.destinations.find(function(d){ return d.id === targetRoute.fromDestId; });
+  var toDest   = trip.destinations.find(function(d){ return d.id === targetRoute.toDestId; });
+  var fromName = (fromDest && fromDest.place) || "?";
+  var toName   = (toDest   && toDest.place)   || "?";
+  if (!opts.silent && typeof _showDayTripToast === "function") {
+    _showDayTripToast(
+      "<strong>" + wsName + "</strong> moved to the " + fromName + " &rarr; " + toName + " route",
+      function(){ console.warn("[Max] moveWaysideToRoute: undo not yet wired"); }
     );
   }
 }
