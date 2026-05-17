@@ -734,14 +734,23 @@
     activeRoutes.forEach(function(r){
       var eps = r.endpoints || r.requiredPlaces || [];
       var matching = eps.map(function(p){ return byName[_normPlaceName(p.place)]; }).filter(Boolean);
-      if (matching.length >= 2) {
+      // v359.60.20: skip degenerate blocks where both endpoints resolve
+      // to the SAME kept candidate. This happens for round-trip routes
+      // like "Drive the complete Ring Road" with endpoints
+      // [Reykjavik, Reykjavik] — the "block" has nothing to bind and
+      // only distorts ordering / produces misleading reasoning
+      // ("I'm going Reykjavik → Reykjavik since you're arriving near
+      // Reykjavik"). The round-trip closure is already handled by
+      // entry+exit being set to the same gateway elsewhere.
+      var uniqueCands = matching.filter(function(c, i){ return matching.indexOf(c) === i; });
+      if (uniqueCands.length >= 2) {
         routeBlocks.push({
           routeName: r.name,
           direction: r.direction || "either",
-          candidates: matching,
+          candidates: uniqueCands,
           endpointsOrder: eps.map(function(p){ return _normPlaceName(p.place); })
         });
-        reasoning.push("Zermatt and St. Moritz belong to the same route (" + r.name + "), so they'll be adjacent in the itinerary.".replace('Zermatt', matching[0].place).replace('St. Moritz', matching[1].place).replace("Zermatt and " + matching[1].place, matching[0].place + " and " + matching[1].place));
+        reasoning.push(uniqueCands[0].place + " and " + uniqueCands[1].place + " belong to the same route (" + r.name + "), so they'll be adjacent in the itinerary.");
       }
     });
 
@@ -802,7 +811,26 @@
     function matchesName(c, nN){
       if (!c || !nN) return false;
       var cN = _normPlaceName(c.place);
-      return cN.indexOf(nN) >= 0 || nN.indexOf(cN) >= 0;
+      if (!cN) return false;
+      // v359.60.20: word-boundary match. Raw indexOf made "vik" match
+      // "reykjavik" because "vik" is a substring of "reykjavik" — and
+      // that triggered the "Starting in Vík since that's where you're
+      // arriving" misfire on Iceland trips where entry=Reykjavik.
+      // We want "York" to match "New York" but not "yore" to match
+      // "yoreshire". The split-on-whitespace test below holds.
+      if (cN === nN) return true;
+      // Tokenize both names and look for any shared whole word.
+      function tokens(s){
+        return String(s||"").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+      }
+      var cTok = tokens(cN);
+      var nTok = tokens(nN);
+      for (var i = 0; i < cTok.length; i++) {
+        for (var j = 0; j < nTok.length; j++) {
+          if (cTok[i] === nTok[j] && cTok[i].length >= 3) return true;
+        }
+      }
+      return false;
     }
 
     // Find entry candidate
@@ -1213,6 +1241,46 @@
       } else {
         reordered = nnOrder;
       }
+
+      // v359.60.20: 2-opt cleanup pass. Both NN and angular-sweep can
+      // leave tangles — e.g. an Iceland trip going Reykjavik → south
+      // coast → SW tip → NW Westfjords leaves a long Blue Lagoon →
+      // Ísafjörður leg that crosses the country, then back across to
+      // Borgarnes at the end (visible "X" shape on the map). 2-opt
+      // walks every pair of edges (i, j) in the ordering and, if
+      // reversing the slice between them shortens the total path,
+      // commits the swap. Repeat until no improvement. O(n²) per
+      // iteration with n ≤ ~30 — trivial cost, big payoff. Sequences
+      // are treated as units so route blocks stay glued.
+      reordered = (function _twoOpt(seqList){
+        if (seqList.length < 4) return seqList;
+        var arr = seqList.slice();
+        function curLen(){
+          return _totalPathLen(arr, lastEntryCoord, firstExitCoord);
+        }
+        var bestLen = curLen();
+        var improved = true;
+        var iters = 0;
+        while (improved && iters < 50) {
+          improved = false;
+          iters++;
+          for (var i = 0; i < arr.length - 1; i++) {
+            for (var j = i + 1; j < arr.length; j++) {
+              // Reverse the slice [i..j].
+              var trial = arr.slice(0, i)
+                .concat(arr.slice(i, j+1).reverse())
+                .concat(arr.slice(j+1));
+              var trialLen = _totalPathLen(trial, lastEntryCoord, firstExitCoord);
+              if (trialLen < bestLen - 1e-9) {
+                arr = trial;
+                bestLen = trialLen;
+                improved = true;
+              }
+            }
+          }
+        }
+        return arr;
+      })(reordered);
       // Reassemble
       var out = [];
       entrySeq.items.forEach(function(c){ out.push(c); });

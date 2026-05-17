@@ -1744,6 +1744,46 @@
       if (pickedCoord) current = pickedCoord;
     }
 
+    // v359.60.20: 2-opt cleanup. NN gets stuck in local minima where
+    // one long backtrack creates an "X" — e.g. Reykjavik → south → SW →
+    // NW (long jump across country) → ... → back to W. 2-opt walks
+    // pairs of indices (i, j) and reverses the slice between them if
+    // the result is shorter. Repeat until stable. O(n²) per iteration,
+    // n ≤ ~30 — negligible cost.
+    function pathLenWithAnchors(middleArr){
+      var total = 0;
+      var prev = entryCoord;
+      for (var k = 0; k < middleArr.length; k++) {
+        var pc = getCoord(middleArr[k]);
+        if (prev && pc) total += Math.sqrt(distSq(prev, pc));
+        if (pc) prev = pc;
+      }
+      if (prev && exitCoord) total += Math.sqrt(distSq(prev, exitCoord));
+      return total;
+    }
+    var bestMiddle = nnMiddle.slice();
+    var bestLen = pathLenWithAnchors(bestMiddle);
+    var improved = true;
+    var iters = 0;
+    while (improved && iters < 50) {
+      improved = false;
+      iters++;
+      for (var ai = 0; ai < bestMiddle.length - 1; ai++) {
+        for (var aj = ai + 1; aj < bestMiddle.length; aj++) {
+          var trial = bestMiddle.slice(0, ai)
+            .concat(bestMiddle.slice(ai, aj+1).reverse())
+            .concat(bestMiddle.slice(aj+1));
+          var trialLen = pathLenWithAnchors(trial);
+          if (trialLen < bestLen - 1e-9) {
+            bestMiddle = trial;
+            bestLen = trialLen;
+            improved = true;
+          }
+        }
+      }
+    }
+    nnMiddle = bestMiddle;
+
     var newOrder = [entry].concat(nnMiddle).concat([exit]);
     // Did the order actually change?
     var changed = false;
