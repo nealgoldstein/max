@@ -30579,12 +30579,39 @@ function _openTripStopPopover(ctx) {
   if (!_addToInitialOpts) {
     _addToInitialOpts = '<option value="">(no existing day trips yet)</option>';
   }
+  // v359.60.23: when the current stop is on a multi-stop day-trip
+  // route, list the other stops in the subtitle so the user can
+  // see what they're already combined with. The Add-to dropdown
+  // excludes the current route (no self-combine), so without this
+  // hint the user wonders why "Þingvellir from Selfoss" isn't
+  // listed — when actually Geysir is already on the same route as
+  // Þingvellir, which is why it's excluded.
+  var _dtCurrentSubtitle;
+  if (currentRole === "dayTrip") {
+    var _hubLbl = (ctx.hubDest && ctx.hubDest.place) || "?";
+    var _otherStops = (ctx.route && Array.isArray(ctx.route.planItems))
+      ? ctx.route.planItems.filter(function(s){
+          return s && s.type === "stop"
+            && s.id !== ctx.stop.id
+            && s.placeId !== ctx.stop.placeId;
+        })
+      : [];
+    if (_otherStops.length) {
+      var _otherNames = _otherStops.map(function(s){
+        var p = trip.places && trip.places[s.placeId];
+        return (p && p.name) || s.placeId || "?";
+      }).join(", ");
+      _dtCurrentSubtitle = "From " + _hubLbl + ", currently combined with: <strong>" + _otherNames + "</strong>. Pick another hub or another day trip below to move it.";
+    } else {
+      _dtCurrentSubtitle = "From " + _hubLbl + ", on its own. Pick another hub to move it, or combine with an existing day trip below.";
+    }
+  }
   var dayTripRow = hubOpts.length
     ? _row(
         "dayTrip",
         "Day trip",
         currentRole === "dayTrip"
-          ? "From " + ((ctx.hubDest && ctx.hubDest.place) || "?") + ". Pick another hub to move it, or combine with an existing day trip from that hub."
+          ? _dtCurrentSubtitle
           : "Visit while based at one of your overnight hubs. Start a new day trip, or combine with an existing one (e.g. Golden Circle).",
         '<div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;">'
         // ── Field 1: From ───────────────────────────────────────
@@ -32309,6 +32336,81 @@ function addDestToExistingDayTripRoute(destId, routeId, opts) {
       function(){ console.warn("[Max] addDestToExistingDayTripRoute: undo not wired"); }
     );
   }
+}
+
+// v359.60.23: drop any place that appears on more than one route's
+// planItems[]. Keeps the FIRST occurrence (in trip.routes order)
+// and removes the rest. Walks all routes — day-trip stops + wayside
+// stops alike. Returns the number of duplicates removed.
+//
+// Why this exists: bug surfaced where a single place (Geysir) ended
+// up on day-trip routes from BOTH its proper hub (Selfoss) AND a
+// distant hub (Akureyri). Root cause not yet pinned — possibly a
+// stale ctx.route in the popover or a missed early-return in a
+// conversion helper. Until the root cause is fixed, this self-heal
+// keeps the data clean and logs every dedupe so we can see if it
+// keeps recurring (which would mean the bug is still live).
+//
+// Also cleans up empty routes: if removing the duplicate stop
+// leaves a route with no stops, drop the route and clear its
+// reference from the hub's days[].planItems / days[].refs.
+function _dedupeStopsAcrossRoutes() {
+  if (!trip || !Array.isArray(trip.routes)) return 0;
+  var firstSeen = {}; // placeId → { route, stop, routeIdx }
+  var removed = 0;
+  var routes = trip.routes;
+  for (var ri = 0; ri < routes.length; ri++) {
+    var route = routes[ri];
+    if (!route || !Array.isArray(route.planItems)) continue;
+    // Walk planItems backward so splice indices stay stable.
+    for (var pi = route.planItems.length - 1; pi >= 0; pi--) {
+      var item = route.planItems[pi];
+      if (!item || item.type !== "stop" || !item.placeId) continue;
+      if (!firstSeen[item.placeId]) {
+        firstSeen[item.placeId] = { route: route, stop: item, routeIdx: ri };
+        continue;
+      }
+      // Duplicate — remove this occurrence (which came later in
+      // trip.routes order, since we iterate forward across routes).
+      // But we iterate backward within each route, so we may see
+      // duplicates within the same route too; same logic — drop.
+      var placeName = (trip.places && trip.places[item.placeId] && trip.places[item.placeId].name) || item.placeId;
+      var keptHubId = firstSeen[item.placeId].route.fromDestId;
+      var keptHubName = (trip.destinations.find(function(d){ return d.id === keptHubId; }) || {}).place || "?";
+      var thisHubId = route.fromDestId;
+      var thisHubName = (trip.destinations.find(function(d){ return d.id === thisHubId; }) || {}).place || "?";
+      console.warn(
+        "[Max self-heal] '" + placeName + "' was duplicated on routes from '" + keptHubName +
+        "' and '" + thisHubName + "'. Removing the duplicate; keeping the one on " + keptHubName + "."
+      );
+      route.planItems.splice(pi, 1);
+      removed++;
+    }
+  }
+  // Pass 2: drop any route that ended up with zero stops AND clean
+  // up the hub's day references to that route.
+  for (var ri2 = routes.length - 1; ri2 >= 0; ri2--) {
+    var r2 = routes[ri2];
+    if (!r2) continue;
+    var hasStops = (r2.planItems || []).some(function(p){ return p && p.type === "stop"; });
+    if (hasStops) continue;
+    // Only remove DAY-TRIP routes that ended up empty. Transit
+    // routes can legitimately have no stops (they're just the leg
+    // between two hubs).
+    var isDT = (typeof MaxMigration !== "undefined" && MaxMigration.isDayTripRoute)
+      ? MaxMigration.isDayTripRoute(r2)
+      : (r2.subKind === "dayTrip" || r2.kind === "dayTrip");
+    if (!isDT) continue;
+    var hubDest = trip.destinations.find(function(d){ return d.id === r2.fromDestId; });
+    if (hubDest) {
+      (hubDest.days || []).forEach(function(day){
+        if (Array.isArray(day.planItems)) day.planItems = day.planItems.filter(function(pi){ return !(pi && pi.type === "route" && pi.routeId === r2.id); });
+        if (Array.isArray(day.refs))      day.refs      = day.refs.filter(function(ref){ return !(ref && ref.routeId === r2.id); });
+      });
+    }
+    routes.splice(ri2, 1);
+  }
+  return removed;
 }
 
 // v359.60.23: convert a destination to a wayside on a SPECIFIC
@@ -34196,6 +34298,14 @@ function drawTripMode(){
     if (window.MaxTripUI && typeof window.MaxTripUI.geoHealTripOrder === "function") {
       _movedTotal += window.MaxTripUI.geoHealTripOrder(trip);
     }
+    // v359.60.23: self-heal duplicate stops across routes. If a place
+    // ends up on more than one route's planItems (different day-trip
+    // routes, or a day-trip and a wayside, etc.), keep the first
+    // occurrence and remove the rest. Logs every dedupe so we can
+    // see if/when this is happening organically (Neal saw Geysir
+    // on day-trip routes from both Selfoss and Akureyri — should
+    // never happen).
+    _movedTotal += _dedupeStopsAcrossRoutes();
     if (_movedTotal > 0 && typeof autoSave === "function") {
       try { autoSave(); } catch(_) {}
     }
