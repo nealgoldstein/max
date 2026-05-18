@@ -39233,13 +39233,29 @@ function _renderBatchPreview(container, bookings) {
       titleBits.push('<span style="background:#f0c060;color:#5a3a0a;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;letter-spacing:.04em;text-transform:uppercase;">cancel</span>');
     }
 
-    // Score destinations + auto-route.
+    // v359.60.39: score destinations + auto-route. If the standard
+    // scorer (token match + date overlap) returns 0 for every
+    // destination, fall through to date-proximity — the destination
+    // whose stay window is closest in time to the booking's check-in.
+    // Previously the no-match fallback was dest[0], which dumped
+    // every unmatched booking on the first destination of the trip
+    // (Reykjavík for Iceland trips). Now Middalskot Cottages at
+    // Sep 20-22 lands at the destination whose dates are closest
+    // to Sep 20, not necessarily dest[0].
     var bestDestId = null;
     if (!b.isCancellation && typeof _scoreDestMatch === "function") {
       var scores = allDests.map(function(d){ return { id: d.id, score: _scoreDestMatch(b, d) }; });
       scores.sort(function(a, c){ return c.score - a.score; });
-      if (scores.length && scores[0].score > 0) bestDestId = scores[0].id;
-      else if (scores.length) bestDestId = scores[0].id; // best-effort fallback
+      if (scores.length && scores[0].score > 0) {
+        bestDestId = scores[0].id;
+      } else if (scores.length && typeof _proximityDestScore === "function") {
+        // All zero — pick by date proximity instead.
+        var withProx = allDests.map(function(d){ return { id: d.id, prox: _proximityDestScore(b, d) }; });
+        withProx.sort(function(a, c){ return a.prox - c.prox; });
+        bestDestId = withProx[0] && withProx[0].id;
+      } else if (scores.length) {
+        bestDestId = scores[0].id;
+      }
     }
     b._destId = bestDestId || (allDests[0] && allDests[0].id);
 
@@ -40183,18 +40199,26 @@ function _normalizeBookingExtraction(p) {
 function _scoreDestMatch(p, dest) {
   if (!dest) return 0;
   var score = 0;
+  // v359.60.39: diacritic-aware normalization so "Myvatn" (booking
+  // address) matches "Mývatn" (destination place). Previous version
+  // lowercased but didn't strip diacritics, so any address that
+  // dropped the accent didn't token-match.
+  function _norm(s) {
+    return String(s||"")
+      .toLowerCase()
+      .normalize("NFD").replace(/[̀-ͯ]/g, "");
+  }
   // Place match — token-by-token substring. We tokenize the booking's
   // address (and from/to for transport) to catch "340 Stykkishólmur,
   // Iceland" matching dest.place "Stykkishólmur".
-  var bookingPlaceText = [p.address, p.from, p.to, p.name]
+  var bookingPlaceText = _norm([p.address, p.from, p.to, p.name]
     .filter(function(s){ return s; })
-    .join(" ")
-    .toLowerCase();
-  var destPlaceText = ((dest.place || "") + " " + (dest.label || "")).toLowerCase();
+    .join(" "));
+  var destPlaceText = _norm((dest.place || "") + " " + (dest.label || ""));
   if (bookingPlaceText && destPlaceText) {
     // Tokenize on non-alphanumeric, keep tokens >= 3 chars (skip "in",
     // "at", country codes that'd give too many false positives).
-    var tokens = bookingPlaceText.split(/[^a-záéíóúýðþæöA-ZÁÉÍÓÚÝÐÞÆÖ]+/i).filter(function(t){ return t.length >= 3; });
+    var tokens = bookingPlaceText.split(/[^a-z0-9]+/i).filter(function(t){ return t.length >= 3; });
     var matched = false;
     for (var i = 0; i < tokens.length; i++) {
       if (destPlaceText.indexOf(tokens[i]) >= 0) { matched = true; break; }
@@ -40214,6 +40238,27 @@ function _scoreDestMatch(p, dest) {
   if (score === 2) score++; // place AND date match → tiebreaker boost
   return score;
 }
+
+// v359.60.39: date-proximity score for routing fallback. When
+// _scoreDestMatch returns 0 for every destination (booking address
+// isn't any dest's name, dates don't overlap any dest's range), we
+// still want to pick the GEOGRAPHICALLY/TEMPORALLY closest destination
+// rather than blindly defaulting to dest[0]. Returns a smaller value
+// for "closer" destinations (minimum days between booking depDate
+// and the dest's nearest stay date). Falls back to Infinity when
+// the booking has no date.
+function _proximityDestScore(p, dest) {
+  if (!dest || !dest.dateFrom) return Infinity;
+  var bd = p.depDate || p.arrDate || null;
+  if (!bd) return Infinity;
+  var bdMs = new Date(bd + "T12:00:00").getTime();
+  var dfMs = new Date(dest.dateFrom + "T12:00:00").getTime();
+  var dtMs = new Date((dest.dateTo || dest.dateFrom) + "T12:00:00").getTime();
+  if (isNaN(bdMs) || isNaN(dfMs)) return Infinity;
+  if (bdMs >= dfMs && bdMs <= dtMs) return 0; // inside the range
+  return Math.min(Math.abs(bdMs - dfMs), Math.abs(bdMs - dtMs)) / 86400000;
+}
+if (typeof globalThis !== "undefined") globalThis._proximityDestScore = _proximityDestScore;
 
 // Preview modal — editable form keyed by detected type. User can
 // override the type via a dropdown if the LLM guessed wrong.
