@@ -30662,7 +30662,13 @@ function _openTripStopPopover(ctx) {
       )
     : '';
 
-  var waysideRow = transitRoutes.length
+  // v359.60.23: render the Wayside row if there's any route to offer —
+  // either the synthetic natural prev→next (for a destination flanked
+  // by two other dests) or any other transit route. Previous check
+  // only counted transitRoutes, which silently hid the row for
+  // destinations whose only valid option was the natural one.
+  var _waysideHasOptions = !!(transitRoutes.length || naturalRouteOpt);
+  var waysideRow = _waysideHasOptions
     ? _row(
         "wayside",
         "Wayside (along the way)",
