@@ -30750,6 +30750,14 @@ function _applyStopRoleChange(ctx, currentRole, selectedRole, opts) {
 
   // Same role + same sub-target = no-op.
   if (currentRole === selectedRole) {
+    // v359.60.23: "Add to" an existing day-trip route wins over the
+    // hub picker. moveDayTripStopToRoute appends to that specific
+    // route (and removes the source route if it becomes empty);
+    // moveDayTripToHub is the new-route-on-different-hub path used
+    // only when the user kept "New day trip" + changed the hub.
+    if (currentRole === "dayTrip" && opts.dtRouteId && opts.dtRouteId !== ctx.route.id) {
+      return moveDayTripStopToRoute(ctx.hubDest, ctx.route, ctx.stop, opts.dtRouteId);
+    }
     if (currentRole === "dayTrip" && opts.hubId && opts.hubId !== ctx.hubDest.id) {
       return moveDayTripToHub(ctx.hubDest, ctx.route, ctx.stop, opts.hubId);
     }
@@ -32523,6 +32531,115 @@ function moveDayTripToHub(oldHubDest, route, stop, newHubDestId, opts){
   if (!opts.silent && typeof _showDayTripToast === "function") {
     _showDayTripToast("<strong>" + dtName + "</strong> moved to a day trip from <strong>" + newHub.place + "</strong>",
       function(){ console.warn("[Max] moveDayTripToHub: undo not wired"); });
+  }
+}
+
+// v359.60.23: move a day-trip stop to a DIFFERENT existing
+// day-trip route. Removes from the source route (cleaning up the
+// route if empty), appends to the target route, transfers nights
+// between hubs if they differ. Distinct from moveDayTripToHub
+// (which always creates a new route on the new hub) — this one
+// reuses an existing route. Used when the user picks "Add to" an
+// existing day trip from the unified popover while currently on a
+// day-trip pin.
+function moveDayTripStopToRoute(oldHubDest, oldRoute, stop, targetRouteId, opts) {
+  opts = opts || {};
+  if (!oldHubDest || !oldRoute || !stop || !targetRouteId || !trip) return;
+  var targetRoute = (trip.routes || []).find(function(r){ return r && r.id === targetRouteId; });
+  if (!targetRoute) {
+    console.warn("[Max] moveDayTripStopToRoute: target route not found", targetRouteId);
+    return;
+  }
+  if (oldRoute.id === targetRoute.id) return; // no-op
+  var newHubDest = trip.destinations.find(function(d){ return d.id === targetRoute.fromDestId; });
+  if (!newHubDest) {
+    console.warn("[Max] moveDayTripStopToRoute: target hub not found");
+    return;
+  }
+
+  var stopIdx = (oldRoute.planItems || []).indexOf(stop);
+  if (stopIdx < 0) stopIdx = (oldRoute.planItems || []).findIndex(function(s){ return s && s.id === stop.id; });
+  if (stopIdx < 0) return;
+
+  var place = (trip.places && trip.places[stop.placeId]) || null;
+  var dtName = (place && place.name) || stop.placeId || "Day trip";
+  var srcNights = (stop.legacy && stop.legacy.sourceNights) || 0;
+
+  // 1. Remove from old route + cleanup empty route.
+  oldRoute.planItems.splice(stopIdx, 1);
+  var hasStopsLeft = (oldRoute.planItems || []).some(function(p){ return p && p.type === "stop"; });
+  if (!hasStopsLeft) {
+    var rIdx = (trip.routes || []).indexOf(oldRoute);
+    if (rIdx >= 0) trip.routes.splice(rIdx, 1);
+    (oldHubDest.days || []).forEach(function(day){
+      if (Array.isArray(day.planItems)) day.planItems = day.planItems.filter(function(pi){ return !(pi && pi.type === "route" && pi.routeId === oldRoute.id); });
+      if (Array.isArray(day.refs))      day.refs      = day.refs.filter(function(ref){ return !(ref && ref.routeId === oldRoute.id); });
+    });
+  }
+
+  // 2. Transfer nights between hubs if different.
+  if (srcNights > 0 && oldHubDest.id !== newHubDest.id) {
+    oldHubDest.nights = Math.max(0, (oldHubDest.nights || 0) - srcNights);
+    newHubDest.nights = (newHubDest.nights || 0) + srcNights;
+    var startDate = trip.destinations[0] && trip.destinations[0].dateFrom;
+    if (startDate) {
+      var cur = new Date(startDate + "T12:00:00");
+      trip.destinations.forEach(function(d){
+        d.dateFrom = cur.toISOString().slice(0, 10);
+        var nx = new Date(cur); nx.setDate(nx.getDate() + (d.nights || 0));
+        d.dateTo = nx.toISOString().slice(0, 10);
+        if (typeof makeDays === "function" && d.id && d.place) {
+          d.days = makeDays(d.id, d.place, d.intent || d.place, d.dateFrom, d.nights || 0);
+        }
+        cur = nx;
+      });
+    }
+  }
+
+  // 3. Append to target route, dedup by placeId, sort by distance.
+  if (!Array.isArray(targetRoute.planItems)) targetRoute.planItems = [];
+  var alreadyOnRoute = targetRoute.planItems.some(function(pi){ return pi && pi.type === "stop" && pi.placeId === stop.placeId; });
+  if (!alreadyOnRoute) {
+    var newStopId = "pi-stop-" + targetRoute.id + "-" + stop.placeId;
+    var newStop = {
+      id:             newStopId,
+      type:           "stop",
+      state:          "scheduled",
+      placeId:        stop.placeId,
+      priority:       stop.priority || "iconic",
+      recommendedMin: stop.recommendedMin || null,
+      notes:          stop.notes || "",
+      source:         "moveDayTripStopToRoute",
+      legacy: {
+        sourceNights:    srcNights,
+        absorbedFromHub: newHubDest.place,
+        distKm:          null,
+        attachedEvents:  (stop.legacy && stop.legacy.attachedEvents) || []
+      }
+    };
+    targetRoute.planItems.push(newStop);
+    // Sort stops by distance from new hub.
+    if (typeof newHubDest.lat === "number" && typeof newHubDest.lng === "number"
+        && typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.haversineKm === "function") {
+      var nonStops = targetRoute.planItems.filter(function(pi){ return !pi || pi.type !== "stop"; });
+      var stops    = targetRoute.planItems.filter(function(pi){ return pi && pi.type === "stop"; });
+      stops.sort(function(a, b){
+        var aP = trip.places && trip.places[a.placeId];
+        var bP = trip.places && trip.places[b.placeId];
+        var aD = (aP && typeof aP.lat === "number") ? MaxEngineTrip.haversineKm(newHubDest.lat, newHubDest.lng, aP.lat, aP.lng) : Infinity;
+        var bD = (bP && typeof bP.lat === "number") ? MaxEngineTrip.haversineKm(newHubDest.lat, newHubDest.lng, bP.lat, bP.lng) : Infinity;
+        return aD - bD;
+      });
+      targetRoute.planItems = nonStops.concat(stops);
+    }
+  }
+
+  _emitTripMutation();
+  if (!opts.silent && typeof _showDayTripToast === "function") {
+    _showDayTripToast(
+      "<strong>" + dtName + "</strong> moved to the day trip from <strong>" + newHubDest.place + "</strong>",
+      function(){ console.warn("[Max] moveDayTripStopToRoute: undo not wired"); }
+    );
   }
 }
 
