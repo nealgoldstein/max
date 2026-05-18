@@ -27559,7 +27559,23 @@ function updateMainMap(){
           iconSize:[dtSize,dtSize], iconAnchor:[dtSize/2,dtSize/2], popupAnchor:[0,-dtSize/2]});
         try {
           var dtMarker = L.marker(dtCtr, {icon:dtIcon}).addTo(_mainMap);
-          dtMarker.bindTooltip(dtName + " · day trip from " + (hubDest.place || ""),
+          // v359.60.33: tooltip reads as part of the loop when the
+          // day-trip route has more than one stop. Single-stop:
+          //   "Diamond Beach · day trip from Skaftafell"
+          // Multi-stop:
+          //   "Diamond Beach · stop on the Skaftafell loop (with Fjallsárlón, Jökulsárlón)"
+          // Loop order comes straight from dtStops (already sorted by
+          // hub distance at render time), with the current stop dropped
+          // from the "with" list.
+          var _otherStopNames = dtStops
+            .filter(function(o){ return o && o.stop && o.stop.id !== stop.id; })
+            .map(function(o){ return o.dtName; })
+            .filter(Boolean);
+          var _hubLbl = hubDest.place || "";
+          var _tipText = (_otherStopNames.length > 0)
+            ? (dtName + " · stop on the " + _hubLbl + " loop (with " + _otherStopNames.join(", ") + ")")
+            : (dtName + " · day trip from " + _hubLbl);
+          dtMarker.bindTooltip(_tipText,
             {permanent:false, direction:"top", offset:[0,-dtSize/2-2], className:"main-map-tooltip"});
           // v359.52.2: pass the route + stop refs to the popover so
           // the writer (ungroupDayTripByRouteStop, also new in v2)
