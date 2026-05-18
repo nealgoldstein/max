@@ -26582,7 +26582,19 @@ function updateMainMap(){
     var pinGroups = [];
     var lastIdx = trip.destinations.length - 1;
     trip.destinations.forEach(function(dest, i){
-      var c = getCityCenter(dest.place);
+      // v359.60.24: prefer dest.lat/lng (set when the destination was
+      // built or refined) over getCityCenter(dest.place). getCityCenter
+      // reads from _generatedCityData[place].cityCenter, which can be
+      // stale or hold a different geocode than the canonical dest
+      // coords — the day-trip / wayside passes already prefer
+      // dest.lat/lng with a getCityCenter fallback, and the numbered
+      // destination pin needs to use the same resolution order or it
+      // anchors in the wrong spot (e.g. Selfoss numbered pin north of
+      // town while the day-trip triangle correctly converges on it).
+      var c = (typeof dest.lat === "number" && typeof dest.lng === "number"
+              && isFinite(dest.lat) && isFinite(dest.lng))
+        ? [dest.lat, dest.lng]
+        : getCityCenter(dest.place);
       if(!c) return;
       bounds.push(c);
       var key = (typeof _normPlaceName === "function") ? _normPlaceName(dest.place) : (dest.place||"").toLowerCase();
