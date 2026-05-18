@@ -30626,12 +30626,19 @@ function _openTripStopPopover(ctx) {
       )
     : '';
 
+  // v359.60.23: subtitle reflects what's actually being dropped
+  // based on currentRole. Previously hardcoded "Drop the overnight"
+  // which was wrong when the stop was already a day trip or wayside.
+  var _seeFromLabel = (currentRole === "overnight") ? "the overnight"
+                    : (currentRole === "dayTrip")  ? "the day trip"
+                    : (currentRole === "wayside")  ? "the wayside"
+                    : "this stop";
   var seeRow = _row(
     "see",
     "👁 See",
     currentRole === "see"
-      ? "Currently a 0-night stop on the trip."
-      : "Drop the overnight, but keep on the trip as a 0-night stop."
+      ? "Currently a potential stop on the trip with no overnight."
+      : "Drop " + _seeFromLabel + ", but keep it on the trip as a potential stop."
   );
 
   ov.innerHTML = ''
