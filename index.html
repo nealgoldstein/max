@@ -30567,20 +30567,46 @@ function _openTripStopPopover(ctx) {
         return '<option value="' + r.id + '">Add to: ' + _dayTripRouteLabel(r) + '</option>';
       }).join("");
 
+  // Three labeled fields: From (hub) · New day trip (radio) · Add to
+  // existing (radio + dropdown of existing dayTrip routes for the
+  // chosen hub). The two radios are mutually exclusive; the Add-to
+  // dropdown is disabled when no routes exist for the chosen hub or
+  // when "New" is selected.
+  var _addToInitiallyEnabled = _initRoutes.length > 0;
+  var _addToInitialOpts = _initRoutes.map(function(r){
+    return '<option value="' + r.id + '">' + _dayTripRouteLabel(r) + '</option>';
+  }).join("");
+  if (!_addToInitialOpts) {
+    _addToInitialOpts = '<option value="">(no existing day trips from this hub)</option>';
+  }
   var dayTripRow = hubOpts.length
     ? _row(
         "dayTrip",
         "Day trip",
         currentRole === "dayTrip"
-          ? "From " + ((ctx.hubDest && ctx.hubDest.place) || "?") + ". Pick another hub below to move it, or combine with an existing day trip."
-          : "Visit while based at one of your overnight hubs. Combine with an existing day trip from that hub (e.g. Golden Circle) or start a new one.",
-        '<div style="margin-top:6px;display:flex;flex-direction:column;gap:5px;">'
-        + '<select id="trip-stop-hub" style="width:100%;padding:5px 8px;font-size:12px;border:1px solid #ccc;border-radius:5px;font-family:inherit;">'
-        +   hubOptsHtml
-        + '</select>'
-        + '<select id="trip-stop-dt-route" style="width:100%;padding:5px 8px;font-size:12px;border:1px solid #ccc;border-radius:5px;font-family:inherit;">'
-        +   _initRouteOptsHtml
-        + '</select>'
+          ? "From " + ((ctx.hubDest && ctx.hubDest.place) || "?") + ". Pick another hub to move it, or combine with an existing day trip from that hub."
+          : "Visit while based at one of your overnight hubs. Start a new day trip, or combine with an existing one (e.g. Golden Circle).",
+        '<div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;">'
+        // ── Field 1: From ───────────────────────────────────────
+        + '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#555;">'
+        +   '<span style="min-width:48px;color:#888;">From</span>'
+        +   '<select id="trip-stop-hub" style="flex:1;padding:5px 8px;font-size:12px;border:1px solid #ccc;border-radius:5px;font-family:inherit;">'
+        +     hubOptsHtml
+        +   '</select>'
+        + '</label>'
+        // ── Field 2: New day trip (radio) ───────────────────────
+        + '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#333;cursor:pointer;">'
+        +   '<input type="radio" name="trip-stop-dt-mode" value="new" checked style="margin:0;" />'
+        +   '<span>New day trip</span>'
+        + '</label>'
+        // ── Field 3: Add to existing (radio + dropdown) ─────────
+        + '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#333;cursor:pointer;">'
+        +   '<input type="radio" name="trip-stop-dt-mode" value="addTo"' + (_addToInitiallyEnabled ? '' : ' disabled') + ' style="margin:0;" />'
+        +   '<span style="min-width:48px;color:' + (_addToInitiallyEnabled ? '#333' : '#aaa') + ';">Add to</span>'
+        +   '<select id="trip-stop-dt-route" ' + (_addToInitiallyEnabled ? '' : 'disabled ') + 'style="flex:1;padding:5px 8px;font-size:12px;border:1px solid #ccc;border-radius:5px;font-family:inherit;' + (_addToInitiallyEnabled ? '' : 'color:#aaa;') + '">'
+        +     _addToInitialOpts
+        +   '</select>'
+        + '</label>'
         + '</div>'
       )
     : '';
@@ -30645,23 +30671,47 @@ function _openTripStopPopover(ctx) {
   }
   var hubSel = ov.querySelector("#trip-stop-hub");
   var dtRouteSel = ov.querySelector("#trip-stop-dt-route");
+  var dtAddToRadio = ov.querySelector('input[name="trip-stop-dt-mode"][value="addTo"]');
   function _refreshDtRoutesForHub() {
     if (!hubSel || !dtRouteSel) return;
     var hubId = hubSel.value;
     var routes = _dayTripRoutesForHub(hubId);
-    var html = '<option value="">— New day trip —</option>'
-      + routes.map(function(r){
-          return '<option value="' + r.id + '">Add to: ' + _dayTripRouteLabel(r) + '</option>';
-        }).join("");
-    dtRouteSel.innerHTML = html;
+    if (routes.length) {
+      dtRouteSel.innerHTML = routes.map(function(r){
+        return '<option value="' + r.id + '">' + _dayTripRouteLabel(r) + '</option>';
+      }).join("");
+      dtRouteSel.disabled = false;
+      dtRouteSel.style.color = "";
+      if (dtAddToRadio) dtAddToRadio.disabled = false;
+      var addToLbl = dtAddToRadio && dtAddToRadio.parentNode && dtAddToRadio.parentNode.querySelector("span");
+      if (addToLbl) addToLbl.style.color = "#333";
+    } else {
+      dtRouteSel.innerHTML = '<option value="">(no existing day trips from this hub)</option>';
+      dtRouteSel.disabled = true;
+      dtRouteSel.style.color = "#aaa";
+      if (dtAddToRadio) {
+        dtAddToRadio.disabled = true;
+        dtAddToRadio.checked = false;
+        // Force-back to "New" if Add-to was selected.
+        var newRadio = ov.querySelector('input[name="trip-stop-dt-mode"][value="new"]');
+        if (newRadio) newRadio.checked = true;
+      }
+      var addToLbl2 = dtAddToRadio && dtAddToRadio.parentNode && dtAddToRadio.parentNode.querySelector("span");
+      if (addToLbl2) addToLbl2.style.color = "#aaa";
+    }
   }
   if (hubSel) {
     hubSel.onchange = function(){ _autoCheck("dayTrip"); _refreshDtRoutesForHub(); };
     hubSel.onclick  = function(){ _autoCheck("dayTrip"); };
   }
   if (dtRouteSel) {
-    dtRouteSel.onchange = function(){ _autoCheck("dayTrip"); };
-    dtRouteSel.onclick  = function(){ _autoCheck("dayTrip"); };
+    dtRouteSel.onchange = function(){
+      _autoCheck("dayTrip");
+      if (dtAddToRadio && !dtAddToRadio.disabled) dtAddToRadio.checked = true;
+    };
+    dtRouteSel.onclick  = function(){
+      if (dtAddToRadio && !dtAddToRadio.disabled) dtAddToRadio.checked = true;
+    };
   }
   var routeSel = ov.querySelector("#trip-stop-route");
   if (routeSel) {
@@ -30683,7 +30733,14 @@ function _openTripStopPopover(ctx) {
     var selectedRole = picked ? picked.value : currentRole;
     var hubId      = (ov.querySelector("#trip-stop-hub")      || {}).value || null;
     var routeId    = (ov.querySelector("#trip-stop-route")    || {}).value || null;
-    var dtRouteId  = (ov.querySelector("#trip-stop-dt-route") || {}).value || null;
+    // v359.60.23: dtRouteId only applies when "Add to" radio is selected.
+    // When "New day trip" is selected, leave dtRouteId null so the
+    // dispatcher routes to convertDestToDayTrip.
+    var dtModeRadio = ov.querySelector('input[name="trip-stop-dt-mode"]:checked');
+    var dtMode = dtModeRadio ? dtModeRadio.value : "new";
+    var dtRouteId = (dtMode === "addTo")
+      ? ((ov.querySelector("#trip-stop-dt-route") || {}).value || null)
+      : null;
     close();
     _applyStopRoleChange(ctx, currentRole, selectedRole, { hubId: hubId, routeId: routeId, dtRouteId: dtRouteId });
   };
