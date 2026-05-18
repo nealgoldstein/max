@@ -3750,7 +3750,8 @@
       // Hotel check-in on first day
       var bookedHotel=dest.hotelBookings&&dest.hotelBookings.find(function(b){return b.status==="booked";});
       if(bookedHotel&&bookedHotel.checkIn){
-        blk.appendChild(buildHotelChip(bookedHotel,'checkin'));
+        // v359.60.38: pass destId so the chip is clickable → Stay tab.
+        blk.appendChild(buildHotelChip(bookedHotel,'checkin',dest.id));
       }
     }
     // Auto-inject departure transport on last day.
@@ -3771,7 +3772,8 @@
       // Hotel checkout on last day
       var bookedHotel2=dest.hotelBookings&&dest.hotelBookings.find(function(b){return b.status==="booked";});
       if(bookedHotel2&&bookedHotel2.checkOut){
-        blk.appendChild(buildHotelChip(bookedHotel2,'checkout'));
+        // v359.60.38: pass destId so the chip is clickable → Stay tab.
+        blk.appendChild(buildHotelChip(bookedHotel2,'checkout',dest.id));
       }
       var destIdx2=trip.destinations.indexOf(dest);
       if(destIdx2<trip.destinations.length-1){

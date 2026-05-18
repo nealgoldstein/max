@@ -36643,9 +36643,52 @@ function mkCachedStoryBox(sid){
   return box;
 }
 
-function buildHotelChip(bk, type){
+function buildHotelChip(bk, type, destId){
   // type: 'checkin' or 'checkout'
   var wrap=document.createElement('div'); wrap.className='itin-hotel-item';
+  // v359.60.38: clickable now. Click → Stay tab of the destination,
+  // scrolled to (and amber-pulsing) the specific hotel record so the
+  // user can edit it. Was static-display-only before — the user could
+  // see "Check-in: Hotel X" on the day card but had no path from there
+  // to the edit form for that booking. Mirrors the transport-chip's
+  // click → Routing tab behavior at the same level on the day card.
+  wrap.style.cursor = 'pointer';
+  wrap.title = 'Click to edit this booking';
+  var bkId = bk && bk.id ? bk.id : null;
+  (function(did, hid){
+    wrap.onclick = function(e){
+      if (e && e.stopPropagation) e.stopPropagation();
+      if (typeof _activeDmSection !== "undefined") _activeDmSection = "stay";
+      if (typeof selectDest === "function" && did) selectDest(did);
+      // After the dest view renders, scroll to and amber-pulse the
+      // specific hotel record. Use a small delay so the Stay tab has
+      // finished mounting. The hotel record's DOM id pattern is set
+      // by mkHotelRecord (Tracker/Stay tab rendering) — we try a few
+      // common forms.
+      if (hid) {
+        setTimeout(function(){
+          var sels = [
+            '[data-booking-id="' + hid + '"]',
+            '#hotel-record-' + hid,
+            '#bk-' + hid
+          ];
+          var el = null;
+          for (var i = 0; i < sels.length && !el; i++) {
+            try { el = document.querySelector(sels[i]); } catch(_){}
+          }
+          if (el && el.scrollIntoView) {
+            try {
+              el.scrollIntoView({behavior:'smooth', block:'center'});
+              el.style.transition = 'background 600ms ease';
+              var orig = el.style.background;
+              el.style.background = '#fff3c4';
+              setTimeout(function(){ el.style.background = orig || ''; }, 1200);
+            } catch(_){}
+          }
+        }, 140);
+      }
+    };
+  })(destId, bkId);
   var icon=document.createElement('span'); icon.className='itin-hotel-icon'; icon.textContent=type==='checkin'?'🛎':'🧳';
   var body=document.createElement('div'); body.style.flex='1';
   var nm=document.createElement('div'); nm.className='itin-hotel-name';
