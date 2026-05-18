@@ -38958,9 +38958,10 @@ function showBatchImportBookingsModal() {
     ov.remove();
     if (typeof showSaveStatus === "function") {
       var bits = [];
-      if (result.added) bits.push("✓ Added " + result.added + " booking" + (result.added !== 1 ? "s" : ""));
+      if (result.added)     bits.push("✓ Added " + result.added + " booking" + (result.added !== 1 ? "s" : ""));
+      if (result.updated)   bits.push(result.updated + " filled in"); // v359.60.37: merged into existing bookings
       if (result.cancelled) bits.push(result.cancelled + " cancellation" + (result.cancelled !== 1 ? "s" : "") + " applied");
-      if (result.skipped) bits.push(result.skipped + " skipped");
+      if (result.skipped)   bits.push(result.skipped + " skipped");
       showSaveStatus(bits.join(" · "), 4200);
     }
     if (typeof autoSave === "function") try { autoSave(); } catch(_){}
@@ -39345,12 +39346,195 @@ function _findExistingBookingForCancellation(cancellation) {
 }
 if (typeof globalThis !== "undefined") globalThis._findExistingBookingForCancellation = _findExistingBookingForCancellation;
 
-// v359.60.35: commit the parsed/reviewed batch. Iterates _bookings,
-// dispatches each to the right shape (hotelBookings / generalBookings
-// / leg.bookings) based on type, and for cancellations runs the
-// matched remover. Returns { added, cancelled, skipped }.
+// v359.60.37: normalize a name for fuzzy matching. Lowercases,
+// collapses whitespace, strips punctuation. Used by both the dedupe
+// finder and the cancellation matcher so they see the same keys.
+function _bimNameKey(s) {
+  if (!s) return "";
+  return String(s).toLowerCase()
+    .normalize("NFD").replace(/[̀-ͯ]/g, "") // strip diacritics
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function _bimNameMatch(a, b) {
+  var ka = _bimNameKey(a), kb = _bimNameKey(b);
+  if (!ka || !kb) return false;
+  if (ka === kb) return true;
+  // Substring match in either direction — handles "Bella Hotel" vs
+  // "Bella Hotel - Superior Two Bedroom Apartment Sóley".
+  return (ka.length >= 6 && kb.indexOf(ka) >= 0)
+      || (kb.length >= 6 && ka.indexOf(kb) >= 0);
+}
+
+function _bimDateDiff(a, b) {
+  if (!a || !b) return Infinity;
+  var da = new Date(a + "T12:00:00").getTime();
+  var db = new Date(b + "T12:00:00").getTime();
+  if (isNaN(da) || isNaN(db)) return Infinity;
+  return Math.round(Math.abs(da - db) / 86400000);
+}
+
+// v359.60.37: search the whole trip for an existing booking that
+// matches an incoming batch entry. Returns { booking, kind } where
+// kind is "hotel" / "leg" / "general", or null when nothing matches.
+// Match priority: confirmation# exact > name + date within 2 days >
+// name alone (last resort, only for the same conf-less type).
+function _findExistingForMerge(b) {
+  if (!trip || !Array.isArray(trip.destinations)) return null;
+  var conf = b.confirmationNumber || null;
+
+  if (b.type === "hotel") {
+    var hotelCandidates = [];
+    trip.destinations.forEach(function(d){
+      (d.hotelBookings || []).forEach(function(h){
+        hotelCandidates.push({ booking: h, kind: "hotel", dest: d });
+      });
+    });
+    // Conf# match wins.
+    if (conf) {
+      var byConf = hotelCandidates.find(function(c){ return c.booking.confirmationNumber === conf; });
+      if (byConf) return byConf;
+    }
+    // Name + close date.
+    var byName = hotelCandidates.find(function(c){
+      if (!_bimNameMatch(c.booking.name, b.name)) return false;
+      if (b.depDate && c.booking.checkIn) {
+        return _bimDateDiff(b.depDate, c.booking.checkIn) <= 2;
+      }
+      return true; // name match alone is enough if neither side has a checkIn
+    });
+    return byName || null;
+  }
+
+  if (b.type === "flight" || b.type === "train" || b.type === "bus" || b.type === "ferry") {
+    var legCandidates = [];
+    Object.keys(trip.legs || {}).forEach(function(k){
+      var leg = trip.legs[k];
+      (leg && leg.bookings || []).forEach(function(bk){
+        if (bk.mode === b.type) legCandidates.push({ booking: bk, kind: "leg", leg: leg });
+      });
+    });
+    if (conf) {
+      var byConfL = legCandidates.find(function(c){ return c.booking.confirmationNumber === conf; });
+      if (byConfL) return byConfL;
+    }
+    var byOp = legCandidates.find(function(c){
+      if (!_bimNameMatch(c.booking.operator, b.carrier)) return false;
+      if (b.depDate && c.booking.departure) {
+        return _bimDateDiff(b.depDate, c.booking.departure) <= 1;
+      }
+      return false;
+    });
+    return byOp || null;
+  }
+
+  // restaurant / tour / ticket / unknown → generalBookings
+  var genCandidates = [];
+  trip.destinations.forEach(function(d){
+    (d.generalBookings || []).forEach(function(g){
+      genCandidates.push({ booking: g, kind: "general", dest: d });
+    });
+  });
+  if (conf) {
+    var byConfG = genCandidates.find(function(c){ return c.booking.confirmationNumber === conf; });
+    if (byConfG) return byConfG;
+  }
+  var byLabel = genCandidates.find(function(c){
+    if (!_bimNameMatch(c.booking.label, b.name)) return false;
+    if (b.depDate && c.booking.date) {
+      return _bimDateDiff(b.depDate, c.booking.date) <= 1;
+    }
+    return true;
+  });
+  return byLabel || null;
+}
+if (typeof globalThis !== "undefined") globalThis._findExistingForMerge = _findExistingForMerge;
+
+// v359.60.37: per-type merge helpers. Fill in EMPTY fields on the
+// existing booking from the incoming batch entry — never overwrite
+// existing non-empty values (the user may have edited them). Notes
+// get appended rather than skipped so additional info accumulates.
+function _bimIsEmpty(v) {
+  return v === null || v === undefined || v === "" || (typeof v === "number" && isNaN(v));
+}
+function _bimSetIfEmpty(obj, field, value) {
+  if (_bimIsEmpty(value)) return false;
+  if (_bimIsEmpty(obj[field])) { obj[field] = value; return true; }
+  return false;
+}
+function _bimAppendNotes(obj, addition) {
+  if (!addition) return;
+  if (!obj.notes) { obj.notes = addition; return; }
+  if (obj.notes.indexOf(addition) >= 0) return; // already there
+  obj.notes = (obj.notes + "\n" + addition).trim();
+}
+
+function _mergeIncomingIntoHotel(existing, b) {
+  _bimSetIfEmpty(existing, "name", b.name);
+  _bimSetIfEmpty(existing, "checkIn", b.depDate);
+  _bimSetIfEmpty(existing, "checkInTime", b.depTime);
+  _bimSetIfEmpty(existing, "checkOut", b.arrDate);
+  _bimSetIfEmpty(existing, "checkOutTime", b.arrTime);
+  _bimSetIfEmpty(existing, "confirmationNumber", b.confirmationNumber);
+  if (_bimIsEmpty(existing.pricePaid) && typeof b.price === "number") existing.pricePaid = b.price;
+  _bimSetIfEmpty(existing, "currency", b.currency);
+  _bimSetIfEmpty(existing, "url", b.url);
+  if (_bimIsEmpty(existing.cancelType) || existing.cancelType === "unknown") {
+    if (!_bimIsEmpty(b.cancelType)) existing.cancelType = b.cancelType;
+  }
+  _bimSetIfEmpty(existing, "cancelDeadline", b.cancelDeadline);
+  if (b.notes) _bimAppendNotes(existing, b.notes);
+  if (b.address) _bimAppendNotes(existing, "Address: " + b.address);
+}
+
+function _mergeIncomingIntoLeg(existing, b) {
+  _bimSetIfEmpty(existing, "operator", b.carrier);
+  _bimSetIfEmpty(existing, "from", b.from);
+  _bimSetIfEmpty(existing, "to", b.to);
+  _bimSetIfEmpty(existing, "departure", b.depDate);
+  _bimSetIfEmpty(existing, "departureTime", b.depTime);
+  _bimSetIfEmpty(existing, "arrival", b.arrDate);
+  _bimSetIfEmpty(existing, "arrivalTime", b.arrTime);
+  _bimSetIfEmpty(existing, "confirmationNumber", b.confirmationNumber);
+  if (_bimIsEmpty(existing.pricePaid) && typeof b.price === "number") existing.pricePaid = b.price;
+  _bimSetIfEmpty(existing, "currency", b.currency);
+  _bimSetIfEmpty(existing, "url", b.url);
+  if (_bimIsEmpty(existing.cancelType) || existing.cancelType === "unknown") {
+    if (!_bimIsEmpty(b.cancelType)) existing.cancelType = b.cancelType;
+  }
+  _bimSetIfEmpty(existing, "cancelDeadline", b.cancelDeadline);
+  if (b.notes) _bimAppendNotes(existing, b.notes);
+  if (b.number) _bimAppendNotes(existing, (b.type === "flight" ? "Flight " : "") + b.number);
+}
+
+function _mergeIncomingIntoGeneral(existing, b) {
+  _bimSetIfEmpty(existing, "label", b.name);
+  _bimSetIfEmpty(existing, "date", b.depDate);
+  _bimSetIfEmpty(existing, "time", b.depTime);
+  _bimSetIfEmpty(existing, "timeEnd", b.arrTime);
+  _bimSetIfEmpty(existing, "confirmationNumber", b.confirmationNumber);
+  if (_bimIsEmpty(existing.pricePaid) && typeof b.price === "number") existing.pricePaid = b.price;
+  _bimSetIfEmpty(existing, "currency", b.currency);
+  _bimSetIfEmpty(existing, "url", b.url);
+  if (_bimIsEmpty(existing.cancelType) || existing.cancelType === "unknown") {
+    if (!_bimIsEmpty(b.cancelType)) existing.cancelType = b.cancelType;
+  }
+  _bimSetIfEmpty(existing, "cancelDeadline", b.cancelDeadline);
+  if (b.notes) _bimAppendNotes(existing, b.notes);
+  if (b.address) _bimAppendNotes(existing, "Location: " + b.address);
+}
+
+// v359.60.35: commit the parsed/reviewed batch. v359.60.37: now
+// dedupes by searching the whole trip first — when a new entry
+// matches an existing booking (by conf# or by name+date), the
+// incoming non-empty fields fill in any empty slots on the existing
+// record instead of adding a duplicate. The user can re-paste the
+// same source (or a richer one) and get FILLED-IN bookings instead
+// of duplicates. Returns { added, updated, cancelled, skipped }.
 function _commitBatchBookings(bookings) {
-  var added = 0, cancelled = 0, skipped = 0;
+  var added = 0, updated = 0, cancelled = 0, skipped = 0;
   var newBkIdFn = (typeof newBkId === "function") ? newBkId : function(){ return "bk-" + Date.now() + "-" + Math.random().toString(36).slice(2,6); };
   bookings.forEach(function(b){
     if (b._skip) { skipped++; return; }
@@ -39366,6 +39550,23 @@ function _commitBatchBookings(bookings) {
       }
       return;
     }
+
+    // v359.60.37: dedupe pass — does the trip already contain this booking?
+    var existingMatch = _findExistingForMerge(b);
+    if (existingMatch) {
+      try {
+        if (existingMatch.kind === "hotel")   _mergeIncomingIntoHotel(existingMatch.booking, b);
+        if (existingMatch.kind === "leg")     _mergeIncomingIntoLeg(existingMatch.booking, b);
+        if (existingMatch.kind === "general") _mergeIncomingIntoGeneral(existingMatch.booking, b);
+        updated++;
+      } catch(e) {
+        console.warn("[bim] merge failed, adding as new:", e);
+        // Fall through to add path below by clearing the match marker.
+        existingMatch = null;
+      }
+      if (existingMatch) return; // merged — don't also add
+    }
+
     var dest = (typeof getDest === "function") ? getDest(b._destId) : null;
     if (!dest && trip.destinations.length) dest = trip.destinations[0];
     if (!dest) { skipped++; return; }
@@ -39453,7 +39654,7 @@ function _commitBatchBookings(bookings) {
       added++;
     }
   });
-  return { added: added, cancelled: cancelled, skipped: skipped };
+  return { added: added, updated: updated, cancelled: cancelled, skipped: skipped };
 }
 if (typeof globalThis !== "undefined") globalThis._commitBatchBookings = _commitBatchBookings;
 
