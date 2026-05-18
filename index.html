@@ -32362,65 +32362,76 @@ function addDestToExistingDayTripRoute(destId, routeId, opts) {
   }
 }
 
-// v359.60.23: drop any place that appears on more than one route's
-// planItems[]. Keeps the FIRST occurrence (in trip.routes order)
-// and removes the rest. Walks all routes — day-trip stops + wayside
-// stops alike. Returns the number of duplicates removed.
+// v359.60.23: detect (but DO NOT remove) places that appear on more
+// than one route's planItems[]. Returns 0 always — exists only to
+// log warnings so we can see if duplicates are still being created
+// organically.
 //
-// Why this exists: bug surfaced where a single place (Geysir) ended
-// up on day-trip routes from BOTH its proper hub (Selfoss) AND a
-// distant hub (Akureyri). Root cause not yet pinned — possibly a
-// stale ctx.route in the popover or a missed early-return in a
-// conversion helper. Until the root cause is fixed, this self-heal
-// keeps the data clean and logs every dedupe so we can see if it
-// keeps recurring (which would mean the bug is still live).
+// Earlier rev of this function auto-removed duplicates, but that
+// turned into a footgun: when the user made a legitimate change
+// (e.g. moved Geysir from Akureyri's stale route to Selfoss's new
+// one), the dedupe ran after autoSave, saw both occurrences,
+// silently chose to keep the first (Akureyri's), and wrote that
+// back to localStorage — effectively undoing the user's change.
+// On reload, the change was gone.
 //
-// Also cleans up empty routes: if removing the duplicate stop
-// leaves a route with no stops, drop the route and clear its
-// reference from the hub's days[].planItems / days[].refs.
+// Right answer: fix duplicates at the SOURCE (in the conversion
+// helpers) when we identify which one is leaking. Until then, we
+// warn here so the bug stays visible without destroying user data.
+// User can manually run `_cleanDupStopsAcrossRoutes()` from the
+// console if they want to force a cleanup.
 function _dedupeStopsAcrossRoutes() {
   if (!trip || !Array.isArray(trip.routes)) return 0;
-  var firstSeen = {}; // placeId → { route, stop, routeIdx }
+  var firstSeen = {};
+  trip.routes.forEach(function(route, ri){
+    if (!route || !Array.isArray(route.planItems)) return;
+    route.planItems.forEach(function(item){
+      if (!item || item.type !== "stop" || !item.placeId) return;
+      if (!firstSeen[item.placeId]) {
+        firstSeen[item.placeId] = { route: route, stop: item };
+        return;
+      }
+      var placeName = (trip.places && trip.places[item.placeId] && trip.places[item.placeId].name) || item.placeId;
+      var keptHub = (trip.destinations.find(function(d){ return d.id === firstSeen[item.placeId].route.fromDestId; }) || {}).place || "?";
+      var thisHub = (trip.destinations.find(function(d){ return d.id === route.fromDestId; }) || {}).place || "?";
+      console.warn(
+        "[Max] '" + placeName + "' is on multiple routes (from '" + keptHub + "' AND '" + thisHub +
+        "'). NOT auto-removing — call _cleanDupStopsAcrossRoutes() in the console to force cleanup."
+      );
+    });
+  });
+  return 0; // never modifies; warnings only
+}
+
+// Manual cleanup version — same algorithm as the warn-only one
+// above but it actually removes duplicates and drops emptied
+// day-trip routes. Exposed globally so the user can run it from
+// the dev console if they want to clear stale duplicates without
+// hunting through every popover.
+function _cleanDupStopsAcrossRoutes() {
+  if (!trip || !Array.isArray(trip.routes)) return 0;
+  var firstSeen = {};
   var removed = 0;
   var routes = trip.routes;
   for (var ri = 0; ri < routes.length; ri++) {
     var route = routes[ri];
     if (!route || !Array.isArray(route.planItems)) continue;
-    // Walk planItems backward so splice indices stay stable.
     for (var pi = route.planItems.length - 1; pi >= 0; pi--) {
       var item = route.planItems[pi];
       if (!item || item.type !== "stop" || !item.placeId) continue;
       if (!firstSeen[item.placeId]) {
-        firstSeen[item.placeId] = { route: route, stop: item, routeIdx: ri };
+        firstSeen[item.placeId] = { route: route, stop: item };
         continue;
       }
-      // Duplicate — remove this occurrence (which came later in
-      // trip.routes order, since we iterate forward across routes).
-      // But we iterate backward within each route, so we may see
-      // duplicates within the same route too; same logic — drop.
-      var placeName = (trip.places && trip.places[item.placeId] && trip.places[item.placeId].name) || item.placeId;
-      var keptHubId = firstSeen[item.placeId].route.fromDestId;
-      var keptHubName = (trip.destinations.find(function(d){ return d.id === keptHubId; }) || {}).place || "?";
-      var thisHubId = route.fromDestId;
-      var thisHubName = (trip.destinations.find(function(d){ return d.id === thisHubId; }) || {}).place || "?";
-      console.warn(
-        "[Max self-heal] '" + placeName + "' was duplicated on routes from '" + keptHubName +
-        "' and '" + thisHubName + "'. Removing the duplicate; keeping the one on " + keptHubName + "."
-      );
       route.planItems.splice(pi, 1);
       removed++;
     }
   }
-  // Pass 2: drop any route that ended up with zero stops AND clean
-  // up the hub's day references to that route.
   for (var ri2 = routes.length - 1; ri2 >= 0; ri2--) {
     var r2 = routes[ri2];
     if (!r2) continue;
     var hasStops = (r2.planItems || []).some(function(p){ return p && p.type === "stop"; });
     if (hasStops) continue;
-    // Only remove DAY-TRIP routes that ended up empty. Transit
-    // routes can legitimately have no stops (they're just the leg
-    // between two hubs).
     var isDT = (typeof MaxMigration !== "undefined" && MaxMigration.isDayTripRoute)
       ? MaxMigration.isDayTripRoute(r2)
       : (r2.subKind === "dayTrip" || r2.kind === "dayTrip");
@@ -32434,8 +32445,11 @@ function _dedupeStopsAcrossRoutes() {
     }
     routes.splice(ri2, 1);
   }
+  if (removed > 0 && typeof _emitTripMutation === "function") _emitTripMutation();
+  console.log("[Max] cleaned " + removed + " duplicate stop(s)");
   return removed;
 }
+if (typeof globalThis !== "undefined") globalThis._cleanDupStopsAcrossRoutes = _cleanDupStopsAcrossRoutes;
 
 // v359.60.23: convert a destination to a wayside on a SPECIFIC
 // transit route, not the natural prev→next route. Used when the
