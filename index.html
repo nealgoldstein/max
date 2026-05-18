@@ -30489,17 +30489,41 @@ function _openTripStopPopover(ctx) {
   }).join("");
 
   // ── Transit-route options for the Wayside dropdown ──────────────
+  // Exclude routes where the source destination is itself the from
+  // or to endpoint (you can't be "along the way" to yourself).
   var transitRoutes = (trip.routes || []).filter(function(r){
     var sub = (typeof MaxMigration !== "undefined" && MaxMigration.routeSubKind)
       ? MaxMigration.routeSubKind(r)
       : (r && (r.subKind || (r.kind && r.kind !== "route" ? r.kind : null)));
-    return sub === "transit";
+    if (sub !== "transit") return false;
+    if (ctx.kind === "destination") {
+      if (r.fromDestId === ctx.destId || r.toDestId === ctx.destId) return false;
+    }
+    return true;
   });
-  var routeOptsHtml = transitRoutes.map(function(r){
+  // v359.60.23: for a destination source, prepend the NATURAL
+  // wayside route — the prev → next merge that convertDestToWayside
+  // would create by collapsing the source's own neighboring legs.
+  // Selected by default since it's almost always what the user
+  // wants. Other transit routes (cross-trip) follow underneath.
+  var naturalRouteOpt = "";
+  if (ctx.kind === "destination") {
+    var _wIdx = trip.destinations.findIndex(function(d){ return d.id === ctx.destId; });
+    if (_wIdx > 0 && _wIdx < trip.destinations.length - 1) {
+      var _wPrev = trip.destinations[_wIdx - 1];
+      var _wNext = trip.destinations[_wIdx + 1];
+      var _natRouteId = "r-tr-" + _wPrev.id + "-" + _wNext.id;
+      naturalRouteOpt = '<option value="' + _natRouteId + '" selected>'
+        + (_wPrev.place || "?") + " → " + (_wNext.place || "?")
+        + " (natural — between its neighbors)"
+        + '</option>';
+    }
+  }
+  var routeOptsHtml = naturalRouteOpt + transitRoutes.map(function(r){
     var rf = trip.destinations.find(function(d){ return d.id === r.fromDestId; });
     var rt = trip.destinations.find(function(d){ return d.id === r.toDestId; });
     var lbl = (rf && rf.place ? rf.place : "?") + " → " + (rt && rt.place ? rt.place : "?");
-    var sel = r.id === currentRouteId ? " selected" : "";
+    var sel = (!naturalRouteOpt && r.id === currentRouteId) ? " selected" : "";
     return '<option value="' + r.id + '"' + sel + '>' + lbl + '</option>';
   }).join("");
 
