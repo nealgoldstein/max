@@ -39030,8 +39030,21 @@ async function _parseBookingBatchLlm(text, html) {
     "- Look for boundaries like 'Booking confirmation', 'Reservation details', 'Cancellation confirmation', 'Your booking at X has been cancelled', a new email's From/Subject line, repeated company logos, or large blocks of whitespace between sections.\n" +
     "- A cancellation usually echoes the original booking (hotel name, dates, confirmation number) — capture those fields so we can match it against an existing booking on the trip. Set isCancellation: true.\n" +
     "- If the entire paste turns out to be a single booking, return an array with one element. Never return prose explaining that.\n\n" +
+    "ALSO HANDLE: 'subject line dumps' — when the user has copied a list of email subject lines from an inbox view (no email bodies, just titles glued together). Each subject is a separate booking. Recognize these patterns:\n" +
+    "  • 'Thanks! Your booking is confirmed at HOTEL' → hotel confirmation, name=HOTEL, isCancellation=false\n" +
+    "  • 'Your booking is confirmed at HOTEL' → same\n" +
+    "  • 'Your updated booking at HOTEL' → hotel confirmation (an update), name=HOTEL, isCancellation=false\n" +
+    "  • 'Booking canceled for HOTEL' / 'Booking cancelled for HOTEL' → hotel cancellation, name=HOTEL, isCancellation=true\n" +
+    "  • 'Reservation Confirmation #NUMBER for HOTEL' → hotel confirmation with confirmationNumber=NUMBER\n" +
+    "  • 'RE: Reservation for HOTEL, MONTH DAY-DAY' → hotel confirmation with depDate / arrDate inferred from the date range\n" +
+    "  • 'Confirmed: Your MONTH DAY-DAY trip, here's your Airbnb receipt' → Airbnb hotel confirmation, name='Airbnb', dates inferred (use the SAME dates to dedupe against a sibling 'RE: Reservation for...' subject if present — they're the same booking)\n" +
+    "  • 'Airbnb Reservation Canceled' → Airbnb cancellation, name='Airbnb', isCancellation=true; if you can't tell which property it cancels, leave name as 'Airbnb' and the user will match it manually\n" +
+    "  • 'Booking.com: Confirmation' as a standalone phrase → it's the sender label; not a booking by itself. Skip it. The next subject usually carries the actual booking info.\n" +
+    "When the subjects are run together with no whitespace separator (icons / boilerplate glued them inline), SPLIT on each of those patterns. Even a 50-word concatenated blob can become 5–10 distinct bookings.\n" +
+    "From subjects you'll usually only have: name, isCancellation, sometimes dates, sometimes a confirmation #. Leave all other fields null — don't guess prices or URLs from a subject line.\n" +
+    "Dedupe within a subject dump: if two subjects clearly point to the same booking (e.g. an Airbnb 'RE: Reservation for X, Sep 17-19' AND a 'Confirmed: Your September 17-19 trip' that share the same dates), return ONE entry, preferring the one with the property name.\n\n" +
     "Same field rules as single-booking extraction: 24-hour time; time-ranges for check-in collapse to the earliest, check-out to the latest; price is what was paid (not the cancellation cost / no-show fee); URL: extract the actual https:// link, not the visible label; cancellation deadline is the LAST date the user can cancel for free (date only, no time).\n\n" +
-    "Return [] if nothing booking-shaped is in the paste.";
+    "Return [] only if there's truly no booking-shaped content. A subject-line dump with even one recognizable hotel/confirmation/cancellation pattern is NOT empty — return the array.";
   var user = "BATCH TEXT:\n\n" + text + "\n\nReturn the JSON array.";
   var resp = await callMax([{role:"user", content: user}], 8000, 90000);
   var clean = String(resp || "").trim()
