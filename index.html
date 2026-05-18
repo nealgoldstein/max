@@ -5823,8 +5823,40 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
     window._tb = _tb = {};
   }
   _tb.name      = name;
-  _tb.region    = parseResult.region || "";
-  _tb.placeName = parseResult.region || "";
+  // v359.60.32: normalize region to a known country/area when the
+  // parsed region is a phrase like "Iceland Road Trip" (the parser
+  // strips the year off the trip name but leaves the "Road Trip"
+  // suffix). Same _coarseGeocode-token logic the picker map uses so
+  // "Iceland Road Trip" → "Iceland" — the LLM prompt then reads
+  // "A traveler wants to go to Iceland" instead of the nonsensical
+  // "A traveler wants to go to Iceland Road Trip" that the picker
+  // got before. Falls through to the raw region when no known
+  // country token is found (e.g. for region names not in the
+  // coarse-geocode dictionary).
+  var _rawRegion = parseResult.region || "";
+  var _normRegion = _rawRegion;
+  try {
+    var _rk = _rawRegion.toLowerCase().trim();
+    if (_rk && typeof _coarseGeocode !== "undefined" && !_coarseGeocode[_rk]) {
+      var _tokens = _rk.split(/[\s,()/\-]+/).filter(Boolean);
+      var _hit = null;
+      for (var _ti = 0; _ti < _tokens.length && !_hit; _ti++) {
+        if (_coarseGeocode[_tokens[_ti]]) _hit = _tokens[_ti];
+      }
+      if (!_hit) {
+        var _keys = Object.keys(_coarseGeocode);
+        for (var _ki = 0; _ki < _keys.length && !_hit; _ki++) {
+          if (_rk.indexOf(_keys[_ki]) >= 0) _hit = _keys[_ki];
+        }
+      }
+      if (_hit) {
+        // Title-case the matched token for display.
+        _normRegion = _hit.replace(/\b\w/g, function(c){ return c.toUpperCase(); });
+      }
+    }
+  } catch(_){}
+  _tb.region    = _normRegion;
+  _tb.placeName = _normRegion;
   _tb.tripMode  = "place";
   _tb.when      = parseResult.when     || "";
   _tb.duration  = parseResult.duration || "";
@@ -6019,26 +6051,53 @@ function _backstopPastedListPlaces() {
   if (!_tb || !Array.isArray(_tb._pastedListPlaces) || !_tb._pastedListPlaces.length) return;
   if (!Array.isArray(_tb.placeActivities)) return;
   var normFn = (typeof globalThis._normPlaceName === "function") ? globalThis._normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
-  // Collect every place name that appears as a requiredPlace anywhere
-  // in the LLM's output.
-  var coveredKeys = {};
+  // v359.60.32: collect TOKENIZED covered names, not just exact
+  // normalized keys. Strict equality was treating "Snæfellsnes" and
+  // "Snæfellsnes Peninsula" as different places — they're the same
+  // geographic feature with a modifier word. Similarly "Ásbyrgi"
+  // (LLM) vs "Ásbyrgi Canyon" (user). Token-subset match: the user's
+  // place is considered covered if its tokens are all present in
+  // some covered name's tokens. This avoids injecting duplicate
+  // entries when the LLM names the same place slightly differently.
+  function _tokensOf(name) {
+    var n = normFn(name);
+    return n ? n.split(/\s+/).filter(Boolean) : [];
+  }
+  var coveredTokenSets = []; // array of Set-like { [token]: true }
+  function _registerCovered(name){
+    var toks = _tokensOf(name);
+    if (!toks.length) return;
+    var set = {};
+    toks.forEach(function(t){ set[t] = true; });
+    coveredTokenSets.push(set);
+  }
   _tb.placeActivities.forEach(function(it){
-    if (!it || !Array.isArray(it.requiredPlaces)) return;
-    it.requiredPlaces.forEach(function(p){
-      if (p && p.place) coveredKeys[normFn(p.place)] = true;
-    });
-    // Endpoints and viableLocations count as "covered" too — a place
-    // surfaced only as a train terminus or aurora-viewing spot still
-    // shows up on the picker map and in the activity list.
-    (it.endpoints || []).forEach(function(p){
-      if (p && p.place) coveredKeys[normFn(p.place)] = true;
-    });
-    (it.viableLocations || []).forEach(function(p){
-      if (p && p.place) coveredKeys[normFn(p.place)] = true;
-    });
+    if (!it) return;
+    (it.requiredPlaces || []).forEach(function(p){ if (p && p.place) _registerCovered(p.place); });
+    (it.endpoints     || []).forEach(function(p){ if (p && p.place) _registerCovered(p.place); });
+    (it.viableLocations|| []).forEach(function(p){ if (p && p.place) _registerCovered(p.place); });
   });
+  // A user-listed place is "covered" if there exists a covered name
+  // whose token set ⊇ the user's token set (every token of the user's
+  // name appears in some covered name). One-word user names match
+  // any covered name containing that word (so "Snæfellsnes" is covered
+  // by "Snæfellsnes Peninsula"). Multi-word user names need every
+  // token present.
+  function _isCovered(userName){
+    var userToks = _tokensOf(userName);
+    if (!userToks.length) return true; // empty input — don't inject
+    for (var ci = 0; ci < coveredTokenSets.length; ci++) {
+      var set = coveredTokenSets[ci];
+      var allHit = true;
+      for (var ti = 0; ti < userToks.length; ti++) {
+        if (!set[userToks[ti]]) { allHit = false; break; }
+      }
+      if (allHit) return true;
+    }
+    return false;
+  }
   var missing = _tb._pastedListPlaces.filter(function(p){
-    return p && p.place && !coveredKeys[normFn(p.place)];
+    return p && p.place && !_isCovered(p.place);
   });
   if (!missing.length) return;
   console.warn("[Max] _backstopPastedListPlaces: LLM dropped " + missing.length +
