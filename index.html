@@ -40050,33 +40050,48 @@ function _parseTimeRange(s, prefer) {
 // might return when it inlines dates into a single string instead
 // of using depDate/arrDate. Returns {start, end} as YYYY-MM-DD or
 // null if it can't make sense of it.
+// v359.60.40: year inference for booking date strings that omit it.
+// Booking.com dashboard rows say "Sep 20 – Sep 22" — no year. Prefer
+// the trip's start year (the booking is FOR this trip); fall back to
+// the current year. Exposed so the backfill console snippet can use
+// the same logic.
+function _inferYearForBooking() {
+  try {
+    if (typeof trip !== "undefined" && trip && trip.destinations && trip.destinations.length) {
+      var first = trip.destinations[0];
+      if (first.dateFrom) {
+        var m = String(first.dateFrom).match(/^(\d{4})/);
+        if (m) return m[1];
+      }
+    }
+  } catch(_){}
+  return String(new Date().getFullYear());
+}
+if (typeof globalThis !== "undefined") globalThis._inferYearForBooking = _inferYearForBooking;
+
 function _parseDateRangeString(s) {
   if (!s) return null;
   s = String(s).trim();
+  var pad = function(n){ n = String(n); return n.length === 1 ? "0" + n : n; };
+  var months = { jan:"01", feb:"02", mar:"03", apr:"04", may:"05", jun:"06", jul:"07", aug:"08", sep:"09", oct:"10", nov:"11", dec:"12" };
   // ISO range: "2026-10-02 to 2026-10-05" or "2026-10-02 - 2026-10-05"
   var iso = s.match(/(\d{4}-\d{2}-\d{2})\s*(?:to|-|–|—)\s*(\d{4}-\d{2}-\d{2})/);
   if (iso) return { start: iso[1], end: iso[2] };
   // Slash range: "10/2/2026 - 10/5/2026"
   var slash = s.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})\s*(?:to|-|–|—)\s*(\d{1,2})\/(\d{1,2})\/(\d{4})/);
   if (slash) {
-    var pad = function(n){ return n.length === 1 ? "0" + n : n; };
     return {
       start: slash[3] + "-" + pad(slash[1]) + "-" + pad(slash[2]),
       end: slash[6] + "-" + pad(slash[4]) + "-" + pad(slash[5]),
     };
   }
-  // English month range: "October 2-5, 2026" or "October 2 - October 5, 2026" or "Oct 2 - Oct 5, 2026"
-  var months = { jan:"01", feb:"02", mar:"03", apr:"04", may:"05", jun:"06", jul:"07", aug:"08", sep:"09", oct:"10", nov:"11", dec:"12" };
-  // Try compact form first: "October 2-5, 2026"
+  // Try compact form: "October 2-5, 2026"
   var compact = s.match(/^([A-Za-z]+)\s+(\d{1,2})\s*[-–—]\s*(\d{1,2}),?\s+(\d{4})$/);
   if (compact) {
     var mc = months[compact[1].slice(0,3).toLowerCase()];
     if (mc) {
       var yc = compact[4];
-      return {
-        start: yc + "-" + mc + "-" + (compact[2].length === 1 ? "0" + compact[2] : compact[2]),
-        end:   yc + "-" + mc + "-" + (compact[3].length === 1 ? "0" + compact[3] : compact[3]),
-      };
+      return { start: yc + "-" + mc + "-" + pad(compact[2]), end: yc + "-" + mc + "-" + pad(compact[3]) };
     }
   }
   // Try expanded form: "October 2 - October 5, 2026"
@@ -40086,9 +40101,34 @@ function _parseDateRangeString(s) {
     var m2 = months[expanded[3].slice(0,3).toLowerCase()];
     var ye = expanded[5];
     if (m1 && m2) {
+      return { start: ye + "-" + m1 + "-" + pad(expanded[2]), end: ye + "-" + m2 + "-" + pad(expanded[4]) };
+    }
+  }
+  // v359.60.40: NO-YEAR forms — booking.com dashboard rows like
+  // "Sep 20 – Sep 22" don't include a year. Infer from trip context.
+  // Compact no-year: "Sep 20-22" / "Sep 20 - Sep 22" / "Sep 20 – 22"
+  var compactNY = s.match(/^([A-Za-z]+)\s+(\d{1,2})\s*[-–—]\s*(?:(?:[A-Za-z]+)\s+)?(\d{1,2})\s*$/);
+  if (compactNY) {
+    var mcny = months[compactNY[1].slice(0,3).toLowerCase()];
+    if (mcny) {
+      var ycny = _inferYearForBooking();
+      return { start: ycny + "-" + mcny + "-" + pad(compactNY[2]), end: ycny + "-" + mcny + "-" + pad(compactNY[3]) };
+    }
+  }
+  // Expanded no-year cross-month: "Dec 28 - Jan 3" → end is in year+1.
+  var expandedNY = s.match(/^([A-Za-z]+)\s+(\d{1,2})\s*[-–—]\s*([A-Za-z]+)\s+(\d{1,2})\s*$/);
+  if (expandedNY) {
+    var m1ny = months[expandedNY[1].slice(0,3).toLowerCase()];
+    var m2ny = months[expandedNY[3].slice(0,3).toLowerCase()];
+    if (m1ny && m2ny) {
+      var yny = _inferYearForBooking();
+      var endYr = yny;
+      if (parseInt(m2ny, 10) < parseInt(m1ny, 10)) {
+        endYr = String(parseInt(yny, 10) + 1);
+      }
       return {
-        start: ye + "-" + m1 + "-" + (expanded[2].length === 1 ? "0" + expanded[2] : expanded[2]),
-        end:   ye + "-" + m2 + "-" + (expanded[4].length === 1 ? "0" + expanded[4] : expanded[4]),
+        start: yny   + "-" + m1ny + "-" + pad(expandedNY[2]),
+        end:   endYr + "-" + m2ny + "-" + pad(expandedNY[4])
       };
     }
   }
