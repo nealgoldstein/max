@@ -5567,25 +5567,25 @@ function _buildStubTripFromPastedList(parseResult, rawText, opts) {
 }
 if (typeof globalThis !== "undefined") globalThis._buildStubTripFromPastedList = _buildStubTripFromPastedList;
 
-// v359.60.26: picker-first variant for paste/file imports. Mints a stub
-// trip, builds candidate stubs from each parsed place, opens the
-// candidate-explorer overlay with those stubs, and asynchronously
-// fires one batched LLM call to enrich every stub with country /
-// coords / role / stayRange / tags / whyItFits — the same shape the
-// LLM-driven runCandidateSearch path produces. The user lands in
-// the picker view (not trip view, not Research notes) with their
-// listed places ready to review, keep/reject, reorder, then commit
-// via "Create a plan →" which routes through buildFromCandidates →
-// publishTrip and builds the actual destinations.
+// v359.60.27: picker-first variant for paste/file imports. Routes
+// straight into the FULL activity-place picker (renderActivityPicker
+// — the same "What to see and do in X" view a from-scratch trip
+// produces). The pasted places become the seeded must-do list that
+// the LLM organizes into activity themes (Hike to waterfalls / Walk
+// in volcanic landscapes / etc.), each one rendered as a grouped
+// card with thumbnails, Stay/See toggles, Story links, and a map.
 //
-// Replaces both prior paste/file paths:
-//   v359.60.23 direct-build (_buildTripFromPastedList) landed on
-//     trip view immediately — no review step.
-//   v359.60.23 stub + Research notes (_buildStubTripFromPastedList)
-//     opened the notes modal but had no enrichment / no candidate
-//     review surface — Neal: "No NO NO. No research notes!! Just
-//     take each place, run it through the LLM and create a list of
-//     destinations in the picker view."
+// Implementation: mint a stub trip, seed _tb.placeName + placeContext
+// (the user's list goes into the context), then call
+// generateActivitiesForPlace which fires the same LLM prompt as the
+// regular new-trip flow. After generation we walk _tb.placeActivities
+// once to honor user-specified nights on listed places (the LLM
+// otherwise uses its own defaults).
+//
+// Replaces three prior paste/file paths:
+//   v359.60.23 direct-build         (_buildTripFromPastedList)        — lands on trip view, no review.
+//   v359.60.23 stub + Research      (_buildStubTripFromPastedList)    — opened notes modal, not picker.
+//   v359.60.26 candidate-explorer   (_llmEnrichPastedCandidates)      — wrong picker (flat list, not themed).
 async function _buildPickerFromPastedList(parseResult, rawText, opts) {
   opts = opts || {};
   if (!parseResult || !Array.isArray(parseResult.destinations) || !parseResult.destinations.length) return null;
@@ -5597,7 +5597,7 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
 
   // Mint a STUB trip so the import is recoverable on reload — the
   // trip has no destinations yet; those get built when the user
-  // commits in the candidate-explorer.
+  // commits in the activity-place picker via "What to see and do →".
   trip = {
     name: name,
     destinations: [],
@@ -5618,10 +5618,9 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
   _currentTripId = "trip-" + Date.now();
   _fileHandle = null;
 
-  // Initialize _tb (picker scratch) with brief + sensible defaults.
-  // tripMode "place" so closePlacesOverlay's "auto-keep on close"
-  // only applies to _required candidates (the user's listed places),
-  // not random LLM discoveries.
+  // Initialize _tb (picker scratch). tripMode "place" so the
+  // activity-place picker treats the user's list as the must-have
+  // set; LLM discoveries become opt-in extras.
   if (typeof _tb === "undefined" || !_tb) {
     window._tb = _tb = {};
   }
@@ -5638,43 +5637,33 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
   if (_tb.exitBuffer  === undefined) _tb.exitBuffer  = false;
   if (!Array.isArray(_tb.interests)) _tb.interests = [];
   if (!Array.isArray(_tb.drivers))   _tb.drivers   = [];
-  // Carry the raw paste/file text on _tb so future "Research notes"
-  // access (if the user ever opens it) has something to show.
+  // Carry the raw text on _tb so a later "Research notes" tap
+  // (kept as a separate affordance, not auto-opened) has something
+  // to show.
   _tb.tripMeta = { notes: rawText || "", links: [] };
 
-  // Build candidate stubs from the parsed destinations. status:"keep"
-  // because the user explicitly listed these — the picker shows them
-  // as already-kept, the user can flip to reject/unchecked if they
-  // change their mind. _required:true protects them from cascade
-  // logic that would otherwise treat them as LLM extras.
-  var normFn = (typeof globalThis._normPlaceName === "function") ? globalThis._normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
-  var stubCands = parseResult.destinations.map(function(p, i) {
-    var nightsHint = (p.nights || 0);
-    var hasCoords = (typeof p.lat === "number" && typeof p.lng === "number" && isFinite(p.lat) && isFinite(p.lng) && (p.lat !== 0 || p.lng !== 0));
-    return {
-      id: "c" + i,
-      place: p.place,
-      country: null,
-      role: nightsHint > 0 ? "base" : "pass-through",
-      stayRange: nightsHint > 0
-        ? (nightsHint + " night" + (nightsHint === 1 ? "" : "s"))
-        : "day visit",
-      whyItFits: "Loading description…",
-      tradeoffs: "",
-      tags: [],
-      lat: hasCoords ? p.lat : null,
-      lng: hasCoords ? p.lng : null,
-      status: "keep",
-      _required: true,
-      _requiredFor: ["pasted-list"],
-      _needsDescription: true,
-      _userPickedNights: nightsHint > 0,
-      nights: nightsHint,
-      order: i,
-      manuallyOrdered: false
-    };
-  });
-  _tb.candidates = stubCands;
+  // Build the place context that gets injected into the picker LLM
+  // prompt. The model treats this as "what the traveler told me they
+  // want" — it'll organize the listed places into themed activities
+  // and surface what each place is known for, instead of starting
+  // from a blank slate. Including the user-specified nights lets
+  // the LLM honor them when it sets requiredPlaces[].nights, though
+  // we also do a post-pass override to make sure.
+  var _ctxBits = parseResult.destinations.map(function(p){
+    var bits = [p.place];
+    if (p.nights > 0) bits.push("(" + p.nights + " night" + (p.nights === 1 ? "" : "s") + ")");
+    else bits.push("(day visit / see)");
+    if (p.intent) bits.push("— " + p.intent);
+    return "  • " + bits.join(" ");
+  }).join("\n");
+  var placeContext = "The traveler has already chosen these specific places for this trip — anchor your "
+    + "activities around them, surface what each one is known for, and group them into themed sections "
+    + "(\"Hike to waterfalls,\" \"Walk in volcanic landscapes,\" etc.) so the traveler can review them as "
+    + "activities, not as a flat list. Use the listed nights as the recommended stay where given. You "
+    + "may add a small number of clearly-canonical additional places that the traveler obviously missed, "
+    + "but don't pad the list.\n\n"
+    + "Places the traveler listed:\n" + _ctxBits;
+  _tb.placeContext = placeContext;
 
   // Push to trips index + persist so reload returns the user here.
   if (typeof _tripsIndex === "undefined" || !Array.isArray(_tripsIndex)) _tripsIndex = [];
@@ -5690,115 +5679,120 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
   if (typeof saveTripsIndex === "function") saveTripsIndex();
   if (typeof localSave === "function") localSave();
 
-  // enterApp so closing the explorer doesn't dump the user back on
-  // the home screen. The candidate-explorer overlay reparents to
-  // <body>, so it shows over whatever's below.
+  // enterApp so closing/canceling the picker drops the user onto a
+  // mounted trip view (showing the empty stub) instead of the bare
+  // home screen. The picker overlay is position:fixed inset:0, so
+  // it sits on top while the user is in it.
   if (typeof enterApp === "function") enterApp();
-  // Open the candidate-explorer with the stub candidates immediately
-  // (so the user sees their list right away with "Loading description…"
-  // placeholders). LLM enrichment streams in and re-renders the cards
-  // when it returns.
-  if (typeof showCandidateExplorer === "function") {
-    showCandidateExplorer(stubCands, false);
+  // Open the activity-place picker overlay in its loading state, then
+  // kick off the LLM generation. renderActivityPicker handles both
+  // states (loading + generated) by checking _tb.placeActivities; on
+  // first call it's empty so the spinner shows. generateActivitiesForPlace
+  // then fires the LLM call, fills _tb.placeActivities, and re-renders.
+  var briefOv = document.getElementById("trip-brief-overlay");
+  if (briefOv && briefOv.parentElement !== document.body) {
+    // Reparent over <body> so a display:none home-screen ancestor
+    // (now that enterApp() switched panels) doesn't hide the overlay.
+    document.body.appendChild(briefOv);
   }
+  if (typeof renderActivityPicker === "function") {
+    renderActivityPicker();
+  }
+  // Stash the user's per-place nights so the post-generation override
+  // can apply them. Keyed by normalized place name.
+  var normFn = (typeof globalThis._normPlaceName === "function") ? globalThis._normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
+  var _userPickedNights = {};
+  parseResult.destinations.forEach(function(p){
+    if (!p || !p.place) return;
+    var k = normFn(p.place);
+    if (!k) return;
+    _userPickedNights[k] = (typeof p.nights === "number") ? p.nights : 0;
+  });
+  _tb._pastedListNights = _userPickedNights;
 
-  // Kick off the batched LLM enrichment. Failure leaves the stubs
-  // in place with their placeholder descriptions — the user can
-  // still commit the trip; enrichment isn't a blocker.
+  // Fire the LLM generation. The function reads _tb.placeName /
+  // _tb.placeContext as fallbacks when the brief-form inputs aren't
+  // mounted (our case — we skipped Step 1 of the brief). On return
+  // it calls renderActivityPicker again to show the populated view.
   setTimeout(function() {
-    if (typeof _llmEnrichPastedCandidates === "function") {
-      _llmEnrichPastedCandidates(stubCands, parseResult.region || "").catch(function(err){
-        console.warn("[Max] LLM enrichment failed for pasted list:", err && err.message);
-      });
+    if (typeof generateActivitiesForPlace === "function") {
+      try {
+        var p = generateActivitiesForPlace();
+        if (p && typeof p.then === "function") {
+          p.then(function(){
+            try { _applyPastedListNights(); } catch(_) {}
+          }).catch(function(err){
+            console.warn("[Max] generateActivitiesForPlace failed for pasted list:", err && err.message);
+          });
+        }
+      } catch(err) {
+        console.warn("[Max] generateActivitiesForPlace threw for pasted list:", err && err.message);
+      }
     }
   }, 50);
 
-  return { tripId: _currentTripId, candCount: stubCands.length };
+  return { tripId: _currentTripId, destCount: parseResult.destinations.length };
 }
 if (typeof globalThis !== "undefined") globalThis._buildPickerFromPastedList = _buildPickerFromPastedList;
 
-// v359.60.26: batched LLM enrichment for paste/file candidates.
-// One prompt covers every place in the list; the model returns one
-// JSON object per place with country / role / stayRange / lat / lng /
-// tags / whyItFits — same shape runCandidateSearch's p1 prompt
-// produces. Merges back into the in-memory stubs (matching by index
-// first, then by name) so the candidate-explorer cards update in
-// place, then re-renders the explorer.
-async function _llmEnrichPastedCandidates(cands, region) {
-  if (!Array.isArray(cands) || !cands.length) return;
-  if (typeof callMax !== "function") return;
-  var placeList = cands.map(function(c, i){ return (i+1) + ". " + (c.place || ""); }).join("\n");
-  var prompt = "You are a travel expert. For each place in this user-provided list, return a JSON object with:\n"
-    + "  - place: the exact name from the list\n"
-    + "  - country: the country it's in\n"
-    + "  - role: one of \"base\", \"anchor\", or \"pass-through\"\n"
-    + "  - stayRange: e.g. \"2-3 nights\" or \"day visit\"\n"
-    + "  - lat, lng: numeric coordinates of the place\n"
-    + "  - tags: array of 2-3 short tags (e.g. [\"coastal\", \"hot springs\"])\n"
-    + "  - whyItFits: 1-2 plain-English sentences on why a traveler would stop here\n\n"
-    + (region ? ("Region context: " + region + "\n\n") : "")
-    + "Places (preserve order):\n" + placeList + "\n\n"
-    + "Return ONLY a valid JSON array (no markdown), one object per place in the same order:\n"
-    + '[{"place":"<name>","country":"…","role":"…","stayRange":"…","lat":0.0,"lng":0.0,"tags":["…"],"whyItFits":"…"}]';
-  var text = await callMax([{role:"user", content: prompt}], 3500, 60000);
-  var enriched;
-  try {
-    enriched = JSON.parse(text.replace(/```json|```/g, "").trim());
-  } catch(e) {
-    console.warn("[Max] _llmEnrichPastedCandidates: JSON parse failed:", e && e.message);
-    return;
-  }
-  if (!Array.isArray(enriched)) return;
-
+// v359.60.27: post-generation pass. The activity-place LLM picks
+// requiredPlaces[].nights from its own knowledge ("Reykjavik:
+// 2-3 nights"); for places that came from a pasted list, the user
+// already specified the nights they want. Walk _tb.placeActivities
+// once and override the nights on any matching requiredPlace.
+// Idempotent — safe to call multiple times.
+function _applyPastedListNights() {
+  if (!_tb || !_tb._pastedListNights) return;
+  if (!Array.isArray(_tb.placeActivities)) return;
   var normFn = (typeof globalThis._normPlaceName === "function") ? globalThis._normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
-  cands.forEach(function(c, i) {
-    var e = enriched[i];
-    if (!e || (typeof e.place === "string" && normFn(e.place) !== normFn(c.place))) {
-      // Fallback: try a name-match across all enriched entries.
-      e = enriched.find(function(x){ return x && normFn(x.place || "") === normFn(c.place || ""); });
-    }
-    if (!e) return;
-    if (e.country) c.country = e.country;
-    if (e.role && !c._userPickedRole) c.role = e.role;
-    if (e.stayRange && !c._userPickedNights) c.stayRange = e.stayRange;
-    var elat = parseFloat(e.lat), elng = parseFloat(e.lng);
-    if (isFinite(elat) && isFinite(elng) && (elat !== 0 || elng !== 0)) {
-      c.lat = elat;
-      c.lng = elng;
-      // Seed coarse-geocode so the map plots correctly.
-      var ck = (c.place || "").toLowerCase().trim();
-      if (ck && typeof _coarseGeocode !== "undefined") {
-        _coarseGeocode[ck] = [elat, elng];
+  var picks = _tb._pastedListNights;
+  var changes = 0;
+  _tb.placeActivities.forEach(function(it){
+    if (!it || !Array.isArray(it.requiredPlaces)) return;
+    it.requiredPlaces.forEach(function(p){
+      if (!p || !p.place) return;
+      var k = normFn(p.place);
+      if (!Object.prototype.hasOwnProperty.call(picks, k)) return;
+      var n = picks[k];
+      if (typeof n !== "number") return;
+      if (p.nights !== n) {
+        p.nights = n;
+        // n=0 means "see / day visit"; keep overnight=false in that
+        // case so the picker renders it as a See. Otherwise mark
+        // overnight=true so it survives as a real base.
+        if (n === 0) {
+          p.overnight = false;
+        } else if (p.overnight !== true) {
+          p.overnight = true;
+        }
+        changes++;
       }
-    }
-    if (Array.isArray(e.tags)) c.tags = e.tags;
-    if (e.whyItFits) {
-      c.whyItFits = e.whyItFits;
-      c._needsDescription = false;
-    }
+    });
   });
-  try { localStorage.setItem("max-coarse-geocode", JSON.stringify(_coarseGeocode)); } catch(_){}
-  // Re-render the explorer if it's still showing OUR candidates. If
-  // the user already committed (closed the explorer), _tb.candidates
-  // may have been replaced — bail in that case.
-  if (_tb && _tb.candidates === cands && typeof showCandidateExplorer === "function") {
-    var ov = document.getElementById("candidate-explorer-overlay");
-    if (ov && ov.style.display !== "none") {
-      showCandidateExplorer(cands, false);
-    }
+  if (changes > 0 && typeof renderActivityPicker === "function") {
+    console.log("[Max] applied user-specified nights to " + changes + " pasted-list place(s)");
+    renderActivityPicker();
   }
 }
-if (typeof globalThis !== "undefined") globalThis._llmEnrichPastedCandidates = _llmEnrichPastedCandidates;
+if (typeof globalThis !== "undefined") globalThis._applyPastedListNights = _applyPastedListNights;
 
-// v359.60.26: unified "open the picker from trip view" entry point.
-// Routes through the right reopener based on what data the trip has:
+// v359.60.27: unified "open the picker from trip view" entry point.
+// Routes through the right reopener based on what data is available:
 //   - mdcItems (Choreograph picker pipeline)        → reopenPickerForEdit
-//   - trip.candidates (paste/file or legacy)        → reopenCandidateExplorer
+//   - _tb.placeActivities (paste/file mid-review)   → renderActivityPicker
+//   - trip.candidates (legacy candidate-explorer)   → reopenCandidateExplorer
 //   - nothing                                       → friendly alert
 // Wired up from the trip-view Edit menu's "Edit destinations…" item.
 function _reopenPickerAny() {
   if (trip && Array.isArray(trip.mdcItems) && trip.mdcItems.length && typeof reopenPickerForEdit === "function") {
     reopenPickerForEdit();
+    return;
+  }
+  // Paste/file stub trip — picker overlay holds the data on _tb.placeActivities.
+  if (typeof _tb !== "undefined" && _tb && Array.isArray(_tb.placeActivities) && _tb.placeActivities.length && typeof renderActivityPicker === "function") {
+    var briefOv = document.getElementById("trip-brief-overlay");
+    if (briefOv && briefOv.parentElement !== document.body) document.body.appendChild(briefOv);
+    renderActivityPicker();
     return;
   }
   if (trip && Array.isArray(trip.candidates) && trip.candidates.length && typeof reopenCandidateExplorer === "function") {
