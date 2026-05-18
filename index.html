@@ -5656,14 +5656,38 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
     if (p.intent) bits.push("— " + p.intent);
     return "  • " + bits.join(" ");
   }).join("\n");
-  var placeContext = "The traveler has already chosen these specific places for this trip — anchor your "
-    + "activities around them, surface what each one is known for, and group them into themed sections "
-    + "(\"Hike to waterfalls,\" \"Walk in volcanic landscapes,\" etc.) so the traveler can review them as "
-    + "activities, not as a flat list. Use the listed nights as the recommended stay where given. You "
-    + "may add a small number of clearly-canonical additional places that the traveler obviously missed, "
-    + "but don't pad the list.\n\n"
-    + "Places the traveler listed:\n" + _ctxBits;
+  // v359.60.28: stronger mandate — EVERY listed place must appear in
+  // the output. Previous "anchor your activities around them" was too
+  // soft; the model would drop secondary towns (Selfoss, Vík,
+  // Egilsstaðir, Akureyri, Snæfellsnes town) in favor of higher-profile
+  // ones in the same region. Now stated as a hard constraint, with an
+  // explicit "if you're not sure how to slot it, put it in 'Other
+  // places to consider'" escape valve so omission isn't an option.
+  // A backstop post-pass (_backstopPastedListPlaces) still injects any
+  // missing place as a stub activity if the model still drops one.
+  var placeContext = "MANDATORY PLACE LIST — read this first:\n"
+    + "The traveler has already chosen these specific places for this trip. EVERY ONE of these places "
+    + "MUST appear in your output as a requiredPlace under at least one activity. This is a hard "
+    + "constraint, not a hint. If you're not sure how to thematically slot a place, put it under an "
+    + "\"Other places to consider\" section — but never omit a listed place.\n\n"
+    + "Use the listed nights as the recommended stay where given. Anchor your activities AROUND these "
+    + "places (group them into themed sections like \"Hike to waterfalls,\" \"Walk in volcanic landscapes,\" "
+    + "etc.) so the traveler reviews them as activities, not as a flat list. You may add a small "
+    + "number of clearly-canonical additional places that the traveler obviously missed, but don't pad.\n\n"
+    + "Places the traveler listed (EVERY ONE must appear in your output):\n" + _ctxBits;
   _tb.placeContext = placeContext;
+  // Stash the parsed list so the backstop post-pass can detect any
+  // place the LLM dropped despite the mandate.
+  _tb._pastedListPlaces = parseResult.destinations.map(function(p){
+    return {
+      place: p.place,
+      country: p.country || parseResult.region || "",
+      nights: (typeof p.nights === "number") ? p.nights : 0,
+      intent: p.intent || "",
+      lat: (typeof p.lat === "number") ? p.lat : null,
+      lng: (typeof p.lng === "number") ? p.lng : null
+    };
+  });
 
   // Push to trips index + persist so reload returns the user here.
   if (typeof _tripsIndex === "undefined" || !Array.isArray(_tripsIndex)) _tripsIndex = [];
@@ -5720,6 +5744,10 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
         var p = generateActivitiesForPlace();
         if (p && typeof p.then === "function") {
           p.then(function(){
+            // Order matters: inject missing places first (so the
+            // nights pass has something to write to), then apply
+            // user-specified nights to every requiredPlace.
+            try { _backstopPastedListPlaces(); } catch(_) {}
             try { _applyPastedListNights(); } catch(_) {}
           }).catch(function(err){
             console.warn("[Max] generateActivitiesForPlace failed for pasted list:", err && err.message);
@@ -5775,6 +5803,82 @@ function _applyPastedListNights() {
   }
 }
 if (typeof globalThis !== "undefined") globalThis._applyPastedListNights = _applyPastedListNights;
+
+// v359.60.28: backstop pass that detects user-listed places the LLM
+// failed to surface (despite the MANDATORY PLACE LIST clause in
+// placeContext) and injects each missing place as a stub activity
+// under an "Other places to consider" section. Without this, the
+// model occasionally drops secondary hub towns (Selfoss, Vík,
+// Egilsstaðir, Akureyri, Snæfellsnes town) in favor of higher-profile
+// ones in the same region — but the user listed those places
+// explicitly and expects to see them.
+//
+// Stub shape mirrors the activity-place picker's normal item:
+// type="activity", category/section set, iconic:false, checked:true,
+// requiredPlaces:[{place, country, nights, overnight, _keep:true}].
+// _keep:true so the place survives continuePlaceModeToStep2's filter.
+function _backstopPastedListPlaces() {
+  if (!_tb || !Array.isArray(_tb._pastedListPlaces) || !_tb._pastedListPlaces.length) return;
+  if (!Array.isArray(_tb.placeActivities)) return;
+  var normFn = (typeof globalThis._normPlaceName === "function") ? globalThis._normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
+  // Collect every place name that appears as a requiredPlace anywhere
+  // in the LLM's output.
+  var coveredKeys = {};
+  _tb.placeActivities.forEach(function(it){
+    if (!it || !Array.isArray(it.requiredPlaces)) return;
+    it.requiredPlaces.forEach(function(p){
+      if (p && p.place) coveredKeys[normFn(p.place)] = true;
+    });
+    // Endpoints and viableLocations count as "covered" too — a place
+    // surfaced only as a train terminus or aurora-viewing spot still
+    // shows up on the picker map and in the activity list.
+    (it.endpoints || []).forEach(function(p){
+      if (p && p.place) coveredKeys[normFn(p.place)] = true;
+    });
+    (it.viableLocations || []).forEach(function(p){
+      if (p && p.place) coveredKeys[normFn(p.place)] = true;
+    });
+  });
+  var missing = _tb._pastedListPlaces.filter(function(p){
+    return p && p.place && !coveredKeys[normFn(p.place)];
+  });
+  if (!missing.length) return;
+  console.warn("[Max] _backstopPastedListPlaces: LLM dropped " + missing.length +
+    " user-listed place(s): " + missing.map(function(p){return p.place;}).join(", "));
+  var nowTs = Date.now();
+  missing.forEach(function(p, i){
+    var hasNights = (typeof p.nights === "number" && p.nights > 0);
+    var stub = {
+      id: "plm_pasted_" + nowTs + "_" + i,
+      name: hasNights ? ("Stay in " + p.place) : ("Stop in " + p.place),
+      type: "activity",
+      category: "scenery-nature",
+      section: "Other places to consider",
+      description: p.intent
+        ? p.intent
+        : (hasNights
+            ? ("A base the traveler listed for " + p.nights + " night" + (p.nights === 1 ? "" : "s") + ".")
+            : "A stop the traveler listed."),
+      iconic: false,
+      checked: true,
+      requiredPlaces: [{
+        place: p.place,
+        country: p.country || "",
+        nights: hasNights ? p.nights : 0,
+        lat: (typeof p.lat === "number") ? p.lat : 0,
+        lng: (typeof p.lng === "number") ? p.lng : 0,
+        overnight: hasNights,
+        _keep: true,
+        _isDayTrip: false,
+        _dayTripHub: ""
+      }],
+      durationHours: hasNights ? 24 : 4
+    };
+    _tb.placeActivities.push(stub);
+  });
+  if (typeof renderActivityPicker === "function") renderActivityPicker();
+}
+if (typeof globalThis !== "undefined") globalThis._backstopPastedListPlaces = _backstopPastedListPlaces;
 
 // v359.60.27: unified "open the picker from trip view" entry point.
 // Routes through the right reopener based on what data is available:
@@ -14973,8 +15077,31 @@ function _renderPlacePickerMap(targetId){
     // was the visible "Switzerland during the wait" Neal flagged.
     // Use _coarseGeocode lookup against _tb.region; fall back to
     // Switzerland only when no region is set.
+    // v359.60.28: tolerant region→coords lookup so a multi-word
+    // region like "Iceland Road Trip 2026" (from the paste-list
+    // parser's tripName-derived region) doesn't miss the
+    // _coarseGeocode["iceland"] entry. Try exact key, then any
+    // whitespace-split token, then a substring scan across known
+    // keys. Previously only the exact lookup was attempted, which
+    // is why file-loaded trips kept centering on Switzerland.
     var _pmRegionKey = ((_tb && _tb.region) || "").toLowerCase().trim();
-    var _pmSeed = (_pmRegionKey && typeof _coarseGeocode !== "undefined" && _coarseGeocode[_pmRegionKey]) || null;
+    var _pmSeed = null;
+    if (_pmRegionKey && typeof _coarseGeocode !== "undefined") {
+      if (_coarseGeocode[_pmRegionKey]) {
+        _pmSeed = _coarseGeocode[_pmRegionKey];
+      } else {
+        var _pmTokens = _pmRegionKey.split(/[\s,()/\-]+/).filter(Boolean);
+        for (var _pti = 0; _pti < _pmTokens.length && !_pmSeed; _pti++) {
+          if (_coarseGeocode[_pmTokens[_pti]]) _pmSeed = _coarseGeocode[_pmTokens[_pti]];
+        }
+        if (!_pmSeed) {
+          var _pmKeys = Object.keys(_coarseGeocode);
+          for (var _pki = 0; _pki < _pmKeys.length && !_pmSeed; _pki++) {
+            if (_pmRegionKey.indexOf(_pmKeys[_pki]) >= 0) _pmSeed = _coarseGeocode[_pmKeys[_pki]];
+          }
+        }
+      }
+    }
     var _pmInitView = (_pmSeed && isFinite(_pmSeed[0]) && isFinite(_pmSeed[1])) ? _pmSeed : [46.8, 8.2];
     var leaflet = L.map(mapDiv, {zoomControl:true,scrollWheelZoom:allowScroll,attributionControl:false}).setView(_pmInitView, 6);
     // v353.2: place-picker map ("What to see and do in {place}") now
