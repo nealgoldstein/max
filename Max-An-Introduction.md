@@ -1,4 +1,6 @@
-# Max — The Existential Traveler
+# Max: An Introduction
+
+> *Last updated: v359.60.34 — paired with the [Operating Manual](Max-Operating-Manual.md) which covers the same surfaces in mechanical detail.*
 
 Max is a travel-planning app for people who do their own research and
 want a working canvas to push back against — not a plug-and-play
@@ -25,30 +27,54 @@ forecasts, in-app Q&A) and stays out of the way everywhere else.
 
 ## How a trip flows through Max
 
+Max has two top-level views you bounce between as you plan:
+
+- **Research view** — place-shaped. The list of places (overnight
+  hubs, day trips, waysides, things you're considering), grouped
+  by activity theme. This is where you decide *what* you're doing.
+- **Trip view** — plan-shaped. The sequenced itinerary with dates,
+  the map, the day-by-day. This is where you decide *when* and
+  *in what order*.
+
+Editing either side updates the other. Add a place from the trip
+view and it shows up in research. Drop a place from research and
+it disappears from the trip. The goal is iteration without losing
+work — you can change your mind freely.
+
 1. **You give Max a brief.** Where you'd like to go, roughly when,
    how long, and the *intent* (active outdoors, museums and food,
    hot springs and remote drives, 2-week family with grade-schoolers).
    The brief is open-ended; Max reads it the way a knowledgeable
    friend would.
 
-2. **Max suggests candidate destinations.** Cities, towns, and
-   regions that fit the brief, with a one-line rationale each.
-   Pick a subset. Drop them in any order. Allocate nights.
+2. **Max opens the research view** with candidate places grouped
+   into activity themes ("Hike to waterfalls," "Walk in volcanic
+   landscapes," "Soak in thermal baths"). Each theme bundles a few
+   places where that activity is especially worthwhile, with a
+   one-line rationale and a thumbnail. Check what you want, ignore
+   what you don't, add anything Max missed.
 
-   ![Destination picker with candidate cards](images/02-picker-candidates.png)
-   > *Capture: picker view showing 4–8 candidate destination cards
-   > with their rationale lines visible. Include the brief at the
-   > top so the reader sees the cause-and-effect.*
+   ![Research view with grouped activity themes and a map](images/02-picker-candidates.png)
+   > *Capture: research view showing 4–8 activity sections (e.g.
+   > "Hike to waterfalls", "Walk in volcanic landscapes") each with
+   > multiple places under it, thumbnails visible, map on the right.*
 
-3. **Max builds a starting itinerary.** Per-destination day-by-day
-   plans with iconic sights pre-seeded across days, balanced
-   against your pace preference (hours of sightseeing per day, max
-   big sights per day).
+3. **Max builds a starting itinerary.** Click *Choreograph my trip*
+   in the research view and Max sequences your kept places into a
+   trip — assigning nights, ordering destinations geographically,
+   distributing iconic sights across days, balanced against your
+   pace preference (hours of sightseeing per day, max big sights
+   per day).
 
-4. **You adjust.** Drag items between days, add things you've
-   researched, cross out things that don't appeal, tweak dates,
-   add/remove destinations. Max recomputes the dates, refits the
-   plan, surfaces conflicts.
+4. **You adjust.** Drag destinations to reorder, bump nights with
+   the +/− stepper, click any pin on the trip map to change its
+   role (Overnight stay / Day trip / Wayside / See / Remove —
+   one unified popover handles all five). Add multi-stop day-trip
+   loops by adding a destination "to" an existing day trip from
+   the popover. Click the dates strip at the top of the trip view
+   to change start or end dates — Max scales destinations
+   proportionally. Open *Edit → Open research* to go back to the
+   research view and add or remove places. Everything keeps in sync.
 
 5. **You book.** Paste your hotel/flight/restaurant/tour
    confirmations into the Tracker — Max extracts the details and
@@ -68,26 +94,28 @@ forecasts, in-app Q&A) and stays out of the way everywhere else.
 
 If you've already done your research and have a list of places
 written down somewhere — your own notes, a friend's email, a
-ChatGPT conversation — you can paste it in and skip the brief +
-candidate-picking steps. Two entry points:
+ChatGPT conversation — you can paste or upload it and Max will
+seed the research view with those places. You skip the brief
+step; Max still runs the LLM, but anchored on *your* list rather
+than starting from scratch. Two entry points:
 
 - **Home screen → Paste a list.** Sits next to *Start a new trip*.
-  Opens a paste box. On Open, Max mints a stub trip and drops the
-  pasted text into the trip's Research notes, opening that modal
-  right away. The trip has no destinations yet — review the text
-  in Research, then click **🪄 Make destinations from this list**
-  when you're ready to commit. Pasting is for when you're still
-  thinking.
-- **Home screen → Load from file.** Loading a `.txt` / `.md` file
-  goes the other way: Max parses it and commits destinations
-  directly, landing you on the trip view with everything
-  populated. Loading a file implies you've already curated; no
-  intermediate review step.
-- **Research notes → 🪄 Make destinations from this list.** Inside
-  any trip's Research notes modal, parses the current notes text
-  and appends the destinations to the trip you already have open.
-  Useful when you've been collecting places in research and want
-  to promote them to the trip without leaving the modal.
+  Opens a paste box. On Open, Max parses the text, runs each
+  place through the LLM to group them into activity themes, and
+  lands you in the research view with everything populated.
+- **Home screen → Load from file.** Same flow for `.txt` / `.md`
+  files. Pick the file, Max parses it, lands you in the research
+  view. (`.json` files still work too — those are full Max trip
+  exports and restore the entire trip as-saved, skipping the
+  research step.)
+
+Whichever entry point you use, every place from your list is
+guaranteed to land in research — if the LLM drops one while
+organizing themes, a backstop catches it and adds it to an
+"Other places to consider" section. Token-aware matching means
+Max won't duplicate a place just because the LLM phrased it
+differently ("Snæfellsnes" vs "Snæfellsnes Peninsula" count as
+the same place; "Ásbyrgi" vs "Ásbyrgi Canyon" likewise).
 
 #### Format
 
@@ -186,8 +214,11 @@ What the parser understands:
 - Lines starting with `#` and blank lines are skipped.
 
 Once the destinations land you adjust like normal: bump nights
-with the +/- spinner, change a stay to a see (or remove it) via
-the role popover on each destination, drag the order, etc.
+with the +/− spinner, change a stay to a see (or to a day-trip
+stop, or to a wayside along a transit leg, or remove it) via
+the unified stop popover on each destination, drag the order,
+etc. See *The unified stop popover* below for the full set of
+role transitions.
 
 ---
 
@@ -251,6 +282,74 @@ item to reveal actions (story, done, move, book, delete).
 > at least one shows the per-day weather chip (🌤️ N°/N°), one
 > shows a hotel check-in or check-out chip, one shows a few
 > planned items.*
+
+### The unified stop popover
+
+Click any pin on the trip map (overnight blue, day-trip purple,
+wayside small purple, see grey) and one dialog opens with the
+same five options every time:
+
+- **Overnight stay** — a real base with at least one night to
+  sleep. The destination shows on the map as a numbered blue pin
+  and gets its own slot in the itinerary.
+- **Day trip** — visited from one of your overnight hubs and
+  returned the same day. Choose the hub in the *From* dropdown.
+  Pick *New day trip* to mint a fresh route, or *Add to* to join
+  an existing one (Golden Circle pattern — see "Multi-stop day
+  trips" below).
+- **Wayside** — a stop on the way between two hubs, no overnight.
+  Pick which transit leg it sits on; the leg's polyline bends
+  through the wayside automatically.
+- **See** — kept on the trip as a potential stop but with no
+  nights, no day-trip role, no wayside role. Renders as a grey
+  pin. Useful while you're still deciding.
+- **Remove from trip** — drops the place entirely. (It stays in
+  the research view, so you can re-add it later.)
+
+The current role is marked *(current)* and highlighted. Apply
+commits the change and re-cascades dates / nights / map.
+
+### Multi-stop day trips
+
+A day trip can hold more than one stop. The Golden Circle pattern
+is the classic example: Reykjavík → Þingvellir → Geysir →
+Gullfoss → Reykjavík, three stops on one route, one day. Build
+one in either order:
+
+- Convert each place to a day trip individually, all from the
+  same hub. Max merges them into one route automatically when
+  you choose *Add to* an existing day trip from the popover.
+- Or start with one day trip from the hub, then for each
+  additional place open the popover and pick *Day trip → Add to
+  → [the existing route]*.
+
+By default new stops slot into the geographically sensible
+position — Max computes the cheapest insertion (the gap that
+adds the least extra driving). Override via the *Insert after*
+dropdown if you want a specific order ("Insert after Þingvellir"
+puts the new stop between Þingvellir and Geysir, regardless of
+geometry).
+
+On the map, multi-stop day trips render as a single purple loop
+hub → stop₁ → stop₂ → … → hub.
+
+### Trip dates editor
+
+Click the dates strip at the top of the trip view (the bold
+"Mon, Sep 15, 2026 – Mon, Oct 2, 2026" line with the small ✎
+icon) — or use *Edit → Trip dates…* — to open a modal with Start
+and End inputs. Two rules:
+
+- **Change Start only:** the whole trip shifts by the delta.
+  Nights per destination stay the same.
+- **Change End only:** Max scales destinations proportionally
+  to fit the new total. A 14→16 day trip stretches the longer
+  stays first; a 14→12 day trip trims them, never below one
+  night per overnight.
+
+A live preview at the bottom of the modal says exactly what
+will happen ("17 days · 16 nights · shifted later by 3 days,
+extended by 2 nights") so there are no surprises.
 
 ### Maps
 
@@ -406,15 +505,51 @@ console.anthropic.com.
 
 ### Preferences
 
-Two cross-device prefs Max uses to shape your trips:
+Preferences shape every trip Max builds for you, and they sync
+across devices when you're signed in. Open the panel from
+*Settings → ⚙* in the trip-view menu bar.
 
-- **Pace** — hours of sightseeing per day (default 4)
-- **Max big sights per day** — how many 2+ hour sights you can
-  stomach in a single day (default 3)
+**Pace** (how dense each day feels):
 
-Set during the welcome flow. Re-edit anytime via the Welcome
-button (home screen) or the ⚙ Preferences link in the Sync modal.
-Per-trip override available in the brief.
+- *Hours of sightseeing per day* (default 6)
+- *Max big sights per day* — 2+ hour anchors (default 2)
+- *Pace mode* — Relaxed / Balanced / Intense
+- *Max drive time for a day trip* — Max won't propose a day trip
+  more than this many hours from a hub (default 3h)
+- *Day-trip radius* — same idea but in kilometres for places without
+  good driving data (default 60 km)
+
+**You** (signals Max uses for filtering):
+
+- *Mobility* — fit / moderate / limited / elderly / other
+- *Dietary* — free-text
+- *Languages spoken* — free-text
+
+**Party** (used to seed every new brief):
+
+- *Travelers* — default headcount
+- *With kids* — toggles the kid-friendly filter
+
+**Defaults for transport + stays** — free-text fields that
+prefill every new brief.
+
+**Avoidances** — chips for high altitude / crowds / extreme heat
+/ extreme cold / long drives, plus an "other" textarea. Soft —
+Max weighs but doesn't refuse.
+
+**Display:**
+
+- *Distance* — metric / imperial
+- *Temperature* — Celsius / Fahrenheit
+- *Date format* — *Mon, Aug 5, 2026* (default) · *Mon, 5 Aug 2026*
+  · *ISO (2026-08-05)* · *Locale (browser default)*
+- *Currency* — three-letter code for cost displays
+
+**API key** (advanced) — a personal Anthropic key for the 💬 Ask
+chat. Most features ride on a shared server key once you're signed in.
+
+Any field can be overridden per-trip in the brief; the override
+sticks for that trip only.
 
 ### Cross-device sync + PWA
 

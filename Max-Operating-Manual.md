@@ -1,7 +1,11 @@
-# User-facing implementation notes
+# Max: Operating Manual
+
+> *Last updated: v359.60.34 — paired with the [Introduction](Max-An-Introduction.md) which covers the same surfaces conceptually.*
 
 What the people using Max actually see and how each surface works.
-Updated v353.6.
+This doc tracks the mechanical details (which menu opens what,
+which dropdown has which options, where data is stored); the
+Introduction tells the story of why each surface exists.
 
 ## Sign-in
 
@@ -18,23 +22,93 @@ returns a clickable link directly inside the modal:
 
 Same flow on phone and laptop. The link is one-time-use, 15-minute TTL.
 
-## Preferences (pace + max big sights)
+## Preferences
 
-Two server-synced user prefs that follow the account across devices:
+Open from **Settings → ⚙ Trip defaults…** in the trip-view menu
+bar (or from the activity-place picker chrome's ⚙ button when
+you're mid-research). The panel groups around 17 fields. Every
+pref syncs across devices when you're signed in (MaxDB.prefs) and
+can be overridden per-trip via the brief.
 
-- **paceHours** — hours of sightseeing per day
-- **sightsPerDay** — max big (2+ hour) sights per day
+### Pace
 
-Set during the first-sign-in welcome modal. Re-edit any time:
+| Field | Pref key | Default | Notes |
+|---|---|---|---|
+| Hours of sightseeing per day | `paceHours` | 6 | number, 2–10 |
+| Max big sights per day | `sightsPerDay` | 2 | number, 1–6 (2+ hour anchors) |
+| Pace mode | `paceMode` | `enough` | `loose` / `enough` / `notmuch` |
+| Max drive time for a day trip | `dayTripHours` | 3 | hours, 1–6 |
+| Day-trip radius | `dayTripRadiusKm` | 60 | km, 10–250 |
 
-- **Home screen header → Welcome** badge → opens the modal
-- **⇄ Sync modal → ⚙ Preferences (pace, sights)** at the bottom
-  — works from inside a trip view too
+Numbers, not sliders (sliders were flaky on iOS touch).
 
-Numbers, not sliders (sliders were flaky on iOS touch). Per-trip
-override available in the picker brief; if you leave the brief
-fields at the pref's default value, the trip lives-tracks the
-pref. If you change them per-trip, that override sticks.
+### You
+
+| Field | Pref key | Notes |
+|---|---|---|
+| Mobility | `mobility` | chip: fit / moderate / limited / elderly / other |
+| Dietary | `dietary` | free-text |
+| Languages | `languages` | free-text |
+
+### Party
+
+| Field | Pref key | Default | Notes |
+|---|---|---|---|
+| Travelers | `travelersCount` | 2 | number, 1–40 |
+| With kids | `withKids` | false | toggles the kid-friendly filter |
+
+### Defaults for new trips
+
+| Field | Pref key | Notes |
+|---|---|---|
+| Transport | `transport` | free-text — prefills the brief |
+| Accommodation | `accommodation` | free-text — prefills the brief |
+
+### Avoidances
+
+`avoidDefaults` is an object of `{altitude, crowds, heat, cold,
+longDrives}` booleans; `avoidOtherDefaults` is a free-text
+textarea. Soft preferences — Max weighs them but won't refuse to
+plan around them.
+
+### Display
+
+| Field | Pref key | Values |
+|---|---|---|
+| Distance | `distanceUnits` | `metric` (default) / `imperial` |
+| Temperature | `temperatureUnits` | `celsius` (default) / `fahrenheit` |
+| Date format | `dateFormat` | `us-long` (default — `Mon, Aug 5, 2026`) · `intl-long` (`Mon, 5 Aug 2026`) · `iso` (`2026-08-05`) · `locale` (browser default) |
+| Currency | `currency` | three-letter code, used in cost displays |
+
+The `dateFormat` pref drives `fmtD()` which formats every date in
+the trip view (per-leg dates, day labels, the trip-overview strip).
+Old `us` pref values soft-migrate to `us-long` so existing accounts
+keep working.
+
+### API key
+
+`maxApiKey` (localStorage only — never synced). The personal
+Anthropic key for the 💬 Ask chat. Most features ride on the shared
+server key when you're signed in; the BYOK fallback exists for
+unsigned-in use and for chat (which always uses your own key so
+cost is per-user, not per-account).
+
+### Where prefs live
+
+- **localStorage** while you're using the app (every read goes
+  through `_defaultX()` helpers that hit `MaxDB.prefs.get`).
+- **Server** when signed in — pushed via PATCH /user/prefs on
+  every change (600ms debounce + exponential backoff, gives up
+  after 6 consecutive failures). Pulled on sign-in + page load
+  + tab focus.
+
+### Per-trip overrides
+
+Every field in the brief that matches a pref defaults to the
+pref's current value. Leave the brief field at the default and
+the trip lives-tracks the pref (changing the pref reflows the
+trip). Change it per-trip and the override sticks — the trip
+ignores future pref changes for that field.
 
 ## PWA install (Add Max as an app)
 
@@ -325,3 +399,204 @@ still display correctly, but new entries always set it to null.
 - Resize handles (panel widths)
 - "max-onboarded" flag (welcome modal is per-device)
 - "max-pwa-installed" flag (install state per-device)
+
+## Trip-view menu bar
+
+The trip view's top chrome runs as a Mac-style menu bar with four
+top-level entries:
+
+- **← Home** (top-level since v359.60.34, was buried in File before) —
+  one-click return to the trips list.
+- **File** — Save now · Copy this trip · Export (PDF, calendar…) ·
+  📋 Paste booking confirmation · ↗ Share trip · — · ← All trips
+  (duplicates the top-level Home for muscle memory).
+- **Edit** — ✎ Edit trip inputs… · 📅 Trip dates… (v359.60.30) ·
+  🔬 Open research (v359.60.29 — was "Edit destinations") · — ·
+  🔍 Search this trip · 💬 Ask Max…
+- **Settings** — ⚙ Trip defaults… · — · 🔑 Set API key…
+
+Hovering across menu labels switches focus like macOS; clicking
+outside any dropdown dismisses it.
+
+## Open research (from the trip view)
+
+**Edit → 🔬 Open research** routes through `_reopenPickerAny()`,
+which picks the right reopener based on what data the trip carries:
+
+- Trip has `mdcItems` (Choreograph picker pipeline) → opens the
+  activity-place picker via `reopenPickerForEdit()`.
+- Trip has `_tb.placeActivities` already in memory (mid-review from
+  a paste/file import) → re-renders the activity-place picker on
+  the existing scratch state.
+- Trip has `trip.candidates` (legacy candidate-explorer trips) →
+  opens that overlay via `reopenCandidateExplorer()`.
+- None of the above → friendly alert.
+
+The research overlay reparents to `<body>` so it sits on top of the
+trip view without z-index fights.
+
+## Unified stop popover
+
+Click any pin on the trip-overview map (or any role-indicator on a
+destination card) — overnight pins, day-trip pins, wayside pins,
+and grey "see" pins all open the same dialog. Replaces three older
+popovers (`_openTripDestRolePopover`, `_openTripDayTripPopover`,
+`_openTripWaysidePopover`) with one entry point: `_openTripStopPopover(ctx)`.
+
+The dialog shows the same five options every time. The current
+role is marked *(current)* and visually highlighted:
+
+| Role | What it does on Apply |
+|---|---|
+| Overnight stay | Promote to a real destination (`_convertSeeToOvernight` if current was See; ungroup helpers if it was day-trip/wayside) |
+| Day trip | Splice into a day-trip route from a chosen hub. *New day trip* mints a route via `convertDestToDayTrip`; *Add to* appends to an existing route via `addDestToExistingDayTripRoute` |
+| Wayside | Splice into a transit route as a stop. *Natural* route = the prev→next leg of the source destination; other routes are listed too via `convertDestToWaysideOnRoute` |
+| See | Drop the role but keep the place on the trip with 0 nights — grey pin |
+| Remove from trip | Drop the place entirely (it stays in research / candidates) |
+
+### Day-trip sub-fields
+
+When *Day trip* is the picked role, three nested fields appear:
+
+- **From** — hub dropdown (every overnight destination on the trip).
+- **○ New day trip** vs **○ Add to** — radio. *Add to* enables a
+  dropdown listing every day-trip route already on the trip
+  (with "(from X)" labels). Picking an "Add to" route auto-syncs
+  the From dropdown to that route's hub.
+- **Insert** — position dropdown. *Smart (closest neighbor)* is the
+  default; explicit positions are *At the start*, *After ⟨stopᵢ⟩*
+  for each existing stop, and *At the end*.
+
+Both inner radios and the dropdowns auto-check the outer *Day trip*
+radio when interacted with, so Apply reads the right transition
+even when the user only touches the nested controls.
+
+### Wayside sub-field
+
+When *Wayside* is the picked role, a single dropdown lists every
+transit route the place can sit on:
+
+- The synthetic *natural* prev→next route (the result of merging the
+  source destination's two neighbouring legs) — selected by default
+  when present.
+- Every other transit route on the trip, except routes where the
+  source destination is itself an endpoint (you can't be "along the
+  way" to yourself).
+
+Both options are mapped via `convertDestToWaysideOnRoute(destId,
+routeId)`; the natural route falls back to `convertDestToWayside`
+which collapses the source's own neighboring legs.
+
+## Multi-stop day trips
+
+A day-trip route's `route.planItems[]` holds an ordered list of
+stops. The map renders the loop as one polyline: `hub → stop₁ →
+stop₂ → … → hub`. Stops auto-sort by distance from the hub on
+new-route creation; subsequent inserts respect either explicit
+position or smart placement, never re-sorting the existing order
+(that was clobbering manual order pre-v359.60.31).
+
+### Adding a stop to an existing loop
+
+`addDestToExistingDayTripRoute(destId, routeId, opts)` accepts:
+
+- `opts.afterStopId` — `"_start"` / `"_end"` / `<stopId>` /
+  null|undefined for smart placement.
+- Smart placement runs `_smartInsertIndexInDayTripRoute()` —
+  cheapest-insertion: for each gap, compute
+  `dist(A, new) + dist(new, B) - dist(A, B)`; insert into the gap
+  with the smallest delta. Equivalent to the classic TSP
+  cheapest-insertion heuristic.
+
+The hub absorbs the source's nights as the destination is removed
+from `trip.destinations`. Dates cascade trip-wide via
+`_ftRecomputeTripDates`.
+
+### Tooltip
+
+Single-stop route → *"Diamond Beach · day trip from Skaftafell"*.
+Multi-stop → *"Diamond Beach · stop on the Skaftafell loop (with
+Fjallsárlón, Jökulsárlón)"*. The "with" list comes from
+`dtStops` (the array used for the polyline render, sorted by hub
+distance) minus the current stop.
+
+## Trip dates editor
+
+**Edit → 📅 Trip dates…** OR click the dates strip at the top of
+the trip view (a small ✎ icon at the right edge of the bold date
+range signals the affordance). Opens `_openTripDatesEditor()`.
+
+Modal contents:
+
+- *Start* (date input) — prefilled with `trip.destinations[0].dateFrom`.
+- *End* (date input) — prefilled with `trip.destinations[last].dateTo`.
+- Live preview line under the inputs:
+  - "*N* days · *M* nights"
+  - "shifted earlier/later by *X* days" (start changed)
+  - "extended/shortened by *Y* nights (scaled across destinations)" (end changed)
+  - "no change" when neither moved.
+- Apply / Cancel buttons.
+
+### Apply rules
+
+- **Start only changed** → first destination anchored at the new
+  date; every subsequent destination cascades via
+  `_ftRecomputeTripDates`. Nights per destination unchanged.
+- **End only changed** → total nights distributed proportionally
+  across destinations with `nights > 0` (0-night "see" destinations
+  stay at 0). Uses largest-remainder rounding so the final sum
+  equals the new target exactly. Overnight destinations never drop
+  below 1 night.
+- **Both changed** → anchor at new start, then proportional scale
+  to fit the new total.
+
+After the per-destination nights are settled,
+`_ftRecomputeTripDates` walks the trip and rewrites every
+`dateFrom`/`dateTo`. `_ftResizeDestDays` resizes each destination's
+`days[]` array. `trip.brief.startDate` / `duration` / `endDate`
+are mirrored so re-edits stay consistent. Fires
+`_emitTripMutation({reason:"tripDatesEdit"})`.
+
+## Paste / load an existing list
+
+Routes both entry points (Home → *Paste a list* and Home → *Load
+from file*) through `_buildPickerFromPastedList(parseResult, rawText)`:
+
+1. **Parse** — `parsePlacesList(text)` reads the file/textarea.
+   Format details in [Max-An-Introduction.md](Max-An-Introduction.md#shortcut-already-have-a-list).
+2. **Mint stub trip** — `trip = { destinations: [], brief: {region, when, duration, …} }`,
+   pushed to the trips index and persisted.
+3. **Normalize the region** — `_tb.region` is set from
+   `parseResult.region`, but if that's a multi-word string like
+   "Iceland Road Trip" the helper does a token-lookup against
+   `_coarseGeocode` and substitutes the matching country
+   ("iceland"). This means the picker LLM prompt reads "A traveler
+   wants to go to Iceland" instead of the nonsensical raw region.
+4. **Seed `_tb.placeContext`** — the user's parsed places get
+   formatted into a "MANDATORY PLACE LIST" block prepended to the
+   prompt: every listed place MUST appear in the LLM's output as
+   a `requiredPlace` under at least one activity.
+5. **Open the activity-place picker** — `enterApp()` lands on the
+   trip view, then `renderActivityPicker()` shows the picker
+   overlay with a loading spinner.
+6. **LLM generation** — `generateActivitiesForPlace()` fires the
+   same prompt the regular Choreograph flow uses; LLM returns
+   themed activity items. `_tb.placeActivities` is populated.
+7. **Post-pass: `_applyPastedListNights`** — overrides
+   `requiredPlace.nights` with the user-specified value for any
+   place the user gave explicit nights for.
+8. **Post-pass: `_backstopPastedListPlaces`** — any user-listed
+   place the LLM dropped (despite the mandatory clause) gets
+   injected as a stub activity under "Other places to consider."
+   Matching uses **token-subset**: a user place is covered if its
+   normalized tokens are a subset of some covered name's tokens.
+   This treats "Snæfellsnes" (user) and "Snæfellsnes Peninsula"
+   (LLM) as the same place, so no duplicate stub is created.
+9. **User reviews** in the activity-place picker, ticks/unticks
+   activities and places, then clicks *Choreograph my trip →* to
+   commit destinations.
+
+If the user bails before clicking Choreograph, the stub trip is
+already in the trips index — `_reopenPickerAny()` (Edit → Open
+research) re-mounts the picker on the same `_tb.placeActivities`
+so the work isn't lost.

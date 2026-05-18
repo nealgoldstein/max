@@ -2041,6 +2041,11 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
           <button class="mw-item" onclick="_mwClose();if(_currentTripId&&confirm('Duplicate this trip? A copy will be created on the home screen.'))duplicateTrip(_currentTripId,false);">Copy this trip</button>
           <button class="mw-item" onclick="_mwClose();showExportTripModal();">Export (PDF, calendar…)</button>
           <button class="mw-item" onclick="_mwClose();showGlobalPasteConfirmationModal();">&#128203;&nbsp; Paste booking confirmation</button>
+          <!-- v359.60.35: batch booking import — multiple confirmations
+               and cancellations in a single paste. Detects free-text
+               vs structured/CSV; cancellations match existing bookings
+               by confirmation # or name+dates and remove them. -->
+          <button class="mw-item" onclick="_mwClose();showBatchImportBookingsModal&amp;&amp;showBatchImportBookingsModal();">&#128229;&nbsp; Import bookings&hellip;</button>
           <button class="mw-item" onclick="_mwClose();showShareTripModal();">&#x2197;&nbsp; Share trip</button>
           <div class="mw-sep"></div>
           <button class="mw-item" onclick="_mwClose();goHome();">&larr;&nbsp; All trips</button>
@@ -38848,6 +38853,596 @@ function showGlobalPasteConfirmationModal() {
   }
   showPasteConfirmationModal(trip.destinations[0].id);
 }
+
+// v359.60.35: batch booking import. Paste multiple booking
+// confirmations + cancellations (one big text dump from booking.com
+// emails OR a CSV/structured export); Max splits, parses, routes
+// each one to the right destination, and applies cancellations by
+// removing matching existing bookings. Single LLM call returns a
+// JSON array; CSV is parsed deterministically (no LLM).
+function showBatchImportBookingsModal() {
+  if (!trip || !trip.destinations || !trip.destinations.length) {
+    maxAlert("Add a destination to this trip first.");
+    return;
+  }
+  var existing = document.getElementById("batch-import-overlay");
+  if (existing) existing.remove();
+  var ov = document.createElement("div");
+  ov.id = "batch-import-overlay";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:11900;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto;";
+  var box = document.createElement("div");
+  box.style.cssText = "background:#fff;border-radius:12px;width:720px;max-width:100%;max-height:calc(100vh - 48px);overflow:auto;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);";
+  box.innerHTML =
+    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">' +
+      '<div style="width:28px;height:28px;border-radius:50%;background:#1a5fa8;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;">📥</div>' +
+      '<div style="font-size:14px;font-weight:700;">Import bookings (batch)</div>' +
+    '</div>' +
+    '<div style="font-size:12px;color:#555;line-height:1.55;margin-bottom:10px;">' +
+      'Paste multiple booking confirmations and cancellations in one go. Email dumps, CSV exports, anything booking-shaped works. ' +
+      'Max splits them, routes each to the right destination, and (for cancellations) removes any existing booking on the trip that matches.' +
+    '</div>' +
+    '<textarea id="bim-input" placeholder="Paste your bookings here…" style="width:100%;min-height:220px;padding:10px 12px;border:1px solid #ccc;border-radius:6px;font-family:-apple-system,sans-serif;font-size:12px;line-height:1.5;box-sizing:border-box;resize:vertical;"></textarea>' +
+    '<div id="bim-status" style="font-size:11px;color:#888;min-height:14px;margin:6px 0 10px;"></div>' +
+    '<div id="bim-preview" style="display:none;"></div>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">' +
+      '<button id="bim-cancel" style="padding:8px 14px;font-size:12px;font-weight:600;background:#fff;color:#666;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;">Cancel</button>' +
+      '<button id="bim-parse" style="padding:8px 16px;font-size:12px;font-weight:700;background:#1a5fa8;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Parse →</button>' +
+      '<button id="bim-save" style="display:none;padding:8px 16px;font-size:12px;font-weight:700;background:#1a5fa8;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Save all</button>' +
+    '</div>';
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+
+  var inputEl    = document.getElementById("bim-input");
+  var statusEl   = document.getElementById("bim-status");
+  var previewEl  = document.getElementById("bim-preview");
+  var parseBtn   = document.getElementById("bim-parse");
+  var saveBtn    = document.getElementById("bim-save");
+  var cancelBtn  = document.getElementById("bim-cancel");
+  inputEl.focus();
+
+  // v353.7: stash text/html alongside text/plain on paste so the URL
+  // extractor (which runs per-booking after the LLM extract) can see
+  // hrefs that don't survive plain-text copy.
+  var _pastedHtml = null;
+  inputEl.addEventListener("paste", function(e){
+    if (e.clipboardData) {
+      try {
+        var h = e.clipboardData.getData("text/html");
+        if (h && h.trim()) _pastedHtml = h;
+      } catch(_){}
+    }
+  });
+
+  cancelBtn.onclick = function(){ ov.remove(); };
+  ov.addEventListener("click", function(e){ if (e.target === ov) ov.remove(); });
+
+  // Parsed bookings live here between Parse → and Save all. The
+  // preview UI mutates this array (user edits, destination overrides,
+  // skip toggles); Save iterates it and commits.
+  var _bookings = [];
+
+  parseBtn.onclick = async function(){
+    var text = (inputEl.value || "").trim();
+    if (!text) { statusEl.textContent = "Paste something first."; statusEl.style.color = "#c44"; return; }
+    parseBtn.disabled = true; cancelBtn.disabled = true;
+    parseBtn.textContent = "Parsing…";
+    statusEl.textContent = "Splitting and extracting…";
+    statusEl.style.color = "#888";
+    try {
+      _bookings = await _parseBookingBatch(text, _pastedHtml);
+      if (!_bookings.length) {
+        statusEl.textContent = "No bookings found in that paste.";
+        statusEl.style.color = "#c44";
+        parseBtn.disabled = false; cancelBtn.disabled = false;
+        parseBtn.textContent = "Parse →";
+        return;
+      }
+      statusEl.textContent = "Parsed " + _bookings.length + " booking" + (_bookings.length !== 1 ? "s" : "") + ". Review and Save all.";
+      statusEl.style.color = "#2a7a4e";
+      inputEl.style.display = "none";
+      parseBtn.style.display = "none";
+      saveBtn.style.display = "inline-block";
+      cancelBtn.disabled = false;
+      _renderBatchPreview(previewEl, _bookings);
+    } catch (err) {
+      console.error("[bim] parse failed:", err);
+      statusEl.textContent = "Couldn't parse: " + (err && err.message ? err.message : "unknown error");
+      statusEl.style.color = "#c44";
+      parseBtn.disabled = false; cancelBtn.disabled = false;
+      parseBtn.textContent = "Parse →";
+    }
+  };
+
+  saveBtn.onclick = function(){
+    var result = _commitBatchBookings(_bookings);
+    ov.remove();
+    if (typeof showSaveStatus === "function") {
+      var bits = [];
+      if (result.added) bits.push("✓ Added " + result.added + " booking" + (result.added !== 1 ? "s" : ""));
+      if (result.cancelled) bits.push(result.cancelled + " cancellation" + (result.cancelled !== 1 ? "s" : "") + " applied");
+      if (result.skipped) bits.push(result.skipped + " skipped");
+      showSaveStatus(bits.join(" · "), 4200);
+    }
+    if (typeof autoSave === "function") try { autoSave(); } catch(_){}
+    if (typeof drawTripMode === "function") drawTripMode();
+  };
+}
+if (typeof globalThis !== "undefined") globalThis.showBatchImportBookingsModal = showBatchImportBookingsModal;
+
+// v359.60.35: heuristic + LLM-driven splitter for a batch of bookings.
+// Detects CSV/TSV by header (first non-blank line with ≥3 comma- or
+// tab-separated fields including a recognizable header token like
+// "booking", "confirmation", "check-in", "type", "date"); if it looks
+// CSV-like, parse deterministically. Otherwise hand the whole blob to
+// one LLM call asking for an array of bookings with an isCancellation
+// flag. Returns array of normalized bookings ready for commit.
+async function _parseBookingBatch(text, html) {
+  // CSV detection.
+  var lines = text.split(/\r?\n/);
+  var firstNonBlank = "";
+  for (var i = 0; i < lines.length; i++) {
+    if (lines[i].trim()) { firstNonBlank = lines[i].trim(); break; }
+  }
+  var commaCount = (firstNonBlank.match(/,/g) || []).length;
+  var tabCount = (firstNonBlank.match(/\t/g) || []).length;
+  var looksHeader = /\b(booking|confirmation|check.?in|check.?out|hotel|status|cancelled|reservation|type|currency|price|amount|nights|guest)\b/i.test(firstNonBlank);
+  if ((commaCount >= 3 || tabCount >= 3) && looksHeader) {
+    return _parseBookingCsv(text);
+  }
+  // Free-text path → one LLM call.
+  return await _parseBookingBatchLlm(text, html);
+}
+if (typeof globalThis !== "undefined") globalThis._parseBookingBatch = _parseBookingBatch;
+
+// v359.60.35: LLM batch extract. Same schema as the single-booking
+// parser (_parseBookingConfirmation), wrapped in an array, plus an
+// isCancellation boolean per item. Single call covers the whole
+// paste — booking.com's typical batch is small enough that this
+// fits well within the 8k token budget below.
+async function _parseBookingBatchLlm(text, html) {
+  var system =
+    "You extract MULTIPLE booking details from a raw text dump (concatenated booking confirmation emails, " +
+    "a copy/paste from an inbox, or a structured account summary). Return ONLY a JSON ARRAY — no prose, no markdown.\n\n" +
+    "Each array element has the SAME schema as a single confirmation, plus an isCancellation flag:\n" +
+    "{\n" +
+    '  "isCancellation": boolean,        // true if this entry is a CANCELLATION notice for an existing booking, false for a new booking\n' +
+    '  "type": "flight"|"hotel"|"train"|"bus"|"ferry"|"restaurant"|"tour"|"ticket"|"unknown",\n' +
+    '  "carrier": string|null,\n' +
+    '  "number": string|null,\n' +
+    '  "name": string|null,              // hotel/restaurant/tour name (or carrier name for transport)\n' +
+    '  "address": string|null,\n' +
+    '  "from": string|null,              // transport: departure city/code\n' +
+    '  "to": string|null,                // transport: arrival city/code\n' +
+    '  "depDate": "YYYY-MM-DD"|null,     // hotel check-in / transport departure / restaurant event date\n' +
+    '  "depTime": "HH:MM"|null,          // 24h\n' +
+    '  "arrDate": "YYYY-MM-DD"|null,     // hotel check-out / transport arrival\n' +
+    '  "arrTime": "HH:MM"|null,\n' +
+    '  "confirmationNumber": string|null,\n' +
+    '  "price": number|null,\n' +
+    '  "currency": string|null,\n' +
+    '  "url": string|null,\n' +
+    '  "cancelType": "deadline"|"non-cancellable"|null,\n' +
+    '  "cancelDeadline": "YYYY-MM-DD"|null,\n' +
+    '  "notes": string|null\n' +
+    "}\n\n" +
+    "Splitting:\n" +
+    "- The paste may contain SEVERAL distinct confirmations / cancellations concatenated. Treat each one as a separate array element.\n" +
+    "- Look for boundaries like 'Booking confirmation', 'Reservation details', 'Cancellation confirmation', 'Your booking at X has been cancelled', a new email's From/Subject line, repeated company logos, or large blocks of whitespace between sections.\n" +
+    "- A cancellation usually echoes the original booking (hotel name, dates, confirmation number) — capture those fields so we can match it against an existing booking on the trip. Set isCancellation: true.\n" +
+    "- If the entire paste turns out to be a single booking, return an array with one element. Never return prose explaining that.\n\n" +
+    "Same field rules as single-booking extraction: 24-hour time; time-ranges for check-in collapse to the earliest, check-out to the latest; price is what was paid (not the cancellation cost / no-show fee); URL: extract the actual https:// link, not the visible label; cancellation deadline is the LAST date the user can cancel for free (date only, no time).\n\n" +
+    "Return [] if nothing booking-shaped is in the paste.";
+  var user = "BATCH TEXT:\n\n" + text + "\n\nReturn the JSON array.";
+  var resp = await callMax([{role:"user", content: user}], 8000, 90000);
+  var clean = String(resp || "").trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "");
+  // Find the first [ ... last ] in case there's preamble.
+  var firstBracket = clean.indexOf("[");
+  var lastBracket  = clean.lastIndexOf("]");
+  if (firstBracket >= 0 && lastBracket > firstBracket) {
+    clean = clean.slice(firstBracket, lastBracket + 1);
+  }
+  var raw;
+  try {
+    raw = JSON.parse(clean);
+  } catch(e) {
+    console.warn("[bim] JSON parse failed:", clean.slice(0, 400));
+    throw new Error("LLM returned malformed JSON — try a smaller batch or use the single-booking Paste instead.");
+  }
+  if (!Array.isArray(raw)) raw = [raw];
+  // Normalize each entry through the existing single-booking
+  // normalizer so downstream commit code sees the same shape. Then
+  // run the URL fallback regex per item against the same combined
+  // text+html (this is best-effort — we don't know which substring
+  // belongs to which booking, but the regex scores by relevance so
+  // the right URL usually wins for at least the most prominent item).
+  var combined = (text || "") + (html ? "\n\n" + html : "");
+  return raw.map(function(item, idx){
+    var n = (typeof _normalizeBookingExtraction === "function") ? _normalizeBookingExtraction(item) : item;
+    if (!n.url && typeof _extractBookingUrl === "function") {
+      try { var u = _extractBookingUrl(combined); if (u) n.url = u; } catch(_){}
+    }
+    n.isCancellation = !!item.isCancellation;
+    n._batchIdx = idx;
+    return n;
+  });
+}
+if (typeof globalThis !== "undefined") globalThis._parseBookingBatchLlm = _parseBookingBatchLlm;
+
+// v359.60.35: deterministic CSV parser for booking.com / other
+// structured exports. First non-blank line = header; we map common
+// column names (case-insensitive, fuzzy) to our internal schema.
+// No LLM call. Cancellations are detected via a "status" / "state"
+// column containing "cancel" (case-insensitive).
+function _parseBookingCsv(text) {
+  var lines = text.split(/\r?\n/).filter(function(l){ return l.trim(); });
+  if (!lines.length) return [];
+  var sep = (lines[0].indexOf("\t") >= 0) ? "\t" : ",";
+  // Naive CSV split — handles unquoted commas; quoted fields with
+  // embedded commas need a real parser. Booking.com's export is
+  // unquoted for the common columns, so this is good enough as a
+  // first cut. Quote-aware parsing is a follow-up if needed.
+  function _splitLine(line) {
+    return line.split(sep).map(function(s){ return s.replace(/^"|"$/g, "").trim(); });
+  }
+  var header = _splitLine(lines[0]).map(function(h){ return h.toLowerCase(); });
+  function _col(row, names) {
+    for (var i = 0; i < names.length; i++) {
+      var idx = header.findIndex(function(h){ return h.indexOf(names[i]) >= 0; });
+      if (idx >= 0 && row[idx] != null && row[idx] !== "") return row[idx];
+    }
+    return null;
+  }
+  function _parseDate(s) {
+    if (!s) return null;
+    var iso = String(s).match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) return iso[0];
+    var d = new Date(s);
+    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+    return null;
+  }
+  var out = [];
+  for (var li = 1; li < lines.length; li++) {
+    var row = _splitLine(lines[li]);
+    if (!row.length || row.every(function(c){ return !c; })) continue;
+    var status = (_col(row, ["status", "state"]) || "").toLowerCase();
+    var isCancel = /cancel/.test(status);
+    var typeRaw = (_col(row, ["type", "category"]) || "").toLowerCase();
+    var type = typeRaw && /flight|hotel|train|bus|ferry|restaurant|tour|ticket/.test(typeRaw)
+      ? typeRaw.match(/flight|hotel|train|bus|ferry|restaurant|tour|ticket/)[0]
+      : "hotel"; // booking.com exports are typically hotels
+    var priceStr = _col(row, ["total", "price", "amount", "cost"]);
+    var price = null;
+    if (priceStr) {
+      var n = parseFloat(String(priceStr).replace(/[^0-9.]/g, ""));
+      if (isFinite(n)) price = n;
+    }
+    out.push({
+      isCancellation: isCancel,
+      type: type,
+      carrier: null,
+      number: null,
+      name: _col(row, ["hotel", "property", "name", "carrier"]),
+      address: _col(row, ["address", "location", "city"]),
+      from: _col(row, ["from", "departure", "origin"]),
+      to: _col(row, ["to", "arrival", "destination"]),
+      depDate: _parseDate(_col(row, ["check-in", "checkin", "from date", "depart", "start date", "date"])),
+      depTime: null,
+      arrDate: _parseDate(_col(row, ["check-out", "checkout", "to date", "arriv", "end date"])),
+      arrTime: null,
+      confirmationNumber: _col(row, ["confirmation", "booking number", "reservation"]),
+      price: price,
+      currency: _col(row, ["currency"]),
+      url: _col(row, ["url", "link", "manage"]),
+      cancelType: null,
+      cancelDeadline: _parseDate(_col(row, ["cancel by", "cancellation deadline", "free cancel"])),
+      notes: _col(row, ["notes", "room", "guests"]),
+      _batchIdx: out.length
+    });
+  }
+  return out;
+}
+if (typeof globalThis !== "undefined") globalThis._parseBookingCsv = _parseBookingCsv;
+
+// v359.60.35: preview row builder. One row per parsed booking with:
+// - Type icon + name + dates
+// - Destination dropdown (pre-routed via _scoreDestMatch — same logic
+//   the single-booking parser uses)
+// - For cancellations: an indicator showing what existing booking
+//   will be removed (or "no match found — will be logged but no-op")
+// - Skip toggle (set _skip=true to exclude from commit)
+function _renderBatchPreview(container, bookings) {
+  if (!container) return;
+  container.style.display = "block";
+  container.innerHTML = "";
+
+  var allDests = trip.destinations.slice();
+  bookings.forEach(function(b, i) {
+    var row = document.createElement("div");
+    row.style.cssText = "border:1px solid #e0e0e0;border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:12px;line-height:1.5;background:" + (b.isCancellation ? "#fff7e6" : "#fff") + ";";
+
+    var icon = ({
+      flight: "✈", hotel: "🏨", train: "🚆", bus: "🚌", ferry: "⛴",
+      restaurant: "🍽", tour: "🎟", ticket: "🎫", unknown: "📌"
+    })[b.type] || "📌";
+    var titleBits = [];
+    titleBits.push(icon);
+    titleBits.push("<strong>" + _bimEsc(b.name || b.carrier || "(unnamed)") + "</strong>");
+    if (b.depDate) {
+      titleBits.push('<span style="color:#888;">' + _bimEsc(b.depDate) + (b.arrDate && b.arrDate !== b.depDate ? " → " + _bimEsc(b.arrDate) : "") + '</span>');
+    }
+    if (b.isCancellation) {
+      titleBits.push('<span style="background:#f0c060;color:#5a3a0a;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;letter-spacing:.04em;text-transform:uppercase;">cancel</span>');
+    }
+
+    // Score destinations + auto-route.
+    var bestDestId = null;
+    if (!b.isCancellation && typeof _scoreDestMatch === "function") {
+      var scores = allDests.map(function(d){ return { id: d.id, score: _scoreDestMatch(b, d) }; });
+      scores.sort(function(a, c){ return c.score - a.score; });
+      if (scores.length && scores[0].score > 0) bestDestId = scores[0].id;
+      else if (scores.length) bestDestId = scores[0].id; // best-effort fallback
+    }
+    b._destId = bestDestId || (allDests[0] && allDests[0].id);
+
+    // For cancellations, find a matching existing booking on the trip.
+    var matchInfo = null;
+    if (b.isCancellation) {
+      var m = _findExistingBookingForCancellation(b);
+      b._cancelMatch = m;
+      if (m) {
+        matchInfo = 'Will remove: <strong>' + _bimEsc(m.label) + '</strong> on <em>' + _bimEsc(m.destName) + '</em>';
+      } else {
+        matchInfo = '<span style="color:#a06030;">No matching booking on this trip — will be logged but no-op.</span>';
+      }
+    }
+
+    var destDdlHtml = "";
+    if (!b.isCancellation) {
+      destDdlHtml = '<select data-bim-dest="' + i + '" style="font-size:11px;padding:3px 6px;border:1px solid #ccc;border-radius:4px;font-family:inherit;">' +
+        allDests.map(function(d){
+          var sel = (d.id === b._destId) ? " selected" : "";
+          return '<option value="' + d.id + '"' + sel + '>' + _bimEsc(d.place || "?") + '</option>';
+        }).join("") +
+      '</select>';
+    }
+
+    row.innerHTML =
+      '<div style="display:flex;align-items:flex-start;gap:10px;">' +
+        '<label style="display:flex;align-items:center;gap:5px;margin-top:1px;cursor:pointer;font-size:11px;color:#666;">' +
+          '<input type="checkbox" data-bim-skip="' + i + '" ' + (b._skip ? "" : "checked") + ' style="margin:0;" />' +
+          'Include' +
+        '</label>' +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;">' + titleBits.join(" ") + '</div>' +
+          (b.address ? '<div style="font-size:11px;color:#666;margin-top:2px;">' + _bimEsc(b.address) + '</div>' : "") +
+          (b.confirmationNumber ? '<div style="font-size:11px;color:#888;margin-top:2px;">Confirmation: ' + _bimEsc(b.confirmationNumber) + '</div>' : "") +
+          (matchInfo ? '<div style="font-size:11px;margin-top:4px;color:#5a3a0a;">' + matchInfo + '</div>' : "") +
+        '</div>' +
+        (destDdlHtml ? '<div style="flex-shrink:0;">' + destDdlHtml + '</div>' : '') +
+      '</div>';
+
+    container.appendChild(row);
+  });
+
+  // Wire up the per-row controls.
+  container.querySelectorAll('[data-bim-dest]').forEach(function(sel){
+    sel.onchange = function(){
+      var idx = parseInt(sel.getAttribute("data-bim-dest"), 10);
+      if (bookings[idx]) bookings[idx]._destId = sel.value;
+    };
+  });
+  container.querySelectorAll('[data-bim-skip]').forEach(function(cb){
+    cb.onchange = function(){
+      var idx = parseInt(cb.getAttribute("data-bim-skip"), 10);
+      if (bookings[idx]) bookings[idx]._skip = !cb.checked;
+    };
+  });
+}
+
+function _bimEsc(s) {
+  return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// v359.60.35: find an existing booking on the trip that matches a
+// cancellation. Matching priority:
+//   1. confirmation number exact match (strongest signal)
+//   2. type + name normalized + overlapping dates
+//   3. type + name normalized (no dates) — last resort
+// Returns { label, destName, remove: function() } or null. The
+// remove() closure does the actual splice when the commit pass runs.
+function _findExistingBookingForCancellation(cancellation) {
+  if (!trip || !Array.isArray(trip.destinations)) return null;
+  var conf = cancellation.confirmationNumber || null;
+  var nameKey = (cancellation.name || cancellation.carrier || "").toLowerCase().replace(/\s+/g, " ").trim();
+  var type = cancellation.type;
+  function _nameMatch(a) {
+    var b = (a || "").toLowerCase().replace(/\s+/g, " ").trim();
+    if (!b || !nameKey) return false;
+    return b === nameKey || b.indexOf(nameKey) >= 0 || nameKey.indexOf(b) >= 0;
+  }
+  function _dateOverlap(checkIn, checkOut) {
+    if (!cancellation.depDate || !checkIn) return false;
+    return cancellation.depDate === checkIn || cancellation.arrDate === checkOut;
+  }
+  for (var di = 0; di < trip.destinations.length; di++) {
+    var d = trip.destinations[di];
+    // Hotels
+    var hotels = d.hotelBookings || [];
+    for (var hi = 0; hi < hotels.length; hi++) {
+      var h = hotels[hi];
+      if (type !== "hotel" && type !== "unknown") continue;
+      var matched =
+        (conf && h.confirmationNumber && h.confirmationNumber === conf) ||
+        (_nameMatch(h.name) && (_dateOverlap(h.checkIn, h.checkOut) || !cancellation.depDate));
+      if (matched) {
+        var idx = hi;
+        return {
+          label: (h.name || "hotel") + (h.checkIn ? " (" + h.checkIn + ")" : ""),
+          destName: d.place,
+          remove: function(){ hotels.splice(idx, 1); }
+        };
+      }
+    }
+    // General bookings (restaurant/tour/ticket)
+    var gen = d.generalBookings || [];
+    for (var gi = 0; gi < gen.length; gi++) {
+      var g = gen[gi];
+      if (type === "hotel" || type === "flight" || type === "train" || type === "bus" || type === "ferry") continue;
+      var matchedG =
+        (conf && g.confirmationNumber && g.confirmationNumber === conf) ||
+        (_nameMatch(g.label));
+      if (matchedG) {
+        var gIdx = gi;
+        return {
+          label: (g.label || "booking"),
+          destName: d.place,
+          remove: function(){ gen.splice(gIdx, 1); }
+        };
+      }
+    }
+  }
+  // Transport legs
+  if (type === "flight" || type === "train" || type === "bus" || type === "ferry") {
+    if (trip.legs) {
+      var legKeys = Object.keys(trip.legs);
+      for (var lki = 0; lki < legKeys.length; lki++) {
+        var leg = trip.legs[legKeys[lki]];
+        var bks = leg && leg.bookings;
+        if (!Array.isArray(bks)) continue;
+        for (var bi = 0; bi < bks.length; bi++) {
+          var bk = bks[bi];
+          var matchedB =
+            (conf && bk.confirmationNumber && bk.confirmationNumber === conf) ||
+            (_nameMatch(bk.operator) && bk.departure === cancellation.depDate);
+          if (matchedB) {
+            var bIdx = bi;
+            return {
+              label: (bk.operator || type) + (bk.departure ? " " + bk.departure : ""),
+              destName: (legKeys[lki] || "leg"),
+              remove: function(){ bks.splice(bIdx, 1); }
+            };
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+if (typeof globalThis !== "undefined") globalThis._findExistingBookingForCancellation = _findExistingBookingForCancellation;
+
+// v359.60.35: commit the parsed/reviewed batch. Iterates _bookings,
+// dispatches each to the right shape (hotelBookings / generalBookings
+// / leg.bookings) based on type, and for cancellations runs the
+// matched remover. Returns { added, cancelled, skipped }.
+function _commitBatchBookings(bookings) {
+  var added = 0, cancelled = 0, skipped = 0;
+  var newBkIdFn = (typeof newBkId === "function") ? newBkId : function(){ return "bk-" + Date.now() + "-" + Math.random().toString(36).slice(2,6); };
+  bookings.forEach(function(b){
+    if (b._skip) { skipped++; return; }
+    if (b.isCancellation) {
+      if (b._cancelMatch && typeof b._cancelMatch.remove === "function") {
+        try { b._cancelMatch.remove(); cancelled++; }
+        catch(e){ console.warn("[bim] cancellation remove failed:", e); }
+      } else {
+        // No match — log but don't error. Cancellation without a
+        // matching booking is benign (maybe the user never added it
+        // to this trip in the first place).
+        console.log("[bim] cancellation had no match:", b.name || b.confirmationNumber);
+      }
+      return;
+    }
+    var dest = (typeof getDest === "function") ? getDest(b._destId) : null;
+    if (!dest && trip.destinations.length) dest = trip.destinations[0];
+    if (!dest) { skipped++; return; }
+    var commonCancel = {
+      cancelType:         b.cancelType || "unknown",
+      cancelDeadline:     b.cancelDeadline || null,
+      cancelDeadlineTime: null
+    };
+    if (b.type === "hotel") {
+      if (!dest.hotelBookings) dest.hotelBookings = [];
+      dest.hotelBookings.push(Object.assign({
+        id: newBkIdFn(),
+        name: b.name || "Untitled hotel",
+        area: "",
+        checkIn: b.depDate || null,
+        checkInTime: b.depTime || null,
+        checkOut: b.arrDate || null,
+        checkOutTime: b.arrTime || null,
+        confirmationNumber: b.confirmationNumber || "",
+        pricePaid: (typeof b.price === "number") ? b.price : null,
+        currency: b.currency || "USD",
+        notes: (b.notes || "") + (b.address ? "\nAddress: " + b.address : ""),
+        url: b.url || null,
+        status: "booked",
+        source: "paste-batch",
+        lat: null, lng: null
+      }, commonCancel));
+      added++;
+    } else if (b.type === "flight" || b.type === "train" || b.type === "bus" || b.type === "ferry") {
+      // Pick the leg whose departure date best matches b.depDate.
+      // For the batch path we default to "arrival" — the most common
+      // case is a flight INTO a destination — and let the user edit
+      // afterward if needed.
+      var destIdx = trip.destinations.indexOf(dest);
+      var fromId, toId;
+      if (destIdx > 0) {
+        fromId = trip.destinations[destIdx - 1].id;
+        toId = dest.id;
+      } else if (destIdx === 0 && trip.destinations.length > 1) {
+        fromId = dest.id;
+        toId = trip.destinations[1].id;
+      } else {
+        skipped++; return;
+      }
+      var leg = (typeof getLeg === "function") ? getLeg(fromId, toId) : null;
+      if (!leg) { skipped++; return; }
+      if (!leg.bookings) leg.bookings = [];
+      leg.bookings.push(Object.assign({
+        id: newBkIdFn(),
+        mode: b.type,
+        operator: b.carrier || "",
+        from: b.from || "",
+        to: b.to || "",
+        departure: b.depDate || null,
+        departureTime: b.depTime || null,
+        arrival: b.arrDate || null,
+        arrivalTime: b.arrTime || null,
+        confirmationNumber: b.confirmationNumber || "",
+        pricePaid: (typeof b.price === "number") ? b.price : null,
+        currency: b.currency || "USD",
+        notes: (b.notes || "") + (b.number ? "\n" + (b.type === "flight" ? "Flight " : "") + b.number : ""),
+        url: b.url || null,
+        status: "booked",
+        source: "paste-batch"
+      }, commonCancel));
+      added++;
+    } else {
+      // restaurant / tour / ticket / unknown → generalBookings
+      if (!dest.generalBookings) dest.generalBookings = [];
+      dest.generalBookings.push(Object.assign({
+        id: newBkIdFn(),
+        type: b.type || "ticket",
+        label: b.name || "Untitled booking",
+        date: b.depDate || null,
+        time: b.depTime || null,
+        timeEnd: b.arrTime || null,
+        confirmationNumber: b.confirmationNumber || "",
+        pricePaid: (typeof b.price === "number") ? b.price : null,
+        currency: b.currency || "USD",
+        notes: (b.notes || "") + (b.address ? "\nLocation: " + b.address : ""),
+        url: b.url || null,
+        status: "booked",
+        source: "paste-batch"
+      }, commonCancel));
+      added++;
+    }
+  });
+  return { added: added, cancelled: cancelled, skipped: skipped };
+}
+if (typeof globalThis !== "undefined") globalThis._commitBatchBookings = _commitBatchBookings;
 
 function showPasteConfirmationModal(destId) {
   var dest = (typeof getDest === "function") ? getDest(destId) : null;
