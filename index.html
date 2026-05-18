@@ -31253,6 +31253,24 @@ function _openTripStopPopover(ctx) {
         +     _addToInitialOpts
         +   '</select>'
         + '</label>'
+        // ── Field 4: Insert position (only meaningful when Add-to is selected) ──
+        // v359.60.31: lets the user slot a new stop into the middle
+        // of an existing day-trip loop instead of always going to the
+        // end. Default is "Smart" — the route's gap-minimizing
+        // insertion (computed in addDestToExistingDayTripRoute) so
+        // common cases need zero thought. Other options:
+        //   _start            → before the first stop
+        //   <stopId>          → after that specific stop
+        //   _end              → after the last stop (legacy default)
+        // Population is dynamic: when the Add-to route changes, an
+        // onchange handler below rebuilds the option list against the
+        // newly-selected route's planItems.
+        + '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#333;margin-left:22px;">'
+        +   '<span style="min-width:48px;color:#888;">Insert</span>'
+        +   '<select id="trip-stop-dt-insert" style="flex:1;padding:5px 8px;font-size:12px;border:1px solid #ccc;border-radius:5px;font-family:inherit;">'
+        +     '<option value="">Smart (closest neighbor)</option>'
+        +   '</select>'
+        + '</label>'
         + '</div>'
       )
     : '';
@@ -31330,6 +31348,7 @@ function _openTripStopPopover(ctx) {
   }
   var hubSel = ov.querySelector("#trip-stop-hub");
   var dtRouteSel = ov.querySelector("#trip-stop-dt-route");
+  var dtInsertSel = ov.querySelector("#trip-stop-dt-insert");
   var dtNewRadio   = ov.querySelector('input[name="trip-stop-dt-mode"][value="new"]');
   var dtAddToRadio = ov.querySelector('input[name="trip-stop-dt-mode"][value="addTo"]');
   // v359.60.23: Add-to dropdown lists ALL day-trip routes across
@@ -31344,6 +31363,36 @@ function _openTripStopPopover(ctx) {
       hubSel.value = hubId;
     }
   }
+  // v359.60.31: rebuild the Insert-after dropdown to match the
+  // currently-selected Add-to route. Options are:
+  //   ""         → Smart (closest neighbor) — default
+  //   "_start"   → before the first stop
+  //   "<stopId>" → after that specific stop
+  //   "_end"     → after the last stop
+  // When the Add-to dropdown is empty / disabled (no day-trip routes
+  // exist anywhere), we still render "Smart" as the only option so
+  // the layout doesn't flicker if the user later picks New + Apply.
+  function _rebuildInsertOpts() {
+    if (!dtInsertSel) return;
+    var routeId = dtRouteSel ? dtRouteSel.value : null;
+    var targetRoute = routeId ? (trip.routes || []).find(function(r){ return r && r.id === routeId; }) : null;
+    var stops = (targetRoute && Array.isArray(targetRoute.planItems))
+      ? targetRoute.planItems.filter(function(pi){ return pi && pi.type === "stop"; })
+      : [];
+    var html = '<option value="">Smart (closest neighbor)</option>';
+    if (stops.length) {
+      html += '<option value="_start">At the start (before ' + ((trip.places && trip.places[stops[0].placeId] && trip.places[stops[0].placeId].name) || "first stop") + ')</option>';
+      stops.forEach(function(s, i){
+        var nm = (trip.places && trip.places[s.placeId] && trip.places[s.placeId].name) || s.placeId || "stop";
+        if (i < stops.length - 1) {
+          html += '<option value="' + s.id + '">After ' + nm + '</option>';
+        }
+      });
+      html += '<option value="_end">At the end (after ' + ((trip.places && trip.places[stops[stops.length-1].placeId] && trip.places[stops[stops.length-1].placeId].name) || "last stop") + ')</option>';
+    }
+    dtInsertSel.innerHTML = html;
+  }
+  _rebuildInsertOpts();
   if (hubSel) {
     hubSel.onchange = function(){ _autoCheck("dayTrip"); };
     hubSel.onclick  = function(){ _autoCheck("dayTrip"); };
@@ -31353,8 +31402,18 @@ function _openTripStopPopover(ctx) {
       _autoCheck("dayTrip");
       if (dtAddToRadio && !dtAddToRadio.disabled) dtAddToRadio.checked = true;
       _syncFromHubToSelectedRoute();
+      _rebuildInsertOpts();
     };
     dtRouteSel.onclick  = function(){
+      _autoCheck("dayTrip");
+      if (dtAddToRadio && !dtAddToRadio.disabled) dtAddToRadio.checked = true;
+    };
+  }
+  if (dtInsertSel) {
+    // Picking an insert position implies the user is actively staging
+    // an Add-to action — auto-check the outer Day-trip radio and the
+    // inner Add-to radio so Apply reads the right transition.
+    dtInsertSel.onchange = dtInsertSel.onclick = function(){
       _autoCheck("dayTrip");
       if (dtAddToRadio && !dtAddToRadio.disabled) dtAddToRadio.checked = true;
     };
@@ -31410,8 +31469,20 @@ function _openTripStopPopover(ctx) {
     var dtRouteId = (dtMode === "addTo")
       ? ((ov.querySelector("#trip-stop-dt-route") || {}).value || null)
       : null;
+    // v359.60.31: Insert-after position for multi-stop day-trip loops.
+    // Only meaningful when dtMode === "addTo"; ignored otherwise.
+    // Empty string ("") = Smart (closest-neighbor gap-minimizing insert).
+    // "_start" / "_end" / "<stopId>" → explicit position.
+    var dtInsertAfter = (dtMode === "addTo")
+      ? ((ov.querySelector("#trip-stop-dt-insert") || {}).value || "")
+      : "";
     close();
-    _applyStopRoleChange(ctx, currentRole, selectedRole, { hubId: hubId, routeId: routeId, dtRouteId: dtRouteId });
+    _applyStopRoleChange(ctx, currentRole, selectedRole, {
+      hubId: hubId,
+      routeId: routeId,
+      dtRouteId: dtRouteId,
+      dtInsertAfter: dtInsertAfter
+    });
   };
 }
 if (typeof globalThis !== "undefined") globalThis._openTripStopPopover = _openTripStopPopover;
@@ -31454,8 +31525,13 @@ function _applyStopRoleChange(ctx, currentRole, selectedRole, opts) {
       // v359.60.23: if user picked "Add to existing day trip" from
       // the sub-dropdown, append to that route. Else mint a new
       // dayTrip route via the existing converter.
+      // v359.60.31: pass through Insert-after position so the user
+      // can drop the new stop into the middle of an existing loop,
+      // not just at the end.
       if (opts.dtRouteId) {
-        addDestToExistingDayTripRoute(ctx.destId, opts.dtRouteId);
+        addDestToExistingDayTripRoute(ctx.destId, opts.dtRouteId, {
+          afterStopId: opts.dtInsertAfter || null
+        });
       } else if (opts.hubId) {
         convertDestToDayTrip(ctx.destId, opts.hubId);
       }
@@ -32839,6 +32915,50 @@ function moveWaysideToRoute(srcRoute, stop, targetRoute, opts){
   }
 }
 
+// v359.60.31: pick the BEST gap to insert a new stop into a day-trip
+// loop, using "minimum extra distance" — for each possible insertion
+// point (hub→stop1, stop1→stop2, …, stopN→hub), compute the detour
+// delta = dist(A, new) + dist(new, B) - dist(A, B), and choose the
+// gap with the smallest delta. This is the classic cheapest-insertion
+// heuristic from TSP and lands the new stop next to its closest
+// geographic neighbor without ever clobbering the user's manual
+// ordering of existing stops.
+//
+// Falls back to "end of loop" when coords are missing or the engine
+// haversine helper isn't loaded — callers expecting a number for
+// splice() get one either way.
+function _smartInsertIndexInDayTripRoute(stops, newLat, newLng, hubLat, hubLng) {
+  if (!Array.isArray(stops) || !stops.length) return 0;
+  if (typeof MaxEngineTrip === "undefined" || typeof MaxEngineTrip.haversineKm !== "function") return stops.length;
+  if (typeof newLat !== "number" || !isFinite(newLat) || typeof newLng !== "number" || !isFinite(newLng)) return stops.length;
+  if (typeof hubLat !== "number" || !isFinite(hubLat) || typeof hubLng !== "number" || !isFinite(hubLng)) return stops.length;
+  var H = MaxEngineTrip.haversineKm;
+  function _stopCoord(pi) {
+    var p = trip.places && trip.places[pi.placeId];
+    if (p && typeof p.lat === "number" && typeof p.lng === "number" && isFinite(p.lat) && isFinite(p.lng)) {
+      return [p.lat, p.lng];
+    }
+    return null;
+  }
+  var coords = stops.map(_stopCoord);
+  var bestIdx = stops.length;
+  var bestDelta = Infinity;
+  for (var i = 0; i <= stops.length; i++) {
+    var fromC = (i === 0) ? [hubLat, hubLng] : coords[i - 1];
+    var toC   = (i === stops.length) ? [hubLat, hubLng] : coords[i];
+    if (!fromC || !toC) continue;
+    var origD = H(fromC[0], fromC[1], toC[0], toC[1]);
+    var newD = H(fromC[0], fromC[1], newLat, newLng) + H(newLat, newLng, toC[0], toC[1]);
+    var delta = newD - origD;
+    if (delta < bestDelta) {
+      bestDelta = delta;
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
+}
+if (typeof globalThis !== "undefined") globalThis._smartInsertIndexInDayTripRoute = _smartInsertIndexInDayTripRoute;
+
 // v359.54.3: drop a wayside stop from a transit route. Doesn't
 // resurrect a destination. Doesn't refund the absorbed nights —
 // those live with the absorber and stay there. If the user wants
@@ -32847,13 +32967,18 @@ function moveWaysideToRoute(srcRoute, stop, targetRoute, opts){
 // day-trip route (multi-stop day trip — Golden Circle pattern:
 // Reykjavík → Þingvellir → Geysir → Gullfoss → Reykjavík, one
 // route, three stops). Counterpart to convertDestToDayTrip which
-// always mints a new route. Stops auto-sort by distance from the
-// hub for a sensible drive sequence; user can drag-reorder on the
-// day card later (future work).
+// always mints a new route.
+//
+// v359.60.31: insertion position is now controllable via
+// opts.afterStopId. Default behavior ("smart") uses the gap-
+// minimizing helper above so the new stop slots geographically
+// near its closest neighbor — but ONLY the new stop is positioned;
+// existing stops keep their order. The previous "auto-sort every
+// stop by hub-distance" approach was clobbering manual order.
 //
 // Night accounting: the existing hub absorbs the source's nights,
 // same as convertDestToDayTrip. The day-trip route already exists
-// so we just append a stop.
+// so we just splice in a stop.
 function addDestToExistingDayTripRoute(destId, routeId, opts) {
   opts = opts || {};
   if (!trip || !Array.isArray(trip.destinations)) return;
@@ -32932,26 +33057,40 @@ function addDestToExistingDayTripRoute(destId, routeId, opts) {
     return pi && pi.type === "stop" && pi.placeId === placeId;
   });
   if (!alreadyOnRoute) {
-    route.planItems.push(newStop);
-    // Re-sort stops by distance from the hub so the polyline drawn
-    // through them (hub → A → B → C → hub) makes geographic sense.
-    // Non-stop items (route refs, etc.) stay at the front.
-    var hubLat = hubDest.lat, hubLng = hubDest.lng;
-    var canSort = (typeof hubLat === "number" && typeof hubLng === "number"
-                   && typeof MaxEngineTrip !== "undefined"
-                   && typeof MaxEngineTrip.haversineKm === "function");
-    if (canSort) {
-      var nonStops = route.planItems.filter(function(pi){ return !pi || pi.type !== "stop"; });
-      var stops    = route.planItems.filter(function(pi){ return pi && pi.type === "stop"; });
-      stops.sort(function(a, b){
-        var aPlace = trip.places && trip.places[a.placeId];
-        var bPlace = trip.places && trip.places[b.placeId];
-        var aD = (aPlace && typeof aPlace.lat === "number") ? MaxEngineTrip.haversineKm(hubLat, hubLng, aPlace.lat, aPlace.lng) : Infinity;
-        var bD = (bPlace && typeof bPlace.lat === "number") ? MaxEngineTrip.haversineKm(hubLat, hubLng, bPlace.lat, bPlace.lng) : Infinity;
-        return aD - bD;
-      });
-      route.planItems = nonStops.concat(stops);
+    // v359.60.31: respect an explicit insert position from the
+    // popover. opts.afterStopId values:
+    //   "_start"      → before the first existing stop
+    //   "_end"        → after the last existing stop (legacy default)
+    //   "<stopId>"    → after that specific stop in the route
+    //   null/""/undef → "smart" insertion via the gap-minimizing
+    //                   helper below (default — preserves the
+    //                   previous "drops into the geographically
+    //                   sensible spot" behavior, but ONLY for the
+    //                   new stop, NOT by re-sorting every existing
+    //                   stop, which was clobbering manual order).
+    var nonStops = route.planItems.filter(function(pi){ return !pi || pi.type !== "stop"; });
+    var stops    = route.planItems.filter(function(pi){ return pi && pi.type === "stop"; });
+    var afterId = opts.afterStopId;
+    var insertIdx = stops.length; // default to end
+    if (afterId === "_start") {
+      insertIdx = 0;
+    } else if (afterId === "_end") {
+      insertIdx = stops.length;
+    } else if (afterId && typeof afterId === "string") {
+      var i = stops.findIndex(function(s){ return s && s.id === afterId; });
+      insertIdx = (i >= 0) ? i + 1 : stops.length;
+    } else {
+      // Smart: pick the gap that minimizes the detour delta.
+      insertIdx = _smartInsertIndexInDayTripRoute(
+        stops,
+        (typeof src.lat === "number") ? src.lat : (trip.places && trip.places[placeId] && trip.places[placeId].lat),
+        (typeof src.lng === "number") ? src.lng : (trip.places && trip.places[placeId] && trip.places[placeId].lng),
+        hubDest.lat,
+        hubDest.lng
+      );
     }
+    stops.splice(insertIdx, 0, newStop);
+    route.planItems = nonStops.concat(stops);
   }
 
   // Hub absorbs the source's nights.
