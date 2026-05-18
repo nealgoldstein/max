@@ -2042,6 +2042,10 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
 
         <div id="mw-edit" class="mw-dropdown" style="display:none;">
           <button class="mw-item" onclick="_mwClose();editConstraints();">&#9998;&nbsp; Edit trip inputs…</button>
+          <!-- v359.60.30: trip-level date editor — change start +/or
+               end without leaving the trip view. Start shifts the
+               whole trip; end scales destinations proportionally. -->
+          <button class="mw-item" onclick="_mwClose();_openTripDatesEditor&amp;&amp;_openTripDatesEditor();">&#128197;&nbsp; Trip dates…</button>
           <!-- v359.60.29: "Open research" — Max has two top-level
                views: Research (place-shaped — overnight hubs, day
                trips, waysides, considered places) and Trip (plan-
@@ -2796,6 +2800,196 @@ function _ftRecomputeTripDates(){
     cur = nx;
   });
 }
+
+// v359.60.30: trip-level date editor. Opens a modal with the
+// current start/end dates pre-filled. Apply rules:
+//   - Start changes only        → SHIFT every dest by delta (nights preserved)
+//   - End changes only          → SCALE nights proportionally across overnights
+//   - Both change               → Anchor at new start, scale nights to fit new total
+// Day-trip routes / wayside routes don't carry their own dates — they
+// inherit from their hub days, so a date cascade automatically updates
+// everything. Stub trips (no destinations) silently no-op.
+function _openTripDatesEditor(){
+  if (!trip || !Array.isArray(trip.destinations) || !trip.destinations.length) {
+    alert("No destinations yet — add at least one to set dates.");
+    return;
+  }
+  var first = trip.destinations[0];
+  var last  = trip.destinations[trip.destinations.length - 1];
+  var curStart = (first && first.dateFrom) || "";
+  var curEnd   = (last  && last.dateTo)   || "";
+  var curNights = trip.destinations.reduce(function(s, d){ return s + (d.nights || 0); }, 0);
+
+  var existing = document.getElementById("trip-dates-editor");
+  if (existing) existing.remove();
+  var ov = document.createElement("div");
+  ov.id = "trip-dates-editor";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.32);z-index:10500;display:flex;align-items:center;justify-content:center;padding:20px;";
+  ov.innerHTML = ''
+    + '<div style="background:#fff;border-radius:12px;max-width:420px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,0.18);">'
+    +   '<div style="padding:18px 20px 6px;">'
+    +     '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">Trip dates</div>'
+    +     '<div style="font-size:17px;font-weight:700;color:#111;margin-top:4px;">' + (trip.name ? String(trip.name).replace(/</g,"&lt;") : "Untitled trip") + '</div>'
+    +     '<div style="font-size:11.5px;color:#777;margin-top:3px;line-height:1.5;">Change the start to shift everything by that delta. Change the end to grow or shrink the trip — destinations scale proportionally to their current nights.</div>'
+    +   '</div>'
+    +   '<div style="padding:12px 20px;display:flex;flex-direction:column;gap:12px;">'
+    +     '<label style="display:flex;align-items:center;gap:10px;font-size:12.5px;color:#222;">'
+    +       '<span style="min-width:60px;font-weight:600;">Start</span>'
+    +       '<input type="date" id="trip-dates-start" value="' + curStart + '" style="flex:1;padding:6px 8px;font-size:12.5px;border:1px solid #ccc;border-radius:6px;font-family:inherit;" />'
+    +     '</label>'
+    +     '<label style="display:flex;align-items:center;gap:10px;font-size:12.5px;color:#222;">'
+    +       '<span style="min-width:60px;font-weight:600;">End</span>'
+    +       '<input type="date" id="trip-dates-end" value="' + curEnd + '" style="flex:1;padding:6px 8px;font-size:12.5px;border:1px solid #ccc;border-radius:6px;font-family:inherit;" />'
+    +     '</label>'
+    +     '<div id="trip-dates-preview" style="font-size:11.5px;color:#666;line-height:1.5;padding:8px 10px;background:#f8f8f6;border:1px solid #ece8db;border-radius:6px;"></div>'
+    +   '</div>'
+    +   '<div style="padding:8px 20px 18px;display:flex;justify-content:flex-end;gap:8px;">'
+    +     '<button id="trip-dates-cancel" type="button" style="font-size:13px;font-weight:500;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Cancel</button>'
+    +     '<button id="trip-dates-apply" type="button" style="font-size:13px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 16px;cursor:pointer;font-family:inherit;">Apply</button>'
+    +   '</div>'
+    + '</div>';
+  document.body.appendChild(ov);
+
+  function close(){ if (ov && ov.parentNode) ov.parentNode.removeChild(ov); }
+  ov.onclick = function(e){ if (e.target === ov) close(); };
+  ov.querySelector("#trip-dates-cancel").onclick = close;
+
+  var startInp = ov.querySelector("#trip-dates-start");
+  var endInp   = ov.querySelector("#trip-dates-end");
+  var prev     = ov.querySelector("#trip-dates-preview");
+
+  function _diffDays(a, b){
+    var da = new Date(a + "T12:00:00"), db = new Date(b + "T12:00:00");
+    if (isNaN(da) || isNaN(db)) return null;
+    return Math.round((db - da) / 86400000);
+  }
+  function _refreshPreview(){
+    var s = startInp.value, e = endInp.value;
+    if (!s || !e) { prev.textContent = "Pick both dates."; return; }
+    var newNights = _diffDays(s, e);
+    if (newNights == null) { prev.textContent = "Couldn't parse dates."; return; }
+    if (newNights < trip.destinations.length) {
+      prev.innerHTML = '<span style="color:#c44;">Too short — you have <strong>' + trip.destinations.length + '</strong> destination' + (trip.destinations.length !== 1 ? 's' : '') + '. Pick an end date at least ' + trip.destinations.length + ' day' + (trip.destinations.length !== 1 ? 's' : '') + ' after start.</span>';
+      return;
+    }
+    var deltaNights = newNights - curNights;
+    var deltaStartDays = (s === curStart) ? 0 : _diffDays(curStart, s);
+    var parts = [];
+    parts.push('<strong>' + (newNights + 1) + ' days</strong> · ' + newNights + ' nights');
+    if (deltaStartDays !== 0) parts.push((deltaStartDays > 0 ? 'shifted later by ' : 'shifted earlier by ') + Math.abs(deltaStartDays) + ' day' + (Math.abs(deltaStartDays) !== 1 ? 's' : ''));
+    if (deltaNights !== 0) parts.push((deltaNights > 0 ? 'extended by ' : 'shortened by ') + Math.abs(deltaNights) + ' night' + (Math.abs(deltaNights) !== 1 ? 's' : '') + ' (scaled across destinations)');
+    if (deltaStartDays === 0 && deltaNights === 0) parts.push('no change');
+    prev.innerHTML = parts.join(' · ');
+  }
+  startInp.oninput = _refreshPreview;
+  endInp.oninput   = _refreshPreview;
+  _refreshPreview();
+
+  ov.querySelector("#trip-dates-apply").onclick = function(){
+    var newStart = startInp.value;
+    var newEnd   = endInp.value;
+    if (!newStart || !newEnd) return;
+    var newNights = _diffDays(newStart, newEnd);
+    if (newNights == null || newNights < trip.destinations.length) return;
+    close();
+    _applyTripDateChange(newStart, newNights);
+  };
+}
+if (typeof globalThis !== "undefined") globalThis._openTripDatesEditor = _openTripDatesEditor;
+
+// v359.60.30: apply a new trip start + total nights. Distributes the
+// delta proportionally across overnight destinations (nights > 0)
+// using a largest-remainder rounding pass so the final total exactly
+// matches the target. 0-night "see" destinations stay at 0. After
+// the per-dest nights are settled, _ftRecomputeTripDates cascades
+// dateFrom / dateTo from the new start.
+function _applyTripDateChange(newStart, newNights){
+  if (!trip || !Array.isArray(trip.destinations) || !trip.destinations.length) return;
+  if (!newStart) return;
+  newNights = Math.max(trip.destinations.length, parseInt(newNights, 10) || 0);
+
+  // Anchor the first destination at newStart. _ftRecomputeTripDates
+  // walks from there.
+  trip.destinations[0].dateFrom = newStart;
+
+  // Distribute nights proportionally to current overnights.
+  var curNights = trip.destinations.reduce(function(s, d){ return s + (d.nights || 0); }, 0);
+  var overnights = trip.destinations.filter(function(d){ return (d.nights || 0) > 0; });
+  var zeroNights = trip.destinations.filter(function(d){ return !(d.nights || 0); });
+
+  if (newNights !== curNights) {
+    if (overnights.length === 0) {
+      // No overnights yet — give every "see" 1 night until budget is consumed.
+      // Cheap fallback; user can rebalance manually after.
+      var remaining = newNights;
+      trip.destinations.forEach(function(d){
+        d.nights = remaining > 0 ? 1 : 0;
+        remaining -= d.nights;
+      });
+    } else if (curNights > 0) {
+      // Proportional scale with largest-remainder rounding.
+      var scale = newNights / curNights;
+      var raw = overnights.map(function(d){ return (d.nights || 0) * scale; });
+      var floors = raw.map(function(v){ return Math.max(1, Math.floor(v)); });
+      var sum = floors.reduce(function(a, b){ return a + b; }, 0);
+      var delta = newNights - sum;
+      // Indices ranked by fractional remainder (descending) get +1
+      // (or -1 when delta < 0; pick smallest remainder first).
+      var rems = raw.map(function(v, i){ return { i: i, frac: v - Math.floor(v) }; });
+      rems.sort(function(a, b){ return b.frac - a.frac; });
+      if (delta > 0) {
+        for (var k = 0; k < delta && k < rems.length; k++) floors[rems[k].i]++;
+      } else if (delta < 0) {
+        var need = -delta;
+        // Subtract from smallest-remainder overnights first, but never below 1.
+        rems.reverse();
+        var rIdx = 0;
+        while (need > 0 && rIdx < rems.length) {
+          var i = rems[rIdx].i;
+          if (floors[i] > 1) { floors[i]--; need--; }
+          else rIdx++;
+          if (rIdx >= rems.length) rIdx = 0; // wrap once if needed
+          // Safety: bail if every overnight is at 1 already.
+          if (floors.every(function(v){ return v <= 1; })) break;
+        }
+      }
+      overnights.forEach(function(d, i){ d.nights = floors[i]; });
+    } else {
+      // curNights === 0 but newNights > 0 — give everyone 1 until consumed.
+      var rem = newNights;
+      trip.destinations.forEach(function(d){
+        d.nights = rem > 0 ? 1 : 0;
+        rem -= d.nights;
+      });
+    }
+  }
+
+  // Re-cascade dates and resize day arrays.
+  if (typeof _ftRecomputeTripDates === "function") _ftRecomputeTripDates();
+  if (typeof _ftResizeDestDays === "function") {
+    trip.destinations.forEach(function(d){ _ftResizeDestDays(d); });
+  }
+
+  // Mirror to the brief so re-edits stay consistent.
+  if (trip.brief) {
+    trip.brief.startDate = newStart;
+    trip.brief.duration = (newNights + 1) + " days";
+    var lastDest = trip.destinations[trip.destinations.length - 1];
+    if (lastDest && lastDest.dateTo) trip.brief.endDate = lastDest.dateTo;
+  }
+
+  if (typeof _emitTripMutation === "function") {
+    _emitTripMutation({ reason: "tripDatesEdit" });
+  } else {
+    if (typeof autoSave === "function") try { autoSave(); } catch(_) {}
+    if (typeof drawTripMode === "function") drawTripMode();
+    if (typeof updateMainMap === "function") updateMainMap();
+  }
+  if (typeof showSaveStatus === "function") {
+    showSaveStatus("Trip dates updated", 2400);
+  }
+}
+if (typeof globalThis !== "undefined") globalThis._applyTripDateChange = _applyTripDateChange;
 
 // Resize a destination's days array in place to match its new
 // nights value. Preserves items as much as possible — appends fresh
@@ -21580,11 +21774,19 @@ function _defaultTemperatureUnits(){
   return "celsius";
 }
 function _defaultDateFormat(){
+  // v359.60.30: new long formats with weekday + year (the user-stated
+  // contract). Old short "us" (Sat, May 12 — no year) is soft-migrated
+  // to "us-long" so existing trips don't need a manual pref update.
+  //   "us-long"   → Mon, Aug 5, 2026  (default — weekday, month, day, year)
+  //   "intl-long" → Mon, 5 Aug 2026   (weekday, day, month, year)
+  //   "iso"       → 2026-08-05        (raw ISO)
+  //   "locale"    → browser-locale toLocaleDateString
   try {
     var f = (window.MaxDB && MaxDB.prefs) ? MaxDB.prefs.get("dateFormat") : null;
-    if (f === "us" || f === "locale") return f;
+    if (f === "us") return "us-long";       // back-compat
+    if (f === "us-long" || f === "intl-long" || f === "iso" || f === "locale") return f;
   } catch(_){}
-  return "iso";
+  return "us-long";
 }
 function _defaultCurrency(){
   try {
@@ -21642,7 +21844,7 @@ function showSettingsPanel(){
   var curHours = 6, curSights = 2, curPace = "enough", curDtHours = 3, curDtRadius = 60;
   var curTravelers = 2, curWithKids = false, curTransport = "", curAccom = "";
   var curMobility = "", curDietary = "", curLanguages = "";
-  var curDistUnits = "metric", curTempUnits = "celsius", curDateFmt = "iso", curCurrency = "";
+  var curDistUnits = "metric", curTempUnits = "celsius", curDateFmt = "us-long", curCurrency = "";
   // v359.15: avoidance defaults.
   var curAvoidDefaults = {}, curAvoidOtherDefaults = "";
   try {
@@ -21679,7 +21881,9 @@ function showSettingsPanel(){
       var tu = MaxDB.prefs.get("temperatureUnits");
       if (tu === "fahrenheit") curTempUnits = "fahrenheit";
       var df = MaxDB.prefs.get("dateFormat");
-      if (df === "us" || df === "locale") curDateFmt = df;
+      // v359.60.30: accept the new long formats AND back-compat alias "us" → "us-long".
+      if (df === "us") curDateFmt = "us-long";
+      else if (df === "us-long" || df === "intl-long" || df === "iso" || df === "locale") curDateFmt = df;
       var cu = MaxDB.prefs.get("currency");
       if (typeof cu === "string") curCurrency = cu;
       // v359.15: avoid defaults.
@@ -21902,8 +22106,9 @@ function showSettingsPanel(){
     +   '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:6px;">'
     +     '<div>'
     +       '<label style="font-weight:600;color:#222;display:block;margin-bottom:6px;">Date format</label>'
-    +       '<label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;cursor:pointer;font-size:12px;font-weight:500;color:#222;text-transform:none;letter-spacing:0;"><input type="radio" name="sp-date" value="iso" '+(curDateFmt==="iso"?"checked":"")+' style="margin:0;width:auto;" /> ISO (2026-05-12)</label>'
-    +       '<label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;cursor:pointer;font-size:12px;font-weight:500;color:#222;text-transform:none;letter-spacing:0;"><input type="radio" name="sp-date" value="us" '+(curDateFmt==="us"?"checked":"")+' style="margin:0;width:auto;" /> US (May 12, 2026)</label>'
+    +       '<label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;cursor:pointer;font-size:12px;font-weight:500;color:#222;text-transform:none;letter-spacing:0;"><input type="radio" name="sp-date" value="us-long" '+(curDateFmt==="us-long"?"checked":"")+' style="margin:0;width:auto;" /> Mon, Aug 5, 2026</label>'
+    +       '<label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;cursor:pointer;font-size:12px;font-weight:500;color:#222;text-transform:none;letter-spacing:0;"><input type="radio" name="sp-date" value="intl-long" '+(curDateFmt==="intl-long"?"checked":"")+' style="margin:0;width:auto;" /> Mon, 5 Aug 2026</label>'
+    +       '<label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;cursor:pointer;font-size:12px;font-weight:500;color:#222;text-transform:none;letter-spacing:0;"><input type="radio" name="sp-date" value="iso" '+(curDateFmt==="iso"?"checked":"")+' style="margin:0;width:auto;" /> ISO (2026-08-05)</label>'
     +       '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:500;color:#222;text-transform:none;letter-spacing:0;"><input type="radio" name="sp-date" value="locale" '+(curDateFmt==="locale"?"checked":"")+' style="margin:0;width:auto;" /> Locale (browser default)</label>'
     +     '</div>'
     +     '<div>'
@@ -22028,7 +22233,7 @@ function showSettingsPanel(){
     var tempR = box.querySelector('input[name="sp-temp"]:checked');
     var tu = tempR ? tempR.value : "celsius";
     var dateR = box.querySelector('input[name="sp-date"]:checked');
-    var df = dateR ? dateR.value : "iso";
+    var df = dateR ? dateR.value : "us-long";
     var cu = (document.getElementById("sp-currency").value || "").trim().toUpperCase();
     // v359.15: avoid defaults.
     var avoidObj = {};
@@ -24052,16 +24257,18 @@ function renderDayWeatherChip(dest, day, container){
 function fmtD(s){
   if(!s)return"";
   var d=new Date(s+"T12:00:00");
-  // v359.12: respect the user's dateFormat preference.
-  //   - "iso"    → 2026-05-12 (raw ISO, no formatting)
-  //   - "us"     → Sat, May 12 (current default, US locale, en-US)
-  //   - "locale" → browser locale (toLocaleDateString with no locale arg)
-  // Includes day-of-week so per-leg dates on the trip plan read
-  // consistently with the trip-level dates strip at the top.
-  var fmt = (typeof _defaultDateFormat === "function") ? _defaultDateFormat() : "us";
+  // v359.60.30: long formats with weekday + year are the new
+  // defaults. Old short "us" (no year) maps to "us-long" via
+  // _defaultDateFormat's back-compat shim.
+  //   "us-long"   → Mon, Aug 5, 2026   (default — weekday, month, day, year)
+  //   "intl-long" → Mon, 5 Aug 2026    (weekday, day, month, year)
+  //   "iso"       → 2026-08-05         (raw ISO, no formatting)
+  //   "locale"    → browser default with weekday short + year
+  var fmt = (typeof _defaultDateFormat === "function") ? _defaultDateFormat() : "us-long";
   if (fmt === "iso") return s;
-  if (fmt === "locale") return d.toLocaleDateString(undefined, {weekday:"short", month:"short", day:"numeric"});
-  return d.toLocaleDateString("en-US", {weekday:"short", month:"short", day:"numeric"});
+  if (fmt === "intl-long") return d.toLocaleDateString("en-GB", {weekday:"short", day:"numeric", month:"short", year:"numeric"});
+  if (fmt === "locale")    return d.toLocaleDateString(undefined,  {weekday:"short", month:"short", day:"numeric", year:"numeric"});
+  return d.toLocaleDateString("en-US", {weekday:"short", month:"short", day:"numeric", year:"numeric"});
 }
 
 // v359.12: distance/temperature formatters honoring user prefs.

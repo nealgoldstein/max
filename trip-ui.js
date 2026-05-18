@@ -954,15 +954,19 @@
     var first = trip.destinations[0];
     var last  = trip.destinations[trip.destinations.length - 1];
     if (!first || !first.dateFrom || !last || !last.dateTo) return;
-    var fmt = function (iso) {
-      try {
-        var d = new Date(iso + "T12:00:00");
-        return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-      } catch (_) { return iso; }
-    };
-    var year;
-    try { year = new Date(last.dateTo + "T12:00:00").getFullYear(); }
-    catch (_) { year = ""; }
+    // v359.60.30: route formatting through global.fmtD so the strip
+    // honors the user's Settings → Date format pref. fmtD already
+    // includes weekday + year in the long formats; drop the manual
+    // year suffix we used to append. Fallback for the headless test
+    // environment keeps the previous toLocaleDateString.
+    var fmt = (typeof global.fmtD === "function")
+      ? global.fmtD
+      : function (iso) {
+          try {
+            var d = new Date(iso + "T12:00:00");
+            return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+          } catch (_) { return iso; }
+        };
     var totalNights = trip.destinations.reduce(function (s, d) { return s + (d.nights || 0); }, 0);
     var totalDays   = totalNights + 1;
     var budget      = (typeof global._parseTripDuration === "function")
@@ -977,10 +981,19 @@
         + '</span>';
     }
     var datesBar = document.createElement("div");
-    datesBar.style.cssText = "margin:0 2px 12px;padding:14px 16px;background:#fff;border:1px solid #e6e2d8;border-radius:8px;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;";
+    // v359.60.30: clickable — opens _openTripDatesEditor so the user
+    // can change start/end without hunting through menus.
+    datesBar.style.cssText = "margin:0 2px 12px;padding:14px 16px;background:#fff;border:1px solid #e6e2d8;border-radius:8px;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;cursor:pointer;transition:background 120ms ease;";
+    datesBar.title = "Click to change trip dates";
+    datesBar.onmouseover = function(){ datesBar.style.background = "#fafaf6"; };
+    datesBar.onmouseout  = function(){ datesBar.style.background = "#fff"; };
+    datesBar.onclick = function(){
+      if (typeof global._openTripDatesEditor === "function") global._openTripDatesEditor();
+    };
     datesBar.innerHTML = ''
       + '<div style="font-size:18px;font-weight:700;color:#1a1a1a;">'
-      +   fmt(first.dateFrom) + ' – ' + fmt(last.dateTo) + (year ? ', ' + year : '')
+      +   fmt(first.dateFrom) + ' – ' + fmt(last.dateTo)
+      +   ' <span style="font-size:11px;color:#aaa;font-weight:500;margin-left:4px;">&#9998;</span>'
       + '</div>'
       + '<div style="font-size:12px;color:#666;">'
       +   '<strong>' + totalDays + ' days</strong> · ' + totalNights + ' nights · '
