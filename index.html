@@ -2042,12 +2042,16 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
 
         <div id="mw-edit" class="mw-dropdown" style="display:none;">
           <button class="mw-item" onclick="_mwClose();editConstraints();">&#9998;&nbsp; Edit trip inputs…</button>
-          <!-- v359.60.25: "Edit destinations…" routes back into the
-               candidate-explorer picker for trips that have either
-               mdcItems (Choreograph picker pipeline) or candidates
-               (paste/file imports — v359.60.26). Falls through to a
-               friendly notice when neither is available. -->
-          <button class="mw-item" onclick="_mwClose();_reopenPickerAny&amp;&amp;_reopenPickerAny();">&#127919;&nbsp; Edit destinations…</button>
+          <!-- v359.60.29: "Open research" — Max has two top-level
+               views: Research (place-shaped — overnight hubs, day
+               trips, waysides, considered places) and Trip (plan-
+               shaped — sequence, dates, day-by-day). Editing either
+               side syncs to the other so the user can iterate
+               back and forth without losing work. This menu item
+               opens whichever research surface this trip carries
+               data for (activity-place picker for paste/file imports,
+               legacy candidate-explorer for older trips). -->
+          <button class="mw-item" onclick="_mwClose();_reopenPickerAny&amp;&amp;_reopenPickerAny();">&#128300;&nbsp; Open research</button>
           <div class="mw-sep"></div>
           <button class="mw-item" onclick="_mwClose();openTripSearch();">&#x1F50D;&nbsp; Search this trip</button>
           <button class="mw-item" onclick="_mwClose();showAskMaxModal();">&#128172;&nbsp; Ask Max…</button>
@@ -31119,6 +31123,7 @@ function _openTripStopPopover(ctx) {
   }
   var hubSel = ov.querySelector("#trip-stop-hub");
   var dtRouteSel = ov.querySelector("#trip-stop-dt-route");
+  var dtNewRadio   = ov.querySelector('input[name="trip-stop-dt-mode"][value="new"]');
   var dtAddToRadio = ov.querySelector('input[name="trip-stop-dt-mode"][value="addTo"]');
   // v359.60.23: Add-to dropdown lists ALL day-trip routes across
   // the trip; picking one auto-syncs From to match the route's hub.
@@ -31143,7 +31148,31 @@ function _openTripStopPopover(ctx) {
       _syncFromHubToSelectedRoute();
     };
     dtRouteSel.onclick  = function(){
+      _autoCheck("dayTrip");
       if (dtAddToRadio && !dtAddToRadio.disabled) dtAddToRadio.checked = true;
+    };
+  }
+  // v359.60.29: clicking either INNER day-trip-mode radio (New /
+  // Add to) must also auto-check the OUTER "Day trip" radio. Without
+  // this, the user sees an active "Add to" with a populated dropdown
+  // but the outer radio still says See (current), so Apply reads
+  // selectedRole=see, hits the "same role" no-op branch, and
+  // silently does nothing. The other auto-check hooks (hub dropdown,
+  // route dropdown change) only fire when the user actually CHANGES
+  // a select — clicking just the radio left the outer radio untouched.
+  if (dtNewRadio) {
+    dtNewRadio.onclick = function(){ _autoCheck("dayTrip"); };
+  }
+  if (dtAddToRadio) {
+    dtAddToRadio.onclick = function(){
+      _autoCheck("dayTrip");
+      // Also sync From hub to whatever the dropdown is currently
+      // showing — at this point the user has picked Add to but
+      // hasn't necessarily touched the dropdown (the default first
+      // option is the active one). Without syncing, From keeps
+      // showing the original hub even though the chosen route
+      // belongs to a different hub.
+      _syncFromHubToSelectedRoute();
     };
   }
   var routeSel = ov.querySelector("#trip-stop-route");
