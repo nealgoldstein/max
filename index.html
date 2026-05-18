@@ -30533,16 +30533,18 @@ function _openTripStopPopover(ctx) {
       : "Promote to its own destination on the trip with a night to sleep."
   );
 
-  // Helper: list existing dayTrip routes for a given hub (used by the
-  // "combine with existing" picker below).
-  function _dayTripRoutesForHub(hubId) {
-    if (!hubId) return [];
+  // Helper: list ALL existing dayTrip routes across the trip
+  // (regardless of hub). The Add-to dropdown shows every day trip
+  // so the user can combine with a day trip from a different hub
+  // than the From dropdown currently shows — picking the route
+  // auto-syncs the From hub. Skips the route this stop is already
+  // on (no self-combine).
+  function _allDayTripRoutes() {
     var isDT = (typeof MaxMigration !== "undefined" && MaxMigration.isDayTripRoute)
       ? MaxMigration.isDayTripRoute
       : function(r){ return r && (r.subKind === "dayTrip" || r.kind === "dayTrip"); };
     return (trip.routes || []).filter(function(r){
-      if (!r || !isDT(r) || r.fromDestId !== hubId) return false;
-      // Skip the route this stop is already on (no self-combine).
+      if (!r || !isDT(r)) return false;
       if (ctx.kind === "dayTrip" && ctx.route && ctx.route.id === r.id) return false;
       return true;
     });
@@ -30558,26 +30560,24 @@ function _openTripStopPopover(ctx) {
     if (names.length <= 3) return names.join(", ");
     return names.slice(0, 2).join(", ") + " +" + (names.length - 2);
   }
-  // Initial hub selection: current hub for dayTrip context, else
-  // first overnight in trip.destinations.
-  var _initHubId = currentHubId || (hubOpts[0] && hubOpts[0].id) || null;
-  var _initRoutes = _dayTripRoutesForHub(_initHubId);
-  var _initRouteOptsHtml = '<option value="">— New day trip —</option>'
-    + _initRoutes.map(function(r){
-        return '<option value="' + r.id + '">Add to: ' + _dayTripRouteLabel(r) + '</option>';
-      }).join("");
+  function _dayTripRouteOption(r) {
+    var hub = trip.destinations.find(function(d){ return d.id === r.fromDestId; });
+    var hubName = (hub && hub.place) || "?";
+    return '<option value="' + r.id + '" data-hub="' + r.fromDestId + '">' + _dayTripRouteLabel(r) + ' (from ' + hubName + ')</option>';
+  }
+  var _allDtRoutes = _allDayTripRoutes();
+  var _initRouteOptsHtml = _allDtRoutes.map(_dayTripRouteOption).join("");
 
   // Three labeled fields: From (hub) · New day trip (radio) · Add to
-  // existing (radio + dropdown of existing dayTrip routes for the
-  // chosen hub). The two radios are mutually exclusive; the Add-to
-  // dropdown is disabled when no routes exist for the chosen hub or
-  // when "New" is selected.
-  var _addToInitiallyEnabled = _initRoutes.length > 0;
-  var _addToInitialOpts = _initRoutes.map(function(r){
-    return '<option value="' + r.id + '">' + _dayTripRouteLabel(r) + '</option>';
-  }).join("");
+  // existing (radio + dropdown of ALL existing dayTrip routes
+  // across the trip). The two radios are mutually exclusive; the
+  // Add-to dropdown is disabled only when there are zero existing
+  // day-trip routes anywhere. Picking a route in Add-to auto-syncs
+  // the From hub to match the route's fromDestId.
+  var _addToInitiallyEnabled = _allDtRoutes.length > 0;
+  var _addToInitialOpts = _initRouteOptsHtml;
   if (!_addToInitialOpts) {
-    _addToInitialOpts = '<option value="">(no existing day trips from this hub)</option>';
+    _addToInitialOpts = '<option value="">(no existing day trips yet)</option>';
   }
   var dayTripRow = hubOpts.length
     ? _row(
@@ -30679,42 +30679,27 @@ function _openTripStopPopover(ctx) {
   var hubSel = ov.querySelector("#trip-stop-hub");
   var dtRouteSel = ov.querySelector("#trip-stop-dt-route");
   var dtAddToRadio = ov.querySelector('input[name="trip-stop-dt-mode"][value="addTo"]');
-  function _refreshDtRoutesForHub() {
+  // v359.60.23: Add-to dropdown lists ALL day-trip routes across
+  // the trip; picking one auto-syncs From to match the route's hub.
+  // No hub-filter refresh needed — the dropdown is static.
+  function _syncFromHubToSelectedRoute() {
     if (!hubSel || !dtRouteSel) return;
-    var hubId = hubSel.value;
-    var routes = _dayTripRoutesForHub(hubId);
-    if (routes.length) {
-      dtRouteSel.innerHTML = routes.map(function(r){
-        return '<option value="' + r.id + '">' + _dayTripRouteLabel(r) + '</option>';
-      }).join("");
-      dtRouteSel.disabled = false;
-      dtRouteSel.style.color = "";
-      if (dtAddToRadio) dtAddToRadio.disabled = false;
-      var addToLbl = dtAddToRadio && dtAddToRadio.parentNode && dtAddToRadio.parentNode.querySelector("span");
-      if (addToLbl) addToLbl.style.color = "#333";
-    } else {
-      dtRouteSel.innerHTML = '<option value="">(no existing day trips from this hub)</option>';
-      dtRouteSel.disabled = true;
-      dtRouteSel.style.color = "#aaa";
-      if (dtAddToRadio) {
-        dtAddToRadio.disabled = true;
-        dtAddToRadio.checked = false;
-        // Force-back to "New" if Add-to was selected.
-        var newRadio = ov.querySelector('input[name="trip-stop-dt-mode"][value="new"]');
-        if (newRadio) newRadio.checked = true;
-      }
-      var addToLbl2 = dtAddToRadio && dtAddToRadio.parentNode && dtAddToRadio.parentNode.querySelector("span");
-      if (addToLbl2) addToLbl2.style.color = "#aaa";
+    var opt = dtRouteSel.options[dtRouteSel.selectedIndex];
+    if (!opt) return;
+    var hubId = opt.getAttribute("data-hub");
+    if (hubId && hubSel.value !== hubId) {
+      hubSel.value = hubId;
     }
   }
   if (hubSel) {
-    hubSel.onchange = function(){ _autoCheck("dayTrip"); _refreshDtRoutesForHub(); };
+    hubSel.onchange = function(){ _autoCheck("dayTrip"); };
     hubSel.onclick  = function(){ _autoCheck("dayTrip"); };
   }
   if (dtRouteSel) {
     dtRouteSel.onchange = function(){
       _autoCheck("dayTrip");
       if (dtAddToRadio && !dtAddToRadio.disabled) dtAddToRadio.checked = true;
+      _syncFromHubToSelectedRoute();
     };
     dtRouteSel.onclick  = function(){
       if (dtAddToRadio && !dtAddToRadio.disabled) dtAddToRadio.checked = true;
