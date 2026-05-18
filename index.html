@@ -2025,6 +2025,12 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
            plain text label that opens a dropdown below. Mousing across
            labels while one is open switches focus (like macOS). -->
       <div class="action-buttons mac-menubar" style="position:relative;">
+        <!-- v359.60.34: persistent Home button at the front of the
+             menu bar. Previously Home was buried inside File → "All
+             trips," which made it three clicks to get back to the
+             trip list from the trip view. Top-level + always-visible
+             means one click from anywhere in the trip view. -->
+        <button class="mw-menu" data-menu="home" onclick="goHome()" title="Back to all trips" style="font-weight:600;">&larr; Home</button>
         <button class="mw-menu" data-menu="file"     onclick="_mwToggle('file')"     onmouseenter="_mwHoverSwitch('file')"     title="File">File</button>
         <button class="mw-menu" data-menu="edit"     onclick="_mwToggle('edit')"     onmouseenter="_mwHoverSwitch('edit')"     title="Edit">Edit</button>
         <button class="mw-menu" data-menu="settings" onclick="_mwToggle('settings')" onmouseenter="_mwHoverSwitch('settings')" title="Settings">Settings</button>
@@ -19303,7 +19309,11 @@ function showCandidateExplorer(cands, editMode){
   // the buttons (Edit why & where / Edit how you travel) on a slim
   // header so the affordances stay visible.
   ov.innerHTML='<div class="ce-header" style="padding-top:8px;padding-bottom:8px;">'
-    +'<div></div>'
+    // v359.60.34: Home button on the candidate-explorer header too.
+    // Picker chrome already has Home; the legacy explorer didn't, so
+    // a user mid-research with this overlay open had no way back to
+    // the trips list without committing or canceling.
+    +'<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:600;" onclick="cancelCandidateExplorer&amp;&amp;cancelCandidateExplorer();goHome();">&larr; Home</button>'
     +(_ceEditMode
       ? '<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:500;" onclick="cancelEditCandidates()">Cancel</button>'
       : '<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:500;margin-right:6px;" onclick="editWhereWhy()">\u2190 Edit why & where</button>'+'<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:500;" onclick="editHowYouTravel()">Edit how you travel</button>')
