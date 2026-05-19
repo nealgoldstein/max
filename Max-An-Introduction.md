@@ -25,92 +25,99 @@ forecasts, in-app Q&A) and stays out of the way everywhere else.
 
 ---
 
-## How a trip flows through Max
+## The four phases
 
-Max has two top-level views you bounce between as you plan:
+Max revolves around four phases that overlap and feed each other.
+They're not a linear wizard — you move between them as you learn
+more, and editing in one is reflected in the others.
 
-- **Research view** — place-shaped. The list of places (overnight
-  hubs, day trips, waysides, things you're considering), grouped
-  by activity theme. This is where you decide *what* you're doing.
-- **Trip view** — plan-shaped. The sequenced itinerary with dates,
-  the map, the day-by-day. This is where you decide *when* and
-  *in what order*.
+**1 · Profile.** Where you want to go, roughly when, how long, and
+the *intent* — what kind of trip this is. Active outdoors, museums
+and food, hot springs and remote drives, 2-week family with
+grade-schoolers. Plus the personal context that shapes what Max
+suggests: how you travel, who's coming, what you'd skip, what you
+won't miss, the pace you can sustain. The Profile is the trip's
+gravity — what gives every other phase its weight.
 
-Editing either side updates the other. Add a place from the trip
-view and it shows up in research. Drop a place from research and
-it disappears from the trip. The goal is iteration without losing
-work — you can change your mind freely.
+**2 · Discovery.** What's actually *in* the place you're going.
+Sights, walks, food, scenery, places to stay overnight, places to
+stop on the way. Grouped into activity themes ("Hike to
+waterfalls," "Walk in volcanic landscapes," "Soak in thermal
+baths"), each with a few specific places. Max suggests a starting
+set; you accept, reject, add, and curate.
 
-1. **You give Max a brief.** Where you'd like to go, roughly when,
-   how long, and the *intent* (active outdoors, museums and food,
-   hot springs and remote drives, 2-week family with grade-schoolers).
-   The brief is open-ended; Max reads it the way a knowledgeable
-   friend would.
+![Discovery view with grouped activity themes and a map](images/02-picker-candidates.png)
+> *Capture: discovery view showing 4–8 activity sections each with
+> multiple places under it, thumbnails visible, map on the right.*
 
-2. **Max opens the research view** with candidate places grouped
-   into activity themes ("Hike to waterfalls," "Walk in volcanic
-   landscapes," "Soak in thermal baths"). Each theme bundles a few
-   places where that activity is especially worthwhile, with a
-   one-line rationale and a thumbnail. Check what you want, ignore
-   what you don't, add anything Max missed.
+**3 · Structure.** Which places make the cut, in what order, for
+how many nights each. The scope of the trip in geographic and
+temporal terms: a sequence of destinations with dates, a route on
+the map, day trips that loop out from a hub, waysides that sit on
+a transit leg, places kept on the trip with no overnight ("see").
+This is where Discovery's "could go" becomes the trip's "will
+go."
 
-   ![Research view with grouped activity themes and a map](images/02-picker-candidates.png)
-   > *Capture: research view showing 4–8 activity sections (e.g.
-   > "Hike to waterfalls", "Walk in volcanic landscapes") each with
-   > multiple places under it, thumbnails visible, map on the right.*
+**4 · Plan.** What you actually do at each destination — which
+sights are scheduled for which day, when arrivals and check-ins
+happen, what restaurants you're considering, what bookings are
+confirmed. Per-destination, day by day. Much more fluid than the
+other three because it gets shaped by what you discover when you
+arrive.
 
-3. **Max builds a starting itinerary.** Click *Choreograph my trip*
-   in the research view and Max sequences your kept places into a
-   trip — assigning nights, ordering destinations geographically,
-   distributing iconic sights across days, balanced against your
-   pace preference (hours of sightseeing per day, max big sights
-   per day).
+### Why phases, not steps
 
-4. **You adjust.** Drag destinations to reorder, bump nights with
-   the +/− stepper, click any pin on the trip map to change its
-   role (Overnight stay / Day trip / Wayside / See / Remove —
-   one unified popover handles all five). Add multi-stop day-trip
-   loops by adding a destination "to" an existing day trip from
-   the popover. Click the dates strip at the top of the trip view
-   to change start or end dates — Max scales destinations
-   proportionally. Open *Edit → Open research* to go back to the
-   research view and add or remove places. Everything keeps in sync.
+In practice you cycle through them, not march through them:
 
-5. **You book.** Paste your hotel/flight/restaurant/tour
-   confirmations into the Tracker — Max extracts the details and
-   files them under the right destination automatically.
+- You set up a **Profile** with two weeks for Iceland → land in
+  **Discovery** → realize the things you want span more than two
+  weeks → back to **Profile** to bump it to three weeks.
+- You **Structure** the trip across six destinations → spot a
+  ring-road town you missed in **Discovery** → add it, re-Structure.
+- You're **Planning** day 5 in Vík → notice a sight on the map you
+  hadn't added in **Discovery** → add it, see if it changes the
+  **Structure** of nights.
+- A booking confirmation comes in → updates Plan AND Structure
+  (dates locked in) AND Discovery (the place is committed now).
 
-6. **You arrive.** During the trip, the home screen shows where you
-   are right now, what's planned for today, and the day-by-day
-   weather. The map highlights your current destination in red.
-   Calendar subscription keeps your phone calendar in sync with
-   the trip.
+Each phase keeps the others up to date. You can change your mind
+freely; nothing locks until you book — and even then, you can
+edit, cancel, and rebook.
 
-7. **Trip ends.** Each destination has a "Notes from the road"
-   section for what you actually did, what was worth it, what
-   you'd skip.
+### After the planning phases
+
+The trip itself isn't a phase in Max's model — it's the payoff.
+But the app still has a role while you're traveling:
+
+- **Today banner** during active trips: "You're on day 5 of 12 ·
+  In Reykjavík · 7°/3° · 7 days left." Tap to scroll to today's
+  day card.
+- **Booking confirmations** still come in mid-trip; paste them
+  and they land in the right Plan.
+- **Notes from the road** on each destination — what you actually
+  did, what was worth it, what you'd skip. Becomes diary later.
 
 ### Shortcut: already have a list?
 
-If you've already done your research and have a list of places
-written down somewhere — your own notes, a friend's email, a
-ChatGPT conversation — you can paste or upload it and Max will
-seed the research view with those places. You skip the brief
-step; Max still runs the LLM, but anchored on *your* list rather
-than starting from scratch. Two entry points:
+If you've already done your own research and have a list of places
+written down — your own notes, a friend's email, a ChatGPT
+conversation — you can paste or upload it and Max will seed
+Discovery with those places. You skip a fresh Profile build
+(mostly); Max still runs the LLM, but anchored on *your* list
+rather than starting from scratch. Two entry points:
 
 - **Home screen → Paste a list.** Sits next to *Start a new trip*.
   Opens a paste box. On Open, Max parses the text, runs each
   place through the LLM to group them into activity themes, and
-  lands you in the research view with everything populated.
+  lands you in Discovery with everything populated.
 - **Home screen → Load from file.** Same flow for `.txt` / `.md`
-  files. Pick the file, Max parses it, lands you in the research
-  view. (`.json` files still work too — those are full Max trip
-  exports and restore the entire trip as-saved, skipping the
-  research step.)
+  files. Pick the file, Max parses it, lands you in Discovery.
+  (`.json` files still work too — those are full Max trip exports
+  and restore the entire trip as-saved, skipping the Discovery
+  phase.)
 
 Whichever entry point you use, every place from your list is
-guaranteed to land in research — if the LLM drops one while
+guaranteed to land in Discovery — if the LLM drops one while
 organizing themes, a backstop catches it and adds it to an
 "Other places to consider" section. Token-aware matching means
 Max won't duplicate a place just because the LLM phrased it

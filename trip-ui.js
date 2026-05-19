@@ -1001,6 +1001,26 @@
       +   underHtml
       + '</div>';
     container.appendChild(datesBar);
+
+    // v359.60.47: cross-phase chip row under the dates strip on the
+    // Structure view. Surfaces the count of places in Discovery that
+    // haven't been added to the trip (a real ongoing thing — you do
+    // bounce back between Structure and Discovery as you refine).
+    if (typeof global._phaseChipsHtml === "function") {
+      var html = global._phaseChipsHtml("structure");
+      if (html) {
+        var chipsWrap = document.createElement("div");
+        chipsWrap.style.cssText = "margin:0 2px 12px;";
+        chipsWrap.innerHTML = html;
+        // Stop chip clicks from bubbling to the dates bar.
+        try {
+          chipsWrap.querySelectorAll(".phase-chips button").forEach(function(b){
+            b.addEventListener("click", function(e){ e.stopPropagation(); });
+          });
+        } catch(_){}
+        container.appendChild(chipsWrap);
+      }
+    }
   }
 
   // (b) Today banner — SCAFFOLD-5 first slice. Renders only in

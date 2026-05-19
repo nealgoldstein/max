@@ -6786,6 +6786,84 @@ function goHome(){
   showHome();
 }
 
+// v359.60.47: cross-phase awareness chips. The four phases —
+// Profile / Discovery / Structure / Plan — overlap and feed each
+// other, but each surface used to be self-contained. These helpers
+// build a compact "where else this trip lives" status bar that
+// surfaces can drop into their headers, with click-through to the
+// other phases. Style is uniform: small pill row, no visual
+// dominance over the page title.
+function _phaseStatus() {
+  var out = {
+    hasTrip:        !!(trip && trip.destinations && trip.destinations.length),
+    destCount:      0,
+    nights:         0,
+    consideredCount: 0,
+    discoveredCount: 0
+  };
+  if (out.hasTrip) {
+    out.destCount = trip.destinations.length;
+    out.nights = trip.destinations.reduce(function(s, d){ return s + (d.nights || 0); }, 0);
+  }
+  // Considered = places the user has surfaced but not added to the
+  // trip yet. Comes from trip.mdcItems (Choreograph picker) when
+  // present, else trip.candidates (legacy explorer), else _tb live state.
+  try {
+    var seen = {};
+    var pushKey = function(s){ if (s) seen[String(s).toLowerCase().trim()] = true; };
+    (trip.destinations || []).forEach(function(d){ pushKey(d.place); });
+    var considered = 0, discovered = 0;
+    if (Array.isArray(trip.mdcItems)) {
+      trip.mdcItems.forEach(function(it){
+        (it.requiredPlaces || []).forEach(function(p){
+          if (!p || !p.place) return;
+          discovered++;
+          if (!seen[p.place.toLowerCase().trim()]) considered++;
+        });
+      });
+    }
+    if (!discovered && Array.isArray(trip.candidates)) {
+      trip.candidates.forEach(function(c){
+        if (!c || !c.place) return;
+        discovered++;
+        if (!seen[c.place.toLowerCase().trim()]) considered++;
+      });
+    }
+    out.consideredCount = considered;
+    out.discoveredCount = discovered;
+  } catch(_){}
+  return out;
+}
+if (typeof globalThis !== "undefined") globalThis._phaseStatus = _phaseStatus;
+
+// Build a clickable HTML chip row that surfaces other phases' state.
+// `currentPhase` is one of "profile" / "discovery" / "structure" /
+// "plan" — the chip for that phase is suppressed (no point linking
+// to yourself). Empty when there's no trip to summarize.
+function _phaseChipsHtml(currentPhase) {
+  var s = _phaseStatus();
+  if (!s.hasTrip && !s.discoveredCount) return "";
+  var chips = [];
+  var style = 'display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:600;color:#5a6478;background:#f1f3f7;border:1px solid #dde1ea;border-radius:11px;padding:3px 9px;cursor:pointer;font-family:inherit;text-decoration:none;white-space:nowrap;line-height:1.2;';
+  function _chip(label, onclick){
+    return '<button type="button" onclick="' + onclick + '" style="' + style + '">' + label + '</button>';
+  }
+  if (currentPhase !== "profile") {
+    chips.push(_chip("✎ Profile", "editConstraints()"));
+  }
+  if (currentPhase !== "discovery" && s.discoveredCount > 0) {
+    var dLabel = s.discoveredCount + " in Discovery";
+    if (s.consideredCount > 0) dLabel += " · " + s.consideredCount + " not on trip";
+    chips.push(_chip("🔍 " + dLabel, "_reopenPickerAny&&_reopenPickerAny()"));
+  }
+  if (currentPhase !== "structure" && s.hasTrip) {
+    chips.push(_chip("🗺 " + s.destCount + " dest · " + s.nights + " nights", "(function(){if(typeof drawTripMode==='function'){_leftMode='trip';drawTripMode();updateMainMap&&updateMainMap();}var ov=document.getElementById('trip-brief-overlay');if(ov)ov.style.display='none';var ce=document.getElementById('candidate-explorer-overlay');if(ce)ce.style.display='none';})()"));
+  }
+  if (!chips.length) return "";
+  return '<div class="phase-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 4px;">' + chips.join("") + '</div>';
+}
+if (typeof globalThis !== "undefined") globalThis._phaseChipsHtml = _phaseChipsHtml;
+
 function showNewTripForm(){
   var inp = g("ntp-name");
   if(inp) { inp.focus(); inp.scrollIntoView({behavior:"smooth",block:"center"}); }
@@ -10468,16 +10546,16 @@ function renderTripStep1Place(){
 
   ov.innerHTML = ''
     + '<div class="tb-header" style="position:relative;">'
-    // v359.60.46: Home button on the Profile (brief) overlay.
-    // Previously this surface had Cancel + Continue but no top-level
-    // path back to the trips list — completing the four-stage rename
-    // (Profile / Discovery / Structure / Plan) means Home should be
-    // reachable from every stage. Top-right so it doesn't compete
-    // with the page title or sub-line.
     +   '<button onclick="if(typeof goHome===\'function\')goHome();" title="Back to all trips" style="position:absolute;top:0;right:0;font-size:11px;font-weight:600;padding:5px 11px;background:#fff;color:#1a5fa8;border:1px solid #c8d8f0;border-radius:5px;cursor:pointer;font-family:inherit;">&larr; Home</button>'
     +   '<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div></div></div>'
     +   '<div class="tb-title">Your trip’s profile</div>'
     +   '<div class="tb-sub">Where you’re going, who you are, how you travel. Fill in what matters, skip what doesn’t.</div>'
+    // v359.60.47: cross-phase awareness chips — when an existing
+    // trip is open in the Profile overlay (re-edit flow), show
+    // small clickable chips that report what's happening in
+    // Discovery and Structure right now. The phases overlap; the
+    // chips make the connection visible.
+    +   (typeof _phaseChipsHtml === "function" ? _phaseChipsHtml("profile") : "")
     + '</div>'
     + '<div class="tb-body">'
 
@@ -16366,8 +16444,13 @@ function renderActivityPicker(){
   // and the trip name lives in the unified header. The .tb-title page
   // heading ("Edit your picks" / "What to see and do in …") stays — it's
   // the page title and useful context.
+  // v359.60.47: cross-phase chips on Discovery — show what's in
+  // Structure (destinations / nights) so users see how Discovery
+  // is feeding into the trip.
+  var _discoveryPhaseChips = (typeof _phaseChipsHtml === "function") ? _phaseChipsHtml("discovery") : "";
   ov.innerHTML = ''
     + _pickerChromeRow
+    + (_discoveryPhaseChips ? ('<div style="padding:6px 22px 0;">' + _discoveryPhaseChips + '</div>') : "")
     +'<div class="tb-header" style="flex-shrink:0;">'
     +  '<div class="tb-title">'+titleLabel+'</div>'
     +'</div>'
