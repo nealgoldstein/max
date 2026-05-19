@@ -3819,11 +3819,15 @@
   //
   // Pane ids unchanged so legacy deep-link assignments still work;
   // only the tab GROUPING changed. The badge follows Action needed.
+  // v359.60.68: Action needed tab removed. The inline expandable
+  // banner above the tabs (on the destination card body, populated
+  // by _renderActionNeededAlert) is now the single Action needed
+  // surface. Three tabs is the right cardinality — three modes,
+  // not three modes plus a duplicate.
   var TAB_GROUPS = [
     {id:"seeAndDo",     lbl:"See and do",    panes:["sights","explore"]},
     {id:"stayAndEat",   lbl:"Stay and Eat",  panes:["stay"]},
-    {id:"onTheGround",  lbl:"On the ground", panes:["info","routing"]},
-    {id:"actionNeeded", lbl:"Action needed", panes:["tracker"]}
+    {id:"onTheGround",  lbl:"On the ground", panes:["info","routing"]}
   ];
   var TAB_OF_PANE = {};
   TAB_GROUPS.forEach(function(grp){ grp.panes.forEach(function(p){ TAB_OF_PANE[p] = grp.id; }); });
