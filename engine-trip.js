@@ -710,6 +710,45 @@
       cur = nextDate;
     });
 
+    // v359.60.54: detect destinations that landed with IDENTICAL
+    // coordinates (rounded to 3 decimal places ≈ 100m precision).
+    // This happens when the Discovery LLM hallucinates the same coord
+    // for two related places — Blue Lagoon ↔ Reykjanes peninsula
+    // is the canonical case (LLM clusters them because Blue Lagoon
+    // sits ON Reykjanes peninsula). With identical coords, Leaflet
+    // stacks the markers and only one pin renders.
+    //
+    // Fix at the writer: keep the first occurrence's coord, null the
+    // duplicates. publishTrip's downstream generateCityData call then
+    // fires Nominatim per destination, populating distinct cityCenter
+    // entries in _generatedCityData — and the pin render falls
+    // through to getCityCenter for the null-coord ones. The first
+    // occurrence keeps its (possibly correct, possibly LLM-hallucinated)
+    // coord; collisions resolve via the more authoritative Nominatim
+    // lookup downstream.
+    (function _dedupeIdenticalCoords(){
+      var seen = {}; // "lat3,lng3" → index of first occurrence
+      var collisions = [];
+      newArr.forEach(function(d, i){
+        if (!d || typeof d.lat !== "number" || typeof d.lng !== "number") return;
+        if (!isFinite(d.lat) || !isFinite(d.lng)) return;
+        if (d.lat === 0 && d.lng === 0) return;
+        var k = d.lat.toFixed(3) + "," + d.lng.toFixed(3);
+        if (seen[k] != null) {
+          collisions.push({first: newArr[seen[k]].place, dup: d.place, i: i});
+          d.lat = null;
+          d.lng = null;
+        } else {
+          seen[k] = i;
+        }
+      });
+      if (collisions.length && typeof console !== "undefined") {
+        collisions.forEach(function(c){
+          console.warn("[Max reconcile] coord collision: '" + c.dup + "' had identical coords to '" + c.first + "'; cleared so Nominatim can resolve distinctly");
+        });
+      }
+    })();
+
     // Round EF: clean up dayTrip chips whose underlying place is no
     // longer kept. Round ES: chip nights live on the hub, so when a
     // chip is dropped, subtract its sourceNights from the hub and regen
