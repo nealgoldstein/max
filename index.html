@@ -6758,6 +6758,41 @@ function enterApp(){
       _mergedDests++;
     });
     if (_mergedDests > 0) console.log("[Max] merged travelerNotes into research on " + _mergedDests + " destination(s)");
+
+    // v359.60.69: migrate "Want to see" entries into the sights pool.
+    // dest.trackerItems.see was a freeform "save for later" list of
+    // strings. Each entry becomes a sight suggestion with no coords
+    // so it surfaces on the See and do tab as an Optional pick and
+    // can be scheduled like any other sight.
+    var _migratedSights = 0;
+    (trip.destinations || []).forEach(function(d){
+      if (!d || !d.trackerItems || !Array.isArray(d.trackerItems.see) || !d.trackerItems.see.length) return;
+      if (!Array.isArray(d.suggestions)) d.suggestions = [];
+      var existingNames = {};
+      d.suggestions.forEach(function(s){
+        if (s && s.n) existingNames[String(s.n).toLowerCase()] = true;
+      });
+      d.trackerItems.see.forEach(function(text, i){
+        var name = (typeof text === "string") ? text.trim() : "";
+        if (!name) return;
+        if (existingNames[name.toLowerCase()]) return;
+        d.suggestions.push({
+          id: "wts-" + d.id + "-" + i,
+          type: "sight",
+          n: name,
+          st: name,
+          note: null,
+          lat: null,
+          lng: null,
+          approx: false,
+          fromWantToSee: true
+        });
+        existingNames[name.toLowerCase()] = true;
+        _migratedSights++;
+      });
+      d.trackerItems.see = [];
+    });
+    if (_migratedSights > 0) console.log("[Max] migrated " + _migratedSights + " 'Want to see' entries into sights");
   }
 
   // v359.60.61: one-time cleanup of duplicate pendingAction rows that
@@ -37732,10 +37767,11 @@ function drawDestMode(destId){
   // intrusive. The picker's "?" popup remains for the decision-time
   // version; this page's "story: X ↗" button covers the longer read.
 
-  // TM.7.5 (v332): unplaced day-trip chips lifted into MaxTripUI.
-  // Same Round FN.7.3 filter (only chips not yet placed on a day),
-  // same Round CO.3 chip-menu wiring via openDayTripMenu.
-  MaxTripUI.renderDayTripChips(dest, hdr);
+  // v359.60.69: header day-trip chip strip removed. The See and do
+  // tab's Day trips section (v359.60.67) now surfaces the same
+  // routes with day-picker capsules, so the chip strip duplicated
+  // information. _renderDayTripChips still exists if a future
+  // surface wants it.
 
   hdr.appendChild(dmActs); hdr.appendChild(dsw); hdr.appendChild(ovWarn);
   c.appendChild(hdr);
@@ -37795,6 +37831,11 @@ function drawDestMode(destId){
 
   // TM.7.10 (v333): routing + tracker panes lifted together.
   MaxTripUI.renderDestRoutingAndTrackerPanes(trip, dest, paneWrap);
+
+  // v359.60.69: Bookings pane (roll-up of all bookings for this dest).
+  if (typeof MaxTripUI.renderDestBookingsPane === "function") {
+    MaxTripUI.renderDestBookingsPane(trip, dest, paneWrap);
+  }
 
   c.appendChild(paneWrap);
 

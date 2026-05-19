@@ -3819,15 +3819,16 @@
   //
   // Pane ids unchanged so legacy deep-link assignments still work;
   // only the tab GROUPING changed. The badge follows Action needed.
-  // v359.60.68: Action needed tab removed. The inline expandable
-  // banner above the tabs (on the destination card body, populated
-  // by _renderActionNeededAlert) is now the single Action needed
-  // surface. Three tabs is the right cardinality — three modes,
-  // not three modes plus a duplicate.
+  // v359.60.69: Bookings tab added — central list of every booking
+  // for this destination (hotels, transport, activities & other).
+  // Stay and Eat's hotel forms and On the ground's routing forms
+  // continue to work for adding bookings in context; Bookings is
+  // the roll-up view.
   var TAB_GROUPS = [
     {id:"seeAndDo",     lbl:"See and do",    panes:["sights","explore"]},
     {id:"stayAndEat",   lbl:"Stay and Eat",  panes:["stay"]},
-    {id:"onTheGround",  lbl:"On the ground", panes:["info","routing"]}
+    {id:"onTheGround",  lbl:"On the ground", panes:["info","routing"]},
+    {id:"bookings",     lbl:"Bookings",      panes:["bookings"]}
   ];
   var TAB_OF_PANE = {};
   TAB_GROUPS.forEach(function(grp){ grp.panes.forEach(function(p){ TAB_OF_PANE[p] = grp.id; }); });
@@ -4587,6 +4588,101 @@
     paneWrap.appendChild(trackPane2);
   }
 
+  // ── v359.60.69: Bookings pane ──────────────────────────────
+  // Roll-up of every booking for this destination (Hotels, Transport
+  // legs touching this destination, Activities & other). Edits and
+  // adds work through the same record renderers used elsewhere; this
+  // pane is read+manage in one view.
+  function _renderDestBookingsPane(trip, dest, paneWrap) {
+    var mkHotelRecord = global.mkHotelRecord;
+    var mkTransportRecord = global.mkTransportRecord;
+    var mkGeneralRecord = global.mkGeneralRecord;
+    var toggleGeneralForm = global.toggleGeneralForm;
+
+    var pane = document.createElement("div");
+    pane.id = "dm-pane-bookings";
+    pane.style.padding = "12px 14px";
+    pane.style.display = global._isPaneInActiveGroup("bookings") ? "block" : "none";
+
+    // ── Hotels ───────────────────────────────────────────────
+    var hSec = document.createElement("div");
+    hSec.className = "tk-section";
+    hSec.style.cssText = "margin-bottom:16px;";
+    var hLbl = document.createElement("div");
+    hLbl.className = "tk-subsection-lbl";
+    hLbl.style.cssText = "font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#666;margin-bottom:8px;";
+    hLbl.textContent = "Hotels";
+    hSec.appendChild(hLbl);
+    if (!dest.hotelBookings || !dest.hotelBookings.length) {
+      var he = document.createElement("div");
+      he.className = "tk-empty";
+      he.style.cssText = "font-size:11.5px;color:#999;font-style:italic;padding:4px 0;";
+      he.textContent = "No hotel bookings yet — add one from the Stay and Eat tab.";
+      hSec.appendChild(he);
+    } else {
+      dest.hotelBookings.forEach(function(b){
+        if (typeof mkHotelRecord === "function") hSec.appendChild(mkHotelRecord(b, dest.id));
+      });
+    }
+    pane.appendChild(hSec);
+
+    // ── Transport ────────────────────────────────────────────
+    var tSec = document.createElement("div");
+    tSec.className = "tk-section";
+    tSec.style.cssText = "margin-bottom:16px;";
+    var tLbl = document.createElement("div");
+    tLbl.className = "tk-subsection-lbl";
+    tLbl.style.cssText = "font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#666;margin-bottom:8px;";
+    tLbl.textContent = "Transport";
+    tSec.appendChild(tLbl);
+    var hasTransport = false;
+    if (trip.legs) {
+      Object.keys(trip.legs).forEach(function(k){
+        var leg = trip.legs[k];
+        if (!leg || !leg.bookings || !leg.bookings.length) return;
+        if (leg.fromId !== dest.id && leg.toId !== dest.id) return;
+        hasTransport = true;
+        leg.bookings.forEach(function(b){
+          if (typeof mkTransportRecord === "function") tSec.appendChild(mkTransportRecord(b, leg.fromId, leg.toId));
+        });
+      });
+    }
+    if (!hasTransport) {
+      var te = document.createElement("div");
+      te.className = "tk-empty";
+      te.style.cssText = "font-size:11.5px;color:#999;font-style:italic;padding:4px 0;";
+      te.textContent = "No transport bookings yet — add one from the On the ground tab.";
+      tSec.appendChild(te);
+    }
+    pane.appendChild(tSec);
+
+    // ── Activities & other ───────────────────────────────────
+    var gSec = document.createElement("div");
+    gSec.className = "tk-section";
+    var gLbl = document.createElement("div");
+    gLbl.className = "tk-subsection-lbl";
+    gLbl.style.cssText = "font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#666;margin-bottom:8px;";
+    gLbl.textContent = "Activities & other";
+    gSec.appendChild(gLbl);
+    var gFormId = "gbf-" + dest.id;
+    (dest.generalBookings || []).forEach(function(b){
+      if (typeof mkGeneralRecord === "function") gSec.appendChild(mkGeneralRecord(b, dest.id));
+    });
+    var gAddBtn = document.createElement("button");
+    gAddBtn.className = "bk-log-btn";
+    gAddBtn.textContent = "+ Add booking";
+    gAddBtn.style.cssText = "margin-top:6px;";
+    (function(btn, sec, did){
+      btn.onclick = function(){
+        if (typeof toggleGeneralForm === "function") toggleGeneralForm(btn, sec, gFormId, did);
+      };
+    })(gAddBtn, gSec, dest.id);
+    gSec.appendChild(gAddBtn);
+    pane.appendChild(gSec);
+
+    paneWrap.appendChild(pane);
+  }
+
   // ── TM.5 final (v333): renderTripPage dispatcher ────────────
   // Single entry point for "render this trip view" — callers don't
   // need to know about the trip-vs-dest mode switch. opts.expandedDestId
@@ -4650,6 +4746,8 @@
     renderDestInfoPane:               _renderDestInfoPane,
     // TM.7.10 (v333):
     renderDestRoutingAndTrackerPanes: _renderDestRoutingAndTrackerPanes,
+    // v359.60.69:
+    renderDestBookingsPane:           _renderDestBookingsPane,
     // v359.50: 3-tab grouping helpers — used by the explore pane in
     // index.html and any future call sites that need to know which
     // tab group a pane belongs to.
