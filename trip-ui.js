@@ -2470,6 +2470,20 @@
     // down to the dates row.
     var nameRow = document.createElement("div");
     nameRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-bottom:4px;";
+    // v359.60.52: destination number badge at the start of the card,
+    // matching the numbered pin on the trip-overview map. Same color
+    // logic as updateMainMap's pin: grey for 0-night ("see")
+    // destinations, blue otherwise. Makes the card↔pin correspondence
+    // immediate — the user can scan the list and find that pin without
+    // hunting.
+    var _isSee = (dest.nights || 0) === 0;
+    var _badgeColor = _isSee ? "#888" : "#1a5fa8";
+    var numBadge = document.createElement("span");
+    numBadge.className = "tm-dest-num";
+    numBadge.textContent = String(idx + 1);
+    numBadge.style.cssText = "flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:" + _badgeColor + ";color:#fff;font-size:11px;font-weight:700;letter-spacing:-0.02em;line-height:1;box-shadow:0 1px 2px rgba(0,0,0,0.15);";
+    numBadge.title = "Destination " + (idx + 1) + " of " + (trip.destinations||[]).length;
+    nameRow.appendChild(numBadge);
     var nameEl=document.createElement("div"); nameEl.className="tm-dest-name";
     nameEl.style.cssText = "flex:1;min-width:0;font-size:17px;font-weight:700;color:#111;line-height:1.25;letter-spacing:-0.005em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
     nameEl.textContent = dest.label || dest.place;
