@@ -4650,7 +4650,10 @@ function renderHomeDashboard(){
   if (tomorrowSec) card.appendChild(tomorrowSec);
   var deadSec = makeSection("Cancellation deadlines", data.deadlines, "#b05820", describeItem);
   if (deadSec) card.appendChild(deadSec);
-  var pendSec = makeSection("Need to do", data.pending, "#5b3f8f", describeItem);
+  // v359.60.74: "Need to do" → "What you need to take care of" so the
+  // home-dashboard label matches the destination-card banner and the
+  // trip-wide panel. Same data (trip.pendingActions[]); single name.
+  var pendSec = makeSection("What you need to take care of", data.pending, "#5b3f8f", describeItem);
   if (pendSec) card.appendChild(pendSec);
 
   host.appendChild(card);
@@ -18204,6 +18207,20 @@ function toggleTag(el){
 // ── EDIT CONSTRAINTS (re-open Step 1 from within planning) ─────────────────
 
 function editConstraints(){
+  // v359.60.73: hydrate insurance + visa from trip.brief into _tb so
+  // the form pre-populates with saved values. Other fields hydrate
+  // earlier in the load path; these are new and don't have hydration
+  // sites elsewhere yet. Deep copies prevent the form's oninput
+  // handlers from mutating trip.brief before applyConstraintChanges
+  // runs the diff.
+  if (trip && trip.brief) {
+    if (trip.brief.insurance && !_tb.insurance) {
+      _tb.insurance = Object.assign({}, trip.brief.insurance);
+    }
+    if (trip.brief.visa && !_tb.visa) {
+      _tb.visa = Object.assign({}, trip.brief.visa);
+    }
+  }
   // Snapshot current values before editing
   var ov = g("trip-brief-overlay");
   if(ov) ov.style.zIndex = "10000";
@@ -18253,7 +18270,13 @@ function editConstraints(){
     // diff doesn't fire spurious "(not set) → 6" phantoms when nothing
     // changed.
     hoursPerDay: _tb.hoursPerDay || 6,
-    maxBigSightsPerDay: _tb.maxBigSightsPerDay || 2
+    maxBigSightsPerDay: _tb.maxBigSightsPerDay || 2,
+    // v359.60.73: travel insurance + visa as reference fields. Deep
+    // copies so the snapshot isn't mutated by oninput handlers as the
+    // user types — applyConstraintChanges compares against this for
+    // change detection.
+    insurance: _tb.insurance ? Object.assign({}, _tb.insurance) : null,
+    visa: _tb.visa ? Object.assign({}, _tb.visa) : null
   };
   _tb._editMode = true;
   if(ov){
@@ -18354,6 +18377,45 @@ function renderTripBriefEdit(){
     + _tbSectionHead("Anything you\u2019d like to avoid?", "Optional.")
     + _tbAvoidFieldHtml()
 
+    // v359.60.73: Travel insurance \u2014 optional structured fields for
+    // reference info that doesn't shape Max's recommendations but the
+    // user wants on hand. Persisted to trip.brief.insurance.
+    + _tbSectionHead("Travel insurance", "Optional. Stored for reference.")
+    +'<div class="tb-field"><label>Provider</label><input id="tb-ins-provider" value="'+((_tb.insurance&&_tb.insurance.provider)||"").replace(/"/g,"&quot;")+'" placeholder="e.g. Allianz, World Nomads, Travelex" oninput="if(!_tb.insurance)_tb.insurance={};_tb.insurance.provider=this.value;" /></div>'
+    +'<div class="tb-field"><label>Policy number</label><input id="tb-ins-policy" value="'+((_tb.insurance&&_tb.insurance.policyNumber)||"").replace(/"/g,"&quot;")+'" placeholder="" oninput="if(!_tb.insurance)_tb.insurance={};_tb.insurance.policyNumber=this.value;" /></div>'
+    +'<div class="tb-field" style="display:flex;gap:14px;flex-wrap:wrap;">'
+    +'<div style="flex:1;min-width:160px;"><label>Coverage start</label><input id="tb-ins-start" type="date" value="'+((_tb.insurance&&_tb.insurance.coverageStart)||"")+'" oninput="if(!_tb.insurance)_tb.insurance={};_tb.insurance.coverageStart=this.value;" /></div>'
+    +'<div style="flex:1;min-width:160px;"><label>Coverage end</label><input id="tb-ins-end" type="date" value="'+((_tb.insurance&&_tb.insurance.coverageEnd)||"")+'" oninput="if(!_tb.insurance)_tb.insurance={};_tb.insurance.coverageEnd=this.value;" /></div>'
+    +'</div>'
+    +'<div class="tb-field"><label>Emergency contact phone</label><input id="tb-ins-phone" type="tel" value="'+((_tb.insurance&&_tb.insurance.contactPhone)||"").replace(/"/g,"&quot;")+'" placeholder="e.g. +1 800 555 0100" oninput="if(!_tb.insurance)_tb.insurance={};_tb.insurance.contactPhone=this.value;" /></div>'
+    +'<div class="tb-field"><label>Notes</label><textarea id="tb-ins-notes" rows="2" placeholder="Coverage details, deductible, claim process, etc." oninput="if(!_tb.insurance)_tb.insurance={};_tb.insurance.notes=this.value;">'+((_tb.insurance&&_tb.insurance.notes)||"").replace(/</g,"&lt;").replace(/>/g,"&gt;")+'</textarea></div>'
+
+    // v359.60.73: Visa \u2014 optional. status enum + reference fields.
+    // Persisted to trip.brief.visa. Different destinations may need
+    // different visas; for now this is a single trip-level record. The
+    // notes field is the catch-all for trips that span visa regimes.
+    + _tbSectionHead("Visa", "Optional. Status and document details for reference.")
+    + (function(){
+        var status = (_tb.visa && _tb.visa.status) || "";
+        var opts = [
+          {id:"",            label:"\u2014 select \u2014"},
+          {id:"not-needed",  label:"Not needed"},
+          {id:"needed",      label:"Needed \u2014 not yet applied"},
+          {id:"applied",     label:"Applied"},
+          {id:"approved",    label:"Approved"},
+          {id:"denied",      label:"Denied"}
+        ];
+        var optsHtml = opts.map(function(o){
+          return '<option value="'+o.id+'"'+(status===o.id?' selected':'')+'>'+o.label+'</option>';
+        }).join("");
+        return '<div class="tb-field"><label>Status</label>'
+          + '<select id="tb-visa-status" onchange="if(!_tb.visa)_tb.visa={};_tb.visa.status=this.value;">'+optsHtml+'</select>'
+          + '</div>';
+      })()
+    +'<div class="tb-field"><label>Document / visa number</label><input id="tb-visa-doc" value="'+((_tb.visa&&_tb.visa.documentNumber)||"").replace(/"/g,"&quot;")+'" oninput="if(!_tb.visa)_tb.visa={};_tb.visa.documentNumber=this.value;" /></div>'
+    +'<div class="tb-field"><label>Valid through</label><input id="tb-visa-validthrough" type="date" value="'+((_tb.visa&&_tb.visa.validThrough)||"")+'" oninput="if(!_tb.visa)_tb.visa={};_tb.visa.validThrough=this.value;" /></div>'
+    +'<div class="tb-field"><label>Notes</label><textarea id="tb-visa-notes" rows="2" placeholder="Multiple visas, appointment dates, country-specific requirements, etc." oninput="if(!_tb.visa)_tb.visa={};_tb.visa.notes=this.value;">'+((_tb.visa&&_tb.visa.notes)||"").replace(/</g,"&lt;").replace(/>/g,"&gt;")+'</textarea></div>'
+
     +'</div>'
     +'<div class="tb-footer">'
     +'<button class="tb-btn-primary" onclick="previewConstraintChanges()">Preview changes \u2192</button>'
@@ -18400,7 +18462,13 @@ async function previewConstraintChanges(){
     avoidSummary:     _tbAvoidSummary(),
     avoidOther:       _tb.avoidOther||"",
     entryMode:        _tb.entryMode||"",
-    exitMode:         _tb.exitMode||""
+    exitMode:         _tb.exitMode||"",
+    // v359.60.73: read insurance + visa back from _tb. The oninput
+    // handlers wrote to _tb.insurance and _tb.visa directly as the
+    // user typed, so the live state is already canonical — read it
+    // back into pending for the snapshot diff comparison.
+    insurance:        _tb.insurance ? Object.assign({}, _tb.insurance) : null,
+    visa:             _tb.visa ? Object.assign({}, _tb.visa) : null
     // Round FQ: betweenMode dropped — pill removed from Step 2.
   };
   var snap = _tb._snapshot || {};
@@ -18570,6 +18638,10 @@ function applyConstraintChanges(){
     // v306: mobility mirrored to trip.brief.
     if (typeof p.physicalAbility !== "undefined") trip.brief.physicalAbility = p.physicalAbility;
     if (typeof p.abilityNote !== "undefined") trip.brief.abilityNote = p.abilityNote;
+    // v359.60.73: insurance + visa mirrored. Stored as objects to
+    // keep the structured fields together; null means "not set".
+    if (typeof p.insurance !== "undefined") trip.brief.insurance = p.insurance;
+    if (typeof p.visa !== "undefined") trip.brief.visa = p.visa;
   }
   _tb._editMode = false;
   _tb._snapshot = null;
