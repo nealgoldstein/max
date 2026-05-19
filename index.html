@@ -25421,10 +25421,9 @@ function pendingCount(){
 
 function updateTrackerBadge(){
   var n=pendingCount();
-  // v359.60.59: tab regroup renamed the tab from onTheGround to logistics.
-  // Same per-render pattern (querySelectorAll covers any duplicated dest
-  // renders).
-  document.querySelectorAll('#dm-tab-logistics').forEach(function(btn){
+  // v359.60.60: badge target is the Action needed tab. Per-render
+  // querySelectorAll covers any duplicated dest renders.
+  document.querySelectorAll('#dm-tab-actionNeeded').forEach(function(btn){
     var badge=btn.querySelector('.dm-tab-badge');
     if(n>0){
       if(!badge){badge=document.createElement('span');badge.className='dm-tab-badge';btn.appendChild(badge);}
@@ -29275,7 +29274,10 @@ async function _renderExecutionGroups(dest, host){
   hdr.style.cssText = "display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;gap:8px;";
   var title = document.createElement("div");
   title.style.cssText = "font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#666;";
-  title.textContent = "On the ground";
+  // v359.60.60: tab itself is named "On the ground" now, so the
+  // inner header would be tautological. Re-label as a more specific
+  // descriptor for the dynamic LLM-generated content.
+  title.textContent = "Friend on the inside";
   var refresh = document.createElement("button");
   refresh.className = "exp-refresh-btn";
   refresh.textContent = "Refresh";
@@ -34644,12 +34646,10 @@ function executeMoveDest(dest,fromIdx,toIdx){
   _actionsToAdd.forEach(function(a){addPendingAction(a);});
 
   // Action log
-  // v359.60.59: pending-actions badge lives on the Logistics tab now
-  // (Tracker tab was retired in v359.50, then On the ground was
-  // folded into Logistics here).
+  // v359.60.60: pending-actions tab is now "Action needed".
   if(_actionsToAdd.length>0){
     showActionLog([{type:'warn',icon:'⚠️',text:_actionsToAdd.length+' booking'+(
-      _actionsToAdd.length!==1?'s':'')+' cleared — check the Logistics tab for required provider actions'}]);
+      _actionsToAdd.length!==1?'s':'')+' cleared — check the Action needed tab for required provider actions'}]);
   }
 
   // Round FW: dedupe adjacent same-place destinations the move may
@@ -35957,6 +35957,39 @@ function syncAddVis(){
 }
 
 // ── Explore pane ───────────────────────────────────────────
+// v359.60.60: shared restaurants renderer — called from the Stay
+// & Eat pane builder, used to live inline in buildExplorePane.
+// Renders an exp-section block (header + Refresh button + suggestion
+// rows) into the given parent. Idempotent: calling Refresh
+// re-fetches and re-renders the inner list in place.
+function _renderRestaurantsSection(dest, parent) {
+  var restSec = document.createElement("div");
+  restSec.className = "exp-section";
+  restSec.style.borderTop = "1px solid #f0f0f0";
+  restSec.style.marginTop = "14px";
+  restSec.style.paddingTop = "10px";
+  var rHdr = document.createElement("div"); rHdr.className = "exp-section-hdr";
+  var rLbl = document.createElement("div"); rLbl.className = "exp-section-lbl"; rLbl.textContent = "Restaurants";
+  var rRef = document.createElement("button"); rRef.className = "exp-refresh-btn";
+  rRef.textContent = (dest.restaurantSuggestions && dest.restaurantSuggestions.length) ? "Refresh" : "Ask Max";
+  (function(d, btn){ rRef.onclick = function(){ refreshRestaurantSuggestions(d, btn); }; })(dest, rRef);
+  rHdr.appendChild(rLbl); rHdr.appendChild(rRef);
+  restSec.appendChild(rHdr);
+  var restInner = document.createElement("div"); restInner.id = "dm-rest-section";
+  if (!dest.restaurantSuggestions || dest.restaurantSuggestions.length === 0) {
+    var rEmp = document.createElement("div"); rEmp.className = "exp-empty";
+    rEmp.textContent = "Restaurant suggestions will appear here.";
+    restInner.appendChild(rEmp);
+  } else {
+    dest.restaurantSuggestions.forEach(function(s){
+      restInner.appendChild(mkExploreSuggestion(s, dest, "restaurant"));
+    });
+  }
+  restSec.appendChild(restInner);
+  parent.appendChild(restSec);
+}
+if (typeof globalThis !== "undefined") globalThis._renderRestaurantsSection = _renderRestaurantsSection;
+
 function buildExplorePane(dest){
   if(!dest.suggestions)dest.suggestions=[];
   if(!dest.restaurantSuggestions)dest.restaurantSuggestions=[];
@@ -36064,36 +36097,13 @@ function buildExplorePane(dest){
   }
   wrap.appendChild(sightsSec);
 
-  // Round FD: Restaurants section moved here from the Stay & Eat tab.
-  // Restaurants are discovery content (browse and pick), same
-  // conceptual category as sights — both belong in Explore.
-  // Eliminates the nested Stay/Eat sub-tab structure.
-  (function(){
-    var restSec = document.createElement("div");
-    restSec.className = "exp-section";
-    restSec.style.borderTop = "1px solid #f0f0f0";
-    restSec.style.marginTop = "8px";
-    restSec.style.paddingTop = "8px";
-    var rHdr = document.createElement("div"); rHdr.className = "exp-section-hdr";
-    var rLbl = document.createElement("div"); rLbl.className = "exp-section-lbl"; rLbl.textContent = "Restaurants";
-    var rRef = document.createElement("button"); rRef.className = "exp-refresh-btn";
-    rRef.textContent = (dest.restaurantSuggestions && dest.restaurantSuggestions.length) ? "Refresh" : "Ask Max";
-    (function(d, btn){ rRef.onclick = function(){ refreshRestaurantSuggestions(d, btn); }; })(dest, rRef);
-    rHdr.appendChild(rLbl); rHdr.appendChild(rRef);
-    restSec.appendChild(rHdr);
-    var restInner = document.createElement("div"); restInner.id = "dm-rest-section";
-    if (!dest.restaurantSuggestions || dest.restaurantSuggestions.length === 0) {
-      var rEmp = document.createElement("div"); rEmp.className = "exp-empty";
-      rEmp.textContent = "Restaurant suggestions will appear here.";
-      restInner.appendChild(rEmp);
-    } else {
-      dest.restaurantSuggestions.forEach(function(s){
-        restInner.appendChild(mkExploreSuggestion(s, dest, "restaurant"));
-      });
-    }
-    restSec.appendChild(restInner);
-    wrap.appendChild(restSec);
-  })();
+  // v359.60.60: restaurants moved from Explore back to the Stay & Eat
+  // tab where the label has always promised them. Sights & restaurants
+  // are different cognitive surfaces (sights are about activities and
+  // optionally schedulable; restaurants are about a meal slot you book
+  // separately), and pairing restaurants with hotels matches the
+  // "where I'll be at meal time" mental model better than pairing
+  // them with day trips. See _renderRestaurantsSection (global).
 
   // Round FZ.6: Round EV's "Could be a day trip from here" section
   // (one-shot conversion: all of source's nights move to hub, source
@@ -37537,6 +37547,13 @@ function drawDestMode(destId){
   // Max says... — unsolicited observation, rendered below the header
   renderMaxNoteCard(dest, c);
 
+  // v359.60.60: "Action needed" alert banner — per-destination
+  // count of open provider actions + upcoming cancellation
+  // deadlines. Click jumps straight to the Action needed tab.
+  if (typeof MaxTripUI.renderActionNeededAlert === "function") {
+    MaxTripUI.renderActionNeededAlert(dest, c);
+  }
+
   // TM.7.3 (v332): pending-cancellations banner lifted.
   MaxTripUI.renderPendingCancellationsBanner(dest, c);
 
@@ -37571,8 +37588,9 @@ function drawDestMode(destId){
   // buckets, same delayed checkTimeConflicts pass.
   MaxTripUI.renderDestItineraryPane(trip, dest, paneWrap);
 
-  // EXPLORE pane — visibility now driven by Plan tab membership
-  // (v359.50); Explore lives under "Plan" alongside Itinerary + Routing.
+  // EXPLORE pane — v359.60.60: now part of the "See and do" tab
+  // alongside the daily schedule (sights pane), since both surfaces
+  // are about deciding what to do with this destination's days.
   var explorePane=document.createElement("div"); explorePane.id="dm-pane-explore";
   explorePane.style.display=(typeof MaxTripUI!=="undefined"&&MaxTripUI._isPaneInActiveGroup&&MaxTripUI._isPaneInActiveGroup("explore"))?"block":"none";
   explorePane.appendChild(buildExplorePane(dest));
@@ -41040,11 +41058,13 @@ function mkTrackerInner(dest){
   // actually need.
 
   // ============================================================
-  // COMING UP — forward-facing
+  // ACTION NEEDED — provider actions + cancellation deadlines for
+  // THIS destination, ordered chronologically. v359.60.60 renames
+  // from "Coming up" to make the tab's job explicit.
   // ============================================================
   var futureSec=document.createElement("div"); futureSec.className="tk-major-section";
   var futureHdr=document.createElement("div"); futureHdr.className="tk-major-hdr";
-  futureHdr.textContent="Coming up";
+  futureHdr.textContent="Action needed";
   futureSec.appendChild(futureHdr);
 
   // ── Pending Actions section ─────────────────────────────
@@ -41076,8 +41096,8 @@ function mkTrackerInner(dest){
         row.classList.add("cleared");
         check.classList.add("done"); check.textContent="\u2713";
         var typEl=row.querySelector(".tk-action-type"); if(typEl)typEl.classList.add("cleared");
-        // v359.60.59: badge lives on dm-tab-logistics after the tab regroup.
-        var badge=g("dm-tab-logistics")&&g("dm-tab-logistics").querySelector(".dm-tab-badge");
+        // v359.60.60: badge lives on dm-tab-actionNeeded.
+        var badge=g("dm-tab-actionNeeded")&&g("dm-tab-actionNeeded").querySelector(".dm-tab-badge");
         if(badge){var n=pendingCount();if(n>0)badge.textContent=n;else badge.parentNode&&badge.parentNode.removeChild(badge);}
       };})(a);
       var body=document.createElement("div"); body.className="tk-action-body";
@@ -41175,6 +41195,17 @@ function mkTrackerInner(dest){
       row.appendChild(dateLbl); row.appendChild(body); row.appendChild(cancelBtn); dlSec.appendChild(row);
     });
     futureSec.appendChild(dlSec);
+  }
+
+  // v359.60.60: empty state when this destination has nothing
+  // outstanding. Without this the section header sat above an
+  // empty pane and read as broken; now it reassures the user.
+  if (openActions.length === 0 && deadlines.length === 0) {
+    var emptyAct = document.createElement("div");
+    emptyAct.className = "tk-empty";
+    emptyAct.style.cssText = "padding:10px 12px;background:#f7faf7;border:1px solid #d8e8d8;border-radius:6px;font-size:11.5px;color:#588a58;line-height:1.5;margin-bottom:14px;";
+    emptyAct.textContent = "Nothing needs your attention here right now. Cancellation deadlines and provider actions for " + (dest.label || dest.place) + " will surface as they come up.";
+    futureSec.appendChild(emptyAct);
   }
 
   // Round FJ: spend total moved into the "Trip diary" section below

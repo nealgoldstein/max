@@ -3404,6 +3404,66 @@
     container.appendChild(wrap);
   }
 
+  // ── v359.60.60: "Action needed" alert banner ───────────────
+  // Counts THIS destination's open pending actions + upcoming
+  // cancellation deadlines (within 7 days or past-due) and renders
+  // a compact orange banner near the top of the destination card.
+  // Click jumps to the Action needed tab. Renders nothing when the
+  // destination is clean.
+  function _renderActionNeededAlert(dest, container) {
+    if (!dest) return;
+    var actions = [];
+    try {
+      var trip = global.trip;
+      if (trip && Array.isArray(trip.pendingActions)) {
+        var dName = (dest.label || dest.place || "").toLowerCase();
+        actions = trip.pendingActions.filter(function(a){
+          if (a.cleared || !a.requiresProviderAction) return false;
+          return (a.destName || "").toLowerCase() === dName;
+        });
+      }
+    } catch(_) {}
+    var deadlines = [];
+    try {
+      if (typeof global.collectDeadlines === "function") {
+        var today = new Date(); today.setHours(0,0,0,0);
+        var in7 = new Date(today); in7.setDate(today.getDate()+7);
+        var all = global.collectDeadlines(dest) || [];
+        // Only count deadlines that are urgent or coming up soon —
+        // far-future ones don't need the alert. They still show in the
+        // tab content.
+        deadlines = all.filter(function(d){
+          if (!d.deadline) return false;
+          var dd = new Date(d.deadline+"T12:00:00");
+          return dd <= in7;
+        });
+      }
+    } catch(_) {}
+    var nA = actions.length, nD = deadlines.length, n = nA + nD;
+    if (n === 0) return;
+    var banner = document.createElement("div");
+    banner.style.cssText = "background:#fff5ec;border:1px solid #f0c8a0;border-radius:6px;padding:9px 11px;margin:8px 0 4px;display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer;transition:background .12s ease;";
+    banner.onmouseover = function(){ banner.style.background = "#fdebd8"; };
+    banner.onmouseout  = function(){ banner.style.background = "#fff5ec"; };
+    var txt = document.createElement("div");
+    txt.style.cssText = "font-size:11.5px;color:#b05820;line-height:1.45;";
+    var bits = [];
+    if (nA) bits.push("<strong>" + nA + "</strong> provider action" + (nA !== 1 ? "s" : ""));
+    if (nD) bits.push("<strong>" + nD + "</strong> cancellation deadline" + (nD !== 1 ? "s" : ""));
+    txt.innerHTML = "⚠ <strong>Action needed</strong> — " + bits.join(" · ");
+    var arrow = document.createElement("div");
+    arrow.style.cssText = "font-size:11px;font-weight:600;color:#b05820;flex-shrink:0;";
+    arrow.textContent = "Open →";
+    banner.appendChild(txt); banner.appendChild(arrow);
+    (function(did){
+      banner.onclick = function(){
+        global._activeDmSection = "tracker";
+        if (typeof global.drawDestMode === "function") global.drawDestMode(did);
+      };
+    })(dest.id);
+    container.appendChild(banner);
+  }
+
   // ── TM.7.3 (v332): pending-cancellations banner ────────────
   // Renders only if dest.pendingCancellations.items has entries.
   // Click of "View checklist" calls global.showCancellationChecklist.
@@ -3600,33 +3660,36 @@
   // (multiple panes can be visible at once within the active tab).
   //
   // Tracker badge moves from its own tab to the On-the-ground tab.
-  // v359.60.59: rebuilt around three clean modes (Schedule = scheduling,
-  // Sights & Eats = browsing/choosing, Logistics = obligations & services).
-  // The old "Plan" tab was doing three jobs at once. The old "Stay & Eat"
-  // tab lied about restaurants — they actually live on the explore pane.
-  // The old "On the ground" tab mixed a broken local-services view with
-  // a trip-wide actions list that doesn't belong on a per-destination card.
+  // v359.60.60: four tabs that map to the four cognitive modes a
+  // traveler uses on a destination:
   //
-  //   • Schedule       → day-by-day itinerary only (pane: sights)
-  //   • Sights & Eats  → optional sights + restaurants + day-trip ideas
-  //                      (pane: explore)
-  //   • Logistics      → hotels, departure transport, local services,
-  //                      per-destination pending actions
-  //                      (panes: stay, routing, info, tracker)
+  //   • See and do     — schedule + sights to consider (keep/reject)
+  //                      + optional sights + day-trip ideas
+  //                      (panes: sights, explore)
+  //   • Stay and Eat   — hotels AND restaurants together where the
+  //                      tab name promises them
+  //                      (pane: stay; restaurants merged in here)
+  //   • On the ground  — how to navigate THIS place: quick reference,
+  //                      local-knowledge LLM panel, transit booking
+  //                      (panes: info, routing)
+  //   • Action needed  — per-destination obligations sorted by date:
+  //                      pending provider actions + cancellation
+  //                      deadlines merged into one chronological list
+  //                      (pane: tracker)
   //
-  // Pane ids ("sights"/"explore"/"stay"/"routing"/"info"/"tracker") are
-  // unchanged so legacy deep-link assignments still work; only the tab
-  // GROUPING changed. The tracker badge follows the Logistics tab.
+  // Pane ids unchanged so legacy deep-link assignments still work;
+  // only the tab GROUPING changed. The badge follows Action needed.
   var TAB_GROUPS = [
-    {id:"schedule",   lbl:"Schedule",      panes:["sights"]},
-    {id:"sightsEats", lbl:"Sights & Eats", panes:["explore"]},
-    {id:"logistics",  lbl:"Logistics",     panes:["stay","routing","info","tracker"]}
+    {id:"seeAndDo",     lbl:"See and do",    panes:["sights","explore"]},
+    {id:"stayAndEat",   lbl:"Stay and Eat",  panes:["stay"]},
+    {id:"onTheGround",  lbl:"On the ground", panes:["info","routing"]},
+    {id:"actionNeeded", lbl:"Action needed", panes:["tracker"]}
   ];
   var TAB_OF_PANE = {};
   TAB_GROUPS.forEach(function(grp){ grp.panes.forEach(function(p){ TAB_OF_PANE[p] = grp.id; }); });
 
   function _activeDmTab(){
-    return TAB_OF_PANE[global._activeDmSection] || "schedule";
+    return TAB_OF_PANE[global._activeDmSection] || "seeAndDo";
   }
   function _isPaneInActiveGroup(paneId){
     return TAB_OF_PANE[paneId] === _activeDmTab();
@@ -3648,10 +3711,9 @@
       btn.className = "dm-tab" + (grp.id === activeTab ? " on" : "");
       btn.id = "dm-tab-" + grp.id;
       btn.textContent = grp.lbl;
-      // Tracker badge follows the Logistics tab — pendingCount
-      // covers booking-confirmation and other action items regardless
-      // of which sub-pane will render them.
-      if (grp.id === "logistics" && pendingN > 0) {
+      // Badge follows the Action needed tab — pendingCount covers
+      // booking-confirmation and other action items.
+      if (grp.id === "actionNeeded" && pendingN > 0) {
         var badge = document.createElement("span");
         badge.className = "dm-tab-badge";
         badge.textContent = pendingN;
@@ -3680,8 +3742,8 @@
             if (p) p.style.display = (TAB_OF_PANE[paneId] === gid ? "block" : "none");
           });
           // Lazy-render the on-the-ground execution groups when the
-          // Logistics tab is activated (info pane lives inside it).
-          if (gid === "logistics") {
+          // On the ground tab is activated (info pane lives inside it).
+          if (gid === "onTheGround") {
             var _execHost = g("dm-exec-groups-" + dest.id);
             if (_execHost && !_execHost._cyRendered && typeof global._renderExecutionGroups === "function") {
               global._renderExecutionGroups(dest, _execHost);
@@ -4173,9 +4235,14 @@
   manualWrap.appendChild(manualBtn);
   dest.hotelBookings.filter(function(b){return b.name&&!districts.some(function(d){return d.hotels.some(function(h){return h.name===b.name;});});}).forEach(function(b){manualWrap.appendChild(mkHotelRecord(b,dest.id));});
   seStayPane.appendChild(manualWrap);
-  // Round FD: stayPane2 already IS seStayPane (alias above), so no
-  // appendChild-self call. Restaurants used to be appended here as
-  // a second sub-pane (seEatPane); they now live in the Explore tab.
+
+  // v359.60.60: restaurants render here under the same Stay & Eat
+  // tab, below the hotel list. _renderRestaurantsSection is defined
+  // globally in index.html — same DOM as the legacy Explore-pane
+  // section, now in the surface the tab name has always promised.
+  if (typeof global._renderRestaurantsSection === "function") {
+    global._renderRestaurantsSection(dest, seStayPane);
+  }
 
   paneWrap.appendChild(stayPane2);
   }
@@ -4418,6 +4485,8 @@
     renderResearch:              _renderResearch,
     // TM.7.3 (v332):
     renderPendingCancellationsBanner: _renderPendingCancellationsBanner,
+    // v359.60.60:
+    renderActionNeededAlert:          _renderActionNeededAlert,
     // TM.7.4 (v332):
     renderDestLogistics:              _renderDestLogistics,
     // TM.7.5 (v332):
