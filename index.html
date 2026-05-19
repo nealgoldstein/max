@@ -36737,6 +36737,28 @@ function mkExploreSuggestion(s,dest,type){
   stb.setAttribute("data-state","idle"); stb.textContent="story";
   (function(sid,did){stb.onclick=function(){sStory(sid,did);};})(s.id,dest.id);
   acts.appendChild(stb);
+  // v359.60.70: Book button on optional sights too \u2014 same booking shape
+  // (s.booking) used for scheduled items. Tapping opens an inline form
+  // that saves to s.booking. If a booking already exists, the button
+  // surfaces it ("booked \u2713") and a click opens the form for editing.
+  // The Bookings tab rolls up suggestion-level bookings alongside the
+  // scheduled-item ones.
+  if (type === "sight") {
+    var bkb = document.createElement("button");
+    bkb.className = "exp-book-btn";
+    bkb.style.cssText = "font-size:10px;font-weight:600;padding:3px 8px;border-radius:5px;cursor:pointer;font-family:inherit;border:1px solid " + (s.booking ? "#2a7a4e" : "#d0d0d0") + ";background:" + (s.booking ? "#eaf5ee" : "#fff") + ";color:" + (s.booking ? "#2a7a4e" : "#666") + ";white-space:nowrap;";
+    bkb.textContent = s.booking ? "booked \u2713" : "book";
+    bkb.title = s.booking ? "Edit booking" : "Log a booking for this sight";
+    (function(item, did){
+      bkb.onclick = function(e){
+        e.stopPropagation();
+        if (typeof toggleSightBookForm === "function") {
+          toggleSightBookForm(row, item, did, null);
+        }
+      };
+    })(s, dest.id);
+    acts.appendChild(bkb);
+  }
   // Add to day button
   var addBtn=document.createElement("button"); addBtn.className="exp-add-btn"; addBtn.textContent="Add to day \u2192";
   (function(item,tp,btn){addBtn.onclick=function(e){

@@ -4656,6 +4656,80 @@
     }
     pane.appendChild(tSec);
 
+    // ── Per-sight bookings (v359.60.70) ──────────────────────
+    // Aggregate booking records that live on individual sights —
+    // both scheduled (day.items[i].booking) and unscheduled
+    // (dest.suggestions[i].booking). Each row shows the sight name,
+    // schedule context, time, confirmation, and an inline Edit
+    // affordance that opens the same toggleSightBookForm used to
+    // create them.
+    var sightBookings = [];
+    (dest.days || []).forEach(function(day, dayIdx){
+      (day.items || []).forEach(function(it){
+        if (!it || it.type !== "sight" || !it.booking) return;
+        sightBookings.push({
+          sight: it,
+          bk: it.booking,
+          dayIdx: dayIdx,
+          dayLbl: day.lbl || ("Day " + (dayIdx + 1)),
+          location: "scheduled"
+        });
+      });
+    });
+    (dest.suggestions || []).forEach(function(sg){
+      if (!sg || !sg.booking) return;
+      sightBookings.push({
+        sight: sg,
+        bk: sg.booking,
+        dayIdx: -1,
+        dayLbl: null,
+        location: "unscheduled"
+      });
+    });
+    var sSec = document.createElement("div");
+    sSec.className = "tk-section";
+    sSec.style.cssText = "margin-bottom:16px;";
+    var sLbl = document.createElement("div");
+    sLbl.className = "tk-subsection-lbl";
+    sLbl.style.cssText = "font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#666;margin-bottom:8px;";
+    sLbl.textContent = "Sights with bookings";
+    sSec.appendChild(sLbl);
+    if (!sightBookings.length) {
+      var sEmp = document.createElement("div");
+      sEmp.className = "tk-empty";
+      sEmp.style.cssText = "font-size:11.5px;color:#999;font-style:italic;padding:4px 0;";
+      sEmp.textContent = "No bookings on individual sights yet — tap 'book' on any sight in See and do to log one.";
+      sSec.appendChild(sEmp);
+    } else {
+      sightBookings.forEach(function(sb){
+        var row = document.createElement("div");
+        row.style.cssText = "padding:8px 10px;margin-bottom:6px;background:#fafafa;border:1px solid #e8e8e8;border-radius:6px;";
+        var line1 = document.createElement("div");
+        line1.style.cssText = "font-size:12.5px;font-weight:600;color:#222;line-height:1.4;";
+        line1.textContent = sb.sight.n || sb.sight.name || "Sight";
+        row.appendChild(line1);
+        var line2 = document.createElement("div");
+        line2.style.cssText = "font-size:10.5px;color:#666;margin-top:3px;line-height:1.45;";
+        var bits = [];
+        if (sb.location === "scheduled") bits.push("on " + sb.dayLbl);
+        else bits.push("not yet on a day");
+        if (sb.bk.time) bits.push(sb.bk.time + (sb.bk.timeEnd ? "–" + sb.bk.timeEnd : ""));
+        if (sb.bk.confirmationNumber) bits.push("Conf " + sb.bk.confirmationNumber);
+        if (sb.bk.pricePaid != null) bits.push(sb.bk.pricePaid + " " + (sb.bk.currency || ""));
+        line2.textContent = bits.join(" · ");
+        row.appendChild(line2);
+        if (sb.bk.cancelDeadline) {
+          var line3 = document.createElement("div");
+          line3.style.cssText = "font-size:10px;color:#b05820;margin-top:2px;";
+          var fmtDFn = global.fmtD || function(d){ return d; };
+          line3.textContent = "Cancel by " + fmtDFn(sb.bk.cancelDeadline) + (sb.bk.cancelDeadlineTime ? " " + sb.bk.cancelDeadlineTime : "");
+          row.appendChild(line3);
+        }
+        sSec.appendChild(row);
+      });
+    }
+    pane.appendChild(sSec);
+
     // ── Activities & other ───────────────────────────────────
     var gSec = document.createElement("div");
     gSec.className = "tk-section";
