@@ -36199,6 +36199,105 @@ function buildExplorePane(dest){
   // "where I'll be at meal time" mental model better than pairing
   // them with day trips. See _renderRestaurantsSection (global).
 
+  // ── v359.60.67: Day trips section ───────────────────────────────
+  // Lists existing day-trip routes from this hub (trip.routes[] where
+  // subKind==="dayTrip" and fromDestId===dest.id) with day-picker
+  // capsules. Was reading legacy dest.dayTrips[] (empty post-migration)
+  // so existing day trips never surfaced on the destination card even
+  // though they were on the map. Now reads the modern data.
+  // The "Other places that could be day trips" peer section below
+  // (was "Could be a day trip from here") sits underneath as the same
+  // surface for ADDING new day trips from other trip destinations.
+  (function _renderExistingDayTripRoutes(){
+    var _isDT = (typeof MaxMigration !== "undefined" && MaxMigration.isDayTripRoute)
+      ? MaxMigration.isDayTripRoute
+      : function(r){ return r && (r.subKind === "dayTrip" || r.kind === "dayTrip"); };
+    var hubRoutes = (trip.routes || []).filter(function(r){
+      return _isDT(r) && r.fromDestId === dest.id;
+    });
+    if (!hubRoutes.length) return;
+
+    var dtSec = document.createElement("div");
+    dtSec.style.cssText = "margin-top:18px;";
+    var dtHdr = document.createElement("div");
+    dtHdr.style.cssText = "padding:6px 10px;background:#f4eef9;border:1px solid #d8c4e8;border-radius:6px;font-size:13px;font-weight:700;color:#5b3f8f;";
+    dtHdr.textContent = "Day trips";
+    dtSec.appendChild(dtHdr);
+
+    hubRoutes.forEach(function(route){
+      var stops = (route.planItems || []).filter(function(pi){ return pi && pi.type === "stop"; });
+      if (!stops.length) return;
+      var stopNames = stops.map(function(s){
+        var p = (trip.places || {})[s.placeId];
+        return (p && p.name) || s.placeId || "?";
+      });
+      var rowSec = document.createElement("div");
+      rowSec.style.cssText = "margin:8px 4px;padding:10px 12px;background:#faf6ff;border:1px solid #e5d8f0;border-radius:7px;";
+
+      var titleLine = document.createElement("div");
+      titleLine.style.cssText = "font-size:13px;font-weight:700;color:#222;";
+      titleLine.textContent = stopNames.length > 1
+        ? stopNames.join(" · ") + " (loop)"
+        : stopNames[0];
+      rowSec.appendChild(titleLine);
+
+      var scheduledDayId = (route.transitDays && route.transitDays[0]) || null;
+      var scheduledIdx = -1;
+      (dest.days || []).forEach(function(d, idx){
+        if (d && d.id === scheduledDayId) scheduledIdx = idx;
+      });
+
+      var subLine = document.createElement("div");
+      subLine.style.cssText = "font-size:10.5px;color:#666;margin-top:3px;";
+      var schedTxt;
+      if (scheduledIdx >= 0) {
+        var schedLbl = ((dest.days || [])[scheduledIdx] && dest.days[scheduledIdx].lbl) || ("Day " + (scheduledIdx + 1));
+        schedTxt = '<span style="color:#5b3f8f;font-weight:600;">✓ scheduled on ' + schedLbl + '</span>';
+      } else {
+        schedTxt = '<span style="color:#b05820;font-weight:600;">⚠ not yet scheduled</span>';
+      }
+      if (route.distKm) {
+        schedTxt += ' &nbsp;·&nbsp; ' + (typeof _fmtDistance === "function" ? _fmtDistance(route.distKm) : route.distKm + "km");
+      }
+      subLine.innerHTML = schedTxt;
+      rowSec.appendChild(subLine);
+
+      // Day-picker capsules: click a different day to reschedule.
+      var capsules = document.createElement("div");
+      capsules.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;";
+      var lblEl = document.createElement("span");
+      lblEl.style.cssText = "font-size:10.5px;font-weight:600;color:#5b3f8f;";
+      lblEl.textContent = scheduledIdx >= 0 ? "Move to:" : "Place on:";
+      capsules.appendChild(lblEl);
+      (dest.days || []).forEach(function(day, dIdx){
+        var btn = document.createElement("button");
+        btn.type = "button";
+        var isOn = (dIdx === scheduledIdx);
+        var dayLbl = day.lbl || ("Day " + (dIdx + 1));
+        btn.textContent = (isOn ? "✓ " : "") + dayLbl;
+        btn.style.cssText = "font-size:10.5px;font-weight:600;padding:3px 8px;border-radius:10px;border:1px solid "
+          + (isOn ? "#5b3f8f" : "#d8c4e8") + ";background:"
+          + (isOn ? "#5b3f8f" : "#fff") + ";color:"
+          + (isOn ? "#fff" : "#5b3f8f") + ";cursor:"
+          + (isOn ? "default" : "pointer") + ";font-family:inherit;";
+        if (!isOn) {
+          (function(hub, rt, targetDay){
+            btn.onclick = function(){
+              if (typeof _moveDayTripRouteToDay === "function") {
+                _moveDayTripRouteToDay(hub, rt, targetDay);
+              }
+            };
+          })(dest, route, day);
+        }
+        capsules.appendChild(btn);
+      });
+      rowSec.appendChild(capsules);
+
+      dtSec.appendChild(rowSec);
+    });
+    wrap.appendChild(dtSec);
+  })();
+
   // Round FZ.6: Round EV's "Could be a day trip from here" section
   // (one-shot conversion: all of source's nights move to hub, source
   // disappears from trip.destinations) is replaced by FT.2's
@@ -36455,9 +36554,12 @@ function buildExplorePane(dest){
     peerSec.style.cssText = "margin-top:18px;";
     var peerHdr = document.createElement("div");
     peerHdr.style.cssText = "padding:6px 10px;background:#eef4ee;border:1px solid #c8e0c8;border-radius:6px;font-size:13px;font-weight:700;color:#2d5a2d;";
-    // Round FZ.6: reuses the older EV header naming since EV's
-    // section is gone. One section, gradual-shrink mechanic.
-    peerHdr.textContent = "Could be a day trip from here";
+    // v359.60.67: the existing day-trip routes section above is now
+    // labeled "Day trips"; this section sits below as candidate places
+    // that COULD be converted into new day trips (other destinations
+    // within X hours). The split label keeps the surfaces' roles
+    // distinct.
+    peerHdr.textContent = "Other places that could be day trips";
     peerSec.appendChild(peerHdr);
 
     // Threshold control — free-form text input
