@@ -31452,6 +31452,36 @@ function _openTripStopPopover(ctx) {
     return '<option value="' + r.id + '" data-hub="' + r.fromDestId + '">' + _dayTripRouteLabel(r) + ' (from ' + hubName + ')</option>';
   }
   var _allDtRoutes = _allDayTripRoutes();
+
+  // v359.60.57: default Add-to selection should be context/location-
+  // aware. Sort the route list ascending by haversine distance from
+  // the source stop to each route's hub destination, so the closest
+  // hub's route becomes the first option (and the default <select>
+  // value). Falls through to original order when coords are missing.
+  (function _sortAllDtRoutesByDistance() {
+    var srcLat = null, srcLng = null;
+    if (ctx.kind === "destination") {
+      var _sd = trip.destinations.find(function(d){ return d.id === ctx.destId; });
+      if (_sd && typeof _sd.lat === "number" && typeof _sd.lng === "number") {
+        srcLat = _sd.lat; srcLng = _sd.lng;
+      }
+    } else if ((ctx.kind === "dayTrip" || ctx.kind === "wayside") && ctx.stop) {
+      var _sp = trip.places && trip.places[ctx.stop.placeId];
+      if (_sp && typeof _sp.lat === "number" && typeof _sp.lng === "number") {
+        srcLat = _sp.lat; srcLng = _sp.lng;
+      }
+    }
+    if (srcLat == null || typeof MaxEngineTrip === "undefined" || !MaxEngineTrip.haversineKm) return;
+    _allDtRoutes.sort(function(a, b) {
+      var ha = trip.destinations.find(function(d){ return d.id === a.fromDestId; });
+      var hb = trip.destinations.find(function(d){ return d.id === b.fromDestId; });
+      var dA = (ha && typeof ha.lat === "number" && typeof ha.lng === "number")
+        ? MaxEngineTrip.haversineKm(srcLat, srcLng, ha.lat, ha.lng) : Infinity;
+      var dB = (hb && typeof hb.lat === "number" && typeof hb.lng === "number")
+        ? MaxEngineTrip.haversineKm(srcLat, srcLng, hb.lat, hb.lng) : Infinity;
+      return dA - dB;
+    });
+  })();
   var _initRouteOptsHtml = _allDtRoutes.map(_dayTripRouteOption).join("");
 
   // Three labeled fields: From (hub) · New day trip (radio) · Add to
