@@ -3600,16 +3600,33 @@
   // (multiple panes can be visible at once within the active tab).
   //
   // Tracker badge moves from its own tab to the On-the-ground tab.
+  // v359.60.59: rebuilt around three clean modes (Schedule = scheduling,
+  // Sights & Eats = browsing/choosing, Logistics = obligations & services).
+  // The old "Plan" tab was doing three jobs at once. The old "Stay & Eat"
+  // tab lied about restaurants — they actually live on the explore pane.
+  // The old "On the ground" tab mixed a broken local-services view with
+  // a trip-wide actions list that doesn't belong on a per-destination card.
+  //
+  //   • Schedule       → day-by-day itinerary only (pane: sights)
+  //   • Sights & Eats  → optional sights + restaurants + day-trip ideas
+  //                      (pane: explore)
+  //   • Logistics      → hotels, departure transport, local services,
+  //                      per-destination pending actions
+  //                      (panes: stay, routing, info, tracker)
+  //
+  // Pane ids ("sights"/"explore"/"stay"/"routing"/"info"/"tracker") are
+  // unchanged so legacy deep-link assignments still work; only the tab
+  // GROUPING changed. The tracker badge follows the Logistics tab.
   var TAB_GROUPS = [
-    {id:"plan",        lbl:"Plan",          panes:["sights","explore","routing"]},
-    {id:"stayEat",     lbl:"Stay & Eat",    panes:["stay"]},
-    {id:"onTheGround", lbl:"On the ground", panes:["info","tracker"]}
+    {id:"schedule",   lbl:"Schedule",      panes:["sights"]},
+    {id:"sightsEats", lbl:"Sights & Eats", panes:["explore"]},
+    {id:"logistics",  lbl:"Logistics",     panes:["stay","routing","info","tracker"]}
   ];
   var TAB_OF_PANE = {};
   TAB_GROUPS.forEach(function(grp){ grp.panes.forEach(function(p){ TAB_OF_PANE[p] = grp.id; }); });
 
   function _activeDmTab(){
-    return TAB_OF_PANE[global._activeDmSection] || "plan";
+    return TAB_OF_PANE[global._activeDmSection] || "schedule";
   }
   function _isPaneInActiveGroup(paneId){
     return TAB_OF_PANE[paneId] === _activeDmTab();
@@ -3631,10 +3648,10 @@
       btn.className = "dm-tab" + (grp.id === activeTab ? " on" : "");
       btn.id = "dm-tab-" + grp.id;
       btn.textContent = grp.lbl;
-      // Tracker badge now lives on the On-the-ground tab — pendingCount
+      // Tracker badge follows the Logistics tab — pendingCount
       // covers booking-confirmation and other action items regardless
       // of which sub-pane will render them.
-      if (grp.id === "onTheGround" && pendingN > 0) {
+      if (grp.id === "logistics" && pendingN > 0) {
         var badge = document.createElement("span");
         badge.className = "dm-tab-badge";
         badge.textContent = pendingN;
@@ -3662,8 +3679,9 @@
             var p = g("dm-pane-" + paneId);
             if (p) p.style.display = (TAB_OF_PANE[paneId] === gid ? "block" : "none");
           });
-          // Lazy-render the on-the-ground execution groups on first view.
-          if (gid === "onTheGround") {
+          // Lazy-render the on-the-ground execution groups when the
+          // Logistics tab is activated (info pane lives inside it).
+          if (gid === "logistics") {
             var _execHost = g("dm-exec-groups-" + dest.id);
             if (_execHost && !_execHost._cyRendered && typeof global._renderExecutionGroups === "function") {
               global._renderExecutionGroups(dest, _execHost);
@@ -4202,13 +4220,15 @@
     infoPane2.appendChild(pigrid2);
     if(pi2.note){var pinote2=document.createElement("div");pinote2.className="pi-note";pinote2.textContent=pi2.note;infoPane2.appendChild(pinote2);}
 
-    // ── Getting around: execution-mode rideshare/transit panel ──
-    // Round CY rendered this content into execHost. Now wrapped in a
-    // labeled section so the user knows what's about to load.
-    var gettingHdr=document.createElement("div");
-    gettingHdr.style.cssText="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#666;margin:18px 0 10px;padding-top:14px;border-top:1px solid #eee;";
-    gettingHdr.textContent="Getting around";
-    infoPane2.appendChild(gettingHdr);
+    // ── On the ground: 6-group LLM panel ──────────────────────
+    // v359.60.59: dropped the parent "Getting around" header — it
+    // was too narrow (the LLM returns six topics, not just transit)
+    // and duplicated the "On the ground" title that the execHost
+    // itself adds. A thin separator is all the visual hand-off
+    // needed before the dynamic content.
+    var execSep=document.createElement("div");
+    execSep.style.cssText="margin:18px 0 10px;padding-top:14px;border-top:1px solid #eee;";
+    infoPane2.appendChild(execSep);
     var execHost=document.createElement("div");
     execHost.id="dm-exec-groups-"+dest.id;
     infoPane2.appendChild(execHost);

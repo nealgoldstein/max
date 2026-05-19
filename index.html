@@ -25421,10 +25421,10 @@ function pendingCount(){
 
 function updateTrackerBadge(){
   var n=pendingCount();
-  // v359.50: tracker badge moved from #dm-tab-tracker (no longer exists
-  // as its own tab) to #dm-tab-onTheGround. Same per-render pattern
-  // (querySelectorAll covers any duplicated dest renders).
-  document.querySelectorAll('#dm-tab-onTheGround').forEach(function(btn){
+  // v359.60.59: tab regroup renamed the tab from onTheGround to logistics.
+  // Same per-render pattern (querySelectorAll covers any duplicated dest
+  // renders).
+  document.querySelectorAll('#dm-tab-logistics').forEach(function(btn){
     var badge=btn.querySelector('.dm-tab-badge');
     if(n>0){
       if(!badge){badge=document.createElement('span');badge.className='dm-tab-badge';btn.appendChild(badge);}
@@ -29165,6 +29165,10 @@ async function _generateExecutionInfo(placeName, ctx){
   if (!window._placeExecutionCache) window._placeExecutionCache = {};
   var key = String(placeName).toLowerCase();
   if (window._placeExecutionCache[key]) return window._placeExecutionCache[key];
+  // v359.60.59: stash the last error for the renderer so the user
+  // sees WHY a load failed (timeout vs auth vs parse), not just a
+  // generic "couldn't load". Cleared at the top of every attempt.
+  window._placeExecutionLastError = null;
   ctx = ctx || {};
   // Pull personal context from trip.brief if present (we're typically on
   // the trip view here), else fall back to _tb for consistency.
@@ -29213,26 +29217,41 @@ async function _generateExecutionInfo(placeName, ctx){
     + "  \"saving_money\": [{\"name\":\"…\",\"desc\":\"…\"}, …],\n"
     + "  \"cultural_norms\": [{\"name\":\"…\",\"desc\":\"…\"}, …]\n"
     + "}";
-  try {
-    var text = await callMax([{role: "user", content: prompt}], 2500, 35000);
-    if (text && text.trim()) {
-      // Strip any code fences in case the model adds them
-      var raw = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-      var parsed;
-      try { parsed = JSON.parse(raw); }
-      catch(e) {
-        // Try to find a JSON object inside the text
-        var m = raw.match(/\{[\s\S]*\}/);
-        if (m) { try { parsed = JSON.parse(m[0]); } catch(_) {} }
-      }
-      if (parsed && typeof parsed === "object") {
-        window._placeExecutionCache[key] = parsed;
-        return parsed;
-      }
+  // v359.60.59: 60s timeout (was 35s) — the prompt asks for 6 sections
+  // plus a structured rideshare object, which can run long on slow
+  // networks. Also one auto-retry on transient failures (timeouts,
+  // empty bodies, parse failures) before surfacing the error.
+  async function _attempt(timeoutMs) {
+    var text = await callMax([{role: "user", content: prompt}], 2500, timeoutMs);
+    if (!text || !text.trim()) {
+      throw new Error("Empty response from Max");
     }
-  } catch(e) {
-    console.warn("[Max] execution-info gen failed for " + placeName + ":", e && e.message);
+    // Strip any code fences in case the model adds them
+    var raw = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+    var parsed;
+    try { parsed = JSON.parse(raw); }
+    catch(e) {
+      // Try to find a JSON object inside the text
+      var m = raw.match(/\{[\s\S]*\}/);
+      if (m) { try { parsed = JSON.parse(m[0]); } catch(_) {} }
+    }
+    if (!parsed || typeof parsed !== "object") {
+      throw new Error("Max's response wasn't valid JSON");
+    }
+    return parsed;
   }
+  var lastErr = null;
+  for (var attempt = 1; attempt <= 2; attempt++) {
+    try {
+      var parsed = await _attempt(60000);
+      window._placeExecutionCache[key] = parsed;
+      return parsed;
+    } catch(e) {
+      lastErr = e;
+      console.warn("[Max] execution-info gen attempt " + attempt + " failed for " + placeName + ":", e && e.message);
+    }
+  }
+  window._placeExecutionLastError = (lastErr && lastErr.message) || "unknown error";
   return null;
 }
 
@@ -29284,9 +29303,12 @@ async function _renderExecutionGroups(dest, host){
   loading.remove();
 
   if (!info) {
+    // v359.60.59: surface the actual error so the user knows whether
+    // to retry, check connectivity, or look at sign-in.
+    var lastErr = window._placeExecutionLastError || "unknown error";
     var err = document.createElement("div");
-    err.style.cssText = "font-size:12px;color:#a55;font-style:italic;padding:6px 0;";
-    err.textContent = "Couldn't load on-the-ground info right now.";
+    err.style.cssText = "font-size:12px;color:#a55;font-style:italic;padding:6px 0;line-height:1.5;";
+    err.textContent = "Couldn't load on-the-ground info for " + dest.place + ": " + lastErr;
     host.appendChild(err);
     var retry = document.createElement("button");
     retry.className = "exp-refresh-btn";
@@ -34622,12 +34644,12 @@ function executeMoveDest(dest,fromIdx,toIdx){
   _actionsToAdd.forEach(function(a){addPendingAction(a);});
 
   // Action log
-  // v359.60.48: Tracker tab was retired (v359.50) — the pending-actions
-  // badge moved to "On the ground." Update the user-facing copy so
-  // we don't point at a tab that no longer exists.
+  // v359.60.59: pending-actions badge lives on the Logistics tab now
+  // (Tracker tab was retired in v359.50, then On the ground was
+  // folded into Logistics here).
   if(_actionsToAdd.length>0){
     showActionLog([{type:'warn',icon:'⚠️',text:_actionsToAdd.length+' booking'+(
-      _actionsToAdd.length!==1?'s':'')+' cleared — check the On the ground tab for required provider actions'}]);
+      _actionsToAdd.length!==1?'s':'')+' cleared — check the Logistics tab for required provider actions'}]);
   }
 
   // Round FW: dedupe adjacent same-place destinations the move may
@@ -36009,51 +36031,14 @@ function buildExplorePane(dest){
       // dashed-gold rows in the trip view.
       seedNote.style.cssText = "font-size:11px;color:#7d5e00;background:#fbf6e8;border:1px solid #e6d5a0;border-radius:6px;padding:8px 11px;margin:0 0 8px;line-height:1.55;";
       var _placeForBanner = (dest && dest.place) ? dest.place : "this destination";
-      seedNote.innerHTML = "There " + (autoOnDays===1?"is":"are") + " <strong>"+autoOnDays+"</strong> placeholder"+(autoOnDays!==1?"s":"")+" for the iconic sight"+(autoOnDays!==1?"s":"")+" spread across the days you will be in <strong>"+_placeForBanner.replace(/&/g,"&amp;").replace(/</g,"&lt;")+"</strong>. You can accept, reject, or move them around in the Itinerary tab.";
+      seedNote.innerHTML = "There " + (autoOnDays===1?"is":"are") + " <strong>"+autoOnDays+"</strong> placeholder"+(autoOnDays!==1?"s":"")+" for the iconic sight"+(autoOnDays!==1?"s":"")+" spread across the days you will be in <strong>"+_placeForBanner.replace(/&/g,"&amp;").replace(/</g,"&lt;")+"</strong>. You can accept, reject, or move them around in the Schedule tab.";
       sightsSec.appendChild(seedNote);
     }
-    // "Already on your days" — list the auto-seeded sights right here in the
-    // Explore tab so iconic sights aren't hidden from this view.
-    if (autoOnDays > 0) {
-      var onDaysHdr = document.createElement("div");
-      onDaysHdr.style.cssText = "font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#1a6fb0;margin:10px 0 6px;";
-      onDaysHdr.textContent = "Already on your days";
-      sightsSec.appendChild(onDaysHdr);
-      (dest.days||[]).forEach(function(day, dayIdx){
-        (day.items||[]).forEach(function(it){
-          if (it.type !== "sight" || !it.autoSeeded) return;
-          var row = document.createElement("div");
-          row.className = "exp-item";
-          row.style.cssText = "background:#f7faff;border:1px solid #e0eaf6;";
-          var icon = document.createElement("div"); icon.className = "exp-item-icon";
-          icon.textContent = "●"; icon.style.color = "#1a6fb0";
-          var body = document.createElement("div"); body.className = "exp-item-body";
-          var nm = document.createElement("div"); nm.className = "exp-item-name";
-          nm.textContent = it.n || "";
-          body.appendChild(nm);
-          if (it.note) {
-            var nt = document.createElement("div"); nt.className = "exp-item-note";
-            nt.textContent = it.note.length > 120 ? it.note.substring(0,118) + "…" : it.note;
-            body.appendChild(nt);
-          }
-          var acts = document.createElement("div"); acts.className = "exp-item-acts";
-          var dayBadge = document.createElement("button");
-          dayBadge.style.cssText = "font-size:10px;font-weight:600;color:#1a6fb0;background:#e8f0fc;border:1px solid #c8dff8;border-radius:5px;padding:3px 8px;cursor:pointer;font-family:inherit;white-space:nowrap;";
-          dayBadge.textContent = "On " + (day.lbl || ("Day " + (dayIdx + 1)));
-          dayBadge.title = "Jump to this day in the itinerary";
-          (function(did){
-            dayBadge.onclick = function(e){
-              e.stopPropagation();
-              _activeDmSection = "itinerary";
-              if (typeof selectDest === "function") selectDest(did);
-            };
-          })(dest.id);
-          acts.appendChild(dayBadge);
-          row.appendChild(icon); row.appendChild(body); row.appendChild(acts);
-          sightsSec.appendChild(row);
-        });
-      });
-    }
+    // v359.60.59: the "Already on your days" duplicate list used to render
+    // here was redundant — the Schedule tab already shows these sights
+    // inline on their scheduled day. Removing it keeps Sights & Eats
+    // focused on what's NOT yet on the schedule (the browse-and-choose
+    // surface, not a status report).
     // v295.2: always render the Optional/Sights header (when we got past
     // the empty/loading branches above). Earlier the header only rendered
     // when sightOnly.length > 0, so when auto-seed pulled the iconic ones
@@ -37343,10 +37328,75 @@ function drawDestMode(destId){
   renPen.onclick = function (e) { e.stopPropagation(); _startRename(); };
   titleWrap.appendChild(title);
   titleWrap.appendChild(renPen);
-  var datesRow=document.createElement("div"); datesRow.style.cssText="display:flex;align-items:center;gap:8px;margin-bottom:8px;";
-  var dates=document.createElement("div"); dates.className="dm-dates"; dates.id="ud-dates-"+destId;
+  var datesRow=document.createElement("div"); datesRow.style.cssText="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;";
+  // v359.60.58: dates are clickable to open an inline editor right
+  // here on the destination card, so the user doesn't have to bounce
+  // back to the trip list view to change dates. Pencil + hover bg
+  // match the list-view affordance in trip-ui.js.
+  var dates=document.createElement("div"); dates.className="dm-dates dm-dates-clickable"; dates.id="ud-dates-"+destId;
+  dates.style.cssText="cursor:pointer;padding:3px 6px;margin:-3px -6px;border-radius:4px;transition:background .12s ease;";
+  dates.title="Click to edit dates";
   dates.textContent=fmtD(dest.dateFrom)+" \u2013 "+fmtD(dest.dateTo)+" ("+dest.nights+" night"+(dest.nights!==1?"s":"")+")";
+  var _dmDatePencil=document.createElement("span");
+  _dmDatePencil.textContent=" \u270e";
+  _dmDatePencil.style.cssText="font-size:11px;color:#888;font-weight:400;margin-left:4px;";
+  dates.appendChild(_dmDatePencil);
+  dates.onmouseover=function(){ dates.style.background="#f0f6fc"; };
+  dates.onmouseout =function(){ dates.style.background="transparent"; };
   datesRow.appendChild(dates);
+  // Inline date edit row \u2014 hidden until the user clicks the dates.
+  var _dmDateEditRow=document.createElement("div");
+  _dmDateEditRow.id="dm-date-edit-row-"+destId;
+  _dmDateEditRow.style.cssText="display:none;align-items:center;gap:6px;padding:6px 0 2px;flex-wrap:wrap;width:100%;";
+  (function(){
+    var _dmFi=null, _dmTi=null;
+    if (typeof mkDateInp === "function") {
+      _dmFi=mkDateInp("dm-edit-from-"+destId, dest.dateFrom, {onSelect:function(iso){
+        if (_dmTi) {
+          _dmTi.setMin(iso);
+          if (_dmTi.getIso() && _dmTi.getIso() < iso) _dmTi.setIso('');
+        }
+      }});
+      _dmTi=mkDateInp("dm-edit-to-"+destId, dest.dateTo, {minDate:dest.dateFrom});
+    }
+    var _dmArrow=document.createElement("span");
+    _dmArrow.style.cssText="font-size:11px;color:#aaa;margin:0 2px;";
+    _dmArrow.textContent="\u2192";
+    var _dmSave=document.createElement("button");
+    _dmSave.type="button";
+    _dmSave.className="date-save-btn";
+    _dmSave.textContent="Save";
+    (function(did){
+      _dmSave.onclick=function(e){
+        e.stopPropagation();
+        if (!_dmFi || !_dmTi) return;
+        var nf=_dmFi.getIso(), nt=_dmTi.getIso();
+        if (!nf || !nt) return;
+        saveDates(did, nf, nt);
+      };
+    })(destId);
+    var _dmCancel=document.createElement("button");
+    _dmCancel.type="button";
+    _dmCancel.className="date-cancel-btn";
+    _dmCancel.textContent="Cancel";
+    _dmCancel.onclick=function(e){
+      e.stopPropagation();
+      _dmDateEditRow.style.display="none";
+      dates.style.display="";
+    };
+    _dmDateEditRow.onclick=function(e){ e.stopPropagation(); };
+    if (_dmFi) _dmDateEditRow.appendChild(_dmFi);
+    _dmDateEditRow.appendChild(_dmArrow);
+    if (_dmTi) _dmDateEditRow.appendChild(_dmTi);
+    _dmDateEditRow.appendChild(_dmSave);
+    _dmDateEditRow.appendChild(_dmCancel);
+    dates.onclick=function(e){
+      e.stopPropagation();
+      var willShow = _dmDateEditRow.style.display === "none";
+      _dmDateEditRow.style.display = willShow ? "flex" : "none";
+    };
+  })();
+  datesRow.appendChild(_dmDateEditRow);
   // v353.2: Map button next to the dates. Pans the map to this
   // destination's pin and pulses it. On mobile, where the map is
   // docked at the top of the viewport, this gives a fast "where is
@@ -40998,7 +41048,17 @@ function mkTrackerInner(dest){
   futureSec.appendChild(futureHdr);
 
   // ── Pending Actions section ─────────────────────────────
-  var openActions=(trip.pendingActions||[]).filter(function(a){return !a.cleared&&a.requiresProviderAction;});
+  // v359.60.59: scope to THIS destination. Showing the trip-wide pending
+  // list on every per-destination card was the heart of why the old
+  // "On the ground" tab felt wrong — you'd see the Reykjavík card
+  // listing actions tied to Vík. Now each destination shows only its
+  // own actions. Trip-wide aggregate lives at the trip view.
+  var _trkDestName = (dest.label || dest.place || "").toLowerCase();
+  var openActions=(trip.pendingActions||[]).filter(function(a){
+    if (a.cleared || !a.requiresProviderAction) return false;
+    var actDest = (a.destName || "").toLowerCase();
+    return actDest === _trkDestName;
+  });
   if(openActions.length>0){
     var actSec=document.createElement("div"); actSec.className="tk-section";
     var actHdr=document.createElement("div"); actHdr.style.cssText="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;";
@@ -41016,9 +41076,8 @@ function mkTrackerInner(dest){
         row.classList.add("cleared");
         check.classList.add("done"); check.textContent="\u2713";
         var typEl=row.querySelector(".tk-action-type"); if(typEl)typEl.classList.add("cleared");
-        // v359.50: badge now lives on dm-tab-onTheGround instead of
-        // the (now-retired) dm-tab-tracker button.
-        var badge=g("dm-tab-onTheGround")&&g("dm-tab-onTheGround").querySelector(".dm-tab-badge");
+        // v359.60.59: badge lives on dm-tab-logistics after the tab regroup.
+        var badge=g("dm-tab-logistics")&&g("dm-tab-logistics").querySelector(".dm-tab-badge");
         if(badge){var n=pendingCount();if(n>0)badge.textContent=n;else badge.parentNode&&badge.parentNode.removeChild(badge);}
       };})(a);
       var body=document.createElement("div"); body.className="tk-action-body";
