@@ -34550,9 +34550,12 @@ function executeMoveDest(dest,fromIdx,toIdx){
   _actionsToAdd.forEach(function(a){addPendingAction(a);});
 
   // Action log
+  // v359.60.48: Tracker tab was retired (v359.50) — the pending-actions
+  // badge moved to "On the ground." Update the user-facing copy so
+  // we don't point at a tab that no longer exists.
   if(_actionsToAdd.length>0){
     showActionLog([{type:'warn',icon:'⚠️',text:_actionsToAdd.length+' booking'+(
-      _actionsToAdd.length!==1?'s':'')+' cleared — check Tracker tab for required provider actions'}]);
+      _actionsToAdd.length!==1?'s':'')+' cleared — check the On the ground tab for required provider actions'}]);
   }
 
   // Round FW: dedupe adjacent same-place destinations the move may
@@ -34566,6 +34569,19 @@ function executeMoveDest(dest,fromIdx,toIdx){
     if (_mergedAfterMove && typeof showActionLog === "function") {
       showActionLog([{type:"info", icon:"✓", text:"Merged adjacent stays in the same place into one."}]);
     }
+  }
+
+  // v359.60.49: re-synth transit routes against the new destination
+  // order. Every OTHER mutator (role-change helpers, remove-dest,
+  // day-trip converters, …) calls syncTransitRoutes after touching
+  // trip.destinations — reorder was the one path that didn't, so a
+  // drag-to-reorder left routes pointing at the old traversal.
+  // Symptom: trip-overview map drew a tangled polyline because the
+  // transit polyline still followed the previous order. Calling it
+  // here brings the routes back in sync with destinations[] and the
+  // map re-renders correctly on the _emitTripMutation below.
+  if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
+    try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
   }
 
   // Round HE: emit instead of direct drawXxx tail. The rAF scroll
