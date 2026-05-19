@@ -1486,7 +1486,7 @@
     var bits = [];
     if (actions.length) bits.push("<strong>" + actions.length + "</strong> provider action" + (actions.length !== 1 ? "s" : ""));
     if (deadlines.length) bits.push("<strong>" + deadlines.length + "</strong> cancellation deadline" + (deadlines.length !== 1 ? "s" : ""));
-    hdrL.innerHTML = "⚠ <strong>Action needed across the trip</strong> — " + bits.join(" · ");
+    hdrL.innerHTML = "⚠ <strong>What you need to take care of</strong> — " + bits.join(" · ");
     var hdrR = document.createElement("div");
     hdrR.style.cssText = "font-size:11px;font-weight:600;color:#b05820;flex-shrink:0;";
     hdrR.textContent = "▾ Show all";
@@ -3580,7 +3580,7 @@
     var bits = [];
     if (nA) bits.push("<strong>" + nA + "</strong> provider action" + (nA !== 1 ? "s" : ""));
     if (nD) bits.push("<strong>" + nD + "</strong> cancellation deadline" + (nD !== 1 ? "s" : ""));
-    txt.innerHTML = "⚠ <strong>Action needed</strong> — " + bits.join(" · ");
+    txt.innerHTML = "⚠ <strong>What you need to take care of</strong> — " + bits.join(" · ");
     var arrow = document.createElement("div");
     arrow.style.cssText = "font-size:11px;font-weight:600;color:#b05820;flex-shrink:0;";
     arrow.textContent = "Open →";

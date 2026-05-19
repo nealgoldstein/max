@@ -41082,12 +41082,13 @@ function mkTrackerInner(dest){
 
   // ============================================================
   // ACTION NEEDED — provider actions + cancellation deadlines for
-  // THIS destination, ordered chronologically. v359.60.60 renames
-  // from "Coming up" to make the tab's job explicit.
+  // THIS destination, ordered chronologically. v359.60.62: title now
+  // reads "What you need to take care of for {Place}" so the user
+  // knows immediately what this surface is for.
   // ============================================================
   var futureSec=document.createElement("div"); futureSec.className="tk-major-section";
   var futureHdr=document.createElement("div"); futureHdr.className="tk-major-hdr";
-  futureHdr.textContent="Action needed";
+  futureHdr.textContent="What you need to take care of for " + (dest.label || dest.place);
   futureSec.appendChild(futureHdr);
 
   // ── Pending Actions section ─────────────────────────────
@@ -41231,16 +41232,24 @@ function mkTrackerInner(dest){
     futureSec.appendChild(emptyAct);
   }
 
-  // Round FJ: spend total moved into the "Trip diary" section below
-  // (it's a backward-looking accumulator — what's been spent so far).
-  // Sub-tab nav (Booked / Want to see / Visited) removed; each
-  // category now sits inline with its own header so the user sees
-  // everything at once.
-
-  // ── Bookings header ─────────────────────────────────────
-  var bookedDiv=document.createElement("div"); bookedDiv.className="tlist"; bookedDiv.id="tl-"+dest.id+"-booked";
-  var bookedHdr=document.createElement("div"); bookedHdr.className="tk-section-lbl"; bookedHdr.style.marginTop="14px"; bookedHdr.textContent="Bookings";
-  bookedDiv.appendChild(bookedHdr);
+  // v359.60.62: Action needed tab is now only the two action sections
+  // above. The legacy Bookings list (Hotels / Transport / Activities &
+  // other), the Want to see brainstorm, the Trip diary / Visited
+  // history, the cumulative Spend total, and the per-destination Ask
+  // Max row used to render here as leftover from the old Tracker tab —
+  // none are action items. Hotel bookings already render on the Stay
+  // & Eat tab; transport bookings on the routing surface under On the
+  // ground; the Ask Max input is duplicated at the bottom of every
+  // destination card. The Want to see / Visited / Activities & other
+  // lists are dropped pending a follow-up home. Code below this point
+  // still runs (it appends to local divs) but the divs are never
+  // attached to wrap, so nothing reaches the DOM.
+  wrap.appendChild(futureSec);
+  return wrap;
+  // Unreachable from here on — preserved to keep DOM ids /
+  // event-handler shapes intact for any external callers.
+  // eslint-disable-next-line no-unreachable
+  var bookedDiv=document.createElement("div");
 
   // Hotels section
   var hSec=document.createElement("div"); hSec.className="tk-section"; hSec.id="tk-hotels-"+dest.id;
