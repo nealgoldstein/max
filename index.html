@@ -4755,13 +4755,14 @@ function openTripSearch() {
           line: '<strong>Destination:</strong> ' + highlight(destLabel, q),
         });
       }
-      // Traveler notes on the destination
-      if ((dest.travelerNotes || '').toLowerCase().indexOf(q) >= 0) {
-        var nt = dest.travelerNotes;
+      // v359.60.66: per-destination notes — "Keep in mind for {dest}"
+      // lives on dest.research after the travelerNotes merge.
+      if ((dest.research || '').toLowerCase().indexOf(q) >= 0) {
+        var nt = dest.research;
         if (nt.length > 100) {
           var i = nt.toLowerCase().indexOf(q);
           var s2 = Math.max(0, i - 30), e2 = Math.min(nt.length, i + q.length + 50);
-          nt = (s2 > 0 ? '…' : '') + nt.substring(s2, e2) + (e2 < dest.travelerNotes.length ? '…' : '');
+          nt = (s2 > 0 ? '…' : '') + nt.substring(s2, e2) + (e2 < dest.research.length ? '…' : '');
         }
         results.push({
           kind: 'note',
@@ -6704,6 +6705,61 @@ function enterApp(){
   // on the destination where pickup happens. The retired logistics screen used to
   // handle this; Tracker items are the new home.
   migrateCarRentalsIntoTracker();
+  // v359.60.66: one-time notes-surface merge. We used to have two
+  // notes surfaces at each level (Trip notes / Discovery notes at the
+  // trip level; Notes from the road / Research at the destination
+  // level) with overlapping intent. Merged into one per level:
+  //   • trip.brief.tripMeta = canonical trip-level notes & links
+  //   • dest.research       = canonical per-destination notes
+  // Migrate the legacy "trip-time" surfaces (trip.notes, dest.travelerNotes)
+  // into the canonical location, separated by a blank line so old content
+  // is preserved, then null/empty the legacy field so the new writers see
+  // a clean slate.
+  if (trip) {
+    // Trip-level merge: trip.notes → trip.brief.tripMeta
+    var _tn = trip.notes;
+    if (_tn && typeof _tn === "object" && (
+        (typeof _tn.text === "string" && _tn.text.trim())
+        || (Array.isArray(_tn.links) && _tn.links.length))) {
+      if (!trip.brief) trip.brief = {};
+      if (!trip.brief.tripMeta) trip.brief.tripMeta = { notes: "", links: [] };
+      if (!Array.isArray(trip.brief.tripMeta.links)) trip.brief.tripMeta.links = [];
+      var _legacyTxt = (typeof _tn.text === "string") ? _tn.text.trim() : "";
+      if (_legacyTxt) {
+        var _existingTxt = (trip.brief.tripMeta.notes || "").trim();
+        trip.brief.tripMeta.notes = _existingTxt
+          ? _existingTxt + "\n\n" + _legacyTxt
+          : _legacyTxt;
+      }
+      if (Array.isArray(_tn.links) && _tn.links.length) {
+        var _seenUrl = {};
+        trip.brief.tripMeta.links.forEach(function(l){
+          if (l && l.url) _seenUrl[String(l.url).toLowerCase()] = true;
+        });
+        _tn.links.forEach(function(l){
+          if (l && l.url && !_seenUrl[String(l.url).toLowerCase()]) {
+            trip.brief.tripMeta.links.push(l);
+            _seenUrl[String(l.url).toLowerCase()] = true;
+          }
+        });
+      }
+      trip.notes = null;
+      console.log("[Max] merged trip.notes into trip.brief.tripMeta");
+    }
+    // Per-destination merge: dest.travelerNotes → dest.research
+    var _mergedDests = 0;
+    (trip.destinations || []).forEach(function(d){
+      if (!d) return;
+      var legacy = (typeof d.travelerNotes === "string") ? d.travelerNotes.trim() : "";
+      if (!legacy) return;
+      var existing = (typeof d.research === "string") ? d.research.trim() : "";
+      d.research = existing ? existing + "\n\n" + legacy : legacy;
+      d.travelerNotes = "";
+      _mergedDests++;
+    });
+    if (_mergedDests > 0) console.log("[Max] merged travelerNotes into research on " + _mergedDests + " destination(s)");
+  }
+
   // v359.60.61: one-time cleanup of duplicate pendingAction rows that
   // accumulated before addPendingAction was deduped at the writer. Same
   // identity rule as the writer (eventName + confirmation, or eventName
@@ -13755,8 +13811,7 @@ function _pmOpenTripResearchCard(){
       + '<div style="padding:18px 20px 6px;">'
       +   '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">Keep in mind for your trip</div>'
       +   '<div style="font-size:17px;font-weight:700;color:#111;margin-top:4px;">' + String(tripLabel).replace(/</g, "&lt;") + '</div>'
-      +   '<div style="font-size:11.5px;color:#777;margin-top:3px;line-height:1.5;">Things to remember before and during the trip &mdash; links, gear thoughts, timing, weather, general guides. For trip-time stuff (confirmations, packing, contacts), see Trip notes.</div>'
-      +   '<a href="#" id="pm-trc-to-trip-notes" style="display:inline-block;margin-top:8px;font-size:11.5px;font-weight:600;color:#1a5fa8;text-decoration:none;">&#128203; Trip notes &rarr;</a>'
+      +   '<div style="font-size:11.5px;color:#777;margin-top:3px;line-height:1.5;">Anything you want to remember &mdash; links, gear thoughts, timing, weather, confirmations, packing list, contacts. One place for everything trip-related.</div>'
       + '</div>'
       + '<div style="padding:10px 20px;display:flex;flex-direction:column;gap:14px;">'
       +   '<div>'
@@ -13803,18 +13858,9 @@ function _pmOpenTripResearchCard(){
   ov.onclick = function(e){ if (e.target === ov) close(); };
   ov.querySelector("#pm-trc-close").onclick = close;
 
-  // v359.58: cross-link to operational trip notes. Closes this
-  // popover and opens the other so the two surfaces feel connected.
-  function bindCrossLink(){
-    var lnk = ov.querySelector("#pm-trc-to-trip-notes");
-    if (lnk) lnk.onclick = function(e){
-      e.preventDefault();
-      close();
-      if (typeof _openTripNotesPopover === "function") _openTripNotesPopover();
-      else if (typeof globalThis !== "undefined" && typeof globalThis._openTripNotesPopover === "function") globalThis._openTripNotesPopover();
-    };
-  }
-  bindCrossLink();
+  // v359.60.66: the cross-link to operational "Trip notes" used to
+  // live here. After the merge there's only one trip-level notes
+  // surface, so no cross-link is needed.
 
   function bindLinkActions(){
     var addBtn = ov.querySelector("#pm-trc-add-link");
@@ -37605,15 +37651,11 @@ function drawDestMode(destId){
   // TM.7.3 (v332): pending-cancellations banner lifted.
   MaxTripUI.renderPendingCancellationsBanner(dest, c);
 
-  // TM.7.2 (v331): "Notes from the road" strip lifted into
-  // MaxTripUI.renderTravelerNotes. Same DOM, same save-on-blur via
-  // localSave, same cross-tab storage propagation to mobile.
-  MaxTripUI.renderTravelerNotes(dest, c);
-  // v353.2: Research strip (separate from Notes from the road).
-  // Notes from the road = on-the-road diary. Research = pre-trip
-  // homework: links, opening hours, reservation deadlines, friend's
-  // recommendations. URLs auto-detected and rendered as clickable
-  // links in view mode; tap to edit.
+  // v359.60.66: "Notes from the road" (dest.travelerNotes) merged
+  // into "Keep in mind for {destination}" (dest.research). One notes
+  // surface per destination instead of two with overlapping intent.
+  // Legacy travelerNotes content is concatenated into research at
+  // enterApp().
   if (typeof MaxTripUI.renderResearch === "function") {
     MaxTripUI.renderResearch(dest, c);
   }
