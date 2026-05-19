@@ -1970,7 +1970,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
       <button onclick="selectHomeOption('new')" style="font-size:12.5px;font-weight:600;padding:8px 16px;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;">+ Start a new trip</button>
       <button onclick="selectHomeOption('browse')" style="font-size:12px;font-weight:500;padding:8px 12px;background:#fff;color:#1a5fa8;border:1px solid #d8d4c8;border-radius:6px;cursor:pointer;font-family:inherit;">Just browsing →</button>
       <button onclick="selectHomeOption('paste')" style="font-size:11px;font-weight:500;padding:8px 12px;background:#fff;color:#888;border:1px solid #d8d4c8;border-radius:6px;cursor:pointer;font-family:inherit;" title="Already have a list of places you want to visit? Paste it in.">Paste a list</button>
-      <button onclick="selectHomeOption('import')" style="font-size:11px;font-weight:500;padding:8px 12px;background:#fff;color:#888;border:1px solid #d8d4c8;border-radius:6px;cursor:pointer;font-family:inherit;" title="Open a saved Max trip (.json) or a text list (.txt / .md). Text files route through Research notes for review.">Load from file</button>
+      <button onclick="selectHomeOption('import')" style="font-size:11px;font-weight:500;padding:8px 12px;background:#fff;color:#888;border:1px solid #d8d4c8;border-radius:6px;cursor:pointer;font-family:inherit;" title="Open a saved Max trip (.json) or a text list (.txt / .md). Text files land in Discovery with places already populated.">Load from file</button>
       <span style="margin-left:auto;font-size:10.5px;color:#bbb;">Max gathers; you evaluate, edit, add. <span onclick="showAboutMax()" style="color:#1a5fa8;cursor:pointer;">How it works →</span></span>
     </div>
     <div id="new-trip-form" style="margin-top:12px;display:none;">
@@ -6255,7 +6255,7 @@ function _openPasteListModal(opts) {
   var box = document.createElement("div");
   box.style.cssText = "background:#fff;border-radius:12px;width:560px;max-width:100%;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 36px rgba(0,0,0,0.22);";
   var title = opts.title || "Paste a list of places";
-  var subtitle = opts.subtitle || "First line is the trip name + region — e.g. <em>Iceland Road Trip 2026 (Iceland)</em>. Optional second line for dates — <em>September 17, 17 nights</em> works. Then one place per line. After Open, you'll land in Research notes with everything populated — review there and decide when to make destinations.";
+  var subtitle = opts.subtitle || "First line is the trip name + region — e.g. <em>Iceland Road Trip 2026 (Iceland)</em>. Optional second line for dates — <em>September 17, 17 nights</em> works. Then one place per line. After Open, you'll land in Discovery with your places grouped into activity themes — review, keep/reject, and add what Max missed before committing destinations.";
   box.innerHTML = ''
     + '<div style="padding:16px 20px 10px;border-bottom:1px solid #eee;">'
     +   '<div style="font-size:15px;font-weight:700;color:#111;">' + title + '</div>'
@@ -6298,7 +6298,7 @@ function _openPasteListModal(opts) {
     if (parsed.exit && parsed.exit !== parsed.entry) bits.push('exit: <strong>' + parsed.exit + '</strong>');
     if (parsed.entry && parsed.exit === parsed.entry) bits.push('round trip via <strong>' + parsed.entry + '</strong>');
     prev.innerHTML = bits.length
-      ? ('Will create: ' + bits.join(' · ') + (parsed.destinations.length ? '' : '<br><span style="color:#888;">No destinations parsed yet — you can add them in Research after the trip opens.</span>'))
+      ? ('Will create: ' + bits.join(' · ') + (parsed.destinations.length ? '' : '<br><span style="color:#888;">No destinations parsed yet — you can add them in Discovery after the trip opens.</span>'))
       : '<span style="color:#aaa;">Paste a list above to see a preview.</span>';
     // Allow Build with just a trip name (no destinations) — the
     // research-notes editing pass is where the user actually commits.
@@ -9207,7 +9207,7 @@ function _exportTripShareableList() {
     +     '<div style="width:28px;height:28px;border-radius:50%;background:#1a5fa8;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">📋</div>'
     +     '<div style="font-size:15px;font-weight:700;color:#111;">Shareable list</div>'
     +   '</div>'
-    +   '<div style="font-size:11.5px;color:#777;margin-top:4px;line-height:1.5;">Paste this into Max\'s &ldquo;Paste a list&rdquo; (home screen) or any trip\'s Research notes &rarr; &ldquo;🪄 Make destinations from this list&rdquo; to recreate the destination skeleton.</div>'
+    +   '<div style="font-size:11.5px;color:#777;margin-top:4px;line-height:1.5;">Paste this into Max\'s &ldquo;Paste a list&rdquo; (home screen) or any trip\'s Discovery notes &rarr; &ldquo;🪄 Make destinations from this list&rdquo; to recreate the destination skeleton.</div>'
     + '</div>'
     + '<div style="flex:1;overflow-y:auto;padding:14px 20px;">'
     +   '<textarea id="share-list-ta" style="width:100%;min-height:260px;font:inherit;font-size:12.5px;line-height:1.55;padding:10px 12px;border:1px solid #ccc;border-radius:6px;background:#fafaf6;color:#111;font-family:ui-monospace,Menlo,Consolas,monospace;resize:vertical;box-sizing:border-box;">' + listText.replace(/</g, "&lt;") + '</textarea>'
@@ -9333,7 +9333,7 @@ function _exportTripPrintable(){
   var _shareList = (typeof serializeTripToPasteList === "function") ? serializeTripToPasteList(trip) : "";
   if (_shareList) {
     html.push('<div class="share-list-label">📋 Shareable list</div>');
-    html.push('<div class="share-list-note">Paste this into Max’s &ldquo;Paste a list&rdquo; (home screen) or any trip’s Research notes &rarr; &ldquo;🪄 Make destinations from this list&rdquo; to recreate the destination skeleton.</div>');
+    html.push('<div class="share-list-note">Paste this into Max’s &ldquo;Paste a list&rdquo; (home screen) or any trip’s Discovery notes &rarr; &ldquo;🪄 Make destinations from this list&rdquo; to recreate the destination skeleton.</div>');
     html.push('<div class="share-list">' + _esc(_shareList) + '</div>');
   }
   // Destinations
@@ -12165,7 +12165,7 @@ function _renderPlaceActivityItems(){
     exportBtn.type = "button";
     exportBtn.style.cssText = "font-size:11px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;";
     exportBtn.innerHTML = "⤓ Export";
-    exportBtn.title = "Copy research as markdown to clipboard";
+    exportBtn.title = "Copy Discovery notes as markdown to clipboard";
     exportBtn.onclick = function(e){ e.stopPropagation(); _pmExportResearchAsMarkdown(exportBtn); };
     hdrActions.appendChild(exportBtn);
     var tripMeta = (_tb && _tb.tripMeta) ? _tb.tripMeta : null;
@@ -12188,7 +12188,7 @@ function _renderPlaceActivityItems(){
     researchNotesBtn.type = "button";
     researchNotesBtn.style.cssText = "font-size:11px;font-weight:600;color:" + (_tripHasMeta ? "#fff" : "#5b3f8f") + ";background:" + (_tripHasMeta ? "#5b3f8f" : "#fff") + ";border:1px solid #5b3f8f;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;";
     var _tripLinkBadge = tripLinkCount > 0 ? ' <span style="font-size:9.5px;opacity:.85;">(' + tripLinkCount + ')</span>' : '';
-    researchNotesBtn.innerHTML = '🔬 Research notes' + _tripLinkBadge;
+    researchNotesBtn.innerHTML = '🔬 Discovery notes' + _tripLinkBadge;
     researchNotesBtn.title = _tripHasMeta
       ? "Planning-stage notes" + (tripLinkCount ? " and " + tripLinkCount + " link" + (tripLinkCount === 1 ? "" : "s") : "") + " — click to edit. Link inside to switch to Trip notes."
       : "Planning-stage notes and links — gear, timing, things to figure out. Trip notes (confirmations, packing) is linked from inside.";
@@ -13690,9 +13690,9 @@ function _pmOpenTripResearchCard(){
 
     return '<div style="background:#fff;border-radius:12px;max-width:500px;width:100%;box-shadow:0 12px 36px rgba(0,0,0,0.22);">'
       + '<div style="padding:18px 20px 6px;">'
-      +   '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">Research notes</div>'
+      +   '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">Discovery notes</div>'
       +   '<div style="font-size:17px;font-weight:700;color:#111;margin-top:4px;">' + String(tripLabel).replace(/</g, "&lt;") + '</div>'
-      +   '<div style="font-size:11.5px;color:#777;margin-top:3px;line-height:1.5;">Planning-stage notes and links &mdash; gear thoughts, timing, weather research, general guides. For trip-time stuff (confirmations, packing, contacts), see Trip notes.</div>'
+      +   '<div style="font-size:11.5px;color:#777;margin-top:3px;line-height:1.5;">Discovery-phase notes and links &mdash; gear thoughts, timing, weather, general guides. For trip-time stuff (confirmations, packing, contacts), see Trip notes.</div>'
       +   '<a href="#" id="pm-trc-to-trip-notes" style="display:inline-block;margin-top:8px;font-size:11.5px;font-weight:600;color:#1a5fa8;text-decoration:none;">&#128203; Trip notes &rarr;</a>'
       + '</div>'
       + '<div style="padding:10px 20px;display:flex;flex-direction:column;gap:14px;">'

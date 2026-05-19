@@ -40,7 +40,7 @@
     var hdr = document.createElement("div");
     hdr.style.cssText = "font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#8a7440;margin-bottom:5px;display:flex;align-items:center;justify-content:space-between;";
     var lbl = document.createElement("span");
-    lbl.textContent = "Research · " + (s.n || "this sight");
+    lbl.textContent = "Notes · " + (s.n || "this sight");
     var status = document.createElement("span");
     status.style.cssText = "font-size:8px;font-weight:500;color:#aaa;text-transform:none;letter-spacing:0;";
     hdr.appendChild(lbl);
@@ -59,7 +59,7 @@
     }
     function renderViewMode() {
       if (!saved) {
-        view.innerHTML = '<span style="color:#bbb;">Tap to add research, links, hours, reservation notes…</span>';
+        view.innerHTML = '<span style="color:#bbb;">Tap to add notes, links, hours, reservation details…</span>';
         return;
       }
       var html = "";
@@ -111,7 +111,7 @@
           if (status.textContent === "saved") status.textContent = "";
         }, 1800);
         // Update the 📚• indicator on the action button.
-        var btn = document.querySelector('#sr-' + s.id + ' .sa[title="Research notes for this sight"]');
+        var btn = document.querySelector('#sr-' + s.id + ' .sa[title="Notes for this sight"]');
         if (btn) btn.textContent = saved ? "📚•" : "📚";
       }
       ta.style.display = "none";
@@ -425,7 +425,7 @@
     var resBtn = document.createElement("button");
     resBtn.className = "sa";
     resBtn.textContent = (s.research && s.research.length) ? "📚•" : "📚";
-    resBtn.title = "Research notes for this sight";
+    resBtn.title = "Notes for this sight";
     (function (item, did) {
       resBtn.onclick = function (e) {
         if (e && e.stopPropagation) e.stopPropagation();
@@ -2268,15 +2268,16 @@
     ));
     var _tripLinkN = (_tripBriefMeta && Array.isArray(_tripBriefMeta.links)) ? _tripBriefMeta.links.length : 0;
     var _tripLinkBadgeTV = _tripLinkN > 0 ? ' <span style="opacity:.85;font-size:10px;">(' + _tripLinkN + ')</span>' : "";
-    // v359.60.21: was "🔬 Research" — added "notes" for consistency
-    // with the picker's "🔬 Research notes" and the sibling "📋 Trip
-    // notes" button. The noun "notes" is the through-line for every
-    // writable-notes surface; without it, "Research" alone reads
-    // ambiguously (research view? research suggestions?).
-    tripResearchBtn.innerHTML = "🔬 Research notes" + _tripLinkBadgeTV;
+    // v359.60.51: "Research notes" → "Discovery notes" to match the
+    // four-phase rename. This button is the planning-stage notes/
+    // links surface that pairs with Discovery; calling it "Discovery
+    // notes" makes the relationship explicit and ends the lingering
+    // "Research" reference. Trip-time notes still live under the
+    // sibling "📋 Trip notes" button.
+    tripResearchBtn.innerHTML = "🔬 Discovery notes" + _tripLinkBadgeTV;
     tripResearchBtn.title = _tripHasMeta
-      ? "Planning-stage notes" + (_tripLinkN ? " and " + _tripLinkN + " link" + (_tripLinkN === 1 ? "" : "s") : "") + " — click to edit"
-      : "Planning-stage notes and links — what to read, candidate places, things to figure out";
+      ? "Discovery-phase notes" + (_tripLinkN ? " and " + _tripLinkN + " link" + (_tripLinkN === 1 ? "" : "s") : "") + " — click to edit"
+      : "Discovery-phase notes and links — what to read, candidate places, things to figure out";
     tripResearchBtn.style.cssText = "font-size:12px;font-weight:600;color:" + (_tripHasMeta ? "#fff" : "#5b3f8f") + ";background:" + (_tripHasMeta ? "#5b3f8f" : "#fff") + ";border:1px solid #5b3f8f;border-radius:6px;padding:6px 11px;cursor:pointer;font-family:inherit;margin-right:8px;white-space:nowrap;";
     tripResearchBtn.onclick = function(e){
       e.stopPropagation();
@@ -2342,8 +2343,8 @@
     if (trip && trip.candidates && trip.candidates.length) {
       var editBtn = document.createElement("button");
       editBtn.style.cssText = _chipStyle;
-      editBtn.textContent = "✎ Open research";
-      editBtn.title = "Re-open the research surface with your current keep/reject decisions, notes, and links";
+      editBtn.textContent = "✎ Open Discovery";
+      editBtn.title = "Re-open Discovery with your current keep/reject decisions, notes, and links";
       editBtn.onmouseover = function () { editBtn.style.background = "#f0f5fc"; };
       editBtn.onmouseout  = function () { editBtn.style.background = "#fff"; };
       editBtn.onclick = function () {
