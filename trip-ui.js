@@ -4663,10 +4663,19 @@
     // schedule context, time, confirmation, and an inline Edit
     // affordance that opens the same toggleSightBookForm used to
     // create them.
+    // v359.60.72: filter on "has a booking" alone. The earlier
+    // type==="sight" guard hid bookings on items with missing/legacy
+    // type fields (older auto-seeded items, items added before the
+    // type field existed). The display below tolerates any item that
+    // has a name (.n / .name) and a booking object.
     var sightBookings = [];
     (dest.days || []).forEach(function(day, dayIdx){
       (day.items || []).forEach(function(it){
-        if (!it || it.type !== "sight" || !it.booking) return;
+        if (!it || !it.booking) return;
+        // Exclude restaurants and day-trip placeholders — those are
+        // their own categories elsewhere. Anything else (sights,
+        // typed or untyped) counts.
+        if (it.type === "restaurant" || it.type === "daytrip" || it.type === "route") return;
         sightBookings.push({
           sight: it,
           bk: it.booking,
@@ -4678,6 +4687,7 @@
     });
     (dest.suggestions || []).forEach(function(sg){
       if (!sg || !sg.booking) return;
+      if (sg.type === "restaurant") return;
       sightBookings.push({
         sight: sg,
         bk: sg.booking,
