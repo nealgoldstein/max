@@ -865,6 +865,35 @@
   function addPendingAction(opts){
     // opts: {eventType, eventName, destName, confirmationNumber, detail, requiresProviderAction}
     if(!trip.pendingActions) trip.pendingActions=[];
+    // v359.60.61: dedupe at the writer. Without this, every cascade
+    // (destination moved + dates changed + overlap detected) wrote a
+    // fresh row for the same booking, so the Action needed tab grew
+    // 3–4 duplicates per booking. Identity:
+    //   • If there's a confirmation number, eventName + confirmation
+    //     uniquely identifies the booking — duplicate any time both
+    //     match an open (uncleared) action, regardless of eventType
+    //     (catches the "same hotel logged once as 'hotel' once as
+    //     'booking'" bug).
+    //   • Without a confirmation, fall back to eventName + destName +
+    //     eventType.
+    // First-write wins; later attempts at the same booking become
+    // no-ops. autoSave still fires from the caller's downstream paths.
+    var _nameKey = String(opts.eventName||'').toLowerCase().trim();
+    var _confKey = opts.confirmationNumber||null;
+    var _destKey = String(opts.destName||'').toLowerCase().trim();
+    var _typeKey = String(opts.eventType||'').toLowerCase().trim();
+    if (_nameKey) {
+      var _dup = trip.pendingActions.some(function(a){
+        if (!a || a.cleared) return false;
+        if (String(a.eventName||'').toLowerCase().trim() !== _nameKey) return false;
+        if (_confKey && a.confirmationNumber === _confKey) return true;
+        if (!_confKey && !a.confirmationNumber
+            && String(a.destName||'').toLowerCase().trim() === _destKey
+            && String(a.eventType||'').toLowerCase().trim() === _typeKey) return true;
+        return false;
+      });
+      if (_dup) return null;
+    }
     var action={
       id: newActionId(),
       eventType: opts.eventType||'booking',       // 'hotel','transport','restaurant','general'

@@ -6704,6 +6704,29 @@ function enterApp(){
   // on the destination where pickup happens. The retired logistics screen used to
   // handle this; Tracker items are the new home.
   migrateCarRentalsIntoTracker();
+  // v359.60.61: one-time cleanup of duplicate pendingAction rows that
+  // accumulated before addPendingAction was deduped at the writer. Same
+  // identity rule as the writer (eventName + confirmation, or eventName
+  // + destName + eventType when no confirmation). Keeps the first
+  // occurrence, clears subsequent dupes so the user can still recover
+  // any unique detail from cleared rows if needed.
+  if (trip && Array.isArray(trip.pendingActions)) {
+    var _seen = {};
+    var _cleaned = 0;
+    trip.pendingActions.forEach(function(a){
+      if (!a || a.cleared) return;
+      var _nameKey = String(a.eventName||'').toLowerCase().trim();
+      if (!_nameKey) return;
+      var _confKey = a.confirmationNumber||'';
+      var _key = _confKey
+        ? "c:" + _nameKey + "|" + _confKey
+        : "n:" + _nameKey + "|" + String(a.destName||'').toLowerCase().trim()
+          + "|" + String(a.eventType||'').toLowerCase().trim();
+      if (_seen[_key]) { a.cleared = true; _cleaned++; }
+      else _seen[_key] = true;
+    });
+    if (_cleaned > 0) console.log("[Max] cleared " + _cleaned + " duplicate pendingAction row(s)");
+  }
   g("home-screen").style.display="none";
   g("app").style.display="flex";
   var tn=g("trip-name-display"); if(tn){

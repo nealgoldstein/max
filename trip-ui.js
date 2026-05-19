@@ -1433,6 +1433,136 @@
     _renderPreArrivalBanner(trip, container);
     _renderDecisionsDeferredPanel(trip, container);
     _renderGeoAffordanceBanner(trip, container);
+    // v359.60.61: trip-wide Action needed surface — answers the
+    // "is there a trip-wide list?" question by aggregating every
+    // destination's open provider actions and upcoming cancellation
+    // deadlines into one collapsible panel.
+    _renderTripActionNeededPanel(trip, container);
+  }
+
+  // ── v359.60.61: trip-wide Action needed panel ──────────────
+  // Aggregates open pendingActions + cancellation deadlines across
+  // every destination. Renders nothing when the trip is clean.
+  // Click an item to jump to the source destination's Action needed
+  // tab; the panel itself is collapsible, defaulting to collapsed
+  // so it doesn't dominate the trip view when the list is long.
+  function _renderTripActionNeededPanel(trip, container) {
+    if (!trip || !Array.isArray(trip.destinations)) return;
+    var actions = Array.isArray(trip.pendingActions)
+      ? trip.pendingActions.filter(function(a){ return a && !a.cleared && a.requiresProviderAction; })
+      : [];
+    var collectDeadlinesFn = global.collectDeadlines;
+    var deadlines = [];
+    if (typeof collectDeadlinesFn === "function") {
+      trip.destinations.forEach(function(d){
+        try { deadlines = deadlines.concat(collectDeadlinesFn(d) || []); } catch(_) {}
+      });
+    }
+    if (actions.length === 0 && deadlines.length === 0) return;
+
+    // Resolve each action to the destination it belongs to (by
+    // destName) so the click handler can jump to that card's Action
+    // needed tab. Falls back to the first destination if name doesn't
+    // resolve — better than leaving the click dead.
+    var destByName = {};
+    trip.destinations.forEach(function(d){
+      if (d && d.id) {
+        if (d.label) destByName[String(d.label).toLowerCase()] = d.id;
+        if (d.place) destByName[String(d.place).toLowerCase()] = d.id;
+      }
+    });
+    function _destIdFor(actDest){
+      return destByName[String(actDest||'').toLowerCase()] || (trip.destinations[0] && trip.destinations[0].id) || null;
+    }
+
+    var panel = document.createElement("div");
+    panel.style.cssText = "margin:8px 0;background:#fff5ec;border:1px solid #f0c8a0;border-radius:7px;overflow:hidden;";
+
+    var hdr = document.createElement("button");
+    hdr.type = "button";
+    hdr.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;padding:9px 12px;background:transparent;border:none;cursor:pointer;font-family:inherit;text-align:left;";
+    var hdrL = document.createElement("div");
+    hdrL.style.cssText = "font-size:12px;color:#b05820;line-height:1.4;";
+    var bits = [];
+    if (actions.length) bits.push("<strong>" + actions.length + "</strong> provider action" + (actions.length !== 1 ? "s" : ""));
+    if (deadlines.length) bits.push("<strong>" + deadlines.length + "</strong> cancellation deadline" + (deadlines.length !== 1 ? "s" : ""));
+    hdrL.innerHTML = "⚠ <strong>Action needed across the trip</strong> — " + bits.join(" · ");
+    var hdrR = document.createElement("div");
+    hdrR.style.cssText = "font-size:11px;font-weight:600;color:#b05820;flex-shrink:0;";
+    hdrR.textContent = "▾ Show all";
+    hdr.appendChild(hdrL); hdr.appendChild(hdrR);
+    panel.appendChild(hdr);
+
+    var body = document.createElement("div");
+    body.style.cssText = "display:none;border-top:1px solid #f0c8a0;background:#fff;padding:6px 0;";
+    hdr.onclick = function(){
+      var open = body.style.display !== "none";
+      body.style.display = open ? "none" : "block";
+      hdrR.textContent = open ? "▾ Show all" : "▴ Hide";
+    };
+
+    function _row(opts) {
+      var row = document.createElement("div");
+      row.style.cssText = "display:flex;align-items:flex-start;gap:10px;padding:8px 12px;border-bottom:1px solid #f4f0eb;cursor:pointer;transition:background .12s ease;";
+      row.onmouseover = function(){ row.style.background = "#fafaf7"; };
+      row.onmouseout  = function(){ row.style.background = "transparent"; };
+      var datePill = document.createElement("div");
+      datePill.style.cssText = "min-width:62px;font-size:10.5px;font-weight:700;color:" + (opts.urgent ? "#c0392b" : "#b05820") + ";text-transform:uppercase;letter-spacing:0.04em;padding-top:1px;";
+      datePill.textContent = opts.dateLabel;
+      var col = document.createElement("div");
+      col.style.cssText = "flex:1;min-width:0;";
+      var name = document.createElement("div");
+      name.style.cssText = "font-size:12.5px;font-weight:600;color:#222;line-height:1.35;";
+      name.textContent = opts.eventName;
+      var sub = document.createElement("div");
+      sub.style.cssText = "font-size:10.5px;color:#666;margin-top:2px;line-height:1.45;";
+      sub.textContent = opts.destName + " · " + opts.kind + (opts.detail ? " — " + opts.detail : "");
+      col.appendChild(name); col.appendChild(sub);
+      row.appendChild(datePill); row.appendChild(col);
+      if (opts.destId) {
+        row.onclick = function(e){
+          e.stopPropagation();
+          global._activeDmSection = "tracker";
+          if (typeof global.drawDestMode === "function") global.drawDestMode(opts.destId);
+        };
+      }
+      return row;
+    }
+
+    var today = new Date(); today.setHours(0,0,0,0);
+    // Deadlines first, in date order — they're the time-pressured ones.
+    deadlines.sort(function(a,b){ return (a.deadline||'').localeCompare(b.deadline||''); });
+    deadlines.forEach(function(d){
+      var dd = new Date((d.deadline||'') + "T12:00:00");
+      var urgent = dd <= today;
+      var label = urgent ? "PAST" : (global.fmtD ? global.fmtD(d.deadline) : d.deadline);
+      body.appendChild(_row({
+        dateLabel: label,
+        urgent: urgent,
+        eventName: d.name || "Booking",
+        destName: d.destName || "",
+        kind: d.type + " cancel deadline",
+        detail: "",
+        destId: d.destId
+      }));
+    });
+    // Then provider actions — no calendar date, so labeled "NOW".
+    actions.forEach(function(a){
+      body.appendChild(_row({
+        dateLabel: "NOW",
+        urgent: false,
+        eventName: a.eventName || "Action",
+        destName: a.destName || "",
+        kind: a.actionType || "",
+        detail: a.detail || "",
+        destId: _destIdFor(a.destName)
+      }));
+    });
+    // Drop the trailing bottom-border on the last child for a clean edge.
+    if (body.lastChild && body.lastChild.style) body.lastChild.style.borderBottom = "none";
+
+    panel.appendChild(body);
+    container.appendChild(panel);
   }
 
   // ── TM.3d (v320): arrival/departure logistics panel ──────
