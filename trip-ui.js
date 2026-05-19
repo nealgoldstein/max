@@ -4701,6 +4701,17 @@
       sEmp.textContent = "No bookings on individual sights yet — tap 'book' on any sight in See and do to log one.";
       sSec.appendChild(sEmp);
     } else {
+      // v359.60.71: sort by booking.date so the roll-up reads
+      // chronologically (matches how the user thinks about an
+      // itinerary — what's next on the calendar).
+      sightBookings.sort(function(a, b){
+        var ad = (a.bk && a.bk.date) || "";
+        var bd = (b.bk && b.bk.date) || "";
+        if (ad && bd) return ad.localeCompare(bd);
+        if (ad) return -1;
+        if (bd) return 1;
+        return 0;
+      });
       sightBookings.forEach(function(sb){
         var row = document.createElement("div");
         row.style.cssText = "padding:8px 10px;margin-bottom:6px;background:#fafafa;border:1px solid #e8e8e8;border-radius:6px;";
@@ -4710,18 +4721,47 @@
         row.appendChild(line1);
         var line2 = document.createElement("div");
         line2.style.cssText = "font-size:10.5px;color:#666;margin-top:3px;line-height:1.45;";
+        var fmtDFn = global.fmtD || function(d){ return d; };
         var bits = [];
-        if (sb.location === "scheduled") bits.push("on " + sb.dayLbl);
-        else bits.push("not yet on a day");
+        // v359.60.71: date is the most important field for a booking
+        // — surface it first. Falls back to "on {dayLbl}" when no
+        // explicit date is stored (older booking records).
+        if (sb.bk.date) bits.push(fmtDFn(sb.bk.date));
+        else if (sb.location === "scheduled") bits.push("on " + sb.dayLbl);
+        else bits.push("no date set");
         if (sb.bk.time) bits.push(sb.bk.time + (sb.bk.timeEnd ? "–" + sb.bk.timeEnd : ""));
         if (sb.bk.confirmationNumber) bits.push("Conf " + sb.bk.confirmationNumber);
         if (sb.bk.pricePaid != null) bits.push(sb.bk.pricePaid + " " + (sb.bk.currency || ""));
         line2.textContent = bits.join(" · ");
         row.appendChild(line2);
+        // Flag when booking.date and the scheduled day's date disagree
+        // — easy to miss otherwise; common after rescheduling a sight.
+        if (sb.location === "scheduled" && sb.bk.date && sb.dayLbl) {
+          var dayDateMatch = false;
+          // Compare booking date to the day's date if available.
+          var trip = global.trip;
+          if (trip && trip.destinations) {
+            trip.destinations.some(function(d){
+              if (!d || !d.days) return false;
+              return d.days.some(function(day){
+                if (day && day.lbl === sb.dayLbl && day.date) {
+                  dayDateMatch = (day.date === sb.bk.date);
+                  return true;
+                }
+                return false;
+              });
+            });
+          }
+          if (!dayDateMatch) {
+            var mismatch = document.createElement("div");
+            mismatch.style.cssText = "font-size:10px;color:#b05820;margin-top:2px;";
+            mismatch.textContent = "⚠ Booked for " + fmtDFn(sb.bk.date) + " but scheduled on " + sb.dayLbl;
+            row.appendChild(mismatch);
+          }
+        }
         if (sb.bk.cancelDeadline) {
           var line3 = document.createElement("div");
           line3.style.cssText = "font-size:10px;color:#b05820;margin-top:2px;";
-          var fmtDFn = global.fmtD || function(d){ return d; };
           line3.textContent = "Cancel by " + fmtDFn(sb.bk.cancelDeadline) + (sb.bk.cancelDeadlineTime ? " " + sb.bk.cancelDeadlineTime : "");
           row.appendChild(line3);
         }
