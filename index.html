@@ -2052,21 +2052,21 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
         </div>
 
         <div id="mw-edit" class="mw-dropdown" style="display:none;">
-          <button class="mw-item" onclick="_mwClose();editConstraints();">&#9998;&nbsp; Edit trip inputs…</button>
-          <!-- v359.60.30: trip-level date editor — change start +/or
-               end without leaving the trip view. Start shifts the
-               whole trip; end scales destinations proportionally. -->
+          <!-- v359.60.46: four-stage rename — Profile / Discovery /
+               Structure / Plan. "Edit trip inputs…" → "Profile";
+               "Open research" → "Discovery"; the trip view itself is
+               "Structure"; per-destination view is "Plan". This
+               menu lives on the Structure (trip) view, so jumps go
+               back to Profile or sideways to Discovery. -->
+          <button class="mw-item" onclick="_mwClose();editConstraints();">&#9998;&nbsp; Profile&hellip;</button>
+          <!-- Trip-level date editor — change start +/or end without
+               leaving Structure. Start shifts the whole trip; end
+               scales destinations proportionally. -->
           <button class="mw-item" onclick="_mwClose();_openTripDatesEditor&amp;&amp;_openTripDatesEditor();">&#128197;&nbsp; Trip dates…</button>
-          <!-- v359.60.29: "Open research" — Max has two top-level
-               views: Research (place-shaped — overnight hubs, day
-               trips, waysides, considered places) and Trip (plan-
-               shaped — sequence, dates, day-by-day). Editing either
-               side syncs to the other so the user can iterate
-               back and forth without losing work. This menu item
-               opens whichever research surface this trip carries
-               data for (activity-place picker for paste/file imports,
-               legacy candidate-explorer for older trips). -->
-          <button class="mw-item" onclick="_mwClose();_reopenPickerAny&amp;&amp;_reopenPickerAny();">&#128300;&nbsp; Open research</button>
+          <!-- Discovery: place-shaped view (overnight hubs, day trips,
+               waysides, considered places). Opens whichever surface
+               this trip carries data for. -->
+          <button class="mw-item" onclick="_mwClose();_reopenPickerAny&amp;&amp;_reopenPickerAny();">&#128270;&nbsp; Discovery</button>
           <div class="mw-sep"></div>
           <button class="mw-item" onclick="_mwClose();openTripSearch();">&#x1F50D;&nbsp; Search this trip</button>
           <button class="mw-item" onclick="_mwClose();showAskMaxModal();">&#128172;&nbsp; Ask Max…</button>
@@ -6171,7 +6171,7 @@ function _reopenPickerAny() {
     reopenCandidateExplorer();
     return;
   }
-  alert("No picker data on this trip yet — try Edit trip inputs… instead.");
+  alert("Nothing in Discovery yet — try the Profile menu instead.");
 }
 if (typeof globalThis !== "undefined") globalThis._reopenPickerAny = _reopenPickerAny;
 
@@ -10467,10 +10467,17 @@ function renderTripStep1Place(){
   }
 
   ov.innerHTML = ''
-    + '<div class="tb-header">'
+    + '<div class="tb-header" style="position:relative;">'
+    // v359.60.46: Home button on the Profile (brief) overlay.
+    // Previously this surface had Cancel + Continue but no top-level
+    // path back to the trips list — completing the four-stage rename
+    // (Profile / Discovery / Structure / Plan) means Home should be
+    // reachable from every stage. Top-right so it doesn't compete
+    // with the page title or sub-line.
+    +   '<button onclick="if(typeof goHome===\'function\')goHome();" title="Back to all trips" style="position:absolute;top:0;right:0;font-size:11px;font-weight:600;padding:5px 11px;background:#fff;color:#1a5fa8;border:1px solid #c8d8f0;border-radius:5px;cursor:pointer;font-family:inherit;">&larr; Home</button>'
     +   '<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div></div></div>'
-    +   '<div class="tb-title">Tell Max about your trip</div>'
-    +   '<div class="tb-sub">One page. Fill in what matters, skip what doesn’t.</div>'
+    +   '<div class="tb-title">Your trip’s profile</div>'
+    +   '<div class="tb-sub">Where you’re going, who you are, how you travel. Fill in what matters, skip what doesn’t.</div>'
     + '</div>'
     + '<div class="tb-body">'
 
@@ -16271,17 +16278,22 @@ function renderActivityPicker(){
   }
 
   // Edit-mode adjusts: step counter, title, footer button text, back action.
+  // v359.60.46: titles now reflect the four-stage rename. Discovery
+  // is the user-facing name for this page; "Edit your picks" stays
+  // for re-entry from a built trip (it's literally re-editing what
+  // you discovered).
   var isEdit = !!_tb._editMode;
   var stepLabel = isEdit ? "Editing your trip" : "";
+  var _regionTitle = (typeof _titleCaseCity === "function"
+    ? _titleCaseCity(_tb.region || _tb.placeName || "this place")
+    : (_tb.region || _tb.placeName || "this place"));
   var titleLabel = isEdit
-    ? "Edit your picks"
-    : ("What to see and do in " + (typeof _titleCaseCity === "function"
-        ? _titleCaseCity(_tb.region || _tb.placeName || "this place")
-        : (_tb.region || _tb.placeName || "this place")));
+    ? "Discovery — edit your picks"
+    : ("Discovery — what to see and do in " + _regionTitle);
   var primaryBtnHandler = isEdit ? "saveActivityPickerEdits()" : "continuePlaceModeToStep2()";
   var primaryBtnLabel = isEdit ? "Update my trip →" : "Choreograph my trip →";
   var backHandler = isEdit ? "cancelPickerEdit()" : "renderTripBrief()";
-  var backLabel = isEdit ? "← Cancel" : "← Back to inputs";
+  var backLabel = isEdit ? "← Cancel" : "← Profile";
 
   // v359.2: Unified header is rendered on BOTH fresh-build flow AND
   // re-edit flow (previously only isEdit). Detect whether a built trip
@@ -16300,7 +16312,7 @@ function renderActivityPicker(){
   // pills appear and Save / 🔍 Search join the action set.
   var _pickerActionBtns = ''
     + '<button class="file-btn" onclick="goHome()" title="All trips">&larr; Home</button>'
-    + '<button class="file-btn" onclick="editConstraints()" title="Edit trip parameters">&#9998; Parameters</button>'
+    + '<button class="file-btn" onclick="editConstraints()" title="Profile — trip-shaping inputs">&#9998; Profile</button>'
     + '<button class="file-btn" onclick="showAskMaxModal()" title="Chat with an AI about this trip / region">&#128172; Ask</button>';
   if (_hasTrip) {
     _pickerActionBtns += ''
@@ -16314,7 +16326,7 @@ function renderActivityPicker(){
   // when _mdcItems is already populated. Edit-mode hides it (the
   // edit flow already has its own cancel path).
   if (!isEdit) {
-    _pickerActionBtns += '<button class="file-btn" onclick="renderTripBrief()" title="Edit trip inputs — dates, pace, transport, etc. without losing your picks">&#x270E; Edit</button>';
+    _pickerActionBtns += '<button class="file-btn" onclick="renderTripBrief()" title="Profile — dates, pace, transport, etc. without losing your picks">&#x270E; Profile</button>';
   }
   // v359.6: ⚙ Settings gear — opens the global trip-defaults panel.
   // Sits before the 🔑 API-key button so it falls inside the main
@@ -19321,7 +19333,7 @@ function showCandidateExplorer(cands, editMode){
     +'<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:600;" onclick="cancelCandidateExplorer&amp;&amp;cancelCandidateExplorer();goHome();">&larr; Home</button>'
     +(_ceEditMode
       ? '<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:500;" onclick="cancelEditCandidates()">Cancel</button>'
-      : '<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:500;margin-right:6px;" onclick="editWhereWhy()">\u2190 Edit why & where</button>'+'<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:500;" onclick="editHowYouTravel()">Edit how you travel</button>')
+      : '<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:500;margin-right:6px;" onclick="editWhereWhy()">\u2190 Profile</button>'+'<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:500;" onclick="editHowYouTravel()">Profile (how you travel)</button>')
     +'</div>'
     +'<div class="ce-body">'
     +'<div class="ce-left">'
