@@ -5570,6 +5570,62 @@ if (typeof globalThis !== "undefined") globalThis.parsePlacesList = parsePlacesL
 // `Start:` or a natural-language date line); else opts.startDate;
 // else today. dateFrom/dateTo cascade by accumulated nights.
 // 0-night entries occupy a single day (dateFrom === dateTo).
+
+// v359.60.55: shared region normalizer used by every paste/file
+// import path. The parser's raw region carries trip-name noise
+// ("Iceland Road Trip", "Patagonia Adventure 2028") because it's
+// derived from the first line minus the year. Both the picker LLM
+// prompt AND Nominatim queries downstream want the canonical
+// country/region — "Iceland", "Patagonia" — so the prompt isn't
+// nonsensical and Nominatim's region scope doesn't kill matches.
+//
+// Strategy, in order:
+//   1. If the raw lower-cased region is itself a known _coarseGeocode
+//      key, use it as-is (already a known country/area).
+//   2. Else try each whitespace-split token against _coarseGeocode —
+//      "Iceland Road Trip" → "iceland" hits.
+//   3. Else scan all _coarseGeocode keys for any that appears as a
+//      substring of the raw — handles multi-word countries
+//      ("New Zealand Vacation" → "new zealand" hits).
+//   4. Else strip common trip-noise tokens (Road Trip, Vacation,
+//      Adventure, Holiday, Tour, Getaway, Journey) and any 4-digit
+//      year — falls back to a cleaner phrase like "Patagonia" from
+//      "Patagonia Adventure 2028". This handles regions Max doesn't
+//      have hard-coded in _coarseGeocode.
+//   5. Else return the raw value (last resort).
+function _normalizeImportedRegion(rawRegion) {
+  if (!rawRegion) return "";
+  var rk = String(rawRegion).toLowerCase().trim();
+  if (!rk) return "";
+  if (typeof _coarseGeocode !== "undefined" && _coarseGeocode[rk]) {
+    return _titleCaseHelper(rk);
+  }
+  if (typeof _coarseGeocode !== "undefined") {
+    var tokens = rk.split(/[\s,()/\-]+/).filter(Boolean);
+    for (var ti = 0; ti < tokens.length; ti++) {
+      if (_coarseGeocode[tokens[ti]]) return _titleCaseHelper(tokens[ti]);
+    }
+    var keys = Object.keys(_coarseGeocode);
+    for (var ki = 0; ki < keys.length; ki++) {
+      if (rk.indexOf(keys[ki]) >= 0) return _titleCaseHelper(keys[ki]);
+    }
+  }
+  // No coarse-geocode match — strip trip-noise tokens and years.
+  var stripped = rk
+    .replace(/\b(road\s*trip|vacation|adventure|holiday|getaway|journey|tour|expedition|trek|escape)\b/gi, "")
+    .replace(/\b(19|20)\d{2}\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (stripped && stripped !== rk) return _titleCaseHelper(stripped);
+  return String(rawRegion);
+}
+function _titleCaseHelper(s) {
+  return String(s || "").replace(/\b\w/g, function(c){ return c.toUpperCase(); });
+}
+if (typeof globalThis !== "undefined") {
+  globalThis._normalizeImportedRegion = _normalizeImportedRegion;
+}
+
 function _buildTripFromPastedList(parseResult, opts) {
   opts = opts || {};
   if (!parseResult || !Array.isArray(parseResult.destinations) || !parseResult.destinations.length) return null;
@@ -5619,7 +5675,11 @@ function _buildTripFromPastedList(parseResult, opts) {
       // v359.60.23: also propagate region / when / duration from the
       // parse so the picker LLM gets scope context if the user later
       // expands the trip via "Add destinations" or rebuild.
-      region:   parseResult.region   || "",
+      // v359.60.55: normalize via shared helper so the brief gets a
+      // canonical region ("Iceland", "Patagonia") rather than the raw
+      // "Iceland Road Trip 2026" parser output that breaks downstream
+      // LLM prompts and Nominatim queries.
+      region:   _normalizeImportedRegion(parseResult.region),
       when:     parseResult.when     || "",
       duration: parseResult.duration || "",
       entry: parseResult.entry || "",
@@ -5696,7 +5756,11 @@ function _buildStubTripFromPastedList(parseResult, rawText, opts) {
     trackSpending: false,
     pendingActions: [],
     brief: {
-      region:   parseResult.region || "",
+      // v359.60.55: normalize via shared helper (same fix as
+      // _buildTripFromPastedList — was carrying raw "Iceland Road
+      // Trip" into trip.brief.region, breaking downstream Nominatim
+      // scoping).
+      region:   _normalizeImportedRegion(parseResult.region),
       entry:    parseResult.entry  || "",
       tbExit:   parseResult.exit   || "",
       exitBuffer: true,
@@ -5804,44 +5868,13 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
   var name = parseResult.tripName || opts.name
     || ("Imported — " + new Date().toLocaleDateString("en-US", {month:"short", day:"numeric", year:"numeric"}));
 
-  // v359.60.32 / v359.60.53: normalize region to a known country/area
-  // when the parsed region is a phrase like "Iceland Road Trip" (the
-  // parser strips the year off the trip name but leaves the "Road
-  // Trip" suffix). Token-match against _coarseGeocode keys so
-  // "Iceland Road Trip" → "Iceland" — the LLM prompt then reads
-  // "A traveler wants to go to Iceland" instead of the nonsensical
-  // "A traveler wants to go to Iceland Road Trip", AND Nominatim
-  // queries downstream (generateCityData scopes by trip.brief.region)
-  // get a real country name to disambiguate against. Falls through
-  // to the raw region when no known country token is found.
-  //
-  // Computed BEFORE the trip brief so the brief gets the normalized
-  // form too. v359.60.46 set _tb.region to the normalized value but
-  // left trip.brief.region raw — Nominatim queries like
-  // "Blue Lagoon, Iceland Road Trip" returned no hits, leaving
-  // unsuggested places coord-less and pin-less on the map.
-  var _rawRegion = parseResult.region || "";
-  var _normRegion = _rawRegion;
-  try {
-    var _rk = _rawRegion.toLowerCase().trim();
-    if (_rk && typeof _coarseGeocode !== "undefined" && !_coarseGeocode[_rk]) {
-      var _tokens = _rk.split(/[\s,()/\-]+/).filter(Boolean);
-      var _hit = null;
-      for (var _ti = 0; _ti < _tokens.length && !_hit; _ti++) {
-        if (_coarseGeocode[_tokens[_ti]]) _hit = _tokens[_ti];
-      }
-      if (!_hit) {
-        var _keys = Object.keys(_coarseGeocode);
-        for (var _ki = 0; _ki < _keys.length && !_hit; _ki++) {
-          if (_rk.indexOf(_keys[_ki]) >= 0) _hit = _keys[_ki];
-        }
-      }
-      if (_hit) {
-        // Title-case the matched token for display.
-        _normRegion = _hit.replace(/\b\w/g, function(c){ return c.toUpperCase(); });
-      }
-    }
-  } catch(_){}
+  // v359.60.55: route through the shared _normalizeImportedRegion
+  // helper. Same logic as v359.60.32/v359.60.53 but extracted so the
+  // other import paths (_buildTripFromPastedList,
+  // _buildStubTripFromPastedList) get the same normalization without
+  // drift. Also adds a trip-noise-token fallback ("Patagonia
+  // Adventure 2028" → "Patagonia") for regions not in _coarseGeocode.
+  var _normRegion = _normalizeImportedRegion(parseResult.region);
 
   // Mint a STUB trip so the import is recoverable on reload — the
   // trip has no destinations yet; those get built when the user
