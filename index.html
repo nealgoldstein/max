@@ -41070,7 +41070,12 @@ function _showBookingPreviewModal(destId, p, originalText) {
 // inline so the user can scan the whole tab without clicking
 // through nav layers. The tab itself was renamed Tracker → Tracking
 // (live, ongoing) to better fit the temporal split.
-function mkTrackerInner(dest){
+function mkTrackerInner(dest, opts){
+  // v359.60.63: opts.skipTitle suppresses the "What you need to take
+  // care of for {Place}" header so the same content can render inline
+  // under the banner on the destination card (which already shows the
+  // same title) without duplicating it.
+  opts = opts || {};
   var wrap=document.createElement("div");
 
   // Paste-confirmation flow lives at the trip-view header now (📋
@@ -41087,9 +41092,11 @@ function mkTrackerInner(dest){
   // knows immediately what this surface is for.
   // ============================================================
   var futureSec=document.createElement("div"); futureSec.className="tk-major-section";
-  var futureHdr=document.createElement("div"); futureHdr.className="tk-major-hdr";
-  futureHdr.textContent="What you need to take care of for " + (dest.label || dest.place);
-  futureSec.appendChild(futureHdr);
+  if (!opts.skipTitle) {
+    var futureHdr=document.createElement("div"); futureHdr.className="tk-major-hdr";
+    futureHdr.textContent="What you need to take care of for " + (dest.label || dest.place);
+    futureSec.appendChild(futureHdr);
+  }
 
   // ── Pending Actions section ─────────────────────────────
   // v359.60.59: scope to THIS destination. Showing the trip-wide pending

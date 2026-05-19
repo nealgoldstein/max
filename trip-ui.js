@@ -3571,27 +3571,54 @@
     } catch(_) {}
     var nA = actions.length, nD = deadlines.length, n = nA + nD;
     if (n === 0) return;
-    var banner = document.createElement("div");
-    banner.style.cssText = "background:#fff5ec;border:1px solid #f0c8a0;border-radius:6px;padding:9px 11px;margin:8px 0 4px;display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer;transition:background .12s ease;";
+    // v359.60.63: banner is now a click-to-expand surface. The action
+    // list opens directly under the banner (using mkTrackerInner with
+    // skipTitle so we don't double-render the heading). No longer
+    // navigates to a separate tab.
+    var wrapEl = document.createElement("div");
+    wrapEl.style.cssText = "margin:8px 0 4px;background:#fff5ec;border:1px solid #f0c8a0;border-radius:6px;overflow:hidden;";
+    var banner = document.createElement("button");
+    banner.type = "button";
+    banner.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;padding:9px 11px;background:transparent;border:none;cursor:pointer;font-family:inherit;text-align:left;transition:background .12s ease;";
     banner.onmouseover = function(){ banner.style.background = "#fdebd8"; };
-    banner.onmouseout  = function(){ banner.style.background = "#fff5ec"; };
+    banner.onmouseout  = function(){ banner.style.background = "transparent"; };
     var txt = document.createElement("div");
-    txt.style.cssText = "font-size:11.5px;color:#b05820;line-height:1.45;";
+    txt.style.cssText = "font-size:12px;color:#b05820;line-height:1.45;";
+    var placeName = dest.label || dest.place || "this destination";
     var bits = [];
     if (nA) bits.push("<strong>" + nA + "</strong> provider action" + (nA !== 1 ? "s" : ""));
     if (nD) bits.push("<strong>" + nD + "</strong> cancellation deadline" + (nD !== 1 ? "s" : ""));
-    txt.innerHTML = "⚠ <strong>What you need to take care of</strong> — " + bits.join(" · ");
+    txt.innerHTML = "⚠ <strong>What you need to take care of for " + placeName + "</strong> — " + bits.join(" · ");
     var arrow = document.createElement("div");
     arrow.style.cssText = "font-size:11px;font-weight:600;color:#b05820;flex-shrink:0;";
-    arrow.textContent = "Open →";
+    arrow.textContent = "▾ Show";
     banner.appendChild(txt); banner.appendChild(arrow);
+
+    var listHost = document.createElement("div");
+    listHost.style.cssText = "display:none;border-top:1px solid #f0c8a0;background:#fff;padding:8px 12px 4px;";
+
     (function(did){
       banner.onclick = function(){
-        global._activeDmSection = "tracker";
-        if (typeof global.drawDestMode === "function") global.drawDestMode(did);
+        var open = listHost.style.display !== "none";
+        if (open) {
+          listHost.style.display = "none";
+          arrow.textContent = "▾ Show";
+          listHost.innerHTML = "";
+          return;
+        }
+        listHost.style.display = "block";
+        arrow.textContent = "▴ Hide";
+        // Lazy-render the list on first open so big trips don't pay
+        // the DOM cost up-front.
+        if (!listHost.firstChild && typeof global.mkTrackerInner === "function") {
+          listHost.appendChild(global.mkTrackerInner(dest, {skipTitle: true}));
+        }
       };
     })(dest.id);
-    container.appendChild(banner);
+
+    wrapEl.appendChild(banner);
+    wrapEl.appendChild(listHost);
+    container.appendChild(wrapEl);
   }
 
   // ── TM.7.3 (v332): pending-cancellations banner ────────────
