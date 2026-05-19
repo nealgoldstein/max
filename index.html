@@ -27708,14 +27708,16 @@ function updateMainMap(){
 
       if (!dtStops.length) return;
 
-      // Sort by distance from hub so the loop reads naturally.
-      if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.haversineKm === "function") {
-        dtStops.sort(function(a, b){
-          var aD = MaxEngineTrip.haversineKm(hubCtr[0], hubCtr[1], a.dtCtr[0], a.dtCtr[1]);
-          var bD = MaxEngineTrip.haversineKm(hubCtr[0], hubCtr[1], b.dtCtr[0], b.dtCtr[1]);
-          return aD - bD;
-        });
-      }
+      // v359.60.56: the render-side sort-by-hub-distance was removed.
+      // It was added in v359.60.23 when stops were always inserted
+      // at the end; v359.60.31 made insertion position user-
+      // controllable (Insert-after dropdown: Smart / At start /
+      // After X / At end), and the writer now respects that exact
+      // order in planItems[]. The render kept the old sort, which
+      // silently overrode the user's choice and re-tangled the loop
+      // by hub-distance. Now the polyline draws stops in planItems
+      // order — the user's "Insert at end" / "After Ásbyrgi" / etc.
+      // is what shows on the map.
 
       // Draw the multi-stop loop: hub → stop1 → stop2 → … → hub.
       // Single-stop falls out as a simple there-and-back: hub → A → hub.
