@@ -25827,6 +25827,13 @@ function mkHotelRecord(bk,destId){
       if(existing){existing.parentNode.removeChild(existing);eb.textContent="Edit";return;}
       eb.textContent="Close";
       var form=document.createElement("div"); form.id=editId; form.className="bk-form"; form.style.marginTop="6px";
+      // v359.60.44: name field was missing from this form — the user
+      // could edit every field EXCEPT the hotel name. Lands at the
+      // top of the form so a paste-batch-imported booking with a
+      // wrong/missing name is the first thing the user fixes.
+      var r0=document.createElement("div"); r0.className="bk-row";
+      var nameInp=document.createElement("input"); nameInp.type="text"; nameInp.className="bk-inp"; nameInp.placeholder="Hotel name"; nameInp.value=b.name||""; nameInp.style.flex="1";
+      r0.appendChild(mkField("Hotel name",nameInp));
       var r1=document.createElement("div"); r1.className="bk-row";
       var ciInp=document.createElement("input"); ciInp.type="date"; ciInp.className="bk-inp"; ciInp.value=b.checkIn||"";
       var ciTime=document.createElement("input"); ciTime.type="time"; ciTime.className="bk-inp"; ciTime.value=b.checkInTime||"";
@@ -25843,7 +25850,7 @@ function mkHotelRecord(bk,destId){
       var r3=document.createElement("div"); r3.className="bk-row";
       var urlInp=document.createElement("input"); urlInp.type="url"; urlInp.className="bk-inp"; urlInp.placeholder="https:// \u2014 booking page or hotel site"; urlInp.value=b.url||""; urlInp.style.flex="1";
       r3.appendChild(mkField("Reservation URL",urlInp));
-      form.appendChild(r1); form.appendChild(r2); form.appendChild(r3);
+      form.appendChild(r0); form.appendChild(r1); form.appendChild(r2); form.appendChild(r3);
       // Round FN: cancellation policy was missing from the edit form,
       // so once you booked you couldn't change "cancel by Jul 12" to
       // "cancel by Jul 19" if the hotel updated their policy. Add the
@@ -25874,6 +25881,8 @@ function mkHotelRecord(bk,destId){
       var cx=document.createElement("button"); cx.className="bk-dismiss-btn"; cx.textContent="Cancel";
       cx.onclick=function(){form.parentNode.removeChild(form);eb.textContent="Edit";};
       sv.onclick=function(){
+        // v359.60.44: persist name edits.
+        b.name=nameInp.value.trim()||b.name||"Untitled hotel";
         b.checkIn=ciInp.value; b.checkInTime=ciTime.value||null; b.checkOut=coInp.value; b.checkOutTime=coTime.value||null;
         b.confirmationNumber=confInp.value;
         b.pricePaid=parseFloat(priceInp.value)||null;
@@ -40375,11 +40384,18 @@ function _showBookingPreviewModal(destId, p, originalText) {
   }
 
   var typeOptions = ["flight","hotel","train","bus","ferry","restaurant","tour","ticket"];
+  // v359.60.43: type dropdown gets an explicit hint that changing
+  // it swaps the field set. Previously the user had no signal that
+  // an LLM mis-classification (Marriott confirmation # looks flight-
+  // shaped → typed as Flight) could be fixed by flipping this one
+  // dropdown, so they'd hit "no way to enter a hotel name."
   var typeSelHtml = '<label style="display:block;margin-bottom:8px;">' +
     '<span style="display:block;font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:2px;">Type</span>' +
     '<select id="pcfp-type" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid #ccc;border-radius:4px;font-family:inherit;box-sizing:border-box;background:#fff;">' +
     typeOptions.map(function(t){ return '<option value="' + t + '"' + (t === p.type ? ' selected' : '') + '>' + t.charAt(0).toUpperCase() + t.slice(1) + '</option>'; }).join("") +
-    '</select></label>';
+    '</select>' +
+    '<span style="display:block;font-size:10.5px;color:#888;margin-top:3px;line-height:1.4;">Change this if Max guessed wrong — the fields below swap to match the type.</span>' +
+    '</label>';
 
   var directionHtml = '';
   if (isTransport) {
