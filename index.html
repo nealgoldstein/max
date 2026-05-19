@@ -25726,9 +25726,27 @@ function mkTransportRecord(bk,fromId,toId){
 
 function toggleHotelForm(btn,container,formId,opts,onSaved){
   var existing=g(formId);
-  if(existing){existing.parentNode.removeChild(existing);btn.classList.remove("active");btn.textContent="Book";return;}
+  if(existing){
+    existing.parentNode.removeChild(existing);
+    btn.classList.remove("active");
+    // v359.60.45: restore the ORIGINAL button label instead of
+    // hardcoding "Book". "Book any hotel" was getting clobbered to
+    // just "Book" after a single open/close cycle.
+    btn.textContent = btn.dataset.originalText || "Book";
+    return;
+  }
+  if (!btn.dataset.originalText) btn.dataset.originalText = btn.textContent;
   btn.classList.add("active"); btn.textContent="Close";
   var form=document.createElement("div"); form.className="bk-form"; form.id=formId;
+  // v359.60.45: Hotel-name input. Pre-fills from opts.hotelName when
+  // a suggestion's Book button was clicked; blank for the manual
+  // "Add and book a hotel" path. Either way the user can edit before
+  // save. Previously this form had no name input — a manual add
+  // saved a booking with empty name, and a suggestion-driven add had
+  // no way to correct a wrong suggestion name on the spot.
+  var r0=document.createElement("div"); r0.className="bk-row";
+  var nameInp=document.createElement("input"); nameInp.type="text"; nameInp.className="bk-inp"; nameInp.placeholder="Hotel name"; nameInp.value=opts.hotelName||""; nameInp.style.flex="1";
+  r0.appendChild(mkField("Hotel name",nameInp));
   var r1=document.createElement("div"); r1.className="bk-row";
   var ciInp=document.createElement("input"); ciInp.type="date"; ciInp.className="bk-inp"; ciInp.value=opts.checkIn||"";
   var ciTime=document.createElement("input"); ciTime.type="time"; ciTime.className="bk-inp"; ciTime.value=opts.checkInTime||"";
@@ -25747,12 +25765,16 @@ function toggleHotelForm(btn,container,formId,opts,onSaved){
   var r3=document.createElement("div"); r3.className="bk-row";
   var urlInp=document.createElement("input"); urlInp.type="url"; urlInp.className="bk-inp"; urlInp.placeholder="https:// \u2014 booking page, confirmation, or hotel site"; urlInp.style.flex="1";
   r3.appendChild(mkField("Reservation URL",urlInp));
-  form.appendChild(r1); form.appendChild(r2); form.appendChild(r3);
+  form.appendChild(r0); form.appendChild(r1); form.appendChild(r2); form.appendChild(r3);
   var cancelFieldH=mkCancelField(formId+"-hc"); form.appendChild(cancelFieldH);
   var acts=document.createElement("div"); acts.className="bk-form-actions";
   var sv=document.createElement("button"); sv.className="bk-save-btn"; sv.textContent="Save booking";
   var cx=document.createElement("button"); cx.className="bk-dismiss-btn"; cx.textContent="Cancel";
-  cx.onclick=function(){form.parentNode.removeChild(form);btn.classList.remove("active");btn.textContent="Book";};
+  cx.onclick=function(){
+    form.parentNode.removeChild(form);
+    btn.classList.remove("active");
+    btn.textContent = btn.dataset.originalText || "Book";
+  };
   sv.onclick=function(){
     // Round FN.9: validate before persisting.
     //   1. Defend against the dest being removed while form is open.
@@ -25773,10 +25795,19 @@ function toggleHotelForm(btn,container,formId,opts,onSaved){
       return;
     }
     var cp=cancelFieldH.getCancelPolicy();
+    // v359.60.45: the typed name wins over opts.hotelName so manual
+    // adds and edited-suggestion adds both save the right name. If
+    // the user left it blank, require it before saving.
+    var finalName = (nameInp.value || "").trim() || opts.hotelName || "";
+    if (!finalName) {
+      alert("Enter a hotel name before saving.");
+      try { nameInp.focus(); } catch(_) {}
+      return;
+    }
     var hotelCoords=null;
     var allDists=getDistricts(dest.place,dest.intent);
-    allDists.forEach(function(d){d.hotels.forEach(function(h){if(h.name===opts.hotelName&&h.lat){hotelCoords={lat:h.lat,lng:h.lng};}});});
-    var bk={id:newBkId(),name:opts.hotelName,area:opts.area,checkIn:ciInp.value,checkInTime:ciTime.value||null,checkOut:coInp.value,checkOutTime:coTime.value||null,
+    allDists.forEach(function(d){d.hotels.forEach(function(h){if(h.name===finalName&&h.lat){hotelCoords={lat:h.lat,lng:h.lng};}});});
+    var bk={id:newBkId(),name:finalName,area:opts.area,checkIn:ciInp.value,checkInTime:ciTime.value||null,checkOut:coInp.value,checkOutTime:coTime.value||null,
       confirmationNumber:confInp.value,pricePaid:isNaN(priceVal)?null:priceVal,currency:currSel.value,
       notes:notesInp.value,url:urlInp.value.trim()||null,status:"booked",source:"manual",
       cancelType:cp.type,cancelDeadline:cp.deadline,cancelDeadlineTime:cp.deadlineTime||null,

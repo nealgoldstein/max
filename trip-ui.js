@@ -4112,7 +4112,7 @@
     noneD.textContent="Hotel suggestions loading\u2026 You can log a booking manually.";
     seStayPane.appendChild(noneD);
   }
-  var manualBtn=document.createElement("button"); manualBtn.className="bk-log-btn"; manualBtn.textContent="Book any hotel";
+  var manualBtn=document.createElement("button"); manualBtn.className="bk-log-btn"; manualBtn.textContent="Add and book a hotel";
   var manualFormId="hbf-"+dest.id+"-manual-"+Date.now();
   (function(btn,wrap,did){btn.onclick=function(){toggleHotelForm(btn,wrap,manualFormId,{
     hotelName:"",area:"",destId:did,checkIn:dest.dateFrom,checkOut:dest.dateTo,currency:"EUR"
