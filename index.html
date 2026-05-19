@@ -5804,46 +5804,22 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
   var name = parseResult.tripName || opts.name
     || ("Imported — " + new Date().toLocaleDateString("en-US", {month:"short", day:"numeric", year:"numeric"}));
 
-  // Mint a STUB trip so the import is recoverable on reload — the
-  // trip has no destinations yet; those get built when the user
-  // commits in the activity-place picker via "What to see and do →".
-  trip = {
-    name: name,
-    destinations: [],
-    legs: {},
-    trackSpending: false,
-    pendingActions: [],
-    brief: {
-      region:   parseResult.region || "",
-      entry:    parseResult.entry  || "",
-      tbExit:   parseResult.exit   || "",
-      exitBuffer: true,
-      when:     parseResult.when     || "",
-      duration: parseResult.duration || "",
-      _pendingStartDate: parseResult.startDate || null
-    }
-  };
-  activeDest = null;
-  _currentTripId = "trip-" + Date.now();
-  _fileHandle = null;
-
-  // Initialize _tb (picker scratch). tripMode "place" so the
-  // activity-place picker treats the user's list as the must-have
-  // set; LLM discoveries become opt-in extras.
-  if (typeof _tb === "undefined" || !_tb) {
-    window._tb = _tb = {};
-  }
-  _tb.name      = name;
-  // v359.60.32: normalize region to a known country/area when the
-  // parsed region is a phrase like "Iceland Road Trip" (the parser
-  // strips the year off the trip name but leaves the "Road Trip"
-  // suffix). Same _coarseGeocode-token logic the picker map uses so
+  // v359.60.32 / v359.60.53: normalize region to a known country/area
+  // when the parsed region is a phrase like "Iceland Road Trip" (the
+  // parser strips the year off the trip name but leaves the "Road
+  // Trip" suffix). Token-match against _coarseGeocode keys so
   // "Iceland Road Trip" → "Iceland" — the LLM prompt then reads
   // "A traveler wants to go to Iceland" instead of the nonsensical
-  // "A traveler wants to go to Iceland Road Trip" that the picker
-  // got before. Falls through to the raw region when no known
-  // country token is found (e.g. for region names not in the
-  // coarse-geocode dictionary).
+  // "A traveler wants to go to Iceland Road Trip", AND Nominatim
+  // queries downstream (generateCityData scopes by trip.brief.region)
+  // get a real country name to disambiguate against. Falls through
+  // to the raw region when no known country token is found.
+  //
+  // Computed BEFORE the trip brief so the brief gets the normalized
+  // form too. v359.60.46 set _tb.region to the normalized value but
+  // left trip.brief.region raw — Nominatim queries like
+  // "Blue Lagoon, Iceland Road Trip" returned no hits, leaving
+  // unsuggested places coord-less and pin-less on the map.
   var _rawRegion = parseResult.region || "";
   var _normRegion = _rawRegion;
   try {
@@ -5866,6 +5842,37 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
       }
     }
   } catch(_){}
+
+  // Mint a STUB trip so the import is recoverable on reload — the
+  // trip has no destinations yet; those get built when the user
+  // commits in the activity-place picker via "What to see and do →".
+  trip = {
+    name: name,
+    destinations: [],
+    legs: {},
+    trackSpending: false,
+    pendingActions: [],
+    brief: {
+      region:   _normRegion,
+      entry:    parseResult.entry  || "",
+      tbExit:   parseResult.exit   || "",
+      exitBuffer: true,
+      when:     parseResult.when     || "",
+      duration: parseResult.duration || "",
+      _pendingStartDate: parseResult.startDate || null
+    }
+  };
+  activeDest = null;
+  _currentTripId = "trip-" + Date.now();
+  _fileHandle = null;
+
+  // Initialize _tb (picker scratch). tripMode "place" so the
+  // activity-place picker treats the user's list as the must-have
+  // set; LLM discoveries become opt-in extras.
+  if (typeof _tb === "undefined" || !_tb) {
+    window._tb = _tb = {};
+  }
+  _tb.name      = name;
   _tb.region    = _normRegion;
   _tb.placeName = _normRegion;
   _tb.tripMode  = "place";
