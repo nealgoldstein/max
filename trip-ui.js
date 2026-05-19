@@ -2398,16 +2398,14 @@
     ));
     var _tripLinkN = (_tripBriefMeta && Array.isArray(_tripBriefMeta.links)) ? _tripBriefMeta.links.length : 0;
     var _tripLinkBadgeTV = _tripLinkN > 0 ? ' <span style="opacity:.85;font-size:10px;">(' + _tripLinkN + ')</span>' : "";
-    // v359.60.51: "Research notes" → "Discovery notes" to match the
-    // four-phase rename. This button is the planning-stage notes/
-    // links surface that pairs with Discovery; calling it "Discovery
-    // notes" makes the relationship explicit and ends the lingering
-    // "Research" reference. Trip-time notes still live under the
-    // sibling "📋 Trip notes" button.
-    tripResearchBtn.innerHTML = "🔬 Discovery notes" + _tripLinkBadgeTV;
+    // v359.60.65: rename "Discovery notes" → "Keep in mind for your
+    // trip" so the trip-level planning-notes button mirrors the
+    // per-destination "Keep in mind for {place}" strip. Same data
+    // (trip.brief.tripMeta), same popover; just intent-first wording.
+    tripResearchBtn.innerHTML = "🔬 Keep in mind for your trip" + _tripLinkBadgeTV;
     tripResearchBtn.title = _tripHasMeta
-      ? "Discovery-phase notes" + (_tripLinkN ? " and " + _tripLinkN + " link" + (_tripLinkN === 1 ? "" : "s") : "") + " — click to edit"
-      : "Discovery-phase notes and links — what to read, candidate places, things to figure out";
+      ? "Things to remember for the trip" + (_tripLinkN ? " plus " + _tripLinkN + " link" + (_tripLinkN === 1 ? "" : "s") : "") + " — click to edit"
+      : "Things to remember for the trip — links, reservations, reminders to look up";
     tripResearchBtn.style.cssText = "font-size:12px;font-weight:600;color:" + (_tripHasMeta ? "#fff" : "#5b3f8f") + ";background:" + (_tripHasMeta ? "#5b3f8f" : "#fff") + ";border:1px solid #5b3f8f;border-radius:6px;padding:6px 11px;cursor:pointer;font-family:inherit;margin-right:8px;white-space:nowrap;";
     tripResearchBtn.onclick = function(e){
       e.stopPropagation();
@@ -3350,7 +3348,10 @@
     caret.style.cssText = "font-size:8px;display:inline-block;transition:transform 0.12s ease;";
     caret.textContent = "▾";
     var lbl = document.createElement("span");
-    lbl.textContent = "Research";
+    // v359.60.65: rename per-destination "Research" surface to
+    // "Keep in mind for {place}" so the language matches the intent
+    // (stuff to remember before/during the trip for this place).
+    lbl.textContent = "Keep in mind for " + (dest.label || dest.place || "this destination");
     var meta = document.createElement("span");
     meta.style.cssText = "font-size:9px;font-weight:500;color:#bbb;text-transform:none;letter-spacing:0;margin-left:4px;";
     hdrLeft.appendChild(caret);
@@ -3393,7 +3394,7 @@
 
     function renderViewMode() {
       if (!saved) {
-        view.innerHTML = '<span style="color:#bbb;">Tap to add research, links, opening hours, reservations…</span>';
+        view.innerHTML = '<span style="color:#bbb;">Tap to add things to remember — links, opening hours, reservations…</span>';
         return;
       }
       // URL auto-detection. Plain text + clickable <a> for any
@@ -3482,7 +3483,7 @@
       micRow.style.cssText = "margin-top:6px;display:flex;justify-content:flex-end;";
       var micBtn = document.createElement("button");
       micBtn.type = "button";
-      micBtn.textContent = "🎤 Dictate research";
+      micBtn.textContent = "🎤 Dictate";
       micBtn.title = "Dictate (Web Speech API)";
       micBtn.style.cssText = "font-size:11px;background:#fff;border:1px solid #e6e0cc;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;color:#8a7440;";
       var rec = null, listening = false;
@@ -3513,7 +3514,7 @@
           rec.onerror = function () {};
           rec.onend = function () {
             listening = false;
-            micBtn.textContent = "🎤 Dictate research";
+            micBtn.textContent = "🎤 Dictate";
             micBtn.style.background = "#fff";
             ta.value = ta.value.substring(0, startLen) + (finalText ? leadingSpace + finalText : "");
             // Stay in edit mode after dictation ends — user may
@@ -3522,7 +3523,7 @@
           rec.start();
         } catch (e) {
           listening = false;
-          micBtn.textContent = "🎤 Dictate research";
+          micBtn.textContent = "🎤 Dictate";
           status.textContent = "mic unavailable";
           status.style.color = "#c05020";
         }
@@ -3861,7 +3862,12 @@
     tabs.className = "dm-tabs";
     var g = global.g || function(id){ return document.getElementById(id); };
     var activeTab = _activeDmTab();
-    var pendingN = (typeof global.pendingCount === "function") ? global.pendingCount() : 0;
+    // v359.60.64: per-destination count for the badge, not trip-wide.
+    // Matches what the Action needed surface actually shows for this
+    // destination (provider actions + cancellation deadlines).
+    var pendingN = (typeof global.destPendingCount === "function")
+      ? global.destPendingCount(dest)
+      : ((typeof global.pendingCount === "function") ? global.pendingCount() : 0);
 
     TAB_GROUPS.forEach(function(grp){
       var btn = document.createElement("button");

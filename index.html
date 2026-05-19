@@ -13753,9 +13753,9 @@ function _pmOpenTripResearchCard(){
 
     return '<div style="background:#fff;border-radius:12px;max-width:500px;width:100%;box-shadow:0 12px 36px rgba(0,0,0,0.22);">'
       + '<div style="padding:18px 20px 6px;">'
-      +   '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">Discovery notes</div>'
+      +   '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">Keep in mind for your trip</div>'
       +   '<div style="font-size:17px;font-weight:700;color:#111;margin-top:4px;">' + String(tripLabel).replace(/</g, "&lt;") + '</div>'
-      +   '<div style="font-size:11.5px;color:#777;margin-top:3px;line-height:1.5;">Discovery-phase notes and links &mdash; gear thoughts, timing, weather, general guides. For trip-time stuff (confirmations, packing, contacts), see Trip notes.</div>'
+      +   '<div style="font-size:11.5px;color:#777;margin-top:3px;line-height:1.5;">Things to remember before and during the trip &mdash; links, gear thoughts, timing, weather, general guides. For trip-time stuff (confirmations, packing, contacts), see Trip notes.</div>'
       +   '<a href="#" id="pm-trc-to-trip-notes" style="display:inline-block;margin-top:8px;font-size:11.5px;font-weight:600;color:#1a5fa8;text-decoration:none;">&#128203; Trip notes &rarr;</a>'
       + '</div>'
       + '<div style="padding:10px 20px;display:flex;flex-direction:column;gap:14px;">'
@@ -25442,10 +25442,35 @@ function pendingCount(){
   return trip.pendingActions.filter(function(a){return !a.cleared&&a.requiresProviderAction;}).length;
 }
 
+// v359.60.64: per-destination count for badge + per-dest UI. Counts
+// open provider actions whose destName matches this destination's
+// label/place AND any cancellation deadlines that resolve to this
+// destination — same scope the Action needed surface shows.
+function destPendingCount(dest){
+  if (!dest) return 0;
+  var dName = (dest.label || dest.place || "").toLowerCase();
+  var n = 0;
+  if (Array.isArray(trip.pendingActions)) {
+    n += trip.pendingActions.filter(function(a){
+      if (!a || a.cleared || !a.requiresProviderAction) return false;
+      return (a.destName || "").toLowerCase() === dName;
+    }).length;
+  }
+  try {
+    if (typeof collectDeadlines === "function") {
+      n += (collectDeadlines(dest) || []).length;
+    }
+  } catch (_) {}
+  return n;
+}
+if (typeof globalThis !== "undefined") globalThis.destPendingCount = destPendingCount;
+
 function updateTrackerBadge(){
-  var n=pendingCount();
-  // v359.60.60: badge target is the Action needed tab. Per-render
-  // querySelectorAll covers any duplicated dest renders.
+  // v359.60.64: badge is per-destination, not trip-wide. activeDest
+  // is the destination currently rendered in destMode.
+  var dest = (typeof activeDest !== "undefined" && activeDest && typeof getDest === "function")
+    ? getDest(activeDest) : null;
+  var n = dest ? destPendingCount(dest) : 0;
   document.querySelectorAll('#dm-tab-actionNeeded').forEach(function(btn){
     var badge=btn.querySelector('.dm-tab-badge');
     if(n>0){
