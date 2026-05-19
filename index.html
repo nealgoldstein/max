@@ -39655,11 +39655,46 @@ function _commitBatchBookings(bookings) {
       }, commonCancel));
       added++;
     } else if (b.type === "flight" || b.type === "train" || b.type === "bus" || b.type === "ferry") {
-      // Pick the leg whose departure date best matches b.depDate.
-      // For the batch path we default to "arrival" — the most common
-      // case is a flight INTO a destination — and let the user edit
-      // afterward if needed.
+      // v359.60.42: arrival at the FIRST destination has no previous
+      // leg — save to trip.brief.entryDetails (same fix the single-
+      // booking preview got). The previous fallback shoved arrivals
+      // at dest[0] into the OUTBOUND leg, which is wrong.
       var destIdx = trip.destinations.indexOf(dest);
+      var hasMatchingDepDate = b.depDate && dest.dateFrom && dest.dateTo
+        && b.depDate <= dest.dateTo && b.depDate >= dest.dateFrom;
+      var isFirstDest = (destIdx === 0);
+      var isLastDest  = (destIdx === trip.destinations.length - 1);
+      // Heuristic: flight that arrives within the first destination's
+      // stay window → entryDetails. Flight that departs within the
+      // last destination's stay window → exitDetails.
+      if (isFirstDest && b.arrDate && dest.dateFrom && b.arrDate <= dest.dateFrom) {
+        if (!trip.brief) trip.brief = {};
+        trip.brief.entryDetails = {
+          carrier: b.carrier || "",
+          number:  b.number  || "",
+          time:    b.arrTime || b.depTime || "",
+          url:     b.url     || null,
+          confirmationNumber: b.confirmationNumber || ""
+        };
+        if (!trip.brief.entryMode) trip.brief.entryMode = (b.type === "flight") ? "fly" : b.type;
+        if (!trip.brief.entry) trip.brief.entry = dest.place || "";
+        added++;
+        return;
+      }
+      if (isLastDest && b.depDate && dest.dateTo && b.depDate >= dest.dateTo) {
+        if (!trip.brief) trip.brief = {};
+        trip.brief.exitDetails = {
+          carrier: b.carrier || "",
+          number:  b.number  || "",
+          time:    b.depTime || "",
+          url:     b.url     || null,
+          confirmationNumber: b.confirmationNumber || ""
+        };
+        if (!trip.brief.exitMode) trip.brief.exitMode = (b.type === "flight") ? "fly" : b.type;
+        if (!trip.brief.tbExit) trip.brief.tbExit = dest.place || "";
+        added++;
+        return;
+      }
       var fromId, toId;
       if (destIdx > 0) {
         fromId = trip.destinations[destIdx - 1].id;
@@ -40398,7 +40433,7 @@ function _showBookingPreviewModal(destId, p, originalText) {
     '<div id="pcfp-fields"></div>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px;">' +
       '<button id="pcfp-back" style="padding:8px 14px;font-size:12px;font-weight:600;background:#fff;color:#666;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;">← Back</button>' +
-      '<button id="pcfp-save" style="padding:8px 16px;font-size:12px;font-weight:700;background:#1a5fa8;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Save to tracker</button>' +
+      '<button id="pcfp-save" style="padding:8px 16px;font-size:12px;font-weight:700;background:#1a5fa8;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Save</button>' +
     '</div>';
   ov.appendChild(box);
   document.body.appendChild(ov);
@@ -40566,7 +40601,7 @@ function _showBookingPreviewModal(destId, p, originalText) {
     // point of the verification — let the user route to the right place.
     var chosenDestId = destSel ? destSel.value : destId;
     var freshDest = getDest(chosenDestId);
-    if (!freshDest) { maxAlert("Destination is gone — close this and reopen the tracker."); return; }
+    if (!freshDest) { maxAlert("Destination is gone — close this and reopen the booking dialog."); return; }
     // Read cancellation policy from the radio + date input.
     // cancelDeadlineTime is intentionally always null on new entries
     // — see preview-modal comment about timezone confusion.
@@ -40603,19 +40638,53 @@ function _showBookingPreviewModal(destId, p, originalText) {
       var dirEl = document.querySelector('input[name="pcfp-dir"]:checked');
       var direction = dirEl ? dirEl.value : "arrival";
       var destIdx = trip.destinations.indexOf(freshDest);
+      // v359.60.42: arrival at the FIRST destination has no previous
+      // leg — save to trip.brief.entryDetails instead of refusing.
+      // Same for departure from the LAST destination → exitDetails.
+      // Previously these alerted with "Edit Trip Parameters → Entry…"
+      // which was a circuitous dead end; now Save just works.
+      if (direction === "arrival" && destIdx <= 0) {
+        if (!trip.brief) trip.brief = {};
+        var depTimeForEntry = v("pcfp-dep-time") || null;
+        var arrTimeForEntry = v("pcfp-arr-time") || null;
+        trip.brief.entryDetails = {
+          carrier: v("pcfp-carrier") || "",
+          number:  v("pcfp-number")  || "",
+          time:    arrTimeForEntry || depTimeForEntry || "",
+          url:     v("pcfp-url")     || null,
+          confirmationNumber: v("pcfp-conf") || ""
+        };
+        if (!trip.brief.entryMode) trip.brief.entryMode = (t === "flight") ? "fly" : t;
+        if (!trip.brief.entry) trip.brief.entry = freshDest.place || "";
+        if (typeof autoSave === "function") try { autoSave(); } catch(_){}
+        if (typeof drawTripMode === "function") drawTripMode();
+        if (typeof showSaveStatus === "function") showSaveStatus("✓ Arrival saved to trip entry", 2800);
+        if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+        return;
+      }
+      if (direction === "departure" && destIdx >= trip.destinations.length - 1) {
+        if (!trip.brief) trip.brief = {};
+        var depTimeForExit = v("pcfp-dep-time") || null;
+        trip.brief.exitDetails = {
+          carrier: v("pcfp-carrier") || "",
+          number:  v("pcfp-number")  || "",
+          time:    depTimeForExit || "",
+          url:     v("pcfp-url")     || null,
+          confirmationNumber: v("pcfp-conf") || ""
+        };
+        if (!trip.brief.exitMode) trip.brief.exitMode = (t === "flight") ? "fly" : t;
+        if (!trip.brief.tbExit) trip.brief.tbExit = freshDest.place || "";
+        if (typeof autoSave === "function") try { autoSave(); } catch(_){}
+        if (typeof drawTripMode === "function") drawTripMode();
+        if (typeof showSaveStatus === "function") showSaveStatus("✓ Departure saved to trip exit", 2800);
+        if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+        return;
+      }
       var fromId, toId;
       if (direction === "arrival") {
-        if (destIdx <= 0) {
-          maxAlert("This is the first destination — there's no previous leg to attach an arrival booking to. Edit Trip Parameters → Entry to set arrival info.");
-          return;
-        }
         fromId = trip.destinations[destIdx - 1].id;
         toId = freshDest.id;
       } else {
-        if (destIdx >= trip.destinations.length - 1) {
-          maxAlert("This is the last destination — there's no next leg to attach a departure booking to. Edit Trip Parameters → Exit to set departure info.");
-          return;
-        }
         fromId = freshDest.id;
         toId = trip.destinations[destIdx + 1].id;
       }
