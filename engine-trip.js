@@ -460,6 +460,18 @@
     // saw: unchecked Appenzell+Emmental → Zurich went from 6n
     // (3 + Schaffhausen + Lucerne) to 4n (3 + Schaffhausen) and trip
     // total grew because Lucerne became its own destination.
+    //
+    // v359.60.50: ALSO include places that live as day-trip stops on
+    // trip.routes[] (the modern v2/v3 shape). The legacy dest.dayTrips
+    // array is the OLD chip representation; current converters write
+    // to trip.routes with subKind:"dayTrip" + planItems[type:"stop"].
+    // Symptom Neal saw on Iceland: after converting Þingvellir / Geysir
+    // / Gullfoss to day trips from Selfoss (popover correctly spliced
+    // them out of destinations + added stops to a route), a later
+    // re-Choreograph re-introduced them as standalone destinations
+    // because this chipPlaceSet was blind to the route-stops shape.
+    // Result: duplicate places — once as standalone, once as day-trip
+    // stops on the same route.
     var chipPlaceSet = {};
     oldDests.forEach(function(d){
       if (!d || !Array.isArray(d.dayTrips)) return;
@@ -469,6 +481,24 @@
         if (ck) chipPlaceSet[ck] = true;
       });
     });
+    // v359.60.50: also include day-trip stops from trip.routes.
+    try {
+      if (typeof trip !== "undefined" && trip && Array.isArray(trip.routes)) {
+        trip.routes.forEach(function(r){
+          if (!r) return;
+          var isDT = (r.subKind === "dayTrip") || (r.kind === "dayTrip");
+          if (!isDT) return;
+          (r.planItems || []).forEach(function(pi){
+            if (!pi || pi.type !== "stop") return;
+            var pl = (trip.places && trip.places[pi.placeId]) || null;
+            var nm = (pl && pl.name) || pi.placeId || "";
+            if (!nm) return;
+            var ck2 = (typeof _normPlaceName === "function") ? _normPlaceName(nm) : nm.toLowerCase();
+            if (ck2) chipPlaceSet[ck2] = true;
+          });
+        });
+      }
+    } catch(_){}
     var claimedIds = {};
     var newArr = [];
     var cur = new Date(startDate + "T12:00:00");
