@@ -105,6 +105,39 @@ async function _issueMagicLink(env: Record<string, string | undefined>, email: s
   return { sent: false, directLink: verifyUrl, sendError };
 }
 
+// v359.60.89: notify ADMIN_EMAIL when a brand-new user completes
+// sign-in (first time hitting /verify successfully). Skip if the new
+// user is in ALLOWED_EMAILS — those are owner accounts; the admin
+// doesn't need to be pinged about their own sign-ins.
+async function _notifyAdminOfNewUser(env: Record<string, string | undefined>, email: string, name: string | null, marketingOptIn: boolean): Promise<void> {
+  const adminEmail = env.ADMIN_EMAIL;
+  if (!adminEmail) return; // notifications disabled, silent skip
+  if (!env.RESEND_API_KEY) return;
+  if (_isBootstrapAllowed(env, email)) return; // owner sign-in, skip
+  const subject = '[Max] New sign-up: ' + (name ? name + ' (' + email + ')' : email);
+  const displayLine = name ? '<strong>' + name + '</strong> &lt;' + email + '&gt;' : '<strong>' + email + '</strong>';
+  const html =
+    '<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;font-size:14px;color:#333;line-height:1.5;max-width:520px;margin:0 auto;padding:24px;">' +
+    '<h2 style="font-size:18px;margin:0 0 12px;">🎉 New Max sign-up</h2>' +
+    '<p>' + displayLine + ' just completed their first sign-in.</p>' +
+    '<ul style="font-size:13px;color:#444;padding-left:20px;margin:12px 0;">' +
+    '<li>Marketing opt-in: <strong>' + (marketingOptIn ? 'Yes' : 'No') + '</strong></li>' +
+    '<li>Signed up at: ' + new Date().toISOString() + '</li>' +
+    '</ul>' +
+    '<p style="font-size:11.5px;color:#888;margin-top:18px;">No action needed — they\'re already in. This is just a heads-up. You can view the full list with the /admin/users endpoint.</p>' +
+    '</div>';
+  const text =
+    '[Max] New sign-up\n\n' +
+    (name ? name + ' <' + email + '>' : email) + '\n' +
+    'Marketing opt-in: ' + (marketingOptIn ? 'Yes' : 'No') + '\n' +
+    'Signed up at: ' + new Date().toISOString() + '\n';
+  try {
+    await sendEmail(env, { to: adminEmail, subject, html, text });
+  } catch (e) {
+    console.error('[max] new-user notification failed:', e);
+  }
+}
+
 // Send the admin a notification email about a new sign-in request,
 // with one-time approve / deny links embedded.
 async function _notifyAdminOfRequest(env: Record<string, string | undefined>, email: string, approveToken: string, denyToken: string, name?: string | null): Promise<void> {
@@ -351,6 +384,10 @@ authApi.get('/verify', async (c) => {
     if (!user) {
       return c.redirect(clientBase + '/?signin=error&reason=user_create_failed');
     }
+    // v359.60.89: notify admin about the new sign-up. Fire-and-forget
+    // so the user's redirect isn't blocked by email delivery latency.
+    _notifyAdminOfNewUser(env, email, magic.name || null, !!magic.marketingOptIn)
+      .catch((e) => console.error('[max] new-user notification dispatch failed:', e));
   } else {
     // Returning user — backfill displayName if missing, and update
     // marketing opt-in to whatever they just submitted (let them
