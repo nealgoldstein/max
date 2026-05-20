@@ -18,6 +18,10 @@ type Env = {
   RESEND_API_KEY?: string;
   RESEND_FROM?: string;
   PUBLIC_APP_URL?: string;
+  // v359.60.81: sign-in access control
+  ALLOWED_EMAILS?: string;  // comma-separated bootstrap allowlist
+  ADMIN_EMAIL?: string;     // where approval-request notifications get sent
+  ADMIN_TOKEN?: string;     // shared secret for /admin/revoke + /admin/grants
 };
 
 // ExecutionContext shape — `waitUntil` is the only piece we need.

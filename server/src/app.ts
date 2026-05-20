@@ -5,7 +5,7 @@
 import { Hono } from 'hono';
 import { logger } from 'hono/logger';
 import { cors } from 'hono/cors';
-import { authApi } from './routes/auth.js';
+import { authApi, adminApi } from './routes/auth.js';
 import { tripsApi } from './routes/trips.js';
 import { llmApi } from './routes/llm.js';
 import { prefsApi } from './routes/prefs.js';
@@ -32,6 +32,7 @@ export function createApp() {
   );
 
   app.route('/auth', authApi);
+  app.route('/admin', adminApi);
   app.route('/trips', tripsApi);
   app.route('/llm', llmApi);
   app.route('/user/prefs', prefsApi);

@@ -145,12 +145,19 @@
   // clicks it; comes back with #session=<token> in the URL hash.
   // The boot path detects the hash and stores the token. The
   // legacy dev-login is kept as `signInDev` for local testing.
-  async function requestMagicLink(email) {
+  // v359.60.82: name optional in the API but the UI requires it for
+  // new sign-ups; the server returns 400 "Name is required for new
+  // sign-ups" when missing for a never-seen-before email. Returning
+  // users skip the requirement — they already have a name on file.
+  async function requestMagicLink(email, name) {
     if (!email || !email.trim()) throw new Error('Email required');
     return request('/auth/magic-link', {
       method: 'POST',
       skipAuth: true,
-      body: { email: email.trim() },
+      body: {
+        email: email.trim(),
+        name: name ? name.trim() : undefined,
+      },
     });
   }
 
@@ -798,16 +805,23 @@
       '<div style="font-size:12px;color:#555;line-height:1.55;margin-bottom:14px;">' +
       (isSignedIn()
         ? '<strong>Signed in as ' + (getEmail() || 'user') + '</strong>.'
-        : 'Sign in to share trips between devices. Enter your email and we\'ll generate a one-time sign-in link — no password.') +
+        : 'Sign in to share trips between devices. Enter your name and email — we\'ll generate a one-time sign-in link. No password required.') +
       '</div>' +
+      // v359.60.82: Name field shown only for signed-out state. New
+      // sign-ups need it; returning users (server already has them)
+      // can leave it blank or fill it to update their display name.
+      (isSignedIn() ? '' :
+        '<label style="display:block;font-size:11px;color:#666;font-weight:600;margin-bottom:6px;">Name <span style="color:#c44;">*</span></label>' +
+        '<input id="max-sync-name" type="text" placeholder="Your name" value="" autocomplete="name" style="width:100%;font-size:12px;padding:7px 9px;border:1px solid #ddd;border-radius:5px;box-sizing:border-box;margin-bottom:10px;" />'
+      ) +
+      '<label style="display:block;font-size:11px;color:#666;font-weight:600;margin-bottom:6px;">Email <span style="color:#c44;">*</span></label>' +
+      '<input id="max-sync-email" type="email" placeholder="you@example.com" value="' +
+      _esc(getEmail() || '') +
+      '" autocomplete="email" style="width:100%;font-size:12px;padding:7px 9px;border:1px solid #ddd;border-radius:5px;box-sizing:border-box;margin-bottom:14px;" />' +
       '<label style="display:block;font-size:11px;color:#666;font-weight:600;margin-bottom:6px;">Server URL</label>' +
       '<input id="max-sync-url" type="text" value="' +
       _esc(getServerUrl()) +
-      '" style="width:100%;font-size:12px;padding:7px 9px;border:1px solid #ddd;border-radius:5px;font-family:monospace;box-sizing:border-box;margin-bottom:10px;" />' +
-      '<label style="display:block;font-size:11px;color:#666;font-weight:600;margin-bottom:6px;">Email</label>' +
-      '<input id="max-sync-email" type="email" placeholder="you@example.com" value="' +
-      _esc(getEmail() || '') +
-      '" style="width:100%;font-size:12px;padding:7px 9px;border:1px solid #ddd;border-radius:5px;box-sizing:border-box;margin-bottom:14px;" />' +
+      '" style="width:100%;font-size:12px;padding:7px 9px;border:1px solid #ddd;border-radius:5px;font-family:monospace;box-sizing:border-box;margin-bottom:14px;" />' +
       '<div id="max-sync-msg" style="font-size:11px;color:#888;min-height:14px;margin-bottom:10px;"></div>' +
       '<div style="display:flex;gap:8px;">' +
       (isSignedIn()
@@ -852,6 +866,9 @@
       inBtn.onclick = async function () {
         var url = (urlInp && urlInp.value.trim()) || DEFAULT_URL;
         var email = emailInp && emailInp.value.trim();
+        // v359.60.82: name input only renders in the signed-out state.
+        var nameInp = document.getElementById('max-sync-name');
+        var name = nameInp ? nameInp.value.trim() : '';
         if (!email) {
           _msg('Enter an email', '#c44');
           return;
@@ -859,8 +876,16 @@
         setServerUrl(url);
         _msg('Sending sign-in link…', '#888');
         try {
-          var resp = await requestMagicLink(email);
-          if (resp && resp.directLink) {
+          var resp = await requestMagicLink(email, name);
+          // v359.60.81: handle approval-workflow states.
+          // status: "pending" — request submitted to admin, no link sent yet.
+          // status: "denied" / "revoked" — sign-in unavailable.
+          if (resp && resp.status === 'pending') {
+            _msg(
+              resp.message || 'Your sign-in request has been sent for approval. You\'ll receive an email once it\'s reviewed.',
+              '#b05820',
+            );
+          } else if (resp && resp.directLink) {
             // v350.1: server didn't send an email (no provider
             // configured) but returned the link directly. Render
             // as a big tappable button instead of raw URL text so
@@ -878,7 +903,13 @@
             );
           }
         } catch (e) {
-          _msg('Failed: ' + e.message, '#c44');
+          // v359.60.81: server returns 403 with a friendly error for
+          // denied / revoked emails. Surface that text verbatim.
+          var raw = e && e.message ? String(e.message) : 'Sign-in failed.';
+          // The request() helper wraps server JSON in "HTTP NNN: {json body}";
+          // pull the actual error string out so the user sees just that.
+          var friendly = raw.replace(/^HTTP \d+:\s*/, '').replace(/^\{.*"error":"([^"]+)".*\}$/, '$1');
+          _msg(friendly, '#c44');
         }
       };
     }

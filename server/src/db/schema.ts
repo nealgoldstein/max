@@ -129,6 +129,11 @@ export const usage = sqliteTable(
 export const magicTokens = sqliteTable('magic_tokens', {
   token: text('token').primaryKey(),
   email: text('email').notNull(),
+  // v359.60.82: capture user's display name at sign-in request time
+  // so /verify can populate users.displayName when creating the
+  // account on first sign-in. Optional — older rows / direct-API
+  // callers may not provide it.
+  name: text('name'),
   expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
   usedAt: integer('used_at', { mode: 'timestamp_ms' }),
   createdAt: integer('created_at', { mode: 'timestamp_ms' })
@@ -180,7 +185,32 @@ export const remindersSent = sqliteTable(
   }),
 );
 
+// v359.60.81: per-email access grants for sign-in approval workflow.
+// Anyone trying to sign in either already has status='approved' here
+// (proceeds normally) OR creates/updates a row with status='pending'
+// + admin notification email. Admin clicks the approve link with a
+// one-time approveToken, status flips to 'approved', user gets a
+// magic-link email. Admin can revoke later via the protected
+// /admin/revoke endpoint (uses ADMIN_TOKEN env var). The ALLOWED_EMAILS
+// env-var allowlist still works as a bootstrap: emails on that list
+// are auto-approved without going through the request flow.
+export const accessGrants = sqliteTable('access_grants', {
+  email: text('email').primaryKey(),
+  status: text('status').notNull(), // 'pending' | 'approved' | 'denied' | 'revoked'
+  // v359.60.82: name from the original sign-in request, used to
+  // populate users.displayName when the request gets approved and
+  // the user creates their account.
+  name: text('name'),
+  approveToken: text('approve_token'),  // one-time, cleared on use
+  denyToken: text('deny_token'),        // one-time, cleared on use
+  requestedAt: integer('requested_at', { mode: 'timestamp_ms' }).notNull(),
+  decidedAt: integer('decided_at', { mode: 'timestamp_ms' }),
+  notes: text('notes'),
+});
+
 export type User = typeof users.$inferSelect;
+export type AccessGrant = typeof accessGrants.$inferSelect;
+export type NewAccessGrant = typeof accessGrants.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
 export type Trip = typeof trips.$inferSelect;
 export type NewTrip = typeof trips.$inferInsert;
