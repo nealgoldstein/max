@@ -905,10 +905,23 @@
         } catch (e) {
           // v359.60.81: server returns 403 with a friendly error for
           // denied / revoked emails. Surface that text verbatim.
+          // v359.60.83: when the server returns { error, detail }
+          // (the unhandled-error path), show the detail so debugging
+          // doesn't require wrangler tail. Falls back to just `error`
+          // when no detail is present.
           var raw = e && e.message ? String(e.message) : 'Sign-in failed.';
-          // The request() helper wraps server JSON in "HTTP NNN: {json body}";
-          // pull the actual error string out so the user sees just that.
-          var friendly = raw.replace(/^HTTP \d+:\s*/, '').replace(/^\{.*"error":"([^"]+)".*\}$/, '$1');
+          var friendly = raw.replace(/^HTTP \d+:\s*/, '');
+          // Try to parse the JSON envelope: {"error":"...","detail":"..."}.
+          try {
+            var parsed = JSON.parse(friendly);
+            if (parsed && parsed.error) {
+              friendly = parsed.detail
+                ? parsed.error + ' — ' + parsed.detail
+                : parsed.error;
+            }
+          } catch (_) {
+            // not JSON; leave friendly as-is
+          }
           _msg(friendly, '#c44');
         }
       };
