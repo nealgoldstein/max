@@ -1908,7 +1908,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
         <div onclick="showInstallPrompt()" id="hs-install-link" style="display:none;font-size:11px;color:#1a5fa8;cursor:pointer;padding:3px 10px;border:1px solid #c8d8f0;border-radius:10px;white-space:nowrap;font-weight:600;" title="Install Max as an app — required on iPhone to receive trip reminders and alerts">⊕ Install</div>
         <div onclick="showWelcomeOnboarding()" id="hs-welcome-link" style="font-size:11px;color:#999;cursor:pointer;padding:3px 10px;border:1px solid #ddd;border-radius:10px;white-space:nowrap;" title="Re-read the welcome + change your pace setting">Welcome</div>
         <div onclick="showAboutMax()" id="hs-how-it-works" style="font-size:11px;color:#999;cursor:pointer;padding:3px 10px;border:1px solid #ddd;border-radius:10px;white-space:nowrap;" title="How Max works">How it works</div>
-        <div onclick="showSettingsPanel()" id="hs-settings-btn" style="font-size:11px;color:#999;cursor:pointer;padding:3px 10px;border:1px solid #ddd;border-radius:10px;white-space:nowrap;" title="Trip defaults — hours per day, pace, day-trip threshold">⚙ Settings</div>
+        <div onclick="showSettingsPanel()" id="hs-settings-btn" style="font-size:11px;color:#999;cursor:pointer;padding:3px 10px;border:1px solid #ddd;border-radius:10px;white-space:nowrap;" title="My preferences — hours per day, pace, mobility, dietary, emergency contact">⚙ My preferences</div>
         <div onclick="showHomeApiKeyForm()" id="hs-apikey-btn" style="font-size:11px;color:#999;cursor:pointer;padding:3px 10px;border:1px solid #ddd;border-radius:10px;white-space:nowrap;" title="Set your Anthropic API key (BYOK) — alternative to signing in">🔑 API key</div>
         <div onclick="MaxSync.showSignInModal()" id="hs-sync-btn" style="font-size:11px;color:#999;cursor:pointer;padding:3px 10px;border:1px solid #ddd;border-radius:10px;white-space:nowrap;" title="Sync with server">⇄ Sync</div>
       </div>
@@ -2073,7 +2073,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
         </div>
 
         <div id="mw-settings" class="mw-dropdown" style="display:none;">
-          <button class="mw-item" onclick="_mwClose();showSettingsPanel();">&#9881;&nbsp; Trip defaults…</button>
+          <button class="mw-item" onclick="_mwClose();showSettingsPanel();">&#9881;&nbsp; My preferences…</button>
           <div class="mw-sep"></div>
           <button class="mw-item" onclick="_mwClose();showApiKeyForm();" style="color:#888;">&#x1F511;&nbsp; Set API key…</button>
         </div>
@@ -16553,10 +16553,10 @@ function renderActivityPicker(){
   if (!isEdit) {
     _pickerActionBtns += '<button class="file-btn" onclick="renderTripBrief()" title="Profile — dates, pace, transport, etc. without losing your picks">&#x270E; Profile</button>';
   }
-  // v359.6: ⚙ Settings gear — opens the global trip-defaults panel.
+  // v359.6: ⚙ Settings gear — opens the user-level "My preferences" panel.
   // Sits before the 🔑 API-key button so it falls inside the main
   // action group rather than getting tucked next to the dim BYOK key.
-  _pickerActionBtns += '<button class="file-btn" onclick="showSettingsPanel()" title="Trip defaults — hours per day, pace, day-trip threshold">&#9881;</button>';
+  _pickerActionBtns += '<button class="file-btn" onclick="showSettingsPanel()" title="My preferences — hours per day, pace, day-trip threshold">&#9881;</button>';
   _pickerActionBtns += '<button class="file-btn" onclick="showApiKeyForm()" title="Set API key" style="opacity:0.6;">&#x1F511;</button>';
   // v359.2.3: all mode pills removed from picker chrome too. The
   // "Choreograph my trip →" CTA at the bottom of the picker is the
@@ -18596,19 +18596,15 @@ function _mountDocumentsSection(mountId){
     listEl.appendChild(sizeLine);
   }
   _renderList();
-  var addRow = document.createElement("div");
-  addRow.style.cssText = "display:flex;gap:6px;align-items:center;";
-  var fileInp = document.createElement("input");
-  fileInp.type = "file";
-  fileInp.multiple = true;
-  fileInp.style.cssText = "flex:1;font-size:12px;font-family:inherit;";
-  fileInp.onchange = function(){
-    var files = Array.from(fileInp.files || []);
-    if (!files.length) return;
+  // v359.60.76: shared file-list processor. Used by both the regular
+  // file picker AND the camera-capture input below so they go through
+  // the same size-check + base64 + push path.
+  function _processFiles(files, clearFn){
+    if (!files || !files.length) return;
     var totalAfter = _totalBytes() + files.reduce(function(s, f){ return s + f.size; }, 0);
     if (totalAfter > 3 * 1048576) {
       if (!confirm("Attaching these files would push total documents over 3 MB (" + _fmtBytes(totalAfter) + "). Large attachments slow down trip syncing. Continue?")) {
-        fileInp.value = ""; return;
+        if (clearFn) clearFn(); return;
       }
     }
     var pending = files.length;
@@ -18624,16 +18620,42 @@ function _mountDocumentsSection(mountId){
           addedAt: new Date().toISOString()
         });
         pending--;
-        if (pending === 0) { _renderList(); fileInp.value = ""; }
+        if (pending === 0) { _renderList(); if (clearFn) clearFn(); }
       };
       reader.onerror = function(){
         pending--;
-        if (pending === 0) { _renderList(); fileInp.value = ""; }
+        if (pending === 0) { _renderList(); if (clearFn) clearFn(); }
       };
       reader.readAsDataURL(f);
     });
+  }
+  var addRow = document.createElement("div");
+  addRow.style.cssText = "display:flex;gap:6px;align-items:center;flex-wrap:wrap;";
+  var fileInp = document.createElement("input");
+  fileInp.type = "file";
+  fileInp.multiple = true;
+  fileInp.style.cssText = "flex:1;min-width:140px;font-size:12px;font-family:inherit;";
+  fileInp.onchange = function(){
+    _processFiles(Array.from(fileInp.files || []), function(){ fileInp.value = ""; });
   };
   addRow.appendChild(fileInp);
+  // v359.60.76: camera-capture button. Hidden input with
+  // capture="environment" opens the rear camera directly on mobile.
+  // Desktop browsers fall back to a normal file picker; harmless.
+  var camWrap = document.createElement("label");
+  camWrap.style.cssText = "font-size:12px;font-weight:600;padding:6px 12px;border:1px solid #1a5fa8;background:#fff;color:#1a5fa8;border-radius:5px;cursor:pointer;font-family:inherit;flex-shrink:0;display:inline-flex;align-items:center;gap:5px;";
+  camWrap.textContent = "📷 Take photo";
+  camWrap.title = "Snap a photo of a passport, visa, or confirmation — opens the camera on mobile";
+  var camInp = document.createElement("input");
+  camInp.type = "file";
+  camInp.accept = "image/*";
+  camInp.setAttribute("capture", "environment");
+  camInp.style.display = "none";
+  camInp.onchange = function(){
+    _processFiles(Array.from(camInp.files || []), function(){ camInp.value = ""; });
+  };
+  camWrap.appendChild(camInp);
+  addRow.appendChild(camWrap);
   mount.appendChild(addRow);
 }
 
@@ -22430,7 +22452,7 @@ function _hasAvoidDefaults(){
   return !!_defaultAvoidOther();
 }
 
-// v359.6: Settings panel — global trip-defaults editor. Opens from
+// v359.6: Settings panel — user-level "My preferences" editor. Opens from
 // the ⚙ button in any of three headers (home, picker, trip-view).
 // Writes to MaxDB.prefs so changes sync across devices via the
 // existing prefs bridge. Four fields in v1:
@@ -22533,8 +22555,8 @@ function showSettingsPanel(){
     + '<div style="padding:18px 22px 14px;border-bottom:1px solid #eee;display:flex;align-items:center;gap:10px;">'
     +   '<div style="width:30px;height:30px;border-radius:50%;background:#1a5fa8;color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;">&#9881;</div>'
     +   '<div style="flex:1;">'
-    +     '<div style="font-size:15px;font-weight:700;color:#222;">Trip defaults</div>'
-    +     '<div style="font-size:11.5px;color:#888;margin-top:1px;">These shape every trip Max builds. Override them per-trip from the &#9998; Parameters button.</div>'
+    +     '<div style="font-size:15px;font-weight:700;color:#222;">My preferences</div>'
+    +     '<div style="font-size:11.5px;color:#888;margin-top:1px;">About you, applied to every trip. Override per-trip from the &#9998; Profile button.</div>'
     +   '</div>'
     +   '<button id="sp-close-x" type="button" style="background:#fff;border:1px solid #ddd;border-radius:6px;font-size:13px;color:#666;padding:5px 9px;cursor:pointer;font-family:inherit;" title="Close">&times;</button>'
     + '</div>'
