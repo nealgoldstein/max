@@ -21,6 +21,12 @@ export const users = sqliteTable('users', {
   id: text('id').primaryKey(),
   email: text('email').notNull().unique(),
   displayName: text('display_name'),
+  // v359.60.87: marketing email consent. marketingOptIn is the
+  // boolean; marketingOptInAt records when they consented (or revoked,
+  // future use). Null = no decision recorded yet. Populated from the
+  // sign-up form via access_grants → users at /verify time.
+  marketingOptIn: integer('marketing_opt_in', { mode: 'boolean' }).default(false),
+  marketingOptInAt: integer('marketing_opt_in_at', { mode: 'timestamp_ms' }),
   createdAt: integer('created_at', { mode: 'timestamp_ms' })
     .notNull()
     .default(sql`(strftime('%s', 'now') * 1000)`),
@@ -134,6 +140,9 @@ export const magicTokens = sqliteTable('magic_tokens', {
   // account on first sign-in. Optional — older rows / direct-API
   // callers may not provide it.
   name: text('name'),
+  // v359.60.87: marketing consent at sign-in time, propagated to
+  // users.marketingOptIn at /verify.
+  marketingOptIn: integer('marketing_opt_in', { mode: 'boolean' }).default(false),
   expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
   usedAt: integer('used_at', { mode: 'timestamp_ms' }),
   createdAt: integer('created_at', { mode: 'timestamp_ms' })
@@ -201,6 +210,9 @@ export const accessGrants = sqliteTable('access_grants', {
   // populate users.displayName when the request gets approved and
   // the user creates their account.
   name: text('name'),
+  // v359.60.87: marketing opt-in captured at sign-up time. Flows
+  // through to users.marketingOptIn at /verify.
+  marketingOptIn: integer('marketing_opt_in', { mode: 'boolean' }).default(false),
   approveToken: text('approve_token'),  // one-time, cleared on use
   denyToken: text('deny_token'),        // one-time, cleared on use
   requestedAt: integer('requested_at', { mode: 'timestamp_ms' }).notNull(),

@@ -65,12 +65,12 @@ async function _canSignIn(env: Record<string, string | undefined>, email: string
 // trigger it too). Generates the token, writes magic_tokens row,
 // sends email (or returns the direct link when no email service is
 // configured). Returns { sent: boolean, directLink: string | null }.
-async function _issueMagicLink(env: Record<string, string | undefined>, email: string, name?: string | null): Promise<{ sent: boolean; directLink: string | null }> {
+async function _issueMagicLink(env: Record<string, string | undefined>, email: string, name?: string | null, marketingOptIn?: boolean | null): Promise<{ sent: boolean; directLink: string | null; sendError?: string | null }> {
   const token = randomUUID() + '-' + randomUUID();
   const expiresAt = new Date(Date.now() + MAGIC_TTL_MS);
   await db
     .insert(schema.magicTokens)
-    .values({ token, email, name: name || null, expiresAt })
+    .values({ token, email, name: name || null, marketingOptIn: !!marketingOptIn, expiresAt })
     .run();
   const baseUrl = env.API_BASE_URL || 'https://api.travelingwithmax.app';
   const verifyUrl = baseUrl + '/auth/verify?token=' + encodeURIComponent(token);
@@ -84,15 +84,25 @@ async function _issueMagicLink(env: Record<string, string | undefined>, email: s
     '<p style="font-size:11px;color:#aaa;margin-top:24px;">Or copy this URL into your browser:<br><span style="word-break:break-all;">' + verifyUrl + '</span></p>' +
     '</div>';
   const text = 'Sign in to Max\n\nClick this link to sign in (valid 15 minutes, one-time use):\n' + verifyUrl + '\n\nIf you didn\'t request this, ignore the email.';
+  let sendError: string | null = null;
   if (env.RESEND_API_KEY) {
     try {
       await sendEmail(env, { to: email, subject, html, text });
       return { sent: true, directLink: null };
     } catch (e) {
       console.error('[max] magic-link email failed:', e);
+      // v359.60.84: surface the send error to the client so the modal
+      // can show *why* the email didn't go (not just "skipping inbox").
+      // Strip noisy prefixes so the message is readable.
+      sendError = e instanceof Error ? e.message : String(e);
+      sendError = sendError.replace(/^Resend HTTP \d+:\s*/, '');
+      try {
+        const parsed = JSON.parse(sendError);
+        if (parsed && parsed.message) sendError = parsed.message;
+      } catch (_) { /* leave raw */ }
     }
   }
-  return { sent: false, directLink: verifyUrl };
+  return { sent: false, directLink: verifyUrl, sendError };
 }
 
 // Send the admin a notification email about a new sign-in request,
@@ -137,9 +147,12 @@ async function _notifyAdminOfRequest(env: Record<string, string | undefined>, em
 // v359.60.82: name is required on sign-up. Optional in the schema
 // so existing /dev-login callers without a name still work, but the
 // /magic-link handler enforces it for new sign-ins.
+// v359.60.87: marketingOptIn — boolean checkbox from sign-up form.
+// Stored on access_grants pending → propagated to users at /verify.
 const loginSchema = z.object({
   email: z.string().email(),
   name: z.string().trim().min(1).max(100).optional(),
+  marketingOptIn: z.boolean().optional(),
 });
 
 authApi.post('/dev-login', async (c) => {
@@ -178,6 +191,7 @@ authApi.post('/magic-link', async (c) => {
   }
   const email = parsed.data.email.trim().toLowerCase();
   const name = (parsed.data.name || '').trim() || null;
+  const marketingOptIn = !!parsed.data.marketingOptIn;
 
   // v359.60.82: name is required for new sign-ups. If the user is
   // already in the access_grants table (any status) OR in users (via
@@ -199,22 +213,27 @@ authApi.post('/magic-link', async (c) => {
   // 4) Denied / revoked → tell user sign-in unavailable.
   // 5) No record → create pending row, notify admin, tell user.
   if (_isBootstrapAllowed(env, email)) {
-    const result = await _issueMagicLink(env, email, name || (existingUser ? existingUser.displayName : null));
+    const result = await _issueMagicLink(env, email, name || (existingUser ? existingUser.displayName : null), marketingOptIn);
     if (result.directLink) {
-      return c.json({
-        ok: true,
-        message: 'Email service not configured — use the link below directly (it expires in 15 minutes).',
-        directLink: result.directLink,
-      });
+      // v359.60.84: when send failed (sendError set), tell the user
+      // why — otherwise the fallback always read like an unconfigured
+      // build even when the real issue was e.g. domain verification.
+      const message = result.sendError
+        ? 'Email send failed (' + result.sendError + '). Use the link below to sign in directly.'
+        : 'Email service not configured — use the link below directly (it expires in 15 minutes).';
+      return c.json({ ok: true, message, directLink: result.directLink, sendError: result.sendError || null });
     }
     return c.json({ ok: true, message: 'Check your email for a sign-in link.' });
   }
 
   if (existingGrant) {
     if (existingGrant.status === 'approved') {
-      const result = await _issueMagicLink(env, email, name || existingGrant.name);
+      const result = await _issueMagicLink(env, email, name || existingGrant.name, marketingOptIn || existingGrant.marketingOptIn);
       if (result.directLink) {
-        return c.json({ ok: true, message: 'Email service not configured — use the link below directly (it expires in 15 minutes).', directLink: result.directLink });
+        const message = result.sendError
+          ? 'Email send failed (' + result.sendError + '). Use the link below to sign in directly.'
+          : 'Email service not configured — use the link below directly (it expires in 15 minutes).';
+        return c.json({ ok: true, message, directLink: result.directLink, sendError: result.sendError || null });
       }
       return c.json({ ok: true, message: 'Check your email for a sign-in link.' });
     }
@@ -244,6 +263,7 @@ authApi.post('/magic-link', async (c) => {
         email,
         status: 'pending',
         name,
+        marketingOptIn,
         approveToken,
         denyToken,
         requestedAt: new Date(),
@@ -311,9 +331,17 @@ authApi.get('/verify', async (c) => {
     // v359.60.82: populate displayName from the magic-link request's
     // captured name so the user's name shows up on their account
     // record from the very first session.
+    // v359.60.87: also set marketing_opt_in + marketing_opt_in_at
+    // from the magic_tokens row.
     await db
       .insert(schema.users)
-      .values({ id, email, displayName: magic.name || null })
+      .values({
+        id,
+        email,
+        displayName: magic.name || null,
+        marketingOptIn: !!magic.marketingOptIn,
+        marketingOptInAt: magic.marketingOptIn ? new Date() : null,
+      })
       .run();
     user = await db
       .select()
@@ -323,15 +351,22 @@ authApi.get('/verify', async (c) => {
     if (!user) {
       return c.redirect(clientBase + '/?signin=error&reason=user_create_failed');
     }
-  } else if (magic.name && !user.displayName) {
-    // Backfill displayName for users who signed up before name capture
-    // existed, if they provide one on a later sign-in.
-    await db
-      .update(schema.users)
-      .set({ displayName: magic.name })
-      .where(eq(schema.users.id, user.id))
-      .run();
-    user = { ...user, displayName: magic.name };
+  } else {
+    // Returning user — backfill displayName if missing, and update
+    // marketing opt-in to whatever they just submitted (let them
+    // change their mind via the sign-in form).
+    const patch: Record<string, unknown> = {};
+    if (magic.name && !user.displayName) patch.displayName = magic.name;
+    if (magic.marketingOptIn !== null && magic.marketingOptIn !== undefined) {
+      if (!!magic.marketingOptIn !== !!user.marketingOptIn) {
+        patch.marketingOptIn = !!magic.marketingOptIn;
+        patch.marketingOptInAt = new Date();
+      }
+    }
+    if (Object.keys(patch).length) {
+      await db.update(schema.users).set(patch).where(eq(schema.users.id, user.id)).run();
+      user = { ...user, ...patch } as typeof user;
+    }
   }
 
   // Mint session
@@ -401,10 +436,10 @@ adminApi.get('/approve', async (c) => {
     })
     .where(eq(schema.accessGrants.email, email))
     .run();
-  // Auto-send the user their sign-in link; pass through the name
-  // captured on the original request so /verify can use it to populate
-  // the new user's displayName.
-  const result = await _issueMagicLink(env, email, grant.name);
+  // Auto-send the user their sign-in link; pass through the name and
+  // marketing opt-in captured on the original request so /verify can
+  // use them to populate the new user's row.
+  const result = await _issueMagicLink(env, email, grant.name, grant.marketingOptIn);
   const detail = result.sent
     ? '<p>A sign-in link has been emailed to <strong>' + email + '</strong>.</p>'
     : '<p>Approved <strong>' + email + '</strong>, but no email was sent because the email service isn\'t configured. Share this link with them manually:</p>' +
@@ -493,6 +528,69 @@ adminApi.get('/grants', async (c) => {
   if (denied) return denied;
   const rows = await db.select().from(schema.accessGrants).all();
   return c.json({ ok: true, grants: rows });
+});
+
+// v359.60.85: GET /admin/users?adminToken=... — every user who has
+// completed sign-in (made it past /auth/verify and got a session).
+// Distinct from /admin/grants — that's the approval pipeline; this is
+// confirmed-signed-in accounts. Returns id, email, displayName,
+// createdAt, plus the access_grant status if any.
+// v359.60.86: ?format=csv returns text/csv for direct import into
+// Resend audiences, Mailchimp, etc. Default is still JSON.
+adminApi.get('/users', async (c) => {
+  const env = (c.env as Record<string, string | undefined>) || {};
+  const denied = _requireAdmin(env, c);
+  if (denied) return denied;
+  const users = await db.select().from(schema.users).all();
+  // Pull grants once and index by lowercased email for join.
+  const grants = await db.select().from(schema.accessGrants).all();
+  const grantByEmail: Record<string, typeof grants[number]> = {};
+  grants.forEach((g) => {
+    if (g && g.email) grantByEmail[g.email.toLowerCase()] = g;
+  });
+  let rows = users.map((u) => {
+    const g = grantByEmail[(u.email || '').toLowerCase()] || null;
+    return {
+      id: u.id,
+      email: u.email,
+      name: u.displayName || '',
+      signedUpAt: u.createdAt ? new Date(u.createdAt).toISOString() : '',
+      grantStatus: g ? g.status : '(bootstrap or none)',
+      marketingOptIn: !!u.marketingOptIn,
+      marketingOptInAt: u.marketingOptInAt ? new Date(u.marketingOptInAt).toISOString() : '',
+    };
+  });
+
+  // v359.60.87: ?optedInOnly=true filters the result to users who
+  // consented to marketing. Use this when generating your newsletter
+  // list to stay compliant.
+  if (c.req.query('optedInOnly') === 'true') {
+    rows = rows.filter((r) => r.marketingOptIn);
+  }
+
+  const format = (c.req.query('format') || 'json').toLowerCase();
+  if (format === 'csv') {
+    // RFC 4180-style CSV: wrap fields in quotes when they contain
+    // commas, quotes, or newlines; escape internal quotes by doubling.
+    function _csvCell(v: string | null | undefined | boolean): string {
+      const s = String(v == null ? '' : v);
+      if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+      return s;
+    }
+    const header = 'email,name,signed_up_at,status,marketing_opt_in,marketing_opt_in_at';
+    const body = rows
+      .map((r) => [r.email, r.name, r.signedUpAt, r.grantStatus, r.marketingOptIn ? 'yes' : 'no', r.marketingOptInAt].map(_csvCell).join(','))
+      .join('\n');
+    const csv = header + '\n' + body + '\n';
+    return new Response(csv, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': 'attachment; filename="max-users.csv"',
+      },
+    });
+  }
+  return c.json({ ok: true, count: rows.length, users: rows });
 });
 
 export { authApi, adminApi };

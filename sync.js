@@ -149,7 +149,9 @@
   // new sign-ups; the server returns 400 "Name is required for new
   // sign-ups" when missing for a never-seen-before email. Returning
   // users skip the requirement — they already have a name on file.
-  async function requestMagicLink(email, name) {
+  // v359.60.87: marketingOptIn — boolean from the sign-up checkbox.
+  // Defaults to false (opt-out unless user actively checks the box).
+  async function requestMagicLink(email, name, marketingOptIn) {
     if (!email || !email.trim()) throw new Error('Email required');
     return request('/auth/magic-link', {
       method: 'POST',
@@ -157,6 +159,7 @@
       body: {
         email: email.trim(),
         name: name ? name.trim() : undefined,
+        marketingOptIn: !!marketingOptIn,
       },
     });
   }
@@ -805,7 +808,7 @@
       '<div style="font-size:12px;color:#555;line-height:1.55;margin-bottom:14px;">' +
       (isSignedIn()
         ? '<strong>Signed in as ' + (getEmail() || 'user') + '</strong>.'
-        : 'Sign in to share trips between devices. Enter your name and email — we\'ll generate a one-time sign-in link. No password required.') +
+        : 'Sign in to share trips between devices. Enter your name and email — we\'ll send a one-time sign-in link. No password required. <span style="color:#666;">Sign-in lasts 30 days; you\'ll get a fresh link after that.</span>') +
       '</div>' +
       // v359.60.82: Name field shown only for signed-out state. New
       // sign-ups need it; returning users (server already has them)
@@ -818,6 +821,17 @@
       '<input id="max-sync-email" type="email" placeholder="you@example.com" value="' +
       _esc(getEmail() || '') +
       '" autocomplete="email" style="width:100%;font-size:12px;padding:7px 9px;border:1px solid #ddd;border-radius:5px;box-sizing:border-box;margin-bottom:14px;" />' +
+      // v359.60.87: marketing opt-in checkbox shown only for signed-out
+      // state. Unchecked by default — affirmative opt-in only.
+      // v359.60.88: sharper value prop — concrete frequency, specific
+      // content type. Earns higher voluntary opt-in than the generic
+      // "occasional emails" pitch.
+      (isSignedIn() ? '' :
+        '<label style="display:flex;align-items:flex-start;gap:8px;font-size:11px;font-weight:400;color:#444;margin-bottom:14px;cursor:pointer;text-transform:none;letter-spacing:0;line-height:1.45;">' +
+          '<input id="max-sync-marketing" type="checkbox" style="margin:2px 0 0;width:auto;flex-shrink:0;" />' +
+          '<span><strong style="color:#222;">Send me travel-planning tips and Max updates.</strong> About one email a month — destination ideas, new features, and shortcuts to help you plan better trips. Unsubscribe any time, one click.</span>' +
+        '</label>'
+      ) +
       '<label style="display:block;font-size:11px;color:#666;font-weight:600;margin-bottom:6px;">Server URL</label>' +
       '<input id="max-sync-url" type="text" value="' +
       _esc(getServerUrl()) +
@@ -869,6 +883,10 @@
         // v359.60.82: name input only renders in the signed-out state.
         var nameInp = document.getElementById('max-sync-name');
         var name = nameInp ? nameInp.value.trim() : '';
+        // v359.60.87: marketing opt-in checkbox only renders in the
+        // signed-out state.
+        var marketingInp = document.getElementById('max-sync-marketing');
+        var marketingOptIn = marketingInp ? !!marketingInp.checked : false;
         if (!email) {
           _msg('Enter an email', '#c44');
           return;
@@ -876,7 +894,7 @@
         setServerUrl(url);
         _msg('Sending sign-in link…', '#888');
         try {
-          var resp = await requestMagicLink(email, name);
+          var resp = await requestMagicLink(email, name, marketingOptIn);
           // v359.60.81: handle approval-workflow states.
           // status: "pending" — request submitted to admin, no link sent yet.
           // status: "denied" / "revoked" — sign-in unavailable.
@@ -890,9 +908,16 @@
             // configured) but returned the link directly. Render
             // as a big tappable button instead of raw URL text so
             // it looks like an action, not a typo.
+            // v359.60.84: when server returns sendError, surface it —
+            // otherwise the user can't tell whether the fallback is
+            // because email isn't configured, or because Resend
+            // rejected the send (e.g. domain not verified).
             if (msg) {
+              var fallbackBlurb = resp.sendError
+                ? 'Email send failed: <strong>' + _esc(resp.sendError) + '</strong>. Use the link below to sign in directly.'
+                : 'Click below to sign in. (Email delivery is not configured for this build, so we\'re skipping the inbox step.)';
               msg.innerHTML =
-                '<div style="color:#555;margin-bottom:10px;font-size:12px;line-height:1.55;">Click below to sign in. (Email delivery is not configured for this build, so we\'re skipping the inbox step.)</div>' +
+                '<div style="color:' + (resp.sendError ? '#c44' : '#555') + ';margin-bottom:10px;font-size:12px;line-height:1.55;">' + fallbackBlurb + '</div>' +
                 '<a href="' + _esc(resp.directLink) + '" style="display:block;background:#1a5fa8;color:#fff;padding:11px 14px;border-radius:6px;text-decoration:none;font-weight:600;font-size:13px;text-align:center;">Sign in →</a>';
             }
           } else {
