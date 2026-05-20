@@ -3862,6 +3862,67 @@ function _runGeoQueue(){
 }
 function _enqueueGeo(task){ _geoQueue.push(task); _runGeoQueue(); }
 
+// v359.60.79: detect Nominatim result types that are "wilderness"
+// (centroids of natural features or regional boundaries) rather than
+// settlements. When the user names a destination after such a feature
+// (Mývatn, Vatnajökull, Snæfellsnes, Yellowstone), the centroid lands
+// in the middle of water/ice/forest — useless as a destination pin.
+// We snap to the nearest settlement instead via _refineCoordsToSettlement.
+function _isWildernessNomType(cls, typ) {
+  if (cls === "natural") return true; // lake, peak, bay, forest, glacier, island…
+  if (cls === "boundary" && (typ === "national_park" || typ === "protected_area" || typ === "nature_reserve")) return true;
+  if (cls === "place" && ["region","state","county","province","locality","island","islet","archipelago"].indexOf(typ) >= 0) return true;
+  return false;
+}
+
+function _isSettlementNomType(cls, typ) {
+  if (cls !== "place" && cls !== "boundary") return false;
+  return ["city","town","village","hamlet","suburb","municipality","borough","quarter","neighbourhood"].indexOf(typ) >= 0;
+}
+
+function _sleepMs(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
+
+// Given a feature centroid + its country, find the nearest named
+// settlement (village/town/city/hamlet) and return its coordinates.
+// Two Nominatim calls in the worst case (reverse + forward), each
+// throttled to 1.1s to respect the 1 req/sec policy. Returns the
+// original coords if no settlement can be identified.
+async function _refineCoordsToSettlement(originalLat, originalLon, countryHint) {
+  try {
+    await _sleepMs(1100);
+    var revUrl = 'https://nominatim.openstreetmap.org/reverse?format=json&zoom=14&addressdetails=1'
+               + '&lat=' + originalLat + '&lon=' + originalLon;
+    var rev = await fetch(revUrl, { headers: {'Accept-Language':'en'} });
+    var rd = await rev.json();
+    if (!rd) return null;
+    var addr = rd.address || {};
+    // If the reverse point itself is a settlement, use its coords.
+    if (rd.lat && rd.lon && _isSettlementNomType(rd.class, rd.type)) {
+      var slat = parseFloat(rd.lat), slon = parseFloat(rd.lon);
+      if (isFinite(slat) && isFinite(slon)) return [slat, slon];
+    }
+    // Otherwise pull the most-specific settlement field from the
+    // address object and forward-geocode that name to get its centroid.
+    var settlement = addr.city || addr.town || addr.village || addr.hamlet || addr.suburb;
+    if (!settlement) return null;
+    await _sleepMs(1100);
+    var country = addr.country || countryHint || "";
+    var iso = _isoCodeForCountry(country);
+    var fwUrl = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q='
+              + encodeURIComponent(settlement + (country ? ", " + country : ""))
+              + (iso ? '&countrycodes=' + iso : '');
+    var fr = await fetch(fwUrl, { headers: {'Accept-Language':'en'} });
+    var fres = await fr.json();
+    if (fres && fres.length) {
+      var flat = parseFloat(fres[0].lat), flon = parseFloat(fres[0].lon);
+      if (isFinite(flat) && isFinite(flon)) return [flat, flon];
+    }
+    return null;
+  } catch(e) {
+    return null;
+  }
+}
+
 // Country name → ISO 3166-1 alpha-2 code. Used to feed Nominatim's
 // `countrycodes` parameter, which is a STRICT filter — without it,
 // "Chillon, Switzerland" can still return Chillón in Spain because
@@ -3914,8 +3975,23 @@ function ensureCoarseGeocode(place, onResolve, country){
       var r = await fetch(url, { headers: {'Accept-Language':'en'} });
       var res = await r.json();
       if (res && res.length) {
-        var lat = parseFloat(res[0].lat), lon = parseFloat(res[0].lon);
+        var hit = res[0];
+        var lat = parseFloat(hit.lat), lon = parseFloat(hit.lon);
         if (isFinite(lat) && isFinite(lon)) {
+          // v359.60.79: if Nominatim returned a natural-feature
+          // centroid (lake, glacier, national park, etc.) instead of
+          // a settlement, snap to the nearest named town/village so
+          // the destination pin lands somewhere lodgeable. Mývatn
+          // lake centroid → Reykjahlíð, Vatnajökull → Höfn, etc.
+          if (_isWildernessNomType(hit.class, hit.type)) {
+            var refined = await _refineCoordsToSettlement(lat, lon, countryHint);
+            if (refined && Array.isArray(refined)) {
+              console.log("[Max] refined " + place + " coord from " + lat.toFixed(4) + "," + lon.toFixed(4)
+                + " (" + (hit.class||"") + "/" + (hit.type||"") + ") to nearest settlement "
+                + refined[0].toFixed(4) + "," + refined[1].toFixed(4));
+              lat = refined[0]; lon = refined[1];
+            }
+          }
           _coarseGeocode[key] = [lat, lon];
           _persistCoarseGeocode();
           if (onResolve) onResolve(_coarseGeocode[key]);
@@ -3928,8 +4004,15 @@ function ensureCoarseGeocode(place, onResolve, country){
           + encodeURIComponent(q), { headers: {'Accept-Language':'en'} });
         var res2 = await r2.json();
         if (res2 && res2.length) {
-          var lat2 = parseFloat(res2[0].lat), lon2 = parseFloat(res2[0].lon);
+          var hit2 = res2[0];
+          var lat2 = parseFloat(hit2.lat), lon2 = parseFloat(hit2.lon);
           if (isFinite(lat2) && isFinite(lon2)) {
+            if (_isWildernessNomType(hit2.class, hit2.type)) {
+              var refined2 = await _refineCoordsToSettlement(lat2, lon2, countryHint);
+              if (refined2 && Array.isArray(refined2)) {
+                lat2 = refined2[0]; lon2 = refined2[1];
+              }
+            }
             _coarseGeocode[key] = [lat2, lon2];
             _persistCoarseGeocode();
             if (onResolve) onResolve(_coarseGeocode[key]);
@@ -6739,6 +6822,58 @@ function enterApp(){
     });
     trip._coordRefreshed = true;
     if (_coordsFixed > 0) console.log("[Max] refreshed " + _coordsFixed + " destination coordinate(s) from built-in geocode table");
+  }
+
+  // v359.60.79: per-destination snap-to-settlement pass. For each
+  // destination not already refined (no dest._coordsRefined flag),
+  // reverse-geocode at its current coords; if Nominatim says we're
+  // at a natural feature centroid (lake, peak, park, etc.), snap to
+  // the nearest village/town/city found in the address. Runs in the
+  // background; updates dest.lat/lng + autoSaves as refinements come
+  // in. Throttled to respect Nominatim's 1 req/sec policy.
+  if (trip && Array.isArray(trip.destinations)) {
+    trip.destinations.forEach(function(d){
+      if (!d || d._coordsRefined) return;
+      if (typeof d.lat !== "number" || typeof d.lng !== "number") return;
+      // Skip destinations whose coords match a built-in entry (we
+      // already trust those).
+      var key = String(d.place||"").toLowerCase().trim();
+      var builtin = (_coarseGeocode && _coarseGeocode[key]) || null;
+      if (builtin && Array.isArray(builtin) && typeof _fqHaversineKm === "function") {
+        var bkm = _fqHaversineKm(d.lat, d.lng, builtin[0], builtin[1]);
+        if (bkm < 2) { d._coordsRefined = true; return; }
+      }
+      _enqueueGeo(async function(){
+        try {
+          await _sleepMs(0);
+          var revUrl = 'https://nominatim.openstreetmap.org/reverse?format=json&zoom=14&addressdetails=1'
+                     + '&lat=' + d.lat + '&lon=' + d.lng;
+          var rev = await fetch(revUrl, { headers: {'Accept-Language':'en'} });
+          var rd = await rev.json();
+          if (!rd) { d._coordsRefined = true; return; }
+          // Already at a settlement? Mark refined and exit.
+          if (_isSettlementNomType(rd.class, rd.type)) { d._coordsRefined = true; return; }
+          // Wilderness — try to snap to the nearest settlement.
+          if (_isWildernessNomType(rd.class, rd.type)) {
+            var addr = rd.address || {};
+            var refined = await _refineCoordsToSettlement(d.lat, d.lng, addr.country || "");
+            if (refined && Array.isArray(refined) && typeof _fqHaversineKm === "function") {
+              var rkm = _fqHaversineKm(d.lat, d.lng, refined[0], refined[1]);
+              if (rkm > 0.5) {
+                console.log("[Max] snapped " + d.place + " from (" + d.lat.toFixed(4) + "," + d.lng.toFixed(4)
+                  + ") to nearest settlement (" + refined[0].toFixed(4) + "," + refined[1].toFixed(4) + ")");
+                d.lat = refined[0]; d.lng = refined[1];
+                if (typeof autoSave === "function") autoSave();
+                if (typeof _emitTripMutation === "function") _emitTripMutation();
+              }
+            }
+          }
+          d._coordsRefined = true;
+        } catch(e) {
+          d._coordsRefined = true;
+        }
+      });
+    });
   }
 
   // v359.60.66: one-time notes-surface merge. We used to have two
