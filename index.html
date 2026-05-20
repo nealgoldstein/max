@@ -3804,6 +3804,11 @@ var _builtinGeo = {
   "thingvellir":[64.2558,-21.1296],"geysir":[64.3104,-20.3022],
   "gullfoss":[64.3275,-20.1200],"jökulsárlón":[64.0784,-16.2306],
   "jokulsarlon":[64.0784,-16.2306],"skaftafell":[64.0167,-16.9667],
+  // v359.60.78: Mývatn is a lake; Nominatim returns its centroid
+  // which lands the destination pin in the middle of the water.
+  // Override to Reykjahlíð, the lodging village on the NE shore.
+  "mývatn":[65.6411,-16.9112],"myvatn":[65.6411,-16.9112],
+  "reykjahlíð":[65.6411,-16.9112],"reykjahlid":[65.6411,-16.9112],
   // Châteaux + landmarks
   "château de chillon":[46.4145,6.9275],"chateau de chillon":[46.4145,6.9275],
   "chillon":[46.4145,6.9275]
@@ -6708,6 +6713,34 @@ function enterApp(){
   // on the destination where pickup happens. The retired logistics screen used to
   // handle this; Tracker items are the new home.
   migrateCarRentalsIntoTracker();
+  // v359.60.78: one-time coord refresh for destinations whose place
+  // matches a built-in geocode entry but whose current coords are
+  // significantly off (>5km). Fixes cases where Nominatim returned a
+  // lake/feature centroid (Mývatn → middle of the water) instead of
+  // the lodging town. The 5 km threshold preserves any pins the user
+  // intentionally moved a short distance — only blatantly-wrong coords
+  // get refreshed. Runs once per trip, guarded by trip._coordRefreshed.
+  if (trip && Array.isArray(trip.destinations) && !trip._coordRefreshed) {
+    var _coordsFixed = 0;
+    trip.destinations.forEach(function(d){
+      if (!d || !d.place) return;
+      var key = String(d.place).toLowerCase().trim();
+      var coords = (_coarseGeocode && _coarseGeocode[key]) || null;
+      if (!coords || !Array.isArray(coords) || coords.length !== 2) return;
+      if (typeof d.lat !== "number" || typeof d.lng !== "number") {
+        d.lat = coords[0]; d.lng = coords[1]; _coordsFixed++; return;
+      }
+      if (typeof _fqHaversineKm === "function") {
+        var km = _fqHaversineKm(d.lat, d.lng, coords[0], coords[1]);
+        if (km > 5) {
+          d.lat = coords[0]; d.lng = coords[1]; _coordsFixed++;
+        }
+      }
+    });
+    trip._coordRefreshed = true;
+    if (_coordsFixed > 0) console.log("[Max] refreshed " + _coordsFixed + " destination coordinate(s) from built-in geocode table");
+  }
+
   // v359.60.66: one-time notes-surface merge. We used to have two
   // notes surfaces at each level (Trip notes / Discovery notes at the
   // trip level; Notes from the road / Research at the destination
