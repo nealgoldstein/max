@@ -122,7 +122,94 @@
     // Safari has no install API but does support "Add to Dock"
     // since macOS Sonoma — instructions cover that case too.
     _showInstallPill();
+    // v360.0.5: bigger first-visit install banner on mobile. The
+    // header pill is too easy to miss on a phone screen. On second
+    // visit on a mobile device (when the user has clearly used the
+    // app), surface a prominent banner across the bottom prompting
+    // installation. Dismissible — once dismissed, never shown again.
+    _maybeShowMobileInstallBanner();
   });
+
+  // v360.0.5: first-visit install banner. Shown only:
+  //   - on mobile (touch UA)
+  //   - on the SECOND+ visit (proves engagement)
+  //   - when not standalone
+  //   - when not previously dismissed
+  // Dismissal sticks via localStorage so we don't nag.
+  function _maybeShowMobileInstallBanner() {
+    try {
+      if (_isPwaStandalone()) return;
+      if (localStorage.getItem('max-pwa-installed') === '1') return;
+      if (localStorage.getItem('max-pwa-banner-dismissed') === '1') return;
+      var ua = navigator.userAgent || '';
+      var isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+      if (!isMobile) return;
+      // Visit counter — increment on each load. Show banner on visit 2+.
+      var visits = 0;
+      try { visits = parseInt(localStorage.getItem('max-visit-count') || '0', 10) || 0; } catch (_) {}
+      visits += 1;
+      try { localStorage.setItem('max-visit-count', String(visits)); } catch (_) {}
+      if (visits < 2) return;
+    } catch (_) { return; }
+
+    var banner = document.createElement('div');
+    banner.id = 'pwa-mobile-banner';
+    banner.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:11800;background:#1a5fa8;color:#fff;border-radius:10px;padding:14px 16px;box-shadow:0 4px 16px rgba(0,0,0,.25);font:13px/1.45 -apple-system,sans-serif;display:flex;gap:12px;align-items:center;';
+    banner.innerHTML =
+      '<div style="font-size:22px;flex-shrink:0;">📱</div>' +
+      '<div style="flex:1;">' +
+        '<div style="font-weight:700;margin-bottom:2px;">Install Max as an app</div>' +
+        '<div style="font-size:11.5px;opacity:.92;">Home-screen access. Required on iPhone to receive trip reminders.</div>' +
+      '</div>' +
+      '<button id="pwa-banner-install" style="background:#fff;color:#1a5fa8;border:none;border-radius:6px;padding:7px 12px;font-weight:700;font-size:12px;cursor:pointer;font-family:inherit;flex-shrink:0;">Install</button>' +
+      '<button id="pwa-banner-close" aria-label="Dismiss" style="background:transparent;color:#fff;border:none;padding:6px 4px 6px 8px;cursor:pointer;font-size:18px;line-height:1;opacity:.8;flex-shrink:0;">✕</button>';
+    document.body.appendChild(banner);
+    document.getElementById('pwa-banner-install').onclick = function () {
+      try { window.showInstallPrompt(); } catch (_) {}
+    };
+    document.getElementById('pwa-banner-close').onclick = function () {
+      try { localStorage.setItem('max-pwa-banner-dismissed', '1'); } catch (_) {}
+      banner.remove();
+    };
+  }
+
+  // v360.0.5: offline indicator. When the browser goes offline, show
+  // a non-blocking banner so users understand they're viewing cached
+  // content (and writes won't sync until they're back online). When
+  // they come back online, swap to a "✓ Back online" toast that
+  // auto-hides after a few seconds.
+  function _showOfflineBanner() {
+    if (document.getElementById('max-offline-banner')) return;
+    var b = document.createElement('div');
+    b.id = 'max-offline-banner';
+    b.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:11700;background:#7a4040;color:#fff;text-align:center;padding:7px 12px;font:12px/1.4 -apple-system,sans-serif;';
+    b.innerHTML = '⚠ <strong>You\'re offline.</strong> Viewing cached version — changes will sync when you reconnect.';
+    document.body.appendChild(b);
+  }
+  function _hideOfflineBanner() {
+    var b = document.getElementById('max-offline-banner');
+    if (b) {
+      // Flash a brief "back online" before removing.
+      b.style.background = '#2a7a4e';
+      b.innerHTML = '✓ <strong>Back online.</strong> Syncing your changes…';
+      setTimeout(function () { if (b.parentNode) b.parentNode.removeChild(b); }, 2500);
+    }
+    // Actively push any pending changes + refetch. Without this,
+    // changes made offline would only sync the next time the user
+    // touched the app (debounced scheduleSave on next edit). Better
+    // to flush as soon as we're back online so the banner's promise
+    // ("Syncing your changes…") is actually true.
+    if (typeof MaxSync !== 'undefined') {
+      if (MaxSync.scheduleSave) try { MaxSync.scheduleSave(); } catch (_) {}
+      if (MaxSync.pullAll)     try { MaxSync.pullAll(); }     catch (_) {}
+    }
+  }
+  window.addEventListener('offline', _showOfflineBanner);
+  window.addEventListener('online', _hideOfflineBanner);
+  // On boot — if already offline, show immediately.
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    setTimeout(_showOfflineBanner, 0);
+  }
   // Handler used by the pill's onclick. Routes to the native prompt
   // on Android, or to an instructions overlay on iOS.
   window.showInstallPrompt = function () {
@@ -277,31 +364,31 @@
 <!-- v359.45 Phase 1: schema migrations. Loaded BEFORE db.js so that
      db.js's tripRead/tripReadRaw can call MaxMigration.migrateTripShape
      synchronously on legacy envelopes. -->
-<script src="migration.js?v=DEV"></script>
+<script src="migration.js?v=1779458597"></script>
 <!-- Round HA: Phase 0 of the engine/UI split. db.js exposes window.MaxDB
      as the persistence seam. No callsites migrated yet; this just
      defines the API and verifies it loads. -->
-<script src="db.js?v=DEV"></script>
+<script src="db.js?v=1779458597"></script>
 <!-- Round HB: Phase 1 of the engine/UI split. engine-trip.js owns
      the trip engine's PURE helpers (haversine, pair-key, fastest-
      practical, hour parse/format, place-name canonicalization).
      Both window.MaxEngineTrip.<name> and window.<name> exposed for
      migration; the inline script still calls by original names. -->
-<script src="engine-trip.js?v=DEV"></script>
+<script src="engine-trip.js?v=1779458597"></script>
 <!-- Round HH: Phase 3 of the engine/UI split. engine-picker.js owns
      the picker engine's PURE helpers (findMatchingRequired + brief
      parsers). Same dual-surface pattern as engine-trip.js. -->
-<script src="engine-picker.js?v=DEV"></script>
+<script src="engine-picker.js?v=1779458597"></script>
 <!-- Round HW: Phase 4 of the engine/UI split. picker-ui.js owns the
      picker's DOM rendering. Today it holds one helper
      (_renderPickerCategoryNav); future rounds move more in. -->
-<script src="picker-ui.js?v=DEV"></script>
+<script src="picker-ui.js?v=1779458597"></script>
 <!-- Round MA.2/MA.4: trip-view rendering shared with mobile.
      Holds renderItinItem (full mode = the lifted mkItinItem body)
      + renderItinItemCompact (mobile path) + renderDay. The inline
      mkItinItem and mkDay below are 5-line delegators into here. -->
-<script src="trip-ui.js?v=DEV"></script>
-<script src="sync.js?v=DEV"></script>
+<script src="trip-ui.js?v=1779458597"></script>
+<script src="sync.js?v=1779458597"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#e8e8e8;color:#111;font-size:14px;line-height:1.6;}
@@ -659,7 +746,9 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 #deadline-alert{display:none;background:#fff8f0;border-bottom:2px solid #f0dcc0;padding:8px 14px;font-size:11px;color:#b05820;cursor:pointer;flex-shrink:0;}
 #deadline-alert strong{color:#b05820;}
 /* Action log */
-#action-log{position:fixed;bottom:20px;right:20px;z-index:2000;background:#fff;border:1px solid #ddd;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.18);width:320px;max-height:400px;display:none;flex-direction:column;}
+/* v360.0.6: width 320 + right 20 = 340px, clips on viewports <360px.
+   max-width:calc(100vw - 24px) keeps it fully visible on any phone. */
+#action-log{position:fixed;bottom:20px;right:20px;z-index:2000;background:#fff;border:1px solid #ddd;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.18);width:320px;max-width:calc(100vw - 24px);max-height:400px;display:none;flex-direction:column;}
 .action-log-hdr{display:flex;align-items:center;justify-content:space-between;padding:10px 14px 8px;border-bottom:1px solid #f0f0f0;flex-shrink:0;}
 .action-log-title{font-size:12px;font-weight:600;color:#111;}
 .action-log-close{font-size:14px;color:#bbb;background:none;border:none;cursor:pointer;padding:0 4px;font-family:inherit;line-height:1;}
@@ -721,7 +810,11 @@ input[type="date"]{width:100%;font-size:11px;padding:5px 7px;border:1px solid #d
 .tk-action-name{font-size:11px;font-weight:600;color:#111;}
 .tk-action-detail{font-size:10px;color:#888;margin-top:1px;}
 .tk-action-conf{font-size:10px;color:#aaa;margin-top:1px;}
-.dm-tab{flex:1;font-size:9.5px;font-weight:500;padding:7px 3px 5px;border:none;border-top:2px solid transparent;background:transparent;color:#aaa;cursor:pointer;font-family:inherit;white-space:nowrap;min-width:40px;text-overflow:ellipsis;overflow:hidden;position:relative;}
+/* v360.0.6: destination tabs bumped up for mobile. Previous size
+   (9.5px font, 7×3 padding) gave a ~30×30px tap target — well below
+   Apple's 44×44 minimum and under iOS's 12px legibility threshold.
+   Now: 11.5px font with 11×4 padding → ~44×38 tap area, 12px+ text. */
+.dm-tab{flex:1;font-size:11.5px;font-weight:500;padding:11px 4px 9px;border:none;border-top:2px solid transparent;background:transparent;color:#aaa;cursor:pointer;font-family:inherit;white-space:nowrap;min-width:44px;min-height:44px;text-overflow:ellipsis;overflow:hidden;position:relative;}
 .dm-tab.on{color:#111;border-top-color:#111;}
 /* Round FN.3: pending-action badge on the Tracking tab. The JS to
    render it has existed since the tracker was built, but the CSS for
@@ -1108,6 +1201,11 @@ body[data-overlay="1"] .mob-map-fullscreen{display:none !important;}
    almost certainly a phone, not a narrow desktop window. */
 @media(max-width:520px){
   body{font-size:14px;}
+  /* v360.0.6: on phones, the .lp left panel was stuck at width:420px
+     which overflows viewports < 420px (most phones in portrait).
+     Force full-width and let the map sit underneath / hide via the
+     existing #main-map mobile handling. */
+  .lp{width:100% !important;max-width:100%;border-right:none;}
   /* v353.2: trip-view header at narrow widths. Was a 6-button row
      fighting the trip-name wrap for horizontal space — at 390px the
      scaffold chip got pushed into a 30px column and wrapped
@@ -4352,22 +4450,18 @@ function localSave(){
   if (typeof _readOnlyShare !== "undefined" && _readOnlyShare) return;
   try{
     updateIndexEntry();
-    // localSave is intentionally a raw localStorage.setItem rather
-    // than a route through MaxDB.trip.writeRaw. writeRaw fires the
-    // `tripWritten` event, which engine-trip.js's subscriber adopts
-    // by JSON-parsing the body and re-assigning global.trip — that
-    // creates fresh dest/day/item object refs every save, breaking
-    // any code holding references to the old refs (DOM closures,
-    // hero-map markers, popup links). Cross-device pulls and
-    // picker→trip handoffs DO need to go through writeRaw because
-    // they're the path by which a NEW trip body arrives; in that
-    // case object-identity replacement is the correct behavior.
-    // Local-edit autoSave already updated global.trip in memory and
-    // emits tripChange via _emitTripMutation, so the UI is already
-    // re-rendering — firing tripWritten on top would just churn.
-    // Cross-tab sync within the same browser doesn't need it either,
-    // because localStorage.setItem fires the storage event for other
-    // tabs regardless of writeRaw vs. setItem.
+    // v359.60.97: route through MaxDB.trip.writeRaw (silent mode) so
+    // edits persist even when localStorage is full. Trips overflow to
+    // IndexedDB automatically inside writeRaw — what used to be a
+    // silent "QuotaExceededError, edit not persisted" warning is now
+    // "trip wrote to IDB instead." The silent flag tells writeRaw
+    // NOT to emit tripWritten; that event would cause engine-trip's
+    // subscriber to re-parse the body and re-assign global.trip,
+    // breaking any code holding refs into the live trip object (DOM
+    // closures, hero-map markers, popup links). Local edits already
+    // mutated global.trip in place and fired tripChange via
+    // _emitTripMutation, so the UI is already up-to-date and the
+    // event would just churn refs.
     //
     // v353.1: stamp the serialized envelope with __saved__ so
     // sync.js's pullAll() correctly identifies freshly-edited local
@@ -4386,26 +4480,54 @@ function localSave(){
       envelopeJson = JSON.stringify(env);
     } catch (_) { /* if parse fails, fall back to unstamped — better
                     than throwing out of localSave */ }
-    localStorage.setItem("max-trip-"+_currentTripId, envelopeJson);
-  }catch(e){
-    // Round CL.3: cache moved to IndexedDB so it no longer fights for
-    // localStorage space. If we still hit QuotaExceededError it's because
-    // accumulated trip data has filled the bucket — log clearly so the
-    // user knows to delete old trips.
-    if (e && (e.name === "QuotaExceededError" || (e.code && e.code === 22))) {
-      console.warn("[Max] localStorage full from accumulated trip data. Delete unused trips from the home screen, or clear localStorage trip-* keys via the console.");
-      return;
+    var wrote = false;
+    if (typeof MaxDB !== "undefined" && MaxDB.trip && typeof MaxDB.trip.writeRaw === "function") {
+      wrote = MaxDB.trip.writeRaw(_currentTripId, envelopeJson, { silent: true });
     }
-    console.warn("localStorage save failed:",e);
+    if (!wrote) {
+      // MaxDB not loaded yet, or writeRaw returned false. Best-effort
+      // fallback to direct localStorage so we don't drop the edit
+      // entirely. If quota's full at this point, MaxDB is the only
+      // thing that would have rescued us — log so it's visible.
+      try {
+        localStorage.setItem("max-trip-"+_currentTripId, envelopeJson);
+      } catch (e) {
+        if (e && (e.name === "QuotaExceededError" || (e.code && e.code === 22))) {
+          console.warn("[Max] localStorage full and MaxDB unavailable — edit not persisted on this device. Reload to retry with MaxDB.");
+        } else {
+          throw e;
+        }
+      }
+    }
+  }catch(e){
+    console.warn("localSave failed:",e);
   }
 }
 
 function localLoad(tripId){
   if(_inIframe)return false;
-  try{
-    var saved=localStorage.getItem("max-trip-"+tripId);
-    if(saved){restoreTrip(saved);return true;}
-  }catch(e){console.warn("localStorage load failed:",e);}
+  // v359.60.93: route through MaxDB.trip.readRaw so we pick up trips
+  // that live in IndexedDB. Trip bodies overflow to IDB when
+  // localStorage hits quota (or when MaxDB chooses IDB up-front for
+  // large bodies). Before this, localLoad only checked localStorage,
+  // so an IDB-only trip showed in the home-screen list (because the
+  // index lives in localStorage and is fine) but tapping the card
+  // did nothing — localLoad returned false, selectTrip exited
+  // silently, and the user saw a dead button. Falling back to the
+  // raw localStorage read keeps boot order safe: if MaxDB.trip isn't
+  // wired up yet, we still have the original path.
+  try {
+    var raw = null;
+    if (typeof MaxDB !== "undefined" && MaxDB.trip && typeof MaxDB.trip.readRaw === "function") {
+      raw = MaxDB.trip.readRaw(tripId);
+    }
+    if (!raw) {
+      raw = localStorage.getItem("max-trip-" + tripId);
+    }
+    if (raw) { restoreTrip(raw); return true; }
+  } catch (e) {
+    console.warn("localLoad failed:", e);
+  }
   return false;
 }
 
@@ -4453,13 +4575,21 @@ function showHome(){
   renderHomeScreen();
 }
 
-// Round DH — read a saved trip from localStorage WITHOUT mutating the
-// global trip variable. Used by the home-screen dashboard so we can
-// inspect bookings/pending-actions across all trips.
+// Round DH — read a saved trip WITHOUT mutating the global trip
+// variable. Used by the home-screen dashboard so we can inspect
+// bookings/pending-actions across all trips.
+// v359.60.93: read through MaxDB.trip.readRaw so trips stored in
+// IndexedDB (when localStorage spills over quota) still show up on
+// the home dashboard. Falls back to raw localStorage if MaxDB isn't
+// ready yet.
 function _readTripById(tripId){
   if (_inIframe || !tripId) return null;
   try {
-    var saved = localStorage.getItem("max-trip-" + tripId);
+    var saved = null;
+    if (typeof MaxDB !== "undefined" && MaxDB.trip && typeof MaxDB.trip.readRaw === "function") {
+      saved = MaxDB.trip.readRaw(tripId);
+    }
+    if (!saved) saved = localStorage.getItem("max-trip-" + tripId);
     if (!saved) return null;
     var parsed = JSON.parse(saved);
     return (parsed && parsed.trip) ? parsed.trip : parsed;
@@ -6617,7 +6747,73 @@ function selectTrip(id){
   if(localLoad(id)){
     _currentTripId=id;
     enterApp();
+    return;
   }
+  // v359.60.92: silent local-load failure was the worst kind of bug —
+  // user taps a trip card on the home screen and nothing happens, no
+  // error, no spinner, no hint that the trip body just isn't in
+  // localStorage on this device. Most common cause: the user was
+  // signed out (10-year session somehow lost, or _wipeLocalTripCache
+  // ran on a forced sign-out), signed back in, and the trips index
+  // has been restored but the bodies are still being fetched — or
+  // pullAll already finished but a specific body fetch failed mid-way
+  // and the index entry stuck around without its body.
+  //
+  // Fallback: if we're signed in, fetch this trip from the server
+  // directly, write the body, then retry the load. Surface failures
+  // explicitly so the user knows whether to retry or report.
+  if (typeof MaxSync === "undefined" ||
+      typeof MaxSync.isSignedIn !== "function" ||
+      !MaxSync.isSignedIn() ||
+      typeof MaxSync.getTrip !== "function") {
+    if (typeof maxAlert === "function") {
+      maxAlert("Couldn't open that trip — its data isn't on this device. Sign in to sync it from the server.");
+    }
+    return;
+  }
+  // Show a brief loading state so the click feels acknowledged.
+  if (typeof showSaveStatus === "function") {
+    try { showSaveStatus("Loading trip…", 6000); } catch (_) {}
+  }
+  MaxSync.getTrip(id).then(function (full) {
+    if (!full || !full.trip || !full.trip.body) {
+      throw new Error("Server returned no trip body");
+    }
+    var serverTs = full.trip.updatedAt ? new Date(full.trip.updatedAt).getTime() : Date.now();
+    var envelope = Object.assign({}, full.trip.body, { __saved__: serverTs });
+    var serialized = JSON.stringify(envelope);
+    // Route through MaxDB.trip.writeRaw when available so engine-trip's
+    // tripWritten subscriber picks up the new body — matches the
+    // pullAll path. Plain setItem is the defense-in-depth fallback.
+    try {
+      if (typeof MaxDB !== "undefined" && MaxDB.trip &&
+          typeof MaxDB.trip.writeRaw === "function") {
+        MaxDB.trip.writeRaw(id, serialized);
+      } else {
+        localStorage.setItem("max-trip-" + id, serialized);
+      }
+    } catch (e) {
+      console.warn("[Max] selectTrip server-fallback save failed:", e);
+      localStorage.setItem("max-trip-" + id, serialized);
+    }
+    if (localLoad(id)) {
+      _currentTripId = id;
+      enterApp();
+    } else {
+      throw new Error("localLoad still failed after server fetch");
+    }
+  }).catch(function (err) {
+    console.warn("[Max] selectTrip server-fallback failed:", err);
+    var msg = "Couldn't open that trip. ";
+    if (err && err.code === "AUTH") {
+      msg += "Your sign-in expired — sign in again and try once more.";
+    } else if (err && err.code === "NETWORK") {
+      msg += "You appear to be offline. Reconnect and try again.";
+    } else {
+      msg += "Try again, or refresh the page.";
+    }
+    if (typeof maxAlert === "function") maxAlert(msg);
+  });
 }
 
 // v353.5: duplicate a trip locally + push to server. Clones the entire
@@ -6627,8 +6823,17 @@ function selectTrip(id){
 // POSTs the clone to the server so it shows up on other devices.
 function duplicateTrip(srcId, openAfter){
   if (!srcId) return null;
-  var srcRaw;
-  try { srcRaw = localStorage.getItem("max-trip-" + srcId); } catch (_) {}
+  // v359.60.93: route the source read through MaxDB.trip.readRaw so
+  // IDB-only source trips can still be duplicated. Same fix as
+  // localLoad / _readTripById — the localStorage-only read was
+  // silently failing for trips that overflowed to IndexedDB.
+  var srcRaw = null;
+  try {
+    if (typeof MaxDB !== "undefined" && MaxDB.trip && typeof MaxDB.trip.readRaw === "function") {
+      srcRaw = MaxDB.trip.readRaw(srcId);
+    }
+    if (!srcRaw) srcRaw = localStorage.getItem("max-trip-" + srcId);
+  } catch (_) {}
   if (!srcRaw) { maxAlert("Couldn't read source trip."); return null; }
   var env;
   try { env = JSON.parse(srcRaw); } catch (_) { return null; }
@@ -18482,6 +18687,7 @@ function renderTripBriefEdit(){
     +'<div class="tb-sub">Make changes below. Max will show you what needs to be revisited before anything is applied.</div>'
     +'</div>'
     +'<div class="tb-body">'
+
     +'<div class="tb-field"><label>Where are you going?</label><input id="tb-region" value="'+(_tb.region||"")+'" placeholder="e.g. Central Europe, Swiss Alps, Japan\u2026" oninput="_tb.region=this.value;" /></div>'
 
     // Round DM: edit-mode mirrors the new Step 2 structure.
@@ -18596,6 +18802,20 @@ function renderTripBriefEdit(){
     +'<div class="tb-field"><label>Valid through</label><input id="tb-visa-validthrough" type="date" value="'+((_tb.visa&&_tb.visa.validThrough)||"")+'" oninput="if(!_tb.visa)_tb.visa={};_tb.visa.validThrough=this.value;" /></div>'
     +'<div class="tb-field"><label>Notes</label><textarea id="tb-visa-notes" rows="2" placeholder="Multiple visas, appointment dates, country-specific requirements, etc." oninput="if(!_tb.visa)_tb.visa={};_tb.visa.notes=this.value;">'+((_tb.visa&&_tb.visa.notes)||"").replace(/</g,"&lt;").replace(/>/g,"&gt;")+'</textarea></div>'
 
+    // v359.60.75: Trip documents — base64-encoded file attachments.
+    // Passport scans, vaccination records, insurance PDFs, etc.
+    // Reordered v360.0.0 to immediately follow Travel insurance + Visa
+    // (the other "official documents" items) so the document-y stuff
+    // stays grouped together.
+    + _tbSectionHead("Trip documents", "Optional. Passport scans, vaccination records, confirmation PDFs.")
+    + '<div class="tb-field"><div id="tb-documents-mount"></div></div>'
+
+    // v360.0.0: Email import follows Trip documents — both are about
+    // pulling external content into your trip. The forwarding-address
+    // section + unassigned-bookings tray live in this mount.
+    + _tbSectionHead("Email import", "Forward booking confirmations to this address — they'll auto-attach.")
+    + '<div class="tb-field"><div id="tb-inbox-mount"></div></div>'
+
     // v359.60.75: Pre-trip checklist — structured array of {id, text,
     // done}. Distinct from "Keep in mind" freeform notes; this is a
     // proper task list with checkboxes that survive across sessions.
@@ -18603,13 +18823,6 @@ function renderTripBriefEdit(){
     // _mountChecklistSection() after innerHTML is set.
     + _tbSectionHead("Pre-trip checklist", "Optional. Things to do, buy, or arrange before you go.")
     + '<div class="tb-field"><div id="tb-checklist-mount"></div></div>'
-
-    // v359.60.75: Trip documents — base64-encoded file attachments.
-    // Passport scans, vaccination records, insurance PDFs, etc.
-    // Stored in localStorage so storage limits apply; warn at upload
-    // if total exceeds ~3MB. Mount point only.
-    + _tbSectionHead("Trip documents", "Optional. Passport scans, vaccination records, confirmation PDFs.")
-    + '<div class="tb-field"><div id="tb-documents-mount"></div></div>'
 
     +'</div>'
     +'<div class="tb-footer">'
@@ -18626,6 +18839,7 @@ function renderTripBriefEdit(){
   setTimeout(function(){
     if (typeof _mountChecklistSection === "function") _mountChecklistSection("tb-checklist-mount");
     if (typeof _mountDocumentsSection === "function") _mountDocumentsSection("tb-documents-mount");
+    if (typeof _mountInboxSection === "function") _mountInboxSection("tb-inbox-mount");
   }, 0);
 }
 
@@ -18700,6 +18914,262 @@ function _mountChecklistSection(mountId){
 // stored as base64 data URLs in the trip object (which goes through
 // localStorage + sync). Soft cap at 3 MB total to keep the trip
 // payload reasonable.
+// v360.0.0 — Phase 2 email auto-import UI. Renders two sub-sections:
+//
+// 1. Forwarding address: shows the user's unique address (minted
+//    server-side on first GET), copy button, and a "Last forwarded
+//    email: …" freshness indicator.
+//
+// 2. Unassigned bookings tray: parsed emails the auto-attacher
+//    couldn't place (no date match, no destination match, etc.).
+//    Each entry shows a summary + Attach button (attaches to the
+//    current trip; for destination-anchored types like hotels, a
+//    second dropdown picks the destination). Dismiss button on
+//    each entry for spam / mis-classifications.
+//
+// Both sections fetch state lazily on mount. No local caching —
+// the user opens this section rarely and the data isn't large.
+function _mountInboxSection(mountId){
+  var mount = document.getElementById(mountId);
+  if (!mount) return;
+  mount.innerHTML = '<div style="font-size:11px;color:#888;font-style:italic;">Loading your forwarding inbox…</div>';
+  if (typeof MaxSync === "undefined" || !MaxSync._request) {
+    mount.innerHTML = '<div style="font-size:11px;color:#c44;">Sign in required.</div>';
+    return;
+  }
+  // MaxSync._request returns parsed JSON directly and throws on
+  // non-ok responses. No need to deal with the Response object.
+  // v360.0.0 update: the unassigned-bookings tray moved to the
+  // trip view's Trip-bookings section where users actually look
+  // (Profile is for trip-meta editing, not booking management).
+  // This mount only renders the forwarding address + freshness
+  // indicator now.
+  MaxSync._request('/user/inbox')
+    .then(function(data){
+      _renderInboxAddress(mount, data);
+    })
+    .catch(function(e){
+      console.warn('[inbox] mount failed:', e);
+      var msg = (e && e.message) || "Couldn't load your inbox.";
+      mount.innerHTML = '<div style="font-size:11px;color:#c44;">' + msg.replace(/</g,"&lt;") + '</div>';
+    });
+}
+
+function _renderInboxAddress(mount, data){
+  mount.innerHTML = "";
+  var box = document.createElement("div");
+  box.style.cssText = "padding:10px 12px;background:#f5f8fc;border:1px solid #d4e0f0;border-radius:6px;margin-bottom:10px;";
+
+  var ttl = document.createElement("div");
+  ttl.style.cssText = "font-size:10.5px;font-weight:700;color:#1a5fa8;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;";
+  ttl.textContent = "Your forwarding address";
+  box.appendChild(ttl);
+
+  var addrRow = document.createElement("div");
+  addrRow.style.cssText = "display:flex;gap:6px;align-items:stretch;margin-bottom:6px;";
+  var addrInput = document.createElement("input");
+  addrInput.type = "text";
+  addrInput.readOnly = true;
+  addrInput.value = data.address || "";
+  addrInput.style.cssText = "flex:1;padding:7px 9px;font-size:12px;font-family:monospace;border:1px solid #ccc;border-radius:4px;background:#fff;";
+  var copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.textContent = "📋 Copy";
+  copyBtn.style.cssText = "padding:0 12px;font-size:11.5px;font-weight:600;background:#1a5fa8;color:#fff;border:none;border-radius:4px;cursor:pointer;flex-shrink:0;";
+  copyBtn.onclick = function(){
+    addrInput.select();
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(addrInput.value);
+      } else {
+        document.execCommand('copy');
+      }
+      copyBtn.textContent = "✓ Copied";
+      setTimeout(function(){ copyBtn.textContent = "📋 Copy"; }, 1500);
+    } catch(_) {}
+  };
+  addrRow.appendChild(addrInput);
+  addrRow.appendChild(copyBtn);
+  box.appendChild(addrRow);
+
+  // v360.0.0: explanatory copy ("Forward booking confirmations...
+  // they'll auto-attach to a matching trip") moved out of here.
+  // The Profile is for trip-meta — this section just needs the
+  // address + copy + freshness. Discoverability of the forwarding
+  // feature lives on the Bookings surface (task #101).
+
+  if (data.lastReceivedAt) {
+    var ago = _fmtAgo(data.lastReceivedAt);
+    var fresh = document.createElement("div");
+    fresh.style.cssText = "font-size:10.5px;color:#2a7a4e;margin-top:6px;";
+    fresh.textContent = "✓ Last forwarded email received " + ago;
+    box.appendChild(fresh);
+  }
+
+  // v360.0.2: spam-filter heads-up. Some outbound mail providers
+  // (SiteGround, certain corporate mail servers) flag forwards to
+  // unfamiliar domains as spam and refuse to send — the user never
+  // sees their email arrive here because it didn't leave their
+  // outbox. Telling them this upfront beats them debugging it cold.
+  var providerWarn = document.createElement("details");
+  providerWarn.style.cssText = "margin-top:8px;font-size:10.5px;color:#5c4520;";
+  providerWarn.innerHTML =
+    '<summary style="cursor:pointer;color:#a06d00;">Forwards getting bounced as spam?</summary>' +
+    '<div style="margin-top:6px;padding:8px 10px;background:#fff8ed;border:1px solid #f0dcc0;border-radius:5px;line-height:1.55;">' +
+      'Some email providers (e.g. SiteGround, some corporate mail) have aggressive outbound spam filtering ' +
+      'and refuse to forward to unfamiliar domains. If your forward bounces with "<i>high probability of spam</i>," ' +
+      'send from a personal Gmail, iCloud, Outlook, or Yahoo account instead — those have lenient outbound rules. ' +
+      'The booking content is the same; only the sending account changes.' +
+    '</div>';
+  box.appendChild(providerWarn);
+
+  // Tray placeholder — _renderUnassignedTray writes into this.
+  var trayHost = document.createElement("div");
+  trayHost.id = "tb-inbox-tray";
+  box.appendChild(trayHost);
+
+  mount.appendChild(box);
+}
+
+function _fmtAgo(ms){
+  var diff = Date.now() - ms;
+  if (diff < 60000) return "just now";
+  if (diff < 3600000) return Math.round(diff / 60000) + " minute" + (diff < 120000 ? "" : "s") + " ago";
+  if (diff < 86400000) return Math.round(diff / 3600000) + " hour" + (diff < 7200000 ? "" : "s") + " ago";
+  return Math.round(diff / 86400000) + " day" + (diff < 172800000 ? "" : "s") + " ago";
+}
+
+function _renderUnassignedTray(mount, items){
+  var tray = mount.querySelector('#tb-inbox-tray');
+  if (!tray) return;
+  tray.innerHTML = "";
+  if (!items.length) return;
+
+  var hdr = document.createElement("div");
+  hdr.style.cssText = "font-size:10.5px;font-weight:700;color:#a06d00;text-transform:uppercase;letter-spacing:0.04em;margin-top:12px;margin-bottom:6px;";
+  hdr.textContent = "Unassigned bookings (" + items.length + ")";
+  tray.appendChild(hdr);
+
+  var sub = document.createElement("div");
+  sub.style.cssText = "font-size:10.5px;color:#888;margin-bottom:8px;";
+  sub.textContent = "These parsed successfully but Max couldn't auto-match a trip. Pick a destination (when needed), then Attach.";
+  tray.appendChild(sub);
+
+  items.forEach(function(it){
+    var row = document.createElement("div");
+    row.style.cssText = "padding:8px 10px;margin:5px 0;background:#fff;border:1px solid #e0d8c8;border-radius:5px;font-size:11.5px;line-height:1.5;";
+
+    var p = it.parsed || {};
+    var icon = (p.type === "car") ? "🚗" : (p.type === "flight") ? "✈" : (p.type === "hotel") ? "🏨" : "📋";
+    var head = document.createElement("div");
+    head.style.cssText = "display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:4px;";
+    var headL = document.createElement("div");
+    headL.style.cssText = "font-weight:600;color:#444;";
+    var summary = icon + " " + (p.type || "booking");
+    if (p.carrier || p.name) summary += " · " + (p.carrier || p.name);
+    headL.textContent = summary;
+    var headR = document.createElement("div");
+    headR.style.cssText = "font-size:10px;color:#999;";
+    headR.textContent = "from " + (it.from || "?");
+    head.appendChild(headL);
+    head.appendChild(headR);
+    row.appendChild(head);
+
+    if (p.depDate || p.confirmationNumber) {
+      var meta = document.createElement("div");
+      meta.style.cssText = "font-size:10.5px;color:#666;margin-bottom:6px;";
+      var bits = [];
+      if (p.depDate) bits.push(p.depDate + (p.arrDate ? " → " + p.arrDate : ""));
+      if (p.confirmationNumber) bits.push("Conf " + p.confirmationNumber);
+      if (p.price != null) bits.push((p.currency || "") + " " + p.price);
+      meta.textContent = bits.join(" · ");
+      row.appendChild(meta);
+    }
+
+    // Destination picker only for hotel + generalBookings types.
+    var needsDest = (p.type !== "car" && p.type !== "flight");
+    var destSel = null;
+    var localTrip = (typeof trip !== "undefined" && trip) ? trip : null;
+    if (needsDest && localTrip && Array.isArray(localTrip.destinations)) {
+      destSel = document.createElement("select");
+      destSel.style.cssText = "width:100%;padding:5px 8px;font-size:11.5px;border:1px solid #ccc;border-radius:4px;background:#fff;margin-bottom:6px;";
+      var opt0 = document.createElement("option");
+      opt0.value = "";
+      opt0.textContent = "Pick a destination on " + (localTrip.name || "this trip") + "…";
+      destSel.appendChild(opt0);
+      localTrip.destinations.forEach(function(d){
+        var o = document.createElement("option");
+        o.value = d.id;
+        var dateStr = d.dateFrom ? " (" + d.dateFrom + (d.dateTo && d.dateTo !== d.dateFrom ? " → " + d.dateTo : "") + ")" : "";
+        o.textContent = (d.place || d.label || "Untitled") + dateStr;
+        destSel.appendChild(o);
+      });
+      row.appendChild(destSel);
+    }
+
+    var btnRow = document.createElement("div");
+    btnRow.style.cssText = "display:flex;gap:8px;justify-content:flex-end;";
+    var attachBtn = document.createElement("button");
+    attachBtn.type = "button";
+    attachBtn.textContent = "✓ Attach to trip";
+    attachBtn.style.cssText = "padding:5px 12px;font-size:11.5px;font-weight:600;background:#2a7a4e;color:#fff;border:none;border-radius:4px;cursor:pointer;";
+    var dismissBtn = document.createElement("button");
+    dismissBtn.type = "button";
+    dismissBtn.textContent = "✕ Dismiss";
+    dismissBtn.style.cssText = "padding:5px 12px;font-size:11.5px;background:#fff;color:#666;border:1px solid #ddd;border-radius:4px;cursor:pointer;";
+
+    (function(id, pType){
+      attachBtn.onclick = function(){
+        if (!localTrip || !localTrip.id) {
+          maxAlert("Open a trip first so Max knows where to attach this booking.");
+          return;
+        }
+        var destId = destSel ? destSel.value : "";
+        if (needsDest && !destId) {
+          maxAlert("Pick a destination first.");
+          return;
+        }
+        attachBtn.disabled = true;
+        attachBtn.textContent = "Attaching…";
+        var payload = { tripId: localTrip.id };
+        if (destId) payload.destinationId = destId;
+        MaxSync._request('/user/unassigned-bookings/' + encodeURIComponent(id) + '/attach', {
+          method: 'POST',
+          body: payload,
+        })
+          .then(function(){
+            row.style.opacity = "0.4";
+            row.innerHTML = '<div style="text-align:center;font-size:11px;color:#2a7a4e;">✓ Attached. Refresh the trip to see it.</div>';
+            // Trigger a fresh sync so the trip body updates locally.
+            if (MaxSync.pullAll) try { MaxSync.pullAll(); } catch(_){}
+          })
+          .catch(function(e){
+            console.warn('[inbox] attach failed:', e);
+            attachBtn.disabled = false;
+            attachBtn.textContent = "✓ Attach to trip";
+            maxAlert("Attach failed. " + ((e && e.message) || ""));
+          });
+      };
+      dismissBtn.onclick = function(){
+        if (!global.confirm || global.confirm("Dismiss this booking? You won't see it again.")) {
+          MaxSync._request('/user/unassigned-bookings/' + encodeURIComponent(id) + '/dismiss', {
+            method: 'POST',
+          })
+            .then(function(){
+              row.parentNode.removeChild(row);
+            })
+            .catch(function(e){ console.warn('[inbox] dismiss failed:', e); });
+        }
+      };
+    })(it.id, p.type);
+
+    btnRow.appendChild(dismissBtn);
+    btnRow.appendChild(attachBtn);
+    row.appendChild(btnRow);
+    tray.appendChild(row);
+  });
+}
+
 function _mountDocumentsSection(mountId){
   var mount = document.getElementById(mountId);
   if (!mount) return;
@@ -19005,6 +19475,16 @@ function applyConstraintChanges(){
     if (typeof p.gettingTo !== "undefined") trip.brief.gettingTo = p.gettingTo;
     if (typeof p.gettingOut !== "undefined") trip.brief.gettingOut = p.gettingOut;
     if (typeof p.transport !== "undefined") trip.brief.transport = p.transport;
+    // v360.0.0: travelersCount + withKids were being lost on apply —
+    // the form input writes _tb.travelersCount, but the trip's
+    // canonical storage is trip.brief.partySize. Without this mirror,
+    // every Apply would silently drop the value and the next Preview
+    // would show the same "(not set) → 2" false-positive forever.
+    if (typeof p.travelersCount !== "undefined") trip.brief.partySize = p.travelersCount;
+    if (typeof p.withKids !== "undefined") {
+      trip.brief.withKids = !!p.withKids;
+      trip.brief.partyComposition = p.withKids ? 'family-kids' : (trip.brief.partyComposition === 'family-kids' ? 'adults-only' : trip.brief.partyComposition);
+    }
     // Round EW.2: duration was missing from the mirror list. Without
     // this, changing the duration in Parameters left trip.brief.duration
     // stale, and the over-budget banner kept appearing against the old
@@ -19074,6 +19554,11 @@ function applyConstraintChanges(){
   }
 
   autoSave();
+
+  // v360.0.4: visible feedback for the Apply step. Without this,
+  // clicking "Yes, apply these changes" just closes the overlay
+  // with no acknowledgment — new users wonder if anything happened.
+  if (typeof showSaveStatus === "function") showSaveStatus("✓ Trip preferences saved", 2400);
 
   // v359.49.2: After Parameters apply, just close the overlay and
   // leave the user where they were. Previously (v294.11) this
@@ -28519,12 +29004,19 @@ function updateMainMap(){
       if (fromCtr && toCtr) {
         var path = [fromCtr].concat(stops.map(function(s){return s.ctr;})).concat([toCtr]);
         try {
-          var detourHalo = L.polyline(path, {
-            color:"#fff", weight:6, opacity:0.9, lineCap:"round", lineJoin:"round"
-          }).addTo(_mainMap);
-          _mainMarkers.push(detourHalo);
+          // v359.60.95: simplified wayside-detour rendering. Was a
+          // heavy white halo + opaque dashed purple, which compounded
+          // into pure visual noise once 10+ routes drew on top of
+          // each other (see the Iceland trip screenshot — every
+          // route's bends overlapped neighbouring routes into
+          // spaghetti). New treatment: drop the halo entirely (the
+          // satellite tiles are dark enough that a 2px purple
+          // reads fine on its own), thin to 1.5px, knock opacity
+          // down to 0.55, keep the dashed pattern so the line still
+          // visually belongs to the transit family. Net: the same
+          // information, half the visual weight.
           var detourLine = L.polyline(path, {
-            color:"#7a4fbf", weight:2.5, opacity:1.0, dashArray:"1 6", lineCap:"round", lineJoin:"round"
+            color:"#7a4fbf", weight:1.5, opacity:0.55, dashArray:"1 6", lineCap:"round", lineJoin:"round"
           }).addTo(_mainMap);
           _mainMarkers.push(detourLine);
         } catch(_){}
@@ -28538,17 +29030,54 @@ function updateMainMap(){
         var wsName = (place && place.name) || stop.placeId || "";
         if (!wsName) return;
         bounds.push(wsCtr);
-        // 16 px pin — smaller than overnight pins (22) and day-trip pins
-        // (20) to communicate "this is a stop, not a sleep."
-        var wsSize = 16;
-        var wsAbbrev = wsName.trim().substring(0, 1) || "·";
-        var wsHtml = '<div style="background:#9c7ad1;color:#fff;border-radius:50%;width:'
+        // v359.60.97: shrink the pin and drop the single-letter
+        // abbreviation. The old "first char in a circle" treatment
+        // collided constantly on real itineraries (Iceland trip had
+        // multiple "G" stops on different routes — Gullfoss, Goðafoss,
+        // Geysir — all rendering as a "G" pin with no way to tell
+        // which was which without hovering). New treatment: tiny
+        // unlabeled dot for position, then a separate always-visible
+        // label marker next to it carrying the truncated place name.
+        // Mirrors the destination-list label pattern used for "see"
+        // pins (see line ~28400 — same idea, different content).
+        var wsSize = 10; // smaller than before; the label carries the name
+        var wsHtml = '<div style="background:#9c7ad1;border-radius:50%;width:'
           + wsSize + 'px;height:' + wsSize + 'px;border:2px solid #fff;'
-          + 'box-shadow:0 1px 3px rgba(0,0,0,0.22);display:flex;align-items:center;'
-          + 'justify-content:center;font-size:8.5px;font-weight:700;">'
-          + wsAbbrev + '</div>';
+          + 'box-shadow:0 1px 3px rgba(0,0,0,0.25);"></div>';
         var wsIcon = L.divIcon({className:"main-trip-wayside-pin", html:wsHtml,
           iconSize:[wsSize,wsSize], iconAnchor:[wsSize/2,wsSize/2], popupAnchor:[0,-wsSize/2]});
+
+        // Adjacent label marker. Truncate to 16 chars so longer names
+        // (Seljalandsfoss, Hallgrímskirkja) don't dominate the map at
+        // typical zooms. Tooltip on the pin still has the full name.
+        // interactive:false so clicks pass through to the pin
+        // beneath; pointer-events:none on the inner div as well so
+        // dragging the map doesn't grab the label.
+        var wsLabelText = wsName.trim().length > 16
+          ? wsName.trim().substring(0, 15) + '…'
+          : wsName.trim();
+        var wsLabelEsc = String(wsLabelText)
+          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+        var wsLblHtml = '<div style="font-size:9px;color:#5b3f8f;font-weight:600;'
+          + 'white-space:nowrap;background:rgba(255,255,255,0.92);padding:1px 5px;'
+          + 'border-radius:3px;box-shadow:0 1px 2px rgba(0,0,0,.12);'
+          + 'pointer-events:none;">' + wsLabelEsc + '</div>';
+        var wsLblIcon = L.divIcon({
+          className:"main-trip-wayside-label",
+          html:wsLblHtml,
+          iconSize:[0,0],
+          // Negative x pushes the label to the RIGHT of the geo point
+          // (out past the dot's edge). Slight negative y so the label's
+          // baseline aligns with the pin's center instead of dropping
+          // to its lower edge.
+          iconAnchor:[-(wsSize/2 + 3), 6],
+        });
+        try {
+          var wsLblMarker = L.marker(wsCtr, {icon:wsLblIcon, interactive:false}).addTo(_mainMap);
+          _mainMarkers.push(wsLblMarker);
+        } catch(_){}
+
         try {
           var wsMarker = L.marker(wsCtr, {icon:wsIcon}).addTo(_mainMap);
           wsMarker.bindTooltip(wsName + " · wayside on " + fromName + " → " + toName,
@@ -35952,7 +36481,14 @@ function addBufferNight(side, city){
     todayItems: [],
     discoveredItems: [],
     suggestions: [],
-    attachedEvents: []
+    attachedEvents: [],
+    // v360.0.7: flag the buffer as an entry/exit anchor stop so
+    // _mergeAdjacentSamePlaceDests won't fold it into the adjacent
+    // main stay when both happen to be the same city. Round FY of
+    // the merge function explicitly skips merging across stops with
+    // these flags; addBufferNight had been forgetting to set them.
+    _entryStop: side === "arrival",
+    _exitStop: side === "departure",
   };
   if (side === "arrival") {
     var oldFirst = trip.destinations[0];
@@ -36136,6 +36672,15 @@ function drawTripMode(){
   // can now be called independently — first step toward Item 16
   // (drawTripMode + drawDestMode fold). See audit-drawTripMode.md.
   MaxTripUI.renderTripOverviewStrips(trip, c);
+
+  // v360.1 (slice 1): trip-level peek chip. Renders the quiet link
+  // to the operational surface stub when there are operational items
+  // (pending actions, cancellation deadlines, etc.). When there's
+  // nothing pressing the chip is absent — its absence is itself the
+  // signal that the world isn't requiring anything right now.
+  if (typeof MaxTripUI !== "undefined" && typeof MaxTripUI.renderTripPeekChip === "function") {
+    MaxTripUI.renderTripPeekChip(trip, c);
+  }
 
   // v294.15: hero map removed. The right-panel map (#main-map) now does the
   // same job — same Esri+Carto basemap, numbered pins with split-color rings
@@ -36504,6 +37049,34 @@ function drawTripMode(){
   // calls buildFromCandidates with the rebuild flag.
   MaxTripUI.renderArrivalDeparturePanel(trip, c);
 
+  // v359.60.91: trip-level Bookings section (flights, car rentals
+  // — anything that spans the whole trip rather than anchoring to
+  // one destination). Sits between Arrival/Departure and the
+  // destination card list so the user sees their cross-trip
+  // bookings in the same hierarchy they'd expect.
+  if (typeof MaxTripUI !== "undefined" && typeof MaxTripUI.renderTripLevelBookings === "function") {
+    MaxTripUI.renderTripLevelBookings(trip, c);
+  }
+
+  // v360.0.8: wayside-generation banner. Shows only if there are
+  // transit routes without waysides yet. Click → calls
+  // generateWaysidesForTrip → re-renders. Sits just above the
+  // destinations list so the user notices on first scroll.
+  if (typeof MaxTripUI !== "undefined" && typeof MaxTripUI.renderWaysidePromptBanner === "function") {
+    MaxTripUI.renderWaysidePromptBanner(trip, c);
+  }
+
+  // v360.1 (slice 1): persistent Spark intake. Sits between the
+  // trip-level metadata (bookings, arrival/dep, waysides) and the
+  // destinations list — the moment in the layout where the user
+  // transitions from looking at the trip's structure to its
+  // content. A wisp captured here lands in trip.brief.tripMeta.notes
+  // (the "Keep in mind for your trip" surface) prefixed with ✨ so
+  // the user can find it later. A future slice will route the wisp
+  // through the discovery LLM so it becomes a real candidate place.
+  if (typeof MaxTripUI !== "undefined" && typeof MaxTripUI.renderSparkIntake === "function") {
+    MaxTripUI.renderSparkIntake(trip, c);
+  }
 
   if(trip.destinations.length===0){
     var emp=document.createElement("div"); emp.style.cssText="font-size:12px;color:#ccc;font-style:italic;padding:4px 0 8px;";
@@ -36521,6 +37094,13 @@ function drawTripMode(){
   trip.destinations.forEach(function(dest, idx) {
     if (typeof MaxTripUI !== "undefined" && typeof MaxTripUI.renderTripDestinationCard === "function") {
       MaxTripUI.renderTripDestinationCard(dest, idx, trip, listSec);
+    }
+    // v360.0.8: render waysides on the route OUT of this destination
+    // (between this card and the next). Appears as a purple-bordered
+    // sub-section under the destination card with each wayside as a
+    // row + ✕ remove button.
+    if (typeof MaxTripUI !== "undefined" && typeof MaxTripUI.renderRouteWaysides === "function") {
+      MaxTripUI.renderRouteWaysides(trip, dest, idx, listSec);
     }
   });
 
@@ -36579,6 +37159,16 @@ function drawTripMode(){
 
   listSec.appendChild(addBtn); listSec.appendChild(addForm);
   c.appendChild(listSec);
+
+  // v360.1 (slice 1): collapsed "More" disclosure. Holds the
+  // tertiary controls displaced from the destinations header
+  // (Tidy trip, Keep in mind, Reverse order, Considered, Open
+  // Discovery). Collapsed by default; expanded state per-trip in
+  // trip._ui.moreOpen so it survives re-renders without leaking
+  // across trips.
+  if (typeof MaxTripUI !== "undefined" && typeof MaxTripUI.renderTripMore === "function") {
+    MaxTripUI.renderTripMore(trip, c);
+  }
 
   // Pre-fill arriving date from last dest
   if(trip.destinations.length>0){
@@ -40146,16 +40736,16 @@ async function _parseBookingBatchLlm(text, html) {
     "Each array element has the SAME schema as a single confirmation, plus an isCancellation flag:\n" +
     "{\n" +
     '  "isCancellation": boolean,        // true if this entry is a CANCELLATION notice for an existing booking, false for a new booking\n' +
-    '  "type": "flight"|"hotel"|"train"|"bus"|"ferry"|"restaurant"|"tour"|"ticket"|"unknown",\n' +
-    '  "carrier": string|null,\n' +
+    '  "type": "flight"|"hotel"|"car"|"train"|"bus"|"ferry"|"restaurant"|"tour"|"ticket"|"unknown",\n' +
+    '  "carrier": string|null,           // airline / train operator / rental company (Hertz, Sixt, Avis, …)\n' +
     '  "number": string|null,\n' +
     '  "name": string|null,              // hotel/restaurant/tour name (or carrier name for transport)\n' +
     '  "address": string|null,\n' +
-    '  "from": string|null,              // transport: departure city/code\n' +
-    '  "to": string|null,                // transport: arrival city/code\n' +
-    '  "depDate": "YYYY-MM-DD"|null,     // hotel check-in / transport departure / restaurant event date\n' +
+    '  "from": string|null,              // transport: departure city/code · car rental: pickup location\n' +
+    '  "to": string|null,                // transport: arrival city/code · car rental: dropoff location (omit/repeat from if same)\n' +
+    '  "depDate": "YYYY-MM-DD"|null,     // hotel check-in / transport departure / car pickup / restaurant event date\n' +
     '  "depTime": "HH:MM"|null,          // 24h\n' +
-    '  "arrDate": "YYYY-MM-DD"|null,     // hotel check-out / transport arrival\n' +
+    '  "arrDate": "YYYY-MM-DD"|null,     // hotel check-out / transport arrival / car dropoff\n' +
     '  "arrTime": "HH:MM"|null,\n' +
     '  "confirmationNumber": string|null,\n' +
     '  "price": number|null,\n' +
@@ -40183,6 +40773,7 @@ async function _parseBookingBatchLlm(text, html) {
     "When the subjects are run together with no whitespace separator (icons / boilerplate glued them inline), SPLIT on each of those patterns. Even a 50-word concatenated blob can become 5–10 distinct bookings.\n" +
     "From subjects you'll usually only have: name, isCancellation, sometimes dates, sometimes a confirmation #. Leave all other fields null — don't guess prices or URLs from a subject line.\n" +
     "Dedupe within a subject dump: if two subjects clearly point to the same booking (e.g. an Airbnb 'RE: Reservation for X, Sep 17-19' AND a 'Confirmed: Your September 17-19 trip' that share the same dates), return ONE entry, preferring the one with the property name.\n\n" +
+    "Car rental recognition: 'Your reservation with HERTZ', 'Sixt rental confirmation', 'Enterprise booking #', 'Blue Car Rental — your car is ready' → type='car', carrier=rental company. depDate/depTime = pickup; arrDate/arrTime = return. from = pickup location (often an airport code like KEF or 'Keflavík Airport'); to = return location (set equal to 'from' if same — most rentals are round-trip). One-way rentals (pickup KEF, return AKU) keep from/to distinct. Vehicle class (compact, SUV, 4×4) goes in notes, not as a separate field.\n\n" +
     "Same field rules as single-booking extraction: 24-hour time; time-ranges for check-in collapse to the earliest, check-out to the latest; price is what was paid (not the cancellation cost / no-show fee); URL: extract the actual https:// link, not the visible label; cancellation deadline is the LAST date the user can cancel for free (date only, no time).\n\n" +
     "Return [] only if there's truly no booking-shaped content. A subject-line dump with even one recognizable hotel/confirmation/cancellation pattern is NOT empty — return the array.";
   var user = "BATCH TEXT:\n\n" + text + "\n\nReturn the JSON array.";
@@ -40823,6 +41414,35 @@ function _commitBatchBookings(bookings) {
         source: "paste-batch"
       }, commonCancel));
       added++;
+    } else if (b.type === "car") {
+      // v359.60.91: car-rental commit. Goes to trip.tripBookings[]
+      // (top-level). Pickup/dropoff use the same depDate/arrDate
+      // fields the LLM prompt uses for everything else; we map them
+      // through here so the storage shape stays distinct.
+      if (!trip.tripBookings) trip.tripBookings = [];
+      trip.tripBookings.push(Object.assign({
+        id: newBkIdFn(),
+        kind: "car",
+        vendor: b.carrier || b.name || "",
+        pickup: {
+          location: b.from || "",
+          date: b.depDate || null,
+          time: b.depTime || null
+        },
+        dropoff: {
+          location: b.to || b.from || "",
+          date: b.arrDate || null,
+          time: b.arrTime || null
+        },
+        confirmationNumber: b.confirmationNumber || "",
+        pricePaid: (typeof b.price === "number") ? b.price : null,
+        currency: b.currency || "USD",
+        notes: b.notes || "",
+        url: b.url || null,
+        status: "booked",
+        source: "paste-batch"
+      }, commonCancel));
+      added++;
     } else {
       // restaurant / tour / ticket / unknown → generalBookings
       if (!dest.generalBookings) dest.generalBookings = [];
@@ -40914,6 +41534,10 @@ function showPasteConfirmationModal(destId) {
       // mode used to be a silent generic message that gave the user
       // nothing to act on.
       console.log("[paste-confirm] LLM extracted:", parsed);
+      // v359.60.91 (b): also dump as a flat JSON string so the
+      // console doesn't truncate nested objects with "…" — easier
+      // to copy/paste the whole shape when debugging.
+      try { console.log("[paste-confirm] LLM extracted (JSON):", JSON.stringify(parsed)); } catch(_){}
       // Lenient pass: as long as the LLM gave us SOMETHING actionable,
       // hand off to the preview. The user can fix anything wrong; an
       // empty preview is better than a hard failure when the LLM
@@ -40971,20 +41595,29 @@ async function _parseBookingConfirmation(text, html) {
   var system =
     "You extract booking details from raw confirmation text (emails, web pages, screenshots transcribed). " +
     "Return ONLY a single JSON object — no prose, no markdown fences, no explanation. " +
-    "Use EXACTLY the field names below. Do NOT invent your own field names like 'destination', 'accommodation', 'dates', 'travelers' — use the canonical names listed.\n\n" +
+    "Use EXACTLY the field names below. Do NOT invent your own field names. Common wrong names to AVOID: " +
+    "'destination', 'accommodation', 'dates', 'travelers', 'trip_type', 'trip_kind', 'duration_days', " +
+    "'travel_dates', 'pickup_location', 'pickup_date', 'pickup_time', 'dropoff_location', 'dropoff_date', " +
+    "'dropoff_time', 'return_location', 'return_date', 'return_time', 'rental_company', 'rental_agency', " +
+    "'vehicle_class', 'vehicle_type', 'total_cost', 'total_amount', 'amount_paid', 'booking_reference', " +
+    "'confirmation_code', 'reservation_code'. " +
+    "ALL of these should be re-mapped to the canonical names below — e.g. trip_type → type, pickup_location → from, " +
+    "dropoff_location → to, pickup_date → depDate, dropoff_date → arrDate, rental_company → carrier, " +
+    "total_cost → price, booking_reference → confirmationNumber. " +
+    "Never return a nested object like { 'travel_dates': { 'start': '...', 'end': '...' } } — flatten to depDate / arrDate at the top level.\n\n" +
     "Schema:\n" +
     "{\n" +
-    '  "type": "flight" | "hotel" | "train" | "bus" | "ferry" | "restaurant" | "tour" | "ticket" | "unknown",\n' +
-    '  "carrier": string | null,        // airline / rail operator / bus company / hotel brand / restaurant name\n' +
-    '  "number": string | null,         // flight number, train number — null for hotels\n' +
-    '  "name": string | null,           // hotel/restaurant/tour/ticket name (use carrier for transport)\n' +
-    '  "address": string | null,        // hotel/restaurant address — null for transport\n' +
-    '  "from": string | null,           // departure city or airport code (transport only)\n' +
-    '  "to": string | null,             // arrival city or airport code (transport only)\n' +
-    '  "depDate": "YYYY-MM-DD" | null,  // transport: departure date; hotel: check-in; restaurant/tour: event date\n' +
-    '  "depTime": "HH:MM" | null,       // 24h. transport: departure; hotel: check-in time; restaurant/tour: start time\n' +
-    '  "arrDate": "YYYY-MM-DD" | null,  // transport: arrival date; hotel: check-out\n' +
-    '  "arrTime": "HH:MM" | null,       // 24h. transport: arrival; hotel: check-out time; restaurant/tour: end time\n' +
+    '  "type": "flight" | "hotel" | "car" | "train" | "bus" | "ferry" | "restaurant" | "tour" | "ticket" | "unknown",\n' +
+    '  "carrier": string | null,        // airline / rail operator / bus company / hotel brand / restaurant name / car-rental company (Hertz, Sixt, Avis, Enterprise, Blue Car Rental, …)\n' +
+    '  "number": string | null,         // flight number, train number — null for hotels and car rentals\n' +
+    '  "name": string | null,           // hotel/restaurant/tour/ticket name (use carrier for transport AND car rentals)\n' +
+    '  "address": string | null,        // hotel/restaurant address — null for transport / car rentals\n' +
+    '  "from": string | null,           // transport: departure city or airport code · car rental: pickup location (often an airport name/code like "Keflavík Airport" or "KEF")\n' +
+    '  "to": string | null,             // transport: arrival city or airport code · car rental: dropoff/return location (set equal to "from" for round-trip rentals — most common)\n' +
+    '  "depDate": "YYYY-MM-DD" | null,  // transport: departure date; hotel: check-in; car: pickup date; restaurant/tour: event date\n' +
+    '  "depTime": "HH:MM" | null,       // 24h. transport: departure; hotel: check-in time; car: pickup time; restaurant/tour: start time\n' +
+    '  "arrDate": "YYYY-MM-DD" | null,  // transport: arrival date; hotel: check-out; car: dropoff/return date\n' +
+    '  "arrTime": "HH:MM" | null,       // 24h. transport: arrival; hotel: check-out time; car: dropoff/return time; restaurant/tour: end time\n' +
     '  "confirmationNumber": string | null,\n' +
     '  "price": number | null,          // total paid, decimal\n' +
     '  "currency": string | null,       // ISO code: USD, EUR, GBP, ISK, etc\n' +
@@ -41013,6 +41646,19 @@ async function _parseBookingConfirmation(text, html) {
     "Lufthansa LH 414\nDeparture: JFK 9:25 PM Wed Oct 1, 2026\nArrival: FRA 11:00 AM Thu Oct 2, 2026\nConfirmation: ABC123\nTotal $842.00\nNon-refundable\nManage booking: https://lufthansa.com/booking/ABC123\n\n" +
     "EXAMPLE OUTPUT for that input:\n" +
     '{"type":"flight","carrier":"Lufthansa","number":"LH 414","name":null,"address":null,"from":"JFK","to":"FRA","depDate":"2026-10-01","depTime":"21:25","arrDate":"2026-10-02","arrTime":"11:00","confirmationNumber":"ABC123","price":842.00,"currency":"USD","url":"https://lufthansa.com/booking/ABC123","cancelType":"non-cancellable","cancelDeadline":null,"notes":null}\n\n' +
+    "EXAMPLE INPUT (car rental):\n" +
+    "Hertz Reservation Confirmation\nPickup: Keflavík Airport, June 2, 2026, 7:30 AM\nReturn: Keflavík Airport, June 14, 2026, 6:00 PM\nConfirmation: H89401234\nTotal: USD 612.50\n\n" +
+    "EXAMPLE OUTPUT for that input:\n" +
+    '{"type":"car","carrier":"Hertz","number":null,"name":null,"address":null,"from":"Keflavík Airport","to":"Keflavík Airport","depDate":"2026-06-02","depTime":"07:30","arrDate":"2026-06-14","arrTime":"18:00","confirmationNumber":"H89401234","price":612.50,"currency":"USD","url":null,"cancelType":null,"cancelDeadline":null,"notes":null}\n\n' +
+    "MULTI-LEG FLIGHTS: when a flight confirmation has more than one physical segment under a single PNR (e.g., JFK→LHR→KEF with a layover, or a round-trip with outbound and return legs), return an additional `legs` array with one entry per segment. Each leg has: {from, to, depDate, depTime, arrDate, arrTime, carrier, flightNumber}. Keep the top-level type='flight'; the flat carrier/from/to/depDate/etc. fields can still hold the FIRST leg for backward compatibility, but `legs` is the authoritative shape when present.\n\n" +
+    "EXAMPLE INPUT (multi-leg flight):\n" +
+    "Lufthansa Confirmation: ABC123\nOutbound: LH 400 JFK→FRA, Oct 1 9:25 PM → Oct 2 11:00 AM\nConnecting: LH 1158 FRA→ZRH, Oct 2 1:00 PM → Oct 2 2:15 PM\nTotal $842\n\n" +
+    "EXAMPLE OUTPUT for that input:\n" +
+    '{"type":"flight","carrier":"Lufthansa","number":"LH 400","legs":[{"carrier":"Lufthansa","flightNumber":"LH 400","from":"JFK","to":"FRA","depDate":"2026-10-01","depTime":"21:25","arrDate":"2026-10-02","arrTime":"11:00"},{"carrier":"Lufthansa","flightNumber":"LH 1158","from":"FRA","to":"ZRH","depDate":"2026-10-02","depTime":"13:00","arrDate":"2026-10-02","arrTime":"14:15"}],"from":"JFK","to":"ZRH","depDate":"2026-10-01","depTime":"21:25","arrDate":"2026-10-02","arrTime":"14:15","confirmationNumber":"ABC123","price":842.00,"currency":"USD","url":null,"cancelType":null,"cancelDeadline":null,"notes":null}\n\n' +
+    "CRITICAL for car rentals: when the input contains a rental-company name (Hertz, Sixt, Avis, Enterprise, Budget, Alamo, National, Thrifty, Dollar, Europcar, Blue Car Rental, Lava Car Rental, Lava, etc.), ALWAYS populate carrier with that name. When pickup or return text contains a time like '7:30 AM' or '18:00' or '14:30', ALWAYS populate depTime (pickup) and arrTime (return) in 24-hour HH:MM format. When the total is shown with a currency code or symbol ('USD 612.50', '$612.50', '384.934 ISK'), populate price with JUST the number (612.50, 384934) and currency with the ISO code ('USD', 'ISK'). Never put 'USD 612.50' as the price value — split them apart. Note: in European-style numbers '384.934 ISK' the dot is a thousands separator, so the value is 384934, not 384.934.\n\n" +
+    "LOCATION SPECIFICITY: when the source contains BOTH a country/region (e.g. 'Iceland') AND a specific airport, city, or station name (e.g. 'Keflavik International Airport'), populate from / to with the SPECIFIC location, never the country. The country is too vague to be useful for a pickup point.\n\n" +
+    "CONFIRMATION NUMBER aliases: 'Booking Number', 'Booking ID', 'Booking Reference', 'Reservation Number', 'Reservation Code', 'PNR', 'Reference', 'Record Locator' — ALL of these go into confirmationNumber. Always extract this value if any of those labels appear in the source.\n\n" +
+    "PRICE PREFERENCE: when a confirmation shows multiple money figures ('Amount Paid: 0', 'Outstanding Balance: 384.934 ISK', 'Total Price: 384.934 ISK'), use the TOTAL (or Total Price / Total Cost / Grand Total) — NOT the amount paid so far and NOT the outstanding balance. Customer cares about what the rental costs, not their payment progress.\n\n" +
     "Now extract the user's confirmation in the same shape.";
   var user = "CONFIRMATION TEXT:\n\n" + text + "\n\nReturn the JSON.";
   var resp = await callMax(
@@ -41036,6 +41682,93 @@ async function _parseBookingConfirmation(text, html) {
     throw new Error("LLM returned malformed JSON");
   }
   var normalized = _normalizeBookingExtraction(raw);
+  // v359.60.91 (b): time-regex fallback. LLM sometimes drops times
+  // even when they're plainly present in the source text ("Pickup
+  // ... 7:30 AM Return ... 6:00 PM"). When depTime / arrTime are
+  // missing after normalization, scan the raw text directly and
+  // use the first time → depTime, last time → arrTime. Works for
+  // typical pickup-then-return ordering in rental confirmations.
+  if ((!normalized.depTime || !normalized.arrTime) && text) {
+    var timeRe = /\b(\d{1,2}):(\d{2})\s*(am|pm|a\.m\.|p\.m\.)?\b/gi;
+    var found = [];
+    var tm;
+    while ((tm = timeRe.exec(text)) !== null) {
+      var h = parseInt(tm[1], 10);
+      var min = tm[2];
+      var ampm = (tm[3] || "").toLowerCase().replace(/\./g, "");
+      if (ampm === "pm" && h < 12) h += 12;
+      if (ampm === "am" && h === 12) h = 0;
+      if (h >= 0 && h <= 23) {
+        found.push(String(h).padStart(2, "0") + ":" + min);
+      }
+    }
+    if (found.length >= 1 && !normalized.depTime) normalized.depTime = found[0];
+    if (found.length >= 2 && !normalized.arrTime) normalized.arrTime = found[found.length - 1];
+    if (found.length >= 1) console.log("[paste-confirm] time-regex fallback found:", found);
+  }
+  // v359.60.91 (b): vendor-regex fallback. If the LLM forgot the
+  // rental-company name but it's clearly present in the source text
+  // ("Hertz Reservation Confirmation"), pluck it out. Longer/more
+  // specific names first so "Lava Car Rental" wins over "Lava" alone.
+  if (!normalized.carrier && !normalized.name && text) {
+    var vendorRe = /\b(Lava Car Rental|Blue Car Rental|Sicily by Car|Fox Rent A Car|Auto Europe|Ace Rent A Car|Hertz|Sixt|Avis|Enterprise|Budget|Alamo|National|Thrifty|Dollar|Europcar|Payless|Kemwel|Rentalcars|Lava)\b/i;
+    var vm = text.match(vendorRe);
+    if (vm) {
+      normalized.carrier = vm[1];
+      console.log("[paste-confirm] vendor-regex fallback found:", vm[1]);
+    }
+  }
+  // v359.60.91 (b): confirmation-number regex fallback. The LLM
+  // surprisingly often misses an explicit "Confirmation #: XXX" or
+  // "Booking Number: YYY" right at the top of the email. Regex
+  // catches it deterministically.
+  if (!normalized.confirmationNumber && text) {
+    var confRe = /(?:Confirmation(?:\s*#|\s*Number|\s*Code)?|Booking(?:\s*#|\s*Number|\s*ID|\s*Reference|\s*Code)?|Reservation(?:\s*#|\s*Number|\s*Code)?|PNR|Record\s*Locator|Reference\s*Number)\s*[:\-#]?\s*([A-Z0-9]{4,20})\b/i;
+    var cm = text.match(confRe);
+    if (cm && cm[1]) {
+      normalized.confirmationNumber = cm[1].toUpperCase();
+      console.log("[paste-confirm] confirmation-regex fallback found:", cm[1]);
+    }
+  }
+  // v359.60.91 (b): price + currency regex fallback. Real
+  // confirmations show price in formats like "Total: ISK 372,696",
+  // "Total Price: USD 612.50", "Grand Total: $1,234.56", "€586.50".
+  // The LLM sometimes gets distracted by other money figures
+  // ("Amount Paid: 0", "Outstanding Balance: ..."). Regex anchors on
+  // the Total/Grand Total label to grab the right line.
+  if ((normalized.price == null || normalized.price === "") && text) {
+    var priceRe = /(?:Total\s*Price|Grand\s*Total|Total(?!\s*does\s*not))\s*[:\-]?\s*((?:[A-Z]{3}\s*)?(?:[\$€£¥]\s*)?[\d,. ]+(?:\s*[A-Z]{3})?)/i;
+    var pmatch = text.match(priceRe);
+    if (pmatch && pmatch[1]) {
+      var rawAmt = pmatch[1].trim();
+      var ccyAmt = rawAmt.match(/\b(USD|EUR|GBP|JPY|CAD|AUD|ISK|CHF|CNY|INR|MXN|BRL|KRW|SEK|NOK|DKK|PLN|CZK|HUF|RUB|TRY|ZAR|SGD|HKD|NZD)\b/i);
+      if (ccyAmt && !normalized.currency) normalized.currency = ccyAmt[1].toUpperCase();
+      if (!normalized.currency) {
+        if (/\$/.test(rawAmt)) normalized.currency = "USD";
+        else if (/€/.test(rawAmt)) normalized.currency = "EUR";
+        else if (/£/.test(rawAmt)) normalized.currency = "GBP";
+        else if (/¥/.test(rawAmt)) normalized.currency = "JPY";
+      }
+      // Strip currency, then handle European thousands separator.
+      // "ISK 372,696" → "372,696" → 372696 (comma is thousands sep)
+      // "ISK 384.934" → "384.934" → 384934 (dot is thousands sep when
+      //   there are exactly 3 digits after AND no other decimal point)
+      var num = rawAmt.replace(/[A-Z]{3}/gi, "").replace(/[\$€£¥]/g, "").trim();
+      // Heuristic: if there's a single dot followed by exactly 3
+      // digits and no other dots/commas, treat as European thousands.
+      if (/^\d+\.\d{3}$/.test(num)) {
+        num = num.replace(/\./g, "");
+      } else {
+        // US-style: commas are thousands, dot is decimal.
+        num = num.replace(/,/g, "");
+      }
+      var nVal = parseFloat(num);
+      if (isFinite(nVal)) {
+        normalized.price = nVal;
+        console.log("[paste-confirm] price-regex fallback found:", nVal, normalized.currency);
+      }
+    }
+  }
   console.log("[paste-confirm] LLM url field:", normalized.url);
   // Belt-and-braces: if no URL was extracted (or the LLM grabbed the
   // visible label "modify or cancel" instead of the actual https://
@@ -41052,6 +41785,55 @@ async function _parseBookingConfirmation(text, html) {
     console.log("[paste-confirm] URL fallback ran. found:", fallback, "(html available:", !!html, ")");
     if (fallback) normalized.url = fallback;
   }
+
+  // v359.60.91 (b): URL parameter rescue. Booking-management URLs
+  // from many rental + airline systems carry the truth as query
+  // parameters: ddate, pdate, confirmationNumber. When the LLM
+  // hallucinates a date or misses a confirmation number, the URL is
+  // more reliable. We OVERRIDE the LLM's value when the URL has one
+  // — the LLM has been observed to invent dates (returning Sep 8
+  // when the URL says Oct 8). Runs AFTER the URL fallback above so
+  // normalized.url is fully populated.
+  if (normalized.url && /[?&]/.test(normalized.url)) {
+    try {
+      // Decode HTML entities — the LLM sometimes returns &amp; instead
+      // of & in the URL, which breaks naive new URL() param parsing
+      // because the param name becomes "amp;X" instead of "X".
+      var decodedUrl = normalized.url.replace(/&amp;/g, "&");
+      var u = new URL(decodedUrl);
+      var sp = u.searchParams;
+      function _getParam(names) {
+        for (var i = 0; i < names.length; i++) {
+          var v = sp.get(names[i]);
+          if (v != null && v !== "") return v;
+        }
+        return null;
+      }
+      var urlConf = _getParam(["confirmationNumber", "confirmation", "conf", "bookingNumber", "booking", "reservationNumber", "reservation", "pnr"]);
+      if (urlConf) {
+        normalized.confirmationNumber = urlConf;
+        console.log("[paste-confirm] URL param confirmationNumber:", urlConf);
+      }
+      var urlPdate = _getParam(["pdate", "pickupDate", "pickup_date", "fromDate", "checkin", "depart", "departure"]);
+      var urlDdate = _getParam(["ddate", "dropoffDate", "dropoff_date", "returnDate", "toDate", "checkout", "arrive", "arrival"]);
+      function _splitDateTime(iso) {
+        if (!iso) return [null, null];
+        var s = decodeURIComponent(String(iso));
+        var m = s.match(/^(\d{4}-\d{2}-\d{2})[T\s]?(\d{2}:\d{2})?/);
+        if (!m) return [null, null];
+        return [m[1], m[2] || null];
+      }
+      var pParts = _splitDateTime(urlPdate);
+      var dParts = _splitDateTime(urlDdate);
+      if (pParts[0]) { normalized.depDate = pParts[0]; console.log("[paste-confirm] URL param depDate:", pParts[0]); }
+      if (pParts[1]) { normalized.depTime = pParts[1]; console.log("[paste-confirm] URL param depTime:", pParts[1]); }
+      if (dParts[0]) { normalized.arrDate = dParts[0]; console.log("[paste-confirm] URL param arrDate:", dParts[0]); }
+      if (dParts[1]) { normalized.arrTime = dParts[1]; console.log("[paste-confirm] URL param arrTime:", dParts[1]); }
+    } catch (e) {
+      console.warn("[paste-confirm] URL parameter parse failed:", e);
+    }
+  }
+
   return normalized;
 }
 
@@ -41105,6 +41887,12 @@ function _extractBookingUrl(text) {
   // is footer/legal/social, not a management CTA.
   var negativeLabel = /unsubscribe|preferences|privacy|terms|footer|optout|opt out|facebook|twitter|linkedin|instagram|youtube|tiktok/i;
   var imageExt = /\.(?:gif|png|jpg|jpeg|svg|webp|ico|css|js|woff|woff2|ttf)(\?|$)/i;
+  // v359.60.91 (b): tech-spec URLs that creep in via the page's HTML
+  // DOCTYPE / namespace declarations when the user copy-pastes from
+  // a rendered page (browsers attach the source HTML to the clipboard
+  // even for selected-text copy). These are never booking URLs.
+  var technicalNonsense = /^https?:\/\/(?:www\.)?(?:w3\.org|schemas?\.[a-z]+\.[a-z]+|xmlns\.|ns\.adobe|purl\.org|tools\.ietf\.org\/rfc)/i;
+  var techExt = /\.(?:dtd|xsd|xsl|xslt|rng|owl|rdf)(\?|$|#)/i;
 
   function score(u) {
     var s = 0;
@@ -41128,6 +41916,12 @@ function _extractBookingUrl(text) {
     if (negativeHost.test(host)) s -= 6;
     if (negativeLabel.test(u.label)) s -= 6;
     if (imageExt.test(host) || imageExt.test(pathQuery)) s -= 6;
+    // v359.60.91 (b): aggressively zero-out tech-spec URLs (w3.org
+    // DOCTYPE references, .dtd/.xsd files, etc.). A score of -10
+    // guarantees they fall below the >= 0 cutoff at the bottom of
+    // this function even if some weak positive signal hits.
+    if (technicalNonsense.test(url)) s -= 10;
+    if (techExt.test(url)) s -= 10;
     return s;
   }
   urls.forEach(function(u){ u.score = score(u); });
@@ -41281,16 +42075,98 @@ function _normalizeBookingExtraction(p) {
       if (v != null && v !== "") { out[canonical] = v; return; }
     }
   }
+  // v359.60.91: date normalizer. LLMs frequently return "June 2,
+  // 2026" or "06/02/2026" instead of the ISO YYYY-MM-DD the form's
+  // <input type="date"> requires. Parse anything Date.parse() can
+  // chew, then format to ISO. If parsing fails, leave the raw
+  // value alone so it surfaces to the user instead of getting
+  // silently zeroed out.
+  function _isoDate(v) {
+    if (v == null || v === "") return v;
+    var s = String(v).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s; // already ISO
+    var t = Date.parse(s);
+    if (isNaN(t)) return v; // unrecognized — leave raw
+    var d = new Date(t);
+    var yyyy = d.getUTCFullYear();
+    var mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    var dd = String(d.getUTCDate()).padStart(2, "0");
+    return yyyy + "-" + mm + "-" + dd;
+  }
+  // v359.60.91: time normalizer. Convert "7:30 AM" / "7:30am" /
+  // "6:00 PM" to 24-hour "HH:MM". Pass through anything already
+  // in HH:MM. Leave un-parseable values alone.
+  function _isoTime(v) {
+    if (v == null || v === "") return v;
+    var s = String(v).trim();
+    if (/^\d{2}:\d{2}$/.test(s)) return s; // already 24h
+    var m = s.match(/^(\d{1,2}):(\d{2})\s*(am|pm|a\.m\.|p\.m\.)?$/i);
+    if (!m) return v;
+    var h = parseInt(m[1], 10);
+    var min = m[2];
+    var ampm = (m[3] || "").toLowerCase().replace(/\./g, "");
+    if (ampm === "pm" && h < 12) h += 12;
+    if (ampm === "am" && h === 12) h = 0;
+    return String(h).padStart(2, "0") + ":" + min;
+  }
+  // v359.60.91: car-rental aliases. LLM frequently invents its own
+  // schema for rentals — trip_type: 'rental_car', pickup_location,
+  // dropoff_location, travel_dates: {start, end}, rental_company,
+  // etc. Catch the most common drift patterns here so the form
+  // gets pre-filled even when the LLM ignores the canonical schema.
+  // Flatten nested travel_dates first so the date picks below find them.
+  if (p.travel_dates && typeof p.travel_dates === "object") {
+    var td = p.travel_dates;
+    if (!out.depDate) out.depDate = td.start || td.startDate || td.start_date || td.pickup || td.pickupDate || td.pickup_date || td.from;
+    if (!out.arrDate) out.arrDate = td.end || td.endDate || td.end_date || td.dropoff || td.dropoffDate || td.dropoff_date || td.return || td.returnDate || td.return_date || td.to;
+  }
+  if (p.dates && typeof p.dates === "object") {
+    if (!out.depDate) out.depDate = p.dates.start || p.dates.startDate || p.dates.start_date || p.dates.from;
+    if (!out.arrDate) out.arrDate = p.dates.end || p.dates.endDate || p.dates.end_date || p.dates.to;
+  }
+  if (p.pickup && typeof p.pickup === "object") {
+    if (!out.from)     out.from     = p.pickup.location || p.pickup.airport || p.pickup.city;
+    if (!out.depDate)  out.depDate  = p.pickup.date;
+    if (!out.depTime)  out.depTime  = p.pickup.time;
+  }
+  if ((p.dropoff || p.return || p.returnDetails) && typeof (p.dropoff || p.return || p.returnDetails) === "object") {
+    var dpo = p.dropoff || p.return || p.returnDetails;
+    if (!out.to)       out.to       = dpo.location || dpo.airport || dpo.city;
+    if (!out.arrDate)  out.arrDate  = dpo.date;
+    if (!out.arrTime)  out.arrTime  = dpo.time;
+  }
+  // Normalize trip_type → type, and map any rental-car-ish value to "car".
+  if (!out.type && (p.trip_type || p.bookingType || p.booking_type)) {
+    out.type = p.trip_type || p.bookingType || p.booking_type;
+  }
+  if (out.type) {
+    var typeStr = String(out.type).toLowerCase().replace(/[_-]/g, "");
+    // v359.60.91 (b): broaden the car-equivalent matcher. LLMs use
+    // a zoo of names for rentals — self_drive, car_rental, rental,
+    // carhire, vehicle_rental, drive_yourself, self-drive — all of
+    // these mean "car rental" in our schema.
+    if (/^(rentalcar|car|carrental|selfdrive|carhire|vehiclerental|drivecourself|driveyourself|rental|hire)$/.test(typeStr)) out.type = "car";
+  }
   pick("name",       ["accommodation", "hotel", "hotelName", "property", "propertyName", "venue", "restaurantName", "tourName", "ticketName"]);
-  pick("carrier",    ["airline", "operator", "company", "provider"]);
+  pick("carrier",    ["airline", "operator", "company", "provider", "rentalCompany", "rental_company", "vendor", "rentalAgency", "rental_agency", "rentalProvider"]);
   pick("number",     ["flightNumber", "flight", "trainNumber", "train", "busNumber", "ferryNumber", "pnr", "reference"]);
   pick("address",    ["location", "destination", "venueAddress", "hotelAddress", "fullAddress"]);
-  pick("from",       ["origin", "departureCity", "departureAirport", "fromCity", "fromAirport"]);
-  pick("to",         ["destinationCity", "arrivalAirport", "toCity", "toAirport"]);
-  pick("depDate",    ["checkIn", "checkInDate", "checkin", "departureDate", "departure", "startDate", "date"]);
-  pick("depTime",    ["checkInTime", "departureTime", "startTime", "time"]);
-  pick("arrDate",    ["checkOut", "checkOutDate", "checkout", "arrivalDate", "arrival", "endDate"]);
-  pick("arrTime",    ["checkOutTime", "arrivalTime", "endTime"]);
+  pick("from",       ["origin", "departureCity", "departureAirport", "fromCity", "fromAirport", "pickupLocation", "pickup_location", "pickup_airport", "pickupAirport", "pickup_address"]);
+  pick("to",         ["destinationCity", "arrivalAirport", "toCity", "toAirport", "dropoffLocation", "dropoff_location", "returnLocation", "return_location", "dropoffAirport", "dropoff_airport"]);
+  pick("depDate",    ["checkIn", "checkInDate", "checkin", "departureDate", "departure", "startDate", "date", "pickupDate", "pickup_date", "pickup_start"]);
+  pick("depTime",    ["checkInTime", "departureTime", "startTime", "time", "pickupTime", "pickup_time"]);
+  pick("arrDate",    ["checkOut", "checkOutDate", "checkout", "arrivalDate", "arrival", "endDate", "dropoffDate", "dropoff_date", "returnDate", "return_date"]);
+  pick("arrTime",    ["checkOutTime", "arrivalTime", "endTime", "dropoffTime", "dropoff_time", "returnTime", "return_time"]);
+  // v359.60.91: coerce non-ISO date / time values to the format
+  // <input type="date">/<input type="time"> requires. Without this,
+  // "June 2, 2026" silently gets rejected by the date picker and
+  // the user sees an empty field even though the LLM extracted it.
+  out.depDate = _isoDate(out.depDate);
+  out.arrDate = _isoDate(out.arrDate);
+  out.depTime = _isoTime(out.depTime);
+  out.arrTime = _isoTime(out.arrTime);
+  out.cancelDeadline = _isoDate(out.cancelDeadline);
+  // (price normalizer moved to bottom of function — see below)
   // If depTime/arrTime came back as a range string ("3:00 PM - 10:00 PM"),
   // collapse to a single time. Check-in uses the START of the range
   // (when the room opens up); check-out uses the END (the deadline).
@@ -41302,8 +42178,8 @@ function _normalizeBookingExtraction(p) {
     var at = _parseTimeRange(out.arrTime, "end");
     if (at) out.arrTime = at;
   }
-  pick("confirmationNumber", ["confirmation", "confirmationCode", "bookingNumber", "bookingReference", "reservationNumber", "reservationCode", "code"]);
-  pick("price",      ["total", "totalPrice", "totalCost", "amount", "amountPaid", "pricePaid", "cost"]);
+  pick("confirmationNumber", ["confirmation", "confirmationCode", "confirmation_code", "confirmation_number", "bookingNumber", "booking_number", "bookingReference", "booking_reference", "reservationNumber", "reservation_number", "reservationCode", "reservation_code", "bookingId", "booking_id", "code"]);
+  pick("price",      ["total", "total_cost", "total_amount", "totalPrice", "total_price", "totalCost", "amount", "amount_paid", "amountPaid", "pricePaid", "price_paid", "cost"]);
   pick("currency",   ["currencyCode", "currencySymbol"]);
   pick("url",        ["bookingUrl", "managementUrl", "link", "href", "manageBooking", "manageReservation", "viewReservation"]);
   pick("notes",      ["description", "details", "additionalInfo", "remarks"]);
@@ -41347,10 +42223,16 @@ function _normalizeBookingExtraction(p) {
     out.notes = p.duration;
   }
   // Type detection: many alt schemas don't include type at all.
+  // v359.60.91: 'car' detection runs FIRST so a rental confirmation
+  // ("Hertz pickup at Keflavík Airport") isn't auto-misclassified as
+  // 'flight' just because it mentions an airport. Car-rental brand
+  // names and rental-specific vocabulary are the strongest signal.
   if (!out.type || out.type === "unknown") {
-    if (out.from || out.to || out.number || /flight|airline|airport/i.test(JSON.stringify(p))) out.type = "flight";
-    else if (out.address || out.arrDate || /hotel|check.?in|check.?out|nights|room/i.test(JSON.stringify(p))) out.type = "hotel";
-    else if (/restaurant|reservation.*table|dinner|lunch/i.test(JSON.stringify(p))) out.type = "restaurant";
+    var _pJson = JSON.stringify(p);
+    if (/\b(hertz|sixt|avis|enterprise|budget|alamo|national|thrifty|dollar|europcar|sicily by car|blue car rental|hertz rental|car rental|rental car|rent.{0,3}a.{0,3}car|pickup.*car|return.*car)\b/i.test(_pJson)) out.type = "car";
+    else if (out.from || out.to || out.number || /flight|airline|airport/i.test(_pJson)) out.type = "flight";
+    else if (out.address || out.arrDate || /hotel|check.?in|check.?out|nights|room/i.test(_pJson)) out.type = "hotel";
+    else if (/restaurant|reservation.*table|dinner|lunch/i.test(_pJson)) out.type = "restaurant";
     else out.type = "hotel";
   }
   // Currency normalization: turn symbols into ISO codes.
@@ -41358,6 +42240,37 @@ function _normalizeBookingExtraction(p) {
   else if (out.currency === "€") out.currency = "EUR";
   else if (out.currency === "£") out.currency = "GBP";
   else if (out.currency === "¥") out.currency = "JPY";
+
+  // v359.60.91 (b): price normalizer. LLM frequently returns price
+  // as a string with the currency embedded ("USD 612.50", "$612.50",
+  // "€586.50"). HTML5 number input refuses to display these because
+  // they aren't pure numbers. Split currency from value: populate
+  // `currency` if missing, set `price` to the numeric part.
+  // Lives at the END of the function so no later code can re-shadow
+  // it back to a string.
+  console.log("[normalizer] price before:", out.price, "type:", typeof out.price);
+  if (out.price != null && typeof out.price !== "number") {
+    var rawPriceStr = String(out.price).trim();
+    var priceCcyMatch = rawPriceStr.match(/\b(USD|EUR|GBP|JPY|CAD|AUD|ISK|CHF|CNY|INR|MXN|BRL|KRW|SEK|NOK|DKK|PLN|CZK|HUF|RUB|TRY|ZAR|SGD|HKD|NZD)\b/i);
+    if (priceCcyMatch && !out.currency) {
+      out.currency = priceCcyMatch[1].toUpperCase();
+    }
+    if (!out.currency) {
+      if (/\$/.test(rawPriceStr)) out.currency = "USD";
+      else if (/€/.test(rawPriceStr)) out.currency = "EUR";
+      else if (/£/.test(rawPriceStr)) out.currency = "GBP";
+      else if (/¥/.test(rawPriceStr)) out.currency = "JPY";
+    }
+    var priceNumMatch = rawPriceStr.match(/[\d,]+\.?\d*/);
+    if (priceNumMatch) {
+      var priceN = parseFloat(priceNumMatch[0].replace(/,/g, ""));
+      out.price = isFinite(priceN) ? priceN : null;
+    } else {
+      out.price = null;
+    }
+    console.log("[normalizer] price after:", out.price, "currency:", out.currency);
+  }
+
   return out;
 }
 
@@ -41470,7 +42383,13 @@ function _showBookingPreviewModal(destId, p, originalText) {
       '</label>';
   }
 
-  var typeOptions = ["flight","hotel","train","bus","ferry","restaurant","tour","ticket"];
+  // v359.60.91: 'car' added for car-rental bookings. Cars don't fit
+  // the destination-anchored or leg-anchored shapes the other types
+  // use — pickup and dropoff are independent locations with their
+  // own dates/times. Car rentals save to trip.tripBookings[] (a
+  // top-level array introduced in v359.60.91) and surface in the
+  // trip-level Bookings section, not under a single destination.
+  var typeOptions = ["flight","hotel","car","train","bus","ferry","restaurant","tour","ticket"];
   // v359.60.43: type dropdown gets an explicit hint that changing
   // it swaps the field set. Previously the user had no signal that
   // an LLM mis-classification (Marriott confirmation # looks flight-
@@ -41558,10 +42477,24 @@ function _showBookingPreviewModal(destId, p, originalText) {
         inp("pcfp-checkout", "Check-out date", p.arrDate || "", "", "date") +
         inp("pcfp-checkout-time", "Check-out time", p.arrTime || "", "", "time") +
         '</div>';
-    } else if (t === "flight" || t === "train" || t === "bus" || t === "ferry") {
+    } else if (t === "flight") {
+      // v360.0.1: multi-leg flight UI. The form starts with one leg
+      // block; user can add more via "+ Add a missing or new leg." If the LLM
+      // returned p.legs[], render those; otherwise render a single
+      // leg from the flat p.carrier/from/to/depDate/etc. fields.
+      // Save logic detects >1 leg → trip.tripBookings with kind:"flight"
+      // + legs[]; single leg → existing leg.bookings path.
+      html += '<div id="pcfp-legs-host"></div>';
+      html += '<div style="margin:4px 0 8px;">' +
+        '<button type="button" id="pcfp-add-leg" style="padding:5px 11px;font-size:11.5px;font-weight:600;background:#fff;color:#1a5fa8;border:1px solid #1a5fa8;border-radius:4px;cursor:pointer;font-family:inherit;">+ Add a missing or new leg</button>' +
+      '</div>';
+    } else if (t === "train" || t === "bus" || t === "ferry") {
+      // Trains, buses, ferries stay single-segment for v1. Multi-leg
+      // trains exist (e.g., Eurail itineraries) but are rare enough
+      // that the simpler shape pays for itself.
       html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
-        inp("pcfp-carrier", t === "flight" ? "Airline" : t === "train" ? "Operator" : "Operator", p.carrier || "", "") +
-        inp("pcfp-number", t === "flight" ? "Flight #" : "Number", p.number || "", "") +
+        inp("pcfp-carrier", "Operator", p.carrier || "", "") +
+        inp("pcfp-number", "Number", p.number || "", "") +
         '</div>';
       html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
         inp("pcfp-from", "From", p.from || "", "City or code") +
@@ -41575,6 +42508,37 @@ function _showBookingPreviewModal(destId, p, originalText) {
         inp("pcfp-arr-date", "Arrival date", p.arrDate || "", "", "date") +
         inp("pcfp-arr-time", "Arrival time", p.arrTime || "", "", "time") +
         '</div>';
+    } else if (t === "car") {
+      // v359.60.91: car-rental fields. Distinct shape from other
+      // booking types — pickup and dropoff locations can differ
+      // (one-way rentals), and the rental spans multiple days so
+      // both endpoints carry their own date+time. Vendor (Hertz,
+      // Avis, Sixt, Enterprise, …) is captured but optional;
+      // vehicle (Compact SUV, 4×4 with snow tires, …) is captured
+      // as a free-text Notes field within the form, so we don't
+      // over-constrain.
+      //
+      // Field-reading is intentionally lenient: the LLM sometimes
+      // routes vendor name to `name`, location to `address`, etc.
+      // We pull from every reasonable source so an LLM mis-mapping
+      // doesn't leave the user staring at an empty form.
+      html += inp("pcfp-vendor", "Rental company", p.carrier || p.name || "", "e.g. Hertz, Sixt, Blue Car Rental");
+      html += '<div style="margin:6px 0 4px;padding:8px 10px;background:#f4f8f4;border:1px solid #d4e3d4;border-radius:5px;">' +
+        '<div style="font-size:10px;font-weight:700;color:#2a6a3e;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;">Pickup</div>' +
+        inp("pcfp-pickup-loc", "Location", p.from || p.address || "", "e.g. Keflavík Airport") +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+          inp("pcfp-pickup-date", "Date", p.depDate || "", "", "date") +
+          inp("pcfp-pickup-time", "Time", p.depTime || "", "", "time") +
+        '</div>' +
+      '</div>';
+      html += '<div style="margin:0 0 8px;padding:8px 10px;background:#f8f4f4;border:1px solid #e3d4d4;border-radius:5px;">' +
+        '<div style="font-size:10px;font-weight:700;color:#7a4040;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;">Dropoff</div>' +
+        inp("pcfp-dropoff-loc", "Location", p.to || p.from || p.address || "", "Same as pickup, or different airport / city") +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+          inp("pcfp-dropoff-date", "Date", p.arrDate || "", "", "date") +
+          inp("pcfp-dropoff-time", "Time", p.arrTime || "", "", "time") +
+        '</div>' +
+      '</div>';
     } else {
       // restaurant / tour / ticket / other
       html += inp("pcfp-name", "Name", p.name || p.carrier || "", "e.g. Dinner at Dill");
@@ -41586,9 +42550,18 @@ function _showBookingPreviewModal(destId, p, originalText) {
         '</div>';
     }
     // Universal fields
+    // v359.60.91 (b): price uses type="text" instead of "number" so
+    // we can preserve trailing zeros (612.50 not 612.5). Pattern +
+    // inputmode keep it numeric while letting us format as currency.
+    var priceDisplay = (p.price != null && p.price !== "")
+      ? (typeof p.price === "number" ? p.price.toFixed(2) : String(p.price))
+      : "";
     html += '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;">' +
       inp("pcfp-conf", "Confirmation #", p.confirmationNumber || "", "") +
-      inp("pcfp-price", "Price paid", p.price != null ? p.price : "", "", "number") +
+      '<label style="display:block;margin-bottom:8px;">' +
+        '<span style="display:block;font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:2px;">Price paid</span>' +
+        '<input id="pcfp-price" type="text" inputmode="decimal" pattern="[0-9]+(\\.[0-9]+)?" value="' + priceDisplay + '" placeholder="" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid #ccc;border-radius:4px;font-family:inherit;box-sizing:border-box;" />' +
+      '</label>' +
       inp("pcfp-currency", "Currency", p.currency || "", "USD") +
       '</div>';
     // Booking URL with an inline "↗ Open" button — saves the user
@@ -41657,8 +42630,113 @@ function _showBookingPreviewModal(destId, p, originalText) {
     }
     _refreshUrlBtn();
   }
+  // v360.0.1: multi-leg flight helpers. Each leg is rendered into
+  // #pcfp-legs-host with its own ID-suffixed inputs (pcfp-leg-N-from,
+  // etc.). Save reads them in DOM order. Add/Remove buttons mutate
+  // the host live without re-rendering the whole form.
+  var _legCounter = 0;
+  function _addLegBlock(prefill) {
+    var legsHost = document.getElementById("pcfp-legs-host");
+    if (!legsHost) return;
+    _legCounter += 1;
+    var idx = _legCounter;
+    var pre = prefill || {};
+    var legDiv = document.createElement("div");
+    legDiv.className = "pcfp-leg";
+    legDiv.setAttribute("data-leg-idx", String(idx));
+    legDiv.style.cssText = "margin:6px 0;padding:8px 10px;background:#f5f8fc;border:1px solid #d4e0f0;border-radius:5px;";
+    var hdr = document.createElement("div");
+    hdr.style.cssText = "display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;";
+    var hdrL = document.createElement("div");
+    hdrL.style.cssText = "font-size:10px;font-weight:700;color:#1a5fa8;text-transform:uppercase;letter-spacing:0.05em;";
+    hdrL.textContent = "Leg " + idx;
+    var hdrR = document.createElement("button");
+    hdrR.type = "button";
+    hdrR.textContent = "✕ remove";
+    hdrR.style.cssText = "background:none;border:none;color:#c44;font-size:10.5px;cursor:pointer;padding:0;font-family:inherit;";
+    hdrR.onclick = function(){ legDiv.parentNode.removeChild(legDiv); _renumberLegs(); };
+    hdr.appendChild(hdrL);
+    hdr.appendChild(hdrR);
+    legDiv.appendChild(hdr);
+    // Field rows: airline/number, from/to, dep date/time, arr date/time
+    var inner = document.createElement("div");
+    var sfx = "leg-" + idx + "-";
+    inner.innerHTML =
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+        inp("pcfp-" + sfx + "carrier", "Airline", pre.carrier || "", "") +
+        inp("pcfp-" + sfx + "number",  "Flight #", pre.flightNumber || pre.number || "", "") +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+        inp("pcfp-" + sfx + "from", "From", pre.from || "", "City or code") +
+        inp("pcfp-" + sfx + "to",   "To",   pre.to   || "", "City or code") +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+        inp("pcfp-" + sfx + "dep-date", "Departure date", pre.depDate || "", "", "date") +
+        inp("pcfp-" + sfx + "dep-time", "Departure time", pre.depTime || "", "", "time") +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+        inp("pcfp-" + sfx + "arr-date", "Arrival date", pre.arrDate || "", "", "date") +
+        inp("pcfp-" + sfx + "arr-time", "Arrival time", pre.arrTime || "", "", "time") +
+      '</div>';
+    legDiv.appendChild(inner);
+    legsHost.appendChild(legDiv);
+  }
+  // After a leg is removed, re-number remaining legs visually so
+  // the user sees Leg 1, 2, 3 — not 1, 3 with a gap.
+  function _renumberLegs() {
+    var blocks = document.querySelectorAll(".pcfp-leg");
+    blocks.forEach(function(b, i){
+      var lbl = b.querySelector("div > div");
+      if (lbl) lbl.textContent = "Leg " + (i + 1);
+    });
+  }
+  // Initial population for the flight branch. Called from renderFields
+  // by way of _ensureFlightLegs() right after innerHTML is set.
+  function _ensureFlightLegs() {
+    var legsHost = document.getElementById("pcfp-legs-host");
+    if (!legsHost) return; // not a flight render
+    legsHost.innerHTML = "";
+    _legCounter = 0;
+    if (Array.isArray(p.legs) && p.legs.length) {
+      p.legs.forEach(function(lg){ _addLegBlock(lg); });
+    } else {
+      // Single-leg from flat fields.
+      _addLegBlock({
+        carrier:      p.carrier || "",
+        flightNumber: p.number  || "",
+        from:         p.from    || "",
+        to:           p.to      || "",
+        depDate:      p.depDate || "",
+        depTime:      p.depTime || "",
+        arrDate:      p.arrDate || "",
+        arrTime:      p.arrTime || "",
+      });
+    }
+    var addBtn = document.getElementById("pcfp-add-leg");
+    if (addBtn) addBtn.onclick = function(){ _addLegBlock({}); };
+  }
+
   renderFields();
-  typeSel.onchange = renderFields;
+  _ensureFlightLegs();
+  // v359.60.91: when type switches to 'car', hide the
+  // destination-mismatch warning + destination dropdown. Cars are
+  // trip-level — they don't anchor to a single destination — so the
+  // "doesn't match any destination" nudge is misleading. Same logic
+  // will extend to multi-leg flights in Phase 1b.
+  function _toggleTripLevelChrome() {
+    var isTripLevel = (typeSel.value === "car");
+    var warn = document.getElementById("pcfp-warning");
+    if (warn) warn.style.display = isTripLevel ? "none" : "";
+    // Look destSel up live — it's defined later in the parent
+    // function, so on the very first call it isn't ready yet.
+    var liveDestSel = document.getElementById("pcfp-dest");
+    var destLabel = liveDestSel ? liveDestSel.closest("label") : null;
+    if (destLabel) destLabel.style.display = isTripLevel ? "none" : "";
+    var dirWrap = document.getElementById("pcfp-direction-wrap");
+    if (dirWrap) dirWrap.style.display = isTripLevel ? "none" : "";
+  }
+  _toggleTripLevelChrome();
+  typeSel.onchange = function(){ renderFields(); _ensureFlightLegs(); _toggleTripLevelChrome(); };
 
   document.getElementById("pcfp-back").onclick = function(){
     ov.remove();
@@ -41737,27 +42815,72 @@ function _showBookingPreviewModal(destId, p, originalText) {
         lat: null,
         lng: null,
       });
-    } else if (t === "flight" || t === "train" || t === "bus" || t === "ferry") {
+    } else if (t === "flight") {
+      // v360.0.1: flight save with multi-leg support. Collect every
+      // leg block in the form; route the result based on count:
+      //   - 0 legs → bail (shouldn't happen, but defensive)
+      //   - 1 leg → existing single-leg paths (entry/exit/legBookings)
+      //   - 2+ legs → trip.tripBookings as kind:"flight" with legs[]
+      var legs = [];
+      document.querySelectorAll(".pcfp-leg").forEach(function(b){
+        var idx = b.getAttribute("data-leg-idx");
+        var sfx = "leg-" + idx + "-";
+        legs.push({
+          carrier:      v("pcfp-" + sfx + "carrier"),
+          flightNumber: v("pcfp-" + sfx + "number"),
+          from:         v("pcfp-" + sfx + "from"),
+          to:           v("pcfp-" + sfx + "to"),
+          depDate:      v("pcfp-" + sfx + "dep-date") || null,
+          depTime:      v("pcfp-" + sfx + "dep-time") || null,
+          arrDate:      v("pcfp-" + sfx + "arr-date") || null,
+          arrTime:      v("pcfp-" + sfx + "arr-time") || null,
+        });
+      });
+      if (!legs.length) {
+        maxAlert("Add at least one leg before saving the flight.");
+        return;
+      }
+      if (legs.length > 1) {
+        // Multi-leg → trip.tripBookings.
+        if (!trip.tripBookings) trip.tripBookings = [];
+        trip.tripBookings.push({
+          id: (typeof newBkId === "function" ? newBkId() : "bk-" + Date.now()),
+          kind: "flight",
+          legs: legs,
+          confirmationNumber: v("pcfp-conf"),
+          pricePaid: num(v("pcfp-price")),
+          currency: v("pcfp-currency") || "USD",
+          notes: v("pcfp-notes") || "",
+          url: v("pcfp-url") || null,
+          status: "booked",
+          source: "paste",
+          cancelType: cancelType,
+          cancelDeadline: cancelDeadline,
+          cancelDeadlineTime: cancelDeadlineTime,
+        });
+        if (typeof autoSave === "function") try { autoSave(); } catch(_){}
+        if (typeof _emitTripMutation === "function") try { _emitTripMutation(); } catch(_){}
+        if (typeof showSaveStatus === "function") showSaveStatus("✓ Multi-leg flight saved", 2800);
+        if (typeof drawTripMode === "function") drawTripMode();
+        if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+        return;
+      }
+      // Single-leg flight → existing entryDetails/exitDetails/leg.bookings
+      // paths. Read the values from the one leg we have.
+      var L = legs[0];
       var dirEl = document.querySelector('input[name="pcfp-dir"]:checked');
       var direction = dirEl ? dirEl.value : "arrival";
       var destIdx = trip.destinations.indexOf(freshDest);
-      // v359.60.42: arrival at the FIRST destination has no previous
-      // leg — save to trip.brief.entryDetails instead of refusing.
-      // Same for departure from the LAST destination → exitDetails.
-      // Previously these alerted with "Edit Trip Parameters → Entry…"
-      // which was a circuitous dead end; now Save just works.
       if (direction === "arrival" && destIdx <= 0) {
         if (!trip.brief) trip.brief = {};
-        var depTimeForEntry = v("pcfp-dep-time") || null;
-        var arrTimeForEntry = v("pcfp-arr-time") || null;
         trip.brief.entryDetails = {
-          carrier: v("pcfp-carrier") || "",
-          number:  v("pcfp-number")  || "",
-          time:    arrTimeForEntry || depTimeForEntry || "",
-          url:     v("pcfp-url")     || null,
+          carrier: L.carrier || "",
+          number:  L.flightNumber || "",
+          time:    L.arrTime || L.depTime || "",
+          url:     v("pcfp-url") || null,
           confirmationNumber: v("pcfp-conf") || ""
         };
-        if (!trip.brief.entryMode) trip.brief.entryMode = (t === "flight") ? "fly" : t;
+        if (!trip.brief.entryMode) trip.brief.entryMode = "fly";
         if (!trip.brief.entry) trip.brief.entry = freshDest.place || "";
         if (typeof autoSave === "function") try { autoSave(); } catch(_){}
         if (typeof drawTripMode === "function") drawTripMode();
@@ -41767,15 +42890,14 @@ function _showBookingPreviewModal(destId, p, originalText) {
       }
       if (direction === "departure" && destIdx >= trip.destinations.length - 1) {
         if (!trip.brief) trip.brief = {};
-        var depTimeForExit = v("pcfp-dep-time") || null;
         trip.brief.exitDetails = {
-          carrier: v("pcfp-carrier") || "",
-          number:  v("pcfp-number")  || "",
-          time:    depTimeForExit || "",
-          url:     v("pcfp-url")     || null,
+          carrier: L.carrier || "",
+          number:  L.flightNumber || "",
+          time:    L.depTime || "",
+          url:     v("pcfp-url") || null,
           confirmationNumber: v("pcfp-conf") || ""
         };
-        if (!trip.brief.exitMode) trip.brief.exitMode = (t === "flight") ? "fly" : t;
+        if (!trip.brief.exitMode) trip.brief.exitMode = "fly";
         if (!trip.brief.tbExit) trip.brief.tbExit = freshDest.place || "";
         if (typeof autoSave === "function") try { autoSave(); } catch(_){}
         if (typeof drawTripMode === "function") drawTripMode();
@@ -41796,6 +42918,79 @@ function _showBookingPreviewModal(destId, p, originalText) {
       if (!leg.bookings) leg.bookings = [];
       leg.bookings.push({
         id: (typeof newBkId === "function" ? newBkId() : "bk-" + Date.now()),
+        mode: "flight",
+        operator: L.carrier || "",
+        from: L.from || "",
+        to: L.to || "",
+        departure: L.depDate || null,
+        departureTime: L.depTime || null,
+        arrival: L.arrDate || null,
+        arrivalTime: L.arrTime || null,
+        confirmationNumber: v("pcfp-conf"),
+        pricePaid: num(v("pcfp-price")),
+        currency: v("pcfp-currency") || "USD",
+        notes: v("pcfp-notes") + (L.flightNumber ? "\nFlight " + L.flightNumber : ""),
+        url: v("pcfp-url") || null,
+        status: "booked",
+        source: "paste",
+        cancelType: cancelType,
+        cancelDeadline: cancelDeadline,
+        cancelDeadlineTime: cancelDeadlineTime,
+      });
+    } else if (t === "train" || t === "bus" || t === "ferry") {
+      // Trains, buses, ferries stay on the single-segment path —
+      // multi-leg support not warranted for v1. But we DO still need
+      // to handle the "arrival at first destination" / "departure
+      // from last destination" cases by routing to entryDetails /
+      // exitDetails (mirrors the flight single-leg behavior).
+      var dirEl2 = document.querySelector('input[name="pcfp-dir"]:checked');
+      var direction2 = dirEl2 ? dirEl2.value : "arrival";
+      var destIdx2 = trip.destinations.indexOf(freshDest);
+      if (direction2 === "arrival" && destIdx2 <= 0) {
+        if (!trip.brief) trip.brief = {};
+        trip.brief.entryDetails = {
+          carrier: v("pcfp-carrier") || "",
+          number:  v("pcfp-number")  || "",
+          time:    v("pcfp-arr-time") || v("pcfp-dep-time") || "",
+          url:     v("pcfp-url")     || null,
+          confirmationNumber: v("pcfp-conf") || ""
+        };
+        if (!trip.brief.entryMode) trip.brief.entryMode = t;
+        if (!trip.brief.entry) trip.brief.entry = freshDest.place || "";
+        if (typeof autoSave === "function") try { autoSave(); } catch(_){}
+        if (typeof drawTripMode === "function") drawTripMode();
+        if (typeof showSaveStatus === "function") showSaveStatus("✓ Arrival saved to trip entry", 2800);
+        if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+        return;
+      }
+      if (direction2 === "departure" && destIdx2 >= trip.destinations.length - 1) {
+        if (!trip.brief) trip.brief = {};
+        trip.brief.exitDetails = {
+          carrier: v("pcfp-carrier") || "",
+          number:  v("pcfp-number")  || "",
+          time:    v("pcfp-dep-time") || "",
+          url:     v("pcfp-url")     || null,
+          confirmationNumber: v("pcfp-conf") || ""
+        };
+        if (!trip.brief.exitMode) trip.brief.exitMode = t;
+        if (!trip.brief.tbExit) trip.brief.tbExit = freshDest.place || "";
+        if (typeof autoSave === "function") try { autoSave(); } catch(_){}
+        if (typeof drawTripMode === "function") drawTripMode();
+        if (typeof showSaveStatus === "function") showSaveStatus("✓ Departure saved to trip exit", 2800);
+        if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+        return;
+      }
+      var fromId2, toId2;
+      if (direction2 === "arrival") {
+        fromId2 = trip.destinations[destIdx2 - 1].id; toId2 = freshDest.id;
+      } else {
+        fromId2 = freshDest.id; toId2 = trip.destinations[destIdx2 + 1].id;
+      }
+      var leg2 = (typeof getLeg === "function") ? getLeg(fromId2, toId2) : null;
+      if (!leg2) { maxAlert("Couldn't find the transport leg."); return; }
+      if (!leg2.bookings) leg2.bookings = [];
+      leg2.bookings.push({
+        id: (typeof newBkId === "function" ? newBkId() : "bk-" + Date.now()),
         mode: t,
         operator: v("pcfp-carrier") || "",
         from: v("pcfp-from") || "",
@@ -41807,7 +43002,7 @@ function _showBookingPreviewModal(destId, p, originalText) {
         confirmationNumber: v("pcfp-conf"),
         pricePaid: num(v("pcfp-price")),
         currency: v("pcfp-currency") || "USD",
-        notes: v("pcfp-notes") + (v("pcfp-number") ? "\n" + (t === "flight" ? "Flight " : "") + v("pcfp-number") : ""),
+        notes: v("pcfp-notes") + (v("pcfp-number") ? "\n" + v("pcfp-number") : ""),
         url: v("pcfp-url") || null,
         status: "booked",
         source: "paste",
@@ -41815,6 +43010,46 @@ function _showBookingPreviewModal(destId, p, originalText) {
         cancelDeadline: cancelDeadline,
         cancelDeadlineTime: cancelDeadlineTime,
       });
+    } else if (t === "car") {
+      // v359.60.91: car-rental save path. Goes to trip.tripBookings[]
+      // (top-level, not destination-scoped) because pickup and dropoff
+      // can be at different destinations and the rental spans the days
+      // in between. Trip-level Bookings section is the surface; per-
+      // destination Bookings tabs can cross-reference by location later.
+      // Returns early after save so the post-block doesn't try to
+      // re-draw a destination view (this booking has no anchor dest).
+      if (!trip.tripBookings) trip.tripBookings = [];
+      trip.tripBookings.push({
+        id: (typeof newBkId === "function" ? newBkId() : "bk-" + Date.now()),
+        kind: "car",
+        vendor: v("pcfp-vendor") || "",
+        pickup: {
+          location: v("pcfp-pickup-loc") || "",
+          date: v("pcfp-pickup-date") || null,
+          time: v("pcfp-pickup-time") || null,
+        },
+        dropoff: {
+          location: v("pcfp-dropoff-loc") || v("pcfp-pickup-loc") || "",
+          date: v("pcfp-dropoff-date") || null,
+          time: v("pcfp-dropoff-time") || null,
+        },
+        confirmationNumber: v("pcfp-conf"),
+        pricePaid: num(v("pcfp-price")),
+        currency: v("pcfp-currency") || "USD",
+        notes: v("pcfp-notes") || "",
+        url: v("pcfp-url") || null,
+        status: "booked",
+        source: "paste",
+        cancelType: cancelType,
+        cancelDeadline: cancelDeadline,
+        cancelDeadlineTime: cancelDeadlineTime,
+      });
+      if (typeof autoSave === "function") try { autoSave(); } catch(_){}
+      if (typeof _emitTripMutation === "function") try { _emitTripMutation(); } catch(_){}
+      if (typeof showSaveStatus === "function") showSaveStatus("✓ Car rental saved", 2800);
+      if (typeof drawTripMode === "function") drawTripMode();
+      if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+      return;
     } else {
       // restaurant / tour / ticket / other → generalBookings
       if (!freshDest.generalBookings) freshDest.generalBookings = [];
@@ -41843,6 +43078,224 @@ function _showBookingPreviewModal(destId, p, originalText) {
     if (typeof drawDestMode === "function") drawDestMode(freshDest.id);
   };
 }
+
+// v359.60.91 (b): edit modal for trip-level bookings. Opens a small
+// form populated with the booking's current values so the user can
+// fix anything the LLM missed (or fill in fields manually). On save,
+// updates the same record in trip.tripBookings — does NOT create a
+// new one. Wired to the ✎ edit button rendered in trip-ui.js by
+// MaxTripUI.renderTripLevelBookings.
+function _editTripBooking(bookingId) {
+  if (!trip || !Array.isArray(trip.tripBookings)) return;
+  var idx = trip.tripBookings.findIndex(function(b){ return b.id === bookingId; });
+  if (idx < 0) return;
+  var bk = trip.tripBookings[idx];
+
+  var ov = document.createElement("div");
+  ov.id = "tripbk-edit-overlay";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:11900;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto;";
+  var box = document.createElement("div");
+  box.style.cssText = "background:#fff;border-radius:12px;width:600px;max-width:100%;max-height:calc(100vh - 48px);overflow:auto;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);";
+
+  function inp(id, label, value, placeholder, type) {
+    return '<label style="display:block;margin-bottom:8px;">' +
+      '<span style="display:block;font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:2px;">' + label + '</span>' +
+      '<input id="' + id + '" type="' + (type || "text") + '" value="' + (value == null ? "" : String(value).replace(/"/g, "&quot;")) + '" placeholder="' + (placeholder || "") + '" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid #ccc;border-radius:4px;font-family:inherit;box-sizing:border-box;" />' +
+      '</label>';
+  }
+
+  var kindLabel = (bk.kind === "car") ? "Car rental" :
+                  (bk.kind === "flight") ? "Flight" : "Booking";
+
+  var fieldsHtml = '';
+  if (bk.kind === "car") {
+    var pu = bk.pickup || {};
+    var dpo = bk.dropoff || {};
+    fieldsHtml +=
+      inp("tbe-vendor", "Rental company", bk.vendor || "", "e.g. Hertz, Sixt, Blue Car Rental") +
+      '<div style="margin:6px 0 4px;padding:8px 10px;background:#f4f8f4;border:1px solid #d4e3d4;border-radius:5px;">' +
+        '<div style="font-size:10px;font-weight:700;color:#2a6a3e;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;">Pickup</div>' +
+        inp("tbe-pu-loc", "Location", pu.location, "e.g. Keflavík Airport") +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+          inp("tbe-pu-date", "Date", pu.date, "", "date") +
+          inp("tbe-pu-time", "Time", pu.time, "", "time") +
+        '</div>' +
+      '</div>' +
+      '<div style="margin:0 0 8px;padding:8px 10px;background:#f8f4f4;border:1px solid #e3d4d4;border-radius:5px;">' +
+        '<div style="font-size:10px;font-weight:700;color:#7a4040;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;">Dropoff</div>' +
+        inp("tbe-do-loc", "Location", dpo.location || pu.location, "Same as pickup, or different airport / city") +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+          inp("tbe-do-date", "Date", dpo.date, "", "date") +
+          inp("tbe-do-time", "Time", dpo.time, "", "time") +
+        '</div>' +
+      '</div>';
+  } else if (bk.kind === "flight") {
+    // v360.0.1 (Phase 1b): flight legs editor. Each leg has its own
+    // input block; the user can add/remove legs to fix what the LLM
+    // missed. Saves back to bk.legs[] on Save (handler below).
+    var legsArr = Array.isArray(bk.legs) ? bk.legs : [];
+    if (!legsArr.length) {
+      legsArr = [{}]; // empty starter row if no legs (shouldn't happen)
+    }
+    fieldsHtml += '<div id="tbe-legs-host"></div>';
+    fieldsHtml += '<div style="margin:4px 0 8px;">' +
+      '<button type="button" id="tbe-add-leg" style="padding:5px 11px;font-size:11.5px;font-weight:600;background:#fff;color:#1a5fa8;border:1px solid #1a5fa8;border-radius:4px;cursor:pointer;font-family:inherit;">+ Add a missing or new leg</button>' +
+    '</div>';
+    // We'll populate the legs-host after innerHTML is set, below.
+  } else {
+    fieldsHtml += '<div style="padding:10px;background:#fff8ed;border:1px solid #f0dcc0;border-radius:6px;font-size:11.5px;color:#5c4520;">No edit UI for this booking type yet. ✕ Remove and re-paste if changes are needed.</div>';
+  }
+
+  // v359.60.91 (b): same text-input + .toFixed(2) treatment as the
+  // paste-confirmation modal so trailing zeros survive (612.50 ≠ 612.5
+  // visually for currency).
+  var tbeBkPriceDisplay = (bk.pricePaid != null && bk.pricePaid !== "")
+    ? (typeof bk.pricePaid === "number" ? bk.pricePaid.toFixed(2) : String(bk.pricePaid))
+    : "";
+  fieldsHtml +=
+    '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;">' +
+      inp("tbe-conf", "Confirmation #", bk.confirmationNumber, "") +
+      '<label style="display:block;margin-bottom:8px;">' +
+        '<span style="display:block;font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:2px;">Price paid</span>' +
+        '<input id="tbe-price" type="text" inputmode="decimal" pattern="[0-9]+(\\.[0-9]+)?" value="' + tbeBkPriceDisplay + '" placeholder="" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid #ccc;border-radius:4px;font-family:inherit;box-sizing:border-box;" />' +
+      '</label>' +
+      inp("tbe-currency", "Currency", bk.currency || "USD", "USD") +
+    '</div>' +
+    '<label style="display:block;margin-bottom:8px;">' +
+      '<span style="display:block;font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:2px;">Booking URL</span>' +
+      '<input id="tbe-url" type="url" value="' + (bk.url || "").replace(/"/g, "&quot;") + '" placeholder="https://…" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid #ccc;border-radius:4px;font-family:inherit;box-sizing:border-box;" />' +
+    '</label>' +
+    inp("tbe-notes", "Notes", bk.notes, "Optional — vehicle class, drop-off fee, etc.");
+
+  box.innerHTML =
+    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">' +
+      '<div style="width:28px;height:28px;border-radius:50%;background:#1a5fa8;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">▸</div>' +
+      '<div style="font-size:14px;font-weight:700;">' + kindLabel + ' details</div>' +
+    '</div>' +
+    '<div style="font-size:12px;color:#555;line-height:1.55;margin-bottom:14px;">Everything Max has on this booking. Change anything that\'s wrong or missing, then save.</div>' +
+    fieldsHtml +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">' +
+      '<button id="tbe-cancel" style="padding:8px 14px;font-size:12px;font-weight:600;background:#fff;color:#666;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;">Cancel</button>' +
+      '<button id="tbe-save" style="padding:8px 16px;font-size:12px;font-weight:700;background:#1a5fa8;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Save</button>' +
+    '</div>';
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+
+  function _v(id){ var el = document.getElementById(id); return el ? el.value.trim() : ""; }
+  function _num(s){ var n = parseFloat(s); return isFinite(n) ? n : null; }
+
+  // v360.0.1: leg-block builders for the flight edit modal. Mirror
+  // of the paste-confirmation flow's legs UI — same fields, different
+  // ID prefix (tbe-* vs pcfp-*) so the two modals can coexist.
+  var _tbeLegCounter = 0;
+  function _tbeBuildLegInputHtml(idx, pre) {
+    var sfx = "leg-" + idx + "-";
+    function inp2(id, label, value, placeholder, type) {
+      return '<label style="display:block;margin-bottom:8px;">' +
+        '<span style="display:block;font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:2px;">' + label + '</span>' +
+        '<input id="' + id + '" type="' + (type || "text") + '" value="' + (value == null ? "" : String(value).replace(/"/g, "&quot;")) + '" placeholder="' + (placeholder || "") + '" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid #ccc;border-radius:4px;font-family:inherit;box-sizing:border-box;" />' +
+        '</label>';
+    }
+    return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+        inp2("tbe-" + sfx + "carrier", "Airline", pre.carrier || "", "") +
+        inp2("tbe-" + sfx + "number",  "Flight #", pre.flightNumber || pre.number || "", "") +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+        inp2("tbe-" + sfx + "from", "From", pre.from || "", "City or code") +
+        inp2("tbe-" + sfx + "to",   "To",   pre.to   || "", "City or code") +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+        inp2("tbe-" + sfx + "dep-date", "Departure date", pre.depDate || "", "", "date") +
+        inp2("tbe-" + sfx + "dep-time", "Departure time", pre.depTime || "", "", "time") +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+        inp2("tbe-" + sfx + "arr-date", "Arrival date", pre.arrDate || "", "", "date") +
+        inp2("tbe-" + sfx + "arr-time", "Arrival time", pre.arrTime || "", "", "time") +
+      '</div>';
+  }
+  function _tbeAddLegBlock(pre) {
+    var host = document.getElementById("tbe-legs-host");
+    if (!host) return;
+    _tbeLegCounter += 1;
+    var idx = _tbeLegCounter;
+    var div = document.createElement("div");
+    div.className = "tbe-leg";
+    div.setAttribute("data-leg-idx", String(idx));
+    div.style.cssText = "margin:6px 0;padding:8px 10px;background:#f5f8fc;border:1px solid #d4e0f0;border-radius:5px;";
+    div.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">' +
+        '<div style="font-size:10px;font-weight:700;color:#1a5fa8;text-transform:uppercase;letter-spacing:0.05em;">Leg ' + idx + '</div>' +
+        '<button type="button" class="tbe-leg-remove" style="background:none;border:none;color:#c44;font-size:10.5px;cursor:pointer;padding:0;font-family:inherit;">✕ remove</button>' +
+      '</div>' +
+      _tbeBuildLegInputHtml(idx, pre || {});
+    host.appendChild(div);
+    div.querySelector(".tbe-leg-remove").onclick = function(){
+      div.parentNode.removeChild(div);
+      // Renumber visible labels.
+      document.querySelectorAll(".tbe-leg").forEach(function(b, i){
+        var lbl = b.querySelector("div > div");
+        if (lbl) lbl.textContent = "Leg " + (i + 1);
+      });
+    };
+  }
+  if (bk.kind === "flight") {
+    var initLegs = Array.isArray(bk.legs) && bk.legs.length ? bk.legs : [{}];
+    initLegs.forEach(function(lg){ _tbeAddLegBlock(lg); });
+    var addBtn = document.getElementById("tbe-add-leg");
+    if (addBtn) addBtn.onclick = function(){ _tbeAddLegBlock({}); };
+  }
+
+  document.getElementById("tbe-cancel").onclick = function(){ ov.remove(); };
+  ov.addEventListener("click", function(e){ if (e.target === ov) ov.remove(); });
+
+  document.getElementById("tbe-save").onclick = function(){
+    if (bk.kind === "car") {
+      bk.vendor = _v("tbe-vendor");
+      bk.pickup = {
+        location: _v("tbe-pu-loc"),
+        date: _v("tbe-pu-date") || null,
+        time: _v("tbe-pu-time") || null,
+      };
+      bk.dropoff = {
+        location: _v("tbe-do-loc") || _v("tbe-pu-loc"),
+        date: _v("tbe-do-date") || null,
+        time: _v("tbe-do-time") || null,
+      };
+    } else if (bk.kind === "flight") {
+      // v360.0.1: collect leg blocks back into bk.legs[]. Reads
+      // suffix-keyed inputs in DOM order so leg sequence matches
+      // what the user arranged.
+      var newLegs = [];
+      document.querySelectorAll(".tbe-leg").forEach(function(b){
+        var lidx = b.getAttribute("data-leg-idx");
+        var sfx = "leg-" + lidx + "-";
+        newLegs.push({
+          carrier:      _v("tbe-" + sfx + "carrier"),
+          flightNumber: _v("tbe-" + sfx + "number"),
+          from:         _v("tbe-" + sfx + "from"),
+          to:           _v("tbe-" + sfx + "to"),
+          depDate:      _v("tbe-" + sfx + "dep-date") || null,
+          depTime:      _v("tbe-" + sfx + "dep-time") || null,
+          arrDate:      _v("tbe-" + sfx + "arr-date") || null,
+          arrTime:      _v("tbe-" + sfx + "arr-time") || null,
+        });
+      });
+      bk.legs = newLegs;
+    }
+    bk.confirmationNumber = _v("tbe-conf");
+    bk.pricePaid = _num(_v("tbe-price"));
+    bk.currency = _v("tbe-currency") || "USD";
+    bk.url = _v("tbe-url") || null;
+    bk.notes = _v("tbe-notes");
+    trip.tripBookings[idx] = bk;
+    if (typeof autoSave === "function") try { autoSave(); } catch(_){}
+    if (typeof _emitTripMutation === "function") try { _emitTripMutation(); } catch(_){}
+    if (typeof showSaveStatus === "function") showSaveStatus("✓ Booking updated", 2400);
+    if (typeof drawTripMode === "function") drawTripMode();
+    ov.remove();
+  };
+}
+if (typeof globalThis !== "undefined") globalThis._editTripBooking = _editTripBooking;
 
 // ── Tracker ────────────────────────────────────────────────
 // Round FJ: reorganized into two clearly-labeled temporal sections —

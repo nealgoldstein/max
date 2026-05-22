@@ -29,20 +29,70 @@ export type AuthContext = {
 };
 
 export async function getUserFromToken(token: string): Promise<User | null> {
-  if (!token) return null;
+  const r = await resolveSession(token);
+  return r.user || null;
+}
+
+// v359.60.91: split-out session resolver so callers (auth middleware,
+// /auth/whoami) can distinguish between "no token", "no row", "expired",
+// and "user gone" instead of collapsing all four into a generic 401.
+// The repeated-sign-in bug was opaque under "Invalid or expired token";
+// surfacing the specific reason lets the client log what really
+// happened (and lets a /whoami probe tell us if the token in
+// localStorage is even reaching us intact).
+export type SessionReason =
+  | 'ok'
+  | 'no_token'
+  | 'no_session'
+  | 'expired'
+  | 'user_missing';
+
+export type SessionResolveResult = {
+  reason: SessionReason;
+  user: User | null;
+  expiresAt?: Date | null;
+  msUntilExpiry?: number | null;
+};
+
+export async function resolveSession(
+  token: string | undefined | null,
+): Promise<SessionResolveResult> {
+  if (!token) return { reason: 'no_token', user: null };
   const session = await db
     .select()
     .from(schema.sessions)
     .where(eq(schema.sessions.token, token))
     .get();
-  if (!session) return null;
-  if (session.expiresAt.getTime() < Date.now()) return null;
+  if (!session) return { reason: 'no_session', user: null };
+  const now = Date.now();
+  const exp = session.expiresAt.getTime();
+  if (exp < now) {
+    return {
+      reason: 'expired',
+      user: null,
+      expiresAt: session.expiresAt,
+      msUntilExpiry: exp - now,
+    };
+  }
   const user = await db
     .select()
     .from(schema.users)
     .where(eq(schema.users.id, session.userId))
     .get();
-  return user || null;
+  if (!user) {
+    return {
+      reason: 'user_missing',
+      user: null,
+      expiresAt: session.expiresAt,
+      msUntilExpiry: exp - now,
+    };
+  }
+  return {
+    reason: 'ok',
+    user,
+    expiresAt: session.expiresAt,
+    msUntilExpiry: exp - now,
+  };
 }
 
 export const requireAuth: MiddlewareHandler<AuthContext> = async (
@@ -52,14 +102,14 @@ export const requireAuth: MiddlewareHandler<AuthContext> = async (
   const header = c.req.header('Authorization') || '';
   const match = header.match(/^Bearer\s+(.+)$/i);
   const token = match?.[1]?.trim();
-  if (!token) {
-    return c.json({ error: 'Missing Authorization: Bearer <token>' }, 401);
+  const r = await resolveSession(token);
+  if (r.reason !== 'ok' || !r.user) {
+    // Include the reason so the browser network tab tells us which of
+    // the four failure modes hit. Status stays 401 so existing clients
+    // still clear the token and re-auth.
+    return c.json({ error: 'Invalid or expired token', reason: r.reason }, 401);
   }
-  const user = await getUserFromToken(token);
-  if (!user) {
-    return c.json({ error: 'Invalid or expired token' }, 401);
-  }
-  c.set('user', user);
+  c.set('user', r.user);
   await next();
 };
 

@@ -16,7 +16,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '../db/client.js';
-import { devLogin } from '../lib/auth.js';
+import { devLogin, resolveSession } from '../lib/auth.js';
 import { sendEmail } from '../lib/email.js';
 import { randomUUID } from 'node:crypto';
 
@@ -407,8 +407,14 @@ authApi.get('/verify', async (c) => {
   }
 
   // Mint session
+  // v359.60.90: owner accounts (ALLOWED_EMAILS) get a ~10-year
+  // session so the admin doesn't have to re-auth every 30 days.
+  // Everyone else: 30-day session, then a fresh magic link.
   const sessionToken = randomUUID() + '-' + randomUUID();
-  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  const SESSION_TTL_MS = _isBootstrapAllowed(env, email)
+    ? 3650 * 24 * 60 * 60 * 1000 // 10 years
+    : 30 * 24 * 60 * 60 * 1000;  // 30 days
+  const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
   await db
     .insert(schema.sessions)
     .values({ token: sessionToken, userId: user.id, expiresAt })
@@ -424,6 +430,48 @@ authApi.get('/verify', async (c) => {
       '&email=' +
       encodeURIComponent(email),
   );
+});
+
+// v359.60.91: GET /auth/whoami — diagnostic endpoint for the
+// repeated-sign-in bug. Returns what the server sees for the bearer
+// token you send: whether the session row exists, when it expires
+// (ISO + ms-until-expiry), and the resolved email. Always 200 so the
+// client never accidentally clears its token while probing — the
+// payload's `reason` field is the real signal.
+//
+// Paste this into the browser console while signed in to verify:
+//   fetch('https://api.travelingwithmax.app/auth/whoami', {
+//     headers: { Authorization: 'Bearer ' + localStorage.getItem('max-server-token') }
+//   }).then(r => r.json()).then(console.log)
+//
+// Possible reasons:
+//   ok           — session valid, user found.
+//   no_token     — Authorization header missing or malformed.
+//   no_session   — token didn't match any sessions row (deleted, wrong
+//                  env, or never existed).
+//   expired      — session row found but expiresAt < now.
+//   user_missing — session points at a users.id that doesn't exist
+//                  anymore (account deleted but session row wasn't).
+authApi.get('/whoami', async (c) => {
+  const header = c.req.header('Authorization') || '';
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  const token = match?.[1]?.trim() || '';
+  const r = await resolveSession(token);
+  return c.json({
+    reason: r.reason,
+    hasToken: !!token,
+    // Surface a fingerprint of the token, never the token itself — so
+    // copy/paste of /whoami output into a bug report doesn't leak
+    // session credentials.
+    tokenPrefix: token ? token.slice(0, 8) : null,
+    tokenLength: token.length,
+    email: r.user?.email || null,
+    userId: r.user?.id || null,
+    displayName: r.user?.displayName || null,
+    expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null,
+    msUntilExpiry: r.msUntilExpiry ?? null,
+    serverTime: new Date().toISOString(),
+  });
 });
 
 // ── Admin endpoints ────────────────────────────────────────

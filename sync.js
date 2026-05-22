@@ -115,6 +115,35 @@
 
     if (resp.status === 401) {
       // Token expired or invalid. Clear it so the UI prompts re-sign-in.
+      // v359.60.91: before nuking the token, capture WHY the server
+      // rejected it. The server returns { reason: 'no_session' | ... }
+      // on every 401 now (see server/src/lib/auth.ts resolveSession),
+      // so we can stash a breadcrumb in localStorage that survives the
+      // reload-and-re-sign-in cycle. The user can dump it later via:
+      //   JSON.parse(localStorage.getItem('max-auth-debug') || '[]')
+      // to see the trail of "you got booted because X" events.
+      try {
+        var reasonBody = null;
+        try { reasonBody = await resp.clone().json(); } catch (_) { reasonBody = null; }
+        var existingTok = (function () {
+          try { return localStorage.getItem(TOKEN_KEY); } catch (_) { return null; }
+        })();
+        var crumb = {
+          at: new Date().toISOString(),
+          url: url,
+          reason: (reasonBody && reasonBody.reason) || 'unknown',
+          tokenPrefix: existingTok ? existingTok.slice(0, 8) : null,
+          tokenLength: existingTok ? existingTok.length : 0,
+        };
+        console.warn('[max-sync] 401 — clearing token', crumb);
+        var trail = [];
+        try { trail = JSON.parse(localStorage.getItem('max-auth-debug') || '[]'); } catch (_) {}
+        if (!Array.isArray(trail)) trail = [];
+        trail.push(crumb);
+        // Cap at 20 so this doesn't grow unbounded.
+        while (trail.length > 20) trail.shift();
+        try { localStorage.setItem('max-auth-debug', JSON.stringify(trail)); } catch (_) {}
+      } catch (_) { /* breadcrumb is best-effort */ }
       setToken(null);
       var err401 = new Error('Sign-in required');
       err401.code = 'AUTH';

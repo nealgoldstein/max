@@ -1186,6 +1186,320 @@
     });
   }
 
+  // ── v360.0.8: wayside generator (Wayside Phase 2 + 6) ──────
+  //
+  // For each transit route on the trip, asks Claude for 3–6 worthwhile
+  // stops between the two endpoints — waterfalls, viewpoints, lunch
+  // towns, the kind of "stop the car" places that aren't destinations
+  // in their own right but are too good to drive past. Auto-commits
+  // to route.planItems[] (no curation UI yet — users can ✕ remove
+  // individual ones from the map / day card if they don't want them).
+  //
+  // Idempotent: skips routes that already have planItems[] so a
+  // re-run doesn't double-populate. Users wanting fresh waysides
+  // delete all existing first via the per-wayside remove affordance.
+  async function _llmCallWaysidesForRoute(trip, route) {
+    var from = trip.destinations.find(function (d) { return d.id === route.fromDestId; });
+    var to   = trip.destinations.find(function (d) { return d.id === route.toDestId;   });
+    if (!from || !to) return [];
+
+    // Brief context: region + pace + avoidances. Helps Claude scope
+    // (avoid altitude-sensitive stops for someone marked altitude-
+    // averse, avoid crowded sights for crowds-avoidant, etc.).
+    var brief = trip.brief || {};
+    var avoid = (brief.avoidDefaults || {});
+    var avoidBits = [];
+    if (avoid.altitude)   avoidBits.push('altitude');
+    if (avoid.crowds)     avoidBits.push('crowded sights');
+    if (avoid.heat)       avoidBits.push('heat');
+    if (avoid.cold)       avoidBits.push('cold');
+    if (avoid.longDrives) avoidBits.push('long drives');
+    var avoidStr = avoidBits.length ? ('Avoid: ' + avoidBits.join(', ') + '. ') : '';
+    var paceStr  = brief.paceMode === 'loose'   ? 'Relaxed pace. ' :
+                   brief.paceMode === 'notmuch' ? 'Intense pace. '  :
+                                                   'Balanced pace. ';
+
+    // v359.60.94: build an exclusion list so the LLM doesn't suggest
+    // a place that's already on the trip — either as a sight at any
+    // destination, a day-trip stop, or a wayside on a different
+    // route. Without this, on a re-run (or a fresh run when sights
+    // were imported earlier) the model happily proposes "Blue
+    // Lagoon" between Reykjavík and Vík when Blue Lagoon is already
+    // a Reykjavík sight. Names go to the LLM verbatim; dedupe on
+    // the receive side is case-insensitive (see below) as a backstop
+    // for "Þingvellir" vs "Thingvellir" style variants.
+    var existingNames = [];
+    var placesDict = (trip.places && typeof trip.places === 'object') ? trip.places : {};
+    Object.keys(placesDict).forEach(function (pid) {
+      var p = placesDict[pid];
+      if (p && p.name) existingNames.push(String(p.name));
+    });
+    // Also include legacy non-Places-dict sights still living on
+    // dest.days[].items[] (older trips). These have only a label.
+    (trip.destinations || []).forEach(function (d) {
+      (d.days || []).forEach(function (day) {
+        (day.items || []).forEach(function (it) {
+          var nm = it && (it.label || it.name || it.place);
+          if (nm && existingNames.indexOf(String(nm)) === -1) existingNames.push(String(nm));
+        });
+      });
+    });
+    var excludeStr = '';
+    if (existingNames.length) {
+      // Cap at 100 names so a huge trip doesn't blow the prompt; pick
+      // the most-relevant 100 in insertion order (the route's nearby
+      // destinations were added first to trip.places{} typically).
+      var capped = existingNames.slice(0, 100);
+      excludeStr = '\nAlready on the trip — do NOT suggest these (they\'re handled elsewhere):\n' +
+                   capped.map(function (n) { return '- ' + n; }).join('\n') + '\n';
+    }
+
+    var prompt =
+      'You are planning waysides — short stops along a drive between two destinations on a trip. ' +
+      'I want 3 to 6 worthwhile stops along the drive from ' + (from.place || 'origin') +
+      ' (' + (from.lat || '?') + ', ' + (from.lng || '?') + ')' +
+      ' to '   + (to.place   || 'destination') +
+      ' (' + (to.lat   || '?') + ', ' + (to.lng   || '?') + ').\n\n' +
+      'Region: ' + (brief.region || brief.placeName || 'unknown') + '.\n' +
+      paceStr + avoidStr +
+      excludeStr +
+      '\nReturn ONLY a JSON array — no prose, no markdown — with one entry per stop:\n' +
+      '[\n' +
+      '  {\n' +
+      '    "name": "Seljalandsfoss",\n' +
+      '    "lat": 63.6156,\n' +
+      '    "lng": -19.9886,\n' +
+      '    "why": "A 60m waterfall you can walk behind. 5 minutes off the Ring Road.",\n' +
+      '    "durationHours": 0.5,\n' +
+      '    "iconic": true\n' +
+      '  }\n' +
+      ']\n\n' +
+      'Rules:\n' +
+      '- Stops must be approximately on the natural driving path from origin to destination — not 50km off-route.\n' +
+      '- lat/lng must be real coordinates (within ±0.5 of correct). If you don\'t know exact coords, omit the stop.\n' +
+      '- "why" is one sentence, conversational, explains the appeal in ≤25 words.\n' +
+      '- "durationHours" is a quick estimate of how long someone might linger (0.25–2).\n' +
+      '- "iconic" is true for unmissable stops, false for "if you have time."\n' +
+      '- Skip stops that aren\'t worth a detour. Better to return 3 great ones than 6 mediocre.\n' +
+      '- If the drive is too short (<2 hours) and there\'s nothing notable, return [].\n';
+
+    var raw;
+    try {
+      raw = await global.callMax([{ role: 'user', content: prompt }], 2000, 45000);
+    } catch (e) {
+      console.warn('[waysides] LLM call failed for route', route.id, e);
+      return [];
+    }
+    var clean = String(raw || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+    var firstB = clean.indexOf('[');
+    var lastB  = clean.lastIndexOf(']');
+    if (firstB >= 0 && lastB > firstB) clean = clean.slice(firstB, lastB + 1);
+    try {
+      var arr = JSON.parse(clean);
+      if (!Array.isArray(arr)) return [];
+      return arr.filter(function (s) {
+        return s && typeof s === 'object' && s.name && typeof s.lat === 'number' && typeof s.lng === 'number';
+      });
+    } catch (e) {
+      console.warn('[waysides] JSON parse failed:', clean.slice(0, 200));
+      return [];
+    }
+  }
+
+  // Commit an array of wayside stops to a route. Creates a Place
+  // entry in trip.places{} for each stop, and a PlanItem of
+  // type:"stop" in route.planItems[]. Idempotent at the call site —
+  // caller decides whether to skip already-populated routes.
+  // v359.60.94: backstop client-side dedupe. The prompt already tells
+  // the LLM not to repeat existing places, but models drift, so we
+  // also filter here by case-insensitive name match (covers
+  // "Þingvellir"/"Thingvellir" diacritic flips and "Blue Lagoon"
+  // proper-noun reuse). Names are normalized via _normName below.
+  function _normName(s) {
+    if (s == null) return '';
+    var lower = String(s).toLowerCase();
+    // Strip diacritics so Þ/þ-vs-Th and é-vs-e collide.
+    if (typeof lower.normalize === 'function') {
+      lower = lower.normalize('NFKD').replace(/[̀-ͯ]/g, '');
+    }
+    // Collapse non-alphanumerics so "St. Mary's" matches "St Marys".
+    return lower.replace(/[^a-z0-9]+/g, ' ').trim();
+  }
+  function _commitWaysidesToRoute(trip, route, stops) {
+    if (!Array.isArray(stops) || !stops.length) return 0;
+    if (!trip.places || typeof trip.places !== 'object') trip.places = {};
+    if (!Array.isArray(route.planItems)) route.planItems = [];
+
+    // v359.60.95: off-route filter. The LLM is told "stops must be
+    // approximately on the natural driving path — not 50km off-route"
+    // but ignores it more often than we'd like. Symptom: the trip
+    // map's detour polyline bends to coordinates that aren't between
+    // the two destinations at all (a Reykjavík→Vík wayside that's
+    // actually in the north of Iceland), producing a chaotic web of
+    // criss-crossing lines.
+    //
+    // The check: route's direct great-circle distance vs. the
+    // distance going via the wayside (from→stop + stop→to). If the
+    // detour adds more than 40% on top of the direct drive (and at
+    // least 15km of extra travel — so we don't reject reasonable
+    // micro-detours on short hops), it's a side trip not a wayside.
+    // Drop it with a console warning so the data stays clean and the
+    // map readable.
+    var from = (trip.destinations || []).find(function (d) { return d && d.id === route.fromDestId; });
+    var to   = (trip.destinations || []).find(function (d) { return d && d.id === route.toDestId;   });
+    var fromCtr = (from && typeof from.lat === 'number' && typeof from.lng === 'number') ? [from.lat, from.lng] : null;
+    var toCtr   = (to   && typeof to.lat   === 'number' && typeof to.lng   === 'number') ? [to.lat,   to.lng]   : null;
+    var directKm = (fromCtr && toCtr) ? _fqHaversineKm(fromCtr[0], fromCtr[1], toCtr[0], toCtr[1]) : null;
+
+    // Build the dedupe set from every name already on the trip:
+    //   - places dict (sights at destinations + waysides on other routes)
+    //   - legacy items still living on dest.days[].items[]
+    var taken = Object.create(null);
+    Object.keys(trip.places).forEach(function (pid) {
+      var p = trip.places[pid];
+      if (p && p.name) taken[_normName(p.name)] = true;
+    });
+    (trip.destinations || []).forEach(function (d) {
+      (d.days || []).forEach(function (day) {
+        (day.items || []).forEach(function (it) {
+          var nm = it && (it.label || it.name || it.place);
+          if (nm) taken[_normName(nm)] = true;
+        });
+      });
+    });
+
+    var added = 0;
+    stops.forEach(function (s) {
+      var key = _normName(s.name);
+      if (!key) return;
+      if (taken[key]) {
+        console.log('[waysides] skipping duplicate:', s.name);
+        return;
+      }
+
+      // Off-route check — only runs when we have all three sets of
+      // coords. If anything's missing we accept the stop (better to
+      // keep a possibly-off-route wayside than to lose every wayside
+      // because a destination is missing lat/lng).
+      if (directKm != null && fromCtr && toCtr &&
+          typeof s.lat === 'number' && typeof s.lng === 'number') {
+        var viaKm = _fqHaversineKm(fromCtr[0], fromCtr[1], s.lat, s.lng) +
+                    _fqHaversineKm(s.lat, s.lng, toCtr[0], toCtr[1]);
+        var extraKm = viaKm - directKm;
+        // Allow up to 40% overhead OR 15 km, whichever is more
+        // permissive. Short hops get a flat 15 km cushion so we don't
+        // reject a 5 km detour on a 20 km drive (which is 25% over
+        // the direct distance — small absolute terms, but >40% in
+        // ratio terms for a tiny drive).
+        var allowedExtraKm = Math.max(directKm * 0.4, 15);
+        if (extraKm > allowedExtraKm) {
+          console.warn(
+            '[waysides] dropping off-route stop:',
+            s.name,
+            '— direct ' + directKm.toFixed(0) + ' km, via stop ' + viaKm.toFixed(0) + ' km, extra ' + extraKm.toFixed(0) + ' km > ' + allowedExtraKm.toFixed(0) + ' km allowed'
+          );
+          return;
+        }
+      }
+
+      taken[key] = true;
+      var pid = 'p-w-' + Math.random().toString(36).slice(2, 10);
+      trip.places[pid] = {
+        id: pid,
+        name: s.name,
+        lat: s.lat,
+        lng: s.lng,
+        type: 'sight',
+        notes: s.why || '',
+      };
+      var piid = 'pi-w-' + Math.random().toString(36).slice(2, 10);
+      route.planItems.push({
+        id: piid,
+        type: 'stop',
+        state: 'suggestion',
+        placeId: pid,
+        duration: (typeof s.durationHours === 'number' && s.durationHours > 0) ? s.durationHours : 0.5,
+        recommendedMin: (typeof s.durationHours === 'number' && s.durationHours > 0) ? s.durationHours : 0.5,
+        priority: s.iconic ? 'iconic' : 'optional',
+        notes: s.why || '',
+        source: 'llm-wayside-v1',
+      });
+      added++;
+    });
+    return added;
+  }
+
+  // Main entry. Walk all transit routes; for each one without
+  // existing planItems[], call the LLM and commit. Returns a summary
+  // the UI can use to show "✓ N waysides added across M routes."
+  //
+  // v359.60.94: takes an optional `opts.onProgress` callback so the UI
+  // can show live progress instead of sitting on "Generating…" for
+  // two minutes. Without this, the user has no way to tell whether
+  // the loop is making progress or hung — on a 15-route Iceland trip
+  // the sequential LLM calls take 75–150s end to end. Each route
+  // commit fires onProgress({ done, total, route, addedThisRoute,
+  // trip }) so the UI can re-render the wayside section between
+  // calls and stops appear progressively from north to south. Errors
+  // on a single route don't abort the loop — they just yield 0 stops
+  // for that route, get reported via onProgress with `error` set, and
+  // the loop continues. That way a flaky LLM call on one route
+  // doesn't waste the work already done on the others.
+  async function generateWaysidesForTrip(trip, opts) {
+    opts = opts || {};
+    var onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : null;
+    if (!trip || !Array.isArray(trip.routes)) return { addedRoutes: 0, addedItems: 0, skipped: 0 };
+    var transits = trip.routes.filter(function (r) {
+      var sub = (typeof MaxMigration !== 'undefined' && MaxMigration.routeSubKind)
+        ? MaxMigration.routeSubKind(r)
+        : (r.subKind || (r.kind && r.kind !== 'route' ? r.kind : null));
+      return sub === 'transit';
+    });
+    // Build the work queue first — only transit routes without
+    // existing waysides count toward the total. This way the UI's
+    // "3 of 12" matches what the user will actually see happen.
+    var queue = transits.filter(function (r) {
+      return !(Array.isArray(r.planItems) && r.planItems.length);
+    });
+    var skipped = transits.length - queue.length;
+    var total = queue.length;
+    if (onProgress) {
+      try { onProgress({ phase: 'start', done: 0, total: total, skipped: skipped, trip: trip }); } catch (_) {}
+    }
+    var addedRoutes = 0, addedItems = 0;
+    for (var i = 0; i < queue.length; i++) {
+      var r = queue[i];
+      var stops = [];
+      var err = null;
+      try {
+        stops = await _llmCallWaysidesForRoute(trip, r);
+      } catch (e) {
+        err = e;
+        console.warn('[waysides] route', r.id, 'failed:', e);
+      }
+      var n = _commitWaysidesToRoute(trip, r, stops);
+      if (n > 0) { addedRoutes++; addedItems += n; }
+      if (onProgress) {
+        try {
+          onProgress({
+            phase: 'route',
+            done: i + 1,
+            total: total,
+            route: r,
+            addedThisRoute: n,
+            error: err,
+            trip: trip,
+          });
+        } catch (_) {}
+      }
+    }
+    if (onProgress) {
+      try { onProgress({ phase: 'done', done: total, total: total, addedRoutes: addedRoutes, addedItems: addedItems, trip: trip }); } catch (_) {}
+    }
+    return { addedRoutes: addedRoutes, addedItems: addedItems, skipped: skipped };
+  }
+  global.generateWaysidesForTrip = generateWaysidesForTrip;
+
   // ── SCAFFOLD-2: commitment state derivation ────────────────
   // Itinerary items pass through up to four states as the trip
   // firms up. The visual layer depends on this derivation; the

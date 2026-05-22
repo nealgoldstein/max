@@ -13,8 +13,15 @@ compatibility_flags = ["nodejs_compat"]
 #   wrangler secret put RESEND_API_KEY        # v356.5 — reminder emails
 #   wrangler secret put PUBLIC_APP_URL        # optional; "Open trip" link target
 
-# v356.4: daily reminder cron. Fires runDailyReminderJob, which walks
-# users + trips and emails 7/3/1-day-out reminders. 14:00 UTC =
-# 7am Pacific / 10am Eastern — over morning coffee for US users.
+# v356.4: daily reminder cron at 14:00 UTC (7am Pacific / 10am ET) —
+# fires runDailyReminderJob, walks users + trips, emails the 7/3/1-day
+# departure reminders.
+#
+# v360.0.0: email-parser cron every minute. Picks up rows from
+# pending_emails where parse_status='received', calls Claude to
+# extract booking data, marks parsed. Minute granularity is the
+# tightest Cloudflare allows; gives near-real-time UX without
+# overloading the LLM proxy. Both crons funnel through the same
+# scheduled() handler in worker.ts which branches on event.cron.
 [triggers]
-crons = ["0 14 * * *"]
+crons = ["0 14 * * *", "* * * * *"]

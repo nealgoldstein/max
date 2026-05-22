@@ -111,7 +111,55 @@ The container. One trip = one journey the user is planning or has taken.
 | `candidates` | array | Picker carry-forward set |
 | `notes` | string | Freeform |
 | `share` | object | Token, revokedAt, etc. |
+| `tripBookings` | array | See *Trip-level bookings* (v359.60.91). Flights and car rentals that don't anchor to a single destination. |
 | `createdAt`, `updatedAt` | ISO date | |
+
+### Trip-level bookings
+
+`trip.tripBookings[]` is a flat top-level array introduced in v359.60.91 to hold bookings that span the trip rather than anchoring to a single destination — primarily **car rentals** (pickup and dropoff can be at different cities, vehicle is in your possession for the full rental window) and **multi-leg flights** (one PNR covering several physical legs, possibly with layovers).
+
+Distinct from:
+- `destination.hotelBookings[]` — one-place-one-night-or-more stays
+- `trip.legs[fromId-toId].bookings[]` — transit tickets between two consecutive destinations
+- `destination.generalBookings[]` — activities, restaurants, tours
+
+Each entry has a `kind` discriminator (`flight` or `car`) plus the common booking fields (`confirmationNumber`, `pricePaid`, `currency`, `url`, `notes`, `status`, `source`, `cancelType`, `cancelDeadline`, `cancelDeadlineTime`).
+
+**Car rental shape:**
+
+```js
+{
+  id, kind: "car",
+  vendor: "Hertz",
+  pickup:  { location, date, time },   // "Keflavík Airport", "2026-06-02", "07:30"
+  dropoff: { location, date, time },   // same location for round-trip rentals
+  confirmationNumber, pricePaid, currency, url, notes, status, source,
+  cancelType, cancelDeadline, cancelDeadlineTime
+}
+```
+
+**Flight shape (multi-leg):**
+
+```js
+{
+  id, kind: "flight",
+  legs: [
+    {
+      from, to,             // "JFK", "KEF"
+      depDate, depTime,
+      arrDate, arrTime,
+      carrier,              // "Icelandair"
+      flightNumber,         // "FI614"
+      cabin                 // optional
+    },
+    // …layover legs continue here
+  ],
+  confirmationNumber, pricePaid, currency, url, notes, status, source,
+  cancelType, cancelDeadline, cancelDeadlineTime
+}
+```
+
+Single-leg flights between consecutive destinations continue to use `trip.legs[fromId-toId].bookings[]` for backward compatibility — only multi-leg flights and standalone trip-level flights route here.
 
 ### Brief
 

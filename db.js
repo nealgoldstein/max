@@ -218,15 +218,26 @@
     }
   }
 
-  function tripWriteRaw(id, json) {
+  // v359.60.97: opts.silent=true persists without emitting tripWritten.
+  // Used by localSave to avoid the engine subscriber re-parsing the
+  // envelope and re-assigning global.trip — which would break any
+  // code holding refs into the existing trip object (DOM closures,
+  // hero-map markers, popup links). Local edits already mutated
+  // global.trip in place and emitted tripChange via _emitTripMutation,
+  // so the UI is fresh; firing tripWritten would just churn refs.
+  // External writers (sync pulls, picker handoffs) deliberately want
+  // the event because their job IS to install a new envelope, so
+  // they keep the default (silent=false).
+  function tripWriteRaw(id, json, opts) {
     if (!canPersist || !id) return false;
+    var silent = !!(opts && opts.silent);
 
     // v359.43.1: short-circuit for trips already in IDB.
     if (_tripIdbMirrorRaw[id]) {
       _writeTripToIdb(id, json);
       var envEarly = null;
       try { envEarly = JSON.parse(json); } catch (_) {}
-      emit('tripWritten', { id: id, envelope: envEarly });
+      if (!silent) emit('tripWritten', { id: id, envelope: envEarly });
       return true;
     }
 
@@ -234,7 +245,7 @@
       localStorage.setItem(KEY_TRIP_PREFIX + id, json);
       var envelope = null;
       try { envelope = JSON.parse(json); } catch (_) {}
-      emit('tripWritten', { id: id, envelope: envelope });
+      if (!silent) emit('tripWritten', { id: id, envelope: envelope });
       return true;
     } catch (e) {
       if (e && (e.name === 'QuotaExceededError' || (e.code && e.code === 22))) {
@@ -244,7 +255,7 @@
             localStorage.setItem(KEY_TRIP_PREFIX + id, json);
             var env2 = null;
             try { env2 = JSON.parse(json); } catch (_) {}
-            emit('tripWritten', { id: id, envelope: env2 });
+            if (!silent) emit('tripWritten', { id: id, envelope: env2 });
             return true;
           } catch (e2) { /* fall through */ }
         }
@@ -252,7 +263,7 @@
         var env3 = null;
         try { env3 = JSON.parse(json); } catch (_) {}
         console.warn('[MaxDB] localStorage full — trip', id, 'now in IDB (raw)');
-        emit('tripWritten', { id: id, envelope: env3 });
+        if (!silent) emit('tripWritten', { id: id, envelope: env3 });
         return true;
       }
       console.warn('[MaxDB] tripWriteRaw failed:', e);

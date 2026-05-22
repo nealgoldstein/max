@@ -10,6 +10,7 @@ import { tripsApi } from './routes/trips.js';
 import { llmApi } from './routes/llm.js';
 import { prefsApi } from './routes/prefs.js';
 import { shareApi } from './routes/share.js';
+import { inboxApi } from './routes/inbox.js';
 
 export function createApp() {
   const app = new Hono();
@@ -36,6 +37,12 @@ export function createApp() {
   app.route('/trips', tripsApi);
   app.route('/llm', llmApi);
   app.route('/user/prefs', prefsApi);
+  // v360.0.0: email auto-import API. The inboxApi router carries
+  // both /inbox and /unassigned-bookings routes — mount at /user
+  // so paths become /user/inbox, /user/inbox/rotate,
+  // /user/unassigned-bookings, /user/unassigned-bookings/:id/attach,
+  // and /user/unassigned-bookings/:id/dismiss.
+  app.route('/user', inboxApi);
   app.route('/share', shareApi);
 
   app.notFound((c) => c.json({ error: 'Not found' }, 404));

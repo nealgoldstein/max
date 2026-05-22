@@ -25,6 +25,75 @@ forecasts, in-app Q&A) and stays out of the way everywhere else.
 
 ---
 
+## How Max thinks about travel — late binding
+
+A trip in Max is something you *progressively shape*, not something
+you fully define in advance. The world contains more information
+than you can process beforehand. Arrival, conversation, weather, a
+recommendation from someone you meet at breakfast — these will shape
+what actually happens more than any pre-departure checklist can. The
+map is not the territory.
+
+### Max is for the wisp, not the blank slate
+
+Trips don't start in Max with "where should I go?" — they start
+somewhere outside the app, in a book, a conversation, a half-read
+article, a piece of music, a memory. You arrive at Max already
+pointing at a region: Iceland in October, the Alps next summer, the
+Dordogne sometime. Max's job begins from that wisp.
+
+### Three activities, not one
+
+Max separates three activities that planners usually mash together,
+and lets each one breathe in its own register:
+
+- **Spark** is introducing a wisp. The first wisp is what brought
+  you to Max. New sparks fire continuously throughout planning —
+  when reading about a place, when talking to someone, when looking
+  at the map and noticing something you hadn't considered. Each
+  spark is a possibility-in-waiting.
+
+- **Shape** is giving wisps form. Turning "Iceland" into a sequence
+  of destinations with dates; turning "puffins" into a specific
+  stop on a specific day. Shape receives wisps from Spark and
+  surfaces new wisps back — discovering one place makes adjacent
+  ones visible. Spark and Shape run as a tightly coupled recursive
+  loop, and the act of running the loop *generates experience* —
+  what you like, what you'd skip, what feels right.
+
+- **Operate** is about coordination, timing, and commitment. Which
+  hotel will you actually book? What day will you visit a sight?
+  Which deadlines matter now, and which can wait? Operate
+  *narrows* the trip rather than expanding it, and it only fires
+  when reality requires it.
+
+The expansive Spark↔Shape loop and the narrowing Operate activity
+share data but they don't share a mindset. Max keeps them visually
+distinct so the shaping mind isn't pulled prematurely into
+operational anxiety, and the operational mind doesn't have to wade
+through possibility to make a deadline.
+
+### Late binding
+
+The borrowed concept is **late binding** — a software-engineering
+term for *deferring decisions until you have to make them*. Sights,
+hotels, day-by-day plans: none of them lock in until reality
+requires it (a cancellation deadline, a flight with assigned dates,
+a hotel that won't have rooms in two weeks). Everything else stays
+in play.
+
+This is why **discovery isn't a phase that ends**. Sights aren't
+items on a pre-existing checklist; they emerge through the
+Spark↔Shape loop. The loop runs through the entire trip, including
+while you're on it.
+
+A rigid traveler asks "What will I do there?"
+A late-binding traveler asks "What becomes possible once I arrive?"
+
+Leave room for the world to surprise you.
+
+---
+
 ## The four phases
 
 Max revolves around four phases that overlap and feed each other.

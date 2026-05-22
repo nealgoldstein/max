@@ -27,7 +27,7 @@
 // scoping aligned with the asset versions the page actually
 // requests.
 
-const CACHE = 'max-sw-DEV';
+const CACHE = 'max-sw-1779458597';
 const CORE = [
   '/',
   '/index.html',

@@ -26,6 +26,140 @@ import { requireAuth, type AuthContext } from '../lib/auth.js';
 const tripsApi = new Hono<AuthContext>();
 tripsApi.use('*', requireAuth);
 
+// ─── helpers ─────────────────────────────────────────────────
+
+// Trip body is stored as JSON. The client wraps the trip in
+// `{ trip: { ... } }`; older bodies might be flat. This pair of
+// helpers handles both shapes so the same merge code works either way.
+function _unwrap(body: unknown): Record<string, unknown> {
+  if (!body || typeof body !== 'object') return {} as Record<string, unknown>;
+  const b = body as { trip?: Record<string, unknown> };
+  return (b.trip || (body as Record<string, unknown>));
+}
+function _rewrap(original: unknown, unwrapped: Record<string, unknown>): Record<string, unknown> {
+  if (original && typeof original === 'object' && 'trip' in (original as object)) {
+    return { ...(original as Record<string, unknown>), trip: unwrapped };
+  }
+  return unwrapped;
+}
+
+// v359.60.95: preserve email-forwarded bookings that exist on the
+// server but are missing from the incoming PUT body. See the long
+// comment in PUT /:id for why this is needed. Operates on three
+// arrays:
+//
+//   - tripBookings[]              (top-level: flights, car rentals)
+//   - destinations[i].hotelBookings[]
+//   - destinations[i].generalBookings[]
+//
+// Match by booking.id. Anything with source === 'email-forward'
+// that's on server but not in incoming is preserved.
+//
+// Returns the body in the same shape the original was in (wrapped
+// or flat). Pure function — doesn't mutate its inputs.
+function _preserveEmailForwardedBookings(
+  existingBody: unknown,
+  incomingBody: unknown,
+): Record<string, unknown> {
+  // Defensive copies so we never mutate caller-owned objects.
+  const incoming = JSON.parse(JSON.stringify(incomingBody)) as Record<string, unknown>;
+  const incomingInner = _unwrap(incoming);
+  const existingInner = _unwrap(existingBody);
+
+  // ── trip-level bookings ──
+  //
+  // Preservation rule (v359.60.95): an email-forwarded booking is
+  // preserved only when the incoming body has NO booking that
+  // matches it by id OR by natural key (kind + confirmationNumber).
+  // The natural-key check is what makes client-side dedupe stick:
+  // if the user deletes 6 of 7 duplicate United flights locally and
+  // saves, the surviving one's (kind=flight, conf=BP8P5W) covers
+  // the others' natural key, so we don't restore them. Without
+  // this rule the merge would dutifully resurrect every duplicate
+  // on the next save, defeating the cleanup.
+  function _bookingKeys(b: Record<string, unknown>): { id: string; natural: string | null } {
+    const id = String(b.id || '');
+    const kind = (b.kind as string) || (b.type as string) || '';
+    const conf = typeof b.confirmationNumber === 'string' ? b.confirmationNumber.trim().toLowerCase() : '';
+    const natural = (kind && conf) ? (kind + '|' + conf) : null;
+    return { id, natural };
+  }
+  const incomingTb = Array.isArray(incomingInner.tripBookings) ? (incomingInner.tripBookings as Array<Record<string, unknown>>) : [];
+  const existingTb = Array.isArray(existingInner.tripBookings) ? (existingInner.tripBookings as Array<Record<string, unknown>>) : [];
+  const incomingTbIds = new Set<string>();
+  const incomingTbNaturals = new Set<string>();
+  incomingTb.forEach((b) => {
+    const k = _bookingKeys(b);
+    if (k.id) incomingTbIds.add(k.id);
+    if (k.natural) incomingTbNaturals.add(k.natural);
+  });
+  const preservedTb = existingTb.filter((b) => {
+    if (!b || b.source !== 'email-forward') return false;
+    const k = _bookingKeys(b);
+    if (k.id && incomingTbIds.has(k.id)) return false;
+    if (k.natural && incomingTbNaturals.has(k.natural)) return false;
+    return true;
+  });
+  if (preservedTb.length > 0) {
+    console.log(
+      '[trips:put] preserving', preservedTb.length,
+      'server-side email-forwarded tripBooking(s):',
+      preservedTb.map((b) => b.id).join(', '),
+    );
+    incomingInner.tripBookings = incomingTb.concat(preservedTb);
+  }
+
+  // ── per-destination bookings (hotelBookings + generalBookings) ──
+  // Match destinations by id so reordering on the client doesn't
+  // mis-attribute the preserved bookings. If a destination on
+  // server is missing from the incoming body, the bookings are
+  // orphaned — surface them in tripBookings as a fallback so they
+  // don't vanish. (Rare; would only happen if user deletes a
+  // destination that had an email-forward hotel.)
+  const incomingDests = Array.isArray(incomingInner.destinations) ? (incomingInner.destinations as Array<Record<string, unknown>>) : [];
+  const existingDests = Array.isArray(existingInner.destinations) ? (existingInner.destinations as Array<Record<string, unknown>>) : [];
+  const incomingDestById = new Map<string, Record<string, unknown>>();
+  incomingDests.forEach((d) => { if (d && d.id) incomingDestById.set(String(d.id), d); });
+
+  let orphanedFromDeletedDests: Array<Record<string, unknown>> = [];
+  existingDests.forEach((existDest) => {
+    if (!existDest || !existDest.id) return;
+    const incDest = incomingDestById.get(String(existDest.id));
+    (['hotelBookings', 'generalBookings'] as const).forEach((arrName) => {
+      const existArr = Array.isArray(existDest[arrName]) ? (existDest[arrName] as Array<Record<string, unknown>>) : [];
+      const emailBkings = existArr.filter((b) => b && b.source === 'email-forward');
+      if (emailBkings.length === 0) return;
+      if (!incDest) {
+        // Destination deleted client-side. Park the bookings at the
+        // trip level rather than silently dropping them.
+        orphanedFromDeletedDests = orphanedFromDeletedDests.concat(emailBkings);
+        return;
+      }
+      const incArr = Array.isArray(incDest[arrName]) ? (incDest[arrName] as Array<Record<string, unknown>>) : [];
+      const incIds = new Set(incArr.map((b) => String(b.id)));
+      const preserved = emailBkings.filter((b) => !incIds.has(String(b.id)));
+      if (preserved.length > 0) {
+        console.log(
+          '[trips:put] preserving', preserved.length,
+          'server-side email-forwarded', arrName,
+          'on dest', existDest.id,
+        );
+        incDest[arrName] = incArr.concat(preserved);
+      }
+    });
+  });
+  if (orphanedFromDeletedDests.length > 0) {
+    console.log(
+      '[trips:put] parking', orphanedFromDeletedDests.length,
+      'orphaned email-forwarded booking(s) at trip level',
+    );
+    const tb = Array.isArray(incomingInner.tripBookings) ? (incomingInner.tripBookings as Array<Record<string, unknown>>) : [];
+    incomingInner.tripBookings = tb.concat(orphanedFromDeletedDests);
+  }
+
+  return _rewrap(incoming, incomingInner);
+}
+
 // List
 tripsApi.get('/', async (c) => {
   const user = c.get('user');
@@ -144,11 +278,57 @@ tripsApi.put('/:id', async (c) => {
     );
   }
 
+  // v359.60.95: preserve server-side email-forwarded bookings.
+  //
+  // Background. Email parser → attacher writes new bookings directly
+  // into the trip body server-side (tripBookings[] for flights/cars,
+  // destination.hotelBookings[] / .generalBookings[] for the rest).
+  // The client doesn't know about them until its next pullAll.
+  //
+  // The race that loses them: client pulls trip body at T1, user
+  // edits locally (e.g. Generate Waysides) at T2, autosave PUTs the
+  // local body at T2. If the server attached a flight at T1.5
+  // (between pull and save), the client's PUT body lacks that
+  // flight and overwrites it on the server. The local timestamp T2
+  // is newer than the server's T1.5, so the conflict guard above
+  // doesn't fire — and the flight is gone from both sides.
+  //
+  // The fix: before writing, scan the existing server body for any
+  // booking marked source: 'email-forward'. If the incoming body
+  // doesn't have it (by id), merge it back in. Email-forwarded
+  // bookings always originate server-side, so the client's
+  // "absence" of one is never a deletion intent — it's just
+  // ignorance. Anything else (user deletions) operates as before.
+
+  // Diagnostic: log what's coming in and what's already on the server
+  // so we can verify the merge is actually firing. The bug we're
+  // chasing is that even after the merge code shipped, the email-
+  // attached flight kept disappearing — this log will tell us
+  // whether the PUT even ran, what the incoming body had, what the
+  // existing server body had, and what the merge decided to preserve.
+  const _existingTb = (_unwrap(existing.body).tripBookings as Array<{ id?: string; source?: string }> | undefined) || [];
+  const _incomingTb = (_unwrap(body).tripBookings as Array<{ id?: string; source?: string }> | undefined) || [];
+  console.log(
+    '[trips:put]', id,
+    'existing.tripBookings=' + _existingTb.length,
+    '(emailForwarded=' + _existingTb.filter((b) => b && b.source === 'email-forward').length + ')',
+    'incoming.tripBookings=' + _incomingTb.length,
+    '(emailForwarded=' + _incomingTb.filter((b) => b && b.source === 'email-forward').length + ')',
+  );
+
+  const mergedBody = _preserveEmailForwardedBookings(existing.body, body);
+  const _mergedTb = (_unwrap(mergedBody).tripBookings as Array<{ id?: string; source?: string }> | undefined) || [];
+  console.log(
+    '[trips:put]', id,
+    'merged.tripBookings=' + _mergedTb.length,
+    '(emailForwarded=' + _mergedTb.filter((b) => b && b.source === 'email-forward').length + ')',
+  );
+
   await db
     .update(schema.trips)
     .set({
       name: name ?? existing.name,
-      body,
+      body: mergedBody,
       // If client didn't send uiState, preserve what's on the row.
       // Most full-trip writes don't touch UI state — those use
       // PATCH /:id/ui-state instead.
