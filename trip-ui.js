@@ -552,7 +552,9 @@
       var startInp=document.createElement("input"); startInp.type="time"; startInp.className="stime-inp"; startInp.value=item.timeStart||"";
       var sep=document.createElement("span"); sep.style.cssText="font-size:10px;color:#aaa;"; sep.textContent="\u2013";
       var endInp=document.createElement("input"); endInp.type="time"; endInp.className="stime-inp"; endInp.value=item.timeEnd||"";
-      var saveBtn=document.createElement("button"); saveBtn.className="sa"; saveBtn.style.cssText="font-size:9px;padding:1px 5px;"; saveBtn.textContent="Save";
+      // v360.0.6: Save button bumped from 9px/1×5 to 12px/6×11 for
+      // mobile tap target (was ~14×14 → now ~44×30 with min-height).
+      var saveBtn=document.createElement("button"); saveBtn.className="sa"; saveBtn.style.cssText="font-size:12px;padding:6px 11px;min-height:32px;min-width:44px;"; saveBtn.textContent="Save";
       saveBtn.onclick=function(e){
         e.stopPropagation();
         item.timeStart=startInp.value||null;
@@ -2086,10 +2088,10 @@
       + _datalistHtml
       + '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">'
       +   '<label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px;">Arriving at'
-      +     '<input id="tm-entry-inp" placeholder="e.g. Zurich" list="tm-arrdep-suggestions" autocomplete="off" value="' + esc(curEntry) + '" style="font-size:12px;padding:5px 9px;border:1px solid #ccc;border-radius:4px;width:160px;font-family:inherit;" />'
+      +     '<input id="tm-entry-inp" placeholder="e.g. Zurich" list="tm-arrdep-suggestions" autocomplete="off" value="' + esc(curEntry) + '" style="font-size:14px;padding:8px 10px;border:1px solid #ccc;border-radius:4px;width:160px;max-width:100%;font-family:inherit;flex:1;min-width:140px;" />'
       +   '</label>'
       +   '<label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px;">Departing from'
-      +     '<input id="tm-exit-inp" placeholder="e.g. Zurich" list="tm-arrdep-suggestions" autocomplete="off" value="' + esc(curExit) + '" style="font-size:12px;padding:5px 9px;border:1px solid #ccc;border-radius:4px;width:160px;font-family:inherit;" />'
+      +     '<input id="tm-exit-inp" placeholder="e.g. Zurich" list="tm-arrdep-suggestions" autocomplete="off" value="' + esc(curExit) + '" style="font-size:14px;padding:8px 10px;border:1px solid #ccc;border-radius:4px;width:160px;max-width:100%;font-family:inherit;flex:1;min-width:140px;" />'
       +   '</label>'
       +   '<button id="tm-arrdep-apply" style="font-size:11px;font-weight:600;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:4px;padding:5px 12px;cursor:pointer;font-family:inherit;">Apply</button>'
       +   '<span id="tm-arrdep-status" style="font-size:10px;color:#888;"></span>'
@@ -3045,9 +3047,10 @@
         row.appendChild(unk);
       }
 
-      // Routing → button
+      // Routing → button. v360.0.6: bumped from 10px/1×5 to 12px/7×11
+      // for mobile tap target.
       var rtBtn=document.createElement("span");
-      rtBtn.style.cssText="font-size:10px;color:#1a6fb0;font-weight:600;margin-left:auto;white-space:nowrap;cursor:pointer;padding:1px 5px;border:1px solid #cce;border-radius:4px;background:#f0f5ff;flex-shrink:0;";
+      rtBtn.style.cssText="font-size:12px;color:#1a6fb0;font-weight:600;margin-left:auto;white-space:nowrap;cursor:pointer;padding:7px 11px;border:1px solid #cce;border-radius:4px;background:#f0f5ff;flex-shrink:0;min-height:32px;display:inline-flex;align-items:center;";
       rtBtn.textContent="Routing →";
       row.appendChild(rtBtn);
 
@@ -3937,6 +3940,22 @@
   // the same "Plan" tab and show together.
   sightsPane.style.display=global._isPaneInActiveGroup("sights")?"block":"none";
 
+  // v359.60.94: cross-reference any waysides on the drives INTO and
+  // OUT OF this destination into the See and Do tab. The waysides
+  // themselves remain owned by the transit routes (so the data
+  // model stays intact and the trip view's purple "stops on the way"
+  // section keeps working) — these are read-only mirrors that
+  // surface them where users instinctively look:
+  //   • On Reykjavík's tab: "On the way to Vík" so you see them
+  //     while planning Reykjavík.
+  //   • On Vík's tab: "On the way from Reykjavík" so you see them
+  //     while planning Vík.
+  // Each section explicitly says these are en-route stops, not
+  // sights at the destination proper. Manage them from the trip
+  // view between cards (single source of truth for curate/remove).
+  _renderInboundWaysidesSection(trip, dest, sightsPane);
+  _renderOutboundWaysidesSection(trip, dest, sightsPane);
+
   dest.days.forEach(function(day,dayIdx){
     var items=day.items||[];
     // Round FN.7.6: tag each day block with id "dy-{day.id}" so
@@ -4604,6 +4623,106 @@
     pane.style.padding = "12px 14px";
     pane.style.display = global._isPaneInActiveGroup("bookings") ? "block" : "none";
 
+    // ── Trip-level bookings touching this destination ────────
+    // v359.60.91 (c): cross-reference trip-level bookings (cars,
+    // multi-leg flights) onto each destination's Bookings tab when
+    // their pickup/dropoff/from/to location matches the destination's
+    // place name. Rendered as a compact badge with click-through to
+    // the same show/edit modal the trip view uses. Read-only here —
+    // editing centralized at the trip level avoids two ways to mutate
+    // the same record.
+    (function(){
+      var bookings = (trip && trip.tripBookings) || [];
+      if (!bookings.length) return;
+      var destName = String(dest.place || dest.label || "").toLowerCase();
+      var destFrom = dest.dateFrom || null;
+      var destTo = dest.dateTo || null;
+      // Range-overlap helper: do two date ranges [a1..a2] and
+      // [b1..b2] share any day? All strings are YYYY-MM-DD so
+      // lexicographic comparison works.
+      function _rangesOverlap(a1, a2, b1, b2) {
+        if (!a1 || !a2 || !b1 || !b2) return false;
+        return a1 <= b2 && a2 >= b1;
+      }
+      function _touches(bk) {
+        if (bk.kind === "car") {
+          // Primary signal: rental window overlaps with stay window.
+          // A rental picked up Sep 20 and dropped off Oct 8 is "active"
+          // at every destination whose stay falls between those dates,
+          // even if the pickup airport string doesn't mention the
+          // destination's name.
+          var pu = bk.pickup || {};
+          var dpo = bk.dropoff || {};
+          if (_rangesOverlap(pu.date, dpo.date, destFrom, destTo)) return true;
+          // Fallback: substring match on the location strings, in
+          // case dates are missing.
+          if (destName) {
+            var hay = ((pu.location || "") + " " + (dpo.location || "")).toLowerCase();
+            if (hay.indexOf(destName) >= 0) return true;
+          }
+          return false;
+        }
+        if (bk.kind === "flight" && Array.isArray(bk.legs)) {
+          for (var i = 0; i < bk.legs.length; i++) {
+            var lg = bk.legs[i];
+            // Date overlap on any leg's departure/arrival day.
+            if (lg.depDate && destFrom && destTo && lg.depDate >= destFrom && lg.depDate <= destTo) return true;
+            if (lg.arrDate && destFrom && destTo && lg.arrDate >= destFrom && lg.arrDate <= destTo) return true;
+            // Fallback: location string match.
+            if (destName) {
+              var hf = String(lg.from || "").toLowerCase();
+              var ht = String(lg.to || "").toLowerCase();
+              if (hf.indexOf(destName) >= 0 || ht.indexOf(destName) >= 0) return true;
+            }
+          }
+        }
+        return false;
+      }
+      var matches = bookings.filter(_touches);
+      if (!matches.length) return;
+
+      var xSec = document.createElement("div");
+      xSec.className = "tk-section";
+      xSec.style.cssText = "margin-bottom:16px;padding:10px 12px;background:#fdfcf8;border:1px solid #e8e2d2;border-radius:7px;";
+      var xLbl = document.createElement("div");
+      xLbl.style.cssText = "font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#5b3f8f;margin-bottom:6px;";
+      xLbl.textContent = "Trip booking active here";
+      xSec.appendChild(xLbl);
+      var hint = document.createElement("div");
+      hint.style.cssText = "font-size:10.5px;color:#888;font-style:italic;margin-bottom:8px;";
+      hint.textContent = "Manage these in the trip view's Trip bookings section.";
+      xSec.appendChild(hint);
+
+      matches.forEach(function(bk){
+        var row = document.createElement("div");
+        row.style.cssText = "padding:6px 8px;margin:4px 0;background:#fff;border:1px solid #e0d8c8;border-radius:5px;font-size:11.5px;line-height:1.45;cursor:pointer;";
+        row.title = "Click to view full booking details";
+        var icon = (bk.kind === "car") ? "🚗" : (bk.kind === "flight") ? "✈" : "📋";
+        var summary = "";
+        if (bk.kind === "car") {
+          var pu = bk.pickup || {};
+          var dpo = bk.dropoff || {};
+          var puLine = (pu.location || "—") + (pu.date ? " · " + pu.date + (pu.time ? " " + pu.time : "") : "");
+          var doLine = (dpo.location || pu.location || "—") + (dpo.date ? " · " + dpo.date + (dpo.time ? " " + dpo.time : "") : "");
+          summary = icon + " " + (bk.vendor || "Car rental") + " · pickup " + puLine + " → dropoff " + doLine;
+        } else if (bk.kind === "flight" && Array.isArray(bk.legs) && bk.legs.length) {
+          var lg0 = bk.legs[0];
+          summary = icon + " " + (lg0.carrier || "Flight") + " " + (lg0.from || "—") + " → " + (lg0.to || "—");
+        } else {
+          summary = icon + " Booking";
+        }
+        row.textContent = summary;
+        (function(id){
+          row.onclick = function(){
+            if (typeof global._editTripBooking === "function") global._editTripBooking(id);
+          };
+        })(bk.id);
+        xSec.appendChild(row);
+      });
+
+      pane.appendChild(xSec);
+    })();
+
     // ── Hotels ───────────────────────────────────────────────
     var hSec = document.createElement("div");
     hSec.className = "tk-section";
@@ -4807,6 +4926,924 @@
     paneWrap.appendChild(pane);
   }
 
+  // v359.60.95: persistent post-generation result banner.
+  // Survives drawTripMode redraws because it's keyed on a module-
+  // level state object set by the prompt-banner click handler.
+  // Stays until the user clicks ✕. Green for "added N waysides",
+  // amber for "0 added, here's why" — the latter is the case that
+  // most needs explaining (otherwise a no-op click looks like the
+  // app just ignored you).
+  function _renderWaysideResultBanner(trip, container, last) {
+    if (!container || !last) return;
+    var success = (last.addedItems || 0) > 0;
+    var bg     = success ? "#eef8f0" : "#fff5ed";
+    var border = success ? "#b9dec8" : "#f3dcc4";
+    var color  = success ? "#2a7a4e" : "#b05820";
+    var head, detail;
+    if (success) {
+      head = "✓ Added " + last.addedItems + " wayside" + (last.addedItems === 1 ? "" : "s") +
+             " across " + last.addedRoutes + " route" + (last.addedRoutes === 1 ? "" : "s");
+      detail = "Look between destination cards below for the purple ✨ sections — each new stop has a ✕ to remove if it doesn't fit.";
+    } else {
+      head = "No waysides were added";
+      if (last.skipped > 0 && last.addedRoutes === 0) {
+        detail = "All routes already had waysides — nothing to do this round.";
+      } else {
+        detail = "The model didn't surface anything for the routes we tried. Try regenerating, or check that your destinations form a continuous drive — orphan transit routes don't render.";
+      }
+    }
+
+    var b = document.createElement("div");
+    b.style.cssText = "margin:14px 2px 10px;padding:11px 14px;background:" + bg + ";border:1px solid " + border + ";border-radius:8px;display:flex;gap:12px;align-items:flex-start;";
+    var bodyEl = document.createElement("div");
+    bodyEl.style.cssText = "flex:1;font-size:12px;color:#444;line-height:1.5;";
+    bodyEl.innerHTML =
+      '<div style="font-weight:700;color:' + color + ';margin-bottom:2px;">' + head + '</div>' +
+      '<div style="font-size:11.5px;color:#666;">' + detail + '</div>';
+    var x = document.createElement("button");
+    x.type = "button";
+    x.textContent = "✕";
+    x.title = "Dismiss";
+    x.style.cssText = "background:transparent;border:none;color:#888;font-size:16px;cursor:pointer;padding:0 4px;flex-shrink:0;line-height:1;";
+    x.onclick = function () {
+      global._maxLastWaysideResult = null;
+      if (b.parentNode) b.parentNode.removeChild(b);
+    };
+    b.appendChild(bodyEl);
+    b.appendChild(x);
+    container.appendChild(b);
+  }
+
+  // ── v360.0.8: Wayside generation banner + per-route waysides ─
+  //
+  // Show a "✨ Generate waysides" button when the trip has transit
+  // routes that don't yet have waysides. After generation completes
+  // (call to engine-trip.js's generateWaysidesForTrip), re-renders
+  // the trip view and the waysides appear between destination cards.
+  // Hidden once every transit route has waysides (or the user
+  // dismisses).
+  function _renderWaysidePromptBanner(trip, container) {
+    if (!trip || !container) return;
+
+    // v359.60.95: when a generation just finished, show a result
+    // banner first instead of the prompt banner. drawTripMode tears
+    // down the prompt's DOM on every re-render, so a result message
+    // baked into the prompt banner would be wiped immediately.
+    // Storing the result in module state and having this renderer
+    // pick it up lets the success/failure surface survive whatever
+    // redraw drawTripMode triggers next.
+    var lastResult = global._maxLastWaysideResult;
+    if (lastResult && lastResult.tripId === (global._currentTripId || '')) {
+      _renderWaysideResultBanner(trip, container, lastResult);
+      // We DON'T return here — if there are still routes pending
+      // waysides (e.g. user only generated one and there are more),
+      // we want the prompt banner to also show below the result so
+      // they can click again. The two coexist visually.
+    }
+
+    // v359.60.95: tighten the banner to only count routes that
+    // ACTUALLY bridge a currently-adjacent pair of destinations.
+    // Without this, an orphan transit route (left behind from a
+    // reorder/delete) bumps the "needs waysides" count, then
+    // Generate runs, fills the orphan's planItems[], the banner
+    // hides — and nothing visible changes because
+    // _renderRouteWaysides only shows routes between actual
+    // adjacent destinations. Symptom seen: banner shows "0/1",
+    // user clicks Generate, banner disappears, no waysides
+    // appear anywhere. Now the count matches what's renderable.
+    var adjPairs = {};
+    if (Array.isArray(trip.destinations)) {
+      for (var i = 0; i < trip.destinations.length - 1; i++) {
+        var a = trip.destinations[i], b = trip.destinations[i + 1];
+        if (a && b && a.id && b.id) adjPairs[a.id + '→' + b.id] = true;
+      }
+    }
+    var transits = (trip.routes || []).filter(function (r) {
+      var sub = r && (r.subKind || r.kind);
+      if (sub !== 'transit') return false;
+      // Only count routes that map onto a current adjacent pair.
+      return !!adjPairs[(r.fromDestId || '') + '→' + (r.toDestId || '')];
+    });
+    if (!transits.length) return;
+    var withoutWaysides = transits.filter(function (r) {
+      return !Array.isArray(r.planItems) || r.planItems.length === 0;
+    });
+    if (!withoutWaysides.length) return;
+    var dismissed = false;
+    try { dismissed = localStorage.getItem('max-waysides-banner-dismissed-' + (global._currentTripId || '')) === '1'; } catch (_) {}
+    if (dismissed) return;
+
+    var banner = document.createElement("div");
+    banner.style.cssText = "margin:14px 2px 10px;padding:12px 14px;background:#f3f0fc;border:1px solid #d8d0ec;border-radius:8px;display:flex;gap:12px;align-items:center;";
+    var icon = document.createElement("div");
+    icon.style.cssText = "font-size:22px;flex-shrink:0;";
+    icon.textContent = "✨";
+    var body = document.createElement("div");
+    body.style.cssText = "flex:1;font-size:12px;color:#444;line-height:1.5;";
+    body.innerHTML =
+      '<div style="font-weight:700;color:#5b3f8f;margin-bottom:2px;">Add waysides — stops along the way</div>' +
+      '<div style="font-size:11.5px;color:#666;">Max will suggest 3-6 worthwhile stops on each drive between destinations — waterfalls, viewpoints, lunch towns. Auto-generates from your route; you can remove anything that doesn\'t appeal.</div>';
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "✨ Generate";
+    btn.style.cssText = "padding:7px 14px;font-size:12px;font-weight:700;background:#5b3f8f;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;flex-shrink:0;";
+    var dismissBtn = document.createElement("button");
+    dismissBtn.type = "button";
+    dismissBtn.textContent = "✕";
+    dismissBtn.title = "Hide this banner";
+    dismissBtn.style.cssText = "background:transparent;border:none;color:#888;font-size:16px;cursor:pointer;padding:0 4px;flex-shrink:0;line-height:1;";
+
+    btn.onclick = async function () {
+      if (typeof global.generateWaysidesForTrip !== "function") {
+        if (typeof global.maxAlert === "function") global.maxAlert("Wayside generator isn't loaded.");
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = "Generating…";
+      // v359.60.95: progress-driven UX. The generator fires a
+      // callback after each route — we update the button text so
+      // the user sees "3 / 12…" tick up. We deliberately DO NOT
+      // redraw the trip view mid-loop: drawTripMode tears down
+      // this very banner (including the btn we're updating), so
+      // calling it would erase the counter. End-of-loop redraw
+      // handles both the new wayside rendering between cards and
+      // the result banner.
+      try {
+        var result = await global.generateWaysidesForTrip(trip, {
+          onProgress: function (info) {
+            if (!info) return;
+            if (info.phase === 'start') {
+              if (info.total) {
+                btn.textContent = "Generating 0 / " + info.total + "…";
+              }
+              return;
+            }
+            if (info.phase === 'route') {
+              btn.textContent = "Generating " + info.done + " / " + info.total + "…";
+              return;
+            }
+            // info.phase === 'done' — final cleanup happens below.
+          },
+        });
+        if (typeof global.autoSave === "function") global.autoSave();
+        // v359.60.95: stash the result so the next drawTripMode
+        // re-renders it as a persistent banner (see
+        // _renderWaysideResultBanner). The save-status toast alone
+        // was too easy to miss — vanishes after 4s and lives in the
+        // header. Storing the result in module state lets the
+        // banner survive the redraw drawTripMode triggers below.
+        global._maxLastWaysideResult = {
+          tripId: global._currentTripId || '',
+          addedItems: result.addedItems || 0,
+          addedRoutes: result.addedRoutes || 0,
+          skipped: result.skipped || 0,
+          at: Date.now(),
+        };
+        if (typeof global.drawTripMode === "function") global.drawTripMode();
+      } catch (e) {
+        console.warn('[waysides] generate failed:', e);
+        btn.disabled = false;
+        btn.textContent = "✨ Generate";
+        if (typeof global.maxAlert === "function") global.maxAlert("Wayside generation failed. " + ((e && e.message) || ""));
+      }
+    };
+    dismissBtn.onclick = function () {
+      try { localStorage.setItem('max-waysides-banner-dismissed-' + (global._currentTripId || ''), '1'); } catch (_) {}
+      banner.parentNode.removeChild(banner);
+    };
+
+    banner.appendChild(icon);
+    banner.appendChild(body);
+    banner.appendChild(btn);
+    banner.appendChild(dismissBtn);
+    container.appendChild(banner);
+  }
+
+  // v359.60.94: shared renderer for the inbound/outbound wayside
+  // sections on a destination's See and Do tab. `direction` controls
+  // the header copy and the route lookup direction. `dest` is the
+  // current destination; the other side of the drive is derived
+  // from the trip's destination order.
+  //
+  // Read-only mirror of the route's planItems[] — manage actions
+  // (remove, edit) live on the trip view's purple between-cards
+  // section so we don't end up with two places writing the same
+  // data and racing each other.
+  function _renderWaysideMirrorSection(trip, dest, container, direction) {
+    if (!trip || !dest || !container) return;
+    if (!Array.isArray(trip.destinations) || !Array.isArray(trip.routes)) return;
+    var idx = trip.destinations.indexOf(dest);
+    if (idx < 0) return;
+
+    var otherDest, route, hdrLabel, subCopy;
+    if (direction === 'inbound') {
+      if (idx === 0) return; // first destination has no drive in
+      otherDest = trip.destinations[idx - 1];
+      if (!otherDest) return;
+      route = trip.routes.find(function (r) {
+        var sub = r && (r.subKind || r.kind);
+        return sub === 'transit' && r.fromDestId === otherDest.id && r.toDestId === dest.id;
+      });
+      hdrLabel = "✨ On the way from " + (otherDest.place || otherDest.label || "the previous stop");
+      subCopy  = "Suggested stops to fit into your drive in — manage from the trip view between the destination cards.";
+    } else {
+      // outbound
+      if (idx >= trip.destinations.length - 1) return; // last destination has no drive out
+      otherDest = trip.destinations[idx + 1];
+      if (!otherDest) return;
+      route = trip.routes.find(function (r) {
+        var sub = r && (r.subKind || r.kind);
+        return sub === 'transit' && r.fromDestId === dest.id && r.toDestId === otherDest.id;
+      });
+      hdrLabel = "✨ On the way to " + (otherDest.place || otherDest.label || "the next stop");
+      subCopy  = "Suggested stops to fit into your drive out — manage from the trip view between the destination cards.";
+    }
+    if (!route || !Array.isArray(route.planItems) || !route.planItems.length) return;
+    // Only mirror PlanItems of type 'stop' — those are waysides.
+    var stops = route.planItems.filter(function (pi) { return pi && pi.type === 'stop'; });
+    if (!stops.length) return;
+
+    var sec = document.createElement("div");
+    sec.style.cssText = "margin:10px 14px 4px;padding:10px 12px;background:#fbfaf6;border:1px solid #e7dcf2;border-left:3px solid #c8a8e0;border-radius:0 8px 8px 0;";
+    var hdr = document.createElement("div");
+    hdr.style.cssText = "font-size:10px;font-weight:700;color:#5b3f8f;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;";
+    hdr.textContent = hdrLabel;
+    sec.appendChild(hdr);
+    var sub = document.createElement("div");
+    sub.style.cssText = "font-size:10.5px;color:#888;margin-bottom:8px;line-height:1.4;";
+    sub.textContent = subCopy;
+    sec.appendChild(sub);
+
+    stops.forEach(function (pi) {
+      var place = (trip.places || {})[pi.placeId] || {};
+      var row = document.createElement("div");
+      row.style.cssText = "display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:3px 0;";
+      var left = document.createElement("div");
+      left.style.cssText = "flex:1;";
+      var name = place.name || "Stop";
+      var why = pi.notes || "";
+      var dur = (typeof pi.duration === "number" && pi.duration > 0)
+        ? (pi.duration < 1 ? Math.round(pi.duration * 60) + "m" : pi.duration + "h")
+        : "";
+      // Small "on the way" badge per item, so even if the user
+      // scans the list of sights and forgets about the section
+      // header, each en-route stop self-identifies as one.
+      var badge = '<span style="display:inline-block;font-size:9px;font-weight:700;color:#5b3f8f;background:#ece4f5;border:1px solid #d3c1e8;border-radius:8px;padding:1px 6px;margin-left:6px;vertical-align:middle;letter-spacing:.03em;text-transform:uppercase;">on the way</span>';
+      left.innerHTML =
+        '<span style="font-weight:600;color:#222;font-size:12px;">' + (pi.priority === 'iconic' ? '⭐ ' : '') + String(name).replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</span>' +
+        badge +
+        (dur ? ' <span style="color:#888;font-size:10.5px;">· ' + dur + '</span>' : '') +
+        (why ? '<div style="color:#666;font-size:11px;margin-top:1px;">' + String(why).replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</div>' : '');
+      row.appendChild(left);
+      sec.appendChild(row);
+    });
+
+    container.appendChild(sec);
+  }
+
+  // Convenience wrappers so the renderDestItineraryPane call site
+  // reads naturally: "render inbound, then outbound."
+  function _renderInboundWaysidesSection(trip, dest, container) {
+    _renderWaysideMirrorSection(trip, dest, container, 'inbound');
+  }
+  function _renderOutboundWaysidesSection(trip, dest, container) {
+    _renderWaysideMirrorSection(trip, dest, container, 'outbound');
+  }
+
+  // Render the waysides on the route OUT of `dest` (i.e., from dest
+  // to next dest). Appended to listSec right after the destination
+  // card so the user sees waysides in the natural order:
+  //   [Reykjavík card] → [✨ Stops on the way to Vík] → [Vík card]
+  // Each wayside has a tiny ✕ remove so the user can curate.
+  function _renderRouteWaysides(trip, dest, idx, listSec) {
+    if (!trip || !dest || !listSec) return;
+    if (!Array.isArray(trip.destinations) || idx >= trip.destinations.length - 1) return;
+    var nextDest = trip.destinations[idx + 1];
+    if (!nextDest) return;
+    var route = (trip.routes || []).find(function (r) {
+      var sub = r && (r.subKind || r.kind);
+      return sub === 'transit' && r.fromDestId === dest.id && r.toDestId === nextDest.id;
+    });
+    if (!route || !Array.isArray(route.planItems) || !route.planItems.length) return;
+
+    var sec = document.createElement("div");
+    sec.style.cssText = "margin:0 8px;padding:9px 12px;background:#fbfaf6;border-left:3px solid #c8a8e0;border-radius:0 6px 6px 0;font-size:11.5px;color:#444;line-height:1.55;";
+    var hdr = document.createElement("div");
+    hdr.style.cssText = "font-size:10px;font-weight:700;color:#5b3f8f;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:5px;";
+    hdr.textContent = "✨ Stops on the way to " + (nextDest.place || nextDest.label || "the next stop");
+    sec.appendChild(hdr);
+
+    route.planItems.forEach(function (pi) {
+      var place = (trip.places || {})[pi.placeId] || {};
+      var row = document.createElement("div");
+      row.style.cssText = "display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:3px 0;";
+      var left = document.createElement("div");
+      left.style.cssText = "flex:1;";
+      var name = place.name || "Stop";
+      var why = pi.notes || "";
+      var dur = (typeof pi.duration === "number" && pi.duration > 0)
+        ? (pi.duration < 1 ? Math.round(pi.duration * 60) + "m" : pi.duration + "h")
+        : "";
+      left.innerHTML =
+        '<span style="font-weight:600;color:#222;">' + (pi.priority === 'iconic' ? '⭐ ' : '') + String(name).replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</span>' +
+        (dur ? ' <span style="color:#888;font-size:10.5px;">· ' + dur + '</span>' : '') +
+        (why ? '<div style="color:#666;font-size:11px;margin-top:1px;">' + String(why).replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</div>' : '');
+      var rm = document.createElement("button");
+      rm.type = "button";
+      rm.textContent = "✕";
+      rm.title = "Remove this wayside";
+      rm.style.cssText = "background:transparent;border:none;color:#c44;font-size:11px;cursor:pointer;padding:0 4px;flex-shrink:0;";
+      (function (piId) {
+        rm.onclick = function () {
+          route.planItems = route.planItems.filter(function (x) { return x.id !== piId; });
+          if (typeof global.autoSave === "function") global.autoSave();
+          if (typeof global.drawTripMode === "function") global.drawTripMode();
+        };
+      })(pi.id);
+      row.appendChild(left);
+      row.appendChild(rm);
+      sec.appendChild(row);
+    });
+
+    listSec.appendChild(sec);
+  }
+
+  // ── v359.60.91: trip-level Bookings section ─────────────────
+  // Renders trip.tripBookings[] — flights and car rentals that
+  // don't anchor to a single destination. Goes between the
+  // Arrival/Departure panel and the per-destination card list on
+  // the trip view. Hidden entirely when there are no trip-level
+  // bookings AND the trip has no obvious need for one yet (early
+  // planning phase) — but we always render the section header
+  // + Add button so the user knows the surface exists.
+  function _renderTripLevelBookings(trip, container) {
+    if (!trip || !container) return;
+    var bookings = (trip.tripBookings || []);
+    var sec = document.createElement("div");
+    sec.className = "tm-section tm-trip-bookings";
+    sec.style.cssText = "margin:14px 2px 10px;padding:12px 14px;background:#fdfcf8;border:1px solid #e8e2d2;border-radius:8px;";
+
+    var hdr = document.createElement("div");
+    hdr.style.cssText = "display:flex;align-items:baseline;gap:8px;margin-bottom:8px;";
+    var ttl = document.createElement("div");
+    ttl.style.cssText = "font-size:12px;font-weight:700;color:#5b3f8f;text-transform:uppercase;letter-spacing:0.05em;";
+    ttl.textContent = "Trip bookings";
+    var sub = document.createElement("div");
+    sub.style.cssText = "font-size:10.5px;color:#888;font-style:italic;";
+    sub.textContent = "Flights, car rentals, and other things that span the whole trip.";
+    hdr.appendChild(ttl);
+    hdr.appendChild(sub);
+    sec.appendChild(hdr);
+
+    if (bookings.length === 0) {
+      var empty = document.createElement("div");
+      empty.style.cssText = "font-size:11.5px;color:#999;font-style:italic;padding:4px 0 8px;";
+      empty.textContent = "Nothing here yet. Use 📋 Paste at the top of the trip view to add a flight or car-rental confirmation.";
+      sec.appendChild(empty);
+    } else {
+      bookings.forEach(function(bk){
+        var row = document.createElement("div");
+        row.style.cssText = "padding:8px 10px;margin:5px 0;background:#fff;border:1px solid #e0d8c8;border-radius:6px;font-size:12px;line-height:1.5;";
+
+        var iconLabel = (bk.kind === "car") ? "🚗 Car rental" :
+                        (bk.kind === "flight") ? "✈ Flight" :
+                        "📋 Booking";
+
+        var head = document.createElement("div");
+        head.style.cssText = "display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:3px;";
+        var headL = document.createElement("div");
+        headL.style.cssText = "font-weight:600;color:#444;";
+        headL.textContent = iconLabel + (bk.vendor ? " · " + bk.vendor : "");
+        var headRGroup = document.createElement("div");
+        headRGroup.style.cssText = "display:flex;gap:10px;align-items:baseline;";
+        // v359.60.91 (b): show/open affordance. Opens a modal
+        // displaying the booking's current values; user can also
+        // edit fields and save back. Labeled "show" rather than
+        // "edit" because the primary use is reviewing details
+        // (price, confirmation, full pickup/dropoff times) — editing
+        // is secondary, available when needed.
+        var editBtn = document.createElement("button");
+        editBtn.style.cssText = "background:none;border:none;color:#1a5fa8;font-size:11px;cursor:pointer;padding:0;font-family:inherit;";
+        editBtn.title = "Show full details (you can also edit any field)";
+        editBtn.textContent = "▸ show";
+        var removeBtn = document.createElement("button");
+        removeBtn.style.cssText = "background:none;border:none;color:#c44;font-size:11px;cursor:pointer;padding:0;font-family:inherit;";
+        removeBtn.title = "Delete this booking";
+        removeBtn.textContent = "✕ remove";
+        (function(id){
+          editBtn.onclick = function(){
+            if (typeof global._editTripBooking === "function") {
+              global._editTripBooking(id);
+            }
+          };
+          removeBtn.onclick = function(){
+            if (!global.confirm || global.confirm("Remove this booking?")) {
+              trip.tripBookings = (trip.tripBookings || []).filter(function(x){ return x.id !== id; });
+              if (typeof global.autoSave === "function") try { global.autoSave(); } catch(_){}
+              if (typeof global.drawTripMode === "function") global.drawTripMode();
+            }
+          };
+        })(bk.id);
+        headRGroup.appendChild(editBtn);
+        headRGroup.appendChild(removeBtn);
+        head.appendChild(headL);
+        head.appendChild(headRGroup);
+        row.appendChild(head);
+
+        var body = document.createElement("div");
+        body.style.cssText = "color:#555;font-size:11.5px;";
+        if (bk.kind === "car") {
+          var pu = bk.pickup || {};
+          var dpo = bk.dropoff || {};
+          var puLine = "Pickup: " + (pu.location || "—") +
+            (pu.date ? " · " + pu.date + (pu.time ? " " + pu.time : "") : "");
+          var doLine = "Dropoff: " + (dpo.location || pu.location || "—") +
+            (dpo.date ? " · " + dpo.date + (dpo.time ? " " + dpo.time : "") : "");
+          body.innerHTML =
+            '<div>' + puLine.replace(/&/g,"&amp;").replace(/</g,"&lt;") + '</div>' +
+            '<div>' + doLine.replace(/&/g,"&amp;").replace(/</g,"&lt;") + '</div>';
+        } else if (bk.kind === "flight" && Array.isArray(bk.legs) && bk.legs.length) {
+          var legsHtml = bk.legs.map(function(lg, i){
+            var line = (lg.carrier || "Flight") + (lg.flightNumber ? " " + lg.flightNumber : "") +
+              ": " + (lg.from || "—") + " → " + (lg.to || "—") +
+              (lg.depDate ? " · " + lg.depDate + (lg.depTime ? " " + lg.depTime : "") : "");
+            return '<div>' + (bk.legs.length > 1 ? ("Leg " + (i + 1) + " — ") : "") +
+              line.replace(/&/g,"&amp;").replace(/</g,"&lt;") + '</div>';
+          }).join("");
+          body.innerHTML = legsHtml;
+        } else {
+          body.textContent = "(no details)";
+        }
+        row.appendChild(body);
+
+        // Confirmation # + price + URL on a single muted line.
+        var meta = [];
+        if (bk.confirmationNumber) meta.push("Conf #" + bk.confirmationNumber);
+        if (bk.pricePaid != null) {
+          // Format as currency (2 decimals) so 612.5 displays as "USD 612.50".
+          var priceStr = (typeof bk.pricePaid === "number") ? bk.pricePaid.toFixed(2) : String(bk.pricePaid);
+          meta.push((bk.currency || "") + " " + priceStr);
+        }
+        if (bk.cancelType === "deadline" && bk.cancelDeadline) {
+          meta.push("Cancel by " + bk.cancelDeadline);
+        } else if (bk.cancelType === "non-cancellable") {
+          meta.push("Non-refundable");
+        }
+        if (meta.length) {
+          var metaRow = document.createElement("div");
+          metaRow.style.cssText = "font-size:10.5px;color:#888;margin-top:3px;";
+          metaRow.textContent = meta.join(" · ");
+          row.appendChild(metaRow);
+        }
+        if (bk.url) {
+          var urlRow = document.createElement("div");
+          urlRow.style.cssText = "font-size:10.5px;margin-top:3px;";
+          var a = document.createElement("a");
+          a.href = bk.url; a.target = "_blank"; a.rel = "noopener noreferrer";
+          a.style.cssText = "color:#1a5fa8;text-decoration:none;";
+          a.textContent = "↗ Open booking";
+          urlRow.appendChild(a);
+          row.appendChild(urlRow);
+        }
+        sec.appendChild(row);
+      });
+    }
+
+    // v360.0.0: Unassigned-bookings sub-section. Bookings that came
+    // in via email forwarding but couldn't be auto-attached (dates
+    // didn't match this trip, etc.) land here so the user spots them
+    // where they actually look — on the trip view, not in Profile.
+    // Async — async fetch + render so the rest of the Trip-bookings
+    // section paints immediately.
+    var unassignedHost = document.createElement("div");
+    unassignedHost.id = "tm-unassigned-host";
+    sec.appendChild(unassignedHost);
+
+    container.appendChild(sec);
+
+    _renderUnassignedOnTripView(trip, unassignedHost);
+  }
+
+  // Fetches and renders parsed-but-unattached emails on the trip view.
+  // Called from _renderTripLevelBookings above.
+  function _renderUnassignedOnTripView(trip, host) {
+    if (!host) return;
+    var MaxSync = global.MaxSync;
+    if (!MaxSync || !MaxSync._request) return;
+    MaxSync._request('/user/unassigned-bookings')
+      .then(function(data){
+        var items = (data && data.unassigned) || [];
+        if (!items.length) return;
+
+        var hdr = document.createElement("div");
+        hdr.style.cssText = "margin-top:14px;padding-top:10px;border-top:1px dashed #d8d4c8;font-size:10.5px;font-weight:700;color:#a06d00;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;";
+        hdr.textContent = "Bookings to assign (" + items.length + ")";
+        host.appendChild(hdr);
+
+        var sub = document.createElement("div");
+        sub.style.cssText = "font-size:10.5px;color:#888;margin-bottom:8px;font-style:italic;";
+        sub.textContent = "Forwarded by email but Max couldn't auto-place. Pick where each one goes, then Attach.";
+        host.appendChild(sub);
+
+        items.forEach(function(it){
+          var p = it.parsed || {};
+          var row = document.createElement("div");
+          row.style.cssText = "padding:8px 10px;margin:5px 0;background:#fff8ed;border:1px solid #f0dcc0;border-radius:5px;font-size:11.5px;line-height:1.5;";
+
+          var icon = (p.type === "car") ? "🚗" : (p.type === "flight") ? "✈" : (p.type === "hotel") ? "🏨" : "📋";
+          var headLine = document.createElement("div");
+          headLine.style.cssText = "font-weight:600;color:#444;margin-bottom:3px;";
+          var summary = icon + " " + (p.type || "booking");
+          if (p.carrier || p.name) summary += " · " + (p.carrier || p.name);
+          headLine.textContent = summary;
+          row.appendChild(headLine);
+
+          if (p.depDate || p.confirmationNumber) {
+            var meta = document.createElement("div");
+            meta.style.cssText = "font-size:10.5px;color:#666;margin-bottom:6px;";
+            var bits = [];
+            if (p.depDate) bits.push(p.depDate + (p.arrDate ? " → " + p.arrDate : ""));
+            if (p.confirmationNumber) bits.push("Conf " + p.confirmationNumber);
+            if (p.price != null) bits.push((p.currency || "") + " " + p.price);
+            meta.textContent = bits.join(" · ");
+            row.appendChild(meta);
+          }
+
+          // Destination picker only for hotel + general types.
+          var needsDest = (p.type !== "car" && p.type !== "flight");
+          var destSel = null;
+          if (needsDest && Array.isArray(trip.destinations)) {
+            destSel = document.createElement("select");
+            destSel.style.cssText = "width:100%;padding:5px 8px;font-size:11.5px;border:1px solid #ccc;border-radius:4px;background:#fff;margin-bottom:6px;";
+            var opt0 = document.createElement("option");
+            opt0.value = "";
+            opt0.textContent = "Pick a destination…";
+            destSel.appendChild(opt0);
+            trip.destinations.forEach(function(d){
+              var o = document.createElement("option");
+              o.value = d.id;
+              var dateStr = d.dateFrom ? " (" + d.dateFrom + (d.dateTo && d.dateTo !== d.dateFrom ? " → " + d.dateTo : "") + ")" : "";
+              o.textContent = (d.place || d.label || "Untitled") + dateStr;
+              destSel.appendChild(o);
+            });
+            row.appendChild(destSel);
+          }
+
+          var btnRow = document.createElement("div");
+          btnRow.style.cssText = "display:flex;gap:8px;justify-content:flex-end;";
+          var attachBtn = document.createElement("button");
+          attachBtn.type = "button";
+          attachBtn.textContent = "✓ Attach to this trip";
+          attachBtn.style.cssText = "padding:5px 12px;font-size:11.5px;font-weight:600;background:#2a7a4e;color:#fff;border:none;border-radius:4px;cursor:pointer;";
+          // v360.0.2: edit-before-attach. Users can fix LLM mistakes
+          // (wrong date, wrong vendor) before committing the booking
+          // to their trip. PATCH /user/unassigned-bookings/:id
+          // updates parsed_json server-side; we re-render the row
+          // with the new values when the modal saves.
+          var editBtn = document.createElement("button");
+          editBtn.type = "button";
+          editBtn.textContent = "✎ Edit";
+          editBtn.style.cssText = "padding:5px 12px;font-size:11.5px;background:#fff;color:#1a5fa8;border:1px solid #1a5fa8;border-radius:4px;cursor:pointer;";
+          var dismissBtn = document.createElement("button");
+          dismissBtn.type = "button";
+          dismissBtn.textContent = "✕ Dismiss";
+          dismissBtn.style.cssText = "padding:5px 12px;font-size:11.5px;background:#fff;color:#666;border:1px solid #ddd;border-radius:4px;cursor:pointer;";
+
+          (function(id){
+            editBtn.onclick = function(){
+              _editUnassignedBooking(id, p, function(updatedParsed){
+                // Refresh the row's display with new values. Easiest:
+                // re-render the whole unassigned section so all data
+                // (especially destination-dropdown date strings if the
+                // user changed dates) stays consistent.
+                if (typeof global.drawTripMode === "function") global.drawTripMode();
+              });
+            };
+            attachBtn.onclick = function(){
+              var destId = destSel ? destSel.value : "";
+              if (needsDest && !destId) {
+                if (typeof global.maxAlert === "function") global.maxAlert("Pick a destination first.");
+                return;
+              }
+              // Trip ID lives on the global _currentTripId (the trip
+              // object itself doesn't carry an id field — Max's data
+              // model keeps the id at the storage layer, not in the
+              // trip blob).
+              var tid = global._currentTripId || (trip && trip.id);
+              if (!tid) {
+                if (typeof global.maxAlert === "function") global.maxAlert("Couldn't find the trip ID. Try reloading.");
+                return;
+              }
+              attachBtn.disabled = true;
+              attachBtn.textContent = "Attaching…";
+              var payload = { tripId: tid };
+              if (destId) payload.destinationId = destId;
+              MaxSync._request('/user/unassigned-bookings/' + encodeURIComponent(id) + '/attach', {
+                method: 'POST',
+                body: payload,
+              })
+                .then(function(){
+                  row.style.opacity = "0.4";
+                  row.innerHTML = '<div style="text-align:center;font-size:11px;color:#2a7a4e;">✓ Attached. Refreshing your trip…</div>';
+                  // Auto-refresh: pull the latest trip body from the
+                  // server (the booking attacher modified it server-
+                  // side) then re-render the trip view so the booking
+                  // shows up in the Trip-bookings list immediately —
+                  // no manual page reload needed.
+                  if (MaxSync.pullAll) {
+                    return MaxSync.pullAll().then(function(){
+                      if (typeof global.drawTripMode === "function") global.drawTripMode();
+                    }).catch(function(){
+                      // Sync hiccup — leave the "Attached" message; user
+                      // can reload manually if the booking doesn't appear.
+                    });
+                  }
+                })
+                .catch(function(e){
+                  console.warn('[unassigned] attach failed:', e);
+                  attachBtn.disabled = false;
+                  attachBtn.textContent = "✓ Attach to this trip";
+                  if (typeof global.maxAlert === "function") global.maxAlert("Attach failed. " + ((e && e.message) || ""));
+                });
+            };
+            dismissBtn.onclick = function(){
+              if (!global.confirm || global.confirm("Dismiss this booking?")) {
+                MaxSync._request('/user/unassigned-bookings/' + encodeURIComponent(id) + '/dismiss', {
+                  method: 'POST',
+                }).then(function(){
+                  row.parentNode.removeChild(row);
+                }).catch(function(e){ console.warn('[unassigned] dismiss failed:', e); });
+              }
+            };
+          })(it.id);
+
+          btnRow.appendChild(dismissBtn);
+          btnRow.appendChild(editBtn);
+          btnRow.appendChild(attachBtn);
+          row.appendChild(btnRow);
+          host.appendChild(row);
+        });
+      })
+      .catch(function(e){
+        // Silent — if the user isn't signed in or the endpoint
+        // isn't reachable, just skip rendering. No need to nag.
+        console.warn('[unassigned] fetch failed:', e);
+      });
+  }
+
+  // v360.0.2: edit modal for unassigned bookings (pre-attach edit).
+  // Opens with the parsed_json prefilled; user can fix any field;
+  // Save PATCHes server-side and invokes onSaved(updatedParsed) so
+  // the caller can re-render. Type-aware: car shows pickup/dropoff,
+  // flight shows legs[] or single-leg, hotel shows name/address +
+  // checkin/out, others show name + date/time + location.
+  function _editUnassignedBooking(emailId, parsed, onSaved) {
+    var MaxSync = global.MaxSync;
+    if (!MaxSync || !MaxSync._request) return;
+    var p = Object.assign({}, parsed || {});
+
+    var ov = document.createElement("div");
+    ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:11900;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto;";
+    var box = document.createElement("div");
+    box.style.cssText = "background:#fff;border-radius:12px;width:560px;max-width:100%;max-height:calc(100vh - 48px);overflow:auto;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);";
+
+    function inp(id, label, value, placeholder, type) {
+      return '<label style="display:block;margin-bottom:8px;">' +
+        '<span style="display:block;font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:2px;">' + label + '</span>' +
+        '<input id="' + id + '" type="' + (type || "text") + '" value="' + (value == null ? "" : String(value).replace(/"/g, "&quot;")) + '" placeholder="' + (placeholder || "") + '" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid #ccc;border-radius:4px;font-family:inherit;box-sizing:border-box;" />' +
+        '</label>';
+    }
+
+    var typeIcon = (p.type === "car") ? "🚗" : (p.type === "flight") ? "✈" : (p.type === "hotel") ? "🏨" : "📋";
+    var typeLbl = (p.type || "booking").charAt(0).toUpperCase() + (p.type || "booking").slice(1);
+
+    var fieldsHtml = "";
+    if (p.type === "car") {
+      fieldsHtml +=
+        inp("ueb-vendor", "Rental company", p.carrier || p.name || "", "e.g. Hertz") +
+        '<div style="margin:6px 0 4px;padding:8px 10px;background:#f4f8f4;border:1px solid #d4e3d4;border-radius:5px;">' +
+          '<div style="font-size:10px;font-weight:700;color:#2a6a3e;text-transform:uppercase;margin-bottom:6px;">Pickup</div>' +
+          inp("ueb-from", "Location", p.from || "", "e.g. Keflavík Airport") +
+          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+            inp("ueb-depDate", "Date", p.depDate || "", "", "date") +
+            inp("ueb-depTime", "Time", p.depTime || "", "", "time") +
+          '</div>' +
+        '</div>' +
+        '<div style="margin:0 0 8px;padding:8px 10px;background:#f8f4f4;border:1px solid #e3d4d4;border-radius:5px;">' +
+          '<div style="font-size:10px;font-weight:700;color:#7a4040;text-transform:uppercase;margin-bottom:6px;">Dropoff</div>' +
+          inp("ueb-to", "Location", p.to || p.from || "", "Same as pickup, or different") +
+          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+            inp("ueb-arrDate", "Date", p.arrDate || "", "", "date") +
+            inp("ueb-arrTime", "Time", p.arrTime || "", "", "time") +
+          '</div>' +
+        '</div>';
+    } else if (p.type === "flight") {
+      // v360.0.3: full multi-leg editor in the unassigned-tray modal.
+      // The LLM often misses legs (e.g., a 3-leg Chase Travel
+      // itinerary parsed as just leg 1). Letting the user see + add
+      // missing legs BEFORE attach prevents wrong data from polluting
+      // the trip. Same "+ Add a missing or new leg" pattern as the paste flow.
+      fieldsHtml += '<div id="ueb-legs-host"></div>';
+      fieldsHtml += '<div style="margin:4px 0 8px;">' +
+        '<button type="button" id="ueb-add-leg" style="padding:5px 11px;font-size:11.5px;font-weight:600;background:#fff;color:#1a5fa8;border:1px solid #1a5fa8;border-radius:4px;cursor:pointer;font-family:inherit;">+ Add a missing or new leg</button>' +
+      '</div>';
+    } else if (p.type === "hotel") {
+      fieldsHtml +=
+        inp("ueb-name", "Hotel name", p.name || p.carrier || "", "") +
+        inp("ueb-address", "Address", p.address || "", "Optional") +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+          inp("ueb-depDate", "Check-in", p.depDate || "", "", "date") +
+          inp("ueb-depTime", "Check-in time", p.depTime || "", "", "time") +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+          inp("ueb-arrDate", "Check-out", p.arrDate || "", "", "date") +
+          inp("ueb-arrTime", "Check-out time", p.arrTime || "", "", "time") +
+        '</div>';
+    } else {
+      fieldsHtml +=
+        inp("ueb-name", "Name", p.name || "", "") +
+        inp("ueb-address", "Location", p.address || "", "Optional") +
+        // v360.0.6: auto-fit so columns wrap on narrow viewports
+        // instead of squishing to 100px each.
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(110px, 1fr));gap:8px;">' +
+          inp("ueb-depDate", "Date", p.depDate || "", "", "date") +
+          inp("ueb-depTime", "Start time", p.depTime || "", "", "time") +
+          inp("ueb-arrTime", "End time", p.arrTime || "", "", "time") +
+        '</div>';
+    }
+
+    fieldsHtml +=
+      '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;">' +
+        inp("ueb-conf", "Confirmation #", p.confirmationNumber || "", "") +
+        inp("ueb-price", "Price", p.price != null ? p.price : "", "") +
+        inp("ueb-currency", "Currency", p.currency || "USD", "USD") +
+      '</div>' +
+      inp("ueb-url", "Booking URL", p.url || "", "https://…", "url") +
+      inp("ueb-notes", "Notes", p.notes || "", "Optional");
+
+    box.innerHTML =
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">' +
+        '<div style="width:28px;height:28px;border-radius:50%;background:#a06d00;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;">✎</div>' +
+        '<div style="font-size:14px;font-weight:700;">Fix ' + typeIcon + ' ' + typeLbl + ' before attaching</div>' +
+      '</div>' +
+      '<div style="font-size:12px;color:#555;line-height:1.55;margin-bottom:14px;">Change anything Max got wrong, then Save. You can attach the booking to your trip after.</div>' +
+      fieldsHtml +
+      '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">' +
+        '<button id="ueb-cancel" style="padding:8px 14px;font-size:12px;font-weight:600;background:#fff;color:#666;border:1px solid #ddd;border-radius:5px;cursor:pointer;">Cancel</button>' +
+        '<button id="ueb-save" style="padding:8px 16px;font-size:12px;font-weight:700;background:#1a5fa8;color:#fff;border:none;border-radius:5px;cursor:pointer;">Save</button>' +
+      '</div>';
+
+    ov.appendChild(box);
+    document.body.appendChild(ov);
+
+    function _v(id){ var el = document.getElementById(id); return el ? el.value.trim() : ""; }
+    function _num(s){ var n = parseFloat(s); return isFinite(n) ? n : null; }
+
+    // v360.0.3: leg-block builder for the unassigned-tray flight
+    // editor. Same shape as the paste-confirmation flow's legs UI
+    // but with a `ueb-leg-N-*` prefix so it doesn't clash with
+    // either of the other two modals' inputs.
+    var _uebLegCounter = 0;
+    function _uebAddLegBlock(pre) {
+      var host = document.getElementById("ueb-legs-host");
+      if (!host) return;
+      _uebLegCounter += 1;
+      var idx = _uebLegCounter;
+      var sfx = "leg-" + idx + "-";
+      var legDiv = document.createElement("div");
+      legDiv.className = "ueb-leg";
+      legDiv.setAttribute("data-leg-idx", String(idx));
+      legDiv.style.cssText = "margin:6px 0;padding:8px 10px;background:#f5f8fc;border:1px solid #d4e0f0;border-radius:5px;";
+      legDiv.innerHTML =
+        '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">' +
+          '<div style="font-size:10px;font-weight:700;color:#1a5fa8;text-transform:uppercase;letter-spacing:0.05em;">Leg ' + idx + '</div>' +
+          '<button type="button" class="ueb-leg-remove" style="background:none;border:none;color:#c44;font-size:10.5px;cursor:pointer;padding:0;font-family:inherit;">✕ remove</button>' +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+          inp("ueb-" + sfx + "carrier", "Airline", (pre && pre.carrier) || "", "") +
+          inp("ueb-" + sfx + "number",  "Flight #", (pre && (pre.flightNumber || pre.number)) || "", "") +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+          inp("ueb-" + sfx + "from", "From", (pre && pre.from) || "", "City or code") +
+          inp("ueb-" + sfx + "to",   "To",   (pre && pre.to)   || "", "City or code") +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+          inp("ueb-" + sfx + "depDate", "Departure date", (pre && pre.depDate) || "", "", "date") +
+          inp("ueb-" + sfx + "depTime", "Departure time", (pre && pre.depTime) || "", "", "time") +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+          inp("ueb-" + sfx + "arrDate", "Arrival date", (pre && pre.arrDate) || "", "", "date") +
+          inp("ueb-" + sfx + "arrTime", "Arrival time", (pre && pre.arrTime) || "", "", "time") +
+        '</div>';
+      host.appendChild(legDiv);
+      legDiv.querySelector(".ueb-leg-remove").onclick = function(){
+        legDiv.parentNode.removeChild(legDiv);
+        document.querySelectorAll(".ueb-leg").forEach(function(b, i){
+          var lbl = b.querySelector("div > div");
+          if (lbl) lbl.textContent = "Leg " + (i + 1);
+        });
+      };
+    }
+    if (p.type === "flight") {
+      // Populate from p.legs[] if the LLM extracted multiple; else
+      // build a single leg from the flat fields.
+      var initLegs = Array.isArray(p.legs) && p.legs.length ? p.legs : [{
+        carrier:      p.carrier || "",
+        flightNumber: p.number  || "",
+        from:         p.from    || "",
+        to:           p.to      || "",
+        depDate:      p.depDate || "",
+        depTime:      p.depTime || "",
+        arrDate:      p.arrDate || "",
+        arrTime:      p.arrTime || "",
+      }];
+      initLegs.forEach(function(lg){ _uebAddLegBlock(lg); });
+      var addLegBtn = document.getElementById("ueb-add-leg");
+      if (addLegBtn) addLegBtn.onclick = function(){ _uebAddLegBlock({}); };
+    }
+
+    document.getElementById("ueb-cancel").onclick = function(){ ov.remove(); };
+    ov.addEventListener("click", function(e){ if (e.target === ov) ov.remove(); });
+
+    document.getElementById("ueb-save").onclick = function(){
+      var update = {};
+      if (p.type === "car") {
+        update.carrier = _v("ueb-vendor");
+        update.from = _v("ueb-from");
+        update.to = _v("ueb-to") || _v("ueb-from");
+      } else if (p.type === "flight") {
+        // Collect legs from DOM. Persist BOTH the legs[] array (the
+        // authoritative shape) AND the flat fields populated from
+        // leg 1 (for backward-compat with the single-leg attach
+        // path on the server).
+        var collected = [];
+        document.querySelectorAll(".ueb-leg").forEach(function(b){
+          var lidx = b.getAttribute("data-leg-idx");
+          var sfx = "leg-" + lidx + "-";
+          collected.push({
+            carrier:      _v("ueb-" + sfx + "carrier"),
+            flightNumber: _v("ueb-" + sfx + "number"),
+            from:         _v("ueb-" + sfx + "from"),
+            to:           _v("ueb-" + sfx + "to"),
+            depDate:      _v("ueb-" + sfx + "depDate") || null,
+            depTime:      _v("ueb-" + sfx + "depTime") || null,
+            arrDate:      _v("ueb-" + sfx + "arrDate") || null,
+            arrTime:      _v("ueb-" + sfx + "arrTime") || null,
+          });
+        });
+        update.legs = collected;
+        if (collected.length) {
+          var first = collected[0];
+          update.carrier = first.carrier;
+          update.number = first.flightNumber;
+          update.from = first.from;
+          update.to = first.to;
+        }
+      } else if (p.type === "hotel") {
+        update.name = _v("ueb-name");
+        update.address = _v("ueb-address");
+      } else {
+        update.name = _v("ueb-name");
+        update.address = _v("ueb-address");
+      }
+      // For flight, depDate/depTime/arrDate/arrTime are per-leg
+      // already; skip overwriting from non-existent top-level inputs.
+      if (p.type !== "flight") {
+        update.depDate = _v("ueb-depDate") || null;
+        update.depTime = _v("ueb-depTime") || null;
+        update.arrDate = _v("ueb-arrDate") || null;
+        update.arrTime = _v("ueb-arrTime") || null;
+      } else if (Array.isArray(update.legs) && update.legs.length) {
+        // Top-level dates/times from leg 1 for backward compat.
+        var f0 = update.legs[0];
+        update.depDate = f0.depDate;
+        update.depTime = f0.depTime;
+        var fLast = update.legs[update.legs.length - 1];
+        update.arrDate = fLast.arrDate;
+        update.arrTime = fLast.arrTime;
+      }
+      update.confirmationNumber = _v("ueb-conf");
+      var pn = _num(_v("ueb-price"));
+      update.price = pn;
+      update.currency = _v("ueb-currency") || "USD";
+      update.url = _v("ueb-url") || null;
+      update.notes = _v("ueb-notes");
+
+      MaxSync._request('/user/unassigned-bookings/' + encodeURIComponent(emailId), {
+        method: 'PATCH',
+        body: update,
+      })
+        .then(function(resp){
+          ov.remove();
+          if (typeof onSaved === "function") onSaved(resp && resp.parsed);
+        })
+        .catch(function(e){
+          console.warn('[unassigned] PATCH failed:', e);
+          if (typeof global.maxAlert === "function") global.maxAlert("Save failed. " + ((e && e.message) || ""));
+        });
+    };
+  }
+
   // ── TM.5 final (v333): renderTripPage dispatcher ────────────
   // Single entry point for "render this trip view" — callers don't
   // need to know about the trip-vs-dest mode switch. opts.expandedDestId
@@ -4846,6 +5883,12 @@
     renderTripOverviewStrips:    _renderTripOverviewStrips,
     renderDestinationsListHeader:_renderDestinationsListHeader,
     renderArrivalDeparturePanel: _renderArrivalDeparturePanel,
+    // v359.60.91 — trip-level Bookings (flights + car rentals
+    // that don't anchor to a single destination):
+    renderTripLevelBookings:     _renderTripLevelBookings,
+    // v360.0.8 — wayside generation banner + per-route rendering:
+    renderWaysidePromptBanner:   _renderWaysidePromptBanner,
+    renderRouteWaysides:         _renderRouteWaysides,
     // TM.3f (v323) — per-destination card render:
     renderTripDestinationCard:   _renderTripDestinationCard,
     // TM.7.2 (v331) — dest-mode pieces lifted from drawDestMode:

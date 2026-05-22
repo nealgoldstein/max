@@ -220,9 +220,88 @@ export const accessGrants = sqliteTable('access_grants', {
   notes: text('notes'),
 });
 
+// v360.0.0 — Phase 2 (email auto-import). One forwarding address per
+// user. The address is `{inboxToken}@inbox.travelingwithmax.app` —
+// inboxToken is a random non-guessable string minted once per user.
+// Cloudflare Email Routing pipes any mail at *@inbox.travelingwithmax.app
+// to the Email Worker, which validates the recipient against this
+// table before persisting the raw email. One-row-per-user model: a
+// user always has at most one inbox, mostly because the value of
+// multiple inboxes per user is unclear and the security tradeoff
+// (more attack surface) isn't worth it.
+export const userInboxes = sqliteTable('user_inboxes', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  inboxToken: text('inbox_token').notNull().unique(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(strftime('%s', 'now') * 1000)`),
+  // Updated whenever the Email Worker receives a message for this
+  // inbox — drives the "Last forwarded email: 2 hours ago" indicator
+  // on the Profile page so the user knows forwarding is live.
+  lastReceivedAt: integer('last_received_at', { mode: 'timestamp_ms' }),
+});
+
+// v360.0.0 — Phase 2. Durable inbox for raw forwarded emails. The
+// Email Worker writes here on receipt; the parser reads here, calls
+// the LLM, and either creates a booking (status='parsed') or marks
+// the row failed (status='failed'). Persisting raw before parsing
+// means a parser bug never loses an email — the row sits in
+// status='received' and we can re-process it. Also useful for the
+// Unassigned bookings tray (parsed but unmatched to any trip).
+export const pendingEmails = sqliteTable(
+  'pending_emails',
+  {
+    id: text('id').primaryKey(),
+    // Full original to: address; helpful for forensics + future
+    // multi-inbox-per-user (if we ever go there).
+    toAddress: text('to_address').notNull(),
+    // Extracted token (the local part of the to: address). FK
+    // implied — must match a user_inboxes.inbox_token row.
+    inboxToken: text('inbox_token').notNull(),
+    fromAddress: text('from_address'),
+    subject: text('subject'),
+    bodyText: text('body_text'),
+    bodyHtml: text('body_html'),
+    // Raw size in bytes — useful for monitoring + spam heuristics.
+    sizeBytes: integer('size_bytes'),
+    receivedAt: integer('received_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(strftime('%s', 'now') * 1000)`),
+    // Workflow state:
+    //   'received'  — Email Worker wrote it, parser hasn't seen it
+    //   'parsing'   — parser claimed it (set just before LLM call)
+    //   'parsed'    — booking created, attached to a trip OR routed
+    //                 to the Unassigned tray
+    //   'failed'    — parser threw; see `error` for the reason
+    //   'duplicate' — recognized as a re-forward of an already-
+    //                 parsed email (matched by hash)
+    parseStatus: text('parse_status').notNull().default('received'),
+    processedAt: integer('processed_at', { mode: 'timestamp_ms' }),
+    // JSON of the normalized booking the parser produced. Kept even
+    // after the booking is created so we can replay if the trip-
+    // attach logic changes.
+    parsedJson: text('parsed_json', { mode: 'json' }).$type<Record<string, unknown>>(),
+    // Where the booking landed. Empty if status != 'parsed' or if
+    // routed to Unassigned tray (no booking yet).
+    bookingId: text('booking_id'),
+    tripId: text('trip_id'),
+    error: text('error'),
+  },
+  (t) => ({
+    inboxTokenIdx: index('pending_emails_inbox_token_idx').on(t.inboxToken),
+    statusIdx: index('pending_emails_status_idx').on(t.parseStatus),
+  }),
+);
+
 export type User = typeof users.$inferSelect;
 export type AccessGrant = typeof accessGrants.$inferSelect;
 export type NewAccessGrant = typeof accessGrants.$inferInsert;
+export type UserInbox = typeof userInboxes.$inferSelect;
+export type NewUserInbox = typeof userInboxes.$inferInsert;
+export type PendingEmail = typeof pendingEmails.$inferSelect;
+export type NewPendingEmail = typeof pendingEmails.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
 export type Trip = typeof trips.$inferSelect;
 export type NewTrip = typeof trips.$inferInsert;
