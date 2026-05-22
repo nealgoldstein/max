@@ -364,31 +364,31 @@
 <!-- v359.45 Phase 1: schema migrations. Loaded BEFORE db.js so that
      db.js's tripRead/tripReadRaw can call MaxMigration.migrateTripShape
      synchronously on legacy envelopes. -->
-<script src="migration.js?v=DEV"></script>
+<script src="migration.js?v=1779458597"></script>
 <!-- Round HA: Phase 0 of the engine/UI split. db.js exposes window.MaxDB
      as the persistence seam. No callsites migrated yet; this just
      defines the API and verifies it loads. -->
-<script src="db.js?v=DEV"></script>
+<script src="db.js?v=1779458597"></script>
 <!-- Round HB: Phase 1 of the engine/UI split. engine-trip.js owns
      the trip engine's PURE helpers (haversine, pair-key, fastest-
      practical, hour parse/format, place-name canonicalization).
      Both window.MaxEngineTrip.<name> and window.<name> exposed for
      migration; the inline script still calls by original names. -->
-<script src="engine-trip.js?v=DEV"></script>
+<script src="engine-trip.js?v=1779458597"></script>
 <!-- Round HH: Phase 3 of the engine/UI split. engine-picker.js owns
      the picker engine's PURE helpers (findMatchingRequired + brief
      parsers). Same dual-surface pattern as engine-trip.js. -->
-<script src="engine-picker.js?v=DEV"></script>
+<script src="engine-picker.js?v=1779458597"></script>
 <!-- Round HW: Phase 4 of the engine/UI split. picker-ui.js owns the
      picker's DOM rendering. Today it holds one helper
      (_renderPickerCategoryNav); future rounds move more in. -->
-<script src="picker-ui.js?v=DEV"></script>
+<script src="picker-ui.js?v=1779458597"></script>
 <!-- Round MA.2/MA.4: trip-view rendering shared with mobile.
      Holds renderItinItem (full mode = the lifted mkItinItem body)
      + renderItinItemCompact (mobile path) + renderDay. The inline
      mkItinItem and mkDay below are 5-line delegators into here. -->
-<script src="trip-ui.js?v=DEV"></script>
-<script src="sync.js?v=DEV"></script>
+<script src="trip-ui.js?v=1779458597"></script>
+<script src="sync.js?v=1779458597"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#e8e8e8;color:#111;font-size:14px;line-height:1.6;}
@@ -36673,6 +36673,15 @@ function drawTripMode(){
   // (drawTripMode + drawDestMode fold). See audit-drawTripMode.md.
   MaxTripUI.renderTripOverviewStrips(trip, c);
 
+  // v360.1 (slice 1): trip-level peek chip. Renders the quiet link
+  // to the operational surface stub when there are operational items
+  // (pending actions, cancellation deadlines, etc.). When there's
+  // nothing pressing the chip is absent — its absence is itself the
+  // signal that the world isn't requiring anything right now.
+  if (typeof MaxTripUI !== "undefined" && typeof MaxTripUI.renderTripPeekChip === "function") {
+    MaxTripUI.renderTripPeekChip(trip, c);
+  }
+
   // v294.15: hero map removed. The right-panel map (#main-map) now does the
   // same job — same Esri+Carto basemap, numbered pins with split-color rings
   // for round-trip cities, optional polyline (toggle "🛣 Route"), and a
@@ -37057,6 +37066,18 @@ function drawTripMode(){
     MaxTripUI.renderWaysidePromptBanner(trip, c);
   }
 
+  // v360.1 (slice 1): persistent Spark intake. Sits between the
+  // trip-level metadata (bookings, arrival/dep, waysides) and the
+  // destinations list — the moment in the layout where the user
+  // transitions from looking at the trip's structure to its
+  // content. A wisp captured here lands in trip.brief.tripMeta.notes
+  // (the "Keep in mind for your trip" surface) prefixed with ✨ so
+  // the user can find it later. A future slice will route the wisp
+  // through the discovery LLM so it becomes a real candidate place.
+  if (typeof MaxTripUI !== "undefined" && typeof MaxTripUI.renderSparkIntake === "function") {
+    MaxTripUI.renderSparkIntake(trip, c);
+  }
+
   if(trip.destinations.length===0){
     var emp=document.createElement("div"); emp.style.cssText="font-size:12px;color:#ccc;font-style:italic;padding:4px 0 8px;";
     emp.textContent="No destinations yet."; listSec.appendChild(emp);
@@ -37138,6 +37159,16 @@ function drawTripMode(){
 
   listSec.appendChild(addBtn); listSec.appendChild(addForm);
   c.appendChild(listSec);
+
+  // v360.1 (slice 1): collapsed "More" disclosure. Holds the
+  // tertiary controls displaced from the destinations header
+  // (Tidy trip, Keep in mind, Reverse order, Considered, Open
+  // Discovery). Collapsed by default; expanded state per-trip in
+  // trip._ui.moreOpen so it survives re-renders without leaking
+  // across trips.
+  if (typeof MaxTripUI !== "undefined" && typeof MaxTripUI.renderTripMore === "function") {
+    MaxTripUI.renderTripMore(trip, c);
+  }
 
   // Pre-fill arriving date from last dest
   if(trip.destinations.length>0){

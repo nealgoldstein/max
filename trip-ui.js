@@ -2294,14 +2294,21 @@
   //     (picker-edit re-entry path; falls back to legacy explorer
   //      when the trip pre-dates the place-mode picker)
   function _renderDestinationsListHeader(trip) {
-    // v359.53.6: two-row header.
-    //   Row 1 — "Destinations" title (left), "+ Destination" primary
-    //           CTA (right). One clean line, one action that matters
-    //           most for forward motion on a trip.
-    //   Row 2 — totals line (left), secondary chips: "Reverse order",
-    //           "Considered (N)", "Edit destinations" (right). These
-    //           are sometimes-relevant; they shouldn't compete with
-    //           the primary add affordance.
+    // v360.1 (slice 1): slimmed to just title + totals. The six
+    // controls that used to live here — + Destination, Tidy trip,
+    // Keep in mind, Reverse order, Considered, Open Discovery — have
+    // moved:
+    //   - "+ Destination" stays accessible via the existing inline
+    //     form at the bottom of the destination list (#tm-add-btn).
+    //     That's where you'd naturally add the next destination —
+    //     the redesign principle is "primary action at the end of
+    //     the list."
+    //   - Tidy / Keep in mind / Reverse / Considered / Open Discovery
+    //     all moved into MaxTripUI.renderTripMore — a collapsed
+    //     disclosure below the destinations. Tertiary controls
+    //     shouldn't compete with the destination cards themselves.
+    // The preferences panel below this section is kept as-is for now;
+    // slice 2 will inline it into trip identity.
     var listSec = document.createElement("div");
     listSec.className = "tm-section";
 
@@ -2309,170 +2316,23 @@
     var totalNights = dests.reduce(function (s, d) { return s + (d.nights || 0); }, 0);
     var totalDays = totalNights + (dests.length ? 1 : 0);
 
-    // ── Row 1: title + primary "+ Destination" ──
     var listHdr = document.createElement("div");
-    listHdr.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;";
+    listHdr.style.cssText = "display:flex;align-items:baseline;gap:10px;margin-bottom:8px;flex-wrap:wrap;";
+
     var lbl = document.createElement("div");
     lbl.className = "tm-sec-title";
     lbl.style.cssText = "margin:0;font-size:18px;font-weight:700;color:#111;letter-spacing:-.01em;";
     lbl.textContent = "Destinations";
     listHdr.appendChild(lbl);
 
-    var addDestBtn = document.createElement("button");
-    addDestBtn.style.cssText = "font-size:14px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:7px;padding:9px 16px;cursor:pointer;font-family:inherit;white-space:nowrap;letter-spacing:-.01em;box-shadow:0 1px 3px rgba(26,95,168,0.18);";
-    addDestBtn.textContent = "+ Destination";
-    addDestBtn.title = "Add another destination to this trip";
-    addDestBtn.onmouseover = function(){ addDestBtn.style.background = "#134a8a"; };
-    addDestBtn.onmouseout  = function(){ addDestBtn.style.background = "#1a5fa8"; };
-    addDestBtn.onclick = function(){
-      // Reuse the existing inline-form trigger at the bottom of the
-      // destinations list (`#tm-add-btn`). Scrolls into view, opens
-      // the form, focuses the intent textarea.
-      var b = document.getElementById("tm-add-btn");
-      if (b) {
-        try { b.scrollIntoView({behavior:"smooth", block:"center"}); } catch(_) {}
-        b.click();
-        setTimeout(function(){
-          var f = document.getElementById("dest-intent-vis");
-          if (f) f.focus();
-        }, 120);
-      }
-    };
-
-    // v359.59: "Tidy trip" button — runs the reclassifier. Only
-    // shows when there are sight stops to reshape (i.e., at least one
-    // destination with ≤1 night exists alongside ≥1 overnight hub).
-    // Hidden when the trip is already clean so the header doesn't
-    // carry dead buttons.
-    var _hubCount = 0, _sightCount = 0;
-    (Array.isArray(dests) ? dests : []).forEach(function(d){
-      if (!d) return;
-      if ((d.nights || 0) >= 2) _hubCount++;
-      else _sightCount++;
-    });
-    if (_hubCount >= 1 && _sightCount >= 1) {
-      var tidyBtn = document.createElement("button");
-      tidyBtn.type = "button";
-      tidyBtn.innerHTML = "🪄 Tidy trip";
-      tidyBtn.title = "Reshape " + _sightCount + " sight stop" + (_sightCount === 1 ? "" : "s") + " into day trips and waysides attached to your " + _hubCount + " overnight hub" + (_hubCount === 1 ? "" : "s") + ".";
-      tidyBtn.style.cssText = "font-size:12px;font-weight:600;color:#b06000;background:#fff;border:1px solid #e8c08a;border-radius:6px;padding:6px 11px;cursor:pointer;font-family:inherit;margin-right:6px;white-space:nowrap;";
-      tidyBtn.onmouseover = function(){ tidyBtn.style.background = "#fff5e6"; };
-      tidyBtn.onmouseout  = function(){ tidyBtn.style.background = "#fff"; };
-      tidyBtn.onclick = function(e){
-        e.stopPropagation();
-        if (typeof global._openTidyTripPreview === "function") global._openTidyTripPreview();
-      };
-      listHdr.appendChild(tidyBtn);
-    }
-
-    // v359.60.66: the operational "📋 Trip notes" button and the
-    // planning-stage "Research / Discovery notes" button used to live
-    // side by side here. Their intents overlapped so much that users
-    // (Neal) asked "what's the difference between these?" — fair
-    // question. The two surfaces are now merged into a single
-    // "Keep in mind for your trip" button below, with the legacy
-    // trip.notes content concatenated into trip.brief.tripMeta at
-    // enterApp().
-    var tripResearchBtn = document.createElement("button");
-    tripResearchBtn.type = "button";
-    var _tripBriefMeta = (trip && trip.brief && trip.brief.tripMeta) || null;
-    var _tripHasMeta = !!(_tripBriefMeta && (
-      (_tripBriefMeta.notes && _tripBriefMeta.notes.trim())
-      || (Array.isArray(_tripBriefMeta.links) && _tripBriefMeta.links.length)
-    ));
-    var _tripLinkN = (_tripBriefMeta && Array.isArray(_tripBriefMeta.links)) ? _tripBriefMeta.links.length : 0;
-    var _tripLinkBadgeTV = _tripLinkN > 0 ? ' <span style="opacity:.85;font-size:10px;">(' + _tripLinkN + ')</span>' : "";
-    // v359.60.65: rename "Discovery notes" → "Keep in mind for your
-    // trip" so the trip-level planning-notes button mirrors the
-    // per-destination "Keep in mind for {place}" strip. Same data
-    // (trip.brief.tripMeta), same popover; just intent-first wording.
-    tripResearchBtn.innerHTML = "🔬 Keep in mind for your trip" + _tripLinkBadgeTV;
-    tripResearchBtn.title = _tripHasMeta
-      ? "Things to remember for the trip" + (_tripLinkN ? " plus " + _tripLinkN + " link" + (_tripLinkN === 1 ? "" : "s") : "") + " — click to edit"
-      : "Things to remember for the trip — links, reservations, reminders to look up";
-    tripResearchBtn.style.cssText = "font-size:12px;font-weight:600;color:" + (_tripHasMeta ? "#fff" : "#5b3f8f") + ";background:" + (_tripHasMeta ? "#5b3f8f" : "#fff") + ";border:1px solid #5b3f8f;border-radius:6px;padding:6px 11px;cursor:pointer;font-family:inherit;margin-right:8px;white-space:nowrap;";
-    tripResearchBtn.onclick = function(e){
-      e.stopPropagation();
-      if (typeof global._pmEnsureResearchMeta === "function") global._pmEnsureResearchMeta();
-      if (typeof global._pmOpenTripResearchCard === "function") global._pmOpenTripResearchCard();
-    };
-    listHdr.appendChild(tripResearchBtn);
-
-    listHdr.appendChild(addDestBtn);
-
-    // ── Row 2: totals line + secondary chips ──
-    var subRow = document.createElement("div");
-    subRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;flex-wrap:wrap;";
-
     var totalLine = document.createElement("div");
     totalLine.style.cssText = "font-size:11px;color:#666;";
     totalLine.innerHTML = dests.length
       ? '<strong style="color:#111;">' + totalDays + ' days</strong> · ' + totalNights + ' nights · ' + dests.length + ' destination' + (dests.length !== 1 ? 's' : '')
       : '<span style="color:#aaa;font-style:italic;">No destinations yet.</span>';
-    subRow.appendChild(totalLine);
-
-    var chipRow = document.createElement("div");
-    chipRow.style.cssText = "display:flex;align-items:center;gap:6px;flex-wrap:wrap;";
-
-    var _chipStyle = "font-size:11px;font-weight:500;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:6px;padding:5px 10px;cursor:pointer;font-family:inherit;white-space:nowrap;";
-
-    // Reverse-order button — only on trips with 3+ destinations.
-    if (dests.length >= 3) {
-      var revBtn = document.createElement("button");
-      revBtn.style.cssText = _chipStyle;
-      revBtn.textContent = "↺ Reverse order";
-      revBtn.title = "Flip the order of destinations on this trip";
-      revBtn.onmouseover = function () { revBtn.style.background = "#f0f5fc"; };
-      revBtn.onmouseout  = function () { revBtn.style.background = "#fff"; };
-      revBtn.onclick = function () { if (typeof global.reverseTripOrder === "function") global.reverseTripOrder(); };
-      chipRow.appendChild(revBtn);
-    }
-
-    // "Considered (N)" — only when carry-forward candidates exist.
-    if (trip && Array.isArray(trip.candidates) && trip.candidates.length) {
-      var consideredCount = trip.candidates.filter(function(c){
-        return c && c.status !== "keep" && c.status !== "reject";
-      }).length;
-      if (consideredCount > 0) {
-        var conBtn = document.createElement("button");
-        conBtn.style.cssText = _chipStyle;
-        conBtn.textContent = "Considered (" + consideredCount + ")";
-        conBtn.title = "Places Max suggested that you didn't accept or reject — add any of them to this trip";
-        conBtn.onmouseover = function () { conBtn.style.background = "#f0f5fc"; };
-        conBtn.onmouseout  = function () { conBtn.style.background = "#fff"; };
-        conBtn.onclick = function () {
-          if (typeof global.showConsideredCandidatesModal === "function") {
-            global.showConsideredCandidatesModal();
-          }
-        };
-        chipRow.appendChild(conBtn);
-      }
-    }
-
-    // "Edit destinations" — re-open the picker. Demoted from primary
-    // (v359.5 styling) to a secondary chip now that "+ Destination"
-    // is the lead CTA; bulk-edit-in-picker is the less-common path.
-    if (trip && trip.candidates && trip.candidates.length) {
-      var editBtn = document.createElement("button");
-      editBtn.style.cssText = _chipStyle;
-      editBtn.textContent = "✎ Open Discovery";
-      editBtn.title = "Re-open Discovery with your current keep/reject decisions, notes, and links";
-      editBtn.onmouseover = function () { editBtn.style.background = "#f0f5fc"; };
-      editBtn.onmouseout  = function () { editBtn.style.background = "#fff"; };
-      editBtn.onclick = function () {
-        if (typeof global.reopenPickerForEdit === "function" && trip && Array.isArray(trip.mdcItems) && trip.mdcItems.length) {
-          global.reopenPickerForEdit();
-        } else if (typeof global.reopenCandidateExplorer === "function") {
-          global.reopenCandidateExplorer();
-        }
-      };
-      chipRow.appendChild(editBtn);
-    }
-
-    subRow.appendChild(chipRow);
+    listHdr.appendChild(totalLine);
 
     listSec.appendChild(listHdr);
-    listSec.appendChild(subRow);
 
     // v359.19: single trip-level banner surfacing the user's
     // accommodation preference + avoidances. Replaces both the
@@ -5869,6 +5729,389 @@
     }
   }
 
+  // ─────────────────────────────────────────────────────────────
+  // v360.1: Trip-view redesign slice 1 — top of the shaping surface
+  //
+  // Three new helpers that introduce the patterns the redesign
+  // depends on:
+  //   _renderTripPeekChip    — quiet "N things need you →" link to
+  //                            an operational surface stub.
+  //   _renderSparkIntake     — persistent "what else might matter"
+  //                            input for introducing new wisps mid-
+  //                            shaping (the Spark side of the
+  //                            Spark↔Shape loop).
+  //   _renderTripMore        — collapsed disclosure that holds the
+  //                            tertiary controls displaced from the
+  //                            destinations header (Tidy, Keep in
+  //                            mind, Reverse, Considered, Open
+  //                            Discovery).
+  //
+  // The destinations-list header itself is slimmed in a paired edit
+  // below (_renderDestinationsListHeader) — the six buttons it
+  // currently carries move into the surfaces above.
+  // ─────────────────────────────────────────────────────────────
+
+  // Count operational items on a trip — things the world is pressing
+  // on right now. For slice 1 this is just the existing pendingActions
+  // surface; later slices will incorporate cancellation deadlines,
+  // imminent-departure flags, etc.
+  function _countOperationalItems(trip) {
+    if (!trip) return 0;
+    try {
+      if (typeof global.computePendingActions === 'function') {
+        var pa = global.computePendingActions(trip, new Date());
+        if (pa && Array.isArray(pa.items)) return pa.items.length;
+      }
+    } catch (_) {}
+    if (Array.isArray(trip.pendingActions)) return trip.pendingActions.length;
+    return 0;
+  }
+
+  // Render the trip-level peek chip. Sits near the top of the
+  // shaping surface; only appears when there's something for the
+  // operational surface to display.
+  //
+  // For slice 1, tapping opens a stub modal that lists the items.
+  // A proper operational surface is a later slice.
+  function _renderTripPeekChip(trip, container) {
+    if (!trip || !container) return;
+    var n = _countOperationalItems(trip);
+    if (n <= 0) return; // no chip when nothing is pressing
+
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'margin:10px 2px 8px;';
+    var chip = document.createElement('button');
+    chip.type = 'button';
+    chip.style.cssText =
+      'background:#fff;border:1px solid #d8c4a4;color:#5c4520;font-family:inherit;' +
+      'font-size:11.5px;font-weight:600;padding:5px 11px;border-radius:14px;' +
+      'cursor:pointer;display:inline-flex;align-items:center;gap:6px;' +
+      'box-shadow:0 1px 2px rgba(0,0,0,.04);';
+    // Diamond glyph carries the meaning non-color-only ("◇" = "needs you")
+    chip.innerHTML = '◇ <span style="font-weight:700;">' + n + '</span> thing' +
+      (n === 1 ? '' : 's') + ' need you <span aria-hidden="true">→</span>';
+    chip.title = 'See what the world is pressing on right now';
+    chip.onmouseover = function () { chip.style.background = '#fff8ed'; };
+    chip.onmouseout  = function () { chip.style.background = '#fff'; };
+    chip.onclick = function () {
+      _openOperationalSurfaceStub(trip);
+    };
+    wrap.appendChild(chip);
+    container.appendChild(wrap);
+  }
+
+  // Temporary stub for the operational surface. Renders a modal
+  // showing pendingActions as a flat list. Slice 4 will replace this
+  // with a proper standalone surface.
+  function _openOperationalSurfaceStub(trip) {
+    var existing = document.getElementById('max-op-stub');
+    if (existing) { existing.remove(); }
+    var ov = document.createElement('div');
+    ov.id = 'max-op-stub';
+    ov.style.cssText =
+      'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:11900;' +
+      'display:flex;align-items:flex-start;justify-content:center;padding:8vh 16px;' +
+      'font:13px/1.5 -apple-system,BlinkMacSystemFont,sans-serif;';
+    var box = document.createElement('div');
+    box.style.cssText =
+      'background:#fff;border-radius:10px;width:560px;max-width:100%;max-height:80vh;' +
+      'overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.25);padding:24px 28px;';
+    var head = document.createElement('div');
+    head.style.cssText = 'display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:14px;';
+    var h = document.createElement('div');
+    h.style.cssText = 'font-size:16px;font-weight:700;color:#111;';
+    h.textContent = 'What needs you';
+    var x = document.createElement('button');
+    x.type = 'button';
+    x.style.cssText = 'background:none;border:none;color:#888;font-size:18px;cursor:pointer;padding:0 4px;';
+    x.textContent = '✕';
+    x.title = 'Close';
+    x.onclick = function () { ov.remove(); };
+    head.appendChild(h);
+    head.appendChild(x);
+    box.appendChild(head);
+
+    var sub = document.createElement('div');
+    sub.style.cssText = 'font-size:11.5px;color:#888;margin-bottom:14px;line-height:1.5;';
+    sub.textContent =
+      'Stub for the operational surface — things the world is pressing on. ' +
+      'A proper standalone surface lands in a later slice; for now this modal collects them.';
+    box.appendChild(sub);
+
+    var items = [];
+    try {
+      if (typeof global.computePendingActions === 'function') {
+        var pa = global.computePendingActions(trip, new Date());
+        if (pa && Array.isArray(pa.items)) items = pa.items;
+      }
+    } catch (_) {}
+
+    if (!items.length) {
+      var empty = document.createElement('div');
+      empty.style.cssText = 'font-size:12px;color:#888;font-style:italic;padding:8px 0;';
+      empty.textContent = 'Nothing the world is requiring right now — return to shaping.';
+      box.appendChild(empty);
+    } else {
+      var list = document.createElement('div');
+      list.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
+      items.forEach(function (it) {
+        var row = document.createElement('div');
+        row.style.cssText = 'padding:8px 10px;border:1px solid #eee;border-radius:6px;font-size:12px;color:#333;';
+        var line = (it && (it.text || it.message || it.label)) || JSON.stringify(it);
+        row.textContent = line;
+        list.appendChild(row);
+      });
+      box.appendChild(list);
+    }
+
+    ov.appendChild(box);
+    ov.addEventListener('click', function (e) { if (e.target === ov) ov.remove(); });
+    document.body.appendChild(ov);
+  }
+
+  // Render the persistent Spark intake — an always-available
+  // affordance for introducing a new wisp into the trip's
+  // Spark↔Shape loop. For slice 1 the wisp lands in
+  // trip.brief.tripMeta.notes (the existing "Keep in mind"
+  // surface), with a confirmation toast. A later slice will route
+  // it through the discovery LLM so the wisp becomes a candidate
+  // place immediately.
+  function _renderSparkIntake(trip, container) {
+    if (!trip || !container) return;
+
+    var wrap = document.createElement('div');
+    wrap.style.cssText =
+      'margin:8px 2px 14px;padding:10px 12px;background:#fbfaf6;' +
+      'border:1px solid #ece2d2;border-radius:8px;display:flex;gap:8px;align-items:center;';
+
+    var icon = document.createElement('div');
+    icon.style.cssText = 'font-size:16px;flex-shrink:0;';
+    icon.textContent = '✨';
+
+    var inp = document.createElement('input');
+    inp.type = 'text';
+    inp.placeholder = 'What else might matter on this trip?';
+    inp.style.cssText =
+      'flex:1;min-width:0;border:none;background:transparent;font-family:inherit;' +
+      'font-size:13px;color:#333;outline:none;padding:4px 0;';
+    inp.setAttribute('aria-label', 'Capture a new idea, place, or thought');
+
+    var addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.style.cssText =
+      'background:#fff;border:1px solid #d8c4a4;color:#5c4520;font-family:inherit;' +
+      'font-size:11.5px;font-weight:600;padding:5px 11px;border-radius:5px;' +
+      'cursor:pointer;flex-shrink:0;';
+    addBtn.textContent = 'Capture';
+    addBtn.disabled = true;
+
+    function _updateBtnState() {
+      var has = inp.value.trim().length > 0;
+      addBtn.disabled = !has;
+      addBtn.style.opacity = has ? '1' : '0.5';
+      addBtn.style.cursor = has ? 'pointer' : 'default';
+    }
+    _updateBtnState();
+    inp.addEventListener('input', _updateBtnState);
+
+    function _capture() {
+      var text = inp.value.trim();
+      if (!text) return;
+      // Land it in trip.brief.tripMeta.notes (the "Keep in mind"
+      // surface). Prefix with a sparkle so the user can find it
+      // later as a captured wisp.
+      if (!trip.brief) trip.brief = {};
+      if (!trip.brief.tripMeta) trip.brief.tripMeta = {};
+      var existing = (trip.brief.tripMeta.notes || '').trim();
+      var stamped = '✨ ' + text;
+      trip.brief.tripMeta.notes = existing
+        ? (existing + '\n' + stamped)
+        : stamped;
+      inp.value = '';
+      _updateBtnState();
+      if (typeof global.autoSave === 'function') {
+        try { global.autoSave(); } catch (_) {}
+      }
+      if (typeof global.showSaveStatus === 'function') {
+        global.showSaveStatus('✨ Captured — see "Keep in mind for your trip"', 2500);
+      }
+    }
+
+    inp.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        _capture();
+      }
+    });
+    addBtn.onclick = _capture;
+
+    wrap.appendChild(icon);
+    wrap.appendChild(inp);
+    wrap.appendChild(addBtn);
+    container.appendChild(wrap);
+  }
+
+  // Render the "More" disclosure — a collapsed section that holds
+  // tertiary controls displaced from the destinations header. Today
+  // these are always-visible buttons competing with the primary
+  // destination affordances; they belong somewhere discoverable but
+  // not in the user's face on every render.
+  //
+  // Contents:
+  //   - Tidy trip      (when the trip has tidy-able structure)
+  //   - Keep in mind   (notes editor)
+  //   - Reverse order  (3+ destinations only)
+  //   - Considered (N) (only when N > 0)
+  //   - Open Discovery (only when a discovery snapshot exists)
+  //
+  // Collapsed by default. Expanded state is per-trip in
+  // trip._ui.moreOpen so it survives re-renders within a session
+  // (and survives a save, harmless if it lingers).
+  function _renderTripMore(trip, container) {
+    if (!trip || !container) return;
+    if (!trip._ui) trip._ui = {};
+    var open = !!trip._ui.moreOpen;
+
+    var dests = (trip && trip.destinations) || [];
+    var _hubCount = 0, _sightCount = 0;
+    dests.forEach(function (d) {
+      if (!d) return;
+      if ((d.nights || 0) >= 2) _hubCount++; else _sightCount++;
+    });
+    var canTidy = _hubCount >= 1 && _sightCount >= 1;
+    var canReverse = dests.length >= 3;
+    var consideredCount = 0;
+    if (Array.isArray(trip.candidates)) {
+      consideredCount = trip.candidates.filter(function (c) {
+        return c && c.status !== 'keep' && c.status !== 'reject';
+      }).length;
+    }
+    var canOpenDiscovery = !!(trip.candidates && trip.candidates.length);
+
+    // If literally nothing would show up inside, skip the section
+    // entirely — no point in a "More" button that opens to "Keep in
+    // mind" alone (that one's always available).
+    var anyExtras = canTidy || canReverse || consideredCount > 0 || canOpenDiscovery;
+
+    var sec = document.createElement('div');
+    sec.className = 'tm-section tm-more';
+    sec.style.cssText = 'margin:14px 2px 6px;';
+
+    var hdr = document.createElement('button');
+    hdr.type = 'button';
+    hdr.style.cssText =
+      'display:flex;align-items:center;justify-content:space-between;width:100%;' +
+      'background:transparent;border:none;color:#666;font-family:inherit;' +
+      'font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;' +
+      'padding:6px 0;cursor:pointer;';
+    hdr.innerHTML = 'More <span aria-hidden="true">' + (open ? '⌃' : '⌄') + '</span>';
+    hdr.onclick = function () {
+      trip._ui.moreOpen = !trip._ui.moreOpen;
+      if (typeof global.drawTripMode === 'function') global.drawTripMode();
+    };
+    sec.appendChild(hdr);
+
+    if (!open) {
+      container.appendChild(sec);
+      return;
+    }
+
+    var body = document.createElement('div');
+    body.style.cssText =
+      'padding:8px 4px 4px;display:flex;flex-direction:column;gap:6px;border-top:1px solid #eee;';
+
+    function _addRow(label, sub, onClick) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.style.cssText =
+        'text-align:left;padding:8px 10px;border:1px solid #e8e2d2;background:#fff;' +
+        'border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px;' +
+        'color:#444;display:flex;flex-direction:column;gap:2px;';
+      var top = document.createElement('div');
+      top.style.cssText = 'font-weight:600;';
+      top.textContent = label;
+      btn.appendChild(top);
+      if (sub) {
+        var s = document.createElement('div');
+        s.style.cssText = 'font-size:10.5px;color:#888;';
+        s.textContent = sub;
+        btn.appendChild(s);
+      }
+      btn.onmouseover = function () { btn.style.background = '#faf7f1'; };
+      btn.onmouseout  = function () { btn.style.background = '#fff'; };
+      btn.onclick = onClick;
+      body.appendChild(btn);
+    }
+
+    if (canTidy) {
+      _addRow(
+        '🪄 Tidy trip',
+        'Reshape ' + _sightCount + ' sight stop' + (_sightCount === 1 ? '' : 's') +
+          ' into day trips and waysides attached to your ' + _hubCount +
+          ' overnight hub' + (_hubCount === 1 ? '' : 's') + '.',
+        function () {
+          if (typeof global._openTidyTripPreview === 'function') global._openTidyTripPreview();
+        }
+      );
+    }
+
+    _addRow(
+      '🔬 Keep in mind for your trip',
+      'Links, reservations, reminders to look up — and captured ideas from the ✨ intake above.',
+      function () {
+        if (typeof global._pmEnsureResearchMeta === 'function') global._pmEnsureResearchMeta();
+        if (typeof global._pmOpenTripResearchCard === 'function') global._pmOpenTripResearchCard();
+      }
+    );
+
+    if (canReverse) {
+      _addRow(
+        '↺ Reverse trip order',
+        'Flip the order of destinations on this trip.',
+        function () {
+          if (typeof global.reverseTripOrder === 'function') global.reverseTripOrder();
+        }
+      );
+    }
+
+    if (consideredCount > 0) {
+      _addRow(
+        'Considered (' + consideredCount + ')',
+        'Places Max suggested that you didn\'t accept or reject — review or add any of them.',
+        function () {
+          if (typeof global.showConsideredCandidatesModal === 'function') {
+            global.showConsideredCandidatesModal();
+          }
+        }
+      );
+    }
+
+    if (canOpenDiscovery) {
+      _addRow(
+        '✎ Open Discovery',
+        'Re-open Discovery with your current keep/reject decisions and notes.',
+        function () {
+          if (typeof global.reopenPickerForEdit === 'function' &&
+              trip && Array.isArray(trip.mdcItems) && trip.mdcItems.length) {
+            global.reopenPickerForEdit();
+          } else if (typeof global.reopenCandidateExplorer === 'function') {
+            global.reopenCandidateExplorer();
+          }
+        }
+      );
+    }
+
+    if (!anyExtras) {
+      var note = document.createElement('div');
+      note.style.cssText = 'font-size:11px;color:#999;font-style:italic;padding:4px 0;';
+      note.textContent = 'Nothing else right now.';
+      body.appendChild(note);
+    }
+
+    sec.appendChild(body);
+    container.appendChild(sec);
+  }
+
   // ── Public surface ─────────────────────────────────────────
   global.MaxTripUI = {
     renderItinItem:         renderItinItem,         // MA.3 — unified entry
@@ -5882,6 +6125,10 @@
     renderGeoAffordanceBanner:   _renderGeoAffordanceBanner,
     renderTripOverviewStrips:    _renderTripOverviewStrips,
     renderDestinationsListHeader:_renderDestinationsListHeader,
+    // v360.1 — trip-view redesign slice 1: top of the shaping surface:
+    renderTripPeekChip:          _renderTripPeekChip,
+    renderSparkIntake:           _renderSparkIntake,
+    renderTripMore:              _renderTripMore,
     renderArrivalDeparturePanel: _renderArrivalDeparturePanel,
     // v359.60.91 — trip-level Bookings (flights + car rentals
     // that don't anchor to a single destination):
