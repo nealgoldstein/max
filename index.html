@@ -2310,6 +2310,11 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
     <!-- v294.15: route toggle + view-larger buttons (replace deleted hero map). Trip-mode only. -->
     <button type="button" id="map-route-btn" style="position:absolute;top:8px;right:8px;z-index:499;background:rgba(255,255,255,.95);border:1px solid #cfe1f7;border-radius:6px;padding:5px 10px;box-shadow:0 1px 4px rgba(0,0,0,.15);font-size:11px;font-weight:600;color:#1a5fa8;cursor:pointer;font-family:inherit;display:none;" title="Show/hide the trip route on the map">🛣 Route</button>
     <button type="button" id="map-larger-btn" style="position:absolute;top:8px;right:96px;z-index:499;background:rgba(255,255,255,.95);border:1px solid #cfe1f7;border-radius:6px;padding:5px 10px;box-shadow:0 1px 4px rgba(0,0,0,.15);font-size:11px;font-weight:600;color:#1a5fa8;cursor:pointer;font-family:inherit;display:none;" title="Open the trip route in a separate window">🗺 View larger →</button>
+    <!-- Round FN.D.1: day-trips toggle. Same vocabulary as the Route
+         toggle (sticky pref via localStorage, label flips ON/OFF on
+         click). Sits left of Legend so the right-edge order is:
+         Route · View larger · Day trips · Legend. Trip-mode only. -->
+    <button type="button" id="map-daytrips-btn" style="position:absolute;top:8px;right:296px;z-index:499;background:rgba(255,255,255,.95);border:1px solid #e2d4f0;border-radius:6px;padding:5px 10px;box-shadow:0 1px 4px rgba(0,0,0,.15);font-size:11px;font-weight:600;color:#7a4fbf;cursor:pointer;font-family:inherit;display:none;" title="Show/hide day-trip loops on the map">🟣 Day trips</button>
     <!-- v360.3 (#109): map pin legend. Renders the three shape +
          color pairings (overnight circle / day-trip square / wayside
          octagon) so the user can decode any pin without trial and
@@ -30674,6 +30679,9 @@ function initMainMap(){
   // sticky — most users want to see the journey arc by default.
   initMapRouteBtn();
   initMapLargerBtn();
+  // FN.D.1: same sticky-toggle treatment for day-trip loops. Default
+  // visible so the existing user experience is unchanged.
+  if (typeof initMapDayTripsBtn === "function") initMapDayTripsBtn();
 }
 
 // v294.15: trip-route polyline state. Preference persists across sessions.
@@ -30694,6 +30702,35 @@ function initMapRouteBtn(){
   btn.onclick = function(){
     _routeShown = !_routeShown;
     try { localStorage.setItem('max-route-shown', _routeShown ? '1' : '0'); } catch(e){}
+    paint();
+    if (typeof updateMainMap === 'function') updateMainMap();
+  };
+  paint();
+}
+
+// Round FN.D.1: day-trip loops toggle. Same shape as the route
+// toggle — sticky preference in localStorage, default ON so the
+// existing visual experience is unchanged for users who don't touch
+// the button. When OFF, updateMainMap skips drawing the purple
+// day-trip polylines + pins, but doesn't touch the underlying trip
+// data — day trips still exist on the destinations and tabs, just
+// not on the overview map.
+var _dayTripsShown = (function(){
+  try { var v = localStorage.getItem('max-daytrips-shown'); return v === null ? true : v === '1'; }
+  catch(e){ return true; }
+})();
+
+function initMapDayTripsBtn(){
+  var btn = document.getElementById('map-daytrips-btn');
+  if (!btn) return;
+  function paint(){
+    btn.textContent = _dayTripsShown ? '🟣 Day trips on' : '🟣 Day trips off';
+    btn.style.background = _dayTripsShown ? '#7a4fbf' : 'rgba(255,255,255,.95)';
+    btn.style.color = _dayTripsShown ? '#fff' : '#7a4fbf';
+  }
+  btn.onclick = function(){
+    _dayTripsShown = !_dayTripsShown;
+    try { localStorage.setItem('max-daytrips-shown', _dayTripsShown ? '1' : '0'); } catch(e){}
     paint();
     if (typeof updateMainMap === 'function') updateMainMap();
   };
@@ -31533,6 +31570,10 @@ function updateMainMap(){
       if (_lbHide) _lbHide.style.display = 'none';
       var _lpHide = document.getElementById('map-legend-popover');
       if (_lpHide) _lpHide.style.display = 'none';
+      // FN.D.1: hide day-trips toggle on empty trips too — no day
+      // trips can exist yet, so the button has nothing to toggle.
+      var _dtHide = document.getElementById('map-daytrips-btn');
+      if (_dtHide) _dtHide.style.display = 'none';
       clearMainMarkers();
       // Center on region from brief if available
       var region=(trip.brief&&trip.brief.region)||(trip.name)||"";
@@ -31553,6 +31594,16 @@ function updateMainMap(){
     // controls in trip mode. The popover is hidden until tapped.
     var legendBtn = document.getElementById('map-legend-btn');
     if (legendBtn) legendBtn.style.display = 'inline-block';
+    // FN.D.1: day-trips toggle. Only show when the trip actually has
+    // at least one day-trip route — no point in a toggle that
+    // controls nothing. Walks trip.routes[] for the dayTrip subKind.
+    var dtBtn = document.getElementById('map-daytrips-btn');
+    if (dtBtn) {
+      var _hasDayTrip = Array.isArray(trip.routes) && trip.routes.some(function(r){
+        return r && (r.subKind === "dayTrip" || r.kind === "dayTrip");
+      });
+      dtBtn.style.display = _hasDayTrip ? 'inline-block' : 'none';
+    }
 
     // v294.15: numbered + grouped pins (lifted from the deleted hero map).
     // Round-trip cities (same place visited as stop 1 AND stop 9) collapse
@@ -32001,6 +32052,11 @@ function updateMainMap(){
       : function(r){ return r && (r.subKind === "dayTrip" || r.kind === "dayTrip"); };
     _routes.forEach(function(route){
       if (!_isDTRoute(route)) return;
+      // FN.D.1: respect the Day Trips toggle. When off, skip every
+      // day-trip route's render — no purple polylines, no stop pins.
+      // Underlying data is untouched; flip the button back on to
+      // restore.
+      if (typeof _dayTripsShown !== "undefined" && !_dayTripsShown) return;
       var hubDestId = route.fromDestId;
       if (!hubDestId) return;
       var hubDest = trip.destinations.find(function(d){ return d && d.id === hubDestId; });
