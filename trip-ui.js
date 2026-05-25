@@ -6217,8 +6217,16 @@
       return !!adjPairs[(r.fromDestId || '') + '→' + (r.toDestId || '')];
     });
     if (!transits.length) return;
+    // Round FN.E.2: also exclude routes the picker already tried.
+    // The banner is for "you have routes that haven't been
+    // discovered yet, want to fill them in?" — if the picker phase
+    // covered every transit route, there's nothing left for Generate
+    // to do, so the banner shouldn't appear. Routes added after
+    // Choreograph (no flag) still surface here.
     var withoutWaysides = transits.filter(function (r) {
-      return !Array.isArray(r.planItems) || r.planItems.length === 0;
+      if (Array.isArray(r.planItems) && r.planItems.length) return false;
+      if (r && r._waysidesPickerTried) return false;
+      return true;
     });
     if (!withoutWaysides.length) return;
     var dismissed = false;

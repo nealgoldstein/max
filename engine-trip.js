@@ -1578,8 +1578,22 @@
     // Build the work queue first — only transit routes without
     // existing waysides count toward the total. This way the UI's
     // "3 of 12" matches what the user will actually see happen.
+    //
+    // Round FN.E.2: also skip routes the picker already tried. The
+    // picker's runPickerWaysideDiscovery called the same LLM for
+    // every kept-leg pair during the discovery phase; publishTrip
+    // tags transit routes with _waysidesPickerTried = true so we
+    // don't waste a second LLM call here. If the user wants fresh
+    // suggestions for a leg (e.g., they rejected everything the
+    // picker proposed and want another shot), they need a deliberate
+    // per-leg "Rediscover" gesture — Generate is for filling gaps,
+    // not retrying. Routes added after Choreograph won't have the
+    // flag and remain eligible. Force-regenerate via opts.force.
+    var force = !!opts.force;
     var queue = transits.filter(function (r) {
-      return !(Array.isArray(r.planItems) && r.planItems.length);
+      if (Array.isArray(r.planItems) && r.planItems.length) return false;
+      if (!force && r && r._waysidesPickerTried) return false;
+      return true;
     });
     var skipped = transits.length - queue.length;
     var total = queue.length;

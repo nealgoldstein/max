@@ -3130,6 +3130,32 @@
           console.log("[Max publishTrip] wayside commits: " + committed + " attached, " + dropped + " dropped");
         }
       }
+      // Round FN.E.2: mark every transit route as "picker tried it"
+      // regardless of whether any wayside-intent candidate landed. The
+      // picker's runPickerWaysideDiscovery calls the LLM for every kept
+      // adjacent-destination pair during the picker phase; by the time
+      // we reach publishTrip, those calls have either succeeded (kept
+      // ones committed above), returned nothing useful, or had all
+      // results rejected by the user. In any case the LLM has already
+      // been asked. Set the flag so the trip-view's Generate button
+      // (which calls the same LLM) doesn't re-ask for these legs.
+      // Routes added AFTER Choreograph (e.g., user inserts a new
+      // destination in the trip view) won't have this flag and remain
+      // eligible for trip-view discovery. The flag is also a useful
+      // signal for UX — "rediscover this leg" is a deliberate user
+      // gesture, not a side effect of clicking Generate.
+      var _allTransitRoutes = (trip.routes || []).filter(function (r) {
+        var sub = (typeof MaxMigration !== "undefined" && MaxMigration.routeSubKind)
+          ? MaxMigration.routeSubKind(r)
+          : (r && (r.subKind || (r.kind && r.kind !== "route" ? r.kind : null)));
+        return sub === "transit";
+      });
+      _allTransitRoutes.forEach(function (r) {
+        if (r && typeof r === "object") r._waysidesPickerTried = true;
+      });
+      if (_allTransitRoutes.length) {
+        console.log("[Max publishTrip] marked " + _allTransitRoutes.length + " transit route(s) as picker-tried");
+      }
     } catch (e) {
       console.warn("[Max publishTrip] wayside commit pass failed (non-fatal):", e && e.message);
     }
