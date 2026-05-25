@@ -1377,30 +1377,28 @@
         return;
       }
 
-      // Off-route check — only runs when we have all three sets of
-      // coords. If anything's missing we accept the stop (better to
-      // keep a possibly-off-route wayside than to lose every wayside
-      // because a destination is missing lat/lng).
-      if (directKm != null && fromCtr && toCtr &&
-          typeof s.lat === 'number' && typeof s.lng === 'number') {
-        var viaKm = _fqHaversineKm(fromCtr[0], fromCtr[1], s.lat, s.lng) +
-                    _fqHaversineKm(s.lat, s.lng, toCtr[0], toCtr[1]);
-        var extraKm = viaKm - directKm;
-        // Allow up to 40% overhead OR 15 km, whichever is more
-        // permissive. Short hops get a flat 15 km cushion so we don't
-        // reject a 5 km detour on a 20 km drive (which is 25% over
-        // the direct distance — small absolute terms, but >40% in
-        // ratio terms for a tiny drive).
-        var allowedExtraKm = Math.max(directKm * 0.4, 15);
-        if (extraKm > allowedExtraKm) {
-          console.warn(
-            '[waysides] dropping off-route stop:',
-            s.name,
-            '— direct ' + directKm.toFixed(0) + ' km, via stop ' + viaKm.toFixed(0) + ' km, extra ' + extraKm.toFixed(0) + ' km > ' + allowedExtraKm.toFixed(0) + ' km allowed'
-          );
-          return;
-        }
-      }
+      // Round FN.E.1 (v360.3+): per-leg detour-ratio check removed.
+      // The original v359.60.95 filter assumed the LLM was returning
+      // waysides for THIS specific leg and dropped anything that
+      // detoured too far from from→to. That assumption breaks on
+      // dense ring-road trips where every iconic stop is already a
+      // destination — the LLM returns regionally-appropriate waysides
+      // that don't fit the SHORT segment they were proposed against,
+      // but DO fit a longer segment elsewhere on the trip.
+      //
+      // _reassignWaysidesToBestLeg (added v360.3 #120, below) now
+      // handles this geometrically: every committed wayside is
+      // assigned to the leg with the smallest perpendicular distance
+      // to its chord, and anything > 30 km perp from EVERY leg is
+      // dropped as "no transit leg fits." That filter is the right
+      // gate — it lets waysides survive the per-leg call and then
+      // routes them to the leg they actually belong on. Keeping the
+      // old per-leg ratio check just killed waysides before reassign
+      // could see them. Log inspection on a 17-leg Iceland Ring Road
+      // trip showed 20+ valid waysides (Dyrhólaey, Reynisfjara,
+      // Þingvellir, etc.) dropped by the old gate; reassign would
+      // have placed them correctly.
+
 
       taken[key] = true;
       var pid = 'p-w-' + Math.random().toString(36).slice(2, 10);
