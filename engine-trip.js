@@ -1429,6 +1429,128 @@
     return added;
   }
 
+  // v360.3 (#120): geometry-based reassignment pass. The per-leg LLM
+  // call + detour-ratio check (in _commitWaysidesToRoute) catches gross
+  // off-route hallucinations, but it can't catch the case where a
+  // wayside IS approximately on the chord between A and B yet is more
+  // naturally a stop on a different leg. Iceland example: Friðheimar
+  // Greenhouse is near the chord from Gullfoss to Seljalandsfoss
+  // (extra ~4 km by haversine — passes the 40% gate), but it really
+  // sits on the natural path from Reykjavík to Gullfoss (perp ~27 km
+  // from that chord vs. ~46 km from the Gullfoss→Seljalandsfoss chord).
+  //
+  // After all per-leg LLM calls complete, walk every committed wayside
+  // and reassign it to the transit route whose chord it sits closest
+  // to (smallest perpendicular distance, with the parametric position
+  // along the chord clamped to "actually between the endpoints"). If
+  // no leg fits well (perp > MAX_PERP_KM on every leg), drop the
+  // wayside — better to lose a misplaced stop than to leave it on a
+  // leg where the user has to backtrack to visit it.
+  //
+  // Operates in lat/lng-as-flat-meters around the leg's midpoint
+  // latitude. At trip scales (hundreds of km) the great-circle
+  // correction is negligible; the simpler math reads + audits faster.
+  function _legFitness(p, a, b) {
+    var lat0 = (a[0] + b[0]) / 2;
+    var KM_PER_DEG_LAT = 111;
+    var kmPerDegLng = 111 * Math.cos(lat0 * Math.PI / 180);
+    function toLocal(ll) {
+      return [(ll[0] - a[0]) * KM_PER_DEG_LAT, (ll[1] - a[1]) * kmPerDegLng];
+    }
+    var pl = toLocal(p);
+    var bl = toLocal(b);
+    var lenSq = bl[0] * bl[0] + bl[1] * bl[1];
+    if (lenSq === 0) return null;
+    var t = (pl[0] * bl[0] + pl[1] * bl[1]) / lenSq;
+    var projX = t * bl[0];
+    var projY = t * bl[1];
+    var dx = pl[0] - projX;
+    var dy = pl[1] - projY;
+    return { t: t, perpKm: Math.sqrt(dx * dx + dy * dy) };
+  }
+
+  function _reassignWaysidesToBestLeg(trip) {
+    if (!trip || !Array.isArray(trip.routes)) return { moved: 0, dropped: 0 };
+    var MAX_PERP_KM = 30;
+    var MIN_T = 0.05;
+    var MAX_T = 0.95;
+
+    // Cache transit-leg endpoint coords once.
+    var transitLegs = [];
+    trip.routes.forEach(function (r) {
+      if (!r) return;
+      var sub = (typeof MaxMigration !== 'undefined' && MaxMigration.routeSubKind)
+        ? MaxMigration.routeSubKind(r)
+        : (r.subKind || (r.kind && r.kind !== 'route' ? r.kind : null));
+      if (sub !== 'transit') return;
+      var from = (trip.destinations || []).find(function (d) { return d && d.id === r.fromDestId; });
+      var to   = (trip.destinations || []).find(function (d) { return d && d.id === r.toDestId;   });
+      if (!from || !to) return;
+      if (typeof from.lat !== 'number' || typeof from.lng !== 'number') return;
+      if (typeof to.lat   !== 'number' || typeof to.lng   !== 'number') return;
+      transitLegs.push({ route: r, fromLL: [from.lat, from.lng], toLL: [to.lat, to.lng] });
+    });
+    if (!transitLegs.length) return { moved: 0, dropped: 0 };
+
+    function _bestLeg(coord) {
+      var best = null;
+      transitLegs.forEach(function (leg) {
+        var fit = _legFitness(coord, leg.fromLL, leg.toLL);
+        if (!fit) return;
+        if (fit.perpKm > MAX_PERP_KM) return;
+        if (fit.t < MIN_T || fit.t > MAX_T) return;
+        if (!best || fit.perpKm < best.perpKm) {
+          best = { route: leg.route, perpKm: fit.perpKm, t: fit.t };
+        }
+      });
+      return best;
+    }
+
+    var moved = 0;
+    var dropped = 0;
+    // Snapshot the (route, stop) pairs first — iterating while we
+    // mutate route.planItems[] in place would skip entries or double-
+    // process the receiving leg's array.
+    var allStops = [];
+    transitLegs.forEach(function (leg) {
+      var r = leg.route;
+      if (!Array.isArray(r.planItems)) return;
+      r.planItems.forEach(function (pi) {
+        if (pi && pi.type === 'stop') allStops.push({ route: r, stop: pi });
+      });
+    });
+    allStops.forEach(function (entry) {
+      var stop = entry.stop;
+      var fromRoute = entry.route;
+      var place = (trip.places || {})[stop.placeId];
+      if (!place) return;
+      if (typeof place.lat !== 'number' || typeof place.lng !== 'number') return;
+      var best = _bestLeg([place.lat, place.lng]);
+      if (!best) {
+        var idx = fromRoute.planItems.indexOf(stop);
+        if (idx >= 0) fromRoute.planItems.splice(idx, 1);
+        console.warn('[waysides] dropping ill-fit:', place.name, '— no transit leg with perp ≤ ' + MAX_PERP_KM + ' km');
+        dropped++;
+        return;
+      }
+      if (best.route.id === fromRoute.id) return; // already on the best leg
+      // Move the planItem from fromRoute → best.route.
+      var idxMove = fromRoute.planItems.indexOf(stop);
+      if (idxMove < 0) return;
+      fromRoute.planItems.splice(idxMove, 1);
+      if (!Array.isArray(best.route.planItems)) best.route.planItems = [];
+      best.route.planItems.push(stop);
+      console.log(
+        '[waysides] reassigning ' + place.name +
+        ': ' + fromRoute.id + ' → ' + best.route.id +
+        ' (perp ' + best.perpKm.toFixed(1) + ' km, t ' + best.t.toFixed(2) + ')'
+      );
+      moved++;
+    });
+    return { moved: moved, dropped: dropped };
+  }
+  global._reassignWaysidesToBestLeg = _reassignWaysidesToBestLeg;
+
   // Main entry. Walk all transit routes; for each one without
   // existing planItems[], call the LLM and commit. Returns a summary
   // the UI can use to show "✓ N waysides added across M routes."
@@ -1493,12 +1615,378 @@
         } catch (_) {}
       }
     }
-    if (onProgress) {
-      try { onProgress({ phase: 'done', done: total, total: total, addedRoutes: addedRoutes, addedItems: addedItems, trip: trip }); } catch (_) {}
+    // v360.3 (#120): geometry sanity-check pass. After every leg's
+    // LLM call has committed its own waysides, walk all committed
+    // waysides and reassign each to the leg whose chord it sits closest
+    // to. Catches the case where a wayside passes its origin leg's
+    // detour-ratio gate but is more naturally on a different leg
+    // (Friðheimar Greenhouse landing on Gullfoss→Seljalandsfoss when
+    // it really belongs on Reykjavík→Gullfoss).
+    var reassignSummary = { moved: 0, dropped: 0 };
+    try {
+      reassignSummary = _reassignWaysidesToBestLeg(trip);
+      if (reassignSummary.moved || reassignSummary.dropped) {
+        console.log('[waysides] reassignment: moved ' + reassignSummary.moved + ', dropped ' + reassignSummary.dropped);
+      }
+    } catch (e) {
+      console.warn('[waysides] reassignment pass failed (continuing):', e);
     }
-    return { addedRoutes: addedRoutes, addedItems: addedItems, skipped: skipped };
+    if (onProgress) {
+      try {
+        onProgress({
+          phase: 'done',
+          done: total,
+          total: total,
+          addedRoutes: addedRoutes,
+          addedItems: addedItems,
+          reassigned: reassignSummary.moved,
+          droppedOffRoute: reassignSummary.dropped,
+          trip: trip,
+        });
+      } catch (_) {}
+    }
+    return {
+      addedRoutes: addedRoutes,
+      addedItems: addedItems,
+      skipped: skipped,
+      reassigned: reassignSummary.moved,
+      droppedOffRoute: reassignSummary.dropped,
+    };
   }
   global.generateWaysidesForTrip = generateWaysidesForTrip;
+
+  // ── v360.3 (#121): day-trip candidate generator. Parallel to
+  // generateWaysidesForTrip but for radial day-trips from each
+  // overnight hub. The two together form the symmetric "find what
+  // could lighten the trip" pair:
+  //   • Waysides absorb stops onto existing transit legs
+  //   • Day trips anchor more visits to fewer hubs
+  // Both reduce the structural cost of the trip differently.
+  //
+  // Shape mirrors the wayside generator: per-hub LLM call → commit
+  // to a kind:"dayTrip" route off that hub → onProgress callback for
+  // live UI feedback.
+  async function _llmCallDayTripsForHub(trip, hub) {
+    if (!hub || typeof hub.lat !== 'number' || typeof hub.lng !== 'number') return [];
+    var brief = trip.brief || {};
+    var avoid = (brief.avoidDefaults || {});
+    var avoidBits = [];
+    if (avoid.altitude)   avoidBits.push('altitude');
+    if (avoid.crowds)     avoidBits.push('crowded sights');
+    if (avoid.heat)       avoidBits.push('heat');
+    if (avoid.cold)       avoidBits.push('cold');
+    if (avoid.longDrives) avoidBits.push('long drives');
+    var avoidStr = avoidBits.length ? ('Avoid: ' + avoidBits.join(', ') + '. ') : '';
+    var paceStr  = brief.paceMode === 'loose'   ? 'Relaxed pace. ' :
+                   brief.paceMode === 'notmuch' ? 'Intense pace. '  :
+                                                   'Balanced pace. ';
+    // Day-trip radius from settings (Round HG). Default 60km.
+    var radiusKm = (typeof global._defaultDayTripRadiusKm === 'function')
+      ? global._defaultDayTripRadiusKm()
+      : 60;
+    // v360.3 (#123): exclusion list now excludes only places ALREADY
+    // committed as day-trips, waysides, or sights — NOT existing
+    // overnight destinations. If the LLM proposes "Vík is a great
+    // day-trip from Reykjavik" and Vík is currently an overnight,
+    // that's the trade-off the user might want to make ("save a
+    // night, stay at the bigger base"). Suppressing it silently
+    // robs the user of the option. The commit pass below handles
+    // those candidates separately, marking them with _convertFromDestId
+    // so the result banner can show them in a "Could become day
+    // trips" subsection with one-tap convert.
+    var existingNames = [];
+    var placesDict = (trip.places && typeof trip.places === 'object') ? trip.places : {};
+    Object.keys(placesDict).forEach(function (pid) {
+      var p = placesDict[pid];
+      if (p && p.name) existingNames.push(String(p.name));
+    });
+    // NOTE: trip.destinations[].place is deliberately NOT in the
+    // exclusion list any more — we want the LLM to propose them.
+    (trip.destinations || []).forEach(function (d) {
+      (d.days || []).forEach(function (day) {
+        (day.items || []).forEach(function (it) {
+          var nm = it && (it.label || it.name || it.place);
+          if (nm && existingNames.indexOf(String(nm)) === -1) existingNames.push(String(nm));
+        });
+      });
+    });
+    var excludeStr = '';
+    if (existingNames.length) {
+      var capped = existingNames.slice(0, 100);
+      excludeStr = '\nAlready committed as sights/waysides/day-trips — do NOT re-suggest these (they\'re handled elsewhere):\n' +
+                   capped.map(function (n) { return '- ' + n; }).join('\n') + '\n' +
+                   '\nNOTE: Your trip\'s overnight destinations ARE fair game. If you think one of them ' +
+                   'would actually work better as a day-trip from this hub, propose it — the user gets ' +
+                   'to decide whether to convert.\n';
+    }
+
+    var prompt =
+      'You are planning day trips — places worth visiting on a half-day or full-day outing from a base. ' +
+      'I\'m based at ' + (hub.place || 'this hub') +
+      ' (' + (hub.lat || '?') + ', ' + (hub.lng || '?') + ') for ' +
+      (hub.nights || 1) + ' night' + ((hub.nights || 1) === 1 ? '' : 's') + '. ' +
+      'I want 3 to 6 worthwhile day-trip candidates within ' + radiusKm + ' km, ' +
+      'reachable by car and returnable to ' + (hub.place || 'the hub') + ' the same day.\n\n' +
+      'Region: ' + (brief.region || brief.placeName || 'unknown') + '.\n' +
+      paceStr + avoidStr +
+      excludeStr +
+      '\nReturn ONLY a JSON array — no prose, no markdown — with one entry per candidate:\n' +
+      '[\n' +
+      '  {\n' +
+      '    "name": "Þingvellir National Park",\n' +
+      '    "lat": 64.2559,\n' +
+      '    "lng": -21.1295,\n' +
+      '    "why": "Where the tectonic plates split. Hike between continents, see Iceland\'s first parliament site.",\n' +
+      '    "durationHours": 3,\n' +
+      '    "iconic": true\n' +
+      '  }\n' +
+      ']\n\n' +
+      'Rules:\n' +
+      '- Within ' + radiusKm + ' km of the hub (door-to-door, by car).\n' +
+      '- lat/lng must be real coordinates. If you don\'t know, omit the candidate.\n' +
+      '- "why" is one sentence, conversational, explains the appeal in ≤25 words.\n' +
+      '- "durationHours" is rough time on-site (1–6 typical).\n' +
+      '- "iconic" is true for unmissable choices, false for "if you have time."\n' +
+      '- Skip candidates that aren\'t worth the day. Better 3 great ones than 6 mediocre.\n' +
+      '- If the hub doesn\'t have notable nearby options within radius, return [].\n';
+
+    var raw;
+    try {
+      raw = await global.callMax([{ role: 'user', content: prompt }], 2000, 45000);
+    } catch (e) {
+      console.warn('[daytrips] LLM call failed for hub', hub.id, e);
+      return [];
+    }
+    var clean = String(raw || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+    var firstB = clean.indexOf('[');
+    var lastB  = clean.lastIndexOf(']');
+    if (firstB >= 0 && lastB > firstB) clean = clean.slice(firstB, lastB + 1);
+    try {
+      var arr = JSON.parse(clean);
+      if (!Array.isArray(arr)) return [];
+      return arr.filter(function (s) {
+        return s && typeof s === 'object' && s.name && typeof s.lat === 'number' && typeof s.lng === 'number';
+      });
+    } catch (e) {
+      console.warn('[daytrips] JSON parse failed:', clean.slice(0, 200));
+      return [];
+    }
+  }
+
+  // Commit day-trip candidates to a hub. Returns { added, conversions }
+  // where:
+  //   • added: new (net-new) day-trip planItem stops committed
+  //   • conversions: candidates the LLM proposed that match an existing
+  //     overnight destination. NOT auto-committed — surfaced separately
+  //     so the UI can ask the user whether to convert that overnight
+  //     into a day-trip from this hub.
+  //
+  // The conversion list is a per-trip stash (trip._daytripConversions[])
+  // keyed by destination id; the result banner reads it and offers
+  // one-tap convert via the existing role-popover dispatcher.
+  function _commitDayTripsToHub(trip, hub, candidates) {
+    if (!Array.isArray(candidates) || !candidates.length) return { added: 0, conversions: 0 };
+    if (!hub || typeof hub.lat !== 'number' || typeof hub.lng !== 'number') return { added: 0, conversions: 0 };
+    if (!trip.places || typeof trip.places !== 'object') trip.places = {};
+    if (!Array.isArray(trip.routes)) trip.routes = [];
+    if (!Array.isArray(trip._daytripConversions)) trip._daytripConversions = [];
+    var radiusKm = (typeof global._defaultDayTripRadiusKm === 'function')
+      ? global._defaultDayTripRadiusKm() : 60;
+
+    var route = trip.routes.find(function (r) {
+      if (!r) return false;
+      var sub = (typeof MaxMigration !== 'undefined' && MaxMigration.routeSubKind)
+        ? MaxMigration.routeSubKind(r)
+        : (r.subKind || (r.kind && r.kind !== 'route' ? r.kind : null));
+      return sub === 'dayTrip' && r.fromDestId === hub.id;
+    });
+    if (!route) {
+      route = {
+        id: 'r-dt-' + hub.id + '-' + Math.random().toString(36).slice(2, 8),
+        kind: 'route',
+        subKind: 'dayTrip',
+        fromDestId: hub.id,
+        toDestId:   hub.id,
+        planItems: [],
+      };
+      trip.routes.push(route);
+    }
+
+    function _normName(s) {
+      if (s == null) return '';
+      var lower = String(s).toLowerCase();
+      if (typeof lower.normalize === 'function') {
+        lower = lower.normalize('NFKD').replace(/[̀-ͯ]/g, '');
+      }
+      return lower.replace(/[^a-z0-9]+/g, ' ').trim();
+    }
+    // Map from normalized name → existing overnight destination (if
+    // any). Used to detect "this candidate is actually one of my
+    // current overnights" and route it to the conversion list.
+    var destByName = Object.create(null);
+    (trip.destinations || []).forEach(function (d) {
+      if (d && d.place && (d.nights || 0) > 0) {
+        destByName[_normName(d.place)] = d;
+      }
+    });
+    // Dedupe set: places already in trip.places (excluding the
+    // destinations themselves — those are conversion candidates).
+    var taken = Object.create(null);
+    Object.keys(trip.places).forEach(function (pid) {
+      var p = trip.places[pid];
+      if (p && p.name) taken[_normName(p.name)] = true;
+    });
+
+    var added = 0;
+    var conversions = 0;
+    candidates.forEach(function (c) {
+      var key = _normName(c.name);
+      if (!key) return;
+      // Radius check (backstop) — applies to BOTH new candidates and
+      // conversion candidates. If a dest is too far to day-trip to,
+      // skip even the conversion offer.
+      var distKm = _fqHaversineKm(hub.lat, hub.lng, c.lat, c.lng);
+      if (distKm > radiusKm * 1.3) {
+        console.warn('[daytrips] dropping out-of-radius candidate:', c.name,
+          '— ' + distKm.toFixed(0) + ' km from hub, limit ' + radiusKm + ' km');
+        return;
+      }
+      // Conversion candidate? Matches an existing overnight by name.
+      var matchingDest = destByName[key];
+      if (matchingDest && matchingDest.id !== hub.id) {
+        // Don't double-record if the user already saw this conversion
+        // offer from a previous run.
+        var alreadyOffered = trip._daytripConversions.some(function (x) {
+          return x && x.destId === matchingDest.id && x.hubId === hub.id;
+        });
+        if (alreadyOffered) return;
+        trip._daytripConversions.push({
+          destId: matchingDest.id,
+          destName: matchingDest.place,
+          hubId: hub.id,
+          hubName: hub.place,
+          why: c.why || '',
+          distKm: Math.round(distKm * 10) / 10,
+          at: Date.now(),
+        });
+        conversions++;
+        return;
+      }
+      // New candidate. Skip if already in places dict (already a
+      // sight/wayside/day-trip elsewhere on the trip).
+      if (taken[key]) {
+        console.log('[daytrips] skipping duplicate:', c.name);
+        return;
+      }
+      taken[key] = true;
+      var pid = 'p-dt-' + Math.random().toString(36).slice(2, 10);
+      trip.places[pid] = {
+        id: pid,
+        name: c.name,
+        lat: c.lat,
+        lng: c.lng,
+        type: 'sight',
+        notes: c.why || '',
+      };
+      var piid = 'pi-dt-' + Math.random().toString(36).slice(2, 10);
+      route.planItems.push({
+        id: piid,
+        type: 'stop',
+        state: 'suggestion',
+        placeId: pid,
+        duration: (typeof c.durationHours === 'number' && c.durationHours > 0) ? c.durationHours : 2,
+        recommendedMin: (typeof c.durationHours === 'number' && c.durationHours > 0) ? c.durationHours : 2,
+        priority: c.iconic ? 'iconic' : 'optional',
+        notes: c.why || '',
+        source: 'llm-daytrip-v1',
+      });
+      added++;
+    });
+    return { added: added, conversions: conversions };
+  }
+
+  async function generateDayTripsForTrip(trip, opts) {
+    opts = opts || {};
+    var onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : null;
+    if (!trip || !Array.isArray(trip.destinations)) return { addedHubs: 0, addedItems: 0, skipped: 0 };
+
+    // Hubs = overnight destinations (nights >= 1). Skip 0-night "see"
+    // destinations — day trips are radial from real bases.
+    var hubs = trip.destinations.filter(function (d) {
+      return d && (d.nights || 0) >= 1;
+    });
+    // Only run for hubs that don't ALREADY have a day-trip route with
+    // committed stops — opts.force overrides.
+    var queue = opts.force ? hubs : hubs.filter(function (hub) {
+      var route = (trip.routes || []).find(function (r) {
+        if (!r) return false;
+        var sub = (typeof MaxMigration !== 'undefined' && MaxMigration.routeSubKind)
+          ? MaxMigration.routeSubKind(r)
+          : (r.subKind || (r.kind && r.kind !== 'route' ? r.kind : null));
+        return sub === 'dayTrip' && r.fromDestId === hub.id;
+      });
+      if (!route) return true; // no route yet
+      return !(Array.isArray(route.planItems) && route.planItems.some(function (pi) {
+        return pi && pi.type === 'stop';
+      }));
+    });
+    var skipped = hubs.length - queue.length;
+    var total = queue.length;
+    if (onProgress) {
+      try { onProgress({ phase: 'start', done: 0, total: total, skipped: skipped, trip: trip }); } catch (_) {}
+    }
+    var addedHubs = 0, addedItems = 0, addedConversions = 0;
+    for (var i = 0; i < queue.length; i++) {
+      var hub = queue[i];
+      var stops = [];
+      var err = null;
+      try {
+        stops = await _llmCallDayTripsForHub(trip, hub);
+      } catch (e) {
+        err = e;
+        console.warn('[daytrips] hub', hub.id, 'failed:', e);
+      }
+      var summary = _commitDayTripsToHub(trip, hub, stops);
+      var nAdded = (summary && summary.added) || 0;
+      var nConv  = (summary && summary.conversions) || 0;
+      if (nAdded > 0) { addedHubs++; addedItems += nAdded; }
+      addedConversions += nConv;
+      if (onProgress) {
+        try {
+          onProgress({
+            phase: 'hub',
+            done: i + 1,
+            total: total,
+            hub: hub,
+            addedThisHub: nAdded,
+            conversionsThisHub: nConv,
+            error: err,
+            trip: trip,
+          });
+        } catch (_) {}
+      }
+    }
+    if (onProgress) {
+      try {
+        onProgress({
+          phase: 'done',
+          done: total,
+          total: total,
+          addedHubs: addedHubs,
+          addedItems: addedItems,
+          conversions: addedConversions,
+          trip: trip,
+        });
+      } catch (_) {}
+    }
+    return {
+      addedHubs: addedHubs,
+      addedItems: addedItems,
+      conversions: addedConversions,
+      skipped: skipped,
+    };
+  }
+  global.generateDayTripsForTrip = generateDayTripsForTrip;
 
   // ── SCAFFOLD-2: commitment state derivation ────────────────
   // Itinerary items pass through up to four states as the trip

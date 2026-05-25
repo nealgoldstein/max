@@ -139,26 +139,99 @@
     if (!global._ceMap) return;
     var L = global.L;
     if (!L) return;
-    // Clear existing entry markers
+    // Clear existing entry markers + any connectors from a prior render.
     if (global._edMarkers && Array.isArray(global._edMarkers)) {
       global._edMarkers.forEach(function (rec) {
         if (rec.marker && global._ceMap) { try { global._ceMap.removeLayer(rec.marker); } catch (e) {} }
       });
     }
     global._edMarkers = [];
+    if (global._edConnectors && Array.isArray(global._edConnectors)) {
+      global._edConnectors.forEach(function (line) {
+        if (line && global._ceMap) { try { global._ceMap.removeLayer(line); } catch (e) {} }
+      });
+    }
+    global._edConnectors = [];
     if (!global._tbEntryPointsVisible) return;
     var pts = (region && global._epCache && global._epCache[region]) || [];
     var typeToMode  = global._EP_TYPE_TO_MODE || {};
     var modeLabel   = global._EP_MODE_LABEL || {};
     var iconFor     = global._epIconFor;
+
+    // Round FN.C.2: which entry-points are the user's CURRENT picks?
+    // The marker(s) matching _tb.entry / _tb.tbExit get the trip-view
+    // gateway styling (larger white-bg pin with mode glyph) and a thin
+    // dashed connector to the closest kept candidate, so the user can
+    // tell at a glance which of the visible airports they actually
+    // selected. Alternatives keep the original smaller marker.
+    var tb = global._tb || {};
+    var curEntryNorm = String(tb.entry  || "").toLowerCase().trim();
+    var curExitNorm  = String(tb.tbExit || "").toLowerCase().trim();
+    var modeGlyphFn = (typeof global._modeGlyph === "function") ? global._modeGlyph : function(){ return "✈"; };
+    var entryGlyph = modeGlyphFn(tb.entryMode || "fly");
+    var exitGlyph  = modeGlyphFn(tb.exitMode  || "fly");
+    // Compute anchor coordinates for connector lines: first kept
+    // candidate (for entry) and last (for exit). Same ordering helper
+    // as the realism gate + the Max-suggests card uses.
+    var keptCands = (tb.candidates || []).filter(function(c){ return c.status === "keep"; });
+    var orderedKeeps = keptCands.slice();
+    try {
+      var orderFn = (global.MaxEnginePicker && typeof global.MaxEnginePicker.orderKeptCandidates === "function")
+                    ? global.MaxEnginePicker.orderKeptCandidates
+                    : (typeof global.orderKeptCandidates === "function" ? global.orderKeptCandidates : null);
+      if (orderFn && keptCands.length >= 2) {
+        var orderRes = orderFn(keptCands, global._mdcItems || [], tb.entry || "", tb.tbExit || "");
+        if (orderRes && Array.isArray(orderRes.ordered)) orderedKeeps = orderRes.ordered;
+      }
+    } catch (e) { /* swallow */ }
+    function _anchorOf(c){
+      if (!c) return null;
+      if (typeof c.lat === "number" && typeof c.lng === "number"
+          && isFinite(c.lat) && isFinite(c.lng)) return [c.lat, c.lng];
+      var cc = (typeof global.getCityCenter === "function") ? global.getCityCenter(c.place) : null;
+      return (cc && isFinite(cc[0]) && isFinite(cc[1])) ? cc : null;
+    }
+    var entryAnchorCtr = _anchorOf(orderedKeeps[0]);
+    var exitAnchorCtr  = _anchorOf(orderedKeeps[orderedKeeps.length - 1]);
+
+    function _selectedGatewayIcon(glyph){
+      var size = 28;
+      var color = "#1a5fa8";
+      var html = '<div style="background:#fff;border:2px solid ' + color + ';border-radius:50%;'
+        + 'width:' + size + 'px;height:' + size + 'px;display:flex;align-items:center;justify-content:center;'
+        + 'font-size:15px;line-height:1;color:' + color + ';'
+        + 'box-shadow:0 2px 6px rgba(0,0,0,0.3);">' + glyph + '</div>';
+      return L.divIcon({
+        className: "ce-selected-gateway-pin",
+        html: html,
+        iconSize: [size, size],
+        iconAnchor: [size/2, size/2]
+      });
+    }
+
     pts.forEach(function (p) {
       if (typeof iconFor !== 'function') return;
-      var m = L.marker([p.lat, p.lon], { icon: iconFor(p.type), zIndexOffset: 500 }).addTo(global._ceMap);
+      var nameNorm = String(p.name || "").toLowerCase().trim();
+      var isSelectedEntry = curEntryNorm && nameNorm === curEntryNorm;
+      var isSelectedExit  = curExitNorm  && nameNorm === curExitNorm;
+      // Selected gateway gets a distinct icon + bumped z-index so it
+      // sits above alternative markers in the same area.
+      var iconForThis = (isSelectedEntry || isSelectedExit)
+        ? _selectedGatewayIcon(isSelectedEntry ? entryGlyph : exitGlyph)
+        : iconFor(p.type);
+      var zIndexForThis = (isSelectedEntry || isSelectedExit) ? 700 : 500;
+      var m = L.marker([p.lat, p.lon], { icon: iconForThis, zIndexOffset: zIndexForThis }).addTo(global._ceMap);
       var safeName = (p.name || "").replace(/\\/g, "\\\\").replace(/"/g, '&quot;').replace(/'/g, "\\'");
       var notes = p.notes ? '<div style="font-size:10px;color:#666;margin-top:4px;line-height:1.45;">' + p.notes.replace(/</g, "&lt;") + '</div>' : '';
       var typeLabel = { air: "Airport", rail: "Rail station", sea: "Port", bus: "Bus terminal" }[p.type] || "Entry point";
       var mode = typeToMode[p.type] || "";
       var modeTag = mode && modeLabel[mode] ? " " + modeLabel[mode] : "";
+      // Tooltip on selected gateways so the user knows what the
+      // distinct icon means without clicking through to the popup.
+      if (isSelectedEntry || isSelectedExit) {
+        var tipLabel = (p.name || "") + " — " + (isSelectedEntry ? "your arrival" : "your departure");
+        m.bindTooltip(tipLabel, { permanent: false, direction: "top", offset: [0, -16], className: "ce-map-tooltip" });
+      }
       m.bindPopup(
         '<div style="font-size:12px;font-weight:600;color:#111;">' + (p.name || "").replace(/</g, "&lt;") + '</div>'
         + '<div style="font-size:9px;color:#aaa;text-transform:uppercase;letter-spacing:.05em;margin-top:1px;">' + typeLabel + '</div>'
@@ -173,6 +246,21 @@
       global._edMarkers.push({ ep: p, marker: m });
       if (global._edActivePopupId && (p.id || p.name) === global._edActivePopupId) {
         setTimeout(function () { try { m.openPopup(); } catch (e) {} }, 50);
+      }
+      // Connector to the closest kept candidate.
+      if (isSelectedEntry && entryAnchorCtr) {
+        var c1 = L.polyline([[p.lat, p.lon], entryAnchorCtr], {
+          color: "#1a5fa8", weight: 1.5, opacity: 0.5,
+          dashArray: "4 4", interactive: false
+        }).addTo(global._ceMap);
+        global._edConnectors.push(c1);
+      }
+      if (isSelectedExit && exitAnchorCtr) {
+        var c2 = L.polyline([[p.lat, p.lon], exitAnchorCtr], {
+          color: "#1a5fa8", weight: 1.5, opacity: 0.5,
+          dashArray: "4 4", interactive: false
+        }).addTo(global._ceMap);
+        global._edConnectors.push(c2);
       }
     });
   }
@@ -1070,6 +1158,213 @@
         if (detailBtns[1]) detailBtns[1].onclick = function () { if (typeof global.doCompare === "function") global.doCompare(cand.id); };
       })(c);
     }
+
+    // v360.3 (#124 Turn 2): day-trip candidates subsection. When the
+    // user has kept this candidate as an overnight hub AND the picker-
+    // side discovery has stashed day-trip candidates for it, render
+    // them as a checkable list nested under the card. Checking adds
+    // a wisp-like candidate to _tb.candidates with intent=dayTrip +
+    // dayTripHub = this card's id. publishTrip's wayside-commit pass
+    // already handles intent=wayside; the parallel day-trip-commit
+    // is Turn 3.
+    var _tb = global._tb;
+    var dayTripsForHub = (_tb && _tb._hubDayTripCandidates && _tb._hubDayTripCandidates[c.id]) || null;
+    if (c.status === "keep" && dayTripsForHub && dayTripsForHub.length) {
+      var dtSection = document.createElement("div");
+      dtSection.style.cssText =
+        "margin:0 12px 12px 12px;padding:8px 12px;background:#fff4e6;border:1px solid #f0d8a8;border-radius:6px;";
+      var dtHdr = document.createElement("div");
+      dtHdr.style.cssText = "font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#a36500;margin-bottom:6px;";
+      dtHdr.textContent = "Day trips from " + (c.place || "here");
+      dtSection.appendChild(dtHdr);
+
+      dayTripsForHub.forEach(function (dt, dtIdx) {
+        // Existing candidate? Find by name + dayTripHub = this hub.
+        var existing = (_tb.candidates || []).find(function (x) {
+          return x && x.intent === "dayTrip" && x.dayTripHub === c.id &&
+                 x.place && dt.name &&
+                 String(x.place).toLowerCase() === String(dt.name).toLowerCase();
+        });
+        var isKept = !!(existing && existing.status === "keep");
+        var row = document.createElement("label");
+        row.style.cssText = "display:flex;align-items:flex-start;gap:8px;padding:5px 0;cursor:pointer;font-size:12px;line-height:1.45;color:#5c3f10;";
+        var checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = isKept;
+        checkbox.style.cssText = "margin:3px 0 0;flex-shrink:0;";
+        var body = document.createElement("div");
+        body.style.cssText = "flex:1;min-width:0;";
+        body.innerHTML =
+          '<div style="font-weight:600;color:#5c3f10;">' +
+            String(dt.name || "?").replace(/</g, "&lt;") +
+            (typeof dt.durationHours === "number" ? ' <span style="color:#a36500;font-weight:500;font-size:11px;">· ' +
+              (dt.durationHours >= 1 ? Math.round(dt.durationHours) + "h" : Math.round(dt.durationHours * 60) + "m") +
+            '</span>' : '') +
+          '</div>' +
+          (dt.why ? '<div style="font-size:11px;color:#7a5520;margin-top:2px;">' + String(dt.why).replace(/</g, "&lt;").slice(0, 140) + (dt.why.length > 140 ? '…' : '') + '</div>' : '');
+        row.appendChild(checkbox);
+        row.appendChild(body);
+        dtSection.appendChild(row);
+
+        (function (hubCand, dtCand, exists) {
+          checkbox.onchange = function () {
+            if (!_tb || !Array.isArray(_tb.candidates)) return;
+            var match = exists || (_tb.candidates || []).find(function (x) {
+              return x && x.intent === "dayTrip" && x.dayTripHub === hubCand.id &&
+                     x.place && dtCand.name &&
+                     String(x.place).toLowerCase() === String(dtCand.name).toLowerCase();
+            });
+            if (checkbox.checked) {
+              if (match) {
+                match.status = "keep";
+              } else {
+                _tb.candidates.push({
+                  id: "c-dt-" + Math.random().toString(36).slice(2, 8),
+                  place: dtCand.name,
+                  country: (_tb.region || hubCand.country || ""),
+                  intent: "dayTrip",
+                  dayTripHub: hubCand.id,
+                  lat: dtCand.lat,
+                  lng: dtCand.lng,
+                  durationHours: dtCand.durationHours,
+                  whyItFits: dtCand.why || "",
+                  tags: ["picker-daytrip"],
+                  nights: 0,
+                  status: "keep",
+                });
+              }
+            } else if (match) {
+              match.status = "reject";
+            }
+            if (typeof global.renderCandidateCards === "function") {
+              global.renderCandidateCards(_tb.candidates);
+            }
+          };
+        })(c, dt, existing);
+      });
+      card.appendChild(dtSection);
+    }
+
+    // v360.3 (#124 Turn 4): wayside candidates subsection. Same shape
+    // as day-trips above, but lookup is per-leg: this card's id +
+    // "|" + the next kept hub's id. Only renders when this candidate
+    // is a kept overnight hub AND there's at least one wayside
+    // candidate stashed for the leg ending at the NEXT kept hub.
+    var waysidesForLeg = null;
+    var nextHubPlace = null;
+    if (c.status === "keep" && c.intent !== "dayTrip" && c.intent !== "wayside" &&
+        _tb && _tb._legWaysideCandidates) {
+      // Compute the ordered kept set so we can find "next kept hub
+      // after this one." Use the engine's ordering for consistency
+      // with publishTrip's destination order.
+      try {
+        var orderedKept = [];
+        var keptForOrder = (_tb.candidates || []).filter(function (x) {
+          return x && x.status === "keep" && x.intent !== "dayTrip" && x.intent !== "wayside";
+        });
+        if (keptForOrder.length >= 2 && global.MaxEnginePicker && typeof global.MaxEnginePicker.orderKeptCandidates === "function") {
+          var orderResult = global.MaxEnginePicker.orderKeptCandidates(
+            keptForOrder, _tb.mdcItems || global._mdcItems || [],
+            _tb.entry || "", _tb.tbExit || ""
+          );
+          orderedKept = (orderResult && orderResult.ordered) || keptForOrder;
+        } else {
+          orderedKept = keptForOrder;
+        }
+        var myIdx = orderedKept.findIndex(function (x) { return x && x.id === c.id; });
+        if (myIdx >= 0 && myIdx < orderedKept.length - 1) {
+          var nextHub = orderedKept[myIdx + 1];
+          var legKey = c.id + "|" + nextHub.id;
+          waysidesForLeg = _tb._legWaysideCandidates[legKey] || null;
+          nextHubPlace = nextHub.place;
+        }
+      } catch (e) {
+        console.warn("[picker] wayside subsection: ordering failed:", e && e.message);
+      }
+    }
+    if (waysidesForLeg && waysidesForLeg.length) {
+      var wsSection = document.createElement("div");
+      wsSection.style.cssText =
+        "margin:0 12px 12px 12px;padding:8px 12px;background:#f3edfa;border:1px solid #d8c4e8;border-radius:6px;";
+      var wsHdr = document.createElement("div");
+      wsHdr.style.cssText = "font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#5b3f8f;margin-bottom:6px;";
+      wsHdr.textContent = "On the way to " + (nextHubPlace || "the next stop");
+      wsSection.appendChild(wsHdr);
+
+      waysidesForLeg.forEach(function (ws) {
+        // Match by name + same waysideLeg endpoints.
+        var existing = (_tb.candidates || []).find(function (x) {
+          return x && x.intent === "wayside" && x.waysideLeg &&
+                 x.waysideLeg.fromPlace === ws.fromPlace &&
+                 x.waysideLeg.toPlace   === ws.toPlace &&
+                 x.place && ws.name &&
+                 String(x.place).toLowerCase() === String(ws.name).toLowerCase();
+        });
+        var isKept = !!(existing && existing.status === "keep");
+        var row = document.createElement("label");
+        row.style.cssText = "display:flex;align-items:flex-start;gap:8px;padding:5px 0;cursor:pointer;font-size:12px;line-height:1.45;color:#3e2870;";
+        var checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = isKept;
+        checkbox.style.cssText = "margin:3px 0 0;flex-shrink:0;";
+        var body = document.createElement("div");
+        body.style.cssText = "flex:1;min-width:0;";
+        body.innerHTML =
+          '<div style="font-weight:600;color:#3e2870;">' +
+            String(ws.name || "?").replace(/</g, "&lt;") +
+            (typeof ws.durationHours === "number" ? ' <span style="color:#7a5fb0;font-weight:500;font-size:11px;">· ' +
+              (ws.durationHours >= 1 ? Math.round(ws.durationHours) + "h" : Math.round(ws.durationHours * 60) + "m") +
+            '</span>' : '') +
+          '</div>' +
+          (ws.why ? '<div style="font-size:11px;color:#5e4595;margin-top:2px;">' + String(ws.why).replace(/</g, "&lt;").slice(0, 140) + (ws.why.length > 140 ? '…' : '') + '</div>' : '');
+        row.appendChild(checkbox);
+        row.appendChild(body);
+        wsSection.appendChild(row);
+
+        (function (wsCand, exists) {
+          checkbox.onchange = function () {
+            if (!_tb || !Array.isArray(_tb.candidates)) return;
+            var match = exists || (_tb.candidates || []).find(function (x) {
+              return x && x.intent === "wayside" && x.waysideLeg &&
+                     x.waysideLeg.fromPlace === wsCand.fromPlace &&
+                     x.waysideLeg.toPlace   === wsCand.toPlace &&
+                     x.place && wsCand.name &&
+                     String(x.place).toLowerCase() === String(wsCand.name).toLowerCase();
+            });
+            if (checkbox.checked) {
+              if (match) {
+                match.status = "keep";
+              } else {
+                _tb.candidates.push({
+                  id: "c-ws-" + Math.random().toString(36).slice(2, 8),
+                  place: wsCand.name,
+                  country: (_tb.region || ""),
+                  intent: "wayside",
+                  waysideLeg: {
+                    fromPlace: wsCand.fromPlace,
+                    toPlace:   wsCand.toPlace,
+                  },
+                  lat: wsCand.lat,
+                  lng: wsCand.lng,
+                  durationHours: wsCand.durationHours,
+                  whyItFits: wsCand.why || "",
+                  tags: ["picker-wayside"],
+                  nights: 0,
+                  status: "keep",
+                });
+              }
+            } else if (match) {
+              match.status = "reject";
+            }
+            if (typeof global.renderCandidateCards === "function") {
+              global.renderCandidateCards(_tb.candidates);
+            }
+          };
+        })(ws, existing);
+      });
+      card.appendChild(wsSection);
+    }
+
     container.appendChild(card);
     if (typeof addMarkerFn === "function") addMarkerFn(c, false);
 
@@ -1151,9 +1446,41 @@
     var stretchHubs = hubOptions.filter(function(o){ return !o.inRange; });
     var dayTripAvailable = inRangeHubs.length > 0 || stretchHubs.length > 0;
 
+    // v360.3 (#8 Phase 3): wayside-fit detection. If the candidate sits
+    // approximately on the line between two consecutive kept overnight
+    // hubs (perp ≤ 30 km, parametric t in [0.05, 0.95]), offer
+    // "Wayside" as a third role option. When picked, this candidate
+    // will be committed as a wayside stop on that transit leg at
+    // publish time (handled in publishTrip below).
+    //
+    // We need the kept set in ORDER to compute legs. orderKeptCandidates
+    // (engine-picker.js) is the source of truth for trip order.
+    var keptOrdered = [];
+    var waysideFit = null;
+    try {
+      var keptForOrder = allCands.filter(function (c) { return c && c.status === "keep"; });
+      if (keptForOrder.length >= 2 && global.MaxEnginePicker && typeof global.MaxEnginePicker.orderKeptCandidates === "function") {
+        var orderResult = global.MaxEnginePicker.orderKeptCandidates(
+          keptForOrder,
+          (global._mdcItems || global._tb && global._tb.mdcItems || []),
+          (global._tb && global._tb.entry) || "",
+          (global._tb && global._tb.tbExit) || ""
+        );
+        keptOrdered = (orderResult && orderResult.ordered) || [];
+      } else {
+        keptOrdered = keptForOrder;
+      }
+      if (typeof global._bestWaysideLegForCandidate === "function") {
+        waysideFit = global._bestWaysideLegForCandidate(cand, keptOrdered);
+      }
+    } catch (e) {
+      console.warn("[Max] role popover: wayside-fit check failed (non-fatal):", e && e.message);
+    }
+    var waysideAvailable = !!waysideFit;
+
     // Current state.
     var curRole = _computeCandidateRole(cand, allCands);
-    var curIntent = curRole ? curRole.intent : "stay";
+    var curIntent = (cand.intent === "wayside") ? "wayside" : (curRole ? curRole.intent : "stay");
     var curHubId = curRole && curRole.hub ? curRole.hub.id : (inRangeHubs[0] ? inRangeHubs[0].hub.id : (stretchHubs[0] ? stretchHubs[0].hub.id : null));
 
     // Build the overlay.
@@ -1191,6 +1518,30 @@
           + _distLbl(_dayTripRadiusKm()) + ' first.'
         + '</div>');
 
+    // v360.3 (#8 Phase 3): wayside row. Only renders when the candidate
+    // sits between two consecutive kept hubs. The legend reads
+    // "Along the way between A and B" so the user sees which leg
+    // they're committing the candidate to.
+    var waysideRow = "";
+    if (waysideAvailable) {
+      var legLbl = (waysideFit.fromCand.place || "?") + " → " + (waysideFit.toCand.place || "?");
+      var perpLbl = _distLbl(waysideFit.perpKm);
+      waysideRow = ''
+        + '<label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid '
+        + (curIntent === "wayside" ? "#7a4fbf" : "#e0e0e0")
+        + ';border-radius:8px;cursor:pointer;background:'
+        + (curIntent === "wayside" ? "#f3edfa" : "#fff") + ';">'
+        +   '<input type="radio" name="role-pick" value="wayside"' + (curIntent === "wayside" ? " checked" : "") + ' style="margin:0;" />'
+        +   '<div style="flex:1;">'
+        +     '<div style="font-size:13px;font-weight:600;color:#222;">Along the way</div>'
+        +     '<div style="font-size:11px;color:#777;margin-top:2px;">'
+        +       'A stop on the drive from <strong>' + legLbl + '</strong>'
+        +       ' · ' + perpLbl + ' off the line.'
+        +     '</div>'
+        +   '</div>'
+        + '</label>';
+    }
+
     ov.innerHTML = ''
       + '<div style="background:#fff;border-radius:12px;max-width:420px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,0.18);">'
       +   '<div style="padding:18px 20px 4px;">'
@@ -1206,6 +1557,7 @@
       +       '</div>'
       +     '</label>'
       +     dayTripRow
+      +     waysideRow
       +   '</div>'
       +   '<div style="padding:8px 20px 18px;display:flex;justify-content:flex-end;gap:8px;">'
       +     '<button id="role-cancel" style="font-size:13px;font-weight:500;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Cancel</button>'
@@ -1231,9 +1583,25 @@
         if (!newHubId) { close(); return; }
         cand.intent = "dayTrip";
         cand.dayTripHub = newHubId;
+        delete cand.waysideLeg;
+      } else if (newIntent === "wayside" && waysideFit) {
+        // v360.3 (#8 Phase 3+4): persist the wayside choice. cand.intent
+        // = "wayside" tags this candidate for the publishTrip wayside-
+        // commit pass below. waysideLeg holds the chosen from/to hub
+        // place names so publishTrip can attach this candidate to the
+        // right route (place names because hub ids may shift between
+        // picker session and trip publish — _normPlaceName lookup is
+        // resilient).
+        cand.intent = "wayside";
+        cand.waysideLeg = {
+          fromPlace: waysideFit.fromCand.place,
+          toPlace:   waysideFit.toCand.place,
+        };
+        delete cand.dayTripHub;
       } else {
         cand.intent = "stay";
         delete cand.dayTripHub;
+        delete cand.waysideLeg;
       }
       close();
       if (typeof global.renderCandidateCards === "function" && global._tb) {

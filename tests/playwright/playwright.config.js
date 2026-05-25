@@ -49,7 +49,12 @@ module.exports = defineConfig({
     command: `python3 -m http.server 8765 --directory "${APP_ROOT}"`,
     url: 'http://localhost:8765/index.html',
     reuseExistingServer: !process.env.CI,
-    timeout: 5000,
+    // v360.1: bumped from 5s. Python http.server's cold-start is
+    // usually <1s, but the deploy occasionally hit a 5s timeout on
+    // slower machines / when the OS was paging. 20s is generous but
+    // doesn't slow anything down on the happy path — Playwright
+    // polls the URL and proceeds as soon as it answers.
+    timeout: 20000,
   },
 
   projects: [

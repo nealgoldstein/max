@@ -172,7 +172,9 @@ The user's stated intent for the trip. Captured in the brief flow ("Tell Max abo
 | `startDate`, `endDate` | ISO date | Optional; if absent, anchored by `duration` |
 | `duration` | string | "10 days", "2 weeks" — parsed by `_parseTripDuration` |
 | `entry`, `tbExit` | string | Arrival / departure cities |
-| `entryDetails`, `exitDetails` | object | Flight/train/etc., carrier, time, confirmation |
+| `entryMode`, `exitMode` | enum | `fly` / `train` / `drive` / `bus` / `boat` — how the user gets in / out. Drives label vocabulary on `entryDetails`/`exitDetails` ("Flight number" → "Train number" → "Vessel / route") and the glyph rendered on the collapsed Arrival/Departure summary. Defaults to `fly` on read when unset. |
+| `entryDetails`, `exitDetails` | object | Logistics for the inbound/outbound leg — `{ carrier, number, date, time, confirmation, notes, url }`. Field labels in the UI flip by mode (above); field keys stay stable so persistence doesn't migrate. |
+| `shape` | enum | Optional explicit override of trip shape: `round` / `open-jaw` / `multi-leg`. No UI sets this today — readers use `_getTripShape(brief)`, which falls back to inference (`entry === exit` ⇒ round, otherwise open-jaw; multi-leg reserved for a future slice with explicit UI). The field exists in the schema so a future "same city, different airports" override can write to it without code change downstream. |
 | `travelersCount` | number | Party size |
 | `withKids` | boolean | |
 | `physicalAbility` | enum | `fit` / `moderate` / `limited` / `elderly` / `mobility` / `other` |

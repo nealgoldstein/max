@@ -699,6 +699,252 @@
   // Reasoning strings + Round CN geo-reorder + Round DO round-trip
   // angular-sort all preserved as-is.
 
+  // ── v360.3 (#8 Wayside Phase 3+5): wayside-fit detection ────
+  // Returns the best-fit transit leg (pair of consecutive kept hubs)
+  // for a candidate, or null if no leg fits. "Best fit" = smallest
+  // perpendicular distance from the chord, with parametric position
+  // in [0.05, 0.95] and perp distance ≤ 30 km. Same math as
+  // _legFitness / _reassignWaysidesToBestLeg in engine-trip.js — kept
+  // here so the picker can decide independently of the trip object
+  // (the kept candidates ARE the trip-to-be at this point).
+  //
+  // Inputs:
+  //   c: candidate (needs c.lat, c.lng)
+  //   keptOrdered: candidates already ordered by trip sequence, with
+  //                c.intent !== "dayTrip" (i.e. the future hubs)
+  // Returns: { fromCand, toCand, perpKm, t } | null
+  function _bestWaysideLegForCandidate(c, keptOrdered) {
+    if (!c || typeof c.lat !== "number" || typeof c.lng !== "number") return null;
+    var hubs = (keptOrdered || []).filter(function (k) {
+      return k && k.status === "keep" && k.intent !== "dayTrip" && k.id !== c.id
+        && typeof k.lat === "number" && typeof k.lng === "number";
+    });
+    if (hubs.length < 2) return null;
+    var MAX_PERP_KM = 30;
+    var MIN_T = 0.05;
+    var MAX_T = 0.95;
+    var best = null;
+    for (var i = 0; i < hubs.length - 1; i++) {
+      var a = [hubs[i].lat, hubs[i].lng];
+      var b = [hubs[i + 1].lat, hubs[i + 1].lng];
+      var p = [c.lat, c.lng];
+      var lat0 = (a[0] + b[0]) / 2;
+      var kmPerDegLat = 111;
+      var kmPerDegLng = 111 * Math.cos(lat0 * Math.PI / 180);
+      var bl = [(b[0] - a[0]) * kmPerDegLat, (b[1] - a[1]) * kmPerDegLng];
+      var pl = [(p[0] - a[0]) * kmPerDegLat, (p[1] - a[1]) * kmPerDegLng];
+      var lenSq = bl[0] * bl[0] + bl[1] * bl[1];
+      if (lenSq === 0) continue;
+      var t = (pl[0] * bl[0] + pl[1] * bl[1]) / lenSq;
+      var dx = pl[0] - t * bl[0];
+      var dy = pl[1] - t * bl[1];
+      var perpKm = Math.sqrt(dx * dx + dy * dy);
+      if (perpKm > MAX_PERP_KM) continue;
+      if (t < MIN_T || t > MAX_T) continue;
+      if (!best || perpKm < best.perpKm) {
+        best = { fromCand: hubs[i], toCand: hubs[i + 1], perpKm: perpKm, t: t };
+      }
+    }
+    return best;
+  }
+  global._bestWaysideLegForCandidate = _bestWaysideLegForCandidate;
+
+  // ── v360.3 (#124): picker-side discovery for day-trips + waysides.
+  // Discovery is where the user decides WHAT to see; the trip view is
+  // where they organize HOW to visit. So day-trip + wayside candidates
+  // should be surfaced in the picker right after the user has settled
+  // on hubs. The engine-trip LLM calls (_llmCallDayTripsForHub,
+  // _llmCallWaysidesForRoute) operate on trip.destinations + trip.routes
+  // — these wrappers synthesize a trip-shape from _tb.candidates so
+  // the same prompts can run during the picker phase.
+  //
+  // Results land in _tb-side stashes, NOT in trip.* (the trip doesn't
+  // exist yet at picker time). publishTrip reads them at commit:
+  //   _tb._hubDayTripCandidates: { [hubCandId]: [<candidate>...] }
+  //   _tb._legWaysideCandidates: { [fromCandId+'|'+toCandId]: [...] }
+  //
+  // The picker UI reads the same stashes to render checklists.
+  function _synthTripForPicker(_tb) {
+    // Build the minimum trip-shape that the engine-trip LLM callers
+    // expect: { destinations:[], routes:[], places:{}, brief:{} }.
+    // Use kept overnight candidates as destinations; the order from
+    // orderKeptCandidates so consecutive pairs read as legs.
+    var kept = (_tb.candidates || []).filter(function (c) {
+      return c && c.status === 'keep' && c.intent !== 'wayside' && c.intent !== 'dayTrip';
+    });
+    if (kept.length < 2) return null;
+    var brief = (typeof MaxEnginePicker !== 'undefined' && MaxEnginePicker.buildBrief)
+      ? MaxEnginePicker.buildBrief(_tb)
+      : { region: _tb.region || '' };
+    var orderResult = orderKeptCandidates(kept, _tb.mdcItems || [], _tb.entry || '', _tb.tbExit || '');
+    var ordered = (orderResult && orderResult.ordered) || kept;
+    var destinations = ordered.map(function (c) {
+      return {
+        id: c.id || ('cand-' + Math.random().toString(36).slice(2, 6)),
+        place: c.place,
+        nights: (typeof c.nights === 'number' && c.nights > 0) ? c.nights : 1,
+        lat: c.lat,
+        lng: c.lng,
+      };
+    });
+    var routes = [];
+    for (var i = 0; i < destinations.length - 1; i++) {
+      routes.push({
+        id: 'r-tr-' + destinations[i].id + '-' + destinations[i + 1].id,
+        kind: 'route',
+        subKind: 'transit',
+        fromDestId: destinations[i].id,
+        toDestId:   destinations[i + 1].id,
+        planItems: [],
+      });
+    }
+    return { destinations: destinations, routes: routes, places: {}, brief: brief };
+  }
+
+  async function runPickerDayTripDiscovery(_tb, opts) {
+    opts = opts || {};
+    var onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : null;
+    var trip = _synthTripForPicker(_tb);
+    if (!trip || !trip.destinations.length) return { addedHubs: 0, addedItems: 0 };
+    if (typeof global._llmCallDayTripsForHub !== 'function') {
+      // Engine-trip didn't expose the LLM helper — fall back to
+      // the orchestrator which is on window.
+      if (typeof global.generateDayTripsForTrip !== 'function') {
+        console.warn('[picker-discovery] generateDayTripsForTrip not available');
+        return { addedHubs: 0, addedItems: 0 };
+      }
+    }
+    if (!_tb._hubDayTripCandidates) _tb._hubDayTripCandidates = {};
+    if (!_tb._daytripDiscoveryRanFor) _tb._daytripDiscoveryRanFor = {};
+    var addedHubs = 0, addedItems = 0;
+    var hubs = trip.destinations.filter(function (d) { return d && (d.nights || 0) >= 1; });
+    if (onProgress) { try { onProgress({ phase: 'start', total: hubs.length }); } catch (_) {} }
+    for (var i = 0; i < hubs.length; i++) {
+      var hub = hubs[i];
+      // Skip if we've already discovered for this exact hub (same id
+      // + same place name) and the user hasn't changed anything.
+      var key = hub.id + '|' + hub.place;
+      if (_tb._daytripDiscoveryRanFor[key]) {
+        if (onProgress) { try { onProgress({ phase: 'hub', done: i + 1, total: hubs.length, hub: hub, addedThisHub: 0, skipped: true }); } catch (_) {} }
+        continue;
+      }
+      var stops = [];
+      try {
+        // _llmCallDayTripsForHub is closure-scoped in engine-trip.js;
+        // not exposed on window directly. Use generateDayTripsForTrip's
+        // single-hub mode by calling it through a synthesized
+        // single-destination trip object.
+        var singleHubTrip = { destinations: [hub], routes: [], places: {}, brief: trip.brief };
+        var res = await global.generateDayTripsForTrip(singleHubTrip, { force: true });
+        // After the call, singleHubTrip.routes holds the new dayTrip
+        // route with planItems[] of type 'stop'. Extract them as
+        // candidates.
+        var dtRoute = (singleHubTrip.routes || []).find(function (r) {
+          return r && (r.subKind === 'dayTrip' || r.kind === 'dayTrip');
+        });
+        stops = (dtRoute && Array.isArray(dtRoute.planItems))
+          ? dtRoute.planItems.filter(function (pi) { return pi && pi.type === 'stop'; }).map(function (pi) {
+              var p = singleHubTrip.places[pi.placeId] || {};
+              return {
+                name: p.name,
+                lat: p.lat,
+                lng: p.lng,
+                why: pi.notes || '',
+                durationHours: pi.duration || 2,
+                iconic: pi.priority === 'iconic',
+              };
+            })
+          : [];
+      } catch (e) {
+        console.warn('[picker-discovery] dayTrip LLM failed for hub', hub.place, e);
+      }
+      if (stops.length) {
+        _tb._hubDayTripCandidates[hub.id] = stops;
+        addedHubs++;
+        addedItems += stops.length;
+      }
+      _tb._daytripDiscoveryRanFor[key] = Date.now();
+      if (onProgress) {
+        try { onProgress({ phase: 'hub', done: i + 1, total: hubs.length, hub: hub, addedThisHub: stops.length }); } catch (_) {}
+      }
+    }
+    if (onProgress) { try { onProgress({ phase: 'done', addedHubs: addedHubs, addedItems: addedItems }); } catch (_) {} }
+    return { addedHubs: addedHubs, addedItems: addedItems };
+  }
+  global.runPickerDayTripDiscovery = runPickerDayTripDiscovery;
+
+  async function runPickerWaysideDiscovery(_tb, opts) {
+    opts = opts || {};
+    var onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : null;
+    var trip = _synthTripForPicker(_tb);
+    if (!trip || !trip.routes.length) return { addedLegs: 0, addedItems: 0 };
+    if (typeof global.generateWaysidesForTrip !== 'function') {
+      console.warn('[picker-discovery] generateWaysidesForTrip not available');
+      return { addedLegs: 0, addedItems: 0 };
+    }
+    if (!_tb._legWaysideCandidates) _tb._legWaysideCandidates = {};
+    if (!_tb._waysideDiscoveryRanFor) _tb._waysideDiscoveryRanFor = {};
+    var legs = trip.routes;
+    var addedLegs = 0, addedItems = 0;
+    if (onProgress) { try { onProgress({ phase: 'start', total: legs.length }); } catch (_) {} }
+    for (var i = 0; i < legs.length; i++) {
+      var leg = legs[i];
+      var key = leg.fromDestId + '|' + leg.toDestId;
+      if (_tb._waysideDiscoveryRanFor[key]) {
+        if (onProgress) { try { onProgress({ phase: 'leg', done: i + 1, total: legs.length, leg: leg, addedThisLeg: 0, skipped: true }); } catch (_) {} }
+        continue;
+      }
+      var stops = [];
+      try {
+        // Synthesize a minimal two-dest trip to run the existing
+        // wayside generator against.
+        var fromD = trip.destinations.find(function (d) { return d.id === leg.fromDestId; });
+        var toD   = trip.destinations.find(function (d) { return d.id === leg.toDestId; });
+        if (!fromD || !toD) continue;
+        var oneLegTrip = {
+          destinations: [fromD, toD],
+          routes: [{
+            id: leg.id, kind: 'route', subKind: 'transit',
+            fromDestId: fromD.id, toDestId: toD.id, planItems: [],
+          }],
+          places: {},
+          brief: trip.brief,
+        };
+        await global.generateWaysidesForTrip(oneLegTrip);
+        var freshLeg = (oneLegTrip.routes || [])[0];
+        stops = (freshLeg && Array.isArray(freshLeg.planItems))
+          ? freshLeg.planItems.filter(function (pi) { return pi && pi.type === 'stop'; }).map(function (pi) {
+              var p = oneLegTrip.places[pi.placeId] || {};
+              return {
+                name: p.name,
+                lat: p.lat,
+                lng: p.lng,
+                why: pi.notes || '',
+                durationHours: pi.duration || 0.5,
+                iconic: pi.priority === 'iconic',
+                fromPlace: fromD.place,
+                toPlace:   toD.place,
+              };
+            })
+          : [];
+      } catch (e) {
+        console.warn('[picker-discovery] wayside LLM failed for leg', key, e);
+      }
+      if (stops.length) {
+        _tb._legWaysideCandidates[key] = stops;
+        addedLegs++;
+        addedItems += stops.length;
+      }
+      _tb._waysideDiscoveryRanFor[key] = Date.now();
+      if (onProgress) {
+        try { onProgress({ phase: 'leg', done: i + 1, total: legs.length, leg: leg, addedThisLeg: stops.length }); } catch (_) {}
+      }
+    }
+    if (onProgress) { try { onProgress({ phase: 'done', addedLegs: addedLegs, addedItems: addedItems }); } catch (_) {} }
+    return { addedLegs: addedLegs, addedItems: addedItems };
+  }
+  global.runPickerWaysideDiscovery = runPickerWaysideDiscovery;
+
   function orderKeptCandidates(kept, mdcItems, entryCity, exitCity){
     var reasoning = [];
     if (!kept.length) return {ordered:[], reasoning:reasoning, inferredEntry:null};
@@ -1477,7 +1723,19 @@
   }
 
   async function publishTrip(){
-    var kept=(_tb.candidates||[]).filter(function(c){return c.status==="keep";});
+    // v360.3 (#8 Phase 5): wayside-intent candidates are kept (the user
+    // explicitly chose them) but they're NOT overnight destinations —
+    // they're stops on transit routes. Exclude them from the
+    // destinations build; the wayside-commit pass below picks them up
+    // separately and attaches each to its appropriate route.
+    var kept=(_tb.candidates||[]).filter(function(c){
+      // v360.3 (#124 Turn 3): also exclude day-trip-intent candidates.
+      // They're committed separately as planItem stops on a dayTrip
+      // route off their chosen hub (see the day-trip-commit pass after
+      // syncTransitRoutes). Without this exclusion they'd double-
+      // commit as both a destination AND a day-trip stop.
+      return c.status==="keep" && c.intent !== "wayside" && c.intent !== "dayTrip";
+    });
 
     // v359.60.5: reconcile placeActivities → candidates. Completeness-pass
     // additions (and any other path that adds places to placeActivities
@@ -1626,6 +1884,36 @@
       trip={name:resolvedName,destinations:[],legs:{},trackSpending:false,pendingActions:[],
         brief:newBrief, mdcItems:newMdcItems, logistics:null};
       activeDest=null; destCtr=0; sidCtr=100; bkCtr=0; _actionCtr=0; _fileHandle=null;
+      trip.createdAt = (new Date()).toISOString();
+      // v360.2 (A.4): seed initial wisps from the user's LITERAL form
+      // input. _tb._initialWispsRaw was populated by
+      // _captureInitialWispsFromForm at saveStep2AndProceed time —
+      // before any LLM step contaminated _tb.anchors with derived
+      // names. Marking _initialMigrated:true here prevents the
+      // legacy migration (which reads brief.mustDo / brief.intent —
+      // potentially contaminated for older trips) from also running
+      // on top.
+      if (_tb && Array.isArray(_tb._initialWispsRaw) && _tb._initialWispsRaw.length) {
+        if (!trip.brief.tripMeta) trip.brief.tripMeta = {};
+        var capAt = trip.createdAt;
+        var wisps = [];
+        _tb._initialWispsRaw.forEach(function (r, i) {
+          if (!r || !r.text) return;
+          wisps.push({
+            id: "w-init-" + Date.now() + "-" + i + "-" + Math.random().toString(36).slice(2, 5),
+            text: r.text,
+            capturedAt: capAt,
+            processedAt: capAt,
+            resultItemIds: [],
+            _initial: true,
+            _initialKind: r.kind || 'why',
+          });
+        });
+        trip.brief.tripMeta.wisps = wisps;
+        trip.brief.tripMeta._initialMigrated = true;
+        console.log("[A.4] seeded " + wisps.length + " initial wisps on new trip:",
+          wisps.map(function (w) { return w.text; }));
+      }
     }
     var tripId = isRebuild ? (_currentTripId || ("trip-"+Date.now())) : ("trip-"+Date.now());
     _currentTripId = tripId;
@@ -2744,6 +3032,212 @@
     if (typeof MaxEngineTrip !== 'undefined' && typeof MaxEngineTrip.syncTransitRoutes === 'function') {
       try { MaxEngineTrip.syncTransitRoutes(trip); }
       catch (e) { console.warn('[Max] syncTransitRoutes failed:', e && e.message); }
+    }
+
+    // v360.3 (#8 Wayside Phase 5): commit wayside-intent candidates as
+    // planItem stops on the appropriate transit routes. The picker's
+    // role popover lets a user mark a candidate as a wayside by
+    // setting cand.intent = "wayside" + cand.waysideLeg = {fromPlace,
+    // toPlace}. At publish time the destinations array doesn't include
+    // these candidates (they're not overnight stops); they need to be
+    // re-anchored onto the route between the named hubs. Resilient
+    // attachment:
+    //   1. Try to match the named (from, to) pair directly.
+    //   2. Fall back to the geometry-based best-fit leg (same logic
+    //      as MaxEngineTrip._reassignWaysidesToBestLeg) so that even
+    //      if hub order has shifted in the cascade, the wayside lands
+    //      on the closest leg by perpendicular distance.
+    //   3. If neither yields a leg, drop with a console warning.
+    try {
+      var waysideCands = (_tb.candidates || []).filter(function (c) {
+        return c && c.intent === "wayside" && c.lat != null && c.lng != null;
+      });
+      if (waysideCands.length) {
+        if (!trip.places || typeof trip.places !== "object") trip.places = {};
+        if (!Array.isArray(trip.routes)) trip.routes = [];
+        var transitRoutes = trip.routes.filter(function (r) {
+          var sub = (typeof MaxMigration !== "undefined" && MaxMigration.routeSubKind)
+            ? MaxMigration.routeSubKind(r)
+            : (r && (r.subKind || (r.kind && r.kind !== "route" ? r.kind : null)));
+          return sub === "transit";
+        });
+        function _normName(s) {
+          if (s == null) return "";
+          return String(s).toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").trim();
+        }
+        function _findLegByPlaceNames(fromPlace, toPlace) {
+          var fN = _normName(fromPlace);
+          var tN = _normName(toPlace);
+          if (!fN || !tN) return null;
+          return transitRoutes.find(function (r) {
+            var fD = trip.destinations.find(function (d) { return d.id === r.fromDestId; });
+            var tD = trip.destinations.find(function (d) { return d.id === r.toDestId; });
+            if (!fD || !tD) return false;
+            return _normName(fD.place) === fN && _normName(tD.place) === tN;
+          }) || null;
+        }
+        var committed = 0, dropped = 0;
+        waysideCands.forEach(function (c) {
+          var leg = null;
+          if (c.waysideLeg) {
+            leg = _findLegByPlaceNames(c.waysideLeg.fromPlace, c.waysideLeg.toPlace);
+          }
+          if (!leg) {
+            // Geometric fallback. Build a minimal "candidate" ordered
+            // by trip.destinations so _bestWaysideLegForCandidate sees
+            // hubs in order.
+            var hubCands = trip.destinations
+              .filter(function (d) { return d && (d.nights || 0) > 0 && typeof d.lat === "number" && typeof d.lng === "number"; })
+              .map(function (d) { return { id: d.id, place: d.place, lat: d.lat, lng: d.lng, status: "keep" }; });
+            var fit = _bestWaysideLegForCandidate({ lat: c.lat, lng: c.lng, id: c.id || "tmp" }, hubCands);
+            if (fit) {
+              leg = transitRoutes.find(function (r) {
+                return r.fromDestId === fit.fromCand.id && r.toDestId === fit.toCand.id;
+              });
+            }
+          }
+          if (!leg) {
+            console.warn("[Max publishTrip] couldn't attach wayside candidate to any leg:", c.place);
+            dropped++;
+            return;
+          }
+          // Mint a place + planItem and attach.
+          var pid = "p-w-" + Math.random().toString(36).slice(2, 10);
+          trip.places[pid] = {
+            id: pid,
+            name: c.place,
+            lat: c.lat,
+            lng: c.lng,
+            type: "sight",
+            notes: c.whyItFits || "",
+          };
+          var piid = "pi-w-" + Math.random().toString(36).slice(2, 10);
+          if (!Array.isArray(leg.planItems)) leg.planItems = [];
+          leg.planItems.push({
+            id: piid,
+            type: "stop",
+            state: "suggestion",
+            placeId: pid,
+            duration: (typeof c.durationHours === "number" && c.durationHours > 0) ? c.durationHours : 0.5,
+            recommendedMin: (typeof c.durationHours === "number" && c.durationHours > 0) ? c.durationHours : 0.5,
+            priority: "iconic",
+            notes: c.whyItFits || "",
+            source: "picker-wayside-v1",
+          });
+          committed++;
+        });
+        if (committed || dropped) {
+          console.log("[Max publishTrip] wayside commits: " + committed + " attached, " + dropped + " dropped");
+        }
+      }
+    } catch (e) {
+      console.warn("[Max publishTrip] wayside commit pass failed (non-fatal):", e && e.message);
+    }
+
+    // v360.3 (#124 Turn 3): day-trip commit pass. Parallel to the
+    // wayside commit above. The picker's per-hub day-trip checklist
+    // creates candidates with intent="dayTrip" + dayTripHub:hubCandId.
+    // At publish time:
+    //   1. Map each picker hub-candidate id → its committed destination
+    //      id. The picker uses one set of ids; trip.destinations have
+    //      another. We bridge via place name (normalized).
+    //   2. For each kept day-trip candidate, find-or-create a dayTrip
+    //      route off the resolved destination.
+    //   3. Attach the candidate as a planItem stop on that route.
+    // Excluded from kept set above so they don't double-commit.
+    try {
+      var dayTripCands = (_tb.candidates || []).filter(function (c) {
+        return c && c.intent === "dayTrip" && c.status === "keep" &&
+               c.lat != null && c.lng != null && c.dayTripHub;
+      });
+      if (dayTripCands.length) {
+        if (!trip.places || typeof trip.places !== "object") trip.places = {};
+        if (!Array.isArray(trip.routes)) trip.routes = [];
+
+        // Resolve picker hub-candidate id → committed destination.
+        // The picker's hub-candidate.id is a temporary picker-side id
+        // (e.g. "c3"); the trip.destinations[].id is the committed
+        // schema id (e.g. "d4"). Bridge by normalized place name.
+        function _normN(s) {
+          if (s == null) return '';
+          var lower = String(s).toLowerCase();
+          if (typeof lower.normalize === 'function') {
+            lower = lower.normalize('NFKD').replace(/[̀-ͯ]/g, '');
+          }
+          return lower.replace(/[^a-z0-9]+/g, ' ').trim();
+        }
+        var pickerCandById = Object.create(null);
+        (_tb.candidates || []).forEach(function (pc) {
+          if (pc && pc.id) pickerCandById[pc.id] = pc;
+        });
+        var destByName = Object.create(null);
+        (trip.destinations || []).forEach(function (d) {
+          if (d && d.place) destByName[_normN(d.place)] = d;
+        });
+
+        var committed = 0, dropped = 0;
+        dayTripCands.forEach(function (c) {
+          // Resolve hub.
+          var hubPicker = pickerCandById[c.dayTripHub];
+          var hubDest = null;
+          if (hubPicker && hubPicker.place) {
+            hubDest = destByName[_normN(hubPicker.place)] || null;
+          }
+          if (!hubDest) {
+            console.warn("[Max publishTrip] day-trip candidate couldn't resolve hub:", c.place, "(hub id was", c.dayTripHub, ")");
+            dropped++;
+            return;
+          }
+          // Find or create the hub's dayTrip route.
+          var route = trip.routes.find(function (r) {
+            if (!r) return false;
+            var sub = (typeof MaxMigration !== "undefined" && MaxMigration.routeSubKind)
+              ? MaxMigration.routeSubKind(r)
+              : (r.subKind || (r.kind && r.kind !== "route" ? r.kind : null));
+            return sub === "dayTrip" && r.fromDestId === hubDest.id;
+          });
+          if (!route) {
+            route = {
+              id: "r-dt-" + hubDest.id + "-" + Math.random().toString(36).slice(2, 8),
+              kind: "route",
+              subKind: "dayTrip",
+              fromDestId: hubDest.id,
+              toDestId:   hubDest.id,
+              planItems: [],
+            };
+            trip.routes.push(route);
+          }
+          // Mint a Place entry + a planItem stop on the route.
+          var pid = "p-dt-" + Math.random().toString(36).slice(2, 10);
+          trip.places[pid] = {
+            id: pid,
+            name: c.place,
+            lat: c.lat,
+            lng: c.lng,
+            type: "sight",
+            notes: c.whyItFits || "",
+          };
+          var piid = "pi-dt-" + Math.random().toString(36).slice(2, 10);
+          if (!Array.isArray(route.planItems)) route.planItems = [];
+          route.planItems.push({
+            id: piid,
+            type: "stop",
+            state: "suggestion",
+            placeId: pid,
+            duration: (typeof c.durationHours === "number" && c.durationHours > 0) ? c.durationHours : 2,
+            recommendedMin: (typeof c.durationHours === "number" && c.durationHours > 0) ? c.durationHours : 2,
+            priority: "iconic",
+            notes: c.whyItFits || "",
+            source: "picker-daytrip-v1",
+          });
+          committed++;
+        });
+        if (committed || dropped) {
+          console.log("[Max publishTrip] day-trip commits: " + committed + " attached, " + dropped + " dropped");
+        }
+      }
+    } catch (e) {
+      console.warn("[Max publishTrip] day-trip commit pass failed (non-fatal):", e && e.message);
     }
 
     // Don't re-sort — ordering was already computed event-aware. Use

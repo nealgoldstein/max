@@ -6,6 +6,20 @@ Max is a travel-planning app for people who do their own research and
 want a working canvas to push back against — not a plug-and-play
 itinerary handed down from on high.
 
+**A trip doesn't begin whole — it begins as a wisp.** A half-formed
+idea picked up from a book, a conversation, a piece of music, a
+photograph, a place you read about years ago. The wisp lives with us:
+we layer detail onto it, change our minds, look at maps, talk to
+friends, drop new wisps as they arrive. Through that living, the trip
+slowly takes shape. Then we travel — and only afterward, when we've
+walked the streets, eaten the meals, watched the light change on
+unfamiliar landscapes, does the trip become real. Not as a plan
+executed, but as something we now know.
+
+Max is the place where the wisp lives between conception and arrival.
+It holds the half-formed idea, helps it grow without pinning it down
+too early, and stays useful through the travel itself.
+
 The core idea: **a trip is a scaffold, not a script.** Max gives you
 something concrete enough to react to (destinations, durations,
 candidate sights, day-by-day plans) and you adjust as you learn.
@@ -73,14 +87,43 @@ distinct so the shaping mind isn't pulled prematurely into
 operational anxiety, and the operational mind doesn't have to wade
 through possibility to make a deadline.
 
+### A trip is a river
+
+A trip is like a river. There are currents pulling you forward, eddies
+where you linger, whirlpools that catch you off guard. The river has
+its own logic — the slope of the land, the shape of the banks, what
+fell into it upstream. You can read it, you can paddle it, you can
+sometimes steer it — but you don't author it.
+
+And on a trip, just as in our lives, **we are one flicker of light on
+the surface.** Brief, particular, present for the part of the river
+we happen to traverse. The current keeps moving after we've moved on.
+
+Rivers are notoriously chaotic systems, and in a chaotic system you
+can't predict the future from a starting state — small inputs amplify
+in unknowable ways. The right response to a chaotic system isn't to
+plan harder; it's to be *prepared* — to have the capacity, the
+context, and the openness to respond to what the river actually does.
+
+> *"Plans are useless, but planning is everything."*
+> — Dwight D. Eisenhower
+
+Eisenhower's distinction is exactly the one Max is built around. The
+specific plan you arrive with — the day-by-day, the bookings you
+made in March, the must-see list — has limited shelf life once
+travel starts. But the *planning* — the wisp-living, the maps you
+poured over, the conversations, the trade-offs you weighed — gives
+you everything you need to read the river in the moment. The plan
+gets thrown out; the planning carries you through.
+
 ### Late binding
 
-The borrowed concept is **late binding** — a software-engineering
-term for *deferring decisions until you have to make them*. Sights,
-hotels, day-by-day plans: none of them lock in until reality
-requires it (a cancellation deadline, a flight with assigned dates,
-a hotel that won't have rooms in two weeks). Everything else stays
-in play.
+The software-engineering term for this kind of preparation-without-
+premature-commitment is **late binding** — *deferring decisions
+until you have to make them*. Sights, hotels, day-by-day plans: none
+of them lock in until reality requires it (a cancellation deadline,
+a flight with assigned dates, a hotel that won't have rooms in two
+weeks). Everything else stays in play.
 
 This is why **discovery isn't a phase that ends**. Sights aren't
 items on a pre-existing checklist; they emerge through the
@@ -91,6 +134,81 @@ A rigid traveler asks "What will I do there?"
 A late-binding traveler asks "What becomes possible once I arrive?"
 
 Leave room for the world to surprise you.
+
+### The arc: wisp → living → travel → real → lineage
+
+There's a longer arc that the three activities sit inside. A trip
+moves through five states, in order, and each one earns the next:
+
+- **Wisp** — an idea barely formed. "Iceland." "Trains." "Somewhere
+  quiet." Not a plan, not even a destination yet. Just a pull. Max's
+  Spark intake exists for exactly this — somewhere to drop the wisp
+  the moment it arrives so you don't lose it.
+
+- **Living with it** — the wisp incubates. You read about Iceland,
+  see a friend's photos of the Westfjords, watch a documentary, drop
+  more wisps as they arrive ("hot springs," "puffins," "the ring
+  road"). Max's Spark↔Shape loop is built for this stretch — the
+  longest stretch in most trips. The trip changes shape multiple
+  times here, and that's not indecision; it's *the work*. A trip
+  shaped without living with it tends to be the trip someone else
+  would have taken.
+
+- **Travel** — the trip leaves the page. You go. Operate kicks in.
+  Things change. The wisp meets the world.
+
+- **Real** — after you return. The trip has become something you
+  know, not something you planned. The hotel that looked perfect on
+  Booking might be remembered for the conversation you had at
+  breakfast. The detour you took because the road was closed might
+  be the day you talk about most. The wisp has fully bound itself to
+  experience.
+
+- **Lineage** — the trip is over, but its consequences carry forward.
+
+  > *"The past is never dead. It's not even past."*
+  > — William Faulkner, *Requiem for a Nun* (1951)
+
+  Faulkner was writing about something larger than travel, but the
+  line lands here too. What you learned on Iceland — that you love
+  raw thundering waterfalls more than picturesque ones, that you'd
+  happily spend a whole day driving without arriving, that a hot
+  spring at sunrise is worth waking up for — quietly seeds the next
+  wisp on the next trip. The trip is gone but it's not gone. **As we
+  travel and learn and discover more, the original idea may fade,
+  but that does not eliminate the history, ideas, and learning we
+  accumulated from pursuing it.**
+
+Each state is necessary. A wisp that never gets lived with stays
+abstract. Living that never becomes travel stays daydream. Travel
+that isn't re-examined doesn't yet become real. And a "real" trip
+that doesn't feed forward into lineage is a kind of forgetting —
+the next trip starts from scratch when it didn't have to.
+
+Max is built to hold the trip through all five. The Spark intake
+catches wisps as they arrive. Discovery + Structure let the wisp
+live with you and reshape. The trip view goes with you on the road.
+The captured-ideas history preserves the wisps even after the trip
+is over. And **trip lineage** (a planned future feature) carries the
+real of one trip forward as raw material the next trip can recognize
+itself from.
+
+#### A wisp's lineage outlives the wisp
+
+The first wisp — the original "why" that brought you to Max — is
+seed, not contract. The wisp can be deleted; what it generated
+(destinations, decisions, bookings, the other wisps it sparked,
+even the learning) stays. The tree outlives the seed.
+
+So delete affordances on wisps are generous: any wisp can go,
+including the original primary. What it produced is unaffected.
+The trip endures past any specific thought that contributed to it.
+
+If you want to truly start over — to reshape a trip from a new
+"why" — the right action is **create a new trip**, not delete the
+original wisp. A new trip can selectively inherit wisps and learning
+from prior trips. The lineage flows forward; nothing has to be
+destroyed to make room.
 
 ---
 
@@ -440,6 +558,26 @@ The "View larger" button opens the map full-screen for closer
 inspection. On phones, it opens as a full-page overlay; on
 desktop, it pops out into a separate window so you can park it
 on a second monitor.
+
+#### Pin shapes
+
+Each role on the trip map renders with both a distinct color and a
+distinct shape, so the encoding is decodable without color
+(important for colorblind users, and useful for everyone scanning
+a busy map):
+
+- **Numbered circle (blue)** — overnight destination. The number
+  is its position in the trip sequence.
+- **Rounded square (purple)** — day-trip stop, with the place's
+  initials inside. Connected to its hub overnight by a purple loop.
+- **Hollow octagon (purple outline)** — wayside, a brief stop on
+  the drive between two hubs. The "stop sign" shape says "pause
+  here." The hollow look keeps the map visible underneath.
+- **Dashed grey circle** — considered/set-aside, a place from
+  discovery that isn't on the trip yet. Tap to add.
+
+The shapes also serve as a built-in legend: a pin's silhouette
+tells you what it is even before you read the color.
 
 ![Map in satellite mode with sight pins clustered around a destination](images/07-map.png)
 > *Capture: per-destination map in satellite mode, zoomed enough to

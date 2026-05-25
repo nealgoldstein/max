@@ -1004,6 +1004,13 @@
       + '</div>';
     container.appendChild(datesBar);
 
+    // v360.1: peek chip ("N things need your attention →") renders
+    // here, between the dates bar and the phase-chips row below.
+    // Ordering principle: the chip carries urgent operational
+    // pressure; phase chips are quieter cross-phase context
+    // ("🧭 4 set aside in Discovery"). Urgent first.
+    _renderTripPeekChip(trip, container);
+
     // v359.60.47: cross-phase chip row under the dates strip on the
     // Structure view. Surfaces the count of places in Discovery that
     // haven't been added to the trip (a real ongoing thing — you do
@@ -1147,10 +1154,14 @@
     var chip = document.createElement("button");
     chip.type = "button";
     chip.style.cssText = "width:100%;text-align:left;padding:10px 14px;background:transparent;border:none;cursor:pointer;font-family:inherit;font-size:12px;font-weight:600;color:#7d5e00;display:flex;align-items:center;gap:10px;";
-    var caretSpan = document.createElement("span");
-    caretSpan.style.cssText = "font-size:9px;opacity:0.7;flex-shrink:0;transition:transform 0.15s ease;display:inline-block;";
-    caretSpan.textContent = "▸";
-    if (expanded) caretSpan.style.transform = "rotate(90deg)";
+    // v360.1: caret removed. The "Show"/"Hide" hint on the right
+    // already conveys expansion state; the rotating caret was
+    // duplicate signal. Removing it also lets 📅 sit at the same
+    // horizontal offset as the icons on the sibling panels
+    // (🔧 Itinerary, 🧭 Discovery).
+    var iconSpan = document.createElement("span");
+    iconSpan.style.cssText = "font-size:14px;flex-shrink:0;line-height:1;";
+    iconSpan.textContent = "📅";
     var labelSpan = document.createElement("span");
     labelSpan.style.cssText = "flex:1;";
     var dCount = actions.daysUntilStart;
@@ -1174,11 +1185,11 @@
     if (hotelN) bookBits.push('<strong>' + hotelN + '</strong> hotel' + (hotelN !== 1 ? 's' : ''));
     if (transitN) bookBits.push('<strong>' + transitN + '</strong> transit leg' + (transitN !== 1 ? 's' : ''));
     var preTail = bookBits.join(' · ') + ' to reserve';
-    labelSpan.innerHTML = "📅 " + when + " — Bookings: " + preTail;
+    labelSpan.innerHTML = when + " — Bookings: " + preTail;
     var hintSpan = document.createElement("span");
     hintSpan.style.cssText = "font-size:10px;font-weight:500;color:#a89055;font-style:italic;";
     hintSpan.textContent = expanded ? "Hide" : "Show";
-    chip.appendChild(caretSpan);
+    chip.appendChild(iconSpan);
     chip.appendChild(labelSpan);
     chip.appendChild(hintSpan);
     wrap.appendChild(chip);
@@ -1243,7 +1254,6 @@
     chip.onclick = function () {
       var nowExpanded = list.style.display === "none";
       list.style.display = nowExpanded ? "block" : "none";
-      caretSpan.style.transform = nowExpanded ? "rotate(90deg)" : "rotate(0deg)";
       hintSpan.textContent = nowExpanded ? "Hide" : "Show";
       try { localStorage.setItem("max-prearrival-expanded", nowExpanded ? "1" : "0"); } catch (e) {}
     };
@@ -1259,16 +1269,27 @@
     if (typeof global.summarizeDecisionsDeferred !== "function") return;
     var summary = global.summarizeDecisionsDeferred(trip);
     if (!summary || !summary.totalCount) return;
-    var anyGenerating = false;
+    // v360.1: honest counting of destinations that genuinely have a
+    // load in flight vs. ones that just haven't been opened yet.
+    // Suggestions fetch lazily — only when the user opens that
+    // destination's detail view. So "(still gathering…)" was
+    // misleading: it implied Max was busy when really it was
+    // describing destinations the user simply hadn't visited. Per
+    // late-binding, unopened destinations are FINE and shouldn't be
+    // framed as incomplete. We now distinguish:
+    //   nLoading    — fetches actively in flight RIGHT NOW (rare)
+    //   nUnexplored — destinations without any suggestions yet
+    //                 (the common case, no fetch queued)
+    var nLoading = 0, nUnexplored = 0;
     if (typeof global._generatedCityData !== "undefined" && trip && trip.destinations) {
       for (var i = 0; i < trip.destinations.length; i++) {
         var d = trip.destinations[i];
         if (!d || !d.place) continue;
         var k = d.place.toLowerCase();
         var s = global._generatedCityData[k];
-        if (s && s.loading) { anyGenerating = true; break; }
-        if (!s && (!Array.isArray(d.suggestions) || d.suggestions.length === 0)) {
-          anyGenerating = true; break;
+        if (s && s.loading) nLoading++;
+        else if (!s && (!Array.isArray(d.suggestions) || d.suggestions.length === 0)) {
+          nUnexplored++;
         }
       }
     }
@@ -1280,10 +1301,16 @@
     var chip = document.createElement("button");
     chip.type = "button";
     chip.style.cssText = "width:100%;text-align:left;padding:10px 14px;background:transparent;border:none;cursor:pointer;font-family:inherit;font-size:12px;font-weight:600;color:#7d5e00;display:flex;align-items:center;gap:10px;";
-    var caretSpan = document.createElement("span");
-    caretSpan.style.cssText = "font-size:9px;opacity:0.7;flex-shrink:0;transition:transform 0.15s ease;display:inline-block;";
-    caretSpan.textContent = "▸";
-    if (expanded) caretSpan.style.transform = "rotate(90deg)";
+    // v360.1: 🔧 wrench lifted into its own icon span (matching the
+    // 🧭 compass on the Discovery panel below) so the two icons sit
+    // at the same horizontal offset across both sibling panels. The
+    // expand/collapse caret was removed entirely — the "Show"/"Hide"
+    // hint on the right already conveys state; the rotating caret
+    // was duplicate signal and pushed the icon out of alignment with
+    // sibling panels.
+    var iconSpan = document.createElement("span");
+    iconSpan.style.cssText = "font-size:14px;flex-shrink:0;line-height:1;";
+    iconSpan.textContent = "🔧";
     var labelSpan = document.createElement("span");
     labelSpan.style.cssText = "flex:1;";
     // v353.2: header reworded. Was "N suggestions to review" which
@@ -1304,12 +1331,24 @@
     // from the Bookings banner above (which is about reservations
     // with money + providers). "Sights to keep or skip" is the
     // plain-English version of "tentative placeholders."
-    labelSpan.innerHTML = '🔧 Itinerary: ' + bits.join(' · ')
-      + (anyGenerating ? ' <span style="font-weight:500;color:#a89055;font-style:italic;font-size:11px;">(still gathering…)</span>' : '');
+    // v360.1: honest indicator. If we have a real in-flight load,
+    // say "fetching…". If destinations exist without suggestions
+    // (just unopened — no work happening), say "N not yet explored"
+    // so the user knows it's about their action, not Max's.
+    var generatingTail = '';
+    if (nLoading > 0) {
+      generatingTail = ' <span style="font-weight:500;color:#a89055;font-style:italic;font-size:11px;">(fetching ' +
+        nLoading + ' destination' + (nLoading === 1 ? '' : 's') + '…)</span>';
+    } else if (nUnexplored > 0) {
+      generatingTail = ' <span style="font-weight:500;color:#a89055;font-size:11px;">· ' +
+        nUnexplored + ' not yet explored</span>';
+    }
+    labelSpan.innerHTML = 'Itinerary: ' + bits.join(' · ') + generatingTail;
     var hintSpan = document.createElement("span");
     hintSpan.style.cssText = "font-size:10px;font-weight:500;color:#a89055;font-style:italic;";
     hintSpan.textContent = expanded ? "Hide" : "Show";
-    chip.appendChild(caretSpan);
+    // Layout: [🔧 icon] [Itinerary: ...] [Show / Hide]
+    chip.appendChild(iconSpan);
     chip.appendChild(labelSpan);
     chip.appendChild(hintSpan);
     wrap.appendChild(chip);
@@ -1318,6 +1357,28 @@
     list.style.cssText = "padding:0 14px 12px;display:" + (expanded ? "block" : "none") + ";";
     list.style.borderTop = "1px solid #e6d5a0";
     list.style.paddingTop = "10px";
+
+    // v360.1 (slice 2c-ish): pop-out affordance. Opens the same list
+    // in a new browser window so the user can keep it visible
+    // alongside the main app while working through items — and
+    // print from that window via Cmd/Ctrl+P. The new window has a
+    // Print button of its own for clarity.
+    var actionBar = document.createElement("div");
+    actionBar.style.cssText =
+      'display:flex;justify-content:flex-end;gap:6px;margin-bottom:10px;';
+    var popoutBtn = document.createElement("button");
+    popoutBtn.type = "button";
+    popoutBtn.style.cssText =
+      'background:#fff;border:1px solid #d8c4a4;color:#5c4520;font-family:inherit;' +
+      'font-size:11px;font-weight:600;padding:4px 10px;border-radius:5px;cursor:pointer;';
+    popoutBtn.textContent = '📋 Pop out';
+    popoutBtn.title = 'Open this list in a separate window you can keep visible while you work through it';
+    popoutBtn.onclick = function (e) {
+      e.stopPropagation();
+      _popoutDecisionsDeferred(trip, summary);
+    };
+    actionBar.appendChild(popoutBtn);
+    list.appendChild(actionBar);
 
     summary.items.forEach(function (item) {
       var line = document.createElement("button");
@@ -1388,11 +1449,431 @@
     chip.onclick = function () {
       var nowExpanded = list.style.display === "none";
       list.style.display = nowExpanded ? "block" : "none";
-      caretSpan.style.transform = nowExpanded ? "rotate(90deg)" : "rotate(0deg)";
       hintSpan.textContent = nowExpanded ? "Hide" : "Show";
       try { localStorage.setItem("max-decisions-expanded", nowExpanded ? "1" : "0"); } catch (e) {}
     };
     container.appendChild(wrap);
+  }
+
+  // v360.1: "Find more in Discovery" panel — styled to match the
+  // Itinerary (decisions-deferred) panel above it. Both panels are
+  // invitations to a sub-surface: the Itinerary panel opens the
+  // keep/skip flow for placeholder sights; this one opens Discovery
+  // so the user can ask Max for more places to consider.
+  //
+  // The matching style (cream background, warm tan border, same font
+  // weight + colour) makes the parallel role visually obvious — they
+  // read as siblings, two doors into the work that's still open.
+  //
+  // Earlier this affordance lived as a single line in the phase-chips
+  // row, where it duplicated the count already shown by the PLACES
+  // YOU SET ASIDE section. The chip is gone from that row; the count
+  // lives in the section header; this panel is the call-to-action.
+  //
+  // Conditional: only renders when Discovery has produced any places
+  // (s.discoveredCount > 0). When the trip has nothing in Discovery,
+  // there's nothing to go back to — the panel stays hidden.
+  function _renderDiscoveryPromptPanel(trip, container) {
+    if (!container) return;
+    if (typeof global._phaseStatus !== 'function') return;
+    var s = global._phaseStatus();
+    if (!s || !s.discoveredCount) return;
+
+    // v360.2: surface unprocessed wisps. If the user has captured one or
+    // more ✨ ideas via the Spark intake that Max hasn't evaluated yet,
+    // the panel label changes from a generic "find more places" to a
+    // specific "N new ideas to evaluate" — and tapping it runs the
+    // wisps through Max's must-do extractor before opening the picker,
+    // so the new ideas show up as candidate places. Closes the
+    // Structure↔Spark recursive loop (audit fix #1).
+    // v360.2: three-state panel — but cream (default) state exposes
+    // TWO distinct actions side-by-side because "browse what's there"
+    // and "ask Max for more" are not the same intent. Conflating them
+    // hides the generative action behind a navigational verb.
+    //
+    //   1. UNPROCESSED WISPS (amber): single action — Evaluate
+    //   2. RESULTS READY (green): single action — Review
+    //   3. CALM (cream): TWO actions — Browse / Ask for more
+    //
+    // Late-binding throughout: capture deferred, evaluation deferred,
+    // review deferred. The user opts in at every step.
+    var unprocessed = (typeof global._wispUnprocessed === 'function')
+      ? global._wispUnprocessed(trip)
+      : [];
+    var n = unprocessed.length;
+    var hasWisps = n > 0;
+    var lastResult = (typeof globalThis !== 'undefined' && globalThis._lastWispEvalResult) ||
+                     (typeof window !== 'undefined' && window._lastWispEvalResult) ||
+                     null;
+    var resultsReady = !hasWisps && !!(lastResult && lastResult.addedCount &&
+      (Date.now() - (lastResult.evaluatedAt || 0) < 5 * 60 * 1000));
+    // Evaluating-in-progress: the LLM call is in flight. Show a visible
+    // "Evaluating…" state instead of leaving the amber panel unchanged
+    // while the user waits 5-15 seconds wondering if their click worked.
+    var evalInProgress = !!(typeof window !== 'undefined' && window._wispEvalInProgress);
+    console.log('[discovery-panel] render state', {
+      unprocessedCount: n,
+      hasWisps: hasWisps,
+      hasLastResult: !!lastResult,
+      addedCount: lastResult && lastResult.addedCount,
+      evaluatedAt: lastResult && lastResult.evaluatedAt,
+      ageMs: lastResult ? Date.now() - (lastResult.evaluatedAt || 0) : null,
+      resultsReady: resultsReady,
+      evalInProgress: evalInProgress,
+    });
+
+    // Palette by state. Green is now more visibly green (less pale).
+    var palette;
+    if (evalInProgress) {
+      palette = { bg:'#fef0d8', bgHover:'#fef0d8', border:'#d8a060',
+                  fg:'#7a3e10', hint:'#a86838', icon:'✨' };
+    } else if (hasWisps) {
+      palette = { bg:'#fff5ec', bgHover:'#ffeacc', border:'#d8a060',
+                  fg:'#7a3e10', hint:'#a86838', icon:'✨' };
+    } else if (resultsReady) {
+      // More saturated green so the celebratory state is impossible to
+      // miss. Was #ecf6ec (very pale) — read closer to cream than green.
+      palette = { bg:'#d4ecd4', bgHover:'#bfe1bf', border:'#4f9d3e',
+                  fg:'#1e4a22', hint:'#2a7a2a', icon:'✓' };
+    } else {
+      palette = { bg:'#fbf6e8', bgHover:'#f7eed3', border:'#e6d5a0',
+                  fg:'#7d5e00', hint:'#a89055', icon:'🧭' };
+    }
+
+    var wrap = document.createElement('div');
+    wrap.style.cssText =
+      'margin:0 2px 12px;padding:10px 14px;border:1px solid ' + palette.border + ';border-radius:8px;' +
+      'background:' + palette.bg + ';display:flex;align-items:center;gap:10px;' +
+      'font-family:inherit;font-size:12px;font-weight:600;color:' + palette.fg + ';';
+    // v360.3 (#104): apply the discovery-panel pulse if a wisp was
+    // just captured. _wispJustCaptured is a timestamp set by the
+    // Spark intake; we pulse for ~3 seconds after capture, then let
+    // the flag age out. Without this, a user captures a wisp and
+    // sees only a toast — the amber panel below silently increments
+    // its count with nothing pulling the eye to it.
+    var _captureTs = (typeof window !== 'undefined' && window._wispJustCaptured) || 0;
+    if (_captureTs && (Date.now() - _captureTs) < 3000 && hasWisps) {
+      wrap.className = 'tm-discovery-pulse';
+      // Clear the flag after starting the animation so subsequent
+      // renders (e.g. from autoSave) don't restart the pulse.
+      setTimeout(function () {
+        try { window._wispJustCaptured = 0; } catch (_) {}
+      }, 100);
+    }
+
+    var icon = document.createElement('span');
+    icon.style.cssText = 'font-size:14px;flex-shrink:0;line-height:1;';
+    icon.textContent = palette.icon;
+    wrap.appendChild(icon);
+
+    var label = document.createElement('span');
+    label.style.cssText = 'flex:1;min-width:0;';
+    if (evalInProgress) {
+      label.innerHTML = 'Evaluating with Max <span class="max-thinking" style="font-style:italic;color:#a86838;">…</span>';
+    } else if (hasWisps) {
+      label.innerHTML = 'Discovery: <strong>' + n + '</strong> new idea' +
+        (n === 1 ? '' : 's') + ' to evaluate';
+    } else if (resultsReady) {
+      var rc = lastResult.addedCount;
+      var rWispBit = (lastResult.wispCount === 1 && lastResult.wispTexts && lastResult.wispTexts[0])
+        ? ' from "' + lastResult.wispTexts[0] + '"'
+        : '';
+      // "Must-dos" implies commitment (must); these are possibilities,
+      // not commitments. Language mirrors the Spark intake ("What else
+      // might matter on this trip?") — recipients of that prompt are
+      // things to consider, not obligations.
+      label.innerHTML = 'Max added <strong>' + rc + '</strong> new thing' +
+        (rc === 1 ? '' : 's') + ' to consider' + rWispBit;
+    } else {
+      label.innerHTML = 'Discovery';
+    }
+    wrap.appendChild(label);
+
+    // Action button factory — keeps single + dual button states uniform.
+    function _mkBtn(text, onclick, kind) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      // primary kind = filled; secondary kind = outlined.
+      var primary = (kind === 'primary');
+      b.style.cssText =
+        'flex-shrink:0;font-family:inherit;font-size:11px;font-weight:600;' +
+        'padding:6px 12px;border-radius:5px;cursor:pointer;white-space:nowrap;' +
+        (primary
+          ? 'background:' + palette.fg + ';color:#fff;border:1px solid ' + palette.fg + ';'
+          : 'background:#fff;color:' + palette.fg + ';border:1px solid ' + palette.border + ';');
+      b.innerHTML = text;
+      b.onmouseover = function () {
+        if (primary) b.style.opacity = '0.88';
+        else b.style.background = palette.bgHover;
+      };
+      b.onmouseout = function () {
+        if (primary) b.style.opacity = '1';
+        else b.style.background = '#fff';
+      };
+      b.onclick = function (e) {
+        e.stopPropagation();
+        if (typeof onclick === 'function') onclick();
+      };
+      return b;
+    }
+
+    if (evalInProgress) {
+      // Disabled spinner-like button while LLM is running. No click.
+      var spinBtn = document.createElement('span');
+      spinBtn.style.cssText =
+        'flex-shrink:0;font-size:11px;font-weight:600;padding:6px 12px;' +
+        'border-radius:5px;background:#fff;color:#a86838;border:1px solid #d8a060;' +
+        'font-style:italic;cursor:wait;';
+      spinBtn.textContent = 'Thinking…';
+      wrap.appendChild(spinBtn);
+    } else if (hasWisps) {
+      wrap.appendChild(_mkBtn('Evaluate →', function () {
+        if (typeof window.evaluateWispsForDiscovery === 'function') {
+          window.evaluateWispsForDiscovery();
+        }
+      }, 'primary'));
+    } else if (resultsReady) {
+      wrap.appendChild(_mkBtn('Review →', function () {
+        if (typeof window._reopenPickerAny === 'function') {
+          window._reopenPickerAny();
+        }
+      }, 'primary'));
+    } else {
+      // Cream state — single action: open Discovery. The picker has its
+      // own "Discover more places" affordance and per-section "more
+      // like these" buttons, so duplicating "Ask for more" here just
+      // adds noise. The panel's job is to get you back to Discovery;
+      // the picker's job is to offer the in-context generative paths.
+      wrap.appendChild(_mkBtn('Open Discovery →', function () {
+        if (typeof window._reopenPickerAny === 'function') {
+          window._reopenPickerAny();
+        }
+      }, 'primary'));
+    }
+
+    container.appendChild(wrap);
+  }
+
+  // v360.1: shared pop-out builder. Opens a new browser window with
+  // a sectioned list the user can resize, reposition next to the main
+  // app, and print from. Each row is clickable; clicks navigate the
+  // main window via window.opener (selectDest + optional activeSection
+  // override + optional day-card scroll) without closing the popout.
+  //
+  // Replaces ~150 lines of near-identical implementation across the
+  // decisions-deferred and operational popouts. Wrappers below
+  // prepare the sections and call this.
+  //
+  // opts = {
+  //   title:    "What needs you — <Trip>",
+  //   subtitle: "8 items · opened 2026-05-22",
+  //   tipHtml:  "Print single-sided..."  // optional, suppressed in print
+  //   width:    560,  // optional initial window width
+  //   height:   720,
+  //   sections: [
+  //     {
+  //       heading: "Cancellation deadlines",  // optional
+  //       rows: [
+  //         {
+  //           line1: "Fri, 18 Sept · Reykjavík",  // already-escaped HTML
+  //           line2: "Cancel by 2026-09-17",
+  //           destId: "trip-1234",
+  //           dayId: "d-abc",          // optional, scroll target
+  //           urgent: true,            // optional, red border + glyph
+  //           activeSection: "tracker", // optional, opener._activeDmSection
+  //         },
+  //         …
+  //       ]
+  //     }
+  //   ]
+  // }
+  function _popoutListWindow(opts) {
+    opts = opts || {};
+    var sections = Array.isArray(opts.sections) ? opts.sections : [];
+    var totalRows = sections.reduce(function (n, s) {
+      return n + ((s && Array.isArray(s.rows)) ? s.rows.length : 0);
+    }, 0);
+    if (!totalRows) {
+      if (typeof global.maxAlert === 'function') {
+        global.maxAlert('Nothing to pop out — the list is empty.');
+      }
+      return;
+    }
+    var w = window.open(
+      '',
+      '_blank',
+      'width=' + (opts.width || 560) + ',height=' + (opts.height || 720),
+    );
+    if (!w) {
+      console.warn('[popout] popup blocked');
+      if (typeof global.maxAlert === 'function') {
+        global.maxAlert('Browser blocked the pop-out window. Allow popups from this site and try again.');
+      }
+      return;
+    }
+
+    var sectionsHtml = sections.map(function (sec) {
+      if (!sec || !Array.isArray(sec.rows) || !sec.rows.length) return '';
+      var head = sec.heading ? '<h2>' + sec.heading + '</h2>' : '';
+      var rows = sec.rows.map(function (r) {
+        var cls = r.urgent ? 'urgent' : '';
+        var attrs = [
+          'data-dest-id="' + (r.destId || '') + '"',
+        ];
+        if (r.dayId) attrs.push('data-day-id="' + r.dayId + '"');
+        if (r.activeSection) attrs.push('data-active-section="' + r.activeSection + '"');
+        return '<li class="' + cls + '" ' + attrs.join(' ') + '>' +
+          '<div class="text">' +
+            '<div class="line1">' + (r.line1 || '') + '</div>' +
+            (r.line2 ? '<div class="line2">' + r.line2 + '</div>' : '') +
+          '</div>' +
+          '<div class="checkbox">☐</div>' +
+        '</li>';
+      }).join('');
+      return head + '<ul>' + rows + '</ul>';
+    }).join('');
+
+    var html =
+      '<!doctype html><html><head><meta charset="utf-8"><title>' + (opts.title || 'List') + '</title>' +
+      '<style>' +
+        'body{font:13px/1.5 -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;color:#222;max-width:680px;margin:24px auto;padding:0 24px;}' +
+        '.toolbar{display:flex;justify-content:flex-end;margin-bottom:12px;}' +
+        '.toolbar button{font:600 12px inherit;background:#fff;border:1px solid #d8c4a4;color:#5c4520;border-radius:5px;padding:5px 12px;cursor:pointer;}' +
+        '@media print{.toolbar{display:none;}}' +
+        'h1{font-size:20px;margin:0 0 4px;}' +
+        '.meta{font-size:11px;color:#888;margin:0 0 8px;}' +
+        '.tip{font-size:11px;color:#888;font-style:italic;margin:0 0 18px;}' +
+        '@media print{.tip{display:none;}}' +
+        'h2{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:#5c4520;margin:18px 0 6px;border-bottom:1px solid #e8d8c4;padding-bottom:4px;}' +
+        'ul{list-style:none;padding:0;margin:0 0 12px;}' +
+        'li{display:flex;align-items:center;gap:12px;padding:9px 6px;border-bottom:1px dashed #ddd;cursor:pointer;border-radius:4px;transition:background .12s ease;break-inside:avoid;}' +
+        'li:hover{background:#fff8e6;}' +
+        'li.urgent{border-left:3px solid #c0392b;padding-left:8px;}' +
+        'li.urgent .line1{color:#c0392b;}' +
+        '@media print{li{cursor:auto;padding:9px 0;}li:hover{background:transparent;}}' +
+        'li .text{flex:1;min-width:0;}' +
+        '.line1{font-weight:600;color:#111;}' +
+        '.line2{font-size:11.5px;color:#666;margin-top:2px;}' +
+        '.checkbox{font-size:20px;color:#aaa;line-height:1;flex-shrink:0;}' +
+        '@media print{body{margin:0;padding:0 12mm;}.checkbox{color:#000;}}' +
+      '</style></head><body>' +
+      '<div class="toolbar"><button onclick="window.print()">🖨 Print</button></div>' +
+      '<h1>' + (opts.title || '') + '</h1>' +
+      '<div class="meta">' + (opts.subtitle || '') + '</div>' +
+      (opts.tipHtml ? '<div class="tip">' + opts.tipHtml + '</div>' : '') +
+      sectionsHtml +
+      '<script>' +
+        '(function(){' +
+          'document.querySelectorAll("li[data-dest-id]").forEach(function(li){' +
+            'var destId = li.getAttribute("data-dest-id");' +
+            'var dayId = li.getAttribute("data-day-id");' +
+            'var sect = li.getAttribute("data-active-section");' +
+            'if (!destId) return;' +
+            'li.title = "Click to jump to this destination in the main window";' +
+            'li.addEventListener("click", function(){' +
+              'if (!window.opener || window.opener.closed) {' +
+                'alert("The main Max window is closed — reopen it and try again.");' +
+                'return;' +
+              '}' +
+              'try {' +
+                'window.opener.focus();' +
+                'if (sect) { try { window.opener._activeDmSection = sect; } catch(e) {} }' +
+                'if (typeof window.opener.selectDest === "function") {' +
+                  'window.opener.selectDest(destId);' +
+                '}' +
+                'if (dayId) {' +
+                  'setTimeout(function(){' +
+                    'try {' +
+                      'var el = window.opener.document.getElementById("dy-" + dayId);' +
+                      'if (el && el.scrollIntoView) {' +
+                        'el.scrollIntoView({ behavior: "smooth", block: "center" });' +
+                      '}' +
+                    '} catch(e) {}' +
+                  '}, 280);' +
+                '}' +
+              '} catch (e) { alert("Couldn\'t navigate the main window: " + (e && e.message ? e.message : e)); }' +
+            '});' +
+          '});' +
+        '})();' +
+      '<\/script>' +
+      '</body></html>';
+
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+  }
+
+  // v360.1 (slice 2c-ish): pop-out window for the decisions-deferred
+  // panel. Opens the same item list in a new browser window the user
+  // can resize, reposition next to the main app, and print from. The
+  // popup includes its own Print button. Doesn't auto-print and
+  // doesn't auto-close — the user keeps it open as long as useful.
+  function _popoutDecisionsDeferred(trip, summary) {
+    function esc(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+    var fmtD = global.fmtD;
+    function destObj(id) {
+      if (!trip || !Array.isArray(trip.destinations)) return null;
+      for (var i = 0; i < trip.destinations.length; i++) {
+        if (trip.destinations[i] && trip.destinations[i].id === id) return trip.destinations[i];
+      }
+      return null;
+    }
+    function destRange(d) {
+      if (!d || !fmtD) return '';
+      if (d.dateFrom && d.dateTo && d.dateFrom !== d.dateTo) {
+        return fmtD(d.dateFrom) + ' – ' + fmtD(d.dateTo);
+      }
+      if (d.dateFrom) return fmtD(d.dateFrom);
+      return '';
+    }
+
+    // v360.1: single-line format mirrors the inline panel so popout
+    // and inline read identically — date as the bold-led head, then
+    // destination, then the action description after an em-dash.
+    // (Previous two-line stacking split the date away from the
+    // action; the user pointed out the inline format reads better.)
+    var items = (summary && Array.isArray(summary.items)) ? summary.items : [];
+    var rows = items.map(function (item) {
+      if (item.kind === 'tentative') {
+        var d = destObj(item.destId);
+        var range = destRange(d);
+        return {
+          line1:
+            (range ? '<strong>' + esc(range) + '</strong> · ' : '') +
+            esc(item.destPlace || 'this destination') + ' — ' +
+            '<strong>' + esc(item.count) + '</strong> placeholder' +
+            (item.count !== 1 ? 's' : '') + ' to keep or skip',
+          destId: item.destId || '',
+        };
+      }
+      return {
+        line1:
+          '<strong>' + esc(item.dayLbl || 'A day') + '</strong> · ' +
+          esc(item.destPlace || 'this destination') + ' — empty',
+        destId: item.destId || '',
+        dayId: item.dayId || null,
+      };
+    });
+
+    var tripName = (trip && trip.name) || (trip && trip.brief && trip.brief.name) || 'Trip';
+    var today = new Date();
+    var genStr = today.getFullYear() + '-' +
+      String(today.getMonth() + 1).padStart(2, '0') + '-' +
+      String(today.getDate()).padStart(2, '0');
+    var total = (summary && summary.totalCount) || items.length;
+
+    _popoutListWindow({
+      title: 'Itinerary decisions — ' + esc(tripName),
+      subtitle: total + ' open item' + (total === 1 ? '' : 's') + ' · opened ' + genStr,
+      tipHtml: 'Click a row to jump to that destination in the main window (this window stays open). Print: set single-sided in the dialog so you can mark items off as you go.',
+      width: 520,
+      height: 720,
+      sections: [{ rows: rows }],
+    });
   }
 
   // (e) FQ geographic-affordance banner — TM.3a (v317). Day-trip
@@ -1430,16 +1911,37 @@
   // for callers (drawTripMode, future unified renderer) that want
   // the standard top-of-trip-view header.
   function _renderTripOverviewStrips(trip, container) {
+    // v360.1: _renderTripDatesStrip now also fires the peek chip
+    // *inside* itself, between the dates bar and the phase-chips row.
+    // The chip ("N things need your attention →") must sit ABOVE the
+    // phase chips ("🧭 4 set aside in Discovery") — urgent over
+    // contextual — and the cleanest way to guarantee that ordering
+    // is to inline the peek-chip render inside the dates strip.
     _renderTripDatesStrip(trip, container);
+    // v360.3: overview strips now hold ONLY the dates card and the
+    // conditional state banners (today's day, pre-arrival countdown).
+    // The other panels have moved to explicit positions in
+    // drawTripMode to match the user's desired reading order:
+    //   • Day-trips / On-the-way tips text (_renderGeoAffordanceBanner)
+    //     → renders AFTER arrival/departure + trip bookings, so it
+    //       reads as guidance before the user starts shaping
+    //   • Itinerary empty-days panel (_renderDecisionsDeferredPanel)
+    //     → renders AFTER spark intake, just before the destinations
+    //       list, so it reads as the bridge from "what could go here"
+    //       into "what's actually scheduled"
+    //   • Considered + Discovery panels render at the very bottom
+    //     (already moved in v360.3 earlier).
     _renderTodayBanner(trip, container);
     _renderPreArrivalBanner(trip, container);
-    _renderDecisionsDeferredPanel(trip, container);
-    _renderGeoAffordanceBanner(trip, container);
-    // v359.60.61: trip-wide Action needed surface — answers the
-    // "is there a trip-wide list?" question by aggregating every
-    // destination's open provider actions and upcoming cancellation
-    // deadlines into one collapsible panel.
-    _renderTripActionNeededPanel(trip, container);
+    // v360.1 (slice 1.1): the trip-wide Action needed banner used to
+    // render here. It's been replaced by the quieter peek chip
+    // (renderTripPeekChip) that links to the operational surface
+    // stub. Both surfaces showed the same data; the louder banner
+    // was the redundancy. The chip uses _collectOperationalItems
+    // which is shaped from the same actions + deadlines logic.
+    // _renderTripActionNeededPanel kept defined in this file for now
+    // as a deprecation cushion — nothing calls it. Safe to delete in
+    // a later slice once we're sure nothing else references it.
   }
 
   // ── v359.60.61: trip-wide Action needed panel ──────────────
@@ -2002,8 +2504,86 @@
   }
 
   function _renderArrivalDeparturePanel(trip, container) {
-    if (!container) return;
-    if (!trip || !trip.candidates || !trip.candidates.length) return;
+    console.log('[arrival-panel] called', {
+      hasContainer: !!container,
+      hasTrip: !!trip,
+      destCount: (trip && Array.isArray(trip.destinations)) ? trip.destinations.length : -1,
+      entry: trip && trip.brief && trip.brief.entry,
+      tbExit: trip && trip.brief && trip.brief.tbExit,
+      uiState: trip && trip._ui && trip._ui.arrivalExpanded,
+    });
+    if (!container) { console.log('[arrival-panel] bail: no container'); return; }
+    if (!trip || !Array.isArray(trip.destinations) || !trip.destinations.length) {
+      console.log('[arrival-panel] bail: no destinations');
+      return;
+    }
+
+    // v360.1 (slice 2a): collapse to a one-line summary by default.
+    // The full form is a lot of vertical real estate to show on
+    // every render when the user has already set their arrival /
+    // departure. Default state is collapsed; expand on click. The
+    // expanded flag lives in trip._ui.arrivalExpanded so it sticks
+    // within a session but doesn't pollute the trip body. When the
+    // user hasn't set entry / exit yet, we expand by default so the
+    // first-time-through form is still surfaced.
+    if (!trip._ui) trip._ui = {};
+    var _aeTb = global._tb || {};
+    var _aeCurEntry = (trip.brief && trip.brief.entry)  || _aeTb.entry  || "";
+    var _aeCurExit  = (trip.brief && trip.brief.tbExit) || _aeTb.tbExit || "";
+    // FN.A.2: read mode for each side so the collapsed summary glyph
+    // reflects how the user is actually traveling, not a hardcoded ✈.
+    // Defaults to "fly" — same default the mode-pill render assumes
+    // (index.html ~39370). When entry and exit modes differ (open-jaw
+    // with mode mix, e.g. fly in + ferry out), show both glyphs.
+    var _aeCurEntryMode = (trip.brief && trip.brief.entryMode) || _aeTb.entryMode || "";
+    var _aeCurExitMode  = (trip.brief && trip.brief.exitMode)  || _aeTb.exitMode  || "";
+    var _aeNeverSet = !_aeCurEntry || !_aeCurExit;
+    var _aeExpanded = trip._ui.arrivalExpanded === true ||
+                      (trip._ui.arrivalExpanded === undefined && _aeNeverSet);
+    if (!_aeExpanded) {
+      var sumRow = document.createElement('div');
+      sumRow.style.cssText = 'margin:0 2px 12px;padding:9px 14px;background:#fafafa;border:1px solid #e6e2d8;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:12px;color:#444;';
+      var sumIcon = document.createElement('span');
+      sumIcon.style.cssText = 'flex-shrink:0;color:#888;font-size:14px;';
+      // FN.A.2: mode-aware glyph for the collapsed line. _modeGlyph
+      // lives in index.html and returns ✈ as a safe fallback when the
+      // helper isn't loaded yet (early init paths).
+      var _aeMG = (typeof global._modeGlyph === 'function') ? global._modeGlyph : function(){ return '✈'; };
+      var _aeEntryGlyph = _aeMG(_aeCurEntryMode);
+      var _aeExitGlyph  = _aeMG(_aeCurExitMode);
+      var _aeShowBoth = _aeCurEntryMode && _aeCurExitMode && _aeCurEntryMode !== _aeCurExitMode;
+      sumIcon.textContent = _aeShowBoth ? (_aeEntryGlyph + ' ' + _aeExitGlyph) : _aeEntryGlyph;
+      if (_aeShowBoth) sumIcon.title = 'Arriving by ' + _aeCurEntryMode + ', departing by ' + _aeCurExitMode;
+      var sumText = document.createElement('div');
+      sumText.style.cssText = 'flex:1;min-width:0;';
+      var aeED = (trip.brief && trip.brief.entryDetails) || {};
+      var aeXD = (trip.brief && trip.brief.exitDetails)  || {};
+      function _flightFrag(d) {
+        var bits = [];
+        if (d.carrier) bits.push(d.carrier);
+        if (d.number)  bits.push(d.number);
+        if (d.time && typeof global._fmtTime12h === 'function') bits.push(global._fmtTime12h(d.time));
+        else if (d.time) bits.push(d.time);
+        return bits.length ? ' (' + bits.join(' · ') + ')' : '';
+      }
+      sumText.innerHTML =
+        '<strong style="color:#222;">Arriving</strong> ' + (_aeCurEntry || '?').replace(/</g,'&lt;') + _flightFrag(aeED) +
+        ' · <strong style="color:#222;">Departing</strong> ' + (_aeCurExit || '?').replace(/</g,'&lt;') + _flightFrag(aeXD);
+      var sumChev = document.createElement('span');
+      sumChev.style.cssText = 'flex-shrink:0;color:#888;font-size:12px;';
+      sumChev.textContent = '⌄';
+      sumRow.appendChild(sumIcon);
+      sumRow.appendChild(sumText);
+      sumRow.appendChild(sumChev);
+      sumRow.title = 'Click to edit arrival / departure';
+      sumRow.onclick = function () {
+        trip._ui.arrivalExpanded = true;
+        if (typeof global.drawTripMode === 'function') global.drawTripMode();
+      };
+      container.appendChild(sumRow);
+      return;
+    }
+
     var aeRow = document.createElement("div");
     var tb = global._tb || {};
     var curEntry  = (trip.brief && trip.brief.entry)        || tb.entry  || "";
@@ -2080,6 +2660,95 @@
         if (typeof global.drawTripMode === "function") global.drawTripMode();
       });
     }
+
+    // ───── Round FN.B.2: "Max suggests" propose-and-explain card ─────
+    // Rank gateways by mode + distance to anchor destination (first
+    // destination for arrival, last for departure). Top result is
+    // Max's lead suggestion with a one-line reasoning; the rest become
+    // collapsible alternatives. Click "Use ___" fills the input and
+    // triggers Apply through the existing button (no duplicated
+    // rebuild logic). Card hides when there are no ranked gateways —
+    // happens on first render before the region fetch completes, on
+    // drive mode (no gateway concept), or in regions the LLM returned
+    // no entry points for.
+    var _gwRankFn = (typeof global._rankGatewaysForTrip === "function") ? global._rankGatewaysForTrip : null;
+    var _gwWhyFn  = (typeof global._gatewayWhy === "function") ? global._gatewayWhy : function(){ return ""; };
+    var _gwGlyphFn = (typeof global._modeGlyph === "function") ? global._modeGlyph : function(){ return "✈"; };
+    var _gwEntryModeForCard = (trip.brief && trip.brief.entryMode) || "fly";
+    var _gwExitModeForCard  = (trip.brief && trip.brief.exitMode)  || "fly";
+    var _gwAnchorEntry = (trip.destinations || [])[0] || null;
+    var _gwAnchorExit  = (trip.destinations || [])[(trip.destinations || []).length - 1] || null;
+    var _gwEntryRanked = _gwRankFn ? _gwRankFn(_epPts, _gwEntryModeForCard, _gwAnchorEntry) : [];
+    var _gwExitRanked  = _gwRankFn ? _gwRankFn(_epPts, _gwExitModeForCard,  _gwAnchorExit)  : [];
+
+    function _gwSideHtml(side, ranked, anchor, curValue, mode){
+      if (!ranked.length) return "";
+      var top = ranked[0];
+      var rest = ranked.slice(1, 4); // up to 3 alternatives
+      var curNorm = String(curValue || "").toLowerCase().trim();
+      var isAccepted = curNorm === String(top.name || "").toLowerCase().trim();
+      var glyph = _gwGlyphFn(mode);
+      var anchorName = anchor ? (anchor.place || "your trip") : "your trip";
+      var sideLabel = side === "entry" ? "For your arrival" : "For your departure";
+      var topWhy = _gwWhyFn(top, anchorName);
+      var html = ''
+        + '<div data-gw-section="' + side + '" style="margin-bottom:' + (rest.length ? '10px' : '4px') + ';">'
+        +   '<div style="font-size:10.5px;color:#777;margin-bottom:4px;">' + sideLabel + '</div>'
+        +   '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12.5px;color:#222;">'
+        +     '<strong style="font-size:13px;">' + glyph + ' ' + esc(top.name) + '</strong>'
+        +     '<span style="color:#777;font-size:11px;">' + esc(topWhy) + '</span>';
+      if (isAccepted) {
+        html += '<span style="color:#3a7a4a;font-size:11px;font-weight:600;">✓ accepted</span>';
+      } else {
+        html += '<button type="button" data-gw-action="use" data-gw-side="' + side
+             +  '" data-gw-name="' + esc(top.name)
+             +  '" style="font-size:10.5px;font-weight:600;color:#fff;background:#1a5fa8;border:none;border-radius:4px;padding:3px 9px;cursor:pointer;font-family:inherit;">'
+             +  'Use ' + esc(top.name)
+             +  '</button>';
+      }
+      html += '</div>';
+      if (rest.length) {
+        html += '<div style="margin-top:5px;">'
+             +  '<a href="#" data-gw-action="show-alts" data-gw-side="' + side
+             +  '" style="font-size:10.5px;color:#1a5fa8;text-decoration:none;font-weight:600;">'
+             +  '▾ ' + rest.length + ' other ' + (rest.length === 1 ? 'option' : 'options')
+             +  '</a>'
+             +  '<div data-gw-alts="' + side + '" style="display:none;margin-top:6px;padding-left:8px;border-left:2px solid #d8e2f0;">';
+        for (var i = 0; i < rest.length; i++) {
+          var alt = rest[i];
+          var altWhy = _gwWhyFn(alt, anchorName);
+          var altAccepted = curNorm === String(alt.name || "").toLowerCase().trim();
+          html += '<div style="font-size:11.5px;color:#333;margin-bottom:4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
+               +    '<strong>' + esc(alt.name) + '</strong>'
+               +    '<span style="color:#888;font-size:10.5px;">' + esc(altWhy) + '</span>';
+          if (altAccepted) {
+            html += '<span style="color:#3a7a4a;font-size:10.5px;font-weight:600;">✓ accepted</span>';
+          } else {
+            html += '<button type="button" data-gw-action="use" data-gw-side="' + side
+                 +  '" data-gw-name="' + esc(alt.name)
+                 +  '" style="font-size:10px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #1a5fa8;border-radius:3px;padding:2px 7px;cursor:pointer;font-family:inherit;">Use</button>';
+          }
+          html += '</div>';
+        }
+        html += '</div></div>';
+      }
+      html += '</div>';
+      return html;
+    }
+
+    var _gwEntryCardHtml = _gwSideHtml("entry", _gwEntryRanked, _gwAnchorEntry, curEntry, _gwEntryModeForCard);
+    var _gwExitCardHtml  = _gwSideHtml("exit",  _gwExitRanked,  _gwAnchorExit,  curExit,  _gwExitModeForCard);
+    var _gwCardHtml = "";
+    if (_gwEntryCardHtml || _gwExitCardHtml) {
+      _gwCardHtml = ''
+        + '<div id="tm-max-suggests" style="margin-top:12px;padding:12px 14px;background:#f0f4fa;border:1px solid #c8d8f0;border-radius:7px;">'
+        +   '<div style="font-size:11px;font-weight:700;color:#1a5fa8;letter-spacing:0.05em;text-transform:uppercase;margin-bottom:8px;">✦ Max suggests</div>'
+        +   _gwEntryCardHtml
+        +   _gwExitCardHtml
+        + '</div>';
+    }
+    // ───────────────────────────────────────────────────────────────
+
     aeRow.innerHTML = ''
       + (missing
           ? '<div style="font-size:11px;font-weight:700;color:#a06010;margin-bottom:8px;">⚠ Set arrival and departure to lock in the calendar</div>'
@@ -2096,6 +2765,7 @@
       +   '<button id="tm-arrdep-apply" style="font-size:11px;font-weight:600;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:4px;padding:5px 12px;cursor:pointer;font-family:inherit;">Apply</button>'
       +   '<span id="tm-arrdep-status" style="font-size:10px;color:#888;"></span>'
       + '</div>'
+      + _gwCardHtml
       + '<div style="margin-top:10px;border-top:1px dashed #d8d4c8;padding-top:8px;">'
       +   '<button id="tm-logistics-toggle" type="button" onclick="_toggleLogistics(&#39;trip&#39;)" style="font-size:11px;color:#1a5fa8;background:none;border:none;padding:2px 0;cursor:pointer;font-family:inherit;font-weight:600;">'
       +     (detailsExpanded ? '▿ Hide arrival/departure details' : '▸ Add arrival/departure details')
@@ -2109,6 +2779,27 @@
       +     '<div style="font-size:10px;color:#999;margin-top:8px;">Saved automatically. These don\'t change the trip calendar.</div>'
       +   '</div>'
       + '</div>';
+    // v360.1 (slice 2a): collapse affordance — small "▴ Hide" pill
+    // pinned to the top-right of the expanded panel so the user can
+    // close it back to the summary line once the fields are set.
+    // Only shown when entry+exit are both filled, otherwise the form
+    // is the primary task and collapsing would hide work-in-progress.
+    if (_aeCurEntry && _aeCurExit) {
+      var hideBtn = document.createElement('button');
+      hideBtn.type = 'button';
+      hideBtn.textContent = '▴ Hide';
+      hideBtn.title = 'Collapse arrival/departure to the summary line';
+      hideBtn.style.cssText =
+        'position:absolute;top:8px;right:10px;' +
+        'background:transparent;border:none;color:#888;font:600 10.5px inherit;' +
+        'cursor:pointer;padding:2px 6px;';
+      hideBtn.onclick = function () {
+        trip._ui.arrivalExpanded = false;
+        if (typeof global.drawTripMode === 'function') global.drawTripMode();
+      };
+      aeRow.style.position = 'relative';
+      aeRow.appendChild(hideBtn);
+    }
     container.appendChild(aeRow);
 
     setTimeout(function () {
@@ -2277,7 +2968,511 @@
           this.value = titleCase(this.value);
         });
       });
+      // FN.B.2 / FN.B.3: wire "Use ___" buttons and "▾ alternatives"
+      // toggles on the Max-suggests card. The Use-click does NOT go
+      // through Apply — Apply calls buildFromCandidates which inserts
+      // the entry/exit as a destination in the spine. That's the
+      // right behavior when the user types a destination name, but
+      // wrong for gateway acceptance: KEF is a transit point, not a
+      // place you sleep. So we write trip.brief.entry / tbExit
+      // directly and re-render. The existing destinations array stays
+      // intact; updateMainMap's gateway-resolution layer detects that
+      // brief.entry doesn't name-match any destination and renders a
+      // separate gateway pin with a connector.
+      var _gwUseBtns = aeRow.querySelectorAll('[data-gw-action="use"]');
+      _gwUseBtns.forEach(function(btn){
+        btn.addEventListener('click', function(){
+          var side = btn.getAttribute('data-gw-side');
+          var name = btn.getAttribute('data-gw-name') || "";
+          var inp = (side === "entry") ? entryInp : exitInp;
+          if (inp) { inp.value = name; }
+          if (!trip.brief) trip.brief = {};
+          if (side === "entry") trip.brief.entry = name;
+          else                  trip.brief.tbExit = name;
+          // Mirror to _tb so subsequent operations that read from it
+          // (logistics form, Apply if the user clicks it next) see the
+          // same value.
+          var tbMirror = global._tb || (global._tb = {});
+          if (side === "entry") tbMirror.entry = name;
+          else                  tbMirror.tbExit = name;
+          if (statusEl) {
+            statusEl.style.color = "#3a7a4a";
+            statusEl.style.fontWeight = "600";
+            statusEl.textContent = "✓ " + (side === "entry" ? "Arrival" : "Departure") + " set to " + name;
+            setTimeout(function(){
+              if (statusEl && /^✓ /.test(statusEl.textContent || "")) {
+                statusEl.style.color = ""; statusEl.style.fontWeight = "";
+                statusEl.textContent = "";
+              }
+            }, 4000);
+          }
+          if (typeof global.autoSave === "function") { try { global.autoSave(); } catch (_) {} }
+          // Keep the panel expanded after a Use click so the user can
+          // see the suggestion morph into "✓ accepted" + adjust the
+          // other side without re-clicking the summary row.
+          if (!trip._ui) trip._ui = {};
+          trip._ui.arrivalExpanded = true;
+          if (typeof global.drawTripMode === "function") global.drawTripMode();
+          // drawTripMode redraws the left-panel content; updateMainMap
+          // redraws the right-panel Leaflet map. Both have to fire so
+          // the new gateway pin appears alongside the morph of the
+          // suggests card. (Apply's rebuild path indirectly triggers
+          // updateMainMap via publishTrip; the no-rebuild Use-click
+          // path doesn't, so we call it explicitly.)
+          if (typeof global.updateMainMap === "function") global.updateMainMap();
+        });
+      });
+      var _gwAltLinks = aeRow.querySelectorAll('[data-gw-action="show-alts"]');
+      _gwAltLinks.forEach(function(link){
+        link.addEventListener('click', function(e){
+          e.preventDefault();
+          var side = link.getAttribute('data-gw-side');
+          var altsBox = aeRow.querySelector('[data-gw-alts="' + side + '"]');
+          if (!altsBox) return;
+          var shown = altsBox.style.display !== "none";
+          altsBox.style.display = shown ? "none" : "block";
+          // Swap caret only; preserve the rest of the label text.
+          var txt = link.textContent || "";
+          link.textContent = (shown ? "▾" : "▴") + txt.substring(1);
+        });
+      });
     }, 0);
+  }
+
+  // ── v360.4 (#124 follow-up): Traveler Profile panel ───────
+  // Surfaces the user's ambient Traveler Profile on the trip page
+  // — the "how you generally travel" context that Max applies to
+  // every trip. Reads from MaxDB.prefs for global defaults and
+  // from trip.brief.profileOverrides for per-trip tweaks. Each
+  // edit defaults to per-trip; the "Save to my profile too" link
+  // lets the user push the change up to the global profile.
+  //
+  // First-time vs returning copy switches based on whether ANY
+  // traveler-profile field has been set globally yet:
+  //   first time:  "Before we get into [destination], how do you
+  //                generally travel? Max will remember these
+  //                across all your trips. Fill them out once,
+  //                update them anytime."
+  //   returning:   "Max understands this is how you usually travel.
+  //                Tune them for this trip only, or update your
+  //                profile to change them from now on."
+  //
+  // Renders right under the Arrival/Departure panel. Collapsed by
+  // default once the profile has been set; expanded by default
+  // for first-time users so they see the form on first encounter
+  // inside a trip (per Neal's decision: profile is NOT the first
+  // thing on a brand-new app session, but the first trip should
+  // surface it prominently).
+  function _renderTravelerProfilePanel(trip, container) {
+    if (!container || !trip) return;
+    if (!Array.isArray(trip.destinations) || !trip.destinations.length) return;
+
+    var prefs = (global.MaxDB && global.MaxDB.prefs) ? global.MaxDB.prefs : null;
+    function pget(k){ try { return prefs ? prefs.get(k) : null; } catch(_) { return null; } }
+    function pset(k, v){ try { if (prefs) prefs.set(k, v); } catch(_) {} }
+
+    // Detect first-time: ONLY cross-trip Traveler Profile fields the
+    // user has deliberately shaped. paceHours + sightsPerDay are
+    // seeded by the welcome onboarding on first sign-in, and
+    // transport is a per-trip field (not Traveler Profile), so
+    // none of those count toward "have they shaped a profile."
+    // See matching detection in renderTripStep1Place (index.html).
+    var hasAnyProfileData = !!(
+      pget("mobility") || (pget("accommodation") && String(pget("accommodation")).trim()) ||
+      pget("paceMode") ||
+      (pget("avoidOtherDefaults") && String(pget("avoidOtherDefaults")).trim())
+    );
+    var firstTime = !hasAnyProfileData;
+
+    if (!trip.brief) trip.brief = {};
+    if (!trip.brief.profileOverrides) trip.brief.profileOverrides = {};
+    var po = trip.brief.profileOverrides;
+    if (!trip._ui) trip._ui = {};
+
+    function effective(key, fallback){
+      var v = po[key];
+      if (v !== undefined && v !== null && v !== "") return v;
+      // v360.4: fall through to trip.brief.<key> for fields the
+      // editors write directly (hardlimits, avoidOther, etc.) before
+      // landing on the global default. Without this the panel can
+      // show "Not set" for a field the user already set in the
+      // editor.
+      if (trip.brief && trip.brief[key] != null && trip.brief[key] !== "") {
+        return trip.brief[key];
+      }
+      return fallback;
+    }
+    function isOverride(key){
+      var v = po[key];
+      if (v !== undefined && v !== null && v !== "") return true;
+      // Also treat a trip.brief.<key> value as an override if the
+      // global default differs.
+      if (trip.brief && trip.brief[key] != null && trip.brief[key] !== "") {
+        return true;
+      }
+      return false;
+    }
+
+    var mobLabels = {fit:"Fit and active", moderate:"Moderate", limited:"Limited walking", elderly:"Elderly", mobility:"Mobility aid", other:"Other"};
+    var paceLabels = {loose:"Relaxed", enough:"Balanced", notmuch:"Intense"};
+    var mobOptions = [["fit","Fit and active"],["moderate","Moderate"],["limited","Limited walking"],["elderly","Elderly"],["mobility","Mobility aid"],["other","Other"]];
+    var paceOptions = [["loose","Relaxed"],["enough","Balanced"],["notmuch","Intense"]];
+
+    // Field defs: each declares how to read effective value, display it,
+    // and edit it. `prefKey` is the MaxDB.prefs key (often the same as
+    // the override key; differs for `avoidOther` which writes to
+    // `avoidOtherDefaults` globally).
+    // v360.4: ambient panel field set expanded to match the full
+    // Traveler Profile captured in welcome + editors + Settings.
+    // Fields with custom controls in the editors (soft-avoidance
+    // chips, pace radios) fall through to simpler inline editors
+    // here — the panel is a summary, the editors are where the
+    // rich controls live.
+    var fields = [
+      { key:"mobility", prefKey:"mobility", label:"Mobility of the slowest member", type:"select", options:mobOptions,
+        display:function(v){ return v ? (mobLabels[v] || v) : "Not set"; },
+        defaultGetter:function(){ return (typeof global._defaultMobility === "function") ? global._defaultMobility() : ""; } },
+      // v360.4: usual party. Number-editable inline. The kids checkbox
+      // appends to display ("2 travelers, with kids") but isn't editable
+      // here — toggle that from Settings or the trip editor. Display
+      // matches what welcome captures.
+      { key:"travelersCount", prefKey:"travelersCount", label:"How many travelers?", type:"number", min:1, max:40, step:1,
+        display:function(v){
+          var n = (v != null && v !== "") ? v : "?";
+          var kidsRaw = pget("withKids");
+          var kids = (kidsRaw === true || kidsRaw === "true" || kidsRaw === 1 || kidsRaw === "1");
+          return n + " traveler" + (n === 1 ? "" : "s") + (kids ? ", with kids" : "");
+        },
+        defaultGetter:function(){
+          var v = pget("travelersCount");
+          var n = parseInt(v, 10);
+          return (isFinite(n) && n >= 1 && n <= 40) ? n : 2;
+        } },
+      { key:"accommodation", prefKey:"accommodation", label:"Where you'd like to stay", type:"text", placeholder:"e.g. Small family hotels, en suite required",
+        display:function(v){ return v && String(v).trim() ? String(v) : "Not set"; },
+        defaultGetter:function(){ return (typeof global._defaultAccommodation === "function") ? global._defaultAccommodation() : ""; } },
+      { key:"paceHours", prefKey:"paceHours", label:"Hours of sightseeing per day", type:"number", min:2, max:10, step:1,
+        display:function(v){ return v != null && v !== "" ? (v + (v === 1 ? " hour" : " hours")) : "Not set"; },
+        defaultGetter:function(){ return (typeof global._defaultHoursPerDay === "function") ? global._defaultHoursPerDay() : 6; } },
+      { key:"sightsPerDay", prefKey:"sightsPerDay", label:"Max big sights per day", type:"number", min:1, max:6, step:1,
+        display:function(v){ return v != null && v !== "" ? String(v) : "Not set"; },
+        defaultGetter:function(){ return (typeof global._defaultMaxBigSightsPerDay === "function") ? global._defaultMaxBigSightsPerDay() : 2; } },
+      { key:"paceMode", prefKey:"paceMode", label:"Default pace", type:"select", options:paceOptions,
+        display:function(v){ return v ? (paceLabels[v] || v) : "Not set"; },
+        defaultGetter:function(){ return (typeof global._defaultPaceMode === "function") ? global._defaultPaceMode() : "enough"; } },
+      { key:"dayTripHours", prefKey:"dayTripHours", label:"Max drive time for a day trip", type:"number", min:1, max:6, step:0.5,
+        display:function(v){ return v != null && v !== "" ? (v + (v === 1 ? " hour" : " hours")) : "Not set"; },
+        defaultGetter:function(){ return (typeof global._defaultDayTripHours === "function") ? global._defaultDayTripHours() : 3; } },
+      { key:"hardlimits", prefKey:"hardLimits", label:"Hard limits", type:"text", placeholder:"e.g. No car rentals. Vegetarian.",
+        display:function(v){ return v && String(v).trim() ? String(v) : "Not set"; },
+        defaultGetter:function(){ return (typeof global._defaultHardLimits === "function") ? global._defaultHardLimits() : ""; } },
+      { key:"avoidOther", prefKey:"avoidOtherDefaults", label:"Anything you'd like to avoid?", type:"text", placeholder:"e.g. Crowds, group tours, very early starts",
+        display:function(v){
+          // Combine soft-avoidance chips + free-form into one summary
+          // line. Both come from MaxDB.prefs; chips from avoidDefaults,
+          // free-form from avoidOtherDefaults. Display read-only here;
+          // editing chips happens in the full editor.
+          var chipLabels = {altitude:"high altitude", crowds:"crowds", heat:"extreme heat", cold:"extreme cold", longDrives:"long drives"};
+          var chips = pget("avoidDefaults") || {};
+          var picks = Object.keys(chips).filter(function(k){ return chips[k]; }).map(function(k){ return chipLabels[k] || k; });
+          var other = v && String(v).trim() ? String(v).trim() : "";
+          if (other) picks.push(other);
+          return picks.length ? picks.join(", ") : "Not set";
+        },
+        defaultGetter:function(){ return pget("avoidOtherDefaults") || ""; } },
+      // v360.4: Personal & medical — same five fields the editors
+      // capture under their "Personal & medical" sub-section.
+      { key:"dietary", prefKey:"dietary", label:"Dietary restrictions", type:"text", placeholder:"e.g. vegetarian; tree-nut allergy",
+        display:function(v){ return v && String(v).trim() ? String(v) : "Not set"; },
+        defaultGetter:function(){ return (typeof global._defaultDietary === "function") ? global._defaultDietary() : ""; } },
+      { key:"languages", prefKey:"languages", label:"Languages you speak", type:"text", placeholder:"e.g. English, conversational French",
+        display:function(v){ return v && String(v).trim() ? String(v) : "Not set"; },
+        defaultGetter:function(){ return (typeof global._defaultLanguages === "function") ? global._defaultLanguages() : ""; } },
+      { key:"allergies", prefKey:"allergies", label:"Allergies / medical", type:"text", placeholder:"e.g. peanut, shellfish, penicillin",
+        display:function(v){ return v && String(v).trim() ? String(v) : "Not set"; },
+        defaultGetter:function(){ return (typeof global._defaultAllergies === "function") ? global._defaultAllergies() : ""; } },
+      // v360.4: combined emergency contact row — displays both name
+      // and phone together. Inline editor edits the name; full
+      // editing of both is in Settings / trip editor's Personal &
+      // medical sub-section.
+      { key:"emergencyContactName", prefKey:"emergencyContactName", label:"Emergency contact", type:"text", placeholder:"Name",
+        display:function(v){
+          var name = (v && String(v).trim()) ? String(v).trim() : "";
+          var phoneRaw = pget("emergencyContactPhone");
+          var phone = (phoneRaw && String(phoneRaw).trim()) ? String(phoneRaw).trim() : "";
+          if (!name && !phone) return "Not set";
+          if (name && phone) return name + " · " + phone;
+          return name || phone;
+        },
+        defaultGetter:function(){ return (typeof global._defaultEmergencyName === "function") ? global._defaultEmergencyName() : ""; } },
+      { key:"loyaltyPrograms", prefKey:"loyaltyPrograms", label:"Loyalty programs", type:"text", placeholder:"e.g. United MileagePlus 12345678",
+        display:function(v){
+          if (!v || !String(v).trim()) return "Not set";
+          // Multiple lines — show first line + count of others as summary.
+          var lines = String(v).split(/\n+/).filter(function(l){ return l.trim(); });
+          if (lines.length === 1) return lines[0];
+          return lines[0] + " · +" + (lines.length - 1) + " more";
+        },
+        defaultGetter:function(){ return (typeof global._defaultLoyaltyPrograms === "function") ? global._defaultLoyaltyPrograms() : ""; } }
+    ];
+
+    // Default expanded state: expanded if first-time; otherwise
+    // honor the user's last toggle, defaulting to collapsed.
+    var expanded;
+    if (trip._ui.travelerProfileExpanded === true) expanded = true;
+    else if (trip._ui.travelerProfileExpanded === false) expanded = false;
+    else expanded = firstTime;
+
+    var panel = document.createElement("div");
+    panel.style.cssText = "margin:0 2px 12px;background:#fbf8f1;border:1px solid #e6dec8;border-radius:8px;font-size:12px;color:#3a3528;";
+
+    // Header (always visible)
+    var hdr = document.createElement("div");
+    hdr.style.cssText = "padding:10px 14px;display:flex;align-items:center;gap:10px;cursor:pointer;";
+    var hdrIcon = document.createElement("span");
+    hdrIcon.style.cssText = "flex-shrink:0;color:#7a5b3a;font-size:14px;";
+    hdrIcon.textContent = "🧭";
+    var hdrText = document.createElement("div");
+    hdrText.style.cssText = "flex:1;min-width:0;";
+    var titleStr = firstTime ? "Tell Max how you generally travel" : "Your traveler profile";
+    hdrText.innerHTML = '<strong style="color:#3a2e1a;">' + titleStr + '</strong>';
+    var hdrChev = document.createElement("span");
+    hdrChev.style.cssText = "flex-shrink:0;color:#7a5b3a;font-size:12px;";
+    hdrChev.textContent = expanded ? "⌃" : "⌄";
+    hdr.appendChild(hdrIcon);
+    hdr.appendChild(hdrText);
+    hdr.appendChild(hdrChev);
+    hdr.onclick = function(){
+      trip._ui.travelerProfileExpanded = !expanded;
+      if (typeof global.drawTripMode === "function") global.drawTripMode();
+    };
+
+    // When collapsed, render a one-line summary of the most salient
+    // fields next to the chevron so the user can see what's set
+    // without expanding.
+    if (!expanded) {
+      var sumBits = [];
+      var mobV = effective("mobility", fields[0].defaultGetter());
+      if (mobV) sumBits.push(mobLabels[mobV] || mobV);
+      var paceV = effective("paceMode", fields[1].defaultGetter());
+      if (paceV) sumBits.push(paceLabels[paceV] || paceV);
+      var hpdV = effective("paceHours", fields[2].defaultGetter());
+      if (hpdV != null) sumBits.push(hpdV + " hrs/day");
+      var spdV = effective("sightsPerDay", fields[3].defaultGetter());
+      if (spdV != null) sumBits.push(spdV + " big sights/day");
+      if (sumBits.length) {
+        hdrText.innerHTML += ' <span style="color:#7a5b3a;font-weight:400;"> · ' + sumBits.join(" · ").replace(/</g, "&lt;") + '</span>';
+      }
+    }
+    panel.appendChild(hdr);
+
+    if (!expanded) {
+      container.appendChild(panel);
+      return;
+    }
+
+    // Body — visible when expanded.
+    var body = document.createElement("div");
+    body.style.cssText = "padding:0 14px 12px;";
+
+    // Hint copy — first-time or returning. v360.4: context-agnostic
+    // first-time copy works for new-trip and edit-existing-trip flows.
+    var hint = document.createElement("div");
+    hint.style.cssText = "margin:0 0 12px;padding:10px 12px;background:#fff;border:1px dashed #d6c8a8;border-radius:6px;font-size:11.5px;line-height:1.55;color:#5a4a2a;";
+    if (firstTime) {
+      hint.innerHTML = "How do you generally travel? Max will remember these across all your trips. " +
+        "Fill them out once, update them anytime.";
+    } else {
+      hint.innerHTML = "Max understands this is how you usually travel. " +
+        "Tune them for this trip only, or update your profile to change them from now on.";
+    }
+    body.appendChild(hint);
+
+    // Field list.
+    var list = document.createElement("div");
+    list.style.cssText = "display:grid;grid-template-columns:1fr;gap:0;";
+
+    fields.forEach(function(f, fi){
+      var row = document.createElement("div");
+      row.style.cssText = "display:grid;grid-template-columns:180px 1fr;gap:10px;align-items:center;padding:7px 6px;border-bottom:1px " + (fi === fields.length - 1 ? "solid transparent" : "dashed #e6dec8") + ";";
+
+      var labelEl = document.createElement("div");
+      labelEl.style.cssText = "font-size:11.5px;font-weight:600;color:#3a2e1a;";
+      labelEl.textContent = f.label;
+      row.appendChild(labelEl);
+
+      var valWrap = document.createElement("div");
+      valWrap.style.cssText = "display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0;";
+
+      var curVal = effective(f.key, f.defaultGetter());
+      var overridden = isOverride(f.key);
+
+      var valBtn = document.createElement("button");
+      valBtn.type = "button";
+      valBtn.style.cssText = "background:transparent;border:none;padding:3px 0;text-align:left;font-family:inherit;font-size:12px;color:" +
+        (overridden ? "#6a4f1a" : "#222") + ";" +
+        "cursor:pointer;font-weight:" + (overridden ? "600" : "500") + ";font-style:" + (overridden ? "italic" : "normal") + ";" +
+        "text-decoration:underline dotted;text-underline-offset:3px;";
+      valBtn.textContent = f.display(curVal);
+      valBtn.title = "Click to edit";
+      valWrap.appendChild(valBtn);
+
+      if (overridden) {
+        var ovBadge = document.createElement("span");
+        ovBadge.style.cssText = "font-size:10px;color:#7a5b3a;background:#f1e6cf;padding:1px 6px;border-radius:9px;";
+        ovBadge.textContent = "this trip only";
+        valWrap.appendChild(ovBadge);
+        var resetLink = document.createElement("a");
+        resetLink.href = "#";
+        resetLink.style.cssText = "font-size:10.5px;color:#7a5b3a;text-decoration:none;";
+        resetLink.textContent = "↺ use profile default";
+        resetLink.onclick = function(e){
+          e.preventDefault();
+          delete po[f.key];
+          if (typeof global.autoSave === "function") global.autoSave({ reason: "profileOverrideReset" });
+          if (typeof global.drawTripMode === "function") global.drawTripMode();
+        };
+        valWrap.appendChild(resetLink);
+      }
+
+      row.appendChild(valWrap);
+
+      // Inline editor (hidden until valBtn clicked).
+      var editorWrap = document.createElement("div");
+      editorWrap.style.cssText = "grid-column:1 / -1;display:none;margin-top:8px;padding:10px 12px;background:#fff;border:1px solid #d6c8a8;border-radius:6px;";
+
+      valBtn.onclick = function(){
+        if (editorWrap.style.display === "block") {
+          editorWrap.style.display = "none";
+          return;
+        }
+        editorWrap.innerHTML = "";
+        editorWrap.style.display = "block";
+
+        var inputEl;
+        var initVal = effective(f.key, f.defaultGetter());
+        if (f.type === "select") {
+          inputEl = document.createElement("select");
+          inputEl.style.cssText = "font-size:12px;padding:6px 8px;border:1px solid #ccc;border-radius:5px;font-family:inherit;width:100%;box-sizing:border-box;";
+          var blank = document.createElement("option");
+          blank.value = ""; blank.textContent = "— select —";
+          inputEl.appendChild(blank);
+          f.options.forEach(function(opt){
+            var o = document.createElement("option");
+            o.value = opt[0]; o.textContent = opt[1];
+            if (opt[0] === initVal) o.selected = true;
+            inputEl.appendChild(o);
+          });
+        } else if (f.type === "number") {
+          inputEl = document.createElement("input");
+          inputEl.type = "number";
+          if (f.min != null) inputEl.min = f.min;
+          if (f.max != null) inputEl.max = f.max;
+          if (f.step != null) inputEl.step = f.step;
+          inputEl.value = (initVal != null && initVal !== "") ? String(initVal) : "";
+          inputEl.style.cssText = "font-size:12px;padding:6px 8px;border:1px solid #ccc;border-radius:5px;font-family:inherit;width:120px;box-sizing:border-box;";
+        } else {
+          inputEl = document.createElement("input");
+          inputEl.type = "text";
+          inputEl.value = (initVal != null) ? String(initVal) : "";
+          if (f.placeholder) inputEl.placeholder = f.placeholder;
+          inputEl.style.cssText = "font-size:12px;padding:6px 8px;border:1px solid #ccc;border-radius:5px;font-family:inherit;width:100%;box-sizing:border-box;";
+        }
+        editorWrap.appendChild(inputEl);
+
+        function _commit(saveToProfile){
+          var raw = inputEl.value;
+          var v;
+          if (f.type === "number") {
+            v = parseFloat(raw);
+            if (!isFinite(v)) v = null;
+            if (v != null && f.min != null && v < f.min) v = f.min;
+            if (v != null && f.max != null && v > f.max) v = f.max;
+          } else if (f.type === "select") {
+            v = raw || null;
+          } else {
+            v = (raw == null ? "" : String(raw).trim()) || null;
+          }
+          // Decide: per-trip override (always), and optionally global.
+          if (saveToProfile) {
+            // Push to global profile AND clear the per-trip override
+            // (since global is now what the user wants everywhere).
+            if (v == null || v === "") {
+              pset(f.prefKey, "");
+            } else {
+              pset(f.prefKey, v);
+            }
+            delete po[f.key];
+          } else {
+            // Per-trip only.
+            if (v == null || v === "") {
+              delete po[f.key];
+            } else {
+              po[f.key] = v;
+            }
+          }
+          if (typeof global.autoSave === "function") global.autoSave({ reason: "profileEdit" });
+          if (typeof global.drawTripMode === "function") global.drawTripMode();
+        }
+
+        var btnRow = document.createElement("div");
+        btnRow.style.cssText = "display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center;";
+
+        var saveTripBtn = document.createElement("button");
+        saveTripBtn.type = "button";
+        saveTripBtn.style.cssText = "font-size:11.5px;font-weight:600;padding:6px 12px;border:1px solid #1a5fa8;background:#1a5fa8;color:#fff;border-radius:5px;cursor:pointer;font-family:inherit;";
+        saveTripBtn.textContent = "Save for this trip";
+        saveTripBtn.onclick = function(){ _commit(false); };
+        btnRow.appendChild(saveTripBtn);
+
+        var saveProfileBtn = document.createElement("button");
+        saveProfileBtn.type = "button";
+        saveProfileBtn.style.cssText = "font-size:11.5px;font-weight:500;padding:6px 12px;border:1px solid #d6c8a8;background:#fff;color:#5a4a2a;border-radius:5px;cursor:pointer;font-family:inherit;";
+        saveProfileBtn.textContent = "Save to my profile too";
+        saveProfileBtn.title = "Update your profile so this becomes the new default for future trips too.";
+        saveProfileBtn.onclick = function(){ _commit(true); };
+        btnRow.appendChild(saveProfileBtn);
+
+        var cancelBtn = document.createElement("button");
+        cancelBtn.type = "button";
+        cancelBtn.style.cssText = "font-size:11.5px;font-weight:500;padding:6px 10px;background:transparent;border:none;color:#888;cursor:pointer;font-family:inherit;margin-left:auto;";
+        cancelBtn.textContent = "Cancel";
+        cancelBtn.onclick = function(){
+          editorWrap.style.display = "none";
+          editorWrap.innerHTML = "";
+        };
+        btnRow.appendChild(cancelBtn);
+
+        editorWrap.appendChild(btnRow);
+
+        // Focus the input.
+        setTimeout(function(){ try { inputEl.focus(); if (typeof inputEl.select === "function") inputEl.select(); } catch(_) {} }, 0);
+      };
+
+      row.appendChild(editorWrap);
+      list.appendChild(row);
+    });
+
+    body.appendChild(list);
+
+    // Footer link: open the full Profile panel for everything not on
+    // this short list (dietary, languages, emergency contact, units, etc.).
+    var footer = document.createElement("div");
+    footer.style.cssText = "margin-top:10px;padding-top:10px;border-top:1px dashed #e6dec8;display:flex;justify-content:flex-end;";
+    var openFull = document.createElement("a");
+    openFull.href = "#";
+    openFull.style.cssText = "font-size:11px;color:#1a5fa8;text-decoration:none;font-weight:600;";
+    openFull.textContent = "Open full profile →";
+    openFull.title = "Edit all profile fields including dietary, languages, units, emergency contact, etc.";
+    openFull.onclick = function(e){
+      e.preventDefault();
+      if (typeof global.showSettingsPanel === "function") global.showSettingsPanel();
+    };
+    footer.appendChild(openFull);
+    body.appendChild(footer);
+
+    panel.appendChild(body);
+    container.appendChild(panel);
   }
 
   // ── TM.3b (v318): destinations-list header section ────────
@@ -2331,6 +3526,29 @@
       ? '<strong style="color:#111;">' + totalDays + ' days</strong> · ' + totalNights + ' nights · ' + dests.length + ' destination' + (dests.length !== 1 ? 's' : '')
       : '<span style="color:#aaa;font-style:italic;">No destinations yet.</span>';
     listHdr.appendChild(totalLine);
+
+    // v360.2: Reverse trip order — restored as a first-class affordance
+    // on the destinations row. Was moved to the ⋯ More disclosure in an
+    // earlier slice but the user couldn't reliably find it there.
+    // Only shows when there are 3+ destinations (with 2, "reverse" is
+    // just a swap of arrival↔departure; the constraint-editor handles
+    // that more clearly).
+    if (dests.length >= 3) {
+      var reverseBtn = document.createElement("button");
+      reverseBtn.type = "button";
+      reverseBtn.style.cssText =
+        "background:#fff;border:1px solid #d8d4c8;color:#555;font-family:inherit;" +
+        "font-size:11px;font-weight:600;padding:4px 10px;border-radius:5px;cursor:pointer;" +
+        "margin-left:auto;flex-shrink:0;";
+      reverseBtn.innerHTML = "↺ Reverse trip order";
+      reverseBtn.title = "Flip the order of destinations on this trip — what was first becomes last.";
+      reverseBtn.onmouseover = function () { reverseBtn.style.background = "#faf8f1"; };
+      reverseBtn.onmouseout  = function () { reverseBtn.style.background = "#fff"; };
+      reverseBtn.onclick = function () {
+        if (typeof global.reverseTripOrder === 'function') global.reverseTripOrder();
+      };
+      listHdr.appendChild(reverseBtn);
+    }
 
     listSec.appendChild(listHdr);
 
@@ -2573,6 +3791,45 @@
     dateLineWrap.appendChild(downBtn);
     bodyDiv.appendChild(dateLineWrap);
 
+    // v360.3: per-card empty-day indicator. A "day" inside a
+    // destination is empty when it has no scheduled items (neither
+    // legacy day.items[] nor modern day.planItems[]). The aggregate
+    // trip-wide panel above the destinations list rolls these up;
+    // showing the count on each card tells the user WHICH stops
+    // still need shaping. Only renders when count > 0 and the dest
+    // has at least one night (a 0-night "see" stop has no day
+    // structure to fill).
+    if ((dest.nights || 0) > 0 && Array.isArray(dest.days) && dest.days.length) {
+      var _emptyDays = 0;
+      dest.days.forEach(function (day) {
+        if (!day) return;
+        var hasLegacy = Array.isArray(day.items) && day.items.length > 0;
+        var hasPlan   = Array.isArray(day.planItems) && day.planItems.some(function (pi) {
+          // Route refs alone don't count as "scheduled content" — the
+          // route is auto-derived from adjacency. Stops, sights,
+          // restaurants, etc. do count.
+          return pi && pi.type !== "route";
+        });
+        if (!hasLegacy && !hasPlan) _emptyDays++;
+      });
+      if (_emptyDays > 0) {
+        var emptyChip = document.createElement("div");
+        emptyChip.style.cssText =
+          "margin:4px 0 2px;font-size:10.5px;color:#8a7220;background:#fbf4dd;" +
+          "border:1px solid #ead9a8;border-radius:10px;padding:2px 8px;" +
+          "display:inline-block;letter-spacing:.01em;cursor:pointer;";
+        emptyChip.textContent = "🔧 " + _emptyDays + " empty day" + (_emptyDays === 1 ? "" : "s");
+        emptyChip.title = "Tap to open this destination and start filling these days.";
+        (function (did) {
+          emptyChip.onclick = function (e) {
+            e.stopPropagation();
+            if (typeof global.selectDest === "function") global.selectDest(did);
+          };
+        })(dest.id);
+        bodyDiv.appendChild(emptyChip);
+      }
+    }
+
     // v353.6: weather strip — quick forecast (within 16 days) or
     // climate normals (further out) so the user can see at a
     // glance what the trip will be like at this destination on
@@ -2667,7 +3924,13 @@
               if (typeof global.ungroupDayTripByRouteStop === "function") {
                 global.ungroupDayTripByRouteStop(hubDest, routeRef, stopRef);
               } else {
+                // v360.3 (#104): make this visible. The chip looks
+                // tappable, the user taps it, nothing happens, no
+                // signal anything went wrong. At minimum tell them.
                 console.warn("[Max] ungroupDayTripByRouteStop not defined; chip click is a no-op");
+                if (typeof global.showSaveStatus === "function") {
+                  global.showSaveStatus("⚠ Day-trip action unavailable in this build — please reload.", 5000);
+                }
               }
             };
           })(dest, route, stop);
@@ -2861,6 +4124,10 @@
     if(idx<trip.destinations.length-1){
       var next=trip.destinations[idx+1];
       var chip2=document.createElement("div"); chip2.className="route-chip";
+      // v360.3 (#104): data-attrs so _flashJustMovedTarget can address
+      // a specific leg's chip after an overnight↔wayside conversion.
+      chip2.setAttribute("data-from-dest", dest.id);
+      chip2.setAttribute("data-to-dest",   next.id);
       var dot=document.createElement("div"); dot.className="route-dot";
       var inner=document.createElement("div"); inner.className="route-chip-inner";
       var routing=(typeof global.getRouting === "function") ? global.getRouting(dest.place,next.place) : null;
@@ -2915,6 +4182,63 @@
       row.appendChild(rtBtn);
 
       inner.appendChild(row);
+
+      // v360.3 (#119): per-leg honesty surface. Sits as a second line
+      // inside the route chip — drive-time estimate + stop count.
+      // Info-only by design (the "Max suggests, user decides" principle):
+      // no warning, no nudge, no "doesn't fit" framing. The user reads
+      // the number and decides whether 8h plus 6 stops is a real day
+      // for their trip.
+      //
+      // Drive time = haversine(from, to) ÷ 60 km/h. Crude but honest;
+      // pinned with "~" so users don't read it as turn-by-turn precision.
+      // Stops = waysides currently on the route between these two dests.
+      var _hav = (global.MaxEngineTrip && typeof global.MaxEngineTrip.haversineKm === "function")
+        ? global.MaxEngineTrip.haversineKm : null;
+      var _fromLL = (typeof dest.lat === "number" && typeof dest.lng === "number") ? [dest.lat, dest.lng] : null;
+      var _toLL   = (typeof next.lat === "number" && typeof next.lng === "number") ? [next.lat, next.lng] : null;
+      var _legKm  = (_hav && _fromLL && _toLL) ? _hav(_fromLL[0], _fromLL[1], _toLL[0], _toLL[1]) : null;
+      var _legHrs = (typeof _legKm === "number" && isFinite(_legKm)) ? (_legKm / 60) : null;
+      function _fmtHrs(h) {
+        if (typeof h !== "number" || !isFinite(h)) return null;
+        var totalMin = Math.round(h * 60);
+        var hh = Math.floor(totalMin / 60);
+        var mm = totalMin % 60;
+        // Round mm to nearest 5 to read as "ballpark" not "to the minute".
+        mm = Math.round(mm / 5) * 5;
+        if (mm === 60) { hh += 1; mm = 0; }
+        if (hh === 0) return mm + "m";
+        if (mm === 0) return hh + "h";
+        return hh + "h" + (mm < 10 ? "0" + mm : mm);
+      }
+      function _countLegWaysides() {
+        var routes = trip && Array.isArray(trip.routes) ? trip.routes : [];
+        for (var i = 0; i < routes.length; i++) {
+          var r = routes[i];
+          if (!r) continue;
+          var sub = (global.MaxMigration && global.MaxMigration.routeSubKind)
+            ? global.MaxMigration.routeSubKind(r)
+            : (r.subKind || (r.kind && r.kind !== "route" ? r.kind : null));
+          if (sub !== "transit") continue;
+          if (r.fromDestId === dest.id && r.toDestId === next.id) {
+            return (r.planItems || []).filter(function(pi){ return pi && pi.type === "stop"; }).length;
+          }
+        }
+        return 0;
+      }
+      var honestyRow = document.createElement("div");
+      honestyRow.style.cssText = "display:flex;align-items:center;gap:6px;margin-top:4px;font-size:10.5px;color:#888;";
+      var parts = [];
+      var _hrsLbl = _fmtHrs(_legHrs);
+      if (_hrsLbl) parts.push("~" + _hrsLbl + " drive");
+      var _waysideCount = _countLegWaysides();
+      if (_waysideCount > 0) {
+        parts.push(_waysideCount + " stop" + (_waysideCount === 1 ? "" : "s") + " along the way");
+      }
+      if (parts.length) {
+        honestyRow.textContent = parts.join(" · ");
+        inner.appendChild(honestyRow);
+      }
 
       // Click anywhere: open Routing tab
       (function(did){inner.onclick=function(){
@@ -3618,7 +4942,11 @@
         chip.textContent = "📍 " + placeName
           + (distKm ? " · " + (typeof global._fmtDistance === "function" ? global._fmtDistance(distKm) : distKm + "km") : "")
           + dayOf;
-        chip.title = "Click to schedule on a specific day or convert " + placeName + " back to an overnight stop";
+        // v360.3 (#125): expanded tooltip. The "convert to overnight"
+        // path was already here; spelling it out signals to the user
+        // that they can swap which city they're based in. "Stay
+        // outside a big city" hint pulls the trade-off forward.
+        chip.title = "Click to schedule on a specific day, or convert " + placeName + " into a hub of its own — useful if you'd rather stay outside a big city.";
         chip.onmouseover = function(){ chip.style.background = "#ede0f4"; };
         chip.onmouseout = function(){ chip.style.background = "#fff"; };
         (function(hubDest, routeRef, stopRef, chipEl){
@@ -3630,7 +4958,11 @@
               // Fallback if menu helper isn't loaded yet.
               global.ungroupDayTripByRouteStop(hubDest, routeRef, stopRef);
             } else {
+              // v360.3 (#104): make the no-op visible.
               console.warn("[Max] no day-trip menu/ungroup helper defined");
+              if (typeof global.showSaveStatus === "function") {
+                global.showSaveStatus("⚠ Day-trip action unavailable in this build — please reload.", 5000);
+              }
             }
           };
         })(dest, route, stop, chip);
@@ -4893,16 +6225,25 @@
     try { dismissed = localStorage.getItem('max-waysides-banner-dismissed-' + (global._currentTripId || '')) === '1'; } catch (_) {}
     if (dismissed) return;
 
+    // v360.1: banner palette aligned with the Geo affordance banner
+    // (same blue tint, same border colour) since both are sibling
+    // coaching surfaces — explain a concept, allow dismissal, sit at
+    // the same depth in the layout. Earlier they were arbitrarily
+    // different colours (purple here, blue there), which made them
+    // read as unrelated when they're really the same role.
+    //
+    // The "✨ Generate" button stays purple — that's Max's brand
+    // signal for AI/generative actions, and it's where the meaning
+    // belongs. A standalone ✨ icon used to sit at the left of the
+    // banner alongside the button; it duplicated the button's
+    // signal and didn't carry information, so it's gone.
     var banner = document.createElement("div");
-    banner.style.cssText = "margin:14px 2px 10px;padding:12px 14px;background:#f3f0fc;border:1px solid #d8d0ec;border-radius:8px;display:flex;gap:12px;align-items:center;";
-    var icon = document.createElement("div");
-    icon.style.cssText = "font-size:22px;flex-shrink:0;";
-    icon.textContent = "✨";
+    banner.style.cssText = "margin:14px 2px 10px;padding:12px 14px;background:#eaf3fb;border:1px solid #c8dff8;border-radius:8px;display:flex;gap:12px;align-items:center;";
     var body = document.createElement("div");
-    body.style.cssText = "flex:1;font-size:12px;color:#444;line-height:1.5;";
+    body.style.cssText = "flex:1;font-size:12px;color:#1a3f6f;line-height:1.5;";
     body.innerHTML =
-      '<div style="font-weight:700;color:#5b3f8f;margin-bottom:2px;">Add waysides — stops along the way</div>' +
-      '<div style="font-size:11.5px;color:#666;">Max will suggest 3-6 worthwhile stops on each drive between destinations — waterfalls, viewpoints, lunch towns. Auto-generates from your route; you can remove anything that doesn\'t appeal.</div>';
+      '<div style="font-weight:700;color:#1a5fa8;margin-bottom:2px;">Find waysides — stops along the way</div>' +
+      '<div style="font-size:11.5px;color:#3a5572;">Max will suggest 3–6 worthwhile stops on each drive between hubs — waterfalls, viewpoints, lunch towns. <strong>Cuts a night · breaks up the drive.</strong></div>';
     var btn = document.createElement("button");
     btn.type = "button";
     btn.textContent = "✨ Generate";
@@ -4972,10 +6313,236 @@
       banner.parentNode.removeChild(banner);
     };
 
-    banner.appendChild(icon);
     banner.appendChild(body);
     banner.appendChild(btn);
     banner.appendChild(dismissBtn);
+    container.appendChild(banner);
+  }
+
+  // v360.3 (#122): symmetric counterpart to _renderWaysidePromptBanner —
+  // the "Find day trips" action panel. Same visual shape, same
+  // generate→commit→re-render flow, but operates on hubs (overnight
+  // destinations) rather than transit legs. Renders only when there's
+  // at least one hub without a day-trip route yet.
+  //
+  // Both panels carry a brief one-line hint about why the user might
+  // want this:
+  //   • Day trips: "Less moving · maybe cheaper hotels."
+  //   • Waysides:  "Cuts a night · breaks up the drive."
+  // The long educational prose (formerly the geo-affordance banner)
+  // moves to the over-budget context where it's actionable.
+  function _renderDayTripPromptBanner(trip, container) {
+    if (!trip || !container) return;
+    var lastResult = global._maxLastDayTripResult;
+    if (lastResult && lastResult.tripId === (global._currentTripId || '')) {
+      _renderDayTripResultBanner(trip, container, lastResult);
+    }
+
+    // Hubs = destinations with ≥1 night. A hub already has day-trips
+    // if it has a dayTrip route with at least one stop.
+    var hubs = (trip.destinations || []).filter(function (d) {
+      return d && (d.nights || 0) >= 1;
+    });
+    if (!hubs.length) return;
+    var hubsWithoutDayTrips = hubs.filter(function (hub) {
+      var route = (trip.routes || []).find(function (r) {
+        if (!r) return false;
+        var sub = (typeof global.MaxMigration !== 'undefined' && global.MaxMigration.routeSubKind)
+          ? global.MaxMigration.routeSubKind(r)
+          : (r.subKind || (r.kind && r.kind !== 'route' ? r.kind : null));
+        return sub === 'dayTrip' && r.fromDestId === hub.id;
+      });
+      if (!route) return true;
+      return !(Array.isArray(route.planItems) && route.planItems.some(function (pi) {
+        return pi && pi.type === 'stop';
+      }));
+    });
+    if (!hubsWithoutDayTrips.length) return;
+    var dismissed = false;
+    try { dismissed = localStorage.getItem('max-daytrips-banner-dismissed-' + (global._currentTripId || '')) === '1'; } catch (_) {}
+    if (dismissed) return;
+
+    var banner = document.createElement("div");
+    banner.style.cssText = "margin:14px 2px 10px;padding:12px 14px;background:#eaf3fb;border:1px solid #c8dff8;border-radius:8px;display:flex;gap:12px;align-items:center;";
+    var body = document.createElement("div");
+    body.style.cssText = "flex:1;font-size:12px;color:#1a3f6f;line-height:1.5;";
+    body.innerHTML =
+      '<div style="font-weight:700;color:#1a5fa8;margin-bottom:2px;">Find day trips — visit while based at a hub</div>' +
+      '<div style="font-size:11.5px;color:#3a5572;">Max will suggest 3–6 day-trip candidates near each overnight hub — places worth a half- or full-day from your base. <strong>Less moving · maybe cheaper hotels and a slower pace staying outside a big city.</strong></div>';
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "✨ Generate";
+    btn.style.cssText = "padding:7px 14px;font-size:12px;font-weight:700;background:#5b3f8f;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;flex-shrink:0;";
+    var dismissBtn = document.createElement("button");
+    dismissBtn.type = "button";
+    dismissBtn.textContent = "✕";
+    dismissBtn.title = "Hide this banner";
+    dismissBtn.style.cssText = "background:transparent;border:none;color:#888;font-size:16px;cursor:pointer;padding:0 4px;flex-shrink:0;line-height:1;";
+
+    btn.onclick = async function () {
+      if (typeof global.generateDayTripsForTrip !== "function") {
+        if (typeof global.maxAlert === "function") global.maxAlert("Day-trip generator isn't loaded.");
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = "Generating…";
+      try {
+        var result = await global.generateDayTripsForTrip(trip, {
+          onProgress: function (info) {
+            if (!info) return;
+            if (info.phase === 'start') {
+              if (info.total) btn.textContent = "Generating 0 / " + info.total + "…";
+              return;
+            }
+            if (info.phase === 'hub') {
+              btn.textContent = "Generating " + info.done + " / " + info.total + "…";
+            }
+          },
+        });
+        if (typeof global.autoSave === "function") global.autoSave();
+        global._maxLastDayTripResult = {
+          tripId: global._currentTripId || '',
+          addedItems:  result.addedItems  || 0,
+          addedHubs:   result.addedHubs   || 0,
+          conversions: result.conversions || 0,
+          skipped:     result.skipped     || 0,
+          at: Date.now(),
+        };
+        if (typeof global.drawTripMode === "function") global.drawTripMode();
+      } catch (e) {
+        console.warn('[daytrips] generate failed:', e);
+        btn.disabled = false;
+        btn.textContent = "✨ Generate";
+        if (typeof global.maxAlert === "function") global.maxAlert("Day-trip generation failed. " + ((e && e.message) || ""));
+      }
+    };
+    dismissBtn.onclick = function () {
+      try { localStorage.setItem('max-daytrips-banner-dismissed-' + (global._currentTripId || ''), '1'); } catch (_) {}
+      banner.parentNode.removeChild(banner);
+    };
+
+    banner.appendChild(body);
+    banner.appendChild(btn);
+    banner.appendChild(dismissBtn);
+    container.appendChild(banner);
+  }
+
+  // Result banner. Two parts:
+  //   1. Summary row (green pill) — N new candidates + X conversion
+  //      offers surfaced.
+  //   2. "Could become day trips" subsection — lists each conversion
+  //      offer with [Convert to day trip] / [Keep as overnight]
+  //      buttons. The convert path dispatches through the existing
+  //      _applyStopRoleChange("overnight"→"dayTrip") which already
+  //      handles the trip-data side of the conversion.
+  function _renderDayTripResultBanner(trip, container, result) {
+    if (!result) return;
+    var n = result.addedItems  || 0;
+    var h = result.addedHubs   || 0;
+    var c = result.conversions || 0;
+    if (!n && !c) return;
+
+    var banner = document.createElement("div");
+    banner.style.cssText = "margin:14px 2px 8px;padding:10px 14px;background:#ecf6ec;border:1px solid #b8dfc9;border-radius:8px;font-size:12px;color:#1e4a22;display:flex;flex-direction:column;gap:8px;";
+
+    // Summary row.
+    var summaryRow = document.createElement("div");
+    summaryRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:10px;";
+    var summaryBits = [];
+    if (n > 0) {
+      summaryBits.push('<strong>Added ' + n + ' day-trip candidate' + (n === 1 ? '' : 's') + '</strong> across ' + h + ' hub' + (h === 1 ? '' : 's'));
+    }
+    if (c > 0) {
+      summaryBits.push('<strong>' + c + ' existing overnight' + (c === 1 ? '' : 's') + '</strong> could become day-trip' + (c === 1 ? '' : 's') + ' — see below');
+    }
+    summaryRow.innerHTML = '<div>✓ ' + summaryBits.join(' · ') + '.</div>';
+    var clear = document.createElement("button");
+    clear.type = "button";
+    clear.textContent = "✕";
+    clear.style.cssText = "background:transparent;border:none;color:#3a7a4e;font-size:14px;cursor:pointer;padding:0 4px;line-height:1;flex-shrink:0;";
+    clear.onclick = function () {
+      global._maxLastDayTripResult = null;
+      if (Array.isArray(trip._daytripConversions)) trip._daytripConversions = [];
+      if (banner.parentNode) banner.parentNode.removeChild(banner);
+    };
+    summaryRow.appendChild(clear);
+    banner.appendChild(summaryRow);
+
+    // Conversion subsection — only when conversion offers exist on
+    // this trip. We re-read trip._daytripConversions (rather than
+    // relying on result.conversions count) because the trip object
+    // is the source of truth and might have older offers too.
+    var offers = Array.isArray(trip._daytripConversions) ? trip._daytripConversions : [];
+    if (offers.length) {
+      var section = document.createElement("div");
+      section.style.cssText = "border-top:1px solid #c8e4ce;padding-top:8px;display:flex;flex-direction:column;gap:6px;";
+      var hdr = document.createElement("div");
+      hdr.style.cssText = "font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#2a7a4e;";
+      hdr.textContent = "Could become day trips";
+      section.appendChild(hdr);
+      offers.forEach(function (offer) {
+        var row = document.createElement("div");
+        row.style.cssText = "display:flex;align-items:center;gap:10px;padding:6px 0;font-size:11.5px;color:#1e4a22;";
+        var label = document.createElement("div");
+        label.style.cssText = "flex:1;min-width:0;";
+        label.innerHTML =
+          '<strong>' + (offer.destName || '?') + '</strong> ' +
+          '<span style="color:#3a7a4e;">could be a day-trip from <strong>' + (offer.hubName || '?') + '</strong></span>' +
+          '<span style="color:#5a8a6e;"> · ~' + offer.distKm + ' km' +
+          (offer.why ? ' · ' + String(offer.why).slice(0, 90) + (offer.why.length > 90 ? '…' : '') : '') + '</span>';
+        var convertBtn = document.createElement("button");
+        convertBtn.type = "button";
+        convertBtn.textContent = "Convert";
+        convertBtn.style.cssText = "padding:5px 10px;font-size:11px;font-weight:600;background:#2a7a4e;color:#fff;border:none;border-radius:4px;cursor:pointer;font-family:inherit;";
+        convertBtn.title = "Convert this overnight to a day-trip from " + (offer.hubName || 'the hub');
+        var keepBtn = document.createElement("button");
+        keepBtn.type = "button";
+        keepBtn.textContent = "Keep";
+        keepBtn.style.cssText = "padding:5px 10px;font-size:11px;font-weight:500;background:#fff;color:#3a7a4e;border:1px solid #b8dfc9;border-radius:4px;cursor:pointer;font-family:inherit;";
+        keepBtn.title = "Keep as overnight";
+        (function (offerRef) {
+          convertBtn.onclick = function () {
+            // Dispatch through the existing role-popover dispatcher.
+            // overnight → dayTrip with the chosen hub as the target.
+            if (typeof global._applyStopRoleChange !== "function") {
+              if (typeof global.maxAlert === "function") global.maxAlert("Conversion isn't available.");
+              return;
+            }
+            global._applyStopRoleChange(
+              { kind: "destination", destId: offerRef.destId },
+              "overnight",
+              "dayTrip",
+              { hubId: offerRef.hubId }
+            );
+            // Remove this offer from the list so it doesn't re-show.
+            if (Array.isArray(trip._daytripConversions)) {
+              trip._daytripConversions = trip._daytripConversions.filter(function (x) {
+                return !(x && x.destId === offerRef.destId && x.hubId === offerRef.hubId);
+              });
+            }
+            if (typeof global.autoSave === "function") global.autoSave();
+            // Re-render — drawTripMode rebuilds the banner with the
+            // updated offer list, the conversion's flash highlight
+            // lands on the hub card via the dispatcher's flash hook.
+            if (typeof global.drawTripMode === "function") global.drawTripMode();
+          };
+          keepBtn.onclick = function () {
+            if (Array.isArray(trip._daytripConversions)) {
+              trip._daytripConversions = trip._daytripConversions.filter(function (x) {
+                return !(x && x.destId === offerRef.destId && x.hubId === offerRef.hubId);
+              });
+            }
+            if (typeof global.autoSave === "function") global.autoSave();
+            if (typeof global.drawTripMode === "function") global.drawTripMode();
+          };
+        })(offer);
+        row.appendChild(label);
+        row.appendChild(convertBtn);
+        row.appendChild(keepBtn);
+        section.appendChild(row);
+      });
+      banner.appendChild(section);
+    }
     container.appendChild(banner);
   }
 
@@ -5139,21 +6706,50 @@
   function _renderTripLevelBookings(trip, container) {
     if (!trip || !container) return;
     var bookings = (trip.tripBookings || []);
+
+    // v360.1 (slice 2b): collapse to a section header by default.
+    // The full booking rows take a lot of vertical space and the
+    // user usually just wants to confirm they exist, not read them.
+    // Header shows the count; tap to expand. Expanded state lives
+    // in trip._ui.bookingsExpanded so it survives re-renders within
+    // a session. When there are no bookings, we still render an
+    // empty-state header so the user can see the section exists
+    // (and learn what it's for) — collapsed empty header isn't
+    // useful, so we expand empty automatically.
+    if (!trip._ui) trip._ui = {};
+    var _bkExpanded = trip._ui.bookingsExpanded === true ||
+                      (trip._ui.bookingsExpanded === undefined && bookings.length === 0);
+
     var sec = document.createElement("div");
     sec.className = "tm-section tm-trip-bookings";
     sec.style.cssText = "margin:14px 2px 10px;padding:12px 14px;background:#fdfcf8;border:1px solid #e8e2d2;border-radius:8px;";
 
     var hdr = document.createElement("div");
-    hdr.style.cssText = "display:flex;align-items:baseline;gap:8px;margin-bottom:8px;";
+    hdr.style.cssText =
+      "display:flex;align-items:baseline;gap:8px;margin-bottom:" +
+      (_bkExpanded ? "8px" : "0") + ";cursor:pointer;";
     var ttl = document.createElement("div");
     ttl.style.cssText = "font-size:12px;font-weight:700;color:#5b3f8f;text-transform:uppercase;letter-spacing:0.05em;";
-    ttl.textContent = "Trip bookings";
+    ttl.textContent = "Trip bookings" + (bookings.length ? " (" + bookings.length + ")" : "");
     var sub = document.createElement("div");
-    sub.style.cssText = "font-size:10.5px;color:#888;font-style:italic;";
+    sub.style.cssText = "font-size:10.5px;color:#888;font-style:italic;flex:1;";
     sub.textContent = "Flights, car rentals, and other things that span the whole trip.";
+    var chev = document.createElement("div");
+    chev.style.cssText = "font-size:11px;color:#888;flex-shrink:0;";
+    chev.textContent = _bkExpanded ? "⌃" : "⌄";
     hdr.appendChild(ttl);
     hdr.appendChild(sub);
+    hdr.appendChild(chev);
+    hdr.onclick = function () {
+      trip._ui.bookingsExpanded = !_bkExpanded;
+      if (typeof global.drawTripMode === 'function') global.drawTripMode();
+    };
     sec.appendChild(hdr);
+
+    if (!_bkExpanded) {
+      container.appendChild(sec);
+      return;
+    }
 
     if (bookings.length === 0) {
       var empty = document.createElement("div");
@@ -5729,6 +7325,346 @@
     }
   }
 
+  // v360.1: shared "set aside" data source so the chip and the
+  // Considered section agree on the count. Prefers mdcItems (newer
+  // Discovery picker) and falls back to candidates (legacy
+  // explorer) — same priority _phaseStatus uses for the chip.
+  //
+  // Returns an array of normalized place objects:
+  //   { place, country, why, status, _src }
+  //
+  // Filtering rule for "set aside":
+  //   - place is not currently in destinations
+  //   - place isn't explicitly rejected (candidates with status === 'reject')
+  //   - places already "kept" (added to trip) are filtered by the
+  //     not-in-destinations check
+  //
+  // De-dupes by case-folded place name so a place appearing in both
+  // mdcItems and candidates surfaces once.
+  function _collectSetAsidePlaces(trip) {
+    if (!trip) return [];
+    // v360.1: "set aside" must exclude every place already adopted onto
+    // the trip in any form — overnight destination, wayside on a route,
+    // day-trip target, or a sight at a destination. Earlier we only
+    // checked trip.destinations[].place, which missed everything in
+    // routes/planItems/days. Result: classic Golden Circle stops
+    // (Þingvellir, Geysir, Gullfoss) showed as "set aside" even after
+    // the user had already accepted them as day-trip stops from
+    // Reykjavík.
+    //
+    // The taken set is built from:
+    //   1. trip.places{} — modern central dict; populated by the wayside
+    //      generator, destination resolver, picker, and day-trip flows.
+    //      Names found here are unambiguously "on the trip."
+    //   2. trip.destinations[].place — legacy + still-canonical name on
+    //      each destination card.
+    //   3. dest.days[].items[] — legacy day-content path that pre-dates
+    //      the places dict; some older trips still carry data here.
+    //
+    // Same shape the wayside generator uses (engine-trip.js ~1354) for
+    // its dedup, so behavior is consistent across surfaces.
+    var seenDest = Object.create(null);
+    function _mark(name) {
+      if (!name) return;
+      seenDest[String(name).toLowerCase().trim()] = true;
+    }
+    (trip.destinations || []).forEach(function (d) {
+      if (!d) return;
+      _mark(d.place);
+      // legacy day-items live under d.days[].items[]
+      (d.days || []).forEach(function (day) {
+        (day.items || []).forEach(function (it) {
+          _mark(it && (it.label || it.name || it.place));
+        });
+      });
+    });
+    if (trip.places && typeof trip.places === 'object') {
+      Object.keys(trip.places).forEach(function (pid) {
+        var p = trip.places[pid];
+        if (p) _mark(p.name);
+      });
+    }
+    var out = [];
+    var seenName = Object.create(null);
+    function _push(p, src) {
+      if (!p || !p.place) return;
+      var k = String(p.place).toLowerCase().trim();
+      if (seenDest[k]) return;       // already on the trip (any surface)
+      if (seenName[k]) return;       // dedupe across sources
+      if (src === 'candidate' && p.status === 'reject') return; // explicit reject
+      seenName[k] = true;
+      out.push({
+        place: p.place,
+        country: p.country || '',
+        why: p.whyItFits || p.why || '',
+        status: p.status || null,
+        _src: src,
+      });
+    }
+    if (Array.isArray(trip.mdcItems) && trip.mdcItems.length) {
+      trip.mdcItems.forEach(function (it) {
+        (it && it.requiredPlaces || []).forEach(function (p) { _push(p, 'mdc'); });
+      });
+    }
+    // Always also walk candidates so legacy data isn't ignored when
+    // mdcItems exists. De-dupe by name covers overlaps.
+    if (Array.isArray(trip.candidates) && trip.candidates.length) {
+      trip.candidates.forEach(function (c) { _push(c, 'candidate'); });
+    }
+    return out;
+  }
+
+  // v360.1 (slice 2c): Considered as a first-class collapsible section
+  // between Bookings and Destinations on the shaping surface. The
+  // design doc's principle: possibilities deserve real estate, not a
+  // footer — so this section is expanded by default. Header carries
+  // the count; tap to collapse to just the header. Lists each
+  // candidate with name + region + a one-line "why it fits"; the
+  // existing showConsideredCandidatesModal is still available behind
+  // a "see all" link for the full add-to-trip flow.
+  //
+  // Hidden when the trip has zero set-aside places so we don't
+  // surface an empty section. Expanded state lives in
+  // trip._ui.consideredExpanded (default expanded).
+  function _renderConsideredSection(trip, container) {
+    if (!trip || !container) return;
+    // v360.1: pull "set aside" places from the same source the chip
+    // does (_phaseStatus) — mdcItems first (newer Discovery picker),
+    // candidates as fallback (legacy explorer). The previous filter
+    // only looked at candidates, which under-counted whenever
+    // mdcItems was the active data source — the chip and the section
+    // contradicted each other (chip "14 set aside" vs. section "(5)").
+    // Both surfaces now agree.
+    var considered = _collectSetAsidePlaces(trip);
+    if (!considered.length) return;
+
+    if (!trip._ui) trip._ui = {};
+    var expanded = trip._ui.consideredExpanded !== false; // default true
+
+    var sec = document.createElement('div');
+    sec.className = 'tm-section tm-considered';
+    sec.style.cssText =
+      'margin:10px 2px 14px;padding:12px 14px;background:#fafaf6;' +
+      'border:1px dashed #d8d0c4;border-radius:8px;';
+
+    var hdr = document.createElement('div');
+    hdr.style.cssText =
+      'display:flex;align-items:baseline;gap:8px;cursor:pointer;' +
+      'margin-bottom:' + (expanded ? '8px' : '0') + ';';
+    var ttl = document.createElement('div');
+    ttl.style.cssText =
+      'font-size:12px;font-weight:700;color:#5b3f8f;' +
+      'text-transform:uppercase;letter-spacing:0.05em;';
+    // v360.1: "Considered" implied an active mental decision the
+    // user may not have made — they might have just scrolled past
+    // these without considering them. "Places you set aside" is
+    // honest about the actual state: they're parked, not picked
+    // and not rejected. Sub copy slimmed to a one-liner action
+    // hint without re-stating the heading.
+    ttl.textContent = 'Places you set aside (' + considered.length + ')';
+    var sub = document.createElement('div');
+    sub.style.cssText = 'font-size:10.5px;color:#888;font-style:italic;flex:1;';
+    sub.textContent = 'Keep these in mind or add to the trip when ready.';
+    var chev = document.createElement('div');
+    chev.style.cssText = 'font-size:11px;color:#888;flex-shrink:0;';
+    chev.textContent = expanded ? '⌃' : '⌄';
+    hdr.appendChild(ttl);
+    hdr.appendChild(sub);
+    hdr.appendChild(chev);
+    hdr.onclick = function () {
+      trip._ui.consideredExpanded = !expanded;
+      if (typeof global.drawTripMode === 'function') global.drawTripMode();
+    };
+    sec.appendChild(hdr);
+
+    if (!expanded) {
+      container.appendChild(sec);
+      return;
+    }
+
+    // List body — show up to 8 candidates inline; if there are more,
+    // a "see all N" link opens the full modal where the add-to-trip
+    // flow lives.
+    var body = document.createElement('div');
+    body.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
+    var shown = considered.slice(0, 8);
+    shown.forEach(function (c) {
+      var row = document.createElement('div');
+      row.style.cssText =
+        'padding:8px 10px;background:#fff;border:1px dashed #d8d0c4;' +
+        'border-radius:6px;display:flex;align-items:flex-start;gap:10px;';
+      var left = document.createElement('div');
+      left.style.cssText = 'flex:1;min-width:0;';
+      var name = document.createElement('div');
+      name.style.cssText = 'font-weight:600;font-size:12.5px;color:#222;';
+      var nameTxt = c.place || c.name || c.label || 'Unnamed';
+      if (c.country && c.country !== nameTxt) nameTxt += ' · ' + c.country;
+      name.textContent = nameTxt;
+      left.appendChild(name);
+      if (c.whyItFits || c.why) {
+        var why = document.createElement('div');
+        why.style.cssText = 'font-size:11px;color:#666;margin-top:2px;line-height:1.4;';
+        var whyText = String(c.whyItFits || c.why);
+        if (whyText.length > 160) whyText = whyText.substring(0, 157) + '…';
+        why.textContent = whyText;
+        left.appendChild(why);
+      }
+      row.appendChild(left);
+      // Small "open in modal" link per row. Could be wired to a
+      // direct add-to-trip in a later slice; for now we route
+      // through the existing modal which has the geography-aware
+      // add path.
+      var act = document.createElement('button');
+      act.type = 'button';
+      act.style.cssText =
+        'background:transparent;border:none;color:#5b3f8f;font-family:inherit;' +
+        'font-size:11px;font-weight:600;cursor:pointer;padding:2px 6px;flex-shrink:0;';
+      act.textContent = '+ add →';
+      act.title = 'Open the Considered list with this place highlighted';
+      act.onclick = function (e) {
+        e.stopPropagation();
+        if (typeof global.showConsideredCandidatesModal === 'function') {
+          global.showConsideredCandidatesModal();
+        }
+      };
+      row.appendChild(act);
+      body.appendChild(row);
+    });
+
+    if (considered.length > shown.length) {
+      var seeAll = document.createElement('button');
+      seeAll.type = 'button';
+      seeAll.style.cssText =
+        'background:transparent;border:none;color:#5b3f8f;font-family:inherit;' +
+        'font-size:11.5px;font-weight:600;cursor:pointer;padding:6px 0 0;text-align:left;';
+      seeAll.textContent = 'See all ' + considered.length + ' →';
+      seeAll.onclick = function () {
+        if (typeof global.showConsideredCandidatesModal === 'function') {
+          global.showConsideredCandidatesModal();
+        }
+      };
+      body.appendChild(seeAll);
+    }
+
+    sec.appendChild(body);
+    container.appendChild(sec);
+  }
+
+  // v360.1 (slice 2d-i): Trip identity block — the trip's name as a
+  // first-class element at the top of the body, click to rename
+  // inline. Lives in the trip body (not the header) so it doesn't
+  // collide with the File/Edit/Settings menu chrome. The existing
+  // header's trip-name-block is hidden via CSS once this is wired
+  // up (see index.html). Pairs with slice 2d-ii (⋯ menu) but ships
+  // independently — body change has no menubar dependencies.
+  function _renderTripIdentityBlock(trip, container) {
+    if (!trip || !container) return;
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'margin:8px 2px 4px;padding:0;';
+    var nameRow = document.createElement('div');
+    // v360.1: name + pencil left-aligned, "Trip profile" chip
+    // right-aligned. The chip used to live in the phase-chips strip
+    // below the name; that put it visually disconnected from the
+    // trip identity it's about. Trip profile = intent/preferences/
+    // who's going — same conceptual cluster as the name. Adjacency
+    // makes the relationship visible.
+    nameRow.style.cssText =
+      'display:flex;align-items:baseline;gap:8px;' +
+      'padding:4px 4px;border-radius:6px;';
+
+    // Name + pencil is a single click target for rename.
+    var nameClicker = document.createElement('div');
+    nameClicker.style.cssText =
+      'display:flex;align-items:baseline;gap:8px;cursor:pointer;flex:1;min-width:0;' +
+      'transition:background .12s ease;border-radius:6px;padding:2px 4px;margin:-2px -4px;';
+    nameClicker.title = 'Click to rename';
+    nameClicker.onmouseover = function () { nameClicker.style.background = '#fafafa'; };
+    nameClicker.onmouseout  = function () { nameClicker.style.background = 'transparent'; };
+
+    var nameSpan = document.createElement('span');
+    nameSpan.style.cssText =
+      'font-size:20px;font-weight:700;color:#111;letter-spacing:-.01em;line-height:1.2;';
+    nameSpan.textContent = trip.name || 'Untitled trip';
+
+    var pencil = document.createElement('span');
+    pencil.style.cssText = 'font-size:12px;color:#bbb;flex-shrink:0;';
+    pencil.textContent = '✎';
+    pencil.title = 'Click the name to rename';
+
+    nameClicker.appendChild(nameSpan);
+    nameClicker.appendChild(pencil);
+    nameRow.appendChild(nameClicker);
+
+    // Trip profile chip — opens editConstraints (intent, prefs,
+    // who's coming, pace, etc.). Right-aligned via margin-left:auto.
+    var profileChip = document.createElement('button');
+    profileChip.type = 'button';
+    profileChip.style.cssText =
+      'background:#fff;border:1px solid #d8d4c8;color:#555;font-family:inherit;' +
+      'font-size:11.5px;font-weight:600;padding:4px 11px;border-radius:13px;' +
+      'cursor:pointer;flex-shrink:0;align-self:center;';
+    profileChip.textContent = 'Trip profile';
+    profileChip.title = 'Edit the trip\'s intent, preferences, who\'s coming, pace…';
+    profileChip.onmouseover = function () { profileChip.style.background = '#fafafa'; };
+    profileChip.onmouseout  = function () { profileChip.style.background = '#fff'; };
+    profileChip.onclick = function (e) {
+      e.stopPropagation();
+      if (typeof global.editConstraints === 'function') {
+        global.editConstraints();
+      }
+    };
+    nameRow.appendChild(profileChip);
+
+    nameClicker.onclick = function () {
+      // Swap the span for an input matching the same font/weight so
+      // the row doesn't reflow when entering edit mode. Save on blur
+      // or Enter; cancel on Escape.
+      if (wrap.querySelector('input.identity-name-inp')) return;
+      var inp = document.createElement('input');
+      inp.className = 'identity-name-inp';
+      inp.value = trip.name || '';
+      inp.placeholder = 'Trip name';
+      inp.style.cssText =
+        'font-size:20px;font-weight:700;color:#111;letter-spacing:-.01em;' +
+        'background:transparent;border:none;border-bottom:1px solid #999;outline:none;' +
+        'font-family:inherit;flex:1;min-width:0;padding:0;';
+      var savedDisp = nameSpan.style.display;
+      var savedPencilDisp = pencil.style.display;
+      nameSpan.style.display = 'none';
+      pencil.style.display = 'none';
+      nameClicker.insertBefore(inp, nameSpan);
+      inp.focus(); inp.select();
+      var saved = false;
+      function save() {
+        if (saved) return; saved = true;
+        var val = inp.value.trim() || trip.name || 'Untitled trip';
+        trip.name = val;
+        nameSpan.textContent = val;
+        nameSpan.style.display = savedDisp;
+        pencil.style.display = savedPencilDisp;
+        if (inp.parentNode) inp.parentNode.removeChild(inp);
+        if (typeof global.updateIndexEntry === 'function') {
+          try { global.updateIndexEntry(); } catch (_) {}
+        }
+        if (typeof global.autoSave === 'function') {
+          try { global.autoSave(); } catch (_) {}
+        }
+        // Also update the header's trip-name-display span so the two
+        // surfaces stay in sync until 2d-ii hides the header chrome.
+        var headSpan = document.getElementById('trip-name-display');
+        if (headSpan) headSpan.textContent = val;
+      }
+      inp.onblur = save;
+      inp.onkeydown = function (e) {
+        if (e.key === 'Enter') inp.blur();
+        if (e.key === 'Escape') { inp.value = trip.name || ''; inp.blur(); }
+      };
+    };
+
+    wrap.appendChild(nameRow);
+    container.appendChild(wrap);
+  }
+
   // ─────────────────────────────────────────────────────────────
   // v360.1: Trip-view redesign slice 1 — top of the shaping surface
   //
@@ -5751,20 +7687,175 @@
   // currently carries move into the surfaces above.
   // ─────────────────────────────────────────────────────────────
 
-  // Count operational items on a trip — things the world is pressing
-  // on right now. For slice 1 this is just the existing pendingActions
-  // surface; later slices will incorporate cancellation deadlines,
-  // imminent-departure flags, etc.
-  function _countOperationalItems(trip) {
-    if (!trip) return 0;
-    try {
-      if (typeof global.computePendingActions === 'function') {
-        var pa = global.computePendingActions(trip, new Date());
-        if (pa && Array.isArray(pa.items)) return pa.items.length;
+  // Collect operational items on a trip — things the world is
+  // pressing on right now. Per the redesign philosophy: operational
+  // ≠ "things you haven't decided yet" (that's shaping, and shaping
+  // can stay loose indefinitely). Operational = "reality is forcing
+  // a decision":
+  //   - Open provider actions (booking confirmations the user owes
+  //     someone, requiresProviderAction === true on a pendingAction).
+  //   - Cancellation deadlines (calendar-driven, the universe will
+  //     auto-decide if the user doesn't).
+  //
+  // Earlier slice 1 used computePendingActions() which also counted
+  // hotel gaps, transport gaps, etc. — those are SHAPING (the user
+  // might be intentionally leaving them open), not operational. The
+  // chip was overcounting (48 vs the 18 the banner showed) because
+  // of that. Now both surfaces share one source of truth.
+  // v360.1: canonical "things you need to take care of" collector.
+  // Single source of truth used by:
+  //   * the trip-view peek chip (count + drilldown)
+  //   * the home-dashboard panel (via _buildDashboardItems delegation)
+  //   * the print + pop-out renderers
+  //
+  // Returns four arrays; every consumer can choose which sections to
+  // show but they all agree on what counts as "needing the user."
+  //
+  //   actions    — open pendingActions w/ requiresProviderAction. Decisions the
+  //                world is asking you to make (rebookings, refunds, replans).
+  //   deadlines  — every booked item with a cancelDeadline that hasn't passed,
+  //                sorted ascending by days-left. No 7-day cutoff: a far-out
+  //                deadline is still real, just not urgent. UI conveys urgency
+  //                with date-pill prominence + glyph (⚠ if today/past).
+  //   today      — flights / hotel check-ins / hotel check-outs / booked sights
+  //                whose calendar date IS today. Time-pressed by definition.
+  //   tomorrow   — flights tomorrow. The home dashboard also gives this slot
+  //                to flights only; broader tomorrow events stay in their own
+  //                surfaces (you'll see them at the destination when you get
+  //                there).
+  //
+  // Earlier two implementations drifted: the trip view counted all
+  // deadlines without filter; the home dashboard counted only deadlines
+  // within 7 days that also had cancelType === "deadline", plus today/
+  // tomorrow events. A user saw 18 here and 17 on the dashboard. This
+  // helper fixes both surfaces to the same arithmetic.
+  function _collectOperationalItems(trip) {
+    var out = { actions: [], deadlines: [], today: [], tomorrow: [] };
+    if (!trip) return out;
+
+    // ── actions ──────────────────────────────────────────
+    if (Array.isArray(trip.pendingActions)) {
+      out.actions = trip.pendingActions.filter(function (a) {
+        return a && !a.cleared && a.requiresProviderAction;
+      });
+    }
+
+    // ── deadlines ─ all open, sorted soonest-first ──────
+    if (typeof global.collectDeadlines === 'function' && Array.isArray(trip.destinations)) {
+      trip.destinations.forEach(function (d) {
+        try {
+          var ds = global.collectDeadlines(d) || [];
+          if (ds.length) out.deadlines = out.deadlines.concat(ds);
+        } catch (_) {}
+      });
+    }
+    out.deadlines.sort(function (a, b) {
+      return (a.deadline || '').localeCompare(b.deadline || '');
+    });
+
+    // ── today / tomorrow travel events ──────────────────
+    // Mirrors the home dashboard's logic so both surfaces agree.
+    // YYYY-MM-DD string comparison; tz-safe because we work in
+    // local-date components throughout.
+    var todayD = new Date(); todayD.setHours(0, 0, 0, 0);
+    var tomorrowD = new Date(todayD.getTime() + 86400000);
+    function ymd(d) {
+      // Avoid toISOString() — it shifts to UTC and can move the
+      // boundary by a day. Build YYYY-MM-DD from local components.
+      var m = String(d.getMonth() + 1).padStart(2, '0');
+      var day = String(d.getDate()).padStart(2, '0');
+      return d.getFullYear() + '-' + m + '-' + day;
+    }
+    var Tstr = ymd(todayD), Tmrstr = ymd(tomorrowD);
+
+    // Flights at trip endpoints — first dest dateFrom = entry,
+    // last dest dateTo = exit.
+    if (trip.brief) {
+      var b = trip.brief;
+      var firstDest = (trip.destinations || [])[0];
+      var lastDest = (trip.destinations || [])[(trip.destinations || []).length - 1];
+      if (b.entryDetails && firstDest && firstDest.dateFrom) {
+        var arriveRec = {
+          kind: 'flight-arrive',
+          time: b.entryDetails.time || '',
+          carrier: b.entryDetails.carrier || '',
+          number: b.entryDetails.number || '',
+          into: firstDest.place || '',
+          destId: firstDest.id || null,
+          destName: firstDest.place || '',
+          url: b.entryDetails.url || null,
+          mode: b.entryMode || 'fly',
+          date: firstDest.dateFrom,
+        };
+        if (firstDest.dateFrom === Tstr) out.today.push(arriveRec);
+        else if (firstDest.dateFrom === Tmrstr) out.tomorrow.push(arriveRec);
       }
-    } catch (_) {}
-    if (Array.isArray(trip.pendingActions)) return trip.pendingActions.length;
-    return 0;
+      if (b.exitDetails && lastDest && lastDest.dateTo) {
+        var departRec = {
+          kind: 'flight-depart',
+          time: b.exitDetails.time || '',
+          carrier: b.exitDetails.carrier || '',
+          number: b.exitDetails.number || '',
+          from: lastDest.place || '',
+          destId: lastDest.id || null,
+          destName: lastDest.place || '',
+          url: b.exitDetails.url || null,
+          mode: b.exitMode || 'fly',
+          date: lastDest.dateTo,
+        };
+        if (lastDest.dateTo === Tstr) out.today.push(departRec);
+        else if (lastDest.dateTo === Tmrstr) out.tomorrow.push(departRec);
+      }
+    }
+
+    // Hotel check-ins/check-outs + booked sights today.
+    (trip.destinations || []).forEach(function (d) {
+      (d.hotelBookings || []).forEach(function (bk) {
+        if (bk.status !== 'booked') return;
+        if (bk.checkIn === Tstr) {
+          out.today.push({
+            kind: 'hotel-checkin', destId: d.id, destName: d.place || '',
+            name: bk.name || 'Hotel', area: bk.area || '',
+            time: bk.checkInTime || '', url: bk.url || null, date: bk.checkIn,
+          });
+        }
+        if (bk.checkOut === Tstr) {
+          out.today.push({
+            kind: 'hotel-checkout', destId: d.id, destName: d.place || '',
+            name: bk.name || 'Hotel', area: bk.area || '',
+            time: bk.checkOutTime || '', url: bk.url || null, date: bk.checkOut,
+          });
+        }
+      });
+      (d.days || []).forEach(function (day, dayIdx) {
+        (day.items || []).forEach(function (it) {
+          if (!it || !it.booking || it.booking.status === 'cancelled') return;
+          if (!d.dateFrom || dayIdx < 0) return;
+          var dayDate = new Date(d.dateFrom + 'T12:00:00');
+          dayDate.setDate(dayDate.getDate() + dayIdx);
+          var dayYmd = ymd(dayDate);
+          if (dayYmd === Tstr) {
+            out.today.push({
+              kind: 'sight-booked', destId: d.id, destName: d.place || '',
+              name: it.n || it.name || 'Sight', time: it.booking.time || '',
+              confirmation: it.booking.confirmationNumber || null,
+              url: it.url || null, date: dayYmd,
+            });
+          }
+        });
+      });
+    });
+
+    // Sort today/tomorrow by time-of-day so the morning items lead.
+    function timeKey(it) { return it.time || '99:99'; }
+    out.today.sort(function (a, b) { return timeKey(a).localeCompare(timeKey(b)); });
+    out.tomorrow.sort(function (a, b) { return timeKey(a).localeCompare(timeKey(b)); });
+
+    return out;
+  }
+  function _countOperationalItems(trip) {
+    var c = _collectOperationalItems(trip);
+    return c.actions.length + c.deadlines.length + c.today.length + c.tomorrow.length;
   }
 
   // Render the trip-level peek chip. Sits near the top of the
@@ -5778,21 +7869,28 @@
     var n = _countOperationalItems(trip);
     if (n <= 0) return; // no chip when nothing is pressing
 
+    // v360.1: chip styled prominently — this is the trip view's
+    // primary call-to-action when the world is pressing on the user.
+    // Larger font, amber-tinted background, stronger border, and a
+    // wider footprint than the previous quiet pill. It sits directly
+    // under the dates strip; that adjacency + this weight makes it
+    // unmissable on first scroll. Other phase chips remain understated
+    // — only this one carries urgency, so only this one shouts.
     var wrap = document.createElement('div');
-    wrap.style.cssText = 'margin:10px 2px 8px;';
+    wrap.style.cssText = 'margin:0 2px 14px;';
     var chip = document.createElement('button');
     chip.type = 'button';
     chip.style.cssText =
-      'background:#fff;border:1px solid #d8c4a4;color:#5c4520;font-family:inherit;' +
-      'font-size:11.5px;font-weight:600;padding:5px 11px;border-radius:14px;' +
-      'cursor:pointer;display:inline-flex;align-items:center;gap:6px;' +
-      'box-shadow:0 1px 2px rgba(0,0,0,.04);';
+      'background:#fff5ec;border:1.5px solid #d8a060;color:#7a3e10;font-family:inherit;' +
+      'font-size:14px;font-weight:700;padding:10px 16px;border-radius:8px;' +
+      'cursor:pointer;display:inline-flex;align-items:center;gap:8px;' +
+      'box-shadow:0 1px 3px rgba(0,0,0,.06);';
     // Diamond glyph carries the meaning non-color-only ("◇" = "needs you")
-    chip.innerHTML = '◇ <span style="font-weight:700;">' + n + '</span> thing' +
-      (n === 1 ? '' : 's') + ' need you <span aria-hidden="true">→</span>';
+    chip.innerHTML = '◇ <span style="font-weight:800;">' + n + '</span> thing' +
+      (n === 1 ? '' : 's') + ' need your attention <span aria-hidden="true" style="margin-left:2px;">→</span>';
     chip.title = 'See what the world is pressing on right now';
-    chip.onmouseover = function () { chip.style.background = '#fff8ed'; };
-    chip.onmouseout  = function () { chip.style.background = '#fff'; };
+    chip.onmouseover = function () { chip.style.background = '#ffeacc'; };
+    chip.onmouseout  = function () { chip.style.background = '#fff5ec'; };
     chip.onclick = function () {
       _openOperationalSurfaceStub(trip);
     };
@@ -5808,65 +7906,670 @@
     if (existing) { existing.remove(); }
     var ov = document.createElement('div');
     ov.id = 'max-op-stub';
+    // v360.1 (slice 1.1): smaller backdrop padding so the dialog can
+    // grow to use most of a laptop screen when there are many rows.
+    // Mobile gets the same generous space minus the safer 4vh top
+    // margin so the close button stays reachable.
     ov.style.cssText =
       'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:11900;' +
-      'display:flex;align-items:flex-start;justify-content:center;padding:8vh 16px;' +
+      'display:flex;align-items:flex-start;justify-content:center;padding:4vh 16px;' +
       'font:13px/1.5 -apple-system,BlinkMacSystemFont,sans-serif;';
     var box = document.createElement('div');
+    box.id = 'max-op-stub-box';
+    // User-resizable. Initial size is the original 560×70vh, but the
+    // user can drag the bottom-right corner to grow either dimension
+    // up to the viewport caps. Browsers show a small triangle in the
+    // corner as the affordance — native, no custom code needed.
+    // `overflow:hidden` on the box itself is required for resize:both
+    // to take effect; the inner body wrap is what scrolls.
     box.style.cssText =
-      'background:#fff;border-radius:10px;width:560px;max-width:100%;max-height:80vh;' +
-      'overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.25);padding:24px 28px;';
+      'background:#fff;border-radius:10px;' +
+      'width:560px;height:70vh;' +
+      'min-width:320px;min-height:240px;max-width:96vw;max-height:96vh;' +
+      'resize:both;overflow:hidden;' +
+      'display:flex;flex-direction:column;' +
+      'box-shadow:0 12px 40px rgba(0,0,0,.25);';
+    // Header is sticky so the title + Print + Close stay visible while
+    // scrolling a long list.
     var head = document.createElement('div');
-    head.style.cssText = 'display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:14px;';
+    head.style.cssText =
+      'display:flex;align-items:baseline;justify-content:space-between;gap:12px;' +
+      'padding:20px 24px 12px;border-bottom:1px solid #eee;background:#fff;border-radius:10px 10px 0 0;flex-shrink:0;';
     var h = document.createElement('div');
     h.style.cssText = 'font-size:16px;font-weight:700;color:#111;';
     h.textContent = 'What needs you';
+
+    var actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;align-items:center;gap:8px;';
+
+    // Pop out → opens the same list in a separate browser window
+    // the user can keep visible while working. Clicking a row in
+    // that window navigates the MAIN window's destination view
+    // (via window.opener) without closing the pop-out, so the user
+    // can knock items down one at a time without losing their
+    // place. Print is available inside the pop-out window too.
+    var popoutBtn = document.createElement('button');
+    popoutBtn.type = 'button';
+    popoutBtn.style.cssText =
+      'background:#fff;border:1px solid #d8c4a4;color:#5c4520;font-family:inherit;' +
+      'font-size:11.5px;font-weight:600;padding:5px 11px;border-radius:5px;cursor:pointer;';
+    popoutBtn.textContent = '📋 Pop out';
+    popoutBtn.title = 'Open this list in a separate window you can keep visible while you work through it';
+    popoutBtn.onclick = function () { _popoutOperationalSurface(trip); };
+    actions.appendChild(popoutBtn);
+
+    // Print button — opens a printer-friendly version of the items in
+    // a new window, then triggers window.print(). The popup window is
+    // closed after the print dialog dismisses (browsers fire afterprint).
+    var printBtn = document.createElement('button');
+    printBtn.type = 'button';
+    printBtn.style.cssText =
+      'background:#fff;border:1px solid #d8c4a4;color:#5c4520;font-family:inherit;' +
+      'font-size:11.5px;font-weight:600;padding:5px 11px;border-radius:5px;cursor:pointer;';
+    printBtn.textContent = '🖨 Print';
+    printBtn.title = 'Open a printer-friendly version of this list';
+    printBtn.onclick = function () { _printOperationalSurface(trip); };
+    actions.appendChild(printBtn);
+
     var x = document.createElement('button');
     x.type = 'button';
     x.style.cssText = 'background:none;border:none;color:#888;font-size:18px;cursor:pointer;padding:0 4px;';
     x.textContent = '✕';
     x.title = 'Close';
     x.onclick = function () { ov.remove(); };
+    actions.appendChild(x);
+
     head.appendChild(h);
-    head.appendChild(x);
+    head.appendChild(actions);
     box.appendChild(head);
+
+    // Body wrapper that scrolls — separate from the box so the sticky
+    // header stays put. Save the outer box reference so the two
+    // `ov.appendChild(box)` calls below still attach the WHOLE
+    // dialog (header + body) to the overlay, and re-target subsequent
+    // `box.appendChild(...)` to land inside the scrollable body.
+    var bodyWrap = document.createElement('div');
+    bodyWrap.style.cssText = 'overflow-y:auto;padding:14px 24px 22px;flex:1;';
+    box.appendChild(bodyWrap);
+    var outerBox = box;
+    box = bodyWrap; // SHIM: subsequent box.appendChild lands inside bodyWrap
 
     var sub = document.createElement('div');
     sub.style.cssText = 'font-size:11.5px;color:#888;margin-bottom:14px;line-height:1.5;';
     sub.textContent =
-      'Stub for the operational surface — things the world is pressing on. ' +
-      'A proper standalone surface lands in a later slice; for now this modal collects them.';
+      'Travel events, cancellation deadlines, and open provider actions — sorted by date. ' +
+      'Click any row to jump to the destination that owns it.';
     box.appendChild(sub);
 
-    var items = [];
-    try {
-      if (typeof global.computePendingActions === 'function') {
-        var pa = global.computePendingActions(trip, new Date());
-        if (pa && Array.isArray(pa.items)) items = pa.items;
-      }
-    } catch (_) {}
+    var data = _collectOperationalItems(trip);
+    var actions = data.actions;
+    var deadlines = data.deadlines;
+    var todayEvents = data.today;
+    var tomorrowEvents = data.tomorrow;
+    var total = actions.length + deadlines.length + todayEvents.length + tomorrowEvents.length;
 
-    if (!items.length) {
+    if (total === 0) {
       var empty = document.createElement('div');
       empty.style.cssText = 'font-size:12px;color:#888;font-style:italic;padding:8px 0;';
       empty.textContent = 'Nothing the world is requiring right now — return to shaping.';
       box.appendChild(empty);
-    } else {
-      var list = document.createElement('div');
-      list.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
-      items.forEach(function (it) {
-        var row = document.createElement('div');
-        row.style.cssText = 'padding:8px 10px;border:1px solid #eee;border-radius:6px;font-size:12px;color:#333;';
-        var line = (it && (it.text || it.message || it.label)) || JSON.stringify(it);
-        row.textContent = line;
-        list.appendChild(row);
-      });
-      box.appendChild(list);
+      ov.appendChild(outerBox);
+      _wireBackdropClose(ov);
+      document.body.appendChild(ov);
+      return;
     }
 
-    ov.appendChild(box);
-    ov.addEventListener('click', function (e) { if (e.target === ov) ov.remove(); });
+    // Resolve destinations by lowercased name so we can wire click-to-jump.
+    var destByName = {};
+    (trip.destinations || []).forEach(function (d) {
+      if (d && d.id) {
+        if (d.label) destByName[String(d.label).toLowerCase()] = d.id;
+        if (d.place) destByName[String(d.place).toLowerCase()] = d.id;
+      }
+    });
+    function _destIdFor(name) {
+      return destByName[String(name || '').toLowerCase()]
+        || (trip.destinations[0] && trip.destinations[0].id)
+        || null;
+    }
+
+    var list = document.createElement('div');
+    list.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
+
+    var todayMid = new Date(); todayMid.setHours(0, 0, 0, 0);
+    var fmtDateFn = (typeof global.fmtD === 'function')
+      ? global.fmtD
+      : function (iso) { return iso || ''; };
+
+    // ── Unified row builder ────────────────────────────────
+    // datePill is the lead element: the user reads "WHEN" first,
+    // then "WHAT", then "WHERE". Urgency colour goes on the date
+    // pill + border accent — never colour-only (urgent rows also
+    // carry the ⚠ glyph in the pill).
+    function _buildRow(opts) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.style.cssText =
+        'display:flex;align-items:flex-start;gap:10px;padding:9px 10px;' +
+        'background:#fff;border:1px solid ' + (opts.urgent ? '#c0392b' : '#e8d8c4') + ';' +
+        'border-left-width:3px;border-radius:5px;cursor:pointer;font-family:inherit;text-align:left;';
+      // Date pill — fixed width so the names line up cleanly.
+      var pill = document.createElement('div');
+      pill.style.cssText =
+        'min-width:78px;flex-shrink:0;font-size:10.5px;font-weight:700;letter-spacing:0.04em;' +
+        'text-transform:uppercase;padding-top:2px;line-height:1.25;' +
+        'color:' + (opts.urgent ? '#c0392b' : '#5c4520') + ';';
+      pill.textContent = (opts.urgent ? '⚠ ' : '') + (opts.dateLabel || '—');
+      btn.appendChild(pill);
+      var col = document.createElement('div');
+      col.style.cssText = 'flex:1;min-width:0;';
+      var nm = document.createElement('div');
+      nm.style.cssText = 'font-size:12.5px;font-weight:600;color:#222;line-height:1.4;';
+      nm.textContent = opts.name || '';
+      col.appendChild(nm);
+      if (opts.sub) {
+        var meta = document.createElement('div');
+        meta.style.cssText = 'font-size:11px;color:#666;margin-top:2px;';
+        meta.textContent = opts.sub;
+        col.appendChild(meta);
+      }
+      if (opts.detail) {
+        var det = document.createElement('div');
+        det.style.cssText = 'font-size:10.5px;color:#888;margin-top:2px;';
+        det.textContent = opts.detail;
+        col.appendChild(det);
+      }
+      btn.appendChild(col);
+      if (opts.onclick) btn.onclick = opts.onclick;
+      return btn;
+    }
+    function _navTo(destId) {
+      return function () {
+        ov.remove();
+        global._activeDmSection = 'tracker';
+        if (typeof global.drawDestMode === 'function') global.drawDestMode(destId);
+      };
+    }
+
+    // Renders a per-section header inside the same list — keeps the
+    // grouping visible without visual clutter.
+    function _sectionLabel(text) {
+      var lbl = document.createElement('div');
+      lbl.style.cssText =
+        'font-size:10.5px;font-weight:700;color:#888;letter-spacing:0.05em;' +
+        'text-transform:uppercase;margin:10px 2px 2px;';
+      lbl.textContent = text;
+      return lbl;
+    }
+
+    function _eventName(it) {
+      var modeIcon = { fly:'✈',train:'🚂',drive:'🚗',bus:'🚌',boat:'⛴',ferry:'⛴' }[it.mode] || '✈';
+      if (it.kind === 'flight-arrive') {
+        return modeIcon + ' ' + (it.carrier || it.mode || 'Travel') +
+          (it.number ? ' ' + it.number : '') + ' → ' + (it.into || '');
+      }
+      if (it.kind === 'flight-depart') {
+        return modeIcon + ' ' + (it.carrier || it.mode || 'Travel') +
+          (it.number ? ' ' + it.number : '') + ' ← ' + (it.from || '');
+      }
+      if (it.kind === 'hotel-checkin')  return '🏨 Check-in: ' + (it.name || 'Hotel');
+      if (it.kind === 'hotel-checkout') return '🏨 Check-out: ' + (it.name || 'Hotel');
+      if (it.kind === 'sight-booked')   return '🎟 ' + (it.name || 'Sight');
+      return it.name || 'Event';
+    }
+    function _eventSub(it) {
+      var bits = [];
+      if (it.time) bits.push(it.time);
+      if (it.destName) bits.push(it.destName);
+      return bits.join(' · ');
+    }
+
+    // ── TODAY ───────────────────────────────────────────
+    if (todayEvents.length) {
+      list.appendChild(_sectionLabel('Today'));
+      todayEvents.forEach(function (it) {
+        list.appendChild(_buildRow({
+          dateLabel: 'TODAY',
+          urgent: true,
+          name: _eventName(it),
+          sub: _eventSub(it),
+          onclick: it.destId ? _navTo(it.destId) : null,
+        }));
+      });
+    }
+
+    // ── TOMORROW ────────────────────────────────────────
+    if (tomorrowEvents.length) {
+      list.appendChild(_sectionLabel('Tomorrow'));
+      tomorrowEvents.forEach(function (it) {
+        list.appendChild(_buildRow({
+          dateLabel: 'TOMORROW',
+          name: _eventName(it),
+          sub: _eventSub(it),
+          onclick: it.destId ? _navTo(it.destId) : null,
+        }));
+      });
+    }
+
+    // ── DEADLINES (all open, soonest-first) ─────────────
+    if (deadlines.length) {
+      list.appendChild(_sectionLabel('Cancellation deadlines'));
+      deadlines.forEach(function (d) {
+        var dd = d.deadline ? new Date(d.deadline + 'T12:00:00') : null;
+        var urgent = !!dd && dd <= todayMid;
+        var daysLeft = dd ? Math.round((dd - todayMid) / 86400000) : null;
+        var label;
+        if (urgent && daysLeft === 0)        label = 'TODAY';
+        else if (urgent)                     label = 'PAST';
+        else if (daysLeft === 1)             label = 'TOMORROW';
+        else if (daysLeft != null && daysLeft <= 14) label = daysLeft + ' DAYS';
+        else                                 label = fmtDateFn(d.deadline || '');
+        list.appendChild(_buildRow({
+          dateLabel: label,
+          urgent: urgent,
+          name: d.eventName || d.name || 'Cancellation deadline',
+          sub: 'Cancel by ' + fmtDateFn(d.deadline || '') + ' · ' + (d.destName || d.dest || ''),
+          onclick: (function (destId) { return destId ? _navTo(destId) : null; })(_destIdFor(d.destName || d.dest)),
+        }));
+      });
+    }
+
+    // ── PROVIDER ACTIONS ───────────────────────────────
+    if (actions.length) {
+      list.appendChild(_sectionLabel('Provider actions'));
+      actions.forEach(function (a) {
+        var detailBits = [];
+        if (a.confirmationNumber) detailBits.push('Conf #' + a.confirmationNumber);
+        if (a.detail) detailBits.push(a.detail);
+        list.appendChild(_buildRow({
+          dateLabel: 'TODO',
+          name: a.eventName || a.name || 'Booking needs review',
+          sub: ['Contact provider'].concat(a.destName ? [a.destName] : []).join(' · '),
+          detail: detailBits.length ? detailBits.join(' · ') : '',
+          onclick: (function (destId) { return destId ? _navTo(destId) : null; })(_destIdFor(a.destName)),
+        }));
+      });
+    }
+
+    box.appendChild(list);
+
+    ov.appendChild(outerBox);
+    _wireBackdropClose(ov);
     document.body.appendChild(ov);
+  }
+
+  // v360.1: "click outside to close" handler that doesn't fire when
+  // the user was actually drag-resizing the dialog. When you drag
+  // the resize handle (bottom-right corner of the box), the mouseup
+  // can land outside the box on the backdrop — the resulting click
+  // event has target === ov, and a naive close handler treats it as
+  // an intentional close. Fix: only close if the mousedown ALSO
+  // happened on the backdrop. That distinguishes a real outside-
+  // click from a resize-drag that ended on the backdrop.
+  function _wireBackdropClose(ov) {
+    var downOnOv = false;
+    ov.addEventListener('mousedown', function (e) {
+      downOnOv = (e.target === ov);
+    });
+    ov.addEventListener('click', function (e) {
+      if (e.target === ov && downOnOv) ov.remove();
+      downOnOv = false;
+    });
+  }
+
+  // v360.1 (slice 1.1): printer-friendly version of the operational
+  // surface. Opens a new window with a clean HTML document listing
+  // the deadlines + provider actions, then triggers the browser's
+  // native print dialog. The popup closes itself after the user
+  // either prints or cancels. Falls back to console warning if the
+  // browser blocks the popup.
+  function _printOperationalSurface(trip) {
+    // v360.1: print mirror of the inline modal. Four sections in the
+    // same order — Today → Tomorrow → Deadlines → Provider actions —
+    // each row leading with a date pill so the printed list reads
+    // "when, then what" instead of "what, then a date buried in the
+    // sub-line." Same `_collectOperationalItems` source as every
+    // other operational surface; counts always agree.
+    var data = _collectOperationalItems(trip);
+    var actions = data.actions;
+    var deadlines = data.deadlines;
+    var todayEvents = data.today;
+    var tomorrowEvents = data.tomorrow;
+    var total = actions.length + deadlines.length + todayEvents.length + tomorrowEvents.length;
+    if (total === 0) {
+      if (typeof global.maxAlert === 'function') {
+        global.maxAlert('Nothing to print — your operational list is empty.');
+      }
+      return;
+    }
+
+    var w = window.open('', '_blank', 'width=800,height=900');
+    if (!w) {
+      console.warn('[op-print] popup blocked');
+      if (typeof global.maxAlert === 'function') {
+        global.maxAlert('Browser blocked the print window. Allow popups from this site and try again.');
+      }
+      return;
+    }
+
+    function esc(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+    var fmtDateFn = (typeof global.fmtD === 'function')
+      ? global.fmtD
+      : function (iso) { return iso || ''; };
+
+    function _eventName(it) {
+      var modeIcon = { fly:'✈',train:'🚂',drive:'🚗',bus:'🚌',boat:'⛴',ferry:'⛴' }[it.mode] || '✈';
+      if (it.kind === 'flight-arrive') {
+        return modeIcon + ' ' + (it.carrier || it.mode || 'Travel') +
+          (it.number ? ' ' + it.number : '') + ' → ' + (it.into || '');
+      }
+      if (it.kind === 'flight-depart') {
+        return modeIcon + ' ' + (it.carrier || it.mode || 'Travel') +
+          (it.number ? ' ' + it.number : '') + ' ← ' + (it.from || '');
+      }
+      if (it.kind === 'hotel-checkin')  return '🏨 Check-in: ' + (it.name || 'Hotel');
+      if (it.kind === 'hotel-checkout') return '🏨 Check-out: ' + (it.name || 'Hotel');
+      if (it.kind === 'sight-booked')   return '🎟 ' + (it.name || 'Sight');
+      return it.name || 'Event';
+    }
+    function _eventSub(it) {
+      var bits = [];
+      if (it.time) bits.push(it.time);
+      if (it.destName) bits.push(it.destName);
+      return bits.join(' · ');
+    }
+    // Build one printable row. urgent → red text on the pill + line.
+    function _row(opts) {
+      return '<li class="' + (opts.urgent ? 'urgent' : '') + '">' +
+        '<div class="datepill">' + esc(opts.dateLabel || '') + '</div>' +
+        '<div class="text">' +
+          '<div class="line1">' + esc(opts.name || '') + '</div>' +
+          (opts.sub ? '<div class="line2">' + esc(opts.sub) + '</div>' : '') +
+          (opts.detail ? '<div class="line3">' + esc(opts.detail) + '</div>' : '') +
+        '</div>' +
+        '<div class="checkbox">☐</div>' +
+      '</li>';
+    }
+
+    var tripName = (trip && trip.name) || (trip && trip.brief && trip.brief.name) || 'Trip';
+    var today = new Date();
+    var genStr = today.getFullYear() + '-' +
+      String(today.getMonth() + 1).padStart(2, '0') + '-' +
+      String(today.getDate()).padStart(2, '0');
+    var todayMid = new Date(); todayMid.setHours(0, 0, 0, 0);
+
+    // ── TODAY ─────────────────────────────────────────────
+    var todayHtml = '';
+    if (todayEvents.length) {
+      todayHtml = '<h2>Today</h2><ul>' +
+        todayEvents.map(function (it) {
+          return _row({
+            dateLabel: 'TODAY',
+            urgent: true,
+            name: _eventName(it),
+            sub: _eventSub(it),
+          });
+        }).join('') +
+        '</ul>';
+    }
+
+    // ── TOMORROW ──────────────────────────────────────────
+    var tomorrowHtml = '';
+    if (tomorrowEvents.length) {
+      tomorrowHtml = '<h2>Tomorrow</h2><ul>' +
+        tomorrowEvents.map(function (it) {
+          return _row({
+            dateLabel: 'TOMORROW',
+            name: _eventName(it),
+            sub: _eventSub(it),
+          });
+        }).join('') +
+        '</ul>';
+    }
+
+    // ── DEADLINES (already sorted by helper) ──────────────
+    var deadlinesHtml = '';
+    if (deadlines.length) {
+      deadlinesHtml = '<h2>Cancellation deadlines</h2><ul>' +
+        deadlines.map(function (d) {
+          var dd = d.deadline ? new Date(d.deadline + 'T12:00:00') : null;
+          var urgent = !!dd && dd <= todayMid;
+          var daysLeft = dd ? Math.round((dd - todayMid) / 86400000) : null;
+          var label;
+          if (urgent && daysLeft === 0)        label = 'TODAY';
+          else if (urgent)                     label = 'PAST';
+          else if (daysLeft === 1)             label = 'TOMORROW';
+          else if (daysLeft != null && daysLeft <= 14) label = daysLeft + ' DAYS';
+          else                                 label = fmtDateFn(d.deadline || '');
+          return _row({
+            dateLabel: label,
+            urgent: urgent,
+            name: d.eventName || d.name || 'Cancellation deadline',
+            sub: 'Cancel by ' + fmtDateFn(d.deadline || '—') +
+                 (d.destName || d.dest ? ' · ' + (d.destName || d.dest) : ''),
+          });
+        }).join('') +
+        '</ul>';
+    }
+
+    // ── PROVIDER ACTIONS ──────────────────────────────────
+    var actionsHtml = '';
+    if (actions.length) {
+      actionsHtml = '<h2>Contact provider</h2><ul>' +
+        actions.map(function (a) {
+          var meta = [];
+          if (a.destName) meta.push(a.destName);
+          var detailBits = [];
+          if (a.confirmationNumber) detailBits.push('Conf #' + a.confirmationNumber);
+          if (a.detail) detailBits.push(a.detail);
+          return _row({
+            dateLabel: 'TODO',
+            name: a.eventName || a.name || 'Booking needs review',
+            sub: ['Contact provider'].concat(meta).join(' · '),
+            detail: detailBits.length ? detailBits.join(' · ') : '',
+          });
+        }).join('') +
+        '</ul>';
+    }
+
+    var html =
+      '<!doctype html><html><head><meta charset="utf-8"><title>What needs you — ' + esc(tripName) + '</title>' +
+      '<style>' +
+        'body{font:13px/1.5 -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;color:#222;max-width:680px;margin:32px auto;padding:0 24px;}' +
+        'h1{font-size:20px;margin:0 0 4px;}' +
+        '.meta{font-size:11px;color:#888;margin:0 0 8px;}' +
+        '.tip{font-size:11px;color:#888;font-style:italic;margin:0 0 24px;}' +
+        '@media print{.tip{display:none;}}' +
+        'h2{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:#5c4520;margin:24px 0 8px;border-bottom:1px solid #e8d8c4;padding-bottom:4px;}' +
+        'ul{list-style:none;padding:0;margin:0;}' +
+        'li{display:flex;align-items:flex-start;gap:12px;padding:9px 0;border-bottom:1px dashed #ddd;break-inside:avoid;}' +
+        'li .datepill{flex-shrink:0;min-width:78px;font-size:10.5px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#5c4520;padding-top:2px;}' +
+        'li .text{flex:1;min-width:0;}' +
+        '.line1{font-weight:600;color:#111;}' +
+        '.line2{font-size:11.5px;color:#666;margin-top:2px;}' +
+        '.line3{font-size:10.5px;color:#888;margin-top:2px;}' +
+        '.checkbox{font-size:20px;color:#aaa;line-height:1;flex-shrink:0;}' +
+        '.urgent .datepill{color:#c0392b;}' +
+        '.urgent .line1{color:#c0392b;}' +
+        '@media print{body{margin:0;padding:0 12mm;}.checkbox{color:#000;}}' +
+      '</style></head><body>' +
+      '<h1>What needs you — ' + esc(tripName) + '</h1>' +
+      '<div class="meta">' +
+        total + ' item' + (total === 1 ? '' : 's') +
+        ' · printed ' + genStr +
+      '</div>' +
+      '<div class="tip">Tip: print single-sided so you have room to mark items off as you handle them. (Web pages can\'t force this — set it in the print dialog.)</div>' +
+      todayHtml +
+      tomorrowHtml +
+      deadlinesHtml +
+      actionsHtml +
+      '<script>window.addEventListener("load",function(){setTimeout(function(){window.print();},120);});' +
+      'window.addEventListener("afterprint",function(){window.close();});<\/script>' +
+      '</body></html>';
+
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+  }
+
+  // v360.1 (slice 2c-ish): pop-out window for the operational surface.
+  // Same pattern as _popoutDecisionsDeferred — opens a separate
+  // browser window the user can resize, reposition next to the main
+  // app, and work through. Each row is clickable; clicks navigate
+  // the main window via window.opener without closing the pop-out.
+  // Print is available via a button inside the pop-out window.
+  function _popoutOperationalSurface(trip) {
+    // v360.1: pop-out mirror of the inline modal. Four sections —
+    // Today / Tomorrow / Cancellation deadlines / Provider actions
+    // — each row leads with a date label so the user reads
+    // "when, then what." Same data source as the inline modal +
+    // print + home dashboard (_collectOperationalItems); counts
+    // always match across surfaces.
+    //
+    // _popoutListWindow's row shape only has line1 + line2 (no
+    // dedicated date-pill slot), so the date label is prepended to
+    // line1 in uppercase. Visual hierarchy still reads "WHEN ·
+    // what" — date first, then the event name.
+    var data = _collectOperationalItems(trip);
+    var actions = data.actions;
+    var deadlines = data.deadlines;
+    var todayEvents = data.today;
+    var tomorrowEvents = data.tomorrow;
+    function esc(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+    var fmtDateFn = (typeof global.fmtD === 'function')
+      ? global.fmtD
+      : function (iso) { return iso || ''; };
+    var destByName = {};
+    (trip && trip.destinations || []).forEach(function (d) {
+      if (d && d.id) {
+        if (d.label) destByName[String(d.label).toLowerCase()] = d.id;
+        if (d.place) destByName[String(d.place).toLowerCase()] = d.id;
+      }
+    });
+    function destIdFor(name) {
+      return destByName[String(name || '').toLowerCase()] ||
+        (trip && trip.destinations && trip.destinations[0] && trip.destinations[0].id) ||
+        '';
+    }
+    function _eventName(it) {
+      var modeIcon = { fly:'✈',train:'🚂',drive:'🚗',bus:'🚌',boat:'⛴',ferry:'⛴' }[it.mode] || '✈';
+      if (it.kind === 'flight-arrive') {
+        return modeIcon + ' ' + (it.carrier || it.mode || 'Travel') +
+          (it.number ? ' ' + it.number : '') + ' → ' + (it.into || '');
+      }
+      if (it.kind === 'flight-depart') {
+        return modeIcon + ' ' + (it.carrier || it.mode || 'Travel') +
+          (it.number ? ' ' + it.number : '') + ' ← ' + (it.from || '');
+      }
+      if (it.kind === 'hotel-checkin')  return '🏨 Check-in: ' + (it.name || 'Hotel');
+      if (it.kind === 'hotel-checkout') return '🏨 Check-out: ' + (it.name || 'Hotel');
+      if (it.kind === 'sight-booked')   return '🎟 ' + (it.name || 'Sight');
+      return it.name || 'Event';
+    }
+    function _eventSub(it) {
+      var bits = [];
+      if (it.time) bits.push(it.time);
+      if (it.destName) bits.push(it.destName);
+      return bits.join(' · ');
+    }
+
+    var todayMid = new Date(); todayMid.setHours(0, 0, 0, 0);
+    var sections = [];
+
+    if (todayEvents.length) {
+      sections.push({
+        heading: 'Today',
+        rows: todayEvents.map(function (it) {
+          return {
+            line1: 'TODAY · ' + esc(_eventName(it)),
+            line2: esc(_eventSub(it)),
+            destId: it.destId || destIdFor(it.destName),
+            urgent: true,
+            activeSection: 'tracker',
+          };
+        }),
+      });
+    }
+    if (tomorrowEvents.length) {
+      sections.push({
+        heading: 'Tomorrow',
+        rows: tomorrowEvents.map(function (it) {
+          return {
+            line1: 'TOMORROW · ' + esc(_eventName(it)),
+            line2: esc(_eventSub(it)),
+            destId: it.destId || destIdFor(it.destName),
+            activeSection: 'tracker',
+          };
+        }),
+      });
+    }
+    if (deadlines.length) {
+      sections.push({
+        heading: 'Cancellation deadlines',
+        rows: deadlines.map(function (d) {
+          var dd = d.deadline ? new Date(d.deadline + 'T12:00:00') : null;
+          var urgent = !!dd && dd <= todayMid;
+          var daysLeft = dd ? Math.round((dd - todayMid) / 86400000) : null;
+          var label;
+          if (urgent && daysLeft === 0)        label = 'TODAY';
+          else if (urgent)                     label = 'PAST';
+          else if (daysLeft === 1)             label = 'TOMORROW';
+          else if (daysLeft != null && daysLeft <= 14) label = daysLeft + ' DAYS';
+          else                                 label = fmtDateFn(d.deadline || '').toUpperCase();
+          return {
+            line1: label + ' · ' + esc(d.eventName || d.name || 'Cancellation deadline'),
+            line2: 'Cancel by ' + esc(fmtDateFn(d.deadline || '—')) +
+                   (d.destName || d.dest ? ' · ' + esc(d.destName || d.dest) : ''),
+            destId: destIdFor(d.destName || d.dest),
+            urgent: urgent,
+            activeSection: 'tracker',
+          };
+        }),
+      });
+    }
+    if (actions.length) {
+      sections.push({
+        heading: 'Contact provider',
+        rows: actions.map(function (a) {
+          var detailBits = [];
+          if (a.confirmationNumber) detailBits.push('Conf #' + esc(a.confirmationNumber));
+          if (a.detail) detailBits.push(esc(a.detail));
+          return {
+            line1: 'TODO · ' + esc(a.eventName || a.name || 'Booking needs review'),
+            line2: ['Contact provider']
+              .concat(a.destName ? [esc(a.destName)] : [])
+              .concat(detailBits)
+              .join(' · '),
+            destId: destIdFor(a.destName),
+            activeSection: 'tracker',
+          };
+        }),
+      });
+    }
+
+    var tripName = (trip && trip.name) || (trip && trip.brief && trip.brief.name) || 'Trip';
+    var today = new Date();
+    var genStr = today.getFullYear() + '-' +
+      String(today.getMonth() + 1).padStart(2, '0') + '-' +
+      String(today.getDate()).padStart(2, '0');
+    var total = todayEvents.length + tomorrowEvents.length + deadlines.length + actions.length;
+
+    _popoutListWindow({
+      title: 'What needs you — ' + esc(tripName),
+      subtitle: total + ' item' + (total === 1 ? '' : 's') + ' · opened ' + genStr,
+      tipHtml: 'Click a row to jump to that destination in the main window (this window stays open). Print: set single-sided in the dialog so you can mark items off as you go.',
+      width: 560,
+      height: 720,
+      sections: sections,
+    });
   }
 
   // Render the persistent Spark intake — an always-available
@@ -5917,24 +8620,48 @@
     function _capture() {
       var text = inp.value.trim();
       if (!text) return;
-      // Land it in trip.brief.tripMeta.notes (the "Keep in mind"
-      // surface). Prefix with a sparkle so the user can find it
-      // later as a captured wisp.
-      if (!trip.brief) trip.brief = {};
-      if (!trip.brief.tripMeta) trip.brief.tripMeta = {};
-      var existing = (trip.brief.tripMeta.notes || '').trim();
-      var stamped = '✨ ' + text;
-      trip.brief.tripMeta.notes = existing
-        ? (existing + '\n' + stamped)
-        : stamped;
+      // v360.2: wisps now live in trip.brief.tripMeta.wisps[] as
+      // structured records. The Discovery LLM picks them up on the
+      // next run; the Discovery panel surfaces "N new ideas to
+      // evaluate" so the user knows the wisp will actually be
+      // considered. Previously the wisp went to tripMeta.notes as a
+      // ✨-prefixed string that Max never read — a write-only journal.
+      var added = (typeof global._wispAdd === 'function')
+        ? global._wispAdd(trip, text)
+        : null;
+      if (!added) {
+        // Defensive fallback: helper missing, write to notes the old way.
+        if (!trip.brief) trip.brief = {};
+        if (!trip.brief.tripMeta) trip.brief.tripMeta = {};
+        var existing = (trip.brief.tripMeta.notes || '').trim();
+        var stamped = '✨ ' + text;
+        trip.brief.tripMeta.notes = existing
+          ? (existing + '\n' + stamped)
+          : stamped;
+      }
       inp.value = '';
       _updateBtnState();
       if (typeof global.autoSave === 'function') {
         try { global.autoSave(); } catch (_) {}
       }
       if (typeof global.showSaveStatus === 'function') {
-        global.showSaveStatus('✨ Captured — see "Keep in mind for your trip"', 2500);
+        global.showSaveStatus('✨ Captured — Max will consider this next time Discovery runs', 3000);
       }
+      // v360.3 (#104): flag the Discovery panel to pulse on next
+      // render. The panel re-paints below; its renderer checks
+      // window._wispJustCaptured and adds the .tm-discovery-pulse
+      // class if the flag is recent. Pulls the user's eye to the
+      // amber "N new ideas to evaluate" panel that just incremented.
+      try { window._wispJustCaptured = Date.now(); } catch (_) {}
+      // Re-render the trip view so the Discovery panel updates its
+      // "N new ideas to evaluate" badge. Defer one tick so the toast
+      // gets a paint frame before the (heavier) trip-view rebuild —
+      // otherwise the toast can flash on and off in the same tick.
+      setTimeout(function () {
+        if (typeof global.drawTripMode === 'function') {
+          try { global.drawTripMode(); } catch (_) {}
+        }
+      }, 50);
     }
 
     inp.addEventListener('keydown', function (e) {
@@ -5949,6 +8676,50 @@
     wrap.appendChild(inp);
     wrap.appendChild(addBtn);
     container.appendChild(wrap);
+
+    // v360.2: "view history" link below the intake. Tapping opens the
+    // captured-ideas modal where the user can see each wisp, what Max
+    // produced from it, and delete either the wisp or any of its
+    // produced items. Read the wisps array via window.* first (same
+    // scoping quirk that made global.evaluateWispsForDiscovery fail to
+    // resolve inside this IIFE).
+    // Use the migration-aware helper so initial-intent wisps (from the
+    // trip's original brief.intent + brief.mustDo) are counted alongside
+    // any captured later via the Spark intake.
+    var wispsFn = (typeof window !== 'undefined' && window._wispsArrayMigrated) ||
+                  (typeof globalThis !== 'undefined' && globalThis._wispsArrayMigrated) ||
+                  (typeof window !== 'undefined' && window._wispsArray) ||
+                  (typeof global !== 'undefined' && global._wispsArray) || null;
+    var allWisps = (typeof wispsFn === 'function') ? wispsFn(trip) : [];
+    console.log('[spark-intake] wisp count check', {
+      hasWispsFn: typeof wispsFn === 'function',
+      onWindow: typeof window !== 'undefined' && !!window._wispsArray,
+      onGlobal: typeof global !== 'undefined' && !!global._wispsArray,
+      count: allWisps.length,
+      sample: allWisps.slice(0, 3).map(function (w) {
+        return { id: w && w.id, text: w && w.text, processedAt: w && w.processedAt };
+      }),
+    });
+    if (allWisps.length > 0) {
+      var historyRow = document.createElement('div');
+      historyRow.style.cssText =
+        'margin:-6px 2px 14px;padding:0 12px;text-align:right;';
+      var historyLink = document.createElement('button');
+      historyLink.type = 'button';
+      historyLink.style.cssText =
+        'background:transparent;border:none;color:#888;font-family:inherit;' +
+        'font-size:11px;cursor:pointer;padding:2px 4px;font-style:italic;';
+      historyLink.textContent = allWisps.length + ' captured · view history →';
+      historyLink.onmouseover = function () { historyLink.style.color = '#1a5fa8'; };
+      historyLink.onmouseout  = function () { historyLink.style.color = '#888'; };
+      historyLink.onclick = function () {
+        var openFn = (typeof window !== 'undefined' && window.showWispHistoryModal) ||
+                     (typeof global !== 'undefined' && global.showWispHistoryModal);
+        if (typeof openFn === 'function') openFn();
+      };
+      historyRow.appendChild(historyLink);
+      container.appendChild(historyRow);
+    }
   }
 
   // Render the "More" disclosure — a collapsed section that holds
@@ -6064,6 +8835,18 @@
       }
     );
 
+    // v360.3 (#110): demoted entry point to the late-binding philosophy
+    // overview. Lives in More so it's discoverable without competing
+    // with primary actions. Same modal the home-screen footer link
+    // opens — single source of truth for the philosophy content.
+    _addRow(
+      '🌊 How Max thinks',
+      'A river is a chaotic system; you prepare, not predict. The wisp arc and the case for late binding.',
+      function () {
+        if (typeof global.showAboutMax === 'function') global.showAboutMax();
+      }
+    );
+
     if (canReverse) {
       _addRow(
         '↺ Reverse trip order',
@@ -6074,19 +8857,15 @@
       );
     }
 
-    if (consideredCount > 0) {
-      _addRow(
-        'Considered (' + consideredCount + ')',
-        'Places Max suggested that you didn\'t accept or reject — review or add any of them.',
-        function () {
-          if (typeof global.showConsideredCandidatesModal === 'function') {
-            global.showConsideredCandidatesModal();
-          }
-        }
-      );
-    }
+    // v360.1 (slice 2c): Considered row removed from More — it's
+    // now a first-class section between Bookings and Destinations
+    // (see MaxTripUI.renderConsideredSection). Leaving it here would
+    // duplicate the affordance.
 
-    if (canOpenDiscovery) {
+    // v360.2: Open Discovery row removed from More — the Discovery
+    // panel above the destinations list now carries that affordance as
+    // a first-class button. Leaving it here would duplicate.
+    if (false /* canOpenDiscovery */) {
       _addRow(
         '✎ Open Discovery',
         'Re-open Discovery with your current keep/reject decisions and notes.',
@@ -6129,12 +8908,35 @@
     renderTripPeekChip:          _renderTripPeekChip,
     renderSparkIntake:           _renderSparkIntake,
     renderTripMore:              _renderTripMore,
+    // v360.1 — slice 2d-i: trip identity block (name in body).
+    renderTripIdentityBlock:     _renderTripIdentityBlock,
+    // v360.1 — slice 2c: Considered as a standalone section.
+    renderConsideredSection:     _renderConsideredSection,
+    // v360.3: exposed so drawTripMode can call it at the bottom of the
+    // trip view (moved out of renderTripOverviewStrips).
+    renderDiscoveryPromptPanel:  _renderDiscoveryPromptPanel,
+    // v360.3: exposed so drawTripMode can place these at user-requested
+    // positions (geo-affordance / "Day trips" tips between Trip
+    // Bookings and Add Waysides; decisions-deferred / "Itinerary empty
+    // days" between Spark intake and Destinations).
+    renderGeoAffordanceBanner:   _renderGeoAffordanceBanner,
+    renderDecisionsDeferredPanel:_renderDecisionsDeferredPanel,
+    // v360.1: canonical operational-items collector. Exposed so the
+    // home dashboard (index.html _buildDashboardItems) can delegate
+    // instead of maintaining a second implementation.
+    collectOperationalItems:     _collectOperationalItems,
+    countOperationalItems:       _countOperationalItems,
     renderArrivalDeparturePanel: _renderArrivalDeparturePanel,
+    // v360.4 (#124 follow-up) — ambient Traveler Profile panel on
+    // the trip page, surfaced right under Arrival/Departure.
+    renderTravelerProfilePanel:  _renderTravelerProfilePanel,
     // v359.60.91 — trip-level Bookings (flights + car rentals
     // that don't anchor to a single destination):
     renderTripLevelBookings:     _renderTripLevelBookings,
     // v360.0.8 — wayside generation banner + per-route rendering:
     renderWaysidePromptBanner:   _renderWaysidePromptBanner,
+    // v360.3 (#122): parallel day-trip action panel.
+    renderDayTripPromptBanner:   _renderDayTripPromptBanner,
     renderRouteWaysides:         _renderRouteWaysides,
     // TM.3f (v323) — per-destination card render:
     renderTripDestinationCard:   _renderTripDestinationCard,
