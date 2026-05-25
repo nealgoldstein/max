@@ -18732,6 +18732,56 @@ function renderActivityPicker(){
     var _fnc_anchorExit  = _fnc_ordered[_fnc_ordered.length - 1] || null;
     var _fnc_region = _tb.region || _tb.placeName || "";
     var _fnc_epPts = (_fnc_region && typeof _epCache !== "undefined" && _epCache[_fnc_region]) || [];
+
+    // Round FN.C.1.1: cold-cache fetch + re-render hook. The card
+    // first-renders before _epCache populates for this region (the
+    // LLM fetch happens asynchronously elsewhere on render). Without
+    // a re-render trigger, the card stays hidden even after the
+    // cache lands. Same pattern the trip-view panel uses
+    // (trip-ui.js ~2658-2661): if no fetch is in flight and we
+    // haven't seen this region yet, fire one and call
+    // renderTripStep1Place again when it resolves. Region check on
+    // re-entry guards against late-arriving fetches for a region
+    // the user has since changed away from.
+    if (_fnc_region
+        && (typeof _epCache === "undefined" || !(_fnc_region in _epCache))
+        && typeof _epLoading !== "undefined" && !_epLoading[_fnc_region]
+        && typeof fetchRegionEntryPoints === "function") {
+      fetchRegionEntryPoints(_fnc_region).then(function(){
+        if (typeof renderTripStep1Place === "function"
+            && _tb && (_tb.region || _tb.placeName) === _fnc_region) {
+          renderTripStep1Place();
+        }
+      });
+    }
+    // Also handle the case where the cache populated via a sibling
+    // code path (e.g. _renderEntryPointsOnPmMap's fetch) AFTER our
+    // first render but BEFORE the user interacted: hook the next
+    // sibling re-render that populates the cache. This is a one-time
+    // poll because the cache is final once populated.
+    if (_fnc_region && !_fnc_epPts.length
+        && typeof _epCache !== "undefined" && (_fnc_region in _epCache)
+        && _epCache[_fnc_region]) {
+      // Cache key exists but value is empty — LLM returned no
+      // entry-points for this region, so nothing to suggest. Card
+      // will hide. This is correct behavior; we just note it.
+      console.log("[Max FN.C.1.1] region '" + _fnc_region + "' has empty entry-points cache; suggests card will hide");
+    } else if (_fnc_region && !_fnc_epPts.length) {
+      // Cache key doesn't exist yet — set up a one-shot poll to
+      // re-render once it lands. Useful when a parallel code path
+      // (the picker map renderer) is fetching for us.
+      var _fnc_pollStart = Date.now();
+      var _fnc_pollId = setInterval(function(){
+        if (Date.now() - _fnc_pollStart > 30000) { clearInterval(_fnc_pollId); return; }
+        if (typeof _epCache !== "undefined" && _fnc_region in _epCache) {
+          clearInterval(_fnc_pollId);
+          if (typeof renderTripStep1Place === "function"
+              && _tb && (_tb.region || _tb.placeName) === _fnc_region) {
+            renderTripStep1Place();
+          }
+        }
+      }, 500);
+    }
     var _fnc_entryMode = _tb.entryMode || "fly";
     var _fnc_exitMode  = _tb.exitMode  || "fly";
     var _fnc_entryRanked = (typeof _rankGatewaysForTrip === "function")
