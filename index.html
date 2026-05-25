@@ -10056,32 +10056,33 @@ async function runCandidateSearch(requiredPlaces) {
   var cityCount = Math.min(5, Math.max(3, Math.ceil(extraCount / 2)));
   var thematicCount = Math.max(5, extraCount - cityCount);
 
-  // Round FN.F.2: single-sight identification.
+  // Round FN.F.2: single-sight identification by INFRASTRUCTURE.
   //
-  // History: v353.2 instructed the LLM to EXCLUDE sight-level places
-  // (waterfalls, viewpoints, glacier lagoons) from candidates entirely,
-  // on the theory that they belong as sights inside the closest
-  // city/town. Symptom that prevented: Diamond Beach showing up as a
-  // 1-night destination with hotels and meals.
+  // Simple rule (Neal-confirmed):
+  //   STAY = the place has actual lodging AND food/restaurants within
+  //          walking-or-close-drive (~5 km). The user can sleep and eat
+  //          here. Cities, towns, villages with real infrastructure.
+  //   SINGLE-SIGHT (?) = no real lodging OR no food options nearby. The
+  //          place is worth seeing but you can't reasonably stay or eat
+  //          there. Waterfalls, viewpoints, beaches, glacier lagoons,
+  //          hot springs, remote summits.
   //
-  // FN.F.2 flips that: sight-level places ARE valid candidates, but
-  // tagged `singleSight: true` and `stayRange: "0 nights"`. The picker
-  // then renders them with a question-mark pin and lets the user
-  // decide role (Wayside on a transit leg, or Day-trip from a nearby
-  // hub) \u2014 Max suggests, user decides. Cities/towns where the
-  // traveler can sleep stay as `singleSight: false` with their
-  // ordinary stayRange.
+  // The criterion is INFRASTRUCTURE, not number-of-sights. A
+  // multi-sight place without lodging is still a single-sight (user
+  // can't stay). A small village with one main draw but a real B&B
+  // and a restaurant is a STAY (user can sleep and eat).
   //
-  // This is the principle: Max does not pre-resolve "is this a
-  // wayside or a day-trip" ambiguity. The user has more context for
-  // that choice. Max's job is to identify the place and surface the
-  // question, not to silently pick.
-  var pStayConstraint = "Place classification \u2014 two kinds:\n"
-    + "  (a) STAY places: cities, towns, or villages where a traveler can ACTUALLY STAY OVERNIGHT (hotels, B&Bs, vacation rentals within ~5 km). "
+  // The principle: Max identifies what kind of place it is. Max does
+  // NOT decide whether a single-sight should be a wayside or a
+  // day-trip \u2014 that's the user's call, made via the ? pin in the
+  // picker. Max suggests, user decides.
+  var pStayConstraint = "Place classification \u2014 two kinds, decided by INFRASTRUCTURE:\n"
+    + "  (a) STAY: the place has REAL lodging (hotels, B&Bs, vacation rentals) AND food/restaurants within ~5 km. The traveler can plausibly sleep and eat here. "
     + "Set `singleSight: false` and a real `stayRange` like \"1-2 nights\" or \"2-4 nights\".\n"
-    + "  (b) SINGLE-SIGHT places: a waterfall, a viewpoint, a glacier lagoon, a hot spring, a black-sand beach, a famous summit \u2014 places the traveler will want to SEE but where there's no overnight lodging within ~5 km, or where lodging exists but the place is so singular it's worth flagging as a sight rather than a hub. "
-    + "Set `singleSight: true` and `stayRange: \"0 nights\"`. The user will decide whether to fit it as a stop along the way or a day-trip from a hub.\n"
-    + "Include BOTH kinds in your candidates \u2014 single-sights ARE useful candidates, just classified. Do NOT silently drop them. Do NOT promote a single-sight to a stay by assigning it nights it can't support.\n";
+    + "  (b) SINGLE-SIGHT: no real lodging OR no food options nearby. The place is worth SEEING but can't be SLEPT or EATEN in. A waterfall, a viewpoint, a glacier lagoon, a hot spring, a black-sand beach, a remote summit. "
+    + "Set `singleSight: true` and `stayRange: \"0 nights\"`. The user decides whether to fit it as a stop along the way or a day-trip from a hub.\n"
+    + "The criterion is INFRASTRUCTURE, not how many sights are at the place. A multi-sight place without lodging is still SINGLE-SIGHT. A small village with one main draw but a real B&B and restaurant is a STAY.\n"
+    + "Include BOTH kinds. Don't drop single-sights \u2014 they're useful candidates. Don't promote single-sights to stays by faking lodging that doesn't exist.\n";
 
   // v359.60.23: explicit region constraint. The brief already includes
   // "Region: X" but the LLM occasionally wandered out of region anyway
