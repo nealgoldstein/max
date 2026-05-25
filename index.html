@@ -18698,6 +18698,24 @@ function renderActivityPicker(){
     // _tbPlacesReRender — is identical regardless of whether the user
     // picked from the card, the map, or typed it manually.
     var _fnc_keptCands = (_tb.candidates || []).filter(function(c){ return c.status === "keep"; });
+    // Edit-mode fallback: when re-entering the picker on an existing
+    // trip, _tb.candidates is often empty (or carries different status
+    // values than the fresh-build "keep"). The trip's committed
+    // destinations are the source of truth for "what the user is
+    // going to" in that case. Synthesize keep-shaped candidates from
+    // them so ranking has anchors to work against.
+    if (!_fnc_keptCands.length && typeof trip !== "undefined" && trip
+        && Array.isArray(trip.destinations) && trip.destinations.length) {
+      _fnc_keptCands = trip.destinations.map(function(d){
+        return {
+          place: d.place,
+          lat: (typeof d.lat === "number") ? d.lat : null,
+          lng: (typeof d.lng === "number") ? d.lng : null,
+          nights: d.nights || 0,
+          status: "keep"
+        };
+      });
+    }
     var _fnc_ordered = _fnc_keptCands.slice();
     try {
       var _fnc_orderFn = (typeof window.MaxEnginePicker !== "undefined" && typeof MaxEnginePicker.orderKeptCandidates === "function")

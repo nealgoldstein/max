@@ -174,6 +174,21 @@
     // candidate (for entry) and last (for exit). Same ordering helper
     // as the realism gate + the Max-suggests card uses.
     var keptCands = (tb.candidates || []).filter(function(c){ return c.status === "keep"; });
+    // Edit-mode fallback (matches the card in index.html): when
+    // re-entering the picker on an existing trip, candidates may
+    // be empty; trip.destinations is the source of truth.
+    if (!keptCands.length && global.trip && Array.isArray(global.trip.destinations)
+        && global.trip.destinations.length) {
+      keptCands = global.trip.destinations.map(function(d){
+        return {
+          place: d.place,
+          lat: (typeof d.lat === "number") ? d.lat : null,
+          lng: (typeof d.lng === "number") ? d.lng : null,
+          nights: d.nights || 0,
+          status: "keep"
+        };
+      });
+    }
     var orderedKeeps = keptCands.slice();
     try {
       var orderFn = (global.MaxEnginePicker && typeof global.MaxEnginePicker.orderKeptCandidates === "function")
