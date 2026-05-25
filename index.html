@@ -10056,18 +10056,32 @@ async function runCandidateSearch(requiredPlaces) {
   var cityCount = Math.min(5, Math.max(3, Math.ceil(extraCount / 2)));
   var thematicCount = Math.max(5, extraCount - cityCount);
 
-  // v353.2: prevent the LLM from picking single sights (beaches,
-  // waterfalls, viewpoints, summits) as full destinations. A place
-  // only qualifies as a destination if a traveler can ACTUALLY
-  // STAY OVERNIGHT there (hotels, B&Bs, vacation rentals \u2014 real
-  // lodging, not "the closest hotel is 40 minutes away"). Sight-
-  // level places belong inside the closest city/town's itinerary,
-  // not as their own destination card. Symptom this prevents:
-  // Diamond Beach showing up as a 1-night destination instead of
-  // as a sight at H\u00f6fn or V\u00edk.
-  var pStayConstraint = "Only include places where a traveler can ACTUALLY STAY OVERNIGHT \u2014 hotels, inns, vacation rentals, etc. WITHIN that place. "
-    + "Do NOT include sight-level places that are visited as day-trips: beaches, waterfalls, glaciers, viewpoints, summits, individual museums, single attractions, or transit hubs without lodging. "
-    + "Those belong as sights in the closest town/city that DOES have stays. If a place's primary draw is a single attraction and there's no real lodging within ~5 km, it's a SIGHT, not a destination \u2014 recommend the closest city/town instead and mention the attraction in otherAttractions.\n";
+  // Round FN.F.2: single-sight identification.
+  //
+  // History: v353.2 instructed the LLM to EXCLUDE sight-level places
+  // (waterfalls, viewpoints, glacier lagoons) from candidates entirely,
+  // on the theory that they belong as sights inside the closest
+  // city/town. Symptom that prevented: Diamond Beach showing up as a
+  // 1-night destination with hotels and meals.
+  //
+  // FN.F.2 flips that: sight-level places ARE valid candidates, but
+  // tagged `singleSight: true` and `stayRange: "0 nights"`. The picker
+  // then renders them with a question-mark pin and lets the user
+  // decide role (Wayside on a transit leg, or Day-trip from a nearby
+  // hub) \u2014 Max suggests, user decides. Cities/towns where the
+  // traveler can sleep stay as `singleSight: false` with their
+  // ordinary stayRange.
+  //
+  // This is the principle: Max does not pre-resolve "is this a
+  // wayside or a day-trip" ambiguity. The user has more context for
+  // that choice. Max's job is to identify the place and surface the
+  // question, not to silently pick.
+  var pStayConstraint = "Place classification \u2014 two kinds:\n"
+    + "  (a) STAY places: cities, towns, or villages where a traveler can ACTUALLY STAY OVERNIGHT (hotels, B&Bs, vacation rentals within ~5 km). "
+    + "Set `singleSight: false` and a real `stayRange` like \"1-2 nights\" or \"2-4 nights\".\n"
+    + "  (b) SINGLE-SIGHT places: a waterfall, a viewpoint, a glacier lagoon, a hot spring, a black-sand beach, a famous summit \u2014 places the traveler will want to SEE but where there's no overnight lodging within ~5 km, or where lodging exists but the place is so singular it's worth flagging as a sight rather than a hub. "
+    + "Set `singleSight: true` and `stayRange: \"0 nights\"`. The user will decide whether to fit it as a stop along the way or a day-trip from a hub.\n"
+    + "Include BOTH kinds in your candidates \u2014 single-sights ARE useful candidates, just classified. Do NOT silently drop them. Do NOT promote a single-sight to a stay by assigning it nights it can't support.\n";
 
   // v359.60.23: explicit region constraint. The brief already includes
   // "Region: X" but the LLM occasionally wandered out of region anyway
@@ -10097,7 +10111,9 @@ async function runCandidateSearch(requiredPlaces) {
     + pStayConstraint
     + "BE SPECIFIC. Name the museums, the landmarks, the streets, the restaurants, the trains \u2014 don't hand-wave with 'major museums' or 'scenic rail.' Name them.\n"
     + "Return ONLY a JSON array of exactly " + cityCount + " places (no markdown):\n"
-    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why a traveler to this region would want to see it \u2014 specific, not generic.","tradeoffs":"One honest downside (e.g. expensive, touristy, requires rearranging the trip).","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here.","widelyRecommended":false,"lat":0.0,"lng":0.0}]\nSet widelyRecommended=true if this place appears on most standard itineraries for the region \u2014 a canonical destination \u2014 false otherwise.';
+    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","singleSight":false,"whyItFits":"Why a traveler to this region would want to see it \u2014 specific, not generic.","tradeoffs":"One honest downside (e.g. expensive, touristy, requires rearranging the trip).","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here.","widelyRecommended":false,"lat":0.0,"lng":0.0}]\n'
+    + 'Set widelyRecommended=true if this place appears on most standard itineraries for the region \u2014 a canonical destination \u2014 false otherwise. '
+    + 'For this prompt (cities), singleSight is almost always false \u2014 cities have multiple things to see and do.';
 
   var pThematic = "You are a travel expert helping plan a trip to " + (_tb.region||"this region") + ".\n"
     + "Trip context: " + brief + "\n"
@@ -10113,7 +10129,9 @@ async function runCandidateSearch(requiredPlaces) {
     + pStayConstraint
     + "BE SPECIFIC. Name things \u2014 the trail, the hut, the train, the dish, the view. Never hand-wave with 'spectacular scenery' or 'famous for trains' if you can say what specifically.\n"
     + "Return ONLY a JSON array of exactly " + thematicCount + " places (no markdown):\n"
-    + '[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"What makes it worth visiting for this specific trip \u2014 specific, not generic.","tradeoffs":"One honest downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here beyond the trip\u2019s stated reason.","widelyRecommended":false,"lat":0.0,"lng":0.0}]\nSet widelyRecommended=true if this is a canonical destination for the region \u2014 false otherwise.';
+    + '[{"place":"City or Sight","country":"Country","role":"base","stayRange":"2-4 nights OR 0 nights","singleSight":false,"whyItFits":"What makes it worth visiting for this specific trip \u2014 specific, not generic.","tradeoffs":"One honest downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here beyond the trip\u2019s stated reason.","widelyRecommended":false,"lat":0.0,"lng":0.0}]\n'
+    + 'Set widelyRecommended=true if this is a canonical destination for the region \u2014 false otherwise. '
+    + 'Mix STAY places and SINGLE-SIGHT places freely here \u2014 both are useful. For single-sights, set singleSight=true and stayRange="0 nights"; the user picks role downstream.';
 
   // v359.60.23: backstop filter for the region guard above. If the
   // LLM still returns a candidate whose `country` doesn't overlap with
@@ -10147,7 +10165,9 @@ async function runCandidateSearch(requiredPlaces) {
         + "Describe why each is genuinely worth visiting — character, what to see and do, what makes it special. Trains may be one reason but not the only one.\n\n"
         + "BE SPECIFIC. Don't write generic hand-waves like 'three major scenic railway routes converge here' or 'several famous museums' or 'a few notable cathedrals.' Name them: 'the Glacier Express, Bernina Express, and Rhaetian Railway all pass through.' If you're referring to a specific thing the traveler would want to see or do, name it. Specificity is the whole point.\n\n"
         + "Return ONLY a JSON array (no markdown):\n"
-        + '[{"place":"City","country":"Country","role":"anchor","stayRange":"2-4 nights","whyItFits":"Why worth visiting \u2014 specific, named things. Not hand-waves.","tradeoffs":"One downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here \u2014 named specifics.","widelyRecommended":false,"lat":0.0,"lng":0.0}]\nSet widelyRecommended=true if this is a canonical destination.';
+        + '[{"place":"City or Sight","country":"Country","role":"anchor","stayRange":"2-4 nights OR 0 nights","singleSight":false,"whyItFits":"Why worth visiting \u2014 specific, named things. Not hand-waves.","tradeoffs":"One downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth considering here \u2014 named specifics.","widelyRecommended":false,"lat":0.0,"lng":0.0}]\n'
+        + 'Set widelyRecommended=true if this is a canonical destination. '
+        + 'For user-named places that are clearly sight-level (a waterfall, viewpoint, hot spring), set singleSight=true and stayRange="0 nights" \u2014 the user will decide whether to fit it as a wayside or day-trip downstream. For cities/towns the user can stay in, singleSight=false.';
       var p1bTokens = 1800 + batch.length * 220;
       calls.push(callMax([{role:"user",content:p1b}], p1bTokens, 50000).then(function(t){
         var cleaned = t.replace(/```json|```/g,"").trim();
