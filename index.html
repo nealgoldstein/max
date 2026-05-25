@@ -18681,6 +18681,38 @@ function renderActivityPicker(){
     var curEntry = (_tb.entry || "").replace(/"/g,'&quot;');
     var curExit  = (_tb.tbExit || "").replace(/"/g,'&quot;');
 
+    // ───── Round FN.F.1: "Single sight places to assign" banner ─────
+    // When the picker has candidates that Max identified as single-
+    // sight places (one thing to see/do — waterfall, viewpoint, hot
+    // spring) and the user hasn't yet picked a role for them, surface
+    // a count banner at the top of the list. Tells the user there's a
+    // decision to make per place: along the way, or day trip from a
+    // hub. The ? pins on the map are the per-place tap targets;
+    // this banner is just the "you have N decisions" signal.
+    var _fnf_isSSFn = (typeof window._isSingleSight === "function") ? window._isSingleSight
+                     : (typeof _isSingleSight === "function") ? _isSingleSight
+                     : null;
+    var _fnf_ssCount = 0;
+    if (_fnf_isSSFn) {
+      (_tb.candidates || []).forEach(function(c){
+        if (_fnf_isSSFn(c)) _fnf_ssCount++;
+      });
+    }
+    var _fnf_ssBannerHtml = "";
+    if (_fnf_ssCount > 0) {
+      _fnf_ssBannerHtml = ''
+        + '<div style="margin:0 0 14px;padding:11px 14px;background:#f3eefb;border:1px solid #d8c9ed;border-radius:8px;display:flex;align-items:center;gap:12px;">'
+        +   '<div style="font-size:22px;flex-shrink:0;color:#7a4fbf;font-weight:700;line-height:1;width:28px;height:28px;border-radius:50%;background:#9ca3af;color:#fff;display:flex;align-items:center;justify-content:center;border:2px dashed #fff;box-shadow:0 1px 4px rgba(0,0,0,.15);font-size:14px;">?</div>'
+        +   '<div style="flex:1;font-size:12px;color:#3a2960;line-height:1.5;">'
+        +     '<strong style="color:#5a3da0;">' + _fnf_ssCount + ' single-sight place' + (_fnf_ssCount === 1 ? '' : 's') + ' to assign</strong>'
+        +     '<div style="font-size:11px;color:#6a4f9a;margin-top:2px;">'
+        +       'Tap each ? pin on the map (or its card below) and pick: along the way, or day trip from a hub. Max identified these — you decide how to fit them.'
+        +     '</div>'
+        +   '</div>'
+        + '</div>';
+    }
+    // ─────────────────────────────────────────────────────────────────────
+
     // ───── Round FN.C.1: "Max suggests" card at the END of discovery ─────
     // Same propose-and-explain pattern as the trip-view Arrival/Departure
     // panel, planted inside the existing A/D section in the discovery
@@ -18865,6 +18897,8 @@ function renderActivityPicker(){
     // ─────────────────────────────────────────────────────────────────────
     listHtml = ''
       +'<div style="font-size:12px;color:#555;line-height:1.65;margin-bottom:16px;max-width:680px;">There are a lot of things to do and see in '+_pmEsc(placeLabel)+'. Max has included the things that intrigued you, and pre-checked those as well as the things most first-time visitors don’t want to miss. Uncheck what doesn’t appeal to you, check anything else that does, and add anything Max has missed as well. Planning is an iterative process, so you’ll probably be coming back here as you learn more about '+_pmEsc(placeLabel)+' and as you think about your trip.</div>'
+      // FN.F.1: single-sight count banner. Empty if no single-sights.
+      + _fnf_ssBannerHtml
       // v360.2: wisp-evaluation result banner. Empty by default; populated
       // by _renderWispResultBanner() when the user arrives at the picker
       // immediately after running Max on captured Spark wisps. Replaces

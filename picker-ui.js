@@ -292,9 +292,56 @@
   // No state mutation, no engine reads. Pure factory. The caller is
   // responsible for adding it to the map via L.marker(...).
 
+  // ── Round FN.F.1: single-sight candidate detection ──────────
+  // A "single-sight" candidate is a place where there's effectively
+  // one thing to see/do — a waterfall, a viewpoint, a hot spring —
+  // rather than a city/town worth sleeping in. Max identifies these
+  // but DOES NOT pre-assign a role (wayside vs day-trip): the user
+  // decides per place. The principle: Max suggests, user decides.
+  //
+  // Heuristic for MVP:
+  //   * Explicit flag: c.singleSight === true (set by future LLM
+  //     prompt update; honored now if present).
+  //   * c.status === "keep" AND zero nights AND no role committed
+  //     yet (intent is null/undefined/"stay" without explicit user
+  //     action). A 0-night "stay" is the LLM's way of saying "this
+  //     place isn't a hub" — that's the same population we want to
+  //     surface as needs-a-role.
+  //
+  // Returns true when this candidate should render with a "?" pin
+  // and surface in the "decide how to fit it" affordance.
+  function _isSingleSight(c) {
+    if (!c || typeof c !== "object") return false;
+    if (c.singleSight === true) return true;
+    if (c.status !== "keep") return false;
+    var nights = (typeof c.nights === "number") ? c.nights : 0;
+    if (nights > 0) return false;
+    // If the user has already picked Wayside or Day-trip, it's no
+    // longer single-sight — it's assigned.
+    if (c.intent === "wayside" || c.intent === "dayTrip") return false;
+    return true;
+  }
+  global._isSingleSight = _isSingleSight;
+
   function _makeCandidateIcon(c, grayed, selected) {
     var L = global.L;
     if (!L) return null;
+    // FN.F.1: single-sight variant — distinct visual that reads as
+    // "you want to see this; tap to pick wayside or day-trip." Gray
+    // background with white "?" label, slightly thicker border so it
+    // stands out from rejected (also gray) candidates. Skip the
+    // ordinal/sequence label entirely — single-sights aren't on the
+    // numbered spine.
+    var singleSight = (!grayed && _isSingleSight(c));
+    if (singleSight) {
+      var ssSize = selected ? 30 : 24;
+      var ssRing = selected
+        ? '<div style="position:absolute;top:-6px;left:-6px;width:' + (ssSize + 12) + 'px;height:' + (ssSize + 12) + 'px;border:3px solid #ffb300;border-radius:50%;box-shadow:0 0 10px rgba(255,179,0,0.55);pointer-events:none;animation:max-pin-pulse 1.6s ease-in-out infinite;"></div>'
+        : '';
+      var ssInner = '<div style="position:relative;background:#9ca3af;color:#fff;border-radius:50%;width:' + ssSize + 'px;height:' + ssSize + 'px;display:flex;align-items:center;justify-content:center;font-size:' + (selected ? 14 : 13) + 'px;font-weight:700;border:2px dashed #fff;box-shadow:0 1px 4px rgba(0,0,0,.25);">?</div>';
+      var ssHtml = '<div style="position:relative;width:' + ssSize + 'px;height:' + ssSize + 'px;">' + ssRing + ssInner + '</div>';
+      return L.divIcon({ html: ssHtml, className: "ce-single-sight-pin", iconSize: [ssSize, ssSize], iconAnchor: [ssSize / 2, ssSize / 2] });
+    }
     var mc = grayed ? "#7a8090"
                     : (c.status === "keep" ? "#2a7a4e"
                       : c.status === "reject" ? "#888" : "#1a5fa8");
@@ -1557,22 +1604,50 @@
         + '</label>';
     }
 
+    // Round FN.F.1: for single-sight candidates, the popover leads
+    // with Wayside / Day-trip and demotes Stay. The header subtitle
+    // signals "you want to see this — pick how to fit it" rather
+    // than "is this an overnight?" — that question doesn't apply to
+    // a place with one thing to see/do.
+    var _isSS = _isSingleSight(cand);
+    var _headerSub = _isSS
+      ? 'Single sight — pick how to fit it'
+      : 'Role on this trip';
+    var _stayRow = ''
+      + '<label style="display:flex;align-items:center;gap:10px;padding:'
+      + (_isSS ? '8px' : '10px')
+      + ';border:1px solid '
+      + (curIntent === "stay" ? "#1a5fa8" : (_isSS ? "#eaeaea" : "#e0e0e0"))
+      + ';border-radius:8px;cursor:pointer;background:'
+      + (curIntent === "stay" ? "#eef4fb" : "#fff")
+      + ';opacity:' + (_isSS && curIntent !== "stay" ? '0.65' : '1') + ';">'
+      +   '<input type="radio" name="role-pick" value="stay"' + (curIntent === "stay" ? " checked" : "") + ' style="margin:0;" />'
+      +   '<div style="flex:1;">'
+      +     '<div style="font-size:' + (_isSS ? '12px' : '13px') + ';font-weight:600;color:#222;">Overnight stay</div>'
+      +     '<div style="font-size:11px;color:#777;margin-top:2px;">'
+      +       (_isSS
+        ? 'Unusual for a single-sight place — only pick if you want hotels and meals here.'
+        : 'Its own stop on the trip with hotels and meals.')
+      +     '</div>'
+      +   '</div>'
+      + '</label>';
+    // Order: single-sights surface Wayside + Day-trip first; stays are
+    // secondary. Regular candidates keep the historical order
+    // (Stay → Day-trip → Wayside).
+    var _rolesHtml = _isSS
+      ? (waysideRow + dayTripRow + _stayRow)
+      : (_stayRow + dayTripRow + waysideRow);
     ov.innerHTML = ''
       + '<div style="background:#fff;border-radius:12px;max-width:420px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,0.18);">'
       +   '<div style="padding:18px 20px 4px;">'
-      +     '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">Role on this trip</div>'
+      +     '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:'
+      +       (_isSS ? "#7a4fbf" : "#888") + ';">'
+      +       (_isSS ? '✦ ' : '') + _headerSub
+      +     '</div>'
       +     '<div style="font-size:17px;font-weight:700;color:#111;margin-top:4px;">' + cand.place + '</div>'
       +   '</div>'
       +   '<div style="padding:14px 20px;display:flex;flex-direction:column;gap:10px;">'
-      +     '<label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid ' + (curIntent === "stay" ? "#1a5fa8" : "#e0e0e0") + ';border-radius:8px;cursor:pointer;background:' + (curIntent === "stay" ? "#eef4fb" : "#fff") + ';">'
-      +       '<input type="radio" name="role-pick" value="stay"' + (curIntent === "stay" ? " checked" : "") + ' style="margin:0;" />'
-      +       '<div style="flex:1;">'
-      +         '<div style="font-size:13px;font-weight:600;color:#222;">Overnight stay</div>'
-      +         '<div style="font-size:11px;color:#777;margin-top:2px;">Its own stop on the trip with hotels and meals.</div>'
-      +       '</div>'
-      +     '</label>'
-      +     dayTripRow
-      +     waysideRow
+      +     _rolesHtml
       +   '</div>'
       +   '<div style="padding:8px 20px 18px;display:flex;justify-content:flex-end;gap:8px;">'
       +     '<button id="role-cancel" style="font-size:13px;font-weight:500;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Cancel</button>'
