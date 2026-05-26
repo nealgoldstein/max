@@ -670,6 +670,11 @@
         // sees two unflagged adjacent same-place destinations and
         // folds them into one — losing the buffer/main distinction.
         existing._entryStop = !!c._entryStop;
+        // Round FN.F.4: propagate singleSight on the reconcile path
+        // too. A user who edits the trip in the picker and re-
+        // Choreographs should see the flag re-applied based on the
+        // current candidate state — they may have just toggled it.
+        existing.singleSight = !!c.singleSight;
         newArr.push(existing);
       } else {
         // Fresh destination — same shape as the from-scratch path.
@@ -703,7 +708,17 @@
           // flag and the trip-view banner doesn't surface.
           _exitStop: !!c._exitStop,
           // Round FY: same propagation on the fresh-create path.
-          _entryStop: !!c._entryStop
+          _entryStop: !!c._entryStop,
+          // Round FN.F.4: propagate the LLM's singleSight flag.
+          // singleSight: true on a destination means "user wants to see
+          // this, but Max doesn't know whether it's a stop along the
+          // way or a day-trip from a hub." The trip-view map renders
+          // these as numbered pins with a ? badge until the user
+          // assigns a role; tapping the pin opens a role popover that
+          // converts the destination to a wayside or day-trip stop.
+          // singleSight: false (cities/towns with infrastructure)
+          // renders as the normal numbered overnight pin.
+          singleSight: !!c.singleSight
         };
         newArr.push(fresh);
       }
