@@ -4,12 +4,23 @@ Single source of truth for "what's left on the architecture refactor."
 Open this when you sit down and want to know the next move. Update it
 when you ship a round (check a box, add a follow-up).
 
+> **v353 pivot (May 2026):** the separate mobile shell (`mobile/index.html`)
+> was retired in favor of responsive CSS in the main `index.html`. Item B
+> is **closed-by-pivot** — the mobile-as-second-consumer falsifiability
+> test was proven by MA.1–4, and the decision was to collapse to one UI
+> codebase. MA.5+ is no longer scheduled.
+>
+> Current live product direction is **gallery-first templates** — see
+> `design-notes.md`. If templates become the canonical way a trip is
+> born and Places becomes where it lives, that may be the driver Item E
+> was waiting for.
+
 ---
 
 ## Where we are now
 
-**Score: ~8.5 / 10** (May 2026, after Items A, C, D all closed).
-Up from 3 (single 24kloc inline file).
+**Score: ~8.5 / 10** (May 2026, after Items A, C, D closed and B
+closed-by-pivot). Up from 3 (single 24kloc inline file).
 
 What's solid:
 - Pure logic lives in engines and is tested. **211 tests**, well-
@@ -34,15 +45,23 @@ What's solid:
   surface holds up under product change.
 
 What's still missing:
-- **Item B** (mobile shell) — MA.1 read view shipped; mutations
-  beyond notes still require future Phase 2 work.
-- **Item 16** (drawTripMode / drawDestMode fold into Places page) —
-  deferred until a real driver appears. Multi-month estimate, low
-  immediate value, no user-visible payoff.
+- **Item E** (drawTripMode / drawDestMode fold into Places page) —
+  was deferred until a real driver appears. Multi-month estimate,
+  low immediate value, no user-visible payoff *on its own*. **The
+  gallery-first direction may be that driver:** if templates are how
+  a trip is born and Places is where it lives, drawTripMode is the
+  duplicate surface that has to go. Re-evaluate now.
 - **HZ.3+ migration** — inline picker code still reads `_tb.X`
   directly (low-value migration, deferred). The engine API surface
   is what matters for external consumers; inline picker can keep
   its locals.
+
+What's closed-by-pivot:
+- **Item B** (mobile shell) — MA.1–4 shipped through May 2026 and
+  validated the engine API. At v353 the separate mobile shell was
+  retired in favor of responsive CSS in `index.html`. MA.5 has no
+  place to live. The architectural value of Item B was already
+  collected.
 
 ---
 
@@ -97,11 +116,20 @@ emits internally) and out of scope.
   in code (engine-DOM-free test enforces)
 - ✅ namespace surface exists for engine consumers
 
-### Item B — Mobile shell as second consumer
-**State:** **MA.1 shipped (May 2026).** Read-only trip view +
-edit-traveler-notes + cross-tab sync via storage events. Validates
-the engine API for the read path. Mutations beyond notes still
-require Phase 2 mutator conversion (Item A).
+### Item B — Mobile shell as second consumer — ✅ CLOSED-BY-PIVOT
+**State:** **closed at v353 (May 2026).** Separate `mobile/index.html`
+shell was retired in favor of responsive CSS in the main `index.html`.
+The architectural goal of Item B — proving the engine API holds up
+against a second consumer — was collected via MA.1–4. The remaining
+rounds (MA.5+) no longer have a place to live.
+
+What we kept: a real falsifiability test happened. The engine API
+survived a second consumer end-to-end. That's the value Item B was
+underwriting; the rest was scaffolding.
+
+Original notes preserved below for historical context.
+
+---
 
 Recommended sequencing: **don't wait for Item A to finish.** Start
 the mobile shell against `engine-trip.js` as soon as ~half the
@@ -246,19 +274,26 @@ module), that's the trigger.
 
 ### Item E — drawTripMode legacy path → fold into Places
 **State:** open. Mentioned in `STATE.md` since the original picker/
-Places merge. ~30 inline call sites.
+Places merge. ~30 inline call sites. Audit at
+`audit-drawTripMode.md` already exists.
 
-**First concrete round (TM.1):** write an audit doc
-(`audit-drawTripMode.md`) listing every call site and what it
-renders. The audit's the prerequisite — don't start moving anything
-until the call graph is on paper.
+**Possible new driver (May 2026):** the gallery-first direction in
+`design-notes.md` treats templates as the canonical way a trip is
+born, with Places as where the trip lives and is edited. If that
+direction holds, `drawTripMode` is the duplicate surface the new
+model can't tolerate — and Item E is no longer speculative.
+
+**First concrete round (TM.1):** the audit doc
+(`audit-drawTripMode.md`) is done. Next step: re-read it through
+the gallery-first lens and pick the first call site to migrate.
 
 **Done when:** `drawTripMode` and `drawDestMode` are deleted; the
 trip view is the time lens of the picker, period.
 
 **Why item E:** "one surface" was the original goal of the picker/
 Places merge. Two surfaces means twice the inline state, twice the
-redraw paths, twice the bug surface area.
+redraw paths, twice the bug surface area. Gallery-first templates
+sharpen the cost by making the duplicate surface user-visible.
 
 ---
 
@@ -270,9 +305,11 @@ The architecture is a 10 when:
    `g(...)`). Every mutator emits an event; the UI layer subscribes.
 2. `engine-picker.js` has the picker's state behind a clean API; no
    inline script reaches into `_tb` directly.
-3. Mobile shell is shipped. It loads only `db.js` + `engine-trip.js`
-   + the mobile UI bundle. It doesn't import anything from
-   `picker-ui.js` or `index.html`.
+3. ~~Mobile shell is shipped~~ **— rescoped at v353.** The
+   architectural test ("engine API survives a second consumer") was
+   the point; that landed via MA.1–4. With the v353 pivot to
+   responsive CSS, there is no second consumer to keep. Item B is
+   closed-by-pivot.
 4. `renderCandidateCards` is a thin orchestrator (< 200 lines) that
    reads engine derivations and dispatches to picker-ui renderers.
 5. `drawTripMode` is gone. One trip surface.
@@ -281,14 +318,19 @@ The architecture is a 10 when:
 7. Engine test count > 200, with a contract test for every public
    `MaxEngineTrip.*` and `MaxEnginePicker.*` function.
 
-We're hitting 1–2 of the seven now.
+We're hitting 1, 2, 3, 4, and 7 now (post-HX series and v353 pivot).
+Items 5 and 6 remain: drawTripMode fold (Item E) and overall `index.html`
+shrink, both still open.
 
 ---
 
 ## Working rules for picking up this list
 
-- **Pick the topmost unchecked item.** Items A and B can run in
-  parallel; everything else depends on Item A being mostly done.
+- **Pick the topmost unchecked item.** With A, C, D closed and B
+  closed-by-pivot, the live track is Item E (drawTripMode fold) —
+  *if* the gallery-first direction is the driver. Otherwise nothing
+  on this list is urgent and product work in `design-notes.md` /
+  `functionality-roadmap.md` should set the next move.
 - **One round per check.** Don't bundle 3 mutator conversions into a
   single round. The whole point is small, reviewable steps.
 - **Each round bumps SW.** v284 → v285 → v286. The header block
