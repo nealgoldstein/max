@@ -18014,8 +18014,39 @@ function _renderPlacePickerMap(targetId){
       // carry place initials.
       var isStay = info.kept && !info._isDayTrip;
       var isDayTrip = info.kept && info._isDayTrip;
-      var color, label, size;
-      if (isStay) {
+      // Round FN.F.3: cross-reference _tb.candidates for the singleSight
+      // flag. The picker hero map (_pmMap) builds allPlaces from
+      // _tb.placeActivities (must-do items) — separate from _tb.candidates
+      // where the LLM-emitted singleSight flag lives. Walk candidates by
+      // place name to surface the flag here. A single-sight place gets the
+      // ? pin treatment regardless of kept/day-trip status — it's the
+      // "decide how to fit me" signal that overrides the normal role
+      // styling. Once the user assigns Wayside/Day-trip via the role
+      // popover, intent gets set, _isSingleSight returns false, and the
+      // pin morphs to its assigned style on the next render.
+      var isSingleSight = false;
+      try {
+        var _ssCand = (window._tb && Array.isArray(window._tb.candidates))
+          ? window._tb.candidates.find(function(cc){
+              return cc && cc.place && cc.place.toLowerCase() === (info.place || "").toLowerCase();
+            })
+          : null;
+        if (_ssCand && typeof window._isSingleSight === "function") {
+          isSingleSight = window._isSingleSight(_ssCand);
+        } else if (_ssCand && _ssCand.singleSight === true) {
+          isSingleSight = true;
+        }
+      } catch(_) { /* swallow */ }
+      var color, label, size, borderStyle = "2px solid #fff", fontPx = 9;
+      if (isSingleSight) {
+        // Gray pin with white "?" — distinct from rejected (also gray)
+        // via the larger size + dashed border + label.
+        color = "#9ca3af";
+        label = "?";
+        size = 22;
+        borderStyle = "2px dashed #fff";
+        fontPx = 13;
+      } else if (isStay) {
         color = "#1a5fa8";
         label = _pmEsc((info.place || "").substring(0, 2));
         size = 22;
@@ -18045,11 +18076,16 @@ function _renderPlacePickerMap(targetId){
       // pin tooltip ("Akureyri · ★ iconic · stay") and in the
       // sidebar; just not as a colored decoration on the pin.
       var html = '<div style="background:'+color+';color:#fff;border-radius:50%;width:'
-        + size + 'px;height:'+size+'px;border:2px solid #fff'
-        + ';box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;">'
+        + size + 'px;height:'+size+'px;border:' + borderStyle
+        + ';box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;font-size:' + fontPx + 'px;font-weight:700;">'
         + label
         + '</div>';
-      var icon = L.divIcon({html: html, className: "", iconSize: [size,size], iconAnchor: [size/2,size/2]});
+      var icon = L.divIcon({
+        html: html,
+        className: isSingleSight ? "pm-single-sight-pin" : "",
+        iconSize: [size,size],
+        iconAnchor: [size/2,size/2]
+      });
       var existing = _pmMarkersByPlace[key];
       if (existing) {
         existing.setIcon(icon);
