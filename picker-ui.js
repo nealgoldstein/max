@@ -342,8 +342,18 @@
       var ssHtml = '<div style="position:relative;width:' + ssSize + 'px;height:' + ssSize + 'px;">' + ssRing + ssInner + '</div>';
       return L.divIcon({ html: ssHtml, className: "ce-single-sight-pin", iconSize: [ssSize, ssSize], iconAnchor: [ssSize / 2, ssSize / 2] });
     }
+    // Round NC.2 (gallery-pivot): keep the picker and trip-view maps
+    // sharing one icon vocabulary. Kept candidates now render in their
+    // tripRole color so a daytrip pin reads purple on both maps, etc.
+    // Fall back to the legacy green for kept-without-role and the
+    // legacy blue/gray for proposed/rejected.
+    var _keptColor = "#2a7a4e";  // legacy green default
+    if (c.status === "keep" && c.tripRole && c.tripRole !== "unspecified"
+        && global.MaxEnginePicker && typeof global.MaxEnginePicker.pinColorForRole === "function") {
+      _keptColor = global.MaxEnginePicker.pinColorForRole(c.tripRole);
+    }
     var mc = grayed ? "#7a8090"
-                    : (c.status === "keep" ? "#2a7a4e"
+                    : (c.status === "keep" ? _keptColor
                       : c.status === "reject" ? "#888" : "#1a5fa8");
     var opacity = grayed ? 0.85 : 1;
     var borderStyle = grayed ? "2px dashed #fff" : "2px solid #fff";
