@@ -1786,7 +1786,8 @@
             nights: (typeof p.nights === "number") ? p.nights : 1,
             _required: true,
             _requiredFor: ["reconciled"],
-            status: "keep"
+            status: "keep",
+            tripRole: "unspecified"  // Round NC.1 (gallery-pivot)
           };
           kept.push(synth);
           keptKeys[k] = true;
@@ -2033,7 +2034,8 @@
         whyItFits: "Where you arrive — Max suggests one night to recover before moving on. Adjust or drop if you'd rather push through.",
         tradeoffs: "",
         tags: ["arrival"],
-        lat: null, lng: null
+        lat: null, lng: null,
+        tripRole: "unspecified"  // Round NC.1 (gallery-pivot)
       };
       ordered = [entryStop].concat(ordered);
       if (orderResult.reasoning) {
@@ -2068,7 +2070,8 @@
         whyItFits: "Where you depart — Max added one night here so the trip ends at your fly-out city. Adjust or drop if you'd rather fly home directly from your last activity stop.",
         tradeoffs: "",
         tags: ["departure"],
-        lat: null, lng: null
+        lat: null, lng: null,
+        tripRole: "unspecified"  // Round NC.1 (gallery-pivot)
       };
       ordered = ordered.concat([exitStop]);
       if (orderResult.reasoning) {
@@ -3000,6 +3003,10 @@
         stayRange:c.stayRange||"", lat:c.lat||null, lng:c.lng||null,
         nights: (typeof c.nights === "number") ? c.nights : undefined,
         status:c.status||null, _required:!!c._required, _requiredFor:(c._requiredFor||[]).slice(),
+        // Round NC.1 (gallery-pivot): persist user-assigned trip role
+        // on the trip snapshot so reopen of the picker keeps role
+        // decisions across rebuilds.
+        tripRole: c.tripRole || "unspecified",
         // v359.24: preserve user's role decision so re-opens of the
         // picker (Edit destinations) rehydrate the intent/hub the user
         // set, instead of falling back to the auto-suggestion.
@@ -3933,6 +3940,21 @@
       if (!c) return;
       c.status = (status === 'keep' || status === 'reject') ? status : null;
       pickerEmit('candidateChange', { id: candId, status: c.status });
+    },
+
+    // setTripRole(candId, role) — sets the user-assigned role this
+    // place plays in the trip (overnight / daytrip / onway /
+    // unspecified). Distinct from c.role, which is the LLM's own
+    // classification ("base", "anchor"). The Trip View pin shape
+    // and color is driven by tripRole; "unspecified" is the
+    // default before the user has decided.
+    setTripRole: function (candId, role) {
+      if (!global._tb || !Array.isArray(global._tb.candidates)) return;
+      var c = global._tb.candidates.find(function (x) { return x.id === candId; });
+      if (!c) return;
+      var valid = { overnight: 1, daytrip: 1, onway: 1, unspecified: 1 };
+      c.tripRole = valid[role] ? role : 'unspecified';
+      pickerEmit('candidateChange', { id: candId, tripRole: c.tripRole });
     },
 
     // startFresh(initial) — alias for resetState. Reads better at

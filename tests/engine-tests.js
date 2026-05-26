@@ -1139,6 +1139,39 @@ describe('engine-picker.js — domain setters', () => {
     MaxEnginePicker.startFresh({ region: 'fresh' });
     assert.strictEqual(window._tb.region, 'fresh');
   });
+
+  // ── Round NC.1 (gallery-pivot): tripRole setter ─────────────────
+  test('setTripRole writes valid role to candidate and emits', () => {
+    window._tb = { candidates: [{ id: 'c1', place: 'Reykjavik' }] };
+    let captured = null;
+    const off = MaxEnginePicker.on('candidateChange', p => captured = p);
+    MaxEnginePicker.setTripRole('c1', 'overnight');
+    off();
+    assert.strictEqual(window._tb.candidates[0].tripRole, 'overnight');
+    assert.deepStrictEqual(captured, { id: 'c1', tripRole: 'overnight' });
+  });
+  test('setTripRole accepts daytrip, onway, unspecified', () => {
+    window._tb = { candidates: [{ id: 'c1' }] };
+    MaxEnginePicker.setTripRole('c1', 'daytrip');
+    assert.strictEqual(window._tb.candidates[0].tripRole, 'daytrip');
+    MaxEnginePicker.setTripRole('c1', 'onway');
+    assert.strictEqual(window._tb.candidates[0].tripRole, 'onway');
+    MaxEnginePicker.setTripRole('c1', 'unspecified');
+    assert.strictEqual(window._tb.candidates[0].tripRole, 'unspecified');
+  });
+  test('setTripRole rejects garbage as unspecified', () => {
+    window._tb = { candidates: [{ id: 'c1', tripRole: 'overnight' }] };
+    MaxEnginePicker.setTripRole('c1', 'bogus');
+    assert.strictEqual(window._tb.candidates[0].tripRole, 'unspecified');
+    MaxEnginePicker.setTripRole('c1', null);
+    assert.strictEqual(window._tb.candidates[0].tripRole, 'unspecified');
+  });
+  test('setTripRole no-ops on missing candidate id', () => {
+    window._tb = { candidates: [{ id: 'c1' }] };
+    // Should not throw
+    MaxEnginePicker.setTripRole('cZ', 'overnight');
+    assert.strictEqual(window._tb.candidates[0].tripRole, undefined);
+  });
 });
 
 // ── Suite: orderKeptCandidates scenarios ───────────────────────

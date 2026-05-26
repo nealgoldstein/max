@@ -9941,6 +9941,21 @@ async function expandAirportsForRegion(){
 // window so this and other call sites keep working unchanged. (Adds
 // blue ✈ pins to the picker map for entries in _tb.airports.)
 
+// Round NC.1 (gallery-pivot): every candidate must carry a tripRole.
+// This helper ensures that — used at every chokepoint where _tb.candidates
+// is set or rehydrated. tripRole is the user-assigned role in the trip
+// (overnight / daytrip / onway / unspecified), distinct from c.role which
+// is the LLM's own kind-of-place classification.
+function _ensureTripRoleDefaults(cands) {
+  if (!Array.isArray(cands)) return cands;
+  var valid = { overnight: 1, daytrip: 1, onway: 1, unspecified: 1 };
+  cands.forEach(function(c) {
+    if (!c) return;
+    if (!c.tripRole || !valid[c.tripRole]) c.tripRole = "unspecified";
+  });
+  return cands;
+}
+
 async function runCandidateSearch(requiredPlaces) {
   // region already set from sentence in Step 1
   _tb.duration      = g("tb-duration")      ? g("tb-duration").value.trim()      : (_tb.duration||"");
@@ -10353,6 +10368,12 @@ async function runCandidateSearch(requiredPlaces) {
     }
     _tb.candidates = allCands;
     _tb.p2Failed = p2Failed;
+    // Round NC.1 (gallery-pivot): every candidate carries a tripRole — the
+    // user-assigned role this place plays on the trip map (overnight /
+    // daytrip / onway / unspecified). Default to "unspecified" so the user
+    // makes the decision via the trip-view popup. Distinct from c.role,
+    // which is the LLM's own classification (base/anchor).
+    _ensureTripRoleDefaults(_tb.candidates);
     // Persist any candidate-seeded geo entries so reloads benefit too.
     try { localStorage.setItem("max-coarse-geocode", JSON.stringify(_coarseGeocode)); } catch(_){}
     console.log("[Max] runCandidateSearch: total candidates:", allCands.length,
@@ -22407,6 +22428,7 @@ async function findCandidates(){
     // candidate-explorer.
     cands.forEach(function(c,i){c.id="c"+i;c.status=null;c.order=null;c.manuallyOrdered=false;});
     _tb.candidates=cands;
+    _ensureTripRoleDefaults(_tb.candidates);
     showCandidateExplorer(cands);
   }catch(e){
     var el=g("ce-cards");
@@ -22544,6 +22566,7 @@ async function retryDiscoveryCandidates() {
     // candidate-explorer.
     newCands.forEach(function(c,i){ c.id="c"+(existingReq.length+i); c.status=null; c.order=null; c.manuallyOrdered=false; });
     _tb.candidates = existingReq.concat(newCands);
+    _ensureTripRoleDefaults(_tb.candidates);
     _tb.p2Failed = false;
     showCandidateExplorer(_tb.candidates);
   } catch(e) {
@@ -22646,9 +22669,14 @@ function reopenCandidateExplorer(){
       // manual-pin flag so a reopened picker re-acquires the user's order.
       // Missing on legacy trips → null/false, which the next
       // _tbResequenceCandidates pass repopulates from orderKeptCandidates.
-      order:(typeof c.order==="number"?c.order:null), manuallyOrdered:!!c.manuallyOrdered
+      order:(typeof c.order==="number"?c.order:null), manuallyOrdered:!!c.manuallyOrdered,
+      // Round NC.1 (gallery-pivot): user-assigned trip role for the
+      // trip-view pin shape. Legacy trips missing this field default
+      // to "unspecified" downstream.
+      tripRole: c.tripRole || "unspecified"
     };
   });
+  _ensureTripRoleDefaults(_tb.candidates);
   _tb.requiredPlaces = (trip.requiredPlaces||[]).slice();
   if (trip.brief) {
     _tb.region = trip.brief.region || _tb.region || "";
@@ -23239,6 +23267,9 @@ async function applyCandidateChanges(){
       stayRange:c.stayRange||"", lat:c.lat||null, lng:c.lng||null,
       nights: (typeof c.nights === "number") ? c.nights : undefined,
       status:c.status||null, _required:!!c._required, _requiredFor:(c._requiredFor||[]).slice(),
+      // Round NC.1: persist user-assigned trip role onto the trip snapshot
+      // so reopen of the picker keeps the user's role decisions.
+      tripRole: c.tripRole || "unspecified",
       // Round HZ (picker hero map): persist explicit sequence position +
       // manual-pin flag so a reopened picker re-acquires the user's order.
       // Missing on legacy trips → null/false, which the next
