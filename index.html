@@ -31636,6 +31636,39 @@ function getRegionCenter(region) {
   return {center:[48,14], zoom:4};
 }
 
+// Round NC.2 (gallery-pivot): resolve the candidate that backs a given
+// destination. trip.destinations are built from trip.candidates at
+// publishTrip, so they share place names. Name-match via _normPlaceName
+// is the foreign-key bridge until/unless we add an explicit dest.candId.
+function _candForDest(dest) {
+  if (!dest || !trip || !Array.isArray(trip.candidates)) return null;
+  var norm = (typeof _normPlaceName === "function")
+    ? _normPlaceName : function(s){ return (s||"").toLowerCase().trim(); };
+  var dN = norm(dest.place || "");
+  if (!dN) return null;
+  return trip.candidates.find(function(c){ return c && norm(c.place || "") === dN; }) || null;
+}
+
+// Round NC.2: writes tripRole through both _tb.candidates (via the
+// engine setter, which emits) and trip.candidates (the authoritative
+// snapshot the trip view reads from). Called from the role popover
+// commit paths, alongside the existing convertDest* helpers — additive,
+// doesn't replace any legacy writes.
+function _writeTripRoleForDest(dest, role) {
+  var cand = _candForDest(dest);
+  if (!cand) return;
+  var valid = { overnight: 1, daytrip: 1, onway: 1, unspecified: 1 };
+  var safe = valid[role] ? role : "unspecified";
+  cand.tripRole = safe;
+  // Mirror to _tb.candidates if it's hydrated (Edit-destinations flow)
+  if (typeof MaxEnginePicker !== "undefined"
+      && typeof MaxEnginePicker.setTripRole === "function"
+      && window._tb && Array.isArray(window._tb.candidates)
+      && window._tb.candidates.some(function(c){ return c && c.id === cand.id; })) {
+    try { MaxEnginePicker.setTripRole(cand.id, safe); } catch(_){}
+  }
+}
+
 function updateMainMap(){
   if(!_mainMap)return;
   clearMainMarkers();
@@ -31889,7 +31922,16 @@ function updateMainMap(){
       // The purple candidate ring is also removed (see below) — geometry
       // alone shouldn't push a structural change to the trip; the
       // day-trip conversion is still available in the role popover.
-      var color = "#1a5fa8";
+      // Round NC.2 (gallery-pivot): pin color follows tripRole on the
+      // backing candidate. Falls back to the legacy uniform blue when
+      // there's no candidate (orphan destination) or when tripRole is
+      // "overnight" / "unspecified". daytrip → purple, onway → teal
+      // (octagon SVG comes in NC.3).
+      var _primaryCand = _candForDest(group.dests[0].dest);
+      var _primaryRole = (_primaryCand && _primaryCand.tripRole) || "unspecified";
+      var color = (typeof MaxEnginePicker !== "undefined" && MaxEnginePicker.pinColorForRole)
+        ? MaxEnginePicker.pinColorForRole(_primaryRole)
+        : "#1a5fa8";
       // Round FN.A.4: entry/exit glyph badge driven by the precomputed
       // _badgesByDestIdx map (built above the loop). A pin group can
       // carry the entry glyph, the exit glyph, or BOTH simultaneously
@@ -35903,17 +35945,26 @@ function _openTripDestRolePopover(destId){
       if (!hubId) { close(); return; }
       close();
       convertDestToDayTrip(src.id, hubId);
+      // Round NC.2: also sync tripRole on the candidate so trip-view
+      // pin colors and popover state stay in lockstep.
+      _writeTripRoleForDest(src, "daytrip");
     } else if (pickedIntent === "wayside") {
       var absSel = ov.querySelector("#trip-role-wayside-absorber");
       var absorbInto = absSel ? absSel.value : "next";
       close();
       convertDestToWayside(src.id, { absorbInto: absorbInto });
+      _writeTripRoleForDest(src, "onway");
     } else if (pickedIntent === "see") {
       // v359.60.21: convert overnight → see (0-night standalone stop).
       // If already see, no-op — the user just confirmed the current
       // state.
       close();
       if (!_isCurrentlySee) convertDestToSee(src.id);
+      // Round NC.2: "see" in the current trip-view model is a 0-night
+      // standalone stop — pre-decision in the new role taxonomy. Map
+      // it to "unspecified" so the trip-view pin signals "user hasn't
+      // committed to overnight/daytrip/onway."
+      _writeTripRoleForDest(src, "unspecified");
     } else if (pickedIntent === "remove") {
       // v359.60.21: remove dest from trip. Confirm here (not in the
       // helper) so the role popover stays the single confirmation
@@ -35956,9 +36007,14 @@ function _openTripDestRolePopover(destId){
         try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
       }
       _emitTripMutation();
+      // Round NC.2: reversing see → stay is the user committing to overnight.
+      _writeTripRoleForDest(src, "overnight");
     } else {
-      // "Overnight" while not currently see — apply is a no-op.
+      // "Overnight" while not currently see — apply is a no-op for the
+      // legacy code path, but we still record the role decision the user
+      // expressed in the popover so the trip-view pin reflects intent.
       close();
+      _writeTripRoleForDest(src, "overnight");
     }
   };
 }

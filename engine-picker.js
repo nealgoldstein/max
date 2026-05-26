@@ -87,6 +87,17 @@
     return m ? parseInt(m[1]) : 3;
   }
 
+  // Round NC.2 (gallery-pivot): tripRole → pin color. Pure helper, kept
+  // here so the trip-view pin renderer and the engine tests share the
+  // exact same mapping. "onway" is a placeholder teal until NC.3 ships
+  // the octagon SVG. "unspecified" reuses overnight blue because the
+  // pin's singleSight badge already signals the not-yet-decided state.
+  function pinColorForRole(role) {
+    if (role === "daytrip") return "#7c3aed";
+    if (role === "onway")   return "#0891b2";
+    return "#1a5fa8"; // overnight or unspecified
+  }
+
   // ── Picker draft state (Round HI: Phase 3 step 2) ──────────
   // _tb is the picker's draft state — brief fields, candidates in
   // flight, requiredPlaces, region, entry/exit cities, etc.
@@ -3717,6 +3728,7 @@
     findMatchingRequired:   _findMatchingRequired,
     parseStartDateFromBrief: parseStartDateFromBrief,
     parseNightsFromRange:   parseNightsFromRange,
+    pinColorForRole:        pinColorForRole,  // Round NC.2
     orderKeptCandidates:    orderKeptCandidates,
     // place-picker hero map (Step 2)
     orderPlacePickerStays:  orderPlacePickerStays,

@@ -1172,6 +1172,25 @@ describe('engine-picker.js — domain setters', () => {
     MaxEnginePicker.setTripRole('cZ', 'overnight');
     assert.strictEqual(window._tb.candidates[0].tripRole, undefined);
   });
+
+  // ── Round NC.2 (gallery-pivot): pin color helper ───────────────
+  test('pinColorForRole: overnight → blue', () => {
+    assert.strictEqual(MaxEnginePicker.pinColorForRole('overnight'), '#1a5fa8');
+  });
+  test('pinColorForRole: daytrip → purple', () => {
+    assert.strictEqual(MaxEnginePicker.pinColorForRole('daytrip'), '#7c3aed');
+  });
+  test('pinColorForRole: onway → teal (placeholder until NC.3 octagon)', () => {
+    assert.strictEqual(MaxEnginePicker.pinColorForRole('onway'), '#0891b2');
+  });
+  test('pinColorForRole: unspecified falls back to overnight blue', () => {
+    assert.strictEqual(MaxEnginePicker.pinColorForRole('unspecified'), '#1a5fa8');
+  });
+  test('pinColorForRole: unknown role falls back to overnight blue', () => {
+    assert.strictEqual(MaxEnginePicker.pinColorForRole('bogus'), '#1a5fa8');
+    assert.strictEqual(MaxEnginePicker.pinColorForRole(null), '#1a5fa8');
+    assert.strictEqual(MaxEnginePicker.pinColorForRole(undefined), '#1a5fa8');
+  });
 });
 
 // ── Suite: orderKeptCandidates scenarios ───────────────────────
