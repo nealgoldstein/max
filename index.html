@@ -9941,17 +9941,26 @@ async function expandAirportsForRegion(){
 // window so this and other call sites keep working unchanged. (Adds
 // blue ✈ pins to the picker map for entries in _tb.airports.)
 
-// Round NC.1 (gallery-pivot): every candidate must carry a tripRole.
-// This helper ensures that — used at every chokepoint where _tb.candidates
-// is set or rehydrated. tripRole is the user-assigned role in the trip
-// (overnight / daytrip / onway / unspecified), distinct from c.role which
-// is the LLM's own kind-of-place classification.
+// Round NC.3a (state-model): every candidate gets its role +
+// overnightCapable normalized via MaxEnginePicker.normalizeCandidateRole.
+// This is idempotent — safe to call on already-normalized candidates.
+// Replaces the NC.1 _ensureTripRoleDefaults logic but keeps that name
+// because there are 5+ call sites and the new logic does the same job.
 function _ensureTripRoleDefaults(cands) {
   if (!Array.isArray(cands)) return cands;
-  var valid = { overnight: 1, daytrip: 1, onway: 1, unspecified: 1 };
+  var norm = (typeof MaxEnginePicker !== "undefined" && MaxEnginePicker.normalizeCandidateRole)
+    ? MaxEnginePicker.normalizeCandidateRole
+    : null;
   cands.forEach(function(c) {
     if (!c) return;
-    if (!c.tripRole || !valid[c.tripRole]) c.tripRole = "unspecified";
+    if (norm) {
+      norm(c);
+    } else {
+      // Defensive fallback — should never fire since engine-picker.js
+      // loads before this script, but keep the file usable in isolation.
+      if (typeof c.overnightCapable !== "boolean") c.overnightCapable = true;
+      if (!c.role) c.role = c.overnightCapable ? "stay" : "see";
+    }
   });
   return cands;
 }
@@ -31922,16 +31931,30 @@ function updateMainMap(){
       // The purple candidate ring is also removed (see below) — geometry
       // alone shouldn't push a structural change to the trip; the
       // day-trip conversion is still available in the role popover.
-      // Round NC.2 (gallery-pivot): pin color follows tripRole on the
-      // backing candidate. Falls back to the legacy uniform blue when
-      // there's no candidate (orphan destination) or when tripRole is
-      // "overnight" / "unspecified". daytrip → purple, onway → teal
-      // (octagon SVG comes in NC.3).
+      // Round NC.3c (gallery-pivot): pin color follows the backing
+      // candidate's c.role (NC.3 source of truth). Reads c.role first;
+      // falls back to legacy c.tripRole (NC.2) for any candidate not
+      // yet normalized. daytrip → purple, onway → teal, see → gray
+      // (renderer overlays a "?" / eye glyph), stay → blue.
       var _primaryCand = _candForDest(group.dests[0].dest);
-      var _primaryRole = (_primaryCand && _primaryCand.tripRole) || "unspecified";
+      // Defensive: ensure the candidate's role is normalized before we
+      // read it (legacy trips may have only tripRole or only intent).
+      if (_primaryCand && typeof MaxEnginePicker !== "undefined"
+          && MaxEnginePicker.normalizeCandidateRole) {
+        MaxEnginePicker.normalizeCandidateRole(_primaryCand);
+      }
+      var _primaryRole = _primaryCand
+        ? (_primaryCand.role || _primaryCand.tripRole || "stay")
+        : "stay";
       var color = (typeof MaxEnginePicker !== "undefined" && MaxEnginePicker.pinColorForRole)
         ? MaxEnginePicker.pinColorForRole(_primaryRole)
         : "#1a5fa8";
+      // Round NC.3c: a "see" role on a trip-view destination is a
+      // 0-night standalone stop. Render the pin with a dashed border
+      // and a "?" / 👁 glyph instead of the destination number to
+      // signal "you wanted to see this but haven't decided on a stay
+      // or wayside yet."
+      var _isSee = (_primaryRole === "see");
       // Round FN.A.4: entry/exit glyph badge driven by the precomputed
       // _badgesByDestIdx map (built above the loop). A pin group can
       // carry the entry glyph, the exit glyph, or BOTH simultaneously
@@ -31983,12 +32006,22 @@ function updateMainMap(){
           + 'font-size:10px;line-height:1;font-weight:700;'
           + 'box-shadow:0 1px 2px rgba(0,0,0,0.15);">?</div>'
         : '';
+      // Round NC.3c: pin shape follows role.
+      //   - "see"   → dashed border + "?" label, no number
+      //   - "onway" → octagon (CSS clip-path)
+      //   - others  → solid numbered circle (unchanged)
+      var _innerBorder = _isSee ? "2px dashed #fff" : "2px solid #fff";
+      var _innerLabel  = _isSee ? "?" : label;
+      var _isOnway = (_primaryRole === "onway");
+      var _shapeCss = _isOnway
+        ? "border-radius:0;clip-path:polygon(30% 0%,70% 0%,100% 30%,100% 70%,70% 100%,30% 100%,0% 70%,0% 30%);"
+        : "border-radius:50%;";
       var html = '<div style="position:relative;width:'+size+'px;height:'+size+'px;">'
-        + '<div style="background:'+color+';color:#fff;border-radius:50%;width:'
-        + size + 'px;height:' + size + 'px;border:2px solid #fff;'
+        + '<div style="background:'+color+';color:#fff;' + _shapeCss + 'width:'
+        + size + 'px;height:' + size + 'px;border:' + _innerBorder + ';'
         + 'box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;'
         + 'font-size:' + fontSize + 'px;font-weight:700;letter-spacing:-0.02em;">'
-        + label
+        + _innerLabel
         + '</div>'
         + _badgeHtml
         + _qBadgeHtml

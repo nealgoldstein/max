@@ -380,7 +380,12 @@
     var ring = selected
       ? '<div style="position:absolute;top:-6px;left:-6px;width:' + (pinSize + 12) + 'px;height:' + (pinSize + 12) + 'px;border:3px solid #ffb300;border-radius:50%;box-shadow:0 0 10px rgba(255,179,0,0.55);pointer-events:none;animation:max-pin-pulse 1.6s ease-in-out infinite;"></div>'
       : '';
-    var inner = '<div style="position:relative;background:' + mc + ';color:#fff;border-radius:50%;width:' + pinSize + 'px;height:' + pinSize + 'px;display:flex;align-items:center;justify-content:center;font-size:' + fontPx + 'px;font-weight:700;border:' + borderStyle + ';box-shadow:0 1px 4px rgba(0,0,0,.25);opacity:' + opacity + ';">' + label + '</div>';
+    // Round NC.3c: onway candidates render as an octagon via CSS
+    // clip-path (matches the trip-view onway pin shape).
+    var _shapeCss = (c.status === "keep" && c.role === "onway")
+      ? "border-radius:0;clip-path:polygon(30% 0%,70% 0%,100% 30%,100% 70%,70% 100%,30% 100%,0% 70%,0% 30%);"
+      : "border-radius:50%;";
+    var inner = '<div style="position:relative;background:' + mc + ';color:#fff;' + _shapeCss + 'width:' + pinSize + 'px;height:' + pinSize + 'px;display:flex;align-items:center;justify-content:center;font-size:' + fontPx + 'px;font-weight:700;border:' + borderStyle + ';box-shadow:0 1px 4px rgba(0,0,0,.25);opacity:' + opacity + ';">' + label + '</div>';
     var html = '<div style="position:relative;width:' + pinSize + 'px;height:' + pinSize + 'px;">' + ring + inner + '</div>';
     return L.divIcon({ html: html, className: "", iconSize: [pinSize, pinSize], iconAnchor: [pinSize / 2, pinSize / 2] });
   }
