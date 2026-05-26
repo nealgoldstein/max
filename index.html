@@ -2214,7 +2214,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
           <div class="mw-section-hdr">File</div>
           <button class="mw-item" onclick="_mwClose();saveTrip();">Save now</button>
           <button class="mw-item" onclick="_mwClose();if(_currentTripId&amp;&amp;confirm('Duplicate this trip? A copy will be created on the home screen.'))duplicateTrip(_currentTripId,false);">Copy this trip</button>
-          <button class="mw-item" onclick="_mwClose();showExportTripModal();">Export (PDF, calendar&hellip;)</button>
+          <button id="mw-export-trip" class="mw-item" onclick="_mwClose();showExportTripModal();">Export (PDF, calendar&hellip;)</button>
           <button class="mw-item" onclick="_mwClose();showGlobalPasteConfirmationModal();">&#128203;&nbsp; Paste booking confirmation</button>
           <button class="mw-item" onclick="_mwClose();showBatchImportBookingsModal&amp;&amp;showBatchImportBookingsModal();">&#128229;&nbsp; Import bookings&hellip;</button>
           <button class="mw-item" onclick="_mwClose();showShareTripModal();">&#x2197;&nbsp; Share trip</button>
@@ -8491,6 +8491,14 @@ function _mwOpen(name){
   var btn = document.querySelector('.mw-menu[data-menu="'+name+'"]');
   var dd  = document.getElementById('mw-' + name);
   if (!btn || !dd) return;
+  // Round NC.X: gate the Export entry on the trip having destinations.
+  // Exporting an empty trip is never the right answer; hiding the item
+  // keeps the menu honest about what's available right now.
+  var _expBtn = document.getElementById("mw-export-trip");
+  if (_expBtn) {
+    var _hasDests = !!(trip && Array.isArray(trip.destinations) && trip.destinations.length);
+    _expBtn.style.display = _hasDests ? "" : "none";
+  }
   btn.classList.add('is-open');
   // Anchor dropdown's left edge under the button so each menu's
   // popout lines up beneath its own label.
@@ -11127,6 +11135,24 @@ function showWelcomeOnboarding(onContinue) {
 // Triggers a download via Blob.
 function showExportTripModal(){
   if (!_currentTripId || !trip) { maxAlert("Open a trip first."); return; }
+  if (!Array.isArray(trip.destinations) || !trip.destinations.length) {
+    maxAlert("Build a trip first — there's nothing to export yet.");
+    return;
+  }
+  // Round NC.X (export consolidation): research notes appear here as a
+  // fifth option only when there's actually content to export, mirroring
+  // the gating logic the Discovery button used to do.
+  var _placeMeta = (_tb && _tb.placeMeta) || {};
+  var _tripMeta  = (_tb && _tb.tripMeta) || null;
+  var _hasResearch =
+    Object.keys(_placeMeta).some(function(k){
+      var m = _placeMeta[k];
+      return m && ((m.notes && m.notes.trim()) || (Array.isArray(m.links) && m.links.length));
+    }) || !!(_tripMeta && (
+      (_tripMeta.notes && _tripMeta.notes.trim())
+      || (Array.isArray(_tripMeta.links) && _tripMeta.links.length)
+    ));
+
   var existing = document.getElementById("export-trip-overlay");
   if (existing) existing.remove();
   var ov = document.createElement("div");
@@ -11139,24 +11165,30 @@ function showExportTripModal(){
       '<div style="width:28px;height:28px;border-radius:50%;background:#1a5fa8;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">↓</div>' +
       '<div style="font-size:14px;font-weight:700;">Export this trip</div>' +
     '</div>' +
-    '<div style="font-size:12px;color:#555;line-height:1.55;margin-bottom:14px;">Pick a format. Both work offline — no data leaves your device.</div>' +
+    '<div style="font-size:12px;color:#555;line-height:1.55;margin-bottom:14px;">Pick a format. All work offline — no data leaves your device.</div>' +
     '<div style="display:flex;flex-direction:column;gap:10px;">' +
+      '<button id="exp-share-list" style="text-align:left;padding:14px 16px;font-size:13px;background:#fff;color:#1a5fa8;border:1px solid #cfe1f7;border-radius:8px;cursor:pointer;font-family:inherit;">' +
+        '<div style="font-weight:700;margin-bottom:3px;">📋 Shareable itinerary</div>' +
+        '<div style="font-size:11px;color:#666;">Date-anchored, human-readable. Paste into email or chat. Has a toggle to a Max-importable list if you want to round-trip it.</div>' +
+      '</button>' +
       '<button id="exp-pdf" style="text-align:left;padding:14px 16px;font-size:13px;background:#fff;color:#111;border:1px solid #ddd;border-radius:8px;cursor:pointer;font-family:inherit;">' +
         '<div style="font-weight:700;margin-bottom:3px;">📄 Print / Save as PDF</div>' +
-        '<div style="font-size:11px;color:#888;">Opens a print-formatted view. Use your browser\'s print dialog → "Save as PDF" to make a file. Now leads with a paste-back-compatible shareable list.</div>' +
+        '<div style="font-size:11px;color:#888;">Print-formatted view. Use your browser&rsquo;s print dialog → &ldquo;Save as PDF&rdquo; to make a file.</div>' +
       '</button>' +
-      '<button id="exp-share-list" style="text-align:left;padding:14px 16px;font-size:13px;background:#fff;color:#111;border:1px solid #ddd;border-radius:8px;cursor:pointer;font-family:inherit;">' +
-        '<div style="font-weight:700;margin-bottom:3px;">📋 Copy as shareable list</div>' +
-        '<div style="font-size:11px;color:#888;">Plain-text destination list someone can paste into their own Max via &ldquo;Paste a list&rdquo;. Round trip wired via &ldquo;(Arrival/Departure point)&rdquo;.</div>' +
+      '<button id="exp-sub" style="text-align:left;padding:14px 16px;font-size:13px;background:#fff;color:#111;border:1px solid #ddd;border-radius:8px;cursor:pointer;font-family:inherit;">' +
+        '<div style="font-weight:700;margin-bottom:3px;">🔄 Subscribe in calendar</div>' +
+        '<div style="font-size:11px;color:#888;">Live link your calendar refreshes every few hours. Edits in Max → updates in your calendar.</div>' +
       '</button>' +
       '<button id="exp-ics" style="text-align:left;padding:14px 16px;font-size:13px;background:#fff;color:#111;border:1px solid #ddd;border-radius:8px;cursor:pointer;font-family:inherit;">' +
         '<div style="font-weight:700;margin-bottom:3px;">📅 Download to calendar (.ics)</div>' +
         '<div style="font-size:11px;color:#888;">One-shot file. Re-export to update events; deleted destinations stay in your calendar.</div>' +
       '</button>' +
-      '<button id="exp-sub" style="text-align:left;padding:14px 16px;font-size:13px;background:#fff;color:#1a5fa8;border:1px solid #cfe1f7;border-radius:8px;cursor:pointer;font-family:inherit;">' +
-        '<div style="font-weight:700;margin-bottom:3px;">🔄 Subscribe in calendar (recommended)</div>' +
-        '<div style="font-size:11px;color:#666;">Live link your calendar refreshes every few hours. Edits in Max → updates in your calendar automatically. Deletes too.</div>' +
-      '</button>' +
+      (_hasResearch
+        ? '<button id="exp-research" style="text-align:left;padding:14px 16px;font-size:13px;background:#fff;color:#111;border:1px solid #ddd;border-radius:8px;cursor:pointer;font-family:inherit;">' +
+            '<div style="font-weight:700;margin-bottom:3px;">📓 Research notes (markdown)</div>' +
+            '<div style="font-size:11px;color:#888;">Your gathered notes and source links, grouped by activity. For when you&rsquo;ve done homework worth keeping.</div>' +
+          '</button>'
+        : '') +
     '</div>' +
     '<div style="margin-top:14px;text-align:right;">' +
       '<button id="exp-close" style="padding:8px 14px;font-size:12px;font-weight:600;background:#fff;color:#666;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;">Close</button>' +
@@ -11167,6 +11199,10 @@ function showExportTripModal(){
   document.getElementById("exp-share-list").onclick = function(){ ov.remove(); _exportTripShareableList(); };
   document.getElementById("exp-ics").onclick = function(){ ov.remove(); _exportTripIcs(); };
   document.getElementById("exp-sub").onclick = function(){ ov.remove(); _exportTripSubscribe(); };
+  if (_hasResearch) {
+    var rbtn = document.getElementById("exp-research");
+    if (rbtn) rbtn.onclick = function(){ ov.remove(); _pmExportResearchAsMarkdown(null); };
+  }
   document.getElementById("exp-close").onclick = function(){ ov.remove(); };
   ov.addEventListener("click", function(e){ if (e.target === ov) ov.remove(); });
 }
@@ -14531,14 +14567,13 @@ function _renderPlaceActivityItems(){
 
     var hdrActions = document.createElement("div");
     hdrActions.style.cssText = "display:flex;align-items:center;gap:6px;";
-    // Export button
-    var exportBtn = document.createElement("button");
-    exportBtn.type = "button";
-    exportBtn.style.cssText = "font-size:11px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;";
-    exportBtn.innerHTML = "⤓ Export";
-    exportBtn.title = "Copy Discovery notes as markdown to clipboard";
-    exportBtn.onclick = function(e){ e.stopPropagation(); _pmExportResearchAsMarkdown(exportBtn); };
-    hdrActions.appendChild(exportBtn);
+    // Round NC.X (export consolidation): the Discovery "⤓ Export
+    // notes" button is retired. All export formats — PDF, calendar,
+    // itinerary, Max-import, research notes — now live in the single
+    // trip-level Export dialog (showExportTripModal), reachable once
+    // the trip has been built. The research-notes serializer
+    // (_pmExportResearchAsMarkdown) is still used by that dialog as
+    // one of its option paths.
     var tripMeta = (_tb && _tb.tripMeta) ? _tb.tripMeta : null;
     var _tripHasMeta = !!(tripMeta && (
       (tripMeta.notes && tripMeta.notes.trim())
