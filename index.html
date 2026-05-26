@@ -11340,6 +11340,100 @@ function serializeTripToPasteList(trip) {
 }
 if (typeof globalThis !== "undefined") globalThis.serializeTripToPasteList = serializeTripToPasteList;
 
+// Round NC.X (export): date-anchored human itinerary. Unlike
+// serializeTripToPasteList (Max-import format) and
+// _pmExportResearchAsMarkdown (activity-grouped research notes),
+// this one produces what a non-Max reader can actually act on:
+// ordered destinations with dates, nights, role, and arrival/
+// departure context. Plain text — pastes into email, chat, SMS,
+// or prints. No round-trip-back-into-Max contract; this is
+// human-only.
+function serializeTripAsItinerary(trip) {
+  if (!trip || !Array.isArray(trip.destinations) || !trip.destinations.length) return "";
+  var dests = trip.destinations;
+  var brief = trip.brief || {};
+  var lines = [];
+  var name = trip.name || brief.region || "Trip";
+
+  // Header: trip name, date range, total duration
+  var firstDate = (dests[0] && dests[0].dateFrom) || "";
+  var lastDest = dests[dests.length - 1] || {};
+  var lastDate = lastDest.dateTo || lastDest.dateFrom || "";
+  var totalNights = dests.reduce(function(s, d){ return s + (d.nights || 0); }, 0);
+  var headerLine = name;
+  if (firstDate && lastDate) {
+    headerLine += " — " + firstDate + " to " + lastDate;
+    if (totalNights) headerLine += " (" + totalNights + " night" + (totalNights === 1 ? "" : "s") + ")";
+  } else if (totalNights) {
+    headerLine += " — " + totalNights + " night" + (totalNights === 1 ? "" : "s");
+  }
+  lines.push(headerLine);
+  lines.push("");
+
+  // Arrival line (if entry/getting-there info is set)
+  if (brief.entry || brief.gettingTo) {
+    var arr = "✈ Arrival";
+    if (brief.entry) arr += ": " + brief.entry;
+    if (brief.gettingTo) arr += " · " + brief.gettingTo;
+    lines.push(arr);
+    lines.push("");
+  }
+
+  // Walk destinations in trip order. For each, render:
+  //   "Day X-Y  Place (N nights, MMM DD-DD)"
+  //   "         See: a, b, c"  (if see-attached items)
+  var dayCursor = 1;
+  dests.forEach(function(d, i){
+    var nights = d.nights || 0;
+    var dayLabel;
+    if (nights > 0) {
+      var endDay = dayCursor + nights - 1;
+      dayLabel = (dayCursor === endDay) ? ("Day " + dayCursor) : ("Day " + dayCursor + "-" + endDay);
+    } else {
+      dayLabel = "Day " + dayCursor + " (stop)";
+    }
+    var dateBit = "";
+    if (d.dateFrom && d.dateTo && d.dateFrom !== d.dateTo) {
+      dateBit = ", " + d.dateFrom + " → " + d.dateTo;
+    } else if (d.dateFrom) {
+      dateBit = ", " + d.dateFrom;
+    }
+    var nightsBit = nights > 0
+      ? " (" + nights + " night" + (nights === 1 ? "" : "s") + dateBit + ")"
+      : (dateBit ? " (" + dateBit.replace(/^, /, "") + ")" : "");
+    var roleHint = "";
+    if (d.intent === "dayTrip") roleHint = " — day trip";
+    else if (d.intent === "wayside") roleHint = " — on the way";
+    else if (nights === 0) roleHint = " — see only";
+    lines.push(dayLabel + "  " + d.place + nightsBit + roleHint);
+    // Pull any visible sights from city data / attached events to give
+    // the line some texture. Cap at 4 to keep the line readable.
+    var sights = [];
+    if (Array.isArray(d.attachedEvents)) {
+      d.attachedEvents.forEach(function(e){ if (e && e.name && sights.indexOf(e.name) < 0) sights.push(e.name); });
+    }
+    if (sights.length) {
+      var preview = sights.slice(0, 4).join(", ");
+      if (sights.length > 4) preview += ", …";
+      lines.push("          See: " + preview);
+    }
+    if (nights > 0) dayCursor += nights;
+    else dayCursor += 0; // see-only stays on the same day
+  });
+
+  // Departure line
+  if (brief.tbExit || brief.gettingOut) {
+    lines.push("");
+    var dep = "✈ Departure";
+    if (brief.tbExit) dep += ": " + brief.tbExit;
+    if (brief.gettingOut) dep += " · " + brief.gettingOut;
+    lines.push(dep);
+  }
+
+  return lines.join("\n");
+}
+if (typeof globalThis !== "undefined") globalThis.serializeTripAsItinerary = serializeTripAsItinerary;
+
 // v359.60.22: "Copy as shareable list" export. Opens a small modal
 // showing the generated paste-list, with Copy + Download buttons.
 // The user can also edit before copying (e.g. trim a section, add
@@ -11348,8 +11442,12 @@ if (typeof globalThis !== "undefined") globalThis.serializeTripToPasteList = ser
 // another to seed it.
 function _exportTripShareableList() {
   if (!trip) return;
-  var listText = serializeTripToPasteList(trip);
-  if (!listText) { maxAlert("Open a trip with at least one destination first."); return; }
+  // Round NC.X: default to the human-readable itinerary. The
+  // Max-import (paste-list) format is available via the toggle.
+  var itineraryText = serializeTripAsItinerary(trip);
+  var pasteText = serializeTripToPasteList(trip);
+  if (!itineraryText && !pasteText) { maxAlert("Open a trip with at least one destination first."); return; }
+  var listText = itineraryText || pasteText;
   var existing = document.getElementById("share-list-overlay");
   if (existing) existing.remove();
   var ov = document.createElement("div");
@@ -11363,7 +11461,11 @@ function _exportTripShareableList() {
     +     '<div style="width:28px;height:28px;border-radius:50%;background:#1a5fa8;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">📋</div>'
     +     '<div style="font-size:15px;font-weight:700;color:#111;">Shareable list</div>'
     +   '</div>'
-    +   '<div style="font-size:11.5px;color:#777;margin-top:4px;line-height:1.5;">Paste this into Max\'s &ldquo;Paste a list&rdquo; (home screen) or any trip\'s Discovery notes &rarr; &ldquo;🪄 Make destinations from this list&rdquo; to recreate the destination skeleton.</div>'
+    +   '<div style="font-size:11.5px;color:#777;margin-top:4px;line-height:1.5;">A date-anchored itinerary your travel companion (or future self) can read at a glance. Switch to <em>Max import</em> if you want to paste it back into Max later.</div>'
+    +   '<div id="share-list-fmt" style="display:flex;gap:4px;margin-top:10px;">'
+    +     '<button type="button" data-fmt="itinerary" style="font-size:11px;font-weight:700;padding:5px 10px;border-radius:5px;border:1px solid #1a5fa8;background:#1a5fa8;color:#fff;cursor:pointer;font-family:inherit;">Itinerary</button>'
+    +     '<button type="button" data-fmt="paste" style="font-size:11px;font-weight:600;padding:5px 10px;border-radius:5px;border:1px solid #ddd;background:#fff;color:#555;cursor:pointer;font-family:inherit;">Max import</button>'
+    +   '</div>'
     + '</div>'
     + '<div style="flex:1;overflow-y:auto;padding:14px 20px;">'
     +   '<textarea id="share-list-ta" style="width:100%;min-height:260px;font:inherit;font-size:12.5px;line-height:1.55;padding:10px 12px;border:1px solid #ccc;border-radius:6px;background:#fafaf6;color:#111;font-family:ui-monospace,Menlo,Consolas,monospace;resize:vertical;box-sizing:border-box;">' + listText.replace(/</g, "&lt;") + '</textarea>'
@@ -11378,6 +11480,28 @@ function _exportTripShareableList() {
   function close() { if (ov && ov.parentNode) ov.parentNode.removeChild(ov); }
   ov.onclick = function(e) { if (e.target === ov) close(); };
   document.getElementById("share-list-close").onclick = close;
+  // Round NC.X: format toggle. Swaps the textarea between the
+  // itinerary view (default, human-readable) and the paste-list
+  // view (Max-importable). Restyles the buttons to show which is
+  // active.
+  var _fmtRow = document.getElementById("share-list-fmt");
+  if (_fmtRow) {
+    var btns = _fmtRow.querySelectorAll("button[data-fmt]");
+    btns.forEach(function(b){
+      b.onclick = function(){
+        var fmt = b.getAttribute("data-fmt");
+        var ta = document.getElementById("share-list-ta");
+        if (ta) ta.value = (fmt === "paste") ? pasteText : itineraryText;
+        btns.forEach(function(x){
+          var active = x === b;
+          x.style.background = active ? "#1a5fa8" : "#fff";
+          x.style.color = active ? "#fff" : "#555";
+          x.style.borderColor = active ? "#1a5fa8" : "#ddd";
+          x.style.fontWeight = active ? "700" : "600";
+        });
+      };
+    });
+  }
   document.getElementById("share-list-copy").onclick = function() {
     var ta = document.getElementById("share-list-ta");
     var text = ta ? ta.value : listText;
