@@ -326,31 +326,42 @@
   function _makeCandidateIcon(c, grayed, selected) {
     var L = global.L;
     if (!L) return null;
-    // FN.F.1: single-sight variant — distinct visual that reads as
-    // "you want to see this; tap to pick wayside or day-trip." Gray
-    // background with white "?" label, slightly thicker border so it
-    // stands out from rejected (also gray) candidates. Skip the
-    // ordinal/sequence label entirely — single-sights aren't on the
-    // numbered spine.
-    var singleSight = (!grayed && _isSingleSight(c));
-    if (singleSight) {
+    var ME = global.MaxEnginePicker;
+
+    // Round NC.3b: defensive normalization. Ensures c.role and
+    // c.overnightCapable are always present before we read them.
+    // Idempotent — won't churn already-normalized candidates.
+    if (ME && typeof ME.normalizeCandidateRole === "function") {
+      ME.normalizeCandidateRole(c);
+    }
+
+    // ── See variant (Round NC.3b: replaces legacy singleSight) ──
+    // "See" role: a place the user wants to visit but not stay
+    // overnight. Renders as the gray "?" pin previously used for
+    // singleSight. Only for kept candidates — proposed candidates
+    // with role="see" still show as a normal proposed pin so the
+    // user sees the LLM's full suggestion set with consistent
+    // styling.
+    var isSee = (!grayed && c.status === "keep" && c.role === "see");
+    if (isSee) {
       var ssSize = selected ? 30 : 24;
       var ssRing = selected
         ? '<div style="position:absolute;top:-6px;left:-6px;width:' + (ssSize + 12) + 'px;height:' + (ssSize + 12) + 'px;border:3px solid #ffb300;border-radius:50%;box-shadow:0 0 10px rgba(255,179,0,0.55);pointer-events:none;animation:max-pin-pulse 1.6s ease-in-out infinite;"></div>'
         : '';
       var ssInner = '<div style="position:relative;background:#9ca3af;color:#fff;border-radius:50%;width:' + ssSize + 'px;height:' + ssSize + 'px;display:flex;align-items:center;justify-content:center;font-size:' + (selected ? 14 : 13) + 'px;font-weight:700;border:2px dashed #fff;box-shadow:0 1px 4px rgba(0,0,0,.25);">?</div>';
       var ssHtml = '<div style="position:relative;width:' + ssSize + 'px;height:' + ssSize + 'px;">' + ssRing + ssInner + '</div>';
-      return L.divIcon({ html: ssHtml, className: "ce-single-sight-pin", iconSize: [ssSize, ssSize], iconAnchor: [ssSize / 2, ssSize / 2] });
+      return L.divIcon({ html: ssHtml, className: "ce-see-pin", iconSize: [ssSize, ssSize], iconAnchor: [ssSize / 2, ssSize / 2] });
     }
-    // Round NC.2 (gallery-pivot): keep the picker and trip-view maps
-    // sharing one icon vocabulary. Kept candidates now render in their
-    // tripRole color so a daytrip pin reads purple on both maps, etc.
-    // Fall back to the legacy green for kept-without-role and the
-    // legacy blue/gray for proposed/rejected.
-    var _keptColor = "#2a7a4e";  // legacy green default
-    if (c.status === "keep" && c.tripRole && c.tripRole !== "unspecified"
-        && global.MaxEnginePicker && typeof global.MaxEnginePicker.pinColorForRole === "function") {
-      _keptColor = global.MaxEnginePicker.pinColorForRole(c.tripRole);
+
+    // ── Color for circular pins ──
+    // Round NC.3b: kept pins read c.role exclusively. Stay → blue,
+    // daytrip → purple, onway → teal (NC.3c will swap to an octagon
+    // shape). Proposed (status null) stays blue with place-initials
+    // label so the user can still tell "this is a suggestion" via
+    // the lack-of-sequence-number. Reject stays gray.
+    var _keptColor = "#1a5fa8";  // safe default if role missing
+    if (c.status === "keep" && c.role && ME && typeof ME.pinColorForRole === "function") {
+      _keptColor = ME.pinColorForRole(c.role);
     }
     var mc = grayed ? "#7a8090"
                     : (c.status === "keep" ? _keptColor
@@ -1112,26 +1123,28 @@
       ? '<span style="color:#2a7a4e;font-weight:700;margin-right:2px;">✓</span>'
       : (c.status === "reject" ? '<span style="color:#c05020;font-weight:700;margin-right:2px;">×</span>' : '');
 
-    // v359.20: role chip — shows Max's suggested role (overnight or
-    // day-trip-from-X) and signals whether it's auto or user-set.
-    // Hidden when role doesn't apply (required / arrival / departure).
-    var _allCands = (global._tb && Array.isArray(global._tb.candidates)) ? global._tb.candidates : [];
-    var _roleInfo = _computeCandidateRole(c, _allCands);
+    // Round NC.3b: role indicator on the Discovery card. Replaces the
+    // legacy "Overnight / Day trip from X" chip with the unified
+    // role vocabulary (stay / see / daytrip / onway). Stay & See are
+    // toggle-able right here on the card; daytrip & onway are set in
+    // the Trip View popover and render as read-only badges here.
     var _roleChip = '';
-    if (_roleInfo) {
-      var _chipBg = _roleInfo.intent === "dayTrip" ? "#fff4e6" : "#eef4fb";
-      var _chipBd = _roleInfo.intent === "dayTrip" ? "#f0c98a" : "#bcd2ea";
-      var _chipFg = _roleInfo.intent === "dayTrip" ? "#a36500" : "#1a5fa8";
-      var _chipText = _roleInfo.intent === "dayTrip"
-        ? "Day trip from " + (_roleInfo.hub ? _roleInfo.hub.place : "?")
-        : "Overnight";
-      var _chipTitle = _roleInfo.hubAuto
-        ? "Max's suggested role — click to change"
-        : "You set this role — click to change";
-      _roleChip = '<span class="ce-role-chip" data-cand-id="' + c.id + '" title="' + _chipTitle + '" style="font-size:10px;font-weight:600;color:' + _chipFg
-        + ';background:' + _chipBg + ';border:1px solid ' + _chipBd + ';padding:2px 7px;border-radius:10px;display:inline-block;white-space:nowrap;cursor:pointer;">'
-        + _chipText
-        + '</span>';
+    if (c.status === "keep") {
+      if (c.role === "daytrip") {
+        _roleChip = '<span style="font-size:10px;font-weight:600;color:#7c3aed;background:#f3eaff;border:1px solid #d6c2f5;padding:2px 7px;border-radius:10px;display:inline-block;white-space:nowrap;">Day trip</span>';
+      } else if (c.role === "onway") {
+        _roleChip = '<span style="font-size:10px;font-weight:600;color:#0891b2;background:#e6f6f8;border:1px solid #a7dde6;padding:2px 7px;border-radius:10px;display:inline-block;white-space:nowrap;">On the way</span>';
+      } else if (c.overnightCapable === false) {
+        // Non-capable: locked to See, no toggle.
+        _roleChip = '<span title="No overnight infrastructure — this place is See-only." style="font-size:10px;font-weight:600;color:#666;background:#f0f0f0;border:1px solid #ddd;padding:2px 7px;border-radius:10px;display:inline-block;white-space:nowrap;">👁 See</span>';
+      } else {
+        // Capable: two-button Stay / See toggle.
+        var _staySelected = (c.role === "stay");
+        _roleChip = '<span class="ce-role-toggle" data-cand-id="' + c.id + '" style="display:inline-flex;align-items:center;gap:0;border:1px solid #ccc;border-radius:10px;overflow:hidden;font-size:10px;font-weight:600;">'
+          + '<button class="ce-role-stay" type="button" style="padding:2px 8px;border:none;background:' + (_staySelected ? "#1a5fa8" : "#fff") + ';color:' + (_staySelected ? "#fff" : "#1a5fa8") + ';cursor:pointer;font-family:inherit;font-weight:600;">Stay</button>'
+          + '<button class="ce-role-see"  type="button" style="padding:2px 8px;border:none;background:' + (!_staySelected ? "#666" : "#fff") + ';color:' + (!_staySelected ? "#fff" : "#666") + ';cursor:pointer;font-family:inherit;font-weight:600;border-left:1px solid #ccc;">👁 See</button>'
+          + '</span>';
+      }
     }
 
     // v359.22: keep-button tooltip reflects the current role so the
@@ -1196,13 +1209,29 @@
     var rejectBtn  = card.querySelector(".ce-act-compact-reject");
     var expandBtn  = card.querySelector(".ce-act-compact-expand");
     var compactRow = card.querySelector(".ce-card-compact");
-    var roleChipEl = card.querySelector(".ce-role-chip");
+    // Round NC.3b: Stay/See toggle buttons (replaces the legacy ce-role-chip).
+    var stayBtn   = card.querySelector(".ce-role-stay");
+    var seeBtn    = card.querySelector(".ce-role-see");
     (function (cand) {
       if (keepBtn)   keepBtn.onclick   = function (e) { e.stopPropagation(); if (typeof global.setCS === "function") global.setCS(cand.id, "keep"); };
       if (rejectBtn) rejectBtn.onclick = function (e) { e.stopPropagation(); if (typeof global.setCS === "function") global.setCS(cand.id, "reject"); };
-      if (roleChipEl) roleChipEl.onclick = function (e) {
+      if (stayBtn) stayBtn.onclick = function (e) {
         e.stopPropagation();
-        _openRoleChangePopover(cand.id);
+        if (global.MaxEnginePicker && global.MaxEnginePicker.setRole) {
+          global.MaxEnginePicker.setRole(cand.id, "stay");
+          if (typeof global.renderCandidateCards === "function" && global._tb) {
+            global.renderCandidateCards(global._tb.candidates);
+          }
+        }
+      };
+      if (seeBtn) seeBtn.onclick = function (e) {
+        e.stopPropagation();
+        if (global.MaxEnginePicker && global.MaxEnginePicker.setRole) {
+          global.MaxEnginePicker.setRole(cand.id, "see");
+          if (typeof global.renderCandidateCards === "function" && global._tb) {
+            global.renderCandidateCards(global._tb.candidates);
+          }
+        }
       };
       if (expandBtn) expandBtn.onclick = function (e) {
         e.stopPropagation();
