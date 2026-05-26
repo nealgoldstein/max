@@ -31658,23 +31658,31 @@ function _candForDest(dest) {
   return trip.candidates.find(function(c){ return c && norm(c.place || "") === dN; }) || null;
 }
 
-// Round NC.2: writes tripRole through both _tb.candidates (via the
-// engine setter, which emits) and trip.candidates (the authoritative
-// snapshot the trip view reads from). Called from the role popover
-// commit paths, alongside the existing convertDest* helpers — additive,
-// doesn't replace any legacy writes.
+// Round NC.3d: writes c.role (NC.3 source of truth) to both
+// trip.candidates (the authoritative snapshot the trip-view pin
+// renderer reads from) and _tb.candidates via the engine setter (so
+// any open picker observes the change too). The caller passes in the
+// NC.1 vocabulary (overnight/daytrip/onway/unspecified) so existing
+// popover code paths keep working unchanged — we map to NC.3 here.
 function _writeTripRoleForDest(dest, role) {
   var cand = _candForDest(dest);
   if (!cand) return;
-  var valid = { overnight: 1, daytrip: 1, onway: 1, unspecified: 1 };
-  var safe = valid[role] ? role : "unspecified";
-  cand.tripRole = safe;
-  // Mirror to _tb.candidates if it's hydrated (Edit-destinations flow)
+  var map = { overnight: "stay", daytrip: "daytrip", onway: "onway", unspecified: "see", stay: "stay", see: "see" };
+  var nc3Role = map[role] || "see";
+  // Defensive: stay requires overnight-capable; demote to see otherwise.
+  if (nc3Role === "stay" && cand.overnightCapable === false) nc3Role = "see";
+  cand.role = nc3Role;
+  cand._roleTouched = true;
+  // Keep the legacy tripRole field in sync until NC.3e retires it,
+  // so anything still reading the old field renders consistently.
+  var reverseMap = { stay: "overnight", daytrip: "daytrip", onway: "onway", see: "unspecified" };
+  cand.tripRole = reverseMap[nc3Role] || "unspecified";
+  // Mirror to _tb.candidates via the engine setter if hydrated.
   if (typeof MaxEnginePicker !== "undefined"
-      && typeof MaxEnginePicker.setTripRole === "function"
+      && typeof MaxEnginePicker.setRole === "function"
       && window._tb && Array.isArray(window._tb.candidates)
       && window._tb.candidates.some(function(c){ return c && c.id === cand.id; })) {
-    try { MaxEnginePicker.setTripRole(cand.id, safe); } catch(_){}
+    try { MaxEnginePicker.setRole(cand.id, nc3Role); } catch(_){}
   }
 }
 
@@ -35925,6 +35933,29 @@ function _openTripDestRolePopover(destId){
     +   '</div>'
     + '</label>';
 
+  // Round NC.3d: distance context. Show miles to previous overnight
+  // and miles to next overnight (when each exists + has coords) so
+  // the user can read the geography without leaving the popup.
+  var _distMi = function(km){
+    if (km == null || !isFinite(km)) return null;
+    return Math.round(km * 0.621371);
+  };
+  var _hav = function(a, b){
+    if (!a || !b) return null;
+    if (typeof MaxEngineTrip === "undefined" || typeof MaxEngineTrip.haversineKm !== "function") return null;
+    return MaxEngineTrip.haversineKm(a[0], a[1], b[0], b[1]);
+  };
+  var _prevD = waysidePrev ? _coordsFor(waysidePrev) : null;
+  var _nextD = waysideNext ? _coordsFor(waysideNext) : null;
+  var _miPrev = _distMi(_hav(srcCoords, _prevD));
+  var _miNext = _distMi(_hav(srcCoords, _nextD));
+  var _distLineParts = [];
+  if (waysidePrev && _miPrev != null) _distLineParts.push(_miPrev + " mi from " + waysidePrev.place);
+  if (waysideNext && _miNext != null) _distLineParts.push(_miNext + " mi to " + waysideNext.place);
+  var _distLine = _distLineParts.length
+    ? '<div style="font-size:11px;color:#888;margin-top:3px;line-height:1.4;">' + _distLineParts.join(" · ") + '</div>'
+    : '';
+
   ov.innerHTML = ''
     + '<div style="background:#fff;border-radius:12px;max-width:420px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,0.18);">'
     +   '<div style="padding:18px 20px 4px;">'
@@ -35933,6 +35964,7 @@ function _openTripDestRolePopover(destId){
     +       '<div style="font-size:17px;font-weight:700;color:#111;">' + src.place + '</div>'
     +       '<a href="#" id="trip-role-open" style="font-size:11.5px;font-weight:500;color:#1a5fa8;text-decoration:none;cursor:pointer;">Open destination &rarr;</a>'
     +     '</div>'
+    +     _distLine
     +   '</div>'
     +   '<div style="padding:14px 20px;display:flex;flex-direction:column;gap:10px;">'
     +     roleDirsRow
