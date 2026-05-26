@@ -87,15 +87,74 @@
     return m ? parseInt(m[1]) : 3;
   }
 
-  // Round NC.2 (gallery-pivot): tripRole → pin color. Pure helper, kept
-  // here so the trip-view pin renderer and the engine tests share the
-  // exact same mapping. "onway" is a placeholder teal until NC.3 ships
-  // the octagon SVG. "unspecified" reuses overnight blue because the
-  // pin's singleSight badge already signals the not-yet-decided state.
+  // Round NC.3 (state-model): role → pin color. Single source of
+  // truth for the icon-color mapping used by both the picker map
+  // (_makeCandidateIcon) and the trip-view map (updateMainMap). See
+  // state-model-NC3.md for the full vocabulary.
+  //
+  // Visuals not surfaced here because they aren't pure colors:
+  //   - "see" → eye icon (drawn by the pin renderer, not a flat fill)
+  //   - "onway" → octagon shape (NC.3c SVG)
+  //   - status==="reject" → hidden (handled by list filter, not pin)
+  //   - status===null → gray ring (handled by the renderer)
+  //
+  // Anything not stay/daytrip falls back to blue so legacy callers
+  // (NC.1 "overnight", NC.2 "unspecified") still render sensibly.
   function pinColorForRole(role) {
+    if (role === "stay")    return "#1a5fa8";
     if (role === "daytrip") return "#7c3aed";
-    if (role === "onway")   return "#0891b2";
-    return "#1a5fa8"; // overnight or unspecified
+    if (role === "onway")   return "#0891b2";  // temporary fill; NC.3c does the octagon
+    if (role === "see")     return "#9ca3af";  // gray base; renderer overlays the eye glyph
+    return "#1a5fa8";                          // overnight (NC.1 name) / fallback
+  }
+
+  // Round NC.3a: normalize a candidate's role + overnightCapable from
+  // whatever the LLM (or legacy trip data) returned. Idempotent — safe
+  // to call on already-normalized candidates.
+  //
+  // Derivation rules:
+  //   c.overnightCapable defaults to !c.singleSight (legacy field) if
+  //   absent. If neither is present, default to true (most places are
+  //   stay-able; non-overnight is the special case).
+  //
+  //   c.role is derived in priority order:
+  //     1. Existing c.role (NC.3 native) wins.
+  //     2. Legacy c.tripRole (NC.1) maps:
+  //          overnight→stay, daytrip→daytrip, onway→onway, unspecified→see
+  //     3. Legacy c.intent ("stay"/"dayTrip"/"wayside"/"see") maps:
+  //          stay→stay, dayTrip→daytrip, wayside→onway, see→see
+  //     4. Default: overnightCapable ? "stay" : "see".
+  function normalizeCandidateRole(c) {
+    if (!c || typeof c !== "object") return c;
+    if (typeof c.overnightCapable !== "boolean") {
+      if (typeof c.singleSight === "boolean") {
+        c.overnightCapable = !c.singleSight;
+      } else {
+        c.overnightCapable = true;
+      }
+    }
+    if (c.role === "stay" || c.role === "see" || c.role === "daytrip" || c.role === "onway") {
+      // already normalized
+      // Guard: non-capable place tagged stay → demote to see (data
+      // corruption recovery; UI shouldn't have allowed this but
+      // legacy trips might have it).
+      if (c.role === "stay" && c.overnightCapable === false) c.role = "see";
+      return c;
+    }
+    var fromTrip = { overnight: "stay", daytrip: "daytrip", onway: "onway", unspecified: "see" };
+    if (c.tripRole && fromTrip[c.tripRole]) {
+      c.role = fromTrip[c.tripRole];
+      if (c.role === "stay" && c.overnightCapable === false) c.role = "see";
+      return c;
+    }
+    var fromIntent = { stay: "stay", dayTrip: "daytrip", wayside: "onway", see: "see" };
+    if (typeof c.intent === "string" && fromIntent[c.intent]) {
+      c.role = fromIntent[c.intent];
+      if (c.role === "stay" && c.overnightCapable === false) c.role = "see";
+      return c;
+    }
+    c.role = c.overnightCapable ? "stay" : "see";
+    return c;
   }
 
   // ── Picker draft state (Round HI: Phase 3 step 2) ──────────
@@ -1180,9 +1239,26 @@
           }
         }
       }
-      // Last resort — first kept candidate overall
+      // Round NC.3+ bugfix: if the gateway lookup found NO matching kept
+      // candidate (e.g. Iceland trip without Reykjavik kept), don't fall
+      // through to "first kept candidate" — that defaults to whatever's
+      // first in the kept list (Vík for the Iceland case Neal hit). Instead,
+      // emit the region's preferred gateway as a SYNTHETIC entry so
+      // _tb.entry / brief.entry default to a real international gateway
+      // even though it isn't (yet) on the trip. buildFromCandidates's
+      // entry-stop synthesis handles inserting the city as a 1-night
+      // arrival buffer.
+      if (!entryCand && typeof preferred !== "undefined" && preferred && preferred.length) {
+        // Title-case the gateway slug for display ("reykjavik" → "Reykjavik")
+        var _gwName = preferred[0].replace(/(^|\s)\S/g, function(t){ return t.toUpperCase(); });
+        entryCand = { place: _gwName, country: "", _synthetic: true };
+        entryInferred = true;
+        reasoning.push("No arrival city was set, so I'm defaulting to " + _gwName + " — the region's main gateway. Change it if you're flying into somewhere else.");
+      }
+      // Last resort — first kept candidate overall. Only fires when the
+      // region has no entry in the majorGateways table at all.
       if (!entryCand && kept.length > 0) entryCand = kept[0];
-      if (entryCand) {
+      if (entryCand && !entryInferred) {
         entryInferred = true;
         reasoning.push("No arrival city was set, so I'm starting the trip in " + entryCand.place + ". Change it if another city fits your arrival better.");
       }
@@ -3014,10 +3090,11 @@
         stayRange:c.stayRange||"", lat:c.lat||null, lng:c.lng||null,
         nights: (typeof c.nights === "number") ? c.nights : undefined,
         status:c.status||null, _required:!!c._required, _requiredFor:(c._requiredFor||[]).slice(),
-        // Round NC.1 (gallery-pivot): persist user-assigned trip role
-        // on the trip snapshot so reopen of the picker keeps role
-        // decisions across rebuilds.
-        tripRole: c.tripRole || "unspecified",
+        // Round NC.3e: c.role (above on line 3088) is the source of
+        // truth; tripRole (NC.1 transitional) retired here. Keep
+        // c.overnightCapable so the rehydrate doesn't have to re-derive
+        // it from singleSight every reload.
+        overnightCapable: (typeof c.overnightCapable === "boolean") ? c.overnightCapable : null,
         // v359.24: preserve user's role decision so re-opens of the
         // picker (Edit destinations) rehydrate the intent/hub the user
         // set, instead of falling back to the auto-suggestion.
@@ -3728,7 +3805,8 @@
     findMatchingRequired:   _findMatchingRequired,
     parseStartDateFromBrief: parseStartDateFromBrief,
     parseNightsFromRange:   parseNightsFromRange,
-    pinColorForRole:        pinColorForRole,  // Round NC.2
+    pinColorForRole:        pinColorForRole,        // Round NC.2/NC.3
+    normalizeCandidateRole: normalizeCandidateRole, // Round NC.3a
     orderKeptCandidates:    orderKeptCandidates,
     // place-picker hero map (Step 2)
     orderPlacePickerStays:  orderPlacePickerStays,
@@ -3954,19 +4032,43 @@
       pickerEmit('candidateChange', { id: candId, status: c.status });
     },
 
-    // setTripRole(candId, role) — sets the user-assigned role this
-    // place plays in the trip (overnight / daytrip / onway /
-    // unspecified). Distinct from c.role, which is the LLM's own
-    // classification ("base", "anchor"). The Trip View pin shape
-    // and color is driven by tripRole; "unspecified" is the
-    // default before the user has decided.
+    // setTripRole(candId, role) — DEPRECATED (Round NC.1 transitional
+    // setter). Use setRole instead. Kept temporarily for backward
+    // compatibility with NC.2 commit paths. Maps the NC.1 vocabulary
+    // (overnight/daytrip/onway/unspecified) onto the NC.3 vocabulary
+    // (stay/see/daytrip/onway):
+    //   overnight    → stay
+    //   unspecified  → see   (every kept place now has either stay or see,
+    //                         not unspecified — see state-model-NC3.md)
+    //   daytrip      → daytrip
+    //   onway        → onway
     setTripRole: function (candId, role) {
+      var map = { overnight: 'stay', unspecified: 'see', daytrip: 'daytrip', onway: 'onway' };
+      var nc3 = map[role] || 'see';
+      return MaxEnginePicker.setRole(candId, nc3);
+    },
+
+    // setRole(candId, role) — Round NC.3 single source of truth.
+    // Writes the user-assigned role: "stay" | "see" | "daytrip" |
+    // "onway". Validates against c.overnightCapable: only
+    // overnight-capable places can be set to "stay." Other roles are
+    // allowed on any kept candidate. See state-model-NC3.md for the
+    // full transition matrix.
+    setRole: function (candId, role) {
       if (!global._tb || !Array.isArray(global._tb.candidates)) return;
       var c = global._tb.candidates.find(function (x) { return x.id === candId; });
       if (!c) return;
-      var valid = { overnight: 1, daytrip: 1, onway: 1, unspecified: 1 };
-      c.tripRole = valid[role] ? role : 'unspecified';
-      pickerEmit('candidateChange', { id: candId, tripRole: c.tripRole });
+      var valid = { stay: 1, see: 1, daytrip: 1, onway: 1 };
+      if (!valid[role]) return;
+      // Stay requires overnight infrastructure. Non-capable places
+      // can never be marked stay (UI must enforce this too).
+      if (role === 'stay' && c.overnightCapable === false) {
+        return;
+      }
+      var prev = c.role || null;
+      c.role = role;
+      c._roleTouched = true;
+      pickerEmit('candidateChange', { id: candId, role: role, prevRole: prev });
     },
 
     // startFresh(initial) — alias for resetState. Reads better at

@@ -16210,11 +16210,18 @@ function _pmExtractDomain(url){
 // v359.55.4: explicit stay/see writer. Click "+ Stay" → promote;
 // click "− See" → demote. Tri-state reset (back to "use Max's
 // guess") lives in the research card popover, not on the chip.
+//
+// Round NC.3+ bugfix: also re-render the place-picker map so the
+// pin re-colors at the same moment the sidebar chip flips. Without
+// this, the user toggled Stay→See on Mývatn and the sidebar updated
+// while the map pin stayed purple — the kind of split-state that's
+// the whole point of the NC.3 normalization.
 function _pmSetStayOverride(placeName, value){
   var m = _pmPlaceMeta(placeName, { create: true });
   if (!m) return;
   m.stayOverride = !!value;
   if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
+  if (typeof _renderPlacePickerMap === "function") _renderPlacePickerMap("tb-pm-map");
 }
 
 // v359.55.3: open the research card popover for a place. Shows the
@@ -22679,10 +22686,12 @@ function reopenCandidateExplorer(){
       // Missing on legacy trips → null/false, which the next
       // _tbResequenceCandidates pass repopulates from orderKeptCandidates.
       order:(typeof c.order==="number"?c.order:null), manuallyOrdered:!!c.manuallyOrdered,
-      // Round NC.1 (gallery-pivot): user-assigned trip role for the
-      // trip-view pin shape. Legacy trips missing this field default
-      // to "unspecified" downstream.
-      tripRole: c.tripRole || "unspecified"
+      // Round NC.3e: c.role is the source of truth. Legacy trips with
+      // only c.tripRole or c.intent get migrated via normalize on the
+      // next line. c.overnightCapable falls back to !c.singleSight or
+      // defaults to true if neither is present.
+      role: c.role || null,
+      overnightCapable: (typeof c.overnightCapable === "boolean") ? c.overnightCapable : null
     };
   });
   _ensureTripRoleDefaults(_tb.candidates);
@@ -23276,9 +23285,9 @@ async function applyCandidateChanges(){
       stayRange:c.stayRange||"", lat:c.lat||null, lng:c.lng||null,
       nights: (typeof c.nights === "number") ? c.nights : undefined,
       status:c.status||null, _required:!!c._required, _requiredFor:(c._requiredFor||[]).slice(),
-      // Round NC.1: persist user-assigned trip role onto the trip snapshot
-      // so reopen of the picker keeps the user's role decisions.
-      tripRole: c.tripRole || "unspecified",
+      // Round NC.3e: c.role + c.overnightCapable already in the projection
+      // on the line above. tripRole (NC.1 transitional) retired here.
+      overnightCapable: (typeof c.overnightCapable === "boolean") ? c.overnightCapable : null,
       // Round HZ (picker hero map): persist explicit sequence position +
       // manual-pin flag so a reopened picker re-acquires the user's order.
       // Missing on legacy trips → null/false, which the next
@@ -31673,10 +31682,11 @@ function _writeTripRoleForDest(dest, role) {
   if (nc3Role === "stay" && cand.overnightCapable === false) nc3Role = "see";
   cand.role = nc3Role;
   cand._roleTouched = true;
-  // Keep the legacy tripRole field in sync until NC.3e retires it,
-  // so anything still reading the old field renders consistently.
-  var reverseMap = { stay: "overnight", daytrip: "daytrip", onway: "onway", see: "unspecified" };
-  cand.tripRole = reverseMap[nc3Role] || "unspecified";
+  // Round NC.3e: c.tripRole (NC.1 transitional field) retired. Anything
+  // still reading it gets the c.role value via normalizeCandidateRole on
+  // the next render. Old trips with tripRole-only data get migrated by
+  // the normalizer at load time.
+  delete cand.tripRole;
   // Mirror to _tb.candidates via the engine setter if hydrated.
   if (typeof MaxEnginePicker !== "undefined"
       && typeof MaxEnginePicker.setRole === "function"
@@ -31939,21 +31949,17 @@ function updateMainMap(){
       // The purple candidate ring is also removed (see below) — geometry
       // alone shouldn't push a structural change to the trip; the
       // day-trip conversion is still available in the role popover.
-      // Round NC.3c (gallery-pivot): pin color follows the backing
-      // candidate's c.role (NC.3 source of truth). Reads c.role first;
-      // falls back to legacy c.tripRole (NC.2) for any candidate not
-      // yet normalized. daytrip → purple, onway → teal, see → gray
-      // (renderer overlays a "?" / eye glyph), stay → blue.
+      // Round NC.3e: pin color follows c.role (NC.3 source of truth).
+      // c.tripRole (NC.1 transitional) is retired — any candidate
+      // arriving here without c.role gets one via normalizeCandidateRole
+      // (which itself derives from tripRole / intent / singleSight as
+      // fallbacks for legacy data).
       var _primaryCand = _candForDest(group.dests[0].dest);
-      // Defensive: ensure the candidate's role is normalized before we
-      // read it (legacy trips may have only tripRole or only intent).
       if (_primaryCand && typeof MaxEnginePicker !== "undefined"
           && MaxEnginePicker.normalizeCandidateRole) {
         MaxEnginePicker.normalizeCandidateRole(_primaryCand);
       }
-      var _primaryRole = _primaryCand
-        ? (_primaryCand.role || _primaryCand.tripRole || "stay")
-        : "stay";
+      var _primaryRole = (_primaryCand && _primaryCand.role) || "stay";
       var color = (typeof MaxEnginePicker !== "undefined" && MaxEnginePicker.pinColorForRole)
         ? MaxEnginePicker.pinColorForRole(_primaryRole)
         : "#1a5fa8";
