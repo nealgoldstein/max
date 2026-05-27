@@ -1804,7 +1804,16 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
 /* Round NC.X: search-hit glow. Search is scroll-and-highlight, not
    filter — the matching row stays in context but is visually marked
    so the eye finds it after the auto-scroll. */
-.tb-act-table-row.tb-search-hit{background:#fff8d6;border-color:#e0c060;box-shadow:0 0 0 2px #f0d878;}
+.tb-act-table-row.tb-search-hit{background:#fff8d6 !important;border-color:#e0c060 !important;box-shadow:0 0 0 2px #f0d878 !important;}
+/* tb-search-flash: temporary class added to the first/best hit when
+   the search results land. Pulses bigger glow for ~1.4s so the eye
+   has something to lock onto after the smooth scroll. */
+.tb-act-table-row.tb-search-flash{animation:tb-search-flash 1.4s ease-out 1;}
+@keyframes tb-search-flash {
+  0%   { box-shadow:0 0 0 2px #f0d878, 0 0 0 0 rgba(240,200,40,0.55); }
+  40%  { box-shadow:0 0 0 4px #e0b020, 0 0 22px 8px rgba(240,200,40,0.45); }
+  100% { box-shadow:0 0 0 2px #f0d878, 0 0 0 0 rgba(240,200,40,0); }
+}
 @media (max-width:640px){
   /* On narrow screens, stack the columns and let places wrap as chips below */
   .tb-act-table-row{grid-template-columns:1fr;gap:10px;}
@@ -14649,10 +14658,22 @@ function _renderPlaceActivityItems(){
   var _searchQNorm = _searchNormalize(_searchQ);
   function _pmRowMatchesSearch(d, secName){
     if (!_searchQ) return true;
-    // Round NC.X: place-name only, accent-insensitive. "vik" now
-    // matches "Vík"; "thingvellir" matches "Þingvellir".
-    if (!d || !d.place) return false;
-    return _searchNormalize(d.place).indexOf(_searchQNorm) >= 0;
+    if (!d) return false;
+    // Round NC.X: broader text match — place name, section title,
+    // and any activity name / description referencing this row.
+    // Accent-insensitive. Ranking still prioritizes place-name
+    // matches in the scroll-target selector below.
+    var q = _searchQNorm;
+    if (d.place && _searchNormalize(d.place).indexOf(q) >= 0) return true;
+    if (secName && _searchNormalize(secName).indexOf(q) >= 0) return true;
+    var refs = d.placeRefs || [];
+    for (var i = 0; i < refs.length; i++) {
+      var r = refs[i];
+      if (!r || !r.item) continue;
+      if (r.item.name && _searchNormalize(r.item.name).indexOf(q) >= 0) return true;
+      if (r.item.description && _searchNormalize(r.item.description).indexOf(q) >= 0) return true;
+    }
+    return false;
   }
 
   (function _renderSectionTOC(){
@@ -15389,6 +15410,17 @@ function _renderPlaceActivityItems(){
           + (firstHit ? (" firstHit=" + (firstHit.id || firstHit.className)) : " firstHit=null"));
       } catch(_){}
       if (firstHit) {
+        // Mark the best hit with a flash animation so the eye lands
+        // on it after the smooth scroll completes. Remove the class
+        // from any previously-flashed row first.
+        try {
+          var prevFlash = list.querySelectorAll(".tb-search-flash");
+          for (var pf = 0; pf < prevFlash.length; pf++) prevFlash[pf].classList.remove("tb-search-flash");
+          // Force a reflow so the animation restarts cleanly.
+          // eslint-disable-next-line no-unused-expressions
+          firstHit.offsetWidth;
+          firstHit.classList.add("tb-search-flash");
+        } catch(_){}
         // Find the nearest scroll container — the picker-list pane.
         var scroller = firstHit.closest(".picker-list") || list.parentElement || list;
         try {
