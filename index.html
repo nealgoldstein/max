@@ -1801,6 +1801,10 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
 .tb-act-table-row.off{background:#fafafa;}
 .tb-act-table-row.iconic{border-left:3px solid #b28a2e;}
 .tb-act-table-row.iconic.on{border-left-color:#b28a2e;}
+/* Round NC.X: search-hit glow. Search is scroll-and-highlight, not
+   filter — the matching row stays in context but is visually marked
+   so the eye finds it after the auto-scroll. */
+.tb-act-table-row.tb-search-hit{background:#fff8d6;border-color:#e0c060;box-shadow:0 0 0 2px #f0d878;}
 @media (max-width:640px){
   /* On narrow screens, stack the columns and let places wrap as chips below */
   .tb-act-table-row{grid-template-columns:1fr;gap:10px;}
@@ -14841,13 +14845,11 @@ function _renderPlaceActivityItems(){
     // a one-word-per-line stack at narrow widths instead of wrapping cleanly.
     // With min-width as the natural content width, the row triggers
     // flex-wrap (set on .tb-act-section-hdr) when there's no room.
-    // v359.55.15: search filter — drop destinations that don't match.
-    if (_searchQ) {
-      destOrder = destOrder.filter(function(key){
-        return _pmRowMatchesSearch(byDest[key], sec);
-      });
-      if (!destOrder.length) return; // skip the entire section
-    }
+    // Round NC.X: search is now a scroll-and-highlight, not a filter.
+    // All destinations stay visible; the match below is used after
+    // render to scroll to the first hit. Earlier filter-style behavior
+    // hid non-matching rows, which made the user lose their bearings.
+    // (No filtering here.)
     hdrWrap.innerHTML = '<div class="tb-act-section-title" style="flex:1;">' + _pmEsc(sec) + '</div>'
       + '<div class="tb-act-section-count">' + destOrder.length + ' destination' + (destOrder.length===1?'':'s') + '</div>'
       + moreBtnHtml;
@@ -14860,7 +14862,10 @@ function _renderPlaceActivityItems(){
       var destKeptInSection = d.placeRefs.some(function(r){ return r.placeRef && r.placeRef._keep; });
 
       var row = document.createElement("div");
-      row.className = "tb-act-table-row tb-dest-major" + (destKeptInSection ? " on" : " off");
+      var _rowMatchesSearch = _searchQ && _pmRowMatchesSearch(d, sec);
+      row.className = "tb-act-table-row tb-dest-major"
+        + (destKeptInSection ? " on" : " off")
+        + (_rowMatchesSearch ? " tb-search-hit" : "");
       row.id = "tb-place-act-sec-" + sec.replace(/[^a-z0-9]/gi,"_") + "-" + key.replace(/[^a-z0-9]/gi,"_");
 
       // Whether to show nights here — only on the FIRST section where this dest appears.
@@ -15238,27 +15243,28 @@ function _renderPlaceActivityItems(){
   if (typeof _hydrateWispTraces === "function") {
     setTimeout(function () { _hydrateWispTraces(); }, 40);
   }
-  // Round NC.X bugfix: empty-state for "search filters out everything."
-  // If no .tb-act-section-hdr was appended, the user is staring at an
-  // apparently-empty list with no idea the filter is hiding rows. Surface
-  // the residual query with a one-click clear so they can recover.
+  // Round NC.X: search is scroll-and-highlight, not filter. After the
+  // list is fully rendered with all rows visible, find the first row
+  // tagged .tb-search-hit and scroll it into view. The CSS for that
+  // class (defined in the <style> block) gives the row a soft yellow
+  // glow so the eye lands on it.
   if (_searchQ) {
-    var anySection = list.querySelector(".tb-act-section-hdr");
-    if (!anySection) {
-      var empty = document.createElement("div");
-      empty.style.cssText = "margin:14px 0;padding:14px 16px;background:#fff8e6;border:1px solid #f0d8a8;border-radius:8px;font-size:12px;color:#7a5500;line-height:1.5;";
-      empty.innerHTML = 'No matches for &ldquo;<strong>' + _pmEsc(_searchQ) + '</strong>.&rdquo; All your places are still here — the search is just hiding them. '
-        + '<button type="button" id="tb-place-act-search-clear" style="margin-left:6px;font-size:11px;font-weight:600;color:#7a5500;background:#fff;border:1px solid #d8b878;border-radius:4px;padding:3px 9px;cursor:pointer;font-family:inherit;">× Clear search</button>';
-      list.appendChild(empty);
-      var clrBtn = document.getElementById("tb-place-act-search-clear");
-      if (clrBtn) {
-        clrBtn.onclick = function(){
-          _tb._researchSearch = "";
-          _tb._researchSearchWasFocused = false;
-          _renderPlaceActivityItems();
-        };
+    setTimeout(function(){
+      var firstHit = list.querySelector(".tb-search-hit");
+      if (firstHit) {
+        try { firstHit.scrollIntoView({ behavior: "smooth", block: "center" }); } catch(_){}
+      } else {
+        // No matches at all — surface a small inline "no matches" note
+        // at the top so the user knows the search ran.
+        var existing = document.getElementById("tb-search-no-match");
+        if (existing) existing.remove();
+        var note = document.createElement("div");
+        note.id = "tb-search-no-match";
+        note.style.cssText = "margin:10px 0;padding:8px 12px;background:#fff8e6;border:1px solid #f0d8a8;border-radius:6px;font-size:11.5px;color:#7a5500;";
+        note.textContent = 'No matches for "' + _searchQ + '"';
+        list.insertBefore(note, list.firstChild);
       }
-    }
+    }, 0);
   }
   // Round NC.X bugfix: restore focus + cursor on the search input after
   // a rebuild triggered by the user typing. Synchronous (no setTimeout)
