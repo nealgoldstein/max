@@ -14609,6 +14609,9 @@ function _renderPlaceActivityItems(){
     searchWrap.style.cssText = "display:flex;align-items:center;gap:6px;margin:6px 0 8px;";
     var searchInp = document.createElement("input");
     searchInp.type = "search";
+    // Stable id so the post-rebuild focus restore can find the new
+    // element after _renderPlaceActivityItems clobbers the DOM.
+    searchInp.id = "tb-place-act-search";
     searchInp.placeholder = "Search places, notes, links…";
     searchInp.value = (_tb && _tb._researchSearch) || "";
     searchInp.style.cssText = "flex:1;font:inherit;font-size:12.5px;padding:5px 9px;border:1px solid #d8dde5;border-radius:5px;background:#fff;color:#111;box-sizing:border-box;outline:none;";
@@ -14618,7 +14621,13 @@ function _renderPlaceActivityItems(){
     searchClear.textContent = "× Clear";
     searchInp.oninput = function(){
       _tb._researchSearch = searchInp.value;
-      // Debounce slightly so each keystroke doesn't blow away the cursor.
+      // Round NC.X bugfix: capture cursor position so the post-rebuild
+      // focus restore knows where to put the caret. Without this, each
+      // debounced re-render destroys the input element, focus is lost,
+      // and subsequent keystrokes go nowhere — exactly the "search
+      // doesn't work" symptom.
+      try { _tb._researchSearchCaret = searchInp.selectionStart; } catch(_){}
+      _tb._researchSearchWasFocused = true;
       clearTimeout(_tb._researchSearchTimer);
       _tb._researchSearchTimer = setTimeout(function(){
         if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
@@ -14626,6 +14635,8 @@ function _renderPlaceActivityItems(){
     };
     searchClear.onclick = function(){
       _tb._researchSearch = "";
+      _tb._researchSearchWasFocused = true;
+      _tb._researchSearchCaret = 0;
       if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
     };
     searchWrap.appendChild(searchInp);
@@ -15211,6 +15222,22 @@ function _renderPlaceActivityItems(){
   // previously-added trace nodes. The post-render hook re-adds them.
   if (typeof _hydrateWispTraces === "function") {
     setTimeout(function () { _hydrateWispTraces(); }, 40);
+  }
+  // Round NC.X bugfix: restore focus + cursor on the search input after
+  // a rebuild triggered by the user typing. Without this, every
+  // keystroke destroys the focused element and the next keystroke goes
+  // nowhere, which felt like "search doesn't work."
+  if (_tb && _tb._researchSearchWasFocused) {
+    _tb._researchSearchWasFocused = false;
+    setTimeout(function(){
+      var inp = document.getElementById("tb-place-act-search");
+      if (!inp) return;
+      try {
+        inp.focus();
+        var caret = (typeof _tb._researchSearchCaret === "number") ? _tb._researchSearchCaret : inp.value.length;
+        inp.setSelectionRange(caret, caret);
+      } catch(_){}
+    }, 0);
   }
 }
 
