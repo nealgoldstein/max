@@ -13388,14 +13388,48 @@ async function generateActivitiesForPlace(){
     // BA's lat/lng-on-every-place requirement. The output is also longer
     // (more activities × more places per city × added coordinates).
     // Truncated responses fail to parse and the picker hangs forever.
-    var text = await callMax([{role:"user",content:prompt}], 9000, 110000);
-    var cleaned = text.replace(/```json|```/g,"").trim();
+    // Round NC.X: auto-retry once on parse failure with a larger token
+    // budget. The most common cause of "Couldn't generate activities"
+    // is the LLM hitting the maxTokens ceiling mid-array, returning
+    // truncated JSON. A second pass at ~50% larger budget recovers
+    // those cases silently. Marked on the error so the catch block
+    // can surface a clearer message if even the retry fails.
+    var text;
     var items;
-    try { items = JSON.parse(cleaned); }
-    catch(err){
-      var last = cleaned.lastIndexOf("},");
-      if(last > 0) { try { items = JSON.parse(cleaned.substring(0,last+1)+"]"); } catch(_){ throw err; } }
-      else throw err;
+    var _attempt = 0;
+    var _budgets = [9000, 14000];
+    while (_attempt < _budgets.length) {
+      try {
+        text = await callMax([{role:"user",content:prompt}], _budgets[_attempt], 110000);
+      } catch (netErr) {
+        // Network / fetch / API error — no point retrying with a
+        // bigger budget; re-throw with a tag so the catch block can
+        // distinguish from a parse failure.
+        netErr._maxKind = "network";
+        throw netErr;
+      }
+      var cleaned = text.replace(/```json|```/g, "").trim();
+      try {
+        items = JSON.parse(cleaned);
+        break;
+      } catch (err) {
+        // Try the truncated-array recovery first (chop at last "},").
+        var last = cleaned.lastIndexOf("},");
+        if (last > 0) {
+          try {
+            items = JSON.parse(cleaned.substring(0, last + 1) + "]");
+            console.warn("[Max] activity generation: recovered from truncated JSON at attempt " + _attempt);
+            break;
+          } catch (_){ /* fall through to retry-with-bigger-budget */ }
+        }
+        _attempt++;
+        if (_attempt >= _budgets.length) {
+          err._maxKind = "parse";
+          throw err;
+        }
+        console.warn("[Max] activity generation: JSON parse failed at attempt " + (_attempt - 1)
+          + ", retrying with token budget " + _budgets[_attempt]);
+      }
     }
     var regionCountry = place;
     function _normPlaceArr(arr){
@@ -13698,17 +13732,41 @@ async function generateActivitiesForPlace(){
   } catch(e){
     console.error("generateActivitiesForPlace failed:", e && e.message);
     if(btn){ btn.disabled = false; btn.classList.remove("tb-btn-disabled"); btn.textContent = "Try again \u2192"; }
-    // Replace the picker's loading state with an error + retry button so
-    // the user isn't stuck staring at a forever-spinner. The new picker
-    // layout uses #tb-picker-list-pane (the left column); the older code
-    // path used #tb-place-act-list-wrap on the all-in-one screen.
+    // Round NC.X: tailored error message. Three distinct causes:
+    //   1. No API key set \u2192 show "set your API key" copy + link.
+    //   2. Parse failure even after the retry budget bump \u2192 response
+    //      was too large; suggest shortening the brief.
+    //   3. Anything else (network, rate limit, 5xx) \u2192 generic copy.
+    var _msg = e && e.message ? String(e.message) : "unknown error";
+    var _kind = (e && e._maxKind) || "";
+    var _hasApiKey = false;
+    try { _hasApiKey = !!(_apiKey || (typeof localStorage !== "undefined" && localStorage.getItem("max-api-key"))); } catch(_){}
+    var _headline, _detail, _ctaHtml = '';
+    if (!_hasApiKey) {
+      _headline = "No API key set yet.";
+      _detail   = "Max needs an Anthropic API key to generate trip ideas. Add yours and try again.";
+      _ctaHtml  = '<button class="tb-btn-primary" onclick="if(typeof showApiKeyModal===&quot;function&quot;)showApiKeyModal();" style="display:inline-block;margin-right:8px;">Set API key &rarr;</button>'
+                + '<button class="tb-btn-secondary" onclick="generateActivitiesForPlace()" style="display:inline-block;">Try again</button>';
+    } else if (_kind === "parse" || /JSON|parse|Unexpected token|truncated/i.test(_msg)) {
+      _headline = "The response was too long for Max to handle, even after retrying.";
+      _detail   = "Try shortening your sentence or removing some chips. Big briefs can blow past the token budget.";
+      _ctaHtml  = '<button class="tb-btn-primary" onclick="generateActivitiesForPlace()" style="display:inline-block;">Try again &rarr;</button>';
+    } else if (/rate.?limit|429|too many/i.test(_msg)) {
+      _headline = "Rate limited by the API.";
+      _detail   = "Wait 30 seconds and try again. Anthropic limits how often a key can call the model.";
+      _ctaHtml  = '<button class="tb-btn-primary" onclick="generateActivitiesForPlace()" style="display:inline-block;">Try again &rarr;</button>';
+    } else {
+      _headline = "Couldn\u2019t generate activities.";
+      _detail   = _pmEsc(_msg) + ". Check your network and try again.";
+      _ctaHtml  = '<button class="tb-btn-primary" onclick="generateActivitiesForPlace()" style="display:inline-block;">Try again &rarr;</button>';
+    }
     var pane = document.getElementById("tb-picker-list-pane")
             || document.getElementById("tb-place-act-list-wrap");
     if (pane) {
       pane.innerHTML = '<div style="text-align:center;padding:40px 20px;color:#c44;font-size:12px;line-height:1.6;">'
-        + '<div style="margin-bottom:10px;">Couldn\u2019t generate activities \u2014 ' + (e && e.message ? _pmEsc(e.message) : "unknown error") + '</div>'
-        + '<div style="font-size:11px;color:#999;margin-bottom:14px;">Common causes: missing API key, rate limit, or the response was truncated/malformed.</div>'
-        + '<button class="tb-btn-primary" onclick="generateActivitiesForPlace()" style="display:inline-block;">Try again \u2192</button>'
+        + '<div style="margin-bottom:10px;font-weight:600;">' + _headline + '</div>'
+        + '<div style="font-size:11px;color:#999;margin-bottom:14px;">' + _detail + '</div>'
+        + _ctaHtml
         + '</div>';
     }
     return;
