@@ -2821,17 +2821,53 @@ async function callMax(messages, maxTokens, timeoutMs, opts) {
     data = await resp.json();
   } catch(fetchErr) {
     // v353.2: don't prompt for an API key when the user is signed in
-    // via proxy \u2014 they don't need one. The previous logic checked
-    // `!_apiKey && !_inIframe` and surfaced the api-key form on any
-    // proxy fetch failure (network drops, server hiccups), which was
-    // the "API key entry showing occasionally" symptom. Now: only
-    // route to the api-key form for non-proxy users; proxy users get
-    // the actual fetch error so they can see what went wrong.
-    if (!useProxy && !_apiKey && !_inIframe) {
-      showApiKeyForm();
-      throw new Error("API key required \u2014 enter your Anthropic API key in the form above.");
+    // via proxy \u2014 they don't need one.
+    //
+    // Round NC.X: when the proxy is unreachable but the user has a
+    // local API key, fall back to the direct path instead of just
+    // throwing. This was the "sync server is down so the picker is
+    // broken too" symptom \u2014 useProxy=true, fetch to the proxy fails,
+    // user thinks Max is broken. Falling back to the direct path with
+    // the local key keeps everything working until the proxy comes
+    // back, with a one-line console note so the operator can see
+    // what's happening.
+    if (useProxy && _apiKey) {
+      console.warn("[Max] proxy unreachable (" + (fetchErr && fetchErr.message) + ") \u2014 falling back to direct API path with local key");
+      var directHeaders = {
+        "Content-Type": "application/json",
+        "x-api-key": _apiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      };
+      var directTimeout = new Promise(function(_, reject){ setTimeout(function(){ reject(new Error('API timeout')); }, timeoutMs || 25000); });
+      try {
+        resp = await Promise.race([fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: directHeaders,
+          body: JSON.stringify({
+            model: "claude-sonnet-4-20250514",
+            max_tokens: maxTokens || 1000,
+            temperature: systemOverride ? 0.7 : 0,
+            system: systemOverride || MAX_SYSTEM,
+            messages: messages
+          })
+        }), directTimeout]);
+        data = await resp.json();
+        // Successful fallback \u2014 let the rest of callMax handle the
+        // response normally (cache write, return). We didn't break out
+        // of the outer try/catch, so flow continues past line ~2836.
+      } catch (directErr) {
+        // Direct path also failed \u2014 surface the original error so the
+        // user sees the actual root cause (CORS, DNS, network).
+        throw fetchErr;
+      }
+    } else {
+      if (!useProxy && !_apiKey && !_inIframe) {
+        showApiKeyForm();
+        throw new Error("API key required \u2014 enter your Anthropic API key in the form above.");
+      }
+      throw fetchErr;
     }
-    throw fetchErr;
   }
   if (data.error) {
     // v353.2: split the 401 handling per auth mode. Proxy users on
