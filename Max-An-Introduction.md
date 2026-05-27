@@ -252,6 +252,40 @@ confirmed. Per-destination, day by day. Much more fluid than the
 other three because it gets shaped by what you discover when you
 arrive.
 
+### Specificity rewards you — especially in the Profile
+
+The more specific your Profile, the better the trip Max gives you
+back. Compare these two sentences:
+
+> *"To drive the complete ring road and see the northern lights."*
+
+with:
+
+> *"To drive the complete ring road counterclockwise end to end and
+> see the northern lights."*
+
+The second locks in a direction, a completeness commitment, and a
+sequencing order. Max can plan around it: route the southern
+overnights up front, save the aurora-viable dark-sky nights for
+the eastern and northern stops, set the pace so you actually make
+the full loop instead of doubling back. The first sentence leaves
+all of that open — Max guesses, and you may not like the guess.
+
+You can fix this later. Marking destinations, reordering nights,
+rejecting candidates, re-running Discovery — all of it works,
+and Max won't punish you for changing your mind. But it's easier
+to set the constraint up front than to argue with a built trip.
+If you know what you want, say so in the sentence. Every
+modifier you add — *counterclockwise, end to end, by train,
+without backtracking, with at least three dark-sky nights* —
+gives Max one less thing to guess about.
+
+The same goes for Constraints: a return date is more specific
+than a season; a flight number is more specific than "fly in";
+"limited walking" is more specific than "moderate pace." Specific
+inputs produce specific outputs. Vague inputs produce trips you
+have to renegotiate.
+
 ### Why phases, not steps
 
 In practice you cycle through them, not march through them:
