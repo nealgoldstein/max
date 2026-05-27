@@ -18208,31 +18208,48 @@ function _renderPlacePickerMap(targetId){
       // v357: stay pins lost their ordinal number — the picker no
       // longer shows visit order. Both stay and day-trip pins now
       // carry place initials.
-      var isStay = info.kept && !info._isDayTrip;
-      var isDayTrip = info.kept && info._isDayTrip;
-      // Round FN.F.3: cross-reference _tb.candidates for the singleSight
-      // flag. The picker hero map (_pmMap) builds allPlaces from
-      // _tb.placeActivities (must-do items) — separate from _tb.candidates
-      // where the LLM-emitted singleSight flag lives. Walk candidates by
-      // place name to surface the flag here. A single-sight place gets the
-      // ? pin treatment regardless of kept/day-trip status — it's the
-      // "decide how to fit me" signal that overrides the normal role
-      // styling. Once the user assigns Wayside/Day-trip via the role
-      // popover, intent gets set, _isSingleSight returns false, and the
-      // pin morphs to its assigned style on the next render.
-      var isSingleSight = false;
+      // Round NC.3+ bugfix: read c.role from _tb.candidates (NC.3 source
+      // of truth) and let it override the legacy
+      // `kept && !_isDayTrip` derivation. The legacy path drove the
+      // Geysir-shows-stay-when-its-see bug — the picker map was reading
+      // a different field than the role popover writes.
+      var _ssCand = null;
       try {
-        var _ssCand = (window._tb && Array.isArray(window._tb.candidates))
+        _ssCand = (window._tb && Array.isArray(window._tb.candidates))
           ? window._tb.candidates.find(function(cc){
               return cc && cc.place && cc.place.toLowerCase() === (info.place || "").toLowerCase();
             })
           : null;
-        if (_ssCand && typeof window._isSingleSight === "function") {
-          isSingleSight = window._isSingleSight(_ssCand);
-        } else if (_ssCand && _ssCand.singleSight === true) {
-          isSingleSight = true;
+        if (_ssCand && window.MaxEnginePicker && typeof window.MaxEnginePicker.normalizeCandidateRole === "function") {
+          window.MaxEnginePicker.normalizeCandidateRole(_ssCand);
         }
       } catch(_) { /* swallow */ }
+      var _candRole = (_ssCand && _ssCand.role) || null;
+      var isStay, isDayTrip, isSee;
+      if (_candRole) {
+        isStay    = (_candRole === "stay");
+        isDayTrip = (_candRole === "daytrip");
+        isSee     = (_candRole === "see");
+      } else {
+        // Legacy path — no candidate role available, fall back to the
+        // pre-NC.3 _isDayTrip / kept derivation.
+        isStay    = info.kept && !info._isDayTrip;
+        isDayTrip = info.kept && info._isDayTrip;
+        isSee     = false;
+      }
+      // Round FN.F.3 / NC.3: "single sight" derives from c.role === "see"
+      // when we have a candidate; otherwise fall back to legacy
+      // _isSingleSight() which reads c.singleSight + c.intent.
+      var isSingleSight = isSee;
+      if (!isSingleSight) {
+        try {
+          if (_ssCand && typeof window._isSingleSight === "function") {
+            isSingleSight = window._isSingleSight(_ssCand);
+          } else if (_ssCand && _ssCand.singleSight === true) {
+            isSingleSight = true;
+          }
+        } catch(_) { /* swallow */ }
+      }
       var color, label, size, borderStyle = "2px solid #fff", fontPx = 9;
       if (isSingleSight) {
         // Gray pin with white "?" — distinct from rejected (also gray)
@@ -18292,8 +18309,15 @@ function _renderPlacePickerMap(targetId){
         // label is research metadata, not navigation; the tooltip
         // should answer "what is this and what role is it playing on
         // the trip," nothing more.
-        var ttBits = info.place
-          + (isStay ? " · stay" : isDayTrip ? " · day trip / on the way" : info.kept ? " · kept" : "");
+        // Round NC.3+ bugfix: tooltip role label tracks c.role (NC.3
+        // source of truth), so the picker tooltip and the role popover
+        // never disagree about whether a place is stay/see/day-trip.
+        var _ttRole = isSee ? " · see"
+                    : isStay ? " · stay"
+                    : isDayTrip ? " · day trip / on the way"
+                    : info.kept ? " · kept"
+                    : "";
+        var ttBits = info.place + _ttRole;
         m.bindTooltip(ttBits, {direction:"top", offset:[0,-10]});
         // Step 6: clicking a pin opens the stay/day-trip popup.
         // Falls back to the legacy scroll-to-row behavior when the
@@ -35288,7 +35312,7 @@ function convertDestToDayTrip(destId, hubDestId, opts){
   // v359.54 Wayside Phase 1: removing a destination (absorbed into hub
   // as day-trip) changes adjacency — re-sync transit routes.
   if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
-    try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
+    try { var _syncR = MaxEngineTrip.syncTransitRoutes(trip); _notifyOnwayDemotions(_syncR); } catch(_){}
   }
   // v359.54.9: recompute the over-budget notice — the trip just got
   // one night shorter (the absorbed dest's nights stayed on the hub
@@ -35653,7 +35677,7 @@ function convertDestToSee(destId){
   // sync is cheap and defensive — covers any edge case where the
   // route between prev/this or this/next assumed nights > 0.
   if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
-    try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
+    try { var _syncR = MaxEngineTrip.syncTransitRoutes(trip); _notifyOnwayDemotions(_syncR); } catch(_){}
   }
   _emitTripMutation();
 }
@@ -35695,7 +35719,7 @@ function removeDestFromTrip(destId){
   // Adjacency changed — re-sync transit routes so prev/next stitches
   // up correctly (mirrors convertDestToDayTrip post-splice handling).
   if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
-    try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
+    try { var _syncR = MaxEngineTrip.syncTransitRoutes(trip); _notifyOnwayDemotions(_syncR); } catch(_){}
   }
   _emitTripMutation();
 }
@@ -36234,7 +36258,7 @@ function _openTripDestRolePopover(destId){
         });
       }
       if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
-        try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
+        try { var _syncR = MaxEngineTrip.syncTransitRoutes(trip); _notifyOnwayDemotions(_syncR); } catch(_){}
       }
       _emitTripMutation();
       // Round NC.2: reversing see → stay is the user committing to overnight.
@@ -37280,7 +37304,7 @@ function _convertSeeToOvernight(destId, newNights) {
     });
   }
   if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
-    try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
+    try { var _syncR = MaxEngineTrip.syncTransitRoutes(trip); _notifyOnwayDemotions(_syncR); } catch(_){}
   }
   _emitTripMutation();
 }
@@ -38483,7 +38507,7 @@ function ungroupWaysideByRouteStop(route, stop, opts){
   // there's still a route structure for the new adjacency. Skips the
   // sync on the happy path — we already wrote both legs above.
   if (!canRestore && typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
-    try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
+    try { var _syncR = MaxEngineTrip.syncTransitRoutes(trip); _notifyOnwayDemotions(_syncR); } catch(_){}
   }
 
   // v359.54.9: trip just gained a destination — recompute over-budget.
@@ -38809,7 +38833,7 @@ function addDestToExistingDayTripRoute(destId, routeId, opts) {
   }
 
   if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
-    try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
+    try { var _syncR = MaxEngineTrip.syncTransitRoutes(trip); _notifyOnwayDemotions(_syncR); } catch(_){}
   }
   _emitTripMutation();
 
@@ -39019,7 +39043,7 @@ function convertDestToWaysideOnRoute(destId, targetRouteId, opts) {
   // transit routes so the now-missing prev→src and src→next routes
   // get reconciled (typically merged into prev→next).
   if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
-    try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
+    try { var _syncR = MaxEngineTrip.syncTransitRoutes(trip); _notifyOnwayDemotions(_syncR); } catch(_){}
   }
 
   _emitTripMutation();
@@ -39406,7 +39430,7 @@ function convertDayTripToSee(hubDest, route, stop, opts){
   else trip.destinations.push(newDest);
 
   if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
-    try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
+    try { var _syncR = MaxEngineTrip.syncTransitRoutes(trip); _notifyOnwayDemotions(_syncR); } catch(_){}
   }
   _emitTripMutation();
   if (!opts.silent && typeof _showDayTripToast === "function") {
@@ -39453,7 +39477,7 @@ function convertWaysideToSee(route, stop, opts){
   else trip.destinations.push(newDest);
 
   if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
-    try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
+    try { var _syncR = MaxEngineTrip.syncTransitRoutes(trip); _notifyOnwayDemotions(_syncR); } catch(_){}
   }
   _emitTripMutation();
   if (!opts.silent && typeof _showDayTripToast === "function") {
@@ -39589,7 +39613,7 @@ function convertWaysideToDayTrip(route, stop, hubDestId, opts){
   // Adjacency on transit routes may have shifted (one less stop on
   // the original); resync to keep prev/next stitching correct.
   if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
-    try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
+    try { var _syncR = MaxEngineTrip.syncTransitRoutes(trip); _notifyOnwayDemotions(_syncR); } catch(_){}
   }
   _emitTripMutation();
 
@@ -39770,7 +39794,7 @@ function ungroupDayTripByRouteStop(hubDest, route, stop, opts){
   // v359.54 Wayside Phase 1: spawning a new destination changes
   // adjacency — re-sync transit routes against the new lineup.
   if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
-    try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
+    try { var _syncR = MaxEngineTrip.syncTransitRoutes(trip); _notifyOnwayDemotions(_syncR); } catch(_){}
   }
 
   // v359.54.9: trip just gained a destination — recompute over-budget.
@@ -40086,7 +40110,7 @@ function executeMoveDest(dest,fromIdx,toIdx){
   // here brings the routes back in sync with destinations[] and the
   // map re-renders correctly on the _emitTripMutation below.
   if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
-    try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
+    try { var _syncR = MaxEngineTrip.syncTransitRoutes(trip); _notifyOnwayDemotions(_syncR); } catch(_){}
   }
 
   // Round HE: emit instead of direct drawXxx tail. The rAF scroll
@@ -40952,11 +40976,36 @@ function reverseTripOrder(){
   // reversed adjacency. Old transit routes for the previous
   // direction get dropped, new ones for the reversed direction
   // are created. dayTrip/arrival/departure routes are untouched.
+  // Round NC.3+: syncTransitRoutes now also returns the names of
+  // onway candidates orphaned by the reorder; we demote those to
+  // "see" inside the engine and alert the user here.
   if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
-    try { MaxEngineTrip.syncTransitRoutes(trip); } catch(_){}
+    try {
+      var _syncResult = MaxEngineTrip.syncTransitRoutes(trip);
+      _notifyOnwayDemotions(_syncResult);
+    } catch(_){}
   }
   // Round HD: emit instead of direct drawXxx.
   _emitTripMutation();
+}
+
+// Round NC.3+: shared notifier for the onway → see demotion that fires
+// inside syncTransitRoutes. Used by every reorder/move/reverse path so
+// users learn what happened without us needing to plumb the list
+// through each call site individually.
+function _notifyOnwayDemotions(syncResult){
+  if (!syncResult || !Array.isArray(syncResult.demotedWaysides) || !syncResult.demotedWaysides.length) return;
+  var names = syncResult.demotedWaysides;
+  var msg = (names.length === 1)
+    ? names[0] + " was a wayside between two destinations that are no longer adjacent. It's now “See” — still on the trip, but no role committed."
+    : names.slice(0, 3).join(", ")
+        + (names.length > 3 ? " and " + (names.length - 3) + " more" : "")
+        + " were waysides between destinations that are no longer adjacent. They're now “See” — still on the trip, but no role committed.";
+  if (typeof showSaveStatus === "function") {
+    try { showSaveStatus(msg, 6500); return; } catch(_){}
+  }
+  if (typeof maxAlert === "function") { try { maxAlert(msg); return; } catch(_){} }
+  console.log("[Max] onway demoted:", msg);
 }
 
 function drawTripMode(){

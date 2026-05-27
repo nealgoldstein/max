@@ -1214,6 +1214,75 @@
       if (sub !== 'transit') return true;
       return !!keepIds[r.id];
     });
+
+    // Round NC.3+: demote orphaned onway candidates. When the user
+    // reorders the trip, the (from, to) pair a wayside was attached to
+    // may no longer be adjacent. Without this pass the candidate keeps
+    // role="onway" but has no visible home — what Neal saw as "they
+    // became consider." Recast them as "see" (a kept place, just no
+    // longer a wayside), and return the list of names so the caller
+    // can surface an alert.
+    var demotedWaysides = [];
+    try {
+      var _tb_ = global._tb;
+      var cands = (_tb_ && Array.isArray(_tb_.candidates)) ? _tb_.candidates : null;
+      if (cands && cands.length) {
+        // Build a quick lookup of place→coords from the new destination
+        // order so we can geometrically check each onway candidate.
+        var hav = (typeof haversineKm === "function")
+          ? haversineKm
+          : (typeof global.haversineKm === "function" ? global.haversineKm : null);
+        function _perpKm(a, b, p) {
+          if (!a || !b || !p) return Infinity;
+          var meanLat = (a[0] + b[0] + p[0]) / 3 * Math.PI / 180;
+          var kx = Math.cos(meanLat) * 111.32;
+          var ky = 111.32;
+          var ax = a[1]*kx, ay = a[0]*ky;
+          var bx = b[1]*kx, by = b[0]*ky;
+          var px = p[1]*kx, py = p[0]*ky;
+          var dx = bx-ax, dy = by-ay;
+          var len2 = dx*dx + dy*dy;
+          if (len2 < 1e-6) return Math.sqrt((px-ax)*(px-ax) + (py-ay)*(py-ay));
+          var t = ((px - ax) * dx + (py - ay) * dy) / len2;
+          var tC = Math.max(-0.1, Math.min(1.1, t));
+          var cx = ax + tC * dx, cy = ay + tC * dy;
+          return { perp: Math.sqrt((px-cx)*(px-cx) + (py-cy)*(py-cy)), t: t };
+        }
+        function _coordOf(d) {
+          if (!d) return null;
+          if (typeof d.lat === "number" && typeof d.lng === "number") return [d.lat, d.lng];
+          return null;
+        }
+        // Walk every onway candidate, look for ANY adjacent (i, i+1)
+        // dest pair where the candidate is a valid wayside (perp ≤ 40km
+        // AND t ∈ [0.15, 0.85]). If none, demote.
+        cands.forEach(function(c){
+          if (!c || c.role !== "onway") return;
+          if (c.status !== "keep") return;
+          var cp = (typeof c.lat === "number" && typeof c.lng === "number") ? [c.lat, c.lng] : null;
+          if (!cp) return;  // no coords → can't check; leave alone
+          var stillOnway = false;
+          for (var i2 = 0; i2 < dests.length - 1; i2++) {
+            var a = _coordOf(dests[i2]);
+            var b = _coordOf(dests[i2 + 1]);
+            if (!a || !b) continue;
+            var r = _perpKm(a, b, cp);
+            if (r.perp <= 40 && r.t >= 0.15 && r.t <= 0.85) {
+              stillOnway = true;
+              break;
+            }
+          }
+          if (!stillOnway) {
+            c.role = "see";
+            c._roleTouched = true;
+            demotedWaysides.push(c.place || "(unnamed)");
+          }
+        });
+      }
+    } catch(e) {
+      console.warn("[Max] syncTransitRoutes: demote-orphans pass failed:", e && e.message);
+    }
+    return { demotedWaysides: demotedWaysides };
   }
 
   // ── v360.0.8: wayside generator (Wayside Phase 2 + 6) ──────
