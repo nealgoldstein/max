@@ -55,6 +55,13 @@ module.exports = defineConfig({
     // doesn't slow anything down on the happy path — Playwright
     // polls the URL and proceeds as soon as it answers.
     timeout: 20000,
+    // Quiet the per-request "[WebServer] ::1 - - GET /foo.js 200 -"
+    // spam. Python's http.server logs every request to stderr;
+    // Playwright captures and re-emits it, drowning the actual test
+    // results. Set PLAYWRIGHT_VERBOSE=1 in env to re-enable when
+    // debugging a server-side issue.
+    stdout: process.env.PLAYWRIGHT_VERBOSE ? 'pipe' : 'ignore',
+    stderr: process.env.PLAYWRIGHT_VERBOSE ? 'pipe' : 'ignore',
   },
 
   projects: [
