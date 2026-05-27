@@ -14535,30 +14535,13 @@ function _renderPlaceActivityItems(){
   } catch(_){}
   function _pmRowMatchesSearch(d, secName){
     if (!_searchQ) return true;
-    // Place name(s) on this destination
-    if (d.place && d.place.toLowerCase().indexOf(_searchQ) >= 0) return true;
-    // Section name
-    if (secName && secName.toLowerCase().indexOf(_searchQ) >= 0) return true;
-    // Activity names referencing this destination
-    var activityHit = (d.placeRefs || []).some(function(r){
-      return r && r.item && r.item.name && r.item.name.toLowerCase().indexOf(_searchQ) >= 0;
-    });
-    if (activityHit) return true;
-    // Notes / links from placeMeta
-    var meta = (_tb && _tb.placeMeta) ? _tb.placeMeta[_pmMetaKey(d.place)] : null;
-    if (meta) {
-      if (meta.notes && meta.notes.toLowerCase().indexOf(_searchQ) >= 0) return true;
-      if (Array.isArray(meta.links)) {
-        var linkHit = meta.links.some(function(l){
-          return l && (
-            (l.url    && l.url.toLowerCase().indexOf(_searchQ) >= 0) ||
-            (l.domain && l.domain.toLowerCase().indexOf(_searchQ) >= 0)
-          );
-        });
-        if (linkHit) return true;
-      }
-    }
-    return false;
+    // Round NC.X: search is now PLACE-NAME ONLY. The earlier broader
+    // match (section name, activity name, notes, link URLs/domains)
+    // produced noisy hits — "vik" matched anything with "vik" in a
+    // note or a link, which buried the actual place result. Narrowing
+    // to place names makes the result both predictable and consistent
+    // with the "scroll to the place" behavior we now use.
+    return !!(d && d.place && d.place.toLowerCase().indexOf(_searchQ) >= 0);
   }
 
   (function _renderSectionTOC(){
@@ -14615,16 +14598,22 @@ function _renderPlaceActivityItems(){
     tocHdr.appendChild(hdrActions);
     toc.appendChild(tocHdr);
 
-    // Search input — live filter across place names, activity names,
-    // notes, and link URLs/domains.
+    // Search input — sticky to the top of the scrolling list pane so
+    // the user can search again without scrolling back up after
+    // landing on a result. Magnifying-glass affordance + lighter
+    // border to read as "input field" at a glance.
     var searchWrap = document.createElement("div");
-    searchWrap.style.cssText = "display:flex;align-items:center;gap:6px;margin:6px 0 8px;";
+    searchWrap.style.cssText = "display:flex;align-items:center;gap:6px;margin:0 0 10px;padding:8px 10px;background:#fafafa;border:1px solid #e6e1d5;border-radius:6px;position:sticky;top:0;z-index:5;box-shadow:0 1px 0 rgba(0,0,0,0.04);";
+    var searchIcon = document.createElement("span");
+    searchIcon.textContent = "🔍";
+    searchIcon.style.cssText = "font-size:13px;line-height:1;opacity:0.65;flex-shrink:0;";
+    searchWrap.appendChild(searchIcon);
     var searchInp = document.createElement("input");
     searchInp.type = "search";
     // Stable id so the post-rebuild focus restore can find the new
     // element after _renderPlaceActivityItems clobbers the DOM.
     searchInp.id = "tb-place-act-search";
-    searchInp.placeholder = "Search places, notes, links…";
+    searchInp.placeholder = "Search places by name…";
     searchInp.value = (_tb && _tb._researchSearch) || "";
     searchInp.style.cssText = "flex:1;font:inherit;font-size:12.5px;padding:5px 9px;border:1px solid #d8dde5;border-radius:5px;background:#fff;color:#111;box-sizing:border-box;outline:none;";
     var searchClear = document.createElement("button");
@@ -14660,7 +14649,14 @@ function _renderPlaceActivityItems(){
     };
     searchWrap.appendChild(searchInp);
     searchWrap.appendChild(searchClear);
-    toc.appendChild(searchWrap);
+    // Round NC.X: do NOT append searchWrap to toc. For position:sticky
+    // to keep the bar visible across the WHOLE scroll, its parent must
+    // span the whole scrollable content. toc is just the TOC block
+    // (TOC chips + section nav) at the top — sticky inside it
+    // disappears as soon as the user scrolls past the TOC. Append
+    // directly to `list` and BEFORE the TOC is appended, so it sits
+    // at the top of the scroll container.
+    list.appendChild(searchWrap);
 
     var tocList = document.createElement("div");
     tocList.style.cssText = "display:flex;flex-wrap:wrap;gap:4px 8px;";
@@ -15254,15 +15250,22 @@ function _renderPlaceActivityItems(){
       if (firstHit) {
         try { firstHit.scrollIntoView({ behavior: "smooth", block: "center" }); } catch(_){}
       } else {
-        // No matches at all — surface a small inline "no matches" note
-        // at the top so the user knows the search ran.
+        // No matches — surface a small "no matches" note RIGHT BELOW
+        // the search box (not at the very top of the panel; that put
+        // it above the WISPs section, which was confusing). Anchor it
+        // before the first section header (after the TOC + search).
         var existing = document.getElementById("tb-search-no-match");
         if (existing) existing.remove();
         var note = document.createElement("div");
         note.id = "tb-search-no-match";
         note.style.cssText = "margin:10px 0;padding:8px 12px;background:#fff8e6;border:1px solid #f0d8a8;border-radius:6px;font-size:11.5px;color:#7a5500;";
         note.textContent = 'No matches for "' + _searchQ + '"';
-        list.insertBefore(note, list.firstChild);
+        var firstSecHdr = list.querySelector(".tb-act-section-hdr");
+        if (firstSecHdr) {
+          list.insertBefore(note, firstSecHdr);
+        } else {
+          list.appendChild(note);
+        }
       }
     }, 0);
   }
