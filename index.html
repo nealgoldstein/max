@@ -14533,15 +14533,23 @@ function _renderPlaceActivityItems(){
     console.log("[Max render] _renderPlaceActivityItems running. q=" + JSON.stringify(_searchQ)
       + " placeActivities=" + _diagActs + " candidates=" + _diagCands);
   } catch(_){}
+  // Accent-insensitive normalize so "vik" matches "Vík" and "thingvellir"
+  // matches "Þingvellir". Strips combining marks via NFD decomposition,
+  // then collapses a few Icelandic-specific characters that don't
+  // decompose (þ, æ, ð).
+  function _searchNormalize(s){
+    if (!s) return "";
+    // ̀-ͯ is the Combining Diacritical Marks Unicode block.
+    var n = String(s).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+    return n.replace(/þ/g, "th").replace(/æ/g, "ae").replace(/ð/g, "d").replace(/ø/g, "o");
+  }
+  var _searchQNorm = _searchNormalize(_searchQ);
   function _pmRowMatchesSearch(d, secName){
     if (!_searchQ) return true;
-    // Round NC.X: search is now PLACE-NAME ONLY. The earlier broader
-    // match (section name, activity name, notes, link URLs/domains)
-    // produced noisy hits — "vik" matched anything with "vik" in a
-    // note or a link, which buried the actual place result. Narrowing
-    // to place names makes the result both predictable and consistent
-    // with the "scroll to the place" behavior we now use.
-    return !!(d && d.place && d.place.toLowerCase().indexOf(_searchQ) >= 0);
+    // Round NC.X: place-name only, accent-insensitive. "vik" now
+    // matches "Vík"; "thingvellir" matches "Þingvellir".
+    if (!d || !d.place) return false;
+    return _searchNormalize(d.place).indexOf(_searchQNorm) >= 0;
   }
 
   (function _renderSectionTOC(){
@@ -15251,7 +15259,13 @@ function _renderPlaceActivityItems(){
     if (oldNote) oldNote.remove();
     if (!_searchQ) return;
     requestAnimationFrame(function(){
-      var firstHit = list.querySelector(".tb-search-hit");
+      var allHits = list.querySelectorAll(".tb-search-hit");
+      var firstHit = allHits[0] || null;
+      try {
+        console.log("[Max search-scroll] q=" + JSON.stringify(_searchQ)
+          + " hits=" + allHits.length
+          + (firstHit ? (" firstHit=" + (firstHit.id || firstHit.className)) : " firstHit=null"));
+      } catch(_){}
       if (firstHit) {
         // Find the nearest scroll container — the picker-list pane.
         var scroller = firstHit.closest(".picker-list") || list.parentElement || list;
@@ -15262,9 +15276,15 @@ function _renderPlaceActivityItems(){
           // shift up so the row lands ~1/3 from the top of the viewport
           // (leaves the sticky search bar visible above).
           var delta = (hitRect.top - scRect.top) - (scRect.height / 3);
-          scroller.scrollTo({ top: scroller.scrollTop + delta, behavior: "smooth" });
-        } catch(_){
-          // Fallback to scrollIntoView if scrollTo + math fails.
+          var newTop = scroller.scrollTop + delta;
+          try {
+            console.log("[Max search-scroll] scroller=" + (scroller.className || scroller.id || "?")
+              + " scrollTop=" + scroller.scrollTop + " → " + newTop
+              + " (delta=" + delta.toFixed(1) + ")");
+          } catch(_){}
+          scroller.scrollTo({ top: newTop, behavior: "smooth" });
+        } catch(e){
+          try { console.log("[Max search-scroll] math failed, falling back to scrollIntoView:", e && e.message); } catch(_){}
           try { firstHit.scrollIntoView({ behavior: "smooth", block: "center" }); } catch(__){}
         }
         return;
