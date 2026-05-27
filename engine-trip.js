@@ -504,9 +504,24 @@
     var cur = new Date(startDate + "T12:00:00");
     ordered.forEach(function(c){
       var key = (typeof _normPlaceName === "function") ? _normPlaceName(c.place || "") : (c.place||"").toLowerCase();
-      var nights = (typeof c.nights === "number" && c.nights >= 0)
-        ? c.nights
-        : (typeof parseNightsFromRange === "function" ? (parseNightsFromRange(c.stayRange) || 3) : 3);
+      // Round NC.3+ bugfix: nights derives from c.role first. A "see"
+      // candidate is a 0-night standalone stop. "daytrip" and "onway"
+      // also imply 0 nights (you're not sleeping there). Only "stay"
+      // (or a missing role) takes nights from stayRange — the old
+      // behavior. This was the bug where every place became "Stay
+      // the night" after the trip was generated, regardless of what
+      // the user picked in the role popover or Discovery toggle.
+      var _cRole = (typeof window !== "undefined" && window.MaxEnginePicker && window.MaxEnginePicker.normalizeCandidateRole)
+        ? (window.MaxEnginePicker.normalizeCandidateRole(c) || c).role
+        : c.role;
+      var nights;
+      if (_cRole === "see" || _cRole === "daytrip" || _cRole === "onway") {
+        nights = 0;
+      } else {
+        nights = (typeof c.nights === "number" && c.nights >= 0)
+          ? c.nights
+          : (typeof parseNightsFromRange === "function" ? (parseNightsFromRange(c.stayRange) || 3) : 3);
+      }
 
       // Claim one existing destination per ordered slot. If the same
       // place appears multiple times in ordered (round-trip entry/exit),
