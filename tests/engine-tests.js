@@ -1140,56 +1140,150 @@ describe('engine-picker.js — domain setters', () => {
     assert.strictEqual(window._tb.region, 'fresh');
   });
 
-  // ── Round NC.1 (gallery-pivot): tripRole setter ─────────────────
-  test('setTripRole writes valid role to candidate and emits', () => {
-    window._tb = { candidates: [{ id: 'c1', place: 'Reykjavik' }] };
+  // ── Round NC.1 (deprecated, dispatched onto NC.3): tripRole ────
+  // setTripRole is kept as a transitional shim — it dispatches to
+  // setRole with the NC.1 → NC.3 vocabulary mapping. Tests below
+  // pin the shim's mapping; the substantive setRole tests live in
+  // the NC.3a block further down.
+  test('setTripRole shim: writes role via setRole and emits NC.3 shape', () => {
+    window._tb = { candidates: [{ id: 'c1', place: 'Reykjavik', overnightCapable: true }] };
     let captured = null;
     const off = MaxEnginePicker.on('candidateChange', p => captured = p);
     MaxEnginePicker.setTripRole('c1', 'overnight');
     off();
-    assert.strictEqual(window._tb.candidates[0].tripRole, 'overnight');
-    assert.deepStrictEqual(captured, { id: 'c1', tripRole: 'overnight' });
+    assert.strictEqual(window._tb.candidates[0].role, 'stay');
+    assert.strictEqual(captured.id, 'c1');
+    assert.strictEqual(captured.role, 'stay');
   });
-  test('setTripRole accepts daytrip, onway, unspecified', () => {
-    window._tb = { candidates: [{ id: 'c1' }] };
+  test('setTripRole shim: daytrip / onway pass through', () => {
+    window._tb = { candidates: [{ id: 'c1', overnightCapable: true }] };
     MaxEnginePicker.setTripRole('c1', 'daytrip');
-    assert.strictEqual(window._tb.candidates[0].tripRole, 'daytrip');
+    assert.strictEqual(window._tb.candidates[0].role, 'daytrip');
     MaxEnginePicker.setTripRole('c1', 'onway');
-    assert.strictEqual(window._tb.candidates[0].tripRole, 'onway');
-    MaxEnginePicker.setTripRole('c1', 'unspecified');
-    assert.strictEqual(window._tb.candidates[0].tripRole, 'unspecified');
+    assert.strictEqual(window._tb.candidates[0].role, 'onway');
   });
-  test('setTripRole rejects garbage as unspecified', () => {
-    window._tb = { candidates: [{ id: 'c1', tripRole: 'overnight' }] };
+  test('setTripRole shim: garbage maps to "see" (the new neutral default)', () => {
+    window._tb = { candidates: [{ id: 'c1', overnightCapable: true, role: 'stay' }] };
     MaxEnginePicker.setTripRole('c1', 'bogus');
-    assert.strictEqual(window._tb.candidates[0].tripRole, 'unspecified');
-    MaxEnginePicker.setTripRole('c1', null);
-    assert.strictEqual(window._tb.candidates[0].tripRole, 'unspecified');
+    assert.strictEqual(window._tb.candidates[0].role, 'see');
   });
-  test('setTripRole no-ops on missing candidate id', () => {
-    window._tb = { candidates: [{ id: 'c1' }] };
-    // Should not throw
+  test('setTripRole shim: no-ops on missing candidate id', () => {
+    window._tb = { candidates: [{ id: 'c1', overnightCapable: true }] };
     MaxEnginePicker.setTripRole('cZ', 'overnight');
-    assert.strictEqual(window._tb.candidates[0].tripRole, undefined);
+    assert.strictEqual(window._tb.candidates[0].role, undefined);
   });
 
   // ── Round NC.2 (gallery-pivot): pin color helper ───────────────
-  test('pinColorForRole: overnight → blue', () => {
+  test('pinColorForRole: overnight (NC.1 name) → blue', () => {
     assert.strictEqual(MaxEnginePicker.pinColorForRole('overnight'), '#1a5fa8');
+  });
+  test('pinColorForRole: stay (NC.3 name) → blue', () => {
+    assert.strictEqual(MaxEnginePicker.pinColorForRole('stay'), '#1a5fa8');
   });
   test('pinColorForRole: daytrip → purple', () => {
     assert.strictEqual(MaxEnginePicker.pinColorForRole('daytrip'), '#7c3aed');
   });
-  test('pinColorForRole: onway → teal (placeholder until NC.3 octagon)', () => {
+  test('pinColorForRole: onway → teal (placeholder until NC.3c octagon)', () => {
     assert.strictEqual(MaxEnginePicker.pinColorForRole('onway'), '#0891b2');
   });
-  test('pinColorForRole: unspecified falls back to overnight blue', () => {
-    assert.strictEqual(MaxEnginePicker.pinColorForRole('unspecified'), '#1a5fa8');
+  test('pinColorForRole: see → gray (renderer overlays eye glyph)', () => {
+    assert.strictEqual(MaxEnginePicker.pinColorForRole('see'), '#9ca3af');
   });
-  test('pinColorForRole: unknown role falls back to overnight blue', () => {
+  test('pinColorForRole: unknown / null / undefined → blue fallback', () => {
     assert.strictEqual(MaxEnginePicker.pinColorForRole('bogus'), '#1a5fa8');
     assert.strictEqual(MaxEnginePicker.pinColorForRole(null), '#1a5fa8');
     assert.strictEqual(MaxEnginePicker.pinColorForRole(undefined), '#1a5fa8');
+  });
+
+  // ── Round NC.3a (state-model): setRole + normalize ─────────────
+  test('setRole writes "stay" on overnight-capable candidate', () => {
+    window._tb = { candidates: [{ id: 'c1', overnightCapable: true, role: 'see' }] };
+    let captured = null;
+    const off = MaxEnginePicker.on('candidateChange', p => captured = p);
+    MaxEnginePicker.setRole('c1', 'stay');
+    off();
+    assert.strictEqual(window._tb.candidates[0].role, 'stay');
+    assert.strictEqual(window._tb.candidates[0]._roleTouched, true);
+    assert.deepStrictEqual(captured, { id: 'c1', role: 'stay', prevRole: 'see' });
+  });
+  test('setRole accepts daytrip / onway / see on any candidate', () => {
+    window._tb = { candidates: [{ id: 'c1', overnightCapable: false, role: 'see' }] };
+    MaxEnginePicker.setRole('c1', 'daytrip');
+    assert.strictEqual(window._tb.candidates[0].role, 'daytrip');
+    MaxEnginePicker.setRole('c1', 'onway');
+    assert.strictEqual(window._tb.candidates[0].role, 'onway');
+    MaxEnginePicker.setRole('c1', 'see');
+    assert.strictEqual(window._tb.candidates[0].role, 'see');
+  });
+  test('setRole refuses "stay" on a non-overnight-capable candidate', () => {
+    window._tb = { candidates: [{ id: 'c1', overnightCapable: false, role: 'see' }] };
+    MaxEnginePicker.setRole('c1', 'stay');
+    assert.strictEqual(window._tb.candidates[0].role, 'see', 'role unchanged');
+  });
+  test('setRole rejects garbage role values silently', () => {
+    window._tb = { candidates: [{ id: 'c1', overnightCapable: true, role: 'stay' }] };
+    MaxEnginePicker.setRole('c1', 'bogus');
+    assert.strictEqual(window._tb.candidates[0].role, 'stay', 'role unchanged');
+    MaxEnginePicker.setRole('c1', null);
+    assert.strictEqual(window._tb.candidates[0].role, 'stay');
+  });
+  test('setTripRole (NC.1 deprecated) maps onto NC.3 roles', () => {
+    window._tb = { candidates: [{ id: 'c1', overnightCapable: true }] };
+    MaxEnginePicker.setTripRole('c1', 'overnight');
+    assert.strictEqual(window._tb.candidates[0].role, 'stay');
+    MaxEnginePicker.setTripRole('c1', 'unspecified');
+    assert.strictEqual(window._tb.candidates[0].role, 'see');
+    MaxEnginePicker.setTripRole('c1', 'daytrip');
+    assert.strictEqual(window._tb.candidates[0].role, 'daytrip');
+    MaxEnginePicker.setTripRole('c1', 'onway');
+    assert.strictEqual(window._tb.candidates[0].role, 'onway');
+  });
+
+  test('normalizeCandidateRole: derives overnightCapable from legacy singleSight', () => {
+    const c1 = { singleSight: true };
+    MaxEnginePicker.normalizeCandidateRole(c1);
+    assert.strictEqual(c1.overnightCapable, false);
+    assert.strictEqual(c1.role, 'see');
+
+    const c2 = { singleSight: false };
+    MaxEnginePicker.normalizeCandidateRole(c2);
+    assert.strictEqual(c2.overnightCapable, true);
+    assert.strictEqual(c2.role, 'stay');
+  });
+  test('normalizeCandidateRole: defaults bare candidates to stay-capable + stay', () => {
+    const c = {};
+    MaxEnginePicker.normalizeCandidateRole(c);
+    assert.strictEqual(c.overnightCapable, true);
+    assert.strictEqual(c.role, 'stay');
+  });
+  test('normalizeCandidateRole: maps legacy tripRole vocabulary onto role', () => {
+    const c = { overnightCapable: true, tripRole: 'overnight' };
+    MaxEnginePicker.normalizeCandidateRole(c);
+    assert.strictEqual(c.role, 'stay');
+
+    const c2 = { overnightCapable: true, tripRole: 'unspecified' };
+    MaxEnginePicker.normalizeCandidateRole(c2);
+    assert.strictEqual(c2.role, 'see');
+  });
+  test('normalizeCandidateRole: maps legacy dest.intent vocabulary onto role', () => {
+    const c = { overnightCapable: true, intent: 'dayTrip' };
+    MaxEnginePicker.normalizeCandidateRole(c);
+    assert.strictEqual(c.role, 'daytrip');
+
+    const c2 = { overnightCapable: true, intent: 'wayside' };
+    MaxEnginePicker.normalizeCandidateRole(c2);
+    assert.strictEqual(c2.role, 'onway');
+  });
+  test('normalizeCandidateRole: demotes "stay" on non-capable to "see"', () => {
+    const c = { overnightCapable: false, role: 'stay' };
+    MaxEnginePicker.normalizeCandidateRole(c);
+    assert.strictEqual(c.role, 'see', 'corrupted "stay" on non-capable downgraded');
+  });
+  test('normalizeCandidateRole: idempotent on already-normalized', () => {
+    const c = { overnightCapable: true, role: 'daytrip' };
+    MaxEnginePicker.normalizeCandidateRole(c);
+    assert.strictEqual(c.role, 'daytrip');
+    assert.strictEqual(c.overnightCapable, true);
   });
 });
 
