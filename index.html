@@ -14628,10 +14628,17 @@ function _renderPlaceActivityItems(){
       // doesn't work" symptom.
       try { _tb._researchSearchCaret = searchInp.selectionStart; } catch(_){}
       _tb._researchSearchWasFocused = true;
+      // Console trace so "nothing happens" reports can be diagnosed:
+      // if you see this log, the handler is firing and _tb is being
+      // updated. If you don't, the input isn't dispatching oninput.
+      try { console.log("[Max search] query =", JSON.stringify(searchInp.value)); } catch(_){}
       clearTimeout(_tb._researchSearchTimer);
+      // Shorter debounce (60ms vs 180ms) so the filter feels alive.
+      // 60ms is below the human-perception threshold for "lag" but
+      // still coalesces a quick burst of keystrokes into one render.
       _tb._researchSearchTimer = setTimeout(function(){
         if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
-      }, 180);
+      }, 60);
     };
     searchClear.onclick = function(){
       _tb._researchSearch = "";
@@ -15246,20 +15253,20 @@ function _renderPlaceActivityItems(){
     }
   }
   // Round NC.X bugfix: restore focus + cursor on the search input after
-  // a rebuild triggered by the user typing. Without this, every
-  // keystroke destroys the focused element and the next keystroke goes
-  // nowhere, which felt like "search doesn't work."
+  // a rebuild triggered by the user typing. Synchronous (no setTimeout)
+  // so a fast typist can't lose a keystroke into document.body between
+  // old-input-removed and new-input-focused. The new input is already
+  // in the DOM by the time we get here.
   if (_tb && _tb._researchSearchWasFocused) {
     _tb._researchSearchWasFocused = false;
-    setTimeout(function(){
-      var inp = document.getElementById("tb-place-act-search");
-      if (!inp) return;
+    var inp = document.getElementById("tb-place-act-search");
+    if (inp) {
       try {
         inp.focus();
         var caret = (typeof _tb._researchSearchCaret === "number") ? _tb._researchSearchCaret : inp.value.length;
         inp.setSelectionRange(caret, caret);
       } catch(_){}
-    }, 0);
+    }
   }
 }
 
@@ -19251,10 +19258,13 @@ function renderActivityPicker(){
       +'<div style="margin-top:18px;display:grid;grid-template-columns:1fr 1fr;gap:10px;">'
       +'<div style="padding:12px;background:#fafafa;border:1px dashed #d8d8d8;border-radius:8px;">'
       +  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:4px;">+ Add a place</div>'
-      +  '<div style="font-size:10.5px;color:#888;margin-bottom:8px;line-height:1.5;">Don\'t see somewhere you want to go? Type it in — Max didn\'t have it; it\'ll fold it into the picture.</div>'
+      +  '<div style="font-size:10.5px;color:#888;margin-bottom:8px;line-height:1.5;">Don\'t see somewhere you want to go? Type it in — pick Stay if you want to sleep there, See if it\'s just a stop.</div>'
       +  '<div style="display:flex;flex-direction:column;gap:6px;">'
-      +    '<input class="tb-act-add-inp" id="tb-place-add-place-inp" placeholder="e.g. Lugano, Stoos, Mt. Pilatus" autocomplete="off" onkeydown="if(event.key===&#39;Enter&#39;){event.preventDefault();addCustomPlaceFromPicker();}" />'
-      +    '<button class="tb-act-add-btn" id="tb-place-add-place-btn" onclick="addCustomPlaceFromPicker()" style="align-self:flex-start;">+ Add place</button>'
+      +    '<input class="tb-act-add-inp" id="tb-place-add-place-inp" placeholder="e.g. Lugano, Stoos, Mt. Pilatus" autocomplete="off" onkeydown="if(event.key===&#39;Enter&#39;){event.preventDefault();addCustomPlaceFromPicker(&#39;stay&#39;);}" />'
+      +    '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'
+      +      '<button class="tb-act-add-btn" id="tb-place-add-place-btn-stay" onclick="addCustomPlaceFromPicker(&#39;stay&#39;)" title="Add as an overnight stay">🛏 + Add as Stay</button>'
+      +      '<button class="tb-act-add-btn" id="tb-place-add-place-btn-see"  onclick="addCustomPlaceFromPicker(&#39;see&#39;)"  title="Add as a See — a place to visit, no overnight" style="background:#fff;color:#5b3f8f;border:1px solid #5b3f8f;">👁 + Add as See</button>'
+      +    '</div>'
       +    '<div id="tb-place-add-place-status" style="font-size:10px;color:#888;"></div>'
       +  '</div>'
       +'</div>'
@@ -19994,14 +20004,32 @@ function addBreadthSuggestion(idx){
   if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
 }
 
-async function addCustomPlaceFromPicker(){
+// Round NC.X: addCustomPlaceFromPicker now takes a role hint — "stay"
+// (default) or "see" — set by which button the user clicked. "see"
+// adds the place as a 0-night requiredPlace and seeds placeMeta with
+// stayOverride=false so the existing Discovery UI renders it as See
+// from the start. NC.3 c.role gets seeded so any post-build trip flow
+// sees the user's intent immediately.
+async function addCustomPlaceFromPicker(roleHint){
+  var role = (roleHint === "see") ? "see" : "stay";
   var inp = document.getElementById("tb-place-add-place-inp");
-  var btn = document.getElementById("tb-place-add-place-btn");
-  var status = document.getElementById("tb-place-add-place-status");
+  var btnStay = document.getElementById("tb-place-add-place-btn-stay");
+  var btnSee  = document.getElementById("tb-place-add-place-btn-see");
+  var status  = document.getElementById("tb-place-add-place-status");
+  // Backward-compat: an older instance of the button used a single id.
+  var btnLegacy = document.getElementById("tb-place-add-place-btn");
   if (!inp) return;
   var raw = (inp.value||"").trim();
   if (!raw) { inp.focus(); return; }
-  if (btn) { btn.disabled = true; btn.textContent = "Looking up…"; }
+  function _setBusy(busy, label){
+    [btnStay, btnSee, btnLegacy].forEach(function(b){
+      if (!b) return;
+      b.disabled = busy;
+      if (label) { b._origLabel = b._origLabel || b.textContent; b.textContent = label; }
+      else if (b._origLabel) { b.textContent = b._origLabel; }
+    });
+  }
+  _setBusy(true, "Looking up…");
   if (status) status.textContent = "";
   try {
     var region = (_tb && _tb.region) || "";
@@ -20015,29 +20043,50 @@ async function addCustomPlaceFromPicker(){
     var data = JSON.parse(cleaned);
     if (data.error) throw new Error(data.error);
     if (!data.place) throw new Error("No place returned");
-    // Inject as a manual-style item with a single requiredPlace.
+    // Inject as a manual-style item with a single requiredPlace. The
+    // role hint controls nights (Stay = 2, See = 0) and seeds the
+    // overnight flag so the Discovery rendering of role chips matches
+    // what the user picked.
+    var addedNights = (role === "see") ? 0 : 2;
     var newItem = {
       id: "p-user-" + Date.now(),
-      name: "Visit " + data.place,
+      name: (role === "see" ? "See " : "Visit ") + data.place,
       type: "manual",
       category: "culture-history", // Round CZ: manual adds default to culture
       section: "Places you added",
       description: data.whyItFits || "",
       iconic: false,
       checked: true,
-      requiredPlaces: [{ place: data.place, country: data.country || "", nights: 2, _keep: true, _isDayTrip: false, _dayTripHub: "" }]
+      requiredPlaces: [{ place: data.place, country: data.country || "", nights: addedNights, _keep: true, _isDayTrip: false, _dayTripHub: "", overnight: (role !== "see") }]
     };
     _tb.placeActivities = _tb.placeActivities || [];
     _tb.placeActivities.push(newItem);
+    // Seed placeMeta.stayOverride so the Discovery role chip reads
+    // right immediately, without waiting for a build/normalize pass.
+    if (typeof _pmPlaceMeta === "function") {
+      var meta = _pmPlaceMeta(data.place, { create: true });
+      if (meta) meta.stayOverride = (role !== "see");
+    }
     inp.value = "";
-    if (status) { status.style.color = "#3a7a4a"; status.textContent = "Added " + data.place; }
+    if (status) { status.style.color = "#3a7a4a"; status.textContent = "Added " + data.place + (role === "see" ? " (See)" : " (Stay)"); }
     _renderPlaceActivityItems();
     _updatePlaceActivitySummary();
     if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
   } catch(e) {
-    if (status) { status.style.color = "#c44"; status.textContent = "Couldn’t add: " + (e.message||"try a more specific name"); }
+    // Better message: name the place the user actually typed instead of
+    // surfacing the raw fetch/LLM error string. "Failed to fetch" reads
+    // like the app is broken; "Could not find Lugano" tells the user
+    // the model didn't recognize it, which is the real situation 95%
+    // of the time.
+    if (status) {
+      status.style.color = "#c44";
+      var raw_ = (raw || "").trim();
+      status.textContent = raw_
+        ? ("Could not find " + raw_ + ".")
+        : "Could not find that place.";
+    }
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = "+ Add place"; }
+    _setBusy(false);
     if (inp) inp.focus();
   }
 }
@@ -32253,11 +32302,14 @@ function updateMainMap(){
           + 'box-shadow:0 1px 2px rgba(0,0,0,0.15);">?</div>'
         : '';
       // Round NC.3c: pin shape follows role.
-      //   - "see"   → dashed border + "?" label, no number
+      //   - "see"   → dashed border, keeps the destination NUMBER as
+      //               the label (per user feedback: 0-night still has
+      //               an order in the trip; hiding the number behind
+      //               "?" lost the orientation cue)
       //   - "onway" → octagon (CSS clip-path)
       //   - others  → solid numbered circle (unchanged)
       var _innerBorder = _isSee ? "2px dashed #fff" : "2px solid #fff";
-      var _innerLabel  = _isSee ? "?" : label;
+      var _innerLabel  = label;  // always show the trip-order number
       var _isOnway = (_primaryRole === "onway");
       var _shapeCss = _isOnway
         ? "border-radius:0;clip-path:polygon(30% 0%,70% 0%,100% 30%,100% 70%,70% 100%,30% 100%,0% 70%,0% 30%);"
