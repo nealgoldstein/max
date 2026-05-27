@@ -15223,6 +15223,28 @@ function _renderPlaceActivityItems(){
   if (typeof _hydrateWispTraces === "function") {
     setTimeout(function () { _hydrateWispTraces(); }, 40);
   }
+  // Round NC.X bugfix: empty-state for "search filters out everything."
+  // If no .tb-act-section-hdr was appended, the user is staring at an
+  // apparently-empty list with no idea the filter is hiding rows. Surface
+  // the residual query with a one-click clear so they can recover.
+  if (_searchQ) {
+    var anySection = list.querySelector(".tb-act-section-hdr");
+    if (!anySection) {
+      var empty = document.createElement("div");
+      empty.style.cssText = "margin:14px 0;padding:14px 16px;background:#fff8e6;border:1px solid #f0d8a8;border-radius:8px;font-size:12px;color:#7a5500;line-height:1.5;";
+      empty.innerHTML = 'No matches for &ldquo;<strong>' + _pmEsc(_searchQ) + '</strong>.&rdquo; All your places are still here — the search is just hiding them. '
+        + '<button type="button" id="tb-place-act-search-clear" style="margin-left:6px;font-size:11px;font-weight:600;color:#7a5500;background:#fff;border:1px solid #d8b878;border-radius:4px;padding:3px 9px;cursor:pointer;font-family:inherit;">× Clear search</button>';
+      list.appendChild(empty);
+      var clrBtn = document.getElementById("tb-place-act-search-clear");
+      if (clrBtn) {
+        clrBtn.onclick = function(){
+          _tb._researchSearch = "";
+          _tb._researchSearchWasFocused = false;
+          _renderPlaceActivityItems();
+        };
+      }
+    }
+  }
   // Round NC.X bugfix: restore focus + cursor on the search input after
   // a rebuild triggered by the user typing. Without this, every
   // keystroke destroys the focused element and the next keystroke goes
