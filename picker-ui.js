@@ -988,14 +988,31 @@
     return true;
   }
 
+  // Round NC.X: in-flight dedupe so concurrent renders of the same
+  // place don't issue parallel Wikipedia 404 requests for unknown
+  // titles. The async IDB cache only sees stored results AFTER a
+  // fetch resolves — two near-simultaneous calls would both miss
+  // and each fire its own 404. This memo holds the in-flight promise
+  // until the result lands in IDB.
+  var _wikiInFlight = {};
   function _fetchWikiSummary(place, country) {
     if (!place) return Promise.resolve(null);
+    var key = (place || "") + "|" + (country || "");
+    if (_wikiInFlight[key]) return _wikiInFlight[key];
     // v359.42: cache is async now (IDB). Wrap the entire fetch chain
     // in the cache-lookup promise.
-    return _wikiCacheGet(place, country).then(function (cached) {
+    var p = _wikiCacheGet(place, country).then(function (cached) {
       if (cached !== null && cached !== undefined) return cached;
       return _fetchWikiSummaryUncached(place, country);
+    }).then(function(result){
+      delete _wikiInFlight[key];
+      return result;
+    }, function(err){
+      delete _wikiInFlight[key];
+      throw err;
     });
+    _wikiInFlight[key] = p;
+    return p;
   }
 
   function _fetchWikiSummaryUncached(place, country) {

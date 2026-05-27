@@ -2751,10 +2751,16 @@ async function callMax(messages, maxTokens, timeoutMs, opts) {
   // features (picker, ICS, candidate cities, etc.) leave it
   // unset and ride on the shared server key. Cost split: operator
   // pays for bounded calls, user pays for unbounded chat.
+  // Round NC.X: once the proxy has failed in this session, skip it
+  // for subsequent calls. Without this, every callMax wastes 1-2s
+  // hitting the dead proxy before falling back. The flag is cleared
+  // only on a fresh reload — if the proxy comes back, the user
+  // refreshes and we try it again.
   var useProxy = (typeof MaxSync !== "undefined" &&
                   typeof MaxSync.isSignedIn === "function" &&
                   MaxSync.isSignedIn() &&
-                  !opts.useOwnKey);
+                  !opts.useOwnKey &&
+                  !window._maxProxyDown);
   if (opts.useOwnKey && !_apiKey) {
     throw new Error("Chat needs your Anthropic API key — open the ⇄ Sync modal to add one, or click 💬 Ask and follow the prompt.");
   }
@@ -2832,7 +2838,10 @@ async function callMax(messages, maxTokens, timeoutMs, opts) {
     // back, with a one-line console note so the operator can see
     // what's happening.
     if (useProxy && _apiKey) {
-      console.warn("[Max] proxy unreachable (" + (fetchErr && fetchErr.message) + ") \u2014 falling back to direct API path with local key");
+      // Memoize the failure so subsequent calls in this session skip
+      // the proxy attempt entirely and go straight to direct.
+      window._maxProxyDown = true;
+      console.warn("[Max] proxy unreachable (" + (fetchErr && fetchErr.message) + ") \u2014 falling back to direct API path with local key (further calls this session will skip proxy)");
       var directHeaders = {
         "Content-Type": "application/json",
         "x-api-key": _apiKey,
@@ -15354,7 +15363,26 @@ function _renderPlaceActivityItems(){
     if (!_searchQ) return;
     requestAnimationFrame(function(){
       var allHits = list.querySelectorAll(".tb-search-hit");
-      var firstHit = allHits[0] || null;
+      // Round NC.X: rank hits so "vik" prefers "Vík" over "Reykjavik".
+      // Score: exact match=3, prefix match=2, word-boundary match=1,
+      // substring=0. Highest score wins; ties go to DOM order.
+      var firstHit = null;
+      if (allHits.length) {
+        var bestScore = -1;
+        for (var hi = 0; hi < allHits.length; hi++) {
+          var hitEl = allHits[hi];
+          var hitPlace = (hitEl.querySelector(".tb-act-name") || {}).textContent
+            || (hitEl.querySelector(".tb-dest-major-name") || {}).textContent
+            || hitEl.textContent || "";
+          var hpN = _searchNormalize(hitPlace.trim());
+          var sc;
+          if (hpN === _searchQNorm) sc = 3;
+          else if (hpN.indexOf(_searchQNorm) === 0) sc = 2;
+          else if (new RegExp("\\b" + _searchQNorm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).test(hpN)) sc = 1;
+          else sc = 0;
+          if (sc > bestScore) { bestScore = sc; firstHit = hitEl; }
+        }
+      }
       try {
         console.log("[Max search-scroll] q=" + JSON.stringify(_searchQ)
           + " hits=" + allHits.length

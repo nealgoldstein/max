@@ -388,6 +388,9 @@
     }
     try {
       var resp = await getPrefsRemote();
+      // Round NC.X: reset the failure counter so the polling interval
+      // returns to its 60s base after a recovered server.
+      global._maxSyncFailCount = 0;
       var remotePrefs = (resp && resp.prefs) || {};
       // If we have local prefs that the server doesn't (e.g., user
       // changed paceHours offline), the server is the source of
@@ -403,7 +406,14 @@
     } catch (e) {
       // Network unreachable / 401 — keep using local cache. Prefs
       // sync is best-effort; the UI must work offline.
-      console.warn('[max-sync] pullPrefs failed:', e);
+      // Round NC.X: only log the FIRST failure per session, then go
+      // quiet. Logging every minute spammed the console for users
+      // whose sync server is down or who never set one up.
+      if (!global._maxSyncFailLogged) {
+        console.warn('[max-sync] pullPrefs failed (suppressing further failures this session):', e && e.message);
+        global._maxSyncFailLogged = true;
+      }
+      global._maxSyncFailCount = (global._maxSyncFailCount || 0) + 1;
       return null;
     }
   }
@@ -1275,10 +1285,30 @@
   }
   function _startPolling() {
     if (_pollTimer) return;
-    _pollTimer = setInterval(_maybePull, 60000); // 60s
+    // Round NC.X: exponential backoff on persistent failures. Base
+    // 60s; doubles up to 30min when the server is unreachable.
+    // Resets to 60s on any successful pull (success path runs in
+    // pullPrefs, where _maxSyncFailCount is set to 0 on the happy
+    // path — see line 397 area).
+    function _nextInterval() {
+      var fails = global._maxSyncFailCount || 0;
+      if (fails < 3) return 60000;           // first 3 failures: stay at 60s
+      if (fails < 6) return 5 * 60000;       // next 3: 5 min
+      if (fails < 10) return 15 * 60000;     // next 4: 15 min
+      return 30 * 60000;                     // beyond that: 30 min
+    }
+    function _scheduleNext(){
+      if (_pollTimer) { clearTimeout(_pollTimer); _pollTimer = null; }
+      _pollTimer = setTimeout(function(){
+        _maybePull();
+        _scheduleNext();
+      }, _nextInterval());
+    }
+    _scheduleNext();
   }
   function _stopPolling() {
-    if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+    // Either setInterval or setTimeout — clearing both is safe.
+    if (_pollTimer) { clearInterval(_pollTimer); clearTimeout(_pollTimer); _pollTimer = null; }
   }
 
   if (typeof document !== 'undefined') {
