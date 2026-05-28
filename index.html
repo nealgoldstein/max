@@ -23500,9 +23500,18 @@ function reopenPickerForEdit(){
     // placeMeta.stayOverride so the Discovery role-chip reflects what
     // was committed in the trip. Without this, the picker reopens
     // with every place showing as "Stay" even when the user had
-    // chosen "See" or made it a day trip — the chip reads stayOverride,
-    // not c.role. Only seed when stayOverride is missing/null; an
-    // explicit user override from a previous Discovery pass wins.
+    // chosen "See" — the chip reads stayOverride, not c.role.
+    //
+    // Daytrip / onway are NOT bridged here: those are richer states
+    // than the binary stayOverride and live on the requiredPlace
+    // (_isDayTrip + _dayTripHub) plus c.role itself. Forcing them
+    // through stayOverride=false would make the chip read "See"
+    // when the truer rendering is "· day trip from <hub>" / "on
+    // the way" — which the picker row renderer already handles via
+    // the _dayTripPreds path and c.role lookup.
+    //
+    // Only seed when stayOverride is missing/null; an explicit prior
+    // user override wins.
     try {
       var _normFn2 = (typeof _normPlaceName === "function")
         ? _normPlaceName
@@ -23519,9 +23528,11 @@ function reopenPickerForEdit(){
           _tb.placeMeta[k] = { notes: "", links: [], stayOverride: null };
           existing = _tb.placeMeta[k];
         }
-        if (c.role === "stay") existing.stayOverride = true;
-        else if (c.role === "see" || c.role === "daytrip" || c.role === "onway") existing.stayOverride = false;
-        // role null / unknown → leave stayOverride untouched
+        if (c.role === "stay")      existing.stayOverride = true;
+        else if (c.role === "see")  existing.stayOverride = false;
+        // daytrip / onway / null → leave stayOverride at null so the
+        // chip falls through to whichever role the picker derives
+        // from c.role / _isDayTrip.
       });
     } catch(e) {
       console.warn("[Max reopenPickerForEdit] c.role → stayOverride bridge failed:", e && e.message);
@@ -23592,6 +23603,118 @@ function reopenPickerForEdit(){
   // v357: removed the _tb._placePickerStart reset — the picker map
   // no longer carries a "Start from" hint (sequencing is trip-view-
   // only), so there's nothing to reset on rehydrate.
+
+  // Round NC.X: bridge day-trip + wayside designations from the trip
+  // BACK into the picker's requiredPlace flags. Without this, day
+  // trips made in the trip view (via the destination role popover or
+  // the picker map's "make day trip" pill) get lost when Discovery
+  // reopens — Discovery is supposed to be the source of truth across
+  // visits, so a daytrip in the trip view must read as a daytrip in
+  // Discovery too. Walks two shapes:
+  //   1) trip.destinations[*].dayTrips[*]      — legacy chip array
+  //   2) trip.routes[*] where subKind==="dayTrip" + planItems         — modern
+  // For each absorbed source place, find its requiredPlace ref in
+  // _tb.placeActivities and stamp _isDayTrip=true + _dayTripHub.
+  // Waysides (trip.routes[*].planItems[type==="stop"] on non-dayTrip
+  // routes) are bridged by setting the matching candidate's c.role to
+  // "onway" — the picker chip already reads role for the See/?/Stay
+  // visuals.
+  (function _bridgeTripDayTripsToPicker(){
+    if (!trip || !Array.isArray(trip.destinations)) return;
+    var norm = function(s){
+      return (typeof _normPlaceName === "function") ? _normPlaceName(s||"") : String(s||"").toLowerCase().trim();
+    };
+    // Collect (sourceNorm, hubNorm) pairs from both shapes.
+    var dayTripPairs = {}; // sourceKey -> hubKey
+    trip.destinations.forEach(function(d){
+      if (!d || !Array.isArray(d.dayTrips)) return;
+      var hubKey = norm(d.place);
+      if (!hubKey) return;
+      d.dayTrips.forEach(function(chip){
+        if (!chip || !chip.place) return;
+        var srcKey = norm(chip.place);
+        if (!srcKey || srcKey === hubKey) return;
+        if (!(srcKey in dayTripPairs)) dayTripPairs[srcKey] = hubKey;
+      });
+    });
+    // Modern routes shape — same data, different home. Some legacy
+    // trips have ONLY the chip array; some new trips have ONLY the
+    // route+planItem shape. Union both.
+    if (Array.isArray(trip.routes)) {
+      trip.routes.forEach(function(r){
+        if (!r) return;
+        var isDT = (r.subKind === "dayTrip") || (r.kind === "dayTrip");
+        if (!isDT) return;
+        // Hub = the destination this dayTrip route originates from.
+        // Try fromId → fromName → fromPlace.
+        var hubName = r.fromName || r.fromPlace || "";
+        if (!hubName && r.fromId && trip.places && trip.places[r.fromId]) {
+          hubName = trip.places[r.fromId].name || "";
+        }
+        var hubKey = norm(hubName);
+        if (!hubKey) return;
+        (r.planItems || []).forEach(function(pi){
+          if (!pi || pi.type !== "stop") return;
+          var nm = "";
+          if (pi.placeId && trip.places && trip.places[pi.placeId]) nm = trip.places[pi.placeId].name || "";
+          if (!nm) nm = pi.place || pi.name || "";
+          var srcKey = norm(nm);
+          if (!srcKey || srcKey === hubKey) return;
+          if (!(srcKey in dayTripPairs)) dayTripPairs[srcKey] = hubKey;
+        });
+      });
+    }
+    var _dtBridged = 0;
+    _tb.placeActivities.forEach(function(item){
+      if (!item || !Array.isArray(item.requiredPlaces)) return;
+      item.requiredPlaces.forEach(function(p){
+        if (!p || !p.place) return;
+        var k = norm(p.place);
+        if (dayTripPairs[k]) {
+          p._isDayTrip = true;
+          p._dayTripHub = dayTripPairs[k]; // already lowercased / normalized
+          _dtBridged++;
+        }
+      });
+    });
+    if (_dtBridged) {
+      console.log("[Max reopenPickerForEdit] bridged " + _dtBridged +
+        " day-trip flag(s) from trip → picker (" +
+        Object.keys(dayTripPairs).length + " unique sources)");
+    }
+
+    // Waysides: walk non-dayTrip routes with planItem stops. These
+    // are "on the way" places that the picker should render with
+    // c.role === "onway". Apply to the matching candidate so the
+    // Discovery render + the role popover both see the right role.
+    if (Array.isArray(trip.routes) && Array.isArray(_tb.candidates)) {
+      var _wsBridged = 0;
+      trip.routes.forEach(function(r){
+        if (!r) return;
+        var isDT = (r.subKind === "dayTrip") || (r.kind === "dayTrip");
+        if (isDT) return;
+        (r.planItems || []).forEach(function(pi){
+          if (!pi || pi.type !== "stop") return;
+          var nm = "";
+          if (pi.placeId && trip.places && trip.places[pi.placeId]) nm = trip.places[pi.placeId].name || "";
+          if (!nm) nm = pi.place || pi.name || "";
+          var srcKey = norm(nm);
+          if (!srcKey) return;
+          var cand = _tb.candidates.find(function(c){
+            return c && c.place && norm(c.place) === srcKey;
+          });
+          if (cand && cand.role !== "onway") {
+            cand.role = "onway";
+            cand._roleTouched = true;
+            _wsBridged++;
+          }
+        });
+      });
+      if (_wsBridged) {
+        console.log("[Max reopenPickerForEdit] bridged " + _wsBridged + " wayside(s) to c.role=onway");
+      }
+    }
+  })();
 
   // v359.51.10: mark every current overnight destination as
   // _userChoseStay: true on its corresponding requiredPlaces. Without
