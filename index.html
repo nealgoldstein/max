@@ -23836,14 +23836,29 @@ function reopenPickerForEdit(){
     // Modern routes shape — same data, different home. Some legacy
     // trips have ONLY the chip array; some new trips have ONLY the
     // route+planItem shape. Union both.
+    //
+    // Round NC.X bugfix: routes use r.fromDestId (a DESTINATION id),
+    // not fromId / fromName / fromPlace. convertDestToDayTrip writes
+    // {fromDestId: hubDestId, toDestId: hubDestId} — i.e. both point
+    // at the hub destination (the source becomes a planItem stop).
+    // The earlier bridge read non-existent fields, never resolved a
+    // hub, and silently dropped every route. Dynjandi symptom:
+    // converted to a day trip from Ísafjörður in trip view, but
+    // reopening Discovery showed it as "See" because the bridge
+    // couldn't find the hub.
     if (Array.isArray(trip.routes)) {
       trip.routes.forEach(function(r){
         if (!r) return;
         var isDT = (r.subKind === "dayTrip") || (r.kind === "dayTrip");
         if (!isDT) return;
-        // Hub = the destination this dayTrip route originates from.
-        // Try fromId → fromName → fromPlace.
-        var hubName = r.fromName || r.fromPlace || "";
+        // Resolve hub: fromDestId → destinations[id===fromDestId].place
+        var hubName = "";
+        if (r.fromDestId && Array.isArray(trip.destinations)) {
+          var hubDest = trip.destinations.find(function(d){ return d && d.id === r.fromDestId; });
+          if (hubDest && hubDest.place) hubName = hubDest.place;
+        }
+        // Legacy fallbacks for old data shapes.
+        if (!hubName) hubName = r.fromName || r.fromPlace || "";
         if (!hubName && r.fromId && trip.places && trip.places[r.fromId]) {
           hubName = trip.places[r.fromId].name || "";
         }
