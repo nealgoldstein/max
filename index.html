@@ -1814,6 +1814,19 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
   40%  { box-shadow:0 0 0 4px #e0b020, 0 0 22px 8px rgba(240,200,40,0.45); }
   100% { box-shadow:0 0 0 2px #f0d878, 0 0 0 0 rgba(240,200,40,0); }
 }
+/* Round NC.X: picker-map pin focus pulse. Added by _pmFocusPlace when
+   the user toggles a row's checkbox — the corresponding pin pulses a
+   bright halo for ~1.4s so the eye lands on the right pin after the
+   map pans. Targets the inner divIcon child (the pill that holds
+   color + label). */
+.leaflet-marker-icon.pm-focus-pulse > div {
+  animation: pm-focus-pulse 1.4s ease-out 1;
+}
+@keyframes pm-focus-pulse {
+  0%   { box-shadow:0 1px 4px rgba(0,0,0,0.25), 0 0 0 0 rgba(255,210,80,0.9); }
+  40%  { box-shadow:0 1px 4px rgba(0,0,0,0.25), 0 0 0 8px rgba(255,210,80,0.55); }
+  100% { box-shadow:0 1px 4px rgba(0,0,0,0.25), 0 0 0 14px rgba(255,210,80,0); }
+}
 @media (max-width:640px){
   /* On narrow screens, stack the columns and let places wrap as chips below */
   .tb-act-table-row{grid-template-columns:1fr;gap:10px;}
@@ -2234,18 +2247,32 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
 
           <div class="mw-sep"></div>
           <div class="mw-section-hdr">Edit</div>
-          <button class="mw-item" onclick="_mwClose();editConstraints();">&#9998;&nbsp; Profile&hellip;</button>
+          <!-- Round NC.X: rename to "Trip profile…" so it's distinct
+               from the user-level "My preferences…" item under
+               Settings. Both used to read "Profile…", which had users
+               wondering which one they wanted (and increased the
+               chance of clicking the wrong row when reaching for
+               Open Discovery just below). -->
+          <button class="mw-item" onclick="_mwClose();editConstraints();">&#9998;&nbsp; Trip profile&hellip;</button>
           <!-- v360.3: "Open Discovery" restored. The chip-on-trip-view
                affordance silently disappears when there's nothing in the
                discovery pool yet, leaving the user with no way back to
-               the picker. The menu item is always available. -->
-          <button class="mw-item" onclick="_mwClose();if(typeof reopenPickerForEdit==='function')reopenPickerForEdit();else if(typeof reopenCandidateExplorer==='function')reopenCandidateExplorer();">&#129517;&nbsp; Open Discovery</button>
+               the picker. The menu item is always available.
+               Round NC.X: route through _reopenPickerAny — the smart
+               cascade (trip.mdcItems → _tb.placeActivities →
+               trip.candidates → friendly alert). Previously this called
+               reopenPickerForEdit directly, which silently returns when
+               mdcItems is empty; users reported clicking "Open
+               Discovery" and ending up at the Profile editor (mostly
+               because the adjacent "✎ Profile…" item is one row up and
+               looks similar — but the silent no-op made it worse). -->
+          <button class="mw-item" onclick="_mwClose();if(typeof _reopenPickerAny==='function')_reopenPickerAny();else if(typeof reopenPickerForEdit==='function')reopenPickerForEdit();">&#129517;&nbsp; Open Discovery</button>
           <button class="mw-item" onclick="_mwClose();openTripSearch();">&#x1F50D;&nbsp; Search this trip</button>
           <button class="mw-item" onclick="_mwClose();showAskMaxModal();">&#128172;&nbsp; Ask Max&hellip;</button>
 
           <div class="mw-sep"></div>
           <div class="mw-section-hdr">Settings</div>
-          <button class="mw-item" onclick="_mwClose();showSettingsPanel();">&#9881;&nbsp; Profile&hellip;</button>
+          <button class="mw-item" onclick="_mwClose();showSettingsPanel();">&#9881;&nbsp; My preferences&hellip;</button>
           <button class="mw-item" onclick="_mwClose();showApiKeyForm();" style="color:#888;">&#x1F511;&nbsp; Set API key&hellip;</button>
 
           <!-- v360.3 (#104 follow-up): "How Max thinks" in the header
@@ -15151,29 +15178,31 @@ function _renderPlaceActivityItems(){
         ? _placeMeta.stayOverride : null;
       var _isStayCandidate = (_stayOverride !== null) ? _stayOverride : _llmIsStay;
       var _placeArg = _pmEsc(d.place);
-      // v359.55.10: active role renders as plain colored text (not a
-      // button — it's a status label, not a click target). Inactive
-      // renders as a "+ Role" button to switch. Reads as "this is what
-      // it is now" + "click here to change."
-      var _activeLabelStyle = 'font-size:10px;font-weight:700;padding:1px 2px;letter-spacing:.02em;font-family:inherit;line-height:1.3;cursor:default;';
-      var _inactiveBtnStyle = 'font-size:9.5px;font-weight:600;color:#888;background:#fff;border:1px solid #ddd;padding:1px 7px;border-radius:9px;letter-spacing:.02em;cursor:pointer;font-family:inherit;line-height:1.3;';
+      // Round NC.X: BOTH chips render with the same pill shape (border,
+      // padding, border-radius). The only difference is color — active
+      // is filled with its role color (blue/purple), inactive is white
+      // with a subtle gray border. Previously the active rendered as
+      // plain text and the inactive as a pill, which read as
+      // inconsistent — "what are those two unrelated things doing
+      // next to each other?" Now they read as a clear toggle pair.
+      var _stayActiveStyle    = 'font-size:9.5px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;padding:1px 8px;border-radius:9px;letter-spacing:.02em;cursor:default;font-family:inherit;line-height:1.3;';
+      var _seeActiveStyle     = 'font-size:9.5px;font-weight:700;color:#fff;background:#5b3f8f;border:1px solid #5b3f8f;padding:1px 8px;border-radius:9px;letter-spacing:.02em;cursor:default;font-family:inherit;line-height:1.3;';
+      var _inactiveBtnStyle   = 'font-size:9.5px;font-weight:600;color:#888;background:#fff;border:1px solid #ddd;padding:1px 8px;border-radius:9px;letter-spacing:.02em;cursor:pointer;font-family:inherit;line-height:1.3;';
       var stayChip;
       if (_isStayCandidate) {
         stayChip = '<span class="pm-stay-toggle" style="display:inline-flex;align-items:center;gap:6px;">'
-          + '<span style="' + _activeLabelStyle + 'color:#1a5fa8;" title="Currently set as a stay">🛏 Stay</span>'
+          + '<span style="' + _stayActiveStyle + '" title="Currently set as a stay">🛏 Stay</span>'
           + '<button type="button" '
           +   'onclick="_pmSetStayOverride(&#39;' + _placeArg + '&#39;, false);event.stopPropagation();" '
           +   'style="' + _inactiveBtnStyle + '" '
           +   'title="Switch to see-only">+ See</button>'
           + '</span>';
       } else {
-        // Round NC.X: selected role renders FIRST so the user sees the
-        // current state immediately, then the alternative as a "switch
-        // to" affordance. Earlier this branch had "+ Stay" (inactive)
-        // first and "👁 See" (active) second — visually inconsistent
-        // with the Stay-selected branch, which leads with the active.
+        // Selected role renders FIRST so the user sees the current
+        // state immediately, then the alternative as a "switch to"
+        // affordance.
         stayChip = '<span class="pm-stay-toggle" style="display:inline-flex;align-items:center;gap:6px;">'
-          + '<span style="' + _activeLabelStyle + 'color:#5b3f8f;" title="Currently see-only">👁 See</span>'
+          + '<span style="' + _seeActiveStyle + '" title="Currently see-only">👁 See</span>'
           + '<button type="button" '
           +   'onclick="_pmSetStayOverride(&#39;' + _placeArg + '&#39;, true);event.stopPropagation();" '
           +   'style="' + _inactiveBtnStyle + '" '
@@ -15812,6 +15841,16 @@ function togglePlaceActivity(id){
   _renderPlaceActivityItems();
   _updatePlaceActivitySummary();
   if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
+  // Round NC.X: focus the picker map on the first required-place of
+  // the toggled activity. When the user just CHECKED a multi-place
+  // activity, the first place is the most useful anchor (the others
+  // get a size bump on next render via _pmFocusKey persistence). When
+  // unchecking, the focus still pans/pulses so the user sees what
+  // they just deselected.
+  if (typeof _pmFocusPlace === "function") {
+    var firstP = (item.requiredPlaces || []).find(function(p){ return p && p.place; });
+    if (firstP) _pmFocusPlace(firstP.place);
+  }
 }
 
 // Toggle a single place within an activity row. Doesn't affect other places
@@ -15828,6 +15867,8 @@ function togglePlaceInActivity(itemId, placeIdx){
   _renderPlaceActivityItems();
   _updatePlaceActivitySummary();
   if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
+  // Round NC.X: pan + pulse the toggled place on the picker map.
+  if (typeof _pmFocusPlace === "function" && p && p.place) _pmFocusPlace(p.place);
 }
 
 // Per-place nights stepper. Adjust by delta (typically ±1), clamp to 1..14.
@@ -15906,6 +15947,52 @@ function _refreshAllPlacePickerMaps(){
       }
     } catch(_) {}
   }
+}
+
+// Round NC.X: focus a picker map on a specific place — pan the map so
+// the place is visible, then pulse the marker for ~1.4s so the user's
+// eye finds it. Called from togglePlaceActivity / togglePlaceInActivity
+// after a row toggle so "I just checked this place" gets immediate
+// confirmation on the map. Persistent "selected" visual lives via
+// _tb._pmFocusKey (which the marker factory reads to apply a larger
+// size + outer ring). Tolerates missing coords, missing maps, and
+// in-flight geocodes — silently no-ops on each.
+function _pmFocusPlace(placeName){
+  if (!placeName) return;
+  var key = String(placeName).toLowerCase();
+  if (!_tb) return;
+  _tb._pmFocusKey = key;
+  var ll = (typeof _coarseGeocode !== "undefined" && _coarseGeocode[key]) || null;
+  if (!ll || !isFinite(ll[0]) || !isFinite(ll[1])) {
+    // No coords yet — the next render will still pick up the size
+    // bump once geocode lands, but we can't pan without a target.
+    return;
+  }
+  if (typeof _pmMaps !== "object" || !_pmMaps) return;
+  Object.keys(_pmMaps).forEach(function(targetId){
+    var state = _pmMaps[targetId];
+    if (!state || !state.map) return;
+    try {
+      // panTo (not setView) preserves zoom level — user's chosen zoom
+      // shouldn't change every time they tick a checkbox.
+      state.map.panTo(ll, { animate: true, duration: 0.4 });
+    } catch(_){}
+    // Pulse the corresponding marker via a temporary CSS class on its
+    // icon element. Leaflet exposes _icon on the marker after add.
+    try {
+      var marker = state.markers && state.markers[key];
+      var iconEl = marker && marker._icon;
+      if (iconEl) {
+        iconEl.classList.remove("pm-focus-pulse");
+        // Force reflow so the animation restarts cleanly when the
+        // same place is tapped twice in a row.
+        // eslint-disable-next-line no-unused-expressions
+        iconEl.offsetWidth;
+        iconEl.classList.add("pm-focus-pulse");
+        setTimeout(function(){ try { iconEl.classList.remove("pm-focus-pulse"); } catch(__){} }, 1400);
+      }
+    } catch(_){}
+  });
 }
 
 // v357: removed _pmRefreshStartDropdown + _pmOnStartChange. The
@@ -18662,14 +18749,33 @@ function _renderPlacePickerMap(targetId){
       // orange day-trip / grey not-kept. Iconic still appears in the
       // pin tooltip ("Akureyri · ★ iconic · stay") and in the
       // sidebar; just not as a colored decoration on the pin.
+      // Round NC.X: focused-pin treatment. When the user just toggled
+      // this place's row, _tb._pmFocusKey holds its normalized name.
+      // Bump the pin size and add a thicker outer ring so the eye can
+      // re-find it after the map pan. The ring color matches the role
+      // (subtle, not garish). Persistent — survives until the next
+      // place is toggled.
+      var _isFocused = (_tb && _tb._pmFocusKey && _tb._pmFocusKey === key);
+      if (_isFocused) {
+        size = Math.round(size * 1.35);
+        if (fontPx) fontPx = Math.round(fontPx * 1.2);
+        // Outer ring: same hue as the pin, half-opacity, 3px thick.
+        borderStyle = "3px solid #fff";
+      }
+      var _focusRingShadow = _isFocused
+        ? ', 0 0 0 3px ' + color + 'aa, 0 0 0 5px #fff'
+        : '';
       var html = '<div style="background:'+color+';color:#fff;border-radius:50%;width:'
         + size + 'px;height:'+size+'px;border:' + borderStyle
-        + ';box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;font-size:' + fontPx + 'px;font-weight:700;">'
+        + ';box-shadow:0 1px 4px rgba(0,0,0,0.25)' + _focusRingShadow
+        + ';display:flex;align-items:center;justify-content:center;font-size:' + fontPx + 'px;font-weight:700;">'
         + label
         + '</div>';
+      var _cls = isSingleSight ? "pm-single-sight-pin" : "";
+      if (_isFocused) _cls = (_cls ? _cls + " " : "") + "pm-focused";
       var icon = L.divIcon({
         html: html,
-        className: isSingleSight ? "pm-single-sight-pin" : "",
+        className: _cls,
         iconSize: [size,size],
         iconAnchor: [size/2,size/2]
       });

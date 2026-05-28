@@ -3475,6 +3475,133 @@
     container.appendChild(panel);
   }
 
+  // Round NC.X: ⋯ overflow popover for trip-level secondary actions.
+  // Anchors to the ⋯ button in the Destinations header. Holds the
+  // items that used to be split between the inline "↺ Reverse" button
+  // and the "More" disclosure: Tidy trip, Keep in mind, How Max
+  // thinks, Reverse trip order. Built fresh on each open so item
+  // availability (canTidy, canReverse) is always current. Clicks
+  // outside the popover (or on the trigger again) close it.
+  var _tmDestMorePopoverEl = null;
+  var _tmDestMoreOutsideHandler = null;
+  function _tmCloseTripDestMoreMenu() {
+    if (_tmDestMorePopoverEl && _tmDestMorePopoverEl.parentNode) {
+      _tmDestMorePopoverEl.parentNode.removeChild(_tmDestMorePopoverEl);
+    }
+    _tmDestMorePopoverEl = null;
+    if (_tmDestMoreOutsideHandler) {
+      document.removeEventListener("click", _tmDestMoreOutsideHandler, true);
+      _tmDestMoreOutsideHandler = null;
+    }
+  }
+  function _tmShowTripDestMoreMenu(trip, anchorBtn) {
+    // Toggle: a second click on the trigger closes it.
+    if (_tmDestMorePopoverEl) { _tmCloseTripDestMoreMenu(); return; }
+    if (!trip || !anchorBtn) return;
+    var dests = (trip && trip.destinations) || [];
+    var _hubCount = 0, _sightCount = 0;
+    dests.forEach(function (d) {
+      if (!d) return;
+      if ((d.nights || 0) >= 2) _hubCount++; else _sightCount++;
+    });
+    var canTidy    = _hubCount >= 1 && _sightCount >= 1;
+    var canReverse = dests.length >= 3;
+
+    var pop = document.createElement("div");
+    pop.style.cssText =
+      "position:absolute;z-index:11000;min-width:240px;max-width:320px;" +
+      "background:#fff;border:1px solid #d8d4c8;border-radius:8px;" +
+      "box-shadow:0 8px 24px rgba(0,0,0,0.14);padding:4px 0;font-family:inherit;";
+    // Anchor below + right-aligned with the ⋯ button. Use page-
+    // relative coords so scroll containers don't clip the popover.
+    var r = anchorBtn.getBoundingClientRect();
+    pop.style.top  = (window.scrollY + r.bottom + 6) + "px";
+    pop.style.left = (window.scrollX + r.right - 260) + "px";
+
+    function _addItem(label, sub, onClick) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.style.cssText =
+        "display:flex;flex-direction:column;align-items:flex-start;gap:2px;" +
+        "width:100%;text-align:left;padding:9px 14px;border:none;background:#fff;" +
+        "cursor:pointer;font-family:inherit;color:#222;";
+      var top = document.createElement("div");
+      top.style.cssText = "font-size:12.5px;font-weight:600;";
+      top.textContent = label;
+      btn.appendChild(top);
+      if (sub) {
+        var s = document.createElement("div");
+        s.style.cssText = "font-size:10.5px;color:#888;line-height:1.4;";
+        s.textContent = sub;
+        btn.appendChild(s);
+      }
+      btn.onmouseover = function () { btn.style.background = "#faf8f1"; };
+      btn.onmouseout  = function () { btn.style.background = "#fff"; };
+      btn.onclick = function (e) {
+        e.stopPropagation();
+        _tmCloseTripDestMoreMenu();
+        try { onClick(); } catch(_){}
+      };
+      pop.appendChild(btn);
+    }
+
+    if (canTidy) {
+      _addItem(
+        "🪄 Tidy trip",
+        "Reshape " + _sightCount + " sight stop" + (_sightCount === 1 ? "" : "s") +
+          " into day trips and waysides attached to your " + _hubCount +
+          " overnight hub" + (_hubCount === 1 ? "" : "s") + ".",
+        function () {
+          if (typeof global._openTidyTripPreview === "function") global._openTidyTripPreview();
+        }
+      );
+    }
+    _addItem(
+      "🔬 Keep in mind for your trip",
+      "Links, reservations, reminders to look up.",
+      function () {
+        if (typeof global._pmEnsureResearchMeta === "function") global._pmEnsureResearchMeta();
+        if (typeof global._pmOpenTripResearchCard === "function") global._pmOpenTripResearchCard();
+      }
+    );
+    _addItem(
+      "🌊 How Max thinks",
+      "The wisp arc and the case for late binding.",
+      function () {
+        if (typeof global.showAboutMax === "function") global.showAboutMax();
+      }
+    );
+    if (canReverse) {
+      _addItem(
+        "↺ Reverse trip order",
+        "Flip the order of destinations.",
+        function () {
+          if (typeof global.reverseTripOrder === "function") global.reverseTripOrder();
+        }
+      );
+    }
+
+    document.body.appendChild(pop);
+    _tmDestMorePopoverEl = pop;
+
+    // Outside-click closes. Use capture so we beat any inner handlers
+    // that stop propagation. Skip the anchor itself so its toggle
+    // logic handles the close on a re-tap.
+    _tmDestMoreOutsideHandler = function (e) {
+      if (!_tmDestMorePopoverEl) return;
+      if (_tmDestMorePopoverEl.contains(e.target)) return;
+      if (anchorBtn && anchorBtn.contains(e.target)) return;
+      _tmCloseTripDestMoreMenu();
+    };
+    // Defer one tick so the click that opened the menu doesn't
+    // immediately close it.
+    setTimeout(function(){
+      if (_tmDestMoreOutsideHandler) {
+        document.addEventListener("click", _tmDestMoreOutsideHandler, true);
+      }
+    }, 0);
+  }
+
   // ── TM.3b (v318): destinations-list header section ────────
   // Returns a new <div class="tm-section"> containing the
   // "Destinations" label, day/night/dest total line, and the
@@ -3527,28 +3654,29 @@
       : '<span style="color:#aaa;font-style:italic;">No destinations yet.</span>';
     listHdr.appendChild(totalLine);
 
-    // v360.2: Reverse trip order — restored as a first-class affordance
-    // on the destinations row. Was moved to the ⋯ More disclosure in an
-    // earlier slice but the user couldn't reliably find it there.
-    // Only shows when there are 3+ destinations (with 2, "reverse" is
-    // just a swap of arrival↔departure; the constraint-editor handles
-    // that more clearly).
-    if (dests.length >= 3) {
-      var reverseBtn = document.createElement("button");
-      reverseBtn.type = "button";
-      reverseBtn.style.cssText =
-        "background:#fff;border:1px solid #d8d4c8;color:#555;font-family:inherit;" +
-        "font-size:11px;font-weight:600;padding:4px 10px;border-radius:5px;cursor:pointer;" +
-        "margin-left:auto;flex-shrink:0;";
-      reverseBtn.innerHTML = "↺ Reverse trip order";
-      reverseBtn.title = "Flip the order of destinations on this trip — what was first becomes last.";
-      reverseBtn.onmouseover = function () { reverseBtn.style.background = "#faf8f1"; };
-      reverseBtn.onmouseout  = function () { reverseBtn.style.background = "#fff"; };
-      reverseBtn.onclick = function () {
-        if (typeof global.reverseTripOrder === 'function') global.reverseTripOrder();
-      };
-      listHdr.appendChild(reverseBtn);
-    }
+    // Round NC.X: replaced the standalone "↺ Reverse trip order" button
+    // (and the parallel "More" disclosure below the destinations list)
+    // with a single ⋯ overflow button anchored to the destinations
+    // header. The popover it opens carries every secondary action that
+    // used to be split between the inline button and the disclosure:
+    // Tidy trip, Keep in mind, How Max thinks, Reverse trip order.
+    // One discoverable affordance instead of two parallel ones.
+    var moreBtn = document.createElement("button");
+    moreBtn.type = "button";
+    moreBtn.setAttribute("aria-label", "Trip actions");
+    moreBtn.title = "Trip actions — tidy, reverse, notes, more";
+    moreBtn.style.cssText =
+      "background:#fff;border:1px solid #d8d4c8;color:#555;font-family:inherit;" +
+      "font-size:16px;font-weight:600;line-height:1;padding:3px 11px;border-radius:5px;cursor:pointer;" +
+      "margin-left:auto;flex-shrink:0;position:relative;";
+    moreBtn.textContent = "⋯";
+    moreBtn.onmouseover = function () { moreBtn.style.background = "#faf8f1"; };
+    moreBtn.onmouseout  = function () { moreBtn.style.background = "#fff"; };
+    moreBtn.onclick = function (e) {
+      e.stopPropagation();
+      _tmShowTripDestMoreMenu(trip, moreBtn);
+    };
+    listHdr.appendChild(moreBtn);
 
     listSec.appendChild(listHdr);
 
@@ -8747,6 +8875,17 @@
   // trip._ui.moreOpen so it survives re-renders within a session
   // (and survives a save, harmless if it lingers).
   function _renderTripMore(trip, container) {
+    // Round NC.X: the collapsed "More" disclosure has been retired.
+    // Every action it carried (Tidy trip / Keep in mind / How Max
+    // thinks / Reverse trip order) now lives in the ⋯ overflow
+    // popover anchored to the Destinations header. One discoverable
+    // affordance instead of two parallel ones (the disclosure here
+    // PLUS the standalone "↺ Reverse" inline button). The function
+    // body is kept as a no-op so the call site in index.html and any
+    // other consumers don't error; remove the call once the dust has
+    // settled on the new ⋯ pattern.
+    return;
+    // eslint-disable-next-line no-unreachable
     if (!trip || !container) return;
     if (!trip._ui) trip._ui = {};
     var open = !!trip._ui.moreOpen;
