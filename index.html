@@ -23654,6 +23654,47 @@ function reopenPickerForEdit(){
   _tb = _tb || {};
   _tb._editMode = true;
   _tb.tripMode = "place";
+  // Round NC.X: hydrate _tb.candidates from trip.candidates.
+  // reopenPickerForEdit was setting _tb.placeActivities but not
+  // _tb.candidates, leaving _tb.candidates at whatever state the
+  // session had (often []). Console diagnostic: _renderPlaceActivityItems
+  // logged candidates=0 after reopen even though trip.candidates had 35.
+  // Consequences: (1) the picker map's c.role lookup never matched
+  // anything, so role-based pin rendering fell through to legacy
+  // info.kept paths; (2) the Trip→Discovery c.role=daytrip bridge had
+  // no candidates to write to. Mirror the same hydration
+  // reopenCandidateExplorer does so both paths arrive at a consistent
+  // picker state.
+  if (Array.isArray(trip.candidates)) {
+    _tb.candidates = trip.candidates.map(function(c){
+      return {
+        id: c.id,
+        place: c.place,
+        country: c.country || null,
+        role: c.role || null,
+        whyItFits: c.whyItFits || "",
+        tags: c.tags || [],
+        tradeoffs: c.tradeoffs || null,
+        stayRange: c.stayRange || "",
+        lat: (typeof c.lat === "number") ? c.lat : null,
+        lng: (typeof c.lng === "number") ? c.lng : null,
+        status: c.status || null,
+        _required: !!c._required,
+        _requiredFor: (c._requiredFor || []).slice(),
+        order: (typeof c.order === "number") ? c.order : null,
+        manuallyOrdered: !!c.manuallyOrdered,
+        overnightCapable: (typeof c.overnightCapable === "boolean") ? c.overnightCapable : null,
+        singleSight: (typeof c.singleSight === "boolean") ? c.singleSight : null,
+        intent: c.intent || null,
+        tripRole: c.tripRole || null,
+        dayTripHub: c.dayTripHub || null,
+        waysideLeg: c.waysideLeg || null
+      };
+    });
+    if (typeof _ensureTripRoleDefaults === "function") {
+      _ensureTripRoleDefaults(_tb.candidates);
+    }
+  }
   // Rehydrate the brief so picker prompts and downstream rebuild see it.
   if (trip.brief) {
     _tb.region = trip.brief.region || _tb.region || "";
