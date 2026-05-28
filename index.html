@@ -15949,49 +15949,66 @@ function _refreshAllPlacePickerMaps(){
   }
 }
 
-// Round NC.X: focus a picker map on a specific place — pan the map so
-// the place is visible, then pulse the marker for ~1.4s so the user's
-// eye finds it. Called from togglePlaceActivity / togglePlaceInActivity
-// after a row toggle so "I just checked this place" gets immediate
-// confirmation on the map. Persistent "selected" visual lives via
-// _tb._pmFocusKey (which the marker factory reads to apply a larger
-// size + outer ring). Tolerates missing coords, missing maps, and
-// in-flight geocodes — silently no-ops on each.
+// Round NC.X: focus a picker map on a specific place — pan the map to
+// the place, then pulse the marker for ~1.4s so the user's eye lands
+// on the right pin. Pulse-only (no persistent ring) per Round NC.X
+// follow-up: persistent rings on un-toggled pins read as confusing.
+// Coord lookup falls back to the marker's own latLng when
+// _coarseGeocode doesn't have an entry (user-added places sometimes
+// don't seed the geocode table — Selfoss symptom).
 function _pmFocusPlace(placeName){
   if (!placeName) return;
   var key = String(placeName).toLowerCase();
   if (!_tb) return;
-  _tb._pmFocusKey = key;
-  var ll = (typeof _coarseGeocode !== "undefined" && _coarseGeocode[key]) || null;
-  if (!ll || !isFinite(ll[0]) || !isFinite(ll[1])) {
-    // No coords yet — the next render will still pick up the size
-    // bump once geocode lands, but we can't pan without a target.
-    return;
-  }
   if (typeof _pmMaps !== "object" || !_pmMaps) return;
   Object.keys(_pmMaps).forEach(function(targetId){
     var state = _pmMaps[targetId];
     if (!state || !state.map) return;
-    try {
-      // panTo (not setView) preserves zoom level — user's chosen zoom
-      // shouldn't change every time they tick a checkbox.
-      state.map.panTo(ll, { animate: true, duration: 0.4 });
-    } catch(_){}
-    // Pulse the corresponding marker via a temporary CSS class on its
-    // icon element. Leaflet exposes _icon on the marker after add.
-    try {
-      var marker = state.markers && state.markers[key];
-      var iconEl = marker && marker._icon;
-      if (iconEl) {
+    var marker = state.markers && state.markers[key];
+    // Resolve coords: try _coarseGeocode first, fall back to the
+    // marker's own latLng (set when it was added to the map).
+    var ll = (typeof _coarseGeocode !== "undefined" && _coarseGeocode[key]) || null;
+    if ((!ll || !isFinite(ll[0]) || !isFinite(ll[1])) && marker && typeof marker.getLatLng === "function") {
+      try {
+        var mll = marker.getLatLng();
+        if (mll && isFinite(mll.lat) && isFinite(mll.lng)) ll = [mll.lat, mll.lng];
+      } catch(_){}
+    }
+    // Pan if we have coords. panTo (not setView) preserves the user's
+    // zoom level — they shouldn't lose zoom on every checkbox tick.
+    if (ll && isFinite(ll[0]) && isFinite(ll[1])) {
+      try { state.map.panTo(ll, { animate: true, duration: 0.4 }); } catch(_){}
+    }
+    // Pulse the marker by toggling a CSS class on the icon element.
+    // Leaflet exposes _icon on the marker after it's been added.
+    if (marker && marker._icon) {
+      try {
+        var iconEl = marker._icon;
         iconEl.classList.remove("pm-focus-pulse");
-        // Force reflow so the animation restarts cleanly when the
-        // same place is tapped twice in a row.
+        // Force reflow so the animation restarts cleanly on a
+        // double-tap.
         // eslint-disable-next-line no-unused-expressions
         iconEl.offsetWidth;
         iconEl.classList.add("pm-focus-pulse");
         setTimeout(function(){ try { iconEl.classList.remove("pm-focus-pulse"); } catch(__){} }, 1400);
-      }
-    } catch(_){}
+      } catch(_){}
+    } else {
+      // Diagnostic: helps track the "Selfoss had no halo" symptom.
+      // If we hit this, the place exists in the picker list but has
+      // no marker registered for this map yet. Usually the next
+      // render fixes it; a one-shot retry on next animation frame.
+      try { console.log("[Max _pmFocusPlace] no marker for key=" + JSON.stringify(key) + " on map=" + targetId + " — retrying next frame"); } catch(_){}
+      requestAnimationFrame(function(){
+        var s2 = _pmMaps[targetId];
+        var m2 = s2 && s2.markers && s2.markers[key];
+        if (m2 && m2._icon) {
+          try {
+            m2._icon.classList.add("pm-focus-pulse");
+            setTimeout(function(){ try { m2._icon.classList.remove("pm-focus-pulse"); } catch(__){} }, 1400);
+          } catch(_){}
+        }
+      });
+    }
   });
 }
 
@@ -18749,33 +18766,21 @@ function _renderPlacePickerMap(targetId){
       // orange day-trip / grey not-kept. Iconic still appears in the
       // pin tooltip ("Akureyri · ★ iconic · stay") and in the
       // sidebar; just not as a colored decoration on the pin.
-      // Round NC.X: focused-pin treatment. When the user just toggled
-      // this place's row, _tb._pmFocusKey holds its normalized name.
-      // Bump the pin size and add a thicker outer ring so the eye can
-      // re-find it after the map pan. The ring color matches the role
-      // (subtle, not garish). Persistent — survives until the next
-      // place is toggled.
-      var _isFocused = (_tb && _tb._pmFocusKey && _tb._pmFocusKey === key);
-      if (_isFocused) {
-        size = Math.round(size * 1.35);
-        if (fontPx) fontPx = Math.round(fontPx * 1.2);
-        // Outer ring: same hue as the pin, half-opacity, 3px thick.
-        borderStyle = "3px solid #fff";
-      }
-      var _focusRingShadow = _isFocused
-        ? ', 0 0 0 3px ' + color + 'aa, 0 0 0 5px #fff'
-        : '';
+      // Round NC.X: pin focus is PULSE-ONLY now. Earlier this round
+      // added a persistent ring + size bump for the last-toggled pin,
+      // but that read as confusing — Godafoss (gray / not-kept) kept a
+      // halo from a stale toggle, which made it look "selected" even
+      // though its checkbox was off. The 1.4s pulse animation from
+      // _pmFocusPlace fires on every row toggle; that's enough
+      // feedback. Nothing persists on the marker between renders.
       var html = '<div style="background:'+color+';color:#fff;border-radius:50%;width:'
         + size + 'px;height:'+size+'px;border:' + borderStyle
-        + ';box-shadow:0 1px 4px rgba(0,0,0,0.25)' + _focusRingShadow
-        + ';display:flex;align-items:center;justify-content:center;font-size:' + fontPx + 'px;font-weight:700;">'
+        + ';box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;font-size:' + fontPx + 'px;font-weight:700;">'
         + label
         + '</div>';
-      var _cls = isSingleSight ? "pm-single-sight-pin" : "";
-      if (_isFocused) _cls = (_cls ? _cls + " " : "") + "pm-focused";
       var icon = L.divIcon({
         html: html,
-        className: _cls,
+        className: isSingleSight ? "pm-single-sight-pin" : "",
         iconSize: [size,size],
         iconAnchor: [size/2,size/2]
       });
@@ -23491,6 +23496,36 @@ function reopenPickerForEdit(){
     // v359.55.3: hydrate the research-card data (notes, source links,
     // stay/see overrides) so it survives picker reopens after Choreograph.
     _tb.placeMeta = Object.assign({}, trip.brief.placeMeta || {});
+    // Round NC.X: bridge each kept candidate's c.role BACK into
+    // placeMeta.stayOverride so the Discovery role-chip reflects what
+    // was committed in the trip. Without this, the picker reopens
+    // with every place showing as "Stay" even when the user had
+    // chosen "See" or made it a day trip — the chip reads stayOverride,
+    // not c.role. Only seed when stayOverride is missing/null; an
+    // explicit user override from a previous Discovery pass wins.
+    try {
+      var _normFn2 = (typeof _normPlaceName === "function")
+        ? _normPlaceName
+        : function(s){ return String(s||"").toLowerCase(); };
+      (trip.candidates || []).forEach(function(c){
+        if (!c || !c.place) return;
+        var k = _normFn2(c.place);
+        if (!k) return;
+        var existing = _tb.placeMeta[k];
+        if (existing && (existing.stayOverride === true || existing.stayOverride === false)) {
+          return; // explicit prior override wins
+        }
+        if (!existing) {
+          _tb.placeMeta[k] = { notes: "", links: [], stayOverride: null };
+          existing = _tb.placeMeta[k];
+        }
+        if (c.role === "stay") existing.stayOverride = true;
+        else if (c.role === "see" || c.role === "daytrip" || c.role === "onway") existing.stayOverride = false;
+        // role null / unknown → leave stayOverride untouched
+      });
+    } catch(e) {
+      console.warn("[Max reopenPickerForEdit] c.role → stayOverride bridge failed:", e && e.message);
+    }
     // v359.55.13: hydrate trip-level meta too.
     if (trip.brief.tripMeta) {
       _tb.tripMeta = {
