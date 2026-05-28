@@ -18836,10 +18836,19 @@ function _renderPlacePickerMap(targetId){
         // See ↔ Stay never changed the pin because the legacy path
         // (info.kept && !info._isDayTrip) is true for both states —
         // info.kept doesn't track the chip choice, only the checkbox.
+        //
+        // Round NC.X bugfix: placeMeta is keyed via _pmMetaKey (which
+        // calls _normPlaceName — strips accents, so "dyrhólaey" → "dyrholaey").
+        // The marker key here is `key = p.place.toLowerCase()` which
+        // KEEPS accents. Direct `_tb.placeMeta[key]` therefore misses
+        // every accented place name (Dyrhólaey, Vík, Þingvellir, …) —
+        // user reported Dyrhólaey's pin staying blue after toggling to
+        // See. Look it up through _pmMetaKey so the normalization matches.
         var _stayOv = null;
         try {
           if (_tb && _tb.placeMeta) {
-            var _pMeta = _tb.placeMeta[key];
+            var _metaKey = (typeof _pmMetaKey === "function") ? _pmMetaKey(info.place) : key;
+            var _pMeta = _tb.placeMeta[_metaKey];
             if (_pMeta && (_pMeta.stayOverride === true || _pMeta.stayOverride === false)) {
               _stayOv = _pMeta.stayOverride;
             }
