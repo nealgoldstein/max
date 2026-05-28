@@ -19706,14 +19706,24 @@ function renderActivityPicker(){
     // renderTripStep1Place again when it resolves. Region check on
     // re-entry guards against late-arriving fetches for a region
     // the user has since changed away from.
+    // Round NC.X: THIS CODE IS INSIDE renderActivityPicker. The
+    // earlier copy-pasted re-render callbacks called
+    // renderTripStep1Place() — which is the PROFILE/BRIEF EDITOR.
+    // Result: opening Discovery from the trip menu rendered the
+    // picker correctly, then the async entry-points fetch resolved
+    // ~13ms later and clobbered the picker DOM with the brief
+    // editor form. That's the "Open Discovery still goes to trip
+    // profile" bug. Call renderActivityPicker (this function) on
+    // re-render — same intent (entry-points card lands once cache
+    // populates), correct surface.
     if (_fnc_region
         && (typeof _epCache === "undefined" || !(_fnc_region in _epCache))
         && typeof _epLoading !== "undefined" && !_epLoading[_fnc_region]
         && typeof fetchRegionEntryPoints === "function") {
       fetchRegionEntryPoints(_fnc_region).then(function(){
-        if (typeof renderTripStep1Place === "function"
+        if (typeof renderActivityPicker === "function"
             && _tb && (_tb.region || _tb.placeName) === _fnc_region) {
-          renderTripStep1Place();
+          renderActivityPicker();
         }
       });
     }
@@ -19738,9 +19748,9 @@ function renderActivityPicker(){
         if (Date.now() - _fnc_pollStart > 30000) { clearInterval(_fnc_pollId); return; }
         if (typeof _epCache !== "undefined" && _fnc_region in _epCache) {
           clearInterval(_fnc_pollId);
-          if (typeof renderTripStep1Place === "function"
+          if (typeof renderActivityPicker === "function"
               && _tb && (_tb.region || _tb.placeName) === _fnc_region) {
-            renderTripStep1Place();
+            renderActivityPicker();
           }
         }
       }, 500);
