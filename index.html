@@ -2266,7 +2266,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
                Discovery" and ending up at the Profile editor (mostly
                because the adjacent "✎ Profile…" item is one row up and
                looks similar — but the silent no-op made it worse). -->
-          <button class="mw-item" onclick="_mwClose();if(typeof _reopenPickerAny==='function')_reopenPickerAny();else if(typeof reopenPickerForEdit==='function')reopenPickerForEdit();">&#129517;&nbsp; Open Discovery</button>
+          <button class="mw-item" onclick="_mwClose();try{console.log('[Max menu] Open Discovery clicked. trip?',!!window.trip,'mdcItems=',(window.trip&&window.trip.mdcItems&&window.trip.mdcItems.length)||0,'_tb.placeActivities=',(window._tb&&window._tb.placeActivities&&window._tb.placeActivities.length)||0,'trip.candidates=',(window.trip&&window.trip.candidates&&window.trip.candidates.length)||0);}catch(_){};if(typeof _reopenPickerAny==='function')_reopenPickerAny();else if(typeof reopenPickerForEdit==='function')reopenPickerForEdit();">&#129517;&nbsp; Open Discovery</button>
           <button class="mw-item" onclick="_mwClose();openTripSearch();">&#x1F50D;&nbsp; Search this trip</button>
           <button class="mw-item" onclick="_mwClose();showAskMaxModal();">&#128172;&nbsp; Ask Max&hellip;</button>
 
@@ -7105,11 +7105,13 @@ function _reopenPickerAny() {
   } catch(_){}
 
   if (trip && Array.isArray(trip.mdcItems) && trip.mdcItems.length && typeof reopenPickerForEdit === "function") {
+    try { console.log("[Max _reopenPickerAny] routing to reopenPickerForEdit (" + trip.mdcItems.length + " mdcItems)"); } catch(_){}
     reopenPickerForEdit();
     return;
   }
   // Paste/file stub trip — picker overlay holds the data on _tb.placeActivities.
   if (typeof _tb !== "undefined" && _tb && Array.isArray(_tb.placeActivities) && _tb.placeActivities.length && typeof renderActivityPicker === "function") {
+    try { console.log("[Max _reopenPickerAny] routing to renderActivityPicker (" + _tb.placeActivities.length + " placeActivities)"); } catch(_){}
     var briefOv = document.getElementById("trip-brief-overlay");
     if (briefOv && briefOv.parentElement !== document.body) document.body.appendChild(briefOv);
     briefOv.style.display = "block";
@@ -7117,9 +7119,11 @@ function _reopenPickerAny() {
     return;
   }
   if (trip && Array.isArray(trip.candidates) && trip.candidates.length && typeof reopenCandidateExplorer === "function") {
+    try { console.log("[Max _reopenPickerAny] routing to reopenCandidateExplorer (" + trip.candidates.length + " candidates)"); } catch(_){}
     reopenCandidateExplorer();
     return;
   }
+  try { console.log("[Max _reopenPickerAny] no data — showing empty-state alert"); } catch(_){}
   alert("Nothing in Discovery yet — try Trip profile… in the menu instead.");
 }
 if (typeof globalThis !== "undefined") globalThis._reopenPickerAny = _reopenPickerAny;
