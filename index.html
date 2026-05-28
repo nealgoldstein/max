@@ -14748,38 +14748,61 @@ function _renderPlaceActivityItems(){
     searchInp.placeholder = "Search places by name…";
     searchInp.value = (_tb && _tb._researchSearch) || "";
     searchInp.style.cssText = "flex:1;font:inherit;font-size:12.5px;padding:5px 9px;border:1px solid #d8dde5;border-radius:5px;background:#fff;color:#111;box-sizing:border-box;outline:none;";
+    // Round NC.X: match counter "2 / 5" + ↓ Next button. Both are hidden
+    // when there's no active query. Updated by the post-render scroll
+    // step based on how many .tb-search-hit rows survived the filter.
+    var searchCounter = document.createElement("span");
+    searchCounter.id = "tb-place-act-search-counter";
+    searchCounter.style.cssText = "font-size:11px;color:#888;white-space:nowrap;" + (searchInp.value ? "" : "visibility:hidden;");
+    searchCounter.textContent = "";
+    var searchNext = document.createElement("button");
+    searchNext.id = "tb-place-act-search-next";
+    searchNext.type = "button";
+    searchNext.title = "Cycle to next match (Enter)";
+    searchNext.style.cssText = "font-size:11px;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:4px 8px;cursor:pointer;font-family:inherit;" + (searchInp.value ? "" : "visibility:hidden;");
+    searchNext.textContent = "↓ Next";
+    searchNext.onclick = function(){
+      var n = (_tb && _tb._researchSearchMatches) || 0;
+      if (!n) return;
+      _tb._researchSearchMatchIndex = (((_tb._researchSearchMatchIndex || 0) + 1) % n);
+      _renderPlaceActivityItems();
+    };
     var searchClear = document.createElement("button");
     searchClear.type = "button";
     searchClear.style.cssText = "font-size:11px;color:#888;background:#fff;border:1px solid #ddd;border-radius:5px;padding:4px 8px;cursor:pointer;font-family:inherit;" + (searchInp.value ? "" : "visibility:hidden;");
     searchClear.textContent = "× Clear";
     searchInp.oninput = function(){
       _tb._researchSearch = searchInp.value;
-      // Round NC.X bugfix: capture cursor position so the post-rebuild
-      // focus restore knows where to put the caret. Without this, each
-      // debounced re-render destroys the input element, focus is lost,
-      // and subsequent keystrokes go nowhere — exactly the "search
-      // doesn't work" symptom.
+      // Reset to first match whenever the query changes — otherwise the
+      // user types a new word but stays on a stale index that no longer
+      // points at a valid hit.
+      _tb._researchSearchMatchIndex = 0;
       try { _tb._researchSearchCaret = searchInp.selectionStart; } catch(_){}
       _tb._researchSearchWasFocused = true;
-      // Console trace so "nothing happens" reports can be diagnosed:
-      // if you see this log, the handler is firing and _tb is being
-      // updated. If you don't, the input isn't dispatching oninput.
       try { console.log("[Max search] query =", JSON.stringify(searchInp.value)); } catch(_){}
       clearTimeout(_tb._researchSearchTimer);
-      // Shorter debounce (60ms vs 180ms) so the filter feels alive.
-      // 60ms is below the human-perception threshold for "lag" but
-      // still coalesces a quick burst of keystrokes into one render.
       _tb._researchSearchTimer = setTimeout(function(){
         if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
       }, 60);
     };
+    // Enter key in the search input cycles to the next match (same
+    // behavior as the ↓ Next button).
+    searchInp.onkeydown = function(e){
+      if (e.key === "Enter") {
+        e.preventDefault();
+        searchNext.onclick();
+      }
+    };
     searchClear.onclick = function(){
       _tb._researchSearch = "";
+      _tb._researchSearchMatchIndex = 0;
       _tb._researchSearchWasFocused = true;
       _tb._researchSearchCaret = 0;
       if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
     };
     searchWrap.appendChild(searchInp);
+    searchWrap.appendChild(searchCounter);
+    searchWrap.appendChild(searchNext);
     searchWrap.appendChild(searchClear);
     // Round NC.X: do NOT append searchWrap to toc. For position:sticky
     // to keep the bar visible across the WHOLE scroll, its parent must
@@ -15384,26 +15407,53 @@ function _renderPlaceActivityItems(){
     if (!_searchQ) return;
     requestAnimationFrame(function(){
       var allHits = list.querySelectorAll(".tb-search-hit");
-      // Round NC.X: rank hits so "vik" prefers "Vík" over "Reykjavik".
-      // Score: exact match=3, prefix match=2, word-boundary match=1,
-      // substring=0. Highest score wins; ties go to DOM order.
-      var firstHit = null;
-      if (allHits.length) {
-        var bestScore = -1;
-        for (var hi = 0; hi < allHits.length; hi++) {
-          var hitEl = allHits[hi];
-          var hitPlace = (hitEl.querySelector(".tb-act-name") || {}).textContent
-            || (hitEl.querySelector(".tb-dest-major-name") || {}).textContent
-            || hitEl.textContent || "";
-          var hpN = _searchNormalize(hitPlace.trim());
-          var sc;
-          if (hpN === _searchQNorm) sc = 3;
-          else if (hpN.indexOf(_searchQNorm) === 0) sc = 2;
-          else if (new RegExp("\\b" + _searchQNorm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).test(hpN)) sc = 1;
-          else sc = 0;
-          if (sc > bestScore) { bestScore = sc; firstHit = hitEl; }
-        }
+      // Round NC.X: rank hits so "vik" prefers "Vík" over "Reykjavik",
+      // then expose the full ranked list so the user can cycle via
+      // ↓ Next / Enter. Score: exact=3, prefix=2, word-boundary=1,
+      // substring=0. Ties stay in DOM order.
+      var ranked = [];
+      for (var hi = 0; hi < allHits.length; hi++) {
+        var hitEl = allHits[hi];
+        var hitPlace = (hitEl.querySelector(".tb-act-name") || {}).textContent
+          || (hitEl.querySelector(".tb-dest-major-name") || {}).textContent
+          || hitEl.textContent || "";
+        var hpN = _searchNormalize(hitPlace.trim());
+        var sc;
+        if (hpN === _searchQNorm) sc = 3;
+        else if (hpN.indexOf(_searchQNorm) === 0) sc = 2;
+        else if (new RegExp("\\b" + _searchQNorm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).test(hpN)) sc = 1;
+        else sc = 0;
+        ranked.push({ el: hitEl, score: sc, domIdx: hi });
       }
+      ranked.sort(function(a, b){
+        if (b.score !== a.score) return b.score - a.score;
+        return a.domIdx - b.domIdx;
+      });
+      // Save the count + clamp the current cycle index.
+      _tb._researchSearchMatches = ranked.length;
+      if (typeof _tb._researchSearchMatchIndex !== "number" || _tb._researchSearchMatchIndex >= ranked.length) {
+        _tb._researchSearchMatchIndex = 0;
+      }
+      var firstHit = ranked.length ? ranked[_tb._researchSearchMatchIndex].el : null;
+      // Update the inline counter ("2 / 5 matches") + show/hide the
+      // Next button.
+      try {
+        var counterEl = document.getElementById("tb-place-act-search-counter");
+        var nextEl    = document.getElementById("tb-place-act-search-next");
+        if (counterEl) {
+          if (ranked.length > 1) {
+            counterEl.textContent = (_tb._researchSearchMatchIndex + 1) + " / " + ranked.length;
+            counterEl.style.visibility = "visible";
+          } else if (ranked.length === 1) {
+            counterEl.textContent = "1 match";
+            counterEl.style.visibility = "visible";
+          } else {
+            counterEl.textContent = "";
+            counterEl.style.visibility = "hidden";
+          }
+        }
+        if (nextEl) nextEl.style.visibility = (ranked.length > 1) ? "visible" : "hidden";
+      } catch(_){}
       try {
         console.log("[Max search-scroll] q=" + JSON.stringify(_searchQ)
           + " hits=" + allHits.length
