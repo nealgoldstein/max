@@ -15050,6 +15050,10 @@ function _renderPlaceActivityItems(){
       var places = Array.isArray(item.requiredPlaces) ? item.requiredPlaces : [];
       places.forEach(function(p){
         if (!p || !p.place) return;
+        // Round NC.X: rejected places skip the in-section row render
+        // entirely. They live under the dedicated "Rejected" section
+        // at the bottom of the list.
+        if (p._rejected === true) return;
         var key = p.place.toLowerCase();
         if (!byDest[key]) {
           byDest[key] = { place: p.place, nightsMax: 0, items: [], placeRefs: [] };
@@ -15428,6 +15432,76 @@ function _renderPlaceActivityItems(){
       list.appendChild(row);
     });
   });
+
+  // Round NC.X: "Rejected" section. Any place whose requiredPlace has
+  // _rejected=true (set by the "✕ Reject" option in the role popup)
+  // moves here. Collapsed by default; expand to see the list and
+  // optionally un-reject a place.
+  (function _renderRejectedSection(){
+    var rejected = {}; // key -> { place, items: [..source activity names..] }
+    items.forEach(function(item){
+      if (!item || !Array.isArray(item.requiredPlaces)) return;
+      item.requiredPlaces.forEach(function(p){
+        if (!p || !p.place || p._rejected !== true) return;
+        var k = p.place.toLowerCase();
+        if (!rejected[k]) rejected[k] = { place: p.place, sources: [] };
+        if (item.name && rejected[k].sources.indexOf(item.name) < 0) {
+          rejected[k].sources.push(item.name);
+        }
+      });
+    });
+    var rkeys = Object.keys(rejected);
+    if (!rkeys.length) return;
+
+    if (!_tb._rejectedExpanded) _tb._rejectedExpanded = false;
+    var sec = document.createElement("div");
+    sec.style.cssText = "margin:18px 0 8px;padding:0;";
+    var hdr = document.createElement("button");
+    hdr.type = "button";
+    hdr.style.cssText = "display:flex;align-items:center;justify-content:space-between;width:100%;background:transparent;border:none;font-family:inherit;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#a93826;padding:8px 4px;cursor:pointer;border-top:1px solid #f0d8d2;";
+    hdr.innerHTML = "✕ Rejected (" + rkeys.length + ") <span aria-hidden=\"true\">" +
+      (_tb._rejectedExpanded ? "⌃" : "⌄") + "</span>";
+    hdr.onclick = function(){
+      _tb._rejectedExpanded = !_tb._rejectedExpanded;
+      _renderPlaceActivityItems();
+    };
+    sec.appendChild(hdr);
+
+    if (_tb._rejectedExpanded) {
+      var body = document.createElement("div");
+      body.style.cssText = "padding:4px 0 6px;display:flex;flex-direction:column;gap:4px;";
+      rkeys.forEach(function(k){
+        var r = rejected[k];
+        var row = document.createElement("div");
+        row.style.cssText = "display:flex;align-items:center;gap:10px;padding:6px 10px;background:#fdf6f4;border:1px solid #f0d8d2;border-radius:6px;font-size:12px;color:#555;";
+        var name = document.createElement("div");
+        name.style.cssText = "flex:1;font-weight:600;color:#222;";
+        name.textContent = r.place;
+        row.appendChild(name);
+        if (r.sources.length) {
+          var src = document.createElement("div");
+          src.style.cssText = "font-size:10.5px;color:#999;font-style:italic;";
+          src.textContent = "from: " + r.sources.slice(0, 2).join(", ") + (r.sources.length > 2 ? "…" : "");
+          row.appendChild(src);
+        }
+        var unrejectBtn = document.createElement("button");
+        unrejectBtn.type = "button";
+        unrejectBtn.style.cssText = "font-size:11px;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:4px;padding:3px 9px;cursor:pointer;font-family:inherit;font-weight:600;";
+        unrejectBtn.textContent = "↶ Un-reject";
+        unrejectBtn.title = "Move back to Maybe (undecided)";
+        (function(placeName){
+          unrejectBtn.onclick = function(){
+            if (typeof _pmSetPlaceRole === "function") _pmSetPlaceRole(placeName, "maybe", "");
+          };
+        })(r.place);
+        row.appendChild(unrejectBtn);
+        body.appendChild(row);
+      });
+      sec.appendChild(body);
+    }
+    list.appendChild(sec);
+  })();
+
   // v358.7: IntersectionObserver auto-hydration removed. Each story
   // slot now has its own "Story →" button that fires _pmTriggerStory
   // on click. No automatic LLM calls; no work done for places the
@@ -16141,32 +16215,40 @@ function _pmSetPlaceRole(placeKey, role, hubKey){
   if (m) {
     if (role === "stay")      m.stayOverride = true;
     else if (role === "see")  m.stayOverride = false;
-    else if (role === "daytrip") m.stayOverride = null;  // role tracked elsewhere
+    else if (role === "daytrip") m.stayOverride = null;
     else if (role === "onway")   m.stayOverride = null;
+    else if (role === "maybe")   m.stayOverride = null;
+    else if (role === "reject")  m.stayOverride = null;
   }
-  // Second, the legacy _isDayTrip / _dayTripHub flags on every
-  // requiredPlace ref. Still drives the picker map pin color + the
-  // (now-disabled) day-trip absorption pass at publishTrip time.
+  // Round NC.X: keep / reject / maybe semantics:
+  //   - stay / see / daytrip / onway  → _keep=true,  _rejected=false (active role)
+  //   - maybe                         → _keep=false, _rejected=false (undecided)
+  //   - reject                        → _keep=false, _rejected=true  (explicit no)
+  // Reject hides the place from the picker map AND moves it to the
+  // "Rejected" section in the picker list. Maybe is the prior
+  // unchecked-but-not-rejected state — small gray ❓ pin on the map.
+  var keep      = (role !== "maybe" && role !== "reject");
+  var rejected  = (role === "reject");
   _tb.placeActivities.forEach(function(item){
     if (!item || !Array.isArray(item.requiredPlaces)) return;
     item.requiredPlaces.forEach(function(p){
       if (!p || !p.place) return;
       if (p.place.toLowerCase() !== canon) return;
-      p._isDayTrip = (role === "daytrip");
+      p._isDayTrip  = (role === "daytrip");
       p._dayTripHub = (role === "daytrip") ? hub : "";
-      // Stay implies _keep:true (you're committing to it). See /
-      // daytrip / onway also imply _keep:true — the user picked a
-      // role, so they want the place on the trip. The picker
-      // checkbox is a separate concept (keep vs reject the place
-      // entirely); role-setting always means "kept."
-      p._keep = true;
+      // Round NC.X: track wayside's "from" hub the same way day-trip
+      // tracks its hub — needed so the popover can pre-select the
+      // right hub on re-open and so the trip build can route the
+      // wayside onto the right transit segment.
+      p._waysideFromHub = (role === "onway") ? hub : "";
+      p._keep = keep;
+      p._rejected = rejected;
     });
   });
-  // Round NC.X: also update c.role on the matching candidate so the
-  // picker map repaints immediately AND the trip build path reads the
-  // right role without waiting for the placeMeta→c.role bridge in
-  // publishTrip. Important for daytrip/onway, which the stayOverride
-  // path can't represent — c.role is the only place they live.
+  // Round NC.X: also update c.role + c.status on the matching candidate.
+  //   stay/see/daytrip/onway → c.role = that role,        c.status = "keep"
+  //   maybe                   → c.role unchanged,         c.status = null
+  //   reject                  → c.role unchanged,         c.status = "reject"
   try {
     var norm = (typeof _normPlaceName === "function")
       ? _normPlaceName : function(s){ return String(s||"").toLowerCase(); };
@@ -16174,8 +16256,8 @@ function _pmSetPlaceRole(placeKey, role, hubKey){
     if (k && Array.isArray(_tb.candidates)) {
       var cand = _tb.candidates.find(function(c){ return c && c.place && norm(c.place) === k; });
       if (cand) {
-        var allowed = { stay: 1, see: 1, daytrip: 1, onway: 1 };
-        if (allowed[role]) {
+        var roleEnum = { stay: 1, see: 1, daytrip: 1, onway: 1 };
+        if (roleEnum[role]) {
           // Guard Stay on overnightCapable, matching MaxEnginePicker.setRole.
           if (!(role === "stay" && cand.overnightCapable === false)) {
             if (cand.role !== role) {
@@ -16183,6 +16265,11 @@ function _pmSetPlaceRole(placeKey, role, hubKey){
               cand._roleTouched = true;
             }
           }
+          cand.status = "keep";
+        } else if (role === "maybe") {
+          cand.status = null;
+        } else if (role === "reject") {
+          cand.status = "reject";
         }
       }
     }
@@ -17237,11 +17324,15 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
     (item.requiredPlaces || []).forEach(function(p){
       if (!p || !p.place) return;
       var k = p.place.toLowerCase();
-      if (!allPlaces[k]) allPlaces[k] = { place: p.place, kept: false, _isDayTrip: false, _dayTripHub: "" };
+      if (!allPlaces[k]) allPlaces[k] = { place: p.place, kept: false, _isDayTrip: false, _dayTripHub: "", _waysideFromHub: "", _rejected: false };
       if (p._keep) allPlaces[k].kept = true;
+      if (p._rejected === true) allPlaces[k]._rejected = true;
       if (p._isDayTrip === true) {
         allPlaces[k]._isDayTrip = true;
         if (p._dayTripHub && !allPlaces[k]._dayTripHub) allPlaces[k]._dayTripHub = p._dayTripHub;
+      }
+      if (p._waysideFromHub && !allPlaces[k]._waysideFromHub) {
+        allPlaces[k]._waysideFromHub = p._waysideFromHub;
       }
     });
   });
@@ -17280,13 +17371,15 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
   // longer shows a sequence to start from; sequencing is a trip-view
   // concern.
 
-  // Round NC.X: four role options with current first + highlighted.
-  // Detection priority:
-  //   1. c.role on the candidate (NC.3 source of truth — recognizes
-  //      onway, the new fourth role).
-  //   2. _isDayTrip flag on the requiredPlace (legacy daytrip).
-  //   3. placeMeta.stayOverride → stay / see.
-  //   4. LLM default (overnightCapable / overnight flag).
+  // Round NC.X: six role options now — Maybe, Stay, See, Day trip,
+  // On the way, Reject. Detection priority for the pre-selected
+  // current option:
+  //   1. status === "reject" on candidate → "reject"
+  //   2. status === null AND no _keep flag → "maybe"
+  //   3. c.role on the candidate (stay/see/daytrip/onway)
+  //   4. _isDayTrip flag on the requiredPlace (legacy daytrip).
+  //   5. placeMeta.stayOverride → stay / see.
+  //   6. LLM default (overnightCapable / overnight flag).
   var _popMeta = _pmPlaceMeta(info.place, { create: false });
   var _llmIsStayPop = info.overnight !== false; // LLM-marked
   var _popCand = null;
@@ -17297,8 +17390,16 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
       });
     }
   } catch(_){}
+  // Has the user explicitly rejected this place? Check c.status first,
+  // fall back to any requiredPlace._rejected flag (which the writer
+  // sets per-ref before c.status propagates).
+  var _isRejected = (_popCand && _popCand.status === "reject")
+    || info._rejected === true;
+  var _isMaybe = !_isRejected && !info.kept;
   var currentRole;
-  if (_popCand && (_popCand.role === "stay" || _popCand.role === "see" || _popCand.role === "daytrip" || _popCand.role === "onway")) {
+  if (_isRejected) currentRole = "reject";
+  else if (_isMaybe) currentRole = "maybe";
+  else if (_popCand && (_popCand.role === "stay" || _popCand.role === "see" || _popCand.role === "daytrip" || _popCand.role === "onway")) {
     currentRole = _popCand.role;
   } else if (info._isDayTrip) currentRole = "daytrip";
   else if (_popMeta && _popMeta.stayOverride === true)  currentRole = "stay";
@@ -17313,24 +17414,46 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
   if (noHubs) hubOptions = '<option value="">(no other kept stays)</option>';
   var dtDisabled = noHubs ? "disabled" : "";
   var dtTitle = noHubs ? 'title="Pick a hub stay first — no other kept stays exist yet."' : "";
+  // Wayside also uses the hub dropdown — for the "(from {hub})" part.
+  // Reuse the same hub list; the writer treats wayside hub as the
+  // departure dest the route is leaving from. Pre-select the
+  // existing _waysideFromHub if set so re-open shows the saved choice.
+  var _wsCurrentHub = (info._waysideFromHub || "").toLowerCase();
+  var wsHubOptions = hubs.map(function(h){
+    var sel = (h.key === _wsCurrentHub) ? "selected" : "";
+    return '<option value="' + _pmEsc(h.key) + '" ' + sel + '>' + _pmEsc(h.place) + '</option>';
+  }).join("");
+  if (noHubs) wsHubOptions = '<option value="">(no kept stays yet)</option>';
 
-  // Build the three role rows; sort so the current one renders first.
+  // Build the role rows; sort so the current one renders first.
   function _roleRow(role){
     var isCurrent = (role === currentRole);
     var bg = isCurrent ? "#eef4fb" : "#fff";
     var border = isCurrent ? "1px solid #1a5fa8" : "1px solid #e5e5e5";
     var weight = isCurrent ? "600" : "400";
     var checked = isCurrent ? "checked" : "";
+    if (role === "maybe") {
+      // Gray pill — undecided. No checkbox in the picker list = this.
+      var maybeBg = isCurrent ? "#f3f3f3" : "#fff";
+      var maybeBorder = isCurrent ? "1px solid #888" : "1px solid #e5e5e5";
+      return '<label style="display:flex;align-items:center;gap:6px;margin:3px 0;padding:5px 8px;background:' + maybeBg + ';border:' + maybeBorder + ';border-radius:5px;cursor:pointer;font-weight:' + weight + ';color:#666;">'
+        + '<input type="radio" name="pm-mode" value="maybe" ' + checked + ' />'
+        + '<span style="display:inline-flex;align-items:center;gap:6px;">'
+        +   '<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:#bbb;color:#fff;font-size:11px;font-weight:700;">?</span>'
+        +   'Maybe'
+        + '</span>'
+        + '</label>';
+    }
     if (role === "stay") {
       return '<label style="display:flex;align-items:center;gap:6px;margin:3px 0;padding:5px 8px;background:' + bg + ';border:' + border + ';border-radius:5px;cursor:pointer;font-weight:' + weight + ';">'
         + '<input type="radio" name="pm-mode" value="stay" ' + checked + ' />'
-        + '<span>🛏 Stay the night</span>'
+        + '<span>🛏 Overnight</span>'
         + '</label>';
     }
     if (role === "see") {
       return '<label style="display:flex;align-items:center;gap:6px;margin:3px 0;padding:5px 8px;background:' + bg + ';border:' + border + ';border-radius:5px;cursor:pointer;font-weight:' + weight + ';">'
         + '<input type="radio" name="pm-mode" value="see" ' + checked + ' />'
-        + '<span>👁 See — decide later</span>'
+        + '<span>👁 See</span>'
         + '</label>';
     }
     if (role === "daytrip") {
@@ -17342,20 +17465,35 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
         + '</select>'
         + '</label>';
     }
-    // onway — stop on a transit leg between two stays. Distinct from
-    // daytrip (which lives off ONE hub). Pin renders teal so the
-    // user can see at a glance which onway places exist.
-    return '<label style="display:flex;align-items:center;gap:6px;margin:3px 0;padding:5px 8px;background:' + bg + ';border:' + border + ';border-radius:5px;cursor:pointer;font-weight:' + weight + ';">'
-      + '<input type="radio" name="pm-mode" value="onway" ' + checked + ' />'
-      + '<span>🛣 On the way (between stops)</span>'
+    if (role === "onway") {
+      // Wayside also gets a {hub} dropdown — same list of kept stays,
+      // user picks which one the wayside is "from" (i.e., the segment
+      // it's on).
+      var wsDisabled = noHubs ? "disabled" : "";
+      var wsTitle    = noHubs ? 'title="Pick a hub stay first — no kept stays to be on the way from."' : "";
+      return '<label style="display:flex;align-items:center;gap:6px;margin:3px 0;padding:5px 8px;background:' + bg + ';border:' + border + ';border-radius:5px;' + (noHubs ? 'opacity:0.55;cursor:not-allowed;' : 'cursor:pointer;') + 'font-weight:' + weight + ';" ' + wsTitle + '>'
+        + '<input type="radio" name="pm-mode" value="onway" ' + checked + ' ' + wsDisabled + ' />'
+        + '<span>🛣 On the way from</span>'
+        + '<select class="pm-ws-hub-sel" ' + wsDisabled + ' style="font-family:inherit;font-size:12px;padding:2px 4px;margin-left:auto;">'
+        +   wsHubOptions
+        + '</select>'
+        + '</label>';
+    }
+    // reject — dim red pill, explicit no
+    var rejBg = isCurrent ? "#fde8e6" : "#fff";
+    var rejBorder = isCurrent ? "1px solid #b03e2d" : "1px solid #e5e5e5";
+    return '<label style="display:flex;align-items:center;gap:6px;margin:3px 0;padding:5px 8px;background:' + rejBg + ';border:' + rejBorder + ';border-radius:5px;cursor:pointer;font-weight:' + weight + ';color:#a93826;">'
+      + '<input type="radio" name="pm-mode" value="reject" ' + checked + ' />'
+      + '<span style="display:inline-flex;align-items:center;gap:6px;">'
+      +   '<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:#c75348;color:#fff;font-size:11px;font-weight:700;">✕</span>'
+      +   'Reject'
+      + '</span>'
       + '</label>';
   }
 
-  // Round NC.X: all FOUR roles now selectable from the picker popup.
-  // Earlier the popup combined daytrip + onway into one option which
-  // hid the distinction and made it impossible to switch back from
-  // onway to stay (user couldn't see the current state was onway).
-  var allRoles = ["stay", "see", "daytrip", "onway"];
+  // Round NC.X: six role options now (Maybe at top, Reject at bottom),
+  // with the current state highlighted first.
+  var allRoles = ["maybe", "stay", "see", "daytrip", "onway", "reject"];
   var ordered = [currentRole].concat(allRoles.filter(function(r){ return r !== currentRole; }));
 
   var html = ''
@@ -17380,11 +17518,13 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
     var save = root.querySelector(".pm-save");
     var cancel = root.querySelector(".pm-cancel");
     var hubSel = root.querySelector(".pm-hub-sel");
+    var wsHubSel = root.querySelector(".pm-ws-hub-sel");
     var radios = root.querySelectorAll('input[name="pm-mode"]');
     function syncDisabled(){
       var v = root.querySelector('input[name="pm-mode"]:checked');
-      var isDT = v && v.value === "daytrip";
-      if (hubSel) hubSel.disabled = !isDT || noHubs;
+      var mode = v && v.value;
+      if (hubSel)   hubSel.disabled   = (mode !== "daytrip") || noHubs;
+      if (wsHubSel) wsHubSel.disabled = (mode !== "onway")   || noHubs;
     }
     radios.forEach(function(r){ r.addEventListener("change", syncDisabled); });
     syncDisabled();
@@ -17392,10 +17532,12 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
     if (save) save.addEventListener("click", function(){
       var v = root.querySelector('input[name="pm-mode"]:checked');
       var mode = v ? v.value : currentRole;
-      var hub = (mode === "daytrip" && hubSel) ? hubSel.value : "";
+      var hub = "";
+      if (mode === "daytrip" && hubSel) hub = hubSel.value || "";
+      else if (mode === "onway" && wsHubSel) hub = wsHubSel.value || "";
       mapInstance.closePopup(popup);
-      // v359.55.8: route through _pmSetPlaceRole so all three states
-      // (stay / see / daytrip) write consistently.
+      // Route through _pmSetPlaceRole — handles all six modes
+      // (maybe / stay / see / daytrip / onway / reject) consistently.
       _pmSetPlaceRole(canon, mode, hub);
     });
     // v357: "Set as starting point" toggle removed — sequencing is a
@@ -18750,9 +18892,10 @@ function _renderPlacePickerMap(targetId){
     (item.requiredPlaces || []).forEach(function(p){
       if (!p || !p.place) return;
       var key = p.place.toLowerCase();
-      if (!allPlaces[key]) allPlaces[key] = { place: p.place, country: p.country||"", kept: false, iconic: false, anyRoute: false, _isDayTrip: false, _dayTripHub: "" };
+      if (!allPlaces[key]) allPlaces[key] = { place: p.place, country: p.country||"", kept: false, iconic: false, anyRoute: false, _isDayTrip: false, _dayTripHub: "", _waysideFromHub: "", _rejected: false };
       if (p.country && !allPlaces[key].country) allPlaces[key].country = p.country;
       if (p._keep) allPlaces[key].kept = true;
+      if (p._rejected === true) allPlaces[key]._rejected = true;
       if (iconic) allPlaces[key].iconic = true;
       if (item.type === "route") allPlaces[key].anyRoute = true;
       // Any requiredPlace ref that flips _isDayTrip on wins — a place
@@ -18760,6 +18903,9 @@ function _renderPlacePickerMap(targetId){
       if (p._isDayTrip === true) {
         allPlaces[key]._isDayTrip = true;
         if (p._dayTripHub && !allPlaces[key]._dayTripHub) allPlaces[key]._dayTripHub = p._dayTripHub;
+      }
+      if (p._waysideFromHub && !allPlaces[key]._waysideFromHub) {
+        allPlaces[key]._waysideFromHub = p._waysideFromHub;
       }
     });
   });
@@ -18786,9 +18932,12 @@ function _renderPlacePickerMap(targetId){
     if (!allPlaces[srcKey]._dayTripHub && hubName) allPlaces[srcKey]._dayTripHub = hubName.toLowerCase();
   });
 
-  // Tear down markers for places no longer in the dataset
+  // Tear down markers for places no longer in the dataset, OR for
+  // places the user has REJECTED. Rejected places live on in the
+  // picker list (under the "Rejected" section) but don't render on
+  // the map. Round NC.X.
   Object.keys(_pmMarkersByPlace).forEach(function(k){
-    if (!allPlaces[k]) {
+    if (!allPlaces[k] || (allPlaces[k] && allPlaces[k]._rejected)) {
       try { _pmMap.removeLayer(_pmMarkersByPlace[k]); } catch(_){}
       delete _pmMarkersByPlace[k];
     }
@@ -18814,6 +18963,11 @@ function _renderPlacePickerMap(targetId){
   var bounds = [];
   Object.keys(allPlaces).forEach(function(key){
     var info = allPlaces[key];
+    // Round NC.X: Rejected places never render on the map. They live
+    // on in the picker list (under "Rejected") but are out of sight
+    // on every map surface. The tear-down loop above already removed
+    // any existing marker; skip creating a new one here.
+    if (info && info._rejected) return;
     var ll = _coarseGeocode[key];
     function placeMarker(latLng){
       bounds.push(latLng);
@@ -18949,17 +19103,27 @@ function _renderPlacePickerMap(targetId){
         size = 22;
         fontPx = 14;
       } else if (isSingleSight) {
-        // See / undecided single-sight: purple eye, matches the chip
-        // and the popup option "👁 See — decide later".
+        // See: purple eye, matches the chip and the popup option
+        // "👁 See". Only fires when the user has explicitly chosen
+        // See — not for undecided (Maybe) places.
         color = "#5b3f8f";
         label = "👁";
         size = 22;
         borderStyle = "2px solid #fff";
         fontPx = 14;
       } else {
+        // Round NC.X: "Maybe" — unkept and undecided (but not
+        // rejected; rejected places skip rendering entirely above).
+        // Small gray circle with a ❓ glyph so the user can see Max
+        // surfaced this place but they haven't made a call yet.
+        // Earlier this was a featureless gray dot which read like
+        // "rejected" — that confusion is now resolved by giving
+        // rejection its own state (hidden) and giving Maybe a
+        // distinct glyph.
         color = "#bbb";
-        label = "";
-        size = 16;
+        label = "?";
+        size = 18;
+        fontPx = 11;
       }
       // v358.6: no map-level "iconic" decoration. The earlier gold
       // border and the v358.5 ★ overlay both fired only on places
@@ -19003,15 +19167,17 @@ function _renderPlacePickerMap(targetId){
         // Round NC.3+ bugfix: tooltip role label tracks c.role (NC.3
         // source of truth), so the picker tooltip and the role popover
         // never disagree about whether a place is stay/see/day-trip.
-        // Round NC.X: split daytrip / onway into separate labels.
-        // Earlier "day trip / on the way" conflated them which made
-        // the tooltip unhelpful — the user just chose one, not both.
-        var _ttRole = isStay     ? " · stay"
-                    : isDayTrip  ? " · day trip"
-                    : isOnway    ? " · on the way"
-                    : isSee      ? " · see"
-                    : info.kept  ? " · kept"
-                    : "";
+        // Round NC.X: split daytrip / onway / maybe into separate
+        // labels. Rejected places don't render here at all (skipped
+        // above) so no "· rejected" branch — kept for the trip map
+        // path where rejection might surface differently.
+        var _ttRole = isStay        ? " · stay"
+                    : isDayTrip     ? " · day trip"
+                    : isOnway       ? " · on the way"
+                    : isSee         ? " · see"
+                    : info._rejected ? " · rejected"
+                    : info.kept     ? " · kept"
+                    :                 " · maybe";
         var ttBits = info.place + _ttRole;
         m.bindTooltip(ttBits, {direction:"top", offset:[0,-10]});
         // Step 6: clicking a pin opens the stay/day-trip popup.
@@ -36907,6 +37073,33 @@ function removeDestFromTrip(destId){
   var dest = trip.destinations[idx];
   var oldNights = dest.nights || 0;
 
+  // Round NC.X: flag this place as REJECTED in mdcItems so Discovery
+  // shows it in the "Rejected" section instead of just unchecked.
+  // Reject is explicit user intent ("no, not this"); unchecked is
+  // deferred ("not sure yet"). The trip-popover's Reject row routes
+  // here, so we should preserve that semantic.
+  if (typeof _ensureMdcItemsHasPlace === "function") {
+    _ensureMdcItemsHasPlace(dest.place, {
+      role: "reject",
+      country: dest.country,
+      lat: dest.lat,
+      lng: dest.lng
+    });
+  }
+  // Also mark the candidate's status if it's hydrated.
+  try {
+    var norm = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){return String(s||"").toLowerCase();};
+    var k = norm(dest.place);
+    if (_tb && Array.isArray(_tb.candidates)) {
+      var cand = _tb.candidates.find(function(c){ return c && c.place && norm(c.place) === k; });
+      if (cand) { cand.status = "reject"; cand._roleTouched = true; }
+    }
+    if (Array.isArray(trip.candidates)) {
+      var tCand = trip.candidates.find(function(c){ return c && c.place && norm(c.place) === k; });
+      if (tCand) tCand.status = "reject";
+    }
+  } catch(_){}
+
   trip.destinations.splice(idx, 1);
 
   // Cascade subsequent dates earlier by oldNights (only if there's
@@ -37178,7 +37371,7 @@ function _openTripDestRolePopover(destId){
     ? ('<label style="' + _sugRowStyle("dayTrip") + '">'
         + '<input type="radio" name="trip-role-pick" value="dayTrip"' + _sugChecked("dayTrip") + ' style="margin:0;" />'
         + '<div style="flex:1;">'
-        +   '<div style="font-size:13px;font-weight:600;color:#222;">Day trip from</div>'
+        +   '<div style="font-size:13px;font-weight:600;color:#222;"><span style="margin-right:5px;">📍</span>Day trip from</div>'
         +   '<select id="trip-role-hub-select" style="margin-top:6px;width:100%;padding:6px 8px;font-size:12.5px;border:1px solid #ccc;border-radius:6px;font-family:inherit;">' + hubOpts + '</select>'
         +   '<div style="font-size:11px;color:#a36500;margin-top:6px;line-height:1.5;">Heads up: the hub will absorb '
         + (src.nights || 1) + ' night' + ((src.nights || 1) === 1 ? "" : "s")
@@ -37220,7 +37413,7 @@ function _openTripDestRolePopover(destId){
     ? ('<label style="' + _sugRowStyle("wayside") + '">'
         + '<input type="radio" name="trip-role-pick" value="wayside"' + _sugChecked("wayside") + ' style="margin:0;" />'
         + '<div style="flex:1;">'
-        +   '<div style="font-size:13px;font-weight:600;color:#222;">Along the way</div>'
+        +   '<div style="font-size:13px;font-weight:600;color:#222;"><span style="margin-right:5px;">🛣</span>On the way</div>'
         +   '<div style="font-size:11.5px;color:#444;margin-top:3px;line-height:1.5;">'
         +     'A stop on the route from <strong>' + waysidePrev.place + '</strong> &rarr; <strong>' + waysideNext.place + '</strong>' + (_wsNightsN > 0 ? ' — same trip length, just no sleep here.' : ' — no overnight, no shift needed.')
         +   '</div>'
@@ -37320,12 +37513,17 @@ function _openTripDestRolePopover(destId){
   // visible in the picker's research as an unchecked candidate (the
   // user can re-check to bring it back). Grey ✕ icon signals
   // destructive-but-soft (not a hard delete from research).
+  // Round NC.X: "Reject" — matches the Reject option in Discovery
+  // picker popup. Functionally identical to the old "Remove from
+  // trip" (drops from destinations + flags as rejected so the place
+  // surfaces in Discovery's Rejected section). Dim-red pill matches
+  // the Discovery pop's reject row.
   var removeRow = ''
-    + '<label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #e0e0e0;border-radius:8px;cursor:pointer;background:#fff;">'
+    + '<label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #f0d8d2;border-radius:8px;cursor:pointer;background:#fdf6f4;color:#a93826;">'
     +   '<input type="radio" name="trip-role-pick" value="remove" style="margin:0;" />'
     +   '<div style="flex:1;">'
-    +     '<div style="font-size:13px;font-weight:600;color:#222;"><span style="color:#888;margin-right:5px;font-weight:700;">✖</span>Remove from trip</div>'
-    +     '<div style="font-size:11px;color:#777;margin-top:2px;line-height:1.5;">Drop ' + src.place + ' from this trip. It stays unchecked in your research so you can add it back any time. Day items and bookings on this stop will be dropped.</div>'
+    +     '<div style="font-size:13px;font-weight:600;color:#a93826;"><span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:#c75348;color:#fff;font-size:11px;font-weight:700;margin-right:6px;vertical-align:-3px;">✕</span>Reject</div>'
+    +     '<div style="font-size:11px;color:#7a4030;margin-top:2px;line-height:1.5;">Drop ' + src.place + ' from this trip and move it to the Rejected list in Discovery. Day items and bookings on this stop will be dropped.</div>'
     +   '</div>'
     + '</label>';
 
@@ -37367,7 +37565,7 @@ function _openTripDestRolePopover(destId){
     +     '<label style="' + _sugRowStyle("stay") + '">'
     +       '<input type="radio" name="trip-role-pick" value="stay"' + _sugChecked("stay") + ' style="margin:0;" />'
     +       '<div style="flex:1;">'
-    +         '<div style="font-size:13px;font-weight:600;color:#222;">Overnight stay' + (_isCurrentlySee ? '' : ' (current)') + '</div>'
+    +         '<div style="font-size:13px;font-weight:600;color:#222;"><span style="margin-right:5px;">🛏</span>Overnight' + (_isCurrentlySee ? '' : ' (current)') + '</div>'
     +         '<div style="font-size:11px;color:#777;margin-top:2px;line-height:1.5;">' + staySubtitle + '</div>'
     +       '</div>'
     +     '</label>'
@@ -37592,7 +37790,7 @@ function _openTripStopPopover(ctx) {
 
   var overnightRow = _row(
     "overnight",
-    "Overnight stay",
+    "🛏 Overnight",
     currentRole === "overnight"
       ? "A real stop with at least one night."
       : "Promote to its own destination on the trip with a night to sleep."
@@ -37704,7 +37902,7 @@ function _openTripStopPopover(ctx) {
   var dayTripRow = hubOpts.length
     ? _row(
         "dayTrip",
-        "Day trip",
+        "📍 Day trip",
         currentRole === "dayTrip"
           ? _dtCurrentSubtitle
           : "Visit while based at one of your overnight hubs. Start a new day trip, or combine with an existing one (e.g. Golden Circle).",
@@ -37790,7 +37988,7 @@ function _openTripStopPopover(ctx) {
   var waysideRow = (_waysideHasOptions && !_waysideGateBlocks)
     ? _row(
         "wayside",
-        "Wayside (along the way)",
+        "🛣 On the way",
         currentRole === "wayside"
           ? "On a transit route. Pick another route below to move it."
           : "A stop on the way between two hubs — no overnight here.",
