@@ -15410,10 +15410,17 @@ function _renderPlaceActivityItems(){
           + (firstHit ? (" firstHit=" + (firstHit.id || firstHit.className)) : " firstHit=null"));
       } catch(_){}
       if (firstHit) {
-        // Mark the best hit with a flash animation so the eye lands
-        // on it after the smooth scroll completes. Remove the class
-        // from any previously-flashed row first.
+        // Round NC.X: only the BEST hit stays highlighted. Strip the
+        // .tb-search-hit class from every other matching row so the
+        // user's eye isn't pulled to multiple yellow boxes for "vik"
+        // when only Vík (exact match) is the right answer. Then flash
+        // the chosen row so the scroll target is unmistakable.
         try {
+          for (var ah = 0; ah < allHits.length; ah++) {
+            if (allHits[ah] !== firstHit) {
+              allHits[ah].classList.remove("tb-search-hit");
+            }
+          }
           var prevFlash = list.querySelectorAll(".tb-search-flash");
           for (var pf = 0; pf < prevFlash.length; pf++) prevFlash[pf].classList.remove("tb-search-flash");
           // Force a reflow so the animation restarts cleanly.
