@@ -18825,12 +18825,45 @@ function _renderPlacePickerMap(targetId){
         isSee     = (_candRole === "see");
         isOnway   = (_candRole === "onway");
       } else {
-        // Legacy path — no candidate role available, fall back to the
-        // pre-NC.3 _isDayTrip / kept derivation.
-        isStay    = info.kept && !info._isDayTrip;
-        isDayTrip = info.kept && info._isDayTrip;
-        isSee     = false;
-        isOnway   = false;
+        // Round NC.X: between c.role and the legacy `info.kept && !info._isDayTrip`
+        // derivation, consult placeMeta.stayOverride so Discovery chip
+        // toggles repaint the pin immediately for user-added places that
+        // aren't yet in _tb.candidates. Without this, toggling Selfoss
+        // See ↔ Stay never changed the pin because the legacy path
+        // (info.kept && !info._isDayTrip) is true for both states —
+        // info.kept doesn't track the chip choice, only the checkbox.
+        var _stayOv = null;
+        try {
+          if (_tb && _tb.placeMeta) {
+            var _pMeta = _tb.placeMeta[key];
+            if (_pMeta && (_pMeta.stayOverride === true || _pMeta.stayOverride === false)) {
+              _stayOv = _pMeta.stayOverride;
+            }
+          }
+        } catch(_){}
+        if (_stayOv === true) {
+          isStay    = true;
+          isDayTrip = false;
+          isSee     = false;
+          isOnway   = false;
+        } else if (_stayOv === false) {
+          isStay    = false;
+          isDayTrip = false;
+          isSee     = true;
+          isOnway   = false;
+        } else if (info._isDayTrip) {
+          // Legacy day-trip flag from the picker map popup.
+          isStay    = false;
+          isDayTrip = true;
+          isSee     = false;
+          isOnway   = false;
+        } else {
+          // Legacy default: kept = stay; not-kept = small gray dot.
+          isStay    = info.kept;
+          isDayTrip = false;
+          isSee     = false;
+          isOnway   = false;
+        }
       }
       // Round FN.F.3 / NC.3: "single sight" derives from c.role === "see"
       // when we have a candidate; otherwise fall back to legacy
