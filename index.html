@@ -14659,23 +14659,17 @@ function _renderPlaceActivityItems(){
   function _pmRowMatchesSearch(d, secName){
     if (!_searchQ) return true;
     if (!d) return false;
-    // Round NC.X: match ONLY on text the user can actually see in the
-    // row — the place name and the activity name(s) attached to it.
-    // Earlier this also matched activity descriptions (which are often
-    // truncated with "…") and section titles, which produced false-
-    // positive feeling hits: e.g. typing "vik" highlighted Borgarnes
-    // because its full description mentioned Reykjavík offscreen.
-    // The user couldn't see where the match lived, so the hit looked
-    // wrong. Restricting to visible name fields keeps every highlighted
-    // row visibly justified.
+    // Round NC.X: match ONLY on the place name itself. Earlier rounds
+    // tried widening to activity name / description / section title,
+    // but each of those produced confusing hits: e.g. typing "vik"
+    // highlighted Borgarnes because Borgarnes is a requiredPlace on a
+    // "Drive to Reykjavik" activity whose name contains "vik" — but
+    // the visible activity on the row was "Visit Borgarnes", not the
+    // one that matched, so the user saw a glowing row with no "vik"
+    // anywhere they could point at. Place-name-only guarantees every
+    // highlighted row has the query in its big bold name.
     var q = _searchQNorm;
     if (d.place && _searchNormalize(d.place).indexOf(q) >= 0) return true;
-    var refs = d.placeRefs || [];
-    for (var i = 0; i < refs.length; i++) {
-      var r = refs[i];
-      if (!r || !r.item) continue;
-      if (r.item.name && _searchNormalize(r.item.name).indexOf(q) >= 0) return true;
-    }
     return false;
   }
 
