@@ -14748,22 +14748,36 @@ function _renderPlaceActivityItems(){
     searchInp.placeholder = "Search places by name…";
     searchInp.value = (_tb && _tb._researchSearch) || "";
     searchInp.style.cssText = "flex:1;font:inherit;font-size:12.5px;padding:5px 9px;border:1px solid #d8dde5;border-radius:5px;background:#fff;color:#111;box-sizing:border-box;outline:none;";
-    // Round NC.X: match counter "2 / 5" + ↓ Next button. Both are hidden
-    // when there's no active query. Updated by the post-render scroll
-    // step based on how many .tb-search-hit rows survived the filter.
+    // Round NC.X: match counter "2 / 5" + ↑/↓ arrows. All three are
+    // hidden when there's only one (or zero) matches — the arrows
+    // exist to help navigate AMONG matches.
     var searchCounter = document.createElement("span");
     searchCounter.id = "tb-place-act-search-counter";
-    searchCounter.style.cssText = "font-size:11px;color:#888;white-space:nowrap;" + (searchInp.value ? "" : "visibility:hidden;");
+    searchCounter.style.cssText = "font-size:11px;color:#666;font-weight:600;white-space:nowrap;padding:0 4px;" + (searchInp.value ? "" : "visibility:hidden;");
     searchCounter.textContent = "";
+    var _arrowStyle = "font-size:13px;font-weight:700;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:3px 9px;cursor:pointer;font-family:inherit;min-width:30px;text-align:center;";
+    var searchPrev = document.createElement("button");
+    searchPrev.id = "tb-place-act-search-prev";
+    searchPrev.type = "button";
+    searchPrev.title = "Previous match";
+    searchPrev.style.cssText = _arrowStyle + "visibility:hidden;";
+    searchPrev.textContent = "↑";
+    searchPrev.onclick = function(){
+      var n = (_tb && _tb._researchSearchMatches) || 0;
+      if (n < 2) return;
+      var i = ((_tb._researchSearchMatchIndex || 0) - 1 + n) % n;
+      _tb._researchSearchMatchIndex = i;
+      _renderPlaceActivityItems();
+    };
     var searchNext = document.createElement("button");
     searchNext.id = "tb-place-act-search-next";
     searchNext.type = "button";
-    searchNext.title = "Cycle to next match (Enter)";
-    searchNext.style.cssText = "font-size:11px;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:4px 8px;cursor:pointer;font-family:inherit;" + (searchInp.value ? "" : "visibility:hidden;");
-    searchNext.textContent = "↓ Next";
+    searchNext.title = "Next match";
+    searchNext.style.cssText = _arrowStyle + "visibility:hidden;";
+    searchNext.textContent = "↓";
     searchNext.onclick = function(){
       var n = (_tb && _tb._researchSearchMatches) || 0;
-      if (!n) return;
+      if (n < 2) return;
       _tb._researchSearchMatchIndex = (((_tb._researchSearchMatchIndex || 0) + 1) % n);
       _renderPlaceActivityItems();
     };
@@ -14785,14 +14799,10 @@ function _renderPlaceActivityItems(){
         if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
       }, 60);
     };
-    // Enter key in the search input cycles to the next match (same
-    // behavior as the ↓ Next button).
-    searchInp.onkeydown = function(e){
-      if (e.key === "Enter") {
-        e.preventDefault();
-        searchNext.onclick();
-      }
-    };
+    // Round NC.X: no Enter shortcut. Per user feedback ("not hit enter"),
+    // match cycling is driven only by the explicit ↑/↓ arrow buttons —
+    // pressing Enter inside the input does nothing special. Keeps the
+    // input from triggering form submits or surprise navigation.
     searchClear.onclick = function(){
       _tb._researchSearch = "";
       _tb._researchSearchMatchIndex = 0;
@@ -14802,6 +14812,7 @@ function _renderPlaceActivityItems(){
     };
     searchWrap.appendChild(searchInp);
     searchWrap.appendChild(searchCounter);
+    searchWrap.appendChild(searchPrev);
     searchWrap.appendChild(searchNext);
     searchWrap.appendChild(searchClear);
     // Round NC.X: do NOT append searchWrap to toc. For position:sticky
@@ -15436,9 +15447,11 @@ function _renderPlaceActivityItems(){
       }
       var firstHit = ranked.length ? ranked[_tb._researchSearchMatchIndex].el : null;
       // Update the inline counter ("2 / 5 matches") + show/hide the
-      // Next button.
+      // ↑/↓ arrow buttons. Arrows are only useful when there are 2+
+      // matches to cycle between, so they stay hidden for 0 or 1 hits.
       try {
         var counterEl = document.getElementById("tb-place-act-search-counter");
+        var prevEl    = document.getElementById("tb-place-act-search-prev");
         var nextEl    = document.getElementById("tb-place-act-search-next");
         if (counterEl) {
           if (ranked.length > 1) {
@@ -15452,7 +15465,9 @@ function _renderPlaceActivityItems(){
             counterEl.style.visibility = "hidden";
           }
         }
-        if (nextEl) nextEl.style.visibility = (ranked.length > 1) ? "visible" : "hidden";
+        var arrowsVis = (ranked.length > 1) ? "visible" : "hidden";
+        if (prevEl) prevEl.style.visibility = arrowsVis;
+        if (nextEl) nextEl.style.visibility = arrowsVis;
       } catch(_){}
       try {
         console.log("[Max search-scroll] q=" + JSON.stringify(_searchQ)
