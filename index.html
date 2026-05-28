@@ -15498,20 +15498,38 @@ function _renderPlaceActivityItems(){
         try {
           var hitRect = firstHit.getBoundingClientRect();
           var scRect  = scroller.getBoundingClientRect();
-          // Vertical offset from scroll-container top to row top, then
-          // shift up so the row lands ~1/3 from the top of the viewport
-          // (leaves the sticky search bar visible above).
-          var delta = (hitRect.top - scRect.top) - (scRect.height / 3);
+          // Round NC.X: land the matched row at the TOP of the viewport,
+          // just below the sticky search bar (so the row's first line is
+          // immediately visible and not centered or pushed down). Earlier
+          // logic used `scRect.height / 3` to place it 1/3 down — but for
+          // the 2nd+ cycle that often left the row below the fold or
+          // mid-screen instead of at the top.
+          var searchBarH = 0;
+          try {
+            var sbInp = document.getElementById("tb-place-act-search");
+            var sbWrap = sbInp && sbInp.parentElement;
+            if (sbWrap) searchBarH = sbWrap.getBoundingClientRect().height;
+          } catch(_){}
+          var topPad = searchBarH + 8; // 8px breathing room below the bar
+          var delta = (hitRect.top - scRect.top) - topPad;
           var newTop = scroller.scrollTop + delta;
+          // Clamp to valid scroll range so we don't ask for a value the
+          // browser will silently clamp differently and skip the scroll.
+          var maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+          if (newTop < 0) newTop = 0;
+          if (newTop > maxTop) newTop = maxTop;
           try {
             console.log("[Max search-scroll] scroller=" + (scroller.className || scroller.id || "?")
               + " scrollTop=" + scroller.scrollTop + " → " + newTop
-              + " (delta=" + delta.toFixed(1) + ")");
+              + " (delta=" + delta.toFixed(1) + ", topPad=" + topPad.toFixed(1) + ")");
           } catch(_){}
-          scroller.scrollTo({ top: newTop, behavior: "smooth" });
+          // Instant scroll — smooth can be interrupted by a rapid second
+          // arrow click before the first scroll completes, leaving the
+          // match off-screen.
+          scroller.scrollTo({ top: newTop, behavior: "auto" });
         } catch(e){
           try { console.log("[Max search-scroll] math failed, falling back to scrollIntoView:", e && e.message); } catch(_){}
-          try { firstHit.scrollIntoView({ behavior: "smooth", block: "center" }); } catch(__){}
+          try { firstHit.scrollIntoView({ behavior: "auto", block: "start" }); } catch(__){}
         }
         return;
       }
