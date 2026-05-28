@@ -23963,22 +23963,58 @@ function reopenPickerForEdit(){
     // the popup on Landmannalaugar (a day trip in the trip view) showed
     // "See — decide later" pre-selected instead of "Day trip from {hub}".
     // Bridge legacy flag + NC.3 role together so the popup is right.
-    if (Array.isArray(_tb.candidates)) {
-      var _dtCandsBridged = 0;
-      Object.keys(dayTripPairs).forEach(function(srcKey){
-        var cand = _tb.candidates.find(function(c){
-          return c && c.place && norm(c.place) === srcKey;
-        });
-        if (cand && cand.role !== "daytrip") {
+    // Synthesize a candidate if the source isn't in _tb.candidates yet
+    // — _hydratePickerFromCommittedSrc fills in later but the popup
+    // needs the candidate to be present NOW.
+    _tb.candidates = _tb.candidates || [];
+    var _dtCandsBridged = 0;
+    var _dtCandsSynthesized = 0;
+    Object.keys(dayTripPairs).forEach(function(srcKey){
+      var cand = _tb.candidates.find(function(c){
+        return c && c.place && norm(c.place) === srcKey;
+      });
+      if (cand) {
+        if (cand.role !== "daytrip") {
           cand.role = "daytrip";
           cand._roleTouched = true;
           _dtCandsBridged++;
         }
-      });
-      if (_dtCandsBridged) {
-        console.log("[Max reopenPickerForEdit] bridged " + _dtCandsBridged + " c.role=daytrip writes to candidates");
+      } else {
+        // Find a display name + coords from the requiredPlaces walk.
+        var displayName = srcKey;
+        var srcLat = null, srcLng = null;
+        for (var _i = 0; _i < _tb.placeActivities.length && displayName === srcKey; _i++) {
+          var rps = _tb.placeActivities[_i].requiredPlaces || [];
+          for (var _j = 0; _j < rps.length; _j++) {
+            if (rps[_j] && rps[_j].place && norm(rps[_j].place) === srcKey) {
+              displayName = rps[_j].place;
+              if (typeof rps[_j].lat === "number") srcLat = rps[_j].lat;
+              if (typeof rps[_j].lng === "number") srcLng = rps[_j].lng;
+              break;
+            }
+          }
+        }
+        _tb.candidates.push({
+          id: "c-dt-" + srcKey.replace(/[^a-z0-9]+/g, "-").substring(0, 32) + "-" + Math.random().toString(36).slice(2, 6),
+          place: displayName,
+          country: (_tb.region || ""),
+          role: "daytrip",
+          intent: "dayTrip",
+          dayTripHub: dayTripPairs[srcKey],
+          status: "keep",
+          lat: srcLat,
+          lng: srcLng,
+          stayRange: "0 nights",
+          nights: 0,
+          tags: ["picker-daytrip", "committed"],
+          _roleTouched: true,
+          _required: false,
+          _requiredFor: []
+        });
+        _dtCandsSynthesized++;
       }
-    }
+    });
+    console.log("[Max reopenPickerForEdit] day-trip candidates: bridged=" + _dtCandsBridged + " synthesized=" + _dtCandsSynthesized);
     if (_dtBridged) {
       console.log("[Max reopenPickerForEdit] bridged " + _dtBridged +
         " day-trip flag(s) from trip → picker (" +
@@ -23989,32 +24025,77 @@ function reopenPickerForEdit(){
     // are "on the way" places that the picker should render with
     // c.role === "onway". Apply to the matching candidate so the
     // Discovery render + the role popover both see the right role.
-    if (Array.isArray(trip.routes) && Array.isArray(_tb.candidates)) {
+    //
+    // Round NC.X: if a wayside stop has no matching candidate yet
+    // (the trip's wayside-stops aren't always in trip.candidates;
+    // sometimes they're hydrated later as synthetic candidates via
+    // _hydratePickerFromCommittedSrc), SYNTHESIZE one inline so the
+    // popup + map find it immediately. Otherwise opening the popup
+    // on Skogafoss read "See" from a non-existent candidate
+    // (falling through to default) and the user couldn't tell that
+    // the trip already had it as a wayside.
+    if (Array.isArray(trip.routes)) {
+      _tb.candidates = _tb.candidates || [];
       var _wsBridged = 0;
+      var _wsSynthesized = 0;
+      var _wsRoutesWalked = 0;
+      var _wsStopsWalked = 0;
       trip.routes.forEach(function(r){
         if (!r) return;
         var isDT = (r.subKind === "dayTrip") || (r.kind === "dayTrip");
         if (isDT) return;
+        _wsRoutesWalked++;
         (r.planItems || []).forEach(function(pi){
           if (!pi || pi.type !== "stop") return;
+          _wsStopsWalked++;
           var nm = "";
-          if (pi.placeId && trip.places && trip.places[pi.placeId]) nm = trip.places[pi.placeId].name || "";
+          var pLat = null, pLng = null;
+          if (pi.placeId && trip.places && trip.places[pi.placeId]) {
+            var p = trip.places[pi.placeId];
+            nm = p.name || "";
+            if (typeof p.lat === "number") pLat = p.lat;
+            if (typeof p.lng === "number") pLng = p.lng;
+          }
           if (!nm) nm = pi.place || pi.name || "";
           var srcKey = norm(nm);
           if (!srcKey) return;
           var cand = _tb.candidates.find(function(c){
             return c && c.place && norm(c.place) === srcKey;
           });
-          if (cand && cand.role !== "onway") {
-            cand.role = "onway";
-            cand._roleTouched = true;
-            _wsBridged++;
+          if (cand) {
+            if (cand.role !== "onway") {
+              cand.role = "onway";
+              cand._roleTouched = true;
+              _wsBridged++;
+            }
+          } else {
+            // Synthesize a wayside candidate so the popup + picker
+            // map can find it. Same shape _hydratePickerFromCommittedSrc
+            // uses for waysides; we just create it earlier so the
+            // bridge has a target.
+            _tb.candidates.push({
+              id: "c-ws-" + srcKey.replace(/[^a-z0-9]+/g, "-").substring(0, 32) + "-" + Math.random().toString(36).slice(2, 6),
+              place: nm,
+              country: (_tb.region || ""),
+              role: "onway",
+              intent: "wayside",
+              status: "keep",
+              lat: pLat,
+              lng: pLng,
+              stayRange: "0 nights",
+              nights: 0,
+              tags: ["picker-wayside", "committed"],
+              _roleTouched: true,
+              _required: false,
+              _requiredFor: []
+            });
+            _wsSynthesized++;
           }
         });
       });
-      if (_wsBridged) {
-        console.log("[Max reopenPickerForEdit] bridged " + _wsBridged + " wayside(s) to c.role=onway");
-      }
+      // Always log so we can see what happened, even on zero hits.
+      console.log("[Max reopenPickerForEdit] waysides: routes=" + _wsRoutesWalked
+        + " stops=" + _wsStopsWalked + " bridged=" + _wsBridged + " synthesized=" + _wsSynthesized);
     }
   })();
 
