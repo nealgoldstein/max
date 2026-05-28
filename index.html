@@ -3761,11 +3761,16 @@ var MAP_ICONS = {
       +'</svg>';
   },
   "daytrip": function(){
-    // Round EU: purple pin marker for day-trip chip locations. Matches
-    // the chip styling on the dest card (light purple chip + 📍 emoji).
-    return '<svg width="28" height="34" viewBox="0 0 28 34" xmlns="http://www.w3.org/2000/svg">'
-      +'<path d="M14 33 L3 12 Q3 1 14 1 Q25 1 25 12 Z" fill="#7c5cbf" stroke="#fff" stroke-width="2"/>'
-      +'<circle cx="14" cy="11" r="4" fill="#fff"/>'
+    // Round NC.X: purple circle with 📍 emoji to match the Discovery
+    // picker map and the trip-overview's day-trip pins. Earlier this
+    // was a pin-shape SVG (Round EU) which read as a different icon
+    // family from Discovery's circle pins — user feedback: "use the
+    // same icons as on the Discover map." Rendered as a foreignObject
+    // so the 📍 emoji glyph composes inside the SVG. 22px to match
+    // the size of the divIcon variants on the trip overview map.
+    return '<svg width="22" height="22" viewBox="0 0 22 22" xmlns="http://www.w3.org/2000/svg">'
+      +  '<circle cx="11" cy="11" r="10" fill="#5b3f8f" stroke="#fff" stroke-width="2"/>'
+      +  '<text x="11" y="16" text-anchor="middle" font-size="13" font-family="sans-serif">📍</text>'
       +'</svg>';
   },
   "atm": function(){
@@ -3852,7 +3857,20 @@ var MAP_ICONS = {
 function makeMapIcon(styleKey){
   var svgFn=MAP_ICONS[styleKey]||MAP_ICONS["sight-nice"];
   var svg=svgFn();
-  var isPin=(styleKey==="arrival"||styleKey==="departure"||styleKey==="daytrip");
+  // Round NC.X: "daytrip" is no longer a drop-pin shape — it's a
+  // 22px circle now, same shape as the trip-overview's pin (and the
+  // Discovery picker's). So it's anchored at its center like the
+  // other circles, not at its bottom point.
+  var isPin=(styleKey==="arrival"||styleKey==="departure");
+  if (styleKey === "daytrip") {
+    return L.divIcon({
+      html: svg,
+      className: "",
+      iconSize: [22, 22],
+      iconAnchor: [11, 11],
+      popupAnchor: [0, -12]
+    });
+  }
   var h=isPin?34:28;
   return L.divIcon({
     html:svg,
@@ -33509,20 +33527,19 @@ function updateMainMap(){
         var dtName = s.dtName;
         var dtCtr = s.dtCtr;
         bounds.push(dtCtr);
-        // v360.3 (#109): day-trip pins now render as a ROUNDED SQUARE
-        // (border-radius:4px) instead of a circle, so the role is
-        // decodable without color. Combined with the purple fill, this
-        // gives colorblind users (and anyone scanning quickly) two
-        // independent signals — shape + color — for "this is a day-trip
-        // stop." Destinations stay circles, waysides become diamonds
-        // (below). Three distinct shapes, three distinct roles.
-        var dtAbbrev = dtName.trim().substring(0, 2) || "·";
-        var dtSize = 20;
-        var dtHtml = '<div style="background:#5b3f8f;color:#fff;border-radius:4px;width:'
+        // Round NC.X: day-trip pins on the main trip map now match the
+        // Discovery picker map — purple circle with a 📍 emoji glyph.
+        // Earlier this was a rounded-square with initials (Round 109)
+        // — distinct, but inconsistent with the Discovery surface. User
+        // feedback: "use the same icons as on the Discover map."
+        // Purple still encodes role; the 📍 glyph + popup label "Day
+        // trip from {hub}" complete the signal without leaning on color.
+        var dtSize = 22;
+        var dtHtml = '<div style="background:#5b3f8f;color:#fff;border-radius:50%;width:'
           + dtSize + 'px;height:' + dtSize + 'px;border:2px solid #fff;'
           + 'box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;'
-          + 'justify-content:center;font-size:9px;font-weight:700;letter-spacing:-0.02em;">'
-          + dtAbbrev + '</div>';
+          + 'justify-content:center;font-size:14px;font-weight:700;">'
+          + '📍</div>';
         var dtIcon = L.divIcon({className:"main-trip-daytrip-pin", html:dtHtml,
           iconSize:[dtSize,dtSize], iconAnchor:[dtSize/2,dtSize/2], popupAnchor:[0,-dtSize/2]});
         try {
@@ -33688,26 +33705,18 @@ function updateMainMap(){
         // place name surfaces via the existing hover/tap tooltip
         // (already bound below). Matches the picker map's pattern
         // and trades at-a-glance scanning for a clean overview.
-        // v360.3 (#109): wayside pins render as an OUTLINED OCTAGON —
-        // hollow / stop-sign look. Purple stroke, white fill. The
-        // octagon is the iconic "stop along the way" shape; the hollow
-        // outline reads against the map without obscuring it. Three
-        // shape-independent roles total: circle (overnight, filled
-        // blue), rounded square (day-trip, filled purple, abbreviation
-        // inside), octagon (wayside, outlined purple, hollow).
-        // Colorblind users get the role from shape alone.
-        //
-        // Polygon points are a flat-top octagon inscribed in a 16-unit
-        // box — the standard stop-sign cut (8 sides of equal length,
-        // 45° corners) producing two horizontal edges top/bottom, two
-        // vertical edges left/right, and four diagonal corner cuts.
-        var wsSize = 16;
-        var wsHtml = ''
-          + '<svg width="' + wsSize + '" height="' + wsSize + '" viewBox="0 0 16 16"'
-          +   ' style="display:block;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.3));">'
-          +   '<polygon points="4.69,1 11.31,1 15,4.69 15,11.31 11.31,15 4.69,15 1,11.31 1,4.69"'
-          +     ' fill="#fff" stroke="#7a4fbf" stroke-width="2" stroke-linejoin="round"/>'
-          + '</svg>';
+        // Round NC.X: wayside pins on the main trip map now match the
+        // Discovery picker — teal circle with a 🛣 road glyph. Earlier
+        // this was a hollow purple octagon (Round 109), which was
+        // role-distinct but didn't match Discovery. The teal color +
+        // 🛣 glyph + popup label "On the way (between stops)" give the
+        // user a consistent visual across both surfaces.
+        var wsSize = 22;
+        var wsHtml = '<div style="background:#0d8a8a;color:#fff;border-radius:50%;width:'
+          + wsSize + 'px;height:' + wsSize + 'px;border:2px solid #fff;'
+          + 'box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;'
+          + 'justify-content:center;font-size:14px;font-weight:700;">'
+          + '🛣</div>';
         var wsIcon = L.divIcon({className:"main-trip-wayside-pin", html:wsHtml,
           iconSize:[wsSize,wsSize], iconAnchor:[wsSize/2,wsSize/2], popupAnchor:[0,-wsSize/2]});
 
