@@ -14255,6 +14255,14 @@ function _pickerSyntheticItemsFromTripDestinations(){
 function _renderPlaceActivityItems(){
   var list = document.getElementById("tb-place-act-list");
   if(!list) return;
+  // Round NC.X: snapshot the scroll position of the picker-list pane
+  // BEFORE wiping the list. Toggling a place's checkbox used to scroll
+  // the user to the bottom (probably layout clamping after the
+  // list.innerHTML wipe), and clicking "+ more like this" sent them
+  // back to the top. Restore at the end of the render so the user
+  // stays where they were unless a search target hijacks the scroll.
+  var _scrollPane = document.getElementById("tb-picker-list-pane");
+  var _savedScrollTop = _scrollPane ? _scrollPane.scrollTop : null;
   list.innerHTML = "";
   // v359.1 read sync: union _tb.placeActivities with synthetic items
   // mirrored from trip.destinations that don't yet have a picker
@@ -15159,12 +15167,17 @@ function _renderPlaceActivityItems(){
           +   'title="Switch to see-only">+ See</button>'
           + '</span>';
       } else {
+        // Round NC.X: selected role renders FIRST so the user sees the
+        // current state immediately, then the alternative as a "switch
+        // to" affordance. Earlier this branch had "+ Stay" (inactive)
+        // first and "👁 See" (active) second — visually inconsistent
+        // with the Stay-selected branch, which leads with the active.
         stayChip = '<span class="pm-stay-toggle" style="display:inline-flex;align-items:center;gap:6px;">'
+          + '<span style="' + _activeLabelStyle + 'color:#5b3f8f;" title="Currently see-only">👁 See</span>'
           + '<button type="button" '
           +   'onclick="_pmSetStayOverride(&#39;' + _placeArg + '&#39;, true);event.stopPropagation();" '
           +   'style="' + _inactiveBtnStyle + '" '
           +   'title="Switch to a place to stay">+ Stay</button>'
-          + '<span style="' + _activeLabelStyle + 'color:#5b3f8f;" title="Currently see-only">👁 See</span>'
           + '</span>';
       }
 
@@ -15561,6 +15574,17 @@ function _renderPlaceActivityItems(){
         inp.setSelectionRange(caret, caret);
       } catch(_){}
     }
+  }
+  // Round NC.X: restore the picker-list scroll position captured at the
+  // top of the render. Skip when a search query is active — the search
+  // scroll-to-match logic OWNS the scroll target in that mode and we
+  // don't want to fight it. rAF ensures freshly-added children have
+  // laid out, otherwise the assignment can clamp against a stale
+  // scrollHeight that's still 0 from the innerHTML wipe.
+  if (_scrollPane && _savedScrollTop !== null && !_searchQ) {
+    requestAnimationFrame(function(){
+      try { _scrollPane.scrollTop = _savedScrollTop; } catch(_){}
+    });
   }
 }
 

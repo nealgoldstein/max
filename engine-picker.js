@@ -1889,6 +1889,34 @@
       console.warn("[Max publishTrip] placeActivities reconciliation failed (non-fatal):", e && e.message);
     }
 
+    // Round NC.3+ bugfix: propagate Discovery role-chip choices into
+    // c.role on each kept candidate. The Discovery "🛏 Stay / 👁 See"
+    // toggle writes to _tb.placeMeta[key].stayOverride but never
+    // touched the candidate object — so trip-gen kept reading the
+    // LLM-default role (often "stay") and gave See places 3 nights.
+    // Map: stayOverride=true → "stay", stayOverride=false → "see".
+    // Leave null/undefined alone (normalizeCandidateRole picks the
+    // default downstream).
+    try {
+      var _placeMeta = (_tb && _tb.placeMeta) || {};
+      var _normFn = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase(); };
+      var _bridged = 0;
+      kept.forEach(function(c){
+        if (!c || !c.place) return;
+        var k = _normFn(c.place);
+        var meta = _placeMeta[k];
+        if (!meta) return;
+        if (meta.stayOverride === true) {
+          if (c.role !== "stay") { c.role = "stay"; c._roleTouched = true; _bridged++; }
+        } else if (meta.stayOverride === false) {
+          if (c.role !== "see") { c.role = "see"; c._roleTouched = true; _bridged++; }
+        }
+      });
+      if (_bridged) console.log("[Max publishTrip] bridged " + _bridged + " Discovery role overrides into c.role");
+    } catch(e) {
+      console.warn("[Max publishTrip] placeMeta→c.role bridge failed (non-fatal):", e && e.message);
+    }
+
     if(!kept.length) return;
 
     // Round HZ (picker hero map, step 7): entry/exit validation.
