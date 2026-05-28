@@ -29684,6 +29684,15 @@ function addDest(){
     suggestions:[] // populated by generateCityData or Explore tab refresh
   };
   trip.destinations.push(dest);
+  // Round NC.X: sync the new destination into mdcItems so Discovery
+  // sees it as a proper picker row when reopened.
+  if (typeof _ensureMdcItemsHasPlace === "function") {
+    _ensureMdcItemsHasPlace(place, {
+      role: "stay",
+      nights: nights,
+      description: intent
+    });
+  }
   // Keep destinations in date order
   trip.destinations.sort(function(a,b){return(a.dateFrom||'').localeCompare(b.dateFrom||'');});
   generateCityData(place, id);
@@ -36148,6 +36157,133 @@ function makeDayTrip(hubDest, srcDest, opts){
 //   - Undo path lives only as a toast warning for now (the
 //     ungroupDayTripByPlanItem reverse path is symmetric, but wiring
 //     a real undo is follow-on work).
+// Round NC.X: ensure trip.mdcItems carries a row for `placeName` so
+// when Discovery reopens it sees the place as a proper picker row
+// (not just a synthesized map marker). Idempotent — if any existing
+// mdcItem already references the place via its requiredPlaces, this
+// updates the requiredPlace's role flags in place; otherwise it
+// pushes a new "manual" item into the "Places you added" section.
+//
+// opts: { role?: "stay"|"see"|"daytrip"|"onway",
+//         hub?: string,            // for daytrip — hub place name (normalized or display)
+//         country?: string,
+//         lat?: number, lng?: number,
+//         description?: string,
+//         nights?: number }        // only honored for role=stay (default 2)
+//
+// Called from every trip-view writer that creates / promotes / converts
+// a place: _addConsideredAsDestination, _addConsideredAsDayTrip,
+// convertDestToWayside, convertDestToDayTrip, and the trip-view
+// "+ Add destination" handler. Keeps mdcItems consistent with the
+// trip data so the picker is never stale on reopen.
+function _ensureMdcItemsHasPlace(placeName, opts){
+  if (!trip || !placeName) return null;
+  opts = opts || {};
+  if (!Array.isArray(trip.mdcItems)) trip.mdcItems = [];
+  var role = (opts.role === "stay" || opts.role === "see"
+              || opts.role === "daytrip" || opts.role === "onway")
+              ? opts.role : "see";
+  var nights = (role === "stay")
+    ? ((typeof opts.nights === "number" && opts.nights >= 0) ? opts.nights : 2)
+    : 0;
+  var isDayTrip = (role === "daytrip");
+  var hub = opts.hub || "";
+  var norm = (typeof _normPlaceName === "function")
+    ? _normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
+  var k = norm(placeName);
+  if (!k) return null;
+
+  // Update path: place already in some mdcItem's requiredPlaces.
+  var updated = null;
+  trip.mdcItems.forEach(function(item){
+    if (!item || !Array.isArray(item.requiredPlaces)) return;
+    item.requiredPlaces.forEach(function(p){
+      if (!p || !p.place) return;
+      if (norm(p.place) !== k) return;
+      // Mutate the requiredPlace's role flags. Keep _keep:true (the
+      // user explicitly added/promoted this place; it's kept).
+      p._keep = true;
+      p._isDayTrip = isDayTrip;
+      p._dayTripHub = isDayTrip ? hub : "";
+      if (role === "stay") {
+        p.overnight = true;
+        if (typeof opts.nights === "number" && opts.nights >= 0) p.nights = opts.nights;
+      } else {
+        p.overnight = false;
+        p.nights = 0;
+      }
+      if (typeof opts.lat === "number" && (p.lat == null || p.lat === 0)) p.lat = opts.lat;
+      if (typeof opts.lng === "number" && (p.lng == null || p.lng === 0)) p.lng = opts.lng;
+      if (opts.country && !p.country) p.country = opts.country;
+      updated = item;
+    });
+  });
+  if (updated) {
+    // If Discovery picker is currently open, mirror into _tb so the
+    // user sees the update without a reopen.
+    if (typeof _tb !== "undefined" && _tb && Array.isArray(_tb.placeActivities)) {
+      _tb.placeActivities.forEach(function(item){
+        if (!item || !Array.isArray(item.requiredPlaces)) return;
+        item.requiredPlaces.forEach(function(p){
+          if (!p || !p.place || norm(p.place) !== k) return;
+          p._keep = true;
+          p._isDayTrip = isDayTrip;
+          p._dayTripHub = isDayTrip ? hub : "";
+          p.overnight = (role === "stay");
+          p.nights = nights;
+        });
+      });
+    }
+    _ensureMdcItemsPlaceMeta(placeName, role);
+    return updated;
+  }
+
+  // Create path: synthesize a manual mdcItem in "Places you added".
+  var labelPrefix = (role === "stay")    ? "Visit "
+                  : (role === "daytrip") ? "Day trip to "
+                  : (role === "onway")   ? "Stop at "
+                  :                        "See ";
+  var item = {
+    id: "p-trip-" + Date.now() + "-" + Math.floor(Math.random() * 100000),
+    name: labelPrefix + placeName,
+    type: "manual",
+    category: "culture-history",
+    section: "Places you added",
+    description: opts.description || "",
+    iconic: false,
+    checked: true,
+    requiredPlaces: [{
+      place: placeName,
+      country: opts.country || "",
+      nights: nights,
+      lat: (typeof opts.lat === "number") ? opts.lat : null,
+      lng: (typeof opts.lng === "number") ? opts.lng : null,
+      _keep: true,
+      _isDayTrip: isDayTrip,
+      _dayTripHub: isDayTrip ? hub : "",
+      overnight: (role === "stay")
+    }]
+  };
+  trip.mdcItems.push(item);
+  if (typeof _tb !== "undefined" && _tb && Array.isArray(_tb.placeActivities)) {
+    _tb.placeActivities.push(item);
+  }
+  _ensureMdcItemsPlaceMeta(placeName, role);
+  return item;
+}
+function _ensureMdcItemsPlaceMeta(placeName, role){
+  if (typeof _pmPlaceMeta !== "function") return;
+  var meta = _pmPlaceMeta(placeName, { create: true });
+  if (!meta) return;
+  if (role === "stay")      meta.stayOverride = true;
+  else if (role === "see")  meta.stayOverride = false;
+  // daytrip / onway → leave stayOverride null; role lives on
+  // requiredPlace flags / c.role downstream.
+}
+if (typeof globalThis !== "undefined") {
+  globalThis._ensureMdcItemsHasPlace = _ensureMdcItemsHasPlace;
+}
+
 function convertDestToDayTrip(destId, hubDestId, opts){
   opts = opts || {};
   if (!trip || !Array.isArray(trip.destinations)) return;
@@ -36366,6 +36502,19 @@ function convertDestToDayTrip(destId, hubDestId, opts){
   // but the total count of distinct stays dropped, and the algorithm
   // may now find a different proposal). Banner disappears if we fit.
   if (typeof _reEvaluateOverBudget === "function") _reEvaluateOverBudget();
+  // Round NC.X: sync into mdcItems with role=daytrip + hub so Discovery
+  // reopens with this place tagged correctly. If the place existed in
+  // mdcItems as a stay, the helper updates the requiredPlace flags
+  // (_isDayTrip=true, _dayTripHub=hub) in place rather than duplicating.
+  if (typeof _ensureMdcItemsHasPlace === "function") {
+    _ensureMdcItemsHasPlace(src.place, {
+      role: "daytrip",
+      hub: hub.place,
+      lat: src.lat,
+      lng: src.lng,
+      country: src.country
+    });
+  }
   _emitTripMutation();
 
   if (!opts.silent && typeof _showDayTripToast === "function") {
@@ -36589,6 +36738,17 @@ function convertDestToWayside(destId, opts){
   // v359.54.9: recompute the over-budget notice so the trip-view
   // banner clears (or updates) once the wayside conversion lands.
   if (typeof _reEvaluateOverBudget === "function") _reEvaluateOverBudget();
+
+  // Round NC.X: sync into mdcItems with role=onway so Discovery reopens
+  // with this place tagged as a wayside (not as the prior Stay).
+  if (typeof _ensureMdcItemsHasPlace === "function") {
+    _ensureMdcItemsHasPlace(src.place, {
+      role: "onway",
+      lat: src.lat,
+      lng: src.lng,
+      country: src.country
+    });
+  }
 
   if (typeof _emitTripMutation === "function") _emitTripMutation();
 
@@ -38704,6 +38864,16 @@ function _addConsideredAsDestination(placeName, coords){
     newDest.days = makeDays(id, placeName, placeName, newDest.dateFrom || "", 1);
   }
   trip.destinations.push(newDest);
+  // Round NC.X: sync into mdcItems so Discovery sees this place as
+  // a proper picker row on next reopen.
+  if (typeof _ensureMdcItemsHasPlace === "function") {
+    _ensureMdcItemsHasPlace(placeName, {
+      role: "stay",
+      nights: 1,
+      lat: coords && coords[0],
+      lng: coords && coords[1]
+    });
+  }
   if (typeof _ftRecomputeTripDates === "function") _ftRecomputeTripDates();
   if (typeof autoSave === "function") autoSave();
   if (typeof drawTripMode === "function") drawTripMode();
@@ -38753,6 +38923,16 @@ function _addConsideredAsDayTrip(placeName, coords, hubDest){
     placeId: placeId,
     priority: "iconic"
   });
+  // Round NC.X: sync into mdcItems with role=daytrip so Discovery
+  // reopens with this place tagged as a day trip from the hub.
+  if (typeof _ensureMdcItemsHasPlace === "function") {
+    _ensureMdcItemsHasPlace(placeName, {
+      role: "daytrip",
+      hub: (hubDest && hubDest.place) || "",
+      lat: coords && coords[0],
+      lng: coords && coords[1]
+    });
+  }
   if (typeof autoSave === "function") autoSave();
   if (typeof drawTripMode === "function") drawTripMode();
   if (typeof showSaveStatus === "function") showSaveStatus("✓ Added " + placeName + " as day trip from " + hubDest.place, 2800);
