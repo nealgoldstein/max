@@ -17497,7 +17497,7 @@ function openPlacePickerMapModal(){
     +     'return \'<div style="background:\'+color+\';color:#fff;border-radius:50%;width:\'+size+\'px;height:\'+size+\'px;border:2px solid \'+border+\';box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;">\'+label+\'</div>\';'
     +   '}'
     +   'function tooltipText(info){'
-    +     'return info.place+(info._isDayTrip?" · day trip / on the way":info.keep?" · stay":"");'
+    +     'return info.place+(info._isDayTrip?" · day trip":info.keep?" · stay":"");'
     +   '}'
     +   'function scrollOpenerToPlace(name){'
     +     'try{'
@@ -18882,57 +18882,62 @@ function _renderPlacePickerMap(targetId){
           isOnway   = false;
         }
       }
-      // Round FN.F.3 / NC.3: "single sight" derives from c.role === "see"
-      // when we have a candidate; otherwise fall back to legacy
-      // _isSingleSight() which reads c.singleSight + c.intent.
-      var isSingleSight = isSee;
-      if (!isSingleSight) {
-        try {
-          if (_ssCand && typeof window._isSingleSight === "function") {
-            isSingleSight = window._isSingleSight(_ssCand);
-          } else if (_ssCand && _ssCand.singleSight === true) {
-            isSingleSight = true;
-          }
-        } catch(_) { /* swallow */ }
+      // Round NC.X: "single sight" treatment ONLY applies when no
+      // explicit role has been chosen. Earlier this came first and
+      // beat isDayTrip / isOnway — Dynjandi has c.singleSight=true
+      // AND c.role=daytrip, so it rendered as 👁 eye despite being a
+      // committed day trip. The explicit role is the user's intent;
+      // singleSight is a hint that only matters when the user
+      // hasn't decided yet.
+      var isSingleSight = false;
+      if (!isStay && !isDayTrip && !isOnway) {
+        isSingleSight = isSee;
+        if (!isSingleSight) {
+          try {
+            if (_ssCand && typeof window._isSingleSight === "function") {
+              isSingleSight = window._isSingleSight(_ssCand);
+            } else if (_ssCand && _ssCand.singleSight === true) {
+              isSingleSight = true;
+            }
+          } catch(_) { /* swallow */ }
+        }
       }
+      // Round NC.X: Order the visual branches by explicit role first
+      // (Stay → DayTrip → Onway → See/SingleSight → fallback), so any
+      // user-chosen role wins the icon. Emoji glyphs match the popup
+      // labels — 🛏 / 📍 / 🛣 / 👁 — so the pin "is" its role.
       var color, label, size, borderStyle = "2px solid #fff", fontPx = 9;
-      if (isSingleSight) {
-        // Round NC.X: See pins now render in the See chip's purple
-        // with a 👁 eye glyph (matches the row's "👁 See" chip), so
-        // the pin's role is unambiguous. Previously this was a gray
-        // pin with "?" — which read as "unknown" rather than "see"
-        // and made it look like Max hadn't decided the role yet.
-        color = "#5b3f8f";
-        label = "👁";
-        size = 22;
-        borderStyle = "2px solid #fff";
-        // Slightly larger font for the emoji glyph so it fills the
-        // pin without looking lost. Emojis render smaller than text
-        // at the same px size.
-        fontPx = 14;
-      } else if (isStay) {
+      if (isStay) {
+        // Stay: blue with the place's initials. Initials (vs an emoji)
+        // because stays are the trip's structural anchors and the
+        // user benefits from seeing which is which at a glance.
         color = "#1a5fa8";
         label = _pmEsc((info.place || "").substring(0, 2));
         size = 22;
       } else if (isDayTrip) {
-        // v359.51.17: PURPLE for "could be a day trip" (no longer the
-        // orange used for committed day trips). Day-trip role decisions
-        // happen in the trip view; the picker only hints at the
-        // possibility. Same purple as the sidebar "Could be a day trip
-        // from X" badge so the two affordances are visually paired.
+        // Day trip: purple with 📍 pin emoji — same purple as the See
+        // role, but the glyph distinguishes them. Matches the popup
+        // option "📍 Day trip from {hub}".
         color = "#5b3f8f";
-        label = _pmEsc((info.place || "").substring(0, 2));
+        label = "📍";
         size = 22;
+        fontPx = 14;
       } else if (isOnway) {
-        // Round NC.X: distinct treatment for "on the way" places.
-        // Without this, onway candidates fell through to the
-        // not-kept gray dot and looked identical to rejected places,
-        // hiding the fact that the place was actually committed as
-        // a wayside. Teal pin + initials matches the wayside dotted
-        // marker on the main trip map.
+        // On the way: teal with 🛣 road emoji. Matches popup option
+        // "🛣 On the way (between stops)". Earlier this used initials
+        // and looked too similar to a Stay pin.
         color = "#0d8a8a";
-        label = _pmEsc((info.place || "").substring(0, 2));
+        label = "🛣";
         size = 22;
+        fontPx = 14;
+      } else if (isSingleSight) {
+        // See / undecided single-sight: purple eye, matches the chip
+        // and the popup option "👁 See — decide later".
+        color = "#5b3f8f";
+        label = "👁";
+        size = 22;
+        borderStyle = "2px solid #fff";
+        fontPx = 14;
       } else {
         color = "#bbb";
         label = "";
@@ -18980,10 +18985,14 @@ function _renderPlacePickerMap(targetId){
         // Round NC.3+ bugfix: tooltip role label tracks c.role (NC.3
         // source of truth), so the picker tooltip and the role popover
         // never disagree about whether a place is stay/see/day-trip.
-        var _ttRole = isSee ? " · see"
-                    : isStay ? " · stay"
-                    : isDayTrip ? " · day trip / on the way"
-                    : info.kept ? " · kept"
+        // Round NC.X: split daytrip / onway into separate labels.
+        // Earlier "day trip / on the way" conflated them which made
+        // the tooltip unhelpful — the user just chose one, not both.
+        var _ttRole = isStay     ? " · stay"
+                    : isDayTrip  ? " · day trip"
+                    : isOnway    ? " · on the way"
+                    : isSee      ? " · see"
+                    : info.kept  ? " · kept"
                     : "";
         var ttBits = info.place + _ttRole;
         m.bindTooltip(ttBits, {direction:"top", offset:[0,-10]});
