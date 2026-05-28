@@ -16015,34 +16015,38 @@ function _pmFocusPlace(placeName){
       try { state.map.panTo(ll, { animate: true, duration: 0.4 }); } catch(_){}
     }
     // Pulse the marker by toggling a CSS class on the icon element.
-    // Leaflet exposes _icon on the marker after it's been added.
-    if (marker && marker._icon) {
+    // Leaflet exposes _icon on the marker after it's been added. When
+    // the marker was OFF-viewport at pan time, _icon may not exist
+    // yet — Leaflet only mounts visible markers — so the previous
+    // single-tick rAF fallback would miss it. The panTo animation
+    // takes ~400ms, so we poll for up to 800ms.
+    function _applyPulse(el){
       try {
-        var iconEl = marker._icon;
-        iconEl.classList.remove("pm-focus-pulse");
-        // Force reflow so the animation restarts cleanly on a
-        // double-tap.
+        el.classList.remove("pm-focus-pulse");
         // eslint-disable-next-line no-unused-expressions
-        iconEl.offsetWidth;
-        iconEl.classList.add("pm-focus-pulse");
-        setTimeout(function(){ try { iconEl.classList.remove("pm-focus-pulse"); } catch(__){} }, 1400);
-      } catch(_){}
+        el.offsetWidth; // restart animation on double-tap
+        el.classList.add("pm-focus-pulse");
+        setTimeout(function(){ try { el.classList.remove("pm-focus-pulse"); } catch(__){} }, 1400);
+      } catch(__){}
+    }
+    if (marker && marker._icon) {
+      _applyPulse(marker._icon);
     } else {
-      // Diagnostic: helps track the "Selfoss had no halo" symptom.
-      // If we hit this, the place exists in the picker list but has
-      // no marker registered for this map yet. Usually the next
-      // render fixes it; a one-shot retry on next animation frame.
-      try { console.log("[Max _pmFocusPlace] no marker for key=" + JSON.stringify(key) + " on map=" + targetId + " — retrying next frame"); } catch(_){}
-      requestAnimationFrame(function(){
+      // Poll for marker._icon — fires once it mounts after the pan.
+      var _pmPulseStart = Date.now();
+      var _pmPulsePoll = setInterval(function(){
         var s2 = _pmMaps[targetId];
         var m2 = s2 && s2.markers && s2.markers[key];
         if (m2 && m2._icon) {
-          try {
-            m2._icon.classList.add("pm-focus-pulse");
-            setTimeout(function(){ try { m2._icon.classList.remove("pm-focus-pulse"); } catch(__){} }, 1400);
-          } catch(_){}
+          clearInterval(_pmPulsePoll);
+          _applyPulse(m2._icon);
+          return;
         }
-      });
+        if (Date.now() - _pmPulseStart > 800) {
+          clearInterval(_pmPulsePoll);
+          try { console.log("[Max _pmFocusPlace] marker never mounted for key=" + JSON.stringify(key) + " on map=" + targetId + " within 800ms"); } catch(_){}
+        }
+      }, 50);
     }
   });
 }
@@ -23869,6 +23873,29 @@ function reopenPickerForEdit(){
         }
       });
     });
+    // Round NC.X: ALSO set c.role="daytrip" on the matching candidate
+    // for each absorbed day-trip source. Without this, the picker map
+    // popup's currentRole detection reads c.role first (NC.3 source of
+    // truth) and gets "see" / "stay" from a stale value — so opening
+    // the popup on Landmannalaugar (a day trip in the trip view) showed
+    // "See — decide later" pre-selected instead of "Day trip from {hub}".
+    // Bridge legacy flag + NC.3 role together so the popup is right.
+    if (Array.isArray(_tb.candidates)) {
+      var _dtCandsBridged = 0;
+      Object.keys(dayTripPairs).forEach(function(srcKey){
+        var cand = _tb.candidates.find(function(c){
+          return c && c.place && norm(c.place) === srcKey;
+        });
+        if (cand && cand.role !== "daytrip") {
+          cand.role = "daytrip";
+          cand._roleTouched = true;
+          _dtCandsBridged++;
+        }
+      });
+      if (_dtCandsBridged) {
+        console.log("[Max reopenPickerForEdit] bridged " + _dtCandsBridged + " c.role=daytrip writes to candidates");
+      }
+    }
     if (_dtBridged) {
       console.log("[Max reopenPickerForEdit] bridged " + _dtBridged +
         " day-trip flag(s) from trip → picker (" +
