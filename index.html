@@ -7074,6 +7074,36 @@ if (typeof globalThis !== "undefined") globalThis._backstopPastedListPlaces = _b
 //   - nothing                                       → friendly alert
 // Wired up from the trip-view Edit menu's "Edit destinations…" item.
 function _reopenPickerAny() {
+  // Round NC.X: defensive overlay reset BEFORE routing. The
+  // #trip-brief-overlay is shared between Discovery (renderActivityPicker)
+  // and Profile (editConstraints / renderTripBrief). If the user
+  // clicked "Trip profile…" earlier, the overlay still holds the
+  // brief-editor's innerHTML, and downstream renderers that
+  // append-without-clearing left the old form visible behind the
+  // new content — looking like "Discovery opened to Profile."
+  // Clear the overlay and reset _editMode flags so the right
+  // renderer paints from a clean slate.
+  try {
+    var resetOv = document.getElementById("trip-brief-overlay");
+    if (resetOv) {
+      resetOv.innerHTML = "";
+      // Hide briefly to mask any in-flight repaint; the downstream
+      // renderer (reopenPickerForEdit / renderActivityPicker /
+      // reopenCandidateExplorer) sets display:block / flex as part
+      // of its own setup.
+      resetOv.style.display = "none";
+    }
+    // editConstraints leaves _tb._editingConstraints / similar flags;
+    // clear what we know of so the picker code doesn't think we're
+    // still in a profile-edit half-state.
+    if (typeof _tb !== "undefined" && _tb) {
+      // _editMode is the picker's flag — DON'T clear it; reopenPickerForEdit
+      // sets it itself. Only clear unrelated profile flags.
+      if (_tb._briefDirty)         _tb._briefDirty = false;
+      if (_tb._briefPanel)         _tb._briefPanel = null;
+    }
+  } catch(_){}
+
   if (trip && Array.isArray(trip.mdcItems) && trip.mdcItems.length && typeof reopenPickerForEdit === "function") {
     reopenPickerForEdit();
     return;
@@ -7082,6 +7112,7 @@ function _reopenPickerAny() {
   if (typeof _tb !== "undefined" && _tb && Array.isArray(_tb.placeActivities) && _tb.placeActivities.length && typeof renderActivityPicker === "function") {
     var briefOv = document.getElementById("trip-brief-overlay");
     if (briefOv && briefOv.parentElement !== document.body) document.body.appendChild(briefOv);
+    briefOv.style.display = "block";
     renderActivityPicker();
     return;
   }
@@ -7089,7 +7120,7 @@ function _reopenPickerAny() {
     reopenCandidateExplorer();
     return;
   }
-  alert("Nothing in Discovery yet — try the Profile menu instead.");
+  alert("Nothing in Discovery yet — try Trip profile… in the menu instead.");
 }
 if (typeof globalThis !== "undefined") globalThis._reopenPickerAny = _reopenPickerAny;
 
@@ -16084,7 +16115,8 @@ function _pmSetPlaceRole(placeKey, role, hubKey){
   if (m) {
     if (role === "stay")      m.stayOverride = true;
     else if (role === "see")  m.stayOverride = false;
-    else /* daytrip */        m.stayOverride = null;   // role tracked elsewhere
+    else if (role === "daytrip") m.stayOverride = null;  // role tracked elsewhere
+    else if (role === "onway")   m.stayOverride = null;
   }
   // Second, the legacy _isDayTrip / _dayTripHub flags on every
   // requiredPlace ref. Still drives the picker map pin color + the
@@ -16096,9 +16128,39 @@ function _pmSetPlaceRole(placeKey, role, hubKey){
       if (p.place.toLowerCase() !== canon) return;
       p._isDayTrip = (role === "daytrip");
       p._dayTripHub = (role === "daytrip") ? hub : "";
+      // Stay implies _keep:true (you're committing to it). See /
+      // daytrip / onway also imply _keep:true — the user picked a
+      // role, so they want the place on the trip. The picker
+      // checkbox is a separate concept (keep vs reject the place
+      // entirely); role-setting always means "kept."
       p._keep = true;
     });
   });
+  // Round NC.X: also update c.role on the matching candidate so the
+  // picker map repaints immediately AND the trip build path reads the
+  // right role without waiting for the placeMeta→c.role bridge in
+  // publishTrip. Important for daytrip/onway, which the stayOverride
+  // path can't represent — c.role is the only place they live.
+  try {
+    var norm = (typeof _normPlaceName === "function")
+      ? _normPlaceName : function(s){ return String(s||"").toLowerCase(); };
+    var k = norm(placeKey);
+    if (k && Array.isArray(_tb.candidates)) {
+      var cand = _tb.candidates.find(function(c){ return c && c.place && norm(c.place) === k; });
+      if (cand) {
+        var allowed = { stay: 1, see: 1, daytrip: 1, onway: 1 };
+        if (allowed[role]) {
+          // Guard Stay on overnightCapable, matching MaxEnginePicker.setRole.
+          if (!(role === "stay" && cand.overnightCapable === false)) {
+            if (cand.role !== role) {
+              cand.role = role;
+              cand._roleTouched = true;
+            }
+          }
+        }
+      }
+    }
+  } catch(_){}
   if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
   if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
 }
@@ -16857,8 +16919,36 @@ function _pmSetStayOverride(placeName, value){
   var m = _pmPlaceMeta(placeName, { create: true });
   if (!m) return;
   m.stayOverride = !!value;
+  // Round NC.X: ALSO update c.role on the matching candidate so the
+  // picker map (which reads c.role) re-paints the pin immediately.
+  // Without this the chip and tooltip flipped to Stay but the pin
+  // stayed gray (Selfoss symptom) — the bridge only ran at publishTrip
+  // time, way too late. Stay/See are the two values this writer
+  // supports; daytrip/onway have their own setters.
+  try {
+    var norm = (typeof _normPlaceName === "function")
+      ? _normPlaceName : function(s){ return String(s||"").toLowerCase(); };
+    var k = norm(placeName);
+    if (k && _tb && Array.isArray(_tb.candidates)) {
+      var cand = _tb.candidates.find(function(c){ return c && c.place && norm(c.place) === k; });
+      if (cand) {
+        var newRole = value ? "stay" : "see";
+        // Stay requires overnight infrastructure — guard against
+        // promoting a non-overnight-capable place.
+        if (newRole === "stay" && cand.overnightCapable === false) {
+          // Fall back to keeping c.role at its prior value; the
+          // stayOverride above will still re-render the chip per
+          // user intent (legacy behavior — the picker UI also
+          // gates Stay on overnightCapable).
+        } else if (cand.role !== newRole) {
+          cand.role = newRole;
+          cand._roleTouched = true;
+        }
+      }
+    }
+  } catch(_){}
   if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
-  if (typeof _renderPlacePickerMap === "function") _renderPlacePickerMap("tb-pm-map");
+  if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
 }
 
 // v359.55.3: open the research card popover for a place. Shows the
@@ -17164,13 +17254,27 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
   // longer shows a sequence to start from; sequencing is a trip-view
   // concern.
 
-  // v359.55.8: three role options with current first + highlighted.
-  // Determine current role from data: daytrip wins if _isDayTrip is set;
-  // otherwise placeMeta.stayOverride picks stay/see; otherwise LLM default.
+  // Round NC.X: four role options with current first + highlighted.
+  // Detection priority:
+  //   1. c.role on the candidate (NC.3 source of truth — recognizes
+  //      onway, the new fourth role).
+  //   2. _isDayTrip flag on the requiredPlace (legacy daytrip).
+  //   3. placeMeta.stayOverride → stay / see.
+  //   4. LLM default (overnightCapable / overnight flag).
   var _popMeta = _pmPlaceMeta(info.place, { create: false });
   var _llmIsStayPop = info.overnight !== false; // LLM-marked
+  var _popCand = null;
+  try {
+    if (Array.isArray(_tb.candidates)) {
+      _popCand = _tb.candidates.find(function(c){
+        return c && c.place && c.place.toLowerCase() === (info.place || "").toLowerCase();
+      });
+    }
+  } catch(_){}
   var currentRole;
-  if (info._isDayTrip) currentRole = "daytrip";
+  if (_popCand && (_popCand.role === "stay" || _popCand.role === "see" || _popCand.role === "daytrip" || _popCand.role === "onway")) {
+    currentRole = _popCand.role;
+  } else if (info._isDayTrip) currentRole = "daytrip";
   else if (_popMeta && _popMeta.stayOverride === true)  currentRole = "stay";
   else if (_popMeta && _popMeta.stayOverride === false) currentRole = "see";
   else currentRole = _llmIsStayPop ? "stay" : "see";
@@ -17203,18 +17307,29 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
         + '<span>👁 See — decide later</span>'
         + '</label>';
     }
-    // daytrip
-    return '<label style="display:flex;align-items:center;gap:6px;margin:3px 0;padding:5px 8px;background:' + bg + ';border:' + border + ';border-radius:5px;' + (noHubs ? 'opacity:0.55;cursor:not-allowed;' : 'cursor:pointer;') + 'font-weight:' + weight + ';" ' + dtTitle + '>'
-      + '<input type="radio" name="pm-mode" value="daytrip" ' + checked + ' ' + dtDisabled + ' />'
-      + '<span>📍 Day trip / On the way from</span>'
-      + '<select class="pm-hub-sel" ' + dtDisabled + ' style="font-family:inherit;font-size:12px;padding:2px 4px;margin-left:auto;">'
-      +   hubOptions
-      + '</select>'
+    if (role === "daytrip") {
+      return '<label style="display:flex;align-items:center;gap:6px;margin:3px 0;padding:5px 8px;background:' + bg + ';border:' + border + ';border-radius:5px;' + (noHubs ? 'opacity:0.55;cursor:not-allowed;' : 'cursor:pointer;') + 'font-weight:' + weight + ';" ' + dtTitle + '>'
+        + '<input type="radio" name="pm-mode" value="daytrip" ' + checked + ' ' + dtDisabled + ' />'
+        + '<span>📍 Day trip from</span>'
+        + '<select class="pm-hub-sel" ' + dtDisabled + ' style="font-family:inherit;font-size:12px;padding:2px 4px;margin-left:auto;">'
+        +   hubOptions
+        + '</select>'
+        + '</label>';
+    }
+    // onway — stop on a transit leg between two stays. Distinct from
+    // daytrip (which lives off ONE hub). Pin renders teal so the
+    // user can see at a glance which onway places exist.
+    return '<label style="display:flex;align-items:center;gap:6px;margin:3px 0;padding:5px 8px;background:' + bg + ';border:' + border + ';border-radius:5px;cursor:pointer;font-weight:' + weight + ';">'
+      + '<input type="radio" name="pm-mode" value="onway" ' + checked + ' />'
+      + '<span>🛣 On the way (between stops)</span>'
       + '</label>';
   }
 
-  // Order: current first, then the remaining two in stable order.
-  var allRoles = ["stay", "see", "daytrip"];
+  // Round NC.X: all FOUR roles now selectable from the picker popup.
+  // Earlier the popup combined daytrip + onway into one option which
+  // hid the distinction and made it impossible to switch back from
+  // onway to stay (user couldn't see the current state was onway).
+  var allRoles = ["stay", "see", "daytrip", "onway"];
   var ordered = [currentRole].concat(allRoles.filter(function(r){ return r !== currentRole; }));
 
   var html = ''
@@ -18703,17 +18818,19 @@ function _renderPlacePickerMap(targetId){
         }
       } catch(_) { /* swallow */ }
       var _candRole = (_ssCand && _ssCand.role) || null;
-      var isStay, isDayTrip, isSee;
+      var isStay, isDayTrip, isSee, isOnway;
       if (_candRole) {
         isStay    = (_candRole === "stay");
         isDayTrip = (_candRole === "daytrip");
         isSee     = (_candRole === "see");
+        isOnway   = (_candRole === "onway");
       } else {
         // Legacy path — no candidate role available, fall back to the
         // pre-NC.3 _isDayTrip / kept derivation.
         isStay    = info.kept && !info._isDayTrip;
         isDayTrip = info.kept && info._isDayTrip;
         isSee     = false;
+        isOnway   = false;
       }
       // Round FN.F.3 / NC.3: "single sight" derives from c.role === "see"
       // when we have a candidate; otherwise fall back to legacy
@@ -18748,6 +18865,16 @@ function _renderPlacePickerMap(targetId){
         // possibility. Same purple as the sidebar "Could be a day trip
         // from X" badge so the two affordances are visually paired.
         color = "#5b3f8f";
+        label = _pmEsc((info.place || "").substring(0, 2));
+        size = 22;
+      } else if (isOnway) {
+        // Round NC.X: distinct treatment for "on the way" places.
+        // Without this, onway candidates fell through to the
+        // not-kept gray dot and looked identical to rejected places,
+        // hiding the fact that the place was actually committed as
+        // a wayside. Teal pin + initials matches the wayside dotted
+        // marker on the main trip map.
+        color = "#0d8a8a";
         label = _pmEsc((info.place || "").substring(0, 2));
         size = 22;
       } else {
