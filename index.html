@@ -15105,12 +15105,24 @@ function _renderPlaceActivityItems(){
     list.appendChild(toc);
   })();
 
-  // Round NC.X: by-Place view. Consolidates everything about a place
-  // into a single row — role chip, checkbox, "Sights here" if it has
-  // children, and a list of activities/reasons that reference this
-  // place across all sections. Short-circuits the by-Activity section
-  // walk below.
+  // Round NC.X: by-Place view. Reuses the existing by-Activity row
+  // renderer but feeds it a SINGLE virtual section "All places" that
+  // contains every activity. The renderer's existing byDest grouping
+  // then naturally consolidates: a place referenced by 5 activities
+  // gets ONE row with all 5 activities listed in the right column,
+  // the same Story expand, the same Sights-here line, the same
+  // research button, the same chips.
   if (_tb._pickerSortMode === "place") {
+    // Inject the virtual section ahead of the existing forEach.
+    var _virtualSection = "All places";
+    bySection[_virtualSection] = items.slice();
+    sectionOrder = [_virtualSection];
+    // Skip the legacy by-Place renderer below.
+    (function _renderPickerByPlaceLegacy(){ return; })();
+  }
+  // Legacy guard — kept so the old IIFE doesn't fire when we've taken
+  // the virtual-section route above.
+  if (false && _tb._pickerSortMode === "place") {
     (function _renderPickerByPlace(){
       // Group every requiredPlace across every activity by place key.
       var byPlace = {};
@@ -15412,7 +15424,13 @@ function _renderPlaceActivityItems(){
     hdrWrap.innerHTML = '<div class="tb-act-section-title" style="flex:1;">' + _pmEsc(sec) + '</div>'
       + '<div class="tb-act-section-count">' + destOrder.length + ' destination' + (destOrder.length===1?'':'s') + '</div>'
       + moreBtnHtml;
-    list.appendChild(hdrWrap);
+    // Round NC.X: suppress the section header in by-Place mode. The
+    // virtual section "All places" is just a plumbing trick to reuse
+    // the activity-row renderer; the user shouldn't see an "All
+    // places" header at the top of the list.
+    if (_tb._pickerSortMode !== "place") {
+      list.appendChild(hdrWrap);
+    }
 
     // Render each destination as a row in this section
     destOrder.forEach(function(key){
