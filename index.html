@@ -17748,6 +17748,66 @@ function _pmExtractDomain(url){
 // this, the user toggled Stay→See on Mývatn and the sidebar updated
 // while the map pin stayed purple — the kind of split-state that's
 // the whole point of the NC.3 normalization.
+// Round NC.X: shared role derivation. Both the picker map render and
+// the popup were doing their own priority cascade, and they didn't
+// quite line up — symptom: Jökulsárlón's pin showed Day trip while
+// its popup pre-selected See, because the map's fallback checked
+// placeMeta.stayOverride BEFORE info._isDayTrip, but the popup
+// checked info._isDayTrip BEFORE placeMeta.stayOverride. Now both
+// call this. The priority is fixed and explicit:
+//   1. Explicit reject (c.status==="reject" or info._rejected)
+//   2. Unkept = Maybe
+//   3. info._isDayTrip true → daytrip (legacy flag, set by writers)
+//   4. info._waysideFromHub set → onway (legacy)
+//   5. c.role on candidate if valid (NC.3 source of truth)
+//   6. placeMeta.stayOverride true → stay; false → see
+//   7. Default by overnightCapable
+function _pmDeriveRole(info, key, opts){
+  opts = opts || {};
+  if (!info) return { role: "maybe" };
+  if (info._rejected) return { role: "reject" };
+  var cand = null;
+  try {
+    if (window._tb && Array.isArray(window._tb.candidates)) {
+      cand = window._tb.candidates.find(function(c){
+        return c && c.place && c.place.toLowerCase() === (info.place || "").toLowerCase();
+      });
+    }
+  } catch(_){}
+  if (cand && cand.status === "reject") return { role: "reject" };
+  // Day-trip / onway legacy flags WIN over c.role when present —
+  // they're the explicit per-requiredPlace decisions and reflect
+  // dest.dayTrips chips on trip.destinations.
+  if (info._isDayTrip) {
+    return { role: "daytrip", hub: info._dayTripHub || "" };
+  }
+  if (info._waysideFromHub) {
+    return { role: "onway", hub: info._waysideFromHub || "" };
+  }
+  // Maybe: not kept and no day-trip/wayside flag.
+  if (!info.kept && !cand) return { role: "maybe" };
+  // c.role from candidate, when valid.
+  if (cand && (cand.role === "stay" || cand.role === "see" || cand.role === "daytrip" || cand.role === "onway")) {
+    return { role: cand.role, hub: cand.dayTripHub || "" };
+  }
+  if (!info.kept) return { role: "maybe" };
+  // placeMeta.stayOverride.
+  try {
+    if (window._tb && window._tb.placeMeta) {
+      var metaKey = (typeof _pmMetaKey === "function") ? _pmMetaKey(info.place) : (key || info.place || "").toLowerCase();
+      var meta = window._tb.placeMeta[metaKey];
+      if (meta) {
+        if (meta.stayOverride === true) return { role: "stay" };
+        if (meta.stayOverride === false) return { role: "see" };
+      }
+    }
+  } catch(_){}
+  // Default by overnight-capable signal.
+  var capable = (info.overnight !== false);
+  return { role: capable ? "stay" : "see" };
+}
+if (typeof globalThis !== "undefined") globalThis._pmDeriveRole = _pmDeriveRole;
+
 function _pmSetStayOverride(placeName, value){
   var m = _pmPlaceMeta(placeName, { create: true });
   if (!m) return;
@@ -18121,27 +18181,15 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
   Object.keys(allPlaces).forEach(function(k){
     if (k === canon) return;
     var h = allPlaces[k];
-    if (!h.kept) return;
-    if (h._isDayTrip) return;
-    if (h._rejected) return;
-    // Round NC.X: ALSO exclude any place whose candidate c.role is
-    // "daytrip" or "onway" — these are themselves dependent on
-    // another hub and can't host day trips of their own. Skógafoss
-    // symptom: it showed in the hub dropdown despite being a day
-    // trip itself, because _isDayTrip was the only check and
-    // hadn't been seeded for some path.
-    try {
-      if (window._tb && Array.isArray(window._tb.candidates)) {
-        var hubCand = window._tb.candidates.find(function(cc){
-          return cc && cc.place && cc.place.toLowerCase() === k;
-        });
-        if (hubCand && (hubCand.role === "daytrip" || hubCand.role === "onway" || hubCand.role === "see")) return;
-        if (hubCand && hubCand.status === "reject") return;
-      }
-    } catch(_){}
-    // Filter on _waysideFromHub too — a wayside (onway) place that
-    // hasn't yet been promoted to c.role can still slip through.
-    if (h._waysideFromHub) return;
+    // Round NC.X: route through _pmDeriveRole so the hub filter sees
+    // the same role this place would render with elsewhere. Only
+    // role==="stay" qualifies as a hub. Catches every shape of
+    // "this is a day trip" (legacy _isDayTrip flag, c.role,
+    // dest.dayTrips chip mirror).
+    var hubRole = (typeof _pmDeriveRole === "function")
+      ? _pmDeriveRole(h, k, {}).role
+      : (h.kept && !h._isDayTrip ? "stay" : "see");
+    if (hubRole !== "stay") return;
     var coord = (_coarseGeocode && _coarseGeocode[k]) || null;
     var d = (selfCoord && coord) ? distSq(selfCoord, coord) : Infinity;
     hubs.push({ key: k, place: h.place, dist: d });
@@ -18177,21 +18225,17 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
       });
     }
   } catch(_){}
-  // Has the user explicitly rejected this place? Check c.status first,
-  // fall back to any requiredPlace._rejected flag (which the writer
-  // sets per-ref before c.status propagates).
-  var _isRejected = (_popCand && _popCand.status === "reject")
-    || info._rejected === true;
-  var _isMaybe = !_isRejected && !info.kept;
-  var currentRole;
-  if (_isRejected) currentRole = "reject";
-  else if (_isMaybe) currentRole = "maybe";
-  else if (_popCand && (_popCand.role === "stay" || _popCand.role === "see" || _popCand.role === "daytrip" || _popCand.role === "onway")) {
-    currentRole = _popCand.role;
-  } else if (info._isDayTrip) currentRole = "daytrip";
-  else if (_popMeta && _popMeta.stayOverride === true)  currentRole = "stay";
-  else if (_popMeta && _popMeta.stayOverride === false) currentRole = "see";
-  else currentRole = _llmIsStayPop ? "stay" : "see";
+  // Round NC.X: route through the shared _pmDeriveRole so the popup
+  // and the picker map render agree on what role a place has. Earlier
+  // each had its own cascade with slightly different ordering — the
+  // popup checked c.role BEFORE info._isDayTrip, the map checked
+  // placeMeta.stayOverride BEFORE info._isDayTrip — and a place where
+  // info._isDayTrip=true but c.role="see" would render Day trip on
+  // the map and pre-select See in the popup (Jökulsárlón symptom).
+  var _derived = (typeof _pmDeriveRole === "function")
+    ? _pmDeriveRole(info, canon, {})
+    : { role: _llmIsStayPop ? "stay" : "see" };
+  var currentRole = _derived.role;
 
   var popupId = "pm-pop-" + Date.now();
   var hubOptions = hubs.map(function(h){
@@ -19790,63 +19834,17 @@ function _renderPlacePickerMap(targetId){
           window.MaxEnginePicker.normalizeCandidateRole(_ssCand);
         }
       } catch(_) { /* swallow */ }
-      var _candRole = (_ssCand && _ssCand.role) || null;
-      var isStay, isDayTrip, isSee, isOnway;
-      if (_candRole) {
-        isStay    = (_candRole === "stay");
-        isDayTrip = (_candRole === "daytrip");
-        isSee     = (_candRole === "see");
-        isOnway   = (_candRole === "onway");
-      } else {
-        // Round NC.X: between c.role and the legacy `info.kept && !info._isDayTrip`
-        // derivation, consult placeMeta.stayOverride so Discovery chip
-        // toggles repaint the pin immediately for user-added places that
-        // aren't yet in _tb.candidates. Without this, toggling Selfoss
-        // See ↔ Stay never changed the pin because the legacy path
-        // (info.kept && !info._isDayTrip) is true for both states —
-        // info.kept doesn't track the chip choice, only the checkbox.
-        //
-        // Round NC.X bugfix: placeMeta is keyed via _pmMetaKey (which
-        // calls _normPlaceName — strips accents, so "dyrhólaey" → "dyrholaey").
-        // The marker key here is `key = p.place.toLowerCase()` which
-        // KEEPS accents. Direct `_tb.placeMeta[key]` therefore misses
-        // every accented place name (Dyrhólaey, Vík, Þingvellir, …) —
-        // user reported Dyrhólaey's pin staying blue after toggling to
-        // See. Look it up through _pmMetaKey so the normalization matches.
-        var _stayOv = null;
-        try {
-          if (_tb && _tb.placeMeta) {
-            var _metaKey = (typeof _pmMetaKey === "function") ? _pmMetaKey(info.place) : key;
-            var _pMeta = _tb.placeMeta[_metaKey];
-            if (_pMeta && (_pMeta.stayOverride === true || _pMeta.stayOverride === false)) {
-              _stayOv = _pMeta.stayOverride;
-            }
-          }
-        } catch(_){}
-        if (_stayOv === true) {
-          isStay    = true;
-          isDayTrip = false;
-          isSee     = false;
-          isOnway   = false;
-        } else if (_stayOv === false) {
-          isStay    = false;
-          isDayTrip = false;
-          isSee     = true;
-          isOnway   = false;
-        } else if (info._isDayTrip) {
-          // Legacy day-trip flag from the picker map popup.
-          isStay    = false;
-          isDayTrip = true;
-          isSee     = false;
-          isOnway   = false;
-        } else {
-          // Legacy default: kept = stay; not-kept = small gray dot.
-          isStay    = info.kept;
-          isDayTrip = false;
-          isSee     = false;
-          isOnway   = false;
-        }
-      }
+      // Round NC.X: route through the shared _pmDeriveRole so the
+      // picker map render and the role popup use the SAME priority
+      // cascade. Earlier each had its own and they could disagree
+      // (Jökulsárlón rendered Day trip; its popup pre-selected See).
+      var _derivedRole = (typeof _pmDeriveRole === "function")
+        ? _pmDeriveRole(info, key, {}).role
+        : null;
+      var isStay    = (_derivedRole === "stay");
+      var isDayTrip = (_derivedRole === "daytrip");
+      var isSee     = (_derivedRole === "see");
+      var isOnway   = (_derivedRole === "onway");
       // Round NC.X: "single sight" treatment ONLY applies when no
       // explicit role has been chosen. Earlier this came first and
       // beat isDayTrip / isOnway — Dynjandi has c.singleSight=true
