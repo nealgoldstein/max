@@ -2,6 +2,25 @@
 
 Contract for the single source of truth on "what role does a place play in this trip." Replaces the fragmented field set that gave us the Seljalandsfoss bug (picker says "See", trip-view popup says "Stay") in Rounds NC.1 / NC.2.
 
+## Geography model (the framing under the roles)
+
+A **trip** takes place inside a **geography** — a political or cultural boundary like Iceland, the American Southwest, Paris. Inside that trip geography, a **sight** is a physical place (the Matterhorn, the Louvre, Gullfoss). A **destination** is a sub-geography inside the trip that has lodging — it is the only kind of place you spend a night.
+
+Every sight belongs to exactly one geography. The user decides which by picking a role:
+
+| Role | Geography assignment |
+|---|---|
+| `stay`    | This place IS a destination — its own geography on the trip |
+| `daytrip` | Inside destination `_dayTripHub`'s geography — visited out-and-back |
+| `onway`   | Inside the **trip's** geography — a wayside between two destinations |
+| `see`     | Undecided which geography it belongs to yet |
+| `maybe`   | Not yet decided whether to include it at all |
+| `reject`  | User said no — geography is irrelevant |
+
+The user's choice between "Day trip from Reykjavík" and "On the way" IS the user's act of defining the boundary of Reykjavík. Saying "Day trip" makes Reykjavík's geography big enough to include the sight; saying "On the way" leaves the sight in Iceland-the-trip-geography. We don't ask the user to draw polygons — the geography is emergent from role decisions.
+
+Use `_geographyOf(place)` to ask the question directly: returns `{kind, hub?}` where `kind ∈ "destination" | "in-destination" | "trip" | "none"`.
+
 ## The three fields per candidate
 
 | Field | Type | Set by | Mutates |

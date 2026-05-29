@@ -16204,6 +16204,91 @@ function _pmClearDayTripFlag(placeName){
 //   • "daytrip" — committed day-trip from a hub (sets _isDayTrip=true,
 //                 _dayTripHub; clears any stay override)
 // Always sets _keep:true since the user opted in.
+// ── Geography model (Round NC.X) ──────────────────────────────────
+// A trip takes place inside a GEOGRAPHY — a political/cultural
+// boundary like Iceland, the American Southwest, Paris. Inside that
+// trip geography, a SIGHT is a physical place (the Matterhorn, the
+// Louvre, Gullfoss). A DESTINATION is a sub-geography inside the trip
+// that has lodging — it's the only kind of place you spend a night.
+//
+// Every sight belongs to exactly one geography. The user decides
+// which by picking a role:
+//   - role=stay      → this place IS a destination (its own geography)
+//   - role=daytrip   → this sight lives in destination {hub}'s geography
+//   - role=onway     → this sight lives in the TRIP's geography
+//   - role=see       → undecided which geography it belongs to yet
+//   - role=maybe     → user hasn't decided whether to include it at all
+//   - role=reject    → user said no — geography is irrelevant
+//
+// _geographyOf(place) answers "which geography does this place belong
+// to" — used by other code that wants to ask the question directly
+// instead of pattern-matching on c.role + _dayTripHub + _waysideFromHub
+// each time.
+//
+// Input: a place name string, a candidate object, or a requiredPlace
+// object. Returns { kind, hub? } where:
+//   kind = "destination" → the place IS a destination (Stay)
+//   kind = "in-destination" → lives inside {hub}'s geography (Day trip)
+//   kind = "trip" → lives in the trip's geography (Onway / undecided See)
+//   kind = "none" → user hasn't kept it (Maybe / Reject)
+function _geographyOf(place) {
+  if (!place) return { kind: "none" };
+  var name, candRole, candStatus, dayTripHub, waysideFromHub, isKept, isRejected;
+  if (typeof place === "string") {
+    name = place;
+  } else {
+    // Candidate object, requiredPlace, or destination-like
+    name = place.place || place.name || "";
+    candRole = place.role;
+    candStatus = place.status;
+    dayTripHub = place._dayTripHub || place.dayTripHub || "";
+    waysideFromHub = place._waysideFromHub || place.waysideFromHub || "";
+    isKept = (place._keep === true) || (place.status === "keep");
+    isRejected = (place._rejected === true) || (place.status === "reject");
+  }
+  if (isRejected) return { kind: "none" };
+  // If we got a name only, look it up across _tb.candidates and
+  // _tb.placeActivities for richer state.
+  if (typeof place === "string" && _tb) {
+    var norm = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase(); };
+    var key = norm(name);
+    if (Array.isArray(_tb.candidates)) {
+      var c = _tb.candidates.find(function(x){ return x && x.place && norm(x.place) === key; });
+      if (c) {
+        candRole = candRole || c.role;
+        candStatus = candStatus || c.status;
+        if (c.status === "reject") return { kind: "none" };
+      }
+    }
+    // Walk placeActivities for requiredPlace flags as a fallback.
+    if (!dayTripHub || !waysideFromHub || isKept === undefined) {
+      (_tb.placeActivities || []).some(function(it){
+        return (it.requiredPlaces || []).some(function(p){
+          if (!p || !p.place || norm(p.place) !== key) return false;
+          if (!dayTripHub && p._dayTripHub) dayTripHub = p._dayTripHub;
+          if (!waysideFromHub && p._waysideFromHub) waysideFromHub = p._waysideFromHub;
+          if (isKept === undefined) isKept = !!p._keep;
+          if (p._rejected === true) isRejected = true;
+          return false;
+        });
+      });
+      if (isRejected) return { kind: "none" };
+    }
+  }
+  // Maybe (unkept + not rejected) = no geography assignment.
+  if (isKept === false && !candRole) return { kind: "none" };
+  if (candRole === "stay")    return { kind: "destination" };
+  if (candRole === "daytrip") return { kind: "in-destination", hub: dayTripHub || "" };
+  if (candRole === "onway")   return { kind: "trip", from: waysideFromHub || "" };
+  if (candRole === "see")     return { kind: "trip" }; // undecided See defaults to trip geography
+  // No explicit role — fall back to flag-based inference.
+  if (dayTripHub)     return { kind: "in-destination", hub: dayTripHub };
+  if (waysideFromHub) return { kind: "trip", from: waysideFromHub };
+  if (isKept)         return { kind: "destination" };
+  return { kind: "none" };
+}
+if (typeof globalThis !== "undefined") globalThis._geographyOf = _geographyOf;
+
 function _pmSetPlaceRole(placeKey, role, hubKey){
   if (!_tb || !Array.isArray(_tb.placeActivities)) return;
   var canon = String(placeKey || "").toLowerCase();
@@ -37358,9 +37443,11 @@ function _openTripDestRolePopover(destId){
       ? "display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #1a5fa8;border-radius:8px;cursor:pointer;background:#eef4fb;"
       : "display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #e0e0e0;border-radius:8px;cursor:pointer;background:#fff;";
   }
-  // Stay-row subtitle — when stay is NOT the suggestion, surface what
-  // Max thinks would fit better.
-  var staySubtitle = "Its own stop with " + (src.nights || 1) + " night" + ((src.nights || 1) === 1 ? "" : "s") + ".";
+  // Round NC.X: subtitle copy uses the explicit "geography" framing —
+  // an Overnight makes this place its own geography on the trip; a
+  // Day trip puts it inside another destination's geography; On the
+  // way leaves it in the trip's geography between destinations.
+  var staySubtitle = "Its own geography on the trip — " + (src.nights || 1) + " night" + ((src.nights || 1) === 1 ? "" : "s") + " of lodging here.";
   if (suggestedRole === "dayTrip" && suggestedRoleHubName) {
     staySubtitle += " <span style=\"color:#5b3f8f;\">Max suggests making this a day trip from " + suggestedRoleHubName + ".</span>";
   } else if (suggestedRole === "wayside" && waysidePrev && waysideNext) {
@@ -37373,6 +37460,7 @@ function _openTripDestRolePopover(destId){
         + '<div style="flex:1;">'
         +   '<div style="font-size:13px;font-weight:600;color:#222;"><span style="margin-right:5px;">📍</span>Day trip from</div>'
         +   '<select id="trip-role-hub-select" style="margin-top:6px;width:100%;padding:6px 8px;font-size:12.5px;border:1px solid #ccc;border-radius:6px;font-family:inherit;">' + hubOpts + '</select>'
+        +   '<div style="font-size:11px;color:#5b3f8f;margin-top:6px;line-height:1.5;">Treats ' + src.place + ' as inside the chosen destination\'s geography — visit out and back from there.</div>'
         +   '<div style="font-size:11px;color:#a36500;margin-top:6px;line-height:1.5;">Heads up: the hub will absorb '
         + (src.nights || 1) + ' night' + ((src.nights || 1) === 1 ? "" : "s")
         + '. Hotel and other bookings tied to ' + src.place + ' will be dropped — confirm only if there are none yet.</div>'
@@ -37415,7 +37503,7 @@ function _openTripDestRolePopover(destId){
         + '<div style="flex:1;">'
         +   '<div style="font-size:13px;font-weight:600;color:#222;"><span style="margin-right:5px;">🛣</span>On the way</div>'
         +   '<div style="font-size:11.5px;color:#444;margin-top:3px;line-height:1.5;">'
-        +     'A stop on the route from <strong>' + waysidePrev.place + '</strong> &rarr; <strong>' + waysideNext.place + '</strong>' + (_wsNightsN > 0 ? ' — same trip length, just no sleep here.' : ' — no overnight, no shift needed.')
+        +     'Leaves ' + src.place + ' inside the trip\'s geography — a stop on the route from <strong>' + waysidePrev.place + '</strong> &rarr; <strong>' + waysideNext.place + '</strong>' + (_wsNightsN > 0 ? ', same trip length, just no sleep here.' : ', no overnight, no shift needed.')
         +   '</div>'
         +   _wsShiftRow
         +   _wsHeadsUp
@@ -37792,8 +37880,8 @@ function _openTripStopPopover(ctx) {
     "overnight",
     "🛏 Overnight",
     currentRole === "overnight"
-      ? "A real stop with at least one night."
-      : "Promote to its own destination on the trip with a night to sleep."
+      ? "Its own geography on the trip — a real stop with lodging."
+      : "Promote to its own destination — its own geography on the trip with a night to sleep."
   );
 
   // Helper: list ALL existing dayTrip routes across the trip
@@ -37905,7 +37993,7 @@ function _openTripStopPopover(ctx) {
         "📍 Day trip",
         currentRole === "dayTrip"
           ? _dtCurrentSubtitle
-          : "Visit while based at one of your overnight hubs. Start a new day trip, or combine with an existing one (e.g. Golden Circle).",
+          : "Treat it as inside a destination's geography — visit out and back from your overnight hub. Start a new day trip, or combine with an existing one (e.g. Golden Circle).",
         '<div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;">'
         // ── Field 1: From ───────────────────────────────────────
         + '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#555;">'
@@ -37990,8 +38078,8 @@ function _openTripStopPopover(ctx) {
         "wayside",
         "🛣 On the way",
         currentRole === "wayside"
-          ? "On a transit route. Pick another route below to move it."
-          : "A stop on the way between two hubs — no overnight here.",
+          ? "Inside the trip's geography — on a transit route between two destinations. Pick another route below to move it."
+          : "Leave it in the trip's geography — a stop on the way between two destinations, no overnight here.",
         '<div style="margin-top:6px;">'
         + '<select id="trip-stop-route" style="width:100%;padding:5px 8px;font-size:12px;border:1px solid #ccc;border-radius:5px;font-family:inherit;">'
         +   routeOptsHtml
