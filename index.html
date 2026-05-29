@@ -8908,8 +8908,9 @@ async function expandChipSuggestions(region, intent, chips){
     + (intent ? " Their stated goal: " + intent + "." : "")
     + " Their must-dos (the anchors) are handled separately. They also tapped these general interests: " + chipList + ".\n\n"
     + "For each interest, suggest 2-3 specific, named experiences worth considering in " + region + " — things a thoughtful traveler might want to do beyond their stated must-dos. These are OPTIONAL menu items, not requirements.\n\n"
+    + "GEOGRAPHY MODEL: a trip takes place inside a geography (the country/region). Inside it, a destination is a sub-geography with lodging; a sight is a physical place. For every place you return, tag it with geographyKind ∈ {\"destination\", \"sight-in-destination\", \"sight-in-trip\"} and, when geographyKind=\"sight-in-destination\", a parentDestination naming the destination it belongs to.\n\n"
     + "Return ONLY a JSON array (no markdown). Each item:\n"
-    + '[{"name":"Specific named experience","type":"activity","description":"One sentence on what it is and why it\'s worth considering here.","requiredPlaces":[{"place":"City","country":"Country"}],"durationHours":6,"interest":"which chip this came from"}]\n\n'
+    + '[{"name":"Specific named experience","type":"activity","description":"One sentence on what it is and why it\'s worth considering here.","requiredPlaces":[{"place":"City","country":"Country","geographyKind":"destination"}],"durationHours":6,"interest":"which chip this came from"}]\n\n'
     + "Max 5 items total. Pick the most worthwhile and distinctive. Be specific — real named places, not generic categories. No duplicates of obvious must-dos.\n\n"
     + "CRITICAL: requiredPlaces is an ARRAY OF OBJECTS, each with place and country strings. Even for a single-country trip, always include country.";
   try {
@@ -8932,8 +8933,10 @@ async function expandChipSuggestions(region, intent, chips){
       item.type = item.type || "activity";
       if (Array.isArray(item.requiredPlaces)) {
         item.requiredPlaces = item.requiredPlaces.map(function(p){
-          if (typeof p === "string") return {place: p, country: regionCountry};
-          return p;
+          if (typeof p === "string") p = {place: p, country: regionCountry};
+          // Round NC.X: apply geography hint from the LLM's
+          // geographyKind / parentDestination tags.
+          return (typeof _applyGeographyHint === "function") ? _applyGeographyHint(p) : p;
         });
       }
     });
@@ -8949,6 +8952,42 @@ async function expandChipSuggestions(region, intent, chips){
     return [];
   }
 }
+
+// Round NC.X: seed role hints on each requiredPlace from the LLM's
+// geographyKind classification. Backward-compatible — if the LLM
+// didn't supply geographyKind (older models, older trips, edge
+// callers), the requiredPlace passes through unchanged.
+//   "destination"          → _roleHint=stay,    overnight=true
+//   "sight-in-destination" → _roleHint=daytrip, _isDayTrip=true, _dayTripHub=parentDestination
+//   "sight-in-trip"        → _roleHint=onway,   overnight=false, nights=0
+// _roleHint is read downstream when c.role hasn't been explicitly
+// set by the user (a soft default that respects user overrides).
+function _applyGeographyHint(p){
+  if (!p || typeof p !== "object") return p;
+  var kind = p.geographyKind || "";
+  if (kind === "sight-in-destination") {
+    p._roleHint = "daytrip";
+    p._isDayTrip = true;
+    if (p.parentDestination) {
+      p._dayTripHub = String(p.parentDestination).toLowerCase();
+    }
+    p.overnight = false;
+    p.nights = 0;
+  } else if (kind === "sight-in-trip") {
+    p._roleHint = "onway";
+    p._isDayTrip = false;
+    p._dayTripHub = "";
+    p.overnight = false;
+    p.nights = 0;
+  } else if (kind === "destination") {
+    p._roleHint = "stay";
+    p._isDayTrip = false;
+    p._dayTripHub = "";
+    if (p.overnight !== false) p.overnight = true;
+  }
+  return p;
+}
+if (typeof globalThis !== "undefined") globalThis._applyGeographyHint = _applyGeographyHint;
 
 async function expandMustDos() {
   // Pull from DOM if present, fall back to _tb state (fields may not exist in current step)
@@ -9073,6 +9112,20 @@ async function expandMustDos() {
     + (intent ? "Their goal / full sentence: " + intent + "\n" : "")
     + (anchors ? "They also listed these must-dos explicitly: \"" + anchors + "\"\n" : "")
     + "\nWhether the commitments came from the sentence, the must-do list, or both, EXTRACT EVERY DISTINCT THING THE TRAVELER NAMED and produce at least one item for each. If they said 'ride the named trains, hike the mountains, explore the culture, eat chocolate' you must produce items for each of the four — not just the trains. Treat the sentence as binding even if they didn't repeat the items in the must-do field. Do not silently drop any. There are three types.\n\n"
+    + "GEOGRAPHY MODEL — how the trip is structured. A TRIP takes place inside a GEOGRAPHY — a political or cultural boundary (Iceland; the American Southwest; Paris; the Loire Valley). Inside that trip geography, a SIGHT is a physical place worth visiting (the Matterhorn; the Louvre; Gullfoss). A DESTINATION is a sub-geography inside the trip that has LODGING — it is the only kind of place a traveler can spend a night. Every sight belongs to exactly one geography: either a destination's geography (it's close enough to a particular destination to be visited out-and-back as a day trip) OR the trip's geography itself (it's on the way between destinations, not part of any one of them).\n\n"
+    + "For every PLACE you return (in endpoints, viableLocations, requiredPlaces — anywhere a {place, country} object appears), include TWO ADDITIONAL FIELDS that classify its geography assignment:\n"
+    + "  • geographyKind: one of\n"
+    + "      \"destination\"          — this place is itself a destination (has lodging + food; suitable for an overnight stay)\n"
+    + "      \"sight-in-destination\" — this is a sight that lives inside a destination's geography (close enough to be a day trip out-and-back)\n"
+    + "      \"sight-in-trip\"        — this is a sight that lives in the trip's geography but not inside any one destination (a wayside; a place on the way between destinations)\n"
+    + "  • parentDestination: REQUIRED when geographyKind is \"sight-in-destination\" — the name of the destination this sight belongs to. Use the SAME spelling as you used in any destination-kind place in this response so downstream code can match them.\n"
+    + "    For \"destination\" or \"sight-in-trip\" places this field can be omitted.\n"
+    + "Examples:\n"
+    + "  • {\"place\":\"Reykjavík\",\"country\":\"Iceland\",\"geographyKind\":\"destination\"}\n"
+    + "  • {\"place\":\"Þingvellir National Park\",\"country\":\"Iceland\",\"geographyKind\":\"sight-in-destination\",\"parentDestination\":\"Reykjavík\"}\n"
+    + "  • {\"place\":\"Gullfoss\",\"country\":\"Iceland\",\"geographyKind\":\"sight-in-destination\",\"parentDestination\":\"Reykjavík\"}\n"
+    + "  • {\"place\":\"Diamond Beach\",\"country\":\"Iceland\",\"geographyKind\":\"sight-in-trip\"}\n"
+    + "Use the lodging test: if a sight is close enough to a destination that a traveler would visit it as a day trip while staying at that destination, it's \"sight-in-destination\". If it's between destinations on a transit route, it's \"sight-in-trip\". When in doubt, favor \"sight-in-trip\" — the user can always promote it to a day trip later.\n\n"
     + "ACCURACY RULE — overrides everything below: WRONG INFORMATION IS WORSE THAN NO INFORMATION. If you’re not certain about a route’s endpoints, a place’s location, a price, a schedule, or any other specific fact, OMIT THE ITEM rather than guess. Confidently wrong specifics — a named train asserted on a route it doesn’t serve, a sight placed in the wrong country, a festival in the wrong month — destroy trust.\n\n"
     + "TYPE 1 \u2014 ROUTE: a scenic travel leg between specific places. IMPORTANT: routes are TRANSPORTATION, not activities. The Glacier Express, Bernina Express, Lake Geneva steamer circuit, the Atlantic Road drive, etc. — these are how the traveler MOVES between destinations while seeing great scenery. They are functionally the same as a car trip or a bus ride; the scenery is a bonus, not a standalone stop. A route does NOT eat activity time at its endpoints, and it does NOT count as a destination in itself. What counts as a destination are the endpoints, where the traveler actually spends nights and does things.\n"
     + "  Required fields for routes:\n"
@@ -9104,9 +9157,10 @@ async function expandMustDos() {
     + "FACTUAL ACCURACY for named scenic trains — getting endpoints wrong undermines trust. Use the actual operator-published endpoints, not the city the traveler is flying into. Travelers reach scenic services by regular train first; do not use airport cities as a route endpoint just because that's where the trip starts. If unsure of an exact endpoint or schedule, omit the route rather than guess.\n\n"
     + "Return ONLY a JSON array (no markdown):\n"
     + '[\n'
-    + '  {"name":"<Named scenic train>","type":"route","description":"<one-sentence description of the experience>","endpoints":[{"place":"<Endpoint A>","country":"<Country>"},{"place":"<Endpoint B>","country":"<Country>"}],"requiredPlaces":[{"place":"<Endpoint A>","country":"<Country>"},{"place":"<Endpoint B>","country":"<Country>"}],"direction":"either","durationHours":8,"transportModes":["train"],"modeOptions":"both","alternatives":"<short description of the regional alternative if any>","reservationNotes":"<reservation requirements + frequency + supplement>","endpointHighlights":{"<Endpoint A>":"<short list of things to do there>","<Endpoint B>":"<short list>"},"flexibility":"low"},\n'
-    + '  {"name":"<Multi-modal lake/island circuit>","type":"route","description":"<one-sentence description>","endpoints":[{"place":"<Endpoint A>","country":"<Country>"},{"place":"<Endpoint B>","country":"<Country>"}],"requiredPlaces":[{"place":"<Node 1>","country":"<Country>"},{"place":"<Node 2>","country":"<Country>"},{"place":"<Node 3>","country":"<Country>"}],"direction":"either","durationHours":7,"transportModes":["train","boat","train"],"modeOptions":"regional","alternatives":"","reservationNotes":"<reservation / pass coverage info>","endpointHighlights":{"<Endpoint A>":"<short list>","<Endpoint B>":"<short list>"},"flexibility":"low"},\n'
-    + '  {"name":"<Seasonal phenomenon>","type":"condition","description":"<one-sentence description with the months and any caveats>","viableLocations":[{"place":"<Place 1>","country":"<Country>"},{"place":"<Place 2>","country":"<Country>"}],"requiredPlaces":[{"place":"<Place 1>","country":"<Country>"},{"place":"<Place 2>","country":"<Country>"}],"recovery":"high","frequencyRequirement":3,"conditionNote":"<what the traveler needs to understand about planning around this>","flexibility":"high"}\n'
+    + '  {"name":"<Named scenic train>","type":"route","description":"<one-sentence description of the experience>","endpoints":[{"place":"<Endpoint A>","country":"<Country>","geographyKind":"destination"},{"place":"<Endpoint B>","country":"<Country>","geographyKind":"destination"}],"requiredPlaces":[{"place":"<Endpoint A>","country":"<Country>","geographyKind":"destination"},{"place":"<Endpoint B>","country":"<Country>","geographyKind":"destination"}],"direction":"either","durationHours":8,"transportModes":["train"],"modeOptions":"both","alternatives":"<short description of the regional alternative if any>","reservationNotes":"<reservation requirements + frequency + supplement>","endpointHighlights":{"<Endpoint A>":"<short list of things to do there>","<Endpoint B>":"<short list>"},"flexibility":"low"},\n'
+    + '  {"name":"<Multi-modal lake/island circuit>","type":"route","description":"<one-sentence description>","endpoints":[{"place":"<Endpoint A>","country":"<Country>","geographyKind":"destination"},{"place":"<Endpoint B>","country":"<Country>","geographyKind":"destination"}],"requiredPlaces":[{"place":"<Node 1>","country":"<Country>","geographyKind":"destination"},{"place":"<Node 2>","country":"<Country>","geographyKind":"sight-in-trip"},{"place":"<Node 3>","country":"<Country>","geographyKind":"destination"}],"direction":"either","durationHours":7,"transportModes":["train","boat","train"],"modeOptions":"regional","alternatives":"","reservationNotes":"<reservation / pass coverage info>","endpointHighlights":{"<Endpoint A>":"<short list>","<Endpoint B>":"<short list>"},"flexibility":"low"},\n'
+    + '  {"name":"<Sight near a destination>","type":"activity","description":"<concrete sentence>","requiredPlaces":[{"place":"<Sight>","country":"<Country>","geographyKind":"sight-in-destination","parentDestination":"<Destination from elsewhere in this response>"}],"durationHours":4,"flexibility":"medium"},\n'
+    + '  {"name":"<Seasonal phenomenon>","type":"condition","description":"<one-sentence description with the months and any caveats>","viableLocations":[{"place":"<Place 1>","country":"<Country>","geographyKind":"destination"},{"place":"<Place 2>","country":"<Country>","geographyKind":"sight-in-trip"}],"requiredPlaces":[{"place":"<Place 1>","country":"<Country>","geographyKind":"destination"},{"place":"<Place 2>","country":"<Country>","geographyKind":"sight-in-trip"}],"recovery":"high","frequencyRequirement":3,"conditionNote":"<what the traveler needs to understand about planning around this>","flexibility":"high"}\n'
     + ']\n\n'
     + "Be specific. Use real, well-known names. For routes, note each individual route (not 'the trains' as one item). For conditions, list multiple viable locations. Aim for 8\u201314 items total; when a traveler mentions rail-heavy meta-references like \"the named trains\" or \"scenic routes,\" lean toward the upper end so the full canonical set is represented — including the multi-modal train+boat circuits described above.\n\n"
     + "CRITICAL: endpoints, requiredPlaces, and viableLocations are ARRAYS OF OBJECTS, each with {\"place\": \"...\", \"country\": \"...\"} \u2014 never plain strings. Even for a single-country trip, always include country. This matters because the consuming code looks up item.place and item.country.";
@@ -9141,9 +9195,9 @@ async function expandMustDos() {
     items.forEach(function(item, i){
       item.id = "md" + i;
       item.checked = true;
-      if (item.endpoints) item.endpoints = _normPlaceArr(item.endpoints);
-      if (item.requiredPlaces) item.requiredPlaces = _normPlaceArr(item.requiredPlaces);
-      if (item.viableLocations) item.viableLocations = _normPlaceArr(item.viableLocations);
+      if (item.endpoints) item.endpoints = _normPlaceArr(item.endpoints).map(_applyGeographyHint);
+      if (item.requiredPlaces) item.requiredPlaces = _normPlaceArr(item.requiredPlaces).map(_applyGeographyHint);
+      if (item.viableLocations) item.viableLocations = _normPlaceArr(item.viableLocations).map(_applyGeographyHint);
       // Mirror endpoints into requiredPlaces if missing
       if (item.type === "route" && !item.requiredPlaces && item.endpoints) item.requiredPlaces = item.endpoints;
       if (item.type === "condition" && !item.requiredPlaces && item.viableLocations) item.requiredPlaces = item.viableLocations;
