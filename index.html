@@ -14193,18 +14193,18 @@ function _pmHydratePreview(slot){
 function _pmToggleStoryFull(linkEl){
   var slot = linkEl && linkEl.closest ? linkEl.closest(".pm-row-story") : null;
   if (!slot) return;
-  var textSpan = slot.querySelector(".pm-row-story-text");
+  var preview = slot.querySelector(".pm-row-story-preview");
   var fullDiv = slot.querySelector(".pm-row-story-full");
-  if (!textSpan || !fullDiv) return;
+  if (!preview || !fullDiv) return;
   var expanded = fullDiv.style.display !== "none";
   if (expanded) {
     fullDiv.style.display = "none";
-    textSpan.style.display = "inline";
+    preview.style.display = "block";
     linkEl.textContent = "more →";
     return;
   }
   fullDiv.style.display = "block";
-  textSpan.style.display = "none";
+  preview.style.display = "none";
   linkEl.textContent = "less ←";
 }
 window._pmToggleStoryFull = _pmToggleStoryFull;
@@ -14275,6 +14275,7 @@ function _pmTriggerStory(linkEl){
   var slot = linkEl && linkEl.closest ? linkEl.closest(".pm-row-story") : null;
   if (!slot) return;
   var trigger = slot.querySelector(".pm-row-story-trigger");
+  var preview = slot.querySelector(".pm-row-story-preview");
   var textSpan = slot.querySelector(".pm-row-story-text");
   if (trigger) {
     // v359.5.3: reset trigger label in case the previous attempt
@@ -14282,19 +14283,18 @@ function _pmTriggerStory(linkEl){
     trigger.textContent = "Story →";
     trigger.style.display = "none";
   }
+  // Round NC.X: show the preview WRAPPER (block); the textSpan inside
+  // it is always inline within that block. Restructured so the
+  // narrative preview no longer flows between the row's trigger
+  // buttons.
+  if (preview) preview.style.display = "block";
   if (textSpan) {
-    // v359.5.3: reset any error-state styling from a prior failure.
     textSpan.style.fontStyle = "italic";
     textSpan.style.color = "#666";
-    textSpan.style.display = "inline";
-    textSpan.textContent = "…"; // placeholder while generating
+    if (!textSpan.textContent || textSpan.textContent === "…") {
+      textSpan.textContent = "…"; // placeholder while generating
+    }
   }
-  // v359.5.1: reveal the close × so the story can be dismissed.
-  // Neal's report: "I added a place, Egilsstaðir, and when I
-  // selected the story, there was no way to close it." The trigger
-  // was hidden on click and never came back; "less ←" only collapses
-  // the FULL story, not the preview. The close affordance returns
-  // the slot to its initial state (trigger visible, preview hidden).
   var closeLink = slot.querySelector(".pm-row-story-close");
   if (closeLink) closeLink.style.display = "inline";
   _pmHydratePreview(slot);
@@ -14309,11 +14309,11 @@ function _pmCloseStory(linkEl){
   var slot = linkEl && linkEl.closest ? linkEl.closest(".pm-row-story") : null;
   if (!slot) return;
   var trigger = slot.querySelector(".pm-row-story-trigger");
-  var textSpan = slot.querySelector(".pm-row-story-text");
+  var preview = slot.querySelector(".pm-row-story-preview");
   var toggle = slot.querySelector(".pm-row-story-toggle");
   var fullDiv = slot.querySelector(".pm-row-story-full");
   var closeLink = slot.querySelector(".pm-row-story-close");
-  if (textSpan) textSpan.style.display = "none";
+  if (preview) preview.style.display = "none";
   if (toggle) {
     toggle.style.display = "none";
     toggle.textContent = "more →"; // reset
@@ -15696,32 +15696,39 @@ function _renderPlaceActivityItems(){
       var storyHtml = "";
       {
         var _placeAttr = _pmEsc(d.place);
+        // Round NC.X: restructured layout — triggers on their own
+        // header line; story preview + Things-to-do expansions are
+        // BLOCKS below. Previously the preview text was inline and
+        // flowed between the "Story" and "Things to do" buttons,
+        // making the layout look broken when both were on the same
+        // row at narrow widths.
         storyHtml = '<div class="pm-row-story" data-place="'+_placeAttr+'" '
           + 'style="margin-top:3px;font-size:11.5px;line-height:1.5;" '
           + 'onclick="event.stopPropagation();">'
-          +   '<a class="pm-row-story-trigger" '
-          +      'style="color:#1a5fa8;text-decoration:none;cursor:pointer;font-weight:600;" '
-          +      'onclick="_pmTriggerStory(this);event.stopPropagation();return false;" href="#">Story →</a>'
-          // Round NC.X: "Things to do" is now its own button next to
-          // Story. Used to live inside the Story expand's full view
-          // (lazy-loaded on "more →"), but it's a different kind of
-          // content — Story is the narrative; Things to do is a
-          // checklist. Each gets its own affordance.
-          +   '<a class="pm-row-todo-trigger" '
-          +      'style="color:#1a5fa8;text-decoration:none;cursor:pointer;font-weight:600;margin-left:10px;" '
-          +      'onclick="_pmTriggerTodo(this);event.stopPropagation();return false;" href="#">Things to do →</a>'
-          +   '<span class="pm-row-story-text" style="display:none;font-style:italic;color:#666;"></span>'
-          +   '<a class="pm-row-story-toggle" '
-          +      'style="display:none;color:#1a5fa8;text-decoration:none;cursor:pointer;font-weight:600;margin-left:4px;" '
-          +      'onclick="_pmToggleStoryFull(this);event.stopPropagation();return false;" href="#">more →</a>'
-          // v359.5.1: close × — dismisses the story and brings the
-          // "Story →" trigger back. Without this the user has no way
-          // to undo opening the story; the previous "less ←" inside
-          // _pmToggleStoryFull only collapses the EXPANDED state.
-          +   '<a class="pm-row-story-close" '
-          +      'style="display:none;color:#999;text-decoration:none;cursor:pointer;font-weight:600;margin-left:8px;" '
-          +      'onclick="_pmCloseStory(this);event.stopPropagation();return false;" href="#" title="Close story">× close</a>'
-          +   '<div class="pm-row-story-full" style="display:none;margin-top:2px;font-style:normal;color:#333;"></div>'
+          // Header line: the two trigger buttons + close. Stays on one
+          // row at the top of the slot; doesn't flow with the content.
+          +   '<div class="pm-row-story-triggers" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">'
+          +     '<a class="pm-row-story-trigger" '
+          +        'style="color:#1a5fa8;text-decoration:none;cursor:pointer;font-weight:600;" '
+          +        'onclick="_pmTriggerStory(this);event.stopPropagation();return false;" href="#">Story →</a>'
+          +     '<a class="pm-row-todo-trigger" '
+          +        'style="color:#1a5fa8;text-decoration:none;cursor:pointer;font-weight:600;" '
+          +        'onclick="_pmTriggerTodo(this);event.stopPropagation();return false;" href="#">Things to do →</a>'
+          +     '<a class="pm-row-story-close" '
+          +        'style="display:none;color:#999;text-decoration:none;cursor:pointer;font-weight:600;margin-left:auto;" '
+          +        'onclick="_pmCloseStory(this);event.stopPropagation();return false;" href="#" title="Close">× close</a>'
+          +   '</div>'
+          // Story-preview block: appears on its own line when Story
+          // is open. Holds the italic preview + "more →" toggle.
+          +   '<div class="pm-row-story-preview" style="display:none;margin-top:4px;">'
+          +     '<span class="pm-row-story-text" style="font-style:italic;color:#666;"></span>'
+          +     '<a class="pm-row-story-toggle" '
+          +        'style="display:none;color:#1a5fa8;text-decoration:none;cursor:pointer;font-weight:600;margin-left:6px;" '
+          +        'onclick="_pmToggleStoryFull(this);event.stopPropagation();return false;" href="#">more →</a>'
+          +   '</div>'
+          // Story-full block: narrative + sights + dig deeper.
+          +   '<div class="pm-row-story-full" style="display:none;margin-top:4px;font-style:normal;color:#333;"></div>'
+          // Things-to-do block: bullets list.
           +   '<div class="pm-row-todo-full" style="display:none;margin-top:6px;color:#333;"></div>'
           + '</div>';
       }
