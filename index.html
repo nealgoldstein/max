@@ -14407,6 +14407,37 @@ function _renderPlaceActivityItems(){
   var _scrollPane = document.getElementById("tb-picker-list-pane");
   var _savedScrollTop = _scrollPane ? _scrollPane.scrollTop : null;
   list.innerHTML = "";
+  // Round NC.X: build a children-by-hub map so each destination row
+  // can show "Sights here: X, Y, Z" (the sights the LLM tagged as
+  // belonging to this destination's geography via geographyKind +
+  // parentDestination). Walks every requiredPlace across all
+  // activities; groups by the lowercased _dayTripHub (the hub key).
+  var _childrenByHub = {};
+  (function _buildChildrenByHub(){
+    if (!_tb || !Array.isArray(_tb.placeActivities)) return;
+    var seenPerHub = {};
+    _tb.placeActivities.forEach(function(item){
+      if (!item || !Array.isArray(item.requiredPlaces)) return;
+      item.requiredPlaces.forEach(function(p){
+        if (!p || !p.place) return;
+        if (p._rejected === true) return;
+        var hubKey = p._dayTripHub || "";
+        if (!hubKey) return;
+        if (!_childrenByHub[hubKey]) {
+          _childrenByHub[hubKey] = [];
+          seenPerHub[hubKey] = {};
+        }
+        var nameKey = p.place.toLowerCase();
+        // Skip self-references (a destination shouldn't list itself).
+        if (nameKey === hubKey) return;
+        if (seenPerHub[hubKey][nameKey]) return;
+        seenPerHub[hubKey][nameKey] = true;
+        _childrenByHub[hubKey].push(p.place);
+      });
+    });
+  })();
+  // Expose for diagnostics + reuse.
+  if (_tb) _tb._childrenByHub = _childrenByHub;
   // v359.1 read sync: union _tb.placeActivities with synthetic items
   // mirrored from trip.destinations that don't yet have a picker
   // activity. Render-time only — _tb.placeActivities itself is not
@@ -15431,6 +15462,20 @@ function _renderPlaceActivityItems(){
         // expand instead of being a separate popup section.
         + '</div>'
         + (nightsLine ? '<div class="tb-dest-meta">'+nightsLine+'</div>' : '')
+        // Round NC.X: "Sights here" line — children the LLM tagged
+        // as sight-in-destination with this destination as
+        // parentDestination. Lets the user see at a glance what's
+        // already inside this destination's geography (and therefore
+        // attached as a day-trip default).
+        + (function(){
+            var kids = _childrenByHub[key] || [];
+            if (!kids.length) return "";
+            var preview = kids.slice(0, 3).map(_pmEsc).join(", ");
+            if (kids.length > 3) preview += " · +" + (kids.length - 3) + " more";
+            return '<div class="tb-dest-meta" style="font-size:10.5px;color:#5b3f8f;margin-top:3px;line-height:1.45;">'
+                + '<span style="color:#7c5cbf;font-weight:600;">Sights here:</span> ' + preview
+                + '</div>';
+          })()
         + storyHtml
         + '</div>'
         + '</div>'
