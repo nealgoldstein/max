@@ -15209,6 +15209,17 @@ function _renderPlaceActivityItems(){
         var dtBadge = pInfo.isDayTrip && pInfo.dayTripHub
           ? ('<span style="font-size:9.5px;font-weight:700;color:#5b3f8f;background:#f4eef9;border:1px solid #d8c4e8;padding:1px 6px;border-radius:9px;letter-spacing:.02em;">📍 day trip from ' + _pmEsc(pInfo.dayTripHub) + '</span>')
           : '';
+        // Round NC.X: explicit Maybe badge in by-Place mode so the
+        // unkept/undecided state reads at a glance (vs the checked
+        // kept rows above and the Rejected section below). Uses the
+        // same gray ❓ glyph the picker map + role popup use for
+        // Maybe — keeps the vocabulary consistent across surfaces.
+        var maybeBadge = (!pInfo.kept)
+          ? '<span style="font-size:9.5px;font-weight:700;color:#666;background:#f0f0f0;border:1px solid #d8d4c8;padding:1px 7px;border-radius:9px;letter-spacing:.02em;display:inline-flex;align-items:center;gap:3px;">'
+              + '<span style="display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;border-radius:50%;background:#bbb;color:#fff;font-size:9px;font-weight:700;">?</span>'
+              + 'Maybe'
+              + '</span>'
+          : '';
 
         // Activity badges — list every activity this place appears under.
         var activityList = pInfo.activities.map(function(a){
@@ -15224,8 +15235,8 @@ function _renderPlaceActivityItems(){
           +   '<div style="flex:1;min-width:0;">'
           +     '<div class="tb-act-name" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
           +       '<span>' + _placeArg + '</span>'
-          +       stayChip
-          +       dtBadge
+          +       (pInfo.kept ? stayChip : maybeBadge)
+          +       (pInfo.kept ? dtBadge : '')
           +     '</div>'
           +     (nightsLine ? '<div class="tb-dest-meta">' + nightsLine + '</div>' : '')
           +     sightsLine
