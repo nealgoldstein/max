@@ -14209,23 +14209,19 @@ function _pmToggleStoryFull(linkEl){
 }
 window._pmToggleStoryFull = _pmToggleStoryFull;
 
-// Round NC.X: standalone Things-to-do trigger. Lives next to "Story →"
-// on each picker row. Lazy-loads the bullets via _generatePlaceWhatToDo
-// (cache-hit is synchronous). Clicking again toggles closed.
+// Round NC.X: Things-to-do widget — entirely separate from Story.
+// Its own scope (.pm-row-todo), its own trigger, its own close.
 function _pmTriggerTodo(linkEl){
-  var slot = linkEl && linkEl.closest ? linkEl.closest(".pm-row-story") : null;
+  var slot = linkEl && linkEl.closest ? linkEl.closest(".pm-row-todo") : null;
   if (!slot) return;
   var placeName = slot.getAttribute("data-place") || "";
   if (!placeName) return;
   var todoDiv = slot.querySelector(".pm-row-todo-full");
   if (!todoDiv) return;
-  // Toggle behavior — second click closes.
-  if (todoDiv.style.display === "block") {
-    todoDiv.style.display = "none";
-    linkEl.textContent = "Things to do →";
-    return;
-  }
-  linkEl.textContent = "Things to do ↑";
+  var trigger = slot.querySelector(".pm-row-todo-trigger");
+  var closeLink = slot.querySelector(".pm-row-todo-close");
+  if (trigger) trigger.style.display = "none";
+  if (closeLink) closeLink.style.display = "inline";
   var key = placeName.toLowerCase();
   var todoCache = window._placeWhatToDoCache || {};
   function renderTodo(items){
@@ -14263,6 +14259,21 @@ function _pmTriggerTodo(linkEl){
   }
 }
 window._pmTriggerTodo = _pmTriggerTodo;
+
+// Round NC.X: close handler for the Things-to-do widget. Mirrors
+// _pmCloseStory's scope-specific reset — hides the full block,
+// hides the close link, and restores the trigger.
+function _pmCloseTodo(linkEl){
+  var slot = linkEl && linkEl.closest ? linkEl.closest(".pm-row-todo") : null;
+  if (!slot) return;
+  var trigger = slot.querySelector(".pm-row-todo-trigger");
+  var todoDiv = slot.querySelector(".pm-row-todo-full");
+  var closeLink = slot.querySelector(".pm-row-todo-close");
+  if (todoDiv) todoDiv.style.display = "none";
+  if (closeLink) closeLink.style.display = "none";
+  if (trigger) trigger.style.display = "inline";
+}
+window._pmCloseTodo = _pmCloseTodo;
 
 // v358.7: button-driven story trigger. Replaces the v358
 // IntersectionObserver auto-hydration. User clicks "Story →" → we
@@ -14321,13 +14332,9 @@ function _pmCloseStory(linkEl){
   if (fullDiv) fullDiv.style.display = "none";
   if (closeLink) closeLink.style.display = "none";
   if (trigger) trigger.style.display = "inline";
-  // Round NC.X: also collapse the Things-to-do block + reset its
-  // trigger label, since "× close" should leave the row in its
-  // initial state (no expansions anywhere).
-  var todoDiv = slot.querySelector(".pm-row-todo-full");
-  if (todoDiv) todoDiv.style.display = "none";
-  var todoTrigger = slot.querySelector(".pm-row-todo-trigger");
-  if (todoTrigger) todoTrigger.textContent = "Things to do →";
+  // Round NC.X: don't touch the Things-to-do block here. Story and
+  // Things-to-do are now separate widgets with their own × close
+  // affordances; closing one shouldn't affect the other.
   // Round NC.X: also reset the hydration flag so the next click re-
   // applies the cached text immediately. Otherwise _pmTriggerStory
   // sets textContent to the "…" placeholder, _pmHydratePreview sees
@@ -15696,39 +15703,44 @@ function _renderPlaceActivityItems(){
       var storyHtml = "";
       {
         var _placeAttr = _pmEsc(d.place);
-        // Round NC.X: restructured layout — triggers on their own
-        // header line; story preview + Things-to-do expansions are
-        // BLOCKS below. Previously the preview text was inline and
-        // flowed between the "Story" and "Things to do" buttons,
-        // making the layout look broken when both were on the same
-        // row at narrow widths.
-        storyHtml = '<div class="pm-row-story" data-place="'+_placeAttr+'" '
-          + 'style="margin-top:3px;font-size:11.5px;line-height:1.5;" '
-          + 'onclick="event.stopPropagation();">'
-          // Header line: the two trigger buttons + close. Stays on one
-          // row at the top of the slot; doesn't flow with the content.
-          +   '<div class="pm-row-story-triggers" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">'
+        // Round NC.X: Story and Things-to-do live in TWO separate
+        // widgets. Each has its own trigger, expansion, and close
+        // scope. Earlier attempts to share a container kept making
+        // one button look like it was heading the other's content
+        // when one was open. Now they're structurally independent.
+        storyHtml = ''
+          // ── Widget 1: Story ──────────────────────────────────
+          + '<div class="pm-row-story" data-place="'+_placeAttr+'" '
+          +    'style="margin-top:3px;font-size:11.5px;line-height:1.5;" '
+          +    'onclick="event.stopPropagation();">'
+          +   '<div class="pm-row-story-triggers" style="display:flex;align-items:center;gap:10px;">'
           +     '<a class="pm-row-story-trigger" '
           +        'style="color:#1a5fa8;text-decoration:none;cursor:pointer;font-weight:600;" '
           +        'onclick="_pmTriggerStory(this);event.stopPropagation();return false;" href="#">Story →</a>'
-          +     '<a class="pm-row-todo-trigger" '
-          +        'style="color:#1a5fa8;text-decoration:none;cursor:pointer;font-weight:600;" '
-          +        'onclick="_pmTriggerTodo(this);event.stopPropagation();return false;" href="#">Things to do →</a>'
           +     '<a class="pm-row-story-close" '
-          +        'style="display:none;color:#999;text-decoration:none;cursor:pointer;font-weight:600;margin-left:auto;" '
-          +        'onclick="_pmCloseStory(this);event.stopPropagation();return false;" href="#" title="Close">× close</a>'
+          +        'style="display:none;color:#999;text-decoration:none;cursor:pointer;font-weight:600;" '
+          +        'onclick="_pmCloseStory(this);event.stopPropagation();return false;" href="#" title="Close story">× close</a>'
           +   '</div>'
-          // Story-preview block: appears on its own line when Story
-          // is open. Holds the italic preview + "more →" toggle.
           +   '<div class="pm-row-story-preview" style="display:none;margin-top:4px;">'
           +     '<span class="pm-row-story-text" style="font-style:italic;color:#666;"></span>'
           +     '<a class="pm-row-story-toggle" '
           +        'style="display:none;color:#1a5fa8;text-decoration:none;cursor:pointer;font-weight:600;margin-left:6px;" '
           +        'onclick="_pmToggleStoryFull(this);event.stopPropagation();return false;" href="#">more →</a>'
           +   '</div>'
-          // Story-full block: narrative + sights + dig deeper.
           +   '<div class="pm-row-story-full" style="display:none;margin-top:4px;font-style:normal;color:#333;"></div>'
-          // Things-to-do block: bullets list.
+          + '</div>'
+          // ── Widget 2: Things to do — separate scope ──────────
+          + '<div class="pm-row-todo" data-place="'+_placeAttr+'" '
+          +    'style="margin-top:6px;font-size:11.5px;line-height:1.5;" '
+          +    'onclick="event.stopPropagation();">'
+          +   '<div class="pm-row-todo-triggers" style="display:flex;align-items:center;gap:10px;">'
+          +     '<a class="pm-row-todo-trigger" '
+          +        'style="color:#1a5fa8;text-decoration:none;cursor:pointer;font-weight:600;" '
+          +        'onclick="_pmTriggerTodo(this);event.stopPropagation();return false;" href="#">Things to do →</a>'
+          +     '<a class="pm-row-todo-close" '
+          +        'style="display:none;color:#999;text-decoration:none;cursor:pointer;font-weight:600;" '
+          +        'onclick="_pmCloseTodo(this);event.stopPropagation();return false;" href="#" title="Close Things to do">× close</a>'
+          +   '</div>'
           +   '<div class="pm-row-todo-full" style="display:none;margin-top:6px;color:#333;"></div>'
           + '</div>';
       }
