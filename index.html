@@ -15018,6 +15018,41 @@ function _renderPlaceActivityItems(){
     searchWrap.appendChild(searchPrev);
     searchWrap.appendChild(searchNext);
     searchWrap.appendChild(searchClear);
+
+    // Round NC.X: view-mode toggle. Activity-grouping is the original
+    // surface (each section header is an activity; places live under
+    // it). Place-grouping consolidates everything about a place onto
+    // one row so the user can answer "what's the story with Reykjavík"
+    // without scanning every section. Sticky alongside the search bar
+    // so the toggle is always reachable.
+    if (!_tb._pickerSortMode) _tb._pickerSortMode = "activity";
+    var sortGroup = document.createElement("div");
+    sortGroup.style.cssText = "display:inline-flex;align-items:center;gap:0;margin-left:6px;flex-shrink:0;border:1px solid #d8d4c8;border-radius:5px;overflow:hidden;background:#fff;";
+    var _sortBtnStyle = "font-size:10.5px;font-weight:600;padding:4px 9px;border:none;cursor:pointer;font-family:inherit;background:#fff;color:#555;";
+    var _sortBtnOnStyle = "font-size:10.5px;font-weight:700;padding:4px 9px;border:none;cursor:default;font-family:inherit;background:#1a5fa8;color:#fff;";
+    var actBtn = document.createElement("button");
+    actBtn.type = "button";
+    actBtn.title = "Group by activity (original layout)";
+    actBtn.textContent = "Activity";
+    actBtn.style.cssText = (_tb._pickerSortMode === "activity") ? _sortBtnOnStyle : _sortBtnStyle;
+    var plcBtn = document.createElement("button");
+    plcBtn.type = "button";
+    plcBtn.title = "Group by place — one row per place with everything consolidated";
+    plcBtn.textContent = "Place";
+    plcBtn.style.cssText = (_tb._pickerSortMode === "place") ? _sortBtnOnStyle : _sortBtnStyle;
+    actBtn.onclick = function(){
+      if (_tb._pickerSortMode === "activity") return;
+      _tb._pickerSortMode = "activity";
+      _renderPlaceActivityItems();
+    };
+    plcBtn.onclick = function(){
+      if (_tb._pickerSortMode === "place") return;
+      _tb._pickerSortMode = "place";
+      _renderPlaceActivityItems();
+    };
+    sortGroup.appendChild(actBtn);
+    sortGroup.appendChild(plcBtn);
+    searchWrap.appendChild(sortGroup);
     // Round NC.X: do NOT append searchWrap to toc. For position:sticky
     // to keep the bar visible across the WHOLE scroll, its parent must
     // span the whole scrollable content. toc is just the TOC block
@@ -15069,6 +15104,150 @@ function _renderPlaceActivityItems(){
     toc.appendChild(tocList);
     list.appendChild(toc);
   })();
+
+  // Round NC.X: by-Place view. Consolidates everything about a place
+  // into a single row — role chip, checkbox, "Sights here" if it has
+  // children, and a list of activities/reasons that reference this
+  // place across all sections. Short-circuits the by-Activity section
+  // walk below.
+  if (_tb._pickerSortMode === "place") {
+    (function _renderPickerByPlace(){
+      // Group every requiredPlace across every activity by place key.
+      var byPlace = {};
+      var placeOrder = [];
+      items.forEach(function(item){
+        if (!item || !Array.isArray(item.requiredPlaces)) return;
+        item.requiredPlaces.forEach(function(p){
+          if (!p || !p.place) return;
+          if (p._rejected === true) return;
+          var key = p.place.toLowerCase();
+          if (!byPlace[key]) {
+            byPlace[key] = {
+              place: p.place,
+              activities: [],   // {item, placeRef}
+              kept: false,
+              isDayTrip: false,
+              dayTripHub: ""
+            };
+            placeOrder.push(key);
+          }
+          byPlace[key].activities.push({ item: item, placeRef: p });
+          if (p._keep === true) byPlace[key].kept = true;
+          if (p._isDayTrip === true) byPlace[key].isDayTrip = true;
+          if (p._dayTripHub && !byPlace[key].dayTripHub) byPlace[key].dayTripHub = p._dayTripHub;
+        });
+      });
+      // Filter by search (place name only — matches the by-activity
+      // mode which also narrowed to place name a few rounds back).
+      if (_searchQ) {
+        var qN = _searchQNorm;
+        placeOrder = placeOrder.filter(function(k){
+          return _searchNormalize(byPlace[k].place).indexOf(qN) >= 0;
+        });
+      }
+      // Sort: kept stays first (by name), then unkept (by name).
+      placeOrder.sort(function(a, b){
+        var ka = byPlace[a].kept ? 0 : 1;
+        var kb = byPlace[b].kept ? 0 : 1;
+        if (ka !== kb) return ka - kb;
+        return byPlace[a].place.localeCompare(byPlace[b].place);
+      });
+      // Render each place.
+      placeOrder.forEach(function(key){
+        var pInfo = byPlace[key];
+        // Build a synthetic "destination" object for the existing chip
+        // builders. We need it to carry .place + .placeRefs so the
+        // stay chip + research button + nights can render with the
+        // same logic as by-Activity.
+        var d = {
+          place: pInfo.place,
+          nightsMax: 0,
+          items: pInfo.activities.map(function(a){ return a.item; }),
+          placeRefs: pInfo.activities.map(function(a){ return { item: a.item, placeRef: a.placeRef }; })
+        };
+        // Max nights across this place's refs.
+        pInfo.activities.forEach(function(a){
+          var n = (typeof a.placeRef.nights === "number") ? a.placeRef.nights : 0;
+          if (a.item.type !== "route" && n > d.nightsMax) d.nightsMax = n;
+        });
+
+        var row = document.createElement("div");
+        row.className = "tb-act-table-row tb-dest-major" + (pInfo.kept ? " on" : " off");
+        row.id = "tb-place-place-row-" + key.replace(/[^a-z0-9]/gi, "_");
+
+        // Build the chips inline.
+        var _placeArg = _pmEsc(d.place);
+        var _llmIsStay = pInfo.activities.some(function(a){ return a.placeRef.overnight !== false; });
+        var _placeMetaP = (_tb && _tb.placeMeta) ? _tb.placeMeta[_pmMetaKey(d.place)] : null;
+        var _stayOverrideP = _placeMetaP && (_placeMetaP.stayOverride === true || _placeMetaP.stayOverride === false)
+          ? _placeMetaP.stayOverride : null;
+        var _isStayCand = (_stayOverrideP !== null) ? _stayOverrideP : _llmIsStay;
+        var _activePillStay = 'font-size:9.5px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;padding:1px 8px;border-radius:9px;letter-spacing:.02em;cursor:default;font-family:inherit;line-height:1.3;';
+        var _activePillSee  = 'font-size:9.5px;font-weight:700;color:#fff;background:#5b3f8f;border:1px solid #5b3f8f;padding:1px 8px;border-radius:9px;letter-spacing:.02em;cursor:default;font-family:inherit;line-height:1.3;';
+        var _inactivePill   = 'font-size:9.5px;font-weight:600;color:#888;background:#fff;border:1px solid #ddd;padding:1px 8px;border-radius:9px;letter-spacing:.02em;cursor:pointer;font-family:inherit;line-height:1.3;';
+        var stayChip;
+        if (_isStayCand) {
+          stayChip = '<span class="pm-stay-toggle" style="display:inline-flex;align-items:center;gap:6px;">'
+            + '<span style="' + _activePillStay + '">🛏 Stay</span>'
+            + '<button type="button" onclick="_pmSetStayOverride(&#39;' + _placeArg + '&#39;, false);event.stopPropagation();" style="' + _inactivePill + '">+ See</button>'
+            + '</span>';
+        } else {
+          stayChip = '<span class="pm-stay-toggle" style="display:inline-flex;align-items:center;gap:6px;">'
+            + '<span style="' + _activePillSee + '">👁 See</span>'
+            + '<button type="button" onclick="_pmSetStayOverride(&#39;' + _placeArg + '&#39;, true);event.stopPropagation();" style="' + _inactivePill + '">+ Stay</button>'
+            + '</span>';
+        }
+
+        var nightsLine = d.nightsMax ? (d.nightsMax + ' night' + (d.nightsMax === 1 ? '' : 's') + ' suggested') : '';
+        var kids = (_childrenByHub[key] || []);
+        var sightsLine = kids.length
+          ? ('<div class="tb-dest-meta" style="font-size:10.5px;color:#5b3f8f;margin-top:3px;line-height:1.45;">'
+              + '<span style="color:#7c5cbf;font-weight:600;">Sights here:</span> '
+              + kids.slice(0, 4).map(_pmEsc).join(", ") + (kids.length > 4 ? " · +" + (kids.length - 4) + " more" : "")
+              + '</div>')
+          : '';
+        var dtBadge = pInfo.isDayTrip && pInfo.dayTripHub
+          ? ('<span style="font-size:9.5px;font-weight:700;color:#5b3f8f;background:#f4eef9;border:1px solid #d8c4e8;padding:1px 6px;border-radius:9px;letter-spacing:.02em;">📍 day trip from ' + _pmEsc(pInfo.dayTripHub) + '</span>')
+          : '';
+
+        // Activity badges — list every activity this place appears under.
+        var activityList = pInfo.activities.map(function(a){
+          var nm = _pmEsc(a.item.name || a.item.section || "");
+          var iconic = a.item.iconic ? ' <span style="color:#b28a2e;font-weight:700;">★</span>' : '';
+          return '<span style="display:inline-flex;align-items:center;font-size:10.5px;color:#555;background:#f5f1e8;border:1px solid #e6dfca;border-radius:5px;padding:2px 7px;">'
+            + nm + iconic + '</span>';
+        }).join(" ");
+
+        row.innerHTML = '<div class="tb-act-col-left">'
+          + '<div style="display:flex;align-items:flex-start;gap:8px;">'
+          +   '<div class="tb-act-check' + (pInfo.kept ? " on" : "") + '" onclick="togglePlaceByPlaceMode(&#39;' + _placeArg + '&#39;)" title="Keep / drop this place across all activities"></div>'
+          +   '<div style="flex:1;min-width:0;">'
+          +     '<div class="tb-act-name" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
+          +       '<span>' + _placeArg + '</span>'
+          +       stayChip
+          +       dtBadge
+          +     '</div>'
+          +     (nightsLine ? '<div class="tb-dest-meta">' + nightsLine + '</div>' : '')
+          +     sightsLine
+          +     (activityList ? '<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">' + activityList + '</div>' : '')
+          +   '</div>'
+          + '</div>'
+          + '</div>';
+
+        list.appendChild(row);
+      });
+
+      if (!placeOrder.length) {
+        var empty = document.createElement("div");
+        empty.style.cssText = "padding:24px;font-size:12px;color:#999;text-align:center;font-style:italic;";
+        empty.textContent = _searchQ ? ("No places match \"" + _searchQ + "\".") : "No places yet.";
+        list.appendChild(empty);
+      }
+    })();
+    // Reuse the Rejected-section + post-render hooks below; skip the
+    // by-Activity walk by emptying sectionOrder.
+    sectionOrder = [];
+  }
 
   sectionOrder.forEach(function(sec){
     // v359.55.12: category header rendering retired — the section TOC
@@ -16129,6 +16308,38 @@ function togglePlaceInActivity(itemId, placeIdx){
   // Round NC.X: pan + pulse the toggled place on the picker map.
   if (typeof _pmFocusPlace === "function" && p && p.place) _pmFocusPlace(p.place);
 }
+
+// Round NC.X: by-Place mode checkbox writer — flips _keep on EVERY
+// requiredPlace ref for this place across every activity. The by-Place
+// view shows a single row per place; the checkbox should affect every
+// ref consistently. New _keep state = !any currently kept.
+function togglePlaceByPlaceMode(placeName){
+  if (!_tb || !Array.isArray(_tb.placeActivities) || !placeName) return;
+  var key = String(placeName).toLowerCase();
+  var anyKept = false;
+  _tb.placeActivities.forEach(function(item){
+    (item.requiredPlaces || []).forEach(function(p){
+      if (!p || !p.place) return;
+      if (p.place.toLowerCase() !== key) return;
+      if (p._keep === true) anyKept = true;
+    });
+  });
+  var newKeep = !anyKept;
+  _tb.placeActivities.forEach(function(item){
+    var anyKeptInItem = false;
+    (item.requiredPlaces || []).forEach(function(p){
+      if (!p || !p.place) return;
+      if (p.place.toLowerCase() === key) p._keep = newKeep;
+      if (p._keep === true) anyKeptInItem = true;
+    });
+    item.checked = anyKeptInItem;
+  });
+  _renderPlaceActivityItems();
+  _updatePlaceActivitySummary();
+  if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
+  if (typeof _pmFocusPlace === "function") _pmFocusPlace(placeName);
+}
+if (typeof globalThis !== "undefined") globalThis.togglePlaceByPlaceMode = togglePlaceByPlaceMode;
 
 // Per-place nights stepper. Adjust by delta (typically ±1), clamp to 1..14.
 // The summary recomputes from these values, so the day total updates live.
