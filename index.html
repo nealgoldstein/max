@@ -16329,10 +16329,19 @@ function toggleDestKeepInSection(placeName, sectionName){
   var items = _tb.placeActivities || [];
   var key = (placeName || "").toLowerCase();
   var sec = sectionName || "";
+  // Round NC.X: in by-Place mode the renderer uses a virtual section
+  // "All places" that consolidates every item. The actual item.section
+  // is still each item's original — clicking the checkbox in Place
+  // mode would otherwise filter to items with section==="All places"
+  // (none exist), so the click silently no-oped. Symptom: user added
+  // Stykkishólmur as a Stay, the row showed but the checkbox click
+  // wouldn't toggle. Detect by-Place mode and skip the section
+  // filter; toggle ALL refs to this place across every section.
+  var skipSectionFilter = (_tb && _tb._pickerSortMode === "place");
   // Collect refs in items that belong to this section AND name this place.
   var refs = [];
   items.forEach(function(item){
-    if ((item.section || "") !== sec) return;
+    if (!skipSectionFilter && (item.section || "") !== sec) return;
     (item.requiredPlaces||[]).forEach(function(p){
       if (p && p.place && p.place.toLowerCase() === key) refs.push({item:item, place:p});
     });
