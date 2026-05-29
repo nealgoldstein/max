@@ -16333,10 +16333,8 @@ function toggleDestKeepInSection(placeName, sectionName){
   // "All places" that consolidates every item. The actual item.section
   // is still each item's original — clicking the checkbox in Place
   // mode would otherwise filter to items with section==="All places"
-  // (none exist), so the click silently no-oped. Symptom: user added
-  // Stykkishólmur as a Stay, the row showed but the checkbox click
-  // wouldn't toggle. Detect by-Place mode and skip the section
-  // filter; toggle ALL refs to this place across every section.
+  // (none exist), so the click silently no-oped. Detect by-Place mode
+  // and skip the section filter; toggle ALL refs to this place.
   var skipSectionFilter = (_tb && _tb._pickerSortMode === "place");
   // Collect refs in items that belong to this section AND name this place.
   var refs = [];
@@ -16346,7 +16344,25 @@ function toggleDestKeepInSection(placeName, sectionName){
       if (p && p.place && p.place.toLowerCase() === key) refs.push({item:item, place:p});
     });
   });
-  if (!refs.length) return;
+  // Round NC.X: defensive fallback. If the section filter excluded
+  // every ref (e.g. item.section was renamed by the user via the
+  // Move-to-section dropdown, or there's a stale section-name in
+  // the click handler), broaden the search to ALL items for this
+  // place. Better to toggle than to silently no-op. Symptom this
+  // catches: Stykkishólmur added via "+ Add Place" → row showed
+  // unchecked → click did nothing → user couldn't check it.
+  if (!refs.length) {
+    console.log("[Max toggleDestKeepInSection] section-filter found 0 refs for " + JSON.stringify(placeName) + " in section " + JSON.stringify(sec) + " — broadening to all items");
+    items.forEach(function(item){
+      (item.requiredPlaces||[]).forEach(function(p){
+        if (p && p.place && p.place.toLowerCase() === key) refs.push({item:item, place:p});
+      });
+    });
+  }
+  if (!refs.length) {
+    console.log("[Max toggleDestKeepInSection] still 0 refs even with broadened search — place not in placeActivities");
+    return;
+  }
   var anyKept = refs.some(function(r){ return r.place._keep; });
   var newKeep = !anyKept;
   refs.forEach(function(r){ r.place._keep = newKeep; });
@@ -19729,31 +19745,31 @@ function _renderPlacePickerMap(targetId){
         iconSize: [size,size],
         iconAnchor: [size/2,size/2]
       });
+      // Round NC.X: compute the tooltip suffix BEFORE the existing-vs-new
+      // marker branches so we can rebind on EITHER path. Previously the
+      // tooltip was only bound on first create — when a place's role
+      // later changed (See → Maybe, daytrip → onway, etc.) the icon
+      // updated via setIcon but the tooltip kept its old label.
+      // Djúpivogur symptom: pin flipped to purple eye when set to See,
+      // but the tooltip still read "Djúpivogur · maybe".
+      var _ttRole = isStay        ? " · stay"
+                  : isDayTrip     ? " · day trip"
+                  : isOnway       ? " · on the way"
+                  : isSee         ? " · see"
+                  : info._rejected ? " · rejected"
+                  : info.kept     ? " · kept"
+                  :                 " · maybe";
+      var ttBits = info.place + _ttRole;
+
       var existing = _pmMarkersByPlace[key];
       if (existing) {
         existing.setIcon(icon);
         existing.setLatLng(latLng);
+        // Rebind tooltip on existing markers so role changes update.
+        existing.unbindTooltip();
+        existing.bindTooltip(ttBits, {direction:"top", offset:[0,-10]});
       } else {
         var m = L.marker(latLng, {icon: icon}).addTo(_pmMap);
-        // v359.56.6: drop "★ iconic" from research-map tooltips — the
-        // label is research metadata, not navigation; the tooltip
-        // should answer "what is this and what role is it playing on
-        // the trip," nothing more.
-        // Round NC.3+ bugfix: tooltip role label tracks c.role (NC.3
-        // source of truth), so the picker tooltip and the role popover
-        // never disagree about whether a place is stay/see/day-trip.
-        // Round NC.X: split daytrip / onway / maybe into separate
-        // labels. Rejected places don't render here at all (skipped
-        // above) so no "· rejected" branch — kept for the trip map
-        // path where rejection might surface differently.
-        var _ttRole = isStay        ? " · stay"
-                    : isDayTrip     ? " · day trip"
-                    : isOnway       ? " · on the way"
-                    : isSee         ? " · see"
-                    : info._rejected ? " · rejected"
-                    : info.kept     ? " · kept"
-                    :                 " · maybe";
-        var ttBits = info.place + _ttRole;
         m.bindTooltip(ttBits, {direction:"top", offset:[0,-10]});
         // Step 6: clicking a pin opens the stay/day-trip popup.
         // Falls back to the legacy scroll-to-row behavior when the
