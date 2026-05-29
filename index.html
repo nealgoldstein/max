@@ -18085,6 +18085,25 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
     var h = allPlaces[k];
     if (!h.kept) return;
     if (h._isDayTrip) return;
+    if (h._rejected) return;
+    // Round NC.X: ALSO exclude any place whose candidate c.role is
+    // "daytrip" or "onway" — these are themselves dependent on
+    // another hub and can't host day trips of their own. Skógafoss
+    // symptom: it showed in the hub dropdown despite being a day
+    // trip itself, because _isDayTrip was the only check and
+    // hadn't been seeded for some path.
+    try {
+      if (window._tb && Array.isArray(window._tb.candidates)) {
+        var hubCand = window._tb.candidates.find(function(cc){
+          return cc && cc.place && cc.place.toLowerCase() === k;
+        });
+        if (hubCand && (hubCand.role === "daytrip" || hubCand.role === "onway" || hubCand.role === "see")) return;
+        if (hubCand && hubCand.status === "reject") return;
+      }
+    } catch(_){}
+    // Filter on _waysideFromHub too — a wayside (onway) place that
+    // hasn't yet been promoted to c.role can still slip through.
+    if (h._waysideFromHub) return;
     var coord = (_coarseGeocode && _coarseGeocode[k]) || null;
     var d = (selfCoord && coord) ? distSq(selfCoord, coord) : Infinity;
     hubs.push({ key: k, place: h.place, dist: d });
