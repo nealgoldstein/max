@@ -14282,33 +14282,152 @@ window._pmCloseTodo = _pmCloseTodo;
 // _generatePlaceNarrative. From there the existing flow continues:
 // "more →" expands to full narrative + things-to-do (lazy-loaded
 // on first expand), "Tell me more →" digs deeper.
+// Round NC.X: Story → opens a centered modal now. Earlier the
+// narrative was inlined under the trigger inside the left column,
+// which is squeezed by the picker's two-column grid — text wrapped
+// to ~120px and was hard to read. The modal renders at a generous
+// width regardless of the row layout. Things-to-do stays inline
+// because the bulleted list is structured enough to read in a
+// narrow column.
 function _pmTriggerStory(linkEl){
   var slot = linkEl && linkEl.closest ? linkEl.closest(".pm-row-story") : null;
   if (!slot) return;
-  var trigger = slot.querySelector(".pm-row-story-trigger");
-  var preview = slot.querySelector(".pm-row-story-preview");
-  var textSpan = slot.querySelector(".pm-row-story-text");
-  if (trigger) {
-    // v359.5.3: reset trigger label in case the previous attempt
-    // ended in the "Retry →" state.
-    trigger.textContent = "Story →";
-    trigger.style.display = "none";
-  }
-  // Round NC.X: show the preview WRAPPER (block); the textSpan inside
-  // it is always inline within that block. Restructured so the
-  // narrative preview no longer flows between the row's trigger
-  // buttons.
-  if (preview) preview.style.display = "block";
-  if (textSpan) {
-    textSpan.style.fontStyle = "italic";
-    textSpan.style.color = "#666";
-    if (!textSpan.textContent || textSpan.textContent === "…") {
-      textSpan.textContent = "…"; // placeholder while generating
+  var placeName = slot.getAttribute("data-place") || "";
+  if (!placeName) return;
+  _pmOpenStoryModal(placeName);
+}
+
+// Modal-style story view. Shows the wiki narrative + Sights here +
+// "Tell me more" dig-deeper, all at readable width. Uses the existing
+// _placeNarrativeCache for cache hits; otherwise queues an LLM call
+// via _pmEnqueueStoryGen (same backing fetch the old inline path
+// used).
+function _pmOpenStoryModal(placeName){
+  var existing = document.getElementById("pm-story-modal");
+  if (existing) existing.remove();
+  var ov = document.createElement("div");
+  ov.id = "pm-story-modal";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.32);z-index:11600;display:flex;align-items:center;justify-content:center;padding:24px;";
+  ov.onclick = function(e){ if (e.target === ov) ov.remove(); };
+  var box = document.createElement("div");
+  box.style.cssText = "background:#fff;border-radius:12px;max-width:620px;width:100%;max-height:85vh;overflow:auto;box-shadow:0 12px 36px rgba(0,0,0,0.24);padding:20px 24px;font-family:inherit;";
+  box.onclick = function(e){ e.stopPropagation(); };
+  // Header — title + × close
+  var hdr = document.createElement("div");
+  hdr.style.cssText = "display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:10px;";
+  var title = document.createElement("div");
+  title.style.cssText = "font-size:16px;font-weight:700;color:#111;";
+  title.textContent = placeName;
+  var closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.textContent = "×";
+  closeBtn.style.cssText = "font-size:22px;line-height:1;background:none;border:none;color:#888;cursor:pointer;font-family:inherit;padding:0 4px;";
+  closeBtn.onclick = function(){ ov.remove(); };
+  hdr.appendChild(title);
+  hdr.appendChild(closeBtn);
+  box.appendChild(hdr);
+  // Body — initially shows a loading state; populated by applyText
+  var body = document.createElement("div");
+  body.style.cssText = "font-size:13.5px;line-height:1.65;color:#333;";
+  body.innerHTML = '<div style="color:#999;font-style:italic;padding:10px 0;">Loading…</div>';
+  box.appendChild(body);
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+
+  function applyText(full){
+    if (!full) {
+      body.innerHTML = '<div style="color:#b04040;font-style:italic;padding:10px 0;">Couldn\'t load the story. Check your sign-in / API key and try again.</div>';
+      return;
     }
+    // Narrative paragraph
+    var html = '<p style="margin:0 0 14px;">' + _pmEsc(full) + '</p>';
+    // Sights here block (reuse _tb._childrenByHub from the renderer)
+    try {
+      var hubKey = String(placeName).toLowerCase();
+      var kids = (_tb && _tb._childrenByHub && _tb._childrenByHub[hubKey]) || [];
+      if (kids.length) {
+        html += '<div style="margin:0 0 14px;padding:9px 12px;background:#f7f4fb;border:1px solid #e0d7ec;border-radius:6px;">'
+          + '<div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#5b3f8f;margin-bottom:6px;">Sights here</div>'
+          + '<ul style="list-style:none;padding:0;margin:0;">';
+        kids.forEach(function(name){
+          html += '<li style="font-size:13px;color:#3a2960;line-height:1.55;padding-left:14px;position:relative;margin-bottom:3px;">'
+            + '<span style="position:absolute;left:0;top:0;color:#7c5cbf;">·</span>'
+            + _pmEsc(name)
+            + '</li>';
+        });
+        html += '</ul></div>';
+      }
+    } catch(_){}
+    // "Tell me more" inline expansion
+    html += '<div class="pm-modal-deep" style="display:none;margin-bottom:14px;color:#333;line-height:1.65;"></div>'
+      + '<a class="pm-modal-dig" data-place="' + _pmEsc(placeName) + '" href="#" style="font-size:12.5px;color:#1a5fa8;text-decoration:none;font-weight:600;cursor:pointer;">Tell me more →</a>';
+    body.innerHTML = html;
+    var digLink = body.querySelector(".pm-modal-dig");
+    if (digLink) digLink.onclick = function(e){
+      e.preventDefault();
+      _pmDigDeeperInModal(digLink, body);
+    };
   }
-  var closeLink = slot.querySelector(".pm-row-story-close");
-  if (closeLink) closeLink.style.display = "inline";
-  _pmHydratePreview(slot);
+
+  var key = String(placeName).toLowerCase();
+  var cache = window._placeNarrativeCache || {};
+  if (cache[key]) { applyText(cache[key]); return; }
+  if (typeof _pmEnqueueStoryGen === "function") {
+    _pmEnqueueStoryGen(placeName, function(text){ applyText(text); });
+  } else {
+    applyText("");
+  }
+}
+window._pmOpenStoryModal = _pmOpenStoryModal;
+
+// Dig-deeper inside the modal — appends a longer continuation below
+// the original narrative without leaving the modal.
+function _pmDigDeeperInModal(linkEl, bodyEl){
+  var placeName = linkEl.getAttribute("data-place") || "";
+  if (!placeName) return;
+  var deep = bodyEl.querySelector(".pm-modal-deep");
+  if (!deep) return;
+  if (deep.style.display === "block" && deep.children.length > 0) {
+    // Toggle hidden
+    deep.style.display = "none";
+    linkEl.textContent = "Tell me more →";
+    return;
+  }
+  if (deep.children.length > 0) {
+    deep.style.display = "block";
+    linkEl.textContent = "Hide ←";
+    return;
+  }
+  // Cache lookup or fresh fetch
+  var deepCache = window._placeDeepNarrativeCache || (window._placeDeepNarrativeCache = {});
+  var key = placeName.toLowerCase();
+  function applyDeep(text){
+    if (!text) {
+      deep.innerHTML = '<div style="color:#b04040;font-style:italic;">Couldn\'t load more.</div>';
+    } else {
+      deep.innerHTML = '<p style="margin:0;line-height:1.65;">' + _pmEsc(text) + '</p>';
+    }
+    deep.style.display = "block";
+    linkEl.textContent = "Hide ←";
+  }
+  if (deepCache[key]) { applyDeep(deepCache[key]); return; }
+  deep.innerHTML = '<div style="color:#999;font-style:italic;">Digging deeper…</div>';
+  deep.style.display = "block";
+  // Lean on the existing _pmDigDeeper backing fetch if available
+  if (typeof _pmGenerateDeepNarrative === "function") {
+    _pmGenerateDeepNarrative(placeName).then(function(text){
+      if (text) deepCache[key] = text;
+      applyDeep(text || "");
+    }, function(){ applyDeep(""); });
+  } else {
+    // Fallback: re-use callMax with a focused prompt.
+    if (typeof callMax !== "function") { applyDeep(""); return; }
+    var prompt = "Continue this short cultural/historical sketch about " + placeName + ". One paragraph (4-6 sentences). Concrete details — names, dates, specific events, why locals care. No tourist-brochure tone.";
+    callMax([{role:"user", content: prompt}], 600, 25000).then(function(text){
+      if (text) deepCache[key] = text;
+      applyDeep(text || "");
+    }, function(){ applyDeep(""); });
+  }
 }
 window._pmTriggerStory = _pmTriggerStory;
 
