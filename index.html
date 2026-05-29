@@ -15106,17 +15106,21 @@ function _renderPlaceActivityItems(){
   })();
 
   // Round NC.X: by-Place view. Reuses the existing by-Activity row
-  // renderer but feeds it a SINGLE virtual section "All places" that
-  // contains every activity. The renderer's existing byDest grouping
-  // then naturally consolidates: a place referenced by 5 activities
-  // gets ONE row with all 5 activities listed in the right column,
-  // the same Story expand, the same Sights-here line, the same
-  // research button, the same chips.
+  // renderer but feeds it virtual sections. Routes get their own
+  // section (they render as endpoint-pair rows, not per-place rows
+  // — they're transport, not destinations). Non-route items go into
+  // "All places" where byDest consolidates each unique place into one
+  // row with every activity that references it in the right column.
   if (_tb._pickerSortMode === "place") {
-    // Inject the virtual section ahead of the existing forEach.
-    var _virtualSection = "All places";
-    bySection[_virtualSection] = items.slice();
-    sectionOrder = [_virtualSection];
+    var _routeItems = items.filter(function(it){ return it && it.type === "route"; });
+    var _nonRouteItems = items.filter(function(it){ return it && it.type !== "route"; });
+    bySection["All places"] = _nonRouteItems;
+    if (_routeItems.length) {
+      bySection["Scenic routes"] = _routeItems;
+      sectionOrder = ["All places", "Scenic routes"];
+    } else {
+      sectionOrder = ["All places"];
+    }
     // Skip the legacy by-Place renderer below.
     (function _renderPickerByPlaceLegacy(){ return; })();
   }
@@ -15424,11 +15428,12 @@ function _renderPlaceActivityItems(){
     hdrWrap.innerHTML = '<div class="tb-act-section-title" style="flex:1;">' + _pmEsc(sec) + '</div>'
       + '<div class="tb-act-section-count">' + destOrder.length + ' destination' + (destOrder.length===1?'':'s') + '</div>'
       + moreBtnHtml;
-    // Round NC.X: suppress the section header in by-Place mode. The
-    // virtual section "All places" is just a plumbing trick to reuse
-    // the activity-row renderer; the user shouldn't see an "All
-    // places" header at the top of the list.
-    if (_tb._pickerSortMode !== "place") {
+    // Round NC.X: in by-Place mode, suppress the "All places" header
+    // (it's just a plumbing label for the renderer) but KEEP the
+    // "Scenic routes" header so the user can see routes are a
+    // distinct category. Activity mode shows every section header
+    // as usual.
+    if (_tb._pickerSortMode !== "place" || sec === "Scenic routes") {
       list.appendChild(hdrWrap);
     }
 
