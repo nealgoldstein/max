@@ -15556,10 +15556,22 @@ function _renderPlaceActivityItems(){
       var _llmIsStay = d.placeRefs.some(function(r){
         return r.placeRef && r.placeRef.overnight !== false;
       });
+      // Round NC.X: lodging test. A place is overnight-capable if at
+      // least one of its requiredPlace refs says overnight !== false
+      // (LLM-set per the geography model — sight-in-trip /
+      // sight-in-destination places explicitly set overnight=false;
+      // destination places leave it default-true). Reuses _llmIsStay
+      // as the signal since they ask the same question.
+      var _overnightCapable = _llmIsStay;
       var _placeMeta = (_tb && _tb.placeMeta) ? _tb.placeMeta[_pmMetaKey(d.place)] : null;
       var _stayOverride = _placeMeta && (_placeMeta.stayOverride === true || _placeMeta.stayOverride === false)
         ? _placeMeta.stayOverride : null;
+      // If the user has explicitly overridden to Stay (rare — they
+      // know the LLM was wrong about lodging), respect that even when
+      // _overnightCapable is false. The override path goes through the
+      // research card's stayOverride field, not the inline chip.
       var _isStayCandidate = (_stayOverride !== null) ? _stayOverride : _llmIsStay;
+      if (_stayOverride === true) _overnightCapable = true;
       var _placeArg = _pmEsc(d.place);
       // Round NC.X: BOTH chips render with the same pill shape (border,
       // padding, border-radius). The only difference is color — active
@@ -15573,6 +15585,8 @@ function _renderPlaceActivityItems(){
       var _inactiveBtnStyle   = 'font-size:9.5px;font-weight:600;color:#888;background:#fff;border:1px solid #ddd;padding:1px 8px;border-radius:9px;letter-spacing:.02em;cursor:pointer;font-family:inherit;line-height:1.3;';
       var stayChip;
       if (_isStayCandidate) {
+        // Place is currently set as a Stay. Both labels shown — the
+        // user might want to switch to See.
         stayChip = '<span class="pm-stay-toggle" style="display:inline-flex;align-items:center;gap:6px;">'
           + '<span style="' + _stayActiveStyle + '" title="Currently set as a stay">🛏 Stay</span>'
           + '<button type="button" '
@@ -15580,7 +15594,20 @@ function _renderPlaceActivityItems(){
           +   'style="' + _inactiveBtnStyle + '" '
           +   'title="Switch to see-only">+ See</button>'
           + '</span>';
+      } else if (!_overnightCapable) {
+        // Round NC.X: lodging-test gate. The LLM said this place has
+        // no lodging (overnightCapable=false), so it can't be a
+        // destination — only a sight. Render just the active "👁 See"
+        // label with no "+ Stay" affordance. Reinforces the geography
+        // model: destinations are sub-geographies with lodging; sights
+        // are not. If the user knows the LLM was wrong about lodging,
+        // the Research card's stayOverride field is the explicit
+        // escape hatch (it bypasses _overnightCapable).
+        stayChip = '<span class="pm-stay-toggle" style="display:inline-flex;align-items:center;gap:6px;">'
+          + '<span style="' + _seeActiveStyle + '" title="Sight — no lodging here">👁 See</span>'
+          + '</span>';
       } else {
+        // Place is currently See but COULD be a Stay (overnight-capable).
         // Selected role renders FIRST so the user sees the current
         // state immediately, then the alternative as a "switch to"
         // affordance.
@@ -17781,7 +17808,7 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
     (item.requiredPlaces || []).forEach(function(p){
       if (!p || !p.place) return;
       var k = p.place.toLowerCase();
-      if (!allPlaces[k]) allPlaces[k] = { place: p.place, kept: false, _isDayTrip: false, _dayTripHub: "", _waysideFromHub: "", _rejected: false };
+      if (!allPlaces[k]) allPlaces[k] = { place: p.place, kept: false, _isDayTrip: false, _dayTripHub: "", _waysideFromHub: "", _rejected: false, overnight: undefined };
       if (p._keep) allPlaces[k].kept = true;
       if (p._rejected === true) allPlaces[k]._rejected = true;
       if (p._isDayTrip === true) {
@@ -17790,6 +17817,16 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
       }
       if (p._waysideFromHub && !allPlaces[k]._waysideFromHub) {
         allPlaces[k]._waysideFromHub = p._waysideFromHub;
+      }
+      // Round NC.X: aggregate the lodging-test signal. info.overnight
+      // starts undefined; any ref with overnight !== false promotes it
+      // to true. Stays undefined (treated as not-overnight-capable) if
+      // EVERY ref says false — that's the LLM telling us this place
+      // is a sight, not a destination.
+      if (p.overnight !== false && allPlaces[k].overnight !== true) {
+        allPlaces[k].overnight = true;
+      } else if (p.overnight === false && allPlaces[k].overnight === undefined) {
+        allPlaces[k].overnight = false;
       }
     });
   });
@@ -17902,9 +17939,15 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
         + '</label>';
     }
     if (role === "stay") {
+      // Round NC.X: hint when the LLM said this place has no lodging.
+      // The radio stays enabled (power-user override path), but the
+      // user sees Max's call alongside.
+      var _stayHint = (info.overnight === false)
+        ? ' <span style="color:#a36500;font-size:10.5px;font-weight:500;font-style:italic;">(no lodging known)</span>'
+        : '';
       return '<label style="display:flex;align-items:center;gap:6px;margin:3px 0;padding:5px 8px;background:' + bg + ';border:' + border + ';border-radius:5px;cursor:pointer;font-weight:' + weight + ';">'
         + '<input type="radio" name="pm-mode" value="stay" ' + checked + ' />'
-        + '<span>🛏 Overnight</span>'
+        + '<span>🛏 Overnight' + _stayHint + '</span>'
         + '</label>';
     }
     if (role === "see") {
