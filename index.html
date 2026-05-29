@@ -8985,6 +8985,15 @@ function _applyGeographyHint(p){
     p._dayTripHub = "";
     if (p.overnight !== false) p.overnight = true;
   }
+  // Round NC.X diagnostic: log what the LLM returned per place so we
+  // can spot-check whether the model is honoring the geography contract.
+  // "(no kind)" means the LLM omitted the tag — the place still works,
+  // it just defaults to whatever the downstream picker derives.
+  try {
+    var _diagKind = kind || "(no kind)";
+    var _diagParent = p.parentDestination ? (" → " + p.parentDestination) : "";
+    console.log("[Max geography] " + (p.place || "(unnamed)") + " · " + _diagKind + _diagParent);
+  } catch(_){}
   return p;
 }
 if (typeof globalThis !== "undefined") globalThis._applyGeographyHint = _applyGeographyHint;
