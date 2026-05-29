@@ -21626,11 +21626,52 @@ function saveRecognitionAndContinue(){
   }
 
   if(!_tb.tripSentence){
-    maxAlert("Please describe where you want to go and what you want to do there.");
+    maxAlert(_briefMissingFieldMsg());
     return;
   }
 
   renderTripBrief();
+}
+
+// Round NC.X: tailor the "you need to fill this in" message to what
+// the user ACTUALLY left blank. Showing "Please describe where you
+// want to go and what you want to do there" when the user has
+// already filled in why-this-place reads as if Max isn't paying
+// attention. Returns the most-specific message the empty-field
+// set warrants.
+function _briefMissingFieldMsg(){
+  function _read(id){ var el = g(id); return (el && el.value ? el.value : "").trim(); }
+  // Where: placeName field (the new single-page brief) OR region OR
+  // tripSentence (legacy single-line form).
+  var hasPlace = !!(
+    (_tb.placeName || "").trim() ||
+    (_tb.region    || "").trim() ||
+    _read("tb-place-name") ||
+    _read("tb-region")
+  );
+  // Why: either of the two why fields (whySpecifically / whyGenerally)
+  // OR the legacy placeContext / tripSentence as a fallback signal.
+  var hasWhy = !!(
+    (_tb.whySpecifically || "").trim() ||
+    (_tb.whyGenerally    || "").trim() ||
+    (_tb.placeContext    || "").trim() ||
+    (_tb.tripSentence    || "").trim() ||
+    _read("tb-why-specifically") ||
+    _read("tb-why-generally")
+  );
+  if (!hasPlace && !hasWhy) {
+    return "Tell me where you want to go and a little about what's drawing you there.";
+  }
+  if (!hasPlace) {
+    return "Tell me where you want to go.";
+  }
+  if (!hasWhy) {
+    return "Tell me a little about what's drawing you there.";
+  }
+  // All present (caller shouldn't have reached this branch, but keep
+  // a friendly fallback in case the validator and the message helper
+  // disagree).
+  return "Please double-check the trip details — something's missing.";
 }
 
 
@@ -22466,7 +22507,7 @@ function goToTripStep2(){
   _tbCaptureAvoid();
   // Fallback: if sentence didn't parse cleanly into region, use the sentence itself
   if(!_tb.region && _tb.tripSentence){ _tb.region = _tb.tripSentence; }
-  if(!_tb.region){ maxAlert("Please describe where you want to go and what you want to do there."); return; }
+  if(!_tb.region){ maxAlert(_briefMissingFieldMsg()); return; }
   // v360.2 (A.4): capture the user's LITERAL input as initial wisps —
   // before renderActivityPicker / the LLM step contaminate anything.
   // The single-page brief has three free-text user fields: placeName,
