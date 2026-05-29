@@ -14141,9 +14141,12 @@ function _pmHydratePreview(slot){
         + ' style="font-size:11px;color:#1a5fa8;text-decoration:none;cursor:pointer;display:inline-block;margin-top:4px;"'
         + ' onclick="_pmDigDeeper(this);event.preventDefault();event.stopPropagation();return false;"'
         + '>Tell me more →</a>';
+      // Round NC.X: Things-to-do block moved out of the Story expand —
+      // it now lives behind its own "Things to do →" button at the
+      // row level. Story expand carries only the narrative + sights
+      // here + dig-deeper.
       fullDiv.innerHTML = narrPara
         + _sightsBlock
-        + '<div class="pm-row-story-todo" style="display:none;"></div>'
         + digBtn
         + '<div class="pm-row-story-deep" style="display:none;margin-top:6px;font-style:normal;color:#333;line-height:1.65;"></div>';
     }
@@ -14183,9 +14186,10 @@ function _pmHydratePreview(slot){
     applyText(text);
   });
 }
-// Toggle preview ↔ full paragraph + things-to-do. Things-to-do
-// (_generatePlaceWhatToDo) lazy-loads on first expand — we don't
-// pay for it unless the user actually wants the deeper read.
+// Round NC.X: Story expand is now narrative-only (sights here + dig
+// deeper). The Things-to-do bullets moved to their own
+// _pmTriggerTodo handler + its own button — they're a different kind
+// of content from the wiki narrative.
 function _pmToggleStoryFull(linkEl){
   var slot = linkEl && linkEl.closest ? linkEl.closest(".pm-row-story") : null;
   if (!slot) return;
@@ -14202,18 +14206,36 @@ function _pmToggleStoryFull(linkEl){
   fullDiv.style.display = "block";
   textSpan.style.display = "none";
   linkEl.textContent = "less ←";
-  // Lazy-load the things-to-do bullets on first expand. Cache hit
-  // renders synchronously; miss kicks off _generatePlaceWhatToDo.
+}
+window._pmToggleStoryFull = _pmToggleStoryFull;
+
+// Round NC.X: standalone Things-to-do trigger. Lives next to "Story →"
+// on each picker row. Lazy-loads the bullets via _generatePlaceWhatToDo
+// (cache-hit is synchronous). Clicking again toggles closed.
+function _pmTriggerTodo(linkEl){
+  var slot = linkEl && linkEl.closest ? linkEl.closest(".pm-row-story") : null;
+  if (!slot) return;
   var placeName = slot.getAttribute("data-place") || "";
-  var todoDiv = fullDiv.querySelector(".pm-row-story-todo");
-  if (!placeName || !todoDiv || todoDiv._pmTodoHydrated) return;
-  todoDiv._pmTodoHydrated = true;
+  if (!placeName) return;
+  var todoDiv = slot.querySelector(".pm-row-todo-full");
+  if (!todoDiv) return;
+  // Toggle behavior — second click closes.
+  if (todoDiv.style.display === "block") {
+    todoDiv.style.display = "none";
+    linkEl.textContent = "Things to do →";
+    return;
+  }
+  linkEl.textContent = "Things to do ↑";
   var key = placeName.toLowerCase();
   var todoCache = window._placeWhatToDoCache || {};
   function renderTodo(items){
-    if (!items || !items.length) return; // silent on empty/failure
-    var html = '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed #d8d4c8;">'
-      + '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#888;margin-bottom:5px;">What to do here</div>'
+    if (!items || !items.length) {
+      todoDiv.innerHTML = '<div style="font-size:11px;color:#999;font-style:italic;padding:6px 0;">No suggestions available for this place yet.</div>';
+      todoDiv.style.display = "block";
+      return;
+    }
+    var html = '<div style="padding:8px 10px;background:#fafafa;border:1px solid #ececec;border-radius:6px;">'
+      + '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#888;margin-bottom:5px;">Things to do here</div>'
       + '<ul style="list-style:none;padding:0;margin:0;">';
     items.forEach(function(it){
       var what = String(it && it.what || "").trim();
@@ -14229,21 +14251,18 @@ function _pmToggleStoryFull(linkEl){
     todoDiv.innerHTML = html;
     todoDiv.style.display = "block";
   }
-  if (todoCache[key]) {
-    renderTodo(todoCache[key]);
-    return;
-  }
-  todoDiv.innerHTML = '<div style="margin-top:8px;font-size:11px;color:#999;font-style:italic;">Loading suggestions…</div>';
+  if (todoCache[key]) { renderTodo(todoCache[key]); return; }
+  todoDiv.innerHTML = '<div style="font-size:11px;color:#999;font-style:italic;padding:6px 0;">Loading suggestions…</div>';
   todoDiv.style.display = "block";
   if (typeof _generatePlaceWhatToDo === "function") {
     _generatePlaceWhatToDo(placeName, {}).then(function(items){
       renderTodo(items || []);
     }, function(){
-      todoDiv.innerHTML = ""; // clear placeholder on failure
+      todoDiv.innerHTML = '<div style="font-size:11px;color:#c44;font-style:italic;padding:6px 0;">Couldn\'t load suggestions — try again later.</div>';
     });
   }
 }
-window._pmToggleStoryFull = _pmToggleStoryFull;
+window._pmTriggerTodo = _pmTriggerTodo;
 
 // v358.7: button-driven story trigger. Replaces the v358
 // IntersectionObserver auto-hydration. User clicks "Story →" → we
@@ -14302,6 +14321,20 @@ function _pmCloseStory(linkEl){
   if (fullDiv) fullDiv.style.display = "none";
   if (closeLink) closeLink.style.display = "none";
   if (trigger) trigger.style.display = "inline";
+  // Round NC.X: also collapse the Things-to-do block + reset its
+  // trigger label, since "× close" should leave the row in its
+  // initial state (no expansions anywhere).
+  var todoDiv = slot.querySelector(".pm-row-todo-full");
+  if (todoDiv) todoDiv.style.display = "none";
+  var todoTrigger = slot.querySelector(".pm-row-todo-trigger");
+  if (todoTrigger) todoTrigger.textContent = "Things to do →";
+  // Round NC.X: also reset the hydration flag so the next click re-
+  // applies the cached text immediately. Otherwise _pmTriggerStory
+  // sets textContent to the "…" placeholder, _pmHydratePreview sees
+  // _pmHydrated=true and bails, and the user is left staring at "…"
+  // until they click around. Re-hydrate is a cache-hit so it's
+  // instant — no LLM call, no flicker.
+  slot._pmHydrated = false;
 }
 window._pmCloseStory = _pmCloseStory;
 
@@ -15669,6 +15702,14 @@ function _renderPlaceActivityItems(){
           +   '<a class="pm-row-story-trigger" '
           +      'style="color:#1a5fa8;text-decoration:none;cursor:pointer;font-weight:600;" '
           +      'onclick="_pmTriggerStory(this);event.stopPropagation();return false;" href="#">Story →</a>'
+          // Round NC.X: "Things to do" is now its own button next to
+          // Story. Used to live inside the Story expand's full view
+          // (lazy-loaded on "more →"), but it's a different kind of
+          // content — Story is the narrative; Things to do is a
+          // checklist. Each gets its own affordance.
+          +   '<a class="pm-row-todo-trigger" '
+          +      'style="color:#1a5fa8;text-decoration:none;cursor:pointer;font-weight:600;margin-left:10px;" '
+          +      'onclick="_pmTriggerTodo(this);event.stopPropagation();return false;" href="#">Things to do →</a>'
           +   '<span class="pm-row-story-text" style="display:none;font-style:italic;color:#666;"></span>'
           +   '<a class="pm-row-story-toggle" '
           +      'style="display:none;color:#1a5fa8;text-decoration:none;cursor:pointer;font-weight:600;margin-left:4px;" '
@@ -15681,6 +15722,7 @@ function _renderPlaceActivityItems(){
           +      'style="display:none;color:#999;text-decoration:none;cursor:pointer;font-weight:600;margin-left:8px;" '
           +      'onclick="_pmCloseStory(this);event.stopPropagation();return false;" href="#" title="Close story">× close</a>'
           +   '<div class="pm-row-story-full" style="display:none;margin-top:2px;font-style:normal;color:#333;"></div>'
+          +   '<div class="pm-row-todo-full" style="display:none;margin-top:6px;color:#333;"></div>'
           + '</div>';
       }
       // v359.32: Wikipedia thumbnail placeholder + factual description.
