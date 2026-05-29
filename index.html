@@ -43032,8 +43032,27 @@ function drawTripMode(){
   var addForm=document.createElement("div"); addForm.className="tm-add-form"; addForm.id="tm-add-form"; addForm.style.display="none";
 
   var addInp=document.createElement("textarea"); addInp.className="tm-add-inp"; addInp.id="dest-intent-vis";
-  addInp.placeholder="Where do you want to go, and what draws you there?";
+  addInp.placeholder="Where do you want to go";
   addInp.oninput=function(){syncAddVis();g("dest-intent").value=this.value;g("dest-err").style.display="none";};
+
+  // Round NC.X: helper — diff in nights between two ISO dates.
+  function _nightsBetween(fromIso, toIso){
+    if (!fromIso || !toIso) return null;
+    try {
+      var a = new Date(fromIso + "T12:00:00");
+      var b = new Date(toIso + "T12:00:00");
+      if (isNaN(a.getTime()) || isNaN(b.getTime())) return null;
+      return Math.max(0, Math.round((b - a) / 86400000));
+    } catch(_) { return null; }
+  }
+  function _shiftIso(fromIso, nights){
+    if (!fromIso || typeof nights !== "number" || nights < 0) return "";
+    try {
+      var d = new Date(fromIso + "T12:00:00");
+      d.setDate(d.getDate() + nights);
+      return d.toISOString().slice(0, 10);
+    } catch(_) { return ""; }
+  }
 
   var dateRow=document.createElement("div"); dateRow.className="tm-date-row";
   var fc=document.createElement("div"); fc.className="tm-date-col";
@@ -43042,24 +43061,58 @@ function drawTripMode(){
   fi2.onchange=function(){
     g("dest-from").value=this.value; onFromChange(); syncAddVis();
     ti2.min=this.value;
-    // Pre-fill departure with arrival + reasonable default nights
-    // so the date picker opens at (or near) the arrival date
-    if(!ti2.value||ti2.value<this.value){
-      var arr=new Date(this.value+'T12:00:00');
+    // Round NC.X: if a nights value is set, prefer it (recompute
+    // leaving from arrival + nights). Otherwise fall back to the
+    // previous-dest default nights.
+    var nightsVal = parseInt(ni.value, 10);
+    if (isFinite(nightsVal) && nightsVal > 0) {
+      ti2.value = _shiftIso(this.value, nightsVal);
+    } else if(!ti2.value||ti2.value<this.value){
       var defaultNights=trip.destinations.length>0?(trip.destinations[trip.destinations.length-1].nights||3):3;
-      arr.setDate(arr.getDate()+defaultNights);
-      ti2.value=arr.toISOString().slice(0,10);
-      g("dest-to").value=ti2.value;
-      syncAddVis();
+      ti2.value = _shiftIso(this.value, defaultNights);
+      ni.value = defaultNights;
+    } else {
+      // Both dates valid — recompute nights to keep them in sync.
+      var nb = _nightsBetween(this.value, ti2.value);
+      if (nb !== null) ni.value = nb;
     }
+    g("dest-to").value=ti2.value;
+    syncAddVis();
   };
   fc.appendChild(fl); fc.appendChild(fi2);
+  // Round NC.X: Number of nights field — sits between Arriving and
+  // Leaving. Editing it shifts Leaving; editing Leaving recomputes
+  // the count. Defaults to 3 if both dates are empty.
+  var nc=document.createElement("div"); nc.className="tm-date-col";
+  var nl=document.createElement("div"); nl.className="tm-date-lbl"; nl.textContent="Nights";
+  var ni=document.createElement("input"); ni.type="number"; ni.min="1"; ni.max="60"; ni.step="1";
+  ni.className="tm-date-inp"; ni.id="dest-nights-vis"; ni.style.cssText="text-align:center;";
+  ni.oninput=function(){
+    var n = parseInt(this.value, 10);
+    if (!isFinite(n) || n < 1) return;
+    var arr = fi2.value;
+    if (arr) {
+      ti2.value = _shiftIso(arr, n);
+      g("dest-to").value = ti2.value;
+    }
+    syncAddVis();
+  };
+  nc.appendChild(nl); nc.appendChild(ni);
+
   var tc=document.createElement("div"); tc.className="tm-date-col";
   var tl=document.createElement("div"); tl.className="tm-date-lbl"; tl.textContent="Leaving";
   var ti2=document.createElement("input"); ti2.type="date"; ti2.className="tm-date-inp"; ti2.id="dest-to-vis";
-  ti2.onchange=function(){g("dest-to").value=this.value;syncAddVis();};
+  ti2.onchange=function(){
+    g("dest-to").value=this.value;
+    // Round NC.X: keep nights in sync when user edits Leaving.
+    if (fi2.value && this.value) {
+      var nb = _nightsBetween(fi2.value, this.value);
+      if (nb !== null) ni.value = nb;
+    }
+    syncAddVis();
+  };
   tc.appendChild(tl); tc.appendChild(ti2);
-  dateRow.appendChild(fc); dateRow.appendChild(tc);
+  dateRow.appendChild(fc); dateRow.appendChild(nc); dateRow.appendChild(tc);
 
   var errDiv=document.createElement("div"); errDiv.className="tm-err"; errDiv.id="dest-err-vis";
   var sub=document.createElement("button"); sub.className="tm-submit"; sub.id="tm-submit"; sub.textContent="Add destination \u2197";
@@ -43112,7 +43165,19 @@ function drawTripMode(){
     // Sync to visible to-field
     var hTo=g("dest-to").value;
     if(hTo)ti2.value=hTo;
+    // Round NC.X: pre-fill the nights input — either from the
+    // current arr/leave pair if both are set, or from the last
+    // dest's nights as a sensible default.
+    var _initNights = (fi2.value && ti2.value) ? _nightsBetween(fi2.value, ti2.value) : null;
+    if (!isFinite(_initNights) || _initNights < 1) {
+      _initNights = (last && last.nights) || 3;
+    }
+    ni.value = _initNights;
     syncAddVis(); // update submit button state now that dates are set
+  } else {
+    // Fresh trip — no prior destination to anchor from. Default to
+    // 3 nights so the user has a starting number; they can edit.
+    ni.value = 3;
   }
 
   checkAndShowOverlaps();
