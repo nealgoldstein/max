@@ -18039,8 +18039,21 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
   // Recompute allPlaces snapshot — same shape as _renderPlacePickerMap
   // builds, but we only need it here for the popup logic so we keep
   // it inline rather than exporting from the renderer.
+  // Round NC.X: pull the SAME source list the map render uses —
+  // _tb.placeActivities PLUS the synthetic items mirrored from
+  // trip.destinations (kept-stays + absorbed day-trip-chips).
+  // Earlier the popup walked only placeActivities, so places that
+  // lived as day-trips on trip.destinations but didn't have an
+  // _isDayTrip flag in placeActivities (e.g. when reopenPicker's
+  // bridge hadn't reached them) showed in the hub dropdown despite
+  // being day trips themselves, and pre-selected See in their own
+  // popup despite the pin showing day-trip.
+  var _allPopupItems = (_tb.placeActivities || []);
+  if (typeof _pickerSyntheticItemsFromTripDestinations === "function") {
+    try { _allPopupItems = _allPopupItems.concat(_pickerSyntheticItemsFromTripDestinations() || []); } catch(_){}
+  }
   var allPlaces = {};
-  (_tb.placeActivities || []).forEach(function(item){
+  _allPopupItems.forEach(function(item){
     (item.requiredPlaces || []).forEach(function(p){
       if (!p || !p.place) return;
       var k = p.place.toLowerCase();
@@ -18066,6 +18079,31 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
       }
     });
   });
+  // Round NC.X: also fold trip.destinations[*].dayTrips into the
+  // allPlaces dictionary so absorbed chips ARE recognized as day
+  // trips (with their hub) by the popup's hub filter + the role
+  // pre-selection. Without this, the popup hub filter accepts a
+  // place as a candidate hub even when it's itself a day trip on a
+  // hub — Diamond Beach symptom.
+  try {
+    if (typeof trip !== "undefined" && trip && Array.isArray(trip.destinations)) {
+      var _normFn = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase(); };
+      trip.destinations.forEach(function(d){
+        if (!d || !Array.isArray(d.dayTrips)) return;
+        var hubKey = (d.place || "").toLowerCase();
+        d.dayTrips.forEach(function(chip){
+          if (!chip || !chip.place) return;
+          var k = chip.place.toLowerCase();
+          if (!allPlaces[k]) allPlaces[k] = { place: chip.place, kept: true, _isDayTrip: true, _dayTripHub: hubKey, _waysideFromHub: "", _rejected: false, overnight: false };
+          else {
+            allPlaces[k].kept = true;
+            allPlaces[k]._isDayTrip = true;
+            if (!allPlaces[k]._dayTripHub) allPlaces[k]._dayTripHub = hubKey;
+          }
+        });
+      });
+    }
+  } catch(_){}
   var canon = String(placeKey || "").toLowerCase();
   var info = allPlaces[canon];
   if (!info) return;
