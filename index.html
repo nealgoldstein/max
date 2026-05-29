@@ -14209,56 +14209,90 @@ function _pmToggleStoryFull(linkEl){
 }
 window._pmToggleStoryFull = _pmToggleStoryFull;
 
-// Round NC.X: Things-to-do widget — entirely separate from Story.
-// Its own scope (.pm-row-todo), its own trigger, its own close.
+// Round NC.X: Things-to-do now opens a centered modal (matches the
+// Story modal pattern). The inline list was wrapping into the narrow
+// left column at unreadable widths. Modal renders the same bullets at
+// generous width.
 function _pmTriggerTodo(linkEl){
   var slot = linkEl && linkEl.closest ? linkEl.closest(".pm-row-todo") : null;
   if (!slot) return;
   var placeName = slot.getAttribute("data-place") || "";
   if (!placeName) return;
-  var todoDiv = slot.querySelector(".pm-row-todo-full");
-  if (!todoDiv) return;
-  var trigger = slot.querySelector(".pm-row-todo-trigger");
-  var closeLink = slot.querySelector(".pm-row-todo-close");
-  if (trigger) trigger.style.display = "none";
-  if (closeLink) closeLink.style.display = "inline";
-  var key = placeName.toLowerCase();
-  var todoCache = window._placeWhatToDoCache || {};
+  _pmOpenTodoModal(placeName);
+}
+window._pmTriggerTodo = _pmTriggerTodo;
+
+function _pmOpenTodoModal(placeName){
+  var existing = document.getElementById("pm-todo-modal");
+  if (existing) existing.remove();
+  var ov = document.createElement("div");
+  ov.id = "pm-todo-modal";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.32);z-index:11600;display:flex;align-items:center;justify-content:center;padding:24px;";
+  ov.onclick = function(e){ if (e.target === ov) ov.remove(); };
+  var box = document.createElement("div");
+  box.style.cssText = "background:#fff;border-radius:12px;max-width:620px;width:100%;max-height:85vh;overflow:auto;box-shadow:0 12px 36px rgba(0,0,0,0.24);padding:20px 24px;font-family:inherit;";
+  box.onclick = function(e){ e.stopPropagation(); };
+  var hdr = document.createElement("div");
+  hdr.style.cssText = "display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:10px;";
+  var title = document.createElement("div");
+  title.style.cssText = "font-size:16px;font-weight:700;color:#111;";
+  title.textContent = "Things to do here";
+  var sub = document.createElement("div");
+  sub.style.cssText = "font-size:12.5px;color:#888;margin-top:2px;";
+  sub.textContent = placeName;
+  var titleWrap = document.createElement("div");
+  titleWrap.appendChild(title);
+  titleWrap.appendChild(sub);
+  var closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.textContent = "×";
+  closeBtn.style.cssText = "font-size:22px;line-height:1;background:none;border:none;color:#888;cursor:pointer;font-family:inherit;padding:0 4px;";
+  closeBtn.onclick = function(){ ov.remove(); };
+  hdr.appendChild(titleWrap);
+  hdr.appendChild(closeBtn);
+  box.appendChild(hdr);
+
+  var body = document.createElement("div");
+  body.style.cssText = "font-size:13.5px;line-height:1.65;color:#333;";
+  body.innerHTML = '<div style="color:#999;font-style:italic;padding:10px 0;">Loading suggestions…</div>';
+  box.appendChild(body);
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+
   function renderTodo(items){
     if (!items || !items.length) {
-      todoDiv.innerHTML = '<div style="font-size:11px;color:#999;font-style:italic;padding:6px 0;">No suggestions available for this place yet.</div>';
-      todoDiv.style.display = "block";
+      body.innerHTML = '<div style="color:#999;font-style:italic;padding:10px 0;">No suggestions available for this place yet.</div>';
       return;
     }
-    var html = '<div style="padding:8px 10px;background:#fafafa;border:1px solid #ececec;border-radius:6px;">'
-      + '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#888;margin-bottom:5px;">Things to do here</div>'
-      + '<ul style="list-style:none;padding:0;margin:0;">';
+    var html = '<ul style="list-style:none;padding:0;margin:0;">';
     items.forEach(function(it){
       var what = String(it && it.what || "").trim();
       var where = String(it && it.where || "").trim();
       if (!what) return;
-      html += '<li style="font-size:11.5px;color:#333;line-height:1.5;margin-bottom:5px;padding-left:12px;position:relative;">'
-        + '<span style="position:absolute;left:0;top:0;color:#1a5fa8;">·</span>'
-        + _pmEsc(what)
-        + (where ? '<span style="color:#888;font-size:10.5px;display:block;margin-top:1px;">' + _pmEsc(where) + '</span>' : '')
+      html += '<li style="padding-left:16px;position:relative;margin-bottom:10px;">'
+        + '<span style="position:absolute;left:0;top:6px;width:6px;height:6px;border-radius:50%;background:#1a5fa8;"></span>'
+        + '<div style="font-size:14px;color:#222;font-weight:600;">' + _pmEsc(what) + '</div>'
+        + (where ? '<div style="font-size:12px;color:#777;margin-top:2px;line-height:1.55;">' + _pmEsc(where) + '</div>' : '')
         + '</li>';
     });
-    html += '</ul></div>';
-    todoDiv.innerHTML = html;
-    todoDiv.style.display = "block";
+    html += '</ul>';
+    body.innerHTML = html;
   }
+
+  var key = String(placeName).toLowerCase();
+  var todoCache = window._placeWhatToDoCache || {};
   if (todoCache[key]) { renderTodo(todoCache[key]); return; }
-  todoDiv.innerHTML = '<div style="font-size:11px;color:#999;font-style:italic;padding:6px 0;">Loading suggestions…</div>';
-  todoDiv.style.display = "block";
   if (typeof _generatePlaceWhatToDo === "function") {
     _generatePlaceWhatToDo(placeName, {}).then(function(items){
       renderTodo(items || []);
     }, function(){
-      todoDiv.innerHTML = '<div style="font-size:11px;color:#c44;font-style:italic;padding:6px 0;">Couldn\'t load suggestions — try again later.</div>';
+      body.innerHTML = '<div style="color:#c44;font-style:italic;padding:10px 0;">Couldn\'t load suggestions — try again later.</div>';
     });
+  } else {
+    body.innerHTML = '<div style="color:#999;font-style:italic;padding:10px 0;">No fetcher available.</div>';
   }
 }
-window._pmTriggerTodo = _pmTriggerTodo;
+window._pmOpenTodoModal = _pmOpenTodoModal;
 
 // Round NC.X: close handler for the Things-to-do widget. Mirrors
 // _pmCloseStory's scope-specific reset — hides the full block,
@@ -15834,19 +15868,9 @@ function _renderPlaceActivityItems(){
           +    'onclick="event.stopPropagation();">'
           +   '<div class="pm-row-story-triggers" style="display:flex;align-items:center;gap:10px;">'
           +     '<a class="pm-row-story-trigger" '
-          +        'style="color:#1a5fa8;text-decoration:none;cursor:pointer;font-weight:600;" '
+          +        'style="color:#1a5fa8;text-decoration:none;cursor:pointer;font-weight:600;white-space:nowrap;" '
           +        'onclick="_pmTriggerStory(this);event.stopPropagation();return false;" href="#">Story →</a>'
-          +     '<a class="pm-row-story-close" '
-          +        'style="display:none;color:#999;text-decoration:none;cursor:pointer;font-weight:600;" '
-          +        'onclick="_pmCloseStory(this);event.stopPropagation();return false;" href="#" title="Close story">× close</a>'
           +   '</div>'
-          +   '<div class="pm-row-story-preview" style="display:none;margin-top:4px;">'
-          +     '<span class="pm-row-story-text" style="font-style:italic;color:#666;"></span>'
-          +     '<a class="pm-row-story-toggle" '
-          +        'style="display:none;color:#1a5fa8;text-decoration:none;cursor:pointer;font-weight:600;margin-left:6px;" '
-          +        'onclick="_pmToggleStoryFull(this);event.stopPropagation();return false;" href="#">more →</a>'
-          +   '</div>'
-          +   '<div class="pm-row-story-full" style="display:none;margin-top:4px;font-style:normal;color:#333;"></div>'
           + '</div>'
           // ── Widget 2: Things to do — separate scope ──────────
           + '<div class="pm-row-todo" data-place="'+_placeAttr+'" '
@@ -15854,13 +15878,9 @@ function _renderPlaceActivityItems(){
           +    'onclick="event.stopPropagation();">'
           +   '<div class="pm-row-todo-triggers" style="display:flex;align-items:center;gap:10px;">'
           +     '<a class="pm-row-todo-trigger" '
-          +        'style="color:#1a5fa8;text-decoration:none;cursor:pointer;font-weight:600;" '
+          +        'style="color:#1a5fa8;text-decoration:none;cursor:pointer;font-weight:600;white-space:nowrap;" '
           +        'onclick="_pmTriggerTodo(this);event.stopPropagation();return false;" href="#">Things to do →</a>'
-          +     '<a class="pm-row-todo-close" '
-          +        'style="display:none;color:#999;text-decoration:none;cursor:pointer;font-weight:600;" '
-          +        'onclick="_pmCloseTodo(this);event.stopPropagation();return false;" href="#" title="Close Things to do">× close</a>'
           +   '</div>'
-          +   '<div class="pm-row-todo-full" style="display:none;margin-top:6px;color:#333;"></div>'
           + '</div>';
       }
       // v359.32: Wikipedia thumbnail placeholder + factual description.
