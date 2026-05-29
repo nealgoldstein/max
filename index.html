@@ -14111,6 +14111,29 @@ function _pmHydratePreview(slot){
       var narrPara = '<p style="margin:0 0 8px;line-height:1.65;">'
         + _pmEsc(full)
         + '</p>';
+      // Round NC.X: "Sights here" block in the expanded place view —
+      // the sights the LLM tagged as belonging to this destination's
+      // geography (sight-in-destination with this destination as
+      // parentDestination, persisted as _dayTripHub on each
+      // requiredPlace). Read from the _childrenByHub map that
+      // _renderPlaceActivityItems builds once per render.
+      var _sightsBlock = "";
+      try {
+        var _hubKey = String(placeName).toLowerCase();
+        var _kids = (_tb && _tb._childrenByHub && _tb._childrenByHub[_hubKey]) || [];
+        if (_kids.length) {
+          _sightsBlock = '<div style="margin:6px 0 10px;padding:7px 10px;background:#f7f4fb;border:1px solid #e0d7ec;border-radius:6px;">'
+            + '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#5b3f8f;margin-bottom:4px;">Sights here</div>'
+            + '<ul style="list-style:none;padding:0;margin:0;">';
+          _kids.forEach(function(name){
+            _sightsBlock += '<li style="font-size:11.5px;color:#3a2960;line-height:1.5;padding-left:12px;position:relative;margin-bottom:2px;">'
+              + '<span style="position:absolute;left:0;top:0;color:#7c5cbf;">·</span>'
+              + _pmEsc(name)
+              + '</li>';
+          });
+          _sightsBlock += '</ul></div>';
+        }
+      } catch(_){}
       // v358.2: include the trip-view's "Dig deeper" affordance —
       // same content surface available in both places, so the user
       // can keep digging from either the picker or the trip view.
@@ -14119,6 +14142,7 @@ function _pmHydratePreview(slot){
         + ' onclick="_pmDigDeeper(this);event.preventDefault();event.stopPropagation();return false;"'
         + '>Tell me more →</a>';
       fullDiv.innerHTML = narrPara
+        + _sightsBlock
         + '<div class="pm-row-story-todo" style="display:none;"></div>'
         + digBtn
         + '<div class="pm-row-story-deep" style="display:none;margin-top:6px;font-style:normal;color:#333;line-height:1.65;"></div>';
