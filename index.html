@@ -17295,15 +17295,15 @@ function _pmRtFieldHtml(id, initialContent, opts){
   return ''
     + '<div class="pm-rt-wrap" style="border:1px solid #ccc;border-radius:5px;background:#fff;font-family:inherit;">'
     +   '<div class="pm-rt-toolbar" style="display:flex;gap:1px;padding:3px 4px;border-bottom:1px solid #eee;background:#fafafa;">'
-    +     '<button type="button" onmousedown="event.preventDefault();_pmRtCmd(this,&quot;bold&quot;);" title="Bold" style="font-size:13px;font-weight:700;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:serif;">B</button>'
-    +     '<button type="button" onmousedown="event.preventDefault();_pmRtCmd(this,&quot;italic&quot;);" title="Italic" style="font-size:13px;font-style:italic;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:serif;">I</button>'
+    +     '<button type="button" data-pmrt="bold" title="Bold" style="font-size:13px;font-weight:700;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:serif;">B</button>'
+    +     '<button type="button" data-pmrt="italic" title="Italic" style="font-size:13px;font-style:italic;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:serif;">I</button>'
     +     '<span style="width:1px;background:#ddd;margin:3px 4px;"></span>'
-    +     '<button type="button" onmousedown="event.preventDefault();_pmRtCmd(this,&quot;insertUnorderedList&quot;);" title="Bullet list" style="font-size:13px;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:inherit;">•</button>'
-    +     '<button type="button" onmousedown="event.preventDefault();_pmRtCmd(this,&quot;insertOrderedList&quot;);" title="Numbered list" style="font-size:11.5px;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:inherit;">1.</button>'
-    +     '<button type="button" onmousedown="event.preventDefault();_pmRtInsertCheckbox(this);" title="Checklist" style="font-size:13px;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:inherit;">☑</button>'
+    +     '<button type="button" data-pmrt="insertUnorderedList" title="Bullet list" style="font-size:13px;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:inherit;">•</button>'
+    +     '<button type="button" data-pmrt="insertOrderedList" title="Numbered list" style="font-size:11.5px;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:inherit;">1.</button>'
+    +     '<button type="button" data-pmrt="checklist" title="Checklist" style="font-size:13px;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:inherit;">☑</button>'
     +     '<span style="width:1px;background:#ddd;margin:3px 4px;"></span>'
-    +     '<button type="button" onmousedown="event.preventDefault();_pmRtCmd(this,&quot;createLink&quot;);" title="Add link" style="font-size:11.5px;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:inherit;">🔗</button>'
-    +     '<button type="button" onmousedown="event.preventDefault();_pmRtCmd(this,&quot;unlink&quot;);" title="Remove link" style="font-size:11.5px;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:inherit;">⌧</button>'
+    +     '<button type="button" data-pmrt="createLink" title="Add link" style="font-size:11.5px;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:inherit;">🔗</button>'
+    +     '<button type="button" data-pmrt="unlink" title="Remove link" style="font-size:11.5px;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:inherit;">⌧</button>'
     +   '</div>'
     +   '<div id="' + id + '" class="pm-rt-editor" contenteditable="true" data-placeholder="' + placeholder + '" '
     +        'style="min-height:' + minH + ';padding:6px 8px;font:inherit;font-size:12.5px;line-height:1.5;color:#111;outline:none;overflow-y:auto;max-height:380px;">'
@@ -17350,6 +17350,27 @@ function _pmRtSetup(root){
     // Round PD.41: Enter inside a checkbox row creates another row.
     // Backspace at the start of an empty checkbox row removes it
     // (escape hatch back to plain paragraph).
+    // Round PD.44: bind toolbar buttons via addEventListener at setup
+    // time. Inline onmousedown/onclick attributes were intermittently
+    // failing to fire real mouse events (worked for dispatched events
+    // only). Runtime binding via addEventListener is the reliable
+    // path.
+    var wrap = ed.closest ? ed.closest(".pm-rt-wrap") : null;
+    if (wrap) {
+      wrap.querySelectorAll(".pm-rt-toolbar button[data-pmrt]").forEach(function(b){
+        if (b._pmRtBound) return;
+        b._pmRtBound = true;
+        b.addEventListener("mousedown", function(ev){
+          ev.preventDefault();  // keep editor selection alive
+          var cmd = b.getAttribute("data-pmrt");
+          if (cmd === "checklist") {
+            _pmRtInsertCheckbox(b);
+          } else {
+            _pmRtCmd(b, cmd);
+          }
+        });
+      });
+    }
     ed.addEventListener("keydown", function(e){
       if (e.key !== "Enter" && e.key !== "Backspace") return;
       var sel = window.getSelection && window.getSelection();
