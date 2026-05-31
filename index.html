@@ -6390,10 +6390,6 @@ function updateSyncButtons() {
 }
 
 function renderHomeScreen(){
-  // PD.66e: reconcile any local drafts that sync's pullAll may have
-  // dropped from the index. Runs on every home-screen render so
-  // drafts stay visible after server polls.
-  if (typeof _pmDraftReconcileIndex === "function") _pmDraftReconcileIndex();
 
   // v345.1: hide the "API key needed" notice when the user is signed
   // in via MaxSync. Signed-in users get LLM access through the
@@ -19214,52 +19210,15 @@ if (typeof globalThis !== "undefined") {
 // Anything purely UI (search query, expanded sections) is not.
 // ──────────────────────────────────────────────────────────────────────
 
-// ──────────────────────────────────────────────────────────────────────
-// Round PD.66e: reconcile drafts back into the index. Sync\'s pullAll
-// replaces _tripsIndex with the server\'s view, which has no idea
-// about local-only drafts (we don\'t POST drafts to the server until
-// the user clicks Choreograph). Without this pass, drafts vanish from
-// the home screen after every server poll.
-//
-// Scans localStorage for any "max-trip-*" whose body has
-// brief._isDraft = true and ensures _tripsIndex has an entry. Called
-// from renderHomeScreen so it runs on every navigation back home.
-// ──────────────────────────────────────────────────────────────────────
-function _pmDraftReconcileIndex(){
-  if (typeof _tripsIndex === "undefined" || !Array.isArray(_tripsIndex)) return;
-  var added = 0;
-  try {
-    for (var k in localStorage) {
-      if (k.indexOf("max-trip-") !== 0) continue;
-      var id = k.substring("max-trip-".length);
-      if (_tripsIndex.find(function(x){ return x && x.id === id; })) continue;
-      try {
-        var parsed = JSON.parse(localStorage.getItem(k));
-        var t = parsed && parsed.trip;
-        if (!t || !t.brief || !t.brief._isDraft) continue;
-        _tripsIndex.push({
-          id: id,
-          name: t.name || "Untitled draft",
-          dateRange: "",
-          destCount: 0,
-          isDraft: true
-        });
-        added++;
-      } catch(_){}
-    }
-    if (added && typeof saveTripsIndex === "function") {
-      saveTripsIndex();
-      console.log("[Max draft] reconciled", added, "draft(s) back into index");
-    }
-  } catch(_){}
-}
-if (typeof globalThis !== "undefined") globalThis._pmDraftReconcileIndex = _pmDraftReconcileIndex;
-
 function _pmDraftEnsure(){
   if (_currentTripId) return _currentTripId;
   if (typeof _tb === "undefined" || !_tb) return null;
-  // Mint a trip id and stub the trip object so localSave has something
-  // to serialize.
+  // PD.66 (architectural): drafts are first-class trips, not local-only.
+  // Mint locally → populate via MaxDB.index.upsert (the canonical index
+  // writer — survives sync pullAll because it writes through the same
+  // path as everything else) → trigger MaxSync.scheduleSave, which
+  // calls _doSave; _doSave POSTs to /trips when the server returns 404,
+  // creating the row. From then on, drafts ride the normal sync flow.
   var newId = "trip-" + Date.now();
   if (typeof window.trip === "undefined" || !window.trip) {
     window.trip = {};
@@ -19272,20 +19231,38 @@ function _pmDraftEnsure(){
   trip.brief.sentence = trip.brief.sentence || _tb.sentence || "";
   trip.brief._isDraft = true;
   _currentTripId = newId;
-  // Make sure the trip shows up in the index immediately.
+
+  // Canonical index write — uses MaxDB if available (writes through to
+  // localStorage AND keeps the in-memory _tripsIndex consistent),
+  // falls back to the legacy push only if MaxDB isn\'t loaded.
+  var indexEntry = {
+    id: newId,
+    name: trip.name,
+    dateRange: "",
+    destCount: 0,
+    isDraft: true
+  };
+  var wrote = false;
   try {
-    if (typeof _tripsIndex !== "undefined" && Array.isArray(_tripsIndex)) {
-      _tripsIndex.push({
-        id: newId,
-        name: trip.name,
-        dateRange: "",
-        destCount: 0,
-        isDraft: true
-      });
-      if (typeof saveTripsIndex === "function") saveTripsIndex();
+    if (typeof MaxDB !== "undefined" && MaxDB.index && typeof MaxDB.index.upsert === "function") {
+      wrote = MaxDB.index.upsert(indexEntry);
     }
   } catch(_){}
-  console.log("[Max draft] minted draft trip", newId, "for Discovery autosave");
+  if (!wrote) {
+    try {
+      if (typeof _tripsIndex !== "undefined" && Array.isArray(_tripsIndex)) {
+        _tripsIndex.push(indexEntry);
+        if (typeof saveTripsIndex === "function") saveTripsIndex();
+      }
+    } catch(_){}
+  }
+  // Sync to server immediately if signed in. _doSave POSTs on 404 so
+  // the trip is created on the server; subsequent saves PUT.
+  if (typeof MaxSync !== "undefined" && MaxSync.isSignedIn && MaxSync.isSignedIn()
+      && typeof MaxSync.scheduleSave === "function") {
+    try { MaxSync.scheduleSave(); } catch(_){}
+  }
+  console.log("[Max draft] minted draft trip", newId);
   return newId;
 }
 function _pmDraftSnapshot(){
@@ -19312,29 +19289,6 @@ function _pmDraftSave(){
   if (!trip || !trip.brief) return;
   trip.brief._tbDraft = _pmDraftSnapshot();
   trip.brief._isDraft = true;
-  // PD.66 fix: re-ensure the index entry exists on EVERY save. Earlier
-  // we only pushed on initial mint, but the sync poll (pullAll) can
-  // overwrite _tripsIndex with the server's version mid-session and
-  // drop the still-unsynced draft. Self-healing covers that race.
-  try {
-    if (typeof _tripsIndex !== "undefined" && Array.isArray(_tripsIndex)
-        && _currentTripId) {
-      var existing = _tripsIndex.find(function(t){ return t && t.id === _currentTripId; });
-      if (!existing) {
-        _tripsIndex.push({
-          id: _currentTripId,
-          name: trip.name || ("Untitled — " + new Date().toLocaleDateString("en-US", {month:"short", day:"numeric", year:"numeric"})),
-          dateRange: "",
-          destCount: 0,
-          isDraft: true
-        });
-        if (typeof saveTripsIndex === "function") saveTripsIndex();
-      } else if (!existing.isDraft) {
-        existing.isDraft = true;
-        if (typeof saveTripsIndex === "function") saveTripsIndex();
-      }
-    }
-  } catch(_){}
   if (typeof localSave === "function") {
     try { localSave(); } catch(e){ console.warn("[Max draft] localSave failed:", e && e.message); }
   }
@@ -19352,11 +19306,15 @@ function _pmDraftFinalize(){
     delete trip.brief._isDraft;
     delete trip.brief._tbDraft;
   }
-  // Also drop the isDraft flag on the index entry.
+  // PD.66 (architectural): canonical index writer drops the isDraft flag.
   try {
-    if (typeof _tripsIndex !== "undefined" && Array.isArray(_tripsIndex) && _currentTripId) {
-      var entry = _tripsIndex.find(function(t){ return t.id === _currentTripId; });
-      if (entry) delete entry.isDraft;
+    if (typeof MaxDB !== "undefined" && MaxDB.index && typeof MaxDB.index.entry === "function"
+        && typeof MaxDB.index.upsert === "function" && _currentTripId) {
+      var entry = MaxDB.index.entry(_currentTripId);
+      if (entry) { delete entry.isDraft; MaxDB.index.upsert(entry); }
+    } else if (typeof _tripsIndex !== "undefined" && Array.isArray(_tripsIndex) && _currentTripId) {
+      var legacy = _tripsIndex.find(function(t){ return t.id === _currentTripId; });
+      if (legacy) delete legacy.isDraft;
       if (typeof saveTripsIndex === "function") saveTripsIndex();
     }
   } catch(_){}
