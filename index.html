@@ -19265,6 +19265,29 @@ function _pmDraftSave(){
   if (!trip || !trip.brief) return;
   trip.brief._tbDraft = _pmDraftSnapshot();
   trip.brief._isDraft = true;
+  // PD.66 fix: re-ensure the index entry exists on EVERY save. Earlier
+  // we only pushed on initial mint, but the sync poll (pullAll) can
+  // overwrite _tripsIndex with the server's version mid-session and
+  // drop the still-unsynced draft. Self-healing covers that race.
+  try {
+    if (typeof _tripsIndex !== "undefined" && Array.isArray(_tripsIndex)
+        && _currentTripId) {
+      var existing = _tripsIndex.find(function(t){ return t && t.id === _currentTripId; });
+      if (!existing) {
+        _tripsIndex.push({
+          id: _currentTripId,
+          name: trip.name || ("Untitled — " + new Date().toLocaleDateString("en-US", {month:"short", day:"numeric", year:"numeric"})),
+          dateRange: "",
+          destCount: 0,
+          isDraft: true
+        });
+        if (typeof saveTripsIndex === "function") saveTripsIndex();
+      } else if (!existing.isDraft) {
+        existing.isDraft = true;
+        if (typeof saveTripsIndex === "function") saveTripsIndex();
+      }
+    }
+  } catch(_){}
   if (typeof localSave === "function") {
     try { localSave(); } catch(e){ console.warn("[Max draft] localSave failed:", e && e.message); }
   }
