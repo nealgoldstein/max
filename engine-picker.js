@@ -36,6 +36,51 @@
     return String(s || '').toLowerCase().trim();
   }
 
+  // extractRoutePreference(intentText) — parse the user's free-text
+  // "why do you want to go there" narrative into a structured route
+  // preference the orderer can honor.
+  //
+  // Returns: { direction, coastalAffinity, allowInterior, routeTopology }
+  //   direction        : "clockwise" | "counterclockwise" | null
+  //   coastalAffinity  : "strong" | "weak" | null
+  //   allowInterior    : bool (default true)
+  //   routeTopology    : "ring" | "linear" | null
+  //
+  // Keyword-based today. The schema is the durable bit — if/when an
+  // LLM-extraction call lands later, it writes the same fields and
+  // every downstream consumer keeps working unchanged.
+  //
+  // Used by buildBrief to populate brief.routePreference, which then
+  // flows to publishTrip → orderKeptCandidates.
+  function extractRoutePreference(intentText) {
+    var t = String(intentText || '').toLowerCase();
+    if (!t) return { direction: null, coastalAffinity: null, allowInterior: true, routeTopology: null };
+    var rp = { direction: null, coastalAffinity: null, allowInterior: true, routeTopology: null };
+    // Direction — counterclockwise / anti-clockwise / "the other way"
+    // beats clockwise so "counter-clockwise" doesn't accidentally
+    // match the "clockwise" substring inside it.
+    if (/\b(counter[-\s]?clockwise|anti[-\s]?clockwise|widdershins)\b/.test(t)) {
+      rp.direction = 'counterclockwise';
+    } else if (/\bclockwise\b/.test(t)) {
+      rp.direction = 'clockwise';
+    }
+    // Coastal affinity — "stick to the coast", "along the coast",
+    // "coastal route", "coast-hugging," etc.
+    if (/\b(stick(ing)?\s+(to|along)\s+the\s+coast|along\s+the\s+coast|coastal\s+(route|drive|loop)|coast[-\s]?hug|hug(ging)?\s+the\s+coast|mostly\s+(to\s+)?the\s+coast)\b/.test(t)) {
+      rp.coastalAffinity = 'strong';
+    }
+    // Interior avoidance — explicit "no interior", "avoid the
+    // interior", "don't cross the island", "avoid cutting across".
+    if (/\b(no\s+interior|avoid(ing)?\s+the\s+interior|avoid(ing)?\s+routes?\s+that\s+cut\s+across|don'?t\s+cross\s+(the\s+)?(island|interior|country)|stay\s+off\s+the\s+interior|no\s+cross[-\s]?island)\b/.test(t)) {
+      rp.allowInterior = false;
+    }
+    // Topology — "ring road", "loop", "circle the country", "circumnavigate"
+    if (/\b(ring\s+road|loop|circle\s+the\s+(country|island|coast)|circumnavigat|round[-\s]?trip)\b/.test(t)) {
+      rp.routeTopology = 'ring';
+    }
+    return rp;
+  }
+
   // Match a candidate against the requiredPlaces list (must-do anchors).
   // Returns the matching required entry or null. Substring match in
   // either direction handles "St. Moritz" vs "St. Moritz (Upper
@@ -846,7 +891,7 @@
     var brief = (typeof MaxEnginePicker !== 'undefined' && MaxEnginePicker.buildBrief)
       ? MaxEnginePicker.buildBrief(_tb)
       : { region: _tb.region || '' };
-    var orderResult = orderKeptCandidates(kept, _tb.mdcItems || [], _tb.entry || '', _tb.tbExit || '');
+    var orderResult = orderKeptCandidates(kept, _tb.mdcItems || [], _tb.entry || '', _tb.tbExit || '', brief.routePreference);
     var ordered = (orderResult && orderResult.ordered) || kept;
     var destinations = ordered.map(function (c) {
       return {
@@ -1015,9 +1060,16 @@
   }
   global.runPickerWaysideDiscovery = runPickerWaysideDiscovery;
 
-  function orderKeptCandidates(kept, mdcItems, entryCity, exitCity){
+  function orderKeptCandidates(kept, mdcItems, entryCity, exitCity, routePreference){
     var reasoning = [];
     if (!kept.length) return {ordered:[], reasoning:reasoning, inferredEntry:null};
+    // Round NC.X: structured route preference. Optional 5th arg —
+    // when present, locks ordering decisions (direction of angular
+    // sweep, whether 2-opt runs, whether interior shortcuts are
+    // allowed) to the user's stated intent instead of letting pure
+    // geometric optimization win. Backward-compatible: when not
+    // supplied, behavior is identical to pre-NC.X.
+    var rp = routePreference || {};
 
     // Build a map of place → candidate for quick lookup. Use normalized names.
     var byName = {};
@@ -1539,10 +1591,7 @@
         cLng /= allCoords.length;
         // Entry's angle from centroid — the sweep starts from there.
         var entryAngle = Math.atan2(lastEntryCoord[0] - cLat, lastEntryCoord[1] - cLng);
-        // Try both directions (CCW and CW) and use whichever ends
-        // closer to the exit. Without this, the sweep is locked to one
-        // direction and may leave the exit on the wrong side of the
-        // loop.
+        // Compute both directions (CCW and CW).
         var middleWithAngle = middle.map(function(s){
           if (!s.coord) return { seq: s, angle: Infinity };
           var a = Math.atan2(s.coord[0] - cLat, s.coord[1] - cLng);
@@ -1555,16 +1604,54 @@
         function pathFromOrdering(arr){ return arr.map(function(x){ return x.seq; }); }
         var ccwSeq = pathFromOrdering(ccw);
         var cwSeq  = pathFromOrdering(cw);
+        // Round NC.X (corrected NC.7): direction lock from route
+        // preference. When the user said "counterclockwise" (or
+        // "clockwise"), we honor it even when the other direction
+        // would be shorter.
+        //
+        // Convention check (corrected from the inverted v1):
+        //   atan2(Δlat, Δlng) returns angle measured CCW from east.
+        //   East=0, North=π/2, West=π, South=-π/2. CCW (math) =
+        //   ASCENDING angle. From a western entry (≈π rad), math-CCW
+        //   means π → wrap → south → east → north → back to west.
+        //   That matches everyday "counterclockwise around the island"
+        //   on a map with north up: from Reykjavík (west), CCW visits
+        //   the south coast FIRST, then east, then north, then loops
+        //   back. So user-CCW = math-CCW = our ccwSeq (ascending rel).
+        //   No inversion. Mirror for user-CW = cwSeq.
+        //
+        //   The original "user-CCW = math CW" comment was wrong: it
+        //   confused the rotation sense and produced trips that went
+        //   NORTH first from Reykjavík when the user asked for CCW.
+        //   Neal: "looks like the don't drive across the island
+        //   didn't work" — the symptom was the inverted direction
+        //   plus 2-opt running on top.
+        if (rp.direction === 'counterclockwise') {
+          reasoning.push("Sweeping counterclockwise around the perimeter per your stated direction.");
+          return ccwSeq;
+        }
+        if (rp.direction === 'clockwise') {
+          reasoning.push("Sweeping clockwise around the perimeter per your stated direction.");
+          return cwSeq;
+        }
         var ccwLen = _totalPathLen(ccwSeq, lastEntryCoord, firstExitCoord);
         var cwLen  = _totalPathLen(cwSeq,  lastEntryCoord, firstExitCoord);
         return (cwLen < ccwLen) ? cwSeq : ccwSeq;
       })();
 
-      // Pick whichever is shorter overall.
+      // Pick whichever is shorter overall — UNLESS the route
+      // preference dictates a ring topology, in which case the
+      // angular sweep is the right answer regardless of path length
+      // (the NN path can be shorter via interior shortcuts but
+      // violates the user's "ring road, stick to the coast" intent).
       var nnLen  = _totalPathLen(nnOrder,  lastEntryCoord, firstExitCoord);
       var angLen = _totalPathLen(angOrder, lastEntryCoord, firstExitCoord);
       var reordered;
-      if (angLen < nnLen) {
+      var _forceRing = (rp.routeTopology === 'ring' || rp.coastalAffinity === 'strong' || rp.allowInterior === false);
+      if (_forceRing) {
+        reordered = angOrder;
+        reasoning.push("Sweeping around the perimeter to honor your ring-road / coastal preference (interior shortcuts disabled).");
+      } else if (angLen < nnLen) {
         reordered = angOrder;
         if (isRoundTrip) {
           reasoning.push("Entry and exit are the same area, so I swept the destinations around the perimeter — shorter than visiting them in arrival order.");
@@ -1585,6 +1672,21 @@
       // commits the swap. Repeat until no improvement. O(n²) per
       // iteration with n ≤ ~30 — trivial cost, big payoff. Sequences
       // are treated as units so route blocks stay glued.
+      //
+      // Round NC.X: when ring topology / coastal affinity is enforced,
+      // SKIP 2-opt entirely. 2-opt optimizes for distance and would
+      // pull the path back through the interior (Iceland symptom:
+      // south coast → Akureyri via the F35 highland is ~140km
+      // shorter than going via Borgarnes, so 2-opt swaps in that
+      // shortcut). The angular sweep is the answer; don't
+      // post-process it.
+      if (_forceRing) {
+        var out = [];
+        entrySeq.items.forEach(function(c){ out.push(c); });
+        reordered.forEach(function(s){ s.items.forEach(function(c){ out.push(c); }); });
+        exitSeq.items.forEach(function(c){ out.push(c); });
+        return out;
+      }
       reordered = (function _twoOpt(seqList){
         if (seqList.length < 4) return seqList;
         var arr = seqList.slice();
@@ -1689,6 +1791,13 @@
       // whole trip (gear, weather, general guides). Mirrors placeMeta
       // but isn't keyed by place.
       tripMeta: s.tripMeta ? { notes: s.tripMeta.notes || "", links: (s.tripMeta.links || []).slice() } : null,
+      // Round NC.X: structured route preference extracted from the
+      // free-text intent. Flows through to orderKeptCandidates so
+      // direction / coastal-affinity / topology can lock the
+      // ordering algorithm to the user's stated intent instead of
+      // letting pure geometric optimization win. See
+      // extractRoutePreference above for the parse rules.
+      routePreference: extractRoutePreference(s.intent),
     };
   }
 
@@ -1917,6 +2026,50 @@
       console.warn("[Max publishTrip] placeMeta→c.role bridge failed (non-fatal):", e && e.message);
     }
 
+    // Round NC.X: bridge the Discovery PREDICTORS into c.role at
+    // publish time. The day-trip / on-the-way pills in Discovery are
+    // advisory until the user commits ("Choreograph my trip" is the
+    // commit moment). Without this bridge, a sight that Discovery
+    // suggested as "↻ Day trip from Höfn" or "🛣 On the way from
+    // Reykjavík" ships to the trip view as a generic See pin, because
+    // c.role still carries the LLM default ("see" for non-overnight-
+    // capable). The trip-view map color comes straight from c.role,
+    // so every suggested non-stay reads dashed-gray — exactly the
+    // "the trip map doesn't look like the Discovery map" complaint.
+    //
+    // Only fires when:
+    //   - c._roleTouched is false (the user hasn't picked a role).
+    //   - c.role is "see" or empty (don't override stays / waysides
+    //     / day-trips already in play).
+    // On-way wins over day-trip (matches the Discovery cascade —
+    // on-way is the more specific claim).
+    try {
+      var _dayPreds = (_tb && _tb._dayTripPreds) || {};
+      var _wayPreds = (_tb && _tb._onWayPreds) || {};
+      var _normFn2 = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase(); };
+      var _bridgedPred = 0;
+      kept.forEach(function(c){
+        if (!c || !c.place) return;
+        if (c._roleTouched === true) return;
+        if (c.role === "stay" || c.role === "daytrip" || c.role === "onway") return;
+        var k = _normFn2(c.place);
+        if (_wayPreds[k]) {
+          c.role = "onway";
+          c.waysideFromHub = String(_wayPreds[k]).toLowerCase();
+          c._roleTouched = true;
+          _bridgedPred++;
+        } else if (_dayPreds[k]) {
+          c.role = "daytrip";
+          c.dayTripHub = String(_dayPreds[k]).toLowerCase();
+          c._roleTouched = true;
+          _bridgedPred++;
+        }
+      });
+      if (_bridgedPred) console.log("[Max publishTrip] bridged " + _bridgedPred + " picker predictor(s) into c.role");
+    } catch(e) {
+      console.warn("[Max publishTrip] picker predictor bridge failed (non-fatal):", e && e.message);
+    }
+
     if(!kept.length) return;
 
     // Round HZ (picker hero map, step 7): entry/exit validation.
@@ -2083,8 +2236,10 @@
     //   • route endpoints are adjacent and aligned with trip flow (entry → exit)
     //   • condition-viable locations get bunched together where possible
     //   • destinations with late-recovery conditions are followed by easier days
+    //   • route preferences (direction, coastal affinity, topology) are honored
     // Returns {ordered, reasoning}
-    var orderResult = orderKeptCandidates(kept, _mdcItems||[], _tb.entry||"", _tb.tbExit||"");
+    var _rpForOrder = extractRoutePreference(_tb.intent);
+    var orderResult = orderKeptCandidates(kept, _mdcItems||[], _tb.entry||"", _tb.tbExit||"", _rpForOrder);
     var ordered = orderResult.ordered;
     trip.orderingReasoning = orderResult.reasoning;
 
@@ -3127,7 +3282,18 @@
         // picker (Edit destinations) rehydrate the intent/hub the user
         // set, instead of falling back to the auto-suggestion.
         intent: c.intent || undefined,
-        dayTripHub: c.dayTripHub || undefined
+        dayTripHub: c.dayTripHub || undefined,
+        // NC.9: persist the user-commitment flag + the wayside hub.
+        // Without _roleTouched, the trip-view pin renderer reads
+        // c._roleTouched as undefined and runs its predictor override
+        // (line ~35379 in index.html), which can downgrade a Stay to a
+        // Day trip whenever the place is close to another stay. Neal:
+        // "I added Selfoss as a stay, and it was added as a day trip."
+        // Same fix on the index.html projection — both publish paths
+        // missed these fields. waysideFromHub follows the same
+        // reasoning as dayTripHub above.
+        _roleTouched: !!c._roleTouched,
+        waysideFromHub: c.waysideFromHub || undefined
       };
     });
     trip.requiredPlaces = (_tb.requiredPlaces||[]).slice();
@@ -3281,6 +3447,77 @@
       }
     } catch (e) {
       console.warn("[Max publishTrip] wayside commit pass failed (non-fatal):", e && e.message);
+    }
+
+    // NC.9.4: stale-day-trip GC pass. Runs BEFORE the day-trip commit
+    // pass below. Walks every existing day-trip route's planItems and
+    // drops any stop whose backing candidate now has role != "daytrip"
+    // in _tb.candidates. Without this, switching Selfoss from Day-trip
+    // to Stay in Discovery left the old "Day trip from Reykjavik" route
+    // stop intact — reopenPickerForEdit then bridged it back to
+    // role="daytrip" on the next picker open, undoing the user's Stay
+    // choice. Neal: "I added Selfoss as a stay, and it was added as a
+    // day trip" (after the _roleTouched persistence fix landed).
+    //
+    // We don't blanket-clear all day-trip routes because some get
+    // added via the trip-view popover (independent of the picker), and
+    // those have no _tb.candidates entry — those stops are skipped.
+    // Only stops whose candidate exists AND whose role moved away from
+    // "daytrip" get removed. Empty routes (all stops removed) are also
+    // dropped.
+    try {
+      if (Array.isArray(trip.routes) && trip.places) {
+        function _gcNormN(s) {
+          if (s == null) return '';
+          var lower = String(s).toLowerCase();
+          if (typeof lower.normalize === 'function') {
+            lower = lower.normalize('NFKD').replace(/[̀-ͯ]/g, '');
+          }
+          return lower.replace(/[^a-z0-9]+/g, ' ').trim();
+        }
+        // Build lookup: normalized place name → cand.role (only for
+        // candidates whose role has been TOUCHED — untouched ones are
+        // still mutable so we don't yank stale stops they haven't
+        // overridden).
+        var candRoleByName = Object.create(null);
+        (_tb.candidates || []).forEach(function (c) {
+          if (!c || !c.place || !c._roleTouched) return;
+          candRoleByName[_gcNormN(c.place)] = c.role || null;
+        });
+        var dropped = 0, emptiedRoutes = 0;
+        trip.routes = trip.routes.filter(function (route) {
+          if (!route) return false;
+          var sub = (typeof MaxMigration !== "undefined" && MaxMigration.routeSubKind)
+            ? MaxMigration.routeSubKind(route)
+            : (route.subKind || (route.kind && route.kind !== "route" ? route.kind : null));
+          if (sub !== "dayTrip") return true;
+          if (!Array.isArray(route.planItems)) return true;
+          route.planItems = route.planItems.filter(function (pi) {
+            if (!pi || pi.type !== "stop" || !pi.placeId) return true;
+            var p = trip.places[pi.placeId];
+            if (!p || !p.name) return true;
+            var newRole = candRoleByName[_gcNormN(p.name)];
+            // newRole is undefined if no touched candidate matches → keep stop
+            // newRole === "daytrip" → keep stop (still a day trip)
+            // newRole is any other touched value → drop stop
+            if (newRole !== undefined && newRole !== "daytrip") {
+              dropped++;
+              return false;
+            }
+            return true;
+          });
+          if (!route.planItems.length) {
+            emptiedRoutes++;
+            return false;
+          }
+          return true;
+        });
+        if (dropped || emptiedRoutes) {
+          console.log("[Max publishTrip] day-trip GC: dropped " + dropped + " stale stop(s), removed " + emptiedRoutes + " empty route(s)");
+        }
+      }
+    } catch (e) {
+      console.warn("[Max publishTrip] day-trip GC pass failed (non-fatal):", e && e.message);
     }
 
     // v360.3 (#124 Turn 3): day-trip commit pass. Parallel to the
@@ -3836,6 +4073,7 @@
     pinColorForRole:        pinColorForRole,        // Round NC.2/NC.3
     normalizeCandidateRole: normalizeCandidateRole, // Round NC.3a
     orderKeptCandidates:    orderKeptCandidates,
+    extractRoutePreference: extractRoutePreference, // Round NC.X
     // place-picker hero map (Step 2)
     orderPlacePickerStays:  orderPlacePickerStays,
     // place-picker hero map (Step 8)

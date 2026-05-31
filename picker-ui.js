@@ -748,91 +748,6 @@
     }
   }
 
-  // ── v359.20: role-chip model — overnight vs day-trip-from-hub ──
-  // Each candidate has a *role* on the trip: an overnight stop, or
-  // a day trip from some overnight hub. The chip on the card shows
-  // Max's suggested role; the popover (v359.21) lets the user
-  // override. Required stops, arrival/departure structural stops,
-  // and candidates with no hub-in-range get no chip — "what isn't
-  // there is also information" (Neal).
-  //
-  // Persisted on the candidate:
-  //   c.intent       "stay" | "dayTrip" | undefined  (user override)
-  //   c.dayTripHub   <candidate.id of hub>           (when intent="dayTrip")
-  // If neither is set, the default is computed from geometry +
-  // kept-overnights set.
-  // v359.40 CLEANUP NOTE: the helpers below (_pickerDistKm,
-  // _computeCandidateRole) and the popover (_openRoleChangePopover
-  // further down) are referenced ONLY by _renderCandidateCard, which
-  // is itself a dead code path now — the candidate-explorer surface
-  // that rendered chips is no longer in the active flow (replaced by
-  // the place-mode/destination-view picker). Left in place so the
-  // function references resolve if any edge path still invokes them,
-  // but new work should NOT touch this block. The build-time
-  // clustering in engine-picker.js (v359.24) is the live piece that
-  // still honors c.intent / c.dayTripHub.
-  //
-  // v359.51.14: pulled from the global Settings helper so the value
-  // is consistent across picker, engine, and trip-view. Read lazily
-  // (via a getter) so user edits in Settings take effect on the next
-  // call without needing to re-render the picker module. Falls back
-  // to 60 km when the helper isn't loaded (tests / early boot).
-  function _dayTripRadiusKm(){
-    return (typeof global._defaultDayTripRadiusKm === "function")
-      ? global._defaultDayTripRadiusKm()
-      : 60;
-  }
-  function _pickerDistKm(a, b) {
-    if (!a || !b || a[0] == null || a[1] == null || b[0] == null || b[1] == null) return Infinity;
-    // Equirectangular approx — fine at Europe scale.
-    var dLat = (a[0] - b[0]) * 111;
-    var dLng = (a[1] - b[1]) * 111 * Math.cos(((a[0] + b[0]) / 2) * Math.PI / 180);
-    return Math.sqrt(dLat * dLat + dLng * dLng);
-  }
-  function _computeCandidateRole(c, allCands) {
-    if (!c) return null;
-    // Structural / required stops have a predetermined role — chip hidden.
-    if (c._required) return null;
-    if (c.role === "arrival" || c.role === "departure") return null;
-
-    // User override takes precedence.
-    if (c.intent === "stay") {
-      return { intent: "stay", hub: null, hubAuto: false };
-    }
-    if (c.intent === "dayTrip") {
-      var hubId = c.dayTripHub;
-      var hub = (hubId && allCands) ? allCands.find(function(o){ return o && o.id === hubId; }) : null;
-      return { intent: "dayTrip", hub: hub || null, hubAuto: false };
-    }
-
-    // Compute default. Candidates that want ≥2 nights → stay.
-    var wantsLongStay = (typeof c.nights === "number" && c.nights >= 2);
-    if (wantsLongStay) {
-      return { intent: "stay", hub: null, hubAuto: true };
-    }
-    // Otherwise look for closest kept-overnight hub within radius.
-    if (!allCands || !Array.isArray(allCands) || c.lat == null || c.lng == null) {
-      return { intent: "stay", hub: null, hubAuto: true };
-    }
-    var bestHub = null;
-    var bestDist = Infinity;
-    for (var i = 0; i < allCands.length; i++) {
-      var h = allCands[i];
-      if (!h || h.id === c.id) continue;
-      if (h.status !== "keep") continue;
-      if (h.intent === "dayTrip") continue;  // day trips can't be hubs
-      if (h.lat == null || h.lng == null) continue;
-      var d = _pickerDistKm([c.lat, c.lng], [h.lat, h.lng]);
-      if (d < bestDist && d <= _dayTripRadiusKm()) {
-        bestDist = d;
-        bestHub = h;
-      }
-    }
-    if (bestHub) {
-      return { intent: "dayTrip", hub: bestHub, hubAuto: true };
-    }
-    return { intent: "stay", hub: null, hubAuto: true };
-  }
 
   // ── v359.31: Wikipedia summary fetch ──────────────────────
   // Cheap visual-triage assist for candidate cards. Wikipedia's REST
@@ -1510,256 +1425,39 @@
       }
     });
 
-    // v359.23: trip-view deep-link landing. If the user clicked
-    // "Change role" on a destination card, _focusCandidateName was
-    // stashed in _tb. When the matching candidate's card renders,
-    // scroll it into view and open the role popover, then clear
-    // the flag so it doesn't re-trigger on every re-render.
+    // NC.9.16: deep-link "focus this candidate" landing. Previously
+    // also called _openRoleChangePopover to auto-open the legacy role
+    // popover — that popover is gone (deleted in this round, it wrote
+    // cand.intent only and bypassed MaxRoleWriter). Now we just scroll
+    // the card into view; the user opens the real role popover via
+    // the in-card affordance, which goes through the unified path.
     if (global._tb && global._tb._focusCandidateName
         && c.place && c.place === global._tb._focusCandidateName) {
-      var _focusName = global._tb._focusCandidateName;
       delete global._tb._focusCandidateName;
       setTimeout(function(){
         try {
           if (card && typeof card.scrollIntoView === "function") {
             card.scrollIntoView({ behavior: "smooth", block: "center" });
           }
-          _openRoleChangePopover(c.id);
-        } catch (e) {
-          console.warn("[Max] focus-candidate deep-link failed for", _focusName, e);
-        }
+        } catch (e) {}
       }, 220);
     }
   }
 
-  // ── v359.21: Change role popover ──────────────────────────
-  // v359.40 CLEANUP NOTE: dead code. Only invoked from the role
-  // chip inside _renderCandidateCard above, which is itself in a
-  // surface that's no longer active. Kept for reference.
-  //
-  // Opens when the user clicks the role chip on a candidate card.
-  // Lets them switch between Overnight stay and Day trip from
-  // {hub}, with the hub dropdown auto-populated from kept-overnight
-  // candidates ranked by distance. Persists the choice to
-  // c.intent / c.dayTripHub and re-renders the picker list.
-  function _openRoleChangePopover(candId) {
-    var allCands = (global._tb && Array.isArray(global._tb.candidates)) ? global._tb.candidates : [];
-    var cand = allCands.find(function(c){ return c && c.id === candId; });
-    if (!cand) return;
-
-    // Compute hub options: kept candidates that aren't themselves day trips,
-    // sorted by distance from this candidate. Within radius → preferred;
-    // outside radius → still listed but flagged as "stretch."
-    var hubOptions = [];
-    if (cand.lat != null && cand.lng != null) {
-      hubOptions = allCands
-        .filter(function(h){
-          return h && h.id !== cand.id
-            && h.status === "keep"
-            && h.intent !== "dayTrip"
-            && h.lat != null && h.lng != null;
-        })
-        .map(function(h){
-          var d = _pickerDistKm([cand.lat, cand.lng], [h.lat, h.lng]);
-          return { hub: h, distKm: d, inRange: d <= _dayTripRadiusKm() };
-        })
-        .sort(function(a, b){ return a.distKm - b.distKm; });
-    }
-    var inRangeHubs = hubOptions.filter(function(o){ return o.inRange; });
-    var stretchHubs = hubOptions.filter(function(o){ return !o.inRange; });
-    var dayTripAvailable = inRangeHubs.length > 0 || stretchHubs.length > 0;
-
-    // v360.3 (#8 Phase 3): wayside-fit detection. If the candidate sits
-    // approximately on the line between two consecutive kept overnight
-    // hubs (perp ≤ 30 km, parametric t in [0.05, 0.95]), offer
-    // "Wayside" as a third role option. When picked, this candidate
-    // will be committed as a wayside stop on that transit leg at
-    // publish time (handled in publishTrip below).
-    //
-    // We need the kept set in ORDER to compute legs. orderKeptCandidates
-    // (engine-picker.js) is the source of truth for trip order.
-    var keptOrdered = [];
-    var waysideFit = null;
-    try {
-      var keptForOrder = allCands.filter(function (c) { return c && c.status === "keep"; });
-      if (keptForOrder.length >= 2 && global.MaxEnginePicker && typeof global.MaxEnginePicker.orderKeptCandidates === "function") {
-        var orderResult = global.MaxEnginePicker.orderKeptCandidates(
-          keptForOrder,
-          (global._mdcItems || global._tb && global._tb.mdcItems || []),
-          (global._tb && global._tb.entry) || "",
-          (global._tb && global._tb.tbExit) || ""
-        );
-        keptOrdered = (orderResult && orderResult.ordered) || [];
-      } else {
-        keptOrdered = keptForOrder;
-      }
-      if (typeof global._bestWaysideLegForCandidate === "function") {
-        waysideFit = global._bestWaysideLegForCandidate(cand, keptOrdered);
-      }
-    } catch (e) {
-      console.warn("[Max] role popover: wayside-fit check failed (non-fatal):", e && e.message);
-    }
-    var waysideAvailable = !!waysideFit;
-
-    // Current state.
-    var curRole = _computeCandidateRole(cand, allCands);
-    var curIntent = (cand.intent === "wayside") ? "wayside" : (curRole ? curRole.intent : "stay");
-    var curHubId = curRole && curRole.hub ? curRole.hub.id : (inRangeHubs[0] ? inRangeHubs[0].hub.id : (stretchHubs[0] ? stretchHubs[0].hub.id : null));
-
-    // Build the overlay.
-    var existing = document.getElementById("role-popover");
-    if (existing) existing.remove();
-
-    var ov = document.createElement("div");
-    ov.id = "role-popover";
-    ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.32);z-index:10500;display:flex;align-items:center;justify-content:center;padding:20px;";
-
-    // v359.51.15: distances respect the user's km/miles pref via the
-    // shared formatter on the global. Falls back to "<n> km" when the
-    // formatter isn't loaded.
-    function _distLbl(km){
-      if (km == null) return "?";
-      if (global._fmtDistance) return global._fmtDistance(km);
-      return Math.round(km) + " km";
-    }
-    var hubOpts = hubOptions.map(function(o){
-      var label = o.hub.place + " (" + _distLbl(o.distKm) + ")" + (o.inRange ? "" : " — stretch");
-      var sel = o.hub.id === curHubId ? " selected" : "";
-      return '<option value="' + o.hub.id + '"' + sel + '>' + label + '</option>';
-    }).join("");
-
-    var dayTripRow = dayTripAvailable
-      ? ('<label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid ' + (curIntent === "dayTrip" ? "#a36500" : "#e0e0e0") + ';border-radius:8px;cursor:pointer;background:' + (curIntent === "dayTrip" ? "#fff4e6" : "#fff") + ';">'
-          + '<input type="radio" name="role-pick" value="dayTrip"' + (curIntent === "dayTrip" ? " checked" : "") + ' style="margin:0;" />'
-          + '<div style="flex:1;">'
-          +   '<div style="font-size:13px;font-weight:600;color:#222;">Day trip from</div>'
-          +   '<select id="role-hub-select" style="margin-top:6px;width:100%;padding:6px 8px;font-size:12.5px;border:1px solid #ccc;border-radius:6px;font-family:inherit;">' + hubOpts + '</select>'
-          + '</div>'
-        + '</label>')
-      : ('<div style="padding:10px;border:1px dashed #ddd;border-radius:8px;background:#fafafa;font-size:12px;color:#888;line-height:1.5;">'
-          + 'No overnight hub in range for a day trip. Keep an overnight closer than '
-          + _distLbl(_dayTripRadiusKm()) + ' first.'
-        + '</div>');
-
-    // v360.3 (#8 Phase 3): wayside row. Only renders when the candidate
-    // sits between two consecutive kept hubs. The legend reads
-    // "Along the way between A and B" so the user sees which leg
-    // they're committing the candidate to.
-    var waysideRow = "";
-    if (waysideAvailable) {
-      var legLbl = (waysideFit.fromCand.place || "?") + " → " + (waysideFit.toCand.place || "?");
-      var perpLbl = _distLbl(waysideFit.perpKm);
-      waysideRow = ''
-        + '<label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid '
-        + (curIntent === "wayside" ? "#7a4fbf" : "#e0e0e0")
-        + ';border-radius:8px;cursor:pointer;background:'
-        + (curIntent === "wayside" ? "#f3edfa" : "#fff") + ';">'
-        +   '<input type="radio" name="role-pick" value="wayside"' + (curIntent === "wayside" ? " checked" : "") + ' style="margin:0;" />'
-        +   '<div style="flex:1;">'
-        +     '<div style="font-size:13px;font-weight:600;color:#222;">Along the way</div>'
-        +     '<div style="font-size:11px;color:#777;margin-top:2px;">'
-        +       'A stop on the drive from <strong>' + legLbl + '</strong>'
-        +       ' · ' + perpLbl + ' off the line.'
-        +     '</div>'
-        +   '</div>'
-        + '</label>';
-    }
-
-    // Round FN.F.1: for single-sight candidates, the popover leads
-    // with Wayside / Day-trip and demotes Stay. The header subtitle
-    // signals "you want to see this — pick how to fit it" rather
-    // than "is this an overnight?" — that question doesn't apply to
-    // a place with one thing to see/do.
-    var _isSS = _isSingleSight(cand);
-    var _headerSub = _isSS
-      ? 'Single sight — pick how to fit it'
-      : 'Role on this trip';
-    var _stayRow = ''
-      + '<label style="display:flex;align-items:center;gap:10px;padding:'
-      + (_isSS ? '8px' : '10px')
-      + ';border:1px solid '
-      + (curIntent === "stay" ? "#1a5fa8" : (_isSS ? "#eaeaea" : "#e0e0e0"))
-      + ';border-radius:8px;cursor:pointer;background:'
-      + (curIntent === "stay" ? "#eef4fb" : "#fff")
-      + ';opacity:' + (_isSS && curIntent !== "stay" ? '0.65' : '1') + ';">'
-      +   '<input type="radio" name="role-pick" value="stay"' + (curIntent === "stay" ? " checked" : "") + ' style="margin:0;" />'
-      +   '<div style="flex:1;">'
-      +     '<div style="font-size:' + (_isSS ? '12px' : '13px') + ';font-weight:600;color:#222;">Overnight stay</div>'
-      +     '<div style="font-size:11px;color:#777;margin-top:2px;">'
-      +       (_isSS
-        ? 'Unusual for a single-sight place — only pick if you want hotels and meals here.'
-        : 'Its own stop on the trip with hotels and meals.')
-      +     '</div>'
-      +   '</div>'
-      + '</label>';
-    // Order: single-sights surface Wayside + Day-trip first; stays are
-    // secondary. Regular candidates keep the historical order
-    // (Stay → Day-trip → Wayside).
-    var _rolesHtml = _isSS
-      ? (waysideRow + dayTripRow + _stayRow)
-      : (_stayRow + dayTripRow + waysideRow);
-    ov.innerHTML = ''
-      + '<div style="background:#fff;border-radius:12px;max-width:420px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,0.18);">'
-      +   '<div style="padding:18px 20px 4px;">'
-      +     '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:'
-      +       (_isSS ? "#7a4fbf" : "#888") + ';">'
-      +       (_isSS ? '✦ ' : '') + _headerSub
-      +     '</div>'
-      +     '<div style="font-size:17px;font-weight:700;color:#111;margin-top:4px;">' + cand.place + '</div>'
-      +   '</div>'
-      +   '<div style="padding:14px 20px;display:flex;flex-direction:column;gap:10px;">'
-      +     _rolesHtml
-      +   '</div>'
-      +   '<div style="padding:8px 20px 18px;display:flex;justify-content:flex-end;gap:8px;">'
-      +     '<button id="role-cancel" style="font-size:13px;font-weight:500;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Cancel</button>'
-      +     '<button id="role-save" style="font-size:13px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 16px;cursor:pointer;font-family:inherit;">Apply</button>'
-      +   '</div>'
-      + '</div>';
-
-    document.body.appendChild(ov);
-
-    function close() { if (ov && ov.parentNode) ov.parentNode.removeChild(ov); }
-
-    ov.onclick = function(e){ if (e.target === ov) close(); };
-    var cancelBtn = ov.querySelector("#role-cancel");
-    if (cancelBtn) cancelBtn.onclick = close;
-
-    var saveBtn = ov.querySelector("#role-save");
-    if (saveBtn) saveBtn.onclick = function(){
-      var picked = ov.querySelector('input[name="role-pick"]:checked');
-      var newIntent = picked ? picked.value : "stay";
-      if (newIntent === "dayTrip") {
-        var sel = ov.querySelector("#role-hub-select");
-        var newHubId = sel ? sel.value : null;
-        if (!newHubId) { close(); return; }
-        cand.intent = "dayTrip";
-        cand.dayTripHub = newHubId;
-        delete cand.waysideLeg;
-      } else if (newIntent === "wayside" && waysideFit) {
-        // v360.3 (#8 Phase 3+4): persist the wayside choice. cand.intent
-        // = "wayside" tags this candidate for the publishTrip wayside-
-        // commit pass below. waysideLeg holds the chosen from/to hub
-        // place names so publishTrip can attach this candidate to the
-        // right route (place names because hub ids may shift between
-        // picker session and trip publish — _normPlaceName lookup is
-        // resilient).
-        cand.intent = "wayside";
-        cand.waysideLeg = {
-          fromPlace: waysideFit.fromCand.place,
-          toPlace:   waysideFit.toCand.place,
-        };
-        delete cand.dayTripHub;
-      } else {
-        cand.intent = "stay";
-        delete cand.dayTripHub;
-        delete cand.waysideLeg;
-      }
-      close();
-      if (typeof global.renderCandidateCards === "function" && global._tb) {
-        global.renderCandidateCards(global._tb.candidates);
-      }
-    };
-  }
+  // NC.9.16: deleted dead code:
+  //   _dayTripRadiusKm, _pickerDistKm, _computeCandidateRole — a
+  //     parallel role-derivation cascade that disagreed with the
+  //     unified _pmDeriveRole. Removed.
+  //   _openRoleChangePopover — a parallel role-change popover that
+  //     wrote only cand.intent (no role, no _roleTouched), so user
+  //     picks here didn't survive _pmDeriveRole's cascade. The modern
+  //     role popover lives in index.html and routes through
+  //     MaxRoleWriter. Removed.
+  // The comments at the OLD positions of these functions (formerly
+  // lines 764, 1536) called them "dead code" but they were still
+  // reachable via renderCandidateCard's call chain. "Reachable dead"
+  // is worse than gone — re-activating the surface would re-introduce
+  // the bug silently. So they're gone.
 
   // ── HX.13 (v310): renderTimeLensItinerary ─────────────────
   // Lifted from inline renderCandidateCards' `_ceLens === "time"`

@@ -144,12 +144,17 @@ test.describe('Role popover — availability + Wayside gate', () => {
 
     const popover = page.locator('#trip-stop-popover');
     await expect(popover).toBeVisible();
-    await expect(popover).toContainText(/Overnight stay/i);
+    // Label is "🛏 Overnight" (the "stay" suffix was dropped a few
+    // rounds back when role labels were shortened — "Overnight" + the
+    // bed glyph carry the meaning without doubling up).
+    await expect(popover).toContainText(/Overnight/i);
     await expect(popover).toContainText(/Day trip/i);
     // The seed has zero mdcItems → sight count for Vik = 0 → gate
-    // passes → Wayside row offered (and natural route is available
+    // passes → wayside row offered (and natural route is available
     // since Vik has neighbors on both sides).
-    await expect(popover).toContainText(/Wayside/i);
+    // Label renamed from "Wayside" to "🛣 On the way" — the popover
+    // and the picker chip now share the same vocabulary.
+    await expect(popover).toContainText(/On the way/i);
     await expect(popover).toContainText(/See/i);
 
     expect(warnings).toEqual([]);
@@ -180,9 +185,12 @@ test.describe('Role popover — availability + Wayside gate', () => {
 
     const popover = page.locator('#trip-stop-popover');
     await expect(popover).toBeVisible();
-    // 3 sights > 2 → gate fires → Wayside row not rendered, even
+    // 3 sights > 2 → gate fires → wayside row not rendered, even
     // though d2 has a viable natural prev→next route.
-    await expect(popover).not.toContainText(/Wayside/i);
+    // The "On the way" phrase appears ONLY in the wayside row (the
+    // label and its body copy); other roles never use it. Safe to
+    // assert its absence as a proxy for the row's absence.
+    await expect(popover).not.toContainText(/On the way/i);
     // Other transitions still offered.
     await expect(popover).toContainText(/Day trip/i);
     await expect(popover).toContainText(/See/i);

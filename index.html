@@ -1856,7 +1856,14 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
    sections; nights only display on first appearance. No box around each
    destination — it makes the page feel boxed-up, when the goal is two
    parallel lists reading down the page. */
-.tb-act-table-row.tb-dest-major{padding:10px 4px;background:transparent;border:none;box-shadow:none;border-radius:0;border-bottom:1px solid #f0ece1;margin-bottom:0;}
+/* Round NC.X: dest-major rows stack vertically — the activity (right
+   column) drops BELOW the place info (left column) so the place gets
+   the full row width. Earlier the row was a 2-column grid (1fr/1.4fr),
+   which left the place column too narrow for long Icelandic names +
+   "↻ Day trip from Höfn (suggested)" pills — the pill overflowed
+   into the right column. Stacking gives both columns room to breathe
+   without truncating names. */
+.tb-act-table-row.tb-dest-major{padding:10px 4px;background:transparent;border:none;box-shadow:none;border-radius:0;border-bottom:1px solid #f0ece1;margin-bottom:0;grid-template-columns:1fr;gap:6px;}
 .tb-act-table-row.tb-dest-major:last-child{border-bottom:none;}
 .tb-act-table-row.tb-dest-major.on{background:transparent;box-shadow:none;border-color:#f0ece1;}
 .tb-act-table-row.tb-dest-major.off{opacity:0.65;}
@@ -2193,7 +2200,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
       <!-- v359.49: Scaffold chip removed (Neal call). Trip name gets a
            visible ✎ so editability is obvious; the whole name+pencil
            is one click target. -->
-      <div class="trip-name-block" id="trip-name-wrap" onclick="editTripName()" title="Click to rename" style="cursor:pointer;display:flex;align-items:center;gap:6px;">
+      <div class="trip-name-block" id="trip-name-wrap" onclick="editTripName(this)" title="Click to rename" style="cursor:pointer;display:flex;align-items:center;gap:6px;">
         <span id="trip-name-display" style="font-size:14px;font-weight:600;color:#222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">Trip</span>
         <span class="trip-name-edit" style="font-size:11px;color:#aaa;flex-shrink:0;">&#9998;</span>
       </div>
@@ -2348,7 +2355,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
     <!-- Map style toggle -->
     <div id="map-style-btn" style="position:absolute;bottom:36px;left:8px;z-index:600;background:rgba(255,255,255,.95);border:1px solid #ccc;border-radius:6px;padding:4px 10px;box-shadow:0 2px 8px rgba(0,0,0,.15);font-size:10px;font-weight:600;color:#333;cursor:pointer;font-family:inherit;display:none;" title="Switch map style">🗺 Street</div>
     <!-- v294.15: route toggle + view-larger buttons (replace deleted hero map). Trip-mode only. -->
-    <button type="button" id="map-route-btn" style="position:absolute;top:8px;right:8px;z-index:499;background:rgba(255,255,255,.95);border:1px solid #cfe1f7;border-radius:6px;padding:5px 10px;box-shadow:0 1px 4px rgba(0,0,0,.15);font-size:11px;font-weight:600;color:#1a5fa8;cursor:pointer;font-family:inherit;display:none;" title="Show/hide the trip route on the map">🛣 Route</button>
+    <button type="button" id="map-route-btn" style="position:absolute;top:8px;right:8px;z-index:499;background:rgba(255,255,255,.95);border:1px solid #cfe1f7;border-radius:6px;padding:5px 10px;box-shadow:0 1px 4px rgba(0,0,0,.15);font-size:11px;font-weight:600;color:#1a5fa8;cursor:pointer;font-family:inherit;display:none;" title="Show/hide the line connecting stops in order. (Max gives an ordering, not a driving route — see the Legend.)">🛣 Route</button>
     <button type="button" id="map-larger-btn" style="position:absolute;top:8px;right:96px;z-index:499;background:rgba(255,255,255,.95);border:1px solid #cfe1f7;border-radius:6px;padding:5px 10px;box-shadow:0 1px 4px rgba(0,0,0,.15);font-size:11px;font-weight:600;color:#1a5fa8;cursor:pointer;font-family:inherit;display:none;" title="Open the trip route in a separate window">🗺 View larger →</button>
     <!-- Round FN.D.1: day-trips toggle. Same vocabulary as the Route
          toggle (sticky pref via localStorage, label flips ON/OFF on
@@ -2390,6 +2397,20 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
           <div style="background:#aaa;color:#fff;border-radius:50%;width:14px;height:14px;border:2px dashed #fff;opacity:0.78;"></div>
         </div>
         <div><strong>Considered</strong> — a place from Discovery that isn't on the trip yet. Tap to add.</div>
+      </div>
+      <!-- NC.6: clarify that the dashed line connecting numbered pins is
+           an ordering of stops, not a driving route. The dotted blue
+           polyline reads as "the route Max chose", which over-promises:
+           Max sequences stops, but turn-by-turn driving directions
+           (highway choice, ferry segments, scenic vs fastest) are not
+           part of this release. Mirror the same note in the View larger
+           popout header so the same map in a bigger window doesn't
+           re-introduce the same misreading. -->
+      <div style="margin-top:10px;padding-top:10px;border-top:1px solid #eee;display:flex;align-items:flex-start;gap:10px;">
+        <div style="flex-shrink:0;width:22px;height:22px;display:flex;align-items:center;justify-content:center;">
+          <svg width="22" height="8" viewBox="0 0 22 8" style="display:block;"><line x1="1" y1="4" x2="21" y2="4" stroke="#1a5fa8" stroke-width="2.5" stroke-dasharray="1 4" stroke-linecap="round"/></svg>
+        </div>
+        <div style="color:#555;"><strong>Order of stops</strong> — the dashed line shows the sequence Max recommends, not a driving route. Turn-by-turn directions are coming in a future release.</div>
       </div>
     </div>
     <!-- legacy hidden legend slot (no longer rendered to, kept for
@@ -3894,6 +3915,451 @@ function makeMapIconToday(styleKey){
   var html='<div style="position:relative;width:28px;height:28px;">'+svg+'<div style="'+ringStyle+'"></div></div>';
   return L.divIcon({html:html,className:"",iconSize:[34,34],iconAnchor:[17,17],popupAnchor:[0,-18]});
 }
+
+// ────────────────────────────────────────────────────────────────────────
+// MaxMapPin — the single source of truth for pin rendering.
+//
+// Background: the codebase had 6+ independent pin-rendering paths (in-page
+// Discovery, popout window, mobile overlay, trip-overview, trip-overview
+// popout, MAP_ICONS), each deciding color / shape / label / size / border
+// independently. Every time we "made them consistent" we hand-aligned K
+// constants across K paths and the next change broke alignment again. This
+// module collapses pin rendering to one function set so divergence becomes
+// structurally impossible.
+//
+// API:
+//   MaxMapPin.style(role, ctx)
+//     role ∈ "stay" | "daytrip" | "onway" | "see" | "maybe" | "reject"
+//     ctx (optional) ∈ { iconic, size }
+//     → returns { color, label, shape, size, fontPx, borderColor,
+//                 borderWidth, hidden }
+//
+//   MaxMapPin.html(style, overrides, badges)
+//     overrides (optional) ∈ { label }   — override style.label (place
+//                                          initials for stays, etc.)
+//     badges (optional) ∈ { sequence, entryGlyph, exitGlyph }
+//     → returns the pin HTML string
+//
+//   MaxMapPin.icon(html, style)
+//     → returns a Leaflet L.divIcon
+//
+// All six surfaces should call into this module. Anywhere that builds pin
+// HTML inline (`<div style="background:...border-radius:50%...">`) is the
+// old way and should be migrated.
+var MaxMapPin = {
+  // Style spec for a role. Width/height drive sizing; shape drives
+  // render strategy (circle, octagon, teardrop). For back-compat with
+  // pre-refactor callers, `size` and `color` aliases are also set.
+  style: function(role, ctx){
+    ctx = ctx || {};
+    var s = {
+      fill: "#bbb",
+      stroke: "#fff",
+      strokeWidth: 2,
+      glyph: "?",
+      glyphColor: "#fff",
+      shape: "circle",
+      width: 22,
+      height: 22,
+      fontPx: 11,
+      anchor: "center",      // "center" | "tip"  (tip = teardrop bottom)
+      hidden: false
+    };
+    if (role === "reject") { s.hidden = true; }
+    else if (role === "stay") {
+      // Stay: blue filled circle. Caller supplies place initials
+      // via overrides.label. No role badge — the bare circle reads
+      // as the structural anchor.
+      s.fill = "#1a5fa8";
+      s.glyph = "";
+      s.fontPx = 11;
+    } else if (role === "see") {
+      // See / Sight: teardrop pin, blue. Caller supplies initials.
+      // The teardrop shape distinguishes See from Stay.
+      s.fill = "#1a5fa8";
+      s.shape = "teardrop";
+      s.width = 24; s.height = 30;
+      s.glyph = "";
+      s.strokeWidth = 1.5;
+      s.anchor = "tip";
+      s.fontPx = 11;
+    } else if (role === "daytrip") {
+      // NC.9.5: Day trip pin = LIGHT PURPLE circle with BLACK text.
+      // Color is the only differentiator — no badge, no arrowhead,
+      // no shape change. Earlier attempts (corner ↻ badge, attached
+      // arrow triangle, arrow-as-border SVG) all collided with the
+      // "every other role uses just a shape + color" pattern. Neal:
+      // "The problem with the badge is it is the only badge."
+      //
+      // Light purple specifically because: (a) distinct from the blue
+      // used by stay/see/onway so day trips read categorically
+      // different on the map; (b) matches the existing day-trip
+      // purple vocabulary used by the Discovery chip pill and the
+      // legend swatch; (c) light enough that BLACK text inside has
+      // strong contrast even on satellite imagery. White border kept
+      // for definition against busy backgrounds.
+      s.fill = "#c5a3e0";
+      s.stroke = "#fff";
+      s.glyph = "";
+      s.glyphColor = "#000";
+      s.shape = "circle";
+      s.fontPx = 11;
+    } else if (role === "onway") {
+      // NC.9.7: On the way pin = LIGHT PURPLE stop-sign octagon with
+      // BLACK initials. Matches the day-trip color scheme — both roles
+      // are "sub-anchors of a destination" (day-trips loop back to a
+      // hub, waysides sit between two hubs), so sharing a color
+      // categorically groups them apart from Stay/See (blue). Shape
+      // still distinguishes onway (octagon) from daytrip (circle), so
+      // a colorblind reader can still tell them apart. Black text on
+      // light purple keeps the same contrast guarantee as the day-trip
+      // pin even on satellite imagery.
+      s.fill = "#c5a3e0";
+      s.stroke = "#fff";
+      s.strokeWidth = 2;
+      s.shape = "octagon";
+      s.glyph = "";
+      s.glyphColor = "#000";
+      s.fontPx = 11;
+      s.width = 22; s.height = 22;
+    } else if (role === "activeDest") {
+      // NC.9.12: Active-destination marker — the "you are here" pin
+      // shown for the currently-viewed destination in dest mode. Red
+      // (#d92f2f) larger circle with place initials. Previously
+      // hand-rolled inline at line ~35042; routed through here so the
+      // size + color live in one place.
+      s.fill = "#d92f2f";
+      s.stroke = "#fff";
+      s.strokeWidth = 2;
+      s.glyph = "";
+      s.glyphColor = "#fff";
+      s.shape = "circle";
+      s.fontPx = 11;
+      s.width = 32; s.height = 32;
+    } else if (role === "neighborDest") {
+      // NC.9.12: Prev/next context pin — small gray circle for
+      // adjacent destinations shown alongside the active one. Previously
+      // hand-rolled inline at line ~35075.
+      s.fill = "#444";
+      s.stroke = "#fff";
+      s.strokeWidth = 2;
+      s.glyph = "";
+      s.glyphColor = "#fff";
+      s.shape = "circle";
+      s.fontPx = 9;
+      s.width = 22; s.height = 22;
+    } else if (role === "gateway") {
+      // NC.9.10: Gateway pin — the entry/exit marker at the start or
+      // end of a trip (airport, train station, ferry terminal). White
+      // fill + blue border + mode emoji as glyph (caller passes "✈"
+      // "⛴" "🚂" etc. as label override). Visually the inverse of a
+      // stay pin (blue fill / white glyph) so the user can tell at a
+      // glance which pins are travel-modes vs places. Previously this
+      // was hand-coded inline in THREE places (the View-larger popout
+      // window, the in-page overlay, and the trip-detail map) with
+      // hardcoded #1a5fa8 + circle styles. Now one place.
+      s.fill = "#fff";
+      s.stroke = "#1a5fa8";
+      s.strokeWidth = 2;
+      s.glyph = "";
+      s.glyphColor = "#1a5fa8";
+      s.shape = "circle";
+      s.fontPx = 13;
+      s.width = 22; s.height = 22;
+    } else if (role === "maybe") {
+      // Maybe / "considered, not committed". Small gray filled circle
+      // with a DASHED white border + slight opacity so it reads as
+      // tentative everywhere it appears — Discovery picker, trip
+      // overview, popout maps. Initials inside name the place (no
+      // legacy "?"). The dashed border is the universal "not on the
+      // trip yet" cue Neal wanted: NC.7 — adopted as the canonical
+      // treatment instead of letting individual surfaces hand-roll
+      // their own gray-circle styling.
+      s.fill = "#bbb";
+      s.glyph = "";
+      s.glyphColor = "#fff";
+      s.width = 18; s.height = 18;
+      s.fontPx = 9;
+      s.strokeStyle = "dashed";
+      s.opacity = 0.85;
+    }
+    // Iconic gold border: dropped per Round NC.X user decision.
+    if (typeof ctx.size === "number" && ctx.size > 0) {
+      s.width = ctx.size;
+      s.height = ctx.size;
+    }
+    // Back-compat aliases for callers that read .size / .color
+    // (mobile overlay tooltip offset, popout window, etc.).
+    s.size = s.height;
+    s.color = s.fill;
+    s.label = s.glyph;
+    s.borderColor = s.stroke;
+    s.borderWidth = s.strokeWidth;
+    return s;
+  },
+  // Build pin HTML. Three render strategies based on style.shape:
+  //   circle  → CSS div with border-radius:50%
+  //   octagon → CSS div with clip-path polygon (stop-sign)
+  //   teardrop → SVG path (Material Design "location_on" derivative)
+  // Caller can override the inner label (place initials for stay,
+  // or anything for an ad-hoc surface) via overrides.label. Badges
+  // attach to bottom-right (sequence) and top-right (entry/exit).
+  html: function(style, overrides, badges){
+    if (!style || style.hidden) return "";
+    overrides = overrides || {};
+    badges = badges || {};
+    var glyph = (overrides.label != null) ? overrides.label : style.glyph;
+    var w = style.width, h = style.height;
+    var inner;
+    if (style.shape === "teardrop") {
+      // Material-style teardrop: circular bulb at top tapering to a
+      // point at the bottom. viewBox 0 0 24 30 with the tip at
+      // (12, 28). iconAnchor places the GPS point at the tip.
+      var path = "M12 2 C 6 2, 2 6, 2 12 C 2 16, 12 28, 12 28 C 12 28, 22 16, 22 12 C 22 6, 18 2, 12 2 Z";
+      // Glyph centered in the bulb area (y=2..16). y=15 reads visually
+      // centered after accounting for typographic baseline.
+      var glyphY = 15;
+      inner = '<svg width="' + w + '" height="' + h + '" viewBox="0 0 24 30" xmlns="http://www.w3.org/2000/svg" style="overflow:visible;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.3));">'
+            + '<path d="' + path + '" fill="' + style.fill + '" stroke="' + style.stroke + '" stroke-width="' + style.strokeWidth + '"/>'
+            + (glyph ? '<text x="12" y="' + glyphY + '" text-anchor="middle" fill="' + style.glyphColor + '" font-size="' + style.fontPx + '" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-weight="700">' + glyph + '</text>' : '')
+            + '</svg>';
+    } else if (style.shape === "daytripCircle") {
+      // NC.9.2: Day trip pin = single SVG path whose outline IS the
+      // circle PLUS an arrowhead at ~4.5 o'clock. Earlier revisions
+      // (NC.8.1, NC.9.1) drew a circle and then attached a separate
+      // <polygon> triangle on top — the seam between them was visible
+      // and the user (Neal) called it out: "The arrow should be part
+      // of the border, not pointing out."
+      //
+      // The current rendering uses a single closed path:
+      //   1. start at the top of the circle
+      //   2. arc clockwise to the arrow's INNER base (~4 o'clock)
+      //   3. straight line out to the arrow TIP
+      //   4. straight line back to the OUTER base (~5 o'clock)
+      //   5. large arc clockwise around the bottom + left back to top
+      //   6. close path
+      //
+      // Fill (blue) covers the whole blob — the circle disc plus the
+      // triangular protrusion. Stroke (white) traces the entire
+      // outline including the arrowhead, so the arrow IS the border
+      // at that point — no seam, no separate shape, no rendering
+      // drift between the circle and the triangle at any zoom.
+      //
+      // overflow:visible on the SVG keeps the tip from being clipped
+      // when it extends a hair past the iconSize box. iconAnchor
+      // still centers on the circle, so the GPS point lines up with
+      // the disc's middle.
+      var dcx = w/2, dcy = h/2;
+      var dr = Math.min(w, h)/2 - style.strokeWidth/2;
+      // Arrowhead base angles + tip distance in unit coordinates
+      // (circle has r=1, centered at origin). 30° / 60° are 4 and 5
+      // o'clock; tip at 1.30 radial distance at 45° puts it just
+      // outside the border between them.
+      var aA = 30 * Math.PI / 180;  // inner-base angle (4 o'clock)
+      var aB = 60 * Math.PI / 180;  // outer-base angle (5 o'clock)
+      var tipR = 1.30;
+      var tipAngle = 45 * Math.PI / 180;
+      // SVG points
+      var topX = dcx,                       topY = dcy - dr;
+      var aX   = dcx + dr * Math.cos(aA),  aY   = dcy + dr * Math.sin(aA);
+      var bX   = dcx + dr * Math.cos(aB),  bY   = dcy + dr * Math.sin(aB);
+      var tX   = dcx + dr * tipR * Math.cos(tipAngle);
+      var tY   = dcy + dr * tipR * Math.sin(tipAngle);
+      var blobPath = "M " + topX.toFixed(2) + " " + topY.toFixed(2)
+                   + " A " + dr.toFixed(2) + " " + dr.toFixed(2) + " 0 0 1 " + aX.toFixed(2) + " " + aY.toFixed(2)
+                   + " L " + tX.toFixed(2) + " " + tY.toFixed(2)
+                   + " L " + bX.toFixed(2) + " " + bY.toFixed(2)
+                   + " A " + dr.toFixed(2) + " " + dr.toFixed(2) + " 0 1 1 " + topX.toFixed(2) + " " + topY.toFixed(2)
+                   + " Z";
+      inner = '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" style="overflow:visible;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.25));">'
+            + '<path d="' + blobPath + '" fill="' + style.fill + '" stroke="' + style.stroke + '" stroke-width="' + style.strokeWidth + '" stroke-linejoin="round"/>'
+            // Initials, centered on the circle.
+            + (glyph ? '<text x="' + dcx + '" y="' + dcy + '" text-anchor="middle" dominant-baseline="central" fill="' + style.glyphColor + '" font-size="' + style.fontPx + '" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-weight="700">' + glyph + '</text>' : '')
+            + '</svg>';
+    } else if (style.shape === "octagon") {
+      // Octagon as SVG path with breathing room on all sides.
+      //
+      // Render-quality notes:
+      //   • Pad by strokeWidth (not strokeWidth/2) so the entire
+      //     stroke sits ~1px inside the viewBox. Stroke-at-viewBox-
+      //     edge looked uneven because sub-pixel anti-aliasing on
+      //     the slanted edges differed from the axis-aligned ones.
+      //   • shape-rendering="geometricPrecision" tells the renderer
+      //     to prioritize the actual geometry over pixel snapping —
+      //     keeps the diagonal stroke widths consistent with the
+      //     horizontal/vertical strokes.
+      //   • Dropped the SVG drop-shadow filter. The filter was being
+      //     composited AFTER the stroke and made the corners look
+      //     slightly heavier on the shadow side. Inline box-shadow-
+      //     equivalent isn't available on an SVG path, so we accept
+      //     no shadow on the octagon (still distinct enough thanks
+      //     to the stop-sign shape).
+      var sw = style.strokeWidth;
+      var pad = sw;
+      var effW = w - 2 * pad, effH = h - 2 * pad;
+      var ox1 = pad + effW * 0.30, ox2 = pad + effW * 0.70;
+      var oy1 = pad + effH * 0.30, oy2 = pad + effH * 0.70;
+      var top = pad, right = w - pad, bottom = h - pad, left = pad;
+      var octPath = "M" + ox1 + " " + top
+                  + " L" + ox2 + " " + top
+                  + " L" + right + " " + oy1
+                  + " L" + right + " " + oy2
+                  + " L" + ox2 + " " + bottom
+                  + " L" + ox1 + " " + bottom
+                  + " L" + left + " " + oy2
+                  + " L" + left + " " + oy1
+                  + " Z";
+      inner = '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" shape-rendering="geometricPrecision">'
+            + '<path d="' + octPath + '" fill="' + style.fill + '" stroke="' + style.stroke + '" stroke-width="' + sw + '" stroke-linejoin="miter" stroke-linecap="butt"/>'
+            + (glyph ? '<text x="' + (w/2) + '" y="' + (h/2) + '" text-anchor="middle" dominant-baseline="central" fill="' + style.glyphColor + '" font-size="' + style.fontPx + '" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-weight="700">' + glyph + '</text>' : '')
+            + '</svg>';
+    } else {
+      // Circle (CSS div is fine — border-radius:50% doesn't have
+      // the clip-path edge-clipping issue). NC.7: honor style.
+      // strokeStyle (default "solid") and style.opacity so the Maybe
+      // role's dashed-border + faded look comes through every caller
+      // — including the trip-overview's "considered" pin pass.
+      var _bs = style.strokeStyle || "solid";
+      var border = style.strokeWidth + "px " + _bs + " " + style.stroke;
+      var _opa = (typeof style.opacity === "number") ? style.opacity : 1;
+      inner = '<div style="background:' + style.fill + ';color:' + style.glyphColor + ';border-radius:50%;'
+            + 'width:' + w + 'px;height:' + h + 'px;border:' + border + ';'
+            + (_opa < 1 ? 'opacity:' + _opa + ';' : '')
+            + 'box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;'
+            + 'font-size:' + style.fontPx + 'px;font-weight:700;letter-spacing:-0.02em;">'
+            + (glyph != null ? glyph : "")
+            + '</div>';
+    }
+    var hasBadges = !!(badges.sequence || badges.entryGlyph || badges.exitGlyph || style.roleGlyph);
+    if (!hasBadges) return inner;
+    // Wrap with a positioned container so badges can sit at the
+    // pin's corners regardless of shape.
+    var html = '<div style="position:relative;width:' + w + 'px;height:' + h + 'px;">' + inner;
+    var borderColor = style.fill === "#fff" ? style.stroke : style.fill;
+    // Role-glyph badge — small corner indicator that disambiguates
+    // shapes carrying the same fill. Day-trip pins are circles like
+    // Stays (so the place initials read clearly), but the ↻ badge
+    // tells you it's a day trip rather than a stay. Top-LEFT so it
+    // doesn't conflict with the entry/exit (top-right) or sequence
+    // (bottom-right) badges on trip-view pins.
+    if (style.roleGlyph) {
+      html += '<div title="' + (style.roleGlyphTitle || "") + '" style="position:absolute;top:-5px;left:-5px;'
+            + 'background:#fff;border:1.5px solid ' + borderColor + ';border-radius:50%;'
+            + 'width:14px;height:14px;'
+            + 'display:flex;align-items:center;justify-content:center;'
+            + 'font-size:10px;line-height:1;font-weight:700;color:' + borderColor + ';'
+            + 'box-shadow:0 1px 2px rgba(0,0,0,0.15);">' + style.roleGlyph + '</div>';
+    }
+    if (badges.entryGlyph || badges.exitGlyph) {
+      var both = badges.entryGlyph && badges.exitGlyph && badges.entryGlyph !== badges.exitGlyph;
+      var text = both ? (badges.entryGlyph + badges.exitGlyph) : (badges.entryGlyph || badges.exitGlyph);
+      var bw = both ? 22 : 14;
+      var br = both ? "7px" : "50%";
+      var title = (badges.entryGlyph && badges.exitGlyph) ? "Trip start &amp; end"
+                : badges.entryGlyph ? "Trip start" : "Trip end";
+      html += '<div title="' + title + '" style="position:absolute;top:-5px;right:-5px;'
+            + 'background:#fff;border:1.5px solid ' + borderColor + ';border-radius:' + br + ';'
+            + 'width:' + bw + 'px;height:14px;'
+            + 'display:flex;align-items:center;justify-content:center;gap:1px;'
+            + 'font-size:9px;line-height:1;padding:0 2px;'
+            + 'box-shadow:0 1px 2px rgba(0,0,0,0.15);">' + text + '</div>';
+    }
+    if (badges.sequence) {
+      var seq = String(badges.sequence);
+      var wide = seq.length > 1;
+      var sw = wide ? 18 : 14;
+      var sr = wide ? "7px" : "50%";
+      html += '<div style="position:absolute;bottom:-5px;right:-5px;'
+            + 'background:#fff;border:1.5px solid ' + borderColor + ';border-radius:' + sr + ';'
+            + 'width:' + sw + 'px;height:14px;'
+            + 'display:flex;align-items:center;justify-content:center;'
+            + 'font-size:9px;line-height:1;font-weight:700;color:#333;padding:0 2px;'
+            + 'box-shadow:0 1px 2px rgba(0,0,0,0.15);">' + seq + '</div>';
+    }
+    html += '</div>';
+    return html;
+  },
+  // Build a Leaflet L.divIcon. Anchor logic: circles/octagons anchor
+  // at center; teardrop pins anchor at the bottom tip so the GPS
+  // point lines up with the visual point of the pin.
+  icon: function(html, style, opts){
+    if (!style) return null;
+    var sp = MaxMapPin.iconSpec(style);
+    var className = (opts && opts.className) || "";
+    return L.divIcon({
+      html: html,
+      className: className,
+      iconSize: sp.iconSize,
+      iconAnchor: sp.iconAnchor,
+      popupAnchor: sp.popupAnchor
+    });
+  },
+  // Just the dimensions / anchor numbers — useful for callers
+  // (popout windows) that need to build L.divIcon with their own
+  // Leaflet instance.
+  iconSpec: function(style){
+    if (!style) return { iconSize: [22, 22], iconAnchor: [11, 11], popupAnchor: [0, -11] };
+    var w = style.width, h = style.height;
+    var anchorY = (style.anchor === "tip") ? h : h / 2;
+    return {
+      iconSize: [w, h],
+      iconAnchor: [w / 2, anchorY],
+      popupAnchor: [0, -anchorY]
+    };
+  }
+};
+// NC.8: swatch helper — returns an inline-block container with the
+// pin shape for a given role, sized for use inside role-picker
+// popovers + Discovery chips. Solves the "popover icon doesn't
+// match the map pin" mismatch Neal flagged: the role popover used
+// emoji (🛏 📍 🛣 👁) while the map used MaxMapPin's actual shapes
+// (circle / circle+↻ / octagon / teardrop). Now both come from the
+// same module.
+//
+// Sizing: nominal pin sizes (22 for stay/daytrip/onway, 24×30
+// teardrop for see, 18 for maybe) render fine inline. Reject is
+// hidden by MaxMapPin.style — for the popover we synthesize a small
+// red ✕ circle so the row has a visible glyph.
+MaxMapPin.swatch = function(role, opts){
+  opts = opts || {};
+  if (role === "reject") {
+    var rs = opts.size || 18;
+    return '<span style="display:inline-flex;align-items:center;justify-content:center;width:' + rs + 'px;height:' + rs + 'px;border-radius:50%;background:#c75348;color:#fff;font-size:' + Math.max(8, Math.round(rs*0.6)) + 'px;font-weight:700;flex-shrink:0;">&#10005;</span>';
+  }
+  var st = MaxMapPin.style(role, {});
+  if (!st || st.hidden) return "";
+  // Optional size override: scale width/height proportionally. Teardrop
+  // preserves its 24:30 aspect; circle/octagon are 1:1.
+  if (opts.size) {
+    if (st.shape === "teardrop") {
+      st.width  = opts.size * (24/30);
+      st.height = opts.size;
+    } else {
+      st.width = st.height = opts.size;
+    }
+    // Keep glyph + stroke proportionate at very small sizes.
+    if (opts.size < 16) {
+      st.fontPx = Math.max(6, Math.round(opts.size * 0.45));
+      st.strokeWidth = Math.max(1, Math.round(opts.size / 11));
+    }
+  }
+  var html = MaxMapPin.html(st, { label: "" });
+  // Container reserves the pin's visual footprint AND a little extra
+  // room for asymmetric decorations: the legacy ↻ corner badge (still
+  // possible if a future role uses roleGlyph) and the day-trip pin's
+  // arrowhead. NC.9.1: arrow moved from 2 o'clock to 5 o'clock, so
+  // the extra space follows — bottom + a touch on the right, no longer
+  // top. Tip extends ~15-20% past the circle at the lower-right corner.
+  // Vertical-align middle so the swatch sits flush with the role-label
+  // text.
+  var extraRight  = (st.shape === "daytripCircle") ? Math.round(st.width  * 0.15) : 0;
+  var extraBottom = (st.shape === "daytripCircle") ? Math.round(st.height * 0.20) : 0;
+  var badgeMargin = (st.roleGlyph && (!opts.size || opts.size >= 16)) ? 8 : 0;
+  var w = st.width  + badgeMargin + extraRight;
+  var h = st.height + (badgeMargin ? 4 : 0) + extraBottom;
+  return '<span class="max-mappin-swatch" style="display:inline-flex;align-items:center;justify-content:center;width:' + w + 'px;height:' + h + 'px;flex-shrink:0;vertical-align:middle;overflow:visible;">' + html + '</span>';
+};
+if (typeof window !== "undefined") window.MaxMapPin = MaxMapPin;
 
 function makeMapIconWithDay(styleKey,dayNum){
   // Same as makeMapIcon but adds a small day-number badge
@@ -8534,7 +9000,7 @@ function enterApp(){
   var tn=g("trip-name-display"); if(tn){
     tn.textContent=trip.name||"Untitled trip";
     tn.title="Click to rename";
-    // Rename is already wired via inline onclick="editTripName()" on
+    // Rename is already wired via inline onclick="editTripName(this)" on
     // the span itself (HTML line ~1824). The previous ondblclick
     // handler here built a fresh span with much smaller, lighter
     // inline styles (font-size:11px;color:#999) that made the trip
@@ -14668,62 +15134,53 @@ function _renderPlaceActivityItems(){
   // Round DN.7: predict day-trip absorption at picker time. Mirror the
   // build-time clustering rule (Round CO/DA): a kept place with ≤2
   // nights within 60km of another kept place that has strictly more
-  // nights becomes a day trip from that hub. Compute once per render
-  // and stash on _tb._dayTripPreds so the row-render code can label.
-  var _dayTripPreds = (function _computeDayTripPreds(){
-    var places = {}; // key -> { place, lat, lng, nights, kept, userChoseStay }
-    items.forEach(function(it){
-      var rps = Array.isArray(it.requiredPlaces) ? it.requiredPlaces : [];
-      rps.forEach(function(p){
-        if (!p || !p.place) return;
-        var key = p.place.toLowerCase();
-        if (!places[key]) places[key] = { place: p.place, lat: null, lng: null, nights: 0, kept: false, userChoseStay: false };
-        if (typeof p.lat === "number" && typeof p.lng === "number") {
-          places[key].lat = p.lat; places[key].lng = p.lng;
-        }
-        // Max nights across activities (don't double-count multi-activity stays)
-        var n = (typeof p.nights === "number") ? p.nights : 0;
-        if (it.type !== "route" && n > places[key].nights) places[key].nights = n;
-        if (p._keep) places[key].kept = true;
-        // v359.5.4: respect the user's explicit "stay the night"
-        // choice from _pmMakeStay — don't re-predict day-trip status
-        // for places the user already committed to as stays.
-        if (p._userChoseStay) places[key].userChoseStay = true;
-      });
+  // nights becomes a day trip from that hub.
+  //
+  // Round NC.X: the original "hub.nights > src.nights" check was a
+  // PROXY for "this hub is a stay." It breaks when neither place has
+  // nights allocated yet — e.g., user has Vík as a destination but
+  // nights=0 because they haven't sized the trip. With the strict
+  // gate, Reynisfjara (close to Vík, both kept, both nights=0) gets
+  // no suggestion. The fix is to look at the actual stay/sight
+  // signal: hub.overnight !== false AND hub isn't itself flagged as
+  // a day trip. Nights still matter as a tie-break for short-stay
+  // sources, but they no longer gate the simple sight→stay case.
+  // Round NC.X: predictor compute delegated to MaxPredictors. Build
+  // the places dict from placeActivities (same shape MaxPredictors
+  // expects), then call compute with the trip's destination order
+  // as the stayOrder hint so on-way legs follow the user's intent.
+  var _placesForPreds = {};
+  items.forEach(function(it){
+    var rps = Array.isArray(it.requiredPlaces) ? it.requiredPlaces : [];
+    rps.forEach(function(p){
+      if (!p || !p.place) return;
+      var key = MaxPlaceKey.normalize(p.place);
+      if (!_placesForPreds[key]) _placesForPreds[key] = { place: p.place, lat: null, lng: null, nights: 0, kept: false, userChoseStay: false, overnight: undefined, isDayTrip: false };
+      if (typeof p.lat === "number" && typeof p.lng === "number") {
+        _placesForPreds[key].lat = p.lat; _placesForPreds[key].lng = p.lng;
+      }
+      var n = (typeof p.nights === "number") ? p.nights : 0;
+      if (it.type !== "route" && n > _placesForPreds[key].nights) _placesForPreds[key].nights = n;
+      if (p._keep) _placesForPreds[key].kept = true;
+      if (p._userChoseStay) _placesForPreds[key].userChoseStay = true;
+      if (p.overnight !== false && _placesForPreds[key].overnight !== true) _placesForPreds[key].overnight = true;
+      else if (p.overnight === false && _placesForPreds[key].overnight === undefined) _placesForPreds[key].overnight = false;
+      if (p._isDayTrip === true) _placesForPreds[key].isDayTrip = true;
     });
-    // Distance (km) — equirectangular approximation, fine at this scale.
-    function distKm(a, b){
-      if (!a || !b || !isFinite(a.lat) || !isFinite(b.lat)) return Infinity;
-      var dLat = (a.lat - b.lat) * 111;
-      var dLng = (a.lng - b.lng) * 111 * Math.cos(((a.lat + b.lat) / 2) * Math.PI / 180);
-      return Math.sqrt(dLat*dLat + dLng*dLng);
-    }
-    var preds = {};
-    Object.keys(places).forEach(function(srcKey){
-      var src = places[srcKey];
-      if (!src.kept) return;
-      if (src.nights > 2) return;
-      if (!isFinite(src.lat)) return;
-      // v359.5.4: user-chose-stay is sticky. Skip the prediction.
-      if (src.userChoseStay) return;
-      var bestHub = null;
-      var bestDist = Infinity;
-      Object.keys(places).forEach(function(hubKey){
-        if (hubKey === srcKey) return;
-        var hub = places[hubKey];
-        if (!hub.kept) return;
-        if (hub.nights <= src.nights) return;
-        if (!isFinite(hub.lat)) return;
-        var d = distKm(src, hub);
-        if (d < bestDist) { bestDist = d; bestHub = hub; }
-      });
-      // v359.51.14: radius now Settings-backed (defaults to 60 km).
-      var _radius = (typeof _defaultDayTripRadiusKm === "function") ? _defaultDayTripRadiusKm() : 60;
-      if (bestHub && bestDist <= _radius) preds[srcKey] = bestHub.place;
+  });
+  var _stayOrder = [];
+  if (typeof trip !== "undefined" && trip && Array.isArray(trip.destinations)) {
+    trip.destinations.forEach(function(d){
+      if (d && d.place) _stayOrder.push(MaxPlaceKey.normalize(d.place));
     });
-    return preds;
-  })();
-  _tb._dayTripPreds = _dayTripPreds;
+  }
+  var _predRes = MaxPredictors.compute(_placesForPreds, { stayOrder: _stayOrder });
+  _tb._dayTripPreds = _predRes.day;
+  _tb._onWayPreds = _predRes.way;
+
+  // Round NC.X: on-way compute now lives in MaxPredictors.compute
+  // above (called once, returns both day and way dicts). On-way wins
+  // over day-trip on overlapping keys — also handled inside the module.
 
   // v359.51.12: hub-eligibility map — for every KEPT place (not just
   // short-stay candidates), record whether at least one kept hub
@@ -15651,7 +16108,13 @@ function _renderPlaceActivityItems(){
       // unchecked still shows a generic "day trip" label.
       var firstAppearance = !shownIn[key];
       var isTransitDestForNights = d.placeRefs.some(function(r){ return r.placeRef && r.placeRef._transitOnly; });
-      var dayTripHub = _dayTripPreds && _dayTripPreds[key];
+      // Round NC.X: read from _tb._dayTripPreds (set by MaxPredictors.compute
+       // above). Previously this was a local var; the refactor moved
+      // the storage onto _tb and forgot to update this consumer,
+      // which silently ReferenceError'd and aborted the per-section
+      // row render — symptoms: section headers and tag chips appear,
+      // but no destination rows and no map.
+      var dayTripHub = (_tb._dayTripPreds || {})[key];
       // place-picker hero map (Step 7): user-set _isDayTrip wins over
       // the auto-predictor. If any requiredPlace ref of this dest has
       // _isDayTrip=true, treat it as a user-flagged day trip — the
@@ -15751,6 +16214,16 @@ function _renderPlaceActivityItems(){
       // purple for see) and the alternative is greyed with a "+" prefix.
       // Click the inactive one to switch. No asymmetric promote/demote;
       // no tri-state reset.
+      //
+      // Round NC.X (Diamond Beach fix): the chip USED to be binary
+      // Stay/See only, fed by _llmIsStay + placeMeta.stayOverride. That
+      // gave the wrong answer for any role that lived OUTSIDE that
+      // binary — Diamond Beach got predicted as a Day trip by the
+      // predictor, but the chip had no way to surface "Day trip" so it
+      // showed See. Three surfaces (pin, popup, chip) ended up giving
+      // three different answers for the same place. The chip now
+      // routes through _pmDeriveRole — the same function the pin and
+      // popup use — so all three agree by construction.
       var _llmIsStay = d.placeRefs.some(function(r){
         return r.placeRef && r.placeRef.overnight !== false;
       });
@@ -15768,49 +16241,173 @@ function _renderPlaceActivityItems(){
       // know the LLM was wrong about lodging), respect that even when
       // _overnightCapable is false. The override path goes through the
       // research card's stayOverride field, not the inline chip.
-      var _isStayCandidate = (_stayOverride !== null) ? _stayOverride : _llmIsStay;
       if (_stayOverride === true) _overnightCapable = true;
+      // Build a minimal info dict so _pmDeriveRole can reason about
+      // this place exactly the way the map and popup do. The map
+      // aggregates these fields across requiredPlace refs; we mirror
+      // the same aggregation here so the answers line up.
+      var _rowKey = (d.place || "").toLowerCase();
+      var _rowInfo = {
+        place: d.place,
+        kept: destKeptInSection,
+        _isDayTrip: userIsDayTrip,
+        _dayTripHub: userHubKey,
+        _waysideFromHub: "",
+        _rejected: false,
+        overnight: _llmIsStay
+      };
+      // Pull any onway flag from the requiredPlace refs (set by trip
+      // popup's convertDestToWayside helper).
+      d.placeRefs.forEach(function(r){
+        if (r.placeRef && r.placeRef._waysideFromHub && !_rowInfo._waysideFromHub) {
+          _rowInfo._waysideFromHub = r.placeRef._waysideFromHub;
+        }
+      });
+      var _derivedChip = (typeof _pmDeriveRole === "function")
+        ? _pmDeriveRole(_rowInfo, _rowKey, {})
+        : { role: (_llmIsStay ? "stay" : "see"), source: "llm-default" };
+      var _chipRole = _derivedChip.role;
+      var _chipSource = _derivedChip.source || "llm-default";
+      // Round NC.X (deeper Diamond Beach fix): SUGGESTED vs COMMITTED.
+      //
+      // Neal's framing: "the roles assigned in the picker view are
+      // suggestions the user should decide on; if they change it in
+      // the trip view, it is now the source of truth." So the chip
+      // needs to telegraph "this is what Max thinks — you decide" vs.
+      // "you (or the trip view) committed this."
+      //
+      // Committed sources (solid pill): "user", "flag", "stay-override"
+      //   — i.e., you clicked a role chip, or you set the role via the
+      //   trip-view popup, or the publishTrip bridge resolved your
+      //   Stay/See choice into c.role.
+      // Suggested sources (dashed pill + "Max suggests" tooltip):
+      //   "predictor" (60km/nights heuristic), "llm-default" (just the
+      //   LLM's category — no user input yet).
+      //
+      // The committed-vs-suggested distinction lets the chip show
+      // "↻ Day trip" for Diamond Beach (matching the pin) while also
+      // signaling "this isn't your call yet — open the popup to lock
+      // it in or override." Earlier the chip rendered "👁 See" with no
+      // hint that the system actually thought it was a day trip.
+      var _isStayCandidate = (_chipRole === "stay");
+      var _isCommitted = (_chipSource === "user" || _chipSource === "flag" || _chipSource === "stay-override");
       var _placeArg = _pmEsc(d.place);
-      // Round NC.X: BOTH chips render with the same pill shape (border,
-      // padding, border-radius). The only difference is color — active
-      // is filled with its role color (blue/purple), inactive is white
-      // with a subtle gray border. Previously the active rendered as
-      // plain text and the inactive as a pill, which read as
-      // inconsistent — "what are those two unrelated things doing
-      // next to each other?" Now they read as a clear toggle pair.
-      var _stayActiveStyle    = 'font-size:9.5px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;padding:1px 8px;border-radius:9px;letter-spacing:.02em;cursor:default;font-family:inherit;line-height:1.3;';
-      var _seeActiveStyle     = 'font-size:9.5px;font-weight:700;color:#fff;background:#5b3f8f;border:1px solid #5b3f8f;padding:1px 8px;border-radius:9px;letter-spacing:.02em;cursor:default;font-family:inherit;line-height:1.3;';
-      var _inactiveBtnStyle   = 'font-size:9.5px;font-weight:600;color:#888;background:#fff;border:1px solid #ddd;padding:1px 8px;border-radius:9px;letter-spacing:.02em;cursor:pointer;font-family:inherit;line-height:1.3;';
+      // Active styles — solid fills for committed, dashed border for
+      // suggested. Same family of colors so the role is recognizable
+      // either way; the dash + the trailing "(suggested)" badge below
+      // carry the "not yours yet" cue.
+      //
+      // white-space:nowrap is critical — without it the narrow picker
+      // column was wrapping "Stay · suggested" into vertical "S\ne\ne"
+      // character columns. The chip is now a single-line pill that
+      // wraps to the next row only at the flex-container boundary.
+      //
+      // Round NC.X: pills are now CLICKABLE — clicking opens the same
+      // role-picker popup the map pin opens. This gives the list view
+      // full role parity with the map (you can switch a See to a
+      // Day trip without hunting for the pin). cursor:pointer signals
+      // the affordance.
+      function _activeStyle(bg, dashed){
+        var border = dashed ? ('1px dashed ' + bg) : ('1px solid ' + bg);
+        var fill   = dashed ? '#fff' : bg;
+        var color  = dashed ? bg    : '#fff';
+        return 'font-size:9.5px;font-weight:700;color:' + color + ';background:' + fill + ';border:' + border + ';padding:1px 8px;border-radius:9px;letter-spacing:.02em;cursor:pointer;font-family:inherit;line-height:1.3;white-space:nowrap;';
+      }
+      var _stayBg = '#1a5fa8', _seeBg = '#5b3f8f', _dayTripBg = '#9b6fc4', _onwayBg = '#c4753b', _maybeBg = '#888';
+      var _stayActiveStyle    = _activeStyle(_stayBg,    !_isCommitted && _chipRole === "stay");
+      var _seeActiveStyle     = _activeStyle(_seeBg,     !_isCommitted && _chipRole === "see");
+      var _dayTripActiveStyle = _activeStyle(_dayTripBg, !_isCommitted);
+      var _onwayActiveStyle   = _activeStyle(_onwayBg,   !_isCommitted);
+      var _maybeActiveStyle   = 'font-size:9.5px;font-weight:700;color:#555;background:#eee;border:1px solid #bbb;padding:1px 8px;border-radius:9px;letter-spacing:.02em;cursor:default;font-family:inherit;line-height:1.3;white-space:nowrap;';
+      var _inactiveBtnStyle   = 'font-size:9.5px;font-weight:600;color:#888;background:#fff;border:1px solid #ddd;padding:1px 8px;border-radius:9px;letter-spacing:.02em;cursor:pointer;font-family:inherit;line-height:1.3;white-space:nowrap;';
+      // "(suggested)" suffix + 🤖 provenance badge — italic, dim,
+      // INSIDE the pill. The 🤖 makes the LLM-origin explicit and
+      // ties this pill back to the global note at the top of
+      // Discovery ("Anything dashed is Max's guess"). Same badge on
+      // every dashed surface: chip, popup radio, etc.
+      var _suggestedSuffix = !_isCommitted
+        ? ' <span style="font-weight:500;font-style:italic;opacity:.85;">🤖 (suggested)</span>'
+        : '';
+      // Tooltip that distinguishes a suggestion from a commit. The
+      // suggested tooltip carries the "LLMs don't get to travel much"
+      // caveat — same line that lives in the Discovery intro note.
+      function _ttl(committedTxt, suggestedTxt){
+        return _isCommitted ? committedTxt : ("Max suggests: " + suggestedTxt + " — LLMs don’t get to travel much, so this is a starting point, not a verdict. Click to decide.");
+      }
+      // pm-stay-toggle wraps chip + (committed: "+ See/Stay" button |
+      // suggested: "(suggested)" badge). flex-wrap:wrap on the parent
+      // row drops the whole bundle to the next line when the column
+      // can't hold it; each child is intrinsically nowrap so text
+      // never breaks mid-word.
+      var _wrapStyle = 'display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;';
+      // Click handler that opens the role popup the same way the map
+      // pin click does. Falls back to a no-op if the picker map
+      // markers aren't ready yet (e.g., the map hasn't rendered).
+      var _openPopupOnclick = 'onclick="if(typeof _pmOpenPlacePopupByKey===\'function\'){_pmOpenPlacePopupByKey(&#39;' + _pmEsc(_rowKey) + '&#39;,&#39;tb-pm-map&#39;);}event.stopPropagation();"';
+      // Resolve hub display name (used by daytrip + onway branches).
+      function _resolveHubDisplay(hubKey){
+        if (!hubKey) return "";
+        var disp = hubKey;
+        for (var _hI = 0; _hI < items.length && disp === hubKey; _hI++) {
+          var _hIt = items[_hI];
+          (_hIt.requiredPlaces || []).forEach(function(_hP){
+            if (_hP && _hP.place && _hP.place.toLowerCase() === hubKey) disp = _hP.place;
+          });
+        }
+        return disp;
+      }
+      // NC.8: chip prefix is now the same mini-pin shape MaxMapPin draws
+      // on the map (circle / circle+↻ / octagon / teardrop / dashed grey
+      // / red ✕). 14px swatch fits inside the small pill chip without
+      // overwhelming the text. Emojis (🛏 ↻ 🛣 👁 ?) are gone from this
+      // surface — one rendering path across pin, popup, and chip.
+      var _miniPin = function(r){
+        return (typeof MaxMapPin !== "undefined" && MaxMapPin.swatch)
+          ? MaxMapPin.swatch(r, { size: 14 })
+          : "";
+      };
       var stayChip;
-      if (_isStayCandidate) {
-        // Place is currently set as a Stay. Both labels shown — the
-        // user might want to switch to See.
-        stayChip = '<span class="pm-stay-toggle" style="display:inline-flex;align-items:center;gap:6px;">'
-          + '<span style="' + _stayActiveStyle + '" title="Currently set as a stay">🛏 Stay</span>'
+      var _ttlHint = " — click to change";
+      if (_chipRole === "stay") {
+        var _stayTtl = _ttl("Currently set as a stay" + _ttlHint, "Stay" + _ttlHint);
+        stayChip = '<span class="pm-stay-toggle" style="' + _wrapStyle + '">'
+          + '<span style="' + _stayActiveStyle + '" ' + _openPopupOnclick + ' title="' + _pmEsc(_stayTtl) + '">' + _miniPin("stay") + ' Stay' + _suggestedSuffix + '</span>'
           + '<button type="button" '
           +   'onclick="_pmSetStayOverride(&#39;' + _placeArg + '&#39;, false);event.stopPropagation();" '
           +   'style="' + _inactiveBtnStyle + '" '
           +   'title="Switch to see-only">+ See</button>'
           + '</span>';
+      } else if (_chipRole === "daytrip") {
+        var _hubKey = String(_derivedChip.hub || "").toLowerCase();
+        var _hubDisp = _resolveHubDisplay(_hubKey);
+        var _dtTxt = _hubDisp ? ("Day trip from " + _hubDisp) : "Day trip";
+        var _dtCore = _dtTxt;
+        var _dtTtl = _ttl(_dtCore + _ttlHint, _dtCore + _ttlHint);
+        stayChip = '<span class="pm-stay-toggle" style="' + _wrapStyle + '">'
+          + '<span style="' + _dayTripActiveStyle + '" ' + _openPopupOnclick + ' title="' + _pmEsc(_dtTtl) + '">' + _miniPin("daytrip") + ' ' + _pmEsc(_dtTxt) + _suggestedSuffix + '</span>'
+          + '</span>';
+      } else if (_chipRole === "onway") {
+        var _owHubKey = String(_derivedChip.hub || "").toLowerCase();
+        var _owHubDisp = _resolveHubDisplay(_owHubKey);
+        var _owTxt = _owHubDisp ? ("On the way from " + _owHubDisp) : "On the way";
+        var _owCore = _owHubDisp ? ("On the way from " + _owHubDisp) : "On the way between stays";
+        var _owTtl = _ttl(_owCore + _ttlHint, _owCore + _ttlHint);
+        stayChip = '<span class="pm-stay-toggle" style="' + _wrapStyle + '">'
+          + '<span style="' + _onwayActiveStyle + '" ' + _openPopupOnclick + ' title="' + _pmEsc(_owTtl) + '">' + _miniPin("onway") + ' ' + _pmEsc(_owTxt) + _suggestedSuffix + '</span>'
+          + '</span>';
+      } else if (_chipRole === "maybe") {
+        stayChip = '<span class="pm-stay-toggle" style="' + _wrapStyle + '">'
+          + '<span style="' + _maybeActiveStyle + '" ' + _openPopupOnclick + ' title="Undecided — click to pick a role">' + _miniPin("maybe") + ' Maybe</span>'
+          + '</span>';
       } else if (!_overnightCapable) {
-        // Round NC.X: lodging-test gate. The LLM said this place has
-        // no lodging (overnightCapable=false), so it can't be a
-        // destination — only a sight. Render just the active "👁 See"
-        // label with no "+ Stay" affordance. Reinforces the geography
-        // model: destinations are sub-geographies with lodging; sights
-        // are not. If the user knows the LLM was wrong about lodging,
-        // the Research card's stayOverride field is the explicit
-        // escape hatch (it bypasses _overnightCapable).
-        stayChip = '<span class="pm-stay-toggle" style="display:inline-flex;align-items:center;gap:6px;">'
-          + '<span style="' + _seeActiveStyle + '" title="Sight — no lodging here">👁 See</span>'
+        var _seeTtlA = _ttl("Currently see-only" + _ttlHint, "See" + _ttlHint);
+        stayChip = '<span class="pm-stay-toggle" style="' + _wrapStyle + '">'
+          + '<span style="' + _seeActiveStyle + '" ' + _openPopupOnclick + ' title="' + _pmEsc(_seeTtlA) + '">' + _miniPin("see") + ' See' + _suggestedSuffix + '</span>'
           + '</span>';
       } else {
-        // Place is currently See but COULD be a Stay (overnight-capable).
-        // Selected role renders FIRST so the user sees the current
-        // state immediately, then the alternative as a "switch to"
-        // affordance.
-        stayChip = '<span class="pm-stay-toggle" style="display:inline-flex;align-items:center;gap:6px;">'
-          + '<span style="' + _seeActiveStyle + '" title="Currently see-only">👁 See</span>'
+        var _seeTtlB = _ttl("Currently see-only" + _ttlHint, "See" + _ttlHint);
+        stayChip = '<span class="pm-stay-toggle" style="' + _wrapStyle + '">'
+          + '<span style="' + _seeActiveStyle + '" ' + _openPopupOnclick + ' title="' + _pmEsc(_seeTtlB) + '">' + _miniPin("see") + ' See' + _suggestedSuffix + '</span>'
           + '<button type="button" '
           +   'onclick="_pmSetStayOverride(&#39;' + _placeArg + '&#39;, true);event.stopPropagation();" '
           +   'style="' + _inactiveBtnStyle + '" '
@@ -15915,9 +16512,10 @@ function _renderPlaceActivityItems(){
         + '<div style="flex:1;min-width:0;cursor:pointer;" onclick="toggleDestKeepInSection(&#39;'+_pmEsc(d.place)+'&#39;, &#39;'+_secArg+'&#39;)">'
         // Round NC.X: name on its own line so it can use the column's
         // full width; chips and the research button drop to a row
-        // below. Previously the name shared a flex row with the chip
-        // and was forced to wrap (Jökulsárlón → "Jökulsárló / n").
-        + '<div class="tb-act-name" style="font-size:14px;font-weight:700;color:#111;line-height:1.25;">'
+        // below. The row is single-column for dest-major (see CSS
+        // override below) so the name has the FULL row width — no
+        // truncation needed even for "Svínafellsjökull" / "Jökulsárlón".
+        + '<div class="tb-act-name" style="font-size:14px;font-weight:700;color:#111;line-height:1.25;white-space:nowrap;" title="' + _pmEsc(d.place) + '">'
         +   _pmEsc(d.place)
         + '</div>'
         + '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px;">'
@@ -16924,76 +17522,314 @@ function _geographyOf(place) {
 }
 if (typeof globalThis !== "undefined") globalThis._geographyOf = _geographyOf;
 
-function _pmSetPlaceRole(placeKey, role, hubKey){
-  if (!_tb || !Array.isArray(_tb.placeActivities)) return;
-  var canon = String(placeKey || "").toLowerCase();
-  var hub = String(hubKey || "").toLowerCase();
-  // First, the per-place meta (notes/links/stayOverride) — keyed by
-  // normalized place name, used by the picker list chip and the
-  // research card.
-  var m = _pmPlaceMeta(placeKey, { create: true });
-  if (m) {
-    if (role === "stay")      m.stayOverride = true;
-    else if (role === "see")  m.stayOverride = false;
-    else if (role === "daytrip") m.stayOverride = null;
-    else if (role === "onway")   m.stayOverride = null;
-    else if (role === "maybe")   m.stayOverride = null;
-    else if (role === "reject")  m.stayOverride = null;
-  }
-  // Round NC.X: keep / reject / maybe semantics:
-  //   - stay / see / daytrip / onway  → _keep=true,  _rejected=false (active role)
-  //   - maybe                         → _keep=false, _rejected=false (undecided)
-  //   - reject                        → _keep=false, _rejected=true  (explicit no)
-  // Reject hides the place from the picker map AND moves it to the
-  // "Rejected" section in the picker list. Maybe is the prior
-  // unchecked-but-not-rejected state — small gray ❓ pin on the map.
-  var keep      = (role !== "maybe" && role !== "reject");
-  var rejected  = (role === "reject");
-  _tb.placeActivities.forEach(function(item){
-    if (!item || !Array.isArray(item.requiredPlaces)) return;
-    item.requiredPlaces.forEach(function(p){
-      if (!p || !p.place) return;
-      if (p.place.toLowerCase() !== canon) return;
-      p._isDayTrip  = (role === "daytrip");
-      p._dayTripHub = (role === "daytrip") ? hub : "";
-      // Round NC.X: track wayside's "from" hub the same way day-trip
-      // tracks its hub — needed so the popover can pre-select the
-      // right hub on re-open and so the trip build can route the
-      // wayside onto the right transit segment.
-      p._waysideFromHub = (role === "onway") ? hub : "";
-      p._keep = keep;
-      p._rejected = rejected;
-    });
-  });
-  // Round NC.X: also update c.role + c.status on the matching candidate.
-  //   stay/see/daytrip/onway → c.role = that role,        c.status = "keep"
-  //   maybe                   → c.role unchanged,         c.status = null
-  //   reject                  → c.role unchanged,         c.status = "reject"
-  try {
+// ────────────────────────────────────────────────────────────────────────
+// MaxRoleWriter — the single source of truth for writing a candidate's
+// role and its derived state. Mirrors the MaxMapPin pattern: 8 scattered
+// writers (with slightly different rules each) collapse into one.
+//
+// What it writes, atomically, on every role change:
+//   • c.role             — NC.3 source of truth for role
+//   • c._roleTouched     — true once user (or popup) commits a role
+//   • c.status           — "keep" for stay/see/daytrip/onway, null for
+//                          maybe, "reject" for reject
+//   • c.dayTripHub       — set for daytrip, cleared otherwise
+//   • c.waysideFromHub   — set for onway, cleared otherwise
+//   • placeMeta[k].stayOverride
+//                        — true for stay, false for see, null otherwise
+//                          (consistent for the chip's read-path)
+//   • placeActivities[*].requiredPlaces[*]._isDayTrip / _dayTripHub /
+//     _waysideFromHub / _keep / _rejected
+//                        — flag mirrors used by all the surfaces that
+//                          haven't been migrated off legacy flags
+//
+// What it does NOT do (callers handle):
+//   • Manipulate trip.routes (convertDest* helpers do this AFTER calling)
+//   • Re-render the map / list (callers fire UI refresh after)
+//   • Open/close popups
+//
+// API:
+//   MaxRoleWriter.set(idOrPlace, role, opts)
+//     idOrPlace : candidate.id OR place name (lowercased lookup, both tried)
+//     role      : "stay" | "see" | "daytrip" | "onway" | "maybe" | "reject"
+//     opts      : { hub, persist }
+//       hub     : hub place name (for daytrip/onway); lowercased internally
+//       persist : call autoSave after write (default true)
+//     → returns the mutated candidate, or null if not found.
+//
+// Validation:
+//   • Invalid role values → no-op, returns null.
+//   • Place name lookup uses _normPlaceName (case+diacritic).
+//   • Stay is allowed regardless of overnightCapable — explicit user
+//     pick wins (the engine's setRole still guards; this is the UI
+//     write path).
+var MaxRoleWriter = {
+  set: function(idOrPlace, role, opts){
+    opts = opts || {};
+    if (typeof _tb === "undefined" || !_tb || !Array.isArray(_tb.candidates)) return null;
+    var validActive = { stay: 1, see: 1, daytrip: 1, onway: 1 };
+    var validAll = { stay: 1, see: 1, daytrip: 1, onway: 1, maybe: 1, reject: 1 };
+    if (!validAll[role]) return null;
     var norm = (typeof _normPlaceName === "function")
-      ? _normPlaceName : function(s){ return String(s||"").toLowerCase(); };
-    var k = norm(placeKey);
-    if (k && Array.isArray(_tb.candidates)) {
-      var cand = _tb.candidates.find(function(c){ return c && c.place && norm(c.place) === k; });
-      if (cand) {
-        var roleEnum = { stay: 1, see: 1, daytrip: 1, onway: 1 };
-        if (roleEnum[role]) {
-          // Guard Stay on overnightCapable, matching MaxEnginePicker.setRole.
-          if (!(role === "stay" && cand.overnightCapable === false)) {
-            if (cand.role !== role) {
-              cand.role = role;
-              cand._roleTouched = true;
-            }
-          }
-          cand.status = "keep";
-        } else if (role === "maybe") {
-          cand.status = null;
-        } else if (role === "reject") {
-          cand.status = "reject";
+      ? _normPlaceName
+      : function(s){ return String(s||"").toLowerCase().trim(); };
+    // Find candidate by id, then by normalized place name.
+    var cand = _tb.candidates.find(function(c){ return c && c.id === idOrPlace; });
+    if (!cand) {
+      var k = norm(idOrPlace);
+      cand = _tb.candidates.find(function(c){ return c && c.place && norm(c.place) === k; });
+    }
+    if (!cand) return null;
+    var prev = cand.role || null;
+    var hub = opts.hub ? String(opts.hub).toLowerCase() : "";
+    // ── Active roles (stay/see/daytrip/onway) ───────────────────────
+    if (validActive[role]) {
+      cand.role = role;
+      cand._roleTouched = true;
+      cand.status = "keep";
+      if (role === "daytrip") {
+        cand.dayTripHub = hub || cand.dayTripHub || "";
+        cand.waysideFromHub = "";
+        cand.intent = "dayTrip";  // NC.9.4: align intent with role
+      } else if (role === "onway") {
+        cand.waysideFromHub = hub || cand.waysideFromHub || "";
+        cand.dayTripHub = "";
+        cand.intent = "wayside";  // NC.9.4
+      } else {
+        // stay / see — clear stale hubs so _pmDeriveRole's
+        // validation cascade doesn't find a ghost hub. NC.9.4: also
+        // clear `intent` so the publishTrip day-trip / wayside commit
+        // passes (which filter by intent === "dayTrip" / "wayside")
+        // don't treat this candidate as a day-trip / wayside on the
+        // next publish. Without this, switching Selfoss from Day-trip
+        // to Stay in Discovery would still match the day-trip commit
+        // filter's intent check; the dayTripHub guard saved us, but
+        // intent should reflect the user's current call to keep the
+        // model honest end-to-end.
+        cand.dayTripHub = "";
+        cand.waysideFromHub = "";
+        cand.intent = "";
+      }
+    } else if (role === "maybe") {
+      cand.status = null;
+      // Maybe doesn't touch c.role (user hasn't decided), so we leave
+      // _roleTouched alone too. status=null is what _pmDeriveRole reads.
+    } else if (role === "reject") {
+      cand.status = "reject";
+      cand._roleTouched = true;
+    }
+    // ── placeMeta.stayOverride ──────────────────────────────────────
+    try {
+      if (typeof _pmPlaceMeta === "function") {
+        var m = _pmPlaceMeta(cand.place, { create: true });
+        if (m) {
+          if (role === "stay")      m.stayOverride = true;
+          else if (role === "see")  m.stayOverride = false;
+          else                       m.stayOverride = null;
         }
       }
+    } catch(_){}
+    // ── requiredPlace flag mirrors ──────────────────────────────────
+    try {
+      if (Array.isArray(_tb.placeActivities)) {
+        var canon = (cand.place || "").toLowerCase();
+        var keep = (role !== "maybe" && role !== "reject");
+        var rejected = (role === "reject");
+        _tb.placeActivities.forEach(function(item){
+          if (!item || !Array.isArray(item.requiredPlaces)) return;
+          item.requiredPlaces.forEach(function(p){
+            if (!p || !p.place) return;
+            if (p.place.toLowerCase() !== canon) return;
+            p._isDayTrip = (role === "daytrip");
+            p._dayTripHub = (role === "daytrip") ? hub : "";
+            p._waysideFromHub = (role === "onway") ? hub : "";
+            p._keep = keep;
+            p._rejected = rejected;
+          });
+        });
+      }
+    } catch(_){}
+    // ── Event emission (engine event bus) ───────────────────────────
+    try {
+      if (typeof MaxEnginePicker !== "undefined"
+          && typeof MaxEnginePicker.emit === "function"
+          && cand.id) {
+        MaxEnginePicker.emit("candidateChange", { id: cand.id, role: role, prevRole: prev });
+      }
+    } catch(_){}
+    // ── Persistence ─────────────────────────────────────────────────
+    if (opts.persist !== false && typeof autoSave === "function") {
+      try { autoSave(); } catch(_){}
     }
-  } catch(_){}
+    return cand;
+  }
+};
+if (typeof window !== "undefined") window.MaxRoleWriter = MaxRoleWriter;
+
+// ────────────────────────────────────────────────────────────────────────
+// MaxPlaceKey — the single source of truth for normalizing a place name
+// into a lookup key. Wraps engine-trip.js's _normPlaceName so callers
+// can use a clearer name AND so we have a single audit point for any
+// future change to the normalization rules.
+//
+// What it does: NFD-normalize (Unicode decomposition) + strip combining
+// marks (diacritics) + lowercase + trim + collapse whitespace + canonicalize
+// "Saint" / "St." / "St" → "st" + punctuation → space. The result is a
+// stable string-equality key.
+//
+// Why it matters: many call sites use bare `place.toLowerCase()` for
+// lookup. "Mývatn" vs "myvatn", "Jökulsárlón" vs "jokulsarlon",
+// "Dyrhólaey" vs "dyrholaey" all key-mismatch silently — the predictor
+// stores one, the lookup uses the other, and the role-derivation
+// cascade falls through to a wrong default. Routing through
+// MaxPlaceKey.normalize eliminates that class of bug.
+//
+// API:
+//   MaxPlaceKey.normalize(name) → string
+//   MaxPlaceKey.equal(a, b)     → bool  (normalize-and-compare)
+var MaxPlaceKey = {
+  normalize: function(name){
+    if (typeof _normPlaceName === "function") return _normPlaceName(name);
+    // Fallback (shouldn't fire — engine-trip.js loads first).
+    return String(name || "").toLowerCase().trim();
+  },
+  equal: function(a, b){
+    return MaxPlaceKey.normalize(a) === MaxPlaceKey.normalize(b);
+  }
+};
+if (typeof window !== "undefined") window.MaxPlaceKey = MaxPlaceKey;
+
+// ────────────────────────────────────────────────────────────────────────
+// MaxPredictors — single source of truth for day-trip + on-the-way
+// heuristics. Previously the computation lived in two parallel
+// implementations:
+//   • Discovery's _renderPlaceActivityItems built it from _tb.placeActivities
+//   • Trip view's _computeTripViewPreds built it from trip.destinations
+// Different sources → different results for the same place when nights /
+// overnight flags drifted between picker and trip representations. This
+// module computes from either source via a source-spec, so both surfaces
+// can call it and get the same answer.
+//
+// API:
+//   MaxPredictors.compute(places, opts)
+//     places: { [key]: { place, lat, lng, nights, kept, overnight,
+//                        isDayTrip, userChoseStay } }
+//     opts:   { stayOrder: [key, key, …]  (optional, for on-way legs;
+//                                          falls back to lng-sort) }
+//     → returns { day: { srcKey: hubPlace }, way: { srcKey: hubPlace } }
+//
+// On-way wins when both fire (more specific claim).
+var MaxPredictors = {
+  compute: function(places, opts){
+    opts = opts || {};
+    var out = { day: {}, way: {} };
+    if (!places || typeof places !== "object") return out;
+    var _radius = (typeof _defaultDayTripRadiusKm === "function") ? _defaultDayTripRadiusKm() : 60;
+    function distKm(a, b){
+      var dLat = (a.lat - b.lat) * 111;
+      var dLng = (a.lng - b.lng) * 111 * Math.cos(((a.lat + b.lat) / 2) * Math.PI / 180);
+      return Math.sqrt(dLat*dLat + dLng*dLng);
+    }
+    // ── Day-trip pass ───────────────────────────────────────────────
+    Object.keys(places).forEach(function(srcKey){
+      var src = places[srcKey];
+      if (!src.kept) return;
+      if (!isFinite(src.lat)) return;
+      if (src.userChoseStay) return;
+      var srcIsSight = (src.overnight === false);
+      var srcIsShortStay = (src.nights <= 2 && !srcIsSight);
+      if (!srcIsSight && !srcIsShortStay) return;
+      var bestHub = null, bestDist = Infinity;
+      Object.keys(places).forEach(function(hubKey){
+        if (hubKey === srcKey) return;
+        var hub = places[hubKey];
+        if (!hub.kept) return;
+        if (!isFinite(hub.lat)) return;
+        if (hub.overnight === false) return;
+        if (hub.isDayTrip) return;
+        if (srcIsShortStay && hub.nights <= src.nights) return;
+        var d = distKm(src, hub);
+        if (d < bestDist) { bestDist = d; bestHub = hub; }
+      });
+      if (bestHub && bestDist <= _radius) out.day[srcKey] = bestHub.place;
+    });
+    // ── On-the-way pass ─────────────────────────────────────────────
+    // Build legs from stayOrder when provided; else chain stays by lng.
+    var legs = [];
+    function _appendLeg(fromKey, toKey){
+      var from = places[fromKey], to = places[toKey];
+      if (!from || !to) return;
+      if (!isFinite(from.lat) || !isFinite(to.lat)) return;
+      legs.push({ from: from, to: to, fromKey: fromKey, toKey: toKey });
+    }
+    if (Array.isArray(opts.stayOrder) && opts.stayOrder.length >= 2) {
+      var prevK = null;
+      opts.stayOrder.forEach(function(k){
+        var p = places[k];
+        if (!p || !p.kept || p.overnight === false || p.isDayTrip) return;
+        if (prevK) _appendLeg(prevK, k);
+        prevK = k;
+      });
+    } else {
+      // Fall back to chaining stays by longitude (West→East).
+      var stays = [];
+      Object.keys(places).forEach(function(k){
+        var p = places[k];
+        if (!p.kept || p.overnight === false || p.isDayTrip) return;
+        if (!isFinite(p.lat) || !isFinite(p.lng)) return;
+        stays.push(k);
+      });
+      stays.sort(function(a, b){ return places[a].lng - places[b].lng; });
+      for (var li = 0; li < stays.length - 1; li++) {
+        _appendLeg(stays[li], stays[li+1]);
+      }
+    }
+    function _perp(src, leg){
+      var fromS = leg.from, toS = leg.to;
+      var refLat = (fromS.lat + toS.lat) / 2;
+      var kmPerLng = 111 * Math.cos(refLat * Math.PI / 180);
+      var dx = (toS.lng - fromS.lng) * kmPerLng;
+      var dy = (toS.lat - fromS.lat) * 111;
+      var legLenSq = dx*dx + dy*dy;
+      if (legLenSq < 1e-6) return { perpKm: Infinity, projRatio: 0 };
+      var sx = (src.lng - fromS.lng) * kmPerLng;
+      var sy = (src.lat - fromS.lat) * 111;
+      var t = (sx*dx + sy*dy) / legLenSq;
+      var fx = t*dx, fy = t*dy;
+      var pdx = sx - fx, pdy = sy - fy;
+      return { perpKm: Math.sqrt(pdx*pdx + pdy*pdy), projRatio: t };
+    }
+    var _perpMax = 25, _minProj = 0.10, _maxProj = 0.90;
+    Object.keys(places).forEach(function(srcKey){
+      var src = places[srcKey];
+      if (!src.kept) return;
+      if (!isFinite(src.lat) || !isFinite(src.lng)) return;
+      if (src.userChoseStay) return;
+      var srcIsSight = (src.overnight === false);
+      var srcIsShortStay = (src.nights <= 2 && !srcIsSight);
+      if (!srcIsSight && !srcIsShortStay) return;
+      var bestLeg = null, bestPerp = Infinity;
+      legs.forEach(function(leg){
+        if (leg.fromKey === srcKey || leg.toKey === srcKey) return;
+        var r = _perp(src, leg);
+        if (r.projRatio < _minProj || r.projRatio > _maxProj) return;
+        if (r.perpKm > _perpMax) return;
+        if (r.perpKm < bestPerp) { bestPerp = r.perpKm; bestLeg = leg; }
+      });
+      if (bestLeg) out.way[srcKey] = places[bestLeg.fromKey].place;
+    });
+    // On-way wins over day-trip when both fire.
+    Object.keys(out.way).forEach(function(k){ if (out.day[k]) delete out.day[k]; });
+    return out;
+  }
+};
+if (typeof window !== "undefined") window.MaxPredictors = MaxPredictors;
+
+function _pmSetPlaceRole(placeKey, role, hubKey){
+  // Round NC.X: delegated to MaxRoleWriter — atomic write of c.role +
+  // _roleTouched + status + dayTripHub/waysideFromHub +
+  // placeMeta.stayOverride + requiredPlace flags. UI refresh stays
+  // here (writer doesn't know about the picker map / list).
+  if (!MaxRoleWriter.set(placeKey, role, { hub: hubKey })) return;
   if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
   if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
 }
@@ -17764,82 +18600,296 @@ function _pmExtractDomain(url){
 //   7. Default by overnightCapable
 function _pmDeriveRole(info, key, opts){
   opts = opts || {};
-  if (!info) return { role: "maybe" };
-  if (info._rejected) return { role: "reject" };
+  if (!info) return { role: "maybe", source: "default" };
+  if (info._rejected) return { role: "reject", source: "flag" };
+  // NC.9.13: cand lookup now consults BOTH _tb.candidates (picker
+  // draft, freshest) AND trip.candidates (published, the trip-view's
+  // data source). _tb wins when both exist — that's what we want
+  // when the user is actively editing the picker AND looking at the
+  // trip view side-by-side. When _tb is empty (saved-trip reload, no
+  // picker session), trip.candidates is the only data and becomes
+  // the source. Before this change, _pmDeriveRole only consulted
+  // _tb, so the trip view couldn't share this cascade and had to
+  // run its own — guaranteeing the two surfaces could disagree.
   var cand = null;
   try {
+    var nameKey = MaxPlaceKey.normalize(info.place || "");
     if (window._tb && Array.isArray(window._tb.candidates)) {
       cand = window._tb.candidates.find(function(c){
-        return c && c.place && c.place.toLowerCase() === (info.place || "").toLowerCase();
+        return c && c.place && MaxPlaceKey.normalize(c.place) === nameKey;
+      });
+    }
+    if (!cand && typeof trip !== "undefined" && trip && Array.isArray(trip.candidates)) {
+      cand = trip.candidates.find(function(c){
+        return c && c.place && MaxPlaceKey.normalize(c.place) === nameKey;
       });
     }
   } catch(_){}
-  if (cand && cand.status === "reject") return { role: "reject" };
-  // Day-trip / onway legacy flags WIN over c.role when present —
-  // they're the explicit per-requiredPlace decisions and reflect
-  // dest.dayTrips chips on trip.destinations.
+  if (cand && cand.status === "reject") return { role: "reject", source: "user" };
+  // Round NC.X (deeper Diamond Beach fix): the cascade now tracks
+  // SOURCE alongside role, so callers can tell whether a role is a
+  // user commitment ("you decided") or a suggestion ("Max suggests").
+  //
+  // Source values:
+  //   "user"          — c._roleTouched === true (you clicked a role)
+  //   "flag"          — info._isDayTrip / _waysideFromHub (popup write
+  //                     mirrored via dest.dayTrips chip or wayside stop)
+  //   "stay-override" — placeMeta.stayOverride === true|false (you
+  //                     clicked the Stay/See chip)
+  //   "predictor"    — _tb._dayTripPreds matched (60km/nights heuristic)
+  //   "llm-default"  — overnightCapable fallback (no user signal at all)
+  //
+  // Priority: user > flag > stay-override > predictor > llm-default.
+  // The Stay/See chip writer (_pmSetStayOverride) also sets cand.role
+  // and cand._roleTouched, so a Stay/See click reaches the "user"
+  // tier; "stay-override" is just the legacy path that still survives
+  // for places where the candidate wasn't synced (rare).
+  //
+  // USER COMMITMENT — sticky once the user explicitly chose a role.
+  if (cand && cand._roleTouched === true && (cand.role === "stay" || cand.role === "see" || cand.role === "daytrip" || cand.role === "onway")) {
+    return { role: cand.role, hub: cand.dayTripHub || (cand.role === "daytrip" ? (info._dayTripHub || "") : ""), source: "user" };
+  }
+  // Helper: predictor's current day-trip hub for this place
+  // (lowercased), or null if the predictor has no opinion. Only
+  // catches hubs within ~60km; places like Svínafellsjökull (~110km
+  // from Höfn) are out of range. Combined with _findNearestHub below,
+  // this is the full "refresh stale hubs" stack.
+  function _predHubFor(){
+    try {
+      if (!key || !window._tb || !window._tb._dayTripPreds) return null;
+      // Normalize for lookup so accented keys (Mývatn) match the
+      // predictor's normalized keys.
+      var nk = MaxPlaceKey.normalize(key);
+      if (window._tb._dayTripPreds[nk]) return String(window._tb._dayTripPreds[nk]).toLowerCase();
+      // Back-compat fallback: old dicts may have used bare .toLowerCase().
+      if (window._tb._dayTripPreds[key]) return String(window._tb._dayTripPreds[key]).toLowerCase();
+    } catch(_){}
+    return null;
+  }
+  // Helper: on-the-way predictor's hub for this place (the
+  // FROM-stay of the leg the place sits on). Set by the new
+  // _onWayPreds compute in _renderPlaceActivityItems — fires when a
+  // sight is within 25km of the line between two consecutive stays
+  // and the foot of the perpendicular is genuinely between them.
+  function _onWayPredFor(){
+    try {
+      if (!key || !window._tb || !window._tb._onWayPreds) return null;
+      var nk = MaxPlaceKey.normalize(key);
+      if (window._tb._onWayPreds[nk]) return String(window._tb._onWayPreds[nk]).toLowerCase();
+      if (window._tb._onWayPreds[key]) return String(window._tb._onWayPreds[key]).toLowerCase();
+    } catch(_){}
+    return null;
+  }
+  // Helper: is `hubKey` a currently kept stay (overnight-capable,
+  // kept, not flagged as a day trip itself)? Used to validate stored
+  // _dayTripHub values that may have gone stale — e.g., Diamond Beach
+  // stored "jokulsarlon" from when Jökulsárlón was a stay; the user
+  // later demoted Jökulsárlón to a day trip via the trip-view popup
+  // (writes c.role="daytrip", _roleTouched=true), so the stored hub
+  // is no longer valid.
+  //
+  // The check consults c.role FIRST because that's where popup
+  // commitments land — the requiredPlace flags only get the
+  // dest.dayTrips bridge mirror, which can lag. Then falls back to
+  // the placeActivities flag scan for synthesized candidates or
+  // pre-NC.3 trips that don't have a c.role yet.
+  //
+  // Skip recursion: we deliberately read c.role directly (not via
+  // _pmDeriveRole) to avoid mutual-recursion if two places point at
+  // each other as hubs.
+  function _isValidHub(hubKey){
+    if (!hubKey) return false;
+    try {
+      var hubCand = null;
+      if (window._tb && Array.isArray(window._tb.candidates)) {
+        hubCand = window._tb.candidates.find(function(c){
+          return c && c.place && c.place.toLowerCase() === hubKey;
+        });
+      }
+      if (hubCand) {
+        if (hubCand.status === "reject") return false;
+        if (hubCand.role === "stay") return true;
+        // Any explicit non-stay role on the candidate disqualifies
+        // it as a hub — this catches the Jökulsárlón case where the
+        // user converted it to a day trip.
+        if (hubCand.role === "see" || hubCand.role === "daytrip" || hubCand.role === "onway") return false;
+        // No explicit role — fall through to the flag scan.
+      }
+      // Fall back to scanning requiredPlace flags for places without
+      // a c.role yet (e.g., pre-NC.3 trips, or candidates that haven't
+      // been hydrated). A place is hub-eligible if any requiredPlace
+      // ref says it's kept, overnight-capable, not rejected, not a
+      // day trip itself, not a wayside.
+      var items = (window._tb && window._tb.placeActivities) || [];
+      for (var i = 0; i < items.length; i++) {
+        var rps = items[i].requiredPlaces || [];
+        for (var j = 0; j < rps.length; j++) {
+          var p = rps[j];
+          if (!p || !p.place || p.place.toLowerCase() !== hubKey) continue;
+          if (p._keep && p._isDayTrip !== true && p._rejected !== true && !p._waysideFromHub && p.overnight !== false) return true;
+        }
+      }
+    } catch(_){}
+    return false;
+  }
+  // Helper: nearest kept stay to `srcKey` regardless of distance.
+  // Mirrors the popup's "Day trip from" dropdown, which lists every
+  // kept stay sorted by distance and pre-selects the closest. So
+  // when the predictor returns null AND the stored hub is invalid,
+  // this returns what the popup would default to.
+  //
+  // Uses _isValidHub for the per-place check so we consult c.role
+  // (the popup's commitment surface) instead of just the
+  // requiredPlace flags. That stops Jökulsárlón — converted to a
+  // day trip via the popup — from being picked as a hub even when
+  // its requiredPlace ref doesn't have _isDayTrip=true yet.
+  function _findNearestHub(srcKey){
+    if (!srcKey) return null;
+    try {
+      var srcLL = window._coarseGeocode && window._coarseGeocode[srcKey];
+      if (!srcLL) return null;
+      var items = (window._tb && window._tb.placeActivities) || [];
+      var visited = {};
+      var bestKey = null, bestD = Infinity;
+      items.forEach(function(it){
+        (it.requiredPlaces || []).forEach(function(p){
+          if (!p || !p.place) return;
+          var k = p.place.toLowerCase();
+          if (k === srcKey) return;
+          if (visited[k]) return;
+          visited[k] = true;
+          if (!_isValidHub(k)) return;
+          var ll = window._coarseGeocode && window._coarseGeocode[k];
+          if (!ll) return;
+          var dLat = ll[0] - srcLL[0];
+          var dLng = ll[1] - srcLL[1];
+          var d = dLat*dLat + dLng*dLng;
+          if (d < bestD) { bestD = d; bestKey = k; }
+        });
+      });
+      return bestKey;
+    } catch(_){}
+    return null;
+  }
+  // FLAG — daytrip/onway flags set on requiredPlace refs by trip-view
+  // popup writes (chip mirror, wayside stop). The user committed via
+  // a different surface; treat as a commitment ("flag") but refresh
+  // the hub against the predictor + nearest-kept-stay because the
+  // stored value can go stale when the trip's destinations change.
   if (info._isDayTrip) {
-    return { role: "daytrip", hub: info._dayTripHub || "" };
+    var _flagHub = (info._dayTripHub || "").toLowerCase();
+    if (!_isValidHub(_flagHub)) {
+      _flagHub = _predHubFor() || _findNearestHub(key) || "";
+    }
+    return { role: "daytrip", hub: _flagHub, source: "flag" };
   }
   if (info._waysideFromHub) {
-    return { role: "onway", hub: info._waysideFromHub || "" };
+    var _owHub = String(info._waysideFromHub || "").toLowerCase();
+    if (!_isValidHub(_owHub)) {
+      _owHub = _findNearestHub(key) || "";
+    }
+    return { role: "onway", hub: _owHub, source: "flag" };
   }
-  // Maybe: not kept and no day-trip/wayside flag.
-  if (!info.kept && !cand) return { role: "maybe" };
-  // c.role from candidate, when valid.
-  if (cand && (cand.role === "stay" || cand.role === "see" || cand.role === "daytrip" || cand.role === "onway")) {
-    return { role: cand.role, hub: cand.dayTripHub || "" };
-  }
-  if (!info.kept) return { role: "maybe" };
-  // placeMeta.stayOverride.
+  // NC.9.11: STAY-OVERRIDE — user picked Stay or See via the "+ Add as
+  // Stay" / "+ Add as See" buttons in the picker. This is a USER
+  // COMMITMENT, just expressed through a different surface than the
+  // role popover (the popover writes c.role + _roleTouched; the +Add
+  // buttons write placeMeta.stayOverride). The cascade was previously
+  // BUGGY here: the predictor block below ran BEFORE this check, so
+  // a place added as Stay would get demoted to daytrip whenever it
+  // happened to sit within 60km of another stay (Selfoss → Reykjavík).
+  // The comment at the top of this cascade (line ~18602) said the
+  // intended priority was "user > flag > stay-override > predictor >
+  // llm-default" — the code now matches.
+  //
+  // NC.9.13: consult BOTH _tb.placeMeta (picker draft) AND
+  // trip.brief.placeMeta (published) so the trip view sees the +Add
+  // signal even after publish.
   try {
-    if (window._tb && window._tb.placeMeta) {
-      var metaKey = (typeof _pmMetaKey === "function") ? _pmMetaKey(info.place) : (key || info.place || "").toLowerCase();
-      var meta = window._tb.placeMeta[metaKey];
-      if (meta) {
-        if (meta.stayOverride === true) return { role: "stay" };
-        if (meta.stayOverride === false) return { role: "see" };
-      }
+    var metaKey = (typeof _pmMetaKey === "function") ? _pmMetaKey(info.place) : (key || info.place || "").toLowerCase();
+    var meta = null;
+    if (window._tb && window._tb.placeMeta && window._tb.placeMeta[metaKey]) {
+      meta = window._tb.placeMeta[metaKey];
+    } else if (typeof trip !== "undefined" && trip && trip.brief && trip.brief.placeMeta && trip.brief.placeMeta[metaKey]) {
+      meta = trip.brief.placeMeta[metaKey];
+    }
+    if (meta) {
+      if (meta.stayOverride === true) return { role: "stay", source: "stay-override" };
+      if (meta.stayOverride === false) return { role: "see", source: "stay-override" };
     }
   } catch(_){}
+  // PREDICTOR — only when no user commitment. Beats LLM default.
+  // On-the-way wins over day-trip in the compute step (overlaps are
+  // resolved there), so consulting _onWayPreds first is safe.
+  var _owPred = _onWayPredFor();
+  if (_owPred) {
+    return { role: "onway", hub: _owPred, source: "predictor" };
+  }
+  var _predOnly = _predHubFor();
+  if (_predOnly) {
+    return { role: "daytrip", hub: _predOnly, source: "predictor" };
+  }
+  // Maybe: not kept and no day-trip/wayside/predictor flag.
+  if (!info.kept && !cand) return { role: "maybe", source: "default" };
+  // c.role from candidate — set by LLM default or earlier writer
+  // without _roleTouched. Treat as a soft commitment ("llm-default")
+  // so the chip can render it as a suggestion.
+  if (cand && (cand.role === "stay" || cand.role === "see" || cand.role === "daytrip" || cand.role === "onway")) {
+    return { role: cand.role, hub: cand.dayTripHub || "", source: "llm-default" };
+  }
+  if (!info.kept) return { role: "maybe", source: "default" };
   // Default by overnight-capable signal.
   var capable = (info.overnight !== false);
-  return { role: capable ? "stay" : "see" };
+  return { role: capable ? "stay" : "see", source: "llm-default" };
 }
+
+// Debug helper — call _pmDebugRole("Diamond Beach") from devtools to
+// see exactly what _pmDeriveRole returns and why. Used to diagnose
+// the three-surface disagreement bugs.
+function _pmDebugRole(placeName){
+  if (!placeName) return null;
+  var key = String(placeName).toLowerCase();
+  // Mimic the popup's info build so the debug answer matches popup.
+  var info = { place: placeName, kept: false, _isDayTrip: false, _dayTripHub: "", _waysideFromHub: "", _rejected: false, overnight: undefined };
+  try {
+    (((window._tb && _tb.placeActivities) || [])).forEach(function(it){
+      (it.requiredPlaces || []).forEach(function(p){
+        if (!p || !p.place || p.place.toLowerCase() !== key) return;
+        if (p._keep) info.kept = true;
+        if (p._rejected === true) info._rejected = true;
+        if (p._isDayTrip === true) { info._isDayTrip = true; if (p._dayTripHub) info._dayTripHub = p._dayTripHub; }
+        if (p._waysideFromHub) info._waysideFromHub = p._waysideFromHub;
+        if (p.overnight !== false) info.overnight = true;
+        else if (info.overnight === undefined) info.overnight = false;
+      });
+    });
+  } catch(_){}
+  var pred = (window._tb && _tb._dayTripPreds) ? _tb._dayTripPreds[key] : undefined;
+  var cand = null;
+  try {
+    cand = ((window._tb && _tb.candidates) || []).find(function(c){ return c && c.place && c.place.toLowerCase() === key; });
+  } catch(_){}
+  var meta = (window._tb && _tb.placeMeta) ? (_tb.placeMeta[(typeof _pmMetaKey === "function") ? _pmMetaKey(placeName) : key] || null) : null;
+  var derived = _pmDeriveRole(info, key, {});
+  console.log("[_pmDebugRole]", placeName, {
+    derived: derived,
+    info: info,
+    candidate: cand ? { role: cand.role, status: cand.status, _roleTouched: cand._roleTouched, overnightCapable: cand.overnightCapable } : null,
+    placeMeta: meta ? { stayOverride: meta.stayOverride } : null,
+    predictor: pred || null
+  });
+  return derived;
+}
+if (typeof globalThis !== "undefined") globalThis._pmDebugRole = _pmDebugRole;
 if (typeof globalThis !== "undefined") globalThis._pmDeriveRole = _pmDeriveRole;
 
 function _pmSetStayOverride(placeName, value){
-  var m = _pmPlaceMeta(placeName, { create: true });
-  if (!m) return;
-  m.stayOverride = !!value;
-  // Round NC.X: ALSO update c.role on the matching candidate so the
-  // picker map (which reads c.role) re-paints the pin immediately.
-  // Without this the chip and tooltip flipped to Stay but the pin
-  // stayed gray (Selfoss symptom) — the bridge only ran at publishTrip
-  // time, way too late. Stay/See are the two values this writer
-  // supports; daytrip/onway have their own setters.
-  try {
-    var norm = (typeof _normPlaceName === "function")
-      ? _normPlaceName : function(s){ return String(s||"").toLowerCase(); };
-    var k = norm(placeName);
-    if (k && _tb && Array.isArray(_tb.candidates)) {
-      var cand = _tb.candidates.find(function(c){ return c && c.place && norm(c.place) === k; });
-      if (cand) {
-        var newRole = value ? "stay" : "see";
-        // Stay requires overnight infrastructure — guard against
-        // promoting a non-overnight-capable place.
-        if (newRole === "stay" && cand.overnightCapable === false) {
-          // Fall back to keeping c.role at its prior value; the
-          // stayOverride above will still re-render the chip per
-          // user intent (legacy behavior — the picker UI also
-          // gates Stay on overnightCapable).
-        } else if (cand.role !== newRole) {
-          cand.role = newRole;
-          cand._roleTouched = true;
-        }
-      }
-    }
-  } catch(_){}
+  // Round NC.X: delegated to MaxRoleWriter. Stay/See is just a thin
+  // wrapper that maps a boolean to the corresponding role. Writer
+  // handles placeMeta + c.role + flags atomically (and drops the
+  // legacy overnightCapable guard the user already overrode in NC.X).
+  var role = value ? "stay" : "see";
+  if (!MaxRoleWriter.set(placeName, role)) return;
   if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
   if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
 }
@@ -18263,68 +19313,72 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
     var border = isCurrent ? "1px solid #1a5fa8" : "1px solid #e5e5e5";
     var weight = isCurrent ? "600" : "400";
     var checked = isCurrent ? "checked" : "";
+    // NC.8: every role row renders MaxMapPin.swatch(role) as its
+    // leading glyph — same pin shape the map draws. Emojis (🛏 👁 📍 🛣)
+    // are gone from this surface; Neal: "make the icons in the popup
+    // match those on the map." One render path, no per-surface drift.
     if (role === "maybe") {
-      // Gray pill — undecided. No checkbox in the picker list = this.
       var maybeBg = isCurrent ? "#f3f3f3" : "#fff";
       var maybeBorder = isCurrent ? "1px solid #888" : "1px solid #e5e5e5";
-      return '<label style="display:flex;align-items:center;gap:6px;margin:3px 0;padding:5px 8px;background:' + maybeBg + ';border:' + maybeBorder + ';border-radius:5px;cursor:pointer;font-weight:' + weight + ';color:#666;">'
+      return '<label style="display:flex;align-items:center;gap:8px;margin:3px 0;padding:5px 8px;background:' + maybeBg + ';border:' + maybeBorder + ';border-radius:5px;cursor:pointer;font-weight:' + weight + ';color:#666;">'
         + '<input type="radio" name="pm-mode" value="maybe" ' + checked + ' />'
-        + '<span style="display:inline-flex;align-items:center;gap:6px;">'
-        +   '<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:#bbb;color:#fff;font-size:11px;font-weight:700;">?</span>'
-        +   'Maybe'
-        + '</span>'
+        + MaxMapPin.swatch("maybe")
+        + '<span>Maybe</span>'
         + '</label>';
     }
     if (role === "stay") {
-      // Round NC.X: hint when the LLM said this place has no lodging.
-      // The radio stays enabled (power-user override path), but the
-      // user sees Max's call alongside.
-      var _stayHint = (info.overnight === false)
-        ? ' <span style="color:#a36500;font-size:10.5px;font-weight:500;font-style:italic;">(no lodging known)</span>'
+      // Round NC.X: dropped the verbal "(no lodging known)" hint.
+      // Replaced with the dashed-border + 🤖 provenance vocabulary —
+      // when overnight=false, the Stay row renders with a dashed
+      // border + small 🤖 badge to signal "Max thinks no."
+      var _isGuess = (info.overnight === false);
+      var _stayBorder = _isGuess ? "1px dashed #a36500" : border;
+      var _provBadge  = _isGuess
+        ? ' <span class="pm-prov-badge" title="Max guessed this from training data — your pick wins." style="font-size:11px;cursor:help;margin-left:auto;">🤖</span>'
         : '';
-      return '<label style="display:flex;align-items:center;gap:6px;margin:3px 0;padding:5px 8px;background:' + bg + ';border:' + border + ';border-radius:5px;cursor:pointer;font-weight:' + weight + ';">'
+      return '<label style="display:flex;align-items:center;gap:8px;margin:3px 0;padding:5px 8px;background:' + bg + ';border:' + _stayBorder + ';border-radius:5px;cursor:pointer;font-weight:' + weight + ';">'
         + '<input type="radio" name="pm-mode" value="stay" ' + checked + ' />'
-        + '<span>🛏 Overnight' + _stayHint + '</span>'
+        + MaxMapPin.swatch("stay")
+        + '<span style="flex:1;">Overnight</span>'
+        + _provBadge
         + '</label>';
     }
     if (role === "see") {
-      return '<label style="display:flex;align-items:center;gap:6px;margin:3px 0;padding:5px 8px;background:' + bg + ';border:' + border + ';border-radius:5px;cursor:pointer;font-weight:' + weight + ';">'
+      return '<label style="display:flex;align-items:center;gap:8px;margin:3px 0;padding:5px 8px;background:' + bg + ';border:' + border + ';border-radius:5px;cursor:pointer;font-weight:' + weight + ';">'
         + '<input type="radio" name="pm-mode" value="see" ' + checked + ' />'
-        + '<span>👁 See</span>'
+        + MaxMapPin.swatch("see")
+        + '<span>See</span>'
         + '</label>';
     }
     if (role === "daytrip") {
-      return '<label style="display:flex;align-items:center;gap:6px;margin:3px 0;padding:5px 8px;background:' + bg + ';border:' + border + ';border-radius:5px;' + (noHubs ? 'opacity:0.55;cursor:not-allowed;' : 'cursor:pointer;') + 'font-weight:' + weight + ';" ' + dtTitle + '>'
+      return '<label style="display:flex;align-items:center;gap:8px;margin:3px 0;padding:5px 8px;background:' + bg + ';border:' + border + ';border-radius:5px;' + (noHubs ? 'opacity:0.55;cursor:not-allowed;' : 'cursor:pointer;') + 'font-weight:' + weight + ';" ' + dtTitle + '>'
         + '<input type="radio" name="pm-mode" value="daytrip" ' + checked + ' ' + dtDisabled + ' />'
-        + '<span>📍 Day trip from</span>'
+        + MaxMapPin.swatch("daytrip")
+        + '<span>Day trip from</span>'
         + '<select class="pm-hub-sel" ' + dtDisabled + ' style="font-family:inherit;font-size:12px;padding:2px 4px;margin-left:auto;">'
         +   hubOptions
         + '</select>'
         + '</label>';
     }
     if (role === "onway") {
-      // Wayside also gets a {hub} dropdown — same list of kept stays,
-      // user picks which one the wayside is "from" (i.e., the segment
-      // it's on).
       var wsDisabled = noHubs ? "disabled" : "";
       var wsTitle    = noHubs ? 'title="Pick a hub stay first — no kept stays to be on the way from."' : "";
-      return '<label style="display:flex;align-items:center;gap:6px;margin:3px 0;padding:5px 8px;background:' + bg + ';border:' + border + ';border-radius:5px;' + (noHubs ? 'opacity:0.55;cursor:not-allowed;' : 'cursor:pointer;') + 'font-weight:' + weight + ';" ' + wsTitle + '>'
+      return '<label style="display:flex;align-items:center;gap:8px;margin:3px 0;padding:5px 8px;background:' + bg + ';border:' + border + ';border-radius:5px;' + (noHubs ? 'opacity:0.55;cursor:not-allowed;' : 'cursor:pointer;') + 'font-weight:' + weight + ';" ' + wsTitle + '>'
         + '<input type="radio" name="pm-mode" value="onway" ' + checked + ' ' + wsDisabled + ' />'
-        + '<span>🛣 On the way from</span>'
+        + MaxMapPin.swatch("onway")
+        + '<span>On the way from</span>'
         + '<select class="pm-ws-hub-sel" ' + wsDisabled + ' style="font-family:inherit;font-size:12px;padding:2px 4px;margin-left:auto;">'
         +   wsHubOptions
         + '</select>'
         + '</label>';
     }
-    // reject — dim red pill, explicit no
+    // reject
     var rejBg = isCurrent ? "#fde8e6" : "#fff";
     var rejBorder = isCurrent ? "1px solid #b03e2d" : "1px solid #e5e5e5";
-    return '<label style="display:flex;align-items:center;gap:6px;margin:3px 0;padding:5px 8px;background:' + rejBg + ';border:' + rejBorder + ';border-radius:5px;cursor:pointer;font-weight:' + weight + ';color:#a93826;">'
+    return '<label style="display:flex;align-items:center;gap:8px;margin:3px 0;padding:5px 8px;background:' + rejBg + ';border:' + rejBorder + ';border-radius:5px;cursor:pointer;font-weight:' + weight + ';color:#a93826;">'
       + '<input type="radio" name="pm-mode" value="reject" ' + checked + ' />'
-      + '<span style="display:inline-flex;align-items:center;gap:6px;">'
-      +   '<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:#c75348;color:#fff;font-size:11px;font-weight:700;">✕</span>'
-      +   'Reject'
-      + '</span>'
+      + MaxMapPin.swatch("reject")
+      + '<span>Reject</span>'
       + '</label>';
   }
 
@@ -18459,10 +19513,11 @@ function openPlacePickerMapModal(){
     +         '(it.requiredPlaces||[]).forEach(function(p){'
     +           'if(!p||!p.place)return;'
     +           'var k=p.place.toLowerCase();'
-    +           'if(!byKey[k])byKey[k]={place:p.place,lat:null,lng:null,keep:false,iconic:false,_isDayTrip:false,_dayTripHub:""};'
+    +           'if(!byKey[k])byKey[k]={place:p.place,lat:null,lng:null,keep:false,iconic:false,_isDayTrip:false,_dayTripHub:"",_waysideFromHub:""};'
     +           'if(p._keep)byKey[k].keep=true;'
     +           'if(iconicItem||p.iconic)byKey[k].iconic=true;'
     +           'if(p._isDayTrip===true){byKey[k]._isDayTrip=true;if(p._dayTripHub&&!byKey[k]._dayTripHub)byKey[k]._dayTripHub=p._dayTripHub;}'
+    +           'if(p._waysideFromHub&&!byKey[k]._waysideFromHub){byKey[k]._waysideFromHub=p._waysideFromHub;}'
     +           'var coords=gc[k];'
     +           'if(coords&&isFinite(coords[0])){byKey[k].lat=coords[0];byKey[k].lng=coords[1];}'
     +         '});'
@@ -18484,17 +19539,51 @@ function openPlacePickerMapModal(){
            draws a route polyline. Sequencing is trip-view-only.
            NB on the leading "+": the comment block stays no-leading-+
            per the unary-plus footgun documented elsewhere. */
+    /* Round NC.X: popout window delegates BOTH role derivation
+       AND pin rendering to the parent window. opener._pmDeriveRole
+       owns role; opener.MaxMapPin owns the pin style + HTML. The
+       popout just has to pass info through both. The legacy
+       fallback below only runs if the parent fn is unreachable —
+       defensive, should never fire in normal flow. */
+    +   'function deriveRole(info){'
+    +     'try{'
+    +       'var op=window.opener;'
+    +       'if(op&&!op.closed&&typeof op._pmDeriveRole==="function"){'
+    +         'var k=(info.place||"").toLowerCase();'
+    +         'var d=op._pmDeriveRole({place:info.place,kept:info.keep,_isDayTrip:!!info._isDayTrip,_dayTripHub:info._dayTripHub||"",_waysideFromHub:info._waysideFromHub||"",_rejected:false,overnight:undefined},k,{});'
+    +         'return (d&&d.role)||"maybe";'
+    +       '}'
+    +     '}catch(_){}'
+    +     'return (info.keep&&info._isDayTrip)?"daytrip":(info.keep?"stay":"maybe");'
+    +   '}'
     +   'function pinHtml(info){'
-    +     'var isStay=info.keep&&!info._isDayTrip;'
-    +     'var isDayTrip=info.keep&&info._isDayTrip;'
-    +     'var color=isStay?"#1a5fa8":(isDayTrip?"#e6700f":"#bbb");'
-    +     'var border=info.iconic?"#b28a2e":"#fff";'
-    +     'var size=info.keep?22:16;'
-    +     'var label=info.keep?esc(info.place.substring(0,2)):"";'
-    +     'return \'<div style="background:\'+color+\';color:#fff;border-radius:50%;width:\'+size+\'px;height:\'+size+\'px;border:2px solid \'+border+\';box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;">\'+label+\'</div>\';'
+    +     'var role=deriveRole(info);'
+    +     'if(role==="reject")return "";'
+    +     'try{'
+    +       'var op=window.opener;'
+    +       'if(op&&!op.closed&&op.MaxMapPin){'
+    +         'var st=op.MaxMapPin.style(role,{iconic:!!info.iconic});'
+    +         'var lov={label:esc(info.place.substring(0,2))};'
+    +         'return op.MaxMapPin.html(st,lov);'
+    +       '}'
+    +     '}catch(_){}'
+    +     'return \'\';'
+    +   '}'
+    +   'function pinSpec(info){'
+    +     'var role=deriveRole(info);'
+    +     'try{'
+    +       'var op=window.opener;'
+    +       'if(op&&!op.closed&&op.MaxMapPin){'
+    +         'var st=op.MaxMapPin.style(role,{});'
+    +         'return op.MaxMapPin.iconSpec(st);'
+    +       '}'
+    +     '}catch(_){}'
+    +     'return {iconSize:[22,22],iconAnchor:[11,11],popupAnchor:[0,-11]};'
     +   '}'
     +   'function tooltipText(info){'
-    +     'return info.place+(info._isDayTrip?" · day trip":info.keep?" · stay":"");'
+    +     'var r=deriveRole(info);'
+    +     'var suffix=(r==="daytrip")?" \\u00b7 day trip":(r==="onway")?" \\u00b7 on the way":(r==="stay")?" \\u00b7 stay":(r==="see")?" \\u00b7 see":info.keep?" \\u00b7 kept":" \\u00b7 maybe";'
+    +     'return info.place+suffix;'
     +   '}'
     +   'function scrollOpenerToPlace(name){'
     +     'try{'
@@ -18618,8 +19707,8 @@ function openPlacePickerMapModal(){
     +     'var seen={};var bounds=[];'
     +     'pts.forEach(function(info){'
     +       'var k=info.place.toLowerCase();seen[k]=1;'
-    +       'var size=info.keep?22:16;'
-    +       'var icon=L.divIcon({html:pinHtml(info),className:"",iconSize:[size,size],iconAnchor:[size/2,size/2]});'
+    +       'var sp=pinSpec(info);'  /* Round NC.X: dimensions from MaxMapPin.iconSpec */
+    +       'var icon=L.divIcon({html:pinHtml(info),className:"",iconSize:sp.iconSize,iconAnchor:sp.iconAnchor,popupAnchor:sp.popupAnchor});'
     +       'var ll=[info.lat,info.lng];bounds.push(ll);'
     +       'if(markers[k]){markers[k].setIcon(icon);markers[k].setLatLng(ll);'
     +         'if(markers[k].getTooltip())markers[k].setTooltipContent(tooltipText(info));'
@@ -18805,17 +19894,46 @@ function _openPlacePickerMapOverlay(){
   var allByKey = {};
   pts.forEach(function(p){ allByKey[p.place.toLowerCase()] = p; });
   var bounds = L.latLngBounds([]);
+  // Round NC.X: mobile overlay now routes pin rendering through
+  // MaxMapPin — the single source of truth shared with the in-page
+  // picker, popout, trip view, and trip popout. All inline pin HTML
+  // construction is gone; this loop derives the role via
+  // _pmDeriveRole (same as everywhere else) and asks MaxMapPin for
+  // the style + HTML + icon. Identical output as Surface #1 for the
+  // same place / context.
   pts.forEach(function(info){
-    var isStay   = info.keep && !info._isDayTrip;
-    var isDayTrip = info.keep && info._isDayTrip;
-    var color = isStay ? "#1a5fa8" : (isDayTrip ? "#e6700f" : "#bbb");
-    var border = info.iconic ? "#b28a2e" : "#fff";
-    var size = info.keep ? 22 : 16;
-    var html = '<div style="width:' + size + 'px;height:' + size + 'px;border-radius:50%;background:' + color +
-      ';border:' + (info.iconic ? 3 : 2) + 'px solid ' + border + ';box-shadow:0 1px 3px rgba(0,0,0,0.3);"></div>';
-    var icon = L.divIcon({ html: html, className: "", iconSize: [size, size], iconAnchor: [size/2, size/2] });
+    var _key = (info.place || "").toLowerCase();
+    var _derived = (typeof _pmDeriveRole === "function")
+      ? _pmDeriveRole({
+          place: info.place,
+          kept: info.keep,
+          _isDayTrip: !!info._isDayTrip,
+          _dayTripHub: info._dayTripHub || "",
+          _waysideFromHub: info._waysideFromHub || "",
+          _rejected: false,
+          overnight: undefined
+        }, _key, {})
+      : { role: (info.keep && info._isDayTrip ? "daytrip" : info.keep ? "stay" : "maybe") };
+    var _role = _derived.role;
+    if (_role === "reject") return;
+    var _style = MaxMapPin.style(_role, { iconic: !!info.iconic });
+    // All roles carry initials; corner badges / shape carry the role.
+    var _labelOv = { label: info.place.substring(0, 2) };
+    var _html = MaxMapPin.html(_style, _labelOv);
+    var icon = MaxMapPin.icon(_html, _style);
     var m = L.marker([info.lat, info.lng], { icon: icon }).addTo(map);
-    m.bindTooltip(info.place + (isDayTrip ? " · day trip" : isStay ? " · stay" : ""), { direction: "top", offset: [0, -size/2] });
+    var _ttRole = (_role === "daytrip") ? " · day trip"
+                : (_role === "onway")   ? " · on the way"
+                : (_role === "stay")    ? " · stay"
+                : (_role === "see")     ? " · see"
+                : info.keep             ? " · kept"
+                :                         " · maybe";
+    // Tooltip offset clears the pin's visible top regardless of
+    // anchor strategy. For centered shapes (circle/octagon), top is
+    // at -height/2 from anchor; for tip-anchored teardrops, top is
+    // at -height from anchor.
+    var _ttOffset = (_style.anchor === "tip") ? -_style.height : -_style.height/2;
+    m.bindTooltip(info.place + _ttRole, { direction: "top", offset: [0, _ttOffset] });
     bounds.extend([info.lat, info.lng]);
   });
   // v357: main-route polyline removed — matches the inline picker
@@ -18947,6 +20065,14 @@ function _buildHeroMapPoints(){
   trip.destinations.forEach(function(d, i){
     var ctr = getCityCenter(d.place);
     if (!ctr || !isFinite(ctr[0]) || !isFinite(ctr[1])) return;
+    // Round NC.X: thread the candidate's c.role into the snapshot so
+    // the popout renderer can hand it to MaxMapPin.style(). Without
+    // this the popout had no way to know whether a place was Stay /
+    // Day trip / On the way / See and fell back to its own ad-hoc
+    // blue-vs-grey scheme. _candForDest already does the right
+    // candidate lookup; normalizeCandidateRole fills c.role if missing.
+    var _cd = (typeof _candForDest === "function") ? (_candForDest(d) || {}) : {};
+    var _role = _cd.role || "stay";
     pts.push({
       kind: "dest",
       n: i + 1,
@@ -18954,6 +20080,7 @@ function _buildHeroMapPoints(){
       // v294.18: 2-letter abbreviation baked into the snapshot so the popout
       // window can render num+abbrev pins matching the right-panel map.
       abbrev: ((d.place || "") + "").trim().substring(0, 2),
+      role: _role,
       destId: d.id || "",  // Round FZ: ID so popup-window pin clicks
                             // can scroll the opener to the right card.
       lat: ctr[0],
@@ -19007,6 +20134,58 @@ function _buildHeroMapPoints(){
   }
   _pushGateway(_hmEntryLoc, _hmEntryGlyph, _hmEntryName, true);
   _pushGateway(_hmExitLoc,  _hmExitGlyph,  _hmExitName,  false);
+
+  // NC.7: emit "considered, not committed" places as kind:"considered"
+  // pts so the View larger popout + in-page overlay render them with
+  // the same MaxMapPin "maybe" treatment as the inline trip map.
+  // Without this pass, the larger map silently dropped the gray pins —
+  // Neal: "The larger trip map does not agree with the smaller." Same
+  // dedup logic as updateMainMap's _renderConsideredPins.
+  try {
+    if (Array.isArray(trip.mdcItems) && trip.mdcItems.length) {
+      function _hmNormKey(name){
+        if (!name) return "";
+        return (typeof _normPlaceName === "function") ? _normPlaceName(name) : name.toLowerCase().trim();
+      }
+      var _hmIncluded = {};
+      trip.destinations.forEach(function(d){ if (d && d.place) _hmIncluded[_hmNormKey(d.place)] = true; });
+      (trip.routes || []).forEach(function(r){
+        if (!r || !Array.isArray(r.planItems)) return;
+        r.planItems.forEach(function(pi){
+          if (!pi || pi.type !== "stop" || !pi.placeId) return;
+          var p = trip.places && trip.places[pi.placeId];
+          if (p && p.name) _hmIncluded[_hmNormKey(p.name)] = true;
+          if (pi.placeId) _hmIncluded[_hmNormKey(pi.placeId)] = true;
+        });
+      });
+      var _hmConsidered = {};
+      trip.mdcItems.forEach(function(it){
+        if (!it || !Array.isArray(it.requiredPlaces)) return;
+        it.requiredPlaces.forEach(function(p){
+          if (!p || !p.place) return;
+          var k = _hmNormKey(p.place);
+          if (!k || _hmIncluded[k] || _hmConsidered[k]) return;
+          var coords = null;
+          if (typeof p.lat === "number" && typeof p.lng === "number"
+              && isFinite(p.lat) && isFinite(p.lng)) {
+            coords = [p.lat, p.lng];
+          } else if (typeof getCityCenter === "function") {
+            var c = getCityCenter(p.place);
+            if (Array.isArray(c) && isFinite(c[0])) coords = c;
+          }
+          if (!coords) return;
+          _hmConsidered[k] = true;
+          pts.push({
+            kind: "considered",
+            place: p.place,
+            abbrev: (p.place || "").trim().substring(0, 2),
+            lat: coords[0],
+            lng: coords[1]
+          });
+        });
+      });
+    }
+  } catch(_){}
   return pts;
 }
 
@@ -19077,9 +20256,16 @@ function _openTripHeroMapOverlay(){
   ov.style.cssText = "position:fixed;inset:0;background:#fff;z-index:11800;display:flex;flex-direction:column;";
   var tripName = (trip && trip.name) || "Your trip";
   ov.innerHTML =
-    '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid #eee;background:#fafafa;flex-shrink:0;">' +
-      '<div style="font-size:13px;font-weight:700;color:#1a1a1a;">' + tripName.replace(/[<>"]/g, "") + ' — route</div>' +
-      '<button type="button" id="trip-hero-mobile-close" style="background:#fff;border:1px solid #ddd;border-radius:6px;font-size:13px;font-weight:600;color:#333;padding:6px 12px;cursor:pointer;font-family:inherit;">✕ Close</button>' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid #eee;background:#fafafa;flex-shrink:0;gap:10px;">' +
+      // NC.6: title + route disclaimer stacked. Same message as the
+      // inline trip-overview legend's "Order of stops" row and the
+      // popout window's header — the dashed blue line connecting
+      // numbered pins is a sequence, not turn-by-turn directions.
+      '<div style="min-width:0;flex:1;">' +
+        '<div style="font-size:13px;font-weight:700;color:#1a1a1a;">' + tripName.replace(/[<>"]/g, "") + ' — route</div>' +
+        '<div style="font-size:11px;color:#888;margin-top:2px;"><strong style="color:#555;font-weight:600;">Order of stops</strong> — the dashed line shows sequence, not driving directions. Turn-by-turn routing is coming in a future release.</div>' +
+      '</div>' +
+      '<button type="button" id="trip-hero-mobile-close" style="background:#fff;border:1px solid #ddd;border-radius:6px;font-size:13px;font-weight:600;color:#333;padding:6px 12px;cursor:pointer;font-family:inherit;flex-shrink:0;">✕ Close</button>' +
     '</div>' +
     '<div id="trip-hero-mobile-map" style="flex:1;min-height:0;background:#eaf0ed;"></div>';
   document.body.appendChild(ov);
@@ -19129,27 +20315,40 @@ function _openTripHeroMapOverlay(){
   // FN.A.4: route line connects destinations only — gateways have
   // their own dashed connectors. bounds includes everything so the
   // map auto-fits to all pts (including gateways).
-  var line = pts.filter(function(p){ return p.kind !== "gateway"; }).map(function(p){ return [p.lat, p.lng]; });
+  // NC.7: "considered" pts also stay off the polyline — they're
+  // tentative, not part of the route sequence.
+  var line = pts.filter(function(p){ return p.kind !== "gateway" && p.kind !== "considered"; }).map(function(p){ return [p.lat, p.lng]; });
   L.polyline(line, { color: "#fff", weight: 4, opacity: 0.85, dashArray: "6,4" }).addTo(map);
   pts.forEach(function(p, i){
     bounds.extend([p.lat, p.lng]);
-    // FN.A.4: gateway pts render as standalone white-bg pins with
-    // mode glyph + dashed connector to anchor destination. Separate
-    // visual vocabulary from destination pins.
+    // NC.7: "considered, not committed" pts go through MaxMapPin's
+    // "maybe" style — gray dashed circle + place initials — same as
+    // the inline trip-overview map. Single source of truth.
+    if (p.kind === "considered") {
+      var _cstyle = MaxMapPin.style("maybe", {});
+      var _clabel = (p.abbrev || (p.place || "").substring(0, 2));
+      var _chtml = MaxMapPin.html(_cstyle, { label: _clabel });
+      var _cicon = MaxMapPin.icon(_chtml, _cstyle, { className: "trip-popout-considered-pin" });
+      try {
+        var _cm = L.marker([p.lat, p.lng], { icon: _cicon, zIndexOffset: -100 }).addTo(map);
+        _cm.bindTooltip(p.place + " · considered", {
+          direction: "top", offset: [0, -_cstyle.height/2]
+        });
+      } catch(_){}
+      return;
+    }
+    // NC.9.10: gateway pts now route through MaxMapPin.style("gateway")
+    // — same source of truth as destination/considered pins.
     if (p.kind === "gateway") {
-      var gwSize = 22, gwColor = "#1a5fa8";
-      var gwLabel = p.place + (p.isEntry ? " · arrival" : " · departure");
-      var gwHtml = '<div style="background:#fff;border:2px solid ' + gwColor
-        + ';border-radius:50%;width:' + gwSize + 'px;height:' + gwSize + 'px;'
-        + 'display:flex;align-items:center;justify-content:center;'
-        + 'font-size:13px;line-height:1;color:' + gwColor + ';'
-        + 'box-shadow:0 1px 4px rgba(0,0,0,0.25);">' + p.glyph + '</div>';
-      var gwIcon = L.divIcon({ html: gwHtml, className: "", iconSize: [gwSize, gwSize], iconAnchor: [gwSize/2, gwSize/2] });
-      var gm = L.marker([p.lat, p.lng], { icon: gwIcon, zIndexOffset: -50 }).addTo(map);
-      gm.bindTooltip(gwLabel, { direction: "top", offset: [0, -gwSize/2 - 2] });
+      var _gwStyle = MaxMapPin.style("gateway", {});
+      var _gwHtml = MaxMapPin.html(_gwStyle, { label: p.glyph });
+      var _gwIcon = MaxMapPin.icon(_gwHtml, _gwStyle);
+      var _gwLabel = p.place + (p.isEntry ? " · arrival" : " · departure");
+      var gm = L.marker([p.lat, p.lng], { icon: _gwIcon, zIndexOffset: -50 }).addTo(map);
+      gm.bindTooltip(_gwLabel, { direction: "top", offset: [0, -_gwStyle.height/2 - 2] });
       if (isFinite(p.anchorLat) && isFinite(p.anchorLng)) {
         L.polyline([[p.lat, p.lng], [p.anchorLat, p.anchorLng]], {
-          color: gwColor, weight: 1.5, opacity: 0.5,
+          color: _gwStyle.stroke, weight: 1.5, opacity: 0.5,
           dashArray: "4 4", interactive: false
         }).addTo(map);
       }
@@ -19312,6 +20511,12 @@ function openTripHeroMapWindow(){
     + '#hdr{padding:10px 16px;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between;background:#fafafa;gap:10px;}'
     + '#ttl{font-size:14px;font-weight:700;color:#1a1a1a;}'
     + '#sub{font-size:11px;color:#888;margin-left:10px;}'
+    /* NC.6: route-disclaimer subtext. Same idea as the inline trip-
+       overview legend's "Order of stops" row — the dashed blue line is
+       an ordering, not turn-by-turn directions. Lives in the header so
+       the user sees it before they study the map. */
+    + '#routeNote{font-size:11px;color:#888;margin-top:2px;}'
+    + '#routeNote strong{color:#555;font-weight:600;}'
     /* v352: close button. On desktop the user could just close the
        popup window via the OS chrome, but on phones the popup opens
        as a new TAB with no built-in back-to-trip affordance — they
@@ -19328,7 +20533,10 @@ function openTripHeroMapWindow(){
     + '#routeBtn:hover{background:#eef5ff;}'
     + '#routeBtn.off{color:#888;border-color:#ddd;}'
     + '#routeBtn.off:hover{background:#fafafa;}'
-    + '#map{position:absolute;top:56px;left:0;right:0;bottom:0;background:#eaf0ed;}'
+    /* NC.6: header is now two-line (title + route disclaimer) — bump
+       the map down from 56px to 72px so the leaflet container doesn't
+       slide under the header. */
+    + '#map{position:absolute;top:72px;left:0;right:0;bottom:0;background:#eaf0ed;}'
     /* v353.2: kill the 1-pixel tile gaps that read as a lat/lon
        grid covering the whole map. The visible seams come from
        sub-pixel positioning rounding on retina + certain zooms.
@@ -19346,14 +20554,20 @@ function openTripHeroMapWindow(){
     // Round FA: stale-data toast. Shown for ~2s before the popup
     // auto-closes when the opener posts a "maxTripStale" message.
     // Centered on the header for visibility above the map.
-    + '#stale-toast{position:fixed;top:64px;left:50%;transform:translateX(-50%);background:#1a1a1a;color:#fff;padding:10px 16px;border-radius:6px;font-size:12px;font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,0.25);z-index:5000;opacity:0;pointer-events:none;transition:opacity 0.2s ease;}'
+    /* NC.6: bumped from 64px → 80px to clear the taller two-line
+       header (title + route disclaimer). */
+    + '#stale-toast{position:fixed;top:80px;left:50%;transform:translateX(-50%);background:#1a1a1a;color:#fff;padding:10px 16px;border-radius:6px;font-size:12px;font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,0.25);z-index:5000;opacity:0;pointer-events:none;transition:opacity 0.2s ease;}'
     + '#stale-toast.on{opacity:1;}'
     + '</style>'
     + '</head><body>'
     + '<div id="hdr">'
-    +   '<div><span id="ttl">' + tripName.replace(/[<>"]/g, "") + ' — route</span><span id="sub">' + pts.length + ' destination' + (pts.length !== 1 ? 's' : '') + '</span></div>'
+    +   '<div><div><span id="ttl">' + tripName.replace(/[<>"]/g, "") + ' — route</span><span id="sub">' + pts.length + ' destination' + (pts.length !== 1 ? 's' : '') + '</span></div>'
+    /* NC.6: route-disclaimer. Same wording as the inline trip-overview
+       legend so the user gets a consistent message regardless of which
+       map view they're looking at. */
+    +     '<div id="routeNote"><strong>Order of stops</strong> — the dashed line shows sequence, not driving directions. Turn-by-turn routing is coming in a future release.</div></div>'
     +   '<div style="display:flex;align-items:center;flex-shrink:0;">'
-    +     '<button type="button" id="routeBtn" title="Show or hide the trip route line">Route ✓</button>'
+    +     '<button type="button" id="routeBtn" title="Show or hide the line connecting stops in order (this is a sequence, not a driving route)">Route ✓</button>'
     +     '<button type="button" id="closeBtn" title="Back to trip">✕ Close</button>'
     +   '</div>'
     + '</div>'
@@ -19399,7 +20613,9 @@ function openTripHeroMapWindow(){
     // connectors. allCoords (used by fitBounds) keeps everything so
     // the map auto-zooms to include gateway pins.
     +   'var allCoords = pts.map(function(p){return [p.lat, p.lng];});'
-    +   'var coords = pts.filter(function(p){return p.kind !== "gateway";}).map(function(p){return [p.lat, p.lng];});'
+    /* NC.7: route line skips both gateway AND considered pts — the
+       considered pins are tentative, not part of the route sequence. */
+    +   'var coords = pts.filter(function(p){return p.kind !== "gateway" && p.kind !== "considered";}).map(function(p){return [p.lat, p.lng];});'
     // v353.2: route polylines kept on closure refs so the Route
     // toggle button can show/hide them. Comment is OUT of the +
     // chain (unary-plus trap; see v359.5.20).
@@ -19429,45 +20645,43 @@ function openTripHeroMapWindow(){
     // FN.A.4: split pts into destinations and gateways. Destinations
     // group by name (round-trip same-city collapse); gateways render
     // as standalone white-bg pins with dashed connectors.
-    +   'var destPts = pts.filter(function(p){ return p.kind !== "gateway"; });'
+    /* NC.7: destPts excludes considered pts so they don't get grouped
+       into pinGroups (which renders numbered destination pins). */
+    +   'var destPts = pts.filter(function(p){ return p.kind !== "gateway" && p.kind !== "considered"; });'
     +   'var gatewayPts = pts.filter(function(p){ return p.kind === "gateway"; });'
+    +   'var consideredPts = pts.filter(function(p){ return p.kind === "considered"; });'
     +   'var pinGroups = []; var pinByKey = {};'
     +   'destPts.forEach(function(p){'
     +     'var key = (p.place||"").toLowerCase().replace(/[^a-z0-9]/g, "");'
     +     'if (pinByKey[key]) { pinByKey[key].pts.push(p); }'
     +     'else { var g = {key: key, pts: [p]}; pinByKey[key] = g; pinGroups.push(g); }'
     +   '});'
+    /* Round NC.X: trip-overview popout delegates pin rendering to
+       the parent window's MaxMapPin. Inputs the popout assembles
+       (label, entry/exit glyphs, role from c.role threaded in via
+       primary.role) get passed as declarative options. No inline
+       HTML in this surface anymore. */
     +   'pinGroups.forEach(function(g){'
     +     'var primary = g.pts[0];'
     +     'var label = g.pts.map(function(p){ return p.n; }).join("\\u00b7");'
-    // v359.52.4: popup-window markers show sequence numbers (matches
-    // updateMainMap). Round-trip cities dot-join their indices.
-    // Long labels get a smaller font so they still fit at 22 px.
-    +     'var size = 22;'
-    +     'var fontSize = label.length > 3 ? 8 : (label.length > 2 ? 10 : 11);'
-    // v359.60.21: 0-night ("see") destinations render grey to match the
-    // main trip map. Round-trip group only goes grey when EVERY visit
-    // is 0-night; mixed groups stay blue so the overnight context wins.
     +     'var _allZeroNight = g.pts.every(function(p){ return (p.nights || 0) === 0; });'
-    +     'var _bg = _allZeroNight ? "#888" : "#1a5fa8";'
-    // FN.A.4: glyph badge for entry / exit. Supports BOTH glyphs on
-    // the same pin (round-trip same-city with mode mix — fly in,
-    // ferry out — wants ✈⛴ side by side). The badge widens to a pill
-    // when both modes are present and DIFFERENT; same-mode same-pin
-    // collapses to one glyph.
+    +     'var _role = primary.role || (_allZeroNight ? "see" : "stay");'
     +     'var _eG = "", _xG = "";'
     +     'for (var _gi = 0; _gi < g.pts.length; _gi++) {'
     +       'if (!_eG && g.pts[_gi].entryGlyph) _eG = g.pts[_gi].entryGlyph;'
     +       'if (!_xG && g.pts[_gi].exitGlyph)  _xG = g.pts[_gi].exitGlyph;'
     +     '}'
-    +     'var _bgBoth = _eG && _xG && _eG !== _xG;'
-    +     'var _bgText = _bgBoth ? (_eG + _xG) : (_eG || _xG);'
-    +     'var _bgTitle = (_eG && _xG) ? "Trip start &amp; end" : (_eG ? "Trip start" : (_xG ? "Trip end" : ""));'
-    +     'var _bgW = _bgBoth ? 22 : 14;'
-    +     'var _bgR = _bgBoth ? "7px" : "50%";'
-    +     'var _badgeHtml = _bgText ? \'<div title="\'+_bgTitle+\'" style="position:absolute;top:-5px;right:-5px;background:#fff;border:1.5px solid \'+_bg+\';border-radius:\'+_bgR+\';width:\'+_bgW+\'px;height:14px;display:flex;align-items:center;justify-content:center;gap:1px;font-size:9px;line-height:1;padding:0 2px;box-shadow:0 1px 2px rgba(0,0,0,0.15);">\'+_bgText+\'</div>\' : "";'
-    +     'var html = \'<div style="position:relative;width:\'+size+\'px;height:\'+size+\'px;"><div style="background:\'+_bg+\';color:#fff;border-radius:50%;width:\'+size+\'px;height:\'+size+\'px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;font-size:\'+fontSize+\'px;font-weight:700;letter-spacing:-0.02em;">\'+label+\'</div>\'+_badgeHtml+\'</div>\';'
-    +     'var icon = L.divIcon({html: html, className: "", iconSize: [size, size], iconAnchor: [size/2, size/2]});'
+    +     'var html = "", sp = {iconSize:[22,22], iconAnchor:[11,11], popupAnchor:[0,-11]};'
+    +     'try {'
+    +       'var op = window.opener;'
+    +       'if (op && !op.closed && op.MaxMapPin) {'
+    +         'var st = op.MaxMapPin.style(_role, {});'
+    +         'var lov = {label: (primary.place||"").substring(0,2)};'
+    +         'html = op.MaxMapPin.html(st, lov, {sequence: label, entryGlyph: _eG, exitGlyph: _xG});'
+    +         'sp = op.MaxMapPin.iconSpec(st);'
+    +       '}'
+    +     '} catch(_) {}'
+    +     'var icon = L.divIcon({html: html, className: "", iconSize: sp.iconSize, iconAnchor: sp.iconAnchor, popupAnchor: sp.popupAnchor});'
     +     'var popupBits = g.pts.map(function(p){'
     +       'var role = p.isFirst ? "Arrival" : (p.isLast ? "Departure" : "Stop " + p.n);'
     +       'var dateLine = p.dateFrom ? p.dateFrom + " \\u2192 " + p.dateTo + " (" + p.nights + " night" + (p.nights !== 1 ? "s" : "") + ")" : (p.nights + " night" + (p.nights !== 1 ? "s" : ""));'
@@ -19492,16 +20706,47 @@ function openTripHeroMapWindow(){
     // distinctly from destination pins — white fill with mode glyph
     // as content, thin dashed connector to the anchor destination.
     // Makes the trip arc legible at a glance: gateway → 1 → 2 → ... → N → gateway.
+    /* NC.9.10: gateway pins delegate to opener.MaxMapPin so they
+       share the same source of truth as every other pin surface.
+       White-fill + blue-border + mode-emoji glyph all come from the
+       "gateway" role spec; the popout no longer hardcodes #1a5fa8. */
     +   'gatewayPts.forEach(function(p){'
-    +     'var gwSize = 22, gwColor = "#1a5fa8";'
+    +     'var ghtml = "", gsp = {iconSize:[22,22], iconAnchor:[11,11], popupAnchor:[0,-11]}, gColor = "#1a5fa8";'
+    +     'try {'
+    +       'var op = window.opener;'
+    +       'if (op && !op.closed && op.MaxMapPin) {'
+    +         'var gst = op.MaxMapPin.style("gateway", {});'
+    +         'ghtml = op.MaxMapPin.html(gst, {label: p.glyph});'
+    +         'gsp = op.MaxMapPin.iconSpec(gst);'
+    +         'gColor = gst.stroke;'
+    +       '}'
+    +     '} catch(_) {}'
     +     'var gwLabel = p.place + (p.isEntry ? " \\u00b7 arrival" : " \\u00b7 departure");'
-    +     'var gwHtml = \'<div style="background:#fff;border:2px solid \'+gwColor+\';border-radius:50%;width:\'+gwSize+\'px;height:\'+gwSize+\'px;display:flex;align-items:center;justify-content:center;font-size:13px;line-height:1;color:\'+gwColor+\';box-shadow:0 1px 4px rgba(0,0,0,0.25);">\'+p.glyph+\'</div>\';'
-    +     'var gwIcon = L.divIcon({html: gwHtml, className: "", iconSize: [gwSize, gwSize], iconAnchor: [gwSize/2, gwSize/2]});'
+    +     'var gwIcon = L.divIcon({html: ghtml, className: "", iconSize: gsp.iconSize, iconAnchor: gsp.iconAnchor, popupAnchor: gsp.popupAnchor});'
     +     'var gm = L.marker([p.lat, p.lng], {icon: gwIcon, zIndexOffset: -50}).addTo(map);'
-    +     'gm.bindTooltip(gwLabel, {direction: "top", offset: [0, -gwSize/2 - 2]});'
+    +     'gm.bindTooltip(gwLabel, {direction: "top", offset: [0, -gsp.iconSize[1]/2 - 2]});'
     +     'if (isFinite(p.anchorLat) && isFinite(p.anchorLng)) {'
-    +       'L.polyline([[p.lat, p.lng], [p.anchorLat, p.anchorLng]], {color: gwColor, weight: 1.5, opacity: 0.45, dashArray: "4 4", interactive: false}).addTo(map);'
+    +       'L.polyline([[p.lat, p.lng], [p.anchorLat, p.anchorLng]], {color: gColor, weight: 1.5, opacity: 0.45, dashArray: "4 4", interactive: false}).addTo(map);'
     +     '}'
+    +   '});'
+    /* NC.7: render "considered, not committed" pins via the parent
+       window's MaxMapPin so the popout matches the inline trip map —
+       gray dashed circle + place initials. Identical pattern to the
+       gateway pass above: this surface defers rendering to MaxMapPin
+       on the opener so style changes propagate everywhere. */
+    +   'consideredPts.forEach(function(p){'
+    +     'var chtml = "", csp = {iconSize:[18,18], iconAnchor:[9,9], popupAnchor:[0,-9]};'
+    +     'try {'
+    +       'var op = window.opener;'
+    +       'if (op && !op.closed && op.MaxMapPin) {'
+    +         'var cst = op.MaxMapPin.style("maybe", {});'
+    +         'chtml = op.MaxMapPin.html(cst, {label: (p.abbrev || (p.place||"").substring(0,2))});'
+    +         'csp = op.MaxMapPin.iconSpec(cst);'
+    +       '}'
+    +     '} catch(_) {}'
+    +     'var cicon = L.divIcon({html: chtml, className: "trip-popout-considered-pin", iconSize: csp.iconSize, iconAnchor: csp.iconAnchor, popupAnchor: csp.popupAnchor});'
+    +     'var cm = L.marker([p.lat, p.lng], {icon: cicon, zIndexOffset: -100}).addTo(map);'
+    +     'cm.bindTooltip(p.place + " \\u00b7 considered", {direction: "top", offset: [0, -csp.iconSize[1]/2]});'
     +   '});'
     // v353.2: focus on the active destination if one was open when
     // the popup launched, instead of always fitting all destinations.
@@ -19746,28 +20991,19 @@ function _renderPlacePickerMap(targetId){
       }
     });
   });
-  // v359.5.4: fold the day-trip PREDICTOR into the map dataset. The
-  // sidebar already shows "· day trip from {hub}" for predicted day
-  // trips (purple text, _tb._dayTripPreds), but the map only honored
-  // explicit user-flagged day trips — predicted ones rendered as
-  // blue stays with no spur line. Neal's report: "if it is [a day
-  // trip], it needs to be flagged as one and appear that way on the
-  // map with a line for the city it is a day trip from." Treat
-  // predicted == user-flagged for map purposes; the user can still
-  // override either way via the pin popup. User flag wins if both
-  // exist for the same place.
-  var _preds = (_tb && _tb._dayTripPreds) || {};
-  Object.keys(_preds).forEach(function(srcKey){
-    var hubName = _preds[srcKey];
-    if (!allPlaces[srcKey]) return; // predictor saw a place that's no longer in the activity items
-    if (allPlaces[srcKey]._isDayTrip) return; // explicit user flag already set; don't overwrite
-    allPlaces[srcKey]._isDayTrip = true;
-    // v359.51.8: tag predictor-derived flags so the spur-render pass
-    // below can distinguish them from user-committed day trips and
-    // render them with a dashed line (vs solid for committed).
-    allPlaces[srcKey]._isDayTripPredicted = true;
-    if (!allPlaces[srcKey]._dayTripHub && hubName) allPlaces[srcKey]._dayTripHub = hubName.toLowerCase();
-  });
+  // Round NC.X: dropped the picker-map's predictor fold. It used to
+  // copy _tb._dayTripPreds into info._isDayTrip so the role-derivation
+  // cascade would see day-trip suggestions. But _pmDeriveRole now
+  // consults the predictor directly (via _predHubFor / _onWayPredFor)
+  // AND respects user commitments via the c._roleTouched gate. Folding
+  // here was actively harmful: when the user clicked Stay on a
+  // predictor-flagged place (e.g., Mývatn near Akureyri), the writer
+  // cleared p._isDayTrip but the fold re-set it on next render →
+  // _pmDeriveRole's info._isDayTrip branch fired BEFORE the
+  // user-commitment check → pin stayed purple-day-trip even though
+  // c.role was "stay". The spur-rendering consumer of _isDayTripPredicted
+  // was already retired (v359.51.17). Letting _pmDeriveRole own the
+  // predictor lookup keeps a single source of truth for role.
 
   // Tear down markers for places no longer in the dataset, OR for
   // places the user has REJECTED. Rejected places live on in the
@@ -19865,57 +21101,24 @@ function _renderPlacePickerMap(targetId){
           } catch(_) { /* swallow */ }
         }
       }
-      // Round NC.X: Order the visual branches by explicit role first
-      // (Stay → DayTrip → Onway → See/SingleSight → fallback), so any
-      // user-chosen role wins the icon. Emoji glyphs match the popup
-      // labels — 🛏 / 📍 / 🛣 / 👁 — so the pin "is" its role.
-      var color, label, size, borderStyle = "2px solid #fff", fontPx = 9;
-      if (isStay) {
-        // Stay: blue with the place's initials. Initials (vs an emoji)
-        // because stays are the trip's structural anchors and the
-        // user benefits from seeing which is which at a glance.
-        color = "#1a5fa8";
-        label = _pmEsc((info.place || "").substring(0, 2));
-        size = 22;
-      } else if (isDayTrip) {
-        // Day trip: purple with 📍 pin emoji — same purple as the See
-        // role, but the glyph distinguishes them. Matches the popup
-        // option "📍 Day trip from {hub}".
-        color = "#5b3f8f";
-        label = "📍";
-        size = 22;
-        fontPx = 14;
-      } else if (isOnway) {
-        // On the way: teal with 🛣 road emoji. Matches popup option
-        // "🛣 On the way (between stops)". Earlier this used initials
-        // and looked too similar to a Stay pin.
-        color = "#0d8a8a";
-        label = "🛣";
-        size = 22;
-        fontPx = 14;
-      } else if (isSingleSight) {
-        // See: purple eye, matches the chip and the popup option
-        // "👁 See". Only fires when the user has explicitly chosen
-        // See — not for undecided (Maybe) places.
-        color = "#5b3f8f";
-        label = "👁";
-        size = 22;
-        borderStyle = "2px solid #fff";
-        fontPx = 14;
-      } else {
-        // Round NC.X: "Maybe" — unkept and undecided (but not
-        // rejected; rejected places skip rendering entirely above).
-        // Small gray circle with a ❓ glyph so the user can see Max
-        // surfaced this place but they haven't made a call yet.
-        // Earlier this was a featureless gray dot which read like
-        // "rejected" — that confusion is now resolved by giving
-        // rejection its own state (hidden) and giving Maybe a
-        // distinct glyph.
-        color = "#bbb";
-        label = "?";
-        size = 18;
-        fontPx = 11;
-      }
+      // Round NC.X: pin style + HTML now come from MaxMapPin — the
+      // single source of truth used by all map surfaces. The 80+
+      // lines of inline branch-by-role HTML construction that lived
+      // here is gone. Behavior is identical because the role
+      // derivation (above) hasn't changed; only the visual
+      // construction is centralized.
+      var _ctx = { iconic: !!info.iconic };
+      var _styleRole = isStay ? "stay"
+                     : isDayTrip ? "daytrip"
+                     : isOnway ? "onway"
+                     : isSingleSight ? "see"
+                     : "maybe";
+      var _pinStyle = MaxMapPin.style(_styleRole, _ctx);
+      // Round NC.X: EVERY role carries place initials. The role
+      // (stay vs see vs day-trip vs on-way vs maybe) is conveyed by
+      // shape + fill + corner-badge — initials answer "WHICH place?"
+      // at every pin without the user having to hover or click.
+      var _labelOv = { label: _pmEsc((info.place || "").substring(0, 2)) };
       // v358.6: no map-level "iconic" decoration. The earlier gold
       // border and the v358.5 ★ overlay both fired only on places
       // whose source activity carried iconic:true, which made them
@@ -19934,17 +21137,12 @@ function _renderPlacePickerMap(targetId){
       // though its checkbox was off. The 1.4s pulse animation from
       // _pmFocusPlace fires on every row toggle; that's enough
       // feedback. Nothing persists on the marker between renders.
-      var html = '<div style="background:'+color+';color:#fff;border-radius:50%;width:'
-        + size + 'px;height:'+size+'px;border:' + borderStyle
-        + ';box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;font-size:' + fontPx + 'px;font-weight:700;">'
-        + label
-        + '</div>';
-      var icon = L.divIcon({
-        html: html,
-        className: isSingleSight ? "pm-single-sight-pin" : "",
-        iconSize: [size,size],
-        iconAnchor: [size/2,size/2]
-      });
+      var html = MaxMapPin.html(_pinStyle, _labelOv);
+      var icon = MaxMapPin.icon(html, _pinStyle);
+      // Round NC.X: the picker's "Maybe" pin used to carry a
+      // pm-single-sight-pin class for an animation hook; that hook
+      // was retired alongside the legacy single-sight treatment.
+      // No className needed on the MaxMapPin icon.
       // Round NC.X: compute the tooltip suffix BEFORE the existing-vs-new
       // marker branches so we can rebind on EITHER path. Previously the
       // tooltip was only bound on first create — when a place's role
@@ -19961,16 +21159,19 @@ function _renderPlacePickerMap(targetId){
                   :                 " · maybe";
       var ttBits = info.place + _ttRole;
 
+      // Tooltip offset honors the icon's anchor strategy so the
+      // tooltip clears the pin top regardless of teardrop vs circle.
+      var _tipOff = (_pinStyle.anchor === "tip") ? -_pinStyle.height : -_pinStyle.height/2;
       var existing = _pmMarkersByPlace[key];
       if (existing) {
         existing.setIcon(icon);
         existing.setLatLng(latLng);
         // Rebind tooltip on existing markers so role changes update.
         existing.unbindTooltip();
-        existing.bindTooltip(ttBits, {direction:"top", offset:[0,-10]});
+        existing.bindTooltip(ttBits, {direction:"top", offset:[0, _tipOff]});
       } else {
         var m = L.marker(latLng, {icon: icon}).addTo(_pmMap);
-        m.bindTooltip(ttBits, {direction:"top", offset:[0,-10]});
+        m.bindTooltip(ttBits, {direction:"top", offset:[0, _tipOff]});
         // Step 6: clicking a pin opens the stay/day-trip popup.
         // Falls back to the legacy scroll-to-row behavior when the
         // popup helper isn't available (e.g. pre-init paint).
@@ -20838,7 +22039,17 @@ function renderActivityPicker(){
     }
     // ─────────────────────────────────────────────────────────────────────
     listHtml = ''
-      +'<div style="font-size:12px;color:#555;line-height:1.65;margin-bottom:16px;max-width:680px;">There are a lot of things to do and see in '+_pmEsc(placeLabel)+'. Max has included the things that intrigued you, and pre-checked those as well as the things most first-time visitors don’t want to miss. Uncheck what doesn’t appeal to you, check anything else that does, and add anything Max has missed as well. Planning is an iterative process, so you’ll probably be coming back here as you learn more about '+_pmEsc(placeLabel)+' and as you think about your trip.</div>'
+      +'<div style="font-size:12px;color:#555;line-height:1.65;margin-bottom:10px;max-width:680px;">There are a lot of things to do and see in '+_pmEsc(placeLabel)+'. Max has included the things that intrigued you, and pre-checked those as well as the things most first-time visitors don’t want to miss. Uncheck what doesn’t appeal to you, check anything else that does, and add anything Max has missed as well. Planning is an iterative process, so you’ll probably be coming back here as you learn more about '+_pmEsc(placeLabel)+' and as you think about your trip.</div>'
+      // Round NC.X: one policy statement, no per-place hedges. The
+      // visual vocabulary already distinguishes provenance — dashed
+      // pill = Max's guess, solid pill = your decision. Surfaces
+      // everywhere honor it; this note explains what it means once.
+      +'<div id="tb-pm-provenance-note" style="font-size:11.5px;color:#444;line-height:1.55;margin-bottom:16px;max-width:680px;padding:10px 14px;background:#fff8e8;border:1px solid #e8d8a0;border-radius:6px;">'
+      +  '<span style="font-size:14px;margin-right:6px;">🤖</span>'
+      +  '<strong>Anything dashed is Max\'s guess. Anything solid is your decision.</strong> '
+      +  'Tap any pill to flip a guess into a decision — your call wins, even when Max disagrees. '
+      +  '<span style="color:#777;">Max works from training data, not from having been there. It will get places wrong.</span>'
+      +'</div>'
       // FN.F.1: single-sight count banner. Empty if no single-sights.
       + _fnf_ssBannerHtml
       // v360.2: wisp-evaluation result banner. Empty by default; populated
@@ -21014,7 +22225,7 @@ function renderActivityPicker(){
   // need for a rename affordance.
   var _hasNamedTrip = !!(trip && trip.id && trip.name);
   var _pickerNameBlock = _hasNamedTrip
-    ? ('<div class="trip-name-block" onclick="editTripName()" title="Click to rename" style="cursor:pointer;display:flex;align-items:center;gap:6px;">'
+    ? ('<div class="trip-name-block" onclick="editTripName(this)" title="Click to rename" style="cursor:pointer;display:flex;align-items:center;gap:6px;">'
       +   '<span style="font-size:14px;font-weight:600;color:#222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">' + _tripLabel + '</span>'
       +   '<span class="trip-name-edit" style="font-size:11px;color:#aaa;flex-shrink:0;">&#9998;</span>'
       + '</div>')
@@ -21062,8 +22273,8 @@ function renderActivityPicker(){
     +    '<div style="position:relative;flex:1;min-height:0;">'
     +      '<div id="tb-pm-map" style="position:absolute;inset:0;"></div>'
     +      '<button type="button" onclick="openPlacePickerMapModal();event.preventDefault();" '
-    +        'style="position:absolute;top:10px;right:10px;z-index:500;background:#fff;border:1px solid #ccc;border-radius:5px;font-size:11px;padding:4px 9px;font-weight:600;color:#333;cursor:pointer;font-family:inherit;box-shadow:0 1px 4px rgba(0,0,0,0.1);" '
-    +        'title="Open map in a new window">↗ Open in new window</button>'
+    +        'style="position:absolute;top:8px;right:8px;z-index:500;background:rgba(255,255,255,.95);border:1px solid #cfe1f7;border-radius:6px;padding:5px 10px;box-shadow:0 1px 4px rgba(0,0,0,.15);font-size:11px;font-weight:600;color:#1a5fa8;cursor:pointer;font-family:inherit;" '
+    +        'title="Open map in a new window">🗺 View larger →</button>'
     +    '</div>'
     +  '</div>'
     +'</div>'
@@ -21676,6 +22887,41 @@ async function addCustomPlaceFromPicker(roleHint){
       var meta = _pmPlaceMeta(data.place, { create: true });
       if (meta) meta.stayOverride = (role !== "see");
     }
+    // NC.9.11: also stamp a candidate via MaxRoleWriter so the
+    // role+_roleTouched commitment is recorded directly on c, not
+    // just on placeMeta. Without this, downstream paths that read
+    // c.role (publishTrip's destination-build, the trip-view pin
+    // renderer's predictor override at line ~35379) saw nothing and
+    // fell back to the predictor — which classified Selfoss as a
+    // day-trip because it sits ~50km from Reykjavík. Synthesize a
+    // candidate if none exists yet so MaxRoleWriter has something to
+    // mutate.
+    try {
+      _tb.candidates = _tb.candidates || [];
+      var norm = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
+      var candKey = norm(data.place);
+      var existingCand = _tb.candidates.find(function(c){ return c && c.place && norm(c.place) === candKey; });
+      if (!existingCand) {
+        _tb.candidates.push({
+          id: "c-user-" + Date.now(),
+          place: data.place,
+          country: data.country || "",
+          whyItFits: data.whyItFits || "",
+          tags: Array.isArray(data.tags) ? data.tags : [],
+          status: "keep",
+          nights: addedNights,
+          stayRange: (role === "see") ? "0 nights" : "2 nights",
+          _required: false,
+          _requiredFor: [],
+          _userAdded: true,
+          order: null,
+          manuallyOrdered: false
+        });
+      }
+      if (typeof MaxRoleWriter !== "undefined" && MaxRoleWriter.set) {
+        MaxRoleWriter.set(data.place, role === "see" ? "see" : "stay", { persist: false });
+      }
+    } catch(_){}
     inp.value = "";
     if (status) { status.style.color = "#3a7a4a"; status.textContent = "Added " + data.place + (role === "see" ? " (See)" : " (Stay)"); }
     _renderPlaceActivityItems();
@@ -24552,12 +25798,18 @@ async function geocodeMissingCandidates(missing, allCands) {
             ? _makeCandidateIcon(match, false, _ceSelectedCandId === match.id)
             : null;
           if (!icon) {
-            // Defensive fallback — should never fire since picker-ui.js
-            // loads before this script and aliases _makeCandidateIcon
-            // onto window. Keep the old inline construction for safety.
-            var mc = match.status==="keep"?"#2a7a4e":match.status==="reject"?"#888":"#1a5fa8";
-            icon = L.divIcon({html:'<div style="background:'+mc+';color:#fff;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.25);">'+
-              (match.place||"").substring(0,2)+'</div>',className:"",iconSize:[24,24],iconAnchor:[12,12]});
+            // NC.9.12: defensive fallback routes through MaxMapPin.
+            // Maps status → role: keep → stay (blue), reject → maybe-
+            // style gray, anything else → maybe. Earlier this hardcoded
+            // its own status palette (green/gray/blue) which diverged
+            // from the rest of the app.
+            var _fbRole = (match.status === "keep") ? "stay"
+                        : (match.status === "reject") ? "maybe"
+                        : "maybe";
+            var _fbStyle = MaxMapPin.style(_fbRole, {});
+            var _fbLabel = (match.place || "").substring(0, 2);
+            var _fbHtml = MaxMapPin.html(_fbStyle, { label: _fbLabel });
+            icon = MaxMapPin.icon(_fbHtml, _fbStyle);
           }
           var m = L.marker([r.lat, r.lng], {icon:icon});
           m.bindTooltip(match.place||"", {permanent:false,direction:"top",offset:[0,-14]});
@@ -24973,8 +26225,10 @@ function reopenPickerForEdit(){
       });
       if (cand) {
         if (cand.role !== "daytrip") {
-          cand.role = "daytrip";
-          cand._roleTouched = true;
+          // Round NC.X: route through MaxRoleWriter so the bridge
+          // atomically updates c.role + flags + placeMeta + emits
+          // candidateChange. Hub comes from the dayTripPairs map.
+          MaxRoleWriter.set(cand.id || cand.place, "daytrip", { hub: dayTripPairs[srcKey], persist: false });
           _dtCandsBridged++;
         }
       } else {
@@ -25062,8 +26316,8 @@ function reopenPickerForEdit(){
           });
           if (cand) {
             if (cand.role !== "onway") {
-              cand.role = "onway";
-              cand._roleTouched = true;
+              // Round NC.X: route through MaxRoleWriter.
+              MaxRoleWriter.set(cand.id || cand.place, "onway", { persist: false });
               _wsBridged++;
             }
           } else {
@@ -25536,7 +26790,18 @@ async function applyCandidateChanges(){
       // manual-pin flag so a reopened picker re-acquires the user's order.
       // Missing on legacy trips → null/false, which the next
       // _tbResequenceCandidates pass repopulates from orderKeptCandidates.
-      order:(typeof c.order==="number"?c.order:null), manuallyOrdered:!!c.manuallyOrdered
+      order:(typeof c.order==="number"?c.order:null), manuallyOrdered:!!c.manuallyOrdered,
+      // NC.9: persist the user-commitment flag + day-trip / wayside
+      // hubs. Without _roleTouched, the trip-view pin renderer reads
+      // it as undefined and runs the predictor override at line
+      // ~35379, which can demote a Stay to a Day trip whenever the
+      // place is close to another stay. Neal: "I added Selfoss as a
+      // stay, and it was added as a day trip." Same fix in
+      // engine-picker.js — both publish paths missed these fields.
+      _roleTouched: !!c._roleTouched,
+      dayTripHub: c.dayTripHub || undefined,
+      waysideFromHub: c.waysideFromHub || undefined,
+      intent: c.intent || undefined
     };
   });
   trip.mdcItems = (_mdcItems||[]).map(function(m){return {
@@ -27142,6 +28407,10 @@ async function addPlaceToCandidates(){
       country: geocoded.country || "",
       lat: geocoded.lat,
       lng: geocoded.lng,
+      // NOTE: this `role` is the LEGACY "base/anchor/pass" categorization,
+      // NOT the NC.3 role vocabulary (stay/see/daytrip/onway/maybe/reject).
+      // Keep "base" so the LLM-returned rationale at line ~28327 can
+      // overwrite it. The NC.3 role lives on the next two lines.
       role: "base",
       stayRange: "2-3 nights",
       whyItFits: "",
@@ -27152,8 +28421,21 @@ async function addPlaceToCandidates(){
       _requiredFor: [],
       _userAdded: true,
       order: null,
-      manuallyOrdered: false
+      manuallyOrdered: false,
+      // NC.9.9: explicitly add as an overnight Stay AND mark
+      // _roleTouched=true. Without this, the trip view's pin renderer
+      // sees role unset and runs the predictor override (line ~35379),
+      // which downgrades a user-added place close to another stay to
+      // "daytrip" silently. Neal: "selfos still a problem" \u2014 Selfoss
+      // is ~50km from Reykjav\u00edk so it tripped the day-trip range
+      // heuristic. User-explicit-add = user-committed = Stay.
     };
+    // Override `role` field name collision: above sets the legacy
+    // role field; the next assignment is the NC.3 role. The LLM
+    // rationale fetch below overwrites legacy `role` again but leaves
+    // these alone.
+    candidate.role = "stay";
+    candidate._roleTouched = true;
     _tb.candidates = _tb.candidates || [];
     _tb.candidates.push(candidate);
     if (typeof _tbResequenceCandidates === "function") _tbResequenceCandidates();
@@ -27180,7 +28462,12 @@ async function addPlaceToCandidates(){
       var first = cleaned.indexOf("{"), last = cleaned.lastIndexOf("}");
       if (first > -1 && last > -1) cleaned = cleaned.substring(first, last+1);
       var d = JSON.parse(cleaned);
-      if (d.role) candidate.role = d.role;
+      // NC.9.9: skip role overwrite. d.role here is the legacy
+      // "base|anchor|pass" categorization the LLM was prompted for;
+      // nothing in the codebase reads those values anymore (grep
+      // confirms: no `role === "base"` etc.), and overwriting would
+      // clobber the NC.3 role ("stay") we just set above. Just take
+      // the prose fields.
       if (d.stayRange) candidate.stayRange = d.stayRange;
       if (d.whyItFits) candidate.whyItFits = d.whyItFits;
       if (d.tradeoffs) candidate.tradeoffs = d.tradeoffs;
@@ -27219,6 +28506,14 @@ async function addPlaceToCandidates(){
     data2._userAdded = true;
     data2.order = null;
     data2.manuallyOrdered = false;
+    // NC.9.9: same as the fast path above \u2014 user-explicit-add is a
+    // commit. Set NC.3 role="stay" + _roleTouched=true so the trip-
+    // view pin renderer's predictor override doesn't reclassify this
+    // to "daytrip" when the place sits within day-trip range of
+    // another stay. Overwrites the LLM's legacy "base|anchor|pass"
+    // role value, which nothing reads anymore.
+    data2.role = "stay";
+    data2._roleTouched = true;
     _tb.candidates = _tb.candidates || [];
     _tb.candidates.push(data2);
     if (typeof _tbResequenceCandidates === "function") _tbResequenceCandidates();
@@ -27592,7 +28887,16 @@ function _hydratePickerFromCommittedSrc() {
         whyItFits: stop.why || "",
         tags: ["picker-daytrip", "committed"],
         nights: 0,
-        status: "keep"
+        status: "keep",
+        // NC.9.15: this candidate was hydrated from PREVIOUSLY-COMMITTED
+        // trip state — the user already chose day-trip on this place
+        // (publishTrip wrote it into trip.routes, which is what we're
+        // reading from now). Stamp role + _roleTouched so re-opening
+        // the picker doesn't make the cascade treat the committed
+        // choice as a fresh predictor suggestion that could be
+        // overridden.
+        role: "daytrip",
+        _roleTouched: true
       });
       dtHydrated++;
     });
@@ -27639,7 +28943,11 @@ function _hydratePickerFromCommittedSrc() {
         whyItFits: stop.why || "",
         tags: ["picker-wayside", "committed"],
         nights: 0,
-        status: "keep"
+        status: "keep",
+        // NC.9.15: previously-committed wayside — see day-trip note above.
+        role: "onway",
+        _roleTouched: true,
+        waysideFromHub: (src.fromPlace || "").toLowerCase()
       });
       wsHydrated++;
     });
@@ -33797,10 +35105,11 @@ function updateMainMapMarkers(){
   // exactly which city this is — useful when the 2-letter abbrev
   // ("Li" for Lisbon) is ambiguous.
   if(center){
-    var curIcon=L.divIcon({
-      html:'<div style="background:#d92f2f;color:#fff;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;border:2px solid #fff;box-shadow:0 2px 6px rgba(217,47,47,0.45),0 0 0 2px rgba(217,47,47,0.18);">'+dest.place.substring(0,2)+'</div>',
-      className:'',iconSize:[32,32],iconAnchor:[16,16],popupAnchor:[0,-18]
-    });
+    // NC.9.12: active-destination pin routes through MaxMapPin.
+    var _curStyle = MaxMapPin.style("activeDest", {});
+    var _curLabelText = (dest.place || "").substring(0, 2);
+    var _curHtml = MaxMapPin.html(_curStyle, { label: _curLabelText });
+    var curIcon = MaxMapPin.icon(_curHtml, _curStyle);
     var cm=L.marker(center,{icon:curIcon,zIndexOffset:100});
     var _curLabel = (dest.label && dest.label !== dest.place)
       ? (dest.label + ' (' + dest.place + ')')
@@ -33829,10 +35138,10 @@ function updateMainMapMarkers(){
     if(nb.idx<0||nb.idx>=trip.destinations.length) return;
     var nd=trip.destinations[nb.idx];
     var nc=getCityCenter(nd.place); if(!nc) return;
-    var icon=L.divIcon({
-      html:'<div style="background:#444;color:#fff;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.3);">'+nd.place.substring(0,2)+'</div>',
-      className:'',iconSize:[22,22],iconAnchor:[11,11],popupAnchor:[0,-13]
-    });
+    // NC.9.12: prev/next context pin routes through MaxMapPin.
+    var _nbStyle = MaxMapPin.style("neighborDest", {});
+    var _nbHtml = MaxMapPin.html(_nbStyle, { label: (nd.place || "").substring(0, 2) });
+    var icon = MaxMapPin.icon(_nbHtml, _nbStyle);
     var m=L.marker(nc,{icon:icon,opacity:0.85});
     (function(nid){m.on('click',function(){selectDest(nid);});})(nd.id);
     m.addTo(_mainMap); _mainMarkers.push(m);
@@ -33931,14 +35240,14 @@ function _writeTripRoleForDest(dest, role) {
   if (!cand) return;
   var map = { overnight: "stay", daytrip: "daytrip", onway: "onway", unspecified: "see", stay: "stay", see: "see" };
   var nc3Role = map[role] || "see";
-  // Defensive: stay requires overnight-capable; demote to see otherwise.
-  if (nc3Role === "stay" && cand.overnightCapable === false) nc3Role = "see";
-  cand.role = nc3Role;
-  cand._roleTouched = true;
+  // Round NC.X: delegated to MaxRoleWriter. The legacy
+  // "overnight-capable check" guard is dropped here too — user picked
+  // the role from the popover, their choice wins (same rationale as
+  // _pmSetPlaceRole / _pmSetStayOverride).
+  MaxRoleWriter.set(cand.id || cand.place, nc3Role, { persist: false });
   // Round NC.3e: c.tripRole (NC.1 transitional field) retired. Anything
   // still reading it gets the c.role value via normalizeCandidateRole on
-  // the next render. Old trips with tripRole-only data get migrated by
-  // the normalizer at load time.
+  // the next render.
   delete cand.tripRole;
   // Mirror to _tb.candidates via the engine setter if hydrated.
   if (typeof MaxEnginePicker !== "undefined"
@@ -34176,6 +35485,67 @@ function updateMainMap(){
     }
     // ────────────────────────────────────────────────────────────────
 
+    // Round NC.X: trip-view predictor bridge. publishTrip already
+    // bridges _tb._dayTripPreds / _onWayPreds into c.role at build
+    // time, but two cases bypass that path:
+    //   1. Pre-bridge trips (built before the bridge landed) have
+    //      stale c.role="see" on places Discovery now flags as
+    //      day-trip / on-way.
+    //   2. Saved-trip reload — _tb is empty until Discovery renders,
+    //      so even if the user revisits Discovery, the trip view
+    //      already painted with stale c.role.
+    //
+    // Two-tier strategy:
+    //   (a) If _tb._dayTripPreds / _onWayPreds are populated (the
+    //       user has visited Discovery this session), USE THOSE.
+    //       That's the only way Discovery and Trip view are
+    //       GUARANTEED to agree on which heuristic fires for a
+    //       given place — they read from the same dict.
+    //   (b) Otherwise compute fresh from trip.destinations. The
+    //       compute mirrors Discovery's logic but the two sources
+    //       (placeActivities vs trip.destinations) can differ
+    //       slightly on nights / overnight flags, so this path
+    //       can produce mismatches — only used as a last resort.
+    // Round NC.X: trip-view predictor compute delegated to
+    // MaxPredictors. Prefer Discovery's cached predictors when
+    // populated (so both maps agree by construction); fall back to
+    // computing fresh from trip.destinations when _tb is empty
+    // (saved-trip reload).
+    var _tripPinPreds = (function(){
+      try {
+        var _dp = (window._tb && _tb._dayTripPreds) || null;
+        var _wp = (window._tb && _tb._onWayPreds) || null;
+        if ((_dp && Object.keys(_dp).length) || (_wp && Object.keys(_wp).length)) {
+          var copy = { day: {}, way: {} };
+          if (_dp) Object.keys(_dp).forEach(function(k){ copy.day[k] = _dp[k]; });
+          if (_wp) Object.keys(_wp).forEach(function(k){ copy.way[k] = _wp[k]; });
+          return copy;
+        }
+      } catch(_){}
+      if (!trip || !Array.isArray(trip.destinations)) return { day: {}, way: {} };
+      var places = {};
+      var stayOrder = [];
+      trip.destinations.forEach(function(d){
+        if (!d || !d.place) return;
+        if (typeof d.lat !== "number" || typeof d.lng !== "number") return;
+        var c = (typeof _candForDest === "function") ? (_candForDest(d) || {}) : {};
+        var k = MaxPlaceKey.normalize(d.place);
+        var isDayTripRole = (c.role === "daytrip" || c.role === "onway");
+        places[k] = {
+          place: d.place,
+          lat: d.lat,
+          lng: d.lng,
+          nights: (typeof d.nights === "number") ? d.nights : 0,
+          kept: true,
+          userChoseStay: false,
+          overnight: (c.overnightCapable !== false) && !isDayTripRole,
+          isDayTrip: isDayTripRole
+        };
+        if (!isDayTripRole) stayOrder.push(k);
+      });
+      return MaxPredictors.compute(places, { stayOrder: stayOrder });
+    })();
+
     pinGroups.forEach(function(group){
       var indices = group.dests.map(function(x){ return x.idx + 1; });
       // v359.52.4: sequence number on the pin (was 2-letter abbrev
@@ -34185,11 +35555,7 @@ function updateMainMap(){
       // collapse into one pin; the label dot-joins their indices
       // (e.g. "1·11"). Font size adapts so longer labels still fit.
       var label = indices.join("·");
-      var size = 22;
-      // Long labels (round-trip cities visited 3+ times, or any
-      // route that puts a 2-digit number into the label) get a
-      // smaller font so they still read.
-      var fontSize = label.length > 3 ? 8 : (label.length > 2 ? 10 : 11);
+      // size/fontSize used to live here; MaxMapPin owns both now.
       // v360.2: 0-night destinations now render BLUE like overnight
       // stays. v359.60.21 shipped them grey on the theory that "see"
       // = quieter / lower-commitment, but the framing is wrong: a
@@ -34207,21 +35573,41 @@ function updateMainMap(){
       // arriving here without c.role gets one via normalizeCandidateRole
       // (which itself derives from tripRole / intent / singleSight as
       // fallbacks for legacy data).
+      // NC.9.13: trip-view role derivation now delegates to the same
+      // _pmDeriveRole cascade Discovery uses. Previously this surface
+      // had its OWN inline predictor override (only checked
+      // _roleTouched, never consulted placeMeta.stayOverride or
+      // _tb.candidates) — so the trip view could show daytrip while
+      // Discovery showed Stay for the same place. Neal: "Why is the
+      // Selfoss icon a day trip on the trip map? It is a stay on the
+      // discovery map?" Single cascade now serves both surfaces; the
+      // priority comment at the top of _pmDeriveRole is the contract.
+      //
+      // We build an info object that carries the trip-side signals
+      // _pmDeriveRole expects (kept=true for an actual destination,
+      // overnight from dest.nights, _isDayTrip/_waysideFromHub left
+      // off because those are sourced from trip.routes not destinations).
       var _primaryCand = _candForDest(group.dests[0].dest);
       if (_primaryCand && typeof MaxEnginePicker !== "undefined"
           && MaxEnginePicker.normalizeCandidateRole) {
         MaxEnginePicker.normalizeCandidateRole(_primaryCand);
       }
-      var _primaryRole = (_primaryCand && _primaryCand.role) || "stay";
-      var color = (typeof MaxEnginePicker !== "undefined" && MaxEnginePicker.pinColorForRole)
-        ? MaxEnginePicker.pinColorForRole(_primaryRole)
-        : "#1a5fa8";
-      // Round NC.3c: a "see" role on a trip-view destination is a
-      // 0-night standalone stop. Render the pin with a dashed border
-      // and a "?" / 👁 glyph instead of the destination number to
-      // signal "you wanted to see this but haven't decided on a stay
-      // or wayside yet."
-      var _isSee = (_primaryRole === "see");
+      var _primaryDest = group.dests[0].dest;
+      var _primaryInfo = {
+        place: _primaryDest.place || (_primaryCand && _primaryCand.place) || "",
+        kept: true,
+        overnight: ((_primaryDest.nights || 0) > 0)
+      };
+      var _primaryKey = MaxPlaceKey.normalize(_primaryInfo.place);
+      var _derived = (typeof _pmDeriveRole === "function")
+        ? _pmDeriveRole(_primaryInfo, _primaryKey, {})
+        : null;
+      var _primaryRole = (_derived && _derived.role)
+        || (_primaryCand && _primaryCand.role)
+        || "stay";
+      // Round NC.X: color used to live here (via pinColorForRole +
+      // an _isSee override). MaxMapPin.style(role) owns all color
+      // mapping now — single source of truth.
       // Round FN.A.4: entry/exit glyph badge driven by the precomputed
       // _badgesByDestIdx map (built above the loop). A pin group can
       // carry the entry glyph, the exit glyph, or BOTH simultaneously
@@ -34230,6 +35616,10 @@ function updateMainMap(){
       // the badge widens to a pill; when identical (round trip same
       // mode), it collapses to a single circle. Leaflet doesn't clip
       // divIcons, so the badge overflows the iconSize freely.
+      // Round NC.X: collect entry/exit glyphs into _grpEntry/_grpExit
+      // for THIS pin's group. MaxMapPin.html() builds the actual
+      // badge HTML downstream — we just thread the glyph strings
+      // through, not raw HTML.
       var _grpEntry = "", _grpExit = "";
       group.dests.forEach(function(x){
         var b = _badgesByDestIdx[x.idx];
@@ -34237,56 +35627,25 @@ function updateMainMap(){
         if (b.entry && !_grpEntry) _grpEntry = b.entry;
         if (b.exit  && !_grpExit)  _grpExit  = b.exit;
       });
-      var _badgeBoth = _grpEntry && _grpExit && _grpEntry !== _grpExit;
-      var _badgeText = _badgeBoth ? (_grpEntry + _grpExit) : (_grpEntry || _grpExit);
-      var _badgeTitle = (_grpEntry && _grpExit)
-        ? "Trip start &amp; end"
-        : (_grpEntry ? "Trip start" : (_grpExit ? "Trip end" : ""));
-      var _badgeWidth = _badgeBoth ? 22 : 14;
-      var _badgeRadius = _badgeBoth ? "7px" : "50%";
-      var _badgeHtml = _badgeText
-        ? '<div title="' + _badgeTitle + '" style="position:absolute;top:-5px;right:-5px;'
-          + 'background:#fff;border:1.5px solid ' + color + ';'
-          + 'border-radius:' + _badgeRadius + ';'
-          + 'width:' + _badgeWidth + 'px;height:14px;'
-          + 'display:flex;align-items:center;justify-content:center;gap:1px;'
-          + 'font-size:9px;line-height:1;padding:0 2px;'
-          + 'box-shadow:0 1px 2px rgba(0,0,0,0.15);">'
-          + _badgeText
-          + '</div>'
-        : '';
-      // Round NC.X: the "?" sub-badge for single-sight destinations
-      // (Round FN.F.4) is retired. User feedback: it's noise on the
-      // numbered destination pins. The number is the orientation
-      // signal; the role decision lives in the popup (the pin's
-      // tooltip + click → role popover already carry the "tap to
-      // decide" affordance). Keeping the variable name so the HTML
-      // template below doesn't need surgery.
-      var _qBadgeHtml = "";
-      // Round NC.3c: pin shape follows role.
-      //   - "see"   → dashed border, keeps the destination NUMBER as
-      //               the label (per user feedback: 0-night still has
-      //               an order in the trip; hiding the number behind
-      //               "?" lost the orientation cue)
-      //   - "onway" → octagon (CSS clip-path)
-      //   - others  → solid numbered circle (unchanged)
-      var _innerBorder = _isSee ? "2px dashed #fff" : "2px solid #fff";
-      var _innerLabel  = label;  // always show the trip-order number
-      var _isOnway = (_primaryRole === "onway");
-      var _shapeCss = _isOnway
-        ? "border-radius:0;clip-path:polygon(30% 0%,70% 0%,100% 30%,100% 70%,70% 100%,30% 100%,0% 70%,0% 30%);"
-        : "border-radius:50%;";
-      var html = '<div style="position:relative;width:'+size+'px;height:'+size+'px;">'
-        + '<div style="background:'+color+';color:#fff;' + _shapeCss + 'width:'
-        + size + 'px;height:' + size + 'px;border:' + _innerBorder + ';'
-        + 'box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;'
-        + 'font-size:' + fontSize + 'px;font-weight:700;letter-spacing:-0.02em;">'
-        + _innerLabel
-        + '</div>'
-        + _badgeHtml
-        + _qBadgeHtml
-        + '</div>';
-      var icon = L.divIcon({className:"main-trip-pin", html: html, iconSize:[size,size], iconAnchor:[size/2,size/2], popupAnchor:[0,-size/2]});
+      // Round NC.X: trip-overview pin construction now routes through
+      // MaxMapPin — same path as the picker, popout, mobile overlay.
+      // The 60+ lines of inline HTML construction collapse to a
+      // style + html call with declarative badges. Sequence number
+      // and entry/exit glyph become declarative inputs, not inlined
+      // HTML.
+      var _stayPlace = (group.dests[0].dest && group.dests[0].dest.place) || "";
+      var _tripStyle = MaxMapPin.style(_primaryRole, {});
+      // All roles carry place initials; corner badges differentiate.
+      var _tripLabelOv = { label: _stayPlace.substring(0, 2) };
+      var _tripBadges = {
+        sequence: label,
+        entryGlyph: _grpEntry || "",
+        exitGlyph: _grpExit  || ""
+      };
+      var html = MaxMapPin.html(_tripStyle, _tripLabelOv, _tripBadges);
+      // Custom className kept for any downstream selectors that
+      // depend on it (animation hooks, etc.).
+      var icon = MaxMapPin.icon(html, _tripStyle, { className: "main-trip-pin" });
       var m = L.marker(group.ctr, {icon: icon}).addTo(_mainMap);
       // v353.2: register this marker against every dest id in the
       // group. Round-trip places visit the same lat/lng twice (or
@@ -34335,7 +35694,12 @@ function updateMainMap(){
       // based on geometry alone. The role popover still offers the
       // day-trip conversion when the user taps the pin; we trust the
       // user to decide whether a place deserves its own slot.
-      m.bindTooltip(tipParts.join(" · "), {permanent:false, direction:"top", offset:[0,-size/2-2], className:"main-map-tooltip"});
+      // Round NC.X: size was removed when the inline pin HTML
+      // construction collapsed into MaxMapPin. Pull the size from
+      // the style so tooltips clear the pin top correctly regardless
+      // of role.
+      var _tipSize = _tripStyle.height;
+      m.bindTooltip(tipParts.join(" · "), {permanent:false, direction:"top", offset:[0,-_tipSize/2-2], className:"main-map-tooltip"});
       _mainMarkers.push(m);
     });
 
@@ -34350,22 +35714,16 @@ function updateMainMap(){
     (function _drawGatewayPins(){
       function _drawOne(loc, glyph, name, isEntry){
         if (!loc || !glyph) return;
-        var gwSize = 22;
-        var gwColor = "#1a5fa8";
+        // NC.9.10: gateway pin now uses MaxMapPin.style("gateway").
+        // Same source of truth as the popout window + in-page overlay.
+        // The dashed connector reads its color off the style spec so
+        // changing the gateway color updates the connector too.
+        var _gwStyle = MaxMapPin.style("gateway", {});
+        var _gwHtml = MaxMapPin.html(_gwStyle, { label: glyph });
+        var _gwIcon = MaxMapPin.icon(_gwHtml, _gwStyle, { className: "main-trip-gateway-pin" });
         var label = name + (isEntry ? " · arrival" : " · departure");
-        var gwHtml = '<div style="background:#fff;border:2px solid '
-          + gwColor + ';border-radius:50%;width:' + gwSize + 'px;height:' + gwSize + 'px;'
-          + 'display:flex;align-items:center;justify-content:center;'
-          + 'font-size:13px;line-height:1;color:' + gwColor + ';'
-          + 'box-shadow:0 1px 4px rgba(0,0,0,0.25);">' + glyph + '</div>';
-        var gwIcon = L.divIcon({
-          className: "main-trip-gateway-pin",
-          html: gwHtml,
-          iconSize: [gwSize, gwSize],
-          iconAnchor: [gwSize/2, gwSize/2]
-        });
-        var gm = L.marker([loc.lat, loc.lng], { icon: gwIcon, zIndexOffset: -50 }).addTo(_mainMap);
-        gm.bindTooltip(label, { direction: "top", offset: [0, -gwSize/2 - 2], className: "main-map-tooltip" });
+        var gm = L.marker([loc.lat, loc.lng], { icon: _gwIcon, zIndexOffset: -50 }).addTo(_mainMap);
+        gm.bindTooltip(label, { direction: "top", offset: [0, -_gwStyle.height/2 - 2], className: "main-map-tooltip" });
         _mainMarkers.push(gm);
         bounds.push([loc.lat, loc.lng]);
         // Connector to the anchor destination (first / last).
@@ -34379,7 +35737,7 @@ function updateMainMap(){
           : (typeof getCityCenter === "function" ? getCityCenter(anchorDest.place) : null);
         if (!anchorCtr || !isFinite(anchorCtr[0]) || !isFinite(anchorCtr[1])) return;
         var connector = L.polyline([[loc.lat, loc.lng], anchorCtr], {
-          color: gwColor, weight: 1.5, opacity: 0.45,
+          color: _gwStyle.stroke, weight: 1.5, opacity: 0.45,
           dashArray: "4 4", interactive: false
         }).addTo(_mainMap);
         _mainMarkers.push(connector);
@@ -34548,12 +35906,36 @@ function updateMainMap(){
       // for a sensible drive sequence). Previously each stop got its
       // own spur from the hub, which looked correct for single-stop
       // routes but cluttered for multi-stop "Golden Circle" patterns.
+      //
+      // NC.9.14: filter out stops whose place is ALSO a destination
+      // (legacy state where the picker → trip publish left a stale
+      // day-trip planItem behind after the user converted the place
+      // to a Stay). The destination pin takes precedence; rendering
+      // the same place a SECOND time as a day-trip stop produced the
+      // two-pin "Selfoss is both Stay and Daytrip" mismatch Neal
+      // called out. publishTrip's NC.9.4 GC drops these on the next
+      // publish — but render-side defense covers reads-only sessions
+      // that haven't published yet.
+      var _destNamesNorm = {};
+      (trip.destinations || []).forEach(function(d){
+        if (d && d.place) _destNamesNorm[MaxPlaceKey.normalize(d.place)] = true;
+      });
       var dtStops = (route.planItems || [])
         .filter(function(stop){ return stop && stop.type === "stop"; })
         .map(function(stop){
           var place = (trip.places && trip.places[stop.placeId]) || null;
           var dtName = (place && place.name) || stop.placeId || "";
           if (!dtName) return null;
+          // NC.9.14: skip if this stop's place is also a destination.
+          if (_destNamesNorm[MaxPlaceKey.normalize(dtName)]) return null;
+          // NC.9.14: also skip if _pmDeriveRole disagrees with daytrip
+          // (e.g., user clicked Stay on this place since the route was
+          // built). Cascade speaks; the planItem is stale.
+          if (typeof _pmDeriveRole === "function") {
+            var _stopInfo = { place: dtName, kept: true, overnight: false };
+            var _stopDerived = _pmDeriveRole(_stopInfo, MaxPlaceKey.normalize(dtName), {});
+            if (_stopDerived && _stopDerived.role && _stopDerived.role !== "daytrip" && _stopDerived.role !== "maybe") return null;
+          }
           var dtCtr = (place && typeof place.lat === "number" && typeof place.lng === "number")
             ? [place.lat, place.lng]
             : getCityCenter(dtName);
@@ -34605,21 +35987,15 @@ function updateMainMap(){
         var dtName = s.dtName;
         var dtCtr = s.dtCtr;
         bounds.push(dtCtr);
-        // Round NC.X: day-trip pins on the main trip map now match the
-        // Discovery picker map — purple circle with a 📍 emoji glyph.
-        // Earlier this was a rounded-square with initials (Round 109)
-        // — distinct, but inconsistent with the Discovery surface. User
-        // feedback: "use the same icons as on the Discover map."
-        // Purple still encodes role; the 📍 glyph + popup label "Day
-        // trip from {hub}" complete the signal without leaning on color.
-        var dtSize = 22;
-        var dtHtml = '<div style="background:#5b3f8f;color:#fff;border-radius:50%;width:'
-          + dtSize + 'px;height:' + dtSize + 'px;border:2px solid #fff;'
-          + 'box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;'
-          + 'justify-content:center;font-size:14px;font-weight:700;">'
-          + '📍</div>';
-        var dtIcon = L.divIcon({className:"main-trip-daytrip-pin", html:dtHtml,
-          iconSize:[dtSize,dtSize], iconAnchor:[dtSize/2,dtSize/2], popupAnchor:[0,-dtSize/2]});
+        // NC.9.14: day-trip stop pin now routes through MaxMapPin with
+        // PLACE INITIALS (previously rendered empty). Role is still
+        // "daytrip" because we've already filtered out any stops that
+        // disagree with the cascade above — anything left here is
+        // legitimately a day trip.
+        var dtStyle = MaxMapPin.style("daytrip", {});
+        var dtLabel = (dtName || "").substring(0, 2);
+        var dtHtml = MaxMapPin.html(dtStyle, { label: dtLabel });
+        var dtIcon = MaxMapPin.icon(dtHtml, dtStyle, { className: "main-trip-daytrip-pin" });
         try {
           var dtMarker = L.marker(dtCtr, {icon:dtIcon}).addTo(_mainMap);
           // v359.60.33: tooltip reads as part of the loop when the
@@ -34783,25 +36159,23 @@ function updateMainMap(){
         // place name surfaces via the existing hover/tap tooltip
         // (already bound below). Matches the picker map's pattern
         // and trades at-a-glance scanning for a clean overview.
-        // Round NC.X: wayside pins on the main trip map now match the
-        // Discovery picker — teal circle with a 🛣 road glyph. Earlier
-        // this was a hollow purple octagon (Round 109), which was
-        // role-distinct but didn't match Discovery. The teal color +
-        // 🛣 glyph + popup label "On the way (between stops)" give the
-        // user a consistent visual across both surfaces.
-        var wsSize = 22;
-        var wsHtml = '<div style="background:#0d8a8a;color:#fff;border-radius:50%;width:'
-          + wsSize + 'px;height:' + wsSize + 'px;border:2px solid #fff;'
-          + 'box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;'
-          + 'justify-content:center;font-size:14px;font-weight:700;">'
-          + '🛣</div>';
-        var wsIcon = L.divIcon({className:"main-trip-wayside-pin", html:wsHtml,
-          iconSize:[wsSize,wsSize], iconAnchor:[wsSize/2,wsSize/2], popupAnchor:[0,-wsSize/2]});
+        // NC.9.8: wayside pins on the main trip map now go through
+        // MaxMapPin.style("onway") — same single-source rendering used
+        // by destination pins, considered pins, and the role popover
+        // swatches. The previous hardcoded teal circle with a 🛣 emoji
+        // bypassed MaxMapPin, so changing the onway color in
+        // MaxMapPin.style had no effect here. Now it does: when the
+        // onway role flipped from blue to light purple (NC.9.7), this
+        // surface picked it up automatically.
+        var _wsStyle = MaxMapPin.style("onway", {});
+        var _wsLabel = (wsName || "").substring(0, 2);
+        var wsHtml = MaxMapPin.html(_wsStyle, { label: _wsLabel });
+        var wsIcon = MaxMapPin.icon(wsHtml, _wsStyle, { className: "main-trip-wayside-pin" });
 
         try {
           var wsMarker = L.marker(wsCtr, {icon:wsIcon}).addTo(_mainMap);
           wsMarker.bindTooltip(wsName + " · wayside on " + fromName + " → " + toName,
-            {permanent:false, direction:"top", offset:[0,-wsSize/2-2], className:"main-map-tooltip"});
+            {permanent:false, direction:"top", offset:[0, -_wsStyle.height/2 - 2], className:"main-map-tooltip"});
           // v359.54.3: tap the pin → wayside popover with promote /
           // remove actions. Closures capture the route + stop refs.
           // v359.60.23: route through the unified popover.
@@ -34869,16 +36243,22 @@ function updateMainMap(){
       });
       Object.keys(considered).forEach(function(k){
         var c = considered[k];
-        var html = '<div style="background:#aaa;color:#fff;border-radius:50%;width:14px;height:14px;'
-          + 'border:2px dashed #fff;box-shadow:0 1px 3px rgba(0,0,0,0.22);opacity:0.78;"></div>';
-        var icon = L.divIcon({
-          html: html, className: "main-trip-considered-pin",
-          iconSize: [14, 14], iconAnchor: [7, 7], popupAnchor: [0, -8]
-        });
+        // NC.7: route the "considered, not committed" pin through
+        // MaxMapPin so the trip-overview's gray pins match Discovery's
+        // gray pins — same shape, same dashed border, same initials.
+        // Previously this was hand-rolled inline HTML (no initials,
+        // different size). The single-source-of-truth pattern is the
+        // whole point of MaxMapPin; this surface was missed in the
+        // first refactor pass.
+        var _style = MaxMapPin.style("maybe", {});
+        var _label = _pmEsc ? _pmEsc((c.place || "").substring(0, 2))
+                            : (c.place || "").substring(0, 2);
+        var _html = MaxMapPin.html(_style, { label: _label });
+        var icon = MaxMapPin.icon(_html, _style, { className: "main-trip-considered-pin" });
         try {
           var m = L.marker(c.coords, { icon: icon, zIndexOffset: -100 }).addTo(_mainMap);
           m.bindTooltip(c.place + " · considered &middot; tap to add", {
-            permanent: false, direction: "top", offset: [0, -8], className: "main-map-tooltip"
+            permanent: false, direction: "top", offset: [0, -_style.height/2], className: "main-map-tooltip"
           });
           (function(placeName, coords){
             m.on("click", function(){
@@ -37918,14 +39298,13 @@ function removeDestFromTrip(destId){
       lng: dest.lng
     });
   }
-  // Also mark the candidate's status if it's hydrated.
+  // Round NC.X: route through MaxRoleWriter for _tb.candidates side
+  // (handles c.status + _roleTouched + flags atomically). trip.candidates
+  // still gets a direct write — that's a separate snapshot.
+  MaxRoleWriter.set(dest.place, "reject", { persist: false });
   try {
     var norm = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){return String(s||"").toLowerCase();};
     var k = norm(dest.place);
-    if (_tb && Array.isArray(_tb.candidates)) {
-      var cand = _tb.candidates.find(function(c){ return c && c.place && norm(c.place) === k; });
-      if (cand) { cand.status = "reject"; cand._roleTouched = true; }
-    }
     if (Array.isArray(trip.candidates)) {
       var tCand = trip.candidates.find(function(c){ return c && c.place && norm(c.place) === k; });
       if (tCand) tCand.status = "reject";
@@ -38205,7 +39584,7 @@ function _openTripDestRolePopover(destId){
     ? ('<label style="' + _sugRowStyle("dayTrip") + '">'
         + '<input type="radio" name="trip-role-pick" value="dayTrip"' + _sugChecked("dayTrip") + ' style="margin:0;" />'
         + '<div style="flex:1;">'
-        +   '<div style="font-size:13px;font-weight:600;color:#222;"><span style="margin-right:5px;">📍</span>Day trip from</div>'
+        +   '<div style="font-size:13px;font-weight:600;color:#222;display:flex;align-items:center;gap:6px;">' + MaxMapPin.swatch("daytrip") + '<span>Day trip from</span></div>'
         +   '<select id="trip-role-hub-select" style="margin-top:6px;width:100%;padding:6px 8px;font-size:12.5px;border:1px solid #ccc;border-radius:6px;font-family:inherit;">' + hubOpts + '</select>'
         +   '<div style="font-size:11px;color:#5b3f8f;margin-top:6px;line-height:1.5;">Treats ' + src.place + ' as inside the chosen destination\'s geography — visit out and back from there.</div>'
         +   '<div style="font-size:11px;color:#a36500;margin-top:6px;line-height:1.5;">Heads up: the hub will absorb '
@@ -38248,7 +39627,7 @@ function _openTripDestRolePopover(destId){
     ? ('<label style="' + _sugRowStyle("wayside") + '">'
         + '<input type="radio" name="trip-role-pick" value="wayside"' + _sugChecked("wayside") + ' style="margin:0;" />'
         + '<div style="flex:1;">'
-        +   '<div style="font-size:13px;font-weight:600;color:#222;"><span style="margin-right:5px;">🛣</span>On the way</div>'
+        +   '<div style="font-size:13px;font-weight:600;color:#222;display:flex;align-items:center;gap:6px;">' + MaxMapPin.swatch("onway") + '<span>On the way</span></div>'
         +   '<div style="font-size:11.5px;color:#444;margin-top:3px;line-height:1.5;">'
         +     'Leaves ' + src.place + ' inside the trip\'s geography — a stop on the route from <strong>' + waysidePrev.place + '</strong> &rarr; <strong>' + waysideNext.place + '</strong>' + (_wsNightsN > 0 ? ', same trip length, just no sleep here.' : ', no overnight, no shift needed.')
         +   '</div>'
@@ -38337,7 +39716,7 @@ function _openTripDestRolePopover(destId){
     + '<label style="' + _sugRowStyle("see") + '">'
     +   '<input type="radio" name="trip-role-pick" value="see"' + _sugChecked("see") + ' style="margin:0;" />'
     +   '<div style="flex:1;">'
-    +     '<div style="font-size:13px;font-weight:600;color:#222;"><span style="color:#888;margin-right:5px;filter:grayscale(1);opacity:.75;">👁</span>See' + (_isCurrentlySee ? ' (current)' : '') + '</div>'
+    +     '<div style="font-size:13px;font-weight:600;color:#222;display:flex;align-items:center;gap:6px;">' + MaxMapPin.swatch("see") + '<span>See' + (_isCurrentlySee ? ' (current)' : '') + '</span></div>'
     +     '<div style="font-size:11px;color:#777;margin-top:2px;line-height:1.5;">' + seeSubtitle + '</div>'
     +   '</div>'
     + '</label>';
@@ -38357,7 +39736,7 @@ function _openTripDestRolePopover(destId){
     + '<label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #f0d8d2;border-radius:8px;cursor:pointer;background:#fdf6f4;color:#a93826;">'
     +   '<input type="radio" name="trip-role-pick" value="remove" style="margin:0;" />'
     +   '<div style="flex:1;">'
-    +     '<div style="font-size:13px;font-weight:600;color:#a93826;"><span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:#c75348;color:#fff;font-size:11px;font-weight:700;margin-right:6px;vertical-align:-3px;">✕</span>Reject</div>'
+    +     '<div style="font-size:13px;font-weight:600;color:#a93826;display:flex;align-items:center;gap:6px;">' + MaxMapPin.swatch("reject") + '<span>Reject</span></div>'
     +     '<div style="font-size:11px;color:#7a4030;margin-top:2px;line-height:1.5;">Drop ' + src.place + ' from this trip and move it to the Rejected list in Discovery. Day items and bookings on this stop will be dropped.</div>'
     +   '</div>'
     + '</label>';
@@ -38400,7 +39779,7 @@ function _openTripDestRolePopover(destId){
     +     '<label style="' + _sugRowStyle("stay") + '">'
     +       '<input type="radio" name="trip-role-pick" value="stay"' + _sugChecked("stay") + ' style="margin:0;" />'
     +       '<div style="flex:1;">'
-    +         '<div style="font-size:13px;font-weight:600;color:#222;"><span style="margin-right:5px;">🛏</span>Overnight' + (_isCurrentlySee ? '' : ' (current)') + '</div>'
+    +         '<div style="font-size:13px;font-weight:600;color:#222;display:flex;align-items:center;gap:6px;">' + MaxMapPin.swatch("stay") + '<span>Overnight' + (_isCurrentlySee ? '' : ' (current)') + '</span></div>'
     +         '<div style="font-size:11px;color:#777;margin-top:2px;line-height:1.5;">' + staySubtitle + '</div>'
     +       '</div>'
     +     '</label>'
@@ -38608,15 +39987,23 @@ function _openTripStopPopover(ctx) {
   ov.id = "trip-stop-popover";
   ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.32);z-index:10500;display:flex;align-items:center;justify-content:center;padding:20px;";
 
-  function _row(value, label, sub, extraHtml) {
+  // NC.8: _row now accepts a `role` key (stay/see/daytrip/onway/reject)
+  // and renders MaxMapPin.swatch(role) as the leading glyph instead of
+  // an emoji baked into the label string. Single source of truth — the
+  // popover's icon === the map's pin. The `label` argument is now plain
+  // text only (no emoji prefix).
+  function _row(value, label, sub, extraHtml, role) {
     var isCurrent = (value === currentRole);
     var rowStyle = isCurrent
       ? "display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid #1a5fa8;border-radius:8px;cursor:pointer;background:#eef4fb;"
       : "display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid #e0e0e0;border-radius:8px;cursor:pointer;background:#fff;";
+    var swatch = (role && typeof MaxMapPin !== "undefined" && MaxMapPin.swatch)
+      ? '<span style="margin-right:6px;">' + MaxMapPin.swatch(role) + '</span>'
+      : '';
     return '<label style="' + rowStyle + '">'
       + '<input type="radio" name="trip-stop-pick" value="' + value + '"' + (isCurrent ? " checked" : "") + ' style="margin:3px 0 0;" />'
       + '<div style="flex:1;">'
-      +   '<div style="font-size:13px;font-weight:600;color:#222;">' + label + (isCurrent ? ' <span style="color:#1a5fa8;font-weight:500;">(current)</span>' : '') + '</div>'
+      +   '<div style="font-size:13px;font-weight:600;color:#222;display:flex;align-items:center;">' + swatch + '<span>' + label + (isCurrent ? ' <span style="color:#1a5fa8;font-weight:500;">(current)</span>' : '') + '</span></div>'
       +   (sub ? '<div style="font-size:11px;color:#777;margin-top:2px;line-height:1.5;">' + sub + '</div>' : '')
       +   (extraHtml || '')
       + '</div>'
@@ -38625,10 +40012,12 @@ function _openTripStopPopover(ctx) {
 
   var overnightRow = _row(
     "overnight",
-    "🛏 Overnight",
+    "Overnight",
     currentRole === "overnight"
       ? "Its own geography on the trip — a real stop with lodging."
-      : "Promote to its own destination — its own geography on the trip with a night to sleep."
+      : "Promote to its own destination — its own geography on the trip with a night to sleep.",
+    null,
+    "stay"
   );
 
   // Helper: list ALL existing dayTrip routes across the trip
@@ -38737,7 +40126,7 @@ function _openTripStopPopover(ctx) {
   var dayTripRow = hubOpts.length
     ? _row(
         "dayTrip",
-        "📍 Day trip",
+        "Day trip",
         currentRole === "dayTrip"
           ? _dtCurrentSubtitle
           : "Treat it as inside a destination's geography — visit out and back from your overnight hub. Start a new day trip, or combine with an existing one (e.g. Golden Circle).",
@@ -38785,7 +40174,8 @@ function _openTripStopPopover(ctx) {
         +     '<option value="">Smart (closest neighbor)</option>'
         +   '</select>'
         + '</label>'
-        + '</div>'
+        + '</div>',
+        "daytrip"  // NC.8: role → MaxMapPin.swatch
       )
     : '';
 
@@ -38823,7 +40213,7 @@ function _openTripStopPopover(ctx) {
   var waysideRow = (_waysideHasOptions && !_waysideGateBlocks)
     ? _row(
         "wayside",
-        "🛣 On the way",
+        "On the way",
         currentRole === "wayside"
           ? "Inside the trip's geography — on a transit route between two destinations. Pick another route below to move it."
           : "Leave it in the trip's geography — a stop on the way between two destinations, no overnight here.",
@@ -38831,7 +40221,8 @@ function _openTripStopPopover(ctx) {
         + '<select id="trip-stop-route" style="width:100%;padding:5px 8px;font-size:12px;border:1px solid #ccc;border-radius:5px;font-family:inherit;">'
         +   routeOptsHtml
         + '</select>'
-        + '</div>'
+        + '</div>',
+        "onway"  // NC.8
       )
     : '';
 
@@ -38844,10 +40235,12 @@ function _openTripStopPopover(ctx) {
                     : "this stop";
   var seeRow = _row(
     "see",
-    "👁 See",
+    "See",
     currentRole === "see"
       ? "Currently a potential stop on the trip with no overnight."
-      : "Drop " + _seeFromLabel + ", but keep it on the trip as a potential stop."
+      : "Drop " + _seeFromLabel + ", but keep it on the trip as a potential stop.",
+    null,
+    "see"  // NC.8
   );
 
   // v360.3: "What's here" peek block. The user shouldn't have to scroll
@@ -50509,20 +51902,54 @@ function _doTIInline(destId, cat, inpEl, btnEl){
 }
 
 // ── Trip name editing ──────────────────────────────────────
-function editTripName(){
-  var span=g("trip-name-display"); if(!span)return;
-  // Cache the original span and its inline styles so we can restore
-  // them verbatim after save. Previous implementation built a fresh
-  // span with smaller/lighter styles (font-size:11px;color:#999) which
-  // made the trip name visually disappear after every rename. We now
-  // keep the same span node — just hide it during edit and restore.
+function editTripName(clickedBlock){
+  // NC.9.3: editTripName now operates on the CLICKED block, not always
+  // on the static #trip-name-display. The picker chrome renders its
+  // own .trip-name-block with a name span that has no ID — so clicking
+  // it used to fall through to the static block, leave the input
+  // inserted off-screen (in the trip-view header), and leave the
+  // picker's block visible with the truncated label + pencil intact.
+  // Neal: "This shouldn't look this way if you are editing the name."
+  //
+  // Resolution: callers now pass `this` from their onclick, so we get
+  // the actual .trip-name-block the user clicked. We find the name
+  // span by querying for either the legacy #trip-name-display id OR
+  // the first <span> that isn't the pencil affordance. The pencil + any
+  // other siblings inside the block stay visible (only the name span
+  // and the affordance text need to swap).
+  var block = clickedBlock || document.getElementById("trip-name-wrap");
+  if (!block) {
+    // Last-ditch fallback: any .trip-name-block on the page.
+    block = document.querySelector(".trip-name-block");
+  }
+  if (!block) return;
+  // Find the name span inside this block. Prefer #trip-name-display
+  // for back-compat with the static chrome; otherwise grab the first
+  // span that isn't the .trip-name-edit pencil affordance.
+  var span = block.querySelector("#trip-name-display");
+  if (!span) {
+    var spans = block.querySelectorAll("span");
+    for (var si = 0; si < spans.length; si++) {
+      if (!spans[si].classList || !spans[si].classList.contains("trip-name-edit")) {
+        span = spans[si];
+        break;
+      }
+    }
+  }
+  if (!span) return;
+  // Hide the pencil too — its purpose ("click to edit") is satisfied
+  // once we're already editing; it would otherwise sit next to the
+  // input and read as extra chrome. Restored on save/blur.
+  var pencil = block.querySelector(".trip-name-edit");
   var savedDisplay = span.style.display || "block";
+  var savedPencilDisplay = pencil ? (pencil.style.display || "") : null;
   var inp=document.createElement("input"); inp.className="trip-name-inp";
   inp.value=trip.name||""; inp.placeholder="Trip name";
   // Match the visual weight of the trip-name-display span so the swap
   // doesn't jiggle the layout.
   inp.style.cssText="font-size:13px;font-weight:600;color:#222;background:transparent;border:none;border-bottom:1px solid #999;outline:none;font-family:inherit;width:100%;display:block;padding:0;";
   span.style.display="none";
+  if (pencil) pencil.style.display = "none";
   span.parentNode.insertBefore(inp, span);
   inp.focus(); inp.select();
   var saved = false;
@@ -50532,7 +51959,16 @@ function editTripName(){
     trip.name=val;
     span.textContent=val;
     span.style.display=savedDisplay;
+    if (pencil) pencil.style.display = savedPencilDisplay;
     if (inp.parentNode) inp.parentNode.removeChild(inp);
+    // Mirror the new name into any OTHER trip-name spans on the page
+    // (e.g. the static header span while the picker chrome is active,
+    // or vice versa) so reopening the other surface doesn't show stale.
+    try {
+      document.querySelectorAll(".trip-name-block span").forEach(function(s){
+        if (s !== span && !s.classList.contains("trip-name-edit")) s.textContent = val;
+      });
+    } catch(_) {}
     updateIndexEntry(); autoSave();
   }
   inp.onblur=save;

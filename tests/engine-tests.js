@@ -1349,6 +1349,151 @@ describe('engine-picker.js — orderKeptCandidates', () => {
   });
 });
 
+// ── Suite: extractRoutePreference (Round NC.X) ──────────────────
+//
+// Free-text intent → structured route preference. Keyword-driven
+// today; the schema is the durable contract. When an LLM-extraction
+// path lands later, it writes the same fields and every downstream
+// consumer keeps working unchanged.
+describe('engine-picker.js — extractRoutePreference', () => {
+  test('Iceland counterclockwise + coast + no interior', () => {
+    const rp = MaxEnginePicker.extractRoutePreference(
+      'Northern Lights first, while driving the complete ring road counterclockwise from end to end, sticking mostly to the coast and avoiding routes that cut across the island'
+    );
+    assert.strictEqual(rp.direction, 'counterclockwise');
+    assert.strictEqual(rp.coastalAffinity, 'strong');
+    assert.strictEqual(rp.allowInterior, false);
+    assert.strictEqual(rp.routeTopology, 'ring');
+  });
+
+  test('Wild Atlantic Way clockwise', () => {
+    const rp = MaxEnginePicker.extractRoutePreference(
+      'Driving the Wild Atlantic Way clockwise, hugging the coast from Donegal to Cork.'
+    );
+    assert.strictEqual(rp.direction, 'clockwise');
+    assert.strictEqual(rp.coastalAffinity, 'strong');
+  });
+
+  test('anti-clockwise is recognized as counterclockwise', () => {
+    const rp = MaxEnginePicker.extractRoutePreference('anti-clockwise loop of the island');
+    assert.strictEqual(rp.direction, 'counterclockwise');
+  });
+
+  test('default everything-null when no keywords', () => {
+    const rp = MaxEnginePicker.extractRoutePreference('I want to see Northern Lights');
+    assert.strictEqual(rp.direction, null);
+    assert.strictEqual(rp.coastalAffinity, null);
+    assert.strictEqual(rp.allowInterior, true);
+    assert.strictEqual(rp.routeTopology, null);
+  });
+
+  test('empty string yields neutral preference', () => {
+    const rp = MaxEnginePicker.extractRoutePreference('');
+    assert.strictEqual(rp.direction, null);
+    assert.strictEqual(rp.coastalAffinity, null);
+    assert.strictEqual(rp.allowInterior, true);
+  });
+});
+
+// ── Suite: orderKeptCandidates with route preference ────────────
+//
+// Direction lock + ring topology + coastal affinity override the
+// pure-distance optimization that previously won in Iceland.
+describe('engine-picker.js — orderKeptCandidates honors route preference', () => {
+  test('counterclockwise direction is honored even when clockwise is shorter', () => {
+    window._tb = { region: 'Iceland' };
+    // 5 places roughly around Iceland; clockwise vs counterclockwise
+    // length will differ because exit is in a specific quadrant.
+    const kept = [
+      { id: 'c1', place: 'Reykjavik', lat: 64.14, lng: -21.94, _cityPick: true },
+      { id: 'c2', place: 'Vik',       lat: 63.42, lng: -19.01 },
+      { id: 'c3', place: 'Höfn',      lat: 64.25, lng: -15.20 },
+      { id: 'c4', place: 'Akureyri',  lat: 65.68, lng: -18.10 },
+      { id: 'c5', place: 'Egilsstaðir',lat: 65.26, lng: -14.39 },
+    ];
+    const ccwResult = MaxEnginePicker.orderKeptCandidates(
+      kept, [], '', '',
+      { direction: 'counterclockwise', routeTopology: 'ring', coastalAffinity: 'strong', allowInterior: false }
+    );
+    const cwResult = MaxEnginePicker.orderKeptCandidates(
+      kept, [], '', '',
+      { direction: 'clockwise', routeTopology: 'ring', coastalAffinity: 'strong', allowInterior: false }
+    );
+    // NC.7 corrected: from a western entry (Reykjavík at ≈9 o'clock
+    // on the island), everyday-CCW visits the SOUTH coast first
+    // (Vik), then loops east, north, and back. CW does the opposite,
+    // going north first (Akureyri). Earlier version of this test
+    // asserted the inverted mapping; the code change in NC.7 (return
+    // ccwSeq for user-CCW, cwSeq for user-CW) restores the correct
+    // sense and this test now pins it down.
+    const ccwMid = ccwResult.ordered.slice(1).map(c => c.place);
+    const cwMid  = cwResult.ordered.slice(1).map(c => c.place);
+    assert.notDeepStrictEqual(ccwMid, cwMid, 'CCW and CW orderings must differ');
+    // CCW should reach Vik before Akureyri; CW the reverse.
+    const ccwAk = ccwMid.indexOf('Akureyri');
+    const ccwVik = ccwMid.indexOf('Vik');
+    assert.ok(ccwVik < ccwAk, 'CCW from Reykjavik should visit Vik (south) before Akureyri (north)');
+    const cwAk = cwMid.indexOf('Akureyri');
+    const cwVik = cwMid.indexOf('Vik');
+    assert.ok(cwAk < cwVik, 'CW from Reykjavik should visit Akureyri (north) before Vik (south)');
+  });
+
+  test('ring topology + coastal affinity skips 2-opt cleanup', () => {
+    window._tb = { region: 'Iceland' };
+    // Without the topology lock, 2-opt may pull interior shortcuts
+    // in a small fixture. The reasoning should mention the
+    // perimeter sweep rather than a nearest-neighbor / 2-opt explanation.
+    const result = MaxEnginePicker.orderKeptCandidates(
+      [
+        { id: 'c1', place: 'Reykjavik', lat: 64.14, lng: -21.94, _cityPick: true },
+        { id: 'c2', place: 'Vik',       lat: 63.42, lng: -19.01 },
+        { id: 'c3', place: 'Akureyri',  lat: 65.68, lng: -18.10 },
+        { id: 'c4', place: 'Egilsstaðir',lat: 65.26, lng: -14.39 },
+      ],
+      [], '', '',
+      { routeTopology: 'ring', coastalAffinity: 'strong', allowInterior: false }
+    );
+    const ringMention = result.reasoning.some(r => /perimeter|ring-road|coastal/i.test(r));
+    assert.ok(ringMention, 'reasoning should explain the perimeter sweep');
+  });
+
+  test('no route preference preserves existing behavior', () => {
+    window._tb = { region: 'Iceland' };
+    const result = MaxEnginePicker.orderKeptCandidates(
+      [
+        { id: 'c1', place: 'Reykjavik', lat: 64.14, lng: -21.94, _cityPick: true },
+        { id: 'c2', place: 'Vik',       lat: 63.42, lng: -19.01 },
+        { id: 'c3', place: 'Akureyri',  lat: 65.68, lng: -18.10 },
+      ],
+      [], '', ''
+      // No 5th arg — back-compat.
+    );
+    assert.strictEqual(result.ordered[0].place, 'Reykjavik', 'gateway still first');
+  });
+});
+
+// ── Suite: buildBrief threads routePreference ───────────────────
+describe('engine-picker.js — buildBrief emits routePreference', () => {
+  test('Iceland CCW intent produces structured preference', () => {
+    const brief = MaxEnginePicker.buildBrief({
+      region: 'Iceland',
+      intent: 'Ring road counterclockwise, stick to the coast, no interior.',
+    });
+    assert.ok(brief.routePreference, 'brief.routePreference must exist');
+    assert.strictEqual(brief.routePreference.direction, 'counterclockwise');
+    assert.strictEqual(brief.routePreference.coastalAffinity, 'strong');
+    assert.strictEqual(brief.routePreference.allowInterior, false);
+    assert.strictEqual(brief.routePreference.routeTopology, 'ring');
+  });
+
+  test('empty intent yields neutral preference object', () => {
+    const brief = MaxEnginePicker.buildBrief({ region: 'Iceland', intent: '' });
+    assert.ok(brief.routePreference);
+    assert.strictEqual(brief.routePreference.direction, null);
+    assert.strictEqual(brief.routePreference.allowInterior, true);
+  });
+});
+
 // ── Suite: orderPlacePickerStays (place-picker hero map) ────────
 //
 // Mirror of orderKeptCandidates' geo-reorder, simpler — no route

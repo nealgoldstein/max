@@ -203,4 +203,75 @@ test.describe('Picker → trip flow', () => {
     expect(after.places).toContain('Snæfellsnes Peninsula');  // newly kept
     expect(after.places.includes('Vik')).toBe(false);  // newly rejected
   });
+
+  // Round NC.X regression test: the Mývatn bug.
+  //
+  // The role popup gives the user an explicit Overnight option
+  // regardless of cand.overnightCapable (with a "(no lodging known)"
+  // hint when relevant). _pmSetPlaceRole used to silently swallow the
+  // Stay click when overnightCapable was false — user clicked
+  // Overnight five+ times on Mývatn, c.role never moved off "daytrip",
+  // pin stayed purple. This test guards the writer: explicit user
+  // pick wins, no matter what the LLM said about lodging.
+  test('_pmSetPlaceRole: user-picked Overnight wins on a non-overnight-capable place (Mývatn)', async ({ page }) => {
+    await bootClean(page);
+
+    await page.evaluate(() => {
+      // Seed _tb with a single non-overnight-capable candidate.
+      window._tb = window._tb || {};
+      window._tb.placeActivities = [{
+        id: 'a1',
+        section: 'Sights',
+        type: 'sight',
+        requiredPlaces: [{
+          place: 'Mývatn',
+          country: 'Iceland',
+          overnight: false,
+          _keep: true,
+          _isDayTrip: true,
+          _dayTripHub: 'akureyri',
+          lat: 65.61, lng: -16.99,
+        }],
+      }];
+      window._tb.candidates = [{
+        id: 'c1',
+        place: 'Mývatn',
+        overnightCapable: false,
+        role: 'daytrip',
+        dayTripHub: 'akureyri',
+        status: 'keep',
+        _roleTouched: true,
+      }];
+      window._tb.placeMeta = {};
+    });
+
+    // The actual write-path the popup's Save button calls.
+    await page.evaluate(() => {
+      window._pmSetPlaceRole('Mývatn', 'stay', '');
+    });
+
+    const after = await page.evaluate(() => {
+      const c = window._tb.candidates[0];
+      const p = window._tb.placeActivities[0].requiredPlaces[0];
+      const meta = window._tb.placeMeta[Object.keys(window._tb.placeMeta)[0]] || null;
+      return {
+        candRole: c.role,
+        candTouched: c._roleTouched,
+        candStatus: c.status,
+        candHub: c.dayTripHub,
+        pIsDayTrip: p._isDayTrip,
+        pHub: p._dayTripHub,
+        stayOverride: meta && meta.stayOverride,
+      };
+    });
+
+    // The user picked Overnight; everything must reflect that.
+    expect(after.candRole).toBe('stay');               // the bug: was 'daytrip'
+    expect(after.candTouched).toBe(true);
+    expect(after.candStatus).toBe('keep');
+    expect(after.candHub).toBe('');                    // stale hub cleared
+    expect(after.pIsDayTrip).toBe(false);              // requiredPlace flag cleared
+    expect(after.pHub).toBe('');                       // requiredPlace hub cleared
+    expect(after.stayOverride).toBe(true);             // placeMeta updated
+  });
 });

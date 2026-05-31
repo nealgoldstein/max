@@ -2877,6 +2877,18 @@
           && global.trip.destinations.length) {
         global.activeDest = global.trip.destinations[0].id;
       }
+      // NC.7: same routePreference backfill as the tripWritten path
+      // (see below) so the in-memory picker→trip hand-off doesn't drop
+      // the structured preference if the picker built a trip with
+      // brief.intent set but routePreference missing.
+      try {
+        var _b = global.trip && global.trip.brief;
+        if (_b && _b.intent && !_b.routePreference
+            && global.MaxEnginePicker
+            && typeof global.MaxEnginePicker.extractRoutePreference === 'function') {
+          _b.routePreference = global.MaxEnginePicker.extractRoutePreference(_b.intent);
+        }
+      } catch (_) {}
       emit('tripChange');
       emit('mapDataChange');
     },
@@ -2946,6 +2958,22 @@
       if (typeof env.bkCtr === 'number') global.bkCtr = env.bkCtr;
       if (env.activeDmSection) global._activeDmSection = env.activeDmSection;
       if (env.activeDest) global.activeDest = env.activeDest;
+      // NC.7: backfill brief.routePreference from brief.intent for trips
+      // built before the route-preference extractor shipped. Pure
+      // data-shape fix — we re-derive the structured preference from
+      // the intent text but DON'T silently reorder the destinations.
+      // The reordering only happens when the user re-publishes (which
+      // re-runs orderKeptCandidates). Without this backfill, code that
+      // reads trip.brief.routePreference sees undefined forever even
+      // though the intent string clearly states the preference.
+      try {
+        var _b = global.trip && global.trip.brief;
+        if (_b && _b.intent && !_b.routePreference
+            && global.MaxEnginePicker
+            && typeof global.MaxEnginePicker.extractRoutePreference === 'function') {
+          _b.routePreference = global.MaxEnginePicker.extractRoutePreference(_b.intent);
+        }
+      } catch (_) {}
       emit('tripChange');
       emit('mapDataChange');
     });
