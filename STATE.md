@@ -13,6 +13,20 @@
 > work, with concrete first-round names for each item, plus a
 > definition of "done" so we don't drift.
 
+> **Update (May 31 2026, v360.4 — doc reconciliation):** the
+> "Candidate Explorer" section below describes the pre-v355 picker.
+> The current picker is the **Discovery picker** — same job, different
+> UI: by-Activity / by-Place view toggle, geography model
+> (sight-in-destination, parentDestination), six-role popup
+> (Stay / See / Day trip from X / On the way from X / Maybe / Reject),
+> separate Story + Things-to-do modals. The data structures below
+> (`_tb`, `trip`, `_mdcItems`, etc.) are still accurate. Roadmap items
+> ICS export, PDF export, trip duplication, open-in-maps, voice input,
+> search, and search-across-trip have all shipped — see
+> `functionality-roadmap.md`. Architecturally Item E (drawTripMode
+> fold) is partly shipped through TM.3f; TM.3g is UX-blocked and is
+> the next move if/when the user picks it up.
+
 Single-file HTML travel-planning web app. Everything lives in `index.html`. Deploys to GitHub Pages at `nealgoldstein.github.io/max`. Open the file directly in a browser to test locally.
 
 ## What's already built

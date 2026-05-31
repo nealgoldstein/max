@@ -19,11 +19,13 @@ when you ship a round (check a box, add a follow-up).
 
 ## Where we are now
 
-**Score: ~8.5 / 10** (May 2026, after Items A, C, D closed and B
-closed-by-pivot). Up from 3 (single 24kloc inline file).
+**Score: ~8.5 / 10** (verified May 31 2026 at v360.4, after Items
+A, C, D closed and B closed-by-pivot). Up from 3 (single 24kloc
+inline file). Score unchanged from prior update — TM.3f shipped
+inside Item E but TM.3g remains UX-blocked, so the dial hasn't moved.
 
 What's solid:
-- Pure logic lives in engines and is tested. **211 tests**, well-
+- Pure logic lives in engines and is tested. **287 tests**, well-
   named contracts.
 - DB seam exists (`db.js`, Round HA). Picker → trip handoff goes
   through it (Round HM).
@@ -273,19 +275,28 @@ internal call-site cleanup (e.g. lifting picker code into another
 module), that's the trigger.
 
 ### Item E — drawTripMode legacy path → fold into Places
-**State:** open. Mentioned in `STATE.md` since the original picker/
-Places merge. ~30 inline call sites. Audit at
-`audit-drawTripMode.md` already exists.
+**State:** partially shipped. TM.1 → TM.3f done; TM.3g blocks the
+rest. Audit at `audit-drawTripMode.md` is the source of truth and
+has been reconciled May 31 2026.
 
-**Possible new driver (May 2026):** the gallery-first direction in
-`design-notes.md` treats templates as the canonical way a trip is
-born, with Places as where the trip lives and is edited. If that
-direction holds, `drawTripMode` is the duplicate surface the new
-model can't tolerate — and Item E is no longer speculative.
+**Done:**
+- [x] TM.1 — audit
+- [x] TM.2 — trip-level strips lifted (v316)
+- [x] TM.3a → TM.3f — per-card lift into `MaxTripUI.renderTripDestinationCard`
+- [x] Skeleton `MaxTripUI.renderTripPage(trip, opts)` exists at `trip-ui.js:7441`
 
-**First concrete round (TM.1):** the audit doc
-(`audit-drawTripMode.md`) is done. Next step: re-read it through
-the gallery-first lens and pick the first call site to migrate.
+**Still open:**
+- [ ] **TM.3g** — per-card expansion UX. **Needs a sketch first**
+  per the audit. This is the next move on Item E and the gating
+  artifact is a design conversation, not code.
+- [ ] TM.4 — subscribe unified renderer to `tripChange`, delete the
+  ~57 inline `drawTripMode/drawDestMode` post-mutation calls.
+  Blocked on TM.3g.
+- [ ] TM.5 — delete `drawTripMode` / `drawDestMode`. Blocked on TM.4.
+- [ ] TM.6 — cleanup, retire `_leftMode`.
+
+Call counts today: `drawTripMode()` 47 sites, `drawDestMode(...)`
+33 sites, `_leftMode` 54 refs.
 
 **Done when:** `drawTripMode` and `drawDestMode` are deleted; the
 trip view is the time lens of the picker, period.
@@ -321,6 +332,14 @@ The architecture is a 10 when:
 We're hitting 1, 2, 3, 4, and 7 now (post-HX series and v353 pivot).
 Items 5 and 6 remain: drawTripMode fold (Item E) and overall `index.html`
 shrink, both still open.
+
+> **Note (May 31 2026):** there are ~428 commits between the v353
+> snapshot above and v360.4 — almost all product/Discovery-picker
+> work (geography model, by-Activity/by-Place views, Maybe/Reject
+> roles, story modals, day-trip hub system). That work isn't
+> tracked here because path-to-10 is the architecture-refactor
+> ledger, not the product changelog. If it should be tracked,
+> create a separate `product-changelog.md`.
 
 ---
 

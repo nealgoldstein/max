@@ -179,10 +179,11 @@ prefixing needed yet — but the structural seam exists for
 TM.3f to lift the body into trip-ui.js cleanly when that round
 runs.
 
-**TM.3f — STILL OPEN.** Lift `_renderTmDestCard` from inline into
-`MaxTripUI.renderTripDestinationCard(dest, idx, trip, listSec)`.
-Needs ~50+ `global.X` prefix substitutions for inline-globals the
-body references. Mechanical but careful work — its own session.
+**TM.3f — ✅ DONE.** `MaxTripUI.renderTripDestinationCard` lives
+at `trip-ui.js:3740` and is exposed on the namespace at
+`trip-ui.js:9089`. Inline `index.html:45247` is a thin delegator.
+The prefix-substitution work happened in this round. Verified
+against code May 31 2026.
 
 **TM.3g (later) — Per-card expansion UX.** After TM.3f lands, the
 natural follow-up is to expand the card in place instead of
@@ -269,3 +270,19 @@ This audit is good enough to **start** TM.2. Don't do TM.3 without a
 UX sketch first. The 57 inline `drawTripMode/drawDestMode` calls are
 the biggest tax-debt under the fold; eliminating them via TM.4 is the
 single biggest win, achievable only after TM.2 and TM.3 are stable.
+
+---
+
+## Status reconciliation — May 31 2026 (v360.4)
+
+Verified against code. TM.1 through TM.3f all shipped. The skeleton
+of TM.5 also exists in code: `MaxTripUI.renderTripPage(trip, opts)`
+at `trip-ui.js:7441` is the would-be unified renderer — but when
+`opts.expandedDestId` is set it just calls `global.drawDestMode(id)`
+(line 7458), so the legacy functions are still doing the work. Call
+counts now: `drawTripMode()` 47 sites, `drawDestMode(...)` 33 sites
+(picker + per-card lift moved some redraws to listeners; new product
+features added others).
+
+**Live next round is still TM.3g** — per-card expansion UX. The
+sketch is the gating artifact, not a code change.

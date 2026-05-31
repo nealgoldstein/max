@@ -2,6 +2,10 @@
 
 > Captured at v353.1, May 7 2026. Living document — update as features land
 > or new gaps appear.
+>
+> **Reconciled May 31 2026 at v360.4.** Items 2, 3, 4, 5, and 8 ship.
+> "What Max already has" updated. Genuinely open: 1, 6, 7, 9, 10, 11,
+> 12, 13. See per-item annotations below.
 
 ## What Max already has
 
@@ -19,6 +23,15 @@
 - Magic-link auth, cross-device sync, offline-read via service worker
 - Map (Leaflet) with route + destination pins, "View larger map" popup
 - File-based save/load, drag-drop reorder (now on touch via polyfill)
+- Trip export: printable PDF (`window.print` at index.html:12349) and
+  iCalendar `.ics` download (v353.6) with a server-side subscription
+  URL (`share/:token/calendar.ics`, `server/src/lib/ics.ts`)
+- Trip duplication via "Copy this trip" menu (`duplicateTrip` at
+  index.html:8578)
+- Discovery picker rebuild (post-v353): by-Activity / by-Place view
+  toggle, geography model (sight-in-destination, parentDestination),
+  six-role popup (Stay / See / Day trip from X / On the way from X /
+  Maybe / Reject), Story + Things-to-do modals
 
 ## Functionality gaps that matter on the trip
 
@@ -44,7 +57,9 @@ Ordered by ROI for the on-the-ground use case.
    `trip.brief.entryDetails`, `dest.stay.booking`, `s.booking`. No
    path to the user's iOS/Google calendar. ICS export would let
    bookings appear alongside everything else they have scheduled.
-   ~150 lines plus a download/share UI.
+   ~150 lines plus a download/share UI. **[v353.6 done — download
+   at index.html:11795, server subscription URL at
+   server/src/lib/ics.ts]**
 
 4. **Search across the trip.** "Where did I plan that pastry place?"
    After 30 sights across 5 destinations, finding one means
@@ -71,7 +86,8 @@ Ordered by ROI for the on-the-ground use case.
 ### Medium-priority gaps
 
 8. **Trip duplication.** "Copy this trip and modify dates." Useful
-   for recurring travelers.
+   for recurring travelers. **[done — `duplicateTrip` at
+   index.html:8578, "Copy this trip" menu item]**
 
 9. **Time-zone handling on flight times.** A 9pm Lisbon-to-Paris
    flight is currently just "9pm" — origin or destination time?
@@ -108,17 +124,27 @@ Ordered by ROI for the on-the-ground use case.
 
 ## Recommendations
 
-For the next round of "on-the-ground" usefulness, the four
-cheapest-to-build, highest-impact additions are (in order):
+The original four cheapest-to-build / highest-impact items have
+all shipped (1 open-in-maps, 2 voice, 3 search at v353.2; 4 ICS
+at v353.6). Updated recommendation as of May 31 2026:
 
-1. Open in Maps links per item (~30 lines, trivial)
-2. Voice input for notes (~30 lines, trivial, wow-factor)
-3. Search across the trip (~50 lines, low risk, immediately useful)
-4. ICS calendar export of bookings (~150 lines, real engineering
-   but real payoff)
+**Top picks among what's still open:**
 
-If you want one big "this is a real travel app" feature, **offline
-map tiles** is the answer. Hardest of the bunch but turns Max from
+1. **Translation helper** (#7) — ~20 lines using the existing
+   LLM proxy. Trivial cost, real on-trip value.
+2. **Time-zone handling on flight times** (#9) — Subtle but real.
+   No code today; would need a TZ data source per airport/city
+   and a display convention.
+3. **Weather forecast per destination per day** (#10) — Free APIs
+   exist; small fetch+cache layer. Good "feels like a real travel
+   app" addition.
+4. **Photo attachment per item or note** (#6) — Bigger lift but
+   the most-asked travel-app feature. IndexedDB scaffolding already
+   exists (cache layer uses it at index.html:2633+); the photo
+   store can ride on top.
+
+**One big "this is a real travel app" feature: offline map tiles**
+(#1). Still the answer. Hardest of the bunch but turns Max from
 "useful when I have signal" to "useful in a foreign city basement
 with no signal."
 
