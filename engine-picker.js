@@ -1998,28 +1998,38 @@
       console.warn("[Max publishTrip] placeActivities reconciliation failed (non-fatal):", e && e.message);
     }
 
-    // Round NC.3+ bugfix: propagate Discovery role-chip choices into
-    // c.role on each kept candidate. The Discovery "🛏 Stay / 👁 See"
-    // toggle writes to _tb.placeMeta[key].stayOverride but never
-    // touched the candidate object — so trip-gen kept reading the
-    // LLM-default role (often "stay") and gave See places 3 nights.
-    // Map: stayOverride=true → "stay", stayOverride=false → "see".
-    // Leave null/undefined alone (normalizeCandidateRole picks the
-    // default downstream).
+    // Round PD.16: stayOverride → c.role bridge now routes through
+    // MaxRoleWriter so the cross-surface invariant (c.role +
+    // _roleTouched + c.status + _keep + flag mirrors) holds in one
+    // atomic write. The earlier direct c.role/_roleTouched writes
+    // were a parallel path — the same drift pattern the writer
+    // exists to prevent. MaxRoleWriter is defined on window
+    // (inline-script side); guarded so engine-only contexts (Node
+    // tests) where it's absent fall back to legacy direct writes.
+    // After PD.14, most fresh-trip flows won't bridge anything
+    // because MaxRoleWriter already syncs c.role at toggle-time;
+    // this survives for legacy data only.
     try {
       var _placeMeta = (_tb && _tb.placeMeta) || {};
       var _normFn = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase(); };
+      var _writer = (typeof global !== "undefined" && global.MaxRoleWriter) ? global.MaxRoleWriter : null;
       var _bridged = 0;
       kept.forEach(function(c){
         if (!c || !c.place) return;
         var k = _normFn(c.place);
         var meta = _placeMeta[k];
         if (!meta) return;
-        if (meta.stayOverride === true) {
-          if (c.role !== "stay") { c.role = "stay"; c._roleTouched = true; _bridged++; }
-        } else if (meta.stayOverride === false) {
-          if (c.role !== "see") { c.role = "see"; c._roleTouched = true; _bridged++; }
+        var nextRole = (meta.stayOverride === true) ? "stay"
+                     : (meta.stayOverride === false) ? "see"
+                     : null;
+        if (!nextRole || c.role === nextRole) return;
+        if (_writer && typeof _writer.set === "function") {
+          _writer.set(c.place, nextRole, { persist: false });
+        } else {
+          c.role = nextRole;
+          c._roleTouched = true;
         }
+        _bridged++;
       });
       if (_bridged) console.log("[Max publishTrip] bridged " + _bridged + " Discovery role overrides into c.role");
     } catch(e) {
@@ -2043,27 +2053,35 @@
     //     / day-trips already in play).
     // On-way wins over day-trip (matches the Discovery cascade —
     // on-way is the more specific claim).
+    // Round PD.16: predictor bridge routes through MaxRoleWriter so
+    // the hub field, _keep, and candidateChange event emit atomically
+    // with c.role + _roleTouched. Same engine-only fallback as the
+    // stayOverride bridge above.
     try {
       var _dayPreds = (_tb && _tb._dayTripPreds) || {};
       var _wayPreds = (_tb && _tb._onWayPreds) || {};
       var _normFn2 = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase(); };
+      var _writer2 = (typeof global !== "undefined" && global.MaxRoleWriter) ? global.MaxRoleWriter : null;
       var _bridgedPred = 0;
       kept.forEach(function(c){
         if (!c || !c.place) return;
         if (c._roleTouched === true) return;
         if (c.role === "stay" || c.role === "daytrip" || c.role === "onway") return;
         var k = _normFn2(c.place);
-        if (_wayPreds[k]) {
-          c.role = "onway";
-          c.waysideFromHub = String(_wayPreds[k]).toLowerCase();
+        var nextRole = null;
+        var nextHub  = "";
+        if (_wayPreds[k])      { nextRole = "onway";   nextHub = String(_wayPreds[k]).toLowerCase(); }
+        else if (_dayPreds[k]) { nextRole = "daytrip"; nextHub = String(_dayPreds[k]).toLowerCase(); }
+        if (!nextRole) return;
+        if (_writer2 && typeof _writer2.set === "function") {
+          _writer2.set(c.place, nextRole, { hub: nextHub, persist: false });
+        } else {
+          c.role = nextRole;
           c._roleTouched = true;
-          _bridgedPred++;
-        } else if (_dayPreds[k]) {
-          c.role = "daytrip";
-          c.dayTripHub = String(_dayPreds[k]).toLowerCase();
-          c._roleTouched = true;
-          _bridgedPred++;
+          if (nextRole === "onway")        c.waysideFromHub = nextHub;
+          else if (nextRole === "daytrip") c.dayTripHub = nextHub;
         }
+        _bridgedPred++;
       });
       if (_bridgedPred) console.log("[Max publishTrip] bridged " + _bridgedPred + " picker predictor(s) into c.role");
     } catch(e) {

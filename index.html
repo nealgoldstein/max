@@ -17701,26 +17701,39 @@ if (typeof globalThis !== "undefined") globalThis._geographyOf = _geographyOf;
 //      derived from iconic + intent-match. After seeding, all
 //      mutations route through MaxRoleWriter.
 //
-//   2. List-level keep/drop toggles in togglePlaceActivity /
-//      togglePlaceInActivity / togglePlaceByPlaceMode /
-//      toggleDestKeepInSection (index.html ~16940-17140). These
-//      are scoped to a single activity/place's _keep flag without
-//      affecting role, and are the canonical writers for list-side
-//      keep toggles. They DO touch _keep directly; if they ever
-//      need to also change role, route through MaxRoleWriter.
+//   2. Per-activity-ref bookkeeping toggles togglePlaceActivity /
+//      togglePlaceInActivity (index.html ~16985, ~17105). These
+//      modify a single activity-ref's _keep flag — bookkeeping
+//      that has no visible effect at the place level (the picker
+//      aggregates with "any ref kept → place kept"). Routing
+//      through MaxRoleWriter would lose the per-activity-ref
+//      granularity; the writer is for place-level state. The
+//      place-level keep toggles (toggleDestKeep, togglePlaceByPlaceMode,
+//      toggleDestKeepInSection) DO route through MaxRoleWriter as of
+//      PD.16.
 //
-//   3. publishTrip's stayOverride + predictor bridges
-//      (engine-picker.js ~2009-2071). These run at trip-build time
-//      to translate Discovery state into c.role for downstream
-//      consumers. They have privileged context (the whole trip
-//      shape is settled) and run once per publish; routing
-//      individual writes through MaxRoleWriter would require
-//      candidate-by-candidate calls that wouldn't add value.
-//
-//   4. normalizeCandidateRole (engine-picker.js 172) is a READ
+//   3. normalizeCandidateRole (engine-picker.js 172) is a READ
 //      that COERCES a legacy-shaped role into the canonical
 //      stay/see/daytrip/onway set. It's idempotent and called
 //      from render paths; not a true write.
+//
+//   4. reopenPickerForEdit's hydration bridge (index.html ~26168).
+//      Copies trip.candidates[*].role → _tb.placeMeta[].stayOverride
+//      on picker reopen. Not a user mutation; it's restoring picker
+//      view-state from the trip's source-of-truth data.
+//
+//   5. _ensureMdcItemsPlaceMeta (index.html ~38780). Trip-view writer
+//      side-effect — mirrors a trip-view role change into _tb.placeMeta
+//      so the picker reads right on next open. The trip-view path
+//      is authoritative; this is a downstream mirror. Should
+//      eventually live behind its own atomic writer; queued.
+//
+// Migrated through MaxRoleWriter as of PD.16 (formerly false
+// exceptions): the place-level list-keep toggles + publishTrip's
+// stayOverride and predictor bridges in engine-picker.js. Both used
+// to be called "legitimate" but were rationalizations — they wrote
+// fields the cascade reads, so cross-surface drift was structurally
+// possible. Now they go through the writer like everything else.
 //
 // Anything else writing these fields is a bug. If you find a new
 // case that "needs" to bypass MaxRoleWriter, the answer is almost
