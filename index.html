@@ -17355,6 +17355,8 @@ function _pmRtCmd(btn, cmd){
 }
 function _pmRtSetup(root){
   if (!root || !root.querySelectorAll) return;
+  // PD.52: also bind doc-list drag-and-drop on any popup that has a doc list.
+  if (typeof _pmDocsBindDnd === "function") _pmDocsBindDnd(root);
   root.querySelectorAll(".pm-rt-editor").forEach(function(ed){
     if (ed._pmRtSetup) return;
     ed._pmRtSetup = true;
@@ -17727,12 +17729,17 @@ function _pmDocsSyncToNotes(m){
 function _pmDocsRender(m, idPrefix){
   _pmDocsEnsure(m);
   var canDelete = m.docs.length > 1;
+  var canReorder = m.docs.length > 1;
   var rowsHtml = m.docs.map(function(doc, idx){
     var titleSafe = String(doc.title || "Untitled").replace(/</g, "&lt;");
     return '<div class="pm-doc-list-row" data-idx="' + idx + '" '
+      +    (canReorder ? 'draggable="true" ' : '')
       +    'onclick="event.stopPropagation();_pmDocOpen(' + idx + ');" '
-      +    'style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid #eee;cursor:pointer;transition:background-color .12s;" '
+      +    'style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid #eee;cursor:pointer;transition:background-color .12s;border-top:2px solid transparent;border-top-color:transparent;" '
       +    'onmouseenter="this.style.background=&quot;#f5f5f5&quot;" onmouseleave="this.style.background=&quot;transparent&quot;">'
+      +   (canReorder
+            ? '<span class="pm-doc-drag-handle" title="Drag to reorder" style="cursor:grab;color:#bbb;font-size:14px;user-select:none;-webkit-user-select:none;padding:0 2px;">⋮⋮</span>'
+            : '')
       +   '<span style="flex:1;font-size:13px;font-weight:600;color:#111;">📄 ' + titleSafe + '</span>'
       +   (canDelete
             ? '<button type="button" class="pm-doc-del" data-idx="' + idx + '" onclick="event.stopPropagation();_pmDocRemove(this);" title="Delete this document">×</button>'
@@ -17831,6 +17838,65 @@ function _pmDocOpen(idx){
     _pmDocsRefreshActive();
   });
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// Round PD.52: drag-to-reorder docs. HTML5 DnD on .pm-doc-list-row.
+// Visual cue: blue border-top on the row the dragged item would land
+// above. Drop → splice m.docs and refresh.
+// ──────────────────────────────────────────────────────────────────────
+function _pmDocsBindDnd(scope){
+  var root = scope || document;
+  var list = root.querySelector(".pm-doc-list");
+  if (!list || list._pmDndBound) return;
+  list._pmDndBound = true;
+  var srcIdx = null;
+  function clearDropIndicators(){
+    list.querySelectorAll(".pm-doc-list-row").forEach(function(r){
+      r.style.borderTopColor = "transparent";
+    });
+  }
+  list.addEventListener("dragstart", function(e){
+    var row = e.target && e.target.closest ? e.target.closest(".pm-doc-list-row") : null;
+    if (!row) return;
+    srcIdx = parseInt(row.getAttribute("data-idx"), 10);
+    if (!isFinite(srcIdx)) { srcIdx = null; return; }
+    row.style.opacity = "0.4";
+    try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", String(srcIdx)); } catch(_){}
+  });
+  list.addEventListener("dragend", function(e){
+    var row = e.target && e.target.closest ? e.target.closest(".pm-doc-list-row") : null;
+    if (row) row.style.opacity = "1";
+    clearDropIndicators();
+    srcIdx = null;
+  });
+  list.addEventListener("dragover", function(e){
+    if (srcIdx === null) return;
+    e.preventDefault();
+    try { e.dataTransfer.dropEffect = "move"; } catch(_){}
+    var row = e.target && e.target.closest ? e.target.closest(".pm-doc-list-row") : null;
+    clearDropIndicators();
+    if (row) row.style.borderTopColor = "#1a5fa8";
+  });
+  list.addEventListener("drop", function(e){
+    if (srcIdx === null) return;
+    e.preventDefault();
+    var row = e.target && e.target.closest ? e.target.closest(".pm-doc-list-row") : null;
+    if (!row) { clearDropIndicators(); return; }
+    var dstIdx = parseInt(row.getAttribute("data-idx"), 10);
+    clearDropIndicators();
+    if (!isFinite(dstIdx) || dstIdx === srcIdx) { srcIdx = null; return; }
+    var m = window._pmActiveResearchMeta;
+    if (!m || !Array.isArray(m.docs)) { srcIdx = null; return; }
+    var moved = m.docs.splice(srcIdx, 1)[0];
+    // After removing srcIdx, the target index shifts down by 1 if src < dst
+    var insertAt = (srcIdx < dstIdx) ? dstIdx - 1 : dstIdx;
+    m.docs.splice(insertAt, 0, moved);
+    srcIdx = null;
+    if (typeof _pmDocsRefreshActive === "function") _pmDocsRefreshActive();
+  });
+}
+if (typeof globalThis !== "undefined") globalThis._pmDocsBindDnd = _pmDocsBindDnd;
+
 function _pmDocsRefreshActive(){
   var ov = window._pmActiveResearchOv;
   var m  = window._pmActiveResearchMeta;
@@ -17839,6 +17905,7 @@ function _pmDocsRefreshActive(){
   _pmDocsSyncToNotes(m);
   ov.innerHTML = rb();
   if (typeof _pmRtSetup === "function") _pmRtSetup(ov);
+  if (typeof _pmDocsBindDnd === "function") _pmDocsBindDnd(ov);
 }
 // PD.35: per-doc editor dialog. Title input + rich-text body + dictate
 // + Done. Save on Done / × / outside-click. Calls back onSave(doc).
