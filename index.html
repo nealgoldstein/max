@@ -17394,43 +17394,40 @@ function _pmDocsSyncToNotes(m){
     return hdr + (d.body || "");
   }).join('<hr style="border:none;border-top:1px solid #eee;margin:10px 0;" />');
 }
+// Round PD.35: docs render as a scrolling LIST of titles. Click a
+// title → opens that doc in its own editor dialog (_pmOpenDocEditor).
+// + Add document opens editor for a new doc. Body editors no longer
+// live inline; m.docs is the source of truth, updated by editor saves.
 function _pmDocsRender(m, idPrefix){
   _pmDocsEnsure(m);
   var canDelete = m.docs.length > 1;
-  var cardsHtml = m.docs.map(function(doc, idx){
-    var titleSafe = String(doc.title || "").replace(/"/g, "&quot;").replace(/</g, "&lt;");
-    return '<div class="pm-doc-card" data-doc-idx="' + idx + '">'
-      + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">'
-      +   '<input type="text" class="pm-doc-title" data-idx="' + idx + '" value="' + titleSafe + '" placeholder="Document title" />'
+  var rowsHtml = m.docs.map(function(doc, idx){
+    var titleSafe = String(doc.title || "Untitled").replace(/</g, "&lt;");
+    return '<div class="pm-doc-list-row" data-idx="' + idx + '" '
+      +    'onclick="event.stopPropagation();_pmDocOpen(' + idx + ');" '
+      +    'style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid #eee;cursor:pointer;transition:background-color .12s;" '
+      +    'onmouseenter="this.style.background=&quot;#f5f5f5&quot;" onmouseleave="this.style.background=&quot;transparent&quot;">'
+      +   '<span style="flex:1;font-size:13px;font-weight:600;color:#111;">📄 ' + titleSafe + '</span>'
       +   (canDelete
             ? '<button type="button" class="pm-doc-del" data-idx="' + idx + '" onclick="event.stopPropagation();_pmDocRemove(this);" title="Delete this document">×</button>'
             : '')
-      + '</div>'
-      + _pmRtFieldHtml(idPrefix + "-body-" + idx, doc.body || "", { placeholder: "Body…", minHeight: "60px" })
       + '</div>';
   }).join('');
+  var emptyHtml = '<div style="padding:20px;text-align:center;color:#999;font-size:12px;font-style:italic;">No documents yet.</div>';
   return '<div class="pm-docs-wrap" data-id-prefix="' + idPrefix + '">'
-    + cardsHtml
+    + '<div class="pm-doc-list" style="max-height:280px;overflow-y:auto;border:1px solid #ddd;border-radius:6px;background:#fff;">'
+    +   (rowsHtml || emptyHtml)
+    + '</div>'
     + '<button type="button" class="pm-doc-add" onclick="event.stopPropagation();_pmDocAdd(this);">+ Add document</button>'
     + '</div>';
 }
+// PD.35: no-op in list mode — m.docs is the source of truth, set by
+// editor dialog saves. Kept for back-compat with any legacy caller
+// that expected DOM → m.docs sync. Always syncs the legacy m.notes
+// concatenation so non-doc-aware readers see current content.
 function _pmDocsReadFromDom(rootEl, m){
-  if (!rootEl || !m) return;
-  var wrap = rootEl.querySelector ? rootEl.querySelector(".pm-docs-wrap") : null;
-  if (!wrap) return;
-  var cards = wrap.querySelectorAll(".pm-doc-card");
-  if (!cards.length) return;
-  var newDocs = [];
-  cards.forEach(function(card){
-    var titleInp = card.querySelector(".pm-doc-title");
-    var bodyEd   = card.querySelector(".pm-rt-editor");
-    newDocs.push({
-      id: "d-" + Date.now().toString(36) + "-" + Math.random().toString(36).substr(2, 5),
-      title: titleInp ? titleInp.value : "",
-      body:  bodyEd   ? bodyEd.innerHTML : ""
-    });
-  });
-  m.docs = newDocs;
+  if (!m) return;
+  _pmDocsEnsure(m);
   _pmDocsSyncToNotes(m);
 }
 // Active-popup tracking so the add/delete buttons (which live in
@@ -17446,29 +17443,119 @@ function _pmDocsClearActive(){
   window._pmActiveResearchMeta = null;
   window._pmActiveResearchRender = null;
 }
+// PD.35: + Add document opens the editor dialog for a brand-new doc.
+// Empty docs (no title, no body) are discarded on close.
 function _pmDocAdd(){
-  var ov = window._pmActiveResearchOv;
   var m  = window._pmActiveResearchMeta;
-  var rb = window._pmActiveResearchRender;
-  if (!ov || !m || typeof rb !== "function") return;
-  _pmDocsReadFromDom(ov, m);
-  m.docs.push({ id: "d-" + Date.now().toString(36), title: "", body: "" });
-  ov.innerHTML = rb();
-  if (typeof _pmRtSetup === "function") _pmRtSetup(ov);
+  if (!m) return;
+  _pmDocsEnsure(m);
+  var newDoc = { id: "d-" + Date.now().toString(36), title: "", body: "" };
+  _pmOpenDocEditor(newDoc, function(saved){
+    var hasContent = (saved.title && saved.title.trim()) || (saved.body && saved.body.trim() && saved.body !== "<br>");
+    if (!hasContent) return;  // discard empty
+    m.docs.push(saved);
+    _pmDocsRefreshActive();
+  });
 }
 function _pmDocRemove(btn){
-  var ov = window._pmActiveResearchOv;
   var m  = window._pmActiveResearchMeta;
-  var rb = window._pmActiveResearchRender;
-  if (!ov || !m || typeof rb !== "function") return;
+  if (!m) return;
   var idx = parseInt(btn.getAttribute("data-idx"), 10);
   if (!isFinite(idx) || idx < 0) return;
   if (!confirm("Delete this document?")) return;
-  _pmDocsReadFromDom(ov, m);
+  _pmDocsEnsure(m);
   m.docs.splice(idx, 1);
-  _pmDocsEnsure(m);  // never go below one doc
+  _pmDocsEnsure(m);  // ensure at least one doc exists
+  _pmDocsRefreshActive();
+}
+// PD.35: click a doc title row → opens that doc in the editor dialog.
+function _pmDocOpen(idx){
+  var m  = window._pmActiveResearchMeta;
+  if (!m || !Array.isArray(m.docs) || !m.docs[idx]) return;
+  var orig = m.docs[idx];
+  _pmOpenDocEditor(orig, function(saved){
+    m.docs[idx] = saved;
+    _pmDocsRefreshActive();
+  });
+}
+function _pmDocsRefreshActive(){
+  var ov = window._pmActiveResearchOv;
+  var m  = window._pmActiveResearchMeta;
+  var rb = window._pmActiveResearchRender;
+  if (!ov || !m || typeof rb !== "function") return;
+  _pmDocsSyncToNotes(m);
   ov.innerHTML = rb();
   if (typeof _pmRtSetup === "function") _pmRtSetup(ov);
+}
+// PD.35: per-doc editor dialog. Title input + rich-text body + dictate
+// + Done. Save on Done / × / outside-click. Calls back onSave(doc).
+function _pmOpenDocEditor(doc, onSave){
+  var existing = document.getElementById("pm-doc-editor");
+  if (existing) existing.remove();
+  var ov = document.createElement("div");
+  ov.id = "pm-doc-editor";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:11700;display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;";
+
+  var box = document.createElement("div");
+  box.style.cssText = "background:#fff;border-radius:12px;max-width:680px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 12px 36px rgba(0,0,0,0.28);overflow:hidden;";
+
+  var titleSafe = String(doc.title || "").replace(/"/g, "&quot;");
+  box.innerHTML = ''
+    + '<div style="padding:12px 18px;border-bottom:1px solid #eee;display:flex;align-items:center;gap:10px;">'
+    +   '<input id="pm-doc-edit-title" type="text" value="' + titleSafe + '" placeholder="Document title" '
+    +     'style="flex:1;font:inherit;font-size:16px;font-weight:700;border:1px solid transparent;border-radius:5px;padding:6px 8px;background:transparent;outline:none;" '
+    +     'onfocus="this.style.borderColor=&quot;#ccc&quot;" onblur="this.style.borderColor=&quot;transparent&quot;" />'
+    +   '<button type="button" id="pm-doc-edit-dictate" style="font-size:11px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;flex-shrink:0;">🎤 Dictate</button>'
+    +   '<button type="button" id="pm-doc-edit-close-x" style="font-size:22px;color:#999;background:none;border:none;cursor:pointer;padding:0 4px;line-height:1;flex-shrink:0;">×</button>'
+    + '</div>'
+    + '<div style="flex:1;overflow-y:auto;padding:14px 18px;background:#fafafa;">'
+    +   _pmRtFieldHtml("pm-doc-edit-body", doc.body || "", { placeholder: "Write here…", minHeight: "320px" })
+    + '</div>'
+    + '<div style="padding:12px 18px;border-top:1px solid #eee;display:flex;justify-content:flex-end;gap:8px;">'
+    +   '<button type="button" id="pm-doc-edit-done" style="font-size:13px;font-weight:600;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 18px;cursor:pointer;font-family:inherit;">Done</button>'
+    + '</div>';
+
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  _pmRtSetup(ov);
+
+  function save(){
+    var titleInp = ov.querySelector("#pm-doc-edit-title");
+    var bodyEd   = ov.querySelector(".pm-rt-editor");
+    var updated = {
+      id: doc.id || ("d-" + Date.now().toString(36)),
+      title: titleInp ? titleInp.value : (doc.title || ""),
+      body:  bodyEd   ? bodyEd.innerHTML : (doc.body || "")
+    };
+    if (typeof onSave === "function") onSave(updated);
+    if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+  }
+  ov.querySelector("#pm-doc-edit-done").onclick = save;
+  ov.querySelector("#pm-doc-edit-close-x").onclick = save;
+  box.onclick = function(e){ e.stopPropagation(); };
+  ov.onclick = save;
+
+  // Dictate into the body editor.
+  var dictateBtn = ov.querySelector("#pm-doc-edit-dictate");
+  var bodyEd2 = ov.querySelector(".pm-rt-editor");
+  if (dictateBtn && bodyEd2 && typeof _pmAttachDictation === "function") {
+    _pmAttachDictation(dictateBtn, bodyEd2);
+  }
+  // Focus: title if new, body if existing.
+  setTimeout(function(){
+    if (!doc.title) {
+      var t = ov.querySelector("#pm-doc-edit-title");
+      if (t) t.focus();
+    } else {
+      var b = ov.querySelector(".pm-rt-editor");
+      if (b) b.focus();
+    }
+  }, 50);
+}
+if (typeof globalThis !== "undefined") {
+  globalThis._pmDocOpen = _pmDocOpen;
+  globalThis._pmDocsRefreshActive = _pmDocsRefreshActive;
+  globalThis._pmOpenDocEditor = _pmOpenDocEditor;
 }
 if (typeof globalThis !== "undefined") {
   globalThis._pmDocsEnsure = _pmDocsEnsure;
