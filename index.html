@@ -21320,13 +21320,15 @@ function _renderPlacePickerMap(targetId){
         } catch(_){}
         var _isUserCommitted = !!(_candForLabel && _candForLabel._roleTouched === true);
         var prefixLabel = _isUserCommitted ? "You selected" : "Max suggests";
-        // Round PD.24: when the user has overridden Max's suggestion,
-        // show what Max originally said so the user remembers the
-        // history. Max's suggestion = the LLM's overnight hint
-        // (info.overnight) translated to stay/just-visit. Only shown
-        // when the user's choice differs from Max's.
+        // Round PD.26: history line shows whenever the user has
+        // committed, regardless of whether their choice agrees with
+        // Max. The earlier "only show on disagreement" hid useful
+        // context — when a user flips back to Max's original, the
+        // popup was acting like the commitment never happened.
+        // Showing "Max had suggested X" always gives the full
+        // history at a glance.
         var _maxOriginal = llmSaysOvernight ? "stay overnight" : "just visit";
-        var _showHistory = _isUserCommitted && (_maxOriginal !== recoLabel);
+        var _showHistory = _isUserCommitted;
         var historyLine = _showHistory
           ? '<div style="font-size:10.5px;color:#999;font-style:italic;margin-bottom:10px;">Max had suggested ' + _maxOriginal + '</div>'
           : '';
@@ -21336,11 +21338,25 @@ function _renderPlacePickerMap(targetId){
           +   '<div style="font-size:11.5px;color:#666;margin-bottom:' + (_showHistory ? '4px' : '10px') + ';">' + prefixLabel + ': <strong style="color:#111;">' + recoLabel + '</strong></div>'
           +   historyLine
           +   '<button type="button" onclick="_pmTogglePlaceStay(\'' + nameSafe + '\')" '
-          +           'style="display:block;width:100%;font-size:12px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:6px 10px;cursor:pointer;font-family:inherit;margin-bottom:6px;">'
+          +           'style="display:block;width:100%;font-size:12px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:6px 10px;cursor:pointer;font-family:inherit;margin-bottom:8px;">'
           +     flipLabel
           +   '</button>'
+          // Round PD.25: parity with the list's affordances —
+          // Drop from trip (maybe state) and Remove from list
+          // (reject) both reachable from the map popup. Subtle
+          // text links so the popup doesn't bloat into button
+          // soup. Both route through MaxRoleWriter via their
+          // global helpers; the map + list both re-render after.
+          +   '<a href="#" onclick="event.preventDefault();toggleDestKeep(\'' + nameSafe + '\');return false;" '
+          +      'style="display:block;font-size:11px;color:#888;text-align:center;text-decoration:none;font-family:inherit;padding:3px 0;">'
+          +     'Drop from trip'
+          +   '</a>'
+          +   '<a href="#" onclick="event.preventDefault();_pmRemoveFromList(\'' + nameSafe + '\');return false;" '
+          +      'style="display:block;font-size:11px;color:#a93826;text-align:center;text-decoration:none;font-family:inherit;padding:3px 0;">'
+          +     'Remove from list'
+          +   '</a>'
           +   '<a href="#" onclick="event.preventDefault();var r=document.querySelectorAll(\'.tb-dest-major\');for(var i=0;i&lt;r.length;i++){if((r[i].textContent||\'\').toLowerCase().indexOf(\'' + nameSafe.toLowerCase() + '\')!==-1){r[i].scrollIntoView({behavior:\'smooth\',block:\'center\'});r[i].style.transition=\'background-color 0.4s\';r[i].style.backgroundColor=\'#fff7d4\';setTimeout(function(){r[i].style.backgroundColor=\'\';},1600);break;}}return false;" '
-          +      'style="display:block;font-size:11px;color:#888;text-align:center;text-decoration:none;font-family:inherit;">'
+          +      'style="display:block;font-size:11px;color:#888;text-align:center;text-decoration:none;font-family:inherit;padding:3px 0;">'
           +     'Find in list →'
           +   '</a>'
           + '</div>';
