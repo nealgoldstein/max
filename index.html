@@ -14913,21 +14913,27 @@ function _pmDigDeeperInModal(linkEl, bodyEl){
   if (deepCache[key]) { applyDeep(deepCache[key]); return; }
   deep.innerHTML = '<div style="color:#999;font-style:italic;">Digging deeper…</div>';
   deep.style.display = "block";
-  // Lean on the existing _pmDigDeeper backing fetch if available
-  if (typeof _pmGenerateDeepNarrative === "function") {
-    _pmGenerateDeepNarrative(placeName).then(function(text){
-      if (text) deepCache[key] = text;
-      applyDeep(text || "");
-    }, function(){ applyDeep(""); });
-  } else {
-    // Fallback: re-use callMax with a focused prompt.
-    if (typeof callMax !== "function") { applyDeep(""); return; }
-    var prompt = "Continue this short cultural/historical sketch about " + placeName + ". One paragraph (4-6 sentences). Concrete details — names, dates, specific events, why locals care. No tourist-brochure tone.";
-    callMax([{role:"user", content: prompt}], 600, 25000).then(function(text){
-      if (text) deepCache[key] = text;
-      applyDeep(text || "");
-    }, function(){ applyDeep(""); });
-  }
+  // Round PD.2 (v360.5): build a proper 3-turn conversation that
+  // mirrors digDeeper (line 47607). The earlier "fallback" prompt
+  // here said "Continue this short cultural/historical sketch about
+  // {placeName}" but never put the sketch in the conversation, so
+  // the model wrote a plausible paragraph AND asked "Could you share
+  // what you've written so far?" in the same response. Including the
+  // assistant's prior story as the second turn fixes both halves.
+  // _pmGenerateDeepNarrative was referenced but never defined — its
+  // probe path is removed alongside the prompt fix.
+  if (typeof callMax !== "function") { applyDeep(""); return; }
+  var _narrCache = window._placeNarrativeCache || {};
+  var storyText  = _narrCache[key] || "";
+  var messages = [
+    { role: "user",      content: "Tell me the story of " + placeName + "." },
+    { role: "assistant", content: storyText },
+    { role: "user",      content: "Tell me more — go further into the history or cultural significance. One paragraph (4-6 sentences). Concrete details — names, dates, specific events, why locals care. No tourist-brochure tone." }
+  ];
+  callMax(messages, 600, 25000).then(function(text){
+    if (text) deepCache[key] = text;
+    applyDeep(text || "");
+  }, function(){ applyDeep(""); });
 }
 window._pmTriggerStory = _pmTriggerStory;
 
@@ -15875,7 +15881,6 @@ function _renderPlaceActivityItems(){
           +   '<div style="flex:1;min-width:0;">'
           +     '<div class="tb-act-name" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
           +       '<span>' + _placeArg + '</span>'
-          +       _pmReadOnlyRoleBadge(d.place)
           +       (pInfo.kept ? stayChip : maybeBadge)
           +       (pInfo.kept ? dtBadge : '')
           +     '</div>'
@@ -16360,7 +16365,6 @@ function _renderPlaceActivityItems(){
         +   _pmEsc(d.place)
         + '</div>'
         + '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px;">'
-        +   _pmReadOnlyRoleBadge(d.place)
         +   stayChip
         +   transitChip
         +   researchBtn
