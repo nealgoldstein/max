@@ -16124,8 +16124,28 @@ function _renderPlaceActivityItems(){
     // Render each destination as a row in this section
     destOrder.forEach(function(key){
       var d = byDest[key];
-      // A destination is "kept" in this section if any of its placeRefs has _keep
-      var destKeptInSection = d.placeRefs.some(function(r){ return r.placeRef && r.placeRef._keep; });
+      // Round PD.17: checkbox state is the GLOBAL kept aggregation —
+      // any ref of this place across any item has _keep=true. The
+      // earlier section-scoped read could disagree with the map pin
+      // (which always reads global), producing "Hofn pin is blue but
+      // its row checkbox is unchecked" inconsistencies whenever the
+      // LLM seeded different items differently for the same place.
+      // The place-level toggleDestKeep route through MaxRoleWriter
+      // converges all refs on next click, but the initial render
+      // shouldn't lie about state.
+      var destKeptInSection = false;
+      try {
+        var _dKey = (d.place || "").toLowerCase();
+        (_tb.placeActivities || []).some(function(_it){
+          return (_it.requiredPlaces || []).some(function(_p){
+            if (_p && _p.place && _p.place.toLowerCase() === _dKey && _p._keep) {
+              destKeptInSection = true;
+              return true;
+            }
+            return false;
+          });
+        });
+      } catch(_){}
 
       var row = document.createElement("div");
       var _rowMatchesSearch = _searchQ && _pmRowMatchesSearch(d, sec);
