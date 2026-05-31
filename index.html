@@ -17259,9 +17259,123 @@ if (typeof globalThis !== "undefined") {
   s.textContent = '.pm-rt-editor:empty:before{content:attr(data-placeholder);color:#999;font-style:italic;pointer-events:none;}'
     + '.pm-rt-editor a{color:#1a5fa8;text-decoration:underline;}'
     + '.pm-rt-editor ul, .pm-rt-editor ol{margin:6px 0;padding-left:22px;}'
-    + '.pm-rt-editor li{margin:2px 0;}';
+    + '.pm-rt-editor li{margin:2px 0;}'
+    + '.pm-doc-card{margin-bottom:12px;padding:10px;border:1px solid #e0d8c8;border-radius:6px;background:#fafafa;}'
+    + '.pm-doc-card .pm-rt-wrap{background:#fff;}'
+    + '.pm-doc-title{flex:1;font:inherit;font-size:13px;font-weight:600;border:1px solid transparent;border-radius:4px;padding:4px 6px;background:transparent;}'
+    + '.pm-doc-title:focus{background:#fff;border-color:#ccc;outline:none;}'
+    + '.pm-doc-del{font-size:14px;color:#a93826;background:#fff;border:1px solid #f0d8d2;border-radius:4px;padding:2px 8px;cursor:pointer;font-family:inherit;}'
+    + '.pm-doc-add{font-size:11.5px;font-weight:600;color:#1a5fa8;background:#fff;border:1px dashed #c8d8f0;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;margin-top:4px;}';
   document.head.appendChild(s);
 })();
+
+// ──────────────────────────────────────────────────────────────────────
+// Round PD.33: multi-document support for notes. m.docs = [{id, title, body}].
+// Legacy m.notes (string) migrates to docs[0]. m.notes stays synced as
+// a concatenated HTML view so any read-side consumer that still reads
+// m.notes (search, export-as-markdown, etc.) keeps working.
+// ──────────────────────────────────────────────────────────────────────
+function _pmDocsEnsure(m){
+  if (!m) return;
+  if (!Array.isArray(m.docs)) m.docs = [];
+  if (m.docs.length) return;
+  var initial = (typeof m.notes === "string" && m.notes.trim()) ? m.notes : "";
+  m.docs.push({ id: "d-" + Date.now().toString(36), title: "Notes", body: initial });
+}
+function _pmDocsSyncToNotes(m){
+  if (!m || !Array.isArray(m.docs)) return;
+  m.notes = m.docs.map(function(d){
+    var t = String(d.title || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    var hdr = t ? '<h3 style="margin:0 0 4px;font-size:13px;font-weight:700;">' + t + '</h3>' : '';
+    return hdr + (d.body || "");
+  }).join('<hr style="border:none;border-top:1px solid #eee;margin:10px 0;" />');
+}
+function _pmDocsRender(m, idPrefix){
+  _pmDocsEnsure(m);
+  var canDelete = m.docs.length > 1;
+  var cardsHtml = m.docs.map(function(doc, idx){
+    var titleSafe = String(doc.title || "").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    return '<div class="pm-doc-card" data-doc-idx="' + idx + '">'
+      + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">'
+      +   '<input type="text" class="pm-doc-title" data-idx="' + idx + '" value="' + titleSafe + '" placeholder="Document title" />'
+      +   (canDelete
+            ? '<button type="button" class="pm-doc-del" data-idx="' + idx + '" onclick="event.stopPropagation();_pmDocRemove(this);" title="Delete this document">×</button>'
+            : '')
+      + '</div>'
+      + _pmRtFieldHtml(idPrefix + "-body-" + idx, doc.body || "", { placeholder: "Body…", minHeight: "60px" })
+      + '</div>';
+  }).join('');
+  return '<div class="pm-docs-wrap" data-id-prefix="' + idPrefix + '">'
+    + cardsHtml
+    + '<button type="button" class="pm-doc-add" onclick="event.stopPropagation();_pmDocAdd(this);">+ Add document</button>'
+    + '</div>';
+}
+function _pmDocsReadFromDom(rootEl, m){
+  if (!rootEl || !m) return;
+  var wrap = rootEl.querySelector ? rootEl.querySelector(".pm-docs-wrap") : null;
+  if (!wrap) return;
+  var cards = wrap.querySelectorAll(".pm-doc-card");
+  if (!cards.length) return;
+  var newDocs = [];
+  cards.forEach(function(card){
+    var titleInp = card.querySelector(".pm-doc-title");
+    var bodyEd   = card.querySelector(".pm-rt-editor");
+    newDocs.push({
+      id: "d-" + Date.now().toString(36) + "-" + Math.random().toString(36).substr(2, 5),
+      title: titleInp ? titleInp.value : "",
+      body:  bodyEd   ? bodyEd.innerHTML : ""
+    });
+  });
+  m.docs = newDocs;
+  _pmDocsSyncToNotes(m);
+}
+// Active-popup tracking so the add/delete buttons (which live in
+// inline-string HTML, no closure access) can find the surface to
+// mutate + re-render. Set/cleared by each popup's open/close.
+function _pmDocsSetActive(ov, m, renderBody){
+  window._pmActiveResearchOv = ov;
+  window._pmActiveResearchMeta = m;
+  window._pmActiveResearchRender = renderBody;
+}
+function _pmDocsClearActive(){
+  window._pmActiveResearchOv = null;
+  window._pmActiveResearchMeta = null;
+  window._pmActiveResearchRender = null;
+}
+function _pmDocAdd(){
+  var ov = window._pmActiveResearchOv;
+  var m  = window._pmActiveResearchMeta;
+  var rb = window._pmActiveResearchRender;
+  if (!ov || !m || typeof rb !== "function") return;
+  _pmDocsReadFromDom(ov, m);
+  m.docs.push({ id: "d-" + Date.now().toString(36), title: "", body: "" });
+  ov.innerHTML = rb();
+  if (typeof _pmRtSetup === "function") _pmRtSetup(ov);
+}
+function _pmDocRemove(btn){
+  var ov = window._pmActiveResearchOv;
+  var m  = window._pmActiveResearchMeta;
+  var rb = window._pmActiveResearchRender;
+  if (!ov || !m || typeof rb !== "function") return;
+  var idx = parseInt(btn.getAttribute("data-idx"), 10);
+  if (!isFinite(idx) || idx < 0) return;
+  if (!confirm("Delete this document?")) return;
+  _pmDocsReadFromDom(ov, m);
+  m.docs.splice(idx, 1);
+  _pmDocsEnsure(m);  // never go below one doc
+  ov.innerHTML = rb();
+  if (typeof _pmRtSetup === "function") _pmRtSetup(ov);
+}
+if (typeof globalThis !== "undefined") {
+  globalThis._pmDocsEnsure = _pmDocsEnsure;
+  globalThis._pmDocsRender = _pmDocsRender;
+  globalThis._pmDocsReadFromDom = _pmDocsReadFromDom;
+  globalThis._pmDocsSyncToNotes = _pmDocsSyncToNotes;
+  globalThis._pmDocsSetActive = _pmDocsSetActive;
+  globalThis._pmDocsClearActive = _pmDocsClearActive;
+  globalThis._pmDocAdd = _pmDocAdd;
+  globalThis._pmDocRemove = _pmDocRemove;
+}
 
 // Round PD.16: toggle the place's presence on the trip. Routes
 // through MaxRoleWriter so the c.role/c.status/placeMeta/_keep
@@ -18837,7 +18951,7 @@ function _pmOpenTripResearchCard(){
       +       '<span style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;">Notes</span>'
       +       '<button type="button" id="pm-trc-dictate" style="font-size:11px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:3px 8px;cursor:pointer;font-family:inherit;">🎤 Dictate</button>'
       +     '</div>'
-      +     _pmRtFieldHtml("pm-trc-notes", m.notes || "", { placeholder: "What you've learned, timing concerns, gear, things to pack, general questions to resolve…", minHeight: "100px" })
+      +     _pmDocsRender(m, "pm-trc")
       +     '<div style="margin-top:6px;display:flex;justify-content:flex-end;">'
       +       '<button type="button" id="pm-trc-make-dests" style="font-size:11px;font-weight:600;color:#1a5fa8;background:#fff;border:1px dashed #c8d8f0;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;" title="Parse your notes as a list of places (sections, bullets, parentheticals, trailing nights) and add them as destinations on the current trip.">🪄 Make destinations from this list</button>'
       +     '</div>'
@@ -18857,11 +18971,12 @@ function _pmOpenTripResearchCard(){
 
   ov.innerHTML = renderBody();
   if (typeof _pmRtSetup === "function") _pmRtSetup(ov);  // PD.31: attach .value polyfill to any rich-text editors
+  _pmDocsSetActive(ov, m, renderBody);  // PD.33: register active context for + Add document button
   document.body.appendChild(ov);
 
   function close(){
-    var ta = ov.querySelector("#pm-trc-notes");
-    if (ta) m.notes = ta.value;
+    _pmDocsReadFromDom(ov, m);  // PD.33: multi-doc read
+    _pmDocsClearActive();
     if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
     // v359.55.17: persist to trip.brief + autoSave so trip-view edits
     // survive reload (the picker re-render hook below is a no-op when
@@ -18890,8 +19005,7 @@ function _pmOpenTripResearchCard(){
       if (!/^https?:\/\//i.test(clean)) clean = "https://" + clean;
       m.links = m.links || [];
       m.links.push({ url: clean, domain: _pmExtractDomain(clean), addedAt: new Date().toISOString() });
-      var ta = ov.querySelector("#pm-trc-notes");
-      if (ta) m.notes = ta.value;
+      _pmDocsReadFromDom(ov, m);
       ov.innerHTML = renderBody();
   if (typeof _pmRtSetup === "function") _pmRtSetup(ov);  // PD.31: attach .value polyfill to any rich-text editors
       ov.querySelector("#pm-trc-close").onclick = close;
@@ -18907,8 +19021,7 @@ function _pmOpenTripResearchCard(){
         var idx = parseInt(btn.getAttribute("data-link-idx"), 10);
         if (isNaN(idx)) return;
         m.links.splice(idx, 1);
-        var ta = ov.querySelector("#pm-trc-notes");
-        if (ta) m.notes = ta.value;
+        _pmDocsReadFromDom(ov, m);
         ov.innerHTML = renderBody();
     if (typeof _pmRtSetup === "function") _pmRtSetup(ov);  // PD.31: attach .value polyfill to any rich-text editors
         ov.querySelector("#pm-trc-close").onclick = close;
@@ -18921,10 +19034,13 @@ function _pmOpenTripResearchCard(){
     });
   }
   function bindDictation(){
-    _pmAttachDictation(ov.querySelector("#pm-trc-dictate"), ov.querySelector("#pm-trc-notes"));
+    // PD.33: target the first doc body editor (multi-doc means there's no
+    // single "the notes" element; dictation appends to the first one).
+    _pmAttachDictation(ov.querySelector("#pm-trc-dictate"), ov.querySelector(".pm-rt-editor"));
   }
   function bindTodos(){
-    _pmBindTodoCheckboxes(ov, "#pm-trc-notes", "pm-trc-todo", m);
+    // PD.33: legacy [ ] checkbox auto-parser, no-op with rich-text bodies.
+    _pmBindTodoCheckboxes(ov, ".pm-rt-editor", "pm-trc-todo", m);
   }
   // v359.60.22: "🪄 Make destinations from this list" — parses the
   // current notes textarea content via parsePlacesList and appends
@@ -18935,8 +19051,13 @@ function _pmOpenTripResearchCard(){
     var btn = ov.querySelector("#pm-trc-make-dests");
     if (!btn) return;
     btn.onclick = function(){
-      var ta = ov.querySelector("#pm-trc-notes");
-      var text = ta ? ta.value : "";
+      // PD.33: combine all docs' bodies as plain text for parsing.
+      _pmDocsReadFromDom(ov, m);
+      var tmp = document.createElement("div");
+      var text = (m.docs || []).map(function(d){
+        tmp.innerHTML = d.body || "";
+        return (d.title ? d.title + "\n" : "") + (tmp.textContent || tmp.innerText || "");
+      }).join("\n\n");
       if (!text || !text.trim()) {
         alert("Paste a list into the notes above first.\n\nFormat: one place per line. Use a section header like \"Overnight hubs\" or \"Sights\" to switch between stays and see-only stops.");
         return;
@@ -18973,11 +19094,11 @@ function _pmOpenTripResearchCard(){
       }
       msg += "\n\nDates cascade from " + _cascadeOrigin + ".";
       if (!confirm(msg)) return;
-      // Persist the current notes BEFORE we close, so the user keeps
-      // their working text (close() also writes m.notes but we want
-      // belt-and-suspenders here in case _addPastedListToCurrentTrip
-      // re-renders the trip view before close runs).
-      if (ta) m.notes = ta.value;
+      // PD.33: persist current docs state BEFORE we close, so working
+      // text is kept (close() also writes but belt-and-suspenders here
+      // in case _addPastedListToCurrentTrip re-renders the trip view
+      // before close runs).
+      _pmDocsReadFromDom(ov, m);
       _pmPersistResearchToTrip();
       _addPastedListToCurrentTrip(parsed);
       // Close the modal so the user sees the populated trip view.
@@ -18987,11 +19108,14 @@ function _pmOpenTripResearchCard(){
   // v359.55.16: refresh on textarea blur so newly-typed "[ ]" lines
   // become checkboxes without requiring close/reopen.
   function bindNotesBlurRefresh(){
-    var ta = ov.querySelector("#pm-trc-notes");
-    if (!ta) return;
-    ta.addEventListener("blur", function(){
-      var prev = m.notes || "";
-      m.notes = ta.value;
+    // PD.33: refresh on any doc body blur. Rich-text editors handle their
+    // own state; this just nudges the todo list rebuild for legacy plain
+    // text in docs.
+    var editors = ov.querySelectorAll(".pm-rt-editor");
+    editors.forEach(function(ed){
+      ed.addEventListener("blur", function(){
+        var prev = m.notes || "";
+        _pmDocsReadFromDom(ov, m);
       if (_pmParseTodos(prev).length !== _pmParseTodos(m.notes).length) {
         ov.innerHTML = renderBody();
     if (typeof _pmRtSetup === "function") _pmRtSetup(ov);  // PD.31: attach .value polyfill to any rich-text editors
@@ -19002,6 +19126,7 @@ function _pmOpenTripResearchCard(){
         bindNotesBlurRefresh();
         bindMakeDests();
       }
+      });
     });
   }
   bindLinkActions();
@@ -19426,7 +19551,7 @@ function _pmOpenResearchCard(placeName){
       +       '<span style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;">Notes</span>'
       +       '<button type="button" id="pm-rc-dictate" style="font-size:11px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:3px 8px;cursor:pointer;font-family:inherit;">🎤 Dictate</button>'
       +     '</div>'
-      +     _pmRtFieldHtml("pm-rc-notes", m.notes || "", { placeholder: "What you've heard, links to come back to, things to verify…", minHeight: "80px" })
+      +     _pmDocsRender(m, "pm-rc")
       +     _pmRenderTodoList(m.notes, "pm-rc")
       +   '</div>'
       // Source links
@@ -19444,13 +19569,14 @@ function _pmOpenResearchCard(placeName){
 
   ov.innerHTML = renderBody();
   if (typeof _pmRtSetup === "function") _pmRtSetup(ov);  // PD.31: attach .value polyfill to any rich-text editors
+  _pmDocsSetActive(ov, m, renderBody);  // PD.33: register active context for + Add document button
   document.body.appendChild(ov);
 
   function close(){
     // Save notes on close. v359.55.17: persist to trip.brief +
     // autoSave + refresh the active surface (picker or trip view).
-    var ta = ov.querySelector("#pm-rc-notes");
-    if (ta) m.notes = ta.value;
+    _pmDocsReadFromDom(ov, m);  // PD.33: multi-doc read
+    _pmDocsClearActive();
     _pmPersistResearchToTrip();
     setTimeout(function(){
       if (typeof _leftMode !== "undefined" && _leftMode === "trip" && typeof drawTripMode === "function") drawTripMode();
@@ -19483,8 +19609,7 @@ function _pmOpenResearchCard(placeName){
       m.links = m.links || [];
       m.links.push({ url: clean, domain: _pmExtractDomain(clean), addedAt: new Date().toISOString() });
       // Save notes too before re-render.
-      var ta = ov.querySelector("#pm-rc-notes");
-      if (ta) m.notes = ta.value;
+      _pmDocsReadFromDom(ov, m);
       ov.innerHTML = renderBody();
   if (typeof _pmRtSetup === "function") _pmRtSetup(ov);  // PD.31: attach .value polyfill to any rich-text editors
       ov.querySelector("#pm-rc-close").onclick = close;
@@ -19496,8 +19621,7 @@ function _pmOpenResearchCard(placeName){
         var idx = parseInt(btn.getAttribute("data-link-idx"), 10);
         if (isNaN(idx)) return;
         m.links.splice(idx, 1);
-        var ta = ov.querySelector("#pm-rc-notes");
-        if (ta) m.notes = ta.value;
+        _pmDocsReadFromDom(ov, m);
         ov.innerHTML = renderBody();
     if (typeof _pmRtSetup === "function") _pmRtSetup(ov);  // PD.31: attach .value polyfill to any rich-text editors
         ov.querySelector("#pm-rc-close").onclick = close;
@@ -19510,19 +19634,20 @@ function _pmOpenResearchCard(placeName){
     });
   }
   function bindDictation(){
-    _pmAttachDictation(ov.querySelector("#pm-rc-dictate"), ov.querySelector("#pm-rc-notes"));
+    // PD.33: target first body editor.
+    _pmAttachDictation(ov.querySelector("#pm-rc-dictate"), ov.querySelector(".pm-rt-editor"));
   }
   function bindTodos(){
-    _pmBindTodoCheckboxes(ov, "#pm-rc-notes", "pm-rc-todo", m);
+    // PD.33: legacy [ ] parser, mostly no-op with rich-text docs.
+    _pmBindTodoCheckboxes(ov, ".pm-rt-editor", "pm-rc-todo", m);
   }
-  // v359.55.16: also refresh the TODO list when the user blurs the
-  // textarea, so newly-typed "[ ]" lines render as checkboxes.
   function bindNotesBlurRefresh(){
-    var ta = ov.querySelector("#pm-rc-notes");
-    if (!ta) return;
-    ta.addEventListener("blur", function(){
-      var prev = m.notes || "";
-      m.notes = ta.value;
+    // PD.33: refresh on any doc body blur.
+    var editors = ov.querySelectorAll(".pm-rt-editor");
+    editors.forEach(function(ed){
+      ed.addEventListener("blur", function(){
+        var prev = m.notes || "";
+        _pmDocsReadFromDom(ov, m);
       // Only re-render if the parsed TODO list could have changed.
       if (_pmParseTodos(prev).length !== _pmParseTodos(m.notes).length) {
         ov.innerHTML = renderBody();
@@ -19534,6 +19659,7 @@ function _pmOpenResearchCard(placeName){
         bindTodos();
         bindNotesBlurRefresh();
       }
+      });
     });
   }
   bindLinkActions();
@@ -42130,7 +42256,7 @@ function _openTripNotesPopover(){
       + '<div style="padding:10px 20px;display:flex;flex-direction:column;gap:14px;">'
       +   '<div>'
       +     '<div style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;margin-bottom:5px;">Notes</div>'
-      +     _pmRtFieldHtml("trip-notes-text", n.text || "", { placeholder: "Hotel confirmation numbers, flight times, packing list, contacts — anything you'll want at trip time.", minHeight: "160px" })
+      +     _pmDocsRender(n, "trip-notes")
       +   '</div>'
       +   '<div>'
       +     '<div style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;margin-bottom:5px;">Links</div>'
@@ -42146,11 +42272,12 @@ function _openTripNotesPopover(){
 
   ov.innerHTML = renderBody();
   if (typeof _pmRtSetup === "function") _pmRtSetup(ov);  // PD.31: attach .value polyfill to any rich-text editors
+  _pmDocsSetActive(ov, n, renderBody);  // PD.33: register active context for + Add document button
   document.body.appendChild(ov);
 
   function close(){
-    var ta = ov.querySelector("#trip-notes-text");
-    if (ta) n.text = ta.value;
+    _pmDocsReadFromDom(ov, n);  // PD.33: multi-doc read
+    _pmDocsClearActive();
     n.updatedAt = Date.now();
     if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
     if (typeof autoSave === "function") autoSave();
@@ -42179,8 +42306,7 @@ function _openTripNotesPopover(){
       n.links = n.links || [];
       var dom = (typeof _pmExtractDomain === "function") ? _pmExtractDomain(clean) : "";
       n.links.push({ url: clean, domain: dom, addedAt: new Date().toISOString() });
-      var ta = ov.querySelector("#trip-notes-text");
-      if (ta) n.text = ta.value;
+      _pmDocsReadFromDom(ov, n);
       ov.innerHTML = renderBody();
   if (typeof _pmRtSetup === "function") _pmRtSetup(ov);  // PD.31: attach .value polyfill to any rich-text editors
       bindAll();
@@ -42190,8 +42316,7 @@ function _openTripNotesPopover(){
         var idx = parseInt(btn.getAttribute("data-link-idx"), 10);
         if (isNaN(idx)) return;
         n.links.splice(idx, 1);
-        var ta = ov.querySelector("#trip-notes-text");
-        if (ta) n.text = ta.value;
+        _pmDocsReadFromDom(ov, n);
         ov.innerHTML = renderBody();
     if (typeof _pmRtSetup === "function") _pmRtSetup(ov);  // PD.31: attach .value polyfill to any rich-text editors
         bindAll();
