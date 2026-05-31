@@ -15707,7 +15707,10 @@ function _renderPlaceActivityItems(){
     searchIcon.style.cssText = "font-size:13px;line-height:1;opacity:0.65;flex-shrink:0;";
     searchWrap.appendChild(searchIcon);
     var searchInp = document.createElement("input");
-    searchInp.type = "search";
+    // Round PD.48: type="text" instead of "search" to avoid Safari's
+    // search-specific Enter behavior (fires a synthetic "search" event
+    // with quirky scroll side-effects).
+    searchInp.type = "text";
     // Stable id so the post-rebuild focus restore can find the new
     // element after _renderPlaceActivityItems clobbers the DOM.
     searchInp.id = "tb-place-act-search";
@@ -15751,14 +15754,18 @@ function _renderPlaceActivityItems(){
     searchClear.type = "button";
     searchClear.style.cssText = "font-size:11px;color:#888;background:#fff;border:1px solid #ddd;border-radius:5px;padding:4px 8px;cursor:pointer;font-family:inherit;" + (searchInp.value ? "" : "visibility:hidden;");
     searchClear.textContent = "× Clear";
-    // Round PD.47: Enter in this input was bubbling up and triggering a
-    // scroll-to-bottom (implicit form submit / scroll-on-key). Kill it.
-    searchInp.addEventListener("keydown", function(e){
+    // Round PD.47/48: Enter was triggering scroll-to-bottom. Intercept
+    // at all three keyboard event phases to fully kill default behavior.
+    function _killEnter(e){
       if (e.key === "Enter") {
         e.preventDefault();
         e.stopPropagation();
+        if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
       }
-    });
+    }
+    searchInp.addEventListener("keydown", _killEnter);
+    searchInp.addEventListener("keypress", _killEnter);
+    searchInp.addEventListener("keyup", _killEnter);
     searchInp.oninput = function(){
       _tb._researchSearch = searchInp.value;
       // Reset to first match whenever the query changes — otherwise the
