@@ -17761,11 +17761,20 @@ function _pmDocRemove(btn){
   if (!m) return;
   var idx = parseInt(btn.getAttribute("data-idx"), 10);
   if (!isFinite(idx) || idx < 0) return;
-  if (!confirm("Delete this document?")) return;
   _pmDocsEnsure(m);
+  // PD.50: snapshot for undo before splice.
+  var deletedDoc = m.docs[idx];
+  var deletedAt = idx;
   m.docs.splice(idx, 1);
   _pmDocsEnsure(m);  // ensure at least one doc exists
   _pmDocsRefreshActive();
+  if (typeof _pmShowUndo === "function" && deletedDoc) {
+    var title = (deletedDoc.title && deletedDoc.title.trim()) || "Untitled";
+    _pmShowUndo("Deleted \"" + title + "\"", function(){
+      m.docs.splice(deletedAt, 0, deletedDoc);
+      _pmDocsRefreshActive();
+    });
+  }
 }
 // PD.35: click a doc title row → opens that doc in the editor dialog.
 function _pmDocOpen(idx){
@@ -17934,9 +17943,19 @@ function _pmLinkRemove(btn){
   if (!m || !Array.isArray(m.links)) return;
   var idx = parseInt(btn.getAttribute("data-idx"), 10);
   if (!isFinite(idx)) return;
-  if (!confirm("Delete this link?")) return;
+  // PD.50: snapshot for undo before splice; drop the confirm dialog
+  // since undo handles regret.
+  var deletedLink = m.links[idx];
+  var deletedAt = idx;
   m.links.splice(idx, 1);
   _pmDocsRefreshActive();
+  if (typeof _pmShowUndo === "function" && deletedLink) {
+    var label = deletedLink.name || deletedLink.domain || "link";
+    _pmShowUndo("Deleted link \"" + label + "\"", function(){
+      m.links.splice(deletedAt, 0, deletedLink);
+      _pmDocsRefreshActive();
+    });
+  }
 }
 function _pmOpenLinkEditor(link, onSave){
   var existing = document.getElementById("pm-link-editor");
@@ -18122,6 +18141,51 @@ function _pmRenderNotesSearchResults(query){
   });
   return wrap;
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// Round PD.50: shared undo toast. Show a transient bottom-center notice
+// with an Undo button. One toast at a time — opening a new one cancels
+// the old one's timer. 5-second auto-dismiss.
+// ──────────────────────────────────────────────────────────────────────
+function _pmShowUndo(message, undoFn){
+  var prev = document.getElementById("pm-undo-toast");
+  if (prev) {
+    if (prev._pmUndoTimer) clearTimeout(prev._pmUndoTimer);
+    prev.remove();
+  }
+  var toast = document.createElement("div");
+  toast.id = "pm-undo-toast";
+  toast.style.cssText = "position:fixed;left:50%;bottom:32px;transform:translateX(-50%);z-index:13000;display:flex;align-items:center;gap:12px;padding:10px 14px 10px 16px;background:#1f1f1f;color:#fff;font-family:inherit;font-size:13px;line-height:1.4;border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,0.32);max-width:90vw;";
+  var msg = document.createElement("span");
+  msg.style.cssText = "flex:1;";
+  msg.textContent = message;
+  var undoBtn = document.createElement("button");
+  undoBtn.type = "button";
+  undoBtn.textContent = "Undo";
+  undoBtn.style.cssText = "font:inherit;font-weight:600;color:#7ec8ff;background:transparent;border:none;cursor:pointer;padding:4px 8px;border-radius:4px;";
+  undoBtn.onmouseenter = function(){ undoBtn.style.background = "rgba(255,255,255,0.08)"; };
+  undoBtn.onmouseleave = function(){ undoBtn.style.background = "transparent"; };
+  var closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.textContent = "×";
+  closeBtn.style.cssText = "font:inherit;font-size:18px;color:#aaa;background:transparent;border:none;cursor:pointer;padding:0 4px;line-height:1;";
+  toast.appendChild(msg);
+  toast.appendChild(undoBtn);
+  toast.appendChild(closeBtn);
+  function dismiss(){
+    if (toast._pmUndoTimer) clearTimeout(toast._pmUndoTimer);
+    if (toast.parentNode) toast.parentNode.removeChild(toast);
+  }
+  undoBtn.onclick = function(){
+    try { if (typeof undoFn === "function") undoFn(); } catch(_){}
+    dismiss();
+  };
+  closeBtn.onclick = dismiss;
+  document.body.appendChild(toast);
+  toast._pmUndoTimer = setTimeout(dismiss, 5000);
+}
+if (typeof globalThis !== "undefined") globalThis._pmShowUndo = _pmShowUndo;
+
 if (typeof globalThis !== "undefined") {
   globalThis._pmSearchNotes              = _pmSearchNotes;
   globalThis._pmRenderNotesSearchResults = _pmRenderNotesSearchResults;
@@ -18285,10 +18349,25 @@ function _pmRemoveFromList(placeName){
   if (!placeName) return;
   if (typeof _pmEnsureCandidate === "function") _pmEnsureCandidate(placeName);
   if (typeof MaxRoleWriter === "undefined" || !MaxRoleWriter || typeof MaxRoleWriter.set !== "function") return;
+  // PD.50: capture prior role for undo before we reject.
+  var priorRole = "maybe";
+  try {
+    if (typeof _pmIsStayCandidate === "function") {
+      priorRole = _pmIsStayCandidate(placeName) ? "stay" : "see";
+    }
+  } catch(_){}
   if (!MaxRoleWriter.set(placeName, "reject")) return;
   if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
   if (typeof _updatePlaceActivitySummary === "function") _updatePlaceActivitySummary();
   if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
+  if (typeof _pmShowUndo === "function") {
+    _pmShowUndo("Removed " + placeName + " from list", function(){
+      MaxRoleWriter.set(placeName, priorRole);
+      if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
+      if (typeof _updatePlaceActivitySummary === "function") _updatePlaceActivitySummary();
+      if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
+    });
+  }
 }
 if (typeof globalThis !== "undefined") globalThis._pmRemoveFromList = _pmRemoveFromList;
 
