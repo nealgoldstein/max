@@ -15833,43 +15833,86 @@ function _renderPlaceActivityItems(){
 
     var tocList = document.createElement("div");
     tocList.style.cssText = "display:flex;flex-wrap:wrap;gap:4px 8px;";
-    sectionOrder.forEach(function(sec){
-      var secItems = bySection[sec] || [];
-      // v359.55.13: TOC count matches the section header's count.
-      // For route sections, the header reports "N routes" (one per
-      // activity item). For everything else, it reports "N destinations"
-      // (unique requiredPlaces). Use the same logic so the TOC and
-      // header agree — earlier the TOC counted activities and looked
-      // wrong against sections where one activity unlocked many places.
-      var nameSaysRouteTOC = /\btrain|\brail|between destinations|scenic route|named.{0,15}train/i.test(sec);
-      var anyTypeRouteTOC = secItems.some(function(it){ return it && it.type === "route"; });
-      var count;
-      if (nameSaysRouteTOC || anyTypeRouteTOC) {
-        count = secItems.length;
-      } else {
-        var seenPlaces = {};
-        secItems.forEach(function(it){
-          (it.requiredPlaces || []).forEach(function(p){
-            if (p && p.place) seenPlaces[p.place.toLowerCase()] = true;
-          });
+    // Round PD.29: in place mode the TOC pills are PLACES
+    // (alphabetical, click → scroll to that place's row). Activity-
+    // section pills don't make sense in place mode because the list
+    // isn't organized by activity. In activity mode, keep the
+    // section-pill behavior (the existing logic).
+    if (_tb && _tb._pickerSortMode === "place") {
+      var _tocPlaceSet = {};
+      var _tocPlaceOrder = [];
+      (items || []).forEach(function(item){
+        if (!item || item.type === "route") return;
+        (item.requiredPlaces || []).forEach(function(p){
+          if (!p || !p.place || p._rejected === true) return;
+          var k = p.place.toLowerCase();
+          if (_tocPlaceSet[k]) return;
+          _tocPlaceSet[k] = true;
+          _tocPlaceOrder.push({ key: k, place: p.place });
         });
-        count = Object.keys(seenPlaces).length;
-      }
-      var link = document.createElement("a");
-      link.href = "#" + _pmSectionSlug(sec);
-      link.style.cssText = "font-size:12px;color:#1a5fa8;text-decoration:none;padding:3px 8px;border-radius:5px;background:#fff;border:1px solid #d8e3f0;cursor:pointer;line-height:1.4;";
-      link.textContent = sec + " (" + count + ")";
-      link.onmouseover = function(){ link.style.background = "#eef4fb"; };
-      link.onmouseout  = function(){ link.style.background = "#fff"; };
-      (function(secName){
-        link.onclick = function(e){
-          e.preventDefault();
-          var anchor = document.getElementById(_pmSectionSlug(secName));
-          if (anchor && anchor.scrollIntoView) anchor.scrollIntoView({behavior:"smooth", block:"start"});
-        };
-      })(sec);
-      tocList.appendChild(link);
-    });
+      });
+      _tocPlaceOrder.sort(function(a, b){ return a.place.localeCompare(b.place); });
+      _tocPlaceOrder.forEach(function(rec){
+        var link = document.createElement("a");
+        var anchorId = "tb-place-place-row-" + rec.key.replace(/[^a-z0-9]/gi, "_");
+        link.href = "#" + anchorId;
+        link.style.cssText = "font-size:12px;color:#1a5fa8;text-decoration:none;padding:3px 8px;border-radius:5px;background:#fff;border:1px solid #d8e3f0;cursor:pointer;line-height:1.4;";
+        link.textContent = rec.place;
+        link.onmouseover = function(){ link.style.background = "#eef4fb"; };
+        link.onmouseout  = function(){ link.style.background = "#fff"; };
+        (function(_id){
+          link.onclick = function(e){
+            e.preventDefault();
+            var anchor = document.getElementById(_id);
+            if (anchor && anchor.scrollIntoView) {
+              anchor.scrollIntoView({behavior:"smooth", block:"start"});
+              anchor.style.transition = "background-color 0.4s";
+              anchor.style.backgroundColor = "#fff7d4";
+              setTimeout(function(){ anchor.style.backgroundColor = ""; }, 1600);
+            }
+          };
+        })(anchorId);
+        tocList.appendChild(link);
+      });
+    } else {
+      sectionOrder.forEach(function(sec){
+        var secItems = bySection[sec] || [];
+        // v359.55.13: TOC count matches the section header's count.
+        // For route sections, the header reports "N routes" (one per
+        // activity item). For everything else, it reports "N destinations"
+        // (unique requiredPlaces). Use the same logic so the TOC and
+        // header agree — earlier the TOC counted activities and looked
+        // wrong against sections where one activity unlocked many places.
+        var nameSaysRouteTOC = /\btrain|\brail|between destinations|scenic route|named.{0,15}train/i.test(sec);
+        var anyTypeRouteTOC = secItems.some(function(it){ return it && it.type === "route"; });
+        var count;
+        if (nameSaysRouteTOC || anyTypeRouteTOC) {
+          count = secItems.length;
+        } else {
+          var seenPlaces = {};
+          secItems.forEach(function(it){
+            (it.requiredPlaces || []).forEach(function(p){
+              if (p && p.place) seenPlaces[p.place.toLowerCase()] = true;
+            });
+          });
+          count = Object.keys(seenPlaces).length;
+        }
+        var link = document.createElement("a");
+        link.href = "#" + _pmSectionSlug(sec);
+        link.style.cssText = "font-size:12px;color:#1a5fa8;text-decoration:none;padding:3px 8px;border-radius:5px;background:#fff;border:1px solid #d8e3f0;cursor:pointer;line-height:1.4;";
+        link.textContent = sec + " (" + count + ")";
+        link.onmouseover = function(){ link.style.background = "#eef4fb"; };
+        link.onmouseout  = function(){ link.style.background = "#fff"; };
+        (function(secName){
+          link.onclick = function(e){
+            e.preventDefault();
+            var anchor = document.getElementById(_pmSectionSlug(secName));
+            if (anchor && anchor.scrollIntoView) anchor.scrollIntoView({behavior:"smooth", block:"start"});
+          };
+        })(sec);
+        tocList.appendChild(link);
+      });
+    }
     toc.appendChild(tocList);
     list.appendChild(toc);
   })();
