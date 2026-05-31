@@ -17209,32 +17209,70 @@ function _pmUnRejectFromList(placeName){
 }
 if (typeof globalThis !== "undefined") globalThis._pmUnRejectFromList = _pmUnRejectFromList;
 
-// Round PD.12 (v360.5): Discovery map exposes the one role decision
-// that's sequence-free — stay vs see. Pin shape carries the
-// recommendation (circle = Max suggests overnight, teardrop = sight
-// only); pin-popup lets the user accept or flip it. Writes to
-// placeMeta.stayOverride so the trip view sees the commitment and
-// vice versa.
-function _pmTogglePlaceStay(placeName){
-  if (!placeName) return;
-  var meta = (typeof _pmPlaceMeta === "function") ? _pmPlaceMeta(placeName, { create: true }) : null;
-  if (!meta) return;
-  // Effective stay = explicit override, else LLM "overnight" hint.
-  var _llmStay = false;
+// Round PD.14 (v360.5): stay/see toggle routed through MaxRoleWriter
+// — the canonical atomic writer that updates c.role + c._roleTouched
+// + c.status + placeMeta.stayOverride + requiredPlace flags (_keep,
+// _isDayTrip, _waysideFromHub, _rejected) in one shot. PD.12's
+// version wrote only placeMeta and let the rest of the surfaces
+// silently disagree — exactly the architectural drift that earlier
+// rounds were chasing.
+//
+// Includes a candidate-ensure step: many Discovery places come from
+// placeActivities without ever being bridged to _tb.candidates, and
+// MaxRoleWriter returns null when no candidate is found. We
+// synthesize one if needed so the toggle always lands.
+function _pmEnsureCandidate(placeName){
+  if (!_tb || !placeName) return null;
+  if (!Array.isArray(_tb.candidates)) _tb.candidates = [];
+  var key = String(placeName).toLowerCase();
+  var cand = _tb.candidates.find(function(c){
+    return c && c.place && c.place.toLowerCase() === key;
+  });
+  if (cand) return cand;
+  // Minimal stub — MaxRoleWriter will populate role/_roleTouched/status.
+  // Mirrors the synthesis shape publishTrip's reconciliation uses.
+  var country = "";
   try {
-    var key = (typeof _pmMetaKey === "function") ? _pmMetaKey(placeName) : String(placeName).toLowerCase();
-    (_tb.placeActivities || []).forEach(function(a){
-      (a.requiredPlaces || []).forEach(function(p){
-        if (p && _pmMetaKey(p.place) === key && p.overnight !== false) _llmStay = true;
+    (_tb.placeActivities || []).some(function(a){
+      return (a.requiredPlaces || []).some(function(p){
+        if (p && p.place && p.place.toLowerCase() === key && p.country) {
+          country = p.country;
+          return true;
+        }
+        return false;
       });
     });
   } catch(_){}
-  var stayActive = (meta.stayOverride === true) || (meta.stayOverride !== false && _llmStay);
-  meta.stayOverride = !stayActive;
-  // Repaint list (badge/state) + map (pin shape).
+  cand = {
+    id: "p-disc-" + Date.now().toString(36) + "-" + Math.floor(Math.random()*10000).toString(36),
+    place: placeName,
+    country: country,
+    role: "see",
+    status: "keep",
+    _required: false,
+    intent: "",
+    tripRole: "unspecified"
+  };
+  _tb.candidates.push(cand);
+  return cand;
+}
+if (typeof globalThis !== "undefined") globalThis._pmEnsureCandidate = _pmEnsureCandidate;
+
+function _pmTogglePlaceStay(placeName){
+  if (!placeName) return;
+  // Compute current stay state via the same cascade the renderers use,
+  // then ask MaxRoleWriter for the opposite role.
+  var currentlyStay = (typeof _pmIsStayCandidate === "function") ? _pmIsStayCandidate(placeName) : false;
+  var nextRole = currentlyStay ? "see" : "stay";
+  _pmEnsureCandidate(placeName);
+  if (typeof MaxRoleWriter === "undefined" || !MaxRoleWriter || typeof MaxRoleWriter.set !== "function") return;
+  var result = MaxRoleWriter.set(placeName, nextRole);
+  if (!result) return;
+  // Repaint list (badge/state) + map (pin shape + popup HTML).
   if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
   if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
-  // Close any open Leaflet popup so the user sees the shape change.
+  // Close any open Leaflet popup so the user sees the shape change
+  // before re-clicking. The newly-bound popup will show the updated text.
   try {
     if (typeof _pmMaps === "object" && _pmMaps) {
       Object.keys(_pmMaps).forEach(function(tid){
@@ -17246,19 +17284,31 @@ function _pmTogglePlaceStay(placeName){
 }
 if (typeof globalThis !== "undefined") globalThis._pmTogglePlaceStay = _pmTogglePlaceStay;
 
-// Round PD.13: shared stay-candidate read used by both the map pin
-// shape and the list-side ⋯ menu label. Mirrors the cascade in
-// _renderPlacePickerMap: user override wins, otherwise the LLM's
-// explicit overnight===true is required.
+// Round PD.14: stay-candidate read now consults c.role first (the
+// canonical source MaxRoleWriter updates), then falls back to
+// placeMeta.stayOverride, then LLM's overnight hint. All three
+// surfaces — map pin shape, popup label, ⋯ menu label — read
+// through this single function, so they can't disagree.
 function _pmIsStayCandidate(placeName){
   if (!placeName) return false;
   try {
     var k = (typeof _pmMetaKey === "function") ? _pmMetaKey(placeName) : String(placeName).toLowerCase();
+    // 1. c.role — committed by MaxRoleWriter or trip-view popover.
+    if (_tb && Array.isArray(_tb.candidates)) {
+      var cand = _tb.candidates.find(function(c){
+        return c && c.place && _pmMetaKey(c.place) === k;
+      });
+      if (cand && cand._roleTouched && (cand.role === "stay" || cand.role === "see")) {
+        return cand.role === "stay";
+      }
+    }
+    // 2. placeMeta.stayOverride — legacy user override.
     var meta = (_tb && _tb.placeMeta) ? _tb.placeMeta[k] : null;
     if (meta) {
       if (meta.stayOverride === true)  return true;
       if (meta.stayOverride === false) return false;
     }
+    // 3. LLM hint — any requiredPlace ref says overnight===true.
     var anyOvernight = false;
     (_tb.placeActivities || []).forEach(function(a){
       (a.requiredPlaces || []).forEach(function(p){
@@ -21182,36 +21232,21 @@ function _renderPlacePickerMap(targetId){
       // v357: stay pins lost their ordinal number — the picker no
       // longer shows visit order. Both stay and day-trip pins now
       // carry place initials.
-      // Round PD.12 (v360.5): Discovery map surfaces the single
-      // sequence-free role decision — stay vs see — as pin shape.
-      // Circle = Max suggests overnight (stay candidate); teardrop
-      // = sight only. Color still keys off kept-state (PD.7): blue
-      // when on the list, gray when unkept. The four combinations:
+      // Round PD.14 (v360.5): stay/see derivation lives in
+      // _pmIsStayCandidate so the map pin, popup label, and ⋯ menu
+      // label all read through one function and can't disagree.
+      // Cascade: c.role (when _roleTouched=true) > placeMeta.stayOverride >
+      // LLM overnight===true. See PD.12 / PD.13 for the visual rules:
       //   • blue circle  — kept + stay-candidate
       //   • blue teardrop — kept + see-only
       //   • gray circle  — unkept + stay-candidate
       //   • gray teardrop — unkept + see-only
-      // No labels (no initials); the list is the place-identification
-      // surface and clicking a pin opens a popup with the recommendation
-      // + a toggle. Day-trip and on-the-way pins are deliberately NOT
-      // surfaced here — they're sequence-dependent and only meaningful
-      // in the trip view.
-      var _stayMeta = null;
-      try {
-        if (typeof _pmMetaKey === "function" && _tb && _tb.placeMeta) {
-          _stayMeta = _tb.placeMeta[_pmMetaKey(info.place)] || null;
-        }
-      } catch(_){}
-      var _isStayCandidate;
-      if (_stayMeta && _stayMeta.stayOverride === true)       _isStayCandidate = true;
-      else if (_stayMeta && _stayMeta.stayOverride === false) _isStayCandidate = false;
-      // Round PD.13: tightened from `overnight !== false` to
-      // `overnight === true`. The earlier permissive read treated
-      // anything the LLM didn't explicitly mark as transit-only as
-      // a stay candidate — which meant everything became a circle
-      // because info.overnight defaulted to undefined. Require
-      // explicit true now: undefined and false both render as see.
-      else                                                     _isStayCandidate = (info.overnight === true);
+      // Day-trip and on-the-way pins are deliberately NOT surfaced
+      // here — they're sequence-dependent and only meaningful in the
+      // trip view.
+      var _isStayCandidate = (typeof _pmIsStayCandidate === "function")
+        ? _pmIsStayCandidate(info.place)
+        : false;
       var _styleRole = _isStayCandidate ? "stay" : "see";
       var _pinStyle  = MaxMapPin.style(_styleRole, {});
       if (!info.kept) {
@@ -21250,41 +21285,45 @@ function _renderPlacePickerMap(targetId){
       // Tooltip offset honors the icon's anchor strategy so the
       // tooltip clears the pin top regardless of teardrop vs circle.
       var _tipOff = (_pinStyle.anchor === "tip") ? -_pinStyle.height : -_pinStyle.height/2;
+      // Round PD.14: build the popup HTML unconditionally per render
+      // and bind it on both the existing-marker and new-marker
+      // branches. Earlier the HTML was only generated in the
+      // new-marker branch, so existing markers kept stale popup
+      // text after the user toggled stay/see (icon updated via
+      // setIcon, but the popup HTML was never rebuilt). Symptom:
+      // toggle "Just visit" → "Stay overnight" → click pin again
+      // → popup still says "Max suggests: just visit."
+      var _popupHtml = (function(placeName, isStay){
+        var nameSafe  = String(placeName).replace(/'/g, "\\'").replace(/"/g, "&quot;");
+        var recoLabel = isStay ? "stay overnight" : "just visit";
+        var flipLabel = isStay ? "Just visiting"  : "Stay overnight";
+        return ''
+          + '<div style="font-family:inherit;min-width:200px;">'
+          +   '<div style="font-weight:700;font-size:13.5px;color:#111;margin-bottom:6px;">' + _pmEsc(placeName) + '</div>'
+          +   '<div style="font-size:11.5px;color:#666;margin-bottom:10px;">Max suggests: <strong style="color:#111;">' + recoLabel + '</strong></div>'
+          +   '<button type="button" onclick="_pmTogglePlaceStay(\'' + nameSafe + '\')" '
+          +           'style="display:block;width:100%;font-size:12px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:6px 10px;cursor:pointer;font-family:inherit;margin-bottom:6px;">'
+          +     flipLabel
+          +   '</button>'
+          +   '<a href="#" onclick="event.preventDefault();var r=document.querySelectorAll(\'.tb-dest-major\');for(var i=0;i&lt;r.length;i++){if((r[i].textContent||\'\').toLowerCase().indexOf(\'' + nameSafe.toLowerCase() + '\')!==-1){r[i].scrollIntoView({behavior:\'smooth\',block:\'center\'});r[i].style.transition=\'background-color 0.4s\';r[i].style.backgroundColor=\'#fff7d4\';setTimeout(function(){r[i].style.backgroundColor=\'\';},1600);break;}}return false;" '
+          +      'style="display:block;font-size:11px;color:#888;text-align:center;text-decoration:none;font-family:inherit;">'
+          +     'Find in list →'
+          +   '</a>'
+          + '</div>';
+      })(info.place, _isStayCandidate);
       var existing = _pmMarkersByPlace[key];
       if (existing) {
         existing.setIcon(icon);
         existing.setLatLng(latLng);
-        // Rebind tooltip on existing markers so role changes update.
         existing.unbindTooltip();
         existing.bindTooltip(ttBits, {direction:"top", offset:[0, _tipOff]});
+        // PD.14 fix: rebind popup so it reflects the new stay/see state.
+        existing.unbindPopup();
+        existing.bindPopup(_popupHtml, { maxWidth: 260, autoPan: true, closeButton: true });
       } else {
         var m = L.marker(latLng, {icon: icon}).addTo(_pmMap);
         m.bindTooltip(ttBits, {direction:"top", offset:[0, _tipOff]});
-        // Round PD.12: pin click opens a Leaflet popup with Max's
-        // stay/see recommendation + a single toggle. Clicking the
-        // toggle flips placeMeta.stayOverride, re-renders the list
-        // and map (pin shape changes), and closes the popup.
-        // Includes a "scroll to row" link so the user can still get
-        // to the list entry from the map.
-        (function(placeName, isStay){
-          var nameSafe  = String(placeName).replace(/'/g, "\\'").replace(/"/g, "&quot;");
-          var recoLabel = isStay ? "stay overnight" : "just visit";
-          var flipLabel = isStay ? "Just visiting"  : "Stay overnight";
-          var popupHtml = ''
-            + '<div style="font-family:inherit;min-width:200px;">'
-            +   '<div style="font-weight:700;font-size:13.5px;color:#111;margin-bottom:6px;">' + _pmEsc(placeName) + '</div>'
-            +   '<div style="font-size:11.5px;color:#666;margin-bottom:10px;">Max suggests: <strong style="color:#111;">' + recoLabel + '</strong></div>'
-            +   '<button type="button" onclick="_pmTogglePlaceStay(\'' + nameSafe + '\')" '
-            +           'style="display:block;width:100%;font-size:12px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:6px 10px;cursor:pointer;font-family:inherit;margin-bottom:6px;">'
-            +     flipLabel
-            +   '</button>'
-            +   '<a href="#" onclick="event.preventDefault();var r=document.querySelectorAll(\'.tb-dest-major\');for(var i=0;i&lt;r.length;i++){if((r[i].textContent||\'\').toLowerCase().indexOf(\'' + nameSafe.toLowerCase() + '\')!==-1){r[i].scrollIntoView({behavior:\'smooth\',block:\'center\'});r[i].style.transition=\'background-color 0.4s\';r[i].style.backgroundColor=\'#fff7d4\';setTimeout(function(){r[i].style.backgroundColor=\'\';},1600);break;}}return false;" '
-            +      'style="display:block;font-size:11px;color:#888;text-align:center;text-decoration:none;font-family:inherit;">'
-            +     'Find in list →'
-            +   '</a>'
-            + '</div>';
-          m.bindPopup(popupHtml, { maxWidth: 260, autoPan: true, closeButton: true });
-        })(info.place, _isStayCandidate);
+        m.bindPopup(_popupHtml, { maxWidth: 260, autoPan: true, closeButton: true });
         _pmMarkersByPlace[key] = m;
       }
     }
