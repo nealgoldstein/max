@@ -15751,6 +15751,14 @@ function _renderPlaceActivityItems(){
     searchClear.type = "button";
     searchClear.style.cssText = "font-size:11px;color:#888;background:#fff;border:1px solid #ddd;border-radius:5px;padding:4px 8px;cursor:pointer;font-family:inherit;" + (searchInp.value ? "" : "visibility:hidden;");
     searchClear.textContent = "× Clear";
+    // Round PD.47: Enter in this input was bubbling up and triggering a
+    // scroll-to-bottom (implicit form submit / scroll-on-key). Kill it.
+    searchInp.addEventListener("keydown", function(e){
+      if (e.key === "Enter") {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    });
     searchInp.oninput = function(){
       _tb._researchSearch = searchInp.value;
       // Reset to first match whenever the query changes — otherwise the
