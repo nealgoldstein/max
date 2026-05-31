@@ -17474,6 +17474,8 @@ function _pmRtSetup(root){
       if (id && typeof _pmDocLinkNavigate === "function") _pmDocLinkNavigate(id);
     });
     if (typeof _pmRtBindAttachmentHandlers === "function") _pmRtBindAttachmentHandlers(ed);
+    // PD.59: hydrate IDB-stored attachments now that the editor DOM exists.
+    if (typeof _pmAttHydrate === "function") _pmAttHydrate(ed);
     ed.addEventListener("keydown", function(e){
       if (e.key !== "Enter" && e.key !== "Backspace") return;
       var sel = window.getSelection && window.getSelection();
@@ -17582,26 +17584,139 @@ if (typeof globalThis !== "undefined") {
 // download link with the filename + file size.
 // Entry points: 📎 toolbar button, clipboard paste, drag-drop.
 // ──────────────────────────────────────────────────────────────────────
+
+// ──────────────────────────────────────────────────────────────────────
+// Round PD.59: attachments live in IndexedDB, not inline base64.
+// Doc body holds <img data-att-id="..."> / <a class="pm-rt-attach"
+// data-att-id="..."> placeholders. On render, _pmAttHydrate fetches
+// each blob from IDB and assigns a blob URL to the element.
+//
+// Why: base64 inline attachments (PD.49) inflated doc body HTML by
+// ~33%, ate localStorage budget, made share-URLs unsharable, and
+// blocked any "lots of photos per place" use case. Blobs in IDB scale
+// to 50MB+ per origin and don't touch the localStorage bucket.
+//
+// Reuses the existing _maxIdb* helpers (kv store) with key prefix
+// "att:". Each attachment record is { blob, name, type, size, addedAt }.
+// ──────────────────────────────────────────────────────────────────────
+function _pmAttPut(file){
+  return _maxIdbSet("att:" + _pmAttNewId(), {
+    blob: file,
+    name: file.name || "attachment",
+    type: file.type || "application/octet-stream",
+    size: file.size || 0,
+    addedAt: new Date().toISOString()
+  }).then(function(){ return arguments; });
+}
+// Variant that returns the id (the wrapper above can't easily return the id
+// since the promise chain swallows the closure). Use this form directly.
+function _pmAttStore(file){
+  var id = _pmAttNewId();
+  return _maxIdbSet("att:" + id, {
+    blob: file,
+    name: file.name || "attachment",
+    type: file.type || "application/octet-stream",
+    size: file.size || 0,
+    addedAt: new Date().toISOString()
+  }).then(function(){ return id; });
+}
+function _pmAttNewId(){
+  return "a" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+}
+function _pmAttGet(id){
+  return _maxIdbGet("att:" + id);
+}
+// In-memory cache of blob URLs so re-renders don't churn createObjectURL
+// (which leaks if you never revoke; and is async to set up). Map of
+// id → objectURL. Cleared on page unload by the browser.
+var _pmAttUrlCache = {};
+function _pmAttUrl(id){
+  if (_pmAttUrlCache[id]) return Promise.resolve(_pmAttUrlCache[id]);
+  return _pmAttGet(id).then(function(rec){
+    if (!rec || !rec.blob) return null;
+    var url = URL.createObjectURL(rec.blob);
+    _pmAttUrlCache[id] = url;
+    return url;
+  });
+}
+// Hydrate any placeholder elements in `root` whose data-att-id hasn't
+// been resolved to a real src/href yet. Idempotent — safe to call on
+// every re-render.
+function _pmAttHydrate(root){
+  if (!root || !root.querySelectorAll) return;
+  root.querySelectorAll("[data-att-id]").forEach(function(el){
+    var id = el.getAttribute("data-att-id");
+    if (!id) return;
+    // Always re-fetch via _pmAttUrl — its in-memory cache returns the
+    // same blob URL for repeat calls in the same session, and on a
+    // fresh session creates a new one. Don't trust the element's
+    // existing blob: URL — it's dead across reloads.
+    if (el._pmAttHydrating) return;
+    el._pmAttHydrating = true;
+    _pmAttUrl(id).then(function(url){
+      el._pmAttHydrating = false;
+      if (url) {
+        if (el.tagName === "IMG") el.src = url;
+        else if (el.tagName === "A") el.href = url;
+      } else {
+        if (el.tagName === "IMG") el.alt = "[attachment missing]";
+        else if (el.tagName === "A") el.textContent = "[attachment missing]";
+      }
+    });
+  });
+}
+// PD.59: when serializing editor content for save, drop the live blob:
+// URL — only data-att-id matters for round-tripping. Returns a clean
+// HTML string suitable for storing in doc.body.
+function _pmAttSerializeBody(html){
+  if (!html) return html;
+  // Strip src/href that is a blob: URL ON elements that also carry
+  // data-att-id. Other blob: URLs (paste of an existing image without
+  // attaching, edge case) are left alone.
+  return html
+    .replace(/(<img\b[^>]*\bdata-att-id="[^"]*"[^>]*)\bsrc="blob:[^"]*"/gi, "$1")
+    .replace(/(<a\b[^>]*\bdata-att-id="[^"]*"[^>]*)\bhref="blob:[^"]*"/gi, "$1");
+}
+if (typeof globalThis !== "undefined") globalThis._pmAttSerializeBody = _pmAttSerializeBody;
+if (typeof globalThis !== "undefined") {
+  globalThis._pmAttStore = _pmAttStore;
+  globalThis._pmAttGet   = _pmAttGet;
+  globalThis._pmAttUrl   = _pmAttUrl;
+  globalThis._pmAttHydrate = _pmAttHydrate;
+}
+
 function _pmRtFormatBytes(n){
   if (n < 1024) return n + " B";
   if (n < 1024*1024) return (n / 1024).toFixed(0) + " KB";
   return (n / (1024*1024)).toFixed(1) + " MB";
 }
-function _pmRtBuildAttachmentNode(file, dataUrl){
+function _pmRtBuildAttachmentNode(file, attId){
+  // PD.59: build a placeholder element that references the attachment
+  // by IDB id. The blob URL is hydrated asynchronously via
+  // _pmAttHydrate so the body HTML stays small and round-trippable.
   var isImage = file.type && file.type.indexOf("image/") === 0;
   if (isImage) {
     var img = document.createElement("img");
-    img.src = dataUrl;
+    img.setAttribute("data-att-id", attId);
     img.alt = file.name || "image";
     img.style.cssText = "max-width:100%;height:auto;border-radius:4px;margin:6px 0;display:block;";
+    // Hydrate immediately so the user sees the image they just attached.
+    if (typeof _pmAttUrl === "function") {
+      _pmAttUrl(attId).then(function(url){ if (url) img.src = url; });
+    }
     return img;
   }
-  // Non-image: render as a download link.
+  // Non-image: render as a download link, also referencing the att id.
   var link = document.createElement("a");
-  link.href = dataUrl;
+  link.setAttribute("data-att-id", attId);
+  link.className = "pm-rt-attach";
   link.download = file.name || "attachment";
   link.textContent = "📎 " + (file.name || "attachment") + " (" + _pmRtFormatBytes(file.size || 0) + ")";
   link.style.cssText = "display:inline-block;margin:4px 0;padding:5px 10px;background:#f5f1e8;border:1px solid #e6dfca;border-radius:4px;color:#1a5fa8;text-decoration:none;font-size:12px;";
+  link.href = "#";
+  if (typeof _pmAttUrl === "function") {
+    _pmAttUrl(attId).then(function(url){ if (url) link.href = url; });
+  }
   return link;
 }
 function _pmRtInsertNode(ed, node){
@@ -17629,18 +17744,23 @@ function _pmRtInsertNode(ed, node){
 }
 function _pmRtReadFileToNode(ed, file){
   if (!ed || !file) return;
-  // Size cap so we don't accidentally embed a 50MB file as base64.
-  var MAX = 5 * 1024 * 1024;  // 5MB
+  // PD.59: IDB blob storage instead of base64. Cap raised to 25MB —
+  // base64's 33% inflation no longer eats localStorage budget.
+  var MAX = 25 * 1024 * 1024;
   if (file.size && file.size > MAX) {
-    alert("File too large (" + _pmRtFormatBytes(file.size) + "). Max 5 MB for inline attachments.");
+    alert("File too large (" + _pmRtFormatBytes(file.size) + "). Max 25 MB per attachment.");
     return;
   }
-  var reader = new FileReader();
-  reader.onload = function(){
-    var node = _pmRtBuildAttachmentNode(file, reader.result);
+  if (typeof _pmAttStore !== "function") {
+    alert("Attachment store unavailable in this browser.");
+    return;
+  }
+  _pmAttStore(file).then(function(attId){
+    var node = _pmRtBuildAttachmentNode(file, attId);
     _pmRtInsertNode(ed, node);
-  };
-  reader.readAsDataURL(file);
+  }).catch(function(e){
+    alert("Couldn't save attachment: " + (e && e.message || e));
+  });
 }
 function _pmRtAttachFile(btn){
   var wrap = btn.closest ? btn.closest(".pm-rt-wrap") : null;
@@ -18197,6 +18317,9 @@ function _pmOpenDocEditor(doc, onSave){
     var bodyEd   = ov.querySelector(".pm-rt-editor");
     var newTitle = titleInp ? titleInp.value : (doc.title || "");
     var newBody  = bodyEd   ? bodyEd.innerHTML : (doc.body || "");
+    // PD.59: strip live blob: URLs from attachment placeholders so the
+    // saved HTML is portable across sessions.
+    if (typeof _pmAttSerializeBody === "function") newBody = _pmAttSerializeBody(newBody);
     // PD.53: bump updatedAt only when content actually changed; preserve createdAt.
     var changed = (newTitle !== (doc.title || "")) || (newBody !== (doc.body || ""));
     var createdAt = doc.createdAt || new Date().toISOString();
