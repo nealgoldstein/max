@@ -15639,7 +15639,7 @@ function _renderPlaceActivityItems(){
     searchInp.id = "tb-place-act-search";
     searchInp.placeholder = "Search places by name…";
     searchInp.value = (_tb && _tb._researchSearch) || "";
-    searchInp.style.cssText = "flex:1;font:inherit;font-size:12.5px;padding:5px 9px;border:1px solid #d8dde5;border-radius:5px;background:#fff;color:#111;box-sizing:border-box;outline:none;";
+    searchInp.style.cssText = "flex:1;min-width:240px;font:inherit;font-size:12.5px;padding:5px 9px;border:1px solid #d8dde5;border-radius:5px;background:#fff;color:#111;box-sizing:border-box;outline:none;";
     // Round NC.X: match counter "2 / 5" + ↑/↓ arrows. All three are
     // hidden when there's only one (or zero) matches — the arrows
     // exist to help navigate AMONG matches.
@@ -16946,26 +16946,51 @@ function _pmOpenWikiLightbox(thumbEl){
 // on window so this call site keeps working unchanged. Reads
 // _CATEGORIES via window from there too.
 
-// Toggle destination kept/dropped across ALL activity items that include it.
-// A destination is global state — it's either on the trip or not — so the
-// toggle propagates everywhere, not just to one section.
+// Round PD.16: helper used by all place-level keep toggles to pick
+// the role for a check action. If the place's candidate already has
+// an active role, restore it (user just unchecked then re-checked).
+// Otherwise fall back to the LLM's overnight hint: explicit true →
+// "stay", everything else → "see".
+function _pmRoleForCheck(placeName){
+  if (!placeName || typeof _tb === "undefined" || !_tb) return "see";
+  var key = (typeof _pmMetaKey === "function") ? _pmMetaKey(placeName) : String(placeName).toLowerCase();
+  if (Array.isArray(_tb.candidates)) {
+    var cand = _tb.candidates.find(function(c){
+      return c && c.place && _pmMetaKey(c.place) === key;
+    });
+    if (cand && (cand.role === "stay" || cand.role === "see" || cand.role === "daytrip" || cand.role === "onway")) {
+      return cand.role;
+    }
+  }
+  var anyOvernight = false;
+  (_tb.placeActivities || []).forEach(function(a){
+    (a.requiredPlaces || []).forEach(function(p){
+      if (p && _pmMetaKey(p.place) === key && p.overnight === true) anyOvernight = true;
+    });
+  });
+  return anyOvernight ? "stay" : "see";
+}
+if (typeof globalThis !== "undefined") globalThis._pmRoleForCheck = _pmRoleForCheck;
+
+// Round PD.16: toggle the place's presence on the trip. Routes
+// through MaxRoleWriter so the c.role/c.status/placeMeta/_keep
+// surfaces stay in sync — the legitimate-exception #2 from PD.15
+// was a rationalization; this is the real fix. Uncheck → "maybe"
+// (clears _keep without touching c.role); check → restore prior role
+// or derive from LLM hint via _pmRoleForCheck.
 function toggleDestKeep(placeName){
-  var items = _tb.placeActivities || [];
+  if (!placeName) return;
+  if (typeof _pmEnsureCandidate === "function") _pmEnsureCandidate(placeName);
+  if (typeof MaxRoleWriter === "undefined" || !MaxRoleWriter || typeof MaxRoleWriter.set !== "function") return;
   var key = (placeName || "").toLowerCase();
-  // Are any references currently kept? If so, drop all; else keep all.
   var anyKept = false;
-  items.forEach(function(item){
-    (item.requiredPlaces||[]).forEach(function(p){
+  (_tb.placeActivities || []).forEach(function(item){
+    (item.requiredPlaces || []).forEach(function(p){
       if (p && p.place && p.place.toLowerCase() === key && p._keep) anyKept = true;
     });
   });
-  var newKeep = !anyKept;
-  items.forEach(function(item){
-    (item.requiredPlaces||[]).forEach(function(p){
-      if (p && p.place && p.place.toLowerCase() === key) p._keep = newKeep;
-    });
-    item.checked = (item.requiredPlaces||[]).some(function(p){ return p && p._keep; });
-  });
+  var nextRole = anyKept ? "maybe" : _pmRoleForCheck(placeName);
+  if (!MaxRoleWriter.set(placeName, nextRole)) return;
   _renderPlaceActivityItems();
   _updatePlaceActivitySummary();
   if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
@@ -16981,57 +17006,13 @@ function toggleDestKeep(placeName){
 // This variant scopes the toggle to items in the named section only,
 // matching the user's mental model: this checkbox belongs to this row,
 // it should affect this row's place references, not every other row.
+// Round PD.16: section-scoping retired. A place is on the trip or
+// it isn't; whether it shows in section A or B is organization, not
+// state. Delegate to toggleDestKeep so the cross-surface write
+// goes through MaxRoleWriter. The section parameter is preserved
+// for caller back-compat but ignored.
 function toggleDestKeepInSection(placeName, sectionName){
-  var items = _tb.placeActivities || [];
-  var key = (placeName || "").toLowerCase();
-  var sec = sectionName || "";
-  // Round NC.X: in by-Place mode the renderer uses a virtual section
-  // "All places" that consolidates every item. The actual item.section
-  // is still each item's original — clicking the checkbox in Place
-  // mode would otherwise filter to items with section==="All places"
-  // (none exist), so the click silently no-oped. Detect by-Place mode
-  // and skip the section filter; toggle ALL refs to this place.
-  var skipSectionFilter = (_tb && _tb._pickerSortMode === "place");
-  // Collect refs in items that belong to this section AND name this place.
-  var refs = [];
-  items.forEach(function(item){
-    if (!skipSectionFilter && (item.section || "") !== sec) return;
-    (item.requiredPlaces||[]).forEach(function(p){
-      if (p && p.place && p.place.toLowerCase() === key) refs.push({item:item, place:p});
-    });
-  });
-  // Round NC.X: defensive fallback. If the section filter excluded
-  // every ref (e.g. item.section was renamed by the user via the
-  // Move-to-section dropdown, or there's a stale section-name in
-  // the click handler), broaden the search to ALL items for this
-  // place. Better to toggle than to silently no-op. Symptom this
-  // catches: Stykkishólmur added via "+ Add Place" → row showed
-  // unchecked → click did nothing → user couldn't check it.
-  if (!refs.length) {
-    console.log("[Max toggleDestKeepInSection] section-filter found 0 refs for " + JSON.stringify(placeName) + " in section " + JSON.stringify(sec) + " — broadening to all items");
-    items.forEach(function(item){
-      (item.requiredPlaces||[]).forEach(function(p){
-        if (p && p.place && p.place.toLowerCase() === key) refs.push({item:item, place:p});
-      });
-    });
-  }
-  if (!refs.length) {
-    console.log("[Max toggleDestKeepInSection] still 0 refs even with broadened search — place not in placeActivities");
-    return;
-  }
-  var anyKept = refs.some(function(r){ return r.place._keep; });
-  var newKeep = !anyKept;
-  refs.forEach(function(r){ r.place._keep = newKeep; });
-  // Recompute item.checked for each item we touched.
-  var touchedItems = {};
-  refs.forEach(function(r){ touchedItems[r.item.id] = r.item; });
-  Object.keys(touchedItems).forEach(function(iid){
-    var it = touchedItems[iid];
-    it.checked = (it.requiredPlaces||[]).some(function(p){ return p && p._keep; });
-  });
-  _renderPlaceActivityItems();
-  _updatePlaceActivitySummary();
-  if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
+  return toggleDestKeep(placeName);
 }
 if (typeof globalThis !== "undefined") globalThis.toggleDestKeepInSection = toggleDestKeepInSection;
 
@@ -17116,93 +17097,39 @@ function togglePlaceInActivity(itemId, placeIdx){
 // requiredPlace ref for this place across every activity. The by-Place
 // view shows a single row per place; the checkbox should affect every
 // ref consistently. New _keep state = !any currently kept.
+// Round PD.16: by-Place mode toggle now delegates to the same
+// place-level writer toggleDestKeep uses. The old direct-write
+// version was the same parallel path as toggleDestKeep — a place
+// is one thing whether you got to it via Activity or Place mode.
 function togglePlaceByPlaceMode(placeName){
-  if (!_tb || !Array.isArray(_tb.placeActivities) || !placeName) return;
-  var key = String(placeName).toLowerCase();
-  var anyKept = false;
-  _tb.placeActivities.forEach(function(item){
-    (item.requiredPlaces || []).forEach(function(p){
-      if (!p || !p.place) return;
-      if (p.place.toLowerCase() !== key) return;
-      if (p._keep === true) anyKept = true;
-    });
-  });
-  var newKeep = !anyKept;
-  _tb.placeActivities.forEach(function(item){
-    var anyKeptInItem = false;
-    (item.requiredPlaces || []).forEach(function(p){
-      if (!p || !p.place) return;
-      if (p.place.toLowerCase() === key) p._keep = newKeep;
-      if (p._keep === true) anyKeptInItem = true;
-    });
-    item.checked = anyKeptInItem;
-  });
-  _renderPlaceActivityItems();
-  _updatePlaceActivitySummary();
-  if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
-  if (typeof _pmFocusPlace === "function") _pmFocusPlace(placeName);
+  toggleDestKeep(placeName);
+  if (typeof _pmFocusPlace === "function" && placeName) _pmFocusPlace(placeName);
 }
 if (typeof globalThis !== "undefined") globalThis.togglePlaceByPlaceMode = togglePlaceByPlaceMode;
 
-// Round PD.10 (v360.5): "Remove from list" — soft-reject. Marks
-// _rejected=true on every requiredPlace ref for the place, and
-// status="reject" on the candidate. The place hides from the list
-// + map render but survives in the data so the bottom-of-list
-// "Rejected" section can show it with an un-reject affordance.
-//
-// PD.1 originally hard-spliced these refs because the user picked
-// "Hide from list, allow re-suggest" — no undo, LLM regenerate
-// brings it back. PD.10 reverses that choice in favor of an
-// in-place undo via the Rejected section.
+// Round PD.15: _pmRemoveFromList + _pmUnRejectFromList route
+// through MaxRoleWriter.set (the canonical writer per the contract
+// at MaxRoleWriter's definition). Earlier PD.10 versions wrote
+// _rejected and p._keep directly — a parallel path that bypassed
+// the writer, exactly the architectural drift the writer was
+// supposed to prevent. The "reject" role sets c.status="reject",
+// _keep=false, _rejected=true, m.stayOverride=null in one atomic
+// pass; "maybe" undoes it (status=null, _keep=true, _rejected=false).
 function _pmRemoveFromList(placeName){
-  if (!_tb || !placeName) return;
-  var key = String(placeName).toLowerCase();
-  var items = _tb.placeActivities || [];
-  items.forEach(function(item){
-    if (!item || !Array.isArray(item.requiredPlaces)) return;
-    item.requiredPlaces.forEach(function(p){
-      if (!p || !p.place) return;
-      if (p.place.toLowerCase() !== key) return;
-      p._rejected = true;
-      p._keep = false;
-    });
-    item.checked = (item.requiredPlaces || []).some(function(p){ return p && p._keep; });
-  });
-  if (Array.isArray(_tb.candidates)) {
-    _tb.candidates.forEach(function(c){
-      if (c && c.place && c.place.toLowerCase() === key) {
-        c.status = "reject";
-      }
-    });
-  }
+  if (!placeName) return;
+  if (typeof _pmEnsureCandidate === "function") _pmEnsureCandidate(placeName);
+  if (typeof MaxRoleWriter === "undefined" || !MaxRoleWriter || typeof MaxRoleWriter.set !== "function") return;
+  if (!MaxRoleWriter.set(placeName, "reject")) return;
   if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
   if (typeof _updatePlaceActivitySummary === "function") _updatePlaceActivitySummary();
   if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
 }
 if (typeof globalThis !== "undefined") globalThis._pmRemoveFromList = _pmRemoveFromList;
 
-// Round PD.10: un-reject. Inverse of _pmRemoveFromList. Clears
-// _rejected on every requiredPlace ref and resets candidate
-// status so the place reappears in normal sections.
 function _pmUnRejectFromList(placeName){
-  if (!_tb || !placeName) return;
-  var key = String(placeName).toLowerCase();
-  var items = _tb.placeActivities || [];
-  items.forEach(function(item){
-    if (!item || !Array.isArray(item.requiredPlaces)) return;
-    item.requiredPlaces.forEach(function(p){
-      if (!p || !p.place) return;
-      if (p.place.toLowerCase() !== key) return;
-      p._rejected = false;
-    });
-  });
-  if (Array.isArray(_tb.candidates)) {
-    _tb.candidates.forEach(function(c){
-      if (c && c.place && c.place.toLowerCase() === key && c.status === "reject") {
-        c.status = null;
-      }
-    });
-  }
+  if (!placeName) return;
+  if (typeof MaxRoleWriter === "undefined" || !MaxRoleWriter || typeof MaxRoleWriter.set !== "function") return;
+  if (!MaxRoleWriter.set(placeName, "maybe")) return;
   if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
   if (typeof _updatePlaceActivitySummary === "function") _updatePlaceActivitySummary();
   if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
@@ -17737,6 +17664,68 @@ if (typeof globalThis !== "undefined") globalThis._geographyOf = _geographyOf;
 //   • Stay is allowed regardless of overnightCapable — explicit user
 //     pick wins (the engine's setRole still guards; this is the UI
 //     write path).
+// ════════════════════════════════════════════════════════════════════
+// MaxRoleWriter — the SINGLE source of truth for role-affecting writes.
+// ════════════════════════════════════════════════════════════════════
+//
+// CONTRACT (architectural invariant — Round PD.15):
+//
+//   Any code that needs to change a place's role / kept / rejected /
+//   stay state MUST go through MaxRoleWriter.set(placeOrId, role).
+//   Direct writes to any of the following fields are FORBIDDEN
+//   outside this writer and the explicitly-justified exceptions
+//   listed below:
+//
+//     cand.role           cand._roleTouched     cand.status
+//     cand.dayTripHub     cand.waysideFromHub   cand.intent
+//     placeMeta.stayOverride
+//     requiredPlace._keep        requiredPlace._isDayTrip
+//     requiredPlace._dayTripHub  requiredPlace._waysideFromHub
+//     requiredPlace._rejected
+//
+//   Why: these fields appear on three surfaces (candidate, placeMeta,
+//   requiredPlace flags) that the cascade (_pmDeriveRole +
+//   _pmIsStayCandidate) reads independently. If any writer touches
+//   only one of the three, the surfaces silently disagree —
+//   the Mývatn / Selfoss / Diamond Beach class of bug that has
+//   cost multiple sessions to chase. MaxRoleWriter.set updates all
+//   three atomically AND fires an event. No exceptions for "just
+//   this one field" — that's exactly how the bug class got rebuilt
+//   in PD.12.
+//
+// LEGITIMATE EXCEPTIONS (do NOT add to this list without justification):
+//
+//   1. Initial seeding in expandMustDos / runCandidateSearch
+//      (index.html ~14306, ~10199). These run BEFORE any candidate
+//      exists; they bootstrap the requiredPlace flags from item.checked
+//      derived from iconic + intent-match. After seeding, all
+//      mutations route through MaxRoleWriter.
+//
+//   2. List-level keep/drop toggles in togglePlaceActivity /
+//      togglePlaceInActivity / togglePlaceByPlaceMode /
+//      toggleDestKeepInSection (index.html ~16940-17140). These
+//      are scoped to a single activity/place's _keep flag without
+//      affecting role, and are the canonical writers for list-side
+//      keep toggles. They DO touch _keep directly; if they ever
+//      need to also change role, route through MaxRoleWriter.
+//
+//   3. publishTrip's stayOverride + predictor bridges
+//      (engine-picker.js ~2009-2071). These run at trip-build time
+//      to translate Discovery state into c.role for downstream
+//      consumers. They have privileged context (the whole trip
+//      shape is settled) and run once per publish; routing
+//      individual writes through MaxRoleWriter would require
+//      candidate-by-candidate calls that wouldn't add value.
+//
+//   4. normalizeCandidateRole (engine-picker.js 172) is a READ
+//      that COERCES a legacy-shaped role into the canonical
+//      stay/see/daytrip/onway set. It's idempotent and called
+//      from render paths; not a true write.
+//
+// Anything else writing these fields is a bug. If you find a new
+// case that "needs" to bypass MaxRoleWriter, the answer is almost
+// always: add a method to MaxRoleWriter, not a parallel path.
+//
 var MaxRoleWriter = {
   set: function(idOrPlace, role, opts){
     opts = opts || {};
@@ -19160,44 +19149,16 @@ function _pmOpenResearchCard(placeName){
   ov.onclick = function(e){ if (e.target === ov) close(); };
   ov.querySelector("#pm-rc-close").onclick = close;
 
-  // Stay/see buttons
-  ov.querySelectorAll(".pm-rc-stay-btn").forEach(function(btn){
-    btn.onclick = function(){
-      var v = btn.getAttribute("data-stay");
-      if (v === "true") m.stayOverride = true;
-      else if (v === "false") m.stayOverride = false;
-      // Re-render the popover body in place; keep textarea content.
-      var ta = ov.querySelector("#pm-rc-notes");
-      if (ta) m.notes = ta.value;
-      ov.innerHTML = renderBody();
-      // Rebind handlers — easiest path; popover is small.
-      ov.querySelector("#pm-rc-close").onclick = close;
-      bindLinkActions();
-      bindStayButtons();
-      bindDictation();
-      bindTodos();
-      bindNotesBlurRefresh();
-    };
-  });
-  function bindStayButtons(){
-    ov.querySelectorAll(".pm-rc-stay-btn").forEach(function(btn){
-      btn.onclick = function(){
-        var v = btn.getAttribute("data-stay");
-        if (v === "default") m.stayOverride = null;
-        else if (v === "true") m.stayOverride = true;
-        else if (v === "false") m.stayOverride = false;
-        var ta = ov.querySelector("#pm-rc-notes");
-        if (ta) m.notes = ta.value;
-        ov.innerHTML = renderBody();
-        ov.querySelector("#pm-rc-close").onclick = close;
-        bindLinkActions();
-        bindStayButtons();
-        bindDictation();
-        bindTodos();
-        bindNotesBlurRefresh();
-      };
-    });
-  }
+  // Round PD.15: removed the .pm-rc-stay-btn handlers + the
+  // bindStayButtons helper. PD.11 stripped the ROLE block from the
+  // popup HTML, so these handlers bound to nothing — dead code.
+  // More importantly, they wrote m.stayOverride directly, which is
+  // exactly the parallel-writer pattern MaxRoleWriter is supposed
+  // to prevent. If a future round wants stay-toggling here, it must
+  // route through MaxRoleWriter.set, not back to direct writes.
+  function bindStayButtons(){ /* no-op — kept so existing call sites
+    inside bindLinkActions etc. don't throw. Remove once the call
+    sites are also pruned. */ }
 
   function bindLinkActions(){
     var addBtn = ov.querySelector("#pm-rc-add-link");
@@ -23011,13 +22972,12 @@ async function addCustomPlaceFromPicker(roleHint){
     };
     _tb.placeActivities = _tb.placeActivities || [];
     _tb.placeActivities.push(newItem);
-    // Seed placeMeta.stayOverride so the Discovery role chip reads
-    // right immediately, without waiting for a build/normalize pass.
-    if (typeof _pmPlaceMeta === "function") {
-      var meta = _pmPlaceMeta(data.place, { create: true });
-      if (meta) meta.stayOverride = (role !== "see");
-    }
-    // NC.9.11: also stamp a candidate via MaxRoleWriter so the
+    // Round PD.15: dropped the redundant `meta.stayOverride = (role !== "see")`
+    // seed that used to live here. The MaxRoleWriter.set call below
+    // (line ~23050) already sets placeMeta.stayOverride atomically as
+    // part of its three-surface write — the seed was a parallel path
+    // that violated the canonical-writer invariant.
+    // NC.9.11: stamp a candidate via MaxRoleWriter so the
     // role+_roleTouched commitment is recorded directly on c, not
     // just on placeMeta. Without this, downstream paths that read
     // c.role (publishTrip's destination-build, the trip-view pin
@@ -26160,6 +26120,15 @@ function reopenPickerForEdit(){
       var _normFn2 = (typeof _normPlaceName === "function")
         ? _normPlaceName
         : function(s){ return String(s||"").toLowerCase(); };
+      // Round PD.15: legitimate exception #2 to the MaxRoleWriter
+      // invariant — this is reopenPickerForEdit HYDRATING placeMeta
+      // from the trip's c.role at picker-reopen time. The trip's
+      // c.role is the source of truth; we're copying it into _tb
+      // for the picker's view layer. Not a user mutation, so it
+      // doesn't trip the writer's _roleTouched / event-emit
+      // bookkeeping. If you find yourself adding a similar bridge
+      // for another field, ask whether the writer should grow a
+      // hydration mode first.
       (trip.candidates || []).forEach(function(c){
         if (!c || !c.place) return;
         var k = _normFn2(c.place);
@@ -38779,6 +38748,16 @@ function _ensureMdcItemsHasPlace(placeName, opts){
   _ensureMdcItemsPlaceMeta(placeName, role);
   return item;
 }
+// Round PD.15: legitimate exception #3 to the MaxRoleWriter
+// invariant — this is a trip-view writer's side-effect that keeps
+// _tb.placeMeta in sync with a trip-view role change (called from
+// convertDestToDayTrip etc.). The trip-view path is the authoritative
+// mutation; this is a downstream mirror so the picker reads right
+// on next open. TODO: a future cleanup round should route trip-view
+// role mutations through a writer of their own that handles BOTH
+// the trip side and the picker-side mirror atomically — much like
+// MaxRoleWriter does for the picker side. Until then, this helper
+// stays as a justified exception.
 function _ensureMdcItemsPlaceMeta(placeName, role){
   if (typeof _pmPlaceMeta !== "function") return;
   var meta = _pmPlaceMeta(placeName, { create: true });
