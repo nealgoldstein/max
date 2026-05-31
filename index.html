@@ -15693,6 +15693,21 @@ function _renderPlaceActivityItems(){
     printBtn.title = "Print this list (map and controls are hidden on the printed page)";
     printBtn.onclick = function(e){ e.stopPropagation(); _pmPrintDiscovery(); };
     hdrActions.appendChild(printBtn);
+    // Round PD.54: Bulk select button. Toggles bulk-mode on/off.
+    var bulkBtn = document.createElement("button");
+    bulkBtn.type = "button";
+    bulkBtn.id = "pm-bulk-toggle";
+    var bulkOn = (typeof _pmBulk !== "undefined" && _pmBulk.isOn && _pmBulk.isOn());
+    bulkBtn.style.cssText = "font-size:11px;font-weight:600;color:" + (bulkOn ? "#fff" : "#1a5fa8") + ";background:" + (bulkOn ? "#1a5fa8" : "#fff") + ";border:1px solid #1a5fa8;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;";
+    bulkBtn.innerHTML = bulkOn ? '✓ Selecting' : '☑ Select';
+    bulkBtn.title = bulkOn ? "Click to exit selection mode" : "Select multiple places, then apply an action to all of them";
+    bulkBtn.onclick = function(e){
+      e.stopPropagation();
+      if (typeof _pmBulk === "undefined") return;
+      if (_pmBulk.isOn()) _pmBulk.exit();
+      else _pmBulk.enter();
+    };
+    hdrActions.appendChild(bulkBtn);
     tocHdr.appendChild(hdrActions);
     toc.appendChild(tocHdr);
 
@@ -16048,6 +16063,7 @@ function _renderPlaceActivityItems(){
         var row = document.createElement("div");
         row.className = "tb-act-table-row tb-dest-major" + (pInfo.kept ? " on" : " off");
         row.id = "tb-place-place-row-" + key.replace(/[^a-z0-9]/gi, "_");
+        row.setAttribute("data-place", d.place);  // PD.54: bulk-select hook
 
         // Build the chips inline.
         var _placeArg = _pmEsc(d.place);
@@ -16322,6 +16338,7 @@ function _renderPlaceActivityItems(){
         + (destKeptInSection ? " on" : " off")
         + (_rowMatchesSearch ? " tb-search-hit" : "");
       row.id = "tb-place-act-sec-" + sec.replace(/[^a-z0-9]/gi,"_") + "-" + key.replace(/[^a-z0-9]/gi,"_");
+      row.setAttribute("data-place", d.place);  // PD.54: bulk-select hook
 
       // Whether to show nights here — only on the FIRST section where this dest appears.
       // Round DN.7: if the build-time clustering would absorb this place
@@ -17006,6 +17023,11 @@ function _renderPlaceActivityItems(){
     requestAnimationFrame(function(){
       try { _scrollPane.scrollTop = _savedScrollTop; } catch(_){}
     });
+  }
+  // Round PD.54: post-render bulk-mode injection.
+  if (typeof _pmBulk !== "undefined" && _pmBulk.isOn && _pmBulk.isOn()) {
+    _pmBulk.injectCheckboxes();
+    _pmBulk.renderBar();
   }
 }
 
@@ -18760,6 +18782,204 @@ function _pmEnsureCandidate(placeName){
   return cand;
 }
 if (typeof globalThis !== "undefined") globalThis._pmEnsureCandidate = _pmEnsureCandidate;
+
+
+// ──────────────────────────────────────────────────────────────────────
+// Round PD.54: bulk actions on places. Toggle "Bulk select" mode from
+// the picker header → each .tb-act-row gets a selection checkbox
+// (post-render injection so the giant row template stays untouched).
+// Click a row in bulk mode toggles selection; normal row clicks are
+// suppressed via a capture-phase guard. Floating bottom bar offers
+// Mark as stay / see / maybe / Remove, each iterating selected
+// places through MaxRoleWriter so the canonical writer contract is
+// upheld. Cancel exits the mode and clears the selection.
+// ──────────────────────────────────────────────────────────────────────
+var _pmBulk = (function(){
+  var state = {
+    mode: false,
+    selected: new Set(),
+    captureBound: false,
+    onCapture: null
+  };
+
+  function enter(){
+    state.mode = true;
+    state.selected = new Set();
+    bindCapture();
+    rerender();
+    renderBar();
+  }
+  function exit(){
+    state.mode = false;
+    state.selected.clear();
+    unbindCapture();
+    rerender();
+    removeBar();
+  }
+  function rerender(){
+    if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
+  }
+  function bindCapture(){
+    if (state.captureBound) return;
+    state.onCapture = function(e){
+      if (!state.mode) return;
+      // Find the picker list container; if click isn't inside, ignore.
+      var list = document.getElementById("placeActivityList") || document.getElementById("tb-place-act-list");
+      if (!list || !list.contains(e.target)) return;
+      // Allow clicks on header buttons (sort/toggle), bulk checkboxes,
+      // and the bulk bar itself.
+      if (e.target.closest && (
+            e.target.closest(".pm-bulk-cb-wrap")
+         || e.target.closest("#pm-bulk-bar")
+         || e.target.closest("#tb-place-act-toc")  // header chrome
+         || e.target.closest(".pm-bulk-skip"))) {
+        return;
+      }
+      // Otherwise hijack any click on a place row.
+      var row = e.target.closest ? e.target.closest(".tb-act-table-row[data-place]") : null;
+      if (!row) return;
+      var place = row.getAttribute("data-place");
+      if (!place) return;
+      e.preventDefault();
+      e.stopPropagation();
+      toggleSelection(place);
+    };
+    document.addEventListener("click", state.onCapture, true);
+    state.captureBound = true;
+  }
+  function unbindCapture(){
+    if (!state.captureBound) return;
+    document.removeEventListener("click", state.onCapture, true);
+    state.captureBound = false;
+    state.onCapture = null;
+  }
+  function toggleSelection(place){
+    if (state.selected.has(place)) state.selected.delete(place);
+    else state.selected.add(place);
+    // Update just the affected row's UI in place — no full rerender,
+    // which would tear focus and lose scroll position.
+    var list = document.getElementById("placeActivityList") || document.getElementById("tb-place-act-list");
+    if (list) {
+      list.querySelectorAll('.tb-act-table-row[data-place]').forEach(function(r){
+        if (r.getAttribute("data-place") === place) {
+          updateRowSelectionVisual(r, state.selected.has(place));
+        }
+      });
+    }
+    renderBar();
+  }
+  function updateRowSelectionVisual(row, on){
+    var cb = row.querySelector(".pm-bulk-cb-mark");
+    if (cb) {
+      cb.style.background = on ? "#1a5fa8" : "#fff";
+      cb.style.borderColor = on ? "#1a5fa8" : "#aaa";
+      cb.textContent = on ? "✓" : "";
+    }
+    row.style.background = on ? "#eef4fb" : "";
+  }
+  function injectCheckboxes(){
+    if (!state.mode) return;
+    var rows = document.querySelectorAll(".tb-act-table-row[data-place]");
+    rows.forEach(function(row){
+      if (row.querySelector(".pm-bulk-cb-wrap")) return;
+      var place = row.getAttribute("data-place");
+      var wrap = document.createElement("div");
+      wrap.className = "pm-bulk-cb-wrap";
+      wrap.style.cssText = "display:flex;align-items:center;flex-shrink:0;padding-right:6px;cursor:pointer;";
+      wrap.onclick = function(e){
+        e.preventDefault(); e.stopPropagation();
+        toggleSelection(place);
+      };
+      var mark = document.createElement("div");
+      mark.className = "pm-bulk-cb-mark";
+      mark.style.cssText = "width:18px;height:18px;border:2px solid #aaa;border-radius:4px;background:#fff;display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:700;line-height:1;transition:all .12s;";
+      wrap.appendChild(mark);
+      // Prepend at the start of the row, before the leftmost content.
+      row.insertBefore(wrap, row.firstChild);
+      updateRowSelectionVisual(row, state.selected.has(place));
+    });
+    // Also dim/hide existing tb-act-check while in bulk mode — they
+    // do per-section keep/drop which conflicts visually with selection.
+    document.querySelectorAll(".tb-act-row .tb-act-check").forEach(function(c){
+      c.style.opacity = "0.3";
+      c.style.pointerEvents = "none";
+    });
+  }
+  function renderBar(){
+    removeBar();
+    if (!state.mode) return;
+    var bar = document.createElement("div");
+    bar.id = "pm-bulk-bar";
+    bar.className = "pm-bulk-skip";
+    bar.style.cssText = "position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:12500;display:flex;align-items:center;gap:6px;padding:9px 14px;background:#1f1f1f;color:#fff;font-family:inherit;font-size:13px;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,0.32);max-width:96vw;flex-wrap:wrap;";
+    var n = state.selected.size;
+    var count = document.createElement("span");
+    count.style.cssText = "font-weight:600;padding-right:8px;border-right:1px solid #444;margin-right:4px;";
+    count.textContent = n + " selected";
+    bar.appendChild(count);
+    function mkBtn(label, fn, color){
+      var b = document.createElement("button");
+      b.type = "button";
+      b.textContent = label;
+      b.style.cssText = "font:inherit;font-size:12px;font-weight:600;color:" + (color||"#7ec8ff") + ";background:transparent;border:1px solid #444;border-radius:5px;padding:5px 10px;cursor:pointer;";
+      b.disabled = (n === 0 && label !== "Cancel");
+      if (b.disabled) b.style.opacity = "0.4";
+      b.onmouseenter = function(){ if (!b.disabled) b.style.background = "rgba(255,255,255,0.08)"; };
+      b.onmouseleave = function(){ b.style.background = "transparent"; };
+      b.onclick = function(e){ e.stopPropagation(); fn(); };
+      return b;
+    }
+    bar.appendChild(mkBtn("Stay", function(){ apply("stay"); }));
+    bar.appendChild(mkBtn("See",  function(){ apply("see"); }));
+    bar.appendChild(mkBtn("Maybe", function(){ apply("maybe"); }));
+    bar.appendChild(mkBtn("Remove", function(){ apply("reject"); }, "#ff9b8b"));
+    bar.appendChild(mkBtn("Cancel", function(){ exit(); }, "#ccc"));
+    document.body.appendChild(bar);
+  }
+  function removeBar(){
+    var b = document.getElementById("pm-bulk-bar");
+    if (b) b.remove();
+  }
+  function apply(role){
+    if (state.selected.size === 0) return;
+    if (typeof MaxRoleWriter === "undefined" || !MaxRoleWriter || typeof MaxRoleWriter.set !== "function") return;
+    var places = Array.from(state.selected);
+    // Snapshot prior roles so the whole batch can be undone in one toast.
+    var priors = places.map(function(p){
+      try {
+        if (typeof _pmIsStayCandidate === "function") {
+          return { p: p, role: _pmIsStayCandidate(p) ? "stay" : "see" };
+        }
+      } catch(_){}
+      return { p: p, role: "maybe" };
+    });
+    places.forEach(function(p){
+      if (typeof _pmEnsureCandidate === "function") _pmEnsureCandidate(p);
+      MaxRoleWriter.set(p, role);
+    });
+    state.selected.clear();
+    rerender();
+    renderBar();
+    if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
+    if (typeof _pmShowUndo === "function") {
+      var verb = (role === "reject") ? "Removed" : "Marked as " + role + " for";
+      _pmShowUndo(verb + " " + places.length + " place" + (places.length === 1 ? "" : "s"), function(){
+        priors.forEach(function(pr){ MaxRoleWriter.set(pr.p, pr.role); });
+        rerender();
+        if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
+      });
+    }
+  }
+  return {
+    enter: enter,
+    exit: exit,
+    isOn: function(){ return state.mode; },
+    injectCheckboxes: injectCheckboxes,
+    renderBar: renderBar,
+    selectedCount: function(){ return state.selected.size; }
+  };
+})();
+if (typeof globalThis !== "undefined") globalThis._pmBulk = _pmBulk;
 
 function _pmTogglePlaceStay(placeName){
   if (!placeName) return;
