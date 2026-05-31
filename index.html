@@ -17735,6 +17735,18 @@ if (typeof globalThis !== "undefined") {
 // doc; displayed in the list (relative "2h ago") and in the editor
 // header (created date + edited relative).
 // ──────────────────────────────────────────────────────────────────────
+
+// PD.56: strip HTML for body snippet preview (no entity decoding needed
+// beyond &nbsp; — these notes are user prose, not adversarial).
+function _pmStripHtml(html){
+  if (!html) return "";
+  var tmp = document.createElement("div");
+  tmp.innerHTML = html;
+  var t = tmp.textContent || tmp.innerText || "";
+  return t.replace(/\s+/g, " ").trim();
+}
+if (typeof globalThis !== "undefined") globalThis._pmStripHtml = _pmStripHtml;
+
 function _pmFmtRelative(iso){
   if (!iso) return "";
   var t = new Date(iso).getTime();
@@ -17800,28 +17812,69 @@ function _pmDocsSyncToNotes(m){
 function _pmDocsRender(m, idPrefix){
   _pmDocsEnsure(m);
   var canDelete = m.docs.length > 1;
+  // PD.57: optional tag filter — if active, hide docs not matching.
+  var tagFilter = m._docTagFilter || null;
   var canReorder = m.docs.length > 1;
   var rowsHtml = m.docs.map(function(doc, idx){
+    if (tagFilter && (!Array.isArray(doc.tags) || doc.tags.indexOf(tagFilter) === -1)) return "";
     var titleSafe = String(doc.title || "Untitled").replace(/</g, "&lt;");
+    // PD.56: 80-char snippet of the body
+    var snippet = (typeof _pmStripHtml === "function") ? _pmStripHtml(doc.body || "") : "";
+    if (snippet.length > 80) snippet = snippet.slice(0, 80) + "…";
+    var snippetSafe = snippet.replace(/</g, "&lt;");
+    // PD.57: tag chips on the row
+    var tagsHtml = "";
+    if (Array.isArray(doc.tags) && doc.tags.length) {
+      tagsHtml = '<span style="display:inline-flex;gap:4px;margin-top:3px;flex-wrap:wrap;">'
+        + doc.tags.map(function(tag){
+            var safe = String(tag).replace(/</g, "&lt;");
+            return '<span style="font-size:10px;font-weight:600;color:#5b3f8f;background:#f1edf8;border:1px solid #ddd5ec;border-radius:8px;padding:1px 7px;">#' + safe + '</span>';
+          }).join('')
+        + '</span>';
+    }
     return '<div class="pm-doc-list-row" data-idx="' + idx + '" '
       +    (canReorder ? 'draggable="true" ' : '')
       +    'onclick="event.stopPropagation();_pmDocOpen(' + idx + ');" '
-      +    'style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid #eee;cursor:pointer;transition:background-color .12s;border-top:2px solid transparent;border-top-color:transparent;" '
+      +    'style="display:flex;align-items:flex-start;gap:8px;padding:9px 12px;border-bottom:1px solid #eee;cursor:pointer;transition:background-color .12s;border-top:2px solid transparent;border-top-color:transparent;" '
       +    'onmouseenter="this.style.background=&quot;#f5f5f5&quot;" onmouseleave="this.style.background=&quot;transparent&quot;">'
       +   (canReorder
-            ? '<span class="pm-doc-drag-handle" title="Drag to reorder" style="cursor:grab;color:#bbb;font-size:14px;user-select:none;-webkit-user-select:none;padding:0 2px;">⋮⋮</span>'
+            ? '<span class="pm-doc-drag-handle" title="Drag to reorder" style="cursor:grab;color:#bbb;font-size:14px;user-select:none;-webkit-user-select:none;padding:2px 2px 0;">⋮⋮</span>'
             : '')
-      +   '<span style="flex:1;font-size:13px;font-weight:600;color:#111;display:flex;align-items:baseline;gap:8px;min-width:0;">'
-      +     '<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;">📄 ' + titleSafe + '</span>'
-      +     (doc.updatedAt ? '<span style="font-size:11px;font-weight:400;color:#999;white-space:nowrap;flex-shrink:0;">' + _pmFmtRelative(doc.updatedAt) + '</span>' : '')
+      +   '<span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;">'
+      +     '<span style="font-size:13px;font-weight:600;color:#111;display:flex;align-items:baseline;gap:8px;min-width:0;">'
+      +       '<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;">📄 ' + titleSafe + '</span>'
+      +       (doc.updatedAt ? '<span style="font-size:11px;font-weight:400;color:#999;white-space:nowrap;flex-shrink:0;">' + _pmFmtRelative(doc.updatedAt) + '</span>' : '')
+      +     '</span>'
+      +     (snippetSafe ? '<span style="font-size:11.5px;color:#888;font-weight:400;line-height:1.4;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;">' + snippetSafe + '</span>' : '')
+      +     tagsHtml
       +   '</span>'
       +   (canDelete
             ? '<button type="button" class="pm-doc-del" data-idx="' + idx + '" onclick="event.stopPropagation();_pmDocRemove(this);" title="Delete this document">×</button>'
             : '')
       + '</div>';
-  }).join('');
+  }).filter(Boolean).join('');
   var emptyHtml = '<div style="padding:20px;text-align:center;color:#999;font-size:12px;font-style:italic;">No documents yet.</div>';
+  // PD.57: tag filter strip — collect all tags used by docs, render
+  // as clickable chips. Selected chip filters list above.
+  var allTags = {};
+  m.docs.forEach(function(d){ (d.tags || []).forEach(function(t){ allTags[t] = (allTags[t] || 0) + 1; }); });
+  var tagKeys = Object.keys(allTags).sort();
+  var filterHtml = "";
+  if (tagKeys.length) {
+    var activeFilter = m._docTagFilter || null;
+    filterHtml = '<div class="pm-doc-tagstrip" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;align-items:center;">'
+      + '<span style="font-size:10px;color:#888;font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin-right:4px;">Tags:</span>'
+      + tagKeys.map(function(t){
+          var on = (t === activeFilter);
+          var safe = String(t).replace(/</g, "&lt;").replace(/"/g, "&quot;");
+          return '<button type="button" data-tag="' + safe + '" onclick="event.stopPropagation();_pmDocTagFilter(this);" '
+            + 'style="font-size:11px;font-weight:600;color:' + (on ? '#fff' : '#5b3f8f') + ';background:' + (on ? '#5b3f8f' : '#f1edf8') + ';border:1px solid #ddd5ec;border-radius:10px;padding:2px 9px;cursor:pointer;font-family:inherit;">#' + safe + ' <span style="opacity:0.7;font-weight:400;">(' + allTags[t] + ')</span></button>';
+        }).join('')
+      + (activeFilter ? '<button type="button" onclick="event.stopPropagation();_pmDocTagFilter(null);" style="font-size:11px;color:#a93826;background:transparent;border:none;cursor:pointer;font-family:inherit;margin-left:6px;">clear filter ×</button>' : '')
+      + '</div>';
+  }
   return '<div class="pm-docs-wrap" data-id-prefix="' + idPrefix + '">'
+    + filterHtml
     + '<div class="pm-doc-list" style="max-height:280px;overflow-y:auto;border:1px solid #ddd;border-radius:6px;background:#fff;">'
     +   (rowsHtml || emptyHtml)
     + '</div>'
@@ -17919,6 +17972,18 @@ function _pmDocOpen(idx){
 // Visual cue: blue border-top on the row the dragged item would land
 // above. Drop → splice m.docs and refresh.
 // ──────────────────────────────────────────────────────────────────────
+
+// PD.57: tag-filter handler. Pass null or omit to clear.
+function _pmDocTagFilter(arg){
+  var m = window._pmActiveResearchMeta;
+  if (!m) return;
+  var tag = (arg && arg.getAttribute) ? arg.getAttribute("data-tag") : arg;
+  if (m._docTagFilter === tag) m._docTagFilter = null;  // toggle off
+  else m._docTagFilter = tag;
+  if (typeof _pmDocsRefreshActive === "function") _pmDocsRefreshActive();
+}
+if (typeof globalThis !== "undefined") globalThis._pmDocTagFilter = _pmDocTagFilter;
+
 function _pmDocsBindDnd(scope){
   var root = scope || document;
   var list = root.querySelector(".pm-doc-list");
@@ -17982,6 +18047,59 @@ function _pmDocsRefreshActive(){
   if (typeof _pmRtSetup === "function") _pmRtSetup(ov);
   if (typeof _pmDocsBindDnd === "function") _pmDocsBindDnd(ov);
 }
+
+// PD.57: tag chip field for the doc editor header. Tags stored as
+// doc.tags (string[]). Type → add (Enter or comma). Click × on chip → remove.
+function _pmDocTagFieldHtml(doc){
+  var tags = Array.isArray(doc.tags) ? doc.tags : [];
+  var chipsHtml = tags.map(function(t, i){
+    var safe = String(t).replace(/</g, "&lt;").replace(/"/g, "&quot;");
+    return '<span class="pm-doc-tag-chip" data-idx="' + i + '" style="display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;color:#5b3f8f;background:#f1edf8;border:1px solid #ddd5ec;border-radius:10px;padding:2px 4px 2px 9px;">#' + safe
+      + '<button type="button" data-tag-rm="' + i + '" style="background:transparent;border:none;color:#5b3f8f;cursor:pointer;font-size:13px;line-height:1;padding:0 4px;font-family:inherit;">×</button></span>';
+  }).join('');
+  return '<div id="pm-doc-edit-tags" style="padding:4px 18px 8px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;">'
+    + '<span style="font-size:10px;color:#888;font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin-right:4px;">Tags:</span>'
+    + chipsHtml
+    + '<input id="pm-doc-edit-tag-input" type="text" placeholder="add tag…" style="font:inherit;font-size:11px;border:1px dashed #ccc;border-radius:10px;padding:2px 9px;outline:none;background:transparent;min-width:70px;" />'
+    + '</div>';
+}
+function _pmDocTagBind(ov, doc){
+  var inp = ov.querySelector("#pm-doc-edit-tag-input");
+  var wrap = ov.querySelector("#pm-doc-edit-tags");
+  if (!inp || !wrap) return;
+  function rerender(){
+    wrap.outerHTML = _pmDocTagFieldHtml(doc);
+    _pmDocTagBind(ov, doc);  // rebind on new DOM
+  }
+  inp.addEventListener("keydown", function(e){
+    if (e.key === "Enter" || e.key === "," || e.key === "Tab") {
+      var v = inp.value.trim().replace(/^#/, "");
+      if (!v) return;
+      if (e.key !== "Tab") e.preventDefault();
+      if (!Array.isArray(doc.tags)) doc.tags = [];
+      if (doc.tags.indexOf(v) === -1) doc.tags.push(v);
+      inp.value = "";
+      rerender();
+    } else if (e.key === "Backspace" && !inp.value && Array.isArray(doc.tags) && doc.tags.length) {
+      doc.tags.pop();
+      rerender();
+    }
+  });
+  wrap.querySelectorAll("[data-tag-rm]").forEach(function(b){
+    b.onclick = function(){
+      var idx = parseInt(b.getAttribute("data-tag-rm"), 10);
+      if (Array.isArray(doc.tags) && isFinite(idx)) {
+        doc.tags.splice(idx, 1);
+        rerender();
+      }
+    };
+  });
+}
+if (typeof globalThis !== "undefined") {
+  globalThis._pmDocTagFieldHtml = _pmDocTagFieldHtml;
+  globalThis._pmDocTagBind = _pmDocTagBind;
+}
+
 // PD.35: per-doc editor dialog. Title input + rich-text body + dictate
 // + Done. Save on Done / × / outside-click. Calls back onSave(doc).
 function _pmOpenDocEditor(doc, onSave){
@@ -18003,6 +18121,7 @@ function _pmOpenDocEditor(doc, onSave){
     +   '<button type="button" id="pm-doc-edit-dictate" style="font-size:11px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;flex-shrink:0;">🎤 Dictate</button>'
     +   '<button type="button" id="pm-doc-edit-close-x" style="font-size:22px;color:#999;background:none;border:none;cursor:pointer;padding:0 4px;line-height:1;flex-shrink:0;">×</button>'
     + '</div>'
+    + _pmDocTagFieldHtml(doc)
     + (doc.createdAt
         ? '<div style="padding:4px 18px 8px;font-size:11px;color:#999;font-family:inherit;">'
             + 'Created ' + _pmFmtAbsolute(doc.createdAt) + (doc.updatedAt && doc.updatedAt !== doc.createdAt ? ' &middot; edited ' + _pmFmtRelative(doc.updatedAt) : '')
@@ -18021,6 +18140,7 @@ function _pmOpenDocEditor(doc, onSave){
   ov.appendChild(box);
   document.body.appendChild(ov);
   _pmRtSetup(ov);
+  if (typeof _pmDocTagBind === "function") _pmDocTagBind(ov, doc);
 
   function save(){
     var titleInp = ov.querySelector("#pm-doc-edit-title");
@@ -18036,7 +18156,8 @@ function _pmOpenDocEditor(doc, onSave){
       title: newTitle,
       body:  newBody,
       createdAt: createdAt,
-      updatedAt: updatedAt
+      updatedAt: updatedAt,
+      tags: Array.isArray(doc.tags) ? doc.tags.slice() : []
     };
     if (typeof onSave === "function") onSave(updated);
     if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
@@ -18350,6 +18471,96 @@ function _pmRenderNotesSearchResults(query){
 // with an Undo button. One toast at a time — opening a new one cancels
 // the old one's timer. 5-second auto-dismiss.
 // ──────────────────────────────────────────────────────────────────────
+
+// ──────────────────────────────────────────────────────────────────────
+// Round PD.55: keyboard shortcuts.
+//   /                → focus Discovery search input
+//   Esc              → exit bulk-select mode (when active)
+//   Cmd/Ctrl + Enter → save & close doc editor
+//   ?                → show shortcut help overlay
+// All bindings ignore keystrokes when the user is typing in an input,
+// textarea, or contenteditable so we don't hijack normal typing.
+// ──────────────────────────────────────────────────────────────────────
+(function _pmKeyboardShortcuts(){
+  if (window._pmShortcutsBound) return;
+  window._pmShortcutsBound = true;
+
+  function isTyping(e){
+    var t = e.target;
+    if (!t) return false;
+    var tag = (t.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select") return true;
+    if (t.isContentEditable) return true;
+    return false;
+  }
+  function pickerOpen(){
+    return !!document.getElementById("tb-place-act-search");
+  }
+  function docEditorOpen(){
+    return !!document.getElementById("pm-doc-editor");
+  }
+
+  document.addEventListener("keydown", function(e){
+    // Cmd/Ctrl + Enter inside doc editor → click Done.
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && docEditorOpen()) {
+      var done = document.querySelector("#pm-doc-editor #pm-doc-edit-done");
+      if (done) {
+        e.preventDefault();
+        done.click();
+        return;
+      }
+    }
+    if (isTyping(e)) return;
+
+    // Esc exits bulk mode (without competing with native Esc-closes).
+    if (e.key === "Escape") {
+      if (typeof _pmBulk !== "undefined" && _pmBulk.isOn && _pmBulk.isOn()) {
+        _pmBulk.exit();
+        return;
+      }
+    }
+    // / focuses Discovery search.
+    if (e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      var s = document.getElementById("tb-place-act-search");
+      if (s) {
+        e.preventDefault();
+        s.focus();
+        s.select();
+        return;
+      }
+    }
+    // ? opens help overlay.
+    if (e.key === "?" || (e.key === "/" && e.shiftKey)) {
+      _pmShortcutHelpToggle();
+      return;
+    }
+  });
+})();
+
+function _pmShortcutHelpToggle(){
+  var existing = document.getElementById("pm-shortcut-help");
+  if (existing) { existing.remove(); return; }
+  var ov = document.createElement("div");
+  ov.id = "pm-shortcut-help";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:14000;display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;";
+  ov.onclick = function(){ ov.remove(); };
+  var box = document.createElement("div");
+  box.style.cssText = "background:#fff;border-radius:12px;max-width:420px;width:100%;padding:20px 24px;box-shadow:0 12px 36px rgba(0,0,0,0.28);font-size:13px;color:#222;";
+  box.onclick = function(e){ e.stopPropagation(); };
+  box.innerHTML = '<div style="font-size:15px;font-weight:700;margin-bottom:14px;">Keyboard shortcuts</div>'
+    + '<table style="width:100%;border-collapse:collapse;">'
+    +   '<tr><td style="padding:6px 0;color:#666;width:140px;"><kbd style="background:#eee;border:1px solid #ccc;border-radius:3px;padding:1px 6px;font-family:inherit;">/</kbd></td><td>Focus search</td></tr>'
+    +   '<tr><td style="padding:6px 0;color:#666;"><kbd style="background:#eee;border:1px solid #ccc;border-radius:3px;padding:1px 6px;font-family:inherit;">Esc</kbd></td><td>Exit bulk-select mode</td></tr>'
+    +   '<tr><td style="padding:6px 0;color:#666;"><kbd style="background:#eee;border:1px solid #ccc;border-radius:3px;padding:1px 6px;font-family:inherit;">⌘ Enter</kbd></td><td>Save &amp; close doc editor</td></tr>'
+    +   '<tr><td style="padding:6px 0;color:#666;"><kbd style="background:#eee;border:1px solid #ccc;border-radius:3px;padding:1px 6px;font-family:inherit;">[[</kbd></td><td>Link to another doc (in editor)</td></tr>'
+    +   '<tr><td style="padding:6px 0;color:#666;"><kbd style="background:#eee;border:1px solid #ccc;border-radius:3px;padding:1px 6px;font-family:inherit;">?</kbd></td><td>Show this help</td></tr>'
+    + '</table>'
+    + '<div style="margin-top:14px;font-size:11px;color:#999;text-align:right;">Click anywhere to dismiss</div>';
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+}
+if (typeof globalThis !== "undefined") globalThis._pmShortcutHelpToggle = _pmShortcutHelpToggle;
+
 function _pmShowUndo(message, undoFn){
   var prev = document.getElementById("pm-undo-toast");
   if (prev) {
@@ -18808,6 +19019,7 @@ var _pmBulk = (function(){
     bindCapture();
     rerender();
     renderBar();
+    if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
   }
   function exit(){
     state.mode = false;
@@ -18815,6 +19027,7 @@ var _pmBulk = (function(){
     unbindCapture();
     rerender();
     removeBar();
+    if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
   }
   function rerender(){
     if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
@@ -18866,6 +19079,8 @@ var _pmBulk = (function(){
         }
       });
     }
+    // PD.54b: refresh map so the pin flips its selected styling.
+    if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
     renderBar();
   }
   function updateRowSelectionVisual(row, on){
@@ -18974,6 +19189,8 @@ var _pmBulk = (function(){
     enter: enter,
     exit: exit,
     isOn: function(){ return state.mode; },
+    isSelected: function(p){ return state.selected.has(p); },
+    toggleSelection: toggleSelection,
     injectCheckboxes: injectCheckboxes,
     renderBar: renderBar,
     selectedCount: function(){ return state.selected.size; }
@@ -23140,19 +23357,41 @@ function _renderPlacePickerMap(targetId){
           +   '</a>'
           + '</div>';
       })(info.place, _isStayCandidate, info.overnight === true);
+      // PD.54b: when bulk-select mode is on, the map participates —
+      // pins get a selection-tinted icon and click toggles selection
+      // rather than opening the popup.
+      var _bulkOn = (typeof _pmBulk !== "undefined" && _pmBulk.isOn && _pmBulk.isOn());
+      var _bulkSelected = _bulkOn && _pmBulk.isSelected && _pmBulk.isSelected(info.place);
+      if (_bulkOn) {
+        // Override the fill to make the selection state obvious.
+        var _bulkStyle = MaxMapPin.style(_styleRole, {});
+        _bulkStyle.fill = _bulkSelected ? "#1a5fa8" : "#fff";
+        _bulkStyle.stroke = "#1a5fa8";
+        _bulkStyle.strokeWidth = 3;
+        var _bulkHtml = MaxMapPin.html(_bulkStyle, { label: _bulkSelected ? "✓" : "" });
+        icon = MaxMapPin.icon(_bulkHtml, _bulkStyle);
+      }
       var existing = _pmMarkersByPlace[key];
       if (existing) {
         existing.setIcon(icon);
         existing.setLatLng(latLng);
         existing.unbindTooltip();
         existing.bindTooltip(ttBits, {direction:"top", offset:[0, _tipOff]});
-        // PD.14 fix: rebind popup so it reflects the new stay/see state.
         existing.unbindPopup();
-        existing.bindPopup(_popupHtml, { maxWidth: 260, autoPan: true, closeButton: true });
+        existing.off("click");
+        if (_bulkOn) {
+          existing.on("click", function(){ if (window._pmBulk) window._pmBulk.toggleSelection(info.place); });
+        } else {
+          existing.bindPopup(_popupHtml, { maxWidth: 260, autoPan: true, closeButton: true });
+        }
       } else {
         var m = L.marker(latLng, {icon: icon}).addTo(_pmMap);
         m.bindTooltip(ttBits, {direction:"top", offset:[0, _tipOff]});
-        m.bindPopup(_popupHtml, { maxWidth: 260, autoPan: true, closeButton: true });
+        if (_bulkOn) {
+          m.on("click", function(){ if (window._pmBulk) window._pmBulk.toggleSelection(info.place); });
+        } else {
+          m.bindPopup(_popupHtml, { maxWidth: 260, autoPan: true, closeButton: true });
+        }
         _pmMarkersByPlace[key] = m;
       }
     }
