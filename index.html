@@ -15930,6 +15930,9 @@ function _renderPlaceActivityItems(){
           +       '<span class="pm-row-menu-wrap">'
           +         '<button type="button" class="pm-row-menu-btn" onclick="_pmToggleRowMenu(this);event.stopPropagation();" title="More options">⋯</button>'
           +         '<div class="pm-row-menu-pop">'
+          +           '<button type="button" class="pm-row-menu-item" style="color:#1a5fa8;" onclick="event.stopPropagation();_pmTogglePlaceStay(&#39;' + _placeArg + '&#39;);">'
+          +             (_pmIsStayCandidate(d.place) ? 'Mark as just visiting' : 'Mark as overnight stay')
+          +           '</button>'
           +           '<button type="button" class="pm-row-menu-item" onclick="event.stopPropagation();_pmRemoveFromList(&#39;' + _placeArg + '&#39;);">Remove from list</button>'
           +         '</div>'
           +       '</span>'
@@ -16421,6 +16424,9 @@ function _renderPlaceActivityItems(){
         + '<span class="pm-row-menu-wrap">'
         +   '<button type="button" class="pm-row-menu-btn" onclick="_pmToggleRowMenu(this);event.stopPropagation();" title="More options">⋯</button>'
         +   '<div class="pm-row-menu-pop">'
+        +     '<button type="button" class="pm-row-menu-item" style="color:#1a5fa8;" onclick="event.stopPropagation();_pmTogglePlaceStay(&#39;'+_pmEsc(d.place)+'&#39;);">'
+        +       (_pmIsStayCandidate(d.place) ? 'Mark as just visiting' : 'Mark as overnight stay')
+        +     '</button>'
         +     '<button type="button" class="pm-row-menu-item" onclick="event.stopPropagation();_pmRemoveFromList(&#39;'+_pmEsc(d.place)+'&#39;);">Remove from list</button>'
         +   '</div>'
         + '</span>'
@@ -17239,6 +17245,31 @@ function _pmTogglePlaceStay(placeName){
   } catch(_){}
 }
 if (typeof globalThis !== "undefined") globalThis._pmTogglePlaceStay = _pmTogglePlaceStay;
+
+// Round PD.13: shared stay-candidate read used by both the map pin
+// shape and the list-side ⋯ menu label. Mirrors the cascade in
+// _renderPlacePickerMap: user override wins, otherwise the LLM's
+// explicit overnight===true is required.
+function _pmIsStayCandidate(placeName){
+  if (!placeName) return false;
+  try {
+    var k = (typeof _pmMetaKey === "function") ? _pmMetaKey(placeName) : String(placeName).toLowerCase();
+    var meta = (_tb && _tb.placeMeta) ? _tb.placeMeta[k] : null;
+    if (meta) {
+      if (meta.stayOverride === true)  return true;
+      if (meta.stayOverride === false) return false;
+    }
+    var anyOvernight = false;
+    (_tb.placeActivities || []).forEach(function(a){
+      (a.requiredPlaces || []).forEach(function(p){
+        if (p && _pmMetaKey(p.place) === k && p.overnight === true) anyOvernight = true;
+      });
+    });
+    return anyOvernight;
+  } catch(_){}
+  return false;
+}
+if (typeof globalThis !== "undefined") globalThis._pmIsStayCandidate = _pmIsStayCandidate;
 
 // Round PD.9: row-level ⋯ menu toggle. Wraps _pmRemoveFromList
 // behind an explicit affordance so the destructive action requires
@@ -21067,12 +21098,20 @@ function _renderPlacePickerMap(targetId){
     (item.requiredPlaces || []).forEach(function(p){
       if (!p || !p.place) return;
       var key = p.place.toLowerCase();
-      if (!allPlaces[key]) allPlaces[key] = { place: p.place, country: p.country||"", kept: false, iconic: false, anyRoute: false, _isDayTrip: false, _dayTripHub: "", _waysideFromHub: "", _rejected: false };
+      if (!allPlaces[key]) allPlaces[key] = { place: p.place, country: p.country||"", kept: false, iconic: false, anyRoute: false, _isDayTrip: false, _dayTripHub: "", _waysideFromHub: "", _rejected: false, overnight: undefined };
       if (p.country && !allPlaces[key].country) allPlaces[key].country = p.country;
       if (p._keep) allPlaces[key].kept = true;
       if (p._rejected === true) allPlaces[key]._rejected = true;
       if (iconic) allPlaces[key].iconic = true;
       if (item.type === "route") allPlaces[key].anyRoute = true;
+      // Round PD.13: aggregate the LLM's overnight signal so the
+      // stay-shape pick (above, at _isStayCandidate) has real data
+      // to work with. Any "true" wins; otherwise stays false; never
+      // overrides an existing true with false (a place flagged
+      // overnight-capable by one activity stays that way even if
+      // another activity refs it as transit-only).
+      if (p.overnight === true)  allPlaces[key].overnight = true;
+      else if (p.overnight === false && allPlaces[key].overnight === undefined) allPlaces[key].overnight = false;
       // Any requiredPlace ref that flips _isDayTrip on wins — a place
       // is a day trip if the user set it as one anywhere.
       if (p._isDayTrip === true) {
@@ -21166,7 +21205,13 @@ function _renderPlacePickerMap(targetId){
       var _isStayCandidate;
       if (_stayMeta && _stayMeta.stayOverride === true)       _isStayCandidate = true;
       else if (_stayMeta && _stayMeta.stayOverride === false) _isStayCandidate = false;
-      else                                                     _isStayCandidate = (info.overnight !== false);
+      // Round PD.13: tightened from `overnight !== false` to
+      // `overnight === true`. The earlier permissive read treated
+      // anything the LLM didn't explicitly mark as transit-only as
+      // a stay candidate — which meant everything became a circle
+      // because info.overnight defaulted to undefined. Require
+      // explicit true now: undefined and false both render as see.
+      else                                                     _isStayCandidate = (info.overnight === true);
       var _styleRole = _isStayCandidate ? "stay" : "see";
       var _pinStyle  = MaxMapPin.style(_styleRole, {});
       if (!info.kept) {
