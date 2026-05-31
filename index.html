@@ -26032,7 +26032,11 @@ function reopenCandidateExplorer(){
       // next line. c.overnightCapable falls back to !c.singleSight or
       // defaults to true if neither is present.
       role: c.role || null,
-      overnightCapable: (typeof c.overnightCapable === "boolean") ? c.overnightCapable : null
+      overnightCapable: (typeof c.overnightCapable === "boolean") ? c.overnightCapable : null,
+      // Round PD.23: see reopenPickerForEdit for the same fix.
+      dayTripHub: c.dayTripHub || null,
+      waysideFromHub: c.waysideFromHub || null,
+      _roleTouched: !!c._roleTouched
     };
   });
   _ensureTripRoleDefaults(_tb.candidates);
@@ -26123,7 +26127,14 @@ function reopenPickerForEdit(){
         intent: c.intent || null,
         tripRole: c.tripRole || null,
         dayTripHub: c.dayTripHub || null,
-        waysideLeg: c.waysideLeg || null
+        waysideFromHub: c.waysideFromHub || null,
+        waysideLeg: c.waysideLeg || null,
+        // Round PD.23: preserve user-commitment flag across reopen
+        // so the popup's "You selected" vs "Max suggests" label
+        // (PD.22) reads truthfully. Without this, every reopened
+        // candidate looked untouched even when the user had set a
+        // role in the prior session.
+        _roleTouched: !!c._roleTouched
       };
     });
     if (typeof _ensureTripRoleDefaults === "function") {
