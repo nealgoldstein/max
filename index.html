@@ -2892,6 +2892,44 @@ window.maxCacheStats = function(){
   return {entries: keys.length, bytes: bytes};
 };
 
+
+// ──────────────────────────────────────────────────────────────────────
+// Round PD.68: deterministic prompt construction. The LLM cache keys
+// off the prompt string verbatim — if two runs build the prompt with
+// the same user inputs but the arrays (chips, interests, drivers,
+// must-dos, etc.) are in different orders, the prompt text differs
+// and the cache misses. The model is called at temperature=0 but
+// still has minor variance run-to-run, so cache misses produce
+// slightly different lists — the "sometimes Selfoss appears,
+// sometimes not" symptom Neal hit while testing.
+//
+// Fix: every array that gets joined into a prompt goes through
+// _canonArr first — trim, dedupe (case-insensitive), sort. Order
+// is meaningless to the LLM but byte-stable across runs, so cache
+// keys hit reliably.
+// ──────────────────────────────────────────────────────────────────────
+function _canonArr(arr){
+  if (!Array.isArray(arr)) return [];
+  var seen = {};
+  var out = [];
+  for (var i = 0; i < arr.length; i++) {
+    var v = arr[i];
+    if (v == null) continue;
+    var s = String(v).trim();
+    if (!s) continue;
+    var k = s.toLowerCase();
+    if (seen[k]) continue;
+    seen[k] = true;
+    out.push(s);
+  }
+  out.sort(function(a, b){
+    var al = a.toLowerCase(), bl = b.toLowerCase();
+    return al < bl ? -1 : al > bl ? 1 : 0;
+  });
+  return out;
+}
+if (typeof globalThis !== "undefined") globalThis._canonArr = _canonArr;
+
 async function callMax(messages, maxTokens, timeoutMs, opts) {
   // v345: route through MaxSync's LLM proxy when the user is signed
   // in. The server holds the Anthropic API key — testers no longer
@@ -9493,7 +9531,7 @@ var _mdcChipSuggestions = [];
 async function expandChipSuggestions(region, intent, chips){
   _mdcChipSuggestions = [];
   if (!chips || !chips.length) return [];
-  var chipList = chips.join(", ");
+  var chipList = _canonArr(chips).join(", ");
   var prompt = "A traveler is going to " + region + "."
     + (intent ? " Their stated goal: " + intent + "." : "")
     + " Their must-dos (the anchors) are handled separately. They also tapped these general interests: " + chipList + ".\n\n"
@@ -10489,7 +10527,7 @@ async function showMaxBridge(stage, onContinue, correctionHistory) {
       + (_tbAvoidSummary() ? "\u2022 Prefer to avoid: " + _tbAvoidSummary() + "\n" : "")
       + (_tb.hardlimits ? "\u2022 Won't compromise on: " + _tb.hardlimits + "\n" : "")
       + (_tb.familiarity ? "\u2022 Familiarity with region: " + _tb.familiarity + "\n" : "")
-      + (_tb.chips && _tb.chips.length ? "\u2022 Also interested in: " + _tb.chips.join(", ") + "\n" : "");
+      + (_tb.chips && _tb.chips.length ? "\u2022 Also interested in: " + _canonArr(_tb.chips).join(", ") + "\n" : "");
   } else if (stage === "post-candidates") {
     var selected = MaxEnginePicker.keptCandidates(_tb.candidates);
     // Build an ordered list using the same logic as buildFromCandidates, so the bridge reflects the actual plan
@@ -10821,20 +10859,20 @@ async function runCandidateSearch(requiredPlaces) {
     + (_tbAvoidSummary() ? "\nPrefer to avoid (soft): " + _tbAvoidSummary() : "")
     + (_tb.hardlimits    ? "\nHard limits (never route around these): " + _tb.hardlimits : "")
     + (_tb.intent        ? "\nWhat they want: " + _tb.intent        : "")
-    + (_tb.interests&&_tb.interests.length ? "\nAlso interested in: " + _tb.interests.join(", ") : "")
+    + (_tb.interests&&_tb.interests.length ? "\nAlso interested in: " + _canonArr(_tb.interests).join(", ") : "")
     + (_tb.anchors       ? "\nMust-dos: "       + _tb.anchors       : "")
-    + (_tb.drivers&&_tb.drivers.length ? "\nWhat\'s driving this trip: " + _tb.drivers.join(", ") : "")
+    + (_tb.drivers&&_tb.drivers.length ? "\nWhat\'s driving this trip: " + _canonArr(_tb.drivers).join(", ") : "")
     + (_tb.familiarity   ? "\nFamiliarity with destination: " + _tb.familiarity : "")
     + (_tb.gradient      ? "\nWhat \'different\' means to them: " + _tb.gradient : "")
-    + (_tb.flexibilityNotes&&_tb.flexibilityNotes.length ? "\nSCHEDULING NOTES: " + _tb.flexibilityNotes.join("; ") : "")
+    + (_tb.flexibilityNotes&&_tb.flexibilityNotes.length ? "\nSCHEDULING NOTES: " + _canonArr(_tb.flexibilityNotes).join("; ") : "")
     + (_paceDir ? "\n\n" + _paceDir : "");
 
   // For complex multi-country trips, run both calls in parallel
   // and show results as each completes — so adding more required stops
   // doesn't increase the total wait time
-  var reqNames = requiredPlaces.map(function(p){ return p.place+", "+p.country; }).join("; ");
+  var reqNames = _canonArr(requiredPlaces.map(function(p){ return p.place+", "+p.country; })).join("; ");
   var extraCount = Math.max(8, 12 - Math.min(requiredPlaces.length, 4));
-  var skipList = requiredPlaces.map(function(p){ return p.place; }).join(", ");
+  var skipList = _canonArr(requiredPlaces.map(function(p){ return p.place; })).join(", ");
 
   // place-picker hero map (Step 8): if the user pre-flagged any
   // places as day trips on the place-picker, surface those as a
@@ -10981,7 +11019,7 @@ async function runCandidateSearch(requiredPlaces) {
   if (requiredPlaces.length > 0) {
     for (var bi = 0; bi < requiredPlaces.length; bi += BATCH) {
       var batch = requiredPlaces.slice(bi, bi + BATCH);
-      var batchNames = batch.map(function(p){ return p.place+", "+p.country; }).join("; ");
+      var batchNames = _canonArr(batch.map(function(p){ return p.place+", "+p.country; })).join("; ");
       var p1b = "You are a travel expert. For each of these places, write a candidate card for a traveler visiting " + (_tb.region||"this region") + ".\n"
         + "Places: " + batchNames + "\n"
         + "Trip context: " + brief + "\n"
@@ -14108,7 +14146,7 @@ async function generateActivitiesForPlace(){
     + _briefBlock
     + _budgetBlock
     + _completenessBlock
-    + (pmChips.length ? "General interests they tagged (use these to bias what you surface, but don\u2019t shoehorn): " + pmChips.join(", ") + "\n" : "")
+    + (pmChips.length ? "General interests they tagged (use these to bias what you surface, but don\u2019t shoehorn): " + _canonArr(pmChips).join(", ") + "\n" : "")
     + "\nThey haven\u2019t told you what they want to do yet \u2014 they chose a place and want you to map out what\u2019s actually there, so they can decide what matters. Surface the routes, the condition-dependent experiences, and the activities that make this place worth the trip. Be honest about the best of what\u2019s there; don\u2019t pad with generic items.\n\n"
     + "There are three types.\n\n"
     + "TYPE 1 \u2014 ROUTE: a scenic travel leg between specific places (a named train, a scenic road, a long-distance hike, a lake steamer). IMPORTANT: routes are TRANSPORTATION, not activities. They are how the traveler MOVES between destinations while seeing great scenery — functionally the same as a car trip or a bus. A route does NOT count as a destination and does NOT eat activity time at its endpoints; the endpoints are where the real time is spent.\n"
@@ -26585,7 +26623,7 @@ function saveRecognitionAndContinue(){
   // Build the intent that will feed the prompt
   var parts = [];
   if(_tb.tripSentence) parts.push(_tb.tripSentence);
-  if(_tb.chips && _tb.chips.length) parts.push("Also interested in: " + _tb.chips.join(", "));
+  if(_tb.chips && _tb.chips.length) parts.push("Also interested in: " + _canonArr(_tb.chips).join(", "));
   _tb.intent = parts.join(". ");
 
   // Extract region from sentence — try multiple patterns
