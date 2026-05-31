@@ -16507,33 +16507,19 @@ function _renderPlaceActivityItems(){
             + item.endpoints.map(function(p){return _pmEsc(p.place||"");}).join(arrow)
             + '</div>';
         }
-        // Find this destination within item.requiredPlaces.
-        var dPlaceLower = (d.place||"").toLowerCase();
-        var placeIdx = -1;
-        var thisPlace = null;
-        (item.requiredPlaces||[]).forEach(function(p, idx){
-          if (placeIdx < 0 && p && (p.place||"").toLowerCase() === dPlaceLower) {
-            placeIdx = idx;
-            thisPlace = p;
-          }
-        });
-        // Per-row "kept" reflects whether THIS destination's _keep is true,
-        // not whether ANY place under the activity is kept.
-        var rowKept = !!(thisPlace && thisPlace._keep);
-        // Build the click handler. If we found the place index, toggle just
-        // that place. Otherwise (shouldn't happen — d.items is only added
-        // when the destination IS in requiredPlaces), fall back to whole-
-        // activity toggle.
-        var clickAttr = (placeIdx >= 0)
-          ? 'onclick="togglePlaceInActivity(&#39;'+item.id+'&#39;,'+placeIdx+')"'
-          : 'onclick="togglePlaceActivity(&#39;'+item.id+'&#39;)"';
-        rightHtml += '<div class="tb-activity-row" style="display:flex;align-items:flex-start;gap:8px;padding:5px 0;border-top:1px dotted #f0f0f0;">'
-          + '<div class="tb-act-check small'+(rowKept?" on":"")+'" '+clickAttr+' title="Toggle this activity for '+_pmEsc(d.place)+'"></div>'
-          + '<div style="flex:1;min-width:0;cursor:pointer;" '+clickAttr+'>'
+        // Round PD.18: per-activity sub-row checkbox removed. The
+        // activity name + description still render (explains WHY
+        // this place is on the user's list), but the checkbox is
+        // gone — a place is on the trip or not, and the only
+        // control for that is the place-row checkbox on the left.
+        // No more per-activity-per-place toggling. togglePlaceInActivity
+        // is no longer wired to any UI; it survives as a window
+        // global for any external caller that might still reach for
+        // it, but should be considered deprecated.
+        rightHtml += '<div class="tb-activity-row" style="padding:5px 0;border-top:1px dotted #f0f0f0;">'
           +   '<div style="font-size:11.5px;font-weight:600;color:#1a1a1a;">'+_pmEsc(item.name||"")+iconicTag+'</div>'
           +   routeMeta
           +   desc
-          + '</div>'
           + '</div>';
       });
       rightHtml += '</div>';
@@ -17721,16 +17707,19 @@ if (typeof globalThis !== "undefined") globalThis._geographyOf = _geographyOf;
 //      derived from iconic + intent-match. After seeding, all
 //      mutations route through MaxRoleWriter.
 //
-//   2. Per-activity-ref bookkeeping toggles togglePlaceActivity /
+//   2. Per-activity-ref intent toggles togglePlaceActivity /
 //      togglePlaceInActivity (index.html ~16985, ~17105). These
-//      modify a single activity-ref's _keep flag — bookkeeping
-//      that has no visible effect at the place level (the picker
-//      aggregates with "any ref kept → place kept"). Routing
-//      through MaxRoleWriter would lose the per-activity-ref
-//      granularity; the writer is for place-level state. The
-//      place-level keep toggles (toggleDestKeep, togglePlaceByPlaceMode,
-//      toggleDestKeepInSection) DO route through MaxRoleWriter as of
-//      PD.16.
+//      modify a single activity-ref's _keep flag. NOT bookkeeping
+//      noise — they track INTENT: "I want Egilsstadir for the
+//      aurora, not for the cafés." When the LLM seeds different
+//      activities differently for the same place, the sub-row
+//      checkboxes can legitimately disagree with the place row.
+//      Routing through MaxRoleWriter would collapse all refs to
+//      the same state, destroying the per-intent distinction. The
+//      writer is for place-level state; sub-row toggles are for
+//      intent-level state. The place-level keep toggles
+//      (toggleDestKeep, togglePlaceByPlaceMode, toggleDestKeepInSection)
+//      DO route through MaxRoleWriter as of PD.16.
 //
 //   3. normalizeCandidateRole (engine-picker.js 172) is a READ
 //      that COERCES a legacy-shaped role into the canonical
