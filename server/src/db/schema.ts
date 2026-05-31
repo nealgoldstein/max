@@ -313,3 +313,36 @@ export type ShareToken = typeof shareTokens.$inferSelect;
 export type NewShareToken = typeof shareTokens.$inferInsert;
 export type ReminderSent = typeof remindersSent.$inferSelect;
 export type NewReminderSent = typeof remindersSent.$inferInsert;
+
+// PD.61 (cross-device attachments). One row per uploaded blob — images
+// and files attached to Discovery doc bodies. The body HTML carries
+// a placeholder element with data-att-src-id="<this row's id>"; the
+// client fetches /attachments/:id (auth required) and presents the
+// blob locally. Cross-device: phone fetches the same id as laptop,
+// gets the same bytes back, image appears.
+//
+// `data` is base64-encoded bytes. Chose text over a blob column for
+// runtime parity (libsql / Cloudflare Workers handle text identically;
+// raw binary needs per-runtime translation). 33% inflation is fine
+// for the size class we care about (<25MB inputs).
+export const attachments = sqliteTable(
+  'attachments',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    mime: text('mime').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    data: text('data').notNull(), // base64
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(strftime('%s', 'now') * 1000)`),
+  },
+  (t) => ({
+    userIdIdx: index('attachments_user_id_idx').on(t.userId),
+  }),
+);
+export type Attachment = typeof attachments.$inferSelect;
+export type NewAttachment = typeof attachments.$inferInsert;

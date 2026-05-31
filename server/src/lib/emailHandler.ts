@@ -64,7 +64,7 @@ type Env = {
 export function _extractInboxToken(toAddress: string): string | null {
   if (!toAddress) return null;
   const m = toAddress.toLowerCase().match(/\+([a-z0-9]+)@/i);
-  return m ? m[1] : null;
+  return (m && m[1]) ? m[1] : null;
 }
 
 // Read the raw email stream into a Buffer for postal-mime.

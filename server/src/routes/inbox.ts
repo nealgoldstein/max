@@ -286,6 +286,7 @@ inboxApi.post('/unassigned-bookings/:id/attach', async (c) => {
     const destIdx = dests.findIndex((d) => d.id === destinationId);
     if (destIdx < 0) return c.json({ error: 'destination not found on this trip' }, 404);
     const dest = dests[destIdx];
+    if (!dest) return c.json({ error: 'destination not found on this trip' }, 404);
     if (!Array.isArray(dest.hotelBookings)) dest.hotelBookings = [];
     (dest.hotelBookings as unknown[]).push(buildHotel());
   } else {
@@ -294,6 +295,7 @@ inboxApi.post('/unassigned-bookings/:id/attach', async (c) => {
     const destIdx = dests.findIndex((d) => d.id === destinationId);
     if (destIdx < 0) return c.json({ error: 'destination not found on this trip' }, 404);
     const dest = dests[destIdx];
+    if (!dest) return c.json({ error: 'destination not found on this trip' }, 404);
     if (!Array.isArray(dest.generalBookings)) dest.generalBookings = [];
     (dest.generalBookings as unknown[]).push(buildGeneral());
   }

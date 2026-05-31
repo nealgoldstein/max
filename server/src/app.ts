@@ -11,6 +11,8 @@ import { llmApi } from './routes/llm.js';
 import { prefsApi } from './routes/prefs.js';
 import { shareApi } from './routes/share.js';
 import { inboxApi } from './routes/inbox.js';
+import { attachmentsApi } from './routes/attachments.js';
+import { urlMetadataApi } from './routes/urlMetadata.js';
 
 export function createApp() {
   const app = new Hono();
@@ -44,6 +46,10 @@ export function createApp() {
   // and /user/unassigned-bookings/:id/dismiss.
   app.route('/user', inboxApi);
   app.route('/share', shareApi);
+  // PD.61: cross-device blob storage for Discovery doc attachments.
+  app.route('/attachments', attachmentsApi);
+  // PD.63: URL metadata fetch (CORS-free) for smart link paste.
+  app.route('/url-metadata', urlMetadataApi);
 
   app.notFound((c) => c.json({ error: 'Not found' }, 404));
   app.onError((err, c) => {

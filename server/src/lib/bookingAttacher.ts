@@ -149,8 +149,8 @@ function _tripDateRange(unwrapped: TripBody): { from: string | null; to: string 
     const dests = unwrapped.destinations;
     const first = dests[0];
     const last = dests[dests.length - 1];
-    from = from || first.dateFrom || null;
-    to = to || last.dateTo || null;
+    if (first) from = from || first.dateFrom || null;
+    if (last)  to   = to   || last.dateTo   || null;
   }
   return { from, to };
 }
@@ -169,6 +169,7 @@ function _findDestForBooking(unwrapped: TripBody, bk: Booking): number {
   if (!Array.isArray(unwrapped.destinations)) return -1;
   for (let i = 0; i < unwrapped.destinations.length; i++) {
     const d = unwrapped.destinations[i];
+    if (!d) continue;
     if (_dateInRange(bk.depDate, d.dateFrom || null, d.dateTo || null)) {
       return i;
     }
@@ -177,6 +178,7 @@ function _findDestForBooking(unwrapped: TripBody, bk: Booking): number {
     const needle = ((bk.address || '') + ' ' + (bk.from || '')).toLowerCase();
     for (let i = 0; i < unwrapped.destinations.length; i++) {
       const d = unwrapped.destinations[i];
+      if (!d) continue;
       const placeName = String(d.place || d.label || '').toLowerCase();
       if (placeName && needle.indexOf(placeName) >= 0) return i;
     }
@@ -450,6 +452,7 @@ export async function attachBookingToTrip(
         return { tripId: null, bookingId: null, reason: 'no-destination-match' };
       }
       const dest = unwrapped.destinations![destIdx];
+      if (!dest) return { tripId: null, bookingId: null, reason: 'no-destination-match' };
       if (!Array.isArray(dest.hotelBookings)) dest.hotelBookings = [];
       dest.hotelBookings.push(record);
     } else {
@@ -459,6 +462,7 @@ export async function attachBookingToTrip(
         return { tripId: null, bookingId: null, reason: 'no-destination-match' };
       }
       const dest = unwrapped.destinations![destIdx];
+      if (!dest) return { tripId: null, bookingId: null, reason: 'no-destination-match' };
       if (!Array.isArray(dest.generalBookings)) dest.generalBookings = [];
       dest.generalBookings.push(record);
     }

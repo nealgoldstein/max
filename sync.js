@@ -168,6 +168,73 @@
     return data;
   }
 
+  // PD.61: attachment upload / fetch. Distinct from request() because
+  // it sends multipart for upload and expects a raw blob for download
+  // — both incompatible with the JSON-only path.
+  async function uploadAttachment(file) {
+    if (!isSignedIn()) throw new Error('Not signed in');
+    var url = getServerUrl().replace(/\/+$/, '') + '/attachments';
+    var fd = new FormData();
+    fd.append('file', file, file.name || 'attachment');
+    var resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + getToken() },
+      // NB: do NOT set Content-Type — the browser sets a boundary
+      // automatically for multipart/form-data.
+      body: fd,
+    });
+    if (!resp.ok) {
+      var data = null; try { data = await resp.json(); } catch (_) {}
+      var err = new Error((data && data.error) || ('HTTP ' + resp.status));
+      err.code = resp.status === 401 ? 'AUTH' : 'HTTP';
+      err.status = resp.status;
+      throw err;
+    }
+    return resp.json();  // { id, name, mime, sizeBytes }
+  }
+  async function fetchAttachment(id) {
+    if (!isSignedIn()) throw new Error('Not signed in');
+    var url = getServerUrl().replace(/\/+$/, '') + '/attachments/' + encodeURIComponent(id);
+    var resp = await fetch(url, {
+      headers: { 'Authorization': 'Bearer ' + getToken() },
+    });
+    if (resp.status === 404) return null;
+    if (!resp.ok) {
+      var err = new Error('HTTP ' + resp.status);
+      err.code = resp.status === 401 ? 'AUTH' : 'HTTP';
+      err.status = resp.status;
+      throw err;
+    }
+    return resp.blob();
+  }
+  async function deleteAttachment(id) {
+    if (!isSignedIn()) return;
+    var url = getServerUrl().replace(/\/+$/, '') + '/attachments/' + encodeURIComponent(id);
+    try {
+      await fetch(url, {
+        method: 'DELETE',
+        headers: { 'Authorization': 'Bearer ' + getToken() },
+      });
+    } catch (_) { /* best-effort */ }
+  }
+
+  // PD.63: URL metadata. Returns { title, description, image, favicon,
+  // domain } or null on hard failure. The server caches 1h; this is a
+  // thin client wrapper.
+  async function fetchUrlMetadata(targetUrl) {
+    if (!isSignedIn() || !targetUrl) return null;
+    var url = getServerUrl().replace(/\/+$/, '') + '/url-metadata?url=' + encodeURIComponent(targetUrl);
+    try {
+      var resp = await fetch(url, {
+        headers: { 'Authorization': 'Bearer ' + getToken() },
+      });
+      if (!resp.ok) return null;
+      return await resp.json();
+    } catch (_) {
+      return null;
+    }
+  }
+
   // ── Auth ───────────────────────────────────────────────────
 
   // v350: magic-link sign-in. Server emails a one-time link; user
@@ -1241,6 +1308,12 @@
     listShareTokens: listShareTokens,
     revokeShareTokens: revokeShareTokens,
     fetchSharedTrip: fetchSharedTrip,
+    // PD.61: cross-device attachment storage.
+    uploadAttachment: uploadAttachment,
+    fetchAttachment: fetchAttachment,
+    deleteAttachment: deleteAttachment,
+    // PD.63: URL metadata fetch for smart link paste.
+    fetchUrlMetadata: fetchUrlMetadata,
     // For the LLM proxy round — exposed now so callMax can switch
     // over without another file edit.
     _request: request,

@@ -111,7 +111,7 @@ export function _normalizeBookingExtraction(p: Record<string, unknown>): Record<
     const s = String(v).trim();
     if (/^\d{2}:\d{2}$/.test(s)) return s;
     const m = s.match(/^(\d{1,2}):(\d{2})\s*(am|pm|a\.m\.|p\.m\.)?$/i);
-    if (!m) return v;
+    if (!m || !m[1] || !m[2]) return v;
     let h = parseInt(m[1], 10);
     const min = m[2];
     const ampm = (m[3] || '').toLowerCase().replace(/\./g, '');
@@ -170,7 +170,7 @@ export function _normalizeBookingExtraction(p: Record<string, unknown>): Record<
   if (out.price != null && typeof out.price !== 'number') {
     const rawPrice = String(out.price).trim();
     const ccyMatch = rawPrice.match(/\b(USD|EUR|GBP|JPY|CAD|AUD|ISK|CHF|CNY|SEK|NOK|DKK)\b/i);
-    if (ccyMatch && !out.currency) out.currency = ccyMatch[1].toUpperCase();
+    if (ccyMatch && ccyMatch[1] && !out.currency) out.currency = ccyMatch[1].toUpperCase();
     if (!out.currency) {
       if (/\$/.test(rawPrice)) out.currency = 'USD';
       else if (/€/.test(rawPrice)) out.currency = 'EUR';
@@ -205,7 +205,7 @@ export function _normalizeBookingExtraction(p: Record<string, unknown>): Record<
         if (!iso) return [null, null];
         const s = decodeURIComponent(String(iso));
         const m = s.match(/^(\d{4}-\d{2}-\d{2})[T\s]?(\d{2}:\d{2})?/);
-        if (!m) return [null, null];
+        if (!m || !m[1]) return [null, null];
         return [m[1], m[2] || null];
       }
       const pp = splitDT(pdate);
