@@ -19332,23 +19332,29 @@ function _pmDraftRestore(){
   if (typeof _tb === "undefined" || !_tb) window._tb = _tb = {};
   Object.keys(snap).forEach(function(k){ _tb[k] = snap[k]; });
   _tb._editMode = false;  // it\'s still draft, not edit-of-built-trip
-  // If we have candidates, open the picker. Otherwise route to the brief.
-  if (Array.isArray(_tb.candidates) && _tb.candidates.length) {
-    if (typeof showCandidateExplorer === "function") {
-      showCandidateExplorer(_tb.candidates, true);
-      return true;
-    }
-  }
-  // No candidates yet — open the brief.
-  if (typeof showTripBrief === "function") {
-    // showTripBrief reads from #ntp-name and resets _tb; that would
-    // wipe our restore. Instead, just open the brief overlay directly.
+  // PD.66g (architectural): route through the SAME entry points the
+  // fresh-brief flow uses. renderActivityPicker is the Discovery
+  // picker — it reads _tb.placeActivities and renders the full list
+  // (the old code called showCandidateExplorer, which only rendered
+  // _tb.candidates and dropped the rest of the LLM-generated places).
+  //
+  // Decision tree (mirrors the natural flow):
+  //   • placeActivities populated → user was past the brief → picker
+  //   • brief fields populated but no placeActivities → still in brief
+  //   • nothing → fresh brief
+  var hasPicker = Array.isArray(_tb.placeActivities) && _tb.placeActivities.length;
+  if (hasPicker && typeof renderActivityPicker === "function") {
     var ov = document.getElementById("trip-brief-overlay");
-    if (ov) {
-      ov.style.display = "block";
-      if (typeof renderTripStep1Place === "function") renderTripStep1Place();
-      return true;
-    }
+    if (ov) ov.style.display = "block";
+    renderActivityPicker();
+    return true;
+  }
+  // Otherwise, open the brief form with restored fields.
+  var brief = document.getElementById("trip-brief-overlay");
+  if (brief && typeof renderTripStep1Place === "function") {
+    brief.style.display = "block";
+    renderTripStep1Place();
+    return true;
   }
   return false;
 }
