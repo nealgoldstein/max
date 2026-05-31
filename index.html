@@ -1893,79 +1893,62 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
    keep place rows + section headers + activity descriptions. Each
    row gets page-break-inside:avoid so rows don't split across pages. */
 @media print {
-  /* Round PD.28: print pagination fix. The picker list lives inside
-     #tb-picker-list-pane which is overflow-y:auto — the browser only
-     prints what's visible in that scroll container's viewport (one
-     page max). Force the scroll container AND its flex/overflow
-     ancestors to flow naturally so all pages print. Also hide the
-     map column entirely and collapse the 2-column flex layout so the
-     list takes the full page width. */
-  html, body { height: auto !important; overflow: visible !important; background: #fff !important; color: #000 !important; }
-  #tb-picker-list-pane {
-    overflow: visible !important;
-    height: auto !important;
-    max-height: none !important;
-    padding: 0 !important;
-  }
-  #picker-2col {
-    display: block !important;
-    overflow: visible !important;
-    min-height: 0 !important;
-    height: auto !important;
-  }
-  #picker-map, #picker-divider, .picker-map { display: none !important; }
-  /* Picker overlay container — actual id is trip-brief-overlay,
-     actual class is tb-overlay. PD.28 had a typo (.tb-pm-overlay).
-     Force position:static + overflow:visible + display:block so the
-     content lays out at natural height and prints all pages. */
-  #trip-brief-overlay, .tb-overlay,
-  [id^="tb-place-act-overlay"], [id^="tb-pm-overlay"], .tb-pm-overlay,
-  .tb-header {
+  /* Round PD.34: architectural print fix. Earlier rounds tried to
+     coerce the fixed-position picker overlay + nested scroll panes
+     to flow naturally for print via @media print overrides. That was
+     fragile — too many clipping ancestors (position:fixed, overflow:
+     hidden, height:100vh, flex containers). Instead we now build a
+     parallel print-only DOM at document root (#pm-print-page) on
+     Print click and hide everything else. The original picker layout
+     is untouched; the print version is a fresh, simple document. */
+  html, body { background: #fff !important; color: #000 !important; }
+  body > * { display: none !important; }
+  body > #pm-print-page { display: block !important; }
+  #pm-print-page {
     position: static !important;
-    height: auto !important;
-    max-height: none !important;
-    overflow: visible !important;
-    display: block !important;
-    inset: auto !important;
+    margin: 0;
+    padding: 16px 24px;
+    color: #000;
+    background: #fff;
+    font-family: inherit;
+    font-size: 12px;
+    line-height: 1.45;
   }
-  /* Hide everything outside the Discovery list pane. */
-  #tb-pm-map, .leaflet-container,
-  #tb-place-act-toc,
-  .pm-row-menu-wrap, .pm-row-menu-btn, .pm-row-menu-pop,
-  .tb-act-check, .pm-research-btn,
-  .pm-row-story-trigger, .pm-row-story-triggers,
-  .pm-row-todo-trigger, .pm-row-todo-triggers,
-  .pm-row-story-preview, .pm-row-story-toggle,
-  .pm-row-story-full, .pm-row-todo-full,
-  .pm-row-story-close, .pm-row-todo-close,
-  .tb-act-thumb, .tb-more-like-btn,
-  #ce-add-place-row, #tb-place-act-search,
-  #tb-picker-max-suggests, #tb-cat-nav, #wisp-result-banner,
-  #tb-breadth-section, #tb-pm-provenance-note,
-  .tb-act-col-right .tb-act-desc-toggle {
-    display: none !important;
-  }
-  /* Show only the list-pane content; everything else is chrome. */
-  .tb-act-table-row.tb-dest-major {
-    page-break-inside: avoid;
-    break-inside: avoid;
-    grid-template-columns: 1fr !important;
-    padding: 8px 0 !important;
-    border-bottom: 1px solid #ccc !important;
-  }
-  .tb-act-section-hdr {
+  #pm-print-page h1 { font-size: 20px; margin: 0 0 4px; }
+  #pm-print-page .pm-print-subtitle { font-size: 11px; color: #666; margin: 0 0 16px; font-style: italic; }
+  #pm-print-page h2 {
+    font-size: 14px;
+    margin: 18px 0 6px;
+    padding-bottom: 3px;
+    border-bottom: 1px solid #000;
     page-break-after: avoid;
     break-after: avoid;
-    color: #000 !important;
-    border-color: #000 !important;
   }
-  .tb-act-table-row.tb-dest-major .tb-act-col-right {
-    padding-top: 4px !important;
+  #pm-print-page .pm-print-row {
+    page-break-inside: avoid;
+    break-inside: avoid;
+    padding: 6px 0;
+    border-bottom: 1px solid #eee;
   }
-  /* Expand truncated descriptions on print. */
-  .tb-act-desc.collapsed { display: block !important; max-height: none !important; overflow: visible !important; }
-  /* Hide the right-side stay/see indicator (info redundant in print). */
-  .tb-act-name [title^="Marked"], .tb-act-name [title^="Max suggests"] { display: none !important; }
+  #pm-print-page .pm-print-place { font-size: 13px; font-weight: 700; color: #111; }
+  #pm-print-page .pm-print-meta { font-size: 11px; color: #666; font-style: italic; margin-top: 2px; }
+  #pm-print-page .pm-print-sights { font-size: 11px; color: #5b3f8f; margin-top: 2px; }
+  #pm-print-page .pm-print-activity { font-size: 11.5px; margin-top: 3px; color: #333; }
+  #pm-print-page .pm-print-activity-name { font-weight: 600; color: #111; }
+  #pm-print-page .pm-print-activity-desc { color: #444; }
+  #pm-print-page .pm-print-stay-pill {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #1a5fa8;
+    border: 1px solid #1a5fa8;
+    border-radius: 3px;
+    padding: 0 4px;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
 }
 .tb-act-table-row.tb-dest-major:last-child{border-bottom:none;}
 .tb-act-table-row.tb-dest-major.on{background:transparent;box-shadow:none;border-color:#f0ece1;}
@@ -15708,7 +15691,7 @@ function _renderPlaceActivityItems(){
     printBtn.style.cssText = "font-size:11px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;";
     printBtn.innerHTML = '🖨 Print';
     printBtn.title = "Print this list (map and controls are hidden on the printed page)";
-    printBtn.onclick = function(e){ e.stopPropagation(); window.print(); };
+    printBtn.onclick = function(e){ e.stopPropagation(); _pmPrintDiscovery(); };
     hdrActions.appendChild(printBtn);
     tocHdr.appendChild(hdrActions);
     toc.appendChild(tocHdr);
@@ -17167,6 +17150,127 @@ function _pmRoleIndicatorHtml(placeName){
   return '<span ' + clickAttr + ' title="' + title + '" style="display:inline-flex;align-items:center;cursor:pointer;padding:1px;border-radius:50%;">' + swatchHtml + '</span>';
 }
 if (typeof globalThis !== "undefined") globalThis._pmRoleIndicatorHtml = _pmRoleIndicatorHtml;
+
+// ──────────────────────────────────────────────────────────────────────
+// Round PD.34: Discovery print. Builds a parallel print-only DOM at
+// document root and calls window.print(). The @media print CSS hides
+// every other body child; the print container itself is laid out as
+// a clean printable document (no overlay clipping, no scroll panes).
+// ──────────────────────────────────────────────────────────────────────
+function _pmPrintDiscovery(){
+  // Remove any stale print container from a prior run.
+  var prev = document.getElementById("pm-print-page");
+  if (prev) prev.remove();
+
+  var page = document.createElement("div");
+  page.id = "pm-print-page";
+  // Inline display:none for screen; @media print flips to block.
+  page.style.cssText = "display:none;";
+
+  var tripName = "";
+  try {
+    tripName = (window.trip && window.trip.name)
+            || (window._tb && (window._tb.placeName || window._tb.region))
+            || "Trip";
+  } catch(_) { tripName = "Trip"; }
+
+  var title = '<h1>' + _pmEsc(tripName) + ' — Discovery</h1>'
+    + '<div class="pm-print-subtitle">Printed ' + new Date().toLocaleString() + '</div>';
+
+  var body = '';
+  var list = document.getElementById("tb-place-act-list");
+  if (!list) {
+    body = '<div>Nothing to print — Discovery list not found.</div>';
+  } else {
+    // Walk the rendered list in document order so section headers
+    // appear above their rows naturally.
+    var nodes = list.querySelectorAll(".tb-act-section-hdr, .tb-act-table-row.tb-dest-major");
+    if (!nodes.length) {
+      body = '<div>Nothing to print — Discovery list is empty.</div>';
+    } else {
+      nodes.forEach(function(el){
+        if (el.classList.contains("tb-act-section-hdr")) {
+          var titleEl = el.querySelector(".tb-act-section-title");
+          var countEl = el.querySelector(".tb-act-section-count");
+          var titleText = titleEl ? (titleEl.textContent || "").trim() : "";
+          var countText = countEl ? (countEl.textContent || "").trim() : "";
+          body += '<h2>' + _pmEsc(titleText)
+                + (countText ? ' <span style="font-weight:400;font-size:11px;color:#666;">— ' + _pmEsc(countText) + '</span>' : '')
+                + '</h2>';
+        } else {
+          // Place row — extract name, wiki desc, sights-here, activities.
+          var nameEl = el.querySelector(".tb-act-name");
+          var placeText = "";
+          if (nameEl) {
+            var nameSpan = nameEl.querySelector("span");
+            placeText = nameSpan ? (nameSpan.textContent || "").trim() : (nameEl.textContent || "").trim();
+          }
+          // Stay-candidate hint via the role indicator's title attribute
+          var stayPill = "";
+          try {
+            if (typeof _pmIsStayCandidate === "function" && placeText && _pmIsStayCandidate(placeText)) {
+              stayPill = '<span class="pm-print-stay-pill">Stay</span>';
+            }
+          } catch(_){}
+          var wikiDescEl = el.querySelector(".tb-act-wiki-desc");
+          var wikiText = wikiDescEl ? (wikiDescEl.textContent || "").trim() : "";
+          // "Sights here:" line — purple block inside tb-dest-meta. Find by color.
+          var sightsText = "";
+          el.querySelectorAll(".tb-dest-meta").forEach(function(m){
+            var t = (m.textContent || "").trim();
+            if (/^Sights here:/i.test(t)) sightsText = t;
+          });
+          var activities = el.querySelectorAll(".tb-activity-row");
+          var actHtml = "";
+          activities.forEach(function(act){
+            // Activity row structure after PD.18/PD.24: first div = name, optional .tb-act-desc = description.
+            var nameDiv = act.querySelector('div[style*="font-weight:600"]') || act.querySelector("div");
+            var descDiv = act.querySelector(".tb-act-desc") || act.querySelector('div[style*="color:#666"]');
+            var an = nameDiv ? (nameDiv.textContent || "").trim() : "";
+            var ad = descDiv ? (descDiv.textContent || "").trim().replace(/▾$/, "").trim() : "";
+            if (an || ad) {
+              actHtml += '<div class="pm-print-activity">'
+                + (an ? '<span class="pm-print-activity-name">' + _pmEsc(an) + '</span>' : '')
+                + (ad ? (an ? ' — ' : '') + '<span class="pm-print-activity-desc">' + _pmEsc(ad) + '</span>' : '')
+                + '</div>';
+            }
+          });
+          body += '<div class="pm-print-row">'
+            + '<div class="pm-print-place">' + _pmEsc(placeText) + stayPill + '</div>'
+            + (wikiText ? '<div class="pm-print-meta">' + _pmEsc(wikiText) + '</div>' : '')
+            + (sightsText ? '<div class="pm-print-sights">' + _pmEsc(sightsText) + '</div>' : '')
+            + actHtml
+            + '</div>';
+        }
+      });
+    }
+  }
+
+  page.innerHTML = title + body;
+  document.body.appendChild(page);
+
+  // Cleanup after print dialog closes.
+  var cleanedUp = false;
+  function cleanup(){
+    if (cleanedUp) return;
+    cleanedUp = true;
+    if (page && page.parentNode) page.parentNode.removeChild(page);
+    window.removeEventListener("afterprint", cleanup);
+  }
+  window.addEventListener("afterprint", cleanup);
+  // Fallback: some browsers don't fire afterprint. Clean up on focus
+  // return (user closed print dialog).
+  setTimeout(function once(){
+    function onFocus(){
+      window.removeEventListener("focus", onFocus);
+      setTimeout(cleanup, 200);
+    }
+    window.addEventListener("focus", onFocus);
+  }, 100);
+
+  window.print();
+}
+if (typeof globalThis !== "undefined") globalThis._pmPrintDiscovery = _pmPrintDiscovery;
 
 // ──────────────────────────────────────────────────────────────────────
 // Round PD.31: rich-text editor for notes fields. Inline contentEditable
