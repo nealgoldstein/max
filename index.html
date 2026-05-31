@@ -1871,7 +1871,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
    grid; dest-major just keeps the looser padding and border style.
    The @media (max-width:640px) rule above still collapses to 1fr on
    narrow phones. */
-.tb-act-table-row.tb-dest-major{padding:10px 4px;background:transparent;border:none;box-shadow:none;border-radius:0;border-bottom:1px solid #f0ece1;margin-bottom:0;gap:18px;}
+.tb-act-table-row.tb-dest-major{padding:10px 4px;background:transparent;border:none;box-shadow:none;border-radius:0;border-bottom:1px solid #f0ece1;margin-bottom:0;gap:18px;grid-template-columns:minmax(0, 1.4fr) minmax(0, 1fr);}
 /* Round PD.7: push the activity column down a touch so the place
    name on the left has visual primacy at the top of the row. Without
    this, both columns start at the same baseline and the activity's
@@ -16401,7 +16401,7 @@ function _renderPlaceActivityItems(){
         // right edge. Title still truncates with ellipsis when the
         // row is narrow.
         + '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
-        + '<div class="tb-act-name" style="font-size:14px;font-weight:700;color:#111;line-height:1.25;flex:1;min-width:0;word-break:break-word;" title="' + _pmEsc(d.place) + '">'
+        + '<div class="tb-act-name" style="font-size:14px;font-weight:700;color:#111;line-height:1.25;flex:1;min-width:0;white-space:nowrap;overflow:visible;" title="' + _pmEsc(d.place) + '">'
         +   _pmEsc(d.place)
         + '</div>'
         + '<button type="button" class="pm-remove-btn" onclick="event.stopPropagation();_pmRemoveFromList(&#39;'+_pmEsc(d.place)+'&#39;)" title="Remove this place from the list" style="flex-shrink:0;width:20px;height:20px;border:1px solid #ddd;border-radius:4px;background:#fff;color:#888;cursor:pointer;font-family:inherit;font-size:14px;line-height:1;padding:0;display:flex;align-items:center;justify-content:center;">×</button>'
@@ -20972,19 +20972,25 @@ function _renderPlacePickerMap(targetId){
       // v357: stay pins lost their ordinal number — the picker no
       // longer shows visit order. Both stay and day-trip pins now
       // carry place initials.
-      // Round PD.1 (v360.5): Discovery picker map is now a neutral
-      // surface — every place is a blue teardrop with no label, no
+      // Round PD.1 (v360.5): Discovery picker map is a neutral
+      // surface — every place is a teardrop with no label and no
       // role-derived styling. Role decisions moved to trip-build
       // time (buildFromCandidates → _pmDeriveRole cascade per place),
       // and the trip view remains the single place the user shapes
-      // roles. The map's job here is "where are the places," nothing
-      // more. The role derivation, single-sight branching, and
+      // roles.
+      //
+      // Round PD.7 (v360.5): teardrop COLOR keys off kept-state so
+      // the user can see at a glance which places are committed to
+      // the trip. Kept = blue (the original "see" fill); unkept =
+      // gray. Shape stays the same in both cases — only fill shifts.
+      // The role derivation, single-sight branching, and
       // initials-as-label that used to live here are deliberately
-      // gone; if/when Discovery needs to reflect committed roles
-      // again (e.g. on reopen of a built trip), use the read-only
-      // badge in the list row, not the pin.
-      var _styleRole = "see";              // teardrop, blue
+      // gone.
+      var _styleRole = "see";              // teardrop shape
       var _pinStyle  = MaxMapPin.style(_styleRole, {});
+      if (!info.kept) {
+        _pinStyle.fill = "#bbb";           // gray teardrop for unkept
+      }
       var _labelOv   = { label: "" };      // no initials on the pin
       // v358.6: no map-level "iconic" decoration. The earlier gold
       // border and the v358.5 ★ overlay both fired only on places
