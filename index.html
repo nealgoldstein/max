@@ -14305,12 +14305,19 @@ async function generateActivitiesForPlace(){
 
     items.forEach(function(item,i){
       item.id = "plm" + i;
-      // Pre-check rule: an item comes pre-checked if EITHER the LLM flagged it
-      // iconic (canonical things a first-timer shouldn't miss — Rhine Falls,
-      // Glacier Express, Jungfraujoch) OR it matches a keyword the traveler
-      // expressed via sentence/intent/chips. Items that fail both stay opt-in
-      // so the list doesn't pre-commit the traveler to everything.
-      item.checked = !!item.iconic || _itemMatchesIntent(item);
+      // Round PD.7 (v360.5): pre-check rule tightened from OR to AND.
+      // The earlier "iconic OR intent-match" was firing true on
+      // almost every item — LLM marks many things iconic (Iceland:
+      // waterfalls, geysers, glaciers, ring road, aurora, blue
+      // lagoon…) AND the intent matcher hits on a single keyword
+      // anywhere in name/description/type. Result: a brand-new
+      // brief showed everything pre-checked, defeating the
+      // user-driven opt-in model. Requiring BOTH narrows pre-check
+      // to "this is iconic AND it's something you said you cared
+      // about" — a much tighter signal that respects both the
+      // LLM's expert opinion AND the traveler's stated intent.
+      // Items that fail either branch stay opt-in.
+      item.checked = !!item.iconic && _itemMatchesIntent(item);
       if(item.endpoints) item.endpoints = _normPlaceArr(item.endpoints);
       if(item.requiredPlaces) item.requiredPlaces = _normPlaceArr(item.requiredPlaces);
       if(item.viableLocations) item.viableLocations = _normPlaceArr(item.viableLocations);
