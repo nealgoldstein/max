@@ -13547,6 +13547,8 @@ function renderTripStep1Place(){
   if (!_tb.whyGenerally && _tb.placeContext) _tb.whyGenerally = _tb.placeContext;
 
   var ov = g("trip-brief-overlay");
+  // PD.66i: re-parent to body to escape #home-screen display:none.
+  if (ov.parentElement !== document.body) document.body.appendChild(ov);
   ov.className = "tb-overlay";
   var _prevScroll = ov.scrollTop || 0;
   var _preserve = !!_tb._preserveScrollOnce;
@@ -25192,6 +25194,14 @@ function renderActivityPicker(){
   if (_ceOv) _ceOv.style.display = "none";
 
   var ov = g("trip-brief-overlay");
+  // PD.66i (architectural): the overlay is authored inside #home-screen,
+  // which gets display:none after enterApp(). A display:none ancestor
+  // hides the subtree even with position:fixed, so re-parent to
+  // document.body once to guarantee visibility in every mode (fresh
+  // brief, post-Choreograph edit, and the PD.66 draft restore path
+  // which opens the picker while home-screen is hidden). Same pattern
+  // showCandidateExplorer uses for its own overlay.
+  if (ov.parentElement !== document.body) document.body.appendChild(ov);
   ov.className = "tb-overlay";
   // Outer is a non-scrolling flex column; the LIST pane scrolls, the MAP
   // pane is sticky-full-height. Footer pinned at the bottom.
