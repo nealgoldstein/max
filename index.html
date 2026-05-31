@@ -17347,20 +17347,7 @@ function _pmRtSetup(root){
         window.open(a.href, "_blank", "noopener");
       }
     });
-    // Round PD.38: checkbox checked-state persistence. Native
-    // <input type="checkbox"> in contentEditable toggles its
-    // `.checked` property on click, but innerHTML serializes
-    // the ATTRIBUTE — so without this sync the state vanishes
-    // on next render. Listen for change events and mirror the
-    // property into the attribute.
-    ed.addEventListener("change", function(e){
-      var t = e.target;
-      if (t && t.tagName === "INPUT" && t.type === "checkbox") {
-        if (t.checked) t.setAttribute("checked", "checked");
-        else           t.removeAttribute("checked");
-      }
-    });
-    // Round PD.38: Enter inside a checkbox row creates another row.
+    // Round PD.41: Enter inside a checkbox row creates another row.
     // Backspace at the start of an empty checkbox row removes it
     // (escape hatch back to plain paragraph).
     ed.addEventListener("keydown", function(e){
@@ -17369,27 +17356,25 @@ function _pmRtSetup(root){
       if (!sel || !sel.rangeCount) return;
       var node = sel.anchorNode;
       var row = node && node.nodeType === 1 ? node : (node ? node.parentElement : null);
-      while (row && row !== ed && !(row.classList && row.classList.contains("pm-rt-checkbox-row"))) {
+      while (row && row !== ed && !(row.classList && row.classList.contains("pm-rt-cb-item"))) {
         row = row.parentElement;
       }
       if (!row || row === ed) return;
       if (e.key === "Enter") {
         e.preventDefault();
-        var newRow = document.createElement("div");
-        newRow.className = "pm-rt-checkbox-row";
-        var cb = document.createElement("input");
-        cb.type = "checkbox";
-        newRow.appendChild(cb);
-        newRow.appendChild(document.createTextNode(" "));
+        var newRow = _pmRtBuildCheckboxRow("");
         row.parentNode.insertBefore(newRow, row.nextSibling);
-        var range = document.createRange();
-        range.setStart(newRow, newRow.childNodes.length);
-        range.collapse(true);
-        sel.removeAllRanges();
-        sel.addRange(range);
+        var lblNew = newRow.querySelector(".pm-rt-cb-text");
+        if (lblNew) {
+          var range = document.createRange();
+          range.setStart(lblNew, 0);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
       } else if (e.key === "Backspace") {
-        // Only act if the row is effectively empty (no text after the checkbox).
-        var txt = (row.textContent || "").replace(/\s+/g, "");
+        var lblBs = row.querySelector(".pm-rt-cb-text");
+        var txt = lblBs ? (lblBs.textContent || "").replace(/[\s ]+/g, "") : "";
         if (!txt) {
           e.preventDefault();
           var parent = row.parentNode;
@@ -17407,49 +17392,63 @@ function _pmRtSetup(root){
     });
   });
 }
+// Round PD.41: styled-span checkbox row. Native input rendered as
+// chevron by Safari in contentEditable. Styled mark toggles via inline
+// onclick -> classList; class persists in innerHTML for free.
+function _pmRtBuildCheckboxRow(labelText){
+  var row = document.createElement("div");
+  row.className = "pm-rt-cb-item";
+  var mark = document.createElement("span");
+  mark.className = "pm-rt-cb-mark";
+  mark.setAttribute("contenteditable", "false");
+  mark.setAttribute("onclick", "event.stopPropagation();this.parentElement.classList.toggle('checked');");
+  var text = document.createElement("span");
+  text.className = "pm-rt-cb-text";
+  text.textContent = labelText || "";
+  row.appendChild(mark);
+  row.appendChild(text);
+  return row;
+}
 function _pmRtInsertCheckbox(btn){
   var wrap = btn.closest ? btn.closest(".pm-rt-wrap") : null;
   if (!wrap) return;
   var ed = wrap.querySelector(".pm-rt-editor");
   if (!ed) return;
   ed.focus();
-  // Round PD.40: direct DOM insertion. execCommand("insertHTML") was
-  // unreliable on empty contentEditable elements (no selection inside
-  // it = silent no-op). Build the row, insert at the current cursor
-  // when it's inside the editor; otherwise append to the end.
-  var row = document.createElement("div");
-  row.className = "pm-rt-checkbox-row";
-  var cb = document.createElement("input");
-  cb.type = "checkbox";
-  row.appendChild(cb);
-  // Use a non-breaking space so the row has a focusable text node.
-  row.appendChild(document.createTextNode(" "));
   var sel = window.getSelection && window.getSelection();
-  var inserted = false;
-  try {
-    if (sel && sel.rangeCount) {
-      var range = sel.getRangeAt(0);
-      if (ed.contains(range.commonAncestorContainer) || range.commonAncestorContainer === ed) {
-        range.deleteContents();
-        range.insertNode(row);
-        inserted = true;
-      }
+  var hasSelInside = false;
+  var selectedText = "";
+  var insertRange = null;
+  if (sel && sel.rangeCount) {
+    var r = sel.getRangeAt(0);
+    if (ed.contains(r.commonAncestorContainer) || r.commonAncestorContainer === ed) {
+      hasSelInside = true;
+      selectedText = r.toString();
+      insertRange = r;
     }
-  } catch(_){}
-  if (!inserted) ed.appendChild(row);
-  // Move cursor to the end of the new row (after the &nbsp;), ready to type.
+  }
+  var row = _pmRtBuildCheckboxRow(selectedText);
+  if (hasSelInside && insertRange) {
+    try {
+      insertRange.deleteContents();
+      insertRange.insertNode(row);
+    } catch(_) { ed.appendChild(row); }
+  } else {
+    ed.appendChild(row);
+  }
   try {
-    var after = document.createRange();
-    after.setStart(row, row.childNodes.length);
-    after.collapse(true);
-    if (sel) {
-      sel.removeAllRanges();
-      sel.addRange(after);
+    var label = row.querySelector(".pm-rt-cb-text");
+    if (label) {
+      var after = document.createRange();
+      after.selectNodeContents(label);
+      after.collapse(false);
+      if (sel) { sel.removeAllRanges(); sel.addRange(after); }
     }
   } catch(_){}
 }
 if (typeof globalThis !== "undefined") {
   globalThis._pmRtInsertCheckbox = _pmRtInsertCheckbox;
+  globalThis._pmRtBuildCheckboxRow = _pmRtBuildCheckboxRow;
 }
 if (typeof globalThis !== "undefined") {
   globalThis._pmRtCmd = _pmRtCmd;
@@ -17467,10 +17466,12 @@ if (typeof globalThis !== "undefined") {
     + '.pm-rt-editor a{color:#1a5fa8;text-decoration:underline;}'
     + '.pm-rt-editor ul, .pm-rt-editor ol{margin:6px 0;padding-left:22px;}'
     + '.pm-rt-editor li{margin:2px 0;}'
-    + '.pm-rt-editor .pm-rt-checkbox-row{display:flex;align-items:flex-start;gap:6px;margin:3px 0;}'
-    + '.pm-rt-editor .pm-rt-checkbox-row input[type="checkbox"]{margin:4px 0 0;cursor:pointer;flex-shrink:0;}'
-    + '.pm-rt-editor .pm-rt-checkbox-row input[type="checkbox"]:checked + *,'
-    + '.pm-rt-editor .pm-rt-checkbox-row input[type="checkbox"][checked] ~ *{color:#888;text-decoration:line-through;}'
+    + '.pm-rt-editor .pm-rt-cb-item{display:flex;align-items:flex-start;gap:8px;margin:3px 0;}'
+    + '.pm-rt-editor .pm-rt-cb-mark{display:inline-block;width:14px;height:14px;border:1.5px solid #999;border-radius:3px;background:#fff;cursor:pointer;flex-shrink:0;margin-top:3px;position:relative;user-select:none;-webkit-user-select:none;}'
+    + '.pm-rt-editor .pm-rt-cb-item.checked .pm-rt-cb-mark{background:#1a5fa8;border-color:#1a5fa8;}'
+    + '.pm-rt-editor .pm-rt-cb-item.checked .pm-rt-cb-mark::after{content:"\\2713";color:#fff;font-size:10px;font-weight:700;position:absolute;top:-3px;left:1px;}'
+    + '.pm-rt-editor .pm-rt-cb-text{flex:1;min-width:0;}'
+    + '.pm-rt-editor .pm-rt-cb-item.checked .pm-rt-cb-text{color:#888;text-decoration:line-through;}'
     + '.pm-doc-card{margin-bottom:12px;padding:10px;border:1px solid #e0d8c8;border-radius:6px;background:#fafafa;}'
     + '.pm-doc-card .pm-rt-wrap{background:#fff;}'
     + '.pm-doc-title{flex:1;font:inherit;font-size:13px;font-weight:600;border:1px solid transparent;border-radius:4px;padding:4px 6px;background:transparent;}'
