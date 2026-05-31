@@ -15714,7 +15714,7 @@ function _renderPlaceActivityItems(){
     // Stable id so the post-rebuild focus restore can find the new
     // element after _renderPlaceActivityItems clobbers the DOM.
     searchInp.id = "tb-place-act-search";
-    searchInp.placeholder = "Search places by name…";
+    searchInp.placeholder = "Search places and notes…";
     searchInp.value = (_tb && _tb._researchSearch) || "";
     searchInp.style.cssText = "flex:1;min-width:240px;font:inherit;font-size:12.5px;padding:5px 9px;border:1px solid #d8dde5;border-radius:5px;background:#fff;color:#111;box-sizing:border-box;outline:none;";
     // Round NC.X: match counter "2 / 5" + ↑/↓ arrows. All three are
@@ -17325,6 +17325,7 @@ function _pmRtFieldHtml(id, initialContent, opts){
     +     '<button type="button" data-pmrt="insertUnorderedList" title="Bullet list" style="font-size:13px;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:inherit;">•</button>'
     +     '<button type="button" data-pmrt="insertOrderedList" title="Numbered list" style="font-size:11.5px;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:inherit;">1.</button>'
     +     '<button type="button" data-pmrt="checklist" title="Checklist" style="font-size:13px;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:inherit;">☑</button>'
+    +     '<button type="button" data-pmrt="attach" title="Attach file or image" style="font-size:13px;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:inherit;">📎</button>'
     +     '<span style="width:1px;background:#ddd;margin:3px 4px;"></span>'
     +     '<button type="button" data-pmrt="createLink" title="Add link" style="font-size:11.5px;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:inherit;">🔗</button>'
     +     '<button type="button" data-pmrt="unlink" title="Remove link" style="font-size:11.5px;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:inherit;">⌧</button>'
@@ -17389,12 +17390,15 @@ function _pmRtSetup(root){
           var cmd = b.getAttribute("data-pmrt");
           if (cmd === "checklist") {
             _pmRtInsertCheckbox(b);
+          } else if (cmd === "attach") {
+            _pmRtAttachFile(b);
           } else {
             _pmRtCmd(b, cmd);
           }
         });
       });
     }
+    if (typeof _pmRtBindAttachmentHandlers === "function") _pmRtBindAttachmentHandlers(ed);
     ed.addEventListener("keydown", function(e){
       if (e.key !== "Enter" && e.key !== "Backspace") return;
       var sel = window.getSelection && window.getSelection();
@@ -17495,6 +17499,130 @@ if (typeof globalThis !== "undefined") {
   globalThis._pmRtInsertCheckbox = _pmRtInsertCheckbox;
   globalThis._pmRtBuildCheckboxRow = _pmRtBuildCheckboxRow;
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// Round PD.49: file / image attachments in the rich-text editor.
+// Stored as base64 data URLs inline in the doc body HTML — no separate
+// blob store. Images render as <img>; everything else renders as a
+// download link with the filename + file size.
+// Entry points: 📎 toolbar button, clipboard paste, drag-drop.
+// ──────────────────────────────────────────────────────────────────────
+function _pmRtFormatBytes(n){
+  if (n < 1024) return n + " B";
+  if (n < 1024*1024) return (n / 1024).toFixed(0) + " KB";
+  return (n / (1024*1024)).toFixed(1) + " MB";
+}
+function _pmRtBuildAttachmentNode(file, dataUrl){
+  var isImage = file.type && file.type.indexOf("image/") === 0;
+  if (isImage) {
+    var img = document.createElement("img");
+    img.src = dataUrl;
+    img.alt = file.name || "image";
+    img.style.cssText = "max-width:100%;height:auto;border-radius:4px;margin:6px 0;display:block;";
+    return img;
+  }
+  // Non-image: render as a download link.
+  var link = document.createElement("a");
+  link.href = dataUrl;
+  link.download = file.name || "attachment";
+  link.textContent = "📎 " + (file.name || "attachment") + " (" + _pmRtFormatBytes(file.size || 0) + ")";
+  link.style.cssText = "display:inline-block;margin:4px 0;padding:5px 10px;background:#f5f1e8;border:1px solid #e6dfca;border-radius:4px;color:#1a5fa8;text-decoration:none;font-size:12px;";
+  return link;
+}
+function _pmRtInsertNode(ed, node){
+  if (!ed || !node) return;
+  ed.focus();
+  var sel = window.getSelection && window.getSelection();
+  var inserted = false;
+  try {
+    if (sel && sel.rangeCount) {
+      var r = sel.getRangeAt(0);
+      if (ed.contains(r.commonAncestorContainer) || r.commonAncestorContainer === ed) {
+        r.deleteContents();
+        r.insertNode(node);
+        // Place cursor right after the inserted node
+        var after = document.createRange();
+        after.setStartAfter(node);
+        after.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(after);
+        inserted = true;
+      }
+    }
+  } catch(_){}
+  if (!inserted) ed.appendChild(node);
+}
+function _pmRtReadFileToNode(ed, file){
+  if (!ed || !file) return;
+  // Size cap so we don't accidentally embed a 50MB file as base64.
+  var MAX = 5 * 1024 * 1024;  // 5MB
+  if (file.size && file.size > MAX) {
+    alert("File too large (" + _pmRtFormatBytes(file.size) + "). Max 5 MB for inline attachments.");
+    return;
+  }
+  var reader = new FileReader();
+  reader.onload = function(){
+    var node = _pmRtBuildAttachmentNode(file, reader.result);
+    _pmRtInsertNode(ed, node);
+  };
+  reader.readAsDataURL(file);
+}
+function _pmRtAttachFile(btn){
+  var wrap = btn.closest ? btn.closest(".pm-rt-wrap") : null;
+  if (!wrap) return;
+  var ed = wrap.querySelector(".pm-rt-editor");
+  if (!ed) return;
+  var input = document.createElement("input");
+  input.type = "file";
+  input.style.display = "none";
+  input.onchange = function(){
+    var f = input.files && input.files[0];
+    if (f) _pmRtReadFileToNode(ed, f);
+    if (input.parentNode) input.parentNode.removeChild(input);
+  };
+  document.body.appendChild(input);
+  input.click();
+}
+function _pmRtBindAttachmentHandlers(ed){
+  if (!ed || ed._pmRtAttachBound) return;
+  ed._pmRtAttachBound = true;
+  // Paste — capture clipboard images.
+  ed.addEventListener("paste", function(e){
+    var items = (e.clipboardData && e.clipboardData.items) ? e.clipboardData.items : null;
+    if (!items) return;
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      if (it.kind === "file") {
+        var file = it.getAsFile();
+        if (file) {
+          e.preventDefault();
+          _pmRtReadFileToNode(ed, file);
+          return;
+        }
+      }
+    }
+  });
+  // Drag-drop — capture dropped files.
+  ed.addEventListener("dragover", function(e){
+    if (e.dataTransfer && e.dataTransfer.types && Array.prototype.indexOf.call(e.dataTransfer.types, "Files") >= 0) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+    }
+  });
+  ed.addEventListener("drop", function(e){
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+      e.preventDefault();
+      for (var i = 0; i < e.dataTransfer.files.length; i++) {
+        _pmRtReadFileToNode(ed, e.dataTransfer.files[i]);
+      }
+    }
+  });
+}
+if (typeof globalThis !== "undefined") {
+  globalThis._pmRtAttachFile = _pmRtAttachFile;
+  globalThis._pmRtBindAttachmentHandlers = _pmRtBindAttachmentHandlers;
+}
+
 if (typeof globalThis !== "undefined") {
   globalThis._pmRtCmd = _pmRtCmd;
   globalThis._pmRtInitContent = _pmRtInitContent;
