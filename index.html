@@ -2752,6 +2752,24 @@ function _maxIdbGet(key){
   });
 }
 
+// PD.59b: enumerate keys in the kv store. Used by attachment GC.
+function _maxIdbKeys(prefix){
+  return _maxIdbOpen().then(function(db){
+    return new Promise(function(resolve, reject){
+      try {
+        var tx = db.transaction(_MAX_IDB_STORE, "readonly");
+        var req = tx.objectStore(_MAX_IDB_STORE).getAllKeys();
+        req.onsuccess = function(){
+          var keys = req.result || [];
+          if (prefix) keys = keys.filter(function(k){ return String(k).indexOf(prefix) === 0; });
+          resolve(keys);
+        };
+        req.onerror = function(){ reject(req.error); };
+      } catch(e){ reject(e); }
+    });
+  });
+}
+
 function _maxIdbSet(key, value){
   return _maxIdbOpen().then(function(db){
     return new Promise(function(resolve, reject){
@@ -17599,6 +17617,66 @@ if (typeof globalThis !== "undefined") {
 // Reuses the existing _maxIdb* helpers (kv store) with key prefix
 // "att:". Each attachment record is { blob, name, type, size, addedAt }.
 // ──────────────────────────────────────────────────────────────────────
+
+// ──────────────────────────────────────────────────────────────────────
+// Round PD.59b: orphaned-attachment GC. Scans every doc body across
+// _tb.placeMeta / _tb.tripMeta and (if a trip is built) trip.placeMeta
+// / trip.tripMeta for data-att-id references. Anything in IDB under
+// the "att:" prefix that isn't referenced gets deleted. Runs once
+// per session, deferred ~5 seconds after the user first opens the
+// research surface so the UI gets to breathe first.
+// ──────────────────────────────────────────────────────────────────────
+var _pmAttGcRan = false;
+function _pmCollectReferencedAttIds(){
+  var ids = {};
+  function scanBody(body){
+    if (!body) return;
+    var re = /data-att-id="([^"]+)"/g;
+    var m;
+    while ((m = re.exec(body)) !== null) ids[m[1]] = true;
+  }
+  function scanMeta(meta){
+    if (!meta || !Array.isArray(meta.docs)) return;
+    meta.docs.forEach(function(d){ scanBody(d && d.body); });
+  }
+  // Discovery draft.
+  if (typeof _tb !== "undefined" && _tb) {
+    if (_tb.placeMeta) Object.keys(_tb.placeMeta).forEach(function(k){ scanMeta(_tb.placeMeta[k]); });
+    scanMeta(_tb.tripMeta);
+  }
+  // Built trip snapshot, if present.
+  if (typeof trip !== "undefined" && trip) {
+    if (trip.placeMeta) Object.keys(trip.placeMeta).forEach(function(k){ scanMeta(trip.placeMeta[k]); });
+    scanMeta(trip.tripMeta);
+  }
+  return ids;
+}
+function _pmAttGc(){
+  if (typeof _maxIdbKeys !== "function" || typeof _maxIdbDelete !== "function") return;
+  _maxIdbKeys("att:").then(function(keys){
+    if (!keys || !keys.length) return;
+    var referenced = _pmCollectReferencedAttIds();
+    var deleted = 0;
+    var promises = keys.map(function(key){
+      var id = String(key).slice(4);  // strip "att:"
+      if (referenced[id]) return null;
+      deleted++;
+      // Also drop the in-session blob URL cache so next access re-fetches.
+      if (typeof _pmAttUrlCache === "object" && _pmAttUrlCache[id]) {
+        try { URL.revokeObjectURL(_pmAttUrlCache[id]); } catch(_){}
+        delete _pmAttUrlCache[id];
+      }
+      return _maxIdbDelete(key);
+    }).filter(Boolean);
+    if (promises.length) {
+      Promise.all(promises).then(function(){
+        console.log("[Max attachments] GC removed", deleted, "orphaned attachment(s)");
+      });
+    }
+  }).catch(function(){ /* silent — GC is best-effort */ });
+}
+if (typeof globalThis !== "undefined") globalThis._pmAttGc = _pmAttGc;
+
 function _pmAttPut(file){
   return _maxIdbSet("att:" + _pmAttNewId(), {
     blob: file,
@@ -18175,6 +18253,11 @@ function _pmDocsRefreshActive(){
   ov.innerHTML = rb();
   if (typeof _pmRtSetup === "function") _pmRtSetup(ov);
   if (typeof _pmDocsBindDnd === "function") _pmDocsBindDnd(ov);
+  // PD.59b: trigger orphan-attachment GC once per session, deferred.
+  if (!_pmAttGcRan && typeof _pmAttGc === "function") {
+    _pmAttGcRan = true;
+    setTimeout(_pmAttGc, 5000);
+  }
 }
 
 // PD.57: tag chip field for the doc editor header. Tags stored as
