@@ -17417,7 +17417,6 @@ function _pmRtSetup(root){
 // chevron by Safari in contentEditable. Styled mark toggles via inline
 // onclick -> classList; class persists in innerHTML for free.
 function _pmRtBuildCheckboxRow(labelText){
-  console.log("[Max PD.42] building row, label=", JSON.stringify(labelText));
   var row = document.createElement("div");
   row.className = "pm-rt-cb-item";
   var mark = document.createElement("span");
@@ -17432,9 +17431,8 @@ function _pmRtBuildCheckboxRow(labelText){
   return row;
 }
 function _pmRtInsertCheckbox(btn){
-  console.log("[Max PD.42] checklist clicked", btn);
   var wrap = btn.closest ? btn.closest(".pm-rt-wrap") : null;
-  if (!wrap) { console.warn("[Max PD.42] no wrap found"); return; }
+  if (!wrap) return;
   var ed = wrap.querySelector(".pm-rt-editor");
   if (!ed) return;
   ed.focus();
@@ -17444,14 +17442,12 @@ function _pmRtInsertCheckbox(btn){
   var insertRange = null;
   if (sel && sel.rangeCount) {
     var r = sel.getRangeAt(0);
-    console.log("[Max PD.42] range commonAncestor:", r.commonAncestorContainer, "ed.contains:", ed.contains(r.commonAncestorContainer));
     if (ed.contains(r.commonAncestorContainer) || r.commonAncestorContainer === ed) {
       hasSelInside = true;
       selectedText = r.toString();
       insertRange = r;
     }
   }
-  console.log("[Max PD.42] hasSelInside:", hasSelInside, "selectedText:", JSON.stringify(selectedText));
   var row = _pmRtBuildCheckboxRow(selectedText);
   if (hasSelInside && insertRange) {
     try {
@@ -17461,7 +17457,6 @@ function _pmRtInsertCheckbox(btn){
   } else {
     ed.appendChild(row);
   }
-  console.log("[Max PD.42] inserted row into editor. editor children:", ed.children.length, "row in DOM:", document.body.contains(row));
   try {
     var label = row.querySelector(".pm-rt-cb-text");
     if (label) {
