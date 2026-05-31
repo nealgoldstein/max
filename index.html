@@ -6547,6 +6547,14 @@ function renderHomeScreen(){
       })();
       var name=document.createElement("div"); name.className="tc-name"; name.style.display="flex"; name.style.alignItems="center"; name.style.flexWrap="wrap";
       var nameTxt=document.createElement("span"); nameTxt.textContent=entry.name||"Untitled trip"; name.appendChild(nameTxt);
+      // PD.69: drafts get a visible "Draft" pill so users can tell
+      // research-in-progress trips apart from built ones at a glance.
+      if (entry.isDraft) {
+        var draftPill = document.createElement("span");
+        draftPill.textContent = "Draft";
+        draftPill.style.cssText = "display:inline-block;font-size:10px;font-weight:700;color:#5b3f8f;background:#f1edf8;border:1px solid #ddd5ec;padding:2px 8px;border-radius:10px;margin-left:8px;vertical-align:middle;letter-spacing:.02em;";
+        name.appendChild(draftPill);
+      }
       if (countdownChip) name.appendChild(countdownChip);
       var meta=document.createElement("div"); meta.className="tc-meta";
       var parts=[]; if(entry.dateRange)parts.push(entry.dateRange);
@@ -19264,7 +19272,13 @@ function _pmDraftEnsure(){
     window.trip = {};
   }
   trip.id = newId;
-  trip.name = (_tb.name && _tb.name.trim()) || ("Untitled — " + new Date().toLocaleDateString("en-US", {month:"short", day:"numeric", year:"numeric"}));
+  // PD.69: prefer _tb.region (e.g. "Iceland") over the generic
+  // "Untitled — DATE" so the draft is immediately identifiable in
+  // the trips list. Fallback chain: explicit name → region → placeName → dated untitled.
+  trip.name = (_tb.name && _tb.name.trim())
+    || (_tb.region && _tb.region.trim())
+    || (_tb.placeName && _tb.placeName.trim())
+    || ("Untitled — " + new Date().toLocaleDateString("en-US", {month:"short", day:"numeric", year:"numeric"}));
   trip.destinations = trip.destinations || [];
   trip.brief = trip.brief || {};
   trip.brief.region = trip.brief.region || _tb.region || "";
@@ -19333,6 +19347,26 @@ function _pmDraftSave(){
   // re-flip _isDraft back on.
   if (!trip.brief._isDraft) return;
   trip.brief._tbDraft = _pmDraftSnapshot();
+  // PD.69: keep the draft's display name fresh — if the user has
+  // entered a region/place via the brief, update the trip.name AND
+  // the index entry so the home-screen card shows the right label
+  // instead of the generic "Untitled — DATE" from initial mint.
+  var freshName = (_tb.name && _tb.name.trim())
+    || (_tb.region && _tb.region.trim())
+    || (_tb.placeName && _tb.placeName.trim())
+    || trip.name;
+  if (freshName && freshName !== trip.name) {
+    trip.name = freshName;
+    try {
+      if (typeof MaxDB !== "undefined" && MaxDB.index && MaxDB.index.entry && MaxDB.index.upsert) {
+        var ie = MaxDB.index.entry(_currentTripId);
+        if (ie) { ie.name = freshName; MaxDB.index.upsert(ie); }
+      } else if (typeof _tripsIndex !== "undefined" && Array.isArray(_tripsIndex)) {
+        var legacy = _tripsIndex.find(function(t){ return t.id === _currentTripId; });
+        if (legacy) { legacy.name = freshName; if (typeof saveTripsIndex === "function") saveTripsIndex(); }
+      }
+    } catch(_){}
+  }
   if (typeof localSave === "function") {
     try { localSave(); } catch(e){ console.warn("[Max draft] localSave failed:", e && e.message); }
   }
