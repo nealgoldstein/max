@@ -2234,6 +2234,13 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
          outstanding pending-action tasks for the user's current trip. -->
     <div id="hs-dashboard" style="display:none;margin-top:18px;"></div>
     <!-- Round DI: trip list always visible when trips exist. -->
+    <!-- PD.70: draft trips render in their own "In progress" section
+         above the built-trip list so resumable research is clearly
+         separated from finished itineraries. -->
+    <div id="hs-drafts-section" style="display:none;margin-top:18px;">
+      <div class="hs-section-lbl" style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#5b3f8f;margin-bottom:10px;">In progress</div>
+      <div class="trip-cards" id="draft-cards"></div>
+    </div>
     <div id="hs-trips-section" style="display:none;margin-top:18px;">
       <div class="hs-section-lbl" style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:10px;">Your trips</div>
       <div class="trip-cards" id="trip-cards"></div>
@@ -6463,13 +6470,19 @@ function renderHomeScreen(){
 
   // Round DI: trip list shows immediately when there are trips, empty
   // state shows when there aren't.
-  var hasTrips = _tripsIndex && _tripsIndex.length > 0;
-  g("hs-trips-section").style.display = hasTrips ? "block" : "none";
-  g("hs-empty").style.display = hasTrips ? "none" : "block";
+  // PD.70: split drafts (research in progress) from built trips.
+  var allTrips = _tripsIndex || [];
+  var draftTrips = allTrips.filter(function(t){ return t && t.isDraft; });
+  var builtTrips = allTrips.filter(function(t){ return t && !t.isDraft; });
+  var hasAnyTrips = allTrips.length > 0;
+  g("hs-drafts-section").style.display = draftTrips.length > 0 ? "block" : "none";
+  g("hs-trips-section").style.display  = builtTrips.length > 0 ? "block" : "none";
+  g("hs-empty").style.display = hasAnyTrips ? "none" : "block";
 
-  if(hasTrips){
+  if(hasAnyTrips){
     var lbl=g("ntp-lbl"); if(lbl) lbl.textContent="Name this trip";
     var cards=g("trip-cards"); cards.innerHTML="";
+    var draftCards = g("draft-cards"); if (draftCards) draftCards.innerHTML="";
     // Round DI.2: show all trips; the .trip-cards container is
     // scrollable (max-height:280px;overflow-y:auto in CSS) so a long
     // list collapses naturally without a "show all" toggle.
@@ -6683,7 +6696,9 @@ function renderHomeScreen(){
       };})(entry.id,card);
       card.appendChild(info); card.appendChild(dup); card.appendChild(del);
       (function(id){card.onclick=function(e){if(e.target===del||e.target===dup)return;selectTrip(id);};})(entry.id);
-      cards.appendChild(card);
+      // PD.70: route the card to the correct section.
+      var _targetCards = entry.isDraft ? g("draft-cards") : cards;
+      if (_targetCards) _targetCards.appendChild(card);
 
       // ── v356.3: pre-trip pending-actions banner ──────────────
       // For trips departing within 14 days with at least one
