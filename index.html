@@ -17159,6 +17159,101 @@ function _pmRoleIndicatorHtml(placeName){
 }
 if (typeof globalThis !== "undefined") globalThis._pmRoleIndicatorHtml = _pmRoleIndicatorHtml;
 
+// ──────────────────────────────────────────────────────────────────────
+// Round PD.31: rich-text editor for notes fields. Inline contentEditable
+// + a small toolbar (B / I / • / 1. / 🔗). Used by every notes surface
+// (per-place research, trip-level research, trip-view notes). Content
+// stored as HTML; legacy plain-text values auto-migrate at render time.
+//
+// The .value polyfill (attached by _pmRtSetup) means existing read sites
+// (`ta.value`, `ta.value = ...`) keep working without per-site rewrites.
+// ──────────────────────────────────────────────────────────────────────
+function _pmRtInitContent(raw){
+  raw = String(raw == null ? "" : raw);
+  if (/<[a-z][^>]*>/i.test(raw)) return raw;  // already HTML
+  var esc = raw.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  return esc.replace(/\n/g, "<br>");
+}
+function _pmRtFieldHtml(id, initialContent, opts){
+  opts = opts || {};
+  var minH = opts.minHeight || "80px";
+  var placeholder = (opts.placeholder || "").replace(/"/g, "&quot;");
+  var content = _pmRtInitContent(initialContent);
+  return ''
+    + '<div class="pm-rt-wrap" style="border:1px solid #ccc;border-radius:5px;background:#fff;font-family:inherit;">'
+    +   '<div class="pm-rt-toolbar" style="display:flex;gap:1px;padding:3px 4px;border-bottom:1px solid #eee;background:#fafafa;">'
+    +     '<button type="button" onmousedown="event.preventDefault()" onclick="_pmRtCmd(this,&quot;bold&quot;)" title="Bold" style="font-size:13px;font-weight:700;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:serif;">B</button>'
+    +     '<button type="button" onmousedown="event.preventDefault()" onclick="_pmRtCmd(this,&quot;italic&quot;)" title="Italic" style="font-size:13px;font-style:italic;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:serif;">I</button>'
+    +     '<span style="width:1px;background:#ddd;margin:3px 4px;"></span>'
+    +     '<button type="button" onmousedown="event.preventDefault()" onclick="_pmRtCmd(this,&quot;insertUnorderedList&quot;)" title="Bullet list" style="font-size:13px;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:inherit;">•</button>'
+    +     '<button type="button" onmousedown="event.preventDefault()" onclick="_pmRtCmd(this,&quot;insertOrderedList&quot;)" title="Numbered list" style="font-size:11.5px;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:inherit;">1.</button>'
+    +     '<span style="width:1px;background:#ddd;margin:3px 4px;"></span>'
+    +     '<button type="button" onmousedown="event.preventDefault()" onclick="_pmRtCmd(this,&quot;createLink&quot;)" title="Add link" style="font-size:11.5px;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:inherit;">🔗</button>'
+    +     '<button type="button" onmousedown="event.preventDefault()" onclick="_pmRtCmd(this,&quot;unlink&quot;)" title="Remove link" style="font-size:11.5px;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:inherit;">⌧</button>'
+    +   '</div>'
+    +   '<div id="' + id + '" class="pm-rt-editor" contenteditable="true" data-placeholder="' + placeholder + '" '
+    +        'style="min-height:' + minH + ';padding:6px 8px;font:inherit;font-size:12.5px;line-height:1.5;color:#111;outline:none;overflow-y:auto;max-height:380px;">'
+    +     content
+    +   '</div>'
+    + '</div>';
+}
+function _pmRtCmd(btn, cmd){
+  var wrap = btn.closest ? btn.closest(".pm-rt-wrap") : null;
+  if (!wrap) return;
+  var ed = wrap.querySelector(".pm-rt-editor");
+  if (!ed) return;
+  ed.focus();
+  if (cmd === "createLink") {
+    var url = prompt("Paste link URL:", "https://");
+    if (!url || !url.trim() || url.trim() === "https://") return;
+    var clean = url.trim();
+    if (!/^https?:\/\//i.test(clean)) clean = "https://" + clean;
+    document.execCommand(cmd, false, clean);
+  } else {
+    document.execCommand(cmd, false, null);
+  }
+}
+function _pmRtSetup(root){
+  if (!root || !root.querySelectorAll) return;
+  root.querySelectorAll(".pm-rt-editor").forEach(function(ed){
+    if (ed._pmRtSetup) return;
+    ed._pmRtSetup = true;
+    Object.defineProperty(ed, 'value', {
+      get: function(){ return ed.innerHTML; },
+      set: function(v){ ed.innerHTML = _pmRtInitContent(v); },
+      configurable: true
+    });
+    // Open links in new tab when reading the notes (Cmd-click in
+    // contentEditable opens by default; this catches plain clicks
+    // when the editor is rendered in a read-mostly context).
+    ed.addEventListener("click", function(e){
+      var a = e.target && e.target.closest ? e.target.closest("a") : null;
+      if (a && a.href && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        window.open(a.href, "_blank", "noopener");
+      }
+    });
+  });
+}
+if (typeof globalThis !== "undefined") {
+  globalThis._pmRtCmd = _pmRtCmd;
+  globalThis._pmRtInitContent = _pmRtInitContent;
+  globalThis._pmRtFieldHtml = _pmRtFieldHtml;
+  globalThis._pmRtSetup = _pmRtSetup;
+}
+
+// Placeholder styling for empty rich-text editors.
+(function(){
+  if (document.getElementById("pm-rt-style")) return;
+  var s = document.createElement("style");
+  s.id = "pm-rt-style";
+  s.textContent = '.pm-rt-editor:empty:before{content:attr(data-placeholder);color:#999;font-style:italic;pointer-events:none;}'
+    + '.pm-rt-editor a{color:#1a5fa8;text-decoration:underline;}'
+    + '.pm-rt-editor ul, .pm-rt-editor ol{margin:6px 0;padding-left:22px;}'
+    + '.pm-rt-editor li{margin:2px 0;}';
+  document.head.appendChild(s);
+})();
+
 // Round PD.16: toggle the place's presence on the trip. Routes
 // through MaxRoleWriter so the c.role/c.status/placeMeta/_keep
 // surfaces stay in sync — the legitimate-exception #2 from PD.15
@@ -18733,7 +18828,7 @@ function _pmOpenTripResearchCard(){
       +       '<span style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;">Notes</span>'
       +       '<button type="button" id="pm-trc-dictate" style="font-size:11px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:3px 8px;cursor:pointer;font-family:inherit;">🎤 Dictate</button>'
       +     '</div>'
-      +     '<textarea id="pm-trc-notes" placeholder="What you\'ve learned, timing concerns, gear, things to pack, general questions to resolve…  Tip: lines starting with [ ] become checkboxes." style="width:100%;min-height:100px;font:inherit;font-size:12.5px;line-height:1.5;padding:6px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;color:#111;resize:vertical;box-sizing:border-box;font-family:inherit;">' + String(m.notes || "").replace(/</g, "&lt;") + '</textarea>'
+      +     _pmRtFieldHtml("pm-trc-notes", m.notes || "", { placeholder: "What you've learned, timing concerns, gear, things to pack, general questions to resolve…", minHeight: "100px" })
       +     '<div style="margin-top:6px;display:flex;justify-content:flex-end;">'
       +       '<button type="button" id="pm-trc-make-dests" style="font-size:11px;font-weight:600;color:#1a5fa8;background:#fff;border:1px dashed #c8d8f0;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;" title="Parse your notes as a list of places (sections, bullets, parentheticals, trailing nights) and add them as destinations on the current trip.">🪄 Make destinations from this list</button>'
       +     '</div>'
@@ -18752,6 +18847,7 @@ function _pmOpenTripResearchCard(){
   }
 
   ov.innerHTML = renderBody();
+  if (typeof _pmRtSetup === "function") _pmRtSetup(ov);  // PD.31: attach .value polyfill to any rich-text editors
   document.body.appendChild(ov);
 
   function close(){
@@ -18788,6 +18884,7 @@ function _pmOpenTripResearchCard(){
       var ta = ov.querySelector("#pm-trc-notes");
       if (ta) m.notes = ta.value;
       ov.innerHTML = renderBody();
+  if (typeof _pmRtSetup === "function") _pmRtSetup(ov);  // PD.31: attach .value polyfill to any rich-text editors
       ov.querySelector("#pm-trc-close").onclick = close;
       bindLinkActions();
       bindCrossLink();
@@ -18804,6 +18901,7 @@ function _pmOpenTripResearchCard(){
         var ta = ov.querySelector("#pm-trc-notes");
         if (ta) m.notes = ta.value;
         ov.innerHTML = renderBody();
+    if (typeof _pmRtSetup === "function") _pmRtSetup(ov);  // PD.31: attach .value polyfill to any rich-text editors
         ov.querySelector("#pm-trc-close").onclick = close;
         bindLinkActions();
         bindCrossLink();
@@ -18887,6 +18985,7 @@ function _pmOpenTripResearchCard(){
       m.notes = ta.value;
       if (_pmParseTodos(prev).length !== _pmParseTodos(m.notes).length) {
         ov.innerHTML = renderBody();
+    if (typeof _pmRtSetup === "function") _pmRtSetup(ov);  // PD.31: attach .value polyfill to any rich-text editors
         ov.querySelector("#pm-trc-close").onclick = close;
         bindLinkActions();
         bindDictation();
@@ -19318,7 +19417,7 @@ function _pmOpenResearchCard(placeName){
       +       '<span style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;">Notes</span>'
       +       '<button type="button" id="pm-rc-dictate" style="font-size:11px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:3px 8px;cursor:pointer;font-family:inherit;">🎤 Dictate</button>'
       +     '</div>'
-      +     '<textarea id="pm-rc-notes" placeholder="What you\'ve heard, links to come back to, things to verify…  Tip: lines starting with [ ] become checkboxes." style="width:100%;min-height:80px;font:inherit;font-size:12.5px;line-height:1.5;padding:6px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;color:#111;resize:vertical;box-sizing:border-box;font-family:inherit;">' + String(m.notes || "").replace(/</g, "&lt;") + '</textarea>'
+      +     _pmRtFieldHtml("pm-rc-notes", m.notes || "", { placeholder: "What you've heard, links to come back to, things to verify…", minHeight: "80px" })
       +     _pmRenderTodoList(m.notes, "pm-rc")
       +   '</div>'
       // Source links
@@ -19335,6 +19434,7 @@ function _pmOpenResearchCard(placeName){
   }
 
   ov.innerHTML = renderBody();
+  if (typeof _pmRtSetup === "function") _pmRtSetup(ov);  // PD.31: attach .value polyfill to any rich-text editors
   document.body.appendChild(ov);
 
   function close(){
@@ -19377,6 +19477,7 @@ function _pmOpenResearchCard(placeName){
       var ta = ov.querySelector("#pm-rc-notes");
       if (ta) m.notes = ta.value;
       ov.innerHTML = renderBody();
+  if (typeof _pmRtSetup === "function") _pmRtSetup(ov);  // PD.31: attach .value polyfill to any rich-text editors
       ov.querySelector("#pm-rc-close").onclick = close;
       bindLinkActions();
       bindStayButtons();
@@ -19389,6 +19490,7 @@ function _pmOpenResearchCard(placeName){
         var ta = ov.querySelector("#pm-rc-notes");
         if (ta) m.notes = ta.value;
         ov.innerHTML = renderBody();
+    if (typeof _pmRtSetup === "function") _pmRtSetup(ov);  // PD.31: attach .value polyfill to any rich-text editors
         ov.querySelector("#pm-rc-close").onclick = close;
         bindLinkActions();
         bindStayButtons();
@@ -19415,6 +19517,7 @@ function _pmOpenResearchCard(placeName){
       // Only re-render if the parsed TODO list could have changed.
       if (_pmParseTodos(prev).length !== _pmParseTodos(m.notes).length) {
         ov.innerHTML = renderBody();
+    if (typeof _pmRtSetup === "function") _pmRtSetup(ov);  // PD.31: attach .value polyfill to any rich-text editors
         ov.querySelector("#pm-rc-close").onclick = close;
         bindLinkActions();
         bindStayButtons();
@@ -42018,7 +42121,7 @@ function _openTripNotesPopover(){
       + '<div style="padding:10px 20px;display:flex;flex-direction:column;gap:14px;">'
       +   '<div>'
       +     '<div style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;margin-bottom:5px;">Notes</div>'
-      +     '<textarea id="trip-notes-text" placeholder="Hotel confirmation numbers, flight times, packing list, contacts &mdash; anything you\'ll want at trip time. Lines starting with [ ] become checkboxes." style="width:100%;min-height:160px;font:inherit;font-size:12.5px;line-height:1.5;padding:6px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;color:#111;resize:vertical;box-sizing:border-box;font-family:inherit;">' + String(n.text || "").replace(/</g, "&lt;") + '</textarea>'
+      +     _pmRtFieldHtml("trip-notes-text", n.text || "", { placeholder: "Hotel confirmation numbers, flight times, packing list, contacts — anything you'll want at trip time.", minHeight: "160px" })
       +   '</div>'
       +   '<div>'
       +     '<div style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;margin-bottom:5px;">Links</div>'
@@ -42033,6 +42136,7 @@ function _openTripNotesPopover(){
   }
 
   ov.innerHTML = renderBody();
+  if (typeof _pmRtSetup === "function") _pmRtSetup(ov);  // PD.31: attach .value polyfill to any rich-text editors
   document.body.appendChild(ov);
 
   function close(){
@@ -42069,6 +42173,7 @@ function _openTripNotesPopover(){
       var ta = ov.querySelector("#trip-notes-text");
       if (ta) n.text = ta.value;
       ov.innerHTML = renderBody();
+  if (typeof _pmRtSetup === "function") _pmRtSetup(ov);  // PD.31: attach .value polyfill to any rich-text editors
       bindAll();
     };
     ov.querySelectorAll(".trip-notes-del-link").forEach(function(btn){
@@ -42079,6 +42184,7 @@ function _openTripNotesPopover(){
         var ta = ov.querySelector("#trip-notes-text");
         if (ta) n.text = ta.value;
         ov.innerHTML = renderBody();
+    if (typeof _pmRtSetup === "function") _pmRtSetup(ov);  // PD.31: attach .value polyfill to any rich-text editors
         bindAll();
       };
     });
