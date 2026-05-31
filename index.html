@@ -15825,6 +15825,15 @@ function _renderPlaceActivityItems(){
     // at the top of the scroll container.
     list.appendChild(searchWrap);
 
+    // Round PD.46: search across notes. When a query is active, scan
+    // every doc in placeMeta/tripMeta for matches and surface them as
+    // clickable rows above the place list. Click → opens that doc in
+    // the editor directly.
+    if (_searchQ && typeof _pmRenderNotesSearchResults === "function") {
+      var _notesResults = _pmRenderNotesSearchResults(_searchQ);
+      if (_notesResults) list.appendChild(_notesResults);
+    }
+
     var tocList = document.createElement("div");
     tocList.style.cssText = "display:flex;flex-wrap:wrap;gap:4px 8px;";
     // Round PD.29: in place mode the TOC pills are PLACES
@@ -17851,6 +17860,129 @@ if (typeof globalThis !== "undefined") {
   globalThis._pmLinkEdit       = _pmLinkEdit;
   globalThis._pmLinkRemove     = _pmLinkRemove;
   globalThis._pmOpenLinkEditor = _pmOpenLinkEditor;
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Round PD.46: search across notes. Scans every doc's title + body in
+// placeMeta and tripMeta. Surfaces matches as a clickable panel above
+// the Discovery place list.
+// ──────────────────────────────────────────────────────────────────────
+function _pmReadablePlaceName(metaKey){
+  if (!_tb || !Array.isArray(_tb.placeActivities)) return metaKey;
+  for (var i = 0; i < _tb.placeActivities.length; i++) {
+    var item = _tb.placeActivities[i];
+    if (!item || !Array.isArray(item.requiredPlaces)) continue;
+    for (var j = 0; j < item.requiredPlaces.length; j++) {
+      var p = item.requiredPlaces[j];
+      if (p && p.place && typeof _pmMetaKey === "function" && _pmMetaKey(p.place) === metaKey) {
+        return p.place;
+      }
+    }
+  }
+  return metaKey;
+}
+function _pmMatchDoc(doc, q){
+  var title = String(doc.title || "");
+  if (title.toLowerCase().indexOf(q) >= 0) return title || "(untitled)";
+  var body = String(doc.body || "");
+  if (!body) return null;
+  var tmp = document.createElement("div");
+  tmp.innerHTML = body;
+  var text = tmp.textContent || tmp.innerText || "";
+  var textLower = text.toLowerCase();
+  var idx = textLower.indexOf(q);
+  if (idx < 0) return null;
+  var start = Math.max(0, idx - 40);
+  var end   = Math.min(text.length, idx + q.length + 80);
+  var snippet = text.slice(start, end).trim();
+  if (start > 0) snippet = "…" + snippet;
+  if (end < text.length) snippet = snippet + "…";
+  return snippet;
+}
+function _pmSearchNotes(query){
+  if (!query) return [];
+  var q = String(query).toLowerCase().trim();
+  if (!q) return [];
+  var results = [];
+  try {
+    if (_tb && _tb.tripMeta && Array.isArray(_tb.tripMeta.docs)) {
+      _tb.tripMeta.docs.forEach(function(doc, idx){
+        var snip = _pmMatchDoc(doc, q);
+        if (snip) results.push({
+          ownerLabel: "Trip notes",
+          ownerType: "trip",
+          meta: _tb.tripMeta,
+          docIdx: idx,
+          docTitle: doc.title || "(untitled)",
+          snippet: snip
+        });
+      });
+    }
+    if (_tb && _tb.placeMeta) {
+      Object.keys(_tb.placeMeta).forEach(function(key){
+        var meta = _tb.placeMeta[key];
+        if (!meta || !Array.isArray(meta.docs)) return;
+        meta.docs.forEach(function(doc, idx){
+          var snip = _pmMatchDoc(doc, q);
+          if (snip) results.push({
+            ownerLabel: _pmReadablePlaceName(key),
+            ownerType: "place",
+            meta: meta,
+            docIdx: idx,
+            docTitle: doc.title || "(untitled)",
+            snippet: snip
+          });
+        });
+      });
+    }
+  } catch(_){}
+  return results;
+}
+function _pmOpenSearchedDoc(meta, docIdx){
+  if (!meta || !Array.isArray(meta.docs) || !meta.docs[docIdx]) return;
+  var doc = meta.docs[docIdx];
+  if (typeof _pmOpenDocEditor !== "function") return;
+  _pmOpenDocEditor(doc, function(saved){
+    meta.docs[docIdx] = saved;
+    if (typeof _pmDocsSyncToNotes === "function") _pmDocsSyncToNotes(meta);
+    if (typeof _pmPersistResearchToTrip === "function") _pmPersistResearchToTrip();
+    if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
+  });
+}
+function _pmRenderNotesSearchResults(query){
+  var matches = _pmSearchNotes(query);
+  if (!matches.length) return null;
+  var wrap = document.createElement("div");
+  wrap.id = "tb-notes-search-results";
+  wrap.style.cssText = "margin:0 0 14px;padding:10px 12px;background:#f5f9ff;border:1px solid #c8d8f0;border-radius:6px;";
+  var hdr = document.createElement("div");
+  hdr.style.cssText = "font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#1a5fa8;margin-bottom:8px;";
+  hdr.textContent = "📝 " + matches.length + " match" + (matches.length === 1 ? "" : "es") + " in notes";
+  wrap.appendChild(hdr);
+  matches.forEach(function(m, i){
+    var row = document.createElement("div");
+    row.style.cssText = "padding:8px 8px;border-top:" + (i === 0 ? "none" : "1px solid #e0e8f0") + ";cursor:pointer;border-radius:4px;transition:background-color .12s;";
+    row.onmouseenter = function(){ row.style.background = "#eef4fb"; };
+    row.onmouseleave = function(){ row.style.background = "transparent"; };
+    var title = document.createElement("div");
+    title.style.cssText = "font-size:12.5px;color:#111;";
+    title.innerHTML = '<span style="color:#666;font-weight:500;">' + _pmEsc(m.ownerLabel) + ' →</span> <strong>' + _pmEsc(m.docTitle) + '</strong>';
+    var snippet = document.createElement("div");
+    snippet.style.cssText = "font-size:11px;color:#555;line-height:1.45;margin-top:3px;";
+    snippet.textContent = m.snippet;
+    row.appendChild(title);
+    row.appendChild(snippet);
+    (function(meta, docIdx){
+      row.onclick = function(){ _pmOpenSearchedDoc(meta, docIdx); };
+    })(m.meta, m.docIdx);
+    wrap.appendChild(row);
+  });
+  return wrap;
+}
+if (typeof globalThis !== "undefined") {
+  globalThis._pmSearchNotes              = _pmSearchNotes;
+  globalThis._pmRenderNotesSearchResults = _pmRenderNotesSearchResults;
+  globalThis._pmOpenSearchedDoc          = _pmOpenSearchedDoc;
 }
 if (typeof globalThis !== "undefined") {
   globalThis._pmDocsEnsure = _pmDocsEnsure;
