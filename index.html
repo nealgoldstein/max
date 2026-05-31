@@ -17557,6 +17557,154 @@ if (typeof globalThis !== "undefined") {
   globalThis._pmDocsRefreshActive = _pmDocsRefreshActive;
   globalThis._pmOpenDocEditor = _pmOpenDocEditor;
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// Round PD.36: editable links — display name + URL, scrolling list,
+// dialog-based add/edit. Parallel structure to PD.35's docs.
+// ──────────────────────────────────────────────────────────────────────
+function _pmLinksEnsure(m){
+  if (!m) return;
+  if (!Array.isArray(m.links)) m.links = [];
+}
+function _pmLinksRender(m, idPrefix){
+  _pmLinksEnsure(m);
+  var rowsHtml = m.links.map(function(link, idx){
+    var url   = String(link.url || "");
+    var name  = String(link.name || link.domain || (typeof _pmExtractDomain === "function" ? _pmExtractDomain(url) : "") || "link");
+    var urlSafe  = url.replace(/"/g, "&quot;");
+    var nameSafe = name.replace(/</g, "&lt;");
+    return '<div class="pm-link-row" data-idx="' + idx + '" '
+      +    'style="display:flex;align-items:center;gap:6px;padding:8px 12px;border-bottom:1px solid #eee;">'
+      +   '<a href="' + urlSafe + '" target="_blank" rel="noopener noreferrer" '
+      +      'onclick="event.stopPropagation();" '
+      +      'style="flex:1;font-size:12px;color:#1a5fa8;text-decoration:none;font-weight:600;word-break:break-word;cursor:pointer;" '
+      +      'title="' + urlSafe + '">↗ ' + nameSafe + '</a>'
+      +   '<button type="button" class="pm-link-edit" data-idx="' + idx + '" onclick="event.stopPropagation();_pmLinkEdit(this);" title="Edit" '
+      +      'style="font-size:11px;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:4px;padding:2px 8px;cursor:pointer;font-family:inherit;">edit</button>'
+      +   '<button type="button" class="pm-link-del" data-idx="' + idx + '" onclick="event.stopPropagation();_pmLinkRemove(this);" title="Delete" '
+      +      'style="font-size:13px;color:#a93826;background:#fff;border:1px solid #f0d8d2;border-radius:4px;padding:2px 7px;cursor:pointer;font-family:inherit;">×</button>'
+      + '</div>';
+  }).join('');
+  var emptyHtml = '<div style="padding:20px;text-align:center;color:#999;font-size:12px;font-style:italic;">No links yet.</div>';
+  return '<div class="pm-links-wrap" data-id-prefix="' + idPrefix + '">'
+    + '<div class="pm-link-list" style="max-height:200px;overflow-y:auto;border:1px solid #ddd;border-radius:6px;background:#fff;">'
+    +   (rowsHtml || emptyHtml)
+    + '</div>'
+    + '<button type="button" class="pm-link-add-btn" onclick="event.stopPropagation();_pmLinkAdd();" '
+    +    'style="margin-top:6px;font-size:11.5px;font-weight:600;color:#1a5fa8;background:#fff;border:1px dashed #c8d8f0;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;">+ Add link</button>'
+    + '</div>';
+}
+function _pmLinkAdd(){
+  var m = window._pmActiveResearchMeta;
+  if (!m) return;
+  _pmOpenLinkEditor({ url: "", name: "" }, function(saved){
+    if (!saved.url || !saved.url.trim()) return;
+    _pmLinksEnsure(m);
+    var clean = saved.url.trim();
+    if (!/^https?:\/\//i.test(clean)) clean = "https://" + clean;
+    m.links.push({
+      url: clean,
+      name: (saved.name || "").trim(),
+      domain: (typeof _pmExtractDomain === "function") ? _pmExtractDomain(clean) : "",
+      addedAt: new Date().toISOString()
+    });
+    _pmDocsRefreshActive();
+  });
+}
+function _pmLinkEdit(btn){
+  var m = window._pmActiveResearchMeta;
+  if (!m || !Array.isArray(m.links)) return;
+  var idx = parseInt(btn.getAttribute("data-idx"), 10);
+  if (!isFinite(idx) || !m.links[idx]) return;
+  var orig = m.links[idx];
+  _pmOpenLinkEditor({ url: orig.url || "", name: orig.name || "" }, function(saved){
+    if (!saved.url || !saved.url.trim()) return;
+    var clean = saved.url.trim();
+    if (!/^https?:\/\//i.test(clean)) clean = "https://" + clean;
+    m.links[idx] = {
+      url: clean,
+      name: (saved.name || "").trim(),
+      domain: (typeof _pmExtractDomain === "function") ? _pmExtractDomain(clean) : "",
+      addedAt: orig.addedAt || new Date().toISOString()
+    };
+    _pmDocsRefreshActive();
+  });
+}
+function _pmLinkRemove(btn){
+  var m = window._pmActiveResearchMeta;
+  if (!m || !Array.isArray(m.links)) return;
+  var idx = parseInt(btn.getAttribute("data-idx"), 10);
+  if (!isFinite(idx)) return;
+  if (!confirm("Delete this link?")) return;
+  m.links.splice(idx, 1);
+  _pmDocsRefreshActive();
+}
+function _pmOpenLinkEditor(link, onSave){
+  var existing = document.getElementById("pm-link-editor");
+  if (existing) existing.remove();
+  var ov = document.createElement("div");
+  ov.id = "pm-link-editor";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:11750;display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;";
+
+  var box = document.createElement("div");
+  box.style.cssText = "background:#fff;border-radius:12px;max-width:480px;width:100%;display:flex;flex-direction:column;box-shadow:0 12px 36px rgba(0,0,0,0.28);overflow:hidden;";
+
+  var urlSafe  = String(link.url || "").replace(/"/g, "&quot;");
+  var nameSafe = String(link.name || "").replace(/"/g, "&quot;");
+  box.innerHTML = ''
+    + '<div style="padding:16px 20px 8px;">'
+    +   '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">' + (link.url ? 'Edit link' : 'Add link') + '</div>'
+    + '</div>'
+    + '<div style="padding:6px 20px 14px;display:flex;flex-direction:column;gap:10px;">'
+    +   '<div>'
+    +     '<label style="display:block;font-size:11px;font-weight:600;color:#555;margin-bottom:4px;">Name <span style="font-weight:400;color:#999;">(what to call it)</span></label>'
+    +     '<input id="pm-link-edit-name" type="text" value="' + nameSafe + '" placeholder="e.g. \'Reykjavik tourist office\'" style="width:100%;font:inherit;font-size:12.5px;padding:6px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;box-sizing:border-box;outline:none;" />'
+    +   '</div>'
+    +   '<div>'
+    +     '<label style="display:block;font-size:11px;font-weight:600;color:#555;margin-bottom:4px;">URL</label>'
+    +     '<input id="pm-link-edit-url" type="text" value="' + urlSafe + '" placeholder="https://example.com" style="width:100%;font:inherit;font-size:12.5px;padding:6px 8px;border:1px solid #ccc;border-radius:5px;background:#fff;box-sizing:border-box;outline:none;" />'
+    +   '</div>'
+    + '</div>'
+    + '<div style="padding:10px 20px 16px;display:flex;justify-content:flex-end;gap:8px;">'
+    +   '<button type="button" id="pm-link-edit-cancel" style="font-size:13px;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 16px;cursor:pointer;font-family:inherit;">Cancel</button>'
+    +   '<button type="button" id="pm-link-edit-save" style="font-size:13px;font-weight:600;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 18px;cursor:pointer;font-family:inherit;">Save</button>'
+    + '</div>';
+
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+
+  function cleanup(){ if (ov && ov.parentNode) ov.parentNode.removeChild(ov); }
+  function save(){
+    var nameInp = ov.querySelector("#pm-link-edit-name");
+    var urlInp  = ov.querySelector("#pm-link-edit-url");
+    var updated = {
+      name: nameInp ? nameInp.value : "",
+      url:  urlInp  ? urlInp.value  : ""
+    };
+    if (typeof onSave === "function") onSave(updated);
+    cleanup();
+  }
+  ov.querySelector("#pm-link-edit-save").onclick = save;
+  ov.querySelector("#pm-link-edit-cancel").onclick = cleanup;
+  box.onclick = function(e){ e.stopPropagation(); };
+  ov.onclick = cleanup;
+  // Enter key in either field submits
+  ["#pm-link-edit-name", "#pm-link-edit-url"].forEach(function(sel){
+    var inp = ov.querySelector(sel);
+    if (inp) inp.addEventListener("keydown", function(e){ if (e.key === "Enter") { e.preventDefault(); save(); } });
+  });
+  setTimeout(function(){
+    var f = ov.querySelector(link.url ? "#pm-link-edit-name" : "#pm-link-edit-url");
+    if (f) { f.focus(); if (f.value) f.select(); }
+  }, 50);
+}
+if (typeof globalThis !== "undefined") {
+  globalThis._pmLinksRender    = _pmLinksRender;
+  globalThis._pmLinkAdd        = _pmLinkAdd;
+  globalThis._pmLinkEdit       = _pmLinkEdit;
+  globalThis._pmLinkRemove     = _pmLinkRemove;
+  globalThis._pmOpenLinkEditor = _pmOpenLinkEditor;
+}
 if (typeof globalThis !== "undefined") {
   globalThis._pmDocsEnsure = _pmDocsEnsure;
   globalThis._pmDocsRender = _pmDocsRender;
@@ -19150,8 +19298,7 @@ function _pmOpenTripResearchCard(){
       +   '</div>'
       +   '<div>'
       +     '<div style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;margin-bottom:5px;">Source links</div>'
-      +     '<div id="pm-trc-links">' + linksHtml + '</div>'
-      +     '<button type="button" id="pm-trc-add-link" style="margin-top:6px;font-size:11.5px;font-weight:600;color:#1a5fa8;background:#fff;border:1px dashed #c8d8f0;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;">+ Add link</button>'
+      +     _pmLinksRender(m, "pm-trc")
       +   '</div>'
       + '</div>'
       + '<div style="padding:10px 20px 18px;display:flex;justify-content:flex-end;gap:8px;">'
@@ -19166,19 +19313,19 @@ function _pmOpenTripResearchCard(){
   document.body.appendChild(ov);
 
   function close(){
-    _pmDocsReadFromDom(ov, m);  // PD.33: multi-doc read
-    _pmDocsClearActive();
-    if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
-    // v359.55.17: persist to trip.brief + autoSave so trip-view edits
-    // survive reload (the picker re-render hook below is a no-op when
-    // the user is on the trip view; the persistence is the load-bearing
-    // step on that surface).
-    _pmPersistResearchToTrip();
-    if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
-    // Also nudge the trip view to refresh if that's where we are.
-    if (typeof _leftMode !== "undefined" && _leftMode === "trip" && typeof drawTripMode === "function") {
-      drawTripMode();
-    }
+    // Round PD.36: bulletproof close — every save/persist step is
+    // try-wrapped so a downstream throw can't keep the overlay open.
+    // DOM removal happens unconditionally before the post-close hooks.
+    try { _pmDocsReadFromDom(ov, m); } catch(_){}
+    try { _pmDocsClearActive(); } catch(_){}
+    try { if (ov && ov.parentNode) ov.parentNode.removeChild(ov); } catch(_){}
+    try { _pmPersistResearchToTrip(); } catch(_){}
+    try { if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems(); } catch(_){}
+    try {
+      if (typeof _leftMode !== "undefined" && _leftMode === "trip" && typeof drawTripMode === "function") {
+        drawTripMode();
+      }
+    } catch(_){}
   }
   ov.onclick = function(e){ if (e.target === ov) close(); };
   ov.querySelector("#pm-trc-close").onclick = close;
@@ -19748,8 +19895,7 @@ function _pmOpenResearchCard(placeName){
       // Source links
       +   '<div>'
       +     '<div style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;margin-bottom:5px;">Source links</div>'
-      +     '<div id="pm-rc-links">' + linksHtml + '</div>'
-      +     '<button type="button" id="pm-rc-add-link" style="margin-top:6px;font-size:11.5px;font-weight:600;color:#1a5fa8;background:#fff;border:1px dashed #c8d8f0;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;">+ Add link</button>'
+      +     _pmLinksRender(m, "pm-rc")
       +   '</div>'
       + '</div>'
       + '<div style="padding:10px 20px 18px;display:flex;justify-content:flex-end;gap:8px;">'
@@ -19764,16 +19910,18 @@ function _pmOpenResearchCard(placeName){
   document.body.appendChild(ov);
 
   function close(){
-    // Save notes on close. v359.55.17: persist to trip.brief +
-    // autoSave + refresh the active surface (picker or trip view).
-    _pmDocsReadFromDom(ov, m);  // PD.33: multi-doc read
-    _pmDocsClearActive();
-    _pmPersistResearchToTrip();
-    setTimeout(function(){
-      if (typeof _leftMode !== "undefined" && _leftMode === "trip" && typeof drawTripMode === "function") drawTripMode();
-    }, 0);
-    if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
-    if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
+    // Round PD.36: bulletproof — try-wrap every step + remove overlay
+    // before the optional post-close hooks so Done always closes.
+    try { _pmDocsReadFromDom(ov, m); } catch(_){}
+    try { _pmDocsClearActive(); } catch(_){}
+    try { if (ov && ov.parentNode) ov.parentNode.removeChild(ov); } catch(_){}
+    try { _pmPersistResearchToTrip(); } catch(_){}
+    try { if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems(); } catch(_){}
+    try {
+      setTimeout(function(){
+        if (typeof _leftMode !== "undefined" && _leftMode === "trip" && typeof drawTripMode === "function") drawTripMode();
+      }, 0);
+    } catch(_){}
   }
   ov.onclick = function(e){ if (e.target === ov) close(); };
   ov.querySelector("#pm-rc-close").onclick = close;
@@ -42451,8 +42599,7 @@ function _openTripNotesPopover(){
       +   '</div>'
       +   '<div>'
       +     '<div style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;margin-bottom:5px;">Links</div>'
-      +     '<div id="trip-notes-links">' + linksHtml + '</div>'
-      +     '<button type="button" id="trip-notes-add-link" style="margin-top:6px;font-size:11.5px;font-weight:600;color:#1a5fa8;background:#fff;border:1px dashed #c8d8f0;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;">+ Add link</button>'
+      +     _pmLinksRender(n, "trip-notes")
       +   '</div>'
       + '</div>'
       + '<div style="padding:10px 20px 18px;display:flex;justify-content:flex-end;gap:8px;">'
@@ -42467,12 +42614,13 @@ function _openTripNotesPopover(){
   document.body.appendChild(ov);
 
   function close(){
-    _pmDocsReadFromDom(ov, n);  // PD.33: multi-doc read
-    _pmDocsClearActive();
-    n.updatedAt = Date.now();
-    if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
-    if (typeof autoSave === "function") autoSave();
-    if (typeof _leftMode !== "undefined" && _leftMode === "trip" && typeof drawTripMode === "function") drawTripMode();
+    // Round PD.36: bulletproof close (see research card close).
+    try { _pmDocsReadFromDom(ov, n); } catch(_){}
+    try { _pmDocsClearActive(); } catch(_){}
+    try { n.updatedAt = Date.now(); } catch(_){}
+    try { if (ov && ov.parentNode) ov.parentNode.removeChild(ov); } catch(_){}
+    try { if (typeof autoSave === "function") autoSave(); } catch(_){}
+    try { if (typeof _leftMode !== "undefined" && _leftMode === "trip" && typeof drawTripMode === "function") drawTripMode(); } catch(_){}
   }
   ov.onclick = function(e){ if (e.target === ov) close(); };
 
