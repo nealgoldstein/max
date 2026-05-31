@@ -15109,7 +15109,7 @@ function _renderPlaceActivityItems(){
       if (!item || !Array.isArray(item.requiredPlaces)) return;
       item.requiredPlaces.forEach(function(p){
         if (!p || !p.place) return;
-        if (p._rejected === true) return;
+        // Round PD.5: _rejected skip removed — see comment at line ~16012.
         var hubKey = p._dayTripHub || "";
         if (!hubKey) return;
         if (!_childrenByHub[hubKey]) {
@@ -15791,7 +15791,7 @@ function _renderPlaceActivityItems(){
         if (!item || !Array.isArray(item.requiredPlaces)) return;
         item.requiredPlaces.forEach(function(p){
           if (!p || !p.place) return;
-          if (p._rejected === true) return;
+          // Round PD.5: _rejected skip removed — see comment at line ~16012.
           var key = p.place.toLowerCase();
           if (!byPlace[key]) {
             byPlace[key] = {
@@ -15870,7 +15870,11 @@ function _renderPlaceActivityItems(){
         // Activity badges — list every activity this place appears under.
         var activityList = pInfo.activities.map(function(a){
           var nm = _pmEsc(a.item.name || a.item.section || "");
-          var iconic = a.item.iconic ? ' <span style="color:#b28a2e;font-weight:700;">★</span>' : '';
+          // Round PD.4: iconic ★ marker dropped from activity pills.
+          // Auto-check behavior on iconic activities is preserved
+          // upstream; the visible badge was misreading as "Max says
+          // this matters more than what you asked for."
+          var iconic = '';
           return '<span style="display:inline-flex;align-items:center;font-size:10.5px;color:#555;background:#f5f1e8;border:1px solid #e6dfca;border-radius:5px;padding:2px 7px;">'
             + nm + iconic + '</span>';
         }).join(" ");
@@ -15958,7 +15962,8 @@ function _renderPlaceActivityItems(){
       secItems.forEach(function(item){
         var anyKept = (item.requiredPlaces||[]).some(function(p){ return p && p._keep; });
         item.checked = anyKept;
-        var iconicTag = item.iconic ? '<span style="font-size:9px;color:#b28a2e;font-weight:700;margin-left:6px;">★ iconic</span>' : '';
+        // Round PD.4: iconic badge removed from Discovery rows.
+        var iconicTag = '';
         var eps = item.endpoints || item.requiredPlaces || [];
         var arrow = item.direction === "either" ? " ↔ " : " → ";
         var pairText = eps.map(function(p){return _pmEsc(p && p.place || "");}).filter(Boolean).join(arrow);
@@ -16004,10 +16009,13 @@ function _renderPlaceActivityItems(){
       var places = Array.isArray(item.requiredPlaces) ? item.requiredPlaces : [];
       places.forEach(function(p){
         if (!p || !p.place) return;
-        // Round NC.X: rejected places skip the in-section row render
-        // entirely. They live under the dedicated "Rejected" section
-        // at the bottom of the list.
-        if (p._rejected === true) return;
+        // Round PD.5 (v360.5): _rejected skip removed. PD.1 retired
+        // the Rejected section, so any place still carrying _rejected
+        // from legacy data was orphaning silently (counted in the
+        // TOC, missing from the section render). The new model has
+        // only "on the list" vs "removed via ×"; legacy _rejected
+        // state is treated as on-the-list. User can remove if they
+        // want via the row's × button.
         var key = p.place.toLowerCase();
         if (!byDest[key]) {
           byDest[key] = { place: p.place, nightsMax: 0, items: [], placeRefs: [] };
@@ -16404,7 +16412,8 @@ function _renderPlaceActivityItems(){
       // item.requiredPlaces and route the click through togglePlaceInActivity.
       var rightHtml = '<div class="tb-act-col-right">';
       d.items.forEach(function(item){
-        var iconicTag = item.iconic ? '<span style="font-size:9px;color:#b28a2e;font-weight:700;margin-left:6px;">★ iconic</span>' : '';
+        // Round PD.4: iconic badge removed from Discovery rows.
+        var iconicTag = '';
         // Round DN.5: truncate description to one line with ellipsis;
         // a ▾ chevron at the end signals "more to read." Click the
         // description (anywhere) to expand inline; click again to
@@ -20883,11 +20892,13 @@ function _renderPlacePickerMap(targetId){
   // predictor lookup keeps a single source of truth for role.
 
   // Tear down markers for places no longer in the dataset, OR for
-  // places the user has REJECTED. Rejected places live on in the
-  // picker list (under the "Rejected" section) but don't render on
-  // the map. Round NC.X.
+  // Round PD.5: tear down markers for places no longer in the
+  // dataset. The earlier _rejected branch (legacy "rejected places
+  // don't render on the map") is gone — PD.1 retired the Rejected
+  // section, and the new model treats legacy _rejected as
+  // on-the-list.
   Object.keys(_pmMarkersByPlace).forEach(function(k){
-    if (!allPlaces[k] || (allPlaces[k] && allPlaces[k]._rejected)) {
+    if (!allPlaces[k]) {
       try { _pmMap.removeLayer(_pmMarkersByPlace[k]); } catch(_){}
       delete _pmMarkersByPlace[k];
     }
@@ -20913,11 +20924,7 @@ function _renderPlacePickerMap(targetId){
   var bounds = [];
   Object.keys(allPlaces).forEach(function(key){
     var info = allPlaces[key];
-    // Round NC.X: Rejected places never render on the map. They live
-    // on in the picker list (under "Rejected") but are out of sight
-    // on every map surface. The tear-down loop above already removed
-    // any existing marker; skip creating a new one here.
-    if (info && info._rejected) return;
+    // Round PD.5: _rejected skip removed — see tear-down comment above.
     var ll = _coarseGeocode[key];
     function placeMarker(latLng){
       bounds.push(latLng);
