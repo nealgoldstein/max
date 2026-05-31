@@ -19287,8 +19287,12 @@ function _pmDraftSnapshot(){
 function _pmDraftSave(){
   _pmDraftEnsure();
   if (!trip || !trip.brief) return;
+  // PD.66 (architectural): only stamp the snapshot when this trip is
+  // actually a draft. If the user is editing notes on a BUILT trip
+  // (post-Choreograph), the normal save path handles it; we must not
+  // re-flip _isDraft back on.
+  if (!trip.brief._isDraft) return;
   trip.brief._tbDraft = _pmDraftSnapshot();
-  trip.brief._isDraft = true;
   if (typeof localSave === "function") {
     try { localSave(); } catch(e){ console.warn("[Max draft] localSave failed:", e && e.message); }
   }
