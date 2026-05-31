@@ -15693,6 +15693,15 @@ function _renderPlaceActivityItems(){
     printBtn.title = "Print this list (map and controls are hidden on the printed page)";
     printBtn.onclick = function(e){ e.stopPropagation(); _pmPrintDiscovery(); };
     hdrActions.appendChild(printBtn);
+    // Round PD.58: Share button — generates a URL with current Discovery
+    // state encoded; recipient opens for read-only view.
+    var shareBtn = document.createElement("button");
+    shareBtn.type = "button";
+    shareBtn.style.cssText = "font-size:11px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;";
+    shareBtn.innerHTML = '🔗 Share';
+    shareBtn.title = "Generate a shareable URL of this Discovery (read-only for the recipient)";
+    shareBtn.onclick = function(e){ e.stopPropagation(); _pmShareDiscovery(); };
+    hdrActions.appendChild(shareBtn);
     // Round PD.54: Bulk select button. Toggles bulk-mode on/off.
     var bulkBtn = document.createElement("button");
     bulkBtn.type = "button";
@@ -18558,6 +18567,241 @@ function _pmRenderNotesSearchResults(query){
     }
   });
 })();
+
+
+// ──────────────────────────────────────────────────────────────────────
+// Round PD.58: public share link for Discovery. Generates a URL with
+// the current Discovery research (places, docs, links, tags) encoded
+// as a JSON payload in the query string. Recipient opens link →
+// the boot handler in this section detects ?disc=… and renders a
+// read-only viewer. No server required.
+//
+// Notable scope cuts:
+//   • Image / file attachments are stripped from doc bodies before
+//     encoding — base64 inline images blow URL size out of bounds
+//     immediately. The viewer shows a "[attachment removed in share]"
+//     placeholder.
+//   • Pure client-side: no token, no expiry, no revocation. The URL
+//     IS the share permission.
+// ──────────────────────────────────────────────────────────────────────
+function _pmCollectDiscoveryShare(){
+  var payload = {
+    v: 1,                                  // schema version
+    sharedAt: new Date().toISOString(),
+    sentence: (_tb && _tb.sentence) || "",
+    region:   (_tb && _tb.region) || "",
+    places:   [],
+    placeMeta: {},
+    tripMeta:  null
+  };
+  // Collect unique place names from placeActivities → requiredPlaces.
+  var seen = {};
+  (_tb.placeActivities || []).forEach(function(item){
+    (item.requiredPlaces || []).forEach(function(p){
+      if (!p || !p.place) return;
+      var k = p.place.toLowerCase();
+      if (seen[k]) return;
+      seen[k] = true;
+      // Only share kept (or non-rejected) places.
+      if (p._rejected === true) return;
+      payload.places.push({
+        name: p.place,
+        country: p.country || "",
+        kept: !!p._keep
+      });
+    });
+  });
+  // Per-place meta (docs, links). Strip attachments from doc bodies.
+  if (_tb && _tb.placeMeta) {
+    Object.keys(_tb.placeMeta).forEach(function(k){
+      var m = _tb.placeMeta[k];
+      if (!m) return;
+      var slim = _pmSlimMetaForShare(m);
+      if (slim) payload.placeMeta[k] = slim;
+    });
+  }
+  // Trip-level meta.
+  if (_tb && _tb.tripMeta) {
+    payload.tripMeta = _pmSlimMetaForShare(_tb.tripMeta);
+  }
+  return payload;
+}
+function _pmSlimMetaForShare(m){
+  if (!m) return null;
+  var docs = Array.isArray(m.docs) ? m.docs.map(function(d){
+    var body = (d.body || "").replace(/<img[^>]*>/gi, "<em>[image removed in share]</em>")
+                              .replace(/<a[^>]*class="pm-rt-attach[^"]*"[^>]*>[\s\S]*?<\/a>/gi, "<em>[file removed in share]</em>");
+    return {
+      id: d.id, title: d.title || "", body: body,
+      createdAt: d.createdAt || null, updatedAt: d.updatedAt || null,
+      tags: Array.isArray(d.tags) ? d.tags.slice() : []
+    };
+  }) : [];
+  var links = Array.isArray(m.links) ? m.links.slice() : [];
+  if (!docs.length && !links.length && !(m.notes || "").trim()) return null;
+  return { docs: docs, links: links };
+}
+function _pmShareDiscovery(){
+  var payload = _pmCollectDiscoveryShare();
+  var json = JSON.stringify(payload);
+  var encoded;
+  try { encoded = encodeURIComponent(btoa(unescape(encodeURIComponent(json)))); }
+  catch(e){
+    alert("Couldn't encode the share payload: " + (e && e.message || e));
+    return;
+  }
+  var url = location.origin + location.pathname + "?disc=" + encoded;
+  _pmShareModalShow(url, json.length);
+}
+function _pmShareModalShow(url, byteSize){
+  var existing = document.getElementById("pm-share-modal");
+  if (existing) existing.remove();
+  var ov = document.createElement("div");
+  ov.id = "pm-share-modal";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:14000;display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;";
+  ov.onclick = function(){ ov.remove(); };
+  var box = document.createElement("div");
+  box.style.cssText = "background:#fff;border-radius:12px;max-width:560px;width:100%;padding:22px 26px;box-shadow:0 12px 36px rgba(0,0,0,0.28);font-size:13px;color:#222;";
+  box.onclick = function(e){ e.stopPropagation(); };
+
+  var sizeKb = (byteSize / 1024).toFixed(1);
+  var urlLen = url.length;
+  var sizeWarn = "";
+  if (urlLen > 30000) {
+    sizeWarn = '<div style="margin-top:10px;padding:8px 12px;background:#fdf6f4;border:1px solid #f0d8d2;border-radius:6px;font-size:11.5px;color:#a93826;">⚠ This URL is ' + urlLen.toLocaleString() + ' characters. Email and messaging apps may truncate it. Consider sharing fewer docs.</div>';
+  } else if (urlLen > 8000) {
+    sizeWarn = '<div style="margin-top:10px;padding:8px 12px;background:#fffaf0;border:1px solid #f0e0c0;border-radius:6px;font-size:11.5px;color:#8a6020;">URL is ' + urlLen.toLocaleString() + ' characters — fine for most apps but may be truncated by SMS or some chat tools.</div>';
+  }
+
+  box.innerHTML = '<div style="font-size:16px;font-weight:700;margin-bottom:6px;">Share this Discovery</div>'
+    + '<div style="font-size:11.5px;color:#666;margin-bottom:14px;line-height:1.5;">'
+    +   'Anyone with this link can view your places, notes, links, and tags — read-only. '
+    +   'Attachments are stripped to keep the URL small. The URL is the only access control; treat it like a password.'
+    + '</div>'
+    + '<div style="display:flex;gap:6px;align-items:stretch;">'
+    +   '<input id="pm-share-url" type="text" readonly value="' + url.replace(/"/g, "&quot;") + '" '
+    +     'style="flex:1;font:inherit;font-size:11.5px;padding:8px 10px;border:1px solid #ccc;border-radius:6px;background:#fafafa;color:#333;overflow:hidden;text-overflow:ellipsis;" />'
+    +   '<button type="button" id="pm-share-copy" '
+    +     'style="font-size:12px;font-weight:600;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Copy</button>'
+    + '</div>'
+    + sizeWarn
+    + '<div style="margin-top:6px;font-size:10.5px;color:#999;">Payload: ' + sizeKb + ' KB · URL: ' + urlLen.toLocaleString() + ' chars</div>'
+    + '<div style="margin-top:18px;text-align:right;">'
+    +   '<button type="button" id="pm-share-close" style="font-size:12px;font-weight:600;color:#666;background:#fff;border:1px solid #ccc;border-radius:6px;padding:7px 14px;cursor:pointer;font-family:inherit;">Done</button>'
+    + '</div>';
+
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  var inp = box.querySelector("#pm-share-url");
+  if (inp) { try { inp.focus(); inp.select(); } catch(_){} }
+  box.querySelector("#pm-share-copy").onclick = function(){
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url);
+      } else {
+        inp.focus(); inp.select(); document.execCommand("copy");
+      }
+      var btn = box.querySelector("#pm-share-copy");
+      btn.textContent = "Copied ✓";
+      setTimeout(function(){ btn.textContent = "Copy"; }, 1800);
+    } catch(e){
+      alert("Couldn't copy — select the text and copy manually.");
+    }
+  };
+  box.querySelector("#pm-share-close").onclick = function(){ ov.remove(); };
+}
+
+// Boot detection: if ?disc=… in URL, render the read-only viewer.
+function _pmMaybeRenderSharedDiscovery(){
+  try {
+    var qs = new URLSearchParams(location.search);
+    var enc = qs.get("disc");
+    if (!enc) return false;
+    var json;
+    try {
+      json = decodeURIComponent(escape(atob(decodeURIComponent(enc))));
+    } catch(e){
+      alert("This share link is malformed or truncated.");
+      return false;
+    }
+    var payload;
+    try { payload = JSON.parse(json); }
+    catch(e){ alert("Couldn't parse share data."); return false; }
+    _pmRenderSharedDiscoveryViewer(payload);
+    return true;
+  } catch(_){ return false; }
+}
+function _pmRenderSharedDiscoveryViewer(p){
+  document.body.innerHTML = '';
+  var wrap = document.createElement("div");
+  wrap.style.cssText = "max-width:760px;margin:0 auto;padding:28px 22px 60px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#222;line-height:1.5;";
+  function esc(s){ return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  var html = '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:18px;border-bottom:1px solid #eee;padding-bottom:14px;">'
+    + '<div>'
+    +   '<div style="font-size:11px;color:#888;font-weight:700;letter-spacing:.06em;text-transform:uppercase;">SHARED DISCOVERY</div>'
+    +   '<div style="font-size:22px;font-weight:700;margin-top:4px;">' + (esc(p.region) || "Trip planning") + '</div>'
+    +   (p.sentence ? '<div style="font-size:13px;color:#555;margin-top:6px;font-style:italic;">' + esc(p.sentence) + '</div>' : '')
+    + '</div>'
+    + '<a href="' + location.origin + location.pathname + '" style="font-size:11.5px;color:#1a5fa8;text-decoration:none;font-weight:600;flex-shrink:0;">Open Max →</a>'
+    + '</div>';
+
+  function renderMeta(label, meta){
+    if (!meta) return '';
+    var out = '<div style="margin-top:6px;">';
+    if (Array.isArray(meta.docs) && meta.docs.length) {
+      meta.docs.forEach(function(d){
+        out += '<div style="margin:10px 0 16px;padding:12px 14px;background:#fafafa;border:1px solid #eee;border-radius:6px;">'
+          + '<div style="font-weight:700;font-size:13px;margin-bottom:6px;">' + esc(d.title || "Untitled") + '</div>'
+          + (Array.isArray(d.tags) && d.tags.length
+              ? '<div style="margin-bottom:6px;">' + d.tags.map(function(t){
+                  return '<span style="display:inline-block;font-size:10px;font-weight:600;color:#5b3f8f;background:#f1edf8;border:1px solid #ddd5ec;border-radius:8px;padding:1px 7px;margin-right:4px;">#' + esc(t) + '</span>';
+                }).join('') + '</div>'
+              : '')
+          + '<div style="font-size:13px;line-height:1.55;">' + (d.body || "") + '</div>'
+          + '</div>';
+      });
+    }
+    if (Array.isArray(meta.links) && meta.links.length) {
+      out += '<div style="margin-top:8px;"><div style="font-size:10.5px;font-weight:700;color:#888;letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px;">Links</div>';
+      meta.links.forEach(function(l){
+        var name = esc(l.name || l.domain || l.url || "link");
+        var url  = esc(l.url || "#");
+        out += '<div style="padding:5px 0;"><a href="' + url + '" target="_blank" rel="noopener" style="color:#1a5fa8;text-decoration:none;font-weight:600;font-size:12px;">↗ ' + name + '</a></div>';
+      });
+      out += '</div>';
+    }
+    out += '</div>';
+    return out;
+  }
+
+  if (p.tripMeta && (p.tripMeta.docs && p.tripMeta.docs.length || p.tripMeta.links && p.tripMeta.links.length)) {
+    html += '<div style="margin:24px 0;"><div style="font-size:13px;font-weight:700;color:#5b3f8f;margin-bottom:8px;">🔬 Trip-level notes</div>' + renderMeta("trip", p.tripMeta) + '</div>';
+  }
+  if (Array.isArray(p.places) && p.places.length) {
+    html += '<div style="margin-top:24px;"><div style="font-size:13px;font-weight:700;color:#444;margin-bottom:8px;">Places (' + p.places.length + ')</div>';
+    p.places.forEach(function(pl){
+      var k = pl.name.toLowerCase();
+      var meta = p.placeMeta[k];
+      html += '<div style="margin:14px 0;padding:14px 16px;border:1px solid #e6e1d5;border-radius:8px;">'
+        + '<div style="font-size:15px;font-weight:700;display:flex;align-items:baseline;gap:8px;">'
+        +   esc(pl.name)
+        +   (pl.country ? '<span style="font-size:11px;color:#888;font-weight:400;">' + esc(pl.country) + '</span>' : '')
+        + '</div>'
+        + (meta ? renderMeta(pl.name, meta) : '<div style="font-size:11.5px;color:#999;margin-top:4px;font-style:italic;">No notes shared.</div>')
+        + '</div>';
+    });
+    html += '</div>';
+  }
+  html += '<div style="margin-top:32px;padding-top:14px;border-top:1px solid #eee;font-size:10.5px;color:#aaa;text-align:center;">Shared ' + esc(p.sharedAt ? new Date(p.sharedAt).toLocaleString() : "") + ' via Max</div>';
+
+  wrap.innerHTML = html;
+  document.body.appendChild(wrap);
+  document.title = "Shared Discovery · " + (p.region || "Max");
+}
+if (typeof globalThis !== "undefined") {
+  globalThis._pmShareDiscovery = _pmShareDiscovery;
+  globalThis._pmMaybeRenderSharedDiscovery = _pmMaybeRenderSharedDiscovery;
+}
 
 function _pmShowUndo(message, undoFn){
   var prev = document.getElementById("pm-undo-toast");
@@ -32945,6 +33189,10 @@ window.addEventListener("load",function(){
     if (shareTok && typeof openSharedTrip === "function") {
       openSharedTrip(shareTok);
       return;
+    }
+    // Round PD.58: ?disc=<encoded> → render shared-Discovery viewer.
+    if (qs.get("disc") && typeof _pmMaybeRenderSharedDiscovery === "function") {
+      if (_pmMaybeRenderSharedDiscovery()) return;
     }
   } catch (_) { /* fall through to normal boot */ }
   // v353.5: resume pending share-duplicate after a sign-in round-trip.
