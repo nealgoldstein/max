@@ -1893,7 +1893,32 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
    keep place rows + section headers + activity descriptions. Each
    row gets page-break-inside:avoid so rows don't split across pages. */
 @media print {
-  body { background: #fff !important; color: #000 !important; }
+  /* Round PD.28: print pagination fix. The picker list lives inside
+     #tb-picker-list-pane which is overflow-y:auto — the browser only
+     prints what's visible in that scroll container's viewport (one
+     page max). Force the scroll container AND its flex/overflow
+     ancestors to flow naturally so all pages print. Also hide the
+     map column entirely and collapse the 2-column flex layout so the
+     list takes the full page width. */
+  html, body { height: auto !important; overflow: visible !important; background: #fff !important; color: #000 !important; }
+  #tb-picker-list-pane {
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+    padding: 0 !important;
+  }
+  #picker-2col {
+    display: block !important;
+    overflow: visible !important;
+    min-height: 0 !important;
+    height: auto !important;
+  }
+  #picker-map, #picker-divider, .picker-map { display: none !important; }
+  /* Picker overlay container — find by id-or-class so this catches
+     whichever variant is active. Position fixed → static so it lays
+     out at natural height. */
+  [id^="tb-place-act-overlay"], [id^="tb-pm-overlay"], .tb-pm-overlay,
+  .tb-header { position: static !important; height: auto !important; overflow: visible !important; }
   /* Hide everything outside the Discovery list pane. */
   #tb-pm-map, .leaflet-container,
   .pm-row-menu-wrap, .pm-row-menu-btn, .pm-row-menu-pop,
@@ -1905,6 +1930,8 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
   .pm-row-story-close, .pm-row-todo-close,
   .tb-act-thumb, .tb-more-like-btn,
   #ce-add-place-row, #tb-place-act-search,
+  #tb-picker-max-suggests, #tb-cat-nav, #wisp-result-banner,
+  #tb-breadth-section, #tb-pm-provenance-note,
   .tb-act-col-right .tb-act-desc-toggle {
     display: none !important;
   }
