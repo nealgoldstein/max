@@ -15140,7 +15140,9 @@ function _renderPlaceActivityItems(){
       if (!item || !Array.isArray(item.requiredPlaces)) return;
       item.requiredPlaces.forEach(function(p){
         if (!p || !p.place) return;
-        // Round PD.5: _rejected skip removed — see comment at line ~16012.
+        // Round PD.10: _rejected skip restored — rejected places live in
+        // the bottom-of-list Rejected section, not in normal renders.
+        if (p._rejected === true) return;
         var hubKey = p._dayTripHub || "";
         if (!hubKey) return;
         if (!_childrenByHub[hubKey]) {
@@ -15822,7 +15824,8 @@ function _renderPlaceActivityItems(){
         if (!item || !Array.isArray(item.requiredPlaces)) return;
         item.requiredPlaces.forEach(function(p){
           if (!p || !p.place) return;
-          // Round PD.5: _rejected skip removed — see comment at line ~16012.
+          // Round PD.10: _rejected skip restored — see Rejected section render.
+          if (p._rejected === true) return;
           var key = p.place.toLowerCase();
           if (!byPlace[key]) {
             byPlace[key] = {
@@ -16052,13 +16055,10 @@ function _renderPlaceActivityItems(){
       var places = Array.isArray(item.requiredPlaces) ? item.requiredPlaces : [];
       places.forEach(function(p){
         if (!p || !p.place) return;
-        // Round PD.5 (v360.5): _rejected skip removed. PD.1 retired
-        // the Rejected section, so any place still carrying _rejected
-        // from legacy data was orphaning silently (counted in the
-        // TOC, missing from the section render). The new model has
-        // only "on the list" vs "removed via ×"; legacy _rejected
-        // state is treated as on-the-list. User can remove if they
-        // want via the row's × button.
+        // Round PD.10: _rejected skip restored — rejected places appear
+        // only in the bottom-of-list Rejected section so the user can
+        // un-reject.
+        if (p._rejected === true) return;
         var key = p.place.toLowerCase();
         if (!byDest[key]) {
           byDest[key] = { place: p.place, nightsMax: 0, items: [], placeRefs: [] };
@@ -16517,13 +16517,73 @@ function _renderPlaceActivityItems(){
     });
   });
 
-  // Round PD.1 (v360.5): "Rejected" section retired. Discovery is
-  // now a flat list — removing a place hard-splices it from
-  // _tb.candidates (and the LLM is free to re-suggest on
-  // regenerate). The Maybe/Reject/Un-reject affordances those
-  // states underwrote are gone with it. Place's prior position
-  // here is intentionally empty so the section ordering below
-  // (story panels, post-render hooks) stays put.
+  // Round PD.10 (v360.5): "Rejected" section restored. PD.1 had
+  // dropped it on the theory that removed places are gone forever;
+  // PD.10 reverses that — soft-reject with an in-place undo lets
+  // the user change their mind without regenerating the brief.
+  // Collapsed by default; expand to see the list and un-reject.
+  (function _renderRejectedSection(){
+    var rejected = {};
+    items.forEach(function(item){
+      if (!item || !Array.isArray(item.requiredPlaces)) return;
+      item.requiredPlaces.forEach(function(p){
+        if (!p || !p.place || p._rejected !== true) return;
+        var k = p.place.toLowerCase();
+        if (!rejected[k]) rejected[k] = { place: p.place, sources: [] };
+        if (item.name && rejected[k].sources.indexOf(item.name) < 0) {
+          rejected[k].sources.push(item.name);
+        }
+      });
+    });
+    var rkeys = Object.keys(rejected);
+    if (!rkeys.length) return;
+    if (!_tb._rejectedExpanded) _tb._rejectedExpanded = false;
+    var sec = document.createElement("div");
+    sec.style.cssText = "margin:18px 0 8px;padding:0;";
+    var hdr = document.createElement("button");
+    hdr.type = "button";
+    hdr.style.cssText = "display:flex;align-items:center;justify-content:space-between;width:100%;background:transparent;border:none;font-family:inherit;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#a93826;padding:8px 4px;cursor:pointer;border-top:1px solid #f0d8d2;";
+    hdr.innerHTML = "✕ Rejected (" + rkeys.length + ") <span aria-hidden=\"true\">" +
+      (_tb._rejectedExpanded ? "⌃" : "⌄") + "</span>";
+    hdr.onclick = function(){
+      _tb._rejectedExpanded = !_tb._rejectedExpanded;
+      _renderPlaceActivityItems();
+    };
+    sec.appendChild(hdr);
+    if (_tb._rejectedExpanded) {
+      var body = document.createElement("div");
+      body.style.cssText = "padding:4px 0 6px;display:flex;flex-direction:column;gap:4px;";
+      rkeys.forEach(function(k){
+        var r = rejected[k];
+        var row = document.createElement("div");
+        row.style.cssText = "display:flex;align-items:center;gap:10px;padding:6px 10px;background:#fdf6f4;border:1px solid #f0d8d2;border-radius:6px;font-size:12px;color:#555;";
+        var name = document.createElement("div");
+        name.style.cssText = "flex:1;font-weight:600;color:#222;";
+        name.textContent = r.place;
+        row.appendChild(name);
+        if (r.sources.length) {
+          var src = document.createElement("div");
+          src.style.cssText = "font-size:10.5px;color:#999;font-style:italic;";
+          src.textContent = "from: " + r.sources.slice(0, 2).join(", ") + (r.sources.length > 2 ? "…" : "");
+          row.appendChild(src);
+        }
+        var unrejectBtn = document.createElement("button");
+        unrejectBtn.type = "button";
+        unrejectBtn.style.cssText = "font-size:11px;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:4px;padding:3px 9px;cursor:pointer;font-family:inherit;font-weight:600;";
+        unrejectBtn.textContent = "↶ Un-reject";
+        unrejectBtn.title = "Put this place back on the list";
+        (function(placeName){
+          unrejectBtn.onclick = function(){
+            if (typeof _pmUnRejectFromList === "function") _pmUnRejectFromList(placeName);
+          };
+        })(r.place);
+        row.appendChild(unrejectBtn);
+        body.appendChild(row);
+      });
+      sec.appendChild(body);
+    }
+    list.appendChild(sec);
+  })();
 
   // v358.7: IntersectionObserver auto-hydration removed. Each story
   // slot now has its own "Story →" button that fires _pmTriggerStory
@@ -17078,44 +17138,70 @@ function togglePlaceByPlaceMode(placeName){
 }
 if (typeof globalThis !== "undefined") globalThis.togglePlaceByPlaceMode = togglePlaceByPlaceMode;
 
-// Round PD.1 (v360.5): "Remove from list" — hard-splice a place out
-// of Discovery. The new Discovery model treats every visible place as
-// "on the list"; removal hides it from the list AND the map by
-// splicing it from _tb.placeActivities[*].requiredPlaces (the source
-// the list + map both read from) and from _tb.candidates.
+// Round PD.10 (v360.5): "Remove from list" — soft-reject. Marks
+// _rejected=true on every requiredPlace ref for the place, and
+// status="reject" on the candidate. The place hides from the list
+// + map render but survives in the data so the bottom-of-list
+// "Rejected" section can show it with an un-reject affordance.
 //
-// Semantics (per user choice): no _rejected flag persists. If the
-// user later regenerates the brief, the LLM is free to re-suggest
-// the place. This matches "hide from list, allow re-suggest."
-//
-// If an activity loses all its required places as a result, the
-// activity row stays — it may regain places on regenerate. Cleanup
-// of empty activities is a separate concern.
+// PD.1 originally hard-spliced these refs because the user picked
+// "Hide from list, allow re-suggest" — no undo, LLM regenerate
+// brings it back. PD.10 reverses that choice in favor of an
+// in-place undo via the Rejected section.
 function _pmRemoveFromList(placeName){
   if (!_tb || !placeName) return;
   var key = String(placeName).toLowerCase();
-  // Splice across every activity's requiredPlaces.
   var items = _tb.placeActivities || [];
   items.forEach(function(item){
     if (!item || !Array.isArray(item.requiredPlaces)) return;
-    item.requiredPlaces = item.requiredPlaces.filter(function(p){
-      return !(p && p.place && p.place.toLowerCase() === key);
+    item.requiredPlaces.forEach(function(p){
+      if (!p || !p.place) return;
+      if (p.place.toLowerCase() !== key) return;
+      p._rejected = true;
+      p._keep = false;
     });
-    // Recompute the activity's derived "checked" state.
     item.checked = (item.requiredPlaces || []).some(function(p){ return p && p._keep; });
   });
-  // Splice from candidates if present.
   if (Array.isArray(_tb.candidates)) {
-    _tb.candidates = _tb.candidates.filter(function(c){
-      return !(c && c.place && c.place.toLowerCase() === key);
+    _tb.candidates.forEach(function(c){
+      if (c && c.place && c.place.toLowerCase() === key) {
+        c.status = "reject";
+      }
     });
   }
-  // Repaint list + map.
   if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
   if (typeof _updatePlaceActivitySummary === "function") _updatePlaceActivitySummary();
   if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
 }
 if (typeof globalThis !== "undefined") globalThis._pmRemoveFromList = _pmRemoveFromList;
+
+// Round PD.10: un-reject. Inverse of _pmRemoveFromList. Clears
+// _rejected on every requiredPlace ref and resets candidate
+// status so the place reappears in normal sections.
+function _pmUnRejectFromList(placeName){
+  if (!_tb || !placeName) return;
+  var key = String(placeName).toLowerCase();
+  var items = _tb.placeActivities || [];
+  items.forEach(function(item){
+    if (!item || !Array.isArray(item.requiredPlaces)) return;
+    item.requiredPlaces.forEach(function(p){
+      if (!p || !p.place) return;
+      if (p.place.toLowerCase() !== key) return;
+      p._rejected = false;
+    });
+  });
+  if (Array.isArray(_tb.candidates)) {
+    _tb.candidates.forEach(function(c){
+      if (c && c.place && c.place.toLowerCase() === key && c.status === "reject") {
+        c.status = null;
+      }
+    });
+  }
+  if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
+  if (typeof _updatePlaceActivitySummary === "function") _updatePlaceActivitySummary();
+  if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
+}
+if (typeof globalThis !== "undefined") globalThis._pmUnRejectFromList = _pmUnRejectFromList;
 
 // Round PD.9: row-level ⋯ menu toggle. Wraps _pmRemoveFromList
 // behind an explicit affordance so the destructive action requires
@@ -20977,13 +21063,10 @@ function _renderPlacePickerMap(targetId){
   // predictor lookup keeps a single source of truth for role.
 
   // Tear down markers for places no longer in the dataset, OR for
-  // Round PD.5: tear down markers for places no longer in the
-  // dataset. The earlier _rejected branch (legacy "rejected places
-  // don't render on the map") is gone — PD.1 retired the Rejected
-  // section, and the new model treats legacy _rejected as
-  // on-the-list.
+  // Round PD.10: rejected places don't render on the map either —
+  // they live only in the bottom-of-list Rejected section.
   Object.keys(_pmMarkersByPlace).forEach(function(k){
-    if (!allPlaces[k]) {
+    if (!allPlaces[k] || (allPlaces[k] && allPlaces[k]._rejected)) {
       try { _pmMap.removeLayer(_pmMarkersByPlace[k]); } catch(_){}
       delete _pmMarkersByPlace[k];
     }
@@ -21009,7 +21092,8 @@ function _renderPlacePickerMap(targetId){
   var bounds = [];
   Object.keys(allPlaces).forEach(function(key){
     var info = allPlaces[key];
-    // Round PD.5: _rejected skip removed — see tear-down comment above.
+    // Round PD.10: rejected places skip the map render — see tear-down above.
+    if (info && info._rejected) return;
     var ll = _coarseGeocode[key];
     function placeMarker(latLng){
       bounds.push(latLng);
