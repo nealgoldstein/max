@@ -42393,6 +42393,16 @@ function convertDestToDayTrip(destId, hubDestId, opts){
       country: src.country
     });
   }
+  // PD.67b (architectural): write the role through the canonical writer
+  // so trip.candidates AND _tb.candidates AND placeMeta + intent all
+  // reflect the day-trip choice. Without this, the picker re-opens
+  // with c.role / stayOverride still stuck on the old value.
+  try {
+    var _ddtCand = (typeof _candForDest === "function") ? _candForDest(src) : null;
+    if (_ddtCand && typeof MaxRoleWriter !== "undefined" && MaxRoleWriter.set) {
+      MaxRoleWriter.set(_ddtCand.id || _ddtCand.place, "daytrip", { persist: false, hub: hub.place });
+    }
+  } catch(_){}
   _emitTripMutation();
 
   if (!opts.silent && typeof _showDayTripToast === "function") {
@@ -42628,6 +42638,15 @@ function convertDestToWayside(destId, opts){
     });
   }
 
+  // PD.67b (architectural): route through MaxRoleWriter so c.role,
+  // waysideFromHub, intent, placeMeta all update atomically across
+  // both candidate arrays.
+  try {
+    var _dwsCand = (typeof _candForDest === "function") ? _candForDest(src) : null;
+    if (_dwsCand && typeof MaxRoleWriter !== "undefined" && MaxRoleWriter.set) {
+      MaxRoleWriter.set(_dwsCand.id || _dwsCand.place, "onway", { persist: false, hub: prev.place });
+    }
+  } catch(_){}
   if (typeof _emitTripMutation === "function") _emitTripMutation();
 
   if (!opts.silent && typeof _showDayTripToast === "function") {
@@ -42763,6 +42782,14 @@ function convertDestToSee(destId){
   // route between prev/this or this/next assumed nights > 0.
   if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function") {
     try { var _syncR = MaxEngineTrip.syncTransitRoutes(trip); _notifyOnwayDemotions(_syncR); } catch(_){}
+  }
+  // PD.67 (architectural): write the role decision through the canonical
+  // writer so trip.candidates AND _tb.candidates both reflect the change.
+  // Without this, the picker (and the picker map) would re-render off a
+  // stale c.role = "stay" / stayOverride = true after the user explicitly
+  // demoted the place to a See stop in the trip view.
+  if (typeof _writeTripRoleForDest === "function") {
+    try { _writeTripRoleForDest(dest, "see"); } catch(_){}
   }
   _emitTripMutation();
 }
@@ -46201,6 +46228,15 @@ function convertDestToWaysideOnRoute(destId, targetRouteId, opts) {
     try { var _syncR = MaxEngineTrip.syncTransitRoutes(trip); _notifyOnwayDemotions(_syncR); } catch(_){}
   }
 
+  // PD.67b (architectural): route through MaxRoleWriter — same reason
+  // as convertDestToWayside / convertDestToDayTrip above.
+  try {
+    var _wsorFromName = (trip.destinations.find(function(d){ return d.id === targetRoute.fromDestId; }) || {}).place || "";
+    var _wsorCand = (typeof _candForDest === "function") ? _candForDest(src) : null;
+    if (_wsorCand && typeof MaxRoleWriter !== "undefined" && MaxRoleWriter.set) {
+      MaxRoleWriter.set(_wsorCand.id || _wsorCand.place, "onway", { persist: false, hub: _wsorFromName });
+    }
+  } catch(_){}
   _emitTripMutation();
 
   if (!opts.silent && typeof _showDayTripToast === "function") {
