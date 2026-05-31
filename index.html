@@ -18514,13 +18514,13 @@ function _pmRenderNotesSearchResults(query){
 // ──────────────────────────────────────────────────────────────────────
 
 // ──────────────────────────────────────────────────────────────────────
-// Round PD.55: keyboard shortcuts.
-//   /                → focus Discovery search input
+// Round PD.55 (b): keyboard shortcuts — trimmed.
 //   Esc              → exit bulk-select mode (when active)
 //   Cmd/Ctrl + Enter → save & close doc editor
-//   ?                → show shortcut help overlay
-// All bindings ignore keystrokes when the user is typing in an input,
-// textarea, or contenteditable so we don't hijack normal typing.
+// Earlier PD.55 also bound `/` (focus search) and `?` (help overlay);
+// both dropped — the search input is already the natural target for
+// typing in the picker, and a help overlay listing two conventional
+// shortcuts wasn't carrying its weight.
 // ──────────────────────────────────────────────────────────────────────
 (function _pmKeyboardShortcuts(){
   if (window._pmShortcutsBound) return;
@@ -18533,9 +18533,6 @@ function _pmRenderNotesSearchResults(query){
     if (tag === "input" || tag === "textarea" || tag === "select") return true;
     if (t.isContentEditable) return true;
     return false;
-  }
-  function pickerOpen(){
-    return !!document.getElementById("tb-place-act-search");
   }
   function docEditorOpen(){
     return !!document.getElementById("pm-doc-editor");
@@ -18552,7 +18549,6 @@ function _pmRenderNotesSearchResults(query){
       }
     }
     if (isTyping(e)) return;
-
     // Esc exits bulk mode (without competing with native Esc-closes).
     if (e.key === "Escape") {
       if (typeof _pmBulk !== "undefined" && _pmBulk.isOn && _pmBulk.isOn()) {
@@ -18560,47 +18556,8 @@ function _pmRenderNotesSearchResults(query){
         return;
       }
     }
-    // / focuses Discovery search.
-    if (e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey) {
-      var s = document.getElementById("tb-place-act-search");
-      if (s) {
-        e.preventDefault();
-        s.focus();
-        s.select();
-        return;
-      }
-    }
-    // ? opens help overlay.
-    if (e.key === "?" || (e.key === "/" && e.shiftKey)) {
-      _pmShortcutHelpToggle();
-      return;
-    }
   });
 })();
-
-function _pmShortcutHelpToggle(){
-  var existing = document.getElementById("pm-shortcut-help");
-  if (existing) { existing.remove(); return; }
-  var ov = document.createElement("div");
-  ov.id = "pm-shortcut-help";
-  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:14000;display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;";
-  ov.onclick = function(){ ov.remove(); };
-  var box = document.createElement("div");
-  box.style.cssText = "background:#fff;border-radius:12px;max-width:420px;width:100%;padding:20px 24px;box-shadow:0 12px 36px rgba(0,0,0,0.28);font-size:13px;color:#222;";
-  box.onclick = function(e){ e.stopPropagation(); };
-  box.innerHTML = '<div style="font-size:15px;font-weight:700;margin-bottom:14px;">Keyboard shortcuts</div>'
-    + '<table style="width:100%;border-collapse:collapse;">'
-    +   '<tr><td style="padding:6px 0;color:#666;width:140px;"><kbd style="background:#eee;border:1px solid #ccc;border-radius:3px;padding:1px 6px;font-family:inherit;">/</kbd></td><td>Focus search</td></tr>'
-    +   '<tr><td style="padding:6px 0;color:#666;"><kbd style="background:#eee;border:1px solid #ccc;border-radius:3px;padding:1px 6px;font-family:inherit;">Esc</kbd></td><td>Exit bulk-select mode</td></tr>'
-    +   '<tr><td style="padding:6px 0;color:#666;"><kbd style="background:#eee;border:1px solid #ccc;border-radius:3px;padding:1px 6px;font-family:inherit;">⌘ Enter</kbd></td><td>Save &amp; close doc editor</td></tr>'
-    +   '<tr><td style="padding:6px 0;color:#666;"><kbd style="background:#eee;border:1px solid #ccc;border-radius:3px;padding:1px 6px;font-family:inherit;">[[</kbd></td><td>Link to another doc (in editor)</td></tr>'
-    +   '<tr><td style="padding:6px 0;color:#666;"><kbd style="background:#eee;border:1px solid #ccc;border-radius:3px;padding:1px 6px;font-family:inherit;">?</kbd></td><td>Show this help</td></tr>'
-    + '</table>'
-    + '<div style="margin-top:14px;font-size:11px;color:#999;text-align:right;">Click anywhere to dismiss</div>';
-  ov.appendChild(box);
-  document.body.appendChild(ov);
-}
-if (typeof globalThis !== "undefined") globalThis._pmShortcutHelpToggle = _pmShortcutHelpToggle;
 
 function _pmShowUndo(message, undoFn){
   var prev = document.getElementById("pm-undo-toast");
