@@ -21050,6 +21050,50 @@ var MaxRoleWriter = {
         });
       }
     } catch(_){}
+    // ── PD.67 (architectural): mirror to trip.candidates ────────────
+    // trip.candidates is the authoritative snapshot the trip-view pin
+    // renderer + map read from. _tb.candidates is the picker's working
+    // copy. Both must agree on c.role for the trip view and picker to
+    // show the same state. Before this, a role change written via
+    // MaxRoleWriter from any surface (picker toggle, trip-view popover
+    // via _writeTripRoleForDest) only updated _tb.candidates; the
+    // trip-view pin re-rendered against a stale trip.candidates and
+    // showed the old role until a publishTrip rebuild overwrote it.
+    try {
+      if (typeof trip !== "undefined" && trip && Array.isArray(trip.candidates)) {
+        var tCand = null;
+        if (cand.id) tCand = trip.candidates.find(function(c){ return c && c.id === cand.id; });
+        if (!tCand) {
+          var nk = norm(cand.place || "");
+          if (nk) tCand = trip.candidates.find(function(c){ return c && c.place && norm(c.place) === nk; });
+        }
+        if (tCand) {
+          if (validActive[role]) {
+            tCand.role = role;
+            tCand._roleTouched = true;
+            tCand.status = "keep";
+            if (role === "daytrip") {
+              tCand.dayTripHub = hub || tCand.dayTripHub || "";
+              tCand.waysideFromHub = "";
+              tCand.intent = "dayTrip";
+            } else if (role === "onway") {
+              tCand.waysideFromHub = hub || tCand.waysideFromHub || "";
+              tCand.dayTripHub = "";
+              tCand.intent = "wayside";
+            } else {
+              tCand.dayTripHub = "";
+              tCand.waysideFromHub = "";
+              tCand.intent = "";
+            }
+          } else if (role === "maybe") {
+            tCand.status = null;
+          } else if (role === "reject") {
+            tCand.status = "reject";
+            tCand._roleTouched = true;
+          }
+        }
+      }
+    } catch(_){}
     // ── Event emission (engine event bus) ───────────────────────────
     try {
       if (typeof MaxEnginePicker !== "undefined"
