@@ -21309,10 +21309,27 @@ function _renderPlacePickerMap(targetId){
         var nameSafe  = String(placeName).replace(/'/g, "\\'").replace(/"/g, "&quot;");
         var recoLabel = isStay ? "stay overnight" : "just visit";
         var flipLabel = isStay ? "Just visiting"  : "Stay overnight";
+        // Round PD.22: distinguish user commitment from Max's
+        // suggestion. After PD.14, MaxRoleWriter sets _roleTouched=true
+        // whenever the user picks a role (via the popup, the row
+        // indicator, or the ⋯ menu). Use that to label the popup
+        // accurately: "You selected: ..." when committed, "Max
+        // suggests: ..." when still on the LLM/predictor default.
+        var _candForLabel = null;
+        try {
+          if (window._tb && Array.isArray(window._tb.candidates) && typeof _pmMetaKey === "function") {
+            var _kForLabel = _pmMetaKey(placeName);
+            _candForLabel = window._tb.candidates.find(function(c){
+              return c && c.place && _pmMetaKey(c.place) === _kForLabel;
+            });
+          }
+        } catch(_){}
+        var _isUserCommitted = !!(_candForLabel && _candForLabel._roleTouched === true);
+        var prefixLabel = _isUserCommitted ? "You selected" : "Max suggests";
         return ''
           + '<div style="font-family:inherit;min-width:200px;">'
           +   '<div style="font-weight:700;font-size:13.5px;color:#111;margin-bottom:6px;">' + _pmEsc(placeName) + '</div>'
-          +   '<div style="font-size:11.5px;color:#666;margin-bottom:10px;">Max suggests: <strong style="color:#111;">' + recoLabel + '</strong></div>'
+          +   '<div style="font-size:11.5px;color:#666;margin-bottom:10px;">' + prefixLabel + ': <strong style="color:#111;">' + recoLabel + '</strong></div>'
           +   '<button type="button" onclick="_pmTogglePlaceStay(\'' + nameSafe + '\')" '
           +           'style="display:block;width:100%;font-size:12px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:6px 10px;cursor:pointer;font-family:inherit;margin-bottom:6px;">'
           +     flipLabel
