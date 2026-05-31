@@ -48110,6 +48110,27 @@ function _notifyOnwayDemotions(syncResult){
 }
 
 function drawTripMode(){
+  // PD.66h (architectural): trip view doesn't render drafts. Drafts
+  // belong in the Discovery picker. Without this guard, a tripChange
+  // event fired by MaxDB.trip.writeRaw (sync's pullAll path, or
+  // localLoad after selectTrip) re-runs drawTripMode AFTER enterApp's
+  // _pmDraftRestore has already opened the picker, overlaying the
+  // empty trip view on top. Refusing to render here makes drawTripMode
+  // draft-aware in the same way enterApp is.
+  if (trip && trip.brief && trip.brief._isDraft) {
+    if (typeof _pmDraftRestore === "function") {
+      try {
+        if (_pmDraftRestore()) return;
+      } catch (e) {
+        console.warn("[Max draft] restore from drawTripMode failed:", e && e.message);
+      }
+    }
+    // If restore isn't available or failed, still bail — the user has
+    // a draft and shouldn't see an empty trip view. Surface a small
+    // message so they're not stuck on a blank screen.
+    console.warn("[Max draft] drawTripMode bailed on draft trip without restore");
+    return;
+  }
   // v360.1: capture scroll position BEFORE we clobber lp-content.
   // The renderer used to unconditionally jump back to the top on
   // every re-render — which meant clicking any inline expand/collapse
