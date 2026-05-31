@@ -17413,11 +17413,40 @@ function _pmRtInsertCheckbox(btn){
   var ed = wrap.querySelector(".pm-rt-editor");
   if (!ed) return;
   ed.focus();
-  // Insert as HTML at the current selection; execCommand handles the
-  // caret positioning. The trailing &nbsp; gives the user a place to
-  // type after the checkbox without the cursor disappearing behind it.
-  document.execCommand("insertHTML", false,
-    '<div class="pm-rt-checkbox-row"><input type="checkbox">&nbsp;</div>');
+  // Round PD.40: direct DOM insertion. execCommand("insertHTML") was
+  // unreliable on empty contentEditable elements (no selection inside
+  // it = silent no-op). Build the row, insert at the current cursor
+  // when it's inside the editor; otherwise append to the end.
+  var row = document.createElement("div");
+  row.className = "pm-rt-checkbox-row";
+  var cb = document.createElement("input");
+  cb.type = "checkbox";
+  row.appendChild(cb);
+  // Use a non-breaking space so the row has a focusable text node.
+  row.appendChild(document.createTextNode(" "));
+  var sel = window.getSelection && window.getSelection();
+  var inserted = false;
+  try {
+    if (sel && sel.rangeCount) {
+      var range = sel.getRangeAt(0);
+      if (ed.contains(range.commonAncestorContainer) || range.commonAncestorContainer === ed) {
+        range.deleteContents();
+        range.insertNode(row);
+        inserted = true;
+      }
+    }
+  } catch(_){}
+  if (!inserted) ed.appendChild(row);
+  // Move cursor to the end of the new row (after the &nbsp;), ready to type.
+  try {
+    var after = document.createRange();
+    after.setStart(row, row.childNodes.length);
+    after.collapse(true);
+    if (sel) {
+      sel.removeAllRanges();
+      sel.addRange(after);
+    }
+  } catch(_){}
 }
 if (typeof globalThis !== "undefined") {
   globalThis._pmRtInsertCheckbox = _pmRtInsertCheckbox;
