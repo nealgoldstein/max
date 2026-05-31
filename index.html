@@ -15843,26 +15843,14 @@ function _renderPlaceActivityItems(){
 
         // Build the chips inline.
         var _placeArg = _pmEsc(d.place);
-        var _llmIsStay = pInfo.activities.some(function(a){ return a.placeRef.overnight !== false; });
-        var _placeMetaP = (_tb && _tb.placeMeta) ? _tb.placeMeta[_pmMetaKey(d.place)] : null;
-        var _stayOverrideP = _placeMetaP && (_placeMetaP.stayOverride === true || _placeMetaP.stayOverride === false)
-          ? _placeMetaP.stayOverride : null;
-        var _isStayCand = (_stayOverrideP !== null) ? _stayOverrideP : _llmIsStay;
-        var _activePillStay = 'font-size:9.5px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;padding:1px 8px;border-radius:9px;letter-spacing:.02em;cursor:default;font-family:inherit;line-height:1.3;';
-        var _activePillSee  = 'font-size:9.5px;font-weight:700;color:#fff;background:#5b3f8f;border:1px solid #5b3f8f;padding:1px 8px;border-radius:9px;letter-spacing:.02em;cursor:default;font-family:inherit;line-height:1.3;';
-        var _inactivePill   = 'font-size:9.5px;font-weight:600;color:#888;background:#fff;border:1px solid #ddd;padding:1px 8px;border-radius:9px;letter-spacing:.02em;cursor:pointer;font-family:inherit;line-height:1.3;';
-        var stayChip;
-        if (_isStayCand) {
-          stayChip = '<span class="pm-stay-toggle" style="display:inline-flex;align-items:center;gap:6px;">'
-            + '<span style="' + _activePillStay + '">🛏 Stay</span>'
-            + '<button type="button" onclick="_pmSetStayOverride(&#39;' + _placeArg + '&#39;, false);event.stopPropagation();" style="' + _inactivePill + '">+ See</button>'
-            + '</span>';
-        } else {
-          stayChip = '<span class="pm-stay-toggle" style="display:inline-flex;align-items:center;gap:6px;">'
-            + '<span style="' + _activePillSee + '">👁 See</span>'
-            + '<button type="button" onclick="_pmSetStayOverride(&#39;' + _placeArg + '&#39;, true);event.stopPropagation();" style="' + _inactivePill + '">+ Stay</button>'
-            + '</span>';
-        }
+        // Round PD.1: by-Place rendering no longer surfaces role
+        // (Stay/See/Day trip/Maybe). Discovery is a flat list now;
+        // role decisions happen at trip-build time via _pmDeriveRole.
+        // The pill variables stay declared but empty so the row HTML
+        // below doesn't crash when it concatenates them.
+        var stayChip   = '';
+        var dtBadge    = '';
+        var maybeBadge = '';
 
         var nightsLine = d.nightsMax ? (d.nightsMax + ' night' + (d.nightsMax === 1 ? '' : 's') + ' suggested') : '';
         var kids = (_childrenByHub[key] || []);
@@ -15871,20 +15859,6 @@ function _renderPlaceActivityItems(){
               + '<span style="color:#7c5cbf;font-weight:600;">Sights here:</span> '
               + kids.slice(0, 4).map(_pmEsc).join(", ") + (kids.length > 4 ? " · +" + (kids.length - 4) + " more" : "")
               + '</div>')
-          : '';
-        var dtBadge = pInfo.isDayTrip && pInfo.dayTripHub
-          ? ('<span style="font-size:9.5px;font-weight:700;color:#5b3f8f;background:#f4eef9;border:1px solid #d8c4e8;padding:1px 6px;border-radius:9px;letter-spacing:.02em;">📍 day trip from ' + _pmEsc(pInfo.dayTripHub) + '</span>')
-          : '';
-        // Round NC.X: explicit Maybe badge in by-Place mode so the
-        // unkept/undecided state reads at a glance (vs the checked
-        // kept rows above and the Rejected section below). Uses the
-        // same gray ❓ glyph the picker map + role popup use for
-        // Maybe — keeps the vocabulary consistent across surfaces.
-        var maybeBadge = (!pInfo.kept)
-          ? '<span style="font-size:9.5px;font-weight:700;color:#666;background:#f0f0f0;border:1px solid #d8d4c8;padding:1px 7px;border-radius:9px;letter-spacing:.02em;display:inline-flex;align-items:center;gap:3px;">'
-              + '<span style="display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;border-radius:50%;background:#bbb;color:#fff;font-size:9px;font-weight:700;">?</span>'
-              + 'Maybe'
-              + '</span>'
           : '';
 
         // Activity badges — list every activity this place appears under.
@@ -15897,10 +15871,11 @@ function _renderPlaceActivityItems(){
 
         row.innerHTML = '<div class="tb-act-col-left">'
           + '<div style="display:flex;align-items:flex-start;gap:8px;">'
-          +   '<div class="tb-act-check' + (pInfo.kept ? " on" : "") + '" onclick="togglePlaceByPlaceMode(&#39;' + _placeArg + '&#39;)" title="Keep / drop this place across all activities"></div>'
+          +   '<button type="button" class="pm-remove-btn" onclick="event.stopPropagation();_pmRemoveFromList(&#39;' + _placeArg + '&#39;)" title="Remove this place from the list" style="flex-shrink:0;width:20px;height:20px;border:1px solid #ddd;border-radius:4px;background:#fff;color:#888;cursor:pointer;font-family:inherit;font-size:14px;line-height:1;padding:0;display:flex;align-items:center;justify-content:center;margin-top:2px;">×</button>'
           +   '<div style="flex:1;min-width:0;">'
           +     '<div class="tb-act-name" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
           +       '<span>' + _placeArg + '</span>'
+          +       _pmReadOnlyRoleBadge(d.place)
           +       (pInfo.kept ? stayChip : maybeBadge)
           +       (pInfo.kept ? dtBadge : '')
           +     '</div>'
@@ -16268,152 +16243,18 @@ function _renderPlaceActivityItems(){
         : { role: (_llmIsStay ? "stay" : "see"), source: "llm-default" };
       var _chipRole = _derivedChip.role;
       var _chipSource = _derivedChip.source || "llm-default";
-      // Round NC.X (deeper Diamond Beach fix): SUGGESTED vs COMMITTED.
-      //
-      // Neal's framing: "the roles assigned in the picker view are
-      // suggestions the user should decide on; if they change it in
-      // the trip view, it is now the source of truth." So the chip
-      // needs to telegraph "this is what Max thinks — you decide" vs.
-      // "you (or the trip view) committed this."
-      //
-      // Committed sources (solid pill): "user", "flag", "stay-override"
-      //   — i.e., you clicked a role chip, or you set the role via the
-      //   trip-view popup, or the publishTrip bridge resolved your
-      //   Stay/See choice into c.role.
-      // Suggested sources (dashed pill + "Max suggests" tooltip):
-      //   "predictor" (60km/nights heuristic), "llm-default" (just the
-      //   LLM's category — no user input yet).
-      //
-      // The committed-vs-suggested distinction lets the chip show
-      // "↻ Day trip" for Diamond Beach (matching the pin) while also
-      // signaling "this isn't your call yet — open the popup to lock
-      // it in or override." Earlier the chip rendered "👁 See" with no
-      // hint that the system actually thought it was a day trip.
-      var _isStayCandidate = (_chipRole === "stay");
-      var _isCommitted = (_chipSource === "user" || _chipSource === "flag" || _chipSource === "stay-override");
+      // Round PD.1 (v360.5): by-Activity rendering no longer surfaces
+      // the role chip (Stay / See / Day trip / On the way / Maybe).
+      // Discovery is a flat list; role decisions defer to trip-build
+      // time via _pmDeriveRole in buildFromCandidates. The trip view
+      // remains the single place the user shapes roles. _placeArg
+      // stays declared because researchBtn (below) references it.
+      // _derivedChip / _chipRole / _chipSource are dropped along with
+      // the chip — when the read-only badge for reopened trips lands
+      // (round PD.2 / task #15), it will recompute from c.role
+      // directly instead of re-running the suggestion cascade here.
       var _placeArg = _pmEsc(d.place);
-      // Active styles — solid fills for committed, dashed border for
-      // suggested. Same family of colors so the role is recognizable
-      // either way; the dash + the trailing "(suggested)" badge below
-      // carry the "not yours yet" cue.
-      //
-      // white-space:nowrap is critical — without it the narrow picker
-      // column was wrapping "Stay · suggested" into vertical "S\ne\ne"
-      // character columns. The chip is now a single-line pill that
-      // wraps to the next row only at the flex-container boundary.
-      //
-      // Round NC.X: pills are now CLICKABLE — clicking opens the same
-      // role-picker popup the map pin opens. This gives the list view
-      // full role parity with the map (you can switch a See to a
-      // Day trip without hunting for the pin). cursor:pointer signals
-      // the affordance.
-      function _activeStyle(bg, dashed){
-        var border = dashed ? ('1px dashed ' + bg) : ('1px solid ' + bg);
-        var fill   = dashed ? '#fff' : bg;
-        var color  = dashed ? bg    : '#fff';
-        return 'font-size:9.5px;font-weight:700;color:' + color + ';background:' + fill + ';border:' + border + ';padding:1px 8px;border-radius:9px;letter-spacing:.02em;cursor:pointer;font-family:inherit;line-height:1.3;white-space:nowrap;';
-      }
-      var _stayBg = '#1a5fa8', _seeBg = '#5b3f8f', _dayTripBg = '#9b6fc4', _onwayBg = '#c4753b', _maybeBg = '#888';
-      var _stayActiveStyle    = _activeStyle(_stayBg,    !_isCommitted && _chipRole === "stay");
-      var _seeActiveStyle     = _activeStyle(_seeBg,     !_isCommitted && _chipRole === "see");
-      var _dayTripActiveStyle = _activeStyle(_dayTripBg, !_isCommitted);
-      var _onwayActiveStyle   = _activeStyle(_onwayBg,   !_isCommitted);
-      var _maybeActiveStyle   = 'font-size:9.5px;font-weight:700;color:#555;background:#eee;border:1px solid #bbb;padding:1px 8px;border-radius:9px;letter-spacing:.02em;cursor:default;font-family:inherit;line-height:1.3;white-space:nowrap;';
-      var _inactiveBtnStyle   = 'font-size:9.5px;font-weight:600;color:#888;background:#fff;border:1px solid #ddd;padding:1px 8px;border-radius:9px;letter-spacing:.02em;cursor:pointer;font-family:inherit;line-height:1.3;white-space:nowrap;';
-      // "(suggested)" suffix + 🤖 provenance badge — italic, dim,
-      // INSIDE the pill. The 🤖 makes the LLM-origin explicit and
-      // ties this pill back to the global note at the top of
-      // Discovery ("Anything dashed is Max's guess"). Same badge on
-      // every dashed surface: chip, popup radio, etc.
-      var _suggestedSuffix = !_isCommitted
-        ? ' <span style="font-weight:500;font-style:italic;opacity:.85;">🤖 (suggested)</span>'
-        : '';
-      // Tooltip that distinguishes a suggestion from a commit. The
-      // suggested tooltip carries the "LLMs don't get to travel much"
-      // caveat — same line that lives in the Discovery intro note.
-      function _ttl(committedTxt, suggestedTxt){
-        return _isCommitted ? committedTxt : ("Max suggests: " + suggestedTxt + " — LLMs don’t get to travel much, so this is a starting point, not a verdict. Click to decide.");
-      }
-      // pm-stay-toggle wraps chip + (committed: "+ See/Stay" button |
-      // suggested: "(suggested)" badge). flex-wrap:wrap on the parent
-      // row drops the whole bundle to the next line when the column
-      // can't hold it; each child is intrinsically nowrap so text
-      // never breaks mid-word.
-      var _wrapStyle = 'display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;';
-      // Click handler that opens the role popup the same way the map
-      // pin click does. Falls back to a no-op if the picker map
-      // markers aren't ready yet (e.g., the map hasn't rendered).
-      var _openPopupOnclick = 'onclick="if(typeof _pmOpenPlacePopupByKey===\'function\'){_pmOpenPlacePopupByKey(&#39;' + _pmEsc(_rowKey) + '&#39;,&#39;tb-pm-map&#39;);}event.stopPropagation();"';
-      // Resolve hub display name (used by daytrip + onway branches).
-      function _resolveHubDisplay(hubKey){
-        if (!hubKey) return "";
-        var disp = hubKey;
-        for (var _hI = 0; _hI < items.length && disp === hubKey; _hI++) {
-          var _hIt = items[_hI];
-          (_hIt.requiredPlaces || []).forEach(function(_hP){
-            if (_hP && _hP.place && _hP.place.toLowerCase() === hubKey) disp = _hP.place;
-          });
-        }
-        return disp;
-      }
-      // NC.8: chip prefix is now the same mini-pin shape MaxMapPin draws
-      // on the map (circle / circle+↻ / octagon / teardrop / dashed grey
-      // / red ✕). 14px swatch fits inside the small pill chip without
-      // overwhelming the text. Emojis (🛏 ↻ 🛣 👁 ?) are gone from this
-      // surface — one rendering path across pin, popup, and chip.
-      var _miniPin = function(r){
-        return (typeof MaxMapPin !== "undefined" && MaxMapPin.swatch)
-          ? MaxMapPin.swatch(r, { size: 14 })
-          : "";
-      };
-      var stayChip;
-      var _ttlHint = " — click to change";
-      if (_chipRole === "stay") {
-        var _stayTtl = _ttl("Currently set as a stay" + _ttlHint, "Stay" + _ttlHint);
-        stayChip = '<span class="pm-stay-toggle" style="' + _wrapStyle + '">'
-          + '<span style="' + _stayActiveStyle + '" ' + _openPopupOnclick + ' title="' + _pmEsc(_stayTtl) + '">' + _miniPin("stay") + ' Stay' + _suggestedSuffix + '</span>'
-          + '<button type="button" '
-          +   'onclick="_pmSetStayOverride(&#39;' + _placeArg + '&#39;, false);event.stopPropagation();" '
-          +   'style="' + _inactiveBtnStyle + '" '
-          +   'title="Switch to see-only">+ See</button>'
-          + '</span>';
-      } else if (_chipRole === "daytrip") {
-        var _hubKey = String(_derivedChip.hub || "").toLowerCase();
-        var _hubDisp = _resolveHubDisplay(_hubKey);
-        var _dtTxt = _hubDisp ? ("Day trip from " + _hubDisp) : "Day trip";
-        var _dtCore = _dtTxt;
-        var _dtTtl = _ttl(_dtCore + _ttlHint, _dtCore + _ttlHint);
-        stayChip = '<span class="pm-stay-toggle" style="' + _wrapStyle + '">'
-          + '<span style="' + _dayTripActiveStyle + '" ' + _openPopupOnclick + ' title="' + _pmEsc(_dtTtl) + '">' + _miniPin("daytrip") + ' ' + _pmEsc(_dtTxt) + _suggestedSuffix + '</span>'
-          + '</span>';
-      } else if (_chipRole === "onway") {
-        var _owHubKey = String(_derivedChip.hub || "").toLowerCase();
-        var _owHubDisp = _resolveHubDisplay(_owHubKey);
-        var _owTxt = _owHubDisp ? ("On the way from " + _owHubDisp) : "On the way";
-        var _owCore = _owHubDisp ? ("On the way from " + _owHubDisp) : "On the way between stays";
-        var _owTtl = _ttl(_owCore + _ttlHint, _owCore + _ttlHint);
-        stayChip = '<span class="pm-stay-toggle" style="' + _wrapStyle + '">'
-          + '<span style="' + _onwayActiveStyle + '" ' + _openPopupOnclick + ' title="' + _pmEsc(_owTtl) + '">' + _miniPin("onway") + ' ' + _pmEsc(_owTxt) + _suggestedSuffix + '</span>'
-          + '</span>';
-      } else if (_chipRole === "maybe") {
-        stayChip = '<span class="pm-stay-toggle" style="' + _wrapStyle + '">'
-          + '<span style="' + _maybeActiveStyle + '" ' + _openPopupOnclick + ' title="Undecided — click to pick a role">' + _miniPin("maybe") + ' Maybe</span>'
-          + '</span>';
-      } else if (!_overnightCapable) {
-        var _seeTtlA = _ttl("Currently see-only" + _ttlHint, "See" + _ttlHint);
-        stayChip = '<span class="pm-stay-toggle" style="' + _wrapStyle + '">'
-          + '<span style="' + _seeActiveStyle + '" ' + _openPopupOnclick + ' title="' + _pmEsc(_seeTtlA) + '">' + _miniPin("see") + ' See' + _suggestedSuffix + '</span>'
-          + '</span>';
-      } else {
-        var _seeTtlB = _ttl("Currently see-only" + _ttlHint, "See" + _ttlHint);
-        stayChip = '<span class="pm-stay-toggle" style="' + _wrapStyle + '">'
-          + '<span style="' + _seeActiveStyle + '" ' + _openPopupOnclick + ' title="' + _pmEsc(_seeTtlB) + '">' + _miniPin("see") + ' See' + _suggestedSuffix + '</span>'
-          + '<button type="button" '
-          +   'onclick="_pmSetStayOverride(&#39;' + _placeArg + '&#39;, true);event.stopPropagation();" '
-          +   'style="' + _inactiveBtnStyle + '" '
-          +   'title="Switch to a place to stay">+ Stay</button>'
-          + '</span>';
-      }
+      var stayChip  = '';
 
       // v359.55.6: research card affordance. When meta has content
       // (notes or links), the 📓 button is filled blue. Empty stays
@@ -16507,9 +16348,9 @@ function _renderPlaceActivityItems(){
       var _secArg = _pmEsc(sec || "");
       var leftHtml = '<div class="tb-act-col-left">'
         + '<div style="display:flex;align-items:flex-start;gap:8px;">'
-        + '<div class="tb-act-check'+(destKeptInSection?" on":"")+'" onclick="toggleDestKeepInSection(&#39;'+_pmEsc(d.place)+'&#39;, &#39;'+_secArg+'&#39;)" title="Keep / drop this destination in this section"></div>'
+        + '<button type="button" class="pm-remove-btn" onclick="event.stopPropagation();_pmRemoveFromList(&#39;'+_pmEsc(d.place)+'&#39;)" title="Remove this place from the list" style="flex-shrink:0;width:20px;height:20px;border:1px solid #ddd;border-radius:4px;background:#fff;color:#888;cursor:pointer;font-family:inherit;font-size:14px;line-height:1;padding:0;display:flex;align-items:center;justify-content:center;margin-top:2px;">×</button>'
         + _thumbHtml
-        + '<div style="flex:1;min-width:0;cursor:pointer;" onclick="toggleDestKeepInSection(&#39;'+_pmEsc(d.place)+'&#39;, &#39;'+_secArg+'&#39;)">'
+        + '<div style="flex:1;min-width:0;">'
         // Round NC.X: name on its own line so it can use the column's
         // full width; chips and the research button drop to a row
         // below. The row is single-column for dest-major (see CSS
@@ -16519,6 +16360,7 @@ function _renderPlaceActivityItems(){
         +   _pmEsc(d.place)
         + '</div>'
         + '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px;">'
+        +   _pmReadOnlyRoleBadge(d.place)
         +   stayChip
         +   transitChip
         +   researchBtn
@@ -16609,74 +16451,13 @@ function _renderPlaceActivityItems(){
     });
   });
 
-  // Round NC.X: "Rejected" section. Any place whose requiredPlace has
-  // _rejected=true (set by the "✕ Reject" option in the role popup)
-  // moves here. Collapsed by default; expand to see the list and
-  // optionally un-reject a place.
-  (function _renderRejectedSection(){
-    var rejected = {}; // key -> { place, items: [..source activity names..] }
-    items.forEach(function(item){
-      if (!item || !Array.isArray(item.requiredPlaces)) return;
-      item.requiredPlaces.forEach(function(p){
-        if (!p || !p.place || p._rejected !== true) return;
-        var k = p.place.toLowerCase();
-        if (!rejected[k]) rejected[k] = { place: p.place, sources: [] };
-        if (item.name && rejected[k].sources.indexOf(item.name) < 0) {
-          rejected[k].sources.push(item.name);
-        }
-      });
-    });
-    var rkeys = Object.keys(rejected);
-    if (!rkeys.length) return;
-
-    if (!_tb._rejectedExpanded) _tb._rejectedExpanded = false;
-    var sec = document.createElement("div");
-    sec.style.cssText = "margin:18px 0 8px;padding:0;";
-    var hdr = document.createElement("button");
-    hdr.type = "button";
-    hdr.style.cssText = "display:flex;align-items:center;justify-content:space-between;width:100%;background:transparent;border:none;font-family:inherit;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#a93826;padding:8px 4px;cursor:pointer;border-top:1px solid #f0d8d2;";
-    hdr.innerHTML = "✕ Rejected (" + rkeys.length + ") <span aria-hidden=\"true\">" +
-      (_tb._rejectedExpanded ? "⌃" : "⌄") + "</span>";
-    hdr.onclick = function(){
-      _tb._rejectedExpanded = !_tb._rejectedExpanded;
-      _renderPlaceActivityItems();
-    };
-    sec.appendChild(hdr);
-
-    if (_tb._rejectedExpanded) {
-      var body = document.createElement("div");
-      body.style.cssText = "padding:4px 0 6px;display:flex;flex-direction:column;gap:4px;";
-      rkeys.forEach(function(k){
-        var r = rejected[k];
-        var row = document.createElement("div");
-        row.style.cssText = "display:flex;align-items:center;gap:10px;padding:6px 10px;background:#fdf6f4;border:1px solid #f0d8d2;border-radius:6px;font-size:12px;color:#555;";
-        var name = document.createElement("div");
-        name.style.cssText = "flex:1;font-weight:600;color:#222;";
-        name.textContent = r.place;
-        row.appendChild(name);
-        if (r.sources.length) {
-          var src = document.createElement("div");
-          src.style.cssText = "font-size:10.5px;color:#999;font-style:italic;";
-          src.textContent = "from: " + r.sources.slice(0, 2).join(", ") + (r.sources.length > 2 ? "…" : "");
-          row.appendChild(src);
-        }
-        var unrejectBtn = document.createElement("button");
-        unrejectBtn.type = "button";
-        unrejectBtn.style.cssText = "font-size:11px;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:4px;padding:3px 9px;cursor:pointer;font-family:inherit;font-weight:600;";
-        unrejectBtn.textContent = "↶ Un-reject";
-        unrejectBtn.title = "Move back to Maybe (undecided)";
-        (function(placeName){
-          unrejectBtn.onclick = function(){
-            if (typeof _pmSetPlaceRole === "function") _pmSetPlaceRole(placeName, "maybe", "");
-          };
-        })(r.place);
-        row.appendChild(unrejectBtn);
-        body.appendChild(row);
-      });
-      sec.appendChild(body);
-    }
-    list.appendChild(sec);
-  })();
+  // Round PD.1 (v360.5): "Rejected" section retired. Discovery is
+  // now a flat list — removing a place hard-splices it from
+  // _tb.candidates (and the LLM is free to re-suggest on
+  // regenerate). The Maybe/Reject/Un-reject affordances those
+  // states underwrote are gone with it. Place's prior position
+  // here is intentionally empty so the section ordering below
+  // (story panels, post-render hooks) stays put.
 
   // v358.7: IntersectionObserver auto-hydration removed. Each story
   // slot now has its own "Story →" button that fires _pmTriggerStory
@@ -17230,6 +17011,98 @@ function togglePlaceByPlaceMode(placeName){
   if (typeof _pmFocusPlace === "function") _pmFocusPlace(placeName);
 }
 if (typeof globalThis !== "undefined") globalThis.togglePlaceByPlaceMode = togglePlaceByPlaceMode;
+
+// Round PD.1 (v360.5): "Remove from list" — hard-splice a place out
+// of Discovery. The new Discovery model treats every visible place as
+// "on the list"; removal hides it from the list AND the map by
+// splicing it from _tb.placeActivities[*].requiredPlaces (the source
+// the list + map both read from) and from _tb.candidates.
+//
+// Semantics (per user choice): no _rejected flag persists. If the
+// user later regenerates the brief, the LLM is free to re-suggest
+// the place. This matches "hide from list, allow re-suggest."
+//
+// If an activity loses all its required places as a result, the
+// activity row stays — it may regain places on regenerate. Cleanup
+// of empty activities is a separate concern.
+function _pmRemoveFromList(placeName){
+  if (!_tb || !placeName) return;
+  var key = String(placeName).toLowerCase();
+  // Splice across every activity's requiredPlaces.
+  var items = _tb.placeActivities || [];
+  items.forEach(function(item){
+    if (!item || !Array.isArray(item.requiredPlaces)) return;
+    item.requiredPlaces = item.requiredPlaces.filter(function(p){
+      return !(p && p.place && p.place.toLowerCase() === key);
+    });
+    // Recompute the activity's derived "checked" state.
+    item.checked = (item.requiredPlaces || []).some(function(p){ return p && p._keep; });
+  });
+  // Splice from candidates if present.
+  if (Array.isArray(_tb.candidates)) {
+    _tb.candidates = _tb.candidates.filter(function(c){
+      return !(c && c.place && c.place.toLowerCase() === key);
+    });
+  }
+  // Repaint list + map.
+  if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
+  if (typeof _updatePlaceActivitySummary === "function") _updatePlaceActivitySummary();
+  if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
+}
+if (typeof globalThis !== "undefined") globalThis._pmRemoveFromList = _pmRemoveFromList;
+
+// Round PD.1 (v360.5): read-only role badge for Discovery rows on
+// trip reopen. When the user reopens an existing trip's Discovery
+// view via "Open Discovery", the candidates already carry c.role
+// (set at the previous buildFromCandidates pass + any trip-view
+// overrides). The badge conveys "this place has a known role"
+// without inviting edits in Discovery — overrides live on the trip
+// view. Returns "" when no committed role exists (new brief, fresh
+// trip, place with no c.role yet) so the renderer can drop it in
+// unconditionally without checking.
+//
+// The lookup is permissive: tries _tb.candidates first (the
+// in-flight picker draft), falls back to trip.candidates so
+// reopened published trips work even before _tb gets hydrated.
+function _pmReadOnlyRoleBadge(placeName){
+  if (!placeName) return "";
+  var key = String(placeName).toLowerCase();
+  var cand = null;
+  try {
+    if (window._tb && Array.isArray(window._tb.candidates)) {
+      cand = window._tb.candidates.find(function(c){
+        return c && c.place && c.place.toLowerCase() === key;
+      });
+    }
+    if (!cand && typeof trip !== "undefined" && trip && Array.isArray(trip.candidates)) {
+      cand = trip.candidates.find(function(c){
+        return c && c.place && c.place.toLowerCase() === key;
+      });
+    }
+  } catch(_){}
+  if (!cand || !cand.role) return "";
+  var role = cand.role;
+  var hub = cand.dayTripHub || cand.waysideFromHub || "";
+  // Resolve hub display name from candidates (proper-cased) if available.
+  function _hubDisplay(h){
+    if (!h) return "";
+    try {
+      var hk = String(h).toLowerCase();
+      var hSrc = (window._tb && window._tb.candidates) || (typeof trip !== "undefined" && trip && trip.candidates) || [];
+      var match = hSrc.find(function(c){ return c && c.place && c.place.toLowerCase() === hk; });
+      if (match) return match.place;
+    } catch(_){}
+    return h;
+  }
+  var label;
+  if (role === "stay")         label = "Stay";
+  else if (role === "daytrip") label = hub ? ("Day trip from " + _hubDisplay(hub)) : "Day trip";
+  else if (role === "onway")   label = hub ? ("On the way from " + _hubDisplay(hub)) : "On the way";
+  else if (role === "see")     label = "Sight";
+  else                          return "";
+  return '<span style="font-size:9.5px;font-weight:600;color:#666;background:#f3f1ec;border:1px solid #e0dcd0;padding:1px 7px;border-radius:9px;letter-spacing:.02em;font-family:inherit;line-height:1.3;white-space:nowrap;cursor:default;" title="Role from your last build. Edit it on the trip view.">' + _pmEsc(label) + '</span>';
+}
+if (typeof globalThis !== "undefined") globalThis._pmReadOnlyRoleBadge = _pmReadOnlyRoleBadge;
 
 // Per-place nights stepper. Adjust by delta (typically ±1), clamp to 1..14.
 // The summary recomputes from these values, so the day total updates live.
@@ -21054,71 +20927,20 @@ function _renderPlacePickerMap(targetId){
       // v357: stay pins lost their ordinal number — the picker no
       // longer shows visit order. Both stay and day-trip pins now
       // carry place initials.
-      // Round NC.3+ bugfix: read c.role from _tb.candidates (NC.3 source
-      // of truth) and let it override the legacy
-      // `kept && !_isDayTrip` derivation. The legacy path drove the
-      // Geysir-shows-stay-when-its-see bug — the picker map was reading
-      // a different field than the role popover writes.
-      var _ssCand = null;
-      try {
-        _ssCand = (window._tb && Array.isArray(window._tb.candidates))
-          ? window._tb.candidates.find(function(cc){
-              return cc && cc.place && cc.place.toLowerCase() === (info.place || "").toLowerCase();
-            })
-          : null;
-        if (_ssCand && window.MaxEnginePicker && typeof window.MaxEnginePicker.normalizeCandidateRole === "function") {
-          window.MaxEnginePicker.normalizeCandidateRole(_ssCand);
-        }
-      } catch(_) { /* swallow */ }
-      // Round NC.X: route through the shared _pmDeriveRole so the
-      // picker map render and the role popup use the SAME priority
-      // cascade. Earlier each had its own and they could disagree
-      // (Jökulsárlón rendered Day trip; its popup pre-selected See).
-      var _derivedRole = (typeof _pmDeriveRole === "function")
-        ? _pmDeriveRole(info, key, {}).role
-        : null;
-      var isStay    = (_derivedRole === "stay");
-      var isDayTrip = (_derivedRole === "daytrip");
-      var isSee     = (_derivedRole === "see");
-      var isOnway   = (_derivedRole === "onway");
-      // Round NC.X: "single sight" treatment ONLY applies when no
-      // explicit role has been chosen. Earlier this came first and
-      // beat isDayTrip / isOnway — Dynjandi has c.singleSight=true
-      // AND c.role=daytrip, so it rendered as 👁 eye despite being a
-      // committed day trip. The explicit role is the user's intent;
-      // singleSight is a hint that only matters when the user
-      // hasn't decided yet.
-      var isSingleSight = false;
-      if (!isStay && !isDayTrip && !isOnway) {
-        isSingleSight = isSee;
-        if (!isSingleSight) {
-          try {
-            if (_ssCand && typeof window._isSingleSight === "function") {
-              isSingleSight = window._isSingleSight(_ssCand);
-            } else if (_ssCand && _ssCand.singleSight === true) {
-              isSingleSight = true;
-            }
-          } catch(_) { /* swallow */ }
-        }
-      }
-      // Round NC.X: pin style + HTML now come from MaxMapPin — the
-      // single source of truth used by all map surfaces. The 80+
-      // lines of inline branch-by-role HTML construction that lived
-      // here is gone. Behavior is identical because the role
-      // derivation (above) hasn't changed; only the visual
-      // construction is centralized.
-      var _ctx = { iconic: !!info.iconic };
-      var _styleRole = isStay ? "stay"
-                     : isDayTrip ? "daytrip"
-                     : isOnway ? "onway"
-                     : isSingleSight ? "see"
-                     : "maybe";
-      var _pinStyle = MaxMapPin.style(_styleRole, _ctx);
-      // Round NC.X: EVERY role carries place initials. The role
-      // (stay vs see vs day-trip vs on-way vs maybe) is conveyed by
-      // shape + fill + corner-badge — initials answer "WHICH place?"
-      // at every pin without the user having to hover or click.
-      var _labelOv = { label: _pmEsc((info.place || "").substring(0, 2)) };
+      // Round PD.1 (v360.5): Discovery picker map is now a neutral
+      // surface — every place is a blue teardrop with no label, no
+      // role-derived styling. Role decisions moved to trip-build
+      // time (buildFromCandidates → _pmDeriveRole cascade per place),
+      // and the trip view remains the single place the user shapes
+      // roles. The map's job here is "where are the places," nothing
+      // more. The role derivation, single-sight branching, and
+      // initials-as-label that used to live here are deliberately
+      // gone; if/when Discovery needs to reflect committed roles
+      // again (e.g. on reopen of a built trip), use the read-only
+      // badge in the list row, not the pin.
+      var _styleRole = "see";              // teardrop, blue
+      var _pinStyle  = MaxMapPin.style(_styleRole, {});
+      var _labelOv   = { label: "" };      // no initials on the pin
       // v358.6: no map-level "iconic" decoration. The earlier gold
       // border and the v358.5 ★ overlay both fired only on places
       // whose source activity carried iconic:true, which made them
@@ -21143,21 +20965,10 @@ function _renderPlacePickerMap(targetId){
       // pm-single-sight-pin class for an animation hook; that hook
       // was retired alongside the legacy single-sight treatment.
       // No className needed on the MaxMapPin icon.
-      // Round NC.X: compute the tooltip suffix BEFORE the existing-vs-new
-      // marker branches so we can rebind on EITHER path. Previously the
-      // tooltip was only bound on first create — when a place's role
-      // later changed (See → Maybe, daytrip → onway, etc.) the icon
-      // updated via setIcon but the tooltip kept its old label.
-      // Djúpivogur symptom: pin flipped to purple eye when set to See,
-      // but the tooltip still read "Djúpivogur · maybe".
-      var _ttRole = isStay        ? " · stay"
-                  : isDayTrip     ? " · day trip"
-                  : isOnway       ? " · on the way"
-                  : isSee         ? " · see"
-                  : info._rejected ? " · rejected"
-                  : info.kept     ? " · kept"
-                  :                 " · maybe";
-      var ttBits = info.place + _ttRole;
+      // Round PD.1: tooltip is just the place name. Role suffix
+      // ("· stay", "· day trip", etc.) was dropped along with the
+      // role-colored pins — Discovery doesn't surface roles at all.
+      var ttBits = info.place;
 
       // Tooltip offset honors the icon's anchor strategy so the
       // tooltip clears the pin top regardless of teardrop vs circle.
@@ -21172,16 +20983,13 @@ function _renderPlacePickerMap(targetId){
       } else {
         var m = L.marker(latLng, {icon: icon}).addTo(_pmMap);
         m.bindTooltip(ttBits, {direction:"top", offset:[0, _tipOff]});
-        // Step 6: clicking a pin opens the stay/day-trip popup.
-        // Falls back to the legacy scroll-to-row behavior when the
-        // popup helper isn't available (e.g. pre-init paint).
-        (function(placeName, placeKey){
+        // Round PD.1: pin click no longer opens the role popup
+        // (Discovery has no per-place role decisions). Click now
+        // always scrolls the list to the matching row and flashes
+        // it, so the list stays the place identification surface
+        // and the map stays purely spatial.
+        (function(placeName){
           m.on("click", function(){
-            if (typeof _pmOpenPlacePopup === "function") {
-              _pmOpenPlacePopup(placeKey, m, _pmMap);
-              return;
-            }
-            // Fallback: scroll to the place's row in the picker
             var rows = document.querySelectorAll(".tb-dest-major");
             for (var i = 0; i < rows.length; i++) {
               if ((rows[i].textContent || "").toLowerCase().indexOf(placeName.toLowerCase()) !== -1) {
@@ -21193,7 +21001,7 @@ function _renderPlacePickerMap(targetId){
               }
             }
           });
-        })(info.place, key);
+        })(info.place);
         _pmMarkersByPlace[key] = m;
       }
     }
