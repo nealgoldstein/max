@@ -19550,22 +19550,57 @@ function _pmAskMaxOpen(ed){
   });
   insert.onclick = function(){
     if (!lastResponseText) return;
-    // Restore caret and insert as paragraphs.
+    // PD.62b: build the callout as a DOM node + a trailing empty
+    // paragraph, insert at the saved range, and place the caret in
+    // the trailing paragraph. This guarantees the user\'s next
+    // keystroke / paste lands OUTSIDE the styled block.
     ed.focus();
+    var callout = document.createElement("div");
+    callout.style.cssText = "margin:8px 0;padding:8px 12px;border-left:3px solid #5b3f8f;background:#faf8fd;";
+    var label = document.createElement("div");
+    label.style.cssText = "font-size:10px;font-weight:700;color:#5b3f8f;letter-spacing:.04em;text-transform:uppercase;margin-bottom:4px;";
+    label.textContent = "✨ from Max";
+    callout.appendChild(label);
+    lastResponseText.split(/\n\n+/).forEach(function(para){
+      var p = document.createElement("p");
+      p.style.cssText = "margin:0 0 6px;line-height:1.55;";
+      // Use textContent + manual <br> handling rather than innerHTML
+      // so we don\'t inject anything from the LLM as HTML.
+      var lines = para.split(/\n/);
+      lines.forEach(function(line, i){
+        if (i > 0) p.appendChild(document.createElement("br"));
+        p.appendChild(document.createTextNode(line));
+      });
+      callout.appendChild(p);
+    });
+    // Trailing empty paragraph the caret will land in.
+    var trailing = document.createElement("p");
+    trailing.appendChild(document.createElement("br"));
+
     if (savedRange) {
       try {
         var sel2 = window.getSelection();
         sel2.removeAllRanges();
         sel2.addRange(savedRange);
-      } catch(_){}
+        savedRange.deleteContents();
+        // Insert in reverse so the range stays at the head.
+        savedRange.insertNode(trailing);
+        savedRange.insertNode(callout);
+        // Place caret in the trailing paragraph.
+        var newR = document.createRange();
+        newR.setStart(trailing, 0);
+        newR.collapse(true);
+        sel2.removeAllRanges();
+        sel2.addRange(newR);
+      } catch(e){
+        // Fallback: just append.
+        ed.appendChild(callout);
+        ed.appendChild(trailing);
+      }
+    } else {
+      ed.appendChild(callout);
+      ed.appendChild(trailing);
     }
-    var html = "<div style=\"margin:8px 0;padding:8px 12px;border-left:3px solid #5b3f8f;background:#faf8fd;\">"
-      + '<div style="font-size:10px;font-weight:700;color:#5b3f8f;letter-spacing:.04em;text-transform:uppercase;margin-bottom:4px;">✨ from Max</div>'
-      + lastResponseText.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").split(/\n\n+/).map(function(p){
-          return '<p style="margin:0 0 6px;line-height:1.55;">' + p.replace(/\n/g,"<br>") + '</p>';
-        }).join("")
-      + "</div>";
-    document.execCommand("insertHTML", false, html);
     ov.remove();
   };
 }
