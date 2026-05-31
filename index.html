@@ -17203,6 +17203,43 @@ function _pmUnRejectFromList(placeName){
 }
 if (typeof globalThis !== "undefined") globalThis._pmUnRejectFromList = _pmUnRejectFromList;
 
+// Round PD.12 (v360.5): Discovery map exposes the one role decision
+// that's sequence-free — stay vs see. Pin shape carries the
+// recommendation (circle = Max suggests overnight, teardrop = sight
+// only); pin-popup lets the user accept or flip it. Writes to
+// placeMeta.stayOverride so the trip view sees the commitment and
+// vice versa.
+function _pmTogglePlaceStay(placeName){
+  if (!placeName) return;
+  var meta = (typeof _pmPlaceMeta === "function") ? _pmPlaceMeta(placeName, { create: true }) : null;
+  if (!meta) return;
+  // Effective stay = explicit override, else LLM "overnight" hint.
+  var _llmStay = false;
+  try {
+    var key = (typeof _pmMetaKey === "function") ? _pmMetaKey(placeName) : String(placeName).toLowerCase();
+    (_tb.placeActivities || []).forEach(function(a){
+      (a.requiredPlaces || []).forEach(function(p){
+        if (p && _pmMetaKey(p.place) === key && p.overnight !== false) _llmStay = true;
+      });
+    });
+  } catch(_){}
+  var stayActive = (meta.stayOverride === true) || (meta.stayOverride !== false && _llmStay);
+  meta.stayOverride = !stayActive;
+  // Repaint list (badge/state) + map (pin shape).
+  if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
+  if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
+  // Close any open Leaflet popup so the user sees the shape change.
+  try {
+    if (typeof _pmMaps === "object" && _pmMaps) {
+      Object.keys(_pmMaps).forEach(function(tid){
+        var st = _pmMaps[tid];
+        if (st && st.map && st.map.closePopup) st.map.closePopup();
+      });
+    }
+  } catch(_){}
+}
+if (typeof globalThis !== "undefined") globalThis._pmTogglePlaceStay = _pmTogglePlaceStay;
+
 // Round PD.9: row-level ⋯ menu toggle. Wraps _pmRemoveFromList
 // behind an explicit affordance so the destructive action requires
 // two clicks (⋯ → Remove from list) instead of a single accidental
@@ -21106,24 +21143,34 @@ function _renderPlacePickerMap(targetId){
       // v357: stay pins lost their ordinal number — the picker no
       // longer shows visit order. Both stay and day-trip pins now
       // carry place initials.
-      // Round PD.1 (v360.5): Discovery picker map is a neutral
-      // surface — every place is a teardrop with no label and no
-      // role-derived styling. Role decisions moved to trip-build
-      // time (buildFromCandidates → _pmDeriveRole cascade per place),
-      // and the trip view remains the single place the user shapes
-      // roles.
-      //
-      // Round PD.7 (v360.5): teardrop COLOR keys off kept-state so
-      // the user can see at a glance which places are committed to
-      // the trip. Kept = blue (the original "see" fill); unkept =
-      // gray. Shape stays the same in both cases — only fill shifts.
-      // The role derivation, single-sight branching, and
-      // initials-as-label that used to live here are deliberately
-      // gone.
-      var _styleRole = "see";              // teardrop shape
+      // Round PD.12 (v360.5): Discovery map surfaces the single
+      // sequence-free role decision — stay vs see — as pin shape.
+      // Circle = Max suggests overnight (stay candidate); teardrop
+      // = sight only. Color still keys off kept-state (PD.7): blue
+      // when on the list, gray when unkept. The four combinations:
+      //   • blue circle  — kept + stay-candidate
+      //   • blue teardrop — kept + see-only
+      //   • gray circle  — unkept + stay-candidate
+      //   • gray teardrop — unkept + see-only
+      // No labels (no initials); the list is the place-identification
+      // surface and clicking a pin opens a popup with the recommendation
+      // + a toggle. Day-trip and on-the-way pins are deliberately NOT
+      // surfaced here — they're sequence-dependent and only meaningful
+      // in the trip view.
+      var _stayMeta = null;
+      try {
+        if (typeof _pmMetaKey === "function" && _tb && _tb.placeMeta) {
+          _stayMeta = _tb.placeMeta[_pmMetaKey(info.place)] || null;
+        }
+      } catch(_){}
+      var _isStayCandidate;
+      if (_stayMeta && _stayMeta.stayOverride === true)       _isStayCandidate = true;
+      else if (_stayMeta && _stayMeta.stayOverride === false) _isStayCandidate = false;
+      else                                                     _isStayCandidate = (info.overnight !== false);
+      var _styleRole = _isStayCandidate ? "stay" : "see";
       var _pinStyle  = MaxMapPin.style(_styleRole, {});
       if (!info.kept) {
-        _pinStyle.fill = "#bbb";           // gray teardrop for unkept
+        _pinStyle.fill = "#bbb";           // gray for unkept (either shape)
       }
       var _labelOv   = { label: "" };      // no initials on the pin
       // v358.6: no map-level "iconic" decoration. The earlier gold
@@ -21168,25 +21215,31 @@ function _renderPlacePickerMap(targetId){
       } else {
         var m = L.marker(latLng, {icon: icon}).addTo(_pmMap);
         m.bindTooltip(ttBits, {direction:"top", offset:[0, _tipOff]});
-        // Round PD.1: pin click no longer opens the role popup
-        // (Discovery has no per-place role decisions). Click now
-        // always scrolls the list to the matching row and flashes
-        // it, so the list stays the place identification surface
-        // and the map stays purely spatial.
-        (function(placeName){
-          m.on("click", function(){
-            var rows = document.querySelectorAll(".tb-dest-major");
-            for (var i = 0; i < rows.length; i++) {
-              if ((rows[i].textContent || "").toLowerCase().indexOf(placeName.toLowerCase()) !== -1) {
-                rows[i].scrollIntoView({behavior:"smooth", block:"center"});
-                rows[i].style.transition = "background-color 0.4s";
-                rows[i].style.backgroundColor = "#fff7d4";
-                setTimeout(function(){ rows[i].style.backgroundColor = ""; }, 1600);
-                break;
-              }
-            }
-          });
-        })(info.place);
+        // Round PD.12: pin click opens a Leaflet popup with Max's
+        // stay/see recommendation + a single toggle. Clicking the
+        // toggle flips placeMeta.stayOverride, re-renders the list
+        // and map (pin shape changes), and closes the popup.
+        // Includes a "scroll to row" link so the user can still get
+        // to the list entry from the map.
+        (function(placeName, isStay){
+          var nameSafe  = String(placeName).replace(/'/g, "\\'").replace(/"/g, "&quot;");
+          var recoLabel = isStay ? "stay overnight" : "just visit";
+          var flipLabel = isStay ? "Just visiting"  : "Stay overnight";
+          var popupHtml = ''
+            + '<div style="font-family:inherit;min-width:200px;">'
+            +   '<div style="font-weight:700;font-size:13.5px;color:#111;margin-bottom:6px;">' + _pmEsc(placeName) + '</div>'
+            +   '<div style="font-size:11.5px;color:#666;margin-bottom:10px;">Max suggests: <strong style="color:#111;">' + recoLabel + '</strong></div>'
+            +   '<button type="button" onclick="_pmTogglePlaceStay(\'' + nameSafe + '\')" '
+            +           'style="display:block;width:100%;font-size:12px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:6px 10px;cursor:pointer;font-family:inherit;margin-bottom:6px;">'
+            +     flipLabel
+            +   '</button>'
+            +   '<a href="#" onclick="event.preventDefault();var r=document.querySelectorAll(\'.tb-dest-major\');for(var i=0;i&lt;r.length;i++){if((r[i].textContent||\'\').toLowerCase().indexOf(\'' + nameSafe.toLowerCase() + '\')!==-1){r[i].scrollIntoView({behavior:\'smooth\',block:\'center\'});r[i].style.transition=\'background-color 0.4s\';r[i].style.backgroundColor=\'#fff7d4\';setTimeout(function(){r[i].style.backgroundColor=\'\';},1600);break;}}return false;" '
+            +      'style="display:block;font-size:11px;color:#888;text-align:center;text-decoration:none;font-family:inherit;">'
+            +     'Find in list →'
+            +   '</a>'
+            + '</div>';
+          m.bindPopup(popupHtml, { maxWidth: 260, autoPan: true, closeButton: true });
+        })(info.place, _isStayCandidate);
         _pmMarkersByPlace[key] = m;
       }
     }
