@@ -16026,6 +16026,9 @@ function _renderPlaceActivityItems(){
         var row = document.createElement("div");
         row.className = "tb-act-table-row tb-dest-major" + (item.checked ? " on" : " off");
         row.id = "tb-place-act-route-" + (item.id || ("r-" + Math.random().toString(36).substr(2,5)));
+        // Round PD.24: route render path — sub-row checkbox removed
+        // to match PD.18's non-route fix. One control per row (the
+        // place-row checkbox on the left), no per-activity duplicate.
         row.innerHTML = '<div class="tb-act-col-left">'
           + '<div style="display:flex;align-items:flex-start;gap:8px;">'
           + '<div class="tb-act-check'+(item.checked?" on":"")+'" onclick="togglePlaceActivity(&#39;'+item.id+'&#39;)" title="Toggle this route"></div>'
@@ -16036,12 +16039,9 @@ function _renderPlaceActivityItems(){
           + '</div>'
           + '</div>'
           + '<div class="tb-act-col-right">'
-          + '<div class="tb-activity-row" style="display:flex;align-items:flex-start;gap:8px;padding:5px 0;">'
-          + '<div class="tb-act-check small'+(item.checked?" on":"")+'" onclick="togglePlaceActivity(&#39;'+item.id+'&#39;)"></div>'
-          + '<div style="flex:1;min-width:0;cursor:pointer;" onclick="togglePlaceActivity(&#39;'+item.id+'&#39;)">'
+          + '<div class="tb-activity-row" style="padding:5px 0;">'
           +   '<div style="font-size:11.5px;font-weight:600;color:#1a1a1a;">'+_pmEsc(item.name||"")+iconicTag+'</div>'
           +   (item.description ? '<div style="margin-top:2px;font-size:10.5px;color:#666;">'+_pmEsc(item.description)+'</div>' : '')
-          + '</div>'
           + '</div>'
           + '</div>';
         list.appendChild(row);
@@ -21305,16 +21305,10 @@ function _renderPlacePickerMap(targetId){
       // setIcon, but the popup HTML was never rebuilt). Symptom:
       // toggle "Just visit" → "Stay overnight" → click pin again
       // → popup still says "Max suggests: just visit."
-      var _popupHtml = (function(placeName, isStay){
+      var _popupHtml = (function(placeName, isStay, llmSaysOvernight){
         var nameSafe  = String(placeName).replace(/'/g, "\\'").replace(/"/g, "&quot;");
         var recoLabel = isStay ? "stay overnight" : "just visit";
         var flipLabel = isStay ? "Just visiting"  : "Stay overnight";
-        // Round PD.22: distinguish user commitment from Max's
-        // suggestion. After PD.14, MaxRoleWriter sets _roleTouched=true
-        // whenever the user picks a role (via the popup, the row
-        // indicator, or the ⋯ menu). Use that to label the popup
-        // accurately: "You selected: ..." when committed, "Max
-        // suggests: ..." when still on the LLM/predictor default.
         var _candForLabel = null;
         try {
           if (window._tb && Array.isArray(window._tb.candidates) && typeof _pmMetaKey === "function") {
@@ -21326,10 +21320,21 @@ function _renderPlacePickerMap(targetId){
         } catch(_){}
         var _isUserCommitted = !!(_candForLabel && _candForLabel._roleTouched === true);
         var prefixLabel = _isUserCommitted ? "You selected" : "Max suggests";
+        // Round PD.24: when the user has overridden Max's suggestion,
+        // show what Max originally said so the user remembers the
+        // history. Max's suggestion = the LLM's overnight hint
+        // (info.overnight) translated to stay/just-visit. Only shown
+        // when the user's choice differs from Max's.
+        var _maxOriginal = llmSaysOvernight ? "stay overnight" : "just visit";
+        var _showHistory = _isUserCommitted && (_maxOriginal !== recoLabel);
+        var historyLine = _showHistory
+          ? '<div style="font-size:10.5px;color:#999;font-style:italic;margin-bottom:10px;">Max had suggested ' + _maxOriginal + '</div>'
+          : '';
         return ''
           + '<div style="font-family:inherit;min-width:200px;">'
           +   '<div style="font-weight:700;font-size:13.5px;color:#111;margin-bottom:6px;">' + _pmEsc(placeName) + '</div>'
-          +   '<div style="font-size:11.5px;color:#666;margin-bottom:10px;">' + prefixLabel + ': <strong style="color:#111;">' + recoLabel + '</strong></div>'
+          +   '<div style="font-size:11.5px;color:#666;margin-bottom:' + (_showHistory ? '4px' : '10px') + ';">' + prefixLabel + ': <strong style="color:#111;">' + recoLabel + '</strong></div>'
+          +   historyLine
           +   '<button type="button" onclick="_pmTogglePlaceStay(\'' + nameSafe + '\')" '
           +           'style="display:block;width:100%;font-size:12px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:6px 10px;cursor:pointer;font-family:inherit;margin-bottom:6px;">'
           +     flipLabel
@@ -21339,7 +21344,7 @@ function _renderPlacePickerMap(targetId){
           +     'Find in list →'
           +   '</a>'
           + '</div>';
-      })(info.place, _isStayCandidate);
+      })(info.place, _isStayCandidate, info.overnight === true);
       var existing = _pmMarkersByPlace[key];
       if (existing) {
         existing.setIcon(icon);
