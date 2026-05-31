@@ -1872,16 +1872,22 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
    The @media (max-width:640px) rule above still collapses to 1fr on
    narrow phones. */
 .tb-act-table-row.tb-dest-major{padding:10px 4px;background:transparent;border:none;box-shadow:none;border-radius:0;border-bottom:1px solid #f0ece1;margin-bottom:0;gap:18px;grid-template-columns:minmax(0, 1.4fr) minmax(0, 1fr);position:relative;}
-/* Round PD.8: × button absolutely positioned in the row's top-right
-   corner so it lives at the right margin of the WHOLE row rather
-   than at the right edge of the left column. */
-.tb-act-table-row.tb-dest-major .pm-remove-btn{position:absolute;top:10px;right:6px;z-index:2;}
+/* Round PD.9: × replaced by an inline ⋯ menu next to the place
+   name. Position:relative on the row stays — the menu popover
+   anchors to the ⋯ button via its own position:relative. */
+.pm-row-menu-btn{flex-shrink:0;width:22px;height:22px;border:none;background:transparent;color:#aaa;cursor:pointer;font-family:inherit;font-size:16px;line-height:1;padding:0;display:flex;align-items:center;justify-content:center;border-radius:4px;transition:background-color .12s, color .12s;}
+.pm-row-menu-btn:hover{background:#f0ece1;color:#444;}
+.pm-row-menu-wrap{position:relative;display:inline-flex;align-items:center;flex-shrink:0;}
+.pm-row-menu-pop{position:absolute;top:24px;right:0;z-index:50;background:#fff;border:1px solid #d8d4c8;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,0.10);padding:4px 0;min-width:160px;display:none;}
+.pm-row-menu-pop.open{display:block;}
+.pm-row-menu-item{display:block;width:100%;text-align:left;background:transparent;border:none;font-family:inherit;font-size:12.5px;color:#a93826;padding:7px 12px;cursor:pointer;}
+.pm-row-menu-item:hover{background:#fdf6f4;}
 /* Round PD.7: push the activity column down a touch so the place
    name on the left has visual primacy at the top of the row.
-   Round PD.8: bumped from 10px → 32px so the activity content
-   clears the absolutely-positioned × button in the row's top-right
-   corner. */
-.tb-act-table-row.tb-dest-major .tb-act-col-right{padding-top:32px;}
+   Round PD.9: dropped back from 32px → 10px — the absolutely-
+   positioned × is gone (replaced by an inline ⋯ menu), so we
+   no longer need to clear the top-right corner. */
+.tb-act-table-row.tb-dest-major .tb-act-col-right{padding-top:10px;}
 .tb-act-table-row.tb-dest-major:last-child{border-bottom:none;}
 .tb-act-table-row.tb-dest-major.on{background:transparent;box-shadow:none;border-color:#f0ece1;}
 .tb-act-table-row.tb-dest-major.off{opacity:0.65;}
@@ -15918,7 +15924,12 @@ function _renderPlaceActivityItems(){
           +         (pInfo.kept ? stayChip : maybeBadge)
           +         (pInfo.kept ? dtBadge : '')
           +       '</div>'
-          +       '<button type="button" class="pm-remove-btn" onclick="event.stopPropagation();_pmRemoveFromList(&#39;' + _placeArg + '&#39;)" title="Remove this place from the list" style="flex-shrink:0;width:20px;height:20px;border:1px solid #ddd;border-radius:4px;background:#fff;color:#888;cursor:pointer;font-family:inherit;font-size:14px;line-height:1;padding:0;display:flex;align-items:center;justify-content:center;">×</button>'
+          +       '<span class="pm-row-menu-wrap">'
+          +         '<button type="button" class="pm-row-menu-btn" onclick="_pmToggleRowMenu(this);event.stopPropagation();" title="More options">⋯</button>'
+          +         '<div class="pm-row-menu-pop">'
+          +           '<button type="button" class="pm-row-menu-item" onclick="event.stopPropagation();_pmRemoveFromList(&#39;' + _placeArg + '&#39;);">Remove from list</button>'
+          +         '</div>'
+          +       '</span>'
           +     '</div>'
           +     (nightsLine ? '<div class="tb-dest-meta">' + nightsLine + '</div>' : '')
           +     sightsLine
@@ -16407,7 +16418,12 @@ function _renderPlaceActivityItems(){
         + '<div class="tb-act-name" style="font-size:14px;font-weight:700;color:#111;line-height:1.25;flex:1;min-width:0;white-space:nowrap;overflow:visible;" title="' + _pmEsc(d.place) + '">'
         +   _pmEsc(d.place)
         + '</div>'
-        + '<button type="button" class="pm-remove-btn" onclick="event.stopPropagation();_pmRemoveFromList(&#39;'+_pmEsc(d.place)+'&#39;)" title="Remove this place from the list" style="flex-shrink:0;width:20px;height:20px;border:1px solid #ddd;border-radius:4px;background:#fff;color:#888;cursor:pointer;font-family:inherit;font-size:14px;line-height:1;padding:0;display:flex;align-items:center;justify-content:center;">×</button>'
+        + '<span class="pm-row-menu-wrap">'
+        +   '<button type="button" class="pm-row-menu-btn" onclick="_pmToggleRowMenu(this);event.stopPropagation();" title="More options">⋯</button>'
+        +   '<div class="pm-row-menu-pop">'
+        +     '<button type="button" class="pm-row-menu-item" onclick="event.stopPropagation();_pmRemoveFromList(&#39;'+_pmEsc(d.place)+'&#39;);">Remove from list</button>'
+        +   '</div>'
+        + '</span>'
         + '</div>'
         + '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px;">'
         +   stayChip
@@ -17100,6 +17116,38 @@ function _pmRemoveFromList(placeName){
   if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
 }
 if (typeof globalThis !== "undefined") globalThis._pmRemoveFromList = _pmRemoveFromList;
+
+// Round PD.9: row-level ⋯ menu toggle. Wraps _pmRemoveFromList
+// behind an explicit affordance so the destructive action requires
+// two clicks (⋯ → Remove from list) instead of a single accidental
+// hit on a bare × button.
+function _pmToggleRowMenu(buttonEl){
+  if (!buttonEl) return;
+  var wrap = buttonEl.closest ? buttonEl.closest(".pm-row-menu-wrap") : null;
+  if (!wrap) return;
+  var pop = wrap.querySelector(".pm-row-menu-pop");
+  if (!pop) return;
+  var isOpen = pop.classList.contains("open");
+  // Close any other open menus on the page first.
+  document.querySelectorAll(".pm-row-menu-pop.open").forEach(function(p){
+    if (p !== pop) p.classList.remove("open");
+  });
+  if (isOpen) {
+    pop.classList.remove("open");
+    return;
+  }
+  pop.classList.add("open");
+  // One-shot outside-click handler dismisses the menu.
+  setTimeout(function(){
+    function _close(e){
+      if (wrap.contains(e.target)) return;
+      pop.classList.remove("open");
+      document.removeEventListener("click", _close, true);
+    }
+    document.addEventListener("click", _close, true);
+  }, 0);
+}
+if (typeof globalThis !== "undefined") globalThis._pmToggleRowMenu = _pmToggleRowMenu;
 
 // Round PD.1 (v360.5): read-only role badge for Discovery rows on
 // trip reopen. When the user reopens an existing trip's Discovery
