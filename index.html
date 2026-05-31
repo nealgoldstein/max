@@ -6390,6 +6390,11 @@ function updateSyncButtons() {
 }
 
 function renderHomeScreen(){
+  // PD.66e: reconcile any local drafts that sync's pullAll may have
+  // dropped from the index. Runs on every home-screen render so
+  // drafts stay visible after server polls.
+  if (typeof _pmDraftReconcileIndex === "function") _pmDraftReconcileIndex();
+
   // v345.1: hide the "API key needed" notice when the user is signed
   // in via MaxSync. Signed-in users get LLM access through the
   // server proxy — no personal Anthropic key needed.
@@ -19208,6 +19213,48 @@ if (typeof globalThis !== "undefined") {
 // surface (placeMeta, tripMeta — docs, links, tags, attachments).
 // Anything purely UI (search query, expanded sections) is not.
 // ──────────────────────────────────────────────────────────────────────
+
+// ──────────────────────────────────────────────────────────────────────
+// Round PD.66e: reconcile drafts back into the index. Sync\'s pullAll
+// replaces _tripsIndex with the server\'s view, which has no idea
+// about local-only drafts (we don\'t POST drafts to the server until
+// the user clicks Choreograph). Without this pass, drafts vanish from
+// the home screen after every server poll.
+//
+// Scans localStorage for any "max-trip-*" whose body has
+// brief._isDraft = true and ensures _tripsIndex has an entry. Called
+// from renderHomeScreen so it runs on every navigation back home.
+// ──────────────────────────────────────────────────────────────────────
+function _pmDraftReconcileIndex(){
+  if (typeof _tripsIndex === "undefined" || !Array.isArray(_tripsIndex)) return;
+  var added = 0;
+  try {
+    for (var k in localStorage) {
+      if (k.indexOf("max-trip-") !== 0) continue;
+      var id = k.substring("max-trip-".length);
+      if (_tripsIndex.find(function(x){ return x && x.id === id; })) continue;
+      try {
+        var parsed = JSON.parse(localStorage.getItem(k));
+        var t = parsed && parsed.trip;
+        if (!t || !t.brief || !t.brief._isDraft) continue;
+        _tripsIndex.push({
+          id: id,
+          name: t.name || "Untitled draft",
+          dateRange: "",
+          destCount: 0,
+          isDraft: true
+        });
+        added++;
+      } catch(_){}
+    }
+    if (added && typeof saveTripsIndex === "function") {
+      saveTripsIndex();
+      console.log("[Max draft] reconciled", added, "draft(s) back into index");
+    }
+  } catch(_){}
+}
+if (typeof globalThis !== "undefined") globalThis._pmDraftReconcileIndex = _pmDraftReconcileIndex;
+
 function _pmDraftEnsure(){
   if (_currentTripId) return _currentTripId;
   if (typeof _tb === "undefined" || !_tb) return null;
