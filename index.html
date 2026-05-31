@@ -1888,6 +1888,48 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
    positioned × is gone (replaced by an inline ⋯ menu), so we
    no longer need to clear the top-right corner. */
 .tb-act-table-row.tb-dest-major .tb-act-col-right{padding-top:10px;}
+/* Round PD.27: print styles for the Discovery list. Hide map +
+   interactive chrome (search, sort, ⋯ menus, indicators, checkboxes),
+   keep place rows + section headers + activity descriptions. Each
+   row gets page-break-inside:avoid so rows don't split across pages. */
+@media print {
+  body { background: #fff !important; color: #000 !important; }
+  /* Hide everything outside the Discovery list pane. */
+  #tb-pm-map, .leaflet-container,
+  .pm-row-menu-wrap, .pm-row-menu-btn, .pm-row-menu-pop,
+  .tb-act-check, .pm-research-btn,
+  .pm-row-story-trigger, .pm-row-story-triggers,
+  .pm-row-todo-trigger, .pm-row-todo-triggers,
+  .pm-row-story-preview, .pm-row-story-toggle,
+  .pm-row-story-full, .pm-row-todo-full,
+  .pm-row-story-close, .pm-row-todo-close,
+  .tb-act-thumb, .tb-more-like-btn,
+  #ce-add-place-row, #tb-place-act-search,
+  .tb-act-col-right .tb-act-desc-toggle {
+    display: none !important;
+  }
+  /* Show only the list-pane content; everything else is chrome. */
+  .tb-act-table-row.tb-dest-major {
+    page-break-inside: avoid;
+    break-inside: avoid;
+    grid-template-columns: 1fr !important;
+    padding: 8px 0 !important;
+    border-bottom: 1px solid #ccc !important;
+  }
+  .tb-act-section-hdr {
+    page-break-after: avoid;
+    break-after: avoid;
+    color: #000 !important;
+    border-color: #000 !important;
+  }
+  .tb-act-table-row.tb-dest-major .tb-act-col-right {
+    padding-top: 4px !important;
+  }
+  /* Expand truncated descriptions on print. */
+  .tb-act-desc.collapsed { display: block !important; max-height: none !important; overflow: visible !important; }
+  /* Hide the right-side stay/see indicator (info redundant in print). */
+  .tb-act-name [title^="Marked"], .tb-act-name [title^="Max suggests"] { display: none !important; }
+}
 .tb-act-table-row.tb-dest-major:last-child{border-bottom:none;}
 .tb-act-table-row.tb-dest-major.on{background:transparent;box-shadow:none;border-color:#f0ece1;}
 .tb-act-table-row.tb-dest-major.off{opacity:0.65;}
@@ -15619,6 +15661,17 @@ function _renderPlaceActivityItems(){
       : "Planning-stage notes and links — gear, timing, things to figure out. Trip notes (confirmations, packing) is linked from inside.";
     researchNotesBtn.onclick = function(e){ e.stopPropagation(); _pmOpenTripResearchCard(); };
     hdrActions.appendChild(researchNotesBtn);
+    // Round PD.27: Print button — triggers window.print(). The
+    // accompanying @media print CSS hides interactive chrome (map,
+    // search, sort buttons, ⋯ menus) so what prints is just the
+    // list of places organized by section.
+    var printBtn = document.createElement("button");
+    printBtn.type = "button";
+    printBtn.style.cssText = "font-size:11px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;";
+    printBtn.innerHTML = '🖨 Print';
+    printBtn.title = "Print this list (map and controls are hidden on the printed page)";
+    printBtn.onclick = function(e){ e.stopPropagation(); window.print(); };
+    hdrActions.appendChild(printBtn);
     tocHdr.appendChild(hdrActions);
     toc.appendChild(tocHdr);
 
@@ -15800,22 +15853,22 @@ function _renderPlaceActivityItems(){
   // — they're transport, not destinations). Non-route items go into
   // "All places" where byDest consolidates each unique place into one
   // row with every activity that references it in the right column.
+  // Round PD.27: by-Place mode renders TWO sections — "Stay overnight"
+  // and "Just visiting" — each alphabetical. Routes still get their
+  // own "Scenic routes" section via the main section walk. The old
+  // "All places" virtual section is gone.
   if (_tb._pickerSortMode === "place") {
-    var _routeItems = items.filter(function(it){ return it && it.type === "route"; });
-    var _nonRouteItems = items.filter(function(it){ return it && it.type !== "route"; });
-    bySection["All places"] = _nonRouteItems;
-    if (_routeItems.length) {
-      bySection["Scenic routes"] = _routeItems;
-      sectionOrder = ["All places", "Scenic routes"];
+    var _routeItemsPD27 = items.filter(function(it){ return it && it.type === "route"; });
+    if (_routeItemsPD27.length) {
+      bySection["Scenic routes"] = _routeItemsPD27;
+      sectionOrder = ["Scenic routes"];
     } else {
-      sectionOrder = ["All places"];
+      sectionOrder = [];
     }
-    // Skip the legacy by-Place renderer below.
-    (function _renderPickerByPlaceLegacy(){ return; })();
+    // Fall through to the legacy by-Place renderer below, which is
+    // now enabled (PD.27) and emits the two place sections directly.
   }
-  // Legacy guard — kept so the old IIFE doesn't fire when we've taken
-  // the virtual-section route above.
-  if (false && _tb._pickerSortMode === "place") {
+  if (_tb._pickerSortMode === "place") {
     (function _renderPickerByPlace(){
       // Group every requiredPlace across every activity by place key.
       var byPlace = {};
@@ -15851,15 +15904,42 @@ function _renderPlaceActivityItems(){
           return _searchNormalize(byPlace[k].place).indexOf(qN) >= 0;
         });
       }
-      // Sort: kept stays first (by name), then unkept (by name).
-      placeOrder.sort(function(a, b){
-        var ka = byPlace[a].kept ? 0 : 1;
-        var kb = byPlace[b].kept ? 0 : 1;
-        if (ka !== kb) return ka - kb;
-        return byPlace[a].place.localeCompare(byPlace[b].place);
+      // Round PD.27: split into stay-overnight vs just-visiting via
+      // _pmIsStayCandidate, alphabetical within each.
+      var stayOrder = [];
+      var visitOrder = [];
+      placeOrder.forEach(function(k){
+        if (typeof _pmIsStayCandidate === "function" && _pmIsStayCandidate(byPlace[k].place)) {
+          stayOrder.push(k);
+        } else {
+          visitOrder.push(k);
+        }
       });
+      function _alphaByPlace(a, b){ return byPlace[a].place.localeCompare(byPlace[b].place); }
+      stayOrder.sort(_alphaByPlace);
+      visitOrder.sort(_alphaByPlace);
+
+      // Render a section header before each non-empty bucket.
+      function _emitPlaceSectionHeader(title, count){
+        var hdr = document.createElement("div");
+        hdr.className = "tb-act-section-hdr on";
+        hdr.style.scrollMarginTop = "80px";
+        hdr.innerHTML = '<div class="tb-act-section-title" style="flex:1;">' + _pmEsc(title) + '</div>'
+          + '<div class="tb-act-section-count">' + count + ' place' + (count === 1 ? '' : 's') + '</div>';
+        list.appendChild(hdr);
+      }
+      if (stayOrder.length)  _emitPlaceSectionHeader("Stay overnight", stayOrder.length);
+      // Replace the single forEach below with the two ordered buckets
+      // back-to-back. The "Just visiting" header is emitted after
+      // the stay-section rows in the unified loop below.
+      var _bucketBoundaryIdx = stayOrder.length;
+      placeOrder = stayOrder.concat(visitOrder);
+
       // Render each place.
-      placeOrder.forEach(function(key){
+      placeOrder.forEach(function(key, idx){
+        if (idx === _bucketBoundaryIdx && visitOrder.length) {
+          _emitPlaceSectionHeader("Just visiting", visitOrder.length);
+        }
         var pInfo = byPlace[key];
         // Build a synthetic "destination" object for the existing chip
         // builders. We need it to carry .place + .placeRefs so the
