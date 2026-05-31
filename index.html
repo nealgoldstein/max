@@ -18064,35 +18064,76 @@ function _pmDocTagFieldHtml(doc){
     + '</div>';
 }
 function _pmDocTagBind(ov, doc){
-  var inp = ov.querySelector("#pm-doc-edit-tag-input");
+  // PD.57b: direct-DOM rewrite. Each tag is its own <span> chip
+  // inserted before the input. No outerHTML rebuild — that approach
+  // was racy and dropped state.
+  if (!Array.isArray(doc.tags)) doc.tags = [];
   var wrap = ov.querySelector("#pm-doc-edit-tags");
-  if (!inp || !wrap) return;
-  function rerender(){
-    wrap.outerHTML = _pmDocTagFieldHtml(doc);
-    _pmDocTagBind(ov, doc);  // rebind on new DOM
+  var inp  = ov.querySelector("#pm-doc-edit-tag-input");
+  if (!wrap || !inp) return;
+  if (wrap._pmTagBound) return;
+  wrap._pmTagBound = true;
+
+  function makeChip(tag, idx){
+    var safe = String(tag).replace(/</g, "&lt;").replace(/"/g, "&quot;");
+    var span = document.createElement("span");
+    span.className = "pm-doc-tag-chip";
+    span.setAttribute("data-tag", tag);
+    span.style.cssText = "display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;color:#5b3f8f;background:#f1edf8;border:1px solid #ddd5ec;border-radius:10px;padding:2px 4px 2px 9px;";
+    span.innerHTML = "#" + safe
+      + '<button type="button" style="background:transparent;border:none;color:#5b3f8f;cursor:pointer;font-size:13px;line-height:1;padding:0 4px;font-family:inherit;">×</button>';
+    var btn = span.querySelector("button");
+    btn.onclick = function(e){
+      e.preventDefault(); e.stopPropagation();
+      var i = doc.tags.indexOf(tag);
+      if (i !== -1) doc.tags.splice(i, 1);
+      if (span.parentNode) span.parentNode.removeChild(span);
+    };
+    return span;
   }
+
+  function commitInput(){
+    var v = inp.value.trim().replace(/^#/, "");
+    if (!v) return false;
+    if (doc.tags.indexOf(v) === -1) {
+      doc.tags.push(v);
+      wrap.insertBefore(makeChip(v, doc.tags.length - 1), inp);
+    }
+    inp.value = "";
+    return true;
+  }
+
   inp.addEventListener("keydown", function(e){
-    if (e.key === "Enter" || e.key === "," || e.key === "Tab") {
-      var v = inp.value.trim().replace(/^#/, "");
-      if (!v) return;
-      if (e.key !== "Tab") e.preventDefault();
-      if (!Array.isArray(doc.tags)) doc.tags = [];
-      if (doc.tags.indexOf(v) === -1) doc.tags.push(v);
-      inp.value = "";
-      rerender();
-    } else if (e.key === "Backspace" && !inp.value && Array.isArray(doc.tags) && doc.tags.length) {
-      doc.tags.pop();
-      rerender();
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault();
+      e.stopPropagation();
+      commitInput();
+    } else if (e.key === "Backspace" && !inp.value && doc.tags.length) {
+      e.preventDefault();
+      var last = doc.tags.pop();
+      var chips = wrap.querySelectorAll(".pm-doc-tag-chip");
+      var lastChip = chips[chips.length - 1];
+      if (lastChip && lastChip.parentNode) lastChip.parentNode.removeChild(lastChip);
     }
   });
-  wrap.querySelectorAll("[data-tag-rm]").forEach(function(b){
-    b.onclick = function(){
-      var idx = parseInt(b.getAttribute("data-tag-rm"), 10);
-      if (Array.isArray(doc.tags) && isFinite(idx)) {
-        doc.tags.splice(idx, 1);
-        rerender();
-      }
-    };
+  // Commit pending text on blur so a user who types a tag and clicks
+  // Done (instead of pressing Enter) still gets the tag saved.
+  inp.addEventListener("blur", function(){ commitInput(); });
+
+  // Wire up handlers for any chips already present in the initial HTML.
+  wrap.querySelectorAll(".pm-doc-tag-chip").forEach(function(chip, i){
+    var tag = doc.tags[i];
+    if (tag == null) return;
+    chip.setAttribute("data-tag", tag);
+    var btn = chip.querySelector("button[data-tag-rm], button");
+    if (btn) {
+      btn.onclick = function(e){
+        e.preventDefault(); e.stopPropagation();
+        var idx = doc.tags.indexOf(tag);
+        if (idx !== -1) doc.tags.splice(idx, 1);
+        if (chip.parentNode) chip.parentNode.removeChild(chip);
+      };
+    }
   });
 }
 if (typeof globalThis !== "undefined") {
