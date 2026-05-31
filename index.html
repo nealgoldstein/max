@@ -15924,6 +15924,7 @@ function _renderPlaceActivityItems(){
           +     '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
           +       '<div class="tb-act-name" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;flex:1;min-width:0;">'
           +         '<span>' + _placeArg + '</span>'
+          +         _pmRoleIndicatorHtml(d.place)
           +         (pInfo.kept ? stayChip : maybeBadge)
           +         (pInfo.kept ? dtBadge : '')
           +       '</div>'
@@ -16438,8 +16439,9 @@ function _renderPlaceActivityItems(){
         // right edge. Title still truncates with ellipsis when the
         // row is narrow.
         + '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
-        + '<div class="tb-act-name" style="font-size:14px;font-weight:700;color:#111;line-height:1.25;flex:1;min-width:0;white-space:nowrap;overflow:visible;" title="' + _pmEsc(d.place) + '">'
-        +   _pmEsc(d.place)
+        + '<div class="tb-act-name" style="font-size:14px;font-weight:700;color:#111;line-height:1.25;flex:1;min-width:0;white-space:nowrap;overflow:visible;display:flex;align-items:center;gap:6px;" title="' + _pmEsc(d.place) + '">'
+        +   '<span>' + _pmEsc(d.place) + '</span>'
+        +   _pmRoleIndicatorHtml(d.place)
         + '</div>'
         + '<span class="pm-row-menu-wrap">'
         +   '<button type="button" class="pm-row-menu-btn" onclick="_pmToggleRowMenu(this);event.stopPropagation();" title="More options">⋯</button>'
@@ -16977,6 +16979,33 @@ function _pmRoleForCheck(placeName){
   return anyOvernight ? "stay" : "see";
 }
 if (typeof globalThis !== "undefined") globalThis._pmRoleForCheck = _pmRoleForCheck;
+
+// Round PD.20: clickable stay/see indicator HTML. Solid blue circle
+// for stay, faint outlined circle for see — symmetric so the user
+// can flip either direction without hunting through the ⋯ menu.
+// Click routes through _pmTogglePlaceStay (which goes through
+// MaxRoleWriter), so the place row checkbox, map pin, popup, and
+// ⋯ menu label all update together.
+function _pmRoleIndicatorHtml(placeName){
+  if (!placeName) return "";
+  var nameSafe = String(placeName).replace(/'/g, "\\'").replace(/"/g, "&quot;");
+  var isStay = (typeof _pmIsStayCandidate === "function") ? _pmIsStayCandidate(placeName) : false;
+  var clickAttr = 'onclick="event.stopPropagation();_pmTogglePlaceStay(\'' + nameSafe + '\')"';
+  var title = isStay ? "Marked overnight stay — click to make sight-only" : "Marked sight-only — click to mark overnight stay";
+  // Round PD.21: see indicator switched from dashed-outline (which
+  // reads as "maybe / uncertain" across the codebase) to a small
+  // teardrop matching the map's see pin. Same blue fill as the
+  // stay circle, just a different shape — color = "on the list,"
+  // shape = stay vs see. Vocabulary consistent with the map.
+  var role = isStay ? "stay" : "see";
+  var swatchHtml = (typeof MaxMapPin !== "undefined" && MaxMapPin.swatch)
+    ? MaxMapPin.swatch(role, { size: 14 })
+    : (isStay
+        ? '<span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:#1a5fa8;border:1.5px solid #fff;box-sizing:border-box;"></span>'
+        : '<span style="display:inline-block;width:12px;height:14px;background:#1a5fa8;border:1.5px solid #fff;box-sizing:border-box;border-radius:50% 50% 50% 0;transform:rotate(-45deg);"></span>');
+  return '<span ' + clickAttr + ' title="' + title + '" style="display:inline-flex;align-items:center;cursor:pointer;padding:1px;border-radius:50%;">' + swatchHtml + '</span>';
+}
+if (typeof globalThis !== "undefined") globalThis._pmRoleIndicatorHtml = _pmRoleIndicatorHtml;
 
 // Round PD.16: toggle the place's presence on the trip. Routes
 // through MaxRoleWriter so the c.role/c.status/placeMeta/_keep
