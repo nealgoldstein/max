@@ -17398,6 +17398,43 @@ function _pmRtSetup(root){
         });
       });
     }
+    // PD.51: cross-doc linking — listen for [[ in editor, show picker.
+    ed.addEventListener("input", function(){
+      var sel = window.getSelection();
+      if (!sel || !sel.rangeCount) return;
+      var range = sel.getRangeAt(0);
+      var node = range.endContainer;
+      if (!node || node.nodeType !== 3) {
+        if (document.getElementById("pm-doclink-picker")) _pmDocLinkPickerClose();
+        return;
+      }
+      var text = node.textContent || "";
+      var off  = range.endOffset;
+      var open = text.lastIndexOf("[[", off);
+      // Close picker if no open bracket pair before caret, or if a `]]` intervenes
+      if (open === -1 || text.indexOf("]]", open) !== -1 && text.indexOf("]]", open) < off) {
+        if (document.getElementById("pm-doclink-picker")) _pmDocLinkPickerClose();
+        return;
+      }
+      var existing = document.getElementById("pm-doclink-picker");
+      if (!existing) {
+        _pmDocLinkPickerShow(ed);
+        existing = document.getElementById("pm-doclink-picker");
+      }
+      if (existing) {
+        existing._pmQuery = text.substring(open + 2, off);
+        if (typeof existing._pmRender === "function") existing._pmRender();
+      }
+    });
+    // PD.51: click a doc-link chip → save current edits, open target doc.
+    ed.addEventListener("click", function(e){
+      var link = e.target && e.target.closest ? e.target.closest(".pm-doclink") : null;
+      if (!link) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var id = link.getAttribute("data-doc-id");
+      if (id && typeof _pmDocLinkNavigate === "function") _pmDocLinkNavigate(id);
+    });
     if (typeof _pmRtBindAttachmentHandlers === "function") _pmRtBindAttachmentHandlers(ed);
     ed.addEventListener("keydown", function(e){
       if (e.key !== "Enter" && e.key !== "Backspace") return;
@@ -17645,6 +17682,9 @@ if (typeof globalThis !== "undefined") {
     + '.pm-rt-editor .pm-rt-cb-item.checked .pm-rt-cb-mark::after{content:"\\2713";color:#fff;font-size:10px;font-weight:700;position:absolute;top:-3px;left:1px;}'
     + '.pm-rt-editor .pm-rt-cb-text{flex:1;min-width:0;}'
     + '.pm-rt-editor .pm-rt-cb-item.checked .pm-rt-cb-text{color:#888;text-decoration:line-through;}'
+    + '.pm-rt-editor .pm-doclink{display:inline-block;background:#e8f0f9;color:#1a5fa8;padding:1px 7px;border-radius:4px;font-weight:600;cursor:pointer;margin:0 2px;border:1px solid #c8d8f0;font-size:12px;user-select:none;-webkit-user-select:none;}'
+    + '.pm-rt-editor .pm-doclink:hover{background:#d8e6f4;}'
+    + '.pm-rt-editor .pm-doclink:before{content:"\\1F4C4  ";}'
     + '.pm-doc-card{margin-bottom:12px;padding:10px;border:1px solid #e0d8c8;border-radius:6px;background:#fafafa;}'
     + '.pm-doc-card .pm-rt-wrap{background:#fff;}'
     + '.pm-doc-title{flex:1;font:inherit;font-size:13px;font-weight:600;border:1px solid transparent;border-radius:4px;padding:4px 6px;background:transparent;}'
@@ -17823,6 +17863,9 @@ function _pmOpenDocEditor(doc, onSave){
     +   '<button type="button" id="pm-doc-edit-done" style="font-size:13px;font-weight:600;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 18px;cursor:pointer;font-family:inherit;">Done</button>'
     + '</div>';
 
+  // PD.51: remember which doc we're editing so the doc-link picker
+  // can suppress it from its own dropdown.
+  ov._pmEditingDocId = doc.id || null;
   ov.appendChild(box);
   document.body.appendChild(ov);
   _pmRtSetup(ov);
@@ -18185,6 +18228,156 @@ function _pmShowUndo(message, undoFn){
   toast._pmUndoTimer = setTimeout(dismiss, 5000);
 }
 if (typeof globalThis !== "undefined") globalThis._pmShowUndo = _pmShowUndo;
+
+// ──────────────────────────────────────────────────────────────────────
+// Round PD.51: cross-doc linking. Type [[ in any rich-text editor →
+// floating autocomplete dropdown lists docs in the active research
+// context. Pick one → inserts a styled, non-editable chip referencing
+// the target by stable doc id. Clicking a chip saves current edits
+// and opens the target doc.
+// ──────────────────────────────────────────────────────────────────────
+function _pmDocLinkPickerClose(){
+  var pop = document.getElementById("pm-doclink-picker");
+  if (!pop) return;
+  if (pop._pmKeyHandler) document.removeEventListener("keydown", pop._pmKeyHandler, true);
+  if (pop._pmOutsideHandler) document.removeEventListener("mousedown", pop._pmOutsideHandler, true);
+  pop.remove();
+}
+function _pmDocLinkPickerShow(ed){
+  _pmDocLinkPickerClose();
+  var m = window._pmActiveResearchMeta;
+  if (!m || !Array.isArray(m.docs) || !m.docs.length) return;
+  var sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return;
+  var range = sel.getRangeAt(0);
+  var rect = range.getBoundingClientRect();
+  var edRect = ed.getBoundingClientRect();
+  var x = (rect.left || edRect.left + 20);
+  var y = (rect.bottom || edRect.top + 30);
+
+  var pop = document.createElement("div");
+  pop.id = "pm-doclink-picker";
+  pop.style.cssText = "position:fixed;z-index:13500;background:#fff;border:1px solid #ccc;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,0.2);min-width:240px;max-width:340px;max-height:280px;overflow-y:auto;font-family:inherit;font-size:13px;";
+  pop.style.left = Math.max(8, Math.min(x, window.innerWidth - 360)) + "px";
+  pop.style.top  = Math.max(8, Math.min(y + 4, window.innerHeight - 290)) + "px";
+  pop._pmEditor = ed;
+  pop._pmQuery = "";
+  // PD.51: snapshot the doc id we're CURRENTLY editing, if any —
+  // surface it as a self-reference exclusion to avoid recursive opens.
+  pop._pmCurrentDocId = null;
+  var editorOv = document.getElementById("pm-doc-editor");
+  if (editorOv && editorOv._pmEditingDocId) pop._pmCurrentDocId = editorOv._pmEditingDocId;
+
+  function render(){
+    var q = (pop._pmQuery || "").toLowerCase();
+    var matches = m.docs.filter(function(d){
+      if (d.id === pop._pmCurrentDocId) return false;
+      if (!q) return true;
+      return (d.title || "").toLowerCase().indexOf(q) !== -1;
+    }).slice(0, 8);
+    if (!matches.length) {
+      pop.innerHTML = '<div style="padding:10px 14px;color:#999;font-style:italic;">No matching documents</div>';
+      return;
+    }
+    pop.innerHTML = matches.map(function(d){
+      var title = (d.title || "Untitled").replace(/</g, "&lt;");
+      return '<div class="pm-doclink-row" data-id="' + d.id + '" data-title="' + title.replace(/"/g, "&quot;") + '" style="padding:8px 14px;cursor:pointer;border-bottom:1px solid #f0f0f0;">[doc] ' + title + '</div>';
+    }).join('');
+    pop.querySelectorAll(".pm-doclink-row").forEach(function(row){
+      row.onmouseenter = function(){ this.style.background = "#f5f5f5"; };
+      row.onmouseleave = function(){ this.style.background = "transparent"; };
+      row.onmousedown  = function(ev){ ev.preventDefault(); };  // keep editor selection
+      row.onclick = function(){
+        var id = this.getAttribute("data-id");
+        var title = this.getAttribute("data-title");
+        _pmDocLinkInsert(ed, id, title);
+        _pmDocLinkPickerClose();
+      };
+    });
+  }
+  render();
+  pop._pmRender = render;
+  document.body.appendChild(pop);
+
+  function onKey(e){
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      _pmDocLinkPickerClose();
+    }
+  }
+  document.addEventListener("keydown", onKey, true);
+  pop._pmKeyHandler = onKey;
+  function onOutside(e){
+    if (!pop.contains(e.target) && e.target !== ed && !ed.contains(e.target)) {
+      _pmDocLinkPickerClose();
+    }
+  }
+  setTimeout(function(){ document.addEventListener("mousedown", onOutside, true); }, 0);
+  pop._pmOutsideHandler = onOutside;
+}
+function _pmDocLinkInsert(ed, docId, docTitle){
+  var sel = window.getSelection();
+  if (!sel || !sel.rangeCount) { ed.focus(); }
+  if (!sel.rangeCount) return;
+  var range = sel.getRangeAt(0);
+  var anchor = range.endContainer;
+  var offset = range.endOffset;
+  // Delete the trailing [[query if present in this text node
+  if (anchor.nodeType === 3) {
+    var text = anchor.textContent;
+    var idx = text.lastIndexOf("[[", offset);
+    if (idx !== -1) {
+      range.setStart(anchor, idx);
+      range.setEnd(anchor, offset);
+      range.deleteContents();
+    }
+  }
+  var span = document.createElement("span");
+  span.className = "pm-doclink";
+  span.setAttribute("data-doc-id", docId);
+  span.setAttribute("contenteditable", "false");
+  span.textContent = docTitle;
+  var r = sel.getRangeAt(0);
+  r.insertNode(span);
+  // trailing nbsp so the caret has somewhere to land
+  var sp = document.createTextNode("\u00a0");
+  r.setStartAfter(span);
+  r.insertNode(sp);
+  r.setStartAfter(sp);
+  r.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(r);
+}
+function _pmDocLinkNavigate(docId){
+  var m = window._pmActiveResearchMeta;
+  if (!m || !Array.isArray(m.docs)) return;
+  var targetIdx = -1;
+  for (var i = 0; i < m.docs.length; i++) {
+    if (m.docs[i].id === docId) { targetIdx = i; break; }
+  }
+  if (targetIdx === -1) {
+    if (typeof _pmShowUndo === "function") {
+      _pmShowUndo("Linked document not found (may have been deleted)", function(){});
+    }
+    return;
+  }
+  // Save & close the currently-open doc editor by clicking Done.
+  var editor = document.getElementById("pm-doc-editor");
+  if (editor) {
+    var done = editor.querySelector("#pm-doc-edit-done");
+    if (done) done.click();
+  }
+  setTimeout(function(){
+    if (typeof _pmDocOpen === "function") _pmDocOpen(targetIdx);
+  }, 60);
+}
+if (typeof globalThis !== "undefined") {
+  globalThis._pmDocLinkPickerShow = _pmDocLinkPickerShow;
+  globalThis._pmDocLinkPickerClose = _pmDocLinkPickerClose;
+  globalThis._pmDocLinkInsert = _pmDocLinkInsert;
+  globalThis._pmDocLinkNavigate = _pmDocLinkNavigate;
+}
+
 
 if (typeof globalThis !== "undefined") {
   globalThis._pmSearchNotes              = _pmSearchNotes;
