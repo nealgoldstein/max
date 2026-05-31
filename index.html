@@ -8853,6 +8853,18 @@ if (typeof globalThis !== "undefined") {
 }
 
 function enterApp(){
+  // PD.66: draft trips skip trip view — restore _tb and open Discovery.
+  if (trip && trip.brief && trip.brief._isDraft && typeof _pmDraftRestore === "function") {
+    try {
+      // Ensure home screen is hidden and app pane is shown so the
+      // picker overlay has its expected container.
+      var hs = g("home-screen"); if (hs) hs.style.display = "none";
+      var app = g("app"); if (app) app.style.display = "flex";
+      if (_pmDraftRestore()) return;
+    } catch(e){
+      console.warn("[Max draft] restore failed, falling through to trip view:", e && e.message);
+    }
+  }
   // Restore _mdcItems from saved trip for route sequencing
   if(trip && trip.mdcItems) _mdcItems = trip.mdcItems;
   // v360.3 (#104): collect a summary of any migrations that mutated
@@ -18393,6 +18405,8 @@ function _pmDocsRefreshActive(){
     _pmAttGcRan = true;
     setTimeout(_pmAttGc, 5000);
   }
+  // PD.66: any change to docs/links also dirties the draft.
+  if (typeof _pmDraftScheduleSave === "function") _pmDraftScheduleSave();
 }
 
 // PD.57: tag chip field for the doc editor header. Tags stored as
@@ -19164,6 +19178,147 @@ function _pmShowClipperSetup(){
 if (typeof globalThis !== "undefined") {
   globalThis._pmMaybeStartClipFlow = _pmMaybeStartClipFlow;
   globalThis._pmShowClipperSetup = _pmShowClipperSetup;
+}
+
+
+
+// ──────────────────────────────────────────────────────────────────────
+// Round PD.66: Discovery draft autosave. The trip object is materialized
+// lazily on the FIRST meaningful Discovery edit (place toggled, doc
+// saved, link added). From that point, _tb state mirrors into
+// trip.brief._tbDraft on each edit (debounced 1.5s) and rides through
+// the existing localSave + MaxSync.scheduleSave path. Marker flag
+// trip.brief._isDraft distinguishes "research in progress" from a
+// built trip.
+//
+// When the user clicks Choreograph, publishTrip() overwrites the body
+// with the materialized trip and clears both markers — see
+// _pmDraftFinalize below.
+//
+// What's preserved in the snapshot: brief fields (region, sentence,
+// when, duration), the picker's working state (placeActivities,
+// candidates, mdcItems-ish, requiredPlaces), and all of the research
+// surface (placeMeta, tripMeta — docs, links, tags, attachments).
+// Anything purely UI (search query, expanded sections) is not.
+// ──────────────────────────────────────────────────────────────────────
+function _pmDraftEnsure(){
+  if (_currentTripId) return _currentTripId;
+  if (typeof _tb === "undefined" || !_tb) return null;
+  // Mint a trip id and stub the trip object so localSave has something
+  // to serialize.
+  var newId = "trip-" + Date.now();
+  if (typeof window.trip === "undefined" || !window.trip) {
+    window.trip = {};
+  }
+  trip.id = newId;
+  trip.name = (_tb.name && _tb.name.trim()) || ("Untitled — " + new Date().toLocaleDateString("en-US", {month:"short", day:"numeric", year:"numeric"}));
+  trip.destinations = trip.destinations || [];
+  trip.brief = trip.brief || {};
+  trip.brief.region = trip.brief.region || _tb.region || "";
+  trip.brief.sentence = trip.brief.sentence || _tb.sentence || "";
+  trip.brief._isDraft = true;
+  _currentTripId = newId;
+  // Make sure the trip shows up in the index immediately.
+  try {
+    if (typeof _tripsIndex !== "undefined" && Array.isArray(_tripsIndex)) {
+      _tripsIndex.push({
+        id: newId,
+        name: trip.name,
+        dateRange: "",
+        destCount: 0,
+        isDraft: true
+      });
+      if (typeof saveTripsIndex === "function") saveTripsIndex();
+    }
+  } catch(_){}
+  console.log("[Max draft] minted draft trip", newId, "for Discovery autosave");
+  return newId;
+}
+function _pmDraftSnapshot(){
+  if (typeof _tb === "undefined" || !_tb) return null;
+  // Pick out the fields that matter for resuming Discovery. We avoid
+  // JSON.stringify(_tb) entirely because it can carry transient UI
+  // state (timers, DOM refs) that don't round-trip.
+  function pick(obj, keys){
+    var out = {};
+    keys.forEach(function(k){ if (obj[k] !== undefined) out[k] = obj[k]; });
+    return out;
+  }
+  return pick(_tb, [
+    "name", "region", "placeName", "sentence", "when", "duration",
+    "startDate", "entry", "tbExit", "entryBuffer", "exitBuffer",
+    "tripMode", "interests", "drivers", "anchors", "familiarity", "intent",
+    "aboutTrip", "hardlimits", "pace",
+    "placeActivities", "candidates", "requiredPlaces",
+    "placeMeta", "tripMeta"
+  ]);
+}
+function _pmDraftSave(){
+  _pmDraftEnsure();
+  if (!trip || !trip.brief) return;
+  trip.brief._tbDraft = _pmDraftSnapshot();
+  trip.brief._isDraft = true;
+  if (typeof localSave === "function") {
+    try { localSave(); } catch(e){ console.warn("[Max draft] localSave failed:", e && e.message); }
+  }
+}
+var _pmDraftSaveTimer = null;
+function _pmDraftScheduleSave(){
+  if (_pmDraftSaveTimer) clearTimeout(_pmDraftSaveTimer);
+  _pmDraftSaveTimer = setTimeout(_pmDraftSave, 1500);
+}
+// PD.66: called from publishTrip — when the user Choreographs, the
+// real trip body replaces the draft. Clear markers so the trip moves
+// out of "draft" state in the home screen and on the server.
+function _pmDraftFinalize(){
+  if (trip && trip.brief) {
+    delete trip.brief._isDraft;
+    delete trip.brief._tbDraft;
+  }
+  // Also drop the isDraft flag on the index entry.
+  try {
+    if (typeof _tripsIndex !== "undefined" && Array.isArray(_tripsIndex) && _currentTripId) {
+      var entry = _tripsIndex.find(function(t){ return t.id === _currentTripId; });
+      if (entry) delete entry.isDraft;
+      if (typeof saveTripsIndex === "function") saveTripsIndex();
+    }
+  } catch(_){}
+}
+// PD.66: opening a draft trip — restore _tb from the saved snapshot
+// and route to the Discovery picker instead of trip view.
+function _pmDraftRestore(){
+  if (!trip || !trip.brief || !trip.brief._isDraft) return false;
+  var snap = trip.brief._tbDraft;
+  if (!snap) return false;
+  if (typeof _tb === "undefined" || !_tb) window._tb = _tb = {};
+  Object.keys(snap).forEach(function(k){ _tb[k] = snap[k]; });
+  _tb._editMode = false;  // it\'s still draft, not edit-of-built-trip
+  // If we have candidates, open the picker. Otherwise route to the brief.
+  if (Array.isArray(_tb.candidates) && _tb.candidates.length) {
+    if (typeof showCandidateExplorer === "function") {
+      showCandidateExplorer(_tb.candidates, true);
+      return true;
+    }
+  }
+  // No candidates yet — open the brief.
+  if (typeof showTripBrief === "function") {
+    // showTripBrief reads from #ntp-name and resets _tb; that would
+    // wipe our restore. Instead, just open the brief overlay directly.
+    var ov = document.getElementById("trip-brief-overlay");
+    if (ov) {
+      ov.style.display = "block";
+      if (typeof renderTripStep1Place === "function") renderTripStep1Place();
+      return true;
+    }
+  }
+  return false;
+}
+if (typeof globalThis !== "undefined") {
+  globalThis._pmDraftEnsure = _pmDraftEnsure;
+  globalThis._pmDraftSave = _pmDraftSave;
+  globalThis._pmDraftScheduleSave = _pmDraftScheduleSave;
+  globalThis._pmDraftFinalize = _pmDraftFinalize;
+  globalThis._pmDraftRestore = _pmDraftRestore;
 }
 
 
@@ -20860,6 +21015,8 @@ var MaxRoleWriter = {
     if (opts.persist !== false && typeof autoSave === "function") {
       try { autoSave(); } catch(_){}
     }
+    // PD.66: any role write is a meaningful Discovery edit — autosave the draft.
+    if (typeof _pmDraftScheduleSave === "function") _pmDraftScheduleSave();
     return cand;
   }
 };

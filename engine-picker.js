@@ -3703,6 +3703,11 @@
     // the subscriber based on the isRebuild flag in the payload.
     var _hnIsRebuild = !!(_tb && _tb._isRebuild);
     if (_tb) _tb._isRebuild = false; // consume the flag
+    // PD.66: this trip is now built, not a draft. Clear draft markers
+    // so the home screen + sync stop treating it as research-in-progress.
+    if (typeof _pmDraftFinalize === "function") {
+      try { _pmDraftFinalize(); } catch(_){}
+    }
     pickerEmit('published', { tripId: tripId, isRebuild: _hnIsRebuild });
   }
 
