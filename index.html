@@ -11429,6 +11429,27 @@ async function runCandidateSearch(requiredPlaces) {
             MaxRoleWriter.set(cand.id || cand.place, role, { persist: false });
             if (role === "stay") _stayPlaces.push(cand);
           }
+          // PD.74c: pasted places that ended up only as requiredPlaces
+          // on a placeActivity (not as a top-level candidate) need to
+          // be marked _keep so the picker treats them as chosen. Without
+          // this, the user's listed place appears in the activity but
+          // shows as gray/unkept on the map.
+          try {
+            if (Array.isArray(_tb.placeActivities)) {
+              _tb.placeActivities.forEach(function(it){
+                (it && it.requiredPlaces || []).forEach(function(p){
+                  if (!p || !p.place) return;
+                  if (nrm(p.place) !== nrm(k)) return;
+                  p._keep = true;
+                  p._rejected = false;
+                  if (role === "stay") {
+                    p.overnight = true;
+                    if (!p.nights || p.nights < 1) p.nights = 1;
+                  }
+                });
+              });
+            }
+          } catch(_){}
         });
         delete _tb._pastedRoles;
         // PD.75: synthetic top-of-picker section for the user's
