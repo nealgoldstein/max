@@ -11237,6 +11237,10 @@ async function runCandidateSearch(requiredPlaces) {
     }
     _tb.candidates = allCands;
     _tb.p2Failed = p2Failed;
+    // PD.72: LLM populated the candidate list — snapshot the draft so
+    // a tab close at this point still restores into the picker (with
+    // all the generated places) rather than falling back to the brief.
+    if (typeof _pmDraftScheduleSave === "function") _pmDraftScheduleSave();
     // Round NC.1 (gallery-pivot): every candidate carries a tripRole — the
     // user-assigned role this place plays on the trip map (overnight /
     // daytrip / onway / unspecified). Default to "unspecified" so the user
@@ -14543,6 +14547,8 @@ async function generateActivitiesForPlace(){
       }
     });
     _tb.placeActivities = items;
+    // PD.72: LLM populated the activity list — snapshot the draft.
+    if (typeof _pmDraftScheduleSave === "function") _pmDraftScheduleSave();
     // v357: removed the _tb._placePickerStart default-init — the picker
     // map no longer carries a "Start from" preference (sequencing is
     // trip-view-only).
