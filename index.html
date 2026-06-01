@@ -16119,14 +16119,11 @@ function _renderPlaceActivityItems(){
     shareBtn.title = "Generate a shareable URL of this Discovery (read-only for the recipient)";
     shareBtn.onclick = function(e){ e.stopPropagation(); _pmShareDiscovery(); };
     hdrActions.appendChild(shareBtn);
-    // Round PD.64: 🔖 Get clipper button. Shows the bookmarklet drag-link.
-    var clipBtn = document.createElement("button");
-    clipBtn.type = "button";
-    clipBtn.style.cssText = "font-size:11px;font-weight:600;color:#5b3f8f;background:#fff;border:1px solid #ddd5ec;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;";
-    clipBtn.innerHTML = '🔖 Clipper';
-    clipBtn.title = "Set up the web clipper bookmarklet";
-    clipBtn.onclick = function(e){ e.stopPropagation(); _pmShowClipperSetup(); };
-    hdrActions.appendChild(clipBtn);
+    // PD.85: Clipper button moved inside the Discovery notes modal,
+    // next to "Source links" — the clipper's job is to add a source
+    // link to the trip, so it belongs in the same surface that lists
+    // source links. The top-row chrome only carries actions that act
+    // on the picker itself (Discovery notes, Print, Share, Select).
     // Round PD.54: Bulk select button. Toggles bulk-mode on/off.
     var bulkBtn = document.createElement("button");
     bulkBtn.type = "button";
@@ -20369,9 +20366,22 @@ if (typeof globalThis !== "undefined") globalThis._pmUnRejectFromList = _pmUnRej
 function _pmEnsureCandidate(placeName){
   if (!_tb || !placeName) return null;
   if (!Array.isArray(_tb.candidates)) _tb.candidates = [];
-  var key = String(placeName).toLowerCase();
+  // PD.84 (architectural): candidate identity is defined by normalized
+  // name, not raw lowercase. Otherwise minor LLM variants ("Akureyri "
+  // with trailing space, "Akureyri (Iceland)", a diacritic the user
+  // didn't type) created a parallel stub candidate. The popup's
+  // _pmMetaKey-based lookup later matched BOTH (same _normPlaceName)
+  // and Array.find returned the FIRST — usually the LLM original
+  // without _roleTouched — so user-listed stays still read as
+  // "Max suggests". Using _normPlaceName here matches the rest of
+  // the system (MaxRoleWriter, _pmMetaKey, picker lookups), so a
+  // candidate is found whenever one exists for that normalized name.
+  var nrm = (typeof _normPlaceName === "function")
+    ? _normPlaceName
+    : function(s){ return String(s||"").toLowerCase().trim(); };
+  var key = nrm(placeName);
   var cand = _tb.candidates.find(function(c){
-    return c && c.place && c.place.toLowerCase() === key;
+    return c && c.place && nrm(c.place) === key;
   });
   if (cand) return cand;
   // Minimal stub — MaxRoleWriter will populate role/_roleTouched/status.
@@ -20380,7 +20390,7 @@ function _pmEnsureCandidate(placeName){
   try {
     (_tb.placeActivities || []).some(function(a){
       return (a.requiredPlaces || []).some(function(p){
-        if (p && p.place && p.place.toLowerCase() === key && p.country) {
+        if (p && p.place && nrm(p.place) === key && p.country) {
           country = p.country;
           return true;
         }
@@ -22194,7 +22204,12 @@ function _pmOpenTripResearchCard(){
       +     _pmRenderTodoList(m.notes, "pm-trc")
       +   '</div>'
       +   '<div>'
-      +     '<div style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;margin-bottom:5px;">Source links</div>'
+      +     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;">'
+      +       '<span style="font-size:11px;font-weight:700;color:#444;letter-spacing:.04em;text-transform:uppercase;">Source links</span>'
+      // PD.85: clipper affordance lives here — captures (url, title,
+      // selection) from any web page into this trip\'s source links.
+      +       '<button type="button" id="pm-trc-clipper" style="font-size:10.5px;font-weight:600;color:#5b3f8f;background:#fff;border:1px solid #ddd5ec;border-radius:5px;padding:3px 9px;cursor:pointer;font-family:inherit;" title="Set up the web clipper bookmarklet — captures pages into this trip">🔖 Set up clipper</button>'
+      +     '</div>'
       +     _pmLinksRender(m, "pm-trc")
       +   '</div>'
       + '</div>'
