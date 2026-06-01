@@ -55545,8 +55545,15 @@ function editTripName(clickedBlock){
   // once we're already editing; it would otherwise sit next to the
   // input and read as extra chrome. Restored on save/blur.
   var pencil = block.querySelector(".trip-name-edit");
-  var savedDisplay = span.style.display || "block";
-  var savedPencilDisplay = pencil ? (pencil.style.display || "") : null;
+  // PD.73g (architectural): don't snapshot the current inline display
+  // value. If editTripName runs twice in a row (rapid double-click,
+  // or a re-entry after a stuck input), the second call would see
+  // span.style.display already "none" from the first call and capture
+  // that as "the value to restore" — saving back to none and leaving
+  // the name invisible forever. Always restore to "" so the element
+  // falls back to its CSS default (inline for spans).
+  var savedDisplay = "";
+  var savedPencilDisplay = "";
   var inp=document.createElement("input"); inp.className="trip-name-inp";
   inp.value=trip.name||""; inp.placeholder="Trip name";
   // Match the visual weight of the trip-name-display span so the swap
