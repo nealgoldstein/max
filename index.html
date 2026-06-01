@@ -11078,6 +11078,199 @@ function _ensureTripRoleDefaults(cands) {
   return cands;
 }
 
+// PD.111: additive Discovery enhancement. Takes the existing set —
+// user's listed names + previous LLM picks + any manual adds — as
+// the SKIP LIST and the SHAPE INPUT. Asks the LLM for more places
+// that fit the same pattern AND that aren't already in the set.
+// Appends new candidates; doesn't replace. Preserves all _keep flags,
+// role decisions (c._roleTouched), and any picker edits.
+//
+// Architectural: same LLM primitives as runCandidateSearch (pThematic
+// shape + per-place enrichment from PD.110), just with the entire
+// existing set as skipList instead of starting fresh. Reconciliation
+// at render time handles the user-listed force-keep as always.
+async function enhanceDiscovery(btn) {
+  if (typeof _tb === "undefined" || !_tb) return;
+  if (typeof callMax !== "function") {
+    if (typeof maxAlert === "function") maxAlert("Max isn't available — check your API key.");
+    return;
+  }
+  var origLabel = null;
+  if (btn) { origLabel = btn.textContent; btn.disabled = true; btn.textContent = "thinking…"; }
+  try {
+    // Build the existing set — every place currently in candidates
+    // or in any placeActivity requiredPlace. Normalize via _normPlaceName
+    // so country-suffix variants don't sneak through.
+    var nrm = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){return String(s||"").toLowerCase();};
+    var existingNorm = {};
+    var existingDisplay = [];
+    function noteExisting(name) {
+      if (!name) return;
+      var k = nrm(name);
+      if (!k || existingNorm[k]) return;
+      existingNorm[k] = true;
+      existingDisplay.push(name);
+    }
+    (_tb.candidates || []).forEach(function(c){ if (c) noteExisting(c.place); });
+    (_tb.placeActivities || []).forEach(function(it){
+      (it && it.requiredPlaces || []).forEach(function(p){ if (p) noteExisting(p.place); });
+    });
+    if (!existingDisplay.length) {
+      if (typeof maxAlert === "function") maxAlert("Nothing in Discovery yet — start with a paste-list or generate first.");
+      return;
+    }
+    var brief = (typeof _serializeTbForPrompt === "function") ? _serializeTbForPrompt(_tb) : (_tb.intent || "");
+    var region = _tb.region || "this region";
+    var skipList = existingDisplay.join(", ");
+    var listedCount = existingDisplay.length;
+    // PD.111 thematic prompt — same shape as PD.109 comprehensive
+    // mode but ALL places in the existing set are the skip+shape input.
+    var addCount = Math.min(20, Math.max(8, Math.ceil(listedCount / 4)));
+    // PD.99 scope hints reused.
+    var geoScopeHint = "";
+    try {
+      if (typeof MaxGeo !== "undefined" && _tb.region) {
+        var _ctry = MaxGeo.byName(_tb.region);
+        if (_ctry) {
+          var _nbrs = MaxGeo.neighbors(_ctry.name).slice(0, 6);
+          geoScopeHint = "\nRegion context: " + _ctry.name + " is in " + _ctry.subregion + "."
+            + " Capital " + _ctry.capital + ". Currency " + _ctry.currency + "."
+            + (_nbrs.length ? (" Subregion neighbors include " + _nbrs.join(", ") + ".") : "")
+            + "\n";
+        }
+      }
+    } catch(_){}
+    var regionGuard = "\nABSOLUTELY CRITICAL: every place must be physically located in " + region + ". Out-of-region picks will be discarded.\n";
+    var pThematic = "You are a travel expert helping a traveler enrich an existing " + region + " itinerary.\n"
+      + "Trip context: " + brief + "\n"
+      + regionGuard
+      + geoScopeHint
+      + "The traveler already has " + listedCount + " places in their Discovery (the EXISTING SET). Do NOT repeat any of these:\n"
+      + skipList + "\n\n"
+      + "Add " + addCount + " MORE places to " + region + " that ride the same wavelength as the existing set — read it as a signal of taste. "
+      + "Mix STAY places (towns with lodging) and SINGLE-SIGHT places (waterfalls, viewpoints, ruins) freely. "
+      + "BE SPECIFIC. Name the trail, the dish, the building. Never hand-wave.\n"
+      + "Return ONLY a JSON array (no markdown):\n"
+      + '[{"place":"City or Sight","country":"Country","role":"base","stayRange":"2-4 nights OR 0 nights","singleSight":false,"whyItFits":"What makes it specifically worth visiting for this traveler.","tradeoffs":"One honest downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth doing here.","widelyRecommended":false,"lat":0.0,"lng":0.0}]';
+    var calls = [];
+    calls.push(callMax([{role:"user", content:pThematic}], 2200, 60000).then(function(t){
+      var cleaned = t.replace(/```json|```/g, "").trim();
+      var cands;
+      try { cands = JSON.parse(cleaned); }
+      catch(parseErr) {
+        var last = cleaned.lastIndexOf("},");
+        if (last > 0) { try { cands = JSON.parse(cleaned.substring(0, last+1) + "]"); } catch(_) { return []; } }
+        else { return []; }
+      }
+      cands.forEach(function(c){ c._required = false; c._requiredFor = []; });
+      return cands;
+    }).catch(function(e){ console.warn("[Max enhance] pThematic failed:", e && e.message); return []; }));
+    // PD.111 per-place enrichment — same prompt shape as PD.110.
+    // Batches of 8 existing places ask for 1-2 nearby NEW sights each.
+    var BATCH = 8;
+    for (var ei = 0; ei < existingDisplay.length; ei += BATCH) {
+      var eBatch = existingDisplay.slice(ei, ei + BATCH);
+      var pEnrich = "You are a travel expert helping enrich an existing " + region + " itinerary.\n"
+        + "Trip context: " + brief + "\n"
+        + regionGuard
+        + geoScopeHint
+        + "The traveler already has these places in their Discovery (MASTER LIST):\n"
+        + skipList + "\n\n"
+        + "For each of these " + eBatch.length + " places, suggest 1-2 NEARBY sights or activities (within ~50 km) that are NOT in the master list:\n"
+        + eBatch.join("; ") + "\n\n"
+        + "Each suggestion must be specific, actually nearby, NOT in the master list, and NOT a famous gateway the traveler obviously skipped on purpose. "
+        + "Most will be singleSight=true (waterfalls, viewpoints, ruins). Mix freely.\n"
+        + 'Return ONLY a JSON array (no markdown):\n[{"place":"Sight","country":"Country","near":"Place from batch","role":"sight","stayRange":"0 nights","singleSight":true,"whyItFits":"Specific reason.","tradeoffs":"One downside.","tags":["tag1"],"otherAttractions":"","widelyRecommended":false,"lat":0.0,"lng":0.0}]';
+      calls.push(callMax([{role:"user", content:pEnrich}], 1600 + eBatch.length * 180, 50000).then(function(t){
+        var cleaned = t.replace(/```json|```/g, "").trim();
+        var cands;
+        try { cands = JSON.parse(cleaned); }
+        catch(_){ return []; }
+        cands.forEach(function(c){ c._required = false; c._requiredFor = []; c._enrichedFrom = c.near || ""; });
+        return cands;
+      }).catch(function(e){ console.warn("[Max enhance] enrich batch failed:", e && e.message); return []; }));
+    }
+    var results = await Promise.allSettled(calls);
+    var fresh = [];
+    results.forEach(function(r){
+      if (r.status === "fulfilled" && Array.isArray(r.value)) fresh = fresh.concat(r.value);
+    });
+    // Filter out anything already in the existing set (LLM doesn't
+    // always honor the skip list) and de-dup within fresh.
+    var freshNorm = {};
+    var filtered = fresh.filter(function(c){
+      if (!c || !c.place) return false;
+      var k = nrm(c.place);
+      if (!k || existingNorm[k] || freshNorm[k]) return false;
+      freshNorm[k] = true;
+      return true;
+    });
+    // Stamp IDs and append to _tb.candidates.
+    var addedCount = 0;
+    filtered.forEach(function(c){
+      c.id = "c-enh-" + Date.now().toString(36) + "-" + Math.floor(Math.random()*100000).toString(36);
+      c.status = "keep";
+      c._requiredFor = c._requiredFor || [];
+      c.tags = c.tags || [];
+      if (typeof c.overnightCapable !== "boolean") c.overnightCapable = !c.singleSight;
+      if (!c.role) c.role = c.overnightCapable ? "stay" : "see";
+      _tb.candidates = _tb.candidates || [];
+      _tb.candidates.push(c);
+      addedCount++;
+    });
+    // Bucket the new candidates into a synthetic placeActivities
+    // section so they appear in the picker. Group enrichment items
+    // under "Sights near places you listed"; thematic items under
+    // "More places to consider."
+    if (addedCount) {
+      var enrichItems = filtered.filter(function(c){ return c._enrichedFrom; });
+      var themeItems  = filtered.filter(function(c){ return !c._enrichedFrom; });
+      _tb.placeActivities = _tb.placeActivities || [];
+      if (themeItems.length) {
+        _tb.placeActivities.push({
+          id: "synth-enh-theme-" + Date.now().toString(36),
+          section: "More places to consider",
+          name: "Max-suggested additions, in the shape of your list",
+          type: "synthetic-enhance",
+          description: "Max read your existing picks as a signal of taste and added these. Check the ones that fit; ignore the rest.",
+          checked: false,
+          requiredPlaces: themeItems.map(function(c){
+            return { place: c.place, country: c.country || "", lat: c.lat || null, lng: c.lng || null, _keep: false, overnight: !c.singleSight };
+          })
+        });
+      }
+      if (enrichItems.length) {
+        _tb.placeActivities.push({
+          id: "synth-enh-near-" + Date.now().toString(36),
+          section: "Sights near places you listed",
+          name: "Near-by enrichment",
+          type: "synthetic-enhance",
+          description: "Nearby sights and activities tied to the places already in your Discovery. Each one is anchored to a place you've listed.",
+          checked: false,
+          requiredPlaces: enrichItems.map(function(c){
+            return { place: c.place, country: c.country || "", lat: c.lat || null, lng: c.lng || null, _keep: false, overnight: !c.singleSight, _enrichedFrom: c._enrichedFrom || "" };
+          })
+        });
+      }
+    }
+    // Persist + re-render. _initialTripSave handles the trip save.
+    if (typeof _initialTripSave === "function") _initialTripSave();
+    if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
+    if (typeof _renderPlacePickerMap === "function") _renderPlacePickerMap("tb-pm-map");
+    if (typeof showSaveStatus === "function") {
+      showSaveStatus(addedCount
+        ? ("✦ Added " + addedCount + " new place" + (addedCount === 1 ? "" : "s") + " to Discovery")
+        : "No new places this time — Max is out of fresh ideas for this set.", 6000);
+    }
+  } catch(err) {
+    console.warn("[Max enhance] failed:", err && err.message);
+    if (typeof maxAlert === "function") maxAlert("Enhance failed: " + (err && err.message ? err.message : "unknown error"));
+  } finally {
+    if (btn && origLabel != null) { btn.disabled = false; btn.textContent = origLabel; }
+  }
+}
+if (typeof globalThis !== "undefined") globalThis.enhanceDiscovery = enhanceDiscovery;
+
 async function runCandidateSearch(requiredPlaces) {
   // region already set from sentence in Step 1
   _tb.duration      = g("tb-duration")      ? g("tb-duration").value.trim()      : (_tb.duration||"");
@@ -16559,6 +16752,19 @@ function _renderPlaceActivityItems(){
       else _pmBulk.enter();
     };
     hdrActions.appendChild(bulkBtn);
+    // PD.111: Enhance Discovery — additive LLM pass using the
+    // existing set (user list + previous LLM picks + manual adds)
+    // as the skip list. Appends new candidates; doesn't replace.
+    var enhBtn = document.createElement("button");
+    enhBtn.type = "button";
+    enhBtn.style.cssText = "font-size:11px;font-weight:600;color:#fff;background:#5b3f8f;border:1px solid #5b3f8f;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;";
+    enhBtn.innerHTML = '✦ Enhance';
+    enhBtn.title = "Ask Max for more places that fit what's already here. Existing picks are preserved.";
+    enhBtn.onclick = function(e){
+      e.stopPropagation();
+      if (typeof enhanceDiscovery === "function") enhanceDiscovery(enhBtn);
+    };
+    hdrActions.appendChild(enhBtn);
     // PD.87: action buttons render in the page header slot (under the
     // Discovery title) instead of inside the WHAT'S HERE TOC. Fall
     // back to inline placement if the slot isn't in the DOM yet
