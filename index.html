@@ -7467,10 +7467,19 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
     return "  • " + bits.join(" ");
   }).join("\n");
   // Stash user's role intent so post-LLM we can stamp MaxRoleWriter.
+  // PD.74b: normalize the key via _normPlaceName (strips diacritics,
+  // lowercases, canonicalizes) AND split off any ", Country" suffix
+  // the user typed. The LLM returns candidates without those suffixes,
+  // and the pre-fix lookup missed them (e.g. user pastes
+  // "Egilsstaðir, Iceland" but the candidate's place is "Egilsstaðir").
   try {
+    var nrmKey = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
     _tb._pastedRoles = {};
     parseResult.destinations.forEach(function(p){
-      var k = String(p.place || "").toLowerCase().trim();
+      if (!p || !p.place) return;
+      // Drop ", Country" / "; Country" tail so it matches LLM output.
+      var bare = String(p.place).split(/[,;]/)[0].trim();
+      var k = nrmKey(bare);
       if (!k) return;
       _tb._pastedRoles[k] = p.isStay ? "stay" : "see";
     });
