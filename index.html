@@ -2257,7 +2257,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
     <!-- Round DI: bottom action row, always visible. -->
     <div id="hs-actions" style="margin-top:20px;padding-top:14px;border-top:1px solid #eee;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
       <button onclick="selectHomeOption('new')" style="font-size:12.5px;font-weight:600;padding:8px 16px;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;">+ Start a new trip</button>
-      <button onclick="selectHomeOption('browse')" style="font-size:12px;font-weight:500;padding:8px 12px;background:#fff;color:#1a5fa8;border:1px solid #d8d4c8;border-radius:6px;cursor:pointer;font-family:inherit;">Just browsing →</button>
+      <button onclick="selectHomeOption('browse')" style="font-size:12px;font-weight:500;padding:8px 12px;background:#fff;color:#1a5fa8;border:1px solid #d8d4c8;border-radius:6px;cursor:pointer;font-family:inherit;">Discover where to go →</button>
       <button onclick="selectHomeOption('paste')" style="font-size:11px;font-weight:500;padding:8px 12px;background:#fff;color:#888;border:1px solid #d8d4c8;border-radius:6px;cursor:pointer;font-family:inherit;" title="Already have a list of places you want to visit? Paste it in.">Paste a list</button>
       <button onclick="selectHomeOption('import')" style="font-size:11px;font-weight:500;padding:8px 12px;background:#fff;color:#888;border:1px solid #d8d4c8;border-radius:6px;cursor:pointer;font-family:inherit;" title="Open a saved Max trip (.json) or a text list (.txt / .md). Text files land in Discovery with places already populated.">Load from file</button>
       <span style="margin-left:auto;font-size:10.5px;color:#bbb;">Max gathers; you evaluate, edit, add. <span onclick="showAboutMax()" style="color:#1a5fa8;cursor:pointer;">How it works →</span></span>
@@ -7492,7 +7492,19 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
     + "places (group them into themed sections like \"Hike to waterfalls,\" \"Walk in volcanic landscapes,\" "
     + "etc.) so the traveler reviews them as activities, not as a flat list. You may add a small "
     + "number of clearly-canonical additional places that the traveler obviously missed, but don't pad.\n\n"
-    + "Places the traveler listed (EVERY ONE must appear in your output):\n" + _ctxBits;
+    + "Places the traveler listed (EVERY ONE must appear in your output):\n" + _ctxBits
+    // PD.76: when user has tagged some places as overnight stays, ask
+    // the model to surface a few MORE overnight hubs the user didn't
+    // list — especially in regions of the trip that look thin from the
+    // user's choices. PD.77 groups these into "Other stays to consider"
+    // beneath the user's own stays.
+    + (parseResult.destinations.some(function(p){ return p && p.isStay; })
+        ? "\n\nADDITIONAL STAYS — surface 2-4 EXTRA overnight hubs the traveler did NOT list but should "
+          + "seriously consider, especially in regions of this trip that look thin from the user's list "
+          + "(long stretches without an overnight, or major sub-regions with no chosen base). Mark each "
+          + "with overnight=true and a stayRange of at least \"1 night\". Place them under a section "
+          + "titled \"Other stays to consider\" so the picker shows them grouped.\n"
+        : "");
   _tb.placeContext = placeContext;
   // Stash the parsed list so the backstop post-pass can detect any
   // place the LLM dropped despite the mandate.
@@ -11288,6 +11300,47 @@ async function runCandidateSearch(requiredPlaces) {
                 };
               })
             });
+          }
+          // PD.77: also surface LLM-suggested stays NOT in the user\'s
+          // pasted list. The LLM marks overnight candidates via
+          // c.overnight or c.stayRange. Filter out anything already
+          // covered by the user\'s pasted-stays list. Inject as
+          // a second synthetic placeActivity right after the user\'s.
+          var pastedNorm = {};
+          _stayPlaces.forEach(function(c){ pastedNorm[nrm(c.place)] = true; });
+          var llmExtraStays = allCands.filter(function(c){
+            if (!c || !c.place) return false;
+            if (pastedNorm[nrm(c.place)]) return false;
+            var marksOvernight = (c.overnight === true)
+              || (typeof c.stayRange === "string" && /\d/.test(c.stayRange));
+            return marksOvernight;
+          });
+          if (llmExtraStays.length && Array.isArray(_tb.placeActivities)) {
+            var existingExtra = _tb.placeActivities.find(function(it){
+              return it && it.section === "Other stays to consider";
+            });
+            if (!existingExtra) {
+              // Insert at index 1 — right after "Recommended overnight stays" (index 0).
+              _tb.placeActivities.splice(1, 0, {
+                id: "synth-other-stays",
+                section: "Other stays to consider",
+                name: "Additional overnight hubs Max suggests",
+                type: "manual",
+                description: "Places Max thinks are worth considering as overnight stays based on your list. Check the ones that fit your trip; ignore the rest.",
+                checked: false,
+                requiredPlaces: llmExtraStays.map(function(c){
+                  return {
+                    place: c.place,
+                    country: c.country || "",
+                    lat: (typeof c.lat === "number") ? c.lat : null,
+                    lng: (typeof c.lng === "number") ? c.lng : null,
+                    _keep: false,
+                    overnight: true,
+                    stayRange: c.stayRange || ""
+                  };
+                })
+              });
+            }
           }
         }
       }
@@ -15567,8 +15620,11 @@ function _renderPlaceActivityItems(){
       // language in the section name. Be permissive on names since the LLM
       // labels things inconsistently.
       if (anyRoute || /\btrain|\brail|between destinations|scenic route|named.{0,15}train/i.test(name)) return 2;
-      // PD.75: synthetic "Recommended overnight stays" section comes first.
+      // PD.75/77: synthetic stay sections come first.
+      //   0 = user's pasted stays
+      //   0.5 = LLM-suggested additional stays
       if (/recommended overnight stays|overnight hubs|overnight stays/i.test(name)) return 0;
+      if (/other stays to consider/i.test(name)) return 0.5;
       return 1; // activities
     }
     var ra = rank(a), rb = rank(b);
