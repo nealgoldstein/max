@@ -7472,16 +7472,17 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
   // the user typed. The LLM returns candidates without those suffixes,
   // and the pre-fix lookup missed them (e.g. user pastes
   // "Egilsstaðir, Iceland" but the candidate's place is "Egilsstaðir").
+  // Also keep the original display name so _pmEnsureCandidate can mint
+  // a stub with the user-facing form.
   try {
     var nrmKey = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
     _tb._pastedRoles = {};
     parseResult.destinations.forEach(function(p){
       if (!p || !p.place) return;
-      // Drop ", Country" / "; Country" tail so it matches LLM output.
       var bare = String(p.place).split(/[,;]/)[0].trim();
       var k = nrmKey(bare);
       if (!k) return;
-      _tb._pastedRoles[k] = p.isStay ? "stay" : "see";
+      _tb._pastedRoles[k] = { role: p.isStay ? "stay" : "see", displayName: bare };
     });
   } catch(_){}
   // v359.60.28: stronger mandate — EVERY listed place must appear in
@@ -11422,34 +11423,32 @@ async function runCandidateSearch(requiredPlaces) {
         var nrm = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
         var _stayPlaces = [];
         Object.keys(_tb._pastedRoles).forEach(function(k){
-          var role = _tb._pastedRoles[k];
+          var entry = _tb._pastedRoles[k];
+          // Tolerate the legacy shape (role string) in case anything
+          // stashed before the v2 change is still in memory.
+          var role, displayName;
+          if (entry && typeof entry === "object") { role = entry.role; displayName = entry.displayName; }
+          else { role = entry; displayName = k; }
           if (role !== "stay" && role !== "see") return;
-          var cand = allCands.find(function(c){ return c && c.place && nrm(c.place) === nrm(k); });
+          // PD.74 (architectural): ensure a candidate exists, then let
+          // MaxRoleWriter handle ALL state — role, status=keep,
+          // placeMeta.stayOverride, placeActivities.requiredPlaces._keep
+          // — through the canonical writer. _pmEnsureCandidate mints a
+          // stub when the LLM dropped this place from candidates (it
+          // may still be in placeActivities as a requiredPlace). With
+          // a candidate guaranteed, MaxRoleWriter\\'s internal mirror to
+          // placeActivities runs and the place becomes kept.
+          var cand = null;
+          // First try to find the existing candidate (handles diacritic
+          // variants via norm) so we don\\'t synthesize a duplicate.
+          cand = allCands.find(function(c){ return c && c.place && nrm(c.place) === nrm(k); });
+          if (!cand && typeof _pmEnsureCandidate === "function") {
+            cand = _pmEnsureCandidate(displayName);
+          }
           if (cand) {
             MaxRoleWriter.set(cand.id || cand.place, role, { persist: false });
             if (role === "stay") _stayPlaces.push(cand);
           }
-          // PD.74c: pasted places that ended up only as requiredPlaces
-          // on a placeActivity (not as a top-level candidate) need to
-          // be marked _keep so the picker treats them as chosen. Without
-          // this, the user's listed place appears in the activity but
-          // shows as gray/unkept on the map.
-          try {
-            if (Array.isArray(_tb.placeActivities)) {
-              _tb.placeActivities.forEach(function(it){
-                (it && it.requiredPlaces || []).forEach(function(p){
-                  if (!p || !p.place) return;
-                  if (nrm(p.place) !== nrm(k)) return;
-                  p._keep = true;
-                  p._rejected = false;
-                  if (role === "stay") {
-                    p.overnight = true;
-                    if (!p.nights || p.nights < 1) p.nights = 1;
-                  }
-                });
-              });
-            }
-          } catch(_){}
         });
         delete _tb._pastedRoles;
         // PD.75: synthetic top-of-picker section for the user's
