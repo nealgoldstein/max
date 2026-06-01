@@ -430,13 +430,11 @@
           try {
             var parsed = JSON.parse(localStorage.getItem(k));
             var t = parsed && parsed.trip;
-            // PD.66: drafts legitimately have no top-level destinations
-            // or candidates — their working state lives inside
-            // brief._tbDraft. Never treat a draft as an empty shell.
-            var isDraft = !!(t && t.brief && t.brief._isDraft);
-            if (!isDraft
-                && t && (!t.destinations || t.destinations.length === 0)
-                && (!t.candidates   || t.candidates.length === 0)) {
+            // PD.73: candidates populate at first-save (LLM completion).
+            // A trip with neither destinations nor candidates is a
+            // mint-then-abandon — safe to reclaim.
+            if (t && (!t.destinations || t.destinations.length === 0)
+                  && (!t.candidates   || t.candidates.length === 0)) {
               isEmpty = true;
               emptyShells++;
             }

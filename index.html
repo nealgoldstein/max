@@ -2234,14 +2234,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
          outstanding pending-action tasks for the user's current trip. -->
     <div id="hs-dashboard" style="display:none;margin-top:18px;"></div>
     <!-- Round DI: trip list always visible when trips exist. -->
-    <!-- PD.70: draft trips render in their own "In progress" section
-         above the built-trip list so resumable research is clearly
-         separated from finished itineraries. -->
-    <div id="hs-drafts-section" style="display:none;margin-top:18px;">
-      <div class="hs-section-lbl" style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#5b3f8f;margin-bottom:10px;">In research</div>
-      <div class="trip-cards" id="draft-cards"></div>
-    </div>
-    <div id="hs-trips-section" style="display:none;margin-top:18px;">
+<div id="hs-trips-section" style="display:none;margin-top:18px;">
       <div class="hs-section-lbl" style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:10px;">Your trips</div>
       <div class="trip-cards" id="trip-cards"></div>
     </div>
@@ -5208,14 +5201,11 @@ function cleanupOrphanedTrips(){
         try {
           var parsed = JSON.parse(localStorage.getItem(k));
           var t = parsed && parsed.trip;
-          // PD.66: NEVER treat a Discovery draft as an empty shell. Drafts
-          // legitimately have no top-level destinations/candidates — their
-          // _tb working state lives inside t.brief._tbDraft. Wiping them
-          // here threw away the user's mid-research notes and selections.
-          var isDraft = !!(t && t.brief && t.brief._isDraft);
-          if (!isDraft
-              && t && (!t.destinations || t.destinations.length === 0)
-              && (!t.candidates || t.candidates.length === 0)) {
+          // PD.73: a trip with neither destinations nor candidates is a
+          // mint-then-abandon (no LLM completion was reached, so no first
+          // save fired). Safe to reclaim.
+          if (t && (!t.destinations || t.destinations.length === 0)
+                && (!t.candidates || t.candidates.length === 0)) {
             isEmpty = true;
             emptyShells++;
           }
@@ -6470,19 +6460,13 @@ function renderHomeScreen(){
 
   // Round DI: trip list shows immediately when there are trips, empty
   // state shows when there aren't.
-  // PD.70: split drafts (research in progress) from built trips.
-  var allTrips = _tripsIndex || [];
-  var draftTrips = allTrips.filter(function(t){ return t && t.isDraft; });
-  var builtTrips = allTrips.filter(function(t){ return t && !t.isDraft; });
-  var hasAnyTrips = allTrips.length > 0;
-  g("hs-drafts-section").style.display = draftTrips.length > 0 ? "block" : "none";
-  g("hs-trips-section").style.display  = builtTrips.length > 0 ? "block" : "none";
-  g("hs-empty").style.display = hasAnyTrips ? "none" : "block";
+  var hasTrips = _tripsIndex && _tripsIndex.length > 0;
+  g("hs-trips-section").style.display = hasTrips ? "block" : "none";
+  g("hs-empty").style.display = hasTrips ? "none" : "block";
 
-  if(hasAnyTrips){
+  if(hasTrips){
     var lbl=g("ntp-lbl"); if(lbl) lbl.textContent="Name this trip";
     var cards=g("trip-cards"); cards.innerHTML="";
-    var draftCards = g("draft-cards"); if (draftCards) draftCards.innerHTML="";
     // Round DI.2: show all trips; the .trip-cards container is
     // scrollable (max-height:280px;overflow-y:auto in CSS) so a long
     // list collapses naturally without a "show all" toggle.
@@ -6560,14 +6544,6 @@ function renderHomeScreen(){
       })();
       var name=document.createElement("div"); name.className="tc-name"; name.style.display="flex"; name.style.alignItems="center"; name.style.flexWrap="wrap";
       var nameTxt=document.createElement("span"); nameTxt.textContent=entry.name||"Untitled trip"; name.appendChild(nameTxt);
-      // PD.69: drafts get a visible "Draft" pill so users can tell
-      // research-in-progress trips apart from built ones at a glance.
-      if (entry.isDraft) {
-        var draftPill = document.createElement("span");
-        draftPill.textContent = "Draft";
-        draftPill.style.cssText = "display:inline-block;font-size:10px;font-weight:700;color:#5b3f8f;background:#f1edf8;border:1px solid #ddd5ec;padding:2px 8px;border-radius:10px;margin-left:8px;vertical-align:middle;letter-spacing:.02em;";
-        name.appendChild(draftPill);
-      }
       if (countdownChip) name.appendChild(countdownChip);
       var meta=document.createElement("div"); meta.className="tc-meta";
       var parts=[]; if(entry.dateRange)parts.push(entry.dateRange);
@@ -6696,9 +6672,7 @@ function renderHomeScreen(){
       };})(entry.id,card);
       card.appendChild(info); card.appendChild(dup); card.appendChild(del);
       (function(id){card.onclick=function(e){if(e.target===del||e.target===dup)return;selectTrip(id);};})(entry.id);
-      // PD.70: route the card to the correct section.
-      var _targetCards = entry.isDraft ? g("draft-cards") : cards;
-      if (_targetCards) _targetCards.appendChild(card);
+      cards.appendChild(card);
 
       // ── v356.3: pre-trip pending-actions banner ──────────────
       // For trips departing within 14 days with at least one
@@ -8922,16 +8896,16 @@ if (typeof globalThis !== "undefined") {
 }
 
 function enterApp(){
-  // PD.66: draft trips skip trip view — restore _tb and open Discovery.
-  if (trip && trip.brief && trip.brief._isDraft && typeof _pmDraftRestore === "function") {
+  // PD.73: route to last-active screen if recorded; otherwise default
+  // to trip view (drawTripMode). When the screen is "picker", hydrate
+  // _tb from the trip's saved picker state, then open the picker.
+  if (trip && trip._lastScreen && typeof _restoreLastScreen === "function") {
     try {
-      // Ensure home screen is hidden and app pane is shown so the
-      // picker overlay has its expected container.
       var hs = g("home-screen"); if (hs) hs.style.display = "none";
       var app = g("app"); if (app) app.style.display = "flex";
-      if (_pmDraftRestore()) return;
+      if (_restoreLastScreen()) return;
     } catch(e){
-      console.warn("[Max draft] restore failed, falling through to trip view:", e && e.message);
+      console.warn("[Max] last-screen restore failed; falling through to trip view:", e && e.message);
     }
   }
   // Restore _mdcItems from saved trip for route sequencing
@@ -11237,10 +11211,9 @@ async function runCandidateSearch(requiredPlaces) {
     }
     _tb.candidates = allCands;
     _tb.p2Failed = p2Failed;
-    // PD.72: LLM populated the candidate list — snapshot the draft so
-    // a tab close at this point still restores into the picker (with
-    // all the generated places) rather than falling back to the brief.
-    if (typeof _pmDraftScheduleSave === "function") _pmDraftScheduleSave();
+    // PD.73: LLM completion is the FIRST SAVE point — mint the trip
+    // (if not yet minted) with all of _tb's substance and persist.
+    if (typeof _initialTripSave === "function") _initialTripSave();
     // Round NC.1 (gallery-pivot): every candidate carries a tripRole — the
     // user-assigned role this place plays on the trip map (overnight /
     // daytrip / onway / unspecified). Default to "unspecified" so the user
@@ -13591,6 +13564,7 @@ function _tbSetupShapeBadges(){
 // user picks what's must-do vs skip. The picked items populate _mdcItems so
 // Step 2 → candidate search can run without a second LLM regen.
 function renderTripStep1Place(){
+  if (typeof _recordScreen === "function") _recordScreen("brief");
   // v359.7: consolidated single-page brief. Replaces the old two-page
   // flow ("Where do you want to go?" → "Shape the trip") with one
   // scrolling page organized by the new section structure: destination,
@@ -13615,6 +13589,7 @@ function renderTripStep1Place(){
   // PD.66i: re-parent to body to escape #home-screen display:none.
   if (ov.parentElement !== document.body) document.body.appendChild(ov);
   ov.className = "tb-overlay";
+  if (typeof _recordScreen === "function") _recordScreen("picker");
   var _prevScroll = ov.scrollTop || 0;
   var _preserve = !!_tb._preserveScrollOnce;
   _tb._preserveScrollOnce = false;
@@ -14547,8 +14522,9 @@ async function generateActivitiesForPlace(){
       }
     });
     _tb.placeActivities = items;
-    // PD.72: LLM populated the activity list — snapshot the draft.
-    if (typeof _pmDraftScheduleSave === "function") _pmDraftScheduleSave();
+    // PD.73: LLM activity list landed — early first-save (no candidates
+    // yet, but enough substance to want resumption).
+    if (typeof _initialTripSave === "function") _initialTripSave();
     // v357: removed the _tb._placePickerStart default-init — the picker
     // map no longer carries a "Start from" preference (sequencing is
     // trip-view-only).
@@ -18482,8 +18458,6 @@ function _pmDocsRefreshActive(){
     _pmAttGcRan = true;
     setTimeout(_pmAttGc, 5000);
   }
-  // PD.66: any change to docs/links also dirties the draft.
-  if (typeof _pmDraftScheduleSave === "function") _pmDraftScheduleSave();
 }
 
 // PD.57: tag chip field for the doc editor header. Tags stored as
@@ -19259,229 +19233,6 @@ if (typeof globalThis !== "undefined") {
 
 
 
-// ──────────────────────────────────────────────────────────────────────
-// Round PD.66: Discovery draft autosave. The trip object is materialized
-// lazily on the FIRST meaningful Discovery edit (place toggled, doc
-// saved, link added). From that point, _tb state mirrors into
-// trip.brief._tbDraft on each edit (debounced 1.5s) and rides through
-// the existing localSave + MaxSync.scheduleSave path. Marker flag
-// trip.brief._isDraft distinguishes "research in progress" from a
-// built trip.
-//
-// When the user clicks Choreograph, publishTrip() overwrites the body
-// with the materialized trip and clears both markers — see
-// _pmDraftFinalize below.
-//
-// What's preserved in the snapshot: brief fields (region, sentence,
-// when, duration), the picker's working state (placeActivities,
-// candidates, mdcItems-ish, requiredPlaces), and all of the research
-// surface (placeMeta, tripMeta — docs, links, tags, attachments).
-// Anything purely UI (search query, expanded sections) is not.
-// ──────────────────────────────────────────────────────────────────────
-
-function _pmDraftEnsure(){
-  if (_currentTripId) return _currentTripId;
-  if (typeof _tb === "undefined" || !_tb) return null;
-  // PD.66 (architectural): drafts are first-class trips, not local-only.
-  // Mint locally → populate via MaxDB.index.upsert (the canonical index
-  // writer — survives sync pullAll because it writes through the same
-  // path as everything else) → trigger MaxSync.scheduleSave, which
-  // calls _doSave; _doSave POSTs to /trips when the server returns 404,
-  // creating the row. From then on, drafts ride the normal sync flow.
-  var newId = "trip-" + Date.now();
-  if (typeof window.trip === "undefined" || !window.trip) {
-    window.trip = {};
-  }
-  trip.id = newId;
-  // PD.69: prefer _tb.region (e.g. "Iceland") over the generic
-  // "Untitled — DATE" so the draft is immediately identifiable in
-  // the trips list. Fallback chain: explicit name → region → placeName → dated untitled.
-  trip.name = (_tb.name && _tb.name.trim())
-    || (_tb.region && _tb.region.trim())
-    || (_tb.placeName && _tb.placeName.trim())
-    || ("Untitled — " + new Date().toLocaleDateString("en-US", {month:"short", day:"numeric", year:"numeric"}));
-  trip.destinations = trip.destinations || [];
-  trip.brief = trip.brief || {};
-  trip.brief.region = trip.brief.region || _tb.region || "";
-  trip.brief.sentence = trip.brief.sentence || _tb.sentence || "";
-  trip.brief._isDraft = true;
-  _currentTripId = newId;
-
-  // Canonical index write — uses MaxDB if available (writes through to
-  // localStorage AND keeps the in-memory _tripsIndex consistent),
-  // falls back to the legacy push only if MaxDB isn\'t loaded.
-  var indexEntry = {
-    id: newId,
-    name: trip.name,
-    dateRange: "",
-    destCount: 0,
-    isDraft: true
-  };
-  var wrote = false;
-  try {
-    if (typeof MaxDB !== "undefined" && MaxDB.index && typeof MaxDB.index.upsert === "function") {
-      wrote = MaxDB.index.upsert(indexEntry);
-    }
-  } catch(_){}
-  if (!wrote) {
-    try {
-      if (typeof _tripsIndex !== "undefined" && Array.isArray(_tripsIndex)) {
-        _tripsIndex.push(indexEntry);
-        if (typeof saveTripsIndex === "function") saveTripsIndex();
-      }
-    } catch(_){}
-  }
-  // Sync to server immediately if signed in. _doSave POSTs on 404 so
-  // the trip is created on the server; subsequent saves PUT.
-  if (typeof MaxSync !== "undefined" && MaxSync.isSignedIn && MaxSync.isSignedIn()
-      && typeof MaxSync.scheduleSave === "function") {
-    try { MaxSync.scheduleSave(); } catch(_){}
-  }
-  console.log("[Max draft] minted draft trip", newId);
-  return newId;
-}
-function _pmDraftSnapshot(){
-  if (typeof _tb === "undefined" || !_tb) return null;
-  // Pick out the fields that matter for resuming Discovery. We avoid
-  // JSON.stringify(_tb) entirely because it can carry transient UI
-  // state (timers, DOM refs) that don't round-trip.
-  function pick(obj, keys){
-    var out = {};
-    keys.forEach(function(k){ if (obj[k] !== undefined) out[k] = obj[k]; });
-    return out;
-  }
-  return pick(_tb, [
-    "name", "region", "placeName", "sentence", "when", "duration",
-    "startDate", "entry", "tbExit", "entryBuffer", "exitBuffer",
-    "tripMode", "interests", "drivers", "anchors", "familiarity", "intent",
-    "aboutTrip", "hardlimits", "pace",
-    "placeActivities", "candidates", "requiredPlaces",
-    "placeMeta", "tripMeta"
-  ]);
-}
-function _pmDraftSave(){
-  _pmDraftEnsure();
-  if (!trip || !trip.brief) return;
-  // PD.66 (architectural): only stamp the snapshot when this trip is
-  // actually a draft. If the user is editing notes on a BUILT trip
-  // (post-Choreograph), the normal save path handles it; we must not
-  // re-flip _isDraft back on.
-  if (!trip.brief._isDraft) return;
-  trip.brief._tbDraft = _pmDraftSnapshot();
-  // PD.69: keep the draft's display name fresh — if the user has
-  // entered a region/place via the brief, update the trip.name AND
-  // the index entry so the home-screen card shows the right label
-  // instead of the generic "Untitled — DATE" from initial mint.
-  var freshName = (_tb.name && _tb.name.trim())
-    || (_tb.region && _tb.region.trim())
-    || (_tb.placeName && _tb.placeName.trim())
-    || trip.name;
-  if (freshName && freshName !== trip.name) {
-    trip.name = freshName;
-    try {
-      if (typeof MaxDB !== "undefined" && MaxDB.index && MaxDB.index.entry && MaxDB.index.upsert) {
-        var ie = MaxDB.index.entry(_currentTripId);
-        if (ie) { ie.name = freshName; MaxDB.index.upsert(ie); }
-      } else if (typeof _tripsIndex !== "undefined" && Array.isArray(_tripsIndex)) {
-        var legacy = _tripsIndex.find(function(t){ return t.id === _currentTripId; });
-        if (legacy) { legacy.name = freshName; if (typeof saveTripsIndex === "function") saveTripsIndex(); }
-      }
-    } catch(_){}
-  }
-  if (typeof localSave === "function") {
-    try { localSave(); } catch(e){ console.warn("[Max draft] localSave failed:", e && e.message); }
-  }
-}
-var _pmDraftSaveTimer = null;
-function _pmDraftScheduleSave(){
-  if (_pmDraftSaveTimer) clearTimeout(_pmDraftSaveTimer);
-  _pmDraftSaveTimer = setTimeout(_pmDraftSave, 1500);
-}
-// PD.66: called from publishTrip — when the user Choreographs, the
-// real trip body replaces the draft. Clear markers so the trip moves
-// out of "draft" state in the home screen and on the server.
-function _pmDraftFinalize(){
-  if (trip && trip.brief) {
-    delete trip.brief._isDraft;
-    delete trip.brief._tbDraft;
-  }
-  // PD.66 (architectural): canonical index writer drops the isDraft flag.
-  try {
-    if (typeof MaxDB !== "undefined" && MaxDB.index && typeof MaxDB.index.entry === "function"
-        && typeof MaxDB.index.upsert === "function" && _currentTripId) {
-      var entry = MaxDB.index.entry(_currentTripId);
-      if (entry) { delete entry.isDraft; MaxDB.index.upsert(entry); }
-    } else if (typeof _tripsIndex !== "undefined" && Array.isArray(_tripsIndex) && _currentTripId) {
-      var legacy = _tripsIndex.find(function(t){ return t.id === _currentTripId; });
-      if (legacy) delete legacy.isDraft;
-      if (typeof saveTripsIndex === "function") saveTripsIndex();
-    }
-  } catch(_){}
-}
-// PD.66: opening a draft trip — restore _tb from the saved snapshot
-// and route to the Discovery picker instead of trip view.
-function _pmDraftRestore(){
-  if (!trip || !trip.brief || !trip.brief._isDraft) return false;
-  var snap = trip.brief._tbDraft;
-  if (!snap) return false;
-  if (typeof _tb === "undefined" || !_tb) window._tb = _tb = {};
-  Object.keys(snap).forEach(function(k){ _tb[k] = snap[k]; });
-  _tb._editMode = false;  // it\'s still draft, not edit-of-built-trip
-  // PD.66g (architectural): route through the SAME entry points the
-  // fresh-brief flow uses. renderActivityPicker is the Discovery
-  // picker — it reads _tb.placeActivities and renders the full list
-  // (the old code called showCandidateExplorer, which only rendered
-  // _tb.candidates and dropped the rest of the LLM-generated places).
-  //
-  // Decision tree (mirrors the natural flow):
-  //   • placeActivities populated → user was past the brief → picker
-  //   • brief fields populated but no placeActivities → still in brief
-  //   • nothing → fresh brief
-  var hasPicker = Array.isArray(_tb.placeActivities) && _tb.placeActivities.length;
-  if (hasPicker && typeof renderActivityPicker === "function") {
-    var ov = document.getElementById("trip-brief-overlay");
-    if (ov) ov.style.display = "block";
-    renderActivityPicker();
-    return true;
-  }
-  // Otherwise, open the brief form with restored fields.
-  var brief = document.getElementById("trip-brief-overlay");
-  if (brief && typeof renderTripStep1Place === "function") {
-    brief.style.display = "block";
-    renderTripStep1Place();
-    return true;
-  }
-  return false;
-}
-// PD.71: any brief-form edit also dirties the draft. Delegated input
-// + change listeners on document — cheap, fires only when the event
-// target is inside #trip-brief-overlay (the brief AND the Discovery
-// picker share that container). 1.5s debounce inside
-// _pmDraftScheduleSave coalesces rapid typing into one save.
-(function _pmDraftBindBriefAutosave(){
-  if (window._pmDraftBriefBound) return;
-  window._pmDraftBriefBound = true;
-  function shouldSave(e){
-    var ov = document.getElementById("trip-brief-overlay");
-    if (!ov) return false;
-    if (ov.style.display === "none") return false;
-    return ov.contains(e.target);
-  }
-  document.addEventListener("input", function(e){
-    if (shouldSave(e) && typeof _pmDraftScheduleSave === "function") _pmDraftScheduleSave();
-  }, true);
-  document.addEventListener("change", function(e){
-    if (shouldSave(e) && typeof _pmDraftScheduleSave === "function") _pmDraftScheduleSave();
-  }, true);
-})();
-
-if (typeof globalThis !== "undefined") {
-  globalThis._pmDraftEnsure = _pmDraftEnsure;
-  globalThis._pmDraftSave = _pmDraftSave;
-  globalThis._pmDraftScheduleSave = _pmDraftScheduleSave;
-  globalThis._pmDraftFinalize = _pmDraftFinalize;
-  globalThis._pmDraftRestore = _pmDraftRestore;
-}
 
 
 function _pmCollectDiscoveryShare(){
@@ -21221,12 +20972,164 @@ var MaxRoleWriter = {
     if (opts.persist !== false && typeof autoSave === "function") {
       try { autoSave(); } catch(_){}
     }
-    // PD.66: any role write is a meaningful Discovery edit — autosave the draft.
-    if (typeof _pmDraftScheduleSave === "function") _pmDraftScheduleSave();
     return cand;
   }
 };
 if (typeof window !== "undefined") window.MaxRoleWriter = MaxRoleWriter;
+
+// ──────────────────────────────────────────────────────────────────────
+// Round PD.73: trip lifecycle without the "draft" concept.
+//
+//   _initialTripSave()    — runs at LLM completion (in runCandidateSearch
+//                            and expandMustDos). Mints a trip from _tb
+//                            substance the first time the LLM gives us
+//                            something resumable, then schedules sync.
+//
+//   _recordScreen(name)   — called by each screen entry (brief / picker /
+//                            trip / dest:ID). Stamps trip._lastScreen so
+//                            a reopen knows where to land.
+//
+//   _restoreLastScreen()  — read by enterApp. Routes to the saved screen
+//                            instead of always going to trip view.
+//
+// Trip name lives on trip.name. We derive an initial one from _tb.region
+// or _tb.sentence; the user can rename inline on the trip view header.
+// ──────────────────────────────────────────────────────────────────────
+function _initialTripSave(){
+  if (typeof _tb === "undefined" || !_tb) return;
+  // Only mint when we have substance — at least candidates OR placeActivities.
+  var hasCands = Array.isArray(_tb.candidates) && _tb.candidates.length;
+  var hasActs  = Array.isArray(_tb.placeActivities) && _tb.placeActivities.length;
+  if (!hasCands && !hasActs) return;
+
+  if (!_currentTripId) {
+    // Mint trip with the substance we have.
+    var newId = "trip-" + Date.now();
+    if (typeof window.trip === "undefined" || !window.trip) window.trip = {};
+    trip.id = newId;
+    trip.name = (_tb.name && _tb.name.trim())
+      || (_tb.region && _tb.region.trim())
+      || (_tb.placeName && _tb.placeName.trim())
+      || ("Untitled — " + new Date().toLocaleDateString("en-US", {month:"short", day:"numeric", year:"numeric"}));
+    trip.destinations = trip.destinations || [];
+    trip.brief = trip.brief || {};
+    trip.brief.region = trip.brief.region || _tb.region || "";
+    trip.brief.sentence = trip.brief.sentence || _tb.sentence || "";
+    trip.candidates = (_tb.candidates || []).slice();
+    trip.placeActivities = (_tb.placeActivities || []).slice();
+    _currentTripId = newId;
+
+    // Canonical index write.
+    var indexEntry = {
+      id: newId,
+      name: trip.name,
+      dateRange: "",
+      destCount: 0
+    };
+    var wrote = false;
+    try {
+      if (typeof MaxDB !== "undefined" && MaxDB.index && typeof MaxDB.index.upsert === "function") {
+        wrote = MaxDB.index.upsert(indexEntry);
+      }
+    } catch(_){}
+    if (!wrote) {
+      try {
+        if (typeof _tripsIndex !== "undefined" && Array.isArray(_tripsIndex)) {
+          _tripsIndex.push(indexEntry);
+          if (typeof saveTripsIndex === "function") saveTripsIndex();
+        }
+      } catch(_){}
+    }
+    if (typeof MaxSync !== "undefined" && MaxSync.isSignedIn && MaxSync.isSignedIn()
+        && typeof MaxSync.scheduleSave === "function") {
+      try { MaxSync.scheduleSave(); } catch(_){}
+    }
+    console.log("[Max] initial trip save — minted", newId, "name:", trip.name);
+  } else {
+    // Trip already exists. Sync the latest _tb substance to the trip body.
+    trip.candidates = (_tb.candidates || []).slice();
+    trip.placeActivities = (_tb.placeActivities || []).slice();
+    trip.brief = trip.brief || {};
+    trip.brief.region = _tb.region || trip.brief.region || "";
+    trip.brief.sentence = _tb.sentence || trip.brief.sentence || "";
+    // Refresh the display name if a better one is now available.
+    var fresh = (_tb.name && _tb.name.trim())
+      || (_tb.region && _tb.region.trim())
+      || (_tb.placeName && _tb.placeName.trim());
+    if (fresh && fresh !== trip.name) {
+      trip.name = fresh;
+      try {
+        if (typeof MaxDB !== "undefined" && MaxDB.index && MaxDB.index.entry && MaxDB.index.upsert) {
+          var ie = MaxDB.index.entry(_currentTripId);
+          if (ie) { ie.name = fresh; MaxDB.index.upsert(ie); }
+        }
+      } catch(_){}
+    }
+  }
+  if (typeof localSave === "function") {
+    try { localSave(); } catch(e){ console.warn("[Max] localSave failed:", e && e.message); }
+  }
+}
+
+function _recordScreen(name){
+  if (!trip) return;
+  if (trip._lastScreen === name) return;  // no-op
+  trip._lastScreen = name;
+  if (typeof localSave === "function") {
+    try { localSave(); } catch(_){}
+  }
+}
+
+function _restoreLastScreen(){
+  if (!trip || !trip._lastScreen) return false;
+  var s = trip._lastScreen;
+  // Picker — hydrate _tb from trip and open renderActivityPicker.
+  if (s === "picker") {
+    if (typeof _tb === "undefined" || !_tb) window._tb = _tb = {};
+    if (Array.isArray(trip.candidates)) _tb.candidates = trip.candidates.slice();
+    if (Array.isArray(trip.placeActivities)) _tb.placeActivities = trip.placeActivities.slice();
+    if (trip.brief) {
+      _tb.region   = _tb.region   || trip.brief.region   || "";
+      _tb.sentence = _tb.sentence || trip.brief.sentence || "";
+    }
+    if (typeof renderActivityPicker === "function") {
+      var ov = document.getElementById("trip-brief-overlay");
+      if (ov) ov.style.display = "block";
+      renderActivityPicker();
+      return true;
+    }
+  }
+  // Brief — open the brief overlay.
+  if (s === "brief") {
+    if (typeof _tb === "undefined" || !_tb) window._tb = _tb = {};
+    if (trip.brief) {
+      _tb.region   = _tb.region   || trip.brief.region   || "";
+      _tb.sentence = _tb.sentence || trip.brief.sentence || "";
+    }
+    var brief = document.getElementById("trip-brief-overlay");
+    if (brief && typeof renderTripStep1Place === "function") {
+      brief.style.display = "block";
+      renderTripStep1Place();
+      return true;
+    }
+  }
+  // Dest view — drawDestMode(id) takes the id after the colon.
+  if (s && s.indexOf("dest:") === 0) {
+    var destId = s.substring(5);
+    if (destId && typeof drawDestMode === "function") {
+      drawDestMode(destId);
+      return true;
+    }
+  }
+  // "trip" or unrecognized — let enterApp's default path handle it.
+  return false;
+}
+if (typeof globalThis !== "undefined") {
+  globalThis._initialTripSave = _initialTripSave;
+  globalThis._recordScreen = _recordScreen;
+  globalThis._restoreLastScreen = _restoreLastScreen;
+}
+
 
 // ────────────────────────────────────────────────────────────────────────
 // MaxPlaceKey — the single source of truth for normalizing a place name
@@ -48315,27 +48218,7 @@ function _notifyOnwayDemotions(syncResult){
 }
 
 function drawTripMode(){
-  // PD.66h (architectural): trip view doesn't render drafts. Drafts
-  // belong in the Discovery picker. Without this guard, a tripChange
-  // event fired by MaxDB.trip.writeRaw (sync's pullAll path, or
-  // localLoad after selectTrip) re-runs drawTripMode AFTER enterApp's
-  // _pmDraftRestore has already opened the picker, overlaying the
-  // empty trip view on top. Refusing to render here makes drawTripMode
-  // draft-aware in the same way enterApp is.
-  if (trip && trip.brief && trip.brief._isDraft) {
-    if (typeof _pmDraftRestore === "function") {
-      try {
-        if (_pmDraftRestore()) return;
-      } catch (e) {
-        console.warn("[Max draft] restore from drawTripMode failed:", e && e.message);
-      }
-    }
-    // If restore isn't available or failed, still bail — the user has
-    // a draft and shouldn't see an empty trip view. Surface a small
-    // message so they're not stuck on a blank screen.
-    console.warn("[Max draft] drawTripMode bailed on draft trip without restore");
-    return;
-  }
+  if (typeof _recordScreen === "function") _recordScreen("trip");
   // v360.1: capture scroll position BEFORE we clobber lp-content.
   // The renderer used to unconditionally jump back to the top on
   // every re-render — which meant clicking any inline expand/collapse
@@ -50488,6 +50371,7 @@ async function suggestRestaurants(destId,dayId,slot,btn){
 
 // ── Destination mode renderer ──────────────────────────────
 function drawDestMode(destId){
+  if (typeof _recordScreen === "function" && typeof arguments[0] !== "undefined") _recordScreen("dest:" + arguments[0]);
   // Round ED: only scroll to top when the user is ARRIVING at this
   // destination view — coming from trip view, switching to a different
   // dest, etc. When drawDestMode is called as a re-render (same dest,
