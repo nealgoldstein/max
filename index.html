@@ -22265,6 +22265,7 @@ function _pmOpenTripResearchCard(){
       bindTodos();
       bindNotesBlurRefresh();
       bindMakeDests();
+      bindClipper();
     };
     ov.querySelectorAll(".pm-trc-del-link").forEach(function(btn){
       btn.onclick = function(){
@@ -22280,6 +22281,7 @@ function _pmOpenTripResearchCard(){
         bindDictation();
         bindTodos();
         bindNotesBlurRefresh();
+        bindClipper();
       };
     });
   }
@@ -22287,6 +22289,16 @@ function _pmOpenTripResearchCard(){
     // PD.33: target the first doc body editor (multi-doc means there's no
     // single "the notes" element; dictation appends to the first one).
     _pmAttachDictation(ov.querySelector("#pm-trc-dictate"), ov.querySelector(".pm-rt-editor"));
+  }
+  // PD.85: clipper bookmarklet setup. Lives next to "Source links"
+  // because that's what the clipper produces — a new source link on
+  // the active trip. Re-binds on every re-render (link add/delete,
+  // doc edit) since the button gets rewritten with renderBody().
+  function bindClipper(){
+    var clipBtn = ov.querySelector("#pm-trc-clipper");
+    if (clipBtn && typeof _pmShowClipperSetup === "function") {
+      clipBtn.onclick = function(e){ e.stopPropagation(); _pmShowClipperSetup(); };
+    }
   }
   function bindTodos(){
     // PD.33: legacy [ ] checkbox auto-parser, no-op with rich-text bodies.
@@ -22375,6 +22387,7 @@ function _pmOpenTripResearchCard(){
         bindTodos();
         bindNotesBlurRefresh();
         bindMakeDests();
+        bindClipper();
       }
       });
     });
@@ -22384,6 +22397,7 @@ function _pmOpenTripResearchCard(){
   bindTodos();
   bindNotesBlurRefresh();
   bindMakeDests();
+  bindClipper();
 }
 
 // v359.55.3: per-place research metadata. The picker is becoming a
