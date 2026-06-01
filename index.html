@@ -21093,6 +21093,17 @@ function _initialTripSave(){
 
 function _recordScreen(name){
   if (!trip) return;
+  // PD.73d (architectural): drawTripMode / drawDestMode re-run on
+  // tripChange events from background writes (sync pulls, localSave
+  // tripWritten emissions). If the picker overlay is actually on top,
+  // a "trip" or "dest:ID" stamp is wrong — the user is in the picker.
+  // Skip the stamp when the picker is visibly active.
+  if (name === "trip" || (name && name.indexOf("dest:") === 0)) {
+    var pov = document.getElementById("trip-brief-overlay");
+    if (pov && pov.style.display && pov.style.display !== "none") return;
+    var cov = document.getElementById("candidate-explorer-overlay");
+    if (cov && cov.style.display && cov.style.display !== "none") return;
+  }
   if (trip._lastScreen === name) return;  // no-op
   trip._lastScreen = name;
   if (typeof localSave === "function") {
