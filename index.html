@@ -55527,6 +55527,16 @@ function editTripName(clickedBlock){
     block = document.querySelector(".trip-name-block");
   }
   if (!block) return;
+  // PD.73h (architectural): re-entry guard. The block's onclick fires
+  // on EVERY click inside it — including clicks on the rename input
+  // (to reposition the cursor mid-edit). Without this guard, each
+  // re-click inserts a fresh input next to the previous one, creating
+  // the "duplicate name" the user sees. Just refocus the existing input.
+  var _existingInp = block.querySelector("input.trip-name-inp");
+  if (_existingInp) {
+    try { _existingInp.focus(); } catch(_){}
+    return;
+  }
   // Find the name span inside this block. Prefer #trip-name-display
   // for back-compat with the static chrome; otherwise grab the first
   // span that isn't the .trip-name-edit pencil affordance.
