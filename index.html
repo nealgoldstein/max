@@ -55539,6 +55539,19 @@ function editTripName(clickedBlock){
   inp.style.cssText="font-size:13px;font-weight:600;color:#222;background:transparent;border:none;border-bottom:1px solid #999;outline:none;font-family:inherit;width:100%;display:block;padding:0;";
   span.style.display="none";
   if (pencil) pencil.style.display = "none";
+  // PD.73e: hide any other .trip-name-block on the page while editing.
+  // The picker chrome and the static trip-view header each render one,
+  // and they can both be visible simultaneously when the picker is on
+  // top of the app shell — leading to "two names, one's an input"
+  // confusion. Stash original display so we can restore on save/cancel.
+  var _hiddenOthers = [];
+  try {
+    document.querySelectorAll(".trip-name-block").forEach(function(other){
+      if (other === block) return;
+      _hiddenOthers.push({ el: other, display: other.style.display });
+      other.style.display = "none";
+    });
+  } catch(_){}
   span.parentNode.insertBefore(inp, span);
   inp.focus(); inp.select();
   var saved = false;
@@ -55550,6 +55563,10 @@ function editTripName(clickedBlock){
     span.style.display=savedDisplay;
     if (pencil) pencil.style.display = savedPencilDisplay;
     if (inp.parentNode) inp.parentNode.removeChild(inp);
+    // PD.73e: restore the other name-blocks we hid on edit-open.
+    try {
+      _hiddenOthers.forEach(function(o){ o.el.style.display = o.display || ""; });
+    } catch(_){}
     // Mirror the new name into any OTHER trip-name spans on the page
     // (e.g. the static header span while the picker chrome is active,
     // or vice versa) so reopening the other surface doesn't show stale.
