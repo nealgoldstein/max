@@ -21011,10 +21011,17 @@ function _initialTripSave(){
     var newId = "trip-" + Date.now();
     if (typeof window.trip === "undefined" || !window.trip) window.trip = {};
     trip.id = newId;
-    trip.name = (_tb.name && _tb.name.trim())
+    // PD.73c: trip name always reads as "<destination> — <creation date>".
+    // The destination prefix is _tb.region (best) or "Untitled" (no
+    // destination known yet). The date is fixed at mint time so a trip
+    // started today stays "Iceland — May 31, 2026" regardless of when
+    // the user opens it later.
+    var _initDate = new Date().toLocaleDateString("en-US", {month:"short", day:"numeric", year:"numeric"});
+    var _initPlace = (_tb.name && _tb.name.trim())
       || (_tb.region && _tb.region.trim())
       || (_tb.placeName && _tb.placeName.trim())
-      || ("Untitled — " + new Date().toLocaleDateString("en-US", {month:"short", day:"numeric", year:"numeric"}));
+      || "Untitled";
+    trip.name = _initPlace + " — " + _initDate;
     trip.destinations = trip.destinations || [];
     trip.brief = trip.brief || {};
     trip.brief.region = trip.brief.region || _tb.region || "";
@@ -21056,11 +21063,20 @@ function _initialTripSave(){
     trip.brief = trip.brief || {};
     trip.brief.region = _tb.region || trip.brief.region || "";
     trip.brief.sentence = _tb.sentence || trip.brief.sentence || "";
-    // Refresh the display name if a better one is now available.
-    var fresh = (_tb.name && _tb.name.trim())
+    // Refresh the display name if a better one is now available — but
+    // preserve the original "— DATE" suffix from initial mint. If the
+    // user has manually renamed (their custom name doesn't end in the
+    // pattern "— Mon D, YYYY"), don't overwrite their choice.
+    var freshPlace = (_tb.name && _tb.name.trim())
       || (_tb.region && _tb.region.trim())
       || (_tb.placeName && _tb.placeName.trim());
-    if (fresh && fresh !== trip.name) {
+    var dateSuffix = "";
+    var m = trip.name && trip.name.match(/ — ([A-Z][a-z]+ \d+, \d{4})$/);
+    if (m) dateSuffix = " — " + m[1];
+    var fresh = freshPlace ? (freshPlace + dateSuffix) : null;
+    // Only update when (a) we have a place to set, AND (b) the existing
+    // name still has the date suffix (so the user hasn't renamed it).
+    if (fresh && fresh !== trip.name && m) {
       trip.name = fresh;
       try {
         if (typeof MaxDB !== "undefined" && MaxDB.index && MaxDB.index.entry && MaxDB.index.upsert) {
