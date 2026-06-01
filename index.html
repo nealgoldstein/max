@@ -7607,6 +7607,16 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
   if (typeof saveTripsIndex === "function") saveTripsIndex();
   if (typeof localSave === "function") localSave();
 
+  // PD.105: stamp _lastScreen=picker BEFORE enterApp + render so a
+  // hard reset during the picker session (or any reload before the
+  // user commits) lands back on Discovery, not on the empty trip
+  // stub. Without this, _restoreLastScreen had no signal to read
+  // and fell through to drawTripMode — which showed the user the
+  // bare "Destinations: No destinations yet" page.
+  try {
+    if (typeof trip !== "undefined" && trip) trip._lastScreen = "picker";
+    if (typeof localSave === "function") localSave();
+  } catch(_){}
   // enterApp so closing/canceling the picker drops the user onto a
   // mounted trip view (showing the empty stub) instead of the bare
   // home screen. The picker overlay is position:fixed inset:0, so
@@ -7623,6 +7633,11 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
     // (now that enterApp() switched panels) doesn't hide the overlay.
     document.body.appendChild(briefOv);
   }
+  // PD.105: explicitly show the overlay. renderActivityPicker writes
+  // its DOM into the overlay but doesn't always set display:block —
+  // some legacy paths left the overlay display:none from a previous
+  // close, and the user got dumped on the trip view underneath.
+  if (briefOv) briefOv.style.display = "block";
   if (typeof renderActivityPicker === "function") {
     renderActivityPicker();
   }
