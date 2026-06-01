@@ -139,9 +139,23 @@
   // "Saint-Moritz" and "st moritz" all normalize identically.
   function _normPlaceName(s) {
     if (!s) return '';
+    // PD.90 (architectural root cause): NFD doesn't decompose
+    // Icelandic ð (eth) or þ (thorn) — they're not pre-composed
+    // diacritics, they're their own letters in Icelandic. So
+    // "Egilsstaðir" stayed "egilsstaðir" while the LLM happily
+    // returned "Egilsstadir" (Anglicized) — the two never matched.
+    // Same story for æ and ø in Nordic names. Substitute explicitly
+    // BEFORE the NFD pass so every spelling collapses to one form.
+    // This is the bug that drove 6+ rounds of patching downstream
+    // propagation logic. _searchNormalize had the right idea (it
+    // already does these substitutions); _normPlaceName didn't.
     return String(s)
       .toLowerCase()
-      .normalize('NFD').replace(/[̀-ͯ]/g, '') // strip diacritics
+      .replace(/þ/g, 'th')
+      .replace(/æ/g, 'ae')
+      .replace(/ð/g, 'd')
+      .replace(/ø/g, 'o')
+      .normalize('NFD').replace(/[̀-ͯ]/g, '') // strip remaining diacritics
       .replace(/\bsaint\b/g, 'st')                       // saint → st
       .replace(/\bst\.?\s+/g, 'st ')                     // st. / st  → st
       .replace(/[^\w\s]/g, ' ')                          // punct → space
