@@ -16843,6 +16843,7 @@ function _renderPlaceActivityItems(){
           +       '<div class="tb-act-name" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;flex:1;min-width:0;">'
           +         '<span>' + _placeArg + '</span>'
           +         _pmRoleIndicatorHtml(d.place)
+          +         _pmOnUserListedBadgeHtml(d.place)
           +         (pInfo.kept ? stayChip : maybeBadge)
           +         (pInfo.kept ? dtBadge : '')
           +       '</div>'
@@ -17361,6 +17362,7 @@ function _renderPlaceActivityItems(){
         + '<div class="tb-act-name" style="font-size:14px;font-weight:700;color:#111;line-height:1.25;flex:1;min-width:0;white-space:nowrap;overflow:visible;display:flex;align-items:center;gap:6px;" title="' + _pmEsc(d.place) + '">'
         +   '<span>' + _pmEsc(d.place) + '</span>'
         +   _pmRoleIndicatorHtml(d.place)
+        +   _pmOnUserListedBadgeHtml(d.place)
         + '</div>'
         + '<span class="pm-row-menu-wrap">'
         +   '<button type="button" class="pm-row-menu-btn" onclick="_pmToggleRowMenu(this);event.stopPropagation();" title="More options">⋯</button>'
@@ -17910,6 +17912,30 @@ if (typeof globalThis !== "undefined") globalThis._pmRoleForCheck = _pmRoleForCh
 // Click routes through _pmTogglePlaceStay (which goes through
 // MaxRoleWriter), so the place row checkbox, map pin, popup, and
 // ⋯ menu label all update together.
+// PD.104: small badge marking places that came from the user's
+// paste-list, so the picker visually distinguishes "you listed this"
+// from "Max suggested this." Reads _tb._userListedNames (the durable
+// source of truth from PD.89/91/92), so the badge survives reopens,
+// reloads, and sync. Empty string for LLM-added places — no badge
+// means "Max added this."
+function _pmOnUserListedBadgeHtml(placeName){
+  if (!placeName) return "";
+  try {
+    if (typeof _tb === "undefined" || !_tb || !_tb._userListedNames) return "";
+    var nrm = (typeof _normPlaceName === "function")
+      ? _normPlaceName
+      : function(s){ return String(s||"").toLowerCase(); };
+    var role = _tb._userListedNames[nrm(placeName)];
+    if (!role) return "";
+    var label = role === "stay" ? "On your list (stay)" : "On your list";
+    return '<span title="' + label + ' — you pasted this place" '
+      + 'style="display:inline-flex;align-items:center;font-size:9.5px;font-weight:700;color:#5b3f8f;background:#f3eefa;border:1px solid #ddd0f0;border-radius:4px;padding:1px 6px;letter-spacing:.03em;text-transform:uppercase;">'
+      + '★ Your list'
+      + '</span>';
+  } catch(_){ return ""; }
+}
+if (typeof globalThis !== "undefined") globalThis._pmOnUserListedBadgeHtml = _pmOnUserListedBadgeHtml;
+
 function _pmRoleIndicatorHtml(placeName){
   if (!placeName) return "";
   var nameSafe = String(placeName).replace(/'/g, "\\'").replace(/"/g, "&quot;");
