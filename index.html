@@ -13314,6 +13314,8 @@ function showAboutMax(){
   // not competing with the home page's primary actions.
   txt.textContent = "A note on what Max can and can't do.\n\n"
     + "Max gathers; you evaluate, edit, and add. Max's picture is partial — it can't know everything, and won't always be right about what it does know. Trip planning is yours: the choices, responsibility, and judgment stay with you. Verify times, prices, and availability before you commit.\n\n"
+    + "A note on where Max works best.\n\n"
+    + "Max has been tested most against regions in the Latin-alphabet world (Western Europe, the Nordics, the Americas). It handles non-English place spellings — Egilsstaðir, Jökulsárlón, Sankt Moritz — by normalizing accented and special characters before matching. Regions written in non-Latin scripts (Greek, Cyrillic, Arabic, Devanagari, Chinese, Japanese, Korean, Thai) are not yet supported for paste-list matching; the place names will appear but your stay/see intent may not propagate cleanly. If you're traveling somewhere written in a non-Latin script, expect to do more manual checking, and tell us where things break.\n\n"
     + "―\n\n"
     + MAX_ABOUT_TEXT;
   // v360.3 (#104): the overlay is authored inside #home-screen in the
@@ -15631,7 +15633,13 @@ function _reconcileUserListedKeeps(){
       _tb.candidates.forEach(function(c){
         if (!c || !c._required || !c.place) return;
         var nrm0 = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){return String(s||"").toLowerCase();};
-        var k = nrm0(c.place);
+        // PD.93: split off the country tail before normalizing so a
+        // pre-PD.83a candidate stored as "Selfoss, Iceland" produces
+        // the key "selfoss" — same as post-PD.83a trips. Otherwise
+        // backfill produces "selfoss iceland" keys that mismatch
+        // the rest of the system.
+        var bare = String(c.place).split(/\s*,\s*/)[0].trim() || c.place;
+        var k = nrm0(bare);
         if (!k) return;
         var role = (c.role === "stay" || c.overnight === true) ? "stay" : "see";
         derived = derived || {};
@@ -15668,34 +15676,68 @@ function _reconcileUserListedKeeps(){
   // trip, _tb.placeActivities is rehydrated from the persisted snapshot
   // — which may not have the synthetic section — and "Hike to
   // waterfalls" appears first. Re-derive at render time from the
-  // durable _userListedNames source of truth. Same pattern as the
-  // _keep reconciliation: stop trusting one-shot creation, derive
-  // each render from authoritative state.
+  // durable _userListedNames source of truth.
   (function _ensureSyntheticStaysSection(){
-    var listedStayNames = Object.keys(listed).filter(function(k){ return listed[k] === "stay"; });
-    if (!listedStayNames.length) return;
+    var listedStayKeys = Object.keys(listed).filter(function(k){ return listed[k] === "stay"; });
+    if (!listedStayKeys.length) return;
     var existing = _tb.placeActivities.find(function(it){
       return it && /^recommended overnight stays$/i.test(String(it.section || ""));
     });
-    // Collect display names from candidates / placeActivities to use
-    // the user's spelling (not the lowercased key). Fall back to the
-    // key if nothing better is found.
-    var displayByKey = {};
-    function noteDisplay(name){
-      if (!name) return;
-      var k = nrm(name);
-      if (k && !displayByKey[k]) displayByKey[k] = name;
-    }
+    // PD.93: prefer the candidate object directly when picking a
+    // display name + country. Candidates carry the user's original
+    // spelling (or the LLM's echo), which is the closest thing to
+    // canonical we have. Fall back: title-case the key + strip a
+    // trailing country/region word that snuck into legacy data
+    // (e.g. "selfoss iceland" → "Selfoss").
+    var bestCandByKey = {};
+    var bestPlaceMetaByKey = {};
     if (Array.isArray(_tb.candidates)) {
-      _tb.candidates.forEach(function(c){ if (c) noteDisplay(c.place); });
+      _tb.candidates.forEach(function(c){
+        if (!c || !c.place) return;
+        var k = nrm(c.place);
+        if (!k) return;
+        // Strip a trailing country word from the candidate's own key
+        // when comparing — so a candidate with c.place="Selfoss"
+        // (key "selfoss") matches a listed key "selfoss iceland".
+        var alt = k.replace(/\s+(iceland|switzerland|nepal|france|italy|spain|germany|austria|norway|sweden|denmark|finland|portugal|greece|ireland|scotland|england|wales|japan|china|india|mexico|canada|brazil|argentina|chile|peru|morocco|egypt|kenya|turkey|usa|us|uk)$/, "");
+        if (!bestCandByKey[k]) bestCandByKey[k] = c;
+        if (alt !== k && !bestCandByKey[alt]) bestCandByKey[alt] = c;
+      });
     }
     _tb.placeActivities.forEach(function(it){
-      (it && it.requiredPlaces || []).forEach(function(p){ if (p) noteDisplay(p.place); });
+      (it && it.requiredPlaces || []).forEach(function(p){
+        if (!p || !p.place) return;
+        var k = nrm(p.place);
+        if (k && !bestPlaceMetaByKey[k]) bestPlaceMetaByKey[k] = p;
+      });
     });
-    var requiredPlaces = listedStayNames.map(function(k){
+    function _titleCase(s){
+      return String(s||"").split(/\s+/).map(function(w){
+        if (!w) return w;
+        return w.charAt(0).toUpperCase() + w.slice(1);
+      }).join(" ");
+    }
+    function _stripCountrySuffix(s){
+      return String(s||"").replace(/\s+(iceland|switzerland|nepal|france|italy|spain|germany|austria|norway|sweden|denmark|finland|portugal|greece|ireland|scotland|england|wales|japan|china|india|mexico|canada|brazil|argentina|chile|peru|morocco|egypt|kenya|turkey|usa|us|uk)$/i, "");
+    }
+    var requiredPlaces = listedStayKeys.map(function(k){
+      var cand = bestCandByKey[k];
+      var pmeta = bestPlaceMetaByKey[k];
+      var displayName, country;
+      if (cand) {
+        displayName = String(cand.place || "").split(/\s*,\s*/)[0].trim() || cand.place;
+        country = cand.country || "";
+      } else if (pmeta) {
+        displayName = String(pmeta.place || "").split(/\s*,\s*/)[0].trim() || pmeta.place;
+        country = pmeta.country || "";
+      } else {
+        // Last resort: title-case the key and strip the country word.
+        displayName = _titleCase(_stripCountrySuffix(k));
+        country = "";
+      }
       return {
-        place: displayByKey[k] || k,
-        country: "",
+        place: displayName,
+        country: country,
         _keep: !rejected[k],
         _rejected: !!rejected[k],
         nights: 0,
