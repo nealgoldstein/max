@@ -11147,8 +11147,23 @@ async function runCandidateSearch(requiredPlaces) {
   // and show results as each completes — so adding more required stops
   // doesn't increase the total wait time
   var reqNames = requiredPlaces.map(function(p){ return p.place+", "+p.country; }).join("; ");
-  var extraCount = Math.max(8, 12 - Math.min(requiredPlaces.length, 4));
+  // PD.108: scale extras with the size of the listed set, not flat.
+  // The old formula floored at 8 and didn't scale up — a 44-place
+  // list still only got 8 extras (~84% user-listed). New shape:
+  // floor 8, then 1 extra per 3 listed places, capped at 25 so a
+  // very long list doesn't blow up the prompt. 5 listed → 8 extras
+  // (unchanged), 30 listed → 10, 44 listed → 15, 75+ listed → 25.
+  var extraCount = Math.min(25, Math.max(8, Math.ceil(requiredPlaces.length / 3)));
   var skipList = requiredPlaces.map(function(p){ return p.place; }).join(", ");
+  // PD.109: comprehensive-list mode. When the user has named lots of
+  // places they've covered the major cities themselves; asking the
+  // LLM for "5 most significant cities" then forces it to invent
+  // marginal extras. Switch to enrichment shape — skip pCities and
+  // direct pThematic toward less-obvious places consistent with
+  // their pattern. Threshold tuned to ~15 — below that the user is
+  // still in "fill in" mode and wants generic gateways.
+  var _listedCount = requiredPlaces.length;
+  var _comprehensiveMode = _listedCount >= 15;
 
   // place-picker hero map (Step 8): if the user pre-flagged any
   // places as day trips on the place-picker, surface those as a
@@ -11190,8 +11205,13 @@ async function runCandidateSearch(requiredPlaces) {
   //   pCities: 4-6 major cities of the region a traveler would regret missing
   //   pThematic: places that fit the specific trip shape (the existing logic)
   // Together they feed into "Other places worth considering".
-  var cityCount = Math.min(5, Math.max(3, Math.ceil(extraCount / 2)));
-  var thematicCount = Math.max(5, extraCount - cityCount);
+  // PD.109: in comprehensive-list mode (user has named ≥15 places),
+  // skip pCities entirely — they've already covered the gateways —
+  // and route ALL extras into pThematic, which gets rewritten below
+  // to ask for "underrated places that fit your pattern" instead of
+  // "5 most significant cities". For shorter lists, keep the split.
+  var cityCount = _comprehensiveMode ? 0 : Math.min(5, Math.max(3, Math.ceil(extraCount / 2)));
+  var thematicCount = _comprehensiveMode ? extraCount : Math.max(5, extraCount - cityCount);
 
   // Round FN.F.2: single-sight identification by INFRASTRUCTURE.
   //
@@ -11275,6 +11295,23 @@ async function runCandidateSearch(requiredPlaces) {
     + 'Set widelyRecommended=true if this place appears on most standard itineraries for the region \u2014 a canonical destination \u2014 false otherwise. '
     + 'For this prompt (cities), singleSight is almost always false \u2014 cities have multiple things to see and do.';
 
+  // PD.109: pThematic shape switches based on mode.
+  // - Fill-in mode (default): "5 thematic destinations besides the
+  //   major cities" \u2014 pCities handles the gateways.
+  // - Comprehensive mode (listedCount \u2265 15): "N underrated places
+  //   that fit the shape of what they've already listed." The user
+  //   has covered the gateways themselves; the LLM's job here is
+  //   to add depth, not coverage. The "what's already listed" set
+  //   reveals their taste \u2014 Max should lean into it.
+  var pThematicHeader = _comprehensiveMode
+    ? ("\nThe traveler has named " + _listedCount + " places already (listed below). They have clearly done their homework \u2014 don't suggest the famous gateways they already covered. "
+      + "Read their list as a signal of taste: " + (_listedCount > 25 ? "deep, methodical, looking for completeness" : "thorough, looking for under-the-radar additions") + ". "
+      + "Add " + thematicCount + " more places that ride the same wavelength \u2014 less-obvious destinations a traveler making THIS list would also love. "
+      + "Think: 'if they listed Egilssta\u00f0ir and Akureyri, they'd also appreciate Borgarfj\u00f6r\u00f0ur Eystri.' "
+      + "Lean into the texture they're after \u2014 micro-themes, regional depth, places that earn their spot through specifics rather than fame.\n")
+    : ("\nList " + thematicCount + " additional destinations that specifically fit the shape of this trip \u2014 places that extend, enrich, or complement what the traveler described. "
+      + "These should NOT be the obvious major cities (those are handled separately). Focus on less obvious places that reward the kind of traveler this is: "
+      + "scenic towns, regional hubs, natural areas, places that deepen the trip's theme.\n");
   var pThematic = "You are a travel expert helping plan a trip to " + (_tb.region||"this region") + ".\n"
     + "Trip context: " + brief + "\n"
     + regionGuard
@@ -11284,9 +11321,7 @@ async function runCandidateSearch(requiredPlaces) {
     + releasedNote
     + dayTripNote
     + (skipList ? "These stops are already confirmed: " + skipList + ". Do NOT include them again.\n" : "")
-    + "\nList " + thematicCount + " additional destinations that specifically fit the shape of this trip \u2014 places that extend, enrich, or complement what the traveler described. "
-    + "These should NOT be the obvious major cities (those are handled separately). Focus on less obvious places that reward the kind of traveler this is: "
-    + "scenic towns, regional hubs, natural areas, places that deepen the trip's theme.\n"
+    + pThematicHeader
     + pStayConstraint
     + "BE SPECIFIC. Name things \u2014 the trail, the hut, the train, the dish, the view. Never hand-wave with 'spectacular scenery' or 'famous for trains' if you can say what specifically.\n"
     + "Return ONLY a JSON array of exactly " + thematicCount + " places (no markdown):\n"
@@ -11348,19 +11383,27 @@ async function runCandidateSearch(requiredPlaces) {
     }
   }
 
-  calls.push(callMax([{role:"user",content:pCities}], 1500, 45000).then(function(t){
-    var cands = JSON.parse(t.replace(/```json|```/g,"").trim());
-    cands.forEach(function(c){ c._required=false; c._requiredFor=[]; c._cityPick=true; });
-    // v359.60.23: drop any candidate that wandered outside the
-    // trip's region. The prompt's regionGuard tells the LLM to
-    // stay in-region; this is the backstop when it doesn't listen.
-    var beforeN = cands.length;
-    cands = cands.filter(_candInRegion);
-    if (cands.length < beforeN) {
-      console.warn("[Max picker] pCities: dropped " + (beforeN - cands.length) + " out-of-region candidate(s) for region: " + _tb.region);
-    }
-    return cands;
-  }).catch(function(e){ console.warn("Major-cities call failed:", e.message); return []; }));
+  // PD.109: only ask the LLM for major cities when we're not in
+  // comprehensive-list mode. If the user listed ≥15 places they've
+  // already covered the gateways; asking for "5 more major cities"
+  // just forces the LLM to invent marginal ones.
+  var citiesCallPushed = false;
+  if (cityCount > 0) {
+    citiesCallPushed = true;
+    calls.push(callMax([{role:"user",content:pCities}], 1500, 45000).then(function(t){
+      var cands = JSON.parse(t.replace(/```json|```/g,"").trim());
+      cands.forEach(function(c){ c._required=false; c._requiredFor=[]; c._cityPick=true; });
+      // v359.60.23: drop any candidate that wandered outside the
+      // trip's region. The prompt's regionGuard tells the LLM to
+      // stay in-region; this is the backstop when it doesn't listen.
+      var beforeN = cands.length;
+      cands = cands.filter(_candInRegion);
+      if (cands.length < beforeN) {
+        console.warn("[Max picker] pCities: dropped " + (beforeN - cands.length) + " out-of-region candidate(s) for region: " + _tb.region);
+      }
+      return cands;
+    }).catch(function(e){ console.warn("Major-cities call failed:", e.message); return []; }));
+  }
 
   calls.push(callMax([{role:"user",content:pThematic}], 2000, 45000).then(function(t){
     var cands = JSON.parse(t.replace(/```json|```/g,"").trim());
@@ -11374,17 +11417,76 @@ async function runCandidateSearch(requiredPlaces) {
     return cands;
   }).catch(function(){ return []; }));
 
+  // PD.110: per-place enrichment pass. For comprehensive lists (≥10
+  // places), run a parallel pass: for each batch of 8 listed places,
+  // ask the LLM for 1-2 nearby sights NOT already in the master list.
+  // Surfaces actual NEW places the user didn't think of — what the
+  // pCities/pThematic prompts can't do because they ask for region-
+  // level extras, not per-place enrichment. Adds ~6 LLM calls for a
+  // 44-place list, all running in parallel with existing batches so
+  // total latency is unchanged.
+  var enrichBatchCount = 0;
+  if (_listedCount >= 10) {
+    var _enrichMasterList = requiredPlaces.map(function(p){ return p.place; }).join(", ");
+    for (var ei = 0; ei < requiredPlaces.length; ei += BATCH) {
+      var eBatch = requiredPlaces.slice(ei, ei + BATCH);
+      var eBatchNames = eBatch.map(function(p){ return p.place; }).join("; ");
+      var pEnrich = "You are a travel expert helping a traveler enrich a " + (_tb.region||"trip") + " itinerary.\n"
+        + "Trip context: " + brief + "\n"
+        + regionGuard
+        + geoScopeHint
+        + "The traveler has named these " + _listedCount + " places already (the MASTER LIST):\n"
+        + _enrichMasterList + "\n\n"
+        + "For each of these " + eBatch.length + " places, suggest 1-2 NEARBY sights or activities (within ~50 km) that are NOT already in the master list:\n"
+        + eBatchNames + "\n\n"
+        + "Each suggestion must:\n"
+        + "  (a) be SPECIFIC — name the sight, what makes it worth visiting, NOT a generic 'scenic viewpoints nearby';\n"
+        + "  (b) actually be nearby the place it's tied to (under ~50 km driving);\n"
+        + "  (c) NOT duplicate anything in the master list (check carefully — the user already has those);\n"
+        + "  (d) NOT be a famous gateway city the traveler obviously knows about and chose to skip — focus on the under-the-radar.\n\n"
+        + pStayConstraint
+        + "Return ONLY a JSON array (no markdown):\n"
+        + '[{"place":"Sight or Town","country":"Country","near":"Listed place from the batch this is near","role":"sight","stayRange":"0 nights OR 1 night","singleSight":true,"whyItFits":"What makes it specifically worth a side trip — name the trail, the dish, the building, the view.","tradeoffs":"One honest downside.","tags":["tag1"],"otherAttractions":"","widelyRecommended":false,"lat":0.0,"lng":0.0}]\n'
+        + "Most suggestions will be singleSight=true (waterfalls, viewpoints, hot springs, ruins). For small towns with lodging set singleSight=false. Mix both freely.";
+      enrichBatchCount++;
+      calls.push(callMax([{role:"user",content:pEnrich}], 1600 + eBatch.length * 180, 50000).then(function(t){
+        var cleaned = t.replace(/```json|```/g, "").trim();
+        var cands;
+        try { cands = JSON.parse(cleaned); }
+        catch(parseErr) {
+          var last = cleaned.lastIndexOf("},");
+          if (last > 0) { try { cands = JSON.parse(cleaned.substring(0, last+1) + "]"); } catch(_) { return []; } }
+          else { return []; }
+        }
+        cands.forEach(function(c){
+          c._required = false;
+          c._requiredFor = [];
+          c._enrichedFrom = c.near || "";
+        });
+        // PD.110: region backstop (same as pCities/pThematic).
+        var beforeN = cands.length;
+        cands = cands.filter(_candInRegion);
+        if (cands.length < beforeN) {
+          console.warn("[Max picker] pEnrich: dropped " + (beforeN - cands.length) + " out-of-region candidate(s) for region: " + _tb.region);
+        }
+        return cands;
+      }).catch(function(e){ console.warn("[Max picker] enrich batch failed:", e.message); return []; }));
+    }
+  }
+
   try {
     var results = await Promise.allSettled(calls);
     var allCands = [];
     var p2Failed = false;
-    // Index layout with batched p1:
-    //   calls[0 .. p1BatchCount-1] = p1 batches
-    //   calls[p1BatchCount]        = pCities
-    //   calls[p1BatchCount+1]      = pThematic
+    // Index layout with batched p1 + optional cities + thematic + enrich:
+    //   calls[0 .. p1BatchCount-1]                  = p1 batches
+    //   calls[p1BatchCount]                         = pCities (if cityCount > 0)
+    //   calls[p1BatchCount + citiesOffset]          = pThematic
+    //   calls[p1BatchCount + citiesOffset + 1 ..]   = enrich batches
     var p1BatchCount = requiredPlaces.length > 0 ? Math.ceil(requiredPlaces.length / BATCH) : 0;
-    var citiesIdx = p1BatchCount;
-    var thematicIdx = p1BatchCount + 1;
+    var citiesOffset = citiesCallPushed ? 1 : 0;
+    var citiesIdx = citiesCallPushed ? p1BatchCount : -1;
+    var thematicIdx = p1BatchCount + citiesOffset;
     var p1AnyOk = false, citiesFailed = false, thematicFailed = false;
     results.forEach(function(r, i){
       var ok = r.status === "fulfilled" && r.value && r.value.length;
