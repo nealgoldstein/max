@@ -15696,7 +15696,20 @@ function _pickerSyntheticItemsFromTripDestinations(){
 function _reconcileUserListedKeeps(){
   if (typeof _tb === "undefined" || !_tb) return;
   if (!Array.isArray(_tb.placeActivities)) _tb.placeActivities = [];
+  // PD.107 (architectural): trip.brief._userListedNames is the
+  // source of truth; _tb._userListedNames is a cache. If the cache
+  // is empty (any picker-open path that didn't go through the
+  // rehydrate sites — Trip profile → Discovery, the trip-view
+  // "Open Discovery" menu, reopenPickerForEdit), pull directly
+  // from the trip. This means every render path gets correct
+  // behavior, regardless of how the picker was opened.
   var listed = _tb._userListedNames;
+  if ((!listed || !Object.keys(listed).length)
+      && typeof trip !== "undefined" && trip && trip.brief
+      && trip.brief._userListedNames
+      && Object.keys(trip.brief._userListedNames).length) {
+    listed = _tb._userListedNames = Object.assign({}, trip.brief._userListedNames);
+  }
   // PD.92 last-ditch backfill: trips minted before PD.92 don't have
   // _userListedNames persisted to trip.brief, and reopens can't get
   // it from tripMeta.notes either (also wasn't persisted). The user's
@@ -21840,6 +21853,36 @@ function _restoreLastScreen(){
     if (trip.brief) {
       _tb.region   = _tb.region   || trip.brief.region   || "";
       _tb.sentence = _tb.sentence || trip.brief.sentence || "";
+      // PD.106: rehydrate _userListedNames here too. Without this, the
+      // reconciliation pass at the top of the picker render had an
+      // empty source-of-truth map, fell through to its backfill, and
+      // (depending on candidate flags) could un-keep user-listed
+      // places. Match the same shape used in the other rehydrate sites
+      // (renderTripBrief + brief Step 1): direct hydrate if persisted,
+      // else re-parse tripMeta.notes.
+      if (trip.brief._userListedNames) {
+        _tb._userListedNames = Object.assign({}, trip.brief._userListedNames);
+      } else if (trip.brief.tripMeta && trip.brief.tripMeta.notes
+          && typeof parsePlacesList === "function") {
+        try {
+          var _bf = parsePlacesList(trip.brief.tripMeta.notes);
+          if (_bf && Array.isArray(_bf.destinations)) {
+            var _bfN = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){return String(s||"").toLowerCase();};
+            _tb._userListedNames = {};
+            _bf.destinations.forEach(function(p){
+              if (!p || !p.place) return;
+              var k = _bfN(p.place);
+              if (k) _tb._userListedNames[k] = p.isStay ? "stay" : "see";
+            });
+            trip.brief._userListedNames = Object.assign({}, _tb._userListedNames);
+          }
+        } catch(_){}
+      }
+      // Also rehydrate tripMeta so the Discovery notes modal opens
+      // populated and the backfill above can run again on next reload.
+      if (trip.brief.tripMeta && !_tb.tripMeta) {
+        _tb.tripMeta = Object.assign({ notes: "", links: [] }, trip.brief.tripMeta);
+      }
     }
     if (typeof renderActivityPicker === "function") {
       var ov = document.getElementById("trip-brief-overlay");
