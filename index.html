@@ -15617,6 +15617,37 @@ function _reconcileUserListedKeeps(){
   if (typeof _tb === "undefined" || !_tb) return;
   if (!Array.isArray(_tb.placeActivities)) _tb.placeActivities = [];
   var listed = _tb._userListedNames;
+  // PD.92 last-ditch backfill: trips minted before PD.92 don't have
+  // _userListedNames persisted to trip.brief, and reopens can't get
+  // it from tripMeta.notes either (also wasn't persisted). The user's
+  // paste-list places are still recoverable from trip.candidates —
+  // every candidate with _required:true came from the user's
+  // must-haves list. Map their normalized name → role and feed that
+  // to the reconciliation. Persist back to trip.brief so this only
+  // happens once per existing trip.
+  if (!listed || !Object.keys(listed).length) {
+    var derived = null;
+    if (Array.isArray(_tb.candidates)) {
+      _tb.candidates.forEach(function(c){
+        if (!c || !c._required || !c.place) return;
+        var nrm0 = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){return String(s||"").toLowerCase();};
+        var k = nrm0(c.place);
+        if (!k) return;
+        var role = (c.role === "stay" || c.overnight === true) ? "stay" : "see";
+        derived = derived || {};
+        derived[k] = role;
+      });
+    }
+    if (derived) {
+      listed = derived;
+      _tb._userListedNames = derived;
+      try {
+        if (typeof trip !== "undefined" && trip && trip.brief) {
+          trip.brief._userListedNames = Object.assign({}, derived);
+        }
+      } catch(_){}
+    }
+  }
   if (!listed) return;
   var nrm = (typeof _normPlaceName === "function")
     ? _normPlaceName
@@ -21539,6 +21570,23 @@ function _initialTripSave(){
     trip.brief = trip.brief || {};
     trip.brief.region = trip.brief.region || _tb.region || "";
     trip.brief.sentence = trip.brief.sentence || _tb.sentence || "";
+    // PD.92 (architectural root cause of 7+ rounds): persist the
+    // paste-list metadata. Without this, _tb._userListedNames and
+    // _tb.tripMeta lived only in the in-memory _tb scratch and never
+    // made it onto trip.brief — so on reload, the backfill logic had
+    // nothing to read and gray pins persisted. These two fields are
+    // the source of truth for "what did the user actually paste";
+    // they must travel with the trip.
+    if (_tb._userListedNames) {
+      trip.brief._userListedNames = Object.assign({}, _tb._userListedNames);
+    }
+    if (_tb.tripMeta) {
+      trip.brief.tripMeta = trip.brief.tripMeta || {};
+      if (_tb.tripMeta.notes && !trip.brief.tripMeta.notes) trip.brief.tripMeta.notes = _tb.tripMeta.notes;
+      if (Array.isArray(_tb.tripMeta.links) && !Array.isArray(trip.brief.tripMeta.links)) {
+        trip.brief.tripMeta.links = _tb.tripMeta.links.slice();
+      }
+    }
     trip.candidates = (_tb.candidates || []).slice();
     trip.placeActivities = (_tb.placeActivities || []).slice();
     _currentTripId = newId;
@@ -21576,6 +21624,15 @@ function _initialTripSave(){
     trip.brief = trip.brief || {};
     trip.brief.region = _tb.region || trip.brief.region || "";
     trip.brief.sentence = _tb.sentence || trip.brief.sentence || "";
+    // PD.92: keep _userListedNames + tripMeta in sync on every save.
+    if (_tb._userListedNames) {
+      trip.brief._userListedNames = Object.assign({}, _tb._userListedNames);
+    }
+    if (_tb.tripMeta) {
+      trip.brief.tripMeta = trip.brief.tripMeta || {};
+      if (_tb.tripMeta.notes) trip.brief.tripMeta.notes = _tb.tripMeta.notes;
+      if (Array.isArray(_tb.tripMeta.links)) trip.brief.tripMeta.links = _tb.tripMeta.links.slice();
+    }
     // Refresh the display name if a better one is now available — but
     // preserve the original "— DATE" suffix from initial mint. If the
     // user has manually renamed (their custom name doesn't end in the
