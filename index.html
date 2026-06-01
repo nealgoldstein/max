@@ -5201,11 +5201,15 @@ function cleanupOrphanedTrips(){
         try {
           var parsed = JSON.parse(localStorage.getItem(k));
           var t = parsed && parsed.trip;
-          // PD.73: a trip with neither destinations nor candidates is a
-          // mint-then-abandon (no LLM completion was reached, so no first
-          // save fired). Safe to reclaim.
+          // PD.73: a trip with no destinations AND no candidates AND no
+          // placeActivities is a mint-then-abandon. placeActivities is
+          // populated by the FIRST half of Discovery (must-dos LLM call);
+          // candidates by the SECOND half. A trip caught mid-flow has
+          // placeActivities but not candidates — that's substance and
+          // must not be wiped.
           if (t && (!t.destinations || t.destinations.length === 0)
-                && (!t.candidates || t.candidates.length === 0)) {
+                && (!t.candidates || t.candidates.length === 0)
+                && (!t.placeActivities || t.placeActivities.length === 0)) {
             isEmpty = true;
             emptyShells++;
           }

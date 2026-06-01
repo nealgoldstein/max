@@ -430,11 +430,14 @@
           try {
             var parsed = JSON.parse(localStorage.getItem(k));
             var t = parsed && parsed.trip;
-            // PD.73: candidates populate at first-save (LLM completion).
-            // A trip with neither destinations nor candidates is a
-            // mint-then-abandon — safe to reclaim.
+            // PD.73: a trip is "empty shell" only if it has no
+            // destinations, no candidates, AND no placeActivities.
+            // placeActivities is set by the first LLM call (must-dos)
+            // before candidates arrive — leaving it out of this check
+            // would wipe trips caught mid-flow.
             if (t && (!t.destinations || t.destinations.length === 0)
-                  && (!t.candidates   || t.candidates.length === 0)) {
+                  && (!t.candidates   || t.candidates.length === 0)
+                  && (!t.placeActivities || t.placeActivities.length === 0)) {
               isEmpty = true;
               emptyShells++;
             }
