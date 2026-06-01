@@ -21394,16 +21394,25 @@ function _initialTripSave(){
 
 function _recordScreen(name){
   if (!trip) return;
-  // PD.73d (architectural): drawTripMode / drawDestMode re-run on
+  // PD.73d/i (architectural): drawTripMode / drawDestMode re-run on
   // tripChange events from background writes (sync pulls, localSave
-  // tripWritten emissions). If the picker overlay is actually on top,
-  // a "trip" or "dest:ID" stamp is wrong — the user is in the picker.
-  // Skip the stamp when the picker is visibly active.
+  // tripWritten emissions). The user may NOT be on trip/dest at that
+  // moment — they could be in the picker overlay (PD.73d) or back on
+  // the home screen (PD.73i, this fix). In either case the bg render
+  // is invisible to the user and must not stamp _lastScreen — doing
+  // so would mis-route their next re-open.
   if (name === "trip" || (name && name.indexOf("dest:") === 0)) {
     var pov = document.getElementById("trip-brief-overlay");
     if (pov && pov.style.display && pov.style.display !== "none") return;
     var cov = document.getElementById("candidate-explorer-overlay");
     if (cov && cov.style.display && cov.style.display !== "none") return;
+    // PD.73i: also skip when the home screen is showing — the user is
+    // looking at the trips list, NOT the trip view, even if some bg
+    // event triggered drawTripMode.
+    var hs = document.getElementById("home-screen");
+    if (hs && hs.style.display && hs.style.display !== "none") return;
+    var app = document.getElementById("app");
+    if (app && app.style.display === "none") return;
   }
   if (trip._lastScreen === name) return;  // no-op
   trip._lastScreen = name;
