@@ -15615,7 +15615,7 @@ function _pickerSyntheticItemsFromTripDestinations(){
 // does to _keep, listed places always read as kept.
 function _reconcileUserListedKeeps(){
   if (typeof _tb === "undefined" || !_tb) return;
-  if (!Array.isArray(_tb.placeActivities)) return;
+  if (!Array.isArray(_tb.placeActivities)) _tb.placeActivities = [];
   var listed = _tb._userListedNames;
   if (!listed) return;
   var nrm = (typeof _normPlaceName === "function")
@@ -15631,6 +15631,61 @@ function _reconcileUserListedKeeps(){
       }
     });
   }
+  // PD.91 (architectural): ensure the synthetic "Recommended overnight
+  // stays" section exists if the user listed any stays. Was only ever
+  // built once, at LLM-completion time (PD.75). On reopen of a saved
+  // trip, _tb.placeActivities is rehydrated from the persisted snapshot
+  // — which may not have the synthetic section — and "Hike to
+  // waterfalls" appears first. Re-derive at render time from the
+  // durable _userListedNames source of truth. Same pattern as the
+  // _keep reconciliation: stop trusting one-shot creation, derive
+  // each render from authoritative state.
+  (function _ensureSyntheticStaysSection(){
+    var listedStayNames = Object.keys(listed).filter(function(k){ return listed[k] === "stay"; });
+    if (!listedStayNames.length) return;
+    var existing = _tb.placeActivities.find(function(it){
+      return it && /^recommended overnight stays$/i.test(String(it.section || ""));
+    });
+    // Collect display names from candidates / placeActivities to use
+    // the user's spelling (not the lowercased key). Fall back to the
+    // key if nothing better is found.
+    var displayByKey = {};
+    function noteDisplay(name){
+      if (!name) return;
+      var k = nrm(name);
+      if (k && !displayByKey[k]) displayByKey[k] = name;
+    }
+    if (Array.isArray(_tb.candidates)) {
+      _tb.candidates.forEach(function(c){ if (c) noteDisplay(c.place); });
+    }
+    _tb.placeActivities.forEach(function(it){
+      (it && it.requiredPlaces || []).forEach(function(p){ if (p) noteDisplay(p.place); });
+    });
+    var requiredPlaces = listedStayNames.map(function(k){
+      return {
+        place: displayByKey[k] || k,
+        country: "",
+        _keep: !rejected[k],
+        _rejected: !!rejected[k],
+        nights: 0,
+        overnight: true
+      };
+    });
+    if (existing) {
+      existing.requiredPlaces = requiredPlaces;
+      existing.checked = true;
+    } else {
+      _tb.placeActivities.unshift({
+        id: "synth-overnight-stays",
+        section: "Recommended overnight stays",
+        name: "Places to stay overnight",
+        type: "synthetic-stays",
+        description: "Cities and towns you flagged as overnight stays. These anchor the trip's geography — they're where you sleep and the bases for day trips.",
+        checked: true,
+        requiredPlaces: requiredPlaces
+      });
+    }
+  })();
   _tb.placeActivities.forEach(function(item){
     if (!item || !Array.isArray(item.requiredPlaces)) return;
     item.requiredPlaces.forEach(function(p){
@@ -25086,15 +25141,28 @@ function _renderPlacePickerMap(targetId){
         var recoLabel = isStay ? "stay overnight" : "just visit";
         var flipLabel = isStay ? "Just visiting"  : "Stay overnight";
         var _candForLabel = null;
+        var _listedRole = null;
         try {
-          if (window._tb && Array.isArray(window._tb.candidates) && typeof _pmMetaKey === "function") {
+          if (window._tb && typeof _pmMetaKey === "function") {
             var _kForLabel = _pmMetaKey(placeName);
-            _candForLabel = window._tb.candidates.find(function(c){
-              return c && c.place && _pmMetaKey(c.place) === _kForLabel;
-            });
+            if (window._tb._userListedNames && window._tb._userListedNames[_kForLabel]) {
+              _listedRole = window._tb._userListedNames[_kForLabel];
+            }
+            if (Array.isArray(window._tb.candidates)) {
+              _candForLabel = window._tb.candidates.find(function(c){
+                return c && c.place && _pmMetaKey(c.place) === _kForLabel;
+              });
+            }
           }
         } catch(_){}
-        var _isUserCommitted = !!(_candForLabel && _candForLabel._roleTouched === true);
+        // PD.91: the user-listed names are the source of truth for
+        // "you selected this." Touch state on the candidate may not
+        // have stamped correctly on every code path (LLM name
+        // variants, paste-list flows that bypass MaxRoleWriter), but
+        // the listed map is canonical — if the place is on the list,
+        // the user selected it. Period.
+        var _isUserCommitted = !!_listedRole
+          || !!(_candForLabel && _candForLabel._roleTouched === true);
         var prefixLabel = _isUserCommitted ? "You selected" : "Max suggests";
         // Round PD.26: history line shows whenever the user has
         // committed, regardless of whether their choice agrees with
@@ -29893,8 +29961,28 @@ function reopenCandidateExplorer(){
     _tb.familiarity = trip.brief.familiarity || _tb.familiarity || "";
     // PD.89: rehydrate the user-listed names so the render-time
     // reconciliation keeps working after a reload / picker reopen.
+    // PD.91 backfill: trips created before PD.89 don't have
+    // _userListedNames stashed. Re-derive from the original paste
+    // text (stashed on tripMeta.notes by the paste-list flow) so
+    // existing trips also get the source-of-truth treatment.
     if (trip.brief._userListedNames) {
       _tb._userListedNames = Object.assign({}, trip.brief._userListedNames);
+    } else if (trip.brief.tripMeta && trip.brief.tripMeta.notes
+        && typeof parsePlacesList === "function") {
+      try {
+        var _backfill = parsePlacesList(trip.brief.tripMeta.notes);
+        if (_backfill && Array.isArray(_backfill.destinations)) {
+          var _bfNrm = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){return String(s||"").toLowerCase();};
+          _tb._userListedNames = {};
+          _backfill.destinations.forEach(function(p){
+            if (!p || !p.place) return;
+            var k = _bfNrm(p.place);
+            if (k) _tb._userListedNames[k] = p.isStay ? "stay" : "see";
+          });
+          // Persist for future reopens so we don't re-parse every time.
+          trip.brief._userListedNames = Object.assign({}, _tb._userListedNames);
+        }
+      } catch(_){}
     }
   }
   // Rehydrate must-dos so reject-cascade and required-badges work
@@ -30009,8 +30097,24 @@ function reopenPickerForEdit(){
     _tb.startDate = trip.brief.startDate || _tb.startDate || "";
     _tb.endDate = trip.brief.endDate || _tb.endDate || "";
     // PD.89: rehydrate user-listed names (renderActivityPicker path).
+    // PD.91: backfill from tripMeta.notes for pre-PD.89 trips.
     if (trip.brief._userListedNames) {
       _tb._userListedNames = Object.assign({}, trip.brief._userListedNames);
+    } else if (trip.brief.tripMeta && trip.brief.tripMeta.notes
+        && typeof parsePlacesList === "function") {
+      try {
+        var _backfill2 = parsePlacesList(trip.brief.tripMeta.notes);
+        if (_backfill2 && Array.isArray(_backfill2.destinations)) {
+          var _bfNrm2 = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){return String(s||"").toLowerCase();};
+          _tb._userListedNames = {};
+          _backfill2.destinations.forEach(function(p){
+            if (!p || !p.place) return;
+            var k = _bfNrm2(p.place);
+            if (k) _tb._userListedNames[k] = p.isStay ? "stay" : "see";
+          });
+          trip.brief._userListedNames = Object.assign({}, _tb._userListedNames);
+        }
+      } catch(_){}
     }
     _tb.partyComposition = trip.brief.partyComposition || _tb.partyComposition || "";
     _tb.partySize = trip.brief.partySize || _tb.partySize || "";
