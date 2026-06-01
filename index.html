@@ -472,12 +472,13 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
    centering of the pills regardless of the side-column widths. Inside the
    picker overlay this header is the first child and sits above the scrollable
    picker body (z-index:5 to stay over any sibling that might overlap). */
-/* PD.73f': when the picker overlay is open, hide #app entirely so its
-   trip-view chrome (left header, lp-content body) can't bleed through.
-   The picker overlay has its own opaque background but apparently
-   doesn't fully cover every pixel — different chrome (the trip name
-   inside lp-content) was still peeking past. Using visibility:hidden
-   instead of display:none preserves any layout dependencies. */
+/* PD.83c (architectural): the picker overlay is a true modal — when
+   it's active, the underlying #app is not part of the user's surface.
+   We pair this CSS rule with a runtime guard in drawTripMode /
+   drawDestMode that refuses to render while picker-active is set, so
+   stale chrome can never paint behind the picker. visibility:hidden
+   (rather than display:none) preserves any layout dependencies that
+   query #app's geometry while the overlay is up. */
 body.picker-active #app{visibility:hidden;}
 .lp-hdr-unified{
   display:grid;
@@ -7048,8 +7049,18 @@ function parsePlacesList(text) {
       if (hasDeparture && !out.exit) out.exit = item;
     }
 
+    // PD.83a (architectural): split "Place, Country" at parse time so
+    // downstream consumers get a clean city name in .place and an
+    // optional .country hint. Replaces PD.74b, which was splitting
+    // on lookup at the role-application site (a patch — the parser
+    // is the right place to canonicalize). User-typed
+    // "Egilsstaðir, Iceland" -> place="Egilsstaðir", country="Iceland".
+    var _pc = String(item).split(/\s*,\s*/);
+    var _placeOnly = _pc[0].trim();
+    var _countryOnly = (_pc.length > 1) ? _pc.slice(1).join(", ").trim() : "";
     out.destinations.push({
-      place: item,
+      place: _placeOnly,
+      country: _countryOnly,
       nights: nights,
       isStay: thisMode === "stay",
       intent: intent
@@ -7456,7 +7467,10 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
   // which are sights. Also stash a per-place role map on _tb so the
   // post-candidate pass can write the final role through MaxRoleWriter.
   var _ctxBits = parseResult.destinations.map(function(p){
-    var bits = [p.place];
+    // PD.83a: parser stores place + country separately. Recombine for
+    // the LLM prompt so it still gets scope ("Egilsstaðir, Iceland").
+    var _name = p.country ? (p.place + ", " + p.country) : p.place;
+    var bits = [_name];
     if (p.isStay) {
       if (p.nights > 0) bits.push("(overnight stay, " + p.nights + " night" + (p.nights === 1 ? "" : "s") + ")");
       else bits.push("(overnight stay)");
@@ -7467,22 +7481,17 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
     return "  • " + bits.join(" ");
   }).join("\n");
   // Stash user's role intent so post-LLM we can stamp MaxRoleWriter.
-  // PD.74b: normalize the key via _normPlaceName (strips diacritics,
-  // lowercases, canonicalizes) AND split off any ", Country" suffix
-  // the user typed. The LLM returns candidates without those suffixes,
-  // and the pre-fix lookup missed them (e.g. user pastes
-  // "Egilsstaðir, Iceland" but the candidate's place is "Egilsstaðir").
-  // Also keep the original display name so _pmEnsureCandidate can mint
-  // a stub with the user-facing form.
+  // PD.83a: parser already split off ", Country" at parse time, so
+  // p.place is the clean city name. Just normalize via _normPlaceName
+  // for diacritic-tolerant lookup against LLM-returned candidates.
   try {
     var nrmKey = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
     _tb._pastedRoles = {};
     parseResult.destinations.forEach(function(p){
       if (!p || !p.place) return;
-      var bare = String(p.place).split(/[,;]/)[0].trim();
-      var k = nrmKey(bare);
+      var k = nrmKey(p.place);
       if (!k) return;
-      _tb._pastedRoles[k] = { role: p.isStay ? "stay" : "see", displayName: bare };
+      _tb._pastedRoles[k] = { role: p.isStay ? "stay" : "see", displayName: p.place };
     });
   } catch(_){}
   // v359.60.28: stronger mandate — EVERY listed place must appear in
@@ -21414,26 +21423,12 @@ function _initialTripSave(){
 
 function _recordScreen(name){
   if (!trip) return;
-  // PD.73d/i (architectural): drawTripMode / drawDestMode re-run on
-  // tripChange events from background writes (sync pulls, localSave
-  // tripWritten emissions). The user may NOT be on trip/dest at that
-  // moment — they could be in the picker overlay (PD.73d) or back on
-  // the home screen (PD.73i, this fix). In either case the bg render
-  // is invisible to the user and must not stamp _lastScreen — doing
-  // so would mis-route their next re-open.
-  if (name === "trip" || (name && name.indexOf("dest:") === 0)) {
-    var pov = document.getElementById("trip-brief-overlay");
-    if (pov && pov.style.display && pov.style.display !== "none") return;
-    var cov = document.getElementById("candidate-explorer-overlay");
-    if (cov && cov.style.display && cov.style.display !== "none") return;
-    // PD.73i: also skip when the home screen is showing — the user is
-    // looking at the trips list, NOT the trip view, even if some bg
-    // event triggered drawTripMode.
-    var hs = document.getElementById("home-screen");
-    if (hs && hs.style.display && hs.style.display !== "none") return;
-    var app = document.getElementById("app");
-    if (app && app.style.display === "none") return;
-  }
+  // PD.83b: guard removed. The previous PD.73d/i guards here were
+  // trying to detect "is the user actually on this screen, or is a
+  // background tripChange firing the renderer?" — but the *caller*
+  // knows the answer. The tripChange listener now gates drawTripMode /
+  // drawDestMode on UI visibility, so by the time _recordScreen runs
+  // the screen really is the current one. Single source of truth.
   if (trip._lastScreen === name) return;  // no-op
   trip._lastScreen = name;
   if (typeof localSave === "function") {
@@ -37956,13 +37951,35 @@ if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.on === "functio
     // listener is independent of which renderer is active. Same routing
     // logic as before: _leftMode === "dest" + activeDest set → expanded
     // dest view; otherwise → trip overview.
-    if (typeof MaxTripUI !== "undefined" && typeof MaxTripUI.renderTripPage === "function") {
-      var expanded = (_leftMode === "dest" && activeDest) ? activeDest : null;
-      MaxTripUI.renderTripPage(trip, {expandedDestId: expanded});
-    } else if (_leftMode === "trip" && typeof drawTripMode === "function") {
-      drawTripMode();
-    } else if (_leftMode === "dest" && activeDest && typeof drawDestMode === "function") {
-      drawDestMode(activeDest);
+    // PD.83b (architectural): only re-render the trip view if the
+    // user is actually looking at it. Background tripChange events
+    // (sync pulls, localSave write emissions) can fire while the user
+    // is on the home screen or inside the picker / brief overlays;
+    // rendering trip-view chrome at those moments is wasted work and
+    // (worse) used to mis-stamp _lastScreen, mis-routing the next
+    // re-open. Replaces PD.73d / PD.73i guards that lived inside
+    // _recordScreen. Map refresh below is independent — always run.
+    var _uiOnTripView = (function(){
+      if (document.body && document.body.classList.contains("picker-active")) return false;
+      var hs = document.getElementById("home-screen");
+      if (hs && hs.style.display && hs.style.display !== "none") return false;
+      var pov = document.getElementById("trip-brief-overlay");
+      if (pov && pov.style.display && pov.style.display !== "none") return false;
+      var cov = document.getElementById("candidate-explorer-overlay");
+      if (cov && cov.style.display && cov.style.display !== "none") return false;
+      var app = document.getElementById("app");
+      if (app && app.style.display === "none") return false;
+      return true;
+    })();
+    if (_uiOnTripView) {
+      if (typeof MaxTripUI !== "undefined" && typeof MaxTripUI.renderTripPage === "function") {
+        var expanded = (_leftMode === "dest" && activeDest) ? activeDest : null;
+        MaxTripUI.renderTripPage(trip, {expandedDestId: expanded});
+      } else if (_leftMode === "trip" && typeof drawTripMode === "function") {
+        drawTripMode();
+      } else if (_leftMode === "dest" && activeDest && typeof drawDestMode === "function") {
+        drawDestMode(activeDest);
+      }
     }
     // v359.60.21: any tripChange now also refreshes the trip map. The
     // map's pin color depends on dest.nights (purple for 0-night "see"
@@ -48589,6 +48606,15 @@ function _notifyOnwayDemotions(syncResult){
 }
 
 function drawTripMode(){
+  // PD.83c (architectural): if the picker overlay is active, the user
+  // isn't on trip view. Background tripChange events used to slip
+  // through and render trip chrome behind the picker — first masked
+  // by CSS visibility:hidden (PD.73f'), then guarded inside
+  // _recordScreen (PD.73d/i). Both were downstream patches. The
+  // architectural answer is to refuse to render at all. The
+  // tripChange listener (PD.83b) also gates on this; the check here
+  // is defense in depth for any other caller.
+  if (document.body && document.body.classList.contains("picker-active")) return;
   if (typeof _recordScreen === "function") _recordScreen("trip");
   // v360.1: capture scroll position BEFORE we clobber lp-content.
   // The renderer used to unconditionally jump back to the top on
@@ -50742,6 +50768,8 @@ async function suggestRestaurants(destId,dayId,slot,btn){
 
 // ── Destination mode renderer ──────────────────────────────
 function drawDestMode(destId){
+  // PD.83c: see drawTripMode for rationale. Picker-active => no render.
+  if (document.body && document.body.classList.contains("picker-active")) return;
   if (typeof _recordScreen === "function" && typeof arguments[0] !== "undefined") _recordScreen("dest:" + arguments[0]);
   // Round ED: only scroll to top when the user is ARRIVING at this
   // destination view — coming from trip view, switching to a different
@@ -55896,19 +55924,13 @@ function editTripName(clickedBlock){
   inp.style.cssText="font-size:13px;font-weight:600;color:#222;background:transparent;border:none;border-bottom:1px solid #999;outline:none;font-family:inherit;width:100%;display:block;padding:0;";
   span.style.display="none";
   if (pencil) pencil.style.display = "none";
-  // PD.73e: hide any other .trip-name-block on the page while editing.
-  // The picker chrome and the static trip-view header each render one,
-  // and they can both be visible simultaneously when the picker is on
-  // top of the app shell — leading to "two names, one's an input"
-  // confusion. Stash original display so we can restore on save/cancel.
-  var _hiddenOthers = [];
-  try {
-    document.querySelectorAll(".trip-name-block").forEach(function(other){
-      if (other === block) return;
-      _hiddenOthers.push({ el: other, display: other.style.display });
-      other.style.display = "none";
-    });
-  } catch(_){}
+  // PD.83d (architectural): the old PD.73e hid all other .trip-name-block
+  // elements while editing, to mask the "two names, one's an input"
+  // confusion when the picker chrome and the static trip-view header
+  // were both in the DOM. With PD.83c, picker-active makes #app
+  // invisible (CSS + render guard), so only the picker's name-block
+  // is on screen during a picker edit, and only the static one during
+  // a trip-view edit. No parallel block to hide → no snapshot needed.
   span.parentNode.insertBefore(inp, span);
   inp.focus(); inp.select();
   var saved = false;
@@ -55920,10 +55942,7 @@ function editTripName(clickedBlock){
     span.style.display=savedDisplay;
     if (pencil) pencil.style.display = savedPencilDisplay;
     if (inp.parentNode) inp.parentNode.removeChild(inp);
-    // PD.73e: restore the other name-blocks we hid on edit-open.
-    try {
-      _hiddenOthers.forEach(function(o){ o.el.style.display = o.display || ""; });
-    } catch(_){}
+    // PD.83d: no parallel name-blocks to restore — see edit-open.
     // Mirror the new name into any OTHER trip-name spans on the page
     // (e.g. the static header span while the picker chrome is active,
     // or vice versa) so reopening the other surface doesn't show stale.
