@@ -7484,15 +7484,29 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
   // PD.83a: parser already split off ", Country" at parse time, so
   // p.place is the clean city name. Just normalize via _normPlaceName
   // for diacritic-tolerant lookup against LLM-returned candidates.
+  // PD.89: ALSO stash _tb._userListedNames as the durable source of
+  // truth for "these places are on the user's list". _pastedRoles
+  // gets deleted after one use; _userListedNames persists and is
+  // mirrored to trip.brief._userListedNames so reopens still know.
+  // _reconcileUserListedKeeps() reads it at every render and forces
+  // _keep=true on matching requiredPlaces, unless the user has
+  // explicitly rejected that place via the role popover.
   try {
     var nrmKey = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
     _tb._pastedRoles = {};
+    _tb._userListedNames = {};
     parseResult.destinations.forEach(function(p){
       if (!p || !p.place) return;
       var k = nrmKey(p.place);
       if (!k) return;
       _tb._pastedRoles[k] = { role: p.isStay ? "stay" : "see", displayName: p.place };
+      _tb._userListedNames[k] = p.isStay ? "stay" : "see";
     });
+    // Persist on trip.brief so reopens restore the list (the picker
+    // rehydration restores trip.brief → _tb).
+    if (typeof trip !== "undefined" && trip && trip.brief) {
+      trip.brief._userListedNames = Object.assign({}, _tb._userListedNames);
+    }
   } catch(_){}
   // v359.60.28: stronger mandate — EVERY listed place must appear in
   // the output. Previous "anchor your activities around them" was too
@@ -15589,9 +15603,56 @@ function _pickerSyntheticItemsFromTripDestinations(){
 // "Ride mountain railways to summits" alongside Gornergrat, Pilatus, etc.
 // Round CZ: sections roll up under their parent CATEGORY (one of six);
 // rendering shows category headers above their sections.
+// PD.89 (architectural): the user's paste-list is the durable source
+// of truth for "these places are on my list". After six rounds of
+// patching the propagation chain (parser → _pastedRoles → MaxRoleWriter
+// → mirror), we stop trying to make state propagate perfectly and
+// instead RECONCILE at render time: walk placeActivities, force
+// p._keep=true on any requiredPlace whose normalized name is on the
+// list, unless the user has explicitly rejected that place via the
+// role popover. The list is set once on paste and never mutated; the
+// reconciliation runs every render, so no matter what other code
+// does to _keep, listed places always read as kept.
+function _reconcileUserListedKeeps(){
+  if (typeof _tb === "undefined" || !_tb) return;
+  if (!Array.isArray(_tb.placeActivities)) return;
+  var listed = _tb._userListedNames;
+  if (!listed) return;
+  var nrm = (typeof _normPlaceName === "function")
+    ? _normPlaceName
+    : function(s){ return String(s||"").toLowerCase().trim(); };
+  // Build set of normalized names the user has explicitly rejected.
+  // _roleTouched + status="reject" is the explicit-rejection signal.
+  var rejected = {};
+  if (Array.isArray(_tb.candidates)) {
+    _tb.candidates.forEach(function(c){
+      if (c && c._roleTouched && c.status === "reject" && c.place) {
+        rejected[nrm(c.place)] = true;
+      }
+    });
+  }
+  _tb.placeActivities.forEach(function(item){
+    if (!item || !Array.isArray(item.requiredPlaces)) return;
+    item.requiredPlaces.forEach(function(p){
+      if (!p || !p.place) return;
+      var key = nrm(p.place);
+      var role = listed[key];
+      if (!role) return;
+      if (rejected[key]) return;
+      p._keep = true;
+      p._rejected = false;
+      if (role === "stay") p.overnight = true;
+    });
+  });
+}
+if (typeof globalThis !== "undefined") globalThis._reconcileUserListedKeeps = _reconcileUserListedKeeps;
+
 function _renderPlaceActivityItems(){
   var list = document.getElementById("tb-place-act-list");
   if(!list) return;
+  // PD.89: force-keep user-listed places before computing item.checked
+  // (anyKept) or anything downstream.
+  if (typeof _reconcileUserListedKeeps === "function") _reconcileUserListedKeeps();
   // Round NC.X: snapshot the scroll position of the picker-list pane
   // BEFORE wiping the list. Toggling a place's checkbox used to scroll
   // the user to the bottom (probably layout clamping after the
@@ -15871,10 +15932,20 @@ function _renderPlaceActivityItems(){
   // toward the top when its items don't carry a recognized category;
   // do a final pass that splits out user-added sections and appends
   // them after everything else.
+  // PD.88 (architectural): exclude the synthetic stays sections
+  // ("Recommended overnight stays", "Other stays to consider") from
+  // the user-added pin. They use type="manual" too — same as
+  // "Places you added" — and were being shoved to the bottom even
+  // though they semantically belong at the top. Match by section
+  // name so we don't have to thread a new type through the data.
   (function _pinUserAddedSectionsLast(){
+    function _isSyntheticStays(name){
+      return /^(?:recommended overnight stays|other stays to consider)$/i.test(name);
+    }
     var userAdded = [];
     var others = [];
     sectionOrder.forEach(function(sec){
+      if (_isSyntheticStays(sec)) { others.push(sec); return; }
       var its = bySection[sec] || [];
       var isUserAdded = its.some(function(it){ return it && it.type === "manual"; })
         || /\b(places|things)\s+you\s+added\b/i.test(sec);
@@ -15882,6 +15953,27 @@ function _renderPlaceActivityItems(){
       else others.push(sec);
     });
     sectionOrder = others.concat(userAdded);
+  })();
+  // PD.88: final pin-top pass for the synthetic stays sections.
+  // The first sort (rank 0 / 0.5) put them up front, but the category
+  // sort that follows doesn't know about them and resorts by their
+  // unknown category to rank 99, sinking them to the bottom. This
+  // pass restores them to the top — "Recommended overnight stays"
+  // first (the user's pasted stays), then "Other stays to consider"
+  // (LLM-suggested additional hubs), then everything else in its
+  // existing order. Single source of truth for the top.
+  (function _pinSyntheticStaysFirst(){
+    var rec = null, other = null;
+    var rest = [];
+    sectionOrder.forEach(function(sec){
+      if (/^recommended overnight stays$/i.test(sec)) rec = sec;
+      else if (/^other stays to consider$/i.test(sec)) other = sec;
+      else rest.push(sec);
+    });
+    var head = [];
+    if (rec)   head.push(rec);
+    if (other) head.push(other);
+    sectionOrder = head.concat(rest);
   })();
   // Track which categories we've already printed a header for during
   // the section forEach below.
@@ -15992,10 +16084,10 @@ function _renderPlaceActivityItems(){
 
     list.appendChild(wrap);
 
-    var trans = document.createElement("div");
-    trans.style.cssText = "margin:12px 0 8px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#888;font-style:italic;border-top:1px solid #e8e8e8;padding-top:14px;";
-    trans.textContent = "Beyond what you are coming for…";
-    list.appendChild(trans);
+    // PD.87: "Beyond what you are coming for…" subhead removed. The
+    // threads box already explains what the picker is showing; an
+    // extra all-caps transition between the box and the search bar
+    // read as filler. The visual divider on the next block is enough.
   })();
 
   // v359.55.12: section TOC at the top of the picker. Replaces the
@@ -16139,8 +16231,21 @@ function _renderPlaceActivityItems(){
       else _pmBulk.enter();
     };
     hdrActions.appendChild(bulkBtn);
-    tocHdr.appendChild(hdrActions);
-    toc.appendChild(tocHdr);
+    // PD.87: action buttons render in the page header slot (under the
+    // Discovery title) instead of inside the WHAT'S HERE TOC. Fall
+    // back to inline placement if the slot isn't in the DOM yet
+    // (e.g. an early re-render before the chrome is wired up).
+    var _actionBarSlot = document.getElementById("tb-picker-action-bar");
+    if (_actionBarSlot) {
+      _actionBarSlot.innerHTML = "";
+      _actionBarSlot.appendChild(hdrActions);
+      // PD.87: with the action buttons hoisted out, the WHAT'S HERE
+      // header row contains only the label — drop the entire header
+      // since the chip list is self-explanatory.
+    } else {
+      tocHdr.appendChild(hdrActions);
+      toc.appendChild(tocHdr);
+    }
 
     // Search input — sticky to the top of the scrolling list pane so
     // the user can search again without scrolling back up after
@@ -21241,16 +21346,29 @@ var MaxRoleWriter = {
       }
     } catch(_){}
     // ── requiredPlace flag mirrors ──────────────────────────────────
+    // PD.86 (architectural): match candidates → requiredPlaces by
+    // _normPlaceName, not raw toLowerCase. The LLM sometimes returns
+    // a requiredPlace with a country suffix ("Akureyri, Iceland")
+    // while the candidate is just "Akureyri"; raw lowercase didn't
+    // match, so MaxRoleWriter set the candidate's role but never
+    // flipped p._keep on the requiredPlace, and the map kept showing
+    // the pin gray. _normPlaceName collapses diacritics, punctuation,
+    // and whitespace so all the cousin spellings line up — the same
+    // normalizer used by _pmEnsureCandidate, _pmMetaKey, and the
+    // picker's candidate lookups elsewhere.
     try {
       if (Array.isArray(_tb.placeActivities)) {
-        var canon = (cand.place || "").toLowerCase();
+        var _nrm = (typeof _normPlaceName === "function")
+          ? _normPlaceName
+          : function(s){ return String(s||"").toLowerCase().trim(); };
+        var canon = _nrm(cand.place || "");
         var keep = (role !== "maybe" && role !== "reject");
         var rejected = (role === "reject");
         _tb.placeActivities.forEach(function(item){
           if (!item || !Array.isArray(item.requiredPlaces)) return;
           item.requiredPlaces.forEach(function(p){
             if (!p || !p.place) return;
-            if (p.place.toLowerCase() !== canon) return;
+            if (_nrm(p.place) !== canon) return;
             p._isDayTrip = (role === "daytrip");
             p._dayTripHub = (role === "daytrip") ? hub : "";
             p._waysideFromHub = (role === "onway") ? hub : "";
@@ -24739,6 +24857,10 @@ function _renderPlacePickerMap(targetId){
   targetId = targetId || "tb-pm-map";
   var mapDiv = document.getElementById(targetId);
   if (!mapDiv) return;
+  // PD.89: force-keep user-listed places before allPlaces is built
+  // from placeActivities — guarantees their pins render blue, never
+  // gray, unless the user explicitly rejected them via the popover.
+  if (typeof _reconcileUserListedKeeps === "function") _reconcileUserListedKeeps();
   var state = _pmMaps[targetId];
   // (Re)init when the DOM node is fresh or we don't have a state record.
   if (!state || !state.map || !mapDiv._pmInitialized) {
@@ -26123,7 +26245,13 @@ function renderActivityPicker(){
     + _pickerChromeRow
     + (_discoveryPhaseChips ? ('<div style="padding:6px 22px 0;">' + _discoveryPhaseChips + '</div>') : "")
     +'<div class="tb-header" style="flex-shrink:0;">'
-    +  '<div class="tb-title">'+titleLabel+'</div>'
+    +  '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">'
+    +    '<div class="tb-title" style="margin-bottom:0;">'+titleLabel+'</div>'
+    // PD.87: action buttons slot — populated by _renderSectionTOC.
+    // Lives under the Discovery title so the buttons read as "things
+    // I can do to this Discovery" rather than as TOC chrome.
+    +    '<div id="tb-picker-action-bar" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"></div>'
+    +  '</div>'
     +'</div>'
     +'<div class="picker-2col" id="picker-2col" style="flex:1;display:flex;min-height:0;overflow:hidden;">'
     +  '<div class="picker-list" id="tb-picker-list-pane" style="flex:1;min-width:0;overflow-y:auto;padding:18px 22px;-webkit-overflow-scrolling:touch;">'
@@ -29763,6 +29891,11 @@ function reopenCandidateExplorer(){
     _tb.interests = trip.brief.interests || _tb.interests || [];
     _tb.anchors = trip.brief.anchors || _tb.anchors || [];
     _tb.familiarity = trip.brief.familiarity || _tb.familiarity || "";
+    // PD.89: rehydrate the user-listed names so the render-time
+    // reconciliation keeps working after a reload / picker reopen.
+    if (trip.brief._userListedNames) {
+      _tb._userListedNames = Object.assign({}, trip.brief._userListedNames);
+    }
   }
   // Rehydrate must-dos so reject-cascade and required-badges work
   if (trip.mdcItems) _mdcItems = trip.mdcItems.slice();
@@ -29875,6 +30008,10 @@ function reopenPickerForEdit(){
     _tb.when = trip.brief.when || _tb.when || "";
     _tb.startDate = trip.brief.startDate || _tb.startDate || "";
     _tb.endDate = trip.brief.endDate || _tb.endDate || "";
+    // PD.89: rehydrate user-listed names (renderActivityPicker path).
+    if (trip.brief._userListedNames) {
+      _tb._userListedNames = Object.assign({}, trip.brief._userListedNames);
+    }
     _tb.partyComposition = trip.brief.partyComposition || _tb.partyComposition || "";
     _tb.partySize = trip.brief.partySize || _tb.partySize || "";
     _tb.partyAges = trip.brief.partyAges || _tb.partyAges || "";
@@ -32050,11 +32187,9 @@ function renderCandidateCards(cands){
       });
     });
 
-    var transition = document.createElement("div");
-    transition.style.cssText = "margin:20px 4px 8px;padding:10px 4px 4px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#888;border-top:1px solid #e8e8e8;font-style:italic;";
-    transition.textContent = "Beyond what you are coming for…";
-    urWrap.appendChild(transition);
-
+    // PD.87: "Beyond what you are coming for…" subhead removed (also
+    // here in the candidate-explorer "user's reasons" variant). The
+    // box above explains itself; no transition needed.
     el.appendChild(urWrap);
   })();
 
