@@ -19447,6 +19447,28 @@ function _pmDraftRestore(){
   }
   return false;
 }
+// PD.71: any brief-form edit also dirties the draft. Delegated input
+// + change listeners on document — cheap, fires only when the event
+// target is inside #trip-brief-overlay (the brief AND the Discovery
+// picker share that container). 1.5s debounce inside
+// _pmDraftScheduleSave coalesces rapid typing into one save.
+(function _pmDraftBindBriefAutosave(){
+  if (window._pmDraftBriefBound) return;
+  window._pmDraftBriefBound = true;
+  function shouldSave(e){
+    var ov = document.getElementById("trip-brief-overlay");
+    if (!ov) return false;
+    if (ov.style.display === "none") return false;
+    return ov.contains(e.target);
+  }
+  document.addEventListener("input", function(e){
+    if (shouldSave(e) && typeof _pmDraftScheduleSave === "function") _pmDraftScheduleSave();
+  }, true);
+  document.addEventListener("change", function(e){
+    if (shouldSave(e) && typeof _pmDraftScheduleSave === "function") _pmDraftScheduleSave();
+  }, true);
+})();
+
 if (typeof globalThis !== "undefined") {
   globalThis._pmDraftEnsure = _pmDraftEnsure;
   globalThis._pmDraftSave = _pmDraftSave;
