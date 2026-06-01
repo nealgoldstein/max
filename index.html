@@ -7450,13 +7450,30 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
   // from a blank slate. Including the user-specified nights lets
   // the LLM honor them when it sets requiredPlaces[].nights, though
   // we also do a post-pass override to make sure.
+  // PD.74: surface the user's stay-vs-see intent in the prompt so the
+  // LLM knows up front which pasted places are overnight hubs and
+  // which are sights. Also stash a per-place role map on _tb so the
+  // post-candidate pass can write the final role through MaxRoleWriter.
   var _ctxBits = parseResult.destinations.map(function(p){
     var bits = [p.place];
-    if (p.nights > 0) bits.push("(" + p.nights + " night" + (p.nights === 1 ? "" : "s") + ")");
-    else bits.push("(day visit / see)");
+    if (p.isStay) {
+      if (p.nights > 0) bits.push("(overnight stay, " + p.nights + " night" + (p.nights === 1 ? "" : "s") + ")");
+      else bits.push("(overnight stay)");
+    } else {
+      bits.push("(sight to visit, no overnight)");
+    }
     if (p.intent) bits.push("— " + p.intent);
     return "  • " + bits.join(" ");
   }).join("\n");
+  // Stash user's role intent so post-LLM we can stamp MaxRoleWriter.
+  try {
+    _tb._pastedRoles = {};
+    parseResult.destinations.forEach(function(p){
+      var k = String(p.place || "").toLowerCase().trim();
+      if (!k) return;
+      _tb._pastedRoles[k] = p.isStay ? "stay" : "see";
+    });
+  } catch(_){}
   // v359.60.28: stronger mandate — EVERY listed place must appear in
   // the output. Previous "anchor your activities around them" was too
   // soft; the model would drop secondary towns (Selfoss, Vík,
@@ -11223,6 +11240,58 @@ async function runCandidateSearch(requiredPlaces) {
     }
     _tb.candidates = allCands;
     _tb.p2Failed = p2Failed;
+    // PD.74: if this trip came from a paste-list with stay/see
+    // section headers, apply each pasted place's role via the
+    // canonical writer. Runs AFTER candidates are populated so
+    // MaxRoleWriter can find each candidate by place name. Cleared
+    // after one application so re-runs don\'t overwrite later user
+    // edits.
+    try {
+      if (_tb._pastedRoles && typeof MaxRoleWriter !== "undefined" && MaxRoleWriter.set) {
+        var nrm = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
+        var _stayPlaces = [];
+        Object.keys(_tb._pastedRoles).forEach(function(k){
+          var role = _tb._pastedRoles[k];
+          if (role !== "stay" && role !== "see") return;
+          var cand = allCands.find(function(c){ return c && c.place && nrm(c.place) === nrm(k); });
+          if (cand) {
+            MaxRoleWriter.set(cand.id || cand.place, role, { persist: false });
+            if (role === "stay") _stayPlaces.push(cand);
+          }
+        });
+        delete _tb._pastedRoles;
+        // PD.75: synthetic top-of-picker section for the user's
+        // pasted-list overnight stays so they don\'t scatter into
+        // LLM-themed activity sections (or worse, "Other places to
+        // consider"). Section name matches the rank-0 regex above.
+        if (_stayPlaces.length && Array.isArray(_tb.placeActivities)) {
+          var existingStaysItem = _tb.placeActivities.find(function(it){
+            return it && it.section === "Recommended overnight stays";
+          });
+          if (!existingStaysItem) {
+            _tb.placeActivities.unshift({
+              id: "synth-overnight-stays",
+              section: "Recommended overnight stays",
+              name: "Places to stay overnight",
+              type: "manual",
+              description: "Cities and towns you flagged as overnight stays. These anchor the trip\'s geography — they\'re where you sleep and the bases for day trips.",
+              checked: true,
+              requiredPlaces: _stayPlaces.map(function(c){
+                return {
+                  place: c.place,
+                  country: c.country || "",
+                  lat: (typeof c.lat === "number") ? c.lat : null,
+                  lng: (typeof c.lng === "number") ? c.lng : null,
+                  _keep: true,
+                  nights: c.nights || 0,
+                  overnight: true
+                };
+              })
+            });
+          }
+        }
+      }
+    } catch(_){}
     // PD.73: LLM completion is the FIRST SAVE point — mint the trip
     // (if not yet minted) with all of _tb's substance and persist.
     if (typeof _initialTripSave === "function") _initialTripSave();
@@ -15498,6 +15567,8 @@ function _renderPlaceActivityItems(){
       // language in the section name. Be permissive on names since the LLM
       // labels things inconsistently.
       if (anyRoute || /\btrain|\brail|between destinations|scenic route|named.{0,15}train/i.test(name)) return 2;
+      // PD.75: synthetic "Recommended overnight stays" section comes first.
+      if (/recommended overnight stays|overnight hubs|overnight stays/i.test(name)) return 0;
       return 1; // activities
     }
     var ra = rank(a), rb = rank(b);
