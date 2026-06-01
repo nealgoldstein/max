@@ -139,17 +139,29 @@
   // "Saint-Moritz" and "st moritz" all normalize identically.
   function _normPlaceName(s) {
     if (!s) return '';
-    // PD.90 (architectural root cause): NFD doesn't decompose
-    // Icelandic ð (eth) or þ (thorn) — they're not pre-composed
-    // diacritics, they're their own letters in Icelandic. So
-    // "Egilsstaðir" stayed "egilsstaðir" while the LLM happily
-    // returned "Egilsstadir" (Anglicized) — the two never matched.
-    // Same story for æ and ø in Nordic names. Substitute explicitly
-    // BEFORE the NFD pass so every spelling collapses to one form.
-    // This is the bug that drove 6+ rounds of patching downstream
-    // propagation logic. _searchNormalize had the right idea (it
-    // already does these substitutions); _normPlaceName didn't.
-    return String(s)
+    // PD.96 (root cause of repeated Egilsstaðir failure): strip a
+    // trailing country word/phrase BEFORE everything else, using the
+    // MaxGeo lookup module when available. Without this, a candidate
+    // stored as "Egilsstaðir" and a requiredPlace stored as
+    // "Egilsstaðir, Iceland" normalize to "egilsstadir" vs
+    // "egilsstadir iceland" — every downstream consumer (popup
+    // lookup, MaxRoleWriter mirror, reconciliation, backfill) misses
+    // the match. Stripping here gives every caller a country-agnostic
+    // key for free. Falls back cleanly when MaxGeo isn't loaded yet
+    // (e.g. early bootstrap during script-tag evaluation).
+    var bare = s;
+    try {
+      var geo = (typeof globalThis !== "undefined" && globalThis.MaxGeo)
+        || (typeof window !== "undefined" && window.MaxGeo)
+        || null;
+      if (geo && typeof geo.stripCountrySuffix === "function") {
+        bare = geo.stripCountrySuffix(s);
+      }
+    } catch (_) {}
+    // PD.90: Icelandic ð (eth) and þ (thorn) — and Nordic æ, ø — don't
+    // decompose via NFD. Substitute them explicitly before NFD so
+    // "Egilsstaðir" and "Egilsstadir" collapse to the same form.
+    return String(bare)
       .toLowerCase()
       .replace(/þ/g, 'th')
       .replace(/æ/g, 'ae')

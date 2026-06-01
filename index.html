@@ -385,6 +385,13 @@
      Both window.MaxEngineTrip.<name> and window.<name> exposed for
      migration; the inline script still calls by original names. -->
 <script src="engine-trip.js?v=DEV"></script>
+<!-- Round PD.95: country reference data + lookup helpers. Static
+     ISO 3166 entries with UN M49 subregions, alt names, capitals,
+     currencies, languages, drives-on, centroids. Exposes MaxGeo
+     (byName, isCountry, stripCountrySuffix, detectCountry, neighbors,
+     countriesIn). The seam other features grow from — region
+     detection, scope validation, LLM context, multi-country grouping. -->
+<script src="engine-geo.js?v=DEV"></script>
 <!-- Round HH: Phase 3 of the engine/UI split. engine-picker.js owns
      the picker engine's PURE helpers (findMatchingRequired + brief
      parsers). Same dual-surface pattern as engine-trip.js. -->
@@ -7407,6 +7414,39 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
   // drift. Also adds a trip-noise-token fallback ("Patagonia
   // Adventure 2028" → "Patagonia") for regions not in _coarseGeocode.
   var _normRegion = _normalizeImportedRegion(parseResult.region);
+  // PD.97: if normalization landed empty or doesn't look like a known
+  // country / region, fall back to scanning the raw text for any
+  // country mention. "We're going to Akureyri and Egilsstaðir in
+  // September" → detectCountry returns "Iceland". Beats showing a
+  // blank region or guessing wrong.
+  try {
+    if ((!_normRegion || !_normRegion.trim()) && typeof MaxGeo !== "undefined" && MaxGeo.detectCountry) {
+      var _detected = MaxGeo.detectCountry(rawText || "");
+      if (_detected) _normRegion = _detected;
+    }
+  } catch(_){}
+  // PD.98: scope validation. Each parsed destination carries its
+  // country (post-PD.83a parser splits ", Country" at parse time).
+  // Surface a one-time console warning when a pasted destination's
+  // country doesn't match the trip region — typo, paste from wrong
+  // list, or unintended mix. Non-blocking by design; the user might
+  // intentionally span multiple countries.
+  try {
+    if (typeof MaxGeo !== "undefined" && _normRegion) {
+      var _tripCountry = MaxGeo.byName(_normRegion);
+      if (_tripCountry) {
+        var _mismatched = (parseResult.destinations || []).filter(function(p){
+          if (!p || !p.country) return false;
+          var pc = MaxGeo.byName(p.country);
+          return pc && pc.iso2 !== _tripCountry.iso2;
+        });
+        if (_mismatched.length) {
+          console.warn("[Max PD.98] " + _mismatched.length + " pasted place(s) are outside the trip region (" + _tripCountry.name + "):",
+            _mismatched.map(function(p){ return p.place + " ("+ p.country +")"; }));
+        }
+      }
+    }
+  } catch(_){}
 
   // Mint a STUB trip so the import is recoverable on reload — the
   // trip has no destinations yet; those get built when the user
@@ -11181,10 +11221,32 @@ async function runCandidateSearch(requiredPlaces) {
       + "Cross-border picks are only allowed within ~100 km of " + _tb.region + "'s border, and you must say so explicitly in tradeoffs. "
       + "Out-of-region picks will be discarded.\n"
     : "";
+  // PD.99: when the trip region is a known country, inject scope
+  // hints so the LLM has structured context (capital, currency,
+  // primary language, subregion neighbors). Helps the model anchor
+  // place suggestions to the actual geography instead of inferring
+  // from the bare region string. Skipped for non-country regions
+  // ("Patagonia", "Alps") and when MaxGeo isn't loaded.
+  var geoScopeHint = "";
+  try {
+    if (typeof MaxGeo !== "undefined" && _tb.region) {
+      var _ctry = MaxGeo.byName(_tb.region);
+      if (_ctry) {
+        var _nbrs = MaxGeo.neighbors(_ctry.name).slice(0, 6);
+        geoScopeHint = "\nRegion context: " + _ctry.name + " is in " + _ctry.subregion + "."
+          + " Capital " + _ctry.capital + "."
+          + " Currency " + _ctry.currency + "."
+          + (_ctry.drivesOn === "left" ? " Drives on the left." : "")
+          + (_nbrs.length ? (" Subregion neighbors include " + _nbrs.join(", ") + ".") : "")
+          + "\n";
+      }
+    }
+  } catch(_){}
 
   var pCities = "You are a travel expert helping plan a trip to " + (_tb.region||"this region") + ".\n"
     + "Trip context: " + brief + "\n"
     + regionGuard
+    + geoScopeHint
     + dayTripNote
     + (skipList ? "These stops are already confirmed: " + skipList + ". Do NOT include them again.\n" : "")
     + "\nList the " + cityCount + " most significant cities in " + (_tb.region||"this region") + " that a well-traveled visitor would consider \u2014 "
@@ -11201,6 +11263,7 @@ async function runCandidateSearch(requiredPlaces) {
   var pThematic = "You are a travel expert helping plan a trip to " + (_tb.region||"this region") + ".\n"
     + "Trip context: " + brief + "\n"
     + regionGuard
+    + geoScopeHint
     + driverInstruction
     + famNote
     + releasedNote
@@ -15633,12 +15696,13 @@ function _reconcileUserListedKeeps(){
       _tb.candidates.forEach(function(c){
         if (!c || !c._required || !c.place) return;
         var nrm0 = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){return String(s||"").toLowerCase();};
-        // PD.93: split off the country tail before normalizing so a
-        // pre-PD.83a candidate stored as "Selfoss, Iceland" produces
-        // the key "selfoss" — same as post-PD.83a trips. Otherwise
-        // backfill produces "selfoss iceland" keys that mismatch
-        // the rest of the system.
-        var bare = String(c.place).split(/\s*,\s*/)[0].trim() || c.place;
+        // PD.95: MaxGeo.stripCountrySuffix handles ", Country",
+        // " — Country", and tail-word forms ("Selfoss Iceland") for
+        // every known country (~190). Fall back to a simple
+        // comma-split when the geo module isn't loaded.
+        var bare = (typeof MaxGeo !== "undefined" && MaxGeo.stripCountrySuffix)
+          ? MaxGeo.stripCountrySuffix(c.place)
+          : (String(c.place).split(/\s*,\s*/)[0].trim() || c.place);
         var k = nrm0(bare);
         if (!k) return;
         var role = (c.role === "stay" || c.overnight === true) ? "stay" : "see";
@@ -15691,17 +15755,26 @@ function _reconcileUserListedKeeps(){
     // (e.g. "selfoss iceland" → "Selfoss").
     var bestCandByKey = {};
     var bestPlaceMetaByKey = {};
+    // PD.95: country-suffix handling goes through MaxGeo when loaded,
+    // so we recognize every ISO 3166 country + common alt names
+    // ("UAE", "USA", "UK") without maintaining an inline regex.
+    function _stripCountrySuffix(s){
+      if (typeof MaxGeo !== "undefined" && MaxGeo.stripCountrySuffix) {
+        return MaxGeo.stripCountrySuffix(s);
+      }
+      return String(s||"");
+    }
     if (Array.isArray(_tb.candidates)) {
       _tb.candidates.forEach(function(c){
         if (!c || !c.place) return;
         var k = nrm(c.place);
         if (!k) return;
-        // Strip a trailing country word from the candidate's own key
-        // when comparing — so a candidate with c.place="Selfoss"
-        // (key "selfoss") matches a listed key "selfoss iceland".
-        var alt = k.replace(/\s+(iceland|switzerland|nepal|france|italy|spain|germany|austria|norway|sweden|denmark|finland|portugal|greece|ireland|scotland|england|wales|japan|china|india|mexico|canada|brazil|argentina|chile|peru|morocco|egypt|kenya|turkey|usa|us|uk)$/, "");
+        // The candidate's own key after country-suffix stripping; lets
+        // a candidate with c.place="Selfoss" (key "selfoss") match a
+        // listed key that arrived as "selfoss iceland" from older data.
+        var alt = nrm(_stripCountrySuffix(c.place));
         if (!bestCandByKey[k]) bestCandByKey[k] = c;
-        if (alt !== k && !bestCandByKey[alt]) bestCandByKey[alt] = c;
+        if (alt && alt !== k && !bestCandByKey[alt]) bestCandByKey[alt] = c;
       });
     }
     _tb.placeActivities.forEach(function(it){
@@ -15716,9 +15789,6 @@ function _reconcileUserListedKeeps(){
         if (!w) return w;
         return w.charAt(0).toUpperCase() + w.slice(1);
       }).join(" ");
-    }
-    function _stripCountrySuffix(s){
-      return String(s||"").replace(/\s+(iceland|switzerland|nepal|france|italy|spain|germany|austria|norway|sweden|denmark|finland|portugal|greece|ireland|scotland|england|wales|japan|china|india|mexico|canada|brazil|argentina|chile|peru|morocco|egypt|kenya|turkey|usa|us|uk)$/i, "");
     }
     var requiredPlaces = listedStayKeys.map(function(k){
       var cand = bestCandByKey[k];
@@ -25050,6 +25120,22 @@ function _renderPlacePickerMap(targetId){
           }
         }
       }
+    }
+    // PD.102: last-resort seed from MaxGeo centroid. If the region is
+    // a recognized country (Iceland, Nepal, Switzerland — anything in
+    // ISO 3166) and the _coarseGeocode lookups all missed, fall back
+    // to the country's geographic center. Better than Switzerland's
+    // default coordinates for an Iceland trip.
+    if (!_pmSeed) {
+      try {
+        if (typeof MaxGeo !== "undefined" && _tb && _tb.region) {
+          var _geoEntry = MaxGeo.byName(_tb.region);
+          if (_geoEntry && _geoEntry.centroid && _geoEntry.centroid.length === 2) {
+            // MaxGeo stores [lng, lat]; Leaflet wants [lat, lng].
+            _pmSeed = [_geoEntry.centroid[1], _geoEntry.centroid[0]];
+          }
+        }
+      } catch(_){}
     }
     var _pmInitView = (_pmSeed && isFinite(_pmSeed[0]) && isFinite(_pmSeed[1])) ? _pmSeed : [46.8, 8.2];
     var leaflet = L.map(mapDiv, {zoomControl:true,scrollWheelZoom:allowScroll,attributionControl:false}).setView(_pmInitView, 6);
@@ -48983,6 +49069,58 @@ function drawTripMode(){
   // is defense in depth for any other caller.
   if (document.body && document.body.classList.contains("picker-active")) return;
   if (typeof _recordScreen === "function") _recordScreen("trip");
+  // PD.100: drives-on hint. Once per trip, when the region is a known
+  // country that drives on the left, surface a small toast. Cleared
+  // by trip._shownDrivesOn so it doesn't fire every time the user
+  // re-renders the trip view. Skipped silently for right-drive
+  // regions and when the region isn't a recognized country.
+  try {
+    if (trip && !trip._shownDrivesOn && trip.brief && trip.brief.region
+        && typeof MaxGeo !== "undefined" && MaxGeo.byName) {
+      var _drivesEntry = MaxGeo.byName(trip.brief.region);
+      if (_drivesEntry && _drivesEntry.drivesOn === "left"
+          && typeof showSaveStatus === "function") {
+        showSaveStatus("🚗 " + _drivesEntry.name + " drives on the left.", 8000);
+        trip._shownDrivesOn = true;
+      }
+    }
+  } catch(_){}
+  // PD.101: multi-country trips get a "Countries on this trip" hint
+  // grouped by UN M49 subregion. A 3-week European trip with stops
+  // in France, Italy, and Switzerland reads as "Western Europe
+  // (France, Switzerland) · Southern Europe (Italy)". For
+  // single-country trips this is silent — the trip name already
+  // names the country. Stashes the result on trip._countrySummary
+  // so renderers (status bar, subtitle line) can pick it up.
+  try {
+    if (trip && Array.isArray(trip.destinations) && trip.destinations.length
+        && typeof MaxGeo !== "undefined" && MaxGeo.byName) {
+      var _seenCountries = {};
+      trip.destinations.forEach(function(d){
+        if (!d) return;
+        // Best-effort country detection: stored field first, else
+        // try MaxGeo.byName against the place itself (which works
+        // when the place IS a country, like "Andorra"), else null.
+        var name = d.country
+          || (MaxGeo.byName(d.place) ? MaxGeo.byName(d.place).name : null);
+        if (name && MaxGeo.byName(name)) _seenCountries[MaxGeo.byName(name).name] = true;
+      });
+      var _countryList = Object.keys(_seenCountries);
+      if (_countryList.length > 1) {
+        var _bySub = {};
+        _countryList.forEach(function(n){
+          var sub = MaxGeo.subregion(n) || "Other";
+          _bySub[sub] = _bySub[sub] || [];
+          _bySub[sub].push(n);
+        });
+        trip._countrySummary = Object.keys(_bySub).map(function(sub){
+          return sub + " (" + _bySub[sub].sort().join(", ") + ")";
+        }).join(" · ");
+      } else {
+        trip._countrySummary = null;
+      }
+    }
+  } catch(_){}
   // v360.1: capture scroll position BEFORE we clobber lp-content.
   // The renderer used to unconditionally jump back to the top on
   // every re-render — which meant clicking any inline expand/collapse
@@ -56348,7 +56486,34 @@ function calcTotalSpend(){
       total[b.currency]=(total[b.currency]||0)+b.pricePaid;
     });
   });
-  return Object.keys(total).map(function(c){return c+" "+total[c].toFixed(2);}).join("  \u00b7  ")||"0";
+  // PD.103: per-currency totals were already there (booking carries
+  // its own currency code). Enrich with the country/region whose
+  // primary currency that is, when MaxGeo recognizes it, so a
+  // multi-country trip reads as "EUR 1240.00 (Italy) \u00b7 CHF 890.00
+  // (Switzerland)". For currencies shared across many countries
+  // (USD, EUR), we name the trip's destination countries that match
+  // rather than the canonical issuer.
+  var countriesByCurrency = {};
+  if (typeof MaxGeo !== "undefined" && MaxGeo.all && Array.isArray(trip.destinations)) {
+    var _tripCountryNames = {};
+    trip.destinations.forEach(function(d){
+      if (!d) return;
+      var dc = d.country
+        || (d.brief && d.brief.country)
+        || (MaxGeo.byName(d.place) ? MaxGeo.byName(d.place).name : null);
+      if (dc) _tripCountryNames[dc] = true;
+    });
+    MaxGeo.all().forEach(function(e){
+      if (!e || !e.currency) return;
+      if (!_tripCountryNames[e.name]) return;
+      countriesByCurrency[e.currency] = countriesByCurrency[e.currency] || [];
+      if (countriesByCurrency[e.currency].indexOf(e.name) < 0) countriesByCurrency[e.currency].push(e.name);
+    });
+  }
+  return Object.keys(total).map(function(c){
+    var note = countriesByCurrency[c] ? (" (" + countriesByCurrency[c].join(", ") + ")") : "";
+    return c + " " + total[c].toFixed(2) + note;
+  }).join("  \u00b7  ") || "0";
 }
 
 // ── General bookings ───────────────────────────────────────
