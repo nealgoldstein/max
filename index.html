@@ -2242,7 +2242,10 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
     <div id="hs-dashboard" style="display:none;margin-top:18px;"></div>
     <!-- Round DI: trip list always visible when trips exist. -->
 <div id="hs-trips-section" style="display:none;margin-top:18px;">
-      <div class="hs-section-lbl" style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:10px;">Your trips</div>
+      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;">
+        <div class="hs-section-lbl" style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;">Your trips</div>
+        <span onclick="selectHomeOption('import')" style="font-size:10.5px;color:#1a5fa8;cursor:pointer;" title="Open a saved Max trip (.json) or a text list (.txt / .md). Text files land in Discovery with places already populated.">Load from file →</span>
+      </div>
       <div class="trip-cards" id="trip-cards"></div>
     </div>
     <!-- Round DI: empty state for first-time users.
@@ -2258,8 +2261,6 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
     <div id="hs-actions" style="margin-top:20px;padding-top:14px;border-top:1px solid #eee;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
       <button onclick="selectHomeOption('new')" style="font-size:12.5px;font-weight:600;padding:8px 16px;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;">+ Start a new trip</button>
       <button onclick="selectHomeOption('browse')" style="font-size:12px;font-weight:500;padding:8px 12px;background:#fff;color:#1a5fa8;border:1px solid #d8d4c8;border-radius:6px;cursor:pointer;font-family:inherit;">Discover where to go →</button>
-      <button onclick="selectHomeOption('paste')" style="font-size:11px;font-weight:500;padding:8px 12px;background:#fff;color:#888;border:1px solid #d8d4c8;border-radius:6px;cursor:pointer;font-family:inherit;" title="Already have a list of places you want to visit? Paste it in.">Paste a list</button>
-      <button onclick="selectHomeOption('import')" style="font-size:11px;font-weight:500;padding:8px 12px;background:#fff;color:#888;border:1px solid #d8d4c8;border-radius:6px;cursor:pointer;font-family:inherit;" title="Open a saved Max trip (.json) or a text list (.txt / .md). Text files land in Discovery with places already populated.">Load from file</button>
       <span style="margin-left:auto;font-size:10.5px;color:#bbb;">Max gathers; you evaluate, edit, add. <span onclick="showAboutMax()" style="color:#1a5fa8;cursor:pointer;">How it works →</span></span>
     </div>
     <div id="new-trip-form" style="margin-top:12px;display:none;">
@@ -8520,6 +8521,48 @@ function _openPasteListModal(opts) {
 }
 if (typeof globalThis !== "undefined") globalThis._openPasteListModal = _openPasteListModal;
 
+
+// ──────────────────────────────────────────────────────────────────────
+// PD.80: paste-list from the brief profile. The brief profile is the
+// gateway — users fill it in, then choose to either let Max suggest
+// places ("What to see and do →") or paste their own list. This
+// function is the latter path. It opens the existing paste-list modal
+// without re-asking the AI disclaimer (the user already passed it on
+// trip-start).
+// ──────────────────────────────────────────────────────────────────────
+function _pasteListFromBrief(){
+  // Carry current brief inputs into _tb so the paste-list build has
+  // them available (region, dates, pace, etc.). If the pasted list
+  // includes its own region on the first line, that wins downstream —
+  // the parser overrides region anyway.
+  try {
+    if (typeof _tb === "undefined" || !_tb) window._tb = _tb = {};
+    var fields = [
+      ["tb-region","region"], ["tb-when","when"], ["tb-duration","duration"],
+      ["tb-place-name","placeName"], ["tb-intent","intent"], ["tb-anchors","anchors"],
+      ["tb-entry","entry"], ["tb-exit","tbExit"]
+    ];
+    fields.forEach(function(pair){
+      var el = document.getElementById(pair[0]);
+      if (el && typeof el.value === "string") {
+        var v = el.value.trim();
+        if (v) _tb[pair[1]] = v;
+      }
+    });
+  } catch(_){}
+  if (typeof _openPasteListModal !== "function") return;
+  _openPasteListModal({
+    title: "Paste a list of places",
+    buildLabel: "Open in picker →",
+    onBuild: function(parsed, rawText){
+      if (typeof _buildPickerFromPastedList === "function") {
+        _buildPickerFromPastedList(parsed, rawText);
+      }
+    }
+  });
+}
+if (typeof globalThis !== "undefined") globalThis._pasteListFromBrief = _pasteListFromBrief;
+
 function selectHomeOption(id){
   // Round DI: the trip list is always visible now; only the modal-style
   // surfaces (new-trip-form, browse-chat) toggle in response to action
@@ -14156,7 +14199,10 @@ function renderTripStep1Place(){
 
     // ── FOOTER ────────────────────────────────
     + '<div class="tb-footer">'
-    +   '<button class="tb-btn-primary" id="tb-place-continue-btn" onclick="goToTripStep2()">What to see and do →</button>'
+    +   '<div style="display:flex;gap:8px;align-items:center;">'
+    +     '<button class="tb-btn-primary" id="tb-place-continue-btn" onclick="goToTripStep2()">Ask Max to suggest places →</button>'
+    +     '<button class="tb-btn-paste" onclick="_pasteListFromBrief()" style="font-size:13px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:6px;padding:9px 16px;cursor:pointer;font-family:inherit;">Paste a list →</button>'
+    +   '</div>'
     +   '<div style="display:flex;justify-content:space-between;margin-top:8px;">'
     +     '<div class="tb-btn-back" onclick="cancelTripBrief()">← Cancel</div>'
     +     '<div style="font-size:10px;color:#aaa;cursor:pointer;" onclick="showBriefApiKeyForm()">🔑 Set API key</div>'
@@ -27556,7 +27602,8 @@ function _legacyRenderTripBrief(){
 
     +'</div>'
     +'<div class="tb-footer">'
-    +'<button class="tb-btn-primary" onclick="goToTripStep2()">What to see and do \u2192</button>'
+    +'<button class="tb-btn-primary" onclick="goToTripStep2()">Ask Max to suggest places \u2192</button>'
+    +'<button class="tb-btn-paste" onclick="_pasteListFromBrief()" style="font-size:13px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:6px;padding:9px 16px;cursor:pointer;font-family:inherit;margin-left:8px;">Paste a list \u2192</button>'
     +'<div style="display:flex;justify-content:space-between;margin-top:8px;">'
     +'<div class="tb-btn-back" onclick="renderTripStep1()">\u2190 Back</div>'
     +'<div style="font-size:10px;color:#aaa;cursor:pointer;" onclick="showBriefApiKeyForm()">\ud83d\udd11 Set API key</div>'
