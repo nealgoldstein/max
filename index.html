@@ -472,6 +472,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
    centering of the pills regardless of the side-column widths. Inside the
    picker overlay this header is the first child and sits above the scrollable
    picker body (z-index:5 to stay over any sibling that might overlap). */
+body.picker-active #app .lp-hdr-unified{display:none;}
 .lp-hdr-unified{
   display:grid;
   /* v359.49: trip-name takes only what it needs (auto), mode-pills
@@ -9307,6 +9308,7 @@ function _mwOutsideClick(e){
 }
 
 function goHome(){
+  if (document.body) document.body.classList.remove("picker-active");
   if(trip.destinations.length>0&&!confirm("Return to trips? Your trip is saved."))return;
   showHome();
 }
@@ -25296,6 +25298,10 @@ function renderActivityPicker(){
   // showCandidateExplorer uses for its own overlay.
   if (ov.parentElement !== document.body) document.body.appendChild(ov);
   ov.className = "tb-overlay";
+  // PD.73f: signal "picker is active" so the static .lp-hdr-unified
+  // header inside #app (which has its own trip-name-block) stops
+  // bleeding through.
+  document.body.classList.add("picker-active");
   // Outer is a non-scrolling flex column; the LIST pane scrolls, the MAP
   // pane is sticky-full-height. Footer pinned at the bottom.
   ov.style.cssText = "position:fixed;inset:0;background:#f7f7f5;z-index:10000;display:flex;flex-direction:column;overflow:hidden;";
@@ -29410,6 +29416,7 @@ function reopenCandidateExplorer(){
 }
 
 function cancelEditCandidates(){
+  if (document.body) document.body.classList.remove("picker-active");
   _ceEditMode = false;
   g("candidate-explorer-overlay").style.display="none";
   if(_ceMap){_ceMap.remove();_ceMap=null;} _cePolyline=null; if(_edMap){try{_edMap.remove();}catch(e){}_edMap=null;_edMarkers=[];}
@@ -30116,6 +30123,7 @@ function cancelPickerEdit(){
 // If no trip yet but kept candidates exist, build silently (skipping the
 // pre-build modal). If a trip already exists, this is just a dismiss.
 function closePlacesOverlay(){
+  document.body.classList.remove("picker-active");
   if (_ceEditMode) { applyCandidateChanges(); return; }
   // Treat anything not explicitly rejected as kept on close. This matches the
   // "trip is always definite, always fluid" model from STATE.md — closing the
@@ -34478,6 +34486,7 @@ function _stripDraggableForReadOnly(){
 }
 
 function _backToHomeFromShare(){
+  if (document.body) document.body.classList.remove("picker-active");
   // Strip ?share= from the URL and reload into the normal app.
   try {
     history.replaceState(null, "", location.pathname);
