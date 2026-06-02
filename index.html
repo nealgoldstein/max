@@ -7542,17 +7542,24 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
     var nrmKey = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
     _tb._pastedRoles = {};
     _tb._userListedNames = {};
+    // PD.149: also keep the user's ORIGINAL spelling for each listed
+    // entry, keyed by normalized name. Renderers (umbrella section,
+    // popup label, etc.) can show "Snæfellsjökull region" instead of
+    // the lossy title-cased "Snaefellsjokull Region" reconstruction.
+    _tb._userListedDisplay = {};
     parseResult.destinations.forEach(function(p){
       if (!p || !p.place) return;
       var k = nrmKey(p.place);
       if (!k) return;
       _tb._pastedRoles[k] = { role: p.isStay ? "stay" : "see", displayName: p.place };
       _tb._userListedNames[k] = p.isStay ? "stay" : "see";
+      if (!_tb._userListedDisplay[k]) _tb._userListedDisplay[k] = String(p.place).trim();
     });
     // Persist on trip.brief so reopens restore the list (the picker
     // rehydration restores trip.brief → _tb).
     if (typeof trip !== "undefined" && trip && trip.brief) {
       trip.brief._userListedNames = Object.assign({}, _tb._userListedNames);
+      trip.brief._userListedDisplay = Object.assign({}, _tb._userListedDisplay);
     }
   } catch(_){}
   // v359.60.28: stronger mandate — EVERY listed place must appear in
@@ -16323,6 +16330,74 @@ function _reconcileUserListedKeeps(){
       });
     }
   })();
+  // PD.148 (architectural): umbrella paste-list entries. When the
+  // user pastes "Golden Circle" or "Diamond Circle" or a regional
+  // umbrella like "Snæfellsjökull region", the LLM correctly splits
+  // these into constituent places — but the original umbrella has
+  // no row, so the user has no signal their input was understood.
+  // Synthesize a "Routes & regions you named" section at the bottom
+  // listing every listed entry that has no placeActivity coverage.
+  // Reads from the durable _userListedNames source of truth and runs
+  // every render, so it stays in sync as items get added/rejected.
+  (function _ensureUmbrellaListedSection(){
+    var listedKeys = Object.keys(listed);
+    if (!listedKeys.length) return;
+    // Build set of normalized place names in non-umbrella placeActivities.
+    var inActs = {};
+    _tb.placeActivities.forEach(function(it){
+      if (!it || /^routes\s*[&]\s*regions you named$/i.test(String(it.section||""))) return;
+      (it.requiredPlaces||[]).forEach(function(p){
+        if (p && p.place) inActs[nrm(p.place)] = true;
+      });
+    });
+    var umbrellas = [];
+    listedKeys.forEach(function(k){
+      if (inActs[k]) return; // direct match
+      // Fuzzy: is this key a token within any placeActivity key?
+      var fuzzyHit = false;
+      var actKeys = Object.keys(inActs);
+      for (var ai = 0; ai < actKeys.length; ai++) {
+        var ak = actKeys[ai];
+        if (ak.indexOf(k + " ") === 0 || ak.indexOf(" " + k) >= 0 || k.indexOf(ak + " ") === 0 || k.indexOf(" " + ak) >= 0) {
+          fuzzyHit = true; break;
+        }
+      }
+      if (!fuzzyHit) umbrellas.push(k);
+    });
+    // Always replace (don't accumulate) so removed listed items don't
+    // leave stale umbrella rows behind.
+    _tb.placeActivities = _tb.placeActivities.filter(function(it){
+      return !(it && /^routes\s*[&]\s*regions you named$/i.test(String(it.section||"")));
+    });
+    if (!umbrellas.length) return;
+    function _titleCaseKey(k){
+      return String(k).split(/\s+/).map(function(w){
+        return w ? (w.charAt(0).toUpperCase() + w.slice(1)) : w;
+      }).join(" ");
+    }
+    // PD.149: prefer the original-cased display name when available
+    // (preserves diacritics: "Snæfellsjökull region" instead of the
+    // lossy title-cased "Snaefellsjokull Region").
+    var displayMap = (_tb._userListedDisplay) || {};
+    _tb.placeActivities.push({
+      id: "synth-umbrella-listed",
+      section: "Routes & regions you named",
+      name: "Umbrella entries from your paste",
+      type: "synthetic-umbrella",
+      description: "These entries from your paste don't have their own pin — they're touring routes or regional names. The specific places inside them ARE in your list above (e.g., Golden Circle ⇒ Þingvellir, Geysir, Gullfoss).",
+      checked: true,
+      requiredPlaces: umbrellas.map(function(k){
+        return {
+          place: displayMap[k] || _titleCaseKey(k),
+          country: "",
+          _keep: true,
+          _virtual: true,
+          nights: 0,
+          overnight: false
+        };
+      })
+    });
+  })();
   _tb.placeActivities.forEach(function(item){
     if (!item || !Array.isArray(item.requiredPlaces)) return;
     item.requiredPlaces.forEach(function(p){
@@ -16699,14 +16774,20 @@ function _renderPlaceActivityItems(){
   // priority than themed picks. Sister section "Sights near places
   // you listed" is filtered out of sectionOrder entirely below (its
   // items get inlined per-place via _enrichmentsByPlace).
+  // PD.148: also pin "Routes & regions you named" — the umbrella
+  // entries section sits just above "More places to consider", at the
+  // bottom of meaningful sections.
   (function _pinMoreToConsiderLast(){
     var more = null;
+    var umbrella = null;
     var rest = [];
     sectionOrder.forEach(function(sec){
       if (/^more places to consider$/i.test(sec)) more = sec;
+      else if (/^routes\s*[&]\s*regions you named$/i.test(sec)) umbrella = sec;
       else rest.push(sec);
     });
     sectionOrder = rest;
+    if (umbrella) sectionOrder.push(umbrella);
     if (more) sectionOrder.push(more);
   })();
   // PD.114: build _enrichmentsByPlace by walking the synthetic
@@ -22486,6 +22567,9 @@ function _initialTripSave(){
     if (_tb._userListedNames) {
       trip.brief._userListedNames = Object.assign({}, _tb._userListedNames);
     }
+    if (_tb._userListedDisplay) {
+      trip.brief._userListedDisplay = Object.assign({}, _tb._userListedDisplay);
+    }
     if (_tb.tripMeta) {
       trip.brief.tripMeta = trip.brief.tripMeta || {};
       if (_tb.tripMeta.notes && !trip.brief.tripMeta.notes) trip.brief.tripMeta.notes = _tb.tripMeta.notes;
@@ -22533,6 +22617,9 @@ function _initialTripSave(){
     // PD.92: keep _userListedNames + tripMeta in sync on every save.
     if (_tb._userListedNames) {
       trip.brief._userListedNames = Object.assign({}, _tb._userListedNames);
+    }
+    if (_tb._userListedDisplay) {
+      trip.brief._userListedDisplay = Object.assign({}, _tb._userListedDisplay);
     }
     if (_tb.tripMeta) {
       trip.brief.tripMeta = trip.brief.tripMeta || {};
@@ -22614,6 +22701,9 @@ function _restoreLastScreen(){
       // else re-parse tripMeta.notes.
       if (trip.brief._userListedNames) {
         _tb._userListedNames = Object.assign({}, trip.brief._userListedNames);
+      }
+      if (trip.brief._userListedDisplay) {
+        _tb._userListedDisplay = Object.assign({}, trip.brief._userListedDisplay);
       } else if (trip.brief.tripMeta && trip.brief.tripMeta.notes
           && typeof parsePlacesList === "function") {
         try {
@@ -31144,15 +31234,24 @@ function reopenCandidateExplorer(){
         if (_backfill && Array.isArray(_backfill.destinations)) {
           var _bfNrm = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){return String(s||"").toLowerCase();};
           _tb._userListedNames = {};
+          _tb._userListedDisplay = {};
           _backfill.destinations.forEach(function(p){
             if (!p || !p.place) return;
             var k = _bfNrm(p.place);
-            if (k) _tb._userListedNames[k] = p.isStay ? "stay" : "see";
+            if (k) {
+              _tb._userListedNames[k] = p.isStay ? "stay" : "see";
+              if (!_tb._userListedDisplay[k]) _tb._userListedDisplay[k] = String(p.place).trim();
+            }
           });
           // Persist for future reopens so we don't re-parse every time.
           trip.brief._userListedNames = Object.assign({}, _tb._userListedNames);
+          trip.brief._userListedDisplay = Object.assign({}, _tb._userListedDisplay);
         }
       } catch(_){}
+    }
+    // PD.149: rehydrate display map separately too.
+    if (trip.brief._userListedDisplay) {
+      _tb._userListedDisplay = Object.assign({}, trip.brief._userListedDisplay);
     }
   }
   // Rehydrate must-dos so reject-cascade and required-badges work
@@ -31277,14 +31376,24 @@ function reopenPickerForEdit(){
         if (_backfill2 && Array.isArray(_backfill2.destinations)) {
           var _bfNrm2 = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){return String(s||"").toLowerCase();};
           _tb._userListedNames = {};
+          _tb._userListedDisplay = {};
           _backfill2.destinations.forEach(function(p){
             if (!p || !p.place) return;
             var k = _bfNrm2(p.place);
-            if (k) _tb._userListedNames[k] = p.isStay ? "stay" : "see";
+            if (k) {
+              _tb._userListedNames[k] = p.isStay ? "stay" : "see";
+              if (!_tb._userListedDisplay[k]) _tb._userListedDisplay[k] = String(p.place).trim();
+            }
           });
           trip.brief._userListedNames = Object.assign({}, _tb._userListedNames);
+          trip.brief._userListedDisplay = Object.assign({}, _tb._userListedDisplay);
         }
       } catch(_){}
+      // PD.149: also rehydrate the display map alone if it's already
+      // persisted (renderActivityPicker path mirror).
+      if (trip.brief._userListedDisplay) {
+        _tb._userListedDisplay = Object.assign({}, trip.brief._userListedDisplay);
+      }
     }
     _tb.partyComposition = trip.brief.partyComposition || _tb.partyComposition || "";
     _tb.partySize = trip.brief.partySize || _tb.partySize || "";
