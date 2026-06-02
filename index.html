@@ -16580,13 +16580,36 @@ function _reconcileUserListedKeeps(){
     var listedStayKeys = Object.keys(listed).filter(function(k){
       var cand = candByKey[k];
       if (cand) {
-        // LLM-classified: stay-capable wins.
-        if (cand.role === "stay") return true;
+        // PD.160 (architectural): the LLM's INTRINSIC content
+        // classification beats the parser-propagated role.
+        //
+        // Why this order matters: PD.74-arch routes the parser's
+        // stay/see inference through MaxRoleWriter, which sets
+        // cand.role. So a flat paste-list (parser defaults all to
+        // "stay") gives waterfalls cand.role="stay" even though the
+        // LLM correctly marked them singleSight=true. The LLM's
+        // singleSight + overnightCapable flags are CONTENT signals
+        // (the model knows waterfalls don't have lodging). c.role
+        // is mostly a state signal (what the user/system decided).
+        // For "is this stay-capable in principle?" the content
+        // signals are authoritative.
+        //
+        // Order:
+        //   1. LLM says singleSight (waterfall, viewpoint) → exclude
+        //   2. LLM says overnightCapable=false → exclude
+        //   3. c.role explicitly see/daytrip/onway → exclude
+        //   4. c.role explicitly stay OR overnightCapable=true → include
+        //   5. Otherwise → exclude (don't pad section without signal)
+        if (cand.singleSight === true) return false;
+        if (cand.overnightCapable === false) return false;
         if (cand.role === "see" || cand.role === "daytrip" || cand.role === "onway") return false;
-        if (cand.overnightCapable === false || cand.singleSight === true) return false;
-        return cand.overnightCapable === true;
+        if (cand.role === "stay") return true;
+        if (cand.overnightCapable === true) return true;
+        return false;
       }
-      // No candidate yet — fall back to parser's hint.
+      // No candidate yet — fall back to parser's hint, but only when
+      // it's an EXPLICIT stay (parser default of "stay" is too noisy
+      // to trust without LLM confirmation).
       return listed[k] === "stay";
     });
     if (!listedStayKeys.length) return;
