@@ -18599,20 +18599,29 @@ if (typeof globalThis !== "undefined") globalThis._pmRoleForCheck = _pmRoleForCh
 function _pmOnUserListedBadgeHtml(placeName){
   if (!placeName) return "";
   try {
-    if (typeof _tb === "undefined" || !_tb || !_tb._userListedNames) return "";
+    if (typeof _tb === "undefined" || !_tb) return "";
     var nrm = (typeof _normPlaceName === "function")
       ? _normPlaceName
       : function(s){ return String(s||"").toLowerCase(); };
-    var role = _tb._userListedNames[nrm(placeName)];
-    if (!role) return "";
-    // PD.128: bed glyph for stays, eye glyph for sees. User prefers
-    // role-specific glyphs over a generic star — at a glance you see
-    // "on your list AND a stay" vs "on your list AND a sight."
-    var glyph = role === "stay" ? "🛏" : "👁";
-    var label = role === "stay" ? "On your list — stay overnight" : "On your list — sight to visit";
-    return '<span title="' + label + ' (you pasted this place)" '
-      + 'style="display:inline-flex;align-items:center;font-size:9.5px;font-weight:700;color:#5b3f8f;background:#f3eefa;border:1px solid #ddd0f0;border-radius:4px;padding:1px 6px;letter-spacing:.03em;text-transform:uppercase;">'
-      + glyph + '&nbsp;Your list'
+    var k = nrm(placeName);
+    var role = _tb._userListedNames && _tb._userListedNames[k];
+    if (role) {
+      // PD.128: bed glyph for stays, eye glyph for sees. Role-specific.
+      var glyph = role === "stay" ? "🛏" : "👁";
+      var label = role === "stay" ? "On your list — stay overnight" : "On your list — sight to visit";
+      return '<span title="' + label + ' (you pasted this place)" '
+        + 'style="display:inline-flex;align-items:center;font-size:9.5px;font-weight:700;color:#5b3f8f;background:#f3eefa;border:1px solid #ddd0f0;border-radius:4px;padding:1px 6px;letter-spacing:.03em;text-transform:uppercase;">'
+        + glyph + '&nbsp;Your list'
+        + '</span>';
+    }
+    // PD.144: symmetric Max-suggests badge for places NOT on the
+    // user's list. Lets the user see at a glance which rows came
+    // from Max vs from their paste-list. Especially important after
+    // ✦ Enhance, where many new rows appear and the user is asking
+    // "what's mine vs. Max's?"
+    return '<span title="Max suggested this place — review and keep / reject as you see fit." '
+      + 'style="display:inline-flex;align-items:center;font-size:9.5px;font-weight:700;color:#666;background:#f5f5f5;border:1px solid #dcdcdc;border-radius:4px;padding:1px 6px;letter-spacing:.03em;text-transform:uppercase;">'
+      + '✦&nbsp;Max suggests'
       + '</span>';
   } catch(_){ return ""; }
 }
@@ -26090,15 +26099,20 @@ function _renderPlacePickerMap(targetId){
             }
           }
         } catch(_){}
-        // PD.91: the user-listed names are the source of truth for
-        // "you selected this." Touch state on the candidate may not
-        // have stamped correctly on every code path (LLM name
-        // variants, paste-list flows that bypass MaxRoleWriter), but
-        // the listed map is canonical — if the place is on the list,
-        // the user selected it. Period.
-        var _isUserCommitted = !!_listedRole
-          || !!(_candForLabel && _candForLabel._roleTouched === true);
-        var prefixLabel = _isUserCommitted ? "You selected" : "Max suggests";
+        // PD.91 / PD.144: three distinct states, not two. The user
+        // wants to see at a glance which of these a place is:
+        //   • On your list — you pasted this; Max didn't pick it
+        //   • You selected — Max suggested, you committed/changed the role
+        //   • Max suggests — Max's pick, you haven't touched it
+        // (a) and (b) used to collapse into "You selected," losing
+        // the meaningful provenance distinction.
+        var _isOnList = !!_listedRole;
+        var _isUserTouched = !_isOnList && !!(_candForLabel && _candForLabel._roleTouched === true);
+        var _isUserCommitted = _isOnList || _isUserTouched;
+        var prefixLabel;
+        if (_isOnList) prefixLabel = "On your list";
+        else if (_isUserTouched) prefixLabel = "You selected";
+        else prefixLabel = "Max suggests";
         // Round PD.26: history line shows whenever the user has
         // committed, regardless of whether their choice agrees with
         // Max. The earlier "only show on disagreement" hid useful
