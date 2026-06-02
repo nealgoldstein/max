@@ -18704,50 +18704,66 @@ if (typeof globalThis !== "undefined") globalThis._pmRoleForCheck = _pmRoleForCh
 // "Jökulsárgljúfur Canyon") as separate placeActivities. Exact-match
 // lookups miss the listed entry. This resolver tries: (1) exact, (2)
 // listed key starts with "<place> " (handles "<place> <typo>"),
-// (3) place appears as a whitespace token in a listed key. Returns
-// the role string or null. Reused by popup label + row badge so
-// they agree on what's "on your list".
-function _resolveListedRole(placeName){
+// (3) place appears as a whitespace token in a listed key.
+// PD.150: returns role string (legacy callers) — backed by a richer
+// _resolveListedInfo that returns {role, key, display, matchType}
+// for callers that want the original paste text.
+function _resolveListedInfo(placeName){
   if (!placeName) return null;
   if (typeof _tb === "undefined" || !_tb || !_tb._userListedNames) return null;
   var nrm = (typeof _normPlaceName === "function")
     ? _normPlaceName
     : function(s){ return String(s||"").toLowerCase(); };
   var listed = _tb._userListedNames;
+  var display = (_tb._userListedDisplay) || {};
   var k = nrm(placeName);
   if (!k) return null;
-  if (listed[k]) return listed[k];
-  // Prefix-of-listed-key (handles typos appended after the place)
+  function _hit(key, matchType){
+    return { role: listed[key], key: key, display: display[key] || null, matchType: matchType };
+  }
+  if (listed[k]) return _hit(k, "exact");
   var prefix = k + " ";
   var keys = Object.keys(listed);
   for (var i = 0; i < keys.length; i++) {
-    if (keys[i].indexOf(prefix) === 0) return listed[keys[i]];
+    if (keys[i].indexOf(prefix) === 0) return _hit(keys[i], "prefix");
   }
-  // Word-token containment (handles place names buried mid-key)
   for (var j = 0; j < keys.length; j++) {
     var tokens = keys[j].split(/\s+/);
-    if (tokens.indexOf(k) >= 0) return listed[keys[j]];
+    if (tokens.indexOf(k) >= 0) return _hit(keys[j], "token");
   }
   return null;
 }
-if (typeof globalThis !== "undefined") globalThis._resolveListedRole = _resolveListedRole;
+function _resolveListedRole(placeName){
+  var info = _resolveListedInfo(placeName);
+  return info ? info.role : null;
+}
+if (typeof globalThis !== "undefined") {
+  globalThis._resolveListedRole = _resolveListedRole;
+  globalThis._resolveListedInfo = _resolveListedInfo;
+}
 
 function _pmOnUserListedBadgeHtml(placeName){
   if (!placeName) return "";
   try {
     if (typeof _tb === "undefined" || !_tb) return "";
-    var nrm = (typeof _normPlaceName === "function")
-      ? _normPlaceName
-      : function(s){ return String(s||"").toLowerCase(); };
-    var k = nrm(placeName);
-    // PD.146: use the fuzzy resolver so typos in the paste don't
-    // hide the "Your list" badge for places the LLM cleaned up.
-    var role = _resolveListedRole(placeName);
-    if (role) {
+    // PD.146 / PD.150: fuzzy resolver + display map. Returns
+    // {role, key, display, matchType} when the place is on your list.
+    var info = (typeof _resolveListedInfo === "function") ? _resolveListedInfo(placeName) : null;
+    if (info && info.role) {
+      var role = info.role;
       // PD.128: bed glyph for stays, eye glyph for sees. Role-specific.
       var glyph = role === "stay" ? "🛏" : "👁";
-      var label = role === "stay" ? "On your list — stay overnight" : "On your list — sight to visit";
-      return '<span title="' + label + ' (you pasted this place)" '
+      var roleLabel = role === "stay" ? "stay overnight" : "sight to visit";
+      // PD.150: when the user's original phrasing differs from the
+      // current place name (typo, LLM rewrote, etc.), show it in the
+      // tooltip so the user sees their input. "You listed it as: X"
+      // is the provenance receipt.
+      var origNote = "";
+      if (info.display && info.display.toLowerCase() !== String(placeName).toLowerCase()) {
+        origNote = " | You listed it as: \"" + String(info.display).replace(/"/g, "&quot;") + "\"";
+      }
+      var titleText = "On your list — " + roleLabel + origNote;
+      return '<span title="' + titleText + '" '
         + 'style="display:inline-flex;align-items:center;font-size:9.5px;font-weight:700;color:#5b3f8f;background:#f3eefa;border:1px solid #ddd0f0;border-radius:4px;padding:1px 6px;letter-spacing:.03em;text-transform:uppercase;">'
         + glyph + '&nbsp;Your list'
         + '</span>';
@@ -26253,12 +26269,12 @@ function _renderPlacePickerMap(targetId){
         var flipLabel = isStay ? "Just visiting"  : "Stay overnight";
         var _candForLabel = null;
         var _listedRole = null;
+        var _listedInfo = null;
         try {
-          // PD.146: route through _resolveListedRole so typos in the
-          // paste-list don't hide the "On your list" framing for
-          // places the LLM cleaned up. Exact → prefix → word-token.
-          if (window._tb && typeof _resolveListedRole === "function") {
-            _listedRole = _resolveListedRole(placeName);
+          // PD.146 / PD.150: fuzzy resolver returns full info object.
+          if (window._tb && typeof _resolveListedInfo === "function") {
+            _listedInfo = _resolveListedInfo(placeName);
+            if (_listedInfo) _listedRole = _listedInfo.role;
           } else if (window._tb && typeof _pmMetaKey === "function") {
             var _kFallback = _pmMetaKey(placeName);
             if (window._tb._userListedNames && window._tb._userListedNames[_kFallback]) {
@@ -26308,6 +26324,17 @@ function _renderPlacePickerMap(targetId){
         var _otherAttr = (_candForLabel && _candForLabel.otherAttractions) ? String(_candForLabel.otherAttractions).trim() : "";
         var _tradeoffs = (_candForLabel && _candForLabel.tradeoffs) ? String(_candForLabel.tradeoffs).trim() : "";
         var whyBlock = "";
+        // PD.150: when the user's original paste differs from the
+        // current place name (typo, LLM cleaned up the spelling),
+        // surface their original phrasing in the popup. Provenance:
+        // "you can see Max heard you, even though it cleaned the typo."
+        if (_listedInfo && _listedInfo.display
+            && String(_listedInfo.display).toLowerCase() !== String(placeName).toLowerCase()) {
+          whyBlock += '<div style="font-size:10.5px;color:#5b3f8f;line-height:1.5;margin:4px 0 6px;border-left:2px solid #d8c8eb;padding-left:8px;font-style:italic;">'
+            +   'You listed this as: '
+            +   '<strong style="font-style:normal;">' + _pmEsc(_listedInfo.display) + '</strong>'
+            + '</div>';
+        }
         if (_whyFits) {
           whyBlock += '<div style="font-size:11.5px;color:#444;line-height:1.5;margin:6px 0 4px;border-left:2px solid #d8d8e0;padding-left:8px;">'
             +   '<span style="color:#7a6294;font-weight:600;">' + (_isUserCommitted ? "Why this fits:" : "Max suggests " + _pmEsc(placeName) + " has:") + '</span> '
