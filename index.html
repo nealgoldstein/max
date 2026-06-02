@@ -2059,8 +2059,8 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
    inner tree means text wraps instead of pushing the column wider. */
 .ce-cards{flex:1;overflow-y:auto;overflow-x:hidden;padding:7px;min-height:0;}
 .ce-cards,.ce-cards *{overflow-wrap:break-word;min-width:0;}
-.ce-card{border:1px solid #e8e8e8;border-radius:7px;background:#fff;margin-bottom:7px;overflow:hidden;}
-.ce-card.keep{border-color:#2a7a4e;background:#f6fbf8;}
+.ce-card{border:1px dashed #d4d4d4;border-radius:7px;background:#fff;margin-bottom:7px;overflow:hidden;}
+.ce-card.keep{border:1px solid #2a7a4e;background:#f6fbf8;}
 .ce-card.map-selected{border-color:#111!important;box-shadow:0 0 0 2px #111;transition:box-shadow .15s;}
 .ce-map-tooltip{font-size:11px;font-weight:600;padding:3px 8px;background:#111;color:#fff;border:none;border-radius:5px;box-shadow:0 2px 6px rgba(0,0,0,.2);}
 /* Rejected cards: dim the content but keep actions fully interactive so users know they can change their mind */
@@ -18506,10 +18506,14 @@ function _pmOnUserListedBadgeHtml(placeName){
       : function(s){ return String(s||"").toLowerCase(); };
     var role = _tb._userListedNames[nrm(placeName)];
     if (!role) return "";
-    var label = role === "stay" ? "On your list (stay)" : "On your list";
-    return '<span title="' + label + ' — you pasted this place" '
+    // PD.128: bed glyph for stays, eye glyph for sees. User prefers
+    // role-specific glyphs over a generic star — at a glance you see
+    // "on your list AND a stay" vs "on your list AND a sight."
+    var glyph = role === "stay" ? "🛏" : "👁";
+    var label = role === "stay" ? "On your list — stay overnight" : "On your list — sight to visit";
+    return '<span title="' + label + ' (you pasted this place)" '
       + 'style="display:inline-flex;align-items:center;font-size:9.5px;font-weight:700;color:#5b3f8f;background:#f3eefa;border:1px solid #ddd0f0;border-radius:4px;padding:1px 6px;letter-spacing:.03em;text-transform:uppercase;">'
-      + '★ Your list'
+      + glyph + '&nbsp;Your list'
       + '</span>';
   } catch(_){ return ""; }
 }
@@ -30495,6 +30499,28 @@ function applyConstraintChanges(){
 // reassign dates preserving night counts. Bookings stay attached to their destinations.
 function resequenceWithCurrentBrief(){
   if (!trip || !trip.destinations || !trip.destinations.length) return;
+  // PD.125: when the user hasn't named arrival/departure cities,
+  // default to the country's capital via MaxGeo. Before this, the
+  // sequencer picked the first destination in array order — which
+  // gave an Iceland trip Vík as the starting point instead of
+  // Reykjavík (the actual international gateway). Apply to both
+  // _tb (live picker state) and trip.brief (persistent) so reopens
+  // pick up the same default.
+  try {
+    if (typeof MaxGeo !== "undefined" && MaxGeo.byName && trip.brief && trip.brief.region) {
+      var _ctry = MaxGeo.byName(trip.brief.region);
+      if (_ctry && _ctry.capital) {
+        if (!_tb || !_tb.entry) {
+          if (_tb) _tb.entry = _ctry.capital;
+          if (!trip.brief.entry) trip.brief.entry = _ctry.capital;
+        }
+        if (!_tb || !_tb.tbExit) {
+          if (_tb) _tb.tbExit = _ctry.capital;
+          if (!trip.brief.tbExit) trip.brief.tbExit = _ctry.capital;
+        }
+      }
+    }
+  } catch(_){}
   // Build pseudo-candidates from the current destinations so orderKeptCandidates can process them
   var pseudoKept = trip.destinations.map(function(d){
     var rf = (d.attachedEvents||[]).map(function(e){ return e.name; });
@@ -31915,7 +31941,7 @@ function showCandidateExplorer(cands, editMode){
     +'<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:600;" onclick="cancelCandidateExplorer&amp;&amp;cancelCandidateExplorer();goHome();">&larr; Home</button>'
     +(_ceEditMode
       ? '<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:500;" onclick="cancelEditCandidates()">Cancel</button>'
-      : '<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:500;margin-right:6px;" onclick="editWhereWhy()">\u2190 Profile</button>'+'<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:500;" onclick="editHowYouTravel()">Profile (how you travel)</button>')
+      : '<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:500;margin-right:6px;" onclick="editWhereWhy()" title="Where you\'re going + what\'s drawing you to it">\u2190 Trip brief</button>'+'<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:500;margin-right:6px;" onclick="editHowYouTravel()" title="Your travel preferences \u2014 pace, accommodation, mobility">Travel style</button>'+'<button style="font-size:11px;padding:5px 11px;border:1px solid #c8d8f0;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#1a5fa8;font-weight:600;" onclick="if(typeof _reopenPickerAny===&quot;function&quot;)_reopenPickerAny();else if(typeof reopenPickerForEdit===&quot;function&quot;)reopenPickerForEdit();" title="Reopen Discovery to add or curate more places">\ud83e\udded Discovery</button>')
     +'</div>'
     +'<div class="ce-body">'
     +'<div class="ce-left">'
