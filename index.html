@@ -11388,10 +11388,12 @@ async function enhanceDiscovery(btn) {
     if (typeof _initialTripSave === "function") _initialTripSave();
     if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
     if (typeof _renderPlacePickerMap === "function") _renderPlacePickerMap("tb-pm-map");
-    if (typeof showSaveStatus === "function") {
-      // PD.118: descriptive completion toast — breaks the count
-      // down by type, names where to look, and frames the next
-      // step (review + reject) so the curation loop is obvious.
+    // PD.142: Enhance fires while the picker is open, which means
+    // #app is visibility:hidden (PD.83c). showSaveStatus writes to
+    // #save-status inside #app — invisible. Render our own toast
+    // attached to document.body, above the picker overlay, so it's
+    // actually visible.
+    (function _showEnhanceToast(){
       var toastMsg;
       if (!addedCount) {
         toastMsg = rejectedDisplay.length
@@ -11408,8 +11410,29 @@ async function enhanceDiscovery(btn) {
         toastMsg = "✦ Added " + addedCount + " place" + (addedCount === 1 ? "" : "s") + ": " + parts.join(" · ")
           + ". Review them, keep what fits, reject what misses — then click ✦ Enhance again to sharpen further.";
       }
-      showSaveStatus(toastMsg, 12000);
-    }
+      try {
+        // Reuse existing toast div if still on screen.
+        var prev = document.getElementById("pm-enhance-toast");
+        if (prev && prev.parentNode) prev.parentNode.removeChild(prev);
+        var t = document.createElement("div");
+        t.id = "pm-enhance-toast";
+        t.textContent = toastMsg;
+        t.style.cssText = "position:fixed;top:64px;left:50%;transform:translateX(-50%);"
+          + "max-width:680px;z-index:12000;"
+          + "background:#1a1a1a;color:#fff;padding:11px 16px;border-radius:8px;"
+          + "box-shadow:0 4px 14px rgba(0,0,0,0.35);"
+          + "font-size:12px;font-weight:500;line-height:1.5;font-family:inherit;"
+          + "cursor:pointer;";
+        t.title = "Click to dismiss";
+        t.onclick = function(){ if (t.parentNode) t.parentNode.removeChild(t); };
+        document.body.appendChild(t);
+        setTimeout(function(){ if (t.parentNode) t.parentNode.removeChild(t); }, 14000);
+      } catch(toastErr) {
+        // Last-resort fallback to showSaveStatus (still invisible if
+        // picker is open, but at least the message is recorded).
+        if (typeof showSaveStatus === "function") showSaveStatus(toastMsg, 12000);
+      }
+    })();
   } catch(err) {
     console.warn("[Max enhance] failed:", err && err.message);
     if (typeof maxAlert === "function") maxAlert("Enhance failed: " + (err && err.message ? err.message : "unknown error"));
@@ -16691,11 +16714,39 @@ function _renderPlaceActivityItems(){
   // from sectionOrder so it doesn't render as a top-level group or
   // TOC chip. The items themselves stay in _tb.placeActivities so
   // the picker map's allPlaces builder still emits pins for them.
+  // PD.143: store each enrichment under BOTH .toLowerCase() AND
+  // _normPlaceName keys — the by-place and by-activity renderers use
+  // raw lowercase for their row keys (line 17299), while my PD.114
+  // originally used _normPlaceName. The mismatch meant Icelandic
+  // source names (Egilsstaðir → "egilsstaðir" vs "egilsstadir") lost
+  // their inline enrichments. Track orphan enrichments separately so
+  // they can fall back to a visible bucket instead of vanishing.
   var _enrichmentsByPlace = {};
+  var _orphanEnrichments = [];
   (function _bucketEnrichmentsBySourcePlace(){
     var nrmE = (typeof _normPlaceName === "function")
       ? _normPlaceName
       : function(s){ return String(s||"").toLowerCase().trim(); };
+    function _addEnrichment(rawName, p) {
+      if (!rawName || !p) return;
+      var lk = String(rawName).toLowerCase();
+      var nk = nrmE(rawName);
+      [lk, nk].forEach(function(k){
+        if (!k) return;
+        if (!_enrichmentsByPlace[k]) _enrichmentsByPlace[k] = [];
+        if (_enrichmentsByPlace[k].indexOf(p) < 0) _enrichmentsByPlace[k].push(p);
+      });
+    }
+    // Build a set of all rendered row keys so we can detect orphans.
+    var renderedKeys = {};
+    (Array.isArray(_tb.placeActivities) ? _tb.placeActivities : []).forEach(function(it){
+      if (!it || /^sights near places you listed$/i.test(String(it.section||""))) return;
+      (it.requiredPlaces || []).forEach(function(p){
+        if (!p || !p.place) return;
+        renderedKeys[String(p.place).toLowerCase()] = true;
+        renderedKeys[nrmE(p.place)] = true;
+      });
+    });
     var enrSecNames = sectionOrder.filter(function(sec){
       return /^sights near places you listed$/i.test(sec);
     });
@@ -16703,16 +16754,34 @@ function _renderPlaceActivityItems(){
       (bySection[sec] || []).forEach(function(item){
         (item.requiredPlaces || []).forEach(function(p){
           if (!p || !p.place || !p._enrichedFrom) return;
-          var k = nrmE(p._enrichedFrom);
-          if (!k) return;
-          if (!_enrichmentsByPlace[k]) _enrichmentsByPlace[k] = [];
-          _enrichmentsByPlace[k].push(p);
+          var lk = String(p._enrichedFrom).toLowerCase();
+          var nk = nrmE(p._enrichedFrom);
+          // PD.143: if neither key matches a rendered row, the
+          // enrichment would orphan. Track it for the fallback.
+          if (!renderedKeys[lk] && !renderedKeys[nk]) {
+            _orphanEnrichments.push(p);
+          } else {
+            _addEnrichment(p._enrichedFrom, p);
+          }
         });
       });
     });
-    sectionOrder = sectionOrder.filter(function(sec){
-      return !/^sights near places you listed$/i.test(sec);
-    });
+    // PD.143: if there are orphan enrichments, keep the synthetic
+    // section in sectionOrder so they remain visible. Trim its items
+    // to just the orphans (the matched ones inline under their source
+    // place row). Otherwise filter the section out entirely.
+    if (_orphanEnrichments.length) {
+      enrSecNames.forEach(function(sec){
+        (bySection[sec] || []).forEach(function(item){
+          if (item) item.requiredPlaces = _orphanEnrichments.slice();
+        });
+      });
+      // section stays in sectionOrder for rendering
+    } else {
+      sectionOrder = sectionOrder.filter(function(sec){
+        return !/^sights near places you listed$/i.test(sec);
+      });
+    }
   })();
   // Expose to the row renderers so they can inject the inline
   // "Max suggests near here" preview under each source place row.
