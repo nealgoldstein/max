@@ -29928,6 +29928,39 @@ async function previewConstraintChanges(){
   var totalBookings = (trip.destinations||[]).reduce(function(s, d){ return s + (d.hotelBookings||[]).length + (d.generalBookings||[]).length; }, 0);
   var diffText = diffs.map(function(d){ return d.field+": \u201c"+d.from+"\u201d \u2192 \u201c"+d.to+"\u201d"; }).join("\n");
 
+  // PD.112: include the user's listed places + Discovery state in
+  // the impact prompt. Without this, a user mid-Discovery (44 places
+  // listed, no destinations published yet) got generic prose because
+  // the prompt's only context was "no destinations". Now the LLM can
+  // evaluate the change against actual intent.
+  var listedSnippet = "";
+  try {
+    var lst = (trip && trip.brief && trip.brief._userListedNames)
+      || (typeof _tb !== "undefined" && _tb && _tb._userListedNames)
+      || null;
+    if (lst) {
+      var listedNames = Object.keys(lst);
+      if (listedNames.length) {
+        var sample = listedNames.slice(0, 60);
+        listedSnippet = "\nThe traveler's paste-list / Discovery starting points:\n" + sample.join(", ")
+          + (listedNames.length > sample.length ? "\n(+" + (listedNames.length - sample.length) + " more)" : "")
+          + "\n";
+      }
+    }
+  } catch(_){}
+  var discoverySnippet = "";
+  try {
+    var candCount = (typeof _tb !== "undefined" && _tb && Array.isArray(_tb.candidates)) ? _tb.candidates.length : 0;
+    var keptCount = (typeof _tb !== "undefined" && _tb && Array.isArray(_tb.placeActivities))
+      ? _tb.placeActivities.reduce(function(s, it){
+          return s + ((it.requiredPlaces||[]).filter(function(p){ return p && p._keep; }).length);
+        }, 0)
+      : 0;
+    if (candCount || keptCount) {
+      discoverySnippet = "\nDiscovery state: " + candCount + " candidate place(s), " + keptCount + " currently kept.\n";
+    }
+  } catch(_){}
+
   // Whether this change is likely to force a trip-order rebuild
   var affectsOrder = diffs.some(function(d){
     return d.field === "Arrival point" || d.field === "Departure point";
@@ -29935,11 +29968,13 @@ async function previewConstraintChanges(){
 
   var prompt = "A traveler is updating their trip constraints mid-planning. Here are the changes they made:\n\n"
     + diffText + "\n\n"
-    + "Current trip order:\n" + (destList||"(no destinations yet)") + "\n\n"
-    + (totalBookings > 0 ? "The traveler has " + totalBookings + " booking(s) already entered. " : "")
+    + "Current trip order:\n" + (destList||"(no destinations yet)") + "\n"
+    + listedSnippet
+    + discoverySnippet
+    + (totalBookings > 0 ? "\nThe traveler has " + totalBookings + " booking(s) already entered. " : "")
     + (affectsOrder ? "IMPORTANT: changing arrival or departure will re-sequence destinations and reassign dates. Call out any bookings whose dates or locations may no longer match.\n" : "")
     + "Trip name: " + (trip.name||"") + "\n\n"
-    + "Analyse the impact of these changes on the current trip. Be specific and concrete:\n"
+    + "Analyse the impact of these changes on the current trip. Consider both committed destinations and the traveler's stated intent (their listed places + Discovery state). Be specific and concrete:\n"
     + "- Which destinations or plans are directly affected?\n"
     + "- What are definite conflicts (things that must change \u2014 bookings, dates, routes)?\n"
     + "- What are flags worth checking (things that may need revisiting)?\n"
