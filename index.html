@@ -39136,6 +39136,18 @@ if (typeof MaxEnginePicker !== "undefined" && typeof MaxEnginePicker.on === "fun
     // class survived from picker-open time and drawTripMode silently
     // returns.
     if (document.body) document.body.classList.remove("picker-active");
+    // PD.139: stamp _lastScreen=trip IMMEDIATELY, not via drawTripMode
+    // (which runs inside the bridge animation callback ~5s later).
+    // Without this stamp, a hard refresh during the bridge leaves
+    // _lastScreen at its prior value (often "picker") and reloads on
+    // the picker even though the user just published. The published
+    // event IS the trip-view commitment — record it at the event.
+    try {
+      if (typeof trip !== "undefined" && trip) {
+        trip._lastScreen = "trip";
+        if (typeof localSave === "function") { try { localSave(); } catch(_){} }
+      }
+    } catch(_){}
     // Close the picker UI: candidate explorer overlay + Leaflet maps.
     var ceOv = g("candidate-explorer-overlay");
     if (ceOv) ceOv.style.display = "none";
