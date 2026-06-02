@@ -2461,6 +2461,10 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
     <div id="map-style-btn" style="position:absolute;bottom:36px;left:8px;z-index:600;background:rgba(255,255,255,.95);border:1px solid #ccc;border-radius:6px;padding:4px 10px;box-shadow:0 2px 8px rgba(0,0,0,.15);font-size:10px;font-weight:600;color:#333;cursor:pointer;font-family:inherit;display:none;" title="Switch map style">🗺 Street</div>
     <!-- v294.15: route toggle + view-larger buttons (replace deleted hero map). Trip-mode only. -->
     <button type="button" id="map-route-btn" style="position:absolute;top:8px;right:8px;z-index:499;background:rgba(255,255,255,.95);border:1px solid #cfe1f7;border-radius:6px;padding:5px 10px;box-shadow:0 1px 4px rgba(0,0,0,.15);font-size:11px;font-weight:600;color:#1a5fa8;cursor:pointer;font-family:inherit;display:none;" title="Show/hide the line connecting stops in order. (Max gives an ordering, not a driving route — see the Legend.)">🛣 Route</button>
+    <!-- PD.140: road-routing toggle. Default off — straight lines.
+         When on, calls OSRM public API to draw actual driving paths.
+         Free + rate-limited, fine for personal use; user opts in. -->
+    <button type="button" id="map-roads-btn" style="position:absolute;top:8px;right:200px;z-index:499;background:rgba(255,255,255,.95);border:1px solid #cfe1f7;border-radius:6px;padding:5px 10px;box-shadow:0 1px 4px rgba(0,0,0,.15);font-size:11px;font-weight:600;color:#1a5fa8;cursor:pointer;font-family:inherit;display:none;" title="When on, route lines follow real roads (uses OSRM public API). Off draws straight lines.">🛤 Roads off</button>
     <button type="button" id="map-larger-btn" style="position:absolute;top:8px;right:96px;z-index:499;background:rgba(255,255,255,.95);border:1px solid #cfe1f7;border-radius:6px;padding:5px 10px;box-shadow:0 1px 4px rgba(0,0,0,.15);font-size:11px;font-weight:600;color:#1a5fa8;cursor:pointer;font-family:inherit;display:none;" title="Open the trip route in a separate window">🗺 View larger →</button>
     <!-- Round FN.D.1: day-trips toggle. Same vocabulary as the Route
          toggle (sticky pref via localStorage, label flips ON/OFF on
@@ -16969,6 +16973,29 @@ function _renderPlaceActivityItems(){
       else _pmBulk.enter();
     };
     hdrActions.appendChild(bulkBtn);
+    // PD.141: Roads toggle in Discovery chrome — so the user can set
+    // the road-routing pref BEFORE hitting Choreograph (avoids the
+    // first trip-view render firing OSRM calls). Same persisted
+    // preference as the trip view's button; flipping either updates
+    // _useRoadRouting + localStorage. Default OFF.
+    var roadsBtn = document.createElement("button");
+    roadsBtn.type = "button";
+    function _paintRoadsBtn(){
+      var on = (typeof _useRoadRouting !== "undefined") && _useRoadRouting;
+      roadsBtn.innerHTML = on ? '🛤 Roads on' : '🛤 Roads off';
+      roadsBtn.style.cssText = "font-size:11px;font-weight:600;color:" + (on ? "#fff" : "#1a5fa8")
+        + ";background:" + (on ? "#1a5fa8" : "#fff")
+        + ";border:1px solid #c8d8f0;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;";
+    }
+    roadsBtn.title = "Toggle real-road routing for trip-view polylines (uses OSRM public API). Off draws straight lines.";
+    roadsBtn.onclick = function(e){
+      e.stopPropagation();
+      _useRoadRouting = !_useRoadRouting;
+      try { localStorage.setItem('max-road-routing', _useRoadRouting ? '1' : '0'); } catch(_){}
+      _paintRoadsBtn();
+    };
+    _paintRoadsBtn();
+    hdrActions.appendChild(roadsBtn);
     // PD.111: Enhance Discovery — additive LLM pass using the
     // existing set (user list + previous LLM picks + manual adds)
     // as the skip list. Appends new candidates; doesn't replace.
@@ -39540,6 +39567,7 @@ function initMainMap(){
   // panel map; replace the deleted top-of-trip hero map). Route preference is
   // sticky — most users want to see the journey arc by default.
   initMapRouteBtn();
+  initMapRoadsBtn(); // PD.140: road-routing toggle (default off).
   initMapLargerBtn();
   // FN.D.1: same sticky-toggle treatment for day-trip loops. Default
   // visible so the existing user experience is unchanged.
@@ -39551,6 +39579,16 @@ var _mainRoutePoly = null, _mainRouteHalo = null;
 var _routeShown = (function(){
   try { var v = localStorage.getItem('max-route-shown'); return v === null ? true : v === '1'; }
   catch(e){ return true; }
+})();
+// PD.140: road-routing preference. Default OFF — straight lines until
+// the user opts in. When ON, OSRM road routing (PD.136/137) draws
+// real driving paths for the main route + day-trip loops. Off keeps
+// the legacy straight-line behavior. Persisted in localStorage so the
+// choice survives reload; surfaced as a small toggle next to the
+// route button.
+var _useRoadRouting = (function(){
+  try { var v = localStorage.getItem('max-road-routing'); return v === '1'; } // default false
+  catch(e){ return false; }
 })();
 
 function initMapRouteBtn(){
@@ -39564,6 +39602,26 @@ function initMapRouteBtn(){
   btn.onclick = function(){
     _routeShown = !_routeShown;
     try { localStorage.setItem('max-route-shown', _routeShown ? '1' : '0'); } catch(e){}
+    paint();
+    if (typeof updateMainMap === 'function') updateMainMap();
+  };
+  paint();
+}
+
+// PD.140: road-routing toggle. Default off so users opt into the
+// OSRM public API call. When on, polyline switches from straight
+// lines to real driving paths.
+function initMapRoadsBtn(){
+  var btn = document.getElementById('map-roads-btn');
+  if (!btn) return;
+  function paint(){
+    btn.textContent = _useRoadRouting ? '🛤 Roads on' : '🛤 Roads off';
+    btn.style.background = _useRoadRouting ? '#1a5fa8' : 'rgba(255,255,255,.95)';
+    btn.style.color = _useRoadRouting ? '#fff' : '#1a5fa8';
+  }
+  btn.onclick = function(){
+    _useRoadRouting = !_useRoadRouting;
+    try { localStorage.setItem('max-road-routing', _useRoadRouting ? '1' : '0'); } catch(e){}
     paint();
     if (typeof updateMainMap === 'function') updateMainMap();
   };
@@ -40439,6 +40497,8 @@ function _osrmSegmentKey(coords){
 function _ensureTripRoutesCached(segments){
   if (!segments || !segments.length) return Promise.resolve();
   if (typeof trip === "undefined" || !trip) return Promise.resolve();
+  // PD.140: skip the network call when the user has road routing OFF.
+  if (typeof _useRoadRouting !== "undefined" && !_useRoadRouting) return Promise.resolve();
   if (!trip._osrmSegments) trip._osrmSegments = {};
   var missing = segments.filter(function(s){
     var c = trip._osrmSegments[s.key];
@@ -40528,6 +40588,8 @@ function updateMainMap(){
     if(trip.destinations.length===0){
       if(overlay)overlay.style.display="flex";
       if(routeBtn)routeBtn.style.display='none';
+      var _hideRoadsBtn = document.getElementById('map-roads-btn');
+      if(_hideRoadsBtn)_hideRoadsBtn.style.display='none';
       if(largerBtn)largerBtn.style.display='none';
       var _lbHide = document.getElementById('map-legend-btn');
       if (_lbHide) _lbHide.style.display = 'none';
@@ -40552,6 +40614,9 @@ function updateMainMap(){
     // dest trips can still toggle "route" (becomes a no-op visually but
     // doesn't hurt).
     if (routeBtn) routeBtn.style.display = 'inline-block';
+    // PD.140: roads toggle visible alongside the route toggle in trip mode.
+    var roadsBtn = document.getElementById('map-roads-btn');
+    if (roadsBtn) roadsBtn.style.display = 'inline-block';
     if (largerBtn) largerBtn.style.display = (trip.destinations.length >= 2) ? 'inline-block' : 'none';
     // v360.3 (#109): legend button visible alongside the other map
     // controls in trip mode. The popover is hidden until tapped.
@@ -41086,8 +41151,12 @@ function updateMainMap(){
           _segments.push({ key: _osrmSegmentKey(_segCoords), coords: _segCoords });
         }
         var _hasMissing = false;
+        // PD.141: strict off — when road routing is disabled, draw
+        // straight lines even if cached results exist. The toggle is
+        // a true circuit breaker, not just a fetch-suppressor.
+        var _roadsOn = (typeof _useRoadRouting !== "undefined") && _useRoadRouting;
         _segments.forEach(function(s){
-          var cached = trip._osrmSegments && trip._osrmSegments[s.key];
+          var cached = _roadsOn && trip._osrmSegments && trip._osrmSegments[s.key];
           var coords;
           var isStraight;
           if (Array.isArray(cached) && cached.length >= 2) {
@@ -41096,7 +41165,7 @@ function updateMainMap(){
           } else {
             coords = [s.from, s.to];
             isStraight = true;
-            if (cached !== "failed") _hasMissing = true;
+            if (_roadsOn && cached !== "failed") _hasMissing = true;
           }
           // Slightly dimmer styling for straight-line fallback so the
           // user can tell at a glance "this segment isn't road-routed yet."
@@ -41235,7 +41304,9 @@ function updateMainMap(){
       try {
         var loopPath = [hubCtr].concat(dtStops.map(function(s){ return s.dtCtr; })).concat([hubCtr]);
         var loopKey = (typeof _osrmSegmentKey === "function") ? _osrmSegmentKey(loopPath) : null;
-        var loopCached = (loopKey && trip._osrmSegments && trip._osrmSegments[loopKey]);
+        // PD.141: strict off — ignore cache when roads disabled.
+        var _loopRoadsOn = (typeof _useRoadRouting !== "undefined") && _useRoadRouting;
+        var loopCached = (_loopRoadsOn && loopKey && trip._osrmSegments && trip._osrmSegments[loopKey]);
         var loopDrawCoords = (Array.isArray(loopCached) && loopCached.length >= 2)
           ? loopCached
           : loopPath;
