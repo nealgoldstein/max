@@ -12030,7 +12030,7 @@ async function runCandidateSearch(requiredPlaces) {
             _tb.placeActivities.unshift({
               id: "synth-overnight-stays",
               section: "Recommended overnight stays",
-              name: "Places to stay overnight",
+              name: "Place to stay overnight",
               type: "manual",
               description: "Cities and towns you flagged as overnight stays. These anchor the trip\'s geography — they\'re where you sleep and the bases for day trips.",
               checked: true,
@@ -16315,7 +16315,7 @@ function _reconcileUserListedKeeps(){
       _tb.placeActivities.unshift({
         id: "synth-overnight-stays",
         section: "Recommended overnight stays",
-        name: "Places to stay overnight",
+        name: "Place to stay overnight",
         type: "synthetic-stays",
         description: "Cities and towns you flagged as overnight stays. These anchor the trip's geography — they're where you sleep and the bases for day trips.",
         checked: true,
@@ -21872,13 +21872,33 @@ function _refreshAllPlacePickerMaps(){
 // don't seed the geocode table — Selfoss symptom).
 function _pmFocusPlace(placeName){
   if (!placeName) return;
-  var key = String(placeName).toLowerCase();
+  // PD.145: try multiple key forms when looking up the marker. The
+  // map's marker map is keyed by p.place.toLowerCase() but enrichment
+  // items and country-suffix variants may have registered under a
+  // different lowercase form than the user-facing name. Try the raw
+  // lowercase first, then the _normPlaceName form, then a coastline
+  // scan of marker keys for any whose normalized name matches. This
+  // makes the click-to-pulse work for every pin on the map, not just
+  // ones whose key happens to match the row label.
+  var nrm = (typeof _normPlaceName === "function")
+    ? _normPlaceName
+    : function(s){ return String(s||"").toLowerCase().trim(); };
+  var keyLower = String(placeName).toLowerCase();
+  var keyNorm  = nrm(placeName);
   if (!_tb) return;
   if (typeof _pmMaps !== "object" || !_pmMaps) return;
   Object.keys(_pmMaps).forEach(function(targetId){
     var state = _pmMaps[targetId];
     if (!state || !state.map) return;
-    var marker = state.markers && state.markers[key];
+    var marker = state.markers && state.markers[keyLower];
+    if (!marker && state.markers) {
+      // Try normalized form against each registered marker key.
+      var foundKey = Object.keys(state.markers).find(function(mk){
+        return nrm(mk) === keyNorm || mk === keyNorm;
+      });
+      if (foundKey) marker = state.markers[foundKey];
+    }
+    var key = (marker && state.markers) ? Object.keys(state.markers).find(function(mk){ return state.markers[mk] === marker; }) || keyLower : keyLower;
     // Resolve coords: try _coarseGeocode first, fall back to the
     // marker's own latLng (set when it was added to the map).
     var ll = (typeof _coarseGeocode !== "undefined" && _coarseGeocode[key]) || null;
