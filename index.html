@@ -11129,11 +11129,31 @@ async function analyzeCoverageGaps(btn){
   if (btn) { origLabel = btn.textContent; btn.disabled = true; btn.textContent = "Discovering…"; }
   try {
     var nrm = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){return String(s||"").toLowerCase();};
+    // PD.170 (architectural): Discovery's visible content lives in
+    // _tb.placeActivities[].requiredPlaces — that's what the user
+    // sees on screen and what the LLM should reason about. Earlier
+    // code only counted _tb.candidates, which is empty/partial for
+    // sentence-driven flow (LLM populates placeActivities directly).
+    // Result: a Discovery with 12 stays + 10 themed sections looked
+    // "empty" to this function. Single source of truth: scan the
+    // sections the user actually sees; layer candidates as supplement.
     var kept = [];
+    var seen = {};
+    (_tb.placeActivities || []).forEach(function(it){
+      if (!it || !Array.isArray(it.requiredPlaces)) return;
+      it.requiredPlaces.forEach(function(p){
+        if (!p || !p.place) return;
+        if (p._rejected === true) return;
+        if (p._keep === false) return;
+        var k = nrm(p.place);
+        if (k && !seen[k]) { seen[k] = true; kept.push(p.place); }
+      });
+    });
     (_tb.candidates || []).forEach(function(c){
       if (!c || !c.place) return;
       if (c.status === "reject") return;
-      kept.push(c.place);
+      var k = nrm(c.place);
+      if (k && !seen[k]) { seen[k] = true; kept.push(c.place); }
     });
     if (!kept.length) {
       if (typeof maxAlert === "function") maxAlert("Discovery is empty — generate places first, then ask what's missing.");
