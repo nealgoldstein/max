@@ -39090,6 +39090,14 @@ if (typeof MaxEnginePicker !== "undefined" && typeof MaxEnginePicker.on === "fun
   // picker engine builds + writes; the UI watches and renders.
   MaxEnginePicker.on("published", async function (payload) {
     var isRebuild = payload && payload.isRebuild;
+    // PD.124: clear picker-active BEFORE anything else. PD.83c made
+    // drawTripMode bail when this class is set (defense against
+    // picker chrome bleeding under the picker overlay). When the user
+    // hits Choreograph, the picker IS closing — drawTripMode needs to
+    // run. Without this line the user gets a blank screen because the
+    // class survived from picker-open time and drawTripMode silently
+    // returns.
+    if (document.body) document.body.classList.remove("picker-active");
     // Close the picker UI: candidate explorer overlay + Leaflet maps.
     var ceOv = g("candidate-explorer-overlay");
     if (ceOv) ceOv.style.display = "none";
