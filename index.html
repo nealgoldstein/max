@@ -16657,15 +16657,24 @@ function _reconcileUserListedKeeps(){
 
     var listedStayKeys;
     if (listedKeys.length) {
-      // Paste-list: include iff one of
-      //   • positive stay signal somewhere (stayKeys), OR
-      //   • listed AND has presence in acts/candidates AND not sight-only
-      // Listed-with-no-presence = umbrella entry → not a stay.
+      // PD.169 (architectural): respect the user's explicit "stay"
+      // tag even when the LLM failed to produce a candidate for that
+      // name. The parser-tagged "stay" IS the strongest signal here —
+      // the user typed it under their stays heading. Missing candidate
+      // is an LLM failure, not user intent.
+      //
+      // Order:
+      //   1. positive stay signal somewhere (stayKeys) → include
+      //   2. sight-only signal (sightKeys) → exclude
+      //   3. user explicitly tagged "stay" → include (bypasses presence)
+      //   4. has presence + ambiguous (no tag) → include
+      //   5. listed but no presence and no "stay" tag → umbrella → exclude
       listedStayKeys = listedKeys.filter(function(k){
         if (stayKeys[k]) return true;
         if (sightKeys[k]) return false;
-        if (!hasPresence[k]) return false; // umbrella, no concrete place
-        return true; // listed + present + ambiguous → trust the user
+        if (listed[k] === "stay") return true;
+        if (!hasPresence[k]) return false;
+        return true;
       });
     } else {
       // Sentence-driven with no existing stays section → synthesize from
