@@ -16947,6 +16947,27 @@ function _renderPlaceActivityItems(){
     // highlighted row has the query in its big bold name.
     var q = _searchQNorm;
     if (d.place && _searchNormalize(d.place).indexOf(q) >= 0) return true;
+    // PD.147: also match inline Enhance enrichments anchored to this
+    // place. Enrichment items (PD.114) render inline under the source
+    // place's row via _tb._enrichmentsByPlace — they aren't separate
+    // top-level rows, so without this clause searching "Berserkjahraun"
+    // returned zero hits even though it was visible on the map and
+    // inline under its source place. Match against the enrichment's
+    // place name and the source place becomes a search hit.
+    try {
+      var byEnr = (_tb && _tb._enrichmentsByPlace) || null;
+      if (byEnr && d.place) {
+        var nrm0 = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){return String(s||"").toLowerCase();};
+        var k = nrm0(d.place);
+        var kl = String(d.place).toLowerCase();
+        var kids = byEnr[k] || byEnr[kl];
+        if (Array.isArray(kids)) {
+          for (var i = 0; i < kids.length; i++) {
+            if (kids[i] && kids[i].place && _searchNormalize(kids[i].place).indexOf(q) >= 0) return true;
+          }
+        }
+      }
+    } catch(_){}
     return false;
   }
 
