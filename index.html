@@ -16577,65 +16577,66 @@ function _reconcileUserListedKeeps(){
     // c.role is intentionally NOT consulted as a gate — it was set
     // by PD.74-arch from the parser's noisy default and can't beat
     // the LLM's content classification.
+    // PD.163 (architectural): source from placeActivities, not
+    // candidates. The LLM emits its per-place stay classification
+    // as `overnight: true` on placeActivity requiredPlaces, and the
+    // map pins read from the same source. _tb.candidates often lacks
+    // these flags — so a filter that scans candidates misses stays
+    // that the LLM and the map both already agree on.
+    //
+    // Authoritative signal: a place appears with overnight === true
+    // in at least one placeActivity requiredPlace. That's stay-capable.
+    //
+    // Optional secondary signal (candidates): some flows write
+    // c.role="stay" / overnightCapable=true on a candidate without
+    // it appearing in placeActivities yet. We honor those too.
+    var stayKeysFromActs = {};
+    var sightOnlyKeys = {};  // appears only as overnight:false / singleSight
+    _tb.placeActivities.forEach(function(it){
+      if (!it) return;
+      // Skip the synthetic stays section itself to avoid self-referencing.
+      if (/^recommended overnight stays$/i.test(String(it.section||""))) return;
+      (it.requiredPlaces || []).forEach(function(p){
+        if (!p || !p.place) return;
+        if (p._rejected === true) return;
+        var k = nrm(p.place);
+        if (!k) return;
+        if (p.overnight === true) stayKeysFromActs[k] = true;
+        else if (p.overnight === false && !stayKeysFromActs[k]) sightOnlyKeys[k] = true;
+      });
+    });
+    // Layer in candidate-level signals.
     var candByKey = {};
     (_tb.candidates || []).forEach(function(c){
       if (!c || !c.place) return;
       var k = nrm(c.place);
-      if (k && !candByKey[k]) candByKey[k] = c;
+      if (!k) return;
+      if (!candByKey[k]) candByKey[k] = c;
+      if (c.status === "reject") return;
+      if (c.singleSight === true) { sightOnlyKeys[k] = true; return; }
+      if (c.overnightCapable === false) { sightOnlyKeys[k] = true; return; }
+      if (c.role === "stay" || c.overnightCapable === true || c.overnight === true) {
+        stayKeysFromActs[k] = true;
+      }
     });
-    // PD.162 (architectural): trinary classification — YES / NO /
-    // AMBIGUOUS. We have several signals for stay-capability:
-    //   • LLM singleSight=true → definitely a sight (waterfall etc)
-    //   • LLM overnightCapable=false → LLM says no lodging
-    //   • c.role=daytrip/onway → committed elsewhere
-    //   • c.role=stay OR overnightCapable=true OR overnight=true → YES
-    //   • Everything else → AMBIGUOUS
-    //
-    // The right behavior on AMBIGUOUS depends on flow:
-    //   • Paste-list: the user listed this place. Their intent is the
-    //     positive signal. Include unless LLM actively contradicts.
-    //   • Sentence-driven: no user intent on individual places — the
-    //     LLM is generating candidates. Require an affirmative LLM
-    //     signal to include; don't pad the section with maybes.
-    //
-    // Returns: true / false / null (null = ambiguous, caller decides).
-    function _stayCapable(c){
-      if (!c) return null;
-      if (c.singleSight === true) return false;
-      if (c.overnightCapable === false) return false;
-      if (c.role === "daytrip" || c.role === "onway") return false;
-      if (c.role === "stay") return true;
-      if (c.overnightCapable === true) return true;
-      if (c.overnight === true) return true;
-      return null; // ambiguous
-    }
+
     var listedKeys = Object.keys(listed);
     var listedStayKeys;
     if (listedKeys.length) {
-      // Paste-list path: ambiguous → INCLUDE (trust the user's intent).
-      // This is why Stykkishólmur lands here even though its parser
-      // role is "see" (duplicate paste collision) and the LLM didn't
-      // emit overnightCapable=true: nothing actively excludes it, so
-      // we honor the listing.
+      // Paste-list path: a listed place lands in stays if either
+      //   • placeActivities/candidates mark it overnight:true / role:stay
+      //   • parser tagged it stay AND nothing actively contradicts
+      //   • the user listed it AND nothing tags it sight-only
+      //     (ambiguous + listed = trust the user)
       listedStayKeys = listedKeys.filter(function(k){
-        var c = candByKey[k];
-        if (!c) {
-          // No candidate yet — only include on explicit "stay" hint.
-          return listed[k] === "stay";
-        }
-        var sc = _stayCapable(c);
-        if (sc === true) return true;
-        if (sc === false) return false;
-        return true; // ambiguous + listed = include
+        if (stayKeysFromActs[k]) return true;       // positive signal
+        if (sightOnlyKeys[k]) return false;          // negative signal
+        return true;                                  // ambiguous + listed → include
       });
     } else {
-      // Sentence-driven path: ambiguous → EXCLUDE (need positive
-      // LLM signal). Every kept candidate the LLM flagged as a stay.
-      listedStayKeys = (_tb.candidates || []).filter(function(c){
-        if (!c || !c.place) return false;
-        if (c.status === "reject") return false;
-        return _stayCapable(c) === true;
-      }).map(function(c){ return nrm(c.place); });
+      // Sentence-driven path: every place the LLM flagged stay.
+      // No ambiguous-inclusion here — we need a positive signal.
+      listedStayKeys = Object.keys(stayKeysFromActs);
     }
     if (!listedStayKeys.length) return;
     var existing = _tb.placeActivities.find(function(it){
