@@ -18596,6 +18596,40 @@ if (typeof globalThis !== "undefined") globalThis._pmRoleForCheck = _pmRoleForCh
 // source of truth from PD.89/91/92), so the badge survives reopens,
 // reloads, and sync. Empty string for LLM-added places — no badge
 // means "Max added this."
+// PD.146: fuzzy resolver for listed-name role. Paste-list with typos
+// (e.g. "Jökulsárlón cxanyon") gets stored under the garbled key.
+// LLM correctly splits into clean names ("Jökulsárlón" +
+// "Jökulsárgljúfur Canyon") as separate placeActivities. Exact-match
+// lookups miss the listed entry. This resolver tries: (1) exact, (2)
+// listed key starts with "<place> " (handles "<place> <typo>"),
+// (3) place appears as a whitespace token in a listed key. Returns
+// the role string or null. Reused by popup label + row badge so
+// they agree on what's "on your list".
+function _resolveListedRole(placeName){
+  if (!placeName) return null;
+  if (typeof _tb === "undefined" || !_tb || !_tb._userListedNames) return null;
+  var nrm = (typeof _normPlaceName === "function")
+    ? _normPlaceName
+    : function(s){ return String(s||"").toLowerCase(); };
+  var listed = _tb._userListedNames;
+  var k = nrm(placeName);
+  if (!k) return null;
+  if (listed[k]) return listed[k];
+  // Prefix-of-listed-key (handles typos appended after the place)
+  var prefix = k + " ";
+  var keys = Object.keys(listed);
+  for (var i = 0; i < keys.length; i++) {
+    if (keys[i].indexOf(prefix) === 0) return listed[keys[i]];
+  }
+  // Word-token containment (handles place names buried mid-key)
+  for (var j = 0; j < keys.length; j++) {
+    var tokens = keys[j].split(/\s+/);
+    if (tokens.indexOf(k) >= 0) return listed[keys[j]];
+  }
+  return null;
+}
+if (typeof globalThis !== "undefined") globalThis._resolveListedRole = _resolveListedRole;
+
 function _pmOnUserListedBadgeHtml(placeName){
   if (!placeName) return "";
   try {
@@ -18604,7 +18638,9 @@ function _pmOnUserListedBadgeHtml(placeName){
       ? _normPlaceName
       : function(s){ return String(s||"").toLowerCase(); };
     var k = nrm(placeName);
-    var role = _tb._userListedNames && _tb._userListedNames[k];
+    // PD.146: use the fuzzy resolver so typos in the paste don't
+    // hide the "Your list" badge for places the LLM cleaned up.
+    var role = _resolveListedRole(placeName);
     if (role) {
       // PD.128: bed glyph for stays, eye glyph for sees. Role-specific.
       var glyph = role === "stay" ? "🛏" : "👁";
@@ -26107,16 +26143,22 @@ function _renderPlacePickerMap(targetId){
         var _candForLabel = null;
         var _listedRole = null;
         try {
-          if (window._tb && typeof _pmMetaKey === "function") {
-            var _kForLabel = _pmMetaKey(placeName);
-            if (window._tb._userListedNames && window._tb._userListedNames[_kForLabel]) {
-              _listedRole = window._tb._userListedNames[_kForLabel];
+          // PD.146: route through _resolveListedRole so typos in the
+          // paste-list don't hide the "On your list" framing for
+          // places the LLM cleaned up. Exact → prefix → word-token.
+          if (window._tb && typeof _resolveListedRole === "function") {
+            _listedRole = _resolveListedRole(placeName);
+          } else if (window._tb && typeof _pmMetaKey === "function") {
+            var _kFallback = _pmMetaKey(placeName);
+            if (window._tb._userListedNames && window._tb._userListedNames[_kFallback]) {
+              _listedRole = window._tb._userListedNames[_kFallback];
             }
-            if (Array.isArray(window._tb.candidates)) {
-              _candForLabel = window._tb.candidates.find(function(c){
-                return c && c.place && _pmMetaKey(c.place) === _kForLabel;
-              });
-            }
+          }
+          if (window._tb && Array.isArray(window._tb.candidates) && typeof _pmMetaKey === "function") {
+            var _kForCand = _pmMetaKey(placeName);
+            _candForLabel = window._tb.candidates.find(function(c){
+              return c && c.place && _pmMetaKey(c.place) === _kForCand;
+            });
           }
         } catch(_){}
         // PD.91 / PD.144: three distinct states, not two. The user
