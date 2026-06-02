@@ -16590,53 +16590,68 @@ function _reconcileUserListedKeeps(){
     // Optional secondary signal (candidates): some flows write
     // c.role="stay" / overnightCapable=true on a candidate without
     // it appearing in placeActivities yet. We honor those too.
-    var stayKeysFromActs = {};
-    var sightOnlyKeys = {};  // appears only as overnight:false / singleSight
+    // PD.164 (architectural): collect three sets in parallel:
+    //   • stayKeys     — has a positive stay signal somewhere
+    //   • sightKeys    — has a negative (sight-only) signal somewhere
+    //   • hasPresence  — appears in any placeActivity or candidate
+    //
+    // Order-independent: stay always wins over sight (a place that's
+    // a stay in one activity and shown-from in another stays a stay).
+    // hasPresence distinguishes a real listed place from an umbrella
+    // entry (Golden Circle, Snæfellsnes region) — umbrellas have no
+    // requiredPlace row of their own and no candidate, so they have
+    // no presence and don't belong in stays even when listed.
+    var stayKeys = {};
+    var sightKeys = {};
+    var hasPresence = {};
     _tb.placeActivities.forEach(function(it){
       if (!it) return;
-      // Skip the synthetic stays section itself to avoid self-referencing.
-      if (/^recommended overnight stays$/i.test(String(it.section||""))) return;
+      var sec = String(it.section||"");
+      if (/^recommended overnight stays$/i.test(sec)) return;
+      // Umbrella section itself shouldn't grant presence to its entries
+      // — they're listed names that need stay-section treatment.
+      if (/^routes\s*[&]\s*regions you named$/i.test(sec)) return;
       (it.requiredPlaces || []).forEach(function(p){
         if (!p || !p.place) return;
         if (p._rejected === true) return;
         var k = nrm(p.place);
         if (!k) return;
-        if (p.overnight === true) stayKeysFromActs[k] = true;
-        else if (p.overnight === false && !stayKeysFromActs[k]) sightOnlyKeys[k] = true;
+        hasPresence[k] = true;
+        if (p.overnight === true) { stayKeys[k] = true; delete sightKeys[k]; }
+        else if (p.overnight === false && !stayKeys[k]) sightKeys[k] = true;
       });
     });
-    // Layer in candidate-level signals.
     var candByKey = {};
     (_tb.candidates || []).forEach(function(c){
       if (!c || !c.place) return;
       var k = nrm(c.place);
       if (!k) return;
       if (!candByKey[k]) candByKey[k] = c;
+      hasPresence[k] = true;
       if (c.status === "reject") return;
-      if (c.singleSight === true) { sightOnlyKeys[k] = true; return; }
-      if (c.overnightCapable === false) { sightOnlyKeys[k] = true; return; }
       if (c.role === "stay" || c.overnightCapable === true || c.overnight === true) {
-        stayKeysFromActs[k] = true;
+        stayKeys[k] = true; delete sightKeys[k];
+      } else if (c.singleSight === true || c.overnightCapable === false) {
+        if (!stayKeys[k]) sightKeys[k] = true;
       }
     });
 
     var listedKeys = Object.keys(listed);
     var listedStayKeys;
     if (listedKeys.length) {
-      // Paste-list path: a listed place lands in stays if either
-      //   • placeActivities/candidates mark it overnight:true / role:stay
-      //   • parser tagged it stay AND nothing actively contradicts
-      //   • the user listed it AND nothing tags it sight-only
-      //     (ambiguous + listed = trust the user)
+      // Paste-list: include iff one of
+      //   • positive stay signal somewhere (stayKeys), OR
+      //   • listed AND has presence in acts/candidates AND not sight-only
+      // Listed-with-no-presence = umbrella entry → not a stay.
       listedStayKeys = listedKeys.filter(function(k){
-        if (stayKeysFromActs[k]) return true;       // positive signal
-        if (sightOnlyKeys[k]) return false;          // negative signal
-        return true;                                  // ambiguous + listed → include
+        if (stayKeys[k]) return true;
+        if (sightKeys[k]) return false;
+        if (!hasPresence[k]) return false; // umbrella, no concrete place
+        return true; // listed + present + ambiguous → trust the user
       });
     } else {
-      // Sentence-driven path: every place the LLM flagged stay.
-      // No ambiguous-inclusion here — we need a positive signal.
-      listedStayKeys = Object.keys(stayKeysFromActs);
+      // Sentence-driven: positive stay signal only.
+      listedStayKeys = Object.keys(stayKeys);
     }
     if (!listedStayKeys.length) return;
     var existing = _tb.placeActivities.find(function(it){
