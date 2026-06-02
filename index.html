@@ -11103,6 +11103,107 @@ function _ensureTripRoleDefaults(cands) {
 // shape + per-place enrichment from PD.110), just with the entire
 // existing set as skipList instead of starting fresh. Reconciliation
 // at render time handles the user-listed force-keep as always.
+// PD.152: coverage gap analysis. One LLM call asking what major
+// trip-shaping categories are absent from the current Discovery set
+// (e.g. user has 12 waterfalls but no hot springs in an Iceland
+// trip). Surfaces 1-3 short suggestions as a banner; each can be
+// dismissed or feed into a focused Enhance.
+async function analyzeCoverageGaps(btn){
+  if (typeof _tb === "undefined" || !_tb) return;
+  if (typeof callMax !== "function") {
+    if (typeof maxAlert === "function") maxAlert("Max isn't available — check your API key.");
+    return;
+  }
+  var origLabel = null;
+  if (btn) { origLabel = btn.textContent; btn.disabled = true; btn.textContent = "thinking…"; }
+  try {
+    var nrm = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){return String(s||"").toLowerCase();};
+    var kept = [];
+    (_tb.candidates || []).forEach(function(c){
+      if (!c || !c.place) return;
+      if (c.status === "reject") return;
+      kept.push(c.place);
+    });
+    if (!kept.length) {
+      if (typeof maxAlert === "function") maxAlert("Discovery is empty — generate places first, then ask what's missing.");
+      return;
+    }
+    var brief = (typeof _serializeTbForPrompt === "function") ? _serializeTbForPrompt(_tb) : (_tb.intent || "");
+    var region = _tb.region || "this region";
+    var prompt = "You are a travel expert auditing a traveler's Discovery list for " + region + ".\n"
+      + "Trip context: " + brief + "\n\n"
+      + "The traveler has " + kept.length + " places in their list:\n"
+      + kept.join(", ") + "\n\n"
+      + "What 1-3 major categories of " + region + " experience are CONSPICUOUSLY ABSENT from this list? Think about themes a thoughtful traveler to this region would expect to have at least SOMETHING covering — hot springs, glaciers, waterfalls, cities, museums, food, wildlife, scenic drives, etc.\n\n"
+      + "Be specific to this region and this traveler's stated context. Only flag gaps the traveler probably DIDN'T mean to skip. Don't flag generic gateways or things they explicitly rejected.\n\n"
+      + "Return ONLY a JSON array of 0-3 short strings, each ≤120 chars:\n"
+      + '["You have many waterfalls but no hot springs — Iceland is famous for them.", "..."]\n'
+      + 'If the list is well-rounded with no obvious gaps, return [].';
+    var result = await callMax([{role:"user", content:prompt}], 400, 30000);
+    var cleaned = String(result || "").replace(/```json|```/g, "").trim();
+    var gaps;
+    try { gaps = JSON.parse(cleaned); }
+    catch(parseErr) { gaps = []; }
+    if (!Array.isArray(gaps) || !gaps.length) {
+      _showEnhanceLikeToast("✓ Max didn't spot any obvious gaps in your list. You're well-covered.");
+      return;
+    }
+    _showGapBanner(gaps);
+  } catch(err) {
+    console.warn("[Max PD.152] coverage gap failed:", err && err.message);
+    if (typeof maxAlert === "function") maxAlert("Couldn't analyze gaps: " + (err && err.message ? err.message : "unknown error"));
+  } finally {
+    if (btn && origLabel != null) { btn.disabled = false; btn.textContent = origLabel; }
+  }
+}
+if (typeof globalThis !== "undefined") globalThis.analyzeCoverageGaps = analyzeCoverageGaps;
+
+// PD.152: small helpers. The "Enhance-like" toast (PD.142 style — over
+// the picker overlay so it's visible even when #app is hidden).
+function _showEnhanceLikeToast(msg, ms){
+  try {
+    var prev = document.getElementById("pm-enhance-toast");
+    if (prev && prev.parentNode) prev.parentNode.removeChild(prev);
+    var t = document.createElement("div");
+    t.id = "pm-enhance-toast";
+    t.textContent = msg;
+    t.style.cssText = "position:fixed;top:64px;left:50%;transform:translateX(-50%);"
+      + "max-width:680px;z-index:12000;background:#1a1a1a;color:#fff;padding:11px 16px;"
+      + "border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,0.35);"
+      + "font-size:12px;font-weight:500;line-height:1.5;font-family:inherit;cursor:pointer;";
+    t.title = "Click to dismiss";
+    t.onclick = function(){ if (t.parentNode) t.parentNode.removeChild(t); };
+    document.body.appendChild(t);
+    setTimeout(function(){ if (t.parentNode) t.parentNode.removeChild(t); }, ms || 8000);
+  } catch(_){}
+}
+function _showGapBanner(gaps){
+  try {
+    var existing = document.getElementById("pm-gap-banner");
+    if (existing) existing.remove();
+    var b = document.createElement("div");
+    b.id = "pm-gap-banner";
+    b.style.cssText = "position:fixed;top:64px;left:50%;transform:translateX(-50%);"
+      + "max-width:760px;width:90%;z-index:12000;background:#fffaf0;color:#3a2f10;"
+      + "border:1px solid #e6d8a8;padding:14px 18px;border-radius:8px;"
+      + "box-shadow:0 4px 14px rgba(0,0,0,0.18);font-size:13px;line-height:1.55;font-family:inherit;";
+    var html = '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px;">'
+      +   '<strong style="color:#7a6310;">✦ Max sees gaps in your list:</strong>'
+      +   '<span id="pm-gap-banner-close" style="cursor:pointer;color:#999;font-weight:400;">×</span>'
+      + '</div>'
+      + '<ul style="margin:0;padding-left:20px;">'
+      +   gaps.slice(0, 3).map(function(g){ return '<li style="margin-bottom:4px;">' + String(g).replace(/</g,"&lt;") + '</li>'; }).join("")
+      + '</ul>'
+      + '<div style="margin-top:10px;font-size:11.5px;color:#8a7548;">'
+      +   'Use <strong>✦ Enhance</strong> above to ask Max for more places filling these gaps — or add specific places via "+ Add a place" below.'
+      + '</div>';
+    b.innerHTML = html;
+    document.body.appendChild(b);
+    document.getElementById("pm-gap-banner-close").onclick = function(){ b.remove(); };
+    setTimeout(function(){ if (b.parentNode) { b.style.transition = "opacity 0.4s"; b.style.opacity = "0"; setTimeout(function(){ try{b.remove();}catch(_){} }, 400); } }, 18000);
+  } catch(_){}
+}
+
 async function enhanceDiscovery(btn) {
   if (typeof _tb === "undefined" || !_tb) return;
   if (typeof callMax !== "function") {
@@ -17144,6 +17245,86 @@ function _renderPlaceActivityItems(){
       else _pmBulk.enter();
     };
     hdrActions.appendChild(bulkBtn);
+    // PD.151: Recently rejected tray — visible only when there's
+    // something to restore. Click opens a small popover listing each
+    // rejection with a one-click "Restore" button.
+    (function _renderUndoRejectsBtn(){
+      var hist = (_tb && _tb._rejectionHistory) || [];
+      if (!hist.length) return;
+      var undoBtn = document.createElement("button");
+      undoBtn.type = "button";
+      undoBtn.style.cssText = "position:relative;font-size:11px;font-weight:600;color:#a93826;background:#fff;border:1px solid #f2d4cc;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;";
+      undoBtn.innerHTML = '↶ Recently rejected (' + hist.length + ')';
+      undoBtn.title = "Undo rejections — restore places you rejected with one click";
+      undoBtn.onclick = function(e){
+        e.stopPropagation();
+        // Remove any existing popover.
+        var existing = document.getElementById("pm-undo-rejects-pop");
+        if (existing) { existing.remove(); return; }
+        var pop = document.createElement("div");
+        pop.id = "pm-undo-rejects-pop";
+        pop.style.cssText = "position:absolute;top:32px;right:0;z-index:11500;background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,0.18);padding:10px 12px;min-width:280px;max-width:380px;max-height:420px;overflow-y:auto;font-family:inherit;";
+        var hd = document.createElement("div");
+        hd.style.cssText = "font-size:11px;font-weight:700;color:#666;letter-spacing:.04em;text-transform:uppercase;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:8px;";
+        hd.innerHTML = '<span>Recently rejected</span><span id="pm-undo-rejects-close" style="cursor:pointer;color:#999;font-weight:400;text-transform:none;letter-spacing:0;">×</span>';
+        pop.appendChild(hd);
+        hist.slice().reverse().forEach(function(rec){
+          var row = document.createElement("div");
+          row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid #f0f0f0;font-size:12px;";
+          var nameSpan = document.createElement("span");
+          nameSpan.style.cssText = "color:#333;font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+          nameSpan.textContent = rec.place;
+          nameSpan.title = rec.place;
+          var restoreBtn = document.createElement("button");
+          restoreBtn.type = "button";
+          restoreBtn.textContent = "Restore";
+          restoreBtn.style.cssText = "font-size:11px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:3px 10px;cursor:pointer;font-family:inherit;";
+          restoreBtn.onclick = function(){
+            try {
+              if (typeof MaxRoleWriter !== "undefined" && MaxRoleWriter.set) {
+                MaxRoleWriter.set(rec.id || rec.place, rec.prevRole || "see");
+              }
+              // Drop from history.
+              _tb._rejectionHistory = (_tb._rejectionHistory || []).filter(function(r){
+                return r && r.id !== rec.id;
+              });
+            } catch(_){}
+            pop.remove();
+            if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
+          };
+          row.appendChild(nameSpan);
+          row.appendChild(restoreBtn);
+          pop.appendChild(row);
+        });
+        var clearAll = document.createElement("div");
+        clearAll.style.cssText = "margin-top:8px;font-size:10.5px;color:#999;cursor:pointer;text-align:center;padding:4px;";
+        clearAll.textContent = "Clear rejection history";
+        clearAll.title = "Forget what you've rejected (you can't undo after this)";
+        clearAll.onclick = function(){
+          _tb._rejectionHistory = [];
+          pop.remove();
+          if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
+        };
+        pop.appendChild(clearAll);
+        document.body.appendChild(pop);
+        // Position relative to the button.
+        var btnRect = undoBtn.getBoundingClientRect();
+        pop.style.position = "fixed";
+        pop.style.top = (btnRect.bottom + 6) + "px";
+        pop.style.right = (window.innerWidth - btnRect.right) + "px";
+        // Close on outside click + × button.
+        document.getElementById("pm-undo-rejects-close").onclick = function(){ pop.remove(); };
+        setTimeout(function(){
+          document.addEventListener("mousedown", function _outside(ev){
+            if (!pop.contains(ev.target) && ev.target !== undoBtn) {
+              try { pop.remove(); } catch(_){}
+              document.removeEventListener("mousedown", _outside);
+            }
+          });
+        }, 50);
+      };
+      hdrActions.appendChild(undoBtn);
+    })();
     // PD.141: Roads toggle in Discovery chrome — so the user can set
     // the road-routing pref BEFORE hitting Choreograph (avoids the
     // first trip-view render firing OSRM calls). Same persisted
@@ -17167,6 +17348,20 @@ function _renderPlaceActivityItems(){
     };
     _paintRoadsBtn();
     hdrActions.appendChild(roadsBtn);
+    // PD.152: "What's missing?" — one LLM call that audits the
+    // existing set against typical trip themes for the region and
+    // surfaces 1-3 category gaps as a banner. The user can then
+    // hit ✦ Enhance (which is right there) for a focused refinement.
+    var gapBtn = document.createElement("button");
+    gapBtn.type = "button";
+    gapBtn.style.cssText = "font-size:11px;font-weight:600;color:#a08a55;background:#fffaf0;border:1px solid #e6d8a8;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;";
+    gapBtn.innerHTML = '✦ What\'s missing?';
+    gapBtn.title = "Ask Max what major themes / categories are absent from your current Discovery list.";
+    gapBtn.onclick = function(e){
+      e.stopPropagation();
+      if (typeof analyzeCoverageGaps === "function") analyzeCoverageGaps(gapBtn);
+    };
+    hdrActions.appendChild(gapBtn);
     // PD.111: Enhance Discovery — additive LLM pass using the
     // existing set (user list + previous LLM picks + manual adds)
     // as the skip list. Appends new candidates; doesn't replace.
@@ -22422,6 +22617,26 @@ var MaxRoleWriter = {
     } else if (role === "reject") {
       cand.status = "reject";
       cand._roleTouched = true;
+      // PD.151: track rejection history so the user can undo. The
+      // restore action will set the role back to whatever it was
+      // immediately before rejection (or "see" as a sensible default).
+      try {
+        if (!_tb._rejectionHistory) _tb._rejectionHistory = [];
+        // De-dup by id (if a place is re-rejected, refresh its entry).
+        _tb._rejectionHistory = _tb._rejectionHistory.filter(function(r){
+          return r && r.id !== cand.id;
+        });
+        _tb._rejectionHistory.push({
+          id: cand.id,
+          place: cand.place,
+          prevRole: (prev && prev !== "reject") ? prev : "see",
+          ts: Date.now()
+        });
+        // Cap at last 20 to avoid unbounded growth.
+        if (_tb._rejectionHistory.length > 20) {
+          _tb._rejectionHistory = _tb._rejectionHistory.slice(-20);
+        }
+      } catch(_){}
     }
     // ── placeMeta.stayOverride ──────────────────────────────────────
     try {
