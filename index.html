@@ -11138,15 +11138,35 @@ async function analyzeCoverageGaps(btn){
     }
     var brief = (typeof _serializeTbForPrompt === "function") ? _serializeTbForPrompt(_tb) : (_tb.intent || "");
     var region = _tb.region || "this region";
+    // PD.156: pass existing section names + their kept-count so the
+    // LLM can flag THIN categories (1-2 items) as well as absent
+    // ones, and tell us which existing section (if any) each gap
+    // maps to. That way the fill action can EXTEND an existing
+    // section rather than creating a duplicate.
+    var sectionSummary = [];
+    (_tb.placeActivities || []).forEach(function(it){
+      if (!it || !it.section) return;
+      var keptCount = (it.requiredPlaces || []).filter(function(p){ return p && p._keep && !p._rejected; }).length;
+      if (keptCount > 0) sectionSummary.push({ section: it.section, kept: keptCount });
+    });
+    var sectionContext = sectionSummary.length
+      ? ("\nExisting sections in their Discovery (section name + kept count):\n" + sectionSummary.map(function(s){ return "  • " + s.section + " (" + s.kept + ")"; }).join("\n") + "\n")
+      : "";
     var prompt = "You are a travel expert auditing a traveler's Discovery list for " + region + ".\n"
-      + "Trip context: " + brief + "\n\n"
-      + "The traveler has " + kept.length + " places in their list:\n"
+      + "Trip context: " + brief + "\n"
+      + sectionContext + "\n"
+      + "Their kept places (" + kept.length + " total):\n"
       + kept.join(", ") + "\n\n"
-      + "What 1-3 major categories of " + region + " experience are CONSPICUOUSLY ABSENT from this list? Think about themes a thoughtful traveler to this region would expect to have at least SOMETHING covering — hot springs, glaciers, waterfalls, cities, museums, food, wildlife, scenic drives, etc.\n\n"
-      + "Be specific to this region and this traveler's stated context. Only flag gaps the traveler probably DIDN'T mean to skip. Don't flag generic gateways or things they explicitly rejected.\n\n"
-      + "Return ONLY a JSON array of 0-3 short strings, each ≤120 chars:\n"
-      + '["You have many waterfalls but no hot springs — Iceland is famous for them.", "..."]\n'
-      + 'If the list is well-rounded with no obvious gaps, return [].';
+      + "Flag up to 3 categories where this list is CONSPICUOUSLY ABSENT or noticeably THIN — themes a thoughtful traveler to this region would normally have well-covered (hot springs, glaciers, waterfalls, cities, museums, food, wildlife, scenic drives, cultural sites, geothermal, etc.).\n\n"
+      + "For each gap, indicate:\n"
+      + "  • category: the gap label the user will see (e.g. 'Hot springs and geothermal pools')\n"
+      + "  • currentCount: how many existing kept places already cover this — use 0 for fully absent, 1 or 2 for thin coverage\n"
+      + "  • matchesExistingSection: the EXACT section name (from the list above) this gap should extend, or null if it should become a new section\n"
+      + "  • suggestion: a short rationale for the user (≤120 chars), like 'You have 1 museum — adding 2 more rounds out cultural coverage.' or 'No hot springs — Iceland's signature experience.'\n\n"
+      + "Be specific to this region. Don't flag things explicitly rejected. Don't suggest depth on categories that are already fully covered (3+ items).\n\n"
+      + "Return ONLY a JSON array of 0-3 objects, no markdown:\n"
+      + '[{"category":"...","currentCount":0,"matchesExistingSection":null,"suggestion":"..."}]\n'
+      + "If the list is well-rounded with no obvious gaps, return [].";
     var result = await callMax([{role:"user", content:prompt}], 400, 30000);
     var cleaned = String(result || "").replace(/```json|```/g, "").trim();
     var gaps;
@@ -11156,7 +11176,10 @@ async function analyzeCoverageGaps(btn){
       _showEnhanceLikeToast("✓ Max didn't spot any obvious gaps in your list. You're well-covered.");
       return;
     }
-    _showGapBanner(gaps);
+    // PD.155: open the interactive modal — user picks which gaps to
+    // fill, optionally adds a custom category, and clicks the action
+    // to run per-category LLM enrichment.
+    _showGapModal(gaps);
   } catch(err) {
     console.warn("[Max PD.152] coverage gap failed:", err && err.message);
     if (typeof maxAlert === "function") maxAlert("Couldn't analyze gaps: " + (err && err.message ? err.message : "unknown error"));
@@ -11185,31 +11208,212 @@ function _showEnhanceLikeToast(msg, ms){
     setTimeout(function(){ if (t.parentNode) t.parentNode.removeChild(t); }, ms || 8000);
   } catch(_){}
 }
-function _showGapBanner(gaps){
+// PD.155: interactive gap-fill modal. Each LLM gap suggestion is a
+// checkbox row (checked by default), plus a free-text custom category
+// input. Click "Find places for these →" runs one LLM call per
+// selected category — each returns 3-5 places that get inserted as a
+// new themed placeActivity section. The new sections integrate with
+// the rest of the picker (sortable, "+ more like this", etc.).
+function _showGapModal(gaps){
   try {
-    var existing = document.getElementById("pm-gap-banner");
+    var existing = document.getElementById("pm-gap-modal");
     if (existing) existing.remove();
-    var b = document.createElement("div");
-    b.id = "pm-gap-banner";
-    b.style.cssText = "position:fixed;top:64px;left:50%;transform:translateX(-50%);"
-      + "max-width:760px;width:90%;z-index:12000;background:#fffaf0;color:#3a2f10;"
-      + "border:1px solid #e6d8a8;padding:14px 18px;border-radius:8px;"
-      + "box-shadow:0 4px 14px rgba(0,0,0,0.18);font-size:13px;line-height:1.55;font-family:inherit;";
-    var html = '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px;">'
-      +   '<strong style="color:#7a6310;">✦ Max sees gaps in your list:</strong>'
-      +   '<span id="pm-gap-banner-close" style="cursor:pointer;color:#999;font-weight:400;">×</span>'
+    var ov = document.createElement("div");
+    ov.id = "pm-gap-modal";
+    ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.42);z-index:12200;display:flex;align-items:center;justify-content:center;padding:24px;font-family:inherit;";
+    var box = document.createElement("div");
+    box.style.cssText = "background:#fff;border-radius:12px;max-width:600px;width:100%;box-shadow:0 12px 36px rgba(0,0,0,0.32);padding:22px 24px;max-height:80vh;overflow-y:auto;";
+    // PD.156: normalize gaps into the richer object shape. Tolerate the
+    // legacy string shape (just a suggestion) for backward compat.
+    var gapObjs = gaps.slice(0, 5).map(function(g){
+      if (typeof g === "string") return { category: g, suggestion: g, currentCount: 0, matchesExistingSection: null };
+      return {
+        category: g.category || g.suggestion || "",
+        suggestion: g.suggestion || g.category || "",
+        currentCount: typeof g.currentCount === "number" ? g.currentCount : 0,
+        matchesExistingSection: g.matchesExistingSection || null
+      };
+    });
+    var rowsHtml = gapObjs.map(function(g, i){
+      var safeSugg = String(g.suggestion).replace(/"/g, "&quot;").replace(/</g, "&lt;");
+      var depthBadge = "";
+      if (g.matchesExistingSection) {
+        depthBadge = '<span title="Will extend the existing section, not create a duplicate" style="display:inline-block;font-size:9.5px;font-weight:700;color:#1a5fa8;background:#eaf2fa;border:1px solid #c8d8f0;border-radius:4px;padding:1px 6px;margin-left:6px;letter-spacing:.03em;text-transform:uppercase;vertical-align:middle;">extends “' + String(g.matchesExistingSection).replace(/"/g, "&quot;").replace(/</g, "&lt;") + '”</span>';
+      } else {
+        depthBadge = '<span style="display:inline-block;font-size:9.5px;font-weight:700;color:#a08a55;background:#fffaf0;border:1px solid #e6d8a8;border-radius:4px;padding:1px 6px;margin-left:6px;letter-spacing:.03em;text-transform:uppercase;vertical-align:middle;">new section</span>';
+      }
+      var countNote = g.currentCount > 0
+        ? '<span style="font-size:10.5px;color:#888;margin-left:6px;">' + g.currentCount + ' already kept</span>'
+        : '<span style="font-size:10.5px;color:#a93826;margin-left:6px;">none yet</span>';
+      return '<label style="display:flex;align-items:flex-start;gap:9px;padding:9px 0;border-bottom:1px solid #f0f0f0;cursor:pointer;">'
+        +   '<input type="checkbox" class="pm-gap-check" data-idx="' + i + '" checked style="margin-top:4px;flex-shrink:0;" />'
+        +   '<span style="font-size:13px;color:#333;line-height:1.55;flex:1;">'
+        +     safeSugg
+        +     '<div style="margin-top:3px;">' + depthBadge + countNote + '</div>'
+        +   '</span>'
+        + '</label>';
+    }).join("");
+    box.innerHTML = ''
+      + '<div style="font-size:11px;font-weight:700;color:#7a6310;letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px;">✦ Coverage audit</div>'
+      + '<div style="font-size:17px;font-weight:700;color:#111;margin-bottom:6px;">Categories your list might be missing</div>'
+      + '<div style="font-size:12px;color:#666;line-height:1.6;margin-bottom:14px;">Pick what you want Max to find places for. Each checked category gets 3–5 places added to your Discovery as a new themed section.</div>'
+      + '<div id="pm-gap-rows" style="border-top:1px solid #f0f0f0;margin-bottom:10px;">' + rowsHtml + '</div>'
+      + '<div style="margin-top:14px;">'
+      +   '<div style="font-size:10.5px;font-weight:700;color:#666;letter-spacing:.04em;text-transform:uppercase;margin-bottom:5px;">Add your own category</div>'
+      +   '<input id="pm-gap-custom" type="text" placeholder="e.g. live music venues, vegetarian restaurants, kid-friendly stops" style="width:100%;font:inherit;font-size:13px;padding:7px 10px;border:1px solid #d8dde5;border-radius:6px;outline:none;box-sizing:border-box;" />'
       + '</div>'
-      + '<ul style="margin:0;padding-left:20px;">'
-      +   gaps.slice(0, 3).map(function(g){ return '<li style="margin-bottom:4px;">' + String(g).replace(/</g,"&lt;") + '</li>'; }).join("")
-      + '</ul>'
-      + '<div style="margin-top:10px;font-size:11.5px;color:#8a7548;">'
-      +   'Use <strong>✦ Enhance</strong> above to ask Max for more places filling these gaps — or add specific places via "+ Add a place" below.'
+      + '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">'
+      +   '<button type="button" id="pm-gap-cancel" style="font-size:12px;font-weight:600;color:#666;background:#fff;border:1px solid #ddd;border-radius:6px;padding:7px 14px;cursor:pointer;font-family:inherit;">Cancel</button>'
+      +   '<button type="button" id="pm-gap-go" style="font-size:12px;font-weight:600;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:7px 14px;cursor:pointer;font-family:inherit;">Find places for these →</button>'
       + '</div>';
-    b.innerHTML = html;
-    document.body.appendChild(b);
-    document.getElementById("pm-gap-banner-close").onclick = function(){ b.remove(); };
-    setTimeout(function(){ if (b.parentNode) { b.style.transition = "opacity 0.4s"; b.style.opacity = "0"; setTimeout(function(){ try{b.remove();}catch(_){} }, 400); } }, 18000);
+    ov.appendChild(box);
+    document.body.appendChild(ov);
+    function close(){ try { ov.remove(); } catch(_){} }
+    ov.onclick = function(e){ if (e.target === ov) close(); };
+    document.getElementById("pm-gap-cancel").onclick = close;
+    document.getElementById("pm-gap-go").onclick = function(){
+      var selected = [];
+      document.querySelectorAll(".pm-gap-check").forEach(function(cb){
+        if (cb.checked) {
+          var idx = parseInt(cb.getAttribute("data-idx"), 10);
+          if (!isNaN(idx) && gapObjs[idx]) selected.push(gapObjs[idx]);
+        }
+      });
+      var custom = (document.getElementById("pm-gap-custom").value || "").trim();
+      if (custom) selected.push({ category: custom, suggestion: custom, currentCount: 0, matchesExistingSection: null });
+      if (!selected.length) {
+        _showEnhanceLikeToast("Pick at least one category, or type your own.");
+        return;
+      }
+      close();
+      _fillSelectedGaps(selected);
+    };
   } catch(_){}
+}
+
+// PD.155: per-category LLM enrichment. For each selected gap category,
+// one parallel LLM call asks for 3–5 specific places in the region
+// fitting that category and not duplicating anything already in the
+// picker. Results land as new themed placeActivities at the bottom of
+// the picker (just above "More places to consider").
+async function _fillSelectedGaps(selections){
+  // PD.156: selections are now rich objects: {category, suggestion,
+  // currentCount, matchesExistingSection}. If matchesExistingSection
+  // points to a real existing placeActivity section, EXTEND it (push
+  // the new places into its requiredPlaces). Otherwise create a new
+  // themed section.
+  if (!Array.isArray(selections) || !selections.length) return;
+  if (typeof _tb === "undefined" || !_tb) return;
+  if (typeof callMax !== "function") return;
+  _showEnhanceLikeToast("Discovering places for " + selections.length + " categor" + (selections.length === 1 ? "y" : "ies") + "…", 9000);
+  try {
+    var nrm = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){return String(s||"").toLowerCase();};
+    var existingDisplay = [];
+    var existingNorm = {};
+    (_tb.candidates || []).forEach(function(c){
+      if (!c || !c.place) return;
+      var k = nrm(c.place);
+      if (!existingNorm[k]) { existingNorm[k] = true; existingDisplay.push(c.place); }
+    });
+    var brief = (typeof _serializeTbForPrompt === "function") ? _serializeTbForPrompt(_tb) : (_tb.intent || "");
+    var region = _tb.region || "this region";
+    var regionGuard = "\nABSOLUTELY CRITICAL: every place must be in " + region + ". Out-of-region picks will be discarded.\n";
+    var skipList = existingDisplay.join(", ");
+    var calls = selections.map(function(sel){
+      var catName = sel.category || sel.suggestion || "";
+      var depthHint = sel.currentCount > 0
+        ? ("The traveler already has " + sel.currentCount + " place(s) covering this category. Find " + (sel.currentCount === 1 ? "2-3" : "1-2") + " MORE that deepen coverage without duplicating.")
+        : ("This category is currently UNCOVERED. Find 3-5 specific named places.");
+      var prompt = "You are a travel expert. The traveler is planning a trip to " + region + ".\n"
+        + "Trip context: " + brief + "\n"
+        + regionGuard
+        + "They want to add places that fit this category: " + catName + "\n"
+        + depthHint + "\n\n"
+        + "Do NOT repeat anything from:\n" + skipList + "\n\n"
+        + "Each place must be specific (named building, trail, town, sight — not 'various scenic spots'). Mix STAY-capable places (towns with lodging) and SINGLE-SIGHT places freely.\n"
+        + 'Return ONLY a JSON array (no markdown):\n[{"place":"Name","country":"Country","role":"see","stayRange":"0 nights OR 1-2 nights","singleSight":true,"whyItFits":"Specific reason this place fits this category.","tradeoffs":"Honest downside.","tags":["tag1"],"otherAttractions":"","widelyRecommended":false,"lat":0.0,"lng":0.0}]';
+      return callMax([{role:"user",content:prompt}], 1500, 45000).then(function(t){
+        var cleaned = String(t || "").replace(/```json|```/g, "").trim();
+        var parsed;
+        try { parsed = JSON.parse(cleaned); } catch(_){ return {sel: sel, places: []}; }
+        return {sel: sel, places: Array.isArray(parsed) ? parsed : []};
+      }).catch(function(){ return {sel: sel, places: []}; });
+    });
+    var results = await Promise.all(calls);
+    var totalAdded = 0;
+    var extendedCount = 0;
+    var newSectionCount = 0;
+    results.forEach(function(r){
+      var fresh = (r.places || []).filter(function(p){
+        if (!p || !p.place) return false;
+        var k = nrm(p.place);
+        if (existingNorm[k]) return false;
+        existingNorm[k] = true;
+        return true;
+      });
+      if (!fresh.length) return;
+      fresh.forEach(function(p){
+        p.id = "c-gap-" + Date.now().toString(36) + "-" + Math.floor(Math.random()*100000).toString(36);
+        p.status = "keep";
+        p._required = false;
+        p._requiredFor = [];
+        p._gapCategory = r.sel.category;
+        if (typeof p.overnightCapable !== "boolean") p.overnightCapable = !p.singleSight;
+        if (!p.role) p.role = p.overnightCapable ? "stay" : "see";
+        _tb.candidates = _tb.candidates || [];
+        _tb.candidates.push(p);
+        totalAdded++;
+      });
+      _tb.placeActivities = _tb.placeActivities || [];
+      var matchSecName = r.sel.matchesExistingSection;
+      var existingSec = matchSecName ? _tb.placeActivities.find(function(it){
+        return it && it.section && it.section.toLowerCase() === String(matchSecName).toLowerCase();
+      }) : null;
+      var newPlaces = fresh.map(function(p){
+        return {
+          place: p.place, country: p.country || "",
+          lat: (typeof p.lat === "number") ? p.lat : null,
+          lng: (typeof p.lng === "number") ? p.lng : null,
+          _keep: false, overnight: !p.singleSight
+        };
+      });
+      if (existingSec) {
+        // PD.156: extend the existing section in place.
+        existingSec.requiredPlaces = (existingSec.requiredPlaces || []).concat(newPlaces);
+        extendedCount++;
+      } else {
+        _tb.placeActivities.push({
+          id: "synth-gap-" + Date.now().toString(36) + "-" + newSectionCount,
+          section: r.sel.category || "Added by Max",
+          name: r.sel.category || "Added by Max",
+          type: "synthetic-gap",
+          description: "Places Max found to fill this gap in your list. Review each and keep what fits.",
+          checked: false,
+          requiredPlaces: newPlaces
+        });
+        newSectionCount++;
+      }
+    });
+    if (typeof _initialTripSave === "function") _initialTripSave();
+    if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
+    if (typeof _renderPlacePickerMap === "function") _renderPlacePickerMap("tb-pm-map");
+    var summary;
+    if (!totalAdded) {
+      summary = "No new places landed for those categories — Max couldn't find any that aren't already in your list.";
+    } else {
+      var parts = ["✦ Added " + totalAdded + " place" + (totalAdded === 1 ? "" : "s")];
+      var locParts = [];
+      if (newSectionCount) locParts.push(newSectionCount + " new section" + (newSectionCount === 1 ? "" : "s"));
+      if (extendedCount) locParts.push("extended " + extendedCount + " existing section" + (extendedCount === 1 ? "" : "s"));
+      if (locParts.length) parts.push("(" + locParts.join(", ") + ")");
+      parts.push(". Scroll down — Max-added places start unchecked.");
+      summary = parts.join(" ").replace(" . ", ". ");
+    }
+    _showEnhanceLikeToast(summary, 14000);
+  } catch(err) {
+    console.warn("[Max PD.155/156] gap fill failed:", err && err.message);
+    _showEnhanceLikeToast("Couldn't fill gaps: " + (err && err.message ? err.message : "unknown error"));
+  }
 }
 
 async function enhanceDiscovery(btn) {
@@ -17375,12 +17579,10 @@ function _renderPlaceActivityItems(){
       if (typeof analyzeCoverageGaps === "function") analyzeCoverageGaps(gapBtn);
     };
     hdrActions.appendChild(gapBtn);
-    // PD.154: nudge — pulse + label after Discovery has produced kept
-    // candidates and the user hasn't dismissed the nudge yet. Works
-    // for both paste-list and sentence-driven paths because the
-    // condition reads only from _tb.candidates, which both paths
-    // populate the same way. Once dismissed (button click or × on
-    // the label), the nudge stays gone for this trip.
+    // PD.154 / PD.155: nudge — pulse the button (no inline label, which
+    // read as duplicate UI). After Discovery has kept candidates and
+    // the user hasn't yet engaged the gap audit, the button pulses
+    // three times to signal "click me." First interaction dismisses.
     try {
       var _anyKept = Array.isArray(_tb.candidates) && _tb.candidates.some(function(c){
         return c && c.status === "keep";
@@ -17388,23 +17590,6 @@ function _renderPlaceActivityItems(){
       var _dismissed = !!(trip && trip._gapNudgeDismissed);
       if (_anyKept && !_dismissed) {
         gapBtn.classList.add("pm-gap-nudge");
-        var nudgeLabel = document.createElement("span");
-        nudgeLabel.id = "pm-gap-nudge-label";
-        nudgeLabel.style.cssText = "display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:600;color:#7a6310;background:#fffaf0;border:1px solid #e6d8a8;border-radius:5px;padding:2px 8px;margin-left:4px;font-style:italic;animation:pm-gap-nudge-pulse 1.8s ease-in-out 3;";
-        nudgeLabel.innerHTML = '← Review available — click here'
-          + '<span id="pm-gap-nudge-close" style="cursor:pointer;color:#a08a55;font-style:normal;font-weight:400;margin-left:4px;">×</span>';
-        nudgeLabel.title = "Click the button to ask Max what's missing from your list, or × to dismiss.";
-        hdrActions.appendChild(nudgeLabel);
-        // × dismisses without running the audit.
-        var closeBtn = document.getElementById("pm-gap-nudge-close");
-        if (closeBtn) {
-          closeBtn.onclick = function(e){
-            e.stopPropagation();
-            try { if (trip) trip._gapNudgeDismissed = true; if (typeof localSave === "function") localSave(); } catch(_){}
-            nudgeLabel.remove();
-            gapBtn.classList.remove("pm-gap-nudge");
-          };
-        }
       }
     } catch(_){}
     // PD.111: Enhance Discovery — additive LLM pass using the
