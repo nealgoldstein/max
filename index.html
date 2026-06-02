@@ -22400,6 +22400,18 @@ function _recordScreen(name){
 function _restoreLastScreen(){
   if (!trip || !trip._lastScreen) return false;
   var s = trip._lastScreen;
+  // PD.138 (architectural): if the trip has been published (has real
+  // destinations), the trip view is the canonical resting state. A
+  // session that ended in the picker — typically because the user
+  // peeked back at Discovery — should still land on trip view on
+  // reload. The picker is a tool, not the resting state once a trip
+  // is published. Stash the original session screen on a side flag so
+  // a "Resume Discovery" hint on the trip view can surface it.
+  var _hasDestinations = Array.isArray(trip.destinations) && trip.destinations.length > 0;
+  if (s === "picker" && _hasDestinations) {
+    trip._wasInPickerLastSession = true;
+    s = "trip"; // override — render trip view; let user re-enter picker explicitly
+  }
   // Picker — hydrate _tb from trip and open renderActivityPicker.
   if (s === "picker") {
     if (typeof _tb === "undefined" || !_tb) window._tb = _tb = {};
@@ -49987,6 +49999,17 @@ function drawTripMode(){
         showSaveStatus("🚗 " + _drivesEntry.name + " drives on the left.", 8000);
         trip._shownDrivesOn = true;
       }
+    }
+  } catch(_){}
+  // PD.138: surface a toast when we landed on trip view but the user
+  // was last in the picker. Lets them resume Discovery in one click
+  // instead of hunting for the Discovery button in the chrome.
+  try {
+    if (trip && trip._wasInPickerLastSession && typeof showSaveStatus === "function") {
+      // 12s gives the user time to notice + click.
+      showSaveStatus("You were in Discovery last session — click 🧭 Discovery in the chrome to resume.", 12000);
+      delete trip._wasInPickerLastSession;
+      if (typeof localSave === "function") { try { localSave(); } catch(_){} }
     }
   } catch(_){}
   // PD.101: multi-country trips get a "Countries on this trip" hint
