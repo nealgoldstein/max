@@ -17311,22 +17311,25 @@ function _renderPlaceActivityItems(){
         });
       });
     });
-    // PD.143: if there are orphan enrichments, keep the synthetic
-    // section in sectionOrder so they remain visible. Trim its items
-    // to just the orphans (the matched ones inline under their source
-    // place row). Otherwise filter the section out entirely.
-    if (_orphanEnrichments.length) {
-      enrSecNames.forEach(function(sec){
-        (bySection[sec] || []).forEach(function(item){
-          if (item) item.requiredPlaces = _orphanEnrichments.slice();
-        });
-      });
-      // section stays in sectionOrder for rendering
-    } else {
-      sectionOrder = sectionOrder.filter(function(sec){
-        return !/^sights near places you listed$/i.test(sec);
-      });
-    }
+    // PD.171 (architectural): keep "Sights near places you listed"
+    // visible in sectionOrder ALWAYS. The inline "✦ Max suggests
+    // near here" lines under each source place are previews — short
+    // ("A, B, C · +57 more"), context-anchored, easy to skim. The
+    // section is the navigable full list with descriptions and
+    // controls. Different affordances, both belong.
+    //
+    // Earlier behavior (PD.114) removed the section from sectionOrder
+    // when every enrichment matched a source row, on the theory that
+    // inline lines were enough. Result: user runs Enhance, sees
+    // "66 added" but only "More places to consider (6)" — the 60
+    // inlined enrichments were visually subtle with no top-level
+    // navigation chip.
+    //
+    // PD.143's orphan-fallback still works: orphans (enrichments
+    // whose source can't be matched) are pushed to _orphanEnrichments
+    // and the section continues to surface them. With this change,
+    // the section ALSO surfaces matched enrichments.
+    // (No section-removal step anymore.)
   })();
   // Expose to the row renderers so they can inject the inline
   // "Max suggests near here" preview under each source place row.
