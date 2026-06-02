@@ -40399,19 +40399,35 @@ function _writeTripRoleForDest(dest, role) {
 // doesn't retry forever. Net effect: trip-view polyline shows actual
 // driving paths (curves around bays, follows real roads) instead of
 // straight lines across water.
+// PD.137: extended to support arbitrary multi-waypoint segments — a
+// segment can now carry from + waypoints + to and OSRM will route a
+// single continuous path through all of them. Used for both the main
+// destination route (with optional waysides) AND day-trip loops
+// (hub → stop1 → stop2 → … → hub).
+function _osrmSegmentKey(coords){
+  // coords: array of [lat, lng], at least 2. Round to 4 decimals so
+  // tiny coord wobble doesn't bust the cache.
+  return coords.map(function(c){ return c[0].toFixed(4) + "," + c[1].toFixed(4); }).join("|");
+}
 function _ensureTripRoutesCached(segments){
   if (!segments || !segments.length) return Promise.resolve();
   if (typeof trip === "undefined" || !trip) return Promise.resolve();
   if (!trip._osrmSegments) trip._osrmSegments = {};
   var missing = segments.filter(function(s){
     var c = trip._osrmSegments[s.key];
-    return !c; // covers both undefined and null (NOT "failed", we don't retry those)
+    return !c;
   });
   if (!missing.length) return Promise.resolve();
   var promises = missing.map(function(s){
-    var url = "https://router.project-osrm.org/route/v1/driving/"
-      + s.from[1] + "," + s.from[0] + ";"
-      + s.to[1]   + "," + s.to[0]
+    // PD.137: build the coord string from s.coords (any length ≥ 2)
+    // rather than assuming from/to only. OSRM uses lng,lat;lng,lat;...
+    var coords = s.coords || [s.from, s.to];
+    if (!coords || coords.length < 2) {
+      trip._osrmSegments[s.key] = "failed";
+      return Promise.resolve();
+    }
+    var coordStr = coords.map(function(c){ return c[1] + "," + c[0]; }).join(";");
+    var url = "https://router.project-osrm.org/route/v1/driving/" + coordStr
       + "?overview=full&geometries=geojson";
     return fetch(url).then(function(r){
       if (!r.ok) throw new Error("OSRM " + r.status);
@@ -40424,12 +40440,11 @@ function _ensureTripRoutesCached(segments){
       var routed = geom.coordinates.map(function(c){ return [c[1], c[0]]; });
       trip._osrmSegments[s.key] = routed;
     }).catch(function(err){
-      console.warn("[Max PD.136] OSRM segment failed (" + s.key + "):", err && err.message);
+      console.warn("[Max PD.136/137] OSRM segment failed (" + s.key + "):", err && err.message);
       trip._osrmSegments[s.key] = "failed";
     });
   });
   return Promise.all(promises).then(function(){
-    // Persist the cache so reloads use it.
     if (typeof localSave === "function") { try { localSave(); } catch(_){} }
   });
 }
@@ -41037,8 +41052,11 @@ function updateMainMap(){
           if (_fromD && _toD && _waysideCovered[_fromD.id + "|" + _toD.id]) continue;
           var _from = bounds[_bi], _to = bounds[_bi + 1];
           if (!_from || !_to) continue;
-          var _segKey = _from[0].toFixed(4) + "," + _from[1].toFixed(4) + "|" + _to[0].toFixed(4) + "," + _to[1].toFixed(4);
-          _segments.push({ key: _segKey, from: _from, to: _to });
+          // PD.137: coords array (currently just [from, to]; can be
+          // extended to include waysides as intermediate waypoints
+          // when wayside data is available in this code path).
+          var _segCoords = [_from, _to];
+          _segments.push({ key: _osrmSegmentKey(_segCoords), coords: _segCoords });
         }
         var _hasMissing = false;
         _segments.forEach(function(s){
@@ -41183,16 +41201,37 @@ function updateMainMap(){
 
       // Draw the multi-stop loop: hub → stop1 → stop2 → … → hub.
       // Single-stop falls out as a simple there-and-back: hub → A → hub.
+      // PD.137: route via OSRM when possible so the loop follows real
+      // roads (curves around bays, follows the actual driving path)
+      // instead of cutting straight lines. Falls back to straight
+      // lines while OSRM is fetching or if it fails.
       try {
         var loopPath = [hubCtr].concat(dtStops.map(function(s){ return s.dtCtr; })).concat([hubCtr]);
-        var loopHalo = L.polyline(loopPath, {
-          color:"#fff", weight:8, opacity:0.85, lineCap:"round", lineJoin:"round"
+        var loopKey = (typeof _osrmSegmentKey === "function") ? _osrmSegmentKey(loopPath) : null;
+        var loopCached = (loopKey && trip._osrmSegments && trip._osrmSegments[loopKey]);
+        var loopDrawCoords = (Array.isArray(loopCached) && loopCached.length >= 2)
+          ? loopCached
+          : loopPath;
+        var isLoopStraight = !Array.isArray(loopCached);
+        var loopHalo = L.polyline(loopDrawCoords, {
+          color:"#fff", weight:8, opacity: isLoopStraight ? 0.7 : 0.85, lineCap:"round", lineJoin:"round"
         }).addTo(_mainMap);
         _mainMarkers.push(loopHalo);
-        var loopLine = L.polyline(loopPath, {
-          color:"#7a4fbf", weight:5, opacity:1.0, lineCap:"round", lineJoin:"round"
+        var loopLine = L.polyline(loopDrawCoords, {
+          color:"#7a4fbf", weight:5, opacity: isLoopStraight ? 0.75 : 1.0,
+          dashArray: isLoopStraight ? "3 6" : null, lineCap:"round", lineJoin:"round"
         }).addTo(_mainMap);
         _mainMarkers.push(loopLine);
+        // Kick off OSRM fetch for this loop if not cached yet.
+        if (isLoopStraight && loopKey && loopCached !== "failed"
+            && typeof _ensureTripRoutesCached === "function"
+            && !trip._osrmBatchInflight) {
+          trip._osrmBatchInflight = true;
+          _ensureTripRoutesCached([{ key: loopKey, coords: loopPath }]).then(function(){
+            trip._osrmBatchInflight = false;
+            if (typeof updateMainMap === "function") updateMainMap();
+          });
+        }
       } catch(_){}
 
       dtStops.forEach(function(s){
