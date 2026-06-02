@@ -27579,8 +27579,25 @@ function renderActivityPicker(){
     } catch(_fnc_e) {
       console.warn("[Max FN.C.1] ordering fallback:", _fnc_e);
     }
-    var _fnc_anchorEntry = _fnc_ordered[0] || null;
-    var _fnc_anchorExit  = _fnc_ordered[_fnc_ordered.length - 1] || null;
+    // PD.158: anchor for the entry-airport description should be a
+    // STAY (overnight destination), not whatever ended up first in
+    // the geometric ordering — that could be a sight like a canyon,
+    // which is meaningless as "the place 188 km from your airport".
+    // Filter to overnight-capable destinations first.
+    var _fnc_orderedStays = _fnc_ordered.filter(function(c){
+      if (!c) return false;
+      if (c.role === "stay") return true;
+      // Be generous — include things not explicitly tagged as sight/daytrip/onway.
+      if (c.role && c.role !== "see" && c.role !== "daytrip" && c.role !== "onway") return true;
+      // Fall back to overnightCapable flag.
+      return c.singleSight === false || c.overnight === true;
+    });
+    var _fnc_anchorEntry = _fnc_orderedStays[0] || _fnc_ordered[0] || null;
+    // PD.158: no exit anchor — "X km from <last destination>" is
+    // meaningless before the trip is sequenced. Render the airport
+    // suggestion without the distance text. User picks an airport;
+    // distance reappears once destinations are sequenced.
+    var _fnc_anchorExit  = _fnc_orderedStays[_fnc_orderedStays.length - 1] || _fnc_ordered[_fnc_ordered.length - 1] || null;
     var _fnc_region = _tb.region || _tb.placeName || "";
     var _fnc_epPts = (_fnc_region && typeof _epCache !== "undefined" && _epCache[_fnc_region]) || [];
 
@@ -27663,14 +27680,18 @@ function renderActivityPicker(){
       var isAccepted = curNorm === String(top.name || "").toLowerCase().trim();
       var glyph = (typeof _modeGlyph === "function") ? _modeGlyph(mode) : "✈";
       var whyFn = (typeof _gatewayWhy === "function") ? _gatewayWhy : function(){ return ""; };
-      var anchorName = anchor ? (anchor.place || "your trip") : "your trip";
+      // PD.158: when anchor is null (e.g., departure side), render no
+      // distance description. "X km from <some destination>" is
+      // misleading until the trip is sequenced.
+      var anchorName = anchor ? (anchor.place || "") : "";
+      var whyText = anchorName ? whyFn(top, anchorName) : "";
       var sideLabel = side === "entry" ? "For your arrival" : "For your departure";
       var isEntryStr = (side === "entry" ? "true" : "false");
       var html = '<div data-fnc-section="' + side + '" style="margin-bottom:' + (rest.length ? '8px' : '4px') + ';">'
         + '<div style="font-size:10.5px;color:#777;margin-bottom:3px;">' + sideLabel + '</div>'
         + '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;color:#222;">'
         + '<strong style="font-size:12.5px;">' + glyph + ' ' + _pmEsc(top.name) + '</strong>'
-        + '<span style="color:#777;font-size:10.5px;">' + _pmEsc(whyFn(top, anchorName)) + '</span>';
+        + (whyText ? '<span style="color:#777;font-size:10.5px;">' + _pmEsc(whyText) + '</span>' : '');
       if (isAccepted) {
         html += '<span style="color:#3a7a4a;font-size:10.5px;font-weight:600;">✓ accepted</span>';
       } else {
@@ -27690,9 +27711,11 @@ function renderActivityPicker(){
         for (var _fnci = 0; _fnci < rest.length; _fnci++) {
           var alt = rest[_fnci];
           var altAccepted = curNorm === String(alt.name || "").toLowerCase().trim();
+          // PD.158: same null-anchor handling for alternatives.
+          var altWhy = anchorName ? whyFn(alt, anchorName) : "";
           html += '<div style="font-size:11px;color:#333;margin-bottom:3px;display:flex;align-items:center;gap:5px;flex-wrap:wrap;">'
                + '<strong>' + _pmEsc(alt.name) + '</strong>'
-               + '<span style="color:#888;font-size:10px;">' + _pmEsc(whyFn(alt, anchorName)) + '</span>';
+               + (altWhy ? '<span style="color:#888;font-size:10px;">' + _pmEsc(altWhy) + '</span>' : '');
           if (altAccepted) {
             html += '<span style="color:#3a7a4a;font-size:10px;font-weight:600;">✓ accepted</span>';
           } else {
@@ -27709,7 +27732,12 @@ function renderActivityPicker(){
     }
 
     var _fnc_entryHtml = _fncBuildSide("entry", _fnc_entryRanked, _fnc_anchorEntry, _tb.entry || "", _fnc_entryMode);
-    var _fnc_exitHtml  = _fncBuildSide("exit",  _fnc_exitRanked,  _fnc_anchorExit,  _tb.tbExit || "", _fnc_exitMode);
+    // PD.158: exit side renders WITHOUT a distance description. The
+    // anchor is still used internally for ranking (so we surface a
+    // sensible airport), but null is passed to _fncBuildSide so the
+    // "X km from Y" line is suppressed. Distance will return once the
+    // trip is sequenced and we know the actual departure point.
+    var _fnc_exitHtml  = _fncBuildSide("exit",  _fnc_exitRanked,  null,             _tb.tbExit || "", _fnc_exitMode);
     var _fnc_cardHtml = "";
     if (_fnc_entryHtml || _fnc_exitHtml) {
       _fnc_cardHtml = '<div id="tb-picker-max-suggests" style="margin:0 0 10px;padding:10px 12px;background:#f0f4fa;border:1px solid #c8d8f0;border-radius:6px;">'
