@@ -16767,13 +16767,23 @@ function _reconcileUserListedKeeps(){
   (function _ensureUmbrellaListedSection(){
     var listedKeys = Object.keys(listed);
     if (!listedKeys.length) return;
-    // Build set of normalized place names in non-umbrella placeActivities.
+    // PD.168 (architectural): "presence" means concrete-place evidence
+    // from EITHER a placeActivity requiredPlace OR a candidate. Earlier
+    // code only checked requiredPlaces — so a listed name like
+    // "Gardur. Iceland" (typo with period) that the LLM resolved into
+    // a candidate but didn't put in any activity row got falsely
+    // flagged as umbrella. A candidate is unambiguous concrete evidence:
+    // the LLM resolved the name to a real place with coordinates and
+    // a description. That counts.
     var inActs = {};
     _tb.placeActivities.forEach(function(it){
       if (!it || /^routes\s*[&]\s*regions you named$/i.test(String(it.section||""))) return;
       (it.requiredPlaces||[]).forEach(function(p){
         if (p && p.place) inActs[nrm(p.place)] = true;
       });
+    });
+    (_tb.candidates || []).forEach(function(c){
+      if (c && c.place) inActs[nrm(c.place)] = true;
     });
     var umbrellas = [];
     listedKeys.forEach(function(k){
