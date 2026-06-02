@@ -16534,7 +16534,11 @@ function _reconcileUserListedKeeps(){
       } catch(_){}
     }
   }
-  if (!listed) return;
+  // PD.162: don't early-return on empty listed. The synthetic stays
+  // section also needs to run for sentence-driven flow (where the user
+  // never pasted a list, so listed is empty). Subsequent passes that
+  // iterate `listed` keys are no-ops when it's empty, so this is safe.
+  if (!listed) listed = {};
   var nrm = (typeof _normPlaceName === "function")
     ? _normPlaceName
     : function(s){ return String(s||"").toLowerCase().trim(); };
@@ -16579,32 +16583,58 @@ function _reconcileUserListedKeeps(){
       var k = nrm(c.place);
       if (k && !candByKey[k]) candByKey[k] = c;
     });
-    function _isStayCapable(c){
-      if (!c) return false;
+    // PD.162 (architectural): trinary classification — YES / NO /
+    // AMBIGUOUS. We have several signals for stay-capability:
+    //   • LLM singleSight=true → definitely a sight (waterfall etc)
+    //   • LLM overnightCapable=false → LLM says no lodging
+    //   • c.role=daytrip/onway → committed elsewhere
+    //   • c.role=stay OR overnightCapable=true OR overnight=true → YES
+    //   • Everything else → AMBIGUOUS
+    //
+    // The right behavior on AMBIGUOUS depends on flow:
+    //   • Paste-list: the user listed this place. Their intent is the
+    //     positive signal. Include unless LLM actively contradicts.
+    //   • Sentence-driven: no user intent on individual places — the
+    //     LLM is generating candidates. Require an affirmative LLM
+    //     signal to include; don't pad the section with maybes.
+    //
+    // Returns: true / false / null (null = ambiguous, caller decides).
+    function _stayCapable(c){
+      if (!c) return null;
       if (c.singleSight === true) return false;
       if (c.overnightCapable === false) return false;
-      // Either LLM confirmed overnightCapable OR c.role is explicitly stay.
-      return c.overnightCapable === true || c.role === "stay";
+      if (c.role === "daytrip" || c.role === "onway") return false;
+      if (c.role === "stay") return true;
+      if (c.overnightCapable === true) return true;
+      if (c.overnight === true) return true;
+      return null; // ambiguous
     }
     var listedKeys = Object.keys(listed);
     var listedStayKeys;
     if (listedKeys.length) {
-      // Paste-list path: filter listed candidates by stay-capable.
+      // Paste-list path: ambiguous → INCLUDE (trust the user's intent).
+      // This is why Stykkishólmur lands here even though its parser
+      // role is "see" (duplicate paste collision) and the LLM didn't
+      // emit overnightCapable=true: nothing actively excludes it, so
+      // we honor the listing.
       listedStayKeys = listedKeys.filter(function(k){
         var c = candByKey[k];
-        if (c) return _isStayCapable(c);
-        // No candidate yet — fall back to parser hint, but ONLY when
-        // it's an explicit stay. The parser's default is too noisy.
-        return listed[k] === "stay";
+        if (!c) {
+          // No candidate yet — only include on explicit "stay" hint.
+          return listed[k] === "stay";
+        }
+        var sc = _stayCapable(c);
+        if (sc === true) return true;
+        if (sc === false) return false;
+        return true; // ambiguous + listed = include
       });
     } else {
-      // Sentence-driven path: every kept candidate that's stay-capable.
-      // (The user has implicitly endorsed kept candidates; rejected
-      // ones are excluded by status check.)
+      // Sentence-driven path: ambiguous → EXCLUDE (need positive
+      // LLM signal). Every kept candidate the LLM flagged as a stay.
       listedStayKeys = (_tb.candidates || []).filter(function(c){
         if (!c || !c.place) return false;
         if (c.status === "reject") return false;
-        return _isStayCapable(c);
+        return _stayCapable(c) === true;
       }).map(function(c){ return nrm(c.place); });
     }
     if (!listedStayKeys.length) return;
