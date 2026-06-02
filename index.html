@@ -18153,10 +18153,15 @@ function _renderPlaceActivityItems(){
         // distinct from "Sights here" (which surfaces existing
         // children); reads as additive suggestions, not commitments.
         var _enrichKids = (_tb._enrichmentsByPlace && _tb._enrichmentsByPlace[key]) || [];
+        // PD.173: enrichment names are clickable links to their full row.
         var enrichLine = _enrichKids.length
           ? ('<div class="tb-dest-meta" style="font-size:10.5px;color:#7a6294;margin-top:3px;line-height:1.45;font-style:italic;">'
               + '<span style="color:#7a6294;font-weight:600;font-style:normal;">✦ Max suggests near here:</span> '
-              + _enrichKids.slice(0, 4).map(function(p){ return _pmEsc(p.place||""); }).join(", ")
+              + _enrichKids.slice(0, 4).map(function(p){
+                  var nm = p && p.place ? String(p.place) : "";
+                  var arg = nm.replace(/'/g, "\\'");
+                  return '<a href="#" onclick="event.preventDefault();event.stopPropagation();if(typeof _pmJumpToPlaceRow===&quot;function&quot;)_pmJumpToPlaceRow(\'' + arg + '\');" style="color:#7a6294;text-decoration:underline;text-decoration-color:rgba(122,98,148,0.4);cursor:pointer;">' + _pmEsc(nm) + '</a>';
+                }).join(", ")
               + (_enrichKids.length > 4 ? " · +" + (_enrichKids.length - 4) + " more" : "")
               + '</div>')
           : '';
@@ -18770,7 +18775,12 @@ function _renderPlaceActivityItems(){
         + (function(){
             var enrK = (_tb._enrichmentsByPlace && _tb._enrichmentsByPlace[key]) || [];
             if (!enrK.length) return "";
-            var prv = enrK.slice(0, 3).map(function(p){ return _pmEsc(p.place||""); }).join(", ");
+            // PD.173: clickable enrichment names → jump to the full row.
+            var prv = enrK.slice(0, 3).map(function(p){
+              var nm = p && p.place ? String(p.place) : "";
+              var arg = nm.replace(/'/g, "\\'");
+              return '<a href="#" onclick="event.preventDefault();event.stopPropagation();if(typeof _pmJumpToPlaceRow===&quot;function&quot;)_pmJumpToPlaceRow(\'' + arg + '\');" style="color:#7a6294;text-decoration:underline;text-decoration-color:rgba(122,98,148,0.4);cursor:pointer;">' + _pmEsc(nm) + '</a>';
+            }).join(", ");
             if (enrK.length > 3) prv += " · +" + (enrK.length - 3) + " more";
             return '<div class="tb-dest-meta" style="font-size:10.5px;color:#7a6294;margin-top:3px;line-height:1.45;font-style:italic;">'
                 + '<span style="color:#7a6294;font-weight:600;font-style:normal;">✦ Max suggests near here:</span> ' + prv
@@ -22717,6 +22727,49 @@ function _pmFocusPlace(placeName){
 // of this place across _tb.placeActivities and re-renders.
 //
 // Empty-hub edge case: if there are no other kept stays, the day-
+// PD.173: jump the picker list to a place's full row. Used by the
+// inline "Max suggests near here" enrichment previews so the user can
+// click a brief name and land on the full row (with description,
+// "Things to do", checkbox, ⋯ menu) in whatever section it lives in.
+// Also focuses the matching map pin via _pmFocusPlace.
+function _pmJumpToPlaceRow(placeName){
+  if (!placeName) return;
+  try {
+    var nrm = (typeof _normPlaceName === "function")
+      ? _normPlaceName
+      : function(s){ return String(s||"").toLowerCase().trim(); };
+    var wantedLower = String(placeName).toLowerCase();
+    var wantedNorm = nrm(placeName);
+    // 1) Try by data-place attribute (set on by-place mode rows).
+    var rows = document.querySelectorAll("[data-place]");
+    var hit = null;
+    for (var i = 0; i < rows.length; i++) {
+      var dp = rows[i].getAttribute("data-place") || "";
+      if (dp.toLowerCase() === wantedLower || nrm(dp) === wantedNorm) { hit = rows[i]; break; }
+    }
+    // 2) Fall back to a textContent scan on activity-section rows
+    //    (their IDs use a slug of place name; cheaper to scan rows).
+    if (!hit) {
+      var actRows = document.querySelectorAll("[id^='tb-place-act-sec-']");
+      for (var j = 0; j < actRows.length; j++) {
+        if ((actRows[j].textContent || "").toLowerCase().indexOf(wantedLower) >= 0) {
+          hit = actRows[j]; break;
+        }
+      }
+    }
+    if (hit && typeof hit.scrollIntoView === "function") {
+      hit.scrollIntoView({ behavior: "smooth", block: "center" });
+      // Brief highlight so the eye lands on the right row.
+      var prevBg = hit.style.background;
+      hit.style.transition = "background 800ms ease-out";
+      hit.style.background = "#fff8d8";
+      setTimeout(function(){ hit.style.background = prevBg || ""; }, 1200);
+    }
+  } catch(_){}
+  if (typeof _pmFocusPlace === "function") _pmFocusPlace(placeName);
+}
+if (typeof globalThis !== "undefined") globalThis._pmJumpToPlaceRow = _pmJumpToPlaceRow;
+
 // trip option is disabled with a tooltip explaining why.
 function _pmSetPlaceDayTrip(placeKey, isDayTrip, hubKey){
   if (!_tb || !Array.isArray(_tb.placeActivities)) return;
