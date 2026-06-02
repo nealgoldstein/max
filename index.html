@@ -8586,7 +8586,9 @@ function _openPasteListModal(opts) {
   ov.appendChild(box);
   document.body.appendChild(ov);
   function close() { if (ov && ov.parentNode) ov.parentNode.removeChild(ov); }
-  ov.onclick = function(e) { if (e.target === ov) close(); };
+  // PD.166: backdrop click does NOT close. Paste modals contain
+  // active text-editing — losing a pasted list to an errant click
+  // on the dim area is high-cost. Cancel button is the explicit exit.
   document.getElementById("paste-list-cancel").onclick = close;
   var ta = document.getElementById("paste-list-ta");
   var buildBtn = document.getElementById("paste-list-build");
@@ -8687,7 +8689,8 @@ function _openPasteListBriefModal(opts){
   ov.appendChild(box);
   document.body.appendChild(ov);
   function close(){ if (ov && ov.parentNode) ov.parentNode.removeChild(ov); }
-  ov.onclick = function(e){ if (e.target === ov) close(); };
+  // PD.166: backdrop click does NOT close. Same reason as in
+  // _openPasteListModal — protect against accidental loss of pasted text.
   document.getElementById("paste-brief-cancel").onclick = close;
 
   var staysEl = document.getElementById("paste-stays");
@@ -15229,8 +15232,8 @@ function renderTripStep1Place(){
     // ── FOOTER ────────────────────────────────
     + '<div class="tb-footer">'
     +   '<div style="display:flex;gap:10px;align-items:stretch;">'
-    +     '<button class="tb-btn-primary" id="tb-place-continue-btn" onclick="goToTripStep2()" style="flex:1;width:auto;">Ask Max to suggest places →</button>'
-    +     '<button class="tb-btn-paste" onclick="_pasteListFromBrief()" style="flex:1;font-size:12px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:6px;padding:10px;cursor:pointer;font-family:inherit;">Paste a list →</button>'
+    +     '<button class="tb-btn-primary" onclick="_pasteListFromBrief()" style="flex:1;width:auto;">Paste a list →</button>'
+    +     '<button class="tb-btn-paste" id="tb-place-continue-btn" onclick="goToTripStep2()" style="flex:1;font-size:12px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:6px;padding:10px;cursor:pointer;font-family:inherit;">Ask Max to suggest places →</button>'
     +   '</div>'
     +   '<div style="display:flex;justify-content:space-between;margin-top:8px;">'
     +     '<div class="tb-btn-back" onclick="cancelTripBrief()">← Cancel</div>'
@@ -16636,7 +16639,22 @@ function _reconcileUserListedKeeps(){
       }
     });
 
+    var existing = _tb.placeActivities.find(function(it){
+      return it && /^recommended overnight stays$/i.test(String(it.section || ""));
+    });
     var listedKeys = Object.keys(listed);
+
+    // PD.167 (architectural): if the LLM already populated a stays
+    // section and we're in sentence-driven flow (no user-listed
+    // names to merge in), leave it alone. The LLM's curated stays
+    // are the canonical source for this flow; rebuilding from a
+    // scan of OTHER sections would clobber it down to whatever
+    // happens to be tagged overnight=true elsewhere.
+    if (existing && Array.isArray(existing.requiredPlaces)
+        && existing.requiredPlaces.length && !listedKeys.length) {
+      return;
+    }
+
     var listedStayKeys;
     if (listedKeys.length) {
       // Paste-list: include iff one of
@@ -16650,13 +16668,11 @@ function _reconcileUserListedKeeps(){
         return true; // listed + present + ambiguous → trust the user
       });
     } else {
-      // Sentence-driven: positive stay signal only.
+      // Sentence-driven with no existing stays section → synthesize from
+      // any overnight=true / role=stay flag we can find.
       listedStayKeys = Object.keys(stayKeys);
     }
     if (!listedStayKeys.length) return;
-    var existing = _tb.placeActivities.find(function(it){
-      return it && /^recommended overnight stays$/i.test(String(it.section || ""));
-    });
     // PD.93: prefer the candidate object directly when picking a
     // display name + country. Candidates carry the user's original
     // spelling (or the LLM's echo), which is the closest thing to
