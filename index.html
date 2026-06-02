@@ -18374,9 +18374,27 @@ function _renderPlaceActivityItems(){
     // render to scroll to the first hit. Earlier filter-style behavior
     // hid non-matching rows, which made the user lose their bearings.
     // (No filtering here.)
+    // PD.172 (architectural): for synthetic sections (one wrapper
+    // item containing N places), the wrapper's name/description is
+    // SECTION-LEVEL metadata, not per-row. Hoist it to the header
+    // subtitle so it appears once. The per-row right column
+    // suppresses these fields for the same items.
+    var _synthHdrItem = null;
+    if (secItems.length === 1) {
+      var _it0 = secItems[0];
+      if (_it0 && typeof _it0.type === "string" && /^synthetic-/.test(_it0.type)) {
+        _synthHdrItem = _it0;
+      }
+    }
+    var synthSubtitle = "";
+    if (_synthHdrItem && _synthHdrItem.description) {
+      synthSubtitle = '<div class="tb-act-section-subtitle" style="flex-basis:100%;font-size:11px;color:#666;line-height:1.5;margin-top:4px;font-style:italic;">'
+        + _pmEsc(_synthHdrItem.description) + '</div>';
+    }
     hdrWrap.innerHTML = '<div class="tb-act-section-title" style="flex:1;">' + _pmEsc(sec) + '</div>'
       + '<div class="tb-act-section-count">' + destOrder.length + ' destination' + (destOrder.length===1?'':'s') + '</div>'
-      + moreBtnHtml;
+      + moreBtnHtml
+      + synthSubtitle;
     // Round NC.X: in by-Place mode, suppress the "All places" header
     // (it's just a plumbing label for the renderer) but KEEP the
     // "Scenic routes" header so the user can see routes are a
@@ -18773,6 +18791,9 @@ function _renderPlaceActivityItems(){
       // item.requiredPlaces and route the click through togglePlaceInActivity.
       var rightHtml = '<div class="tb-act-col-right">';
       d.items.forEach(function(item){
+        // PD.172: synthetic sections hoist name+description to the
+        // section header. Skip per-row repeat here.
+        if (item && typeof item.type === "string" && /^synthetic-/.test(item.type)) return;
         // Round PD.4: iconic badge removed from Discovery rows.
         var iconicTag = '';
         // Round DN.5: truncate description to one line with ellipsis;
