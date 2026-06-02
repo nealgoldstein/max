@@ -40392,6 +40392,49 @@ function _writeTripRoleForDest(dest, role) {
   }
 }
 
+// PD.136: OSRM road-routing helper. Public OSRM demo endpoint is
+// free + rate-limited; per-segment fetches happen in parallel and
+// cache to trip._osrmSegments so re-renders don't re-fetch. Failures
+// land as "failed" so the renderer falls back to straight lines and
+// doesn't retry forever. Net effect: trip-view polyline shows actual
+// driving paths (curves around bays, follows real roads) instead of
+// straight lines across water.
+function _ensureTripRoutesCached(segments){
+  if (!segments || !segments.length) return Promise.resolve();
+  if (typeof trip === "undefined" || !trip) return Promise.resolve();
+  if (!trip._osrmSegments) trip._osrmSegments = {};
+  var missing = segments.filter(function(s){
+    var c = trip._osrmSegments[s.key];
+    return !c; // covers both undefined and null (NOT "failed", we don't retry those)
+  });
+  if (!missing.length) return Promise.resolve();
+  var promises = missing.map(function(s){
+    var url = "https://router.project-osrm.org/route/v1/driving/"
+      + s.from[1] + "," + s.from[0] + ";"
+      + s.to[1]   + "," + s.to[0]
+      + "?overview=full&geometries=geojson";
+    return fetch(url).then(function(r){
+      if (!r.ok) throw new Error("OSRM " + r.status);
+      return r.json();
+    }).then(function(data){
+      if (!data.routes || !data.routes.length) throw new Error("no route");
+      var geom = data.routes[0].geometry;
+      if (!geom || !Array.isArray(geom.coordinates) || geom.coordinates.length < 2) throw new Error("no geom");
+      // OSRM returns [lng, lat]; Leaflet wants [lat, lng].
+      var routed = geom.coordinates.map(function(c){ return [c[1], c[0]]; });
+      trip._osrmSegments[s.key] = routed;
+    }).catch(function(err){
+      console.warn("[Max PD.136] OSRM segment failed (" + s.key + "):", err && err.message);
+      trip._osrmSegments[s.key] = "failed";
+    });
+  });
+  return Promise.all(promises).then(function(){
+    // Persist the cache so reloads use it.
+    if (typeof localSave === "function") { try { localSave(); } catch(_){} }
+  });
+}
+if (typeof globalThis !== "undefined") globalThis._ensureTripRoutesCached = _ensureTripRoutesCached;
+
 function updateMainMap(){
   if(!_mainMap)return;
   clearMainMarkers();
@@ -40980,15 +41023,52 @@ function updateMainMap(){
       // trip.destinations[i].
       try {
         var _destSeq = trip.destinations || [];
+        // PD.136: build segment list with per-segment cache key, then
+        // render each from trip._osrmSegments cache (real road path) or
+        // a straight-line fallback if not yet fetched. Kicks off a
+        // batch fetch for any missing segments; when OSRM responds,
+        // updateMainMap is called again and the curved paths replace
+        // the straight ones. Failed segments are marked "failed" so
+        // we don't retry forever (visible as straight lines).
+        var _segments = [];
         for (var _bi = 0; _bi < bounds.length - 1; _bi++) {
           var _fromD = _destSeq[_bi];
           var _toD   = _destSeq[_bi + 1];
           if (_fromD && _toD && _waysideCovered[_fromD.id + "|" + _toD.id]) continue;
-          var _seg = [bounds[_bi], bounds[_bi + 1]];
-          var _halo = L.polyline(_seg, {color:"#fff", weight:6, opacity:0.9, lineCap:"round"}).addTo(_mainMap);
-          var _poly = L.polyline(_seg, {color:"#1a5fa8", weight:2.5, opacity:1.0, dashArray:"1 6", lineCap:"round"}).addTo(_mainMap);
-          _mainMarkers.push(_halo);
-          _mainMarkers.push(_poly);
+          var _from = bounds[_bi], _to = bounds[_bi + 1];
+          if (!_from || !_to) continue;
+          var _segKey = _from[0].toFixed(4) + "," + _from[1].toFixed(4) + "|" + _to[0].toFixed(4) + "," + _to[1].toFixed(4);
+          _segments.push({ key: _segKey, from: _from, to: _to });
+        }
+        var _hasMissing = false;
+        _segments.forEach(function(s){
+          var cached = trip._osrmSegments && trip._osrmSegments[s.key];
+          var coords;
+          var isStraight;
+          if (Array.isArray(cached) && cached.length >= 2) {
+            coords = cached;
+            isStraight = false;
+          } else {
+            coords = [s.from, s.to];
+            isStraight = true;
+            if (cached !== "failed") _hasMissing = true;
+          }
+          // Slightly dimmer styling for straight-line fallback so the
+          // user can tell at a glance "this segment isn't road-routed yet."
+          var haloOpacity = isStraight ? 0.7 : 0.9;
+          var lineColor = isStraight ? "#888" : "#1a5fa8";
+          var halo = L.polyline(coords, {color:"#fff", weight:6, opacity:haloOpacity, lineCap:"round"}).addTo(_mainMap);
+          var poly = L.polyline(coords, {color:lineColor, weight:2.5, opacity:1.0, dashArray:"1 6", lineCap:"round"}).addTo(_mainMap);
+          _mainMarkers.push(halo);
+          _mainMarkers.push(poly);
+        });
+        // Kick off batch fetch for missing segments (once at a time).
+        if (_hasMissing && !trip._osrmBatchInflight && typeof _ensureTripRoutesCached === "function") {
+          trip._osrmBatchInflight = true;
+          _ensureTripRoutesCached(_segments).then(function(){
+            trip._osrmBatchInflight = false;
+            if (typeof updateMainMap === "function") updateMainMap();
+          });
         }
         // Keep the legacy refs pointing at *something* so the cleanup
         // path in updateMainMap doesn't error trying to removeLayer(null).
