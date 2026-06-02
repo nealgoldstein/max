@@ -16556,62 +16556,57 @@ function _reconcileUserListedKeeps(){
   // waterfalls" appears first. Re-derive at render time from the
   // durable _userListedNames source of truth.
   (function _ensureSyntheticStaysSection(){
-    // PD.159 (architectural): filter by the LLM's classification of
-    // each candidate, NOT by the parser's stay/see inference.
+    // PD.161 (architectural): the stay section = USER INTEREST ∩
+    // LLM STAY-CAPABLE, where "user interest" depends on flow:
+    //   • Paste-list flow → user's listed places (regardless of
+    //     parser stay/see classification — the parser is a string
+    //     heuristic, the LLM knows what's stay-capable)
+    //   • Sentence-driven flow → every kept candidate (the user
+    //     has implicitly "endorsed" everything by not rejecting)
     //
-    // The parser is a string heuristic — it defaults to "stay" when it
-    // can't detect a "2. See" section header, which silently mis-labels
-    // every sight in a flat paste-list. The LLM, when it returns
-    // candidates, does a content-aware classification: c.singleSight
-    // is true for waterfalls/viewpoints/glaciers, c.overnightCapable
-    // is true for cities/towns/villages with lodging. That's the
-    // authoritative signal.
+    // Why this matters: filtering only "parser said stay" lost
+    // Stykkishólmur (user pasted it in both sections, see won) and
+    // emptied the section for sentence-driven users who have no
+    // _userListedNames at all.
     //
-    // Single source of truth: a place lands in "Place to stay
-    // overnight" iff it's on the user's list AND a candidate exists
-    // saying it's stay-capable. The parser's role is a fallback only
-    // when no candidate exists yet (early render, LLM in flight).
+    // LLM stay-capable = overnightCapable === true && singleSight !== true.
+    // c.role is intentionally NOT consulted as a gate — it was set
+    // by PD.74-arch from the parser's noisy default and can't beat
+    // the LLM's content classification.
     var candByKey = {};
     (_tb.candidates || []).forEach(function(c){
       if (!c || !c.place) return;
       var k = nrm(c.place);
       if (k && !candByKey[k]) candByKey[k] = c;
     });
-    var listedStayKeys = Object.keys(listed).filter(function(k){
-      var cand = candByKey[k];
-      if (cand) {
-        // PD.160 (architectural): the LLM's INTRINSIC content
-        // classification beats the parser-propagated role.
-        //
-        // Why this order matters: PD.74-arch routes the parser's
-        // stay/see inference through MaxRoleWriter, which sets
-        // cand.role. So a flat paste-list (parser defaults all to
-        // "stay") gives waterfalls cand.role="stay" even though the
-        // LLM correctly marked them singleSight=true. The LLM's
-        // singleSight + overnightCapable flags are CONTENT signals
-        // (the model knows waterfalls don't have lodging). c.role
-        // is mostly a state signal (what the user/system decided).
-        // For "is this stay-capable in principle?" the content
-        // signals are authoritative.
-        //
-        // Order:
-        //   1. LLM says singleSight (waterfall, viewpoint) → exclude
-        //   2. LLM says overnightCapable=false → exclude
-        //   3. c.role explicitly see/daytrip/onway → exclude
-        //   4. c.role explicitly stay OR overnightCapable=true → include
-        //   5. Otherwise → exclude (don't pad section without signal)
-        if (cand.singleSight === true) return false;
-        if (cand.overnightCapable === false) return false;
-        if (cand.role === "see" || cand.role === "daytrip" || cand.role === "onway") return false;
-        if (cand.role === "stay") return true;
-        if (cand.overnightCapable === true) return true;
-        return false;
-      }
-      // No candidate yet — fall back to parser's hint, but only when
-      // it's an EXPLICIT stay (parser default of "stay" is too noisy
-      // to trust without LLM confirmation).
-      return listed[k] === "stay";
-    });
+    function _isStayCapable(c){
+      if (!c) return false;
+      if (c.singleSight === true) return false;
+      if (c.overnightCapable === false) return false;
+      // Either LLM confirmed overnightCapable OR c.role is explicitly stay.
+      return c.overnightCapable === true || c.role === "stay";
+    }
+    var listedKeys = Object.keys(listed);
+    var listedStayKeys;
+    if (listedKeys.length) {
+      // Paste-list path: filter listed candidates by stay-capable.
+      listedStayKeys = listedKeys.filter(function(k){
+        var c = candByKey[k];
+        if (c) return _isStayCapable(c);
+        // No candidate yet — fall back to parser hint, but ONLY when
+        // it's an explicit stay. The parser's default is too noisy.
+        return listed[k] === "stay";
+      });
+    } else {
+      // Sentence-driven path: every kept candidate that's stay-capable.
+      // (The user has implicitly endorsed kept candidates; rejected
+      // ones are excluded by status check.)
+      listedStayKeys = (_tb.candidates || []).filter(function(c){
+        if (!c || !c.place) return false;
+        if (c.status === "reject") return false;
+        return _isStayCapable(c);
+      }).map(function(c){ return nrm(c.place); });
+    }
     if (!listedStayKeys.length) return;
     var existing = _tb.placeActivities.find(function(it){
       return it && /^recommended overnight stays$/i.test(String(it.section || ""));
