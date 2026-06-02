@@ -15753,6 +15753,59 @@ async function generateActivitiesForPlace(){
         });
       }
     });
+    // PD.174 (architectural): merge same-named non-route sections. The
+    // LLM sometimes emits multiple activity items under identical
+    // section labels — sentence-driven Iceland produced "Visit natural
+    // wonders" ×3, "Explore cities and towns" ×5. Each is a distinct
+    // wrapper with its own description, but to the user it reads as
+    // one category that got fragmented. Collapse into one section
+    // per name: concatenate requiredPlaces (deduped by place key),
+    // keep the first item's id/name/description as canonical.
+    //
+    // Skip type="route" — routes are intrinsically distinct activities
+    // (Train A vs. Train B with the same "Scenic trains" section).
+    // Skip synthetic-* — handled by their own dedicated builders.
+    items = (function _mergeDuplicateSections(arr){
+      var nrmKey = function(s){ return String(s||"").toLowerCase().trim().replace(/\s+/g," "); };
+      var nrmPlc = (typeof _normPlaceName === "function")
+        ? _normPlaceName
+        : function(s){ return String(s||"").toLowerCase().trim(); };
+      var out = [];
+      var byKey = {};  // section-name → first item in out
+      arr.forEach(function(it){
+        if (!it || !it.section) { out.push(it); return; }
+        if (it.type === "route") { out.push(it); return; }
+        if (typeof it.type === "string" && /^synthetic-/.test(it.type)) { out.push(it); return; }
+        var k = nrmKey(it.section);
+        if (!byKey[k]) {
+          byKey[k] = it;
+          out.push(it);
+          return;
+        }
+        // Merge this duplicate into the canonical item.
+        var canon = byKey[k];
+        canon.requiredPlaces = canon.requiredPlaces || [];
+        var seen = {};
+        canon.requiredPlaces.forEach(function(p){
+          if (p && p.place) seen[nrmPlc(p.place)] = true;
+        });
+        (it.requiredPlaces || []).forEach(function(p){
+          if (!p || !p.place) return;
+          var pk = nrmPlc(p.place);
+          if (seen[pk]) return;
+          seen[pk] = true;
+          canon.requiredPlaces.push(p);
+        });
+        // Pick richer description if canon's is short.
+        if (it.description && (!canon.description || canon.description.length < it.description.length)) {
+          canon.description = it.description;
+        }
+        // If any duplicate is iconic/checked, the merged section is.
+        if (it.iconic) canon.iconic = true;
+        if (it.checked) canon.checked = true;
+      });
+      return out;
+    })(items);
     _tb.placeActivities = items;
     // PD.73: LLM activity list landed — early first-save (no candidates
     // yet, but enough substance to want resumption).
@@ -23372,6 +23425,20 @@ function _restoreLastScreen(){
   if (s === "picker" && _hasDestinations) {
     trip._wasInPickerLastSession = true;
     s = "trip"; // override — render trip view; let user re-enter picker explicitly
+  }
+  // PD.175 (architectural): the symmetric rule. Trip view is the
+  // canonical state ONLY when there are destinations to show. When
+  // _lastScreen=="trip" but the trip has no destinations yet, the
+  // user's work-in-progress lives in Discovery (placeActivities +
+  // candidates from the LLM). Route them there. Without this fix,
+  // a trip view briefly visited before committing gets stamped
+  // _lastScreen=trip and the user reopens to an empty trip view
+  // even though Discovery has all their work.
+  var _hasDiscoveryWork =
+    (Array.isArray(trip.placeActivities) && trip.placeActivities.length > 0) ||
+    (Array.isArray(trip.candidates) && trip.candidates.length > 0);
+  if (s === "trip" && !_hasDestinations && _hasDiscoveryWork) {
+    s = "picker"; // override — route to Discovery where the work is
   }
   // Picker — hydrate _tb from trip and open renderActivityPicker.
   if (s === "picker") {
