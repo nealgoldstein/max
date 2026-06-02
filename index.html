@@ -16556,7 +16556,39 @@ function _reconcileUserListedKeeps(){
   // waterfalls" appears first. Re-derive at render time from the
   // durable _userListedNames source of truth.
   (function _ensureSyntheticStaysSection(){
-    var listedStayKeys = Object.keys(listed).filter(function(k){ return listed[k] === "stay"; });
+    // PD.159 (architectural): filter by the LLM's classification of
+    // each candidate, NOT by the parser's stay/see inference.
+    //
+    // The parser is a string heuristic — it defaults to "stay" when it
+    // can't detect a "2. See" section header, which silently mis-labels
+    // every sight in a flat paste-list. The LLM, when it returns
+    // candidates, does a content-aware classification: c.singleSight
+    // is true for waterfalls/viewpoints/glaciers, c.overnightCapable
+    // is true for cities/towns/villages with lodging. That's the
+    // authoritative signal.
+    //
+    // Single source of truth: a place lands in "Place to stay
+    // overnight" iff it's on the user's list AND a candidate exists
+    // saying it's stay-capable. The parser's role is a fallback only
+    // when no candidate exists yet (early render, LLM in flight).
+    var candByKey = {};
+    (_tb.candidates || []).forEach(function(c){
+      if (!c || !c.place) return;
+      var k = nrm(c.place);
+      if (k && !candByKey[k]) candByKey[k] = c;
+    });
+    var listedStayKeys = Object.keys(listed).filter(function(k){
+      var cand = candByKey[k];
+      if (cand) {
+        // LLM-classified: stay-capable wins.
+        if (cand.role === "stay") return true;
+        if (cand.role === "see" || cand.role === "daytrip" || cand.role === "onway") return false;
+        if (cand.overnightCapable === false || cand.singleSight === true) return false;
+        return cand.overnightCapable === true;
+      }
+      // No candidate yet — fall back to parser's hint.
+      return listed[k] === "stay";
+    });
     if (!listedStayKeys.length) return;
     var existing = _tb.placeActivities.find(function(it){
       return it && /^recommended overnight stays$/i.test(String(it.section || ""));
