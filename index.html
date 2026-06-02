@@ -11259,9 +11259,16 @@ async function enhanceDiscovery(btn) {
     // section so they appear in the picker. Group enrichment items
     // under "Sights near places you listed"; thematic items under
     // "More places to consider."
+    var enrichItems = filtered.filter(function(c){ return c._enrichedFrom; });
+    var themeItems  = filtered.filter(function(c){ return !c._enrichedFrom; });
+    // PD.118: also tally how many distinct source places got
+    // enrichments — useful in the completion toast.
+    var distinctSources = {};
+    enrichItems.forEach(function(c){
+      if (c._enrichedFrom) distinctSources[c._enrichedFrom] = true;
+    });
+    var enrichedSourcesCount = Object.keys(distinctSources).length;
     if (addedCount) {
-      var enrichItems = filtered.filter(function(c){ return c._enrichedFrom; });
-      var themeItems  = filtered.filter(function(c){ return !c._enrichedFrom; });
       _tb.placeActivities = _tb.placeActivities || [];
       if (themeItems.length) {
         _tb.placeActivities.push({
@@ -11290,14 +11297,111 @@ async function enhanceDiscovery(btn) {
         });
       }
     }
+    // PD.117: coord fallback for Enhance items the LLM didn't geocode.
+    // Three cases:
+    //   1. LLM gave valid lat/lng → use as-is, write to _coarseGeocode.
+    //   2. Enrichment item with _enrichedFrom → anchor to source
+    //      place's coords + small golden-angle offset (~3 km).
+    //   3. Thematic item with no source → region centroid + larger
+    //      offset (~30 km). Better than no pin.
+    // Without this, the section count ("Sights near places listed (33)")
+    // shows more items than there are pins, because items without
+    // coords don't render on the map.
+    try {
+      if (typeof _coarseGeocode !== "undefined") {
+        var nrm2 = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){return String(s||"").toLowerCase();};
+        var regionCentroid = null;
+        try {
+          if (typeof MaxGeo !== "undefined" && _tb && _tb.region) {
+            var _rg = MaxGeo.byName(_tb.region);
+            if (_rg && _rg.centroid) regionCentroid = [_rg.centroid[1], _rg.centroid[0]];
+          }
+        } catch(_){}
+        var enrSpread = 0; // index for golden-angle spread around source
+        var themeSpread = 0; // index for golden-angle spread around region
+        function _golden(n, distDeg, anchorLat){
+          var ang = (n * 137.508) * Math.PI / 180;
+          var dLng = (Math.sin(ang) * distDeg) / Math.max(0.1, Math.cos((anchorLat||0) * Math.PI / 180));
+          var dLat = Math.cos(ang) * distDeg;
+          return [dLat, dLng];
+        }
+        filtered.forEach(function(c){
+          var hasCoords = (typeof c.lat === "number" && typeof c.lng === "number"
+                           && isFinite(c.lat) && isFinite(c.lng)
+                           && !(c.lat === 0 && c.lng === 0));
+          var key = nrm2(c.place);
+          if (hasCoords) {
+            _coarseGeocode[key] = [c.lat, c.lng];
+            return;
+          }
+          // Find an anchor: source place if enrichment, region otherwise.
+          var anchor = null;
+          if (c._enrichedFrom) {
+            var srcKey = nrm2(c._enrichedFrom);
+            anchor = _coarseGeocode[srcKey] || null;
+            if (!anchor && Array.isArray(_tb.candidates)) {
+              var srcC = _tb.candidates.find(function(cc){
+                return cc && cc.place && nrm2(cc.place) === srcKey;
+              });
+              if (srcC && typeof srcC.lat === "number" && typeof srcC.lng === "number"
+                  && isFinite(srcC.lat) && isFinite(srcC.lng)) {
+                anchor = [srcC.lat, srcC.lng];
+              }
+            }
+          }
+          if (!anchor) anchor = regionCentroid;
+          if (!anchor) return; // nothing we can do
+          var dist = c._enrichedFrom ? 0.027 : 0.27; // ~3km vs ~30km
+          var idx = c._enrichedFrom ? (enrSpread++) : (themeSpread++);
+          var off = _golden(idx, dist, anchor[0]);
+          var newLat = anchor[0] + off[0];
+          var newLng = anchor[1] + off[1];
+          c.lat = newLat;
+          c.lng = newLng;
+          _coarseGeocode[key] = [newLat, newLng];
+          // Mirror onto every matching requiredPlace so the map's
+          // allPlaces builder picks up the coords from _coarseGeocode.
+          (_tb.placeActivities || []).forEach(function(it){
+            (it.requiredPlaces || []).forEach(function(p){
+              if (p && p.place && nrm2(p.place) === key) {
+                p.lat = newLat;
+                p.lng = newLng;
+              }
+            });
+          });
+        });
+        if (typeof _persistCoarseGeocode === "function") {
+          try { _persistCoarseGeocode(); } catch(_){}
+        }
+      }
+    } catch(coordsErr) {
+      console.warn("[Max enhance] coord fallback failed:", coordsErr && coordsErr.message);
+    }
     // Persist + re-render. _initialTripSave handles the trip save.
     if (typeof _initialTripSave === "function") _initialTripSave();
     if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
     if (typeof _renderPlacePickerMap === "function") _renderPlacePickerMap("tb-pm-map");
     if (typeof showSaveStatus === "function") {
-      showSaveStatus(addedCount
-        ? ("✦ Added " + addedCount + " new place" + (addedCount === 1 ? "" : "s") + " to Discovery")
-        : "No new places this time — Max is out of fresh ideas for this set.", 6000);
+      // PD.118: descriptive completion toast — breaks the count
+      // down by type, names where to look, and frames the next
+      // step (review + reject) so the curation loop is obvious.
+      var toastMsg;
+      if (!addedCount) {
+        toastMsg = rejectedDisplay.length
+          ? "No new places this time — Max is out of fresh ideas given what you've kept and rejected. Try rejecting more, or accept what's there."
+          : "No new places this time — Max is out of fresh ideas for this set.";
+      } else {
+        var parts = [];
+        if (themeItems.length) {
+          parts.push(themeItems.length + " in “More places to consider”");
+        }
+        if (enrichItems.length) {
+          parts.push(enrichItems.length + " near " + enrichedSourcesCount + " of your existing place" + (enrichedSourcesCount === 1 ? "" : "s") + " (look for italic “✦ Max suggests near here” under each)");
+        }
+        toastMsg = "✦ Added " + addedCount + " place" + (addedCount === 1 ? "" : "s") + ": " + parts.join(" · ")
+          + ". Review them, keep what fits, reject what misses — then click ✦ Enhance again to sharpen further.";
+      }
+      showSaveStatus(toastMsg, 12000);
     }
   } catch(err) {
     console.warn("[Max enhance] failed:", err && err.message);
