@@ -9345,6 +9345,19 @@ function enterApp(){
   //  in the canonical shape from the start; no fixup needed.)
   g("home-screen").style.display="none";
   g("app").style.display="flex";
+  // PD.204 (architectural): no-dest-overlay state is a pure function
+  // of trip.destinations.length. HTML defaults the overlay to
+  // display:flex (visible) so a fresh trip with no destinations
+  // shows the empty-state immediately. Once a trip is loaded with
+  // destinations, hide the overlay HERE — before view-specific
+  // rendering (drawTripMode, drawDestMode, _restoreLastScreen) so
+  // even paths that don't touch the overlay (e.g. picker restore)
+  // don't leave the empty-state stranded over a map that has data.
+  var _ndOv = document.getElementById("no-dest-overlay");
+  if (_ndOv) {
+    var _hasDests = Array.isArray(trip.destinations) && trip.destinations.length > 0;
+    _ndOv.style.display = _hasDests ? "none" : "flex";
+  }
   var tn=g("trip-name-display"); if(tn){
     tn.textContent=trip.name||"Untitled trip";
     tn.title="Click to rename";
