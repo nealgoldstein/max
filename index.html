@@ -12368,8 +12368,25 @@ async function runCandidateSearch(requiredPlaces) {
           // c.overnight or c.stayRange. Filter out anything already
           // covered by the user\'s pasted-stays list. Inject as
           // a second synthetic placeActivity right after the user\'s.
+          //
+          // PD.211: dedup against BOTH _stayPlaces (the resolved
+          // candidates) and _tb._userListedNames (the durable
+          // source-of-truth for what the user typed). The pre-211
+          // version only checked _stayPlaces, so any user-listed stay
+          // whose candidate didn\'t materialize (LLM dropped it, name
+          // mismatch on the canonicalization round-trip, normalization
+          // edge case on diacritics) leaked into "Other stays to
+          // consider" — Gardur was the symptom. The user-listed badge
+          // still rendered correctly because the pill reads from
+          // _userListedNames directly, but section placement read the
+          // narrower _stayPlaces set.
           var pastedNorm = {};
           _stayPlaces.forEach(function(c){ pastedNorm[nrm(c.place)] = true; });
+          if (_tb && _tb._userListedNames) {
+            Object.keys(_tb._userListedNames).forEach(function(k){
+              if (k) pastedNorm[k] = true;
+            });
+          }
           var llmExtraStays = allCands.filter(function(c){
             if (!c || !c.place) return false;
             if (pastedNorm[nrm(c.place)]) return false;
