@@ -3877,12 +3877,10 @@ function loadTripFile(input){
         destCount:trip.destinations.length});
       saveTripsIndex();
       localStorage.setItem("max-trip-"+newId,JSON.stringify(data));
-      // PD.186 (architectural): explicit file-open lands on trip view,
-      // not whatever screen was recorded in the file. Saving while
-      // peeking in Discovery shouldn't trap a later loader on the
-      // picker overlay. The picker is one click away via the menu;
-      // trip view is the canonical "show me this trip" surface.
-      try { if (trip) trip._lastScreen = "trip"; } catch(_){}
+      // PD.186 reverted by PD.192: file's saved _lastScreen IS the
+      // source of truth. Whichever view was active when the user
+      // saved/closed is the view that opens. Forcing trip view here
+      // overrides the user's actual last state.
       enterApp();
       showSaveStatus("Trip loaded: "+( trip.name||"Untitled trip"),4000);
     }catch(err){
@@ -9050,12 +9048,8 @@ async function browseChatSend(){
 function selectTrip(id){
   if(localLoad(id)){
     _currentTripId=id;
-    // PD.186 (extended): explicit trip-card click on the home screen
-    // is the same gesture as opening a file — "show me this trip,"
-    // not "resume my last session inside it." Honor that by stamping
-    // _lastScreen=trip before enterApp routes. The picker stays one
-    // click away via the menu.
-    try { if (trip) trip._lastScreen = "trip"; } catch(_){}
+    // PD.186 ext reverted by PD.192: the file's saved _lastScreen
+    // determines the view. Same behavior as file-load.
     enterApp();
     return;
   }
@@ -9108,7 +9102,6 @@ function selectTrip(id){
     }
     if (localLoad(id)) {
       _currentTripId = id;
-      try { if (trip) trip._lastScreen = "trip"; } catch(_){}  // PD.186 (extended)
       enterApp();
     } else {
       throw new Error("localLoad still failed after server fetch");
@@ -23604,20 +23597,15 @@ function _restoreLastScreen(){
     trip._wasInPickerLastSession = true;
     s = "trip"; // override — render trip view; let user re-enter picker explicitly
   }
-  // PD.175 (architectural): the symmetric rule. Trip view is the
-  // canonical state ONLY when there are destinations to show. When
-  // _lastScreen=="trip" but the trip has no destinations yet, the
-  // user's work-in-progress lives in Discovery (placeActivities +
-  // candidates from the LLM). Route them there. Without this fix,
-  // a trip view briefly visited before committing gets stamped
-  // _lastScreen=trip and the user reopens to an empty trip view
-  // even though Discovery has all their work.
-  var _hasDiscoveryWork =
-    (Array.isArray(trip.placeActivities) && trip.placeActivities.length > 0) ||
-    (Array.isArray(trip.candidates) && trip.candidates.length > 0);
-  if (s === "trip" && !_hasDestinations && _hasDiscoveryWork) {
-    s = "picker"; // override — route to Discovery where the work is
-  }
+  // PD.175 (REVERTED by PD.191): the destination-less → picker
+  // override fought every explicit "open this trip" gesture
+  // (file-load, home-screen card click, PD.186). The cure became
+  // worse than the disease — users opening a trip kept landing in
+  // Discovery despite trip._lastScreen="trip" being honored
+  // upstream. The principle from PD.190 generalizes here too:
+  // explicit user action (opening a file or clicking a trip card)
+  // is the commitment. The picker is one menu click away if needed.
+  // (no destinations + has-discovery-work override removed)
   // Picker — hydrate _tb from trip and open renderActivityPicker.
   if (s === "picker") {
     if (typeof _tb === "undefined" || !_tb) window._tb = _tb = {};
@@ -24850,19 +24838,27 @@ function _pmDeriveRole(info, key, opts){
     } catch(_){}
     return null;
   }
-  // FLAG — daytrip/onway flags set on requiredPlace refs by trip-view
-  // popup writes (chip mirror, wayside stop). The user committed via
-  // a different surface; treat as a commitment ("flag") but refresh
-  // the hub against the predictor + nearest-kept-stay because the
-  // stored value can go stale when the trip's destinations change.
-  if (info._isDayTrip) {
+  // FLAG — daytrip/onway flags on requiredPlace refs.
+  //
+  // PD.192 (architectural): only honor _isDayTrip / _waysideFromHub
+  // when there's CORROBORATING user-commitment evidence on the
+  // candidate. The popover writes both (cand._roleTouched=true with
+  // cand.role="daytrip", AND p._isDayTrip=true on the requiredPlace
+  // ref). When both are present, this is a real user commitment.
+  // When _isDayTrip is set ALONE, it's data debris from old
+  // absorption-pass writes (pre-PD.190) that no longer reflects what
+  // the user agreed to. Trust the flag only when the candidate
+  // corroborates.
+  if (info._isDayTrip
+      && cand && cand._roleTouched === true && cand.role === "daytrip") {
     var _flagHub = (info._dayTripHub || "").toLowerCase();
     if (!_isValidHub(_flagHub)) {
-      _flagHub = _predHubFor() || _findNearestHub(key) || "";
+      _flagHub = _findNearestHub(key) || "";
     }
     return { role: "daytrip", hub: _flagHub, source: "flag" };
   }
-  if (info._waysideFromHub) {
+  if (info._waysideFromHub
+      && cand && cand._roleTouched === true && cand.role === "onway") {
     var _owHub = String(info._waysideFromHub || "").toLowerCase();
     if (!_isValidHub(_owHub)) {
       _owHub = _findNearestHub(key) || "";
