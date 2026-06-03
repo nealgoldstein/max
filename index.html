@@ -1852,18 +1852,18 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
    shape of the pin (so the halo traces the teardrop outline, not
    a rectangular box-shadow box), and survives Leaflet's repositioning
    transforms. */
-/* PD.179: tight orange halo, double-pulse. Hugs the pin outline
-   (max 5px spread) so it reads as a ring around the icon/teardrop
-   rather than a wide glow. Two pulses over 2.4s. */
-.leaflet-marker-icon.pm-focus-pulse {
-  animation: pm-focus-pulse 2.4s ease-out 1;
+/* PD.180: turn the pin's BORDER gold for the focus window instead
+   of drawing a glow around it. Hugs the shape exactly. Two CSS
+   targets cover both pin types: SVG path (teardrop, octagon) gets
+   stroke override; circle DIV gets a box-shadow ring matched to its
+   border-radius. Holds for the full focus window then snaps off
+   when the JS removes the class. */
+.leaflet-marker-icon.pm-focus-pulse svg path {
+  stroke: #ffb300 !important;
+  stroke-width: 4 !important;
 }
-@keyframes pm-focus-pulse {
-  0%   { filter: drop-shadow(0 0 0 rgba(255,120,0,1)); }
-  20%  { filter: drop-shadow(0 0 5px rgba(255,120,0,1)); }
-  40%  { filter: drop-shadow(0 0 2px rgba(255,120,0,0.5)); }
-  60%  { filter: drop-shadow(0 0 5px rgba(255,120,0,1)); }
-  100% { filter: drop-shadow(0 0 5px rgba(255,120,0,0)); }
+.leaflet-marker-icon.pm-focus-pulse > div {
+  box-shadow: 0 0 0 3px #ffb300, 0 1px 4px rgba(0,0,0,0.25) !important;
 }
 @media (max-width:640px){
   /* On narrow screens, stack the columns and let places wrap as chips below */
@@ -22824,8 +22824,8 @@ function _pmFocusPlace(placeName){
         // eslint-disable-next-line no-unused-expressions
         el.offsetWidth; // restart animation on double-tap
         el.classList.add("pm-focus-pulse");
-        // PD.179 (tuned): match 2.4s keyframe.
-        setTimeout(function(){ try { el.classList.remove("pm-focus-pulse"); } catch(__){} }, 2400);
+        // PD.180: 2s gold-border highlight.
+        setTimeout(function(){ try { el.classList.remove("pm-focus-pulse"); } catch(__){} }, 2000);
       } catch(__){}
     }
     if (marker && marker._icon) {
