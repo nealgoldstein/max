@@ -42196,6 +42196,27 @@ function updateMainMap(){
       // trip.destinations[i].
       try {
         var _destSeq = trip.destinations || [];
+        // PD.203 (architectural): cache invalidation by destination-
+        // sequence signature. Without this, _osrmSegments accumulates
+        // entries keyed on coordinate pairs from old configurations.
+        // Reorder a destination, add/remove one, or even nudge a coord
+        // — the cache keys built at render time no longer match any
+        // stored entry, so 100% cache misses + all-straight-lines.
+        // Compute a stable signature over the current destination
+        // sequence (id + coord). If it differs from what cached the
+        // current map, wipe and start fresh. One atomic comparison;
+        // no per-key pruning needed.
+        var _destSig = _destSeq.map(function(d){
+          if (!d) return "_";
+          var lat = (typeof d.lat === "number") ? d.lat.toFixed(4) : "?";
+          var lng = (typeof d.lng === "number") ? d.lng.toFixed(4) : "?";
+          return (d.id || "") + "@" + lat + "," + lng;
+        }).join("|");
+        if (trip._osrmCacheSig !== _destSig) {
+          trip._osrmSegments = {};
+          trip._osrmCacheSig = _destSig;
+          trip._osrmBatchInflight = false;
+        }
         // PD.136: build segment list with per-segment cache key, then
         // render each from trip._osrmSegments cache (real road path) or
         // a straight-line fallback if not yet fetched. Kicks off a
