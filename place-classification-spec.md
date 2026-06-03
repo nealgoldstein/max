@@ -22,6 +22,18 @@ The destination/sight distinction is structural, not visual. A destination is *a
 
 The two are exclusive: if a Place is in `trip.destinations[]`, it must not appear in any other destination's `pois[]`. If it's in `pois[]`, it must not appear in `destinations[]`. There is one toggle (Change role) that moves it between the two; the toggle is the *only* mutation that crosses the line.
 
+### Destinations subsume sights
+
+A destination is implicitly a place you'll experience. Every destination has its own card and its own See-and-Do tab, which lists the activities and POIs *at* that destination. You don't need — and the model doesn't allow — listing the destination's own name in the sights list to indicate you also want to see it. Being a destination is the richer assertion; "things to see and do *here*" is what the destination card is for.
+
+The sights list is reserved for POIs that **aren't** where you sleep — places you visit during the day from a destination, then return.
+
+Practical consequences:
+
+- Stykkishólmur in both stays and sees → treated as a stay, the sees entry dropped as redundant. (Stay wins, not see — the importer's old behavior was the opposite and is being corrected.)
+- Reykjavík in stays + Harpa Concert Hall in sees → Reykjavík is a destination, Harpa is a sight under it. Both surface; no conflict.
+- A user who wants to "make sure to visit Selfoss" but is already staying in Selfoss should leave it in stays only. The Selfoss destination card's See-and-Do tab is where the visiting-Selfoss intent lives.
+
 ## The classifier
 
 One pass, before anything else touches the list. Input: a list line + the rest of the in-progress trip. Output: exactly one of —

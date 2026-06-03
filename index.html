@@ -8951,7 +8951,23 @@ function _openPasteListBriefModal(opts){
   function synthesize(){
     var stays = parseSection(staysEl.value, true);
     var sees  = parseSection(seesEl.value, false);
-    var all = stays.concat(sees);
+    // PD.220: stays subsume sights. If a place appears in both fields,
+    // the stay wins — the destination card's See-and-Do tab already
+    // represents "things to do here," so listing the same name as a
+    // separate sight is redundant. Without this dedup, the sees concat
+    // overrode the stays entry in _pastedRoles (last write wins) and
+    // Stykkishólmur-in-both ended up as a sight rather than a stay.
+    var _nrm220 = (typeof _normPlaceName === "function")
+      ? _normPlaceName
+      : function(s){ return String(s || "").toLowerCase().trim(); };
+    var stayKeys = {};
+    stays.forEach(function(p){
+      if (p && p.place) stayKeys[_nrm220(p.place)] = true;
+    });
+    var dedupedSees = sees.filter(function(p){
+      return !(p && p.place && stayKeys[_nrm220(p.place)]);
+    });
+    var all = stays.concat(dedupedSees);
     return {
       destinations: all,
       tripName: (_tb && _tb.name) || (_tb && _tb.region) || "",
