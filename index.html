@@ -6893,7 +6893,18 @@ function parsePlacesList(text) {
     // Section header `N. <title>` — skip
     if (/^\d+\.\s+/.test(fl) && !/^[\*\-•▪◦+]/.test(fl)) continue;
     // Sub-header (ends with ":", no bullet) — skip
-    if (/:$/.test(fl) && !/^[\*\-•▪◦+]/.test(fl)) continue;
+    if (/:$/.test(fl) && !/^[\*\-•▪◦+]/.test(fl)) {
+      // PD.218: if the sub-header is a stay/see mode signal (the
+      // PD.215 path that makes "stays:" / "sees:" meaningful), the
+      // user is diving directly into destinations — there's no trip
+      // name above. Bail out so the body loop starts from the top
+      // and "Selfoss, Iceland" parses as a destination, not the
+      // trip name. Without this, Neal's list (which started with
+      // "stays:" then a destination) lost the first destination
+      // line to the trip name claimer.
+      if (classifyHeader(fl.replace(/:$/, ""))) break;
+      continue;
+    }
     // Bullet — skip
     if (/^[\*\-•▪◦+]/.test(fl)) continue;
     // Found the first "free" line — this is the trip name.
@@ -8920,7 +8931,20 @@ function _openPasteListBriefModal(opts){
     String(text || "").split(/\r?\n/).forEach(function(line){
       var p = line.trim().replace(/^[*\-•+]\s*/, "").trim();
       if (!p) return;
-      out.push({ place: p, nights: 0, isStay: isStay, intent: "" });
+      // PD.219: tag with _userIntent so the PD.215/PD.216 classifier
+      // guards fire. Without this, the two-textarea modal's custom
+      // parser was producing entries with no _userIntent — the
+      // classifier would then fall back to LLM judgment alone, and
+      // sights with no LLM-suggested parent would get Step-3-promoted
+      // to standalone destinations (re-introducing the Skaftafell /
+      // Þingvellir / etc. bug PD.216 was supposed to kill).
+      out.push({
+        place: p,
+        nights: 0,
+        isStay: isStay,
+        intent: "",
+        _userIntent: isStay ? "stay" : "see"
+      });
     });
     return out;
   }
