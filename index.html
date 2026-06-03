@@ -9313,125 +9313,16 @@ function enterApp(){
   }
   // Restore _mdcItems from saved trip for route sequencing
   if(trip && trip.mdcItems) _mdcItems = trip.mdcItems;
-  // v360.3 (#104): collect a summary of any migrations that mutated
-  // the trip on load. UX principle — every action's result must be
-  // visible. The individual migrations previously logged to console
-  // only; opening a trip could silently move waysides, refresh
-  // coords, fold legacy notes around, etc., and the user had no
-  // signal that anything had changed. We push human-readable phrases
-  // into _migrationLog and surface a single consolidated toast at
-  // the end of enterApp if the list is non-empty.
-  var _migrationLog = [];
-  // PD.194 (architectural): one-shot migration for trips saved
-  // before PD.181 fixed the Choreograph publish path. State invariant:
-  // when the trip's Discovery has committed stays (_userListedNames
-  // with role="stay" OR placeActivities with overnight=true), those
-  // stays MUST appear as trip.destinations. Pre-PD.181 trips
-  // sometimes have Discovery work but empty destinations because the
-  // Candidate Explorer publish path wasn't reliably triggered.
-  // Migrate by running publishTrip; the trip becomes self-consistent
-  // and never enters this branch again (guarded by
-  // trip._destinationsMigrated). Going forward, PD.181's bypass
-  // maintains the invariant at Choreograph time so the migration is
-  // a one-shot for legacy data only.
-  if (trip
-      && !trip._destinationsMigrated
-      && Array.isArray(trip.destinations) && trip.destinations.length === 0
-      && (
-        (Array.isArray(trip.placeActivities) && trip.placeActivities.length > 0)
-        || (Array.isArray(trip.mdcItems) && trip.mdcItems.length > 0)
-        || (Array.isArray(trip.candidates) && trip.candidates.length > 0)
-      )) {
-    try {
-      // Hydrate _tb from trip so MaxEnginePicker.publishTrip has the
-      // picker state it expects. Match the rehydrate pattern from
-      // _restoreLastScreen's picker branch.
-      if (typeof _tb === "undefined" || !_tb) window._tb = _tb = {};
-      _tb.tripMode = "place";
-      if (Array.isArray(trip.placeActivities)) _tb.placeActivities = trip.placeActivities.slice();
-      if (Array.isArray(trip.candidates)) _tb.candidates = trip.candidates.slice();
-      if (Array.isArray(trip.mdcItems)) _mdcItems = trip.mdcItems.slice();
-      if (trip.brief) {
-        _tb.region = _tb.region || trip.brief.region || "";
-        if (trip.brief._userListedNames) {
-          _tb._userListedNames = Object.assign({}, trip.brief._userListedNames);
-        }
-      }
-      // Mark migrated BEFORE the async publish so a thrown error or
-      // mid-publish reload doesn't trap the trip in a retry loop.
-      trip._destinationsMigrated = true;
-      if (typeof MaxEnginePicker !== "undefined" && typeof MaxEnginePicker.publishTrip === "function") {
-        // Fire-and-forget; the 'published' event handler will
-        // rerender trip view once destinations exist.
-        Promise.resolve().then(function(){
-          try { return MaxEnginePicker.publishTrip(); } catch(_) {}
-        });
-        _migrationLog.push("committed your Discovery picks as destinations");
-      }
-      if (typeof autoSave === "function") autoSave();
-    } catch (e) {
-      console.warn("[Max PD.194] destinations migration failed:", e && e.message);
-    }
-  }
-  // One-time migration: convert legacy trip.logistics.carRentals into Tracker items
-  // on the destination where pickup happens. The retired logistics screen used to
-  // handle this; Tracker items are the new home.
-  migrateCarRentalsIntoTracker();
-  // v360.3 (#120): one-time wayside geometry migration. Trips built
-  // before the reassignment pass shipped have waysides committed to
-  // whichever leg the LLM hallucinated them onto, even when the
-  // wayside sits closer to a different leg's chord. Run the same
-  // _reassignWaysidesToBestLeg pass that generateWaysidesForTrip now
-  // applies at generation time. Guarded by trip._waysidesGeoMigrated
-  // so it runs at most once per trip — subsequent loads short-circuit.
-  if (trip && !trip._waysidesGeoMigrated &&
-      typeof _reassignWaysidesToBestLeg === "function" &&
-      Array.isArray(trip.routes) && trip.routes.length) {
-    try {
-      var _wsMig = _reassignWaysidesToBestLeg(trip);
-      trip._waysidesGeoMigrated = true;
-      if (_wsMig && (_wsMig.moved || _wsMig.dropped)) {
-        console.log("[Max] one-shot wayside migration: moved " + _wsMig.moved + ", dropped " + _wsMig.dropped);
-        var _wsParts = [];
-        if (_wsMig.moved) _wsParts.push("moved " + _wsMig.moved + " wayside" + (_wsMig.moved === 1 ? "" : "s") + " to a better leg");
-        if (_wsMig.dropped) _wsParts.push("dropped " + _wsMig.dropped + " off-route wayside" + (_wsMig.dropped === 1 ? "" : "s"));
-        _migrationLog.push(_wsParts.join(" · "));
-        if (typeof autoSave === "function") autoSave();
-      }
-    } catch (e) {
-      console.warn("[Max] one-shot wayside migration failed:", e);
-    }
-  }
-  // v359.60.78: one-time coord refresh for destinations whose place
-  // matches a built-in geocode entry but whose current coords are
-  // significantly off (>5km). Fixes cases where Nominatim returned a
-  // lake/feature centroid (Mývatn → middle of the water) instead of
-  // the lodging town. The 5 km threshold preserves any pins the user
-  // intentionally moved a short distance — only blatantly-wrong coords
-  // get refreshed. Runs once per trip, guarded by trip._coordRefreshed.
-  if (trip && Array.isArray(trip.destinations) && !trip._coordRefreshed) {
-    var _coordsFixed = 0;
-    trip.destinations.forEach(function(d){
-      if (!d || !d.place) return;
-      var key = String(d.place).toLowerCase().trim();
-      var coords = (_coarseGeocode && _coarseGeocode[key]) || null;
-      if (!coords || !Array.isArray(coords) || coords.length !== 2) return;
-      if (typeof d.lat !== "number" || typeof d.lng !== "number") {
-        d.lat = coords[0]; d.lng = coords[1]; _coordsFixed++; return;
-      }
-      if (typeof _fqHaversineKm === "function") {
-        var km = _fqHaversineKm(d.lat, d.lng, coords[0], coords[1]);
-        if (km > 5) {
-          d.lat = coords[0]; d.lng = coords[1]; _coordsFixed++;
-        }
-      }
-    });
-    trip._coordRefreshed = true;
-    if (_coordsFixed > 0) {
-      console.log("[Max] refreshed " + _coordsFixed + " destination coordinate(s) from built-in geocode table");
-      _migrationLog.push("fixed " + _coordsFixed + " destination pin location" + (_coordsFixed === 1 ? "" : "s"));
-    }
-  }
+  // PD.196 (architectural reset): all one-shot trip-load migrations
+  // deleted. Going forward, trips are minted clean by Discovery →
+  // Choreograph (PD.181 ensures the publish path produces consistent
+  // data) and stay clean. Legacy data shapes are no longer supported;
+  // users delete and rebuild trips affected by pre-PD.181 bugs.
+  // Removed migrations: carRentals → Tracker, waysides geometry
+  // reassign, destination coord refresh, notes-surface merge,
+  // travelerNotes → research, Want-to-see → sights, pendingActions
+  // dedup. Each was layered defense against specific historical
+  // shapes; in the clean architecture, no such shapes exist to repair.
 
   // v359.60.79: per-destination snap-to-settlement pass. For each
   // destination not already refined (no dest._coordsRefined flag),
@@ -9439,175 +9330,9 @@ function enterApp(){
   // at a natural feature centroid (lake, peak, park, etc.), snap to
   // the nearest village/town/city found in the address. Runs in the
   // background; updates dest.lat/lng + autoSaves as refinements come
-  // in. Throttled to respect Nominatim's 1 req/sec policy.
-  if (trip && Array.isArray(trip.destinations)) {
-    trip.destinations.forEach(function(d){
-      if (!d || d._coordsRefined) return;
-      if (typeof d.lat !== "number" || typeof d.lng !== "number") return;
-      // Skip destinations whose coords match a built-in entry (we
-      // already trust those).
-      var key = String(d.place||"").toLowerCase().trim();
-      var builtin = (_coarseGeocode && _coarseGeocode[key]) || null;
-      if (builtin && Array.isArray(builtin) && typeof _fqHaversineKm === "function") {
-        var bkm = _fqHaversineKm(d.lat, d.lng, builtin[0], builtin[1]);
-        if (bkm < 2) { d._coordsRefined = true; return; }
-      }
-      _enqueueGeo(async function(){
-        try {
-          await _sleepMs(0);
-          var revUrl = 'https://nominatim.openstreetmap.org/reverse?format=json&zoom=14&addressdetails=1'
-                     + '&lat=' + d.lat + '&lon=' + d.lng;
-          var rev = await fetch(revUrl, { headers: {'Accept-Language':'en'} });
-          var rd = await rev.json();
-          if (!rd) { d._coordsRefined = true; return; }
-          // Already at a settlement? Mark refined and exit.
-          if (_isSettlementNomType(rd.class, rd.type)) { d._coordsRefined = true; return; }
-          // Wilderness — try to snap to the nearest settlement.
-          if (_isWildernessNomType(rd.class, rd.type)) {
-            var addr = rd.address || {};
-            var refined = await _refineCoordsToSettlement(d.lat, d.lng, addr.country || "");
-            if (refined && Array.isArray(refined) && typeof _fqHaversineKm === "function") {
-              var rkm = _fqHaversineKm(d.lat, d.lng, refined[0], refined[1]);
-              if (rkm > 0.5) {
-                console.log("[Max] snapped " + d.place + " from (" + d.lat.toFixed(4) + "," + d.lng.toFixed(4)
-                  + ") to nearest settlement (" + refined[0].toFixed(4) + "," + refined[1].toFixed(4) + ")");
-                d.lat = refined[0]; d.lng = refined[1];
-                if (typeof autoSave === "function") autoSave();
-                if (typeof _emitTripMutation === "function") _emitTripMutation();
-              }
-            }
-          }
-          d._coordsRefined = true;
-        } catch(e) {
-          d._coordsRefined = true;
-        }
-      });
-    });
-  }
-
-  // v359.60.66: one-time notes-surface merge. We used to have two
-  // notes surfaces at each level (Trip notes / Discovery notes at the
-  // trip level; Notes from the road / Research at the destination
-  // level) with overlapping intent. Merged into one per level:
-  //   • trip.brief.tripMeta = canonical trip-level notes & links
-  //   • dest.research       = canonical per-destination notes
-  // Migrate the legacy "trip-time" surfaces (trip.notes, dest.travelerNotes)
-  // into the canonical location, separated by a blank line so old content
-  // is preserved, then null/empty the legacy field so the new writers see
-  // a clean slate.
-  if (trip) {
-    // Trip-level merge: trip.notes → trip.brief.tripMeta
-    var _tn = trip.notes;
-    if (_tn && typeof _tn === "object" && (
-        (typeof _tn.text === "string" && _tn.text.trim())
-        || (Array.isArray(_tn.links) && _tn.links.length))) {
-      if (!trip.brief) trip.brief = {};
-      if (!trip.brief.tripMeta) trip.brief.tripMeta = { notes: "", links: [] };
-      if (!Array.isArray(trip.brief.tripMeta.links)) trip.brief.tripMeta.links = [];
-      var _legacyTxt = (typeof _tn.text === "string") ? _tn.text.trim() : "";
-      if (_legacyTxt) {
-        var _existingTxt = (trip.brief.tripMeta.notes || "").trim();
-        trip.brief.tripMeta.notes = _existingTxt
-          ? _existingTxt + "\n\n" + _legacyTxt
-          : _legacyTxt;
-      }
-      if (Array.isArray(_tn.links) && _tn.links.length) {
-        var _seenUrl = {};
-        trip.brief.tripMeta.links.forEach(function(l){
-          if (l && l.url) _seenUrl[String(l.url).toLowerCase()] = true;
-        });
-        _tn.links.forEach(function(l){
-          if (l && l.url && !_seenUrl[String(l.url).toLowerCase()]) {
-            trip.brief.tripMeta.links.push(l);
-            _seenUrl[String(l.url).toLowerCase()] = true;
-          }
-        });
-      }
-      trip.notes = null;
-      console.log("[Max] merged trip.notes into trip.brief.tripMeta");
-      _migrationLog.push("moved trip-level notes into Keep in mind");
-    }
-    // Per-destination merge: dest.travelerNotes → dest.research
-    var _mergedDests = 0;
-    (trip.destinations || []).forEach(function(d){
-      if (!d) return;
-      var legacy = (typeof d.travelerNotes === "string") ? d.travelerNotes.trim() : "";
-      if (!legacy) return;
-      var existing = (typeof d.research === "string") ? d.research.trim() : "";
-      d.research = existing ? existing + "\n\n" + legacy : legacy;
-      d.travelerNotes = "";
-      _mergedDests++;
-    });
-    if (_mergedDests > 0) {
-      console.log("[Max] merged travelerNotes into research on " + _mergedDests + " destination(s)");
-      _migrationLog.push("moved road-notes into Keep in mind on " + _mergedDests + " destination" + (_mergedDests === 1 ? "" : "s"));
-    }
-
-    // v359.60.69: migrate "Want to see" entries into the sights pool.
-    // dest.trackerItems.see was a freeform "save for later" list of
-    // strings. Each entry becomes a sight suggestion with no coords
-    // so it surfaces on the See and do tab as an Optional pick and
-    // can be scheduled like any other sight.
-    var _migratedSights = 0;
-    (trip.destinations || []).forEach(function(d){
-      if (!d || !d.trackerItems || !Array.isArray(d.trackerItems.see) || !d.trackerItems.see.length) return;
-      if (!Array.isArray(d.suggestions)) d.suggestions = [];
-      var existingNames = {};
-      d.suggestions.forEach(function(s){
-        if (s && s.n) existingNames[String(s.n).toLowerCase()] = true;
-      });
-      d.trackerItems.see.forEach(function(text, i){
-        var name = (typeof text === "string") ? text.trim() : "";
-        if (!name) return;
-        if (existingNames[name.toLowerCase()]) return;
-        d.suggestions.push({
-          id: "wts-" + d.id + "-" + i,
-          type: "sight",
-          n: name,
-          st: name,
-          note: null,
-          lat: null,
-          lng: null,
-          approx: false,
-          fromWantToSee: true
-        });
-        existingNames[name.toLowerCase()] = true;
-        _migratedSights++;
-      });
-      d.trackerItems.see = [];
-    });
-    if (_migratedSights > 0) {
-      console.log("[Max] migrated " + _migratedSights + " 'Want to see' entries into sights");
-      _migrationLog.push("moved " + _migratedSights + " 'Want to see' entries into sights");
-    }
-  }
-
-  // v359.60.61: one-time cleanup of duplicate pendingAction rows that
-  // accumulated before addPendingAction was deduped at the writer. Same
-  // identity rule as the writer (eventName + confirmation, or eventName
-  // + destName + eventType when no confirmation). Keeps the first
-  // occurrence, clears subsequent dupes so the user can still recover
-  // any unique detail from cleared rows if needed.
-  if (trip && Array.isArray(trip.pendingActions)) {
-    var _seen = {};
-    var _cleaned = 0;
-    trip.pendingActions.forEach(function(a){
-      if (!a || a.cleared) return;
-      var _nameKey = String(a.eventName||'').toLowerCase().trim();
-      if (!_nameKey) return;
-      var _confKey = a.confirmationNumber||'';
-      var _key = _confKey
-        ? "c:" + _nameKey + "|" + _confKey
-        : "n:" + _nameKey + "|" + String(a.destName||'').toLowerCase().trim()
-          + "|" + String(a.eventType||'').toLowerCase().trim();
-      if (_seen[_key]) { a.cleared = true; _cleaned++; }
-      else _seen[_key] = true;
-    });
-    if (_cleaned > 0) {
-      console.log("[Max] cleared " + _cleaned + " duplicate pendingAction row(s)");
-      _migrationLog.push("cleared " + _cleaned + " duplicate action row" + (_cleaned === 1 ? "" : "s"));
-    }
-  }
+  // (settlement-snap, notes-merge, want-to-see-migrate, pendingActions
+  //  dedup all removed in PD.196. New trips have these surfaces minted
+  //  in the canonical shape from the start; no fixup needed.)
   g("home-screen").style.display="none";
   g("app").style.display="flex";
   var tn=g("trip-name-display"); if(tn){
@@ -9640,19 +9365,7 @@ function enterApp(){
     try { drawTripMode(); } catch (e) { console.error("[Max] drawTripMode failed:", e); }
     try { updateMainMap(); } catch (e) { console.warn("[Max] updateMainMap failed:", e && e.message); }
     try { checkDeadlineAlert(); } catch (e) { console.warn("[Max] checkDeadlineAlert failed:", e && e.message); }
-    // v360.3 (#104): surface the consolidated migration summary AFTER
-    // the initial render's autoSave wave settles. drawTripMode +
-    // updateMainMap fire their own "✓ Saved" toasts via autoSave on
-    // first paint; if we showed the migration toast before that, the
-    // autoSave would clobber it. Fire ours last, inside the same
-    // setTimeout chain, so it stays on top. One toast even when
-    // multiple migrations ran.
-    if (_migrationLog.length && typeof showSaveStatus === "function") {
-      var _msg = "✓ Updated this trip: " + _migrationLog.join(" · ");
-      setTimeout(function () {
-        showSaveStatus(_msg, 6000);
-      }, 150);
-    }
+    // (PD.196: migration toast removed along with the migrations.)
   },50);
 }
 
