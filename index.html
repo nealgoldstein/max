@@ -9322,6 +9322,57 @@ function enterApp(){
   // into _migrationLog and surface a single consolidated toast at
   // the end of enterApp if the list is non-empty.
   var _migrationLog = [];
+  // PD.194 (architectural): one-shot migration for trips saved
+  // before PD.181 fixed the Choreograph publish path. State invariant:
+  // when the trip's Discovery has committed stays (_userListedNames
+  // with role="stay" OR placeActivities with overnight=true), those
+  // stays MUST appear as trip.destinations. Pre-PD.181 trips
+  // sometimes have Discovery work but empty destinations because the
+  // Candidate Explorer publish path wasn't reliably triggered.
+  // Migrate by running publishTrip; the trip becomes self-consistent
+  // and never enters this branch again (guarded by
+  // trip._destinationsMigrated). Going forward, PD.181's bypass
+  // maintains the invariant at Choreograph time so the migration is
+  // a one-shot for legacy data only.
+  if (trip
+      && !trip._destinationsMigrated
+      && Array.isArray(trip.destinations) && trip.destinations.length === 0
+      && (
+        (Array.isArray(trip.placeActivities) && trip.placeActivities.length > 0)
+        || (Array.isArray(trip.mdcItems) && trip.mdcItems.length > 0)
+        || (Array.isArray(trip.candidates) && trip.candidates.length > 0)
+      )) {
+    try {
+      // Hydrate _tb from trip so MaxEnginePicker.publishTrip has the
+      // picker state it expects. Match the rehydrate pattern from
+      // _restoreLastScreen's picker branch.
+      if (typeof _tb === "undefined" || !_tb) window._tb = _tb = {};
+      _tb.tripMode = "place";
+      if (Array.isArray(trip.placeActivities)) _tb.placeActivities = trip.placeActivities.slice();
+      if (Array.isArray(trip.candidates)) _tb.candidates = trip.candidates.slice();
+      if (Array.isArray(trip.mdcItems)) _mdcItems = trip.mdcItems.slice();
+      if (trip.brief) {
+        _tb.region = _tb.region || trip.brief.region || "";
+        if (trip.brief._userListedNames) {
+          _tb._userListedNames = Object.assign({}, trip.brief._userListedNames);
+        }
+      }
+      // Mark migrated BEFORE the async publish so a thrown error or
+      // mid-publish reload doesn't trap the trip in a retry loop.
+      trip._destinationsMigrated = true;
+      if (typeof MaxEnginePicker !== "undefined" && typeof MaxEnginePicker.publishTrip === "function") {
+        // Fire-and-forget; the 'published' event handler will
+        // rerender trip view once destinations exist.
+        Promise.resolve().then(function(){
+          try { return MaxEnginePicker.publishTrip(); } catch(_) {}
+        });
+        _migrationLog.push("committed your Discovery picks as destinations");
+      }
+      if (typeof autoSave === "function") autoSave();
+    } catch (e) {
+      console.warn("[Max PD.194] destinations migration failed:", e && e.message);
+    }
+  }
   // One-time migration: convert legacy trip.logistics.carRentals into Tracker items
   // on the destination where pickup happens. The retired logistics screen used to
   // handle this; Tracker items are the new home.
