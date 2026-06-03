@@ -7861,9 +7861,153 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
     }
   }, 50);
 
+  // PD.224 (piece 3 of the Harpa-double-card fix): one-time modal
+  // dialog explaining where each user-listed sight will land in the
+  // built trip. The classifier has already decided each sight's
+  // parent destination (via _classificationByPlace, piece 2 of this
+  // series), but the user hasn't been told which sight → which
+  // destination. Without this, sights "disappear" from view between
+  // picker (where they're in "Sights you listed") and trip view
+  // (where they're inside a destination card's See-and-Do tab) and
+  // the user has to hunt for them.
+  //
+  // Format per item: "You'll see <sight> in <destination> when you
+  // create the trip." Orphan sights (no in-list parent stay) get a
+  // separate line; piece 4 will promote them to 0-night stays, so
+  // they'll appear as their own stops.
+  try {
+    if (typeof _showPostImportSightsModal === "function") {
+      _showPostImportSightsModal();
+    }
+  } catch (_) {}
+
   return { tripId: _currentTripId, destCount: parseResult.destinations.length };
 }
 if (typeof globalThis !== "undefined") globalThis._buildPickerFromPastedList = _buildPickerFromPastedList;
+
+// PD.224: post-import modal — "You'll see <sight> in <destination>".
+//
+// Reads the classifier's per-place metadata (_tb._classificationByPlace,
+// stashed by PD.208) plus the user-listed stays (_tb._userListedNames)
+// to compute, for each user-listed sight, where it will surface in the
+// built trip. Three buckets:
+//
+//   • Parent stay is on the user's list  → "in <stay>"  (most cases)
+//   • Parent not in list, but classifier had one → "near <city>" (still
+//     parented to the LLM's suggested parent, no destination created)
+//   • No parent at all  → "as its own stop" (piece 4 will promote
+//     orphans to 0-night stays; until then, modal language anticipates
+//     that outcome)
+//
+// Modal styling mirrors _openPasteListBriefModal — same overlay, same
+// box dimensions, same button row. Single dismiss button ("Got it").
+// Skipped silently when no user-listed sights exist.
+function _showPostImportSightsModal() {
+  var listedNames = (typeof _tb !== "undefined" && _tb && _tb._userListedNames) || {};
+  var clsByPlace = (typeof _tb !== "undefined" && _tb && _tb._classificationByPlace) || {};
+  var displayMap = (typeof _tb !== "undefined" && _tb && _tb._userListedDisplay) || {};
+  // Find every user-listed sight (role === "see") and figure out
+  // where it'll live.
+  var sightKeys = Object.keys(listedNames).filter(function (k) {
+    return listedNames[k] === "see";
+  });
+  if (!sightKeys.length) return;
+
+  var nrm = (typeof _normPlaceName === "function")
+    ? _normPlaceName
+    : function (s) { return String(s || "").toLowerCase().trim(); };
+
+  function _titleCaseFallback(s) {
+    return String(s || "").split(/\s+/).map(function (w) {
+      if (!w) return w;
+      return w.charAt(0).toUpperCase() + w.slice(1);
+    }).join(" ");
+  }
+  function _displayFor(key, fallbackFromMeta) {
+    if (displayMap[key]) return displayMap[key];
+    if (fallbackFromMeta) return fallbackFromMeta;
+    return _titleCaseFallback(key);
+  }
+
+  var inDestRows = []; // {sight, dest}
+  var orphanRows = []; // {sight}
+  sightKeys.forEach(function (k) {
+    var meta = clsByPlace[k] || {};
+    var parentKey = meta.parentEntry || null;
+    var sightDisplay = _displayFor(k, null);
+    if (parentKey && listedNames[parentKey] === "stay") {
+      // Parent is on user's stay list — clearest case.
+      var destDisplay = _displayFor(parentKey, null);
+      inDestRows.push({ sight: sightDisplay, dest: destDisplay });
+    } else if (parentKey) {
+      // Parent isn't a user-listed stay; classifier had one
+      // (LLM-suggested). Today: orphan. Piece 4 will auto-create
+      // — until then, we explain the "as its own stop" outcome.
+      orphanRows.push({ sight: sightDisplay });
+    } else {
+      orphanRows.push({ sight: sightDisplay });
+    }
+  });
+
+  var existing = document.getElementById("pd224-overlay");
+  if (existing) existing.remove();
+  var ov = document.createElement("div");
+  ov.id = "pd224-overlay";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:10900;display:flex;align-items:center;justify-content:center;padding:24px;";
+  var box = document.createElement("div");
+  box.style.cssText = "background:#fff;border-radius:12px;width:560px;max-width:100%;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 36px rgba(0,0,0,0.22);";
+
+  var hdr = ''
+    + '<div style="padding:16px 20px 10px;border-bottom:1px solid #eee;">'
+    +   '<div style="font-size:15px;font-weight:700;color:#111;">Your sights will land with their destinations</div>'
+    +   '<div style="font-size:12px;color:#777;margin-top:5px;line-height:1.5;">'
+    +     'Each sight you listed shows up under the destination it sits in (or near). '
+    +     'You’ll find it on the destination card’s See &amp; Do tab when you create the trip.'
+    +   '</div>'
+    + '</div>';
+
+  var bodyParts = [];
+  if (inDestRows.length) {
+    bodyParts.push('<div style="font-size:11.5px;font-weight:700;color:#555;letter-spacing:.04em;text-transform:uppercase;margin:6px 0 8px;">In a destination</div>');
+    inDestRows.forEach(function (row) {
+      bodyParts.push(
+        '<div style="font-size:13px;color:#222;padding:6px 0;line-height:1.55;">'
+        + 'You’ll see <strong>' + _pmEsc(row.sight) + '</strong> in <strong>' + _pmEsc(row.dest) + '</strong>.'
+        + '</div>'
+      );
+    });
+  }
+  if (orphanRows.length) {
+    bodyParts.push('<div style="font-size:11.5px;font-weight:700;color:#555;letter-spacing:.04em;text-transform:uppercase;margin:14px 0 8px;">On the route as a short stop</div>');
+    orphanRows.forEach(function (row) {
+      bodyParts.push(
+        '<div style="font-size:13px;color:#222;padding:6px 0;line-height:1.55;">'
+        + '<strong>' + _pmEsc(row.sight) + '</strong> will be added as its own stop.'
+        + '</div>'
+      );
+    });
+  }
+
+  var bodyHtml = ''
+    + '<div style="flex:1;overflow-y:auto;padding:14px 20px;">'
+    +   bodyParts.join("")
+    + '</div>';
+
+  var foot = ''
+    + '<div style="padding:12px 20px;border-top:1px solid #eee;display:flex;justify-content:flex-end;gap:8px;">'
+    +   '<button id="pd224-ok" type="button" style="font-size:13px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 18px;cursor:pointer;font-family:inherit;">Got it</button>'
+    + '</div>';
+
+  box.innerHTML = hdr + bodyHtml + foot;
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+
+  function close() {
+    if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+  }
+  document.getElementById("pd224-ok").onclick = close;
+}
+if (typeof globalThis !== "undefined") globalThis._showPostImportSightsModal = _showPostImportSightsModal;
 
 // v359.60.27: post-generation pass. The activity-place LLM picks
 // requiredPlaces[].nights from its own knowledge ("Reykjavik:
