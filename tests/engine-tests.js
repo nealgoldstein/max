@@ -65,6 +65,7 @@ function loadModule(rel) {
 loadModule('db.js');
 loadModule('engine-trip.js');
 loadModule('engine-picker.js');
+loadModule('engine-classify.js');
 
 // ── Test runner ─────────────────────────────────────────────────
 
@@ -2919,6 +2920,266 @@ describe('engine-trip.js — computePendingActions', () => {
       assert(sevRank[a.items[i].severity] >= sevRank[a.items[i - 1].severity],
         'severity must be non-decreasing in sorted output');
     }
+  });
+});
+
+// ── Suite: engine-classify.js (PD.205) ─────────────────────────
+//
+// The classifier is a pure function with an injectable LLM seam. These
+// tests cover the heuristic fallback, the response parser, the parentage
+// rules (Part 1 of the spec), and the end-to-end function with a stub LLM.
+
+describe('engine-classify.js — heuristic fallback', () => {
+  const { heuristicClassify } = MaxEngineClassify._internals;
+
+  test('classifies "Drive the Ring Road" as activity', () => {
+    assert.strictEqual(heuristicClassify({ place: 'Drive the Ring Road' }).classification, 'activity');
+  });
+
+  test('classifies "Walk on black sand beaches" as activity', () => {
+    assert.strictEqual(heuristicClassify({ place: 'Walk on black sand beaches' }).classification, 'activity');
+  });
+
+  test('classifies "Place to stay overnight" as role-tag', () => {
+    assert.strictEqual(heuristicClassify({ place: 'Place to stay overnight' }).classification, 'role-tag');
+  });
+
+  test('classifies "Anywhere with northern lights" as role-tag', () => {
+    assert.strictEqual(heuristicClassify({ place: 'Anywhere with northern lights' }).classification, 'role-tag');
+  });
+
+  test('defaults bare place names to city (backwards-compatible)', () => {
+    assert.strictEqual(heuristicClassify({ place: 'Reykjavík' }).classification, 'city');
+    assert.strictEqual(heuristicClassify({ place: 'Harpa Concert Hall' }).classification, 'city');
+  });
+
+  test('handles empty input safely', () => {
+    assert.strictEqual(heuristicClassify({ place: '' }).classification, 'city');
+    assert.strictEqual(heuristicClassify(null).classification, 'city');
+  });
+});
+
+describe('engine-classify.js — response parser', () => {
+  const { parseClassifierResponse } = MaxEngineClassify._internals;
+
+  test('parses clean JSON array', () => {
+    const r = parseClassifierResponse(
+      '[{"i":1,"classification":"city"},{"i":2,"classification":"poi","parentCity":"Reykjavík","parentRelation":"within"}]'
+    );
+    assert.strictEqual(r.length, 2);
+    assert.strictEqual(r[1].classification, 'poi');
+    assert.strictEqual(r[1].parentCity, 'Reykjavík');
+  });
+
+  test('strips markdown code fences', () => {
+    const r = parseClassifierResponse('```json\n[{"i":1,"classification":"city"}]\n```');
+    assert.strictEqual(r[0].classification, 'city');
+  });
+
+  test('recovers from truncated JSON by closing the array', () => {
+    const r = parseClassifierResponse(
+      '[{"i":1,"classification":"city"},{"i":2,"classification":"poi","parentCity":"Reykjavík"'
+    );
+    assert.strictEqual(r.length, 1);
+    assert.strictEqual(r[0].classification, 'city');
+  });
+
+  test('returns [] on garbage', () => {
+    assert.deepStrictEqual(parseClassifierResponse('not json at all'), []);
+    assert.deepStrictEqual(parseClassifierResponse(''), []);
+    assert.deepStrictEqual(parseClassifierResponse(null), []);
+  });
+});
+
+describe('engine-classify.js — parentage rules (spec Part 1)', () => {
+  const { applyParentageRules } = MaxEngineClassify._internals;
+
+  test('Step 1: POI with viable in-list parent parents to it (within)', () => {
+    const entries = [{ place: 'Reykjavík' }, { place: 'Harpa Concert Hall' }];
+    const cls = [
+      { classification: 'city' },
+      { classification: 'poi', parentCity: 'Reykjavík', parentRelation: 'within' }
+    ];
+    const out = applyParentageRules(entries, cls);
+    assert.strictEqual(out[1].classification, 'poi');
+    assert.strictEqual(out[1].parentEntry, 'reykjavik');
+    assert.strictEqual(out[1].parentRelation, 'within');
+    assert.strictEqual(out[1].promotedToDestination, false);
+    assert.strictEqual(out[1].autoCreatedParent, null);
+  });
+
+  test('Step 1: Geysir + Reykjavík (from relation) parents under Reykjavík with "from"', () => {
+    const entries = [{ place: 'Reykjavík' }, { place: 'Geysir' }];
+    const cls = [
+      { classification: 'city' },
+      { classification: 'poi', parentCity: 'Reykjavík', parentRelation: 'from' }
+    ];
+    const out = applyParentageRules(entries, cls);
+    assert.strictEqual(out[1].parentEntry, 'reykjavik');
+    assert.strictEqual(out[1].parentRelation, 'from');
+    assert.strictEqual(out[1].promotedToDestination, false);
+  });
+
+  test('Step 2: POI with a known parent NOT in the list flags autoCreatedParent', () => {
+    const entries = [{ place: 'Harpa Concert Hall' }];
+    const cls = [{ classification: 'poi', parentCity: 'Reykjavík', parentRelation: 'within' }];
+    const out = applyParentageRules(entries, cls);
+    assert.strictEqual(out[0].autoCreatedParent, 'Reykjavík');
+    assert.strictEqual(out[0].parentEntry, 'reykjavik');
+    assert.strictEqual(out[0].parentRelation, 'within');
+    assert.strictEqual(out[0].promotedToDestination, false);
+  });
+
+  test('Step 3: POI with no parent at all gets promoted to standalone destination', () => {
+    const entries = [{ place: 'Geysir' }];
+    const cls = [{ classification: 'poi', parentCity: null }];
+    const out = applyParentageRules(entries, cls);
+    assert.strictEqual(out[0].promotedToDestination, true);
+    assert.strictEqual(out[0].parentEntry, null);
+    assert.strictEqual(out[0].parentRelation, null);
+    assert.strictEqual(out[0].autoCreatedParent, null);
+  });
+
+  test('Non-POI classifications pass through with no parentage', () => {
+    const entries = [
+      { place: 'Reykjavík' },
+      { place: 'Drive the Ring Road' },
+      { place: 'Place to stay overnight' },
+      { place: 'Tuscany' }
+    ];
+    const cls = [
+      { classification: 'city' },
+      { classification: 'activity' },
+      { classification: 'role-tag' },
+      { classification: 'region' }
+    ];
+    const out = applyParentageRules(entries, cls);
+    out.forEach((row) => {
+      assert.strictEqual(row.parentEntry, null);
+      assert.strictEqual(row.parentRelation, null);
+      assert.strictEqual(row.promotedToDestination, false);
+      assert.strictEqual(row.autoCreatedParent, null);
+    });
+    assert.deepStrictEqual(out.map((r) => r.classification), ['city', 'activity', 'role-tag', 'region']);
+  });
+
+  test('Pass-through preserves nights / isStay / intent fields from the parser', () => {
+    const entries = [{ place: 'Reykjavík', nights: 3, isStay: true, intent: 'stay' }];
+    const cls = [{ classification: 'city' }];
+    const out = applyParentageRules(entries, cls);
+    assert.strictEqual(out[0].nights, 3);
+    assert.strictEqual(out[0].isStay, true);
+    assert.strictEqual(out[0].intent, 'stay');
+  });
+
+  test('Invalid classification falls back to city', () => {
+    const entries = [{ place: 'Reykjavík' }];
+    const cls = [{ classification: 'not-a-real-bucket' }];
+    const out = applyParentageRules(entries, cls);
+    assert.strictEqual(out[0].classification, 'city');
+  });
+
+  test('Parent name matching is accent-insensitive when _normPlaceName is loaded', () => {
+    // engine-trip.js exposes _normPlaceName which folds diacritics.
+    // The LLM may return "Reykjavik" (no accent) for a list with "Reykjavík" (accented).
+    const entries = [{ place: 'Reykjavík' }, { place: 'Harpa Concert Hall' }];
+    const cls = [
+      { classification: 'city' },
+      { classification: 'poi', parentCity: 'Reykjavik', parentRelation: 'within' }
+    ];
+    const out = applyParentageRules(entries, cls);
+    assert.strictEqual(out[1].autoCreatedParent, null, 'accented and unaccented should match → no auto-create');
+    assert.strictEqual(out[1].parentEntry, 'reykjavik');
+  });
+});
+
+describe('engine-classify.js — classifyListEntries end-to-end', () => {
+  asyncTest('uses heuristic fallback when no LLM is available', async () => {
+    const out = await MaxEngineClassify.classifyListEntries(
+      [
+        { place: 'Reykjavík' },
+        { place: 'Drive the Ring Road' },
+        { place: 'Place to stay overnight' }
+      ],
+      { llm: null }
+    );
+    assert.strictEqual(out.length, 3);
+    assert.strictEqual(out[0].classification, 'city');
+    assert.strictEqual(out[1].classification, 'activity');
+    assert.strictEqual(out[2].classification, 'role-tag');
+  });
+
+  asyncTest('threads LLM output through parentage rules', async () => {
+    const stub = async () =>
+      JSON.stringify([
+        { i: 1, classification: 'city' },
+        { i: 2, classification: 'poi', parentCity: 'Reykjavík', parentRelation: 'within' },
+        { i: 3, classification: 'poi', parentCity: 'Reykjavík', parentRelation: 'from' },
+        { i: 4, classification: 'activity' }
+      ]);
+    const out = await MaxEngineClassify.classifyListEntries(
+      [
+        { place: 'Reykjavík' },
+        { place: 'Harpa Concert Hall' },
+        { place: 'Geysir' },
+        { place: 'Drive the Ring Road' }
+      ],
+      { llm: stub }
+    );
+    assert.strictEqual(out[1].parentEntry, 'reykjavik');
+    assert.strictEqual(out[1].parentRelation, 'within');
+    assert.strictEqual(out[2].parentRelation, 'from');
+    assert.strictEqual(out[3].classification, 'activity');
+  });
+
+  asyncTest('LLM errors fall back to heuristics, not a thrown error', async () => {
+    const stub = async () => { throw new Error('API down'); };
+    const out = await MaxEngineClassify.classifyListEntries(
+      [{ place: 'Reykjavík' }, { place: 'Drive the Ring Road' }],
+      { llm: stub }
+    );
+    assert.strictEqual(out[0].classification, 'city');
+    assert.strictEqual(out[1].classification, 'activity');
+  });
+
+  asyncTest('missing entries in LLM response fall back to heuristics per-slot', async () => {
+    // LLM only returned slot 1; slot 2 should heuristic-classify.
+    const stub = async () => JSON.stringify([{ i: 1, classification: 'city' }]);
+    const out = await MaxEngineClassify.classifyListEntries(
+      [{ place: 'Reykjavík' }, { place: 'Drive the Ring Road' }],
+      { llm: stub }
+    );
+    assert.strictEqual(out[0].classification, 'city');
+    assert.strictEqual(out[1].classification, 'activity');
+  });
+
+  asyncTest('empty input returns empty output', async () => {
+    const out = await MaxEngineClassify.classifyListEntries([], {});
+    assert.deepStrictEqual(out, []);
+  });
+
+  asyncTest('Harpa-with-no-Reykjavík case auto-creates parent', async () => {
+    const stub = async () =>
+      JSON.stringify([
+        { i: 1, classification: 'poi', parentCity: 'Reykjavík', parentRelation: 'within' }
+      ]);
+    const out = await MaxEngineClassify.classifyListEntries(
+      [{ place: 'Harpa Concert Hall' }],
+      { llm: stub }
+    );
+    assert.strictEqual(out[0].autoCreatedParent, 'Reykjavík');
+    assert.strictEqual(out[0].promotedToDestination, false);
+  });
+
+  asyncTest('Geysir-alone case promotes to standalone destination', async () => {
+    const stub = async () =>
+      JSON.stringify([{ i: 1, classification: 'poi', parentCity: null }]);
+    const out = await MaxEngineClassify.classifyListEntries(
+      [{ place: 'Geysir' }],
+      { llm: stub }
+    );
+    assert.strictEqual(out[0].promotedToDestination, true);
+    assert.strictEqual(out[0].parentEntry, null);
   });
 });
 
