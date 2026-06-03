@@ -22713,6 +22713,30 @@ function _pmFocusPlace(placeName){
       var foundKey = Object.keys(state.markers).find(function(mk){
         return nrm(mk) === keyNorm || mk === keyNorm;
       });
+      // PD.176 (architectural): if strict equality misses, try a
+      // containment match. The same canyon/falls/beach can appear under
+      // two slightly different names — "Fjadrargljufur" and
+      // "Fjaðrárgljúfur Canyon" — where the normalized forms are
+      // "fjadrargljufur" and "fjadrargljufur canyon". One is a prefix
+      // of the other separated by a word boundary; they're the same
+      // place. Pick the LONGEST matching key (most specific).
+      if (!foundKey) {
+        var candidates = Object.keys(state.markers).filter(function(mk){
+          var nmk = nrm(mk);
+          if (!nmk || !keyNorm) return false;
+          // Word-boundary containment: nmk is a token-prefix/suffix of
+          // keyNorm, or vice versa.
+          return (
+            (keyNorm + " ").indexOf(nmk + " ") === 0 ||
+            (" " + keyNorm).indexOf(" " + nmk) === (" " + keyNorm).length - (" " + nmk).length ||
+            (nmk + " ").indexOf(keyNorm + " ") === 0 ||
+            (" " + nmk).indexOf(" " + keyNorm) === (" " + nmk).length - (" " + keyNorm).length
+          );
+        });
+        // Prefer the longest match (most specific name wins).
+        candidates.sort(function(a, b){ return nrm(b).length - nrm(a).length; });
+        if (candidates.length) foundKey = candidates[0];
+      }
       if (foundKey) marker = state.markers[foundKey];
     }
     var key = (marker && state.markers) ? Object.keys(state.markers).find(function(mk){ return state.markers[mk] === marker; }) || keyLower : keyLower;
