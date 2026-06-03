@@ -44312,7 +44312,62 @@ async function _generatePlaceWhatToDo(placeName, ctx){
   if (!placeName) return [];
   if (!window._placeWhatToDoCache) window._placeWhatToDoCache = {};
   var key = String(placeName).toLowerCase();
-  if (window._placeWhatToDoCache[key]) return window._placeWhatToDoCache[key];
+
+  // PD.227 (restored, was PD.214): prepend user-listed sights for this
+  // destination to the "Things to do →" preview the picker shows. The
+  // classifier (PD.206) tags each list entry with parentEntry; the
+  // lookup table is _tb._classificationByPlace (PD.208). We filter for
+  // POIs whose parent matches the destination being previewed and
+  // have parentRelation="within" — those are the sights that will
+  // actually land in this destination's See-and-Do tab (PD.223). "From"
+  // sights and orphans become their own 0-night destinations (PD.225)
+  // — they don't belong in this destination's preview.
+  //
+  // Without this, the picker's preview LLM call generates 3-5 generic
+  // suggestions and never knows about Harpa or Monument, even though
+  // they'll appear in Reykjavík's See-and-Do after publish. The
+  // preview now matches the post-publish reality.
+  var userSights = [];
+  try {
+    var _nrmWtd = (typeof _normPlaceName === "function")
+      ? _normPlaceName
+      : function (s) { return String(s || "").toLowerCase().trim(); };
+    var _destKey = _nrmWtd(placeName);
+    var _listed = (typeof _tb !== "undefined" && _tb && Array.isArray(_tb._pastedListPlaces))
+      ? _tb._pastedListPlaces : null;
+    if (_listed) {
+      _listed.forEach(function (p) {
+        if (!p || !p.place) return;
+        var meta = (_tb._classificationByPlace || {})[_nrmWtd(p.place)];
+        if (!meta || meta.classification !== "poi") return;
+        if (meta.parentEntry !== _destKey) return;
+        // Only include sights that'll actually land in THIS destination
+        // — "within" matches PD.223's attach criterion.
+        if (meta.parentRelation !== "within") return;
+        userSights.push({
+          what: p.place,
+          where: placeName,
+          _fromUserList: true,
+          _parentRelation: "within"
+        });
+      });
+    }
+  } catch (_) {}
+
+  function _mergeUserSightsAndLLM(llmItems) {
+    var userNamesLC = {};
+    userSights.forEach(function (s) {
+      if (s && s.what) userNamesLC[String(s.what).toLowerCase()] = true;
+    });
+    var llmDeduped = (llmItems || []).filter(function (it) {
+      return it && it.what && !userNamesLC[String(it.what).toLowerCase()];
+    });
+    return userSights.concat(llmDeduped);
+  }
+
+  if (window._placeWhatToDoCache[key]) {
+    return _mergeUserSightsAndLLM(window._placeWhatToDoCache[key]);
+  }
   ctx = ctx || {};
   var prompt = "You are Max — speaking as a well-traveled friend.\n\n"
     + "Suggest 4 specific, named things a traveler should consider doing in " + placeName + ".\n"
@@ -44331,13 +44386,17 @@ async function _generatePlaceWhatToDo(placeName, ctx){
     var first = cleaned.indexOf("["), last = cleaned.lastIndexOf("]");
     if (first > -1 && last > -1) cleaned = cleaned.substring(first, last + 1);
     var items = JSON.parse(cleaned);
-    if (!Array.isArray(items)) return [];
+    if (!Array.isArray(items)) items = [];
     items = items.filter(function(it){ return it && it.what; });
-    window._placeWhatToDoCache[key] = items;
-    return items;
+    // PD.227: merge user-listed sights with LLM output, dedup by name.
+    var merged = _mergeUserSightsAndLLM(items);
+    window._placeWhatToDoCache[key] = merged;
+    return merged;
   } catch(e) {
     console.warn("[Max] what-to-do gen failed for " + placeName + ":", e && e.message);
-    return [];
+    // PD.227: even on LLM failure, return user-listed sights so the
+    // user's input never silently disappears from the preview.
+    return _mergeUserSightsAndLLM([]);
   }
 }
 
