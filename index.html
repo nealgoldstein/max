@@ -29110,6 +29110,14 @@ function skipPickerToCandidates(){
 }
 
 function continuePlaceModeToStep2(){
+  // PD.181 (architectural): this function IS the picker-flow entry
+  // into Choreograph. By definition the user has been curating in
+  // the place-mode picker UI. Assert _tb.tripMode = "place" so the
+  // downstream bypass in runCandidateSearch (line ~12480) fires
+  // reliably — without it, the candidate explorer overlay opens
+  // instead and the user lands on an unwanted "On the way" screen
+  // with a separate "Create a plan" → realism-modal flow.
+  if (typeof _tb !== "undefined" && _tb) _tb.tripMode = "place";
   // v360.2: NO wisp capture here. continuePlaceModeToStep2 fires at
   // the activity-picker commit step AFTER saveStep2AndProceed has
   // already captured the user's literal intent + anchors as wisps.
