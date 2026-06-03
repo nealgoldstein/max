@@ -12305,6 +12305,15 @@ async function runCandidateSearch(requiredPlaces) {
       if (_tb._pastedRoles && typeof MaxRoleWriter !== "undefined" && MaxRoleWriter.set) {
         var nrm = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
         var _stayPlaces = [];
+        // PD.212: collect user-listed SIGHTS in parallel with stays, so
+        // we can build a synthetic "Sights you listed" section (mirror
+        // of PD.75's "Recommended overnight stays"). Without this,
+        // user-listed POIs scatter into whichever LLM activity referenced
+        // them ("Explore Reykjavík's culture and architecture" etc.) and
+        // visually look like destinations — which the user noticed
+        // after Harpa + Monument to the Unknown Bureaucrat both showed
+        // up as cards under the "Explore cities and towns" section.
+        var _seePlaces = [];
         Object.keys(_tb._pastedRoles).forEach(function(k){
           var entry = _tb._pastedRoles[k];
           // Tolerate the legacy shape (role string) in case anything
@@ -12331,6 +12340,7 @@ async function runCandidateSearch(requiredPlaces) {
           if (cand) {
             MaxRoleWriter.set(cand.id || cand.place, role, { persist: false });
             if (role === "stay") _stayPlaces.push(cand);
+            else if (role === "see") _seePlaces.push(cand);
           }
         });
         delete _tb._pastedRoles;
@@ -12420,6 +12430,58 @@ async function runCandidateSearch(requiredPlaces) {
                 })
               });
             }
+          }
+        }
+
+        // PD.212: synthetic "Sights you listed" section for user-listed
+        // POIs. Parallel to PD.75's "Recommended overnight stays" but for
+        // sights. Without it, sights like Harpa Concert Hall and Monument
+        // to the Unknown Bureaucrat scatter into LLM activity sections
+        // (e.g., "Explore cities and towns") and visually compete with
+        // destinations. Place it right after the stays sections so the
+        // top of the picker reads: stays → sights → LLM activities.
+        if (_seePlaces.length && Array.isArray(_tb.placeActivities)) {
+          var existingSeeItem = _tb.placeActivities.find(function(it){
+            return it && it.section === "Sights you listed";
+          });
+          if (!existingSeeItem) {
+            // Insert after both stay sections if they exist, otherwise
+            // at the top. Stays are at index 0 (PD.75) and "Other stays"
+            // at index 1 (PD.77).
+            var _insertAt = 0;
+            _tb.placeActivities.forEach(function(it, i){
+              if (it && (it.section === "Recommended overnight stays" || it.section === "Other stays to consider")) {
+                _insertAt = Math.max(_insertAt, i + 1);
+              }
+            });
+            _tb.placeActivities.splice(_insertAt, 0, {
+              id: "synth-listed-sights",
+              section: "Sights you listed",
+              name: "Sights from your list",
+              type: "manual",
+              description: "Points of interest you flagged on your list. Each will land on the See-and-Do for the destination it sits in (or near). Uncheck any you want to drop.",
+              checked: true,
+              requiredPlaces: _seePlaces.map(function(c){
+                // Carry parentEntry/parentRelation forward so the picker
+                // (and later, the trip view's discovery surface) can
+                // group these by parent destination.
+                var _meta = (_tb._classificationByPlace && _tb._classificationByPlace[nrm(c.place)]) || null;
+                return {
+                  place: c.place,
+                  country: c.country || "",
+                  lat: (typeof c.lat === "number") ? c.lat : null,
+                  lng: (typeof c.lng === "number") ? c.lng : null,
+                  _keep: true,
+                  overnight: false,
+                  nights: 0,
+                  // Diagnostic / future-rendering metadata. The discovery
+                  // map render rule (PD.209) reads parentRelation; the
+                  // grouped sights view (later PD) reads parentEntry.
+                  _parentEntry:    _meta && _meta.parentEntry    || null,
+                  _parentRelation: _meta && _meta.parentRelation || null
+                };
+              })
+            });
           }
         }
       }

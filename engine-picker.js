@@ -3651,6 +3651,80 @@
     } else {
       _tripsIndex.push({id:tripId,name:trip.name,destCount:kept.length,dateRange:"",savedAt:new Date().toISOString()});
     }
+    // PD.213: attach user-listed sights to their parent destination's
+    // suggestions[]. The classifier (PD.206) tags each sight with
+    // _parentEntry (normalized parent name) and stashes the lookup
+    // table on _tb._classificationByPlace (PD.208). For each "poi"
+    // entry whose parent is one of the trip's destinations, inject a
+    // suggestion onto that destination if one isn't already there.
+    //
+    // Without this pass, the picker correctly identified Harpa as a
+    // sight under Reykjavík (see icon on the YOUR LIST pill), but
+    // Reykjavík's "Things to do" was empty for it — sights stayed in
+    // _tb.candidates and never landed in trip.destinations[].suggestions[],
+    // which is what the destination card's See-and-Do tab reads.
+    try {
+      var _clsByPlace = (_tb && _tb._classificationByPlace)
+        || (trip.brief && trip.brief._classificationByPlace)
+        || {};
+      var _nrmFn = (typeof _normPlaceName === "function")
+        ? _normPlaceName
+        : function (s) { return String(s || "").toLowerCase().trim(); };
+      var _destByNorm = Object.create(null);
+      (trip.destinations || []).forEach(function (d) {
+        if (d && d.place) _destByNorm[_nrmFn(d.place)] = d;
+      });
+      var _attached = [];
+      Object.keys(_clsByPlace).forEach(function (sightKey) {
+        var meta = _clsByPlace[sightKey];
+        if (!meta || meta.classification !== "poi") return;
+        if (!meta.parentEntry) return;
+        var parentDest = _destByNorm[meta.parentEntry];
+        if (!parentDest) return;
+        var cand = (_tb.candidates || []).find(function (c) {
+          return c && c.place && _nrmFn(c.place) === sightKey;
+        });
+        var displayName = (cand && cand.place)
+          || (trip.brief && trip.brief._userListedDisplay && trip.brief._userListedDisplay[sightKey])
+          || sightKey;
+        var lat = (cand && typeof cand.lat === "number") ? cand.lat : null;
+        var lng = (cand && typeof cand.lng === "number") ? cand.lng : null;
+        if (!Array.isArray(parentDest.suggestions)) parentDest.suggestions = [];
+        var already = parentDest.suggestions.some(function (s) {
+          return s && s.n && _nrmFn(s.n) === sightKey;
+        });
+        if (already) return;
+        // Use the global sidCtr if available (index.html owns it); fall
+        // back to a unique random id in engine-only contexts.
+        var _sid;
+        if (typeof global.sidCtr === "number") {
+          global.sidCtr++;
+          _sid = "s" + global.sidCtr;
+        } else {
+          _sid = "s-pd213-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
+        }
+        parentDest.suggestions.push({
+          id: _sid,
+          type: "sight",
+          n: displayName,
+          st: displayName,
+          note: null,
+          lat: lat,
+          lng: lng,
+          approx: (lat == null || lng == null),
+          _fromUserList: true,
+          _parentRelation: meta.parentRelation || "within"
+        });
+        _attached.push(displayName + " → " + parentDest.place + " (" + (meta.parentRelation || "within") + ")");
+      });
+      if (_attached.length) {
+        console.log("[Max PD.213] attached " + _attached.length + " user-listed sight(s) to parent destinations:");
+        _attached.forEach(function (line) { console.log("  - " + line); });
+      }
+    } catch (e) {
+      console.warn("[Max PD.213] sight-attachment failed (non-fatal):", e && e.message);
+    }
+
     // PD.207: dedup invariant. A place must be EITHER a top-level
     // destination OR a sight-under-some-destination, never both. The
     // classifier in PD.206 enforces this at the parser stage, and the
