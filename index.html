@@ -1852,20 +1852,18 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
    shape of the pin (so the halo traces the teardrop outline, not
    a rectangular box-shadow box), and survives Leaflet's repositioning
    transforms. */
-/* PD.179: brighter, longer, double-pulse. The single soft halo was
-   easy to miss — bumping duration to 2.8s, doing two peaks, and
-   stacking two drop-shadows (saturated gold + white outer ring)
-   gives a much louder "look here" signal that survives any map
-   background. */
+/* PD.179: tight orange halo, double-pulse. Hugs the pin outline
+   (max 5px spread) so it reads as a ring around the icon/teardrop
+   rather than a wide glow. Two pulses over 2.4s. */
 .leaflet-marker-icon.pm-focus-pulse {
-  animation: pm-focus-pulse 2.8s ease-out 1;
+  animation: pm-focus-pulse 2.4s ease-out 1;
 }
 @keyframes pm-focus-pulse {
-  0%   { filter: drop-shadow(0 0 0 rgba(255,200,0,1))    drop-shadow(0 0 0 rgba(255,255,255,0)); }
-  18%  { filter: drop-shadow(0 0 14px rgba(255,200,0,1)) drop-shadow(0 0 22px rgba(255,255,255,0.85)); }
-  36%  { filter: drop-shadow(0 0 4px  rgba(255,200,0,0.6)) drop-shadow(0 0 6px  rgba(255,255,255,0.2)); }
-  58%  { filter: drop-shadow(0 0 18px rgba(255,200,0,1)) drop-shadow(0 0 28px rgba(255,255,255,0.9)); }
-  100% { filter: drop-shadow(0 0 32px rgba(255,200,0,0)) drop-shadow(0 0 40px rgba(255,255,255,0)); }
+  0%   { filter: drop-shadow(0 0 0 rgba(255,120,0,1)); }
+  20%  { filter: drop-shadow(0 0 5px rgba(255,120,0,1)); }
+  40%  { filter: drop-shadow(0 0 2px rgba(255,120,0,0.5)); }
+  60%  { filter: drop-shadow(0 0 5px rgba(255,120,0,1)); }
+  100% { filter: drop-shadow(0 0 5px rgba(255,120,0,0)); }
 }
 @media (max-width:640px){
   /* On narrow screens, stack the columns and let places wrap as chips below */
@@ -22826,8 +22824,8 @@ function _pmFocusPlace(placeName){
         // eslint-disable-next-line no-unused-expressions
         el.offsetWidth; // restart animation on double-tap
         el.classList.add("pm-focus-pulse");
-        // PD.179: match the longer 2.8s keyframe duration.
-        setTimeout(function(){ try { el.classList.remove("pm-focus-pulse"); } catch(__){} }, 2800);
+        // PD.179 (tuned): match 2.4s keyframe.
+        setTimeout(function(){ try { el.classList.remove("pm-focus-pulse"); } catch(__){} }, 2400);
       } catch(__){}
     }
     if (marker && marker._icon) {
