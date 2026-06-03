@@ -1787,6 +1787,19 @@
       // this data needs to survive Choreograph + re-edit. Keyed by
       // normalized place name — see _pmMetaKey in index.html.
       placeMeta: Object.assign({}, s.placeMeta || {}),
+      // PD.228 (architectural): classifier metadata MUST survive
+      // every publish + rebuild. Before this, the only writer of
+      // trip.brief._classificationByPlace was the initial
+      // _buildPickerFromPastedList call (PD.208); buildBrief didn't
+      // copy it, so the first publishTrip after import wiped it
+      // (newBrief overwrites trip.brief). PD.223 / PD.225 / PD.227
+      // then no-op'd because the map they keyed off was empty.
+      // Adding it here makes every newBrief carry the data forward,
+      // which matches how PD.107 handles _userListedNames.
+      _classificationByPlace: Object.assign({}, s._classificationByPlace || {}),
+      // Same persistence problem applied to the display-name map.
+      _userListedDisplay: Object.assign({}, s._userListedDisplay || {}),
+      _userListedNames: Object.assign({}, s._userListedNames || {}),
       // v359.55.13: trip-level notes/links — a single object for the
       // whole trip (gear, weather, general guides). Mirrors placeMeta
       // but isn't keyed by place.
@@ -1924,14 +1937,48 @@
     // they're stops on transit routes. Exclude them from the
     // destinations build; the wayside-commit pass below picks them up
     // separately and attaches each to its appropriate route.
+    // PD.229: also exclude classifier-tagged "within" sights from
+    // becoming destinations. The classifier (PD.206) marks user-listed
+    // POIs whose parent is one of the trip's stays as parentRelation
+    // ="within" — they belong on the parent destination's suggestions[]
+    // (attached by PD.223 below), not as their own destination cards.
+    // Without this filter, Harpa and Monument would (a) be created as
+    // 0-night destinations on the route AND (b) be attached as
+    // suggestions on Reykjavík — double-surfacing the exact bug this
+    // whole rollout was meant to kill.
+    //
+    // Falls back to trip.brief._classificationByPlace when _tb is empty
+    // (rehydrated trip path — PD.227's fix).
+    var _pd229TbMap = (_tb && _tb._classificationByPlace) || {};
+    var _pd229BriefMap = (trip && trip.brief && trip.brief._classificationByPlace) || {};
+    var _pd229ClsMap = Object.keys(_pd229TbMap).length ? _pd229TbMap : _pd229BriefMap;
+    var _pd229NrmFn = (typeof _normPlaceName === "function")
+      ? _normPlaceName
+      : function (s) { return String(s || "").toLowerCase().trim(); };
+    var _pd229Skipped = [];
     var kept=(_tb.candidates||[]).filter(function(c){
       // v360.3 (#124 Turn 3): also exclude day-trip-intent candidates.
       // They're committed separately as planItem stops on a dayTrip
       // route off their chosen hub (see the day-trip-commit pass after
       // syncTransitRoutes). Without this exclusion they'd double-
       // commit as both a destination AND a day-trip stop.
-      return c.status==="keep" && c.intent !== "wayside" && c.intent !== "dayTrip";
+      if (c.status !== "keep") return false;
+      if (c.intent === "wayside" || c.intent === "dayTrip") return false;
+      // PD.229: exclude within-sights.
+      if (c.role === "see" && c.place) {
+        var k = _pd229NrmFn(c.place);
+        var meta = _pd229ClsMap[k];
+        if (meta && meta.parentRelation === "within" && meta.parentEntry) {
+          _pd229Skipped.push(c.place + " → " + meta.parentEntry);
+          return false;
+        }
+      }
+      return true;
     });
+    if (_pd229Skipped.length) {
+      console.log("[Max PD.229] excluded " + _pd229Skipped.length + " within-sight(s) from destinations build (will attach as suggestions via PD.223):");
+      _pd229Skipped.forEach(function (line) { console.log("  - " + line); });
+    }
 
     // v359.60.5: reconcile placeActivities → candidates. Completeness-pass
     // additions (and any other path that adds places to placeActivities
