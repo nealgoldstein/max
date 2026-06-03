@@ -9050,6 +9050,12 @@ async function browseChatSend(){
 function selectTrip(id){
   if(localLoad(id)){
     _currentTripId=id;
+    // PD.186 (extended): explicit trip-card click on the home screen
+    // is the same gesture as opening a file — "show me this trip,"
+    // not "resume my last session inside it." Honor that by stamping
+    // _lastScreen=trip before enterApp routes. The picker stays one
+    // click away via the menu.
+    try { if (trip) trip._lastScreen = "trip"; } catch(_){}
     enterApp();
     return;
   }
@@ -9102,6 +9108,7 @@ function selectTrip(id){
     }
     if (localLoad(id)) {
       _currentTripId = id;
+      try { if (trip) trip._lastScreen = "trip"; } catch(_){}  // PD.186 (extended)
       enterApp();
     } else {
       throw new Error("localLoad still failed after server fetch");
@@ -24890,23 +24897,34 @@ function _pmDeriveRole(info, key, opts){
       if (meta.stayOverride === false) return { role: "see", source: "stay-override" };
     }
   } catch(_){}
-  // PREDICTOR — only when no user commitment. Beats LLM default.
-  // On-the-way wins over day-trip in the compute step (overlaps are
-  // resolved there), so consulting _onWayPreds first is safe.
-  var _owPred = _onWayPredFor();
-  if (_owPred) {
-    return { role: "onway", hub: _owPred, source: "predictor" };
-  }
-  var _predOnly = _predHubFor();
-  if (_predOnly) {
-    return { role: "daytrip", hub: _predOnly, source: "predictor" };
-  }
+  // PD.189 + PD.190 (architectural): NO predictor auto-classification
+  // for either day-trip OR on-the-way. The system never invents these
+  // roles. Every place is either stay (committed nights) or see (no
+  // nights) — same as Discovery showed — UNTIL the user explicitly
+  // selects "Day trip from X" or "On the way" in the popover. The
+  // predictors (_dayTripPreds, _onWayPreds) can still inform the
+  // popover's suggestion rows so the user has guidance — but they
+  // cannot drive the pin's rendered role.
+  //
+  // First-time trip view opens = pins match what Discovery showed.
+  // Day-trip and on-the-way only appear after user commits via the
+  // popover (which sets cand._roleTouched=true, caught at the top of
+  // this cascade) or via the requiredPlace flag (caught in the FLAG
+  // tier above).
+  // (predictor branches removed for both daytrip and onway)
   // Maybe: not kept and no day-trip/wayside/predictor flag.
   if (!info.kept && !cand) return { role: "maybe", source: "default" };
   // c.role from candidate — set by LLM default or earlier writer
-  // without _roleTouched. Treat as a soft commitment ("llm-default")
-  // so the chip can render it as a suggestion.
-  if (cand && (cand.role === "stay" || cand.role === "see" || cand.role === "daytrip" || cand.role === "onway")) {
+  // without _roleTouched. Treat as a soft commitment ("llm-default").
+  //
+  // PD.189 + PD.190: daytrip AND onway both excluded from this tier.
+  // cand.role can be set to either via mirror paths (predictor sync,
+  // re-edit rehydration, absorption logic) that aren't user
+  // commitments. The principle: "day-trip / on-the-way only on
+  // explicit user selection." Only the _roleTouched check at the top
+  // of this cascade or explicit flag commits qualify. Stay/see still
+  // pass through because they're the user's Discovery choices.
+  if (cand && (cand.role === "stay" || cand.role === "see")) {
     return { role: cand.role, hub: cand.dayTripHub || "", source: "llm-default" };
   }
   if (!info.kept) return { role: "maybe", source: "default" };
@@ -29241,21 +29259,19 @@ function continuePlaceModeToStep2(){
   // didn't override is implicit acceptance. The "user decides" rule
   // still holds: an explicit toggle (popup, "+ stay the night"
   // button) wins over the predictor on the same place.
-  if (_tb._dayTripPreds && typeof _tb._dayTripPreds === "object") {
-    (_tb.placeActivities || []).forEach(function(item){
-      if (!item || !Array.isArray(item.requiredPlaces)) return;
-      item.requiredPlaces.forEach(function(p){
-        if (!p || !p.place) return;
-        if (p._isDayTrip) return; // explicit user-set wins; don't override
-        var key = p.place.toLowerCase();
-        var predictedHub = _tb._dayTripPreds[key];
-        if (predictedHub) {
-          p._isDayTrip = true;
-          p._dayTripHub = String(predictedHub).toLowerCase();
-        }
-      });
-    });
-  }
+  // PD.190 (architectural): the predictor → _isDayTrip promotion is
+  // REMOVED. The old comment defended "implicit acceptance" — a chip
+  // the user saw and didn't override. That stance writes system
+  // inference into a flag the trip view treats as a user commitment,
+  // which is why first-time trip view opens with mystery purple
+  // circles the user never agreed to. The principle now is strict:
+  // first-time trip view shows exactly the stay/see classifications
+  // from Discovery, nothing more. Day-trip emerges from explicit user
+  // selection via the popover — that path still writes _isDayTrip
+  // legitimately. The predictor is still available for the picker
+  // and popover to surface SUGGESTIONS the user can accept; what
+  // changed is that it no longer writes the commitment unilaterally.
+  // (block removed)
   // Only carry forward activities that have at least one _keep:true place.
   // For each, narrow requiredPlaces to just the kept ones \u2014 this is the
   // user's expressed commitment, not the full superset Max suggested.
