@@ -16972,6 +16972,117 @@ function _reconcileUserListedKeeps(){
       });
     }
   })();
+  // PD.221 (architectural): mirror of _ensureSyntheticStaysSection
+  // for SIGHTS. Earlier PD.212 lived inside the role-write loop at
+  // line ~12368 — which only runs after the LLM activity-generation
+  // pass and is sometimes skipped (or already ran on a prior render).
+  // The stays section uses _ensureSyntheticStaysSection (PD.91)
+  // because it has to be re-derivable at every render. The sights
+  // section needs the same pattern, or it shows up inconsistently:
+  // user-listed sights scatter into LLM activity sections (Harpa
+  // ending up under "Explore Reykjavík's culture and architecture"
+  // etc.) and the "Sights you listed" header never appears.
+  //
+  // Source of truth: _userListedNames where role === "see". Same
+  // approach as PD.91 stays — re-runs every render, idempotent.
+  (function _ensureSyntheticSightsSection(){
+    var listedKeys = Object.keys(listed);
+    if (!listedKeys.length) return;
+    var listedSightKeys = listedKeys.filter(function(k){
+      return listed[k] === "see";
+    });
+    if (!listedSightKeys.length) return;
+    // Display-name lookup mirrors PD.91 — prefer the candidate's own
+    // spelling, fall back to placeActivity requiredPlace metadata,
+    // fall back to title-cased key.
+    function _stripCountrySuffixSights(s){
+      if (typeof MaxGeo !== "undefined" && MaxGeo.stripCountrySuffix) {
+        return MaxGeo.stripCountrySuffix(s);
+      }
+      return String(s||"");
+    }
+    function _titleCaseSights(s){
+      return String(s||"").split(/\s+/).map(function(w){
+        if (!w) return w;
+        return w.charAt(0).toUpperCase() + w.slice(1);
+      }).join(" ");
+    }
+    var bestCandByKey2 = {};
+    var bestPlaceMetaByKey2 = {};
+    if (Array.isArray(_tb.candidates)) {
+      _tb.candidates.forEach(function(c){
+        if (!c || !c.place) return;
+        var k = nrm(c.place);
+        if (!k) return;
+        if (!bestCandByKey2[k]) bestCandByKey2[k] = c;
+      });
+    }
+    _tb.placeActivities.forEach(function(it){
+      (it && it.requiredPlaces || []).forEach(function(p){
+        if (!p || !p.place) return;
+        var k = nrm(p.place);
+        if (k && !bestPlaceMetaByKey2[k]) bestPlaceMetaByKey2[k] = p;
+      });
+    });
+    var sightRequiredPlaces = listedSightKeys.map(function(k){
+      var cand = bestCandByKey2[k];
+      var pmeta = bestPlaceMetaByKey2[k];
+      var displayName, country;
+      if (cand) {
+        displayName = String(cand.place || "").split(/\s*,\s*/)[0].trim() || cand.place;
+        country = cand.country || "";
+      } else if (pmeta) {
+        displayName = String(pmeta.place || "").split(/\s*,\s*/)[0].trim() || pmeta.place;
+        country = pmeta.country || "";
+      } else {
+        // Fall back to the original spelling preserved on _userListedDisplay
+        // (PD.149) if available, else title-case the normalized key.
+        var origDisplay = (_tb && _tb._userListedDisplay && _tb._userListedDisplay[k])
+          || (typeof trip !== "undefined" && trip && trip.brief && trip.brief._userListedDisplay && trip.brief._userListedDisplay[k]);
+        displayName = origDisplay || _titleCaseSights(_stripCountrySuffixSights(k));
+        country = "";
+      }
+      // Forward any classification metadata stashed in _pastedListPlaces
+      // (PD.208) so future passes — the discovery-map render rule
+      // (PD.209), per-destination grouping — can read parentRelation.
+      var meta = (_tb._classificationByPlace || {})[k] || null;
+      return {
+        place: displayName,
+        country: country,
+        _keep: !rejected[k],
+        _rejected: !!rejected[k],
+        nights: 0,
+        overnight: false,
+        _parentEntry: meta && meta.parentEntry || null,
+        _parentRelation: meta && meta.parentRelation || null
+      };
+    });
+    var existingSights = _tb.placeActivities.find(function(it){
+      return it && it.section === "Sights you listed";
+    });
+    if (existingSights) {
+      existingSights.requiredPlaces = sightRequiredPlaces;
+      existingSights.checked = true;
+      return;
+    }
+    // Insert just after the stays sections (Recommended overnight
+    // stays + Other stays to consider, if either exists).
+    var _insertAtSights = 0;
+    _tb.placeActivities.forEach(function(it, i){
+      if (it && (it.section === "Recommended overnight stays" || it.section === "Other stays to consider")) {
+        _insertAtSights = Math.max(_insertAtSights, i + 1);
+      }
+    });
+    _tb.placeActivities.splice(_insertAtSights, 0, {
+      id: "synth-listed-sights",
+      section: "Sights you listed",
+      name: "Sights from your list",
+      type: "synthetic-sights",
+      description: "Points of interest you flagged on your list. Each will land on the See-and-Do for the destination it sits in (or near). Uncheck any you want to drop.",
+      checked: true,
+      requiredPlaces: sightRequiredPlaces
+    });
+  })();
   // PD.148 (architectural): umbrella paste-list entries. When the
   // user pastes "Golden Circle" or "Diamond Circle" or a regional
   // umbrella like "Snæfellsjökull region", the LLM correctly splits
