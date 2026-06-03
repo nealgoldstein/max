@@ -1852,7 +1852,20 @@
     return issues;
   }
 
-  function _showRealismCheckModal(issues, onProceed, onBack) {
+  function _showRealismCheckModal(issues, onProceed, onBack, opts) {
+    // PD.184: opts allows callers to customize labels for non-publish
+    // contexts. The trip-view "Validate route" action (PD.182) reuses
+    // this modal but doesn't need a "Choreograph anyway" affirmative
+    // — the trip is already published. opts: { eyebrow, title, intro,
+    //   backLabel, proceedLabel, hideProceed }
+    opts = opts || {};
+    var eyebrow = opts.eyebrow || "Before Max choreographs";
+    var title = opts.title || "A few rough spots to consider";
+    var intro = opts.intro || "Max spotted some patterns in your picks that might be worth a second look. None of these are deal-breakers — just things travelers usually wish they'd caught earlier.";
+    var backLabel = opts.backLabel || "← Back to picker";
+    var proceedLabel = opts.proceedLabel || "Choreograph anyway →";
+    var hideProceed = !!opts.hideProceed;
+
     var existing = document.getElementById("realism-check-modal");
     if (existing) existing.remove();
 
@@ -1869,17 +1882,20 @@
         + '</div>';
     }).join("");
 
+    var proceedBtnHtml = hideProceed ? '' :
+        '<button id="realism-proceed" style="font-size:13px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 16px;cursor:pointer;font-family:inherit;">' + proceedLabel + '</button>';
+
     ov.innerHTML = ''
       + '<div style="background:#fff;border-radius:12px;max-width:520px;width:100%;max-height:80vh;overflow-y:auto;box-shadow:0 8px 30px rgba(0,0,0,0.18);">'
       +   '<div style="padding:20px 22px 4px;">'
-      +     '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">Before Max choreographs</div>'
-      +     '<div style="font-size:17px;font-weight:700;color:#111;margin-top:4px;">A few rough spots to consider</div>'
-      +     '<div style="font-size:12px;color:#666;margin-top:6px;line-height:1.55;">Max spotted some patterns in your picks that might be worth a second look. None of these are deal-breakers — just things travelers usually wish they\'d caught earlier.</div>'
+      +     '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">' + eyebrow + '</div>'
+      +     '<div style="font-size:17px;font-weight:700;color:#111;margin-top:4px;">' + title + '</div>'
+      +     '<div style="font-size:12px;color:#666;margin-top:6px;line-height:1.55;">' + intro + '</div>'
       +   '</div>'
       +   '<div style="padding:14px 22px 8px;">' + issuesHtml + '</div>'
       +   '<div style="padding:8px 22px 18px;display:flex;justify-content:flex-end;gap:8px;">'
-      +     '<button id="realism-back" style="font-size:13px;font-weight:500;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">← Back to picker</button>'
-      +     '<button id="realism-proceed" style="font-size:13px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 16px;cursor:pointer;font-family:inherit;">Choreograph anyway →</button>'
+      +     '<button id="realism-back" style="font-size:13px;font-weight:500;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">' + backLabel + '</button>'
+      +     proceedBtnHtml
       +   '</div>'
       + '</div>';
 

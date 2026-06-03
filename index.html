@@ -7935,9 +7935,14 @@ function validateTripRoute() {
   }
   MaxPickerUI.showRealismCheckModal(
     issues,
-    function onProceed() { /* dismiss only — there's nothing to publish */ },
-    function onBack() {
-      if (typeof _reopenPickerAny === "function") _reopenPickerAny();
+    function onProceed() {},
+    function onBack() {},
+    {
+      eyebrow: "Route check",
+      title: "A few rough spots in your route",
+      intro: "These show up when Max walks the sequence you committed. None are deal-breakers — adjust in Discovery if any catch your eye.",
+      backLabel: "Close",
+      hideProceed: true
     }
   );
 }
@@ -42409,10 +42414,17 @@ function updateMainMap(){
             coords = cached;
             isStraight = false;
           } else {
-            coords = [s.from, s.to];
+            // PD.184: segment was pushed as { key, coords } — read
+            // coords, not s.from/s.to (which were never set; polyline
+            // silently failed and the straight-line fallback never
+            // rendered). The route toggle then appeared broken
+            // because turning roads off (or having an empty OSRM
+            // cache) left no visible path.
+            coords = (Array.isArray(s.coords) && s.coords.length >= 2) ? s.coords.slice() : null;
             isStraight = true;
             if (_roadsOn && cached !== "failed") _hasMissing = true;
           }
+          if (!coords) return;
           // Slightly dimmer styling for straight-line fallback so the
           // user can tell at a glance "this segment isn't road-routed yet."
           var haloOpacity = isStraight ? 0.7 : 0.9;
