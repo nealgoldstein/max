@@ -7574,6 +7574,16 @@
     var considered = _collectSetAsidePlaces(trip);
     if (!considered.length) return;
 
+    // PD.193 (architectural): hide the set-aside section when the
+    // trip has no destinations. With "No destinations yet" + an empty
+    // map, a list of 86 candidates below reads as the old Candidate
+    // Explorer — exactly the surface PD.183 deprecated. The set-aside
+    // section is a reference for users browsing committed destinations;
+    // when there are none, the user should land in Discovery to commit,
+    // not see candidates redisplayed as if this were the explorer.
+    var _hasDests = Array.isArray(trip.destinations) && trip.destinations.length > 0;
+    if (!_hasDests) return;
+
     if (!trip._ui) trip._ui = {};
     var expanded = trip._ui.consideredExpanded !== false; // default true
 
