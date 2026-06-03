@@ -3685,6 +3685,10 @@
         var meta = _pd223ClsByPlace[sightKey];
         if (!meta || meta.classification !== "poi") return;
         if (!meta.parentEntry) return;
+        // PD.225: only attach "within" sights to a destination's
+        // suggestions[]. "From" sights and orphans get their own
+        // 0-night destinations in the augment pass below.
+        if (meta.parentRelation !== "within") return;
         var parentDest = _pd223DestByNorm[meta.parentEntry];
         if (!parentDest) return;
         // Find a resolved candidate for richer coords/display name.
@@ -3726,11 +3730,135 @@
         _pd223Attached.push(displayName + " → " + parentDest.place + " (" + (meta.parentRelation || "within") + ")");
       });
       if (_pd223Attached.length) {
-        console.log("[Max PD.223] attached " + _pd223Attached.length + " user-listed sight(s) to parent destinations:");
+        console.log("[Max PD.223] attached " + _pd223Attached.length + " user-listed within-sight(s) to parent destinations:");
         _pd223Attached.forEach(function (line) { console.log("  - " + line); });
       }
     } catch (e) {
       console.warn("[Max PD.223] sight-attachment failed (non-fatal):", e && e.message);
+    }
+
+    // PD.225 (piece 4 of the Harpa-double-card fix): user-listed sights
+    // that aren't "within" a destination — either parentRelation="from"
+    // (waterfall, glacier, day-trip distance away) or no parent at all
+    // (orphan) — become their own 0-night destinations on the trip.
+    // They are NOT attached to a parent's suggestions[]; they're stops
+    // on the route in their own right.
+    //
+    // Insertion strategy:
+    //   "from" sight  → inserted right after its classified parent
+    //   orphan sight  → appended at the end of trip.destinations
+    //
+    // Idempotent — skips sights that already have a destination on the
+    // trip (e.g., picker promoted them via some other path).
+    // Dates are recomputed trip-wide after the augment to absorb the
+    // new 0-night entries cleanly.
+    try {
+      var _pd225ClsByPlace = (_tb && _tb._classificationByPlace)
+        || (trip.brief && trip.brief._classificationByPlace)
+        || {};
+      var _pd225NrmFn = (typeof _normPlaceName === "function")
+        ? _normPlaceName
+        : function (s) { return String(s || "").toLowerCase().trim(); };
+
+      function _pd225NextDestId() {
+        if (typeof global.destCtr === "number") {
+          global.destCtr++;
+          return "d" + global.destCtr;
+        }
+        return "d-pd225-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
+      }
+
+      var _pd225Added = [];
+      Object.keys(_pd225ClsByPlace).forEach(function (sightKey) {
+        var meta = _pd225ClsByPlace[sightKey];
+        if (!meta || meta.classification !== "poi") return;
+        // Within-sights were handled by PD.223 — skip.
+        if (meta.parentRelation === "within" && meta.parentEntry) {
+          var parentForWithin = _pd225NrmFn ? null : null;
+          // Only skip if the within-attach actually succeeded (parent in trip).
+          var parentDestForWithin = (trip.destinations || []).find(function (d) {
+            return d && d.place && _pd225NrmFn(d.place) === meta.parentEntry;
+          });
+          if (parentDestForWithin) return;
+        }
+        // Skip if this sight is ALREADY a destination on the trip (some
+        // other path turned it into one).
+        var existingDest = (trip.destinations || []).find(function (d) {
+          return d && d.place && _pd225NrmFn(d.place) === sightKey;
+        });
+        if (existingDest) return;
+
+        // Resolve display name + coords from candidates / userListedDisplay / key.
+        var cand = (_tb.candidates || []).find(function (c) {
+          return c && c.place && _pd225NrmFn(c.place) === sightKey;
+        });
+        var displayName = (cand && cand.place)
+          || (trip.brief && trip.brief._userListedDisplay && trip.brief._userListedDisplay[sightKey])
+          || sightKey;
+        var lat = (cand && typeof cand.lat === "number") ? cand.lat : null;
+        var lng = (cand && typeof cand.lng === "number") ? cand.lng : null;
+        var country = (cand && cand.country) || (trip.brief && trip.brief.region) || null;
+
+        // Mint a place record + a 0-night destination shell.
+        var placeId = _ensurePlace(trip, {
+          place: displayName, country: country,
+          lat: lat, lng: lng, type: "sight"
+        });
+        var newDest = {
+          id: _pd225NextDestId(),
+          place: displayName,
+          placeId: placeId,
+          country: country,
+          nights: 0,
+          lat: lat,
+          lng: lng,
+          days: [],
+          suggestions: [],
+          dayTrips: [],
+          notes: "",
+          bookings: [],
+          hotelBookings: [],
+          _fromUserListSight: true
+        };
+
+        // Choose insertion point.
+        var insertAt = trip.destinations.length; // default: append
+        if (meta.parentEntry) {
+          var parentIdx = trip.destinations.findIndex(function (d) {
+            return d && d.place && _pd225NrmFn(d.place) === meta.parentEntry;
+          });
+          if (parentIdx >= 0) insertAt = parentIdx + 1;
+        }
+        trip.destinations.splice(insertAt, 0, newDest);
+        _pd225Added.push(displayName + " (relation=" + (meta.parentRelation || "orphan")
+          + ", inserted at " + insertAt + ")");
+      });
+
+      // If anything was added, recompute dates trip-wide. Mirrors the
+      // date-recompute used by the day-trip cluster (engine-picker
+      // line ~2637) — iterate destinations, cumulative dateFrom from
+      // startDate, dateTo = dateFrom + nights, rebuild days.
+      if (_pd225Added.length) {
+        var _pd225Start = parseStartDateFromBrief(_tb && _tb.when || "");
+        if (_pd225Start) {
+          var curDate = new Date(_pd225Start);
+          trip.destinations.forEach(function (d) {
+            if (!d) return;
+            var dateFromStr = curDate.toISOString().slice(0, 10);
+            var next = new Date(curDate);
+            next.setDate(next.getDate() + (d.nights || 0));
+            var dateToStr = next.toISOString().slice(0, 10);
+            d.dateFrom = dateFromStr;
+            d.dateTo = dateToStr;
+            d.days = _buildDaysShim(d);
+            curDate = next;
+          });
+        }
+        console.log("[Max PD.225] augmented trip with " + _pd225Added.length + " 0-night sight stop(s):");
+        _pd225Added.forEach(function (line) { console.log("  - " + line); });
+      }
+    } catch (e) {
+      console.warn("[Max PD.225] sight-augment failed (non-fatal):", e && e.message);
     }
 
     // PD.207: dedup invariant. A place must be EITHER a top-level

@@ -7929,21 +7929,18 @@ function _showPostImportSightsModal() {
     return _titleCaseFallback(key);
   }
 
-  var inDestRows = []; // {sight, dest}
-  var orphanRows = []; // {sight}
+  var inDestRows = []; // {sight, dest}  — parentRelation="within"
+  var orphanRows = []; // {sight}        — parentRelation="from" OR no parent
   sightKeys.forEach(function (k) {
     var meta = clsByPlace[k] || {};
     var parentKey = meta.parentEntry || null;
     var sightDisplay = _displayFor(k, null);
-    if (parentKey && listedNames[parentKey] === "stay") {
-      // Parent is on user's stay list — clearest case.
+    // PD.225: use parentRelation, not just parent presence. Only
+    // "within" sights land in a destination's See-and-Do; "from"
+    // sights and orphans become their own 0-night stops on the route.
+    if (meta.parentRelation === "within" && parentKey && listedNames[parentKey] === "stay") {
       var destDisplay = _displayFor(parentKey, null);
       inDestRows.push({ sight: sightDisplay, dest: destDisplay });
-    } else if (parentKey) {
-      // Parent isn't a user-listed stay; classifier had one
-      // (LLM-suggested). Today: orphan. Piece 4 will auto-create
-      // — until then, we explain the "as its own stop" outcome.
-      orphanRows.push({ sight: sightDisplay });
     } else {
       orphanRows.push({ sight: sightDisplay });
     }

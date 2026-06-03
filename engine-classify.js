@@ -114,7 +114,7 @@
       '',
       'For each POI, ALSO return:',
       '  - parentCity: the name of the city the POI sits in or is reached from. Leave null if you genuinely don\'t know.',
-      '  - parentRelation: "within" if the POI is inside that city\'s walkable footprint; "from" if it is a day-trip distance away (roughly >20 minutes drive one-way). Default to "within" only when you are confident.',
+      '  - parentRelation: "within" ONLY if the POI is genuinely walkable from the city center or part of the city itself — concert halls, museums, monuments, churches, neighborhoods INSIDE the city. Use "from" for any sight that requires driving: waterfalls, glaciers, lava fields, national parks, beaches outside town, day-trip stops. **Default to "from" when uncertain.** A wrong "within" is a worse error than a conservative "from".',
       '',
       'ACCURACY RULE: WRONG INFORMATION IS WORSE THAN NO INFORMATION. If you are unsure about parentCity, return null and leave parentRelation null.',
       '',
@@ -216,7 +216,14 @@
 
       var parentName = (raw.parentCity == null) ? '' : String(raw.parentCity).trim();
       var parentKey = _norm(parentName);
-      var relation = (raw.parentRelation === 'from') ? 'from' : 'within';
+      // PD.225: default to "from" instead of "within". Only treat as
+      // "within" when the LLM explicitly says so. Sights are usually
+      // outside the city footprint (waterfalls, glaciers, viewpoints,
+      // nature stops) — a wrong "within" forces them into the parent
+      // destination's See-and-Do, where they don't belong. A wrong
+      // "from" just makes them a 0-night stop on the route, which
+      // reads cleanly even if the sight is technically in town.
+      var relation = (raw.parentRelation === 'within') ? 'within' : 'from';
 
       if (parentKey && Object.prototype.hasOwnProperty.call(cityIndex, parentKey)) {
         // Step 1: viable in-list parent.
