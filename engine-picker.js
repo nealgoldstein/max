@@ -3651,6 +3651,88 @@
     } else {
       _tripsIndex.push({id:tripId,name:trip.name,destCount:kept.length,dateRange:"",savedAt:new Date().toISOString()});
     }
+    // PD.223 (piece 2 of the Harpa-double-card fix): attach user-listed
+    // sights to their parent destination's suggestions[]. The
+    // classifier (PD.206) tags each sight with parentEntry (normalized
+    // parent name) and stashes the lookup table on
+    // _tb._classificationByPlace (PD.208). For each "poi" entry whose
+    // parent matches a destination on the trip, inject a suggestion
+    // onto that destination's suggestions[] so it shows up in the
+    // destination card's See-and-Do tab.
+    //
+    // Without this pass: the picker correctly identified Harpa as a
+    // sight under Reykjavík (eye icon on the YOUR LIST pill, presence
+    // in "Sights you listed"), but Reykjavík's See-and-Do was empty
+    // for it — sights stayed in _tb.candidates and never landed in
+    // trip.destinations[].suggestions[], which is what the destination
+    // card's See-and-Do tab reads.
+    //
+    // Idempotent — skips inserts when a suggestion with the same
+    // normalized name already exists on that destination.
+    try {
+      var _pd223ClsByPlace = (_tb && _tb._classificationByPlace)
+        || (trip.brief && trip.brief._classificationByPlace)
+        || {};
+      var _pd223NrmFn = (typeof _normPlaceName === "function")
+        ? _normPlaceName
+        : function (s) { return String(s || "").toLowerCase().trim(); };
+      var _pd223DestByNorm = Object.create(null);
+      (trip.destinations || []).forEach(function (d) {
+        if (d && d.place) _pd223DestByNorm[_pd223NrmFn(d.place)] = d;
+      });
+      var _pd223Attached = [];
+      Object.keys(_pd223ClsByPlace).forEach(function (sightKey) {
+        var meta = _pd223ClsByPlace[sightKey];
+        if (!meta || meta.classification !== "poi") return;
+        if (!meta.parentEntry) return;
+        var parentDest = _pd223DestByNorm[meta.parentEntry];
+        if (!parentDest) return;
+        // Find a resolved candidate for richer coords/display name.
+        var cand = (_tb.candidates || []).find(function (c) {
+          return c && c.place && _pd223NrmFn(c.place) === sightKey;
+        });
+        var displayName = (cand && cand.place)
+          || (trip.brief && trip.brief._userListedDisplay && trip.brief._userListedDisplay[sightKey])
+          || sightKey;
+        var lat = (cand && typeof cand.lat === "number") ? cand.lat : null;
+        var lng = (cand && typeof cand.lng === "number") ? cand.lng : null;
+        if (!Array.isArray(parentDest.suggestions)) parentDest.suggestions = [];
+        // Idempotency: don't double-insert if a suggestion with the same
+        // normalized name already exists.
+        var already = parentDest.suggestions.some(function (s) {
+          return s && s.n && _pd223NrmFn(s.n) === sightKey;
+        });
+        if (already) return;
+        // Use the global sidCtr if available (index.html owns it).
+        var _sid;
+        if (typeof global.sidCtr === "number") {
+          global.sidCtr++;
+          _sid = "s" + global.sidCtr;
+        } else {
+          _sid = "s-pd223-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
+        }
+        parentDest.suggestions.push({
+          id: _sid,
+          type: "sight",
+          n: displayName,
+          st: displayName,
+          note: null,
+          lat: lat,
+          lng: lng,
+          approx: (lat == null || lng == null),
+          _fromUserList: true,
+          _parentRelation: meta.parentRelation || "within"
+        });
+        _pd223Attached.push(displayName + " → " + parentDest.place + " (" + (meta.parentRelation || "within") + ")");
+      });
+      if (_pd223Attached.length) {
+        console.log("[Max PD.223] attached " + _pd223Attached.length + " user-listed sight(s) to parent destinations:");
+        _pd223Attached.forEach(function (line) { console.log("  - " + line); });
+      }
+    } catch (e) {
+      console.warn("[Max PD.223] sight-attachment failed (non-fatal):", e && e.message);
+    }
+
     // PD.207: dedup invariant. A place must be EITHER a top-level
     // destination OR a sight-under-some-destination, never both. The
     // classifier in PD.206 enforces this at the parser stage, and the
