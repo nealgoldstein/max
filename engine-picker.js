@@ -3670,9 +3670,11 @@
     // Idempotent — skips inserts when a suggestion with the same
     // normalized name already exists on that destination.
     try {
-      var _pd223ClsByPlace = (_tb && _tb._classificationByPlace)
-        || (trip.brief && trip.brief._classificationByPlace)
-        || {};
+      // PD.227 (parallel fix): pick whichever map has entries. _tb's
+      // copy is often empty after rehydration; trip.brief's persists.
+      var _pd223TbMap = (_tb && _tb._classificationByPlace) || {};
+      var _pd223BriefMap = (trip.brief && trip.brief._classificationByPlace) || {};
+      var _pd223ClsByPlace = Object.keys(_pd223TbMap).length ? _pd223TbMap : _pd223BriefMap;
       var _pd223NrmFn = (typeof _normPlaceName === "function")
         ? _normPlaceName
         : function (s) { return String(s || "").toLowerCase().trim(); };
@@ -3753,9 +3755,10 @@
     // Dates are recomputed trip-wide after the augment to absorb the
     // new 0-night entries cleanly.
     try {
-      var _pd225ClsByPlace = (_tb && _tb._classificationByPlace)
-        || (trip.brief && trip.brief._classificationByPlace)
-        || {};
+      // PD.227 (parallel fix): pick whichever map has entries.
+      var _pd225TbMap = (_tb && _tb._classificationByPlace) || {};
+      var _pd225BriefMap = (trip.brief && trip.brief._classificationByPlace) || {};
+      var _pd225ClsByPlace = Object.keys(_pd225TbMap).length ? _pd225TbMap : _pd225BriefMap;
       var _pd225NrmFn = (typeof _normPlaceName === "function")
         ? _normPlaceName
         : function (s) { return String(s || "").toLowerCase().trim(); };

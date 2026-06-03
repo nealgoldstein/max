@@ -44333,25 +44333,35 @@ async function _generatePlaceWhatToDo(placeName, ctx){
       ? _normPlaceName
       : function (s) { return String(s || "").toLowerCase().trim(); };
     var _destKey = _nrmWtd(placeName);
-    var _listed = (typeof _tb !== "undefined" && _tb && Array.isArray(_tb._pastedListPlaces))
-      ? _tb._pastedListPlaces : null;
-    if (_listed) {
-      _listed.forEach(function (p) {
-        if (!p || !p.place) return;
-        var meta = (_tb._classificationByPlace || {})[_nrmWtd(p.place)];
-        if (!meta || meta.classification !== "poi") return;
-        if (meta.parentEntry !== _destKey) return;
-        // Only include sights that'll actually land in THIS destination
-        // — "within" matches PD.223's attach criterion.
-        if (meta.parentRelation !== "within") return;
-        userSights.push({
-          what: p.place,
-          where: placeName,
-          _fromUserList: true,
-          _parentRelation: "within"
-        });
+    // PD.227 (fix): pick whichever classification map has entries.
+    // On a rehydrated trip _tb._classificationByPlace is empty (not
+    // restored from disk) but trip.brief._classificationByPlace is
+    // intact. The old `||` chain treated an empty {} as truthy and
+    // never fell through.
+    var _tbMap = (typeof _tb !== "undefined" && _tb && _tb._classificationByPlace) || {};
+    var _briefMap = (typeof trip !== "undefined" && trip && trip.brief && trip.brief._classificationByPlace) || {};
+    var _clsMap = (Object.keys(_tbMap).length ? _tbMap : _briefMap);
+    // _pastedListPlaces is cleared after first use on most paths, so
+    // iterate the classification map directly. The display name comes
+    // from _userListedDisplay (PD.149) or the normalized key as a
+    // fallback.
+    Object.keys(_clsMap).forEach(function (k) {
+      var meta = _clsMap[k];
+      if (!meta || meta.classification !== "poi") return;
+      if (meta.parentEntry !== _destKey) return;
+      // Only include sights that'll actually land in THIS destination
+      // — "within" matches PD.223's attach criterion.
+      if (meta.parentRelation !== "within") return;
+      var disp = (_tb && _tb._userListedDisplay && _tb._userListedDisplay[k])
+        || (trip && trip.brief && trip.brief._userListedDisplay && trip.brief._userListedDisplay[k])
+        || k;
+      userSights.push({
+        what: disp,
+        where: placeName,
+        _fromUserList: true,
+        _parentRelation: "within"
       });
-    }
+    });
   } catch (_) {}
 
   function _mergeUserSightsAndLLM(llmItems) {
