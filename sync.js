@@ -394,7 +394,18 @@
     });
   }
   async function deleteTrip(id) {
-    return request('/trips/' + encodeURIComponent(id), { method: 'DELETE' });
+    // PD.197: tombstone the ID before attempting the server delete.
+    // If this call succeeds we drain the tombstone; if it fails the
+    // tombstone stays so pullAll won't resurrect the trip until
+    // the delete eventually goes through on a later poll.
+    _tombstoneAdd(id);
+    try {
+      var r = await request('/trips/' + encodeURIComponent(id), { method: 'DELETE' });
+      _tombstoneRemove(id);
+      return r;
+    } catch (e) {
+      throw e; // leave tombstone in place
+    }
   }
 
   // v353.5: share-link endpoints. Mint creates a fresh token bound
@@ -730,15 +741,67 @@
   // local trips just because they're missing from the server — the
   // user might have offline-only drafts.
 
+  // PD.197 (architectural): deleted-trip tombstones. Without this,
+  // the fire-and-forget server delete in the UI can silently fail
+  // (network blip, transient 5xx) and the next pullAll resurrects
+  // the trip. The tombstone list persists in localStorage; pullAll
+  // skips any tombstoned ID. Tombstones drain when the server
+  // confirms deletion (or when MaxSync.deleteTrip succeeds on a
+  // retry path).
+  var _TOMBSTONE_KEY = 'max-deleted-trips';
+  function _readTombstones() {
+    try {
+      var raw = localStorage.getItem(_TOMBSTONE_KEY);
+      if (!raw) return {};
+      var arr = JSON.parse(raw);
+      if (!Array.isArray(arr)) return {};
+      var out = {};
+      arr.forEach(function(id){ if (id) out[id] = true; });
+      return out;
+    } catch (_) { return {}; }
+  }
+  function _writeTombstones(map) {
+    try {
+      var arr = Object.keys(map || {});
+      localStorage.setItem(_TOMBSTONE_KEY, JSON.stringify(arr));
+    } catch (_) {}
+  }
+  function _tombstoneAdd(id) {
+    if (!id) return;
+    var m = _readTombstones();
+    m[id] = true;
+    _writeTombstones(m);
+  }
+  function _tombstoneRemove(id) {
+    if (!id) return;
+    var m = _readTombstones();
+    if (m[id]) { delete m[id]; _writeTombstones(m); }
+  }
+
   async function pullAll() {
     if (!isSignedIn()) return { pulled: 0, skipped: 0 };
     var resp = await listTrips();
     var serverTrips = (resp && resp.trips) || [];
+    var tombstones = _readTombstones();
     var pulled = 0;
     var skipped = 0;
 
     for (var i = 0; i < serverTrips.length; i++) {
       var s = serverTrips[i];
+      // PD.197: skip tombstoned trips; retry the server delete so
+      // they eventually drain. Without this, every pull would
+      // resurrect a trip whose server delete failed.
+      if (s && s.id && tombstones[s.id]) {
+        try {
+          await request('/trips/' + encodeURIComponent(s.id), { method: 'DELETE' });
+          _tombstoneRemove(s.id);
+        } catch (e) {
+          // Server still won't accept the delete; leave the
+          // tombstone so we skip again next pull.
+        }
+        skipped++;
+        continue;
+      }
       var key = 'max-trip-' + s.id;
       var localTimestamp = 0;
       try {
@@ -1292,6 +1355,23 @@
     listTrips: listTrips,
     getTrip: getTrip,
     deleteTrip: deleteTrip,
+    // PD.197: tombstone API. markDeletedLocally adds the ID to the
+    // local tombstone list unconditionally — call this from any UI
+    // delete path so the trip can't resurrect via pullAll even if
+    // we're offline or signed out at delete time. drainTombstones
+    // (optional) lets a caller proactively retry pending server
+    // deletes; pullAll already does this implicitly per-pull.
+    markDeletedLocally: _tombstoneAdd,
+    drainTombstones: async function() {
+      var m = _readTombstones();
+      var ids = Object.keys(m);
+      for (var i = 0; i < ids.length; i++) {
+        try {
+          await request('/trips/' + encodeURIComponent(ids[i]), { method: 'DELETE' });
+          _tombstoneRemove(ids[i]);
+        } catch (_) {}
+      }
+    },
     // v353.3: prefs sync. UI shouldn't need to call these directly
     // — MaxDB.prefs.set() auto-pushes via the prefsChanged bridge,
     // and pullPrefs runs on sign-in/boot. Exposed for tests and for

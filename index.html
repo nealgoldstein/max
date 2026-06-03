@@ -2524,23 +2524,33 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
         </div>
         <div><strong>Overnight</strong> — a stop with at least one night to sleep. Numbered in trip order.</div>
       </div>
+      <!-- PD.201: Sight (See) — the default non-stay pin shape after
+           PD.189/190/199 stripped auto-classification. Blue teardrop
+           with optional initials. Most common pin on a fresh trip
+           view; legend needed to mention it. -->
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
         <div style="flex-shrink:0;width:22px;height:22px;display:flex;align-items:center;justify-content:center;">
-          <div style="background:#5b3f8f;color:#fff;border-radius:4px;width:20px;height:20px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;">Ge</div>
+          <svg width="18" height="22" viewBox="0 0 24 30" style="display:block;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.3));"><path d="M12 2 C 6 2, 2 6, 2 12 C 2 16, 12 28, 12 28 C 12 28, 22 16, 22 12 C 22 6, 18 2, 12 2 Z" fill="#1a5fa8" stroke="#fff" stroke-width="1.5"/></svg>
         </div>
-        <div><strong>Day trip</strong> — visited from a hub and back the same day. Initials inside; connected to its hub by a purple loop.</div>
+        <div><strong>Sight</strong> — a place to visit, no overnight here. Open its popover to mark as Day trip or On the way if it fits a hub or route.</div>
       </div>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
         <div style="flex-shrink:0;width:22px;height:22px;display:flex;align-items:center;justify-content:center;">
-          <svg width="16" height="16" viewBox="0 0 16 16" style="display:block;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.3));"><polygon points="4.69,1 11.31,1 15,4.69 15,11.31 11.31,15 4.69,15 1,11.31 1,4.69" fill="#fff" stroke="#7a4fbf" stroke-width="2" stroke-linejoin="round"/></svg>
+          <div style="background:#c5a3e0;color:#000;border-radius:50%;width:20px;height:20px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;">Ge</div>
         </div>
-        <div><strong>Wayside</strong> — a brief stop along the drive between two hubs. No overnight.</div>
+        <div><strong>Day trip</strong> — visited from a hub and back the same day. Light purple circle with initials; connected to its hub by a purple loop.</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+        <div style="flex-shrink:0;width:22px;height:22px;display:flex;align-items:center;justify-content:center;">
+          <svg width="16" height="16" viewBox="0 0 16 16" style="display:block;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.3));"><polygon points="4.69,1 11.31,1 15,4.69 15,11.31 11.31,15 4.69,15 1,11.31 1,4.69" fill="#c5a3e0" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>
+        </div>
+        <div><strong>On the way</strong> — a stop along the drive between two hubs. No overnight. Light purple octagon.</div>
       </div>
       <div style="display:flex;align-items:center;gap:10px;">
         <div style="flex-shrink:0;width:22px;height:22px;display:flex;align-items:center;justify-content:center;">
           <div style="background:#aaa;color:#fff;border-radius:50%;width:14px;height:14px;border:2px dashed #fff;opacity:0.78;"></div>
         </div>
-        <div><strong>Considered</strong> — a place from Discovery that isn't on the trip yet. Tap to add.</div>
+        <div><strong>Still considering</strong> — a place from Discovery that isn't on the trip yet. Tap to add.</div>
       </div>
       <!-- NC.6: clarify that the dashed line connecting numbered pins is
            an ordering of stops, not a driving route. The dotted blue
@@ -6700,15 +6710,15 @@ function renderHomeScreen(){
           _tripsIndex=_tripsIndex.filter(function(t){return t.id!==id;});
           saveTripsIndex();
           try{localStorage.removeItem("max-trip-"+id);}catch(ex){}
-          // v353.2: also delete from the server. Without this, the
-          // next 60s poll (sync.js _maybePull → pullAll) sees the
-          // trip still on the server and writes it back into local
-          // storage — looking like the delete "didn't work" because
-          // the trip resurrects within a minute. Fire-and-forget so
-          // a slow / failed server delete doesn't block the local
-          // UI; if the server delete fails, the trip stays remote
-          // and the next pull will repopulate it locally — a real
-          // edge case the user can handle by retrying delete.
+          // PD.197: tombstone unconditionally — even offline / signed
+          // out / before MaxSync.deleteTrip runs. The next pullAll
+          // checks the tombstone and skips resurrection (and retries
+          // the server delete). If signed in, also fire the explicit
+          // delete now so the round trip happens immediately.
+          if (typeof MaxSync !== "undefined" &&
+              typeof MaxSync.markDeletedLocally === "function") {
+            try { MaxSync.markDeletedLocally(id); } catch(_){}
+          }
           if (typeof MaxSync !== "undefined" &&
               typeof MaxSync.isSignedIn === "function" &&
               MaxSync.isSignedIn() &&
@@ -32749,6 +32759,15 @@ function cancelPickerEdit(){
   delete _tb._editPreservedByPlace;
   var ov = g("trip-brief-overlay");
   if (ov) ov.style.display = "none";
+  // PD.198 (architectural): remove body.picker-active BEFORE
+  // drawTripMode runs. Without this, PD.83c's defensive guard bails
+  // drawTripMode (no-op) and the trip view never stamps
+  // _recordScreen("trip"). Result: user cancels the picker, sees
+  // trip view visually, closes the trip — but _lastScreen is still
+  // "picker" because the stamp never fired. Next reopen routes to
+  // Discovery instead of trip view. Same fix as PD.124 for the
+  // 'published' handler; cancel path was the missing twin.
+  if (document.body) document.body.classList.remove("picker-active");
   // v359.1: keep mode toggle in sync when leaving the picker overlay.
   _leftMode = "trip";
   var _pkBtn = g("mode-picker-btn"); if (_pkBtn) _pkBtn.className = "mode-btn";
@@ -51150,15 +51169,21 @@ function _notifyOnwayDemotions(syncResult){
 }
 
 function drawTripMode(){
-  // PD.83c (architectural): if the picker overlay is active, the user
-  // isn't on trip view. Background tripChange events used to slip
-  // through and render trip chrome behind the picker — first masked
-  // by CSS visibility:hidden (PD.73f'), then guarded inside
-  // _recordScreen (PD.73d/i). Both were downstream patches. The
-  // architectural answer is to refuse to render at all. The
-  // tripChange listener (PD.83b) also gates on this; the check here
-  // is defense in depth for any other caller.
-  if (document.body && document.body.classList.contains("picker-active")) return;
+  // PD.83c + PD.198 (architectural): if the picker overlay is
+  // genuinely active, don't render trip chrome behind it. But the
+  // body.picker-active class is a flag that callers can forget to
+  // clear (PD.198 found cancelPickerEdit did this); checking only
+  // the class led to silent no-ops where the user expected trip
+  // view. Cross-check the OVERLAY's actual display state: if the
+  // overlay is hidden, the picker isn't active regardless of what
+  // the body class says — clear the stale class and proceed.
+  if (document.body && document.body.classList.contains("picker-active")) {
+    var _briefOv = document.getElementById("trip-brief-overlay");
+    var _briefVisible = _briefOv && _briefOv.style.display && _briefOv.style.display !== "none";
+    if (_briefVisible) return;
+    // Stale flag — clear it and continue.
+    document.body.classList.remove("picker-active");
+  }
   if (typeof _recordScreen === "function") _recordScreen("trip");
   // PD.100: drives-on hint. Once per trip, when the region is a known
   // country that drives on the left, surface a small toast. Cleared

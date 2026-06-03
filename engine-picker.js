@@ -2036,57 +2036,23 @@
       console.warn("[Max publishTrip] placeMeta→c.role bridge failed (non-fatal):", e && e.message);
     }
 
-    // Round NC.X: bridge the Discovery PREDICTORS into c.role at
-    // publish time. The day-trip / on-the-way pills in Discovery are
-    // advisory until the user commits ("Choreograph my trip" is the
-    // commit moment). Without this bridge, a sight that Discovery
-    // suggested as "↻ Day trip from Höfn" or "🛣 On the way from
-    // Reykjavík" ships to the trip view as a generic See pin, because
-    // c.role still carries the LLM default ("see" for non-overnight-
-    // capable). The trip-view map color comes straight from c.role,
-    // so every suggested non-stay reads dashed-gray — exactly the
-    // "the trip map doesn't look like the Discovery map" complaint.
+    // PD.199 (architectural): predictor bridge REMOVED. PD.189/190
+    // closed the read path (_pmDeriveRole no longer returns daytrip/
+    // onway from predictors); this bridge was the write-path twin
+    // that escaped them. It wrote c.role = "daytrip" / "onway" with
+    // c._roleTouched = true at publish time, falsely marking
+    // system-derived classifications as user commitments. The
+    // cascade's top tier honors _roleTouched as the user-decision
+    // signal — so this bridge poisoned the source of truth.
     //
-    // Only fires when:
-    //   - c._roleTouched is false (the user hasn't picked a role).
-    //   - c.role is "see" or empty (don't override stays / waysides
-    //     / day-trips already in play).
-    // On-way wins over day-trip (matches the Discovery cascade —
-    // on-way is the more specific claim).
-    // Round PD.16: predictor bridge routes through MaxRoleWriter so
-    // the hub field, _keep, and candidateChange event emit atomically
-    // with c.role + _roleTouched. Same engine-only fallback as the
-    // stayOverride bridge above.
-    try {
-      var _dayPreds = (_tb && _tb._dayTripPreds) || {};
-      var _wayPreds = (_tb && _tb._onWayPreds) || {};
-      var _normFn2 = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase(); };
-      var _writer2 = (typeof global !== "undefined" && global.MaxRoleWriter) ? global.MaxRoleWriter : null;
-      var _bridgedPred = 0;
-      kept.forEach(function(c){
-        if (!c || !c.place) return;
-        if (c._roleTouched === true) return;
-        if (c.role === "stay" || c.role === "daytrip" || c.role === "onway") return;
-        var k = _normFn2(c.place);
-        var nextRole = null;
-        var nextHub  = "";
-        if (_wayPreds[k])      { nextRole = "onway";   nextHub = String(_wayPreds[k]).toLowerCase(); }
-        else if (_dayPreds[k]) { nextRole = "daytrip"; nextHub = String(_dayPreds[k]).toLowerCase(); }
-        if (!nextRole) return;
-        if (_writer2 && typeof _writer2.set === "function") {
-          _writer2.set(c.place, nextRole, { hub: nextHub, persist: false });
-        } else {
-          c.role = nextRole;
-          c._roleTouched = true;
-          if (nextRole === "onway")        c.waysideFromHub = nextHub;
-          else if (nextRole === "daytrip") c.dayTripHub = nextHub;
-        }
-        _bridgedPred++;
-      });
-      if (_bridgedPred) console.log("[Max publishTrip] bridged " + _bridgedPred + " picker predictor(s) into c.role");
-    } catch(e) {
-      console.warn("[Max publishTrip] picker predictor bridge failed (non-fatal):", e && e.message);
-    }
+    // The principle from PD.189/190 holds at write time too:
+    // day-trip and on-the-way roles MUST originate in an explicit
+    // user popover click. The predictor's purpose is to suggest in
+    // Discovery; the popover surfaces the suggestion; the user
+    // commits. No auto-bridge, no other path.
+    //
+    // (kept candidates ship with their Discovery roles — stay or
+    // see — same as Discovery showed.)
 
     if(!kept.length) return;
 
@@ -2445,28 +2411,35 @@
         workingNights[biggestKey] -= 1;
         workingSum -= 1;
       }
-      var proposedDeltas = [];
+      // PD.200 (architectural): apply the trim. User specified the
+      // duration as a real constraint — honor it. The earlier
+      // "Round EW" design surfaced a proposal and required the user
+      // to click Apply, but the user reasonably expects the budget
+      // they typed to be the budget they get. If they want a longer
+      // trip, they extend dates explicitly. The notice still posts
+      // so the user can see what was trimmed and inspect/reverse.
+      var appliedDeltas = [];
       ordered.forEach(function(c){
         if (!c.place) return;
         var k = (typeof _normPlaceName === "function") ? _normPlaceName(c.place) : (c.place||"").toLowerCase();
         var before = c.nights || 0;
         var after = workingNights[k] != null ? workingNights[k] : before;
         if (before > after) {
-          proposedDeltas.push({place: c.place, before: before, after: after, key: k});
+          c.nights = after; // APPLY
+          appliedDeltas.push({place: c.place, before: before, after: after, key: k});
         }
       });
-      console.log("[Max night-clamp DETECT-ONLY] picker=" + sumNights + " budget=" + targetNights + " over by " + (sumNights - targetNights));
+      console.log("[Max PD.200 night-clamp APPLIED] picker=" + sumNights + " budget=" + targetNights + " trimmed " + (sumNights - targetNights));
       trip.overBudgetNotice = {
         budgetDays: budget.max,
         pickerNights: sumNights,
         pickerDays: sumNights + 1,
         targetNights: targetNights,
         overage: sumNights - targetNights,
-        proposedDeltas: proposedDeltas,
+        proposedDeltas: appliedDeltas,  // already applied; UI reads to surface what changed
+        applied: true,
         ts: new Date().toISOString()
       };
-      // Don't set legacy trip.clampNotice — that banner described
-      // already-applied trims. Under EW the trims aren't applied yet.
       delete trip.clampNotice;
     })();
 
