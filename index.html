@@ -3877,6 +3877,12 @@ function loadTripFile(input){
         destCount:trip.destinations.length});
       saveTripsIndex();
       localStorage.setItem("max-trip-"+newId,JSON.stringify(data));
+      // PD.186 (architectural): explicit file-open lands on trip view,
+      // not whatever screen was recorded in the file. Saving while
+      // peeking in Discovery shouldn't trap a later loader on the
+      // picker overlay. The picker is one click away via the menu;
+      // trip view is the canonical "show me this trip" surface.
+      try { if (trip) trip._lastScreen = "trip"; } catch(_){}
       enterApp();
       showSaveStatus("Trip loaded: "+( trip.name||"Untitled trip"),4000);
     }catch(err){
@@ -24679,6 +24685,19 @@ function _pmDeriveRole(info, key, opts){
     }
   } catch(_){}
   if (cand && cand.status === "reject") return { role: "reject", source: "user" };
+  // PD.187 (architectural): if the destination has real allocated
+  // nights, that's a committed overnight — period. The destination's
+  // nights count beats any stale candidate role or predictor guess.
+  // Without this, the popover (which reads from dest.nights) and the
+  // pin (which reads from this cascade) can disagree: Stykkishólmur
+  // shows "Overnight (current)" in the popover but renders as a
+  // light-purple day-trip pin. The destination commitment is the
+  // ground truth; this guard sits BEFORE the user/flag/predictor
+  // cascade so it can't be overridden by stale lower-priority signals.
+  // (The user can still flip a stay → day-trip via the popover; that
+  // sets dest.nights=0, so info.overnight goes false and the cascade
+  // resumes its normal classification.)
+  if (info.overnight === true) return { role: "stay", source: "committed-overnight" };
   // Round NC.X (deeper Diamond Beach fix): the cascade now tracks
   // SOURCE alongside role, so callers can tell whether a role is a
   // user commitment ("you decided") or a suggestion ("Max suggests").
