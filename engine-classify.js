@@ -259,12 +259,120 @@
     return applyParentageRules(entries, classifications);
   }
 
+  // ── PD.206 wire-up helper ─────────────────────────────────────
+  //
+  // Apply classifier output to a parser-style entries list. Mutates
+  // each entry's isStay/nights based on classification and inserts
+  // auto-created parent entries for POIs whose LLM-suggested parent
+  // is not already in the list.
+  //
+  // The returned array is rewritten (originals are mutated in-place,
+  // but the array itself is rebuilt to accommodate inserts). Caller
+  // should replace its entries array with the return value.
+  //
+  // Mutations applied per entry:
+  //
+  //   region | city  → isStay = true, nights >= 1
+  //   poi (Step 1)   → isStay = false, nights = 0  (sight under in-list parent)
+  //   poi (Step 2)   → isStay = false, nights = 0  + new parent entry
+  //                    inserted just before this one with isStay:true,
+  //                    nights:1, _autoCreated:true, _autoCreatedFor:[poi]
+  //   poi (Step 3)   → isStay = true,  nights = 0  (standalone destination)
+  //   activity       → unchanged (handled by existing role-tag flow;
+  //                    future PD will route these through a separate lane)
+  //   role-tag       → unchanged (same as activity)
+  //
+  // Each entry also gains diagnostic fields used by downstream consumers
+  // (PD.207, PD.208, dev logging):
+  //
+  //   _classification, _parentEntry, _parentRelation,
+  //   _promotedToDestination, _autoCreatedParent
+
+  function applyClassificationsToEntries(entries, classifications) {
+    if (!Array.isArray(entries) || !Array.isArray(classifications)) return entries || [];
+
+    var rewritten = [];
+    var insertedParents = {}; // norm(name) → true, prevents double-insert
+
+    function _matchesByNorm(arr, key) {
+      for (var i = 0; i < arr.length; i++) {
+        if (_norm(arr[i] && arr[i].place) === key) return true;
+      }
+      return false;
+    }
+
+    for (var i = 0; i < entries.length; i++) {
+      var entry = entries[i] || {};
+      var cls = classifications[i] || { classification: 'city' };
+      var kind = VALID_CLASSIFICATIONS[cls.classification] ? cls.classification : 'city';
+
+      // Stash diagnostic fields on the entry (always, even for non-POIs).
+      entry._classification        = kind;
+      entry._parentEntry           = cls.parentEntry || null;
+      entry._parentRelation        = cls.parentRelation || null;
+      entry._promotedToDestination = !!cls.promotedToDestination;
+      entry._autoCreatedParent     = cls.autoCreatedParent || null;
+
+      if (kind === 'city' || kind === 'region') {
+        entry.isStay = true;
+        if (typeof entry.nights !== 'number' || entry.nights < 1) entry.nights = 1;
+      } else if (kind === 'poi') {
+        // Step 2: auto-create parent if LLM named one not in the list.
+        if (cls.autoCreatedParent) {
+          var parentKey = cls.parentEntry || _norm(cls.autoCreatedParent);
+          if (parentKey && !insertedParents[parentKey] && !_matchesByNorm(rewritten, parentKey)) {
+            rewritten.push({
+              place: cls.autoCreatedParent,
+              country: entry.country || '',
+              nights: 1,
+              isStay: true,
+              intent: '',
+              _classification: 'city',
+              _autoCreated: true,
+              _autoCreatedFor: [entry.place]
+            });
+            insertedParents[parentKey] = true;
+          } else if (insertedParents[parentKey]) {
+            // Track that another POI is also relying on this parent,
+            // so the dev-tooling can show "Reykjavík was added for
+            // Harpa + Hallgrímskirkja" rather than just one.
+            for (var j = 0; j < rewritten.length; j++) {
+              var r = rewritten[j];
+              if (r && r._autoCreated && _norm(r.place) === parentKey) {
+                if (!r._autoCreatedFor) r._autoCreatedFor = [];
+                if (r._autoCreatedFor.indexOf(entry.place) < 0) r._autoCreatedFor.push(entry.place);
+                break;
+              }
+            }
+          }
+        }
+
+        if (cls.promotedToDestination) {
+          // Step 3: standalone destination (Geysir-alone).
+          entry.isStay = true;
+          entry.nights = 0;
+        } else {
+          // Step 1 or 2: sight under a parent.
+          entry.isStay = false;
+          entry.nights = 0;
+        }
+      }
+      // activity / role-tag: unchanged. The parser's existing handling
+      // for these is fine until we build the separate roleTags lane.
+
+      rewritten.push(entry);
+    }
+
+    return rewritten;
+  }
+
   // ── Exports ───────────────────────────────────────────────────
   // Public surface on the namespace; back-compat globals for the
-  // inline-script layer to pick up (PD.206 wires these in).
+  // inline-script layer to pick up.
 
   var MaxEngineClassify = {
     classifyListEntries: classifyListEntries,
+    applyClassificationsToEntries: applyClassificationsToEntries,
     // Internals exposed for unit tests + dev tooling.
     _internals: {
       buildClassifierPrompt: buildClassifierPrompt,

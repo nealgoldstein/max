@@ -3651,6 +3651,82 @@
     } else {
       _tripsIndex.push({id:tripId,name:trip.name,destCount:kept.length,dateRange:"",savedAt:new Date().toISOString()});
     }
+    // PD.207: dedup invariant. A place must be EITHER a top-level
+    // destination OR a sight-under-some-destination, never both. The
+    // classifier in PD.206 enforces this at the parser stage, and the
+    // LLM is told not to surface a destination's own name as an
+    // activity (index.html ~15304). This pass is the safety net: if
+    // anything slipped through (legacy trip rehydrated, LLM ignored
+    // the constraint, post-publish mutation), it logs and surfaces
+    // the offenders so the user can resolve.
+    //
+    // Spec: crash loudly in dev, fall back to a Stray-items tray in
+    // prod. The tray UI is a later PD; for now we log + warn and
+    // record the violations on trip._dedupViolations so the trip view
+    // can render a banner once that PR lands.
+    try {
+      var _destNames = Object.create(null);
+      var _destNameNorm = (typeof _normPlaceName === "function")
+        ? _normPlaceName
+        : function (s) { return String(s || "").toLowerCase().trim(); };
+      (trip.destinations || []).forEach(function (d) {
+        if (d && d.place) _destNames[_destNameNorm(d.place)] = d.place;
+      });
+      var _violations = [];
+      (trip.destinations || []).forEach(function (d) {
+        if (!d) return;
+        var selfKey = _destNameNorm(d.place || "");
+        // (a) sights in d.suggestions (LLM-surfaced "things to do")
+        (d.suggestions || []).forEach(function (s) {
+          if (!s || !s.n) return;
+          var key = _destNameNorm(s.n);
+          if (_destNames[key] && key !== selfKey) {
+            _violations.push({
+              kind: "suggestion",
+              place: s.n,
+              underDestination: d.place,
+              alsoDestination: _destNames[key]
+            });
+          }
+        });
+        // (b) planItems on this destination's days (placed sights /
+        //     day-trip chips). Resolve placeId → name via trip.places.
+        (d.days || []).forEach(function (day) {
+          (day && day.planItems || []).forEach(function (pi) {
+            if (!pi) return;
+            var name = null;
+            if (pi.placeId && trip.places && trip.places[pi.placeId]) {
+              name = trip.places[pi.placeId].name;
+            } else if (pi.n) {
+              name = pi.n;
+            }
+            if (!name) return;
+            var key = _destNameNorm(name);
+            if (_destNames[key] && key !== selfKey) {
+              _violations.push({
+                kind: "planItem",
+                planItemType: pi.type || "?",
+                place: name,
+                underDestination: d.place,
+                alsoDestination: _destNames[key]
+              });
+            }
+          });
+        });
+      });
+      if (_violations.length) {
+        console.warn("[Max PD.207] Dedup invariant violated: " + _violations.length +
+          " place(s) appear both as a destination AND as a sight/planItem under another destination. " +
+          "New trips should not produce this; if you see it on a fresh import, the LLM or the auto-cluster path is bypassing the classifier.");
+        console.table(_violations);
+        trip._dedupViolations = _violations;
+      } else {
+        if (trip._dedupViolations) delete trip._dedupViolations;
+      }
+    } catch (e) {
+      console.warn("[Max PD.207] dedup check failed (non-fatal):", e && e.message);
+    }
+
     // Round HP: persist through the documented DB API instead of the
     // inline-script localSave wrapper. MaxDB.trip.writeRaw takes a
     // pre-serialized JSON string (matches what serializeTrip produces

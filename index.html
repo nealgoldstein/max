@@ -7510,6 +7510,54 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
     }
   } catch(_){}
 
+  // PD.206: Classify the parsed list before building the picker.
+  //
+  // The parser only knows section-header heuristics and per-line tags;
+  // it can't tell a city from a POI from an activity. Run each entry
+  // through the classifier so isStay/nights are decided structurally
+  // (Reykjavík → city → stay; Harpa → POI → sight under Reykjavík;
+  // Geysir-alone → POI → standalone destination with 0 nights). See
+  // place-classification-spec.md for the model.
+  //
+  // The classifier auto-inserts parent cities when a POI's parent isn't
+  // in the user's list (Step 2: "Harpa with no Reykjavík" → Reykjavík
+  // gets added too). The downstream picker doesn't need to know any
+  // of this — it just reads the corrected isStay/nights as if the
+  // user had typed them that way.
+  //
+  // LLM call is injected via callMax (same wrapper generateActivities
+  // uses). Failure modes (network error, malformed JSON, missing key)
+  // all fall back to the heuristic classifier inside classifyListEntries,
+  // which mirrors the parser's old "default to stay" behavior — so we
+  // never block a trip build on the classifier.
+  try {
+    if (typeof MaxEngineClassify !== "undefined" && MaxEngineClassify.classifyListEntries) {
+      var _llmFn = (typeof callMax === "function") ? callMax : null;
+      var _classifications = await MaxEngineClassify.classifyListEntries(
+        parseResult.destinations,
+        { llm: _llmFn, region: _normRegion }
+      );
+      parseResult.destinations = MaxEngineClassify.applyClassificationsToEntries(
+        parseResult.destinations, _classifications
+      );
+      console.log("[Max PD.206] classified " + _classifications.length + " list entries → " +
+        parseResult.destinations.length + " final entries " +
+        "(auto-created: " + parseResult.destinations.filter(function(e){ return e && e._autoCreated; }).length + ")");
+      console.log("[Max PD.206] entries:", parseResult.destinations.map(function(e){
+        return {
+          place: e.place,
+          classification: e._classification,
+          isStay: e.isStay,
+          nights: e.nights,
+          parentRelation: e._parentRelation,
+          autoCreated: !!e._autoCreated
+        };
+      }));
+    }
+  } catch (e) {
+    console.warn("[Max PD.206] classifier wire-up failed; using parser defaults", e);
+  }
+
   // Mint a STUB trip so the import is recoverable on reload — the
   // trip has no destinations yet; those get built when the user
   // commits in the activity-place picker via "What to see and do →".
@@ -7651,6 +7699,10 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
   _tb.placeContext = placeContext;
   // Stash the parsed list so the backstop post-pass can detect any
   // place the LLM dropped despite the mandate.
+  // PD.208: also carry classification metadata (set by PD.206) so the
+  // backstop's synthesized candidates inherit it, and so any future
+  // consumer can look up "what did the classifier say about Harpa?"
+  // via _tb._classificationByPlace.
   _tb._pastedListPlaces = parseResult.destinations.map(function(p){
     return {
       place: p.place,
@@ -7658,9 +7710,37 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
       nights: (typeof p.nights === "number") ? p.nights : 0,
       intent: p.intent || "",
       lat: (typeof p.lat === "number") ? p.lat : null,
-      lng: (typeof p.lng === "number") ? p.lng : null
+      lng: (typeof p.lng === "number") ? p.lng : null,
+      _classification:        p._classification        || null,
+      _parentEntry:           p._parentEntry           || null,
+      _parentRelation:        p._parentRelation        || null,
+      _promotedToDestination: !!p._promotedToDestination,
+      _autoCreated:           !!p._autoCreated,
+      _autoCreatedFor:        p._autoCreatedFor        || null
     };
   });
+  try {
+    var _nrm = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
+    _tb._classificationByPlace = {};
+    parseResult.destinations.forEach(function(p){
+      if (!p || !p.place) return;
+      var k = _nrm(p.place);
+      if (!k) return;
+      _tb._classificationByPlace[k] = {
+        classification:  p._classification || null,
+        parentEntry:     p._parentEntry || null,
+        parentRelation:  p._parentRelation || null,
+        autoCreated:     !!p._autoCreated,
+        promoted:        !!p._promotedToDestination
+      };
+    });
+    // Mirror onto trip.brief so reopens of the trip still know which
+    // sights came from "within" vs "from" their parent. PD.209 (the
+    // discovery-map render rule) reads from here.
+    if (typeof trip !== "undefined" && trip && trip.brief) {
+      trip.brief._classificationByPlace = Object.assign({}, _tb._classificationByPlace);
+    }
+  } catch (_) {}
 
   // Push to trips index + persist so reload returns the user here.
   if (typeof _tripsIndex === "undefined" || !Array.isArray(_tripsIndex)) _tripsIndex = [];
@@ -15302,6 +15382,7 @@ async function generateActivitiesForPlace(){
     + "ICONIC FLAG: every item gets an iconic boolean. Mark iconic:true on items a first-time visitor to this region would be disappointed to miss \u2014 the canonical experiences that define the place. Err toward fewer iconic flags rather than more \u2014 over-flagging shoehorns; under-flagging at least lets the traveler opt in.\n\n"
     + "COVERAGE: surface a FULL canonical set for the region, not a short list. The user is choosing which items to keep \u2014 don't pre-prune to fit a token budget. The traveler should see the iconic things every first-time visitor would consider, plus enough secondary options to make real choices. For a country-sized region, expect roughly 10\u201316 items spanning all six categories.\n\n"
     + "MULTIPLE SECTIONS PER MAJOR CITY: every major city in the region should appear in MULTIPLE activity sections (e.g. museums, food, historic sites, water/parks, neighborhoods), not just one 'Explore the cities' bucket. A city has many facets; surface each one as its own item under its own section. A city showing only under 'Explore the cities' is a failure mode \u2014 go back and add the missing facets.\n\n"
+    + "PD.206 \u2014 DO NOT LIST A DESTINATION AS A REQUIRED PLACE FOR AN ACTIVITY INSIDE THAT DESTINATION. The traveler's list separates destinations (where they stay/visit as stops) from sights (things to do AT a destination). If \"Reykjav\u00edk\" is a destination, do NOT emit \"Reykjav\u00edk\" as a requiredPlace under an activity \u2014 emit the SIGHT (e.g., \"Harpa Concert Hall\", \"Hallgr\u00edmskirkja\") that the activity actually visits. Activities should point at the specific thing the traveler does or sees, not back at the destination itself.\n\n"
     + "DISAMBIGUATION: use the full place name a map service would resolve correctly. Always set the country field. If a name could resolve to two different places in different countries (a town in country A whose name is one letter off from a town in country B, or a landmark whose first word matches an unrelated place), prefer the canonical full form and verify the lat/lng. If you are not certain a name resolves where you think, OMIT the item rather than guess.\n\n"
     + "FACTUAL ACCURACY for named items (routes, trains, hikes, festivals, sights): only include an item if you are confident in its specifics \u2014 endpoints, location, season, schedule. Confidently wrong specifics destroy the traveler's trust in the rest of the output. If you are unsure of the exact endpoints of a named scenic train, the right months for a phenomenon, the right village for a craft, or the right gateway for a national park, OMIT the item. The traveler is better served by a shorter list of correct items than a longer list with mistakes mixed in.\n\n"
     + "PLACES PER ACTIVITY \u2014 better to list many than few. The traveler wants to see options, not commit to a tight set. For a broad activity like \"mountain scenery\" or \"beach time,\" list 4\u20136 places. For a narrower one like \"specific craft\" or \"specific cuisine,\" list 3\u20135 spots. For routes, requiredPlaces is the endpoint pair (and any major intermediate stops on multi-modal circuits).\n\n"

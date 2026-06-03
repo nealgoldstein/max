@@ -3093,6 +3093,135 @@ describe('engine-classify.js — parentage rules (spec Part 1)', () => {
   });
 });
 
+describe('engine-classify.js — applyClassificationsToEntries (PD.206 wire-up)', () => {
+  const { applyClassificationsToEntries } = MaxEngineClassify;
+
+  test('city/region: forces isStay:true, nights>=1', () => {
+    const entries = [
+      { place: 'Reykjavík', nights: 0, isStay: false },
+      { place: 'Tuscany', nights: 3, isStay: true }
+    ];
+    const cls = [{ classification: 'city' }, { classification: 'region' }];
+    const out = applyClassificationsToEntries(entries, cls);
+    assert.strictEqual(out[0].isStay, true);
+    assert.strictEqual(out[0].nights, 1);
+    assert.strictEqual(out[1].isStay, true);
+    assert.strictEqual(out[1].nights, 3, 'existing nights preserved when >=1');
+  });
+
+  test('Step 1 POI with in-list parent: flipped to isStay:false, nights:0', () => {
+    const entries = [
+      { place: 'Reykjavík', nights: 1, isStay: true },
+      { place: 'Harpa Concert Hall', nights: 1, isStay: true } // parser default
+    ];
+    const cls = [
+      { classification: 'city' },
+      { classification: 'poi', parentEntry: 'reykjavik', parentRelation: 'within' }
+    ];
+    const out = applyClassificationsToEntries(entries, cls);
+    assert.strictEqual(out.length, 2, 'no new entry inserted');
+    assert.strictEqual(out[1].isStay, false);
+    assert.strictEqual(out[1].nights, 0);
+    assert.strictEqual(out[1]._classification, 'poi');
+    assert.strictEqual(out[1]._parentRelation, 'within');
+  });
+
+  test('Step 2 POI with autoCreatedParent: parent inserted before POI', () => {
+    const entries = [{ place: 'Harpa Concert Hall', nights: 1, isStay: true }];
+    const cls = [{
+      classification: 'poi',
+      parentEntry: 'reykjavik',
+      parentRelation: 'within',
+      autoCreatedParent: 'Reykjavík'
+    }];
+    const out = applyClassificationsToEntries(entries, cls);
+    assert.strictEqual(out.length, 2);
+    assert.strictEqual(out[0].place, 'Reykjavík');
+    assert.strictEqual(out[0].isStay, true);
+    assert.strictEqual(out[0].nights, 1);
+    assert.strictEqual(out[0]._autoCreated, true);
+    assert.deepStrictEqual(out[0]._autoCreatedFor, ['Harpa Concert Hall']);
+    assert.strictEqual(out[1].isStay, false);
+    assert.strictEqual(out[1].nights, 0);
+  });
+
+  test('Step 2: two POIs with same autoCreatedParent insert one parent and track both', () => {
+    const entries = [
+      { place: 'Harpa Concert Hall' },
+      { place: 'Hallgrímskirkja' }
+    ];
+    const cls = [
+      { classification: 'poi', parentEntry: 'reykjavik', autoCreatedParent: 'Reykjavík', parentRelation: 'within' },
+      { classification: 'poi', parentEntry: 'reykjavik', autoCreatedParent: 'Reykjavík', parentRelation: 'within' }
+    ];
+    const out = applyClassificationsToEntries(entries, cls);
+    const autoParents = out.filter((e) => e._autoCreated);
+    assert.strictEqual(autoParents.length, 1, 'parent inserted exactly once');
+    assert.deepStrictEqual(autoParents[0]._autoCreatedFor.sort(), ['Hallgrímskirkja', 'Harpa Concert Hall']);
+  });
+
+  test('Step 3 promoted POI: stays standalone (isStay:true, nights:0)', () => {
+    const entries = [{ place: 'Geysir' }];
+    const cls = [{ classification: 'poi', promotedToDestination: true }];
+    const out = applyClassificationsToEntries(entries, cls);
+    assert.strictEqual(out.length, 1);
+    assert.strictEqual(out[0].isStay, true);
+    assert.strictEqual(out[0].nights, 0);
+    assert.strictEqual(out[0]._promotedToDestination, true);
+  });
+
+  test('activity/role-tag entries pass through unchanged', () => {
+    const entries = [
+      { place: 'Drive the Ring Road', nights: 1, isStay: true },
+      { place: 'Place to stay overnight', nights: 0, isStay: false }
+    ];
+    const cls = [{ classification: 'activity' }, { classification: 'role-tag' }];
+    const out = applyClassificationsToEntries(entries, cls);
+    assert.strictEqual(out[0].isStay, true, 'activity isStay untouched');
+    assert.strictEqual(out[0].nights, 1, 'activity nights untouched');
+    assert.strictEqual(out[0]._classification, 'activity');
+    assert.strictEqual(out[1]._classification, 'role-tag');
+  });
+
+  test('Step 2: does not duplicate parent already in the list earlier', () => {
+    // Edge case: user listed Reykjavík first, then Harpa, but the LLM
+    // classifications also marked Harpa with autoCreatedParent (e.g.,
+    // because the parentage rules layered Step 2 metadata). The wire-up
+    // should NOT insert a second Reykjavík.
+    const entries = [{ place: 'Reykjavík' }, { place: 'Harpa Concert Hall' }];
+    const cls = [
+      { classification: 'city' },
+      { classification: 'poi', parentEntry: 'reykjavik', autoCreatedParent: 'Reykjavík', parentRelation: 'within' }
+    ];
+    const out = applyClassificationsToEntries(entries, cls);
+    assert.strictEqual(out.length, 2, 'no duplicate parent inserted');
+    assert.strictEqual(out[0].place, 'Reykjavík');
+    assert.strictEqual(out[1].place, 'Harpa Concert Hall');
+  });
+
+  test('mixed list: Reykjavík + Harpa + Geysir + Drive the Ring Road', () => {
+    const entries = [
+      { place: 'Reykjavík', nights: 1, isStay: true },
+      { place: 'Harpa Concert Hall' },
+      { place: 'Geysir' },
+      { place: 'Drive the Ring Road' }
+    ];
+    const cls = [
+      { classification: 'city' },
+      { classification: 'poi', parentEntry: 'reykjavik', parentRelation: 'within' },
+      { classification: 'poi', parentEntry: 'reykjavik', parentRelation: 'from' },
+      { classification: 'activity' }
+    ];
+    const out = applyClassificationsToEntries(entries, cls);
+    assert.strictEqual(out[0].isStay, true);
+    assert.strictEqual(out[1].isStay, false);
+    assert.strictEqual(out[1]._parentRelation, 'within');
+    assert.strictEqual(out[2].isStay, false);
+    assert.strictEqual(out[2]._parentRelation, 'from');
+    assert.strictEqual(out[3]._classification, 'activity');
+  });
+});
+
 describe('engine-classify.js — classifyListEntries end-to-end', () => {
   asyncTest('uses heuristic fallback when no LLM is available', async () => {
     const out = await MaxEngineClassify.classifyListEntries(
