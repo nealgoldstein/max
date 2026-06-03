@@ -2408,6 +2408,12 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
                looks similar — but the silent no-op made it worse). -->
           <button class="mw-item" onclick="_mwClose();try{console.log('[Max menu] Open Discovery clicked. trip?',!!window.trip,'mdcItems=',(window.trip&&window.trip.mdcItems&&window.trip.mdcItems.length)||0,'_tb.placeActivities=',(window._tb&&window._tb.placeActivities&&window._tb.placeActivities.length)||0,'trip.candidates=',(window.trip&&window.trip.candidates&&window.trip.candidates.length)||0);}catch(_){};if(typeof _reopenPickerAny==='function')_reopenPickerAny();else if(typeof reopenPickerForEdit==='function')reopenPickerForEdit();">&#129517;&nbsp; Open Discovery</button>
           <button class="mw-item" onclick="_mwClose();openTripSearch();">&#x1F50D;&nbsp; Search this trip</button>
+          <!-- PD.182: salvaged from the obsolete Candidate Explorer.
+               Runs the rough-spots check over the SEQUENCED
+               destinations (with real coords and real distances) so
+               warnings like "long hops" and "pace mismatch" are
+               trustworthy. -->
+          <button class="mw-item" onclick="_mwClose();validateTripRoute();">&#128739;&nbsp; Validate route&hellip;</button>
           <button class="mw-item" onclick="_mwClose();showAskMaxModal();">&#128172;&nbsp; Ask Max&hellip;</button>
 
           <div class="mw-sep"></div>
@@ -7875,6 +7881,68 @@ if (typeof globalThis !== "undefined") globalThis._backstopPastedListPlaces = _b
 //   - trip.candidates (legacy candidate-explorer)   → reopenCandidateExplorer
 //   - nothing                                       → friendly alert
 // Wired up from the trip-view Edit menu's "Edit destinations…" item.
+// PD.182: validate route — runs the rough-spots realism check over
+// the trip's actual sequenced destinations. Salvaged from the
+// obsolete Candidate Explorer where this check ran pre-publish on
+// candidates without sequencing (so distances were misleading).
+// On the trip view, destinations are ordered, coords are real, and
+// the warnings (long hops in a row, pace mismatch, too many stops)
+// reflect what the user actually committed to.
+function validateTripRoute() {
+  if (typeof trip === "undefined" || !trip
+      || !Array.isArray(trip.destinations) || trip.destinations.length < 2) {
+    if (typeof maxAlert === "function") {
+      maxAlert("Need at least two destinations to validate the route.");
+    }
+    return;
+  }
+  if (typeof MaxPickerUI === "undefined"
+      || typeof MaxPickerUI.runRealismCheck !== "function"
+      || typeof MaxPickerUI.showRealismCheckModal !== "function") {
+    if (typeof maxAlert === "function") {
+      maxAlert("Route validator isn't loaded — try refreshing the page.");
+    }
+    return;
+  }
+  // Build the kept-candidate shape the realism check expects.
+  // Day trips have intent="dayTrip" so they're excluded from
+  // segment distance calculations.
+  var orderedKeeps = trip.destinations.map(function(d){
+    if (!d) return null;
+    return {
+      place: d.place || "",
+      country: d.country || "",
+      lat: (typeof d.lat === "number") ? d.lat : null,
+      lng: (typeof d.lng === "number") ? d.lng : null,
+      nights: (typeof d.nights === "number") ? d.nights : 0,
+      intent: d._isDayTrip ? "dayTrip" : (d.intent || "")
+    };
+  }).filter(Boolean);
+
+  var briefLike = trip.brief || {};
+  var issues;
+  try {
+    issues = MaxPickerUI.runRealismCheck(orderedKeeps, briefLike);
+  } catch (e) {
+    console.warn("[Max PD.182] realism check threw:", e);
+    issues = [];
+  }
+  if (!issues || !issues.length) {
+    if (typeof showSaveStatus === "function") {
+      showSaveStatus("✓ Route looks clean — no rough spots flagged.", 5000);
+    }
+    return;
+  }
+  MaxPickerUI.showRealismCheckModal(
+    issues,
+    function onProceed() { /* dismiss only — there's nothing to publish */ },
+    function onBack() {
+      if (typeof _reopenPickerAny === "function") _reopenPickerAny();
+    }
+  );
+}
+if (typeof globalThis !== "undefined") globalThis.validateTripRoute = validateTripRoute;
+
 function _reopenPickerAny() {
   // Round NC.X: defensive overlay reset BEFORE routing. The
   // #trip-brief-overlay is shared between Discovery (renderActivityPicker)
@@ -33128,6 +33196,15 @@ async function applyCandidateChanges(){
   _emitTripMutation();
 }
 
+// PD.183 (architectural): the Candidate Explorer is OBSOLETE as of
+// the picker-flow refactor (PD.181 routes around it; PD.182 moved
+// the only salvageable piece — the realism check — onto the trip
+// view). The picker handles every curation responsibility this
+// overlay used to own (keep/reject, day-trip/on-the-way assignment,
+// re-edit). Enhance (PD.111) covers the "Max-suggested discoveries"
+// role. The overlay's HTML, CSS, and rendering functions remain in
+// the codebase for trips built before PD.181, but no supported flow
+// should reach this function. Future cleanup PD: delete entirely.
 function showCandidateExplorer(cands, editMode){
   _ceEditMode = !!editMode;
   g("trip-brief-overlay").style.display="none";
