@@ -46175,12 +46175,47 @@ function _openTripDestRolePopover(destId){
   } else if (waysideCandidate) {
     suggestedRole = "wayside";
   }
-  // v359.60.21: if dest is already 0-night (See), that IS the current
-  // state — override suggestedRole so the See radio defaults to
-  // checked + the row gets the highlight-suggestion border. Also
-  // flips the "(current)" label off the Stay row and onto See below.
-  var _isCurrentlySee = (src.nights || 0) === 0;
+  // PD.188 (architectural): single source of truth for "what is this
+  // place CURRENTLY?". Was: a binary stay/see check based on nights,
+  // which couldn't represent day-trip or wayside and could drift from
+  // the pin's _pmDeriveRole output. Now: call _pmDeriveRole and reuse
+  // its answer for every "(current)" label and for the default-checked
+  // radio. Same function the pin renderer calls, same answer, no
+  // independent logic for any surface to drift from.
+  var _curInfo = {
+    place: src.place || "",
+    kept: true,
+    overnight: ((src.nights || 0) > 0),
+    _isDayTrip: !!src._isDayTrip,
+    _dayTripHub: src._dayTripHub || "",
+    _waysideFromHub: src._waysideFromHub || ""
+  };
+  var _curKey = (typeof MaxPlaceKey !== "undefined" && MaxPlaceKey.normalize)
+    ? MaxPlaceKey.normalize(_curInfo.place)
+    : String(_curInfo.place || "").toLowerCase().trim();
+  var _curRole = "stay";
+  try {
+    if (typeof _pmDeriveRole === "function") {
+      var _r = _pmDeriveRole(_curInfo, _curKey, {});
+      if (_r && _r.role) _curRole = _r.role;
+    } else if ((src.nights || 0) === 0) {
+      _curRole = "see";
+    }
+  } catch(_) {
+    if ((src.nights || 0) === 0) _curRole = "see";
+  }
+  var _isCurrentlyStay    = (_curRole === "stay");
+  var _isCurrentlySee     = (_curRole === "see");
+  var _isCurrentlyDayTrip = (_curRole === "daytrip");
+  var _isCurrentlyOnway   = (_curRole === "onway");
+  // Default-check the radio for the CURRENT state when it's one of the
+  // viable options — opening the popover shows the user where they are.
+  // Falls back to the suggested role when the current state isn't one
+  // of the offered radios.
   if (_isCurrentlySee) suggestedRole = "see";
+  else if (_isCurrentlyDayTrip && dayTripCandidate) suggestedRole = "dayTrip";
+  else if (_isCurrentlyOnway && waysideCandidate) suggestedRole = "wayside";
+  else if (_isCurrentlyStay) suggestedRole = "stay";
 
   // Build the overlay (mirrors picker's _openRoleChangePopover).
   var existing = document.getElementById("trip-role-popover");
@@ -46250,7 +46285,7 @@ function _openTripDestRolePopover(destId){
     ? ('<label style="' + _sugRowStyle("dayTrip") + '">'
         + '<input type="radio" name="trip-role-pick" value="dayTrip"' + _sugChecked("dayTrip") + ' style="margin:0;" />'
         + '<div style="flex:1;">'
-        +   '<div style="font-size:13px;font-weight:600;color:#222;display:flex;align-items:center;gap:6px;">' + MaxMapPin.swatch("daytrip") + '<span>Day trip from</span></div>'
+        +   '<div style="font-size:13px;font-weight:600;color:#222;display:flex;align-items:center;gap:6px;">' + MaxMapPin.swatch("daytrip") + '<span>Day trip from' + (_isCurrentlyDayTrip ? ' (current)' : '') + '</span></div>'
         +   '<select id="trip-role-hub-select" style="margin-top:6px;width:100%;padding:6px 8px;font-size:12.5px;border:1px solid #ccc;border-radius:6px;font-family:inherit;">' + hubOpts + '</select>'
         +   '<div style="font-size:11px;color:#5b3f8f;margin-top:6px;line-height:1.5;">Treats ' + src.place + ' as inside the chosen destination\'s geography — visit out and back from there.</div>'
         +   '<div style="font-size:11px;color:#a36500;margin-top:6px;line-height:1.5;">Heads up: the hub will absorb '
@@ -46293,7 +46328,7 @@ function _openTripDestRolePopover(destId){
     ? ('<label style="' + _sugRowStyle("wayside") + '">'
         + '<input type="radio" name="trip-role-pick" value="wayside"' + _sugChecked("wayside") + ' style="margin:0;" />'
         + '<div style="flex:1;">'
-        +   '<div style="font-size:13px;font-weight:600;color:#222;display:flex;align-items:center;gap:6px;">' + MaxMapPin.swatch("onway") + '<span>On the way</span></div>'
+        +   '<div style="font-size:13px;font-weight:600;color:#222;display:flex;align-items:center;gap:6px;">' + MaxMapPin.swatch("onway") + '<span>On the way' + (_isCurrentlyOnway ? ' (current)' : '') + '</span></div>'
         +   '<div style="font-size:11.5px;color:#444;margin-top:3px;line-height:1.5;">'
         +     'Leaves ' + src.place + ' inside the trip\'s geography — a stop on the route from <strong>' + waysidePrev.place + '</strong> &rarr; <strong>' + waysideNext.place + '</strong>' + (_wsNightsN > 0 ? ', same trip length, just no sleep here.' : ', no overnight, no shift needed.')
         +   '</div>'
@@ -46445,7 +46480,7 @@ function _openTripDestRolePopover(destId){
     +     '<label style="' + _sugRowStyle("stay") + '">'
     +       '<input type="radio" name="trip-role-pick" value="stay"' + _sugChecked("stay") + ' style="margin:0;" />'
     +       '<div style="flex:1;">'
-    +         '<div style="font-size:13px;font-weight:600;color:#222;display:flex;align-items:center;gap:6px;">' + MaxMapPin.swatch("stay") + '<span>Overnight' + (_isCurrentlySee ? '' : ' (current)') + '</span></div>'
+    +         '<div style="font-size:13px;font-weight:600;color:#222;display:flex;align-items:center;gap:6px;">' + MaxMapPin.swatch("stay") + '<span>Overnight' + (_isCurrentlyStay ? ' (current)' : '') + '</span></div>'
     +         '<div style="font-size:11px;color:#777;margin-top:2px;line-height:1.5;">' + staySubtitle + '</div>'
     +       '</div>'
     +     '</label>'
