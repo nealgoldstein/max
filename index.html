@@ -22733,9 +22733,55 @@ function _pmFocusPlace(placeName){
             (" " + nmk).indexOf(" " + keyNorm) === (" " + nmk).length - (" " + keyNorm).length
           );
         });
-        // Prefer the longest match (most specific name wins).
         candidates.sort(function(a, b){ return nrm(b).length - nrm(a).length; });
         if (candidates.length) foundKey = candidates[0];
+      }
+      // PD.177 (architectural): coordinate fallback. Name matching is
+      // inherently fragile — same place under different spellings,
+      // different language forms, with/without descriptive suffixes.
+      // Coords are precise. Walk _tb.placeActivities to find any
+      // requiredPlace whose name matches (any form) and grab its
+      // lat/lng. Then find the marker whose stored latLng is within
+      // a tight radius (~200m). That's the same place.
+      if (!foundKey) {
+        var wantLat = null, wantLng = null;
+        try {
+          (_tb.placeActivities || []).some(function(it){
+            return (it.requiredPlaces || []).some(function(p){
+              if (!p || !p.place) return false;
+              var pn = nrm(p.place);
+              if (pn === keyNorm
+                  || pn.indexOf(keyNorm + " ") === 0
+                  || (" " + pn).indexOf(" " + keyNorm) >= 0
+                  || keyNorm.indexOf(pn + " ") === 0
+                  || (" " + keyNorm).indexOf(" " + pn) >= 0) {
+                if (typeof p.lat === "number" && typeof p.lng === "number") {
+                  wantLat = p.lat; wantLng = p.lng; return true;
+                }
+              }
+              return false;
+            });
+          });
+        } catch(_){}
+        if (wantLat != null && wantLng != null) {
+          // Find marker with closest latLng to (wantLat, wantLng).
+          var bestKey = null, bestDist = Infinity;
+          Object.keys(state.markers).forEach(function(mk){
+            var mm = state.markers[mk];
+            if (!mm || typeof mm.getLatLng !== "function") return;
+            try {
+              var ll = mm.getLatLng();
+              if (!ll || !isFinite(ll.lat) || !isFinite(ll.lng)) return;
+              // Equirectangular approx — good enough at this scale.
+              var dLat = (ll.lat - wantLat) * 111;
+              var dLng = (ll.lng - wantLng) * 111 * Math.cos(wantLat * Math.PI / 180);
+              var km = Math.sqrt(dLat*dLat + dLng*dLng);
+              if (km < bestDist) { bestDist = km; bestKey = mk; }
+            } catch(_){}
+          });
+          // 0.5km tolerance — same place even if pin is slightly offset.
+          if (bestKey && bestDist < 0.5) foundKey = bestKey;
+        }
       }
       if (foundKey) marker = state.markers[foundKey];
     }
