@@ -7056,7 +7056,22 @@ function parsePlacesList(text) {
     // Sub-header: ends with ":" and not a bullet. Used to GROUP entries
     // ("Golden Circle Area:", "South Coast / Southeast Region:") but
     // not destinations themselves.
+    //
+    // PD.215: ALSO accept sub-headers with stay/see keywords as mode
+    // signals ("overnight list:", "sights:", "things to see:"). Before
+    // PD.215, "overnight list:" was skipped entirely and the default
+    // mode "stay" silently applied — same outcome, but no signal of
+    // explicit user intent. Now classifyHeader runs on the sub-header
+    // too; if it matches, mode is updated AND seenAnyHeader flips true,
+    // which the classifier uses to know the user actually said so
+    // (vs. parser default). Non-mode sub-headers like "Golden Circle
+    // Area:" still match nothing and pass through unchanged.
     if (/:$/.test(trimmed) && !/^[\*\-•▪◦+]/.test(trimmed)) {
+      var _subInferred = classifyHeader(trimmed.replace(/:$/, ""));
+      if (_subInferred) {
+        mode = _subInferred;
+        seenAnyHeader = true;
+      }
       continue;
     }
 
@@ -7132,7 +7147,15 @@ function parsePlacesList(text) {
       country: _countryOnly,
       nights: nights,
       isStay: thisMode === "stay",
-      intent: intent
+      intent: intent,
+      // PD.215: was the mode for this entry set EXPLICITLY by the user
+      // (via section header, sub-header, or trailing tag), or is it
+      // the parser's default-stay fallback? The classifier reads
+      // _userIntent to decide whether to respect the parser's
+      // stay/see assignment or override it. A trailing tag always
+      // wins (tagMatch); otherwise we trust any header that was seen
+      // before this line.
+      _userIntent: (tagMatch ? thisMode : (seenAnyHeader ? mode : null))
     });
   }
   // v359.60.23: if nights per destination are all present and the
@@ -12433,21 +12456,35 @@ async function runCandidateSearch(requiredPlaces) {
           }
         }
 
-        // PD.212: synthetic "Sights you listed" section for user-listed
-        // POIs. Parallel to PD.75's "Recommended overnight stays" but for
-        // sights. Without it, sights like Harpa Concert Hall and Monument
-        // to the Unknown Bureaucrat scatter into LLM activity sections
-        // (e.g., "Explore cities and towns") and visually compete with
-        // destinations. Place it right after the stays sections so the
-        // top of the picker reads: stays → sights → LLM activities.
-        if (_seePlaces.length && Array.isArray(_tb.placeActivities)) {
+        // PD.212 (revised): synthetic "Sights you listed" section for
+        // user-listed POIs. Parallel to PD.75's "Recommended overnight
+        // stays" but for sights.
+        //
+        // Read directly from _tb._pastedListPlaces (the durable parser
+        // output, carrying classification metadata from PD.208) instead
+        // of _seePlaces (the resolved candidate list). The candidate
+        // path is brittle — the LLM may have dropped a sight, renamed
+        // it, or returned it under a parent activity whose name
+        // doesn't normalize-match. The user-list pill rendering reads
+        // from _userListedNames, so the pill says "this is yours" even
+        // when no candidate exists. The section needs to mirror that
+        // same source of truth or it can be empty while pills show.
+        var _userListedSights = (_tb._pastedListPlaces || []).filter(function (p) {
+          if (!p || !p.place) return false;
+          // Two paths to "this is a user-listed sight":
+          //   (a) classifier said so (preferred, post-PD.206)
+          //   (b) _userListedNames maps it to "see" (parser fallback)
+          if (p._classification === "poi") return true;
+          var nk = nrm(p.place);
+          return _tb._userListedNames && _tb._userListedNames[nk] === "see";
+        });
+        if (_userListedSights.length && Array.isArray(_tb.placeActivities)) {
           var existingSeeItem = _tb.placeActivities.find(function(it){
             return it && it.section === "Sights you listed";
           });
           if (!existingSeeItem) {
             // Insert after both stay sections if they exist, otherwise
-            // at the top. Stays are at index 0 (PD.75) and "Other stays"
-            // at index 1 (PD.77).
+            // at the top.
             var _insertAt = 0;
             _tb.placeActivities.forEach(function(it, i){
               if (it && (it.section === "Recommended overnight stays" || it.section === "Other stays to consider")) {
@@ -12461,27 +12498,32 @@ async function runCandidateSearch(requiredPlaces) {
               type: "manual",
               description: "Points of interest you flagged on your list. Each will land on the See-and-Do for the destination it sits in (or near). Uncheck any you want to drop.",
               checked: true,
-              requiredPlaces: _seePlaces.map(function(c){
-                // Carry parentEntry/parentRelation forward so the picker
-                // (and later, the trip view's discovery surface) can
-                // group these by parent destination.
-                var _meta = (_tb._classificationByPlace && _tb._classificationByPlace[nrm(c.place)]) || null;
+              requiredPlaces: _userListedSights.map(function (p) {
+                // Try to find a resolved candidate for richer coords.
+                var cand = (allCands || []).find(function (c) {
+                  return c && c.place && nrm(c.place) === nrm(p.place);
+                });
                 return {
-                  place: c.place,
-                  country: c.country || "",
-                  lat: (typeof c.lat === "number") ? c.lat : null,
-                  lng: (typeof c.lng === "number") ? c.lng : null,
+                  place: p.place,
+                  country: p.country || "",
+                  lat: (cand && typeof cand.lat === "number") ? cand.lat
+                       : (typeof p.lat === "number") ? p.lat : null,
+                  lng: (cand && typeof cand.lng === "number") ? cand.lng
+                       : (typeof p.lng === "number") ? p.lng : null,
                   _keep: true,
                   overnight: false,
                   nights: 0,
-                  // Diagnostic / future-rendering metadata. The discovery
-                  // map render rule (PD.209) reads parentRelation; the
-                  // grouped sights view (later PD) reads parentEntry.
-                  _parentEntry:    _meta && _meta.parentEntry    || null,
-                  _parentRelation: _meta && _meta.parentRelation || null
+                  // Forward classification metadata so PD.209 (discovery
+                  // map render) and any per-destination grouping pass
+                  // can read it.
+                  _parentEntry:    p._parentEntry    || null,
+                  _parentRelation: p._parentRelation || null
                 };
               })
             });
+            console.log("[Max PD.212] synthetic 'Sights you listed' section: " +
+              _userListedSights.length + " sight(s) — " +
+              _userListedSights.map(function (p) { return p.place; }).join(", "));
           }
         }
       }
@@ -44032,7 +44074,56 @@ async function _generatePlaceWhatToDo(placeName, ctx){
   if (!placeName) return [];
   if (!window._placeWhatToDoCache) window._placeWhatToDoCache = {};
   var key = String(placeName).toLowerCase();
-  if (window._placeWhatToDoCache[key]) return window._placeWhatToDoCache[key];
+
+  // PD.214: prepend user-listed sights for this destination. The picker's
+  // "Things to do →" link calls this function before the trip publishes,
+  // so PD.213 (which injects sights into trip.destinations[].suggestions
+  // at publishTrip) hasn't run yet. Without this, the user lists Harpa
+  // and Monument, opens Reykjavík's Things to do preview, and sees only
+  // the LLM's generic suggestions — not their own list.
+  //
+  // The classifier (PD.206) tags each list entry with parentEntry; the
+  // lookup table is _tb._classificationByPlace (PD.208). We filter for
+  // POIs whose parent matches the destination being previewed, then
+  // hoist them to the top of the result.
+  var userSights = [];
+  try {
+    var _nrmWtd = (typeof _normPlaceName === "function")
+      ? _normPlaceName
+      : function (s) { return String(s || "").toLowerCase().trim(); };
+    var _destKey = _nrmWtd(placeName);
+    var _listed = (typeof _tb !== "undefined" && _tb && Array.isArray(_tb._pastedListPlaces))
+      ? _tb._pastedListPlaces : null;
+    if (_listed) {
+      _listed.forEach(function (p) {
+        if (!p || !p.place) return;
+        var meta = (_tb._classificationByPlace || {})[_nrmWtd(p.place)];
+        if (!meta || meta.classification !== "poi") return;
+        if (meta.parentEntry !== _destKey) return;
+        userSights.push({
+          what: p.place,
+          where: placeName,
+          _fromUserList: true,
+          _parentRelation: meta.parentRelation || "within"
+        });
+      });
+    }
+  } catch (_) {}
+
+  function _mergeUserSightsAndLLM(llmItems) {
+    var userNamesLC = {};
+    userSights.forEach(function (s) {
+      if (s && s.what) userNamesLC[String(s.what).toLowerCase()] = true;
+    });
+    var llmDeduped = (llmItems || []).filter(function (it) {
+      return it && it.what && !userNamesLC[String(it.what).toLowerCase()];
+    });
+    return userSights.concat(llmDeduped);
+  }
+
+  if (window._placeWhatToDoCache[key]) {
+    return _mergeUserSightsAndLLM(window._placeWhatToDoCache[key]);
+  }
   ctx = ctx || {};
   var prompt = "You are Max — speaking as a well-traveled friend.\n\n"
     + "Suggest 4 specific, named things a traveler should consider doing in " + placeName + ".\n"
@@ -44051,13 +44142,17 @@ async function _generatePlaceWhatToDo(placeName, ctx){
     var first = cleaned.indexOf("["), last = cleaned.lastIndexOf("]");
     if (first > -1 && last > -1) cleaned = cleaned.substring(first, last + 1);
     var items = JSON.parse(cleaned);
-    if (!Array.isArray(items)) return [];
+    if (!Array.isArray(items)) items = [];
     items = items.filter(function(it){ return it && it.what; });
-    window._placeWhatToDoCache[key] = items;
-    return items;
+    // PD.214: merge user-listed sights with LLM output, dedup by name.
+    var merged = _mergeUserSightsAndLLM(items);
+    window._placeWhatToDoCache[key] = merged;
+    return merged;
   } catch(e) {
     console.warn("[Max] what-to-do gen failed for " + placeName + ":", e && e.message);
-    return [];
+    // PD.214: even on LLM failure, return user-listed sights so the
+    // user's input never silently disappears.
+    return _mergeUserSightsAndLLM([]);
   }
 }
 

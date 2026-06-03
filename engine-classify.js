@@ -177,6 +177,25 @@
         ? raw.classification
         : 'city';
 
+      // PD.215: respect explicit user intent from the parser. If the
+      // user listed this entry under an explicit stay-header (or
+      // tagged it stay), don't let the LLM downgrade it to a poi —
+      // they said it's a stay. Same in reverse for see-header entries
+      // that the LLM might want to call a city.
+      //
+      // The LLM still gets to refine WITHIN the user's choice:
+      //   _userIntent:"stay" → keep region|city (LLM picks which)
+      //   _userIntent:"see"  → force poi (LLM picks parent + relation)
+      //   _userIntent:null   → trust the LLM fully
+      var ui = entry && entry._userIntent;
+      if (ui === 'stay') {
+        if (classification !== 'region' && classification !== 'city') {
+          classification = 'city';
+        }
+      } else if (ui === 'see') {
+        classification = 'poi';
+      }
+
       var out = {
         // Pass through everything the parser already produced so this
         // function is non-destructive — downstream code keeps reading

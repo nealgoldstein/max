@@ -3079,6 +3079,44 @@ describe('engine-classify.js — parentage rules (spec Part 1)', () => {
     assert.strictEqual(out[0].classification, 'city');
   });
 
+  test('PD.215: _userIntent:"stay" prevents LLM from downgrading to poi', () => {
+    const entries = [
+      { place: 'Skaftafell', _userIntent: 'stay' },
+      { place: 'Lake Mývatn', _userIntent: 'stay' }
+    ];
+    const cls = [
+      { classification: 'poi', parentCity: 'Höfn', parentRelation: 'from' },
+      { classification: 'poi', parentCity: 'Akureyri', parentRelation: 'from' }
+    ];
+    const out = applyParentageRules(entries, cls);
+    assert.strictEqual(out[0].classification, 'city', 'Skaftafell stays city under explicit stay-intent');
+    assert.strictEqual(out[1].classification, 'city', 'Mývatn stays city under explicit stay-intent');
+    assert.strictEqual(out[0].parentEntry, null, 'no parent inherited from LLM');
+    assert.strictEqual(out[0].promotedToDestination, false);
+  });
+
+  test('PD.215: _userIntent:"stay" preserves region classification', () => {
+    const entries = [{ place: 'Snæfellsnes Peninsula', _userIntent: 'stay' }];
+    const cls = [{ classification: 'region' }];
+    const out = applyParentageRules(entries, cls);
+    assert.strictEqual(out[0].classification, 'region', 'region survives stay-intent (it IS a stay-able shape)');
+  });
+
+  test('PD.215: _userIntent:"see" forces poi even if LLM says city', () => {
+    const entries = [{ place: 'Harpa Concert Hall', _userIntent: 'see' }];
+    const cls = [{ classification: 'city', parentCity: 'Reykjavík', parentRelation: 'within' }];
+    const out = applyParentageRules(entries, cls);
+    assert.strictEqual(out[0].classification, 'poi', 'see-intent forces poi');
+  });
+
+  test('PD.215: _userIntent:null lets LLM decide', () => {
+    const entries = [{ place: 'Skaftafell' }]; // no _userIntent
+    const cls = [{ classification: 'poi', parentCity: 'Höfn', parentRelation: 'from' }];
+    const out = applyParentageRules(entries, cls);
+    assert.strictEqual(out[0].classification, 'poi', 'no intent → trust LLM');
+    assert.strictEqual(out[0].parentEntry, 'hofn');
+  });
+
   test('Parent name matching is accent-insensitive when _normPlaceName is loaded', () => {
     // engine-trip.js exposes _normPlaceName which folds diacritics.
     // The LLM may return "Reykjavik" (no accent) for a list with "Reykjavík" (accented).
