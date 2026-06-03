@@ -1840,18 +1840,25 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
   40%  { box-shadow:0 0 0 4px #e0b020, 0 0 22px 8px rgba(240,200,40,0.45); }
   100% { box-shadow:0 0 0 2px #f0d878, 0 0 0 0 rgba(240,200,40,0); }
 }
-/* Round NC.X: picker-map pin focus pulse. Added by _pmFocusPlace when
-   the user toggles a row's checkbox — the corresponding pin pulses a
-   bright halo for ~1.4s so the eye lands on the right pin after the
-   map pans. Targets the inner divIcon child (the pill that holds
-   color + label). */
-.leaflet-marker-icon.pm-focus-pulse > div {
+/* PD.178 (architectural): picker-map pin focus pulse. Earlier
+   selector targeted a `> div` child of the marker icon — but only
+   Stay pins (circle shape) render as div. See/Sight pins use SVG
+   (teardrop shape) and never matched the selector → Diamond Beach,
+   Fjallsárlón, Aldeyjarfoss and all other sight pins got no
+   visible halo even when the focus logic found the marker.
+
+   Fix: apply filter:drop-shadow to the marker icon ELEMENT. Works
+   identically for both <div> and <svg> children, follows the alpha
+   shape of the pin (so the halo traces the teardrop outline, not
+   a rectangular box-shadow box), and survives Leaflet's repositioning
+   transforms. */
+.leaflet-marker-icon.pm-focus-pulse {
   animation: pm-focus-pulse 1.4s ease-out 1;
 }
 @keyframes pm-focus-pulse {
-  0%   { box-shadow:0 1px 4px rgba(0,0,0,0.25), 0 0 0 0 rgba(255,210,80,0.9); }
-  40%  { box-shadow:0 1px 4px rgba(0,0,0,0.25), 0 0 0 8px rgba(255,210,80,0.55); }
-  100% { box-shadow:0 1px 4px rgba(0,0,0,0.25), 0 0 0 14px rgba(255,210,80,0); }
+  0%   { filter: drop-shadow(0 0 0 rgba(255,210,80,0.95)); }
+  35%  { filter: drop-shadow(0 0 8px rgba(255,210,80,0.85)); }
+  100% { filter: drop-shadow(0 0 22px rgba(255,210,80,0)); }
 }
 @media (max-width:640px){
   /* On narrow screens, stack the columns and let places wrap as chips below */
