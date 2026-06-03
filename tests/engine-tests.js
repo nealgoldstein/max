@@ -3109,6 +3109,32 @@ describe('engine-classify.js — parentage rules (spec Part 1)', () => {
     assert.strictEqual(out[0].classification, 'poi', 'see-intent forces poi');
   });
 
+  test('PD.216: _userIntent:"see" with no parent stays a sight, not a destination', () => {
+    const entries = [
+      { place: 'Þingvellir', _userIntent: 'see' },
+      { place: 'Geysir', _userIntent: 'see' }
+    ];
+    // Classifier returned no parent info for these — would normally
+    // trigger Step 3 promotion to standalone destination. _userIntent
+    // overrides.
+    const cls = [
+      { classification: 'poi', parentCity: null },
+      { classification: 'poi', parentCity: null }
+    ];
+    const out = applyParentageRules(entries, cls);
+    assert.strictEqual(out[0].classification, 'poi');
+    assert.strictEqual(out[0].promotedToDestination, false, 'user said see → not promoted');
+    assert.strictEqual(out[0].parentEntry, null);
+    assert.strictEqual(out[1].promotedToDestination, false);
+  });
+
+  test('PD.216: Geysir-alone WITHOUT _userIntent still promotes (regression guard)', () => {
+    const entries = [{ place: 'Geysir' }]; // no _userIntent
+    const cls = [{ classification: 'poi', parentCity: null }];
+    const out = applyParentageRules(entries, cls);
+    assert.strictEqual(out[0].promotedToDestination, true, 'no user intent → original Geysir-alone behavior preserved');
+  });
+
   test('PD.215: _userIntent:null lets LLM decide', () => {
     const entries = [{ place: 'Skaftafell' }]; // no _userIntent
     const cls = [{ classification: 'poi', parentCity: 'Höfn', parentRelation: 'from' }];

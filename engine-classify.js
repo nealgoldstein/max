@@ -229,8 +229,27 @@
         out.parentRelation = relation;
         out.autoCreatedParent = parentName;
       } else {
-        // Step 3: no parent at all — promote to standalone destination.
-        out.promotedToDestination = true;
+        // Step 3: no parent at all.
+        //
+        // PD.216: if the user EXPLICITLY tagged this as "see" (via a
+        // section header like "sees:" or a trailing "see" tag), respect
+        // that — don't promote to a standalone destination just because
+        // we couldn't find a parent. The user said sight; absent a
+        // known parent, leave it as an orphan sight (parentEntry null,
+        // parentRelation null, isStay false) so it surfaces in
+        // "Sights you listed" without a parent attribution.
+        //
+        // The original Step-3 promotion (Geysir-alone case) was
+        // designed for AMBIGUOUS entries where the parser had no
+        // signal of stay vs. sight. With an explicit _userIntent="see"
+        // we DO have signal — and Step 3 would silently override it.
+        if (entry && entry._userIntent === 'see') {
+          // Stay as poi with no parent. isStay flip happens in
+          // applyClassificationsToEntries via the !promotedToDestination
+          // branch.
+        } else {
+          out.promotedToDestination = true;
+        }
       }
 
       return out;
