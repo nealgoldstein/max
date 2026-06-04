@@ -18782,8 +18782,22 @@ function _renderPlaceActivityItems(){
       synthSubtitle = '<div class="tb-act-section-subtitle" style="flex-basis:100%;font-size:11px;color:#666;line-height:1.5;margin-top:4px;font-style:italic;">'
         + _pmEsc(_synthHdrItem.description) + '</div>';
     }
+    // PD.231: section count label picks the right noun per section type.
+    // The generic "destination" everywhere was misleading — "Sights you
+    // listed → 33 destinations" made user-listed sights look like trip
+    // destinations. Synthetic sections know their type (synthetic-stays,
+    // synthetic-sights, etc.); fall back to "destination" for LLM
+    // activity sections, where the count IS roughly "places you could
+    // make destinations".
+    var _pd231Noun = "destination";
+    if (_synthHdrItem && typeof _synthHdrItem.type === "string") {
+      if (_synthHdrItem.type === "synthetic-sights") _pd231Noun = "sight";
+      else if (_synthHdrItem.type === "synthetic-stays") _pd231Noun = "stay";
+    } else if (sec === "Sights you listed") _pd231Noun = "sight";
+    else if (sec === "Recommended overnight stays" || sec === "Other stays to consider") _pd231Noun = "stay";
+    else if (/^routes\s*[&]\s*regions/i.test(sec)) _pd231Noun = "place";
     hdrWrap.innerHTML = '<div class="tb-act-section-title" style="flex:1;">' + _pmEsc(sec) + '</div>'
-      + '<div class="tb-act-section-count">' + destOrder.length + ' destination' + (destOrder.length===1?'':'s') + '</div>'
+      + '<div class="tb-act-section-count">' + destOrder.length + ' ' + _pd231Noun + (destOrder.length===1?'':'s') + '</div>'
       + moreBtnHtml
       + synthSubtitle;
     // Round NC.X: in by-Place mode, suppress the "All places" header

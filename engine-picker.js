@@ -1942,41 +1942,74 @@
     // POIs whose parent is one of the trip's stays as parentRelation
     // ="within" — they belong on the parent destination's suggestions[]
     // (attached by PD.223 below), not as their own destination cards.
-    // Without this filter, Harpa and Monument would (a) be created as
-    // 0-night destinations on the route AND (b) be attached as
-    // suggestions on Reykjavík — double-surfacing the exact bug this
-    // whole rollout was meant to kill.
     //
-    // Falls back to trip.brief._classificationByPlace when _tb is empty
-    // (rehydrated trip path — PD.227's fix).
+    // PD.232: fall back to _userListedNames when the classifier map is
+    // empty (some paths don't persist it). User-listed "see" entries
+    // are excluded from destinations on user-intent grounds alone —
+    // the user said "sight," not "destination."
     var _pd229TbMap = (_tb && _tb._classificationByPlace) || {};
     var _pd229BriefMap = (trip && trip.brief && trip.brief._classificationByPlace) || {};
     var _pd229ClsMap = Object.keys(_pd229TbMap).length ? _pd229TbMap : _pd229BriefMap;
+    var _pd232UserListed = (_tb && _tb._userListedNames)
+      || (trip && trip.brief && trip.brief._userListedNames)
+      || {};
+    var _pd229HasCls = Object.keys(_pd229ClsMap).length > 0;
     var _pd229NrmFn = (typeof _normPlaceName === "function")
       ? _normPlaceName
       : function (s) { return String(s || "").toLowerCase().trim(); };
     var _pd229Skipped = [];
+    // PD.232 (dedup): consolidate duplicate candidates (same normalized
+    // name) before the filter runs. Picker sometimes accumulates
+    // duplicates from multiple paths (LLM backstop + activity
+    // requiredPlace + role-write). The destinations build then
+    // creates one destination per duplicate. Keep the FIRST occurrence
+    // of each normalized name; downstream code uses .id so a stable
+    // first-wins dedup is safe.
+    var _pd232Seen = Object.create(null);
+    var _pd232Deduped = [];
+    var _pd232DropCount = 0;
+    (_tb.candidates || []).forEach(function (c) {
+      if (!c || !c.place) { _pd232Deduped.push(c); return; }
+      var k = _pd229NrmFn(c.place);
+      if (!k) { _pd232Deduped.push(c); return; }
+      if (_pd232Seen[k]) {
+        _pd232DropCount++;
+        return;
+      }
+      _pd232Seen[k] = true;
+      _pd232Deduped.push(c);
+    });
+    if (_pd232DropCount) {
+      console.log("[Max PD.232] dedup'd " + _pd232DropCount + " duplicate candidate(s)");
+      _tb.candidates = _pd232Deduped;
+    }
     var kept=(_tb.candidates||[]).filter(function(c){
       // v360.3 (#124 Turn 3): also exclude day-trip-intent candidates.
-      // They're committed separately as planItem stops on a dayTrip
-      // route off their chosen hub (see the day-trip-commit pass after
-      // syncTransitRoutes). Without this exclusion they'd double-
-      // commit as both a destination AND a day-trip stop.
       if (c.status !== "keep") return false;
       if (c.intent === "wayside" || c.intent === "dayTrip") return false;
-      // PD.229: exclude within-sights.
+      // PD.229: exclude classifier-tagged within-sights.
       if (c.role === "see" && c.place) {
         var k = _pd229NrmFn(c.place);
         var meta = _pd229ClsMap[k];
         if (meta && meta.parentRelation === "within" && meta.parentEntry) {
-          _pd229Skipped.push(c.place + " → " + meta.parentEntry);
+          _pd229Skipped.push(c.place + " → " + meta.parentEntry + " (cls)");
+          return false;
+        }
+        // PD.232: classifier-data fallback. When the classification map
+        // is empty (persistence path didn't fire for this trip), any
+        // role:"see" candidate that the user explicitly listed gets
+        // excluded too. They belong on a parent's See-and-Do, not as
+        // their own destinations. PD.223's attach loop also falls back
+        // to _userListedNames so they end up somewhere reasonable.
+        if (!_pd229HasCls && _pd232UserListed[k] === "see") {
+          _pd229Skipped.push(c.place + " → (user-intent fallback)");
           return false;
         }
       }
       return true;
     });
     if (_pd229Skipped.length) {
-      console.log("[Max PD.229] excluded " + _pd229Skipped.length + " within-sight(s) from destinations build (will attach as suggestions via PD.223):");
+      console.log("[Max PD.229] excluded " + _pd229Skipped.length + " sight(s) from destinations build:");
       _pd229Skipped.forEach(function (line) { console.log("  - " + line); });
     }
 
@@ -3730,6 +3763,50 @@
         if (d && d.place) _pd223DestByNorm[_pd223NrmFn(d.place)] = d;
       });
       var _pd223Attached = [];
+      // PD.232: when classifier map is empty, fall back to attaching
+      // every user-listed "see" entry to the first/longest-stay
+      // destination. Not perfect (won't know parent), but ensures
+      // user-listed sights don't silently disappear.
+      var _pd223HasCls = Object.keys(_pd223ClsByPlace).length > 0;
+      if (!_pd223HasCls) {
+        var _pd232UserListedAttach = (_tb && _tb._userListedNames)
+          || (trip && trip.brief && trip.brief._userListedNames)
+          || {};
+        var _pd232FallbackParent = (trip.destinations || []).reduce(function (acc, d) {
+          if (!d || d.nights == null) return acc;
+          if (!acc) return d;
+          return (d.nights > acc.nights) ? d : acc;
+        }, null);
+        if (_pd232FallbackParent) {
+          Object.keys(_pd232UserListedAttach).forEach(function (sightKey) {
+            if (_pd232UserListedAttach[sightKey] !== "see") return;
+            var existsAsDest = (trip.destinations || []).some(function (d) {
+              return d && d.place && _pd223NrmFn(d.place) === sightKey;
+            });
+            if (existsAsDest) return;
+            if (!Array.isArray(_pd232FallbackParent.suggestions)) _pd232FallbackParent.suggestions = [];
+            var dupe = _pd232FallbackParent.suggestions.some(function (s) {
+              return s && s.n && _pd223NrmFn(s.n) === sightKey;
+            });
+            if (dupe) return;
+            var disp = (trip.brief && trip.brief._userListedDisplay && trip.brief._userListedDisplay[sightKey])
+              || (_tb && _tb._userListedDisplay && _tb._userListedDisplay[sightKey])
+              || sightKey;
+            var _fbSid;
+            if (typeof global.sidCtr === "number") { global.sidCtr++; _fbSid = "s" + global.sidCtr; }
+            else { _fbSid = "s-pd232-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6); }
+            _pd232FallbackParent.suggestions.push({
+              id: _fbSid, type: "sight",
+              n: disp, st: disp, note: null,
+              lat: null, lng: null, approx: true,
+              _fromUserList: true,
+              _parentRelation: "within",
+              _pd232Fallback: true
+            });
+            _pd223Attached.push(disp + " → " + _pd232FallbackParent.place + " (fallback)");
+          });
+        }
+      }
       Object.keys(_pd223ClsByPlace).forEach(function (sightKey) {
         var meta = _pd223ClsByPlace[sightKey];
         if (!meta || meta.classification !== "poi") return;
