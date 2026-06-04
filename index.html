@@ -38124,8 +38124,19 @@ function _autoSeedIconicSightsToDays(dest){
   if (!dest.suggestions.length) { console.log(_logTag, "skip: suggestions empty"); return; }
   if (!Array.isArray(dest.days)) { console.log(_logTag, "skip: no days array"); return; }
   if (!dest.days.length) { console.log(_logTag, "skip: days array empty"); return; }
-  var iconic = dest.suggestions.filter(function(s){ return s.iconic; });
-  console.log(_logTag, "suggestions:", dest.suggestions.length, "iconic:", iconic.length, "days:", dest.days.length);
+  // PD.235 (architectural): "iconic" was the wrong filter. The right
+  // concept is "important enough to pre-seed into the day plan
+  // without asking the user." That set is iconic OR user-listed.
+  // The LLM speaks for "everyone considers this canonical"; the user
+  // speaks for "I personally want this." Both belong on the day
+  // plan by default. Without this, sights that the user explicitly
+  // listed but that the LLM didn't flag iconic (Monument to the
+  // Unknown Bureaucrat, niche museums, personal interest stops)
+  // ended up in suggestions but never on the day, and the user had
+  // to manually drag them over — even though they were the most
+  // explicit signal of intent in the whole picker.
+  var iconic = dest.suggestions.filter(function(s){ return s.iconic || s._fromUserList; });
+  console.log(_logTag, "suggestions:", dest.suggestions.length, "auto-seed candidates (iconic ∪ user-listed):", iconic.length, "days:", dest.days.length);
   // Round EK: fallback when LLM returned no iconic flags. Some prompts
   // (or older cached responses) come back without `iconic` set on any
   // sight, leaving the destination's Itinerary tab empty even when
