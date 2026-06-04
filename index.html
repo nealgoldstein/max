@@ -37220,7 +37220,9 @@ function adjustPaceByItems(direction){
           // SCAFFOLD-2: auto-pulled from suggestions pool — tentative by default.
           tentative:true};
         target2.items.push(ni);
-        dest.suggestions = dest.suggestions.filter(function(x){return x.id !== pick.id;});
+        // PD.241: route through sources model.
+        if (typeof _removeSightById === "function") _removeSightById(dest, pick.id);
+        else dest.suggestions = dest.suggestions.filter(function(x){return x.id !== pick.id;});
         touched++;
       }
     }
@@ -38102,6 +38104,170 @@ async function fetchCityMeta(dest){
   window[lockKey]=false;
 }
 
+// ────────────────────────────────────────────────────────────────────────
+// PD.241 — SOURCES MODEL for destination sights
+//
+// `dest.suggestions` was a free-for-all mutable array; any code anywhere
+// could replace it, append to it, or filter it. The pipeline that adds
+// user-listed sights (classifier → PD.223) would commit data sync during
+// publishTrip, then async paths (generateCityData, auto-seed dedup, etc.)
+// would later overwrite or filter it, silently wiping user data.
+//
+// This module introduces typed SOURCES on each destination:
+//
+//   dest._sightSources = {
+//     user:      [],   // PD.223 attaches here (classifier output)
+//     llm:       [],   // generateCityData writes here
+//     essentials:[],   // mergeEssentialsIntoSuggestions writes here
+//     userAdded: [],   // user UI actions (custom add, drag-to-dest)
+//   }
+//
+// `dest.suggestions` becomes the COMPUTED VIEW: union of all sources,
+// minus any item whose name already appears on a day in `dest.days`.
+// Recompute is called after every source change.
+//
+// Migration is automatic: the first time _initSightSources is called on
+// a destination, it inspects current `dest.suggestions` and buckets each
+// item into the right source (by `_fromUserList`, by `type === "atm"`
+// etc., default LLM). Existing trips work without re-import.
+// ────────────────────────────────────────────────────────────────────────
+
+function _initSightSources(dest) {
+  if (!dest) return;
+  if (dest._sightSources) return;
+  dest._sightSources = { user: [], llm: [], essentials: [], userAdded: [] };
+  // Migrate existing dest.suggestions into the correct sources so trips
+  // that predate PD.241 keep working without losing data.
+  var ESSENTIAL_TYPES = { atm:1, bank:1, grocery:1, "tourist-info":1, pharmacy:1, transit:1 };
+  (Array.isArray(dest.suggestions) ? dest.suggestions : []).forEach(function(s) {
+    if (!s) return;
+    if (s._fromUserList) {
+      dest._sightSources.user.push(s);
+    } else if (s.type && ESSENTIAL_TYPES[s.type]) {
+      dest._sightSources.essentials.push(s);
+    } else {
+      dest._sightSources.llm.push(s);
+    }
+  });
+}
+
+function _placedDayItemNamesSet(dest) {
+  var placed = Object.create(null);
+  (dest.days || []).forEach(function(day){
+    (day.items || []).forEach(function(it){
+      if (it && it.n) placed[it.n.toLowerCase()] = true;
+    });
+  });
+  return placed;
+}
+
+function _recomputeSuggestions(dest) {
+  if (!dest) return;
+  _initSightSources(dest);
+  var placed = _placedDayItemNamesSet(dest);
+  var merged = [];
+  var seen = Object.create(null);
+  // Priority order: user first, then LLM, then essentials, then userAdded.
+  // First occurrence wins for canonical fields; user source upgrades any
+  // duplicate with the _fromUserList flag.
+  ["user", "llm", "essentials", "userAdded"].forEach(function(srcName) {
+    (dest._sightSources[srcName] || []).forEach(function(item) {
+      if (!item || !item.n) return;
+      var key = item.n.toLowerCase();
+      // Skip items already on a day — that's the rule the legacy code
+      // at line ~38330 was enforcing imperatively. Now it's the
+      // recompute's job, so writers don't have to filter manually.
+      if (placed[key]) return;
+      if (seen[key] !== undefined) {
+        // Dupe across sources. User source promotes the existing item.
+        if (srcName === "user") {
+          merged[seen[key]]._fromUserList = true;
+          if (item._parentRelation) merged[seen[key]]._parentRelation = item._parentRelation;
+        }
+        return;
+      }
+      var clone = Object.assign({}, item);
+      if (srcName === "user") clone._fromUserList = true;
+      merged.push(clone);
+      seen[key] = merged.length - 1;
+    });
+  });
+  dest.suggestions = merged;
+}
+
+// Public mutators — every writer that wants to change a destination's
+// sights goes through one of these. They mutate the corresponding source
+// and recompute dest.suggestions.
+
+function _setLLMSights(dest, sights) {
+  if (!dest) return;
+  _initSightSources(dest);
+  dest._sightSources.llm = (Array.isArray(sights) ? sights : []).slice();
+  _recomputeSuggestions(dest);
+}
+
+function _addUserListedSight(dest, sight) {
+  if (!dest || !sight) return;
+  _initSightSources(dest);
+  var key = (sight.n || "").toLowerCase();
+  if (!key) return;
+  var existingIdx = dest._sightSources.user.findIndex(function(s) {
+    return s && s.n && s.n.toLowerCase() === key;
+  });
+  var clone = Object.assign({}, sight, { _fromUserList: true });
+  if (existingIdx >= 0) {
+    dest._sightSources.user[existingIdx] = clone;
+  } else {
+    dest._sightSources.user.push(clone);
+  }
+  _recomputeSuggestions(dest);
+}
+
+function _addEssentialsSights(dest, sights) {
+  if (!dest) return;
+  _initSightSources(dest);
+  var existingNames = {};
+  dest._sightSources.essentials.forEach(function(s) {
+    if (s && s.n) existingNames[s.n.toLowerCase()] = true;
+  });
+  (sights || []).forEach(function(s) {
+    if (!s || !s.n) return;
+    if (existingNames[s.n.toLowerCase()]) return;
+    dest._sightSources.essentials.push(s);
+    existingNames[s.n.toLowerCase()] = true;
+  });
+  _recomputeSuggestions(dest);
+}
+
+function _addUserAddedSight(dest, sight) {
+  if (!dest || !sight) return;
+  _initSightSources(dest);
+  dest._sightSources.userAdded.push(sight);
+  _recomputeSuggestions(dest);
+}
+
+function _removeSightById(dest, sightId) {
+  if (!dest || !sightId) return;
+  _initSightSources(dest);
+  ["user", "llm", "essentials", "userAdded"].forEach(function(srcName) {
+    dest._sightSources[srcName] = (dest._sightSources[srcName] || []).filter(function(s) {
+      return s && s.id !== sightId;
+    });
+  });
+  _recomputeSuggestions(dest);
+}
+
+// Expose globally so engine-picker.js can call these.
+if (typeof globalThis !== "undefined") {
+  globalThis._initSightSources    = _initSightSources;
+  globalThis._setLLMSights        = _setLLMSights;
+  globalThis._addUserListedSight  = _addUserListedSight;
+  globalThis._addEssentialsSights = _addEssentialsSights;
+  globalThis._addUserAddedSight   = _addUserAddedSight;
+  globalThis._removeSightById     = _removeSightById;
+  globalThis._recomputeSuggestions = _recomputeSuggestions;
+}
+
 // PD.240 (architectural — single suggestion writer):
 //
 // Before this, three independent paths assigned to dest.suggestions:
@@ -38119,35 +38285,11 @@ async function fetchCityMeta(dest){
 // the user-listed entries back in (upgrade dupes, append new). PD.223
 // remains as the writer for user-explicit additions; this function
 // guarantees the LLM/cache writes never erase what PD.223 wrote.
+// PD.241 backward-compat shim: legacy _replaceDestSuggestions now just
+// delegates to _setLLMSights. Any code that called the old function gets
+// the safe sources-model behavior.
 function _replaceDestSuggestions(dest, newList) {
-  if (!dest) return;
-  if (!Array.isArray(dest.suggestions)) dest.suggestions = [];
-  // Snapshot user-listed items (PD.223's contributions) so we can
-  // restore them after the replace.
-  var preserve = dest.suggestions.filter(function (s) {
-    return s && s._fromUserList;
-  });
-  dest.suggestions = (Array.isArray(newList) ? newList : []).slice();
-  if (!preserve.length) return;
-  // Re-merge each preserved item: if the new list contains a same-name
-  // entry, mark it as user-listed; otherwise append the preserved item.
-  preserve.forEach(function (userSight) {
-    if (!userSight || !userSight.n) return;
-    var key = userSight.n.toLowerCase();
-    var matchIdx = dest.suggestions.findIndex(function (s) {
-      return s && s.n && s.n.toLowerCase() === key;
-    });
-    if (matchIdx >= 0) {
-      dest.suggestions[matchIdx]._fromUserList = true;
-      if (userSight._parentRelation) {
-        dest.suggestions[matchIdx]._parentRelation = userSight._parentRelation;
-      }
-    } else {
-      dest.suggestions.push(userSight);
-    }
-  });
-  console.log("[Max PD.240] replace-with-preserve on " + (dest.place || "?") +
-    ": " + preserve.length + " user-listed sight(s) preserved across replacement");
+  _setLLMSights(dest, newList);
 }
 if (typeof globalThis !== "undefined") globalThis._replaceDestSuggestions = _replaceDestSuggestions;
 
@@ -38324,43 +38466,43 @@ function _autoSeedIconicSightsToDays(dest){
     }
   });
 
-  // Remove placed sights from the dest-level suggestion list so the Explore
-  // tab stops showing them as "add to day" — they're already on days.
-  if (Object.keys(placedIds).length) {
-    dest.suggestions = dest.suggestions.filter(function(s){ return !placedIds[s.id]; });
+  // PD.241: don't filter dest.suggestions imperatively anymore.
+  // _recomputeSuggestions automatically excludes any item whose name
+  // matches a day item — same outcome, but the source data isn't
+  // mutated, which means user-listed sights survive across all the
+  // async writes that used to wipe them.
+  if (Object.keys(placedIds).length && typeof _recomputeSuggestions === "function") {
+    _recomputeSuggestions(dest);
   }
   console.log(_logTag, "placed:", Object.keys(placedIds).length, "items across", dest.days.length, "days");
 }
 
-// Shared helper — takes an essentials block and appends pins to dest.suggestions.
-// Skips entries whose names already exist (idempotent across re-fetches).
-function mergeEssentialsIntoSuggestions(dest,essentials){
-  if(!dest.suggestions) dest.suggestions=[];
-  var center=getCityCenter(dest.place);
-  var existingNames={};
-  dest.suggestions.forEach(function(s){existingNames[(s.n||'').toLowerCase()]=true;});
-  function push(type,list){
-    (list||[]).forEach(function(item){
-      if(!item||!item.name) return;
-      if(existingNames[item.name.toLowerCase()]) return;
+// PD.241: routes through _addEssentialsSights (sources model) so the
+// essentials live in their own source bucket and survive across LLM
+// replacements. The dedup-by-name behavior is preserved inside
+// _addEssentialsSights.
+function mergeEssentialsIntoSuggestions(dest, essentials){
+  if (!dest || !essentials) return;
+  var center = getCityCenter(dest.place);
+  var collected = [];
+  function collect(type, list){
+    (list || []).forEach(function(item){
+      if (!item || !item.name) return;
       sidCtr++;
-      // v355.10: tightened scatter — see generateCityData for the why
-      // (coastal cities had ATM/grocery/etc. pins drifting into the
-      // ocean). Tight halo until Nominatim resolves real coords.
-      var lat=center?center[0]+(Math.random()-.5)*.003:null;
-      var lng=center?center[1]+(Math.random()-.5)*.004:null;
-      dest.suggestions.push({
-        id:"s"+sidCtr,type:type,n:item.name,st:item.name,
-        note:item.note||null,lat:lat,lng:lng,approx:true
+      var lat = center ? center[0] + (Math.random() - .5) * .003 : null;
+      var lng = center ? center[1] + (Math.random() - .5) * .004 : null;
+      collected.push({
+        id: "s" + sidCtr, type: type, n: item.name, st: item.name,
+        note: item.note || null, lat: lat, lng: lng, approx: true
       });
-      existingNames[item.name.toLowerCase()]=true;
     });
   }
-  push("atm",essentials.atms);
-  push("bank",essentials.banks);
-  push("grocery",essentials.groceries);
-  push("tourist-info",essentials.touristInfo);
-  push("pharmacy",essentials.pharmacies);
+  collect("atm",          essentials.atms);
+  collect("bank",         essentials.banks);
+  collect("grocery",      essentials.groceries);
+  collect("tourist-info", essentials.touristInfo);
+  collect("pharmacy",     essentials.pharmacies);
+  if (collected.length) _addEssentialsSights(dest, collected);
 }
 
 // Round CL: Nominatim circuit breaker. The free Nominatim service rate-
@@ -53514,6 +53656,9 @@ function showAddToDay(item,type,dest,triggerBtn,opts){
         d.items.push(ni);
         if(type==="restaurant"){
           dest.restaurantSuggestions=dest.restaurantSuggestions.filter(function(x){return x.id!==item.id;});
+        } else if (typeof _removeSightById === "function") {
+          // PD.241: route through sources model.
+          _removeSightById(dest, item.id);
         } else {
           dest.suggestions=dest.suggestions.filter(function(x){return x.id!==item.id;});
         }
@@ -54181,14 +54326,17 @@ function drawDestMode(destId){
       var cached=_generatedCityData[dest.place.toLowerCase()];
       if(cached.sights&&dest.suggestions.length===0){
         var gc=getCityCenter(dest.place)||cached.cityCenter;
-        dest.suggestions=cached.sights.map(function(s){
+        // PD.241: route through the sources model so the user source
+        // survives this replay. The drawDestMode cache-replay used to
+        // assign directly to dest.suggestions, wiping any user-listed
+        // sights that hadn't been auto-seeded into days yet.
+        var _cachedNewListInner = cached.sights.map(function(s){
           sidCtr++;
-          // v355.10: tightened scatter — see generateCityData for the why
-          // (coastal-city pins were drifting into the ocean).
           return {id:"s"+sidCtr,type:"sight",n:s.name,st:s.st||s.name,note:s.desc||null,
             lat:s.lat||(gc?gc[0]+(Math.random()-.5)*.003:null),
             lng:s.lng||(gc?gc[1]+(Math.random()-.5)*.004:null),approx:!s.lat,iconic:!!s.iconic,durationHours:(typeof s.durationHours==="number"&&s.durationHours>0)?s.durationHours:null,url:s.url||null};
         });
+        _setLLMSights(dest, _cachedNewListInner);
       }
     }
   }

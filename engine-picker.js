@@ -3793,25 +3793,11 @@
           || sightKey;
         var lat = (cand && typeof cand.lat === "number") ? cand.lat : null;
         var lng = (cand && typeof cand.lng === "number") ? cand.lng : null;
-        if (!Array.isArray(parentDest.suggestions)) parentDest.suggestions = [];
-        // Idempotency: if a suggestion with the same normalized name
-        // already exists (typically planted by generateCityData's
-        // cached path which runs sync before this), UPGRADE it with
-        // the user-list flag instead of skipping. Without this,
-        // user-listed sights that happen to coincide with the LLM's
-        // generic city suggestions are indistinguishable from
-        // LLM-discovered ones — they read as "Max suggested this"
-        // instead of "you put this on your list."
-        var existing = parentDest.suggestions.find(function (s) {
-          return s && s.n && _pd223NrmFn(s.n) === sightKey;
-        });
-        if (existing) {
-          existing._fromUserList = true;
-          existing._parentRelation = meta.parentRelation || "within";
-          _pd223Attached.push(existing.n + " → " + parentDest.place + " (upgraded existing)");
-          return;
-        }
-        // Use the global sidCtr if available (index.html owns it).
+        // PD.241: route through the sources model. _addUserListedSight
+        // puts this in dest._sightSources.user and recomputes
+        // dest.suggestions. That user source is now untouchable by
+        // LLM writes / auto-seed dedup / etc. — the whole class of bugs
+        // where downstream code wiped user-listed sights is gone.
         var _sid;
         if (typeof global.sidCtr === "number") {
           global.sidCtr++;
@@ -3819,7 +3805,7 @@
         } else {
           _sid = "s-pd223-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
         }
-        parentDest.suggestions.push({
+        var newUserSight = {
           id: _sid,
           type: "sight",
           n: displayName,
@@ -3830,7 +3816,23 @@
           approx: (lat == null || lng == null),
           _fromUserList: true,
           _parentRelation: meta.parentRelation || "within"
-        });
+        };
+        if (typeof global._addUserListedSight === "function") {
+          global._addUserListedSight(parentDest, newUserSight);
+        } else {
+          // Fallback for engine-only contexts (Node tests) where index.html
+          // hasn't loaded the sources module.
+          if (!Array.isArray(parentDest.suggestions)) parentDest.suggestions = [];
+          var existing = parentDest.suggestions.find(function (s) {
+            return s && s.n && _pd223NrmFn(s.n) === sightKey;
+          });
+          if (existing) {
+            existing._fromUserList = true;
+            existing._parentRelation = meta.parentRelation || "within";
+          } else {
+            parentDest.suggestions.push(newUserSight);
+          }
+        }
         _pd223Attached.push(displayName + " → " + parentDest.place + " (" + (meta.parentRelation || "within") + ")");
       });
       // PD.238: always log so we can see what state PD.223 ran with —
