@@ -18502,14 +18502,14 @@ function _renderPlaceActivityItems(){
         tocList.appendChild(link);
       });
     } else {
+      // PD.254 / PD.255: TOC count mirrors the section renderer's logic.
+      // After PD.255 the renderer no longer drops user-listed sights,
+      // so the TOC counts every non-rejected unique place. Sections
+      // that end up with zero places are still hidden so empty "(0)"
+      // entries don't pollute the TOC.
+      _tb._pd254EmptySections = {};
       sectionOrder.forEach(function(sec){
         var secItems = bySection[sec] || [];
-        // v359.55.13: TOC count matches the section header's count.
-        // For route sections, the header reports "N routes" (one per
-        // activity item). For everything else, it reports "N destinations"
-        // (unique requiredPlaces). Use the same logic so the TOC and
-        // header agree — earlier the TOC counted activities and looked
-        // wrong against sections where one activity unlocked many places.
         var nameSaysRouteTOC = /\btrain|\brail|between destinations|scenic route|named.{0,15}train/i.test(sec);
         var anyTypeRouteTOC = secItems.some(function(it){ return it && it.type === "route"; });
         var count;
@@ -18519,10 +18519,16 @@ function _renderPlaceActivityItems(){
           var seenPlaces = {};
           secItems.forEach(function(it){
             (it.requiredPlaces || []).forEach(function(p){
-              if (p && p.place) seenPlaces[p.place.toLowerCase()] = true;
+              if (!p || !p.place) return;
+              if (p._rejected === true) return;
+              seenPlaces[p.place.toLowerCase()] = true;
             });
           });
           count = Object.keys(seenPlaces).length;
+        }
+        if (count === 0) {
+          _tb._pd254EmptySections[sec] = true;
+          return;
         }
         var link = document.createElement("a");
         link.href = "#" + _pmSectionSlug(sec);
@@ -18765,6 +18771,10 @@ function _renderPlaceActivityItems(){
     // header before the first section of each canonical category;
     // sections now flow uncategorized, with the TOC giving the user
     // an at-a-glance index.
+    // PD.254: skip sections the TOC pass flagged as empty (every place
+    // was filtered out by PD.222). No point rendering "Stand at coastal
+    // cliffs / 0 destinations" — that's just a broken-looking header.
+    if (_tb && _tb._pd254EmptySections && _tb._pd254EmptySections[sec]) return;
     var secItems = bySection[sec];
 
     // Determine if this is a route section. Route items get a different
@@ -18854,21 +18864,17 @@ function _renderPlaceActivityItems(){
     // AND under "Ride mountain railways" — different reasons each time).
     var byDest = {}; // place.toLowerCase() -> { place, nightsMax, items: [...], placeRefs: [...] }
     var destOrder = [];
-    // PD.222 (piece 1 of the Harpa-double-card fix): suppress cards in
-    // LLM activity sections for places that already appear in "Sights
-    // you listed" (PD.221). Without this, Harpa appears twice — once
-    // as a sight card in "Sights you listed," and again as a card
-    // under whatever LLM activity referenced it ("Experience the
-    // capital" etc.). The rule, per the place-classification spec,
-    // is that a sight belongs in one place. The synthetic section
-    // is canonical; LLM activity sections drop the duplicate.
-    //
-    // Skip the filter when we ARE rendering "Sights you listed" so the
-    // section's own contents survive. Synthetic stay sections aren't
-    // affected because their entries are stays, not sees.
-    var _pd222SkipFilter = (sec === "Sights you listed");
-    var _pd222ListedNames = (_tb && _tb._userListedNames) || {};
-    var _pd222Nrm = (typeof _normPlaceName === "function")
+    // PD.255: PD.222's user-listed-sights-only-appear-in-one-section
+    // filter was the wrong architecture. User-listed and LLM-surfaced
+    // places are equal citizens of the curation surface — a place that
+    // fits a category should appear under that category regardless of
+    // where it came from. The publish-side classification (sightsClassified)
+    // still prevents sights from becoming top-level destinations; this
+    // surface is about helping the user curate, not about ownership.
+    // Each row gets a "you listed" or "Max picked" badge so the source
+    // is visible without hiding the place from sections where it fits.
+    var _pd255ListedNames = (_tb && _tb._userListedNames) || {};
+    var _pd255Nrm = (typeof _normPlaceName === "function")
       ? _normPlaceName
       : function(s){ return String(s || "").toLowerCase().trim(); };
     secItems.forEach(function(item){
@@ -18879,11 +18885,20 @@ function _renderPlaceActivityItems(){
         // only in the bottom-of-list Rejected section so the user can
         // un-reject.
         if (p._rejected === true) return;
-        // PD.222: suppress user-listed sights from non-sights sections.
-        if (!_pd222SkipFilter && _pd222ListedNames[_pd222Nrm(p.place)] === "see") return;
         var key = p.place.toLowerCase();
         if (!byDest[key]) {
-          byDest[key] = { place: p.place, nightsMax: 0, items: [], placeRefs: [] };
+          byDest[key] = {
+            place: p.place,
+            nightsMax: 0,
+            items: [],
+            placeRefs: [],
+            // PD.255: source badge precomputed once per place so the
+            // row renderer doesn't have to re-derive it. "see" in
+            // _userListedNames means the user listed this as a sight.
+            // "stay" means user listed it as a stay. Absence means
+            // Max surfaced it.
+            _userListed: _pd255ListedNames[_pd255Nrm(p.place)] || null
+          };
           destOrder.push(key);
         }
         // Take the max nights across all activities at this place — assumption
