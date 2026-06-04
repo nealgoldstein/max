@@ -9725,15 +9725,24 @@ function enterApp(){
     // updateMainMap). Cleared once consumed.
     try {
       var _pending = null;
+      var _pendingSrc = "none";
       if (typeof _tb !== "undefined" && _tb && typeof _tb._pendingRoadsOn === "boolean") {
         _pending = _tb._pendingRoadsOn;
+        _pendingSrc = "_tb";
       } else {
         try {
           var _lp = localStorage.getItem('max-road-routing-pending');
-          if (_lp === '1' || _lp === '0') _pending = (_lp === '1');
+          if (_lp === '1' || _lp === '0') {
+            _pending = (_lp === '1');
+            _pendingSrc = "localStorage";
+          }
         } catch(_){}
       }
+      console.log("[Max PD.243] deferred-apply check. pending=" + _pending +
+        " (src=" + _pendingSrc + ") _useRoadRouting=" + _useRoadRouting +
+        " segments_cached=" + (trip && trip._osrmSegments ? Object.keys(trip._osrmSegments).length : 0));
       if (_pending !== null && _pending !== _useRoadRouting) {
+        console.log("[Max PD.243] flipping _useRoadRouting " + _useRoadRouting + " → " + _pending);
         _useRoadRouting = _pending;
         try { localStorage.setItem('max-road-routing', _useRoadRouting ? '1' : '0'); } catch(_){}
         if (typeof initMapRoadsBtn === "function") {
@@ -9745,7 +9754,10 @@ function enterApp(){
             _rb.style.color = _useRoadRouting ? '#fff' : '#1a5fa8';
           }
         }
+        console.log("[Max PD.243] calling updateMainMap() to redraw with roads on");
         if (typeof updateMainMap === "function") updateMainMap();
+      } else {
+        console.log("[Max PD.243] no flip needed; pending matches current state");
       }
       if (_tb) delete _tb._pendingRoadsOn;
       try { localStorage.removeItem('max-road-routing-pending'); } catch(_){}
@@ -42358,6 +42370,22 @@ function _ensureTripRoutesCached(segments){
     });
   });
   return Promise.all(promises).then(function(){
+    // PD.243 diagnostic: count successes vs failures so we can see if OSRM
+    // public-demo rate-limiting is the real cause of "straight lines
+    // instead of curves." Each segment is cached as either an Array of
+    // routed coords (success) or the string "failed" (catch-all error
+    // from inside the per-segment .then chain above).
+    try {
+      var _segKeys = Object.keys(trip._osrmSegments || {});
+      var _ok = 0, _failed = 0;
+      _segKeys.forEach(function(k){
+        var v = trip._osrmSegments[k];
+        if (Array.isArray(v)) _ok++;
+        else if (v === "failed") _failed++;
+      });
+      console.log("[Max OSRM] batch settled. cached_total=" + _segKeys.length +
+        " success=" + _ok + " failed=" + _failed);
+    } catch(_){}
     if (typeof localSave === "function") { try { localSave(); } catch(_){} }
   });
 }
