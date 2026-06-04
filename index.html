@@ -8430,9 +8430,13 @@ async function _reconcileListedSightsToSections() {
   }
   var fetcher = (window.MaxPickerUI && window.MaxPickerUI._fetchWikiSummary)
     || window._fetchWikiSummary
+    || (window.MaxPickerUi && window.MaxPickerUi._fetchWikiSummary)
     || null;
   if (!fetcher) {
-    console.warn("[PD.257] _fetchWikiSummary unavailable; skipping reconciliation");
+    console.warn("[PD.257] _fetchWikiSummary unavailable; skipping reconciliation. Diagnostics:",
+      "MaxPickerUI=" + (typeof window.MaxPickerUI),
+      "MaxPickerUI keys=" + (window.MaxPickerUI ? Object.keys(window.MaxPickerUI).join(",") : "n/a"),
+      "_fetchWikiSummary=" + (typeof window._fetchWikiSummary));
     return;
   }
   var sectionVecs = await Promise.all(sections.map(_buildSectionVec));
