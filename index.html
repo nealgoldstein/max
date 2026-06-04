@@ -2513,6 +2513,11 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
          Free + rate-limited, fine for personal use; user opts in. -->
     <!-- PD.185: was at right:200px, colliding with map-legend-btn at the same coord; pushed to right:392px (after day-trips). -->
     <button type="button" id="map-roads-btn" style="position:absolute;top:8px;right:392px;z-index:499;background:rgba(255,255,255,.95);border:1px solid #cfe1f7;border-radius:6px;padding:5px 10px;box-shadow:0 1px 4px rgba(0,0,0,.15);font-size:11px;font-weight:600;color:#1a5fa8;cursor:pointer;font-family:inherit;display:none;" title="When on, route lines follow real roads (uses OSRM public API). Off draws straight lines.">🛤 Roads off</button>
+    <!-- PD.243: OSRM-inflight indicator. Sits just under the Roads button.
+         _setRoadsLoading(true/false) toggles it. Without this the user sees
+         straight lines for several seconds after turning Roads on and
+         reasonably assumes nothing is happening. -->
+    <span id="map-roads-loading" style="position:absolute;top:38px;right:392px;z-index:499;background:rgba(255,255,255,.95);border:1px solid #cfe1f7;border-radius:6px;padding:3px 9px;box-shadow:0 1px 4px rgba(0,0,0,.15);font-size:10.5px;font-weight:600;color:#1a5fa8;font-family:inherit;display:none;align-items:center;gap:6px;">⏳ Fetching road routes…</span>
     <button type="button" id="map-larger-btn" style="position:absolute;top:8px;right:96px;z-index:499;background:rgba(255,255,255,.95);border:1px solid #cfe1f7;border-radius:6px;padding:5px 10px;box-shadow:0 1px 4px rgba(0,0,0,.15);font-size:11px;font-weight:600;color:#1a5fa8;cursor:pointer;font-family:inherit;display:none;" title="Open the trip route in a separate window">🗺 View larger →</button>
     <!-- Round FN.D.1: day-trips toggle. Same vocabulary as the Route
          toggle (sticky pref via localStorage, label flips ON/OFF on
@@ -9725,39 +9730,25 @@ function enterApp(){
     // updateMainMap). Cleared once consumed.
     try {
       var _pending = null;
-      var _pendingSrc = "none";
       if (typeof _tb !== "undefined" && _tb && typeof _tb._pendingRoadsOn === "boolean") {
         _pending = _tb._pendingRoadsOn;
-        _pendingSrc = "_tb";
       } else {
         try {
           var _lp = localStorage.getItem('max-road-routing-pending');
-          if (_lp === '1' || _lp === '0') {
-            _pending = (_lp === '1');
-            _pendingSrc = "localStorage";
-          }
+          if (_lp === '1' || _lp === '0') _pending = (_lp === '1');
         } catch(_){}
       }
-      console.log("[Max PD.243] deferred-apply check. pending=" + _pending +
-        " (src=" + _pendingSrc + ") _useRoadRouting=" + _useRoadRouting +
-        " segments_cached=" + (trip && trip._osrmSegments ? Object.keys(trip._osrmSegments).length : 0));
       if (_pending !== null && _pending !== _useRoadRouting) {
-        console.log("[Max PD.243] flipping _useRoadRouting " + _useRoadRouting + " → " + _pending);
         _useRoadRouting = _pending;
         try { localStorage.setItem('max-road-routing', _useRoadRouting ? '1' : '0'); } catch(_){}
-        if (typeof initMapRoadsBtn === "function") {
-          // Repaint the trip-view's own Roads button to match.
-          var _rb = document.getElementById('map-roads-btn');
-          if (_rb) {
-            _rb.textContent = _useRoadRouting ? '🛤 Roads on' : '🛤 Roads off';
-            _rb.style.background = _useRoadRouting ? '#1a5fa8' : 'rgba(255,255,255,.95)';
-            _rb.style.color = _useRoadRouting ? '#fff' : '#1a5fa8';
-          }
+        // Repaint the trip-view's own Roads button to match.
+        var _rb = document.getElementById('map-roads-btn');
+        if (_rb) {
+          _rb.textContent = _useRoadRouting ? '🛤 Roads on' : '🛤 Roads off';
+          _rb.style.background = _useRoadRouting ? '#1a5fa8' : 'rgba(255,255,255,.95)';
+          _rb.style.color = _useRoadRouting ? '#fff' : '#1a5fa8';
         }
-        console.log("[Max PD.243] calling updateMainMap() to redraw with roads on");
         if (typeof updateMainMap === "function") updateMainMap();
-      } else {
-        console.log("[Max PD.243] no flip needed; pending matches current state");
       }
       if (_tb) delete _tb._pendingRoadsOn;
       try { localStorage.removeItem('max-road-routing-pending'); } catch(_){}
@@ -42332,6 +42323,20 @@ function _osrmSegmentKey(coords){
   // tiny coord wobble doesn't bust the cache.
   return coords.map(function(c){ return c[0].toFixed(4) + "," + c[1].toFixed(4); }).join("|");
 }
+// PD.243: shared toggle for the "Fetching road routes…" indicator under
+// the Roads button. Counter-based so overlapping batches (e.g. main route
+// + day-trip loop) keep the indicator up until ALL settle.
+var _roadsLoadingCount = 0;
+function _setRoadsLoading(on) {
+  try {
+    if (on) _roadsLoadingCount++;
+    else _roadsLoadingCount = Math.max(0, _roadsLoadingCount - 1);
+    var el = document.getElementById('map-roads-loading');
+    if (!el) return;
+    el.style.display = (_roadsLoadingCount > 0) ? 'inline-flex' : 'none';
+  } catch(_){}
+}
+
 function _ensureTripRoutesCached(segments){
   if (!segments || !segments.length) return Promise.resolve();
   if (typeof trip === "undefined" || !trip) return Promise.resolve();
@@ -42369,23 +42374,11 @@ function _ensureTripRoutesCached(segments){
       trip._osrmSegments[s.key] = "failed";
     });
   });
+  // PD.243: show the loading indicator now that we know there's at least
+  // one real fetch in flight. Hidden in the resolve below.
+  _setRoadsLoading(true);
   return Promise.all(promises).then(function(){
-    // PD.243 diagnostic: count successes vs failures so we can see if OSRM
-    // public-demo rate-limiting is the real cause of "straight lines
-    // instead of curves." Each segment is cached as either an Array of
-    // routed coords (success) or the string "failed" (catch-all error
-    // from inside the per-segment .then chain above).
-    try {
-      var _segKeys = Object.keys(trip._osrmSegments || {});
-      var _ok = 0, _failed = 0;
-      _segKeys.forEach(function(k){
-        var v = trip._osrmSegments[k];
-        if (Array.isArray(v)) _ok++;
-        else if (v === "failed") _failed++;
-      });
-      console.log("[Max OSRM] batch settled. cached_total=" + _segKeys.length +
-        " success=" + _ok + " failed=" + _failed);
-    } catch(_){}
+    _setRoadsLoading(false);
     if (typeof localSave === "function") { try { localSave(); } catch(_){} }
   });
 }
