@@ -17225,6 +17225,52 @@ function _reconcileUserListedKeeps(){
       return listed[k] === "see";
     });
     if (!listedSightKeys.length) return;
+
+    // PD.256: this section is now a catch-all for user-listed sights
+    // that DON'T appear in any LLM activity section. After PD.255,
+    // every user-listed sight that fits an LLM activity (Arnarstapi →
+    // "Stand at coastal cliffs," etc.) is already visible under that
+    // section with a "👁 Your list" badge. The catch-all only earns
+    // its space when there are sights nothing else surfaced — that's
+    // what Neal called the orphan case. The section's purpose became
+    // "what doesn't fit anywhere else?" — renamed accordingly.
+    //
+    // Orphan detection: scan placeActivities for non-synthetic items
+    // (i.e., LLM activity sections, not other catch-alls) that contain
+    // this sight in requiredPlaces. If found anywhere, the sight has
+    // a real home and we drop it from here.
+    var _pd256SyntheticTypes = {
+      "synthetic-stays": 1,
+      "synthetic-sights": 1,
+      "synthetic-umbrella": 1
+    };
+    var _pd256PlacesInLLMSections = {};
+    (_tb.placeActivities || []).forEach(function(it){
+      if (!it || !Array.isArray(it.requiredPlaces)) return;
+      // The catch-all itself doesn't disqualify its own entries.
+      if (it.type && _pd256SyntheticTypes[it.type]) return;
+      it.requiredPlaces.forEach(function(p){
+        if (!p || !p.place) return;
+        var k = nrm(p.place);
+        if (k) _pd256PlacesInLLMSections[k] = true;
+      });
+    });
+    var orphanKeys = listedSightKeys.filter(function(k){
+      return !_pd256PlacesInLLMSections[k];
+    });
+    // No orphans → no catch-all needed. Remove any prior copy under
+    // either name so a re-render after Enhance (which can re-home a
+    // previously-orphan sight into a new LLM section) drops the
+    // section cleanly.
+    if (!orphanKeys.length) {
+      _tb.placeActivities = (_tb.placeActivities || []).filter(function(it){
+        return !it || (it.section !== "Other things you listed" && it.section !== "Sights you listed");
+      });
+      return;
+    }
+    // Replace listedSightKeys with the orphan set so the rest of this
+    // function builds requiredPlaces from only the catch-all population.
+    listedSightKeys = orphanKeys;
     // Display-name lookup mirrors PD.91 — prefer the candidate's own
     // spelling, fall back to placeActivity requiredPlace metadata,
     // fall back to title-cased key.
@@ -17290,10 +17336,16 @@ function _reconcileUserListedKeeps(){
         _parentRelation: meta && meta.parentRelation || null
       };
     });
+    // PD.256: find the existing section under EITHER the old name
+    // ("Sights you listed") or the new one. During the transition the
+    // section may already exist with the old name from a prior render.
     var existingSights = _tb.placeActivities.find(function(it){
-      return it && it.section === "Sights you listed";
+      return it && (it.section === "Other things you listed" || it.section === "Sights you listed");
     });
     if (existingSights) {
+      existingSights.section = "Other things you listed";
+      existingSights.name = "Other things you listed";
+      existingSights.description = "Sights from your list that don't fit any of the activity categories Max generated. Most user-listed sights show up under their matching category (with a \"Your list\" badge); these are the ones nothing else surfaced — Max may need more context, or you may want to hit ✦ Enhance to find a better fit.";
       existingSights.requiredPlaces = sightRequiredPlaces;
       existingSights.checked = true;
       return;
@@ -17308,10 +17360,10 @@ function _reconcileUserListedKeeps(){
     });
     _tb.placeActivities.splice(_insertAtSights, 0, {
       id: "synth-listed-sights",
-      section: "Sights you listed",
-      name: "Sights from your list",
+      section: "Other things you listed",
+      name: "Other things you listed",
       type: "synthetic-sights",
-      description: "Points of interest you flagged on your list. Each will land on the See-and-Do for the destination it sits in (or near). Uncheck any you want to drop.",
+      description: "Sights from your list that don't fit any of the activity categories Max generated. Most user-listed sights show up under their matching category (with a \"Your list\" badge); these are the ones nothing else surfaced — Max may need more context, or you may want to hit ✦ Enhance to find a better fit.",
       checked: true,
       requiredPlaces: sightRequiredPlaces
     });
@@ -18971,7 +19023,7 @@ function _renderPlaceActivityItems(){
     if (_synthHdrItem && typeof _synthHdrItem.type === "string") {
       if (_synthHdrItem.type === "synthetic-sights") _pd231Noun = "sight";
       else if (_synthHdrItem.type === "synthetic-stays") _pd231Noun = "stay";
-    } else if (sec === "Sights you listed") _pd231Noun = "sight";
+    } else if (sec === "Other things you listed" || sec === "Sights you listed") _pd231Noun = "sight";
     else if (sec === "Recommended overnight stays" || sec === "Other stays to consider") _pd231Noun = "stay";
     else if (/^routes\s*[&]\s*regions/i.test(sec)) _pd231Noun = "place";
     hdrWrap.innerHTML = '<div class="tb-act-section-title" style="flex:1;">' + _pmEsc(sec) + '</div>'
