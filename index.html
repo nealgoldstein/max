@@ -7763,13 +7763,28 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
   try {
     var _nrm = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
     _tb._classificationByPlace = {};
-    var _pd233WriteCount = 0;
-    var _pd233TaggedCount = 0;
+    // PD.234 (architectural): two new containers that ARE the source of
+    // truth for "is this a destination or a sight?" Every downstream
+    // pipeline step (kept-filter, reconciliation, attach, augment)
+    // reads from these instead of inferring from candidate roles or
+    // placeActivities flags. See sights-rearchitecture-plan.md.
+    //
+    //   _destinationsClassified — Object<key, true>
+    //     A place that becomes a top-level trip destination. City,
+    //     region, or a POI explicitly promoted to standalone (Geysir
+    //     alone). Anything not classified defaults here.
+    //
+    //   _sightsClassified — Object<key, { parentKey, parentRelation,
+    //     displayName, country }>
+    //     A POI that hangs off a parent destination (within) OR a
+    //     short stop on the route between destinations (from). Never
+    //     becomes a top-level destination on its own.
+    _tb._destinationsClassified = {};
+    _tb._sightsClassified = {};
     parseResult.destinations.forEach(function(p){
       if (!p || !p.place) return;
       var k = _nrm(p.place);
       if (!k) return;
-      if (p._classification) _pd233TaggedCount++;
       _tb._classificationByPlace[k] = {
         classification:  p._classification || null,
         parentEntry:     p._parentEntry || null,
@@ -7777,25 +7792,42 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
         autoCreated:     !!p._autoCreated,
         promoted:        !!p._promotedToDestination
       };
-      _pd233WriteCount++;
+      // PD.234 bucketing.
+      var cls = p._classification;
+      if (cls === "poi") {
+        if (p._promotedToDestination) {
+          _tb._destinationsClassified[k] = true;
+        } else {
+          _tb._sightsClassified[k] = {
+            parentKey:      p._parentEntry || null,
+            parentRelation: p._parentRelation || "within",
+            displayName:    p.place,
+            country:        p.country || ""
+          };
+        }
+      } else if (cls === "city" || cls === "region") {
+        _tb._destinationsClassified[k] = true;
+      } else if (cls === "activity" || cls === "role-tag") {
+        // Not a Place. Don't bucket.
+      } else {
+        // Unset / heuristic-defaulted. Preserve legacy behavior:
+        // unknowns go to destinations so the picker doesn't drop them.
+        _tb._destinationsClassified[k] = true;
+      }
     });
-    // PD.233: diagnostic log so we can SEE this fired and how much it
-    // wrote. Earlier diagnostic showed _tb._classificationByPlace
-    // empty after publish — could be PD.208 not running, parseResult
-    // empty here, or entries missing _classification. This line
-    // disambiguates.
-    console.log("[Max PD.208/233] wrote " + _pd233WriteCount +
-      " entries to _tb._classificationByPlace (" + _pd233TaggedCount +
-      " had classifier _classification). parseResult.destinations.length=" +
-      (parseResult.destinations || []).length);
+    console.log("[Max PD.234] classified buckets: " +
+      Object.keys(_tb._destinationsClassified).length + " destinations, " +
+      Object.keys(_tb._sightsClassified).length + " sights " +
+      "(from parseResult.destinations.length=" + parseResult.destinations.length + ")");
     // Mirror onto trip.brief so reopens of the trip still know which
-    // sights came from "within" vs "from" their parent. PD.209 (the
-    // discovery-map render rule) reads from here.
+    // sights came from "within" vs "from" their parent.
     if (typeof trip !== "undefined" && trip && trip.brief) {
-      trip.brief._classificationByPlace = Object.assign({}, _tb._classificationByPlace);
+      trip.brief._classificationByPlace  = Object.assign({}, _tb._classificationByPlace);
+      trip.brief._destinationsClassified = Object.assign({}, _tb._destinationsClassified);
+      trip.brief._sightsClassified       = Object.assign({}, _tb._sightsClassified);
     }
   } catch (e) {
-    console.warn("[Max PD.208/233] classification map write FAILED:", e && e.message);
+    console.warn("[Max PD.234] classification map write FAILED:", e && e.message);
   }
 
   // Push to trips index + persist so reload returns the user here.
@@ -16789,16 +16821,28 @@ function _reconcileUserListedKeeps(){
       && Object.keys(trip.brief._userListedNames).length) {
     listed = _tb._userListedNames = Object.assign({}, trip.brief._userListedNames);
   }
-  // PD.233: parallel rehydration for _classificationByPlace. Without
-  // this, any picker-open path that didn't go through the original
-  // _buildPickerFromPastedList write (reopen, Edit destinations,
-  // navigate-back) starts with an empty _tb._classificationByPlace,
-  // and PD.223 / PD.229 / PD.227 all silently no-op.
+  // PD.233/234: rehydration. Every reopen/navigate-back path lands
+  // here, so this is where the cache is restored from the persisted
+  // brief. Without this, _tb's classifier-derived state is empty and
+  // the entire sights pipeline (publishTrip kept-filter, reconcile
+  // pass, PD.223, PD.225) silently no-ops.
   if ((!_tb._classificationByPlace || !Object.keys(_tb._classificationByPlace).length)
       && typeof trip !== "undefined" && trip && trip.brief
       && trip.brief._classificationByPlace
       && Object.keys(trip.brief._classificationByPlace).length) {
     _tb._classificationByPlace = Object.assign({}, trip.brief._classificationByPlace);
+  }
+  if ((!_tb._destinationsClassified || !Object.keys(_tb._destinationsClassified).length)
+      && typeof trip !== "undefined" && trip && trip.brief
+      && trip.brief._destinationsClassified
+      && Object.keys(trip.brief._destinationsClassified).length) {
+    _tb._destinationsClassified = Object.assign({}, trip.brief._destinationsClassified);
+  }
+  if ((!_tb._sightsClassified || !Object.keys(_tb._sightsClassified).length)
+      && typeof trip !== "undefined" && trip && trip.brief
+      && trip.brief._sightsClassified
+      && Object.keys(trip.brief._sightsClassified).length) {
+    _tb._sightsClassified = Object.assign({}, trip.brief._sightsClassified);
   }
   // Same for the display-name map (PD.149) — also lost on reopen.
   if ((!_tb._userListedDisplay || !Object.keys(_tb._userListedDisplay).length)

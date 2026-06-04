@@ -1797,6 +1797,12 @@
       // Adding it here makes every newBrief carry the data forward,
       // which matches how PD.107 handles _userListedNames.
       _classificationByPlace: Object.assign({}, s._classificationByPlace || {}),
+      // PD.234: the two new bucketing containers — destinationsClassified
+      // and sightsClassified — are the source of truth for "is this a
+      // destination or a sight?" Carry them through publish/rebuild
+      // the same way classification metadata does.
+      _destinationsClassified: Object.assign({}, s._destinationsClassified || {}),
+      _sightsClassified: Object.assign({}, s._sightsClassified || {}),
       // Same persistence problem applied to the display-name map.
       _userListedDisplay: Object.assign({}, s._userListedDisplay || {}),
       _userListedNames: Object.assign({}, s._userListedNames || {}),
@@ -1937,80 +1943,60 @@
     // they're stops on transit routes. Exclude them from the
     // destinations build; the wayside-commit pass below picks them up
     // separately and attaches each to its appropriate route.
-    // PD.229: also exclude classifier-tagged "within" sights from
-    // becoming destinations. The classifier (PD.206) marks user-listed
-    // POIs whose parent is one of the trip's stays as parentRelation
-    // ="within" — they belong on the parent destination's suggestions[]
-    // (attached by PD.223 below), not as their own destination cards.
-    //
-    // PD.232: fall back to _userListedNames when the classifier map is
-    // empty (some paths don't persist it). User-listed "see" entries
-    // are excluded from destinations on user-intent grounds alone —
-    // the user said "sight," not "destination."
-    var _pd229TbMap = (_tb && _tb._classificationByPlace) || {};
-    var _pd229BriefMap = (trip && trip.brief && trip.brief._classificationByPlace) || {};
-    var _pd229ClsMap = Object.keys(_pd229TbMap).length ? _pd229TbMap : _pd229BriefMap;
-    var _pd232UserListed = (_tb && _tb._userListedNames)
-      || (trip && trip.brief && trip.brief._userListedNames)
-      || {};
-    var _pd229HasCls = Object.keys(_pd229ClsMap).length > 0;
-    var _pd229NrmFn = (typeof _normPlaceName === "function")
+    // PD.234 (architectural): a candidate becomes a destination ONLY
+    // if it isn't in the classifier's sightsClassified map. That's the
+    // single source of truth — replaces PD.229's tangled role+classifier
+    // lookup and PD.232's user-intent fallback. Falls through to
+    // trip.brief on rehydrated trips (mirrors PD.107).
+    var _pd234NrmFn = (typeof _normPlaceName === "function")
       ? _normPlaceName
       : function (s) { return String(s || "").toLowerCase().trim(); };
-    var _pd229Skipped = [];
-    // PD.232 (dedup): consolidate duplicate candidates (same normalized
-    // name) before the filter runs. Picker sometimes accumulates
-    // duplicates from multiple paths (LLM backstop + activity
-    // requiredPlace + role-write). The destinations build then
-    // creates one destination per duplicate. Keep the FIRST occurrence
-    // of each normalized name; downstream code uses .id so a stable
-    // first-wins dedup is safe.
-    var _pd232Seen = Object.create(null);
-    var _pd232Deduped = [];
-    var _pd232DropCount = 0;
+    var _pd234TbSights = (_tb && _tb._sightsClassified) || {};
+    var _pd234BriefSights = (trip && trip.brief && trip.brief._sightsClassified) || {};
+    var _pd234SightSet = Object.keys(_pd234TbSights).length ? _pd234TbSights : _pd234BriefSights;
+
+    // Dedup duplicate candidates by normalized name BEFORE the filter
+    // so reconciled / backstopped duplicates don't each spawn a
+    // destination. Keep first occurrence.
+    var _pd234Seen = Object.create(null);
+    var _pd234Deduped = [];
+    var _pd234DropCount = 0;
     (_tb.candidates || []).forEach(function (c) {
-      if (!c || !c.place) { _pd232Deduped.push(c); return; }
-      var k = _pd229NrmFn(c.place);
-      if (!k) { _pd232Deduped.push(c); return; }
-      if (_pd232Seen[k]) {
-        _pd232DropCount++;
-        return;
-      }
-      _pd232Seen[k] = true;
-      _pd232Deduped.push(c);
+      if (!c || !c.place) { _pd234Deduped.push(c); return; }
+      var k = _pd234NrmFn(c.place);
+      if (!k) { _pd234Deduped.push(c); return; }
+      if (_pd234Seen[k]) { _pd234DropCount++; return; }
+      _pd234Seen[k] = true;
+      _pd234Deduped.push(c);
     });
-    if (_pd232DropCount) {
-      console.log("[Max PD.232] dedup'd " + _pd232DropCount + " duplicate candidate(s)");
-      _tb.candidates = _pd232Deduped;
+    if (_pd234DropCount) {
+      console.log("[Max PD.234] dedup'd " + _pd234DropCount + " duplicate candidate(s)");
+      _tb.candidates = _pd234Deduped;
     }
+
+    var _pd234Skipped = [];
     var kept=(_tb.candidates||[]).filter(function(c){
-      // v360.3 (#124 Turn 3): also exclude day-trip-intent candidates.
       if (c.status !== "keep") return false;
+      // v360.3 (#124 Turn 3): exclude day-trip / wayside-intent
+      // candidates — those commit separately as planItem stops on
+      // their respective routes (see passes further down). Without
+      // this they'd double-commit.
       if (c.intent === "wayside" || c.intent === "dayTrip") return false;
-      // PD.229: exclude classifier-tagged within-sights.
-      if (c.role === "see" && c.place) {
-        var k = _pd229NrmFn(c.place);
-        var meta = _pd229ClsMap[k];
-        if (meta && meta.parentRelation === "within" && meta.parentEntry) {
-          _pd229Skipped.push(c.place + " → " + meta.parentEntry + " (cls)");
-          return false;
-        }
-        // PD.232: classifier-data fallback. When the classification map
-        // is empty (persistence path didn't fire for this trip), any
-        // role:"see" candidate that the user explicitly listed gets
-        // excluded too. They belong on a parent's See-and-Do, not as
-        // their own destinations. PD.223's attach loop also falls back
-        // to _userListedNames so they end up somewhere reasonable.
-        if (!_pd229HasCls && _pd232UserListed[k] === "see") {
-          _pd229Skipped.push(c.place + " → (user-intent fallback)");
+      // PD.234: exclude any candidate the classifier put in the sights
+      // bucket. They get attached to a parent's suggestions[] by PD.223
+      // (within) or augmented as 0-night stops by PD.225 (from / orphan).
+      if (c.place) {
+        var k = _pd234NrmFn(c.place);
+        if (_pd234SightSet[k]) {
+          _pd234Skipped.push(c.place);
           return false;
         }
       }
       return true;
     });
-    if (_pd229Skipped.length) {
-      console.log("[Max PD.229] excluded " + _pd229Skipped.length + " sight(s) from destinations build:");
-      _pd229Skipped.forEach(function (line) { console.log("  - " + line); });
+    if (_pd234Skipped.length) {
+      console.log("[Max PD.234] excluded " + _pd234Skipped.length + " sight candidate(s) from destinations build:");
+      _pd234Skipped.forEach(function (line) { console.log("  - " + line); });
     }
 
     // v359.60.5: reconcile placeActivities → candidates. Completeness-pass
@@ -2021,6 +2007,12 @@
     // candidate, append a synthetic candidate so it makes it into the
     // trip. Backstop, not a primary path — the warning logs so we
     // know when it fires.
+    //
+    // PD.234: skip synthesis when the place is in sightsClassified.
+    // This is the bug PD.229 alone couldn't fix — even after the
+    // kept-filter excluded Harpa, this pass synthesized it back from
+    // "Sights you listed" placeActivity. The classifier already said
+    // sight; this pass would have overruled it.
     try {
       var keptKeys = {};
       kept.forEach(function(c){
@@ -2037,6 +2029,9 @@
           if (p._keep === false) return;
           var k = _normPlaceName(p.place);
           if (!k || keptKeys[k]) return;
+          // PD.234: don't synthesize a destination candidate for a
+          // sight. The classifier decided.
+          if (_pd234SightSet[k]) return;
           // No kept candidate exists for this place — synthesize one
           // and mark kept. Shape matches the stub at runCandidateSearch
           // line ~6912 so downstream code treats it as a normal
@@ -3731,97 +3726,40 @@
     } else {
       _tripsIndex.push({id:tripId,name:trip.name,destCount:kept.length,dateRange:"",savedAt:new Date().toISOString()});
     }
-    // PD.223 (piece 2 of the Harpa-double-card fix): attach user-listed
-    // sights to their parent destination's suggestions[]. The
-    // classifier (PD.206) tags each sight with parentEntry (normalized
-    // parent name) and stashes the lookup table on
-    // _tb._classificationByPlace (PD.208). For each "poi" entry whose
-    // parent matches a destination on the trip, inject a suggestion
-    // onto that destination's suggestions[] so it shows up in the
-    // destination card's See-and-Do tab.
+    // PD.234 (was PD.223 + PD.232 fallback): attach within-sights to
+    // parent destination's suggestions[]. Reads directly from
+    // _tb._sightsClassified — the single source of truth.
     //
-    // Without this pass: the picker correctly identified Harpa as a
-    // sight under Reykjavík (eye icon on the YOUR LIST pill, presence
-    // in "Sights you listed"), but Reykjavík's See-and-Do was empty
-    // for it — sights stayed in _tb.candidates and never landed in
-    // trip.destinations[].suggestions[], which is what the destination
-    // card's See-and-Do tab reads.
-    //
-    // Idempotent — skips inserts when a suggestion with the same
-    // normalized name already exists on that destination.
+    // Within-sights with a parent in trip.destinations → attach as
+    // suggestion. Sights whose parent is NOT a destination on this
+    // trip → skip (PD.225 handles them as 0-night standalone stops).
     try {
-      // PD.227 (parallel fix): pick whichever map has entries. _tb's
-      // copy is often empty after rehydration; trip.brief's persists.
-      var _pd223TbMap = (_tb && _tb._classificationByPlace) || {};
-      var _pd223BriefMap = (trip.brief && trip.brief._classificationByPlace) || {};
-      var _pd223ClsByPlace = Object.keys(_pd223TbMap).length ? _pd223TbMap : _pd223BriefMap;
       var _pd223NrmFn = (typeof _normPlaceName === "function")
         ? _normPlaceName
         : function (s) { return String(s || "").toLowerCase().trim(); };
+      var _pd234TbSights2 = (_tb && _tb._sightsClassified) || {};
+      var _pd234BriefSights2 = (trip && trip.brief && trip.brief._sightsClassified) || {};
+      var _pd234Sights = Object.keys(_pd234TbSights2).length ? _pd234TbSights2 : _pd234BriefSights2;
       var _pd223DestByNorm = Object.create(null);
       (trip.destinations || []).forEach(function (d) {
         if (d && d.place) _pd223DestByNorm[_pd223NrmFn(d.place)] = d;
       });
       var _pd223Attached = [];
-      // PD.232: when classifier map is empty, fall back to attaching
-      // every user-listed "see" entry to the first/longest-stay
-      // destination. Not perfect (won't know parent), but ensures
-      // user-listed sights don't silently disappear.
-      var _pd223HasCls = Object.keys(_pd223ClsByPlace).length > 0;
-      if (!_pd223HasCls) {
-        var _pd232UserListedAttach = (_tb && _tb._userListedNames)
-          || (trip && trip.brief && trip.brief._userListedNames)
-          || {};
-        var _pd232FallbackParent = (trip.destinations || []).reduce(function (acc, d) {
-          if (!d || d.nights == null) return acc;
-          if (!acc) return d;
-          return (d.nights > acc.nights) ? d : acc;
-        }, null);
-        if (_pd232FallbackParent) {
-          Object.keys(_pd232UserListedAttach).forEach(function (sightKey) {
-            if (_pd232UserListedAttach[sightKey] !== "see") return;
-            var existsAsDest = (trip.destinations || []).some(function (d) {
-              return d && d.place && _pd223NrmFn(d.place) === sightKey;
-            });
-            if (existsAsDest) return;
-            if (!Array.isArray(_pd232FallbackParent.suggestions)) _pd232FallbackParent.suggestions = [];
-            var dupe = _pd232FallbackParent.suggestions.some(function (s) {
-              return s && s.n && _pd223NrmFn(s.n) === sightKey;
-            });
-            if (dupe) return;
-            var disp = (trip.brief && trip.brief._userListedDisplay && trip.brief._userListedDisplay[sightKey])
-              || (_tb && _tb._userListedDisplay && _tb._userListedDisplay[sightKey])
-              || sightKey;
-            var _fbSid;
-            if (typeof global.sidCtr === "number") { global.sidCtr++; _fbSid = "s" + global.sidCtr; }
-            else { _fbSid = "s-pd232-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6); }
-            _pd232FallbackParent.suggestions.push({
-              id: _fbSid, type: "sight",
-              n: disp, st: disp, note: null,
-              lat: null, lng: null, approx: true,
-              _fromUserList: true,
-              _parentRelation: "within",
-              _pd232Fallback: true
-            });
-            _pd223Attached.push(disp + " → " + _pd232FallbackParent.place + " (fallback)");
-          });
-        }
-      }
-      Object.keys(_pd223ClsByPlace).forEach(function (sightKey) {
-        var meta = _pd223ClsByPlace[sightKey];
-        if (!meta || meta.classification !== "poi") return;
-        if (!meta.parentEntry) return;
-        // PD.225: only attach "within" sights to a destination's
-        // suggestions[]. "From" sights and orphans get their own
-        // 0-night destinations in the augment pass below.
+      Object.keys(_pd234Sights).forEach(function (sightKey) {
+        var meta = _pd234Sights[sightKey];
+        if (!meta) return;
+        // Only "within" sights attach to a parent's See-and-Do.
+        // "from" sights become their own 0-night stops via PD.225.
         if (meta.parentRelation !== "within") return;
-        var parentDest = _pd223DestByNorm[meta.parentEntry];
+        if (!meta.parentKey) return;
+        var parentDest = _pd223DestByNorm[meta.parentKey];
         if (!parentDest) return;
         // Find a resolved candidate for richer coords/display name.
         var cand = (_tb.candidates || []).find(function (c) {
           return c && c.place && _pd223NrmFn(c.place) === sightKey;
         });
         var displayName = (cand && cand.place)
+          || meta.displayName
           || (trip.brief && trip.brief._userListedDisplay && trip.brief._userListedDisplay[sightKey])
           || sightKey;
         var lat = (cand && typeof cand.lat === "number") ? cand.lat : null;
@@ -3863,12 +3801,13 @@
       console.warn("[Max PD.223] sight-attachment failed (non-fatal):", e && e.message);
     }
 
-    // PD.225 (piece 4 of the Harpa-double-card fix): user-listed sights
-    // that aren't "within" a destination — either parentRelation="from"
-    // (waterfall, glacier, day-trip distance away) or no parent at all
-    // (orphan) — become their own 0-night destinations on the trip.
-    // They are NOT attached to a parent's suggestions[]; they're stops
-    // on the route in their own right.
+    // PD.234 (was PD.225): user-listed sights that aren't "within" a
+    // destination — either parentRelation="from" (waterfall, glacier,
+    // day-trip distance away) or whose parent isn't a destination on
+    // this trip — become their own 0-night destinations on the route.
+    //
+    // Reads directly from _tb._sightsClassified (the same single source
+    // of truth PD.223 and the kept-filter use).
     //
     // Insertion strategy:
     //   "from" sight  → inserted right after its classified parent
@@ -3879,13 +3818,14 @@
     // Dates are recomputed trip-wide after the augment to absorb the
     // new 0-night entries cleanly.
     try {
-      // PD.227 (parallel fix): pick whichever map has entries.
-      var _pd225TbMap = (_tb && _tb._classificationByPlace) || {};
-      var _pd225BriefMap = (trip.brief && trip.brief._classificationByPlace) || {};
-      var _pd225ClsByPlace = Object.keys(_pd225TbMap).length ? _pd225TbMap : _pd225BriefMap;
       var _pd225NrmFn = (typeof _normPlaceName === "function")
         ? _normPlaceName
         : function (s) { return String(s || "").toLowerCase().trim(); };
+      // PD.234: iterate _sightsClassified directly. Falls back to brief
+      // for rehydrated trips.
+      var _pd225TbSights = (_tb && _tb._sightsClassified) || {};
+      var _pd225BriefSights = (trip && trip.brief && trip.brief._sightsClassified) || {};
+      var _pd225Sights = Object.keys(_pd225TbSights).length ? _pd225TbSights : _pd225BriefSights;
 
       function _pd225NextDestId() {
         if (typeof global.destCtr === "number") {
@@ -3896,35 +3836,34 @@
       }
 
       var _pd225Added = [];
-      Object.keys(_pd225ClsByPlace).forEach(function (sightKey) {
-        var meta = _pd225ClsByPlace[sightKey];
-        if (!meta || meta.classification !== "poi") return;
-        // Within-sights were handled by PD.223 — skip.
-        if (meta.parentRelation === "within" && meta.parentEntry) {
-          var parentForWithin = _pd225NrmFn ? null : null;
-          // Only skip if the within-attach actually succeeded (parent in trip).
+      Object.keys(_pd225Sights).forEach(function (sightKey) {
+        var meta = _pd225Sights[sightKey];
+        if (!meta) return;
+        // Within-sights with a parent on the trip → PD.223 handled them.
+        if (meta.parentRelation === "within" && meta.parentKey) {
           var parentDestForWithin = (trip.destinations || []).find(function (d) {
-            return d && d.place && _pd225NrmFn(d.place) === meta.parentEntry;
+            return d && d.place && _pd225NrmFn(d.place) === meta.parentKey;
           });
           if (parentDestForWithin) return;
         }
-        // Skip if this sight is ALREADY a destination on the trip (some
-        // other path turned it into one).
+        // Skip if this sight is already a destination on the trip.
         var existingDest = (trip.destinations || []).find(function (d) {
           return d && d.place && _pd225NrmFn(d.place) === sightKey;
         });
         if (existingDest) return;
 
-        // Resolve display name + coords from candidates / userListedDisplay / key.
+        // Resolve display name + coords from candidates / sightsClassified meta / key.
         var cand = (_tb.candidates || []).find(function (c) {
           return c && c.place && _pd225NrmFn(c.place) === sightKey;
         });
         var displayName = (cand && cand.place)
+          || meta.displayName
           || (trip.brief && trip.brief._userListedDisplay && trip.brief._userListedDisplay[sightKey])
           || sightKey;
         var lat = (cand && typeof cand.lat === "number") ? cand.lat : null;
         var lng = (cand && typeof cand.lng === "number") ? cand.lng : null;
-        var country = (cand && cand.country) || (trip.brief && trip.brief.region) || null;
+        var country = (cand && cand.country) || meta.country
+          || (trip.brief && trip.brief.region) || null;
 
         // Mint a place record + a 0-night destination shell.
         var placeId = _ensurePlace(trip, {
