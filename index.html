@@ -2513,11 +2513,21 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
          Free + rate-limited, fine for personal use; user opts in. -->
     <!-- PD.185: was at right:200px, colliding with map-legend-btn at the same coord; pushed to right:392px (after day-trips). -->
     <button type="button" id="map-roads-btn" style="position:absolute;top:8px;right:392px;z-index:499;background:rgba(255,255,255,.95);border:1px solid #cfe1f7;border-radius:6px;padding:5px 10px;box-shadow:0 1px 4px rgba(0,0,0,.15);font-size:11px;font-weight:600;color:#1a5fa8;cursor:pointer;font-family:inherit;display:none;" title="When on, route lines follow real roads (uses OSRM public API). Off draws straight lines.">🛤 Roads off</button>
-    <!-- PD.243: OSRM-inflight indicator. Sits just under the Roads button.
-         _setRoadsLoading(true/false) toggles it. Without this the user sees
-         straight lines for several seconds after turning Roads on and
-         reasonably assumes nothing is happening. -->
-    <span id="map-roads-loading" style="position:absolute;top:38px;right:392px;z-index:499;background:rgba(255,255,255,.95);border:1px solid #cfe1f7;border-radius:6px;padding:3px 9px;box-shadow:0 1px 4px rgba(0,0,0,.15);font-size:10.5px;font-weight:600;color:#1a5fa8;font-family:inherit;display:none;align-items:center;gap:6px;">⏳ Fetching road routes…</span>
+    <!-- PD.243: OSRM-inflight indicator. Centered modal so the user can
+         see at a glance that the map is fetching road routes (40+ parallel
+         calls to the OSRM public demo take several seconds). Toggled by
+         _setRoadsLoading(true/false). pointer-events:none on the backdrop
+         so the map underneath stays interactive. -->
+    <div id="map-roads-loading" style="position:fixed;inset:0;z-index:10500;display:none;align-items:center;justify-content:center;pointer-events:none;font-family:inherit;">
+      <div style="background:#fff;border:1px solid #cfe1f7;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.22);padding:22px 28px;display:flex;align-items:center;gap:14px;pointer-events:auto;max-width:360px;">
+        <div style="width:22px;height:22px;border:3px solid #cfe1f7;border-top-color:#1a5fa8;border-radius:50%;animation:max-roads-spin 0.9s linear infinite;flex-shrink:0;"></div>
+        <div>
+          <div style="font-size:14px;font-weight:700;color:#1a5fa8;margin-bottom:3px;">Fetching road routes…</div>
+          <div style="font-size:11.5px;color:#666;line-height:1.45;">Drawing the actual driving paths between destinations. This can take a few seconds for a large trip.</div>
+        </div>
+      </div>
+    </div>
+    <style>@keyframes max-roads-spin{to{transform:rotate(360deg);}}</style>
     <button type="button" id="map-larger-btn" style="position:absolute;top:8px;right:96px;z-index:499;background:rgba(255,255,255,.95);border:1px solid #cfe1f7;border-radius:6px;padding:5px 10px;box-shadow:0 1px 4px rgba(0,0,0,.15);font-size:11px;font-weight:600;color:#1a5fa8;cursor:pointer;font-family:inherit;display:none;" title="Open the trip route in a separate window">🗺 View larger →</button>
     <!-- Round FN.D.1: day-trips toggle. Same vocabulary as the Route
          toggle (sticky pref via localStorage, label flips ON/OFF on
@@ -42333,7 +42343,7 @@ function _setRoadsLoading(on) {
     else _roadsLoadingCount = Math.max(0, _roadsLoadingCount - 1);
     var el = document.getElementById('map-roads-loading');
     if (!el) return;
-    el.style.display = (_roadsLoadingCount > 0) ? 'inline-flex' : 'none';
+    el.style.display = (_roadsLoadingCount > 0) ? 'flex' : 'none';
   } catch(_){}
 }
 
