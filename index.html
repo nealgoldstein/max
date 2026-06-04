@@ -8347,6 +8347,8 @@ async function _reconcileListedSightsToSections() {
     return false;
   }
   var orphanKeys = listedKeys.filter(function(k){ return !_isCovered(k); });
+  console.log("[PD.257] start: " + listedKeys.length + " user-listed sights, "
+    + orphanKeys.length + " orphan(s) before heuristic: " + JSON.stringify(orphanKeys));
   if (!orphanKeys.length) return;
 
   // Resolve a display name + country for each orphan key so the wiki
@@ -8487,35 +8489,28 @@ async function _reconcileListedSightsToSections() {
         placed.push({ place: o.name, section: best.item.section, score: bestScore });
       });
   }));
-  if (placed.length) {
-    console.log("[PD.257] heuristic reconciled " + placed.length + " user-listed sight(s):",
-      placed.map(function(p){ return p.place + " → \"" + p.section + "\" (score " + p.score + ")"; }).join("; "));
-  }
+  console.log("[PD.257] heuristic placed " + placed.length + " sight(s)" + (placed.length
+    ? ": " + placed.map(function(p){ return p.place + " → \"" + p.section + "\" (score " + p.score + ")"; }).join("; ")
+    : ""));
 
   // PD.259: LLM-backed second pass for orphans the heuristic can't
-  // categorize. Keyword overlap can't help when the section name and
-  // its placed-place wikis share no vocabulary with the sight — e.g.,
-  // "Jökulsárgljúfur Canyon" needs the model to understand that canyons
-  // are natural wonders, not match a literal token. One batched LLM
-  // call per build covers every remaining orphan at once.
-  var stillOrphanKeys = orphanKeys.filter(function(k){
-    // After the heuristic loop, check coverage AGAIN using the same
-    // bidirectional token-subset rule the orphan detector uses.
-    // Anything just placed by the heuristic is now covered.
-    coveredTokenSets = [];
-    _tb.placeActivities.forEach(function(it){
-      if (!it || (it.type && SYNTHETIC[it.type])) return;
-      (it.requiredPlaces || []).forEach(function(p){
-        if (!p || !p.place) return;
-        var toks = _pd258TokensOf(p.place);
-        if (!toks.length) return;
-        var set = {};
-        toks.forEach(function(t){ set[t] = true; });
-        coveredTokenSets.push(set);
-      });
+  // categorize. Rebuild coveredTokenSets once (post-heuristic) and
+  // recompute which orphans remain.
+  coveredTokenSets = [];
+  _tb.placeActivities.forEach(function(it){
+    if (!it || (it.type && SYNTHETIC[it.type])) return;
+    (it.requiredPlaces || []).forEach(function(p){
+      if (!p || !p.place) return;
+      var toks = _pd258TokensOf(p.place);
+      if (!toks.length) return;
+      var set = {};
+      toks.forEach(function(t){ set[t] = true; });
+      coveredTokenSets.push(set);
     });
-    return !_isCovered(k);
   });
+  var stillOrphanKeys = orphanKeys.filter(function(k){ return !_isCovered(k); });
+  console.log("[PD.259] start: " + stillOrphanKeys.length + " still-orphan after heuristic: "
+    + JSON.stringify(stillOrphanKeys));
   if (!stillOrphanKeys.length) return;
   if (typeof callMax !== "function") {
     console.warn("[PD.259] callMax unavailable; LLM reconciliation skipped");
@@ -8567,7 +8562,10 @@ async function _reconcileListedSightsToSections() {
     + "Output JSON only — an object keyed by sight name. Example:\n"
     + '{"Jökulsárgljúfur Canyon": "Visit natural wonders", "Some Other Sight": null}';
   var llmPlaced = [];
+  var llmNullDecisions = [];
   try {
+    console.log("[PD.259] calling LLM with " + stillOrphans.length + " orphan(s) and "
+      + sectionsForPrompt.length + " section(s)");
     var resp = await callMax([{ role: "user", content: prompt }], 600, 25000);
     var text = "";
     if (resp && resp.content && resp.content.length) {
@@ -8575,6 +8573,8 @@ async function _reconcileListedSightsToSections() {
     } else if (typeof resp === "string") {
       text = resp;
     }
+    console.log("[PD.259] LLM response (" + text.length + " chars): "
+      + (text.length > 400 ? text.slice(0, 400) + "…" : text));
     var jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       console.warn("[PD.259] LLM returned no JSON; skipping");
@@ -8585,7 +8585,10 @@ async function _reconcileListedSightsToSections() {
     sections.forEach(function(it){ sectionsByName[it.section] = it; });
     stillOrphans.forEach(function(o){
       var assigned = mapping[o.name];
-      if (!assigned) return;
+      if (!assigned) {
+        llmNullDecisions.push(o.name);
+        return;
+      }
       var target = sectionsByName[assigned];
       if (!target) {
         console.warn("[PD.259] LLM picked unknown section '" + assigned + "' for " + o.name);
@@ -8616,10 +8619,9 @@ async function _reconcileListedSightsToSections() {
     console.warn("[PD.259] LLM reconciliation failed:", e && e.message);
     return;
   }
-  if (llmPlaced.length) {
-    console.log("[PD.259] LLM reconciled " + llmPlaced.length + " sight(s):",
-      llmPlaced.map(function(p){ return p.place + " → \"" + p.section + "\""; }).join("; "));
-  }
+  console.log("[PD.259] done: placed " + llmPlaced.length + ", LLM said no-fit for " + llmNullDecisions.length
+    + (llmPlaced.length ? " | placed: " + llmPlaced.map(function(p){ return p.place + " → \"" + p.section + "\""; }).join("; ") : "")
+    + (llmNullDecisions.length ? " | no-fit: " + llmNullDecisions.join(", ") : ""));
 }
 if (typeof globalThis !== "undefined") globalThis._reconcileListedSightsToSections = _reconcileListedSightsToSections;
 
