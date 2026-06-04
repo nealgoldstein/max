@@ -18114,29 +18114,12 @@ function _renderPlaceActivityItems(){
       };
       hdrActions.appendChild(undoBtn);
     })();
-    // PD.141: Roads toggle in Discovery chrome — so the user can set
-    // the road-routing pref BEFORE hitting Choreograph (avoids the
-    // first trip-view render firing OSRM calls). Same persisted
-    // preference as the trip view's button; flipping either updates
-    // _useRoadRouting + localStorage. Default OFF.
-    var roadsBtn = document.createElement("button");
-    roadsBtn.type = "button";
-    function _paintRoadsBtn(){
-      var on = (typeof _useRoadRouting !== "undefined") && _useRoadRouting;
-      roadsBtn.innerHTML = on ? '🛤 Roads on' : '🛤 Roads off';
-      roadsBtn.style.cssText = "font-size:11px;font-weight:600;color:" + (on ? "#fff" : "#1a5fa8")
-        + ";background:" + (on ? "#1a5fa8" : "#fff")
-        + ";border:1px solid #c8d8f0;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;";
-    }
-    roadsBtn.title = "Toggle real-road routing for trip-view polylines (uses OSRM public API). Off draws straight lines.";
-    roadsBtn.onclick = function(e){
-      e.stopPropagation();
-      _useRoadRouting = !_useRoadRouting;
-      try { localStorage.setItem('max-road-routing', _useRoadRouting ? '1' : '0'); } catch(_){}
-      _paintRoadsBtn();
-    };
-    _paintRoadsBtn();
-    hdrActions.appendChild(roadsBtn);
+    // PD.141 / PD.242: Roads toggle was previously a header button next to
+    // Discovery notes / Print / Share / etc. Neal moved it to a checkbox
+    // beside the bottom "Create my trip" / "Update my trip" CTA — that's
+    // where the user is about to act on the pref, and the header is for
+    // actions that operate on the picker itself. See footer in the
+    // renderActivityPicker output around line ~28801.
     // PD.152: "What's missing?" — one LLM call that audits the
     // existing set against typical trip themes for the region and
     // surfaces 1-3 category gaps as a banner. The user can then
@@ -27937,12 +27920,12 @@ function _updatePlaceActivitySummary(){
   // Without (b), the trip builds without proper arrival/departure stops
   // and the user lands on a trip page with missing logistics \u2014 clearer
   // to block here with explicit reason text.
-  // Round DV.1: button label depends on edit mode just like the initial
-  // render at line ~7150. The dynamic-state branches (disabled-empty,
-  // re-enabled) used to always say "Choreograph my trip \u2192" regardless,
-  // overwriting the initial "Update my trip \u2192" the moment the user
-  // toggled any activity.
-  var _liveLabel = (_tb && _tb._editMode) ? "Update my trip \u2192" : "Choreograph my trip \u2192";
+  // Round DV.1 / PD.242: button label depends on edit mode just like the
+  // initial render at line ~28680. Fresh build now reads "Create my trip"
+  // (was "Choreograph my trip"); re-edit stays "Update my trip". The
+  // dynamic-state branches (disabled-empty, re-enabled) keep the same
+  // wording so toggling activities doesn't overwrite the initial label.
+  var _liveLabel = (_tb && _tb._editMode) ? "Update my trip \u2192" : "Create my trip \u2192";
   if(!activeItems.length){
     el.innerHTML = '<span style="color:#999;">Pick at least one thing you want to do \u2014 and the place(s) you\u2019d do it. That\u2019s the trip.</span>';
     if(btn){ btn.disabled = true; btn.classList.add("tb-btn-disabled"); btn.textContent = _liveLabel; }
@@ -28677,7 +28660,9 @@ function renderActivityPicker(){
     ? "Discovery — edit your picks"
     : ("Discovery — what to see and do in " + _regionTitle);
   var primaryBtnHandler = isEdit ? "saveActivityPickerEdits()" : "continuePlaceModeToStep2()";
-  var primaryBtnLabel = isEdit ? "Update my trip →" : "Choreograph my trip →";
+  // PD.242: Neal renamed "Choreograph my trip" → "Create my trip" so
+  // first-time and re-edit labels read as one verb pair (Create / Update).
+  var primaryBtnLabel = isEdit ? "Update my trip →" : "Create my trip →";
   var backHandler = isEdit ? "cancelPickerEdit()" : "renderTripBrief()";
   var backLabel = isEdit ? "← Cancel" : "← Profile";
 
@@ -28798,8 +28783,24 @@ function renderActivityPicker(){
     // the list to take full width, and this FAB gives users one-tap
     // access to the same fullscreen map modal the desktop button uses.
     +'<button type="button" class="picker-mobile-map-btn" onclick="openPlacePickerMapModal();event.preventDefault();" title="Show map">🗺</button>'
+    // PD.242: footer matches the profile screen's two-control row pattern.
+    // Left: Roads-on checkbox (moved out of the header chrome — that
+    // surface is for actions on the picker itself; this is a pre-flight
+    // pref for the next view). Right: primary CTA, auto-width like the
+    // profile's "Paste a list →" / "Ask Max to suggest places →" pair.
     +'<div class="tb-footer" style="flex-shrink:0;">'
-    +  (hasGenerated?'<button class="tb-btn-primary" id="tb-place-continue-btn" onclick="'+primaryBtnHandler+'">'+primaryBtnLabel+'</button>':'')
+    +  (hasGenerated
+      ? ('<div style="display:flex;gap:14px;align-items:center;justify-content:flex-end;flex-wrap:wrap;">'
+        + '<label id="tb-roads-toggle-wrap" style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:#1a5fa8;font-weight:600;cursor:pointer;font-family:inherit;user-select:none;" title="Real-road routing for trip-view polylines (OSRM). Off draws straight lines.">'
+        +   '<input id="tb-roads-toggle" type="checkbox" '
+        +     ((typeof _useRoadRouting !== "undefined" && _useRoadRouting) ? 'checked' : '')
+        +     ' onchange="(function(c){ _useRoadRouting = !!c.checked; try { localStorage.setItem(\'max-road-routing\', _useRoadRouting ? \'1\' : \'0\'); } catch(_){} })(this);" '
+        +     'style="width:auto;margin:0;cursor:pointer;" />'
+        +   '🛤 Roads on'
+        + '</label>'
+        + '<button class="tb-btn-primary" id="tb-place-continue-btn" onclick="'+primaryBtnHandler+'" style="flex:0 0 auto;width:auto;padding:10px 22px;">'+primaryBtnLabel+'</button>'
+        + '</div>')
+      : '')
     +  '<div style="display:flex;justify-content:space-between;margin-top:8px;">'
     +    '<div class="tb-btn-back" onclick="'+backHandler+'">'+backLabel+'</div>'
     +    '<div style="font-size:10px;color:#aaa;cursor:pointer;" onclick="showBriefApiKeyForm()">🔑 Set API key</div>'
