@@ -8311,16 +8311,42 @@ async function _reconcileListedSightsToSections() {
     ? globalThis._normPlaceName
     : function(s){ return String(s||"").toLowerCase().trim(); };
 
-  // Build the "covered" set: places already in a non-synthetic section.
+  // PD.258: coverage uses bidirectional token-subset matching so
+  // user-name vs LLM-name variants ("Arnarstapi coastal cliffs" vs
+  // "Arnarstapi") count as the same place. Mirrors the orphan-detector
+  // helper in _ensureSyntheticSightsSection.
+  function _pd258TokensOf(name) {
+    var n = normFn(name);
+    return n ? n.split(/\s+/).filter(Boolean) : [];
+  }
   var SYNTHETIC = { "synthetic-stays":1, "synthetic-sights":1, "synthetic-umbrella":1 };
-  var covered = {};
+  var coveredTokenSets = [];
   _tb.placeActivities.forEach(function(it){
     if (!it || (it.type && SYNTHETIC[it.type])) return;
     (it.requiredPlaces || []).forEach(function(p){
-      if (p && p.place) covered[normFn(p.place)] = true;
+      if (!p || !p.place) return;
+      var toks = _pd258TokensOf(p.place);
+      if (!toks.length) return;
+      var set = {};
+      toks.forEach(function(t){ set[t] = true; });
+      coveredTokenSets.push(set);
     });
   });
-  var orphanKeys = listedKeys.filter(function(k){ return !covered[k]; });
+  function _isCovered(userKey) {
+    var userToks = _pd258TokensOf(userKey);
+    if (!userToks.length) return false;
+    for (var ci = 0; ci < coveredTokenSets.length; ci++) {
+      var set = coveredTokenSets[ci];
+      var setKeys = Object.keys(set);
+      var userInCovered = userToks.every(function(t){ return set[t]; });
+      var userTokSet = {};
+      userToks.forEach(function(t){ userTokSet[t] = true; });
+      var coveredInUser = setKeys.every(function(t){ return userTokSet[t]; });
+      if (userInCovered || coveredInUser) return true;
+    }
+    return false;
+  }
+  var orphanKeys = listedKeys.filter(function(k){ return !_isCovered(k); });
   if (!orphanKeys.length) return;
 
   // Resolve a display name + country for each orphan key so the wiki
@@ -8365,11 +8391,49 @@ async function _reconcileListedSightsToSections() {
   var sections = _tb.placeActivities.filter(function(it){
     return it && it.section && (!it.type || !SYNTHETIC[it.type]);
   });
-  // Pre-tokenize each section's name + description once.
-  var sectionVecs = sections.map(function(it){
+  // PD.258: a section's token vector is its name + description PLUS
+  // the names of every place already in its requiredPlaces. The LLM's
+  // section descriptions are sometimes generic ("Iceland's most
+  // striking landscape features") and don't share words with a
+  // specific sight's Wikipedia summary. The places-already-placed
+  // function as a learned vocabulary — if the LLM put "Dimmuborgir"
+  // and "Reynisfjara" under "Visit natural wonders," an orphan whose
+  // wiki summary mentions "Dimmuborgir-like lava formations" or
+  // "Reynisfjara" picks up a signal.
+  //
+  // We ALSO fetch the wiki summaries for the section's existing
+  // places (cached, so usually free) and add THEIR description tokens.
+  // That captures the semantic shape of what "Visit natural wonders"
+  // actually contains, not just the LLM's prose about it.
+  async function _buildSectionVec(it) {
     var blob = (it.section || "") + " " + (it.name || "") + " " + (it.description || "");
-    return { item: it, tokens: _toSet(_tokens(blob)) };
-  });
+    var placeBlob = "";
+    var placeNames = (it.requiredPlaces || [])
+      .map(function(p){ return p && p.place ? p.place : ""; })
+      .filter(Boolean);
+    placeBlob += " " + placeNames.join(" ");
+    // Pull cached wiki summaries for existing places (uncached fetches
+    // are fine too — same provider, cached after first hit).
+    if (placeNames.length && fetcher) {
+      var wikis = await Promise.all(placeNames.map(function(name){
+        return fetcher(name, "").catch(function(){ return null; });
+      }));
+      wikis.forEach(function(w){
+        if (!w) return;
+        if (w.description) placeBlob += " " + w.description;
+        if (w.extract) placeBlob += " " + w.extract;
+      });
+    }
+    return { item: it, tokens: _toSet(_tokens(blob + " " + placeBlob)) };
+  }
+  var fetcher = (window.MaxPickerUi && window.MaxPickerUi._fetchWikiSummary)
+    || window._fetchWikiSummary
+    || null;
+  if (!fetcher) {
+    console.warn("[PD.257] _fetchWikiSummary unavailable; skipping reconciliation");
+    return;
+  }
+  var sectionVecs = await Promise.all(sections.map(_buildSectionVec));
   if (!sectionVecs.length) return;
 
   function _score(sightTokens, secSet) {
@@ -8378,14 +8442,6 @@ async function _reconcileListedSightsToSections() {
       if (secSet[sightTokens[i]]) hits++;
     }
     return hits;
-  }
-
-  var fetcher = (window.MaxPickerUi && window.MaxPickerUi._fetchWikiSummary)
-    || window._fetchWikiSummary
-    || null;
-  if (!fetcher) {
-    console.warn("[PD.257] _fetchWikiSummary unavailable; skipping reconciliation");
-    return;
   }
 
   var THRESHOLD = 1; // at least one meaningful shared token
@@ -17398,37 +17454,63 @@ function _reconcileUserListedKeeps(){
     });
     if (!listedSightKeys.length) return;
 
-    // PD.256: this section is now a catch-all for user-listed sights
-    // that DON'T appear in any LLM activity section. After PD.255,
-    // every user-listed sight that fits an LLM activity (Arnarstapi →
-    // "Stand at coastal cliffs," etc.) is already visible under that
-    // section with a "👁 Your list" badge. The catch-all only earns
-    // its space when there are sights nothing else surfaced — that's
-    // what Neal called the orphan case. The section's purpose became
-    // "what doesn't fit anywhere else?" — renamed accordingly.
+    // PD.256/PD.258: this section is a catch-all for user-listed sights
+    // that DON'T appear in any LLM activity section. After PD.255 every
+    // matching user-listed sight shows up under its category with a
+    // "👁 Your list" badge; the catch-all only earns its space for true
+    // orphans.
     //
-    // Orphan detection: scan placeActivities for non-synthetic items
-    // (i.e., LLM activity sections, not other catch-alls) that contain
-    // this sight in requiredPlaces. If found anywhere, the sight has
-    // a real home and we drop it from here.
+    // PD.258: coverage detection uses bidirectional token-subset
+    // matching (same algorithm as _backstopPastedListPlaces._isCovered)
+    // so the user-name vs LLM-name token mismatch doesn't cause double-
+    // surfacing. Examples:
+    //   • User listed "Arnarstapi coastal cliffs" → LLM section has
+    //     "Arnarstapi" — user tokens {arnarstapi, coastal, cliffs}
+    //     are a superset of section tokens {arnarstapi}. COVERED.
+    //   • User listed "Snæfellsnes" → LLM has "Snæfellsnes Peninsula"
+    //     — user tokens are a subset of section tokens. COVERED.
+    //   • User listed "Monument to the Unknown Bureaucrat" → LLM has
+    //     nothing similar. NOT COVERED, becomes orphan.
     var _pd256SyntheticTypes = {
       "synthetic-stays": 1,
       "synthetic-sights": 1,
       "synthetic-umbrella": 1
     };
-    var _pd256PlacesInLLMSections = {};
+    function _pd258TokensOf(name) {
+      var n = nrm(name);
+      return n ? n.split(/\s+/).filter(Boolean) : [];
+    }
+    var _pd258CoveredTokenSets = [];
     (_tb.placeActivities || []).forEach(function(it){
       if (!it || !Array.isArray(it.requiredPlaces)) return;
-      // The catch-all itself doesn't disqualify its own entries.
       if (it.type && _pd256SyntheticTypes[it.type]) return;
       it.requiredPlaces.forEach(function(p){
         if (!p || !p.place) return;
-        var k = nrm(p.place);
-        if (k) _pd256PlacesInLLMSections[k] = true;
+        var toks = _pd258TokensOf(p.place);
+        if (!toks.length) return;
+        var set = {};
+        toks.forEach(function(t){ set[t] = true; });
+        _pd258CoveredTokenSets.push(set);
       });
     });
+    function _pd258IsCovered(userKey) {
+      var userToks = _pd258TokensOf(userKey);
+      if (!userToks.length) return false;
+      for (var ci = 0; ci < _pd258CoveredTokenSets.length; ci++) {
+        var set = _pd258CoveredTokenSets[ci];
+        var setKeys = Object.keys(set);
+        // user ⊆ covered: every user token appears in the covered name.
+        var userInCovered = userToks.every(function(t){ return set[t]; });
+        // covered ⊆ user: every covered token appears in the user name.
+        var userTokSet = {};
+        userToks.forEach(function(t){ userTokSet[t] = true; });
+        var coveredInUser = setKeys.every(function(t){ return userTokSet[t]; });
+        if (userInCovered || coveredInUser) return true;
+      }
+      return false;
+    }
     var orphanKeys = listedSightKeys.filter(function(k){
-      return !_pd256PlacesInLLMSections[k];
+      return !_pd258IsCovered(k);
     });
     // No orphans → no catch-all needed. Remove any prior copy so a
     // re-render after Enhance (which can re-home a previously-orphan
