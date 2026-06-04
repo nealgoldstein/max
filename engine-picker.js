@@ -3765,12 +3765,23 @@
         var lat = (cand && typeof cand.lat === "number") ? cand.lat : null;
         var lng = (cand && typeof cand.lng === "number") ? cand.lng : null;
         if (!Array.isArray(parentDest.suggestions)) parentDest.suggestions = [];
-        // Idempotency: don't double-insert if a suggestion with the same
-        // normalized name already exists.
-        var already = parentDest.suggestions.some(function (s) {
+        // Idempotency: if a suggestion with the same normalized name
+        // already exists (typically planted by generateCityData's
+        // cached path which runs sync before this), UPGRADE it with
+        // the user-list flag instead of skipping. Without this,
+        // user-listed sights that happen to coincide with the LLM's
+        // generic city suggestions are indistinguishable from
+        // LLM-discovered ones — they read as "Max suggested this"
+        // instead of "you put this on your list."
+        var existing = parentDest.suggestions.find(function (s) {
           return s && s.n && _pd223NrmFn(s.n) === sightKey;
         });
-        if (already) return;
+        if (existing) {
+          existing._fromUserList = true;
+          existing._parentRelation = meta.parentRelation || "within";
+          _pd223Attached.push(existing.n + " → " + parentDest.place + " (upgraded existing)");
+          return;
+        }
         // Use the global sidCtr if available (index.html owns it).
         var _sid;
         if (typeof global.sidCtr === "number") {
