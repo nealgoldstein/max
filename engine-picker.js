@@ -3830,6 +3830,109 @@
         console.log("[Max PD.223] attached " + _pd223Attached.length +
           " user-listed sight(s) to parent destinations.");
       }
+
+      // PD.269: route CONSIDERED (unchecked) and REJECTED sights to
+      // their parent destinations too. Considered → grey "+ Add" rows
+      // under that destination's day plan. Rejected → used purely as a
+      // token-subset filter against LLM/user/considered sources so the
+      // user's "no" survives every regeneration.
+      //
+      // Parent resolution order: (1) explicit parent from the classifier
+      // (PD.234 _sightsClassified, exists for paste-list items), (2)
+      // geographic snap to the nearest kept destination by haversine —
+      // catches Enhance-added items with coords but no classifier
+      // metadata, (3) fallback to the first destination if nothing else
+      // works (rare; logged for diagnosis).
+      try {
+        function _pd269Haversine(lat1, lng1, lat2, lng2) {
+          var R = 6371; // km
+          var toRad = function(d){ return d * Math.PI / 180; };
+          var dLat = toRad(lat2 - lat1);
+          var dLng = toRad(lng2 - lng1);
+          var a = Math.sin(dLat/2)*Math.sin(dLat/2)
+            + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))
+            * Math.sin(dLng/2)*Math.sin(dLng/2);
+          return 2 * R * Math.asin(Math.sqrt(a));
+        }
+        function _pd269NearestDest(lat, lng, dests) {
+          if (typeof lat !== "number" || typeof lng !== "number") return null;
+          var best = null, bestDist = Infinity;
+          (dests || []).forEach(function(d){
+            if (typeof d.lat !== "number" || typeof d.lng !== "number") return;
+            var dist = _pd269Haversine(lat, lng, d.lat, d.lng);
+            if (dist < bestDist) { bestDist = dist; best = d; }
+          });
+          return best;
+        }
+        function _pd269ResolveParent(p) {
+          // (1) classifier metadata
+          var k = _pd223NrmFn(p.place);
+          var meta = _pd234Sights[k];
+          if (meta && meta.parentKey) {
+            var byClassifier = _pd223DestByNorm[meta.parentKey];
+            if (byClassifier) return byClassifier;
+          }
+          // (2) geographic snap
+          var byGeo = _pd269NearestDest(p.lat, p.lng, trip.destinations || []);
+          if (byGeo) return byGeo;
+          // (3) fallback
+          return (trip.destinations || [])[0] || null;
+        }
+        var _pd269ConsideredCount = 0, _pd269RejectedCount = 0;
+        (_tb.placeActivities || []).forEach(function(it) {
+          if (!it || !Array.isArray(it.requiredPlaces)) return;
+          // Skip route-level items; their endpoints are destinations,
+          // not sights.
+          if (it.type === "route") return;
+          it.requiredPlaces.forEach(function(p) {
+            if (!p || !p.place) return;
+            var k = _pd223NrmFn(p.place);
+            // Skip places that became destinations or are essentials —
+            // they aren't sights to surface under another destination.
+            if (_pd223DestByNorm[k]) return;
+            var isRejected = p._rejected === true;
+            var isConsidered = p._keep === false && !isRejected;
+            if (!isConsidered && !isRejected) return;
+            var parentDest = _pd269ResolveParent(p);
+            if (!parentDest) return;
+            // Build the sight payload.
+            var _sid;
+            if (typeof global.sidCtr === "number") {
+              global.sidCtr++;
+              _sid = "s" + global.sidCtr;
+            } else {
+              _sid = "s-pd269-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
+            }
+            var sightObj = {
+              id: _sid,
+              type: "sight",
+              n: p.place,
+              st: p.place,
+              note: null,
+              lat: (typeof p.lat === "number") ? p.lat : null,
+              lng: (typeof p.lng === "number") ? p.lng : null,
+              approx: (typeof p.lat !== "number" || typeof p.lng !== "number")
+            };
+            if (isConsidered) {
+              if (typeof global._addConsideredSight === "function") {
+                global._addConsideredSight(parentDest, sightObj);
+                _pd269ConsideredCount++;
+              }
+            } else if (isRejected) {
+              if (typeof global._addRejectedSight === "function") {
+                global._addRejectedSight(parentDest, sightObj);
+                _pd269RejectedCount++;
+              }
+            }
+          });
+        });
+        if (_pd269ConsideredCount || _pd269RejectedCount) {
+          console.log("[Max PD.269] attached " + _pd269ConsideredCount
+            + " considered + " + _pd269RejectedCount + " rejected sight(s) to parent destinations.");
+        }
+      } catch (e) {
+        console.warn("[Max PD.269] considered/rejected attach failed (non-fatal):", e && e.message);
+      }
       // PD.237 (architectural ordering fix): publishTrip's existing
       // auto-seed call (line ~3252) runs BEFORE PD.223, so newly-attached
       // user-listed sights never get a chance to be picked up. Re-run
