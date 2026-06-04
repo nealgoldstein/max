@@ -1938,6 +1938,35 @@
   }
 
   async function publishTrip(){
+    // PD.236 (architectural): publishTrip is the one function that
+    // requires the classifier's destinations / sights buckets. Every
+    // picker-reopen path doesn't necessarily rehydrate _tb from
+    // trip.brief BEFORE publish (only _reconcileUserListedKeeps does,
+    // and that's a render-time pass). So enforce the contract here:
+    // if _tb's classifier buckets are empty but trip.brief has them,
+    // copy them over before any downstream pass runs.
+    try {
+      if ((!_tb._sightsClassified || !Object.keys(_tb._sightsClassified).length)
+          && trip && trip.brief && trip.brief._sightsClassified
+          && Object.keys(trip.brief._sightsClassified).length) {
+        _tb._sightsClassified = Object.assign({}, trip.brief._sightsClassified);
+      }
+      if ((!_tb._destinationsClassified || !Object.keys(_tb._destinationsClassified).length)
+          && trip && trip.brief && trip.brief._destinationsClassified
+          && Object.keys(trip.brief._destinationsClassified).length) {
+        _tb._destinationsClassified = Object.assign({}, trip.brief._destinationsClassified);
+      }
+      if ((!_tb._classificationByPlace || !Object.keys(_tb._classificationByPlace).length)
+          && trip && trip.brief && trip.brief._classificationByPlace
+          && Object.keys(trip.brief._classificationByPlace).length) {
+        _tb._classificationByPlace = Object.assign({}, trip.brief._classificationByPlace);
+      }
+      var _pd236SightCount = Object.keys(_tb._sightsClassified || {}).length;
+      var _pd236DestCount = Object.keys(_tb._destinationsClassified || {}).length;
+      console.log("[Max PD.236] publishTrip start. sightsClassified=" +
+        _pd236SightCount + " destinationsClassified=" + _pd236DestCount);
+    } catch (_) {}
+
     // v360.3 (#8 Phase 5): wayside-intent candidates are kept (the user
     // explicitly chose them) but they're NOT overnight destinations —
     // they're stops on transit routes. Exclude them from the
