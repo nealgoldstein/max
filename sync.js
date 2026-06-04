@@ -394,18 +394,16 @@
     });
   }
   async function deleteTrip(id) {
-    // PD.197: tombstone the ID before attempting the server delete.
-    // If this call succeeds we drain the tombstone; if it fails the
-    // tombstone stays so pullAll won't resurrect the trip until
-    // the delete eventually goes through on a later poll.
+    // PD.251: tombstones are PERMANENT. The old behavior cleared them
+    // on a successful server DELETE, on the assumption that "200 OK
+    // means the trip is gone from the server forever." That assumption
+    // fails in real life: trips came back later — backup restores,
+    // replication catching up, another device re-uploading, a server
+    // write retry. Once the user deletes a trip, the local tombstone
+    // shields pullAll permanently. The storage cost is a 36-byte UUID
+    // per delete, which is negligible.
     _tombstoneAdd(id);
-    try {
-      var r = await request('/trips/' + encodeURIComponent(id), { method: 'DELETE' });
-      _tombstoneRemove(id);
-      return r;
-    } catch (e) {
-      throw e; // leave tombstone in place
-    }
+    return await request('/trips/' + encodeURIComponent(id), { method: 'DELETE' });
   }
 
   // v353.5: share-link endpoints. Mint creates a fresh token bound
@@ -792,12 +790,17 @@
       // they eventually drain. Without this, every pull would
       // resurrect a trip whose server delete failed.
       if (s && s.id && tombstones[s.id]) {
+        // PD.251: tombstones are PERMANENT — see deleteTrip for
+        // rationale. Still fire the server DELETE on every pull as
+        // belt-and-suspenders (helps drain a server-side write queue
+        // or replication lag), but don't remove the tombstone even
+        // if the server returns 200. If the trip ever reappears in a
+        // later listTrips response, this branch skips it again.
         try {
           await request('/trips/' + encodeURIComponent(s.id), { method: 'DELETE' });
-          _tombstoneRemove(s.id);
-        } catch (e) {
-          // Server still won't accept the delete; leave the
-          // tombstone so we skip again next pull.
+        } catch (_) {
+          // Server still won't accept the delete; tombstone stays
+          // (it would stay regardless under the new permanent policy).
         }
         skipped++;
         continue;
