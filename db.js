@@ -308,6 +308,35 @@
     return true;
   }
 
+  // PD.250: union of trip IDs known across localStorage AND the IDB
+  // mirror. Callers (cleanupOrphanedTrips) use this to detect trips
+  // that exist ONLY in IDB — the resurrection vector before PD.250
+  // routed deletes through tripDelete. Without this, raw
+  // localStorage.removeItem deletes left the IDB copy behind, and the
+  // next hydrateTripIdbMirror() resurrected them.
+  function tripListIds() {
+    var ids = {};
+    if (canPersist) {
+      try {
+        for (var k in localStorage) {
+          if (k && k.indexOf(KEY_TRIP_PREFIX) === 0) {
+            ids[k.substring(KEY_TRIP_PREFIX.length)] = true;
+          }
+        }
+      } catch (_) {}
+    }
+    Object.keys(_tripIdbMirrorRaw || {}).forEach(function (id) { ids[id] = true; });
+    return Object.keys(ids);
+  }
+
+  // PD.250: cache the hydration promise so callers can await it
+  // (orphan sweeps need the IDB mirror to be populated before they
+  // run, or they'll miss IDB-only trips).
+  var _hydrationPromise = null;
+  function tripHydrated() {
+    return _hydrationPromise || Promise.resolve();
+  }
+
   // v359.43: hydrate the in-memory trip mirror from IDB on init.
   // Walks all IDB keys, picks the ones with the trip prefix, and
   // populates _tripIdbMirror so tripRead can find IDB-only trips
@@ -880,6 +909,10 @@
       read:     tripRead,
       readRaw:  tripReadRaw,
       delete:   tripDelete,
+      // PD.250: enumerate trip IDs across localStorage + IDB mirror,
+      // and await IDB hydration so the enumeration is complete.
+      listIds:  tripListIds,
+      hydrated: tripHydrated,
     },
 
     index: {
@@ -985,6 +1018,9 @@
   // mirror so tripRead can find IDB-only trips synchronously.
   if (canPersist) {
     try { wikiCacheMigrate(); } catch (_) {}
-    try { hydrateTripIdbMirror(); } catch (_) {}
+    // PD.250: stash the hydration promise so tripHydrated() can resolve
+    // when it completes; cleanupOrphanedTrips uses this to sweep
+    // IDB-only orphans (the resurrection vector before PD.250).
+    try { _hydrationPromise = hydrateTripIdbMirror(); } catch (_) { _hydrationPromise = Promise.resolve(); }
   }
 })(typeof window !== 'undefined' ? window : this);

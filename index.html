@@ -5280,6 +5280,33 @@ function loadTripsIndex(){
   // active index, plus drop empty shells (no destinations + no candidates)
   // that aren't the current trip.
   cleanupOrphanedTrips();
+  // PD.250: IDB orphan sweep. Trips deleted before PD.250's MaxDB.trip.delete
+  // routing still exist in IndexedDB (the original raw localStorage.removeItem
+  // never touched IDB). hydrateTripIdbMirror() resurrects them on every page
+  // load, which is what made deleted trips reappear after a hard refresh.
+  // This pass waits for the mirror to populate, then deletes any trip ID
+  // that isn't in _tripsIndex.
+  if (typeof MaxDB !== "undefined" && MaxDB.trip
+      && typeof MaxDB.trip.hydrated === "function"
+      && typeof MaxDB.trip.listIds === "function"
+      && typeof MaxDB.trip.delete === "function") {
+    MaxDB.trip.hydrated().then(function () {
+      try {
+        var indexedIds = {};
+        _tripsIndex.forEach(function (t) { if (t && t.id) indexedIds[t.id] = true; });
+        var allIds = MaxDB.trip.listIds();
+        var reaped = 0;
+        allIds.forEach(function (id) {
+          if (id === _currentTripId) return; // never touch the active trip
+          if (indexedIds[id]) return;        // still in the trips index
+          try { MaxDB.trip.delete(id); reaped++; } catch (_) {}
+        });
+        if (reaped) console.log("[Max cleanup] reaped " + reaped + " IDB-only orphan trip(s)");
+      } catch (e) {
+        console.warn("[Max cleanup] IDB orphan sweep failed:", e && e.message);
+      }
+    });
+  }
 }
 
 function cleanupOrphanedTrips(){
@@ -5322,7 +5349,17 @@ function cleanupOrphanedTrips(){
       }
     }
     toDelete.forEach(function(d){
-      localStorage.removeItem(d.key);
+      // PD.250: route through MaxDB.trip.delete to clear localStorage
+      // AND IndexedDB. Raw localStorage.removeItem left IDB copies
+      // behind, which hydrateTripIdbMirror() resurrects on next page
+      // load — same root cause as the manual-delete leak.
+      if (typeof MaxDB !== "undefined" && MaxDB.trip && typeof MaxDB.trip.delete === "function") {
+        try { MaxDB.trip.delete(d.id); } catch(_) {
+          try { localStorage.removeItem(d.key); } catch(__){}
+        }
+      } else {
+        localStorage.removeItem(d.key);
+      }
       // Also remove from index if it was a stale empty-shell that happens to
       // still be indexed.
       _tripsIndex = _tripsIndex.filter(function(t){ return t.id !== d.id; });
@@ -6737,7 +6774,19 @@ function renderHomeScreen(){
           e2.stopPropagation();
           _tripsIndex=_tripsIndex.filter(function(t){return t.id!==id;});
           saveTripsIndex();
-          try{localStorage.removeItem("max-trip-"+id);}catch(ex){}
+          // PD.250: route through MaxDB.trip.delete so the trip is cleared
+          // from BOTH localStorage AND IndexedDB. The old raw
+          // localStorage.removeItem left the IDB copy intact;
+          // hydrateTripIdbMirror() on next page load resurrected the
+          // trip in _tripIdbMirrorRaw, and tripReadRaw returned it from
+          // there, so deleted trips reappeared after a hard refresh.
+          if (typeof MaxDB !== "undefined" && MaxDB.trip && typeof MaxDB.trip.delete === "function") {
+            try { MaxDB.trip.delete(id); } catch(ex){
+              try{ localStorage.removeItem("max-trip-"+id); }catch(_){}
+            }
+          } else {
+            try{ localStorage.removeItem("max-trip-"+id); }catch(ex){}
+          }
           // PD.197: tombstone unconditionally — even offline / signed
           // out / before MaxSync.deleteTrip runs. The next pullAll
           // checks the tombstone and skips resurrection (and retries
