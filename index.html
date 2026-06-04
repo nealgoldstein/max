@@ -7961,12 +7961,22 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
       try {
         var p = generateActivitiesForPlace();
         if (p && typeof p.then === "function") {
-          p.then(function(){
-            // Order matters: inject missing places first (so the
-            // nights pass has something to write to), then apply
-            // user-specified nights to every requiredPlace.
+          p.then(async function(){
+            // Order: backstop synthesizes stubs for any place the LLM
+            // outright dropped → reconciliation pass slots remaining
+            // orphan sights into matching activity sections using
+            // Wikipedia tokens (PD.257) → nights pass writes
+            // user-specified stay lengths onto every requiredPlace.
             try { _backstopPastedListPlaces(); } catch(_) {}
+            try { await _reconcileListedSightsToSections(); } catch(_) {}
             try { _applyPastedListNights(); } catch(_) {}
+            // Reconciliation can add new requiredPlaces — re-render so
+            // the picker reflects them. The render-time orphan catch-all
+            // (PD.256) will auto-shrink because the places are now in
+            // real sections.
+            if (typeof renderActivityPicker === "function") {
+              try { renderActivityPicker(); } catch(_) {}
+            }
           }).catch(function(err){
             console.warn("[Max] generateActivitiesForPlace failed for pasted list:", err && err.message);
           });
@@ -8265,6 +8275,168 @@ function _backstopPastedListPlaces() {
   if (typeof renderActivityPicker === "function") renderActivityPicker();
 }
 if (typeof globalThis !== "undefined") globalThis._backstopPastedListPlaces = _backstopPastedListPlaces;
+
+// PD.257: reconciliation pass — slot user-listed sights into matching
+// LLM activity sections using Wikipedia summary tokens.
+//
+// The LLM that generates activity sections is inconsistent at slotting
+// every user-listed place into one (Seljalandsfoss + Skógafoss land
+// under "Hike to waterfalls" but Goðafoss gets dropped). The render-
+// time orphan catch-all ("Other things you listed") then surfaces the
+// drop, but the user reads it as a bug: "you have a Hike to waterfalls
+// section AND a waterfall called Goðafoss — why didn't you put it
+// there?"
+//
+// This pass closes that gap deterministically. For each user-listed
+// sight that's not in any non-synthetic section's requiredPlaces, we
+// fetch the cached Wikipedia summary (description + extract), tokenize
+// both the summary and each candidate section's name + description,
+// score by shared non-stopword token count, and add the place to the
+// best section if the score exceeds a threshold. Async because the
+// wiki cache lookup is Promise-based, but cached results return
+// synchronously so already-hydrated trips don't pay any extra time.
+//
+// Stopword list is small + Iceland-trip-tuned. Threshold of >= 1
+// shared meaningful token is enough for clean matches like
+// "waterfall" → "Hike to waterfalls"; lower-confidence guesses fall
+// through to the orphan catch-all so the user sees them and can move
+// them manually.
+async function _reconcileListedSightsToSections() {
+  if (!_tb || !Array.isArray(_tb.placeActivities)) return;
+  var listedNames = (_tb._userListedNames) || {};
+  var listedKeys = Object.keys(listedNames).filter(function(k){ return listedNames[k] === "see"; });
+  if (!listedKeys.length) return;
+
+  var normFn = (typeof globalThis._normPlaceName === "function")
+    ? globalThis._normPlaceName
+    : function(s){ return String(s||"").toLowerCase().trim(); };
+
+  // Build the "covered" set: places already in a non-synthetic section.
+  var SYNTHETIC = { "synthetic-stays":1, "synthetic-sights":1, "synthetic-umbrella":1 };
+  var covered = {};
+  _tb.placeActivities.forEach(function(it){
+    if (!it || (it.type && SYNTHETIC[it.type])) return;
+    (it.requiredPlaces || []).forEach(function(p){
+      if (p && p.place) covered[normFn(p.place)] = true;
+    });
+  });
+  var orphanKeys = listedKeys.filter(function(k){ return !covered[k]; });
+  if (!orphanKeys.length) return;
+
+  // Resolve a display name + country for each orphan key so the wiki
+  // fetch + the requiredPlaces.push use the user's original spelling.
+  var displayMap = (_tb._userListedDisplay) || {};
+  var pastedByKey = {};
+  (_tb._pastedListPlaces || []).forEach(function(p){
+    if (p && p.place) pastedByKey[normFn(p.place)] = p;
+  });
+  function _resolveOrphan(k) {
+    var orig = displayMap[k] || (pastedByKey[k] && pastedByKey[k].place) || k;
+    var country = (pastedByKey[k] && pastedByKey[k].country) || _tb.region || "";
+    return { key: k, name: orig, country: country };
+  }
+  var orphans = orphanKeys.map(_resolveOrphan);
+
+  // Candidate sections: non-synthetic placeActivities. We score by
+  // shared tokens between the sight's wiki text and the section's
+  // name + description.
+  var STOP = {
+    a:1, an:1, the:1, and:1, or:1, of:1, in:1, on:1, at:1, to:1, for:1, by:1, with:1,
+    from:1, into:1, this:1, that:1, these:1, those:1, is:1, are:1, was:1, were:1, be:1,
+    it:1, its:1, you:1, your:1, max:1,
+    // Place-name stopwords that show up in nearly every region's sights.
+    region:1, north:1, south:1, east:1, west:1,
+    near:1, around:1, located:1, town:1, village:1
+  };
+  function _tokens(text) {
+    if (!text) return [];
+    return String(text)
+      .toLowerCase()
+      .replace(/[^a-zà-ÿðþæöáéíóúýðþæöß0-9\s-]/g, " ")
+      .split(/\s+/)
+      .filter(function(t){ return t && t.length >= 3 && !STOP[t]; });
+  }
+  function _toSet(arr) {
+    var s = {};
+    arr.forEach(function(t){ s[t] = true; });
+    return s;
+  }
+
+  var sections = _tb.placeActivities.filter(function(it){
+    return it && it.section && (!it.type || !SYNTHETIC[it.type]);
+  });
+  // Pre-tokenize each section's name + description once.
+  var sectionVecs = sections.map(function(it){
+    var blob = (it.section || "") + " " + (it.name || "") + " " + (it.description || "");
+    return { item: it, tokens: _toSet(_tokens(blob)) };
+  });
+  if (!sectionVecs.length) return;
+
+  function _score(sightTokens, secSet) {
+    var hits = 0;
+    for (var i = 0; i < sightTokens.length; i++) {
+      if (secSet[sightTokens[i]]) hits++;
+    }
+    return hits;
+  }
+
+  var fetcher = (window.MaxPickerUi && window.MaxPickerUi._fetchWikiSummary)
+    || window._fetchWikiSummary
+    || null;
+  if (!fetcher) {
+    console.warn("[PD.257] _fetchWikiSummary unavailable; skipping reconciliation");
+    return;
+  }
+
+  var THRESHOLD = 1; // at least one meaningful shared token
+  var placed = [];
+  await Promise.all(orphans.map(function(o){
+    return fetcher(o.name, o.country)
+      .catch(function(){ return null; })
+      .then(function(wiki){
+        var blob = "";
+        if (wiki) {
+          if (wiki.description) blob += " " + wiki.description;
+          if (wiki.extract) blob += " " + wiki.extract;
+        }
+        // Fall back to the place's own name tokens if there's no wiki.
+        // "Goðafoss" alone won't share tokens with "Hike to waterfalls,"
+        // so a no-wiki orphan correctly falls through to the catch-all.
+        blob += " " + o.name;
+        var sightTokens = _tokens(blob);
+        if (!sightTokens.length) return;
+        var best = null;
+        var bestScore = 0;
+        sectionVecs.forEach(function(sv){
+          var s = _score(sightTokens, sv.tokens);
+          if (s > bestScore) { bestScore = s; best = sv; }
+        });
+        if (!best || bestScore < THRESHOLD) return;
+        // Don't double-add if some race already placed it.
+        var k = o.key;
+        var already = (best.item.requiredPlaces || []).some(function(p){
+          return p && p.place && normFn(p.place) === k;
+        });
+        if (already) return;
+        if (!Array.isArray(best.item.requiredPlaces)) best.item.requiredPlaces = [];
+        best.item.requiredPlaces.push({
+          place: o.name,
+          country: o.country,
+          nights: 0,
+          overnight: false,
+          _keep: true,
+          _fromUserList: true,
+          _reconciledScore: bestScore
+        });
+        placed.push({ place: o.name, section: best.item.section, score: bestScore });
+      });
+  }));
+  if (placed.length) {
+    console.log("[PD.257] reconciled " + placed.length + " user-listed sight(s) into matching sections:",
+      placed.map(function(p){ return p.place + " → \"" + p.section + "\" (score " + p.score + ")"; }).join("; "));
+  }
+}
+if (typeof globalThis !== "undefined") globalThis._reconcileListedSightsToSections = _reconcileListedSightsToSections;
 
 // v359.60.27: unified "open the picker from trip view" entry point.
 // Routes through the right reopener based on what data is available:
