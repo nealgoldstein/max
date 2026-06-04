@@ -6772,6 +6772,19 @@ function renderHomeScreen(){
         var no=document.createElement("button"); no.style.cssText="font-size:11px;padding:3px 8px;border:1px solid #ddd;border-radius:4px;background:#fff;color:#666;cursor:pointer;font-family:inherit;"; no.textContent="Cancel";
         yes.onclick=function(e2){
           e2.stopPropagation();
+          // PD.253: if we're deleting the ACTIVE trip, clear _currentTripId
+          // and global.trip BEFORE the delete + tombstone. Otherwise the
+          // 1500ms autosave debounce (sync.js _doSave) fires after delete,
+          // reads _currentTripId, serializes the still-in-memory trip,
+          // PUTs to the server, gets 404, falls through to createTrip,
+          // and resurrects the trip we just told to die. That's the
+          // smoking-gun resurrection vector. _doSave bails at line 659
+          // when _currentTripId is null.
+          if (id === _currentTripId) {
+            try { if (typeof _saveTimer !== "undefined" && _saveTimer) clearTimeout(_saveTimer); } catch(_){}
+            _currentTripId = null;
+            try { trip = null; } catch(_){}
+          }
           _tripsIndex=_tripsIndex.filter(function(t){return t.id!==id;});
           saveTripsIndex();
           // PD.250: route through MaxDB.trip.delete so the trip is cleared

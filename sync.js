@@ -98,10 +98,31 @@
     var token = getToken();
     if (token && !opts.skipAuth) headers['Authorization'] = 'Bearer ' + token;
 
+    // PD.252: instrument every /trips request so we can SEE what's
+    // hitting the server. Specifically watching for any PUT/POST of an
+    // ID that's currently tombstoned — that's the resurrection
+    // smoking gun. A stack trace tells us which client code path
+    // triggered it (autosave? sync push? share-link? something else?).
+    var method = opts.method || 'GET';
+    var tripIdMatch = path.match(/^\/trips\/([^\/\?]+)/);
+    var pdTripId = tripIdMatch ? decodeURIComponent(tripIdMatch[1]) : null;
+    if (pdTripId && (method === 'PUT' || method === 'POST')) {
+      try {
+        var tomb = _readTombstones();
+        if (tomb[pdTripId]) {
+          console.error('[PD.252 RESURRECTION] uploading tombstoned trip', pdTripId, method, path);
+          console.trace('[PD.252 RESURRECTION] stack:');
+        }
+      } catch (_) {}
+    }
+    if (path.indexOf('/trips') === 0) {
+      console.log('[PD.252 sync]', method, path);
+    }
+
     var resp;
     try {
       resp = await fetch(url, {
-        method: opts.method || 'GET',
+        method: method,
         headers: headers,
         body: opts.body ? JSON.stringify(opts.body) : undefined,
       });
