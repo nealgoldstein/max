@@ -33927,6 +33927,17 @@ function _tbUseEntryPoint(isEntry, name, mode){
   var inpId = isEntry ? "td-entry" : "td-exit";
   var inp = document.getElementById(inpId);
   if (inp) inp.value = name;
+  // PD.230: ALSO update the Discovery picker's own inputs. The Trip
+  // Details strip uses td-entry/td-exit; the Discovery picker uses
+  // tb-picker-entry/tb-picker-exit (different DOM, same conceptual
+  // value). _tbUseEntryPoint was only updating the strip — clicking
+  // "Use Reykjavík Airport (RKV)" in the picker correctly set
+  // _tb.entry but the picker's own "Arriving at" input stayed on the
+  // user's previously-typed value (e.g. "Kef") because that input was
+  // never rewritten.
+  var pickerInpId = isEntry ? "tb-picker-entry" : "tb-picker-exit";
+  var pickerInp = document.getElementById(pickerInpId);
+  if (pickerInp) pickerInp.value = name;
   // Close the open popup so the user can see the map update, and give them
   // clear feedback — the collapsed trip-details strip was too subtle and the
   // popup covers it. Also auto-expand the strip on first use so the change is
