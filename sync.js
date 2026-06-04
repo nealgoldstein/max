@@ -98,11 +98,11 @@
     var token = getToken();
     if (token && !opts.skipAuth) headers['Authorization'] = 'Bearer ' + token;
 
-    // PD.252: instrument every /trips request so we can SEE what's
-    // hitting the server. Specifically watching for any PUT/POST of an
-    // ID that's currently tombstoned — that's the resurrection
-    // smoking gun. A stack trace tells us which client code path
-    // triggered it (autosave? sync push? share-link? something else?).
+    // PD.252: alarm when any client code tries to upload a trip ID
+    // that's been tombstoned — that's the resurrection smoking gun.
+    // The stack trace tells us which code path triggered the bad
+    // upload (autosave? sync push? share-link? something else?). Kept
+    // as a defensive guard; if it fires, something's wrong.
     var method = opts.method || 'GET';
     var tripIdMatch = path.match(/^\/trips\/([^\/\?]+)/);
     var pdTripId = tripIdMatch ? decodeURIComponent(tripIdMatch[1]) : null;
@@ -114,9 +114,6 @@
           console.trace('[PD.252 RESURRECTION] stack:');
         }
       } catch (_) {}
-    }
-    if (path.indexOf('/trips') === 0) {
-      console.log('[PD.252 sync]', method, path);
     }
 
     var resp;

@@ -8347,8 +8347,6 @@ async function _reconcileListedSightsToSections() {
     return false;
   }
   var orphanKeys = listedKeys.filter(function(k){ return !_isCovered(k); });
-  console.log("[PD.257] start: " + listedKeys.length + " user-listed sights, "
-    + orphanKeys.length + " orphan(s) before heuristic: " + JSON.stringify(orphanKeys));
   if (!orphanKeys.length) return;
 
   // Resolve a display name + country for each orphan key so the wiki
@@ -8428,15 +8426,9 @@ async function _reconcileListedSightsToSections() {
     }
     return { item: it, tokens: _toSet(_tokens(blob + " " + placeBlob)) };
   }
-  var fetcher = (window.MaxPickerUI && window.MaxPickerUI._fetchWikiSummary)
-    || window._fetchWikiSummary
-    || (window.MaxPickerUi && window.MaxPickerUi._fetchWikiSummary)
-    || null;
+  var fetcher = window.MaxPickerUI && window.MaxPickerUI._fetchWikiSummary;
   if (!fetcher) {
-    console.warn("[PD.257] _fetchWikiSummary unavailable; skipping reconciliation. Diagnostics:",
-      "MaxPickerUI=" + (typeof window.MaxPickerUI),
-      "MaxPickerUI keys=" + (window.MaxPickerUI ? Object.keys(window.MaxPickerUI).join(",") : "n/a"),
-      "_fetchWikiSummary=" + (typeof window._fetchWikiSummary));
+    console.warn("[PD.257] _fetchWikiSummary unavailable; skipping reconciliation");
     return;
   }
   var sectionVecs = await Promise.all(sections.map(_buildSectionVec));
@@ -8493,9 +8485,10 @@ async function _reconcileListedSightsToSections() {
         placed.push({ place: o.name, section: best.item.section, score: bestScore });
       });
   }));
-  console.log("[PD.257] heuristic placed " + placed.length + " sight(s)" + (placed.length
-    ? ": " + placed.map(function(p){ return p.place + " → \"" + p.section + "\" (score " + p.score + ")"; }).join("; ")
-    : ""));
+  if (placed.length) {
+    console.log("[PD.257] heuristic placed " + placed.length + " sight(s): "
+      + placed.map(function(p){ return p.place + " → \"" + p.section + "\""; }).join("; "));
+  }
 
   // PD.259: LLM-backed second pass for orphans the heuristic can't
   // categorize. Rebuild coveredTokenSets once (post-heuristic) and
@@ -8512,17 +8505,7 @@ async function _reconcileListedSightsToSections() {
       coveredTokenSets.push(set);
     });
   });
-  console.log("[PD.259] rebuilt coveredTokenSets: " + coveredTokenSets.length + " sets. First 8 token sets: "
-    + JSON.stringify(coveredTokenSets.slice(0, 8).map(function(s){ return Object.keys(s); })));
-  // Diagnostic per orphan: does _isCovered see it now?
-  orphanKeys.forEach(function(k){
-    console.log("[PD.259] orphan check k=" + JSON.stringify(k)
-      + " toks=" + JSON.stringify(_pd258TokensOf(k))
-      + " covered=" + _isCovered(k));
-  });
   var stillOrphanKeys = orphanKeys.filter(function(k){ return !_isCovered(k); });
-  console.log("[PD.259] start: " + stillOrphanKeys.length + " still-orphan after heuristic: "
-    + JSON.stringify(stillOrphanKeys));
   if (!stillOrphanKeys.length) return;
   if (typeof callMax !== "function") {
     console.warn("[PD.259] callMax unavailable; LLM reconciliation skipped");
@@ -8576,8 +8559,6 @@ async function _reconcileListedSightsToSections() {
   var llmPlaced = [];
   var llmNullDecisions = [];
   try {
-    console.log("[PD.259] calling LLM with " + stillOrphans.length + " orphan(s) and "
-      + sectionsForPrompt.length + " section(s)");
     var resp = await callMax([{ role: "user", content: prompt }], 600, 25000);
     var text = "";
     if (resp && resp.content && resp.content.length) {
@@ -8585,8 +8566,6 @@ async function _reconcileListedSightsToSections() {
     } else if (typeof resp === "string") {
       text = resp;
     }
-    console.log("[PD.259] LLM response (" + text.length + " chars): "
-      + (text.length > 400 ? text.slice(0, 400) + "…" : text));
     var jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       console.warn("[PD.259] LLM returned no JSON; skipping");
@@ -8631,9 +8610,10 @@ async function _reconcileListedSightsToSections() {
     console.warn("[PD.259] LLM reconciliation failed:", e && e.message);
     return;
   }
-  console.log("[PD.259] done: placed " + llmPlaced.length + ", LLM said no-fit for " + llmNullDecisions.length
-    + (llmPlaced.length ? " | placed: " + llmPlaced.map(function(p){ return p.place + " → \"" + p.section + "\""; }).join("; ") : "")
-    + (llmNullDecisions.length ? " | no-fit: " + llmNullDecisions.join(", ") : ""));
+  if (llmPlaced.length) {
+    console.log("[PD.259] LLM placed " + llmPlaced.length + " sight(s): "
+      + llmPlaced.map(function(p){ return p.place + " → \"" + p.section + "\""; }).join("; "));
+  }
 }
 if (typeof globalThis !== "undefined") globalThis._reconcileListedSightsToSections = _reconcileListedSightsToSections;
 
@@ -29469,8 +29449,20 @@ function renderActivityPicker(){
         + '<button class="tb-btn-primary" id="tb-place-continue-btn" onclick="'+primaryBtnHandler+'" style="flex:0 0 auto;width:auto;padding:10px 22px;">'+primaryBtnLabel+'</button>'
         + '</div>')
       : '')
-    +  '<div style="display:flex;justify-content:space-between;margin-top:8px;">'
-    +    '<div class="tb-btn-back" onclick="'+backHandler+'">'+backLabel+'</div>'
+    // PD.266: explicit Home + Profile affordances in the Discovery
+    // footer. Neal asked for clear ways out of Discovery — back to the
+    // trip's profile (dates / pace / transport), and to the home
+    // screen for a new or different trip. The old "← Profile" link
+    // was tiny grey text that read as a back-arrow rather than a
+    // navigation choice. Both buttons sit alongside whatever the
+    // mode-specific back action is (Cancel when editing, otherwise
+    // Profile itself — so the left link is the natural "back").
+    +  '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:10px;flex-wrap:wrap;">'
+    +    '<div style="display:flex;align-items:center;gap:14px;">'
+    +      '<div class="tb-btn-back" onclick="'+backHandler+'">'+backLabel+'</div>'
+    +      '<div class="tb-btn-back" style="color:#1a5fa8;font-weight:600;" onclick="goHome()" title="Back to all trips — create a new one or select another">🏠 Home</div>'
+    + (isEdit ? '<div class="tb-btn-back" style="color:#1a5fa8;font-weight:600;" onclick="renderTripBrief()" title="Edit this trip\'s profile — dates, pace, transport, etc.">✎ Profile</div>' : '')
+    +    '</div>'
     +    '<div style="font-size:10px;color:#aaa;cursor:pointer;" onclick="showBriefApiKeyForm()">🔑 Set API key</div>'
     +  '</div>'
     +'</div>';
