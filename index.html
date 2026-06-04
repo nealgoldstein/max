@@ -7763,23 +7763,23 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
   try {
     var _nrm = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
     _tb._classificationByPlace = {};
-    // PD.234 (architectural): two new containers that ARE the source of
-    // truth for "is this a destination or a sight?" Every downstream
-    // pipeline step (kept-filter, reconciliation, attach, augment)
-    // reads from these instead of inferring from candidate roles or
-    // placeActivities flags. See sights-rearchitecture-plan.md.
-    //
-    //   _destinationsClassified — Object<key, true>
-    //     A place that becomes a top-level trip destination. City,
-    //     region, or a POI explicitly promoted to standalone (Geysir
-    //     alone). Anything not classified defaults here.
+    // PD.234 (architectural): _sightsClassified is the source of truth
+    // for "is this place a sight that hangs off a parent?" Every
+    // downstream pipeline step (kept-filter, reconciliation, attach,
+    // augment) reads from it instead of inferring from candidate roles
+    // or placeActivities flags. See sights-rearchitecture-plan.md.
     //
     //   _sightsClassified — Object<key, { parentKey, parentRelation,
     //     displayName, country }>
     //     A POI that hangs off a parent destination (within) OR a
     //     short stop on the route between destinations (from). Never
     //     becomes a top-level destination on its own.
-    _tb._destinationsClassified = {};
+    //
+    // Destinations (city/region/promoted-POI/unknown) are NOT bucketed
+    // separately — they are simply "not in _sightsClassified" and flow
+    // through the legacy candidates pipeline as before. The cleanup
+    // pass on 2026-06-04 removed a parallel _destinationsClassified
+    // bucket that was written everywhere but never read.
     _tb._sightsClassified = {};
     parseResult.destinations.forEach(function(p){
       if (!p || !p.place) return;
@@ -7792,38 +7792,23 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
         autoCreated:     !!p._autoCreated,
         promoted:        !!p._promotedToDestination
       };
-      // PD.234 bucketing.
-      var cls = p._classification;
-      if (cls === "poi") {
-        if (p._promotedToDestination) {
-          _tb._destinationsClassified[k] = true;
-        } else {
-          _tb._sightsClassified[k] = {
-            parentKey:      p._parentEntry || null,
-            parentRelation: p._parentRelation || "within",
-            displayName:    p.place,
-            country:        p.country || ""
-          };
-        }
-      } else if (cls === "city" || cls === "region") {
-        _tb._destinationsClassified[k] = true;
-      } else if (cls === "activity" || cls === "role-tag") {
-        // Not a Place. Don't bucket.
-      } else {
-        // Unset / heuristic-defaulted. Preserve legacy behavior:
-        // unknowns go to destinations so the picker doesn't drop them.
-        _tb._destinationsClassified[k] = true;
+      // PD.234 bucketing — only sights get a bucket entry.
+      if (p._classification === "poi" && !p._promotedToDestination) {
+        _tb._sightsClassified[k] = {
+          parentKey:      p._parentEntry || null,
+          parentRelation: p._parentRelation || "within",
+          displayName:    p.place,
+          country:        p.country || ""
+        };
       }
     });
-    console.log("[Max PD.234] classified buckets: " +
-      Object.keys(_tb._destinationsClassified).length + " destinations, " +
+    console.log("[Max PD.234] classified " +
       Object.keys(_tb._sightsClassified).length + " sights " +
       "(from parseResult.destinations.length=" + parseResult.destinations.length + ")");
     // Mirror onto trip.brief so reopens of the trip still know which
     // sights came from "within" vs "from" their parent.
     if (typeof trip !== "undefined" && trip && trip.brief) {
       trip.brief._classificationByPlace  = Object.assign({}, _tb._classificationByPlace);
-      trip.brief._destinationsClassified = Object.assign({}, _tb._destinationsClassified);
       trip.brief._sightsClassified       = Object.assign({}, _tb._sightsClassified);
     }
   } catch (e) {
@@ -16831,12 +16816,6 @@ function _reconcileUserListedKeeps(){
       && trip.brief._classificationByPlace
       && Object.keys(trip.brief._classificationByPlace).length) {
     _tb._classificationByPlace = Object.assign({}, trip.brief._classificationByPlace);
-  }
-  if ((!_tb._destinationsClassified || !Object.keys(_tb._destinationsClassified).length)
-      && typeof trip !== "undefined" && trip && trip.brief
-      && trip.brief._destinationsClassified
-      && Object.keys(trip.brief._destinationsClassified).length) {
-    _tb._destinationsClassified = Object.assign({}, trip.brief._destinationsClassified);
   }
   if ((!_tb._sightsClassified || !Object.keys(_tb._sightsClassified).length)
       && typeof trip !== "undefined" && trip && trip.brief
@@ -38268,31 +38247,6 @@ if (typeof globalThis !== "undefined") {
   globalThis._recomputeSuggestions = _recomputeSuggestions;
 }
 
-// PD.240 (architectural — single suggestion writer):
-//
-// Before this, three independent paths assigned to dest.suggestions:
-//   1. generateCityData cached path (line ~38377)
-//   2. generateCityData LLM-call path (line ~38530)
-//   3. PD.223 attach in publishTrip (engine-picker.js)
-//
-// Paths 1 + 2 used wholesale REPLACE; path 3 used insert/upgrade. They
-// racing each other (LLM async, PD.223 sync) was exactly what wiped
-// user-listed sights — the LLM response would fire after PD.223 and
-// overwrite the _fromUserList items.
-//
-// This function is the SINGLE writer for the LLM/cache paths. It
-// snapshots _fromUserList entries, performs the replace, and re-merges
-// the user-listed entries back in (upgrade dupes, append new). PD.223
-// remains as the writer for user-explicit additions; this function
-// guarantees the LLM/cache writes never erase what PD.223 wrote.
-// PD.241 backward-compat shim: legacy _replaceDestSuggestions now just
-// delegates to _setLLMSights. Any code that called the old function gets
-// the safe sources-model behavior.
-function _replaceDestSuggestions(dest, newList) {
-  _setLLMSights(dest, newList);
-}
-if (typeof globalThis !== "undefined") globalThis._replaceDestSuggestions = _replaceDestSuggestions;
-
 // Auto-seed LLM-flagged iconic sights into a destination's day plan so the
 // user lands on a plausible schedule rather than an empty grid. Non-iconic
 // sights stay in dest.suggestions for the user to opt into via the Explore
@@ -38574,10 +38528,9 @@ async function generateCityData(place,destId,_isAutoRetry){
   if(!_isAutoRetry && _generatedCityData[key] && !_generatedCityData[key].loading){
     var _cached = _generatedCityData[key];
     var _destRef = (typeof getDest === "function") ? getDest(destId) : null;
-    // PD.240: cached path now routes through the single writer too.
-    // The empty-only guard is also lifted — _replaceDestSuggestions
-    // preserves user-listed items across the replace, so the cached
-    // result can land even if PD.223 already added user sights.
+    // PD.241: cached path routes through _setLLMSights. The sources
+    // model preserves user-listed items across the replace, so the
+    // cached result can land even if PD.223 already added user sights.
     if (_destRef && _cached.sights) {
       var _genCenter = _cached.cityCenter && _cached.cityCenter[0] ? _cached.cityCenter : (typeof getCityCenter === "function" ? getCityCenter(_destRef.place) : null);
       var _cachedNewList = (Array.isArray(_cached.sights) ? _cached.sights : []).map(function(s){
@@ -38586,7 +38539,7 @@ async function generateCityData(place,destId,_isAutoRetry){
         var sLng = s.lng || (_genCenter ? _genCenter[1] + (Math.random() - .5) * .004 : null);
         return {id:"s"+sidCtr, type:"sight", n:s.name, st:s.st||s.name, note:s.desc||null, lat:sLat, lng:sLng, approx:!s.lat, iconic:!!s.iconic, durationHours:(typeof s.durationHours==="number"&&s.durationHours>0)?s.durationHours:null, url:s.url||null};
       });
-      _replaceDestSuggestions(_destRef, _cachedNewList);
+      _setLLMSights(_destRef, _cachedNewList);
       if (_cached.districts && !_destRef.generatedDistricts) _destRef.generatedDistricts = _cached.districts;
       if (_cached.practicalInfo && !_destRef.generatedPracticalInfo) _destRef.generatedPracticalInfo = _cached.practicalInfo;
       if (_cached.transitHub && !_destRef.generatedTransitHub) _destRef.generatedTransitHub = _cached.transitHub;
@@ -38716,17 +38669,16 @@ async function generateCityData(place,destId,_isAutoRetry){
       if(data.districts) destRef.generatedDistricts=data.districts;
       if(data.practicalInfo) destRef.generatedPracticalInfo=data.practicalInfo;
       if(data.transitHub) destRef.generatedTransitHub=data.transitHub;
-      // PD.240: LLM-call path routes through the single writer too.
-      // Replaces PD.239's inline preserve-and-re-merge block — same
-      // logic, just lives in _replaceDestSuggestions now so both
-      // paths (cached and LLM-call) share one implementation.
+      // PD.241: LLM-call path routes through _setLLMSights, which puts
+      // sights in dest._sightSources.llm and recomputes dest.suggestions.
+      // The sources model preserves user-listed items automatically.
       var _llmNewList = (Array.isArray(data.sights) ? data.sights : []).map(function(s){
         sidCtr++;
         var sLat = s.lat || (genCenter ? genCenter[0] + (Math.random() - .5) * .003 : null);
         var sLng = s.lng || (genCenter ? genCenter[1] + (Math.random() - .5) * .004 : null);
         return {id:"s"+sidCtr, type:"sight", n:s.name, st:s.st||s.name, note:s.desc||null, lat:sLat, lng:sLng, approx:!s.lat, iconic:!!s.iconic, durationHours:(typeof s.durationHours==="number"&&s.durationHours>0)?s.durationHours:null, url:s.url||null};
       });
-      _replaceDestSuggestions(destRef, _llmNewList);
+      _setLLMSights(destRef, _llmNewList);
       // Auto-seed iconic sights onto days so the user lands on a plan, not
       // an empty day grid. Non-iconic sights stay in the Explore list as
       // opt-in picks. See design-notes.md — this is the "Option C" default

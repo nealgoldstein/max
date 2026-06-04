@@ -1797,11 +1797,9 @@
       // Adding it here makes every newBrief carry the data forward,
       // which matches how PD.107 handles _userListedNames.
       _classificationByPlace: Object.assign({}, s._classificationByPlace || {}),
-      // PD.234: the two new bucketing containers — destinationsClassified
-      // and sightsClassified — are the source of truth for "is this a
-      // destination or a sight?" Carry them through publish/rebuild
-      // the same way classification metadata does.
-      _destinationsClassified: Object.assign({}, s._destinationsClassified || {}),
+      // PD.234: _sightsClassified is the source of truth for "is this a
+      // sight that hangs off a parent destination?" Carry it through
+      // publish/rebuild the same way classification metadata does.
       _sightsClassified: Object.assign({}, s._sightsClassified || {}),
       // Same persistence problem applied to the display-name map.
       _userListedDisplay: Object.assign({}, s._userListedDisplay || {}),
@@ -1951,20 +1949,13 @@
           && Object.keys(trip.brief._sightsClassified).length) {
         _tb._sightsClassified = Object.assign({}, trip.brief._sightsClassified);
       }
-      if ((!_tb._destinationsClassified || !Object.keys(_tb._destinationsClassified).length)
-          && trip && trip.brief && trip.brief._destinationsClassified
-          && Object.keys(trip.brief._destinationsClassified).length) {
-        _tb._destinationsClassified = Object.assign({}, trip.brief._destinationsClassified);
-      }
       if ((!_tb._classificationByPlace || !Object.keys(_tb._classificationByPlace).length)
           && trip && trip.brief && trip.brief._classificationByPlace
           && Object.keys(trip.brief._classificationByPlace).length) {
         _tb._classificationByPlace = Object.assign({}, trip.brief._classificationByPlace);
       }
-      var _pd236SightCount = Object.keys(_tb._sightsClassified || {}).length;
-      var _pd236DestCount = Object.keys(_tb._destinationsClassified || {}).length;
       console.log("[Max PD.236] publishTrip start. sightsClassified=" +
-        _pd236SightCount + " destinationsClassified=" + _pd236DestCount);
+        Object.keys(_tb._sightsClassified || {}).length);
     } catch (_) {}
 
     // v360.3 (#8 Phase 5): wayside-intent candidates are kept (the user
@@ -3835,13 +3826,9 @@
         }
         _pd223Attached.push(displayName + " → " + parentDest.place + " (" + (meta.parentRelation || "within") + ")");
       });
-      // PD.238: always log so we can see what state PD.223 ran with —
-      // not just the success case.
-      console.log("[Max PD.223] sightsClassified=" + Object.keys(_pd234Sights).length +
-        " destinations=" + (trip.destinations || []).length +
-        " attached=" + _pd223Attached.length);
       if (_pd223Attached.length) {
-        _pd223Attached.forEach(function (line) { console.log("  - " + line); });
+        console.log("[Max PD.223] attached " + _pd223Attached.length +
+          " user-listed sight(s) to parent destinations.");
       }
       // PD.237 (architectural ordering fix): publishTrip's existing
       // auto-seed call (line ~3252) runs BEFORE PD.223, so newly-attached
@@ -3849,6 +3836,12 @@
       // auto-seed for every destination now that suggestions has the
       // user-listed entries. The function's own existing-names guard
       // keeps this idempotent for sights already on a day.
+      //
+      // NOTE (PD.241 cleanup, 2026-06-04): the sources model lets
+      // _addUserListedSight refresh dest.suggestions, but auto-seed is
+      // what actually places sights onto specific day-plan slots. The
+      // sources model does NOT subsume PD.237 — the order-of-operations
+      // problem still requires a re-run after sights are attached.
       if (typeof global._autoSeedIconicSightsToDays === "function") {
         (trip.destinations || []).forEach(function (d) {
           if (!d || !Array.isArray(d.suggestions) || !d.suggestions.length) return;
