@@ -28330,8 +28330,21 @@ function renderActivityPicker(){
       + '<div style="font-size:11px;color:#999;margin-top:6px;">Max is building a soft architecture, a scaffolding, from your first thoughts. You’ll shape it from here.</div>'
       + '</div>';
   } else {
-    var curEntry = (_tb.entry || "").replace(/"/g,'&quot;');
-    var curExit  = (_tb.tbExit || "").replace(/"/g,'&quot;');
+    // PD.247: fall back to trip.brief when _tb is empty. _tb is hydrated
+    // from trip.brief by reopenPickerForEdit / reopenCandidateExplorer,
+    // but Discovery can be entered via paths that bypass those hydrators
+    // (e.g., back-from-trip nav, restore-last-screen). Without this
+    // fallback the inputs show placeholders even though the trip has
+    // entry/tbExit set, which reads as "my choice was lost."
+    var _briefEntry = (trip && trip.brief && trip.brief.entry) || "";
+    var _briefExit  = (trip && trip.brief && trip.brief.tbExit) || "";
+    var curEntry = (_tb.entry || _briefEntry || "").replace(/"/g,'&quot;');
+    var curExit  = (_tb.tbExit || _briefExit || "").replace(/"/g,'&quot;');
+    // Mirror the fallback back into _tb so downstream code that reads _tb
+    // (publishTrip's _typedEntry stash, the oninput handlers) sees the
+    // same value the inputs display.
+    if (!_tb.entry && _briefEntry) _tb.entry = _briefEntry;
+    if (!_tb.tbExit && _briefExit) _tb.tbExit = _briefExit;
 
     // ───── Round FN.F.1: "Single sight places to assign" banner ─────
     // When the picker has candidates that Max identified as single-
@@ -28648,33 +28661,30 @@ function renderActivityPicker(){
       +  '</div>'
       +'</div>'
       +'</div>'
-      // Arrival / Departure — light version on the picker (no Build gating,
-      // no rebuild trigger). Just stores _tb.entry / _tb.tbExit so the
-      // first build picks them up. Trip view has the heavier panel that
-      // rebuilds on change. Both read/write the same _tb fields, so a value
-      // set in one place displays in the other.
+      // PD.248: redesigned arrival/departure section.
+      // Old design had two free-text city inputs + a separate collapsed
+      // "Add details" expander — the simple inputs only captured city,
+      // half-committing to data the publish path then validated against
+      // kept candidates and silently cleared on mismatch. The new design:
+      //   • Mode pills (Fly / Train / Drive / Bus / Boat) per side
+      //   • One mode-adaptive gateway input (Airport / Station / Port /
+      //     Bus station / Border crossing) per side. Stores into the
+      //     same _tb.entry / _tb.tbExit so downstream publish is
+      //     unchanged.
+      //   • "Add booking details" expander reveals carrier, number,
+      //     date, time, confirmation, notes, URL (the rest of the
+      //     existing logistics fields, sans duplicate mode pills).
+      //
+      // Trip-view's _renderLogisticsCol keeps its existing layout; only
+      // the picker uses opts.omitModePills + opts.omitLabel to render
+      // the booking-details body without re-showing mode pills.
       +'<div style="margin-top:18px;padding:11px 14px;background:#fff;border:1px solid #e8e8e8;border-radius:8px;">'
       +  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:8px;">Arrival / Departure <span style="color:#aaa;font-weight:400;text-transform:none;letter-spacing:0;">— optional, but at some point you\'ll need to set (or change) it on the trip page</span></div>'
       // FN.C.1: Max-suggests card sits between the section header and
-      // the typed-input grid. When the card has nothing to suggest
-      // (region cache cold or no kept candidates yet), it's empty and
-      // doesn't take vertical space.
+      // the form. When the card has nothing to suggest (region cache
+      // cold or no kept candidates yet), it's empty and doesn't take
+      // vertical space.
       +  _fnc_cardHtml
-      +  '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'
-      +    '<div><label style="display:block;font-size:10.5px;color:#666;margin-bottom:4px;">Arriving at</label>'
-      +      '<input class="tb-act-add-inp" id="tb-picker-entry" placeholder="e.g. Zurich" autocomplete="off" value="'+curEntry+'" oninput="_tb.entry=this.value.trim();_pickerArrivalChanged&&_pickerArrivalChanged();" onblur="this.value=_titleCaseCity(this.value);_tb.entry=this.value.trim();_updatePlaceActivitySummary&&_updatePlaceActivitySummary();" />'
-      +    '</div>'
-      +    '<div><label style="display:block;font-size:10.5px;color:#666;margin-bottom:4px;">Departing from</label>'
-      +      '<input class="tb-act-add-inp" id="tb-picker-exit" placeholder="e.g. Zurich" autocomplete="off" value="'+curExit+'" oninput="_tb.tbExit=this.value.trim();_tb._exitTouched=true;_updatePlaceActivitySummary&&_updatePlaceActivitySummary();" onblur="this.value=_titleCaseCity(this.value);_tb.tbExit=this.value.trim();_updatePlaceActivitySummary&&_updatePlaceActivitySummary();" />'
-      +    '</div>'
-      +  '</div>'
-      // Round GA.1: buffer-toggle checkboxes removed. Buffers are now
-      // opt-in via the per-card "+ Add arrival/departure buffer"
-      // buttons on the trip view. Picker no longer asks about them.
-      // Round CK.1.3: collapsible logistics form on the picker, mirrors the
-      // trip view's panel. Captures into _tb.entryDetails / _tb.exitDetails
-      // (seeded from trip.brief if editing an existing trip). On build,
-      // buildFromCandidates merges these into trip.brief.
       + (function(){
           var ed = (_tb.entryDetails && Object.keys(_tb.entryDetails).length)
             ? _tb.entryDetails
@@ -28682,23 +28692,86 @@ function renderActivityPicker(){
           var xd = (_tb.exitDetails && Object.keys(_tb.exitDetails).length)
             ? _tb.exitDetails
             : ((trip && trip.brief && trip.brief.exitDetails) || {});
-          // Pull seeded values back into _tb so subsequent reads use them.
           _tb.entryDetails = Object.assign({}, ed);
           _tb.exitDetails = Object.assign({}, xd);
           var hasAny = Object.values(ed).some(function(v){return !!v;}) || Object.values(xd).some(function(v){return !!v;});
-          // Round CK.7: also stay expanded if the user just toggled it open
-          // or just picked a mode (_logisticsOpen flag). Round CK.9 removes
-          // the "Decide later" affordance — leaving fields blank is the
-          // implicit "decide later" state, no extra UI needed.
           var expanded = hasAny || (_tb && _tb._logisticsOpen);
-          return '<div style="margin-top:10px;border-top:1px dashed #d8d4c8;padding-top:8px;">'
+          // Mode pills (reuse the same logic _renderLogisticsCol uses)
+          function _pickerModeRowFor(side){
+            var modeKey = side === "entry" ? "entryMode" : "exitMode";
+            var curMode = (_tb && _tb[modeKey]) || (trip && trip.brief && trip.brief[modeKey]) || "fly";
+            var modeOptions = [
+              { v: "fly",   icon: "✈️",  label: "Fly"   },
+              { v: "train", icon: "🚂", label: "Train" },
+              { v: "drive", icon: "🚗", label: "Drive" },
+              { v: "bus",   icon: "🚌", label: "Bus"   },
+              { v: "boat",  icon: "⛴️",  label: "Boat"  }
+            ];
+            return '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px;">'
+              + modeOptions.map(function(opt){
+                  var on = (curMode === opt.v);
+                  var bg = on ? "#1a5fa8" : "#fff";
+                  var color = on ? "#fff" : "#666";
+                  var border = on ? "#1a5fa8" : "#d8d4c8";
+                  return '<button type="button" onclick="_setLogisticsMode(&#39;'+side+'&#39;,&#39;'+opt.v+'&#39;,&#39;picker&#39;);renderActivityPicker();" style="font-size:10px;font-weight:600;padding:3px 8px;border-radius:11px;border:1px solid '+border+';background:'+bg+';color:'+color+';cursor:pointer;font-family:inherit;">'
+                    + opt.icon + ' ' + opt.label
+                    + '</button>';
+                }).join("")
+              + '</div>';
+          }
+          // Mode-adaptive gateway label + placeholder.
+          function _gatewayLabel(mode){
+            switch(mode){
+              case "train": return "Station";
+              case "drive": return "City or border crossing";
+              case "bus":   return "Bus station";
+              case "boat":  return "Port";
+              case "fly":
+              default:      return "Airport";
+            }
+          }
+          function _gatewayPlaceholder(mode){
+            switch(mode){
+              case "train": return "e.g. Zürich HB";
+              case "drive": return "e.g. St. Margrethen border";
+              case "bus":   return "e.g. Carcoforo bus station";
+              case "boat":  return "e.g. Reykjavík harbor";
+              case "fly":
+              default:      return "e.g. Keflavík Airport (KEF)";
+            }
+          }
+          var entryMode = (_tb && _tb.entryMode) || (trip && trip.brief && trip.brief.entryMode) || "fly";
+          var exitMode  = (_tb && _tb.exitMode)  || (trip && trip.brief && trip.brief.exitMode)  || "fly";
+          function _col(side, sideLabel, curValue, mode){
+            var labelText = _gatewayLabel(mode);
+            var placeholder = _gatewayPlaceholder(mode);
+            var inputId = side === "entry" ? "tb-picker-entry" : "tb-picker-exit";
+            var stateField = side === "entry" ? "entry" : "tbExit";
+            var oninput = side === "entry"
+              ? "_tb.entry=this.value.trim();_pickerArrivalChanged&&_pickerArrivalChanged();"
+              : "_tb.tbExit=this.value.trim();_tb._exitTouched=true;_updatePlaceActivitySummary&&_updatePlaceActivitySummary();";
+            var onblur = "this.value=_titleCaseCity(this.value);_tb." + stateField + "=this.value.trim();_updatePlaceActivitySummary&&_updatePlaceActivitySummary();";
+            return '<div style="min-width:0;">'
+              + '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#888;margin-bottom:6px;">'+sideLabel+'</div>'
+              + _pickerModeRowFor(side)
+              + '<label style="display:block;font-size:10.5px;color:#666;margin-bottom:4px;">'+labelText+'</label>'
+              + '<input class="tb-act-add-inp" id="'+inputId+'" placeholder="'+placeholder+'" autocomplete="off" value="'+curValue+'" oninput="'+oninput+'" onblur="'+onblur+'" />'
+              + '</div>';
+          }
+          return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">'
+            +   _col("entry", "Arrival",  curEntry, entryMode)
+            +   _col("exit",  "Departure", curExit, exitMode)
+            + '</div>'
+            // Booking details — collapsed by default unless the user has
+            // already entered any of the fields (or just toggled it open).
+            + '<div style="margin-top:10px;border-top:1px dashed #d8d4c8;padding-top:8px;">'
             + '<button id="tb-picker-logistics-toggle" type="button" onclick="_toggleLogistics(&#39;picker&#39;)" style="font-size:11px;color:#1a5fa8;background:none;border:none;padding:2px 0;cursor:pointer;font-family:inherit;font-weight:600;">'
-            +   (expanded ? '▿ Hide arrival/departure details' : '▸ Add arrival/departure details')
+            +   (expanded ? '▿ Hide booking details' : '▸ Add booking details')
             + '</button>'
             + '<div id="tb-picker-logistics-form" style="margin-top:10px;'+(expanded?'':'display:none;')+'">'
             +   '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">'
-            +     _renderLogisticsCol("entry", "Arrival", ed, "picker")
-            +     _renderLogisticsCol("exit", "Departure", xd, "picker")
+            +     _renderLogisticsCol("entry", "Arrival",  ed, "picker", { omitModePills: true, omitLabel: true })
+            +     _renderLogisticsCol("exit",  "Departure", xd, "picker", { omitModePills: true, omitLabel: true })
             +   '</div>'
             +   '<div style="font-size:10px;color:#999;margin-top:8px;">Saved as you type. You can edit these later on the trip page.</div>'
             + '</div>'
@@ -51586,9 +51659,14 @@ function _gatewayWhy(point, anchorName){
 // the logistics form. Driven by _tb.entryMode / exitMode (picker) or
 // trip.brief.entryMode / exitMode (trip view) — same fields the chip
 // rendering reads, so the icon and verb update immediately.
-function _renderLogisticsCol(side, label, d, ctx){
+function _renderLogisticsCol(side, label, d, ctx, opts){
   d = d || {};
   ctx = ctx || "trip";
+  opts = opts || {};
+  // PD.248: opts.omitModePills and opts.omitLabel let the picker render
+  // mode pills + a gateway field inline and then call this helper to
+  // render JUST the booking-details body (carrier, number, date, time,
+  // confirmation, notes, URL) without duplicating the mode pills.
   function _esc(s){ return String(s||"").replace(/"/g,'&quot;'); }
   var timeLabel = side === "entry" ? "Arrives at" : "Departs at";
   // Round FN.4 / FN.8.2: tailor the "Number" label to the selected
@@ -51640,8 +51718,8 @@ function _renderLogisticsCol(side, label, d, ctx){
     // intrinsic min-content size, so inputs don't push the column out
     // of the available width and get clipped.
     + '<div style="min-width:0;">'
-    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#888;margin-bottom:6px;">'+label+'</div>'
-    +   pillsHtml
+    +   (opts.omitLabel ? '' : '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#888;margin-bottom:6px;">'+label+'</div>')
+    +   (opts.omitModePills ? '' : pillsHtml)
     +   '<div style="display:flex;flex-direction:column;gap:6px;">'
     +     '<label style="font-size:10.5px;color:#666;display:flex;flex-direction:column;gap:3px;">Carrier'
     +       '<input data-side="'+side+'" data-field="carrier" '+saveAttr+' placeholder="e.g. Lufthansa, SBB" value="'+_esc(d.carrier)+'" style="font-size:11.5px;padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;width:100%;box-sizing:border-box;min-width:0;" />'
