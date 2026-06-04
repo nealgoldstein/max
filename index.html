@@ -29320,24 +29320,28 @@ function renderActivityPicker(){
   // so showing greyed Trip / Destination pills is confusing rather
   // than informative. When a trip exists (re-edit flow), all three
   // pills appear and Save / 🔍 Search join the action set.
+  // PD.268: dropped the "Parameters" button that pointed at editConstraints.
+  // editConstraints ultimately calls renderTripBriefEdit(), the same Profile
+  // screen the explicit Profile button (added below in non-edit mode) opens
+  // via renderTripBrief(). Two buttons → one destination → confusion. Keep
+  // only the Profile button; users editing the brief land on the same form
+  // and can tap its own Edit affordance.
   var _pickerActionBtns = ''
     + '<button class="file-btn" onclick="goHome()" title="All trips">&larr; Home</button>'
-    + '<button class="file-btn" onclick="editConstraints()" title="Parameters — insurance, visa, hard constraints">&#9881; Parameters</button>'
     + '<button class="file-btn" onclick="showAskMaxModal()" title="Chat with an AI about this trip / region">&#128172; Ask</button>';
   if (_hasTrip) {
     _pickerActionBtns += ''
       + '<button class="file-btn" onclick="saveTrip()" title="Save">Save</button>'
       + '<button class="file-btn" onclick="openTripSearch()" title="Search this trip">&#x1F50D;</button>';
   }
-  // v359.39: Brief button — quick mid-picker access to the brief
-  // (place name, dates, pace, transport, etc.) without losing your
-  // current picks. _tb state is preserved across the round trip;
+  // v359.39 / PD.268: Profile button — quick access to the brief
+  // (place name, dates, pace, transport, etc.) without losing current
+  // picks. _tb state is preserved across the round trip;
   // continuePlaceModeToStep2 → findCandidates short-circuits regen
-  // when _mdcItems is already populated. Edit-mode hides it (the
-  // edit flow already has its own cancel path).
-  if (!isEdit) {
-    _pickerActionBtns += '<button class="file-btn" onclick="renderTripBrief()" title="Profile — dates, pace, transport, etc. without losing your picks">&#x270E; Profile</button>';
-  }
+  // when _mdcItems is already populated. Visible in BOTH fresh-build
+  // and edit modes — the old edit-mode hide assumed the now-removed
+  // editConstraints button covered it.
+  _pickerActionBtns += '<button class="file-btn" onclick="renderTripBrief()" title="Profile — dates, pace, transport, etc. without losing your picks">&#x270E; Profile</button>';
   // v359.6: ⚙ Settings gear — opens the user-level "My preferences" panel.
   // Sits before the 🔑 API-key button so it falls inside the main
   // action group rather than getting tucked next to the dim BYOK key.
