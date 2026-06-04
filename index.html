@@ -17258,13 +17258,12 @@ function _reconcileUserListedKeeps(){
     var orphanKeys = listedSightKeys.filter(function(k){
       return !_pd256PlacesInLLMSections[k];
     });
-    // No orphans → no catch-all needed. Remove any prior copy under
-    // either name so a re-render after Enhance (which can re-home a
-    // previously-orphan sight into a new LLM section) drops the
-    // section cleanly.
+    // No orphans → no catch-all needed. Remove any prior copy so a
+    // re-render after Enhance (which can re-home a previously-orphan
+    // sight into a new LLM section) drops the section cleanly.
     if (!orphanKeys.length) {
       _tb.placeActivities = (_tb.placeActivities || []).filter(function(it){
-        return !it || (it.section !== "Other things you listed" && it.section !== "Sights you listed");
+        return !it || it.section !== "Other things you listed";
       });
       return;
     }
@@ -17336,16 +17335,10 @@ function _reconcileUserListedKeeps(){
         _parentRelation: meta && meta.parentRelation || null
       };
     });
-    // PD.256: find the existing section under EITHER the old name
-    // ("Sights you listed") or the new one. During the transition the
-    // section may already exist with the old name from a prior render.
     var existingSights = _tb.placeActivities.find(function(it){
-      return it && (it.section === "Other things you listed" || it.section === "Sights you listed");
+      return it && it.section === "Other things you listed";
     });
     if (existingSights) {
-      existingSights.section = "Other things you listed";
-      existingSights.name = "Other things you listed";
-      existingSights.description = "Sights from your list that don't fit any of the activity categories Max generated. Most user-listed sights show up under their matching category (with a \"Your list\" badge); these are the ones nothing else surfaced — Max may need more context, or you may want to hit ✦ Enhance to find a better fit.";
       existingSights.requiredPlaces = sightRequiredPlaces;
       existingSights.checked = true;
       return;
@@ -19023,7 +19016,7 @@ function _renderPlaceActivityItems(){
     if (_synthHdrItem && typeof _synthHdrItem.type === "string") {
       if (_synthHdrItem.type === "synthetic-sights") _pd231Noun = "sight";
       else if (_synthHdrItem.type === "synthetic-stays") _pd231Noun = "stay";
-    } else if (sec === "Other things you listed" || sec === "Sights you listed") _pd231Noun = "sight";
+    } else if (sec === "Other things you listed") _pd231Noun = "sight";
     else if (sec === "Recommended overnight stays" || sec === "Other stays to consider") _pd231Noun = "stay";
     else if (/^routes\s*[&]\s*regions/i.test(sec)) _pd231Noun = "place";
     hdrWrap.innerHTML = '<div class="tb-act-section-title" style="flex:1;">' + _pmEsc(sec) + '</div>'
