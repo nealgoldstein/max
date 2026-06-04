@@ -18190,7 +18190,9 @@ function _renderPlaceActivityItems(){
       gapBtn.classList.remove("pm-gap-nudge");
       if (typeof analyzeCoverageGaps === "function") analyzeCoverageGaps(gapBtn);
     };
-    hdrActions.appendChild(gapBtn);
+    // PD.244: gapBtn appended at the END of this block — see the reorder
+    // pass after enhBtn so What's missing? / Enhance land leftmost as
+    // primary AI actions instead of buried after the utilities.
     // PD.154 / PD.155: nudge — pulse the button (no inline label, which
     // read as duplicate UI). After Discovery has kept candidates and
     // the user hasn't yet engaged the gap audit, the button pulses
@@ -18216,7 +18218,12 @@ function _renderPlaceActivityItems(){
       e.stopPropagation();
       if (typeof enhanceDiscovery === "function") enhanceDiscovery(enhBtn);
     };
-    hdrActions.appendChild(enhBtn);
+    // PD.244: prepend What's missing? + Enhance so they read as the
+    // leading actions on this surface (the AI moves the user takes), with
+    // Discovery notes / Print / Share / Select following as utilities.
+    // Order in DOM after this pass: gapBtn, enhBtn, …rest.
+    hdrActions.insertBefore(enhBtn, hdrActions.firstChild);
+    hdrActions.insertBefore(gapBtn, hdrActions.firstChild);
     // PD.87: action buttons render in the page header slot (under the
     // Discovery title) instead of inside the WHAT'S HERE TOC. Fall
     // back to inline placement if the slot isn't in the DOM yet
