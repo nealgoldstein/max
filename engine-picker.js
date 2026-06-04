@@ -3837,6 +3837,18 @@
         console.log("[Max PD.223] attached " + _pd223Attached.length + " user-listed within-sight(s) to parent destinations:");
         _pd223Attached.forEach(function (line) { console.log("  - " + line); });
       }
+      // PD.237 (architectural ordering fix): publishTrip's existing
+      // auto-seed call (line ~3252) runs BEFORE PD.223, so newly-attached
+      // user-listed sights never get a chance to be picked up. Re-run
+      // auto-seed for every destination now that suggestions has the
+      // user-listed entries. The function's own existing-names guard
+      // keeps this idempotent for sights already on a day.
+      if (typeof global._autoSeedIconicSightsToDays === "function") {
+        (trip.destinations || []).forEach(function (d) {
+          if (!d || !Array.isArray(d.suggestions) || !d.suggestions.length) return;
+          global._autoSeedIconicSightsToDays(d);
+        });
+      }
     } catch (e) {
       console.warn("[Max PD.223] sight-attachment failed (non-fatal):", e && e.message);
     }
