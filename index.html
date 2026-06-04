@@ -2534,6 +2534,11 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
          click). Sits left of Legend so the right-edge order is:
          Route · View larger · Day trips · Legend. Trip-mode only. -->
     <button type="button" id="map-daytrips-btn" style="position:absolute;top:8px;right:296px;z-index:499;background:rgba(255,255,255,.95);border:1px solid #e2d4f0;border-radius:6px;padding:5px 10px;box-shadow:0 1px 4px rgba(0,0,0,.15);font-size:11px;font-weight:600;color:#7a4fbf;cursor:pointer;font-family:inherit;display:none;" title="Show/hide day-trip loops on the map">🟣 Day trips</button>
+    <!-- PD.271: considered-sights toggle. Default hidden (display:none until
+         initMapConsideredBtn finds at least one considered sight). Lets the
+         user surface sights they unchecked in Discovery as outlined low-
+         opacity pins. -->
+    <button type="button" id="map-considered-btn" style="position:absolute;top:38px;right:296px;z-index:499;background:rgba(255,255,255,.95);border:1px solid #ddd0f0;border-radius:6px;padding:5px 10px;box-shadow:0 1px 4px rgba(0,0,0,.15);font-size:11px;font-weight:600;color:#5b3f8f;cursor:pointer;font-family:inherit;display:none;" title="Show/hide sights you considered in Discovery but didn't pick">👁 Show considered</button>
     <!-- v360.3 (#109): map pin legend. Renders the three shape +
          color pairings (overnight circle / day-trip square / wayside
          octagon) so the user can decode any pin without trial and
@@ -42199,6 +42204,48 @@ var _dayTripsShown = (function(){
   catch(e){ return true; }
 })();
 
+// PD.271: considered-sights map layer. Default off so the destination
+// map stays focused on what the user committed to. Toggle pill in
+// the map chrome lets them surface their "still on the radar" picks
+// as outlined low-opacity pins.
+var _consideredMapVisible = (function(){
+  try { var v = localStorage.getItem('max-considered-map'); return v === '1'; }
+  catch(e){ return false; }
+})();
+
+function initMapConsideredBtn(){
+  var btn = document.getElementById('map-considered-btn');
+  if (!btn) return;
+  // Count considered sights across the trip so the pill can show "Show 7 considered"
+  // instead of just "Show considered" — gives the user a sense of scale.
+  function countConsidered(){
+    var c = 0;
+    if (typeof trip !== "undefined" && trip && Array.isArray(trip.destinations)) {
+      trip.destinations.forEach(function(d){
+        (d.suggestions || []).forEach(function(s){ if (s && s._considered) c++; });
+      });
+    }
+    return c;
+  }
+  function paint(){
+    var n = countConsidered();
+    if (!n) { btn.style.display = 'none'; return; }
+    btn.style.display = 'inline-block';
+    btn.textContent = _consideredMapVisible
+      ? ('👁 Considered on (' + n + ')')
+      : ('👁 Show ' + n + ' considered');
+    btn.style.background = _consideredMapVisible ? '#5b3f8f' : 'rgba(255,255,255,.95)';
+    btn.style.color      = _consideredMapVisible ? '#fff'     : '#5b3f8f';
+  }
+  btn.onclick = function(){
+    _consideredMapVisible = !_consideredMapVisible;
+    try { localStorage.setItem('max-considered-map', _consideredMapVisible ? '1' : '0'); } catch(e){}
+    paint();
+    if (typeof updateMainMap === 'function') updateMainMap();
+  };
+  paint();
+}
+
 function initMapDayTripsBtn(){
   var btn = document.getElementById('map-daytrips-btn');
   if (!btn) return;
@@ -42636,10 +42683,15 @@ function updateMainMapMarkers(){
       addPin(coords,icon,onDay?(s.done?0.3:1):1,s,onDay?(s.type==='restaurant'?'restaurant':'sight'):(s.type==='restaurant'?'restaurant-suggestion':'suggestion'));
     });
     // Unscheduled suggestions (not on any day)
+    // PD.271: considered sights only render when the user opts in via
+    // the "Show N considered" pill. Default off so the map stays
+    // focused on the trip's actual route.
     (dest.suggestions||[]).forEach(function(s){
       var coords=getCoords(s,dest.suggestions,center); if(!coords) return;
       if(allDayItems[s.n]) return; // already rendered above
-      addPin(coords,makeMapIconDimmed('sight-nice'),1,s,'suggestion');
+      if (s._considered && !_consideredMapVisible) return;
+      var op = s._considered ? 0.45 : 1;
+      addPin(coords,makeMapIconDimmed('sight-nice'),op,s,'suggestion');
     });
     // Unscheduled restaurant suggestions
     (dest.restaurantSuggestions||[]).forEach(function(s){
@@ -42704,11 +42756,15 @@ function updateMainMapMarkers(){
   });
 
   // Unscheduled sights — dimmed blue suggestions (skip if scheduled, shown below)
+  // PD.271: considered sights only render when the user opts in via
+  // the "Show N considered" pill in the map chrome.
   if(_mainActiveLayers["sight-nice"]){
     (dest.suggestions||[]).forEach(function(s){
       if(!s.lat||!s.lng) return;
       if(scheduledSights[s.n]) return;
-      addPin([s.lat,s.lng],makeMapIcon("suggestion"),s.approx?0.45:0.65,s,'suggestion');
+      if (s._considered && !_consideredMapVisible) return;
+      var op = s._considered ? 0.35 : (s.approx?0.45:0.65);
+      addPin([s.lat,s.lng],makeMapIcon("suggestion"),op,s,'suggestion');
     });
   }
 
@@ -53746,9 +53802,27 @@ function buildExplorePane(dest){
     optHdr.textContent = autoOnDays > 0 ? "Optional picks — not on a day yet" : "Sights";
     sightsSec.appendChild(optHdr);
     if (sightOnly.length > 0) {
-      sightOnly.forEach(function(s){
+      // PD.270: split into kept and considered. Considered sights
+      // render below a small divider so the user sees them as
+      // "still on the radar" rather than mixed in with active picks.
+      var keptSights = sightOnly.filter(function(s){ return !s._considered; });
+      var consideredSights = sightOnly.filter(function(s){ return s._considered; });
+      keptSights.forEach(function(s){
         sightsSec.appendChild(mkExploreSuggestion(s,dest,"sight"));
       });
+      if (consideredSights.length) {
+        var consHdr = document.createElement("div");
+        consHdr.style.cssText = "font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#7a6294;margin:16px 0 6px;padding-top:8px;border-top:1px dashed #e2d4f0;";
+        consHdr.textContent = "Things you considered — " + consideredSights.length + " on the radar";
+        sightsSec.appendChild(consHdr);
+        var consNote = document.createElement("div");
+        consNote.style.cssText = "font-size:10.5px;color:#7a6294;margin:0 0 8px;line-height:1.5;";
+        consNote.textContent = "You unchecked these in Discovery. Tap Add to day to put one on a day.";
+        sightsSec.appendChild(consNote);
+        consideredSights.forEach(function(s){
+          sightsSec.appendChild(mkExploreSuggestion(s,dest,"sight"));
+        });
+      }
     } else {
       var noOpt = document.createElement("div");
       noOpt.style.cssText = "font-size:11px;color:#888;line-height:1.55;padding:8px 10px;background:#fafafa;border:1px dashed #e5e5e5;border-radius:6px;";
@@ -54257,11 +54331,39 @@ function buildRestaurantSection(dest){
 
 function mkExploreSuggestion(s,dest,type){
   var row=document.createElement("div"); row.className="exp-item"; row.id="exp-"+s.id;
+  // PD.270: a "considered" sight (the user unchecked it in Discovery
+  // but didn't reject it) renders muted with a "Considered" badge.
+  // The existing Add-to-day button is the promotion path: when the
+  // user adds it to a day, _recomputeSuggestions filters it out of
+  // dest.suggestions so it stops appearing here.
+  if (s && s._considered) {
+    row.style.opacity = "0.72";
+    row.style.borderLeft = "3px solid #d8c4e8";
+    row.style.paddingLeft = "4px";
+    row.title = "You considered this in Discovery but left it unchecked. Add to a day if you want it on the trip.";
+  }
   var icon=document.createElement("div"); icon.className="exp-item-icon";
   icon.textContent=type==="restaurant"?"\uD83C\uDF7D":"\u25CF";
   if(type==="sight")icon.style.color="#555";
+  if(s && s._considered) icon.style.color = "#a08acf";
   var body=document.createElement("div"); body.className="exp-item-body";
   var nm=document.createElement("div"); nm.className="exp-item-name"; nm.textContent=s.n||s.name||"";
+  // PD.270: badge for considered + also-considered. _considered means
+  // the user marked it considered (and there's no LLM equivalent
+  // currently). _alsoConsidered means BOTH the user considered it AND
+  // Max independently surfaced it \u2014 the row is the LLM's record
+  // promoted with a "you considered this too" affirmation.
+  if (s && s._considered) {
+    var consBadge = document.createElement("span");
+    consBadge.style.cssText = "display:inline-block;margin-left:8px;font-size:9.5px;font-weight:700;color:#5b3f8f;background:#f3eefa;border:1px solid #ddd0f0;border-radius:4px;padding:1px 6px;letter-spacing:.03em;text-transform:uppercase;vertical-align:middle;";
+    consBadge.textContent = "Considered";
+    nm.appendChild(consBadge);
+  } else if (s && s._alsoConsidered) {
+    var alsoBadge = document.createElement("span");
+    alsoBadge.style.cssText = "display:inline-block;margin-left:8px;font-size:9.5px;font-weight:700;color:#3a7a4e;background:#eaf5ee;border:1px solid #c4d8c8;border-radius:4px;padding:1px 6px;letter-spacing:.03em;text-transform:uppercase;vertical-align:middle;";
+    alsoBadge.textContent = "\u2713 You considered this";
+    nm.appendChild(alsoBadge);
+  }
   body.appendChild(nm);
   if(s.note){var nt=document.createElement("div");nt.className="exp-item-note";nt.textContent=s.note.length>120?s.note.substring(0,118)+"\u2026":s.note;body.appendChild(nt);}
   var acts=document.createElement("div"); acts.className="exp-item-acts";
