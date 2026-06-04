@@ -38865,20 +38865,23 @@ function _recomputeSuggestions(dest) {
   // PD.269: rejected items are filtered out via token-subset match —
   // anything whose tokens match a rejected entry is suppressed across
   // all sources.
+  // PD.272: considered items dedupe against earlier-priority sources
+  // (user/LLM/essentials/userAdded) via token-subset match too. The
+  // user considered "Skaftafell" and Max independently suggests
+  // "Skaftafell Glacier Outlets" — those are the same place. Drop
+  // the considered duplicate and mark the merged entry with
+  // _alsoConsidered:true so the renderer can show a "you considered
+  // this too" affirmation.
+  var nrm = (typeof globalThis._normPlaceName === "function")
+    ? globalThis._normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
   ["user", "llm", "essentials", "userAdded", "considered"].forEach(function(srcName) {
     (dest._sightSources[srcName] || []).forEach(function(item) {
       if (!item || !item.n) return;
       var key = item.n.toLowerCase();
       if (placed[key]) return;
-      // PD.269: drop anything the user rejected. Match by token-subset
-      // so "Reynisfjara" rejected blocks "Reynisfjara black sand beach"
-      // (LLM rewrite of the same place).
       if (_sightTokensMatchAny(item.n, rejectedSets)) return;
+      // Exact-key dupe across sources.
       if (seen[key] !== undefined) {
-        // Dupe across sources. User source promotes the existing item.
-        // PD.269: considered source dupe → add _considered flag to the
-        // existing record (so the LLM/user version stays visible but
-        // is also flagged "you considered this too" by the renderer).
         if (srcName === "user") {
           merged[seen[key]]._fromUserList = true;
           if (item._parentRelation) merged[seen[key]]._parentRelation = item._parentRelation;
@@ -38886,6 +38889,31 @@ function _recomputeSuggestions(dest) {
           merged[seen[key]]._alsoConsidered = true;
         }
         return;
+      }
+      // PD.272: token-subset dupe — applies to the considered source
+      // only. Scan merged for any entry whose tokens overlap (either
+      // direction). If found, this considered entry is the same place
+      // the LLM/user already surfaced; mark and skip.
+      if (srcName === "considered") {
+        var itemToks = (nrm(item.n) || "").split(/\s+/).filter(Boolean);
+        if (itemToks.length) {
+          var dupIdx = -1;
+          for (var mi = 0; mi < merged.length; mi++) {
+            var mItem = merged[mi];
+            if (!mItem || !mItem.n) continue;
+            var mToks = (nrm(mItem.n) || "").split(/\s+/).filter(Boolean);
+            if (!mToks.length) continue;
+            var mSet = {}; mToks.forEach(function(t){ mSet[t] = true; });
+            var iSet = {}; itemToks.forEach(function(t){ iSet[t] = true; });
+            var itemInM = itemToks.every(function(t){ return mSet[t]; });
+            var mInItem = mToks.every(function(t){ return iSet[t]; });
+            if (itemInM || mInItem) { dupIdx = mi; break; }
+          }
+          if (dupIdx >= 0) {
+            merged[dupIdx]._alsoConsidered = true;
+            return;
+          }
+        }
       }
       var clone = Object.assign({}, item);
       if (srcName === "user") clone._fromUserList = true;
@@ -42136,6 +42164,8 @@ function initMainMap(){
   // FN.D.1: same sticky-toggle treatment for day-trip loops. Default
   // visible so the existing user experience is unchanged.
   if (typeof initMapDayTripsBtn === "function") initMapDayTripsBtn();
+  // PD.271: considered-sights toggle (default off, hidden unless any exist).
+  if (typeof initMapConsideredBtn === "function") initMapConsideredBtn();
 }
 
 // v294.15: trip-route polyline state. Preference persists across sessions.
@@ -42213,37 +42243,34 @@ var _consideredMapVisible = (function(){
   catch(e){ return false; }
 })();
 
+function _paintConsideredBtn(){
+  var btn = document.getElementById('map-considered-btn');
+  if (!btn) return;
+  var n = 0;
+  if (typeof trip !== "undefined" && trip && Array.isArray(trip.destinations)) {
+    trip.destinations.forEach(function(d){
+      (d.suggestions || []).forEach(function(s){ if (s && s._considered) n++; });
+    });
+  }
+  if (!n) { btn.style.display = 'none'; return; }
+  btn.style.display = 'inline-block';
+  btn.textContent = _consideredMapVisible
+    ? ('👁 Considered on (' + n + ')')
+    : ('👁 Show ' + n + ' considered');
+  btn.style.background = _consideredMapVisible ? '#5b3f8f' : 'rgba(255,255,255,.95)';
+  btn.style.color      = _consideredMapVisible ? '#fff'     : '#5b3f8f';
+}
+
 function initMapConsideredBtn(){
   var btn = document.getElementById('map-considered-btn');
   if (!btn) return;
-  // Count considered sights across the trip so the pill can show "Show 7 considered"
-  // instead of just "Show considered" — gives the user a sense of scale.
-  function countConsidered(){
-    var c = 0;
-    if (typeof trip !== "undefined" && trip && Array.isArray(trip.destinations)) {
-      trip.destinations.forEach(function(d){
-        (d.suggestions || []).forEach(function(s){ if (s && s._considered) c++; });
-      });
-    }
-    return c;
-  }
-  function paint(){
-    var n = countConsidered();
-    if (!n) { btn.style.display = 'none'; return; }
-    btn.style.display = 'inline-block';
-    btn.textContent = _consideredMapVisible
-      ? ('👁 Considered on (' + n + ')')
-      : ('👁 Show ' + n + ' considered');
-    btn.style.background = _consideredMapVisible ? '#5b3f8f' : 'rgba(255,255,255,.95)';
-    btn.style.color      = _consideredMapVisible ? '#fff'     : '#5b3f8f';
-  }
   btn.onclick = function(){
     _consideredMapVisible = !_consideredMapVisible;
     try { localStorage.setItem('max-considered-map', _consideredMapVisible ? '1' : '0'); } catch(e){}
-    paint();
+    _paintConsideredBtn();
     if (typeof updateMainMap === 'function') updateMainMap();
   };
-  paint();
+  _paintConsideredBtn();
 }
 
 function initMapDayTripsBtn(){
@@ -43265,6 +43292,10 @@ function updateMainMap(){
       });
       dtBtn.style.display = _hasDayTrip ? 'inline-block' : 'none';
     }
+    // PD.271: refresh the considered-sights toggle count on every map
+    // update — destination changes (publish, Enhance) can add or remove
+    // considered sights, and the pill should reflect that immediately.
+    if (typeof _paintConsideredBtn === "function") _paintConsideredBtn();
 
     // v294.15: numbered + grouped pins (lifted from the deleted hero map).
     // Round-trip cities (same place visited as stop 1 AND stop 9) collapse
