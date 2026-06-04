@@ -18008,6 +18008,14 @@ function _renderPlaceActivityItems(){
 
     var hdrActions = document.createElement("div");
     hdrActions.style.cssText = "display:flex;align-items:center;gap:6px;";
+    // PD.246: uniform Discovery header button style. Neal wants every
+    // button white + same size for now; color strategy gets revisited
+    // later. State-driven branches (Discovery-notes-has-content,
+    // Select-active, Recently-rejected-alert, What's-missing-cream,
+    // Enhance-primary) are intentionally collapsed to one neutral
+    // utility pill. Toggle/state still conveyed via the label text
+    // (e.g., "✓ Selecting" vs "☑ Select"), not via fill color.
+    var _pd246HdrBtnStyle = "font-size:11px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;";
     // Round NC.X (export consolidation): the Discovery "⤓ Export
     // notes" button is retired. All export formats — PDF, calendar,
     // itinerary, Max-import, research notes — now live in the single
@@ -18033,12 +18041,7 @@ function _renderPlaceActivityItems(){
     // v359.58).
     var researchNotesBtn = document.createElement("button");
     researchNotesBtn.type = "button";
-    // PD.244: Discovery notes restyled to the utility-blue palette so it
-    // groups visually with Print / Share / Select. Previously purple-filled,
-    // which competed with Enhance for "primary action" attention. Filled
-    // state still indicates "has content"; just in blue rather than purple.
-    // Reserves purple-filled exclusively for Enhance (the primary CTA).
-    researchNotesBtn.style.cssText = "font-size:11px;font-weight:600;color:" + (_tripHasMeta ? "#fff" : "#1a5fa8") + ";background:" + (_tripHasMeta ? "#1a5fa8" : "#fff") + ";border:1px solid " + (_tripHasMeta ? "#1a5fa8" : "#c8d8f0") + ";border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;";
+    researchNotesBtn.style.cssText = _pd246HdrBtnStyle;
     var _tripLinkBadge = tripLinkCount > 0 ? ' <span style="font-size:9.5px;opacity:.85;">(' + tripLinkCount + ')</span>' : '';
     researchNotesBtn.innerHTML = '🔬 Discovery notes' + _tripLinkBadge;
     researchNotesBtn.title = _tripHasMeta
@@ -18052,7 +18055,7 @@ function _renderPlaceActivityItems(){
     // list of places organized by section.
     var printBtn = document.createElement("button");
     printBtn.type = "button";
-    printBtn.style.cssText = "font-size:11px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;";
+    printBtn.style.cssText = _pd246HdrBtnStyle;
     printBtn.innerHTML = '🖨 Print';
     printBtn.title = "Print this list (map and controls are hidden on the printed page)";
     printBtn.onclick = function(e){ e.stopPropagation(); _pmPrintDiscovery(); };
@@ -18061,7 +18064,7 @@ function _renderPlaceActivityItems(){
     // state encoded; recipient opens for read-only view.
     var shareBtn = document.createElement("button");
     shareBtn.type = "button";
-    shareBtn.style.cssText = "font-size:11px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;";
+    shareBtn.style.cssText = _pd246HdrBtnStyle;
     shareBtn.innerHTML = '🔗 Share';
     shareBtn.title = "Generate a shareable URL of this Discovery (read-only for the recipient)";
     shareBtn.onclick = function(e){ e.stopPropagation(); _pmShareDiscovery(); };
@@ -18076,12 +18079,7 @@ function _renderPlaceActivityItems(){
     bulkBtn.type = "button";
     bulkBtn.id = "pm-bulk-toggle";
     var bulkOn = (typeof _pmBulk !== "undefined" && _pmBulk.isOn && _pmBulk.isOn());
-    // PD.244 followup: border softens to #c8d8f0 in the inactive state so
-    // Select reads as part of the utility cluster (Print / Share /
-    // Discovery-notes-empty) instead of jumping out with a strong outline.
-    // Active state keeps the filled #1a5fa8 fill+border so the toggle
-    // affordance is still obvious.
-    bulkBtn.style.cssText = "font-size:11px;font-weight:600;color:" + (bulkOn ? "#fff" : "#1a5fa8") + ";background:" + (bulkOn ? "#1a5fa8" : "#fff") + ";border:1px solid " + (bulkOn ? "#1a5fa8" : "#c8d8f0") + ";border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;";
+    bulkBtn.style.cssText = _pd246HdrBtnStyle;
     bulkBtn.innerHTML = bulkOn ? '✓ Selecting' : '☑ Select';
     bulkBtn.title = bulkOn ? "Click to exit selection mode" : "Select multiple places, then apply an action to all of them";
     bulkBtn.onclick = function(e){
@@ -18099,7 +18097,7 @@ function _renderPlaceActivityItems(){
       if (!hist.length) return;
       var undoBtn = document.createElement("button");
       undoBtn.type = "button";
-      undoBtn.style.cssText = "position:relative;font-size:11px;font-weight:600;color:#a93826;background:#fff;border:1px solid #f2d4cc;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;";
+      undoBtn.style.cssText = "position:relative;" + _pd246HdrBtnStyle;
       undoBtn.innerHTML = '↶ Recently rejected (' + hist.length + ')';
       undoBtn.title = "Undo rejections — restore places you rejected with one click";
       undoBtn.onclick = function(e){
@@ -18183,7 +18181,7 @@ function _renderPlaceActivityItems(){
     // hit ✦ Enhance (which is right there) for a focused refinement.
     var gapBtn = document.createElement("button");
     gapBtn.type = "button";
-    gapBtn.style.cssText = "font-size:11px;font-weight:600;color:#a08a55;background:#fffaf0;border:1px solid #e6d8a8;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;";
+    gapBtn.style.cssText = _pd246HdrBtnStyle;
     gapBtn.innerHTML = '✦ What\'s missing?';
     gapBtn.title = "Ask Max what major themes / categories are absent from your current Discovery list.";
     gapBtn.onclick = function(e){
@@ -18216,7 +18214,7 @@ function _renderPlaceActivityItems(){
     // as the skip list. Appends new candidates; doesn't replace.
     var enhBtn = document.createElement("button");
     enhBtn.type = "button";
-    enhBtn.style.cssText = "font-size:11px;font-weight:600;color:#fff;background:#5b3f8f;border:1px solid #5b3f8f;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;";
+    enhBtn.style.cssText = _pd246HdrBtnStyle;
     enhBtn.innerHTML = '✦ Enhance';
     enhBtn.title = "Find places near what you've already chosen — and places that fit your pattern but weren't on your list. Existing picks are preserved.";
     enhBtn.onclick = function(e){
@@ -28924,11 +28922,17 @@ function renderActivityPicker(){
       var _hintN = _hintListed ? Object.keys(_hintListed).length : 0;
       var _hintHtml = "";
       if (_hintN >= 15) {
+        // PD.245: banner rewritten per Neal — drops the "your taste, Max's
+        // memory" tagline (lame) and adds the missing distinction between
+        // the two AI buttons: Enhance ADDS (adjacent picks) vs What's
+        // missing? AUDITS (theme gaps). Without this distinction users
+        // see two purple-ish CTAs and don't know which to click.
         _hintHtml = '<div style="flex:1;">'
           +   '<strong style="color:#5b3f8f;">You named ' + _hintN + ' places.</strong> '
-          +   'Max won\'t pad your list with famous gateways you\'ve already covered. Click '
-          +   '<strong>✦ Enhance</strong> above to find nearby sights and pattern-fits you might not have thought of. '
-          +   'AI is best as an adjacency tool — your taste, Max\'s memory.'
+          +   'Max won\'t pad your list with famous gateways you\'ve already covered. '
+          +   '<strong>✦ Enhance</strong> finds nearby sights and pattern-fits you might not have thought of. '
+          +   '<strong>✦ What\'s missing?</strong> flags themes (food, architecture, hikes) absent from your set. '
+          +   'AI is best as an adjacency tool.'
           + '</div>';
       } else if (_hintN < 5 && _tb && Array.isArray(_tb.candidates) && _tb.candidates.length > 0) {
         // PD.116: sentence-driven path. Max generated everything; the
