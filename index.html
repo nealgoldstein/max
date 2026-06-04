@@ -9716,6 +9716,40 @@ function enterApp(){
     _leftMode="trip";
     try { drawTripMode(); } catch (e) { console.error("[Max] drawTripMode failed:", e); }
     try { updateMainMap(); } catch (e) { console.warn("[Max] updateMainMap failed:", e && e.message); }
+    // PD.243: deferred apply of the picker's Roads-on checkbox. The
+    // checkbox writes _tb._pendingRoadsOn (and a localStorage fallback)
+    // instead of mutating _useRoadRouting directly, because the first
+    // updateMainMap with _useRoadRouting=true + empty OSRM cache hits a
+    // blank-map bug. Apply here AFTER the first clean render by
+    // mimicking the trip-view Roads button (set global, persist, call
+    // updateMainMap). Cleared once consumed.
+    try {
+      var _pending = null;
+      if (typeof _tb !== "undefined" && _tb && typeof _tb._pendingRoadsOn === "boolean") {
+        _pending = _tb._pendingRoadsOn;
+      } else {
+        try {
+          var _lp = localStorage.getItem('max-road-routing-pending');
+          if (_lp === '1' || _lp === '0') _pending = (_lp === '1');
+        } catch(_){}
+      }
+      if (_pending !== null && _pending !== _useRoadRouting) {
+        _useRoadRouting = _pending;
+        try { localStorage.setItem('max-road-routing', _useRoadRouting ? '1' : '0'); } catch(_){}
+        if (typeof initMapRoadsBtn === "function") {
+          // Repaint the trip-view's own Roads button to match.
+          var _rb = document.getElementById('map-roads-btn');
+          if (_rb) {
+            _rb.textContent = _useRoadRouting ? '🛤 Roads on' : '🛤 Roads off';
+            _rb.style.background = _useRoadRouting ? '#1a5fa8' : 'rgba(255,255,255,.95)';
+            _rb.style.color = _useRoadRouting ? '#fff' : '#1a5fa8';
+          }
+        }
+        if (typeof updateMainMap === "function") updateMainMap();
+      }
+      if (_tb) delete _tb._pendingRoadsOn;
+      try { localStorage.removeItem('max-road-routing-pending'); } catch(_){}
+    } catch (e) { console.warn("[Max PD.243] deferred roads-on apply failed:", e && e.message); }
     try { checkDeadlineAlert(); } catch (e) { console.warn("[Max] checkDeadlineAlert failed:", e && e.message); }
     // (PD.196: migration toast removed along with the migrations.)
   },50);
@@ -28788,13 +28822,22 @@ function renderActivityPicker(){
     // surface is for actions on the picker itself; this is a pre-flight
     // pref for the next view). Right: primary CTA, auto-width like the
     // profile's "Paste a list →" / "Ask Max to suggest places →" pair.
+    //
+    // PD.243: the checkbox does NOT mutate _useRoadRouting at toggle
+    // time. The trip view's first updateMainMap with _useRoadRouting=true
+    // + empty OSRM cache hits a pre-existing rendering bug where the
+    // map appears blank. Instead the checkbox stores the user's choice
+    // on _tb._pendingRoadsOn; enterApp applies it AFTER the first clean
+    // render by mimicking the trip-view Roads button (set the global,
+    // persist, call updateMainMap). That is the proven path. The actual
+    // first-render-with-roads-on bug should be diagnosed separately.
     +'<div class="tb-footer" style="flex-shrink:0;">'
     +  (hasGenerated
       ? ('<div style="display:flex;gap:14px;align-items:center;justify-content:flex-end;flex-wrap:wrap;">'
-        + '<label id="tb-roads-toggle-wrap" style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:#1a5fa8;font-weight:600;cursor:pointer;font-family:inherit;user-select:none;" title="Real-road routing for trip-view polylines (OSRM). Off draws straight lines.">'
+        + '<label id="tb-roads-toggle-wrap" style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:#1a5fa8;font-weight:600;cursor:pointer;font-family:inherit;user-select:none;" title="Real-road routing for trip-view polylines (OSRM). Off draws straight lines. Applies after the trip view loads.">'
         +   '<input id="tb-roads-toggle" type="checkbox" '
         +     ((typeof _useRoadRouting !== "undefined" && _useRoadRouting) ? 'checked' : '')
-        +     ' onchange="(function(c){ _useRoadRouting = !!c.checked; try { localStorage.setItem(\'max-road-routing\', _useRoadRouting ? \'1\' : \'0\'); } catch(_){} })(this);" '
+        +     ' onchange="(function(c){ if (typeof _tb !== \'undefined\' && _tb) _tb._pendingRoadsOn = !!c.checked; try { localStorage.setItem(\'max-road-routing-pending\', c.checked ? \'1\' : \'0\'); } catch(_){} })(this);" '
         +     'style="width:auto;margin:0;cursor:pointer;" />'
         +   '🛤 Roads on'
         + '</label>'
