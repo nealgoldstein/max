@@ -3833,8 +3833,12 @@
         });
         _pd223Attached.push(displayName + " → " + parentDest.place + " (" + (meta.parentRelation || "within") + ")");
       });
+      // PD.238: always log so we can see what state PD.223 ran with —
+      // not just the success case.
+      console.log("[Max PD.223] sightsClassified=" + Object.keys(_pd234Sights).length +
+        " destinations=" + (trip.destinations || []).length +
+        " attached=" + _pd223Attached.length);
       if (_pd223Attached.length) {
-        console.log("[Max PD.223] attached " + _pd223Attached.length + " user-listed within-sight(s) to parent destinations:");
         _pd223Attached.forEach(function (line) { console.log("  - " + line); });
       }
       // PD.237 (architectural ordering fix): publishTrip's existing
