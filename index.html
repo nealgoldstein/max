@@ -38527,6 +38527,17 @@ async function generateCityData(place,destId,_isAutoRetry){
       if(data.districts) destRef.generatedDistricts=data.districts;
       if(data.practicalInfo) destRef.generatedPracticalInfo=data.practicalInfo;
       if(data.transitHub) destRef.generatedTransitHub=data.transitHub;
+      // PD.239 (architectural): preserve user-listed sights across the
+      // LLM replacement. Without this, the entire pipeline (classifier
+      // → PD.223 → user-listed flag) runs sync during publishTrip and
+      // attaches Monument/Harpa. Then the LLM response fires async
+      // AFTER publishTrip returns, hits THIS line, and unconditionally
+      // overwrites suggestions[] with the LLM's list — wiping every
+      // _fromUserList item. The classifier's authoritative output gets
+      // erased by a downstream LLM cache write. We snapshot _fromUserList
+      // entries before the replace, then re-merge them after: dupes get
+      // upgraded with the user-listed flag, non-dupes get appended.
+      var _pd239UserListed = (destRef.suggestions || []).filter(function(s){ return s && s._fromUserList; });
       destRef.suggestions=(Array.isArray(data.sights)?data.sights:[]).map(function(s){
         sidCtr++;
         // v355.10: tightened scatter — see twin block above for the
@@ -38535,6 +38546,20 @@ async function generateCityData(place,destId,_isAutoRetry){
         var sLng=s.lng||(genCenter?genCenter[1]+(Math.random()-.5)*.004:null);
         return {id:"s"+sidCtr,type:"sight",n:s.name,st:s.st||s.name,note:s.desc||null,lat:sLat,lng:sLng,approx:!s.lat,iconic:!!s.iconic,durationHours:(typeof s.durationHours==="number"&&s.durationHours>0)?s.durationHours:null,url:s.url||null};
       });
+      if (_pd239UserListed.length) {
+        _pd239UserListed.forEach(function(userSight){
+          var matchIdx = destRef.suggestions.findIndex(function(s){
+            return s && s.n && userSight.n && s.n.toLowerCase() === userSight.n.toLowerCase();
+          });
+          if (matchIdx >= 0) {
+            destRef.suggestions[matchIdx]._fromUserList = true;
+            destRef.suggestions[matchIdx]._parentRelation = userSight._parentRelation;
+          } else {
+            destRef.suggestions.push(userSight);
+          }
+        });
+        console.log("[Max PD.239] preserved " + _pd239UserListed.length + " user-listed sight(s) across LLM suggestion replacement in " + destRef.place);
+      }
       // Auto-seed iconic sights onto days so the user lands on a plan, not
       // an empty day grid. Non-iconic sights stay in the Explore list as
       // opt-in picks. See design-notes.md — this is the "Option C" default
