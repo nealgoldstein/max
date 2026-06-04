@@ -38102,6 +38102,55 @@ async function fetchCityMeta(dest){
   window[lockKey]=false;
 }
 
+// PD.240 (architectural — single suggestion writer):
+//
+// Before this, three independent paths assigned to dest.suggestions:
+//   1. generateCityData cached path (line ~38377)
+//   2. generateCityData LLM-call path (line ~38530)
+//   3. PD.223 attach in publishTrip (engine-picker.js)
+//
+// Paths 1 + 2 used wholesale REPLACE; path 3 used insert/upgrade. They
+// racing each other (LLM async, PD.223 sync) was exactly what wiped
+// user-listed sights — the LLM response would fire after PD.223 and
+// overwrite the _fromUserList items.
+//
+// This function is the SINGLE writer for the LLM/cache paths. It
+// snapshots _fromUserList entries, performs the replace, and re-merges
+// the user-listed entries back in (upgrade dupes, append new). PD.223
+// remains as the writer for user-explicit additions; this function
+// guarantees the LLM/cache writes never erase what PD.223 wrote.
+function _replaceDestSuggestions(dest, newList) {
+  if (!dest) return;
+  if (!Array.isArray(dest.suggestions)) dest.suggestions = [];
+  // Snapshot user-listed items (PD.223's contributions) so we can
+  // restore them after the replace.
+  var preserve = dest.suggestions.filter(function (s) {
+    return s && s._fromUserList;
+  });
+  dest.suggestions = (Array.isArray(newList) ? newList : []).slice();
+  if (!preserve.length) return;
+  // Re-merge each preserved item: if the new list contains a same-name
+  // entry, mark it as user-listed; otherwise append the preserved item.
+  preserve.forEach(function (userSight) {
+    if (!userSight || !userSight.n) return;
+    var key = userSight.n.toLowerCase();
+    var matchIdx = dest.suggestions.findIndex(function (s) {
+      return s && s.n && s.n.toLowerCase() === key;
+    });
+    if (matchIdx >= 0) {
+      dest.suggestions[matchIdx]._fromUserList = true;
+      if (userSight._parentRelation) {
+        dest.suggestions[matchIdx]._parentRelation = userSight._parentRelation;
+      }
+    } else {
+      dest.suggestions.push(userSight);
+    }
+  });
+  console.log("[Max PD.240] replace-with-preserve on " + (dest.place || "?") +
+    ": " + preserve.length + " user-listed sight(s) preserved across replacement");
+}
+if (typeof globalThis !== "undefined") globalThis._replaceDestSuggestions = _replaceDestSuggestions;
+
 // Auto-seed LLM-flagged iconic sights into a destination's day plan so the
 // user lands on a plausible schedule rather than an empty grid. Non-iconic
 // sights stay in dest.suggestions for the user to opt into via the Explore
@@ -38383,21 +38432,19 @@ async function generateCityData(place,destId,_isAutoRetry){
   if(!_isAutoRetry && _generatedCityData[key] && !_generatedCityData[key].loading){
     var _cached = _generatedCityData[key];
     var _destRef = (typeof getDest === "function") ? getDest(destId) : null;
-    if (_destRef && (!Array.isArray(_destRef.suggestions) || !_destRef.suggestions.length) && _cached.sights) {
+    // PD.240: cached path now routes through the single writer too.
+    // The empty-only guard is also lifted — _replaceDestSuggestions
+    // preserves user-listed items across the replace, so the cached
+    // result can land even if PD.223 already added user sights.
+    if (_destRef && _cached.sights) {
       var _genCenter = _cached.cityCenter && _cached.cityCenter[0] ? _cached.cityCenter : (typeof getCityCenter === "function" ? getCityCenter(_destRef.place) : null);
-      _destRef.suggestions = (Array.isArray(_cached.sights) ? _cached.sights : []).map(function(s){
+      var _cachedNewList = (Array.isArray(_cached.sights) ? _cached.sights : []).map(function(s){
         sidCtr++;
-        // v355.10: random scatter dropped from ±0.025/0.030 deg
-        // (~2-3 km radius) to ±0.003/0.004 deg (~300-400 m). The
-        // wider radius was throwing approx-coord pins into the
-        // ocean for coastal cities (Vík south coast: half the
-        // random pins landed offshore). Tight halo keeps sights
-        // distinguishable visually while staying inside the city
-        // footprint until Nominatim resolves real coords.
         var sLat = s.lat || (_genCenter ? _genCenter[0] + (Math.random() - .5) * .003 : null);
         var sLng = s.lng || (_genCenter ? _genCenter[1] + (Math.random() - .5) * .004 : null);
         return {id:"s"+sidCtr, type:"sight", n:s.name, st:s.st||s.name, note:s.desc||null, lat:sLat, lng:sLng, approx:!s.lat, iconic:!!s.iconic, durationHours:(typeof s.durationHours==="number"&&s.durationHours>0)?s.durationHours:null, url:s.url||null};
       });
+      _replaceDestSuggestions(_destRef, _cachedNewList);
       if (_cached.districts && !_destRef.generatedDistricts) _destRef.generatedDistricts = _cached.districts;
       if (_cached.practicalInfo && !_destRef.generatedPracticalInfo) _destRef.generatedPracticalInfo = _cached.practicalInfo;
       if (_cached.transitHub && !_destRef.generatedTransitHub) _destRef.generatedTransitHub = _cached.transitHub;
@@ -38527,39 +38574,17 @@ async function generateCityData(place,destId,_isAutoRetry){
       if(data.districts) destRef.generatedDistricts=data.districts;
       if(data.practicalInfo) destRef.generatedPracticalInfo=data.practicalInfo;
       if(data.transitHub) destRef.generatedTransitHub=data.transitHub;
-      // PD.239 (architectural): preserve user-listed sights across the
-      // LLM replacement. Without this, the entire pipeline (classifier
-      // → PD.223 → user-listed flag) runs sync during publishTrip and
-      // attaches Monument/Harpa. Then the LLM response fires async
-      // AFTER publishTrip returns, hits THIS line, and unconditionally
-      // overwrites suggestions[] with the LLM's list — wiping every
-      // _fromUserList item. The classifier's authoritative output gets
-      // erased by a downstream LLM cache write. We snapshot _fromUserList
-      // entries before the replace, then re-merge them after: dupes get
-      // upgraded with the user-listed flag, non-dupes get appended.
-      var _pd239UserListed = (destRef.suggestions || []).filter(function(s){ return s && s._fromUserList; });
-      destRef.suggestions=(Array.isArray(data.sights)?data.sights:[]).map(function(s){
+      // PD.240: LLM-call path routes through the single writer too.
+      // Replaces PD.239's inline preserve-and-re-merge block — same
+      // logic, just lives in _replaceDestSuggestions now so both
+      // paths (cached and LLM-call) share one implementation.
+      var _llmNewList = (Array.isArray(data.sights) ? data.sights : []).map(function(s){
         sidCtr++;
-        // v355.10: tightened scatter — see twin block above for the
-        // why (coastal-city pins were drifting into the ocean).
-        var sLat=s.lat||(genCenter?genCenter[0]+(Math.random()-.5)*.003:null);
-        var sLng=s.lng||(genCenter?genCenter[1]+(Math.random()-.5)*.004:null);
-        return {id:"s"+sidCtr,type:"sight",n:s.name,st:s.st||s.name,note:s.desc||null,lat:sLat,lng:sLng,approx:!s.lat,iconic:!!s.iconic,durationHours:(typeof s.durationHours==="number"&&s.durationHours>0)?s.durationHours:null,url:s.url||null};
+        var sLat = s.lat || (genCenter ? genCenter[0] + (Math.random() - .5) * .003 : null);
+        var sLng = s.lng || (genCenter ? genCenter[1] + (Math.random() - .5) * .004 : null);
+        return {id:"s"+sidCtr, type:"sight", n:s.name, st:s.st||s.name, note:s.desc||null, lat:sLat, lng:sLng, approx:!s.lat, iconic:!!s.iconic, durationHours:(typeof s.durationHours==="number"&&s.durationHours>0)?s.durationHours:null, url:s.url||null};
       });
-      if (_pd239UserListed.length) {
-        _pd239UserListed.forEach(function(userSight){
-          var matchIdx = destRef.suggestions.findIndex(function(s){
-            return s && s.n && userSight.n && s.n.toLowerCase() === userSight.n.toLowerCase();
-          });
-          if (matchIdx >= 0) {
-            destRef.suggestions[matchIdx]._fromUserList = true;
-            destRef.suggestions[matchIdx]._parentRelation = userSight._parentRelation;
-          } else {
-            destRef.suggestions.push(userSight);
-          }
-        });
-        console.log("[Max PD.239] preserved " + _pd239UserListed.length + " user-listed sight(s) across LLM suggestion replacement in " + destRef.place);
-      }
+      _replaceDestSuggestions(destRef, _llmNewList);
       // Auto-seed iconic sights onto days so the user lands on a plan, not
       // an empty day grid. Non-iconic sights stay in the Explore list as
       // opt-in picks. See design-notes.md — this is the "Option C" default
