@@ -2509,6 +2509,14 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
     </div>
     <style>@keyframes max-roads-spin{to{transform:rotate(360deg);}}</style>
     <button type="button" id="map-larger-btn" style="position:absolute;top:8px;right:96px;z-index:499;background:rgba(255,255,255,.95);border:1px solid #cfe1f7;border-radius:6px;padding:5px 10px;box-shadow:0 1px 4px rgba(0,0,0,.15);font-size:11px;font-weight:600;color:#1a5fa8;cursor:pointer;font-family:inherit;display:none;" title="Open the trip route in a separate window">🗺 View larger →</button>
+    <!-- PD.296: secondary controls collapsed into a ⋯ menu. Only
+         Route + View larger stay surfaced as the high-frequency
+         actions. The menu button lives where Legend used to be; on
+         click it toggles #map-menu-popover, which JS populates with
+         the four secondary buttons (Legend, Day trips, Roads,
+         Considered) relocated from their old absolute positions. -->
+    <button type="button" id="map-menu-btn" style="position:absolute;top:8px;right:200px;z-index:499;background:rgba(255,255,255,.95);border:1px solid #cfe1f7;border-radius:6px;padding:5px 10px;box-shadow:0 1px 4px rgba(0,0,0,.15);font-size:14px;font-weight:700;color:#1a5fa8;cursor:pointer;font-family:inherit;display:none;line-height:1;" title="Map options">⋯</button>
+    <div id="map-menu-popover" style="position:absolute;top:38px;right:200px;z-index:500;display:none;background:#fff;border:1px solid #d6e1f0;border-radius:8px;padding:6px;box-shadow:0 4px 16px rgba(0,0,0,.18);min-width:200px;flex-direction:column;gap:4px;"></div>
     <!-- Round FN.D.1: day-trips toggle. Same vocabulary as the Route
          toggle (sticky pref via localStorage, label flips ON/OFF on
          click). Sits left of Legend so the right-edge order is:
@@ -42486,6 +42494,10 @@ function initMainMap(){
   if (typeof initMapDayTripsBtn === "function") initMapDayTripsBtn();
   // PD.271: considered-sights toggle (default off, hidden unless any exist).
   if (typeof initMapConsideredBtn === "function") initMapConsideredBtn();
+  // PD.296: ⋯ menu relocates the four secondary buttons into a
+  // popover. Must run AFTER the four button inits so it can find
+  // them in the DOM and move them.
+  if (typeof initMapMenuBtn === "function") initMapMenuBtn();
 }
 
 // v294.15: trip-route polyline state. Preference persists across sessions.
@@ -42592,6 +42604,85 @@ function initMapConsideredBtn(){
   };
   _paintConsideredBtn();
 }
+
+// PD.296: ⋯ menu that hosts the four secondary map controls
+// (Legend, Day trips, Roads, Considered). On first run, relocate
+// those buttons from their old absolute positions into the popover
+// so their existing paint/click code keeps working unchanged — just
+// inside a different container. After relocation, the buttons'
+// display:none/inline-block toggling still works; we just show the
+// ⋯ trigger whenever any of the four is non-hidden.
+function initMapMenuBtn(){
+  var trigger = document.getElementById('map-menu-btn');
+  var popover = document.getElementById('map-menu-popover');
+  if (!trigger || !popover) return;
+  var hostIds = ['map-legend-btn', 'map-daytrips-btn', 'map-roads-btn', 'map-considered-btn'];
+  // Relocate each button into the popover and strip the old
+  // absolute-position styles so they stack as flex items. Idempotent:
+  // moves only buttons not already inside the popover.
+  hostIds.forEach(function(id){
+    var b = document.getElementById(id);
+    if (!b) return;
+    if (b.parentNode === popover) return;
+    b.style.position = 'static';
+    b.style.top = 'auto';
+    b.style.right = 'auto';
+    b.style.left = 'auto';
+    b.style.bottom = 'auto';
+    b.style.width = '100%';
+    b.style.textAlign = 'left';
+    b.style.boxShadow = 'none';
+    popover.appendChild(b);
+  });
+  // For the floating legend popover (#map-legend-popover) — its
+  // absolute coords were anchored to the old map-legend-btn
+  // position. Reanchor under the new ⋯ menu so it doesn't float
+  // alone in the upper right.
+  var legendPop = document.getElementById('map-legend-popover');
+  if (legendPop) {
+    legendPop.style.top = '38px';
+    legendPop.style.right = '8px';
+  }
+  function _anyChildVisible(){
+    var any = false;
+    hostIds.forEach(function(id){
+      var b = document.getElementById(id);
+      if (b && b.style.display !== 'none' && b.offsetParent !== null) any = true;
+      // offsetParent === null when the element OR an ancestor is
+      // display:none, so we double-check by reading the inline style
+      // directly — the inline style is what the paint functions set.
+      else if (b && b.style.display && b.style.display !== 'none') any = true;
+    });
+    return any;
+  }
+  function _paintTrigger(){
+    if (_leftMode === "trip" && _anyChildVisible()) {
+      trigger.style.display = 'inline-block';
+    } else {
+      trigger.style.display = 'none';
+      popover.style.display = 'none';
+    }
+  }
+  trigger.onclick = function(ev){
+    ev.stopPropagation();
+    var shown = popover.style.display === 'flex';
+    popover.style.display = shown ? 'none' : 'flex';
+  };
+  // Close on outside click.
+  document.addEventListener('click', function(ev){
+    if (popover.style.display !== 'flex') return;
+    if (ev.target === trigger) return;
+    if (popover.contains(ev.target)) return;
+    popover.style.display = 'none';
+  });
+  // Repaint the trigger whenever the map redraws — paint functions
+  // for the children run inside updateMainMap, so trigger visibility
+  // needs to follow.
+  _paintTrigger();
+  // Expose so updateMainMap can call after children paint.
+  if (typeof globalThis !== "undefined") globalThis._paintMapMenuTrigger = _paintTrigger;
+}
+if (typeof globalThis !== "undefined") globalThis.initMapMenuBtn = initMapMenuBtn;
 
 function initMapDayTripsBtn(){
   var btn = document.getElementById('map-daytrips-btn');
@@ -43616,6 +43707,9 @@ function updateMainMap(){
     // update — destination changes (publish, Enhance) can add or remove
     // considered sights, and the pill should reflect that immediately.
     if (typeof _paintConsideredBtn === "function") _paintConsideredBtn();
+    // PD.296: repaint the ⋯ trigger visibility after the children's
+    // paint functions have run — trigger shows iff any child does.
+    if (typeof _paintMapMenuTrigger === "function") _paintMapMenuTrigger();
 
     // v294.15: numbered + grouped pins (lifted from the deleted hero map).
     // Round-trip cities (same place visited as stop 1 AND stop 9) collapse
@@ -44665,6 +44759,11 @@ function updateMainMap(){
   } else {
     if (routeBtn) routeBtn.style.display = 'none';
     if (largerBtn) largerBtn.style.display = 'none';
+    // PD.296: hide the ⋯ menu trigger + popover in dest mode too.
+    var _menuBtnD = document.getElementById('map-menu-btn');
+    if (_menuBtnD) _menuBtnD.style.display = 'none';
+    var _menuPopD = document.getElementById('map-menu-popover');
+    if (_menuPopD) _menuPopD.style.display = 'none';
     var _legendBtnD = document.getElementById('map-legend-btn');
     if (_legendBtnD) _legendBtnD.style.display = 'none';
     var _legendPopD = document.getElementById('map-legend-popover');
