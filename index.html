@@ -8394,26 +8394,37 @@ async function _reconcileListedSightsToSections() {
   // places (cached, so usually free) and add THEIR description tokens.
   // That captures the semantic shape of what "Visit natural wonders"
   // actually contains, not just the LLM's prose about it.
+  // PD.281: split the section's tokens into IDENTITY (name +
+  // description — what the section IS) and ENRICHMENT (placed
+  // places + their wikis — what the section CONTAINS). The earlier
+  // single-set scoring let regional co-occurrence dominate: a sight
+  // in northern Iceland matched any section with northern-Iceland
+  // places in it, regardless of category. Now identity gates
+  // eligibility (the sight must share at least one identity token
+  // with the section), and the combined score breaks ties between
+  // categorically-eligible sections.
   async function _buildSectionVec(it) {
-    var blob = (it.section || "") + " " + (it.name || "") + " " + (it.description || "");
-    var placeBlob = "";
+    var identityBlob = (it.section || "") + " " + (it.name || "") + " " + (it.description || "");
+    var enrichBlob = "";
     var placeNames = (it.requiredPlaces || [])
       .map(function(p){ return p && p.place ? p.place : ""; })
       .filter(Boolean);
-    placeBlob += " " + placeNames.join(" ");
-    // Pull cached wiki summaries for existing places (uncached fetches
-    // are fine too — same provider, cached after first hit).
+    enrichBlob += " " + placeNames.join(" ");
     if (placeNames.length && fetcher) {
       var wikis = await Promise.all(placeNames.map(function(name){
         return fetcher(name, "").catch(function(){ return null; });
       }));
       wikis.forEach(function(w){
         if (!w) return;
-        if (w.description) placeBlob += " " + w.description;
-        if (w.extract) placeBlob += " " + w.extract;
+        if (w.description) enrichBlob += " " + w.description;
+        if (w.extract) enrichBlob += " " + w.extract;
       });
     }
-    return { item: it, tokens: _toSet(_tokens(blob + " " + placeBlob)) };
+    return {
+      item: it,
+      identityTokens: _toSet(_tokens(identityBlob)),
+      enrichTokens: _toSet(_tokens(enrichBlob))
+    };
   }
   var fetcher = window.MaxPickerUI && window.MaxPickerUI._fetchWikiSummary;
   if (!fetcher) {
@@ -8431,7 +8442,15 @@ async function _reconcileListedSightsToSections() {
     return hits;
   }
 
-  var THRESHOLD = 1; // at least one meaningful shared token
+  // PD.281: eligibility gate. A section is a heuristic-eligible match
+  // ONLY if it shares at least one identity token (from section name
+  // or description) with the sight. Regional co-occurrence alone
+  // (canyon X is near canyon Y, so it matches Y's section about
+  // scenic drives) is not enough — that's how Jökulsárgljúfur
+  // Canyon landed under "Drive scenic routes" in PD.279's trace.
+  // The combined identity + enrichment score still picks the best
+  // among eligible sections; non-eligible ones fall to the LLM pass.
+  var IDENTITY_MIN = 1;
   var placed = [];
   await Promise.all(orphans.map(function(o){
     return fetcher(o.name, o.country)
@@ -8450,19 +8469,41 @@ async function _reconcileListedSightsToSections() {
         if (!sightTokens.length) return;
         var best = null;
         var bestScore = 0;
+        var bestIdentity = 0;
         sectionVecs.forEach(function(sv){
-          var s = _score(sightTokens, sv.tokens);
-          if (s > bestScore) { bestScore = s; best = sv; }
+          var identityHits = _score(sightTokens, sv.identityTokens);
+          if (identityHits < IDENTITY_MIN) return; // not categorically eligible
+          var enrichHits = _score(sightTokens, sv.enrichTokens);
+          var combined = identityHits * 3 + enrichHits;
+          if (combined > bestScore) {
+            bestScore = combined;
+            bestIdentity = identityHits;
+            best = sv;
+          }
         });
-        if (!best || bestScore < THRESHOLD) return;
+        if (!best) return;
+        // PD.280: re-resolve the target item by section name AT PUSH
+        // TIME. best.item was captured when sectionVecs was built; by
+        // the time this .then fires, render-time synthesizers may
+        // have replaced _tb.placeActivities entirely (the filter
+        // reassignment in _ensureSyntheticSightsSection), leaving
+        // best.item as a detached object reference. Pushing to a
+        // detached object means the placement is invisible to the
+        // rebuild and to render-time orphan detection. Re-resolve
+        // by section name so we mutate the CURRENT array's item.
+        var _targetSection = best.item.section;
+        var _currentItem = (_tb.placeActivities || []).find(function(it){
+          return it && it.section === _targetSection;
+        });
+        if (!_currentItem) return;
         // Don't double-add if some race already placed it.
         var k = o.key;
-        var already = (best.item.requiredPlaces || []).some(function(p){
+        var already = (_currentItem.requiredPlaces || []).some(function(p){
           return p && p.place && normFn(p.place) === k;
         });
         if (already) return;
-        if (!Array.isArray(best.item.requiredPlaces)) best.item.requiredPlaces = [];
-        best.item.requiredPlaces.push({
+        if (!Array.isArray(_currentItem.requiredPlaces)) _currentItem.requiredPlaces = [];
+        _currentItem.requiredPlaces.push({
           place: o.name,
           country: o.country,
           nights: 0,
@@ -8471,7 +8512,7 @@ async function _reconcileListedSightsToSections() {
           _fromUserList: true,
           _reconciledScore: bestScore
         });
-        placed.push({ place: o.name, section: best.item.section, score: bestScore });
+        placed.push({ place: o.name, section: _targetSection, score: bestScore });
       });
   }));
   console.log("[PD.257] heuristic placed " + placed.length + " of " + orphans.length + " sight(s)"
@@ -8587,13 +8628,19 @@ async function _reconcileListedSightsToSections() {
         llmNullDecisions.push(o.name);
         return;
       }
-      var target = sectionsByName[assigned];
-      if (!target) {
+      // PD.280: same fix as the heuristic — sectionsByName was built
+      // when sectionVecs was snapshotted; re-resolve by section name
+      // against the CURRENT _tb.placeActivities so the push is
+      // visible to downstream render-time orphan detection.
+      var _currentTarget = (_tb.placeActivities || []).find(function(it){
+        return it && it.section === assigned;
+      });
+      if (!_currentTarget) {
         console.warn("[PD.259] LLM picked unknown section '" + assigned + "' for " + o.name);
         return;
       }
       var alreadyToks = _pd258TokensOf(o.key);
-      var dup = (target.requiredPlaces || []).some(function(p){
+      var dup = (_currentTarget.requiredPlaces || []).some(function(p){
         if (!p || !p.place) return false;
         var pToks = _pd258TokensOf(p.place);
         var pTokSet = {};
@@ -8601,8 +8648,8 @@ async function _reconcileListedSightsToSections() {
         return alreadyToks.every(function(t){ return pTokSet[t]; });
       });
       if (dup) return;
-      if (!Array.isArray(target.requiredPlaces)) target.requiredPlaces = [];
-      target.requiredPlaces.push({
+      if (!Array.isArray(_currentTarget.requiredPlaces)) _currentTarget.requiredPlaces = [];
+      _currentTarget.requiredPlaces.push({
         place: o.name,
         country: o.country,
         nights: 0,
@@ -8611,7 +8658,7 @@ async function _reconcileListedSightsToSections() {
         _fromUserList: true,
         _reconciledByLlm: true
       });
-      llmPlaced.push({ place: o.name, section: target.section });
+      llmPlaced.push({ place: o.name, section: _currentTarget.section });
     });
   } catch (e) {
     console.warn("[PD.259] LLM reconciliation failed:", e && e.message);
