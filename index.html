@@ -7791,7 +7791,7 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
     + "The traveler has already chosen these specific places for this trip. EVERY ONE of these places "
     + "MUST appear in your output as a requiredPlace under at least one activity. This is a hard "
     + "constraint, not a hint. If you're not sure how to thematically slot a place, put it under an "
-    + "\"Other places to consider\" section — but never omit a listed place.\n\n"
+    + "\"More places to consider\" section — but never omit a listed place.\n\n"
     + "Use the listed nights as the recommended stay where given. Anchor your activities AROUND these "
     + "places (group them into themed sections like \"Hike to waterfalls,\" \"Walk in volcanic landscapes,\" "
     + "etc.) so the traveler reviews them as activities, not as a flat list. You may add a small "
@@ -7800,14 +7800,14 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
     // PD.76: when user has tagged some places as overnight stays, ask
     // the model to surface a few MORE overnight hubs the user didn't
     // list — especially in regions of the trip that look thin from the
-    // user's choices. PD.77 groups these into "Other stays to consider"
+    // user's choices. PD.77 groups these into "Overnight stays to consider"
     // beneath the user's own stays.
     + (parseResult.destinations.some(function(p){ return p && p.isStay; })
         ? "\n\nADDITIONAL STAYS — surface 2-4 EXTRA overnight hubs the traveler did NOT list but should "
           + "seriously consider, especially in regions of this trip that look thin from the user's list "
           + "(long stretches without an overnight, or major sub-regions with no chosen base). Mark each "
           + "with overnight=true and a stayRange of at least \"1 night\". Place them under a section "
-          + "titled \"Other stays to consider\" so the picker shows them grouped.\n"
+          + "titled EXACTLY \"Overnight stays to consider\" (verbatim string match — do not invent a different title) so the picker shows them grouped.\n"
         : "");
   _tb.placeContext = placeContext;
   // Stash the parsed list so the backstop post-pass can detect any
@@ -8171,7 +8171,7 @@ if (typeof globalThis !== "undefined") globalThis._applyPastedListNights = _appl
 // v359.60.28: backstop pass that detects user-listed places the LLM
 // failed to surface (despite the MANDATORY PLACE LIST clause in
 // placeContext) and injects each missing place as a stub activity
-// under an "Other places to consider" section. Without this, the
+// under an "More places to consider" section. Without this, the
 // model occasionally drops secondary hub towns (Selfoss, Vík,
 // Egilsstaðir, Akureyri, Snæfellsnes town) in favor of higher-profile
 // ones in the same region — but the user listed those places
@@ -8244,7 +8244,7 @@ function _backstopPastedListPlaces() {
       name: hasNights ? ("Stay in " + p.place) : ("Stop in " + p.place),
       type: "activity",
       category: "scenery-nature",
-      section: "Other places to consider",
+      section: "More places to consider",
       description: p.intent
         ? p.intent
         : (hasNights
@@ -8277,7 +8277,7 @@ if (typeof globalThis !== "undefined") globalThis._backstopPastedListPlaces = _b
 // The LLM that generates activity sections is inconsistent at slotting
 // every user-listed place into one (Seljalandsfoss + Skógafoss land
 // under "Hike to waterfalls" but Goðafoss gets dropped). The render-
-// time orphan catch-all ("Other things you listed") then surfaces the
+// time orphan catch-all ("Sights near places you listed") then surfaces the
 // drop, but the user reads it as a bug: "you have a Hike to waterfalls
 // section AND a waterfall called Goðafoss — why didn't you put it
 // there?"
@@ -8322,7 +8322,7 @@ async function _reconcileListedSightsToSections() {
     return n ? n.split(/\s+/).filter(Boolean) : [];
   }
   var SYNTHETIC = { "synthetic-stays":1, "synthetic-sights":1, "synthetic-umbrella":1 };
-  // PD.283: also treat the backstop's "Other places to consider"
+  // PD.283: also treat the backstop's "More places to consider"
   // section as NOT covered. That section is a safety net for places
   // the LLM outright dropped; treating it as covered means
   // reconciliation never re-categorizes Goðafoss Waterfall or
@@ -8332,7 +8332,7 @@ async function _reconcileListedSightsToSections() {
   // get LLM-placed, and are removed from the catchall at placement
   // time so we don't end up with duplicates.
   function _isCatchallSection(it) {
-    return it && it.section === "Other places to consider";
+    return it && it.section === "More places to consider";
   }
   var coveredTokenSets = [];
   _tb.placeActivities.forEach(function(it){
@@ -8683,7 +8683,7 @@ async function _reconcileListedSightsToSections() {
     console.warn("[PD.259] LLM reconciliation failed:", e && e.message);
     return;
   }
-  // PD.283: after LLM placement, drop any "Other places to consider"
+  // PD.283: after LLM placement, drop any "More places to consider"
   // section that's now empty. The user shouldn't see a half-empty
   // catchall when reconciliation re-homed everything in it.
   try {
@@ -13129,6 +13129,24 @@ async function runCandidateSearch(requiredPlaces) {
         // pasted-list overnight stays so they don\'t scatter into
         // LLM-themed activity sections (or worse, "Other places to
         // consider"). Section name matches the rank-0 regex above.
+        // PD.290: seed "Recommended overnight stays" from LLM overnight
+        // candidates if the user didn't paste any stays. Without this,
+        // a no-stays paste (or intent-only paste) ends up with overnight
+        // bases scattered across LLM activity sections — no anchored
+        // "where you sleep" section at the top. When the user DID paste
+        // stays, _stayPlaces wins; this branch is just the fallback.
+        var _pd290UseLlmStays = false;
+        if (!_stayPlaces.length && Array.isArray(allCands)) {
+          var _pd290LlmStays = allCands.filter(function(c){
+            if (!c || !c.place) return false;
+            return c.overnight === true
+              || (typeof c.stayRange === "string" && /\d/.test(c.stayRange));
+          });
+          if (_pd290LlmStays.length) {
+            _stayPlaces = _pd290LlmStays;
+            _pd290UseLlmStays = true;
+          }
+        }
         if (_stayPlaces.length && Array.isArray(_tb.placeActivities)) {
           var existingStaysItem = _tb.placeActivities.find(function(it){
             return it && it.section === "Recommended overnight stays";
@@ -13139,7 +13157,9 @@ async function runCandidateSearch(requiredPlaces) {
               section: "Recommended overnight stays",
               name: "Place to stay overnight",
               type: "manual",
-              description: "Cities and towns you flagged as overnight stays. These anchor the trip\'s geography — they\'re where you sleep and the bases for day trips.",
+              description: _pd290UseLlmStays
+                ? "Cities and towns Max picked as overnight bases for this trip. These anchor the trip's geography — they're where you sleep and the bases for day trips."
+                : "Cities and towns you flagged as overnight stays. These anchor the trip\'s geography — they\'re where you sleep and the bases for day trips.",
               checked: true,
               requiredPlaces: _stayPlaces.map(function(c){
                 return {
@@ -13187,14 +13207,14 @@ async function runCandidateSearch(requiredPlaces) {
           });
           if (llmExtraStays.length && Array.isArray(_tb.placeActivities)) {
             var existingExtra = _tb.placeActivities.find(function(it){
-              return it && it.section === "Other stays to consider";
+              return it && it.section === "Overnight stays to consider";
             });
             if (!existingExtra) {
               // Insert at index 1 — right after "Recommended overnight stays" (index 0).
               _tb.placeActivities.splice(1, 0, {
                 id: "synth-other-stays",
-                section: "Other stays to consider",
-                name: "Additional overnight hubs Max suggests",
+                section: "Overnight stays to consider",
+                name: "Overnight stays Max suggests",
                 type: "manual",
                 description: "Places Max thinks are worth considering as overnight stays based on your list. Check the ones that fit your trip; ignore the rest.",
                 checked: false,
@@ -13212,6 +13232,85 @@ async function runCandidateSearch(requiredPlaces) {
               });
             }
           }
+          // PD.289: Option C — fold any LLM-generated "additional stays"
+          // section into the synthetic "Overnight stays to consider"
+          // and drop the LLM duplicate. The prompt asks for the exact
+          // title "Overnight stays to consider", but the LLM sometimes
+          // invents alternatives ("Additional overnight bases") and we
+          // end up with two sections covering the same places. Detect
+          // structurally: any non-synthetic, non-route section whose
+          // requiredPlaces are ALL overnight=true AND ALL not in the
+          // user's list is the duplicate. Fold its requiredPlaces into
+          // the synthetic (creating the synthetic if it doesn't exist),
+          // then drop the LLM section.
+          try {
+            function _pd289IsSyntheticName(s) {
+              return s === "Recommended overnight stays"
+                  || s === "Overnight stays to consider"
+                  || s === "Sights near places you listed"
+                  || s === "More places to consider";
+            }
+            var synthExtras = _tb.placeActivities.find(function(it){
+              return it && it.section === "Overnight stays to consider";
+            });
+            var existingNorm = {};
+            if (synthExtras && Array.isArray(synthExtras.requiredPlaces)) {
+              synthExtras.requiredPlaces.forEach(function(p){
+                if (p && p.place) existingNorm[nrm(p.place)] = true;
+              });
+            }
+            var pd289Folded = 0;
+            var pd289DropSections = [];
+            _tb.placeActivities = _tb.placeActivities.filter(function(it){
+              if (!it || !it.section) return true;
+              if (_pd289IsSyntheticName(it.section)) return true;
+              if (it.type === "route") return true;
+              if (it.type && /^synthetic-/.test(it.type)) return true;
+              var rp = it.requiredPlaces || [];
+              if (!rp.length) return true;
+              var allOvernight = rp.every(function(p){ return p && p.overnight === true; });
+              if (!allOvernight) return true;
+              var allNotInUserList = rp.every(function(p){
+                return !p || !p.place || !pastedNorm[nrm(p.place)];
+              });
+              if (!allNotInUserList) return true;
+              // This is the duplicate. Ensure the synthetic exists,
+              // then fold this section's unique requiredPlaces in.
+              if (!synthExtras) {
+                synthExtras = {
+                  id: "synth-other-stays",
+                  section: "Overnight stays to consider",
+                  name: "Overnight stays Max suggests",
+                  type: "manual",
+                  description: "Places Max thinks are worth considering as overnight stays based on your list. Check the ones that fit your trip; ignore the rest.",
+                  checked: false,
+                  requiredPlaces: []
+                };
+                // Insert right after Recommended overnight stays.
+                var insertAt = 1;
+                for (var i = 0; i < _tb.placeActivities.length; i++) {
+                  if (_tb.placeActivities[i] && _tb.placeActivities[i].section === "Recommended overnight stays") {
+                    insertAt = i + 1;
+                    break;
+                  }
+                }
+                _tb.placeActivities.splice(insertAt, 0, synthExtras);
+              }
+              rp.forEach(function(p){
+                if (!p || !p.place) return;
+                var k = nrm(p.place);
+                if (existingNorm[k]) return;
+                synthExtras.requiredPlaces.push(p);
+                existingNorm[k] = true;
+                pd289Folded++;
+              });
+              pd289DropSections.push(it.section);
+              return false; // drop this LLM duplicate
+            });
+            if (pd289Folded || pd289DropSections.length) {
+              console.log("[PD.289] folded " + pd289Folded + " stay(s) into 'Overnight stays to consider'; dropped " + pd289DropSections.length + " duplicate section(s): " + pd289DropSections.join(", "));
+            }
+          } catch (_) {}
         }
       }
     } catch(_){}
@@ -16334,7 +16433,7 @@ async function generateActivitiesForPlace(){
             if (!p || !p.place) return;
             var _section = (p.section && typeof p.section === "string" && p.section.trim())
               ? p.section.trim()
-              : "Other places to consider";
+              : "More places to consider";
             var _category = (p.category && typeof p.category === "string" && p.category.trim())
               ? p.category.trim()
               : "scenery-nature";
@@ -17731,7 +17830,7 @@ function _reconcileUserListedKeeps(){
     // sight into a new LLM section) drops the section cleanly.
     if (!orphanKeys.length) {
       _tb.placeActivities = (_tb.placeActivities || []).filter(function(it){
-        return !it || it.section !== "Other things you listed";
+        return !it || it.section !== "Sights near places you listed";
       });
       return;
     }
@@ -17804,7 +17903,7 @@ function _reconcileUserListedKeeps(){
       };
     });
     var existingSights = _tb.placeActivities.find(function(it){
-      return it && it.section === "Other things you listed";
+      return it && it.section === "Sights near places you listed";
     });
     if (existingSights) {
       existingSights.requiredPlaces = sightRequiredPlaces;
@@ -17815,16 +17914,16 @@ function _reconcileUserListedKeeps(){
     // stays + Other stays to consider, if either exists).
     var _insertAtSights = 0;
     _tb.placeActivities.forEach(function(it, i){
-      if (it && (it.section === "Recommended overnight stays" || it.section === "Other stays to consider")) {
+      if (it && (it.section === "Recommended overnight stays" || it.section === "Overnight stays to consider")) {
         _insertAtSights = Math.max(_insertAtSights, i + 1);
       }
     });
     _tb.placeActivities.splice(_insertAtSights, 0, {
       id: "synth-listed-sights",
-      section: "Other things you listed",
-      name: "Other things you listed",
+      section: "Sights near places you listed",
+      name: "Sights near places you listed",
       type: "synthetic-sights",
-      description: "Sights from your list that don't fit any of the activity categories Max generated. Most user-listed sights show up under their matching category (with a \"Your list\" badge); these are the ones nothing else surfaced — Max may need more context, or you may want to hit ✦ Enhance to find a better fit.",
+      description: "Sights tied to places on your list — either ones you listed that didn't fit any of the activity categories Max generated, or nearby additions Max suggested via ✦ Enhance. Most user-listed sights show up under their matching category (with a \"Your list\" badge); these are the ones nothing else surfaced.",
       checked: true,
       requiredPlaces: sightRequiredPlaces
     });
@@ -18236,14 +18335,14 @@ function _renderPlaceActivityItems(){
   // do a final pass that splits out user-added sections and appends
   // them after everything else.
   // PD.88 (architectural): exclude the synthetic stays sections
-  // ("Recommended overnight stays", "Other stays to consider") from
+  // ("Recommended overnight stays", "Overnight stays to consider") from
   // the user-added pin. They use type="manual" too — same as
   // "Places you added" — and were being shoved to the bottom even
   // though they semantically belong at the top. Match by section
   // name so we don't have to thread a new type through the data.
   (function _pinUserAddedSectionsLast(){
     function _isSyntheticStays(name){
-      return /^(?:recommended overnight stays|other stays to consider)$/i.test(name);
+      return /^(?:recommended overnight stays|overnight stays to consider)$/i.test(name);
     }
     var userAdded = [];
     var others = [];
@@ -18262,7 +18361,7 @@ function _renderPlaceActivityItems(){
   // sort that follows doesn't know about them and resorts by their
   // unknown category to rank 99, sinking them to the bottom. This
   // pass restores them to the top — "Recommended overnight stays"
-  // first (the user's pasted stays), then "Other stays to consider"
+  // first (the user's pasted stays), then "Overnight stays to consider"
   // (LLM-suggested additional hubs), then everything else in its
   // existing order. Single source of truth for the top.
   (function _pinSyntheticStaysFirst(){
@@ -18270,7 +18369,7 @@ function _renderPlaceActivityItems(){
     var rest = [];
     sectionOrder.forEach(function(sec){
       if (/^recommended overnight stays$/i.test(sec)) rec = sec;
-      else if (/^other stays to consider$/i.test(sec)) other = sec;
+      else if (/^overnight stays to consider$/i.test(sec)) other = sec;
       else rest.push(sec);
     });
     var head = [];
@@ -18280,24 +18379,31 @@ function _renderPlaceActivityItems(){
   })();
   // PD.114: pin "More places to consider" (PD.111 Enhance output) at
   // the very bottom — it's by definition extra material, lower
-  // priority than themed picks. Sister section "Sights near places
-  // you listed" is filtered out of sectionOrder entirely below (its
-  // items get inlined per-place via _enrichmentsByPlace).
+  // priority than themed picks.
   // PD.148: also pin "Routes & regions you named" — the umbrella
   // entries section sits just above "More places to consider", at the
   // bottom of meaningful sections.
-  (function _pinMoreToConsiderLast(){
+  // PD.288: pin "Sights near places you listed" second-from-bottom
+  // (just above "More places to consider"). Both are catchalls — the
+  // sights catchall sits above the places catchall per Neal's TOC
+  // ordering. Final bottom order: ...everything else..., Routes &
+  // regions you named, Sights near places you listed, More places
+  // to consider.
+  (function _pinCatchallsLast(){
     var more = null;
+    var sights = null;
     var umbrella = null;
     var rest = [];
     sectionOrder.forEach(function(sec){
       if (/^more places to consider$/i.test(sec)) more = sec;
+      else if (/^sights near places you listed$/i.test(sec)) sights = sec;
       else if (/^routes\s*[&]\s*regions you named$/i.test(sec)) umbrella = sec;
       else rest.push(sec);
     });
     sectionOrder = rest;
     if (umbrella) sectionOrder.push(umbrella);
-    if (more) sectionOrder.push(more);
+    if (sights)   sectionOrder.push(sights);
+    if (more)     sectionOrder.push(more);
   })();
   // PD.114: build _enrichmentsByPlace by walking the synthetic
   // "Sights near places you listed" section, then remove that section
@@ -19484,8 +19590,8 @@ function _renderPlaceActivityItems(){
     if (_synthHdrItem && typeof _synthHdrItem.type === "string") {
       if (_synthHdrItem.type === "synthetic-sights") _pd231Noun = "sight";
       else if (_synthHdrItem.type === "synthetic-stays") _pd231Noun = "stay";
-    } else if (sec === "Other things you listed") _pd231Noun = "sight";
-    else if (sec === "Recommended overnight stays" || sec === "Other stays to consider") _pd231Noun = "stay";
+    } else if (sec === "Sights near places you listed") _pd231Noun = "sight";
+    else if (sec === "Recommended overnight stays" || sec === "Overnight stays to consider") _pd231Noun = "stay";
     else if (/^routes\s*[&]\s*regions/i.test(sec)) _pd231Noun = "place";
     hdrWrap.innerHTML = '<div class="tb-act-section-title" style="flex:1;">' + _pmEsc(sec) + '</div>'
       + '<div class="tb-act-section-count">' + destOrder.length + ' ' + _pd231Noun + (destOrder.length===1?'':'s') + '</div>'
