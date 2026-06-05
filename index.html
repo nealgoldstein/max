@@ -16815,6 +16815,44 @@ async function generateActivitiesForPlace(){
     // PD.73: LLM activity list landed — early first-save (no candidates
     // yet, but enough substance to want resumption).
     if (typeof _initialTripSave === "function") _initialTripSave();
+
+    // PD.308: auto-Enhance for the paste-list flow. PD.306 added the
+    // same chain inside runCandidateSearch — but that's only the
+    // sentence / Discovery path. Paste-list goes through
+    // generateActivitiesForPlace, which bypasses runCandidateSearch
+    // entirely, so the user never got the auto-Enhance pass after a
+    // paste-build. Fix: insert the same await here, right after the
+    // initial trip mint, with a status banner so the user knows what's
+    // happening during the extra wait.
+    //
+    // Best-effort: a failed Enhance does NOT abort the build. The
+    // existing renderActivityPicker call at the end of this function
+    // (line ~16905) renders whatever items landed.
+    try {
+      var _enhBanner = document.createElement("div");
+      _enhBanner.id = "pm-auto-enhance-banner";
+      _enhBanner.style.cssText = "position:fixed;top:60px;left:50%;transform:translateX(-50%);"
+        + "max-width:680px;z-index:12000;background:#5b3f8f;color:#fff;"
+        + "padding:11px 16px;border-radius:8px;"
+        + "box-shadow:0 4px 14px rgba(0,0,0,0.35);"
+        + "font-size:12px;font-weight:500;line-height:1.5;font-family:inherit;";
+      _enhBanner.innerHTML = '✨ Finding more places like the ones you listed… '
+        + '<span style="opacity:0.85;">Max learns from your choices — reject anything that doesn’t fit.</span>';
+      document.body.appendChild(_enhBanner);
+      var _enhAdded = await enhanceDiscovery(null, {
+        suppressToast:    true,
+        suppressMaxAlert: true,
+        silentNoOp:       true
+      });
+      console.log("[Max] generateActivitiesForPlace: auto-Enhance added", _enhAdded, "place(s)");
+      if (_enhBanner.parentNode) _enhBanner.parentNode.removeChild(_enhBanner);
+    } catch (_enhErr) {
+      console.warn("[Max] generateActivitiesForPlace: auto-Enhance failed (best-effort, continuing):",
+        _enhErr && _enhErr.message);
+      var _bn = document.getElementById("pm-auto-enhance-banner");
+      if (_bn && _bn.parentNode) _bn.parentNode.removeChild(_bn);
+    }
+
     // v357: removed the _tb._placePickerStart default-init — the picker
     // map no longer carries a "Start from" preference (sequencing is
     // trip-view-only).
