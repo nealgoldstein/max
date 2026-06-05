@@ -7341,6 +7341,11 @@ if (typeof globalThis !== "undefined") {
 function _buildTripFromPastedList(parseResult, opts) {
   opts = opts || {};
   if (!parseResult || !Array.isArray(parseResult.destinations) || !parseResult.destinations.length) return null;
+  // PD.297: mint a fresh trip slot. See _buildPickerFromPastedList
+  // for the full diagnosis; same architectural fix.
+  _currentTripId = null;
+  activeDest = null;
+  _fileHandle = null;
   var startStr = parseResult.startDate || opts.startDate || new Date().toISOString().slice(0, 10);
   var cur = new Date(startStr + "T12:00:00");
   destCtr = 0;
@@ -7456,6 +7461,12 @@ if (typeof globalThis !== "undefined") globalThis._buildTripFromPastedList = _bu
 function _buildStubTripFromPastedList(parseResult, rawText, opts) {
   opts = opts || {};
   if (!parseResult) return null;
+  // PD.297: same fix as _buildPickerFromPastedList — null out the
+  // current trip pointer so this paste mints its own slot instead of
+  // overwriting the previously-active trip's storage on next save.
+  _currentTripId = null;
+  activeDest = null;
+  _fileHandle = null;
   destCtr = 0;
   sidCtr = 100;
   bkCtr = 0;
@@ -7574,6 +7585,19 @@ if (typeof globalThis !== "undefined") globalThis._buildStubTripFromPastedList =
 async function _buildPickerFromPastedList(parseResult, rawText, opts) {
   opts = opts || {};
   if (!parseResult || !Array.isArray(parseResult.destinations) || !parseResult.destinations.length) return null;
+  // PD.297: pasting a list MUST mint a fresh trip slot. Without this
+  // null-out, _currentTripId still points at whatever trip was active
+  // before the paste, the new stub (with destinations:[]) below gets
+  // reassigned to `trip`, and the next localSave writes the empty
+  // stub back to the existing trip's storage slot — wiping its
+  // destinations. _initialTripSave mints a new id whenever
+  // _currentTripId is falsy, so clearing here routes the paste into
+  // its own slot. Mirror showHome()'s state reset for activeDest +
+  // _fileHandle so the prior trip's UI state doesn't leak into the
+  // new one either.
+  _currentTripId = null;
+  activeDest = null;
+  _fileHandle = null;
   destCtr = 0;
   sidCtr = 100;
   bkCtr = 0;
