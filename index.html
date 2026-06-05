@@ -30195,7 +30195,19 @@ function renderActivityPicker(){
     _kickPickerMap();
   } else {
     _kickPickerMap();
-    setTimeout(function(){ generateActivitiesForPlace(); }, 60);
+    // PD.313: only auto-fire generateActivitiesForPlace when MaxBuild
+    // is NOT in flight. Without this guard, the paste-list flow races:
+    //   _buildPickerFromPastedList → renderActivityPicker → setTimeout
+    //     (generateActivitiesForPlace, 60ms)                       (A)
+    //   _buildPickerFromPastedList → setTimeout(MaxBuild, 50ms) →
+    //     primary phase → generateActivitiesForPlace               (B)
+    // Both fire. (B) populates _tb.placeActivities with 14 items;
+    // the enhance phase grows it to 15; then (A) runs against the
+    // cached LLM response, overwrites with its own 14 items, and the
+    // enhance addition is silently lost. Confirmed via PD.311 logs.
+    if (typeof MaxBuild === "undefined" || !MaxBuild || typeof MaxBuild.isBuilding !== "function" || !MaxBuild.isBuilding()) {
+      setTimeout(function(){ generateActivitiesForPlace(); }, 60);
+    }
   }
   // PD.113 / PD.116: contextual hint banner. Two variants, mutually
   // exclusive, both dismissible per-trip:

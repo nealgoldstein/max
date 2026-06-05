@@ -32,6 +32,20 @@
 (function (global) {
   "use strict";
 
+  // ── Lifecycle flag ────────────────────────────────────────────────
+  //
+  // PD.313: `isBuilding()` returns true between `build:start` and
+  // `build:done` / `build:error`. The paste-list flow renders the
+  // picker BEFORE MaxBuild fires, to show a loading state. The
+  // picker's "no activities yet → auto-fire generateActivitiesForPlace
+  // in 60ms" code path then races MaxBuild's own primary phase. Both
+  // generateActivitiesForPlace invocations run; the second clobbers
+  // the first plus the auto-Enhance additions. By checking
+  // isBuilding() the picker can defer to the orchestrator.
+  var _building = false;
+
+  function isBuilding() { return _building; }
+
   // ── Event bus ──────────────────────────────────────────────────────
   //
   // Same pub-sub shape as TripStore's tripChange. Subscribers receive
@@ -138,6 +152,10 @@
     // leaves a paper trail. Without these, a stalled build (LLM hang,
     // silent no-op, exception swallowed downstream) is invisible.
     console.log("[MaxBuild] start — mode:", mode, "region:", input.region);
+    // PD.313: flag set across the full build. Pickers and other UI
+    // surfaces check `MaxBuild.isBuilding()` to skip their own
+    // auto-fire codepaths (which would race with the orchestrator).
+    _building = true;
 
     try {
       // Phase 1: normalize.
@@ -205,10 +223,12 @@
         }
       } catch (_) {}
       console.log("[MaxBuild] done — tripId:", tripId);
+      _building = false;
       emit("build:done", { tripId: tripId, mode: mode });
       return { tripId: tripId, mode: mode };
     } catch (err) {
       console.error("[MaxBuild] findCandidates failed:", err && err.message, err && err.stack);
+      _building = false;
       emit("build:error", { error: err, mode: mode });
       throw err;
     }
@@ -351,6 +371,7 @@
   global.MaxBuild = {
     findCandidates: findCandidates,
     rerunEnhance:   rerunEnhance,
+    isBuilding:     isBuilding,
     on:             on,
     _diagnostic:    _diagnostic
   };

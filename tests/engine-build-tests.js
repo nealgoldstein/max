@@ -407,6 +407,49 @@ console.log("\nengine-build.js — input contract\n");
     assert(ehCall.opts.suppressMaxAlert === true, "build-time enhance must suppressMaxAlert");
   });
 
+  console.log("\nengine-build.js — PD.313 isBuilding lifecycle flag\n");
+
+  await test("isBuilding() is false before a build starts", async function () {
+    _resetCalls();
+    _resetTb();
+    assert.strictEqual(global.MaxBuild.isBuilding(), false, "isBuilding should be false before any build");
+  });
+
+  await test("isBuilding() is true during a build", async function () {
+    _resetCalls();
+    _resetTb();
+    var capturedDuringPrimary = null;
+    // Capture isBuilding() at a phase event, while findCandidates is awaiting.
+    var off = global.MaxBuild.on("build:primary-done", function () {
+      capturedDuringPrimary = global.MaxBuild.isBuilding();
+    });
+    await global.MaxBuild.findCandidates({ mode: "candidate-first", region: "X", requiredPlaces: [] });
+    off();
+    assert.strictEqual(capturedDuringPrimary, true,
+      "isBuilding should be true while the orchestrator is mid-build (captured at build:primary-done)");
+  });
+
+  await test("isBuilding() is false again after a build completes", async function () {
+    _resetCalls();
+    _resetTb();
+    await global.MaxBuild.findCandidates({ mode: "candidate-first", region: "X", requiredPlaces: [] });
+    assert.strictEqual(global.MaxBuild.isBuilding(), false,
+      "isBuilding must reset to false on build:done");
+  });
+
+  await test("isBuilding() is false again after a build errors", async function () {
+    _resetCalls();
+    _resetTb();
+    var originalRCS = global.runCandidateSearch;
+    global.runCandidateSearch = async function () { throw new Error("primary boom"); };
+    try {
+      await global.MaxBuild.findCandidates({ mode: "candidate-first", region: "X", requiredPlaces: [] });
+    } catch (_) {}
+    global.runCandidateSearch = originalRCS;
+    assert.strictEqual(global.MaxBuild.isBuilding(), false,
+      "isBuilding must reset to false on build:error");
+  });
+
   console.log("\nengine-build.js — input contract enforcement (PD.303 alarm)\n");
 
   await test("normalize copies input → _tb but does NOT touch unrelated _tb fields", async function () {
