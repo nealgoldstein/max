@@ -9800,8 +9800,15 @@ async function browseChatSend(){
 function selectTrip(id){
   if(localLoad(id)){
     _currentTripId=id;
-    // PD.186 ext reverted by PD.192: the file's saved _lastScreen
-    // determines the view. Same behavior as file-load.
+    // PD.275: explicit user action wins. When the user clicks a trip
+    // card on the home screen, that's a deliberate "open this trip"
+    // — not "resume whichever sub-screen I happened to be on." Clear
+    // _lastScreen here so enterApp's restore path falls through to
+    // drawTripMode. Without this, a trip whose last screen was the
+    // brief (or the misnamed-as-"picker" brief render) would reopen
+    // Discovery instead of the trip view. _lastScreen is still
+    // useful for true browser-reload restore (different code path).
+    if (trip) trip._lastScreen = "trip";
     enterApp();
     return;
   }
@@ -15492,7 +15499,13 @@ function renderTripStep1Place(){
   // PD.66i: re-parent to body to escape #home-screen display:none.
   if (ov.parentElement !== document.body) document.body.appendChild(ov);
   ov.className = "tb-overlay";
-  if (typeof _recordScreen === "function") _recordScreen("picker");
+  // PD.275: this is the brief / Profile screen, NOT the picker. The
+  // earlier _recordScreen("picker") here was misnamed — it stamped
+  // _lastScreen as "picker" whenever the user opened ✎ Profile from
+  // the trip view, which made the restore path believe the user was
+  // in Discovery. Record the correct screen name so the restore can
+  // route accurately.
+  if (typeof _recordScreen === "function") _recordScreen("brief");
   var _prevScroll = ov.scrollTop || 0;
   var _preserve = !!_tb._preserveScrollOnce;
   _tb._preserveScrollOnce = false;
@@ -53647,12 +53660,14 @@ function drawTripMode(){
   // above the destinations list header — see the comment block at
   // the new call site for rationale.
 
-  // v360.3: Places you set aside (Considered) + Discovery panel
-  // render here, AFTER the destinations list and BEFORE the More
-  // disclosure.
-  if (typeof MaxTripUI !== "undefined" && typeof MaxTripUI.renderConsideredSection === "function") {
-    MaxTripUI.renderConsideredSection(trip, c);
-  }
+  // PD.276: legacy "Places you set aside" section removed. It pulled
+  // from candidates and mixed destinations + sights at the trip
+  // level, duplicating the per-destination "Things you considered"
+  // surface PD.269/270 introduced. The new surface is geographic
+  // (each considered sight lives under its parent destination's
+  // Sights pane), respects the sources model, and stays in sync via
+  // _recomputeSuggestions. One source of truth.
+  // (renderConsideredSection call dropped here)
   if (typeof MaxTripUI !== "undefined" && typeof MaxTripUI.renderDiscoveryPromptPanel === "function") {
     MaxTripUI.renderDiscoveryPromptPanel(trip, c);
   }

@@ -3903,15 +3903,69 @@
             } else {
               _sid = "s-pd269-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
             }
+            // PD.277: coords cascade for considered sights. The
+            // requiredPlace usually has lat/lng but Enhance-added
+            // unchecked picks sometimes don't. Cascade through:
+            //   (1) requiredPlace.lat/lng
+            //   (2) matching trip.candidates entry's coords
+            //   (3) getCityCenter(sight name)
+            //   (4) parent destination's center + stable offset
+            //       (derived from sight name so multiple considered
+            //        sights at the same dest don't pile on one pixel)
+            // Without coords the map "Show N considered" pill would
+            // highlight but render nothing, which looked broken.
+            var _coordLat = (typeof p.lat === "number") ? p.lat : null;
+            var _coordLng = (typeof p.lng === "number") ? p.lng : null;
+            var _coordSource = "requiredPlace";
+            if (_coordLat == null) {
+              // (2) candidates lookup
+              try {
+                var _candByPlace = (_tb.candidates || []).find(function(c){
+                  return c && c.place && _pd223NrmFn(c.place) === k;
+                });
+                if (_candByPlace && typeof _candByPlace.lat === "number") {
+                  _coordLat = _candByPlace.lat;
+                  _coordLng = _candByPlace.lng;
+                  _coordSource = "candidate";
+                }
+              } catch (_) {}
+            }
+            if (_coordLat == null) {
+              // (3) getCityCenter
+              try {
+                var _gcc = (typeof global.getCityCenter === "function")
+                  ? global.getCityCenter(p.place) : null;
+                if (_gcc && typeof _gcc[0] === "number") {
+                  _coordLat = _gcc[0];
+                  _coordLng = _gcc[1];
+                  _coordSource = "cityCenter";
+                }
+              } catch (_) {}
+            }
+            if (_coordLat == null && typeof parentDest.lat === "number" && typeof parentDest.lng === "number") {
+              // (4) parent + stable name-derived offset (~0.005° / ~500m).
+              // Hash the sight name to (-1..1, -1..1) so multiple
+              // considered sights spread out without overlapping.
+              var _hash = 0;
+              var _nameStr = String(p.place || "");
+              for (var _hi = 0; _hi < _nameStr.length; _hi++) {
+                _hash = (_hash * 31 + _nameStr.charCodeAt(_hi)) | 0;
+              }
+              var _dLat = ((_hash & 0xff) / 128 - 1) * 0.005;
+              var _dLng = (((_hash >> 8) & 0xff) / 128 - 1) * 0.008;
+              _coordLat = parentDest.lat + _dLat;
+              _coordLng = parentDest.lng + _dLng;
+              _coordSource = "parentOffset";
+            }
             var sightObj = {
               id: _sid,
               type: "sight",
               n: p.place,
               st: p.place,
               note: null,
-              lat: (typeof p.lat === "number") ? p.lat : null,
-              lng: (typeof p.lng === "number") ? p.lng : null,
-              approx: (typeof p.lat !== "number" || typeof p.lng !== "number")
+              lat: _coordLat,
+              lng: _coordLng,
+              approx: (_coordSource !== "requiredPlace" && _coordSource !== "candidate")
             };
             if (isConsidered) {
               if (typeof global._addConsideredSight === "function") {
