@@ -13264,91 +13264,17 @@ async function runCandidateSearch(requiredPlaces) {
               });
             }
           }
-          // PD.289: Option C — fold any LLM-generated "additional stays"
-          // section into the synthetic "Overnight stays to consider"
-          // and drop the LLM duplicate. The prompt asks for the exact
-          // title "Overnight stays to consider", but the LLM sometimes
-          // invents alternatives ("Additional overnight bases") and we
-          // end up with two sections covering the same places. Detect
-          // structurally: any non-synthetic, non-route section whose
-          // requiredPlaces are ALL overnight=true AND ALL not in the
-          // user's list is the duplicate. Fold its requiredPlaces into
-          // the synthetic (creating the synthetic if it doesn't exist),
-          // then drop the LLM section.
-          try {
-            function _pd289IsSyntheticName(s) {
-              return s === "Recommended overnight stays"
-                  || s === "Overnight stays to consider"
-                  || s === "Sights near places you listed"
-                  || s === "More places to consider";
-            }
-            var synthExtras = _tb.placeActivities.find(function(it){
-              return it && it.section === "Overnight stays to consider";
-            });
-            var existingNorm = {};
-            if (synthExtras && Array.isArray(synthExtras.requiredPlaces)) {
-              synthExtras.requiredPlaces.forEach(function(p){
-                if (p && p.place) existingNorm[nrm(p.place)] = true;
-              });
-            }
-            var pd289Folded = 0;
-            var pd289DropSections = [];
-            _tb.placeActivities = _tb.placeActivities.filter(function(it){
-              if (!it || !it.section) return true;
-              if (_pd289IsSyntheticName(it.section)) return true;
-              if (it.type === "route") return true;
-              if (it.type && /^synthetic-/.test(it.type)) return true;
-              var rp = it.requiredPlaces || [];
-              if (!rp.length) return true;
-              var allOvernight = rp.every(function(p){ return p && p.overnight === true; });
-              if (!allOvernight) return true;
-              // PD.298: any all-overnight section IS a stays-extras
-              // duplicate. PD.289's "all not in user list" check was
-              // too strict — the LLM routinely mixes user-listed
-              // stays (already in Recommended) with new suggestions
-              // in the same section. Partition: places not in the
-              // user's list fold into "Overnight stays to consider";
-              // places in the user's list are silent duplicates of
-              // Recommended and just get dropped with the section.
-              var toFold = rp.filter(function(p){
-                return p && p.place && !pastedNorm[nrm(p.place)];
-              });
-              if (toFold.length && !synthExtras) {
-                synthExtras = {
-                  id: "synth-other-stays",
-                  section: "Overnight stays to consider",
-                  name: "Overnight stays Max suggests",
-                  type: "manual",
-                  description: "Places Max thinks are worth considering as overnight stays based on your list. Check the ones that fit your trip; ignore the rest.",
-                  checked: false,
-                  requiredPlaces: []
-                };
-                // Insert right after Recommended overnight stays.
-                var insertAt = 1;
-                for (var i = 0; i < _tb.placeActivities.length; i++) {
-                  if (_tb.placeActivities[i] && _tb.placeActivities[i].section === "Recommended overnight stays") {
-                    insertAt = i + 1;
-                    break;
-                  }
-                }
-                _tb.placeActivities.splice(insertAt, 0, synthExtras);
-              }
-              toFold.forEach(function(p){
-                var k = nrm(p.place);
-                if (existingNorm[k]) return;
-                synthExtras.requiredPlaces.push(p);
-                existingNorm[k] = true;
-                pd289Folded++;
-              });
-              pd289DropSections.push(it.section);
-              return false; // drop this stays-extras section regardless
-            });
-            if (pd289Folded || pd289DropSections.length) {
-              console.log("[PD.289] folded " + pd289Folded + " stay(s) into 'Overnight stays to consider'; dropped " + pd289DropSections.length + " duplicate section(s): " + pd289DropSections.join(", "));
-            }
-          } catch (_) {}
         }
       }
+    } catch(_){}
+    // PD.299: run the standalone stays-extras fold at build time too —
+    // outside any paste-mode guard, so sentence-mode trips also get
+    // consolidated. The function is idempotent; the render-time call
+    // inside _reconcileUserListedKeeps also fires, but running here
+    // means the build's [PD.299] diagnostic log shows up in the trip-
+    // creation flow and the fresh trip's first paint is already clean.
+    try {
+      if (typeof _pd289ConsolidateStaysExtras === "function") _pd289ConsolidateStaysExtras();
     } catch(_){}
     // PD.73: LLM completion is the FIRST SAVE point — mint the trip
     // (if not yet minted) with all of _tb's substance and persist.
@@ -17472,6 +17398,119 @@ function _pickerSyntheticItemsFromTripDestinations(){
 // of truth for "these places are on my list". After six rounds of
 // patching the propagation chain (parser → _pastedRoles → MaxRoleWriter
 // → mirror), we stop trying to make state propagate perfectly and
+// PD.299 (architectural): standalone, idempotent fold for stays-extras
+// sections. Replaces inline PD.289/298 that was nested inside paste-
+// mode guards in runCandidateSearch and therefore (a) unreachable in
+// sentence-mode and (b) never ran on render so legacy trips kept
+// their LLM-named "Additional overnight bases" / similar duplicate
+// stay sections forever. Now: extracted as a function, called at
+// build time AND every render-side reconcile pass.
+//
+// Detection (structural, name-agnostic): any non-synthetic, non-route
+// section whose requiredPlaces are ALL overnight=true is a stays-
+// extras duplicate of "Recommended overnight stays".
+//
+// Action: partition the section's requiredPlaces against the
+// "coverage" set (= _userListedNames keys + Recommended overnight
+// stays' requiredPlaces). Places NOT in coverage fold into the
+// synthetic "Overnight stays to consider" (created on demand if it
+// doesn't yet exist). Places IN coverage are silent duplicates of
+// Recommended and just drop with the section. The source section is
+// dropped regardless — it's a duplicate by intent.
+//
+// Idempotent: running a second time finds no all-overnight non-
+// synthetic sections (the first run dropped them), so it's a no-op.
+function _pd289ConsolidateStaysExtras() {
+  if (typeof _tb === "undefined" || !_tb) return 0;
+  if (!Array.isArray(_tb.placeActivities) || !_tb.placeActivities.length) return 0;
+  var normFn = (typeof _normPlaceName === "function")
+    ? _normPlaceName
+    : function(s){ return String(s||"").toLowerCase().trim(); };
+  var SYNTHETIC_NAMES = {
+    "Recommended overnight stays": 1,
+    "Overnight stays to consider": 1,
+    "Sights near places you listed": 1,
+    "More places to consider": 1
+  };
+  // Build coverage: user-typed names + Recommended overnight stays
+  // requiredPlaces. Any extras-section place already in coverage is
+  // a duplicate of the route's canonical stays and drops silently.
+  var coveredNorm = {};
+  if (_tb._userListedNames) {
+    Object.keys(_tb._userListedNames).forEach(function(k){
+      if (k) coveredNorm[k] = true;
+    });
+  }
+  var recommended = _tb.placeActivities.find(function(it){
+    return it && it.section === "Recommended overnight stays";
+  });
+  if (recommended && Array.isArray(recommended.requiredPlaces)) {
+    recommended.requiredPlaces.forEach(function(p){
+      if (p && p.place) coveredNorm[normFn(p.place)] = true;
+    });
+  }
+  // Find existing "Overnight stays to consider" synthetic.
+  var synthExtras = _tb.placeActivities.find(function(it){
+    return it && it.section === "Overnight stays to consider";
+  });
+  var existingNorm = {};
+  if (synthExtras && Array.isArray(synthExtras.requiredPlaces)) {
+    synthExtras.requiredPlaces.forEach(function(p){
+      if (p && p.place) existingNorm[normFn(p.place)] = true;
+    });
+  }
+  var folded = 0;
+  var droppedSections = [];
+  _tb.placeActivities = _tb.placeActivities.filter(function(it){
+    if (!it || !it.section) return true;
+    if (SYNTHETIC_NAMES[it.section]) return true;
+    if (it.type === "route") return true;
+    if (it.type && /^synthetic-/.test(it.type)) return true;
+    var rp = it.requiredPlaces || [];
+    if (!rp.length) return true;
+    var allOvernight = rp.every(function(p){ return p && p.overnight === true; });
+    if (!allOvernight) return true;
+    // This section is all-stays — a duplicate of Recommended.
+    var toFold = rp.filter(function(p){
+      return p && p.place && !coveredNorm[normFn(p.place)];
+    });
+    if (toFold.length && !synthExtras) {
+      synthExtras = {
+        id: "synth-other-stays",
+        section: "Overnight stays to consider",
+        name: "Overnight stays Max suggests",
+        type: "manual",
+        description: "Places Max thinks are worth considering as overnight stays based on your list. Check the ones that fit your trip; ignore the rest.",
+        checked: false,
+        requiredPlaces: []
+      };
+      var insertAt = 1;
+      for (var i = 0; i < _tb.placeActivities.length; i++) {
+        if (_tb.placeActivities[i] && _tb.placeActivities[i].section === "Recommended overnight stays") {
+          insertAt = i + 1;
+          break;
+        }
+      }
+      _tb.placeActivities.splice(insertAt, 0, synthExtras);
+    }
+    toFold.forEach(function(p){
+      var k = normFn(p.place);
+      if (existingNorm[k]) return;
+      synthExtras.requiredPlaces.push(p);
+      existingNorm[k] = true;
+      folded++;
+    });
+    droppedSections.push(it.section);
+    return false;
+  });
+  if (folded || droppedSections.length) {
+    console.log("[PD.299] consolidated " + folded + " stay(s) into 'Overnight stays to consider'; dropped "
+      + droppedSections.length + " duplicate section(s): " + droppedSections.join(", "));
+  }
+  return folded;
+}
+if (typeof globalThis !== "undefined") globalThis._pd289ConsolidateStaysExtras = _pd289ConsolidateStaysExtras;
+
 // instead RECONCILE at render time: walk placeActivities, force
 // p._keep=true on any requiredPlace whose normalized name is on the
 // list, unless the user has explicitly rejected that place via the
@@ -17481,6 +17520,13 @@ function _pickerSyntheticItemsFromTripDestinations(){
 function _reconcileUserListedKeeps(){
   if (typeof _tb === "undefined" || !_tb) return;
   if (!Array.isArray(_tb.placeActivities)) _tb.placeActivities = [];
+  // PD.299: idempotent stays-extras fold. Runs every render so legacy
+  // trips (built before PD.288-298 shipped) clean up on next open and
+  // sentence-mode trips (no paste-mode block to nest the fold inside)
+  // also get consolidated. No-op when there's nothing to fold.
+  try {
+    if (typeof _pd289ConsolidateStaysExtras === "function") _pd289ConsolidateStaysExtras();
+  } catch(_){}
   // PD.107 (architectural): trip.brief._userListedNames is the
   // source of truth; _tb._userListedNames is a cache. If the cache
   // is empty (any picker-open path that didn't go through the
