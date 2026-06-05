@@ -102,6 +102,20 @@
   // rebuild:
   //   (no extra inputs; preserves trip.id and existing wisp stream)
   //
+  // Optional (any mode):
+  //   reconcile         — async function() that runs AFTER mint and
+  //                       BEFORE enhance. Mode-specific reconciliation
+  //                       passes go here: paste-list passes backstop +
+  //                       sight-reconcile + nights-apply; sentence-mode
+  //                       typically passes nothing. Running before
+  //                       enhance is load-bearing — the enhance phase's
+  //                       skip list is built from _tb.placeActivities,
+  //                       so any user-listed place that the primary LLM
+  //                       dropped must be backstopped in BEFORE enhance
+  //                       sees the skip list. Otherwise the dropped
+  //                       places land in "Sights near places you listed"
+  //                       as enhance enrichments and stick there.
+  //
   // Returns a Promise that resolves when the build pipeline finishes
   // (or rejects if a fatal phase throws). The "handoff" phase fires
   // the appropriate UI transition.
@@ -138,14 +152,33 @@
         emit("build:mint-done");
       }
 
-      // Phase 4: enhance (always, best-effort).
+      // Phase 4: reconcile. PD.310: MUST run BEFORE enhance so the
+      // enhance phase's skip list (built from _tb.placeActivities)
+      // includes user-listed places that the primary LLM dropped.
+      // Otherwise Enhance's LLM suggests those dropped places as
+      // "nearby sights," lands them in the enrichment section, and
+      // backstop's token-coverage check then treats them as already
+      // covered — so they're stuck in the wrong section forever.
+      //
+      // Reconcile is caller-supplied because the passes are mode-
+      // specific (paste-list needs backstop + sight-reconcile + nights
+      // application; sentence-mode needs none of those).
+      if (typeof input.reconcile === "function") {
+        try {
+          await input.reconcile();
+        } catch (recErr) {
+          // Best-effort: reconcile failure should not abort the build.
+          // The downstream picker will still render; the user can
+          // re-curate manually.
+          console.warn("[MaxBuild] reconcile phase failed (best-effort, continuing):",
+            recErr && recErr.message);
+        }
+      }
+      emit("build:reconcile-done");
+
+      // Phase 5: enhance (always, best-effort).
       var enhanceResult = await _runEnhancePhase();
       emit("build:enhance-done", { added: enhanceResult.added });
-
-      // Phase 5: reconcile / backstop / fold. Currently subsumed by
-      // the legacy primary phase bodies (they call backstop, fold,
-      // reconcile inline). Future Phase 7b will lift them up here.
-      emit("build:reconcile-done");
 
       // Phase 6: handoff. The legacy primary phase already either
       // showed the picker (showCandidateExplorer / renderActivity-

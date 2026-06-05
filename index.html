@@ -8075,20 +8075,29 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
         region:       _tb.region || _normRegion || "",
         tripMode:     "paste",
         placeName:    _tb.placeName || _tb.region || _normRegion || "",
-        placeContext: _tb.placeContext || rawText || ""
-      }).then(async function(){
+        placeContext: _tb.placeContext || rawText || "",
+        // PD.310: reconcile passes MUST run before enhance so the
+        // enhance phase's skip list sees user-listed places that
+        // the primary LLM dropped. Before this fix, these ran in
+        // the .then() after MaxBuild resolved — i.e., AFTER enhance
+        // — and any user-listed place the LLM dropped landed in
+        // "Sights near places you listed" as a phantom enrichment
+        // (Jökulsárlón canyon, Goðafoss Waterfall, etc.) and stuck.
         // Order: backstop synthesizes stubs for any place the LLM
         // outright dropped → reconciliation pass slots remaining
         // orphan sights into matching activity sections using
-        // Wikipedia tokens (PD.257) → nights pass writes
-        // user-specified stay lengths onto every requiredPlace.
-        try { _backstopPastedListPlaces(); } catch(_) {}
-        try { await _reconcileListedSightsToSections(); } catch(_) {}
-        try { _applyPastedListNights(); } catch(_) {}
-        // Reconciliation can add new requiredPlaces — re-render so
-        // the picker reflects them. The render-time orphan catch-all
-        // (PD.256) will auto-shrink because the places are now in
-        // real sections.
+        // Wikipedia tokens (PD.257) → nights pass writes user-
+        // specified stay lengths onto every requiredPlace.
+        reconcile: async function() {
+          try { _backstopPastedListPlaces(); } catch(_) {}
+          try { await _reconcileListedSightsToSections(); } catch(_) {}
+          try { _applyPastedListNights(); } catch(_) {}
+        }
+      }).then(function(){
+        // Final picker re-render after the orchestrator has run all
+        // phases (primary → mint → reconcile → enhance). Reconcile
+        // and enhance both mutate _tb.placeActivities; render here so
+        // the user sees the final composed state.
         if (typeof renderActivityPicker === "function") {
           try { renderActivityPicker(); } catch(_) {}
         }

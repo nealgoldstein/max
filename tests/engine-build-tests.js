@@ -189,6 +189,56 @@ console.log("\nengine-build.js — input contract\n");
     assert(idxMint    < idxEnh,  "mint phase should fire BEFORE enhance phase");
   });
 
+  await test("PD.310: reconcile callback runs BETWEEN mint and enhance", async function () {
+    _resetCalls();
+    _resetTb();
+    var reconcileFired = false;
+    var enhanceCalledAfterReconcile = false;
+    await global.MaxBuild.findCandidates({
+      mode: "candidate-first",
+      region: "Iceland",
+      requiredPlaces: [],
+      reconcile: async function () {
+        reconcileFired = true;
+        calls.push({ fn: "reconcile" });
+      }
+    });
+    assert(reconcileFired, "reconcile callback should have fired");
+    var idxMint      = calls.findIndex(function (c) { return c.fn === "_initialTripSave"; });
+    var idxReconcile = calls.findIndex(function (c) { return c.fn === "reconcile"; });
+    var idxEnhance   = calls.findIndex(function (c) { return c.fn === "enhanceDiscovery"; });
+    assert(idxMint < idxReconcile, "reconcile must fire AFTER mint");
+    assert(idxReconcile < idxEnhance, "reconcile must fire BEFORE enhance (load-bearing: enhance's skip list reads _tb.placeActivities after backstop has filled gaps)");
+  });
+
+  await test("PD.310: reconcile failure does NOT abort the build", async function () {
+    _resetCalls();
+    _resetTb();
+    var enhanceFired = false;
+    await global.MaxBuild.findCandidates({
+      mode: "candidate-first",
+      region: "Iceland",
+      requiredPlaces: [],
+      reconcile: async function () {
+        throw new Error("reconcile blew up");
+      }
+    });
+    assert(calls.some(function (c) { return c.fn === "enhanceDiscovery"; }),
+      "enhance must still fire even when reconcile throws");
+  });
+
+  await test("PD.310: build:reconcile-done fires even when no reconcile callback supplied", async function () {
+    _resetCalls();
+    _resetTb();
+    var fired = false;
+    var off = global.MaxBuild.on("build:reconcile-done", function () { fired = true; });
+    await global.MaxBuild.findCandidates({
+      mode: "candidate-first", region: "Iceland", requiredPlaces: []
+    });
+    off();
+    assert(fired, "build:reconcile-done event should fire regardless of whether a callback was supplied");
+  });
+
   await test("rebuild mode SKIPS mint phase", async function () {
     _resetCalls();
     _resetTb();
