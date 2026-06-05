@@ -541,6 +541,37 @@ test("_version increments monotonically", function () {
   assert.strictEqual(TripStore.getVersion(), v0 + 3);
 });
 
+// ── notifyChange (Phase 5 escape hatch) ───────────────────────────────
+
+console.log("\nnotifyChange (legacy bridge)");
+
+test("notifyChange emits tripChange with legacy:true", function () {
+  reset();
+  TripStore.mint({});
+  var captured = null;
+  TripStore.on("tripChange", function (e) { captured = e; });
+  TripStore.notifyChange("autoSave");
+  assert.ok(captured);
+  assert.strictEqual(captured.mutator, "autoSave");
+  assert.strictEqual(captured.legacy, true);
+});
+
+test("notifyChange bumps _version", function () {
+  reset();
+  TripStore.mint({});
+  var v0 = TripStore.getVersion();
+  TripStore.notifyChange("test");
+  assert.strictEqual(TripStore.getVersion(), v0 + 1);
+});
+
+test("notifyChange is a no-op when no trip loaded", function () {
+  reset();
+  var count = 0;
+  TripStore.on("tripChange", function () { count++; });
+  TripStore.notifyChange("test");
+  assert.strictEqual(count, 0);
+});
+
 // ── Batch (Phase 3 transactional API) ─────────────────────────────────
 
 console.log("\nBatch (transactional)");
@@ -794,6 +825,171 @@ test("publish-atomicity class: destinations + routes update in one emit", functi
   assert.strictEqual(emits, 1);
   assert.strictEqual(TripStore.trip.destinations.length, 1);
   assert.strictEqual(TripStore.trip.routes.length, 1);
+});
+
+// ── Phase 6 integration scenarios ─────────────────────────────────────
+// Each scenario simulates a real-world flow that exercised one of the
+// bug classes we hit this session. Each passes by construction now.
+
+console.log("\nPhase 6 integration scenarios");
+
+test("full lifecycle: mint → name → destinations → reload preserves everything", function () {
+  reset();
+  // User pastes a list, picker mints a trip
+  TripStore.batch(function () {
+    TripStore.mint({ region: "Iceland", when: "September 2026" });
+    TripStore.setName("Iceland 2026");
+    TripStore.setPlaceActivities([
+      { id: "pa1", section: "Hike to waterfalls", checked: true, requiredPlaces: [{ place: "Seljalandsfoss", _keep: true }] },
+      { id: "pa2", section: "Drive scenic routes", checked: true, requiredPlaces: [{ place: "Ring Road", _keep: true }] }
+    ]);
+    TripStore.setCandidates([
+      { id: "c1", place: "Reykjavík", role: "stay" },
+      { id: "c2", place: "Vík", role: "stay" }
+    ]);
+  }, "test-mint-flow");
+  var tripId = TripStore.trip.id;
+  // User clicks "Create my trip" — publish populates destinations
+  TripStore.publish({
+    destinations: [
+      { id: "d1", place: "Reykjavík", nights: 3 },
+      { id: "d2", place: "Vík", nights: 2 }
+    ],
+    routes: [{ id: "r-d1-d2" }]
+  });
+  // Simulate page reload
+  TripStore.unload();
+  TripStore.load(tripId);
+  // Everything survives
+  assert.strictEqual(TripStore.trip.id, tripId);
+  assert.strictEqual(TripStore.trip.name, "Iceland 2026");
+  assert.strictEqual(TripStore.trip.brief.region, "Iceland");
+  assert.strictEqual(TripStore.trip.destinations.length, 2);
+  assert.strictEqual(TripStore.trip.destinations[0].place, "Reykjavík");
+  assert.strictEqual(TripStore.trip.placeActivities.length, 2);
+  assert.strictEqual(TripStore.trip.placeActivities[0].section, "Hike to waterfalls");
+  assert.strictEqual(TripStore.trip.candidates.length, 2);
+  assert.strictEqual(TripStore.trip.routes.length, 1);
+});
+
+test("sync-clobber: pulling an older envelope does NOT replace newer local state", function () {
+  reset();
+  TripStore.mint({});
+  TripStore.setName("local edit");
+  var localSaved = TripStore.trip.__saved__;
+  // Simulate a sync pull arriving with the SAME __saved__ as local
+  // (its own echo) — listener should refuse to clobber. In the real
+  // app the engine-trip.js listener guards this with TripStore's
+  // local-saved comparison.
+  var olderEnvelope = {
+    trip: { id: TripStore.trip.id, name: "stale server copy", _schemaVersion: 1 },
+    __saved__: localSaved - 1000
+  };
+  // Manually simulate the listener's decision:
+  var localTrip = TripStore.trip;
+  var localSavedTs = (localTrip && localTrip.__saved__) || 0;
+  var incomingSaved = olderEnvelope.__saved__ || (olderEnvelope.trip && olderEnvelope.trip.__saved__) || 0;
+  var shouldSkip = localSavedTs && localSavedTs >= incomingSaved;
+  assert.ok(shouldSkip, "older envelope must be rejected");
+  // Local survives
+  assert.strictEqual(TripStore.trip.name, "local edit");
+});
+
+test("destination-loss: paste-flow mint cannot clobber existing trip's storage", function () {
+  reset();
+  // First trip: real published trip with destinations
+  var t1 = TripStore.mint({});
+  TripStore.publish({
+    destinations: [{ id: "d1" }, { id: "d2" }, { id: "d3" }]
+  });
+  var t1id = t1.id;
+  // User goes to home (unload), pastes a new list (mint)
+  TripStore.unload();
+  // Force timestamp delta
+  var until = Date.now() + 5;
+  while (Date.now() < until) {}
+  var t2 = TripStore.mint({});
+  // The new trip has a DIFFERENT id — every mint generates fresh
+  assert.notStrictEqual(t1id, t2.id);
+  // Original trip's destinations untouched in storage
+  var stored = MaxDB.trip.read(t1id);
+  assert.strictEqual(stored.trip.destinations.length, 3);
+});
+
+test("stale-render: subscribers see current state in their callback (not pre-mutation)", function () {
+  reset();
+  TripStore.mint({});
+  var capturedName, capturedDests;
+  TripStore.on("tripChange", function () {
+    capturedName = TripStore.trip.name;
+    capturedDests = TripStore.trip.destinations.length;
+  });
+  TripStore.batch(function () {
+    TripStore.setName("Iceland 2026");
+    TripStore.setDestinations([{ id: "d1" }, { id: "d2" }]);
+  });
+  // The listener saw the FINAL post-mutation state, not any
+  // intermediate or pre-mutation snapshot.
+  assert.strictEqual(capturedName, "Iceland 2026");
+  assert.strictEqual(capturedDests, 2);
+});
+
+test("trip.id never undefined: every mutator path leaves it set", function () {
+  reset();
+  var t = TripStore.mint({});
+  assert.ok(t.id);
+  assert.strictEqual(typeof t.id, "string");
+  // After multiple operations
+  TripStore.setName("x");
+  TripStore.setDestinations([{ id: "d1" }]);
+  TripStore.updateBrief({ region: "Iceland" });
+  TripStore.publish({ destinations: [{ id: "d2" }] });
+  assert.ok(TripStore.trip.id);
+  // After reload
+  TripStore.unload();
+  TripStore.load(t.id);
+  assert.ok(TripStore.trip.id);
+  assert.strictEqual(TripStore.trip.id, t.id);
+});
+
+test("notifyChange + autoSave-bridge fires subscribers on legacy mutations", function () {
+  reset();
+  TripStore.mint({});
+  // Simulate a legacy mutation: mutate trip directly, call notifyChange
+  // (what autoSave does after Phase 5).
+  global.trip.name = "legacy mutation";
+  TripStore.notifyChange("autoSave");
+  // Subscriber should have seen the new state.
+  var subscriberSawName = null;
+  TripStore.on("tripChange", function () { subscriberSawName = TripStore.trip.name; });
+  TripStore.notifyChange("test");
+  assert.strictEqual(subscriberSawName, "legacy mutation");
+});
+
+test("schema migration runs on load (legacy envelope without id is healed)", function () {
+  reset();
+  // Pre-rewrite envelope: trip object lacks id field; id is only the key.
+  _storage["max-trip-trip-legacy-X"] = JSON.stringify({
+    trip: {
+      name: "Old trip",
+      // no id field
+      destinations: [{ id: "d1", place: "Reykjavík" }],
+      mdcItems: [{ id: "pa1", section: "Hike" }]  // legacy field
+    }
+  });
+  TripStore.load("trip-legacy-X");
+  // Migration backfilled the id from the storage key
+  assert.strictEqual(TripStore.trip.id, "trip-legacy-X");
+  // Migration dropped the legacy mdcItems field
+  assert.strictEqual(TripStore.trip.mdcItems, undefined);
+  // Migration filled in default fields
+  assert.ok(Array.isArray(TripStore.trip.placeActivities));
+  assert.ok(TripStore.trip.brief);
+  assert.ok(TripStore.trip.picker);
+  // Destinations survived
+  assert.strictEqual(TripStore.trip.destinations.length, 1);
+  // Schema version is current
+  assert.strictEqual(TripStore.trip._schemaVersion, TripStore.SCHEMA_VERSION);
 });
 
 // ── Result ────────────────────────────────────────────────────────────

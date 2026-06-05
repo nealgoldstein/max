@@ -5997,6 +5997,16 @@ if (typeof globalThis !== "undefined") {
 
 function autoSave(){
   localSave();
+  // ARCH Phase 5: signal TripStore subscribers that something changed.
+  // Legacy mutators that go through autoSave but not through a TripStore
+  // mutator still trigger a tripChange via this hook — closing the
+  // stale-render gap without needing to migrate every individual
+  // mutator. Eventually each call site migrates to a named mutator
+  // (Phase 6) and this becomes redundant; until then it's the bridge.
+  if (typeof TripStore !== "undefined" && typeof TripStore.notifyChange === "function"
+      && TripStore.isLoaded()) {
+    try { TripStore.notifyChange("autoSave"); } catch(_){}
+  }
   // v342: every autoSave also triggers a server push. Some mutators
   // call autoSave directly without going through _emitTripMutation
   // (rename, simple toggles, etc.), so hooking just _emitTripMutation
@@ -16683,6 +16693,18 @@ async function generateActivitiesForPlace(){
       return out;
     })(items);
     _tb.placeActivities = items;
+    // ARCH Phase 5: also route through TripStore so the LLM-completion
+    // event flows through the reactive layer. setPlaceActivities mutates
+    // trip.placeActivities = items (the SAME array as _tb.placeActivities),
+    // emits tripChange (subscribers re-render), and persists atomically.
+    // No-op if TripStore isn't loaded or no trip is current yet (the
+    // subsequent _initialTripSave call mints the trip if needed; the
+    // mint path itself sets placeActivities via TripStore mutators).
+    if (typeof TripStore !== "undefined" && TripStore.isLoaded
+        && TripStore.isLoaded() && typeof TripStore.setPlaceActivities === "function") {
+      try { TripStore.setPlaceActivities(items); }
+      catch (e) { console.warn("[ARCH P5] TripStore.setPlaceActivities failed:", e && e.message); }
+    }
     // PD.73: LLM activity list landed — early first-save (no candidates
     // yet, but enough substance to want resumption).
     if (typeof _initialTripSave === "function") _initialTripSave();
@@ -42362,6 +42384,67 @@ if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.on === "functio
   });
   MaxEngineTrip.on("mapDataChange", function () {
     if (typeof updateMainMap === "function") updateMainMap();
+  });
+}
+
+// ARCH Phase 5: TripStore subscriber for the picker. The picker
+// owns its own render path (_renderPlaceActivityItems) and isn't
+// wired into MaxEngineTrip's listener above. When a TripStore
+// mutation fires while the picker is visible, re-render so the
+// picker reflects current state. This closes the stale-banner
+// bug class: the footer's "N unchecked sights" counter recomputes
+// against current placeActivities, the section TOC reflects any
+// reconciliation / fold mutations, etc.
+//
+// Re-render is gated on picker visibility (the DOM node for the
+// list is mounted and visible) so background tripChanges from
+// trip-view interactions don't trigger expensive picker work the
+// user can't see. No cycle risk: the picker render mutates _tb
+// directly (not through TripStore mutators), so it doesn't re-
+// emit tripChange.
+if (typeof TripStore !== "undefined" && typeof TripStore.on === "function") {
+  // ARCH Phase 6: legacy-array sync-back. When TripStore mutates trip
+  // .placeActivities / .candidates, mirror onto _tb and _mdcItems so
+  // legacy code reading those (most of the picker, pre-Phase-3 publish
+  // logic, persistence paths) sees the same reference. This is what
+  // collapses the parallel-arrays bug class for the bridge phase: the
+  // four arrays (_tb.placeActivities, _mdcItems, trip.placeActivities,
+  // trip.mdcItems) all converge on whatever TripStore last set. When
+  // legacy code mutates _tb.placeActivities[i] directly, the mutation
+  // shows up everywhere because they're the SAME array. When TripStore
+  // mutates via setPlaceActivities, _tb gets re-pointed to the new
+  // array. No drift.
+  TripStore.on("tripChange", function () {
+    try {
+      var t = TripStore.trip;
+      if (!t) return;
+      if (Array.isArray(t.placeActivities)) {
+        if (typeof window !== "undefined") {
+          window._tb = window._tb || {};
+          window._tb.placeActivities = t.placeActivities;
+          window._mdcItems = t.placeActivities;
+        }
+      }
+      if (Array.isArray(t.candidates) && typeof window !== "undefined") {
+        window._tb = window._tb || {};
+        window._tb.candidates = t.candidates;
+      }
+    } catch (e) {
+      console.warn("[ARCH P6] _tb/_mdcItems sync-back:", e && e.message);
+    }
+  });
+
+  TripStore.on("tripChange", function (evt) {
+    try {
+      var pickerList = document.getElementById("tb-place-act-list");
+      if (!pickerList) return;
+      if (pickerList.offsetParent === null) return;  // not visible
+      if (typeof _renderPlaceActivityItems === "function") {
+        _renderPlaceActivityItems();
+      }
+    } catch (e) {
+      console.warn("[ARCH P5] picker tripChange listener:", e && e.message);
+    }
   });
 }
 

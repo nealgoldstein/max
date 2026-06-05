@@ -2763,7 +2763,16 @@
       // Remove absorbed sources, recompute dates trip-wide.
       var absorbedIds = {};
       absorbtions.forEach(function(a){ absorbedIds[a.src.id] = true; });
-      trip.destinations = trip.destinations.filter(function(d){ return !absorbedIds[d.id]; });
+      // ARCH Phase 6: route absorbed-destination removal through TripStore
+      // so the mutation emits tripChange + persists atomically. Falls
+      // back to direct mutation when TripStore isn't loaded.
+      var _absFiltered = trip.destinations.filter(function(d){ return !absorbedIds[d.id]; });
+      if (global.TripStore && typeof global.TripStore.setDestinations === "function" && global.TripStore.isLoaded()) {
+        try { global.TripStore.setDestinations(_absFiltered); }
+        catch (e) { trip.destinations = _absFiltered; }
+      } else {
+        trip.destinations = _absFiltered;
+      }
       var curDate = new Date(startDate);
       trip.destinations.forEach(function(d){
         var dateFrom = curDate.toISOString().slice(0,10);
@@ -2905,7 +2914,16 @@
       // Remove sources and recompute dates from the surviving destinations.
       var absorbedIds = {};
       absorbtions.forEach(function(a){ absorbedIds[a.src.id] = true; });
-      trip.destinations = trip.destinations.filter(function(d){ return !absorbedIds[d.id]; });
+      // ARCH Phase 6: route absorbed-destination removal through TripStore
+      // so the mutation emits tripChange + persists atomically. Falls
+      // back to direct mutation when TripStore isn't loaded.
+      var _absFiltered = trip.destinations.filter(function(d){ return !absorbedIds[d.id]; });
+      if (global.TripStore && typeof global.TripStore.setDestinations === "function" && global.TripStore.isLoaded()) {
+        try { global.TripStore.setDestinations(_absFiltered); }
+        catch (e) { trip.destinations = _absFiltered; }
+      } else {
+        trip.destinations = _absFiltered;
+      }
       // Recompute dates: cur runs forward from the original start.
       // Round DV.2: preserve day items across the makeDays regeneration.
       // Capture each surviving destination's existing items, rebuild days
@@ -3172,7 +3190,16 @@
       // Remove absorbed sources and recompute dates trip-wide.
       var absorbedIds = {};
       absorbtions.forEach(function(a){ absorbedIds[a.src.id] = true; });
-      trip.destinations = trip.destinations.filter(function(d){ return !absorbedIds[d.id]; });
+      // ARCH Phase 6: route absorbed-destination removal through TripStore
+      // so the mutation emits tripChange + persists atomically. Falls
+      // back to direct mutation when TripStore isn't loaded.
+      var _absFiltered = trip.destinations.filter(function(d){ return !absorbedIds[d.id]; });
+      if (global.TripStore && typeof global.TripStore.setDestinations === "function" && global.TripStore.isLoaded()) {
+        try { global.TripStore.setDestinations(_absFiltered); }
+        catch (e) { trip.destinations = _absFiltered; }
+      } else {
+        trip.destinations = _absFiltered;
+      }
       // Recompute dates from the original startDate. Mirrors the
       // auto-cluster's date-recompute block: rebuild days with the
       // new range, replay items + planItems by clamped index so the

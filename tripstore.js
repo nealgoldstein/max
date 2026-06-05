@@ -520,6 +520,23 @@
   function getVersion() { return _version; }
   function isLoaded() { return _trip != null; }
 
+  // Public escape hatch for legacy code paths (autoSave, direct trip.X
+  // mutations, etc.) to signal "external mutation happened, please
+  // notify subscribers." Bumps version + emits tripChange. Does NOT
+  // persist (the legacy caller already did that or will). Use sparingly;
+  // every call site should migrate to a real named mutator eventually.
+  function notifyChange(reason) {
+    if (!_trip) return;
+    _version++;
+    _trip._version = _version;
+    emit("tripChange", {
+      mutator: reason || "external",
+      payload: null,
+      version: _version,
+      legacy: true
+    });
+  }
+
   // ── Escape hatch ───────────────────────────────────────────────────
   // For tests and rare cases where you need to inject a fresh state
   // without going through load/mint. Bypasses persistence. Should NOT
@@ -575,6 +592,9 @@
 
     // Batch (multi-mutator transaction)
     batch: batch,
+
+    // Escape hatch for legacy code paths
+    notifyChange: notifyChange,
 
     // Annotations
     setDestNote: setDestNote,

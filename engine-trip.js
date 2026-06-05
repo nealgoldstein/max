@@ -2985,6 +2985,38 @@
         ? payload.envelope
         : global.MaxDB.trip.read(payload.id);
       if (!env || !env.trip) return;
+      // ARCH Phase 6 (push-only sync): local-wins policy. When the
+      // active trip is managed by TripStore and the incoming envelope
+      // has the same or older __saved__ than the in-memory trip, this
+      // is a sync pull arriving with stale data — preserve local.
+      // Without this, sync pulls of our OWN just-pushed envelope
+      // would replace global.trip with the storage echo, diverging
+      // TripStore._trip from the live reference. Cross-device pulls
+      // hit the same gate; live editing wins until the user
+      // explicitly "Restore from cloud."
+      //
+      // When the server IS genuinely newer, route through
+      // TripStore.replace so TripStore._trip and global.trip stay in
+      // sync — and the tripChange emit propagates through TripStore's
+      // bridge (which fires MaxEngineTrip.tripChange too, covering the
+      // legacy listeners). The legacy global.trip assignment + emit
+      // below run only when TripStore isn't present (rare bootstrap
+      // window or test envs).
+      if (global.TripStore && global.TripStore.isLoaded && global.TripStore.isLoaded()) {
+        var localTrip = global.trip;
+        var localSaved = (localTrip && localTrip.__saved__) || 0;
+        var incomingSaved = env.__saved__ || (env.trip && env.trip.__saved__) || 0;
+        if (localSaved && localSaved >= incomingSaved) {
+          return;
+        }
+        try {
+          global.TripStore.replace(env.trip);
+          return;  // TripStore's bridge re-emits tripChange + mapDataChange
+        } catch (e) {
+          console.warn('[engine-trip] TripStore.replace from sync pull failed:', e && e.message);
+          // fall through to legacy path
+        }
+      }
       global.trip = env.trip;
       if (typeof env.destCtr === 'number') global.destCtr = env.destCtr;
       if (typeof env.sidCtr === 'number') global.sidCtr = env.sidCtr;
