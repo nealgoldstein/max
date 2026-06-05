@@ -30196,18 +30196,24 @@ function renderActivityPicker(){
   } else {
     _kickPickerMap();
     // PD.313: only auto-fire generateActivitiesForPlace when MaxBuild
-    // is NOT in flight. Without this guard, the paste-list flow races:
-    //   _buildPickerFromPastedList → renderActivityPicker → setTimeout
-    //     (generateActivitiesForPlace, 60ms)                       (A)
-    //   _buildPickerFromPastedList → setTimeout(MaxBuild, 50ms) →
-    //     primary phase → generateActivitiesForPlace               (B)
-    // Both fire. (B) populates _tb.placeActivities with 14 items;
-    // the enhance phase grows it to 15; then (A) runs against the
-    // cached LLM response, overwrites with its own 14 items, and the
-    // enhance addition is silently lost. Confirmed via PD.311 logs.
-    if (typeof MaxBuild === "undefined" || !MaxBuild || typeof MaxBuild.isBuilding !== "function" || !MaxBuild.isBuilding()) {
-      setTimeout(function(){ generateActivitiesForPlace(); }, 60);
-    }
+    // is NOT in flight. CRITICAL: the isBuilding() check has to be
+    // INSIDE the setTimeout callback, not outside. Paste-list timing:
+    //   T+0    renderActivityPicker runs, MaxBuild hasn't started
+    //   T+50   _buildPickerFromPastedList's setTimeout starts MaxBuild
+    //          (_building = true)
+    //   T+60   the picker's setTimeout fires — needs to see
+    //          isBuilding()=true to bail
+    // If the guard ran at schedule time (T+0), MaxBuild wouldn't be
+    // building yet and the guard would pass — racing the orchestrator.
+    setTimeout(function(){
+      if (typeof MaxBuild !== "undefined" && MaxBuild
+          && typeof MaxBuild.isBuilding === "function"
+          && MaxBuild.isBuilding()) {
+        console.log("[Max] renderActivityPicker auto-fire skipped — MaxBuild owns this build");
+        return;
+      }
+      generateActivitiesForPlace();
+    }, 60);
   }
   // PD.113 / PD.116: contextual hint banner. Two variants, mutually
   // exclusive, both dismissible per-trip:
