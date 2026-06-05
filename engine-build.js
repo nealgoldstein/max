@@ -273,6 +273,12 @@
   }
 
   async function _runEnhancePhase() {
+    // PD.310 fix: emit build:enhance-start so subscribers (paste-list
+    // banner, sentence-mode candidate-explorer loading copy) can show
+    // a phase-2 status. The earlier MaxBuild only emitted enhance-done,
+    // not enhance-start — so the banner never fired and the user could
+    // not see that anything was happening during the ~30-60s wait.
+    emit("build:enhance-start");
     if (typeof global.enhanceDiscovery !== "function") {
       console.warn("[MaxBuild] enhanceDiscovery not loaded; skipping enhance phase");
       return { added: 0 };

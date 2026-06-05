@@ -273,6 +273,23 @@ console.log("\nengine-build.js — input contract\n");
     assert(seen.mode === "candidate-first", "build:primary-done payload should carry mode");
   });
 
+  await test("emits build:enhance-start BEFORE enhance phase runs", async function () {
+    _resetCalls();
+    _resetTb();
+    var startSeen = false;
+    var enhanceWhenStartFired = null;
+    var off = global.MaxBuild.on("build:enhance-start", function () {
+      startSeen = true;
+      // Capture how many times enhanceDiscovery has fired AT THIS POINT.
+      enhanceWhenStartFired = calls.filter(function (c) { return c.fn === "enhanceDiscovery"; }).length;
+    });
+    await global.MaxBuild.findCandidates({ mode: "candidate-first", region: "Iceland", requiredPlaces: [] });
+    off();
+    assert(startSeen, "build:enhance-start must fire");
+    assert.strictEqual(enhanceWhenStartFired, 0,
+      "build:enhance-start must fire BEFORE the enhance LLM call (subscribers can show 'phase 2' UI before the wait begins)");
+  });
+
   await test("emits build:enhance-done with added count", async function () {
     _resetCalls();
     _resetTb();
