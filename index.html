@@ -18151,9 +18151,19 @@ function _reconcileUserListedKeeps(){
     // No orphans → no catch-all needed. Remove any prior copy so a
     // re-render after Enhance (which can re-home a previously-orphan
     // sight into a new LLM section) drops the section cleanly.
+    //
+    // PD.312: filter by TYPE, not section name. The orphan catchall
+    // has type "synthetic-sights"; Enhance's enrichment section has
+    // type "synthetic-enhance" but shares the same user-visible label
+    // "Sights near places you listed" by design (both surface "sights
+    // near your places"). Matching by section name nuked Enhance's
+    // enrichment items every render — confirmed via PD.311 diagnostic
+    // logs showing placeActivities=15 after enhance → placeActivities=14
+    // after the next render. Identity is the type field; the label is
+    // a display concern.
     if (!orphanKeys.length) {
       _tb.placeActivities = (_tb.placeActivities || []).filter(function(it){
-        return !it || it.section !== "Sights near places you listed";
+        return !it || it.type !== "synthetic-sights";
       });
       return;
     }
