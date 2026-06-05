@@ -3040,6 +3040,43 @@ function _canonArr(arr){
 }
 if (typeof globalThis !== "undefined") globalThis._canonArr = _canonArr;
 
+// PD.314: network-drop banner. Mounts a single sticky banner at the
+// top of the viewport when callMax catches a "Failed to fetch" (or
+// similar) network error. Cleared on the next successful response.
+// Without this, multiple LLM calls fail silently — every enhanceDiscovery
+// batch logs "[Max enhance] enrich batch failed: Failed to fetch" to
+// the console, but the user just sees an empty picker. The banner
+// surfaces what's actually going wrong so the user can check their
+// network instead of blaming the app.
+function _maxShowNetworkBanner() {
+  try {
+    var existing = document.getElementById("max-network-banner");
+    if (existing) return; // already mounted
+    var b = document.createElement("div");
+    b.id = "max-network-banner";
+    b.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:14000;"
+      + "background:#a93826;color:#fff;padding:10px 20px;"
+      + "font-size:12.5px;font-weight:600;line-height:1.5;"
+      + "font-family:inherit;text-align:center;"
+      + "box-shadow:0 2px 12px rgba(0,0,0,0.3);"
+      + "cursor:pointer;";
+    b.innerHTML = '⚠ Can’t reach Max — network down. Build &amp; Enhance need the Anthropic API. <span style="opacity:0.85;font-weight:500;">Check your connection and try again. (Click to dismiss.)</span>';
+    b.onclick = function(){ if (b.parentNode) b.parentNode.removeChild(b); };
+    document.body.appendChild(b);
+  } catch(_) {}
+}
+function _maxClearNetworkBanner() {
+  try {
+    var b = document.getElementById("max-network-banner");
+    if (b && b.parentNode) b.parentNode.removeChild(b);
+  } catch(_) {}
+}
+function _maxIsNetworkErr(err) {
+  if (!err) return false;
+  var m = String(err.message || err || "").toLowerCase();
+  return /failed to fetch|network|fetch.*fail|err_network|err_internet|timed?\s*out|abort/i.test(m);
+}
+
 async function callMax(messages, maxTokens, timeoutMs, opts) {
   // v345: route through MaxSync's LLM proxy when the user is signed
   // in. The server holds the Anthropic API key — testers no longer
@@ -3177,6 +3214,7 @@ async function callMax(messages, maxTokens, timeoutMs, opts) {
       } catch (directErr) {
         // Direct path also failed \u2014 surface the original error so the
         // user sees the actual root cause (CORS, DNS, network).
+        if (_maxIsNetworkErr(fetchErr) || _maxIsNetworkErr(directErr)) _maxShowNetworkBanner();
         throw fetchErr;
       }
     } else {
@@ -3184,9 +3222,14 @@ async function callMax(messages, maxTokens, timeoutMs, opts) {
         showApiKeyForm();
         throw new Error("API key required \u2014 enter your Anthropic API key in the form above.");
       }
+      if (_maxIsNetworkErr(fetchErr)) _maxShowNetworkBanner();
       throw fetchErr;
     }
   }
+  // PD.314: any successful response clears the network banner. If the
+  // user fixed their connection and a subsequent call landed, the
+  // banner shouldn't linger.
+  _maxClearNetworkBanner();
   if (data.error) {
     // v353.2: split the 401 handling per auth mode. Proxy users on
     // 401 mean their session token expired \u2014 clear it and route to
