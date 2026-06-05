@@ -12317,11 +12317,20 @@ async function _fillSelectedGaps(selections){
   }
 }
 
-async function enhanceDiscovery(btn) {
-  if (typeof _tb === "undefined" || !_tb) return;
+async function enhanceDiscovery(btn, opts) {
+  // PD.306: opts param so the auto-Enhance chain inside runCandidateSearch
+  // can call us without the user-facing toast / error popup / empty-set
+  // alert. Standalone button click still gets all the affordances.
+  //   suppressToast    — skip the bottom-screen "✦ Added N place(s)…" toast
+  //   suppressMaxAlert — log errors only, don't show a maxAlert popup
+  //   silentNoOp       — when there's nothing in Discovery yet, return 0
+  //                      instead of alerting "Nothing in Discovery yet…"
+  // Returns the number of added candidates (0 when nothing added).
+  opts = opts || {};
+  if (typeof _tb === "undefined" || !_tb) return 0;
   if (typeof callMax !== "function") {
-    if (typeof maxAlert === "function") maxAlert("Max isn't available — check your API key.");
-    return;
+    if (!opts.suppressMaxAlert && typeof maxAlert === "function") maxAlert("Max isn't available — check your API key.");
+    return 0;
   }
   var origLabel = null;
   if (btn) { origLabel = btn.textContent; btn.disabled = true; btn.textContent = "Discovering…"; }
@@ -12359,8 +12368,8 @@ async function enhanceDiscovery(btn) {
       });
     });
     if (!keptDisplay.length && !rejectedDisplay.length) {
-      if (typeof maxAlert === "function") maxAlert("Nothing in Discovery yet — start with a paste-list or generate first.");
-      return;
+      if (!opts.silentNoOp && typeof maxAlert === "function") maxAlert("Nothing in Discovery yet — start with a paste-list or generate first.");
+      return 0;
     }
     var existingDisplay = keptDisplay.concat(rejectedDisplay);
     var brief = (typeof _serializeTbForPrompt === "function") ? _serializeTbForPrompt(_tb) : (_tb.intent || "");
@@ -12620,6 +12629,10 @@ async function enhanceDiscovery(btn) {
     if (typeof _initialTripSave === "function") _initialTripSave();
     if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
     if (typeof _renderPlacePickerMap === "function") _renderPlacePickerMap("tb-pm-map");
+    // PD.306: auto-chain mode skips the toast (it'd flash on top of the
+    // build loading overlay, which is meaningless). The caller decides
+    // how to message the user.
+    if (opts.suppressToast) return addedCount;
     // PD.142: Enhance fires while the picker is open, which means
     // #app is visibility:hidden (PD.83c). showSaveStatus writes to
     // #save-status inside #app — invisible. Render our own toast
@@ -12640,7 +12653,7 @@ async function enhanceDiscovery(btn) {
           parts.push(enrichItems.length + " near " + enrichedSourcesCount + " of your existing place" + (enrichedSourcesCount === 1 ? "" : "s") + " (look for italic “✦ Max suggests near here” under each)");
         }
         toastMsg = "✦ Added " + addedCount + " place" + (addedCount === 1 ? "" : "s") + ": " + parts.join(" · ")
-          + ". Review them, keep what fits, reject what misses — then click ✦ Enhance again to sharpen further.";
+          + ". Review them, keep what fits, reject what misses — then click ✦ More like this again to sharpen further.";
       }
       try {
         // Reuse existing toast div if still on screen.
@@ -12665,9 +12678,11 @@ async function enhanceDiscovery(btn) {
         if (typeof showSaveStatus === "function") showSaveStatus(toastMsg, 12000);
       }
     })();
+    return addedCount;
   } catch(err) {
     console.warn("[Max enhance] failed:", err && err.message);
-    if (typeof maxAlert === "function") maxAlert("Enhance failed: " + (err && err.message ? err.message : "unknown error"));
+    if (!opts.suppressMaxAlert && typeof maxAlert === "function") maxAlert("Enhance failed: " + (err && err.message ? err.message : "unknown error"));
+    return 0;
   } finally {
     if (btn && origLabel != null) { btn.disabled = false; btn.textContent = origLabel; }
   }
@@ -12703,14 +12718,17 @@ async function runCandidateSearch(requiredPlaces) {
     detailNow = document.getElementById("ce-loading-detail");
   }
   if (detailNow) {
+    // PD.306: build = candidates + auto-Enhance, so the loading copy
+    // describes the combined wait up-front. Phase 2 ("Adding more like
+    // them\u2026") swaps in after candidates land but before Enhance starts.
     var n = requiredPlaces.length;
     if (n > 0) {
       detailNow.innerHTML = 'Describing ' + n + ' required stop' + (n>1?'s':'')
         + ' from what your trip includes<br>and finding more places worth visiting.'
-        + '<br><span style="color:#ccc;margin-top:4px;display:inline-block;">This usually takes 20\u201340 seconds.</span>';
+        + '<br><span style="color:#ccc;margin-top:4px;display:inline-block;">This usually takes about a minute.</span>';
     } else {
       detailNow.innerHTML = 'Searching for places that fit your trip.'
-        + '<br><span style="color:#ccc;margin-top:4px;display:inline-block;">This usually takes 15\u201330 seconds.</span>';
+        + '<br><span style="color:#ccc;margin-top:4px;display:inline-block;">This usually takes about a minute.</span>';
     }
   }
 
@@ -13383,6 +13401,39 @@ async function runCandidateSearch(requiredPlaces) {
     console.log("[Max] runCandidateSearch: total candidates:", allCands.length,
       "· required:", allCands.filter(function(c){return c._required;}).length,
       "· p1Failed:", p1Failed, "· p2Failed:", p2Failed);
+
+    // PD.306: auto-Enhance. Build and Enhance are now one operation —
+    // users no longer have to click ✦ Enhance separately to get the
+    // pattern-fit + nearby-sights pass. Update the loading copy to a
+    // phase-2 message, then await the same enhanceDiscovery() the
+    // standalone button calls (with toast/popup suppressed).
+    //
+    // The auto-Enhance pass also signals to the user, via copy, that
+    // their accept/reject choices teach Max — making the existing
+    // "Not interested ever" affordance (PD.305) meaningful from the
+    // first interaction instead of buried.
+    //
+    // Best-effort: a failed Enhance does NOT abort the build. We log
+    // the warning and continue with build-only candidates.
+    try {
+      var detailNow2 = document.getElementById("ce-loading-detail");
+      if (detailNow2) {
+        detailNow2.innerHTML = 'Found ' + (_tb.candidates ? _tb.candidates.length : 0)
+          + ' places. Now adding more like the ones you listed.'
+          + '<br><span style="color:#ccc;margin-top:4px;display:inline-block;">'
+          + 'Max learns from your choices — reject anything that doesn’t fit.'
+          + '</span>';
+      }
+      var enhAdded = await enhanceDiscovery(null, {
+        suppressToast:    true,
+        suppressMaxAlert: true,
+        silentNoOp:       true
+      });
+      console.log("[Max] runCandidateSearch: auto-Enhance added", enhAdded, "place(s)");
+    } catch(enhErr) {
+      console.warn("[Max] runCandidateSearch: auto-Enhance failed (best-effort, continuing):",
+        enhErr && enhErr.message);
+    }
     // PLACE-MODE FAST PATH: when the user comes through the merged picker,
     // they've already curated. Skip the Places-to-think-about overlay and
     // build the trip directly. Auto-keep _required candidates that appear
@@ -19162,8 +19213,11 @@ function _renderPlaceActivityItems(){
     var enhBtn = document.createElement("button");
     enhBtn.type = "button";
     enhBtn.style.cssText = _pd246HdrBtnStyle;
-    enhBtn.innerHTML = '✦ Enhance';
-    enhBtn.title = "Find places near what you've already chosen — and places that fit your pattern but weren't on your list. Existing picks are preserved.";
+    // PD.306: Build now runs Enhance automatically, so this button is
+    // for a second pass — "find more places shaped like the ones I'm
+    // keeping." Renamed accordingly.
+    enhBtn.innerHTML = '✦ More like this';
+    enhBtn.title = "Find more places shaped like the ones you’ve kept — and steer away from anything like what you’ve rejected. Existing picks are preserved.";
     enhBtn.onclick = function(e){
       e.stopPropagation();
       if (typeof enhanceDiscovery === "function") enhanceDiscovery(enhBtn);
@@ -19622,7 +19676,7 @@ function _renderPlaceActivityItems(){
           +           '<button type="button" class="pm-row-menu-item" style="color:#1a5fa8;" onclick="event.stopPropagation();_pmTogglePlaceStay(&#39;' + _placeArg + '&#39;);">'
           +             (_pmIsStayCandidate(d.place) ? 'Mark as just visiting' : 'Mark as overnight stay')
           +           '</button>'
-          +           '<button type="button" class="pm-row-menu-item" title="Reject — teaches Max what kind of place this trip isn\'t about. The next ✦ Enhance avoids places like this." onclick="event.stopPropagation();_pmRemoveFromList(&#39;' + _placeArg + '&#39;);">Remove from list</button>'
+          +           '<button type="button" class="pm-row-menu-item" title="Rejects this place and teaches Max to steer away from anything like it." onclick="event.stopPropagation();_pmRemoveFromList(&#39;' + _placeArg + '&#39;);">Not interested ever</button>'
           +         '</div>'
           +       '</span>'
           +     '</div>'
@@ -20232,7 +20286,7 @@ function _renderPlaceActivityItems(){
         +     '<button type="button" class="pm-row-menu-item" style="color:#1a5fa8;" onclick="event.stopPropagation();_pmTogglePlaceStay(&#39;'+_pmEsc(d.place)+'&#39;);">'
         +       (_pmIsStayCandidate(d.place) ? 'Mark as just visiting' : 'Mark as overnight stay')
         +     '</button>'
-        +     '<button type="button" class="pm-row-menu-item" title="Reject — teaches Max what kind of place this trip isn\'t about. The next ✦ Enhance avoids places like this." onclick="event.stopPropagation();_pmRemoveFromList(&#39;'+_pmEsc(d.place)+'&#39;);">Remove from list</button>'
+        +     '<button type="button" class="pm-row-menu-item" title="Rejects this place and teaches Max to steer away from anything like it." onclick="event.stopPropagation();_pmRemoveFromList(&#39;'+_pmEsc(d.place)+'&#39;);">Not interested ever</button>'
         +   '</div>'
         + '</span>'
         + '</div>'
@@ -26864,7 +26918,7 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
     // reject
     var rejBg = isCurrent ? "#fde8e6" : "#fff";
     var rejBorder = isCurrent ? "1px solid #b03e2d" : "1px solid #e5e5e5";
-    return '<label title="Reject — teaches Max what kind of place this trip isn\'t about. Next ✦ Enhance avoids places like this." style="display:flex;align-items:center;gap:8px;margin:3px 0;padding:5px 8px;background:' + rejBg + ';border:' + rejBorder + ';border-radius:5px;cursor:pointer;font-weight:' + weight + ';color:#a93826;">'
+    return '<label title="Rejects this place and teaches Max to steer away from anything like it." style="display:flex;align-items:center;gap:8px;margin:3px 0;padding:5px 8px;background:' + rejBg + ';border:' + rejBorder + ';border-radius:5px;cursor:pointer;font-weight:' + weight + ';color:#a93826;">'
       + '<input type="radio" name="pm-mode" value="reject" ' + checked + ' />'
       + MaxMapPin.swatch("reject")
       + '<span>Reject</span>'
@@ -28734,17 +28788,23 @@ function _renderPlacePickerMap(targetId){
           // text links so the popup doesn't bloat into button
           // soup. Both route through MaxRoleWriter via their
           // global helpers; the map + list both re-render after.
+          // PD.305: clearer copy — "Drop from trip" was ambiguous
+          // (sounded permanent); "Remove from list" sounded like data
+          // deletion when it's actually a taste signal. New labels
+          // describe the actual effect.
           +   '<a href="#" onclick="event.preventDefault();toggleDestKeep(\'' + nameSafe + '\');return false;" '
+          +      'title="Unchecks this place but keeps it in your picker list. You can re-check it later." '
           +      'style="display:block;font-size:11px;color:#888;text-align:center;text-decoration:none;font-family:inherit;padding:3px 0;">'
-          +     'Drop from trip'
+          +     'Skip on this trip'
           +   '</a>'
           +   '<a href="#" onclick="event.preventDefault();_pmRemoveFromList(\'' + nameSafe + '\');return false;" '
+          +      'title="Removes this place and teaches Max to avoid similar suggestions." '
           +      'style="display:block;font-size:11px;color:#a93826;text-align:center;text-decoration:none;font-family:inherit;padding:3px 0;">'
-          +     'Remove from list'
+          +     'Not interested ever'
           +   '</a>'
           +   '<a href="#" onclick="event.preventDefault();var r=document.querySelectorAll(\'.tb-dest-major\');for(var i=0;i&lt;r.length;i++){if((r[i].textContent||\'\').toLowerCase().indexOf(\'' + nameSafe.toLowerCase() + '\')!==-1){r[i].scrollIntoView({behavior:\'smooth\',block:\'center\'});r[i].style.transition=\'background-color 0.4s\';r[i].style.backgroundColor=\'#fff7d4\';setTimeout(function(){r[i].style.backgroundColor=\'\';},1600);break;}}return false;" '
           +      'style="display:block;font-size:11px;color:#888;text-align:center;text-decoration:none;font-family:inherit;padding:3px 0;">'
-          +     'Find in list →'
+          +     'Show in list →'
           +   '</a>'
           + '</div>';
       })(info.place, _isStayCandidate, info.overnight === true);
@@ -30102,29 +30162,27 @@ function renderActivityPicker(){
       var _hintN = _hintListed ? Object.keys(_hintListed).length : 0;
       var _hintHtml = "";
       if (_hintN >= 15) {
-        // PD.245: banner rewritten per Neal — drops the "your taste, Max's
-        // memory" tagline (lame) and adds the missing distinction between
-        // the two AI buttons: Enhance ADDS (adjacent picks) vs What's
-        // missing? AUDITS (theme gaps). Without this distinction users
-        // see two purple-ish CTAs and don't know which to click.
+        // PD.306: build now auto-runs Enhance, so this banner reframes
+        // the two AI buttons as REFINEMENT actions for after the
+        // initial pass — not as the "you need to click this" CTAs they
+        // used to be.
         _hintHtml = '<div style="flex:1;">'
-          +   '<strong style="color:#5b3f8f;">You named ' + _hintN + ' places.</strong> '
-          +   'Max won\'t pad your list with famous gateways you\'ve already covered. '
-          +   '<strong>✦ Enhance</strong> finds nearby sights and pattern-fits you might not have thought of. '
-          +   '<strong>✦ What\'s missing?</strong> flags themes (food, architecture, hikes) absent from your set. '
-          +   'AI is best as an adjacency tool.'
+          +   '<strong style="color:#5b3f8f;">You named ' + _hintN + ' places — Max added more like them automatically.</strong> '
+          +   'Reject what misses; Max learns from your choices. '
+          +   '<strong>✦ More like this</strong> runs another round shaped by your kept + rejected set. '
+          +   '<strong>✦ What\'s missing?</strong> flags themes (food, architecture, hikes) absent from your set.'
           + '</div>';
       } else if (_hintN < 5 && _tb && Array.isArray(_tb.candidates) && _tb.candidates.length > 0) {
-        // PD.116: sentence-driven path. Max generated everything; the
-        // user has no taste signal yet. The CURATION is how they
-        // create one. Reject is the teaching move.
+        // PD.116/PD.306: sentence-driven path. Max generated everything,
+        // INCLUDING the Enhance pass. The user's job is to curate —
+        // reject is the teaching move.
         _hintHtml = '<div style="flex:1;">'
           +   '<strong style="color:#5b3f8f;">Max\'s first guess is on the page.</strong> '
           +   'It can find places, but it doesn\'t know what\'s right for you yet — only you do. '
           +   'Tell it what\'s actually <em>you</em>: keep what resonates, '
           +   '<strong style="color:#9a2a2a;">reject what misses</strong>. '
           +   'Rejection is the teaching move — five rejections in a row that share a character teach Max what kind of place this trip isn\'t about. '
-          +   'Then click <strong>✦ Enhance</strong> to find more places shaped by what you kept and steered clear of what you rejected.'
+          +   'Click <strong>✦ More like this</strong> for another round shaped by what you kept and steered clear of what you rejected.'
           + '</div>';
       }
       if (_hintHtml) {
@@ -49132,11 +49190,17 @@ function _openTripStopPopover(ctx) {
   // Exception: never hide the user's CURRENT role — if they're
   // already on a wayside, the row needs to render so they can move
   // it to a different route, even if the gate would otherwise fire.
+  // PD.307b: read from trip.placeActivities (canonical post-ARCH)
+  // instead of trip.mdcItems. The schema migration strips mdcItems
+  // on load (tripstore.js _migrateV0ToV1), so the old read was
+  // returning 0 for every place — silently breaking the Wayside
+  // gate. placeActivities has the same shape: items with
+  // requiredPlaces:[{place}] tying them to a destination.
   function _sightsCountForPlace(name) {
     if (!name) return 0;
     var nk = (typeof _normPlaceName === "function") ? _normPlaceName(name) : String(name).toLowerCase().trim();
     if (!nk) return 0;
-    var src = Array.isArray(trip.mdcItems) ? trip.mdcItems : [];
+    var src = Array.isArray(trip.placeActivities) ? trip.placeActivities : [];
     return src.filter(function(m){
       if (!m || !Array.isArray(m.requiredPlaces)) return false;
       return m.requiredPlaces.some(function(p){
@@ -49182,17 +49246,19 @@ function _openTripStopPopover(ctx) {
     "see"  // NC.8
   );
 
-  // v360.3: "What's here" peek block. The user shouldn't have to scroll
-  // the destination card (or the wayside detail) to remember why a
-  // place is on the trip before deciding its role. Sources differ by
-  // ctx.kind:
+  // v360.3 / PD.307b: "What's here" peek block. The user shouldn't have
+  // to scroll the destination card (or the wayside detail) to remember
+  // why a place is on the trip before deciding its role. Sources differ
+  // by ctx.kind:
   //   destination:
-  //     - trip.mdcItems with requiredPlaces matching this place
+  //     - trip.placeActivities with requiredPlaces matching this place
+  //       (canonical post-ARCH; the schema migration strips the
+  //        pre-rewrite trip.mdcItems on load)
   //     - dest.suggestions[] (picker's later additions)
   //   wayside / dayTrip:
   //     - stop.notes (the LLM's "why this stop" written at generation)
   //     - trip.places[stop.placeId].notes (any later editorial)
-  //     - mdcItems by name match (rare for waysides, but cheap to check)
+  //     - placeActivities by name match (rare for waysides, but cheap)
   // Dedupe by normalized name. Show up to 6; "+N more" if there are
   // extras so the popover doesn't grow unboundedly.
   function _collectWhatsHere(placeName) {
@@ -49304,11 +49370,16 @@ function _openTripStopPopover(ctx) {
       _push(placeName, headBits.join(" · "));
     }
 
-    // 1) mdcItems linked by requiredPlaces. Applies to every ctx.kind —
-    //    a destination's discovery items, OR a wayside that the user
-    //    discovered earlier and that the LLM happened to also wayside.
-    var mdc = Array.isArray(trip.mdcItems) ? trip.mdcItems : [];
-    mdc.forEach(function (m) {
+    // 1) placeActivities linked by requiredPlaces. Applies to every
+    //    ctx.kind — a destination's discovery items, OR a wayside that
+    //    the user discovered earlier and that the LLM happened to also
+    //    wayside.
+    //    PD.307b: read trip.placeActivities (canonical post-ARCH).
+    //    trip.mdcItems is stripped by the schema migration on load
+    //    (tripstore.js _migrateV0ToV1) — reading it was silently
+    //    returning no matches.
+    var acts = Array.isArray(trip.placeActivities) ? trip.placeActivities : [];
+    acts.forEach(function (m) {
       if (!m || !Array.isArray(m.requiredPlaces)) return;
       var matches = m.requiredPlaces.some(function (p) {
         if (!p || !p.place) return false;

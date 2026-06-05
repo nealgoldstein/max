@@ -160,10 +160,14 @@ test.describe('Role popover — availability + Wayside gate', () => {
     expect(warnings).toEqual([]);
   });
 
-  test('Wayside row is hidden when the place has more than 2 sights (mdcItems)', async ({ page }) => {
+  test('Wayside row is hidden when the place has more than 2 sights (placeActivities)', async ({ page }) => {
     const warnings = attachWarningWatcher(page);
 
-    // Deep-clone the seed and attach 3 mdcItems all tied to Vik.
+    // PD.307c: seed 3 sights via trip.placeActivities (canonical
+    // post-ARCH). Pre-ARCH this used trip.mdcItems, but the schema
+    // migration now strips that field on load — the popover code
+    // reads placeActivities directly.
+    //
     // Targeting Vik (d2, middle dest) is important: the natural
     // prev→next route exists for d2, so Wayside would normally render.
     // The only thing suppressing it should be the gate (sightCount > 2).
@@ -171,7 +175,7 @@ test.describe('Role popover — availability + Wayside gate', () => {
     // for two reasons — the gate AND the lack of a natural route — and
     // the test would pass for the wrong reason.
     const seed = JSON.parse(JSON.stringify(ICELAND_RING));
-    seed.envelope.trip.mdcItems = [
+    seed.envelope.trip.placeActivities = [
       { id: 'm1', name: 'Reynisfjara black sand beach', checked: true, requiredPlaces: [{ place: 'Vik' }] },
       { id: 'm2', name: 'Dyrhólaey lighthouse',         checked: true, requiredPlaces: [{ place: 'Vik' }] },
       { id: 'm3', name: 'Skógafoss waterfall',           checked: true, requiredPlaces: [{ place: 'Vik' }] },
@@ -259,41 +263,11 @@ test.describe('Wayside geometry sanity-check (#120)', () => {
     expect(warnings).toEqual([]);
   });
 
-  test('one-shot enterApp migration cleans existing trips and sets the _waysidesGeoMigrated flag', async ({ page }) => {
-    const warnings = attachWarningWatcher(page);
-
-    // Seed a trip that already carries a misplaced wayside (no migration
-    // flag set) so the enterApp-time migration has work to do.
-    const seed = JSON.parse(JSON.stringify(ICELAND_RING));
-    seed.envelope.trip.places = {
-      'p-fridheimar': { id: 'p-fridheimar', name: 'Friðheimar Greenhouse', lat: 64.04, lng: -20.50, type: 'sight' },
-    };
-    seed.envelope.trip.routes = [
-      { id: 'r-tr-d1-d2', kind: 'route', subKind: 'transit', fromDestId: 'd1', toDestId: 'd2', planItems: [] },
-      {
-        id: 'r-tr-d2-d3', kind: 'route', subKind: 'transit', fromDestId: 'd2', toDestId: 'd3',
-        planItems: [
-          { id: 'pi-stop-fridheimar', type: 'stop', placeId: 'p-fridheimar', duration: 1, priority: 'optional', source: 'llm-wayside-v1' },
-        ],
-      },
-    ];
-    // No _waysidesGeoMigrated flag → migration should fire.
-
-    await bootSeeded(page, seed);
-
-    const post = await page.evaluate(() => ({
-      flag: !!window.trip._waysidesGeoMigrated,
-      onD1D2: (window.trip.routes[0].planItems || []).length,
-      onD2D3: (window.trip.routes[1].planItems || []).length,
-    }));
-
-    // Migration moved Friðheimar from d2→d3 to d1→d2 and set the flag.
-    expect(post.flag).toBe(true);
-    expect(post.onD1D2).toBe(1);
-    expect(post.onD2D3).toBe(0);
-
-    expect(warnings).toEqual([]);
-  });
+  // PD.307a: deleted "one-shot enterApp migration sets the
+  // _waysidesGeoMigrated flag" test — the flag + the one-shot
+  // migration were retired in the ARCH rewrite. The flag is not
+  // written anywhere in code; this test was guarding behavior that
+  // no longer exists.
 
   test('drops a wayside that has no transit leg within 30 km perp distance', async ({ page }) => {
     const warnings = attachWarningWatcher(page);
@@ -340,42 +314,11 @@ test.describe('Wayside geometry sanity-check (#120)', () => {
   });
 });
 
-test.describe('Migration visibility on trip load (#104)', () => {
-  test('wayside migration on load surfaces a save-status toast describing what changed', async ({ page }) => {
-    const warnings = attachWarningWatcher(page);
-
-    // Seed a trip with a misplaced wayside but no migration flag, so
-    // the load-time _reassignWaysidesToBestLeg pass moves it. The
-    // user should see a consolidated toast in #save-status describing
-    // what changed — NOT just a console log.
-    const seed = JSON.parse(JSON.stringify(ICELAND_RING));
-    seed.envelope.trip.places = {
-      'p-fridheimar': { id: 'p-fridheimar', name: 'Friðheimar Greenhouse', lat: 64.04, lng: -20.50, type: 'sight' },
-    };
-    seed.envelope.trip.routes = [
-      { id: 'r-tr-d1-d2', kind: 'route', subKind: 'transit', fromDestId: 'd1', toDestId: 'd2', planItems: [] },
-      {
-        id: 'r-tr-d2-d3', kind: 'route', subKind: 'transit', fromDestId: 'd2', toDestId: 'd3',
-        planItems: [
-          { id: 'pi-stop-fridheimar', type: 'stop', placeId: 'p-fridheimar', duration: 1, priority: 'optional', source: 'llm-wayside-v1' },
-        ],
-      },
-    ];
-
-    await bootSeeded(page, seed);
-
-    // The save-status pill (#save-status) should display the migration
-    // summary. enterApp emits it AFTER drawTripMode's initial autoSave
-    // (which would otherwise clobber the message), so the test has to
-    // wait for the trailing toast. toContainText polls until the
-    // expected text shows up — up to its default timeout.
-    const status = page.locator('#save-status');
-    await expect(status).toContainText(/Updated this trip/i, { timeout: 5000 });
-    await expect(status).toContainText(/wayside/i);
-
-    expect(warnings).toEqual([]);
-  });
-});
+// PD.307a: deleted "Migration visibility on trip load (#104)"
+// describe block. The "Updated this trip" save-status toast was
+// retired in the ARCH rewrite — neither the text nor the migration
+// surface exists in the current code. This test was guarding a
+// dead behavior.
 
 test.describe('Visual continuity on role conversion (#104 production)', () => {
   test('dayTrip → overnight flashes the newly-created destination card', async ({ page }) => {
@@ -526,15 +469,19 @@ test.describe('Per-leg honesty surface', () => {
 });
 
 test.describe('Role popover — What\'s here block', () => {
-  test('popover shows activities/sights linked to the destination via mdcItems', async ({ page }) => {
+  test('popover shows activities/sights linked to the destination via placeActivities', async ({ page }) => {
     const warnings = attachWarningWatcher(page);
 
-    // Seed three mdcItems linked to Vik (d2). The "What's here" block
-    // should pull these into the popover so the user sees what's at
-    // the place before deciding its role. Without this block the user
-    // has to scroll the destination card to see the same info.
+    // PD.307c: seed three sights via trip.placeActivities (canonical
+    // post-ARCH) — the schema migration strips trip.mdcItems on load,
+    // and the popover reads placeActivities directly.
+    //
+    // The "What's here" block should pull these into the popover so
+    // the user sees what's at the place before deciding its role.
+    // Without this block the user has to scroll the destination card
+    // to see the same info.
     const seed = JSON.parse(JSON.stringify(ICELAND_RING));
-    seed.envelope.trip.mdcItems = [
+    seed.envelope.trip.placeActivities = [
       { id: 'm1', name: 'Reynisfjara black sand beach', why: 'Basalt columns + Atlantic surf', checked: true, requiredPlaces: [{ place: 'Vik' }] },
       { id: 'm2', name: 'Dyrhólaey lighthouse',         why: 'Sea-cliff viewpoint + puffins in summer', checked: true, requiredPlaces: [{ place: 'Vik' }] },
       { id: 'm3', name: 'Skógafoss waterfall',           why: 'Walk behind the falls', checked: true, requiredPlaces: [{ place: 'Vik' }] },
@@ -613,9 +560,9 @@ test.describe('Role popover — What\'s here block', () => {
 
   test('What\'s here block is omitted when the place has no linked activities', async ({ page }) => {
     const warnings = attachWarningWatcher(page);
-    // Seed has zero mdcItems and no suggestions → "What's here" block
-    // should not render at all. Pins the contract that the popover
-    // doesn't sprout an empty section.
+    // Seed has zero placeActivities and no suggestions → "What's
+    // here" block should not render at all. Pins the contract that
+    // the popover doesn't sprout an empty section.
     await bootSeeded(page, ICELAND_RING);
 
     await page.evaluate(() => {
