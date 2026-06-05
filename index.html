@@ -379,6 +379,14 @@
      as the persistence seam. No callsites migrated yet; this just
      defines the API and verifies it loads. -->
 <script src="db.js?v=DEV"></script>
+<!-- ARCHITECTURE REWRITE Phase 1: TripStore — single source of truth
+     for trip state. Owns the canonical in-memory `trip` object,
+     exposes named mutators, emits `tripChange` on every mutation,
+     persists atomically via MaxDB. All callers migrate to this
+     module across Phases 2-6 (see architecture-rewrite.md). Loaded
+     AFTER db.js because it depends on MaxDB; loaded before all other
+     inline scripts because they will read/write through it. -->
+<script src="tripstore.js?v=DEV"></script>
 <!-- Round HB: Phase 1 of the engine/UI split. engine-trip.js owns
      the trip engine's PURE helpers (haversine, pair-key, fastest-
      practical, hour parse/format, place-name canonicalization).
