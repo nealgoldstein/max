@@ -8332,7 +8332,11 @@ async function _reconcileListedSightsToSections() {
     return false;
   }
   var orphanKeys = listedKeys.filter(function(k){ return !_isCovered(k); });
-  if (!orphanKeys.length) return;
+  if (!orphanKeys.length) {
+    console.log("[PD.257] no orphans, reconciliation skipped");
+    return;
+  }
+  console.log("[PD.257] start: " + orphanKeys.length + " orphan(s):", JSON.stringify(orphanKeys));
 
   // Resolve a display name + country for each orphan key so the wiki
   // fetch + the requiredPlaces.push use the user's original spelling.
@@ -8470,10 +8474,8 @@ async function _reconcileListedSightsToSections() {
         placed.push({ place: o.name, section: best.item.section, score: bestScore });
       });
   }));
-  if (placed.length) {
-    console.log("[PD.257] heuristic placed " + placed.length + " sight(s): "
-      + placed.map(function(p){ return p.place + " → \"" + p.section + "\""; }).join("; "));
-  }
+  console.log("[PD.257] heuristic placed " + placed.length + " of " + orphans.length + " sight(s)"
+    + (placed.length ? ": " + placed.map(function(p){ return p.place + " → \"" + p.section + "\""; }).join("; ") : ""));
 
   // PD.259: LLM-backed second pass for orphans the heuristic can't
   // categorize. Rebuild coveredTokenSets once (post-heuristic) and
@@ -8491,7 +8493,12 @@ async function _reconcileListedSightsToSections() {
     });
   });
   var stillOrphanKeys = orphanKeys.filter(function(k){ return !_isCovered(k); });
-  if (!stillOrphanKeys.length) return;
+  if (!stillOrphanKeys.length) {
+    console.log("[PD.259] no still-orphans after heuristic; LLM pass skipped");
+    return;
+  }
+  console.log("[PD.259] " + stillOrphanKeys.length + " still-orphan after heuristic:",
+    JSON.stringify(stillOrphanKeys));
   if (typeof callMax !== "function") {
     console.warn("[PD.259] callMax unavailable; LLM reconciliation skipped");
     return;
@@ -8595,10 +8602,9 @@ async function _reconcileListedSightsToSections() {
     console.warn("[PD.259] LLM reconciliation failed:", e && e.message);
     return;
   }
-  if (llmPlaced.length) {
-    console.log("[PD.259] LLM placed " + llmPlaced.length + " sight(s): "
-      + llmPlaced.map(function(p){ return p.place + " → \"" + p.section + "\""; }).join("; "));
-  }
+  console.log("[PD.259] LLM placed " + llmPlaced.length + " of " + stillOrphans.length + " sight(s)"
+    + (llmPlaced.length ? ": " + llmPlaced.map(function(p){ return p.place + " → \"" + p.section + "\""; }).join("; ") : "")
+    + (llmNullDecisions.length ? " | LLM said no-fit: " + llmNullDecisions.join(", ") : ""));
 }
 if (typeof globalThis !== "undefined") globalThis._reconcileListedSightsToSections = _reconcileListedSightsToSections;
 
