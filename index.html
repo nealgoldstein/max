@@ -8518,12 +8518,20 @@ async function _reconcileListedSightsToSections() {
     if (s.length <= max) return s;
     return s.slice(0, max - 1) + "…";
   }
-  var sectionsForPrompt = sections.map(function(it){
-    return {
-      name: it.section,
-      description: _shortText(it.description || "", 220)
-    };
-  });
+  // PD.283: don't offer the catchall as a placement target to the
+  // LLM. If we did, the LLM could "place" a backstop stub back into
+  // the same section it came from, then the cleanup below would
+  // remove it from there as if it had been promoted — and the sight
+  // vanishes entirely. Forcing the LLM to pick from real categorical
+  // sections (or return null) makes the cleanup safe.
+  var sectionsForPrompt = sections
+    .filter(function(it){ return !_isCatchallSection(it); })
+    .map(function(it){
+      return {
+        name: it.section,
+        description: _shortText(it.description || "", 220)
+      };
+    });
   var orphansForPrompt = stillOrphans.map(function(o, i){
     var w = orphanWikis[i];
     var desc = "";
@@ -8582,6 +8590,15 @@ async function _reconcileListedSightsToSections() {
       });
       if (!_currentTarget) {
         console.warn("[PD.259] LLM picked unknown section '" + assigned + "' for " + o.name);
+        return;
+      }
+      // PD.283 safety net: even though the catchall is filtered out
+      // of the prompt, refuse to "place" into it as a defense against
+      // a hallucinated name. If the LLM somehow says "Other places to
+      // consider," treat as a null decision so the cleanup below
+      // doesn't pull the sight out.
+      if (_isCatchallSection(_currentTarget)) {
+        llmNullDecisions.push(o.name);
         return;
       }
       var alreadyToks = _pd258TokensOf(o.key);
