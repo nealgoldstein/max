@@ -13302,13 +13302,18 @@ async function runCandidateSearch(requiredPlaces) {
               if (!rp.length) return true;
               var allOvernight = rp.every(function(p){ return p && p.overnight === true; });
               if (!allOvernight) return true;
-              var allNotInUserList = rp.every(function(p){
-                return !p || !p.place || !pastedNorm[nrm(p.place)];
+              // PD.298: any all-overnight section IS a stays-extras
+              // duplicate. PD.289's "all not in user list" check was
+              // too strict — the LLM routinely mixes user-listed
+              // stays (already in Recommended) with new suggestions
+              // in the same section. Partition: places not in the
+              // user's list fold into "Overnight stays to consider";
+              // places in the user's list are silent duplicates of
+              // Recommended and just get dropped with the section.
+              var toFold = rp.filter(function(p){
+                return p && p.place && !pastedNorm[nrm(p.place)];
               });
-              if (!allNotInUserList) return true;
-              // This is the duplicate. Ensure the synthetic exists,
-              // then fold this section's unique requiredPlaces in.
-              if (!synthExtras) {
+              if (toFold.length && !synthExtras) {
                 synthExtras = {
                   id: "synth-other-stays",
                   section: "Overnight stays to consider",
@@ -13328,8 +13333,7 @@ async function runCandidateSearch(requiredPlaces) {
                 }
                 _tb.placeActivities.splice(insertAt, 0, synthExtras);
               }
-              rp.forEach(function(p){
-                if (!p || !p.place) return;
+              toFold.forEach(function(p){
                 var k = nrm(p.place);
                 if (existingNorm[k]) return;
                 synthExtras.requiredPlaces.push(p);
@@ -13337,7 +13341,7 @@ async function runCandidateSearch(requiredPlaces) {
                 pd289Folded++;
               });
               pd289DropSections.push(it.section);
-              return false; // drop this LLM duplicate
+              return false; // drop this stays-extras section regardless
             });
             if (pd289Folded || pd289DropSections.length) {
               console.log("[PD.289] folded " + pd289Folded + " stay(s) into 'Overnight stays to consider'; dropped " + pd289DropSections.length + " duplicate section(s): " + pd289DropSections.join(", "));
