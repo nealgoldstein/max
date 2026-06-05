@@ -19723,30 +19723,60 @@ function _renderPlaceActivityItems(){
         ? '<span style="font-size:9.5px;font-weight:700;color:#5b3f8f;background:#f4eef9;border:1px solid #d8c4e8;padding:1px 6px;border-radius:9px;letter-spacing:.02em;" title="'+_pmEsc(routeStops.length>1 ? "Also on: " + routeStops.slice(1).join(", ") : "Endpoint of an iconic route experience.")+'">📍 stop on '+_pmEsc(routeStops[0])+'</span>'
         : '';
 
-      // v359.55.2: section-reassignment affordance for user-added places.
-      // The picker treats user-added items as a personal addendum (section
-      // pinned to the end), but users may want to re-file them under one
-      // of Max's themes ("Coastal towns I want to overnight in," etc.) so
-      // the picker becomes a research document, not a stash. A small
-      // "Move to: ▾" select lists every other section.
+      // v359.55.2 / PD.291: section-reassignment affordance.
+      // Originally limited to user-added (type:"manual") rows; PD.291
+      // widens to every sight row whose current section is placeable.
+      // User can override Max's categorization at any time — "Skógafoss
+      // belongs under Drive scenic routes, not Hike to waterfalls."
+      // Skipped on stay-only sections (Recommended overnight stays,
+      // Overnight stays to consider) and on type:"route" sections —
+      // moving an endpoint or a stay to a sight section breaks the
+      // semantic of those sections.
       var manualRefs = d.placeRefs.filter(function(r){ return r.item && r.item.type === "manual"; });
+      function _pd291IsStaySection(s) {
+        return s === "Recommended overnight stays"
+            || s === "Overnight stays to consider";
+      }
+      var _pd291AnyRoute = d.placeRefs.some(function(r){ return r.item && r.item.type === "route"; });
+      var _pd291Eligible = !_pd291IsStaySection(sec) && !_pd291AnyRoute;
       var moveSelect = "";
-      if (manualRefs.length && sectionOrder.length > 1) {
-        var _actId = manualRefs[0].item.id;
-        var _opts = sectionOrder.map(function(s){
-          var _safe = _pmEsc(s).replace(/"/g, '&quot;');
-          var _selected = (s === sec) ? ' selected' : '';
-          return '<option value="' + _safe + '"' + _selected + '>' + _safe + '</option>';
-        }).join("");
-        // v359.55.3: also offer "+ New section…" so the user can spin
-        // up custom theme labels (matches the picker-as-research-doc
-        // direction — Max's category names aren't the only frame).
-        _opts += '<option value="__new__">+ New section…</option>';
-        moveSelect = '<select class="pm-move-section" '
-          + 'onchange="_pmMoveUserAddedToSection(&#39;' + _pmEsc(_actId) + '&#39;, this.value);event.stopPropagation();" '
-          + 'onclick="event.stopPropagation();" '
-          + 'title="Move this place to a different section" '
-          + 'style="font-size:10px;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:2px 4px;margin-left:6px;font-family:inherit;cursor:pointer;max-width:160px;">' + _opts + '</select>';
+      if (_pd291Eligible && sectionOrder.length > 1) {
+        // Target sections: every other section except stay-only ones
+        // and route-type ones (which would silently hide the row per
+        // PD.286). New section creation still allowed via "+ New
+        // section…" so users can spin up custom theme labels.
+        var _pd291TargetSecs = sectionOrder.filter(function(s){
+          if (s === sec) return true; // keep current as default-selected
+          if (_pd291IsStaySection(s)) return false;
+          // Check if any activity in that section is type:"route" — if
+          // ALL are route-type, skip; mixed sections are fine targets.
+          var hasNonRoute = (_tb.placeActivities || []).some(function(it){
+            return it && it.section === s && it.type !== "route";
+          });
+          return hasNonRoute;
+        });
+        if (_pd291TargetSecs.length > 1) {
+          var _opts = _pd291TargetSecs.map(function(s){
+            var _safe = _pmEsc(s).replace(/"/g, '&quot;');
+            var _selected = (s === sec) ? ' selected' : '';
+            return '<option value="' + _safe + '"' + _selected + '>' + _safe + '</option>';
+          }).join("");
+          _opts += '<option value="__new__">+ New section…</option>';
+          // If the row is a manual single-place activity, use the
+          // legacy whole-activity mover (cheaper). Otherwise route
+          // through the new per-requiredPlace mover that surgically
+          // extracts this place from its current activity.
+          var _useManualMover = manualRefs.length === 1
+            && (manualRefs[0].item.requiredPlaces || []).length === 1;
+          var _onchange = _useManualMover
+            ? "_pmMoveUserAddedToSection(&#39;" + _pmEsc(manualRefs[0].item.id) + "&#39;, this.value)"
+            : "_pmMovePlaceToSection(&#39;" + _pmEsc(d.place).replace(/'/g, "\\'") + "&#39;, &#39;" + _pmEsc(sec).replace(/'/g, "\\'") + "&#39;, this.value)";
+          moveSelect = '<select class="pm-move-section" '
+            + 'onchange="' + _onchange + ';event.stopPropagation();" '
+            + 'onclick="event.stopPropagation();" '
+            + 'title="Move this place to a different section" '
+            + 'style="font-size:10px;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:2px 4px;margin-left:6px;font-family:inherit;cursor:pointer;max-width:160px;">' + _opts + '</select>';
+        }
       }
 
       // v359.55.6: stay/see as a symmetric two-button toggle. Always
@@ -24926,6 +24956,85 @@ function _pmMoveUserAddedToSection(activityId, newSection){
   act.section = newSection;
   if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
 }
+
+// PD.291: per-requiredPlace mover. Unlike _pmMoveUserAddedToSection
+// (which moves a whole single-place activity by changing its section
+// label), this surgically extracts ONE requiredPlace from a shared
+// activity (e.g. "Skógafoss" from "Hike to waterfalls", which has
+// 4 other waterfalls in it) and grafts it onto an activity in the
+// target section. Used by the "Move to: ▾" dropdown on every sight
+// row when the source activity has multiple places.
+//
+// Source removal: walk every activity in fromSection, drop any
+// requiredPlace matching placeName. If an activity is left with zero
+// requiredPlaces, drop the whole activity too (no orphan section
+// headers).
+// Target insertion: find the first non-route activity in toSection
+// and push the requiredPlace there. If toSection has no activities
+// (custom new name from "+ New section…"), create a manual one.
+function _pmMovePlaceToSection(placeName, fromSection, toSection){
+  if (!_tb || !Array.isArray(_tb.placeActivities)) return;
+  if (!placeName || !fromSection || !toSection) return;
+  if (toSection === "__new__") {
+    var customName = prompt("Name for the new section:", "");
+    if (!customName || !customName.trim()) {
+      if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
+      return;
+    }
+    toSection = customName.trim();
+  }
+  if (fromSection === toSection) return;
+  var nameLC = String(placeName).toLowerCase();
+  var moved = null; // capture the first matching requiredPlace to transplant
+  _tb.placeActivities.forEach(function(act){
+    if (!act || act.section !== fromSection) return;
+    if (!Array.isArray(act.requiredPlaces)) return;
+    act.requiredPlaces = act.requiredPlaces.filter(function(p){
+      if (!p || !p.place) return true;
+      if (p.place.toLowerCase() !== nameLC) return true;
+      if (!moved) moved = p;
+      return false; // drop from source
+    });
+  });
+  if (!moved) {
+    // Nothing matched — likely a stale render. Re-render to resync.
+    if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
+    return;
+  }
+  // Mark as user-overridden so we know the placement was hand-set
+  // (downstream code can avoid silently re-categorizing it on
+  // Enhance / regenerate).
+  moved._userReassigned = true;
+  // Drop any now-empty activities in fromSection so the section
+  // either keeps its remaining places or collapses entirely.
+  _tb.placeActivities = _tb.placeActivities.filter(function(act){
+    if (!act) return false;
+    if (act.section !== fromSection) return true;
+    return Array.isArray(act.requiredPlaces) && act.requiredPlaces.length > 0;
+  });
+  // Find a host activity in toSection. Prefer the first non-route
+  // activity. If none exists (new custom section), spin up a manual
+  // one to carry the moved place.
+  var host = _tb.placeActivities.find(function(act){
+    return act && act.section === toSection && act.type !== "route";
+  });
+  if (!host) {
+    host = {
+      id: "user-section-" + Date.now().toString(36),
+      section: toSection,
+      name: toSection,
+      type: "manual",
+      description: "Places you reassigned to this section.",
+      checked: true,
+      requiredPlaces: []
+    };
+    _tb.placeActivities.push(host);
+  }
+  if (!Array.isArray(host.requiredPlaces)) host.requiredPlaces = [];
+  host.requiredPlaces.push(moved);
+  if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
+}
+if (typeof globalThis !== "undefined") globalThis._pmMovePlaceToSection = _pmMovePlaceToSection;
 
 // v359.55.17: research-meta access from any surface (picker OR trip
 // view). _tb is the picker's transient state; trip.brief is the
