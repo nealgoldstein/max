@@ -3040,43 +3040,6 @@ function _canonArr(arr){
 }
 if (typeof globalThis !== "undefined") globalThis._canonArr = _canonArr;
 
-// PD.314: network-drop banner. Mounts a single sticky banner at the
-// top of the viewport when callMax catches a "Failed to fetch" (or
-// similar) network error. Cleared on the next successful response.
-// Without this, multiple LLM calls fail silently — every enhanceDiscovery
-// batch logs "[Max enhance] enrich batch failed: Failed to fetch" to
-// the console, but the user just sees an empty picker. The banner
-// surfaces what's actually going wrong so the user can check their
-// network instead of blaming the app.
-function _maxShowNetworkBanner() {
-  try {
-    var existing = document.getElementById("max-network-banner");
-    if (existing) return; // already mounted
-    var b = document.createElement("div");
-    b.id = "max-network-banner";
-    b.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:14000;"
-      + "background:#a93826;color:#fff;padding:10px 20px;"
-      + "font-size:12.5px;font-weight:600;line-height:1.5;"
-      + "font-family:inherit;text-align:center;"
-      + "box-shadow:0 2px 12px rgba(0,0,0,0.3);"
-      + "cursor:pointer;";
-    b.innerHTML = '⚠ Can’t reach Max — network down. Build &amp; Enhance need the Anthropic API. <span style="opacity:0.85;font-weight:500;">Check your connection and try again. (Click to dismiss.)</span>';
-    b.onclick = function(){ if (b.parentNode) b.parentNode.removeChild(b); };
-    document.body.appendChild(b);
-  } catch(_) {}
-}
-function _maxClearNetworkBanner() {
-  try {
-    var b = document.getElementById("max-network-banner");
-    if (b && b.parentNode) b.parentNode.removeChild(b);
-  } catch(_) {}
-}
-function _maxIsNetworkErr(err) {
-  if (!err) return false;
-  var m = String(err.message || err || "").toLowerCase();
-  return /failed to fetch|network|fetch.*fail|err_network|err_internet|timed?\s*out|abort/i.test(m);
-}
-
 async function callMax(messages, maxTokens, timeoutMs, opts) {
   // v345: route through MaxSync's LLM proxy when the user is signed
   // in. The server holds the Anthropic API key — testers no longer
@@ -3214,7 +3177,6 @@ async function callMax(messages, maxTokens, timeoutMs, opts) {
       } catch (directErr) {
         // Direct path also failed \u2014 surface the original error so the
         // user sees the actual root cause (CORS, DNS, network).
-        if (_maxIsNetworkErr(fetchErr) || _maxIsNetworkErr(directErr)) _maxShowNetworkBanner();
         throw fetchErr;
       }
     } else {
@@ -3222,14 +3184,9 @@ async function callMax(messages, maxTokens, timeoutMs, opts) {
         showApiKeyForm();
         throw new Error("API key required \u2014 enter your Anthropic API key in the form above.");
       }
-      if (_maxIsNetworkErr(fetchErr)) _maxShowNetworkBanner();
       throw fetchErr;
     }
   }
-  // PD.314: any successful response clears the network banner. If the
-  // user fixed their connection and a subsequent call landed, the
-  // banner shouldn't linger.
-  _maxClearNetworkBanner();
   if (data.error) {
     // v353.2: split the 401 handling per auth mode. Proxy users on
     // 401 mean their session token expired \u2014 clear it and route to
@@ -12466,16 +12423,10 @@ async function enhanceDiscovery(btn, opts) {
         noteExisting(p.place, isRej);
       });
     });
-    console.log("[Max enhanceDiscovery] entry — _tb.candidates.len:", (_tb && _tb.candidates || []).length,
-      "_tb.placeActivities.len:", (_tb && _tb.placeActivities || []).length,
-      "keptDisplay.len:", keptDisplay.length, "rejectedDisplay.len:", rejectedDisplay.length,
-      "opts.silentNoOp:", !!opts.silentNoOp);
     if (!keptDisplay.length && !rejectedDisplay.length) {
-      console.log("[Max enhanceDiscovery] no kept/rejected — bailing out", opts.silentNoOp ? "(silentNoOp)" : "(showing maxAlert)");
       if (!opts.silentNoOp && typeof maxAlert === "function") maxAlert("Nothing in Discovery yet — start with a paste-list or generate first.");
       return 0;
     }
-    console.log("[Max enhanceDiscovery] proceeding to LLM call — keptDisplay:", keptDisplay.length, "items");
     var existingDisplay = keptDisplay.concat(rejectedDisplay);
     var brief = (typeof _serializeTbForPrompt === "function") ? _serializeTbForPrompt(_tb) : (_tb.intent || "");
     var region = _tb.region || "this region";
@@ -16340,25 +16291,20 @@ function continueFromPlaceToBrief(){
 }
 
 // Generate activities for the named place.
-// PD.315: instrumentation. Logs a stack trace at every invocation of
-// generateActivitiesForPlace so we can see who's calling it twice. The
-// race between MaxBuild's orchestrated call and an unidentified second
-// caller is wiping Enhance's additions (placeActivities 16 → 14).
-// PD.313's `isBuilding()` guard didn't catch this because the second
-// call happens AFTER `build:done` (when _building is false).
-//
-// MUTEX guard: if generateActivitiesForPlace is already in flight,
-// the second call returns immediately. The unguarded re-entry was the
-// proximate cause of the regression — _tb.placeActivities = items at
-// line 16850 reassigns the array reference, wiping Enhance's pushed
-// sections. Mutex closes the race regardless of who's the caller.
+// PD.315: mutex on generateActivitiesForPlace. If it's already in
+// flight, the second call returns immediately instead of running.
+// Without this guard, a second invocation reassigns
+// _tb.placeActivities = items (line ~16850), wiping any concurrent
+// additions made by enhanceDiscovery while the first invocation was
+// awaiting its LLM call. PD.313's isBuilding() guard does not catch
+// every path — the orchestrator can complete (_building=false) and
+// a deferred legacy timer can still re-enter. The mutex closes the
+// race by construction at the only function that does the damaging
+// reassignment.
 var _generateActivitiesInFlight = false;
 async function generateActivitiesForPlace(){
-  console.log("[Max] generateActivitiesForPlace called — in-flight:", _generateActivitiesInFlight,
-    "_tb.placeActivities.len:", (_tb && _tb.placeActivities || []).length);
-  console.trace("[Max] generateActivitiesForPlace stack");
   if (_generateActivitiesInFlight) {
-    console.warn("[Max] generateActivitiesForPlace: SKIPPED (already in flight) — second call would clobber any concurrent additions to _tb.placeActivities");
+    console.warn("[Max] generateActivitiesForPlace: skipped (already in flight)");
     return;
   }
   _generateActivitiesInFlight = true;

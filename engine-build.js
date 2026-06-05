@@ -148,65 +148,45 @@
     }
 
     emit("build:start", { mode: mode, region: input.region });
-    // PD.311: diagnostic logging at phase boundaries so a failed build
-    // leaves a paper trail. Without these, a stalled build (LLM hang,
-    // silent no-op, exception swallowed downstream) is invisible.
-    console.log("[MaxBuild] start — mode:", mode, "region:", input.region);
     // PD.313: flag set across the full build. Pickers and other UI
     // surfaces check `MaxBuild.isBuilding()` to skip their own
     // auto-fire codepaths (which would race with the orchestrator).
     _building = true;
 
     try {
-      // Phase 1: normalize.
+      // Phase 1: normalize input → _tb so legacy phases keep reading.
       _normalize(input);
-      console.log("[MaxBuild] normalize done — _tb.placeName:", _readTb("placeName"),
-        "_tb.region:", _readTb("region"),
-        "_tb.placeContext.len:", (_readTb("placeContext") || "").length,
-        "_tb._pastedListPlaces.len:", (_readTb("_pastedListPlaces") || []).length);
 
       // Phase 2: primary LLM, mode-dispatched.
-      console.log("[MaxBuild] phase: primary (start)");
       var primaryResult = await _runPrimaryPhase(mode, input);
-      console.log("[MaxBuild] phase: primary (done) — count:", primaryResult.count,
-        "_tb.placeActivities.len:", (_readTb("placeActivities") || []).length,
-        "_tb.candidates.len:", (_readTb("candidates") || []).length);
       emit("build:primary-done", { count: primaryResult.count, mode: mode });
 
-      // Phase 3: mint (or skip for rebuild).
+      // Phase 3: mint (skipped for rebuild — preserves trip identity).
       if (mode !== "rebuild") {
-        console.log("[MaxBuild] phase: mint (start)");
         await _runMintPhase();
-        console.log("[MaxBuild] phase: mint (done) — _currentTripId:", global._currentTripId);
         emit("build:mint-done");
-      } else {
-        console.log("[MaxBuild] phase: mint SKIPPED (rebuild mode)");
       }
 
-      // Phase 4: reconcile.
+      // Phase 4: reconcile. PD.310: MUST run BEFORE enhance so the
+      // enhance phase's skip list (built from _tb.placeActivities)
+      // includes user-listed places that the primary LLM dropped.
+      // Otherwise Enhance's LLM suggests those dropped places as
+      // "nearby sights," lands them in the enrichment section, and
+      // backstop's token-coverage check then treats them as already
+      // covered — they're stuck in the wrong section forever.
       if (typeof input.reconcile === "function") {
-        console.log("[MaxBuild] phase: reconcile (start)");
         try {
           await input.reconcile();
         } catch (recErr) {
-          console.warn("[MaxBuild] reconcile phase failed (best-effort, continuing):",
+          // Best-effort: reconcile failure should not abort the build.
+          console.warn("[MaxBuild] reconcile failed (best-effort, continuing):",
             recErr && recErr.message);
         }
-        console.log("[MaxBuild] phase: reconcile (done) — _tb.placeActivities.len:",
-          (_readTb("placeActivities") || []).length);
-      } else {
-        console.log("[MaxBuild] phase: reconcile SKIPPED (no callback supplied)");
       }
       emit("build:reconcile-done");
 
       // Phase 5: enhance (always, best-effort).
-      console.log("[MaxBuild] phase: enhance (start) — _tb.candidates.len:",
-        (_readTb("candidates") || []).length,
-        "_tb.placeActivities.len:", (_readTb("placeActivities") || []).length);
       var enhanceResult = await _runEnhancePhase();
-      console.log("[MaxBuild] phase: enhance (done) — added:", enhanceResult.added,
-        "_tb.candidates.len:", (_readTb("candidates") || []).length,
-        "_tb.placeActivities.len:", (_readTb("placeActivities") || []).length);
       emit("build:enhance-done", { added: enhanceResult.added });
 
       // Phase 6: handoff. The legacy primary phase already either
@@ -222,12 +202,11 @@
           tripId = global.TripStore.trip && global.TripStore.trip.id;
         }
       } catch (_) {}
-      console.log("[MaxBuild] done — tripId:", tripId);
       _building = false;
       emit("build:done", { tripId: tripId, mode: mode });
       return { tripId: tripId, mode: mode };
     } catch (err) {
-      console.error("[MaxBuild] findCandidates failed:", err && err.message, err && err.stack);
+      console.error("[MaxBuild] findCandidates failed:", err && err.message);
       _building = false;
       emit("build:error", { error: err, mode: mode });
       throw err;
@@ -235,10 +214,6 @@
   }
 
   // ── Phase implementations (thin wrappers around legacy bodies) ─────
-
-  function _readTb(field) {
-    return global._tb && global._tb[field];
-  }
 
   function _normalize(input) {
     // The orchestrator copies explicit input → _tb so legacy phase
@@ -309,16 +284,10 @@
   }
 
   async function _runEnhancePhase() {
-    // PD.310 fix: emit build:enhance-start so subscribers (paste-list
-    // banner, sentence-mode candidate-explorer loading copy) can show
-    // a phase-2 status. The earlier MaxBuild only emitted enhance-done,
-    // not enhance-start — so the banner never fired and the user could
-    // not see that anything was happening during the ~30-60s wait.
+    // PD.310: emit build:enhance-start before the LLM await so
+    // subscribers can show a phase-2 status during the wait.
     emit("build:enhance-start");
-    if (typeof global.enhanceDiscovery !== "function") {
-      console.warn("[MaxBuild] enhanceDiscovery not loaded; skipping enhance phase");
-      return { added: 0 };
-    }
+    if (typeof global.enhanceDiscovery !== "function") return { added: 0 };
     try {
       var added = await global.enhanceDiscovery(null, {
         suppressToast: true,
@@ -328,7 +297,7 @@
       return { added: added || 0 };
     } catch (err) {
       // Best-effort. A failed enhance does not abort the build.
-      console.warn("[MaxBuild] enhance phase failed (best-effort, continuing):",
+      console.warn("[MaxBuild] enhance failed (best-effort, continuing):",
         err && err.message);
       return { added: 0 };
     }
