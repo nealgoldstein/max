@@ -2229,10 +2229,33 @@
       // freshly-created destinations / sights / bookings get unique IDs
       // that don't collide with surviving ones.
     } else {
-      trip={name:resolvedName,destinations:[],legs:{},trackSpending:false,pendingActions:[],
+      // ARCH Phase 4: preserve trip.id across the fresh-stub reset.
+      // Previously this branch rebuilt `trip` as a brand-new object
+      // with no id field. If _currentTripId was set (because
+      // _initialTripSave had already minted), the next save serialized
+      // an id-less envelope to that storage slot — every reload showed
+      // `trip.id: undefined` (the bug class Neal hit repeatedly). By
+      // capturing the existing id (and falling back to TripStore.trip.id
+      // for the rewrite path), we keep the trip's identity through the
+      // publish cycle.
+      var _preservedId = (trip && trip.id)
+        || (global.TripStore && global.TripStore.trip && global.TripStore.trip.id)
+        || null;
+      trip={id:_preservedId, name:resolvedName,destinations:[],legs:{},trackSpending:false,pendingActions:[],
         brief:newBrief, mdcItems:newMdcItems, logistics:null};
       activeDest=null; destCtr=0; sidCtr=100; bkCtr=0; _actionCtr=0; _fileHandle=null;
       trip.createdAt = (new Date()).toISOString();
+      // Phase 4 bridge: re-anchor TripStore to the freshly-stubbed trip
+      // so subsequent mutators (and the persistence layer) see this as
+      // the canonical reference. Without this, TripStore._trip still
+      // points at the OLD trip object and diverges from global.trip.
+      // Uses replace() so migration runs (filling in defaults like
+      // destNotes, sightStories, etc. that the stub above didn't seed).
+      if (global.TripStore && typeof global.TripStore.replace === "function" && _preservedId) {
+        try { global.TripStore.replace(trip); } catch (e) {
+          console.warn("[Max publishTrip] TripStore.replace bridge failed:", e && e.message);
+        }
+      }
       // v360.2 (A.4): seed initial wisps from the user's LITERAL form
       // input. _tb._initialWispsRaw was populated by
       // _captureInitialWispsFromForm at saveStep2AndProceed time —
@@ -2552,7 +2575,21 @@
     // Hotel-date validation (Round DT) still runs below the reconcile,
     // since it has to check against the *new* dateFrom/dateTo set by
     // reconcile — not the pre-rebuild dates.
-    trip.destinations = _reconcileDestinations(oldDestinations, ordered, startDate);
+    // ARCH Phase 4: route the primary destinations assignment through
+    // TripStore so the publish emits an atomic tripChange + persists
+    // through the canonical writer. Subscribers (trip view, map) re-
+    // render against the committed destinations array. Falls back to
+    // direct assignment when TripStore isn't loaded (Node tests).
+    var _pubDests = _reconcileDestinations(oldDestinations, ordered, startDate);
+    if (global.TripStore && typeof global.TripStore.setDestinations === "function") {
+      try { global.TripStore.setDestinations(_pubDests); }
+      catch (e) {
+        console.warn("[Max publishTrip] TripStore.setDestinations failed:", e && e.message);
+        trip.destinations = _pubDests;
+      }
+    } else {
+      trip.destinations = _pubDests;
+    }
 
     // Round FW.1: safety-net merge for adjacent same-place destinations
     // at the end of build. Round DZ.1 dedupes by id but not by place;
