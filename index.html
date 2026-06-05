@@ -5278,7 +5278,12 @@ function setMobileMap(idx){
   // Invalidate the visible map's size
   setTimeout(function(){if(idx===0&&_map1)_map1.invalidateSize();if(idx===1&&_map2)_map2.invalidateSize();},50);
 }
-var _currentTripId = null;
+// ARCH Phase 6: _currentTripId is now a TripStore-backed property
+// (see tripstore.js bottom-of-IIFE). Reads return TripStore.trip.id;
+// writes route through TripStore.load / .replace / .unload so
+// _currentTripId and TripStore can't diverge. The legacy `var
+// _currentTripId = null` declaration is removed — TripStore.unload()
+// covers the equivalent reset.
 var _tripsIndex = [];
 
 function loadTripsIndex(){
@@ -8306,8 +8311,48 @@ function _backstopPastedListPlaces() {
   console.warn("[Max] _backstopPastedListPlaces: LLM dropped " + missing.length +
     " user-listed place(s): " + missing.map(function(p){return p.place;}).join(", "));
   var nowTs = Date.now();
+  // PD.301 (architectural): route by intent, not by one-size-fits-all
+  // catchall. The backstop's job is to recover places the LLM dropped;
+  // the recovery path should respect what the user originally said
+  // those places were for.
+  //
+  //   • User-listed STAY (hasNights > 0) → append to "Recommended
+  //     overnight stays" requiredPlaces. The user explicitly designated
+  //     this place as an overnight base; it belongs with the canonical
+  //     stays, not in the catchall. Previously Gardur sat in "More
+  //     places to consider" forever (PD.211 was a partial fix that
+  //     only dedup'd against _userListedNames but didn't route).
+  //
+  //   • User-listed SIGHT (hasNights == 0) → keep going through the
+  //     "More places to consider" stub path. Reconciliation later
+  //     promotes any sight that fits an activity section; the rest
+  //     stay in catchall as designed.
+  //
+  // The architectural improvement: the "More places to consider"
+  // catchall is now genuinely for sight-shaped places the LLM dropped
+  // and that reconciliation couldn't place. Stays don't pollute it.
+  var recommended = _tb.placeActivities.find(function(it){
+    return it && it.section === "Recommended overnight stays";
+  });
   missing.forEach(function(p, i){
     var hasNights = (typeof p.nights === "number" && p.nights > 0);
+    if (hasNights && recommended) {
+      if (!Array.isArray(recommended.requiredPlaces)) recommended.requiredPlaces = [];
+      recommended.requiredPlaces.push({
+        place: p.place,
+        country: p.country || "",
+        nights: p.nights,
+        lat: (typeof p.lat === "number") ? p.lat : 0,
+        lng: (typeof p.lng === "number") ? p.lng : 0,
+        overnight: true,
+        _keep: true,
+        _isDayTrip: false,
+        _dayTripHub: ""
+      });
+      return; // routed to Recommended; skip the catchall stub
+    }
+    // Sight-shaped, OR stay-shaped with no Recommended section (sentence
+    // mode or no other user stays) — create the legacy catchall stub.
     var stub = {
       id: "plm_pasted_" + nowTs + "_" + i,
       name: hasNights ? ("Stay in " + p.place) : ("Stop in " + p.place),
@@ -18164,8 +18209,28 @@ function _reconcileUserListedKeeps(){
     });
     // Always replace (don't accumulate) so removed listed items don't
     // leave stale umbrella rows behind.
+    // PD.302 (architectural): also drop "More places to consider"
+    // catchall stubs whose single requiredPlace is an umbrella entry.
+    // The backstop runs at LLM completion (before this render-time
+    // pass) and stubs every dropped user-listed place. Named routes
+    // (Golden Circle, Diamond Circle) end up in BOTH the backstop
+    // catchall AND the umbrella section because they're not in any
+    // requiredPlace and so qualify as umbrellas. The umbrella section
+    // is the canonical home for named routes; the catchall duplicate
+    // is noise. Build a set of umbrella keys and filter both at once.
+    var _umbrellaKeySet = {};
+    umbrellas.forEach(function(k){ if (k) _umbrellaKeySet[k] = true; });
     _tb.placeActivities = _tb.placeActivities.filter(function(it){
-      return !(it && /^routes\s*[&]\s*regions you named$/i.test(String(it.section||"")));
+      if (!it) return false;
+      if (/^routes\s*[&]\s*regions you named$/i.test(String(it.section||""))) return false;
+      // PD.302: catchall stub whose only requiredPlace is an umbrella entry → drop
+      if (it.section === "More places to consider"
+          && Array.isArray(it.requiredPlaces)
+          && it.requiredPlaces.length === 1) {
+        var stubKey = nrm(it.requiredPlaces[0].place || "");
+        if (_umbrellaKeySet[stubKey]) return false;
+      }
+      return true;
     });
     if (!umbrellas.length) return;
     function _titleCaseKey(k){

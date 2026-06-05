@@ -175,6 +175,22 @@
     return result;
   }
 
+  // Self-heal: legacy load paths can set global.trip + _currentTripId
+  // without going through TripStore.mint or .load. When subsequent
+  // code calls a TripStore mutator, _trip is null and the mutator
+  // would throw. Detect that state and adopt the legacy-loaded trip
+  // into TripStore (running schema migrations on the way in). The
+  // alternative — throwing — leaves the bridge layer brittle. This
+  // closes the regression where _initialTripSave's existing-trip
+  // branch saw a set _currentTripId but TripStore wasn't initialized.
+  function _adoptLegacyTripIfNeeded() {
+    if (_trip) return;
+    if (global.trip && global.trip.id) {
+      _setTripRef(_migrate(global.trip, global.trip.id));
+      _version = (_trip._version || 0);
+    }
+  }
+
   // The core mutation primitive. Every named mutator below calls this.
   // Guarantees outside a batch: mutation → version bump → persist →
   // emit, in order, atomically (synchronously — no caller can observe
@@ -182,6 +198,7 @@
   // Guarantees inside a batch: mutation → version bump; persist + emit
   // deferred until the outermost batch() returns.
   function _mutate(name, fn, payload) {
+    _adoptLegacyTripIfNeeded();
     if (!_trip) {
       throw new Error("[TripStore] cannot mutate (" + name + ") — no trip loaded");
     }
@@ -612,6 +629,60 @@
   };
 
   global.TripStore = TripStore;
+
+  // ARCH Phase 6 (architectural close): _currentTripId is now a
+  // TripStore-backed property. Reads return TripStore.trip.id; writes
+  // route through TripStore so the two CAN'T diverge.
+  //
+  // Before this: 15+ places across the codebase wrote directly to
+  // _currentTripId, and TripStore could be unaware of the change.
+  // The Phase 5 regression that crashed generateActivitiesForPlace
+  // was exactly that gap: legacy boot-load set _currentTripId without
+  // telling TripStore; the next mutator failed with "no trip loaded."
+  //
+  // After this: writing _currentTripId = null unloads TripStore.
+  // Writing _currentTripId = "trip-X" loads or replaces. Reading
+  // returns whatever trip TripStore currently holds. The "trip is
+  // current" invariant is single-sourced — there's no way to set
+  // _currentTripId such that TripStore doesn't know about it.
+  //
+  // The defineProperty runs before any inline-script `var
+  // _currentTripId = null` because tripstore.js is a <script src=>
+  // loaded ahead of inline scripts. The legacy `var` declaration
+  // becomes a no-op for the binding (already exists) and runs the
+  // setter for its `= null` initializer (which no-ops when TripStore
+  // isn't loaded yet).
+  try {
+    Object.defineProperty(global, "_currentTripId", {
+      get: function () { return _trip ? _trip.id : null; },
+      set: function (v) {
+        if (v == null) {
+          if (_trip) {
+            try { unload(); } catch (_) {}
+          }
+          return;
+        }
+        if (_trip && _trip.id === v) return;  // already current
+        // Adopt: prefer the in-memory trip object if it matches;
+        // otherwise load from storage. Either path runs migrations.
+        if (global.trip && global.trip.id === v) {
+          try { replace(global.trip); } catch (_) {}
+        } else {
+          try { load(v); }
+          catch (_) {
+            // Storage may not have it (rare). Caller's intent was to
+            // mark this id as current; nothing reasonable to do.
+          }
+        }
+      },
+      configurable: true,
+      enumerable: true
+    });
+  } catch (e) {
+    // Already defined (defensive — shouldn't happen given script order).
+    console.warn("[TripStore] could not bind _currentTripId getter/setter:", e && e.message);
+  }
+
   // Node export for tests
   if (typeof module !== "undefined" && module.exports) {
     module.exports = TripStore;

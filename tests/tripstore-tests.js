@@ -827,6 +827,126 @@ test("publish-atomicity class: destinations + routes update in one emit", functi
   assert.strictEqual(TripStore.trip.routes.length, 1);
 });
 
+// ── Architectural invariants (Phase 6 close) ──────────────────────────
+
+console.log("\nArchitectural invariants");
+
+test("self-heal: mutator adopts a legacy-loaded global.trip", function () {
+  reset();
+  // Simulate the regression: legacy code loads a trip directly,
+  // without going through TripStore. TripStore.trip is null.
+  global.trip = {
+    id: "trip-legacy-Y",
+    _schemaVersion: 1,
+    name: "Loaded legacy",
+    destinations: [{ id: "d1" }],
+    placeActivities: [],
+    candidates: [],
+    routes: [],
+    places: {},
+    brief: {},
+    picker: {},
+    destNotes: {},
+    destStories: {},
+    sightStories: {},
+    ffHistories: {},
+    notes: { text: "", links: [] },
+    legs: {},
+    pendingActions: [],
+    trackSpending: false
+  };
+  // No mint or load was called. Now legacy code triggers a mutator.
+  // Before the self-heal, this threw "no trip loaded." After: TripStore
+  // auto-adopts global.trip and the mutator succeeds.
+  TripStore.setName("renamed via mutator");
+  assert.strictEqual(TripStore.trip.id, "trip-legacy-Y");
+  assert.strictEqual(TripStore.trip.name, "renamed via mutator");
+  // global.trip stayed the same object — they share a reference now
+  assert.strictEqual(global.trip, TripStore.trip);
+});
+
+test("_currentTripId getter returns TripStore.trip.id", function () {
+  reset();
+  assert.strictEqual(global._currentTripId, null);
+  var t = TripStore.mint({});
+  assert.strictEqual(global._currentTripId, t.id);
+});
+
+test("_currentTripId getter returns null after unload", function () {
+  reset();
+  TripStore.mint({});
+  assert.ok(global._currentTripId);
+  TripStore.unload();
+  assert.strictEqual(global._currentTripId, null);
+});
+
+test("_currentTripId setter to null unloads TripStore", function () {
+  reset();
+  TripStore.mint({});
+  assert.ok(TripStore.isLoaded());
+  global._currentTripId = null;
+  assert.strictEqual(TripStore.isLoaded(), false);
+});
+
+test("_currentTripId setter to existing storage id loads that trip", function () {
+  reset();
+  // Persist a trip
+  var t1 = TripStore.mint({});
+  TripStore.setName("first");
+  var t1id = t1.id;
+  TripStore.unload();
+  // Force timestamp delta
+  var until = Date.now() + 5;
+  while (Date.now() < until) {}
+  TripStore.mint({});
+  TripStore.setName("second");
+  // Now assign _currentTripId to the first trip's id
+  global._currentTripId = t1id;
+  // TripStore should have loaded the first trip
+  assert.strictEqual(TripStore.trip.id, t1id);
+  assert.strictEqual(TripStore.trip.name, "first");
+});
+
+test("_currentTripId setter adopts global.trip if it matches the id", function () {
+  reset();
+  // Legacy code prepares a trip object in global.trip
+  var legacyTrip = {
+    id: "trip-LEG-1",
+    _schemaVersion: 1,
+    name: "Legacy",
+    destinations: [],
+    placeActivities: [],
+    candidates: [],
+    routes: [],
+    places: {},
+    brief: {},
+    picker: {},
+    destNotes: {},
+    destStories: {},
+    sightStories: {},
+    ffHistories: {},
+    notes: { text: "", links: [] },
+    legs: {},
+    pendingActions: [],
+    trackSpending: false
+  };
+  global.trip = legacyTrip;
+  // Then legacy code sets _currentTripId
+  global._currentTripId = "trip-LEG-1";
+  // TripStore picked up the legacy trip by reference
+  assert.strictEqual(TripStore.trip, legacyTrip);
+  assert.strictEqual(TripStore.trip.id, "trip-LEG-1");
+});
+
+test("_currentTripId setter is a no-op when already pointing at the same id", function () {
+  reset();
+  TripStore.mint({});
+  var origTrip = TripStore.trip;
+  global._currentTripId = origTrip.id;
+  // Same trip, same reference
+  assert.strictEqual(TripStore.trip, origTrip);
+});
+
 // ── Phase 6 integration scenarios ─────────────────────────────────────
 // Each scenario simulates a real-world flow that exercised one of the
 // bug classes we hit this session. Each passes by construction now.
