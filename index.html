@@ -12507,7 +12507,16 @@ async function enhanceDiscovery(btn) {
           description: "Max read your existing picks as a signal of taste and added these. Check the ones that fit; ignore the rest.",
           checked: false,
           requiredPlaces: themeItems.map(function(c){
-            return { place: c.place, country: c.country || "", lat: c.lat || null, lng: c.lng || null, _keep: false, overnight: !c.singleSight };
+            // PD.304: default overnight=false. The LLM's singleSight
+            // flag isn't a reliable stay/sight oracle (a complex
+            // sight like Skaftafell National Park is singleSight:false
+            // because it's worth multiple days of visits, NOT because
+            // the user should sleep there). The map renders overnight=
+            // true as a bed pin, which contradicts the popup's
+            // "recommended to visit" copy and confuses the user. Make
+            // these all sights by default; the user can flip via the
+            // role popover if they want one as a stay.
+            return { place: c.place, country: c.country || "", lat: c.lat || null, lng: c.lng || null, _keep: false, overnight: false };
           })
         });
       }
@@ -12520,7 +12529,9 @@ async function enhanceDiscovery(btn) {
           description: "Nearby sights and activities tied to the places already in your Discovery. Each one is anchored to a place you've listed.",
           checked: false,
           requiredPlaces: enrichItems.map(function(c){
-            return { place: c.place, country: c.country || "", lat: c.lat || null, lng: c.lng || null, _keep: false, overnight: !c.singleSight, _enrichedFrom: c._enrichedFrom || "" };
+            // PD.304: same fix for enrichment items — overnight=false
+            // by default; flip via role popover if appropriate.
+            return { place: c.place, country: c.country || "", lat: c.lat || null, lng: c.lng || null, _keep: false, overnight: false, _enrichedFrom: c._enrichedFrom || "" };
           })
         });
       }
