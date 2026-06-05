@@ -24819,8 +24819,17 @@ function _initialTripSave(){
     TripStore.batch(function(){
       TripStore.mint(initialBrief);
       TripStore.setName(_initName);
-      TripStore.setCandidates((_tb.candidates || []).slice());
-      TripStore.setPlaceActivities((_tb.placeActivities || []).slice());
+      // PD.303: pass arrays BY REFERENCE (no .slice). This is the
+      // architectural bridge invariant: _tb.placeActivities and
+      // trip.placeActivities must be the same array so any direct
+      // mutation (reconciliation pushing sights into sections, fold
+      // dropping duplicates, etc.) is visible to both. The original
+      // .slice() copies broke that invariant — reconciliation's
+      // mutations on _tb would land on the OLD array while
+      // trip.placeActivities held the COPY, and subsequent renders
+      // saw stale data.
+      TripStore.setCandidates(_tb.candidates || []);
+      TripStore.setPlaceActivities(_tb.placeActivities || []);
     }, "initial-mint");
     _currentTripId = TripStore.trip.id;
 
@@ -24855,8 +24864,10 @@ function _initialTripSave(){
     // Existing trip. Sync the latest _tb substance via TripStore
     // mutators in a single batch.
     TripStore.batch(function(){
-      TripStore.setCandidates((_tb.candidates || []).slice());
-      TripStore.setPlaceActivities((_tb.placeActivities || []).slice());
+      // PD.303: pass arrays BY REFERENCE (see comment in mint branch
+      // above). Bridge invariant.
+      TripStore.setCandidates(_tb.candidates || []);
+      TripStore.setPlaceActivities(_tb.placeActivities || []);
       var briefUpdates = {};
       if (_tb.region)   briefUpdates.region   = _tb.region;
       if (_tb.sentence) briefUpdates.sentence = _tb.sentence;
@@ -42468,36 +42479,28 @@ if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.on === "functio
 // directly (not through TripStore mutators), so it doesn't re-
 // emit tripChange.
 if (typeof TripStore !== "undefined" && typeof TripStore.on === "function") {
-  // ARCH Phase 6: legacy-array sync-back. When TripStore mutates trip
-  // .placeActivities / .candidates, mirror onto _tb and _mdcItems so
-  // legacy code reading those (most of the picker, pre-Phase-3 publish
-  // logic, persistence paths) sees the same reference. This is what
-  // collapses the parallel-arrays bug class for the bridge phase: the
-  // four arrays (_tb.placeActivities, _mdcItems, trip.placeActivities,
-  // trip.mdcItems) all converge on whatever TripStore last set. When
-  // legacy code mutates _tb.placeActivities[i] directly, the mutation
-  // shows up everywhere because they're the SAME array. When TripStore
-  // mutates via setPlaceActivities, _tb gets re-pointed to the new
-  // array. No drift.
-  TripStore.on("tripChange", function () {
-    try {
-      var t = TripStore.trip;
-      if (!t) return;
-      if (Array.isArray(t.placeActivities)) {
-        if (typeof window !== "undefined") {
-          window._tb = window._tb || {};
-          window._tb.placeActivities = t.placeActivities;
-          window._mdcItems = t.placeActivities;
-        }
-      }
-      if (Array.isArray(t.candidates) && typeof window !== "undefined") {
-        window._tb = window._tb || {};
-        window._tb.candidates = t.candidates;
-      }
-    } catch (e) {
-      console.warn("[ARCH P6] _tb/_mdcItems sync-back:", e && e.message);
-    }
-  });
+  // ARCH Phase 6 (PD.303 correction): the original sync-back here
+  // OVERWROTE _tb.placeActivities with trip.placeActivities on every
+  // tripChange. That was actively wrong: reconciliation, fold, and
+  // other build-time passes mutate _tb.placeActivities directly
+  // (pushing requiredPlaces into sections). Those direct mutations
+  // never went through a TripStore mutator, so trip.placeActivities
+  // could be a stale array — and the sync-back would then clobber
+  // _tb with that stale data, silently undoing reconciliation's
+  // work. Reconciliation's sight placements vanished; the orphan-
+  // sights catchall caught them; the user saw 11 user-listed sights
+  // dumped into "Sights near places you listed."
+  //
+  // The architectural fix: ensure _tb.placeActivities and
+  // trip.placeActivities point at the SAME array (no .slice() copies
+  // at TripStore.setPlaceActivities call sites — see PD.303 in
+  // _initialTripSave). With shared references, mutations on either
+  // are visible to both, and no sync-back is needed. Removing this
+  // listener also removes the silent-clobber bug class.
+  //
+  // The _mdcItems sync still has value (it's a separate legacy
+  // global with its own write paths) but is no-op'd here too —
+  // wherever _mdcItems = X is needed, the explicit caller does it.
 
   TripStore.on("tripChange", function (evt) {
     try {
