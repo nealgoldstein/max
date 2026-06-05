@@ -17506,6 +17506,65 @@ function _pd289ConsolidateStaysExtras() {
   if (folded || droppedSections.length) {
     console.log("[PD.299] consolidated " + folded + " stay(s) into 'Overnight stays to consider'; dropped "
       + droppedSections.length + " duplicate section(s): " + droppedSections.join(", "));
+    // PD.300: write-through. The picker keeps four parallel copies of
+    // "the section list": _tb.placeActivities, _mdcItems,
+    // trip.placeActivities, trip.mdcItems. Without write-through, the
+    // fold's mutations live only in _tb.placeActivities, and the next
+    // render that rehydrates from any of the other three resurrects
+    // the dropped section. Propagate to all four and persist so the
+    // fold actually sticks.
+    try {
+      // Build the canonical post-fold section→item map from _tb.
+      var keepBySection = {};
+      var keepOrder = [];
+      _tb.placeActivities.forEach(function(it){
+        if (!it || !it.section) return;
+        if (!keepBySection[it.section]) keepOrder.push(it.section);
+        keepBySection[it.section] = it;
+      });
+      // Mirror to trip.placeActivities (in-memory trip mirror).
+      if (typeof trip !== "undefined" && trip) {
+        trip.placeActivities = _tb.placeActivities.slice();
+      }
+      // Filter _mdcItems to match kept sections; append the synthetic
+      // if it was newly created and isn't yet in _mdcItems. _mdcItems
+      // items are the same shape as _tb.placeActivities items (the
+      // picker pushes _tb items into _mdcItems in expandMustDos), so
+      // we can append the synthetic verbatim.
+      if (typeof _mdcItems !== "undefined" && Array.isArray(_mdcItems)) {
+        _mdcItems = _mdcItems.filter(function(m){
+          return m && m.section && keepBySection[m.section];
+        });
+        var hasSynthInMdc = _mdcItems.some(function(m){
+          return m && m.section === "Overnight stays to consider";
+        });
+        if (!hasSynthInMdc && keepBySection["Overnight stays to consider"]) {
+          _mdcItems.push(keepBySection["Overnight stays to consider"]);
+        }
+      }
+      // Mirror to trip.mdcItems (the persistence-shape array). Same
+      // filter rule; the persist-time projection on save converts
+      // _mdcItems → trip.mdcItems anyway, so this is belt-and-
+      // suspenders for any reader that goes straight to trip.mdcItems
+      // before the next save fires.
+      if (typeof trip !== "undefined" && trip && Array.isArray(trip.mdcItems)) {
+        trip.mdcItems = trip.mdcItems.filter(function(m){
+          return m && m.section && keepBySection[m.section];
+        });
+        var hasSynthInTrip = trip.mdcItems.some(function(m){
+          return m && m.section === "Overnight stays to consider";
+        });
+        if (!hasSynthInTrip && keepBySection["Overnight stays to consider"]) {
+          trip.mdcItems.push(keepBySection["Overnight stays to consider"]);
+        }
+      }
+      // Persist so the next reload reads the cleaned state.
+      if (typeof localSave === "function") {
+        try { localSave(); } catch(_){}
+      }
+    } catch(e) {
+      console.warn("[PD.300] write-through failed:", e && e.message);
+    }
   }
   return folded;
 }
