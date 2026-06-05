@@ -16340,7 +16340,35 @@ function continueFromPlaceToBrief(){
 }
 
 // Generate activities for the named place.
+// PD.315: instrumentation. Logs a stack trace at every invocation of
+// generateActivitiesForPlace so we can see who's calling it twice. The
+// race between MaxBuild's orchestrated call and an unidentified second
+// caller is wiping Enhance's additions (placeActivities 16 → 14).
+// PD.313's `isBuilding()` guard didn't catch this because the second
+// call happens AFTER `build:done` (when _building is false).
+//
+// MUTEX guard: if generateActivitiesForPlace is already in flight,
+// the second call returns immediately. The unguarded re-entry was the
+// proximate cause of the regression — _tb.placeActivities = items at
+// line 16850 reassigns the array reference, wiping Enhance's pushed
+// sections. Mutex closes the race regardless of who's the caller.
+var _generateActivitiesInFlight = false;
 async function generateActivitiesForPlace(){
+  console.log("[Max] generateActivitiesForPlace called — in-flight:", _generateActivitiesInFlight,
+    "_tb.placeActivities.len:", (_tb && _tb.placeActivities || []).length);
+  console.trace("[Max] generateActivitiesForPlace stack");
+  if (_generateActivitiesInFlight) {
+    console.warn("[Max] generateActivitiesForPlace: SKIPPED (already in flight) — second call would clobber any concurrent additions to _tb.placeActivities");
+    return;
+  }
+  _generateActivitiesInFlight = true;
+  try {
+    return await _generateActivitiesForPlaceImpl();
+  } finally {
+    _generateActivitiesInFlight = false;
+  }
+}
+async function _generateActivitiesForPlaceImpl(){
   var nameInp = document.getElementById("tb-place-name");
   var ctxInp = document.getElementById("tb-place-context");
   var place = nameInp ? nameInp.value.trim() : (_tb.placeName||"").trim();
