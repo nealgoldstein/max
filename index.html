@@ -44585,6 +44585,10 @@ function updateMainMap(){
         });
       });
       // Collect unique considered places.
+      // PD.294: also stash the source activity's description and
+      // section so the add-to-trip popover can show context — users
+      // pick gray pins from the map without seeing the row that
+      // explains why Max suggested it.
       var considered = {};
       src.forEach(function(it){
         if (!it || !Array.isArray(it.requiredPlaces)) return;
@@ -44601,7 +44605,12 @@ function updateMainMap(){
             if (Array.isArray(c) && isFinite(c[0])) coords = c;
           }
           if (!coords) return;
-          considered[k] = { place: p.place, coords: coords };
+          considered[k] = {
+            place: p.place,
+            coords: coords,
+            description: (it.description || "").toString().trim(),
+            section: (it.section || "").toString().trim()
+          };
         });
       });
       Object.keys(considered).forEach(function(k){
@@ -44623,14 +44632,17 @@ function updateMainMap(){
           m.bindTooltip(c.place + " · considered &middot; tap to add", {
             permanent: false, direction: "top", offset: [0, -_style.height/2], className: "main-map-tooltip"
           });
-          (function(placeName, coords){
+          (function(placeName, coords, description, section){
             m.on("click", function(){
               try { m.closeTooltip(); } catch(_){}
               if (typeof _openTripConsideredAddPopover === "function") {
-                _openTripConsideredAddPopover(placeName, coords);
+                _openTripConsideredAddPopover(placeName, coords, {
+                  description: description,
+                  section: section
+                });
               }
             });
-          })(c.place, c.coords);
+          })(c.place, c.coords, c.description || "", c.section || "");
           _mainMarkers.push(m);
         } catch(_){}
       });
@@ -49644,8 +49656,9 @@ function _tidyTripApply(scanResult, selectedDestIds){
 // roles: overnight stay, day trip from a hub, or "along the way" on
 // a route between two hubs. Mirrors _openTripDestRolePopover but the
 // source is a (placeName, coords) pair rather than an existing dest.
-function _openTripConsideredAddPopover(placeName, coords){
+function _openTripConsideredAddPopover(placeName, coords, meta){
   if (!trip || !placeName || !coords) return;
+  meta = meta || {};
   var existing = document.getElementById("trip-considered-popover");
   if (existing) existing.remove();
 
@@ -49708,6 +49721,63 @@ function _openTripConsideredAddPopover(placeName, coords){
       + '</label>';
   }
 
+  // PD.294: "Along the way" row. Each consecutive hub pair (i, i+1)
+  // is a candidate slot for inserting the considered place between
+  // them as a 0-night wayside. We pick the pair whose midpoint is
+  // closest to the considered coord as the default selection, so the
+  // user just hits Add and gets the geographically sensible answer.
+  var waysideRowHtml = '';
+  var waysidePairs = [];
+  if (Array.isArray(trip.destinations) && trip.destinations.length >= 2) {
+    for (var wi = 0; wi < trip.destinations.length - 1; wi++) {
+      var hA = trip.destinations[wi];
+      var hB = trip.destinations[wi + 1];
+      if (!hA || !hB || !hA.id || !hB.id) continue;
+      var ca = _coordsFor(hA), cb = _coordsFor(hB);
+      var midDist = null;
+      if (ca && cb && typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.haversineKm === "function") {
+        var midLat = (ca[0] + cb[0]) / 2;
+        var midLng = (ca[1] + cb[1]) / 2;
+        midDist = MaxEngineTrip.haversineKm(coords[0], coords[1], midLat, midLng);
+      }
+      waysidePairs.push({ from: hA, to: hB, midDist: midDist });
+    }
+    waysidePairs.sort(function(a, b){
+      if (a.midDist == null && b.midDist == null) return 0;
+      if (a.midDist == null) return 1;
+      if (b.midDist == null) return -1;
+      return a.midDist - b.midDist;
+    });
+  }
+  if (waysidePairs.length) {
+    var defaultWaysidePairKey = waysidePairs[0].from.id + "::" + waysidePairs[0].to.id;
+    var waysideOpts = waysidePairs.map(function(p){
+      var key = p.from.id + "::" + p.to.id;
+      var sel = (key === defaultWaysidePairKey) ? ' selected' : '';
+      return '<option value="' + key + '"' + sel + '>'
+        + p.from.place + ' → ' + p.to.place
+        + '</option>';
+    }).join("");
+    waysideRowHtml = '<label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #e0e0e0;border-radius:8px;cursor:pointer;background:#fff;">'
+      + '<input type="radio" name="trip-cons-role" value="wayside" style="margin:0;" />'
+      + '<div style="flex:1;">'
+      +   '<div style="font-size:13px;font-weight:600;color:#222;">Along the way</div>'
+      +   '<select id="trip-cons-wayside-pair" style="margin-top:6px;width:100%;padding:6px 8px;font-size:12.5px;border:1px solid #ccc;border-radius:6px;font-family:inherit;">' + waysideOpts + '</select>'
+      +   '<div style="font-size:11px;color:#777;margin-top:4px;line-height:1.5;">Stop on the route between the chosen hubs. No new night.</div>'
+      + '</div>'
+      + '</label>';
+  }
+
+  // PD.294: optional description block under the title — shows what
+  // Max said about this place so the user has context before
+  // committing. Truncate long descriptions to keep the dialog tight.
+  var descTxt = (meta && meta.description) ? String(meta.description).trim() : "";
+  if (descTxt.length > 240) descTxt = descTxt.slice(0, 237).trim() + "…";
+  var descSafe = descTxt.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  var descHtml = descTxt
+    ? '<div style="font-size:12px;color:#555;margin-top:8px;line-height:1.5;font-style:italic;">' + descSafe + '</div>'
+    : '';
+
   var ov = document.createElement("div");
   ov.id = "trip-considered-popover";
   ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.32);z-index:10500;display:flex;align-items:center;justify-content:center;padding:20px;";
@@ -49717,7 +49787,8 @@ function _openTripConsideredAddPopover(placeName, coords){
     +   '<div style="padding:18px 20px 4px;">'
     +     '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">Add to trip</div>'
     +     '<div style="font-size:17px;font-weight:700;color:#111;margin-top:4px;">' + placeName + '</div>'
-    +     '<div style="font-size:11.5px;color:#777;margin-top:3px;line-height:1.5;">You considered this earlier but didn\'t pick it. Pick a role and it joins the trip.</div>'
+    +     descHtml
+    +     '<div style="font-size:11.5px;color:#777;margin-top:8px;line-height:1.5;">You considered this earlier but didn\'t pick it. Pick a role and it joins the trip.</div>'
     +   '</div>'
     +   '<div style="padding:14px 20px;display:flex;flex-direction:column;gap:10px;">'
     +     '<label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #1a5fa8;border-radius:8px;cursor:pointer;background:#eef4fb;">'
@@ -49728,6 +49799,7 @@ function _openTripConsideredAddPopover(placeName, coords){
     +       '</div>'
     +     '</label>'
     +     dayTripRowHtml
+    +     waysideRowHtml
     +   '</div>'
     +   '<div style="padding:8px 20px 18px;display:flex;justify-content:flex-end;gap:8px;">'
     +     '<button id="trip-cons-cancel" style="font-size:13px;font-weight:500;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Cancel</button>'
@@ -49753,11 +49825,76 @@ function _openTripConsideredAddPopover(placeName, coords){
       } else {
         _addConsideredAsDestination(placeName, coords);
       }
+    } else if (role === "wayside") {
+      var wsel = document.getElementById("trip-cons-wayside-pair");
+      var pairKey = wsel ? wsel.value : "";
+      var parts = pairKey.split("::");
+      var fromHub = parts[0] ? trip.destinations.find(function(d){ return d.id === parts[0]; }) : null;
+      var toHub   = parts[1] ? trip.destinations.find(function(d){ return d.id === parts[1]; }) : null;
+      if (fromHub && toHub && typeof _addConsideredAsWayside === "function") {
+        _addConsideredAsWayside(placeName, coords, fromHub, toHub);
+      } else {
+        _addConsideredAsDestination(placeName, coords);
+      }
     } else {
       _addConsideredAsDestination(placeName, coords);
     }
   };
 }
+
+// PD.294: insert a considered sight as a wayside (a "stop on the way"
+// between two existing hubs). Mechanics: create a fresh 0-night
+// destination object positioned BETWEEN fromHub and toHub in
+// trip.destinations[], then call convertDestToWayside on it. The
+// converter handles the transit-route plumbing — splitting the
+// fromHub→toHub route into fromHub→sight + sight→toHub if those
+// routes don't exist, and merging the legs at the wayside.
+function _addConsideredAsWayside(placeName, coords, fromHub, toHub){
+  if (!trip || !Array.isArray(trip.destinations)) return;
+  if (!fromHub || !toHub || !fromHub.id || !toHub.id) return;
+  var fromIdx = trip.destinations.findIndex(function(d){ return d.id === fromHub.id; });
+  var toIdx   = trip.destinations.findIndex(function(d){ return d.id === toHub.id; });
+  if (fromIdx < 0 || toIdx < 0) return;
+  // The two hubs must be adjacent in trip order for the wayside
+  // converter to work (it splits a single transit leg). The picker
+  // already restricts the dropdown to consecutive pairs, but
+  // double-check.
+  if (Math.abs(toIdx - fromIdx) !== 1) {
+    console.warn("[Max PD.294] hubs not adjacent; falling back to end-of-trip insert");
+    _addConsideredAsDestination(placeName, coords);
+    return;
+  }
+  var insertIdx = Math.max(fromIdx, toIdx);
+  if (typeof destCtr !== "number") destCtr = 0;
+  destCtr++;
+  var newId = "d" + destCtr;
+  var newDest = {
+    id: newId,
+    place: placeName,
+    intent: placeName,
+    nights: 0,
+    lat: coords[0],
+    lng: coords[1],
+    days: [],
+    trackerItems: { booked: [], see: [], visited: [] },
+    trackerCat: "booked",
+    storyState: "idle",
+    hotelBookings: [], generalBookings: [], locations: [],
+    execMode: false, todayItems: [], discoveredItems: [], suggestions: [],
+    attachedEvents: []
+  };
+  trip.destinations.splice(insertIdx, 0, newDest);
+  if (typeof _ensureMdcItemsHasPlace === "function") {
+    try { _ensureMdcItemsHasPlace(placeName, coords); } catch(_){}
+  }
+  if (typeof convertDestToWayside === "function") {
+    try { convertDestToWayside(newId, { absorbInto: "next" }); }
+    catch (e) { console.warn("[Max PD.294] convertDestToWayside threw:", e && e.message); }
+  }
+  if (typeof autoSave === "function") autoSave();
+  if (typeof drawTripMode === "function") drawTripMode();
+}
+if (typeof globalThis !== "undefined") globalThis._addConsideredAsWayside = _addConsideredAsWayside;
 
 // Add a considered place as a 1-night destination at the end of the
 // trip. User can reorder / change role via existing UI afterward.
