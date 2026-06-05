@@ -8481,10 +8481,23 @@ async function _reconcileListedSightsToSections() {
   // categorize. Rebuild coveredTokenSets once (post-heuristic) and
   // recompute which orphans remain.
   coveredTokenSets = [];
+  // PD.279: also verify what heuristic-placed items are actually in
+  // _tb.placeActivities at rebuild time — diagnostic for the race
+  // suspected in PD.263. If best.item ≠ _tb.placeActivities[i] for
+  // any reason (snapshot mismatch, filter replacement), the push
+  // lands on a detached object the rebuild won't see.
+  var _pd279SectionsWithPushes = {};
+  placed.forEach(function(p){ _pd279SectionsWithPushes[p.section] = (_pd279SectionsWithPushes[p.section] || 0) + 1; });
+  var _pd279Found = {};
   _tb.placeActivities.forEach(function(it){
     if (!it || (it.type && SYNTHETIC[it.type])) return;
+    var secName = it.section || "";
     (it.requiredPlaces || []).forEach(function(p){
       if (!p || !p.place) return;
+      if (_pd279SectionsWithPushes[secName]) {
+        if (!_pd279Found[secName]) _pd279Found[secName] = [];
+        _pd279Found[secName].push(p.place);
+      }
       var toks = _pd258TokensOf(p.place);
       if (!toks.length) return;
       var set = {};
@@ -8492,6 +8505,8 @@ async function _reconcileListedSightsToSections() {
       coveredTokenSets.push(set);
     });
   });
+  console.log("[PD.279] sections that got pushes — current requiredPlace names visible to rebuild:",
+    JSON.stringify(_pd279Found));
   var stillOrphanKeys = orphanKeys.filter(function(k){ return !_isCovered(k); });
   if (!stillOrphanKeys.length) {
     console.log("[PD.259] no still-orphans after heuristic; LLM pass skipped");
