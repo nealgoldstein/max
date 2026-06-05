@@ -8296,10 +8296,17 @@ async function _reconcileListedSightsToSections() {
     ? globalThis._normPlaceName
     : function(s){ return String(s||"").toLowerCase().trim(); };
 
-  // PD.258: coverage uses bidirectional token-subset matching so
-  // user-name vs LLM-name variants ("Arnarstapi coastal cliffs" vs
-  // "Arnarstapi") count as the same place. Mirrors the orphan-detector
-  // helper in _ensureSyntheticSightsSection.
+  // PD.258/PD.285: coverage uses UNIDIRECTIONAL token-subset matching.
+  // A user-listed sight is "covered" only when every user token appears
+  // in some LLM requiredPlace's token set. PD.258 originally allowed
+  // bidirectional matching so "Snæfellsnes" (user) would be covered by
+  // "Snæfellsnes Peninsula" (LLM) — that direction is still kept. But
+  // the reverse direction ("Arnarstapi" LLM token-subset of "Arnarstapi
+  // coastal cliffs" user) was conflating distinct places — the town
+  // stay activity is NOT the user's coastal-cliffs sight. PD.285 drops
+  // the reverse, so user-listed names with extra qualifier words flow
+  // through reconciliation and get categorized into a real section
+  // instead of disappearing into a false-match.
   function _pd258TokensOf(name) {
     var n = normFn(name);
     return n ? n.split(/\s+/).filter(Boolean) : [];
@@ -8335,12 +8342,11 @@ async function _reconcileListedSightsToSections() {
     if (!userToks.length) return false;
     for (var ci = 0; ci < coveredTokenSets.length; ci++) {
       var set = coveredTokenSets[ci];
-      var setKeys = Object.keys(set);
+      // PD.285: user identity must be fully captured by the covered
+      // name (every user token in the LLM requiredPlace's tokens). The
+      // reverse direction conflated distinct places.
       var userInCovered = userToks.every(function(t){ return set[t]; });
-      var userTokSet = {};
-      userToks.forEach(function(t){ userTokSet[t] = true; });
-      var coveredInUser = setKeys.every(function(t){ return userTokSet[t]; });
-      if (userInCovered || coveredInUser) return true;
+      if (userInCovered) return true;
     }
     return false;
   }
@@ -17636,21 +17642,22 @@ function _reconcileUserListedKeeps(){
     });
     if (!listedSightKeys.length) return;
 
-    // PD.256/PD.258: this section is a catch-all for user-listed sights
-    // that DON'T appear in any LLM activity section. After PD.255 every
-    // matching user-listed sight shows up under its category with a
-    // "👁 Your list" badge; the catch-all only earns its space for true
-    // orphans.
+    // PD.256/PD.258/PD.285: this section is a catch-all for user-listed
+    // sights that DON'T appear in any LLM activity section. After PD.255
+    // every matching user-listed sight shows up under its category with
+    // a "👁 Your list" badge; the catch-all only earns its space for
+    // true orphans.
     //
-    // PD.258: coverage detection uses bidirectional token-subset
-    // matching (same algorithm as _backstopPastedListPlaces._isCovered)
-    // so the user-name vs LLM-name token mismatch doesn't cause double-
-    // surfacing. Examples:
-    //   • User listed "Arnarstapi coastal cliffs" → LLM section has
-    //     "Arnarstapi" — user tokens {arnarstapi, coastal, cliffs}
-    //     are a superset of section tokens {arnarstapi}. COVERED.
+    // PD.285 narrows coverage to UNIDIRECTIONAL: user tokens must be a
+    // subset of the covered name's tokens. PD.258 used bidirectional,
+    // which conflated distinct places (LLM's "Arnarstapi" town stay
+    // shouldn't cover user's "Arnarstapi coastal cliffs" sight).
+    // Examples:
     //   • User listed "Snæfellsnes" → LLM has "Snæfellsnes Peninsula"
     //     — user tokens are a subset of section tokens. COVERED.
+    //   • User listed "Arnarstapi coastal cliffs" → LLM has "Arnarstapi"
+    //     — user tokens NOT a subset (coastal, cliffs missing).
+    //     NOT COVERED, becomes orphan and gets categorized.
     //   • User listed "Monument to the Unknown Bureaucrat" → LLM has
     //     nothing similar. NOT COVERED, becomes orphan.
     var _pd256SyntheticTypes = {
@@ -17680,14 +17687,10 @@ function _reconcileUserListedKeeps(){
       if (!userToks.length) return false;
       for (var ci = 0; ci < _pd258CoveredTokenSets.length; ci++) {
         var set = _pd258CoveredTokenSets[ci];
-        var setKeys = Object.keys(set);
-        // user ⊆ covered: every user token appears in the covered name.
+        // PD.285: only user ⊆ covered counts. The reverse direction
+        // (covered ⊆ user) conflated distinct places sharing a token.
         var userInCovered = userToks.every(function(t){ return set[t]; });
-        // covered ⊆ user: every covered token appears in the user name.
-        var userTokSet = {};
-        userToks.forEach(function(t){ userTokSet[t] = true; });
-        var coveredInUser = setKeys.every(function(t){ return userTokSet[t]; });
-        if (userInCovered || coveredInUser) return true;
+        if (userInCovered) return true;
       }
       return false;
     }
