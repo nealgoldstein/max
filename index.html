@@ -8305,9 +8305,22 @@ async function _reconcileListedSightsToSections() {
     return n ? n.split(/\s+/).filter(Boolean) : [];
   }
   var SYNTHETIC = { "synthetic-stays":1, "synthetic-sights":1, "synthetic-umbrella":1 };
+  // PD.283: also treat the backstop's "Other places to consider"
+  // section as NOT covered. That section is a safety net for places
+  // the LLM outright dropped; treating it as covered means
+  // reconciliation never re-categorizes Goðafoss Waterfall or
+  // Jökulsárlón canyon out of the generic catchall and into their
+  // proper homes (Hike to waterfalls / Visit natural wonders).
+  // Stubs in that section flow through reconciliation as orphans,
+  // get LLM-placed, and are removed from the catchall at placement
+  // time so we don't end up with duplicates.
+  function _isCatchallSection(it) {
+    return it && it.section === "Other places to consider";
+  }
   var coveredTokenSets = [];
   _tb.placeActivities.forEach(function(it){
     if (!it || (it.type && SYNTHETIC[it.type])) return;
+    if (_isCatchallSection(it)) return;
     (it.requiredPlaces || []).forEach(function(p){
       if (!p || !p.place) return;
       var toks = _pd258TokensOf(p.place);
@@ -8463,6 +8476,7 @@ async function _reconcileListedSightsToSections() {
   var _pd279Found = {};
   _tb.placeActivities.forEach(function(it){
     if (!it || (it.type && SYNTHETIC[it.type])) return;
+    if (_isCatchallSection(it)) return; // PD.283
     var secName = it.section || "";
     (it.requiredPlaces || []).forEach(function(p){
       if (!p || !p.place) return;
@@ -8590,11 +8604,42 @@ async function _reconcileListedSightsToSections() {
         _reconciledByLlm: true
       });
       llmPlaced.push({ place: o.name, section: _currentTarget.section });
+      // PD.283: if this sight was sitting in the backstop's "Other
+      // places to consider" catchall, pull it out now that it has a
+      // real categorical home. Match by token-subset so backstop
+      // spellings ("Goðafoss Waterfall") match user-list spellings
+      // ("Goðafoss") cleanly.
+      try {
+        var oTokens = _pd258TokensOf(o.name);
+        var oSet = {}; oTokens.forEach(function(t){ oSet[t] = true; });
+        (_tb.placeActivities || []).forEach(function(it){
+          if (!_isCatchallSection(it)) return;
+          if (!Array.isArray(it.requiredPlaces)) return;
+          it.requiredPlaces = it.requiredPlaces.filter(function(p){
+            if (!p || !p.place) return true;
+            var pToks = _pd258TokensOf(p.place);
+            if (!pToks.length) return true;
+            var pSet = {}; pToks.forEach(function(t){ pSet[t] = true; });
+            var pInO = pToks.every(function(t){ return oSet[t]; });
+            var oInP = oTokens.every(function(t){ return pSet[t]; });
+            return !(pInO || oInP); // remove on match
+          });
+        });
+      } catch (_) {}
     });
   } catch (e) {
     console.warn("[PD.259] LLM reconciliation failed:", e && e.message);
     return;
   }
+  // PD.283: after LLM placement, drop any "Other places to consider"
+  // section that's now empty. The user shouldn't see a half-empty
+  // catchall when reconciliation re-homed everything in it.
+  try {
+    _tb.placeActivities = (_tb.placeActivities || []).filter(function(it){
+      if (!_isCatchallSection(it)) return true;
+      return Array.isArray(it.requiredPlaces) && it.requiredPlaces.length > 0;
+    });
+  } catch (_) {}
   console.log("[PD.259] LLM placed " + llmPlaced.length + " of " + stillOrphans.length + " sight(s)"
     + (llmPlaced.length ? ": " + llmPlaced.map(function(p){ return p.place + " → \"" + p.section + "\""; }).join("; ") : "")
     + (llmNullDecisions.length ? " | LLM said no-fit: " + llmNullDecisions.join(", ") : ""));
