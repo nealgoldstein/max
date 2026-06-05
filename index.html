@@ -7757,6 +7757,16 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
       if (!p || !p.place) return;
       var k = nrmKey(p.place);
       if (!k) return;
+      // PD.287: applyClassificationsToEntries (engine-classify.js)
+      // inserts _autoCreated:true parent entries to give orphan POIs
+      // a home — e.g. Reykjahlíð is inserted as a stay so Mývatn-area
+      // POIs have a parent, Grundarfjörður is inserted for Kirkjufell.
+      // Those parents need to flow into the LLM context and the stay
+      // pipeline (_pastedListPlaces below), but they are NOT places the
+      // user typed. Excluding them here keeps _userListedNames honest:
+      // it's the "did the user actually paste this name?" oracle that
+      // drives the "👁 / 🛏 Your list" badge and the orphan reconciler.
+      if (p._autoCreated) return;
       _tb._pastedRoles[k] = { role: p.isStay ? "stay" : "see", displayName: p.place };
       _tb._userListedNames[k] = p.isStay ? "stay" : "see";
       if (!_tb._userListedDisplay[k]) _tb._userListedDisplay[k] = String(p.place).trim();
@@ -8530,8 +8540,24 @@ async function _reconcileListedSightsToSections() {
   // remove it from there as if it had been promoted — and the sight
   // vanishes entirely. Forcing the LLM to pick from real categorical
   // sections (or return null) makes the cleanup safe.
+  //
+  // PD.286: also exclude type:"route" sections. Route sections are
+  // multi-day overnight sequences (Ring Road bases like Reykjavík →
+  // Selfoss → Vík → Höfn → ...), rendered by the picker as a
+  // connected endpoint line, not as a list of sight rows. A sight
+  // pushed into a route's requiredPlaces (e.g. Diamond Circle into
+  // "Drive scenic routes") gets stored but invisibly hidden — it's
+  // not an endpoint, so it never renders. Only type:"activity"
+  // sections render their requiredPlaces as discoverable rows, so
+  // those are the only valid placement targets.
+  function _isPlaceableSection(it) {
+    if (!it) return false;
+    if (_isCatchallSection(it)) return false;
+    if (it.type === "route") return false;
+    return true;
+  }
   var sectionsForPrompt = sections
-    .filter(function(it){ return !_isCatchallSection(it); })
+    .filter(_isPlaceableSection)
     .map(function(it){
       return {
         name: it.section,
@@ -8603,7 +8629,10 @@ async function _reconcileListedSightsToSections() {
       // a hallucinated name. If the LLM somehow says "Other places to
       // consider," treat as a null decision so the cleanup below
       // doesn't pull the sight out.
-      if (_isCatchallSection(_currentTarget)) {
+      // PD.286: same defense for type:"route" sections — they're
+      // also filtered from the prompt, but if a hallucinated name
+      // resolves to one, treat as null (sight would vanish from view).
+      if (!_isPlaceableSection(_currentTarget)) {
         llmNullDecisions.push(o.name);
         return;
       }
