@@ -1079,6 +1079,15 @@
       if (_coarseGeocode[p]) return _coarseGeocode[p];
       return null;
     }
+    // PD.293: prefer the coarse-geocode cache (hardcoded canonical
+    // centers + Nominatim results) before averaging suggestion coords.
+    // For Reykjavík, suggestions include Þingvellir / Geysir / Gullfoss
+    // 50–125 km east; the average pulled the "center" out into the bay
+    // and every coord-less restaurant/sight pin ended up clustered
+    // around the wrong spot. The canonical center is the right answer
+    // whenever we have one — averaging is only a last-ditch fallback
+    // for cities with neither a coarse geocode nor a generated center.
+    if (_coarseGeocode[p]) return _coarseGeocode[p];
     // For generated cities loaded from storage: derive center from stored suggestion coords
     // Find the destination and average its suggestion coordinates
     var dest=trip.destinations.find(function(d){return d.place.toLowerCase()===p;});
@@ -1097,8 +1106,6 @@
         return [avgLat2,avgLng2];
       }
     }
-    // Last resort: the coarse Nominatim cache if populated.
-    if (_coarseGeocode[p]) return _coarseGeocode[p];
     return null;
   }
 
