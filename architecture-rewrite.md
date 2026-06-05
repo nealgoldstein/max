@@ -247,3 +247,111 @@ Why: we don't have a real conflict UI. Last-write-wins on timestamps is unreliab
 Cost: cross-device editing is broken until we build a real conflict UI. Acceptable for now.
 
 If you (Neal) want a different policy, flag now — it's a one-line change in `TripStore.replace` to gate sync-pulls.
+
+---
+
+# Phase 7 — `findCandidates` orchestrator (PD.309)
+
+Status: Design (this section), code in progress.
+
+## The bug class we are eliminating
+
+PD.306 + PD.308 are the worked example: the "build a trip" operation has three entry points (sentence, place-picker, paste-list) that each separately call `_initialTripSave`, separately call `enhanceDiscovery`, separately update loading copy, separately handle errors. Adding a single feature ("auto-Enhance during build") required two inline patches in two different functions. The next feature ("Max learns from your choices") would require three. Every entry point reads ~12 fields off the implicit `_tb` argument bag, so the "interface" between callers and the build pipeline is the union of every property anyone ever wrote on `_tb`.
+
+After this phase:
+- One canonical `findCandidates({mode, ...input})` orchestrates every build.
+- The input is an **explicit, enumerated contract** — not `_tb`.
+- Build is a unidirectional pipeline of named phases that **emit events** (`build:phase-start`, `build:phase-done`, `build:done`).
+- Loading UI subscribes to phase events instead of having each entry point write `innerHTML` inline.
+- `_initialTripSave` collapses from 4 call sites to 1 (owned by the orchestrator's `mint` phase).
+- `enhanceDiscovery`'s internal core becomes the `enhance` phase. The standalone "✦ More like this" button calls `MaxBuild.rerunEnhance()` — the only by-name re-invocation in the codebase.
+
+## Input contract
+
+```js
+findCandidates({
+  mode,           // "candidate-first" | "activity-first" | "rebuild"
+  region,         // required
+  sentence,       // candidate-first
+  anchors,        // candidate-first
+  listedPlaces,   // activity-first (paste-list) — array of { place, country, nights, ... }
+  placeName,      // activity-first (place-mode) — single place
+  placeContext,   // activity-first (place-mode) — context string
+  tripMode,       // "sentence" | "place" | "paste" — historical, kept for routing
+  isRebuild,      // boolean — true preserves destinations + skips mint
+  // ... none of: every other _tb field. Period.
+})
+```
+
+The orchestrator **never reads `_tb` for input**. It writes to `_tb` only because legacy phases still read from it; the orchestrator's first phase is `normalize` which copies the explicit input into `_tb`. Phase implementations are unchanged in this round; the contract enforcement happens at the boundary. Phase 7b will refactor phases to take explicit args. Phase 7a (this round) just makes the boundary explicit so callers can't sneak `_tb.foo = x` into the contract.
+
+## Modes
+
+| Mode | Trigger | Primary phase | Mint? | Notes |
+|---|---|---|---|---|
+| `candidate-first` | Sentence/Discovery brief | `runCandidateSearch` body | Yes | The 5 callers of `runCandidateSearch` (10897, 10905, 11058, 11063, 11657) collapse to 1 caller of `findCandidates({mode:"candidate-first", ...})`. |
+| `activity-first` | Paste-list, place-mode | `generateActivitiesForPlace` body | Yes | Callers at 8031 (paste modal) and 30185 (retry) collapse. |
+| `rebuild` | `saveActivityPickerEdits` | `runCandidateSearch` body **(no mint)** | **No** | Must preserve destination identity + the existing wisp stream. Goes through publishTrip on the other side. |
+
+Place-mode and paste-list are NOT separate modes; both are `activity-first`. The distinction (single place vs many) is an input variant, not a mode.
+
+## Phases
+
+```
+findCandidates(input)
+  emit("build:start", { mode })
+  ├── normalize       — copy input → _tb (legacy bridge; deletes ad-hoc fields)
+  ├── primary         — mode-dispatched LLM (candidate or activity); legacy body
+  │   emit("build:primary-done", { count })
+  ├── mint            — TripStore.mint via _initialTripSave (skipped if rebuild)
+  │   emit("build:mint-done")
+  ├── enhance         — enhanceDiscovery core (always; best-effort)
+  │   emit("build:enhance-done", { added })
+  ├── reconcile       — backstop / fold / sight reconciliation (legacy passes)
+  │   emit("build:reconcile-done")
+  └── handoff         — show picker OR fast-path to buildFromCandidates
+      emit("build:done")
+  on throw: emit("build:error", { error })
+```
+
+## Event shape
+
+```js
+MaxBuild.on("build:start",         fn({ mode }))
+MaxBuild.on("build:primary-done",  fn({ count }))
+MaxBuild.on("build:mint-done",     fn())
+MaxBuild.on("build:enhance-done",  fn({ added }))
+MaxBuild.on("build:reconcile-done",fn())
+MaxBuild.on("build:done",          fn({ tripId }))
+MaxBuild.on("build:error",         fn({ error }))
+```
+
+The candidate-explorer loading overlay subscribes to `primary-done` and `enhance-done` to update its phase copy. The paste-list picker subscribes to `enhance-done` to drop a "✦ Max added N nearby places — review and reject" toast. Inline `getElementById("ce-loading-detail").innerHTML = ...` writes inside `runCandidateSearch` are deleted; the overlay is the subscriber.
+
+## What we are NOT doing in PD.309
+
+- **`publishTrip` refactor.** It has 8 architectural patches in one function. Per reviewer's advice, treated as an opaque phase. Future Phase 8.
+- **Phase implementations taking explicit args.** Round 7a wraps legacy bodies. Round 7b argumentizes them.
+- **Sync / restore / share-link import.** Not build paths; go through `TripStore.replace` cleanly.
+- **Refactoring the wisp stream.** Rebuild mode preserves it unchanged.
+
+## Migration
+
+1. New module `engine-build.js` with `MaxBuild = { findCandidates, rerunEnhance, on }`.
+2. Globally expose `findCandidates` so existing callers don't change shape — but they MUST pass the explicit input contract, not pass nothing.
+3. Each of the 5 `runCandidateSearch` callers, the 2 `generateActivitiesForPlace` callers, and `saveActivityPickerEdits` are converted in this order: paste-list → sentence → place-mode → rebuild. Tests verify each migration.
+4. After migration: `runCandidateSearch` and `generateActivitiesForPlace` become *phase implementations* — exported only to `MaxBuild`, not callable globally. The `_initialTripSave` call inside them is removed (orchestrator owns mint).
+5. Standalone `enhanceDiscovery(btn)` button at index.html:19261 calls `MaxBuild.rerunEnhance()`.
+
+## PD.303 invariant
+
+`_tb.placeActivities === trip.placeActivities` (same array by reference). No phase in `engine-build.js` may `.slice()` either side. Any new pass that wants to filter must rebuild in place. Write this in the module header.
+
+## Done when
+
+- 5 `runCandidateSearch` callers reduced to 0 (replaced by `findCandidates`).
+- 2 `generateActivitiesForPlace` callers reduced to 0.
+- `_initialTripSave` callable from 1 site (the orchestrator's mint phase).
+- New `engine-build-tests.js` covers: mode dispatch, phase ordering, event emission, rebuild-skips-mint, enhance-failure-is-best-effort, contract-rejects-unknown-fields.
+- Existing 329 + 77 = 406 Node tests still green.
+- 30 Playwright tests still green.

@@ -387,6 +387,19 @@
      AFTER db.js because it depends on MaxDB; loaded before all other
      inline scripts because they will read/write through it. -->
 <script src="tripstore.js?v=DEV"></script>
+<!-- Phase 7 (PD.309): engine-build.js owns the single orchestrator
+     for "build a trip" — MaxBuild.findCandidates({mode, ...input}).
+     Before this module, three separate functions (runCandidateSearch,
+     generateActivitiesForPlace, saveActivityPickerEdits) each
+     separately minted the trip, separately auto-Enhanced, separately
+     wrote loading-state DOM. PD.306 + PD.308 were the worked example
+     of why that was wrong: adding "auto-Enhance during build" had to
+     be patched into two places. After Phase 7 every build goes
+     through one pipeline of named phases that emit events. Loaded
+     AFTER tripstore.js because it calls TripStore mutators; before
+     inline scripts because legacy entry-point wrappers route through
+     MaxBuild.findCandidates. See architecture-rewrite.md Phase 7. -->
+<script src="engine-build.js?v=DEV"></script>
 <!-- Round HB: Phase 1 of the engine/UI split. engine-trip.js owns
      the trip engine's PURE helpers (haversine, pair-key, fastest-
      practical, hour parse/format, place-name canonicalization).
@@ -8021,38 +8034,72 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
   });
   _tb._pastedListNights = _userPickedNights;
 
-  // Fire the LLM generation. The function reads _tb.placeName /
-  // _tb.placeContext as fallbacks when the brief-form inputs aren't
-  // mounted (our case — we skipped Step 1 of the brief). On return
-  // it calls renderActivityPicker again to show the populated view.
+  // PD.309: route through MaxBuild.findCandidates — the single
+  // orchestrator for "build a trip." Before Phase 7, this site called
+  // generateActivitiesForPlace() directly, and PD.308's auto-Enhance
+  // was patched inline inside that function. Now the orchestrator
+  // owns the phase sequence (activity-LLM → mint → enhance →
+  // reconcile → handoff) and emits buildPhase events so loading UI
+  // can subscribe. See architecture-rewrite.md Phase 7.
+  //
+  // Mode: "activity-first" — paste-list (and place-mode) generate
+  // activities first, then mint the trip from them, then enhance.
+  // The orchestrator awaits all phases before resolving; the
+  // post-build reconcile passes below run after that.
   setTimeout(function() {
-    if (typeof generateActivitiesForPlace === "function") {
-      try {
-        var p = generateActivitiesForPlace();
-        if (p && typeof p.then === "function") {
-          p.then(async function(){
-            // Order: backstop synthesizes stubs for any place the LLM
-            // outright dropped → reconciliation pass slots remaining
-            // orphan sights into matching activity sections using
-            // Wikipedia tokens (PD.257) → nights pass writes
-            // user-specified stay lengths onto every requiredPlace.
-            try { _backstopPastedListPlaces(); } catch(_) {}
-            try { await _reconcileListedSightsToSections(); } catch(_) {}
-            try { _applyPastedListNights(); } catch(_) {}
-            // Reconciliation can add new requiredPlaces — re-render so
-            // the picker reflects them. The render-time orphan catch-all
-            // (PD.256) will auto-shrink because the places are now in
-            // real sections.
-            if (typeof renderActivityPicker === "function") {
-              try { renderActivityPicker(); } catch(_) {}
-            }
-          }).catch(function(err){
-            console.warn("[Max] generateActivitiesForPlace failed for pasted list:", err && err.message);
-          });
-        }
-      } catch(err) {
-        console.warn("[Max] generateActivitiesForPlace threw for pasted list:", err && err.message);
+    if (typeof MaxBuild !== "undefined" && MaxBuild && typeof MaxBuild.findCandidates === "function") {
+      // PD.309: subscribe to phase events for the loading banner.
+      // Auto-unsubscribes when the build completes.
+      var _offEnhStart, _offEnhDone, _offError;
+      function _removeBanner() {
+        var bn = document.getElementById("pm-build-phase-banner");
+        if (bn && bn.parentNode) bn.parentNode.removeChild(bn);
       }
+      _offEnhStart = MaxBuild.on("build:enhance-start", function() {
+        _removeBanner();
+        var bn = document.createElement("div");
+        bn.id = "pm-build-phase-banner";
+        bn.style.cssText = "position:fixed;top:60px;left:50%;transform:translateX(-50%);"
+          + "max-width:680px;z-index:12000;background:#5b3f8f;color:#fff;"
+          + "padding:11px 16px;border-radius:8px;"
+          + "box-shadow:0 4px 14px rgba(0,0,0,0.35);"
+          + "font-size:12px;font-weight:500;line-height:1.5;font-family:inherit;";
+        bn.innerHTML = '✨ Finding more places like the ones you listed… '
+          + '<span style="opacity:0.85;">Max learns from your choices — reject anything that doesn’t fit.</span>';
+        document.body.appendChild(bn);
+      });
+      _offEnhDone = MaxBuild.on("build:enhance-done", function() { _removeBanner(); });
+      _offError   = MaxBuild.on("build:error",        function() { _removeBanner(); });
+      MaxBuild.findCandidates({
+        mode:         "activity-first",
+        region:       _tb.region || _normRegion || "",
+        tripMode:     "paste",
+        placeName:    _tb.placeName || _tb.region || _normRegion || "",
+        placeContext: _tb.placeContext || rawText || ""
+      }).then(async function(){
+        // Order: backstop synthesizes stubs for any place the LLM
+        // outright dropped → reconciliation pass slots remaining
+        // orphan sights into matching activity sections using
+        // Wikipedia tokens (PD.257) → nights pass writes
+        // user-specified stay lengths onto every requiredPlace.
+        try { _backstopPastedListPlaces(); } catch(_) {}
+        try { await _reconcileListedSightsToSections(); } catch(_) {}
+        try { _applyPastedListNights(); } catch(_) {}
+        // Reconciliation can add new requiredPlaces — re-render so
+        // the picker reflects them. The render-time orphan catch-all
+        // (PD.256) will auto-shrink because the places are now in
+        // real sections.
+        if (typeof renderActivityPicker === "function") {
+          try { renderActivityPicker(); } catch(_) {}
+        }
+      }).catch(function(err){
+        console.warn("[Max] MaxBuild.findCandidates failed for pasted list:", err && err.message);
+      }).then(function(){
+        // Unsubscribe phase listeners regardless of success/failure.
+        if (typeof _offEnhStart === "function") _offEnhStart();
+        if (typeof _offEnhDone  === "function") _offEnhDone();
+        if (typeof _offError    === "function") _offError();
+      });
     }
   }, 50);
 
@@ -12718,17 +12765,14 @@ async function runCandidateSearch(requiredPlaces) {
     detailNow = document.getElementById("ce-loading-detail");
   }
   if (detailNow) {
-    // PD.306: build = candidates + auto-Enhance, so the loading copy
-    // describes the combined wait up-front. Phase 2 ("Adding more like
-    // them\u2026") swaps in after candidates land but before Enhance starts.
     var n = requiredPlaces.length;
     if (n > 0) {
       detailNow.innerHTML = 'Describing ' + n + ' required stop' + (n>1?'s':'')
         + ' from what your trip includes<br>and finding more places worth visiting.'
-        + '<br><span style="color:#ccc;margin-top:4px;display:inline-block;">This usually takes about a minute.</span>';
+        + '<br><span style="color:#ccc;margin-top:4px;display:inline-block;">This usually takes 20\u201340 seconds.</span>';
     } else {
       detailNow.innerHTML = 'Searching for places that fit your trip.'
-        + '<br><span style="color:#ccc;margin-top:4px;display:inline-block;">This usually takes about a minute.</span>';
+        + '<br><span style="color:#ccc;margin-top:4px;display:inline-block;">This usually takes 15\u201330 seconds.</span>';
     }
   }
 
@@ -13401,39 +13445,6 @@ async function runCandidateSearch(requiredPlaces) {
     console.log("[Max] runCandidateSearch: total candidates:", allCands.length,
       "· required:", allCands.filter(function(c){return c._required;}).length,
       "· p1Failed:", p1Failed, "· p2Failed:", p2Failed);
-
-    // PD.306: auto-Enhance. Build and Enhance are now one operation —
-    // users no longer have to click ✦ Enhance separately to get the
-    // pattern-fit + nearby-sights pass. Update the loading copy to a
-    // phase-2 message, then await the same enhanceDiscovery() the
-    // standalone button calls (with toast/popup suppressed).
-    //
-    // The auto-Enhance pass also signals to the user, via copy, that
-    // their accept/reject choices teach Max — making the existing
-    // "Not interested ever" affordance (PD.305) meaningful from the
-    // first interaction instead of buried.
-    //
-    // Best-effort: a failed Enhance does NOT abort the build. We log
-    // the warning and continue with build-only candidates.
-    try {
-      var detailNow2 = document.getElementById("ce-loading-detail");
-      if (detailNow2) {
-        detailNow2.innerHTML = 'Found ' + (_tb.candidates ? _tb.candidates.length : 0)
-          + ' places. Now adding more like the ones you listed.'
-          + '<br><span style="color:#ccc;margin-top:4px;display:inline-block;">'
-          + 'Max learns from your choices — reject anything that doesn’t fit.'
-          + '</span>';
-      }
-      var enhAdded = await enhanceDiscovery(null, {
-        suppressToast:    true,
-        suppressMaxAlert: true,
-        silentNoOp:       true
-      });
-      console.log("[Max] runCandidateSearch: auto-Enhance added", enhAdded, "place(s)");
-    } catch(enhErr) {
-      console.warn("[Max] runCandidateSearch: auto-Enhance failed (best-effort, continuing):",
-        enhErr && enhErr.message);
-    }
     // PLACE-MODE FAST PATH: when the user comes through the merged picker,
     // they've already curated. Skip the Places-to-think-about overlay and
     // build the trip directly. Auto-keep _required candidates that appear
@@ -16815,44 +16826,6 @@ async function generateActivitiesForPlace(){
     // PD.73: LLM activity list landed — early first-save (no candidates
     // yet, but enough substance to want resumption).
     if (typeof _initialTripSave === "function") _initialTripSave();
-
-    // PD.308: auto-Enhance for the paste-list flow. PD.306 added the
-    // same chain inside runCandidateSearch — but that's only the
-    // sentence / Discovery path. Paste-list goes through
-    // generateActivitiesForPlace, which bypasses runCandidateSearch
-    // entirely, so the user never got the auto-Enhance pass after a
-    // paste-build. Fix: insert the same await here, right after the
-    // initial trip mint, with a status banner so the user knows what's
-    // happening during the extra wait.
-    //
-    // Best-effort: a failed Enhance does NOT abort the build. The
-    // existing renderActivityPicker call at the end of this function
-    // (line ~16905) renders whatever items landed.
-    try {
-      var _enhBanner = document.createElement("div");
-      _enhBanner.id = "pm-auto-enhance-banner";
-      _enhBanner.style.cssText = "position:fixed;top:60px;left:50%;transform:translateX(-50%);"
-        + "max-width:680px;z-index:12000;background:#5b3f8f;color:#fff;"
-        + "padding:11px 16px;border-radius:8px;"
-        + "box-shadow:0 4px 14px rgba(0,0,0,0.35);"
-        + "font-size:12px;font-weight:500;line-height:1.5;font-family:inherit;";
-      _enhBanner.innerHTML = '✨ Finding more places like the ones you listed… '
-        + '<span style="opacity:0.85;">Max learns from your choices — reject anything that doesn’t fit.</span>';
-      document.body.appendChild(_enhBanner);
-      var _enhAdded = await enhanceDiscovery(null, {
-        suppressToast:    true,
-        suppressMaxAlert: true,
-        silentNoOp:       true
-      });
-      console.log("[Max] generateActivitiesForPlace: auto-Enhance added", _enhAdded, "place(s)");
-      if (_enhBanner.parentNode) _enhBanner.parentNode.removeChild(_enhBanner);
-    } catch (_enhErr) {
-      console.warn("[Max] generateActivitiesForPlace: auto-Enhance failed (best-effort, continuing):",
-        _enhErr && _enhErr.message);
-      var _bn = document.getElementById("pm-auto-enhance-banner");
-      if (_bn && _bn.parentNode) _bn.parentNode.removeChild(_bn);
-    }
-
     // v357: removed the _tb._placePickerStart default-init — the picker
     // map no longer carries a "Start from" preference (sequencing is
     // trip-view-only).
@@ -19258,7 +19231,22 @@ function _renderPlaceActivityItems(){
     enhBtn.title = "Find more places shaped like the ones you’ve kept — and steer away from anything like what you’ve rejected. Existing picks are preserved.";
     enhBtn.onclick = function(e){
       e.stopPropagation();
-      if (typeof enhanceDiscovery === "function") enhanceDiscovery(enhBtn);
+      // PD.309: route through MaxBuild.rerunEnhance so the standalone
+      // button is the ONLY by-name re-invocation of enhance, and so
+      // subscribers to enhance:start / enhance:done get notified the
+      // same way they do during a build. Falls back to direct
+      // enhanceDiscovery call if MaxBuild hasn't loaded.
+      if (typeof MaxBuild !== "undefined" && MaxBuild && typeof MaxBuild.rerunEnhance === "function") {
+        var origLabel = enhBtn.textContent;
+        enhBtn.disabled = true;
+        enhBtn.textContent = "Discovering…";
+        MaxBuild.rerunEnhance().catch(function(_){}).then(function(){
+          enhBtn.disabled = false;
+          enhBtn.textContent = origLabel;
+        });
+      } else if (typeof enhanceDiscovery === "function") {
+        enhanceDiscovery(enhBtn);
+      }
     };
     // PD.244: prepend What's missing? + Enhance so they read as the
     // leading actions on this surface (the AI moves the user takes), with
@@ -30870,7 +30858,20 @@ function skipPickerToCandidates(){
   _mdcItems = [];
   if ((_tb.placeName||"").trim() && !(_tb.region||"").trim()) _tb.region = _tb.placeName.trim();
   if ((_tb.placeContext||"").trim() && !(_tb.intent||"").trim()) _tb.intent = _tb.placeContext.trim();
-  findCandidates();
+  // PD.309: route through the orchestrator. candidate-first mode without
+  // precomputed requiredPlaces → primary phase runs expandMustDos which
+  // does the must-do LLM extraction then candidate search.
+  if (typeof MaxBuild !== "undefined" && MaxBuild && typeof MaxBuild.findCandidates === "function") {
+    MaxBuild.findCandidates({
+      mode:     "candidate-first",
+      region:   _tb.region,
+      sentence: _tb.intent || "",
+      anchors:  _tb.anchors || "",
+      tripMode: "sentence"
+    }).catch(function(err){
+      console.warn("[Max] skipPickerToCandidates: MaxBuild failed:", err && err.message);
+    });
+  }
 }
 
 function continuePlaceModeToStep2(){
@@ -30971,7 +30972,22 @@ function continuePlaceModeToStep2(){
   // have something to work with, and so the Step 2 summary shows what we picked.
   _tb.anchors = items.map(function(i){return i.name;}).join(", ");
   if(!_tb.intent) _tb.intent = "Exploring " + (_tb.placeName||"this place") + (_tb.placeContext ? " \u2014 " + _tb.placeContext : "");
-  findCandidates();
+  // PD.309: route through the orchestrator. Place-mode goes through
+  // candidate-first because expandMustDos's "_mdcItems already populated"
+  // shortcut fires when the picker has curated content \u2014 at that point
+  // expandMustDos derives requiredPlaces from _mdcItems and calls
+  // runCandidateSearch directly. So no precomputed requiredPlaces here.
+  if (typeof MaxBuild !== "undefined" && MaxBuild && typeof MaxBuild.findCandidates === "function") {
+    MaxBuild.findCandidates({
+      mode:     "candidate-first",
+      region:   _tb.region,
+      sentence: _tb.intent || "",
+      anchors:  _tb.anchors || "",
+      tripMode: "place"
+    }).catch(function(err){
+      console.warn("[Max] continuePlaceModeToStep2: MaxBuild failed:", err && err.message);
+    });
+  }
 }
 
 // TM.6 (v330): renderTripStep1Recognition + addCustomChip deleted.
@@ -32069,7 +32085,20 @@ function saveStep2AndProceed(){
   if(drivers.indexOf("different") > -1 && drivers.length === 1 && !_tb.gradient){
     openGradientConversation();
   } else {
-    findCandidates();
+    // PD.309: route through the orchestrator. Sentence-mode "Create my
+    // trip" → candidate-first → expandMustDos extracts must-dos via LLM
+    // → runCandidateSearch → mint → enhance.
+    if (typeof MaxBuild !== "undefined" && MaxBuild && typeof MaxBuild.findCandidates === "function") {
+      MaxBuild.findCandidates({
+        mode:     "candidate-first",
+        region:   _tb.region || "",
+        sentence: _tb.intent || "",
+        anchors:  _tb.anchors || "",
+        tripMode: "sentence"
+      }).catch(function(err){
+        console.warn("[Max] saveStep2AndProceed: MaxBuild failed:", err && err.message);
+      });
+    }
   }
 }
 
@@ -32164,7 +32193,19 @@ async function submitGradientConversation(){
     "Distance from familiar: " + {near:"noticeably different but still navigable",mid:"genuinely foreign but manageable",far:"as different as possible"}[distance]
   ].filter(Boolean).join(". ");
 
-  findCandidates();
+  // PD.309: route through the orchestrator. Gradient conversation
+  // resolves into sentence-mode candidate-first build.
+  if (typeof MaxBuild !== "undefined" && MaxBuild && typeof MaxBuild.findCandidates === "function") {
+    MaxBuild.findCandidates({
+      mode:     "candidate-first",
+      region:   _tb.region || "",
+      sentence: _tb.intent || "",
+      anchors:  _tb.anchors || "",
+      tripMode: "sentence"
+    }).catch(function(err){
+      console.warn("[Max] submitGradientConversation: MaxBuild failed:", err && err.message);
+    });
+  }
 }
 function toggleTag(el){
   el.classList.toggle("on");
@@ -33570,37 +33611,49 @@ function _toggleMustDoFromSummary(name){
 }
 
 
+// PD.309: legacy global findCandidates() forwards to MaxBuild for
+// any external caller (console commands, debug tools) that still uses
+// the old name. The 5 in-app callers have all been migrated to call
+// MaxBuild.findCandidates({mode, ...input}) directly. Reads _tb to
+// build a defensive input — but the in-app entry points should NOT
+// rely on this forwarding (it's the _tb-as-argument-bag anti-pattern
+// the orchestrator exists to prevent). Phase 7b: delete entirely
+// once we've audited that no console / dev-tool path depends on it.
 async function findCandidates(){
   _tb.region=g("tb-region")?g("tb-region").value.trim():(_tb.region||"");
   _tb.when=g("tb-when")?g("tb-when").value.trim():(_tb.when||"");
   _tb.intent=g("tb-intent")?g("tb-intent").value.trim():(_tb.intent||"");
   _tb.anchors=g("tb-anchors")?g("tb-anchors").value.trim():(_tb.anchors||"");
   _tb.constraints=g("tb-constraints")?g("tb-constraints").value.trim():(_tb.constraints||"");
-  // The activity-place picker (Mode 2) does the curation that the gallery
-  // used to do — so we go straight to expandMustDos. When _mdcItems is
-  // already populated (which it is whenever the user came through the picker),
-  // expandMustDos takes its shortcut path and runs candidate search directly.
-  expandMustDos(); return;
-  showCandidateExplorer(null);
-  var prompt="You are a travel expert. Suggest 6-8 destination candidates based on this trip brief.\n\n"
-    +"Trip: "+_tb.name
-    +(_tb.region?"\nRegion: "+_tb.region:"")
-    +(_tb.when?"\nWhen/how long: "+_tb.when:"")
-    +(_tb.intent?"\nPurpose: "+_tb.intent:"")
-    +(_tb.anchors?"\nMust-dos: "+_tb.anchors:"")
-    +(_tb.interests&&_tb.interests.length?"\nInterests: "+_tb.interests.join(", "):"")
-    +(_tb.constraints?"\nConstraints: "+_tb.constraints:"")
-    +"\n\nReturn ONLY a valid JSON array (no markdown):\n"
-    +'[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why.","tradeoffs":"Downside.","tags":["tag1","tag2"],"otherAttractions":"2-3 other things worth considering here.","widelyRecommended":false,"accepted":true,"lat":48.2,"lng":16.4}]\nSet widelyRecommended=true for canonical destinations.'
-    +"\nMix roles: base, anchor, pass-through. Include real lat/lng."
-    +"\nMark accepted=true for places a reasonable traveler with this brief would almost certainly include — the trip's core. Mark accepted=false for alternatives worth surfacing but that the traveler might reasonably skip. Aim for roughly 60-70% accepted on average; vary by trip ambition.";
-  try{
+  if (typeof MaxBuild !== "undefined" && MaxBuild && typeof MaxBuild.findCandidates === "function") {
+    return MaxBuild.findCandidates({
+      mode:     _tb._isRebuild ? "rebuild" : "candidate-first",
+      region:   _tb.region || "",
+      sentence: _tb.intent || "",
+      anchors:  _tb.anchors || "",
+      tripMode: _tb.tripMode || "sentence"
+    }).catch(function(err){
+      console.warn("[Max] legacy findCandidates() forward to MaxBuild failed:", err && err.message);
+    });
+  }
+  // Fallback to legacy behavior (defensive — MaxBuild should always
+  // be loaded by the time any caller fires).
+  try {
+    showCandidateExplorer(null);
+    var prompt="You are a travel expert. Suggest 6-8 destination candidates based on this trip brief.\n\n"
+      +"Trip: "+_tb.name
+      +(_tb.region?"\nRegion: "+_tb.region:"")
+      +(_tb.when?"\nWhen/how long: "+_tb.when:"")
+      +(_tb.intent?"\nPurpose: "+_tb.intent:"")
+      +(_tb.anchors?"\nMust-dos: "+_tb.anchors:"")
+      +(_tb.interests&&_tb.interests.length?"\nInterests: "+_tb.interests.join(", "):"")
+      +(_tb.constraints?"\nConstraints: "+_tb.constraints:"")
+      +"\n\nReturn ONLY a valid JSON array (no markdown):\n"
+      +'[{"place":"City","country":"Country","role":"base","stayRange":"2-4 nights","whyItFits":"Why.","tradeoffs":"Downside.","tags":["tag1","tag2"],"otherAttractions":"2-3 other things worth considering here.","widelyRecommended":false,"accepted":true,"lat":48.2,"lng":16.4}]\nSet widelyRecommended=true for canonical destinations.'
+      +"\nMix roles: base, anchor, pass-through. Include real lat/lng."
+      +"\nMark accepted=true for places a reasonable traveler with this brief would almost certainly include — the trip's core. Mark accepted=false for alternatives worth surfacing but that the traveler might reasonably skip. Aim for roughly 60-70% accepted on average; vary by trip ambition.";
     var text=await callMax([{role:"user",content:prompt}],2000);
     var cands=JSON.parse(text.replace(/```json|```/g,"").trim());
-    // v358.8: every candidate starts at status:null. See the
-    // allCands.forEach in findCandidates above for the rationale —
-    // user picks are the contract; LLM extras are opt-in via the
-    // candidate-explorer.
     cands.forEach(function(c,i){c.id="c"+i;c.status=null;c.order=null;c.manuallyOrdered=false;});
     _tb.candidates=cands;
     _ensureTripRoleDefaults(_tb.candidates);
@@ -34630,10 +34683,24 @@ async function saveActivityPickerEdits(){
     trip.brief.tbExit = _tb.tbExit || trip.brief.tbExit || "";
   }
   _tb._editMode = false;
-  // Run the same candidate-resolve + build path as the new-trip flow.
-  // _tb._isRebuild=true (set above) tells buildFromCandidates to reconcile
-  // against the existing trip.destinations rather than rebuild from scratch.
-  findCandidates();
+  // PD.309: route through the orchestrator in REBUILD mode. The
+  // orchestrator's mint phase is SKIPPED for rebuild — the existing
+  // trip id is preserved; publishTrip reconciles destinations
+  // against the existing trip object. _tb._isRebuild=true (set above)
+  // is still consulted by downstream code (publishTrip's destination
+  // identity preservation, the wisp stream preservation) so the
+  // legacy flag stays.
+  if (typeof MaxBuild !== "undefined" && MaxBuild && typeof MaxBuild.findCandidates === "function") {
+    MaxBuild.findCandidates({
+      mode:     "rebuild",
+      region:   _tb.region,
+      sentence: _tb.intent || "",
+      anchors:  _tb.anchors || "",
+      tripMode: _tb.tripMode || "sentence"
+    }).catch(function(err){
+      console.warn("[Max] saveActivityPickerEdits: MaxBuild failed:", err && err.message);
+    });
+  }
 }
 
 // Bail out of edit mode without applying changes.
