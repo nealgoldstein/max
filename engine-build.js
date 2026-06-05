@@ -134,50 +134,61 @@
     }
 
     emit("build:start", { mode: mode, region: input.region });
+    // PD.311: diagnostic logging at phase boundaries so a failed build
+    // leaves a paper trail. Without these, a stalled build (LLM hang,
+    // silent no-op, exception swallowed downstream) is invisible.
+    console.log("[MaxBuild] start — mode:", mode, "region:", input.region);
 
     try {
-      // Phase 1: normalize. Copy explicit input → _tb so legacy phase
-      // bodies (runCandidateSearch, generateActivitiesForPlace, etc.)
-      // can keep reading from _tb until Phase 7b argumentizes them.
-      // This is the only place the orchestrator writes _tb.
+      // Phase 1: normalize.
       _normalize(input);
+      console.log("[MaxBuild] normalize done — _tb.placeName:", _readTb("placeName"),
+        "_tb.region:", _readTb("region"),
+        "_tb.placeContext.len:", (_readTb("placeContext") || "").length,
+        "_tb._pastedListPlaces.len:", (_readTb("_pastedListPlaces") || []).length);
 
       // Phase 2: primary LLM, mode-dispatched.
+      console.log("[MaxBuild] phase: primary (start)");
       var primaryResult = await _runPrimaryPhase(mode, input);
+      console.log("[MaxBuild] phase: primary (done) — count:", primaryResult.count,
+        "_tb.placeActivities.len:", (_readTb("placeActivities") || []).length,
+        "_tb.candidates.len:", (_readTb("candidates") || []).length);
       emit("build:primary-done", { count: primaryResult.count, mode: mode });
 
       // Phase 3: mint (or skip for rebuild).
       if (mode !== "rebuild") {
+        console.log("[MaxBuild] phase: mint (start)");
         await _runMintPhase();
+        console.log("[MaxBuild] phase: mint (done) — _currentTripId:", global._currentTripId);
         emit("build:mint-done");
+      } else {
+        console.log("[MaxBuild] phase: mint SKIPPED (rebuild mode)");
       }
 
-      // Phase 4: reconcile. PD.310: MUST run BEFORE enhance so the
-      // enhance phase's skip list (built from _tb.placeActivities)
-      // includes user-listed places that the primary LLM dropped.
-      // Otherwise Enhance's LLM suggests those dropped places as
-      // "nearby sights," lands them in the enrichment section, and
-      // backstop's token-coverage check then treats them as already
-      // covered — so they're stuck in the wrong section forever.
-      //
-      // Reconcile is caller-supplied because the passes are mode-
-      // specific (paste-list needs backstop + sight-reconcile + nights
-      // application; sentence-mode needs none of those).
+      // Phase 4: reconcile.
       if (typeof input.reconcile === "function") {
+        console.log("[MaxBuild] phase: reconcile (start)");
         try {
           await input.reconcile();
         } catch (recErr) {
-          // Best-effort: reconcile failure should not abort the build.
-          // The downstream picker will still render; the user can
-          // re-curate manually.
           console.warn("[MaxBuild] reconcile phase failed (best-effort, continuing):",
             recErr && recErr.message);
         }
+        console.log("[MaxBuild] phase: reconcile (done) — _tb.placeActivities.len:",
+          (_readTb("placeActivities") || []).length);
+      } else {
+        console.log("[MaxBuild] phase: reconcile SKIPPED (no callback supplied)");
       }
       emit("build:reconcile-done");
 
       // Phase 5: enhance (always, best-effort).
+      console.log("[MaxBuild] phase: enhance (start) — _tb.candidates.len:",
+        (_readTb("candidates") || []).length,
+        "_tb.placeActivities.len:", (_readTb("placeActivities") || []).length);
       var enhanceResult = await _runEnhancePhase();
+      console.log("[MaxBuild] phase: enhance (done) — added:", enhanceResult.added,
+        "_tb.candidates.len:", (_readTb("candidates") || []).length,
+        "_tb.placeActivities.len:", (_readTb("placeActivities") || []).length);
       emit("build:enhance-done", { added: enhanceResult.added });
 
       // Phase 6: handoff. The legacy primary phase already either
@@ -193,16 +204,21 @@
           tripId = global.TripStore.trip && global.TripStore.trip.id;
         }
       } catch (_) {}
+      console.log("[MaxBuild] done — tripId:", tripId);
       emit("build:done", { tripId: tripId, mode: mode });
       return { tripId: tripId, mode: mode };
     } catch (err) {
-      console.error("[MaxBuild] findCandidates failed:", err && err.message);
+      console.error("[MaxBuild] findCandidates failed:", err && err.message, err && err.stack);
       emit("build:error", { error: err, mode: mode });
       throw err;
     }
   }
 
   // ── Phase implementations (thin wrappers around legacy bodies) ─────
+
+  function _readTb(field) {
+    return global._tb && global._tb[field];
+  }
 
   function _normalize(input) {
     // The orchestrator copies explicit input → _tb so legacy phase

@@ -12423,10 +12423,16 @@ async function enhanceDiscovery(btn, opts) {
         noteExisting(p.place, isRej);
       });
     });
+    console.log("[Max enhanceDiscovery] entry — _tb.candidates.len:", (_tb && _tb.candidates || []).length,
+      "_tb.placeActivities.len:", (_tb && _tb.placeActivities || []).length,
+      "keptDisplay.len:", keptDisplay.length, "rejectedDisplay.len:", rejectedDisplay.length,
+      "opts.silentNoOp:", !!opts.silentNoOp);
     if (!keptDisplay.length && !rejectedDisplay.length) {
+      console.log("[Max enhanceDiscovery] no kept/rejected — bailing out", opts.silentNoOp ? "(silentNoOp)" : "(showing maxAlert)");
       if (!opts.silentNoOp && typeof maxAlert === "function") maxAlert("Nothing in Discovery yet — start with a paste-list or generate first.");
       return 0;
     }
+    console.log("[Max enhanceDiscovery] proceeding to LLM call — keptDisplay:", keptDisplay.length, "items");
     var existingDisplay = keptDisplay.concat(rejectedDisplay);
     var brief = (typeof _serializeTbForPrompt === "function") ? _serializeTbForPrompt(_tb) : (_tb.intent || "");
     var region = _tb.region || "this region";
