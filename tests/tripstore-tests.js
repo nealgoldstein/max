@@ -541,6 +541,93 @@ test("_version increments monotonically", function () {
   assert.strictEqual(TripStore.getVersion(), v0 + 3);
 });
 
+// ── Batch (Phase 3 transactional API) ─────────────────────────────────
+
+console.log("\nBatch (transactional)");
+
+test("batch emits one tripChange instead of N", function () {
+  reset();
+  TripStore.mint({});
+  var count = 0;
+  TripStore.on("tripChange", function () { count++; });
+  TripStore.batch(function () {
+    TripStore.setName("a");
+    TripStore.setName("b");
+    TripStore.setName("c");
+  }, "test-batch");
+  // One change for the batch (the mint already fired before subscribe).
+  assert.strictEqual(count, 1);
+  assert.strictEqual(TripStore.trip.name, "c");
+});
+
+test("batch persists once at the end", function () {
+  reset();
+  var t = TripStore.mint({});
+  var writes = 0;
+  // Wrap MaxDB to count writes (mint already wrote 1).
+  var origWrite = MaxDB.trip.writeRaw;
+  MaxDB.trip.writeRaw = function () { writes++; return origWrite.apply(this, arguments); };
+  TripStore.batch(function () {
+    TripStore.setName("a");
+    TripStore.setName("b");
+    TripStore.setName("c");
+  });
+  assert.strictEqual(writes, 1);
+  MaxDB.trip.writeRaw = origWrite;
+});
+
+test("batch with no mutations doesn't emit", function () {
+  reset();
+  TripStore.mint({});
+  var count = 0;
+  TripStore.on("tripChange", function () { count++; });
+  TripStore.batch(function () {
+    // do nothing
+  });
+  assert.strictEqual(count, 0);
+});
+
+test("nested batches collapse to one emit", function () {
+  reset();
+  TripStore.mint({});
+  var count = 0;
+  TripStore.on("tripChange", function () { count++; });
+  TripStore.batch(function () {
+    TripStore.setName("outer");
+    TripStore.batch(function () {
+      TripStore.setName("inner");
+    });
+  });
+  assert.strictEqual(count, 1);
+});
+
+test("batch payload identifies the batch by name", function () {
+  reset();
+  TripStore.mint({});
+  var captured = null;
+  TripStore.on("tripChange", function (e) { captured = e; });
+  TripStore.batch(function () {
+    TripStore.setName("x");
+  }, "trip-mint");
+  assert.strictEqual(captured.mutator, "batch:trip-mint");
+});
+
+test("error inside batch still releases the batch depth", function () {
+  reset();
+  TripStore.mint({});
+  try {
+    TripStore.batch(function () {
+      TripStore.setName("x");
+      throw new Error("oops");
+    });
+  } catch (_) {}
+  // Subsequent mutations should fire normally, not be batch-suppressed.
+  var count = 0;
+  TripStore.on("tripChange", function () { count++; });
+  TripStore.setName("y");
+  assert.strictEqual(count, 1);
+});
+
 // ── Global mirror (Phase 2 bridge) ────────────────────────────────────
 
 console.log("\nGlobal mirror (Phase 2 bridge)");

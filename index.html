@@ -3842,10 +3842,21 @@ function serializeTrip(){
 function restoreTrip(json){
   try{
     var d=JSON.parse(json);
-    trip=d.trip; activeDest=d.activeDest;
-    if(!trip.pendingActions) trip.pendingActions=[];
+    activeDest=d.activeDest;
     destCtr=d.destCtr||0; sidCtr=d.sidCtr||100; bkCtr=d.bkCtr||0;
     if(d.activeDmSection) _activeDmSection=d.activeDmSection;
+    // ARCH Phase 3: route trip restore through TripStore so:
+    //   - migrations run on legacy envelopes (backfills missing id, etc.)
+    //   - global.trip and TripStore._trip stay in sync
+    //   - tripChange fires so subscribers re-render against current data
+    // The fallback (direct assignment + pendingActions init) covers the
+    // race where this function is called before TripStore loaded.
+    if (typeof TripStore !== "undefined" && d.trip) {
+      TripStore.replace(d.trip);
+    } else {
+      trip=d.trip;
+      if(!trip.pendingActions) trip.pendingActions=[];
+    }
     restoreTripUI();
   }catch(e){showSaveStatus("Couldn't read that file.",4000);console.error(e);}
 }
@@ -6014,6 +6025,14 @@ function autoSave(){
 // ── Home screen ────────────────────────────────────────────
 function showHome(){
   loadTripsIndex();
+  // ARCH Phase 3: tell TripStore we're leaving the trip context.
+  // emits tripUnloaded for subscribers; clears the canonical reference.
+  // The stub-trip assignment below is defensive cover for any reader
+  // that doesn't null-check global.trip — those become migration
+  // targets in subsequent phases.
+  if (typeof TripStore !== "undefined") {
+    try { TripStore.unload(); } catch(_) {}
+  }
   trip={name:"",destinations:[],legs:{},trackSpending:false,pendingActions:[]};
   activeDest=null; _currentTripId=null; _fileHandle=null;
   // Clear left panel content
@@ -24673,54 +24692,56 @@ function _initialTripSave(){
   var hasActs  = Array.isArray(_tb.placeActivities) && _tb.placeActivities.length;
   if (!hasCands && !hasActs) return;
 
+  // ARCH Phase 3: route through TripStore. The function still does
+  // the same work but each state change is a named mutator inside a
+  // batch — one atomic transaction, one tripChange emit, one persist.
+  // The destination-loss class is closed by construction: TripStore.mint
+  // assigns trip.id at creation; existing-trip syncs go through
+  // updateBrief / setName / setCandidates / setPlaceActivities; no
+  // path can wipe destinations because the mutators don't touch them.
+  // Falls back to the legacy inline pattern if TripStore isn't loaded
+  // yet (defensive — shouldn't happen given script ordering).
+  if (typeof TripStore === "undefined") {
+    console.warn("[Max] _initialTripSave: TripStore not loaded, skipping");
+    return;
+  }
+
   if (!_currentTripId) {
-    // Mint trip with the substance we have.
-    var newId = "trip-" + Date.now();
-    if (typeof window.trip === "undefined" || !window.trip) window.trip = {};
-    trip.id = newId;
-    // PD.73c: trip name always reads as "<destination> — <creation date>".
-    // The destination prefix is _tb.region (best) or "Untitled" (no
-    // destination known yet). The date is fixed at mint time so a trip
-    // started today stays "Iceland — May 31, 2026" regardless of when
-    // the user opens it later.
+    // Mint a brand-new trip. Builds initial brief from _tb, then
+    // populates name + candidates + placeActivities inside the same
+    // batch so the whole mint+populate is one atomic transition.
     var _initDate = new Date().toLocaleDateString("en-US", {month:"short", day:"numeric", year:"numeric"});
     var _initPlace = (_tb.name && _tb.name.trim())
       || (_tb.region && _tb.region.trim())
       || (_tb.placeName && _tb.placeName.trim())
       || "Untitled";
-    trip.name = _initPlace + " — " + _initDate;
-    trip.destinations = trip.destinations || [];
-    trip.brief = trip.brief || {};
-    trip.brief.region = trip.brief.region || _tb.region || "";
-    trip.brief.sentence = trip.brief.sentence || _tb.sentence || "";
-    // PD.92 (architectural root cause of 7+ rounds): persist the
-    // paste-list metadata. Without this, _tb._userListedNames and
-    // _tb.tripMeta lived only in the in-memory _tb scratch and never
-    // made it onto trip.brief — so on reload, the backfill logic had
-    // nothing to read and gray pins persisted. These two fields are
-    // the source of truth for "what did the user actually paste";
-    // they must travel with the trip.
-    if (_tb._userListedNames) {
-      trip.brief._userListedNames = Object.assign({}, _tb._userListedNames);
-    }
-    if (_tb._userListedDisplay) {
-      trip.brief._userListedDisplay = Object.assign({}, _tb._userListedDisplay);
-    }
+    var _initName = _initPlace + " — " + _initDate;
+    var initialBrief = {
+      region:   _tb.region   || "",
+      sentence: _tb.sentence || ""
+    };
+    // PD.92: paste-list metadata. The user-typed source-of-truth fields
+    // travel WITH the trip on the brief.
+    if (_tb._userListedNames)   initialBrief._userListedNames   = Object.assign({}, _tb._userListedNames);
+    if (_tb._userListedDisplay) initialBrief._userListedDisplay = Object.assign({}, _tb._userListedDisplay);
     if (_tb.tripMeta) {
-      trip.brief.tripMeta = trip.brief.tripMeta || {};
-      if (_tb.tripMeta.notes && !trip.brief.tripMeta.notes) trip.brief.tripMeta.notes = _tb.tripMeta.notes;
-      if (Array.isArray(_tb.tripMeta.links) && !Array.isArray(trip.brief.tripMeta.links)) {
-        trip.brief.tripMeta.links = _tb.tripMeta.links.slice();
-      }
+      initialBrief.tripMeta = {};
+      if (_tb.tripMeta.notes) initialBrief.tripMeta.notes = _tb.tripMeta.notes;
+      if (Array.isArray(_tb.tripMeta.links)) initialBrief.tripMeta.links = _tb.tripMeta.links.slice();
     }
-    trip.candidates = (_tb.candidates || []).slice();
-    trip.placeActivities = (_tb.placeActivities || []).slice();
-    _currentTripId = newId;
+    TripStore.batch(function(){
+      TripStore.mint(initialBrief);
+      TripStore.setName(_initName);
+      TripStore.setCandidates((_tb.candidates || []).slice());
+      TripStore.setPlaceActivities((_tb.placeActivities || []).slice());
+    }, "initial-mint");
+    _currentTripId = TripStore.trip.id;
 
-    // Canonical index write.
+    // External integrations (index, sync) — these aren't trip state,
+    // they're catalog metadata. Stays as direct calls.
     var indexEntry = {
-      id: newId,
-      name: trip.name,
+      id:        _currentTripId,
+      name:      TripStore.trip.name,
       dateRange: "",
       destCount: 0
     };
@@ -24742,52 +24763,47 @@ function _initialTripSave(){
         && typeof MaxSync.scheduleSave === "function") {
       try { MaxSync.scheduleSave(); } catch(_){}
     }
-    console.log("[Max] initial trip save — minted", newId, "name:", trip.name);
+    console.log("[Max] initial trip save — minted", _currentTripId, "name:", TripStore.trip.name);
   } else {
-    // Trip already exists. Sync the latest _tb substance to the trip body.
-    trip.candidates = (_tb.candidates || []).slice();
-    trip.placeActivities = (_tb.placeActivities || []).slice();
-    trip.brief = trip.brief || {};
-    trip.brief.region = _tb.region || trip.brief.region || "";
-    trip.brief.sentence = _tb.sentence || trip.brief.sentence || "";
-    // PD.92: keep _userListedNames + tripMeta in sync on every save.
-    if (_tb._userListedNames) {
-      trip.brief._userListedNames = Object.assign({}, _tb._userListedNames);
-    }
-    if (_tb._userListedDisplay) {
-      trip.brief._userListedDisplay = Object.assign({}, _tb._userListedDisplay);
-    }
-    if (_tb.tripMeta) {
-      trip.brief.tripMeta = trip.brief.tripMeta || {};
-      if (_tb.tripMeta.notes) trip.brief.tripMeta.notes = _tb.tripMeta.notes;
-      if (Array.isArray(_tb.tripMeta.links)) trip.brief.tripMeta.links = _tb.tripMeta.links.slice();
-    }
-    // Refresh the display name if a better one is now available — but
-    // preserve the original "— DATE" suffix from initial mint. If the
-    // user has manually renamed (their custom name doesn't end in the
-    // pattern "— Mon D, YYYY"), don't overwrite their choice.
-    var freshPlace = (_tb.name && _tb.name.trim())
-      || (_tb.region && _tb.region.trim())
-      || (_tb.placeName && _tb.placeName.trim());
-    var dateSuffix = "";
-    var m = trip.name && trip.name.match(/ — ([A-Z][a-z]+ \d+, \d{4})$/);
-    if (m) dateSuffix = " — " + m[1];
-    var fresh = freshPlace ? (freshPlace + dateSuffix) : null;
-    // Only update when (a) we have a place to set, AND (b) the existing
-    // name still has the date suffix (so the user hasn't renamed it).
-    if (fresh && fresh !== trip.name && m) {
-      trip.name = fresh;
-      try {
-        if (typeof MaxDB !== "undefined" && MaxDB.index && MaxDB.index.entry && MaxDB.index.upsert) {
-          var ie = MaxDB.index.entry(_currentTripId);
-          if (ie) { ie.name = fresh; MaxDB.index.upsert(ie); }
-        }
-      } catch(_){}
-    }
+    // Existing trip. Sync the latest _tb substance via TripStore
+    // mutators in a single batch.
+    TripStore.batch(function(){
+      TripStore.setCandidates((_tb.candidates || []).slice());
+      TripStore.setPlaceActivities((_tb.placeActivities || []).slice());
+      var briefUpdates = {};
+      if (_tb.region)   briefUpdates.region   = _tb.region;
+      if (_tb.sentence) briefUpdates.sentence = _tb.sentence;
+      if (_tb._userListedNames)   briefUpdates._userListedNames   = Object.assign({}, _tb._userListedNames);
+      if (_tb._userListedDisplay) briefUpdates._userListedDisplay = Object.assign({}, _tb._userListedDisplay);
+      if (_tb.tripMeta) {
+        var existingMeta = (TripStore.trip.brief && TripStore.trip.brief.tripMeta) || {};
+        var nextMeta = Object.assign({}, existingMeta);
+        if (_tb.tripMeta.notes) nextMeta.notes = _tb.tripMeta.notes;
+        if (Array.isArray(_tb.tripMeta.links)) nextMeta.links = _tb.tripMeta.links.slice();
+        briefUpdates.tripMeta = nextMeta;
+      }
+      if (Object.keys(briefUpdates).length) TripStore.updateBrief(briefUpdates);
+      // Display-name refresh — keep the "— DATE" suffix if user hasn't renamed.
+      var freshPlace = (_tb.name && _tb.name.trim())
+        || (_tb.region && _tb.region.trim())
+        || (_tb.placeName && _tb.placeName.trim());
+      var curName = TripStore.trip.name;
+      var dateSuffix = "";
+      var m = curName && curName.match(/ — ([A-Z][a-z]+ \d+, \d{4})$/);
+      if (m) dateSuffix = " — " + m[1];
+      var fresh = freshPlace ? (freshPlace + dateSuffix) : null;
+      if (fresh && fresh !== curName && m) {
+        TripStore.setName(fresh);
+        try {
+          if (typeof MaxDB !== "undefined" && MaxDB.index && MaxDB.index.entry && MaxDB.index.upsert) {
+            var ie = MaxDB.index.entry(_currentTripId);
+            if (ie) { ie.name = fresh; MaxDB.index.upsert(ie); }
+          }
+        } catch(_){}
+      }
+    }, "initial-sync");
   }
-  if (typeof localSave === "function") {
-    try { localSave(); } catch(e){ console.warn("[Max] localSave failed:", e && e.message); }
-  }
+  // Note: NO localSave() call. TripStore.batch persisted atomically.
 }
 
 function _recordScreen(name){

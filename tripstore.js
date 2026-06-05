@@ -142,9 +142,45 @@
     }
   }
 
+  // Batch-mutation context. When non-zero, individual mutators skip
+  // their persist+emit; the batch call does one persist + emit at
+  // the end. Used by multi-step flows like _initialTripSave which
+  // would otherwise fire 5+ tripChange events for a single logical
+  // operation (mint → setName → setCandidates → setPlaceActivities →
+  // updateBrief).
+  var _batchDepth = 0;
+  var _batchDirty = false;
+
+  function batch(fn, batchName) {
+    if (typeof fn !== "function") {
+      throw new Error("[TripStore] batch() requires a function");
+    }
+    _batchDepth++;
+    var result;
+    try {
+      result = fn();
+    } finally {
+      _batchDepth--;
+      // Top-level batch exit. Persist + emit if anything changed.
+      if (_batchDepth === 0 && _batchDirty && _trip) {
+        _batchDirty = false;
+        _persist();
+        emit("tripChange", {
+          mutator: "batch:" + (batchName || "anonymous"),
+          payload: null,
+          version: _version
+        });
+      }
+    }
+    return result;
+  }
+
   // The core mutation primitive. Every named mutator below calls this.
-  // Guarantees: mutation → version bump → persist → emit, in order,
-  // atomically (synchronously — no caller can observe a partial state).
+  // Guarantees outside a batch: mutation → version bump → persist →
+  // emit, in order, atomically (synchronously — no caller can observe
+  // a partial state).
+  // Guarantees inside a batch: mutation → version bump; persist + emit
+  // deferred until the outermost batch() returns.
   function _mutate(name, fn, payload) {
     if (!_trip) {
       throw new Error("[TripStore] cannot mutate (" + name + ") — no trip loaded");
@@ -157,6 +193,10 @@
     }
     _version++;
     _trip._version = _version;
+    if (_batchDepth > 0) {
+      _batchDirty = true;
+      return _trip;
+    }
     _persist();
     emit("tripChange", { mutator: name, payload: payload, version: _version });
     return _trip;
@@ -532,6 +572,9 @@
 
     // Publish
     publish: publish,
+
+    // Batch (multi-mutator transaction)
+    batch: batch,
 
     // Annotations
     setDestNote: setDestNote,
