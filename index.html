@@ -45206,7 +45206,14 @@ function updateMainMap(){
     // the user explicitly asks for these pins.
     (function _renderConsideredPins(){
       if (!_consideredMapVisible) return;
-      var src = Array.isArray(trip.mdcItems) ? trip.mdcItems : [];
+      // PD.318: read trip.placeActivities (canonical post-ARCH) instead
+      // of trip.mdcItems. The schema migration strips mdcItems on load
+      // (tripstore.js _migrateV0ToV1), so the old read returned an
+      // empty array — the "Considered on (N)" toggle correctly counted
+      // sights from placeActivities elsewhere, but this renderer
+      // bailed before drawing any pins. Same architectural cleanup
+      // PD.307b applied to _collectWhatsHere.
+      var src = Array.isArray(trip.placeActivities) ? trip.placeActivities : [];
       if (!src.length) return;
       function _normKey(name){
         if (!name) return "";
