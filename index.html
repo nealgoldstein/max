@@ -5612,7 +5612,7 @@ function _wispsArrayMigrated(trip) {
 // v360.2: collapse duplicate mdcItems by name. The LLM extraction
 // sometimes produces multiple condition items with the same name (e.g.
 // "Northern Lights viewing" once per viable location), and those all
-// get persisted into trip.mdcItems[]. The picker then renders one row
+// get persisted into trip.placeActivities[]. The picker then renders one row
 // per item, producing the visible duplicates the user is seeing.
 //
 // Merge rule: items with the same case-folded name collapse to one
@@ -5624,13 +5624,13 @@ function _wispsArrayMigrated(trip) {
 //
 // Idempotent — safe to run on every read.
 function _mdcItemsDedupe(trip) {
-  if (!trip || !Array.isArray(trip.mdcItems)) return false;
+  if (!trip || !Array.isArray(trip.placeActivities)) return false;
   var seen = {};
   var keep = [];
   var idMap = {};
   var removed = 0;
   var removedSample = [];
-  trip.mdcItems.forEach(function (m) {
+  trip.placeActivities.forEach(function (m) {
     if (!m || !m.name) { keep.push(m); return; }
     var key = String(m.name).trim().toLowerCase();
     if (!key) { keep.push(m); return; }
@@ -5666,7 +5666,7 @@ function _mdcItemsDedupe(trip) {
     keep.push(m);
   });
   if (removed > 0) {
-    trip.mdcItems = keep;
+    trip.placeActivities = keep;
     // Rewrite wisp.resultItemIds[] so traces point at kept items.
     _wispsArray(trip).forEach(function (w) {
       if (!w || !Array.isArray(w.resultItemIds)) return;
@@ -5963,7 +5963,7 @@ function _wispMarkProcessed(trip, wispIds, resultItemIds) {
 }
 // v360.2: delete a wisp (and optionally the mdcItems it produced).
 // When also=true, every place/route/condition Max generated from this
-// wisp is removed from trip.mdcItems[] in the same call — useful when
+// wisp is removed from trip.placeActivities[] in the same call — useful when
 // the wisp was a bad idea and so were its results. Default behavior
 // (also=false) keeps the produced items in case the user still wants
 // some of them; they live as ordinary mdcItems with no wisp reference.
@@ -5982,8 +5982,8 @@ function _wispDelete(trip, wispId, alsoDeleteItems) {
   if (alsoDeleteItems && Array.isArray(wisp.resultItemIds) && wisp.resultItemIds.length) {
     var idSet = {};
     wisp.resultItemIds.forEach(function (id) { idSet[id] = true; });
-    if (Array.isArray(trip.mdcItems)) {
-      trip.mdcItems = trip.mdcItems.filter(function (m) {
+    if (Array.isArray(trip.placeActivities)) {
+      trip.placeActivities = trip.placeActivities.filter(function (m) {
         if (m && idSet[m.id]) { removed++; return false; }
         return true;
       });
@@ -6001,10 +6001,10 @@ function _wispDelete(trip, wispId, alsoDeleteItems) {
 // Delete an mdcItem outright. Also scrubs the id from any wisp's
 // resultItemIds[] so the wisp's "produced N items" count stays honest.
 function _mdcItemDelete(trip, itemId) {
-  if (!trip || !itemId || !Array.isArray(trip.mdcItems)) return false;
-  var before = trip.mdcItems.length;
-  trip.mdcItems = trip.mdcItems.filter(function (m) { return !(m && m.id === itemId); });
-  if (trip.mdcItems.length === before) return false;
+  if (!trip || !itemId || !Array.isArray(trip.placeActivities)) return false;
+  var before = trip.placeActivities.length;
+  trip.placeActivities = trip.placeActivities.filter(function (m) { return !(m && m.id === itemId); });
+  if (trip.placeActivities.length === before) return false;
   _wispsArray(trip).forEach(function (w) {
     if (w && Array.isArray(w.resultItemIds)) {
       w.resultItemIds = w.resultItemIds.filter(function (rid) { return rid !== itemId; });
@@ -8994,8 +8994,8 @@ function _reopenPickerAny() {
     }
   } catch(_){}
 
-  if (trip && Array.isArray(trip.mdcItems) && trip.mdcItems.length && typeof reopenPickerForEdit === "function") {
-    try { console.log("[Max _reopenPickerAny] routing to reopenPickerForEdit (" + trip.mdcItems.length + " mdcItems)"); } catch(_){}
+  if (trip && Array.isArray(trip.placeActivities) && trip.placeActivities.length && typeof reopenPickerForEdit === "function") {
+    try { console.log("[Max _reopenPickerAny] routing to reopenPickerForEdit (" + trip.placeActivities.length + " mdcItems)"); } catch(_){}
     reopenPickerForEdit();
     return;
   }
@@ -9024,7 +9024,7 @@ if (typeof globalThis !== "undefined") globalThis._reopenPickerAny = _reopenPick
 // function runs them through Max: a focused LLM call that turns each
 // wisp into one or more must-do items (activity / route / condition)
 // matching the existing _mdcItems schema. Results merge into
-// trip.mdcItems; the wisps are marked processed; the picker re-opens
+// trip.placeActivities; the wisps are marked processed; the picker re-opens
 // with the new items visible.
 //
 // Architecturally this is the closure of audit Loop 3 (Structure ↔
@@ -9072,8 +9072,8 @@ async function evaluateWispsForDiscovery() {
   // as context so Max doesn't double-up on things already on the trip.
   var region = (trip.brief && trip.brief.region) || "";
   var intent = (trip.brief && (trip.brief.intent || trip.brief.aboutTrip)) || "";
-  var existing = Array.isArray(trip.mdcItems)
-    ? trip.mdcItems.filter(function (m) { return m && m.checked; }).map(function (m) { return m.name; })
+  var existing = Array.isArray(trip.placeActivities)
+    ? trip.placeActivities.filter(function (m) { return m && m.checked; }).map(function (m) { return m.name; })
     : [];
 
   var wispLines = wisps.map(function (w, i) {
@@ -9150,9 +9150,9 @@ async function evaluateWispsForDiscovery() {
     return;
   }
 
-  // Merge items into trip.mdcItems. Each gets a fresh id and is
+  // Merge items into trip.placeActivities. Each gets a fresh id and is
   // checked-by-default so it shows up as a kept item in the picker.
-  if (!Array.isArray(trip.mdcItems)) trip.mdcItems = [];
+  if (!Array.isArray(trip.placeActivities)) trip.placeActivities = [];
   var wispToResults = {};
   var addedIds = [];
   items.forEach(function (it, i) {
@@ -9192,7 +9192,7 @@ async function evaluateWispsForDiscovery() {
       if (it.conditionNote) mdcItem.conditionNote = it.conditionNote;
     }
     if (typeof it.durationHours === "number") mdcItem.durationHours = it.durationHours;
-    trip.mdcItems.push(mdcItem);
+    trip.placeActivities.push(mdcItem);
     addedIds.push(id);
     if (it.wispId) {
       if (!wispToResults[it.wispId]) wispToResults[it.wispId] = [];
@@ -9549,8 +9549,8 @@ function showWispHistoryModal() {
 
       // Produced items, if any.
       var resultIds = Array.isArray(w.resultItemIds) ? w.resultItemIds : [];
-      if (resultIds.length && Array.isArray(trip.mdcItems)) {
-        var items = trip.mdcItems.filter(function (m) { return m && resultIds.indexOf(m.id) >= 0; });
+      if (resultIds.length && Array.isArray(trip.placeActivities)) {
+        var items = trip.placeActivities.filter(function (m) { return m && resultIds.indexOf(m.id) >= 0; });
         if (items.length) {
           var itemsHdr = document.createElement("div");
           itemsHdr.style.cssText = "font-size:10.5px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.04em;margin:10px 0 5px;";
@@ -10358,7 +10358,7 @@ function enterApp(){
     }
   }
   // Restore _mdcItems from saved trip for route sequencing
-  if(trip && trip.mdcItems) _mdcItems = trip.mdcItems;
+  if(trip && trip.placeActivities) _mdcItems = trip.placeActivities;
   // PD.196 (architectural reset): all one-shot trip-load migrations
   // deleted. Going forward, trips are minted clean by Discovery →
   // Choreograph (PD.181 ensures the publish path produces consistent
@@ -10640,8 +10640,8 @@ function _phaseStatus() {
       if (src === 'candidate' && p.status === 'reject') return;
       considered++;
     }
-    if (Array.isArray(trip.mdcItems)) {
-      trip.mdcItems.forEach(function(it){
+    if (Array.isArray(trip.placeActivities)) {
+      trip.placeActivities.forEach(function(it){
         (it && it.requiredPlaces || []).forEach(function(p){ _accumulate(p, 'mdc'); });
       });
     }
@@ -10913,7 +10913,7 @@ async function expandMustDos() {
   // those additions. Result: unchecked activities that exist in
   // placeActivities aren't in _mdcItems, so they get lost on save
   // and disappear when the user returns to research. Merging here
-  // means trip.mdcItems carries the full menu (checked + unchecked)
+  // means trip.placeActivities carries the full menu (checked + unchecked)
   // so re-edit preserves "things you considered but didn't pick."
   if (Array.isArray(_tb.placeActivities) && _tb.placeActivities.length) {
     if (!Array.isArray(_mdcItems)) _mdcItems = [];
@@ -14356,7 +14356,7 @@ function showConsideredCandidatesModal(){
       // Open the picker so the user sees the change and can commit.
       // Prefer reopenPickerForEdit when mdcItems exist (newer trips);
       // fall back to reopenCandidateExplorer for legacy trips.
-      if (typeof reopenPickerForEdit === "function" && trip && Array.isArray(trip.mdcItems) && trip.mdcItems.length) {
+      if (typeof reopenPickerForEdit === "function" && trip && Array.isArray(trip.placeActivities) && trip.placeActivities.length) {
         reopenPickerForEdit();
       } else if (typeof reopenCandidateExplorer === "function") {
         reopenCandidateExplorer();
@@ -17728,7 +17728,7 @@ function _pd289ConsolidateStaysExtras() {
       + droppedSections.length + " duplicate section(s): " + droppedSections.join(", "));
     // PD.300: write-through. The picker keeps four parallel copies of
     // "the section list": _tb.placeActivities, _mdcItems,
-    // trip.placeActivities, trip.mdcItems. Without write-through, the
+    // trip.placeActivities, trip.placeActivities. Without write-through, the
     // fold's mutations live only in _tb.placeActivities, and the next
     // render that rehydrates from any of the other three resurrects
     // the dropped section. Propagate to all four and persist so the
@@ -17762,20 +17762,20 @@ function _pd289ConsolidateStaysExtras() {
           _mdcItems.push(keepBySection["Overnight stays to consider"]);
         }
       }
-      // Mirror to trip.mdcItems (the persistence-shape array). Same
+      // Mirror to trip.placeActivities (the persistence-shape array). Same
       // filter rule; the persist-time projection on save converts
-      // _mdcItems → trip.mdcItems anyway, so this is belt-and-
-      // suspenders for any reader that goes straight to trip.mdcItems
+      // _mdcItems → trip.placeActivities anyway, so this is belt-and-
+      // suspenders for any reader that goes straight to trip.placeActivities
       // before the next save fires.
-      if (typeof trip !== "undefined" && trip && Array.isArray(trip.mdcItems)) {
-        trip.mdcItems = trip.mdcItems.filter(function(m){
+      if (typeof trip !== "undefined" && trip && Array.isArray(trip.placeActivities)) {
+        trip.placeActivities = trip.placeActivities.filter(function(m){
           return m && m.section && keepBySection[m.section];
         });
-        var hasSynthInTrip = trip.mdcItems.some(function(m){
+        var hasSynthInTrip = trip.placeActivities.some(function(m){
           return m && m.section === "Overnight stays to consider";
         });
         if (!hasSynthInTrip && keepBySection["Overnight stays to consider"]) {
-          trip.mdcItems.push(keepBySection["Overnight stays to consider"]);
+          trip.placeActivities.push(keepBySection["Overnight stays to consider"]);
         }
       }
       // Persist so the next reload reads the cleaned state.
@@ -27774,7 +27774,7 @@ function _buildHeroMapPoints(){
   // Neal: "The larger trip map does not agree with the smaller." Same
   // dedup logic as updateMainMap's _renderConsideredPins.
   try {
-    if (Array.isArray(trip.mdcItems) && trip.mdcItems.length) {
+    if (Array.isArray(trip.placeActivities) && trip.placeActivities.length) {
       function _hmNormKey(name){
         if (!name) return "";
         return (typeof _normPlaceName === "function") ? _normPlaceName(name) : name.toLowerCase().trim();
@@ -27791,7 +27791,7 @@ function _buildHeroMapPoints(){
         });
       });
       var _hmConsidered = {};
-      trip.mdcItems.forEach(function(it){
+      trip.placeActivities.forEach(function(it){
         if (!it || !Array.isArray(it.requiredPlaces)) return;
         it.requiredPlaces.forEach(function(p){
           if (!p || !p.place) return;
@@ -30334,7 +30334,7 @@ function renderActivityPicker(){
 // nearest .tb-act-table-row / .tb-act-item by searching for any element
 // whose onclick attribute references the item's id.
 function _hydrateWispTraces() {
-  if (!trip || !Array.isArray(trip.mdcItems)) return;
+  if (!trip || !Array.isArray(trip.placeActivities)) return;
   // Build wispId → wisp map for fast lookup.
   var wispMap = {};
   var wisps = (typeof _wispsArray === "function") ? _wispsArray(trip) : [];
@@ -30346,7 +30346,7 @@ function _hydrateWispTraces() {
       .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
 
-  trip.mdcItems.forEach(function (m) {
+  trip.placeActivities.forEach(function (m) {
     if (!m || !m._fromWispId) return;
     var w = wispMap[m._fromWispId];
     if (!w) return; // wisp was deleted but item kept — no trace to show
@@ -34045,7 +34045,7 @@ function reopenCandidateExplorer(){
     }
   }
   // Rehydrate must-dos so reject-cascade and required-badges work
-  if (trip.mdcItems) _mdcItems = trip.mdcItems.slice();
+  if (trip.placeActivities) _mdcItems = trip.placeActivities.slice();
   _ceRejectedExpanded = true;
   showCandidateExplorer(_tb.candidates, true);
 }
@@ -34061,7 +34061,7 @@ function cancelEditCandidates(){
 // trip so the user can curate inside the same UI they used to create the
 // trip. This replaces the old "Edit destinations" path that mounted the
 // legacy candidate explorer with a different layout. State is rehydrated
-// from trip.mdcItems + trip.brief; the picker's button reads "Save changes
+// from trip.placeActivities + trip.brief; the picker's button reads "Save changes
 // →" instead of "Choreograph my trip →" and routes through saveActivityPickerEdits.
 function reopenPickerForEdit(){
   // v360.2: dedupe mdcItems before re-hydrating the picker. LLM extraction
@@ -34072,8 +34072,8 @@ function reopenPickerForEdit(){
   if (typeof _mdcItemsDedupe === "function") {
     try { _mdcItemsDedupe(trip); } catch (_) {}
   }
-  console.log("[Max] reopenPickerForEdit called. trip.mdcItems length:", (trip && trip.mdcItems) ? trip.mdcItems.length : "(none)");
-  if (!trip || !Array.isArray(trip.mdcItems) || !trip.mdcItems.length) {
+  console.log("[Max] reopenPickerForEdit called. trip.placeActivities length:", (trip && trip.placeActivities) ? trip.placeActivities.length : "(none)");
+  if (!trip || !Array.isArray(trip.placeActivities) || !trip.placeActivities.length) {
     // No mdcItems snapshot — fall back to the legacy explorer.
     console.log("[Max] reopenPickerForEdit: no mdcItems, falling back to reopenCandidateExplorer");
     if (typeof reopenCandidateExplorer === "function") {
@@ -34260,13 +34260,13 @@ function reopenPickerForEdit(){
       };
     }
   }
-  // Hydrate _tb.placeActivities from trip.mdcItems. Round DX: restore
+  // Hydrate _tb.placeActivities from trip.placeActivities. Round DX: restore
   // each place's _keep state from the saved record so previously-rejected
   // places show up unchecked in the picker (and can be re-added by the
   // user) instead of vanishing. Legacy data without an explicit _keep
   // flag defaults to true — that's what every place was before this
   // round, so old saved trips behave the same as before.
-  _tb.placeActivities = trip.mdcItems.map(function(m){
+  _tb.placeActivities = trip.placeActivities.map(function(m){
     return {
       id: m.id,
       name: m.name,
@@ -34594,7 +34594,7 @@ function reopenPickerForEdit(){
 
   // Mirror into _mdcItems too — downstream code reads from both depending
   // on the path. Keep them in sync.
-  _mdcItems = trip.mdcItems.slice();
+  _mdcItems = trip.placeActivities.slice();
 
   // v360.3 (#124 Turn 4B): extract committed day-trips and waysides from
   // trip.routes[] so the picker can pre-check them under each destination.
@@ -34703,14 +34703,14 @@ async function saveActivityPickerEdits(){
   // Round DX: preserve REJECTED places in the saved record (with _keep:false)
   // alongside kept ones, so the next edit pass can show them unchecked and
   // let the user re-add them. Previously, unchecking a place silently
-  // dropped it from trip.mdcItems and there was no way to bring it back
+  // dropped it from trip.placeActivities and there was no way to bring it back
   // without starting over. Routes still collapse to activity-type if too
   // few endpoints survive — that's a real type change, not a UI toggle.
   //
   // Round DX.1: also preserve activities where ALL places are unchecked.
   // The activity's `checked` flag reflects "any kept place"; when false,
   // expandMustDos / findAttachedEvents skip the activity (so it doesn't
-  // affect the trip), but it survives in trip.mdcItems so the next edit
+  // affect the trip), but it survives in trip.placeActivities so the next edit
   // pass shows it with its places ready to be re-checked.
   var items = (_tb.placeActivities||[]).map(function(i){
     var allPlaces = (i.requiredPlaces||[]).map(function(p){
@@ -35029,7 +35029,7 @@ async function applyCandidateChanges(){
       intent: c.intent || undefined
     };
   });
-  trip.mdcItems = (_mdcItems||[]).map(function(m){return {
+  trip.placeActivities = (_mdcItems||[]).map(function(m){return {
     id:m.id, name:m.name, type:m.type, checked:m.checked,
     requiredPlaces:m.requiredPlaces, endpoints:m.endpoints, viableLocations:m.viableLocations,
     direction:m.direction, durationHours:m.durationHours,
@@ -42781,7 +42781,7 @@ if (typeof TripStore !== "undefined" && typeof TripStore.on === "function") {
 // the user drops a destination on the trip view, the picker should
 // know about it (so re-opening shows it unchecked). Walks
 // trip.destinations and updates _keep flags on _tb.placeActivities;
-// also persists to trip.mdcItems so the re-edit rehydration path
+// also persists to trip.placeActivities so the re-edit rehydration path
 // picks up the changes.
 function _syncPickerToTrip(){
   if (typeof _tb === "undefined" || !_tb || !Array.isArray(_tb.placeActivities)) {
@@ -42811,11 +42811,11 @@ function _syncPickerToTrip(){
     // Activity is "checked" if any of its required places is kept.
     item.checked = anyKept;
   });
-  // Mirror to trip.mdcItems so a future re-edit rehydration picks up
-  // the synced state. trip.mdcItems is the persisted snapshot; _tb is
+  // Mirror to trip.placeActivities so a future re-edit rehydration picks up
+  // the synced state. trip.placeActivities is the persisted snapshot; _tb is
   // the in-memory working copy.
-  if (Array.isArray(trip.mdcItems)) {
-    trip.mdcItems.forEach(function(m){
+  if (Array.isArray(trip.placeActivities)) {
+    trip.placeActivities.forEach(function(m){
       if (!m || !Array.isArray(m.requiredPlaces)) return;
       var sourceItem = _tb.placeActivities.find(function(a){ return a && a.id === m.id; });
       if (!sourceItem) return;
@@ -45389,9 +45389,9 @@ function setLeftMode(mode){
   var _deBtn = g("mode-dest-btn"); if (_deBtn) _deBtn.className = "mode-btn" + (mode === "dest" ? " on" : "");
   if (mode === "picker") {
     // Open the picker overlay over the app shell. reopenPickerForEdit
-    // hydrates _tb from trip.mdcItems / trip.brief and renders. If the
+    // hydrates _tb from trip.placeActivities / trip.brief and renders. If the
     // user is leaving the picker for trip view and back again, the
-    // hydrate is cheap (re-reads trip.mdcItems) and avoids stale state
+    // hydrate is cheap (re-reads trip.placeActivities) and avoids stale state
     // from earlier picker sessions.
     if (typeof reopenPickerForEdit === "function") {
       reopenPickerForEdit();
@@ -47605,7 +47605,7 @@ function makeDayTrip(hubDest, srcDest, opts){
 //   - Undo path lives only as a toast warning for now (the
 //     ungroupDayTripByPlanItem reverse path is symmetric, but wiring
 //     a real undo is follow-on work).
-// Round NC.X: ensure trip.mdcItems carries a row for `placeName` so
+// Round NC.X: ensure trip.placeActivities carries a row for `placeName` so
 // when Discovery reopens it sees the place as a proper picker row
 // (not just a synthesized map marker). Idempotent — if any existing
 // mdcItem already references the place via its requiredPlaces, this
@@ -47627,7 +47627,7 @@ function makeDayTrip(hubDest, srcDest, opts){
 function _ensureMdcItemsHasPlace(placeName, opts){
   if (!trip || !placeName) return null;
   opts = opts || {};
-  if (!Array.isArray(trip.mdcItems)) trip.mdcItems = [];
+  if (!Array.isArray(trip.placeActivities)) trip.placeActivities = [];
   var role = (opts.role === "stay" || opts.role === "see"
               || opts.role === "daytrip" || opts.role === "onway")
               ? opts.role : "see";
@@ -47643,7 +47643,7 @@ function _ensureMdcItemsHasPlace(placeName, opts){
 
   // Update path: place already in some mdcItem's requiredPlaces.
   var updated = null;
-  trip.mdcItems.forEach(function(item){
+  trip.placeActivities.forEach(function(item){
     if (!item || !Array.isArray(item.requiredPlaces)) return;
     item.requiredPlaces.forEach(function(p){
       if (!p || !p.place) return;
@@ -47712,7 +47712,7 @@ function _ensureMdcItemsHasPlace(placeName, opts){
       overnight: (role === "stay")
     }]
   };
-  trip.mdcItems.push(item);
+  trip.placeActivities.push(item);
   if (typeof _tb !== "undefined" && _tb && Array.isArray(_tb.placeActivities)) {
     _tb.placeActivities.push(item);
   }
@@ -49336,7 +49336,7 @@ function _openTripStopPopover(ctx) {
   // already on a wayside, the row needs to render so they can move
   // it to a different route, even if the gate would otherwise fire.
   // PD.307b: read from trip.placeActivities (canonical post-ARCH)
-  // instead of trip.mdcItems. The schema migration strips mdcItems
+  // instead of trip.placeActivities. The schema migration strips mdcItems
   // on load (tripstore.js _migrateV0ToV1), so the old read was
   // returning 0 for every place — silently breaking the Wayside
   // gate. placeActivities has the same shape: items with
@@ -49398,7 +49398,7 @@ function _openTripStopPopover(ctx) {
   //   destination:
   //     - trip.placeActivities with requiredPlaces matching this place
   //       (canonical post-ARCH; the schema migration strips the
-  //        pre-rewrite trip.mdcItems on load)
+  //        pre-rewrite trip.placeActivities on load)
   //     - dest.suggestions[] (picker's later additions)
   //   wayside / dayTrip:
   //     - stop.notes (the LLM's "why this stop" written at generation)
@@ -49520,7 +49520,7 @@ function _openTripStopPopover(ctx) {
     //    the user discovered earlier and that the LLM happened to also
     //    wayside.
     //    PD.307b: read trip.placeActivities (canonical post-ARCH).
-    //    trip.mdcItems is stripped by the schema migration on load
+    //    trip.placeActivities is stripped by the schema migration on load
     //    (tripstore.js _migrateV0ToV1) — reading it was silently
     //    returning no matches.
     var acts = Array.isArray(trip.placeActivities) ? trip.placeActivities : [];

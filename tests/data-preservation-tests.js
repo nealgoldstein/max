@@ -379,7 +379,10 @@ test("legacy trip without id gets one backfilled (PD.74)", function () {
   assert.strictEqual(t.id, "legacy-001");
 });
 
-test("PD.321: legacy mdcItems is REPLACED by the placeActivities alias, not dropped", function () {
+test("PD.322: legacy mdcItems is dropped on migration (all readers migrated)", function () {
+  // PD.303 made placeActivities canonical. PD.322 migrated every
+  // trip.mdcItems read site in index.html, engine-picker.js, and
+  // trip-ui.js to placeActivities so the strip is safe.
   _resetStorage();
   var raw = JSON.stringify({
     trip: {
@@ -395,54 +398,16 @@ test("PD.321: legacy mdcItems is REPLACED by the placeActivities alias, not drop
   _storage["max-trip-legacy-002"] = raw;
   global.TripStore.unload();
   var t = global.TripStore.load("legacy-002");
-  // placeActivities preserved
   assert(Array.isArray(t.placeActivities));
   assert.strictEqual(t.placeActivities.length, 1);
-  // PD.321: mdcItems is now an ALIAS for placeActivities — same array
-  // reference. The legacy mdcItems content from the envelope is
-  // replaced (canonical store wins) but the field itself stays
-  // present so legacy readers don't crash.
-  assert(Array.isArray(t.mdcItems));
-  assert.strictEqual(t.mdcItems, t.placeActivities,
-    "PD.321: mdcItems must be the SAME array reference as placeActivities");
-  assert.strictEqual(t.mdcItems[0].name, "Section 1");
+  assert.strictEqual(t.mdcItems, undefined,
+    "PD.322: mdcItems stripped; canonical store is placeActivities");
 });
 
-test("PD.321: mint creates a trip with mdcItems aliased to placeActivities", function () {
-  _resetStorage();
-  global.TripStore.unload();
-  var t = global.TripStore.mint({ region: "Iceland" });
-  assert(Array.isArray(t.placeActivities));
-  assert.strictEqual(t.mdcItems, t.placeActivities,
-    "mint must alias mdcItems to placeActivities");
-});
-
-test("PD.321: setPlaceActivities re-aliases mdcItems to the new array", function () {
-  _resetStorage();
-  global.TripStore.unload();
-  var t = global.TripStore.mint({ region: "Iceland" });
-  var newItems = [{ id: "a" }, { id: "b" }];
-  global.TripStore.setPlaceActivities(newItems);
-  assert.strictEqual(t.placeActivities, newItems);
-  assert.strictEqual(t.mdcItems, newItems,
-    "mdcItems must follow placeActivities after setPlaceActivities");
-});
-
-test("PD.321: mutation on mdcItems is visible to placeActivities (shared reference)", function () {
-  _resetStorage();
-  global.TripStore.unload();
-  var t = global.TripStore.mint({ region: "Iceland" });
-  t.mdcItems.push({ id: "legacy-write" });
-  assert.strictEqual(t.placeActivities.length, 1,
-    "writing to mdcItems must be visible on placeActivities (shared array)");
-  assert.strictEqual(t.placeActivities[0].id, "legacy-write");
-});
-
-test("PD.321: a legacy v0 trip with mdcItems and NO placeActivities still loads", function () {
-  // Old envelope shape — pre-PD.303 trips might have only mdcItems.
-  // The migration must default placeActivities to [] BEFORE aliasing
-  // mdcItems = placeActivities, otherwise the alias drops the legacy
-  // content. Verify the migration handles this.
+test("PD.322: a legacy v0 trip with only mdcItems and NO placeActivities still loads", function () {
+  // Pre-PD.303 trip shape. Migration must default placeActivities
+  // to [] regardless of what mdcItems held. The legacy content is
+  // LOST (PD.319-6's backup snapshot is the recovery path).
   _resetStorage();
   var raw = JSON.stringify({
     trip: {
@@ -450,7 +415,6 @@ test("PD.321: a legacy v0 trip with mdcItems and NO placeActivities still loads"
       name: "Pre-PD.303 trip",
       destinations: [],
       mdcItems: [{ id: "old-m1", name: "Original section" }]
-      // no placeActivities field at all
     },
     _schemaVersion: 0,
     __saved__: 0
@@ -461,11 +425,7 @@ test("PD.321: a legacy v0 trip with mdcItems and NO placeActivities still loads"
   // Trip loaded without throwing — the load itself is the test.
   assert(t);
   assert(Array.isArray(t.placeActivities));
-  assert(Array.isArray(t.mdcItems));
-  assert.strictEqual(t.mdcItems, t.placeActivities, "alias holds");
-  // The pre-PD.303 mdcItems content is LOST (placeActivities is the
-  // canonical store; the migration trusts it). This is the same
-  // trade-off PD.319-6's backup snapshot preserves for recovery.
+  assert.strictEqual(t.mdcItems, undefined);
 });
 
 test("user-owned brief fields survive migration", function () {

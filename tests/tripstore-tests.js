@@ -179,20 +179,18 @@ test("v0→v1 backfills id from storage key", function () {
   assert.strictEqual(t.id, "trip-XYZ");
 });
 
-test("PD.321: v0→v1 ALIASES mdcItems to placeActivities (was: dropped)", function () {
-  // Original PD.303 intent stripped mdcItems on migration. PD.321
-  // restores it as an alias because 60+ readers in index.html still
-  // call trip.mdcItems.forEach / .filter / .length and every saved
-  // trip was breaking on load. Same array reference; mutations on
-  // either are visible to both.
+test("PD.322: v0→v1 drops legacy mdcItems (all readers migrated to placeActivities)", function () {
+  // PD.303 made placeActivities canonical; the migration strips
+  // mdcItems. PD.322 migrated all 67 trip.mdcItems read sites in
+  // the codebase to placeActivities, so the strip is safe.
   reset();
   _storage["max-trip-trip-1"] = JSON.stringify({
     trip: { id: "trip-1", mdcItems: [{ id: "x" }], placeActivities: [] }
   });
   var t = TripStore.load("trip-1");
-  assert.ok(Array.isArray(t.mdcItems), "mdcItems must be present (alias) for legacy reads");
-  assert.strictEqual(t.mdcItems, t.placeActivities,
-    "PD.321: mdcItems and placeActivities must share the SAME array reference");
+  assert.strictEqual(t.mdcItems, undefined,
+    "PD.322: mdcItems is stripped; canonical store is placeActivities");
+  assert.ok(Array.isArray(t.placeActivities), "placeActivities preserved");
 });
 
 test("v0→v1 fills all default fields", function () {
@@ -785,19 +783,17 @@ test("trip.id-undefined class: every mutator path leaves trip.id set", function 
   assert.strictEqual(TripStore.trip.id, t.id);
 });
 
-test("parallel-arrays class: mdcItems and placeActivities share ONE source of truth (PD.321)", function () {
+test("parallel-arrays class: only one source of truth (PD.322)", function () {
   // Old bug: _tb.placeActivities and trip.placeActivities and
-  // _mdcItems and trip.mdcItems could disagree.
-  // PD.321 correction: trip.mdcItems and trip.placeActivities share
-  // the SAME array reference. Legacy readers (60+ in index.html)
-  // see canonical data; mutations on either are visible to both.
+  // _mdcItems and trip.mdcItems could disagree. PD.303 made
+  // placeActivities canonical; PD.322 migrated every trip.mdcItems
+  // read site to placeActivities so there's no parallel field.
   reset();
   TripStore.mint({});
   TripStore.setPlaceActivities([{ id: "pa1" }]);
-  assert.strictEqual(TripStore.trip.mdcItems, TripStore.trip.placeActivities,
-    "mdcItems and placeActivities must share the same array reference (PD.321)");
+  assert.strictEqual(TripStore.trip.mdcItems, undefined,
+    "trip.mdcItems must not exist post-PD.322");
   assert.strictEqual(TripStore.trip.placeActivities.length, 1);
-  assert.strictEqual(TripStore.trip.mdcItems.length, 1);
 });
 
 test("schema-renames class: a rename ships as a migration, not a manual sweep", function () {
@@ -813,9 +809,7 @@ test("schema-renames class: a rename ships as a migration, not a manual sweep", 
     trip: { id: "trip-legacy", mdcItems: [{ id: "x" }] }
   });
   var t = TripStore.load("trip-legacy");
-  // PD.321: migration aliases mdcItems to placeActivities now
-  // (was: dropped). The interface still ran; that's the test.
-  assert.strictEqual(t.mdcItems, t.placeActivities);
+  assert.strictEqual(t.mdcItems, undefined);   // migration dropped it
   assert.strictEqual(t._schemaVersion, TripStore.SCHEMA_VERSION);
 });
 
@@ -1111,9 +1105,8 @@ test("schema migration runs on load (legacy envelope without id is healed)", fun
   TripStore.load("trip-legacy-X");
   // Migration backfilled the id from the storage key
   assert.strictEqual(TripStore.trip.id, "trip-legacy-X");
-  // PD.321: migration ALIASES mdcItems to placeActivities (was: dropped)
-  assert.ok(Array.isArray(TripStore.trip.mdcItems));
-  assert.strictEqual(TripStore.trip.mdcItems, TripStore.trip.placeActivities);
+  // PD.322: migration drops legacy mdcItems (all readers migrated)
+  assert.strictEqual(TripStore.trip.mdcItems, undefined);
   // Migration filled in default fields
   assert.ok(Array.isArray(TripStore.trip.placeActivities));
   assert.ok(TripStore.trip.brief);

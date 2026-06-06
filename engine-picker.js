@@ -2221,7 +2221,7 @@
       // destinations / legs / pendingActions / trackSpending fields.
       trip.name = MaxEnginePicker.isAutoName(trip.name) ? resolvedName : trip.name;
       trip.brief = newBrief;
-      trip.mdcItems = newMdcItems;
+      trip.placeActivities = newMdcItems;
       if (!Array.isArray(trip.pendingActions)) trip.pendingActions = [];
       if (!trip.legs) trip.legs = {};
       if (typeof trip.trackSpending !== "boolean") trip.trackSpending = false;

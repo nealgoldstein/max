@@ -4179,7 +4179,7 @@
             global._openTripDestRolePopover(destId);
           } else {
             if (global._tb) global._tb._focusCandidateName = destPlace;
-            if (typeof global.reopenPickerForEdit === "function" && trip && Array.isArray(trip.mdcItems) && trip.mdcItems.length) {
+            if (typeof global.reopenPickerForEdit === "function" && trip && Array.isArray(trip.placeActivities) && trip.placeActivities.length) {
               global.reopenPickerForEdit();
             } else if (typeof global.reopenCandidateExplorer === "function") {
               global.reopenCandidateExplorer();
@@ -7537,8 +7537,8 @@
         _src: src,
       });
     }
-    if (Array.isArray(trip.mdcItems) && trip.mdcItems.length) {
-      trip.mdcItems.forEach(function (it) {
+    if (Array.isArray(trip.placeActivities) && trip.placeActivities.length) {
+      trip.placeActivities.forEach(function (it) {
         (it && it.requiredPlaces || []).forEach(function (p) { _push(p, 'mdc'); });
       });
     }
@@ -9028,7 +9028,7 @@
         'Re-open Discovery with your current keep/reject decisions and notes.',
         function () {
           if (typeof global.reopenPickerForEdit === 'function' &&
-              trip && Array.isArray(trip.mdcItems) && trip.mdcItems.length) {
+              trip && Array.isArray(trip.placeActivities) && trip.placeActivities.length) {
             global.reopenPickerForEdit();
           } else if (typeof global.reopenCandidateExplorer === 'function') {
             global.reopenCandidateExplorer();
