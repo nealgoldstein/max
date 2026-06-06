@@ -175,6 +175,66 @@
     return result;
   }
 
+  // ── Single-flight primitive (PD.319-7) ─────────────────────────────
+  //
+  // Generalizes the PD.315 mutex pattern (originally local to
+  // generateActivitiesForPlace) so any async writer can opt in with
+  // one wrapper call. The bug class it closes:
+  //
+  //   1. async function A() { await llm(); _tb.X = result; }
+  //   2. Two callers fire A() in parallel.
+  //   3. Both await. Both then reassign _tb.X.
+  //   4. The second reassignment wipes whatever the first wrote
+  //      between its return and the second's reassignment.
+  //
+  // Single-flight guard: if a call with the given key is already
+  // in flight, return its promise instead of starting a second one.
+  // The second caller gets the FIRST call's result — semantically
+  // correct because both want the same answer.
+  //
+  //   await TripStore.singleFlight("generateActivities", function () {
+  //     return llm("...").then(function (r) { _tb.X = r; });
+  //   });
+  //
+  // Keys are arbitrary strings; same key = same flight. Different
+  // keys are independent. Failures (rejections) clear the in-flight
+  // entry so the next caller gets a fresh attempt.
+  var _inFlight = {};
+
+  function singleFlight(key, fn) {
+    if (!key || typeof key !== "string") {
+      throw new Error("[TripStore] singleFlight requires a string key");
+    }
+    if (typeof fn !== "function") {
+      throw new Error("[TripStore] singleFlight requires a function");
+    }
+    if (_inFlight[key]) return _inFlight[key];
+    var p;
+    try {
+      var ret = fn();
+      // Allow sync OR async fns. Wrap in Promise.resolve so we always
+      // return a promise.
+      p = Promise.resolve(ret);
+    } catch (syncErr) {
+      // fn threw synchronously — propagate without keeping it
+      // in-flight (a sync throw is not a race condition).
+      return Promise.reject(syncErr);
+    }
+    _inFlight[key] = p;
+    // Clear the in-flight entry whether the promise resolves or
+    // rejects, so a future caller can retry.
+    p.then(
+      function () { delete _inFlight[key]; },
+      function () { delete _inFlight[key]; }
+    );
+    return p;
+  }
+
+  // Debug helper — list currently in-flight keys.
+  function _singleFlightInFlight() {
+    return Object.keys(_inFlight);
+  }
+
   // Self-heal: legacy load paths can set global.trip + _currentTripId
   // without going through TripStore.mint or .load. When subsequent
   // code calls a TripStore mutator, _trip is null and the mutator
@@ -191,43 +251,140 @@
     }
   }
 
+  // PD.319-7: single-flight guard. If a mutator is mid-execution and
+  // a nested mutator fires (synchronously, via a subscriber that
+  // mistakenly mutates back), the second call would clobber the first.
+  // Detect that — log a warning, but allow the call (some legitimate
+  // patterns re-enter via batch()). Helps surface PD.315-class bugs
+  // for new writers without breaking existing chains.
+  var _mutatorDepth = 0;
+
+  // PD.319-5: mutation audit log. Every mutator appends a record to
+  // trip._auditLog. Used by support / debugging to answer "what
+  // mutator dropped my reservation?". Capped at 200 entries to
+  // bound storage cost; older entries roll off. Not user-visible.
+  var _AUDIT_CAP = 200;
+  function _appendAudit(name, payload) {
+    if (!_trip) return;
+    if (!Array.isArray(_trip._auditLog)) _trip._auditLog = [];
+    _trip._auditLog.push({
+      t: Date.now(),
+      v: _version,
+      m: name,
+      p: _trimPayload(payload),
+      d: _mutatorDepth
+    });
+    if (_trip._auditLog.length > _AUDIT_CAP) {
+      _trip._auditLog.splice(0, _trip._auditLog.length - _AUDIT_CAP);
+    }
+  }
+  // Audit payloads are kept small — large arrays are summarized as
+  // {len:N}, large strings truncated at 80 chars. Prevents the audit
+  // log from ballooning trip storage on every mutation.
+  function _trimPayload(p) {
+    if (p == null) return p;
+    if (typeof p === "string") return p.length > 80 ? p.slice(0, 80) + "…" : p;
+    if (Array.isArray(p)) return { len: p.length };
+    if (typeof p !== "object") return p;
+    var out = {};
+    Object.keys(p).forEach(function (k) {
+      var v = p[k];
+      if (Array.isArray(v)) out[k] = { len: v.length };
+      else if (typeof v === "string") out[k] = v.length > 80 ? v.slice(0, 80) + "…" : v;
+      else if (typeof v === "object" && v !== null) out[k] = "[obj]";
+      else out[k] = v;
+    });
+    return out;
+  }
+
   // The core mutation primitive. Every named mutator below calls this.
-  // Guarantees outside a batch: mutation → version bump → persist →
-  // emit, in order, atomically (synchronously — no caller can observe
-  // a partial state).
-  // Guarantees inside a batch: mutation → version bump; persist + emit
-  // deferred until the outermost batch() returns.
+  // Guarantees outside a batch: mutation → version bump → audit →
+  // persist → emit, in order, atomically (synchronously — no caller
+  // can observe a partial state).
+  // Guarantees inside a batch: mutation → version bump → audit;
+  // persist + emit deferred until the outermost batch() returns.
   function _mutate(name, fn, payload) {
     _adoptLegacyTripIfNeeded();
     if (!_trip) {
       throw new Error("[TripStore] cannot mutate (" + name + ") — no trip loaded");
     }
+    if (_mutatorDepth > 0) {
+      // Surface the re-entry — typically a subscriber to tripChange
+      // is mutating, which is at minimum a code-smell.
+      console.warn("[TripStore] re-entrant mutator '" + name + "' (depth " +
+        _mutatorDepth + ") — possible subscriber-induced cycle. See PD.315 for the bug class.");
+    }
+    _mutatorDepth++;
     try {
-      fn(_trip);
-    } catch (e) {
-      console.warn("[TripStore] mutator '" + name + "' threw:", e && e.message);
-      throw e;
-    }
-    _version++;
-    _trip._version = _version;
-    if (_batchDepth > 0) {
-      _batchDirty = true;
+      try {
+        fn(_trip);
+      } catch (e) {
+        console.warn("[TripStore] mutator '" + name + "' threw:", e && e.message);
+        throw e;
+      }
+      _version++;
+      _trip._version = _version;
+      // PD.319-5: audit BEFORE persist so the audit entry rides with
+      // the persisted trip. Cheap (Date.now + push).
+      _appendAudit(name, payload);
+      if (_batchDepth > 0) {
+        _batchDirty = true;
+        return _trip;
+      }
+      _persist();
+      emit("tripChange", { mutator: name, payload: payload, version: _version });
       return _trip;
+    } finally {
+      _mutatorDepth--;
     }
-    _persist();
-    emit("tripChange", { mutator: name, payload: payload, version: _version });
-    return _trip;
   }
 
   // ── Migrations ─────────────────────────────────────────────────────
   // Runs on every load. Each migrator is a pure function (trip) → void
   // that mutates trip in place. Order matters: v0→v1, v1→v2, etc.
+  //
+  // PD.319-6: when a migration runs, the pre-migration trip is
+  // snapshotted to trip._preMigrationBackup. The backup carries:
+  //   - fromVersion: the schema version BEFORE this migration
+  //   - toVersion: SCHEMA_VERSION (what we migrated to)
+  //   - snapshot: a JSON clone of the pre-migration trip
+  //   - migratedAt: timestamp
+  // The backup survives one further version bump (cleared at v+2),
+  // so a buggy migration is recoverable within the same session and
+  // the next one. After two versions, we delete the backup to bound
+  // storage cost. To recover: read trip._preMigrationBackup.snapshot
+  // and TripStore.replace() it.
   function _migrate(trip, storageKey) {
     if (!trip || typeof trip !== "object") return trip;
     var v = trip._schemaVersion || 0;
+    if (v === SCHEMA_VERSION) return trip; // no migration needed
+    // PD.319-6: snapshot before mutating. Only snapshot if we're
+    // actually going to migrate (v < SCHEMA_VERSION). Don't snapshot
+    // an already-migrated trip just because it loaded.
+    if (v < SCHEMA_VERSION) {
+      try {
+        trip._preMigrationBackup = {
+          fromVersion: v,
+          toVersion: SCHEMA_VERSION,
+          migratedAt: Date.now(),
+          snapshot: JSON.parse(JSON.stringify(trip))
+        };
+      } catch (snapErr) {
+        // Backup is best-effort. If structured clone fails (huge trip,
+        // cyclic refs), warn and continue without it.
+        console.warn("[TripStore] could not snapshot pre-migration backup:",
+          snapErr && snapErr.message);
+      }
+    }
     if (v < 1) _migrateV0ToV1(trip, storageKey);
     // Future: if (v < 2) _migrateV1ToV2(trip);
     trip._schemaVersion = SCHEMA_VERSION;
+    // Roll off backups that are more than ONE version behind.
+    if (trip._preMigrationBackup
+        && typeof trip._preMigrationBackup.fromVersion === "number"
+        && SCHEMA_VERSION - trip._preMigrationBackup.fromVersion >= 2) {
+      delete trip._preMigrationBackup;
+    }
     return trip;
   }
 
@@ -609,6 +766,11 @@
 
     // Batch (multi-mutator transaction)
     batch: batch,
+
+    // Single-flight guard (PD.319-7) — wraps any async writer with a
+    // mutex keyed by name. Generalizes PD.315's local mutex.
+    singleFlight: singleFlight,
+    _singleFlightInFlight: _singleFlightInFlight,
 
     // Escape hatch for legacy code paths
     notifyChange: notifyChange,

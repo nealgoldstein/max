@@ -12,3 +12,5 @@ cd "$(dirname "$0")/.."
 node tests/engine-tests.js
 node tests/tripstore-tests.js
 node tests/engine-build-tests.js
+node tests/data-preservation-tests.js
+node tests/engine-publish-tests.js

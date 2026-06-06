@@ -400,6 +400,27 @@
      inline scripts because legacy entry-point wrappers route through
      MaxBuild.findCandidates. See architecture-rewrite.md Phase 7. -->
 <script src="engine-build.js?v=DEV"></script>
+<!-- PD.319-3: max-data.js — the schema accessor layer. No renderer
+     reads raw trip.X directly after this module loads. PD.307b and
+     PD.318 were one-line forensics on field renames; the accessor
+     layer makes that bug class impossible by construction.
+     Read-only — writes still go through TripStore mutators. See
+     data-inventory.md for the field catalog. -->
+<script src="max-data.js?v=DEV"></script>
+<!-- PD.319-4: max-merge.js — preserves user state when destinations
+     are regenerated. The Rebuild flow (saveActivityPickerEdits →
+     MaxBuild rebuild mode) regenerates trip.destinations from kept
+     candidates. Reservations, bookings, per-dest notes, dayItems,
+     suggestion flags (_considered, _rejected) must merge forward.
+     See data-inventory.md for the full per-destination user-field
+     catalog; the MaxMerge module enforces every entry. -->
+<script src="max-merge.js?v=DEV"></script>
+<!-- PD.320: engine-publish.js — pure helpers carved out from
+     publishTrip in engine-picker.js. publishTrip stays the
+     orchestrator; this module is where its named, testable phases
+     live. As we move more logic here, publishTrip shrinks. See
+     PD.320 in the task list for the full refactor plan. -->
+<script src="engine-publish.js?v=DEV"></script>
 <!-- Round HB: Phase 1 of the engine/UI split. engine-trip.js owns
      the trip engine's PURE helpers (haversine, pair-key, fastest-
      practical, hour parse/format, place-name canonicalization).
@@ -45206,68 +45227,15 @@ function updateMainMap(){
     // the user explicitly asks for these pins.
     (function _renderConsideredPins(){
       if (!_consideredMapVisible) return;
-      // PD.318 (revised): the considered-pin source is
-      // trip.destinations[].suggestions[] filtered by _considered:true.
-      // That's what _paintConsideredBtn at line ~43124 reads to compute
-      // the "(N)" count — so the count and the renderer agree on
-      // identity. Earlier this renderer read trip.mdcItems (legacy,
-      // ARCH-stripped) which silently returned 0. The first PD.318
-      // attempt routed to trip.placeActivities — same shape but
-      // wrong semantic source. The canonical "considered" surface is
-      // PD.269's sources-model output: a sight is "considered" iff
-      // its suggestion carries _considered:true on the parent
-      // destination.
-      if (!Array.isArray(trip.destinations) || !trip.destinations.length) return;
-      function _normKey(name){
-        if (!name) return "";
-        return (typeof _normPlaceName === "function") ? _normPlaceName(name) : name.toLowerCase().trim();
-      }
-      // Build set of place names ALREADY in the trip — destinations,
-      // day-trip stops, and wayside stops all count.
-      var includedKeys = {};
-      trip.destinations.forEach(function(d){ if (d && d.place) includedKeys[_normKey(d.place)] = true; });
-      (trip.routes || []).forEach(function(r){
-        if (!r || !Array.isArray(r.planItems)) return;
-        r.planItems.forEach(function(pi){
-          if (!pi || pi.type !== "stop" || !pi.placeId) return;
-          var p = trip.places && trip.places[pi.placeId];
-          if (p && p.name) includedKeys[_normKey(p.name)] = true;
-          if (pi.placeId) includedKeys[_normKey(pi.placeId)] = true;
-        });
-      });
-      // Collect unique considered places from each destination's
-      // suggestions[]. Filter to _considered:true so the renderer's
-      // population matches _paintConsideredBtn's count by identity.
-      // PD.294: stash the parent destination's name as section context
-      // so the add-to-trip popover can show "Considered near {dest}".
-      var considered = {};
-      trip.destinations.forEach(function(d){
-        if (!d || !Array.isArray(d.suggestions)) return;
-        d.suggestions.forEach(function(s){
-          if (!s || !s._considered) return;
-          var name = s.name || s.label || s.place;
-          if (!name) return;
-          var k = _normKey(name);
-          if (!k || includedKeys[k] || considered[k]) return;
-          var coords = null;
-          if (typeof s.lat === "number" && typeof s.lng === "number"
-              && isFinite(s.lat) && isFinite(s.lng)) {
-            coords = [s.lat, s.lng];
-          } else if (typeof getCityCenter === "function") {
-            var c = getCityCenter(name);
-            if (Array.isArray(c) && isFinite(c[0])) coords = c;
-          }
-          if (!coords) return;
-          considered[k] = {
-            place: name,
-            coords: coords,
-            description: (s.notes || s.description || s.why || "").toString().trim(),
-            section: "Considered near " + (d.place || "this destination")
-          };
-        });
-      });
-      Object.keys(considered).forEach(function(k){
-        var c = considered[k];
+      // PD.319-3: route through MaxData.getConsideredSights — the
+      // schema accessor layer. Renderer no longer reads any raw
+      // trip.X field; PD.307b + PD.318 bug class is closed by
+      // construction. If the underlying canonical home changes
+      // again, only max-data.js gets edited.
+      var considered = (typeof MaxData !== "undefined" && MaxData.getConsideredSights)
+        ? MaxData.getConsideredSights(trip)
+        : [];
+      considered.forEach(function(c){
         // NC.7: route the "considered, not committed" pin through
         // MaxMapPin so the trip-overview's gray pins match Discovery's
         // gray pins — same shape, same dashed border, same initials.

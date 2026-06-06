@@ -153,6 +153,28 @@
     // auto-fire codepaths (which would race with the orchestrator).
     _building = true;
 
+    // PD.319-4: snapshot pre-rebuild user state. Rebuild mode runs
+    // the primary phase against the existing trip — publishTrip then
+    // regenerates trip.destinations from candidates. Reservations,
+    // bookings, day-items, suggestion flags (_considered, _rejected)
+    // attached to surviving destinations MUST merge forward. Capture
+    // here so we can hand it to MaxMerge at the end of the build.
+    var _rebuildSnapshot = null;
+    if (mode === "rebuild") {
+      try {
+        if (typeof global.TripStore !== "undefined"
+            && global.TripStore.isLoaded
+            && global.TripStore.isLoaded()) {
+          // Deep clone — the snapshot can't share references with the
+          // live trip or downstream mutations would corrupt it.
+          _rebuildSnapshot = JSON.parse(JSON.stringify(global.TripStore.trip));
+        }
+      } catch (snapErr) {
+        console.warn("[MaxBuild] could not snapshot pre-rebuild trip for merge:",
+          snapErr && snapErr.message);
+      }
+    }
+
     try {
       // Phase 1: normalize input → _tb so legacy phases keep reading.
       _normalize(input);
@@ -188,6 +210,28 @@
       // Phase 5: enhance (always, best-effort).
       var enhanceResult = await _runEnhancePhase();
       emit("build:enhance-done", { added: enhanceResult.added });
+
+      // Phase 5b (rebuild only): merge user state from the snapshot
+      // back into the regenerated trip. Reservations, bookings, day-
+      // items, considered/rejected flags, etc. would otherwise be
+      // dropped by the destination regeneration. PD.319-4 owns this.
+      if (mode === "rebuild" && _rebuildSnapshot
+          && typeof global.MaxMerge !== "undefined"
+          && typeof global.MaxMerge.mergeUserStateIntoRegenerated === "function"
+          && typeof global.TripStore !== "undefined"
+          && global.TripStore.isLoaded
+          && global.TripStore.isLoaded()) {
+        try {
+          var liveTrip = global.TripStore.trip;
+          global.MaxMerge.mergeUserStateIntoRegenerated(_rebuildSnapshot, liveTrip);
+          var preserved = global.MaxMerge.describePreservation(_rebuildSnapshot, liveTrip);
+          console.log("[MaxBuild] rebuild user-state merge — preserved:", preserved);
+          emit("build:merge-done", { preserved: preserved });
+        } catch (mergeErr) {
+          console.warn("[MaxBuild] rebuild user-state merge failed (best-effort, continuing):",
+            mergeErr && mergeErr.message);
+        }
+      }
 
       // Phase 6: handoff. The legacy primary phase already either
       // showed the picker (showCandidateExplorer / renderActivity-
