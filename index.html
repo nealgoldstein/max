@@ -45206,15 +45206,18 @@ function updateMainMap(){
     // the user explicitly asks for these pins.
     (function _renderConsideredPins(){
       if (!_consideredMapVisible) return;
-      // PD.318: read trip.placeActivities (canonical post-ARCH) instead
-      // of trip.mdcItems. The schema migration strips mdcItems on load
-      // (tripstore.js _migrateV0ToV1), so the old read returned an
-      // empty array — the "Considered on (N)" toggle correctly counted
-      // sights from placeActivities elsewhere, but this renderer
-      // bailed before drawing any pins. Same architectural cleanup
-      // PD.307b applied to _collectWhatsHere.
-      var src = Array.isArray(trip.placeActivities) ? trip.placeActivities : [];
-      if (!src.length) return;
+      // PD.318 (revised): the considered-pin source is
+      // trip.destinations[].suggestions[] filtered by _considered:true.
+      // That's what _paintConsideredBtn at line ~43124 reads to compute
+      // the "(N)" count — so the count and the renderer agree on
+      // identity. Earlier this renderer read trip.mdcItems (legacy,
+      // ARCH-stripped) which silently returned 0. The first PD.318
+      // attempt routed to trip.placeActivities — same shape but
+      // wrong semantic source. The canonical "considered" surface is
+      // PD.269's sources-model output: a sight is "considered" iff
+      // its suggestion carries _considered:true on the parent
+      // destination.
+      if (!Array.isArray(trip.destinations) || !trip.destinations.length) return;
       function _normKey(name){
         if (!name) return "";
         return (typeof _normPlaceName === "function") ? _normPlaceName(name) : name.toLowerCase().trim();
@@ -45232,32 +45235,34 @@ function updateMainMap(){
           if (pi.placeId) includedKeys[_normKey(pi.placeId)] = true;
         });
       });
-      // Collect unique considered places.
-      // PD.294: also stash the source activity's description and
-      // section so the add-to-trip popover can show context — users
-      // pick gray pins from the map without seeing the row that
-      // explains why Max suggested it.
+      // Collect unique considered places from each destination's
+      // suggestions[]. Filter to _considered:true so the renderer's
+      // population matches _paintConsideredBtn's count by identity.
+      // PD.294: stash the parent destination's name as section context
+      // so the add-to-trip popover can show "Considered near {dest}".
       var considered = {};
-      src.forEach(function(it){
-        if (!it || !Array.isArray(it.requiredPlaces)) return;
-        it.requiredPlaces.forEach(function(p){
-          if (!p || !p.place) return;
-          var k = _normKey(p.place);
+      trip.destinations.forEach(function(d){
+        if (!d || !Array.isArray(d.suggestions)) return;
+        d.suggestions.forEach(function(s){
+          if (!s || !s._considered) return;
+          var name = s.name || s.label || s.place;
+          if (!name) return;
+          var k = _normKey(name);
           if (!k || includedKeys[k] || considered[k]) return;
           var coords = null;
-          if (typeof p.lat === "number" && typeof p.lng === "number"
-              && isFinite(p.lat) && isFinite(p.lng)) {
-            coords = [p.lat, p.lng];
+          if (typeof s.lat === "number" && typeof s.lng === "number"
+              && isFinite(s.lat) && isFinite(s.lng)) {
+            coords = [s.lat, s.lng];
           } else if (typeof getCityCenter === "function") {
-            var c = getCityCenter(p.place);
+            var c = getCityCenter(name);
             if (Array.isArray(c) && isFinite(c[0])) coords = c;
           }
           if (!coords) return;
           considered[k] = {
-            place: p.place,
+            place: name,
             coords: coords,
-            description: (it.description || "").toString().trim(),
-            section: (it.section || "").toString().trim()
+            description: (s.notes || s.description || s.why || "").toString().trim(),
+            section: "Considered near " + (d.place || "this destination")
           };
         });
       });
