@@ -179,13 +179,20 @@ test("v0→v1 backfills id from storage key", function () {
   assert.strictEqual(t.id, "trip-XYZ");
 });
 
-test("v0→v1 drops legacy mdcItems field", function () {
+test("PD.321: v0→v1 ALIASES mdcItems to placeActivities (was: dropped)", function () {
+  // Original PD.303 intent stripped mdcItems on migration. PD.321
+  // restores it as an alias because 60+ readers in index.html still
+  // call trip.mdcItems.forEach / .filter / .length and every saved
+  // trip was breaking on load. Same array reference; mutations on
+  // either are visible to both.
   reset();
   _storage["max-trip-trip-1"] = JSON.stringify({
     trip: { id: "trip-1", mdcItems: [{ id: "x" }], placeActivities: [] }
   });
   var t = TripStore.load("trip-1");
-  assert.strictEqual(t.mdcItems, undefined);
+  assert.ok(Array.isArray(t.mdcItems), "mdcItems must be present (alias) for legacy reads");
+  assert.strictEqual(t.mdcItems, t.placeActivities,
+    "PD.321: mdcItems and placeActivities must share the SAME array reference");
 });
 
 test("v0→v1 fills all default fields", function () {
@@ -778,17 +785,19 @@ test("trip.id-undefined class: every mutator path leaves trip.id set", function 
   assert.strictEqual(TripStore.trip.id, t.id);
 });
 
-test("parallel-arrays class: only one source of truth", function () {
+test("parallel-arrays class: mdcItems and placeActivities share ONE source of truth (PD.321)", function () {
   // Old bug: _tb.placeActivities and trip.placeActivities and
-  // _mdcItems and trip.mdcItems could disagree. New: only
-  // trip.placeActivities exists. There is no parallel array.
+  // _mdcItems and trip.mdcItems could disagree.
+  // PD.321 correction: trip.mdcItems and trip.placeActivities share
+  // the SAME array reference. Legacy readers (60+ in index.html)
+  // see canonical data; mutations on either are visible to both.
   reset();
   TripStore.mint({});
   TripStore.setPlaceActivities([{ id: "pa1" }]);
-  // Verify there's no mdcItems-shaped field
-  assert.strictEqual(TripStore.trip.mdcItems, undefined);
-  // setPlaceActivities mutates the canonical field
+  assert.strictEqual(TripStore.trip.mdcItems, TripStore.trip.placeActivities,
+    "mdcItems and placeActivities must share the same array reference (PD.321)");
   assert.strictEqual(TripStore.trip.placeActivities.length, 1);
+  assert.strictEqual(TripStore.trip.mdcItems.length, 1);
 });
 
 test("schema-renames class: a rename ships as a migration, not a manual sweep", function () {
@@ -804,7 +813,9 @@ test("schema-renames class: a rename ships as a migration, not a manual sweep", 
     trip: { id: "trip-legacy", mdcItems: [{ id: "x" }] }
   });
   var t = TripStore.load("trip-legacy");
-  assert.strictEqual(t.mdcItems, undefined);   // migration dropped it
+  // PD.321: migration aliases mdcItems to placeActivities now
+  // (was: dropped). The interface still ran; that's the test.
+  assert.strictEqual(t.mdcItems, t.placeActivities);
   assert.strictEqual(t._schemaVersion, TripStore.SCHEMA_VERSION);
 });
 
@@ -1100,8 +1111,9 @@ test("schema migration runs on load (legacy envelope without id is healed)", fun
   TripStore.load("trip-legacy-X");
   // Migration backfilled the id from the storage key
   assert.strictEqual(TripStore.trip.id, "trip-legacy-X");
-  // Migration dropped the legacy mdcItems field
-  assert.strictEqual(TripStore.trip.mdcItems, undefined);
+  // PD.321: migration ALIASES mdcItems to placeActivities (was: dropped)
+  assert.ok(Array.isArray(TripStore.trip.mdcItems));
+  assert.strictEqual(TripStore.trip.mdcItems, TripStore.trip.placeActivities);
   // Migration filled in default fields
   assert.ok(Array.isArray(TripStore.trip.placeActivities));
   assert.ok(TripStore.trip.brief);

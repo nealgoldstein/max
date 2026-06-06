@@ -418,10 +418,25 @@
     if (!trip.notes || typeof trip.notes !== "object") trip.notes = { text: "", links: [] };
     if (!trip.legs || typeof trip.legs !== "object") trip.legs = {};
     if (typeof trip.trackSpending !== "boolean") trip.trackSpending = false;
-    // 3. Drop old field shapes. Pre-rewrite trip.mdcItems was a
-    //    duplicate of placeActivities. The bridge will project either
-    //    into the other; the canonical store is placeActivities.
-    if (trip.mdcItems !== undefined) delete trip.mdcItems;
+    // 3. Alias mdcItems → placeActivities (PD.321).
+    //
+    // Original intent (PD.303): mdcItems was a duplicate of
+    // placeActivities; the canonical store is placeActivities;
+    // strip mdcItems on migration. The strip broke 60+ readers
+    // across index.html that still call trip.mdcItems.forEach /
+    // .filter / .length — every saved trip from before this
+    // refactor became unloadable because the first reader threw
+    // "Cannot read properties of undefined."
+    //
+    // The PD.303 invariant ("trip.placeActivities and _tb.placeActivities
+    // share the same array reference") is preserved here by making
+    // mdcItems point at the SAME array as placeActivities. Mutations
+    // on either are visible to both; legacy renderers keep working;
+    // new code reads from placeActivities. A future Phase 7
+    // cleanup pass can grep-and-replace the legacy reads, at which
+    // point this alias becomes purely optional. Until then it's
+    // load-bearing.
+    trip.mdcItems = trip.placeActivities;
   }
 
   // ── Lifecycle mutators ─────────────────────────────────────────────
@@ -430,6 +445,7 @@
   // sentence flow, file import. Returns the new trip object.
   function mint(initialBrief) {
     var id = "trip-" + Date.now();
+    var _placeActivities = [];
     var t = {
       id: id,
       _schemaVersion: SCHEMA_VERSION,
@@ -438,7 +454,13 @@
       name: "",
       _lastScreen: null,
       destinations: [],
-      placeActivities: [],
+      placeActivities: _placeActivities,
+      // PD.321: mdcItems aliased to the SAME array reference as
+      // placeActivities. Legacy readers (60+ in index.html) call
+      // trip.mdcItems directly; the alias keeps them working without
+      // forcing every read site through an accessor. PD.303 invariant
+      // (shared array reference) holds by construction.
+      mdcItems: _placeActivities,
       candidates: [],
       routes: [],
       places: {},
@@ -606,6 +628,10 @@
     }
     return _mutate("setPlaceActivities", function (t) {
       t.placeActivities = items;
+      // PD.321: keep mdcItems pointing at the new array. Legacy
+      // readers expect trip.mdcItems to track current state. Sharing
+      // the reference (no .slice) preserves the PD.303 invariant.
+      t.mdcItems = items;
     }, { count: items.length });
   }
 
