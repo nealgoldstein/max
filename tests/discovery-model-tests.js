@@ -88,6 +88,16 @@ test("identity: a distinct place inside a destination is NOT merged", function (
   ]);
   assert.strictEqual(m.all().length, 2, "two distinct places — no over-merge");
 });
+test("identity (PD.401P): two UNRELATED names at one point do NOT merge", function () {
+  // A church and the statue in front of it: same point, different names,
+  // no name relation. They must stay distinct — merging would hide one.
+  // Coordinates only confirm a name relation; they never merge on their own.
+  var m = model([
+    { place: "Hallgrimskirkja", coords: { lat: 64.1417, lng: -21.9266 }, origin: "user", role: "sight", decision: "unchecked" },
+    { place: "Leif Erikson Statue", coords: { lat: 64.1417, lng: -21.9266 }, origin: "max", role: "sight", decision: "unchecked" }
+  ]);
+  assert.strictEqual(m.all().length, 2, "distinct names at one point stay distinct — never hide a place");
+});
 test("identity: a true variant at the same coords merges to ONE entity", function () {
   var m = model([
     { place: "Þingvellir National Park", coords: { lat: 64.25, lng: -21.13 }, origin: "max", role: "sight", themeFit: "See natural wonders", decision: "unchecked" },

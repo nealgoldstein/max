@@ -79,14 +79,23 @@
     return (dLat * dLat + dLng * dLng) <= (km * km);
   }
 
-  // Are two places the SAME place? Exact/token identity on name OR same
-  // coordinates; containment ("X" vs "X Y") only when coords agree.
+  // Are two places the SAME place? PD.401P: identity is NAME-DRIVEN.
+  // Coordinates only ever CONFIRM a name relation (containment) — they
+  // never merge two UNRELATED names. The old "same coordinates → same
+  // place" branch is gone: it made identity unstable (a place's identity
+  // flipped as async coords loaded) AND it false-merged genuinely distinct
+  // places that happen to sit close together (a church and the statue in
+  // front of it), permanently hiding one. Never merge on a guess; never
+  // hide a place.
+  //   • exact name (alias-aware resolve) — same.
+  //   • token-overlap name (PlaceKey.same) — same.
+  //   • word-prefix containment ("Þingvellir" ⊂ "Þingvellir National
+  //     Park") — same, but ONLY when coordinates also agree (the name
+  //     relation is real, the proximity confirms it).
   function sameEntity(a, b) {
     var ka = _norm(a.place), kb = _norm(b.place);
     if (ka && kb && ka === kb) return true;
     if (PK && typeof PK.same === "function" && PK.same(a.place, b.place)) return true;
-    var co = (a.coords && b.coords) ? _coordsClose(a.coords, b.coords, 0.3) : false;
-    if (co) return true;
     if (PK && typeof PK.contains === "function" && PK.contains(a.place, b.place)) {
       return (a.coords && b.coords) ? _coordsClose(a.coords, b.coords, 0.6) : false;
     }

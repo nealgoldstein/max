@@ -554,6 +554,17 @@ check("Rule 26e: route-umbrella detection is folded into the model (PD.401e)",
 // `place.toLowerCase()`. Identity is established once; readers group by
 // it. (The Leaflet marker subsystem's internal keying is a documented
 // holdout — non-divergent, and coupled to inline-generated scripts.)
+check("Rule 31j: identity is name-driven — no pure-coordinate merge (PD.401P)",
+  (function () {
+    var dm = fs.readFileSync(path.join(ROOT, "discovery-model.js"), "utf8");
+    var fn = fnBody(dm, /function sameEntity\s*\(/);
+    if (fn === null) return false;
+    // sameEntity must NOT merge on coordinates ALONE (the 0.3km branch is
+    // gone); coords only confirm a name relation (the 0.6km containment).
+    return fn.indexOf("_coordsClose(a.coords, b.coords, 0.3)") === -1
+      && fn.indexOf("PK.contains") !== -1;
+  })(),
+  "identity reverted to merging unrelated names by coordinate — instability + hidden places return");
 check("Rule 31h: a name-merge LEARNS the alias (one stable identity, PD.401N)",
   // When two different names merge by a NAME relation, the write door
   // learns the alias once (PlaceKey.learn) so identity becomes stable

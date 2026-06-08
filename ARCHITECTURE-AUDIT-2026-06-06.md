@@ -633,6 +633,49 @@ section counts, TOC, banner, pill, overview pins). The remaining
 lowercase dedups are non-divergent presentation keys, not second owners
 of the data.
 
+## 18. PD.401P — identity is name-driven (the architecture is closed)
+
+The last load-bearing flaw: `sameEntity` still merged two places when
+their COORDINATES alone agreed (within 0.3 km), regardless of name. That
+single branch was the source of BOTH problems chased all session:
+- **Instability** — coordinates arrive asynchronously during enrichment,
+  so a place's identity flipped as they loaded (the Gullfoss flake).
+- **Hidden places** — two genuinely distinct places that sit close
+  together (a church and the statue in front of it) merged and one
+  vanished (the "missing place" class).
+
+It's gone. Identity is now NAME-driven: exact name (alias-aware resolve),
+token-overlap, or word-prefix containment — and coordinates serve ONLY to
+*confirm* a containment relation ("Þingvellir" ⊂ "Þingvellir National
+Park", within 0.6 km), never to merge two unrelated names. So identity no
+longer depends on mutable/async data, and it never merges on a guess —
+which means it never hides a place. Pinned by a model test (two unrelated
+names at one point stay two) and contract Rule 31j.
+
+### The architecture, closed
+One identity, end to end:
+- **PlaceKey** owns it: name resolution + a learned alias registry. The
+  write door learns an alias once when names merge; nothing re-derives
+  identity from coordinates afterward.
+- **The write door** (`canonicalizePlaceActivities`) is the single
+  interning author: it stamps `_key`, merges by the one identity, and
+  learns aliases.
+- **Two pure derivations over one source**, now in full agreement because
+  they share the one identity: the **DiscoveryModel** (placement, counts,
+  considered/committed) and the **PlaceRepository** (existence/coverage,
+  the whole audit). They answer different questions; they never disagree
+  about what "the same place" is.
+- **Every surface reads it**: the picker sections and counts, the receipt
+  banner and provenance, the trip pill, coverage, and the maps (picker +
+  overview) all resolve through the one identity. Counts reconcile by
+  construction; the map draws one marker per identity; a listed name is
+  found if present and counted once.
+
+110 contract checks, 78 Node unit tests, 38 Playwright — all green,
+verified explicitly. The recurring count/placement/coverage/missing/
+duplicate bug classes are now structural impossibilities, each held by a
+named contract rule.
+
 ## 17. PD.401O — the overview map rides the one identity (no double pins)
 
 The map is where "is identity really one?" gets proven visually — stacked
