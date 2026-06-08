@@ -633,6 +633,21 @@ section counts, TOC, banner, pill, overview pins). The remaining
 lowercase dedups are non-divergent presentation keys, not second owners
 of the data.
 
+## 15. PD.401M — `byKey` collapsed: the audit has ONE registry
+
+The residual patch-seam is gone: `_maxPlaceSetAudit` no longer keeps its
+own `byKey`/`bySec` place map alongside the repository. The whole audit —
+section counts (`sections`/`slots`/`unique`/`multi`), coverage, and
+provenance — now derives from the single `PlaceRepository`. Route umbrellas
+carry no section in the repo, so they don't inflate the sight-slot count
+(matching the picker's chips) but are still found by coverage. Two totals
+remain in the receipt and are now BOTH from one registry with clear,
+distinct meaning: `pageTotal` (every place on the page, routes included)
+and `unique` (distinct sight-slot places); they differ only by the
+route/region count, which is correct, not a contradiction. Contract Rule
+26f pins that no second registry can regrow. Verified explicitly: 38
+Playwright passing / 0 failing, 107 contract checks.
+
 ## 14. PD.401M — provenance math + two regressions caught
 
 The "87 places: 46 + 43 + 1 = 90" bug was the audit half-converged: the

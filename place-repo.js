@@ -144,10 +144,14 @@
       else if (it.type === "condition") kind = "condition";
       else if (isStaySection(sec)) kind = "stay";
       else if (/regions?\b/i.test(sec)) kind = "region";
+      // Route umbrellas are NOT sight-section slots — record the place
+      // (so coverage finds it) but not the section, so section counts stay
+      // sight-only (matching the picker's section chips).
+      var secForCount = (kind === "route") ? undefined : sec;
       (it.requiredPlaces || []).forEach(function (p) {
         if (!p || !p.place) return;
         repo.add({ place: p.place, _key: p._key, lat: p.lat, lng: p.lng,
-                   section: sec, kind: kind, _keep: p._keep !== false, _origin: originOf(p), src: p });
+                   section: secForCount, kind: kind, _keep: p._keep !== false, _origin: originOf(p), src: p });
       });
     });
     return repo;

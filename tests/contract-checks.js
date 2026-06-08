@@ -309,9 +309,12 @@ check("Rule 14b: origin is tagged at the creation sites",
 check("Rule 14c: origin survives the reopen clone",
   indexSrc.indexOf('_origin: (p._origin === "user"') !== -1,
   "reopen drops _origin — provenance is lost on every edit cycle");
-check("Rule 14d: the audit derives provenance from the stored field",
-  indexSrc.indexOf("window._placeOrigin(p)") !== -1
-    && /_og === "max-hub"/.test(indexSrc),
+check("Rule 14d: the audit derives provenance from the stored field (via the repo)",
+  // PD.401M: the audit's provenance now comes from the place repository,
+  // whose `originOf` reads window._placeOrigin (the stored _origin field).
+  // Hubs are origin "max-hub".
+  indexSrc.indexOf("originOf: function(p){ return window._placeOrigin") !== -1
+    && indexSrc.indexOf('r.origin === "max-hub"') !== -1,
   "the audit re-infers provenance instead of reading it");
 
 // ── Rule 15: headliner marks, never checks (PD.383) ────────────────
@@ -510,6 +513,18 @@ check("Rule 26c: coverage is a single lookup against the place repository (PD.40
       return /function _related/.test(pr) && pr.indexOf("PK.relatedTo") !== -1;
     })(),
   "the coverage check no longer goes through the place repository / lost its relatedTo fuzz");
+check("Rule 26f: the audit has ONE registry — no byKey second owner (PD.401M)",
+  (function () {
+    var fn = fnBody(indexSrc, /function _maxPlaceSetAudit\s*\(/);
+    if (fn === null) return false;
+    // The whole audit (sections, coverage, provenance) derives from the
+    // repo; the second `byKey`/`bySec` registry is gone, so the receipt
+    // can't show two different totals from two registries.
+    return fn.indexOf("var byKey") === -1 && fn.indexOf("var bySec") === -1
+      && fn.indexOf("_repo.all()") !== -1
+      && fn.indexOf("out.pageTotal") !== -1;
+  })(),
+  "the audit re-grew a second place registry (byKey) — two totals can diverge again");
 check("Rule 26d: the model ingestion excludes dests/hubs (no catchall padding)",
   (function () {
     // Formerly enforced by _ensureCatchallsUnchecked (deleted PD.401d).

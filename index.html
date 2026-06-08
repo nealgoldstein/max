@@ -39011,56 +39011,15 @@ function _maxPlaceSetAudit(quiet) {
               missing: [], maxChecked: 0, maxUnchecked: 0 };
   try {
     if (typeof _tb === "undefined" || !_tb || !Array.isArray(_tb.placeActivities)) return out;
-    var key = (typeof PlaceKey !== "undefined" && PlaceKey.resolve) ? PlaceKey.resolve
-      : function(s){ return String(s||"").toLowerCase().trim(); };
-    var bySec = {};                 // section → Set of keys
-    var byKey = {};                 // key → { display, sections:[], anyKeep }
-    var _destKeys = {};             // PD.386: trip destination keys
+    // PD.401M: ONE registry for the WHOLE audit. The place repository is
+    // built once; section counts, coverage, and provenance all derive from
+    // it. There is no second `byKey` map — so the receipt cannot show two
+    // different "totals" from two registries.
+    var _audTrip = null;
     try {
-      var _audTrip = (typeof TripStore !== "undefined" && TripStore.isLoaded && TripStore.isLoaded())
+      _audTrip = (typeof TripStore !== "undefined" && TripStore.isLoaded && TripStore.isLoaded())
         ? TripStore.trip : ((typeof trip !== "undefined") ? trip : null);
-      ((_audTrip && _audTrip.destinations) || []).forEach(function(d){
-        if (d && d.place) _destKeys[key(d.place)] = true;
-      });
     } catch(_){}
-    (_tb.placeActivities || []).forEach(function(it){
-      if (!it || it.type === "route") return;
-      var sec = it.section || "(no section)";
-      (it.requiredPlaces || []).forEach(function(p){
-        if (!p || !p.place) return;
-        var k = key(p.place);
-        if (!k) return;
-        bySec[sec] = bySec[sec] || {};
-        bySec[sec][k] = true;
-        var rec = byKey[k] = byKey[k] || { display: p.place, sections: [], anyKeep: false };
-        if (rec.sections.indexOf(sec) === -1) rec.sections.push(sec);
-        if (p._keep !== false) rec.anyKeep = true;
-        // PD.382: provenance comes from the stored field (legacy
-        // fallback inside _placeOrigin). A "max-hub" is the synthesized
-        // base; "user" is the traveler's; "max" is a suggestion.
-        var _og = window._placeOrigin ? window._placeOrigin(p) : (p._autoCreated ? "max-hub" : "max");
-        if (_og === "max-hub") rec.auto = true;
-        if (!rec.origin) rec.origin = _og;
-      });
-    });
-    Object.keys(bySec).forEach(function(sec){
-      var n = Object.keys(bySec[sec]).length;
-      out.sections.push({ section: sec, places: n });
-      out.slots += n;
-    });
-    out.unique = Object.keys(byKey).length;
-    Object.keys(byKey).forEach(function(k){
-      if (byKey[k].sections.length > 1) {
-        out.multi.push({ place: byKey[k].display, sections: byKey[k].sections.slice() });
-      }
-    });
-    // PD.401M: COVERAGE is a single lookup against the PLACE REPOSITORY —
-    // the ONE store of every place (sight, route umbrella, stay, region,
-    // destination) interned under the canonical identity. "Is this listed
-    // place present anywhere?" is repo.find(), not a bespoke scan over a
-    // second place-set. (The PD.401L coverageDisp scan it replaces was a
-    // patch; this is the repository it pointed to building.)
-    var listedNames = (_tb._userListedNames) || {};
     var _repo = (typeof PlaceRepository !== "undefined")
       ? PlaceRepository.fromTrip(_tb.placeActivities, (_audTrip && _audTrip.destinations) || [], {
           isStaySection: function(s){ return !!window._isStaySection && window._isStaySection(s); },
@@ -39068,6 +39027,24 @@ function _maxPlaceSetAudit(quiet) {
           originOf: function(p){ return window._placeOrigin ? window._placeOrigin(p) : (p._autoCreated ? "max-hub" : "max"); }
         })
       : null;
+    var _allRecs = _repo ? _repo.all() : [];
+    // Section counts — each record contributes its (sight) sections. Route
+    // umbrellas carry no section (set in fromTrip), so they don't inflate
+    // the sight-slot count; this matches the picker's section chips.
+    var _secCounts = {};
+    _allRecs.forEach(function(r){
+      r.sections.forEach(function(sec){ _secCounts[sec] = (_secCounts[sec] || 0) + 1; });
+    });
+    Object.keys(_secCounts).forEach(function(sec){
+      out.sections.push({ section: sec, places: _secCounts[sec] });
+      out.slots += _secCounts[sec];
+    });
+    out.unique = _allRecs.filter(function(r){ return r.sections.length; }).length;
+    _allRecs.forEach(function(r){
+      if (r.sections.length > 1) out.multi.push({ place: r.place, sections: r.sections.slice() });
+    });
+    // Coverage — a single lookup against the same registry.
+    var listedNames = (_tb._userListedNames) || {};
     Object.keys(listedNames).forEach(function(lk){
       var disp = (_tb._userListedDisplay && _tb._userListedDisplay[lk]) || lk;
       var hit = _repo ? (_repo.find(lk) || (disp !== lk ? _repo.find(disp) : null)) : null;
