@@ -495,3 +495,39 @@ concern. The picker's placement is the model, the counts are the model,
 and the only thing left that "decides" anything about a sight's home —
 route-umbrella-ness — is a pure, unit-tested function inside it. Contract
 Rule 26e is repointed to pin the fold (the pre-pass cannot return).
+
+## 11. Operational hardening (PD.401f–g)
+
+Three weaknesses were named in a candid re-evaluation: the monolith, a
+history of persistence races, and an environment-dependent test failure.
+Two are now addressed.
+
+### PD.401f — Leaflet vendored (no third-party CDN)
+The map library was loaded from cdnjs/unpkg at runtime — a supply-chain
+and uptime dependency, and the reason one Playwright test failed whenever
+the network was blocked. Leaflet 1.9.4 is now vendored under
+`vendor/leaflet/` (js, css, marker images) and every CDN reference
+repointed to it. The full suite is green for the first time (35/35
+Playwright, no environment-dependent failure), and `deploy.sh` passes its
+gate without `--skip-tests`. Contract Rule 28 keeps a CDN reference from
+returning.
+
+### PD.401g — continuing the strangler-fig (shrinking the monolith)
+The Discovery placement adapter (`_discoveryOpts`,
+`_discoveryConsideredCounts`, `_applyDiscoveryModelToSights`) was
+extracted verbatim from index.html into `discovery-adapter.js` — a
+cohesive ~157-line unit with a clear seam to the pure model. This is the
+chosen approach: incremental extraction behind the existing script-tag
+pattern, no build step, full suite green after each move. index.html is
+~62.2k inline-script lines; 21 modules now hold ~27.8k. The contract
+checks that grepped the inline code were repointed to a `placementSrc`
+that spans "wherever the adapter lives," so the rules don't care which
+file holds the code — only that the invariant holds.
+
+### Persistence (the third item) — status
+Not a missing-protection problem: revision tracking (server-owned
+monotonic `rev`), real 409-conflict handling with a keep-mine/take-theirs
+path, and GC guards (protect the URL trip, never reap server truth, age
+floor) all exist. The open work is to *pin those invariants with tests*
+so a future edit can't silently undo them — a contained next step, not a
+rebuild.

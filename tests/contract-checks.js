@@ -118,6 +118,13 @@ check("Rule 4c: LLM output MERGES around constructed items (never replaces)",
 // One dedupe owner; enforced at the render chokepoint every path
 // crosses. Re-running any pass can never grow the Discovery set.
 var maxDataSrc = fs.readFileSync(path.join(ROOT, "max-data.js"), "utf8");
+// PD.401g: the Discovery placement adapter was extracted out of index.html
+// into discovery-adapter.js. Checks that used to grep the inline code now
+// read it here. `placementSrc` is "wherever the adapter lives" so the
+// rules don't care which file holds it.
+var adapterSrc = fs.existsSync(path.join(ROOT, "discovery-adapter.js"))
+  ? fs.readFileSync(path.join(ROOT, "discovery-adapter.js"), "utf8") : "";
+var placementSrc = indexSrc + "\n" + adapterSrc;
 check("Rule 5a: MaxData.canonicalizePlaceActivities exists",
   /function canonicalizePlaceActivities\s*\(/.test(maxDataSrc));
 var keepsPass = fnBody(indexSrc, /function _reconcileUserListedKeeps\s*\(/);
@@ -451,7 +458,7 @@ check("Rule 25b: the DiscoveryModel owns final placement at the chokepoint (PD.4
     // decision — not the residue of a mutation pass.
     var fn = fnBody(indexSrc, /function _reconcileUserListedKeeps\s*\(/);
     return fn !== null && fn.indexOf("_applyDiscoveryModelToSights()") !== -1
-      && indexSrc.indexOf("function _applyDiscoveryModelToSights") !== -1;
+      && placementSrc.indexOf("function _applyDiscoveryModelToSights") !== -1;
   })(),
   "the model isn't the final placement authority on every render");
 check("Rule 25c: the chip shows the section's actual rows (no count hack)",
@@ -489,9 +496,25 @@ check("Rule 26e: route-umbrella detection is folded into the model (PD.401e)",
     return indexSrc.indexOf("function _routeUmbrellasToScenicRoutes") === -1
       && /function isRouteUmbrella\(/.test(dm)
       && dm.indexOf("SCENIC") !== -1
-      && indexSrc.indexOf("S.SCENIC") !== -1;
+      && placementSrc.indexOf("S.SCENIC") !== -1;
   })(),
   "Golden/Diamond Circle fall back to From-your-list / the pre-pass came back");
+
+// ── Rule 28: no third-party CDN for Leaflet (PD.401f) ──────────────
+// Leaflet is vendored locally (vendor/leaflet/). A CDN <script>/<link>
+// is a runtime supply-chain + uptime dependency AND makes the map tests
+// non-deterministic (they fail when the network is blocked). This rule
+// keeps both the top-of-file load and the dynamically-built map HTML on
+// the vendored copy.
+check("Rule 28a: Leaflet is vendored, not loaded from a CDN",
+  indexSrc.indexOf("cdnjs.cloudflare.com/ajax/libs/leaflet") === -1
+    && indexSrc.indexOf("unpkg.com/leaflet") === -1
+    && indexSrc.indexOf("vendor/leaflet/leaflet.js") !== -1,
+  "a Leaflet CDN reference returned — vendor it under vendor/leaflet/ instead");
+check("Rule 28b: the vendored Leaflet files exist",
+  fs.existsSync(path.join(ROOT, "vendor/leaflet/leaflet.js"))
+    && fs.existsSync(path.join(ROOT, "vendor/leaflet/leaflet.css")),
+  "vendor/leaflet/ is missing its files");
 
 // ── Rule 27: ONE considered derivation (PD.401c) ───────────────────
 // The whole "two owners" bug class — banner 63 vs chips 56, discovery
@@ -512,11 +535,11 @@ check("Rule 27b: MaxData.consideredPlaceKeys DELEGATES to the model",
     && maxDataSrc.indexOf("model.consideredKeyedSet()") !== -1,
   "the trip pill/audit/count forked their own considered derivation again");
 check("Rule 27c: the render adapter uses the SAME ingestion",
-  indexSrc.indexOf("MaxDiscovery.DiscoveryModel.fromPlaceActivities") !== -1,
+  placementSrc.indexOf("MaxDiscovery.DiscoveryModel.fromPlaceActivities") !== -1,
   "the picker placement re-implemented its own ingestion");
 check("Rule 27d: the receipt banner reads the model count, not a forked loop",
   indexSrc.indexOf("_discoveryConsideredCounts()") !== -1
-    && indexSrc.indexOf("function _discoveryConsideredCounts") !== -1,
+    && placementSrc.indexOf("function _discoveryConsideredCounts") !== -1,
   "the banner re-acquired its own count derivation (63-vs-56 returns)");
 
 // ── GC safety ──────────────────────────────────────────────────────
