@@ -47838,11 +47838,25 @@ function updateMainMap(){
     // overview as green teardrops, always — they are decisions made.
     // Derived from the SAME single source (placeActivities) via
     // MaxData.getCommittedSights.
+    // PD.401O: the overview map draws ONE marker per IDENTITY. Destinations,
+    // committed sights, and considered sights share a single seen-set keyed
+    // by the one identity (window._pmKey — alias-aware, so "Þingvellir" and
+    // "Þingvellir National Park" are one), precedence destination >
+    // committed > considered. A coordinate/alias duplicate can no longer
+    // paint two overlapping pins.
+    var _pinSeen = {};
+    try {
+      ((typeof MaxData !== "undefined" && MaxData.getDestinations) ? MaxData.getDestinations(trip) : (trip.destinations || []))
+        .forEach(function(d){ if (d && d.place) _pinSeen[window._pmKey(d.place)] = true; });
+    } catch(_){}
     (function _renderCommittedSightPins(){
       var committed = (typeof MaxData !== "undefined" && MaxData.getCommittedSights)
         ? MaxData.getCommittedSights(trip) : [];
       committed.forEach(function(c){
         try {
+          var _ck = window._pmKey(c.place);
+          if (_pinSeen[_ck]) return;            // already a pin for this identity
+          _pinSeen[_ck] = true;
           var _style = MaxMapPin.style("see", {});
           var _label = _pmEsc ? _pmEsc((c.place || "").substring(0, 2))
                               : (c.place || "").substring(0, 2);
@@ -47868,6 +47882,11 @@ function updateMainMap(){
         ? MaxData.getConsideredSights(trip)
         : [];
       considered.forEach(function(c){
+        // PD.401O: one marker per identity — skip if a destination or a
+        // committed sight already drew a pin for this place.
+        var _ck2 = window._pmKey(c.place);
+        if (_pinSeen[_ck2]) return;
+        _pinSeen[_ck2] = true;
         // NC.7: route the "considered, not committed" pin through
         // MaxMapPin so the trip-overview's gray pins match Discovery's
         // gray pins — same shape, same dashed border, same initials.

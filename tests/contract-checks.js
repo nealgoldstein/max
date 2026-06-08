@@ -592,6 +592,14 @@ check("Rule 31f: the popup map keys via one helper (pk) and map hub-matching nor
   indexSrc.indexOf("function pk(x){var o=window.opener;") !== -1
     && indexSrc.indexOf("hubKey = window._pmKey(hubKey)") !== -1,
   "the popup map or hub matcher reverted to bare place.toLowerCase()");
+check("Rule 31i: the overview map draws one marker per identity (PD.401O)",
+  // Destinations, committed, and considered pins share a single seen-set
+  // keyed by window._pmKey (alias-aware), so a coordinate/alias duplicate
+  // can't paint two overlapping markers.
+  indexSrc.indexOf("var _pinSeen = {}") !== -1
+    && indexSrc.indexOf("if (_pinSeen[_ck]) return;") !== -1
+    && indexSrc.indexOf("if (_pinSeen[_ck2]) return;") !== -1,
+  "the overview map can paint two pins for one place again");
 check("Rule 31d: the picker-map markers are keyed by the one identity (PD.401k)",
   // The marker dictionary's allPlaces build and the primary marker lookup
   // both key via _pmKey; the fuzzy fallback is retained intentionally for

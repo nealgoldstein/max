@@ -633,6 +633,19 @@ section counts, TOC, banner, pill, overview pins). The remaining
 lowercase dedups are non-divergent presentation keys, not second owners
 of the data.
 
+## 17. PD.401O — the overview map rides the one identity (no double pins)
+
+The map is where "is identity really one?" gets proven visually — stacked
+pins = one place drawn twice. The overview map drew destinations, committed
+sights, and considered sights as three independent layers with no shared
+dedup, so a place that resolves to one entity (a coordinate or alias
+duplicate) could paint two overlapping markers. Fixed: the three layers
+now share ONE seen-set keyed by `window._pmKey` (the alias-aware identity),
+precedence destination > committed > considered. One marker per identity.
+With PD.401N (learned aliases), "Þingvellir" and "Þingvellir National Park"
+resolve to one key, so they collapse to a single pin here too. Contract
+Rule 31i pins it.
+
 ## 16. PD.401N — ONE stable identity (name + learned aliases)
 
 The deepest defect this audit surfaced: there were really TWO identities
