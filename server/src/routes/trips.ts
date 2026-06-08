@@ -167,6 +167,9 @@ tripsApi.get('/', async (c) => {
     .select({
       id: schema.trips.id,
       name: schema.trips.name,
+      // PD.334: rev is the sync arbiter — the client's pullAll
+      // compares server rev vs its recorded rev instead of clocks.
+      rev: schema.trips.rev,
       updatedAt: schema.trips.updatedAt,
       createdAt: schema.trips.createdAt,
     })
@@ -225,6 +228,7 @@ tripsApi.post('/', async (c) => {
       name,
       body,
       uiState: uiState ?? {},
+      rev: 1, // PD.334: first revision
       updatedAt: ts,
       createdAt: ts,
     })
@@ -243,8 +247,14 @@ const updateSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   body: z.record(z.unknown()),
   uiState: z.record(z.unknown()).optional(),
-  updatedAt: z.number().int(), // client's local timestamp (ms)
-  force: z.boolean().optional(), // client overrides server-newer guard
+  updatedAt: z.number().int(), // client's local timestamp (ms) — display + legacy guard
+  // PD.334: the revision this edit was BASED on. The server bumps
+  // rev on every write; if the row's rev moved since the client
+  // last saw it, someone else wrote in between — a real conflict,
+  // no clocks involved. Optional for pre-rev clients (they fall
+  // back to the legacy updatedAt guard).
+  baseRev: z.number().int().optional(),
+  force: z.boolean().optional(), // client overrides the conflict guard
 });
 
 tripsApi.put('/:id', async (c) => {
@@ -254,7 +264,7 @@ tripsApi.put('/:id', async (c) => {
   if (!parsed.success) {
     return c.json({ error: 'Invalid body', issues: parsed.error.issues }, 400);
   }
-  const { name, body, uiState, updatedAt, force } = parsed.data;
+  const { name, body, uiState, updatedAt, baseRev, force } = parsed.data;
 
   const existing = await db
     .select()
@@ -263,11 +273,18 @@ tripsApi.put('/:id', async (c) => {
     .get();
   if (!existing) return c.json({ error: 'Not found' }, 404);
 
-  // Conflict guard. The server's row is newer than the client says.
-  if (!force && existing.updatedAt.getTime() > updatedAt) {
+  // Conflict guard — PD.334 revision check when the client sends
+  // baseRev (rev-aware client), legacy clock comparison otherwise.
+  const existingRev = (existing as { rev?: number }).rev ?? 0;
+  const hasRealConflict = (typeof baseRev === 'number')
+    ? existingRev !== baseRev
+    : existing.updatedAt.getTime() > updatedAt;
+  if (!force && hasRealConflict) {
     return c.json(
       {
         error: 'Conflict — server has newer data',
+        serverRev: existingRev,
+        clientBaseRev: baseRev ?? null,
         serverUpdatedAt: existing.updatedAt.getTime(),
         clientUpdatedAt: updatedAt,
         // The full server row so the client can present a chooser
@@ -333,6 +350,10 @@ tripsApi.put('/:id', async (c) => {
       // Most full-trip writes don't touch UI state — those use
       // PATCH /:id/ui-state instead.
       uiState: uiState ?? existing.uiState ?? {},
+      // PD.334: server owns the revision — bump on every write.
+      // The response row carries the new rev; the client records it
+      // as the base for its next edit.
+      rev: existingRev + 1,
       updatedAt: new Date(updatedAt),
     })
     .where(eq(schema.trips.id, id))

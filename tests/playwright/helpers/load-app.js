@@ -21,7 +21,15 @@ async function _resetStorage(page) {
     // Clear everything EXCEPT the API key — needed for record-mode
     // tests that hit the real LLM. Tests that should run without an
     // API key (engine-only assertions) shouldn't trip on a stale key.
+    //
+    // PD.331: clear ONCE per tab session, not on every navigation.
+    // Init scripts re-run on page.reload(); unguarded, the clear
+    // wiped the trip the app had just saved, so reload-persistence
+    // scenarios (hard refresh in Discovery) couldn't be tested —
+    // the app booted into an empty home screen instead of restoring.
     try {
+      if (sessionStorage.getItem('_max-test-cleared')) return;
+      sessionStorage.setItem('_max-test-cleared', '1');
       const keep = localStorage.getItem('max-api-key');
       localStorage.clear();
       if (keep) localStorage.setItem('max-api-key', keep);

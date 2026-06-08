@@ -45,6 +45,10 @@
   var _building = false;
 
   function isBuilding() { return _building; }
+  var _phase = null;
+  var _buildMode = null;
+  function phase() { return _building ? _phase : null; }
+  function mode() { return _building ? _buildMode : null; }
 
   // ── Event bus ──────────────────────────────────────────────────────
   //
@@ -66,6 +70,10 @@
   }
 
   function emit(event, payload) {
+    // PD.363: track the current phase so UI surfaces (the build
+    // banner) can re-derive their copy from STATE on any screen
+    // change, instead of replaying stale event history.
+    if (event && event.indexOf("build:") === 0) _phase = event;
     var arr = _listeners[event];
     if (!arr || !arr.length) return;
     // Copy so a listener that unsubscribes mid-loop doesn't shift the
@@ -152,6 +160,7 @@
     // surfaces check `MaxBuild.isBuilding()` to skip their own
     // auto-fire codepaths (which would race with the orchestrator).
     _building = true;
+    _buildMode = mode; // PD.394: surfaced via .mode() for banner copy
 
     // PD.319-4: snapshot pre-rebuild user state. Rebuild mode runs
     // the primary phase against the existing trip — publishTrip then
@@ -207,9 +216,19 @@
       }
       emit("build:reconcile-done");
 
-      // Phase 5: enhance (always, best-effort).
-      var enhanceResult = await _runEnhancePhase();
-      emit("build:enhance-done", { added: enhanceResult.added });
+      // Phase 5: enhance (best-effort) — FRESH BUILDS ONLY (PD.345).
+      // Rebuilds are the user EDITING an existing Discovery set; an
+      // unconditional enhance added another batch of suggestions on
+      // every Discovery→edit→rebuild round-trip, ratcheting the
+      // unchecked-sights count up each cycle (observed 50 → 187).
+      // "✦ More like this" is the explicit way to ask for more on an
+      // existing set.
+      if (mode !== "rebuild") {
+        var enhanceResult = await _runEnhancePhase();
+        emit("build:enhance-done", { added: enhanceResult.added });
+      } else {
+        emit("build:enhance-done", { added: 0, skipped: "rebuild" });
+      }
 
       // Phase 5b (rebuild only): merge user state from the snapshot
       // back into the regenerated trip. Reservations, bookings, day-
@@ -385,6 +404,8 @@
     findCandidates: findCandidates,
     rerunEnhance:   rerunEnhance,
     isBuilding:     isBuilding,
+    phase:          phase,
+    mode:           mode,
     on:             on,
     _diagnostic:    _diagnostic
   };

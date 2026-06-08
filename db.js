@@ -232,6 +232,29 @@
     if (!canPersist || !id) return false;
     var silent = !!(opts && opts.silent);
 
+    // PD.333 (audit A2): ONE id, ONE key — asserted at the choke
+    // point. Every "trip saved but invisible / duplicated / reloaded
+    // wrong" bug reduces to the storage key disagreeing with the id
+    // INSIDE the envelope (publishTrip's id:null rebuild, fresh-build
+    // divergence). Heal a missing body id from the key; flag a
+    // conflicting one loudly — the write still happens (refusing
+    // would lose data) but the console now names the seam instead of
+    // the downstream symptom.
+    try {
+      var _chk = JSON.parse(json);
+      if (_chk && _chk.trip) {
+        if (!_chk.trip.id) {
+          _chk.trip.id = id;
+          json = JSON.stringify(_chk);
+          console.warn("[MaxDB] tripWriteRaw: envelope had no trip.id — healed to storage key '" + id + "'");
+        } else if (_chk.trip.id !== id) {
+          console.error("[MaxDB] ID/KEY MISMATCH: writing slot '" + id +
+            "' but envelope.trip.id is '" + _chk.trip.id +
+            "'. This WILL surface as a lost or duplicated trip. Stack:", new Error().stack);
+        }
+      }
+    } catch (_) { /* non-JSON payloads pass through untouched */ }
+
     // v359.43.1: short-circuit for trips already in IDB.
     if (_tripIdbMirrorRaw[id]) {
       _writeTripToIdb(id, json);

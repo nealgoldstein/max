@@ -3794,13 +3794,21 @@
     // destinations, blue otherwise. Makes the card↔pin correspondence
     // immediate — the user can scan the list and find that pin without
     // hunting.
+    // PD.342b: color system — BLUE = overnight stay, GREEN =
+    // committed 0-night stop/visit. GRAY is reserved for undecided/
+    // considered (unchecked) only, and never appears on committed
+    // destinations. Matches MaxMapPin: stay pins blue, see pins green.
     var _isSee = (dest.nights || 0) === 0;
-    var _badgeColor = _isSee ? "#888" : "#1a5fa8";
+    var _badgeColor = _isSee ? "#2a7a4e" : "#1a5fa8";
     var numBadge = document.createElement("span");
     numBadge.className = "tm-dest-num";
     numBadge.textContent = String(idx + 1);
     numBadge.style.cssText = "flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:" + _badgeColor + ";color:#fff;font-size:11px;font-weight:700;letter-spacing:-0.02em;line-height:1;box-shadow:0 1px 2px rgba(0,0,0,0.15);";
-    numBadge.title = "Destination " + (idx + 1) + " of " + (trip.destinations||[]).length;
+    // PD.342b: the color carries meaning — say so. Blue = overnight
+    // stay, green = day stop. Gray is reserved for considered/unchecked.
+    numBadge.title = "Destination " + (idx + 1) + " of " + (trip.destinations||[]).length
+      + (_isSee ? " — day stop, no overnight (green, same as its map pin)"
+                : " — overnight stay, " + dest.nights + " night" + (dest.nights === 1 ? "" : "s") + " (blue, same as its map pin)");
     nameRow.appendChild(numBadge);
     var nameEl=document.createElement("div"); nameEl.className="tm-dest-name";
     nameEl.style.cssText = "flex:1;min-width:0;font-size:17px;font-weight:700;color:#111;line-height:1.25;letter-spacing:-0.005em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
@@ -5148,7 +5156,7 @@
   // continue to work for adding bookings in context; Bookings is
   // the roll-up view.
   var TAB_GROUPS = [
-    {id:"seeAndDo",     lbl:"See and do",    panes:["sights","explore"]},
+    {id:"seeAndDo",     lbl:"See and Do",    panes:["sights","explore"]},
     {id:"stayAndEat",   lbl:"Stay and Eat",  panes:["stay"]},
     {id:"onTheGround",  lbl:"On the ground", panes:["info","routing"]},
     {id:"bookings",     lbl:"Bookings",      panes:["bookings"]}
@@ -5579,8 +5587,8 @@
     hint.style.cssText="margin:12px 14px 4px;padding:10px 12px;background:#f0f5ff;border:1px solid #c8d8f8;border-radius:7px;font-size:11px;color:#2056b0;line-height:1.5;";
     var isGenerating=_generatedCityData[dest.place.toLowerCase()]&&_generatedCityData[dest.place.toLowerCase()].loading;
     hint.innerHTML=isGenerating
-      ?"⌛ Max is generating suggestions for "+String(dest.place||"").replace(/&/g,"&amp;").replace(/</g,"&lt;")+" — sights show up under Plan, places to stay and restaurants under Stay &amp; Eat once ready."
-      :"→ Stay in the <b>Plan</b> tab to browse sights, switch to <b>Stay &amp; Eat</b> for places to stay and restaurants — then add them to your days.";
+      ?"⌛ Max is generating suggestions for "+String(dest.place||"").replace(/&/g,"&amp;").replace(/</g,"&lt;")+" — sights show up under See and Do, places to stay and restaurants under Stay and Eat once ready."
+      :"→ Stay in the <b>See and Do</b> tab to browse sights, switch to <b>Stay and Eat</b> for places to stay and restaurants — then add them to your days.";
     sightsPane.insertBefore(hint,sightsPane.firstChild);
   }
 
@@ -7452,12 +7460,19 @@
   // factor cleanly through a function call boundary. The dispatcher
   // is the architectural contract; the implementations stay where
   // they have the closest access to that state.
+  // PD.331: opts.noUrlStamp forwards to the renderers. Background
+  // repaints (the tripChange subscriber) MUST pass it — a repaint is
+  // not a navigation, and an unflagged drawTripMode during boot was
+  // pushing #/trip/<id> over a #/trip/<id>/discovery deep link
+  // before the route dispatcher could honor it (hard refresh in
+  // Discovery on a new trip opened an empty trip view).
   function _renderTripPage(trip, opts) {
     opts = opts || {};
+    var fwd = opts.noUrlStamp ? { noUrlStamp: true } : undefined;
     if (opts.expandedDestId != null) {
-      if (typeof global.drawDestMode === "function") global.drawDestMode(opts.expandedDestId);
+      if (typeof global.drawDestMode === "function") global.drawDestMode(opts.expandedDestId, fwd);
     } else {
-      if (typeof global.drawTripMode === "function") global.drawTripMode();
+      if (typeof global.drawTripMode === "function") global.drawTripMode(fwd);
     }
   }
 
@@ -7617,22 +7632,27 @@
     hdr.appendChild(ttl);
     hdr.appendChild(sub);
     hdr.appendChild(chev);
-    hdr.onclick = function () {
-      trip._ui.consideredExpanded = !expanded;
-      if (typeof global.drawTripMode === 'function') global.drawTripMode();
-    };
     sec.appendChild(hdr);
-
-    if (!expanded) {
-      container.appendChild(sec);
-      return;
-    }
 
     // List body — show up to 8 candidates inline; if there are more,
     // a "see all N" link opens the full modal where the add-to-trip
     // flow lives.
+    // PD.332: ALWAYS built; expanded state only toggles display. The
+    // previous toggle flipped trip._ui.consideredExpanded and called
+    // drawTripMode() for a full re-render — which can bail (stale
+    // picker-active class, picker overlay edge cases), leaving the
+    // click apparently dead ("Considered has 129, clicking doesn't
+    // show"). A self-contained display toggle can't bail.
     var body = document.createElement('div');
     body.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
+    body.style.display = expanded ? 'flex' : 'none';
+    hdr.onclick = function () {
+      var nowExpanded = body.style.display === 'none';
+      trip._ui.consideredExpanded = nowExpanded;
+      body.style.display = nowExpanded ? 'flex' : 'none';
+      chev.textContent = nowExpanded ? '⌃' : '⌄';
+      hdr.style.marginBottom = nowExpanded ? '8px' : '0';
+    };
     var shown = considered.slice(0, 8);
     shown.forEach(function (c) {
       var row = document.createElement('div');
@@ -9069,6 +9089,12 @@
     renderTripIdentityBlock:     _renderTripIdentityBlock,
     // v360.1 — slice 2c: Considered as a standalone section.
     renderConsideredSection:     _renderConsideredSection,
+    // PD.332: exposed so showConsideredCandidatesModal (index.html)
+    // lists the SAME union set (mdcItems ∪ candidates) the section
+    // header counts. The modal previously read only trip.candidates,
+    // so a Discovery-driven trip showed "(129)" on the section but
+    // the modal found nothing to display.
+    collectSetAsidePlaces:       _collectSetAsidePlaces,
     // v360.3: exposed so drawTripMode can call it at the bottom of the
     // trip view (moved out of renderTripOverviewStrips).
     renderDiscoveryPromptPanel:  _renderDiscoveryPromptPanel,

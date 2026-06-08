@@ -238,14 +238,7 @@ test("setName updates trip.name and persists", function () {
   assert.strictEqual(blob.trip.name, "Iceland 2026");
 });
 
-test("setLastScreen accepts known values and null", function () {
-  reset();
-  TripStore.mint({});
-  TripStore.setLastScreen("trip");
-  assert.strictEqual(TripStore.trip._lastScreen, "trip");
-  TripStore.setLastScreen(null);
-  assert.strictEqual(TripStore.trip._lastScreen, null);
-});
+// PD.330: setLastScreen + _lastScreen removed. Screen state is in URL.
 
 test("updateBrief merges instead of replacing", function () {
   reset();
@@ -510,7 +503,6 @@ test("every mutator persists immediately", function () {
   reset();
   var t = TripStore.mint({});
   TripStore.setName("Iceland");
-  TripStore.setLastScreen("trip");
   TripStore.setDestinations([{ id: "d1", place: "Reykjavík" }]);
   TripStore.setPlaceActivities([{ id: "pa1", section: "Hike to waterfalls" }]);
   TripStore.setDestNote("d1", { text: "hello" });
@@ -518,7 +510,6 @@ test("every mutator persists immediately", function () {
   TripStore.unload();
   TripStore.load(t.id);
   assert.strictEqual(TripStore.trip.name, "Iceland");
-  assert.strictEqual(TripStore.trip._lastScreen, "trip");
   assert.strictEqual(TripStore.trip.destinations[0].place, "Reykjavík");
   assert.strictEqual(TripStore.trip.placeActivities[0].section, "Hike to waterfalls");
   assert.deepStrictEqual(TripStore.trip.destNotes.d1, { text: "hello" });

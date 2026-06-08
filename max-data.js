@@ -34,6 +34,14 @@
 
   function _normKey(name) {
     if (!name) return "";
+    // PD.357: alias-aware identity. Once PlaceKey learns that the
+    // LLM's "Mývatn Nature Baths" is the user's "Mývatn natursone
+    // baths", BOTH normalize to the same key here — so the
+    // canonicalizer's dedupe and the catchall claim-filtering treat
+    // them as one place, exactly like the badge resolver does.
+    if (global.PlaceKey && typeof global.PlaceKey.resolve === "function") {
+      return global.PlaceKey.resolve(name);
+    }
     if (typeof global._normPlaceName === "function") {
       return global._normPlaceName(name);
     }
@@ -149,40 +157,132 @@
   //   - sights without resolvable coordinates
   //
   // Pure. No DOM access. Safe at any frequency.
+  // PD.387 (architectural): THE CONSIDERED SET IS ONE DERIVATION.
+  // "Considered" was computed two ways from two representations — the
+  // discovery preview from placeActivities, the trip pill from a
+  // SEPARATE pool (dest.suggestions) built at publish. Two copies of
+  // one truth drift; we'd been asserting them equal in a test (a
+  // patch). This function is the SINGLE OWNER: the considered set is a
+  // pure function of trip.placeActivities (the canonical source,
+  // PD.356/358). Every surface — the discovery preview, the trip
+  // pill, the overview map — calls this, so they cannot diverge.
+  //
+  // A "considered sight" is: a place that is UNCHECKED (kept===false,
+  // not rejected), is NOT a Max hub, is NOT in a stay section, and is
+  // NOT already a destination. Deduped by canonical key.
+  function consideredPlaceKeys(trip) {
+    if (!trip) return {};
+    var pa = getPlaceActivities(trip);
+    var SK = global.SectionKind || null;
+    var isStaySec = function (s) { return SK ? SK.isStay(s) : false; };
+    var excluded = {};
+    getDestinations(trip).forEach(function (d) {
+      if (d && d.place) excluded[_normKey(d.place)] = true;
+    });
+    pa.forEach(function (it) {
+      if (it && isStaySec(it.section)) {
+        (it.requiredPlaces || []).forEach(function (p) {
+          if (p && p.place) excluded[_normKey(p.place)] = true;
+        });
+      }
+    });
+    var out = {};
+    pa.forEach(function (it) {
+      if (!it || it.type === "route" || isStaySec(it.section)) return;
+      (it.requiredPlaces || []).forEach(function (p) {
+        if (!p || !p.place) return;
+        if (p._autoCreated) return; // a Max hub is a stay proposal, not a sight
+        if (!(p._keep === false && p._rejected !== true)) return; // unchecked only
+        var k = _normKey(p.place);
+        if (!k || excluded[k] || out[k]) return;
+        out[k] = { name: p.place, lat: p.lat, lng: p.lng, section: it.section };
+      });
+    });
+    // PD.387: LEGACY ABSORPTION. placeActivities is authoritative, but
+    // trips saved before this refactor carry their considered set ONLY
+    // in the old dest.suggestions pool (PD.269). Supplement — never
+    // override — from that pool for any considered sight not already
+    // derived, so legacy trips still render. New trips get nothing
+    // extra here (their pool is a projection of placeActivities), so
+    // the count stays identical to the discovery preview.
+    getDestinations(trip).forEach(function (d) {
+      getSuggestions(d).forEach(function (s) {
+        if (!s || !s._considered) return;
+        var name = s.name || s.label || s.place || s.n || s.st;
+        if (!name) return;
+        var k = _normKey(name);
+        if (!k || excluded[k] || out[k]) return;
+        out[k] = { name: name, lat: s.lat, lng: s.lng, section: null, _legacy: true, _src: s };
+      });
+    });
+    return out;
+  }
+
+  // PD.388: committed sights — the green teardrops. Same single
+  // derivation as consideredPlaceKeys, but CHECKED (kept) sight places
+  // that are NOT destinations and NOT stays. These are decisions the
+  // traveler made; the overview map shows them as green teardrops.
+  function getCommittedSights(trip) {
+    if (!trip) return [];
+    var pa = getPlaceActivities(trip);
+    var SK = global.SectionKind || null;
+    var isStaySec = function (s) { return SK ? SK.isStay(s) : false; };
+    var excluded = {};
+    getDestinations(trip).forEach(function (d) {
+      if (d && d.place) excluded[_normKey(d.place)] = true;
+    });
+    pa.forEach(function (it) {
+      if (it && isStaySec(it.section)) {
+        (it.requiredPlaces || []).forEach(function (p) {
+          if (p && p.place) excluded[_normKey(p.place)] = true;
+        });
+      }
+    });
+    var out = [], seen = {};
+    var firstDest = (getDestinations(trip) || [])[0] || null;
+    pa.forEach(function (it) {
+      if (!it || it.type === "route" || isStaySec(it.section)) return;
+      (it.requiredPlaces || []).forEach(function (p) {
+        if (!p || !p.place) return;
+        if (p._autoCreated) return;
+        if (p._keep === false || p._rejected === true) return; // CHECKED only
+        var k = _normKey(p.place);
+        if (!k || excluded[k] || seen[k]) return;
+        // Resolve coords (LLM coords → city center → parent offset).
+        var coords = null;
+        if (_isFiniteCoord(p.lat) && _isFiniteCoord(p.lng)) coords = [p.lat, p.lng];
+        else if (typeof global.getCityCenter === "function") {
+          var c = global.getCityCenter(p.place);
+          if (Array.isArray(c) && _isFiniteCoord(c[0]) && _isFiniteCoord(c[1])) coords = c;
+        }
+        if (!coords && firstDest && _isFiniteCoord(firstDest.lat) && _isFiniteCoord(firstDest.lng)) {
+          var _h = 0, nm = String(p.place);
+          for (var _i = 0; _i < nm.length; _i++) _h = (_h * 31 + nm.charCodeAt(_i)) | 0;
+          coords = [firstDest.lat + ((_h & 0xff) / 128 - 1) * 0.005,
+                    firstDest.lng + (((_h >> 8) & 0xff) / 128 - 1) * 0.008];
+        }
+        if (!coords) return;
+        seen[k] = true;
+        out.push({ place: p.place, coords: coords, section: it.section });
+      });
+    });
+    return out;
+  }
+
   function getConsideredSights(trip) {
     if (!trip) return [];
     var ds = getDestinations(trip);
-    if (!ds.length) return [];
-
-    var routes = getRoutes(trip);
-    var places = getPlaces(trip);
-
-    // Build set of place names already in the trip.
-    var includedKeys = {};
-    ds.forEach(function (d) {
-      if (d && d.place) includedKeys[_normKey(d.place)] = true;
-    });
-    routes.forEach(function (r) {
-      if (!r || !Array.isArray(r.planItems)) return;
-      r.planItems.forEach(function (pi) {
-        if (!pi || pi.type !== "stop" || !pi.placeId) return;
-        var p = places[pi.placeId];
-        if (p && p.name) includedKeys[_normKey(p.name)] = true;
-        includedKeys[_normKey(pi.placeId)] = true;
-      });
-    });
-
+    // PD.387: derive from placeActivities (single source), then
+    // resolve coords for the map. The dest.suggestions pool is no
+    // longer the source of truth for the count or the overview pins.
+    var set = consideredPlaceKeys(trip);
+    var firstDest = ds.length ? ds[0] : null;
     var out = [];
-    var seen = {};
-    ds.forEach(function (d) {
-      var suggs = getSuggestions(d);
-      suggs.forEach(function (s) {
-        if (!s || !s._considered) return;
-        var name = s.name || s.label || s.place;
-        if (!name) return;
-        var k = _normKey(name);
-        if (!k || includedKeys[k] || seen[k]) return;
-
+    Object.keys(set).forEach(function (k) {
+      var s = set[k];
+      var name = s.name;
+      var d = firstDest;
+      {
         // Resolve coordinates.
         var coords = null;
         if (_isFiniteCoord(s.lat) && _isFiniteCoord(s.lng)) {
@@ -193,32 +293,67 @@
             coords = c;
           }
         }
+        // PD.336: coarse-geocode fallback with name normalization.
+        // The LLM seeds max-coarse-geocode at Discovery time keyed by
+        // lowercased place name; considered-suggestion names often
+        // carry a ", Country" suffix or accents that miss the exact
+        // key. Try the stripped form before giving up — a considered
+        // place with no pin is invisible to the user even though the
+        // toggle counts it.
+        if (!coords && global._coarseGeocode) {
+          var _lower = String(name).toLowerCase().trim();
+          var _stripped = _lower.replace(/,[^,]*$/, "").trim(); // drop ", Iceland"
+          var _cg = global._coarseGeocode[_lower] || global._coarseGeocode[_stripped];
+          if (Array.isArray(_cg) && _isFiniteCoord(_cg[0]) && _isFiniteCoord(_cg[1])) {
+            coords = _cg;
+          }
+        }
+        // PD.354: LAST-RESORT — parent destination + a stable
+        // name-derived offset (~500m), the same trick the publish
+        // router uses. EVERY considered sight pins; an invisible
+        // maybe is indistinguishable from a lost one, which is how
+        // "48 unchecked but only 39 considered" reads to the user.
+        if (!coords && d && _isFiniteCoord(d.lat) && _isFiniteCoord(d.lng)) {
+          var _h = 0;
+          for (var _hi = 0; _hi < name.length; _hi++) _h = (_h * 31 + name.charCodeAt(_hi)) | 0;
+          coords = [d.lat + ((_h & 0xff) / 128 - 1) * 0.005,
+                    d.lng + (((_h >> 8) & 0xff) / 128 - 1) * 0.008];
+        }
         if (!coords) return;
 
-        seen[k] = true;
         out.push({
           place: name,
           coords: coords,
-          description: String(s.notes || s.description || s.why || "").trim(),
-          section: "Considered near " + (d.place || "this destination"),
+          description: "",
+          section: s.section || ("Considered near " + ((d && d.place) || "this destination")),
           parentDest: d,
           suggestion: s
         });
-      });
+      }
     });
     return out;
   }
 
-  // Count of considered sights — matches the renderer above.
+  // PD.395: the considered set, grouped by section. The ONE source
+  // both the section chip and the receipt read for the Max catchall
+  // sections, so their numbers cannot disagree (the "44+10 vs 53"
+  // mismatch). Returns { sectionName: count }.
+  function consideredBySection(trip) {
+    var set = consideredPlaceKeys(trip);
+    var out = {};
+    Object.keys(set).forEach(function (k) {
+      var sec = set[k].section || "(none)";
+      out[sec] = (out[sec] || 0) + 1;
+    });
+    return out;
+  }
+
+  // PD.387: the count is the SIZE of the canonical considered set —
+  // the SAME derivation the pill and the discovery preview use. No
+  // second computation, so nothing to keep in sync.
   function countConsideredSights(trip) {
     if (!trip) return 0;
-    var n = 0;
-    getDestinations(trip).forEach(function (d) {
-      getSuggestions(d).forEach(function (s) {
-        if (s && s._considered) n++;
-      });
-    });
-    return n;
+    return Object.keys(consideredPlaceKeys(trip)).length;
   }
 
   // Rejected sights (PD.269 anti-signal). Used by Enhance's skip
@@ -292,6 +427,223 @@
 
   // ── Export ───────────────────────────────────────────────────────
 
+  // ── PD.349: THE CANONICAL PLACE-SET INVARIANT ─────────────────────
+  // The Discovery working set has many writers (primary LLM,
+  // construct, backstop, enhance, secondary discovery, consolidation)
+  // and each historically appended its own copies with its own ad-hoc
+  // dedupe — re-running ANY pass could grow the set (the observed
+  // ratchet: 55 unchecked → 149 → 209 across trip↔Discovery
+  // round-trips). This function is the SINGLE OWNER of the invariant.
+  //
+  // Invariant (enforced, idempotent — f(f(x)) === f(x)):
+  //   1. Within one item, a place key appears at most once
+  //      (duplicate entries merge; coords/desc fill from whichever
+  //      copy has them; _rejected=true wins, else _keep=true wins).
+  //   2. A key present in any THEMATIC section is removed from every
+  //      CATCHALL bucket ("From your list", "Sights near places you
+  //      listed", "More places to consider") — a themed place needs
+  //      no stub.
+  //   3. Among catchalls, a key lives in exactly ONE, by precedence:
+  //      From your list > Sights near places you listed > More
+  //      places to consider.
+  //   4. A key in "Recommended overnight stays" is removed from
+  //      "Overnight stays to consider" — a committed/recommended stay
+  //      is not "to consider".
+  //   5. Items left with zero places are dropped (routes and
+  //      synthetic-typed items exempt).
+  //
+  // PURE: returns a new array; does not mutate input items' identity
+  // (entries are reused by reference where untouched, so the PD.303
+  // bridge stays intact for surviving objects).
+  // PD.381: section identity comes from SectionKind (the one owner)
+  // when loaded; the inline fallbacks keep Node tests self-contained.
+  var _SK = global.SectionKind || null;
+  var _CATCHALL_PRECEDENCE = _SK ? _SK.catchallPrecedence()
+    : ["From your list", "Sights near places you listed", "More places to consider"];
+  function canonicalizePlaceActivities(items) {
+    if (!Array.isArray(items)) return items;
+    var CATCH = {};
+    _CATCHALL_PRECEDENCE.forEach(function (s, i) { CATCH[s] = i + 1; });
+    var STAY_REC = _SK ? _SK.NAMES.STAYS_REC : "Recommended overnight stays";
+    var STAY_USER = _SK ? _SK.NAMES.STAYS_USER : "Overnight stays";
+    var STAY_CONSIDER = _SK ? _SK.NAMES.STAYS_CONSIDER : "Overnight stays to consider";
+    function _isCommittedStaySec(s){
+      return _SK ? _SK.isCommittedStay(s) : (s === STAY_REC || s === STAY_USER);
+    }
+
+    function isExempt(it) {
+      return !it || it.type === "route" || (it.type && /^synthetic-/.test(String(it.type)));
+    }
+    function mergePlace(into, from) {
+      if (!into || !from) return into;
+      if ((into.lat == null || into.lat === 0) && typeof from.lat === "number" && from.lat !== 0) {
+        into.lat = from.lat; into.lng = from.lng;
+      }
+      if (!into.country && from.country) into.country = from.country;
+      if ((!into.nights || into.nights === 0) && from.nights > 0) into.nights = from.nights;
+      if (from.overnight === true) into.overnight = true;
+      if (from._rejected === true) { into._rejected = true; into._keep = false; }
+      else if (from._keep === true && into._rejected !== true) into._keep = true;
+      return into;
+    }
+
+    // Pass 0 (rule 1b): duplicate ITEMS — same section + same name —
+    // merge into the first occurrence (a racing regeneration emits
+    // near-identical items; without this the set grows by whole
+    // items, not just entries).
+    var byIdentity = {};
+    var merged = [];
+    items.forEach(function (it) {
+      if (isExempt(it) || !it.section || !Array.isArray(it.requiredPlaces)) { merged.push(it); return; }
+      var idKey = String(it.section) + "||" + String(it.name || "");
+      var first = byIdentity[idKey];
+      if (!first) { byIdentity[idKey] = it; merged.push(it); return; }
+      Array.prototype.push.apply(first.requiredPlaces, it.requiredPlaces);
+      if (it.checked) first.checked = true;
+      if (it._userConstructed) first._userConstructed = true;
+    });
+    items = merged;
+
+    // Pass 1: per-item entry dedupe + collect where each key lives.
+    var themedKeys = {};
+    var themedPlaces = []; // PD.399: themed places WITH coords for safe identity
+    var recStayKeys = {};
+    items.forEach(function (it) {
+      if (isExempt(it) || !Array.isArray(it.requiredPlaces)) return;
+      var seen = {};
+      var out = [];
+      it.requiredPlaces.forEach(function (p) {
+        if (!p || !p.place) return;
+        var k = _normKey(p.place);
+        if (!k) { out.push(p); return; }
+        if (seen[k]) { mergePlace(seen[k], p); return; }
+        seen[k] = p;
+        out.push(p);
+      });
+      it.requiredPlaces = out;
+      var sec = it.section || "";
+      var isCatchall = !!CATCH[sec];
+      var isStayBucket = (sec === STAY_REC || sec === STAY_USER || sec === STAY_CONSIDER);
+      out.forEach(function (p) {
+        var k = _normKey(p.place);
+        if (!k) return;
+        if (_isCommittedStaySec(sec)) recStayKeys[k] = true;
+        if (!isCatchall && !isStayBucket) { themedKeys[k] = true; themedPlaces.push(p); }
+      });
+    });
+
+    // PD.385: a catchall place is "already themed" if its key is in
+    // themedKeys OR it fuzzy-matches a themed place name. The exact-key
+    // check missed naming variants — the user's "Þingvellir" vs the
+    // LLM's "Þingvellir National Park" — so the user's copy lingered in
+    // "From your list" as a phantom duplicate of the themed one. The
+    // dedupe owner now uses the SAME identity matcher (PlaceKey.same)
+    // that the badge resolver uses.
+    var _PK = global.PlaceKey || null;
+    function _coordsClose(a, b, km) {
+      if (!a || !b) return false;
+      var la = a.lat, lo = a.lng, lb = b.lat, lob = b.lng;
+      if (typeof la !== "number" || typeof lo !== "number"
+          || typeof lb !== "number" || typeof lob !== "number") return false;
+      // Cheap equirectangular distance (fine at these scales).
+      var dLat = (la - lb) * 111;                       // ~km per degree lat
+      var dLng = (lo - lob) * 111 * Math.cos(la * Math.PI / 180);
+      return (dLat * dLat + dLng * dLng) <= (km * km);
+    }
+    // PD.385: "same place" for catchall dedupe is broader than the
+    // token-overlap matcher — which requires BOTH names to have 2+
+    // tokens (so it deliberately won't match a single-word name like
+    // "Þingvellir" against "Þingvellir National Park"). For dedupe we
+    // ALSO want word-prefix containment: a catchall entry that is a
+    // leading word-run of a themed entry (or vice-versa) is the same
+    // place and must collapse into the theme.
+    function _sameOrContains(a, b) {
+      // PD.397: THE identity relation lives in PlaceKey now (relatedTo
+      // = exact | token-overlap | containment). One matcher shared by
+      // the dedup, the coverage audit, and the badge resolver.
+      if (_PK && typeof _PK.relatedTo === "function") return _PK.relatedTo(a, b);
+      var ka = _normKey(a), kb = _normKey(b);
+      if (!ka || !kb) return false;
+      if (ka === kb) return true;
+      if (kb.length > ka.length && kb.indexOf(ka + " ") === 0) return true;
+      if (ka.length > kb.length && ka.indexOf(kb + " ") === 0) return true;
+      return false;
+    }
+    // PD.399: COORDINATE-GATED IDENTITY. Exact-key and token-overlap
+    // matches are trusted on name alone. But CONTAINMENT ("X" ⊂ "X Y")
+    // is ambiguous — "Þingvellir" ⊂ "Þingvellir National Park" is the
+    // SAME place, but "Reykjavik" ⊂ "Reykjavik Old Harbour" is a
+    // DIFFERENT place inside the city. String containment alone
+    // deleted legitimate Max sights (the "no Max recommendations"
+    // regression). So a containment match is only trusted when the two
+    // are also within ~0.6 km. Without coords, containment does NOT
+    // merge — never delete on a guess.
+    function _isAlreadyThemed(placeOrObj) {
+      var pObj = (placeOrObj && typeof placeOrObj === "object") ? placeOrObj : null;
+      var name = pObj ? pObj.place : placeOrObj;
+      if (!name) return false;
+      if (themedKeys[_normKey(name)]) return true;
+      for (var i = 0; i < themedPlaces.length; i++) {
+        var tp = themedPlaces[i];
+        // Strong name identity (exact / token-overlap): trust it.
+        if (_PK && typeof _PK.same === "function" && _PK.same(name, tp.place)) return true;
+        if (!_PK && _normKey(name) === _normKey(tp.place)) return true;
+        // Weak identity (containment): require coordinate proximity.
+        if (_PK && typeof _PK.contains === "function" && _PK.contains(name, tp.place)
+            && _coordsClose(pObj, tp, 0.6)) return true;
+      }
+      return false;
+    }
+
+    // Pass 2a: compute the BEST (lowest) catchall rank per key — the
+    // precedence decision happens before any filtering, so iteration
+    // order can't make first-seen beat best-rank.
+    var bestRank = {};
+    items.forEach(function (it) {
+      if (isExempt(it) || !Array.isArray(it.requiredPlaces)) return;
+      var rank = CATCH[it.section || ""];
+      if (!rank) return;
+      it.requiredPlaces.forEach(function (p) {
+        var k = _normKey(p && p.place);
+        if (!k || _isAlreadyThemed(p)) return;
+        if (!bestRank[k] || rank < bestRank[k]) bestRank[k] = rank;
+      });
+    });
+
+    // Pass 2b: filter — themed keys leave all catchalls; a key stays
+    // only in its best-rank catchall, and only in the first item of
+    // that rank; "to consider" stays lose to Recommended.
+    var claimed = {};
+    items.forEach(function (it, idx) {
+      if (isExempt(it) || !Array.isArray(it.requiredPlaces)) return;
+      var sec = it.section || "";
+      var rank = CATCH[sec];
+      if (rank) {
+        it.requiredPlaces = it.requiredPlaces.filter(function (p) {
+          var k = _normKey(p && p.place);
+          if (!k) return true;
+          if (_isAlreadyThemed(p)) return false; // PD.385/399: coord-gated
+          if (bestRank[k] !== rank) return false;
+          if (claimed[k] != null && claimed[k] !== idx) return false;
+          claimed[k] = idx;
+          return true;
+        });
+      } else if (sec === STAY_CONSIDER) {
+        it.requiredPlaces = it.requiredPlaces.filter(function (p) {
+          var k = _normKey(p && p.place);
+          return !(k && recStayKeys[k]);
+        });
+      }
+    });
+
+    // Pass 3 (rule 5): drop emptied non-exempt items.
+    return items.filter(function (it) {
+      if (isExempt(it)) return true;
+      if (!Array.isArray(it.requiredPlaces)) return true;
+      return it.requiredPlaces.length > 0;
+    });
+  }
+
   global.MaxData = {
     // Trip-level
     getPlaceActivities:    getPlaceActivities,
@@ -311,6 +663,9 @@
     getBookings:           getBookings,
     // Considered / rejected
     getConsideredSights:   getConsideredSights,
+    consideredPlaceKeys:   consideredPlaceKeys,
+    consideredBySection:   consideredBySection,
+    getCommittedSights:    getCommittedSights,
     countConsideredSights: countConsideredSights,
     getRejectedSights:     getRejectedSights,
     // User-listed
@@ -321,7 +676,9 @@
     getDestStory:          getDestStory,
     getSightStory:         getSightStory,
     // Diagnostics
-    describeTrip:          describeTrip
+    describeTrip:          describeTrip,
+    // PD.349: canonical place-set invariant (single dedupe owner)
+    canonicalizePlaceActivities: canonicalizePlaceActivities
   };
 
 })(typeof globalThis !== "undefined" ? globalThis : window);

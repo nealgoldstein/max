@@ -151,6 +151,16 @@
   var _batchDepth = 0;
   var _batchDirty = false;
 
+  // PD.358: touch(name) — version-bump + persist with NO state change.
+  // The one-door no-op guard (PD.356a) means reassigning an unchanged
+  // array is silent; flows that mutate items IN PLACE (keep flips,
+  // folds, role changes) call touch() so the persist is explicit and
+  // guaranteed, not a side effect of some sibling mutator happening
+  // to be dirty.
+  function touch(name) {
+    return _mutate("touch:" + (name || "anonymous"), function () {}, null);
+  }
+
   function batch(fn, batchName) {
     if (typeof fn !== "function") {
       throw new Error("[TripStore] batch() requires a function");
@@ -439,7 +449,6 @@
       _version: 0,
       __saved__: 0,
       name: "",
-      _lastScreen: null,
       destinations: [],
       placeActivities: [],
       candidates: [],
@@ -526,11 +535,9 @@
     }, { name: name });
   }
 
-  function setLastScreen(screen) {
-    return _mutate("setLastScreen", function (t) {
-      t._lastScreen = screen || null;
-    }, { screen: screen });
-  }
+  // setLastScreen removed in PD.330. Screen state lives in the URL
+  // (MaxRoute) instead of on the trip body. The mutator was unused
+  // outside its own tests.
 
   function setBrief(brief) {
     return _mutate("setBrief", function (t) {
@@ -607,6 +614,35 @@
     if (!Array.isArray(items)) {
       throw new Error("[TripStore] setPlaceActivities requires an array");
     }
+    // PD.356 (Phase 1): CANONICAL AT WRITE. This mutator is the one
+    // door for the Discovery set; the PD.349 invariant is enforced
+    // here so non-canonical data can never even be PERSISTED. The
+    // render-time canonicalizer remains as a self-heal for legacy
+    // saved trips, but this is the authoritative point. MaxData is a
+    // browser global; in Node test contexts without it, the write
+    // passes through unchanged (the invariant has its own suite).
+    try {
+      var _g = (typeof globalThis !== "undefined") ? globalThis : null;
+      if (_g && _g.MaxData && typeof _g.MaxData.canonicalizePlaceActivities === "function") {
+        items = _g.MaxData.canonicalizePlaceActivities(items);
+      }
+    } catch (_) {}
+    // PD.356a: writing identical state is a SILENT NO-OP. With
+    // _tb.placeActivities routed through this mutator, render-time
+    // passes that reassign the (canonically unchanged) set would
+    // otherwise emit tripChange → re-render → reassign → emit — a
+    // feedback loop. Canonicalization is idempotent, so comparing
+    // element identity in order is exact: same items, same order,
+    // nothing changed, nothing to emit or persist. A genuinely
+    // changed set differs in length or refs and mutates normally.
+    var _cur = _trip && _trip.placeActivities;
+    if (Array.isArray(_cur) && _cur.length === items.length) {
+      var _same = true;
+      for (var _i = 0; _i < items.length; _i++) {
+        if (_cur[_i] !== items[_i]) { _same = false; break; }
+      }
+      if (_same) return _trip;
+    }
     return _mutate("setPlaceActivities", function (t) {
       t.placeActivities = items;
     }, { count: items.length });
@@ -630,6 +666,18 @@
   function setCandidates(items) {
     if (!Array.isArray(items)) {
       throw new Error("[TripStore] setCandidates requires an array");
+    }
+    // PD.370: identical writes are silent no-ops — same loop-guard
+    // semantics as setPlaceActivities (PD.356a). _tb.candidates is a
+    // routed view; render passes that reassign an unchanged array
+    // must not emit.
+    var _curC = _trip && _trip.candidates;
+    if (Array.isArray(_curC) && _curC.length === items.length) {
+      var _sameC = true;
+      for (var _ci = 0; _ci < items.length; _ci++) {
+        if (_curC[_ci] !== items[_ci]) { _sameC = false; break; }
+      }
+      if (_sameC) return _trip;
     }
     return _mutate("setCandidates", function (t) {
       t.candidates = items;
@@ -745,7 +793,6 @@
 
     // Trip-level
     setName: setName,
-    setLastScreen: setLastScreen,
     setBrief: setBrief,
     updateBrief: updateBrief,
     setNotes: setNotes,
@@ -759,6 +806,7 @@
 
     // Picker
     setPlaceActivities: setPlaceActivities,
+    touch: touch,
     updatePlaceActivity: updatePlaceActivity,
     removePlaceActivity: removePlaceActivity,
     setCandidates: setCandidates,

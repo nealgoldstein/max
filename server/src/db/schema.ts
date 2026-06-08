@@ -65,9 +65,15 @@ export const trips = sqliteTable(
     uiState: text('ui_state', { mode: 'json' })
       .$type<Record<string, unknown>>()
       .default(sql`'{}'`),
-    // updatedAt drives sync. Client compares its local timestamp to
-    // remote; newer wins. For now last-write-wins is fine; we'll
-    // add per-field merge in a later round if conflicts get common.
+    // PD.334: server-owned monotonic revision. Bumped by the server
+    // on every successful write; never set by clients. Clients send
+    // the rev their edit was based on (baseRev) — a mismatch is a
+    // real conflict regardless of device clocks. This replaces
+    // updatedAt as the sync arbiter; updatedAt remains for display
+    // and as the fallback for pre-rev clients.
+    rev: integer('rev').notNull().default(0),
+    // updatedAt drives sync for LEGACY clients only (pre-rev).
+    // Client compares its local timestamp to remote; newer wins.
     updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
       .notNull()
       .default(sql`(strftime('%s', 'now') * 1000)`),

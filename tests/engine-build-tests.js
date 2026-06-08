@@ -239,15 +239,19 @@ console.log("\nengine-build.js — input contract\n");
     assert(fired, "build:reconcile-done event should fire regardless of whether a callback was supplied");
   });
 
-  await test("rebuild mode SKIPS mint phase", async function () {
+  await test("rebuild mode SKIPS mint phase AND enhance phase", async function () {
     _resetCalls();
     _resetTb();
     await global.MaxBuild.findCandidates({ mode: "rebuild", region: "Iceland" });
     assert(!calls.some(function (c) { return c.fn === "_initialTripSave"; }),
       "_initialTripSave must NOT fire in rebuild mode");
-    // Enhance still fires.
-    assert(calls.some(function (c) { return c.fn === "enhanceDiscovery"; }),
-      "enhanceDiscovery should still fire in rebuild mode");
+    // PD.345: enhance must NOT fire on rebuilds. Rebuilds are the
+    // user EDITING an existing Discovery set; unconditional enhance
+    // added a fresh batch of suggestions on every Discovery→edit→
+    // rebuild round-trip, ratcheting the unchecked-sights count up
+    // each cycle. "✦ More like this" is the explicit ask-for-more.
+    assert(!calls.some(function (c) { return c.fn === "enhanceDiscovery"; }),
+      "enhanceDiscovery must NOT fire in rebuild mode (PD.345)");
   });
 
   console.log("\nengine-build.js — phase events\n");

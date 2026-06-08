@@ -312,7 +312,13 @@
   // and surface in the "decide how to fit it" affordance.
   function _isSingleSight(c) {
     if (!c || typeof c !== "object") return false;
-    if (c.singleSight === true) return true;
+    // PD.364: "to assign" means A DECISION THE USER STILL OWES — and
+    // only adopted (checked) places generate decisions. The old
+    // `c.singleSight === true` early-return counted every LLM-flagged
+    // suggestion regardless of status, so Max's own unadopted
+    // suggestions inflated the banner ("79 single-sight places to
+    // assign" when the user listed 45). Provenance doesn't matter;
+    // adoption does.
     if (c.status !== "keep") return false;
     var nights = (typeof c.nights === "number") ? c.nights : 0;
     if (nights > 0) return false;
@@ -883,10 +889,35 @@
     };
   }
 
+  // PD.336: negative cache for 404'd titles. The thumb hydrator runs
+  // on EVERY picker re-render; without this, the same unknown titles
+  // ("Mývatn natursone baths", "Arnarstapi coastal cliffs", …) fired
+  // fresh 404s dozens of times per session — drowning the console and
+  // wasting requests. A title that 404s once is never fetched again
+  // (persisted, capped at 500 entries).
+  var _wiki404 = (function(){
+    try { return JSON.parse(localStorage.getItem("max-wiki-404") || "{}"); }
+    catch(_){ return {}; }
+  })();
+  function _wiki404Add(title) {
+    _wiki404[title] = 1;
+    try {
+      var keys = Object.keys(_wiki404);
+      if (keys.length > 500) {
+        keys.slice(0, keys.length - 250).forEach(function(k){ delete _wiki404[k]; });
+      }
+      localStorage.setItem("max-wiki-404", JSON.stringify(_wiki404));
+    } catch(_){}
+  }
   function _fetchSummaryByTitle(title) {
+    if (_wiki404[title]) return Promise.resolve(null);
     var url = "https://en.wikipedia.org/api/rest_v1/page/summary/" + title;
     return fetch(url, { headers: { "accept": "application/json" } })
-      .then(function(r){ return r.ok ? r.json() : null; });
+      .then(function(r){
+        if (r.ok) return r.json();
+        if (r.status === 404) _wiki404Add(title);
+        return null;
+      });
   }
 
   // v359.46: detect "looks-like-a-place-not-a-film" from the summary

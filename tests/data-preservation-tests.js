@@ -179,12 +179,9 @@ test("trackSpending survives setDestinations", function () {
   assert.strictEqual(t.trackSpending, true);
 });
 
-test("_lastScreen survives setBrief", function () {
-  var t = _freshTrip();
-  global.TripStore.setLastScreen("dest-view-d1");
-  global.TripStore.setBrief({ region: "Iceland" });
-  assert.strictEqual(t._lastScreen, "dest-view-d1");
-});
+// PD.330: _lastScreen field removed. Screen state lives in the URL,
+// not on the trip body — so there's no field to preserve through
+// trip mutations. Test deleted.
 
 // ── Per-destination user state ──────────────────────────────────────
 console.log("\ndata-preservation — per-destination user state\n");
@@ -360,6 +357,28 @@ test("countConsideredSights matches getConsideredSights for trips with coords", 
   // The fixture has 2 considered, both with coords, so they match.
   assert.strictEqual(global.MaxData.countConsideredSights(t), 2);
   assert.strictEqual(global.MaxData.getConsideredSights(t).length, 2);
+});
+
+test("PD.395: consideredBySection sums to the considered set size", function () {
+  _resetStorage();
+  global.TripStore.unload();
+  var t = global.TripStore.replace({
+    id: "cbs-1", name: "T", destinations: [{ id: "d1", place: "Reykjavik", lat: 64.1, lng: -21.9 }],
+    placeActivities: [
+      { id: "a", type: "activity", section: "Sights near places you listed", requiredPlaces: [
+        { place: "AAA", lat: 64, lng: -22, _keep: false }, { place: "BBB", lat: 64, lng: -22, _keep: false } ] },
+      { id: "b", type: "activity", section: "More places to consider", requiredPlaces: [
+        { place: "CCC", lat: 64, lng: -22, _keep: false } ] },
+      { id: "c", type: "activity", section: "Sights near places you listed", requiredPlaces: [
+        { place: "DDD", lat: 64, lng: -22, _keep: true } ] } // checked → NOT considered
+    ]
+  });
+  var cbs = global.MaxData.consideredBySection(t);
+  var total = Object.keys(cbs).reduce(function (a, k) { return a + cbs[k]; }, 0);
+  // 2 unchecked in "Sights near" + 1 in "More places" = 3; DDD checked excluded.
+  assert.strictEqual(cbs["Sights near places you listed"], 2);
+  assert.strictEqual(cbs["More places to consider"], 1);
+  assert.strictEqual(total, global.MaxData.countConsideredSights(t));
 });
 
 // ── Schema migration: legacy fields preserved or migrated, not dropped silently ──
@@ -693,7 +712,6 @@ function _oldTripWithUserState() {
   return {
     id: "t-old",
     name: "Iceland Trip",
-    _lastScreen: "trip-overview",
     trackSpending: true,
     notes: { text: "Trip-level note", links: [{ url: "https://x.y" }] },
     destNotes: { d1: "Confirm hotel by Sept 10" },

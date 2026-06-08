@@ -274,4 +274,350 @@ test.describe('Picker → trip flow', () => {
     expect(after.pHub).toBe('');                       // requiredPlace hub cleared
     expect(after.stayOverride).toBe(true);             // placeMeta updated
   });
+
+  // PD.331 regression test: hard refresh in Discovery stays in Discovery.
+  //
+  // The URL is the source of truth for the screen (PD.330): being in
+  // Discovery means the hash is #/trip/<id>/discovery, and a reload
+  // must land back there. The bug: enterApp's BASELINE drawTripMode
+  // call stamped #/trip/<id> over the deep link before the deferred
+  // _dispatchRoute could honor it — refresh in Discovery opened the
+  // trip view instead ("I save it from discovery and it opens in
+  // trip"). drawTripMode now takes {noUrlStamp:true} for baseline
+  // renders and refuses to stamp while a picker overlay is visible
+  // (background re-renders were also stealing the URL and closing
+  // the overlay via the route listener's TRIP branch).
+  test('hard refresh in Discovery lands back in Discovery, not trip view', async ({ page }) => {
+    await bootClean(page);
+
+    await page.evaluate((candidates) => {
+      window.MaxEnginePicker.resetState({
+        name: 'Iceland Refresh Test',
+        region: 'Iceland',
+        when: '2026-08-01', duration: '10 days', intent: 'Ring Road',
+        interests: ['waterfalls'], drivers: [], tripMode: 'place',
+        placeName: 'Iceland', placeContext: '',
+        partyComposition: 'couple', partySize: '2', partyAges: 'adults',
+        physicalAbility: 'moderate', avoid: {}, pace: 'enough',
+        anchors: '', familiarity: 'first', accommodation: '', compromises: '', hardlimits: '',
+        entry: '', tbExit: '', entryMode: 'flight', exitMode: 'flight',
+        candidates: candidates, chips: [], activityChips: [], requiredPlaces: [],
+      });
+      window._mdcItems = [];
+    }, ICELAND_CANDIDATES);
+
+    await page.evaluate(async () => { await window.buildFromCandidates(); });
+    await page.waitForSelector('.tm-dest', { timeout: 5000 });
+
+    // Enter Discovery — same route the Discovery affordances use.
+    await page.evaluate(() => {
+      window.MaxRoute.navigate({
+        screen: window.MaxRoute.SCREENS.DISCOVERY,
+        tripId: window.trip.id,
+      });
+    });
+    await page.waitForFunction(() => {
+      const ov = document.getElementById('trip-brief-overlay');
+      const ce = document.getElementById('candidate-explorer-overlay');
+      const anyDiscovery = (ov && ov.style.display && ov.style.display !== 'none')
+        || (ce && ce.style.display && ce.style.display !== 'none');
+      return location.hash.includes('/discovery') && anyDiscovery;
+    }, { timeout: 5000 });
+
+    // THE SCENARIO: hard refresh while in Discovery.
+    await page.reload();
+
+    // Boot must honor the deep link: hash still /discovery and SOME
+    // Discovery surface visible — PD.333: the dispatcher picks the
+    // surface by data shape (placeActivities → activity picker;
+    // candidates-only → candidate explorer), so this trip (built from
+    // candidates, no placeActivities) restores the explorer. Either
+    // way, NOT the trip view or home screen.
+    await page.waitForFunction(() => {
+      const ov = document.getElementById('trip-brief-overlay');
+      const ce = document.getElementById('candidate-explorer-overlay');
+      const anyDiscovery = (ov && ov.style.display && ov.style.display !== 'none')
+        || (ce && ce.style.display && ce.style.display !== 'none');
+      return location.hash.includes('/discovery') && anyDiscovery;
+    }, { timeout: 10000 });
+
+    const state = await page.evaluate(() => ({
+      hash: location.hash,
+      homeDisplay: document.getElementById('home-screen').style.display,
+      tripLoaded: !!(window.trip && window.trip.id),
+    }));
+    expect(state.hash).toContain('/discovery');
+    expect(state.homeDisplay).toBe('none');
+    expect(state.tripLoaded).toBe(true);
+  });
+
+  // PD.331 regression test #2: the NEW-trip variant (Neal's exact
+  // report — "it still opens in trip with no destinations"). A
+  // brand-new trip sits in Discovery with ZERO destinations (nothing
+  // published yet). Three separate gaps made refresh lose the screen:
+  //   1. No Discovery entry path stamped the URL for regular new
+  //      trips (only the paste-list import did) — renderActivityPicker
+  //      now stamps, and _initialTripSave stamps at mint time.
+  //   2. enterApp's baseline drawTripMode stomped deep links (test #1).
+  //   3. The boot-time tripChange repaint (renderTripPage →
+  //      drawTripMode) pushed the bare trip route over /discovery
+  //      before dispatch — repaints now pass noUrlStamp.
+  test('new trip (no destinations): refresh in Discovery restores Discovery', async ({ page }) => {
+    await bootClean(page);
+
+    // New trip lands in Discovery: _tb seeded, picker rendered —
+    // NOTHING published, trip.destinations stays empty.
+    await page.evaluate((candidates) => {
+      window.MaxEnginePicker.resetState({
+        name: 'Iceland Fresh',
+        region: 'Iceland',
+        when: '2026-09-01', duration: '8 days', intent: 'Ring Road',
+        interests: [], drivers: [], tripMode: 'place',
+        placeName: 'Iceland', placeContext: '',
+        partyComposition: 'couple', partySize: '2', partyAges: 'adults',
+        physicalAbility: 'moderate', avoid: {}, pace: 'enough',
+        anchors: '', familiarity: 'first', accommodation: '', compromises: '', hardlimits: '',
+        entry: '', tbExit: '', entryMode: 'flight', exitMode: 'flight',
+        candidates: candidates, chips: [], activityChips: [], requiredPlaces: [],
+      });
+      window._mdcItems = [];
+      window.renderActivityPicker();
+    }, ICELAND_CANDIDATES);
+
+    // Simulate LLM completion: placeActivities arrive, the initial
+    // save mints the trip, the picker re-renders.
+    await page.evaluate(() => {
+      window._tb.placeActivities = [{
+        id: 'a1', section: 'Sights', type: 'sight', name: 'Golden Circle',
+        requiredPlaces: [{ place: 'Reykjavik', country: 'Iceland' }],
+      }];
+      window._initialTripSave();
+      window.renderActivityPicker();
+    });
+    // The mint must have put the discovery route in the URL.
+    await page.waitForFunction(() => location.hash.includes('/discovery'), { timeout: 5000 });
+
+    // THE SCENARIO: hard refresh on a destination-less trip in Discovery.
+    await page.reload();
+
+    await page.waitForFunction(() => {
+      const ov = document.getElementById('trip-brief-overlay');
+      return location.hash.includes('/discovery') &&
+        ov && ov.style.display && ov.style.display !== 'none';
+    }, { timeout: 10000 });
+
+    const state = await page.evaluate(() => ({
+      hash: location.hash,
+      homeDisplay: document.getElementById('home-screen').style.display,
+      destCount: window.trip && window.trip.destinations ? window.trip.destinations.length : -1,
+      candidatesRestored: window._tb && Array.isArray(window._tb.candidates) ? window._tb.candidates.length : 0,
+    }));
+    expect(state.hash).toContain('/discovery');
+    expect(state.homeDisplay).toBe('none');
+    expect(state.destCount).toBe(0);                 // still unpublished
+    expect(state.candidatesRestored).toBeGreaterThan(0); // Discovery rehydrated
+  });
+
+  // PD.333 regression test: the SECOND Discovery surface. The
+  // candidate explorer (#candidate-explorer-overlay) was invisible to
+  // the router — it never stamped the URL and the dispatcher couldn't
+  // restore it, so a refresh mid-explorer-session lost the screen
+  // ("reloading when discovery was the only window ended up in trip
+  // yet again"). Now: showCandidateExplorer stamps /discovery, and
+  // the dispatcher restores the explorer when the trip has candidates
+  // but no placeActivities.
+  test('candidate explorer: refresh restores the explorer, not trip view', async ({ page }) => {
+    await bootClean(page);
+
+    await page.evaluate((candidates) => {
+      window.MaxEnginePicker.resetState({
+        name: 'Iceland Explorer',
+        region: 'Iceland',
+        when: '2026-09-01', duration: '8 days', intent: 'Ring Road',
+        interests: [], drivers: [], tripMode: 'place',
+        placeName: 'Iceland', placeContext: '',
+        partyComposition: 'couple', partySize: '2', partyAges: 'adults',
+        physicalAbility: 'moderate', avoid: {}, pace: 'enough',
+        anchors: '', familiarity: 'first', accommodation: '', compromises: '', hardlimits: '',
+        entry: '', tbExit: '', entryMode: 'flight', exitMode: 'flight',
+        candidates: candidates, chips: [], activityChips: [], requiredPlaces: [],
+      });
+      window._mdcItems = [];
+      // Mint with candidates only — no placeActivities (the explorer
+      // path: candidate-first trips).
+      window._initialTripSave();
+      window.showCandidateExplorer(window._tb.candidates, false);
+    }, ICELAND_CANDIDATES);
+
+    await page.waitForFunction(() => {
+      const ce = document.getElementById('candidate-explorer-overlay');
+      return location.hash.includes('/discovery') &&
+        ce && ce.style.display && ce.style.display !== 'none';
+    }, { timeout: 5000 });
+
+    await page.reload();
+
+    await page.waitForFunction(() => {
+      const ce = document.getElementById('candidate-explorer-overlay');
+      return location.hash.includes('/discovery') &&
+        ce && ce.style.display && ce.style.display !== 'none';
+    }, { timeout: 10000 });
+
+    const state = await page.evaluate(() => ({
+      hash: location.hash,
+      candidatesRestored: window._tb && Array.isArray(window._tb.candidates) ? window._tb.candidates.length : 0,
+    }));
+    expect(state.hash).toContain('/discovery');
+    expect(state.candidatesRestored).toBeGreaterThan(0);
+  });
+
+  // PD.334 regression test: THE core complaint — "a simple process of
+  // saving a trip, or a discovery page, and its data, and loading
+  // from where you saved." Curation actions (keep/reject) used to
+  // mutate _tb in memory with NO persist call: closing the tab lost
+  // the work. Now every curation action persists (600ms debounce)
+  // AND pagehide flushes the pending debounce. This test rejects a
+  // candidate and reloads IMMEDIATELY (inside the debounce window) —
+  // the pagehide flush must have written it.
+  test('Discovery curation survives immediate close/reload (save-on-leave)', async ({ page }) => {
+    await bootClean(page);
+
+    await page.evaluate((candidates) => {
+      window.MaxEnginePicker.resetState({
+        name: 'Iceland Curate',
+        region: 'Iceland',
+        when: '2026-09-01', duration: '8 days', intent: 'Ring Road',
+        interests: [], drivers: [], tripMode: 'place',
+        placeName: 'Iceland', placeContext: '',
+        partyComposition: 'couple', partySize: '2', partyAges: 'adults',
+        physicalAbility: 'moderate', avoid: {}, pace: 'enough',
+        anchors: '', familiarity: 'first', accommodation: '', compromises: '', hardlimits: '',
+        entry: '', tbExit: '', entryMode: 'flight', exitMode: 'flight',
+        candidates: candidates, chips: [], activityChips: [], requiredPlaces: [],
+      });
+      window._mdcItems = [];
+      window._initialTripSave();
+      window.showCandidateExplorer(window._tb.candidates, false);
+    }, ICELAND_CANDIDATES);
+    await page.waitForFunction(() => location.hash.includes('/discovery'), { timeout: 5000 });
+
+    // Curate: reject Vik (c2 is 'keep' in the fixture).
+    await page.evaluate(async () => { await window.setCS('c2', 'reject'); });
+
+    // Reload IMMEDIATELY — inside the 600ms persist debounce. The
+    // pagehide save-on-leave flush is what must write it.
+    await page.reload();
+    await page.waitForFunction(() => window.MaxDB && window.trip && window.trip.id, { timeout: 10000 });
+
+    const after = await page.evaluate(() => {
+      const c2 = (window.trip.candidates || []).find(c => c && c.id === 'c2');
+      return { c2Status: c2 ? c2.status : 'MISSING' };
+    });
+    expect(after.c2Status).toBe('reject');
+  });
+
+  // PD.338 regression test: a Discovery-stage trip (no destinations,
+  // has candidates) reopens INTO Discovery from the home screen —
+  // not into an empty trip overview. ("If you return to home from
+  // the discovery view, it still opens in the trip view.")
+  test('Discovery-stage trip reopens into Discovery from home, not empty trip view', async ({ page }) => {
+    await bootClean(page);
+
+    await page.evaluate((candidates) => {
+      window.MaxEnginePicker.resetState({
+        name: 'Iceland Reopen',
+        region: 'Iceland',
+        when: '2026-09-01', duration: '8 days', intent: 'Ring Road',
+        interests: [], drivers: [], tripMode: 'place',
+        placeName: 'Iceland', placeContext: '',
+        partyComposition: 'couple', partySize: '2', partyAges: 'adults',
+        physicalAbility: 'moderate', avoid: {}, pace: 'enough',
+        anchors: '', familiarity: 'first', accommodation: '', compromises: '', hardlimits: '',
+        entry: '', tbExit: '', entryMode: 'flight', exitMode: 'flight',
+        candidates: candidates, chips: [], activityChips: [], requiredPlaces: [],
+      });
+      window._mdcItems = [];
+      window._initialTripSave();              // mint: candidates, no destinations
+      window.showCandidateExplorer(window._tb.candidates, false);
+    }, ICELAND_CANDIDATES);
+    await page.waitForFunction(() => location.hash.includes('/discovery'), { timeout: 5000 });
+    const tripId = await page.evaluate(() => window.trip.id);
+
+    // Home from Discovery.
+    await page.evaluate(() => window.goHome());
+    await page.waitForFunction(() => {
+      const hs = document.getElementById('home-screen');
+      return location.hash === '#/' && hs && hs.style.display === 'flex';
+    }, { timeout: 5000 });
+
+    // Reopen the trip from the home screen (same path the card uses).
+    await page.evaluate((id) => window.selectTrip(id), tripId);
+    await page.waitForFunction(() => {
+      const ov = document.getElementById('trip-brief-overlay');
+      const ce = document.getElementById('candidate-explorer-overlay');
+      const anyDiscovery = (ov && ov.style.display && ov.style.display !== 'none')
+        || (ce && ce.style.display && ce.style.display !== 'none');
+      return location.hash.includes('/discovery') && anyDiscovery;
+    }, { timeout: 10000 });
+
+    const state = await page.evaluate(() => ({ hash: location.hash, destCount: window.trip.destinations.length }));
+    expect(state.hash).toContain('/discovery');
+    expect(state.destCount).toBe(0);
+  });
+
+  // PD.338a regression test: the BUILT-trip variant — "if you had
+  // built the trip and went back to discovery (likely)", reopening
+  // from home must land back in Discovery, not the trip overview.
+  // Last-screen memory is local-only and written solely by the route
+  // dispatcher.
+  test('built trip last seen in Discovery reopens into Discovery from home', async ({ page }) => {
+    await bootClean(page);
+
+    // Build a full trip (destinations exist).
+    await page.evaluate((candidates) => {
+      window.MaxEnginePicker.resetState({
+        name: 'Iceland Built Reopen',
+        region: 'Iceland',
+        when: '2026-08-01', duration: '10 days', intent: 'Ring Road',
+        interests: ['waterfalls'], drivers: [], tripMode: 'place',
+        placeName: 'Iceland', placeContext: '',
+        partyComposition: 'couple', partySize: '2', partyAges: 'adults',
+        physicalAbility: 'moderate', avoid: {}, pace: 'enough',
+        anchors: '', familiarity: 'first', accommodation: '', compromises: '', hardlimits: '',
+        entry: '', tbExit: '', entryMode: 'flight', exitMode: 'flight',
+        candidates: candidates, chips: [], activityChips: [], requiredPlaces: [],
+      });
+      window._mdcItems = [];
+    }, ICELAND_CANDIDATES);
+    await page.evaluate(async () => { await window.buildFromCandidates(); });
+    await page.waitForSelector('.tm-dest', { timeout: 5000 });
+
+    // Go back into Discovery on the built trip, then Home.
+    await page.evaluate(() => {
+      window.MaxRoute.navigate({ screen: window.MaxRoute.SCREENS.DISCOVERY, tripId: window.trip.id });
+    });
+    await page.waitForFunction(() => location.hash.includes('/discovery'), { timeout: 5000 });
+    const tripId = await page.evaluate(() => window.trip.id);
+    // goHome confirms ("Return to trips?") on built trips — accept it.
+    page.on('dialog', (d) => d.accept());
+    await page.evaluate(() => window.goHome());
+    await page.waitForFunction(() => location.hash === '#/', { timeout: 5000 });
+
+    // Reopen from home → must resume Discovery, not the trip overview.
+    await page.evaluate((id) => window.selectTrip(id), tripId);
+    await page.waitForFunction(() => {
+      const ov = document.getElementById('trip-brief-overlay');
+      const ce = document.getElementById('candidate-explorer-overlay');
+      const anyDiscovery = (ov && ov.style.display && ov.style.display !== 'none')
+        || (ce && ce.style.display && ce.style.display !== 'none');
+      return location.hash.includes('/discovery') && anyDiscovery;
+    }, { timeout: 10000 });
+
+    const state = await page.evaluate(() => ({
+      hash: location.hash,
+      destCount: window.trip.destinations.length,
+    }));
+    expect(state.hash).toContain('/discovery');
+    expect(state.destCount).toBeGreaterThan(0); // built trip, resumed in Discovery
+  });
 });

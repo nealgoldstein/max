@@ -122,11 +122,21 @@
         method: method,
         headers: headers,
         body: opts.body ? JSON.stringify(opts.body) : undefined,
+        // PD.334: keepalive lets a save PUT issued during pagehide
+        // survive the tab teardown (the flush-on-close path). Bodies
+        // over the ~64KB keepalive cap fall back silently — browsers
+        // ignore the flag rather than reject, except Chrome which
+        // throws; guarded below.
+        keepalive: !!(opts.keepalive && (!opts.body || JSON.stringify(opts.body).length < 60000)),
       });
     } catch (e) {
-      // Network unreachable — server down, offline, etc. Surface
-      // a typed error so callers can distinguish from auth/data errors.
-      var err = new Error('Server unreachable: ' + (e && e.message ? e.message : 'unknown'));
+      // Network unreachable — server down, offline, CORS preflight,
+      // etc. Surface a typed error NAMING THE OPERATION so a console
+      // log can distinguish "the POST after the 404 died" from "the
+      // prefs pull died" (PD.373 — the bare message made transient
+      // failures undiagnosable).
+      var err = new Error('Server unreachable on ' + (opts.method || 'GET') + ' ' + path
+        + ': ' + (e && e.message ? e.message : 'unknown'));
       err.code = 'NETWORK';
       throw err;
     }
@@ -181,6 +191,9 @@
       errBad.code = resp.status === 409 ? 'CONFLICT' : 'HTTP';
       errBad.status = resp.status;
       errBad.data = data;
+      // PD.334: surface the server's revision on conflicts so the
+      // save path can log/record the real divergence.
+      if (data && typeof data.serverRev === 'number') errBad.serverRev = data.serverRev;
       throw errBad;
     }
     return data;
@@ -403,12 +416,15 @@
     return request('/trips/' + encodeURIComponent(id));
   }
   async function createTrip(payload) {
-    return request('/trips', { method: 'POST', body: payload });
+    return request('/trips', { method: 'POST', body: payload, keepalive: _flushing });
   }
   async function updateTrip(id, payload) {
     return request('/trips/' + encodeURIComponent(id), {
       method: 'PUT',
       body: payload,
+      // PD.334: keepalive during the flush-on-close path so the PUT
+      // survives tab teardown.
+      keepalive: _flushing,
     });
   }
   async function deleteTrip(id) {
@@ -645,7 +661,34 @@
   // we POST first.
 
   var _saveTimer = null;
+  var _netRetryCount = 0; // PD.373: transient-failure retry budget
   var _saveInFlight = false;
+  var _flushing = false; // PD.334: true while flushNow() runs (pagehide path)
+
+  // ── PD.334: revision tracking ──────────────────────────────
+  // The server owns a monotonic `rev` per trip, bumped on every
+  // successful write. We record the rev each save/pull was based on;
+  // pullAll compares revs instead of wall clocks (device clocks
+  // can't be trusted — a fast clock made stale data look fresh under
+  // pure last-write-wins). Falls back to timestamps when the server
+  // hasn't sent a rev (pre-migration rows).
+  var REVS_KEY = 'max-sync-revs';
+  function _readRevs() {
+    try { return JSON.parse(localStorage.getItem(REVS_KEY) || '{}'); }
+    catch (_) { return {}; }
+  }
+  function _getRev(tripId) {
+    var r = _readRevs()[tripId];
+    return (typeof r === 'number') ? r : 0;
+  }
+  function _setRev(tripId, rev) {
+    if (typeof rev !== 'number') return;
+    try {
+      var m = _readRevs();
+      m[tripId] = rev;
+      localStorage.setItem(REVS_KEY, JSON.stringify(m));
+    } catch (_) {}
+  }
 
   function _setStatus(text, color) {
     // v337: don't cache the element. drawTripMode rebuilds the
@@ -664,6 +707,22 @@
     if (_saveTimer) clearTimeout(_saveTimer);
     _setStatus('changes pending…', '#aaa');
     _saveTimer = setTimeout(_doSave, 1500);
+  }
+
+  // PD.334: flush the pending debounce NOW. The save/load trace found
+  // that a pending _saveTimer was simply ABANDONED when the tab closed
+  // — any edit made within 1.5s of closing never reached the server.
+  // Called from the pagehide/visibilitychange handler (index.html).
+  // The request uses fetch keepalive semantics where available so the
+  // PUT survives the page teardown.
+  function flushNow() {
+    if (!isSignedIn()) return;
+    if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
+    _flushing = true;
+    try { _doSave(); } catch (_) {}
+    // _doSave is async; clear the flag on the next tick — the fetch
+    // (with keepalive) has been issued by then.
+    setTimeout(function () { _flushing = false; }, 0);
   }
 
   async function _doSave() {
@@ -704,25 +763,76 @@
     _setStatus('saving…', '#888');
     try {
       try {
-        await updateTrip(tripId, { body: body, updatedAt: now, name: name });
+        // PD.334: send the rev this edit was based on; record the
+        // server's new rev from the response as the next base.
+        var _putResp = await updateTrip(tripId, {
+          body: body, updatedAt: now, name: name, baseRev: _getRev(tripId),
+        });
+        if (_putResp && _putResp.trip && typeof _putResp.trip.rev === 'number') {
+          _setRev(tripId, _putResp.trip.rev);
+        }
         _setStatus('saved ✓', '#2a7a4e');
+        _netRetryCount = 0;
       } catch (e) {
         if (e.status === 404) {
           // Server doesn't have this trip yet. POST it.
-          await createTrip({ id: tripId, name: name, body: body, updatedAt: now });
+          var _postResp = await createTrip({ id: tripId, name: name, body: body, updatedAt: now });
+          if (_postResp && _postResp.trip && typeof _postResp.trip.rev === 'number') {
+            _setRev(tripId, _postResp.trip.rev);
+          }
           _setStatus('saved ✓', '#2a7a4e');
         } else if (e.code === 'CONFLICT') {
-          // Server has a newer copy. For v1 we just resave with force,
-          // since the user is actively typing here. A future round
-          // will surface a "server has newer — keep yours / theirs"
-          // chooser.
-          await updateTrip(tripId, {
-            body: body,
-            updatedAt: now,
-            name: name,
-            force: true,
-          });
-          _setStatus('saved ✓ (overrode server)', '#b05820');
+          // PD.362: a REAL conflict (rev mismatch, not clock skew) is
+          // the USER'S decision, not the sync layer's. If the app
+          // registered a chooser (MaxSync.onConflict), ask: 'mine'
+          // forces this device's version; 'theirs' adopts the
+          // server's copy. Without a chooser, keep the v1 behavior
+          // (force local) so headless/test contexts never block.
+          console.warn('[max-sync] REAL sync conflict on', tripId,
+            '— serverRev=', e.serverRev, 'baseRev=', _getRev(tripId));
+          var _choice = 'mine';
+          var _mx = global.MaxSync;
+          if (_mx && typeof _mx.onConflict === 'function') {
+            try {
+              _choice = await _mx.onConflict({
+                tripId: tripId, name: name,
+                serverRev: e.serverRev, baseRev: _getRev(tripId),
+              });
+            } catch (_) { _choice = 'mine'; }
+          }
+          if (_choice === 'theirs') {
+            // Adopt the server's copy: fetch, store locally through
+            // MaxDB (fires tripWritten so the UI reloads), record rev.
+            var _srv = await getTrip(tripId);
+            var _srvTrip = _srv && (_srv.trip || _srv);
+            if (_srvTrip && _srvTrip.body) {
+              var _parsed = (typeof _srvTrip.body === 'string')
+                ? JSON.parse(_srvTrip.body) : _srvTrip.body;
+              if (global.MaxDB && global.MaxDB.trip &&
+                  typeof global.MaxDB.trip.writeRaw === 'function') {
+                global.MaxDB.trip.writeRaw(tripId, _parsed);
+              }
+              if (typeof _srvTrip.rev === 'number') _setRev(tripId, _srvTrip.rev);
+              if (_mx && typeof _mx.onAdoptedServerTrip === 'function') {
+                try { _mx.onAdoptedServerTrip(tripId, _parsed); } catch (_) {}
+              }
+              _setStatus('using other device\u2019s version \u2713', '#2a7a4e');
+            } else {
+              _setStatus('could not fetch other version — kept yours', '#b05820');
+            }
+          } else {
+            var _forceResp = await updateTrip(tripId, {
+              body: body,
+              updatedAt: now,
+              name: name,
+              baseRev: _getRev(tripId),
+              force: true,
+            });
+            if (_forceResp && _forceResp.trip && typeof _forceResp.trip.rev === 'number') {
+              _setRev(tripId, _forceResp.trip.rev);
+            }
+            _setStatus('saved \u2713 (kept this device\u2019s version)', '#b05820');
+          }
         } else {
           throw e;
         }
@@ -732,7 +842,21 @@
       if (e.code === 'AUTH') {
         _setStatus('signed out — sign in again', '#c44');
       } else if (e.code === 'NETWORK') {
-        _setStatus('offline — saved locally only', '#aaa');
+        // PD.373: a transient blip must not strand the trip locally
+        // until the next curation action. Retry with backoff — 10s,
+        // 30s, 90s — and stop after three attempts (the pagehide
+        // flush still covers tab close; a real outage shows the
+        // offline status without hammering).
+        _netRetryCount = (_netRetryCount || 0) + 1;
+        if (_netRetryCount <= 3) {
+          var _delay = [10000, 30000, 90000][_netRetryCount - 1];
+          console.log('[max-sync] retrying save in ' + (_delay / 1000) + 's (attempt '
+            + _netRetryCount + '/3)');
+          setTimeout(function () { _doSave(); }, _delay);
+          _setStatus('offline — will retry', '#aaa');
+        } else {
+          _setStatus('offline — saved locally only', '#aaa');
+        }
       } else {
         _setStatus('save failed: ' + e.message, '#c44');
       }
@@ -825,9 +949,11 @@
       }
       var key = 'max-trip-' + s.id;
       var localTimestamp = 0;
+      var hasLocalBody = false;
       try {
         var local = localStorage.getItem(key);
         if (local) {
+          hasLocalBody = true;
           var parsed = JSON.parse(local);
           // Use the trip's __saved__ timestamp if present, otherwise
           // skip — local always wins for unfetched trips so we don't
@@ -839,7 +965,19 @@
 
       var serverTimestamp = s.updatedAt ? new Date(s.updatedAt).getTime() : 0;
 
-      if (serverTimestamp > localTimestamp) {
+      // PD.334: revision-based decision when the server sends a rev.
+      // Pull the body ONLY if the server has revisions we haven't
+      // recorded (s.rev > our recorded rev) — device clocks play no
+      // part. If we have no local body at all, always pull. Falls
+      // back to the legacy clock comparison for pre-rev servers.
+      var shouldPull;
+      if (typeof s.rev === 'number') {
+        shouldPull = !hasLocalBody || s.rev > _getRev(s.id);
+      } else {
+        shouldPull = serverTimestamp > localTimestamp;
+      }
+
+      if (shouldPull) {
         // Server is newer — pull full body
         try {
           var full = await getTrip(s.id);
@@ -871,6 +1009,10 @@
               localStorage.setItem(key, serialized);
             }
             _ensureIndexEntry(s.id, full.trip.name, full.trip.body, serverTimestamp);
+            // PD.334: record the rev this body corresponds to — the
+            // base for our next push.
+            if (typeof full.trip.rev === 'number') _setRev(s.id, full.trip.rev);
+            else if (typeof s.rev === 'number') _setRev(s.id, s.rev);
             pulled++;
           }
         } catch (e) {
@@ -1372,6 +1514,7 @@
     signOut: signOut,
     showSignInModal: showSignInModal,
     scheduleSave: scheduleSave,
+    flushNow: flushNow, // PD.334: flush pending debounce (pagehide path)
     pullAll: pullAll,
     listTrips: listTrips,
     getTrip: getTrip,

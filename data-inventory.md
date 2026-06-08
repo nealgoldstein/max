@@ -33,7 +33,6 @@
 | `_version` | S | Mutation counter for tripChange listeners. |
 | `__saved__` | S | Last-saved timestamp. Sync uses for last-write-wins. |
 | `name` | U | Trip title. Edited via `TripStore.setName`. |
-| `_lastScreen` | U | Restore-on-load state. Survives rebuild. |
 | `destinations[]` | M | LLM produces the base; user adds reservations, notes, day items per dest. See per-destination table. |
 | `placeActivities[]` | M | LLM produces sections; user toggles `_keep` per requiredPlace, `checked` per section, `_rejected` for taste signal. PD.303 invariant: shared reference with `_tb.placeActivities`. |
 | `candidates[]` | M | LLM-generated; user sets `status: keep \| reject`, `tripRole`, `_roleTouched`. |

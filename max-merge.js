@@ -94,7 +94,6 @@
   // Top-level user-owned trip fields that always carry forward.
   var TRIP_USER_FIELDS = [
     "name",
-    "_lastScreen",
     "trackSpending",
     "_gapNudgeDismissed",
     "_enhanceHintDismissed"

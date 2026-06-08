@@ -2241,8 +2241,18 @@
       var _preservedId = (trip && trip.id)
         || (global.TripStore && global.TripStore.trip && global.TripStore.trip.id)
         || null;
+      // PD.370: carry the LIVE picker arrays onto the fresh stub
+      // BEFORE the store swap. _tb.candidates/_tb.placeActivities are
+      // routed views of the store's trip — replacing the trip with a
+      // stub that lacks these fields voided the views mid-publish
+      // (every post-swap reader saw [] — rebuilt trips lost their
+      // candidate flips). Reading them HERE resolves against the
+      // OLD trip; putting them on the stub keeps the views seamless
+      // across the swap.
       trip={id:_preservedId, name:resolvedName,destinations:[],legs:{},trackSpending:false,pendingActions:[],
-        brief:newBrief, mdcItems:newMdcItems, logistics:null};
+        brief:newBrief, mdcItems:newMdcItems, logistics:null,
+        candidates: (_tb && Array.isArray(_tb.candidates)) ? _tb.candidates : [],
+        placeActivities: (_tb && Array.isArray(_tb.placeActivities)) ? _tb.placeActivities : []};
       activeDest=null; destCtr=0; sidCtr=100; bkCtr=0; _actionCtr=0; _fileHandle=null;
       trip.createdAt = (new Date()).toISOString();
       // Phase 4 bridge: re-anchor TripStore to the freshly-stubbed trip
@@ -2286,8 +2296,35 @@
           wisps.map(function (w) { return w.text; }));
       }
     }
-    var tripId = isRebuild ? (_currentTripId || ("trip-"+Date.now())) : ("trip-"+Date.now());
+    // ARCH (post-PD.330): tripId IS trip.id. Previously fresh builds
+    // always minted a new id here even when the stub above preserved
+    // one (divergence: envelope written under the new slot, trip.id
+    // pointing at the old one), and when NO id was preserved (file-
+    // load and test paths that bypass _initialTripSave) trip.id stayed
+    // null through the whole publish:
+    //   * TripStore never anchored (the replace() bridge above is
+    //     gated on _preservedId) — every TripStore mutator below
+    //     no-op'd with "cannot mutate — no trip loaded"
+    //   * the MaxRoute.navigate at the end of publishTrip and
+    //     enterApp's URL normalization both skip on falsy trip.id,
+    //     so the hash never left "" — and enterApp's deferred
+    //     _dispatchRoute parsed "" as HOME and re-rendered the home
+    //     screen OVER the freshly drawn trip view (the picker-flow
+    //     Playwright failures: .tm-dest cards present but hidden).
+    // One identity, assigned once, anchored everywhere.
+    var tripId = (trip && trip.id)
+      || (isRebuild ? _currentTripId : null)
+      || ("trip-"+Date.now());
     _currentTripId = tripId;
+    if (trip && !trip.id) {
+      trip.id = tripId;
+      if (global.TripStore && typeof global.TripStore.replace === "function"
+          && !(typeof global.TripStore.isLoaded === "function" && global.TripStore.isLoaded())) {
+        try { global.TripStore.replace(trip); } catch (e) {
+          console.warn("[Max publishTrip] TripStore.replace (fresh mint) failed:", e && e.message);
+        }
+      }
+    }
 
     // Parse start date from brief
     var startDate=parseStartDateFromBrief(_tb.when||"");
@@ -3780,36 +3817,18 @@
     // trip.name (resolved to placeName/region above) so the home
     // screen's trip list shows "Switzerland" instead of "Untitled —
     // May 1, 2026".
-    // Round EI: idempotent index update. If an entry already exists for
-    // this tripId (i.e. this is a rebuild of an existing trip),
-    // overwrite its fields in place. Without this, every rebuild
-    // appended a duplicate entry, and the home screen's delete-trip
-    // filter (`t.id !== id`) would remove ALL duplicate entries — and
-    // if any of those duplicates somehow shared an id with a different
-    // trip (rebuild race, _currentTripId carryover), deleting one
-    // would also wipe the other. Self-heals existing duplicate-laden
-    // indexes by deduping when the user does any rebuild.
-    var _existingIdx = _tripsIndex.findIndex ? _tripsIndex.findIndex(function(t){return t && t.id === tripId;}) : -1;
-    if (_existingIdx === -1) {
-      // Some older browsers / older index entries: linear scan fallback.
-      for (var _ei = 0; _ei < _tripsIndex.length; _ei++) {
-        if (_tripsIndex[_ei] && _tripsIndex[_ei].id === tripId) { _existingIdx = _ei; break; }
-      }
-    }
-    // Also dedupe any extra duplicates beyond the first match (defensive
-    // self-heal for indexes that have already accumulated dupes).
-    _tripsIndex = _tripsIndex.filter(function(t, i){
-      if (!t || t.id !== tripId) return true;
-      return i === _existingIdx;
+    // PD.327: route through the single index mutator. Replaces the
+    // Round EI inline dedup logic — the architectural fix moved that
+    // dedup INTO _upsertTripIndexEntry, so every mint path benefits
+    // from it, not just this one. The mutator handles both new-trip
+    // (append) and rebuild (in-place merge) cases by checking id.
+    global._upsertTripIndexEntry({
+      id: tripId,
+      name: trip.name,
+      destCount: kept.length,
+      dateRange: "",
+      savedAt: new Date().toISOString()
     });
-    if (_existingIdx >= 0 && _tripsIndex[_existingIdx]) {
-      _tripsIndex[_existingIdx].name = trip.name;
-      _tripsIndex[_existingIdx].destCount = kept.length;
-      _tripsIndex[_existingIdx].dateRange = "";
-      _tripsIndex[_existingIdx].savedAt = new Date().toISOString();
-    } else {
-      _tripsIndex.push({id:tripId,name:trip.name,destCount:kept.length,dateRange:"",savedAt:new Date().toISOString()});
-    }
     // PD.234 (was PD.223 + PD.232 fallback): attach within-sights to
     // parent destination's suggestions[]. Reads directly from
     // _tb._sightsClassified — the single source of truth.
@@ -3942,7 +3961,30 @@
           // (3) fallback
           return (trip.destinations || [])[0] || null;
         }
+        // PD.354: the considered pool is a FUNCTION of the current
+        // Discovery set + current route — re-derived from scratch at
+        // every publish, never accumulated across publishes. Without
+        // this, each re-create's LLM nondeterminism (differently
+        // named wayside/day-trip proposals) stacked new entries on
+        // top of the old ones: 39 → 67 considered across two creates
+        // of the same trip. Rejected names are NOT cleared — user
+        // taste memory is permanent.
+        (trip.destinations || []).forEach(function(d){
+          if (d && d._sightSources && Array.isArray(d._sightSources.considered)
+              && d._sightSources.considered.length) {
+            d._sightSources.considered = [];
+            if (typeof global._recomputeSuggestions === "function") {
+              try { global._recomputeSuggestions(d); } catch(_){}
+            }
+          }
+        });
         var _pd269ConsideredCount = 0, _pd269RejectedCount = 0;
+        // PD.367: reconcile the math. "N unchecked sights" in the
+        // receipt vs "Considered on (M)" in the trip diverged (154 vs
+        // 102) with no visible reason. Count every skip by cause so
+        // one console line accounts for the whole gap.
+        var _pd269Refs = 0, _pd269SkipDest = 0, _pd269SkipNoParent = 0, _pd269Dupes = 0, _pd269SkipHubs = 0;
+        var _pd269SeenKey = {};
         (_tb.placeActivities || []).forEach(function(it) {
           if (!it || !Array.isArray(it.requiredPlaces)) return;
           // Skip route-level items; their endpoints are destinations,
@@ -3951,14 +3993,24 @@
           it.requiredPlaces.forEach(function(p) {
             if (!p || !p.place) return;
             var k = _pd223NrmFn(p.place);
+            var _isRej0 = p._rejected === true;
+            var _isCons0 = p._keep === false && !_isRej0;
+            if (_isCons0 || _isRej0) _pd269Refs++;
+            // PD.379: auto-created hubs are STAY PROPOSALS, not sights
+            // — an uncommitted hub stays in Discovery's Recommended
+            // section (unchecked) and must not appear in the trip
+            // view's considered-sights pool as a phantom town pin.
+            if (p._autoCreated) { if (_isCons0 || _isRej0) _pd269SkipHubs++; return; }
             // Skip places that became destinations or are essentials —
             // they aren't sights to surface under another destination.
-            if (_pd223DestByNorm[k]) return;
-            var isRejected = p._rejected === true;
-            var isConsidered = p._keep === false && !isRejected;
+            if (_pd223DestByNorm[k]) { if (_isCons0 || _isRej0) _pd269SkipDest++; return; }
+            var isRejected = _isRej0;
+            var isConsidered = _isCons0;
             if (!isConsidered && !isRejected) return;
+            if (_pd269SeenKey[k]) { _pd269Dupes++; return; }
+            _pd269SeenKey[k] = true;
             var parentDest = _pd269ResolveParent(p);
-            if (!parentDest) return;
+            if (!parentDest) { _pd269SkipNoParent++; return; }
             // Build the sight payload.
             var _sid;
             if (typeof global.sidCtr === "number") {
@@ -4044,9 +4096,13 @@
             }
           });
         });
-        if (_pd269ConsideredCount || _pd269RejectedCount) {
-          console.log("[Max PD.269] attached " + _pd269ConsideredCount
-            + " considered + " + _pd269RejectedCount + " rejected sight(s) to parent destinations.");
+        if (_pd269Refs) {
+          console.log("[Max PD.269] " + _pd269Refs + " unchecked/rejected ref(s) → "
+            + _pd269ConsideredCount + " considered + " + _pd269RejectedCount + " rejected"
+            + " (skipped: " + _pd269SkipDest + " already-destinations, "
+            + _pd269Dupes + " duplicate name(s), "
+            + _pd269SkipNoParent + " unresolvable parent(s), "
+            + _pd269SkipHubs + " uncommitted hub(s))");
         }
       } catch (e) {
         console.warn("[Max PD.269] considered/rejected attach failed (non-fatal):", e && e.message);
@@ -4300,11 +4356,15 @@
     // the subscriber based on the isRebuild flag in the payload.
     var _hnIsRebuild = !!(_tb && _tb._isRebuild);
     if (_tb) _tb._isRebuild = false; // consume the flag
-    // PD.73: after Choreograph the user lands on trip view; record that
-    // so a reopen goes there. _recordScreen lives in index.html — guard
-    // for engine-only callers.
-    if (typeof _recordScreen === "function") {
-      try { _recordScreen("trip"); } catch(_){}
+    // PD.73 / PD.330: after Choreograph the user lands on trip view;
+    // navigate to that route so reload goes there.
+    if (typeof global.MaxRoute !== "undefined" && trip && trip.id) {
+      try {
+        global.MaxRoute.navigate({
+          screen: global.MaxRoute.SCREENS.TRIP,
+          tripId: trip.id
+        });
+      } catch(_){}
     }
     pickerEmit('published', { tripId: tripId, isRebuild: _hnIsRebuild });
   }
@@ -4774,7 +4834,13 @@
     // Replace the entire draft. Used by picker.start() to begin a
     // fresh brief; matches the inline script's `_tb = {...}` reset.
     resetState: function (initial) {
-      global._tb = initial || {};
+      // PD.356 (Phase 2): in the browser, _tb.placeActivities is a
+      // routed view of the trip's array (see _tbInstall in
+      // index.html). In Node tests the helper is absent and _tb
+      // stays a plain object.
+      var fresh = initial || {};
+      if (typeof global._tbInstall === "function") fresh = global._tbInstall(fresh);
+      global._tb = fresh;
       pickerEmit('stateReset', global._tb);
     },
 
