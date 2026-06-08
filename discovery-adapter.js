@@ -140,6 +140,16 @@ function _applyDiscoveryModelToSights(){
       newSightItems.push(_scenicGroup);
     }
   }
+  // PD.401i: stash the model's per-section place count. This is THE
+  // single source every displayed section count reads — the TOC and the
+  // section headers no longer each re-dedup placeActivities with their
+  // own lowercase key (three copies of "count a section" that could
+  // drift). One number, the model's, for every surface.
+  var _secCounts = {};
+  newSightItems.forEach(function(it){
+    if (it && it.section) _secCounts[it.section] = (it.requiredPlaces || []).length;
+  });
+  window._discoverySectionCounts = _secCounts;
   // Reassemble: passthrough (stays/routes) FIRST in their order, then
   // the model's sight sections. The stays owner already pinned the stay
   // sections to the top of `passthrough`.
@@ -148,10 +158,20 @@ function _applyDiscoveryModelToSights(){
   });
 }
 
+// PD.401i: the ONE accessor for a section's displayed place count. The
+// model owns it; the TOC and the section headers read it. Returns null
+// for sections the model doesn't own (routes/stays), where the caller
+// keeps its own count.
+function _pmModelSectionCount(sec){
+  var m = window._discoverySectionCounts;
+  return (m && Object.prototype.hasOwnProperty.call(m, sec)) ? m[sec] : null;
+}
+
 // Export onto the global the same way the inline block did, so existing
 // callers (the reconcile chokepoint, the receipt banner) resolve these.
 if (typeof globalThis !== "undefined") {
   globalThis._discoveryOpts = _discoveryOpts;
   globalThis._discoveryConsideredCounts = _discoveryConsideredCounts;
   globalThis._applyDiscoveryModelToSights = _applyDiscoveryModelToSights;
+  globalThis._pmModelSectionCount = _pmModelSectionCount;
 }

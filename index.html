@@ -20743,15 +20743,24 @@ function _renderPlaceActivityItems(){
         if (nameSaysRouteTOC || anyTypeRouteTOC) {
           count = secItems.length;
         } else {
-          var seenPlaces = {};
-          secItems.forEach(function(it){
-            (it.requiredPlaces || []).forEach(function(p){
-              if (!p || !p.place) return;
-              if (p._rejected === true) return;
-              seenPlaces[p.place.toLowerCase()] = true;
+          // PD.401i: ONE count source — the model's per-section count.
+          // Falls back to the local unique-place count only for sections
+          // the model doesn't own (so the TOC and the header can never
+          // show different numbers for the same section).
+          var _mc = (typeof _pmModelSectionCount === "function") ? _pmModelSectionCount(sec) : null;
+          if (_mc != null) {
+            count = _mc;
+          } else {
+            var seenPlaces = {};
+            secItems.forEach(function(it){
+              (it.requiredPlaces || []).forEach(function(p){
+                if (!p || !p.place) return;
+                if (p._rejected === true) return;
+                seenPlaces[p.place.toLowerCase()] = true;
+              });
             });
-          });
-          count = Object.keys(seenPlaces).length;
+            count = Object.keys(seenPlaces).length;
+          }
         }
         if (count === 0) {
           _tb._pd254EmptySections[sec] = true;
@@ -21202,13 +21211,16 @@ function _renderPlaceActivityItems(){
     } else if (sec === "Sights near places you listed") _pd231Noun = "sight";
     else if (window._isStaySection(sec)) _pd231Noun = "stay";
     else if (/^routes\s*[&]\s*regions/i.test(sec)) _pd231Noun = "place";
-    // PD.396: the chip shows the section's actual rows. No special-
-    // casing — because the catchalls now hold ONLY unchecked sights
-    // (the _ensureCatchallsUnchecked invariant), so rows == unchecked
-    // == considered == the receipt. The data is coherent; the count
-    // is trivial.
+    // PD.401i: the chip reads the ONE count source — the model's
+    // per-section count — the SAME number the TOC and the receipt banner
+    // read. `destOrder.length` (the rendered rows) equals it by
+    // construction after the model is applied (PD.401h); using the model
+    // count directly removes the last bespoke per-section dedup so the
+    // surfaces cannot drift even on an accented/alias/coord-merge edge.
+    var _hdrCount = (typeof _pmModelSectionCount === "function") ? _pmModelSectionCount(sec) : null;
+    if (_hdrCount == null) _hdrCount = destOrder.length;
     hdrWrap.innerHTML = '<div class="tb-act-section-title" style="flex:1;">' + _pmEsc(sec) + '</div>'
-      + '<div class="tb-act-section-count">' + destOrder.length + ' ' + _pd231Noun + (destOrder.length===1?'':'s') + '</div>'
+      + '<div class="tb-act-section-count">' + _hdrCount + ' ' + _pd231Noun + (_hdrCount===1?'':'s') + '</div>'
       + moreBtnHtml
       + synthSubtitle;
     // Round NC.X: in by-Place mode, suppress the "All places" header

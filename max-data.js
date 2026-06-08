@@ -234,53 +234,71 @@
     return out;
   }
 
-  // PD.388: committed sights — the green teardrops. Same single
-  // derivation as consideredPlaceKeys, but CHECKED (kept) sight places
-  // that are NOT destinations and NOT stays. These are decisions the
-  // traveler made; the overview map shows them as green teardrops.
+  // PD.388 / PD.401j: committed sights — the green teardrops. The
+  // MEMBERSHIP now comes from the DiscoveryModel (model.committed() =
+  // CHECKED sight places that are not stays, hubs, destinations, or
+  // route umbrellas), the SAME single derivation the considered count
+  // and the render use. This function only resolves coordinates for the
+  // map; it no longer re-decides "what is committed" with its own dedup.
   function getCommittedSights(trip) {
     if (!trip) return [];
     var pa = getPlaceActivities(trip);
     var SK = global.SectionKind || null;
     var isStaySec = function (s) { return SK ? SK.isStay(s) : false; };
+    var firstDest = (getDestinations(trip) || [])[0] || null;
     var excluded = {};
     getDestinations(trip).forEach(function (d) {
       if (d && d.place) excluded[_normKey(d.place)] = true;
     });
-    pa.forEach(function (it) {
-      if (it && isStaySec(it.section)) {
-        (it.requiredPlaces || []).forEach(function (p) {
-          if (p && p.place) excluded[_normKey(p.place)] = true;
-        });
-      }
-    });
-    var out = [], seen = {};
-    var firstDest = (getDestinations(trip) || [])[0] || null;
-    pa.forEach(function (it) {
-      if (!it || it.type === "route" || isStaySec(it.section)) return;
-      (it.requiredPlaces || []).forEach(function (p) {
-        if (!p || !p.place) return;
-        if (p._autoCreated) return;
-        if (p._keep === false || p._rejected === true) return; // CHECKED only
-        var k = _normKey(p.place);
-        if (!k || excluded[k] || seen[k]) return;
-        // Resolve coords (LLM coords → city center → parent offset).
-        var coords = null;
-        if (_isFiniteCoord(p.lat) && _isFiniteCoord(p.lng)) coords = [p.lat, p.lng];
-        else if (typeof global.getCityCenter === "function") {
-          var c = global.getCityCenter(p.place);
-          if (Array.isArray(c) && _isFiniteCoord(c[0]) && _isFiniteCoord(c[1])) coords = c;
-        }
-        if (!coords && firstDest && _isFiniteCoord(firstDest.lat) && _isFiniteCoord(firstDest.lng)) {
-          var _h = 0, nm = String(p.place);
-          for (var _i = 0; _i < nm.length; _i++) _h = (_h * 31 + nm.charCodeAt(_i)) | 0;
-          coords = [firstDest.lat + ((_h & 0xff) / 128 - 1) * 0.005,
-                    firstDest.lng + (((_h >> 8) & 0xff) / 128 - 1) * 0.008];
-        }
-        if (!coords) return;
-        seen[k] = true;
-        out.push({ place: p.place, coords: coords, section: it.section });
+    var MD = global.MaxDiscovery;
+    var committed;
+    if (MD && MD.DiscoveryModel && typeof MD.DiscoveryModel.fromPlaceActivities === "function") {
+      var model = MD.DiscoveryModel.fromPlaceActivities(pa, {
+        isStaySection: isStaySec,
+        isDestination: function (p) { return !!(p && p.place && excluded[_normKey(p.place)]); },
+        isHub: function (p) { return !!(p && (p._autoCreated || p._origin === "max-hub")); }
       });
+      committed = model.committed().map(function (mp) {
+        var c = mp.coords || {};
+        return { place: mp.place,
+                 lat: (typeof c.lat === "number") ? c.lat : (mp.src && mp.src.lat),
+                 lng: (typeof c.lng === "number") ? c.lng : (mp.src && mp.src.lng),
+                 section: MD.PlacementPolicy.sectionFor(mp) };
+      });
+    } else {
+      // Fallback (model unavailable): the previous inline derivation.
+      committed = [];
+      var seenF = {};
+      pa.forEach(function (it) {
+        if (!it || it.type === "route" || isStaySec(it.section)) return;
+        (it.requiredPlaces || []).forEach(function (p) {
+          if (!p || !p.place || p._autoCreated) return;
+          if (p._keep === false || p._rejected === true) return;
+          var k = _normKey(p.place);
+          if (!k || excluded[k] || seenF[k]) return;
+          seenF[k] = true;
+          committed.push({ place: p.place, lat: p.lat, lng: p.lng, section: it.section });
+        });
+      });
+    }
+    // Resolve coordinates for the map (LLM coords → city center → parent
+    // offset). Membership is already decided above; this is presentation.
+    var out = [];
+    committed.forEach(function (s) {
+      var coords = null;
+      if (_isFiniteCoord(s.lat) && _isFiniteCoord(s.lng)) coords = [s.lat, s.lng];
+      else if (typeof global.getCityCenter === "function") {
+        var c = global.getCityCenter(s.place);
+        if (Array.isArray(c) && _isFiniteCoord(c[0]) && _isFiniteCoord(c[1])) coords = c;
+      }
+      if (!coords && firstDest && _isFiniteCoord(firstDest.lat) && _isFiniteCoord(firstDest.lng)) {
+        var _h = 0, nm = String(s.place);
+        for (var _i = 0; _i < nm.length; _i++) _h = (_h * 31 + nm.charCodeAt(_i)) | 0;
+        coords = [firstDest.lat + ((_h & 0xff) / 128 - 1) * 0.005,
+                  firstDest.lng + (((_h >> 8) & 0xff) / 128 - 1) * 0.008];
+      }
+      if (!coords) return;
+      out.push({ place: s.place, coords: coords, section: s.section });
     });
     return out;
   }

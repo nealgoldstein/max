@@ -566,6 +566,73 @@ read the one derivation at the moment it paints; a cached/flagged copy is
 a latent second owner. The remaining count surfaces should be audited for
 the same pattern.
 
+### PD.401i — audit: kill the duplicate count derivations
+A sweep for "second paths" that independently group/count places found
+THREE separate per-section counters, each deduping by its own
+`place.toLowerCase()` key — none using the model's identity:
+
+1. the **TOC** count (`Object.keys(seenPlaces).length`),
+2. the **by-section header** count (`destOrder.length`, from `byDest`),
+3. the **by-place ("All places") header** count (from `byPlace`).
+
+After PD.401h these *happened* to agree (all read the model-synced array),
+but three copies of "count a section" are three chances to drift on an
+accented variant, an alias, or a coordinate-merge — exactly the kind of
+latent second owner that produces the next wrong number.
+
+Fix: the adapter now stashes `window._discoverySectionCounts` — the
+model's per-section place count — and `_pmModelSectionCount(sec)` is the
+one accessor. The TOC and the section header both read it (falling back to
+local counting only for sections the model doesn't own: routes/stays). One
+number, the model's, for every displayed section count. The harness now
+asserts, in the rendered DOM, that the TOC entry and the section header
+show the SAME number per catchall; contract Rule 30 pins that both read
+the one source and Rule 25c that the chip never re-acquires a bespoke
+counter.
+
+Still on the list (honest): the by-place "All places" consolidated view
+(`byPlace`, header at the stay/visit split) is a structurally different
+aggregation across sections and was NOT migrated this pass; and the map
+pins build their own `allPlaces` set. Neither currently shows a
+section-count that contradicts the model, but both are second groupings of
+the same data and should be routed through the model next, by the same
+principle. The rule of thumb going forward: any surface that displays a
+place or a count reads `model.sections()` / the model accessors at paint
+time — no surface re-groups or re-counts.
+
+### PD.401j — finishing the second-path sweep
+A full sweep for surfaces that independently derive place membership:
+
+- **`MaxData.getCommittedSights`** (the overview's green teardrops) WAS a
+  genuine second derivation — its own checked-filter and `_normKey` dedup,
+  not the model. Now routed through `model.committed()` (membership) with
+  coordinate resolution kept as presentation. Contract Rule 27e pins it.
+  So the considered set, the committed set, section placement, and section
+  counts ALL now derive from the one model.
+
+- **The by-place "All places" view** and **the Leaflet map pins** are NOT
+  independent derivations of membership. Both iterate the *model-synced*
+  `placeActivities`, so their place SET already equals the model. The only
+  difference is the identity *function* used for the final presentation
+  dedup: raw `place.toLowerCase()` vs the model's `PlaceKey.resolve`. These
+  two keyings provably cannot yield different sets on the synced array —
+  the model has already merged anything `resolve` treats as equal, so no
+  surviving pair differs only by case/accent/alias. And that raw key is
+  coupled to the TOC scroll anchors (`tb-place-place-row-KEY`) and the
+  marker dictionary (`state.markers[key]`) with many lookup sites.
+  Rewriting it is plumbing risk for zero behavioral change, so it is
+  deliberately left — consistent with the safety principle of not making
+  risky changes without payoff. If a single identity function is wanted
+  everywhere as a purity measure, it is a coordinated rename of three
+  coupling groups (by-place + TOC anchors; the marker dictionary) that
+  changes no numbers; scoped, not urgent.
+
+Bottom line: there is now ONE source of truth for every place COUNT and
+every membership SET a user sees (placement, considered, committed,
+section counts, TOC, banner, pill, overview pins). The remaining
+lowercase dedups are non-divergent presentation keys, not second owners
+of the data.
+
 ### Persistence (the third item) — status
 Not a missing-protection problem: revision tracking (server-owned
 monotonic `rev`), real 409-conflict handling with a keep-mine/take-theirs

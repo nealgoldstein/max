@@ -461,9 +461,18 @@ check("Rule 25b: the DiscoveryModel owns final placement at the chokepoint (PD.4
       && placementSrc.indexOf("function _applyDiscoveryModelToSights") !== -1;
   })(),
   "the model isn't the final placement authority on every render");
-check("Rule 25c: the chip shows the section's actual rows (no count hack)",
-  indexSrc.indexOf("the catchalls now hold ONLY unchecked sights") !== -1,
-  "the chip re-acquired a special-case count");
+check("Rule 25c: the section chip reads the model count, not a bespoke hack (PD.401i)",
+  (function () {
+    // Formerly asserted the chip showed `destOrder.length` directly. The
+    // chip now reads `_pmModelSectionCount(sec)` — the SAME model count
+    // the TOC and the banner read — which equals the rendered rows by
+    // construction. What it must NOT do is re-acquire a special-case
+    // counter (e.g. reading consideredBySection only for catchalls).
+    var fn = fnBody(indexSrc, /function _renderPlaceActivityItems\s*\(/);
+    return fn !== null && fn.indexOf("_pmModelSectionCount(sec)") !== -1
+      && fn.indexOf("consideredBySection") === -1;
+  })(),
+  "the chip re-acquired a special-case count instead of the one model source");
 
 // ── Rule 26: ONE identity matcher (PD.397) ─────────────────────────
 check("Rule 26a: PlaceKey owns contains + relatedTo",
@@ -499,6 +508,26 @@ check("Rule 26e: route-umbrella detection is folded into the model (PD.401e)",
       && placementSrc.indexOf("S.SCENIC") !== -1;
   })(),
   "Golden/Diamond Circle fall back to From-your-list / the pre-pass came back");
+
+// ── Rule 30: ONE displayed section-count source (PD.401i) ──────────
+// The TOC and the section headers must read the model's per-section count
+// (_pmModelSectionCount), not each re-dedup placeActivities with its own
+// lowercase key. Three copies of "count a section" are three chances to
+// drift; there is now one source.
+check("Rule 30a: the adapter stashes the model's per-section counts",
+  adapterSrc.indexOf("window._discoverySectionCounts") !== -1
+    && /function _pmModelSectionCount\s*\(/.test(adapterSrc),
+  "the single section-count source is missing");
+check("Rule 30b: the TOC and the section header read _pmModelSectionCount",
+  (function () {
+    var fn = fnBody(indexSrc, /function _renderPlaceActivityItems\s*\(/);
+    if (fn === null) return false;
+    // Both the TOC count and the header count must consult the model
+    // source; at least two call sites inside the renderer.
+    var hits = (fn.match(/_pmModelSectionCount\(/g) || []).length;
+    return hits >= 2;
+  })(),
+  "a section-count display still re-derives its own count instead of the model's");
 
 // ── Rule 29: the render applies the model every paint (PD.401h) ────
 // The chip-vs-banner divergence (38+9 rendered, banner said 51) came
@@ -562,6 +591,13 @@ check("Rule 27b: MaxData.consideredPlaceKeys DELEGATES to the model",
   maxDataSrc.indexOf("MD.DiscoveryModel.fromPlaceActivities") !== -1
     && maxDataSrc.indexOf("model.consideredKeyedSet()") !== -1,
   "the trip pill/audit/count forked their own considered derivation again");
+check("Rule 27e: MaxData.getCommittedSights DELEGATES to the model (PD.401j)",
+  (function () {
+    var fn = fnBody(maxDataSrc, /function getCommittedSights\s*\(/);
+    return fn !== null && fn.indexOf("model.committed()") !== -1
+      && fn.indexOf("DiscoveryModel.fromPlaceActivities") !== -1;
+  })(),
+  "the committed (green-pin) set forked its own derivation instead of the model's");
 check("Rule 27c: the render adapter uses the SAME ingestion",
   placementSrc.indexOf("MaxDiscovery.DiscoveryModel.fromPlaceActivities") !== -1,
   "the picker placement re-implemented its own ingestion");

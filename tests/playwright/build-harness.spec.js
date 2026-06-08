@@ -561,14 +561,37 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
         if (CATCH.indexOf(it.section) === -1) return;
         (it.requiredPlaces || []).forEach((p) => { if (p && p.place === 'StaleSight') sawStaleInCatchall = true; });
       });
+      // PD.401i: the TOC must show the SAME per-section number as the
+      // header — both read the model count, not their own dedup.
+      const tocByCatch = {};
+      document.querySelectorAll('a').forEach((a) => {
+        const m = (a.textContent || '').match(/^(.*) \((\d+)\)$/);
+        if (m && CATCH.indexOf(m[1]) !== -1) tocByCatch[m[1]] = parseInt(m[2], 10);
+      });
+      const hdrByCatch = {};
+      document.querySelectorAll('.tb-act-section-hdr').forEach((hdr) => {
+        const title = hdr.querySelector('.tb-act-section-title');
+        const count = hdr.querySelector('.tb-act-section-count');
+        if (!title || !count) return;
+        if (CATCH.indexOf(title.textContent.trim()) === -1) return;
+        const mm = count.textContent.match(/(\d+)/);
+        if (mm) hdrByCatch[title.textContent.trim()] = parseInt(mm[1], 10);
+      });
       const dcc = window._discoveryConsideredCounts ? window._discoveryConsideredCounts() : null;
-      return { chipSum, modelCatch: dcc ? dcc.catchall : -1, sawStaleInCatchall };
+      return { chipSum, modelCatch: dcc ? dcc.catchall : -1, sawStaleInCatchall, tocByCatch, hdrByCatch };
     });
     // The painted catchall chips equal the model's catchall count — the
     // banner reads the same model, so chip-sum == banner by construction.
     expect(r.chipSum, 'rendered catchall chips must equal the model catchall count (banner)').toBe(r.modelCatch);
     // And the stale, mis-placed sight was healed into a catchall on render.
     expect(r.sawStaleInCatchall, 'the model re-placed the stale sight on render').toBe(true);
+    // PD.401i: the TOC entry and the section header show the SAME number
+    // for each catchall — one count source, no second path.
+    Object.keys(r.hdrByCatch).forEach((sec) => {
+      if (r.tocByCatch[sec] !== undefined) {
+        expect(r.tocByCatch[sec], 'TOC and header must agree for "' + sec + '"').toBe(r.hdrByCatch[sec]);
+      }
+    });
   });
 
 });
