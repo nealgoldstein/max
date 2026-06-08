@@ -549,6 +549,15 @@ check("Rule 31c: the picker groupings dedup by the one identity, not toLowerCase
     return hits >= 3 && fn.indexOf("var key = p.place.toLowerCase()") === -1;
   })(),
   "a picker grouping still keys by place.toLowerCase() instead of the one identity");
+check("Rule 31e: placeMeta is keyed by the one identity, with a migration (PD.401k)",
+  indexSrc.indexOf("function _pmMetaKey") !== -1
+    && /function _pmMetaKey\([^)]*\)\{[^}]*window\._pmKey/.test(indexSrc.replace(/\n/g, " "))
+    && indexSrc.indexOf("function _migratePlaceMetaKeys") !== -1,
+  "placeMeta reverted to _normPlaceName keying, or the migration is gone");
+check("Rule 31f: the popup map keys via one helper (pk) and map hub-matching normalizes input",
+  indexSrc.indexOf("function pk(x){var o=window.opener;") !== -1
+    && indexSrc.indexOf("hubKey = window._pmKey(hubKey)") !== -1,
+  "the popup map or hub matcher reverted to bare place.toLowerCase()");
 check("Rule 31d: the picker-map markers are keyed by the one identity (PD.401k)",
   // The marker dictionary's allPlaces build and the primary marker lookup
   // both key via _pmKey; the fuzzy fallback is retained intentionally for

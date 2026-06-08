@@ -695,6 +695,33 @@ discovery-model.js to mirror production's script order. Contract Rules
 17a/17b/26b were repointed from the deleted implementation to the one
 identity.
 
+### PD.401k-cleanup — the three contained follow-ons (done)
+1. **Map name-comparison sites → one identity.** ~30 `place.toLowerCase()`
+   identity comparisons in the map subsystem (candidate/hub matching,
+   day-trip resolution, dest-index lookup) now route through `_pmKey`,
+   converted as complete pairs (both sides), with functions like
+   `_isValidHub` normalizing their own input key. Sites that are NOT place
+   identity were deliberately left: the `_coarseGeocode` cache lookup and
+   the route-endpoint cache (separate keyspaces), and a display-text
+   substring scan (which needs the un-normalized form). Verified: full
+   suite green, accented-marker test passes.
+2. **Inline popup-map scripts → one identity.** The picker's pop-out map
+   builds its marker dict in a generated `<script>` that runs in a child
+   window. It now defines ONE helper `pk()` (prefers the stamped `_key`,
+   else delegates to the opener's `_pmKey`) and every key in the popup —
+   the marker dict, the click lookup, the hub/spur keys, `deriveRole` —
+   goes through it. Internally consistent by construction; worst case is a
+   graceful miss (no crash). Caveat: pop-out windows are not reachable by
+   the Playwright harness, so this is verified by construction, not by an
+   executing test.
+3. **`_pmMetaKey`/`placeMeta` re-key + migration.** `_pmMetaKey` now uses
+   `_pmKey`. Because `_pmKey === _normPlaceName` for any non-aliased name,
+   existing keys are unchanged; only aliased entries differ, and
+   `_migratePlaceMetaKeys()` (run at the reconcile chokepoint, idempotent)
+   moves those to their canonical key once. No user note is orphaned.
+
+Contract Rules 31d/31e/31f pin all three.
+
 ### What shipped (PD.401k, verified green at each step)
 - **Identity once, coordinate-canonical (Steps 1+3).** The write door
   (`canonicalizePlaceActivities`) stamps `_key` on every place using the

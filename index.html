@@ -18714,6 +18714,9 @@ function _reconcileUserListedKeeps(){
       }
     }
   } catch(e) { console.warn("[Max PD.349] canonicalize failed:", e && e.message); }
+  // PD.401k: re-key any pre-existing placeMeta entry to the canonical
+  // identity (idempotent; only aliased keys ever move).
+  if (typeof _migratePlaceMetaKeys === "function") _migratePlaceMetaKeys();
   // PD.299: idempotent stays-extras fold. Runs every render so legacy
   // trips (built before PD.288-298 shipped) clean up on next open and
   // sentence-mode trips (no paste-mode block to nest the fold inside)
@@ -25364,7 +25367,7 @@ if (typeof globalThis !== "undefined") globalThis._pmTogglePlaceStay = _pmToggle
 function _pmIsStayCandidate(placeName){
   if (!placeName) return false;
   try {
-    var k = (typeof _pmMetaKey === "function") ? _pmMetaKey(placeName) : String(placeName).toLowerCase();
+    var k = (typeof _pmMetaKey === "function") ? _pmMetaKey(placeName) : window._pmKey(placeName);
     // 1. c.role — committed by MaxRoleWriter or trip-view popover.
     if (_tb && Array.isArray(_tb.candidates)) {
       var cand = _tb.candidates.find(function(c){
@@ -25440,17 +25443,17 @@ if (typeof globalThis !== "undefined") globalThis._pmToggleRowMenu = _pmToggleRo
 // reopened published trips work even before _tb gets hydrated.
 function _pmReadOnlyRoleBadge(placeName){
   if (!placeName) return "";
-  var key = String(placeName).toLowerCase();
+  var key = window._pmKey(placeName);
   var cand = null;
   try {
     if (window._tb && Array.isArray(window._tb.candidates)) {
       cand = window._tb.candidates.find(function(c){
-        return c && c.place && c.place.toLowerCase() === key;
+        return c && c.place && window._pmKey(c.place) === key;
       });
     }
     if (!cand && typeof trip !== "undefined" && trip && Array.isArray(trip.candidates)) {
       cand = trip.candidates.find(function(c){
-        return c && c.place && c.place.toLowerCase() === key;
+        return c && c.place && window._pmKey(c.place) === key;
       });
     }
   } catch(_){}
@@ -25461,9 +25464,9 @@ function _pmReadOnlyRoleBadge(placeName){
   function _hubDisplay(h){
     if (!h) return "";
     try {
-      var hk = String(h).toLowerCase();
+      var hk = window._pmKey(h);
       var hSrc = (window._tb && window._tb.candidates) || (typeof trip !== "undefined" && trip && trip.candidates) || [];
-      var match = hSrc.find(function(c){ return c && c.place && c.place.toLowerCase() === hk; });
+      var match = hSrc.find(function(c){ return c && c.place && window._pmKey(c.place) === hk; });
       if (match) return match.place;
     } catch(_){}
     return h;
@@ -25566,7 +25569,7 @@ function _refreshAllPlacePickerMaps(){
 function _pmFocusPlace(placeName){
   if (!placeName) return;
   // PD.145: try multiple key forms when looking up the marker. The
-  // map's marker map is keyed by p.place.toLowerCase() but enrichment
+  // map's marker map is keyed by window._pmKey(p.place) but enrichment
   // items and country-suffix variants may have registered under a
   // different lowercase form than the user-facing name. Try the raw
   // lowercase first, then the _normPlaceName form, then a coastline
@@ -25742,14 +25745,15 @@ function _pmJumpToPlaceRow(placeName){
     var nrm = (typeof _normPlaceName === "function")
       ? _normPlaceName
       : function(s){ return String(s||"").toLowerCase().trim(); };
-    var wantedLower = String(placeName).toLowerCase();
+    var wantedLower = String(placeName).toLowerCase();  // for the substring scan below (display text)
+    var wantedKey = window._pmKey(placeName);            // PD.401k: identity comparison
     var wantedNorm = nrm(placeName);
     // 1) Try by data-place attribute (set on by-place mode rows).
     var rows = document.querySelectorAll("[data-place]");
     var hit = null;
     for (var i = 0; i < rows.length; i++) {
       var dp = rows[i].getAttribute("data-place") || "";
-      if (dp.toLowerCase() === wantedLower || nrm(dp) === wantedNorm) { hit = rows[i]; break; }
+      if (window._pmKey(dp) === wantedKey || nrm(dp) === wantedNorm) { hit = rows[i]; break; }
     }
     // 2) Fall back to a textContent scan on activity-section rows
     //    (their IDs use a slug of place name; cheaper to scan rows).
@@ -25777,13 +25781,13 @@ if (typeof globalThis !== "undefined") globalThis._pmJumpToPlaceRow = _pmJumpToP
 // trip option is disabled with a tooltip explaining why.
 function _pmSetPlaceDayTrip(placeKey, isDayTrip, hubKey){
   if (!_tb || !Array.isArray(_tb.placeActivities)) return;
-  var canon = String(placeKey || "").toLowerCase();
+  var canon = window._pmKey(placeKey);
   var hub = String(hubKey || "").toLowerCase();
   _tb.placeActivities.forEach(function(item){
     if (!item || !Array.isArray(item.requiredPlaces)) return;
     item.requiredPlaces.forEach(function(p){
       if (!p || !p.place) return;
-      if (p.place.toLowerCase() !== canon) return;
+      if (window._pmKey(p.place) !== canon) return;
       p._isDayTrip = !!isDayTrip;
       p._dayTripHub = isDayTrip ? hub : "";
       // v355.9: picking "Stay the night" or "Day trip from X" in the
@@ -25811,7 +25815,7 @@ function _pmSetPlaceDayTrip(placeKey, isDayTrip, hubKey){
 // override. To suppress the predictor too, the user can bump nights.
 function _pmClearDayTripFlag(placeName){
   if (typeof _pmSetPlaceDayTrip !== "function") return;
-  var canon = String(placeName || "").toLowerCase();
+  var canon = window._pmKey(placeName);
   _pmSetPlaceDayTrip(canon, false, "");
 }
 
@@ -26898,14 +26902,14 @@ function _pmMovePlaceToSection(placeName, fromSection, toSection){
     toSection = customName.trim();
   }
   if (fromSection === toSection) return;
-  var nameLC = String(placeName).toLowerCase();
+  var nameLC = window._pmKey(placeName);
   var moved = null; // capture the first matching requiredPlace to transplant
   _tb.placeActivities.forEach(function(act){
     if (!act || act.section !== fromSection) return;
     if (!Array.isArray(act.requiredPlaces)) return;
     act.requiredPlaces = act.requiredPlaces.filter(function(p){
       if (!p || !p.place) return true;
-      if (p.place.toLowerCase() !== nameLC) return true;
+      if (window._pmKey(p.place) !== nameLC) return true;
       if (!moved) moved = p;
       return false; // drop from source
     });
@@ -27672,9 +27676,35 @@ function _pmOpenTripResearchCard(){
 //     stayOverride: true | false | null   // null = use LLM's overnight flag
 //   }
 function _pmMetaKey(placeName){
+  // PD.401k: placeMeta is keyed by the ONE identity. For a non-aliased
+  // name _pmKey === _normPlaceName, so existing keys are unchanged;
+  // aliased names resolve to canonical (and _migratePlaceMetaKeys moves
+  // any pre-existing aliased entry to its canonical key once).
+  if (typeof window !== "undefined" && typeof window._pmKey === "function") return window._pmKey(placeName);
   if (typeof _normPlaceName === "function") return _normPlaceName(placeName || "");
   return String(placeName || "").trim().toLowerCase();
 }
+// PD.401k: one-time re-key of any placeMeta entry whose stored key isn't
+// canonical (an aliased name written before this change). Idempotent and
+// safe — non-aliased keys are already canonical, so they don't move.
+function _migratePlaceMetaKeys(){
+  try {
+    if (typeof _tb === "undefined" || !_tb || !_tb.placeMeta) return;
+    var pm = _tb.placeMeta, moved = 0;
+    Object.keys(pm).forEach(function(oldK){
+      var newK = window._pmKey(oldK);
+      if (!newK || newK === oldK) return;
+      if (!pm[newK]) pm[newK] = pm[oldK];
+      else if (typeof pm[newK] === "object" && typeof pm[oldK] === "object") {
+        Object.keys(pm[oldK]).forEach(function(f){ if (!(f in pm[newK])) pm[newK][f] = pm[oldK][f]; });
+      }
+      delete pm[oldK];
+      moved++;
+    });
+    if (moved) console.log("[Max PD.401k] migrated " + moved + " placeMeta key(s) to canonical identity");
+  } catch(_){}
+}
+if (typeof globalThis !== "undefined") globalThis._migratePlaceMetaKeys = _migratePlaceMetaKeys;
 function _pmPlaceMeta(placeName, opts){
   opts = opts || {};
   if (!_tb) return null;
@@ -27833,11 +27863,12 @@ function _pmDeriveRole(info, key, opts){
   // each other as hubs.
   function _isValidHub(hubKey){
     if (!hubKey) return false;
+    hubKey = window._pmKey(hubKey);                    // PD.401k: normalize input to the one identity
     try {
       var hubCand = null;
       if (window._tb && Array.isArray(window._tb.candidates)) {
         hubCand = window._tb.candidates.find(function(c){
-          return c && c.place && c.place.toLowerCase() === hubKey;
+          return c && c.place && window._pmKey(c.place) === hubKey;
         });
       }
       if (hubCand) {
@@ -27859,7 +27890,7 @@ function _pmDeriveRole(info, key, opts){
         var rps = items[i].requiredPlaces || [];
         for (var j = 0; j < rps.length; j++) {
           var p = rps[j];
-          if (!p || !p.place || p.place.toLowerCase() !== hubKey) continue;
+          if (!p || !p.place || window._pmKey(p.place) !== hubKey) continue;
           if (p._keep && p._isDayTrip !== true && p._rejected !== true && !p._waysideFromHub && p.overnight !== false) return true;
         }
       }
@@ -27888,7 +27919,7 @@ function _pmDeriveRole(info, key, opts){
       items.forEach(function(it){
         (it.requiredPlaces || []).forEach(function(p){
           if (!p || !p.place) return;
-          var k = p.place.toLowerCase();
+          var k = window._pmKey(p.place);
           if (k === srcKey) return;
           if (visited[k]) return;
           visited[k] = true;
@@ -28001,13 +28032,13 @@ function _pmDeriveRole(info, key, opts){
 // the three-surface disagreement bugs.
 function _pmDebugRole(placeName){
   if (!placeName) return null;
-  var key = String(placeName).toLowerCase();
+  var key = window._pmKey(placeName);
   // Mimic the popup's info build so the debug answer matches popup.
   var info = { place: placeName, kept: false, _isDayTrip: false, _dayTripHub: "", _waysideFromHub: "", _rejected: false, overnight: undefined };
   try {
     (((window._tb && _tb.placeActivities) || [])).forEach(function(it){
       (it.requiredPlaces || []).forEach(function(p){
-        if (!p || !p.place || p.place.toLowerCase() !== key) return;
+        if (!p || !p.place || window._pmKey(p.place) !== key) return;
         if (p._keep) info.kept = true;
         if (p._rejected === true) info._rejected = true;
         if (p._isDayTrip === true) { info._isDayTrip = true; if (p._dayTripHub) info._dayTripHub = p._dayTripHub; }
@@ -28020,7 +28051,7 @@ function _pmDebugRole(placeName){
   var pred = (window._tb && _tb._dayTripPreds) ? _tb._dayTripPreds[key] : undefined;
   var cand = null;
   try {
-    cand = ((window._tb && _tb.candidates) || []).find(function(c){ return c && c.place && c.place.toLowerCase() === key; });
+    cand = ((window._tb && _tb.candidates) || []).find(function(c){ return c && c.place && window._pmKey(c.place) === key; });
   } catch(_){}
   var meta = (window._tb && _tb.placeMeta) ? (_tb.placeMeta[(typeof _pmMetaKey === "function") ? _pmMetaKey(placeName) : key] || null) : null;
   var derived = _pmDeriveRole(info, key, {});
@@ -28237,12 +28268,12 @@ function _pmOpenResearchCard(placeName){
 //   4. Re-renders maps + sidebar.
 function _pmMakeStay(placeName){
   if (!_tb || !Array.isArray(_tb.placeActivities)) return;
-  var canon = String(placeName || "").toLowerCase();
+  var canon = window._pmKey(placeName);
   _tb.placeActivities.forEach(function(item){
     if (!item || !Array.isArray(item.requiredPlaces)) return;
     item.requiredPlaces.forEach(function(p){
       if (!p || !p.place) return;
-      if (p.place.toLowerCase() !== canon) return;
+      if (window._pmKey(p.place) !== canon) return;
       p._isDayTrip = false;
       p._dayTripHub = "";
       p._keep = true;
@@ -28267,7 +28298,7 @@ function _pmOpenPlacePopupByKey(placeKey, targetId){
   targetId = targetId || "tb-pm-map";
   var state = _pmMaps && _pmMaps[targetId];
   if (!state || !state.map || !state.markers) return false;
-  var key = String(placeKey || "").toLowerCase();
+  var key = window._pmKey(placeKey);
   var marker = state.markers[key];
   if (!marker || typeof _pmOpenPlacePopup !== "function") return false;
   _pmOpenPlacePopup(key, marker, state.map);
@@ -28330,10 +28361,10 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
       var _normFn = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase(); };
       trip.destinations.forEach(function(d){
         if (!d || !Array.isArray(d.dayTrips)) return;
-        var hubKey = (d.place || "").toLowerCase();
+        var hubKey = window._pmKey(d.place);
         d.dayTrips.forEach(function(chip){
           if (!chip || !chip.place) return;
-          var k = chip.place.toLowerCase();
+          var k = window._pmKey(chip.place);
           if (!allPlaces[k]) allPlaces[k] = { place: chip.place, kept: true, _isDayTrip: true, _dayTripHub: hubKey, _waysideFromHub: "", _rejected: false, overnight: false };
           else {
             allPlaces[k].kept = true;
@@ -28344,7 +28375,7 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
       });
     }
   } catch(_){}
-  var canon = String(placeKey || "").toLowerCase();
+  var canon = window._pmKey(placeKey);
   var info = allPlaces[canon];
   if (!info) return;
 
@@ -28401,7 +28432,7 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
   try {
     if (Array.isArray(_tb.candidates)) {
       _popCand = _tb.candidates.find(function(c){
-        return c && c.place && c.place.toLowerCase() === (info.place || "").toLowerCase();
+        return c && c.place && window._pmKey(c.place) === window._pmKey(info.place);
       });
     }
   } catch(_){}
@@ -28629,6 +28660,10 @@ function openPlacePickerMapModal(){
     + '<script>'
     + '(function(){'
     +   'var map=null,markers={},spurs={},entryMarkers=[],lastSig="";'
+    +   /* PD.401k: the ONE place identity inside the popup — prefer the
+    +      stamped _key, else delegate to the opener\'s _pmKey. Every key in
+    +      this popup goes through pk(), so they cannot drift. */
+    +   'function pk(x){var o=window.opener;if(x&&typeof x==="object"){return x._key||((o&&!o.closed&&o._pmKey)?o._pmKey(x.place):String(x.place||"").toLowerCase());}return (o&&!o.closed&&o._pmKey)?o._pmKey(x):String(x||"").toLowerCase();}'
     +   'function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"}[c];});}'
     +   'function getState(){'
     +     'try{'
@@ -28642,13 +28677,16 @@ function openPlacePickerMapModal(){
     +         'var iconicItem=!!it.iconic;'
     +         '(it.requiredPlaces||[]).forEach(function(p){'
     +           'if(!p||!p.place)return;'
-    +           'var k=p.place.toLowerCase();'
-    +           'if(!byKey[k])byKey[k]={place:p.place,lat:null,lng:null,keep:false,iconic:false,_isDayTrip:false,_dayTripHub:"",_waysideFromHub:""};'
+    +           /* PD.401k: the marker key is the ONE identity (pk → _key);
+    +              the geocode cache stays keyed by name. */
+    +           'var k=pk(p);'
+    +           'var gk=p.place.toLowerCase();'
+    +           'if(!byKey[k])byKey[k]={place:p.place,_key:k,lat:null,lng:null,keep:false,iconic:false,_isDayTrip:false,_dayTripHub:"",_waysideFromHub:""};'
     +           'if(p._keep)byKey[k].keep=true;'
     +           'if(iconicItem||p.iconic)byKey[k].iconic=true;'
     +           'if(p._isDayTrip===true){byKey[k]._isDayTrip=true;if(p._dayTripHub&&!byKey[k]._dayTripHub)byKey[k]._dayTripHub=p._dayTripHub;}'
     +           'if(p._waysideFromHub&&!byKey[k]._waysideFromHub){byKey[k]._waysideFromHub=p._waysideFromHub;}'
-    +           'var coords=gc[k];'
+    +           'var coords=gc[gk];'
     +           'if(coords&&isFinite(coords[0])){byKey[k].lat=coords[0];byKey[k].lng=coords[1];}'
     +         '});'
     +       '});'
@@ -28679,7 +28717,7 @@ function openPlacePickerMapModal(){
     +     'try{'
     +       'var op=window.opener;'
     +       'if(op&&!op.closed&&typeof op._pmDeriveRole==="function"){'
-    +         'var k=(info.place||"").toLowerCase();'
+    +         'var k=pk(info);'
     +         'var d=op._pmDeriveRole({place:info.place,kept:info.keep,_isDayTrip:!!info._isDayTrip,_dayTripHub:info._dayTripHub||"",_waysideFromHub:info._waysideFromHub||"",_rejected:false,overnight:undefined},k,{});'
     +         'return (d&&d.role)||"maybe";'
     +       '}'
@@ -28836,7 +28874,7 @@ function openPlacePickerMapModal(){
     +     'lastSig=sig;'
     +     'var seen={};var bounds=[];'
     +     'pts.forEach(function(info){'
-    +       'var k=info.place.toLowerCase();seen[k]=1;'
+    +       'var k=pk(info);seen[k]=1;'
     +       'var sp=pinSpec(info);'  /* Round NC.X: dimensions from MaxMapPin.iconSpec */
     +       'var icon=L.divIcon({html:pinHtml(info),className:"",iconSize:sp.iconSize,iconAnchor:sp.iconAnchor,popupAnchor:sp.popupAnchor});'
     +       'var ll=[info.lat,info.lng];bounds.push(ll);'
@@ -28856,8 +28894,8 @@ function openPlacePickerMapModal(){
     +         '(function(name,marker){marker.on("click",function(){'
     +           'try{'
     +             'var state=getState();'
-    +             'var info=state&&state._byKey&&state._byKey[name.toLowerCase()];'
-    +             'if(info){openLocalPlacePopup(name.toLowerCase(),info,marker);return;}'
+    +             'var info=state&&state._byKey&&state._byKey[pk(name)];'
+    +             'if(info){openLocalPlacePopup(pk(name),info,marker);return;}'
     +           '}catch(_){}'
     +           'scrollOpenerToPlace(name);'
     +         '});})(info.place,m);'
@@ -28876,9 +28914,9 @@ function openPlacePickerMapModal(){
     +     'Object.keys(spurs).forEach(function(k){try{map.removeLayer(spurs[k]);}catch(_){}delete spurs[k];});'
     +     'pts.forEach(function(info){'
     +       'if(!info._isDayTrip||!info._dayTripHub)return;'
-    +       'var hub=byKey[String(info._dayTripHub).toLowerCase()];'
+    +       'var hub=byKey[pk(info._dayTripHub)];'
     +       'if(!hub||!hub.keep||hub._isDayTrip||hub.lat==null)return;'
-    +       'var sk=info.place.toLowerCase();'
+    +       'var sk=pk(info);'
     +       'spurs[sk]=L.polyline([[hub.lat,hub.lng],[info.lat,info.lng]],{color:"#7a4fbf",weight:4,opacity:0.95,dashArray:"10,6"}).addTo(map);'
           /* v355.5: no bringToBack — spurs sit ABOVE the main-route
              halo so they read cleanly all the way to the hub pin. No
@@ -28997,7 +29035,7 @@ function _openPlacePickerMapOverlay(){
     var iconicItem = !!it.iconic;
     (it.requiredPlaces || []).forEach(function(p){
       if (!p || !p.place) return;
-      var k = p.place.toLowerCase();
+      var k = window._pmKey(p.place);
       if (!byKey[k]) byKey[k] = { place: p.place, lat: null, lng: null, keep: false, iconic: false, _isDayTrip: false, _dayTripHub: "" };
       if (p._keep) byKey[k].keep = true;
       if (iconicItem || p.iconic) byKey[k].iconic = true;
@@ -29032,7 +29070,7 @@ function _openPlacePickerMapOverlay(){
   // the style + HTML + icon. Identical output as Surface #1 for the
   // same place / context.
   pts.forEach(function(info){
-    var _key = (info.place || "").toLowerCase();
+    var _key = window._pmKey(info.place);
     var _derived = (typeof _pmDeriveRole === "function")
       ? _pmDeriveRole({
           place: info.place,
@@ -29153,10 +29191,10 @@ function _buildHeroMapPoints(){
   var _hmLastIdx = trip.destinations.length - 1;
 
   function _hmMatchDestIdx(name){
-    var n = String(name || "").trim().toLowerCase();
+    var n = window._pmKey(name);                       // PD.401k: one identity
     if (!n) return -1;
     for (var i = 0; i < trip.destinations.length; i++) {
-      if (String(trip.destinations[i].place || "").trim().toLowerCase() === n) return i;
+      if (window._pmKey(trip.destinations[i].place) === n) return i;
     }
     return -1;
   }
@@ -30335,7 +30373,7 @@ function _renderPlacePickerMap(targetId){
         // surface their original phrasing in the popup. Provenance:
         // "you can see Max heard you, even though it cleaned the typo."
         if (_listedInfo && _listedInfo.display
-            && String(_listedInfo.display).toLowerCase() !== String(placeName).toLowerCase()) {
+            && String(_listedInfo.display).toLowerCase() !== window._pmKey(placeName)) {
           whyBlock += '<div style="font-size:10.5px;color:#5b3f8f;line-height:1.5;margin:4px 0 6px;border-left:2px solid #d8c8eb;padding-left:8px;font-style:italic;">'
             +   'You listed this as: '
             +   '<strong style="font-style:normal;">' + _pmEsc(_listedInfo.display) + '</strong>'
@@ -30370,11 +30408,11 @@ function _renderPlacePickerMap(targetId){
           // "Stay overnight" (the role flip) is the LEAST likely action
           // for a sight pin; it's demoted to a plain link below.
           +   (function(){
-                var _kKey = String(placeName || '').toLowerCase();
+                var _kKey = window._pmKey(placeName);  // PD.401k: one identity
                 var _kept = false;
                 ((_tb && _tb.placeActivities) || []).forEach(function(it){
                   (it && it.requiredPlaces || []).forEach(function(p){
-                    if (p && p.place && String(p.place).toLowerCase() === _kKey && p._keep) _kept = true;
+                    if (p && p.place && window._pmKey(p.place) === _kKey && p._keep) _kept = true;
                   });
                 });
                 if (!_kept) {
