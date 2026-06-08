@@ -39048,29 +39048,47 @@ function _maxPlaceSetAudit(quiet) {
         out.multi.push({ place: byKey[k].display, sections: byKey[k].sections.slice() });
       }
     });
-    // Your-list coverage. Exact key first, then PlaceKey.same fuzz.
+    // PD.401L: COVERAGE is "present ANYWHERE", not "present as a sight".
+    // A listed place that became a named-route umbrella ("Golden Circle"
+    // → "Drive scenic routes", a type:route item the sight audit skips),
+    // a region, or a destination/stay is PRESENT — not missing. So
+    // coverage matches against EVERY placeActivities place (routes and
+    // regions included) plus the trip's destinations, while the section
+    // counts above stay sight-only.
+    var coverageDisp = {};               // key → display, across all items
+    Object.keys(byKey).forEach(function(k){ coverageDisp[k] = byKey[k].display; });
+    (_tb.placeActivities || []).forEach(function(it){
+      if (!it) return;
+      (it.requiredPlaces || []).forEach(function(p){
+        if (!p || !p.place) return;
+        var k = key(p.place);
+        if (k && !coverageDisp[k]) coverageDisp[k] = p.place;
+      });
+    });
+    Object.keys(_destKeys).forEach(function(k){ if (!coverageDisp[k]) coverageDisp[k] = k; });
+    // Your-list coverage. Exact key first, then PlaceKey.relatedTo fuzz.
     var listedNames = (_tb._userListedNames) || {};
-    var allKeys = Object.keys(byKey);
+    var allKeys = Object.keys(coverageDisp);
     Object.keys(listedNames).forEach(function(lk){
       var disp = (_tb._userListedDisplay && _tb._userListedDisplay[lk]) || lk;
       var hitKey = null;
       var rk = key(lk);
-      if (byKey[rk]) hitKey = rk;
+      if (coverageDisp[rk]) hitKey = rk;
       // PD.397: containment-aware matching — "Þingvellir" must match
       // the LLM's "Þingvellir National Park", which PlaceKey.same
       // (2-token rule) missed, falsely reporting it MISSING. Use the
-      // unified relatedTo. Match against the place's DISPLAY name too,
-      // since byKey is keyed by resolved key.
+      // unified relatedTo. Match against the place's DISPLAY name too.
       if (!hitKey && typeof PlaceKey !== "undefined" && PlaceKey.relatedTo) {
         for (var i = 0; i < allKeys.length; i++) {
-          var dispI = (byKey[allKeys[i]] && byKey[allKeys[i]].display) || allKeys[i];
+          var dispI = coverageDisp[allKeys[i]] || allKeys[i];
           if (PlaceKey.relatedTo(lk, allKeys[i]) || PlaceKey.relatedTo(disp, dispI)) { hitKey = allKeys[i]; break; }
         }
       }
       if (hitKey) {
+        var rec = byKey[hitKey];        // may be undefined for a route/region/dest place
         out.listed.push({ place: disp, found: true,
-          checked: byKey[hitKey].anyKeep, sections: byKey[hitKey].sections.slice() });
-        byKey[hitKey]._isListed = true;
+          checked: rec ? rec.anyKeep : true, sections: rec ? rec.sections.slice() : [] });
+        if (rec) rec._isListed = true;
       } else {
         out.listed.push({ place: disp, found: false, checked: false, sections: [] });
         out.missing.push(disp);

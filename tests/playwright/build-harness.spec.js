@@ -639,4 +639,30 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
     expect(r.allCanonical, 'every marker key is the canonical identity (no raw toLowerCase keys)').toBe(true);
   });
 
+  // PD.401L: a listed place that lives in a route/region container (a
+  // named-route umbrella like "Golden Circle" routed to "Drive scenic
+  // routes", a type:route item) must NOT be reported missing by the
+  // coverage audit — it is PRESENT, just not as a sight. Reproduces
+  // "3 of your 46 listed places are missing: Golden Circle, ...".
+  test('PD.401L: a listed route-umbrella in a route container is not "missing"', async ({ page }) => {
+    await bootClean(page);
+    await runPipeline(page);
+    const r = await page.evaluate(() => {
+      // The user listed "Golden Circle"; it lives in a type:route container.
+      window._tb._userListedNames = window._tb._userListedNames || {};
+      const lk = window._pmKey('Golden Circle');
+      window._tb._userListedNames[lk] = 'see';
+      window._tb._userListedDisplay = window._tb._userListedDisplay || {};
+      window._tb._userListedDisplay[lk] = 'Golden Circle';
+      window._tb.placeActivities.push({
+        id: 'scenic-routes', section: 'Drive scenic routes', type: 'route',
+        requiredPlaces: [{ place: 'Golden Circle', lat: 64.3, lng: -20.3, _keep: true }]
+      });
+      const aud = window._maxPlaceSetAudit(true);
+      return { missing: aud.missing, listedFound: (aud.listed.find(function(x){ return x.place === 'Golden Circle'; }) || {}).found };
+    });
+    expect(r.missing, 'Golden Circle (in a route container) must not be reported missing').not.toContain('Golden Circle');
+    expect(r.listedFound, 'the listed route-umbrella is marked found').toBe(true);
+  });
+
 });
