@@ -372,8 +372,10 @@ check("Rule 17b: containment dedupe is COORDINATE-gated (no over-deletion)",
 
 // ── Rule 18: one Considered count across views (PD.386) ────────────
 check("Rule 18a: the audit computes a considered PREVIEW excluding destinations",
+  // PD.401M: the audit's provenance now runs over the place repository;
+  // destinations are excluded via the record's kind, not a _destKeys map.
   indexSrc.indexOf("out.considered = 0") !== -1
-    && indexSrc.indexOf("_destKeys[k]) return") !== -1,
+    && indexSrc.indexOf("if (r.kinds.destination) return") !== -1,
   "the considered preview no longer excludes destinations — it won't match the trip pill");
 check("Rule 18b: the receipt shows the considered bridge number",
   indexSrc.indexOf("will appear as <strong>Considered</strong> sights") !== -1,
@@ -496,9 +498,18 @@ check("Rule 26b: the canon delegates its matcher to the ONE identity (PD.401k)",
   maxDataSrc.indexOf("_sameEntity ? _sameEntity(e, cand)") !== -1
     && maxDataSrc.indexOf("function _isAlreadyThemed") === -1,
   "the canon forked its own containment matcher again instead of the one identity");
-check("Rule 26c: the coverage audit uses relatedTo (Þingvellir not falsely missing)",
-  indexSrc.indexOf("PlaceKey.relatedTo(lk, allKeys[i])") !== -1,
-  "the coverage check reverted to PlaceKey.same — one-word listed places report missing");
+check("Rule 26c: coverage is a single lookup against the place repository (PD.401M)",
+  // The bespoke coverage scan (and its relatedTo loop) is gone; coverage
+  // now calls PlaceRepository.find(), which uses relatedTo internally —
+  // so Þingvellir still matches its qualified form, AND a listed place
+  // that became a route/region/stay is present, not missing.
+  indexSrc.indexOf("PlaceRepository.fromTrip(") !== -1
+    && indexSrc.indexOf("_repo.find(lk)") !== -1
+    && (function () {
+      var pr = fs.readFileSync(path.join(ROOT, "place-repo.js"), "utf8");
+      return /function _related/.test(pr) && pr.indexOf("PK.relatedTo") !== -1;
+    })(),
+  "the coverage check no longer goes through the place repository / lost its relatedTo fuzz");
 check("Rule 26d: the model ingestion excludes dests/hubs (no catchall padding)",
   (function () {
     // Formerly enforced by _ensureCatchallsUnchecked (deleted PD.401d).

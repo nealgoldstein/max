@@ -659,10 +659,19 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
         requiredPlaces: [{ place: 'Golden Circle', lat: 64.3, lng: -20.3, _keep: true }]
       });
       const aud = window._maxPlaceSetAudit(true);
-      return { missing: aud.missing, listedFound: (aud.listed.find(function(x){ return x.place === 'Golden Circle'; }) || {}).found };
+      const listedFoundN = aud.listed.filter(function(l){ return l.found; }).length;
+      return {
+        missing: aud.missing,
+        listedFound: (aud.listed.find(function(x){ return x.place === 'Golden Circle'; }) || {}).found,
+        pageTotal: aud.pageTotal,
+        sumParts: listedFoundN + aud.maxChecked + aud.maxUnchecked + (aud.hubs || []).length
+      };
     });
     expect(r.missing, 'Golden Circle (in a route container) must not be reported missing').not.toContain('Golden Circle');
     expect(r.listedFound, 'the listed route-umbrella is marked found').toBe(true);
+    // PD.401M: the page breakdown reconciles — total IS the sum of parts,
+    // even with a route place in the mix (the "87 vs 46+43+1" bug).
+    expect(r.pageTotal, 'page total must equal listed(found) + max + hubs').toBe(r.sumParts);
   });
 
 });

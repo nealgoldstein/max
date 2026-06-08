@@ -1,0 +1,88 @@
+// tests/place-repo-tests.js — PD.401M: the place repository.
+//
+// Pins the contract: ONE store of every place (sight/route/stay/region/
+// destination) keyed by canonical identity; "is X present" is a single
+// lookup; a listed place that became a route/region/stay is FOUND.
+
+"use strict";
+var assert = require("assert");
+global.PlaceKey = require("../place-key.js");
+var Repo = require("../place-repo.js").PlaceRepository;
+
+var pass = 0, fail = 0;
+function test(name, fn) {
+  try { fn(); pass++; console.log("  ✓ " + name); }
+  catch (e) { fail++; console.error("  ✗ " + name + " — " + e.message); }
+}
+console.log("place-repo-tests — PD.401M\n");
+
+function trip() {
+  return {
+    destinations: [{ place: "Reykjavik", lat: 64.14, lng: -21.94 }],
+    placeActivities: [
+      { section: "Chase waterfalls", type: "activity", requiredPlaces: [
+        { place: "Skogafoss", _key: "skogafoss", lat: 63.5, lng: -19.5, _keep: false } ] },
+      { section: "Drive scenic routes", type: "route", requiredPlaces: [
+        { place: "Golden Circle", _key: "golden circle", lat: 64.3, lng: -20.3, _keep: true },
+        { place: "Diamond Circle", _key: "diamond circle", lat: 65.9, lng: -16.9, _keep: true } ] },
+      { section: "Routes & regions", type: "activity", requiredPlaces: [
+        { place: "East Fjords", _key: "east fjords", _keep: true } ] },
+      { section: "Overnight stays", type: "synthetic-stays", requiredPlaces: [
+        { place: "Vik", _key: "vik", _keep: true } ] }
+    ]
+  };
+}
+var opts = {
+  isStaySection: function (s) { return s === "Overnight stays"; },
+  isRouteSection: function () { return false; }
+};
+
+test("fromTrip interns every kind under one store", function () {
+  var t = trip();
+  var repo = Repo.fromTrip(t.placeActivities, t.destinations, opts);
+  // Reykjavik(dest) + Skogafoss + Golden + Diamond + East Fjords + Vik
+  assert.strictEqual(repo.all().length, 6);
+});
+
+test("a route-umbrella listed place is PRESENT (the false-missing bug)", function () {
+  var t = trip();
+  var repo = Repo.fromTrip(t.placeActivities, t.destinations, opts);
+  assert.strictEqual(repo.has("Golden Circle"), true);
+  assert.strictEqual(repo.has("Diamond Circle"), true);
+  assert.strictEqual(repo.find("Golden Circle").kinds.route, true);
+});
+
+test("a region and a stay are present too", function () {
+  var t = trip();
+  var repo = Repo.fromTrip(t.placeActivities, t.destinations, opts);
+  assert.strictEqual(repo.has("East Fjords"), true);
+  assert.strictEqual(repo.has("Vik"), true);
+  assert.strictEqual(repo.find("Vik").kinds.stay, true);
+});
+
+test("coverage() answers found/kind for a listed set in one call", function () {
+  var t = trip();
+  var repo = Repo.fromTrip(t.placeActivities, t.destinations, opts);
+  var cov = repo.coverage(["Golden Circle", "East Fjords", "Atlantis"]);
+  assert.strictEqual(cov[0].found, true);
+  assert.strictEqual(cov[1].found, true);
+  assert.strictEqual(cov[2].found, false); // genuinely absent
+});
+
+test("find() is coverage-fuzz aware (Þingvellir ⊂ Þingvellir National Park)", function () {
+  var repo = new Repo();
+  repo.add({ place: "Þingvellir National Park", _key: "þingvellir national park", section: "See natural wonders", kind: "sight" });
+  assert.strictEqual(repo.has("Þingvellir"), true);
+});
+
+test("interning is idempotent and merges sections/kinds", function () {
+  var repo = new Repo();
+  repo.add({ place: "Gullfoss", _key: "gullfoss", section: "A", kind: "sight" });
+  repo.add({ place: "Gullfoss", _key: "gullfoss", section: "B", kind: "sight" });
+  assert.strictEqual(repo.all().length, 1);
+  assert.strictEqual(repo.find("Gullfoss").sections.length, 2);
+});
+
+console.log("\n" + "─".repeat(50));
+console.log("PASS: " + pass + "    FAIL: " + fail);
+if (fail > 0) process.exit(1);

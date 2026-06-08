@@ -200,6 +200,5 @@ test("PD.399: a true variant at the SAME coords still dedupes", function () {
   assert.ok(!more, "the same-coords variant must collapse into the theme");
 });
 
-
 console.log("PASS: " + pass + "    FAIL: " + fail);
 if (fail > 0) process.exit(1);

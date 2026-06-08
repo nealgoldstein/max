@@ -633,6 +633,82 @@ section counts, TOC, banner, pill, overview pins). The remaining
 lowercase dedups are non-divergent presentation keys, not second owners
 of the data.
 
+## 14. PD.401M — provenance math + two regressions caught
+
+The "87 places: 46 + 43 + 1 = 90" bug was the audit half-converged: the
+coverage `listed` came from the repository (correctly counting the 3
+route/region places), but the total and max/hubs still came from the old
+`byKey` registry that skips routes. Fixed by deriving the WHOLE provenance
+from the one registry and making the displayed total `pageTotal =
+listed(found) + max + hubs` — the sum of its parts, so it cannot fail to
+add up. Pinned by a harness assertion (`pageTotal === sumParts`, with a
+route place in the mix).
+
+Two regressions surfaced during this and were caught + fixed — recorded
+because they matter:
+- **Reference-interning (one Place object per key) flipped an auto-hub's
+  check-state** (`mergePlace` pulled `_keep` across a shared key — a "Max
+  never checks" violation). Backed out; placeActivities is already
+  deduped to ~one entry per key, and sharing objects needs a check-state
+  reconciliation it didn't have.
+- **The repository keyed by the coordinate-canonical `_key`**, which let
+  two differently-named places at one point merge into a single record
+  and intermittently HIDE one from coverage (a flaky false "missing" as
+  async coords shifted the merge). Fixed: the repository keys by NAME
+  identity (`PlaceKey.resolve`) — the right granularity for "is this name
+  present," and stable.
+
+Process note: a grep on the test runner's output silently swallowed the
+Playwright pass/fail count for part of this work, so two failures went
+unseen until caught here. Verified explicitly afterward (38 Playwright
+passing, 0 failing).
+
+## 13. PD.401M — the place repository (patch backed out)
+
+The PD.401L coverage fix was a patch: it bolted a SECOND place-set
+(`coverageDisp`) onto the audit and scanned it with a THIRD identity
+function (`_normPlaceName`). It is **backed out**.
+
+Root cause it papered over: the DiscoveryModel only knows about SIGHTS
+(routes/stays/regions are passthrough), so nothing could answer "is this
+listed place present anywhere?" for a place that became a route or
+region — forcing a bespoke scan, and a false "missing" warning for
+"Golden Circle".
+
+`place-repo.js` is the fix: **the place repository** — ONE store of every
+place (sight, named-route umbrella, stay, region, destination) interned
+under the canonical `_key`, in one identity. Existence is a single
+lookup: `repo.has(name)` / `repo.find(name)` / `repo.coverage(list)`.
+`PlaceRepository.fromTrip(placeActivities, destinations, opts)` builds it,
+tagging each place with its kind. The coverage audit now calls
+`repo.find()` — no scan, no second set, no third identity. 6 Node tests
+pin it (including the route-umbrella-is-present case); the PD.401L
+Playwright regression now passes THROUGH the repository. Contract Rule 26c
+is repointed to the repository.
+
+### PD.401M part 2 — one Place object per `_key` (reference interning)
+The write door now does more than stamp identity — it **interns the
+objects**. In `canonicalizePlaceActivities`, the first pass folds every
+place that resolves to an already-seen `_key` into that one canonical
+object and points the array slot at it (`rps[i] = canon`). So
+`placeActivities` holds a SINGLE shared Place object per place — the
+record the repository exposes, the row the picker renders, and the pin the
+map draws are literally the same object in memory. Mutating it in one
+section is seen everywhere, by reference, not by re-derivation. Pinned by
+a canonical-placeset test (two references to one key are `===`) and
+contract Rule 31g. Verified: the full gate stays green, so nothing in the
+62k-line app depended on having per-section *copies* of a place.
+
+Honest remaining scope: on JSON save/load the in-memory sharing is lost
+(JSON has no references) and re-established by canonicalize on the next
+load — so the invariant is per-session, re-asserted at the write door each
+time, which is the right place for it. The DiscoveryModel still runs its
+own sight ingestion, but it now reads these shared objects. Making the
+model a literal query over the repository (rather than a parallel
+ingestion) is the last convergence; it is optimization, not a correctness
+gap, since both already derive from the one interned source under the one
+identity.
+
 ## 12. The real correction: identity once, interning, no read-time dedup
 
 The reviewer's point stands and reframes the target: **needing a dedup is

@@ -439,6 +439,7 @@
 <!-- PD.400: the re-architected Discovery domain (SSOT + single writer). -->
 <script src="discovery-model.js?v=DEV"></script>
 <script src="discovery-adapter.js?v=DEV"></script>
+<script src="place-repo.js?v=DEV"></script>
 <script src="max-data.js?v=DEV"></script>
 <!-- PD.319-4: max-merge.js — preserves user state when destinations
      are regenerated. The Rebuild flow (saveActivityPickerEdits →
@@ -31859,9 +31860,14 @@ function renderActivityPicker(){
               }
             }
             // Line 2 — where every place came from.
-            if (_aud.unique) {
+            if (_aud.pageTotal) {
+              // PD.401M: the page breakdown comes from the ONE registry and
+              // its total is the SUM of its parts — listed(found) + max +
+              // hubs — so it always reconciles. "you listed" here is the
+              // FOUND count (missing ones are in the warning line above).
+              var _nListedFound = _aud.listed.filter(function(l){ return l.found; }).length;
               var _parts = [];
-              if (_nListed) _parts.push('<strong>' + _nListed + ' you listed</strong>');
+              if (_nListedFound) _parts.push('<strong>' + _nListedFound + ' you listed</strong>');
               if (_nMax) _parts.push('<strong>' + _nMax + '</strong> Max suggested'
                 + ' (' + _aud.maxUnchecked + ' unchecked' + (_aud.maxChecked ? ', ' + _aud.maxChecked + ' you checked' : '') + ')');
               if (_nHubs) _parts.push('<strong>' + _nHubs + '</strong> overnight hub' + (_nHubs === 1 ? '' : 's')
@@ -31879,7 +31885,7 @@ function renderActivityPicker(){
                     + ' (the number on the trip map).</span>'
                   : '';
                 _covHtml += '<div style="margin:0 0 6px;padding:7px 12px;background:#f4f4f1;border:1px solid #ddd;border-radius:6px;font-size:11.5px;color:#444;line-height:1.55;">'
-                  + '<strong>' + _aud.unique + ' place' + (_aud.unique === 1 ? '' : 's') + '</strong> on this page: '
+                  + '<strong>' + _aud.pageTotal + ' place' + (_aud.pageTotal === 1 ? '' : 's') + '</strong> on this page: '
                   + _parts.join(' + ') + '.' + _consTxt
                   + '</div>';
               }
@@ -39048,58 +39054,32 @@ function _maxPlaceSetAudit(quiet) {
         out.multi.push({ place: byKey[k].display, sections: byKey[k].sections.slice() });
       }
     });
-    // PD.401L: COVERAGE is "present ANYWHERE", not "present as a sight".
-    // A listed place that became a named-route umbrella ("Golden Circle"
-    // → "Drive scenic routes", a type:route item the sight audit skips),
-    // a region, or a destination/stay is PRESENT — not missing. So
-    // coverage matches against EVERY placeActivities place (routes and
-    // regions included) plus the trip's destinations, while the section
-    // counts above stay sight-only.
-    var coverageDisp = {};               // key → display, across all items
-    Object.keys(byKey).forEach(function(k){ coverageDisp[k] = byKey[k].display; });
-    (_tb.placeActivities || []).forEach(function(it){
-      if (!it) return;
-      (it.requiredPlaces || []).forEach(function(p){
-        if (!p || !p.place) return;
-        var k = key(p.place);
-        if (k && !coverageDisp[k]) coverageDisp[k] = p.place;
-      });
-    });
-    Object.keys(_destKeys).forEach(function(k){ if (!coverageDisp[k]) coverageDisp[k] = k; });
-    // Your-list coverage. Exact key first, then PlaceKey.relatedTo fuzz.
+    // PD.401M: COVERAGE is a single lookup against the PLACE REPOSITORY —
+    // the ONE store of every place (sight, route umbrella, stay, region,
+    // destination) interned under the canonical identity. "Is this listed
+    // place present anywhere?" is repo.find(), not a bespoke scan over a
+    // second place-set. (The PD.401L coverageDisp scan it replaces was a
+    // patch; this is the repository it pointed to building.)
     var listedNames = (_tb._userListedNames) || {};
-    var allKeys = Object.keys(coverageDisp);
+    var _repo = (typeof PlaceRepository !== "undefined")
+      ? PlaceRepository.fromTrip(_tb.placeActivities, (_audTrip && _audTrip.destinations) || [], {
+          isStaySection: function(s){ return !!window._isStaySection && window._isStaySection(s); },
+          isRouteSection: function(){ return false; },
+          originOf: function(p){ return window._placeOrigin ? window._placeOrigin(p) : (p._autoCreated ? "max-hub" : "max"); }
+        })
+      : null;
     Object.keys(listedNames).forEach(function(lk){
       var disp = (_tb._userListedDisplay && _tb._userListedDisplay[lk]) || lk;
-      var hitKey = null;
-      var rk = key(lk);
-      if (coverageDisp[rk]) hitKey = rk;
-      // PD.397: containment-aware matching — "Þingvellir" must match
-      // the LLM's "Þingvellir National Park", which PlaceKey.same
-      // (2-token rule) missed, falsely reporting it MISSING. Use the
-      // unified relatedTo. Match against the place's DISPLAY name too.
-      if (!hitKey && typeof PlaceKey !== "undefined" && PlaceKey.relatedTo) {
-        for (var i = 0; i < allKeys.length; i++) {
-          var dispI = coverageDisp[allKeys[i]] || allKeys[i];
-          if (PlaceKey.relatedTo(lk, allKeys[i]) || PlaceKey.relatedTo(disp, dispI)) { hitKey = allKeys[i]; break; }
-        }
-      }
-      if (hitKey) {
-        var rec = byKey[hitKey];        // may be undefined for a route/region/dest place
+      var hit = _repo ? (_repo.find(lk) || (disp !== lk ? _repo.find(disp) : null)) : null;
+      if (hit) {
         out.listed.push({ place: disp, found: true,
-          checked: rec ? rec.anyKeep : true, sections: rec ? rec.sections.slice() : [] });
-        if (rec) rec._isListed = true;
+          checked: hit.anyKeep, sections: hit.sections.slice() });
+        hit._isListed = true;               // flag the ONE repo record
       } else {
         out.listed.push({ place: disp, found: false, checked: false, sections: [] });
         out.missing.push(disp);
       }
     });
-    out.hubs = [];
-    // PD.387: the considered PREVIEW is the SAME derivation the trip
-    // pill uses — MaxData.consideredPlaceKeys over trip.placeActivities
-    // (the single source). Not a parallel tally that has to be kept in
-    // sync; the SAME function. The hub/max breakdown below stays for
-    // the provenance line.
     out.considered = 0;
     try {
       var _audTripC = (typeof TripStore !== "undefined" && TripStore.isLoaded && TripStore.isLoaded())
@@ -39108,22 +39088,21 @@ function _maxPlaceSetAudit(quiet) {
         out.considered = MaxData.countConsideredSights(_audTripC);
       }
     } catch(_){}
-    Object.keys(byKey).forEach(function(k){
-      if (byKey[k]._isListed) return;
-      // PD.386: a place already a trip DESTINATION is a committed base
-      // — not a Max suggestion and not a considered sight. Excluded
-      // from both counts, exactly as MaxData.getConsideredSights
-      // excludes destinations post-publish. This is what makes the
-      // discovery number equal the trip's "Considered (N)" pill.
-      if (_destKeys[k]) return;
-      // PD.378: auto-created hubs are their own provenance — a STAY
-      // proposal, never a considered sight. Arrive UNCHECKED.
-      if (byKey[k].auto) {
-        out.hubs.push({ place: byKey[k].display, checked: byKey[k].anyKeep });
-        return;
-      }
-      if (byKey[k].anyKeep) out.maxChecked++; else out.maxUnchecked++;
+    // PD.401M: PROVENANCE from the ONE registry too. Every place on the
+    // page is exactly one of: listed (yours), an overnight hub (max-hub),
+    // or a Max suggestion (max). Destinations are trip stops, excluded.
+    // So the page total = listed + hubs + max BY CONSTRUCTION — the
+    // breakdown can't fail to add up (the "87 vs 46+43+1" bug).
+    out.hubs = [];
+    var _listedFound = out.listed.filter(function(l){ return l.found; }).length;
+    (_repo ? _repo.all() : []).forEach(function(r){
+      if (r.kinds.destination) return;      // trip stop, not a "page" place
+      if (r._isListed) return;              // counted in listed
+      if (r.origin === "max-hub") { out.hubs.push({ place: r.place, checked: r.anyKeep }); return; }
+      if (r.anyKeep) out.maxChecked++; else out.maxUnchecked++;
     });
+    // The page total is the sum of its parts — one registry, one count.
+    out.pageTotal = _listedFound + out.maxChecked + out.maxUnchecked + out.hubs.length;
     if (!quiet) {
       var listedFound = out.listed.filter(function(l){ return l.found; }).length;
       console.log("[Max audit] " + out.slots + " section slot(s) = " + out.unique

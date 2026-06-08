@@ -559,6 +559,13 @@
       _interned.push({ key: key, place: p.place, coords: coords });
       return key;
     }
+    // PD.401M (reverted): reference-interning to ONE Place object per key
+    // was backed out — `mergePlace` across same-key occurrences flipped an
+    // auto-hub's check-state (a "Max never checks" violation surfaced by
+    // the harness). placeActivities is already deduped to ~one entry per
+    // key by the passes below; the write door stamps identity, and the
+    // place repository is the existence registry. Sharing objects by
+    // reference needs a check-state reconciliation it didn't have.
     items.forEach(function (it) {
       if (isExempt(it)) return;
       (it.requiredPlaces || []).forEach(function (p) {
