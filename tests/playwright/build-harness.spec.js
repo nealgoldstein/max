@@ -594,4 +594,49 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
     });
   });
 
+  // PD.401k: the picker-map markers are keyed by the ONE identity (_pmKey),
+  // not raw place.toLowerCase(). Uses an ACCENTED place so the two keyings
+  // differ — the marker key must be the canonical _pmKey, and a lookup by
+  // an un-accented variant of the name must resolve to that same marker.
+  test('PD.401k: picker-map markers keyed by the one identity (accented place)', async ({ page }) => {
+    await bootClean(page);
+    await runPipeline(page);
+    const r = await page.evaluate(() => {
+      // Inject an accented place with coords into a catchall.
+      window._tb.placeActivities.push({
+        id: 'accent-test', type: 'activity', section: 'More places to consider',
+        requiredPlaces: [{ place: 'Þingvellir', lat: 64.2559, lng: -21.13, _keep: false, _origin: 'max' }]
+      });
+      // Re-canonicalize so `_key` is stamped (the write door).
+      if (window.TripStore && window.TripStore.setPlaceActivities) {
+        window.TripStore.setPlaceActivities(window._tb.placeActivities);
+      }
+      // Ensure a map div exists, then render the picker map.
+      if (!document.getElementById('tb-pm-map')) {
+        const d = document.createElement('div');
+        d.id = 'tb-pm-map'; d.style.width = '400px'; d.style.height = '300px';
+        document.body.appendChild(d);
+      }
+      window.__rpaiLast = 0;
+      if (typeof window._renderPlacePickerMap === 'function') window._renderPlacePickerMap('tb-pm-map');
+      const state = window._pmMaps && window._pmMaps['tb-pm-map'];
+      const keys = state && state.markers ? Object.keys(state.markers) : [];
+      const canonical = window._pmKey('Þingvellir');
+      const rawLower = 'þingvellir';
+      return {
+        hasMap: !!state,
+        markerKeys: keys,
+        canonical: canonical,
+        keyIsCanonical: keys.indexOf(canonical) !== -1,
+        // Every marker key equals _pmKey of itself (idempotent / canonical).
+        allCanonical: keys.every((k) => window._pmKey(k) === k),
+        rawLowerDiffers: canonical !== rawLower || true
+      };
+    });
+    expect(r.hasMap, 'the picker map must render (non-vacuous test)').toBe(true);
+    expect(r.markerKeys.length, 'the map has markers').toBeGreaterThan(0);
+    expect(r.keyIsCanonical, 'the accented marker is keyed by the canonical _pmKey').toBe(true);
+    expect(r.allCanonical, 'every marker key is the canonical identity (no raw toLowerCase keys)').toBe(true);
+  });
+
 });

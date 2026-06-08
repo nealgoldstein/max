@@ -536,6 +536,13 @@ check("Rule 31c: the picker groupings dedup by the one identity, not toLowerCase
     return hits >= 3 && fn.indexOf("var key = p.place.toLowerCase()") === -1;
   })(),
   "a picker grouping still keys by place.toLowerCase() instead of the one identity");
+check("Rule 31d: the picker-map markers are keyed by the one identity (PD.401k)",
+  // The marker dictionary's allPlaces build and the primary marker lookup
+  // both key via _pmKey; the fuzzy fallback is retained intentionally for
+  // bare-name lookups (documented), so it is NOT required to be removed.
+  indexSrc.indexOf("var key = window._pmKey(p);                      // PD.401k: one identity") !== -1
+    && indexSrc.indexOf("var keyLower = window._pmKey(placeName);") !== -1,
+  "the picker-map markers reverted to raw place.toLowerCase() keying");
 
 // ── Rule 30: ONE displayed section-count source (PD.401i) ──────────
 // The TOC and the section headers must read the model's per-section count

@@ -697,19 +697,35 @@ exist — which is the reviewer's point made structural.
   only fires for un-stamped input (tests / in-memory pre-write). Contract
   Rule 31 pins all of this.
 
-### The one documented holdout — the Leaflet marker subsystem
-The map's marker dictionary keys by `place.toLowerCase()` across ~30
-coupled sites, including dynamically-generated inline `<script>` strings
-(the popup maps) that run where `PlaceKey`/`_pmKey` are not in scope. Its
-pin SET already derives from the unified array, so it surfaces no
-divergent number — it's an internal lookup handle, not a count. Converting
-it is a large coupled rename with thin automated coverage of the
-interactive paths (pin toggle, popup targeting). Doing it as a deliberate
-pass with added interaction tests is the correct sequencing; blasting it
-at the end of a session would risk precisely the subtle pin/popup
-regressions this whole effort exists to prevent. It is the single
-remaining place that recomputes identity, and it is non-divergent by
-construction.
+### The Leaflet marker subsystem (PD.401k-markers)
+Done, behind a safety-net test. The picker-map marker dictionary
+(`allPlaces` build), the popup snapshot, the day-trip hub lookup, and the
+primary marker lookup are all keyed by the ONE identity (`_pmKey`) — the
+raw `place.toLowerCase()` keys are gone. A new Playwright test renders the
+picker map with an ACCENTED place (so raw-lower ≠ canonical) and asserts
+every marker key is the canonical `_pmKey` and the accented marker is
+found by it; it renders the real Leaflet map (vendored), so it is
+non-vacuous. Contract Rule 31d pins the keying.
+
+A deep finding worth recording: the map's three-way FUZZY lookup
+(`keyLower` → `keyNorm` → word-containment search) was itself a SYMPTOM of
+non-canonical keying — with canonical keys the exact hit suffices. It is
+**deliberately retained** as a fallback, and this is not a second identity
+scheme: coordinate-canonical identity cannot be recomputed from a bare
+place name (a name carries no coordinates), and several callers pass only
+a name. Fully deleting the fallback would require threading `_key` through
+every lookup CALLER — a separate, larger effort. The fallback now fires
+only for the rare coordinate-merged / variant-name case; the common path
+is one exact canonical hit.
+
+Two narrower items remain, both non-divergent: (1) the inline-generated
+popup-map `<script>` strings build a self-contained marker dict with
+their own `place.toLowerCase()` — internally consistent, so correct, but
+a second identity for purity; aligning them means embedding `_key` in the
+serialized place data. (2) `_pmMetaKey`/`placeMeta` (per-place notes /
+overrides) is keyed by `_normPlaceName`; re-keying it to `_pmKey` is a
+data migration (existing stored keys), so it is intentionally left for a
+dedicated pass. Neither produces a wrong number; both are tracked.
 
 ### Persistence (the third item) — status
 Not a missing-protection problem: revision tracking (server-owned

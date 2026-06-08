@@ -25576,7 +25576,11 @@ function _pmFocusPlace(placeName){
   var nrm = (typeof _normPlaceName === "function")
     ? _normPlaceName
     : function(s){ return String(s||"").toLowerCase().trim(); };
-  var keyLower = String(placeName).toLowerCase();
+  // PD.401k: the EXACT hit uses the one identity (markers are keyed by
+  // _pmKey). The fuzzy fallback below stays — it is the justified handler
+  // for bare-name lookups whose coordinate-canonical key can't be
+  // recomputed from a name alone, NOT a second identity scheme.
+  var keyLower = window._pmKey(placeName);
   var keyNorm  = nrm(placeName);
   if (!_tb) return;
   if (typeof _pmMaps !== "object" || !_pmMaps) return;
@@ -28292,7 +28296,7 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
   _allPopupItems.forEach(function(item){
     (item.requiredPlaces || []).forEach(function(p){
       if (!p || !p.place) return;
-      var k = p.place.toLowerCase();
+      var k = window._pmKey(p);                        // PD.401k: one identity
       if (!allPlaces[k]) allPlaces[k] = { place: p.place, kept: false, _isDayTrip: false, _dayTripHub: "", _waysideFromHub: "", _rejected: false, overnight: undefined };
       if (p._keep) allPlaces[k].kept = true;
       if (p._rejected === true) allPlaces[k]._rejected = true;
@@ -29018,7 +29022,7 @@ function _openPlacePickerMapOverlay(){
   // overlay no longer draws a route polyline. allByKey is kept for
   // the day-trip-spur lookup below.
   var allByKey = {};
-  pts.forEach(function(p){ allByKey[p.place.toLowerCase()] = p; });
+  pts.forEach(function(p){ allByKey[window._pmKey(p)] = p; });          // PD.401k: one identity
   var bounds = L.latLngBounds([]);
   // Round NC.X: mobile overlay now routes pin rendering through
   // MaxMapPin — the single source of truth shared with the in-page
@@ -29068,7 +29072,7 @@ function _openPlacePickerMapOverlay(){
   // hub stay out to the day-trip place.
   pts.forEach(function(info){
     if (!info._isDayTrip || !info._dayTripHub) return;
-    var hub = allByKey[String(info._dayTripHub).toLowerCase()];
+    var hub = allByKey[window._pmKey(info._dayTripHub)];                // PD.401k: one identity
     if (!hub || !hub.keep || hub._isDayTrip) return;
     if (hub.lat == null || info.lat == null) return;
     // v355.5: no bringToBack on spurs — they need to sit ABOVE the
@@ -30119,7 +30123,7 @@ function _renderPlacePickerMap(targetId){
     var iconic = !!item.iconic;
     (item.requiredPlaces || []).forEach(function(p){
       if (!p || !p.place) return;
-      var key = p.place.toLowerCase();
+      var key = window._pmKey(p);                      // PD.401k: one identity
       if (!allPlaces[key]) allPlaces[key] = { place: p.place, country: p.country||"", kept: false, iconic: false, anyRoute: false, _isDayTrip: false, _dayTripHub: "", _waysideFromHub: "", _rejected: false, overnight: undefined };
       if (p.country && !allPlaces[key].country) allPlaces[key].country = p.country;
       if (p._keep) allPlaces[key].kept = true;
