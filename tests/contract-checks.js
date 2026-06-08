@@ -432,10 +432,16 @@ check("Rule 24a: MaxData.consideredBySection groups the single set",
 // sight is a DECISION — it leaves to-consider and commits. This makes
 // chip == rows == unchecked == considered == receipt with NO per-surface
 // special-casing: the data itself is coherent.
-check("Rule 25a: _ensureCatchallsUnchecked enforces the invariant",
-  indexSrc.indexOf("function _ensureCatchallsUnchecked") !== -1
-    && indexSrc.indexOf("THE CATCHALL INVARIANT") !== -1,
-  "checked sights can sit in a to-consider catchall again — counts will diverge");
+check("Rule 25a: the catchall invariant is the model's derivation, not a pass (PD.401d)",
+  // The imperative _ensureCatchallsUnchecked pass is DELETED. A checked
+  // sight leaving "to consider" for "Sights you're keeping" is now a pure
+  // consequence of PlacementPolicy.sectionFor — there is no pass to run.
+  indexSrc.indexOf("function _ensureCatchallsUnchecked") === -1
+    && (function () {
+      var dm = fs.readFileSync(path.join(ROOT, "discovery-model.js"), "utf8");
+      return dm.indexOf("SECTION.KEEPING") !== -1 && /sectionFor\s*:\s*function/.test(dm);
+    })(),
+  "the deleted catchall pass came back, or the model stopped deriving 'keeping'");
 check("Rule 25b: the DiscoveryModel owns final placement at the chokepoint (PD.401)",
   (function () {
     // The catchall invariant is now SUBSUMED by the model: the reconcile
@@ -464,12 +470,54 @@ check("Rule 26b: the canon delegates its matcher to PlaceKey.relatedTo",
 check("Rule 26c: the coverage audit uses relatedTo (Þingvellir not falsely missing)",
   indexSrc.indexOf("PlaceKey.relatedTo(lk, allKeys[i])") !== -1,
   "the coverage check reverted to PlaceKey.same — one-word listed places report missing");
-check("Rule 26d: the catchall holds only considered-eligible (no dests/hubs)",
-  indexSrc.indexOf("destination-named place counted as a catchall row") !== -1,
+check("Rule 26d: the model ingestion excludes dests/hubs (no catchall padding)",
+  (function () {
+    // Formerly enforced by _ensureCatchallsUnchecked (deleted PD.401d).
+    // Now fromPlaceActivities skips hubs and destinations at ingestion,
+    // so they can never become catchall rows in the first place.
+    var dm = fs.readFileSync(path.join(ROOT, "discovery-model.js"), "utf8");
+    return /if\s*\(\s*isHub\(p\)\s*\)\s*return/.test(dm)
+      && /if\s*\(\s*isDestination\(p\)\s*\)\s*return/.test(dm);
+  })(),
   "destinations/hubs can pad a catchall and break chip==receipt");
-check("Rule 26e: named-route umbrellas route to the scenic-routes section",
-  indexSrc.indexOf("function _routeUmbrellasToScenicRoutes") !== -1,
-  "Golden/Diamond Circle fall back to From-your-list");
+check("Rule 26e: route-umbrella detection is folded into the model (PD.401e)",
+  (function () {
+    // The _routeUmbrellasToScenicRoutes pre-pass is DELETED. The model
+    // now owns the decision (isRouteUmbrella → SECTION.SCENIC) and the
+    // adapter merges it into the route container.
+    var dm = fs.readFileSync(path.join(ROOT, "discovery-model.js"), "utf8");
+    return indexSrc.indexOf("function _routeUmbrellasToScenicRoutes") === -1
+      && /function isRouteUmbrella\(/.test(dm)
+      && dm.indexOf("SCENIC") !== -1
+      && indexSrc.indexOf("S.SCENIC") !== -1;
+  })(),
+  "Golden/Diamond Circle fall back to From-your-list / the pre-pass came back");
+
+// ── Rule 27: ONE considered derivation (PD.401c) ───────────────────
+// The whole "two owners" bug class — banner 63 vs chips 56, discovery
+// preview vs trip pill — comes from "what's considered and where" being
+// computed in more than one place with more than one dedup. These rules
+// pin the single owner: ONE ingestion (DiscoveryModel.fromPlaceActivities)
+// that the render, the receipt banner, and MaxData's count surfaces all
+// build through.
+check("Rule 27a: DiscoveryModel owns the one ingestion (fromPlaceActivities)",
+  (function () {
+    var dm = fs.readFileSync(path.join(ROOT, "discovery-model.js"), "utf8");
+    return /DiscoveryModel\.fromPlaceActivities\s*=/.test(dm)
+      && /consideredKeyedSet\s*=\s*function/.test(dm);
+  })(),
+  "the single ingestion/derivation owner is missing");
+check("Rule 27b: MaxData.consideredPlaceKeys DELEGATES to the model",
+  maxDataSrc.indexOf("MD.DiscoveryModel.fromPlaceActivities") !== -1
+    && maxDataSrc.indexOf("model.consideredKeyedSet()") !== -1,
+  "the trip pill/audit/count forked their own considered derivation again");
+check("Rule 27c: the render adapter uses the SAME ingestion",
+  indexSrc.indexOf("MaxDiscovery.DiscoveryModel.fromPlaceActivities") !== -1,
+  "the picker placement re-implemented its own ingestion");
+check("Rule 27d: the receipt banner reads the model count, not a forked loop",
+  indexSrc.indexOf("_discoveryConsideredCounts()") !== -1
+    && indexSrc.indexOf("function _discoveryConsideredCounts") !== -1,
+  "the banner re-acquired its own count derivation (63-vs-56 returns)");
 
 // ── GC safety ──────────────────────────────────────────────────────
 var gc = fnBody(indexSrc, /function cleanupOrphanedTrips\s*\(/);

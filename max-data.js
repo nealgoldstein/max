@@ -187,17 +187,33 @@
       }
     });
     var out = {};
-    pa.forEach(function (it) {
-      if (!it || it.type === "route" || isStaySec(it.section)) return;
-      (it.requiredPlaces || []).forEach(function (p) {
-        if (!p || !p.place) return;
-        if (p._autoCreated) return; // a Max hub is a stay proposal, not a sight
-        if (!(p._keep === false && p._rejected !== true)) return; // unchecked only
-        var k = _normKey(p.place);
-        if (!k || excluded[k] || out[k]) return;
-        out[k] = { name: p.place, lat: p.lat, lng: p.lng, section: it.section };
+    // PD.401c (SINGLE SOURCE OF TRUTH): the considered set is whatever the
+    // DiscoveryModel says it is — the SAME ingestion and the SAME
+    // coordinate-aware dedup the picker renders and the receipt banner
+    // counts. No second placement policy, no second dedup: the trip pill,
+    // the audit, the section chips, and the render are one derivation.
+    // (Falls back to the inline loop only if the model isn't loaded.)
+    var MD = global.MaxDiscovery;
+    if (MD && MD.DiscoveryModel && typeof MD.DiscoveryModel.fromPlaceActivities === "function") {
+      var model = MD.DiscoveryModel.fromPlaceActivities(pa, {
+        isStaySection: isStaySec,
+        isDestination: function (p) { return !!(p && p.place && excluded[_normKey(p.place)]); },
+        isHub: function (p) { return !!(p && (p._autoCreated || p._origin === "max-hub")); }
       });
-    });
+      out = model.consideredKeyedSet();
+    } else {
+      pa.forEach(function (it) {
+        if (!it || it.type === "route" || isStaySec(it.section)) return;
+        (it.requiredPlaces || []).forEach(function (p) {
+          if (!p || !p.place) return;
+          if (p._autoCreated) return; // a Max hub is a stay proposal, not a sight
+          if (!(p._keep === false && p._rejected !== true)) return; // unchecked only
+          var k = _normKey(p.place);
+          if (!k || excluded[k] || out[k]) return;
+          out[k] = { name: p.place, lat: p.lat, lng: p.lng, section: it.section };
+        });
+      });
+    }
     // PD.387: LEGACY ABSORPTION. placeActivities is authoritative, but
     // trips saved before this refactor carry their considered set ONLY
     // in the old dest.suggestions pool (PD.269). Supplement — never

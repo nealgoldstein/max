@@ -19475,7 +19475,9 @@ function _reconcileUserListedKeeps(){
   // committed "Sights you're keeping" section, so the catchalls stay
   // pure and chip == rows == unchecked == considered == receipt, by
   // construction, with no per-surface special-casing.
-  _routeUmbrellasToScenicRoutes();
+  // PD.401e: the scenic-route umbrella pre-pass is GONE — route-umbrella
+  // detection is now folded into the DiscoveryModel (SECTION.SCENIC), so
+  // the WHAT is a model concern and the adapter only does the plumbing.
   // PD.401: the DiscoveryModel is now the FINAL placement authority for
   // sights. It ingests every sight the pass-chain produced, dedupes by
   // coordinate-aware identity, and RE-DERIVES each sight's section from
@@ -19486,47 +19488,72 @@ function _reconcileUserListedKeeps(){
   _applyDiscoveryModelToSights();
 }
 
+// PD.401c: the app's classifiers for the ONE ingestion. Built once here
+// so the render, the receipt banner, and MaxData's count surfaces all
+// hand DiscoveryModel.fromPlaceActivities the SAME notions of "stay
+// section", "origin", "destination", and "hub". One derivation, one set.
+function _discoveryOpts(){
+  var t = (typeof TripStore !== "undefined" && TripStore.isLoaded && TripStore.isLoaded()) ? TripStore.trip
+    : ((typeof trip !== "undefined") ? trip : null);
+  var _rk = function(name){ return window.PlaceKey ? PlaceKey.resolve(name) : String(name||"").toLowerCase().trim(); };
+  var destKeys = {};
+  try {
+    var ds = (t && typeof MaxData !== "undefined" && MaxData.getDestinations) ? MaxData.getDestinations(t)
+      : ((t && t.destinations) || []);
+    (ds || []).forEach(function(d){ if (d && d.place) destKeys[_rk(d.place)] = 1; });
+    // Match MaxData.consideredPlaceKeys exactly: a place that appears in
+    // ANY stay section is a stay, not a considered sight — exclude it
+    // from the count the same way, so the banner == the trip pill.
+    var _pa = (typeof _tb !== "undefined" && _tb && Array.isArray(_tb.placeActivities)) ? _tb.placeActivities : [];
+    _pa.forEach(function(it){
+      if (it && window._isStaySection && window._isStaySection(it.section)) {
+        (it.requiredPlaces || []).forEach(function(p){ if (p && p.place) destKeys[_rk(p.place)] = 1; });
+      }
+    });
+  } catch(_){}
+  return {
+    isStaySection: function(s){ return !!window._isStaySection && window._isStaySection(s); },
+    originOf: function(p){ return window._placeOrigin ? window._placeOrigin(p) : "max"; },
+    isDestination: function(p){
+      if (!p || !p.place) return false;
+      var k = window.PlaceKey ? PlaceKey.resolve(p.place) : String(p.place).toLowerCase().trim();
+      return !!destKeys[k];
+    },
+    isHub: function(p){ return !!(p && (p._autoCreated || p._origin === "max-hub")); }
+  };
+}
+
+// PD.401c: the considered count, derived from the SAME model + the SAME
+// ingestion every other surface uses. Returns { total, catchall, other }
+// so the receipt banner reads the identical set as the chips and the pill.
+function _discoveryConsideredCounts(){
+  if (typeof _tb === "undefined" || !_tb || !Array.isArray(_tb.placeActivities)) return null;
+  if (typeof MaxDiscovery === "undefined" || !MaxDiscovery.DiscoveryModel) return null;
+  var S = MaxDiscovery.SECTION, Policy = MaxDiscovery.PlacementPolicy;
+  var model = MaxDiscovery.DiscoveryModel.fromPlaceActivities(_tb.placeActivities, _discoveryOpts());
+  var unchecked = model.considered();
+  var catchall = 0;
+  unchecked.forEach(function(p){
+    var sec = Policy.sectionFor(p);
+    if (sec === S.SIGHTS_NEAR || sec === S.MORE) catchall++;
+  });
+  return { total: unchecked.length, catchall: catchall, other: unchecked.length - catchall };
+}
+
 function _applyDiscoveryModelToSights(){
   if (typeof _tb === "undefined" || !_tb || !Array.isArray(_tb.placeActivities)) return;
   if (typeof MaxDiscovery === "undefined" || !MaxDiscovery.DiscoveryModel) return;
   var S = MaxDiscovery.SECTION;
-  var CATCH = {}; CATCH[S.SIGHTS_NEAR] = 1; CATCH[S.MORE] = 1; CATCH[S.FROM_LIST] = 1; CATCH[S.KEEPING] = 1;
-  // Partition: items the model OWNS (sight-bearing themes + catchalls)
-  // vs items it passes through (stay sections, routes, conditions).
-  var passthrough = [], owned = [];
-  _tb.placeActivities.forEach(function(it){
-    if (!it) return;
-    if (window._isStaySection(it.section)
-        || it.type === "route" || it.type === "condition"
-        || (it.type && /^synthetic-stays$/.test(it.type))
-        || /^routes\s*[&]\s*regions/i.test(String(it.section||""))) {
-      passthrough.push(it); return;
-    }
-    owned.push(it);
+  // Passthrough = items the model does NOT own (stays, routes, conditions).
+  var passthrough = _tb.placeActivities.filter(function(it){
+    return it && (window._isStaySection(it.section)
+      || it.type === "route" || it.type === "condition"
+      || (it.type && /^synthetic-stays$/.test(it.type))
+      || /^routes\s*[&]\s*regions/i.test(String(it.section||"")));
   });
-  var model = new MaxDiscovery.DiscoveryModel();
-  owned.forEach(function(it){
-    var sec = String(it.section || "");
-    var isCatch = !!CATCH[sec];
-    var themeFit = isCatch ? null : sec;            // a real theme, or null for catchalls
-    var nearListed = (sec === S.SIGHTS_NEAR);
-    (it.requiredPlaces || []).forEach(function(p){
-      if (!p || !p.place) return;
-      var origin = window._placeOrigin ? window._placeOrigin(p) : "max";
-      var decision = (p._rejected === true) ? "rejected"
-        : (p._keep === false ? "unchecked" : "checked");
-      model.upsert({
-        place: p.place,
-        coords: (typeof p.lat === "number" && typeof p.lng === "number") ? { lat: p.lat, lng: p.lng } : null,
-        origin: origin,
-        role: "sight",
-        decision: decision,
-        themeFit: themeFit,
-        nearListed: nearListed,
-        src: p
-      });
-    });
-  });
+  var owned = _tb.placeActivities.filter(function(it){ return passthrough.indexOf(it) === -1; });
+  // THE single ingestion — same function MaxData and the banner call.
+  var model = MaxDiscovery.DiscoveryModel.fromPlaceActivities(_tb.placeActivities, _discoveryOpts());
   // Rebuild the owned (sight) items from the model's derivation.
   var prevById = {};
   owned.forEach(function(it){ if (it && it.section) prevById[it.section] = it; });
@@ -19554,6 +19581,39 @@ function _applyDiscoveryModelToSights(){
     }).filter(Boolean);
     return item;
   });
+  // PD.401e: the model DECIDES which places are scenic-route umbrellas
+  // (PlacementPolicy → SECTION.SCENIC). Here we honor that decision by
+  // merging them into the existing route container (a type:"route" item
+  // carries route semantics the model deliberately doesn't own). This
+  // replaces the old _routeUmbrellasToScenicRoutes pre-pass: the WHAT is
+  // the model's; this is only the WHERE-it-lives plumbing.
+  var _scenicGroup = null;
+  newSightItems = newSightItems.filter(function(it){
+    if (it && it.section === S.SCENIC) { _scenicGroup = it; return false; }
+    return true;
+  });
+  if (_scenicGroup && _scenicGroup.requiredPlaces && _scenicGroup.requiredPlaces.length) {
+    var _routeContainer = passthrough.find(function(it){
+      return it && (it.type === "route"
+        || /drive\s*scenic\s*routes|scenic\s*routes?|drive\s*the\s*(routes|ring)/i.test(String(it.section||"")));
+    });
+    var _nrm = (window.PlaceKey && PlaceKey.resolve) ? PlaceKey.resolve
+      : function(s){ return String(s||"").toLowerCase().trim(); };
+    if (_routeContainer) {
+      if (!Array.isArray(_routeContainer.requiredPlaces)) _routeContainer.requiredPlaces = [];
+      var _have = {};
+      _routeContainer.requiredPlaces.forEach(function(p){ if (p && p.place) _have[_nrm(p.place)] = 1; });
+      _scenicGroup.requiredPlaces.forEach(function(p){
+        var k = p && p.place ? _nrm(p.place) : null;
+        if (!k || _have[k]) return;
+        _have[k] = 1; _routeContainer.requiredPlaces.push(p);
+      });
+    } else {
+      // No route container exists — keep the umbrellas grouped so they
+      // are not orphaned (fallback; the old pass simply left them).
+      newSightItems.push(_scenicGroup);
+    }
+  }
   // Reassemble: passthrough (stays/routes) FIRST in their order, then
   // the model's sight sections. The stays owner already pinned the stay
   // sections to the top of `passthrough`.
@@ -19562,129 +19622,26 @@ function _applyDiscoveryModelToSights(){
   });
 }
 
-// PD.398: named driving loops the traveler listed — "Golden Circle",
-// "Diamond Circle", "Ring Road" — are ROUTES, not single sights, so
-// "From your list" is the wrong home. If the LLM produced a scenic-
-// routes section, move them there (it's where the user expects them).
-// Surgical: only entries whose name matches a route-umbrella pattern,
-// only when a route section exists. No new section is invented.
-function _routeUmbrellasToScenicRoutes(){
-  if (typeof _tb === "undefined" || !_tb || !Array.isArray(_tb.placeActivities)) return;
-  var ROUTE_RE = /\b(circle|ring\s*road|ring\s*route|scenic\s*loop|scenic\s*drive|scenic\s*route)\b/i;
-  var routeItem = _tb.placeActivities.find(function(it){
-    return it && it.section && /drive\s*scenic\s*routes|scenic\s*routes?|drive\s*the\s*(routes|ring)/i.test(it.section);
-  });
-  if (!routeItem) return;
-  if (!Array.isArray(routeItem.requiredPlaces)) routeItem.requiredPlaces = [];
-  var nrm = (window.PlaceKey && PlaceKey.resolve) ? PlaceKey.resolve
-    : (typeof _normPlaceName === "function" ? _normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); });
-  var have = {};
-  routeItem.requiredPlaces.forEach(function(p){ if (p && p.place) have[nrm(p.place)] = true; });
-  _tb.placeActivities.forEach(function(it){
-    if (!it || it.section !== "From your list" || !Array.isArray(it.requiredPlaces)) return;
-    it.requiredPlaces = it.requiredPlaces.filter(function(p){
-      if (!p || !p.place || !ROUTE_RE.test(p.place)) return true;
-      var k = nrm(p.place);
-      if (!have[k]) { routeItem.requiredPlaces.push(p); have[k] = true; }
-      return false; // moved out of "From your list"
-    });
-  });
-  // Drop "From your list" if it emptied.
-  _tb.placeActivities = _tb.placeActivities.filter(function(it){
-    return !(it && it.section === "From your list" && Array.isArray(it.requiredPlaces) && !it.requiredPlaces.length);
-  });
-}
+// PD.401e: _routeUmbrellasToScenicRoutes DELETED. Named driving loops
+// ("Golden Circle", "Ring Road", a scenic loop) are recognized inside
+// the DiscoveryModel now — isRouteUmbrella() + PlacementPolicy →
+// SECTION.SCENIC, and they're excluded from the considered count. The
+// adapter merges the model's scenic decision into the route container.
+// The WHAT is a model concern; no standalone pre-pass remains.
 
-function _ensureCatchallsUnchecked(){
-  if (typeof _tb === "undefined" || !_tb || !Array.isArray(_tb.placeActivities)) return;
-  var CATCH = { "Sights near places you listed": 1, "More places to consider": 1 };
-  var KEPT_SECTION = "Sights you're keeping";
-  var _nrm = (window.PlaceKey && PlaceKey.resolve) ? PlaceKey.resolve
-    : (typeof _normPlaceName === "function" ? _normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); });
-  // PD.397: a "to consider" catchall holds EXACTLY the considered-
-  // eligible sights — unchecked, NOT a destination, NOT a hub. A
-  // destination-named place counted as a catchall row but was excluded
-  // from "considered," so the chip (rows) exceeded the receipt
-  // (considered) by 1. Removing them makes catchall rows == considered
-  // == receipt, by construction.
-  var _destKeys = {};
-  try {
-    var _t = (typeof TripStore !== "undefined" && TripStore.isLoaded && TripStore.isLoaded()) ? TripStore.trip
-      : ((typeof trip !== "undefined") ? trip : null);
-    ((_t && _t.destinations) || []).forEach(function(d){ if (d && d.place) _destKeys[_nrm(d.place)] = true; });
-  } catch(_){}
-  _tb.placeActivities.forEach(function(it){
-    if (it && window._isStaySection(it.section)) {
-      (it.requiredPlaces || []).forEach(function(p){ if (p && p.place) _destKeys[_nrm(p.place)] = true; });
-    }
-  });
-  var moved = [];
-  _tb.placeActivities.forEach(function(it){
-    if (!it || !CATCH[it.section] || !Array.isArray(it.requiredPlaces)) return;
-    var stay = [];
-    it.requiredPlaces.forEach(function(p){
-      if (!p) return;
-      var k = p.place ? _nrm(p.place) : null;
-      // A destination or a Max hub is not a sight-to-consider — drop
-      // it from the catchall (it lives in a stay/destination section).
-      if (p._autoCreated || (k && _destKeys[k])) return;
-      // A checked, non-rejected sight = a decision → leaves "to consider".
-      if (p._keep !== false && p._rejected !== true) { moved.push(p); return; }
-      stay.push(p);
-    });
-    it.requiredPlaces = stay;
-  });
-  if (!moved.length) {
-    // Drop an empty "kept" section if nothing is committed anymore.
-    _tb.placeActivities = _tb.placeActivities.filter(function(it){
-      return !(it && it.section === KEPT_SECTION && (!it.requiredPlaces || !it.requiredPlaces.length));
-    });
-    // Drop emptied catchalls.
-    _tb.placeActivities = _tb.placeActivities.filter(function(it){
-      return !(it && CATCH[it.section] && Array.isArray(it.requiredPlaces) && !it.requiredPlaces.length);
-    });
-    return;
-  }
-  var keptItem = _tb.placeActivities.find(function(it){ return it && it.section === KEPT_SECTION; });
-  if (!keptItem) {
-    keptItem = {
-      id: "synth-kept-sights",
-      section: KEPT_SECTION,
-      name: "Sights you're keeping",
-      type: "synthetic-sights",
-      description: "Sights you checked that don't belong to a named activity above. They're committed to your trip.",
-      checked: true,
-      requiredPlaces: []
-    };
-    // Insert just below the stay sections + Sights-near, above the
-    // remaining to-consider catchalls.
-    var at = 0;
-    _tb.placeActivities.forEach(function(it, i){
-      if (it && (window._isStaySection(it.section) || it.section === "Sights near places you listed")) at = i + 1;
-    });
-    _tb.placeActivities.splice(at, 0, keptItem);
-  }
-  // Merge moved places in, deduped by key.
-  var nrm = (window.PlaceKey && PlaceKey.resolve) ? PlaceKey.resolve
-    : (typeof _normPlaceName === "function" ? _normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); });
-  var seen = {};
-  (keptItem.requiredPlaces || []).forEach(function(p){ if (p && p.place) seen[nrm(p.place)] = true; });
-  moved.forEach(function(p){
-    var k = p && p.place ? nrm(p.place) : null;
-    if (!k || seen[k]) return;
-    seen[k] = true;
-    keptItem.requiredPlaces.push(p);
-  });
-  // Drop any catchall that emptied out.
-  _tb.placeActivities = _tb.placeActivities.filter(function(it){
-    return !(it && CATCH[it.section] && Array.isArray(it.requiredPlaces) && !it.requiredPlaces.length);
-  });
-}
+// PD.401d: _ensureCatchallsUnchecked DELETED. The whole invariant it
+// enforced imperatively — a "to consider" catchall holds only unchecked
+// sights (no dests, no hubs); a checked sight moves to "Sights you're
+// keeping" — is now a PURE CONSEQUENCE of PlacementPolicy.sectionFor in
+// the DiscoveryModel. A checked sight's section IS "Sights you're
+// keeping" (or its theme) by derivation; a destination/hub is excluded
+// from ingestion. There is nothing left to "ensure." One less mutation
+// pass, one less owner.
 if (typeof globalThis !== "undefined") {
   globalThis._reconcileUserListedKeeps = _reconcileUserListedKeeps;
-  globalThis._ensureCatchallsUnchecked = _ensureCatchallsUnchecked;
-  globalThis._routeUmbrellasToScenicRoutes = _routeUmbrellasToScenicRoutes;
   globalThis._applyDiscoveryModelToSights = _applyDiscoveryModelToSights;
+  globalThis._discoveryOpts = _discoveryOpts;
+  globalThis._discoveryConsideredCounts = _discoveryConsideredCounts;
 }
 
 // PD.360: writers own reconciliation. Every milestone that lands new
@@ -31883,19 +31840,30 @@ function renderActivityPicker(){
         // per-section raw count (PD.390) double-counted any place that
         // the LLM placed in two sections — the source of the inflated
         // "104 unchecked."
-        var _rcTrip2 = (typeof TripStore !== "undefined" && TripStore.isLoaded && TripStore.isLoaded()) ? TripStore.trip
-          : ((typeof trip !== "undefined") ? trip : null);
-        var _consSet = (_rcTrip2 && typeof MaxData !== "undefined" && MaxData.consideredPlaceKeys)
-          ? MaxData.consideredPlaceKeys(_rcTrip2) : {};
-        var _catchNames = { "Sights near places you listed": 1, "More places to consider": 1 };
-        var n = 0, nCatch = 0;
-        Object.keys(_consSet).forEach(function(k){
-          n++;
-          var sec = _consSet[k].section || "";
-          if (_catchNames[sec]) nCatch++;
-        });
+        // PD.401b: ONE derivation. The receipt reads the SAME
+        // DiscoveryModel the picker renders, so the number here and the
+        // section chips are the identical set by construction — no second
+        // dedup, no drift (the 63-vs-56 bug). Falls back to the old owner
+        // only if the model is somehow unavailable.
+        var n, nCatch, nOther;
+        var _dcc = (typeof _discoveryConsideredCounts === "function") ? _discoveryConsideredCounts() : null;
+        if (_dcc) {
+          n = _dcc.total; nCatch = _dcc.catchall; nOther = _dcc.other;
+        } else {
+          var _rcTrip2 = (typeof TripStore !== "undefined" && TripStore.isLoaded && TripStore.isLoaded()) ? TripStore.trip
+            : ((typeof trip !== "undefined") ? trip : null);
+          var _consSet = (_rcTrip2 && typeof MaxData !== "undefined" && MaxData.consideredPlaceKeys)
+            ? MaxData.consideredPlaceKeys(_rcTrip2) : {};
+          var _catchNames = { "Sights near places you listed": 1, "More places to consider": 1 };
+          n = 0; nCatch = 0;
+          Object.keys(_consSet).forEach(function(k){
+            n++;
+            var sec = _consSet[k].section || "";
+            if (_catchNames[sec]) nCatch++;
+          });
+          nOther = n - nCatch;
+        }
         if (!n) return '';
-        var nOther = n - nCatch;
         var _whereTxt;
         if (nOther <= 0) {
           _whereTxt = 'They are unchecked in <strong>“Sights near places you listed”</strong> and <strong>“More places to consider”</strong>, and are gray pins on the map. Check them in those sections, or tap a gray pin to add it.';

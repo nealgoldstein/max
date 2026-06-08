@@ -298,18 +298,36 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
     // A headliner that is Max's own suggestion is highlighted, never checked.
     expect(head.anyMaxHeadlinerChecked).toBe(false);
 
-    // PD.391: the receipt's "N unchecked sights" headline must equal
-    // the SINGLE considered derivation — no second computation, no
-    // "104 wrong number" drift. Read it from the rendered footer.
+    // PD.401b: the receipt's "N unchecked sights" headline and its
+    // catchall sentence must come from the SAME DiscoveryModel the picker
+    // renders — so the banner number equals the section chips by
+    // construction. This pins the 63-vs-56 bug: the banner counted
+    // consideredPlaceKeys (one dedup) while the chips came from the model
+    // (coordinate-aware dedup), and they drifted by 7.
     const recBundle = await page.evaluate(() => {
-      const considered = window.MaxData.consideredPlaceKeys(window.TripStore.trip || {});
+      const dcc = window._discoveryConsideredCounts ? window._discoveryConsideredCounts() : null;
       const el = document.querySelector('.tb-footer');
       const m = el && el.innerText.match(/(\d+) unchecked sight/);
-      return { setSize: Object.keys(considered).length, receipt: m ? parseInt(m[1], 10) : null };
+      // The actual RENDERED sizes of the two catchall sections.
+      const S = window.MaxDiscovery.SECTION;
+      let renderedCatch = 0;
+      (window._tb.placeActivities || []).forEach((it) => {
+        if (!it) return;
+        if (it.section === S.SIGHTS_NEAR || it.section === S.MORE) {
+          renderedCatch += (it.requiredPlaces || []).filter((p) => p && p._keep === false).length;
+        }
+      });
+      return { dcc, receipt: m ? parseInt(m[1], 10) : null, renderedCatch };
     });
-    if (recBundle.receipt !== null) {
-      expect(recBundle.receipt, 'receipt headline must equal the considered set size')
-        .toBe(recBundle.setSize);
+    if (recBundle.receipt !== null && recBundle.dcc) {
+      expect(recBundle.receipt, 'receipt headline must equal the model considered total')
+        .toBe(recBundle.dcc.total);
+    }
+    // THE FIX: the banner's catchall count == the rendered catchall chips.
+    if (recBundle.dcc) {
+      expect(recBundle.dcc.catchall,
+        'banner catchall count (' + recBundle.dcc.catchall + ') must equal the rendered catchall chips (' + recBundle.renderedCatch + ')')
+        .toBe(recBundle.renderedCatch);
     }
 
     // PD.391: DEDUP INVARIANT — no place may appear in two non-stay

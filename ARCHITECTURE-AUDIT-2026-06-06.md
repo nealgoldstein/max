@@ -414,3 +414,84 @@ enhance/stays-owner/umbrella-router); the model is the single LAST WORD
 on where each sight lands. Deleting the now-redundant placement passes is
 the next step — the model already overrides them, so they can come out
 one at a time behind a green suite.
+
+### PD.401c — ONE considered derivation (no more two owners)
+The 63-vs-56 banner bug (and the older discovery-preview-vs-trip-pill
+drift) had the same cause: "what's considered, and where" was computed in
+several places, each with its own dedup. The render came from the model
+(coordinate-aware identity); `MaxData.consideredPlaceKeys` used name-key
+dedup; the banner read one, the chips read the other → drift.
+
+Now there is ONE ingestion and ONE derivation:
+`DiscoveryModel.fromPlaceActivities(items, opts)` is the single function
+that turns placeActivities into the model — skipping stays, routes,
+hubs, and destinations, applying the one coordinate-aware identity. Every
+surface builds through it:
+- the **render** (`_applyDiscoveryModelToSights`) — placement;
+- the **receipt banner** (`_discoveryConsideredCounts`) — the headline
+  and the catchall split;
+- **`MaxData.consideredPlaceKeys`** — which now DELEGATES to
+  `model.consideredKeyedSet()`, so everything built on it (the trip pill
+  `countConsideredSights`, the overview pins `getConsideredSights`, the
+  section chips `consideredBySection`, the `_maxPlaceSetAudit` receipt)
+  is the identical set.
+
+Because the pill, the audit, the chips, the banner, and the render are
+now literally the same derivation over the same ingestion, they cannot
+disagree by construction. Contract Rule 27 pins this: any future edit
+that forks a second considered-derivation fails the gate.
+
+### PD.401d — deleting the redundant pass (and what is NOT redundant)
+`_ensureCatchallsUnchecked` is DELETED. It imperatively enforced "a to-
+consider catchall holds only unchecked sights; a checked sight moves to
+'Sights you're keeping'; no dests/hubs." Every clause of that is now a
+pure consequence of `PlacementPolicy.sectionFor` plus the ingestion
+skipping dests/hubs — there is nothing left to "ensure." (Rules 25a and
+26d were repointed at the model; the suite stays green.)
+
+Being honest about the rest of the "7 passes," because not all of them
+were placement owners competing with the model — most are the PIPELINE
+that PRODUCES the model's inputs, and deleting them would starve it:
+
+- **construct / backstop / enhance** — GENERATE places (the user's list,
+  dropped-place recovery, LLM suggestions). The model derives placement
+  *from* these; it does not replace them.
+- **`_reconcileUserListedKeeps`** — canonicalization at the chokepoint +
+  rehydration of `_userListedNames` / `_classificationByPlace` / origin.
+  This is the data prep that gives each place its `_origin` and `_keep`;
+  the model READS those. It ends by calling the model (the last word on
+  placement), but its body is inputs, not a competing owner.
+- **stays-owner** — places the stay sections (passthrough; the model
+  deliberately does not own stays).
+- **umbrella-router** — assigns the scenic-routes theme, which the model
+  consumes as `themeFit`. An input, not an override.
+
+So the architecture is now a clean pipeline: *generate → prepare →
+DiscoveryModel derives the single placement + the single considered set →
+everything reads that one derivation*. The only thing that was a genuine
+second owner of placement (the catchall pass) is gone.
+
+### PD.401e — folding the umbrella-router into the model
+`_routeUmbrellasToScenicRoutes` is DELETED too. It was the last *input*
+pass that made a placement decision outside the model: it recognized that
+a place whose name is itself a named driving route ("Golden Circle",
+"Ring Road", a scenic loop) belongs in "Drive scenic routes," not in
+"From your list." That recognition is now the model's:
+
+- `MaxDiscovery.isRouteUmbrella(name)` — the pure predicate (the old
+  regex, now owned by the model).
+- `PlacementPolicy.sectionFor` routes an umbrella (with no more-specific
+  theme) to `SECTION.SCENIC`, and `considered()`/`committed()` exclude
+  it — a route reference is not a considerable sight, so it never pads
+  the count.
+- The adapter does the only thing that isn't a pure decision: it merges
+  the model's scenic places into the existing `type:"route"` container
+  (which carries route semantics — endpoints, transit chips — the model
+  deliberately doesn't own). The *what* is the model's; the adapter is
+  just *where it lives*.
+
+That closes the loop the user asked for: even this input is now a model
+concern. The picker's placement is the model, the counts are the model,
+and the only thing left that "decides" anything about a sight's home —
+route-umbrella-ness — is a pure, unit-tested function inside it. Contract
+Rule 26e is repointed to pin the fold (the pre-pass cannot return).

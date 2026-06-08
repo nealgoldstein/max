@@ -127,6 +127,85 @@ test("stay split: user stay and max hub never share a section", function () {
   assert.strictEqual(Policy.sectionFor(m._findExisting({ place: "Grundarfjordur" })), S.STAYS_REC);
 });
 
+// ── ONE ingestion: fromPlaceActivities is the single derivation ──────
+test("fromPlaceActivities: skips stays, routes, hubs, destinations", function () {
+  var items = [
+    { section: "Overnight stays", requiredPlaces: [ { place: "Reykjavik", _keep: true } ] },
+    { section: "Drive scenic routes", type: "route", requiredPlaces: [ { place: "Golden Circle", _keep: false } ] },
+    { section: "More places to consider", requiredPlaces: [
+      { place: "Geysir", _keep: false, _origin: "max" },
+      { place: "Grundarfjordur", _keep: false, _autoCreated: true },  // a hub
+      { place: "Vik", _keep: false, _origin: "max" }                  // also a destination
+    ] }
+  ];
+  var m = DiscoveryModel.fromPlaceActivities(items, {
+    isStaySection: function (s) { return s === "Overnight stays"; },
+    isDestination: function (p) { return p.place === "Vik"; }
+  });
+  var names = m.all().map(function (p) { return p.place; });
+  assert.deepStrictEqual(names, ["Geysir"], "only the genuine unchecked sight is ingested");
+});
+
+test("fromPlaceActivities: catchall vs theme drives placement", function () {
+  var items = [
+    { section: "Chase waterfalls", requiredPlaces: [ { place: "Skogafoss", _keep: false, _origin: "max" } ] },
+    { section: "More places to consider", requiredPlaces: [ { place: "Geysir", _keep: false, _origin: "max" } ] },
+    { section: "Sights near places you listed", requiredPlaces: [ { place: "Kerid", _keep: false, _origin: "max" } ] }
+  ];
+  var m = DiscoveryModel.fromPlaceActivities(items, {});
+  assert.strictEqual(Policy.sectionFor(m._findExisting({ place: "Skogafoss" })), "Chase waterfalls");
+  assert.strictEqual(Policy.sectionFor(m._findExisting({ place: "Geysir" })), S.MORE);
+  assert.strictEqual(Policy.sectionFor(m._findExisting({ place: "Kerid" })), S.SIGHTS_NEAR);
+});
+
+test("consideredKeyedSet: keyed shape, deduped, section-tagged", function () {
+  var items = [
+    { section: "More places to consider", requiredPlaces: [
+      { place: "Þingvellir", _keep: false, _origin: "max", lat: 64.25, lng: -21.13 } ] },
+    { section: "See natural wonders", requiredPlaces: [
+      // same coords, qualified name → MUST dedupe to ONE considered entry
+      { place: "Þingvellir National Park", _keep: false, _origin: "max", lat: 64.25, lng: -21.13 } ] }
+  ];
+  var m = DiscoveryModel.fromPlaceActivities(items, {});
+  var set = m.consideredKeyedSet();
+  assert.strictEqual(Object.keys(set).length, 1, "the two variants collapse to one considered place");
+  // and it lands in the theme (themeFit wins over the catchall).
+  var only = set[Object.keys(set)[0]];
+  assert.strictEqual(only.section, "See natural wonders");
+});
+
+// ── ROUTE UMBRELLAS: folded into the model (PD.401e) ─────────────────
+test("route umbrella: a named loop is recognized", function () {
+  assert.strictEqual(M.isRouteUmbrella("Golden Circle"), true);
+  assert.strictEqual(M.isRouteUmbrella("Ring Road"), true);
+  assert.strictEqual(M.isRouteUmbrella("Diamond Circle"), true);
+  assert.strictEqual(M.isRouteUmbrella("Skogafoss"), false);
+});
+
+test("route umbrella: lands in Drive scenic routes, NOT From your list", function () {
+  var m = model([
+    { place: "Golden Circle", origin: "user", role: "sight", decision: "unchecked" }
+  ]);
+  assert.strictEqual(Policy.sectionFor(m.all()[0]), S.SCENIC);
+});
+
+test("route umbrella: excluded from the considered count", function () {
+  var m = model([
+    { place: "Golden Circle", origin: "user", role: "sight", decision: "unchecked" },
+    { place: "Geysir", origin: "max", role: "sight", decision: "unchecked" }
+  ]);
+  assert.strictEqual(m.considered().length, 1, "only Geysir is considered; the route umbrella is not");
+  assert.strictEqual(m.considered()[0].place, "Geysir");
+});
+
+test("route umbrella: a themed place keeps its theme (not hijacked to scenic)", function () {
+  // If the LLM gave a route-named place a real theme, respect it.
+  var m = model([
+    { place: "Golden Circle", origin: "max", role: "sight", decision: "unchecked", themeFit: "See natural wonders" }
+  ]);
+  assert.strictEqual(Policy.sectionFor(m.all()[0]), "See natural wonders");
+});
+
 console.log("\n" + "─".repeat(50));
 console.log("PASS: " + pass + "    FAIL: " + fail);
 if (fail > 0) process.exit(1);

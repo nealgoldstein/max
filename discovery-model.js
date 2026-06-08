@@ -49,8 +49,20 @@
     KEEPING:      "Sights you're keeping",
     SIGHTS_NEAR:  "Sights near places you listed",
     MORE:         "More places to consider",
-    FROM_LIST:    "From your list"
+    FROM_LIST:    "From your list",
+    SCENIC:       "Drive scenic routes"
   };
+
+  // PD.401e: a "route umbrella" is a place whose NAME is itself a named
+  // driving route ("Golden Circle", "Ring Road", "Diamond Circle", a
+  // scenic loop/drive). These are not considerable sights — they belong
+  // in "Drive scenic routes". Folded in from the old
+  // _routeUmbrellasToScenicRoutes pre-pass so the decision is the model's.
+  var _ROUTE_RE = /\b(circle|ring\s*road|ring\s*route|scenic\s*loop|scenic\s*drive|scenic\s*route)\b/i;
+  function isRouteUmbrella(name) { return !!name && _ROUTE_RE.test(String(name)); }
+  // A place lands in the scenic-routes section when it is a route umbrella
+  // AND the LLM did not give it a more specific theme.
+  function _inScenic(p) { return !!(p && p.routeUmbrella && !p.themeFit); }
 
   function _norm(s) {
     if (PK && typeof PK.resolve === "function") { try { return PK.resolve(s); } catch (_) {} }
@@ -95,6 +107,9 @@
       if (p.role === "stay") {
         return (p.origin === "user") ? SECTION.STAYS_USER : SECTION.STAYS_REC;
       }
+      // A named-route umbrella (no specific theme) belongs in scenic
+      // routes regardless of check state — it is a route, not a sight.
+      if (_inScenic(p)) return SECTION.SCENIC;
       // sight
       if (p.decision === "checked") {
         return p.themeFit || SECTION.KEEPING;        // committed → theme, else "keeping"
@@ -163,6 +178,7 @@
       themeFit: raw.themeFit || null,
       listedRole: raw.listedRole || null,
       nearListed: !!raw.nearListed,
+      routeUmbrella: !!raw.routeUmbrella || isRouteUmbrella(raw.place),
       src: raw.src || null,
       _decisionSet: (raw.decision === "checked" || raw.decision === "rejected")
     };
@@ -226,7 +242,9 @@
   // reads. Excludes hubs (they're stay proposals).
   DiscoveryModel.prototype.considered = function () {
     return this.all().filter(function (p) {
-      return p.role === "sight" && p.decision === "unchecked";
+      // Route umbrellas live in "Drive scenic routes"; they are not
+      // considerable sights and never enter the considered count.
+      return p.role === "sight" && p.decision === "unchecked" && !_inScenic(p);
     });
   };
   DiscoveryModel.prototype.consideredBySection = function () {
@@ -241,7 +259,7 @@
   // committed() — checked sights (the green teardrops).
   DiscoveryModel.prototype.committed = function () {
     return this.all().filter(function (p) {
-      return p.role === "sight" && p.decision === "checked";
+      return p.role === "sight" && p.decision === "checked" && !_inScenic(p);
     });
   };
 
@@ -273,11 +291,84 @@
     });
   };
 
+  // ── ONE ingestion: placeActivities → model ────────────────────────
+  // THE single derivation owner. Every surface — the render, the receipt
+  // banner, the trip pill, the audit, the section grouping — builds the
+  // model through THIS function, so they read one set deduped one way.
+  // No consumer re-implements "what's considered and where."
+  //
+  // opts (all optional, with safe defaults):
+  //   isStaySection(section) → bool  (default: false)
+  //   originOf(place)        → "user"|"max-hub"|"max"
+  //   isDestination(place)   → bool  (a place that is also a trip stop)
+  //   isHub(place)           → bool  (a Max overnight proposal, not a sight)
+  var _CATCH_SET = {};
+  _CATCH_SET[SECTION.SIGHTS_NEAR] = 1; _CATCH_SET[SECTION.MORE] = 1;
+  _CATCH_SET[SECTION.FROM_LIST] = 1;  _CATCH_SET[SECTION.KEEPING] = 1;
+
+  function _defaultOrigin(p) {
+    if (!p) return "max";
+    if (p._origin === "user" || p._origin === "max-hub" || p._origin === "max") return p._origin;
+    if (p._autoCreated) return "max-hub";
+    return "max";
+  }
+
+  DiscoveryModel.fromPlaceActivities = function (items, opts) {
+    opts = opts || {};
+    var isStaySection = opts.isStaySection || function () { return false; };
+    var originOf = opts.originOf || _defaultOrigin;
+    var isDestination = opts.isDestination || function () { return false; };
+    var isHub = opts.isHub || function (p) { return !!(p && p._autoCreated); };
+    var m = new DiscoveryModel();
+    (items || []).forEach(function (it) {
+      if (!it || it.type === "route" || it.type === "condition") return;
+      if (isStaySection(it.section)) return;             // stays own their sections
+      if (it.type && /^synthetic-stays$/.test(it.type)) return;
+      if (/^routes\s*[&]\s*regions/i.test(String(it.section || ""))) return;
+      var sec = String(it.section || "");
+      var isCatch = !!_CATCH_SET[sec];
+      var themeFit = isCatch ? null : sec;               // a real theme, or null for catchalls
+      var nearListed = (sec === SECTION.SIGHTS_NEAR);
+      (it.requiredPlaces || []).forEach(function (p) {
+        if (!p || !p.place) return;
+        if (isHub(p)) return;                            // a hub is a stay proposal, not a sight
+        if (isDestination(p)) return;                    // a destination is not a considered sight
+        var decision = (p._rejected === true) ? "rejected"
+          : (p._keep === false ? "unchecked" : "checked");
+        m.upsert({
+          place: p.place,
+          coords: (typeof p.lat === "number" && typeof p.lng === "number") ? { lat: p.lat, lng: p.lng } : null,
+          origin: originOf(p),
+          role: "sight",
+          decision: decision,
+          themeFit: themeFit,
+          nearListed: nearListed,
+          src: p
+        });
+      });
+    });
+    return m;
+  };
+
+  // consideredKeyedSet() — the considered set in the legacy keyed shape
+  // { normKey: { name, lat, lng, section } } that count consumers expect.
+  // Same derivation as sections()/considered(), so the pill == the chips.
+  DiscoveryModel.prototype.consideredKeyedSet = function () {
+    var out = Object.create(null);
+    this.considered().forEach(function (p) {
+      var c = p.coords || {};
+      out[p.key] = { name: p.place, lat: c.lat, lng: c.lng,
+                     section: PlacementPolicy.sectionFor(p) };
+    });
+    return out;
+  };
+
   var api = {
     DiscoveryModel: DiscoveryModel,
     PlacementPolicy: PlacementPolicy,
     SECTION: SECTION,
     sameEntity: sameEntity,
+    isRouteUmbrella: isRouteUmbrella,
     _coordsClose: _coordsClose
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
