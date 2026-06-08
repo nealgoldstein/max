@@ -19572,11 +19572,26 @@ function _renderPlaceActivityItems(){
     return;
   }
   window.__rpaiLast = _rpaiNow;
-  // PD.360: render is a SELF-HEAL backstop, not the primary
-  // reconciliation site. Writers (build milestones, merges,
-  // hydration) run the passes; if data arrives here un-reconciled, a
-  // writer escaped — heal it (identical user-facing behavior) and
-  // log the escape so the leak gets plugged at its source.
+  // PD.401h (THE FIX for chip-vs-banner divergence): apply the model's
+  // placement UNCONDITIONALLY before grouping. The render used to trust
+  // `_placeSetClean` to decide whether to re-derive — a discipline-based
+  // flag every writer had to remember to reset. When a writer left it
+  // true after mutating placeActivities, the rendered sections showed
+  // stale placement while the receipt banner built a fresh model live,
+  // so the chips (38+9) disagreed with the banner (51). Re-deriving here
+  // every render makes the rendered sections == the model == the banner
+  // == the pill, by construction — no flag to get wrong. The adapter is
+  // a pure O(n) re-derivation and an identical result is a silent no-op
+  // write (TripStore PD.356a), so this neither loops nor churns. Skipped
+  // only mid-build, when the orchestrator owns the array.
+  if (typeof _applyDiscoveryModelToSights === "function"
+      && !(window.MaxBuild && MaxBuild.isBuilding && MaxBuild.isBuilding())) {
+    try { _applyDiscoveryModelToSights(); } catch(e){ console.warn("[Max PD.401h] model apply failed:", e && e.message); }
+  }
+  // PD.360: render is a SELF-HEAL backstop for the HEAVIER passes
+  // (canonicalize + cache rehydration). Writers (build milestones,
+  // merges, hydration) run them; if data arrives un-reconciled, a writer
+  // escaped — heal it and log the escape so the leak gets plugged.
   if (window._placeSetClean !== true) {
     if (typeof _reconcileUserListedKeeps === "function") _reconcileUserListedKeeps();
   }

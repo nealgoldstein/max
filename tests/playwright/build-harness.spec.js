@@ -522,4 +522,53 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
     expect(r.committed, 'the checked sight committed to "Sights you\'re keeping"').toContain('InvariantSight');
   });
 
+  // PD.401h: the painted section chips must equal the banner — in the DOM.
+  // Reproduces the real bug: a writer mutates placeActivities into a state
+  // the model would re-place, but leaves _placeSetClean === true (the
+  // discipline flag the render trusted). An unchecked MAX sight parked in
+  // "From your list" belongs in "More places to consider" by the model.
+  // Pre-fix the render trusted the flag, showed it in the wrong section,
+  // and the chips (rendered) disagreed with the banner (live model) — the
+  // exact 38+9-vs-51 divergence. The render now applies the model every
+  // paint, so the chips == the model == the banner by construction.
+  test('PD.401h: rendered catchall chips equal the model (no stale-placement drift)', async ({ page }) => {
+    await bootClean(page);
+    await runPipeline(page);
+    const r = await page.evaluate(() => {
+      window._tb.placeActivities.push({
+        id: 'stale-fromlist', type: 'activity', section: 'From your list',
+        requiredPlaces: [{ place: 'StaleSight', lat: 65.12, lng: -18.34, _keep: false, _origin: 'max' }]
+      });
+      window._placeSetClean = true;            // pretend the set is already reconciled
+      window.__rpaiLast = 0;                   // bypass the 150ms render throttle
+      window.renderActivityPicker();
+      if (typeof window._renderPlaceActivityItems === 'function') {
+        window.__rpaiLast = 0; window._renderPlaceActivityItems(); // force a synchronous paint
+      }
+
+      const CATCH = ['Sights near places you listed', 'More places to consider'];
+      let chipSum = 0, sawStaleInCatchall = false;
+      document.querySelectorAll('.tb-act-section-hdr').forEach((hdr) => {
+        const title = hdr.querySelector('.tb-act-section-title');
+        const count = hdr.querySelector('.tb-act-section-count');
+        if (!title || !count) return;
+        if (CATCH.indexOf(title.textContent.trim()) === -1) return;
+        const m = count.textContent.match(/(\d+)/);
+        if (m) chipSum += parseInt(m[1], 10);
+      });
+      // Did StaleSight actually render inside a catchall (model healed it)?
+      (window._tb.placeActivities || []).forEach((it) => {
+        if (CATCH.indexOf(it.section) === -1) return;
+        (it.requiredPlaces || []).forEach((p) => { if (p && p.place === 'StaleSight') sawStaleInCatchall = true; });
+      });
+      const dcc = window._discoveryConsideredCounts ? window._discoveryConsideredCounts() : null;
+      return { chipSum, modelCatch: dcc ? dcc.catchall : -1, sawStaleInCatchall };
+    });
+    // The painted catchall chips equal the model's catchall count — the
+    // banner reads the same model, so chip-sum == banner by construction.
+    expect(r.chipSum, 'rendered catchall chips must equal the model catchall count (banner)').toBe(r.modelCatch);
+    // And the stale, mis-placed sight was healed into a catchall on render.
+    expect(r.sawStaleInCatchall, 'the model re-placed the stale sight on render').toBe(true);
+  });
+
 });

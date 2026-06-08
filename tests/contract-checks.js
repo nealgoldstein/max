@@ -500,6 +500,34 @@ check("Rule 26e: route-umbrella detection is folded into the model (PD.401e)",
   })(),
   "Golden/Diamond Circle fall back to From-your-list / the pre-pass came back");
 
+// ── Rule 29: the render applies the model every paint (PD.401h) ────
+// The chip-vs-banner divergence (38+9 rendered, banner said 51) came
+// from the section renderer trusting `_placeSetClean` to skip re-deriving
+// placement — a discipline flag a writer could leave stale. The renderer
+// must apply the model UNCONDITIONALLY before grouping, so the painted
+// section chips == the model == the banner == the pill, with no flag to
+// get wrong.
+check("Rule 29a: _renderPlaceActivityItems applies the model before grouping",
+  (function () {
+    var fn = fnBody(indexSrc, /function _renderPlaceActivityItems\s*\(/);
+    if (fn === null) return false;
+    var applyAt = fn.indexOf("_applyDiscoveryModelToSights()");
+    var groupAt = fn.indexOf("var bySection");
+    return applyAt !== -1 && groupAt !== -1 && applyAt < groupAt;
+  })(),
+  "the renderer groups sections without first applying the model — chips can drift from the banner");
+check("Rule 29b: the model apply is NOT gated by _placeSetClean",
+  (function () {
+    var fn = fnBody(indexSrc, /function _renderPlaceActivityItems\s*\(/);
+    if (fn === null) return false;
+    // The apply call must not sit inside an `if (window._placeSetClean...`
+    // block. Cheap proxy: the apply appears before the _placeSetClean gate.
+    var applyAt = fn.indexOf("_applyDiscoveryModelToSights()");
+    var gateAt = fn.indexOf("_placeSetClean !== true");
+    return applyAt !== -1 && (gateAt === -1 || applyAt < gateAt);
+  })(),
+  "the model apply got gated behind the discipline flag again");
+
 // ── Rule 28: no third-party CDN for Leaflet (PD.401f) ──────────────
 // Leaflet is vendored locally (vendor/leaflet/). A CDN <script>/<link>
 // is a runtime supply-chain + uptime dependency AND makes the map tests

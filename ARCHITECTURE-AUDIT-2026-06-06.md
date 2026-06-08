@@ -524,6 +524,48 @@ checks that grepped the inline code were repointed to a `placementSrc`
 that spans "wherever the adapter lives," so the rules don't care which
 file holds the code — only that the invariant holds.
 
+### PD.401h — the render was still a second owner (the real "deeper issue")
+A live build still showed `Sights near (38) + More (9)` while the banner
+said `51`. The unification (PD.401c) had reached the *count* surfaces but
+NOT the *rendered sections*. Two compounding causes:
+
+1. **The section renderer never applied the model.**
+   `_applyDiscoveryModelToSights` ran only inside `_reconcileUserListedKeeps`,
+   which fires at write *milestones* — not on render. So a returned/
+   hydrated trip painted whatever placement the last milestone left, while
+   the receipt banner built a *fresh* model live. The render showed stale
+   placement; the banner showed the model. The gap was exactly the places
+   the model would re-home.
+2. **The render trusted a discipline flag.** The one re-derivation hook it
+   did have was gated by `window._placeSetClean` — a flag every writer had
+   to remember to reset. A writer that mutated `placeActivities` and left
+   the flag `true` made the render skip re-derivation silently. That is the
+   same "enforced by discipline, not structure" fragility the safety
+   re-evaluation called out — and here it produced a visible wrong number.
+
+Fix: `_renderPlaceActivityItems` now applies the model UNCONDITIONALLY
+before it groups sections (PD.401h). The adapter is a pure O(n)
+re-derivation and an identical result is a silent no-op write, so this
+neither loops nor churns; it's skipped only mid-build. Now the painted
+section chips == the model == the banner == the trip pill, by
+construction — no flag to get wrong.
+
+This was caught only because the test suite was extended to read the
+RENDERED DOM: the harness previously asserted the model and the array
+agreed, but never that the *painted* section chips matched the banner.
+The new test injects a mis-placed sight with `_placeSetClean` left true
+and asserts the rendered catchall chips equal the model — it fails
+without the fix (chips 0, model 1) and passes with it. Contract Rule 29
+pins that the renderer applies the model before grouping and isn't
+re-gated behind the flag.
+
+Honest note: this is the third time "single source of truth" had to be
+extended to another surface (write door → counts → render). The lesson is
+that in a render-heavy app, *every* surface that displays a number must
+read the one derivation at the moment it paints; a cached/flagged copy is
+a latent second owner. The remaining count surfaces should be audited for
+the same pattern.
+
 ### Persistence (the third item) — status
 Not a missing-protection problem: revision tracking (server-owned
 monotonic `rev`), real 409-conflict handling with a keep-mine/take-theirs
