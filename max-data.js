@@ -547,13 +547,31 @@
     var _MD = global.MaxDiscovery;
     var _sameEntity = (_MD && typeof _MD.sameEntity === "function") ? _MD.sameEntity : null;
     var _interned = []; // { key, place, coords }
+    var _PKlearn = (global.PlaceKey && typeof global.PlaceKey.learn === "function") ? global.PlaceKey : null;
     function _internKey(p) {
       var coords = (typeof p.lat === "number" && typeof p.lng === "number") ? { lat: p.lat, lng: p.lng } : null;
       var cand = { place: p.place, coords: coords };
       for (var i = 0; i < _interned.length; i++) {
         var e = _interned[i];
         var same = _sameEntity ? _sameEntity(e, cand) : (_normKey(e.place) === _normKey(p.place));
-        if (same) return e.key;
+        if (same) {
+          // PD.401N: ONE STABLE IDENTITY. When two DIFFERENT names merge to
+          // one entity by a NAME relation (token-overlap or word-prefix
+          // containment — e.g. "Þingvellir" ⊂ "Þingvellir National Park"),
+          // LEARN the alias once. After this, identity is alias-aware name
+          // resolution and never re-derives from coordinates — so the same
+          // place can't flicker as async coords load, and EVERY surface
+          // (counts AND coverage) agrees: the listed name resolves to the
+          // entity, found and counted once. A PURE coordinate merge is NOT
+          // learned (coords are mutable/flaky; a sticky wrong alias is
+          // worse than a one-time merge).
+          if (_PKlearn && _normKey(p.place) !== e.key) {
+            var nameRel = (_PKlearn.same && _PKlearn.same(p.place, e.place))
+                       || (_PKlearn.contains && _PKlearn.contains(p.place, e.place));
+            if (nameRel) { try { _PKlearn.learn(p.place, e.place); } catch (_) {} }
+          }
+          return e.key;
+        }
       }
       var key = _normKey(p.place);
       _interned.push({ key: key, place: p.place, coords: coords });

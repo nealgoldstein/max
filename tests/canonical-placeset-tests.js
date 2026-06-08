@@ -200,5 +200,33 @@ test("PD.399: a true variant at the SAME coords still dedupes", function () {
   assert.ok(!more, "the same-coords variant must collapse into the theme");
 });
 
+test("PD.401N: a name-merge LEARNS the alias — one stable identity (Þingvellir)", function () {
+  global.PlaceKey.reset();
+  // The build has the qualified name; the user listed the short name, same point.
+  canon([
+    item("See natural wonders", [P("Þingvellir National Park", { lat: 64.25, lng: -21.13 })]),
+    item("More places to consider", [P("Þingvellir", { lat: 64.25, lng: -21.13, _keep: false })])
+  ]);
+  // After the write door, the two names resolve to ONE identity — so
+  // coverage finds the listed short name AND the entity counts once,
+  // by the SAME rule (no separate coverage heuristic).
+  assert.strictEqual(global.PlaceKey.resolve("Þingvellir"),
+    global.PlaceKey.resolve("Þingvellir National Park"),
+    "the merge must LEARN the alias so both names are one identity");
+});
+
+test("PD.401N: a PURE coordinate merge does NOT learn an alias (no sticky wrong merge)", function () {
+  global.PlaceKey.reset();
+  // Two unrelated names at the same point: merge for the count is fine,
+  // but the names must NOT become permanent aliases of each other.
+  canon([
+    item("Sights", [P("North Beach", { lat: 64.0, lng: -22.0 })]),
+    item("More places to consider", [P("South Cliff", { lat: 64.0, lng: -22.0, _keep: false })])
+  ]);
+  assert.notStrictEqual(global.PlaceKey.resolve("North Beach"),
+    global.PlaceKey.resolve("South Cliff"),
+    "a coordinate-only merge must not bake a permanent name alias");
+});
+
 console.log("PASS: " + pass + "    FAIL: " + fail);
 if (fail > 0) process.exit(1);

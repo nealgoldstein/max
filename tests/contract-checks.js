@@ -554,6 +554,14 @@ check("Rule 26e: route-umbrella detection is folded into the model (PD.401e)",
 // `place.toLowerCase()`. Identity is established once; readers group by
 // it. (The Leaflet marker subsystem's internal keying is a documented
 // holdout — non-divergent, and coupled to inline-generated scripts.)
+check("Rule 31h: a name-merge LEARNS the alias (one stable identity, PD.401N)",
+  // When two different names merge by a NAME relation, the write door
+  // learns the alias once (PlaceKey.learn) so identity becomes stable
+  // alias-aware resolution — the listed name is found AND counted once by
+  // the SAME rule. Pure coordinate merges are NOT learned.
+  maxDataSrc.indexOf("_PKlearn.learn(p.place, e.place)") !== -1
+    && maxDataSrc.indexOf("nameRel") !== -1,
+  "the write door stopped learning aliases on merge — identity reverts to two heuristics");
 check("Rule 31a: the write door stamps a coordinate-canonical _key",
   maxDataSrc.indexOf("function _internKey") !== -1
     && maxDataSrc.indexOf("p._key = _internKey(p)") !== -1

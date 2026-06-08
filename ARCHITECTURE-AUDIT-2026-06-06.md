@@ -633,6 +633,36 @@ section counts, TOC, banner, pill, overview pins). The remaining
 lowercase dedups are non-divergent presentation keys, not second owners
 of the data.
 
+## 16. PD.401N — ONE stable identity (name + learned aliases)
+
+The deepest defect this audit surfaced: there were really TWO identities
+that disagreed — coordinate-canonical `_key` (counts) merged Þingvellir
+with Þingvellir National Park; name identity (coverage) kept them apart.
+"Þingvellir reported missing" and the Gullfoss merge-flake were the same
+disease from opposite sides: no single, *stable* notion of "same place."
+The coordinate-merge made identity depend on async-loaded coordinates, so
+a place's identity could flicker as enrichment ran.
+
+Fix: the write door now LEARNS the alias at the merge point. When
+`_internKey` merges two DIFFERENT names by a NAME relation (token-overlap
+or word-prefix containment — "Þingvellir" ⊂ "Þingvellir National Park"),
+it calls `PlaceKey.learn(name, canonical)` ONCE. From then on identity is
+alias-aware name resolution — stable, deterministic, never re-derived from
+coordinates. So EVERY surface agrees by the SAME rule: the listed name
+resolves to the entity, so coverage finds it AND the count merges it once.
+A PURE coordinate merge is deliberately NOT learned (coordinates are
+mutable/flaky; a sticky wrong alias is worse than a one-time count merge).
+
+Pinned: canonical-placeset tests assert the Þingvellir alias is learned
+(both names → one identity) and that a coordinate-only merge does NOT bake
+a permanent alias; contract Rule 31h holds it.
+
+Remaining (now lower-risk, because the identities agree): drop the live
+coordinate-merge from the hot comparison path entirely (keep it only as
+the one-time learn trigger), and fold the DiscoveryModel's sight ingestion
+into the repository — the two could not be one before only because the two
+identities disagreed, and that's resolved.
+
 ## 15. PD.401M — `byKey` collapsed: the audit has ONE registry
 
 The residual patch-seam is gone: `_maxPlaceSetAudit` no longer keeps its
