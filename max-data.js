@@ -538,146 +538,12 @@
     });
     items = merged;
 
-    // Pass 1: per-item entry dedupe + collect where each key lives.
-    var themedKeys = {};
-    var themedPlaces = []; // PD.399: themed places WITH coords for safe identity
-    var recStayKeys = {};
-    items.forEach(function (it) {
-      if (isExempt(it) || !Array.isArray(it.requiredPlaces)) return;
-      var seen = {};
-      var out = [];
-      it.requiredPlaces.forEach(function (p) {
-        if (!p || !p.place) return;
-        var k = _normKey(p.place);
-        if (!k) { out.push(p); return; }
-        if (seen[k]) { mergePlace(seen[k], p); return; }
-        seen[k] = p;
-        out.push(p);
-      });
-      it.requiredPlaces = out;
-      var sec = it.section || "";
-      var isCatchall = !!CATCH[sec];
-      var isStayBucket = (sec === STAY_REC || sec === STAY_USER || sec === STAY_CONSIDER);
-      out.forEach(function (p) {
-        var k = _normKey(p.place);
-        if (!k) return;
-        if (_isCommittedStaySec(sec)) recStayKeys[k] = true;
-        if (!isCatchall && !isStayBucket) { themedKeys[k] = true; themedPlaces.push(p); }
-      });
-    });
-
-    // PD.385: a catchall place is "already themed" if its key is in
-    // themedKeys OR it fuzzy-matches a themed place name. The exact-key
-    // check missed naming variants — the user's "Þingvellir" vs the
-    // LLM's "Þingvellir National Park" — so the user's copy lingered in
-    // "From your list" as a phantom duplicate of the themed one. The
-    // dedupe owner now uses the SAME identity matcher (PlaceKey.same)
-    // that the badge resolver uses.
-    var _PK = global.PlaceKey || null;
-    function _coordsClose(a, b, km) {
-      if (!a || !b) return false;
-      var la = a.lat, lo = a.lng, lb = b.lat, lob = b.lng;
-      if (typeof la !== "number" || typeof lo !== "number"
-          || typeof lb !== "number" || typeof lob !== "number") return false;
-      // Cheap equirectangular distance (fine at these scales).
-      var dLat = (la - lb) * 111;                       // ~km per degree lat
-      var dLng = (lo - lob) * 111 * Math.cos(la * Math.PI / 180);
-      return (dLat * dLat + dLng * dLng) <= (km * km);
-    }
-    // PD.385: "same place" for catchall dedupe is broader than the
-    // token-overlap matcher — which requires BOTH names to have 2+
-    // tokens (so it deliberately won't match a single-word name like
-    // "Þingvellir" against "Þingvellir National Park"). For dedupe we
-    // ALSO want word-prefix containment: a catchall entry that is a
-    // leading word-run of a themed entry (or vice-versa) is the same
-    // place and must collapse into the theme.
-    function _sameOrContains(a, b) {
-      // PD.397: THE identity relation lives in PlaceKey now (relatedTo
-      // = exact | token-overlap | containment). One matcher shared by
-      // the dedup, the coverage audit, and the badge resolver.
-      if (_PK && typeof _PK.relatedTo === "function") return _PK.relatedTo(a, b);
-      var ka = _normKey(a), kb = _normKey(b);
-      if (!ka || !kb) return false;
-      if (ka === kb) return true;
-      if (kb.length > ka.length && kb.indexOf(ka + " ") === 0) return true;
-      if (ka.length > kb.length && ka.indexOf(kb + " ") === 0) return true;
-      return false;
-    }
-    // PD.399: COORDINATE-GATED IDENTITY. Exact-key and token-overlap
-    // matches are trusted on name alone. But CONTAINMENT ("X" ⊂ "X Y")
-    // is ambiguous — "Þingvellir" ⊂ "Þingvellir National Park" is the
-    // SAME place, but "Reykjavik" ⊂ "Reykjavik Old Harbour" is a
-    // DIFFERENT place inside the city. String containment alone
-    // deleted legitimate Max sights (the "no Max recommendations"
-    // regression). So a containment match is only trusted when the two
-    // are also within ~0.6 km. Without coords, containment does NOT
-    // merge — never delete on a guess.
-    function _isAlreadyThemed(placeOrObj) {
-      var pObj = (placeOrObj && typeof placeOrObj === "object") ? placeOrObj : null;
-      var name = pObj ? pObj.place : placeOrObj;
-      if (!name) return false;
-      if (themedKeys[_normKey(name)]) return true;
-      for (var i = 0; i < themedPlaces.length; i++) {
-        var tp = themedPlaces[i];
-        // Strong name identity (exact / token-overlap): trust it.
-        if (_PK && typeof _PK.same === "function" && _PK.same(name, tp.place)) return true;
-        if (!_PK && _normKey(name) === _normKey(tp.place)) return true;
-        // Weak identity (containment): require coordinate proximity.
-        if (_PK && typeof _PK.contains === "function" && _PK.contains(name, tp.place)
-            && _coordsClose(pObj, tp, 0.6)) return true;
-      }
-      return false;
-    }
-
-    // Pass 2a: compute the BEST (lowest) catchall rank per key — the
-    // precedence decision happens before any filtering, so iteration
-    // order can't make first-seen beat best-rank.
-    var bestRank = {};
-    items.forEach(function (it) {
-      if (isExempt(it) || !Array.isArray(it.requiredPlaces)) return;
-      var rank = CATCH[it.section || ""];
-      if (!rank) return;
-      it.requiredPlaces.forEach(function (p) {
-        var k = _normKey(p && p.place);
-        if (!k || _isAlreadyThemed(p)) return;
-        if (!bestRank[k] || rank < bestRank[k]) bestRank[k] = rank;
-      });
-    });
-
-    // Pass 2b: filter — themed keys leave all catchalls; a key stays
-    // only in its best-rank catchall, and only in the first item of
-    // that rank; "to consider" stays lose to Recommended.
-    var claimed = {};
-    items.forEach(function (it, idx) {
-      if (isExempt(it) || !Array.isArray(it.requiredPlaces)) return;
-      var sec = it.section || "";
-      var rank = CATCH[sec];
-      if (rank) {
-        it.requiredPlaces = it.requiredPlaces.filter(function (p) {
-          var k = _normKey(p && p.place);
-          if (!k) return true;
-          if (_isAlreadyThemed(p)) return false; // PD.385/399: coord-gated
-          if (bestRank[k] !== rank) return false;
-          if (claimed[k] != null && claimed[k] !== idx) return false;
-          claimed[k] = idx;
-          return true;
-        });
-      } else if (sec === STAY_CONSIDER) {
-        it.requiredPlaces = it.requiredPlaces.filter(function (p) {
-          var k = _normKey(p && p.place);
-          return !(k && recStayKeys[k]);
-        });
-      }
-    });
-
-    // PD.401k: stamp the canonical identity ONCE here, at the write door,
-    // using the ONE identity function — the model's `sameEntity`
-    // (coordinate-aware: exact/token on name, containment gated by ~0.6km,
-    // same point within ~0.3km). Coordinate-duplicates therefore receive
-    // the SAME `_key`. From this point outward NO reader recomputes
-    // identity and NO reader needs to dedup: grouping by `_key` is exact,
-    // because the write door has already interned. Falls back to name
-    // identity if the model isn't loaded.
+    // PD.401k: INTERN FIRST. `_key` is authored HERE, once, by the ONE
+    // identity — the model's `sameEntity` (coordinate-aware: exact/token
+    // on name, containment gated ~0.6km, same point ~0.3km). Every
+    // subsequent pass groups by `_key`; there is no second merge
+    // implementation. `sameEntity` subsumes the old `_isAlreadyThemed`
+    // (relatedTo + coordinate gate), so that whole apparatus is gone.
     var _MD = global.MaxDiscovery;
     var _sameEntity = (_MD && typeof _MD.sameEntity === "function") ? _MD.sameEntity : null;
     var _interned = []; // { key, place, coords }
@@ -694,9 +560,85 @@
       return key;
     }
     items.forEach(function (it) {
-      (it && it.requiredPlaces || []).forEach(function (p) {
+      if (isExempt(it)) return;
+      (it.requiredPlaces || []).forEach(function (p) {
         if (p && p.place) p._key = _internKey(p);
       });
+    });
+
+    // Pass 1: per-item entry dedupe + collect where each key lives.
+    var themedKeys = {};
+    var recStayKeys = {};
+    items.forEach(function (it) {
+      if (isExempt(it) || !Array.isArray(it.requiredPlaces)) return;
+      var seen = {};
+      var out = [];
+      it.requiredPlaces.forEach(function (p) {
+        if (!p || !p.place) return;
+        var k = p._key;                                  // PD.401k: the one identity
+        if (!k) { out.push(p); return; }
+        if (seen[k]) { mergePlace(seen[k], p); return; }
+        seen[k] = p;
+        out.push(p);
+      });
+      it.requiredPlaces = out;
+      var sec = it.section || "";
+      var isCatchall = !!CATCH[sec];
+      var isStayBucket = (sec === STAY_REC || sec === STAY_USER || sec === STAY_CONSIDER);
+      out.forEach(function (p) {
+        var k = p._key;
+        if (!k) return;
+        if (_isCommittedStaySec(sec)) recStayKeys[k] = true;
+        if (!isCatchall && !isStayBucket) { themedKeys[k] = true; }
+      });
+    });
+
+    // PD.401k: "already themed" is now EXACT — a catchall place is themed
+    // iff its `_key` is in themedKeys. The interning (sameEntity) already
+    // merged naming variants and coordinate-dups to one `_key`, so the
+    // whole fuzzy `_isAlreadyThemed` apparatus (relatedTo + coordinate
+    // gating) is GONE: it was compensating for non-canonical keys.
+    function _isThemed(p) { return !!(p && p._key && themedKeys[p._key]); }
+
+    // Pass 2a: compute the BEST (lowest) catchall rank per key — the
+    // precedence decision happens before any filtering, so iteration
+    // order can't make first-seen beat best-rank.
+    var bestRank = {};
+    items.forEach(function (it) {
+      if (isExempt(it) || !Array.isArray(it.requiredPlaces)) return;
+      var rank = CATCH[it.section || ""];
+      if (!rank) return;
+      it.requiredPlaces.forEach(function (p) {
+        var k = p && p._key;
+        if (!k || _isThemed(p)) return;
+        if (!bestRank[k] || rank < bestRank[k]) bestRank[k] = rank;
+      });
+    });
+
+    // Pass 2b: filter — themed keys leave all catchalls; a key stays
+    // only in its best-rank catchall, and only in the first item of
+    // that rank; "to consider" stays lose to Recommended.
+    var claimed = {};
+    items.forEach(function (it, idx) {
+      if (isExempt(it) || !Array.isArray(it.requiredPlaces)) return;
+      var sec = it.section || "";
+      var rank = CATCH[sec];
+      if (rank) {
+        it.requiredPlaces = it.requiredPlaces.filter(function (p) {
+          var k = p && p._key;
+          if (!k) return true;
+          if (_isThemed(p)) return false;
+          if (bestRank[k] !== rank) return false;
+          if (claimed[k] != null && claimed[k] !== idx) return false;
+          claimed[k] = idx;
+          return true;
+        });
+      } else if (sec === STAY_CONSIDER) {
+        it.requiredPlaces = it.requiredPlaces.filter(function (p) {
+          var k = p && p._key;
+          return !(k && recStayKeys[k]);
+        });
+      }
     });
 
     // Pass 3 (rule 5): drop emptied non-exempt items.

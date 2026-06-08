@@ -18,6 +18,11 @@ var assert = require("assert");
 
 global.window = global;
 global.PlaceKey = require("../place-key.js");
+// PD.401k: mirror production's script order — discovery-model.js loads
+// before max-data.js, so the canonicalizer's interning can use the ONE
+// identity (MaxDiscovery.sameEntity, coordinate-aware). Without it,
+// max-data degrades gracefully to name-only identity.
+require("../discovery-model.js");
 require("../max-data.js");
 var canon = global.MaxData.canonicalizePlaceActivities;
 

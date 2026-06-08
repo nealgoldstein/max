@@ -678,6 +678,23 @@ End state: identity once, interned at the write door, read everywhere;
 zero dedup at read. The dedups disappear because duplicates can no longer
 exist — which is the reviewer's point made structural.
 
+### PD.401k-collapse — one interning author (done)
+`canonicalizePlaceActivities` had THREE identity notions inside it
+(`_normKey` name dedup, the `_isAlreadyThemed`/`relatedTo`+coordinate-gate
+fuzzy matcher, and the `_internKey`/`sameEntity` stamp). They are now ONE:
+the canonicalizer interns every place at the TOP via `sameEntity` (the
+model's single coordinate-aware identity), stamps `_key`, and every
+subsequent pass (entry dedupe, themed-vs-catchall, best-rank, claimed,
+stay precedence) groups by `_key`. The whole fuzzy apparatus
+(`_isAlreadyThemed`, `_sameOrContains`, the local `_coordsClose`) is
+DELETED — it existed only to compensate for non-canonical keys. `_key`
+now has exactly one author, shared with the model. Verified: the
+canonical-placeset coordinate-gating guards still pass (distinct place not
+deleted; same-coords variant collapses), and the test now loads
+discovery-model.js to mirror production's script order. Contract Rules
+17a/17b/26b were repointed from the deleted implementation to the one
+identity.
+
 ### What shipped (PD.401k, verified green at each step)
 - **Identity once, coordinate-canonical (Steps 1+3).** The write door
   (`canonicalizePlaceActivities`) stamps `_key` on every place using the

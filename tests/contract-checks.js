@@ -352,14 +352,23 @@ check("Rule 16d: headliner intent includes the user's selected interests",
   "headliners ignore selected interests again — paste-flow shows none");
 
 // ── Rule 17: catchall dedupe uses real identity (PD.385) ───────────
-check("Rule 17a: the canonicalizer dedupes themed places (coord-gated)",
-  /_isAlreadyThemed/.test(maxDataSrc)
-    && maxDataSrc.indexOf("themedPlaces") !== -1,
+check("Rule 17a: the canonicalizer dedupes themed places by the one identity",
+  // PD.401k: themed dedupe is now EXACT on `_key` (themedKeys[p._key]),
+  // because interning already merged naming variants/coordinate-dups to
+  // one key. The behavioral guard lives in canonical-placeset-tests
+  // (variant collapses into the theme).
+  maxDataSrc.indexOf("themedKeys[p._key]") !== -1
+    && maxDataSrc.indexOf("function _isThemed") !== -1,
   "the dedupe owner lost its themed-place matcher — naming variants duplicate");
 check("Rule 17b: containment dedupe is COORDINATE-gated (no over-deletion)",
-  maxDataSrc.indexOf("COORDINATE-GATED IDENTITY") !== -1
-    && /_coordsClose\(pObj, tp, 0\.6\)/.test(maxDataSrc),
-  "containment merges on NAME alone again — deletes 'X Old Harbour' as 'X' (no-Max-recs regression)");
+  // PD.401k: the coordinate gate now lives in the ONE identity
+  // (MaxDiscovery.sameEntity), which the canon interns through. The
+  // behavioral guard is canonical-placeset-tests' "distinct place inside
+  // a destination is NOT deleted"; here we pin that the canon interns via
+  // sameEntity rather than a forked name-only matcher.
+  maxDataSrc.indexOf("function _internKey") !== -1
+    && maxDataSrc.indexOf("_sameEntity ? _sameEntity(e, cand)") !== -1,
+  "the canon stopped interning via the one coordinate-aware identity — over-deletion can return");
 
 // ── Rule 18: one Considered count across views (PD.386) ────────────
 check("Rule 18a: the audit computes a considered PREVIEW excluding destinations",
@@ -480,9 +489,13 @@ check("Rule 26a: PlaceKey owns contains + relatedTo",
     var pk = fs.readFileSync(path.join(ROOT, "place-key.js"), "utf8");
     return /function contains\(/.test(pk) && /function relatedTo\(/.test(pk);
   })());
-check("Rule 26b: the canon delegates its matcher to PlaceKey.relatedTo",
-  maxDataSrc.indexOf("_PK.relatedTo(a, b)") !== -1,
-  "the canon forked its own containment matcher again");
+check("Rule 26b: the canon delegates its matcher to the ONE identity (PD.401k)",
+  // Was PlaceKey.relatedTo; the canon now interns through
+  // MaxDiscovery.sameEntity — the single identity the model uses — so
+  // there is exactly one matcher, not a forked containment one.
+  maxDataSrc.indexOf("_sameEntity ? _sameEntity(e, cand)") !== -1
+    && maxDataSrc.indexOf("function _isAlreadyThemed") === -1,
+  "the canon forked its own containment matcher again instead of the one identity");
 check("Rule 26c: the coverage audit uses relatedTo (Þingvellir not falsely missing)",
   indexSrc.indexOf("PlaceKey.relatedTo(lk, allKeys[i])") !== -1,
   "the coverage check reverted to PlaceKey.same — one-word listed places report missing");
