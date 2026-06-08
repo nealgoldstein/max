@@ -132,7 +132,10 @@
   DiscoveryModel.PlacementPolicy = PlacementPolicy;
 
   DiscoveryModel.prototype._findExisting = function (raw) {
-    var k = _norm(raw.place);
+    // PD.401k: prefer the identity stamped at the write door (_key). No
+    // reader recomputes identity once the write door has set it; _norm is
+    // the fallback for places that haven't passed through canonicalize.
+    var k = raw._key || _norm(raw.place);
     if (k && this._byKey[k]) return this._byKey[k];
     // coordinate / fuzzy identity against existing entities
     for (var i = 0; i < this._order.length; i++) {
@@ -167,7 +170,7 @@
       if (raw.src && !existing.src) existing.src = raw.src;
       return existing;
     }
-    var key = _norm(raw.place);
+    var key = raw._key || _norm(raw.place);
     var place = {
       key: key,
       place: raw.place,
@@ -337,6 +340,7 @@
           : (p._keep === false ? "unchecked" : "checked");
         m.upsert({
           place: p.place,
+          _key: p._key,                                  // PD.401k: identity from the write door
           coords: (typeof p.lat === "number" && typeof p.lng === "number") ? { lat: p.lat, lng: p.lng } : null,
           origin: originOf(p),
           role: "sight",

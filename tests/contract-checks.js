@@ -509,6 +509,34 @@ check("Rule 26e: route-umbrella detection is folded into the model (PD.401e)",
   })(),
   "Golden/Diamond Circle fall back to From-your-list / the pre-pass came back");
 
+// ── Rule 31: ONE identity, stamped once at the write door (PD.401k) ─
+// The canonicalizer stamps a coordinate-canonical `_key` on every place;
+// the model and the renderer read it (via _pmKey) instead of recomputing
+// `place.toLowerCase()`. Identity is established once; readers group by
+// it. (The Leaflet marker subsystem's internal keying is a documented
+// holdout — non-divergent, and coupled to inline-generated scripts.)
+check("Rule 31a: the write door stamps a coordinate-canonical _key",
+  maxDataSrc.indexOf("function _internKey") !== -1
+    && maxDataSrc.indexOf("p._key = _internKey(p)") !== -1
+    && maxDataSrc.indexOf("_MD.sameEntity") !== -1,
+  "identity isn't interned at the write door — readers will recompute and drift");
+check("Rule 31b: the one identity accessor exists and the model reads _key",
+  indexSrc.indexOf("window._pmKey = function") !== -1
+    && (function () {
+      var dm = fs.readFileSync(path.join(ROOT, "discovery-model.js"), "utf8");
+      return dm.indexOf("raw._key || _norm(raw.place)") !== -1;
+    })(),
+  "the single identity accessor is missing or the model recomputes identity");
+check("Rule 31c: the picker groupings dedup by the one identity, not toLowerCase",
+  (function () {
+    var fn = fnBody(indexSrc, /function _renderPlaceActivityItems\s*\(/);
+    if (fn === null) return false;
+    // byDest, byPlace, and the place-TOC must all key via _pmKey.
+    var hits = (fn.match(/window\._pmKey\(/g) || []).length;
+    return hits >= 3 && fn.indexOf("var key = p.place.toLowerCase()") === -1;
+  })(),
+  "a picker grouping still keys by place.toLowerCase() instead of the one identity");
+
 // ── Rule 30: ONE displayed section-count source (PD.401i) ──────────
 // The TOC and the section headers must read the model's per-section count
 // (_pmModelSectionCount), not each re-dedup placeActivities with its own

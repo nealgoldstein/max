@@ -8824,6 +8824,19 @@ window._placeOrigin = function (p) {
 // places default to checked. "Max never checks anything."
 window._defaultKeepForOrigin = function (o) { return o === "user"; };
 
+// PD.401k: the ONE place-identity accessor every reader uses. Prefers the
+// canonical `_key` stamped at the write door (coordinate-aware interning);
+// falls back to PlaceKey.resolve for a bare name or an un-stamped object.
+// No reader computes `place.toLowerCase()` for identity anymore — there is
+// one identity, established once, read here.
+window._pmKey = function (po) {
+  if (po && typeof po === "object") {
+    if (po._key) return po._key;
+    return window.PlaceKey ? PlaceKey.resolve(po.place) : String(po.place || "").toLowerCase().trim();
+  }
+  return window.PlaceKey ? PlaceKey.resolve(po) : String(po || "").toLowerCase().trim();
+};
+
 function _constructUserListedItems() {
   if (typeof _tb === "undefined" || !_tb) return;
   if (!Array.isArray(_tb._pastedListPlaces) || !_tb._pastedListPlaces.length) return;
@@ -19739,7 +19752,7 @@ function _renderPlaceActivityItems(){
     items.forEach(function(it){
       (it.requiredPlaces || []).forEach(function(p){
         if (!p || !p.place) return;
-        var key = p.place.toLowerCase();
+        var key = window._pmKey(p);                    // PD.401k: one identity
         if (!places[key]) places[key] = { place:p.place, lat:null, lng:null, nights:0, kept:false };
         if (typeof p.lat === "number" && typeof p.lng === "number") {
           places[key].lat = p.lat; places[key].lng = p.lng;
@@ -20699,7 +20712,7 @@ function _renderPlaceActivityItems(){
         if (!item || item.type === "route") return;
         (item.requiredPlaces || []).forEach(function(p){
           if (!p || !p.place || p._rejected === true) return;
-          var k = p.place.toLowerCase();
+          var k = window._pmKey(p);                    // PD.401k: one identity (matches byPlace row ids)
           if (_tocPlaceSet[k]) return;
           _tocPlaceSet[k] = true;
           _tocPlaceOrder.push({ key: k, place: p.place });
@@ -20818,7 +20831,7 @@ function _renderPlaceActivityItems(){
           if (!p || !p.place) return;
           // Round PD.10: _rejected skip restored — see Rejected section render.
           if (p._rejected === true) return;
-          var key = p.place.toLowerCase();
+          var key = window._pmKey(p);                  // PD.401k: one identity
           if (!byPlace[key]) {
             byPlace[key] = {
               place: p.place,
@@ -21122,7 +21135,7 @@ function _renderPlaceActivityItems(){
         // only in the bottom-of-list Rejected section so the user can
         // un-reject.
         if (p._rejected === true) return;
-        var key = p.place.toLowerCase();
+        var key = window._pmKey(p);                    // PD.401k: one identity
         if (!byDest[key]) {
           byDest[key] = {
             place: p.place,

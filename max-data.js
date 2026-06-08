@@ -670,6 +670,35 @@
       }
     });
 
+    // PD.401k: stamp the canonical identity ONCE here, at the write door,
+    // using the ONE identity function — the model's `sameEntity`
+    // (coordinate-aware: exact/token on name, containment gated by ~0.6km,
+    // same point within ~0.3km). Coordinate-duplicates therefore receive
+    // the SAME `_key`. From this point outward NO reader recomputes
+    // identity and NO reader needs to dedup: grouping by `_key` is exact,
+    // because the write door has already interned. Falls back to name
+    // identity if the model isn't loaded.
+    var _MD = global.MaxDiscovery;
+    var _sameEntity = (_MD && typeof _MD.sameEntity === "function") ? _MD.sameEntity : null;
+    var _interned = []; // { key, place, coords }
+    function _internKey(p) {
+      var coords = (typeof p.lat === "number" && typeof p.lng === "number") ? { lat: p.lat, lng: p.lng } : null;
+      var cand = { place: p.place, coords: coords };
+      for (var i = 0; i < _interned.length; i++) {
+        var e = _interned[i];
+        var same = _sameEntity ? _sameEntity(e, cand) : (_normKey(e.place) === _normKey(p.place));
+        if (same) return e.key;
+      }
+      var key = _normKey(p.place);
+      _interned.push({ key: key, place: p.place, coords: coords });
+      return key;
+    }
+    items.forEach(function (it) {
+      (it && it.requiredPlaces || []).forEach(function (p) {
+        if (p && p.place) p._key = _internKey(p);
+      });
+    });
+
     // Pass 3 (rule 5): drop emptied non-exempt items.
     return items.filter(function (it) {
       if (isExempt(it)) return true;

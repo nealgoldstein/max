@@ -633,6 +633,84 @@ section counts, TOC, banner, pill, overview pins). The remaining
 lowercase dedups are non-divergent presentation keys, not second owners
 of the data.
 
+## 12. The real correction: identity once, interning, no read-time dedup
+
+The reviewer's point stands and reframes the target: **needing a dedup is
+the architecture admitting it let a duplicate in.** Dedup is a symptom of
+identity being established LATE (recomputed at each read) instead of at
+the moment a place enters. And **one identity function everywhere is
+correctness, not a "purity measure."** The correct design:
+
+- `PlaceKey` is the sole identity owner.
+- Identity is computed ONCE, at the write door, and stamped on the place
+  (`_key`). No reader ever recomputes it.
+- The canonical store INTERNS: a place that resolves to an existing `_key`
+  merges into it. Duplicates are structurally impossible.
+- Every reader groups by `_key`. No reader dedups, because there is
+  nothing to dedup.
+
+Current debt: there were TWO interning implementations
+(`canonicalizePlaceActivities` at the write door, `DiscoveryModel`'s
+ingestion at read) and identity was recomputed at every read site
+(`place.toLowerCase()` in the map/by-place/TOC; `PlaceKey.resolve` in the
+model and counts). That is the root the read-time dedups were papering
+over.
+
+### Staged migration (correctness, not big-bang)
+- **PD.401k — STEP 1 (done):** the write door (`canonicalizePlaceActivities`)
+  now stamps `_key` on every place once, after merging; the
+  `DiscoveryModel` reads `_key` instead of recomputing. Behavior-identical
+  and verified (full gate green) — `_key` equals what the model already
+  computed, so nothing moves yet. This is the foundation: identity now
+  *flows from* the write door.
+- **STEP 2 (next):** route every identity consumer to `p._key` — the
+  Leaflet marker dictionary, `byDest`, `byPlace`, the TOC — deleting every
+  `place.toLowerCase()` / per-site `PlaceKey.resolve(place)`. One identity,
+  read everywhere. (This removes the inconsistent lowercase keying.)
+- **STEP 3:** collapse the two interns into one — the write door adopts
+  the model's coordinate-aware identity (or the model becomes the store),
+  so there is a single interning algorithm.
+- **STEP 4:** delete read-time dedup entirely — readers `group by _key`;
+  no `seen{}` / `byDest` dedup loops, because the write door guarantees one
+  place per `_key`.
+
+End state: identity once, interned at the write door, read everywhere;
+zero dedup at read. The dedups disappear because duplicates can no longer
+exist — which is the reviewer's point made structural.
+
+### What shipped (PD.401k, verified green at each step)
+- **Identity once, coordinate-canonical (Steps 1+3).** The write door
+  (`canonicalizePlaceActivities`) stamps `_key` on every place using the
+  ONE identity — the model's `sameEntity` — so coordinate-duplicates get
+  the SAME key. Identity is established at the door; nothing downstream
+  recomputes it. The `DiscoveryModel` reads `_key`.
+- **One accessor, read everywhere in the data/render path (Step 2).**
+  `window._pmKey(placeOrName)` returns the canonical `_key` (fallback
+  `PlaceKey.resolve`). Routed through it: `byDest`, `byPlace`, the
+  place-TOC, the day-trip eligibility map, the model ingestion, and (via
+  the model) every count, the considered set, the committed set, and the
+  section placement. No `place.toLowerCase()` identity remains in the
+  picker renderer.
+- **No read-time dedup (Step 4).** Readers now GROUP by the one `_key`
+  rather than running their own `seen{}`/lowercase dedup. The write door
+  interns; the model's coordinate match is now a dormant fallback that
+  only fires for un-stamped input (tests / in-memory pre-write). Contract
+  Rule 31 pins all of this.
+
+### The one documented holdout — the Leaflet marker subsystem
+The map's marker dictionary keys by `place.toLowerCase()` across ~30
+coupled sites, including dynamically-generated inline `<script>` strings
+(the popup maps) that run where `PlaceKey`/`_pmKey` are not in scope. Its
+pin SET already derives from the unified array, so it surfaces no
+divergent number — it's an internal lookup handle, not a count. Converting
+it is a large coupled rename with thin automated coverage of the
+interactive paths (pin toggle, popup targeting). Doing it as a deliberate
+pass with added interaction tests is the correct sequencing; blasting it
+at the end of a session would risk precisely the subtle pin/popup
+regressions this whole effort exists to prevent. It is the single
+remaining place that recomputes identity, and it is non-divergent by
+construction.
+
 ### Persistence (the third item) — status
 Not a missing-protection problem: revision tracking (server-owned
 monotonic `rev`), real 409-conflict handling with a keep-mine/take-theirs
