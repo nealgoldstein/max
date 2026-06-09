@@ -674,4 +674,36 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
     expect(r.pageTotal, 'page total must equal listed(found) + max + hubs').toBe(r.sumParts);
   });
 
+  // PD.401R: a kept sight whose requiredPlace carries real coordinates must
+  // pin on the picker map even when the _coarseGeocode cache doesn't have it.
+  // Repro of "my sights are in the list but there are no sight icons on the
+  // map": the picker pinned ONLY from the cache and ignored coordinates the
+  // place already had.
+  test('PD.401R: picker map pins a sight from its own coords when the cache misses', async ({ page }) => {
+    await bootClean(page);
+    await runPipeline(page);
+    const r = await page.evaluate(() => {
+      // A kept sight with real coords, deliberately NOT in _coarseGeocode.
+      window._tb.placeActivities.push({
+        id: 'r-owncoords', type: 'activity', section: "Sights you're keeping",
+        requiredPlaces: [{ place: 'Skógafoss', lat: 63.5321, lng: -19.5114, _keep: true, _origin: 'user' }]
+      });
+      const key = window._pmKey('Skógafoss');
+      // Guarantee the cache miss this test is about.
+      if (window._coarseGeocode) delete window._coarseGeocode[key];
+      if (!document.getElementById('tb-pm-map')) {
+        const d = document.createElement('div');
+        d.id = 'tb-pm-map'; d.style.width = '400px'; d.style.height = '300px';
+        document.body.appendChild(d);
+      }
+      const inCacheBefore = !!(window._coarseGeocode && window._coarseGeocode[key]);
+      if (typeof window._renderPlacePickerMap === 'function') window._renderPlacePickerMap('tb-pm-map');
+      const state = window._pmMaps && window._pmMaps['tb-pm-map'];
+      const keys = state && state.markers ? Object.keys(state.markers) : [];
+      return { inCacheBefore, hasMarker: keys.indexOf(key) !== -1 };
+    });
+    expect(r.inCacheBefore, 'precondition: the sight is NOT in the geocode cache').toBe(false);
+    expect(r.hasMarker, 'the sight pins from its own coordinates despite the cache miss').toBe(true);
+  });
+
 });

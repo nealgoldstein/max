@@ -30163,8 +30163,18 @@ function _renderPlacePickerMap(targetId){
     (item.requiredPlaces || []).forEach(function(p){
       if (!p || !p.place) return;
       var key = window._pmKey(p);                      // PD.401k: one identity
-      if (!allPlaces[key]) allPlaces[key] = { place: p.place, country: p.country||"", kept: false, iconic: false, anyRoute: false, _isDayTrip: false, _dayTripHub: "", _waysideFromHub: "", _rejected: false, overnight: undefined };
+      if (!allPlaces[key]) allPlaces[key] = { place: p.place, country: p.country||"", kept: false, iconic: false, anyRoute: false, _isDayTrip: false, _dayTripHub: "", _waysideFromHub: "", _rejected: false, overnight: undefined, lat: undefined, lng: undefined };
       if (p.country && !allPlaces[key].country) allPlaces[key].country = p.country;
+      // PD.401R: capture the coordinates the place already carries. The
+      // picker map otherwise pins ONLY from the _coarseGeocode cache, so a
+      // sight whose requiredPlace has real lat/lng (the LLM supplied it, or
+      // a geocode landed it on the place) silently never pins — the "sights
+      // are in the list but not on the map" bug. Map-only; reads existing
+      // data, mutates nothing.
+      if (typeof p.lat === "number" && isFinite(p.lat) && (p.lat !== 0 || p.lng !== 0)
+          && allPlaces[key].lat == null) {
+        allPlaces[key].lat = p.lat; allPlaces[key].lng = p.lng;
+      }
       if (p._keep) allPlaces[key].kept = true;
       if (p._rejected === true) allPlaces[key]._rejected = true;
       if (iconic) allPlaces[key].iconic = true;
@@ -30235,6 +30245,14 @@ function _renderPlacePickerMap(targetId){
     // Round PD.10: rejected places skip the map render — see tear-down above.
     if (info && info._rejected) return;
     var ll = _coarseGeocode[key];
+    // PD.401R: if the cache hasn't got this place but the place itself
+    // carries coordinates, pin from those — and seed the cache so the
+    // spur/_pmCoord passes agree. This is what makes the kept sights
+    // (Skógafoss, Fjallsárlón, Lake Mývatn geothermal region, …) appear.
+    if ((!ll || !isFinite(ll[0])) && typeof info.lat === "number" && isFinite(info.lat)) {
+      ll = [info.lat, info.lng];
+      if (!_coarseGeocode[key]) _coarseGeocode[key] = ll;
+    }
     function placeMarker(latLng){
       bounds.push(latLng);
       // Step 3: pin styling.
