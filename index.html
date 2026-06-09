@@ -17195,19 +17195,6 @@ async function _generateActivitiesForPlaceImpl(){
   var _themingPassOn = false;
   try { _themingPassOn = (typeof localStorage !== "undefined" && localStorage.getItem("max-theming-pass") === "1"); } catch(_){}
   var _hasUserList = Array.isArray(_tb._pastedListPlaces) && _tb._pastedListPlaces.length > 0;
-  // PD.404/diag: unconditional — prints on EVERY generation so we can see
-  // exactly why the theming pass did or didn't run.
-  try {
-    var _pd404diag = {
-      themingPassOn: _themingPassOn,
-      hasUserList: _hasUserList,
-      listLen: ((_tb._pastedListPlaces && _tb._pastedListPlaces.length) || 0),
-      flagRaw: (function(){ try { return localStorage.getItem("max-theming-pass"); } catch(_){ return "ERR"; } })(),
-      at: new Date().toISOString()
-    };
-    window.__PD404 = _pd404diag;   // read after a build: JSON.stringify(window.__PD404)
-    console.log("[Max PD.404/flag] " + JSON.stringify(_pd404diag));
-  } catch(_){}
 
   var prompt = MaxGenPrompt.build({
     place: place,
@@ -17597,16 +17584,6 @@ async function _generateActivitiesForPlaceImpl(){
           + " chars; parsed " + (Array.isArray(_themeMap) ? _themeMap.length : 0)
           + " entr(ies) for " + _themeNames.length + " listed place(s); budget " + _themeBudget
           + "; sections offered: " + _themeSections.length);
-        // PD.404/diag: stash the theming result on the global so it can be
-        // read in one console command (JSON.stringify(window.__PD404)).
-        try {
-          if (window.__PD404) {
-            window.__PD404.themeRawLen = (_themeText && _themeText.length) || 0;
-            window.__PD404.themeParsed = (Array.isArray(_themeMap) ? _themeMap.length : 0);
-            window.__PD404.themeSectionsOffered = _themeSections.length;
-            window.__PD404.themeRawHead = String(_themeText || "").slice(0, 200);
-          }
-        } catch(_){}
         if (Array.isArray(_themeMap) && _themeMap.length) {
           // The catch-all section names are owned by SectionKind — use its
           // canonical list so this can't drift (the user-listed sights land
@@ -17618,7 +17595,6 @@ async function _generateActivitiesForPlaceImpl(){
             normPlaceName: (typeof _normPlaceName === "function") ? _normPlaceName : null,
             movableSections: _movable
           });
-          try { if (window.__PD404) window.__PD404.themeSorted = _themedCount; } catch(_){}
           console.log("[Max PD.404] theming pass sorted " + _themedCount + " of " +
             _themeNames.length + " listed place(s) into themed sections");
         } else {
