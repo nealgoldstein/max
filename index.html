@@ -444,6 +444,9 @@
 <!-- PD.402: gen-prompt.js — pure activity-generation prompt assembly,
      extracted verbatim from _generateActivitiesForPlaceImpl. -->
 <script src="gen-prompt.js?v=DEV"></script>
+<!-- PD.403: gen-postprocess.js — pure post-LLM transforms (transit-only,
+     section merge, place normalization, constructed-coord borrowing). -->
+<script src="gen-postprocess.js?v=DEV"></script>
 <!-- PD.319-4: max-merge.js — preserves user state when destinations
      are regenerated. The Rebuild flow (saveActivityPickerEdits →
      MaxBuild rebuild mode) regenerates trip.destinations from kept
@@ -17286,14 +17289,7 @@ async function _generateActivitiesForPlaceImpl(){
         + (_diagSecs.length ? "; sections: " + _diagSecs.join(" | ") : "; (no sections)"));
     } catch(_){}
     var regionCountry = place;
-    function _normPlaceArr(arr){
-      if(!Array.isArray(arr)) return arr;
-      return arr.map(function(p){
-        if(typeof p === "string") return {place:p, country:regionCountry};
-        if(p && typeof p === "object" && p.place) return p;
-        return p;
-      });
-    }
+  function _normPlaceArr(arr){ return MaxGenPost.normalizePlaceArr(arr, regionCountry); }
 
     // v359.55.9: post-LLM completeness check. When the user said
     // "complete the ring road" / "every stop" etc., the first
@@ -17450,52 +17446,12 @@ async function _generateActivitiesForPlaceImpl(){
     // (every non-route reference says overnight:false). Then the flag
     // is propagated to all refs of the place, so chip and checkbox stay
     // consistent.
-    var _placeStates = {}; // normalized place → {anyOvernightTrue, anyOvernightFalse, anyDenylist}
-    items.forEach(function(item){
-      if (item.type === "route") return;
-      if (!Array.isArray(item.requiredPlaces)) return;
-      item.requiredPlaces.forEach(function(p){
-        if (!p || !p.place) return;
-        var k = (typeof _normPlaceName === "function") ? _normPlaceName(p.place) : p.place.toLowerCase();
-        if (!_placeStates[k]) _placeStates[k] = {anyOvernightTrue:false, anyOvernightFalse:false, anyDenylist:false};
-        var st = _placeStates[k];
-        if (typeof _isTransitOnlyByDenylist === "function" && _isTransitOnlyByDenylist(p.place)) {
-          st.anyDenylist = true;
-        }
-        if (p.overnight === false) st.anyOvernightFalse = true;
-        else if (p.overnight === true) st.anyOvernightTrue = true;
-      });
+    // PD.403: transit-only aggregation + propagation extracted to gen-postprocess.js.
+    var _transitStats = MaxGenPost.computeTransitOnly(items, {
+      normPlaceName: (typeof _normPlaceName === "function") ? _normPlaceName : null,
+      isTransitOnlyByDenylist: (typeof _isTransitOnlyByDenylist === "function") ? _isTransitOnlyByDenylist : null
     });
-    // Decide transit-only per place: denylist always wins; otherwise need
-    // ALL refs to say overnight:false (no ref has overnight:true).
-    var _transitPlaces = {};
-    Object.keys(_placeStates).forEach(function(k){
-      var st = _placeStates[k];
-      if (st.anyDenylist) _transitPlaces[k] = "denylist";
-      else if (st.anyOvernightFalse && !st.anyOvernightTrue) _transitPlaces[k] = "llm";
-    });
-    // Propagate the verdict to every requiredPlace ref of those places
-    var _markedTransit = 0;
-    var _denylistApplied = 0;
-    items.forEach(function(item){
-      if (item.type === "route") return;
-      if (!Array.isArray(item.requiredPlaces)) return;
-      item.requiredPlaces.forEach(function(p){
-        if (!p || !p.place) return;
-        var k = (typeof _normPlaceName === "function") ? _normPlaceName(p.place) : p.place.toLowerCase();
-        if (_transitPlaces[k]) {
-          p.overnight = false;
-          p._transitOnly = true;
-          _markedTransit++;
-          if (_transitPlaces[k] === "denylist") _denylistApplied++;
-        } else {
-          // Place has at least one overnight:true ref — clear stale flags
-          p._transitOnly = false;
-          if (p.overnight !== true) p.overnight = true;
-        }
-      });
-    });
-    if (_markedTransit > 0) console.log("[Max] marked " + Object.keys(_transitPlaces).length + " transit-only place(s) (" + _markedTransit + " refs across activities)" + (_denylistApplied > 0 ? " — " + _denylistApplied + " ref(s) caught by denylist" : ""));
+    if (_transitStats.markedTransit > 0) console.log("[Max] marked " + _transitStats.transitPlaceCount + " transit-only place(s) (" + _transitStats.markedTransit + " refs across activities)" + (_transitStats.denylistApplied > 0 ? " — " + _transitStats.denylistApplied + " ref(s) caught by denylist" : ""));
 
     items.forEach(function(item,i){
       item.id = "plm" + i;
@@ -17590,47 +17546,8 @@ async function _generateActivitiesForPlaceImpl(){
     // Skip type="route" — routes are intrinsically distinct activities
     // (Train A vs. Train B with the same "Scenic trains" section).
     // Skip synthetic-* — handled by their own dedicated builders.
-    items = (function _mergeDuplicateSections(arr){
-      var nrmKey = function(s){ return String(s||"").toLowerCase().trim().replace(/\s+/g," "); };
-      var nrmPlc = (typeof _normPlaceName === "function")
-        ? _normPlaceName
-        : function(s){ return String(s||"").toLowerCase().trim(); };
-      var out = [];
-      var byKey = {};  // section-name → first item in out
-      arr.forEach(function(it){
-        if (!it || !it.section) { out.push(it); return; }
-        if (it.type === "route") { out.push(it); return; }
-        if (typeof it.type === "string" && /^synthetic-/.test(it.type)) { out.push(it); return; }
-        var k = nrmKey(it.section);
-        if (!byKey[k]) {
-          byKey[k] = it;
-          out.push(it);
-          return;
-        }
-        // Merge this duplicate into the canonical item.
-        var canon = byKey[k];
-        canon.requiredPlaces = canon.requiredPlaces || [];
-        var seen = {};
-        canon.requiredPlaces.forEach(function(p){
-          if (p && p.place) seen[nrmPlc(p.place)] = true;
-        });
-        (it.requiredPlaces || []).forEach(function(p){
-          if (!p || !p.place) return;
-          var pk = nrmPlc(p.place);
-          if (seen[pk]) return;
-          seen[pk] = true;
-          canon.requiredPlaces.push(p);
-        });
-        // Pick richer description if canon's is short.
-        if (it.description && (!canon.description || canon.description.length < it.description.length)) {
-          canon.description = it.description;
-        }
-        // If any duplicate is iconic/checked, the merged section is.
-        if (it.iconic) canon.iconic = true;
-        if (it.checked) canon.checked = true;
-      });
-      return out;
-    })(items);
+    // PD.403: same-named section merge extracted to gen-postprocess.js.
+    items = MaxGenPost.mergeDuplicateSections(items, { normPlaceName: _normPlaceName });
     // PD.337: CONSTRUCT-THEN-DECORATE merge. If the user's listed
     // places were constructed into _tb.placeActivities before this
     // LLM call, the LLM output MERGES AROUND them — it never replaces
@@ -17645,30 +17562,8 @@ async function _generateActivitiesForPlaceImpl(){
     var _constructed = (Array.isArray(_tb.placeActivities) ? _tb.placeActivities : [])
       .filter(function(it){ return it && it._userConstructed; });
     if (_constructed.length) {
-      var _nrmM = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
-      var _coordIdx = {};
-      items.forEach(function(it){
-        ["requiredPlaces","endpoints","viableLocations"].forEach(function(arr){
-          (it && it[arr] || []).forEach(function(p){
-            if (p && p.place && typeof p.lat === "number" && isFinite(p.lat) && p.lat !== 0) {
-              var k = _nrmM(p.place);
-              if (k && !_coordIdx[k]) _coordIdx[k] = p;
-            }
-          });
-        });
-      });
-      var _decorated = 0;
-      _constructed.forEach(function(it){
-        (it.requiredPlaces || []).forEach(function(p){
-          if (!p || !p.place) return;
-          var hit = _coordIdx[_nrmM(p.place)];
-          if (hit && (typeof p.lat !== "number" || !isFinite(p.lat) || p.lat === 0)) {
-            p.lat = hit.lat; p.lng = hit.lng;
-            if (!p.country && hit.country) p.country = hit.country;
-            _decorated++;
-          }
-        });
-      });
+      // PD.403: constructed-place coord borrowing extracted to gen-postprocess.js.
+      var _decorated = MaxGenPost.decorateConstructedWithCoords(_constructed, items, { normPlaceName: _normPlaceName });
       console.log("[Max PD.337] merged LLM output around " + _constructed.length +
         " constructed item(s); decorated " + _decorated + " place(s) with LLM coordinates");
       items = _constructed.concat(items);
