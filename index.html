@@ -8980,6 +8980,21 @@ async function _runThemingPass() {
     }
     var map = MaxGenPost.coerceThemingMap(raw);
     var parsed = Array.isArray(map) ? map.length : 0;
+    // PD.404/diag: capture the ACTUAL data applyTheming sees, so a sorted:0
+    // result shows exactly why — which sections exist (and which are
+    // movable), a sample of the catch-all place names, and a sample of the
+    // map names. The mismatch is then visible in one read.
+    var _dbgSections = {};
+    var _dbgMovablePlaces = [];
+    pa.forEach(function(it){
+      if (!it || !it.section) return;
+      var cnt = (it.requiredPlaces && it.requiredPlaces.length) || 0;
+      _dbgSections[it.section] = (_dbgSections[it.section] || 0) + cnt;
+      if (movableSet[it.section] && Array.isArray(it.requiredPlaces)) {
+        it.requiredPlaces.forEach(function(p){ if (p && p.place && _dbgMovablePlaces.length < 10) _dbgMovablePlaces.push(p.place); });
+      }
+    });
+    var _mapSample = (map || []).slice(0, 8).map(function(e){ return e && e.place; });
     var sorted = 0;
     if (parsed) {
       sorted = MaxGenPost.applyTheming(pa, map, {
@@ -8987,11 +9002,12 @@ async function _runThemingPass() {
         movableSections: movable
       });
     }
-    // Lean, flag-on-only summary for live verification: JSON.stringify(window.__PD404_THEME)
+    // Flag-on-only summary for live verification: JSON.stringify(window.__PD404_THEME)
     try {
       window.__PD404_THEME = { parsed: parsed, sorted: sorted, listLen: names.length,
-        sectionsOffered: sections.length, rawLen: (raw && raw.length) || 0,
-        rawHead: String(raw || "").slice(0, 200), at: new Date().toISOString() };
+        sectionsOffered: sections.length, movableSections: movable,
+        mapSample: _mapSample, catchallPlaces: _dbgMovablePlaces, sectionCounts: _dbgSections,
+        rawLen: (raw && raw.length) || 0, at: new Date().toISOString() };
     } catch(_){}
     console.log("[Max PD.404] theming pass: parsed " + parsed + " mapping(s), sorted "
       + sorted + " of " + names.length + " listed place(s) into themes ("
