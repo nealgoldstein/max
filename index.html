@@ -17198,10 +17198,15 @@ async function _generateActivitiesForPlaceImpl(){
   // PD.404/diag: unconditional — prints on EVERY generation so we can see
   // exactly why the theming pass did or didn't run.
   try {
-    console.log("[Max PD.404/flag] themingPassOn=" + _themingPassOn
-      + " hasUserList=" + _hasUserList
-      + " listLen=" + ((_tb._pastedListPlaces && _tb._pastedListPlaces.length) || 0)
-      + " flagRaw=" + (function(){ try { return localStorage.getItem("max-theming-pass"); } catch(_){ return "ERR"; } })());
+    var _pd404diag = {
+      themingPassOn: _themingPassOn,
+      hasUserList: _hasUserList,
+      listLen: ((_tb._pastedListPlaces && _tb._pastedListPlaces.length) || 0),
+      flagRaw: (function(){ try { return localStorage.getItem("max-theming-pass"); } catch(_){ return "ERR"; } })(),
+      at: new Date().toISOString()
+    };
+    window.__PD404 = _pd404diag;   // read after a build: JSON.stringify(window.__PD404)
+    console.log("[Max PD.404/flag] " + JSON.stringify(_pd404diag));
   } catch(_){}
 
   var prompt = MaxGenPrompt.build({
