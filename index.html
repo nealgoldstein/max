@@ -8939,17 +8939,16 @@ async function _runThemingPass() {
   var pa = Array.isArray(_tb.placeActivities) ? _tb.placeActivities : [];
   var place = _tb.placeName || _tb.region || "";
   var ctx = _tb.placeContext || _tb.intent || "";
-  var movable = (window.SectionKind && typeof SectionKind.catchallPrecedence === "function")
-    ? SectionKind.catchallPrecedence().slice()
-    : ["From your list", "Sights near places you listed", "More places to consider"];
-  // PD.404: the DiscoveryModel parks COMMITTED sights with no themeFit in the
-  // generic "Sights you're keeping" bucket (it's in the model's _CATCH_SET,
-  // so themeFit is null there). That's where the bulk of listed sights sit —
-  // and the #1 thing #80 needs to drain. Setting it.section to a real theme
-  // makes the next model rebuild derive themeFit from that section, so the
-  // move persists. Include it in the movable set.
-  var _KEEPING = (window.MaxDiscovery && MaxDiscovery.SECTION && MaxDiscovery.SECTION.KEEPING) || "Sights you're keeping";
-  if (movable.indexOf(_KEEPING) < 0) movable.push(_KEEPING);
+  // PD.404: "which sections may the theming pass re-theme?" = exactly the
+  // sections the DiscoveryModel treats as carrying NO theme (themeFit null).
+  // Derive it from the model itself (its catch-set, which includes the
+  // generic "Sights you're keeping" bucket where most kept sights sit), so
+  // this can never drift from the placement logic. Setting it.section to a
+  // real theme makes the next model rebuild derive themeFit from it, so the
+  // move persists.
+  var movable = (window.MaxDiscovery && typeof MaxDiscovery.catchallSections === "function")
+    ? MaxDiscovery.catchallSections()
+    : ["From your list", "Sights near places you listed", "More places to consider", "Sights you're keeping"];
   var movableSet = {};
   movable.forEach(function(s){ movableSet[s] = true; });
   // Offer the model the REAL themes (everything that isn't a catch-all or a

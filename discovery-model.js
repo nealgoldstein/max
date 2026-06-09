@@ -376,12 +376,22 @@
     return out;
   };
 
+  // PD.404: the model's own notion of "this section carries no theme"
+  // (themeFit is null in it). Exported so other passes — e.g. the theming
+  // pass deciding which sights it may re-theme — derive "un-themed" from the
+  // SAME source the placement logic uses, instead of a parallel hardcoded
+  // list that can drift. Includes KEEPING, which SectionKind does not.
+  function isCatchallSection(name) { return !!_CATCH_SET[String(name)]; }
+  function catchallSections() { return Object.keys(_CATCH_SET); }
+
   var api = {
     DiscoveryModel: DiscoveryModel,
     PlacementPolicy: PlacementPolicy,
     SECTION: SECTION,
     sameEntity: sameEntity,
     isRouteUmbrella: isRouteUmbrella,
+    isCatchallSection: isCatchallSection,
+    catchallSections: catchallSections,
     _coordsClose: _coordsClose
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;

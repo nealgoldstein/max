@@ -216,6 +216,20 @@ test("route umbrella: a themed place keeps its theme (not hijacked to scenic)", 
   assert.strictEqual(Policy.sectionFor(m.all()[0]), "See natural wonders");
 });
 
+test("PD.404: catchallSections / isCatchallSection expose the themeFit-null set", function () {
+  var cs = M.catchallSections();
+  // The four sections the model places themeFit-null sights into, INCLUDING
+  // the generic "Sights you're keeping" bucket (which SectionKind omits).
+  ["Sights near places you listed", "More places to consider", "From your list", "Sights you're keeping"]
+    .forEach(function (s) { assert.ok(cs.indexOf(s) !== -1, "missing catchall: " + s); });
+  assert.strictEqual(M.isCatchallSection("Sights you're keeping"), true);
+  assert.strictEqual(M.isCatchallSection("Walk to natural wonders"), false);
+  // It must agree with the placement policy: a checked sight with no themeFit
+  // lands in a section isCatchallSection() reports true for.
+  var m = model([{ place: "Goðafoss", origin: "user", role: "sight", decision: "checked" }]);
+  assert.strictEqual(M.isCatchallSection(Policy.sectionFor(m.all()[0])), true);
+});
+
 console.log("\n" + "─".repeat(50));
 console.log("PASS: " + pass + "    FAIL: " + fail);
 if (fail > 0) process.exit(1);
