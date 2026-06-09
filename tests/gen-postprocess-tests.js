@@ -175,6 +175,23 @@ test("applyTheming leaves a place in the catch-all when the entry has no section
   assert.strictEqual(n, 0);
   assert.strictEqual(items[0].section, "From your list");
 });
+test("applyTheming matches across a trailing country suffix (PD.404 live bug)", function () {
+  // The theming model appends ", Iceland" to names; stubs are bare. Must still match.
+  var items = themingItems();
+  var map = [
+    { place: "Gullfoss, Iceland", section: "Visit natural wonders", category: "scenery-nature", lat: 64.3, lng: -20.1 }
+  ];
+  var n = M.applyTheming(items, map, { normPlaceName: nrm, movableSections: MOVABLE });
+  assert.strictEqual(n, 1);
+  assert.strictEqual(items[0].section, "Visit natural wonders");
+});
+test("applyTheming matches when the STUB has the suffix and the map is bare", function () {
+  var items = [{ section: "From your list", _userConstructed: true, requiredPlaces: [{ place: "Gullfoss, Iceland", lat: 0, lng: 0 }] }];
+  var map = [{ place: "Gullfoss", section: "Visit natural wonders" }];
+  var n = M.applyTheming(items, map, { normPlaceName: nrm, movableSections: MOVABLE });
+  assert.strictEqual(n, 1);
+  assert.strictEqual(items[0].section, "Visit natural wonders");
+});
 test("applyTheming does not overwrite coords a stub already has", function () {
   var items = themingItems();
   items[0].requiredPlaces[0].lat = 64.0; items[0].requiredPlaces[0].lng = -20.0;

@@ -184,9 +184,27 @@
       : function(s){ return String(s || "").toLowerCase().replace(/\s+/g, " ").trim(); };
     var movable = {};
     (opts.movableSections || []).forEach(function(s){ movable[String(s)] = true; });
+    // PD.404: the theming model frequently appends a country to the name
+    // ("Vík" → "Vík, Iceland") even when asked not to, while the catch-all
+    // stubs are bare ("Vík"). Key BOTH the full normalized name AND a "base"
+    // form with a trailing ", …" segment stripped, on both sides, so the
+    // suffix never blocks a match.
+    function _keysFor(name){
+      var keys = [];
+      var full = _normPlaceName(name);
+      if (full) keys.push(full);
+      var s = String(name || "");
+      var ci = s.lastIndexOf(",");
+      if (ci > 0) {
+        var base = _normPlaceName(s.slice(0, ci));
+        if (base && keys.indexOf(base) < 0) keys.push(base);
+      }
+      return keys;
+    }
     var byPlace = {};
     (themingMap || []).forEach(function(e){
-      if (e && e.place) byPlace[_normPlaceName(e.place)] = e;
+      if (!e || !e.place) return;
+      _keysFor(e.place).forEach(function(k){ if (!byPlace[k]) byPlace[k] = e; });
     });
     var themed = 0;
     (items || []).forEach(function(it){
@@ -197,8 +215,11 @@
       for (var i = 0; i < it.requiredPlaces.length; i++) {
         var p = it.requiredPlaces[i];
         if (!p || !p.place) continue;
-        var hit = byPlace[_normPlaceName(p.place)];
-        if (hit) { entry = hit; matchP = p; break; }
+        var ks = _keysFor(p.place);
+        for (var j = 0; j < ks.length; j++) {
+          if (byPlace[ks[j]]) { entry = byPlace[ks[j]]; matchP = p; break; }
+        }
+        if (entry) break;
       }
       if (!entry) return;
       var newSec = (typeof entry.section === "string") ? entry.section.trim() : "";
