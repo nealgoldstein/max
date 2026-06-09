@@ -8958,7 +8958,26 @@ async function _runThemingPass() {
   try {
     var prompt = MaxGenPrompt.buildThemingPrompt({ place: place, ctx: ctx, userList: names, sections: sections });
     var budget = Math.min(8000, Math.max(2000, names.length * 120));
-    var raw = await callMax([{ role: "user", content: prompt }], budget, 60000);
+    // PD.404: the theming call is one of several LLM calls in a build; when
+    // the API is rate-limited it's often the one that fails ("Failed to
+    // fetch" / timeout). Retry once after a short pause to ride out the
+    // transient case. On hard failure, record THIS run's status on the
+    // global (with a fresh timestamp) so the read is never misleadingly
+    // stale from an earlier build.
+    var raw = null, _themeErr = null;
+    for (var _ta = 0; _ta < 2; _ta++) {
+      try { raw = await callMax([{ role: "user", content: prompt }], budget, 60000); _themeErr = null; break; }
+      catch (e) {
+        _themeErr = e;
+        if (_ta === 0) { try { await new Promise(function(r){ setTimeout(r, 1500); }); } catch(_){} }
+      }
+    }
+    if (_themeErr || raw == null) {
+      try { window.__PD404_THEME = { error: (_themeErr && _themeErr.message) || "no response",
+        listLen: names.length, sectionsOffered: sections.length, at: new Date().toISOString() }; } catch(_){}
+      console.warn("[Max PD.404] theming pass failed after retry (non-fatal):", _themeErr && _themeErr.message);
+      return;
+    }
     var map = MaxGenPost.coerceThemingMap(raw);
     var parsed = Array.isArray(map) ? map.length : 0;
     var sorted = 0;
