@@ -8940,8 +8940,16 @@ async function _runThemingPass() {
   var place = _tb.placeName || _tb.region || "";
   var ctx = _tb.placeContext || _tb.intent || "";
   var movable = (window.SectionKind && typeof SectionKind.catchallPrecedence === "function")
-    ? SectionKind.catchallPrecedence()
+    ? SectionKind.catchallPrecedence().slice()
     : ["From your list", "Sights near places you listed", "More places to consider"];
+  // PD.404: the DiscoveryModel parks COMMITTED sights with no themeFit in the
+  // generic "Sights you're keeping" bucket (it's in the model's _CATCH_SET,
+  // so themeFit is null there). That's where the bulk of listed sights sit —
+  // and the #1 thing #80 needs to drain. Setting it.section to a real theme
+  // makes the next model rebuild derive themeFit from that section, so the
+  // move persists. Include it in the movable set.
+  var _KEEPING = (window.MaxDiscovery && MaxDiscovery.SECTION && MaxDiscovery.SECTION.KEEPING) || "Sights you're keeping";
+  if (movable.indexOf(_KEEPING) < 0) movable.push(_KEEPING);
   var movableSet = {};
   movable.forEach(function(s){ movableSet[s] = true; });
   // Offer the model the REAL themes (everything that isn't a catch-all or a

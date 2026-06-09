@@ -192,6 +192,28 @@ test("applyTheming matches when the STUB has the suffix and the map is bare", fu
   assert.strictEqual(n, 1);
   assert.strictEqual(items[0].section, "Visit natural wonders");
 });
+test("applyTheming re-themes the 'Sights you're keeping' bucket when it's movable (PD.404 root cause)", function () {
+  // The live bug: kept listed sights sit in "Sights you're keeping" (themeFit
+  // null in the model). They must be movable so the theming pass can sort
+  // them into real themes; then a model rebuild derives themeFit from the
+  // new section and the move persists.
+  var items = [
+    { name: "Stop in Goðafoss", section: "Sights you're keeping", _userConstructed: true,
+      requiredPlaces: [{ place: "Goðafoss", _keep: true, lat: 0, lng: 0 }] }
+  ];
+  var map = [{ place: "Goðafoss, Iceland", section: "Visit natural wonders", category: "scenery-nature", lat: 65.7, lng: -17.5 }];
+  var n = M.applyTheming(items, map, { normPlaceName: nrm, movableSections: ["Sights you're keeping", "From your list"] });
+  assert.strictEqual(n, 1);
+  assert.strictEqual(items[0].section, "Visit natural wonders");
+  // section is a real theme (not a catch-all) → a model rebuild would set themeFit and keep it.
+});
+test("applyTheming leaves 'Sights you're keeping' alone when it is NOT in movableSections", function () {
+  var items = [{ section: "Sights you're keeping", _userConstructed: true, requiredPlaces: [{ place: "Goðafoss" }] }];
+  var map = [{ place: "Goðafoss", section: "Visit natural wonders" }];
+  var n = M.applyTheming(items, map, { normPlaceName: nrm, movableSections: ["From your list"] });
+  assert.strictEqual(n, 0);
+  assert.strictEqual(items[0].section, "Sights you're keeping");
+});
 test("applyTheming does not overwrite coords a stub already has", function () {
   var items = themingItems();
   items[0].requiredPlaces[0].lat = 64.0; items[0].requiredPlaces[0].lng = -20.0;
