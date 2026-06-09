@@ -32,6 +32,23 @@
     if (PK && typeof PK.resolve === "function") { try { return PK.resolve(s); } catch (_) {} }
     return String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
   }
+  // PD.401T: PURE normalization — accent/case folding ONLY, with NO alias
+  // resolution. _norm() above goes through PlaceKey.resolve, which applies
+  // the LEARNED ALIAS registry; a corrupted alias can knock an accented
+  // name (Vík, Höfn, Þingvellir) onto an unexpected key so the exact-key
+  // lookup misses and coverage falsely reports it "missing" (and miscounts
+  // it as a Max suggestion). Existence must be decidable by the place's own
+  // name, never by mutable learned state — this is the alias-free anchor.
+  function _pureNorm(s) {
+    if (PK && typeof PK.norm === "function") { try { return PK.norm(s); } catch (_) {} }
+    if (typeof global._normPlaceName === "function") { try { return global._normPlaceName(s); } catch (_) {} }
+    return String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+  }
+  // a is a WORD-prefix of b ("thingvellir" of "thingvellir national park").
+  // Word-boundary guarded so "vik" does not prefix-match "viking".
+  function _purePrefix(a, b) {
+    return !!a && !!b && b.length > a.length && b.indexOf(a + " ") === 0;
+  }
   // Coverage match: exact key, or the unified relatedTo (exact | token
   // overlap | word-prefix containment) so "Þingvellir" finds "Þingvellir
   // National Park". Permissive because it only LABELS found/missing.
@@ -98,6 +115,29 @@
     var all = this.all();
     for (var i = 0; i < all.length; i++) {
       if (_related(name, all[i].place) || _related(name, all[i].key)) return all[i];
+    }
+    // PD.401T: alias-free anchor. If the alias-aware passes all missed,
+    // match on PURE normalization of the place's own name. This guarantees
+    // a place that is genuinely present (record.place === the listed name,
+    // accents and all) can never be reported "missing" because a learned
+    // alias corrupted its key. Exact pure-normalized equality only — no
+    // fuzz, so it can't create false matches.
+    var pn = _pureNorm(name);
+    if (pn) {
+      // Pass 1: exact pure-normalized equality (Vík, Höfn, the accented stays).
+      for (var j = 0; j < all.length; j++) {
+        if (_pureNorm(all[j].place) === pn || _pureNorm(all[j].key) === pn) return all[j];
+      }
+      // Pass 2: alias-free WORD-PREFIX containment, so a one-word listed
+      // name ("Þingvellir") still finds its qualified record ("Þingvellir
+      // National Park") even when a corrupted alias has broken the
+      // alias-aware relatedTo above. Coverage only LABELS found/missing, so
+      // permissive containment is safe; an exact stay record (e.g.
+      // "Reykjavik") already matched in pass 1, so this can't mislabel one.
+      for (var m = 0; m < all.length; m++) {
+        var rp = _pureNorm(all[m].place);
+        if (rp && (_purePrefix(pn, rp) || _purePrefix(rp, pn))) return all[m];
+      }
     }
     return null;
   };

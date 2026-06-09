@@ -75,6 +75,26 @@ test("find() is coverage-fuzz aware (Þingvellir ⊂ Þingvellir National Park)"
   assert.strictEqual(repo.has("Þingvellir"), true);
 });
 
+test("PD.401T: a corrupted alias cannot make a present place 'missing'", function () {
+  // A learned alias drifts the accented name off its expected key — the
+  // live "8 of your listed places are missing: Vík, Höfn, …" bug. Coverage
+  // must still find a place that is genuinely present, by its own name.
+  global.PlaceKey.learn("Vík", "Vík Bogus Alias");
+  global.PlaceKey.learn("Þingvellir", "Þingvellir Bogus Alias");
+  var repo = new Repo();
+  repo.add({ place: "Vik", section: "Overnight stays", kind: "stay" });
+  repo.add({ place: "Þingvellir National Park", section: "See natural wonders", kind: "sight" });
+  repo.add({ place: "Reykjavik", section: "Overnight stays", kind: "stay" });
+  repo.add({ place: "Reykjavik Old Harbour", section: "See sights", kind: "sight" });
+  assert.strictEqual(repo.has("vik"), true, "accented stay found despite a corrupt alias");
+  assert.strictEqual(repo.has("Þingvellir"), true, "one-word listed name finds its qualified record");
+  // exact wins over containment: 'reykjavik' is the stay, not the harbour.
+  assert.strictEqual(repo.find("reykjavik").kinds.stay, true);
+  // word-boundary guard: a prefix that isn't a whole word does NOT match.
+  assert.strictEqual(repo.has("viking"), false);
+  global.PlaceKey.forget("Vík"); global.PlaceKey.forget("Þingvellir");
+});
+
 test("interning is idempotent and merges sections/kinds", function () {
   var repo = new Repo();
   repo.add({ place: "Gullfoss", _key: "gullfoss", section: "A", kind: "sight" });
