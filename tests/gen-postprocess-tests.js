@@ -133,6 +133,56 @@ test("constructed places borrow coords from a matching LLM place", function () {
   assert.strictEqual(constructed[1].requiredPlaces[0].lat, undefined);
 });
 
+// ── PD.404 (#80): applyTheming ─────────────────────────────────────
+function themingItems() {
+  return [
+    { name: "Stop in Gullfoss", section: "From your list", category: "scenery-nature", iconic: false, _userConstructed: true,
+      requiredPlaces: [{ place: "Gullfoss", overnight: true, lat: 0, lng: 0 }] },
+    { name: "Stop in Mystery", section: "From your list", category: "scenery-nature", _userConstructed: true,
+      requiredPlaces: [{ place: "Unknown Place", overnight: true }] },
+    { name: "Overnight stays", section: "Overnight stays", _userConstructed: true,
+      requiredPlaces: [{ place: "Reykjavik", overnight: true }] },
+    { name: "LLM activity", section: "Visit natural wonders",
+      requiredPlaces: [{ place: "Dettifoss" }] }
+  ];
+}
+var MOVABLE = ["From your list", "More places to consider"];
+test("applyTheming moves a matched stub into its themed section + fills coords/iconic", function () {
+  var items = themingItems();
+  var map = [{ place: "Gullfoss", section: "Visit natural wonders", category: "scenery-nature", iconic: true, lat: 64.3, lng: -20.1, country: "Iceland" }];
+  var n = M.applyTheming(items, map, { normPlaceName: nrm, movableSections: MOVABLE });
+  assert.strictEqual(n, 1);
+  assert.strictEqual(items[0].section, "Visit natural wonders");
+  assert.strictEqual(items[0].iconic, true);
+  assert.strictEqual(items[0].requiredPlaces[0].lat, 64.3);
+  assert.strictEqual(items[0].requiredPlaces[0].country, "Iceland");
+});
+test("applyTheming never disturbs stays sections or non-movable items", function () {
+  var items = themingItems();
+  var map = [
+    { place: "Reykjavik", section: "Explore the city", category: "culture-history" }, // in a stays section → ignore
+    { place: "Dettifoss", section: "Somewhere else" }                                 // LLM item, not movable → ignore
+  ];
+  var n = M.applyTheming(items, map, { normPlaceName: nrm, movableSections: MOVABLE });
+  assert.strictEqual(n, 0);
+  assert.strictEqual(items[2].section, "Overnight stays");
+  assert.strictEqual(items[3].section, "Visit natural wonders");
+});
+test("applyTheming leaves a place in the catch-all when the entry has no section", function () {
+  var items = themingItems();
+  var map = [{ place: "Gullfoss", section: "   ", category: "scenery-nature" }];
+  var n = M.applyTheming(items, map, { normPlaceName: nrm, movableSections: MOVABLE });
+  assert.strictEqual(n, 0);
+  assert.strictEqual(items[0].section, "From your list");
+});
+test("applyTheming does not overwrite coords a stub already has", function () {
+  var items = themingItems();
+  items[0].requiredPlaces[0].lat = 64.0; items[0].requiredPlaces[0].lng = -20.0;
+  var map = [{ place: "Gullfoss", section: "Visit natural wonders", lat: 11.1, lng: 22.2 }];
+  M.applyTheming(items, map, { normPlaceName: nrm, movableSections: MOVABLE });
+  assert.strictEqual(items[0].requiredPlaces[0].lat, 64.0); // unchanged
+});
+
 // ── full-pipeline snapshot ─────────────────────────────────────────
 var SNAP = path.join(__dirname, "fixtures", "gen-postprocess.snapshot.json");
 test("full pipeline (transit → merge → decorate → concat) matches snapshot", function () {

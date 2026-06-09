@@ -162,11 +162,70 @@
     return _decorated;
   }
 
+  // PD.404 (#80): apply the theming pass's section/category assignments to
+  // the constructed user-listed sight stubs. Those stubs are created in a
+  // catch-all section ("From your list" / "More places to consider") before
+  // generation; the theming pass returns, per listed place, the section it
+  // belongs in. This moves each matched stub out of the catch-all into its
+  // themed section (and fills coords if the stub lacked them), so the
+  // generation prompt no longer has to re-emit the list to get it themed.
+  //
+  //   items       : array of placeActivities items (constructed + others)
+  //   themingMap  : [{place, section, category?, iconic?, lat?, lng?, country?}]
+  //   opts        : { normPlaceName, movableSections:[section names] }
+  //
+  // Only items whose CURRENT section is in movableSections are re-themed,
+  // so user "Overnight stays" and Max's own sections are never disturbed.
+  // Pure: mutates the passed items; returns the count re-themed.
+  function applyTheming(items, themingMap, opts){
+    opts = opts || {};
+    var _normPlaceName = (typeof opts.normPlaceName === "function")
+      ? opts.normPlaceName
+      : function(s){ return String(s || "").toLowerCase().replace(/\s+/g, " ").trim(); };
+    var movable = {};
+    (opts.movableSections || []).forEach(function(s){ movable[String(s)] = true; });
+    var byPlace = {};
+    (themingMap || []).forEach(function(e){
+      if (e && e.place) byPlace[_normPlaceName(e.place)] = e;
+    });
+    var themed = 0;
+    (items || []).forEach(function(it){
+      if (!it || !movable[it.section]) return;
+      if (!Array.isArray(it.requiredPlaces) || !it.requiredPlaces.length) return;
+      // Find the first requiredPlace this map has an assignment for.
+      var entry = null, matchP = null;
+      for (var i = 0; i < it.requiredPlaces.length; i++) {
+        var p = it.requiredPlaces[i];
+        if (!p || !p.place) continue;
+        var hit = byPlace[_normPlaceName(p.place)];
+        if (hit) { entry = hit; matchP = p; break; }
+      }
+      if (!entry) return;
+      var newSec = (typeof entry.section === "string") ? entry.section.trim() : "";
+      if (!newSec) return; // no usable section → leave it in the catch-all
+      it.section = newSec;
+      if (entry.category && typeof entry.category === "string" && entry.category.trim()) {
+        it.category = entry.category.trim();
+      }
+      if (entry.iconic === true) it.iconic = true;
+      // Fill coords on the matched place if it lacked them and we got real ones.
+      var lat = parseFloat(entry.lat), lng = parseFloat(entry.lng);
+      if (isFinite(lat) && isFinite(lng) && !(lat === 0 && lng === 0)
+          && (typeof matchP.lat !== "number" || !isFinite(matchP.lat) || matchP.lat === 0)) {
+        matchP.lat = lat; matchP.lng = lng;
+        if (!matchP.country && entry.country) matchP.country = entry.country;
+      }
+      themed++;
+    });
+    return themed;
+  }
+
   var api = {
     normalizePlaceArr: normalizePlaceArr,
     computeTransitOnly: computeTransitOnly,
     mergeDuplicateSections: mergeDuplicateSections,
-    decorateConstructedWithCoords: decorateConstructedWithCoords
+    decorateConstructedWithCoords: decorateConstructedWithCoords,
+    applyTheming: applyTheming
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   global.MaxGenPost = api;

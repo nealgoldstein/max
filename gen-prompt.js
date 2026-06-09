@@ -39,6 +39,13 @@
     var userList        = opts.userList || [];
     var pmChips         = opts.pmChips || [];
     var personalContext = opts.personalContext || "";
+    // PD.404 (#80): when true, the listed places are captured + themed by a
+    // SEPARATE theming pass, so generation must NOT be asked to re-emit them
+    // (re-emitting a long list is what makes the model drop places). The
+    // softened block tells the model the list is handled and to suggest
+    // complementary things AROUND it. Default false = the original
+    // hard-constraint, re-emit-every-place block (unchanged behavior).
+    var listHandledSeparately = !!opts.listHandledSeparately;
 
   var _userListBlock = "";
   if (Array.isArray(userList) && userList.length) {
@@ -46,11 +53,21 @@
       var stay = d.isStay || (typeof d.nights === "number" && d.nights > 0);
       return "  - " + d.place + (stay ? (" — OVERNIGHT STAY" + (d.nights ? " (" + d.nights + " nights)" : "")) : " — see/do");
     }).join("\n");
-    _userListBlock = "\nTHE TRAVELER'S OWN LIST — HARD CONSTRAINT, this overrides every clustering and selectivity rule above:\n"
-      + _ulLines + "\n"
-      + "  - EVERY place on this list MUST appear in your output as a requiredPlace (use the canonical full name a map service resolves).\n"
-      + "  - Places marked OVERNIGHT STAY MUST have overnight:true and at least the listed nights — do NOT demote them to day trips or sights; the traveler explicitly chose to sleep there.\n"
-      + "  - Do not drop, rename beyond canonical form, or merge away any listed place. Add your own suggestions AROUND this list, never instead of it.\n\n";
+    if (listHandledSeparately) {
+      // PD.404 (#80): the list is captured + themed by a separate pass.
+      // Don't make generation responsible for re-emitting it.
+      _userListBlock = "\nTHE TRAVELER'S OWN LIST — already captured, do NOT re-list these:\n"
+        + _ulLines + "\n"
+        + "  - These places are ALREADY in the traveler's plan; a separate step files each one into the right section. You do NOT need to output them as requiredPlaces, and you must NOT treat this as a list to reproduce.\n"
+        + "  - Your job is to suggest COMPLEMENTARY activities, routes, and condition-dependent experiences AROUND this list — things that pair well with these places but that the traveler hasn't already named.\n"
+        + "  - You MAY name a listed place inside an activity when it is genuinely the spot for that activity, but never pad your output by re-listing the whole set.\n\n";
+    } else {
+      _userListBlock = "\nTHE TRAVELER'S OWN LIST — HARD CONSTRAINT, this overrides every clustering and selectivity rule above:\n"
+        + _ulLines + "\n"
+        + "  - EVERY place on this list MUST appear in your output as a requiredPlace (use the canonical full name a map service resolves).\n"
+        + "  - Places marked OVERNIGHT STAY MUST have overnight:true and at least the listed nights — do NOT demote them to day trips or sights; the traveler explicitly chose to sleep there.\n"
+        + "  - Do not drop, rename beyond canonical form, or merge away any listed place. Add your own suggestions AROUND this list, never instead of it.\n\n";
+    }
   }
 
   var _briefBlock = briefBits.length
@@ -148,7 +165,40 @@
   return prompt;
   }
 
-  var api = { build: build, detectCompleteness: detectCompleteness };
+  // PD.404 (#80): the THEMING pass prompt. Runs AFTER generation, mirroring
+  // the completeness pass: it hands the model the traveler's listed places
+  // plus the sections generation already produced, and asks ONLY for a
+  // section/category assignment per listed place. Output is one compact
+  // object per place (no descriptions, no nights, no endpoints), so even a
+  // 40-place list stays well inside the token budget and nothing is dropped.
+  //   opts: { place, ctx, userList:[displayName,...], sections:[name,...],
+  //           categories?:[id,...] }
+  var _SIX_CATEGORIES = ["outdoors-active", "scenery-nature", "culture-history",
+    "food-drink", "connection-gatherings", "wellness-growth"];
+  function buildThemingPrompt(opts){
+    opts = opts || {};
+    var place      = opts.place || "";
+    var ctx        = opts.ctx || "";
+    var userList   = opts.userList || [];
+    var sections   = opts.sections || [];
+    var categories = opts.categories || _SIX_CATEGORIES;
+    return "A traveler is planning a trip to " + place + ".\n"
+      + (ctx ? "Their context: " + ctx + "\n" : "")
+      + "\nThey listed these specific places they want included in the trip:\n"
+      + userList.map(function(p){ return "  - " + p; }).join("\n") + "\n\n"
+      + "I have already organized the rest of the trip into these themed sections:\n"
+      + (sections.length ? sections.map(function(s){ return "  - " + s; }).join("\n") : "  (no sections yet)") + "\n\n"
+      + "This is a SORTING task, not a generation task. For EVERY listed place, tell me which themed section it best belongs in and its category, so I can file it correctly alongside the rest of the trip.\n"
+      + "  - Prefer a section from the list above. If a listed place genuinely fits none of them, you may name a new short verb-phrase section (e.g. \"Visit historic sites\").\n"
+      + "  - Return EXACTLY one entry per listed place — no more, no fewer. Do NOT add places the traveler didn't list. Do NOT drop any listed place.\n"
+      + "  - Keep the place name EXACTLY as the traveler wrote it (so I can match it back).\n\n"
+      + "Return ONLY a JSON array (no markdown), one object per listed place:\n"
+      + '[{"place":"<exact listed place>","section":"<best section>","category":"<one of the six>","iconic":false,"lat":0.0,"lng":0.0,"country":"<country>"}]\n\n'
+      + "Categories: " + categories.join(", ") + ".\n"
+      + "Coordinates: 4 decimals, accurate within ~5km; use 0,0 only if you genuinely don't know the place. Set iconic:true only for a place a first-time visitor would be disappointed to miss.";
+  }
+
+  var api = { build: build, detectCompleteness: detectCompleteness, buildThemingPrompt: buildThemingPrompt };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   global.MaxGenPrompt = api;
 

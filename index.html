@@ -17187,6 +17187,15 @@ async function _generateActivitiesForPlaceImpl(){
   var _completenessAsked = MaxGenPrompt.detectCompleteness(
     [ctx || "", _tb.intent || "", _tb.placeContext || "", _tb.activityDesc || ""].join(" "));
 
+  // PD.404 (#80): theming-pass feature flag (default OFF). When on AND the
+  // traveler has a listed set, generation is told NOT to re-emit the list
+  // (a separate compact theming pass sorts the list into sections instead),
+  // which is what stops the model dropping places from long lists. Enable
+  // with localStorage.setItem("max-theming-pass","1") to A/B test live.
+  var _themingPassOn = false;
+  try { _themingPassOn = (typeof localStorage !== "undefined" && localStorage.getItem("max-theming-pass") === "1"); } catch(_){}
+  var _hasUserList = Array.isArray(_tb._pastedListPlaces) && _tb._pastedListPlaces.length > 0;
+
   var prompt = MaxGenPrompt.build({
     place: place,
     ctx: ctx,
@@ -17195,7 +17204,8 @@ async function _generateActivitiesForPlaceImpl(){
     completeness: _completenessAsked,
     userList: _tb._pastedListPlaces || [],
     pmChips: pmChips,
-    personalContext: (typeof _briefPersonalContext === "function") ? _briefPersonalContext() : ""
+    personalContext: (typeof _briefPersonalContext === "function") ? _briefPersonalContext() : "",
+    listHandledSeparately: _themingPassOn && _hasUserList
   });
 
   try {
@@ -17548,6 +17558,39 @@ async function _generateActivitiesForPlaceImpl(){
     // Skip synthetic-* — handled by their own dedicated builders.
     // PD.403: same-named section merge extracted to gen-postprocess.js.
     items = MaxGenPost.mergeDuplicateSections(items, { normPlaceName: _normPlaceName });
+    // PD.404 (#80): THEMING PASS (flag-gated; default off). Generation was
+    // told NOT to re-emit the listed set (listHandledSeparately) — so a
+    // separate compact call sorts each listed place into one of the sections
+    // generation just produced, and we move the constructed catch-all stubs
+    // into those sections. Construction + the backstop remain the safety
+    // nets: a failed or partial theming pass can never drop a place; at
+    // worst a place stays in the catch-all where it already was.
+    if (_themingPassOn && _hasUserList) {
+      try {
+        var _themeSections = [];
+        items.forEach(function(it){
+          if (it && it.section && _themeSections.indexOf(it.section) < 0) _themeSections.push(it.section);
+        });
+        var _themeNames = _tb._pastedListPlaces.map(function(d){ return d && d.place; }).filter(Boolean);
+        var _themePrompt = MaxGenPrompt.buildThemingPrompt({
+          place: place, ctx: ctx, userList: _themeNames, sections: _themeSections
+        });
+        var _themeText = await callMax([{role:"user", content:_themePrompt}], 2000, 60000);
+        var _themeClean = _themeText.replace(/```json|```/g, "").trim();
+        var _themeMap = [];
+        try { _themeMap = JSON.parse(_themeClean); } catch(_){ _themeMap = []; }
+        if (Array.isArray(_themeMap) && _themeMap.length) {
+          var _themedCount = MaxGenPost.applyTheming(_tb.placeActivities, _themeMap, {
+            normPlaceName: (typeof _normPlaceName === "function") ? _normPlaceName : null,
+            movableSections: ["From your list", "More places to consider"]
+          });
+          console.log("[Max PD.404] theming pass sorted " + _themedCount + " of " +
+            _themeNames.length + " listed place(s) into themed sections");
+        } else {
+          console.warn("[Max PD.404] theming pass returned no usable mapping — places stay in the catch-all (safety net intact)");
+        }
+      } catch(e) { console.warn("[Max PD.404] theming pass failed (non-fatal):", e && e.message); }
+    }
     // PD.337: CONSTRUCT-THEN-DECORATE merge. If the user's listed
     // places were constructed into _tb.placeActivities before this
     // LLM call, the LLM output MERGES AROUND them — it never replaces

@@ -125,6 +125,40 @@ test("block ORDER: brief → budget → completeness → user-list → chips", f
     "prompt blocks are out of order");
 });
 
+// ── PD.404 (#80): list-handled-separately + theming prompt ─────────
+test("default keeps the HARD re-emit-every-place list block", function () {
+  var p = GP.build(FULL);
+  assert.ok(p.indexOf("EVERY place on this list MUST appear in your output as a requiredPlace") !== -1);
+  assert.ok(p.indexOf("already captured, do NOT re-list") === -1);
+});
+test("listHandledSeparately softens the block (no re-emit demand)", function () {
+  var opts = Object.assign({}, FULL, { listHandledSeparately: true });
+  var p = GP.build(opts);
+  assert.ok(p.indexOf("already captured, do NOT re-list") !== -1);
+  assert.ok(p.indexOf("suggest COMPLEMENTARY activities") !== -1);
+  assert.ok(p.indexOf("EVERY place on this list MUST appear in your output as a requiredPlace") === -1);
+  // listed places are still shown so the model knows what to build around
+  assert.ok(p.indexOf("Reykjavik") !== -1 && p.indexOf("Vík") !== -1);
+});
+test("buildThemingPrompt is a one-entry-per-place SORTING task", function () {
+  var t = GP.buildThemingPrompt({
+    place: "Iceland", ctx: "ring road",
+    userList: ["Gullfoss", "Vík", "Akureyri"],
+    sections: ["Visit natural wonders", "Travel on trains"]
+  });
+  assert.ok(t.indexOf("SORTING task") !== -1);
+  assert.ok(t.indexOf("EXACTLY one entry per listed place") !== -1);
+  ["Gullfoss", "Vík", "Akureyri"].forEach(function (pl) {
+    assert.ok(t.indexOf("  - " + pl) !== -1, "missing listed place " + pl);
+  });
+  assert.ok(t.indexOf("  - Visit natural wonders") !== -1);
+  assert.ok(t.indexOf("outdoors-active, scenery-nature, culture-history") !== -1);
+});
+test("buildThemingPrompt tolerates no sections yet", function () {
+  var t = GP.buildThemingPrompt({ place: "Iceland", userList: ["Gullfoss"], sections: [] });
+  assert.ok(t.indexOf("(no sections yet)") !== -1);
+});
+
 // ── byte-for-byte snapshot guard ───────────────────────────────────
 // Locks the EXACT assembled prompt for both the full and minimal paths.
 // To intentionally change the prompt: UPDATE_SNAPSHOT=1 node tests/gen-prompt-tests.js
