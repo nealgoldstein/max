@@ -725,6 +725,41 @@ check("GC 2: cleanup is non-destructive for signed-in users",
 check("GC 3: empty-shell reaping has an age floor",
   gc !== null && gc.indexOf("EMPTY_SHELL_MIN_AGE_MS") !== -1);
 
+// ── PD.401W: persistence/sync invariants — the guards that keep a
+//    curated list from being silently replaced by an older copy. These
+//    are the structural rules behind "my list vanished"; locking them in
+//    source means a future edit that removes one fails the deploy gate.
+var syncSrc = fs.readFileSync(path.join(ROOT, "sync.js"), "utf8");
+
+check("Sync 1: a server body is pulled ONLY when the server is strictly ahead (rev-gated)",
+  // shouldPull must require s.rev > our recorded rev (or no local body),
+  // never an unconditional or clock-only pull that could overwrite newer
+  // local curation with an older server copy.
+  /shouldPull\s*=\s*!hasLocalBody\s*\|\|\s*s\.rev\s*>\s*_getRev\(/.test(syncSrc),
+  "the rev-gated pull guard is gone — sync could overwrite newer local curation");
+
+check("Sync 2: a real conflict DEFAULTS to keeping this device's version ('mine')",
+  // Without an explicit user chooser, the conflict path must force-keep
+  // local ('mine'); only an explicit chooser may adopt 'theirs'. A default
+  // of 'theirs' would silently drop local curation on any rev mismatch.
+  /var\s+_choice\s*=\s*'mine'/.test(syncSrc)
+    && syncSrc.indexOf("_choice === 'theirs'") !== -1
+    && syncSrc.indexOf("force: true") !== -1,
+  "the conflict default no longer keeps the local version");
+
+check("Sync 3: adopting 'theirs' is gated on a real fetched server body",
+  // The take-theirs branch only overwrites local after it actually has the
+  // server body (_srvTrip.body), else it keeps yours — so a failed fetch
+  // can't blank the trip.
+  /_choice === 'theirs'[\s\S]{0,600}_srvTrip && _srvTrip\.body/.test(syncSrc),
+  "take-theirs can overwrite local without a confirmed server body");
+
+check("Persist 1: the one write door tripwires a large place-set drop",
+  // setPlaceActivities logs loudly if a substantial set is replaced by a
+  // near-empty one — the diagnostic net for the elusive curated-list drop.
+  tripstoreSrc.indexOf("LARGE place-set drop") !== -1,
+  "the place-set-drop tripwire was removed from setPlaceActivities");
+
 // ───────────────────────────────────────────────────────────────────
 console.log("\n" + "─".repeat(50));
 console.log("PASS: " + pass + "    FAIL: " + fail);
