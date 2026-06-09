@@ -17585,9 +17585,15 @@ async function _generateActivitiesForPlaceImpl(){
           + " entr(ies) for " + _themeNames.length + " listed place(s); budget " + _themeBudget
           + "; sections offered: " + _themeSections.length);
         if (Array.isArray(_themeMap) && _themeMap.length) {
+          // The catch-all section names are owned by SectionKind — use its
+          // canonical list so this can't drift (the user-listed sights land
+          // in "Sights near places you listed", not just "From your list").
+          var _movable = (window.SectionKind && typeof SectionKind.catchallPrecedence === "function")
+            ? SectionKind.catchallPrecedence()
+            : ["From your list", "Sights near places you listed", "More places to consider"];
           var _themedCount = MaxGenPost.applyTheming(_tb.placeActivities, _themeMap, {
             normPlaceName: (typeof _normPlaceName === "function") ? _normPlaceName : null,
-            movableSections: ["From your list", "More places to consider"]
+            movableSections: _movable
           });
           console.log("[Max PD.404] theming pass sorted " + _themedCount + " of " +
             _themeNames.length + " listed place(s) into themed sections");
