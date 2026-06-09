@@ -183,6 +183,36 @@ test("applyTheming does not overwrite coords a stub already has", function () {
   assert.strictEqual(items[0].requiredPlaces[0].lat, 64.0); // unchanged
 });
 
+// ── PD.404 (#80): coerceThemingMap (robust LLM-response parsing) ───
+test("coerceThemingMap parses a clean array", function () {
+  var a = M.coerceThemingMap('[{"place":"Gullfoss","section":"S"}]');
+  assert.strictEqual(a.length, 1);
+  assert.strictEqual(a[0].place, "Gullfoss");
+});
+test("coerceThemingMap strips ```json fences", function () {
+  var a = M.coerceThemingMap('```json\n[{"place":"Vik","section":"S"}]\n```');
+  assert.strictEqual(a.length, 1);
+});
+test("coerceThemingMap strips surrounding prose", function () {
+  var a = M.coerceThemingMap('Sure! Here you go:\n[{"place":"Vik","section":"S"}]\nLet me know!');
+  assert.strictEqual(a.length, 1);
+});
+test("coerceThemingMap unwraps an object that nests the array", function () {
+  var a = M.coerceThemingMap('{"places":[{"place":"Vik","section":"S"}]}');
+  assert.strictEqual(a.length, 1);
+});
+test("coerceThemingMap recovers a truncated array", function () {
+  var a = M.coerceThemingMap('[{"place":"A","section":"S"},{"place":"B","section":"S"},{"place":"C","sec');
+  assert.strictEqual(a.length, 2); // keeps the two complete objects
+  assert.strictEqual(a[1].place, "B");
+});
+test("coerceThemingMap returns [] for junk / empty", function () {
+  assert.deepStrictEqual(M.coerceThemingMap("not json at all"), []);
+  assert.deepStrictEqual(M.coerceThemingMap("[]"), []);
+  assert.deepStrictEqual(M.coerceThemingMap(""), []);
+  assert.deepStrictEqual(M.coerceThemingMap(null), []);
+});
+
 // ── full-pipeline snapshot ─────────────────────────────────────────
 var SNAP = path.join(__dirname, "fixtures", "gen-postprocess.snapshot.json");
 test("full pipeline (transit → merge → decorate → concat) matches snapshot", function () {

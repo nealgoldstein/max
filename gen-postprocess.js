@@ -220,12 +220,44 @@
     return themed;
   }
 
+  // PD.404 (#80): robustly coerce the theming pass's raw LLM text into an
+  // array of assignment objects. The model sometimes wraps the array in
+  // prose, fences it, nests it under a key, or (on long lists) truncates it
+  // mid-array. Recover from all of those rather than silently returning [].
+  // Pure; returns [] only when nothing array-shaped can be salvaged.
+  function coerceThemingMap(text){
+    if (!text || typeof text !== "string") return [];
+    var s = text.replace(/```json|```/g, "").trim();
+    function tryParse(str){ try { return JSON.parse(str); } catch (_) { return undefined; } }
+    // 1. Clean parse.
+    var v = tryParse(s);
+    if (Array.isArray(v)) return v;
+    // 2. Object that wraps the array under some key.
+    if (v && typeof v === "object") {
+      for (var k in v) { if (Array.isArray(v[k])) return v[k]; }
+    }
+    // 3. Slice to the outermost [ ... ] (strips leading/trailing prose).
+    var i = s.indexOf("["), j = s.lastIndexOf("]");
+    if (i !== -1 && j > i) {
+      v = tryParse(s.slice(i, j + 1));
+      if (Array.isArray(v)) return v;
+    }
+    // 4. Truncation recovery: chop at the last complete object and close.
+    var cut = s.lastIndexOf("},");
+    if (i !== -1 && cut > i) {
+      v = tryParse(s.slice(i, cut + 1) + "]");
+      if (Array.isArray(v)) return v;
+    }
+    return [];
+  }
+
   var api = {
     normalizePlaceArr: normalizePlaceArr,
     computeTransitOnly: computeTransitOnly,
     mergeDuplicateSections: mergeDuplicateSections,
     decorateConstructedWithCoords: decorateConstructedWithCoords,
-    applyTheming: applyTheming
+    applyTheming: applyTheming,
+    coerceThemingMap: coerceThemingMap
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   global.MaxGenPost = api;
