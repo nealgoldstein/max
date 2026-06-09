@@ -21,6 +21,19 @@ module.exports = defineConfig({
   fullyParallel: false,
   workers: 1,
 
+  // v360.x: per-test timeout raised from Playwright's 30s default. The
+  // build-harness tests drive the FULL paste→build→publish→return
+  // pipeline (many canned-LLM round-trips + renders); on a loaded
+  // machine that legitimately runs past 30s and tripped a flaky timeout
+  // during the full-suite deploy gate — even though each test passes
+  // comfortably in isolation. 60s gives real headroom without slowing
+  // the happy path (tests finish as soon as they're done).
+  timeout: 60000,
+  // One retry so a single load-induced flake re-runs instead of aborting
+  // the whole deploy. trace:'on-first-retry' (below) captures the retry
+  // for debugging; a test that fails on BOTH attempts is a real failure.
+  retries: 1,
+
   // Headless by default for CI; set HEADED=1 in env to see what's
   // happening.
   use: {

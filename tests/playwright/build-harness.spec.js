@@ -132,7 +132,7 @@ async function runPipeline(page) {
   // Build settles: the orchestrator's own done/error event — the
   // paste flow starts MaxBuild on a setTimeout, so "not building yet"
   // and "finished" are indistinguishable by polling isBuilding().
-  await page.waitForFunction(() => window._buildDone === true, { timeout: 30000 });
+  await page.waitForFunction(() => window._buildDone === true, { timeout: 55000 });
   await page.waitForFunction(() => window._tb
     && Array.isArray(window._tb.placeActivities)
     && window._tb.placeActivities.length > 0, { timeout: 5000 });
@@ -460,7 +460,7 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
     await page.waitForFunction(() => {
       const t = window.TripStore && window.TripStore.isLoaded() && window.TripStore.trip;
       return t && Array.isArray(t.destinations) && t.destinations.length > 0;
-    }, { timeout: 30000 });
+    }, { timeout: 55000 });
 
     // Destinations: the 3 user stays must all be destinations.
     const dests = await page.evaluate(() =>
@@ -525,7 +525,7 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
     await page.waitForFunction(() => {
       const t = window.TripStore && window.TripStore.isLoaded() && window.TripStore.trip;
       return t && Array.isArray(t.destinations) && t.destinations.length > 0;
-    }, { timeout: 30000 });
+    }, { timeout: 55000 });
 
     // Every curated place must be present in the published trip — either as
     // a placeActivities entry (sight/route) or as a destination (a stay).
@@ -826,7 +826,7 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
         { destinations: userList, tripName: 'Empty-Retry Iceland', region: 'Iceland' },
         userList.map(p => p.place).join('\n'), {});
     }, { userList: USER_LIST, canned: CANNED_ITEMS });
-    await page.waitForFunction(() => window._buildDone === true, { timeout: 30000 });
+    await page.waitForFunction(() => window._buildDone === true, { timeout: 55000 });
     await page.waitForFunction(() => window._tb && Array.isArray(window._tb.placeActivities)
       && window._tb.placeActivities.length > 0, { timeout: 5000 });
     const r = await page.evaluate(() => {
