@@ -498,6 +498,54 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
       'discovery considered-preview (' + reconcile.preview + ') must equal the trip pill (' + reconcile.trip + ')')
       .toBe(reconcile.trip);
   });
+  // PD.401V: the curated set must SURVIVE publish. The live bug was a
+  // published trip holding a different/smaller generation than the user's
+  // curated Discovery list. Capture every place in Discovery, publish via
+  // the real engine path, and assert the trip's placeActivities still
+  // contains every one of them — no silent drop in Discovery→trip.
+  test('PD.401V: every curated place survives publish into the trip', async ({ page }) => {
+    page.on('dialog', (d) => d.accept());
+    await bootClean(page);
+    await runPipeline(page);
+
+    const before = await page.evaluate(() => {
+      const keys = {};
+      (window._tb.placeActivities || []).forEach((it) => {
+        if (!it || it.type === 'route' || (it.type && /^synthetic-/.test(it.type))) return;
+        (it.requiredPlaces || []).forEach((p) => {
+          if (p && p.place) keys[window._pmKey(p.place)] = p.place;
+        });
+      });
+      return keys;
+    });
+    const beforeKeys = Object.keys(before);
+    expect(beforeKeys.length, 'Discovery has a non-trivial curated set').toBeGreaterThan(4);
+
+    await page.evaluate(() => window.MaxEnginePicker.publishTrip());
+    await page.waitForFunction(() => {
+      const t = window.TripStore && window.TripStore.isLoaded() && window.TripStore.trip;
+      return t && Array.isArray(t.destinations) && t.destinations.length > 0;
+    }, { timeout: 30000 });
+
+    // Every curated place must be present in the published trip — either as
+    // a placeActivities entry (sight/route) or as a destination (a stay).
+    const missing = await page.evaluate((keys) => {
+      const t = window.TripStore.trip;
+      const present = {};
+      (t.placeActivities || []).forEach((it) => {
+        (it.requiredPlaces || []).forEach((p) => {
+          if (p && p.place) present[window._pmKey(p.place)] = true;
+        });
+      });
+      (t.destinations || []).forEach((d) => {
+        if (d && d.place) present[window._pmKey(d.place)] = true;
+      });
+      return keys.filter((k) => !present[k]);
+    }, beforeKeys);
+
+    expect(missing, 'no curated place may be dropped on publish: ' + JSON.stringify(missing)).toEqual([]);
+  });
+
   test('PD.396: checking a catchall sight moves it out of "to consider"', async ({ page }) => {
     await bootClean(page);
     await runPipeline(page);

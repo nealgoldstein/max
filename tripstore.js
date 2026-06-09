@@ -643,6 +643,29 @@
       }
       if (_same) return _trip;
     }
+    // PD.401V: TRIPWIRE for the elusive "my curated list vanished" drop.
+    // The local publish path is proven sound (harness PD.401V) and sync is
+    // guarded both ways, so a curated-set drop is non-reproducible — which
+    // is exactly why it needs to be caught in the act. This is LOG-ONLY (it
+    // changes nothing): if a substantial place set is ever replaced by a
+    // near-empty one through the ONE write door, it fires a loud,
+    // stack-bearing warning naming the moment, so the regression is
+    // diagnosable from one console line instead of reconstructed later.
+    // Counts PLACES (requiredPlaces), since a rebuild can legitimately
+    // reshape SECTIONS without losing places.
+    try {
+      var _paCount = function (arr) {
+        var n = 0;
+        (arr || []).forEach(function (it) { n += (it && it.requiredPlaces ? it.requiredPlaces.length : 0); });
+        return n;
+      };
+      var _wasN = _paCount(_cur), _nowN = _paCount(items);
+      if (_wasN >= 10 && _nowN < _wasN * 0.4) {
+        console.warn("[TripStore PD.401V] LARGE place-set drop: " + _wasN + " → " + _nowN
+          + " places through setPlaceActivities. If this was NOT an intentional clear/rebuild, the curated list is being lost at THIS write.",
+          (new Error("place-set drop stack")).stack);
+      }
+    } catch (_) {}
     return _mutate("setPlaceActivities", function (t) {
       t.placeActivities = items;
     }, { count: items.length });
