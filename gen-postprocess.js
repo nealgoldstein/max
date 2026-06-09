@@ -206,37 +206,36 @@
       if (!e || !e.place) return;
       _keysFor(e.place).forEach(function(k){ if (!byPlace[k]) byPlace[k] = e; });
     });
+    // PD.404: a catch-all section is ONE item grouping many places, so the
+    // theme can't live on the item (its places belong in DIFFERENT themes).
+    // Stamp the theme on each PLACE (_themeFit); the DiscoveryModel reads it
+    // per-place and splits the group, placing each place in its own theme.
+    // Returns the count of PLACES re-themed (not items).
     var themed = 0;
     (items || []).forEach(function(it){
       if (!it || !movable[it.section]) return;
-      if (!Array.isArray(it.requiredPlaces) || !it.requiredPlaces.length) return;
-      // Find the first requiredPlace this map has an assignment for.
-      var entry = null, matchP = null;
-      for (var i = 0; i < it.requiredPlaces.length; i++) {
-        var p = it.requiredPlaces[i];
-        if (!p || !p.place) continue;
+      if (!Array.isArray(it.requiredPlaces)) return;
+      it.requiredPlaces.forEach(function(p){
+        if (!p || !p.place) return;
         var ks = _keysFor(p.place);
-        for (var j = 0; j < ks.length; j++) {
-          if (byPlace[ks[j]]) { entry = byPlace[ks[j]]; matchP = p; break; }
+        var entry = null;
+        for (var j = 0; j < ks.length; j++) { if (byPlace[ks[j]]) { entry = byPlace[ks[j]]; break; } }
+        if (!entry) return;
+        var newSec = (typeof entry.section === "string") ? entry.section.trim() : "";
+        if (!newSec) return;          // no usable theme → leave the place where it is
+        if (movable[newSec]) return;  // never re-theme a place INTO another catch-all
+        p._themeFit = newSec;
+        if (entry.category && typeof entry.category === "string" && entry.category.trim()) p._themeCategory = entry.category.trim();
+        if (entry.iconic === true) p._iconic = true;
+        // Fill coords if the place lacked them and we got real ones.
+        var lat = parseFloat(entry.lat), lng = parseFloat(entry.lng);
+        if (isFinite(lat) && isFinite(lng) && !(lat === 0 && lng === 0)
+            && (typeof p.lat !== "number" || !isFinite(p.lat) || p.lat === 0)) {
+          p.lat = lat; p.lng = lng;
+          if (!p.country && entry.country) p.country = entry.country;
         }
-        if (entry) break;
-      }
-      if (!entry) return;
-      var newSec = (typeof entry.section === "string") ? entry.section.trim() : "";
-      if (!newSec) return; // no usable section → leave it in the catch-all
-      it.section = newSec;
-      if (entry.category && typeof entry.category === "string" && entry.category.trim()) {
-        it.category = entry.category.trim();
-      }
-      if (entry.iconic === true) it.iconic = true;
-      // Fill coords on the matched place if it lacked them and we got real ones.
-      var lat = parseFloat(entry.lat), lng = parseFloat(entry.lng);
-      if (isFinite(lat) && isFinite(lng) && !(lat === 0 && lng === 0)
-          && (typeof matchP.lat !== "number" || !isFinite(matchP.lat) || matchP.lat === 0)) {
-        matchP.lat = lat; matchP.lng = lng;
-        if (!matchP.country && entry.country) matchP.country = entry.country;
-      }
-      themed++;
+        themed++;
+      });
     });
     return themed;
   }

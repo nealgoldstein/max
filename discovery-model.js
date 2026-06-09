@@ -347,6 +347,13 @@
         if (isDestination(p)) return;                    // a destination is not a considered sight
         var decision = (p._rejected === true) ? "rejected"
           : (p._keep === false ? "unchecked" : "checked");
+        // PD.404: a PER-PLACE themeFit overrides the item's section-derived
+        // one. A catch-all item (e.g. "Sights you're keeping") groups many
+        // places under one section, so the only way to sort individual
+        // places into DIFFERENT themes is to carry the assignment on the
+        // place itself. The theming pass stamps p._themeFit; the model then
+        // splits the group by placing each place in its own theme.
+        var placeTheme = (p._themeFit && String(p._themeFit)) || themeFit;
         m.upsert({
           place: p.place,
           _key: p._key,                                  // PD.401k: identity from the write door
@@ -354,7 +361,7 @@
           origin: originOf(p),
           role: "sight",
           decision: decision,
-          themeFit: themeFit,
+          themeFit: placeTheme,
           nearListed: nearListed,
           src: p
         });

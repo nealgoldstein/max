@@ -230,6 +230,25 @@ test("PD.404: catchallSections / isCatchallSection expose the themeFit-null set"
   assert.strictEqual(M.isCatchallSection(Policy.sectionFor(m.all()[0])), true);
 });
 
+test("PD.404: a per-place _themeFit splits one grouped catch-all item across themes", function () {
+  // One "Sights you're keeping" item with three places, each carrying its own
+  // _themeFit (stamped by the theming pass). The model must place each in its
+  // own theme — not leave them grouped.
+  var m = M.DiscoveryModel.fromPlaceActivities([
+    { section: "Sights you're keeping", type: "activity", requiredPlaces: [
+      { place: "Gullfoss", _keep: true, _themeFit: "Visit natural wonders" },
+      { place: "Reynisfjara Beach", _keep: true, _themeFit: "Walk the coast" },
+      { place: "Harpa Concert Hall", _keep: true, _themeFit: "Explore the capital" }
+    ] }
+  ], {});
+  var secs = {};
+  m.sections().forEach(function (g) { secs[g.section] = g.places.map(function (p) { return p.place; }); });
+  assert.deepStrictEqual(secs["Visit natural wonders"], ["Gullfoss"]);
+  assert.deepStrictEqual(secs["Walk the coast"], ["Reynisfjara Beach"]);
+  assert.deepStrictEqual(secs["Explore the capital"], ["Harpa Concert Hall"]);
+  assert.ok(!secs["Sights you're keeping"], "nothing should remain in the catch-all");
+});
+
 console.log("\n" + "─".repeat(50));
 console.log("PASS: " + pass + "    FAIL: " + fail);
 if (fail > 0) process.exit(1);

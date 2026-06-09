@@ -147,74 +147,94 @@ function themingItems() {
   ];
 }
 var MOVABLE = ["From your list", "More places to consider"];
-test("applyTheming moves a matched stub into its themed section + fills coords/iconic", function () {
+// PD.404: applyTheming stamps a per-PLACE _themeFit (the DiscoveryModel then
+// splits the grouped catch-all item by placing each place in its own theme).
+// It does NOT change the item's section.
+test("applyTheming stamps _themeFit on a matched place + fills coords/iconic", function () {
   var items = themingItems();
   var map = [{ place: "Gullfoss", section: "Visit natural wonders", category: "scenery-nature", iconic: true, lat: 64.3, lng: -20.1, country: "Iceland" }];
   var n = M.applyTheming(items, map, { normPlaceName: nrm, movableSections: MOVABLE });
   assert.strictEqual(n, 1);
-  assert.strictEqual(items[0].section, "Visit natural wonders");
-  assert.strictEqual(items[0].iconic, true);
-  assert.strictEqual(items[0].requiredPlaces[0].lat, 64.3);
-  assert.strictEqual(items[0].requiredPlaces[0].country, "Iceland");
+  var p = items[0].requiredPlaces[0];
+  assert.strictEqual(p._themeFit, "Visit natural wonders");
+  assert.strictEqual(p._iconic, true);
+  assert.strictEqual(p.lat, 64.3);
+  assert.strictEqual(p.country, "Iceland");
+});
+test("applyTheming SPLITS one grouped item: each place gets its own _themeFit (the live sorted:1 bug)", function () {
+  // One catch-all item with three places that belong in three different
+  // themes — the exact shape of the live "Sights you're keeping" item.
+  var items = [{ section: "Sights you're keeping", _userConstructed: true, requiredPlaces: [
+    { place: "Gullfoss" }, { place: "Reynisfjara Beach" }, { place: "Harpa Concert Hall" }
+  ] }];
+  var map = [
+    { place: "Gullfoss, Iceland", section: "Visit natural wonders" },
+    { place: "Reynisfjara Beach, Iceland", section: "Walk the coast" },
+    { place: "Harpa Concert Hall, Iceland", section: "Explore the capital" }
+  ];
+  var n = M.applyTheming(items, map, { normPlaceName: nrm, movableSections: ["Sights you're keeping"] });
+  assert.strictEqual(n, 3); // all three placed — not 1
+  assert.strictEqual(items[0].requiredPlaces[0]._themeFit, "Visit natural wonders");
+  assert.strictEqual(items[0].requiredPlaces[1]._themeFit, "Walk the coast");
+  assert.strictEqual(items[0].requiredPlaces[2]._themeFit, "Explore the capital");
 });
 test("applyTheming never disturbs stays sections or non-movable items", function () {
   var items = themingItems();
   var map = [
-    { place: "Reykjavik", section: "Explore the city", category: "culture-history" }, // in a stays section → ignore
-    { place: "Dettifoss", section: "Somewhere else" }                                 // LLM item, not movable → ignore
+    { place: "Reykjavik", section: "Explore the city" },   // in a stays section → ignore
+    { place: "Dettifoss", section: "Somewhere else" }       // LLM item, not movable → ignore
   ];
   var n = M.applyTheming(items, map, { normPlaceName: nrm, movableSections: MOVABLE });
   assert.strictEqual(n, 0);
-  assert.strictEqual(items[2].section, "Overnight stays");
-  assert.strictEqual(items[3].section, "Visit natural wonders");
+  assert.strictEqual(items[2].requiredPlaces[0]._themeFit, undefined);
+  assert.strictEqual(items[3].requiredPlaces[0]._themeFit, undefined);
 });
-test("applyTheming leaves a place in the catch-all when the entry has no section", function () {
+test("applyTheming leaves a place untouched when the entry has no section", function () {
   var items = themingItems();
-  var map = [{ place: "Gullfoss", section: "   ", category: "scenery-nature" }];
+  var map = [{ place: "Gullfoss", section: "   " }];
   var n = M.applyTheming(items, map, { normPlaceName: nrm, movableSections: MOVABLE });
   assert.strictEqual(n, 0);
-  assert.strictEqual(items[0].section, "From your list");
+  assert.strictEqual(items[0].requiredPlaces[0]._themeFit, undefined);
+});
+test("applyTheming never re-themes a place INTO another catch-all", function () {
+  var items = themingItems();
+  var map = [{ place: "Gullfoss", section: "More places to consider" }]; // a movable/catch-all target
+  var n = M.applyTheming(items, map, { normPlaceName: nrm, movableSections: ["From your list", "More places to consider"] });
+  assert.strictEqual(n, 0);
+  assert.strictEqual(items[0].requiredPlaces[0]._themeFit, undefined);
 });
 test("applyTheming matches across a trailing country suffix (PD.404 live bug)", function () {
-  // The theming model appends ", Iceland" to names; stubs are bare. Must still match.
   var items = themingItems();
-  var map = [
-    { place: "Gullfoss, Iceland", section: "Visit natural wonders", category: "scenery-nature", lat: 64.3, lng: -20.1 }
-  ];
+  var map = [{ place: "Gullfoss, Iceland", section: "Visit natural wonders", lat: 64.3, lng: -20.1 }];
   var n = M.applyTheming(items, map, { normPlaceName: nrm, movableSections: MOVABLE });
   assert.strictEqual(n, 1);
-  assert.strictEqual(items[0].section, "Visit natural wonders");
+  assert.strictEqual(items[0].requiredPlaces[0]._themeFit, "Visit natural wonders");
 });
 test("applyTheming matches when the STUB has the suffix and the map is bare", function () {
   var items = [{ section: "From your list", _userConstructed: true, requiredPlaces: [{ place: "Gullfoss, Iceland", lat: 0, lng: 0 }] }];
   var map = [{ place: "Gullfoss", section: "Visit natural wonders" }];
   var n = M.applyTheming(items, map, { normPlaceName: nrm, movableSections: MOVABLE });
   assert.strictEqual(n, 1);
-  assert.strictEqual(items[0].section, "Visit natural wonders");
+  assert.strictEqual(items[0].requiredPlaces[0]._themeFit, "Visit natural wonders");
 });
 test("applyTheming re-themes the 'Sights you're keeping' bucket when it's movable (PD.404 root cause)", function () {
-  // The live bug: kept listed sights sit in "Sights you're keeping" (themeFit
-  // null in the model). They must be movable so the theming pass can sort
-  // them into real themes; then a model rebuild derives themeFit from the
-  // new section and the move persists.
   var items = [
-    { name: "Stop in Goðafoss", section: "Sights you're keeping", _userConstructed: true,
+    { name: "Sights you're keeping", section: "Sights you're keeping", _userConstructed: true,
       requiredPlaces: [{ place: "Goðafoss", _keep: true, lat: 0, lng: 0 }] }
   ];
-  var map = [{ place: "Goðafoss, Iceland", section: "Visit natural wonders", category: "scenery-nature", lat: 65.7, lng: -17.5 }];
+  var map = [{ place: "Goðafoss, Iceland", section: "Visit natural wonders", lat: 65.7, lng: -17.5 }];
   var n = M.applyTheming(items, map, { normPlaceName: nrm, movableSections: ["Sights you're keeping", "From your list"] });
   assert.strictEqual(n, 1);
-  assert.strictEqual(items[0].section, "Visit natural wonders");
-  // section is a real theme (not a catch-all) → a model rebuild would set themeFit and keep it.
+  assert.strictEqual(items[0].requiredPlaces[0]._themeFit, "Visit natural wonders");
 });
 test("applyTheming leaves 'Sights you're keeping' alone when it is NOT in movableSections", function () {
   var items = [{ section: "Sights you're keeping", _userConstructed: true, requiredPlaces: [{ place: "Goðafoss" }] }];
   var map = [{ place: "Goðafoss", section: "Visit natural wonders" }];
   var n = M.applyTheming(items, map, { normPlaceName: nrm, movableSections: ["From your list"] });
   assert.strictEqual(n, 0);
-  assert.strictEqual(items[0].section, "Sights you're keeping");
+  assert.strictEqual(items[0].requiredPlaces[0]._themeFit, undefined);
 });
-test("applyTheming does not overwrite coords a stub already has", function () {
+test("applyTheming does not overwrite coords a place already has", function () {
   var items = themingItems();
   items[0].requiredPlaces[0].lat = 64.0; items[0].requiredPlaces[0].lng = -20.0;
   var map = [{ place: "Gullfoss", section: "Visit natural wonders", lat: 11.1, lng: 22.2 }];
