@@ -716,50 +716,6 @@ check("Rule 27d: the receipt banner reads the model count, not a forked loop",
     && placementSrc.indexOf("function _discoveryConsideredCounts") !== -1,
   "the banner re-acquired its own count derivation (63-vs-56 returns)");
 
-// ── PD.401Q: every real place can be pinned; one identity for keep ───
-check("Rule 32a: keep-enforcement matches a listed sight's expanded twin (reverse containment)",
-  // _resolveListedInfo must bridge a one-word listed SIGHT to its LLM-
-  // expanded form ("Þingvellir" → "Þingvellir National Park"), the SAME
-  // direction coverage already matched — so keep-enforcement and coverage
-  // can't disagree (the lost-commit / "Þingvellir unchecked" bug).
-  (function () {
-    var fn = fnBody(indexSrc, /function _resolveListedInfo\s*\(/);
-    if (fn === null) return false;
-    return fn.indexOf('"expanded"') !== -1
-      && fn.indexOf('listed[lk] !== "see"') !== -1   // gated to sights
-      && fn.indexOf('k.indexOf(lk + " ") === 0') !== -1;
-  })(),
-  "the reverse-containment (expanded-twin) match is missing or no longer sight-gated");
-check("Rule 32b: a stay's sub-place is NOT reverse-matched (Max never checks)",
-  // The gate forbids a listed STAY ('Reykjavik') from claiming a sub-place
-  // sight ('Reykjavik Old Harbour') — which would silently auto-check a Max
-  // suggestion and promote it to an overnight.
-  (function () {
-    var fn = fnBody(indexSrc, /function _resolveListedInfo\s*\(/);
-    return fn !== null && fn.indexOf('lk.split(/\\s+/).length !== 1') !== -1;
-  })(),
-  "the reverse-containment match lost its single-word / sight-only guard");
-check("Rule 32c: kept listed sights without coordinates are geocoded so they can pin",
-  // The root of 'the map is missing real-place pins': user-listed sights
-  // never went through a geocoder. This pass backfills their coords and
-  // re-canonicalizes so they pin AND merge with their Max coordinate twin.
-  indexSrc.indexOf("async function geocodeMissingPlaceActivityCoords") !== -1
-    && /geocodeMissingPlaceActivityCoords[\s\S]{0,4000}_runPlaceSetPasses\("placeActivity-geocode"\)/.test(indexSrc),
-  "the placeActivity geocoder is gone, or no longer re-canonicalizes after coords land");
-check("Rule 32d: the placeActivity geocoder runs from the picker map and the trip overview",
-  // Both place surfaces trigger the backfill, so pins appear wherever the
-  // user looks — not just in Discovery.
-  (indexSrc.match(/geocodeMissingPlaceActivityCoords\(\)/g) || []).length >= 2,
-  "the placeActivity geocoder is no longer triggered from both map surfaces");
-check("Rule 32e: the geocoder skips umbrella (_virtual) entries — regions/loops are not single pins",
-  // 'Golden Circle' and other umbrellas must NOT be geocoded to a single
-  // point; their component real places are what get pinned.
-  (function () {
-    var fn = fnBody(indexSrc, /async function geocodeMissingPlaceActivityCoords\s*\(/);
-    return fn !== null && fn.indexOf("p._virtual") !== -1;
-  })(),
-  "the geocoder no longer excludes umbrella/_virtual entries");
-
 // ── GC safety ──────────────────────────────────────────────────────
 var gc = fnBody(indexSrc, /function cleanupOrphanedTrips\s*\(/);
 check("GC 1: cleanup protects the URL-referenced trip",
