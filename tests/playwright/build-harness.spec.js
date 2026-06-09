@@ -740,4 +740,55 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
     expect(r.hasMarker, 'the sight pins via the raw-key fallback').toBe(true);
   });
 
+  // PD.401U: a valid-but-EMPTY generation ([] from the LLM) is the silent
+  // failure that left the user's sights un-themed in "Sights you're keeping"
+  // with no error. The build must RETRY on empty; a fresh non-empty result
+  // then themes the sights normally.
+  test('PD.401U: an empty generation retries, and the fresh result themes the sights', async ({ page }) => {
+    await bootClean(page);
+    await page.evaluate(({ userList, canned }) => {
+      window.MaxEnginePicker.resetState({
+        tripMode: 'place', placeName: 'Iceland', region: 'Iceland',
+        candidates: [], chips: [], activityChips: [], requiredPlaces: [],
+        interests: ['waterfalls'], drivers: [], avoid: {},
+      });
+      window._buildDone = false;
+      window.__genCalls = 0;
+      if (window.MaxBuild && window.MaxBuild.on) {
+        window.MaxBuild.on('build:done', () => { window._buildDone = true; });
+        window.MaxBuild.on('build:error', () => { window._buildDone = true; });
+      }
+      window.callMax = async function (messages) {
+        const prompt = (messages && messages[0] && messages[0].content) || '';
+        if (prompt.indexOf('Classify each entry on this travel wish-list') !== -1) {
+          return JSON.stringify(userList.map((u, i) => ({
+            i: i + 1, classification: u.isStay ? 'city' : 'poi',
+            parentCity: u.isStay ? null : 'Reykjavik',
+            parentRelation: u.isStay ? null : (u.place === 'Harpa Concert Hall' ? 'within' : 'from'),
+          })));
+        }
+        if (prompt.indexOf('OVERNIGHT FLAG') !== -1) {
+          window.__genCalls++;
+          return window.__genCalls === 1 ? '[]' : JSON.stringify(canned);  // empty first, real on retry
+        }
+        if (prompt.indexOf('A traveler is planning a trip') !== -1) return '[]';
+        throw new Error('harness: no canned response');
+      };
+      return window._buildPickerFromPastedList(
+        { destinations: userList, tripName: 'Empty-Retry Iceland', region: 'Iceland' },
+        userList.map(p => p.place).join('\n'), {});
+    }, { userList: USER_LIST, canned: CANNED_ITEMS });
+    await page.waitForFunction(() => window._buildDone === true, { timeout: 30000 });
+    await page.waitForFunction(() => window._tb && Array.isArray(window._tb.placeActivities)
+      && window._tb.placeActivities.length > 0, { timeout: 5000 });
+    const r = await page.evaluate(() => {
+      const secs = (window._tb.placeActivities || []).map(it => it.section);
+      return { genCalls: window.__genCalls, themingFailed: !!window._tb._themingFailed,
+               hasThemed: secs.indexOf('Chase waterfalls') !== -1 };
+    });
+    expect(r.genCalls, 'the empty [] triggered a retry — two generation calls').toBe(2);
+    expect(r.themingFailed, 'the retry recovered, so theming did NOT fail').toBe(false);
+    expect(r.hasThemed, 'the retried result produced a themed section').toBe(true);
+  });
+
 });

@@ -17341,6 +17341,30 @@ async function _generateActivitiesForPlaceImpl(){
       var cleaned = text.replace(/```json|```/g, "").trim();
       try {
         items = JSON.parse(cleaned);
+        // PD.401U: VALID-BUT-EMPTY is a SILENT failure mode. The LLM
+        // returns `[]`, JSON.parse SUCCEEDS, the loop breaks, and the whole
+        // build proceeds with ZERO themed categories — the user's sights
+        // fall through to the bare "Sights you're keeping" catch-all with
+        // no error, no retry, no p2Failed. (This is exactly the "the
+        // categories usually generated were not generated" report.) An
+        // empty result is almost always a transient model hiccup, so retry
+        // with a fresh call; only if it STAYS empty do we proceed — and
+        // then loudly, with a flag + a visible nudge, never silently.
+        if (Array.isArray(items) && items.length === 0) {
+          _attempt++;
+          if (_attempt < _budgets.length) {
+            console.warn("[Max PD.401U] activity generation returned EMPTY, retrying (attempt " + _attempt + ")");
+            continue;
+          }
+          _tb._themingFailed = true;
+          console.error("[Max PD.401U] activity generation EMPTY after " + _attempt + " attempt(s) — proceeding with the constructed list; sights remain un-themed");
+          if (typeof _showEnhanceLikeToast === "function") {
+            setTimeout(function(){
+              try { _showEnhanceLikeToast("Max couldn’t sort your places into themed categories this time — they’re grouped under “Sights you’re keeping.” Rebuild or reopen Discovery to try again.", 10000); } catch(_){}
+            }, 1200);
+          }
+          break;
+        }
         break;
       } catch (err) {
         // Try the truncated-array recovery first (chop at last "},").
@@ -17361,6 +17385,20 @@ async function _generateActivitiesForPlaceImpl(){
           + ", retrying with token budget " + _budgets[_attempt]);
       }
     }
+    // PD.401U/diag: log EXACTLY what the generation produced, so a real
+    // build disambiguates the two roots of "no themed categories":
+    //   • "0 item(s)"  → the LLM genuinely returned empty → prompt/flow fix.
+    //   • "N item(s); <sections>" → themes WERE generated; if they don't
+    //     appear in the UI, something downstream flattened them → that's a
+    //     different fix (theme preservation), not the prompt.
+    try {
+      var _diagSecs = Array.isArray(items)
+        ? items.map(function(it){ return it && it.section; }).filter(Boolean)
+        : [];
+      console.log("[Max PD.401U/diag] generation produced "
+        + (Array.isArray(items) ? items.length : 0) + " item(s)"
+        + (_diagSecs.length ? "; sections: " + _diagSecs.join(" | ") : "; (no sections)"));
+    } catch(_){}
     var regionCountry = place;
     function _normPlaceArr(arr){
       if(!Array.isArray(arr)) return arr;
