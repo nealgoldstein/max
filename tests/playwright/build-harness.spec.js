@@ -706,4 +706,38 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
     expect(r.hasMarker, 'the sight pins from its own coordinates despite the cache miss').toBe(true);
   });
 
+  // PD.401S: ensureCoarseGeocode stores coords under the RAW lowercase name
+  // ("goðafoss waterfall"); the picker looks up under the canonical _pmKey
+  // ("godafoss waterfall", ð→d). For accented/qualified names those differ,
+  // so the geocoded pin never appeared. The lookup must fall back to the
+  // raw key. Repro of "quite a few sights are missing."
+  test('PD.401S: a sight cached under its raw accented key still pins (key-mismatch)', async ({ page }) => {
+    await bootClean(page);
+    await runPipeline(page);
+    const r = await page.evaluate(() => {
+      window._tb.placeActivities.push({
+        id: 's-rawkey', type: 'activity', section: "Sights you're keeping",
+        requiredPlaces: [{ place: 'Goðafoss Waterfall', _keep: true, _origin: 'user' }]  // NO coords on the place
+      });
+      const canonical = window._pmKey('Goðafoss Waterfall');         // "godafoss waterfall"
+      const rawKey = 'goðafoss waterfall';                            // what ensureCoarseGeocode writes
+      window._coarseGeocode = window._coarseGeocode || {};
+      delete window._coarseGeocode[canonical];
+      window._coarseGeocode[rawKey] = [65.6826, -17.5500];           // geocode landed under the raw key only
+      if (!document.getElementById('tb-pm-map')) {
+        const d = document.createElement('div');
+        d.id = 'tb-pm-map'; d.style.width = '400px'; d.style.height = '300px';
+        document.body.appendChild(d);
+      }
+      const canonicalMissBefore = !window._coarseGeocode[canonical];
+      if (typeof window._renderPlacePickerMap === 'function') window._renderPlacePickerMap('tb-pm-map');
+      const state = window._pmMaps && window._pmMaps['tb-pm-map'];
+      const keys = state && state.markers ? Object.keys(state.markers) : [];
+      return { canonicalMissBefore, keysDiffer: canonical !== rawKey, hasMarker: keys.indexOf(canonical) !== -1 };
+    });
+    expect(r.keysDiffer, 'the raw and canonical keys genuinely differ (ð vs d)').toBe(true);
+    expect(r.canonicalMissBefore, 'precondition: nothing under the canonical key').toBe(true);
+    expect(r.hasMarker, 'the sight pins via the raw-key fallback').toBe(true);
+  });
+
 });

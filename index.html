@@ -30245,9 +30245,23 @@ function _renderPlacePickerMap(targetId){
     // Round PD.10: rejected places skip the map render — see tear-down above.
     if (info && info._rejected) return;
     var ll = _coarseGeocode[key];
-    // PD.401R: if the cache hasn't got this place but the place itself
-    // carries coordinates, pin from those — and seed the cache so the
-    // spur/_pmCoord passes agree. This is what makes the kept sights
+    // PD.401S: ensureCoarseGeocode stores coords under the RAW lowercase
+    // name (line ~5129), but this lookup uses the canonical _pmKey. For
+    // accented / qualified names ("Goðafoss Waterfall", "Jökulsárlón
+    // canyon") the two keys differ (ð→d, country stripped), so the place
+    // geocoded forever and its pin never appeared — the "quite a few
+    // sights are missing" bug. Fall back to the raw-lowercase key, then
+    // mirror it onto the canonical key so the next render is a direct hit.
+    if (!ll || !isFinite(ll[0])) {
+      var _rawk = (info.place || "").toLowerCase().trim();
+      if (_coarseGeocode[_rawk] && isFinite(_coarseGeocode[_rawk][0])) {
+        ll = _coarseGeocode[_rawk];
+        _coarseGeocode[key] = ll;
+      }
+    }
+    // PD.401R: if the cache still hasn't got this place but the place
+    // itself carries coordinates, pin from those — and seed the cache so
+    // the spur/_pmCoord passes agree. This is what makes the kept sights
     // (Skógafoss, Fjallsárlón, Lake Mývatn geothermal region, …) appear.
     if ((!ll || !isFinite(ll[0])) && typeof info.lat === "number" && isFinite(info.lat)) {
       ll = [info.lat, info.lng];
