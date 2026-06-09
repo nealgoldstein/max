@@ -22216,6 +22216,30 @@ function _resolveListedInfo(placeName){
       return _hit(keys[i], "prefix");
     }
   }
+  // PD.401Q: REVERSE containment — the missing direction. The forward
+  // loop above matches a listed key LONGER than the place name. But the
+  // LLM routinely EXPANDS a one-word listed sight into a qualified form
+  // ("Þingvellir" → "Þingvellir National Park", "Goðafoss" →
+  // "Goðafoss Waterfall"). That left the user's own listed sight at the
+  // LLM's keep=false — the "Þingvellir reported missing / unchecked"
+  // bug. Coverage already bridges this (bidirectional PlaceKey.contains);
+  // keep-enforcement did not, so the two identities disagreed. Match
+  // when the place name STARTS WITH a listed key (listed key is a word-
+  // prefix of placeName), so keep-enforcement uses the SAME identity as
+  // coverage. GATED to listed SIGHTS ("see"): a listed STAY (a city you
+  // sleep in) must never reverse-match its own sub-places
+  // ("Reykjavik" the stay ⇏ "Reykjavik Old Harbour" the sight), which
+  // would silently auto-check a Max suggestion (a "Max never checks"
+  // violation) and even promote it to an overnight.
+  for (var rp = 0; rp < keys.length; rp++) {
+    var lk = keys[rp];
+    if (listed[lk] !== "see") continue;          // sights only — never a stay
+    if (lk.split(/\s+/).length !== 1) continue;  // the listed name is a single word
+    if (k.indexOf(lk + " ") === 0) {             // placeName = "<listed> <qualifier...>"
+      if (typeof PlaceKey !== "undefined") PlaceKey.learn(placeName, lk);
+      return _hit(lk, "expanded");
+    }
+  }
   for (var j = 0; j < keys.length; j++) {
     var tokens = keys[j].split(/\s+/);
     if (tokens.indexOf(k) >= 0) {
@@ -30072,6 +30096,10 @@ function _renderPlacePickerMap(targetId){
   // from placeActivities — guarantees their pins render blue, never
   // gray, unless the user explicitly rejected them via the popover.
   if (typeof _reconcileUserListedKeeps === "function") _reconcileUserListedKeeps();
+  // PD.401Q: backfill coordinates for any kept listed sight that has
+  // none, so it can actually be pinned. Async + idempotent (per-place
+  // tried flag); repaints the maps itself once coords land.
+  if (typeof geocodeMissingPlaceActivityCoords === "function") geocodeMissingPlaceActivityCoords();
   var state = _pmMaps[targetId];
   // (Re)init when the DOM node is fresh or we don't have a state record.
   if (!state || !state.map || !mapDiv._pmInitialized) {
@@ -37126,6 +37154,94 @@ async function geocodeMissingCoords(cands){
     _geocodeInFlight = false;
   }
 }
+
+// PD.401Q: geocode the USER'S LISTED SIGHTS that have no coordinates.
+//
+// Root cause of "the map is missing real-place pins": geocodeMissingCoords
+// runs only on _tb.candidates (Max's suggestions). The sights built from
+// the user's pasted list ("Goðafoss Waterfall", "Skaftafell glacier
+// region", "Jökulsárlón canyon" …) live in placeActivities, never pass
+// through a geocoder, and so carry NO lat/lng — a place with no
+// coordinates physically cannot be pinned. They're also the kept (green)
+// places, so the map looked empty exactly where the user's committed
+// sights should be.
+//
+// This pass backfills coordinates for every KEPT requiredPlace that lacks
+// finite coords (skipping routes, synthetic/umbrella containers, and
+// _virtual umbrella entries — those are regions/loops, not single pins,
+// the user's own "Golden Circle ⇒ real places" insight). After coords
+// land, _runPlaceSetPasses re-canonicalizes: a now-located user sight
+// whose name contains a Max twin ("Goðafoss Waterfall" ⊃ "Goðafoss")
+// merges to ONE record by the existing coordinate-aware identity — fixing
+// the duplicate AND giving it one green pin.
+var _paGeocodeInFlight = false;
+async function geocodeMissingPlaceActivityCoords(){
+  if (_paGeocodeInFlight) return;
+  if (typeof _tb === "undefined" || !_tb || !Array.isArray(_tb.placeActivities)) return;
+  function _missingCoords(p){
+    if (!p) return false;
+    if (p._virtual) return false;                       // umbrella entry — never a pin
+    if (isFinite(p.lat) && isFinite(p.lng)
+        && (p.lat !== 0 || p.lng !== 0)
+        && Math.abs(p.lat) <= 90 && Math.abs(p.lng) <= 180
+        && !(Math.abs(p.lat) < 1 && Math.abs(p.lng) < 1)) return false;
+    return true;
+  }
+  var need = [];
+  _tb.placeActivities.forEach(function(it){
+    if (!it || it.type === "route" || (it.type && /^synthetic-/.test(String(it.type)))) return;
+    (it.requiredPlaces || []).forEach(function(p){
+      if (!p || !p.place) return;
+      if (p._keep === false) return;                    // only the kept (visible) sights
+      if (p._paGeocodeTried) return;
+      if (!_missingCoords(p)) return;
+      need.push(p);
+    });
+  });
+  if (!need.length) return;
+  _paGeocodeInFlight = true;
+  var progressed = false;
+  try {
+    var region = (_tb && _tb.region) ? _tb.region : "";
+    for (var i = 0; i < need.length; i++) {
+      var p = need[i];
+      p._paGeocodeTried = true;
+      var qParts = [p.place];
+      if (p.country) qParts.push(p.country);
+      else if (region) qParts.push(region);
+      try {
+        var r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='
+          + encodeURIComponent(qParts.join(", ")), {headers:{'Accept-Language':'en'}});
+        var data = await r.json();
+        if ((!data || !data.length) && !p.country && region) {
+          r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='
+            + encodeURIComponent(p.place), {headers:{'Accept-Language':'en'}});
+          data = await r.json();
+        }
+        if (data && data.length && data[0].lat && data[0].lon) {
+          p.lat = parseFloat(data[0].lat);
+          p.lng = parseFloat(data[0].lon);
+          progressed = true;
+        }
+      } catch(e) { /* leave un-located; tried flag prevents a retry storm */ }
+      await new Promise(function(res){ setTimeout(res, 250); });
+    }
+    if (progressed) {
+      // Re-canonicalize: now-located user sights merge with their Max
+      // coordinate-bearing twins (one record, user's keep wins, coords
+      // present → one green pin), then repaint every place map.
+      if (typeof _runPlaceSetPasses === "function") _runPlaceSetPasses("placeActivity-geocode");
+      if (typeof _renderPlaceActivityItems === "function") { try { _renderPlaceActivityItems(); } catch(_){} }
+      if (typeof _refreshAllPlacePickerMaps === "function") { try { _refreshAllPlacePickerMaps(); } catch(_){} }
+      if (typeof updateMainMap === "function") { try { updateMainMap(); } catch(_){} }
+      if (typeof _persistDiscoveryState === "function") { try { _persistDiscoveryState(); } catch(_){} }
+      else if (typeof autoSave === "function") { try { autoSave(); } catch(_){} }
+    }
+  } finally {
+    _paGeocodeInFlight = false;
+  }
+}
+if (typeof globalThis !== "undefined") globalThis.geocodeMissingPlaceActivityCoords = geocodeMissingPlaceActivityCoords;
 
 // Module-level state for the inline trip-details strip. Preserves expand/
 // collapse across re-renders without forcing the user to reopen it after
@@ -46779,6 +46895,11 @@ if (typeof globalThis !== "undefined") globalThis._ensureTripRoutesCached = _ens
 
 function updateMainMap(){
   if(!_mainMap)return;
+  // PD.401Q: ensure kept listed sights have coordinates so they pin on
+  // the trip overview too (not just the picker). Async + idempotent;
+  // the per-place tried flag makes this a no-op once every kept sight
+  // has been located, so it can't loop with the re-render it triggers.
+  if (typeof geocodeMissingPlaceActivityCoords === "function") geocodeMissingPlaceActivityCoords();
   clearMainMarkers();
   // v294.15: drop the trip-route polyline + halo on every re-render. They
   // get redrawn below when in trip mode AND _routeShown is true. This
