@@ -8381,6 +8381,11 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
         reconcile: async function() {
           try { _backstopPastedListPlaces(); } catch(_) {}
           try { await _reconcileListedSightsToSections(); } catch(_) {}
+          // PD.404 (#80): LLM theming pass — sorts listed sights the
+          // deterministic reconcile left in a catch-all into real themes.
+          // Runs here (post-reconcile, pre-enhance) so the section set is
+          // final and enhance's own extras aren't disturbed. Flag-gated off.
+          try { await _runThemingPass(); } catch(_) {}
           try { _applyPastedListNights(); } catch(_) {}
         }
       }).then(function(){
@@ -8917,6 +8922,67 @@ if (typeof globalThis !== "undefined") globalThis._constructUserListedItems = _c
 // "waterfall" → "Hike to waterfalls"; lower-confidence guesses fall
 // through to the orphan catch-all so the user sees them and can move
 // them manually.
+// PD.404 (#80): the THEMING PASS. Runs in the reconcile phase, AFTER the
+// deterministic _reconcileListedSightsToSections has slotted everything it
+// can by token-match, and BEFORE enhance adds Max's own extras. It asks the
+// model to sort the traveler's listed places into the REAL theme sections
+// the build has produced (catch-alls excluded), then moves any listed sight
+// still sitting in a catch-all into its assigned theme. Flag-gated
+// (localStorage "max-theming-pass" === "1"); default OFF. Construction and
+// the backstop remain the safety nets — a failed or partial pass can never
+// drop a place; at worst a place stays in the catch-all it was already in.
+async function _runThemingPass() {
+  var on = false;
+  try { on = (typeof localStorage !== "undefined" && localStorage.getItem("max-theming-pass") === "1"); } catch(_){}
+  if (!on) return;
+  if (!_tb || !(Array.isArray(_tb._pastedListPlaces) && _tb._pastedListPlaces.length)) return;
+  var pa = Array.isArray(_tb.placeActivities) ? _tb.placeActivities : [];
+  var place = _tb.placeName || _tb.region || "";
+  var ctx = _tb.placeContext || _tb.intent || "";
+  var movable = (window.SectionKind && typeof SectionKind.catchallPrecedence === "function")
+    ? SectionKind.catchallPrecedence()
+    : ["From your list", "Sights near places you listed", "More places to consider"];
+  var movableSet = {};
+  movable.forEach(function(s){ movableSet[s] = true; });
+  // Offer the model the REAL themes (everything that isn't a catch-all or a
+  // stay bucket) — we want listed sights sorted INTO themes, never back into
+  // a catch-all.
+  var sections = [];
+  pa.forEach(function(it){
+    if (!it || !it.section) return;
+    if (movableSet[it.section]) return;
+    if (typeof window._isStaySection === "function" && window._isStaySection(it.section)) return;
+    if (sections.indexOf(it.section) < 0) sections.push(it.section);
+  });
+  var names = _tb._pastedListPlaces.map(function(d){ return d && d.place; }).filter(Boolean);
+  try {
+    var prompt = MaxGenPrompt.buildThemingPrompt({ place: place, ctx: ctx, userList: names, sections: sections });
+    var budget = Math.min(8000, Math.max(2000, names.length * 120));
+    var raw = await callMax([{ role: "user", content: prompt }], budget, 60000);
+    var map = MaxGenPost.coerceThemingMap(raw);
+    var parsed = Array.isArray(map) ? map.length : 0;
+    var sorted = 0;
+    if (parsed) {
+      sorted = MaxGenPost.applyTheming(pa, map, {
+        normPlaceName: (typeof _normPlaceName === "function") ? _normPlaceName : null,
+        movableSections: movable
+      });
+    }
+    // Lean, flag-on-only summary for live verification: JSON.stringify(window.__PD404_THEME)
+    try {
+      window.__PD404_THEME = { parsed: parsed, sorted: sorted, listLen: names.length,
+        sectionsOffered: sections.length, rawLen: (raw && raw.length) || 0,
+        rawHead: String(raw || "").slice(0, 200), at: new Date().toISOString() };
+    } catch(_){}
+    console.log("[Max PD.404] theming pass: parsed " + parsed + " mapping(s), sorted "
+      + sorted + " of " + names.length + " listed place(s) into themes ("
+      + sections.length + " sections offered)");
+  } catch(e) {
+    console.warn("[Max PD.404] theming pass failed (non-fatal):", e && e.message);
+  }
+}
+if (typeof globalThis !== "undefined") globalThis._runThemingPass = _runThemingPass;
+
 async function _reconcileListedSightsToSections() {
   if (!_tb || !Array.isArray(_tb.placeActivities)) return;
   var listedNames = (_tb._userListedNames) || {};
@@ -17558,51 +17624,10 @@ async function _generateActivitiesForPlaceImpl(){
     // Skip synthetic-* — handled by their own dedicated builders.
     // PD.403: same-named section merge extracted to gen-postprocess.js.
     items = MaxGenPost.mergeDuplicateSections(items, { normPlaceName: _normPlaceName });
-    // PD.404 (#80): THEMING PASS (flag-gated; default off). Generation was
-    // told NOT to re-emit the listed set (listHandledSeparately) — so a
-    // separate compact call sorts each listed place into one of the sections
-    // generation just produced, and we move the constructed catch-all stubs
-    // into those sections. Construction + the backstop remain the safety
-    // nets: a failed or partial theming pass can never drop a place; at
-    // worst a place stays in the catch-all where it already was.
-    if (_themingPassOn && _hasUserList) {
-      try {
-        var _themeSections = [];
-        items.forEach(function(it){
-          if (it && it.section && _themeSections.indexOf(it.section) < 0) _themeSections.push(it.section);
-        });
-        var _themeNames = _tb._pastedListPlaces.map(function(d){ return d && d.place; }).filter(Boolean);
-        var _themePrompt = MaxGenPrompt.buildThemingPrompt({
-          place: place, ctx: ctx, userList: _themeNames, sections: _themeSections
-        });
-        // Budget scales with the list: ~120 tokens/place of headroom so a
-        // long list (the case #80 targets) can't truncate mid-array.
-        var _themeBudget = Math.min(8000, Math.max(2000, _themeNames.length * 120));
-        var _themeText = await callMax([{role:"user", content:_themePrompt}], _themeBudget, 60000);
-        var _themeMap = MaxGenPost.coerceThemingMap(_themeText);
-        console.log("[Max PD.404/diag] theming raw " + ((_themeText && _themeText.length) || 0)
-          + " chars; parsed " + (Array.isArray(_themeMap) ? _themeMap.length : 0)
-          + " entr(ies) for " + _themeNames.length + " listed place(s); budget " + _themeBudget
-          + "; sections offered: " + _themeSections.length);
-        if (Array.isArray(_themeMap) && _themeMap.length) {
-          // The catch-all section names are owned by SectionKind — use its
-          // canonical list so this can't drift (the user-listed sights land
-          // in "Sights near places you listed", not just "From your list").
-          var _movable = (window.SectionKind && typeof SectionKind.catchallPrecedence === "function")
-            ? SectionKind.catchallPrecedence()
-            : ["From your list", "Sights near places you listed", "More places to consider"];
-          var _themedCount = MaxGenPost.applyTheming(_tb.placeActivities, _themeMap, {
-            normPlaceName: (typeof _normPlaceName === "function") ? _normPlaceName : null,
-            movableSections: _movable
-          });
-          console.log("[Max PD.404] theming pass sorted " + _themedCount + " of " +
-            _themeNames.length + " listed place(s) into themed sections");
-        } else {
-          console.warn("[Max PD.404] theming pass returned no usable mapping — places stay in the catch-all (safety net intact). Raw head: "
-            + String(_themeText || "").slice(0, 240));
-        }
-      } catch(e) { console.warn("[Max PD.404] theming pass failed (non-fatal):", e && e.message); }
-    }
+    // PD.404 (#80): the theming pass MOVED to the reconcile phase
+    // (_runThemingPass, called from the reconcile callback) so it runs after
+    // the deterministic sight-reconcile has finalized the section set —
+    // running it here in primary was too early (reconcile re-bucketed after).
     // PD.337: CONSTRUCT-THEN-DECORATE merge. If the user's listed
     // places were constructed into _tb.placeActivities before this
     // LLM call, the LLM output MERGES AROUND them — it never replaces
