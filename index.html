@@ -9019,16 +9019,13 @@ async function _runThemingPass() {
     console.log("[Max PD.404] theming pass: parsed " + parsed + " mapping(s), sorted "
       + sorted + " of " + names.length + " listed place(s) into themes ("
       + sections.length + " sections offered)");
-    // PD.404: BAKE the per-place _themeFit into real section-grouped items
-    // RIGHT NOW, before enhance/canonicalize run. _applyDiscoveryModelToSights
-    // rebuilds _tb.placeActivities from the model (which reads _themeFit), so
-    // each themed place lands in an item whose section IS its theme. After
-    // this the assignment lives on the item's section — the normal, preserved
-    // path — instead of a loose _themeFit field that the downstream rebuilds
-    // were dropping (which is why sorted:31 didn't reach the picker).
-    if (sorted > 0 && typeof _applyDiscoveryModelToSights === "function") {
-      try { _applyDiscoveryModelToSights(); } catch(e2){ console.warn("[Max PD.404] bake-to-sections failed (non-fatal):", e2 && e2.message); }
-    }
+    // PD.404: NOTE — do NOT call _applyDiscoveryModelToSights() here to
+    // "bake" _themeFit into sections. It reassigns _tb.placeActivities,
+    // which is a routed accessor that emits tripChange → re-render → adapter
+    // → reassign … an infinite render loop mid-build (it hung the build and
+    // tripped the harness teardown timeouts). The per-place _themeFit set
+    // above is honored by the model on the next NATURAL render; persisting
+    // it through enhance/canonicalize is the remaining work (see NEXT-SESSION).
   } catch(e) {
     console.warn("[Max PD.404] theming pass failed (non-fatal):", e && e.message);
   }
