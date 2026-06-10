@@ -426,9 +426,19 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
 
     // PD.379: the provenance banner explains the numbers in user
     // terms, and its numbers must MATCH the audit exactly.
+    // PD.413: the receipt moved from .tb-footer to a compact strip at the
+    // TOP (#tb-receipt-strip) with the full breakdown in an expandable
+    // #tb-receipt-detail (collapsed by default). Read textContent of both
+    // so the assertions see the breakdown even while it isn't expanded.
     const footerText = await page.evaluate(() => {
-      const el = document.querySelector('.tb-footer');
-      return el ? el.innerText : '';
+      const strip = document.querySelector('#tb-receipt-strip');
+      const detail = document.querySelector('#tb-receipt-detail');
+      const legacy = document.querySelector('.tb-footer');
+      return [
+        strip ? strip.textContent : '',
+        detail ? detail.textContent : '',
+        legacy ? legacy.textContent : ''
+      ].join(' ');
     });
     expect(footerText).toContain(audit.unique + ' place');
     expect(footerText).toContain(audit.listed.length + ' you listed');
@@ -449,8 +459,9 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
     expect(s.building).toBe(false);
     expect(s.bannerUp).toBe(false);
 
-    // CTA: fresh trip, no destinations yet → Create.
-    expect(s.ctaText).toContain('Create my trip');
+    // CTA: fresh trip, no destinations yet → the build CTA (PD.414:
+    // renamed "Create my trip" → "Plan my trip").
+    expect(s.ctaText).toContain('Plan my trip');
   });
 
   // PD.404 (#80): with the theming flag ON, listed SIGHTS get sorted into a
@@ -545,8 +556,9 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
     }, { timeout: 10000 });
 
     const s2 = await snapshot(page);
-    // CTA on a built trip must NEVER say Create.
-    expect(s2.ctaText).not.toContain('Create my trip');
+    // CTA on a built trip must NEVER say the build label (PD.414: "Plan
+    // my trip"); it shows Update / Return instead.
+    expect(s2.ctaText).not.toContain('Plan my trip');
     expect(/Update my trip|Return to my trip/.test(s2.ctaText)).toBe(true);
     // No build running → no banner.
     expect(s2.bannerUp).toBe(false);

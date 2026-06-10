@@ -2480,7 +2480,6 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
              frequency as Discovery's chrome, same affordances. The
              ⋯ menu shrinks to genuinely rare actions only. -->
         <button class="mw-menu" data-menu="ask" onclick="showAskMaxModal()" title="Chat with Max about this trip">&#128172; Ask</button>
-        <button class="mw-menu" data-menu="search" onclick="openTripSearch()" title="Search this trip">&#x1F50D;</button>
         <button class="mw-menu" data-menu="profile" onclick="editConstraints()" title="Trip profile — dates, pace, transport, etc.">&#9998; Profile</button>
         <!-- v360.1 (slice 2d-ii) / PD.273: consolidated ⋯ menu. One
              trigger, one dropdown. With the four frequent moves
@@ -2551,6 +2550,22 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
     <!-- v359.2: .lp-mode-row was merged into .lp-hdr-unified above. The
          three-pill mode toggle now lives in the center column of the
          unified header so it's the visual anchor of the chrome. -->
+
+    <!-- PD.407: inline trip-view search. Replaces the old 🔍 menu
+         button + openTripSearch() modal with a Discovery-style inline
+         bar (input + "i / n" counter + ↑/↓ nav + scroll-and-highlight),
+         modeled on the picker's #tb-place-act-search. Lives as a sibling
+         ABOVE #lp-content (not inside it) so drawTripMode/drawDestMode's
+         `c.innerHTML=""` clobber doesn't destroy it; wired once via
+         _ensureTripInlineSearch(). Hidden until a built trip exists. -->
+    <div id="trip-inline-search-bar" style="display:none;align-items:center;gap:6px;margin:8px 14px 0;padding:6px 10px;background:#fafafa;border:1px solid #e6e1d5;border-radius:6px;flex-shrink:0;box-shadow:0 1px 0 rgba(0,0,0,0.04);">
+      <span style="font-size:13px;line-height:1;opacity:0.65;flex-shrink:0;">&#x1F50D;</span>
+      <input id="trip-inline-search" type="text" placeholder="Search this trip…" autocomplete="off" style="flex:1;min-width:140px;font:inherit;font-size:12.5px;padding:5px 9px;border:1px solid #d8dde5;border-radius:5px;background:#fff;color:#111;box-sizing:border-box;outline:none;"/>
+      <span id="trip-inline-search-counter" style="font-size:11px;color:#666;font-weight:600;white-space:nowrap;padding:0 4px;visibility:hidden;"></span>
+      <button id="trip-inline-search-prev" type="button" title="Previous match (↑)" style="font-size:13px;font-weight:700;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:3px 9px;cursor:pointer;font-family:inherit;min-width:30px;text-align:center;visibility:hidden;">&#8593;</button>
+      <button id="trip-inline-search-next" type="button" title="Next match (↓ / Enter)" style="font-size:13px;font-weight:700;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:3px 9px;cursor:pointer;font-family:inherit;min-width:30px;text-align:center;visibility:hidden;">&#8595;</button>
+      <button id="trip-inline-search-clear" type="button" title="Clear" style="font-size:11px;color:#888;background:#fff;border:1px solid #ddd;border-radius:5px;padding:4px 8px;cursor:pointer;font-family:inherit;visibility:hidden;">&times; Clear</button>
+    </div>
 
     <!-- Scrollable content — JS populates -->
     <div id="lp-content" class="lp-content"></div>
@@ -6573,216 +6588,218 @@ function renderHomeDashboard(){
   });
 }
 
-// v353.2: trip-wide search. Opens a fullscreen-on-mobile, modal-on-
-// desktop overlay with an input that substring-matches across:
+// PD.407: inline trip-view search engine. Replaces the old modal
+// (openTripSearch overlay) with a Discovery-style inline bar wired to
+// #trip-inline-search (see the markup above #lp-content). Substring-
+// matches across the same surfaces the modal did:
 //   - destination place + label + day labels
 //   - itinerary item names + notes
 //   - laterItems / maybeItems names
-//   - traveler notes
-// Results show "Dest > Day > Item" context. Clicking a result calls
-// selectDest(destId) to drill into that destination, then scrolls
-// the matching day into view + flashes it.
+//   - per-destination "Keep in mind" research notes
+// Navigation: ↓ / Enter = next match, ↑ = previous, with wraparound.
+// Going to a match calls selectDest(destId) (so cross-destination
+// matches work from any view) then scrolls the matching day into view
+// and flashes it — mirroring the old modal's click-to-navigate.
+var _tripSearch = { q: "", matches: [], idx: -1, timer: null };
+
+// PD.412: accent/diacritic-insensitive normalizer so "Vik" matches
+// "Vík", "Reykjavik" matches "Reykjavík", etc. Mirrors the Discovery
+// search's _searchNormalize (which is function-local there, so we
+// re-implement the same NFD-strip here).
+function _tripSearchNorm(s) {
+  try {
+    return String(s == null ? "" : s).toLowerCase()
+      .normalize("NFD").replace(/[̀-ͯ]/g, "");
+  } catch (_) {
+    return String(s == null ? "" : s).toLowerCase();
+  }
+}
+
+// Scan the whole trip for substring matches. Returns lightweight
+// navigation targets {destId, dayId, kind, context}; the inline bar
+// only needs counts + where-to-jump, not rendered result rows. `q` is
+// already lowercased + accent-stripped by the caller.
+function _tripSearchScan(q) {
+  var out = [];
+  if (typeof trip === "undefined" || !trip || !trip.destinations) return out;
+  var N = _tripSearchNorm;
+  (trip.destinations || []).forEach(function (dest) {
+    var destLabel = dest.label || dest.place || "";
+    if (N(dest.place).indexOf(q) >= 0 || N(dest.label).indexOf(q) >= 0) {
+      out.push({ kind: "dest", destId: dest.id, dayId: null, context: destLabel });
+    }
+    // v359.60.66: per-destination notes live on dest.research.
+    if (N(dest.research).indexOf(q) >= 0) {
+      out.push({ kind: "note", destId: dest.id, dayId: null, context: destLabel + " · note" });
+    }
+    (dest.days || []).forEach(function (day) {
+      if (N(day.lbl).indexOf(q) >= 0) {
+        out.push({ kind: "day", destId: dest.id, dayId: day.id, context: destLabel + " · day" });
+      }
+      (day.items || []).forEach(function (it) {
+        if (N(it.n).indexOf(q) >= 0) {
+          out.push({ kind: "item", destId: dest.id, dayId: day.id, context: destLabel });
+        }
+        if (N(it.note).indexOf(q) >= 0) {
+          out.push({ kind: "item-note", destId: dest.id, dayId: day.id, context: destLabel });
+        }
+      });
+    });
+    ["laterItems", "maybeItems"].forEach(function (bucket) {
+      (dest[bucket] || []).forEach(function (it) {
+        if (N(it.n).indexOf(q) >= 0) {
+          out.push({ kind: "bucket", destId: dest.id, dayId: null, context: destLabel });
+        }
+      });
+    });
+  });
+  return out;
+}
+
+// Update the counter text + show/hide arrows and Clear, matching the
+// picker's behavior: arrows appear only when there's more than one
+// match (they exist to navigate AMONG matches); the counter reads
+// "N matches" before the user has stepped into one, then "i / N".
+function _tripSearchSyncCounter() {
+  var c = document.getElementById("trip-inline-search-counter");
+  var prev = document.getElementById("trip-inline-search-prev");
+  var next = document.getElementById("trip-inline-search-next");
+  var clr = document.getElementById("trip-inline-search-clear");
+  var inp = document.getElementById("trip-inline-search");
+  var n = _tripSearch.matches.length;
+  var hasQ = !!(inp && inp.value.trim().length >= 2);
+  if (c) {
+    if (!hasQ) {
+      c.style.visibility = "hidden";
+      c.textContent = "";
+    } else {
+      c.style.visibility = "visible";
+      if (n === 0) c.textContent = "No matches";
+      else if (_tripSearch.idx < 0) c.textContent = n + (n === 1 ? " match" : " matches");
+      else c.textContent = (_tripSearch.idx + 1) + " / " + n;
+    }
+  }
+  var showArrows = n > 1;
+  if (prev) prev.style.visibility = showArrows ? "visible" : "hidden";
+  if (next) next.style.visibility = showArrows ? "visible" : "hidden";
+  if (clr) clr.style.visibility = (inp && inp.value.length) ? "visible" : "hidden";
+}
+
+// PD.412: jump to match i (wraps) and highlight it IN THE LIST — no
+// selectDest, so searching never yanks the user into a single
+// destination's detail card. If we're currently in a detail view,
+// switch back to the overview list first, then scroll+flash the
+// matching destination card (.tm-dest[data-id]) or day (#dy-<id>).
+function _tripSearchGoTo(i) {
+  var m = _tripSearch.matches;
+  if (!m.length) return;
+  i = ((i % m.length) + m.length) % m.length;
+  _tripSearch.idx = i;
+  _tripSearchSyncCounter();
+  var r = m[i];
+  // Ensure the overview LIST is showing (not a single-dest detail card).
+  var switched = false;
+  if (typeof _leftMode !== "undefined" && _leftMode !== "trip") {
+    switched = true;
+    if (typeof setLeftMode === "function") setLeftMode("trip");
+    else if (typeof drawTripMode === "function") drawTripMode();
+  }
+  var go = function () {
+    var el = null;
+    if (r.dayId) { try { el = document.getElementById("dy-" + r.dayId); } catch (_) {} }
+    if (!el && r.destId != null) {
+      try { el = document.querySelector('.tm-dest[data-id="' + String(r.destId).replace(/"/g, '\\"') + '"]'); } catch (_) {}
+    }
+    if (!el) {
+      var lpc = document.getElementById("lp-content");
+      if (lpc) { try { lpc.scrollTo({ top: 0, behavior: "smooth" }); } catch (_) { lpc.scrollTop = 0; } }
+      return;
+    }
+    try { el.scrollIntoView({ behavior: "smooth", block: "center" }); }
+    catch (_) { el.scrollIntoView(); }
+    var _prevTrans = el.style.transition, _prevBg = el.style.backgroundColor;
+    el.style.transition = "background-color 0.4s";
+    el.style.backgroundColor = "#fff7d4";
+    setTimeout(function () {
+      el.style.backgroundColor = _prevBg || "";
+      el.style.transition = _prevTrans || "";
+    }, 1800);
+  };
+  // If we just switched modes, give drawTripMode a tick to paint.
+  if (switched) setTimeout(go, 140); else go();
+}
+
+function _tripSearchOnInput() {
+  var inp = document.getElementById("trip-inline-search");
+  if (!inp) return;
+  _tripSearch.q = inp.value;
+  // PD.412: normalize the query the same way as the fields (accent-strip)
+  // so "Vik" finds "Vík". Length gate uses the raw trimmed input.
+  var raw = inp.value.trim();
+  var q = _tripSearchNorm(raw);
+  clearTimeout(_tripSearch.timer);
+  _tripSearch.timer = setTimeout(function () {
+    _tripSearch.matches = raw.length >= 2 ? _tripSearchScan(q) : [];
+    // Reset to "not yet stepped in" so the counter shows the total and
+    // the first down/Enter lands on match 0.
+    _tripSearch.idx = -1;
+    _tripSearchSyncCounter();
+  }, 120);
+}
+
+// Wire the inline bar once and keep its visibility in sync. Called from
+// drawTripMode / drawDestMode (the two trip-view renderers). The bar
+// lives outside #lp-content so it survives their innerHTML rebuilds;
+// we just re-toggle display and restore the stored query each render.
+function _ensureTripInlineSearch() {
+  var bar = document.getElementById("trip-inline-search-bar");
+  if (!bar) return;
+  var hasTrip = !!(typeof trip !== "undefined" && trip &&
+                   Array.isArray(trip.destinations) && trip.destinations.length);
+  bar.style.display = hasTrip ? "flex" : "none";
+  var inp = document.getElementById("trip-inline-search");
+  if (bar._wired) {
+    if (inp && _tripSearch.q != null && document.activeElement !== inp) inp.value = _tripSearch.q;
+    _tripSearchSyncCounter();
+    return;
+  }
+  bar._wired = true;
+  var prev = document.getElementById("trip-inline-search-prev");
+  var next = document.getElementById("trip-inline-search-next");
+  var clr = document.getElementById("trip-inline-search-clear");
+  if (inp) {
+    inp.addEventListener("input", _tripSearchOnInput);
+    inp.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === "ArrowDown") {
+        e.preventDefault();
+        _tripSearchGoTo((_tripSearch.idx < 0 ? 0 : _tripSearch.idx + 1));
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        _tripSearchGoTo((_tripSearch.idx < 0 ? -1 : _tripSearch.idx - 1));
+      } else if (e.key === "Escape") {
+        inp.value = ""; _tripSearch.q = ""; _tripSearch.matches = []; _tripSearch.idx = -1;
+        _tripSearchSyncCounter(); inp.blur();
+      }
+    });
+  }
+  if (prev) prev.onclick = function () { _tripSearchGoTo((_tripSearch.idx < 0 ? -1 : _tripSearch.idx - 1)); };
+  if (next) next.onclick = function () { _tripSearchGoTo((_tripSearch.idx < 0 ? 0 : _tripSearch.idx + 1)); };
+  if (clr) clr.onclick = function () {
+    if (inp) inp.value = "";
+    _tripSearch.q = ""; _tripSearch.matches = []; _tripSearch.idx = -1;
+    _tripSearchSyncCounter();
+    if (inp) inp.focus();
+  };
+}
+
+// Back-compat: the menu/keyboard entry point now just reveals + focuses
+// the inline bar instead of opening a modal. (The 🔍 menu buttons that
+// called this were removed in PD.407; kept for any other callers.)
 function openTripSearch() {
-  if (!trip || !trip.destinations) return;
-  // If an overlay already exists (rapid double-tap), reuse it.
-  var existing = document.getElementById('trip-search-overlay');
-  if (existing) { var inp = existing.querySelector('input'); if (inp) inp.focus(); return; }
-
-  var ov = document.createElement('div');
-  ov.id = 'trip-search-overlay';
-  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:11000;' +
-    'display:flex;align-items:flex-start;justify-content:center;padding:60px 20px 20px;';
-
-  var box = document.createElement('div');
-  box.style.cssText = 'background:#fff;border-radius:10px;width:100%;max-width:520px;' +
-    'box-shadow:0 12px 40px rgba(0,0,0,0.25);display:flex;flex-direction:column;max-height:80vh;';
-
-  var hdr = document.createElement('div');
-  hdr.style.cssText = 'padding:14px 16px 10px;border-bottom:1px solid #eee;display:flex;align-items:center;gap:10px;';
-  hdr.innerHTML =
-    '<div style="font-size:14px;font-weight:700;flex:1;">🔍 Search this trip</div>' +
-    '<button id="trip-search-close" style="background:none;border:none;font-size:18px;color:#999;cursor:pointer;padding:0 4px;line-height:1;">✕</button>';
-  box.appendChild(hdr);
-
-  var inp = document.createElement('input');
-  inp.type = 'text';
-  inp.placeholder = 'Place, sight, day, note…';
-  inp.autocomplete = 'off';
-  inp.style.cssText = 'margin:10px 16px;padding:10px 12px;font-size:14px;border:1px solid #ddd;border-radius:6px;outline:none;font-family:inherit;';
-  box.appendChild(inp);
-
-  var resultsHost = document.createElement('div');
-  resultsHost.style.cssText = 'overflow-y:auto;flex:1;padding:0 6px 12px;';
-  box.appendChild(resultsHost);
-
-  var emptyHint = document.createElement('div');
-  emptyHint.style.cssText = 'padding:24px 16px;text-align:center;color:#aaa;font-size:12px;';
-  emptyHint.textContent = 'Start typing to search.';
-  resultsHost.appendChild(emptyHint);
-
-  ov.appendChild(box);
-  document.body.appendChild(ov);
-  setTimeout(function () { inp.focus(); }, 30);
-
-  function close() {
-    if (ov.parentNode) ov.parentNode.removeChild(ov);
-  }
-  hdr.querySelector('#trip-search-close').onclick = close;
-  ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
-  document.addEventListener('keydown', function escClose(e) {
-    if (e.key === 'Escape') {
-      close();
-      document.removeEventListener('keydown', escClose);
-    }
-  });
-
-  function highlight(text, q) {
-    if (!text) return '';
-    var idx = text.toLowerCase().indexOf(q);
-    if (idx < 0) return _esc(text);
-    return _esc(text.substring(0, idx)) +
-      '<mark style="background:#fff7d4;padding:0 1px;">' + _esc(text.substring(idx, idx + q.length)) + '</mark>' +
-      _esc(text.substring(idx + q.length));
-  }
-  function _esc(s) {
-    return String(s == null ? '' : s)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-  }
-
-  function search() {
-    var q = inp.value.trim().toLowerCase();
-    resultsHost.innerHTML = '';
-    if (q.length < 2) {
-      resultsHost.appendChild(emptyHint);
-      emptyHint.textContent = q.length === 1 ? 'Keep typing…' : 'Start typing to search.';
-      return;
-    }
-    var results = [];
-    (trip.destinations || []).forEach(function (dest) {
-      var destLabel = dest.label || dest.place || '';
-      // Destination name itself
-      if ((dest.place || '').toLowerCase().indexOf(q) >= 0 ||
-          (dest.label || '').toLowerCase().indexOf(q) >= 0) {
-        results.push({
-          kind: 'dest',
-          destId: dest.id,
-          dayId: null,
-          context: destLabel,
-          line: '<strong>Destination:</strong> ' + highlight(destLabel, q),
-        });
-      }
-      // v359.60.66: per-destination notes — "Keep in mind for {dest}"
-      // lives on dest.research after the travelerNotes merge.
-      if ((dest.research || '').toLowerCase().indexOf(q) >= 0) {
-        var nt = dest.research;
-        if (nt.length > 100) {
-          var i = nt.toLowerCase().indexOf(q);
-          var s2 = Math.max(0, i - 30), e2 = Math.min(nt.length, i + q.length + 50);
-          nt = (s2 > 0 ? '…' : '') + nt.substring(s2, e2) + (e2 < dest.research.length ? '…' : '');
-        }
-        results.push({
-          kind: 'note',
-          destId: dest.id,
-          dayId: null,
-          context: destLabel + ' · note',
-          line: highlight(nt, q),
-        });
-      }
-      // Day labels and items
-      (dest.days || []).forEach(function (day) {
-        if ((day.lbl || '').toLowerCase().indexOf(q) >= 0) {
-          results.push({
-            kind: 'day',
-            destId: dest.id,
-            dayId: day.id,
-            context: destLabel + ' · day',
-            line: '<strong>Day:</strong> ' + highlight(day.lbl, q),
-          });
-        }
-        (day.items || []).forEach(function (it) {
-          if ((it.n || '').toLowerCase().indexOf(q) >= 0) {
-            results.push({
-              kind: 'item',
-              destId: dest.id,
-              dayId: day.id,
-              context: destLabel + ' · ' + (day.lbl || ''),
-              line: highlight(it.n, q) + (it.timeStart ? ' <span style="color:#aaa;font-size:10px;">' + it.timeStart + '</span>' : ''),
-            });
-          }
-          if ((it.note || '').toLowerCase().indexOf(q) >= 0) {
-            results.push({
-              kind: 'item-note',
-              destId: dest.id,
-              dayId: day.id,
-              context: destLabel + ' · ' + (day.lbl || '') + ' · ' + (it.n || ''),
-              line: '<em style="color:#777;">' + highlight(it.note, q) + '</em>',
-            });
-          }
-        });
-      });
-      // Later / Maybe buckets
-      ['laterItems', 'maybeItems'].forEach(function (bucket) {
-        (dest[bucket] || []).forEach(function (it) {
-          if ((it.n || '').toLowerCase().indexOf(q) >= 0) {
-            results.push({
-              kind: 'bucket',
-              destId: dest.id,
-              dayId: null,
-              context: destLabel + ' · ' + (bucket === 'laterItems' ? 'Later' : 'Maybe'),
-              line: highlight(it.n, q),
-            });
-          }
-        });
-      });
-    });
-
-    if (results.length === 0) {
-      var none = document.createElement('div');
-      none.style.cssText = 'padding:24px 16px;text-align:center;color:#aaa;font-size:12px;';
-      none.textContent = 'No matches.';
-      resultsHost.appendChild(none);
-      return;
-    }
-    results.forEach(function (r) {
-      var row = document.createElement('div');
-      row.style.cssText = 'padding:9px 12px;cursor:pointer;border-radius:6px;margin:2px 6px;';
-      row.onmouseover = function () { row.style.background = '#f5f5f5'; };
-      row.onmouseout = function () { row.style.background = ''; };
-      row.innerHTML =
-        '<div style="font-size:9.5px;color:#aaa;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:2px;">' +
-        _esc(r.context) + '</div>' +
-        '<div style="font-size:13px;color:#222;line-height:1.45;">' + r.line + '</div>';
-      row.onclick = function () {
-        close();
-        if (typeof selectDest === 'function' && r.destId) {
-          selectDest(r.destId);
-          if (r.dayId) {
-            // Scroll to the day after the dest-mode renders.
-            setTimeout(function () {
-              var el = document.getElementById('dy-' + r.dayId);
-              if (el && el.scrollIntoView) {
-                try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
-                catch (_) { el.scrollIntoView(); }
-                el.style.transition = 'background-color 0.4s';
-                el.style.backgroundColor = '#fff7d4';
-                setTimeout(function () { el.style.backgroundColor = ''; }, 1800);
-              }
-            }, 120);
-          }
-        }
-      };
-      resultsHost.appendChild(row);
-    });
-  }
-
-  inp.addEventListener('input', search);
-  inp.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') {
-      var first = resultsHost.querySelector('div[style*="cursor:pointer"]');
-      if (first) first.click();
-    }
-  });
+  var bar = document.getElementById("trip-inline-search-bar");
+  if (bar) bar.style.display = "flex";
+  var inp = document.getElementById("trip-inline-search");
+  if (inp) { inp.focus(); try { inp.select(); } catch (_) {} }
 }
 
 // v353: keep the sync-related buttons in sync with sign-in state.
@@ -20493,12 +20510,13 @@ function _renderPlaceActivityItems(){
       toc.appendChild(tocHdr);
     }
 
-    // Search input — sticky to the top of the scrolling list pane so
-    // the user can search again without scrolling back up after
-    // landing on a result. Magnifying-glass affordance + lighter
-    // border to read as "input field" at a glance.
+    // PD.409: search input is anchored in a FIXED host above the scroll
+    // pane (#tb-picker-search-host), not floating/sticky over the rows.
+    // Matches the trip-view inline bar: the bar holds its position on the
+    // page and the list scrolls beneath it. (Was position:sticky inside
+    // the scrolling list, which Neal disliked as "floating".)
     var searchWrap = document.createElement("div");
-    searchWrap.style.cssText = "display:flex;align-items:center;gap:6px;margin:0 0 10px;padding:8px 10px;background:#fafafa;border:1px solid #e6e1d5;border-radius:6px;position:sticky;top:0;z-index:5;box-shadow:0 1px 0 rgba(0,0,0,0.04);";
+    searchWrap.style.cssText = "display:flex;align-items:center;gap:6px;margin:0;padding:8px 10px;background:#fafafa;border:1px solid #e6e1d5;border-radius:6px;box-shadow:0 1px 0 rgba(0,0,0,0.04);";
     var searchIcon = document.createElement("span");
     searchIcon.textContent = "🔍";
     searchIcon.style.cssText = "font-size:13px;line-height:1;opacity:0.65;flex-shrink:0;";
@@ -20530,9 +20548,12 @@ function _renderPlaceActivityItems(){
     searchPrev.textContent = "↑";
     searchPrev.onclick = function(){
       var n = (_tb && _tb._researchSearchMatches) || 0;
-      if (n < 2) return;
-      var i = ((_tb._researchSearchMatchIndex || 0) - 1 + n) % n;
-      _tb._researchSearchMatchIndex = i;
+      if (n < 1) return;
+      // PD.408: the first navigation after typing lands on a match
+      // (last, for ↑) rather than skipping one; subsequent presses step.
+      if (!_tb._researchSearchNavStarted) { _tb._researchSearchNavStarted = true; _tb._researchSearchMatchIndex = (n - 1); }
+      else { _tb._researchSearchMatchIndex = ((_tb._researchSearchMatchIndex || 0) - 1 + n) % n; }
+      _tb._researchSearchNavScroll = true;   // PD.408: only navigation scrolls
       _renderPlaceActivityItems();
     };
     var searchNext = document.createElement("button");
@@ -20543,16 +20564,25 @@ function _renderPlaceActivityItems(){
     searchNext.textContent = "↓";
     searchNext.onclick = function(){
       var n = (_tb && _tb._researchSearchMatches) || 0;
-      if (n < 2) return;
-      _tb._researchSearchMatchIndex = (((_tb._researchSearchMatchIndex || 0) + 1) % n);
+      if (n < 1) return;
+      // PD.408: first ↓ after typing lands on the first match.
+      if (!_tb._researchSearchNavStarted) { _tb._researchSearchNavStarted = true; _tb._researchSearchMatchIndex = 0; }
+      else { _tb._researchSearchMatchIndex = (((_tb._researchSearchMatchIndex || 0) + 1) % n); }
+      _tb._researchSearchNavScroll = true;   // PD.408: only navigation scrolls
       _renderPlaceActivityItems();
     };
     var searchClear = document.createElement("button");
     searchClear.type = "button";
     searchClear.style.cssText = "font-size:11px;color:#888;background:#fff;border:1px solid #ddd;border-radius:5px;padding:4px 8px;cursor:pointer;font-family:inherit;" + (searchInp.value ? "" : "visibility:hidden;");
     searchClear.textContent = "× Clear";
-    // Round PD.47/48: Enter was triggering scroll-to-bottom. Intercept
-    // at all three keyboard event phases to fully kill default behavior.
+    // Round PD.47/48: Enter used to trigger a scroll-to-bottom (a bug).
+    // We still suppress the default on every key phase so that can't
+    // happen — but on keydown, Enter now STARTS the search: it jumps to
+    // the first match, and pressing it again steps to the next (same as
+    // the ↓ button). ↑/↓ in the input also move between matches. This is
+    // PD.409 — matching the trip-view bar (Enter starts, arrows go
+    // back/forth); the old "no Enter" behavior was a workaround for the
+    // scroll bug, not a desired interaction.
     function _killEnter(e){
       if (e.key === "Enter") {
         e.preventDefault();
@@ -20560,7 +20590,20 @@ function _renderPlaceActivityItems(){
         if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
       }
     }
-    searchInp.addEventListener("keydown", _killEnter);
+    searchInp.addEventListener("keydown", function(e){
+      if (e.key === "Enter") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+        if (searchNext && typeof searchNext.onclick === "function") searchNext.onclick();
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        if (searchNext && typeof searchNext.onclick === "function") searchNext.onclick();
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        if (searchPrev && typeof searchPrev.onclick === "function") searchPrev.onclick();
+      }
+    });
     searchInp.addEventListener("keypress", _killEnter);
     searchInp.addEventListener("keyup", _killEnter);
     searchInp.oninput = function(){
@@ -20569,6 +20612,12 @@ function _renderPlaceActivityItems(){
       // user types a new word but stays on a stale index that no longer
       // points at a valid hit.
       _tb._researchSearchMatchIndex = 0;
+      // PD.408: typing updates the highlight + count but never scrolls the
+      // list. The list stays put ("fixed"); the user jumps between matches
+      // with the ↑/↓ arrows. navStarted resets so the next arrow press
+      // lands on the first/last match rather than skipping one.
+      _tb._researchSearchNavStarted = false;
+      _tb._researchSearchNavScroll = false;
       try { _tb._researchSearchCaret = searchInp.selectionStart; } catch(_){}
       _tb._researchSearchWasFocused = true;
       try { console.log("[Max search] query =", JSON.stringify(searchInp.value)); } catch(_){}
@@ -20577,13 +20626,15 @@ function _renderPlaceActivityItems(){
         if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
       }, 60);
     };
-    // Round NC.X: no Enter shortcut. Per user feedback ("not hit enter"),
-    // match cycling is driven only by the explicit ↑/↓ arrow buttons —
-    // pressing Enter inside the input does nothing special. Keeps the
-    // input from triggering form submits or surprise navigation.
+    // PD.409: Enter now starts the search (see the keydown handler above)
+    // and ↑/↓ move between matches — both from the buttons and from the
+    // input. The earlier "not hit enter" feedback was about the
+    // scroll-to-end bug, which is suppressed independently.
     searchClear.onclick = function(){
       _tb._researchSearch = "";
       _tb._researchSearchMatchIndex = 0;
+      _tb._researchSearchNavStarted = false;   // PD.408
+      _tb._researchSearchNavScroll = false;
       _tb._researchSearchWasFocused = true;
       _tb._researchSearchCaret = 0;
       if (typeof _renderPlaceActivityItems === "function") _renderPlaceActivityItems();
@@ -20628,14 +20679,19 @@ function _renderPlaceActivityItems(){
     sortGroup.appendChild(actBtn);
     sortGroup.appendChild(plcBtn);
     searchWrap.appendChild(sortGroup);
-    // Round NC.X: do NOT append searchWrap to toc. For position:sticky
-    // to keep the bar visible across the WHOLE scroll, its parent must
-    // span the whole scrollable content. toc is just the TOC block
-    // (TOC chips + section nav) at the top — sticky inside it
-    // disappears as soon as the user scrolls past the TOC. Append
-    // directly to `list` and BEFORE the TOC is appended, so it sits
-    // at the top of the scroll container.
-    list.appendChild(searchWrap);
+    // PD.409: mount the bar in the FIXED host above the scroll pane so it
+    // holds its position on the page (the list scrolls beneath it) instead
+    // of floating/sticking inside the scroll. The host lives in the picker
+    // chrome (built once), so it persists across _renderPlaceActivityItems
+    // rebuilds — we just clear + re-append the freshly-built bar each time.
+    // Fallback to the scroll list only if an older chrome lacks the host.
+    var _searchHost = document.getElementById("tb-picker-search-host");
+    if (_searchHost) {
+      _searchHost.innerHTML = "";
+      _searchHost.appendChild(searchWrap);
+    } else {
+      list.appendChild(searchWrap);
+    }
 
     // Round PD.46: search across notes. When a query is active, scan
     // every doc in placeMeta/tripMeta for matches and surface them as
@@ -21454,7 +21510,7 @@ function _renderPlaceActivityItems(){
       var researchBtn = '<button type="button" class="pm-research-btn" '
         + 'onclick="_pmOpenResearchCard(&#39;' + _pmEsc(d.place) + '&#39;);event.stopPropagation();" '
         + 'title="' + _researchTitle + '" '
-        + 'style="font-size:11px;color:' + (_hasMetaContent ? '#fff' : '#888') + ';background:' + (_hasMetaContent ? '#1a5fa8' : '#fff') + ';border:1px solid ' + (_hasMetaContent ? '#1a5fa8' : '#ddd') + ';border-radius:9px;padding:1px 7px;cursor:pointer;font-family:inherit;line-height:1.3;">'
+        + 'style="font-size:16px;line-height:1;color:' + (_hasMetaContent ? '#fff' : '#444') + ';background:' + (_hasMetaContent ? '#1a5fa8' : '#fff') + ';border:1px solid ' + (_hasMetaContent ? '#1a5fa8' : '#cdd3da') + ';border-radius:8px;padding:4px 8px;cursor:pointer;font-family:inherit;">'
         + '📓'
         + '</button>';
       // v357: sidebar ordinal badge removed — sequencing is a trip-view
@@ -21841,18 +21897,24 @@ function _renderPlaceActivityItems(){
         var prevEl    = document.getElementById("tb-place-act-search-prev");
         var nextEl    = document.getElementById("tb-place-act-search-next");
         if (counterEl) {
-          if (ranked.length > 1) {
-            counterEl.textContent = (_tb._researchSearchMatchIndex + 1) + " / " + ranked.length;
-            counterEl.style.visibility = "visible";
-          } else if (ranked.length === 1) {
-            counterEl.textContent = "1 match";
-            counterEl.style.visibility = "visible";
-          } else {
+          if (ranked.length === 0) {
             counterEl.textContent = "";
             counterEl.style.visibility = "hidden";
+          } else if (!_tb._researchSearchNavStarted) {
+            // PD.408: before the user steps into a match the list hasn't
+            // moved, so show the total ("3 matches") rather than a "1 / 3"
+            // position that would imply we'd scrolled to the first one.
+            counterEl.textContent = ranked.length + (ranked.length === 1 ? " match" : " matches");
+            counterEl.style.visibility = "visible";
+          } else {
+            counterEl.textContent = (_tb._researchSearchMatchIndex + 1) + " / " + ranked.length;
+            counterEl.style.visibility = "visible";
           }
         }
-        var arrowsVis = (ranked.length > 1) ? "visible" : "hidden";
+        // PD.408: arrows available whenever there's at least one match —
+        // since typing no longer auto-scrolls, the arrows are the only way
+        // to jump to a match (including a single one).
+        var arrowsVis = (ranked.length >= 1) ? "visible" : "hidden";
         if (prevEl) prevEl.style.visibility = arrowsVis;
         if (nextEl) nextEl.style.visibility = arrowsVis;
       } catch(_){}
@@ -21862,6 +21924,12 @@ function _renderPlaceActivityItems(){
           + (firstHit ? (" firstHit=" + (firstHit.id || firstHit.className)) : " firstHit=null"));
       } catch(_){}
       if (firstHit) {
+        // PD.408: typing updates the highlight + count but must NOT move
+        // the list. Only an explicit ↑/↓ navigation sets
+        // _researchSearchNavScroll; when it isn't set, leave every matching
+        // row highlighted in place and bail before the strip/flash/scroll.
+        if (!(_tb && _tb._researchSearchNavScroll)) { return; }
+        _tb._researchSearchNavScroll = false;
         // Round NC.X: only the BEST hit stays highlighted. Strip the
         // .tb-search-hit class from every other matching row so the
         // user's eye isn't pulled to multiple yellow boxes for "vik"
@@ -21885,19 +21953,12 @@ function _renderPlaceActivityItems(){
         try {
           var hitRect = firstHit.getBoundingClientRect();
           var scRect  = scroller.getBoundingClientRect();
-          // Round NC.X: land the matched row at the TOP of the viewport,
-          // just below the sticky search bar (so the row's first line is
-          // immediately visible and not centered or pushed down). Earlier
-          // logic used `scRect.height / 3` to place it 1/3 down — but for
-          // the 2nd+ cycle that often left the row below the fold or
-          // mid-screen instead of at the top.
-          var searchBarH = 0;
-          try {
-            var sbInp = document.getElementById("tb-place-act-search");
-            var sbWrap = sbInp && sbInp.parentElement;
-            if (sbWrap) searchBarH = sbWrap.getBoundingClientRect().height;
-          } catch(_){}
-          var topPad = searchBarH + 8; // 8px breathing room below the bar
+          // Round NC.X: land the matched row near the TOP of the pane so
+          // its first line is immediately visible. PD.409: the search bar
+          // now lives ABOVE the scroll pane (not sticky inside it), so we
+          // no longer subtract the bar height — scRect.top already sits
+          // just below the bar. A small constant gives breathing room.
+          var topPad = 8;
           var delta = (hitRect.top - scRect.top) - topPad;
           var newTop = scroller.scrollTop + delta;
           // Clamp to valid scroll range so we don't ask for a value the
@@ -28024,8 +28085,225 @@ function _pmSetStayOverride(placeName, value){
   if (typeof _persistDiscoveryState === "function") _persistDiscoveryState(); // PD.334
 }
 
+// PD.411: ONE canonical "open this place's notes" affordance — a bare
+// 📓 icon button, filled blue when the place already has notes/links,
+// hollow grey otherwise. Used by the trip overview card (trip-ui.js) and
+// the trip detail view (drawDestMode), and styled identically to the
+// Discovery picker row's 📓 icon, so EVERY path to a place's notes looks
+// and behaves the same. (Replaces the wide "📓 {place} notes" text
+// buttons that diverged per-surface.) Returns a configured <button>.
+function _notesIconBtn(placeName){
+  var btn = document.createElement("button");
+  btn.type = "button";
+  try { if (typeof _pmEnsureResearchMeta === "function") _pmEnsureResearchMeta(); } catch(_){}
+  var m = null;
+  try {
+    var key = (typeof _pmMetaKey === "function") ? _pmMetaKey(placeName) : placeName;
+    m = (typeof _tb !== "undefined" && _tb && _tb.placeMeta)
+      ? (_tb.placeMeta[key] || _tb.placeMeta[placeName]) : null;
+  } catch(_){}
+  var ln = (m && Array.isArray(m.links)) ? m.links.length : 0;
+  var has = !!(m && ((m.notes && m.notes.trim()) || ln));
+  btn.className = "pm-research-btn max-notes-icon";
+  btn.textContent = "📓";
+  btn.title = has
+    ? ("Notes" + (ln ? " and " + ln + " link" + (ln === 1 ? "" : "s") : "") + " for " + placeName)
+    : ("Add notes / source links for " + placeName);
+  // PD.415: bigger, higher-contrast bare 📓 so it clearly reads as the
+  // notes affordance (Neal couldn't see the old 11px one). Blue-filled
+  // when the place already has notes/links.
+  btn.style.cssText = "font-size:16px;line-height:1;color:" + (has ? "#fff" : "#444")
+    + ";background:" + (has ? "#1a5fa8" : "#fff")
+    + ";border:1px solid " + (has ? "#1a5fa8" : "#cdd3da")
+    + ";border-radius:8px;padding:4px 8px;cursor:pointer;font-family:inherit;";
+  (function(pn){
+    btn.onclick = function(e){
+      e.preventDefault(); e.stopPropagation();
+      try { if (typeof _pmEnsureResearchMeta === "function") _pmEnsureResearchMeta(); } catch(_){}
+      if (typeof _pmOpenResearchCard === "function") _pmOpenResearchCard(pn);
+    };
+  })(placeName);
+  return btn;
+}
+if (typeof globalThis !== "undefined") globalThis._notesIconBtn = _notesIconBtn;
+
 // v359.55.3: open the research card popover for a place. Shows the
 // notes textarea, source-link list, and stay/see override toggle.
+// PD.413: Discovery receipt as a COMPACT strip at the top of the picker,
+// expandable to the full breakdown. Was three stacked banners in the
+// footer that squeezed the list (Neal). Same numbers/derivations as
+// before (MaxData / _maxPlaceSetAudit / _discoveryConsideredCounts).
+function _pmReceiptStripHtml(){
+        // PD.346: no receipt mid-build — the counts are still moving
+        // and "N unchecked sights" mid-generation reads as final when
+        // it isn't.
+        if (typeof MaxBuild !== "undefined" && MaxBuild.isBuilding && MaxBuild.isBuilding()) return '';
+        // PD.365: the math must match the sections. The old copy
+        // claimed every unchecked sight lived in the two catchall
+        // sections, but uncheckeds also sit in theme sections
+        // ("Relax in hot springs", "From your list", …) — the user
+        // counted 124 in the named sections while the banner said
+        // 154. Count per bucket and say where things actually are.
+        // PD.367: count UNIQUE places, the same way publish derives
+        // the considered pool — references deduped by place key,
+        // destination-named places excluded. This is why the receipt
+        // number now matches "Considered on (N)" after a build.
+        // PD.391 (architectural): ONE OWNER. The receipt no longer has
+        // its own counting loop — it reads MaxData.consideredPlaceKeys,
+        // the SAME deduped derivation the trip pill and the audit use.
+        // No second computation means no drift: the headline, the
+        // section breakdown, the trip's "Considered (N)" pill, and the
+        // console audit are all the identical set. The earlier
+        // per-section raw count (PD.390) double-counted any place that
+        // the LLM placed in two sections — the source of the inflated
+        // "104 unchecked."
+        // PD.401b: ONE derivation. The receipt reads the SAME
+        // DiscoveryModel the picker renders, so the number here and the
+        // section chips are the identical set by construction — no second
+        // dedup, no drift (the 63-vs-56 bug). Falls back to the old owner
+        // only if the model is somehow unavailable.
+        var n, nCatch, nOther;
+        var _dcc = (typeof _discoveryConsideredCounts === "function") ? _discoveryConsideredCounts() : null;
+        if (_dcc) {
+          n = _dcc.total; nCatch = _dcc.catchall; nOther = _dcc.other;
+        } else {
+          var _rcTrip2 = (typeof TripStore !== "undefined" && TripStore.isLoaded && TripStore.isLoaded()) ? TripStore.trip
+            : ((typeof trip !== "undefined") ? trip : null);
+          var _consSet = (_rcTrip2 && typeof MaxData !== "undefined" && MaxData.consideredPlaceKeys)
+            ? MaxData.consideredPlaceKeys(_rcTrip2) : {};
+          var _catchNames = { "Sights near places you listed": 1, "More places to consider": 1 };
+          n = 0; nCatch = 0;
+          Object.keys(_consSet).forEach(function(k){
+            n++;
+            var sec = _consSet[k].section || "";
+            if (_catchNames[sec]) nCatch++;
+          });
+          nOther = n - nCatch;
+        }
+        if (!n) return '';
+        var _whereTxt;
+        if (nOther <= 0) {
+          _whereTxt = 'They are unchecked in <strong>“Sights near places you listed”</strong> and <strong>“More places to consider”</strong>, and are gray pins on the map. Check them in those sections, or tap a gray pin to add it.';
+        } else {
+          _whereTxt = nCatch + ' are unchecked in <strong>“Sights near places you listed”</strong> and <strong>“More places to consider”</strong>; '
+            + nOther + ' sit unchecked in their theme sections. All are gray pins on the map. Check them where they are, or tap a gray pin to add it.';
+        }
+        // PD.379: THE NUMBERS, EXPLAINED. "Even though the numbers may
+        // be correct, a user has to be able to understand where the
+        // numbers come from." The receipt opens with the full
+        // accounting in user terms — what's yours, what's Max's, what
+        // the hubs are — and, when section counts exceed the place
+        // count, says exactly why, with the doubled places one tap
+        // away. All driven by the same audit the console prints.
+        var _covHtml = '';
+        try {
+          if (typeof _maxPlaceSetAudit === "function") {
+            var _aud = _maxPlaceSetAudit(true);
+            var _esc = function(s){ return String(s).replace(/</g, "&lt;"); };
+            var _nListed = _aud.listed.length;
+            var _nMax = _aud.maxChecked + _aud.maxUnchecked;
+            var _nHubs = (_aud.hubs || []).length;
+            // Line 1 — your-list coverage (green) or missing (red).
+            if (_nListed) {
+              if (!_aud.missing.length) {
+                _covHtml += '<div style="margin:0 0 6px;padding:7px 12px;background:#eef7ef;border:1px solid #cfe6d2;border-radius:6px;font-size:11.5px;color:#1e5c2a;font-weight:600;">'
+                  + '✓ All ' + _nListed + ' place' + (_nListed === 1 ? '' : 's') + ' you listed ' + (_nListed === 1 ? 'is' : 'are') + ' here.'
+                  + '</div>';
+              } else {
+                _covHtml += '<div style="margin:0 0 6px;padding:7px 12px;background:#fdf0ee;border:1px solid #f0c9c2;border-radius:6px;font-size:11.5px;color:#8a2e1f;font-weight:600;">'
+                  + '⚠ ' + _aud.missing.length + ' of your ' + _nListed + ' listed place' + (_nListed === 1 ? '' : 's') + ' ' + (_aud.missing.length === 1 ? 'is' : 'are') + ' missing: '
+                  + _aud.missing.slice(0, 6).map(_esc).join(', ')
+                  + (_aud.missing.length > 6 ? '…' : '')
+                  + '</div>';
+              }
+            }
+            // Line 2 — where every place came from.
+            if (_aud.pageTotal) {
+              // PD.401M: the page breakdown comes from the ONE registry and
+              // its total is the SUM of its parts — listed(found) + max +
+              // hubs — so it always reconciles. "you listed" here is the
+              // FOUND count (missing ones are in the warning line above).
+              var _nListedFound = _aud.listed.filter(function(l){ return l.found; }).length;
+              var _parts = [];
+              if (_nListedFound) _parts.push('<strong>' + _nListedFound + ' you listed</strong>');
+              if (_nMax) _parts.push('<strong>' + _nMax + '</strong> Max suggested'
+                + ' (' + _aud.maxUnchecked + ' unchecked' + (_aud.maxChecked ? ', ' + _aud.maxChecked + ' you checked' : '') + ')');
+              if (_nHubs) _parts.push('<strong>' + _nHubs + '</strong> overnight hub' + (_nHubs === 1 ? '' : 's')
+                + ' Max added near your sights (unchecked — check one to make it a base)');
+              if (_parts.length) {
+                // PD.386: the bridge to the trip. The unchecked Max
+                // sights become "Considered (N)" in the trip view —
+                // show the EXACT number both views share so the math
+                // reconciles. Destinations and hubs (counted above)
+                // are NOT considered sights, which is why this can be
+                // smaller than "Max suggested unchecked".
+                var _consTxt = (typeof _aud.considered === "number")
+                  ? ' <span style="color:#5b3f8f;">→ <strong>' + _aud.considered
+                    + '</strong> will appear as <strong>Considered</strong> sights in your trip'
+                    + ' (the number on the trip map).</span>'
+                  : '';
+                _covHtml += '<div style="margin:0 0 6px;padding:7px 12px;background:#f4f4f1;border:1px solid #ddd;border-radius:6px;font-size:11.5px;color:#444;line-height:1.55;">'
+                  + '<strong>' + _aud.pageTotal + ' place' + (_aud.pageTotal === 1 ? '' : 's') + '</strong> on this page: '
+                  + _parts.join(' + ') + '.' + _consTxt
+                  + '</div>';
+              }
+            }
+            // Line 3 — slots vs places, only when they differ.
+            if (_aud.multi && _aud.multi.length) {
+              var _extra = _aud.slots - _aud.unique;
+              _covHtml += '<details style="margin:0 0 6px;padding:6px 12px;background:#f4f4f1;border:1px solid #ddd;border-radius:6px;font-size:11px;color:#555;line-height:1.55;">'
+                + '<summary style="cursor:pointer;font-weight:600;color:#444;">Section counts add up to ' + _aud.slots
+                + ', not ' + _aud.unique + ' — ' + _aud.multi.length + ' place' + (_aud.multi.length === 1 ? '' : 's')
+                + ' appear' + (_aud.multi.length === 1 ? 's' : '') + ' in more than one section. Why?</summary>'
+                + '<div style="margin-top:6px;">A place can be an overnight stay <em>and</em> show under a sights theme, so it counts in both sections. '
+                + 'The doubled place' + (_aud.multi.length === 1 ? '' : 's') + ': '
+                + _aud.multi.slice(0, 15).map(function(m){
+                    return '<strong>' + _esc(m.place) + '</strong> (' + m.sections.map(_esc).join(' + ') + ')';
+                  }).join('; ')
+                + (_aud.multi.length > 15 ? '…' : '') + '.</div>'
+                + '</details>';
+            }
+          }
+        } catch(_){}
+        // PD.339: truthful receipt + a one-tap "keep them all" action.
+        // PD.413: compact strip + collapsible detail (was 3 stacked
+        // footer banners that squeezed the list). The detail keeps the
+        // full breakdown verbatim (incl. the "Considered" copy).
+        var _detail = _covHtml
+          + '<div style="margin:0 0 10px;padding:8px 12px;background:#f3eefa;border:1px solid #ddd0f0;border-radius:6px;font-size:11.5px;color:#3a2d56;line-height:1.5;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
+          +   '<span style="flex:1;min-width:200px;"><strong>' + n + ' unchecked sight' + (n === 1 ? '' : 's') + '</strong> — These are Max\'s suggestions and stay available after you build: ' + _whereTxt + '</span>'
+          +   '<button type="button" onclick="if(typeof _pmCheckAllUnchecked===\'function\')_pmCheckAllUnchecked();" style="flex:0 0 auto;font-size:11px;font-weight:700;color:#5b3f8f;background:#fff;border:1px solid #ddd0f0;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;">✓ Check them all</button>'
+          + '</div>';
+        var _bits = [];
+        try {
+          if (typeof _nListed !== "undefined" && _nListed) {
+            if (typeof _aud !== "undefined" && _aud && _aud.missing && _aud.missing.length)
+              _bits.push('⚠ ' + _aud.missing.length + ' of ' + _nListed + ' listed missing');
+            else _bits.push('✓ All ' + _nListed + ' listed here');
+          }
+          if (typeof _nMax !== "undefined" && _nMax) _bits.push('<strong>' + _nMax + '</strong> Max suggested');
+          if (typeof _aud !== "undefined" && _aud && typeof _aud.considered === "number" && _aud.considered)
+            _bits.push('→ <strong>' + _aud.considered + '</strong> considered (gray pins)');
+        } catch(_){}
+        var _summary = _bits.length ? _bits.join(' · ')
+          : ('<strong>' + n + '</strong> unchecked sight' + (n === 1 ? '' : 's') + ' — Max suggestions, kept after build');
+        return '<div id="tb-receipt-strip" style="flex-shrink:0;margin:8px 22px 0;padding:6px 12px;background:#f7f6f2;border:1px solid #e6e1d5;border-radius:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:11.5px;color:#444;line-height:1.4;">'
+          + '<span style="flex:1;min-width:160px;">' + _summary + '</span>'
+          + '<button type="button" onclick="if(typeof _pmCheckAllUnchecked===\'function\')_pmCheckAllUnchecked();" style="flex:0 0 auto;font-size:11px;font-weight:700;color:#5b3f8f;background:#fff;border:1px solid #ddd0f0;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;">✓ Check them all</button>'
+          + '<button type="button" onclick="if(typeof _pmToggleReceiptDetail===\'function\')_pmToggleReceiptDetail(this)" style="flex:0 0 auto;font-size:11px;font-weight:600;color:#666;background:#fff;border:1px solid #ddd;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;">Details ▾</button>'
+          + '</div>'
+          + '<div id="tb-receipt-detail" style="display:none;flex-shrink:0;margin:6px 22px 0;">' + _detail + '</div>';
+}
+if (typeof globalThis !== "undefined") globalThis._pmReceiptStripHtml = _pmReceiptStripHtml;
+function _pmToggleReceiptDetail(btn){
+  var d = document.getElementById("tb-receipt-detail"); if (!d) return;
+  var open = d.style.display !== "none";
+  d.style.display = open ? "none" : "block";
+  if (btn) btn.innerHTML = open ? "Details ▾" : "Hide ▴";
+}
+if (typeof globalThis !== "undefined") globalThis._pmToggleReceiptDetail = _pmToggleReceiptDetail;
+
+
 function _pmOpenResearchCard(placeName){
   var existing = document.getElementById("pm-research-card");
   if (existing) existing.remove();
@@ -30239,9 +30517,26 @@ function _renderPlacePickerMap(targetId){
         ? _pmIsStayCandidate(info.place)
         : false;
       var _styleRole = _isStayCandidate ? "stay" : "see";
-      var _pinStyle  = MaxMapPin.style(_styleRole, {});
-      if (!info.kept) {
-        _pinStyle.fill = "#bbb";           // gray for unkept (either shape)
+      // PD.410: a NOT-kept (considered) place renders as the small gray
+      // dashed "maybe" pin — identical to the trip view's considered pins
+      // (MaxData.getConsideredSights → MaxMapPin.style("maybe")) and to the
+      // documented intent above ("not-kept (any): small muted dot"). The
+      // old code drew the full-size stay/see shape tinted gray, which made
+      // an unkept sight a big gray TEARDROP — the pin Neal asked to shrink.
+      // Kept places keep their stay(circle) / see(teardrop) treatment.
+      // (_styleRole stays defined for the bulk-select path below.)
+      var _pinStyle;
+      if (info.kept) {
+        _pinStyle = MaxMapPin.style(_styleRole, {});
+      } else {
+        // PD.414: suggested (unchecked) places keep the dashed "maybe"
+        // treatment (small circle, dotted border) but are TINTED BY ROLE
+        // so the suggestion reads at a glance — light blue = suggested
+        // stay, light green = suggested sight. (Was undifferentiated
+        // gray.) Committed (kept) places keep their solid stay-circle /
+        // see-teardrop look.
+        _pinStyle = MaxMapPin.style("maybe", {});
+        _pinStyle.fill = _isStayCandidate ? "#a9c8ef" : "#a9d8bb";
       }
       var _labelOv   = { label: "" };      // no initials on the pin
       // v358.6: no map-level "iconic" decoration. The earlier gold
@@ -30748,7 +31043,7 @@ function _updatePlaceActivitySummary(){
   // (was "Choreograph my trip"); re-edit stays "Update my trip". The
   // dynamic-state branches (disabled-empty, re-enabled) keep the same
   // wording so toggling activities doesn't overwrite the initial label.
-  var _liveLabel = (_tb && _tb._editMode) ? "Update my trip \u2192" : "Create my trip \u2192";
+  var _liveLabel = (_tb && _tb._editMode) ? "Update my trip \u2192" : "Plan my trip \u2192";
   if(!activeItems.length){
     el.innerHTML = '<span style="color:#999;">Pick at least one thing you want to do \u2014 and the place(s) you\u2019d do it. That\u2019s the trip.</span>';
     if(btn){ btn.disabled = true; btn.classList.add("tb-btn-disabled"); btn.textContent = _liveLabel; }
@@ -31606,7 +31901,7 @@ function renderActivityPicker(){
   var primaryBtnHandler = !isEdit ? "continuePlaceModeToStep2()"
     : (_pickerDirty ? "saveActivityPickerEdits()"
                     : "(function(){try{var _t=(typeof TripStore!=='undefined'&&TripStore.isLoaded&&TripStore.isLoaded()&&TripStore.trip)||((typeof trip!=='undefined')?trip:null);if(typeof MaxRoute!=='undefined'&&_t&&_t.id){MaxRoute.navigate({screen:MaxRoute.SCREENS.TRIP,tripId:_t.id});}}catch(_){}})()");
-  var primaryBtnLabel = !isEdit ? "Create my trip →"
+  var primaryBtnLabel = !isEdit ? "Plan my trip →"
     : (_pickerDirty ? "Update my trip →" : "Return to my trip →");
   var backHandler = isEdit ? "cancelPickerEdit()" : "renderTripBrief()";
   var backLabel = isEdit ? "← Cancel" : "← Profile";
@@ -31637,8 +31932,7 @@ function renderActivityPicker(){
     + '<button class="file-btn" onclick="showAskMaxModal()" title="Chat with an AI about this trip / region">&#128172; Ask</button>';
   if (_hasTrip) {
     _pickerActionBtns += ''
-      + '<button class="file-btn" onclick="saveTrip()" title="Save">Save</button>'
-      + '<button class="file-btn" onclick="openTripSearch()" title="Search this trip">&#x1F50D;</button>';
+      + '<button class="file-btn" onclick="saveTrip()" title="Save">Save</button>';
   }
   // v359.39 / PD.268: Profile button — quick access to the brief
   // (place name, dates, pace, transport, etc.) without losing current
@@ -31705,9 +31999,17 @@ function renderActivityPicker(){
     // listedCount ≥ 15 AND the user hasn't dismissed it for this trip.
     +  '<div id="tb-picker-enhance-hint"></div>'
     +'</div>'
+    + (typeof _pmReceiptStripHtml === "function" ? _pmReceiptStripHtml() : "")  // PD.413
     +'<div class="picker-2col" id="picker-2col" style="flex:1;display:flex;min-height:0;overflow:hidden;">'
-    +  '<div class="picker-list" id="tb-picker-list-pane" style="flex:1;min-width:0;overflow-y:auto;padding:18px 22px;-webkit-overflow-scrolling:touch;">'
-    +    listHtml
+    // PD.409: list column = fixed search host on top + scrolling pane
+    // below. The host anchors the search bar above the list so it never
+    // floats over the rows (the bar used to be position:sticky inside the
+    // scroll pane). Mirrors the trip view's fixed inline bar.
+    +  '<div id="tb-picker-list-col" style="flex:1;min-width:0;display:flex;flex-direction:column;">'
+    +    '<div id="tb-picker-search-host" style="flex-shrink:0;padding:14px 22px 0;"></div>'
+    +    '<div class="picker-list" id="tb-picker-list-pane" style="flex:1;min-width:0;overflow-y:auto;padding:14px 22px 18px;-webkit-overflow-scrolling:touch;">'
+    +      listHtml
+    +    '</div>'
     +  '</div>'
     // v294.18: drag divider so the user can resize the list/map split. The
     // mousedown handler is wired in initPickerDivider (called after render).
@@ -31751,145 +32053,7 @@ function renderActivityPicker(){
     // user where unchecked sights will end up so they don't worry
     // they've lost them. PD.269 routes each to its parent destination's
     // "Considered" bucket on publish; this is the announcement.
-    +  (function(){
-        // PD.346: no receipt mid-build — the counts are still moving
-        // and "N unchecked sights" mid-generation reads as final when
-        // it isn't.
-        if (typeof MaxBuild !== "undefined" && MaxBuild.isBuilding && MaxBuild.isBuilding()) return '';
-        // PD.365: the math must match the sections. The old copy
-        // claimed every unchecked sight lived in the two catchall
-        // sections, but uncheckeds also sit in theme sections
-        // ("Relax in hot springs", "From your list", …) — the user
-        // counted 124 in the named sections while the banner said
-        // 154. Count per bucket and say where things actually are.
-        // PD.367: count UNIQUE places, the same way publish derives
-        // the considered pool — references deduped by place key,
-        // destination-named places excluded. This is why the receipt
-        // number now matches "Considered on (N)" after a build.
-        // PD.391 (architectural): ONE OWNER. The receipt no longer has
-        // its own counting loop — it reads MaxData.consideredPlaceKeys,
-        // the SAME deduped derivation the trip pill and the audit use.
-        // No second computation means no drift: the headline, the
-        // section breakdown, the trip's "Considered (N)" pill, and the
-        // console audit are all the identical set. The earlier
-        // per-section raw count (PD.390) double-counted any place that
-        // the LLM placed in two sections — the source of the inflated
-        // "104 unchecked."
-        // PD.401b: ONE derivation. The receipt reads the SAME
-        // DiscoveryModel the picker renders, so the number here and the
-        // section chips are the identical set by construction — no second
-        // dedup, no drift (the 63-vs-56 bug). Falls back to the old owner
-        // only if the model is somehow unavailable.
-        var n, nCatch, nOther;
-        var _dcc = (typeof _discoveryConsideredCounts === "function") ? _discoveryConsideredCounts() : null;
-        if (_dcc) {
-          n = _dcc.total; nCatch = _dcc.catchall; nOther = _dcc.other;
-        } else {
-          var _rcTrip2 = (typeof TripStore !== "undefined" && TripStore.isLoaded && TripStore.isLoaded()) ? TripStore.trip
-            : ((typeof trip !== "undefined") ? trip : null);
-          var _consSet = (_rcTrip2 && typeof MaxData !== "undefined" && MaxData.consideredPlaceKeys)
-            ? MaxData.consideredPlaceKeys(_rcTrip2) : {};
-          var _catchNames = { "Sights near places you listed": 1, "More places to consider": 1 };
-          n = 0; nCatch = 0;
-          Object.keys(_consSet).forEach(function(k){
-            n++;
-            var sec = _consSet[k].section || "";
-            if (_catchNames[sec]) nCatch++;
-          });
-          nOther = n - nCatch;
-        }
-        if (!n) return '';
-        var _whereTxt;
-        if (nOther <= 0) {
-          _whereTxt = 'They are unchecked in <strong>“Sights near places you listed”</strong> and <strong>“More places to consider”</strong>, and are gray pins on the map. Check them in those sections, or tap a gray pin to add it.';
-        } else {
-          _whereTxt = nCatch + ' are unchecked in <strong>“Sights near places you listed”</strong> and <strong>“More places to consider”</strong>; '
-            + nOther + ' sit unchecked in their theme sections. All are gray pins on the map. Check them where they are, or tap a gray pin to add it.';
-        }
-        // PD.379: THE NUMBERS, EXPLAINED. "Even though the numbers may
-        // be correct, a user has to be able to understand where the
-        // numbers come from." The receipt opens with the full
-        // accounting in user terms — what's yours, what's Max's, what
-        // the hubs are — and, when section counts exceed the place
-        // count, says exactly why, with the doubled places one tap
-        // away. All driven by the same audit the console prints.
-        var _covHtml = '';
-        try {
-          if (typeof _maxPlaceSetAudit === "function") {
-            var _aud = _maxPlaceSetAudit(true);
-            var _esc = function(s){ return String(s).replace(/</g, "&lt;"); };
-            var _nListed = _aud.listed.length;
-            var _nMax = _aud.maxChecked + _aud.maxUnchecked;
-            var _nHubs = (_aud.hubs || []).length;
-            // Line 1 — your-list coverage (green) or missing (red).
-            if (_nListed) {
-              if (!_aud.missing.length) {
-                _covHtml += '<div style="margin:0 0 6px;padding:7px 12px;background:#eef7ef;border:1px solid #cfe6d2;border-radius:6px;font-size:11.5px;color:#1e5c2a;font-weight:600;">'
-                  + '✓ All ' + _nListed + ' place' + (_nListed === 1 ? '' : 's') + ' you listed ' + (_nListed === 1 ? 'is' : 'are') + ' here.'
-                  + '</div>';
-              } else {
-                _covHtml += '<div style="margin:0 0 6px;padding:7px 12px;background:#fdf0ee;border:1px solid #f0c9c2;border-radius:6px;font-size:11.5px;color:#8a2e1f;font-weight:600;">'
-                  + '⚠ ' + _aud.missing.length + ' of your ' + _nListed + ' listed place' + (_nListed === 1 ? '' : 's') + ' ' + (_aud.missing.length === 1 ? 'is' : 'are') + ' missing: '
-                  + _aud.missing.slice(0, 6).map(_esc).join(', ')
-                  + (_aud.missing.length > 6 ? '…' : '')
-                  + '</div>';
-              }
-            }
-            // Line 2 — where every place came from.
-            if (_aud.pageTotal) {
-              // PD.401M: the page breakdown comes from the ONE registry and
-              // its total is the SUM of its parts — listed(found) + max +
-              // hubs — so it always reconciles. "you listed" here is the
-              // FOUND count (missing ones are in the warning line above).
-              var _nListedFound = _aud.listed.filter(function(l){ return l.found; }).length;
-              var _parts = [];
-              if (_nListedFound) _parts.push('<strong>' + _nListedFound + ' you listed</strong>');
-              if (_nMax) _parts.push('<strong>' + _nMax + '</strong> Max suggested'
-                + ' (' + _aud.maxUnchecked + ' unchecked' + (_aud.maxChecked ? ', ' + _aud.maxChecked + ' you checked' : '') + ')');
-              if (_nHubs) _parts.push('<strong>' + _nHubs + '</strong> overnight hub' + (_nHubs === 1 ? '' : 's')
-                + ' Max added near your sights (unchecked — check one to make it a base)');
-              if (_parts.length) {
-                // PD.386: the bridge to the trip. The unchecked Max
-                // sights become "Considered (N)" in the trip view —
-                // show the EXACT number both views share so the math
-                // reconciles. Destinations and hubs (counted above)
-                // are NOT considered sights, which is why this can be
-                // smaller than "Max suggested unchecked".
-                var _consTxt = (typeof _aud.considered === "number")
-                  ? ' <span style="color:#5b3f8f;">→ <strong>' + _aud.considered
-                    + '</strong> will appear as <strong>Considered</strong> sights in your trip'
-                    + ' (the number on the trip map).</span>'
-                  : '';
-                _covHtml += '<div style="margin:0 0 6px;padding:7px 12px;background:#f4f4f1;border:1px solid #ddd;border-radius:6px;font-size:11.5px;color:#444;line-height:1.55;">'
-                  + '<strong>' + _aud.pageTotal + ' place' + (_aud.pageTotal === 1 ? '' : 's') + '</strong> on this page: '
-                  + _parts.join(' + ') + '.' + _consTxt
-                  + '</div>';
-              }
-            }
-            // Line 3 — slots vs places, only when they differ.
-            if (_aud.multi && _aud.multi.length) {
-              var _extra = _aud.slots - _aud.unique;
-              _covHtml += '<details style="margin:0 0 6px;padding:6px 12px;background:#f4f4f1;border:1px solid #ddd;border-radius:6px;font-size:11px;color:#555;line-height:1.55;">'
-                + '<summary style="cursor:pointer;font-weight:600;color:#444;">Section counts add up to ' + _aud.slots
-                + ', not ' + _aud.unique + ' — ' + _aud.multi.length + ' place' + (_aud.multi.length === 1 ? '' : 's')
-                + ' appear' + (_aud.multi.length === 1 ? 's' : '') + ' in more than one section. Why?</summary>'
-                + '<div style="margin-top:6px;">A place can be an overnight stay <em>and</em> show under a sights theme, so it counts in both sections. '
-                + 'The doubled place' + (_aud.multi.length === 1 ? '' : 's') + ': '
-                + _aud.multi.slice(0, 15).map(function(m){
-                    return '<strong>' + _esc(m.place) + '</strong> (' + m.sections.map(_esc).join(' + ') + ')';
-                  }).join('; ')
-                + (_aud.multi.length > 15 ? '…' : '') + '.</div>'
-                + '</details>';
-            }
-          }
-        } catch(_){}
-        // PD.339: truthful receipt + a one-tap "keep them all" action.
-        return _covHtml
-          + '<div style="margin:0 0 10px;padding:8px 12px;background:#f3eefa;border:1px solid #ddd0f0;border-radius:6px;font-size:11.5px;color:#3a2d56;line-height:1.5;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
-          +   '<span style="flex:1;min-width:200px;"><strong>' + n + ' unchecked sight' + (n === 1 ? '' : 's') + '</strong> — These are Max\'s suggestions and stay available after you build: ' + _whereTxt + '</span>'
-          +   '<button type="button" onclick="if(typeof _pmCheckAllUnchecked===\'function\')_pmCheckAllUnchecked();" style="flex:0 0 auto;font-size:11px;font-weight:700;color:#5b3f8f;background:#fff;border:1px solid #ddd0f0;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;">✓ Check them all</button>'
-          + '</div>';
-      })()
+    +  ''  /* PD.413: receipt moved to a compact strip at the TOP (see _pmReceiptStripHtml) */
     +  (hasGenerated
       ? ('<div style="display:flex;gap:14px;align-items:center;justify-content:flex-end;flex-wrap:wrap;">'
         + '<label id="tb-roads-toggle-wrap" style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:#1a5fa8;font-weight:600;cursor:pointer;font-family:inherit;user-select:none;" title="Real-road routing for trip-view polylines (OSRM). Off draws straight lines. Applies after the trip view loads.">'
@@ -56734,6 +56898,7 @@ function drawTripMode(opts){
       try { autoSave(); } catch(_) {}
     }
   } catch(_) {}
+  if (typeof _ensureTripInlineSearch === "function") _ensureTripInlineSearch(); // PD.407
   var c=g("lp-content"); if(!c)return;
   c.innerHTML="";
   // v360.1: only reset scroll when entering the trip view from
@@ -59003,6 +59168,7 @@ function drawDestMode(destId, opts){
   }
   var todayIds=getTodayIds(dest);
   var allSights=getAllSights(dest);
+  if (typeof _ensureTripInlineSearch === "function") _ensureTripInlineSearch(); // PD.407
   var c=g("lp-content"); if(!c)return;
   c.innerHTML="";
 
@@ -59223,26 +59389,12 @@ function drawDestMode(destId, opts){
   cmpBtn.textContent="Compare tiles";
   (function(did){cmpBtn.onclick=function(){openMap(did);};})(dest.id);
   dmActs.appendChild(stBtn2); dmActs.appendChild(cmpBtn);
-  // PD.406: notes-affordance parity. The trip-LIST destination card has a
-  // "📓 {place} notes" button (→ _pmOpenResearchCard); this detailed place
-  // view had none. Add the same button so notes are reachable from both.
-  var notesBtn=document.createElement("button"); notesBtn.className="dm-act-btn";
-  (function(d){
-    try { if (typeof _pmEnsureResearchMeta === "function") _pmEnsureResearchMeta(); } catch(_){}
-    var _m = (typeof _tb !== "undefined" && _tb && _tb.placeMeta) ? _tb.placeMeta[d.place] : null;
-    var _ln = (_m && Array.isArray(_m.links)) ? _m.links.length : 0;
-    var _has = !!(_m && ((_m.notes && _m.notes.trim()) || _ln));
-    notesBtn.innerHTML = "📓 " + d.place + " notes" + (_ln ? ' <span style="opacity:.8;font-size:9.5px;">(' + _ln + ')</span>' : "");
-    notesBtn.title = _has
-      ? ("Notes" + (_ln ? " and " + _ln + " link" + (_ln === 1 ? "" : "s") : "") + " for " + d.place)
-      : ("Add notes / source links for " + d.place);
-    if (_has) { notesBtn.style.color = "#fff"; notesBtn.style.background = "#1a5fa8"; notesBtn.style.borderColor = "#1a5fa8"; }
-    notesBtn.onclick = function(e){
-      e.preventDefault(); e.stopPropagation();
-      try { if (typeof _pmEnsureResearchMeta === "function") _pmEnsureResearchMeta(); } catch(_){}
-      if (typeof _pmOpenResearchCard === "function") _pmOpenResearchCard(d.place);
-    };
-  })(dest);
+  // PD.411: notes affordance is now the shared bare 📓 icon (identical to
+  // the Discovery row and the trip overview card) instead of the old wide
+  // "📓 {place} notes" text button. One helper, one look, everywhere.
+  var notesBtn = (typeof _notesIconBtn === "function")
+    ? _notesIconBtn(dest.place)
+    : document.createElement("button");
   dmActs.appendChild(notesBtn);
 
   var dsw=document.createElement("div"); dsw.id="dsw-"+dest.id;

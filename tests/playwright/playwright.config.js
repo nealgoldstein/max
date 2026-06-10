@@ -84,5 +84,11 @@ module.exports = defineConfig({
     },
   ],
 
-  reporter: process.env.CI ? 'list' : [['list'], ['html', { open: 'never' }]],
+  // Quiet local runs: 'dot' prints one char per test and only expands
+  // output for FAILURES (full error + the HTML report for digging in).
+  // CI keeps 'list' for readable logs. Set PW_VERBOSE=1 to force 'list'
+  // locally when you want the per-test rundown.
+  reporter: process.env.CI || process.env.PW_VERBOSE
+    ? 'list'
+    : [['dot'], ['html', { open: 'never' }]],
 });

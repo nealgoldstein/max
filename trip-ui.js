@@ -4132,41 +4132,29 @@
       // trip-view card. Opens the same popover the picker uses, but
       // makes sure _tb.placeMeta is populated from trip.brief first
       // (the user may not have entered the picker this session).
-      var researchBtn = document.createElement("button");
-      researchBtn.type = "button";
-      var _researchMeta = null;
-      try {
-        var brief = (global.trip && global.trip.brief) || null;
-        var meta = brief && brief.placeMeta && typeof global._pmMetaKey === "function"
-          ? brief.placeMeta[global._pmMetaKey(dest.place)] : null;
-        _researchMeta = meta || null;
-      } catch(_){}
-      var _hasResearch = !!(_researchMeta && (
-        (_researchMeta.notes && _researchMeta.notes.trim())
-        || (Array.isArray(_researchMeta.links) && _researchMeta.links.length)
-      ));
-      var _linkN = (_researchMeta && Array.isArray(_researchMeta.links)) ? _researchMeta.links.length : 0;
-      // v359.56.4: link-count badge only; fill state conveys "any content".
-      var _resLinkBadge = _linkN > 0 ? ' <span style="opacity:.8;font-size:9.5px;">(' + _linkN + ')</span>' : "";
-      // v359.60.21: was "📓 Research" — now reads "📓 {place} notes"
-      // so the button names what it opens. On a destination card the
-      // place context is already visible right above, but pairing the
-      // name with the noun "notes" matches the vocabulary set by
-      // "🔬 Research notes" + "📋 Trip notes" at the trip level —
-      // every writable-notes surface ends in "notes."
-      researchBtn.innerHTML = "📓 " + dest.place + " notes" + _resLinkBadge;
-      researchBtn.title = _hasResearch
-        ? "Notes" + (_linkN ? " and " + _linkN + " link" + (_linkN === 1 ? "" : "s") : "") + " for " + dest.place
-        : "Add notes / source links for " + dest.place;
-      researchBtn.style.cssText = "font-size:10.5px;font-weight:600;color:" + (_hasResearch ? "#fff" : "#1a5fa8") + ";background:" + (_hasResearch ? "#1a5fa8" : "#fff") + ";border:1px solid #c8d8f0;border-radius:5px;padding:3px 9px;cursor:pointer;font-family:inherit;";
-      (function(placeName){
-        researchBtn.onclick = function(e){
-          e.preventDefault();
-          e.stopPropagation();
-          if (typeof global._pmEnsureResearchMeta === "function") global._pmEnsureResearchMeta();
-          if (typeof global._pmOpenResearchCard === "function") global._pmOpenResearchCard(placeName);
-        };
-      })(dest.place);
+      // PD.411: notes affordance is now the shared bare 📓 icon (identical
+      // to the Discovery row and the trip detail view) instead of the old
+      // wide "📓 {place} notes" text button. One helper, one look,
+      // everywhere. Falls back to a minimal inline button only if the
+      // shared helper isn't present (older index.html).
+      var researchBtn;
+      if (typeof global._notesIconBtn === "function") {
+        researchBtn = global._notesIconBtn(dest.place);
+      } else {
+        researchBtn = document.createElement("button");
+        researchBtn.type = "button";
+        researchBtn.textContent = "📓";
+        researchBtn.title = "Notes for " + dest.place;
+        researchBtn.style.cssText = "font-size:11px;color:#888;background:#fff;border:1px solid #ddd;border-radius:9px;padding:1px 7px;cursor:pointer;font-family:inherit;line-height:1.3;";
+        (function(placeName){
+          researchBtn.onclick = function(e){
+            e.preventDefault();
+            e.stopPropagation();
+            if (typeof global._pmEnsureResearchMeta === "function") global._pmEnsureResearchMeta();
+            if (typeof global._pmOpenResearchCard === "function") global._pmOpenResearchCard(placeName);
+          };
+        })(dest.place);
+      }
       roleRow.appendChild(researchBtn);
       var link = document.createElement("a");
       link.href = "#";
