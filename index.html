@@ -3330,21 +3330,24 @@ async function callMax(messages, maxTokens, timeoutMs, opts) {
         // session is genuinely expired after CONSECUTIVE 401s; the counter
         // resets on any successful call. A lone 401 throws a quiet,
         // retryable error and KEEPS the token.
+        // PD.436: do NOT auto-pop the sign-in modal from a background LLM
+        // call. Neal: "I still get a sign-in request, but when I close it,
+        // it works anyway" -- the 401 was transient (the proxy is fine), and
+        // shoving the modal over the screen on a blip is exactly the
+        // intrusive behavior PD.339 removed for the API-key form. Surface a
+        // quiet, one-shot toast and KEEP the session; the user re-signs-in
+        // via the Sync button if a genuine expiry persists. We no longer
+        // signOut / clear the token here at all -- a credential must survive
+        // a transient error, and only an explicit user action ends a session.
         window._maxProxy401Count = (window._maxProxy401Count || 0) + 1;
-        if (window._maxProxy401Count >= 2) {
-          window._maxProxy401Count = 0;
-          try { localStorage.removeItem("max-server-token"); } catch(_) {}
-          if (typeof MaxSync !== "undefined" && typeof MaxSync.signOut === "function") {
-            // PD.434 (T1.1): keep local trips — an auth blip must never
-            // delete the user's (possibly unpushed) trips.
-            try { MaxSync.signOut({ keepLocalTrips: true }); } catch(_) {}
-          }
-          if (typeof MaxSync !== "undefined" && typeof MaxSync.showSignInModal === "function") {
-            try { MaxSync.showSignInModal(); } catch(_) {}
-          }
-          throw new Error("Session expired \u2014 sign in again to continue.");
+        if (window._maxProxy401Count === 2) {
+          try {
+            if (typeof showSaveStatus === "function") {
+              showSaveStatus("Sync had an auth hiccup — tap the Sync button to re-sign-in if it persists.", 6000);
+            }
+          } catch(_){}
         }
-        throw new Error("Auth hiccup \u2014 please retry. Your sign-in was kept; if it keeps failing you'll be asked to sign in again.");
+        throw new Error("Auth hiccup — your sign-in was kept; retry, and use the Sync button if it keeps failing.");
       }
       // Not signed in to begin with \u2014 throw a quieter error so callers
       // (refreshRestaurantSuggestions etc.) can degrade silently
@@ -48219,14 +48222,25 @@ function updateMainMap(){
       return Array.isArray(b) && b.length >= 2 && isFinite(b[0]) && isFinite(b[1])
         && !(Math.abs(b[0]) < 0.01 && Math.abs(b[1]) < 0.01);
     });
-    if(_fitBounds.length===1){_mainMap.setView(_fitBounds[0],10,{animate:false});}
-    else if(_fitBounds.length>1){try{_mainMap.fitBounds(_fitBounds,{padding:[40,40],animate:false});}catch(e){}}
+    // PD.435: only AUTO-FRAME the overview when the user actually arrives
+    // here — first render of this trip, or returning from a destination
+    // view. A same-trip re-render (a mutation, e.g. adding an along-the-way
+    // / day-trip stop) PRESERVES the current pan/zoom. The overview used to
+    // refit on every render, so an edit scrolled the map and the freshly
+    // converted pin appeared to vanish (Neal: "it still scrolls… removes it
+    // from the map"). Mirrors the dest-view branch's isNewDest gating.
+    // (_maxDestId is non-null only if the previous render was dest mode.)
+    var _cameFromDestView = (_mainMap._maxDestId != null);
+    var _firstOverviewForTrip = (_mainMap._overviewTripId !== (trip && trip.id));
+    if (_cameFromDestView || _firstOverviewForTrip) {
+      if(_fitBounds.length===1){_mainMap.setView(_fitBounds[0],10,{animate:false});}
+      else if(_fitBounds.length>1){try{_mainMap.fitBounds(_fitBounds,{padding:[40,40],animate:false});}catch(e){}}
+    }
+    _mainMap._overviewTripId = (trip && trip.id) || null;
     // Round ED: clear the cached "last dest the map zoomed to" so that
     // when the user clicks a destination card from the trip view, the
     // dest-view branch below treats it as a fresh arrival and refits
-    // bounds to that destination + its sights. Without this, going
-    // trip → dest A → trip → dest A again leaves the map fitted to
-    // the whole trip because _maxDestId still equals activeDest.
+    // bounds to that destination + its sights.
     _mainMap._maxDestId = null;
   } else {
     if (routeBtn) routeBtn.style.display = 'none';
