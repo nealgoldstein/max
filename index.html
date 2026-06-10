@@ -3335,7 +3335,9 @@ async function callMax(messages, maxTokens, timeoutMs, opts) {
           window._maxProxy401Count = 0;
           try { localStorage.removeItem("max-server-token"); } catch(_) {}
           if (typeof MaxSync !== "undefined" && typeof MaxSync.signOut === "function") {
-            try { MaxSync.signOut(); } catch(_) {}
+            // PD.434 (T1.1): keep local trips — an auth blip must never
+            // delete the user's (possibly unpushed) trips.
+            try { MaxSync.signOut({ keepLocalTrips: true }); } catch(_) {}
           }
           if (typeof MaxSync !== "undefined" && typeof MaxSync.showSignInModal === "function") {
             try { MaxSync.showSignInModal(); } catch(_) {}
@@ -26790,6 +26792,15 @@ if (typeof MaxRoute !== "undefined" && typeof MaxRoute.on === "function") {
 //   MaxPlaceKey.equal(a, b)     → bool  (normalize-and-compare)
 var MaxPlaceKey = {
   normalize: function(name){
+    // PD.432 (T2.3): resolve LEARNED ALIASES the same way every writer
+    // does (_pmKey → PlaceKey.resolve), so a lookup keyed here matches
+    // what was stored under the canonical key. This was alias-blind
+    // (_normPlaceName only), so after a learned rename _pmDeriveRole
+    // couldn't find the candidate it just wrote and the role reverted to
+    // its default — the highest-leverage key inconsistency in the audit.
+    if (typeof window !== "undefined" && typeof window._pmKey === "function") {
+      try { return window._pmKey(name); } catch(_){}
+    }
     if (typeof _normPlaceName === "function") return _normPlaceName(name);
     // Fallback (shouldn't fire — engine-trip.js loads first).
     return String(name || "").toLowerCase().trim();
@@ -45495,6 +45506,21 @@ if (typeof MaxBuild !== "undefined" && typeof MaxBuild.on === "function") {
 // _emitTripMutation() is the helper mutators use after a state
 // change: autoSave + emit('tripChange') + emit('mapDataChange').
 // Defined later in the script, after autoSave is in scope.
+//
+// PD.433 (T3.1): coalesce map repaints. _emitTripMutation emits BOTH
+// tripChange AND mapDataChange, and each subscriber below called the
+// ~1200-line updateMainMap — so every mutation repainted the map TWICE.
+// Collapse multiple requests in the same tick into ONE render on the
+// next microtask. Direct updateMainMap callers elsewhere are unaffected.
+var _mainMapRepaintScheduled = false;
+function _scheduleMainMapUpdate() {
+  if (_mainMapRepaintScheduled) return;
+  _mainMapRepaintScheduled = true;
+  Promise.resolve().then(function () {
+    _mainMapRepaintScheduled = false;
+    if (typeof updateMainMap === "function") { try { updateMainMap(); } catch (_) {} }
+  });
+}
 if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.on === "function") {
   MaxEngineTrip.on("tripChange", function () {
     // TM.5 final (v333): route through MaxTripUI.renderTripPage so the
@@ -45543,10 +45569,11 @@ if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.on === "functio
     // here means a nights flip (overnight ↔ see) repaints the pin
     // even on code paths that emit only tripChange (or that go
     // through drawTripMode without an explicit mapDataChange).
-    if (typeof updateMainMap === "function") updateMainMap();
+    // PD.433: coalesced so a tripChange+mapDataChange pair repaints once.
+    _scheduleMainMapUpdate();
   });
   MaxEngineTrip.on("mapDataChange", function () {
-    if (typeof updateMainMap === "function") updateMainMap();
+    _scheduleMainMapUpdate();
   });
 }
 
@@ -48182,8 +48209,18 @@ function updateMainMap(){
       });
     })();
 
-    if(bounds.length===1){_mainMap.setView(bounds[0],10,{animate:false});}
-    else if(bounds.length>1){try{_mainMap.fitBounds(bounds,{padding:[40,40],animate:false});}catch(e){}}
+    // PD.430: drop invalid / null-island coords before fitting. A single
+    // [0,0] or non-finite point — e.g. an unresolved day-trip/wayside coord
+    // from a role conversion — was dragging the bounds out to the whole
+    // world (Neal: "made it a day trip, the map zoomed all the way out").
+    // (0,0) sits in the open Atlantic off west Africa, so excluding a tiny
+    // box around it never drops a real destination.
+    var _fitBounds = bounds.filter(function(b){
+      return Array.isArray(b) && b.length >= 2 && isFinite(b[0]) && isFinite(b[1])
+        && !(Math.abs(b[0]) < 0.01 && Math.abs(b[1]) < 0.01);
+    });
+    if(_fitBounds.length===1){_mainMap.setView(_fitBounds[0],10,{animate:false});}
+    else if(_fitBounds.length>1){try{_mainMap.fitBounds(_fitBounds,{padding:[40,40],animate:false});}catch(e){}}
     // Round ED: clear the cached "last dest the map zoomed to" so that
     // when the user clicks a destination card from the trip view, the
     // dest-view branch below treats it as a fresh arrival and refits
@@ -50727,7 +50764,12 @@ function convertDestToDayTrip(destId, hubDestId, opts){
 
   var routeId = "r-dt-" + hubDestId + "-" + placeId;
   var existingRoute = trip.routes.find(function(r){ return r && r.id === routeId; });
-  var srcNights = src.nights || 1;
+  // PD.431: preserve a REAL 0 — a 0-night "see" destination (a sight like
+  // a waterfall) occupies no night, so the hub must absorb 0, not 1. The
+  // old `src.nights || 1` turned a sight's 0 into 1 and inflated the trip
+  // by a phantom overnight (Neal: "made it a day trip, it also made it an
+  // overnight"). Default to 1 only when nights is genuinely missing.
+  var srcNights = (typeof src.nights === "number") ? src.nights : 1;
 
   // v3 Phase 3: write the native Segment shape — route gets
   // kind:"route" + subKind:"dayTrip", Day gets refs[] alongside the

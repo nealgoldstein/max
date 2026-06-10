@@ -412,11 +412,18 @@
     } catch (_) { return false; }
   }
 
-  function signOut() {
-    // v353.2: clear local trip cache so the next user (or the same
-    // user signing in as a different account) doesn't see this
-    // user's trips. UI prefs / onboarded flag / SW cache stay.
-    _wipeLocalTripCache();
+  function signOut(opts) {
+    opts = opts || {};
+    // v353.2: an EXPLICIT user sign-out clears the local trip cache so the
+    // next user (or this user signing in as a different account) doesn't
+    // see these trips. UI prefs / onboarded flag / SW cache stay.
+    //
+    // PD.434 (T1.1): but an AUTOMATIC sign-out triggered by a transient or
+    // misclassified 401 must NEVER wipe local trips — that was deleting
+    // every max-trip-* (including not-yet-pushed work) because an Anthropic
+    // overload surfaced as a 401. Such callers pass {keepLocalTrips:true}
+    // to clear only the session token, not the user's data.
+    if (!opts.keepLocalTrips) _wipeLocalTripCache();
     setToken(null);
     setEmail(null);
     _emitMaxSyncEvent('signedOut');
