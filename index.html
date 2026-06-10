@@ -50743,7 +50743,10 @@ function convertDestToDayTrip(destId, hubDestId, opts){
     placeId = "pl-" + (src.place || "unknown").toLowerCase().replace(/[^a-z0-9]+/g, "-");
   }
 
-  // Make sure trip.places has an entry.
+  // Make sure trip.places has an entry — WITH coordinates (PD.438: the
+  // day-trip render resolves the stop from trip.places[id].lat/lng, so a
+  // pre-existing entry without coords would make the stop unplottable and
+  // it would vanish from the map; backfill the source's coords).
   if (!trip.places) trip.places = {};
   if (!trip.places[placeId]) {
     trip.places[placeId] = {
@@ -50753,6 +50756,11 @@ function convertDestToDayTrip(destId, hubDestId, opts){
       lat:     (typeof src.lat === "number") ? src.lat : null,
       lng:     (typeof src.lng === "number") ? src.lng : null
     };
+  } else {
+    var _dp = trip.places[placeId];
+    if ((typeof _dp.lat !== "number" || !isFinite(_dp.lat)) && typeof src.lat === "number") _dp.lat = src.lat;
+    if ((typeof _dp.lng !== "number" || !isFinite(_dp.lng)) && typeof src.lng === "number") _dp.lng = src.lng;
+    if (!_dp.name && src.place) _dp.name = src.place;
   }
 
   // Distance from hub for chip metadata + future sort.
@@ -51036,7 +51044,13 @@ function convertDestToWayside(destId, opts){
     placeId = "pl-" + (src.place || "unknown").toLowerCase().replace(/[^a-z0-9]+/g, "-");
   }
 
-  // Ensure trip.places has an entry.
+  // Ensure trip.places has an entry — WITH coordinates. PD.438: the
+  // wayside render resolves a stop's position from trip.places[id].lat/lng
+  // (the dest pin used dest.lat/lng), so if this place entry already
+  // existed WITHOUT coords, the new wayside has no position, getCityCenter
+  // can't resolve a sight name, and the render silently drops it — the
+  // place "disappears from the map." Always backfill the source dest's
+  // coords so the wayside pin can be placed.
   if (!trip.places) trip.places = {};
   if (!trip.places[placeId]) {
     trip.places[placeId] = {
@@ -51046,6 +51060,11 @@ function convertDestToWayside(destId, opts){
       lat:     (typeof src.lat === "number") ? src.lat : null,
       lng:     (typeof src.lng === "number") ? src.lng : null
     };
+  } else {
+    var _wp = trip.places[placeId];
+    if ((typeof _wp.lat !== "number" || !isFinite(_wp.lat)) && typeof src.lat === "number") _wp.lat = src.lat;
+    if ((typeof _wp.lng !== "number" || !isFinite(_wp.lng)) && typeof src.lng === "number") _wp.lng = src.lng;
+    if (!_wp.name && src.place) _wp.name = src.place;
   }
 
   // Find the existing prev→src and src→next transit routes.
@@ -51065,7 +51084,9 @@ function convertDestToWayside(destId, opts){
 
   // Build the stop PlanItem. legacy.preservedFirstLeg/preservedSecondLeg
   // hold full route snapshots so the reverse writer can re-split.
-  var srcNights = src.nights || 1;
+  // PD.431: preserve a real 0 — a 0-night sight made a wayside adds no
+  // night to the absorber. (Was `src.nights || 1`, a phantom overnight.)
+  var srcNights = (typeof src.nights === "number") ? src.nights : 1;
   var stopPlanItem = {
     id:             "pi-stop-w-" + placeId,
     type:           "stop",
