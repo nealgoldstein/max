@@ -59223,6 +59223,27 @@ function drawDestMode(destId, opts){
   cmpBtn.textContent="Compare tiles";
   (function(did){cmpBtn.onclick=function(){openMap(did);};})(dest.id);
   dmActs.appendChild(stBtn2); dmActs.appendChild(cmpBtn);
+  // PD.406: notes-affordance parity. The trip-LIST destination card has a
+  // "📓 {place} notes" button (→ _pmOpenResearchCard); this detailed place
+  // view had none. Add the same button so notes are reachable from both.
+  var notesBtn=document.createElement("button"); notesBtn.className="dm-act-btn";
+  (function(d){
+    try { if (typeof _pmEnsureResearchMeta === "function") _pmEnsureResearchMeta(); } catch(_){}
+    var _m = (typeof _tb !== "undefined" && _tb && _tb.placeMeta) ? _tb.placeMeta[d.place] : null;
+    var _ln = (_m && Array.isArray(_m.links)) ? _m.links.length : 0;
+    var _has = !!(_m && ((_m.notes && _m.notes.trim()) || _ln));
+    notesBtn.innerHTML = "📓 " + d.place + " notes" + (_ln ? ' <span style="opacity:.8;font-size:9.5px;">(' + _ln + ')</span>' : "");
+    notesBtn.title = _has
+      ? ("Notes" + (_ln ? " and " + _ln + " link" + (_ln === 1 ? "" : "s") : "") + " for " + d.place)
+      : ("Add notes / source links for " + d.place);
+    if (_has) { notesBtn.style.color = "#fff"; notesBtn.style.background = "#1a5fa8"; notesBtn.style.borderColor = "#1a5fa8"; }
+    notesBtn.onclick = function(e){
+      e.preventDefault(); e.stopPropagation();
+      try { if (typeof _pmEnsureResearchMeta === "function") _pmEnsureResearchMeta(); } catch(_){}
+      if (typeof _pmOpenResearchCard === "function") _pmOpenResearchCard(d.place);
+    };
+  })(dest);
+  dmActs.appendChild(notesBtn);
 
   var dsw=document.createElement("div"); dsw.id="dsw-"+dest.id;
   // Re-render cached story if available
