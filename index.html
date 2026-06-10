@@ -17302,15 +17302,13 @@ async function _generateActivitiesForPlaceImpl(){
   var _completenessAsked = MaxGenPrompt.detectCompleteness(
     [ctx || "", _tb.intent || "", _tb.placeContext || "", _tb.activityDesc || ""].join(" "));
 
-  // PD.404 (#80): theming-pass feature flag (default OFF). When on AND the
-  // traveler has a listed set, generation is told NOT to re-emit the list
-  // (a separate compact theming pass sorts the list into sections instead),
-  // which is what stops the model dropping places from long lists. Enable
-  // with localStorage.setItem("max-theming-pass","1") to A/B test live.
-  var _themingPassOn = false;
-  try { _themingPassOn = (typeof localStorage !== "undefined" && localStorage.getItem("max-theming-pass") === "1"); } catch(_){}
-  var _hasUserList = Array.isArray(_tb._pastedListPlaces) && _tb._pastedListPlaces.length > 0;
-
+  // PD.404 (#80): generation is NOT softened. Max emits its full normal set
+  // (re-emits the user's list AND its own suggestions, exactly like baseline)
+  // so the "Sights near places you listed" / themed Max suggestions are
+  // preserved. The theming pass (in reconcile) ONLY cleans up listed sights
+  // that still landed in a catch-all — it never replaces Max's discovery.
+  // (Earlier we softened the prompt to "suggest complementary only"; that
+  // suppressed Max's suggestions and was the wrong trade — reverted.)
   var prompt = MaxGenPrompt.build({
     place: place,
     ctx: ctx,
@@ -17319,8 +17317,7 @@ async function _generateActivitiesForPlaceImpl(){
     completeness: _completenessAsked,
     userList: _tb._pastedListPlaces || [],
     pmChips: pmChips,
-    personalContext: (typeof _briefPersonalContext === "function") ? _briefPersonalContext() : "",
-    listHandledSeparately: _themingPassOn && _hasUserList
+    personalContext: (typeof _briefPersonalContext === "function") ? _briefPersonalContext() : ""
   });
 
   try {

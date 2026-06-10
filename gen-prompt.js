@@ -182,18 +182,20 @@
     var userList   = opts.userList || [];
     var sections   = opts.sections || [];
     var categories = opts.categories || _SIX_CATEGORIES;
+    var _targetThemes = Math.max(4, Math.min(8, Math.round((userList.length || 0) / 4) + (sections.length || 0)));
     return "A traveler is planning a trip to " + place + ".\n"
       + (ctx ? "Their context: " + ctx + "\n" : "")
       + "\nThey listed these specific places they want included in the trip:\n"
       + userList.map(function(p){ return "  - " + p; }).join("\n") + "\n\n"
       + "I have already organized the rest of the trip into these themed sections:\n"
       + (sections.length ? sections.map(function(s){ return "  - " + s; }).join("\n") : "  (no sections yet)") + "\n\n"
-      + "This is a SORTING task, not a generation task. For EVERY listed place, tell me which themed section it best belongs in and its category, so I can file it correctly alongside the rest of the trip.\n"
-      + "  - Prefer a section from the list above. If a listed place genuinely fits none of them, you may name a new short verb-phrase section (e.g. \"Visit historic sites\").\n"
-      + "  - Return EXACTLY one entry per listed place — no more, no fewer. Do NOT add places the traveler didn't list. Do NOT drop any listed place.\n"
+      + "This is a SORTING task, not a generation task. Sort EVERY listed place into a themed section so I can file it alongside the rest of the trip.\n"
+      + "  - COVER EVERY PLACE. Return EXACTLY one entry per listed place — no more, no fewer. Every place above MUST appear in your output. Do NOT add places the traveler didn't list. Do NOT drop any.\n"
+      + "  - USE FEW, BROAD THEMES. Reuse the sections above wherever they fit; only invent a new section when several places need it. Aim for about " + _targetThemes + " themes TOTAL across everything — group similar places into the SAME theme (e.g. ALL waterfalls under one \"Chase waterfalls,\" ALL museums/landmarks under one \"Explore culture & history\"). Do NOT create a separate one-place theme for each sight — that is the main failure to avoid.\n"
+      + "  - A good theme holds 3+ places. If you're about to put a single place in its own theme, find the broader theme it shares with others instead.\n"
       + "  - Keep the place name EXACTLY as the traveler wrote it (so I can match it back).\n\n"
       + "Return ONLY a JSON array (no markdown), one object per listed place:\n"
-      + '[{"place":"<exact listed place>","section":"<best section>","category":"<one of the six>","iconic":false,"lat":0.0,"lng":0.0,"country":"<country>"}]\n\n'
+      + '[{"place":"<exact listed place>","section":"<broad theme name>","category":"<one of the six>","iconic":false,"lat":0.0,"lng":0.0,"country":"<country>"}]\n\n'
       + "Categories: " + categories.join(", ") + ".\n"
       + "Coordinates: 4 decimals, accurate within ~5km; use 0,0 only if you genuinely don't know the place. Set iconic:true only for a place a first-time visitor would be disappointed to miss.";
   }
