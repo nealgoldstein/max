@@ -50731,22 +50731,30 @@ if (typeof globalThis !== "undefined") {
 function _ensureStopPlaceEntry(placeId, src){
   if (!placeId || !src) return null;
   if (!trip.places) trip.places = {};
-  var p = trip.places[placeId];
-  if (!p) {
-    p = trip.places[placeId] = {
-      id:      placeId,
-      name:    src.place,
-      country: src.country || null,
-      lat:     (typeof src.lat === "number") ? src.lat : null,
-      lng:     (typeof src.lng === "number") ? src.lng : null
-    };
-    return p;
-  }
-  // Backfill onto a pre-existing entry that may be missing coords/name.
-  if ((typeof p.lat !== "number" || !isFinite(p.lat)) && typeof src.lat === "number") p.lat = src.lat;
-  if ((typeof p.lng !== "number" || !isFinite(p.lng)) && typeof src.lng === "number") p.lng = src.lng;
+  var p = trip.places[placeId] || (trip.places[placeId] = { id: placeId });
   if (!p.name && src.place) p.name = src.place;
   if (!p.country && src.country) p.country = src.country;
+
+  // Resolve CONCRETE coordinates the same way the destination pin did
+  // (_resolveDestCtr: own lat/lng, else getCityCenter(name)). Neal's
+  // principle: "if it's on the map it has to have coordinates" - so if
+  // the source was renderable as a destination, the stop it becomes must
+  // inherit a real position. We store actual numbers rather than copying
+  // a possibly-null lat/lng, so the stop never depends on getCityCenter
+  // resolving the SAME name again downstream. Only fill when missing -
+  // never clobber a good existing position.
+  var hasCoords = (typeof p.lat === "number" && isFinite(p.lat)
+                && typeof p.lng === "number" && isFinite(p.lng));
+  if (!hasCoords) {
+    var lat = (typeof src.lat === "number" && isFinite(src.lat)) ? src.lat : null;
+    var lng = (typeof src.lng === "number" && isFinite(src.lng)) ? src.lng : null;
+    if ((lat === null || lng === null) && typeof getCityCenter === "function" && src.place) {
+      var c = getCityCenter(src.place);
+      if (c && isFinite(c[0]) && isFinite(c[1])) { lat = c[0]; lng = c[1]; }
+    }
+    if (lat !== null) p.lat = lat;
+    if (lng !== null) p.lng = lng;
+  }
   return p;
 }
 
