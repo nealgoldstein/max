@@ -3321,14 +3321,28 @@ async function callMax(messages, maxTokens, timeoutMs, opts) {
       var _wasSignedIn = (typeof MaxSync !== "undefined" && typeof MaxSync.isSignedIn === "function")
         ? !!MaxSync.isSignedIn() : false;
       if (_wasSignedIn) {
-        try { localStorage.removeItem("max-server-token"); } catch(_) {}
-        if (typeof MaxSync !== "undefined" && typeof MaxSync.signOut === "function") {
-          try { MaxSync.signOut(); } catch(_) {}
+        // PD.424: do NOT destroy the session on the FIRST 401 \u2014 same
+        // architectural flaw as the API-key bug (PD.421). A transient or
+        // misclassified 401 (a momentary proxy/auth blip, an overload
+        // surfaced as 401) was deleting the session token and signing the
+        // user out \u2014 "I have to sign in multiple times." A persistent
+        // credential must survive a transient error: only conclude the
+        // session is genuinely expired after CONSECUTIVE 401s; the counter
+        // resets on any successful call. A lone 401 throws a quiet,
+        // retryable error and KEEPS the token.
+        window._maxProxy401Count = (window._maxProxy401Count || 0) + 1;
+        if (window._maxProxy401Count >= 2) {
+          window._maxProxy401Count = 0;
+          try { localStorage.removeItem("max-server-token"); } catch(_) {}
+          if (typeof MaxSync !== "undefined" && typeof MaxSync.signOut === "function") {
+            try { MaxSync.signOut(); } catch(_) {}
+          }
+          if (typeof MaxSync !== "undefined" && typeof MaxSync.showSignInModal === "function") {
+            try { MaxSync.showSignInModal(); } catch(_) {}
+          }
+          throw new Error("Session expired \u2014 sign in again to continue.");
         }
-        if (typeof MaxSync !== "undefined" && typeof MaxSync.showSignInModal === "function") {
-          try { MaxSync.showSignInModal(); } catch(_) {}
-        }
-        throw new Error("Session expired \u2014 sign in again to continue.");
+        throw new Error("Auth hiccup \u2014 please retry. Your sign-in was kept; if it keeps failing you'll be asked to sign in again.");
       }
       // Not signed in to begin with \u2014 throw a quieter error so callers
       // (refreshRestaurantSuggestions etc.) can degrade silently
@@ -3346,21 +3360,24 @@ async function callMax(messages, maxTokens, timeoutMs, opts) {
       } catch(_){}
       throw new Error("API key required \u2014 tap \ud83d\udd11 to add your Anthropic API key.");
     }
-    // v324: when the key WAS set but Anthropic rejected it ("invalid
-    // x-api-key" or other 401), open the entry form so the user can
-    // re-paste without hunting for the Settings button. Also clear
-    // the bad key from localStorage so a stale paste doesn't keep
-    // failing on every retry. Surface a clearer message that points
-    // at the most likely fix.
+    // PD.421: do NOT auto-DELETE the saved key on a 401. The old code
+    // wiped max-api-key from localStorage on any 401 / authentication_error
+    // \u2014 but a transient or misclassified 401 (a momentary auth blip, an
+    // overload surfaced as 401, a single bad request) then destroyed a
+    // VALID key, forcing the user to re-paste it ("my key disappeared
+    // again"). Now we OPEN the entry form so the user can re-paste IF the
+    // key is genuinely bad, but we keep the saved key in place so a one-off
+    // 401 can't lose it. Re-pasting simply overwrites it.
     if (!useProxy && _apiKey && (data.error.type === "authentication_error" || resp.status === 401)) {
-      try { localStorage.removeItem("max-api-key"); } catch(_) {}
-      _apiKey = null;
-      if (typeof renderApiKeyUI === "function") renderApiKeyUI();
-      showApiKeyForm();
-      throw new Error("API key was rejected by Anthropic. The saved key has been cleared \u2014 paste a fresh copy from console.anthropic.com.");
+      if (typeof showApiKeyForm === "function") showApiKeyForm();
+      throw new Error("Anthropic rejected that request (401). Your saved key was kept \u2014 if this keeps happening, paste a fresh copy from console.anthropic.com.");
     }
     throw new Error(data.error.message);
   }
+  // PD.424: a successful response means the credential is fine — reset the
+  // consecutive-401 tolerance counter so a later transient blip again gets
+  // its grace before any sign-out.
+  if (useProxy) window._maxProxy401Count = 0;
   var text = data.content[0].text;
 
   // Round CI: store in cache. Evict oldest by lastUsed if past the cap.
@@ -4492,6 +4509,13 @@ var MaxMapPin = {
       s.fontPx = 9;
       s.strokeStyle = "dashed";
       s.opacity = 0.85;
+      // PD.425 (map collapse #2): ONE place owns the considered-pin tint.
+      // A suggested STAY is light blue, a suggested SIGHT is light green;
+      // callers pass ctx.isStay (true/false) instead of overriding .fill
+      // themselves — this tint used to be copy-pasted at 4 render sites.
+      // When isStay is undefined the pin stays neutral gray (#bbb).
+      if (ctx.isStay === true)  s.fill = "#a9c8ef";
+      else if (ctx.isStay === false) s.fill = "#a9d8bb";
     }
     // Iconic gold border: dropped per Round NC.X user decision.
     if (typeof ctx.size === "number" && ctx.size > 0) {
@@ -6628,8 +6652,11 @@ function _tripSearchScan(q) {
     if (N(dest.place).indexOf(q) >= 0 || N(dest.label).indexOf(q) >= 0) {
       out.push({ kind: "dest", destId: dest.id, dayId: null, context: destLabel });
     }
-    // v359.60.66: per-destination notes live on dest.research.
-    if (N(dest.research).indexOf(q) >= 0) {
+    // PD.416: per-destination notes now live in the unified per-place
+    // store (placeMeta.notes); fall back to legacy dest.research.
+    var _destNotes = (typeof _pmGetPlaceNotes === "function")
+      ? _pmGetPlaceNotes(dest.place) : (dest.research || "");
+    if (N(_destNotes).indexOf(q) >= 0) {
       out.push({ kind: "note", destId: dest.id, dayId: null, context: destLabel + " · note" });
     }
     (dest.days || []).forEach(function (day) {
@@ -25370,33 +25397,46 @@ if (typeof globalThis !== "undefined") globalThis._pmTogglePlaceStay = _pmToggle
 // placeMeta.stayOverride, then LLM's overnight hint. All three
 // surfaces — map pin shape, popup label, ⋯ menu label — read
 // through this single function, so they can't disagree.
+// PD.423 (map-renderer collapse, phase 1): the ONE per-place "is this an
+// overnight (listed in a stay section)?" signal. A place the user LISTED
+// as an overnight lives in a stay section ("Overnight stays" /
+// "Recommended overnight stays" / "Overnight stays to consider"); that
+// section membership IS the overnight intent, even before nights are
+// assigned. Shared by _pmIsStayCandidate AND _pmDeriveRole so there is a
+// SINGLE stay/see authority (they used to default oppositely — one to
+// "stay", one to "see" — which is what made the maps disagree).
+function _pmInAnyStaySection(placeName){
+  try {
+    if (typeof _tb === "undefined" || !_tb || !Array.isArray(_tb.placeActivities)) return false;
+    var k = (typeof _pmMetaKey === "function") ? _pmMetaKey(placeName)
+          : (window._pmKey ? window._pmKey(placeName) : String(placeName || "").toLowerCase());
+    if (!k) return false;
+    var hit = false;
+    _tb.placeActivities.forEach(function(a){
+      if (hit || !a) return;
+      if (!(typeof window._isStaySection === "function" && window._isStaySection(a.section))) return;
+      (a.requiredPlaces || []).forEach(function(p){
+        if (p && _pmMetaKey(p.place) === k) hit = true;
+      });
+    });
+    return hit;
+  } catch(_){ return false; }
+}
+if (typeof globalThis !== "undefined") globalThis._pmInAnyStaySection = _pmInAnyStaySection;
+
+// PD.423: _pmIsStayCandidate now DELEGATES to _pmDeriveRole so there is a
+// single stay/see cascade. Passing kept:true asks the cascade purely
+// "stay or see for this place?" (skipping the unkept→maybe tier); the
+// cascade consults the same signals it always did — _roleTouched role,
+// stayOverride, the stay-section helper above, and the overnight flag.
 function _pmIsStayCandidate(placeName){
   if (!placeName) return false;
   try {
     var k = (typeof _pmMetaKey === "function") ? _pmMetaKey(placeName) : window._pmKey(placeName);
-    // 1. c.role — committed by MaxRoleWriter or trip-view popover.
-    if (_tb && Array.isArray(_tb.candidates)) {
-      var cand = _tb.candidates.find(function(c){
-        return c && c.place && _pmMetaKey(c.place) === k;
-      });
-      if (cand && cand._roleTouched && (cand.role === "stay" || cand.role === "see")) {
-        return cand.role === "stay";
-      }
+    if (typeof _pmDeriveRole === "function") {
+      var r = _pmDeriveRole({ place: placeName, kept: true }, k, {});
+      return !!(r && r.role === "stay");
     }
-    // 2. placeMeta.stayOverride — legacy user override.
-    var meta = (_tb && _tb.placeMeta) ? _tb.placeMeta[k] : null;
-    if (meta) {
-      if (meta.stayOverride === true)  return true;
-      if (meta.stayOverride === false) return false;
-    }
-    // 3. LLM hint — any requiredPlace ref says overnight===true.
-    var anyOvernight = false;
-    (_tb.placeActivities || []).forEach(function(a){
-      (a.requiredPlaces || []).forEach(function(p){
-        if (p && _pmMetaKey(p.place) === k && p.overnight === true) anyOvernight = true;
-      });
-    });
-    return anyOvernight;
   } catch(_){}
   return false;
 }
@@ -27723,6 +27763,34 @@ function _pmPlaceMeta(placeName, opts){
   }
   return _tb.placeMeta[key];
 }
+// PD.416: ONE per-place notes store. Both the 📓 research card
+// (_pmOpenResearchCard) and the trip view's inline "Keep in mind"
+// editor (trip-ui.js _renderResearch) read/write THIS — the canonical
+// _tb.placeMeta[key].notes, mirrored to trip.brief.placeMeta on persist.
+// Was two stores (placeMeta.notes vs dest.research); they now share one.
+function _pmGetPlaceNotes(placeName){
+  try {
+    if (typeof _pmEnsureResearchMeta === "function") _pmEnsureResearchMeta();
+    var m = (typeof _pmPlaceMeta === "function") ? _pmPlaceMeta(placeName, { create: false }) : null;
+    return (m && typeof m.notes === "string") ? m.notes : "";
+  } catch(_) { return ""; }
+}
+function _pmSetPlaceNotes(placeName, text){
+  try {
+    if (typeof _pmEnsureResearchMeta === "function") _pmEnsureResearchMeta();
+    var m = (typeof _pmPlaceMeta === "function") ? _pmPlaceMeta(placeName, { create: true }) : null;
+    if (!m) return false;
+    m.notes = (text == null ? "" : String(text));
+    if (typeof _pmPersistResearchToTrip === "function") _pmPersistResearchToTrip();
+    if (typeof autoSave === "function") { try { autoSave(); } catch(_){} }
+    else if (typeof localSave === "function") { try { localSave(); } catch(_){} }
+    return true;
+  } catch(_) { return false; }
+}
+if (typeof globalThis !== "undefined") {
+  globalThis._pmGetPlaceNotes = _pmGetPlaceNotes;
+  globalThis._pmSetPlaceNotes = _pmSetPlaceNotes;
+}
 function _pmExtractDomain(url){
   try {
     var u = new URL(url);
@@ -28028,9 +28096,20 @@ function _pmDeriveRole(info, key, opts){
     return { role: cand.role, hub: cand.dayTripHub || "", source: "llm-default" };
   }
   if (!info.kept) return { role: "maybe", source: "default" };
-  // Default by overnight-capable signal.
-  var capable = (info.overnight !== false);
-  return { role: capable ? "stay" : "see", source: "llm-default" };
+  // PD.423 (map-renderer collapse): section-driven stay/see — the SAME
+  // signal _pmIsStayCandidate uses, so the two no longer default
+  // OPPOSITELY (the bug that made the Discovery and trip maps disagree).
+  // A committed overnight (info.overnight===true) was already returned
+  // above; a 0-night place (overnight===false) is a sight; and a kept
+  // place with NO overnight signal that ISN'T listed in a stay section
+  // defaults to SEE — a kept place you didn't list as an overnight is a
+  // sight. (This flips the old kept-defaults-to-"stay" behavior, which
+  // wrongly painted kept sights as blue stays on surfaces that passed
+  // overnight:undefined.)
+  if (typeof _pmInAnyStaySection === "function" && _pmInAnyStaySection(info.place)) {
+    return { role: "stay", source: "section" };
+  }
+  return { role: "see", source: "llm-default" };
 }
 
 // Debug helper — call _pmDebugRole("Diamond Beach") from devtools to
@@ -29463,7 +29542,12 @@ function _buildHeroMapPoints(){
     // blue-vs-grey scheme. _candForDest already does the right
     // candidate lookup; normalizeCandidateRole fills c.role if missing.
     var _cd = (typeof _candForDest === "function") ? (_candForDest(d) || {}) : {};
-    var _role = _cd.role || "stay";
+    // PD.420: same stay-authority as the main map + Discovery
+    // (_pmIsStayCandidate — honors stay sections + overrides + overnight
+    // flags), with a nights>0 fallback. So a listed overnight is a blue
+    // stay on the larger map + popout too, not a green sight.
+    var _role = ((typeof _pmIsStayCandidate === "function" && _pmIsStayCandidate(d.place))
+                 || (d.nights || 0) > 0) ? "stay" : "see";
     pts.push({
       kind: "dest",
       n: i + 1,
@@ -29472,6 +29556,7 @@ function _buildHeroMapPoints(){
       // window can render num+abbrev pins matching the right-panel map.
       abbrev: ((d.place || "") + "").trim().substring(0, 2),
       role: _role,
+      nights: (d.nights || 0),
       destId: d.id || "",  // Round FZ: ID so popup-window pin clicks
                             // can scroll the opener to the right card.
       lat: ctr[0],
@@ -29570,6 +29655,9 @@ function _buildHeroMapPoints(){
             kind: "considered",
             place: p.place,
             abbrev: (p.place || "").trim().substring(0, 2),
+            // PD.417: carry stay-vs-sight so the popout can role-tint
+            // the considered pin (light blue stay / light green sight).
+            isStay: (typeof window._isStaySection === "function" && window._isStaySection(it.section)),
             lat: coords[0],
             lng: coords[1]
           });
@@ -29716,7 +29804,8 @@ function _openTripHeroMapOverlay(){
     // "maybe" style — gray dashed circle + place initials — same as
     // the inline trip-overview map. Single source of truth.
     if (p.kind === "considered") {
-      var _cstyle = MaxMapPin.style("maybe", {});
+      // PD.425: considered tint owned by MaxMapPin (pass isStay).
+      var _cstyle = MaxMapPin.style("maybe", { isStay: p.isStay });
       var _clabel = (p.abbrev || (p.place || "").substring(0, 2));
       var _chtml = MaxMapPin.html(_cstyle, { label: _clabel });
       var _cicon = MaxMapPin.icon(_chtml, _cstyle, { className: "trip-popout-considered-pin" });
@@ -30130,7 +30219,7 @@ function openTripHeroMapWindow(){
     +     'try {'
     +       'var op = window.opener;'
     +       'if (op && !op.closed && op.MaxMapPin) {'
-    +         'var cst = op.MaxMapPin.style("maybe", {});'
+    +         'var cst = op.MaxMapPin.style("maybe", {isStay: p.isStay});'  /* PD.425: tint owned by MaxMapPin */
     +         'chtml = op.MaxMapPin.html(cst, {label: (p.abbrev || (p.place||"").substring(0,2))});'
     +         'csp = op.MaxMapPin.iconSpec(cst);'
     +       '}'
@@ -30535,8 +30624,7 @@ function _renderPlacePickerMap(targetId){
         // stay, light green = suggested sight. (Was undifferentiated
         // gray.) Committed (kept) places keep their solid stay-circle /
         // see-teardrop look.
-        _pinStyle = MaxMapPin.style("maybe", {});
-        _pinStyle.fill = _isStayCandidate ? "#a9c8ef" : "#a9d8bb";
+        _pinStyle = MaxMapPin.style("maybe", { isStay: _isStayCandidate });  // PD.425
       }
       var _labelOv   = { label: "" };      // no initials on the pin
       // v358.6: no map-level "iconic" decoration. The earlier gold
@@ -47273,9 +47361,22 @@ function updateMainMap(){
       var _derived = (typeof _pmDeriveRole === "function")
         ? _pmDeriveRole(_primaryInfo, _primaryKey, {})
         : null;
-      var _primaryRole = (_derived && _derived.role)
-        || (_primaryCand && _primaryCand.role)
-        || "stay";
+      // PD.420 (map-renderer collapse): stay-vs-see uses the SAME
+      // authority as Discovery — _pmIsStayCandidate, which honors stay
+      // SECTIONS ("Overnight stays" …) + stayOverride + overnight flags.
+      // So a place you LISTED as an overnight is a blue stay circle on
+      // both maps even when its nights count is 0 (PD.419's nights-only
+      // rule wrongly turned those overnights into green sights). A group
+      // is a stay if ANY of its dests is. Fallback to nights>0 for
+      // saved-trip reloads where _tb (Discovery state) isn't populated.
+      // Day-trip / on-the-way pins come from trip.routes in their own
+      // passes, not here.
+      var _grpIsStay = group.dests.some(function(x){
+        var pl = x.dest && x.dest.place;
+        if (pl && typeof _pmIsStayCandidate === "function" && _pmIsStayCandidate(pl)) return true;
+        return ((x.dest && x.dest.nights) || 0) > 0;
+      });
+      var _primaryRole = _grpIsStay ? "stay" : "see";
       // Round NC.X: color used to live here (via pinColorForRole +
       // an _isSee override). MaxMapPin.style(role) owns all color
       // mapping now — single source of truth.
@@ -48034,7 +48135,12 @@ function updateMainMap(){
         // different size). The single-source-of-truth pattern is the
         // whole point of MaxMapPin; this surface was missed in the
         // first refactor pass.
-        var _style = MaxMapPin.style("maybe", {});
+        // PD.425: considered tint owned by MaxMapPin — pass isStay
+        // (derived from the suggestion's section bucket); light blue =
+        // suggested stay, light green = suggested sight.
+        var _style = MaxMapPin.style("maybe", {
+          isStay: (typeof window._isStaySection === "function" && window._isStaySection(c.section))
+        });
         var _label = _pmEsc ? _pmEsc((c.place || "").substring(0, 2))
                             : (c.place || "").substring(0, 2);
         var _html = MaxMapPin.html(_style, { label: _label });
@@ -59460,14 +59566,13 @@ function drawDestMode(destId, opts){
   // TM.7.3 (v332): pending-cancellations banner lifted.
   MaxTripUI.renderPendingCancellationsBanner(dest, c);
 
-  // v359.60.66: "Notes from the road" (dest.travelerNotes) merged
-  // into "Keep in mind for {destination}" (dest.research). One notes
-  // surface per destination instead of two with overlapping intent.
-  // Legacy travelerNotes content is concatenated into research at
-  // enterApp().
-  if (typeof MaxTripUI.renderResearch === "function") {
-    MaxTripUI.renderResearch(dest, c);
-  }
+  // PD.418: the inline "Keep in mind" editor is retired. Notes are now
+  // one per-place store (PD.416) reached via the 📓 icon on the card,
+  // whose dialog already has notes + links + dictation — so the inline
+  // editor was a redundant second surface (and the one showing raw HTML
+  // from stale data). The 📓 button remains the single notes affordance.
+  // (MaxTripUI.renderResearch / _renderResearch are left defined but
+  // unused; trivial to re-enable if we want an inline preview back.)
 
   // TM.7.6 (v332): destination tab bar lifted into
   // MaxTripUI.renderDestTabBar. Same 6 tabs (Itinerary / Explore /

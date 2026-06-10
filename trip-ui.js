@@ -4612,6 +4612,23 @@
   // editing, the textarea shows raw text so the user can paste
   // and edit URLs naturally.
   function _renderResearch(dest, container) {
+    // PD.416: the inline "Keep in mind" editor now reads/writes the ONE
+    // per-place notes store (placeMeta.notes) — the SAME text the 📓
+    // research card edits — instead of the separate dest.research field.
+    // Legacy dest.research is seeded into the unified store once.
+    var _notesPlace = dest.place || dest.label || "";
+    function _curNotes() {
+      if (typeof global._pmGetPlaceNotes === "function") return global._pmGetPlaceNotes(_notesPlace);
+      return (typeof dest.research === "string") ? dest.research : "";
+    }
+    try {
+      if (typeof global._pmGetPlaceNotes === "function" && typeof global._pmSetPlaceNotes === "function") {
+        var _seed = global._pmGetPlaceNotes(_notesPlace);
+        if (!_seed && typeof dest.research === "string" && dest.research) {
+          global._pmSetPlaceNotes(_notesPlace, dest.research);
+        }
+      }
+    } catch (_) {}
     var wrap = document.createElement("div");
     wrap.style.cssText = "margin:0 0 10px;padding:10px 12px;background:#f7f4ec;border:1px solid #e6e0cc;border-radius:8px;";
 
@@ -4629,7 +4646,8 @@
       else {
         // No saved choice: default to collapsed if empty, expanded
         // if there's already research (so the user sees it).
-        collapsed = !((typeof dest.research === "string") && dest.research.length > 0);
+        var _cn0 = _curNotes();
+        collapsed = !(_cn0 && _cn0.length > 0);
       }
     } catch (_) { collapsed = true; }
 
@@ -4666,7 +4684,7 @@
       caret.style.transform = collapsed ? "rotate(-90deg)" : "rotate(0deg)";
       body.style.display = collapsed ? "none" : "block";
       // Update the meta hint with a length cue when collapsed.
-      var s = (typeof dest.research === "string") ? dest.research : "";
+      var s = _curNotes();
       if (collapsed) {
         meta.textContent = s ? "(" + s.length + " chars)" : "(empty — tap to add)";
       } else {
@@ -4680,7 +4698,7 @@
     };
     _applyCollapsed();
 
-    var saved = (typeof dest.research === "string") ? dest.research : "";
+    var saved = _curNotes();
     var view = document.createElement("div"); // Read-only view: text + clickable URLs.
     view.style.cssText = "font-size:12.5px;line-height:1.55;color:#333;min-height:36px;padding:6px 8px;background:#fff;border:1px solid #e8e1c8;border-radius:5px;cursor:text;white-space:pre-wrap;word-wrap:break-word;";
     view.title = "Tap to edit";
@@ -4731,7 +4749,10 @@
       // Save if changed, then re-render the view.
       var nextVal = ta.value;
       if (nextVal !== saved) {
-        dest.research = nextVal;
+        // PD.416: write to the unified per-place notes store (same text
+        // the 📓 card edits) instead of the legacy dest.research field.
+        if (typeof global._pmSetPlaceNotes === "function") global._pmSetPlaceNotes(_notesPlace, nextVal);
+        else dest.research = nextVal;
         saved = nextVal;
         var ok = false;
         try {
@@ -4763,7 +4784,7 @@
       exitEdit();
       // After saving, refresh the collapsed-state meta hint so it
       // shows the new char count if user collapses.
-      var s = (typeof dest.research === "string") ? dest.research : "";
+      var s = _curNotes();
       if (collapsed) meta.textContent = s ? "(" + s.length + " chars)" : "(empty — tap to add)";
     });
     body.appendChild(view);

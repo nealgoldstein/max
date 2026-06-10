@@ -547,6 +547,17 @@
         nights = (typeof c.nights === "number" && c.nights >= 0)
           ? c.nights
           : (typeof parseNightsFromRange === "function" ? (parseNightsFromRange(c.stayRange) || 3) : 3);
+        // PD.422: an overnight ("stay") must have at least one night. The
+        // stays-section rebuild can stamp c.nights:0 on a user overnight
+        // (overnight intent without a night count), and the `>= 0` guard
+        // above accepts that 0 verbatim — so a place the user listed as an
+        // overnight became a 0-night destination (rendered as a sight, no
+        // night count). A stay is overnight BY DEFINITION; floor to the
+        // stayRange or 1. (See also the source fix in the Discovery stays
+        // rebuild so the per-place count is honest there too.)
+        if (!(nights >= 1)) {
+          nights = (typeof parseNightsFromRange === "function" ? parseNightsFromRange(c.stayRange) : 0) || 1;
+        }
       }
 
       // Claim one existing destination per ordered slot. If the same
