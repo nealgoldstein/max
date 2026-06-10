@@ -213,8 +213,19 @@
     // Returns the count of PLACES re-themed (not items).
     var themed = 0;
     (items || []).forEach(function(it){
-      if (!it || !movable[it.section]) return;
-      if (!Array.isArray(it.requiredPlaces)) return;
+      if (!it || !Array.isArray(it.requiredPlaces) || !it.requiredPlaces.length) return;
+      // Movable = a catch-all section, OR a PD.405 per-place fallback category
+      // (a single un-themed sight whose section is just its own name). The
+      // latter matters because PD.405 places kept-but-uncategorized sights in
+      // their own category at the construction render — BEFORE the theming
+      // pass runs — so they're no longer sitting in a catch-all here. Without
+      // this, the theming pass can't re-theme them (the PD.404/PD.405 clash).
+      var isMovable = !!movable[it.section];
+      if (!isMovable && it.requiredPlaces.length === 1) {
+        var only = it.requiredPlaces[0];
+        if (only && only.place && _normPlaceName(it.section) === _normPlaceName(only.place)) isMovable = true;
+      }
+      if (!isMovable) return;
       it.requiredPlaces.forEach(function(p){
         if (!p || !p.place) return;
         var ks = _keysFor(p.place);

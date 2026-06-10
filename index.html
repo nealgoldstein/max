@@ -8942,13 +8942,12 @@ async function _runThemingPass() {
   // PD.404: "which sections may the theming pass re-theme?" = exactly the
   // sections the DiscoveryModel treats as carrying NO theme (themeFit null).
   // Derive it from the model itself (its catch-set, which includes the
-  // generic "Sights you're keeping" bucket where most kept sights sit), so
-  // this can never drift from the placement logic. Setting it.section to a
-  // real theme makes the next model rebuild derive themeFit from it, so the
-  // move persists.
+  // "Unique sights" fallback bucket), so this can never drift from the
+  // placement logic. Setting it.section to a real theme makes the next model
+  // rebuild derive themeFit from it, so the move persists.
   var movable = (window.MaxDiscovery && typeof MaxDiscovery.catchallSections === "function")
     ? MaxDiscovery.catchallSections()
-    : ["From your list", "Sights near places you listed", "More places to consider", "Sights you're keeping"];
+    : ["From your list", "Sights near places you listed", "More places to consider", "Unique sights"];
   var movableSet = {};
   movable.forEach(function(s){ movableSet[s] = true; });
   // Offer the model the REAL themes (everything that isn't a catch-all or a
@@ -17371,7 +17370,7 @@ async function _generateActivitiesForPlaceImpl(){
           console.error("[Max PD.401U] activity generation EMPTY after " + _attempt + " attempt(s) — proceeding with the constructed list; sights remain un-themed");
           if (typeof _showEnhanceLikeToast === "function") {
             setTimeout(function(){
-              try { _showEnhanceLikeToast("Max couldn’t sort your places into themed categories this time — they’re grouped under “Sights you’re keeping.” Rebuild or reopen Discovery to try again.", 10000); } catch(_){}
+              try { _showEnhanceLikeToast("Max couldn’t sort your places into themed categories this time — each is shown on its own under “Unique sights.” Rebuild or reopen Discovery to try again.", 10000); } catch(_){}
             }, 1200);
           }
           break;

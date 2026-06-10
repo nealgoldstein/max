@@ -473,7 +473,7 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
     expect(s.calls, 'theming pass must have run (flag on)').toContain('theming');
 
     const sectionsOf = (k) => (s.byKey[k] || []).map((e) => e.section);
-    const KEEP = "Sights you're keeping";
+    const KEEP = "Unique sights"; // PD.405: renamed fallback bucket
 
     // 1) Listed sights are THEMED, not stranded in the catch-all.
     //    Gullfoss + Skogafoss both land in the SAME broad theme.
@@ -631,11 +631,14 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
         if (!CATCH[it.section]) return;
         (it.requiredPlaces || []).forEach((pp) => { if (pp && pp._keep !== false) badly.push(it.section + ':' + pp.place); });
       });
-      const kept = (window._tb.placeActivities || []).find((it) => it.section === "Sights you're keeping");
-      return { badly, committed: kept ? kept.requiredPlaces.map((pp) => pp.place) : [] };
+      // PD.405: a checked, un-themed sight commits to its OWN category (named
+      // for the place) — never a generic "keeping" bucket.
+      const landed = (window._tb.placeActivities || []).find((it) =>
+        (it.requiredPlaces || []).some((pp) => pp.place === 'InvariantSight'));
+      return { badly, landedSection: landed ? landed.section : null };
     });
     expect(r.badly, 'no checked place may remain in a to-consider catchall').toEqual([]);
-    expect(r.committed, 'the checked sight committed to "Sights you\'re keeping"').toContain('InvariantSight');
+    expect(r.landedSection, 'the checked sight committed to its own category (PD.405)').toBe('InvariantSight');
   });
 
   // PD.401h: the painted section chips must equal the banner — in the DOM.

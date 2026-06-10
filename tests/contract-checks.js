@@ -455,14 +455,16 @@ check("Rule 24a: MaxData.consideredBySection groups the single set",
 // special-casing: the data itself is coherent.
 check("Rule 25a: the catchall invariant is the model's derivation, not a pass (PD.401d)",
   // The imperative _ensureCatchallsUnchecked pass is DELETED. A checked
-  // sight leaving "to consider" for "Sights you're keeping" is now a pure
-  // consequence of PlacementPolicy.sectionFor — there is no pass to run.
+  // sight's placement (its theme, its own single-member category, or the
+  // "Unique sights" fallback) is now a pure consequence of
+  // PlacementPolicy.sectionFor — there is no pass to run. (PD.405 renamed
+  // the fallback constant KEEPING → UNIQUE.)
   indexSrc.indexOf("function _ensureCatchallsUnchecked") === -1
     && (function () {
       var dm = fs.readFileSync(path.join(ROOT, "discovery-model.js"), "utf8");
-      return dm.indexOf("SECTION.KEEPING") !== -1 && /sectionFor\s*:\s*function/.test(dm);
+      return dm.indexOf("SECTION.UNIQUE") !== -1 && /sectionFor\s*:\s*function/.test(dm);
     })(),
-  "the deleted catchall pass came back, or the model stopped deriving 'keeping'");
+  "the deleted catchall pass came back, or the model stopped deriving the kept-sight fallback");
 check("Rule 25b: the DiscoveryModel owns final placement at the chokepoint (PD.401)",
   (function () {
     // The catchall invariant is now SUBSUMED by the model: the reconcile

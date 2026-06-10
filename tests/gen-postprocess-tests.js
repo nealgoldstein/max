@@ -178,6 +178,19 @@ test("applyTheming SPLITS one grouped item: each place gets its own _themeFit (t
   assert.strictEqual(items[0].requiredPlaces[1]._themeFit, "Walk the coast");
   assert.strictEqual(items[0].requiredPlaces[2]._themeFit, "Explore the capital");
 });
+test("applyTheming re-themes a PD.405 per-place fallback category (section === place name)", function () {
+  // PD.405 puts a kept, un-themed sight in its own category named for the
+  // place. The theming pass must still be able to move it (the PD.404/PD.405
+  // clash) even though that category isn't in movableSections.
+  var items = [
+    { section: "Gullfoss", _userConstructed: true, requiredPlaces: [{ place: "Gullfoss", _keep: true, lat: 0, lng: 0 }] }
+  ];
+  var map = [{ place: "Gullfoss, Iceland", section: "Chase waterfalls", lat: 64.3, lng: -20.1 }];
+  // movableSections does NOT include "Gullfoss" — yet it must still re-theme.
+  var n = M.applyTheming(items, map, { normPlaceName: nrm, movableSections: ["From your list", "Unique sights"] });
+  assert.strictEqual(n, 1);
+  assert.strictEqual(items[0].requiredPlaces[0]._themeFit, "Chase waterfalls");
+});
 test("applyTheming never disturbs stays sections or non-movable items", function () {
   var items = themingItems();
   var map = [

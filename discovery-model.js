@@ -46,7 +46,12 @@
   var SECTION = {
     STAYS_USER:   "Overnight stays",
     STAYS_REC:    "Recommended overnight stays",
-    KEEPING:      "Sights you're keeping",
+    // PD.405: the shared fallback for a KEPT sight that has no theme AND no
+    // usable name. Renamed from "Sights you're keeping" — a checked place
+    // sitting in a generic bucket reads as a categorizer failure; "Unique
+    // sights" frames a one-off as intentional. Most misses now get their OWN
+    // single-member category (the place name) instead of pooling here.
+    UNIQUE:       "Unique sights",
     SIGHTS_NEAR:  "Sights near places you listed",
     MORE:         "More places to consider",
     FROM_LIST:    "From your list",
@@ -121,11 +126,19 @@
       if (_inScenic(p)) return SECTION.SCENIC;
       // sight
       if (p.decision === "checked") {
-        return p.themeFit || SECTION.KEEPING;        // committed → theme, else "keeping"
+        if (p.themeFit) return p.themeFit;           // committed → its theme
+        // PD.405: a kept sight the categorizer missed is NEVER dumped in a
+        // generic bucket. It gets its OWN single-member category — the place
+        // name — so the picker shows it as a real (if unique) theme the user
+        // can grow ("more like this"). Only a nameless miss falls back to the
+        // shared "Unique sights" bucket.
+        return (p.place && String(p.place).trim()) ? String(p.place).trim() : SECTION.UNIQUE;
       }
       // unchecked (rejected places are excluded from the view entirely)
       if (p.themeFit) return p.themeFit;             // shown unchecked in its theme
-      if (p.origin === "user") return SECTION.FROM_LIST;
+      // PD.405: "From your list" removed as a destination — a listed place is
+      // always checked (the contract), so the unchecked-user-sight bucket was
+      // a contradiction. An unchecked sight falls through like any other.
       if (p.nearListed) return SECTION.SIGHTS_NEAR;  // enhance leftover near a listed place
       return SECTION.MORE;                           // a Max suggestion with no theme
     }
@@ -223,7 +236,7 @@
   // Rejected places are omitted. This is the single derivation the
   // view renders and every count reads.
   var SECTION_ORDER = [
-    SECTION.STAYS_USER, SECTION.STAYS_REC, SECTION.KEEPING
+    SECTION.STAYS_USER, SECTION.STAYS_REC, SECTION.UNIQUE
     // theme sections fall here, in first-seen order
     // catchalls pinned last:
   ];
@@ -316,7 +329,7 @@
   //   isHub(place)           → bool  (a Max overnight proposal, not a sight)
   var _CATCH_SET = {};
   _CATCH_SET[SECTION.SIGHTS_NEAR] = 1; _CATCH_SET[SECTION.MORE] = 1;
-  _CATCH_SET[SECTION.FROM_LIST] = 1;  _CATCH_SET[SECTION.KEEPING] = 1;
+  _CATCH_SET[SECTION.FROM_LIST] = 1;  _CATCH_SET[SECTION.UNIQUE] = 1;
 
   function _defaultOrigin(p) {
     if (!p) return "max";
@@ -387,7 +400,7 @@
   // (themeFit is null in it). Exported so other passes — e.g. the theming
   // pass deciding which sights it may re-theme — derive "un-themed" from the
   // SAME source the placement logic uses, instead of a parallel hardcoded
-  // list that can drift. Includes KEEPING, which SectionKind does not.
+  // list that can drift. Includes UNIQUE ("Unique sights"), which SectionKind does not.
   function isCatchallSection(name) { return !!_CATCH_SET[String(name)]; }
   function catchallSections() { return Object.keys(_CATCH_SET); }
 

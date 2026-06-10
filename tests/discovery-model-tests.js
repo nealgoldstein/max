@@ -38,14 +38,21 @@ test("placement: max-hub stay → Recommended overnight stays", function () {
 test("placement: checked sight with a theme → that theme", function () {
   assert.strictEqual(Policy.sectionFor({ role: "sight", decision: "checked", themeFit: "Chase waterfalls" }), "Chase waterfalls");
 });
-test("placement: checked sight with NO theme → Sights you're keeping", function () {
-  assert.strictEqual(Policy.sectionFor({ role: "sight", decision: "checked", themeFit: null }), S.KEEPING);
+test("placement: checked sight with NO theme → its OWN single-member category (the place name)", function () {
+  // PD.405: a kept sight the categorizer missed is never dumped in a generic
+  // bucket — it becomes its own category named for the place.
+  assert.strictEqual(Policy.sectionFor({ place: "Goðafoss Waterfall", role: "sight", decision: "checked", themeFit: null }), "Goðafoss Waterfall");
+});
+test("placement: checked sight with NO theme AND no name → 'Unique sights' fallback", function () {
+  assert.strictEqual(Policy.sectionFor({ role: "sight", decision: "checked", themeFit: null }), S.UNIQUE);
 });
 test("placement: unchecked sight with a theme → that theme (shown unchecked)", function () {
   assert.strictEqual(Policy.sectionFor({ role: "sight", decision: "unchecked", themeFit: "Relax in hot springs" }), "Relax in hot springs");
 });
-test("placement: unchecked USER sight, no theme → From your list", function () {
-  assert.strictEqual(Policy.sectionFor({ role: "sight", decision: "unchecked", origin: "user", themeFit: null }), S.FROM_LIST);
+test("placement: unchecked USER sight, no theme → More places to consider (PD.405: 'From your list' removed)", function () {
+  // PD.405: listed places are always checked (the contract), so there is no
+  // dedicated unchecked-user bucket; an unchecked sight falls through like any.
+  assert.strictEqual(Policy.sectionFor({ role: "sight", decision: "unchecked", origin: "user", themeFit: null }), S.MORE);
 });
 test("placement: unchecked MAX sight, no theme → More places to consider", function () {
   assert.strictEqual(Policy.sectionFor({ role: "sight", decision: "unchecked", origin: "max", themeFit: null }), S.MORE);
@@ -62,8 +69,10 @@ test("invariant: a checked sight is NEVER in a to-consider catchall", function (
   m.setDecision("Geysir", "checked");
   var more = m.sections().find(function (x) { return x.section === S.MORE; });
   assert.ok(!more, "the catchall is empty once the only place is checked");
-  var keeping = m.sections().find(function (x) { return x.section === S.KEEPING; });
-  assert.ok(keeping && keeping.places.length === 1, "the checked sight committed to 'keeping'");
+  // PD.405: a checked, un-themed sight commits to its OWN single-member
+  // category (the place name) — never a generic to-consider catchall.
+  var own = m.sections().find(function (x) { return x.section === "Geysir"; });
+  assert.ok(own && own.places.length === 1, "the checked sight committed to its own category");
 });
 
 // ── COUNTS CANNOT DISAGREE (one derivation) ──────────────────────────
@@ -216,26 +225,29 @@ test("route umbrella: a themed place keeps its theme (not hijacked to scenic)", 
   assert.strictEqual(Policy.sectionFor(m.all()[0]), "See natural wonders");
 });
 
-test("PD.404: catchallSections / isCatchallSection expose the themeFit-null set", function () {
+test("PD.404/405: catchallSections / isCatchallSection expose the themeFit-null set", function () {
   var cs = M.catchallSections();
-  // The four sections the model places themeFit-null sights into, INCLUDING
-  // the generic "Sights you're keeping" bucket (which SectionKind omits).
-  ["Sights near places you listed", "More places to consider", "From your list", "Sights you're keeping"]
+  // The four sections the model treats as carrying no theme, INCLUDING the
+  // "Unique sights" fallback (which SectionKind omits).
+  ["Sights near places you listed", "More places to consider", "From your list", "Unique sights"]
     .forEach(function (s) { assert.ok(cs.indexOf(s) !== -1, "missing catchall: " + s); });
-  assert.strictEqual(M.isCatchallSection("Sights you're keeping"), true);
+  assert.strictEqual(M.isCatchallSection("Unique sights"), true);
   assert.strictEqual(M.isCatchallSection("Walk to natural wonders"), false);
-  // It must agree with the placement policy: a checked sight with no themeFit
-  // lands in a section isCatchallSection() reports true for.
-  var m = model([{ place: "Goðafoss", origin: "user", role: "sight", decision: "checked" }]);
-  assert.strictEqual(M.isCatchallSection(Policy.sectionFor(m.all()[0])), true);
+  // PD.405: a checked, un-themed NAMED sight lands in its OWN category (the
+  // place name) — which is NOT a catchall (so it isn't re-themed away).
+  var named = model([{ place: "Goðafoss", origin: "user", role: "sight", decision: "checked" }]);
+  assert.strictEqual(Policy.sectionFor(named.all()[0]), "Goðafoss");
+  assert.strictEqual(M.isCatchallSection(Policy.sectionFor(named.all()[0])), false);
+  // A nameless checked miss falls back to "Unique sights", which IS a catchall.
+  assert.strictEqual(M.isCatchallSection(Policy.sectionFor({ role: "sight", decision: "checked", themeFit: null })), true);
 });
 
 test("PD.404: a per-place _themeFit splits one grouped catch-all item across themes", function () {
-  // One "Sights you're keeping" item with three places, each carrying its own
+  // One grouped catch-all item with three places, each carrying its own
   // _themeFit (stamped by the theming pass). The model must place each in its
   // own theme — not leave them grouped.
   var m = M.DiscoveryModel.fromPlaceActivities([
-    { section: "Sights you're keeping", type: "activity", requiredPlaces: [
+    { section: "Unique sights", type: "activity", requiredPlaces: [
       { place: "Gullfoss", _keep: true, _themeFit: "Visit natural wonders" },
       { place: "Reynisfjara Beach", _keep: true, _themeFit: "Walk the coast" },
       { place: "Harpa Concert Hall", _keep: true, _themeFit: "Explore the capital" }
@@ -246,7 +258,7 @@ test("PD.404: a per-place _themeFit splits one grouped catch-all item across the
   assert.deepStrictEqual(secs["Visit natural wonders"], ["Gullfoss"]);
   assert.deepStrictEqual(secs["Walk the coast"], ["Reynisfjara Beach"]);
   assert.deepStrictEqual(secs["Explore the capital"], ["Harpa Concert Hall"]);
-  assert.ok(!secs["Sights you're keeping"], "nothing should remain in the catch-all");
+  assert.ok(!secs["Unique sights"], "nothing should remain in the catch-all");
 });
 
 test("PD.404: a per-place _themeFit SURVIVES canonicalize + model placement (persistence)", function () {
@@ -259,7 +271,7 @@ test("PD.404: a per-place _themeFit SURVIVES canonicalize + model placement (per
     || (global.MaxData && global.MaxData.canonicalizePlaceActivities);
   assert.strictEqual(typeof canon, "function", "canonicalizePlaceActivities must be available");
   var pa = [
-    { section: "Sights you're keeping", type: "activity", name: "keep", requiredPlaces: [
+    { section: "Unique sights", type: "activity", name: "keep", requiredPlaces: [
       { place: "Gullfoss", country: "Iceland", lat: 64.3, lng: -20.1, _keep: true, _themeFit: "Visit natural wonders" } ] },
     // an enhance leftover duplicate with NO theme — the merge must not strip the theme
     { section: "Sights near places you listed", type: "activity", name: "near", requiredPlaces: [
@@ -270,7 +282,7 @@ test("PD.404: a per-place _themeFit SURVIVES canonicalize + model placement (per
   var secs = {};
   m2.sections().forEach(function (g) { secs[g.section] = g.places.map(function (p) { return p.place; }); });
   assert.deepStrictEqual(secs["Visit natural wonders"], ["Gullfoss"], "themed sight must land in its theme after canonicalize+merge");
-  assert.ok(!secs["Sights you're keeping"], "must not remain in the catch-all");
+  assert.ok(!secs["Unique sights"], "must not remain in the catch-all");
 });
 
 console.log("\n" + "─".repeat(50));
