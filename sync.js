@@ -43,6 +43,14 @@
   var URL_KEY = 'max-server-url';
   var TOKEN_KEY = 'max-server-token';
   var EMAIL_KEY = 'max-server-email';
+  // PD.429: when true, a 401 from a BACKGROUND sync call (the page-load
+  // auto-pull, prefs hydrate) does NOT clear the token. A background sync
+  // failure must never sign the user out — that was prompting a sign-in on
+  // EVERY refresh. Only an explicit, user-initiated sync clears + re-prompts
+  // on a genuine 401. Same principle as PD.421 (API key) / PD.424 (LLM
+  // proxy session): a persistent credential survives a transient/background
+  // error.
+  var _bgAuthTolerant = false;
 
   function getServerUrl() {
     try {
@@ -172,7 +180,14 @@
         while (trail.length > 20) trail.shift();
         try { localStorage.setItem('max-auth-debug', JSON.stringify(trail)); } catch (_) {}
       } catch (_) { /* breadcrumb is best-effort */ }
-      setToken(null);
+      // PD.429: only nuke the token (→ "sign in" prompt) for an EXPLICIT,
+      // user-initiated sync. A background/auto-pull 401 keeps the token so
+      // a transient blip doesn't sign the user out on every refresh.
+      if (!_bgAuthTolerant && !opts.tolerateAuth) {
+        setToken(null);
+      } else {
+        console.warn('[max-sync] 401 on a background/tolerant call — keeping token (no re-prompt)');
+      }
       var err401 = new Error('Sign-in required');
       err401.code = 'AUTH';
       throw err401;
@@ -1462,7 +1477,12 @@
     if (fromMagic) {
       setTimeout(function () { _refreshHomeScreen(); }, 300);
     }
-    pullAll().then(
+    // PD.429: the boot auto-pull is a BACKGROUND op — a 401 here must not
+    // sign the user out (was re-prompting on every refresh). Mark the
+    // window tolerant, then clear it once both pulls settle.
+    _bgAuthTolerant = true;
+    var _bootPulls = [];
+    _bootPulls.push(pullAll().then(
       function (r) {
         if (r.pulled > 0) {
           console.log('[max-sync] pulled', r.pulled, 'trip(s) from server on boot');
@@ -1472,12 +1492,13 @@
       function (e) {
         console.warn('[max-sync] boot pull failed:', e);
       },
-    );
+    ));
     // v353.3: also hydrate prefs on boot so a returning device picks
     // up changes another device pushed (e.g., paceHours bumped on
     // the laptop, opened the phone next morning). Independent of
     // pullAll so a trip-pull failure doesn't block prefs.
-    pullPrefs().catch(function () {});
+    _bootPulls.push(pullPrefs().catch(function () {}));
+    Promise.allSettled(_bootPulls).then(function () { _bgAuthTolerant = false; });
   }
 
   // v343: re-render the home screen / trip list after a pull so
