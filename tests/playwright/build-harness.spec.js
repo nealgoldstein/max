@@ -70,8 +70,22 @@ const CANNED_ITEMS = [
     ] },
 ];
 
+// PD.404 (#80): canned response for the THEMING pass (flag on). Sorts the
+// user's listed SIGHTS into a FEW BROAD themes — Gullfoss + Skogafoss share
+// "Chase waterfalls" (grouping, not singletons). Stays are omitted (they
+// own their own sections and aren't movable). Names match the user list.
+const THEME_MAP = [
+  { place: 'Blue Lagoon',        section: 'Relax in hot springs',     category: 'wellness-growth', lat: 63.8804, lng: -22.4495 },
+  { place: 'Gullfoss',           section: 'Chase waterfalls',         category: 'scenery-nature',  lat: 64.3271, lng: -20.1199 },
+  { place: 'Skogafoss',          section: 'Chase waterfalls',         category: 'scenery-nature',  lat: 63.5321, lng: -19.5114 },
+  { place: 'Jokulsarlon',        section: 'See ice and glaciers',     category: 'scenery-nature',  lat: 64.0784, lng: -16.2306 },
+  { place: 'Harpa Concert Hall', section: 'Explore the capital',      category: 'culture-history', lat: 64.1505, lng: -21.9326 },
+  { place: 'Kirkjufell',         section: 'See ice and glaciers',     category: 'scenery-nature',  lat: 64.9416, lng: -23.3074 },
+  { place: 'Hverir',             section: 'Walk volcanic terrain',    category: 'scenery-nature',  lat: 65.6408, lng: -16.8094 },
+];
+
 async function runPipeline(page) {
-  await page.evaluate(({ userList, canned }) => {
+  await page.evaluate(({ userList, canned, theme }) => {
     window.MaxEnginePicker.resetState({
       tripMode: 'place', placeName: 'Iceland', region: 'Iceland',
       candidates: [], chips: [], activityChips: [], requiredPlaces: [],
@@ -118,6 +132,12 @@ async function runPipeline(page) {
         return JSON.stringify(canned);
       }
       if (prompt.indexOf('A traveler is planning a trip') !== -1) {
+        // The theming prompt and the completeness prompt share this prefix;
+        // 'SORTING task' is unique to the PD.404 theming pass.
+        if (prompt.indexOf('SORTING task') !== -1) {
+          window._harnessCalls.push('theming');
+          return JSON.stringify(theme);
+        }
         window._harnessCalls.push('completeness');
         return '[]';
       }
@@ -127,7 +147,7 @@ async function runPipeline(page) {
     return window._buildPickerFromPastedList(
       { destinations: userList, tripName: 'Harness Iceland', region: 'Iceland' },
       userList.map(p => p.place).join('\n'), {});
-  }, { userList: USER_LIST, canned: CANNED_ITEMS });
+  }, { userList: USER_LIST, canned: CANNED_ITEMS, theme: THEME_MAP });
 
   // Build settles: the orchestrator's own done/error event — the
   // paste flow starts MaxBuild on a setTimeout, so "not building yet"
@@ -431,6 +451,54 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
 
     // CTA: fresh trip, no destinations yet → Create.
     expect(s.ctaText).toContain('Create my trip');
+  });
+
+  // PD.404 (#80): with the theming flag ON, listed SIGHTS get sorted into a
+  // few BROAD themes (not left in the catch-all), AND Max's own suggestions
+  // are still present (generation is not softened). Deterministic — no real
+  // LLM — so it can't flake on a slow API the way live builds did.
+  test('PD.404: flag on → listed sights themed into broad categories, Max suggestions preserved', async ({ page }) => {
+    await bootClean(page);
+    await page.evaluate(() => { try { localStorage.setItem('max-theming-pass', '1'); } catch (_) {} });
+    await runPipeline(page);
+    const s = await snapshot(page);
+
+    // Diagnostic dump (shows in the test output if an assertion fails).
+    const sections = await page.evaluate(() =>
+      (window._tb.placeActivities || []).map((it) => it.section + ': ' + (it.requiredPlaces || []).length));
+    console.log('[PD.404 test] sections:', JSON.stringify(sections));
+    console.log('[PD.404 test] calls:', JSON.stringify(s.calls));
+
+    // 0) The theming pass actually ran.
+    expect(s.calls, 'theming pass must have run (flag on)').toContain('theming');
+
+    const sectionsOf = (k) => (s.byKey[k] || []).map((e) => e.section);
+    const KEEP = "Sights you're keeping";
+
+    // 1) Listed sights are THEMED, not stranded in the catch-all.
+    //    Gullfoss + Skogafoss both land in the SAME broad theme.
+    expect(sectionsOf('gullfoss'), 'Gullfoss themed').toContain('Chase waterfalls');
+    expect(sectionsOf('skogafoss'), 'Skogafoss themed').toContain('Chase waterfalls');
+    ['gullfoss', 'skogafoss', 'jokulsarlon', 'blue lagoon', 'harpa concert hall', 'hverir'].forEach((k) => {
+      expect(sectionsOf(k), k + ' must not be stranded in the catch-all').not.toContain(KEEP);
+    });
+
+    // 2) Broad grouping, not singletons: both waterfalls share one theme.
+    const waterfalls = (s.byKey['gullfoss'] || []).concat(s.byKey['skogafoss'] || [])
+      .filter((e) => e.section === 'Chase waterfalls');
+    expect(waterfalls.length, 'waterfalls grouped into one broad theme').toBeGreaterThanOrEqual(2);
+
+    // 3) Max's OWN suggestions are preserved (generation not softened).
+    //    Seljalandsfoss + Sky Lagoon are canned Max picks NOT on the user list.
+    expect(s.byKey['seljalandsfoss'], "Max suggestion Seljalandsfoss must be present").toBeTruthy();
+    expect(s.byKey['sky lagoon'], "Max suggestion Sky Lagoon must be present").toBeTruthy();
+
+    // 4) The user-listed contract still holds: every listed place present + checked.
+    for (const u of USER_LIST) {
+      const k = u.place.toLowerCase();
+      const hits = Object.keys(s.byKey).filter((key) => key === k || key.indexOf(k) === 0);
+      expect(hits.length, u.place + ' must be present').toBeGreaterThan(0);
+    }
   });
 
   test('publish → return loop: CTA states + receipt matches considered', async ({ page }) => {
