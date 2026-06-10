@@ -91,7 +91,12 @@ self.addEventListener('fetch', function (event) {
   // the user can still see the app shell offline.
   if (req.mode === 'navigate' || (req.headers.get('accept') || '').includes('text/html')) {
     event.respondWith(
-      fetch(req)
+      // PD.443: no-store so a deploy ALWAYS wins. Plain network-first
+      // still let Cloudflare's edge / the HTTP cache hand back a stale
+      // index.html for a window after deploy — which is exactly why
+      // "I deployed but don't see it" kept happening. Bypass both;
+      // fall back to the cached shell only when the network is down.
+      fetch(req, { cache: 'no-store' })
         .then(function (resp) {
           // Stash a copy in cache for offline next time. Only if 200.
           if (resp && resp.status === 200) {

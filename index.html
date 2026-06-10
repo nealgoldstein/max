@@ -306,10 +306,25 @@
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
-      navigator.serviceWorker.register('/sw.js').catch(function (err) {
-        // Registration failures shouldn't break the app — just log.
-        console.warn('[sw] registration failed:', err);
-      });
+      // PD.443: updateViaCache:'none' makes the browser revalidate
+      // sw.js itself on every check (never serve it from the HTTP
+      // cache), so a new SW is detected promptly instead of up to 24h
+      // later. And re-check for a new version whenever the tab regains
+      // focus/visibility — a long-open tab otherwise sits on old code
+      // until the browser's periodic check, which is why deploys
+      // "didn't show" without a manual hard-reload.
+      navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
+        .then(function (reg) {
+          var _checkForUpdate = function () { try { reg.update(); } catch (_) {} };
+          document.addEventListener('visibilitychange', function () {
+            if (!document.hidden) _checkForUpdate();
+          });
+          window.addEventListener('focus', _checkForUpdate);
+        })
+        .catch(function (err) {
+          // Registration failures shouldn't break the app — just log.
+          console.warn('[sw] registration failed:', err);
+        });
       // Listen for the activate-time message that tells us a new SW
       // is in control. Show a non-blocking toast that, when tapped,
       // reloads the page to pick up the new bundle. We don't auto-
@@ -48036,7 +48051,16 @@ function updateMainMap(){
       // default waysides are pins only; the detour appears one route at a
       // time, layered over the destination spine so you can see how far it
       // bends off the direct line (genuinely on-the-way vs a day trip).
-      if (fromCtr && toCtr && window._activeRouteRouting === route.id) {
+      // PD.442: the wayside detour now draws AUTOMATICALLY whenever Route
+      // mode is on (_routeShown) — not only when this one route is hand-
+      // toggled. Neal: "show automatically." This also closes a latent
+      // gap: the spine pass above SKIPS wayside-bearing segments (the
+      // detour is meant to cover them), so when the detour wasn't toggled
+      // those legs rendered with NO line at all ("there is no route
+      // line"). Now route-mode on => every wayside leg shows its road
+      // line. The per-route _activeRouteRouting toggle still forces a
+      // single leg on even with Route mode off (back-compat).
+      if (fromCtr && toCtr && (_routeShown || window._activeRouteRouting === route.id)) {
         var path = [fromCtr].concat(stops.map(function(s){return s.ctr;})).concat([toCtr]);
         try {
           // PD.441: route the wayside detour through OSRM so it follows
