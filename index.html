@@ -48039,26 +48039,43 @@ function updateMainMap(){
       if (fromCtr && toCtr && window._activeRouteRouting === route.id) {
         var path = [fromCtr].concat(stops.map(function(s){return s.ctr;})).concat([toCtr]);
         try {
-          // v360.2: restored visibility. v359.60.95 dropped the detour
-          // to weight 1.5 / opacity 0.55 / no halo to fight spaghetti
-          // — but the direct blue-dashed line is intentionally skipped
-          // on wayside-bearing segments (see _waysideCovered above),
-          // and at opacity 0.55 on satellite tiles the detour is
-          // effectively invisible. Result: no trip spine on any
-          // segment that has a wayside. New treatment mirrors the
-          // direct route's visibility budget — white halo for contrast,
-          // dashed purple at full weight — but with a thinner halo
-          // (weight 4 vs 6) so adjacent routes don't blob into one
-          // another. The dashed pattern + purple color still mark
-          // these as "transit, with a stop along the way."
-          var detourHalo = L.polyline(path, {
+          // PD.441: route the wayside detour through OSRM so it follows
+          // REAL ROADS (from → wayside(s) → to), exactly like the day-trip
+          // loop above and the blue destination spine. Previously this
+          // drew straight L.polyline segments between point centers, which
+          // looked nothing like a route — a ruler-straight purple line
+          // cutting across terrain next to the curving blue road (Neal:
+          // "when I select show route it does not look like a real route").
+          // Same cache-or-fetch dance: draw the cached road geometry if we
+          // have it, else draw straight as a placeholder and kick an OSRM
+          // fetch that re-renders when it lands.
+          var wsKey = (typeof _osrmSegmentKey === "function") ? _osrmSegmentKey(path) : null;
+          var _wsRoadsOn = (typeof _useRoadRouting !== "undefined") && _useRoadRouting;
+          var wsCached = (_wsRoadsOn && wsKey && trip._osrmSegments && trip._osrmSegments[wsKey]);
+          var wsDrawCoords = (Array.isArray(wsCached) && wsCached.length >= 2) ? wsCached : path;
+          var isWsStraight = !Array.isArray(wsCached);
+          // v360.2 visibility budget: white halo for contrast on satellite
+          // tiles + dashed purple. Dashed while straight (placeholder),
+          // solid once it follows the road so it reads as a real route.
+          var detourHalo = L.polyline(wsDrawCoords, {
             color:"#fff", weight:4, opacity:0.85, lineCap:"round", lineJoin:"round"
           }).addTo(_mainMap);
           _mainMarkers.push(detourHalo);
-          var detourLine = L.polyline(path, {
-            color:"#7a4fbf", weight:2.5, opacity:1.0, dashArray:"1 6", lineCap:"round", lineJoin:"round"
+          var detourLine = L.polyline(wsDrawCoords, {
+            color:"#7a4fbf", weight:2.5, opacity:1.0,
+            dashArray: isWsStraight ? "1 6" : null, lineCap:"round", lineJoin:"round"
           }).addTo(_mainMap);
           _mainMarkers.push(detourLine);
+          // Kick off OSRM fetch for this detour if not cached yet.
+          if (isWsStraight && _wsRoadsOn && wsKey && wsCached !== "failed"
+              && typeof _ensureTripRoutesCached === "function"
+              && !trip._osrmBatchInflight) {
+            trip._osrmBatchInflight = true;
+            _ensureTripRoutesCached([{ key: wsKey, coords: path }]).then(function(){
+              trip._osrmBatchInflight = false;
+              if (typeof updateMainMap === "function") updateMainMap();
+            });
+          }
         } catch(_){}
       }
 
