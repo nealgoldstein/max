@@ -50716,6 +50716,40 @@ if (typeof globalThis !== "undefined") {
   globalThis._ensureMdcItemsHasPlace = _ensureMdcItemsHasPlace;
 }
 
+// PD.439 (architectural): single source of truth for "give this stop a
+// trip.places entry that HAS coordinates." The wayside / day-trip map
+// renderers resolve a stop's position from trip.places[placeId].lat/lng
+// (_resolveStopCtr) — a different representation than a destination pin,
+// which reads dest.lat/lng. The three dest→stop converters
+// (convertDestToWayside, convertDestToWaysideOnRoute, convertDestToDayTrip)
+// each used to inline their own "ensure place entry" block, and they
+// drifted: two backfilled coords onto a pre-existing (coordless) entry,
+// one did not — so converting a SIGHT (a non-city name getCityCenter
+// can't resolve) on the route-picked path left the stop unplottable and
+// the pin "disappeared from the map." Funnel all three through here so
+// the coord guarantee can never diverge again. Returns the entry.
+function _ensureStopPlaceEntry(placeId, src){
+  if (!placeId || !src) return null;
+  if (!trip.places) trip.places = {};
+  var p = trip.places[placeId];
+  if (!p) {
+    p = trip.places[placeId] = {
+      id:      placeId,
+      name:    src.place,
+      country: src.country || null,
+      lat:     (typeof src.lat === "number") ? src.lat : null,
+      lng:     (typeof src.lng === "number") ? src.lng : null
+    };
+    return p;
+  }
+  // Backfill onto a pre-existing entry that may be missing coords/name.
+  if ((typeof p.lat !== "number" || !isFinite(p.lat)) && typeof src.lat === "number") p.lat = src.lat;
+  if ((typeof p.lng !== "number" || !isFinite(p.lng)) && typeof src.lng === "number") p.lng = src.lng;
+  if (!p.name && src.place) p.name = src.place;
+  if (!p.country && src.country) p.country = src.country;
+  return p;
+}
+
 function convertDestToDayTrip(destId, hubDestId, opts){
   opts = opts || {};
   if (!trip || !Array.isArray(trip.destinations)) return;
@@ -50743,25 +50777,11 @@ function convertDestToDayTrip(destId, hubDestId, opts){
     placeId = "pl-" + (src.place || "unknown").toLowerCase().replace(/[^a-z0-9]+/g, "-");
   }
 
-  // Make sure trip.places has an entry — WITH coordinates (PD.438: the
-  // day-trip render resolves the stop from trip.places[id].lat/lng, so a
-  // pre-existing entry without coords would make the stop unplottable and
-  // it would vanish from the map; backfill the source's coords).
-  if (!trip.places) trip.places = {};
-  if (!trip.places[placeId]) {
-    trip.places[placeId] = {
-      id:      placeId,
-      name:    src.place,
-      country: src.country || null,
-      lat:     (typeof src.lat === "number") ? src.lat : null,
-      lng:     (typeof src.lng === "number") ? src.lng : null
-    };
-  } else {
-    var _dp = trip.places[placeId];
-    if ((typeof _dp.lat !== "number" || !isFinite(_dp.lat)) && typeof src.lat === "number") _dp.lat = src.lat;
-    if ((typeof _dp.lng !== "number" || !isFinite(_dp.lng)) && typeof src.lng === "number") _dp.lng = src.lng;
-    if (!_dp.name && src.place) _dp.name = src.place;
-  }
+  // PD.439: ensure a trip.places entry that carries coords (shared
+  // helper — see _ensureStopPlaceEntry). The day-trip render resolves the
+  // stop from trip.places[id].lat/lng, so a coordless entry would make the
+  // stop unplottable and vanish from the map.
+  _ensureStopPlaceEntry(placeId, src);
 
   // Distance from hub for chip metadata + future sort.
   var distKm = null;
@@ -51044,28 +51064,12 @@ function convertDestToWayside(destId, opts){
     placeId = "pl-" + (src.place || "unknown").toLowerCase().replace(/[^a-z0-9]+/g, "-");
   }
 
-  // Ensure trip.places has an entry — WITH coordinates. PD.438: the
-  // wayside render resolves a stop's position from trip.places[id].lat/lng
-  // (the dest pin used dest.lat/lng), so if this place entry already
-  // existed WITHOUT coords, the new wayside has no position, getCityCenter
-  // can't resolve a sight name, and the render silently drops it — the
-  // place "disappears from the map." Always backfill the source dest's
-  // coords so the wayside pin can be placed.
-  if (!trip.places) trip.places = {};
-  if (!trip.places[placeId]) {
-    trip.places[placeId] = {
-      id:      placeId,
-      name:    src.place,
-      country: src.country || null,
-      lat:     (typeof src.lat === "number") ? src.lat : null,
-      lng:     (typeof src.lng === "number") ? src.lng : null
-    };
-  } else {
-    var _wp = trip.places[placeId];
-    if ((typeof _wp.lat !== "number" || !isFinite(_wp.lat)) && typeof src.lat === "number") _wp.lat = src.lat;
-    if ((typeof _wp.lng !== "number" || !isFinite(_wp.lng)) && typeof src.lng === "number") _wp.lng = src.lng;
-    if (!_wp.name && src.place) _wp.name = src.place;
-  }
+  // PD.439: ensure a trip.places entry that carries coords (shared
+  // helper — see _ensureStopPlaceEntry). The wayside render resolves a
+  // stop's position from trip.places[id].lat/lng (the dest pin used
+  // dest.lat/lng); a coordless entry leaves the wayside unplottable —
+  // getCityCenter can't resolve a sight name — and it "disappears."
+  _ensureStopPlaceEntry(placeId, src);
 
   // Find the existing prev→src and src→next transit routes.
   // syncTransitRoutes (called on every previous build / reorder)
@@ -54941,16 +54945,12 @@ function convertDestToWaysideOnRoute(destId, targetRouteId, opts) {
   if (!placeId) {
     placeId = "pl-" + (src.place || "unknown").toLowerCase().replace(/[^a-z0-9]+/g, "-");
   }
-  if (!trip.places) trip.places = {};
-  if (!trip.places[placeId]) {
-    trip.places[placeId] = {
-      id:      placeId,
-      name:    src.place,
-      country: src.country || null,
-      lat:     (typeof src.lat === "number") ? src.lat : null,
-      lng:     (typeof src.lng === "number") ? src.lng : null
-    };
-  }
+  // PD.439: ensure a trip.places entry that carries coords (shared
+  // helper). THIS path (route-picked from the popover) was the one
+  // missing the backfill — a pre-existing coordless entry left a SIGHT
+  // wayside unplottable and it vanished from the map. Now consistent
+  // with the other two converters.
+  _ensureStopPlaceEntry(placeId, src);
 
   var absorberId = (opts.absorbInto === "from") ? targetRoute.fromDestId : targetRoute.toDestId;
   var absorber = trip.destinations.find(function(d){ return d.id === absorberId; });
