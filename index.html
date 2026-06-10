@@ -28412,9 +28412,13 @@ function _pmReceiptStripHtml(){
         return '<div id="tb-receipt-strip" style="flex-shrink:0;margin:8px 22px 0;padding:6px 12px;background:#f7f6f2;border:1px solid #e6e1d5;border-radius:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:11.5px;color:#444;line-height:1.4;">'
           + '<span style="flex:1;min-width:160px;">' + _summary + '</span>'
           + '<button type="button" onclick="if(typeof _pmCheckAllUnchecked===\'function\')_pmCheckAllUnchecked();" style="flex:0 0 auto;font-size:11px;font-weight:700;color:#5b3f8f;background:#fff;border:1px solid #ddd0f0;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;">✓ Check them all</button>'
-          + '<button type="button" onclick="if(typeof _pmToggleReceiptDetail===\'function\')_pmToggleReceiptDetail(this)" style="flex:0 0 auto;font-size:11px;font-weight:600;color:#666;background:#fff;border:1px solid #ddd;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;">Details ▾</button>'
+          + '<button type="button" onclick="if(typeof _pmToggleReceiptDetail===\'function\')_pmToggleReceiptDetail(this)" style="flex:0 0 auto;font-size:11px;font-weight:600;color:#666;background:#fff;border:1px solid #ddd;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;">Hide ▴</button>'
           + '</div>'
-          + '<div id="tb-receipt-detail" style="display:none;flex-shrink:0;margin:6px 22px 0;">' + _detail + '</div>';
+          // PD.427: the math breakdown ("N places: X you listed + Y Max
+          // suggested → Z considered") is shown by DEFAULT at the top —
+          // Neal: it disappeared when the receipt moved up. The toggle
+          // still collapses it.
+          + '<div id="tb-receipt-detail" style="display:block;flex-shrink:0;margin:6px 22px 0;">' + _detail + '</div>';
 }
 if (typeof globalThis !== "undefined") globalThis._pmReceiptStripHtml = _pmReceiptStripHtml;
 function _pmToggleReceiptDetail(btn){
@@ -47667,7 +47671,14 @@ function updateMainMap(){
         for (var _bi = 0; _bi < bounds.length - 1; _bi++) {
           var _fromD = _destSeq[_bi];
           var _toD   = _destSeq[_bi + 1];
-          if (_fromD && _toD && _waysideCovered[_fromD.id + "|" + _toD.id]) continue;
+          // PD.428: ALWAYS draw the destination-to-destination spine for
+          // every segment. (Was skipped when a wayside detour covered the
+          // segment.) Per Neal: the route line is the trip's structural
+          // spine — destinations only — and day-trip / on-the-way road
+          // routings are shown selectively on demand (one route at a time
+          // via the stop popover), layered ON TOP of the spine so you can
+          // compare the detour against the direct line and judge whether a
+          // stop is genuinely "on the way" or really a day trip.
           var _from = bounds[_bi], _to = bounds[_bi + 1];
           if (!_from || !_to) continue;
           // PD.137: coords array (currently just [from, to]; can be
@@ -47834,7 +47845,11 @@ function updateMainMap(){
       // roads (curves around bays, follows the actual driving path)
       // instead of cutting straight lines. Falls back to straight
       // lines while OSRM is fetching or if it fails.
-      try {
+      // PD.428: the day-trip loop line draws ONLY when this route is the
+      // selected on-demand routing (toggled from the stop popover). By
+      // default day-trips are pins only; the loop appears one route at a
+      // time, layered over the destination spine for comparison.
+      if (window._activeRouteRouting === route.id) try {
         var loopPath = [hubCtr].concat(dtStops.map(function(s){ return s.dtCtr; })).concat([hubCtr]);
         var loopKey = (typeof _osrmSegmentKey === "function") ? _osrmSegmentKey(loopPath) : null;
         // PD.141: strict off — ignore cache when roads disabled.
@@ -47979,7 +47994,12 @@ function updateMainMap(){
       // Style matched to regular transit (weight 2.5, dashArray "1 6",
       // weight-6 white halo) so wayside routes visually belong to
       // the transit family.
-      if (fromCtr && toCtr) {
+      // PD.428: the wayside detour line draws ONLY when this route is the
+      // selected on-demand routing (toggled from the stop popover). By
+      // default waysides are pins only; the detour appears one route at a
+      // time, layered over the destination spine so you can see how far it
+      // bends off the direct line (genuinely on-the-way vs a day trip).
+      if (fromCtr && toCtr && window._activeRouteRouting === route.id) {
         var path = [fromCtr].concat(stops.map(function(s){return s.ctr;})).concat([toCtr]);
         try {
           // v360.2: restored visibility. v359.60.95 dropped the detour
@@ -52693,6 +52713,35 @@ function _openTripStopPopover(ctx) {
   if (routeSel) {
     routeSel.onchange = function(){ _autoCheck("wayside"); };
     routeSel.onclick  = function(){ _autoCheck("wayside"); };
+  }
+
+  // PD.428: "show this route on the map" toggle for day-trip / wayside
+  // stops. By default the trip map shows only the destination spine; this
+  // reveals ONE route's road routing (the day-trip loop or the wayside
+  // detour) layered over the spine, so the user can judge whether the
+  // stop is genuinely on the way or really a day trip. One at a time:
+  // setting it replaces whatever was shown. Injected after the modal is in
+  // the DOM rather than into the large innerHTML above.
+  if ((ctx.kind === "dayTrip" || ctx.kind === "wayside") && ctx.route && ctx.route.id) {
+    var _rtId = ctx.route.id;
+    var _rtBtn = document.createElement("button");
+    _rtBtn.type = "button";
+    function _rtSync(){
+      var on = (window._activeRouteRouting === _rtId);
+      _rtBtn.textContent = on ? "✓ Showing this route on the map" : "🗺 Show this route on the map";
+      _rtBtn.style.color = on ? "#fff" : "#5b3f8f";
+      _rtBtn.style.background = on ? "#7a4fbf" : "#fff";
+    }
+    _rtBtn.style.cssText = "display:block;width:100%;margin:0 0 12px;font-size:12px;font-weight:600;border:1px solid #d6c8ee;border-radius:7px;padding:8px 12px;cursor:pointer;font-family:inherit;";
+    _rtSync();
+    _rtBtn.onclick = function(){
+      window._activeRouteRouting = (window._activeRouteRouting === _rtId) ? null : _rtId;
+      if (typeof updateMainMap === "function") { try { updateMainMap(); } catch(_){} }
+      _rtSync();
+    };
+    var _box = ov.firstElementChild;
+    if (_box && _box.firstChild) _box.insertBefore(_rtBtn, _box.firstChild);
+    else if (_box) _box.appendChild(_rtBtn);
   }
 
   ov.querySelector("#trip-stop-remove").onclick = function(){
