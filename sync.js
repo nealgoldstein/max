@@ -1469,6 +1469,21 @@
         hasLocalTrips = Array.isArray(idx) && idx.length > 0;
       } catch (_) {}
       if (hasLocalTrips) return;
+      // PD.437: do not auto-prompt sign-in on EVERY refresh for a RETURNING
+      // visitor. The old gate only skipped users who currently have local
+      // trips, so a returning user whose token expired (or who cleared
+      // their trips between runs) got the modal on every single refresh
+      // (Neal: "refresh still causes signup dialog to show"). Only offer
+      // sign-in unprompted to a GENUINELY first-time visitor — anyone who
+      // has been onboarded, visited before, or signed in before already
+      // knows the ⇄ Sync button and should not be greeted by a modal.
+      var _returningVisitor = false;
+      try {
+        _returningVisitor = (localStorage.getItem('max-onboarded') === '1')
+          || ((parseInt(localStorage.getItem('max-visit-count') || '0', 10) || 0) > 1)
+          || !!localStorage.getItem('max-server-email');
+      } catch (_) {}
+      if (_returningVisitor) return;
       // Wait until the page has rendered something, then offer
       // sign-in. 600ms gives enough time for the home screen to
       // mount but not so long the user starts wondering what
@@ -1612,7 +1627,14 @@
   function _maybePull() {
     if (!isSignedIn()) return;
     if (typeof document !== 'undefined' && document.hidden) return;
-    pullAll().then(
+    // PD.429b (T1.2): the poll / visibility-change pull is a BACKGROUND op
+    // — a transient 401 here must NOT clear the token and sign the user out
+    // (this fires on every tab-focus, including right after a refresh, so it
+    // was a recurring silent sign-out). Same tolerant window as the boot
+    // pull. v353.4: also pull prefs so cross-device pref changes flow in.
+    _bgAuthTolerant = true;
+    var _polls = [];
+    _polls.push(pullAll().then(
       function (r) {
         if (r.pulled > 0) {
           console.log('[max-sync] poll pulled', r.pulled, 'trip(s)');
@@ -1620,13 +1642,9 @@
         }
       },
       function () { /* silent on poll failures */ },
-    );
-    // v353.4: also pull prefs so changes made on another device
-    // (e.g. paceHours bumped on the phone) flow into the desktop
-    // when the tab regains focus or after each 60s tick. Without
-    // this, the desktop's pref is whatever was loaded at boot —
-    // it never picks up cross-device changes mid-session.
-    pullPrefs().catch(function () { /* silent */ });
+    ));
+    _polls.push(pullPrefs().catch(function () { /* silent */ }));
+    Promise.allSettled(_polls).then(function () { _bgAuthTolerant = false; });
   }
   function _startPolling() {
     if (_pollTimer) return;
