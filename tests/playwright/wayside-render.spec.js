@@ -102,6 +102,37 @@ test.describe('wayside pin actually renders on the trip map (sight, non-city nam
     expect(pins, 'the sight wayside pin must render on the map (not disappear)').toBeGreaterThanOrEqual(1);
   });
 
+  test('null-island [0,0] sentinel entry is repaired, not plotted in the ocean (PD.440)', async ({ page }) => {
+    // The real bug from Neal's trip: trip.places[id] pre-existed with
+    // lat:0/lng:0 (the "coords unknown" sentinel the place pipeline
+    // writes). isFinite(0) is true, so the old guard treated [0,0] as a
+    // valid position and the pin was drawn ~3000km off Iceland (invisible).
+    const seed = fourStopSeedWithSightWayside();
+    seed.envelope.trip.places['pl-gljufrabui'].lat = 0;
+    seed.envelope.trip.places['pl-gljufrabui'].lng = 0;
+    await bootSeeded(page, seed);
+    await page.locator('#main-map').waitFor({ state: 'visible' });
+
+    await page.evaluate(() => {
+      if (window.MaxEngineTrip && MaxEngineTrip.syncTransitRoutes) MaxEngineTrip.syncTransitRoutes(window.trip);
+      window.convertDestToWaysideOnRoute('d2', 'r-tr-d3-d4');
+    });
+    await page.waitForFunction(() => window.trip.destinations.length === 3);
+
+    const coords = await page.evaluate(() => {
+      const p = window.trip.places['pl-gljufrabui'];
+      return { lat: p.lat, lng: p.lng };
+    });
+    // The dest carried real coords (63.61,-19.99); the [0,0] entry must
+    // be repaired to those, NOT left at the null-island sentinel.
+    expect(Math.abs(coords.lat) > 0.01 || Math.abs(coords.lng) > 0.01,
+      'place entry must no longer sit at [0,0]').toBe(true);
+    expect(coords.lat).toBeCloseTo(63.61, 1);
+
+    const pins = await renderMainMapAndCountWaysidePins(page);
+    expect(pins).toBeGreaterThanOrEqual(1);
+  });
+
   test('natural path: convertDestToWayside keeps the sight pin on the map', async ({ page }) => {
     await bootSeeded(page, fourStopSeedWithSightWayside());
     await page.locator('#main-map').waitFor({ state: 'visible' });

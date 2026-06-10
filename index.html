@@ -47575,9 +47575,16 @@ function updateMainMap(){
     // _routeHasRenderableWayside check (which now decides whether a
     // segment's blue spine is skipped) can run against the same dedup
     // logic the wayside renderer uses.
+    // PD.440: reject the [0,0] "coordinates unknown" sentinel. The place
+    // pipeline writes lat:0/lng:0 for places it couldn't geocode, but
+    // [0,0] is a real point in the Atlantic — plotting a marker there
+    // puts it ~3000 km off any real trip, so it "disappears" off the
+    // visible map. Treat near-[0,0] as NOT real and fall back to the
+    // name geocode (getCityCenter), which recovers the true location for
+    // named sights/cities. Uses the shared _coordsReal predicate.
     function _resolveDestCtr(d) {
       if (!d) return null;
-      if (typeof d.lat === "number" && typeof d.lng === "number") return [d.lat, d.lng];
+      if (_coordsReal(d.lat, d.lng)) return [d.lat, d.lng];
       if (d.place) {
         var c = getCityCenter(d.place);
         if (c && isFinite(c[0])) return c;
@@ -47586,7 +47593,7 @@ function updateMainMap(){
     }
     function _resolveStopCtr(stop) {
       var place = stop && trip.places && trip.places[stop.placeId];
-      if (place && typeof place.lat === "number" && typeof place.lng === "number") return [place.lat, place.lng];
+      if (place && _coordsReal(place.lat, place.lng)) return [place.lat, place.lng];
       if (place && place.name) {
         var c = getCityCenter(place.name);
         if (c && isFinite(c[0])) return c;
@@ -50728,6 +50735,20 @@ if (typeof globalThis !== "undefined") {
 // can't resolve) on the route-picked path left the stop unplottable and
 // the pin "disappeared from the map." Funnel all three through here so
 // the coord guarantee can never diverge again. Returns the entry.
+// PD.440: single "are these REAL coordinates?" predicate. Rejects
+// non-finite values AND the [0,0] null-island sentinel that the place
+// pipeline writes for "coordinates unknown." A travel place is never at
+// 0N/0E (open Atlantic), so near-[0,0] means "no coords" — distinct from
+// a legitimate point that merely sits on the equator or prime meridian
+// elsewhere (both being ~0 simultaneously is the giveaway). Used by the
+// dest/stop map resolvers and by _ensureStopPlaceEntry so "unknown" is
+// judged the same way everywhere, instead of each surface re-deciding.
+function _coordsReal(lat, lng){
+  return typeof lat === "number" && isFinite(lat)
+      && typeof lng === "number" && isFinite(lng)
+      && !(Math.abs(lat) < 0.01 && Math.abs(lng) < 0.01);
+}
+
 function _ensureStopPlaceEntry(placeId, src){
   if (!placeId || !src) return null;
   if (!trip.places) trip.places = {};
@@ -50741,19 +50762,18 @@ function _ensureStopPlaceEntry(placeId, src){
   // the source was renderable as a destination, the stop it becomes must
   // inherit a real position. We store actual numbers rather than copying
   // a possibly-null lat/lng, so the stop never depends on getCityCenter
-  // resolving the SAME name again downstream. Only fill when missing -
-  // never clobber a good existing position.
-  var hasCoords = (typeof p.lat === "number" && isFinite(p.lat)
-                && typeof p.lng === "number" && isFinite(p.lng));
-  if (!hasCoords) {
-    var lat = (typeof src.lat === "number" && isFinite(src.lat)) ? src.lat : null;
-    var lng = (typeof src.lng === "number" && isFinite(src.lng)) ? src.lng : null;
-    if ((lat === null || lng === null) && typeof getCityCenter === "function" && src.place) {
-      var c = getCityCenter(src.place);
-      if (c && isFinite(c[0]) && isFinite(c[1])) { lat = c[0]; lng = c[1]; }
+  // resolving the SAME name again downstream. Only fill when the existing
+  // position is NOT real (missing, non-finite, or the [0,0] sentinel) -
+  // never clobber a good position. PD.440: the [0,0]-as-valid bug is why
+  // a converted sight (Skogafoss) landed in the Atlantic and vanished.
+  if (!_coordsReal(p.lat, p.lng)) {
+    var lat = _coordsReal(src.lat, src.lng) ? src.lat : null;
+    var lng = _coordsReal(src.lat, src.lng) ? src.lng : null;
+    if (lat === null && typeof getCityCenter === "function") {
+      var c = getCityCenter(p.name || src.place || "");
+      if (c && _coordsReal(c[0], c[1])) { lat = c[0]; lng = c[1]; }
     }
-    if (lat !== null) p.lat = lat;
-    if (lng !== null) p.lng = lng;
+    if (lat !== null) { p.lat = lat; p.lng = lng; }
   }
   return p;
 }
