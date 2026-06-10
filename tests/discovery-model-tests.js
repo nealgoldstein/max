@@ -249,6 +249,30 @@ test("PD.404: a per-place _themeFit splits one grouped catch-all item across the
   assert.ok(!secs["Sights you're keeping"], "nothing should remain in the catch-all");
 });
 
+test("PD.404: a per-place _themeFit SURVIVES canonicalize + model placement (persistence)", function () {
+  // The theming pass stamps _themeFit on places sitting in a catch-all.
+  // It must survive the write-door canonicalizer AND the dedupe-merge with
+  // an enhance duplicate, then place the sight in its theme on render.
+  global.SectionKind = (function () { try { var sk = require("../section-kind.js"); return sk.SectionKind || sk; } catch (_) { return undefined; } })();
+  global.MaxDiscovery = M;
+  var canon = require("../max-data.js").canonicalizePlaceActivities
+    || (global.MaxData && global.MaxData.canonicalizePlaceActivities);
+  assert.strictEqual(typeof canon, "function", "canonicalizePlaceActivities must be available");
+  var pa = [
+    { section: "Sights you're keeping", type: "activity", name: "keep", requiredPlaces: [
+      { place: "Gullfoss", country: "Iceland", lat: 64.3, lng: -20.1, _keep: true, _themeFit: "Visit natural wonders" } ] },
+    // an enhance leftover duplicate with NO theme — the merge must not strip the theme
+    { section: "Sights near places you listed", type: "activity", name: "near", requiredPlaces: [
+      { place: "Gullfoss", country: "Iceland", lat: 64.3, lng: -20.1, _keep: false } ] }
+  ];
+  var out = canon(pa);
+  var m2 = M.DiscoveryModel.fromPlaceActivities(out, {});
+  var secs = {};
+  m2.sections().forEach(function (g) { secs[g.section] = g.places.map(function (p) { return p.place; }); });
+  assert.deepStrictEqual(secs["Visit natural wonders"], ["Gullfoss"], "themed sight must land in its theme after canonicalize+merge");
+  assert.ok(!secs["Sights you're keeping"], "must not remain in the catch-all");
+});
+
 console.log("\n" + "─".repeat(50));
 console.log("PASS: " + pass + "    FAIL: " + fail);
 if (fail > 0) process.exit(1);
