@@ -4742,6 +4742,49 @@ var MaxMapPin = {
     };
   }
 };
+// PD.426 (map collapse #3, step 1): ONE marker factory. Every map surface
+// drew pins with the identical sequence — style → html → icon → L.marker →
+// bindTooltip → (bindPopup | on click) → push — duplicated at 8+ sites,
+// each re-deriving the tooltip offset. This collapses that path into one
+// call so the two renderers can't drift on how a pin is drawn.
+//   spec: { lat, lng | latLng, role, styleCtx, label, badges, tooltip,
+//           tooltipOpts, tooltipClassName, popupHtml, popupOpts, onClick,
+//           className, zIndexOffset }
+// Returns the L.marker, or null if coords are bad / the role is hidden.
+MaxMapPin.draw = function(map, spec){
+  if (!map || !spec || typeof L === "undefined") return null;
+  var lat = spec.lat, lng = spec.lng;
+  if (Array.isArray(spec.latLng)) { lat = spec.latLng[0]; lng = spec.latLng[1]; }
+  if (typeof lat !== "number" || typeof lng !== "number" || !isFinite(lat) || !isFinite(lng)) return null;
+  var style = MaxMapPin.style(spec.role || "maybe", spec.styleCtx || {});
+  if (!style || style.hidden) return null;
+  var html = MaxMapPin.html(style, { label: (spec.label != null ? spec.label : "") }, spec.badges || {});
+  var icon = MaxMapPin.icon(html, style, spec.className ? { className: spec.className } : {});
+  var mOpts = { icon: icon };
+  if (typeof spec.zIndexOffset === "number") mOpts.zIndexOffset = spec.zIndexOffset;
+  if (typeof spec.opacity === "number") mOpts.opacity = spec.opacity;
+  var marker;
+  try { marker = L.marker([lat, lng], mOpts).addTo(map); } catch(_){ return null; }
+  if (spec.tooltip) {
+    // Tooltip offset honors the icon's anchor (teardrop tip vs circle
+    // center) so it clears the pin top regardless of shape — this was
+    // re-derived at every call site (and inconsistently).
+    var off = (style.anchor === "tip") ? [0, -style.height] : [0, -style.height / 2];
+    try {
+      marker.bindTooltip(spec.tooltip, spec.tooltipOpts || {
+        permanent: false, direction: "top", offset: off,
+        className: spec.tooltipClassName || ""
+      });
+    } catch(_){}
+  }
+  if (spec.popupHtml) {
+    try { marker.bindPopup(spec.popupHtml, spec.popupOpts || { maxWidth: 260, autoPan: true, closeButton: true }); } catch(_){}
+  }
+  if (typeof spec.onClick === "function") {
+    (function(mk){ mk.on("click", function(e){ try { spec.onClick(mk, e); } catch(_){} }); })(marker);
+  }
+  return marker;
+};
 // NC.8: swatch helper — returns an inline-block container with the
 // pin shape for a given role, sized for use inside role-picker
 // popovers + Discovery chips. Solves the "popover icon doesn't
@@ -29386,24 +29429,20 @@ function _openPlacePickerMapOverlay(){
       : { role: (info.keep && info._isDayTrip ? "daytrip" : info.keep ? "stay" : "maybe") };
     var _role = _derived.role;
     if (_role === "reject") return;
-    var _style = MaxMapPin.style(_role, { iconic: !!info.iconic });
-    // All roles carry initials; corner badges / shape carry the role.
-    var _labelOv = { label: info.place.substring(0, 2) };
-    var _html = MaxMapPin.html(_style, _labelOv);
-    var icon = MaxMapPin.icon(_html, _style);
-    var m = L.marker([info.lat, info.lng], { icon: icon }).addTo(map);
     var _ttRole = (_role === "daytrip") ? " · day trip"
                 : (_role === "onway")   ? " · on the way"
                 : (_role === "stay")    ? " · stay"
                 : (_role === "see")     ? " · see"
                 : info.keep             ? " · kept"
                 :                         " · maybe";
-    // Tooltip offset clears the pin's visible top regardless of
-    // anchor strategy. For centered shapes (circle/octagon), top is
-    // at -height/2 from anchor; for tip-anchored teardrops, top is
-    // at -height from anchor.
-    var _ttOffset = (_style.anchor === "tip") ? -_style.height : -_style.height/2;
-    m.bindTooltip(info.place + _ttRole, { direction: "top", offset: [0, _ttOffset] });
+    // PD.426: drawn via the shared MaxMapPin.draw factory — same path as
+    // the main trip map; the factory owns the anchor-aware tooltip offset.
+    MaxMapPin.draw(map, {
+      latLng: [info.lat, info.lng], role: _role,
+      styleCtx: { iconic: !!info.iconic },
+      label: info.place.substring(0, 2),
+      tooltip: info.place + _ttRole
+    });
     bounds.extend([info.lat, info.lng]);
   });
   // v357: main-route polyline removed — matches the inline picker
@@ -29804,28 +29843,25 @@ function _openTripHeroMapOverlay(){
     // "maybe" style — gray dashed circle + place initials — same as
     // the inline trip-overview map. Single source of truth.
     if (p.kind === "considered") {
-      // PD.425: considered tint owned by MaxMapPin (pass isStay).
-      var _cstyle = MaxMapPin.style("maybe", { isStay: p.isStay });
-      var _clabel = (p.abbrev || (p.place || "").substring(0, 2));
-      var _chtml = MaxMapPin.html(_cstyle, { label: _clabel });
-      var _cicon = MaxMapPin.icon(_chtml, _cstyle, { className: "trip-popout-considered-pin" });
-      try {
-        var _cm = L.marker([p.lat, p.lng], { icon: _cicon, zIndexOffset: -100 }).addTo(map);
-        _cm.bindTooltip(p.place + " · considered", {
-          direction: "top", offset: [0, -_cstyle.height/2]
-        });
-      } catch(_){}
+      // PD.425/426: tint owned by MaxMapPin (isStay), drawn via the factory.
+      MaxMapPin.draw(map, {
+        latLng: [p.lat, p.lng], role: "maybe", styleCtx: { isStay: p.isStay },
+        label: (p.abbrev || (p.place || "").substring(0, 2)),
+        className: "trip-popout-considered-pin", zIndexOffset: -100,
+        tooltip: p.place + " · considered"
+      });
       return;
     }
-    // NC.9.10: gateway pts now route through MaxMapPin.style("gateway")
-    // — same source of truth as destination/considered pins.
+    // NC.9.10 / PD.426: gateway pts route through the factory; keep
+    // _gwStyle for the dashed connector's color.
     if (p.kind === "gateway") {
       var _gwStyle = MaxMapPin.style("gateway", {});
-      var _gwHtml = MaxMapPin.html(_gwStyle, { label: p.glyph });
-      var _gwIcon = MaxMapPin.icon(_gwHtml, _gwStyle);
       var _gwLabel = p.place + (p.isEntry ? " · arrival" : " · departure");
-      var gm = L.marker([p.lat, p.lng], { icon: _gwIcon, zIndexOffset: -50 }).addTo(map);
-      gm.bindTooltip(_gwLabel, { direction: "top", offset: [0, -_gwStyle.height/2 - 2] });
+      MaxMapPin.draw(map, {
+        latLng: [p.lat, p.lng], role: "gateway", label: p.glyph,
+        zIndexOffset: -50, tooltip: _gwLabel,
+        tooltipOpts: { direction: "top", offset: [0, -_gwStyle.height/2 - 2] }
+      });
       if (isFinite(p.anchorLat) && isFinite(p.anchorLng)) {
         L.polyline([[p.lat, p.lng], [p.anchorLat, p.anchorLng]], {
           color: _gwStyle.stroke, weight: 1.5, opacity: 0.5,
@@ -46774,31 +46810,23 @@ function updateMainMapMarkers(){
   // exactly which city this is — useful when the 2-letter abbrev
   // ("Li" for Lisbon) is ambiguous.
   if(center){
-    // NC.9.12: active-destination pin routes through MaxMapPin.
-    var _curStyle = MaxMapPin.style("activeDest", {});
-    var _curLabelText = (dest.place || "").substring(0, 2);
-    var _curHtml = MaxMapPin.html(_curStyle, { label: _curLabelText });
-    var curIcon = MaxMapPin.icon(_curHtml, _curStyle);
-    var cm=L.marker(center,{icon:curIcon,zIndexOffset:100});
+    // NC.9.12 / PD.426: active-destination pin via the shared factory.
     var _curLabel = (dest.label && dest.label !== dest.place)
       ? (dest.label + ' (' + dest.place + ')')
       : dest.place;
-    cm.bindTooltip(_curLabel, {
-      permanent: false,
-      direction: 'top',
-      offset: [0, -18],
-      className: 'main-map-tooltip'
+    var cm = MaxMapPin.draw(_mainMap, {
+      latLng: center, role: "activeDest",
+      label: (dest.place || "").substring(0, 2), zIndexOffset: 100,
+      tooltip: _curLabel,
+      tooltipOpts: { permanent:false, direction:'top', offset:[0,-18], className:'main-map-tooltip' },
+      // Tap-to-show: Leaflet tooltips open on hover only; on touch the
+      // tap is the user's only path. Auto-close after a beat.
+      onClick: function(mk){
+        try { mk.openTooltip(); } catch(_){}
+        setTimeout(function(){ try { mk.closeTooltip(); } catch(_){} }, 2200);
+      }
     });
-    cm.on('click', function(){
-      // Open the tooltip on tap. By default Leaflet's tooltip opens
-      // on hover only; on touch devices that hover never fires, so
-      // the tap is the user's only path. openTooltip is idempotent
-      // and the close on the next tap-elsewhere is automatic.
-      try { cm.openTooltip(); } catch(_){}
-      // Auto-close after a beat so the tooltip doesn't linger.
-      setTimeout(function(){ try { cm.closeTooltip(); } catch(_){} }, 2200);
-    });
-    cm.addTo(_mainMap); _mainMarkers.push(cm);
+    if (cm) _mainMarkers.push(cm);
   }
 
   // Previous and next destination markers — context pins, don't affect zoom
@@ -46807,13 +46835,13 @@ function updateMainMapMarkers(){
     if(nb.idx<0||nb.idx>=trip.destinations.length) return;
     var nd=trip.destinations[nb.idx];
     var nc=getCityCenter(nd.place); if(!nc) return;
-    // NC.9.12: prev/next context pin routes through MaxMapPin.
-    var _nbStyle = MaxMapPin.style("neighborDest", {});
-    var _nbHtml = MaxMapPin.html(_nbStyle, { label: (nd.place || "").substring(0, 2) });
-    var icon = MaxMapPin.icon(_nbHtml, _nbStyle);
-    var m=L.marker(nc,{icon:icon,opacity:0.85});
-    (function(nid){m.on('click',function(){selectDest(nid);});})(nd.id);
-    m.addTo(_mainMap); _mainMarkers.push(m);
+    // NC.9.12 / PD.426: prev/next context pin via the shared factory.
+    var m = MaxMapPin.draw(_mainMap, {
+      latLng: nc, role: "neighborDest",
+      label: (nd.place || "").substring(0, 2), opacity: 0.85,
+      onClick: (function(nid){ return function(){ selectDest(nid); }; })(nd.id)
+    });
+    if (m) _mainMarkers.push(m);
     var lbl=L.divIcon({
       html:'<div style="font-size:9px;color:#333;font-weight:600;white-space:nowrap;background:rgba(255,255,255,0.92);padding:1px 5px;border-radius:3px;margin-top:2px;box-shadow:0 1px 3px rgba(0,0,0,.12);">'+nb.label+' '+nd.place+'</div>',
       className:'',iconSize:[0,0],iconAnchor:[-4,0]
@@ -47408,46 +47436,12 @@ function updateMainMap(){
       var _stayPlace = (group.dests[0].dest && group.dests[0].dest.place) || "";
       var _tripStyle = MaxMapPin.style(_primaryRole, {});
       // All roles carry place initials; corner badges differentiate.
-      var _tripLabelOv = { label: _stayPlace.substring(0, 2) };
       var _tripBadges = {
         sequence: label,
         entryGlyph: _grpEntry || "",
         exitGlyph: _grpExit  || ""
       };
-      var html = MaxMapPin.html(_tripStyle, _tripLabelOv, _tripBadges);
-      // Custom className kept for any downstream selectors that
-      // depend on it (animation hooks, etc.).
-      var icon = MaxMapPin.icon(html, _tripStyle, { className: "main-trip-pin" });
-      var m = L.marker(group.ctr, {icon: icon}).addTo(_mainMap);
-      // v353.2: register this marker against every dest id in the
-      // group. Round-trip places visit the same lat/lng twice (or
-      // more) and updateMainMap collapses them into one pin; we
-      // register both dest ids to the same marker so highlight calls
-      // from either dest card find their pin.
-      group.dests.forEach(function(d){
-        if (d && d.dest && d.dest.id) _mainMarkerByDestId[d.dest.id] = m;
-      });
-      // v359.51.1: click → open the role popover directly. The
-      // previous intermediate Leaflet popup was getting eaten by the
-      // marker's tooltip (and added a friction step Neal didn't want).
-      // The role popover itself carries both affordances ("Open this
-      // destination" link + the Overnight / Day-trip choices) so the
-      // dropped Open-destination shortcut isn't lost.
-      // v359.60.23: route through the unified _openTripStopPopover
-      // (same dialog for destinations / day-trips / waysides) so
-      // every stop offers the full transition set.
-      (function(did){
-        m.on("click", function(){
-          try { m.closeTooltip(); } catch(_){}
-          if (typeof _openTripStopPopover === "function") {
-            _openTripStopPopover({ kind: "destination", destId: did });
-          } else if (typeof _openTripDestRolePopover === "function") {
-            _openTripDestRolePopover(did);
-          } else {
-            selectDest(did);
-          }
-        });
-      })(group.dests[0].dest.id);
+      // Tooltip text, computed before the draw so the factory binds it.
       var primary = group.dests[0].dest;
       var tipParts = [primary.place];
       if (group.dests.length > 1) {
@@ -47460,19 +47454,38 @@ function updateMainMap(){
           tipParts.push(primary.nights + " night" + (primary.nights!==1?"s":""));
         }
       }
-      // v360.2: removed the "could be a day trip" tooltip hint. It
-      // accompanied the purple candidate ring (also dropped above) —
-      // both were Max nudging the user toward a structural change
-      // based on geometry alone. The role popover still offers the
-      // day-trip conversion when the user taps the pin; we trust the
-      // user to decide whether a place deserves its own slot.
-      // Round NC.X: size was removed when the inline pin HTML
-      // construction collapsed into MaxMapPin. Pull the size from
-      // the style so tooltips clear the pin top correctly regardless
-      // of role.
-      var _tipSize = _tripStyle.height;
-      m.bindTooltip(tipParts.join(" · "), {permanent:false, direction:"top", offset:[0,-_tipSize/2-2], className:"main-map-tooltip"});
-      _mainMarkers.push(m);
+      // PD.426: destination pin via the shared MaxMapPin.draw factory
+      // (sequence + entry/exit badges; tooltip offset from _tripStyle's
+      // height, kept above). v359.51.1/60.23: click → unified stop popover
+      // (same dialog for destinations / day-trips / waysides).
+      var m = MaxMapPin.draw(_mainMap, {
+        latLng: group.ctr, role: _primaryRole,
+        label: _stayPlace.substring(0, 2), badges: _tripBadges,
+        className: "main-trip-pin",
+        tooltip: tipParts.join(" · "),
+        tooltipOpts: { permanent:false, direction:"top", offset:[0, -_tripStyle.height/2 - 2], className:"main-map-tooltip" },
+        onClick: (function(did){
+          return function(mk){
+            try { mk.closeTooltip(); } catch(_){}
+            if (typeof _openTripStopPopover === "function") {
+              _openTripStopPopover({ kind: "destination", destId: did });
+            } else if (typeof _openTripDestRolePopover === "function") {
+              _openTripDestRolePopover(did);
+            } else {
+              selectDest(did);
+            }
+          };
+        })(group.dests[0].dest.id)
+      });
+      if (m) {
+        // v353.2: register the pin against EVERY dest id in the group —
+        // round-trip places collapse to one marker, so either card's
+        // highlight must resolve to it.
+        group.dests.forEach(function(d){
+          if (d && d.dest && d.dest.id) _mainMarkerByDestId[d.dest.id] = m;
+        });
+        _mainMarkers.push(m);
+      }
     });
 
     // Round FN.A.4: separate gateway pins for entry / exit that didn't
@@ -47490,13 +47503,17 @@ function updateMainMap(){
         // Same source of truth as the popout window + in-page overlay.
         // The dashed connector reads its color off the style spec so
         // changing the gateway color updates the connector too.
+        // PD.426: pin via the shared factory; keep _gwStyle for the
+        // dashed connector's color (reads style.stroke below).
         var _gwStyle = MaxMapPin.style("gateway", {});
-        var _gwHtml = MaxMapPin.html(_gwStyle, { label: glyph });
-        var _gwIcon = MaxMapPin.icon(_gwHtml, _gwStyle, { className: "main-trip-gateway-pin" });
         var label = name + (isEntry ? " · arrival" : " · departure");
-        var gm = L.marker([loc.lat, loc.lng], { icon: _gwIcon, zIndexOffset: -50 }).addTo(_mainMap);
-        gm.bindTooltip(label, { direction: "top", offset: [0, -_gwStyle.height/2 - 2], className: "main-map-tooltip" });
-        _mainMarkers.push(gm);
+        var gm = MaxMapPin.draw(_mainMap, {
+          latLng: [loc.lat, loc.lng], role: "gateway", label: glyph,
+          className: "main-trip-gateway-pin", zIndexOffset: -50,
+          tooltip: label,
+          tooltipOpts: { direction: "top", offset: [0, -_gwStyle.height/2 - 2], className: "main-map-tooltip" }
+        });
+        if (gm) _mainMarkers.push(gm);
         bounds.push([loc.lat, loc.lng]);
         // Connector to the anchor destination (first / last).
         var anchorDest = isEntry
@@ -47859,41 +47876,30 @@ function updateMainMap(){
         // "daytrip" because we've already filtered out any stops that
         // disagree with the cascade above — anything left here is
         // legitimately a day trip.
-        var dtStyle = MaxMapPin.style("daytrip", {});
+        // v359.60.33: tooltip reads as part of the loop when the day-trip
+        // route has more than one stop. Single: "X · day trip from Hub";
+        // multi: "X · stop on the Hub loop (with …)". Loop order comes from
+        // dtStops (sorted by hub distance), current stop dropped.
         var dtLabel = (dtName || "").substring(0, 2);
-        var dtHtml = MaxMapPin.html(dtStyle, { label: dtLabel });
-        var dtIcon = MaxMapPin.icon(dtHtml, dtStyle, { className: "main-trip-daytrip-pin" });
-        try {
-          var dtMarker = L.marker(dtCtr, {icon:dtIcon}).addTo(_mainMap);
-          // v359.60.33: tooltip reads as part of the loop when the
-          // day-trip route has more than one stop. Single-stop:
-          //   "Diamond Beach · day trip from Skaftafell"
-          // Multi-stop:
-          //   "Diamond Beach · stop on the Skaftafell loop (with Fjallsárlón, Jökulsárlón)"
-          // Loop order comes straight from dtStops (already sorted by
-          // hub distance at render time), with the current stop dropped
-          // from the "with" list.
-          var _otherStopNames = dtStops
-            .filter(function(o){ return o && o.stop && o.stop.id !== stop.id; })
-            .map(function(o){ return o.dtName; })
-            .filter(Boolean);
-          var _hubLbl = hubDest.place || "";
-          var _tipText = (_otherStopNames.length > 0)
-            ? (dtName + " · stop on the " + _hubLbl + " loop (with " + _otherStopNames.join(", ") + ")")
-            : (dtName + " · day trip from " + _hubLbl);
-          dtMarker.bindTooltip(_tipText,
-            {permanent:false, direction:"top", offset:[0,-dtSize/2-2], className:"main-map-tooltip"});
-          // v359.52.2: pass the route + stop refs to the popover so
-          // the writer (ungroupDayTripByRouteStop, also new in v2)
-          // has everything it needs to detach the stop, optionally
-          // remove the empty route, drop the route reference from
-          // the hub day's planItems, and re-create the standalone
-          // destination.
-          // v359.60.23: route through the unified popover so day-trip
-          // pins get the same role-change menu as destination + wayside.
-          (function(hubId, hubRef, routeRef, stopRef, placeName){
-            dtMarker.on("click", function(){
-              try { dtMarker.closeTooltip(); } catch(_){}
+        var _otherStopNames = dtStops
+          .filter(function(o){ return o && o.stop && o.stop.id !== stop.id; })
+          .map(function(o){ return o.dtName; })
+          .filter(Boolean);
+        var _hubLbl = hubDest.place || "";
+        var _tipText = (_otherStopNames.length > 0)
+          ? (dtName + " · stop on the " + _hubLbl + " loop (with " + _otherStopNames.join(", ") + ")")
+          : (dtName + " · day trip from " + _hubLbl);
+        // PD.426: drawn via the shared MaxMapPin.draw factory. v359.60.23:
+        // click routes through the unified stop popover (same role-change
+        // menu as destination + wayside pins).
+        (function(hubId, hubRef, routeRef, stopRef, placeName){
+          var dtMarker = MaxMapPin.draw(_mainMap, {
+            latLng: dtCtr, role: "daytrip", label: dtLabel,
+            className: "main-trip-daytrip-pin",
+            tooltip: _tipText,
+            tooltipOpts: { permanent:false, direction:"top", offset:[0,-dtSize/2-2], className:"main-map-tooltip" },
+            onClick: function(mk){
+              try { mk.closeTooltip(); } catch(_){}
               if (typeof _openTripStopPopover === "function") {
                 _openTripStopPopover({ kind: "dayTrip", hubDest: hubRef, route: routeRef, stop: stopRef });
               } else if (typeof _openTripDayTripPopover === "function") {
@@ -47901,10 +47907,10 @@ function updateMainMap(){
               } else if (typeof selectDest === "function") {
                 selectDest(hubId);
               }
-            });
-          })(hubDest.id, hubDest, route, stop, dtName);
-          _mainMarkers.push(dtMarker);
-        } catch(_){}
+            }
+          });
+          if (dtMarker) _mainMarkers.push(dtMarker);
+        })(hubDest.id, hubDest, route, stop, dtName);
       });
     });
 
@@ -48034,30 +48040,27 @@ function updateMainMap(){
         // MaxMapPin.style had no effect here. Now it does: when the
         // onway role flipped from blue to light purple (NC.9.7), this
         // surface picked it up automatically.
-        var _wsStyle = MaxMapPin.style("onway", {});
+        // PD.426: wayside pin via the shared MaxMapPin.draw factory.
+        // v359.54.3 + v359.60.23: tap → unified stop popover (promote /
+        // remove). Closures capture the route + stop refs.
         var _wsLabel = (wsName || "").substring(0, 2);
-        var wsHtml = MaxMapPin.html(_wsStyle, { label: _wsLabel });
-        var wsIcon = MaxMapPin.icon(wsHtml, _wsStyle, { className: "main-trip-wayside-pin" });
-
-        try {
-          var wsMarker = L.marker(wsCtr, {icon:wsIcon}).addTo(_mainMap);
-          wsMarker.bindTooltip(wsName + " · wayside on " + fromName + " → " + toName,
-            {permanent:false, direction:"top", offset:[0, -_wsStyle.height/2 - 2], className:"main-map-tooltip"});
-          // v359.54.3: tap the pin → wayside popover with promote /
-          // remove actions. Closures capture the route + stop refs.
-          // v359.60.23: route through the unified popover.
-          (function(routeRef, stopRef, placeName){
-            wsMarker.on("click", function(){
-              try { wsMarker.closeTooltip(); } catch(_){}
+        (function(routeRef, stopRef, placeName){
+          var wsMarker = MaxMapPin.draw(_mainMap, {
+            latLng: wsCtr, role: "onway", label: _wsLabel,
+            className: "main-trip-wayside-pin",
+            tooltip: wsName + " · wayside on " + fromName + " → " + toName,
+            tooltipOpts: { permanent:false, direction:"top", offset:[0, -22/2 - 2], className:"main-map-tooltip" },
+            onClick: function(mk){
+              try { mk.closeTooltip(); } catch(_){}
               if (typeof _openTripStopPopover === "function") {
                 _openTripStopPopover({ kind: "wayside", route: routeRef, stop: stopRef });
               } else if (typeof _openTripWaysidePopover === "function") {
                 _openTripWaysidePopover(routeRef, stopRef, placeName);
               }
-            });
-          })(route, stop, wsName);
-          _mainMarkers.push(wsMarker);
-        } catch(_){}
+            }
+          });
+          if (wsMarker) _mainMarkers.push(wsMarker);
+        })(route, stop, wsName);
       });
     });
 
@@ -48098,16 +48101,16 @@ function updateMainMap(){
           var _ck = window._pmKey(c.place);
           if (_pinSeen[_ck]) return;            // already a pin for this identity
           _pinSeen[_ck] = true;
-          var _style = MaxMapPin.style("see", {});
+          // PD.426: drawn via the shared MaxMapPin.draw factory.
           var _label = _pmEsc ? _pmEsc((c.place || "").substring(0, 2))
                               : (c.place || "").substring(0, 2);
-          var _html = MaxMapPin.html(_style, { label: _label });
-          var icon = MaxMapPin.icon(_html, _style, { className: "main-trip-committed-sight-pin" });
-          var m = L.marker(c.coords, { icon: icon, zIndexOffset: -50 }).addTo(_mainMap);
-          m.bindTooltip(c.place + " · sight you committed", {
-            permanent: false, direction: "top", offset: [0, -_style.height/2], className: "main-map-tooltip"
+          var m = MaxMapPin.draw(_mainMap, {
+            latLng: c.coords, role: "see", label: _label,
+            className: "main-trip-committed-sight-pin", zIndexOffset: -50,
+            tooltip: c.place + " · sight you committed",
+            tooltipClassName: "main-map-tooltip"
           });
-          _mainMarkers.push(m);
+          if (m) _mainMarkers.push(m);
         } catch(_){}
       });
     })();
@@ -48135,34 +48138,27 @@ function updateMainMap(){
         // different size). The single-source-of-truth pattern is the
         // whole point of MaxMapPin; this surface was missed in the
         // first refactor pass.
-        // PD.425: considered tint owned by MaxMapPin — pass isStay
-        // (derived from the suggestion's section bucket); light blue =
-        // suggested stay, light green = suggested sight.
-        var _style = MaxMapPin.style("maybe", {
-          isStay: (typeof window._isStaySection === "function" && window._isStaySection(c.section))
-        });
+        // PD.425/426: tint owned by MaxMapPin (pass isStay), drawn via the
+        // shared MaxMapPin.draw factory; light blue = suggested stay, light
+        // green = suggested sight.
         var _label = _pmEsc ? _pmEsc((c.place || "").substring(0, 2))
                             : (c.place || "").substring(0, 2);
-        var _html = MaxMapPin.html(_style, { label: _label });
-        var icon = MaxMapPin.icon(_html, _style, { className: "main-trip-considered-pin" });
-        try {
-          var m = L.marker(c.coords, { icon: icon, zIndexOffset: -100 }).addTo(_mainMap);
-          m.bindTooltip(c.place + " · considered &middot; tap to add", {
-            permanent: false, direction: "top", offset: [0, -_style.height/2], className: "main-map-tooltip"
-          });
-          (function(placeName, coords, description, section){
-            m.on("click", function(){
-              try { m.closeTooltip(); } catch(_){}
+        (function(placeName, coords, description, section){
+          var m = MaxMapPin.draw(_mainMap, {
+            latLng: coords, role: "maybe",
+            styleCtx: { isStay: (typeof window._isStaySection === "function" && window._isStaySection(section)) },
+            label: _label, className: "main-trip-considered-pin", zIndexOffset: -100,
+            tooltip: placeName + " · considered &middot; tap to add",
+            tooltipClassName: "main-map-tooltip",
+            onClick: function(mk){
+              try { mk.closeTooltip(); } catch(_){}
               if (typeof _openTripConsideredAddPopover === "function") {
-                _openTripConsideredAddPopover(placeName, coords, {
-                  description: description,
-                  section: section
-                });
+                _openTripConsideredAddPopover(placeName, coords, { description: description, section: section });
               }
-            });
-          })(c.place, c.coords, c.description || "", c.section || "");
-          _mainMarkers.push(m);
-        } catch(_){}
+            }
+          });
+          if (m) _mainMarkers.push(m);
+        })(c.place, c.coords, c.description || "", c.section || "");
       });
     })();
 
