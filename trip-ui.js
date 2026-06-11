@@ -47,16 +47,28 @@
     hdr.appendChild(status);
     wrap.appendChild(hdr);
 
-    var saved = (typeof s.research === "string") ? s.research : "";
+    // PD.485 (T2.7): per-sight notes share the ONE place-notes store — the
+    // same unification dest.research got in PD.416. s.research was a THIRD
+    // store that could silently diverge from the place's notes elsewhere.
+    // Seed the legacy field into the unified store once, then read/write
+    // through it (s.research kept as a lossless legacy fallback).
+    var _sNotesKey = s.n || s.st || "";
+    try {
+      if (_sNotesKey && typeof global._pmGetPlaceNotes === "function" && typeof global._pmSetPlaceNotes === "function") {
+        var _sSeed = global._pmGetPlaceNotes(_sNotesKey);
+        if (!_sSeed && typeof s.research === "string" && s.research) {
+          global._pmSetPlaceNotes(_sNotesKey, s.research);
+        }
+      }
+    } catch (_) {}
+    var saved = (_sNotesKey && typeof global._pmGetPlaceNotes === "function")
+      ? global._pmGetPlaceNotes(_sNotesKey)
+      : ((typeof s.research === "string") ? s.research : "");
     var view = document.createElement("div");
     view.style.cssText = "font-size:12px;line-height:1.55;color:#333;min-height:30px;padding:5px 7px;background:#fff;border:1px solid #e8e1c8;border-radius:4px;cursor:text;white-space:pre-wrap;word-wrap:break-word;";
     view.title = "Tap to edit";
 
-    function _esc(x) {
-      return String(x == null ? "" : x)
-        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-    }
+    function _esc(x){ return _escHtml(x); }
     function renderViewMode() {
       if (!saved) {
         view.innerHTML = '<span style="color:#bbb;">Tap to add notes, links, hours, reservation details…</span>';
@@ -92,7 +104,8 @@
     function exitEdit() {
       var nextVal = ta.value;
       if (nextVal !== saved) {
-        s.research = nextVal;
+        if (_sNotesKey && typeof global._pmSetPlaceNotes === "function") global._pmSetPlaceNotes(_sNotesKey, nextVal);
+        else s.research = nextVal;
         saved = nextVal;
         var ok = false;
         try {
@@ -424,7 +437,11 @@
     // Same URL auto-detection + voice input as the dest-level version.
     var resBtn = document.createElement("button");
     resBtn.className = "sa";
-    resBtn.textContent = (s.research && s.research.length) ? "📚•" : "📚";
+    // PD.485 (T2.7): button dot reflects the unified place-notes store (the
+    // sight-notes panel now reads/writes there), with s.research as fallback.
+    var _sBtnNotes = ((s.n || s.st) && typeof global._pmGetPlaceNotes === "function")
+      ? global._pmGetPlaceNotes(s.n || s.st) : (s.research || "");
+    resBtn.textContent = (_sBtnNotes && _sBtnNotes.length) ? "📚•" : "📚";
     resBtn.title = "Notes for this sight";
     (function (item, did) {
       resBtn.onclick = function (e) {
@@ -1223,7 +1240,7 @@
       line.onmouseover = function () { line.style.background = "#fdf3cf"; };
       line.onmouseout  = function () { line.style.background = "#fff"; };
       var text = "";
-      var _esc = function (s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;'); };
+      var _esc = function(s){ return _escHtml(s); };
       if (item.kind === "hotelMissing") {
         var d = _destById(item.destId);
         var rng = _destRange(d);
@@ -1396,7 +1413,7 @@
       // already carry a day label which is usually "Jul 8" or
       // similar (set in mkDay), perfect for the calendar voice.
       var text;
-      var _esc = function (s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;'); };
+      var _esc = function(s){ return _escHtml(s); };
       // Pull date context from the trip when the engine summary
       // doesn't include it directly.
       var _destObj = null;
@@ -1809,11 +1826,7 @@
   // popup includes its own Print button. Doesn't auto-print and
   // doesn't auto-close — the user keeps it open as long as useful.
   function _popoutDecisionsDeferred(trip, summary) {
-    function esc(s) {
-      return String(s == null ? '' : s)
-        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    }
+    function esc(s){ return _escHtml(s); }
     var fmtD = global.fmtD;
     function destObj(id) {
       if (!trip || !Array.isArray(trip.destinations)) return null;
@@ -2597,7 +2610,7 @@
     var hasEntryLogistics = hasLogistics(entryDetails);
     var hasExitLogistics  = hasLogistics(exitDetails);
     var detailsExpanded   = hasEntryLogistics || hasExitLogistics || (tb && tb._logisticsOpen);
-    var esc = function (s) { return String(s || "").replace(/"/g, '&quot;'); };
+    var esc = function(s){ return _escHtml(s); };
     function summaryLine(label, d) {
       var bits = [];
       if (d.carrier) bits.push(d.carrier);
@@ -4728,11 +4741,7 @@
       html += _esc(saved.substring(lastIdx));
       view.innerHTML = html;
     }
-    function _esc(s) {
-      return String(s == null ? "" : s)
-        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-    }
+    function _esc(s){ return _escHtml(s); }
     renderViewMode();
 
     var ta = document.createElement("textarea");
@@ -8427,11 +8436,7 @@
       return;
     }
 
-    function esc(s) {
-      return String(s == null ? '' : s)
-        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    }
+    function esc(s){ return _escHtml(s); }
     var fmtDateFn = (typeof global.fmtD === 'function')
       ? global.fmtD
       : function (iso) { return iso || ''; };
@@ -8614,11 +8619,7 @@
     var deadlines = data.deadlines;
     var todayEvents = data.today;
     var tomorrowEvents = data.tomorrow;
-    function esc(s) {
-      return String(s == null ? '' : s)
-        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    }
+    function esc(s){ return _escHtml(s); }
     var fmtDateFn = (typeof global.fmtD === 'function')
       ? global.fmtD
       : function (iso) { return iso || ''; };

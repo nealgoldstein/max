@@ -36,7 +36,7 @@ var indexSrc = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
 // care that a function EXISTS and keeps a property — not which file holds
 // it — so fold the extracted modules into the same haystack. File-specific
 // checks (db.js, sync.js, …) still read their own files separately.
-["apikey.js", "features-conversation.js", "features-trip.js", "trip-edit.js",
+["util-esc.js", "apikey.js", "features-conversation.js", "features-trip.js", "trip-edit.js",
  "trip-detail-render.js", "exec-mode.js", "logistics.js", "home-screen.js",
  "trip-affordance.js", "geography-model.js", "who-avoidances.js", "edit-constraints.js",
  "map-pin-panel.js", "itinerary-ordering.js", "discovery-curation.js",
@@ -782,6 +782,14 @@ check("Persist 1: the one write door tripwires a large place-set drop",
   // near-empty one — the diagnostic net for the elusive curated-list drop.
   tripstoreSrc.indexOf("LARGE place-set drop") !== -1,
   "the place-set-drop tripwire was removed from setPlaceActivities");
+
+check("Theming 1: the theming pass is ON by default (PD.486; '0' is the escape hatch)",
+  // #80 shipped behind a default-OFF flag while the persistence trap was
+  // open; PD.404/405 closed it and PD.486 flipped the default on. Guard it
+  // so the default can't silently revert: _runThemingPass must start on and
+  // only disable when the flag is the explicit string "0".
+  /_runThemingPass[\s\S]{0,1200}var on = true;[\s\S]{0,300}getItem\("max-theming-pass"\) === "0"/.test(indexSrc),
+  "the theming pass default reverted to OFF — listed sights would pile in a catch-all again");
 
 // ───────────────────────────────────────────────────────────────────
 console.log("\n" + "─".repeat(50));

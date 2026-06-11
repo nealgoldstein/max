@@ -376,7 +376,7 @@ function _pmRenderSharedDiscoveryViewer(p){
   document.body.innerHTML = '';
   var wrap = document.createElement("div");
   wrap.style.cssText = "max-width:760px;margin:0 auto;padding:28px 22px 60px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#222;line-height:1.5;";
-  function esc(s){ return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  function esc(s){ return _escHtml(s); }
   var html = '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:18px;border-bottom:1px solid #eee;padding-bottom:14px;">'
     + '<div>'
     +   '<div style="font-size:11px;color:#888;font-weight:700;letter-spacing:.06em;text-transform:uppercase;">SHARED DISCOVERY</div>'

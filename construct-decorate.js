@@ -124,8 +124,16 @@ if (typeof globalThis !== "undefined") globalThis._constructUserListedItems = _c
 // the backstop remain the safety nets — a failed or partial pass can never
 // drop a place; at worst a place stays in the catch-all it was already in.
 async function _runThemingPass() {
-  var on = false;
-  try { on = (typeof localStorage !== "undefined" && localStorage.getItem("max-theming-pass") === "1"); } catch(_){}
+  // PD.486 (#80): theming pass is now ON by default. It was flag-gated
+  // (default OFF) while the "assignment doesn't survive to the final picker"
+  // trap was open; PD.404/405 closed it by writing the assigned THEME into
+  // it.section (so the next model rebuild re-derives themeFit from it and the
+  // move persists) rather than reassigning routed _tb.placeActivities (which
+  // looped). Construction + backstop remain the safety nets — a failed or
+  // partial pass can never drop a place. "max-theming-pass"==="0" is the
+  // explicit escape hatch if it ever needs disabling in the field.
+  var on = true;
+  try { if (typeof localStorage !== "undefined" && localStorage.getItem("max-theming-pass") === "0") on = false; } catch(_){}
   if (!on) return;
   if (!_tb || !(Array.isArray(_tb._pastedListPlaces) && _tb._pastedListPlaces.length)) return;
   var pa = Array.isArray(_tb.placeActivities) ? _tb.placeActivities : [];
@@ -1091,11 +1099,7 @@ function showWispHistoryModal() {
   body.style.cssText = "overflow-y:auto;padding:14px 22px 22px;flex:1;";
   box.appendChild(body);
 
-  function esc(s) {
-    return String(s == null ? "" : s)
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  }
+  function esc(s){ return _escHtml(s); }
   function fmtRelative(iso) {
     if (!iso) return "";
     try {

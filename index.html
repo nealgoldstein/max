@@ -417,6 +417,7 @@
 <!-- v359.45 Phase 1: schema migrations. Loaded BEFORE db.js so that
      db.js's tripRead/tripReadRaw can call MaxMigration.migrateTripShape
      synchronously on legacy envelopes. -->
+<script src="util-esc.js?v=DEV"></script>
 <script src="migration.js?v=DEV"></script>
 <!-- Round HA: Phase 0 of the engine/UI split. db.js exposes window.MaxDB
      as the persistence seam. No callsites migrated yet; this just
@@ -8946,7 +8947,7 @@ function showWelcomeOnboarding(onContinue) {
   // Local mutable state for chips (mobility = single-select, avoid = multi-select).
   var _welMob = startingMobility;
   var _welAvoid = Object.assign({}, startingAvoid);
-  function _esc(s){ return String(s||"").replace(/"/g,"&quot;"); }
+  function _esc(s){ return _escHtml(s); }
   function _escTA(s){ return String(s||"").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
   function _chipStyle(on){ return "display:inline-block;padding:5px 11px;font-size:11.5px;font-weight:500;border:1px solid " + (on?"#1a5fa8":"#d8d4c8") + ";background:" + (on?"#eef4fb":"#fff") + ";color:" + (on?"#1a5fa8":"#444") + ";border-radius:14px;cursor:pointer;transition:all .15s;user-select:none;"; }
   function _mobChipsHtml(){
@@ -10192,11 +10193,7 @@ function _fmtDateLong(iso){
     return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
   } catch (_) { return iso; }
 }
-function _esc(s){
-  return String(s == null ? "" : s)
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-}
+function _esc(s){ return _escHtml(s); }
 
 function showShareTripModal(){
   if (!_currentTripId) { maxAlert("Open a trip first."); return; }
@@ -19916,7 +19913,7 @@ function _pmReceiptStripHtml(){
         try {
           if (typeof _maxPlaceSetAudit === "function") {
             var _aud = _maxPlaceSetAudit(true);
-            var _esc = function(s){ return String(s).replace(/</g, "&lt;"); };
+            var _esc = function(s){ return _escHtml(s); };
             var _nListed = _aud.listed.length;
             var _nMax = _aud.maxChecked + _aud.maxUnchecked;
             var _nHubs = (_aud.hubs || []).length;
@@ -23946,11 +23943,7 @@ function _hydrateWispTraces() {
   var wisps = (typeof _wispsArray === "function") ? _wispsArray(trip) : [];
   wisps.forEach(function (w) { if (w && w.id) wispMap[w.id] = w; });
 
-  function esc(s) {
-    return String(s == null ? "" : s)
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  }
+  function esc(s){ return _escHtml(s); }
 
   trip.placeActivities.forEach(function (m) {
     if (!m || !m._fromWispId) return;
@@ -24022,10 +24015,7 @@ function _renderWispResultBanner() {
     host.innerHTML = "";
     return;
   }
-  function esc(s) {
-    return String(s == null ? "" : s)
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  }
+  function esc(s){ return _escHtml(s); }
   var wispBit = r.wispCount === 1 && r.wispTexts && r.wispTexts[0]
     ? 'from your idea "<em>' + esc(r.wispTexts[0]) + '</em>"'
     : 'from your ' + r.wispCount + ' ideas';
@@ -32921,10 +32911,7 @@ function _openTripStopPopover(ctx) {
     var MAX_SHOW = 6;
     var shown = _whatsHere.slice(0, MAX_SHOW);
     var moreCount = _whatsHere.length - shown.length;
-    function _esc(s) {
-      return String(s || "")
-        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    }
+    function _esc(s){ return _escHtml(s); }
     var rows = shown.map(function (it) {
       var line = '<div style="font-size:12px;line-height:1.45;color:#333;">'
                +   '<span style="color:#7c5cbf;font-weight:600;">✨</span> '
@@ -36885,7 +36872,7 @@ function _renderLogisticsCol(side, label, d, ctx, opts){
   // mode pills + a gateway field inline and then call this helper to
   // render JUST the booking-details body (carrier, number, date, time,
   // confirmation, notes, URL) without duplicating the mode pills.
-  function _esc(s){ return String(s||"").replace(/"/g,'&quot;'); }
+  function _esc(s){ return _escHtml(s); }
   var timeLabel = side === "entry" ? "Arrives at" : "Departs at";
   // Round FN.4 / FN.8.2: tailor the "Number" label to the selected
   // mode. Default to "Flight number" since most international entry/

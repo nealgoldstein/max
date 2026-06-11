@@ -2056,7 +2056,7 @@ function mkDay(day, destId){
 // to show (no current item, no upcoming items, no past items).
 function _buildNowNextWidgetHtml(split) {
   if (!split) return "";
-  function _esc(s){ return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;"); }
+  function _esc(s){ return _escHtml(s); }
   function _now() {
     var d = new Date();
     return ('0'+d.getHours()).slice(-2) + ':' + ('0'+d.getMinutes()).slice(-2);

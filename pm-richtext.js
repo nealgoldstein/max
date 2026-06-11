@@ -8,7 +8,7 @@
 function _pmRtInitContent(raw){
   raw = String(raw == null ? "" : raw);
   if (/<[a-z][^>]*>/i.test(raw)) return raw;  // already HTML
-  var esc = raw.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  var esc = _escHtml(raw);
   return esc.replace(/\n/g, "<br>");
 }
 function _pmRtFieldHtml(id, initialContent, opts){

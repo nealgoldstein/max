@@ -1398,13 +1398,7 @@
     });
   }
 
-  function _esc(s) {
-    return String(s || '')
-      .replace(/&/g, '&amp;')
-      .replace(/"/g, '&quot;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
-  }
+  function _esc(s){ return _escHtml(s); }
 
   // v350: list server-side trips with per-row delete buttons.
   // Renders into #max-sync-trips inside the modal. Each delete:
