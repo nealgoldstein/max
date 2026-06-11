@@ -37266,23 +37266,32 @@ function updateMainMap(){
         // updateMainMap is called again and the curved paths replace
         // the straight ones. Failed segments are marked "failed" so
         // we don't retry forever (visible as straight lines).
+        // PD.465 (Option 1): the route SPINE connects only the places you
+        // SLEEP — overnight bases (nights >= 1) — not every picked sight.
+        // Routing through every place forced convoluted detours: a highland
+        // sight like Sigöldugljúfur dragged the whole line up and back. Now
+        // the spine is the clean hub-to-hub driving loop; sights are pins
+        // the traveler classifies (on-the-way adds a detour via PD.464,
+        // day-trip adds a spur, or just see/skip). The OSRM route between
+        // two consecutive bases follows real roads, so it naturally passes
+        // by the sights that genuinely ARE on the way — without the line
+        // being yanked off to each one. bounds[i] aligns with _destSeq[i].
+        var _spineIdx = [];
+        for (var _qi = 0; _qi < bounds.length; _qi++) {
+          var _qd = _destSeq[_qi];
+          if (bounds[_qi] && _qd && typeof _qd.nights === "number" && _qd.nights >= 1) _spineIdx.push(_qi);
+        }
+        // Fallback: a draft with <2 overnight bases (e.g. an all-sights
+        // first pass) keeps the old every-destination spine so the route
+        // doesn't disappear entirely.
+        if (_spineIdx.length < 2) {
+          _spineIdx = [];
+          for (var _ri = 0; _ri < bounds.length; _ri++) { if (bounds[_ri]) _spineIdx.push(_ri); }
+        }
         var _segments = [];
-        for (var _bi = 0; _bi < bounds.length - 1; _bi++) {
-          var _fromD = _destSeq[_bi];
-          var _toD   = _destSeq[_bi + 1];
-          // PD.428: ALWAYS draw the destination-to-destination spine for
-          // every segment. (Was skipped when a wayside detour covered the
-          // segment.) Per Neal: the route line is the trip's structural
-          // spine — destinations only — and day-trip / on-the-way road
-          // routings are shown selectively on demand (one route at a time
-          // via the stop popover), layered ON TOP of the spine so you can
-          // compare the detour against the direct line and judge whether a
-          // stop is genuinely "on the way" or really a day trip.
-          var _from = bounds[_bi], _to = bounds[_bi + 1];
+        for (var _bi = 0; _bi < _spineIdx.length - 1; _bi++) {
+          var _from = bounds[_spineIdx[_bi]], _to = bounds[_spineIdx[_bi + 1]];
           if (!_from || !_to) continue;
-          // PD.137: coords array (currently just [from, to]; can be
-          // extended to include waysides as intermediate waypoints
-          // when wayside data is available in this code path).
           var _segCoords = [_from, _to];
           _segments.push({ key: _osrmSegmentKey(_segCoords), coords: _segCoords });
         }
