@@ -4314,7 +4314,7 @@
       // Routing → button. v360.0.6: bumped from 10px/1×5 to 12px/7×11
       // for mobile tap target.
       var rtBtn=document.createElement("span");
-      rtBtn.style.cssText="font-size:12px;color:#1a6fb0;font-weight:600;margin-left:auto;white-space:nowrap;cursor:pointer;padding:7px 11px;border:1px solid #cce;border-radius:4px;background:#f0f5ff;flex-shrink:0;min-height:32px;display:inline-flex;align-items:center;";
+      rtBtn.style.cssText="font-size:12px;color:#1a5fa8;font-weight:600;margin-left:auto;white-space:nowrap;cursor:pointer;padding:7px 11px;border:1px solid #cce;border-radius:4px;background:#f0f5ff;flex-shrink:0;min-height:32px;display:inline-flex;align-items:center;";
       rtBtn.textContent="Routing →";
       row.appendChild(rtBtn);
 

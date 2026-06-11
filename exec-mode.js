@@ -382,7 +382,7 @@ function mkExSight(s,dest,todayIds,allSights,context){
       d.days.forEach(function(day){
         var opt=document.createElement("div"); opt.style.cssText="padding:6px 14px;font-size:11px;cursor:pointer;color:#444;";
         opt.textContent=day.lbl;
-        opt.onmouseover=function(){opt.style.background="#f8f8f8";};
+        opt.onmouseover=function(){opt.style.background="#fafafa";};
         opt.onmouseout=function(){opt.style.background="";};
         (function(dayObj){opt.onclick=function(){
           // Remove from today list
@@ -431,7 +431,7 @@ function mkExSight(s,dest,todayIds,allSights,context){
         picker.style.position="fixed";
 
         // Today option
-        var todayOpt=document.createElement("div"); todayOpt.style.cssText="padding:7px 14px;font-size:12px;cursor:pointer;color:#1a6fb0;font-weight:500;";
+        var todayOpt=document.createElement("div"); todayOpt.style.cssText="padding:7px 14px;font-size:12px;cursor:pointer;color:#1a5fa8;font-weight:500;";
         todayOpt.textContent="\u2605 Today";
         todayOpt.onmouseover=function(){todayOpt.style.background="#f0f7ff";};
         todayOpt.onmouseout=function(){todayOpt.style.background="";};
@@ -448,7 +448,7 @@ function mkExSight(s,dest,todayIds,allSights,context){
         d.days.forEach(function(day){
           var opt=document.createElement("div"); opt.style.cssText="padding:6px 14px;font-size:11px;cursor:pointer;color:#444;";
           opt.textContent=day.lbl;
-          opt.onmouseover=function(){opt.style.background="#f8f8f8";};
+          opt.onmouseover=function(){opt.style.background="#fafafa";};
           opt.onmouseout=function(){opt.style.background="";};
           (function(dayObj){opt.onclick=function(){
             // Move sight to this day

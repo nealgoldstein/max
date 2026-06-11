@@ -101,7 +101,7 @@ function buildExplorePane(dest){
     emp.style.cssText = "padding:14px 16px;background:#fafafa;border:1px solid #eee;border-radius:8px;font-size:11px;color:#666;line-height:1.55;display:flex;align-items:center;gap:10px;flex-wrap:wrap;";
     emp.innerHTML = '<span style="flex:1;min-width:0;">' + msg.replace(/&/g,"&amp;").replace(/</g,"&lt;") + '</span>';
     var retryBtn = document.createElement("button");
-    retryBtn.style.cssText = "background:#1a6fb0;border:none;color:#fff;font-size:11px;font-weight:600;padding:6px 12px;border-radius:5px;cursor:pointer;font-family:inherit;flex-shrink:0;";
+    retryBtn.style.cssText = "background:#1a5fa8;border:none;color:#fff;font-size:11px;font-weight:600;padding:6px 12px;border-radius:5px;cursor:pointer;font-family:inherit;flex-shrink:0;";
     retryBtn.textContent = btnLbl + " \u2192";
     (function(d){
       retryBtn.onclick = function(){
@@ -1302,7 +1302,7 @@ function toggleSightBookForm(row,item,destId,dayId){
   var existing=row.querySelector('.sight-book-form');
   if(existing){existing.parentNode.removeChild(existing);return;}
   var form=document.createElement("div"); form.className="sight-book-form bk-form";
-  form.style.cssText="margin:4px 0 4px 12px;padding:8px;background:#f8f8f8;border-radius:6px;";
+  form.style.cssText="margin:4px 0 4px 12px;padding:8px;background:#fafafa;border-radius:6px;";
   // v359.60.71: derive a sensible default date for the booking. When
   // the sight is on a specific day (dayId set + day has .date), use
   // that. When the sight is unscheduled (suggestion), fall back to

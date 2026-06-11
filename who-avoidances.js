@@ -547,7 +547,7 @@ function _legacyRenderTripBrief(){
   var _prevScroll = ov.scrollTop || 0;
   var _preserve = !!_tb._preserveScrollOnce;
   _tb._preserveScrollOnce = false;
-  ov.style.cssText="position:fixed;inset:0;background:#f7f7f5;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
+  ov.style.cssText="position:fixed;inset:0;background:#fafafa;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
   // Reset scroll to top on render (fresh view), then attach the scroll hint
   setTimeout(function(){ ov.scrollTop = _preserve ? _prevScroll : 0; attachScrollHint(ov); }, 0);
   ov.innerHTML='<div class="tb-header">'
@@ -819,7 +819,7 @@ function goToTripStep2(){
 
 function renderTripStep2(){
   var ov=g("trip-brief-overlay"); ov.className="tb-overlay";
-  ov.style.cssText="position:fixed;inset:0;background:#f7f7f5;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
+  ov.style.cssText="position:fixed;inset:0;background:#fafafa;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
 
   // Sentence starters
   var sentences = [
@@ -976,7 +976,7 @@ if (typeof globalThis !== "undefined") {
 
 function openGradientConversation(){
   var ov = g("trip-brief-overlay");
-  ov.style.cssText = "position:fixed;inset:0;background:#f7f7f5;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
+  ov.style.cssText = "position:fixed;inset:0;background:#fafafa;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
   ov.innerHTML = '<div class="tb-header">'
     +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Before we find places</div></div></div>'
     +'<div class="tb-title">Let\u2019s find the right distance</div>'
