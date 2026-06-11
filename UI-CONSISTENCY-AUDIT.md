@@ -175,3 +175,43 @@ CURRENT dominant values (zero visual change), (2) property-aware rewrite of inli
 styles + CSS rules to `var(--token)` (still zero visual change — a pure refactor),
 (3) THEN tune token values to consolidate, verifying each on a light page. Gate
 every step with `bash tests/run.sh` + the full Playwright suite.
+
+---
+
+## SHIPPED — 2026-06-11 (PD.491–494) — the single-source system is live
+
+Done exactly on the "recommended shape" above. Every step value-preserving (zero
+visual change) and gated by the full Node + Playwright suite (55 passed, 3 skip).
+
+- **PD.491 — Phase 0 + 1.** Dropped a 29→32-token `:root` block at the *real*
+  dominant values (audit estimates were corrected against source: dominant border is
+  `#ddd` not `#e8e8e8`; primary ink `#111`). **Property-aware AND context-aware:**
+  border tokens kept distinct from equal-valued bg/ink tokens (so the `#f0f0f0`
+  border-vs-bg and `#111` text-vs-button-vs-border collisions can't collapse).
+  Migrated the main `<style>` block — 714 `color`/`background`/`border` → `var()`.
+- **PD.492 — Phase 2.** Shared `.btn` system: `.btn` + `.btn-top` (black, top-level)
+  / `.btn-primary` (blue, in-trip) / `.btn-soft` / `.btn-danger` / `.btn-sm`. The
+  intentional two-tier primary is preserved. Home action buttons migrated to it.
+- **PD.493 — Wave A (app-wide colors).** Context-aware var()-ize of **1,641** color
+  literals inside `style="…"` attrs + `cssText` across index.html body + ~20 JS view
+  files. **Critically: only CSS contexts** — SVG `fill=`, canvas `fillStyle`, and the
+  pin/role color DATA (`pinColorForRole` still returns `#1a5fa8`) were left as hex,
+  because `var()` does NOT resolve in canvas/SVG. Proven: no hex changed outside
+  `style=`/`cssText`; all 27 JS files still parse.
+- **PD.494 — Phase 3.** Semantic type scale (`--fs-micro`→`--fs-xl` at current px)
+  and radius tokens; 326 font-sizes + 50 on-scale radii in the stylesheet → `var()`.
+  Zero-visual (token px == original px).
+
+**Net:** ~2,370 `var()` refs app-wide. Colors / type / radius / button-colors now
+have a single definition. Tooling: `dev.sh` (serve/check/stop) + `dev.config`
+(single-source port, read by `dev.sh` and `playwright.config.js`).
+
+**Deliberately NOT done (needs eyes on each view — do with the user navigating):**
+1. **Button MARKUP → `.btn` classes beyond home.** Buttons are heterogeneous (7+
+   font sizes, 3 radii incl. `50%`) and `var(--c-primary)` is also used by NON-buttons
+   (circular badges, dot indicators). A blind sweep would mis-convert badges and
+   restyle ~159 buttons across unseen views. Migrate per-view, visually.
+2. **Aesthetic CONSOLIDATION (the audit's original Phase 1/3 intent).** Actually
+   *reducing* 17 font sizes → ~6 and 14 radii → 3 by snapping values. This is a real
+   visual change (text reflow, corner shifts), so it needs per-view review. The
+   tokens/scale are in place to make it a one-line-per-token change when ready.

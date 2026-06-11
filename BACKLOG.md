@@ -46,6 +46,17 @@ a module-load `ReferenceError` that the full suite caught (PD.483b).
 - PD.486 (#80) — **theming pass ON by default** (sorts listed sights into themed sections);
   guarded by contract-check "Theming 1"; `"max-theming-pass"==="0"` is the escape hatch.
 
+**UI design system / single source of truth (PD.491–494):**
+- A `:root` token block is now the single definition for colors, type, and radius.
+  ~2,370 `var()` refs app-wide (stylesheet + every inline `style=` + JS view files).
+- Property-AND-context-aware migration: border tokens kept distinct from equal-valued
+  bg/ink; only CSS contexts var()-ized (SVG `fill=`/canvas `fillStyle`/pin-color DATA
+  left as hex — `var()` doesn't resolve there; `pinColorForRole` still returns `#1a5fa8`).
+- Shared `.btn` system (two-tier black/blue preserved); button COLORS single-sourced.
+- Every step value-preserving (zero visual change), gated by Node + full Playwright.
+- See `UI-CONSISTENCY-AUDIT.md` → "SHIPPED — 2026-06-11" for the full record.
+- Tooling: `./dev.sh serve|check|stop` + `dev.config` (single-source dev port).
+
 **Architecture:** single role authority; base-to-base routes; DiscoveryModel SSOT + PlaceKey/
 aliases + PlaceRepository; bloat reduction PD.449–483 (25 modules, 42.7k→38.4k lines).
 
@@ -76,6 +87,15 @@ below. Tier 3 — T3.4/3.7 done. Tier 4 — T4.1 done.
 - **T3.6 — god-functions** (`publishTrip` et al.) with mixed responsibilities.
 - **T3.8 — `mdcItems` zombie field** still emitted by publish.
 - **T4.2 — `86400000`/`msDay` redefined ~12×;** **T4.3 — `_isStaySection` duplicates `SectionKind.isStay`.**
+
+### UI design system — remaining (needs eyes on each view; not blocking)
+- **Button MARKUP → `.btn` classes beyond home.** ~159 inline-styled buttons across
+  trip/picker/Discovery. NOT a blind sweep: buttons are heterogeneous and
+  `var(--c-primary)` is also used by non-buttons (badges, dots). Migrate per-view with
+  the app navigated so each screen is visually reviewed.
+- **Aesthetic consolidation.** Reduce 17 font sizes → ~6 and 14 radii → 3 by snapping
+  to the scale. Real visual change (reflow / corners) — review per view. Tokens are
+  already in place, so it's a per-token value edit once approved.
 
 ### Bloat phase 3 (ongoing, risky)
 The remaining monolith sections have interleaved boot code (event listeners, load-time IIFEs,
