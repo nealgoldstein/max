@@ -38,7 +38,9 @@ var indexSrc = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
 // checks (db.js, sync.js, …) still read their own files separately.
 ["apikey.js", "features-conversation.js", "features-trip.js", "trip-edit.js",
  "trip-detail-render.js", "exec-mode.js", "logistics.js", "home-screen.js",
- "trip-affordance.js", "geography-model.js", "who-avoidances.js", "edit-constraints.js"
+ "trip-affordance.js", "geography-model.js", "who-avoidances.js", "edit-constraints.js",
+ "map-pin-panel.js", "itinerary-ordering.js", "discovery-curation.js",
+ "entry-point-map.js", "picker-hero-sidebar.js"
 ].forEach(function (f) {
   var p = path.join(ROOT, f);
   if (fs.existsSync(p)) indexSrc += "\n" + fs.readFileSync(p, "utf8");
