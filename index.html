@@ -2636,7 +2636,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
          When on, calls OSRM public API to draw actual driving paths.
          Free + rate-limited, fine for personal use; user opts in. -->
     <!-- PD.185: was at right:200px, colliding with map-legend-btn at the same coord; pushed to right:392px (after day-trips). -->
-    <button type="button" id="map-roads-btn" style="position:absolute;top:8px;right:392px;z-index:499;background:rgba(255,255,255,.95);border:1px solid #cfe1f7;border-radius:6px;padding:5px 10px;box-shadow:0 1px 4px rgba(0,0,0,.15);font-size:11px;font-weight:600;color:#1a5fa8;cursor:pointer;font-family:inherit;display:none;" title="When on, route lines follow real roads (uses OSRM public API). Off draws straight lines.">🛤 Roads off</button>
+    <button type="button" id="map-roads-btn" style="position:absolute;top:8px;right:392px;z-index:499;background:rgba(255,255,255,.95);border:1px solid #cfe1f7;border-radius:6px;padding:5px 10px;box-shadow:0 1px 4px rgba(0,0,0,.15);font-size:11px;font-weight:600;color:#1a5fa8;cursor:pointer;font-family:inherit;display:none;" title="When on, route lines follow real roads (uses OSRM public API) to show your trip's SHAPE — not driving directions. Use a maps app or GPS to navigate. Off draws straight lines.">🛤 Roads off</button>
     <!-- PD.243: OSRM-inflight indicator. Centered modal so the user can
          see at a glance that the map is fetching road routes (40+ parallel
          calls to the OSRM public demo take several seconds). Toggled by
@@ -35525,9 +35525,44 @@ function initMapRoadsBtn(){
     _useRoadRouting = !_useRoadRouting;
     try { localStorage.setItem('max-road-routing', _useRoadRouting ? '1' : '0'); } catch(e){}
     paint();
+    // PD.463: one-time disclaimer the first time Roads is turned ON. The
+    // road-following lines LOOK like driving directions but aren't — OSRM's
+    // public routing is for the trip's SHAPE, not navigation. Show once,
+    // then remember so it never nags again.
+    if (_useRoadRouting) {
+      var _seen = false;
+      try { _seen = localStorage.getItem('max-roads-disclaimer-seen') === '1'; } catch(e){}
+      if (!_seen) {
+        try { localStorage.setItem('max-roads-disclaimer-seen', '1'); } catch(e){}
+        if (typeof _showRoadsDisclaimer === 'function') _showRoadsDisclaimer();
+      }
+    }
     if (typeof updateMainMap === 'function') updateMainMap();
   };
   paint();
+}
+
+// PD.463: "this is not driving directions" notice for the road-routing view.
+// Bottom-center toast, dismissible, auto-clears after 11s. Kept as its own
+// function so the Roads toggle (and any future surface) can reuse it.
+function _showRoadsDisclaimer(){
+  try { var ex = document.getElementById('max-roads-disclaimer'); if (ex) ex.remove(); } catch(_){}
+  var t = document.createElement('div');
+  t.id = 'max-roads-disclaimer';
+  t.style.cssText = 'position:fixed;bottom:22px;left:50%;transform:translateX(-50%);'
+    + 'max-width:min(460px,calc(100vw - 32px));background:#1a3a5f;color:#fff;'
+    + 'padding:13px 16px;border-radius:9px;box-shadow:0 6px 22px rgba(0,0,0,0.28);'
+    + 'z-index:99999;font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;'
+    + 'display:flex;gap:12px;align-items:flex-start;';
+  t.innerHTML = '<span style="font-size:16px;line-height:1.2;">🛤</span>'
+    + '<div><strong>This isn’t turn-by-turn navigation.</strong> The road lines show the '
+    + 'shape of your trip, not driving directions — use a maps app or GPS on the road. '
+    + '<button type="button" style="margin-left:6px;background:rgba(255,255,255,0.18);color:#fff;'
+    + 'border:none;border-radius:5px;padding:3px 10px;font:600 12px inherit;cursor:pointer;">Got it</button></div>';
+  var btn = t.querySelector('button');
+  if (btn) btn.onclick = function(){ try { t.remove(); } catch(_){} };
+  document.body && document.body.appendChild(t);
+  setTimeout(function(){ try { if (t.parentNode) t.parentNode.removeChild(t); } catch(_){} }, 11000);
 }
 
 // Round FN.D.1: day-trip loops toggle. Same shape as the route
@@ -37574,7 +37609,27 @@ function updateMainMap(){
       // already draws on every leg (PD.428, above) — so by default the leg
       // shows blue + the wayside PIN, and the purple detour appears only
       // when you opt in to inspect how far that stop bends off the line.
-      if (fromCtr && toCtr && window._activeRouteRouting === route.id) {
+      // PD.464: draw the purple detour AUTOMATICALLY when the wayside
+      // genuinely DEVIATES from the direct leg — so an off-route stop
+      // (Sigöldugljúfur, up in the highlands) gets a connecting line and
+      // doesn't float disconnected, while an on-route stop (Skógafoss, on
+      // Route 1) stays blue + pin with no purple. Deviation = max
+      // perpendicular distance (km) of any stop from the straight
+      // fromCtr→toCtr line; beyond ~4 km it's a real detour. The on-demand
+      // toggle (_activeRouteRouting) still forces it on for inspection.
+      function _perpKmToSeg(a, b, p){
+        var kx = 111.32 * Math.cos(a[0] * Math.PI/180), ky = 111.32;
+        var ax=a[1]*kx, ay=a[0]*ky, bx=b[1]*kx, by=b[0]*ky, px=p[1]*kx, py=p[0]*ky;
+        var dx=bx-ax, dy=by-ay, L2=dx*dx+dy*dy;
+        if (L2===0) return Math.sqrt((px-ax)*(px-ax)+(py-ay)*(py-ay));
+        var t=((px-ax)*dx+(py-ay)*dy)/L2; t=Math.max(0,Math.min(1,t));
+        var qx=ax+t*dx, qy=ay+t*dy;
+        return Math.sqrt((px-qx)*(px-qx)+(py-qy)*(py-qy));
+      }
+      var _waysideDeviates = !!(fromCtr && toCtr) && stops.some(function(s){
+        return _perpKmToSeg(fromCtr, toCtr, s.ctr) > 4;
+      });
+      if (fromCtr && toCtr && (_waysideDeviates || window._activeRouteRouting === route.id)) {
         var path = [fromCtr].concat(stops.map(function(s){return s.ctr;})).concat([toCtr]);
         try {
           // PD.441: route the wayside detour through OSRM so it follows
@@ -38291,6 +38346,33 @@ function _flashJustMovedTarget() {
   _try(180);  // retry if a downstream tripChange landed later
 }
 if (typeof globalThis !== "undefined") globalThis._flashJustMovedTarget = _flashJustMovedTarget;
+
+// PD.464: nudge when a place marked "on the way" actually sits well off
+// the leg it joined — it's geographically a Day trip, not a wayside (Neal:
+// Sigöldugljúfur is up in the highlands; making it "on the way" left it
+// floating off the ring road). Computes the perpendicular distance of the
+// stop from the straight from→to line; past ~8 km it's a real detour and
+// we suggest switching. Informational toast — the user changes the role
+// from the pin's popover. fromC/toC/srcC are [lat,lng].
+function _maybeNudgeWaysideIsDayTrip(srcC, fromC, toC, placeName){
+  try {
+    if (!srcC || !fromC || !toC) return;
+    var kx = 111.32 * Math.cos(fromC[0] * Math.PI/180), ky = 111.32;
+    var ax=fromC[1]*kx, ay=fromC[0]*ky, bx=toC[1]*kx, by=toC[0]*ky, px=srcC[1]*kx, py=srcC[0]*ky;
+    var dx=bx-ax, dy=by-ay, L2=dx*dx+dy*dy;
+    var perp;
+    if (L2===0) perp = Math.sqrt((px-ax)*(px-ax)+(py-ay)*(py-ay));
+    else { var t=Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/L2)); var qx=ax+t*dx, qy=ay+t*dy; perp = Math.sqrt((px-qx)*(px-qx)+(py-qy)*(py-qy)); }
+    if (perp <= 8) return;  // genuinely on the way — no nudge
+    if (typeof _showDayTripToast === "function") {
+      _showDayTripToast(
+        "<strong>" + (placeName || "This stop") + "</strong> sits about " + Math.round(perp) +
+        " km off the direct route — that's a real detour, so it may fit better as a <strong>day trip</strong> than a stop on the way. Tap its pin to change.",
+        null
+      );
+    }
+  } catch(_){}
+}
 
 function _showDayTripToast(msgHtml, undoFn){
   // Dismiss any active toast (either kind) before showing this one.
@@ -40329,6 +40411,11 @@ function convertDestToWayside(destId, opts){
       function(){
         console.warn("[Max] convertDestToWayside: undo not yet wired");
       }
+    );
+    // PD.464: if the new wayside is a big detour off prev→next, replace the
+    // success toast with the day-trip nudge.
+    _maybeNudgeWaysideIsDayTrip(
+      [src.lat, src.lng], [prev.lat, prev.lng], [next.lat, next.lng], src.place
     );
   }
 }
@@ -44143,6 +44230,14 @@ function convertDestToWaysideOnRoute(destId, targetRouteId, opts) {
       "<strong>" + src.place + "</strong> is now a wayside on " + fromName + " → " + toName,
       function(){ console.warn("[Max] convertDestToWaysideOnRoute: undo not wired"); }
     );
+    // PD.464: nudge to day-trip if the stop is a big detour off this route.
+    var _fromD = trip.destinations.find(function(d){ return d.id === targetRoute.fromDestId; });
+    var _toD   = trip.destinations.find(function(d){ return d.id === targetRoute.toDestId; });
+    if (_fromD && _toD) {
+      _maybeNudgeWaysideIsDayTrip(
+        [src.lat, src.lng], [_fromD.lat, _fromD.lng], [_toD.lat, _toD.lng], src.place
+      );
+    }
   }
 }
 
