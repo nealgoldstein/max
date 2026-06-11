@@ -1004,6 +1004,27 @@
         try {
           var full = await getTrip(s.id);
           if (full && full.trip) {
+            // PD.478 (data integrity): re-check local BEFORE overwriting.
+            // The shouldPull decision + the localTimestamp read happened
+            // BEFORE the `await getTrip` above — a network round-trip. If
+            // the user edited THIS trip locally during that window
+            // (localSave bumped __saved__), installing the server body now
+            // would silently clobber their just-made change. Re-read local;
+            // if it's newer than when we decided to pull, skip the
+            // overwrite and let the next push reconcile. Conservative:
+            // local edits win over a concurrent server change.
+            try {
+              var _localNow = localStorage.getItem(key);
+              if (_localNow) {
+                var _tsNow = (JSON.parse(_localNow) || {}).__saved__ || 0;
+                if (_tsNow > localTimestamp) {
+                  console.warn('[max-sync] pull skipped for', s.id,
+                    '— local was edited during the fetch (race avoided)');
+                  skipped++;
+                  continue;
+                }
+              }
+            } catch (_) {}
             var serialized = JSON.stringify(
               Object.assign({}, full.trip.body, {
                 __saved__: serverTimestamp,
@@ -1534,11 +1555,10 @@
         global.goHome();
         return;
       }
-      // Mobile: dispatch a hashchange so its router re-renders.
-      if (typeof global.MaxMobile === 'function') {
-        global.MaxMobile();
-        return;
-      }
+      // PD.482 (dead-code): removed a vestigial `global.MaxMobile()` branch
+      // here — MaxMobile is never defined anywhere in the codebase, so the
+      // typeof check was always false and the branch never ran. The generic
+      // storage-event fallback below was already the real mobile path.
       // Generic fallback: synthetic storage event (mobile listens
       // for these to re-render on cross-tab sync).
       var ev = new StorageEvent('storage', { key: 'max-trips-index' });

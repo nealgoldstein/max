@@ -57,6 +57,18 @@
     return _norm(a) === _norm(b);
   }
 
+  // PD.476 (data integrity): real coordinates only. The LLM frequently
+  // copies the prompt's example JSON (lat:0.0, lng:0.0) verbatim, so a
+  // place can arrive with the [0,0] "null island" sentinel — a real point
+  // in the Atlantic. We made the MAP robust to it (PD.440), but it should
+  // never enter the place registry as if it were a location, or distance /
+  // directions / booking code downstream will trust it. Reject near-[0,0].
+  function _realLL(lat, lng) {
+    return typeof lat === "number" && isFinite(lat)
+        && typeof lng === "number" && isFinite(lng)
+        && !(Math.abs(lat) < 0.01 && Math.abs(lng) < 0.01);
+  }
+
   function PlaceRepository() {
     this._byKey = Object.create(null);   // key → record (SINGLE store)
     this._order = [];
@@ -80,14 +92,14 @@
       if (raw.kind) rec.kinds[raw.kind] = true;
       if (raw.section && rec.sections.indexOf(raw.section) === -1) rec.sections.push(raw.section);
       if (raw._keep === true) rec.anyKeep = true;
-      if (!rec.coords && typeof raw.lat === "number" && typeof raw.lng === "number") rec.coords = { lat: raw.lat, lng: raw.lng };
+      if (!rec.coords && _realLL(raw.lat, raw.lng)) rec.coords = { lat: raw.lat, lng: raw.lng };
       if (!rec.origin && raw._origin) rec.origin = raw._origin;
       return rec;
     }
     rec = {
       key: key,
       place: raw.place,
-      coords: (typeof raw.lat === "number" && typeof raw.lng === "number") ? { lat: raw.lat, lng: raw.lng } : null,
+      coords: _realLL(raw.lat, raw.lng) ? { lat: raw.lat, lng: raw.lng } : null,
       kinds: {},
       sections: raw.section ? [raw.section] : [],
       anyKeep: raw._keep === true,

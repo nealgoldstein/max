@@ -3140,6 +3140,13 @@ async function callMax(messages, maxTokens, timeoutMs, opts) {
   }
   try {
   var resp, data;
+  var _llmAttempt = 0;
+  // PD.481 (network reliability): retry loop around the LLM fetch so a
+  // transient 429 (rate limit) / 529 (overloaded) backs off instead of
+  // aborting Discovery/Enhance mid-plan. The in-flight/cache bookkeeping
+  // lives OUTSIDE this loop (settled once at the end), so re-fetching here
+  // is safe — it never re-registers or double-settles the in-flight promise.
+  for (;;) {
   try {
     var fetchTimeout=new Promise(function(_,reject){setTimeout(function(){reject(new Error('API timeout'));},timeoutMs||25000);});
     // v345: choose endpoint based on auth path.
@@ -3215,6 +3222,25 @@ async function callMax(messages, maxTokens, timeoutMs, opts) {
       throw fetchErr;
     }
   }
+  // PD.481: back off and retry on 429 (rate limit) / 529 (overloaded) /
+  // 503. These are transient — the API is briefly busy, not broken — so a
+  // hard fail here needlessly aborts a Discovery/Enhance run. Honor the
+  // Retry-After header when present, else exponential backoff (1s, 2s, 4s),
+  // up to 3 tries, then fall through to the normal error handling below.
+  var _llmStatus = resp && resp.status;
+  if ((_llmStatus === 429 || _llmStatus === 529 || _llmStatus === 503) && _llmAttempt < 3) {
+    var _retryAfter = (resp.headers && typeof resp.headers.get === "function")
+      ? parseInt(resp.headers.get("retry-after"), 10) : NaN;
+    var _waitMs = (isFinite(_retryAfter) && _retryAfter > 0)
+      ? Math.min(_retryAfter * 1000, 20000)
+      : Math.min(1000 * Math.pow(2, _llmAttempt), 8000);
+    console.warn("[Max PD.481] LLM " + _llmStatus + " (busy) — backing off " + _waitMs + "ms, retry " + (_llmAttempt + 1) + "/3");
+    await new Promise(function(_r){ setTimeout(_r, _waitMs); });
+    _llmAttempt++;
+    continue;
+  }
+  break;
+  } // end PD.481 retry loop
   if (data.error) {
     // v353.2: split the 401 handling per auth mode. Proxy users on
     // 401 mean their session token expired \u2014 clear it and route to
@@ -3351,8 +3377,36 @@ var _saveTimer  = null;
 var _inIframe   = (window !== window.top);
 var _hasFileAPI = !_inIframe && (typeof window !== "undefined") && ("showSaveFilePicker" in window);
 
+function _persistTripRaw(id, json){
+  // PD.475 (data integrity): route raw trip-envelope writes through
+  // MaxDB.trip.writeRaw so the id==key assertion always runs (db.js) — a
+  // mis-keyed envelope is the root of "trip lost / duplicated / reloaded
+  // wrong". silent:true preserves the no-emit behaviour of the bare
+  // localStorage.setItem calls these replace; falls back to a raw write
+  // only if MaxDB is not wired yet (boot-order safety).
+  try {
+    if (typeof MaxDB !== "undefined" && MaxDB.trip && typeof MaxDB.trip.writeRaw === "function") {
+      return MaxDB.trip.writeRaw(id, json, { silent: true });
+    }
+  } catch(_){}
+  try { localStorage.setItem("max-trip-" + id, json); return true; } catch(_){ return false; }
+}
+
 function serializeTrip(){
-  return JSON.stringify({trip:trip,activeDest:activeDest,destCtr:destCtr,sidCtr:sidCtr,bkCtr:bkCtr,activeDmSection:_activeDmSection},null,2);
+  // PD.479 (network reliability): omit transient render caches from the
+  // saved envelope. trip._osrmSegments holds OSRM "failed" sentinels from a
+  // transient routing outage — persisting them POISONS the route: a segment
+  // that failed once on bad signal would stay a straight line forever, even
+  // after signal returns. These caches are rebuilt on demand and the
+  // cache-signature invalidates them on any change, so they carry no value
+  // in storage (and bloat it — road geometry is hundreds of points per
+  // segment). Strip them here so every save/export starts routing fresh.
+  var _transientKeys = { _osrmSegments:1, _osrmCacheSig:1, _osrmBatchInflight:1, _dtLoopFetched:1 };
+  return JSON.stringify(
+    {trip:trip,activeDest:activeDest,destCtr:destCtr,sidCtr:sidCtr,bkCtr:bkCtr,activeDmSection:_activeDmSection},
+    function(key, value){ return _transientKeys[key] ? undefined : value; },
+    2
+  );
 }
 
 function restoreTrip(json){
@@ -3462,7 +3516,7 @@ function loadTripFile(input){
       _upsertTripIndexEntry({id:newId,name:trip.name||"Imported trip",
         dateRange:trip.destinations.length?trip.destinations[0].dateFrom+" – "+trip.destinations[trip.destinations.length-1].dateTo:"",
         destCount:trip.destinations.length});
-      localStorage.setItem("max-trip-"+newId,JSON.stringify(data));
+      _persistTripRaw(newId, JSON.stringify(data));
       // PD.330: file-loaded trips open at the trip overview. There's
       // no saved last-screen anymore — the URL is the source of truth
       // and an imported file doesn't carry one — so trip overview is
@@ -4477,8 +4531,18 @@ function _runGeoQueue(){
   var task = _geoQueue.shift();
   if (!task) return;
   _geoQueueRunning = true;
-  Promise.resolve()
-    .then(task)
+  // PD.480 (network reliability): race the task against a timeout. The
+  // Nominatim fetch inside the task has no timeout, so on bad signal it
+  // can hang forever — the task promise never settles, _geoQueueRunning
+  // stays true, and the WHOLE geo queue latches dead for the session (no
+  // pin ever geocodes again). The 12s race guarantees the chain always
+  // settles so the queue keeps draining; a hung fetch is just abandoned
+  // (its in-flight latch clears in ensureCoarseGeocode's finally, so the
+  // place is retryable later).
+  Promise.race([
+      Promise.resolve().then(task),
+      new Promise(function(res){ setTimeout(res, 12000); })
+    ])
     .catch(function(){ /* errors handled per-task */ })
     .then(function(){
       setTimeout(function(){
@@ -5162,7 +5226,7 @@ function localSave(){
       // entirely. If quota's full at this point, MaxDB is the only
       // thing that would have rescued us — log so it's visible.
       try {
-        localStorage.setItem("max-trip-"+_currentTripId, envelopeJson);
+        _persistTripRaw(_currentTripId, envelopeJson);
       } catch (e) {
         if (e && (e.name === "QuotaExceededError" || (e.code && e.code === 22))) {
           console.warn("[Max] localStorage full and MaxDB unavailable — edit not persisted on this device. Reload to retry with MaxDB.");
@@ -7695,11 +7759,11 @@ function selectTrip(id){
           typeof MaxDB.trip.writeRaw === "function") {
         MaxDB.trip.writeRaw(id, serialized);
       } else {
-        localStorage.setItem("max-trip-" + id, serialized);
+        _persistTripRaw(id, serialized);
       }
     } catch (e) {
       console.warn("[Max] selectTrip server-fallback save failed:", e);
-      localStorage.setItem("max-trip-" + id, serialized);
+      _persistTripRaw(id, serialized);
     }
     if (localLoad(id)) {
       _currentTripId = id;
@@ -7761,7 +7825,7 @@ function duplicateTrip(srcId, openAfter){
   // so the new trip lands looking the same as the original. If we
   // ever want a fresh-look duplicate, delete clone._uiState here.
 
-  try { localStorage.setItem("max-trip-" + newId, JSON.stringify(clone)); }
+  try { _persistTripRaw(newId, JSON.stringify(clone)); }
   catch (e) {
     console.warn("[Max] duplicate save failed:", e);
     maxAlert("Out of storage. Delete some old trips and try again.");
@@ -29615,7 +29679,7 @@ function _resumePendingShareDuplicate(token){
       body: { id: newId, name: newName, body: newEnv, updatedAt: Date.now() },
     }).then(function(){
       try {
-        localStorage.setItem("max-trip-" + newId, JSON.stringify(newEnv));
+        _persistTripRaw(newId, JSON.stringify(newEnv));
         var idx = [];
         try { idx = JSON.parse(localStorage.getItem("max-trips-index") || "[]"); } catch (_) {}
         idx.push({
@@ -29739,7 +29803,7 @@ function _duplicateSharedTripToMyAccount(){
   }).then(function(){
     // Persist locally too so the user immediately sees it on home.
     try {
-      localStorage.setItem("max-trip-" + newId, JSON.stringify(envelope));
+      _persistTripRaw(newId, JSON.stringify(envelope));
       // Index entry — minimal; pullAll will fill in dates etc.
       var idxEntry = {
         id: newId, name: newName,

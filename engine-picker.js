@@ -4338,10 +4338,27 @@
     // activeDmSection). MaxDB also fires 'tripWritten' so subscribers
     // can react. The trips index update goes through MaxDB.index.save
     // for the same reason.
+    // PD.477 (data integrity): CHECK the write result. publishTrip used to
+    // ignore it — so a failed persist (quota full, storage error) looked
+    // like success: the user lands on their trip, then it's gone on reload.
+    // Now a failed write is surfaced loudly so the user knows to retry
+    // before they invest in it. The trip stays in memory either way, so we
+    // still show it — we just don't pretend it was saved.
+    var _published_saved = true;
     if (global.MaxDB && global.MaxDB.trip && global.MaxDB.trip.writeRaw) {
-      global.MaxDB.trip.writeRaw(tripId, global.serializeTrip());
+      _published_saved = (global.MaxDB.trip.writeRaw(tripId, global.serializeTrip()) !== false);
     } else if (typeof localSave === "function") {
-      localSave();
+      _published_saved = (localSave() !== false);
+    } else {
+      _published_saved = false;
+    }
+    if (!_published_saved) {
+      console.error("[Max PD.477] publishTrip: trip write FAILED — not persisted:", tripId);
+      try {
+        if (typeof global.showSaveStatus === "function") {
+          global.showSaveStatus("⚠ Couldn't save your trip to this device — it's open but not stored. Free up space and use Save to export a backup.", 8000);
+        }
+      } catch (_) {}
     }
     if (global.MaxDB && global.MaxDB.index && global.MaxDB.index.save) {
       global.MaxDB.index.save(_tripsIndex);

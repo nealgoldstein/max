@@ -101,26 +101,39 @@
     return 'd-' + destId + '-' + dayIdx;
   }
 
+  // PD.476 (data integrity): real coordinates only — reject the [0,0]
+  // "null island" sentinel the LLM copies from the prompt's example JSON.
+  // This get-or-create is where trip.places entries are born, so it's the
+  // upstream source of the [0,0] Skógafoss that disappeared into the
+  // Atlantic. Store null instead, so no place enters the registry with a
+  // fake location for distance / directions / booking code to trust.
+  function _realLL(lat, lng) {
+    return typeof lat === 'number' && isFinite(lat)
+        && typeof lng === 'number' && isFinite(lng)
+        && !(Math.abs(lat) < 0.01 && Math.abs(lng) < 0.01);
+  }
+
   // Get-or-create an entry in trip.places{} for the given place
   // descriptor. Returns the placeId. Mutates trip.places in place.
   function _getOrCreatePlace(trip, p) {
     if (!p || !p.place) return null;
     var placeId = _makePlaceId(p.place);
+    var _real = _realLL(p.lat, p.lng);
     if (!trip.places[placeId]) {
       trip.places[placeId] = {
         id: placeId,
         name: p.place,
         country: p.country || null,
-        lat: (typeof p.lat === 'number') ? p.lat : null,
-        lng: (typeof p.lng === 'number') ? p.lng : null,
+        lat: _real ? p.lat : null,
+        lng: _real ? p.lng : null,
         type: p.type || 'place'
       };
     } else {
       // Backfill lat/lng/country if they weren't set the first time
-      // but are present this time.
+      // but are present (and real) this time.
       var existing = trip.places[placeId];
-      if (existing.lat == null && typeof p.lat === 'number') existing.lat = p.lat;
-      if (existing.lng == null && typeof p.lng === 'number') existing.lng = p.lng;
+      if (existing.lat == null && _real) existing.lat = p.lat;
+      if (existing.lng == null && _real) existing.lng = p.lng;
       if (!existing.country && p.country) existing.country = p.country;
     }
     return placeId;
