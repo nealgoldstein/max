@@ -40,7 +40,8 @@ var indexSrc = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
  "trip-detail-render.js", "exec-mode.js", "logistics.js", "home-screen.js",
  "trip-affordance.js", "geography-model.js", "who-avoidances.js", "edit-constraints.js",
  "map-pin-panel.js", "itinerary-ordering.js", "discovery-curation.js",
- "entry-point-map.js", "picker-hero-sidebar.js"
+ "entry-point-map.js", "picker-hero-sidebar.js", "construct-decorate.js",
+ "pm-doclink-dest.js", "pm-clip-share.js", "pm-docs-editor.js", "pm-docs-core.js", "pm-richtext.js", "menubar-phase.js", "paste-browse-modal.js"
 ].forEach(function (f) {
   var p = path.join(ROOT, f);
   if (fs.existsSync(p)) indexSrc += "\n" + fs.readFileSync(p, "utf8");
