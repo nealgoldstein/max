@@ -37470,11 +37470,14 @@ function updateMainMap(){
       // roads (curves around bays, follows the actual driving path)
       // instead of cutting straight lines. Falls back to straight
       // lines while OSRM is fetching or if it fails.
-      // PD.428: the day-trip loop line draws ONLY when this route is the
-      // selected on-demand routing (toggled from the stop popover). By
-      // default day-trips are pins only; the loop appears one route at a
-      // time, layered over the destination spine for comparison.
-      if (window._activeRouteRouting === route.id) try {
+      // PD.471: the day-trip spur/loop draws automatically whenever day
+      // trips are visible — we're already past the _dayTripsShown gate
+      // above, so reaching here means day trips are on. A day trip without
+      // its hub→stop→hub connection is just a floating pin with no way to
+      // see WHICH hub it belongs to (Neal: "I can make it a day trip, but
+      // there is no route"). The Day Trips toggle hides them all at once;
+      // it doesn't need a second per-route toggle to show the connection.
+      try {
         var loopPath = [hubCtr].concat(dtStops.map(function(s){ return s.dtCtr; })).concat([hubCtr]);
         var loopKey = (typeof _osrmSegmentKey === "function") ? _osrmSegmentKey(loopPath) : null;
         // PD.141: strict off — ignore cache when roads disabled.
@@ -37493,8 +37496,14 @@ function updateMainMap(){
           dashArray: isLoopStraight ? "3 6" : null, lineCap:"round", lineJoin:"round"
         }).addTo(_mainMap);
         _mainMarkers.push(loopLine);
-        // Kick off OSRM fetch for this loop if not cached yet.
+        // PD.471: the spur DRAWS for every day trip (so you see the hub
+        // connection), but the road-following OSRM fetch only fires for the
+        // route you've toggled on-demand — otherwise every day trip would
+        // kick a network call on every render (a fetch storm, and a hang
+        // when OSRM is slow/unreachable). Straight spur by default;
+        // road-following when you opt into a specific route.
         if (isLoopStraight && loopKey && loopCached !== "failed"
+            && window._activeRouteRouting === route.id
             && typeof _ensureTripRoutesCached === "function"
             && !trip._osrmBatchInflight) {
           trip._osrmBatchInflight = true;
