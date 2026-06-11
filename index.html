@@ -3368,6 +3368,17 @@ function restoreTrip(json){
       trip=d.trip;
       if(!trip.pendingActions) trip.pendingActions=[];
     }
+    // PD.468c: reconcile transit routes on load so trips SAVED before the
+    // base-to-base change (PD.468) adopt the new hub-to-hub legs without the
+    // user having to mutate the trip first — which is why a deploy + hard
+    // refresh still showed the old place-to-place legs. syncTransitRoutes is
+    // idempotent (no-op if already base-to-base) and re-homes any wayside
+    // stops off superseded legs (PD.468b), so it's lossless.
+    try {
+      if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.syncTransitRoutes === "function" && window.trip) {
+        MaxEngineTrip.syncTransitRoutes(window.trip);
+      }
+    } catch(_){}
     restoreTripUI();
   }catch(e){showSaveStatus("Couldn't read that file.",4000);console.error(e);}
 }

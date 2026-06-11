@@ -1258,6 +1258,49 @@
       keepIds[route.id] = true;
     });
 
+    // PD.468b: before dropping any superseded transit route (e.g. an old
+    // dest-to-dest leg replaced by base-to-base reconciliation), RE-HOME
+    // its wayside stops onto the surviving base leg that fits each best
+    // (smallest perpendicular distance) — so reconciliation never silently
+    // loses a wayside the user placed. Lossless by construction.
+    (function _rehomeOrphanWaysides() {
+      try {
+        function _sub(r) {
+          return (typeof MaxMigration !== 'undefined' && MaxMigration.routeSubKind)
+            ? MaxMigration.routeSubKind(r) : (r.subKind || (r.kind && r.kind !== 'route' ? r.kind : null));
+        }
+        var kept = trip.routes.filter(function (r) { return r && _sub(r) === 'transit' && keepIds[r.id]; });
+        if (!kept.length) return;
+        function _coordsOf(id) { var d = dests.find(function (x) { return x && x.id === id; }); return (d && typeof d.lat === 'number' && typeof d.lng === 'number') ? [d.lat, d.lng] : null; }
+        function _placeCoords(pid) { var p = trip.places && trip.places[pid]; return (p && typeof p.lat === 'number' && typeof p.lng === 'number') ? [p.lat, p.lng] : null; }
+        function _perp(a, b, p) {
+          if (!a || !b || !p) return Infinity;
+          var kx = 111.32 * Math.cos(a[0] * Math.PI / 180), ky = 111.32;
+          var ax = a[1]*kx, ay = a[0]*ky, bx = b[1]*kx, by = b[0]*ky, px = p[1]*kx, py = p[0]*ky;
+          var dx = bx-ax, dy = by-ay, L2 = dx*dx+dy*dy;
+          if (L2 === 0) return Math.sqrt((px-ax)*(px-ax)+(py-ay)*(py-ay));
+          var t = Math.max(0, Math.min(1, ((px-ax)*dx+(py-ay)*dy)/L2));
+          var qx = ax+t*dx, qy = ay+t*dy;
+          return Math.sqrt((px-qx)*(px-qx)+(py-qy)*(py-qy));
+        }
+        trip.routes.forEach(function (r) {
+          if (!r || _sub(r) !== 'transit' || keepIds[r.id]) return; // only routes about to be dropped
+          (r.planItems || []).forEach(function (pi) {
+            if (!pi || pi.type !== 'stop' || !pi.placeId) return;
+            var sc = _placeCoords(pi.placeId);
+            var best = null, bestKm = Infinity;
+            kept.forEach(function (kr) {
+              var km = _perp(_coordsOf(kr.fromDestId), _coordsOf(kr.toDestId), sc);
+              if (km < bestKm) { bestKm = km; best = kr; }
+            });
+            if (!best) best = kept[0]; // no coords → don't lose it; park on first base leg
+            if (!Array.isArray(best.planItems)) best.planItems = [];
+            if (!best.planItems.some(function (p) { return p && p.type === 'stop' && p.placeId === pi.placeId; })) best.planItems.push(pi);
+          });
+        });
+      } catch (_) {}
+    })();
+
     // Drop transit routes whose (fromId, toId) is no longer adjacent.
     // (dayTrip / arrival / departure routes are immune — different subKind.)
     trip.routes = trip.routes.filter(function (r) {
