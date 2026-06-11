@@ -137,3 +137,41 @@ behavior, not pixels).
 This is a real, multi-session refactor (~291 colors, 1,151 inline styles). The
 *analysis* is done; the *migration* is a project. Phase 0 is safe to land now;
 Phases 1–3 want a visual feedback loop.
+
+---
+
+## Execution notes (2026-06-11 — what we learned doing it)
+
+**DONE & shipped (PD.490) — the only blind-safe merges:** primary-blue dedup
+`#1a6fb0`→`#1a5fa8`; light grays 5→3 (`#f7f7f5`,`#f8f8f8`→`#fafafa`). Verified by
+usage data that these never erase a border or recolor text.
+
+**CRITICAL LESSON — do NOT do a blind hex find-replace.** The same hex serves
+DIFFERENT semantic roles in different places, proven with usage counts:
+- `#f0f0f0` is a **border** 37× AND a **background** 15×. `#f5f5f5`: border 10×,
+  bg 20×. Merging them erases card borders into their fills.
+- `#1a1a1a` is **body-text ink** 14× AND a **button background** 4×. Merging the
+  "blacks" would recolor your text.
+So the migration MUST be **property-aware**: map each color by the CSS property it
+sits in (`color` → ink token, `background` → panel/primary token, `border-color`
+→ a SEPARATE border token), never by hex alone. Keep border tokens distinct from
+background tokens even when their values match, so a bg+border on one element can
+never collapse.
+
+**Button decision (settled):** intentional TWO-TIER system — **black** primary for
+top-level/home actions, **blue** (`#1a5fa8`) primary for in-trip actions. Don't
+unify to one color; make each tier internally consistent and give the scattered
+soft/secondary buttons ONE shared treatment.
+
+**Tooling reality:** the live-CSS-injection loop (Chrome extension `javascript_tool`)
+TIMES OUT on the real 44-destination Iceland trip — it's heavy (PD.479 re-fetches
+all routes on load) and blocks the renderer's main thread. Compositor screenshots
+(`mcp__computer-use__screenshot`) work fine even then, but can't inject. **Do the
+visual loop on a LIGHT page** (home/Discovery, or a small throwaway trip) where the
+CSS is the same but the page isn't churning — preview there, then apply to source.
+
+**Recommended next-session shape:** (1) define the `:root` semantic tokens at their
+CURRENT dominant values (zero visual change), (2) property-aware rewrite of inline
+styles + CSS rules to `var(--token)` (still zero visual change — a pure refactor),
+(3) THEN tune token values to consolidate, verifying each on a light page. Gate
+every step with `bash tests/run.sh` + the full Playwright suite.
