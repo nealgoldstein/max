@@ -37563,16 +37563,18 @@ function updateMainMap(){
       // default waysides are pins only; the detour appears one route at a
       // time, layered over the destination spine so you can see how far it
       // bends off the direct line (genuinely on-the-way vs a day trip).
-      // PD.442: the wayside detour now draws AUTOMATICALLY whenever Route
-      // mode is on (_routeShown) — not only when this one route is hand-
-      // toggled. Neal: "show automatically." This also closes a latent
-      // gap: the spine pass above SKIPS wayside-bearing segments (the
-      // detour is meant to cover them), so when the detour wasn't toggled
-      // those legs rendered with NO line at all ("there is no route
-      // line"). Now route-mode on => every wayside leg shows its road
-      // line. The per-route _activeRouteRouting toggle still forces a
-      // single leg on even with Route mode off (back-compat).
-      if (fromCtr && toCtr && (_routeShown || window._activeRouteRouting === route.id)) {
+      // PD.462: the purple wayside detour draws ON DEMAND only — when this
+      // specific route is toggled via the stop popover (_activeRouteRouting).
+      // PD.442 had made it auto-draw whenever Route mode was on, which
+      // painted the ENTIRE leg purple over the blue spine — for an on-route
+      // wayside (Skógafoss sits right on Route 1) the detour traces the same
+      // road, so the whole leg went purple instead of staying blue. Neal:
+      // "the entire route turned purple. What should have turned purple was
+      // only the detour off the main route." The blue destination spine
+      // already draws on every leg (PD.428, above) — so by default the leg
+      // shows blue + the wayside PIN, and the purple detour appears only
+      // when you opt in to inspect how far that stop bends off the line.
+      if (fromCtr && toCtr && window._activeRouteRouting === route.id) {
         var path = [fromCtr].concat(stops.map(function(s){return s.ctr;})).concat([toCtr]);
         try {
           // PD.441: route the wayside detour through OSRM so it follows
@@ -37702,6 +37704,22 @@ function updateMainMap(){
     try {
       ((typeof MaxData !== "undefined" && MaxData.getDestinations) ? MaxData.getDestinations(trip) : (trip.destinations || []))
         .forEach(function(d){ if (d && d.place) _pinSeen[window._pmKey(d.place)] = true; });
+    } catch(_){}
+    // PD.461: also claim the identities of wayside / day-trip STOPS so the
+    // committed + considered passes below don't paint a SECOND pin for a
+    // place that's already drawn as a purple wayside/day-trip pin. Neal hit
+    // this: converting a "see" sight (Skógafoss) to along-the-way left the
+    // place in the considered pool, so it rendered as BOTH a purple wayside
+    // pin AND a green considered pin — two icons for one place.
+    try {
+      (trip.routes || []).forEach(function(r){
+        (r.planItems || []).forEach(function(pi){
+          if (pi && pi.type === "stop" && pi.placeId) {
+            var _nm = (trip.places && trip.places[pi.placeId] && trip.places[pi.placeId].name) || "";
+            if (_nm) _pinSeen[window._pmKey(_nm)] = true;
+          }
+        });
+      });
     } catch(_){}
     (function _renderCommittedSightPins(){
       var committed = (typeof MaxData !== "undefined" && MaxData.getCommittedSights)
