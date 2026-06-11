@@ -2871,6 +2871,14 @@ function saveApiKey(val){
   // space/non-joiner/joiner, LTR/RTL marks, BOM. They survive .trim() but
   // cause Anthropic to see a byte sequence different from what was pasted.
   v = v.replace(/[\u00a0\u200b-\u200f\ufeff]/g, '');
+  // PD.444: strip ALL internal whitespace too (spaces, tabs, newlines).
+  // A valid key is one unbroken token; interior whitespace only ever comes
+  // from a bad paste (a line-wrapped copy, or two values run together) and
+  // yields a malformed Authorization header \u2192 a silent Anthropic 401 on
+  // every call. Neal hit exactly this: a 187-char key with interior spaces
+  // saved cleanly and nothing would build. The previous strip above only
+  // covered INVISIBLE chars, not ordinary ASCII space/tab/newline.
+  v = v.replace(/\s+/g, '');
   // Anthropic API keys start with "sk-ant-" (api03 prefix on current
   // gen) and are typically ~100 chars. We don't hard-fail on a wrong
   // prefix because Anthropic could change it, but we warn loudly so
@@ -2884,6 +2892,16 @@ function saveApiKey(val){
   if (v.length < 60) {
     if (typeof maxAlert === "function") {
       maxAlert("That key looks truncated — Anthropic keys are about 100 characters. Try copying again and make sure you got the whole string.");
+    }
+    return;
+  }
+  // PD.444: implausibly long = extra content rode along on the paste (a
+  // label, a second token, surrounding prose). Current keys are ~108
+  // chars; flag well above that rather than silently saving a key that
+  // will only ever 401. This is the other half of Neal's 187-char key.
+  if (v.length > 130) {
+    if (typeof maxAlert === "function") {
+      maxAlert("That key looks too long (" + v.length + " characters; Anthropic keys are ~108). Some extra text may have been copied with it — recopy just the key, starting at <code>sk-ant-</code> with nothing after the end of the string.");
     }
     return;
   }
