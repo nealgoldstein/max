@@ -2775,7 +2775,7 @@
       +   '<label style="font-size:11px;color:var(--c-ink-2);display:flex;align-items:center;gap:5px;">Departing from'
       +     '<input id="tm-exit-inp" placeholder="e.g. Zurich" list="tm-arrdep-suggestions" autocomplete="off" value="' + esc(curExit) + '" style="font-size:14px;padding:8px 10px;border:1px solid var(--c-border-strong);border-radius:4px;width:160px;max-width:100%;font-family:inherit;flex:1;min-width:140px;" />'
       +   '</label>'
-      +   '<button id="tm-arrdep-apply" style="font-size:11px;font-weight:600;color:var(--c-on-dark);background:var(--c-primary);border:1px solid var(--c-primary);border-radius:4px;padding:5px 12px;cursor:pointer;font-family:inherit;">Apply</button>'
+      +   '<button id="tm-arrdep-apply" class="btn btn-primary btn-sm">Apply</button>'
       +   '<span id="tm-arrdep-status" style="font-size:10px;color:var(--c-ink-3);"></span>'
       + '</div>'
       + _gwCardHtml
