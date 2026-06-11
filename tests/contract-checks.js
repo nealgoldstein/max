@@ -31,6 +31,18 @@ var path = require("path");
 
 var ROOT = path.resolve(__dirname, "..");
 var indexSrc = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+// PD.449–456: functions are being lifted out of the index.html monolith
+// into sibling modules (bloat reduction). The architecture greps below
+// care that a function EXISTS and keeps a property — not which file holds
+// it — so fold the extracted modules into the same haystack. File-specific
+// checks (db.js, sync.js, …) still read their own files separately.
+["apikey.js", "features-conversation.js", "features-trip.js", "trip-edit.js",
+ "trip-detail-render.js", "exec-mode.js", "logistics.js", "home-screen.js",
+ "trip-affordance.js", "geography-model.js", "who-avoidances.js", "edit-constraints.js"
+].forEach(function (f) {
+  var p = path.join(ROOT, f);
+  if (fs.existsSync(p)) indexSrc += "\n" + fs.readFileSync(p, "utf8");
+});
 var dbSrc = fs.readFileSync(path.join(ROOT, "db.js"), "utf8");
 
 var pass = 0, fail = 0;
@@ -64,7 +76,13 @@ check("Rule 1b: drawTripMode contains NO MaxRoute.navigate",
   dtm !== null && dtm.indexOf("MaxRoute.navigate") === -1,
   "a renderer is writing the URL again");
 
-var ddm = fnBody(indexSrc, /function drawDestMode\s*\(/);
+// PD.453: the destination-mode renderer was extracted out of index.html
+// into trip-detail-render.js (bloat reduction). Same precedent as the
+// discovery-adapter extraction below — point the grep at the module that
+// now owns drawDestMode, falling back to the inline source if absent.
+var renderSrc = fs.existsSync(path.join(ROOT, "trip-detail-render.js"))
+  ? fs.readFileSync(path.join(ROOT, "trip-detail-render.js"), "utf8") : indexSrc;
+var ddm = fnBody(renderSrc, /function drawDestMode\s*\(/);
 check("Rule 1c: drawDestMode exists", !!ddm);
 check("Rule 1d: drawDestMode's stamp is fresh-arrival-guarded",
   ddm !== null && (ddm.indexOf("MaxRoute.navigate") === -1 ||
