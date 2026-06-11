@@ -2250,7 +2250,7 @@
       // OLD trip; putting them on the stub keeps the views seamless
       // across the swap.
       trip={id:_preservedId, name:resolvedName,destinations:[],legs:{},trackSpending:false,pendingActions:[],
-        brief:newBrief, mdcItems:newMdcItems, logistics:null,
+        brief:newBrief, logistics:null, /* PD.488 (T3.8): no mdcItems — retired field; tripstore deletes it on save and placeActivities below is the SSOT */
         candidates: (_tb && Array.isArray(_tb.candidates)) ? _tb.candidates : [],
         placeActivities: (_tb && Array.isArray(_tb.placeActivities)) ? _tb.placeActivities : []};
       activeDest=null; destCtr=0; sidCtr=100; bkCtr=0; _actionCtr=0; _fileHandle=null;
