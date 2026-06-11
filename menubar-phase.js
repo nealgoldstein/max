@@ -191,7 +191,7 @@ function _phaseChipsHtml(currentPhase) {
   var s = _phaseStatus();
   if (!s.hasTrip && !s.discoveredCount) return "";
   var chips = [];
-  var style = 'display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:600;color:#5a6478;background:#f1f3f7;border:1px solid #dde1ea;border-radius:11px;padding:3px 9px;cursor:pointer;font-family:inherit;text-decoration:none;white-space:nowrap;line-height:1.2;';
+  var style='display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:600;color:#5a6478;background:#f1f3f7;border:1px solid #dde1ea;border-radius:11px;padding:3px 9px;cursor:pointer;font-family:inherit;text-decoration:none;white-space:nowrap;line-height:1.2;';
   function _chip(label, onclick){
     return '<button type="button" onclick="' + onclick + '" style="' + style + '">' + label + '</button>';
   }
@@ -239,13 +239,13 @@ function showBriefApiKeyForm(){
   var ov=document.createElement("div");
   ov.id="brief-key-overlay";
   ov.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9000;display:flex;align-items:center;justify-content:center;";
-  ov.innerHTML='<div style="background:#fff;border-radius:10px;padding:24px;width:380px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,.2);">'
+  ov.innerHTML='<div style="background:var(--c-bg);border-radius:10px;padding:24px;width:380px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,.2);">'
     +'<div style="font-size:14px;font-weight:700;margin-bottom:8px;">Set Anthropic API key</div>'
-    +'<div style="font-size:11px;color:#888;margin-bottom:14px;">Your key is stored locally in this browser. Max needs it to generate destination suggestions.</div>'
-    +'<input id="brief-key-inp" type="password" placeholder="sk-ant-..." style="width:100%;font-size:12px;padding:9px 11px;border:1px solid #ddd;border-radius:6px;font-family:monospace;box-sizing:border-box;margin-bottom:10px;">'
+    +'<div style="font-size:11px;color:var(--c-ink-3);margin-bottom:14px;">Your key is stored locally in this browser. Max needs it to generate destination suggestions.</div>'
+    +'<input id="brief-key-inp" type="password" placeholder="sk-ant-..." style="width:100%;font-size:12px;padding:9px 11px;border:1px solid var(--c-border);border-radius:6px;font-family:monospace;box-sizing:border-box;margin-bottom:10px;">'
     +'<div style="display:flex;gap:8px;">'
-    +'<button onclick="saveBriefKey()" style="flex:1;padding:9px;font-size:12px;font-weight:600;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;">Save key</button>'
-    +'<button onclick="var o=document.getElementById(&quot;brief-key-overlay&quot;);if(o)o.remove();" style="padding:9px 14px;font-size:12px;border:1px solid #ddd;border-radius:6px;cursor:pointer;font-family:inherit;background:#fff;color:#555;">Cancel</button>'
+    +'<button onclick="saveBriefKey()" style="flex:1;padding:9px;font-size:12px;font-weight:600;background:var(--c-primary-top);color:var(--c-on-dark);border:none;border-radius:6px;cursor:pointer;font-family:inherit;">Save key</button>'
+    +'<button onclick="var o=document.getElementById(&quot;brief-key-overlay&quot;);if(o)o.remove();" style="padding:9px 14px;font-size:12px;border:1px solid var(--c-border);border-radius:6px;cursor:pointer;font-family:inherit;background:var(--c-bg);color:var(--c-ink-2);">Cancel</button>'
     +'</div>'
     +'</div>';
   document.body.appendChild(ov);
@@ -262,7 +262,7 @@ function saveBriefKey(){
   var ov=document.getElementById("brief-key-overlay"); if(ov) ov.remove();
   // Show confirmation
   var toast=document.createElement("div");
-  toast.style.cssText="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#2a7a4e;color:#fff;padding:8px 16px;border-radius:6px;font-size:11px;font-weight:600;z-index:9999;pointer-events:none;";
+  toast.style.cssText="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:var(--c-see);color:var(--c-on-dark);padding:8px 16px;border-radius:6px;font-size:11px;font-weight:600;z-index:9999;pointer-events:none;";
   toast.textContent="\u2713 API key saved";
   document.body.appendChild(toast);
   setTimeout(function(){toast.remove();},2000);
@@ -275,13 +275,13 @@ function showHomeApiKeyForm(){
   var ov = document.createElement("div");
   ov.id = "home-key-modal";
   ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9000;display:flex;align-items:center;justify-content:center;";
-  ov.innerHTML = '<div style="background:#fff;border-radius:10px;padding:24px;width:380px;max-width:90vw;">'
+  ov.innerHTML = '<div style="background:var(--c-bg);border-radius:10px;padding:24px;width:380px;max-width:90vw;">'
     + '<div style="font-size:14px;font-weight:700;margin-bottom:6px;">Set Anthropic API key</div>'
-    + '<div style="font-size:11px;color:#888;margin-bottom:14px;">Your key is stored only in this browser. Get one at <a href="https://console.anthropic.com" target="_blank" style="color:#1a5fa8;">console.anthropic.com</a>.</div>'
-    + '<input id="home-key-inp" type="password" placeholder="sk-ant-..." autocomplete="off" style="width:100%;font-size:12px;padding:9px 11px;border:1px solid #ddd;border-radius:6px;font-family:monospace;box-sizing:border-box;margin-bottom:10px;">'
+    + '<div style="font-size:11px;color:var(--c-ink-3);margin-bottom:14px;">Your key is stored only in this browser. Get one at <a href="https://console.anthropic.com" target="_blank" style="color:var(--c-primary);">console.anthropic.com</a>.</div>'
+    + '<input id="home-key-inp" type="password" placeholder="sk-ant-..." autocomplete="off" style="width:100%;font-size:12px;padding:9px 11px;border:1px solid var(--c-border);border-radius:6px;font-family:monospace;box-sizing:border-box;margin-bottom:10px;">'
     + '<div style="display:flex;gap:8px;">'
-    + '<button id="home-key-save" style="flex:1;padding:9px;font-size:12px;font-weight:600;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;">Save key</button>'
-    + '<button id="home-key-cancel" style="padding:9px 14px;font-size:12px;border:1px solid #ddd;border-radius:6px;cursor:pointer;font-family:inherit;background:#fff;">Cancel</button>'
+    + '<button id="home-key-save" style="flex:1;padding:9px;font-size:12px;font-weight:600;background:var(--c-primary-top);color:var(--c-on-dark);border:none;border-radius:6px;cursor:pointer;font-family:inherit;">Save key</button>'
+    + '<button id="home-key-cancel" style="padding:9px 14px;font-size:12px;border:1px solid var(--c-border);border-radius:6px;cursor:pointer;font-family:inherit;background:var(--c-bg);">Cancel</button>'
     + '</div></div>';
   document.body.appendChild(ov);
   ov.onclick = function(e){ if(e.target===ov) ov.remove(); };
@@ -295,7 +295,7 @@ function showHomeApiKeyForm(){
     var notice = document.getElementById("hs-key-notice");
     if (notice) notice.style.display = "none";
     var t = document.createElement("div");
-    t.style.cssText = "position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#2a7a4e;color:#fff;padding:8px 18px;border-radius:6px;font-size:12px;font-weight:600;z-index:9999;";
+    t.style.cssText = "position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:var(--c-see);color:var(--c-on-dark);padding:8px 18px;border-radius:6px;font-size:12px;font-weight:600;z-index:9999;";
     t.textContent = "✓ API key saved";
     document.body.appendChild(t);
     setTimeout(function(){ t.remove(); }, 2500);

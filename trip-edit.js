@@ -332,7 +332,7 @@ function renderDestWeatherStrip(dest, container){
     }
     var icon = (w.daily && w.daily[0]) ? _wxCodeIcon(w.daily[0].code) : "🌤️";
     strip.innerHTML = '<span>' + icon + '</span><span>' + w.summary + '</span>'
-      + (w.kind === "climate" ? '<span style="font-size:9px;color:#aaa;margin-left:4px;">(climate avg)</span>' : '');
+      + (w.kind === "climate" ? '<span style="font-size:9px;color:var(--c-ink-4);margin-left:4px;">(climate avg)</span>' : '');
   }).catch(function(){ strip.remove(); });
 }
 
@@ -464,7 +464,7 @@ function _openSightUrlEditor(anchor, item, onSaved){
   var pop = document.createElement("div");
   pop.id = "sight-url-pop";
   pop.setAttribute("data-item-id", item.id || "");
-  pop.style.cssText = "position:absolute;background:#fff;border:1px solid #d8d4c8;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.15);z-index:10000;padding:10px 12px;min-width:320px;max-width:calc(100vw - 24px);font-family:inherit;";
+  pop.style.cssText = "position:absolute;background:var(--c-bg);border:1px solid #d8d4c8;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.15);z-index:10000;padding:10px 12px;min-width:320px;max-width:calc(100vw - 24px);font-family:inherit;";
   var lbl = document.createElement("div");
   lbl.style.cssText = "font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#666;margin-bottom:6px;";
   lbl.textContent = "URL for " + (item.n || item.name || "this sight");
@@ -473,17 +473,17 @@ function _openSightUrlEditor(anchor, item, onSaved){
   inp.type = "url";
   inp.placeholder = "https:// — paste an official site or any link. Leave blank to use the search fallback.";
   inp.value = item.url || "";
-  inp.style.cssText = "width:100%;font-size:12px;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-family:inherit;box-sizing:border-box;";
+  inp.style.cssText = "width:100%;font-size:12px;padding:6px 8px;border:1px solid var(--c-border-strong);border-radius:4px;font-family:inherit;box-sizing:border-box;";
   inp.spellcheck = false;
   pop.appendChild(inp);
   var actions = document.createElement("div");
   actions.style.cssText = "display:flex;gap:6px;justify-content:flex-end;margin-top:8px;";
   var saveBtn = document.createElement("button");
   saveBtn.textContent = "Save";
-  saveBtn.style.cssText = "font-size:11px;font-weight:600;padding:4px 10px;border-radius:4px;border:1px solid #1a5fa8;background:#1a5fa8;color:#fff;cursor:pointer;font-family:inherit;";
+  saveBtn.style.cssText = "font-size:11px;font-weight:600;padding:4px 10px;border-radius:4px;border:1px solid var(--c-primary);background:var(--c-primary);color:var(--c-on-dark);cursor:pointer;font-family:inherit;";
   var cancelBtn = document.createElement("button");
   cancelBtn.textContent = "Cancel";
-  cancelBtn.style.cssText = "font-size:11px;font-weight:500;padding:4px 10px;border-radius:4px;border:1px solid #d8d4c8;background:#fff;color:#666;cursor:pointer;font-family:inherit;";
+  cancelBtn.style.cssText = "font-size:11px;font-weight:500;padding:4px 10px;border-radius:4px;border:1px solid #d8d4c8;background:var(--c-bg);color:#666;cursor:pointer;font-family:inherit;";
   actions.appendChild(cancelBtn); actions.appendChild(saveBtn);
   pop.appendChild(actions);
 
@@ -746,7 +746,7 @@ function _sf6Btn(rationale, opts){
     if (pop) return pop;
     pop = document.createElement("div");
     pop.className = "sf6-pop";
-    pop.style.cssText = "display:none;position:fixed;width:300px;max-width:calc(100vw - 24px);font-size:11px;line-height:1.55;color:#5a4520;background:#fff;border:1px solid #e6d5a0;border-radius:6px;padding:9px 11px;box-shadow:0 4px 14px rgba(0,0,0,.18);z-index:8500;font-weight:500;text-align:left;white-space:normal;";
+    pop.style.cssText = "display:none;position:fixed;width:300px;max-width:calc(100vw - 24px);font-size:11px;line-height:1.55;color:#5a4520;background:var(--c-bg);border:1px solid #e6d5a0;border-radius:6px;padding:9px 11px;box-shadow:0 4px 14px rgba(0,0,0,.18);z-index:8500;font-weight:500;text-align:left;white-space:normal;";
     pop.textContent = rationale;
     document.body.appendChild(pop);
     return pop;
@@ -802,7 +802,7 @@ function editDates(destId){
   span.textContent="";
   var row=document.createElement("div"); row.className="date-edit-row";
   var fi=document.createElement("input"); fi.type="date"; fi.className="date-edit-inp"; fi.id="edit-from-"+destId; fi.value=dest.dateFrom; fi.min="";
-  var arrow=document.createElement("span"); arrow.style.cssText="font-size:10px;color:#aaa;"; arrow.textContent="\u2192";
+  var arrow=document.createElement("span"); arrow.style.cssText="font-size:10px;color:var(--c-ink-4);"; arrow.textContent="\u2192";
   var ti=document.createElement("input"); ti.type="date"; ti.className="date-edit-inp"; ti.id="edit-to-"+destId; ti.value=dest.dateTo;
   ti.min=dest.dateFrom;
   fi.onchange=function(){ti.min=fi.value;if(ti.value&&ti.value<fi.value)ti.value="";};
@@ -975,10 +975,10 @@ function buildCancelRows(container,items){
     var list=document.createElement('div'); list.style.cssText='margin-bottom:10px;';
     groups[gDest].forEach(function(b){
       var row=document.createElement('div');
-      row.style.cssText='font-size:11px;padding:4px 8px;background:#fff8f0;border:1px solid #f0dcc0;border-radius:4px;margin-bottom:3px;';
+      row.style.cssText='font-size:11px;padding:4px 8px;background:var(--c-tint-amber);border:1px solid #f0dcc0;border-radius:4px;margin-bottom:3px;';
       row.innerHTML='<strong>'+b.type+'</strong>: '+b.name
         +(b.detail?' <span style="color:#999;">('+b.detail+')</span>':'')
-        +'<span style="margin-left:6px;color:#b05820;font-size:10px;">removed from Max — contact provider</span>';
+        +'<span style="margin-left:6px;color:var(--c-warn);font-size:10px;">removed from Max — contact provider</span>';
       list.appendChild(row);
     });
     container.appendChild(list);
@@ -1041,14 +1041,14 @@ function showDateChangeDialog(dest,newFrom,newTo,affected,onConfirm){
       if(bookings&&bookings.length>0){
         bookings.forEach(function(b){
           var row=document.createElement('div'); row.style.cssText='font-size:11px;padding:3px 0;display:flex;align-items:baseline;gap:6px;';
-          row.innerHTML='<span style="color:#b05820;">✕</span><span><strong>'+b.type+':</strong> '+b.name+(b.detail?' <span style="color:#999;font-size:10px;">('+b.detail+')</span>':'')+'</span>';
+          row.innerHTML='<span style="color:var(--c-warn);">✕</span><span><strong>'+b.type+':</strong> '+b.name+(b.detail?' <span style="color:#999;font-size:10px;">('+b.detail+')</span>':'')+'</span>';
           body.appendChild(row);
         });
       } else if(extraNote){
-        var note=document.createElement('div'); note.style.cssText='font-size:11px;color:#888;';
+        var note=document.createElement('div'); note.style.cssText='font-size:11px;color:var(--c-ink-3);';
         note.textContent=extraNote; body.appendChild(note);
       } else {
-        var ok=document.createElement('div'); ok.style.cssText='font-size:11px;color:#2a7a4e;';
+        var ok=document.createElement('div'); ok.style.cssText='font-size:11px;color:var(--c-see);';
         ok.textContent='No bookings affected.'; body.appendChild(ok);
       }
       sec.appendChild(body);
@@ -1104,7 +1104,7 @@ function showDateChangeDialog(dest,newFrom,newTo,affected,onConfirm){
       buildCancelRows(dlg,items);
     } else {
       var noItems=document.createElement('div'); noItems.className='move-dialog-warn';
-      noItems.style.cssText='background:#f0f8f4;border-color:#b8dfc9;color:#2a7a4e;';
+      noItems.style.cssText='background:var(--c-tint-green);border-color:#b8dfc9;color:var(--c-see);';
       noItems.innerHTML='<strong>All done</strong> \u2014 no provider contact needed for this change.';
       dlg.appendChild(noItems);
     }
@@ -1671,7 +1671,7 @@ function mkTransportRecord(bk,fromId,toId){
     var urlRow=document.createElement("div"); urlRow.className="bk-rec-meta";
     var urlA=document.createElement("a");
     urlA.href=bk.url; urlA.target="_blank"; urlA.rel="noopener noreferrer";
-    urlA.style.cssText="color:#1a5fa8;text-decoration:none;font-weight:500;";
+    urlA.style.cssText="color:var(--c-primary);text-decoration:none;font-weight:500;";
     urlA.textContent="\u2197 Booking";
     urlRow.appendChild(urlA);
     rec.appendChild(urlRow);
@@ -1920,7 +1920,7 @@ function mkHotelRecord(bk,destId){
     var urlRow=document.createElement("div"); urlRow.className="bk-rec-meta";
     var urlA=document.createElement("a");
     urlA.href=bk.url; urlA.target="_blank"; urlA.rel="noopener noreferrer";
-    urlA.style.cssText="color:#1a5fa8;text-decoration:none;font-weight:500;";
+    urlA.style.cssText="color:var(--c-primary);text-decoration:none;font-weight:500;";
     urlA.textContent="\u2197 Reservation";
     urlRow.appendChild(urlA);
     rec.appendChild(urlRow);

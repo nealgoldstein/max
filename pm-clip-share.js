@@ -43,7 +43,7 @@ function _pmShowClipPicker(){
   ov.id = "pm-clip-picker";
   ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:15000;display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;";
   var box = document.createElement("div");
-  box.style.cssText = "background:#fff;border-radius:12px;max-width:480px;width:100%;box-shadow:0 12px 36px rgba(0,0,0,0.32);font-size:13px;color:#222;padding:18px 22px;";
+  box.style.cssText = "background:var(--c-bg);border-radius:12px;max-width:480px;width:100%;box-shadow:0 12px 36px rgba(0,0,0,0.32);font-size:13px;color:#222;padding:18px 22px;";
   ov.onclick = function(){ ov.remove(); };
   box.onclick = function(e){ e.stopPropagation(); };
 
@@ -52,19 +52,19 @@ function _pmShowClipPicker(){
   var selPreview = "";
   if (payload.selection) {
     var sel = payload.selection.length > 240 ? payload.selection.slice(0, 240) + "…" : payload.selection;
-    selPreview = '<div style="margin-top:8px;padding:8px 10px;background:#f5f5f5;border-left:3px solid #1a5fa8;border-radius:3px;font-size:12px;color:#555;max-height:90px;overflow:auto;">' + sel.replace(/</g, "&lt;") + '</div>';
+    selPreview = '<div style="margin-top:8px;padding:8px 10px;background:var(--c-panel-2);border-left:3px solid var(--c-primary);border-radius:3px;font-size:12px;color:var(--c-ink-2);max-height:90px;overflow:auto;">' + sel.replace(/</g, "&lt;") + '</div>';
   }
   box.innerHTML = '<div style="font-size:15px;font-weight:700;margin-bottom:8px;">📎 Save to Max</div>'
     + '<div style="font-size:11.5px;color:#999;margin-bottom:10px;">From the webpage you were viewing.</div>'
     + '<div style="padding:8px 10px;background:#fafbfd;border:1px solid #e0e6ee;border-radius:6px;margin-bottom:14px;">'
-    +   '<div style="font-weight:600;font-size:13px;color:#111;margin-bottom:3px;">' + titleSafe + '</div>'
-    +   '<div style="font-size:11px;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + urlSafe + '</div>'
+    +   '<div style="font-weight:600;font-size:13px;color:var(--c-ink);margin-bottom:3px;">' + titleSafe + '</div>'
+    +   '<div style="font-size:11px;color:var(--c-ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + urlSafe + '</div>'
     +   selPreview
     + '</div>'
-    + '<div style="font-size:11px;color:#888;font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin-bottom:6px;">Save to which trip?</div>'
+    + '<div style="font-size:11px;color:var(--c-ink-3);font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin-bottom:6px;">Save to which trip?</div>'
     + '<div id="pm-clip-trips" style="margin-bottom:16px;font-size:11px;color:#999;">Loading trips…</div>'
     + '<div style="display:flex;justify-content:flex-end;gap:8px;">'
-    +   '<button type="button" id="pm-clip-cancel" style="font-size:12px;font-weight:600;color:#666;background:#fff;border:1px solid #ccc;border-radius:6px;padding:7px 14px;cursor:pointer;font-family:inherit;">Cancel</button>'
+    +   '<button type="button" id="pm-clip-cancel" style="font-size:12px;font-weight:600;color:#666;background:var(--c-bg);border:1px solid var(--c-border-strong);border-radius:6px;padding:7px 14px;cursor:pointer;font-family:inherit;">Cancel</button>'
     + '</div>';
 
   ov.appendChild(box);
@@ -83,7 +83,7 @@ function _pmShowClipPicker(){
     trips.forEach(function(t){
       var row = document.createElement("button");
       row.type = "button";
-      row.style.cssText = "display:block;width:100%;text-align:left;font:inherit;font-size:13px;font-weight:600;padding:10px 12px;margin-bottom:4px;background:#fff;border:1px solid #ddd;border-radius:6px;cursor:pointer;color:#1a5fa8;";
+      row.style.cssText = "display:block;width:100%;text-align:left;font:inherit;font-size:13px;font-weight:600;padding:10px 12px;margin-bottom:4px;background:var(--c-bg);border:1px solid var(--c-border);border-radius:6px;cursor:pointer;color:var(--c-primary);";
       row.textContent = "→ " + (t.name || "Untitled trip");
       row.onmouseenter = function(){ this.style.background = "#f5f5f5"; };
       row.onmouseleave = function(){ this.style.background = "#fff"; };
@@ -123,12 +123,12 @@ function _pmExecuteClipSave(tripId, payload, ov){
     // Build doc body: link card at top + selected text (if any).
     var bodyHtml = '<a href="' + (payload.url||"").replace(/"/g,"&quot;") + '" target="_blank" rel="noopener" class="pm-rt-linkcard" contenteditable="false" style="display:flex;align-items:center;gap:10px;margin:8px 0;padding:8px 12px;border:1px solid #e0e6ee;border-radius:8px;background:#fafbfd;text-decoration:none;color:#222;">'
       + '<div style="flex:1;min-width:0;">'
-      +   '<div style="font-weight:600;color:#111;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (titleText.replace(/</g,"&lt;")) + '</div>'
-      +   '<div style="font-size:11px;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (payload.url || "").replace(/</g,"&lt;") + '</div>'
+      +   '<div style="font-weight:600;color:var(--c-ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (titleText.replace(/</g,"&lt;")) + '</div>'
+      +   '<div style="font-size:11px;color:var(--c-ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (payload.url || "").replace(/</g,"&lt;") + '</div>'
       + '</div>'
       + '</a>';
     if (payload.selection) {
-      bodyHtml += '<blockquote style="margin:8px 0;padding:8px 12px;border-left:3px solid #ccc;color:#444;font-style:italic;">'
+      bodyHtml += '<blockquote style="margin:8px 0;padding:8px 12px;border-left:3px solid var(--c-border-strong);color:#444;font-style:italic;">'
         + payload.selection.replace(/</g, "&lt;").replace(/\n/g, "<br>")
         + '</blockquote>';
     }
@@ -159,8 +159,8 @@ function _pmExecuteClipSave(tripId, payload, ov){
       '<div style="text-align:center;padding:24px 12px;">'
       + '<div style="font-size:32px;margin-bottom:8px;">✓</div>'
       + '<div style="font-weight:700;margin-bottom:6px;">Saved to Max</div>'
-      + '<div style="font-size:11.5px;color:#888;">You can close this window.</div>'
-      + '<div style="margin-top:14px;"><button type="button" onclick="window.close();" style="font-size:12px;font-weight:600;color:#fff;background:#1a5fa8;border:none;border-radius:6px;padding:7px 14px;cursor:pointer;font-family:inherit;">Close</button></div>'
+      + '<div style="font-size:11.5px;color:var(--c-ink-3);">You can close this window.</div>'
+      + '<div style="margin-top:14px;"><button type="button" onclick="window.close();" style="font-size:12px;font-weight:600;color:var(--c-on-dark);background:var(--c-primary);border:none;border-radius:6px;padding:7px 14px;cursor:pointer;font-family:inherit;">Close</button></div>'
       + '</div>';
     window._pmPendingClip = null;
   }).catch(function(e){
@@ -193,24 +193,24 @@ function _pmShowClipperSetup(){
   ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:14000;display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;";
   ov.onclick = function(){ ov.remove(); };
   var box = document.createElement("div");
-  box.style.cssText = "background:#fff;border-radius:12px;max-width:520px;width:100%;padding:22px 26px;box-shadow:0 12px 36px rgba(0,0,0,0.28);font-size:13px;color:#222;line-height:1.55;";
+  box.style.cssText = "background:var(--c-bg);border-radius:12px;max-width:520px;width:100%;padding:22px 26px;box-shadow:0 12px 36px rgba(0,0,0,0.28);font-size:13px;color:#222;line-height:1.55;";
   box.onclick = function(e){ e.stopPropagation(); };
   var href = _pmGetClipperBookmarklet().replace(/"/g, "&quot;");
   box.innerHTML = '<div style="font-size:16px;font-weight:700;margin-bottom:12px;">🔖 Web clipper</div>'
     + '<div style="margin-bottom:14px;color:#444;">Drag this button onto your bookmarks bar. On any webpage, click it to save the page into a Max trip.</div>'
     + '<div style="text-align:center;padding:20px;background:#f5f1e8;border:1px dashed #d8c8a8;border-radius:8px;margin-bottom:14px;">'
-    +   '<a href="' + href + '" style="display:inline-block;font-size:14px;font-weight:700;color:#fff;background:#5b3f8f;padding:10px 22px;border-radius:6px;text-decoration:none;cursor:grab;font-family:inherit;" onclick="event.preventDefault();return false;">📎 Save to Max</a>'
-    +   '<div style="font-size:11px;color:#888;margin-top:8px;">↑ drag this onto your bookmarks bar</div>'
+    +   '<a href="' + href + '" style="display:inline-block;font-size:14px;font-weight:700;color:var(--c-on-dark);background:var(--c-accent);padding:10px 22px;border-radius:6px;text-decoration:none;cursor:grab;font-family:inherit;" onclick="event.preventDefault();return false;">📎 Save to Max</a>'
+    +   '<div style="font-size:11px;color:var(--c-ink-3);margin-top:8px;">↑ drag this onto your bookmarks bar</div>'
     + '</div>'
     + '<div style="font-size:12px;color:#666;line-height:1.6;">'
     +   '<strong>How it works:</strong><br>'
     +   '1. On a webpage you want to save, click the bookmarklet.<br>'
     +   '2. A small Max popup opens.<br>'
-    +   '3. Pick which trip — the page lands as a new doc in that trip\'s research notes, tagged <code style="background:#f1edf8;padding:1px 5px;border-radius:3px;color:#5b3f8f;">#clipped</code>.<br>'
+    +   '3. Pick which trip — the page lands as a new doc in that trip\'s research notes, tagged <code style="background:#f1edf8;padding:1px 5px;border-radius:3px;color:var(--c-accent);">#clipped</code>.<br>'
     +   '4. Triage and organize later inside Max.'
     + '</div>'
     + '<div style="margin-top:18px;text-align:right;">'
-    +   '<button type="button" id="pm-clipper-close" style="font-size:12px;font-weight:600;color:#666;background:#fff;border:1px solid #ccc;border-radius:6px;padding:7px 14px;cursor:pointer;font-family:inherit;">Close</button>'
+    +   '<button type="button" id="pm-clipper-close" style="font-size:12px;font-weight:600;color:#666;background:var(--c-bg);border:1px solid var(--c-border-strong);border-radius:6px;padding:7px 14px;cursor:pointer;font-family:inherit;">Close</button>'
     + '</div>';
   ov.appendChild(box);
   document.body.appendChild(ov);
@@ -302,7 +302,7 @@ function _pmShareModalShow(url, byteSize){
   ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:14000;display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;";
   ov.onclick = function(){ ov.remove(); };
   var box = document.createElement("div");
-  box.style.cssText = "background:#fff;border-radius:12px;max-width:560px;width:100%;padding:22px 26px;box-shadow:0 12px 36px rgba(0,0,0,0.28);font-size:13px;color:#222;";
+  box.style.cssText = "background:var(--c-bg);border-radius:12px;max-width:560px;width:100%;padding:22px 26px;box-shadow:0 12px 36px rgba(0,0,0,0.28);font-size:13px;color:#222;";
   box.onclick = function(e){ e.stopPropagation(); };
 
   var sizeKb = (byteSize / 1024).toFixed(1);
@@ -321,14 +321,14 @@ function _pmShareModalShow(url, byteSize){
     + '</div>'
     + '<div style="display:flex;gap:6px;align-items:stretch;">'
     +   '<input id="pm-share-url" type="text" readonly value="' + url.replace(/"/g, "&quot;") + '" '
-    +     'style="flex:1;font:inherit;font-size:11.5px;padding:8px 10px;border:1px solid #ccc;border-radius:6px;background:#fafafa;color:#333;overflow:hidden;text-overflow:ellipsis;" />'
+    +     'style="flex:1;font:inherit;font-size:11.5px;padding:8px 10px;border:1px solid var(--c-border-strong);border-radius:6px;background:var(--c-panel);color:#333;overflow:hidden;text-overflow:ellipsis;" />'
     +   '<button type="button" id="pm-share-copy" '
-    +     'style="font-size:12px;font-weight:600;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Copy</button>'
+    +     'style="font-size:12px;font-weight:600;color:var(--c-on-dark);background:var(--c-primary);border:1px solid var(--c-primary);border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Copy</button>'
     + '</div>'
     + sizeWarn
     + '<div style="margin-top:6px;font-size:10.5px;color:#999;">Payload: ' + sizeKb + ' KB · URL: ' + urlLen.toLocaleString() + ' chars</div>'
     + '<div style="margin-top:18px;text-align:right;">'
-    +   '<button type="button" id="pm-share-close" style="font-size:12px;font-weight:600;color:#666;background:#fff;border:1px solid #ccc;border-radius:6px;padding:7px 14px;cursor:pointer;font-family:inherit;">Done</button>'
+    +   '<button type="button" id="pm-share-close" style="font-size:12px;font-weight:600;color:#666;background:var(--c-bg);border:1px solid var(--c-border-strong);border-radius:6px;padding:7px 14px;cursor:pointer;font-family:inherit;">Done</button>'
     + '</div>';
 
   ov.appendChild(box);
@@ -377,13 +377,13 @@ function _pmRenderSharedDiscoveryViewer(p){
   var wrap = document.createElement("div");
   wrap.style.cssText = "max-width:760px;margin:0 auto;padding:28px 22px 60px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#222;line-height:1.5;";
   function esc(s){ return _escHtml(s); }
-  var html = '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:18px;border-bottom:1px solid #eee;padding-bottom:14px;">'
+  var html = '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:18px;border-bottom:1px solid var(--c-border-3);padding-bottom:14px;">'
     + '<div>'
-    +   '<div style="font-size:11px;color:#888;font-weight:700;letter-spacing:.06em;text-transform:uppercase;">SHARED DISCOVERY</div>'
+    +   '<div style="font-size:11px;color:var(--c-ink-3);font-weight:700;letter-spacing:.06em;text-transform:uppercase;">SHARED DISCOVERY</div>'
     +   '<div style="font-size:22px;font-weight:700;margin-top:4px;">' + (esc(p.region) || "Trip planning") + '</div>'
-    +   (p.sentence ? '<div style="font-size:13px;color:#555;margin-top:6px;font-style:italic;">' + esc(p.sentence) + '</div>' : '')
+    +   (p.sentence ? '<div style="font-size:13px;color:var(--c-ink-2);margin-top:6px;font-style:italic;">' + esc(p.sentence) + '</div>' : '')
     + '</div>'
-    + '<a href="' + location.origin + location.pathname + '" style="font-size:11.5px;color:#1a5fa8;text-decoration:none;font-weight:600;flex-shrink:0;">Open Max →</a>'
+    + '<a href="' + location.origin + location.pathname + '" style="font-size:11.5px;color:var(--c-primary);text-decoration:none;font-weight:600;flex-shrink:0;">Open Max →</a>'
     + '</div>';
 
   function renderMeta(label, meta){
@@ -391,11 +391,11 @@ function _pmRenderSharedDiscoveryViewer(p){
     var out = '<div style="margin-top:6px;">';
     if (Array.isArray(meta.docs) && meta.docs.length) {
       meta.docs.forEach(function(d){
-        out += '<div style="margin:10px 0 16px;padding:12px 14px;background:#fafafa;border:1px solid #eee;border-radius:6px;">'
+        out += '<div style="margin:10px 0 16px;padding:12px 14px;background:var(--c-panel);border:1px solid var(--c-border-3);border-radius:6px;">'
           + '<div style="font-weight:700;font-size:13px;margin-bottom:6px;">' + esc(d.title || "Untitled") + '</div>'
           + (Array.isArray(d.tags) && d.tags.length
               ? '<div style="margin-bottom:6px;">' + d.tags.map(function(t){
-                  return '<span style="display:inline-block;font-size:10px;font-weight:600;color:#5b3f8f;background:#f1edf8;border:1px solid #ddd5ec;border-radius:8px;padding:1px 7px;margin-right:4px;">#' + esc(t) + '</span>';
+                  return '<span style="display:inline-block;font-size:10px;font-weight:600;color:var(--c-accent);background:#f1edf8;border:1px solid #ddd5ec;border-radius:8px;padding:1px 7px;margin-right:4px;">#' + esc(t) + '</span>';
                 }).join('') + '</div>'
               : '')
           + '<div style="font-size:13px;line-height:1.55;">' + (d.body || "") + '</div>'
@@ -403,11 +403,11 @@ function _pmRenderSharedDiscoveryViewer(p){
       });
     }
     if (Array.isArray(meta.links) && meta.links.length) {
-      out += '<div style="margin-top:8px;"><div style="font-size:10.5px;font-weight:700;color:#888;letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px;">Links</div>';
+      out += '<div style="margin-top:8px;"><div style="font-size:10.5px;font-weight:700;color:var(--c-ink-3);letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px;">Links</div>';
       meta.links.forEach(function(l){
         var name = esc(l.name || l.domain || l.url || "link");
         var url  = esc(l.url || "#");
-        out += '<div style="padding:5px 0;"><a href="' + url + '" target="_blank" rel="noopener" style="color:#1a5fa8;text-decoration:none;font-weight:600;font-size:12px;">↗ ' + name + '</a></div>';
+        out += '<div style="padding:5px 0;"><a href="' + url + '" target="_blank" rel="noopener" style="color:var(--c-primary);text-decoration:none;font-weight:600;font-size:12px;">↗ ' + name + '</a></div>';
       });
       out += '</div>';
     }
@@ -416,7 +416,7 @@ function _pmRenderSharedDiscoveryViewer(p){
   }
 
   if (p.tripMeta && (p.tripMeta.docs && p.tripMeta.docs.length || p.tripMeta.links && p.tripMeta.links.length)) {
-    html += '<div style="margin:24px 0;"><div style="font-size:13px;font-weight:700;color:#5b3f8f;margin-bottom:8px;">🔬 Trip-level notes</div>' + renderMeta("trip", p.tripMeta) + '</div>';
+    html += '<div style="margin:24px 0;"><div style="font-size:13px;font-weight:700;color:var(--c-accent);margin-bottom:8px;">🔬 Trip-level notes</div>' + renderMeta("trip", p.tripMeta) + '</div>';
   }
   if (Array.isArray(p.places) && p.places.length) {
     html += '<div style="margin-top:24px;"><div style="font-size:13px;font-weight:700;color:#444;margin-bottom:8px;">Places (' + p.places.length + ')</div>';
@@ -426,14 +426,14 @@ function _pmRenderSharedDiscoveryViewer(p){
       html += '<div style="margin:14px 0;padding:14px 16px;border:1px solid #e6e1d5;border-radius:8px;">'
         + '<div style="font-size:15px;font-weight:700;display:flex;align-items:baseline;gap:8px;">'
         +   esc(pl.name)
-        +   (pl.country ? '<span style="font-size:11px;color:#888;font-weight:400;">' + esc(pl.country) + '</span>' : '')
+        +   (pl.country ? '<span style="font-size:11px;color:var(--c-ink-3);font-weight:400;">' + esc(pl.country) + '</span>' : '')
         + '</div>'
         + (meta ? renderMeta(pl.name, meta) : '<div style="font-size:11.5px;color:#999;margin-top:4px;font-style:italic;">No notes shared.</div>')
         + '</div>';
     });
     html += '</div>';
   }
-  html += '<div style="margin-top:32px;padding-top:14px;border-top:1px solid #eee;font-size:10.5px;color:#aaa;text-align:center;">Shared ' + esc(p.sharedAt ? new Date(p.sharedAt).toLocaleString() : "") + ' via Max</div>';
+  html += '<div style="margin-top:32px;padding-top:14px;border-top:1px solid var(--c-border-3);font-size:10.5px;color:var(--c-ink-4);text-align:center;">Shared ' + esc(p.sharedAt ? new Date(p.sharedAt).toLocaleString() : "") + ' via Max</div>';
 
   wrap.innerHTML = html;
   document.body.appendChild(wrap);
@@ -452,7 +452,7 @@ function _pmShowUndo(message, undoFn){
   }
   var toast = document.createElement("div");
   toast.id = "pm-undo-toast";
-  toast.style.cssText = "position:fixed;left:50%;bottom:32px;transform:translateX(-50%);z-index:13000;display:flex;align-items:center;gap:12px;padding:10px 14px 10px 16px;background:#1f1f1f;color:#fff;font-family:inherit;font-size:13px;line-height:1.4;border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,0.32);max-width:90vw;";
+  toast.style.cssText = "position:fixed;left:50%;bottom:32px;transform:translateX(-50%);z-index:13000;display:flex;align-items:center;gap:12px;padding:10px 14px 10px 16px;background:#1f1f1f;color:var(--c-on-dark);font-family:inherit;font-size:13px;line-height:1.4;border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,0.32);max-width:90vw;";
   var msg = document.createElement("span");
   msg.style.cssText = "flex:1;";
   msg.textContent = message;
@@ -465,7 +465,7 @@ function _pmShowUndo(message, undoFn){
   var closeBtn = document.createElement("button");
   closeBtn.type = "button";
   closeBtn.textContent = "×";
-  closeBtn.style.cssText = "font:inherit;font-size:18px;color:#aaa;background:transparent;border:none;cursor:pointer;padding:0 4px;line-height:1;";
+  closeBtn.style.cssText = "font:inherit;font-size:18px;color:var(--c-ink-4);background:transparent;border:none;cursor:pointer;padding:0 4px;line-height:1;";
   toast.appendChild(msg);
   toast.appendChild(undoBtn);
   toast.appendChild(closeBtn);

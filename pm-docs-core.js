@@ -73,7 +73,7 @@ function _pmDocsSyncToNotes(m){
     var t = String(d.title || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     var hdr = t ? '<h3 style="margin:0 0 4px;font-size:13px;font-weight:700;">' + t + '</h3>' : '';
     return hdr + (d.body || "");
-  }).join('<hr style="border:none;border-top:1px solid #eee;margin:10px 0;" />');
+  }).join('<hr style="border:none;border-top:1px solid var(--c-border-3);margin:10px 0;" />');
 }
 // Round PD.35: docs render as a scrolling LIST of titles. Click a
 // title → opens that doc in its own editor dialog (_pmOpenDocEditor).
@@ -98,24 +98,24 @@ function _pmDocsRender(m, idPrefix){
       tagsHtml = '<span style="display:inline-flex;gap:4px;margin-top:3px;flex-wrap:wrap;">'
         + doc.tags.map(function(tag){
             var safe = String(tag).replace(/</g, "&lt;");
-            return '<span style="font-size:10px;font-weight:600;color:#5b3f8f;background:#f1edf8;border:1px solid #ddd5ec;border-radius:8px;padding:1px 7px;">#' + safe + '</span>';
+            return '<span style="font-size:10px;font-weight:600;color:var(--c-accent);background:#f1edf8;border:1px solid #ddd5ec;border-radius:8px;padding:1px 7px;">#' + safe + '</span>';
           }).join('')
         + '</span>';
     }
     return '<div class="pm-doc-list-row" data-idx="' + idx + '" '
       +    (canReorder ? 'draggable="true" ' : '')
       +    'onclick="event.stopPropagation();_pmDocOpen(' + idx + ');" '
-      +    'style="display:flex;align-items:flex-start;gap:8px;padding:9px 12px;border-bottom:1px solid #eee;cursor:pointer;transition:background-color .12s;border-top:2px solid transparent;border-top-color:transparent;" '
+      +    'style="display:flex;align-items:flex-start;gap:8px;padding:9px 12px;border-bottom:1px solid var(--c-border-3);cursor:pointer;transition:background-color .12s;border-top:2px solid transparent;border-top-color:transparent;" '
       +    'onmouseenter="this.style.background=&quot;#f5f5f5&quot;" onmouseleave="this.style.background=&quot;transparent&quot;">'
       +   (canReorder
             ? '<span class="pm-doc-drag-handle" title="Drag to reorder" style="cursor:grab;color:#bbb;font-size:14px;user-select:none;-webkit-user-select:none;padding:2px 2px 0;">⋮⋮</span>'
             : '')
       +   '<span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;">'
-      +     '<span style="font-size:13px;font-weight:600;color:#111;display:flex;align-items:baseline;gap:8px;min-width:0;">'
+      +     '<span style="font-size:13px;font-weight:600;color:var(--c-ink);display:flex;align-items:baseline;gap:8px;min-width:0;">'
       +       '<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;">📄 ' + titleSafe + '</span>'
       +       (doc.updatedAt ? '<span style="font-size:11px;font-weight:400;color:#999;white-space:nowrap;flex-shrink:0;">' + _pmFmtRelative(doc.updatedAt) + '</span>' : '')
       +     '</span>'
-      +     (snippetSafe ? '<span style="font-size:11.5px;color:#888;font-weight:400;line-height:1.4;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;">' + snippetSafe + '</span>' : '')
+      +     (snippetSafe ? '<span style="font-size:11.5px;color:var(--c-ink-3);font-weight:400;line-height:1.4;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;">' + snippetSafe + '</span>' : '')
       +     tagsHtml
       +   '</span>'
       +   (canDelete
@@ -133,7 +133,7 @@ function _pmDocsRender(m, idPrefix){
   if (tagKeys.length) {
     var activeFilter = m._docTagFilter || null;
     filterHtml = '<div class="pm-doc-tagstrip" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;align-items:center;">'
-      + '<span style="font-size:10px;color:#888;font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin-right:4px;">Tags:</span>'
+      + '<span style="font-size:10px;color:var(--c-ink-3);font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin-right:4px;">Tags:</span>'
       + tagKeys.map(function(t){
           var on = (t === activeFilter);
           var safe = String(t).replace(/</g, "&lt;").replace(/"/g, "&quot;");
@@ -145,7 +145,7 @@ function _pmDocsRender(m, idPrefix){
   }
   return '<div class="pm-docs-wrap" data-id-prefix="' + idPrefix + '">'
     + filterHtml
-    + '<div class="pm-doc-list" style="max-height:280px;overflow-y:auto;border:1px solid #ddd;border-radius:6px;background:#fff;">'
+    + '<div class="pm-doc-list" style="max-height:280px;overflow-y:auto;border:1px solid var(--c-border);border-radius:6px;background:var(--c-bg);">'
     +   (rowsHtml || emptyHtml)
     + '</div>'
     + '<button type="button" class="pm-doc-add" onclick="event.stopPropagation();_pmDocAdd(this);">+ Add document</button>'

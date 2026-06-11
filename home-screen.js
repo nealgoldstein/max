@@ -228,7 +228,7 @@ function renderHomeDashboard(){
     // first, then state, then the call to action.
     var card = document.createElement("div");
     card.style.cssText =
-      "background:#fff;border:1px solid #e6e2d8;border-radius:10px;" +
+      "background:var(--c-bg);border:1px solid #e6e2d8;border-radius:10px;" +
       "padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,.04);" +
       "margin-bottom:8px;display:flex;flex-direction:column;gap:6px;";
 
@@ -272,7 +272,7 @@ function renderHomeDashboard(){
       var chip = document.createElement("button");
       chip.type = "button";
       chip.style.cssText =
-        "background:#fff;border:1px solid #d8c4a4;color:#5c4520;font-family:inherit;" +
+        "background:var(--c-bg);border:1px solid #d8c4a4;color:#5c4520;font-family:inherit;" +
         "font-size:11.5px;font-weight:600;padding:6px 12px;border-radius:14px;" +
         "cursor:pointer;display:inline-flex;align-items:center;gap:6px;align-self:flex-start;" +
         "box-shadow:0 1px 2px rgba(0,0,0,.04);margin-top:2px;";
@@ -289,7 +289,7 @@ function renderHomeDashboard(){
       var calm = document.createElement("button");
       calm.type = "button";
       calm.style.cssText =
-        "background:transparent;border:none;color:#888;font-family:inherit;" +
+        "background:transparent;border:none;color:var(--c-ink-3);font-family:inherit;" +
         "font-size:11.5px;font-style:italic;cursor:pointer;padding:4px 0;align-self:flex-start;";
       calm.textContent = "Nothing pressing →";
       calm.onmouseover = function () { calm.style.color = "#1a5fa8"; };
@@ -735,7 +735,7 @@ function renderHomeScreen(){
           if (carrierNum) bits.push(carrierNum);
           if (details.time) bits.push(typeof _fmtTime12h === "function" ? _fmtTime12h(details.time) : details.time);
           if (!bits.length) return "";
-          return '<span><strong style="color:#888;font-weight:600;">' + prefix + ':</strong> ' + bits.join(" \u00b7 ") + '</span>';
+          return '<span><strong style="color:var(--c-ink-3);font-weight:600;">' + prefix + ':</strong> ' + bits.join(" \u00b7 ") + '</span>';
         }
         var arrHtml = _flightLabel(entry.entryDetails, "Arrive");
         var depHtml = _flightLabel(entry.exitDetails, "Depart");
@@ -756,7 +756,7 @@ function renderHomeScreen(){
       // happens before they click.
       dup.textContent = "Copy";
       dup.title = "Duplicate this trip";
-      dup.style.cssText = "background:#fff;border:1px solid #cfe1f7;color:#1a5fa8;font-size:11px;font-weight:600;padding:4px 10px;cursor:pointer;font-family:inherit;border-radius:5px;margin-right:6px;";
+      dup.style.cssText = "background:var(--c-bg);border:1px solid #cfe1f7;color:var(--c-primary);font-size:11px;font-weight:600;padding:4px 10px;cursor:pointer;font-family:inherit;border-radius:5px;margin-right:6px;";
       (function(id, c){
         dup.onclick = function(e){
           e.stopPropagation();
@@ -768,10 +768,10 @@ function renderHomeScreen(){
           msg.style.cssText = "font-size:11px;color:#666;flex:1;";
           msg.textContent = "Make a copy of \"" + (entry.name || "this trip") + "\"?";
           var yes = document.createElement("button");
-          yes.style.cssText = "font-size:11px;padding:3px 10px;border:1px solid #1a5fa8;border-radius:4px;background:#1a5fa8;color:#fff;cursor:pointer;font-family:inherit;";
+          yes.style.cssText = "font-size:11px;padding:3px 10px;border:1px solid var(--c-primary);border-radius:4px;background:var(--c-primary);color:var(--c-on-dark);cursor:pointer;font-family:inherit;";
           yes.textContent = "Duplicate";
           var no = document.createElement("button");
-          no.style.cssText = "font-size:11px;padding:3px 8px;border:1px solid #ddd;border-radius:4px;background:#fff;color:#666;cursor:pointer;font-family:inherit;";
+          no.style.cssText = "font-size:11px;padding:3px 8px;border:1px solid var(--c-border);border-radius:4px;background:var(--c-bg);color:#666;cursor:pointer;font-family:inherit;";
           no.textContent = "Cancel";
           yes.onclick = function(e2){
             e2.stopPropagation();
@@ -798,8 +798,8 @@ function renderHomeScreen(){
         cf.style.cssText="display:flex;align-items:center;gap:8px;width:100%;padding:4px 0 2px;";
         var msg=document.createElement("span"); msg.style.cssText="font-size:11px;color:#666;flex:1;";
         msg.textContent="Delete \""+(entry.name||"this trip")+"\"?";
-        var yes=document.createElement("button"); yes.style.cssText="font-size:11px;padding:3px 10px;border:1px solid #e05050;border-radius:4px;background:#e05050;color:#fff;cursor:pointer;font-family:inherit;"; yes.textContent="Delete";
-        var no=document.createElement("button"); no.style.cssText="font-size:11px;padding:3px 8px;border:1px solid #ddd;border-radius:4px;background:#fff;color:#666;cursor:pointer;font-family:inherit;"; no.textContent="Cancel";
+        var yes=document.createElement("button"); yes.style.cssText="font-size:11px;padding:3px 10px;border:1px solid var(--c-danger);border-radius:4px;background:var(--c-danger);color:var(--c-on-dark);cursor:pointer;font-family:inherit;"; yes.textContent="Delete";
+        var no=document.createElement("button"); no.style.cssText="font-size:11px;padding:3px 8px;border:1px solid var(--c-border);border-radius:4px;background:var(--c-bg);color:#666;cursor:pointer;font-family:inherit;"; no.textContent="Cancel";
         yes.onclick=function(e2){
           e2.stopPropagation();
           // PD.253: if we're deleting the ACTIVE trip, clear _currentTripId
@@ -933,9 +933,9 @@ function renderHomeOptions(){
   options.push({id:"browse", label:"Or just browse — I’m not planning yet", sub:"Look at places, dream a little, no commitment"});
 
   opts.innerHTML = options.map(function(o){
-    return '<div class="hs-option" data-id="'+o.id+'" onclick="selectHomeOption(\''+o.id+'\')" style="padding:11px 14px;border:1px solid #e0e0e0;border-radius:8px;margin-bottom:6px;cursor:pointer;background:#fff;transition:all 0.12s;">'
-      + '<div style="font-size:13px;font-weight:600;color:#111;margin-bottom:2px;">'+o.label+'</div>'
-      + '<div style="font-size:11px;color:#888;">'+o.sub+'</div>'
+    return '<div class="hs-option" data-id="'+o.id+'" onclick="selectHomeOption(\''+o.id+'\')" style="padding:11px 14px;border:1px solid #e0e0e0;border-radius:8px;margin-bottom:6px;cursor:pointer;background:var(--c-bg);transition:all 0.12s;">'
+      + '<div style="font-size:13px;font-weight:600;color:var(--c-ink);margin-bottom:2px;">'+o.label+'</div>'
+      + '<div style="font-size:11px;color:var(--c-ink-3);">'+o.sub+'</div>'
       + '</div>';
   }).join("");
 }
@@ -2234,11 +2234,11 @@ function _showPostImportSightsModal() {
   ov.id = "pd224-overlay";
   ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:10900;display:flex;align-items:center;justify-content:center;padding:24px;";
   var box = document.createElement("div");
-  box.style.cssText = "background:#fff;border-radius:12px;width:560px;max-width:100%;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 36px rgba(0,0,0,0.22);";
+  box.style.cssText = "background:var(--c-bg);border-radius:12px;width:560px;max-width:100%;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 36px rgba(0,0,0,0.22);";
 
   var hdr = ''
-    + '<div style="padding:16px 20px 10px;border-bottom:1px solid #eee;">'
-    +   '<div style="font-size:15px;font-weight:700;color:#111;">Your sights will land with their destinations</div>'
+    + '<div style="padding:16px 20px 10px;border-bottom:1px solid var(--c-border-3);">'
+    +   '<div style="font-size:15px;font-weight:700;color:var(--c-ink);">Your sights will land with their destinations</div>'
     +   '<div style="font-size:12px;color:#777;margin-top:5px;line-height:1.5;">'
     +     'Each sight you listed shows up under the destination it sits in (or near). '
     +     'You’ll find it on the destination card’s See &amp; Do tab when you create the trip.'
@@ -2247,7 +2247,7 @@ function _showPostImportSightsModal() {
 
   var bodyParts = [];
   if (inDestRows.length) {
-    bodyParts.push('<div style="font-size:11.5px;font-weight:700;color:#555;letter-spacing:.04em;text-transform:uppercase;margin:6px 0 8px;">In a destination</div>');
+    bodyParts.push('<div style="font-size:11.5px;font-weight:700;color:var(--c-ink-2);letter-spacing:.04em;text-transform:uppercase;margin:6px 0 8px;">In a destination</div>');
     inDestRows.forEach(function (row) {
       bodyParts.push(
         '<div style="font-size:13px;color:#222;padding:6px 0;line-height:1.55;">'
@@ -2257,7 +2257,7 @@ function _showPostImportSightsModal() {
     });
   }
   if (orphanRows.length) {
-    bodyParts.push('<div style="font-size:11.5px;font-weight:700;color:#555;letter-spacing:.04em;text-transform:uppercase;margin:14px 0 8px;">On the route as a short stop</div>');
+    bodyParts.push('<div style="font-size:11.5px;font-weight:700;color:var(--c-ink-2);letter-spacing:.04em;text-transform:uppercase;margin:14px 0 8px;">On the route as a short stop</div>');
     orphanRows.forEach(function (row) {
       bodyParts.push(
         '<div style="font-size:13px;color:#222;padding:6px 0;line-height:1.55;">'
@@ -2273,8 +2273,8 @@ function _showPostImportSightsModal() {
     + '</div>';
 
   var foot = ''
-    + '<div style="padding:12px 20px;border-top:1px solid #eee;display:flex;justify-content:flex-end;gap:8px;">'
-    +   '<button id="pd224-ok" type="button" style="font-size:13px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 18px;cursor:pointer;font-family:inherit;">Got it</button>'
+    + '<div style="padding:12px 20px;border-top:1px solid var(--c-border-3);display:flex;justify-content:flex-end;gap:8px;">'
+    +   '<button id="pd224-ok" type="button" style="font-size:13px;font-weight:700;color:var(--c-on-dark);background:var(--c-primary);border:1px solid var(--c-primary);border-radius:6px;padding:8px 18px;cursor:pointer;font-family:inherit;">Got it</button>'
     + '</div>';
 
   box.innerHTML = hdr + bodyHtml + foot;

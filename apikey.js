@@ -44,7 +44,7 @@ function _consumeReviewKeyFromUrl(){
     // Show a transient toast so the user knows the key was loaded
     setTimeout(function(){
       var t = document.createElement("div");
-      t.style.cssText = "position:fixed;top:14px;right:14px;background:#1a5fa8;color:#fff;font-size:12px;font-weight:600;padding:10px 14px;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,0.18);z-index:99999;font-family:inherit;max-width:300px;line-height:1.5;";
+      t.style.cssText = "position:fixed;top:14px;right:14px;background:var(--c-primary);color:var(--c-on-dark);font-size:12px;font-weight:600;padding:10px 14px;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,0.18);z-index:99999;font-family:inherit;max-width:300px;line-height:1.5;";
       t.innerHTML = "✓ Shared review key loaded.<br><span style='font-size:10.5px;font-weight:400;opacity:0.85;'>Don\'t share this URL — it had a key in it. The key is now in your browser only.</span>";
       document.body && document.body.appendChild(t);
       setTimeout(function(){ try { t.remove(); } catch(_){} }, 8000);

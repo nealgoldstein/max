@@ -1091,7 +1091,7 @@ async function generateCityData(place,destId,_isAutoRetry){
         var actions=document.createElement('div');
         actions.style.cssText='margin-top:7px;display:flex;gap:6px;flex-wrap:wrap;';
         var retryBtn=document.createElement('button');
-        retryBtn.style.cssText='font-size:11px;padding:3px 10px;border:1px solid #f8c8c8;border-radius:11px;background:#fff;color:#b04040;cursor:pointer;font-family:inherit;font-weight:600;';
+        retryBtn.style.cssText='font-size:11px;padding:3px 10px;border:1px solid #f8c8c8;border-radius:11px;background:var(--c-bg);color:#b04040;cursor:pointer;font-family:inherit;font-weight:600;';
         retryBtn.textContent='Retry';
         (function(p,did){retryBtn.onclick=function(){delete _generatedCityData[p.toLowerCase()];generateCityData(p,did);drawDestMode(did);};})(place,destId);
         actions.appendChild(retryBtn);

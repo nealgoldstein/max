@@ -29,18 +29,18 @@ function _tbPartyFieldHtml(){
   }).join("");
   var showAges = (comp === "family-kids");
   return '<div class="tb-field" style="margin-top:20px;"><label>Who\u2019s coming on this trip</label>'
-    +'<div style="font-size:10px;color:#888;margin-top:2px;margin-bottom:6px;line-height:1.55;">What Max shapes the days around \u2014 pace, accommodation, what\u2019s actually practical.</div>'
+    +'<div style="font-size:10px;color:var(--c-ink-3);margin-top:2px;margin-bottom:6px;line-height:1.55;">What Max shapes the days around \u2014 pace, accommodation, what\u2019s actually practical.</div>'
     +'<div style="display:flex;gap:6px;flex-wrap:wrap;">'+compHtml+'</div>'
     +'<div id="tb-party-ages-row" style="'+(showAges?"":"display:none;")+'margin-top:10px;">'
     +'<input id="tb-party-ages" value="'+(_tb.partyAges||"")+'" placeholder="Kids\u2019 ages \u2014 e.g. 4, 7, 11" />'
     +'</div>'
     +'<div style="display:flex;gap:10px;align-items:center;margin-top:10px;">'
-    +'<label style="font-size:10px;color:#888;font-weight:500;text-transform:none;letter-spacing:0;margin:0;">People, total:</label>'
-    +'<input type="number" id="tb-party-size" min="1" max="20" value="'+(_tb.partySize||"")+'" style="width:72px;padding:5px 8px;font-size:12px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'<label style="font-size:10px;color:var(--c-ink-3);font-weight:500;text-transform:none;letter-spacing:0;margin:0;">People, total:</label>'
+    +'<input type="number" id="tb-party-size" min="1" max="20" value="'+(_tb.partySize||"")+'" style="width:72px;padding:5px 8px;font-size:12px;border:1px solid var(--c-border);border-radius:6px;font-family:inherit;" />'
     +'</div>'
     +'</div>'
     +'<div class="tb-field"><label>Physical ability of the group</label>'
-    +'<div style="font-size:10px;color:#888;margin-top:2px;margin-bottom:6px;line-height:1.55;">Shape it around what the slowest or least mobile member can manage comfortably.</div>'
+    +'<div style="font-size:10px;color:var(--c-ink-3);margin-top:2px;margin-bottom:6px;line-height:1.55;">Shape it around what the slowest or least mobile member can manage comfortably.</div>'
     +'<div style="display:flex;gap:6px;flex-wrap:wrap;">'+abilityHtml+'</div>'
     +'<input id="tb-ability-note" value="'+(_tb.abilityNote||"")+'" placeholder="Anything specific Max should know (e.g. bad knees, pregnant, strollers)." style="margin-top:8px;" />'
     +'</div>';
@@ -252,17 +252,17 @@ function _tbDatesFieldHtml(){
   if (flexOn) {
     panel = ''
       +'<input id="tb-when" value="'+(_tb.when||"").replace(/"/g,'&quot;')+'" placeholder="e.g. September\u2013October, shoulder season." />'
-      +'<label style="display:block;font-size:10px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:.06em;margin-top:14px;margin-bottom:5px;">First guess at how long you want to be in '+_scaffoldPlace+'</label>'
+      +'<label style="display:block;font-size:10px;font-weight:700;color:var(--c-ink-2);text-transform:uppercase;letter-spacing:.06em;margin-top:14px;margin-bottom:5px;">First guess at how long you want to be in '+_scaffoldPlace+'</label>'
       +'<input id="tb-duration" value="'+(_tb.duration||"").replace(/"/g,'&quot;')+'" placeholder="e.g. 10\u201314 days, three weeks\u2026" />'
-      +'<div style="font-size:10px;color:#888;margin-top:5px;line-height:1.5;font-style:italic;">You can change this as you learn more.</div>';
+      +'<div style="font-size:10px;color:var(--c-ink-3);margin-top:5px;line-height:1.5;font-style:italic;">You can change this as you learn more.</div>';
   } else {
     var startD = _tb.startDate || "";
     var endD = _tb.endDate || "";
     var daysV = (typeof _tb.days === "number" && _tb.days > 0) ? _tb.days : "";
     var derived = _tb.dateDerived || "";
-    function mark(id){ return derived === id ? ' <span style="font-size:10px;color:#888;font-weight:400;font-style:italic;">(auto)</span>' : ""; }
+    function mark(id){ return derived === id ? ' <span style="font-size:10px;color:var(--c-ink-3);font-weight:400;font-style:italic;">(auto)</span>' : ""; }
     panel = ''
-      +'<div style="font-size:10px;color:#888;margin-bottom:8px;line-height:1.5;">First guess at when you’ll be in '+_scaffoldPlace+'. Fill any two \u2014 Max fills the third. Edit any field to override. You can change all of this as you learn more.</div>'
+      +'<div style="font-size:10px;color:var(--c-ink-3);margin-bottom:8px;line-height:1.5;">First guess at when you’ll be in '+_scaffoldPlace+'. Fill any two \u2014 Max fills the third. Edit any field to override. You can change all of this as you learn more.</div>'
       +'<div style="display:flex;gap:10px;flex-wrap:wrap;">'
       +'<div style="flex:1;min-width:120px;"><label style="display:block;font-size:11px;font-weight:600;color:#333;margin-bottom:4px;">Start date'+mark("startDate")+'</label>'
       +'<input id="tb-startDate" type="date" value="'+startD+'" onchange="_tbOnDateChange(&#39;startDate&#39;)" style="width:100%;box-sizing:border-box;" />'
@@ -358,7 +358,7 @@ function _tbModePillsHtml(which){
     +   '<span>'+(cur?label:"Tap to pick how")+'</span>'
     +   '<span style="font-size:9px;color:#999;">\u25BE</span>'
     + '</button>'
-    + '<div id="'+popId+'" style="display:none;position:absolute;top:100%;left:0;z-index:1000;margin-top:4px;background:#fff;border:1px solid #ccc;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,0.1);padding:4px;min-width:160px;">'
+    + '<div id="'+popId+'" style="display:none;position:absolute;top:100%;left:0;z-index:1000;margin-top:4px;background:var(--c-bg);border:1px solid var(--c-border-strong);border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,0.1);padding:4px;min-width:160px;">'
     +   _tbTransportModes.map(function(m){
           var on = cur === m.id;
           return '<div onclick="_tbPickMode(&#39;'+which+'&#39;,&#39;'+m.id+'&#39;)" '
@@ -420,10 +420,10 @@ function _tbEntryExitFieldsHtml(){
   var outLabel = "How you\u2019re leaving";
   return ''
     +'<div class="tb-field" style="margin-top:20px;"><label>'+inLabel+'</label>'
-    +'<div style="font-size:10px;color:#888;margin-top:2px;margin-bottom:4px;">Pick how. Then say where.</div>'
+    +'<div style="font-size:10px;color:var(--c-ink-3);margin-top:2px;margin-bottom:4px;">Pick how. Then say where.</div>'
     + _tbModePillsHtml("entryMode")
     +'<input id="tb-entry" value="'+(_tb.entry||'').replace(/"/g,'&quot;')+'" placeholder="First city or airport \u2014 e.g. Zurich, ZRH" style="margin-bottom:6px;" oninput="_tb.entryInferred=false;" />'
-    +(_tb.entryInferred ? '<div style="font-size:10px;color:#888;margin-bottom:6px;font-style:italic;">\u2728 Max suggested this starting point. Edit to set your actual arrival.</div>' : '')
+    +(_tb.entryInferred ? '<div style="font-size:10px;color:var(--c-ink-3);margin-bottom:6px;font-style:italic;">\u2728 Max suggested this starting point. Edit to set your actual arrival.</div>' : '')
     +'<input id="tb-gettingTo" value="'+(_tb.gettingTo||'').replace(/"/g,'&quot;')+'" placeholder="Optional: booked flight/train #, date, notes" />'
     +'<div style="display:flex;gap:5px;margin-top:6px;">'
     +'<span class="tb-toggle'+(_tb.entryFixed?' on':'')+'" onclick="_tbSetFixed(&#39;entry&#39;,true)">Booked / fixed</span>'
@@ -431,7 +431,7 @@ function _tbEntryExitFieldsHtml(){
     +'</div>'
     +'</div>'
     +'<div class="tb-field"><label>'+outLabel+'</label>'
-    +'<div style="font-size:10px;color:#888;margin-top:2px;margin-bottom:4px;">Entry and exit can differ \u2014 that\u2019s fine, and shapes the direction.</div>'
+    +'<div style="font-size:10px;color:var(--c-ink-3);margin-top:2px;margin-bottom:4px;">Entry and exit can differ \u2014 that\u2019s fine, and shapes the direction.</div>'
     + _tbModePillsHtml("exitMode")
     +'<input id="tb-exit" value="'+(_tb.tbExit||'').replace(/"/g,'&quot;')+'" placeholder="Last city or airport \u2014 e.g. Geneva, GVA" style="margin-bottom:6px;" />'
     +'<input id="tb-gettingOut" value="'+(_tb.gettingOut||'').replace(/"/g,'&quot;')+'" placeholder="Optional: booked flight/train #, date, notes" />'
@@ -448,7 +448,7 @@ function _tbEntryExitFieldsHtml(){
 function _tbEntryExitModesOnlyHtml(){
   return ''
     +'<div class="tb-field" style="margin-top:20px;"><label>How you\u2019re arriving</label>'
-    +'<div style="font-size:10px;color:#888;margin-top:2px;margin-bottom:4px;">The specific city comes after you\u2019ve picked places \u2014 it\u2019ll be clearer then.</div>'
+    +'<div style="font-size:10px;color:var(--c-ink-3);margin-top:2px;margin-bottom:4px;">The specific city comes after you\u2019ve picked places \u2014 it\u2019ll be clearer then.</div>'
     + _tbModePillsHtml("entryMode")
     +'</div>'
     // Round FQ: between-mode pill removed. The geographic-affordance
@@ -458,7 +458,7 @@ function _tbEntryExitModesOnlyHtml(){
     // up front. See the picker banner in renderCandidateCards and
     // the trip-view banner in drawTripMode.
     +'<div class="tb-field"><label>How you\u2019re leaving</label>'
-    +'<div style="font-size:10px;color:#888;margin-top:2px;margin-bottom:4px;">Entry and exit can differ \u2014 that\u2019s fine, and shapes the direction.</div>'
+    +'<div style="font-size:10px;color:var(--c-ink-3);margin-top:2px;margin-bottom:4px;">Entry and exit can differ \u2014 that\u2019s fine, and shapes the direction.</div>'
     + _tbModePillsHtml("exitMode")
     +'</div>';
 }
@@ -547,7 +547,7 @@ function _legacyRenderTripBrief(){
   var _prevScroll = ov.scrollTop || 0;
   var _preserve = !!_tb._preserveScrollOnce;
   _tb._preserveScrollOnce = false;
-  ov.style.cssText="position:fixed;inset:0;background:#fafafa;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
+  ov.style.cssText="position:fixed;inset:0;background:var(--c-panel);z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
   // Reset scroll to top on render (fresh view), then attach the scroll hint
   setTimeout(function(){ ov.scrollTop = _preserve ? _prevScroll : 0; attachScrollHint(ov); }, 0);
   ov.innerHTML='<div class="tb-header">'
@@ -555,7 +555,7 @@ function _legacyRenderTripBrief(){
     +'<div class="tb-title">Tell Max about your trip</div>'
     +'</div>'
     +'<div class="tb-body">'
-    +'<p style="margin:0 0 8px;font-size:12px;color:#555;line-height:1.65;">How do you want to travel through it? Fill in what matters, skip what doesn\u2019t.</p>'
+    +'<p style="margin:0 0 8px;font-size:12px;color:var(--c-ink-2);line-height:1.65;">How do you want to travel through it? Fill in what matters, skip what doesn\u2019t.</p>'
 
     // Round DM: Brief Step 2 rebuilt around clearer contracts. Section 1
     // (required): dates + travelers count + with-kids. Sections 2/3
@@ -582,14 +582,14 @@ function _legacyRenderTripBrief(){
     + _tbSectionHead("How you'd like to get around in " + (_tb.region || "the region"))
     +'<div class="tb-field">'
     +'<input id="tb-transport" value="'+(_tb.transport||"").replace(/"/g,"&quot;")+'" placeholder="e.g. Trains and walking only \u2014 no rental car. Swiss Travel Pass." oninput="_tb.transport=this.value;" />'
-    +'<div style="font-size:10.5px;color:#b05820;font-style:italic;margin-top:4px;line-height:1.55;">This shapes everything. Easy to skip even though you wouldn\u2019t want to \u2014 most travelers default to whatever\u2019s familiar from home, but in a different country, \u201cI\u2019ve always done it this way\u201d can limit your experience.</div>'
+    +'<div style="font-size:10.5px;color:var(--c-warn);font-style:italic;margin-top:4px;line-height:1.55;">This shapes everything. Easy to skip even though you wouldn\u2019t want to \u2014 most travelers default to whatever\u2019s familiar from home, but in a different country, \u201cI\u2019ve always done it this way\u201d can limit your experience.</div>'
     +'</div>'
 
     // 3. WHERE YOU STAY (high consequence)
     + _tbSectionHead("Where you'd like to stay")
     +'<div class="tb-field">'
     +'<textarea id="tb-accommodation" rows="2" placeholder="e.g. Small family hotels, en suite required, no hostels, no shared bathrooms." oninput="_tb.accommodation=this.value;" style="resize:vertical;min-height:54px;">'+(_tb.accommodation||"").replace(/</g,"&lt;").replace(/>/g,"&gt;")+'</textarea>'
-    +'<div style="font-size:10.5px;color:#b05820;font-style:italic;margin-top:4px;line-height:1.55;">Same \u2014 be explicit even if it feels obvious. \u201cHotel is fine\u201d doesn\u2019t tell Max whether you need air conditioning or whether shared bathrooms would ruin the trip.</div>'
+    +'<div style="font-size:10.5px;color:var(--c-warn);font-style:italic;margin-top:4px;line-height:1.55;">Same \u2014 be explicit even if it feels obvious. \u201cHotel is fine\u201d doesn\u2019t tell Max whether you need air conditioning or whether shared bathrooms would ruin the trip.</div>'
     +'</div>'
 
     // visual divider
@@ -607,7 +607,7 @@ function _legacyRenderTripBrief(){
     //   3. Mobility chips (structured \u2014 heavily shapes picker output)
     //   4. Pace (hours/day + max big sights)
     + _tbSectionHead("How do you travel?", "Optional. What you\u2019d skip, what you wouldn\u2019t miss, prior trips, things that just matter \u2014 in your own words. Mobility and pace get their own structured fields below since they shape what Max suggests.")
-    +'<div class="tb-field"><textarea id="tb-about-trip" rows="5" placeholder="e.g. Couple in our 60s, both fit but slow paced \u2014 rather linger in one place than rush. First trip to this region. Would skip a famous-but-touristy day-trip to keep an extra night somewhere quieter; wouldn\u2019t skip a once-in-a-lifetime view." oninput="_tb.aboutTrip=this.value;">'+((_tb.aboutTrip||"").replace(/</g,"&lt;"))+'</textarea><div style="font-size:10px;color:#aaa;margin-top:4px;line-height:1.5;">The more you share, the better the suggestions. Max reads this as prose \u2014 write naturally.</div></div>'
+    +'<div class="tb-field"><textarea id="tb-about-trip" rows="5" placeholder="e.g. Couple in our 60s, both fit but slow paced \u2014 rather linger in one place than rush. First trip to this region. Would skip a famous-but-touristy day-trip to keep an extra night somewhere quieter; wouldn\u2019t skip a once-in-a-lifetime view." oninput="_tb.aboutTrip=this.value;">'+((_tb.aboutTrip||"").replace(/</g,"&lt;"))+'</textarea><div style="font-size:10px;color:var(--c-ink-4);margin-top:4px;line-height:1.5;">The more you share, the better the suggestions. Max reads this as prose \u2014 write naturally.</div></div>'
 
     // v306: Mobility \u2014 resurrected from the legacy _tb.physicalAbility
     // field (engine still reads it via _briefPersonalContext at line
@@ -638,19 +638,19 @@ function _legacyRenderTripBrief(){
     +'<div class="tb-field"><label>Pace \u2014 typical hours of sightseeing per day</label>'
     +'<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-top:6px;">'
     +'<div style="display:flex;align-items:center;gap:8px;">'
-    +'<label style="font-size:10px;color:#888;font-weight:500;text-transform:none;letter-spacing:0;margin:0;">Hours/day:</label>'
-    +'<input id="tb-hours-per-day" type="number" min="1" max="12" inputmode="numeric" value="'+((_tb.hoursPerDay||_defaultHoursPerDay())+"")+'" oninput="_tb.hoursPerDay=this.value;" style="width:72px;padding:5px 8px;font-size:12px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'<label style="font-size:10px;color:var(--c-ink-3);font-weight:500;text-transform:none;letter-spacing:0;margin:0;">Hours/day:</label>'
+    +'<input id="tb-hours-per-day" type="number" min="1" max="12" inputmode="numeric" value="'+((_tb.hoursPerDay||_defaultHoursPerDay())+"")+'" oninput="_tb.hoursPerDay=this.value;" style="width:72px;padding:5px 8px;font-size:12px;border:1px solid var(--c-border);border-radius:6px;font-family:inherit;" />'
     +'</div>'
     +'<div style="display:flex;align-items:center;gap:8px;">'
-    +'<label style="font-size:10px;color:#888;font-weight:500;text-transform:none;letter-spacing:0;margin:0;">Max \u201cbig\u201d sights (2+ hrs) per day:</label>'
-    +'<input id="tb-max-big-sights" type="number" min="1" max="6" inputmode="numeric" value="'+((_tb.maxBigSightsPerDay||_defaultMaxBigSightsPerDay())+"")+'" oninput="_tb.maxBigSightsPerDay=this.value;" style="width:72px;padding:5px 8px;font-size:12px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'<label style="font-size:10px;color:var(--c-ink-3);font-weight:500;text-transform:none;letter-spacing:0;margin:0;">Max \u201cbig\u201d sights (2+ hrs) per day:</label>'
+    +'<input id="tb-max-big-sights" type="number" min="1" max="6" inputmode="numeric" value="'+((_tb.maxBigSightsPerDay||_defaultMaxBigSightsPerDay())+"")+'" oninput="_tb.maxBigSightsPerDay=this.value;" style="width:72px;padding:5px 8px;font-size:12px;border:1px solid var(--c-border);border-radius:6px;font-family:inherit;" />'
     +'</div>'
     +'</div>'
     +'<div style="font-size:10.5px;color:#777;margin-top:8px;line-height:1.6;">'
     +'Max will use about <strong>'+((_tb.hoursPerDay||_defaultHoursPerDay())+"")+' hrs</strong> of sightseeing on a full day (lighter on travel days, fuller in the middle), and won\u2019t schedule more than '
     +'<strong>'+((_tb.maxBigSightsPerDay||_defaultMaxBigSightsPerDay())+"")+'</strong> big sight'+((_tb.maxBigSightsPerDay||_defaultMaxBigSightsPerDay())==1?"":"s")+' per day so a single day doesn\u2019t turn into a forced march.'
     +'</div>'
-    +'<div style="font-size:10.5px;color:#b05820;font-style:italic;margin-top:6px;line-height:1.55;">'
+    +'<div style="font-size:10.5px;color:var(--c-warn);font-style:italic;margin-top:6px;line-height:1.55;">'
     +'A note on duration: Max\u2019s per-sight time estimates are LLM best-guesses, not measured data. They assume a committed traveler. If you\u2019re a slower museum-goer, expect to fit less per day; if you\u2019re a look-and-go type, you may want to bump the hours up.'
     +'</div>'
     +'</div>'
@@ -667,11 +667,11 @@ function _legacyRenderTripBrief(){
     +'<div class="tb-footer">'
     +'<div style="display:flex;gap:10px;align-items:stretch;">'
     +'<button class="tb-btn-primary" onclick="goToTripStep2()" style="flex:1;width:auto;">Ask Max to suggest places \u2192</button>'
-    +'<button class="tb-btn-paste" onclick="_pasteListFromBrief()" style="flex:1;font-size:12px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:6px;padding:10px;cursor:pointer;font-family:inherit;">Add your places \u2192</button>'
+    +'<button class="tb-btn-paste" onclick="_pasteListFromBrief()" style="flex:1;font-size:12px;font-weight:600;color:var(--c-primary);background:var(--c-bg);border:1px solid var(--c-border-blue);border-radius:6px;padding:10px;cursor:pointer;font-family:inherit;">Add your places \u2192</button>'
     +'</div>'
     +'<div style="display:flex;justify-content:space-between;margin-top:8px;">'
     +'<div class="tb-btn-back" onclick="renderTripStep1()">\u2190 Back</div>'
-    +'<div style="font-size:10px;color:#aaa;cursor:pointer;" onclick="showBriefApiKeyForm()">\ud83d\udd11 Set API key</div>'
+    +'<div style="font-size:10px;color:var(--c-ink-4);cursor:pointer;" onclick="showBriefApiKeyForm()">\ud83d\udd11 Set API key</div>'
     +'</div>'
     +'</div>';
 }
@@ -819,7 +819,7 @@ function goToTripStep2(){
 
 function renderTripStep2(){
   var ov=g("trip-brief-overlay"); ov.className="tb-overlay";
-  ov.style.cssText="position:fixed;inset:0;background:#fafafa;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
+  ov.style.cssText="position:fixed;inset:0;background:var(--c-panel);z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
 
   // Sentence starters
   var sentences = [
@@ -859,16 +859,16 @@ function renderTripStep2(){
     +'<div class="tb-field" id="gradient-field" style="'+(drivers.indexOf('different')>-1?'':'display:none;')+'">'
     +'<label>What does \u201cdifferent\u201d mean for you right now?</label>'
     +'<textarea id="tb-gradient" rows="3" placeholder="e.g. My life is loud and busy. I want quiet, slow, and warm. Not a beach resort — something real but simple.">'+((_tb.gradient)||'')+'</textarea>'
-    +'<div style="font-size:10px;color:#aaa;margin-top:4px;">Max uses this to find candidates at the right distance from your current life — you pick what fits and add what’s missing.</div></div>'
+    +'<div style="font-size:10px;color:var(--c-ink-4);margin-top:4px;">Max uses this to find candidates at the right distance from your current life — you pick what fits and add what’s missing.</div></div>'
 
     +'<div class="tb-field"><label>How familiar are you with this part of the world?</label>'
     +'<div style="display:flex;gap:6px;margin-top:5px;">'+famHtml+'</div></div>'
 
-    +'<div class="tb-field"><label>Tell Max more <span style="font-weight:400;color:#aaa;">(optional)</span></label>'
+    +'<div class="tb-field"><label>Tell Max more <span style="font-weight:400;color:var(--c-ink-4);">(optional)</span></label>'
     +'<textarea id="tb-intent" rows="3" placeholder="e.g. Going with my partner for three weeks. Want a mix — big mountain scenery but also a city with real cultural depth.">'+(_tb.intent||'')+'</textarea>'
-    +'<div style="font-size:10px;color:#aaa;margin-top:4px;">You don’t need to have this figured out. Max will help you explore it.</div></div>'
+    +'<div style="font-size:10px;color:var(--c-ink-4);margin-top:4px;">You don’t need to have this figured out. Max will help you explore it.</div></div>'
 
-    +'<div class="tb-field"><label>Things you can’t miss <span style="font-weight:400;color:#aaa;">(optional)</span></label>'
+    +'<div class="tb-field"><label>Things you can’t miss <span style="font-weight:400;color:var(--c-ink-4);">(optional)</span></label>'
     +'<input id="tb-anchors" value="'+(_tb.anchors||'')+'" placeholder="e.g. Vienna Philharmonic, Glacier Express…" /></div>'
 
     +'</div>'
@@ -876,7 +876,7 @@ function renderTripStep2(){
     +'<button class="tb-btn-primary" onclick="saveStep2AndProceed()">Places to think about \u2192</button>'
     +'<div style="display:flex;justify-content:space-between;margin-top:8px;">'
     +'<div class="tb-btn-back" onclick="renderTripBrief()">\u2190 Back</div>'
-    +'<div style="font-size:10px;color:#aaa;cursor:pointer;" onclick="showBriefApiKeyForm()">\ud83d\udd11 Set API key</div>'
+    +'<div style="font-size:10px;color:var(--c-ink-4);cursor:pointer;" onclick="showBriefApiKeyForm()">\ud83d\udd11 Set API key</div>'
     +'</div>'
     +'</div>';
 }
@@ -976,7 +976,7 @@ if (typeof globalThis !== "undefined") {
 
 function openGradientConversation(){
   var ov = g("trip-brief-overlay");
-  ov.style.cssText = "position:fixed;inset:0;background:#fafafa;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
+  ov.style.cssText = "position:fixed;inset:0;background:var(--c-panel);z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
   ov.innerHTML = '<div class="tb-header">'
     +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Before we find places</div></div></div>'
     +'<div class="tb-title">Let\u2019s find the right distance</div>'

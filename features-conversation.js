@@ -126,7 +126,7 @@ function renderMaxNoteCard(dest, container){
   body.id = "max-note-body-"+dest.id;
 
   var refreshBtn = document.createElement("button");
-  refreshBtn.style.cssText = "margin-top:8px;font-size:10px;color:#888;background:none;border:none;cursor:pointer;padding:2px 0;font-family:inherit;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px;";
+  refreshBtn.style.cssText = "margin-top:8px;font-size:10px;color:var(--c-ink-3);background:none;border:none;cursor:pointer;padding:2px 0;font-family:inherit;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px;";
   refreshBtn.textContent = "another thought \u2197";
   refreshBtn.onclick = function(){ generateMaxNote(dest, true); };
 
@@ -352,9 +352,9 @@ function togMov(sid,dayId,destId,event,isEvening){
   var dest=getDest(destId);if(!dest)return;
 
   var popup=document.createElement("div"); popup.id="mp-"+sid;
-  popup.style.cssText="position:fixed;z-index:9999;background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.18);padding:6px 0;min-width:160px;";
+  popup.style.cssText="position:fixed;z-index:9999;background:var(--c-bg);border:1px solid var(--c-border);border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.18);padding:6px 0;min-width:160px;";
 
-  var phdr=document.createElement("div"); phdr.style.cssText="font-size:9px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#bbb;padding:4px 14px 5px;border-bottom:1px solid #f0f0f0;margin-bottom:3px;";
+  var phdr=document.createElement("div"); phdr.style.cssText="font-size:9px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#bbb;padding:4px 14px 5px;border-bottom:1px solid var(--c-border-4);margin-bottom:3px;";
   phdr.textContent="Move"; popup.appendChild(phdr);
 
   // Slot toggle
@@ -369,7 +369,7 @@ function togMov(sid,dayId,destId,event,isEvening){
   });
 
   // Day separator
-  var s1=document.createElement("div");s1.style.cssText="height:1px;background:#f0f0f0;margin:3px 0 2px;";popup.appendChild(s1);
+  var s1=document.createElement("div");s1.style.cssText="height:1px;background:var(--c-panel-3);margin:3px 0 2px;";popup.appendChild(s1);
   var ds=document.createElement("div");ds.style.cssText="font-size:9px;color:#bbb;padding:2px 14px 3px;letter-spacing:.05em;text-transform:uppercase;";ds.textContent="Day";popup.appendChild(ds);
 
   dest.days.forEach(function(day){
@@ -383,10 +383,10 @@ function togMov(sid,dayId,destId,event,isEvening){
     popup.appendChild(opt);
   });
 
-  var s2=document.createElement("div");s2.style.cssText="height:1px;background:#f0f0f0;margin:3px 0;";popup.appendChild(s2);
+  var s2=document.createElement("div");s2.style.cssText="height:1px;background:var(--c-panel-3);margin:3px 0;";popup.appendChild(s2);
   [{key:"later",lbl:"\u2192 Later"},{key:"maybe",lbl:"\u2192 Maybe"}].forEach(function(bucket){
     var opt=document.createElement("div");
-    opt.style.cssText="padding:6px 14px;font-size:11px;color:#888;cursor:pointer;";
+    opt.style.cssText="padding:6px 14px;font-size:11px;color:var(--c-ink-3);cursor:pointer;";
     opt.textContent=bucket.lbl;
     opt.onmouseover=function(){opt.style.background="#f5f5f5";};opt.onmouseout=function(){opt.style.background="";};
     (function(bk){opt.onclick=function(e){
@@ -657,16 +657,16 @@ function _showDayTripConversionToast(dest, sightItem, dayId, distKm){
   if (existing) existing.remove();
   var toast = document.createElement("div");
   toast.id = "dt-convert-toast";
-  toast.style.cssText = "position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#fff;border:1px solid #d8c4e8;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.12);padding:14px 16px;font-size:12px;line-height:1.5;color:#333;max-width:420px;z-index:9999;font-family:inherit;";
+  toast.style.cssText = "position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--c-bg);border:1px solid #d8c4e8;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.12);padding:14px 16px;font-size:12px;line-height:1.5;color:#333;max-width:420px;z-index:9999;font-family:inherit;";
   toast.innerHTML = '<div style="margin-bottom:10px;"><strong>' + sightItem.n + '</strong> is ' + _fmtDistance(distKm) + ' from ' + dest.place + ' — that\'s usually day-trip distance.</div>';
   var btnRow = document.createElement("div");
   btnRow.style.cssText = "display:flex;gap:8px;justify-content:flex-end;";
   var convertBtn = document.createElement("button");
   convertBtn.textContent = "Make it a day trip";
-  convertBtn.style.cssText = "background:#5b3f8f;color:#fff;border:none;padding:6px 12px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;";
+  convertBtn.style.cssText = "background:var(--c-accent);color:var(--c-on-dark);border:none;padding:6px 12px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;";
   var keepBtn = document.createElement("button");
   keepBtn.textContent = "Keep as sight";
-  keepBtn.style.cssText = "background:#fff;color:#666;border:1px solid #ccc;padding:6px 12px;border-radius:5px;font-size:11px;font-weight:500;cursor:pointer;font-family:inherit;";
+  keepBtn.style.cssText = "background:var(--c-bg);color:#666;border:1px solid var(--c-border-strong);padding:6px 12px;border-radius:5px;font-size:11px;font-weight:500;cursor:pointer;font-family:inherit;";
   convertBtn.onclick = function(){
     // Remove the sight from its day.
     var freshDest = getDest(dest.id);
@@ -841,16 +841,16 @@ function showAskMaxKeyModal(opts) {
   ov.id = "askmax-key-overlay";
   ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:11950;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto;";
   var box = document.createElement("div");
-  box.style.cssText = "background:#fff;border-radius:12px;width:560px;max-width:100%;max-height:calc(100vh - 48px);overflow:auto;padding:24px 26px;box-shadow:0 12px 40px rgba(0,0,0,.25);";
+  box.style.cssText = "background:var(--c-bg);border-radius:12px;width:560px;max-width:100%;max-height:calc(100vh - 48px);overflow:auto;padding:24px 26px;box-shadow:0 12px 40px rgba(0,0,0,.25);";
 
   var introBlock = mode === "intro"
     ? '<div style="font-size:13px;color:#444;line-height:1.6;margin-bottom:16px;">' +
         '<p style="margin:0 0 10px;"><strong>Max\'s chat needs your own Anthropic API key.</strong></p>' +
         '<p style="margin:0 0 10px;">Everything else in Max — picker suggestions, candidate cities, calendar export — runs on a shared budget. Chat is open-ended, so we ask you to bring your own key for that one feature. Your key stays in your browser only and is never sent to Max\'s servers.</p>' +
         '<div style="background:#eef5fb;border:1px solid #c8dff8;border-radius:6px;padding:12px 14px;margin:12px 0;">' +
-          '<div style="font-size:11px;font-weight:700;color:#1a5fa8;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">Why use Claude inside Max instead of in a separate tab?</div>' +
+          '<div style="font-size:11px;font-weight:700;color:var(--c-primary);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">Why use Claude inside Max instead of in a separate tab?</div>' +
           '<div style="font-size:12.5px;color:#333;line-height:1.6;">' +
-            'You can absolutely keep using <a href="https://claude.ai" target="_blank" rel="noopener noreferrer" style="color:#1a5fa8;">claude.ai</a> (or ChatGPT, or any other AI) on its own. Using it <em>inside Max</em> just adds three things:' +
+            'You can absolutely keep using <a href="https://claude.ai" target="_blank" rel="noopener noreferrer" style="color:var(--c-primary);">claude.ai</a> (or ChatGPT, or any other AI) on its own. Using it <em>inside Max</em> just adds three things:' +
             '<ol style="margin:6px 0 0;padding-left:20px;">' +
               '<li><b>It already knows your trip.</b> Your destinations, dates, lodging, what\'s planned per day, the weather forecast — all auto-loaded into the conversation. No re-explaining "I\'m going to Iceland May 10–13, three nights in Reykjavik then…" every single time.</li>' +
               '<li><b>The conversation stays with the trip.</b> Open it tomorrow, next week, on your phone — the same thread is right where you left it. Generic chat windows lose this.</li>' +
@@ -866,28 +866,28 @@ function showAskMaxKeyModal(opts) {
 
   box.innerHTML =
     '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">' +
-      '<div style="width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#1a5fa8,#2a7a4e);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;">🔑</div>' +
+      '<div style="width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#1a5fa8,#2a7a4e);color:var(--c-on-dark);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;">🔑</div>' +
       '<div style="font-size:15px;font-weight:700;">' + (mode === "edit" ? "Update your chat API key" : "Set up Max chat") + '</div>' +
     '</div>' +
     introBlock +
     (mode === "intro"
       ? '<div style="background:#f7f9fc;border:1px solid #e2e7ee;border-radius:7px;padding:14px 16px;margin-bottom:16px;">' +
-          '<div style="font-size:11px;font-weight:700;color:#1a5fa8;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">How to get a key (2 minutes)</div>' +
+          '<div style="font-size:11px;font-weight:700;color:var(--c-primary);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">How to get a key (2 minutes)</div>' +
           '<ol style="margin:0;padding-left:20px;font-size:12.5px;color:#333;line-height:1.7;">' +
-            '<li>Open <a href="https://console.anthropic.com/" target="_blank" rel="noopener noreferrer" style="color:#1a5fa8;font-weight:600;">console.anthropic.com</a> and sign up (or sign in if you already have a developer account — different from claude.ai).</li>' +
-            '<li>Go to <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer" style="color:#1a5fa8;font-weight:600;">Settings → API Keys</a>.</li>' +
-            '<li>Click <b>Create Key</b>. Name it something like "Max chat". Copy the long <code style="background:#fff;padding:1px 5px;border-radius:3px;border:1px solid #ddd;font-size:11px;">sk-ant-…</code> string immediately — you can\'t view it again.</li>' +
-            '<li>You may need to add a payment method on the <a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noopener noreferrer" style="color:#1a5fa8;font-weight:600;">Billing tab</a> for the key to work. Anthropic gives you free credits to start.</li>' +
+            '<li>Open <a href="https://console.anthropic.com/" target="_blank" rel="noopener noreferrer" style="color:var(--c-primary);font-weight:600;">console.anthropic.com</a> and sign up (or sign in if you already have a developer account — different from claude.ai).</li>' +
+            '<li>Go to <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer" style="color:var(--c-primary);font-weight:600;">Settings → API Keys</a>.</li>' +
+            '<li>Click <b>Create Key</b>. Name it something like "Max chat". Copy the long <code style="background:var(--c-bg);padding:1px 5px;border-radius:3px;border:1px solid var(--c-border);font-size:11px;">sk-ant-…</code> string immediately — you can\'t view it again.</li>' +
+            '<li>You may need to add a payment method on the <a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noopener noreferrer" style="color:var(--c-primary);font-weight:600;">Billing tab</a> for the key to work. Anthropic gives you free credits to start.</li>' +
             '<li>Paste the key below.</li>' +
           '</ol>' +
         '</div>'
       : '') +
     '<label style="display:block;font-size:11px;font-weight:700;color:#444;margin-bottom:6px;">Anthropic API key</label>' +
-    '<input id="askmax-key-input" type="password" placeholder="sk-ant-…" value="' + (_apiKey || "").replace(/"/g, "&quot;") + '" style="width:100%;font-size:12px;padding:9px 11px;border:1px solid #ccc;border-radius:5px;font-family:monospace;box-sizing:border-box;margin-bottom:10px;" />' +
-    '<div id="askmax-key-msg" style="font-size:11px;color:#888;min-height:14px;margin-bottom:12px;"></div>' +
+    '<input id="askmax-key-input" type="password" placeholder="sk-ant-…" value="' + (_apiKey || "").replace(/"/g, "&quot;") + '" style="width:100%;font-size:12px;padding:9px 11px;border:1px solid var(--c-border-strong);border-radius:5px;font-family:monospace;box-sizing:border-box;margin-bottom:10px;" />' +
+    '<div id="askmax-key-msg" style="font-size:11px;color:var(--c-ink-3);min-height:14px;margin-bottom:12px;"></div>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end;">' +
-      '<button id="askmax-key-cancel" style="padding:9px 14px;font-size:12px;font-weight:600;background:#fff;color:#666;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;">Cancel</button>' +
-      '<button id="askmax-key-save" style="padding:9px 18px;font-size:12px;font-weight:700;background:#1a5fa8;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Save & continue →</button>' +
+      '<button id="askmax-key-cancel" style="padding:9px 14px;font-size:12px;font-weight:600;background:var(--c-bg);color:#666;border:1px solid var(--c-border);border-radius:5px;cursor:pointer;font-family:inherit;">Cancel</button>' +
+      '<button id="askmax-key-save" style="padding:9px 18px;font-size:12px;font-weight:700;background:var(--c-primary);color:var(--c-on-dark);border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Save & continue →</button>' +
     '</div>';
   ov.appendChild(box);
   document.body.appendChild(ov);
@@ -986,33 +986,33 @@ function showAskMaxModal() {
   ov.id = "ask-max-overlay";
   ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:11900;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto;";
   var box = document.createElement("div");
-  box.style.cssText = "background:#fff;border-radius:12px;width:680px;max-width:100%;height:calc(100vh - 48px);max-height:760px;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,.25);";
+  box.style.cssText = "background:var(--c-bg);border-radius:12px;width:680px;max-width:100%;height:calc(100vh - 48px);max-height:760px;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,.25);";
   box.innerHTML =
     // Header — title + model picker + close.
-    '<div style="padding:14px 18px;border-bottom:1px solid #eee;display:flex;align-items:center;gap:10px;flex-shrink:0;">' +
-      '<div style="width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#1a5fa8,#2a7a4e);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;">💬</div>' +
+    '<div style="padding:14px 18px;border-bottom:1px solid var(--c-border-3);display:flex;align-items:center;gap:10px;flex-shrink:0;">' +
+      '<div style="width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#1a5fa8,#2a7a4e);color:var(--c-on-dark);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;">💬</div>' +
       '<div style="flex:1;min-width:0;">' +
         '<div style="font-size:14px;font-weight:700;color:#222;">Ask about this trip</div>' +
-        '<div id="askmax-context-line" style="font-size:11px;color:#888;line-height:1.3;"></div>' +
+        '<div id="askmax-context-line" style="font-size:11px;color:var(--c-ink-3);line-height:1.3;"></div>' +
       '</div>' +
-      '<select id="askmax-model" style="font-size:11.5px;font-weight:600;padding:5px 8px;border:1px solid #ccc;border-radius:5px;font-family:inherit;background:#fff;cursor:pointer;">' +
+      '<select id="askmax-model" style="font-size:11.5px;font-weight:600;padding:5px 8px;border:1px solid var(--c-border-strong);border-radius:5px;font-family:inherit;background:var(--c-bg);cursor:pointer;">' +
         '<option value="claude" selected>Claude (Anthropic)</option>' +
         '<option value="openai" disabled>GPT-4 (set OPENAI_API_KEY) — coming soon</option>' +
         '<option value="gemini" disabled>Gemini (set GEMINI_API_KEY) — coming soon</option>' +
       '</select>' +
-      '<button id="askmax-close" style="margin-left:6px;padding:6px 10px;font-size:11.5px;background:#fff;color:#666;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;">Close</button>' +
+      '<button id="askmax-close" style="margin-left:6px;padding:6px 10px;font-size:11.5px;background:var(--c-bg);color:#666;border:1px solid var(--c-border);border-radius:5px;cursor:pointer;font-family:inherit;">Close</button>' +
     '</div>' +
     // Conversation pane.
-    '<div id="askmax-pane" style="flex:1;overflow-y:auto;padding:16px 18px;background:#fafafa;display:flex;flex-direction:column;gap:10px;"></div>' +
+    '<div id="askmax-pane" style="flex:1;overflow-y:auto;padding:16px 18px;background:var(--c-panel);display:flex;flex-direction:column;gap:10px;"></div>' +
     // Input row.
-    '<div style="padding:12px 18px;border-top:1px solid #eee;flex-shrink:0;background:#fff;">' +
+    '<div style="padding:12px 18px;border-top:1px solid var(--c-border-3);flex-shrink:0;background:var(--c-bg);">' +
       '<div style="display:flex;gap:8px;align-items:flex-end;">' +
-        '<textarea id="askmax-input" placeholder="Ask anything about this trip — weather, places to eat, logistics, what to pack…" style="flex:1;font-size:13px;padding:9px 11px;border:1px solid #ccc;border-radius:6px;font-family:-apple-system,sans-serif;resize:none;min-height:40px;max-height:140px;line-height:1.4;box-sizing:border-box;"></textarea>' +
-        '<button id="askmax-send" style="padding:9px 16px;font-size:12.5px;font-weight:700;background:#1a5fa8;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;flex-shrink:0;height:40px;">Send</button>' +
+        '<textarea id="askmax-input" placeholder="Ask anything about this trip — weather, places to eat, logistics, what to pack…" style="flex:1;font-size:13px;padding:9px 11px;border:1px solid var(--c-border-strong);border-radius:6px;font-family:-apple-system,sans-serif;resize:none;min-height:40px;max-height:140px;line-height:1.4;box-sizing:border-box;"></textarea>' +
+        '<button id="askmax-send" style="padding:9px 16px;font-size:12.5px;font-weight:700;background:var(--c-primary);color:var(--c-on-dark);border:none;border-radius:6px;cursor:pointer;font-family:inherit;flex-shrink:0;height:40px;">Send</button>' +
       '</div>' +
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;gap:10px;flex-wrap:wrap;">' +
         '<div style="font-size:10px;color:#999;">Cmd/Ctrl+Enter to send · Shift+Enter for newline · <span id="askmax-keystate"></span></div>' +
-        '<button id="askmax-clear" style="font-size:10.5px;background:none;color:#888;border:none;cursor:pointer;font-family:inherit;text-decoration:underline;">Clear conversation</button>' +
+        '<button id="askmax-clear" style="font-size:10.5px;background:none;color:var(--c-ink-3);border:none;cursor:pointer;font-family:inherit;text-decoration:underline;">Clear conversation</button>' +
       '</div>' +
     '</div>';
   ov.appendChild(box);
@@ -1089,7 +1089,7 @@ function showAskMaxModal() {
   // the key in case the user wants to rotate or replace.
   var keystateEl = document.getElementById("askmax-keystate");
   if (keystateEl) {
-    keystateEl.innerHTML = 'Powered by <a href="#" id="askmax-keystate-link" style="color:#1a5fa8;text-decoration:none;font-weight:600;">your Anthropic key ↗</a>';
+    keystateEl.innerHTML = 'Powered by <a href="#" id="askmax-keystate-link" style="color:var(--c-primary);text-decoration:none;font-weight:600;">your Anthropic key ↗</a>';
     var link = document.getElementById("askmax-keystate-link");
     if (link) {
       link.onclick = function(e){
@@ -1107,7 +1107,7 @@ function _renderAskMaxPane() {
   if (!pane) return;
   var msgs = _askModalState.messages || [];
   if (!msgs.length && !_askModalState.loading) {
-    pane.innerHTML = '<div style="text-align:center;padding:40px 20px;color:#888;">' +
+    pane.innerHTML = '<div style="text-align:center;padding:40px 20px;color:var(--c-ink-3);">' +
       '<div style="font-size:30px;margin-bottom:10px;">💬</div>' +
       '<div style="font-size:13px;font-weight:600;color:#444;margin-bottom:6px;">Ask anything about this trip</div>' +
       '<div style="font-size:11.5px;line-height:1.5;max-width:380px;margin:0 auto;">Try: "What\'s a good breakfast spot near my Reykjavik hotel?" · "Will I be cold in May?" · "Translate \'where\'s the bathroom\' to Icelandic" · "What should I pack for the trip?"</div>' +
@@ -1127,7 +1127,7 @@ function _renderAskMaxPane() {
     bubble.textContent = m.content || "";
     row.appendChild(bubble);
     var meta = document.createElement("div");
-    meta.style.cssText = "font-size:9.5px;color:#aaa;margin-top:3px;text-align:" + (isUser ? "right" : "left") + ";";
+    meta.style.cssText = "font-size:9.5px;color:var(--c-ink-4);margin-top:3px;text-align:" + (isUser ? "right" : "left") + ";";
     var when = m.ts ? new Date(m.ts).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"}) : "";
     meta.textContent = (isUser ? "you" : (m.model || "assistant")) + (when ? " · " + when : "");
     row.appendChild(meta);
@@ -1136,7 +1136,7 @@ function _renderAskMaxPane() {
   if (_askModalState.loading) {
     var thinking = document.createElement("div");
     thinking.style.cssText = "max-width:84%;align-self:flex-start;";
-    thinking.innerHTML = '<div style="padding:9px 13px;border-radius:14px;font-size:13px;background:#fff;border:1px solid #e2e6ea;color:#888;border-bottom-left-radius:4px;">Thinking…</div>';
+    thinking.innerHTML = '<div style="padding:9px 13px;border-radius:14px;font-size:13px;background:var(--c-bg);border:1px solid #e2e6ea;color:var(--c-ink-3);border-bottom-left-radius:4px;">Thinking…</div>';
     pane.appendChild(thinking);
   }
   pane.scrollTop = pane.scrollHeight;
@@ -1295,23 +1295,23 @@ function showBatchImportBookingsModal() {
   ov.id = "batch-import-overlay";
   ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:11900;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto;";
   var box = document.createElement("div");
-  box.style.cssText = "background:#fff;border-radius:12px;width:720px;max-width:100%;max-height:calc(100vh - 48px);overflow:auto;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);";
+  box.style.cssText = "background:var(--c-bg);border-radius:12px;width:720px;max-width:100%;max-height:calc(100vh - 48px);overflow:auto;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);";
   box.innerHTML =
     '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">' +
-      '<div style="width:28px;height:28px;border-radius:50%;background:#1a5fa8;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;">📥</div>' +
+      '<div style="width:28px;height:28px;border-radius:50%;background:var(--c-primary);color:var(--c-on-dark);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;">📥</div>' +
       '<div style="font-size:14px;font-weight:700;">Import bookings (batch)</div>' +
     '</div>' +
-    '<div style="font-size:12px;color:#555;line-height:1.55;margin-bottom:10px;">' +
+    '<div style="font-size:12px;color:var(--c-ink-2);line-height:1.55;margin-bottom:10px;">' +
       'Paste multiple booking confirmations and cancellations in one go. Email dumps, CSV exports, anything booking-shaped works. ' +
       'Max splits them, routes each to the right destination, and (for cancellations) removes any existing booking on the trip that matches.' +
     '</div>' +
-    '<textarea id="bim-input" placeholder="Paste your bookings here…" style="width:100%;min-height:220px;padding:10px 12px;border:1px solid #ccc;border-radius:6px;font-family:-apple-system,sans-serif;font-size:12px;line-height:1.5;box-sizing:border-box;resize:vertical;"></textarea>' +
-    '<div id="bim-status" style="font-size:11px;color:#888;min-height:14px;margin:6px 0 10px;"></div>' +
+    '<textarea id="bim-input" placeholder="Paste your bookings here…" style="width:100%;min-height:220px;padding:10px 12px;border:1px solid var(--c-border-strong);border-radius:6px;font-family:-apple-system,sans-serif;font-size:12px;line-height:1.5;box-sizing:border-box;resize:vertical;"></textarea>' +
+    '<div id="bim-status" style="font-size:11px;color:var(--c-ink-3);min-height:14px;margin:6px 0 10px;"></div>' +
     '<div id="bim-preview" style="display:none;"></div>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">' +
-      '<button id="bim-cancel" style="padding:8px 14px;font-size:12px;font-weight:600;background:#fff;color:#666;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;">Cancel</button>' +
-      '<button id="bim-parse" style="padding:8px 16px;font-size:12px;font-weight:700;background:#1a5fa8;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Parse →</button>' +
-      '<button id="bim-save" style="display:none;padding:8px 16px;font-size:12px;font-weight:700;background:#1a5fa8;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Save all</button>' +
+      '<button id="bim-cancel" style="padding:8px 14px;font-size:12px;font-weight:600;background:var(--c-bg);color:#666;border:1px solid var(--c-border);border-radius:5px;cursor:pointer;font-family:inherit;">Cancel</button>' +
+      '<button id="bim-parse" style="padding:8px 16px;font-size:12px;font-weight:700;background:var(--c-primary);color:var(--c-on-dark);border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Parse →</button>' +
+      '<button id="bim-save" style="display:none;padding:8px 16px;font-size:12px;font-weight:700;background:var(--c-primary);color:var(--c-on-dark);border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Save all</button>' +
     '</div>';
   ov.appendChild(box);
   document.body.appendChild(ov);
@@ -1609,7 +1609,7 @@ function _renderBatchPreview(container, bookings) {
     titleBits.push(icon);
     titleBits.push("<strong>" + _bimEsc(b.name || b.carrier || "(unnamed)") + "</strong>");
     if (b.depDate) {
-      titleBits.push('<span style="color:#888;">' + _bimEsc(b.depDate) + (b.arrDate && b.arrDate !== b.depDate ? " → " + _bimEsc(b.arrDate) : "") + '</span>');
+      titleBits.push('<span style="color:var(--c-ink-3);">' + _bimEsc(b.depDate) + (b.arrDate && b.arrDate !== b.depDate ? " → " + _bimEsc(b.arrDate) : "") + '</span>');
     }
     if (b.isCancellation) {
       titleBits.push('<span style="background:#f0c060;color:#5a3a0a;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;letter-spacing:.04em;text-transform:uppercase;">cancel</span>');
@@ -1655,7 +1655,7 @@ function _renderBatchPreview(container, bookings) {
 
     var destDdlHtml = "";
     if (!b.isCancellation) {
-      destDdlHtml = '<select data-bim-dest="' + i + '" style="font-size:11px;padding:3px 6px;border:1px solid #ccc;border-radius:4px;font-family:inherit;">' +
+      destDdlHtml = '<select data-bim-dest="' + i + '" style="font-size:11px;padding:3px 6px;border:1px solid var(--c-border-strong);border-radius:4px;font-family:inherit;">' +
         allDests.map(function(d){
           var sel = (d.id === b._destId) ? " selected" : "";
           return '<option value="' + d.id + '"' + sel + '>' + _bimEsc(d.place || "?") + '</option>';
@@ -1672,7 +1672,7 @@ function _renderBatchPreview(container, bookings) {
         '<div style="flex:1;min-width:0;">' +
           '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;">' + titleBits.join(" ") + '</div>' +
           (b.address ? '<div style="font-size:11px;color:#666;margin-top:2px;">' + _bimEsc(b.address) + '</div>' : "") +
-          (b.confirmationNumber ? '<div style="font-size:11px;color:#888;margin-top:2px;">Confirmation: ' + _bimEsc(b.confirmationNumber) + '</div>' : "") +
+          (b.confirmationNumber ? '<div style="font-size:11px;color:var(--c-ink-3);margin-top:2px;">Confirmation: ' + _bimEsc(b.confirmationNumber) + '</div>' : "") +
           (matchInfo ? '<div style="font-size:11px;margin-top:4px;color:#5a3a0a;">' + matchInfo + '</div>' : "") +
         '</div>' +
         (destDdlHtml ? '<div style="flex-shrink:0;">' + destDdlHtml + '</div>' : '') +
@@ -2173,18 +2173,18 @@ function showPasteConfirmationModal(destId) {
   ov.id = "paste-confirm-overlay";
   ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:11900;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto;";
   var box = document.createElement("div");
-  box.style.cssText = "background:#fff;border-radius:12px;width:560px;max-width:100%;max-height:calc(100vh - 48px);overflow:auto;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);";
+  box.style.cssText = "background:var(--c-bg);border-radius:12px;width:560px;max-width:100%;max-height:calc(100vh - 48px);overflow:auto;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);";
   box.innerHTML =
     '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">' +
-      '<div style="width:28px;height:28px;border-radius:50%;background:#1a5fa8;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;">📋</div>' +
+      '<div style="width:28px;height:28px;border-radius:50%;background:var(--c-primary);color:var(--c-on-dark);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;">📋</div>' +
       '<div style="font-size:14px;font-weight:700;">Paste a booking confirmation</div>' +
     '</div>' +
-    '<div style="font-size:12px;color:#555;line-height:1.55;margin-bottom:10px;">Paste the email or confirmation page below. Max will pull out the carrier, dates, times, location, confirmation # — whatever it can find. You\'ll get a chance to review before saving.</div>' +
-    '<textarea id="pcf-input" placeholder="Paste your confirmation here…" style="width:100%;min-height:200px;padding:10px 12px;border:1px solid #ccc;border-radius:6px;font-family:-apple-system,sans-serif;font-size:12px;line-height:1.5;box-sizing:border-box;resize:vertical;"></textarea>' +
-    '<div id="pcf-status" style="font-size:11px;color:#888;min-height:14px;margin:6px 0 10px;"></div>' +
+    '<div style="font-size:12px;color:var(--c-ink-2);line-height:1.55;margin-bottom:10px;">Paste the email or confirmation page below. Max will pull out the carrier, dates, times, location, confirmation # — whatever it can find. You\'ll get a chance to review before saving.</div>' +
+    '<textarea id="pcf-input" placeholder="Paste your confirmation here…" style="width:100%;min-height:200px;padding:10px 12px;border:1px solid var(--c-border-strong);border-radius:6px;font-family:-apple-system,sans-serif;font-size:12px;line-height:1.5;box-sizing:border-box;resize:vertical;"></textarea>' +
+    '<div id="pcf-status" style="font-size:11px;color:var(--c-ink-3);min-height:14px;margin:6px 0 10px;"></div>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end;">' +
-      '<button id="pcf-cancel" style="padding:8px 14px;font-size:12px;font-weight:600;background:#fff;color:#666;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;">Cancel</button>' +
-      '<button id="pcf-parse" style="padding:8px 16px;font-size:12px;font-weight:700;background:#1a5fa8;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Parse →</button>' +
+      '<button id="pcf-cancel" style="padding:8px 14px;font-size:12px;font-weight:600;background:var(--c-bg);color:#666;border:1px solid var(--c-border);border-radius:5px;cursor:pointer;font-family:inherit;">Cancel</button>' +
+      '<button id="pcf-parse" style="padding:8px 16px;font-size:12px;font-weight:700;background:var(--c-primary);color:var(--c-on-dark);border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Parse →</button>' +
     '</div>';
   ov.appendChild(box);
   document.body.appendChild(ov);
@@ -3059,7 +3059,7 @@ function _showBookingPreviewModal(destId, p, originalText) {
   ov.id = "paste-confirm-preview-overlay";
   ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:11900;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto;";
   var box = document.createElement("div");
-  box.style.cssText = "background:#fff;border-radius:12px;width:600px;max-width:100%;max-height:calc(100vh - 48px);overflow:auto;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);";
+  box.style.cssText = "background:var(--c-bg);border-radius:12px;width:600px;max-width:100%;max-height:calc(100vh - 48px);overflow:auto;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);";
 
   // Determine arrival vs departure for transport types based on date
   // proximity to the destination's stay window.
@@ -3074,7 +3074,7 @@ function _showBookingPreviewModal(destId, p, originalText) {
   function inp(id, label, value, placeholder, type) {
     return '<label style="display:block;margin-bottom:8px;">' +
       '<span style="display:block;font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:2px;">' + label + '</span>' +
-      '<input id="' + id + '" type="' + (type || "text") + '" value="' + (value == null ? "" : String(value).replace(/"/g, "&quot;")) + '" placeholder="' + (placeholder || "") + '" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid #ccc;border-radius:4px;font-family:inherit;box-sizing:border-box;" />' +
+      '<input id="' + id + '" type="' + (type || "text") + '" value="' + (value == null ? "" : String(value).replace(/"/g, "&quot;")) + '" placeholder="' + (placeholder || "") + '" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid var(--c-border-strong);border-radius:4px;font-family:inherit;box-sizing:border-box;" />' +
       '</label>';
   }
 
@@ -3092,10 +3092,10 @@ function _showBookingPreviewModal(destId, p, originalText) {
   // dropdown, so they'd hit "no way to enter a hotel name."
   var typeSelHtml = '<label style="display:block;margin-bottom:8px;">' +
     '<span style="display:block;font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:2px;">Type</span>' +
-    '<select id="pcfp-type" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid #ccc;border-radius:4px;font-family:inherit;box-sizing:border-box;background:#fff;">' +
+    '<select id="pcfp-type" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid var(--c-border-strong);border-radius:4px;font-family:inherit;box-sizing:border-box;background:var(--c-bg);">' +
     typeOptions.map(function(t){ return '<option value="' + t + '"' + (t === p.type ? ' selected' : '') + '>' + t.charAt(0).toUpperCase() + t.slice(1) + '</option>'; }).join("") +
     '</select>' +
-    '<span style="display:block;font-size:10.5px;color:#888;margin-top:3px;line-height:1.4;">Change this if Max guessed wrong — the fields below swap to match the type.</span>' +
+    '<span style="display:block;font-size:10.5px;color:var(--c-ink-3);margin-top:3px;line-height:1.4;">Change this if Max guessed wrong — the fields below swap to match the type.</span>' +
     '</label>';
 
   var directionHtml = '';
@@ -3112,7 +3112,7 @@ function _showBookingPreviewModal(destId, p, originalText) {
   // best-matching one (by date+place score) pre-selected.
   var destSelHtml = '<label style="display:block;margin-bottom:8px;">' +
     '<span style="display:block;font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:2px;">Destination</span>' +
-    '<select id="pcfp-dest" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid #ccc;border-radius:4px;font-family:inherit;box-sizing:border-box;background:#fff;">' +
+    '<select id="pcfp-dest" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid var(--c-border-strong);border-radius:4px;font-family:inherit;box-sizing:border-box;background:var(--c-bg);">' +
     allDests.map(function(d){
       var lbl = (d.place || d.label || "Untitled");
       if (d.dateFrom && d.dateTo) lbl += " (" + d.dateFrom + " → " + d.dateTo + ")";
@@ -3139,18 +3139,18 @@ function _showBookingPreviewModal(destId, p, originalText) {
 
   box.innerHTML =
     '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">' +
-      '<div style="width:28px;height:28px;border-radius:50%;background:#2a7a4e;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">✓</div>' +
+      '<div style="width:28px;height:28px;border-radius:50%;background:var(--c-see);color:var(--c-on-dark);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">✓</div>' +
       '<div style="font-size:14px;font-weight:700;">Review extracted details</div>' +
     '</div>' +
-    '<div style="font-size:12px;color:#555;line-height:1.55;margin-bottom:14px;">Edit anything Max got wrong, then save. Empty fields stay empty — you can fill them in later.</div>' +
+    '<div style="font-size:12px;color:var(--c-ink-2);line-height:1.55;margin-bottom:14px;">Edit anything Max got wrong, then save. Empty fields stay empty — you can fill them in later.</div>' +
     destSelHtml +
     warningHtml +
     typeSelHtml +
     directionHtml +
     '<div id="pcfp-fields"></div>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px;">' +
-      '<button id="pcfp-back" style="padding:8px 14px;font-size:12px;font-weight:600;background:#fff;color:#666;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;">← Back</button>' +
-      '<button id="pcfp-save" style="padding:8px 16px;font-size:12px;font-weight:700;background:#1a5fa8;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Save</button>' +
+      '<button id="pcfp-back" style="padding:8px 14px;font-size:12px;font-weight:600;background:var(--c-bg);color:#666;border:1px solid var(--c-border);border-radius:5px;cursor:pointer;font-family:inherit;">← Back</button>' +
+      '<button id="pcfp-save" style="padding:8px 16px;font-size:12px;font-weight:700;background:var(--c-primary);color:var(--c-on-dark);border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Save</button>' +
     '</div>';
   ov.appendChild(box);
   document.body.appendChild(ov);
@@ -3181,7 +3181,7 @@ function _showBookingPreviewModal(destId, p, originalText) {
       // + legs[]; single leg → existing leg.bookings path.
       html += '<div id="pcfp-legs-host"></div>';
       html += '<div style="margin:4px 0 8px;">' +
-        '<button type="button" id="pcfp-add-leg" style="padding:5px 11px;font-size:11.5px;font-weight:600;background:#fff;color:#1a5fa8;border:1px solid #1a5fa8;border-radius:4px;cursor:pointer;font-family:inherit;">+ Add a missing or new leg</button>' +
+        '<button type="button" id="pcfp-add-leg" style="padding:5px 11px;font-size:11.5px;font-weight:600;background:var(--c-bg);color:var(--c-primary);border:1px solid var(--c-primary);border-radius:4px;cursor:pointer;font-family:inherit;">+ Add a missing or new leg</button>' +
       '</div>';
     } else if (t === "train" || t === "bus" || t === "ferry") {
       // Trains, buses, ferries stay single-segment for v1. Multi-leg
@@ -3255,7 +3255,7 @@ function _showBookingPreviewModal(destId, p, originalText) {
       inp("pcfp-conf", "Confirmation #", p.confirmationNumber || "", "") +
       '<label style="display:block;margin-bottom:8px;">' +
         '<span style="display:block;font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:2px;">Price paid</span>' +
-        '<input id="pcfp-price" type="text" inputmode="decimal" pattern="[0-9]+(\\.[0-9]+)?" value="' + priceDisplay + '" placeholder="" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid #ccc;border-radius:4px;font-family:inherit;box-sizing:border-box;" />' +
+        '<input id="pcfp-price" type="text" inputmode="decimal" pattern="[0-9]+(\\.[0-9]+)?" value="' + priceDisplay + '" placeholder="" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid var(--c-border-strong);border-radius:4px;font-family:inherit;box-sizing:border-box;" />' +
       '</label>' +
       inp("pcfp-currency", "Currency", p.currency || "", "USD") +
       '</div>';
@@ -3266,8 +3266,8 @@ function _showBookingPreviewModal(destId, p, originalText) {
     html += '<label style="display:block;margin-bottom:8px;">' +
       '<span style="display:block;font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:2px;">Booking URL</span>' +
       '<div style="display:flex;gap:6px;align-items:stretch;">' +
-        '<input id="pcfp-url" type="url" value="' + (p.url == null ? "" : String(p.url).replace(/"/g, "&quot;")) + '" placeholder="https://…" style="flex:1;padding:6px 9px;font-size:12px;border:1px solid #ccc;border-radius:4px;font-family:inherit;box-sizing:border-box;min-width:0;" />' +
-        '<button type="button" id="pcfp-url-open" title="Open this link in a new tab" style="padding:0 12px;font-size:11.5px;font-weight:600;background:#fff;color:#1a5fa8;border:1px solid #1a5fa8;border-radius:4px;cursor:pointer;font-family:inherit;flex-shrink:0;white-space:nowrap;">↗ Open</button>' +
+        '<input id="pcfp-url" type="url" value="' + (p.url == null ? "" : String(p.url).replace(/"/g, "&quot;")) + '" placeholder="https://…" style="flex:1;padding:6px 9px;font-size:12px;border:1px solid var(--c-border-strong);border-radius:4px;font-family:inherit;box-sizing:border-box;min-width:0;" />' +
+        '<button type="button" id="pcfp-url-open" title="Open this link in a new tab" style="padding:0 12px;font-size:11.5px;font-weight:600;background:var(--c-bg);color:var(--c-primary);border:1px solid var(--c-primary);border-radius:4px;cursor:pointer;font-family:inherit;flex-shrink:0;white-space:nowrap;">↗ Open</button>' +
       '</div>' +
     '</label>';
     // Cancellation policy block — date-only.
@@ -3343,7 +3343,7 @@ function _showBookingPreviewModal(destId, p, originalText) {
     var hdr = document.createElement("div");
     hdr.style.cssText = "display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;";
     var hdrL = document.createElement("div");
-    hdrL.style.cssText = "font-size:10px;font-weight:700;color:#1a5fa8;text-transform:uppercase;letter-spacing:0.05em;";
+    hdrL.style.cssText = "font-size:10px;font-weight:700;color:var(--c-primary);text-transform:uppercase;letter-spacing:0.05em;";
     hdrL.textContent = "Leg " + idx;
     var hdrR = document.createElement("button");
     hdrR.type = "button";
@@ -3790,12 +3790,12 @@ function _editTripBooking(bookingId) {
   ov.id = "tripbk-edit-overlay";
   ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:11900;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto;";
   var box = document.createElement("div");
-  box.style.cssText = "background:#fff;border-radius:12px;width:600px;max-width:100%;max-height:calc(100vh - 48px);overflow:auto;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);";
+  box.style.cssText = "background:var(--c-bg);border-radius:12px;width:600px;max-width:100%;max-height:calc(100vh - 48px);overflow:auto;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);";
 
   function inp(id, label, value, placeholder, type) {
     return '<label style="display:block;margin-bottom:8px;">' +
       '<span style="display:block;font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:2px;">' + label + '</span>' +
-      '<input id="' + id + '" type="' + (type || "text") + '" value="' + (value == null ? "" : String(value).replace(/"/g, "&quot;")) + '" placeholder="' + (placeholder || "") + '" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid #ccc;border-radius:4px;font-family:inherit;box-sizing:border-box;" />' +
+      '<input id="' + id + '" type="' + (type || "text") + '" value="' + (value == null ? "" : String(value).replace(/"/g, "&quot;")) + '" placeholder="' + (placeholder || "") + '" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid var(--c-border-strong);border-radius:4px;font-family:inherit;box-sizing:border-box;" />' +
       '</label>';
   }
 
@@ -3834,7 +3834,7 @@ function _editTripBooking(bookingId) {
     }
     fieldsHtml += '<div id="tbe-legs-host"></div>';
     fieldsHtml += '<div style="margin:4px 0 8px;">' +
-      '<button type="button" id="tbe-add-leg" style="padding:5px 11px;font-size:11.5px;font-weight:600;background:#fff;color:#1a5fa8;border:1px solid #1a5fa8;border-radius:4px;cursor:pointer;font-family:inherit;">+ Add a missing or new leg</button>' +
+      '<button type="button" id="tbe-add-leg" style="padding:5px 11px;font-size:11.5px;font-weight:600;background:var(--c-bg);color:var(--c-primary);border:1px solid var(--c-primary);border-radius:4px;cursor:pointer;font-family:inherit;">+ Add a missing or new leg</button>' +
     '</div>';
     // We'll populate the legs-host after innerHTML is set, below.
   } else {
@@ -3852,26 +3852,26 @@ function _editTripBooking(bookingId) {
       inp("tbe-conf", "Confirmation #", bk.confirmationNumber, "") +
       '<label style="display:block;margin-bottom:8px;">' +
         '<span style="display:block;font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:2px;">Price paid</span>' +
-        '<input id="tbe-price" type="text" inputmode="decimal" pattern="[0-9]+(\\.[0-9]+)?" value="' + tbeBkPriceDisplay + '" placeholder="" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid #ccc;border-radius:4px;font-family:inherit;box-sizing:border-box;" />' +
+        '<input id="tbe-price" type="text" inputmode="decimal" pattern="[0-9]+(\\.[0-9]+)?" value="' + tbeBkPriceDisplay + '" placeholder="" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid var(--c-border-strong);border-radius:4px;font-family:inherit;box-sizing:border-box;" />' +
       '</label>' +
       inp("tbe-currency", "Currency", bk.currency || "USD", "USD") +
     '</div>' +
     '<label style="display:block;margin-bottom:8px;">' +
       '<span style="display:block;font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:2px;">Booking URL</span>' +
-      '<input id="tbe-url" type="url" value="' + (bk.url || "").replace(/"/g, "&quot;") + '" placeholder="https://…" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid #ccc;border-radius:4px;font-family:inherit;box-sizing:border-box;" />' +
+      '<input id="tbe-url" type="url" value="' + (bk.url || "").replace(/"/g, "&quot;") + '" placeholder="https://…" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid var(--c-border-strong);border-radius:4px;font-family:inherit;box-sizing:border-box;" />' +
     '</label>' +
     inp("tbe-notes", "Notes", bk.notes, "Optional — vehicle class, drop-off fee, etc.");
 
   box.innerHTML =
     '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">' +
-      '<div style="width:28px;height:28px;border-radius:50%;background:#1a5fa8;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">▸</div>' +
+      '<div style="width:28px;height:28px;border-radius:50%;background:var(--c-primary);color:var(--c-on-dark);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">▸</div>' +
       '<div style="font-size:14px;font-weight:700;">' + kindLabel + ' details</div>' +
     '</div>' +
-    '<div style="font-size:12px;color:#555;line-height:1.55;margin-bottom:14px;">Everything Max has on this booking. Change anything that\'s wrong or missing, then save.</div>' +
+    '<div style="font-size:12px;color:var(--c-ink-2);line-height:1.55;margin-bottom:14px;">Everything Max has on this booking. Change anything that\'s wrong or missing, then save.</div>' +
     fieldsHtml +
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">' +
-      '<button id="tbe-cancel" style="padding:8px 14px;font-size:12px;font-weight:600;background:#fff;color:#666;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;">Cancel</button>' +
-      '<button id="tbe-save" style="padding:8px 16px;font-size:12px;font-weight:700;background:#1a5fa8;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Save</button>' +
+      '<button id="tbe-cancel" style="padding:8px 14px;font-size:12px;font-weight:600;background:var(--c-bg);color:#666;border:1px solid var(--c-border);border-radius:5px;cursor:pointer;font-family:inherit;">Cancel</button>' +
+      '<button id="tbe-save" style="padding:8px 16px;font-size:12px;font-weight:700;background:var(--c-primary);color:var(--c-on-dark);border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Save</button>' +
     '</div>';
   ov.appendChild(box);
   document.body.appendChild(ov);
@@ -3888,7 +3888,7 @@ function _editTripBooking(bookingId) {
     function inp2(id, label, value, placeholder, type) {
       return '<label style="display:block;margin-bottom:8px;">' +
         '<span style="display:block;font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:2px;">' + label + '</span>' +
-        '<input id="' + id + '" type="' + (type || "text") + '" value="' + (value == null ? "" : String(value).replace(/"/g, "&quot;")) + '" placeholder="' + (placeholder || "") + '" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid #ccc;border-radius:4px;font-family:inherit;box-sizing:border-box;" />' +
+        '<input id="' + id + '" type="' + (type || "text") + '" value="' + (value == null ? "" : String(value).replace(/"/g, "&quot;")) + '" placeholder="' + (placeholder || "") + '" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid var(--c-border-strong);border-radius:4px;font-family:inherit;box-sizing:border-box;" />' +
         '</label>';
     }
     return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
@@ -3919,7 +3919,7 @@ function _editTripBooking(bookingId) {
     div.style.cssText = "margin:6px 0;padding:8px 10px;background:#f5f8fc;border:1px solid #d4e0f0;border-radius:5px;";
     div.innerHTML =
       '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">' +
-        '<div style="font-size:10px;font-weight:700;color:#1a5fa8;text-transform:uppercase;letter-spacing:0.05em;">Leg ' + idx + '</div>' +
+        '<div style="font-size:10px;font-weight:700;color:var(--c-primary);text-transform:uppercase;letter-spacing:0.05em;">Leg ' + idx + '</div>' +
         '<button type="button" class="tbe-leg-remove" style="background:none;border:none;color:#c44;font-size:10.5px;cursor:pointer;padding:0;font-family:inherit;">✕ remove</button>' +
       '</div>' +
       _tbeBuildLegInputHtml(idx, pre || {});

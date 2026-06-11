@@ -400,7 +400,7 @@ function doCompare(id){
   var others=cands.filter(function(c){return c.id!==id&&c.status!=="reject";});
   if(!others.length){
     var tip=document.createElement("div");
-    tip.style.cssText="position:fixed;bottom:70px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:7px 13px;border-radius:5px;font-size:11px;z-index:9999;pointer-events:none;";
+    tip.style.cssText="position:fixed;bottom:70px;left:50%;transform:translateX(-50%);background:#333;color:var(--c-on-dark);padding:7px 13px;border-radius:5px;font-size:11px;z-index:9999;pointer-events:none;";
     tip.textContent="Keep at least one other place to compare";
     document.body.appendChild(tip); setTimeout(function(){tip.remove();},2500);
     return;
@@ -418,7 +418,7 @@ function openComparePicker(target,others){
   var body=document.createElement("div"); body.style.cssText="padding:12px;";
   others.forEach(function(o){
     var row=document.createElement("div");
-    row.style.cssText="padding:7px 11px;border:1px solid #eee;border-radius:5px;margin-bottom:5px;cursor:pointer;font-size:11px;font-weight:600;";
+    row.style.cssText="padding:7px 11px;border:1px solid var(--c-border-3);border-radius:5px;margin-bottom:5px;cursor:pointer;font-size:11px;font-weight:600;";
     row.innerHTML=o.place+' <span style="font-weight:400;color:#999;font-size:10px;">'+o.role+'</span>';
     row.onmouseover=function(){this.style.background="#f5f5f5";};
     row.onmouseout=function(){this.style.background="";};
@@ -438,7 +438,7 @@ async function openCompareModal(a,b){
       +'<div class="cmp-row"><div class="cmp-row-label">Role</div><div class="cmp-row-val">'+rIcon(c.role)+' '+c.role+'</div></div>'
       +'<div class="cmp-row"><div class="cmp-row-label">Stay</div><div class="cmp-row-val">'+c.stayRange+'</div></div>'
       +'<div class="cmp-row"><div class="cmp-row-label">Why it fits</div><div class="cmp-row-val">'+c.whyItFits+'</div></div>'
-      +'<div class="cmp-row"><div class="cmp-row-label">Tradeoffs</div><div class="cmp-row-val" style="color:#b05820;">'+c.tradeoffs+'</div></div>'
+      +'<div class="cmp-row"><div class="cmp-row-label">Tradeoffs</div><div class="cmp-row-val" style="color:var(--c-warn);">'+c.tradeoffs+'</div></div>'
       +'<div class="cmp-row"><div class="cmp-row-label">Tags</div><div class="cmp-row-val">'+(c.tags||[]).join(", ")+'</div></div>'
       +'</div>';
   }
@@ -489,32 +489,32 @@ function showPreBuildModal(){
   ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:10050;display:flex;align-items:center;justify-content:center;padding:20px;";
   var q = function(s){return (s||"").replace(/"/g,'&quot;');};
   ov.innerHTML =
-    '<div style="background:#fff;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.25);max-width:520px;width:100%;max-height:90vh;overflow-y:auto;font-family:inherit;">'
+    '<div style="background:var(--c-bg);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.25);max-width:520px;width:100%;max-height:90vh;overflow-y:auto;font-family:inherit;">'
     +'<div style="padding:18px 20px 10px;">'
-    +'<div style="font-size:14px;font-weight:700;color:#111;margin-bottom:4px;">One more thing</div>'
+    +'<div style="font-size:14px;font-weight:700;color:var(--c-ink);margin-bottom:4px;">One more thing</div>'
     +'<div style="font-size:11px;color:#666;line-height:1.55;margin-bottom:14px;">Before Max builds your trip, it needs to know how you arrive and how you leave. Booked details help Max respect what you\u2019ve locked in; rough plans are fine too. You can edit any of this later.</div>'
 
-    +'<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#888;margin-top:6px;margin-bottom:8px;">Getting there</div>'
+    +'<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--c-ink-3);margin-top:6px;margin-bottom:8px;">Getting there</div>'
 
     +'<div style="margin-bottom:10px;">'
     +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Arriving into (city or airport)</label>'
-    +'<input id="pbm-entry" type="text" value="'+q(_tb.entry || defaultEntry)+'" placeholder="e.g. Zurich or ZRH" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'<input id="pbm-entry" type="text" value="'+q(_tb.entry || defaultEntry)+'" placeholder="e.g. Zurich or ZRH" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid var(--c-border);border-radius:6px;font-family:inherit;" />'
     +'</div>'
 
     +'<div style="display:flex;gap:8px;margin-bottom:10px;">'
     +'<div style="flex:1;">'
     +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Arrival date</label>'
-    +'<input id="pbm-date" type="date" value="'+defaultDate+'" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'<input id="pbm-date" type="date" value="'+defaultDate+'" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid var(--c-border);border-radius:6px;font-family:inherit;" />'
     +'</div>'
     +'<div style="flex:1;">'
-    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Arrival time <span style="font-weight:400;color:#aaa;">(optional)</span></label>'
-    +'<input id="pbm-arrTime" type="time" value="'+q(_tb.arrivalTime||"")+'" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Arrival time <span style="font-weight:400;color:var(--c-ink-4);">(optional)</span></label>'
+    +'<input id="pbm-arrTime" type="time" value="'+q(_tb.arrivalTime||"")+'" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid var(--c-border);border-radius:6px;font-family:inherit;" />'
     +'</div>'
     +'</div>'
 
     +'<div style="margin-bottom:10px;">'
-    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Flight / train number <span style="font-weight:400;color:#aaa;">(optional)</span></label>'
-    +'<input id="pbm-arrNum" type="text" value="'+q(_tb.arrivalNumber||"")+'" placeholder="e.g. Swiss 38, Eurostar 9137" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Flight / train number <span style="font-weight:400;color:var(--c-ink-4);">(optional)</span></label>'
+    +'<input id="pbm-arrNum" type="text" value="'+q(_tb.arrivalNumber||"")+'" placeholder="e.g. Swiss 38, Eurostar 9137" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid var(--c-border);border-radius:6px;font-family:inherit;" />'
     +'</div>'
 
     +'<div style="display:flex;gap:5px;margin-bottom:18px;">'
@@ -522,27 +522,27 @@ function showPreBuildModal(){
     +'<span id="pbm-entry-flex" class="tb-toggle'+(!_tb.entryFixed?' on':'')+'" onclick="_tb.entryFixed=false;document.getElementById(&quot;pbm-entry-flex&quot;).classList.add(&quot;on&quot;);document.getElementById(&quot;pbm-entry-fixed&quot;).classList.remove(&quot;on&quot;);">Still flexible</span>'
     +'</div>'
 
-    +'<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#888;margin-top:6px;margin-bottom:8px;">Getting out</div>'
+    +'<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--c-ink-3);margin-top:6px;margin-bottom:8px;">Getting out</div>'
 
     +'<div style="margin-bottom:10px;">'
     +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Leaving from (city or airport)</label>'
-    +'<input id="pbm-exit" type="text" value="'+q(_tb.tbExit || defaultExit)+'" placeholder="e.g. Geneva or GVA" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'<input id="pbm-exit" type="text" value="'+q(_tb.tbExit || defaultExit)+'" placeholder="e.g. Geneva or GVA" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid var(--c-border);border-radius:6px;font-family:inherit;" />'
     +'</div>'
 
     +'<div style="display:flex;gap:8px;margin-bottom:10px;">'
     +'<div style="flex:1;">'
-    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Departure date <span style="font-weight:400;color:#aaa;">(optional)</span></label>'
-    +'<input id="pbm-depDate" type="date" value="'+q(_tb.departureDate||"")+'" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Departure date <span style="font-weight:400;color:var(--c-ink-4);">(optional)</span></label>'
+    +'<input id="pbm-depDate" type="date" value="'+q(_tb.departureDate||"")+'" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid var(--c-border);border-radius:6px;font-family:inherit;" />'
     +'</div>'
     +'<div style="flex:1;">'
-    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Departure time <span style="font-weight:400;color:#aaa;">(optional)</span></label>'
-    +'<input id="pbm-depTime" type="time" value="'+q(_tb.departureTime||"")+'" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Departure time <span style="font-weight:400;color:var(--c-ink-4);">(optional)</span></label>'
+    +'<input id="pbm-depTime" type="time" value="'+q(_tb.departureTime||"")+'" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid var(--c-border);border-radius:6px;font-family:inherit;" />'
     +'</div>'
     +'</div>'
 
     +'<div style="margin-bottom:10px;">'
-    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Flight / train number <span style="font-weight:400;color:#aaa;">(optional)</span></label>'
-    +'<input id="pbm-depNum" type="text" value="'+q(_tb.departureNumber||"")+'" placeholder="e.g. Swiss 17" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;" />'
+    +'<label style="display:block;font-size:11px;font-weight:600;color:#444;margin-bottom:4px;">Flight / train number <span style="font-weight:400;color:var(--c-ink-4);">(optional)</span></label>'
+    +'<input id="pbm-depNum" type="text" value="'+q(_tb.departureNumber||"")+'" placeholder="e.g. Swiss 17" style="width:100%;box-sizing:border-box;font-size:12px;padding:8px 10px;border:1px solid var(--c-border);border-radius:6px;font-family:inherit;" />'
     +'</div>'
 
     +'<div style="display:flex;gap:5px;margin-bottom:10px;">'
@@ -551,9 +551,9 @@ function showPreBuildModal(){
     +'</div>'
 
     +'</div>'
-    +'<div style="display:flex;gap:8px;justify-content:flex-end;padding:12px 20px 18px;border-top:1px solid #f0f0f0;">'
-    +'<button id="pbm-cancel" style="font-size:11px;font-weight:600;padding:8px 14px;border:1px solid #ddd;background:#fff;color:#555;border-radius:6px;cursor:pointer;font-family:inherit;">Back</button>'
-    +'<button id="pbm-build" style="font-size:11px;font-weight:700;padding:8px 16px;border:1px solid #111;background:#111;color:#fff;border-radius:6px;cursor:pointer;font-family:inherit;">Build my trip \u2192</button>'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end;padding:12px 20px 18px;border-top:1px solid var(--c-border-4);">'
+    +'<button id="pbm-cancel" style="font-size:11px;font-weight:600;padding:8px 14px;border:1px solid var(--c-border);background:var(--c-bg);color:var(--c-ink-2);border-radius:6px;cursor:pointer;font-family:inherit;">Back</button>'
+    +'<button id="pbm-build" style="font-size:11px;font-weight:700;padding:8px 16px;border:1px solid var(--c-border-dark);background:var(--c-primary-top);color:var(--c-on-dark);border-radius:6px;cursor:pointer;font-family:inherit;">Build my trip \u2192</button>'
     +'</div>'
     +'</div>';
   document.body.appendChild(ov);

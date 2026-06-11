@@ -145,10 +145,10 @@ function showLogisticsConfirmation() {
       if (r.pickupLocation) lines.push("  Car: " + r.pickupLocation + (r.pickupDate ? " " + r.pickupDate : "") + " \u2192 " + (r.returnLocation||"same") + (r.returnDate ? " " + r.returnDate : "") + (r.carType ? " (" + r.carType + ")" : ""));
     });
   }
-  b.innerHTML = '<div style="font-weight:700;color:#2a7a4e;margin-bottom:4px;">\u2713 Logistics saved</div>'
+  b.innerHTML = '<div style="font-weight:700;color:var(--c-see);margin-bottom:4px;">\u2713 Logistics saved</div>'
     + lines.map(function(l){ return '<div>' + l + '</div>'; }).join("")
-    + '<div style="color:#888;font-size:10px;margin-top:5px;">You can edit this anytime from the trip settings.</div>'
-    + '<button style="margin-top:5px;font-size:10px;padding:2px 8px;border:1px solid #b8e0c8;border-radius:4px;background:#fff;color:#2a7a4e;cursor:pointer;font-family:inherit;" onclick="this.parentNode.remove()">Dismiss</button>';
+    + '<div style="color:var(--c-ink-3);font-size:10px;margin-top:5px;">You can edit this anytime from the trip settings.</div>'
+    + '<button style="margin-top:5px;font-size:10px;padding:2px 8px;border:1px solid #b8e0c8;border-radius:4px;background:var(--c-bg);color:var(--c-see);cursor:pointer;font-family:inherit;" onclick="this.parentNode.remove()">Dismiss</button>';
   lpc.insertBefore(b, lpc.firstChild);
 }
 

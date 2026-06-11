@@ -217,7 +217,7 @@ function _tbPlacesModeIconHtml(which){
     +   '<span>'+(cur?label:"Tap to pick how")+'</span>'
     +   '<span style="font-size:9px;color:#999;">\u25BE</span>'
     + '</button>'
-    + '<div id="'+popId+'" style="display:none;position:absolute;top:100%;left:0;z-index:1000;margin-top:4px;background:#fff;border:1px solid #ccc;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,0.1);padding:4px;min-width:160px;">'
+    + '<div id="'+popId+'" style="display:none;position:absolute;top:100%;left:0;z-index:1000;margin-top:4px;background:var(--c-bg);border:1px solid var(--c-border-strong);border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,0.1);padding:4px;min-width:160px;">'
     +   _tbTransportModes.map(function(m){
           var on = cur === m.id;
           return '<div onclick="_tbPlacesPickMode(&#39;'+which+'&#39;,&#39;'+m.id+'&#39;)" '
@@ -250,7 +250,7 @@ function _tbPlacesTransportButtonHtml(){
   var popId = "tb-transport-pop";
   var rowHtml = function(labelText, which, cur){
     return '<div style="margin-bottom:8px;">'
-      + '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:#888;margin-bottom:4px;">'+labelText+'</div>'
+      + '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--c-ink-3);margin-bottom:4px;">'+labelText+'</div>'
       + '<div style="display:flex;flex-wrap:wrap;gap:4px;">'
       + _tbTransportModes.map(function(m){
           var on = cur === m.id;
@@ -267,7 +267,7 @@ function _tbPlacesTransportButtonHtml(){
     +   '<span>'+buttonText+'</span>'
     +   '<span style="font-size:9px;color:#999;">\u25BE</span>'
     + '</button>'
-    + '<div id="'+popId+'" style="display:none;position:absolute;top:100%;left:0;z-index:1000;margin-top:4px;background:#fff;border:1px solid #ccc;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,0.1);padding:10px 12px;min-width:260px;">'
+    + '<div id="'+popId+'" style="display:none;position:absolute;top:100%;left:0;z-index:1000;margin-top:4px;background:var(--c-bg);border:1px solid var(--c-border-strong);border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,0.1);padding:10px 12px;min-width:260px;">'
     +   rowHtml("Getting there",  "entryMode", _tb.entryMode || "")
     +   rowHtml("Getting out",    "exitMode",  _tb.exitMode  || "")
     + '</div></div>';

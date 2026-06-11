@@ -1167,7 +1167,7 @@
     // max-height on the box itself plus overflow-y as a fallback in
     // case the overlay scroll is suppressed by some UA.
     box.style.cssText =
-      'background:#fff;border-radius:12px;max-width:420px;width:100%;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);max-height:calc(100vh - 48px);overflow-y:auto;-webkit-overflow-scrolling:touch;';
+      'background:var(--c-bg);border-radius:12px;max-width:420px;width:100%;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);max-height:calc(100vh - 48px);overflow-y:auto;-webkit-overflow-scrolling:touch;';
 
     // v353: title is context-aware. When signed in the modal is a
     // sync-management surface (pull, sign out, list server trips);
@@ -1177,10 +1177,10 @@
     var modalTitle = isSignedIn() ? 'Sync with server' : 'Sign in to Max';
     box.innerHTML =
       '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">' +
-      '<div style="width:28px;height:28px;border-radius:50%;background:#1a5fa8;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">⇄</div>' +
+      '<div style="width:28px;height:28px;border-radius:50%;background:var(--c-primary);color:var(--c-on-dark);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">⇄</div>' +
       '<div style="font-size:14px;font-weight:700;">' + modalTitle + '</div>' +
       '</div>' +
-      '<div style="font-size:12px;color:#555;line-height:1.55;margin-bottom:14px;">' +
+      '<div style="font-size:12px;color:var(--c-ink-2);line-height:1.55;margin-bottom:14px;">' +
       (isSignedIn()
         ? '<strong>Signed in as ' + (getEmail() || 'user') + '</strong>.'
         : 'Sign in to share trips between devices. Enter your name and email — we\'ll send a one-time sign-in link. No password required. <span style="color:#666;">Sign-in lasts 30 days; you\'ll get a fresh link after that.</span>') +
@@ -1190,12 +1190,12 @@
       // can leave it blank or fill it to update their display name.
       (isSignedIn() ? '' :
         '<label style="display:block;font-size:11px;color:#666;font-weight:600;margin-bottom:6px;">Name <span style="color:#c44;">*</span></label>' +
-        '<input id="max-sync-name" type="text" placeholder="Your name" value="" autocomplete="name" style="width:100%;font-size:12px;padding:7px 9px;border:1px solid #ddd;border-radius:5px;box-sizing:border-box;margin-bottom:10px;" />'
+        '<input id="max-sync-name" type="text" placeholder="Your name" value="" autocomplete="name" style="width:100%;font-size:12px;padding:7px 9px;border:1px solid var(--c-border);border-radius:5px;box-sizing:border-box;margin-bottom:10px;" />'
       ) +
       '<label style="display:block;font-size:11px;color:#666;font-weight:600;margin-bottom:6px;">Email <span style="color:#c44;">*</span></label>' +
       '<input id="max-sync-email" type="email" placeholder="you@example.com" value="' +
       _esc(getEmail() || '') +
-      '" autocomplete="email" style="width:100%;font-size:12px;padding:7px 9px;border:1px solid #ddd;border-radius:5px;box-sizing:border-box;margin-bottom:14px;" />' +
+      '" autocomplete="email" style="width:100%;font-size:12px;padding:7px 9px;border:1px solid var(--c-border);border-radius:5px;box-sizing:border-box;margin-bottom:14px;" />' +
       // v359.60.87: marketing opt-in checkbox shown only for signed-out
       // state. Unchecked by default — affirmative opt-in only.
       // v359.60.88: sharper value prop — concrete frequency, specific
@@ -1210,21 +1210,21 @@
       '<label style="display:block;font-size:11px;color:#666;font-weight:600;margin-bottom:6px;">Server URL</label>' +
       '<input id="max-sync-url" type="text" value="' +
       _esc(getServerUrl()) +
-      '" style="width:100%;font-size:12px;padding:7px 9px;border:1px solid #ddd;border-radius:5px;font-family:monospace;box-sizing:border-box;margin-bottom:14px;" />' +
-      '<div id="max-sync-msg" style="font-size:11px;color:#888;min-height:14px;margin-bottom:10px;"></div>' +
+      '" style="width:100%;font-size:12px;padding:7px 9px;border:1px solid var(--c-border);border-radius:5px;font-family:monospace;box-sizing:border-box;margin-bottom:14px;" />' +
+      '<div id="max-sync-msg" style="font-size:11px;color:var(--c-ink-3);min-height:14px;margin-bottom:10px;"></div>' +
       '<div style="display:flex;gap:8px;">' +
       (isSignedIn()
-        ? '<button id="max-sync-pull" style="flex:1;padding:8px;font-size:12px;font-weight:600;background:#fff;color:#1a5fa8;border:1px solid #1a5fa8;border-radius:5px;cursor:pointer;font-family:inherit;">Pull trips from server</button>' +
-          '<button id="max-sync-out" style="flex:1;padding:8px;font-size:12px;font-weight:600;background:#fff;color:#c44;border:1px solid #c44;border-radius:5px;cursor:pointer;font-family:inherit;">Sign out</button>'
-        : '<button id="max-sync-in" style="flex:1;padding:8px;font-size:12px;font-weight:600;background:#1a5fa8;color:#fff;border:1px solid #1a5fa8;border-radius:5px;cursor:pointer;font-family:inherit;">Get sign-in link</button>') +
-      '<button id="max-sync-close" style="padding:8px 14px;font-size:12px;font-weight:600;background:#fff;color:#666;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;">Close</button>' +
+        ? '<button id="max-sync-pull" style="flex:1;padding:8px;font-size:12px;font-weight:600;background:var(--c-bg);color:var(--c-primary);border:1px solid var(--c-primary);border-radius:5px;cursor:pointer;font-family:inherit;">Pull trips from server</button>' +
+          '<button id="max-sync-out" style="flex:1;padding:8px;font-size:12px;font-weight:600;background:var(--c-bg);color:#c44;border:1px solid #c44;border-radius:5px;cursor:pointer;font-family:inherit;">Sign out</button>'
+        : '<button id="max-sync-in" style="flex:1;padding:8px;font-size:12px;font-weight:600;background:var(--c-primary);color:var(--c-on-dark);border:1px solid var(--c-primary);border-radius:5px;cursor:pointer;font-family:inherit;">Get sign-in link</button>') +
+      '<button id="max-sync-close" style="padding:8px 14px;font-size:12px;font-weight:600;background:var(--c-bg);color:#666;border:1px solid var(--c-border);border-radius:5px;cursor:pointer;font-family:inherit;">Close</button>' +
       '</div>' +
       // v353.4: Preferences link — opens the welcome modal so the
       // user can change pace / sights without leaving the trip view
       // (the home-screen "Welcome" link is invisible from inside a
       // trip).
-      '<div style="margin-top:14px;padding-top:12px;border-top:1px solid #eee;text-align:center;">' +
-        '<span id="max-sync-prefs" style="font-size:12px;color:#1a5fa8;cursor:pointer;text-decoration:underline;">⚙ Preferences (pace, sights)</span>' +
+      '<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--c-border-3);text-align:center;">' +
+        '<span id="max-sync-prefs" style="font-size:12px;color:var(--c-primary);cursor:pointer;text-decoration:underline;">⚙ Preferences (pace, sights)</span>' +
       '</div>';
 
     ov.appendChild(box);
@@ -1293,7 +1293,7 @@
                 : 'Click below to sign in. (Email delivery is not configured for this build, so we\'re skipping the inbox step.)';
               msg.innerHTML =
                 '<div style="color:' + (resp.sendError ? '#c44' : '#555') + ';margin-bottom:10px;font-size:12px;line-height:1.55;">' + fallbackBlurb + '</div>' +
-                '<a href="' + _esc(resp.directLink) + '" style="display:block;background:#1a5fa8;color:#fff;padding:11px 14px;border-radius:6px;text-decoration:none;font-weight:600;font-size:13px;text-align:center;">Sign in →</a>';
+                '<a href="' + _esc(resp.directLink) + '" style="display:block;background:var(--c-primary);color:var(--c-on-dark);padding:11px 14px;border-radius:6px;text-decoration:none;font-weight:600;font-size:13px;text-align:center;">Sign in →</a>';
             }
           } else {
             _msg(
@@ -1362,10 +1362,10 @@
     // server-side trips without having to curl.
     if (isSignedIn()) {
       var trashWrap = document.createElement('div');
-      trashWrap.style.cssText = 'margin-top:14px;padding-top:12px;border-top:1px solid #eee;';
+      trashWrap.style.cssText = 'margin-top:14px;padding-top:12px;border-top:1px solid var(--c-border-3);';
       trashWrap.innerHTML =
         '<div style="font-size:11px;font-weight:600;color:#666;margin-bottom:6px;">Trips on the server</div>' +
-        '<div id="max-sync-trips" style="font-size:11px;color:#888;">loading…</div>';
+        '<div id="max-sync-trips" style="font-size:11px;color:var(--c-ink-3);">loading…</div>';
       box.appendChild(trashWrap);
       _renderServerTripList();
     }
@@ -1411,19 +1411,19 @@
       var resp = await listTrips();
       var trips = (resp && resp.trips) || [];
       if (!trips.length) {
-        host.innerHTML = '<div style="color:#aaa;font-style:italic;">No trips on the server.</div>';
+        host.innerHTML = '<div style="color:var(--c-ink-4);font-style:italic;">No trips on the server.</div>';
         return;
       }
       host.innerHTML = '';
       trips.forEach(function (t) {
         var row = document.createElement('div');
-        row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f0f0f0;';
+        row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--c-border-4);';
         var label = document.createElement('div');
         label.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#333;';
         label.textContent = t.name || 'Untitled';
         var del = document.createElement('button');
         del.textContent = 'Delete';
-        del.style.cssText = 'font-size:10px;font-weight:600;color:#c44;background:#fff;border:1px solid #e8c4c4;border-radius:4px;padding:3px 8px;cursor:pointer;font-family:inherit;margin-left:10px;flex-shrink:0;';
+        del.style.cssText = 'font-size:10px;font-weight:600;color:#c44;background:var(--c-bg);border:1px solid #e8c4c4;border-radius:4px;padding:3px 8px;cursor:pointer;font-family:inherit;margin-left:10px;flex-shrink:0;';
         (function (id, name) {
           del.onclick = async function () {
             if (!confirm('Delete "' + name + '" from the server?\n\nThis also removes the local copy. Cannot be undone.')) return;

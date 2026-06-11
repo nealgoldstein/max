@@ -92,13 +92,13 @@ function _pmDocTagFieldHtml(doc){
   var tags = Array.isArray(doc.tags) ? doc.tags : [];
   var chipsHtml = tags.map(function(t, i){
     var safe = String(t).replace(/</g, "&lt;").replace(/"/g, "&quot;");
-    return '<span class="pm-doc-tag-chip" data-idx="' + i + '" style="display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;color:#5b3f8f;background:#f1edf8;border:1px solid #ddd5ec;border-radius:10px;padding:2px 4px 2px 9px;">#' + safe
-      + '<button type="button" data-tag-rm="' + i + '" style="background:transparent;border:none;color:#5b3f8f;cursor:pointer;font-size:13px;line-height:1;padding:0 4px;font-family:inherit;">×</button></span>';
+    return '<span class="pm-doc-tag-chip" data-idx="' + i + '" style="display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;color:var(--c-accent);background:#f1edf8;border:1px solid #ddd5ec;border-radius:10px;padding:2px 4px 2px 9px;">#' + safe
+      + '<button type="button" data-tag-rm="' + i + '" style="background:transparent;border:none;color:var(--c-accent);cursor:pointer;font-size:13px;line-height:1;padding:0 4px;font-family:inherit;">×</button></span>';
   }).join('');
   return '<div id="pm-doc-edit-tags" style="padding:4px 18px 8px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;">'
-    + '<span style="font-size:10px;color:#888;font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin-right:4px;">Tags:</span>'
+    + '<span style="font-size:10px;color:var(--c-ink-3);font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin-right:4px;">Tags:</span>'
     + chipsHtml
-    + '<input id="pm-doc-edit-tag-input" type="text" placeholder="add tag…" style="font:inherit;font-size:11px;border:1px dashed #ccc;border-radius:10px;padding:2px 9px;outline:none;background:transparent;min-width:70px;" />'
+    + '<input id="pm-doc-edit-tag-input" type="text" placeholder="add tag…" style="font:inherit;font-size:11px;border:1px dashed var(--c-border-strong);border-radius:10px;padding:2px 9px;outline:none;background:transparent;min-width:70px;" />'
     + '</div>';
 }
 function _pmDocTagBind(ov, doc){
@@ -117,9 +117,9 @@ function _pmDocTagBind(ov, doc){
     var span = document.createElement("span");
     span.className = "pm-doc-tag-chip";
     span.setAttribute("data-tag", tag);
-    span.style.cssText = "display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;color:#5b3f8f;background:#f1edf8;border:1px solid #ddd5ec;border-radius:10px;padding:2px 4px 2px 9px;";
+    span.style.cssText = "display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;color:var(--c-accent);background:#f1edf8;border:1px solid #ddd5ec;border-radius:10px;padding:2px 4px 2px 9px;";
     span.innerHTML = "#" + safe
-      + '<button type="button" style="background:transparent;border:none;color:#5b3f8f;cursor:pointer;font-size:13px;line-height:1;padding:0 4px;font-family:inherit;">×</button>';
+      + '<button type="button" style="background:transparent;border:none;color:var(--c-accent);cursor:pointer;font-size:13px;line-height:1;padding:0 4px;font-family:inherit;">×</button>';
     var btn = span.querySelector("button");
     btn.onclick = function(e){
       e.preventDefault(); e.stopPropagation();
@@ -189,15 +189,15 @@ function _pmOpenDocEditor(doc, onSave){
   ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:11700;display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;";
 
   var box = document.createElement("div");
-  box.style.cssText = "background:#fff;border-radius:12px;max-width:680px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 12px 36px rgba(0,0,0,0.28);overflow:hidden;";
+  box.style.cssText = "background:var(--c-bg);border-radius:12px;max-width:680px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 12px 36px rgba(0,0,0,0.28);overflow:hidden;";
 
   var titleSafe = String(doc.title || "").replace(/"/g, "&quot;");
   box.innerHTML = ''
-    + '<div style="padding:12px 18px;border-bottom:1px solid #eee;display:flex;align-items:center;gap:10px;">'
+    + '<div style="padding:12px 18px;border-bottom:1px solid var(--c-border-3);display:flex;align-items:center;gap:10px;">'
     +   '<input id="pm-doc-edit-title" type="text" value="' + titleSafe + '" placeholder="Document title" '
     +     'style="flex:1;font:inherit;font-size:16px;font-weight:700;border:1px solid transparent;border-radius:5px;padding:6px 8px;background:transparent;outline:none;" '
     +     'onfocus="this.style.borderColor=&quot;#ccc&quot;" onblur="this.style.borderColor=&quot;transparent&quot;" />'
-    +   '<button type="button" id="pm-doc-edit-dictate" style="font-size:11px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;flex-shrink:0;">🎤 Dictate</button>'
+    +   '<button type="button" id="pm-doc-edit-dictate" style="font-size:11px;font-weight:600;color:var(--c-primary);background:var(--c-bg);border:1px solid var(--c-border-blue);border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;flex-shrink:0;">🎤 Dictate</button>'
     +   '<button type="button" id="pm-doc-edit-close-x" style="font-size:22px;color:#999;background:none;border:none;cursor:pointer;padding:0 4px;line-height:1;flex-shrink:0;">×</button>'
     + '</div>'
     + _pmDocTagFieldHtml(doc)
@@ -206,11 +206,11 @@ function _pmOpenDocEditor(doc, onSave){
             + 'Created ' + _pmFmtAbsolute(doc.createdAt) + (doc.updatedAt && doc.updatedAt !== doc.createdAt ? ' &middot; edited ' + _pmFmtRelative(doc.updatedAt) : '')
             + '</div>'
         : '')
-    + '<div style="flex:1;overflow-y:auto;padding:14px 18px;background:#fafafa;">'
+    + '<div style="flex:1;overflow-y:auto;padding:14px 18px;background:var(--c-panel);">'
     +   _pmRtFieldHtml("pm-doc-edit-body", doc.body || "", { placeholder: "Write here…", minHeight: "320px" })
     + '</div>'
-    + '<div style="padding:12px 18px;border-top:1px solid #eee;display:flex;justify-content:flex-end;gap:8px;">'
-    +   '<button type="button" id="pm-doc-edit-done" style="font-size:13px;font-weight:600;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 18px;cursor:pointer;font-family:inherit;">Done</button>'
+    + '<div style="padding:12px 18px;border-top:1px solid var(--c-border-3);display:flex;justify-content:flex-end;gap:8px;">'
+    +   '<button type="button" id="pm-doc-edit-done" style="font-size:13px;font-weight:600;color:var(--c-on-dark);background:var(--c-primary);border:1px solid var(--c-primary);border-radius:6px;padding:8px 18px;cursor:pointer;font-family:inherit;">Done</button>'
     + '</div>';
 
   // PD.51: remember which doc we're editing so the doc-link picker

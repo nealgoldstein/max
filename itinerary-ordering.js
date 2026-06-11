@@ -217,7 +217,7 @@ function _briefRenderLocked(label, displayValue, overrideKey){
     + '<label style="font-weight:500;color:#222;margin:0 0 4px;font-size:12.5px;text-transform:none;letter-spacing:0;display:block;">' + label + '</label>'
     + '<div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;">'
     +   '<span style="font-size:13px;font-weight:600;color:#222;">' + displayValue + '</span>'
-    +   '<a href="#" onclick="_tbUnlockShape(\'' + overrideKey + '\');event.preventDefault();" style="font-size:11.5px;font-weight:600;color:#1a5fa8;text-decoration:none;cursor:pointer;white-space:nowrap;">Override for this trip ↻</a>'
+    +   '<a href="#" onclick="_tbUnlockShape(\'' + overrideKey + '\');event.preventDefault();" style="font-size:11.5px;font-weight:600;color:var(--c-primary);text-decoration:none;cursor:pointer;white-space:nowrap;">Override for this trip ↻</a>'
     + '</div>'
     + '</div>';
 }
@@ -482,7 +482,7 @@ function showSettingsPanel(){
   ov.id = "settings-panel-overlay";
   ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:11900;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto;";
   var box = document.createElement("div");
-  box.style.cssText = "background:#fff;border-radius:12px;width:520px;max-width:100%;max-height:calc(100vh - 48px);overflow:auto;padding:0;box-shadow:0 12px 40px rgba(0,0,0,.25);";
+  box.style.cssText = "background:var(--c-bg);border-radius:12px;width:520px;max-width:100%;max-height:calc(100vh - 48px);overflow:auto;padding:0;box-shadow:0 12px 40px rgba(0,0,0,.25);";
 
   function _paceRadio(value, label, desc){
     var checked = (curPace === value) ? "checked" : "";
@@ -498,13 +498,13 @@ function showSettingsPanel(){
 
   box.innerHTML = ''
     // Header
-    + '<div style="padding:18px 22px 14px;border-bottom:1px solid #eee;display:flex;align-items:center;gap:10px;">'
-    +   '<div style="width:30px;height:30px;border-radius:50%;background:#1a5fa8;color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;">&#9881;</div>'
+    + '<div style="padding:18px 22px 14px;border-bottom:1px solid var(--c-border-3);display:flex;align-items:center;gap:10px;">'
+    +   '<div style="width:30px;height:30px;border-radius:50%;background:var(--c-primary);color:var(--c-on-dark);display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;">&#9881;</div>'
     +   '<div style="flex:1;">'
     +     '<div style="font-size:15px;font-weight:700;color:#222;">Profile</div>'
-    +     '<div style="font-size:11.5px;color:#888;margin-top:1px;">How you generally travel. Max carries these into every trip; tune them for a specific trip from that trip\'s page.</div>'
+    +     '<div style="font-size:11.5px;color:var(--c-ink-3);margin-top:1px;">How you generally travel. Max carries these into every trip; tune them for a specific trip from that trip\'s page.</div>'
     +   '</div>'
-    +   '<button id="sp-close-x" type="button" style="background:#fff;border:1px solid #ddd;border-radius:6px;font-size:13px;color:#666;padding:5px 9px;cursor:pointer;font-family:inherit;" title="Close">&times;</button>'
+    +   '<button id="sp-close-x" type="button" style="background:var(--c-bg);border:1px solid var(--c-border);border-radius:6px;font-size:13px;color:#666;padding:5px 9px;cursor:pointer;font-family:inherit;" title="Close">&times;</button>'
     + '</div>'
     // Body
     + '<div style="padding:18px 22px;font-size:12.5px;color:#333;line-height:1.55;">'
@@ -517,7 +517,7 @@ function showSettingsPanel(){
     // then Display.
 
     // ── MOBILITY ──────────────────────────────────
-    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:10px;">Mobility</div>'
+    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--c-ink-3);margin-bottom:10px;">Mobility</div>'
     +   '<div style="margin-bottom:14px;">'
     +     '<label style="font-weight:600;color:#222;display:block;margin-bottom:6px;">Mobility of the slowest member</label>'
     +     (function(){
@@ -538,21 +538,21 @@ function showSettingsPanel(){
 
     // ── WHERE YOU STAY ────────────────────────────
     +   '<div style="margin:18px 0 10px;border-top:1px dashed #d8d4c8;"></div>'
-    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:10px;">Where you stay</div>'
+    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--c-ink-3);margin-bottom:10px;">Where you stay</div>'
     +   '<div style="margin-bottom:6px;">'
     +     '<label for="sp-accom" style="font-weight:600;color:#222;display:block;margin-bottom:4px;">Where you’d like to stay</label>'
-    +     '<textarea id="sp-accom" rows="2" placeholder="e.g. Small family hotels, en suite required, no hostels" style="width:100%;font-size:12.5px;padding:6px 9px;border:1px solid #ccc;border-radius:5px;font-family:inherit;box-sizing:border-box;resize:vertical;min-height:54px;">'+curAccom.replace(/</g,"&lt;").replace(/>/g,"&gt;")+'</textarea>'
+    +     '<textarea id="sp-accom" rows="2" placeholder="e.g. Small family hotels, en suite required, no hostels" style="width:100%;font-size:12.5px;padding:6px 9px;border:1px solid var(--c-border-strong);border-radius:5px;font-family:inherit;box-sizing:border-box;resize:vertical;min-height:54px;">'+curAccom.replace(/</g,"&lt;").replace(/>/g,"&gt;")+'</textarea>'
     +     '<div style="font-size:11px;color:#777;line-height:1.5;margin-top:4px;">Your usual lodging style. Carried into every trip.</div>'
     +   '</div>'
 
     // ── PACE & DURATION ───────────────────────────
     +   '<div style="margin:18px 0 10px;border-top:1px dashed #d8d4c8;"></div>'
-    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:10px;">Pace &amp; duration</div>'
+    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--c-ink-3);margin-bottom:10px;">Pace &amp; duration</div>'
 
     +   '<div style="margin-bottom:14px;">'
     +     '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">'
     +       '<label for="sp-hpd" style="font-weight:600;color:#222;flex:1;">Hours of sightseeing per day</label>'
-    +       '<input id="sp-hpd" type="number" min="2" max="10" step="1" value="'+curHours+'" inputmode="numeric" style="width:64px;text-align:center;font-size:13px;font-weight:600;padding:5px 7px;border:1px solid #ccc;border-radius:5px;font-family:inherit;" />'
+    +       '<input id="sp-hpd" type="number" min="2" max="10" step="1" value="'+curHours+'" inputmode="numeric" style="width:64px;text-align:center;font-size:13px;font-weight:600;padding:5px 7px;border:1px solid var(--c-border-strong);border-radius:5px;font-family:inherit;" />'
     +     '</div>'
     +     '<div style="font-size:11px;color:#777;line-height:1.5;">How many hours you actually spend on sights — not what you &ldquo;should.&rdquo; Range 2&ndash;10.</div>'
     +   '</div>'
@@ -560,7 +560,7 @@ function showSettingsPanel(){
     +   '<div style="margin-bottom:14px;">'
     +     '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">'
     +       '<label for="sp-spd" style="font-weight:600;color:#222;flex:1;">Max big sights per day</label>'
-    +       '<input id="sp-spd" type="number" min="1" max="6" step="1" value="'+curSights+'" inputmode="numeric" style="width:64px;text-align:center;font-size:13px;font-weight:600;padding:5px 7px;border:1px solid #ccc;border-radius:5px;font-family:inherit;" />'
+    +       '<input id="sp-spd" type="number" min="1" max="6" step="1" value="'+curSights+'" inputmode="numeric" style="width:64px;text-align:center;font-size:13px;font-weight:600;padding:5px 7px;border:1px solid var(--c-border-strong);border-radius:5px;font-family:inherit;" />'
     +     '</div>'
     +     '<div style="font-size:11px;color:#777;line-height:1.5;">A &ldquo;big&rdquo; sight is a 2+ hour anchor &mdash; major museum, mountain railway, long hike. The cap keeps days from becoming a forced march.</div>'
     +   '</div>'
@@ -573,13 +573,13 @@ function showSettingsPanel(){
     +   '</div>'
 
     +   '<div style="margin:18px 0 10px;border-top:1px dashed #d8d4c8;"></div>'
-    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:10px;">Day trips</div>'
+    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--c-ink-3);margin-bottom:10px;">Day trips</div>'
 
     +   '<div style="margin-bottom:14px;">'
     +     '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">'
     +       '<label for="sp-dth" style="font-weight:600;color:#222;flex:1;">Max drive time for a day trip</label>'
     +       '<div style="display:flex;align-items:center;gap:5px;">'
-    +         '<input id="sp-dth" type="number" min="1" max="6" step="0.5" value="'+curDtHours+'" inputmode="decimal" style="width:64px;text-align:center;font-size:13px;font-weight:600;padding:5px 7px;border:1px solid #ccc;border-radius:5px;font-family:inherit;" />'
+    +         '<input id="sp-dth" type="number" min="1" max="6" step="0.5" value="'+curDtHours+'" inputmode="decimal" style="width:64px;text-align:center;font-size:13px;font-weight:600;padding:5px 7px;border:1px solid var(--c-border-strong);border-radius:5px;font-family:inherit;" />'
     +         '<span style="font-size:12px;color:#666;">hours</span>'
     +       '</div>'
     +     '</div>'
@@ -613,7 +613,7 @@ function showSettingsPanel(){
           +     '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">'
           +       '<label for="sp-dt-radius" style="font-weight:600;color:#222;flex:1;">Day-trip radius from a hub</label>'
           +       '<div style="display:flex;align-items:center;gap:5px;">'
-          +         '<input id="sp-dt-radius" type="number" min="'+minDisp+'" max="'+maxDisp+'" step="'+stepDisp+'" value="'+displayVal+'" inputmode="numeric" data-unit="'+(imp?"imperial":"metric")+'" style="width:64px;text-align:center;font-size:13px;font-weight:600;padding:5px 7px;border:1px solid #ccc;border-radius:5px;font-family:inherit;" />'
+          +         '<input id="sp-dt-radius" type="number" min="'+minDisp+'" max="'+maxDisp+'" step="'+stepDisp+'" value="'+displayVal+'" inputmode="numeric" data-unit="'+(imp?"imperial":"metric")+'" style="width:64px;text-align:center;font-size:13px;font-weight:600;padding:5px 7px;border:1px solid var(--c-border-strong);border-radius:5px;font-family:inherit;" />'
           +         '<span style="font-size:12px;color:#666;">'+unitLbl+'</span>'
           +       '</div>'
           +     '</div>'
@@ -626,17 +626,17 @@ function showSettingsPanel(){
     // welcome onboarding; pre-fills the trip-editor hardlimits
     // textarea via _defaultHardLimits().
     +   '<div style="margin:18px 0 10px;border-top:1px dashed #d8d4c8;"></div>'
-    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:10px;">Hard limits</div>'
+    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--c-ink-3);margin-bottom:10px;">Hard limits</div>'
     +   '<div style="margin-bottom:6px;">'
     +     '<label for="sp-hardlimits" style="font-weight:600;color:#222;display:block;margin-bottom:4px;">Things Max won’t route around</label>'
-    +     '<textarea id="sp-hardlimits" rows="2" placeholder="e.g. No car rentals. Vegetarian. Wheelchair access required." style="width:100%;font-size:12.5px;padding:6px 9px;border:1px solid #ccc;border-radius:5px;font-family:inherit;box-sizing:border-box;resize:vertical;min-height:54px;">'+curHardLimits.replace(/</g,"&lt;").replace(/>/g,"&gt;")+'</textarea>'
+    +     '<textarea id="sp-hardlimits" rows="2" placeholder="e.g. No car rentals. Vegetarian. Wheelchair access required." style="width:100%;font-size:12.5px;padding:6px 9px;border:1px solid var(--c-border-strong);border-radius:5px;font-family:inherit;box-sizing:border-box;resize:vertical;min-height:54px;">'+curHardLimits.replace(/</g,"&lt;").replace(/>/g,"&gt;")+'</textarea>'
     +     '<div style="font-size:11px;color:#777;line-height:1.5;margin-top:4px;">Optional but consequential. Things Max won’t route around.</div>'
     +   '</div>'
 
     // v359.15: AVOIDANCES — soft preferences that apply to every trip
     // unless overridden on the brief.
     +   '<div style="margin:18px 0 10px;border-top:1px dashed #d8d4c8;"></div>'
-    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:10px;">Anything you’d like to avoid?</div>'
+    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--c-ink-3);margin-bottom:10px;">Anything you’d like to avoid?</div>'
     +   '<div style="margin-bottom:14px;">'
     +     '<label style="font-weight:600;color:#222;display:block;margin-bottom:6px;">Soft avoidances</label>'
     +     (function(){
@@ -655,7 +655,7 @@ function showSettingsPanel(){
     +   '</div>'
     +   '<div style="margin-bottom:6px;">'
     +     '<label for="sp-avoid-other" style="font-weight:600;color:#222;display:block;margin-bottom:4px;">Anything else to avoid</label>'
-    +     '<textarea id="sp-avoid-other" rows="2" placeholder="e.g. group tours, chain restaurants, cruise-ship ports" style="width:100%;font-size:12.5px;padding:6px 9px;border:1px solid #ccc;border-radius:5px;font-family:inherit;box-sizing:border-box;resize:vertical;min-height:54px;">'+curAvoidOtherDefaults.replace(/</g,"&lt;").replace(/>/g,"&gt;")+'</textarea>'
+    +     '<textarea id="sp-avoid-other" rows="2" placeholder="e.g. group tours, chain restaurants, cruise-ship ports" style="width:100%;font-size:12.5px;padding:6px 9px;border:1px solid var(--c-border-strong);border-radius:5px;font-family:inherit;box-sizing:border-box;resize:vertical;min-height:54px;">'+curAvoidOtherDefaults.replace(/</g,"&lt;").replace(/>/g,"&gt;")+'</textarea>'
     +     '<div style="font-size:11px;color:#777;line-height:1.5;margin-top:4px;">Free-form preferences that aren’t in the chip list above.</div>'
     +   '</div>'
 
@@ -664,11 +664,11 @@ function showSettingsPanel(){
 
     // v359.9: travelers section.
     +   '<div style="margin:18px 0 10px;border-top:1px dashed #d8d4c8;"></div>'
-    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:10px;">Travelers</div>'
+    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--c-ink-3);margin-bottom:10px;">Travelers</div>'
     +   '<div style="margin-bottom:14px;">'
     +     '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">'
     +       '<label for="sp-travelers" style="font-weight:600;color:#222;flex:1;">How many travelers?</label>'
-    +       '<input id="sp-travelers" type="number" min="1" max="40" value="'+curTravelers+'" inputmode="numeric" style="width:64px;text-align:center;font-size:13px;font-weight:600;padding:5px 7px;border:1px solid #ccc;border-radius:5px;font-family:inherit;" />'
+    +       '<input id="sp-travelers" type="number" min="1" max="40" value="'+curTravelers+'" inputmode="numeric" style="width:64px;text-align:center;font-size:13px;font-weight:600;padding:5px 7px;border:1px solid var(--c-border-strong);border-radius:5px;font-family:inherit;" />'
     +     '</div>'
     +     '<div style="font-size:11px;color:#777;line-height:1.5;">Your usual party size. Most people travel solo, as a couple, or as a family — pick whichever you do most. You can change it for any specific trip.</div>'
     +   '</div>'
@@ -689,15 +689,15 @@ function showSettingsPanel(){
     // and promoted to the top of the Settings panel (matches
     // welcome / trip-editor order).
     +   '<div style="margin:18px 0 10px;border-top:1px dashed #d8d4c8;"></div>'
-    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:10px;">Personal &amp; medical</div>'
+    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--c-ink-3);margin-bottom:10px;">Personal &amp; medical</div>'
     +   '<div style="margin-bottom:14px;">'
     +     '<label for="sp-dietary" style="font-weight:600;color:#222;display:block;margin-bottom:4px;">Dietary restrictions</label>'
-    +     '<input id="sp-dietary" type="text" value="'+curDietary.replace(/"/g,"&quot;")+'" placeholder="e.g. vegetarian; tree-nut allergy" style="width:100%;font-size:12.5px;padding:6px 9px;border:1px solid #ccc;border-radius:5px;font-family:inherit;box-sizing:border-box;" />'
+    +     '<input id="sp-dietary" type="text" value="'+curDietary.replace(/"/g,"&quot;")+'" placeholder="e.g. vegetarian; tree-nut allergy" style="width:100%;font-size:12.5px;padding:6px 9px;border:1px solid var(--c-border-strong);border-radius:5px;font-family:inherit;box-sizing:border-box;" />'
     +     '<div style="font-size:11px;color:#777;line-height:1.5;margin-top:4px;">Affects restaurant suggestions.</div>'
     +   '</div>'
     +   '<div style="margin-bottom:14px;">'
     +     '<label for="sp-languages" style="font-weight:600;color:#222;display:block;margin-bottom:4px;">Languages you speak</label>'
-    +     '<input id="sp-languages" type="text" value="'+curLanguages.replace(/"/g,"&quot;")+'" placeholder="e.g. English, conversational French" style="width:100%;font-size:12.5px;padding:6px 9px;border:1px solid #ccc;border-radius:5px;font-family:inherit;box-sizing:border-box;" />'
+    +     '<input id="sp-languages" type="text" value="'+curLanguages.replace(/"/g,"&quot;")+'" placeholder="e.g. English, conversational French" style="width:100%;font-size:12.5px;padding:6px 9px;border:1px solid var(--c-border-strong);border-radius:5px;font-family:inherit;box-sizing:border-box;" />'
     +     '<div style="font-size:11px;color:#777;line-height:1.5;margin-top:4px;">Helps Max gauge how off-the-beaten-path is realistic.</div>'
     +   '</div>'
 
@@ -706,27 +706,27 @@ function showSettingsPanel(){
     // prefs (MaxDB.prefs) so they apply across every trip.
     +   '<div style="margin-bottom:14px;">'
     +     '<label for="sp-allergies" style="font-weight:600;color:#222;display:block;margin-bottom:4px;">Allergies / medical</label>'
-    +     '<input id="sp-allergies" type="text" value="'+curAllergies.replace(/"/g,"&quot;")+'" placeholder="e.g. peanut, shellfish, penicillin" style="width:100%;font-size:12.5px;padding:6px 9px;border:1px solid #ccc;border-radius:5px;font-family:inherit;box-sizing:border-box;" />'
+    +     '<input id="sp-allergies" type="text" value="'+curAllergies.replace(/"/g,"&quot;")+'" placeholder="e.g. peanut, shellfish, penicillin" style="width:100%;font-size:12.5px;padding:6px 9px;border:1px solid var(--c-border-strong);border-radius:5px;font-family:inherit;box-sizing:border-box;" />'
     +     '<div style="font-size:11px;color:#777;line-height:1.5;margin-top:4px;">Severe enough to matter at a restaurant or hospital. Separate from general dietary preference above.</div>'
     +   '</div>'
     +   '<div style="margin-bottom:14px;">'
     +     '<label style="font-weight:600;color:#222;display:block;margin-bottom:6px;">Emergency contact</label>'
     +     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'
-    +       '<input id="sp-emergency-name" type="text" value="'+curEmergencyName.replace(/"/g,"&quot;")+'" placeholder="Name" style="font-size:12.5px;padding:6px 9px;border:1px solid #ccc;border-radius:5px;font-family:inherit;box-sizing:border-box;" />'
-    +       '<input id="sp-emergency-phone" type="tel" value="'+curEmergencyPhone.replace(/"/g,"&quot;")+'" placeholder="Phone (with country code)" style="font-size:12.5px;padding:6px 9px;border:1px solid #ccc;border-radius:5px;font-family:inherit;box-sizing:border-box;" />'
+    +       '<input id="sp-emergency-name" type="text" value="'+curEmergencyName.replace(/"/g,"&quot;")+'" placeholder="Name" style="font-size:12.5px;padding:6px 9px;border:1px solid var(--c-border-strong);border-radius:5px;font-family:inherit;box-sizing:border-box;" />'
+    +       '<input id="sp-emergency-phone" type="tel" value="'+curEmergencyPhone.replace(/"/g,"&quot;")+'" placeholder="Phone (with country code)" style="font-size:12.5px;padding:6px 9px;border:1px solid var(--c-border-strong);border-radius:5px;font-family:inherit;box-sizing:border-box;" />'
     +     '</div>'
     +     '<div style="font-size:11px;color:#777;line-height:1.5;margin-top:4px;">Someone back home to reach in an emergency. Include the country code so it dials from anywhere.</div>'
     +   '</div>'
     +   '<div style="margin-bottom:6px;">'
     +     '<label for="sp-loyalty" style="font-weight:600;color:#222;display:block;margin-bottom:4px;">Loyalty programs</label>'
-    +     '<textarea id="sp-loyalty" rows="3" placeholder="e.g. United MileagePlus 12345678\nHilton Honors 87654321\nHertz Gold 5555555" style="width:100%;font-size:12.5px;padding:6px 9px;border:1px solid #ccc;border-radius:5px;font-family:inherit;box-sizing:border-box;resize:vertical;min-height:64px;">'+curLoyalty.replace(/</g,"&lt;").replace(/>/g,"&gt;")+'</textarea>'
+    +     '<textarea id="sp-loyalty" rows="3" placeholder="e.g. United MileagePlus 12345678\nHilton Honors 87654321\nHertz Gold 5555555" style="width:100%;font-size:12.5px;padding:6px 9px;border:1px solid var(--c-border-strong);border-radius:5px;font-family:inherit;box-sizing:border-box;resize:vertical;min-height:64px;">'+curLoyalty.replace(/</g,"&lt;").replace(/>/g,"&gt;")+'</textarea>'
     +     '<div style="font-size:11px;color:#777;line-height:1.5;margin-top:4px;">Frequent flyer numbers, hotel loyalty IDs, rental car accounts. One per line. Useful when re-booking.</div>'
     +   '</div>'
 
     // v359.10: DISPLAY — units, temperature, date format, currency.
     +   '<div style="margin:18px 0 10px;border-top:1px dashed #d8d4c8;"></div>'
-    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:4px;">Display</div>'
-    +   '<div style="font-size:11px;color:#aaa;font-style:italic;margin-bottom:10px;line-height:1.5;">Collected here now; the rest of the UI will pick them up in a follow-up pass.</div>'
+    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--c-ink-3);margin-bottom:4px;">Display</div>'
+    +   '<div style="font-size:11px;color:var(--c-ink-4);font-style:italic;margin-bottom:10px;line-height:1.5;">Collected here now; the rest of the UI will pick them up in a follow-up pass.</div>'
     +   '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">'
     +     '<div>'
     +       '<label style="font-weight:600;color:#222;display:block;margin-bottom:6px;">Distance units</label>'
@@ -749,7 +749,7 @@ function showSettingsPanel(){
     +     '</div>'
     +     '<div>'
     +       '<label for="sp-currency" style="font-weight:600;color:#222;display:block;margin-bottom:6px;">Currency</label>'
-    +       '<input id="sp-currency" type="text" value="'+curCurrency.replace(/"/g,"&quot;")+'" placeholder="e.g. USD, EUR, GBP" style="width:100%;font-size:12.5px;padding:6px 9px;border:1px solid #ccc;border-radius:5px;font-family:inherit;box-sizing:border-box;" />'
+    +       '<input id="sp-currency" type="text" value="'+curCurrency.replace(/"/g,"&quot;")+'" placeholder="e.g. USD, EUR, GBP" style="width:100%;font-size:12.5px;padding:6px 9px;border:1px solid var(--c-border-strong);border-radius:5px;font-family:inherit;box-sizing:border-box;" />'
     +       '<div style="font-size:11px;color:#777;line-height:1.5;margin-top:4px;">Three-letter code. For cost displays.</div>'
     +     '</div>'
     +   '</div>'
@@ -760,14 +760,14 @@ function showSettingsPanel(){
     // welcome-onboarded localStorage marker so the next session
     // looks like a fresh new-user install. Confirms first; harm
     // reversibility is "type your prefs back in," not catastrophic.
-    + '<div style="padding:10px 22px 12px;border-top:1px solid #eee;background:#fff;font-size:11px;text-align:center;">'
+    + '<div style="padding:10px 22px 12px;border-top:1px solid var(--c-border-3);background:var(--c-bg);font-size:11px;text-align:center;">'
     +   '<a href="#" id="sp-reset-all" style="color:#c44;text-decoration:none;font-weight:600;cursor:pointer;">Reset all preferences (start over as a new user)</a>'
     + '</div>'
     // Footer
-    + '<div style="padding:14px 22px;border-top:1px solid #eee;display:flex;justify-content:space-between;align-items:center;gap:10px;background:#fafafa;">'
-    +   '<div id="sp-status" style="font-size:11px;color:#888;flex:1;"></div>'
-    +   '<button id="sp-cancel" type="button" style="font-size:12px;font-weight:600;padding:7px 14px;background:#fff;border:1px solid #ddd;border-radius:6px;color:#666;cursor:pointer;font-family:inherit;">Cancel</button>'
-    +   '<button id="sp-save" type="button" style="font-size:12px;font-weight:700;padding:7px 16px;background:#1a5fa8;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;">Save</button>'
+    + '<div style="padding:14px 22px;border-top:1px solid var(--c-border-3);display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--c-panel);">'
+    +   '<div id="sp-status" style="font-size:11px;color:var(--c-ink-3);flex:1;"></div>'
+    +   '<button id="sp-cancel" type="button" style="font-size:12px;font-weight:600;padding:7px 14px;background:var(--c-bg);border:1px solid var(--c-border);border-radius:6px;color:#666;cursor:pointer;font-family:inherit;">Cancel</button>'
+    +   '<button id="sp-save" type="button" style="font-size:12px;font-weight:700;padding:7px 16px;background:var(--c-primary);color:var(--c-on-dark);border:none;border-radius:6px;cursor:pointer;font-family:inherit;">Save</button>'
     + '</div>';
 
   ov.appendChild(box);
@@ -1003,24 +1003,24 @@ function showPaceToast(){
   if (document.getElementById("pace-toast")) return;
   var t = document.createElement("div");
   t.id = "pace-toast";
-  t.style.cssText = "position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:900;background:#2a2a2a;color:#fff;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.25);padding:10px 14px;display:flex;align-items:center;gap:10px;font-family:inherit;max-width:calc(100vw - 32px);flex-wrap:wrap;";
+  t.style.cssText = "position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:900;background:#2a2a2a;color:var(--c-on-dark);border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.25);padding:10px 14px;display:flex;align-items:center;gap:10px;font-family:inherit;max-width:calc(100vw - 32px);flex-wrap:wrap;";
   function modeBtn(id,label){
     var on=_paceMode===id;
     return '<button id="pace-mode-'+id+'" style="font-size:10px;padding:4px 9px;border-radius:11px;border:1px solid '+(on?"#fff":"#555")+';background:'+(on?"#fff":"transparent")+';color:'+(on?"#111":"#aaa")+';cursor:pointer;font-family:inherit;font-weight:'+(on?"700":"500")+';">'+label+'</button>';
   }
   // Rebalance button — only meaningful in Nights mode (net-zero transfer between destinations)
   var rebalanceHtml = _paceMode === "nights"
-    ? '<button id="pace-balance" style="font-size:11px;padding:5px 10px;border-radius:5px;border:1px solid #4a6a8a;background:#2a3a5a;color:#fff;cursor:pointer;font-family:inherit;" title="Move 1 night from the least-packed destination to the most-packed one (trip length unchanged)">Even out</button>'
+    ? '<button id="pace-balance" style="font-size:11px;padding:5px 10px;border-radius:5px;border:1px solid #4a6a8a;background:#2a3a5a;color:var(--c-on-dark);cursor:pointer;font-family:inherit;" title="Move 1 night from the least-packed destination to the most-packed one (trip length unchanged)">Even out</button>'
     : '';
   t.innerHTML =
     '<span style="font-size:12px;font-weight:500;">Pace feel right?</span>'
-    +'<span style="font-size:10px;color:#888;margin-right:-4px;">Adjust:</span>'
+    +'<span style="font-size:10px;color:var(--c-ink-3);margin-right:-4px;">Adjust:</span>'
     +modeBtn("items","Items")+modeBtn("nights","Nights")
     +'<span style="width:1px;background:#555;align-self:stretch;margin:0 2px;"></span>'
-    +'<button id="pace-loose" style="font-size:11px;padding:5px 10px;border-radius:5px;border:1px solid #555;background:#3a3a3a;color:#fff;cursor:pointer;font-family:inherit;">Too tight</button>'
-    +'<button id="pace-tight" style="font-size:11px;padding:5px 10px;border-radius:5px;border:1px solid #555;background:#3a3a3a;color:#fff;cursor:pointer;font-family:inherit;">Too loose</button>'
+    +'<button id="pace-loose" style="font-size:11px;padding:5px 10px;border-radius:5px;border:1px solid #555;background:#3a3a3a;color:var(--c-on-dark);cursor:pointer;font-family:inherit;">Too tight</button>'
+    +'<button id="pace-tight" style="font-size:11px;padding:5px 10px;border-radius:5px;border:1px solid #555;background:#3a3a3a;color:var(--c-on-dark);cursor:pointer;font-family:inherit;">Too loose</button>'
     +rebalanceHtml
-    +'<button id="pace-ok" style="font-size:11px;padding:5px 10px;border-radius:5px;border:1px solid #4a7a4e;background:#2a5a3e;color:#fff;cursor:pointer;font-family:inherit;font-weight:600;">\u2713 Feels good</button>'
+    +'<button id="pace-ok" style="font-size:11px;padding:5px 10px;border-radius:5px;border:1px solid #4a7a4e;background:#2a5a3e;color:var(--c-on-dark);cursor:pointer;font-family:inherit;font-weight:600;">\u2713 Feels good</button>'
     +'<button id="pace-x" style="font-size:13px;color:#999;background:none;border:none;cursor:pointer;font-family:inherit;padding:0 4px;line-height:1;" title="Dismiss">\u00d7</button>';
   document.body.appendChild(t);
   document.getElementById("pace-mode-items").onclick = function(){ _paceMode="items"; dismissPaceToast(false); showPaceToast(); };

@@ -13,11 +13,11 @@ function _openPasteListBriefModal(opts){
   ov.id = "paste-list-overlay";
   ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:10800;display:flex;align-items:center;justify-content:center;padding:24px;";
   var box = document.createElement("div");
-  box.style.cssText = "background:#fff;border-radius:12px;width:580px;max-width:100%;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 36px rgba(0,0,0,0.22);";
+  box.style.cssText = "background:var(--c-bg);border-radius:12px;width:580px;max-width:100%;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 36px rgba(0,0,0,0.22);";
   var subtitle = opts.subtitle || "One place per line. Max will fetch details and add suggestions around what you list.";
   box.innerHTML = ''
-    + '<div style="padding:16px 20px 10px;border-bottom:1px solid #eee;">'
-    +   '<div style="font-size:15px;font-weight:700;color:#111;">What\'s on your list?</div>'
+    + '<div style="padding:16px 20px 10px;border-bottom:1px solid var(--c-border-3);">'
+    +   '<div style="font-size:15px;font-weight:700;color:var(--c-ink);">What\'s on your list?</div>'
     +   '<div style="font-size:11.5px;color:#777;margin-top:5px;line-height:1.5;">' + subtitle + '</div>'
     + '</div>'
     + '<div style="flex:1;overflow-y:auto;padding:14px 20px;display:flex;flex-direction:column;gap:14px;">'
@@ -25,19 +25,19 @@ function _openPasteListBriefModal(opts){
     +     '<label style="display:block;font-size:11.5px;font-weight:600;color:#444;margin-bottom:5px;">'
     +       '<span style="margin-right:5px;">🛏</span>Places I want to stay'
     +     '</label>'
-    +     '<textarea id="paste-stays" placeholder="Reykjavík&#10;Vík&#10;Akureyri" style="width:100%;min-height:120px;font:inherit;font-size:12.5px;line-height:1.5;padding:8px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;color:#111;resize:vertical;font-family:inherit;box-sizing:border-box;"></textarea>'
+    +     '<textarea id="paste-stays" placeholder="Reykjavík&#10;Vík&#10;Akureyri" style="width:100%;min-height:120px;font:inherit;font-size:12.5px;line-height:1.5;padding:8px 10px;border:1px solid var(--c-border-strong);border-radius:6px;background:var(--c-bg);color:var(--c-ink);resize:vertical;font-family:inherit;box-sizing:border-box;"></textarea>'
     +   '</div>'
     +   '<div>'
     +     '<label style="display:block;font-size:11.5px;font-weight:600;color:#444;margin-bottom:5px;">'
     +       '<span style="margin-right:5px;">📍</span>Things I want to see and do'
     +     '</label>'
-    +     '<textarea id="paste-sees" placeholder="Seljalandsfoss&#10;Skógafoss&#10;Reynisfjara&#10;Jökulsárlón" style="width:100%;min-height:140px;font:inherit;font-size:12.5px;line-height:1.5;padding:8px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;color:#111;resize:vertical;font-family:inherit;box-sizing:border-box;"></textarea>'
+    +     '<textarea id="paste-sees" placeholder="Seljalandsfoss&#10;Skógafoss&#10;Reynisfjara&#10;Jökulsárlón" style="width:100%;min-height:140px;font:inherit;font-size:12.5px;line-height:1.5;padding:8px 10px;border:1px solid var(--c-border-strong);border-radius:6px;background:var(--c-bg);color:var(--c-ink);resize:vertical;font-family:inherit;box-sizing:border-box;"></textarea>'
     +   '</div>'
-    +   '<div id="paste-brief-preview" style="font-size:11.5px;color:#555;line-height:1.55;min-height:18px;"></div>'
+    +   '<div id="paste-brief-preview" style="font-size:11.5px;color:var(--c-ink-2);line-height:1.55;min-height:18px;"></div>'
     + '</div>'
-    + '<div style="padding:12px 20px;border-top:1px solid #eee;display:flex;justify-content:flex-end;gap:8px;">'
-    +   '<button id="paste-brief-cancel" type="button" style="font-size:13px;font-weight:500;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Cancel</button>'
-    +   '<button id="paste-brief-build" type="button" style="font-size:13px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 18px;cursor:pointer;font-family:inherit;" disabled>Open in discovery →</button>'
+    + '<div style="padding:12px 20px;border-top:1px solid var(--c-border-3);display:flex;justify-content:flex-end;gap:8px;">'
+    +   '<button id="paste-brief-cancel" type="button" style="font-size:13px;font-weight:500;color:var(--c-ink-2);background:var(--c-bg);border:1px solid var(--c-border-strong);border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Cancel</button>'
+    +   '<button id="paste-brief-build" type="button" style="font-size:13px;font-weight:700;color:var(--c-on-dark);background:var(--c-primary);border:1px solid var(--c-primary);border-radius:6px;padding:8px 18px;cursor:pointer;font-family:inherit;" disabled>Open in discovery →</button>'
     + '</div>';
   ov.appendChild(box);
   document.body.appendChild(ov);
@@ -117,7 +117,7 @@ function _openPasteListBriefModal(opts){
     if (r.duration) bits.push('duration: <strong>' + r.duration + '</strong>');
     prev.innerHTML = bits.length
       ? ('Will create: ' + bits.join(' · '))
-      : '<span style="color:#aaa;">Add places above to see a preview.</span>';
+      : '<span style="color:var(--c-ink-4);">Add places above to see a preview.</span>';
     buildBtn.disabled = !r.destinations.length;
   }
   staysEl.addEventListener("input", refresh);
@@ -251,10 +251,10 @@ async function renderBrowseChat(){
   bc.innerHTML = '<div style="background:#fbfaf6;border:1px solid #e8e4d8;border-radius:8px;padding:14px 16px;font-family:Georgia,serif;font-size:13px;line-height:1.7;color:#333;">'
     + '<div style="font-size:10px;font-weight:700;color:#888;letter-spacing:0.05em;text-transform:uppercase;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;margin-bottom:6px;">Max says\u2026</div>'
     + '<div id="browse-chat-body"><span class="max-thinking">Let me think\u2026</span></div>'
-    + '<textarea id="browse-input" rows="2" placeholder="e.g. somewhere warm, slow, not too crowded\u2026" style="width:100%;margin-top:12px;font-size:12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;resize:vertical;box-sizing:border-box;"></textarea>'
+    + '<textarea id="browse-input" rows="2" placeholder="e.g. somewhere warm, slow, not too crowded\u2026" style="width:100%;margin-top:12px;font-size:12px;padding:8px 10px;border:1px solid var(--c-border);border-radius:6px;font-family:inherit;resize:vertical;box-sizing:border-box;"></textarea>'
     + '<div style="margin-top:8px;display:flex;gap:6px;">'
-    + '<button id="browse-send" style="font-size:11px;padding:6px 14px;background:#111;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Ask Max</button>'
-    + '<button onclick="document.getElementById(\'browse-chat\').style.display=\'none\';renderHomeOptions();" style="font-size:11px;padding:6px 10px;background:#fff;color:#888;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;">Never mind</button>'
+    + '<button id="browse-send" style="font-size:11px;padding:6px 14px;background:var(--c-primary-top);color:var(--c-on-dark);border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Ask Max</button>'
+    + '<button onclick="document.getElementById(\'browse-chat\').style.display=\'none\';renderHomeOptions();" style="font-size:11px;padding:6px 10px;background:var(--c-bg);color:var(--c-ink-3);border:1px solid var(--c-border);border-radius:5px;cursor:pointer;font-family:inherit;">Never mind</button>'
     + '</div>'
     + '</div>';
 

@@ -67,14 +67,14 @@ function renderPickerSidebar(cands){
 
   // Header: Trip Details strip + Add-a-place input
   var headerWrap = document.createElement("div");
-  headerWrap.style.cssText = "padding:4px 4px 8px;border-bottom:1px solid #eee;margin-bottom:8px;";
+  headerWrap.style.cssText = "padding:4px 4px 8px;border-bottom:1px solid var(--c-border-3);margin-bottom:8px;";
 
   var detailsStrip = _renderTripDetailsStrip(MaxEnginePicker.keptCandidates(cands));
   if (detailsStrip) headerWrap.appendChild(detailsStrip);
 
   var addRow = document.createElement("div");
   addRow.style.cssText = "display:flex;gap:6px;margin-top:10px;";
-  addRow.innerHTML = '<input id="ce-add-place-inp" placeholder="Heard about a place not on the list? Type it here…" style="flex:1;min-width:0;font-size:11px;padding:7px 10px;border:1px solid #ddd;border-radius:5px;font-family:inherit;" onkeydown="if(event.key===&#39;Enter&#39;){event.preventDefault();addPlaceToCandidates();}" />';
+  addRow.innerHTML = '<input id="ce-add-place-inp" placeholder="Heard about a place not on the list? Type it here…" style="flex:1;min-width:0;font-size:11px;padding:7px 10px;border:1px solid var(--c-border);border-radius:5px;font-family:inherit;" onkeydown="if(event.key===&#39;Enter&#39;){event.preventDefault();addPlaceToCandidates();}" />';
   headerWrap.appendChild(addRow);
 
   el.appendChild(headerWrap);
@@ -93,7 +93,7 @@ function renderPickerSidebar(cands){
   // Ordered sequence list — accepted + unchecked, both in the route
   if (active.length === 0) {
     var empty = document.createElement("div");
-    empty.style.cssText = "padding:24px 12px;text-align:center;font-size:11px;color:#888;";
+    empty.style.cssText = "padding:24px 12px;text-align:center;font-size:11px;color:var(--c-ink-3);";
     empty.textContent = (cands && cands.length) ? "Resolving sequence…" : "Building your trip…";
     el.appendChild(empty);
   } else {
@@ -176,8 +176,8 @@ function _makePickerSidebarRow(c){
 
   var nameLine = document.createElement("div");
   nameLine.style.cssText = "color:#333;line-height:1.4;";
-  var country = c.country ? '<span style="color:#888;font-weight:400;"> · ' + _escapeHtml(c.country) + '</span>' : "";
-  var req = c._required ? '<span title="Required by a must-do" style="margin-left:6px;color:#b05820;font-size:10px;">★</span>' : "";
+  var country = c.country ? '<span style="color:var(--c-ink-3);font-weight:400;"> · ' + _escapeHtml(c.country) + '</span>' : "";
+  var req = c._required ? '<span title="Required by a must-do" style="margin-left:6px;color:var(--c-warn);font-size:10px;">★</span>' : "";
   nameLine.innerHTML = '<span style="font-weight:600;">' + _escapeHtml(c.place || "(unnamed)") + '</span>' + country + req;
   body.appendChild(nameLine);
 
@@ -186,17 +186,17 @@ function _makePickerSidebarRow(c){
   // LLM prose follows.
   var wikiDesc = document.createElement("div");
   wikiDesc.className = "ce-sidebar-wiki-desc";
-  wikiDesc.style.cssText = "display:none;font-size:10.5px;color:#888;font-style:italic;line-height:1.4;margin-top:2px;";
+  wikiDesc.style.cssText = "display:none;font-size:10.5px;color:var(--c-ink-3);font-style:italic;line-height:1.4;margin-top:2px;";
   body.appendChild(wikiDesc);
 
   // Expand for rationale on click — _ceCardExpanded carries state
   var expanded = !!(_ceCardExpanded && _ceCardExpanded[c.id]);
   if (expanded && (c.whyItFits || c.tradeoffs)) {
     var detail = document.createElement("div");
-    detail.style.cssText = "margin-top:6px;font-size:11px;color:#555;line-height:1.5;";
+    detail.style.cssText = "margin-top:6px;font-size:11px;color:var(--c-ink-2);line-height:1.5;";
     var html = "";
     if (c.whyItFits) html += '<div>' + _escapeHtml(c.whyItFits) + '</div>';
-    if (c.tradeoffs) html += '<div style="margin-top:4px;color:#888;">⚠ ' + _escapeHtml(c.tradeoffs) + '</div>';
+    if (c.tradeoffs) html += '<div style="margin-top:4px;color:var(--c-ink-3);">⚠ ' + _escapeHtml(c.tradeoffs) + '</div>';
     if (c.stayRange) html += '<div style="margin-top:4px;color:#777;font-size:10px;">' + _escapeHtml(c.stayRange) + '</div>';
     detail.innerHTML = html;
     body.appendChild(detail);
@@ -294,7 +294,7 @@ function _makePickerRejectedSection(rejected){
   wrap.style.cssText = "margin-top:14px;padding:8px 10px;background:#f6f7f9;border:1px solid #e0e6ef;border-radius:7px;";
   var collapsed = !_ceRejectedExpanded;
   var hdr = document.createElement("div");
-  hdr.style.cssText = "font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#888;margin-bottom:" + (collapsed ? "0" : "6px") + ";cursor:pointer;display:flex;justify-content:space-between;align-items:center;";
+  hdr.style.cssText = "font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--c-ink-3);margin-bottom:" + (collapsed ? "0" : "6px") + ";cursor:pointer;display:flex;justify-content:space-between;align-items:center;";
   hdr.innerHTML = '<span>Set aside · ' + rejected.length + '</span><span style="font-size:11px;">' + (collapsed ? "▸" : "▾") + '</span>';
   hdr.onclick = function(){
     _ceRejectedExpanded = !_ceRejectedExpanded;
@@ -304,13 +304,13 @@ function _makePickerRejectedSection(rejected){
   if (!collapsed) {
     rejected.forEach(function(c){
       var rRow = document.createElement("div");
-      rRow.style.cssText = "display:flex;align-items:center;gap:8px;padding:5px 6px;font-size:11px;color:#888;";
+      rRow.style.cssText = "display:flex;align-items:center;gap:8px;padding:5px 6px;font-size:11px;color:var(--c-ink-3);";
       var n = document.createElement("span");
       n.style.flex = "1";
       n.textContent = (c.place || "(unnamed)") + (c.country ? " · " + c.country : "");
       rRow.appendChild(n);
       var undo = document.createElement("button");
-      undo.style.cssText = "background:none;border:1px solid #d0d0d0;color:#555;font-size:10px;cursor:pointer;padding:3px 8px;border-radius:4px;font-family:inherit;";
+      undo.style.cssText = "background:none;border:1px solid #d0d0d0;color:var(--c-ink-2);font-size:10px;cursor:pointer;padding:3px 8px;border-radius:4px;font-family:inherit;";
       undo.textContent = "Restore";
       undo.onclick = function(){ setCS(c.id, "reject"); /* toggles off — status becomes null */ };
       rRow.appendChild(undo);
@@ -488,7 +488,7 @@ function renderCandidateCards(cands){
   console.log("[Max] renderCandidateCards: kept.length =", kept.length, "/ _tb.candidates =", (_tb.candidates||[]).length,
     "/ sample status =", (_tb.candidates && _tb.candidates[0]) ? {place:_tb.candidates[0].place, status:_tb.candidates[0].status, required:_tb.candidates[0]._required} : null);
   var headerWrap = document.createElement("div");
-  headerWrap.style.cssText = "margin:8px 4px 10px;padding:10px 14px;background:#fff;border:1px solid #e0e8f0;border-radius:8px;";
+  headerWrap.style.cssText = "margin:8px 4px 10px;padding:10px 14px;background:var(--c-bg);border:1px solid #e0e8f0;border-radius:8px;";
   // Round HX.4: day-range summary now MaxEnginePicker.keptDaysRangeText.
   // Returns the formatted "5 days" / "5\u20137 days" string, or empty when any
   // stayRange is unparseable (header omits the time clause rather than
@@ -496,31 +496,31 @@ function renderCandidateCards(cands){
   var _dayRangeStr = MaxEnginePicker.keptDaysRangeText(kept);
 
   var headerLabel = document.createElement("div");
-  headerLabel.style.cssText = "font-size:11px;color:#555;line-height:1.6;margin-bottom:6px;";
+  headerLabel.style.cssText = "font-size:11px;color:var(--c-ink-2);line-height:1.6;margin-bottom:6px;";
   if (!kept.length) {
     headerLabel.innerHTML = '<em>Pick at least one place to build a trip.</em>';
   } else {
     var timeClause = _dayRangeStr
-      ? '\u00b7 roughly <strong style="color:#111;">' + _dayRangeStr + '</strong>'
+      ? '\u00b7 roughly <strong style="color:var(--c-ink);">' + _dayRangeStr + '</strong>'
       : '';
     headerLabel.innerHTML = kept.length + ' place' + (kept.length!==1?'s':'') + ' kept ' + timeClause;
   }
   headerWrap.appendChild(headerLabel);
   if (kept.length) {
     var keptLine = document.createElement("div");
-    keptLine.style.cssText = "font-size:12px;color:#111;line-height:1.6;margin-bottom:4px;";
+    keptLine.style.cssText = "font-size:12px;color:var(--c-ink);line-height:1.6;margin-bottom:4px;";
     keptLine.innerHTML = kept.map(function(c){return '<strong>'+c.place+'</strong>';}).join(' \u00b7 ');
     headerWrap.appendChild(keptLine);
   }
   var headerStay = document.createElement("div");
   headerStay.id = "ce-summary-stay";
-  headerStay.style.cssText = "font-size:10px;color:#888;margin-bottom:8px;";
+  headerStay.style.cssText = "font-size:10px;color:var(--c-ink-3);margin-bottom:8px;";
   headerWrap.appendChild(headerStay);
   var headerBtns = document.createElement("div");
   headerBtns.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;align-items:center;";
   if (_ceEditMode) {
     var sumBuild = document.createElement("button");
-    sumBuild.style.cssText = "font-size:11px;font-weight:700;padding:7px 13px;border-radius:5px;border:1px solid #111;background:#111;color:#fff;cursor:pointer;font-family:inherit;"+(kept.length?"":"opacity:0.5;cursor:not-allowed;");
+    sumBuild.style.cssText = "font-size:11px;font-weight:700;padding:7px 13px;border-radius:5px;border:1px solid var(--c-border-dark);background:var(--c-primary-top);color:var(--c-on-dark);cursor:pointer;font-family:inherit;"+(kept.length?"":"opacity:0.5;cursor:not-allowed;");
     sumBuild.textContent = "Apply changes \u2192";
     sumBuild.disabled = !kept.length;
     sumBuild.onclick = function(){ if (!sumBuild.disabled) applyCandidateChanges(); };
@@ -544,10 +544,10 @@ function renderCandidateCards(cands){
   // Max didn't generate. This is where the tourist's knowledge starts sharing
   // the lead with the traveler's planning.
   var addRow = document.createElement("div");
-  addRow.style.cssText = "display:flex;gap:6px;margin-top:10px;padding-top:8px;border-top:1px solid #f0f0f0;";
+  addRow.style.cssText = "display:flex;gap:6px;margin-top:10px;padding-top:8px;border-top:1px solid var(--c-border-4);";
   addRow.innerHTML =
-    '<input id="ce-add-place-inp" placeholder="Heard about a place not on the list? Type it here\u2026" style="flex:1;min-width:0;font-size:11px;padding:7px 10px;border:1px solid #ddd;border-radius:5px;font-family:inherit;" onkeydown="if(event.key===&#39;Enter&#39;){event.preventDefault();addPlaceToCandidates();}" />'
-    +'<button onclick="addPlaceToCandidates()" style="font-size:11px;font-weight:600;padding:7px 12px;background:#fff;color:#333;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-family:inherit;white-space:nowrap;">+ Add</button>';
+    '<input id="ce-add-place-inp" placeholder="Heard about a place not on the list? Type it here\u2026" style="flex:1;min-width:0;font-size:11px;padding:7px 10px;border:1px solid var(--c-border);border-radius:5px;font-family:inherit;" onkeydown="if(event.key===&#39;Enter&#39;){event.preventDefault();addPlaceToCandidates();}" />'
+    +'<button onclick="addPlaceToCandidates()" style="font-size:11px;font-weight:600;padding:7px 12px;background:var(--c-bg);color:#333;border:1px solid var(--c-border);border-radius:5px;cursor:pointer;font-family:inherit;white-space:nowrap;">+ Add</button>';
   headerWrap.appendChild(addRow);
   // Lens bar — three different organizations of the same data. Different
   // travelers look for different things; same places, three reorderings.
@@ -591,7 +591,7 @@ function renderCandidateCards(cands){
     if (buckets === null) {
       // Cache miss → render skeleton, fire async LLM, re-render on return.
       var sk = document.createElement("div");
-      sk.style.cssText = "margin:8px 4px 14px;padding:10px 12px;background:#fafafa;border:1px dashed #ddd;border-radius:7px;font-size:11px;color:#888;font-style:italic;";
+      sk.style.cssText = "margin:8px 4px 14px;padding:10px 12px;background:var(--c-panel);border:1px dashed var(--c-border);border-radius:7px;font-size:11px;color:var(--c-ink-3);font-style:italic;";
       sk.textContent = "Sketching what's drawing you here…";
       el.appendChild(sk);
       MaxEnginePicker.deriveUserReasons(_tb.placeContext, activeCands, _mdcItems, _tb.region).then(function(){
@@ -689,7 +689,7 @@ function renderCandidateCards(cands){
     if (!MaxEnginePicker.mustDoSectionRenderable(t, hasAnyGroup)) return;
     // Umbrella type header
     var typeHdr = document.createElement("div");
-    typeHdr.style.cssText = "margin-top:18px;padding:10px 4px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#111;border-top:"+(renderedAny?"1px solid #e8e8e8":"none")+";";
+    typeHdr.style.cssText = "margin-top:18px;padding:10px 4px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--c-ink);border-top:"+(renderedAny?"1px solid #e8e8e8":"none")+";";
     typeHdr.textContent = typeLabelMap[t] || t;
     el.appendChild(typeHdr);
     renderedAny = true;
@@ -718,7 +718,7 @@ function renderCandidateCards(cands){
     // Patch (post-HX.10): best-mode branch removed; always render the
     // discovery cards.
     var dhdr = document.createElement("div");
-    dhdr.style.cssText = "margin-top:14px;padding:10px 4px 6px;font-size:10px;font-weight:700;text-transform:uppercase;color:#111;letter-spacing:0.06em;"
+    dhdr.style.cssText = "margin-top:14px;padding:10px 4px 6px;font-size:10px;font-weight:700;text-transform:uppercase;color:var(--c-ink);letter-spacing:0.06em;"
       + (renderedAny ? "border-top:1px solid #e8e8e8;" : "");
     dhdr.textContent = renderedAny ? "Other places worth considering" : "Places";
     el.appendChild(dhdr);
@@ -1054,17 +1054,17 @@ function showRejectRequiredModal(c, willDrop, willKeep, hasManual){
   var ov=document.createElement("div");
   ov.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;";
   var modal=document.createElement("div");
-  modal.style.cssText="background:#fff;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.25);max-width:480px;width:100%;overflow:hidden;font-family:inherit;";
+  modal.style.cssText="background:var(--c-bg);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.25);max-width:480px;width:100%;overflow:hidden;font-family:inherit;";
   modal.innerHTML=
     '<div style="padding:16px 18px 10px;">'
-    +'<div style="font-size:14px;font-weight:700;color:#111;margin-bottom:10px;">Reject '+c.place+'?</div>'
+    +'<div style="font-size:14px;font-weight:700;color:var(--c-ink);margin-bottom:10px;">Reject '+c.place+'?</div>'
     +'<div id="rrm-body" style="font-size:12px;line-height:1.65;color:#333;min-height:54px;">'
     +'<span style="color:#999;font-style:italic;">Thinking about the trade-offs\u2026</span>'
     +'</div>'
     +'</div>'
     +'<div style="display:flex;gap:8px;justify-content:flex-end;padding:10px 18px 16px;">'
-    +'<button id="rrm-cancel" style="font-size:11px;padding:7px 14px;border:1px solid #ddd;border-radius:5px;background:#fff;color:#333;cursor:pointer;font-family:inherit;font-weight:600;">Keep it</button>'
-    +'<button id="rrm-confirm" style="font-size:11px;padding:7px 14px;border:1px solid #c05020;border-radius:5px;background:#c05020;color:#fff;cursor:pointer;font-family:inherit;font-weight:600;">Reject</button>'
+    +'<button id="rrm-cancel" style="font-size:11px;padding:7px 14px;border:1px solid var(--c-border);border-radius:5px;background:var(--c-bg);color:#333;cursor:pointer;font-family:inherit;font-weight:600;">Keep it</button>'
+    +'<button id="rrm-confirm" style="font-size:11px;padding:7px 14px;border:1px solid #c05020;border-radius:5px;background:#c05020;color:var(--c-on-dark);cursor:pointer;font-family:inherit;font-weight:600;">Reject</button>'
     +'</div>';
   ov.appendChild(modal);
   document.body.appendChild(ov);

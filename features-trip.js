@@ -259,7 +259,7 @@ function mkTrackerInner(dest, opts){
   var seeLbl=document.createElement("div"); seeLbl.className="tk-section-lbl"; seeLbl.style.marginTop="14px"; seeLbl.textContent="Want to see";
   seeSec.appendChild(seeLbl);
   var seeHint=document.createElement("div");
-  seeHint.style.cssText = "font-size:10.5px;color:#888;margin:0 0 6px;line-height:1.4;";
+  seeHint.style.cssText = "font-size:10.5px;color:var(--c-ink-3);margin:0 0 6px;line-height:1.4;";
   seeHint.textContent = "Anything you've heard about and might want to look up later — a sight, a restaurant, a viewpoint. Type below and click Add.";
   seeSec.appendChild(seeHint);
   var seeListDiv=document.createElement("div"); seeListDiv.className="tlist"; seeListDiv.id="tl-"+dest.id+"-see";
@@ -290,7 +290,7 @@ function mkTrackerInner(dest, opts){
   // "Trip diary" alone reads as a heading without explanation; users
   // (Neal in 4.4) wondered how things end up here.
   var diaryHint=document.createElement("div");
-  diaryHint.style.cssText="font-size:10.5px;color:#888;margin:0 0 8px;line-height:1.4;";
+  diaryHint.style.cssText="font-size:10.5px;color:var(--c-ink-3);margin:0 0 8px;line-height:1.4;";
   diaryHint.textContent="Sights, restaurants, and notes from each day land here once you mark them done. Anything else you want to remember about being here, log below.";
   pastSec.appendChild(diaryHint);
 

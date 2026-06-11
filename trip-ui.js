@@ -42,7 +42,7 @@
     var lbl = document.createElement("span");
     lbl.textContent = "Notes · " + (s.n || "this sight");
     var status = document.createElement("span");
-    status.style.cssText = "font-size:8px;font-weight:500;color:#aaa;text-transform:none;letter-spacing:0;";
+    status.style.cssText = "font-size:8px;font-weight:500;color:var(--c-ink-4);text-transform:none;letter-spacing:0;";
     hdr.appendChild(lbl);
     hdr.appendChild(status);
     wrap.appendChild(hdr);
@@ -65,7 +65,7 @@
       ? global._pmGetPlaceNotes(_sNotesKey)
       : ((typeof s.research === "string") ? s.research : "");
     var view = document.createElement("div");
-    view.style.cssText = "font-size:12px;line-height:1.55;color:#333;min-height:30px;padding:5px 7px;background:#fff;border:1px solid #e8e1c8;border-radius:4px;cursor:text;white-space:pre-wrap;word-wrap:break-word;";
+    view.style.cssText = "font-size:12px;line-height:1.55;color:#333;min-height:30px;padding:5px 7px;background:var(--c-bg);border:1px solid #e8e1c8;border-radius:4px;cursor:text;white-space:pre-wrap;word-wrap:break-word;";
     view.title = "Tap to edit";
 
     function _esc(x){ return _escHtml(x); }
@@ -83,7 +83,7 @@
         var u = m[1], trail = "";
         while (/[)\.,;:!?]$/.test(u)) { trail = u.charAt(u.length - 1) + trail; u = u.substring(0, u.length - 1); }
         var safe = _esc(u);
-        html += '<a href="' + safe + '" target="_blank" rel="noopener noreferrer" style="color:#1a5fa8;text-decoration:underline;word-break:break-all;">' + safe + '</a>' + _esc(trail);
+        html += '<a href="' + safe + '" target="_blank" rel="noopener noreferrer" style="color:var(--c-primary);text-decoration:underline;word-break:break-all;">' + safe + '</a>' + _esc(trail);
         lastIdx = m.index + m[1].length;
       }
       html += _esc(saved.substring(lastIdx));
@@ -93,7 +93,7 @@
 
     var ta = document.createElement("textarea");
     ta.placeholder = "Hours, reservation URL, friend's tip, the side entrance…";
-    ta.style.cssText = "width:100%;min-height:60px;max-height:200px;font:inherit;font-size:12px;line-height:1.5;padding:5px 7px;border:1px solid #1a5fa8;border-radius:4px;background:#fff;color:#111;resize:vertical;box-sizing:border-box;font-family:inherit;display:none;outline:none;box-shadow:0 0 0 3px rgba(26,95,168,.12);";
+    ta.style.cssText = "width:100%;min-height:60px;max-height:200px;font:inherit;font-size:12px;line-height:1.5;padding:5px 7px;border:1px solid var(--c-primary);border-radius:4px;background:var(--c-bg);color:var(--c-ink);resize:vertical;box-sizing:border-box;font-family:inherit;display:none;outline:none;box-shadow:0 0 0 3px rgba(26,95,168,.12);";
 
     function enterEdit() {
       ta.value = saved;
@@ -237,7 +237,7 @@
     // capability when MA.3 lands the full row.
     if (s && s.done) {
       var done = document.createElement('div');
-      done.style.cssText = 'font-size:10px;color:#2a7a4e;margin-left:18px;margin-top:1px;';
+      done.style.cssText = 'font-size:10px;color:var(--c-see);margin-left:18px;margin-top:1px;';
       done.textContent = '✓ done';
       r.appendChild(done);
     }
@@ -325,7 +325,7 @@
       // sees at a glance this isn't a sight at the hub but a side trip
       // to a different town. Matches the chip-box color treatment.
       dot=document.createElement("span"); dot.className="item-dot-daytrip"; dot.textContent="📍";
-      dot.style.cssText="color:#5b3f8f;font-size:13px;flex-shrink:0;width:14px;text-align:center;";
+      dot.style.cssText="color:var(--c-accent);font-size:13px;flex-shrink:0;width:14px;text-align:center;";
       dot.title="Day trip — leaves the hub, return same day";
     } else {
       // v290: 7px dot was too small to hit reliably (and the row's
@@ -385,7 +385,7 @@
       extEdit.type = "button";
       extEdit.textContent = "\u270e";
       extEdit.title = s.url ? "Edit URL" : "Set a custom URL";
-      extEdit.style.cssText = "margin-left:3px;font-size:10px;color:#aaa;background:none;border:none;cursor:pointer;padding:0 2px;font-family:inherit;line-height:1;";
+      extEdit.style.cssText = "margin-left:3px;font-size:10px;color:var(--c-ink-4);background:none;border:none;cursor:pointer;padding:0 2px;font-family:inherit;line-height:1;";
       (function(item,did){extEdit.onclick = function(e){
         e.stopPropagation();
         global._openSightUrlEditor(extEdit, item, function(){ if (did && typeof global.drawDestMode === "function") global.drawDestMode(did); });
@@ -473,7 +473,7 @@
     acts.appendChild(mb);
     // Book button
     var bkb=document.createElement("button"); bkb.className="sa"; bkb.textContent=s.booking?"booked \u2713":"book";
-    if(s.booking) bkb.style.cssText="color:#2a7a4e;font-weight:600;";
+    if(s.booking) bkb.style.cssText="color:var(--c-see);font-weight:600;";
     (function(item,did,dId){bkb.onclick=function(e){e.stopPropagation();global.toggleSightBookForm(r,item,did,dId);};})(s,destId,dayId);
     acts.appendChild(bkb);
     // Delete button
@@ -567,7 +567,7 @@
       var editRow=document.createElement("div"); editRow.className="stime-edit";
       editRow.style.cssText="display:flex;align-items:center;gap:4px;padding-left:12px;margin-top:2px;";
       var startInp=document.createElement("input"); startInp.type="time"; startInp.className="stime-inp"; startInp.value=item.timeStart||"";
-      var sep=document.createElement("span"); sep.style.cssText="font-size:10px;color:#aaa;"; sep.textContent="\u2013";
+      var sep=document.createElement("span"); sep.style.cssText="font-size:10px;color:var(--c-ink-4);"; sep.textContent="\u2013";
       var endInp=document.createElement("input"); endInp.type="time"; endInp.className="stime-inp"; endInp.value=item.timeEnd||"";
       // v360.0.6: Save button bumped from 9px/1×5 to 12px/6×11 for
       // mobile tap target (was ~14×14 → now ~44×30 with min-height).
@@ -599,7 +599,7 @@
     // book the in/out leg without hunting for the tab.
     if (isDayTrip) {
       var transportLine = document.createElement("div");
-      transportLine.style.cssText = "font-size:10.5px;color:#5b3f8f;margin:2px 0 0 22px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;";
+      transportLine.style.cssText = "font-size:10.5px;color:var(--c-accent);margin:2px 0 0 22px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;";
       var hubName = s.dayTripFrom || "the hub";
       var noteMatch = (s.note || "").match(/(\d+)\s*km/);
       var distNote = noteMatch ? " · ~" + (parseInt(noteMatch[1], 10) * 2) + "km round trip" : "";
@@ -609,7 +609,7 @@
       var transportBtn = document.createElement("button");
       transportBtn.type = "button";
       transportBtn.textContent = "→ Plan transport";
-      transportBtn.style.cssText = "font-size:10px;font-weight:600;color:#5b3f8f;background:#fff;border:1px solid #d8c4e8;border-radius:9px;padding:2px 7px;cursor:pointer;font-family:inherit;";
+      transportBtn.style.cssText = "font-size:10px;font-weight:600;color:var(--c-accent);background:var(--c-bg);border:1px solid #d8c4e8;border-radius:9px;padding:2px 7px;cursor:pointer;font-family:inherit;";
       transportBtn.onmouseover = function(){ transportBtn.style.background = "#f4eef9"; };
       transportBtn.onmouseout = function(){ transportBtn.style.background = "#fff"; };
       (function(did){
@@ -636,7 +636,7 @@
       // generic title rather than looking up the hub name (would
       // require getDest + null guard for a tooltip not worth it).
       cancelBtn.title = "Convert this day trip into its own destination (a stay) inserted after the hub";
-      cancelBtn.style.cssText = "font-size:11px;font-weight:600;color:#1a5fa8;background:#eef5ff;border:1px solid #cfe1f7;border-radius:11px;padding:3px 10px;cursor:pointer;font-family:inherit;";
+      cancelBtn.style.cssText = "font-size:11px;font-weight:600;color:var(--c-primary);background:var(--c-tint-blue);border:1px solid #cfe1f7;border-radius:11px;padding:3px 10px;cursor:pointer;font-family:inherit;";
       cancelBtn.onmouseover = function(){ cancelBtn.style.background = "#dceaf8"; };
       cancelBtn.onmouseout = function(){ cancelBtn.style.background = "#eef5ff"; };
       (function(did, dtPlace, isPeer){
@@ -721,7 +721,7 @@
           var sightAddRow = document.createElement("div");
           sightAddRow.style.cssText = "margin:3px 0 0 22px;display:flex;flex-wrap:wrap;gap:4px;align-items:baseline;";
           var sightLbl = document.createElement("span");
-          sightLbl.style.cssText = "font-size:10px;color:#888;font-weight:500;margin-right:4px;";
+          sightLbl.style.cssText = "font-size:10px;color:var(--c-ink-3);font-weight:500;margin-right:4px;";
           sightLbl.textContent = "Add sights at " + dtPlaceForSuggest + ":";
           sightAddRow.appendChild(sightLbl);
           availableSights.forEach(function(sg){
@@ -729,7 +729,7 @@
             chip.type = "button";
             chip.textContent = "+ " + (sg.name || sg.n || "");
             chip.title = sg.desc || sg.note || "";
-            chip.style.cssText = "font-size:10px;font-weight:500;color:#5b3f8f;background:#fff;border:1px solid #d8c4e8;border-radius:9px;padding:2px 7px;cursor:pointer;font-family:inherit;";
+            chip.style.cssText = "font-size:10px;font-weight:500;color:var(--c-accent);background:var(--c-bg);border:1px solid #d8c4e8;border-radius:9px;padding:2px 7px;cursor:pointer;font-family:inherit;";
             chip.onmouseover = function(){ chip.style.background = "#f4eef9"; };
             chip.onmouseout = function(){ chip.style.background = "#fff"; };
             (function(sgData, did, dId){
@@ -865,7 +865,7 @@
         if (qPop) return qPop;
         qPop = document.createElement('div');
         qPop.className = 'sf6-pop';
-        qPop.style.cssText = 'display:none;position:fixed;width:280px;max-width:calc(100vw - 24px);font-size:11px;line-height:1.55;color:#5a4520;background:#fff;border:1px solid #e6d5a0;border-radius:6px;padding:9px 11px;box-shadow:0 4px 14px rgba(0,0,0,.18);z-index:8500;font-weight:500;text-align:left;white-space:normal;';
+        qPop.style.cssText = 'display:none;position:fixed;width:280px;max-width:calc(100vw - 24px);font-size:11px;line-height:1.55;color:#5a4520;background:var(--c-bg);border:1px solid #e6d5a0;border-radius:6px;padding:9px 11px;box-shadow:0 4px 14px rgba(0,0,0,.18);z-index:8500;font-weight:500;text-align:left;white-space:normal;';
         qPop.textContent = rationale;
         document.body.appendChild(qPop);
         return qPop;
@@ -1002,7 +1002,7 @@
     var datesBar = document.createElement("div");
     // v359.60.30: clickable — opens _openTripDatesEditor so the user
     // can change start/end without hunting through menus.
-    datesBar.style.cssText = "margin:0 2px 12px;padding:14px 16px;background:#fff;border:1px solid #e6e2d8;border-radius:8px;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;cursor:pointer;transition:background 120ms ease;";
+    datesBar.style.cssText = "margin:0 2px 12px;padding:14px 16px;background:var(--c-bg);border:1px solid #e6e2d8;border-radius:8px;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;cursor:pointer;transition:background 120ms ease;";
     datesBar.title = "Click to change trip dates";
     datesBar.onmouseover = function(){ datesBar.style.background = "#fafaf6"; };
     datesBar.onmouseout  = function(){ datesBar.style.background = "#fff"; };
@@ -1012,7 +1012,7 @@
     datesBar.innerHTML = ''
       + '<div style="font-size:18px;font-weight:700;color:#1a1a1a;">'
       +   fmt(first.dateFrom) + ' – ' + fmt(last.dateTo)
-      +   ' <span style="font-size:11px;color:#aaa;font-weight:500;margin-left:4px;">&#9998;</span>'
+      +   ' <span style="font-size:11px;color:var(--c-ink-4);font-weight:500;margin-left:4px;">&#9998;</span>'
       + '</div>'
       + '<div style="font-size:12px;color:#666;">'
       +   '<strong>' + totalDays + ' days</strong> · ' + totalNights + ' nights · '
@@ -1063,7 +1063,7 @@
     var leftCol = document.createElement("div");
     leftCol.style.cssText = "flex:1;min-width:0;line-height:1.4;";
     var topLine = document.createElement("div");
-    topLine.style.cssText = "font-size:11px;font-weight:700;color:#1a5fa8;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:2px;";
+    topLine.style.cssText = "font-size:11px;font-weight:700;color:var(--c-primary);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:2px;";
     topLine.textContent = "📍 You're on day " + status.dayNumber + " of " + status.totalDays;
     var bottomLine = document.createElement("div");
     bottomLine.style.cssText = "font-size:13px;font-weight:600;color:#0e3a6a;display:flex;flex-wrap:wrap;align-items:baseline;gap:6px;";
@@ -1118,7 +1118,7 @@
       var jumpBtn = document.createElement("button");
       jumpBtn.type = "button";
       jumpBtn.textContent = "Today's plan →";
-      jumpBtn.style.cssText = "font-size:11px;font-weight:600;padding:6px 12px;border:1px solid #1a5fa8;border-radius:5px;background:#1a5fa8;color:#fff;cursor:pointer;font-family:inherit;flex-shrink:0;";
+      jumpBtn.style.cssText = "font-size:11px;font-weight:600;padding:6px 12px;border:1px solid var(--c-primary);border-radius:5px;background:var(--c-primary);color:var(--c-on-dark);cursor:pointer;font-family:inherit;flex-shrink:0;";
       jumpBtn.onmouseover = function () { jumpBtn.style.background = "#0e3a6a"; jumpBtn.style.borderColor = "#0e3a6a"; };
       jumpBtn.onmouseout  = function () { jumpBtn.style.background = "#1a5fa8"; jumpBtn.style.borderColor = "#1a5fa8"; };
       (function (destId, dayId) {
@@ -1236,7 +1236,7 @@
     actions.items.forEach(function (item) {
       var line = document.createElement("button");
       line.type = "button";
-      line.style.cssText = "display:block;width:100%;text-align:left;padding:7px 10px;margin-bottom:4px;font-family:inherit;font-size:11.5px;color:#5a4520;background:#fff;border:1px solid #ead7a3;border-radius:5px;cursor:pointer;line-height:1.45;";
+      line.style.cssText = "display:block;width:100%;text-align:left;padding:7px 10px;margin-bottom:4px;font-family:inherit;font-size:11.5px;color:#5a4520;background:var(--c-bg);border:1px solid #ead7a3;border-radius:5px;cursor:pointer;line-height:1.45;";
       line.onmouseover = function () { line.style.background = "#fdf3cf"; };
       line.onmouseout  = function () { line.style.background = "#fff"; };
       var text = "";
@@ -1386,7 +1386,7 @@
     var popoutBtn = document.createElement("button");
     popoutBtn.type = "button";
     popoutBtn.style.cssText =
-      'background:#fff;border:1px solid #d8c4a4;color:#5c4520;font-family:inherit;' +
+      'background:var(--c-bg);border:1px solid #d8c4a4;color:#5c4520;font-family:inherit;' +
       'font-size:11px;font-weight:600;padding:4px 10px;border-radius:5px;cursor:pointer;';
     popoutBtn.textContent = '📋 Pop out';
     popoutBtn.title = 'Open this list in a separate window you can keep visible while you work through it';
@@ -1400,7 +1400,7 @@
     summary.items.forEach(function (item) {
       var line = document.createElement("button");
       line.type = "button";
-      line.style.cssText = "display:block;width:100%;text-align:left;padding:7px 10px;margin-bottom:4px;font-family:inherit;font-size:11.5px;color:#5a4520;background:#fff;border:1px solid #ead7a3;border-radius:5px;cursor:pointer;line-height:1.45;";
+      line.style.cssText = "display:block;width:100%;text-align:left;padding:7px 10px;margin-bottom:4px;font-family:inherit;font-size:11.5px;color:#5a4520;background:var(--c-bg);border:1px solid #ead7a3;border-radius:5px;cursor:pointer;line-height:1.45;";
       line.onmouseover = function () { line.style.background = "#fdf3cf"; };
       line.onmouseout  = function () { line.style.background = "#fff"; };
       // v353.2: each line leads with a date reference so the panel
@@ -1905,7 +1905,7 @@
     var dismissRow = document.createElement("div");
     dismissRow.style.cssText = "margin-top:8px;display:flex;justify-content:flex-end;";
     var dismissBtn = document.createElement("button");
-    dismissBtn.style.cssText = "font-size:10px;font-weight:500;padding:4px 10px;border:1px solid #cfd8e2;border-radius:5px;background:#fff;color:#666;cursor:pointer;font-family:inherit;";
+    dismissBtn.style.cssText = "font-size:10px;font-weight:500;padding:4px 10px;border:1px solid #cfd8e2;border-radius:5px;background:var(--c-bg);color:#666;cursor:pointer;font-family:inherit;";
     dismissBtn.textContent = "Dismiss";
     dismissBtn.onmouseover = function () { dismissBtn.style.background = "#f5f7fa"; };
     dismissBtn.onmouseout  = function () { dismissBtn.style.background = "#fff"; };
@@ -1999,19 +1999,19 @@
     hdr.type = "button";
     hdr.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;padding:9px 12px;background:transparent;border:none;cursor:pointer;font-family:inherit;text-align:left;";
     var hdrL = document.createElement("div");
-    hdrL.style.cssText = "font-size:12px;color:#b05820;line-height:1.4;";
+    hdrL.style.cssText = "font-size:12px;color:var(--c-warn);line-height:1.4;";
     var bits = [];
     if (actions.length) bits.push("<strong>" + actions.length + "</strong> provider action" + (actions.length !== 1 ? "s" : ""));
     if (deadlines.length) bits.push("<strong>" + deadlines.length + "</strong> cancellation deadline" + (deadlines.length !== 1 ? "s" : ""));
     hdrL.innerHTML = "⚠ <strong>What you need to take care of</strong> — " + bits.join(" · ");
     var hdrR = document.createElement("div");
-    hdrR.style.cssText = "font-size:11px;font-weight:600;color:#b05820;flex-shrink:0;";
+    hdrR.style.cssText = "font-size:11px;font-weight:600;color:var(--c-warn);flex-shrink:0;";
     hdrR.textContent = "▾ Show all";
     hdr.appendChild(hdrL); hdr.appendChild(hdrR);
     panel.appendChild(hdr);
 
     var body = document.createElement("div");
-    body.style.cssText = "display:none;border-top:1px solid #f0c8a0;background:#fff;padding:6px 0;";
+    body.style.cssText = "display:none;border-top:1px solid #f0c8a0;background:var(--c-bg);padding:6px 0;";
     hdr.onclick = function(){
       var open = body.style.display !== "none";
       body.style.display = open ? "none" : "block";
@@ -2555,9 +2555,9 @@
                       (trip._ui.arrivalExpanded === undefined && _aeNeverSet);
     if (!_aeExpanded) {
       var sumRow = document.createElement('div');
-      sumRow.style.cssText = 'margin:0 2px 12px;padding:9px 14px;background:#fafafa;border:1px solid #e6e2d8;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:12px;color:#444;';
+      sumRow.style.cssText = 'margin:0 2px 12px;padding:9px 14px;background:var(--c-panel);border:1px solid #e6e2d8;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:12px;color:#444;';
       var sumIcon = document.createElement('span');
-      sumIcon.style.cssText = 'flex-shrink:0;color:#888;font-size:14px;';
+      sumIcon.style.cssText = 'flex-shrink:0;color:var(--c-ink-3);font-size:14px;';
       // FN.A.2: mode-aware glyph for the collapsed line. _modeGlyph
       // lives in index.html and returns ✈ as a safe fallback when the
       // helper isn't loaded yet (early init paths).
@@ -2583,7 +2583,7 @@
         '<strong style="color:#222;">Arriving</strong> ' + (_aeCurEntry || '?').replace(/</g,'&lt;') + _flightFrag(aeED) +
         ' · <strong style="color:#222;">Departing</strong> ' + (_aeCurExit || '?').replace(/</g,'&lt;') + _flightFrag(aeXD);
       var sumChev = document.createElement('span');
-      sumChev.style.cssText = 'flex-shrink:0;color:#888;font-size:12px;';
+      sumChev.style.cssText = 'flex-shrink:0;color:var(--c-ink-3);font-size:12px;';
       sumChev.textContent = '⌄';
       sumRow.appendChild(sumIcon);
       sumRow.appendChild(sumText);
@@ -2618,7 +2618,7 @@
       if (d.time && typeof global._fmtTime12h === "function") bits.push(global._fmtTime12h(d.time));
       else if (d.time) bits.push(d.time);
       if (!bits.length) return "";
-      return '<span style="margin-right:8px;"><strong style="color:#555;">' + label + ':</strong> ' + bits.join(" · ") + '</span>';
+      return '<span style="margin-right:8px;"><strong style="color:var(--c-ink-2);">' + label + ':</strong> ' + bits.join(" · ") + '</span>';
     }
     var summaryHtml = '';
     if (hasEntryLogistics || hasExitLogistics) {
@@ -2715,7 +2715,7 @@
       } else {
         html += '<button type="button" data-gw-action="use" data-gw-side="' + side
              +  '" data-gw-name="' + esc(top.name)
-             +  '" style="font-size:10.5px;font-weight:600;color:#fff;background:#1a5fa8;border:none;border-radius:4px;padding:3px 9px;cursor:pointer;font-family:inherit;">'
+             +  '" style="font-size:10.5px;font-weight:600;color:var(--c-on-dark);background:var(--c-primary);border:none;border-radius:4px;padding:3px 9px;cursor:pointer;font-family:inherit;">'
              +  'Use ' + esc(top.name)
              +  '</button>';
       }
@@ -2723,7 +2723,7 @@
       if (rest.length) {
         html += '<div style="margin-top:5px;">'
              +  '<a href="#" data-gw-action="show-alts" data-gw-side="' + side
-             +  '" style="font-size:10.5px;color:#1a5fa8;text-decoration:none;font-weight:600;">'
+             +  '" style="font-size:10.5px;color:var(--c-primary);text-decoration:none;font-weight:600;">'
              +  '▾ ' + rest.length + ' other ' + (rest.length === 1 ? 'option' : 'options')
              +  '</a>'
              +  '<div data-gw-alts="' + side + '" style="display:none;margin-top:6px;padding-left:8px;border-left:2px solid #d8e2f0;">';
@@ -2733,13 +2733,13 @@
           var altAccepted = curNorm === String(alt.name || "").toLowerCase().trim();
           html += '<div style="font-size:11.5px;color:#333;margin-bottom:4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
                +    '<strong>' + esc(alt.name) + '</strong>'
-               +    '<span style="color:#888;font-size:10.5px;">' + esc(altWhy) + '</span>';
+               +    '<span style="color:var(--c-ink-3);font-size:10.5px;">' + esc(altWhy) + '</span>';
           if (altAccepted) {
             html += '<span style="color:#3a7a4a;font-size:10.5px;font-weight:600;">✓ accepted</span>';
           } else {
             html += '<button type="button" data-gw-action="use" data-gw-side="' + side
                  +  '" data-gw-name="' + esc(alt.name)
-                 +  '" style="font-size:10px;font-weight:600;color:#1a5fa8;background:#fff;border:1px solid #1a5fa8;border-radius:3px;padding:2px 7px;cursor:pointer;font-family:inherit;">Use</button>';
+                 +  '" style="font-size:10px;font-weight:600;color:var(--c-primary);background:var(--c-bg);border:1px solid var(--c-primary);border-radius:3px;padding:2px 7px;cursor:pointer;font-family:inherit;">Use</button>';
           }
           html += '</div>';
         }
@@ -2754,8 +2754,8 @@
     var _gwCardHtml = "";
     if (_gwEntryCardHtml || _gwExitCardHtml) {
       _gwCardHtml = ''
-        + '<div id="tm-max-suggests" style="margin-top:12px;padding:12px 14px;background:#f0f4fa;border:1px solid #c8d8f0;border-radius:7px;">'
-        +   '<div style="font-size:11px;font-weight:700;color:#1a5fa8;letter-spacing:0.05em;text-transform:uppercase;margin-bottom:8px;">✦ Max suggests</div>'
+        + '<div id="tm-max-suggests" style="margin-top:12px;padding:12px 14px;background:#f0f4fa;border:1px solid var(--c-border-blue);border-radius:7px;">'
+        +   '<div style="font-size:11px;font-weight:700;color:var(--c-primary);letter-spacing:0.05em;text-transform:uppercase;margin-bottom:8px;">✦ Max suggests</div>'
         +   _gwEntryCardHtml
         +   _gwExitCardHtml
         + '</div>';
@@ -2769,18 +2769,18 @@
         )
       + _datalistHtml
       + '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">'
-      +   '<label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px;">Arriving at'
-      +     '<input id="tm-entry-inp" placeholder="e.g. Zurich" list="tm-arrdep-suggestions" autocomplete="off" value="' + esc(curEntry) + '" style="font-size:14px;padding:8px 10px;border:1px solid #ccc;border-radius:4px;width:160px;max-width:100%;font-family:inherit;flex:1;min-width:140px;" />'
+      +   '<label style="font-size:11px;color:var(--c-ink-2);display:flex;align-items:center;gap:5px;">Arriving at'
+      +     '<input id="tm-entry-inp" placeholder="e.g. Zurich" list="tm-arrdep-suggestions" autocomplete="off" value="' + esc(curEntry) + '" style="font-size:14px;padding:8px 10px;border:1px solid var(--c-border-strong);border-radius:4px;width:160px;max-width:100%;font-family:inherit;flex:1;min-width:140px;" />'
       +   '</label>'
-      +   '<label style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px;">Departing from'
-      +     '<input id="tm-exit-inp" placeholder="e.g. Zurich" list="tm-arrdep-suggestions" autocomplete="off" value="' + esc(curExit) + '" style="font-size:14px;padding:8px 10px;border:1px solid #ccc;border-radius:4px;width:160px;max-width:100%;font-family:inherit;flex:1;min-width:140px;" />'
+      +   '<label style="font-size:11px;color:var(--c-ink-2);display:flex;align-items:center;gap:5px;">Departing from'
+      +     '<input id="tm-exit-inp" placeholder="e.g. Zurich" list="tm-arrdep-suggestions" autocomplete="off" value="' + esc(curExit) + '" style="font-size:14px;padding:8px 10px;border:1px solid var(--c-border-strong);border-radius:4px;width:160px;max-width:100%;font-family:inherit;flex:1;min-width:140px;" />'
       +   '</label>'
-      +   '<button id="tm-arrdep-apply" style="font-size:11px;font-weight:600;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:4px;padding:5px 12px;cursor:pointer;font-family:inherit;">Apply</button>'
-      +   '<span id="tm-arrdep-status" style="font-size:10px;color:#888;"></span>'
+      +   '<button id="tm-arrdep-apply" style="font-size:11px;font-weight:600;color:var(--c-on-dark);background:var(--c-primary);border:1px solid var(--c-primary);border-radius:4px;padding:5px 12px;cursor:pointer;font-family:inherit;">Apply</button>'
+      +   '<span id="tm-arrdep-status" style="font-size:10px;color:var(--c-ink-3);"></span>'
       + '</div>'
       + _gwCardHtml
       + '<div style="margin-top:10px;border-top:1px dashed #d8d4c8;padding-top:8px;">'
-      +   '<button id="tm-logistics-toggle" type="button" onclick="_toggleLogistics(&#39;trip&#39;)" style="font-size:11px;color:#1a5fa8;background:none;border:none;padding:2px 0;cursor:pointer;font-family:inherit;font-weight:600;">'
+      +   '<button id="tm-logistics-toggle" type="button" onclick="_toggleLogistics(&#39;trip&#39;)" style="font-size:11px;color:var(--c-primary);background:none;border:none;padding:2px 0;cursor:pointer;font-family:inherit;font-weight:600;">'
       +     (detailsExpanded ? '▿ Hide arrival/departure details' : '▸ Add arrival/departure details')
       +   '</button>'
       +   summaryHtml
@@ -3291,7 +3291,7 @@
     // Hint copy — first-time or returning. v360.4: context-agnostic
     // first-time copy works for new-trip and edit-existing-trip flows.
     var hint = document.createElement("div");
-    hint.style.cssText = "margin:0 0 12px;padding:10px 12px;background:#fff;border:1px dashed #d6c8a8;border-radius:6px;font-size:11.5px;line-height:1.55;color:#5a4a2a;";
+    hint.style.cssText = "margin:0 0 12px;padding:10px 12px;background:var(--c-bg);border:1px dashed #d6c8a8;border-radius:6px;font-size:11.5px;line-height:1.55;color:#5a4a2a;";
     if (firstTime) {
       hint.innerHTML = "How do you generally travel? Max will remember these across all your trips. " +
         "Fill them out once, update them anytime.";
@@ -3352,7 +3352,7 @@
 
       // Inline editor (hidden until valBtn clicked).
       var editorWrap = document.createElement("div");
-      editorWrap.style.cssText = "grid-column:1 / -1;display:none;margin-top:8px;padding:10px 12px;background:#fff;border:1px solid #d6c8a8;border-radius:6px;";
+      editorWrap.style.cssText = "grid-column:1 / -1;display:none;margin-top:8px;padding:10px 12px;background:var(--c-bg);border:1px solid #d6c8a8;border-radius:6px;";
 
       valBtn.onclick = function(){
         if (editorWrap.style.display === "block") {
@@ -3366,7 +3366,7 @@
         var initVal = effective(f.key, f.defaultGetter());
         if (f.type === "select") {
           inputEl = document.createElement("select");
-          inputEl.style.cssText = "font-size:12px;padding:6px 8px;border:1px solid #ccc;border-radius:5px;font-family:inherit;width:100%;box-sizing:border-box;";
+          inputEl.style.cssText = "font-size:12px;padding:6px 8px;border:1px solid var(--c-border-strong);border-radius:5px;font-family:inherit;width:100%;box-sizing:border-box;";
           var blank = document.createElement("option");
           blank.value = ""; blank.textContent = "— select —";
           inputEl.appendChild(blank);
@@ -3383,13 +3383,13 @@
           if (f.max != null) inputEl.max = f.max;
           if (f.step != null) inputEl.step = f.step;
           inputEl.value = (initVal != null && initVal !== "") ? String(initVal) : "";
-          inputEl.style.cssText = "font-size:12px;padding:6px 8px;border:1px solid #ccc;border-radius:5px;font-family:inherit;width:120px;box-sizing:border-box;";
+          inputEl.style.cssText = "font-size:12px;padding:6px 8px;border:1px solid var(--c-border-strong);border-radius:5px;font-family:inherit;width:120px;box-sizing:border-box;";
         } else {
           inputEl = document.createElement("input");
           inputEl.type = "text";
           inputEl.value = (initVal != null) ? String(initVal) : "";
           if (f.placeholder) inputEl.placeholder = f.placeholder;
-          inputEl.style.cssText = "font-size:12px;padding:6px 8px;border:1px solid #ccc;border-radius:5px;font-family:inherit;width:100%;box-sizing:border-box;";
+          inputEl.style.cssText = "font-size:12px;padding:6px 8px;border:1px solid var(--c-border-strong);border-radius:5px;font-family:inherit;width:100%;box-sizing:border-box;";
         }
         editorWrap.appendChild(inputEl);
 
@@ -3433,14 +3433,14 @@
 
         var saveTripBtn = document.createElement("button");
         saveTripBtn.type = "button";
-        saveTripBtn.style.cssText = "font-size:11.5px;font-weight:600;padding:6px 12px;border:1px solid #1a5fa8;background:#1a5fa8;color:#fff;border-radius:5px;cursor:pointer;font-family:inherit;";
+        saveTripBtn.style.cssText = "font-size:11.5px;font-weight:600;padding:6px 12px;border:1px solid var(--c-primary);background:var(--c-primary);color:var(--c-on-dark);border-radius:5px;cursor:pointer;font-family:inherit;";
         saveTripBtn.textContent = "Save for this trip";
         saveTripBtn.onclick = function(){ _commit(false); };
         btnRow.appendChild(saveTripBtn);
 
         var saveProfileBtn = document.createElement("button");
         saveProfileBtn.type = "button";
-        saveProfileBtn.style.cssText = "font-size:11.5px;font-weight:500;padding:6px 12px;border:1px solid #d6c8a8;background:#fff;color:#5a4a2a;border-radius:5px;cursor:pointer;font-family:inherit;";
+        saveProfileBtn.style.cssText = "font-size:11.5px;font-weight:500;padding:6px 12px;border:1px solid #d6c8a8;background:var(--c-bg);color:#5a4a2a;border-radius:5px;cursor:pointer;font-family:inherit;";
         saveProfileBtn.textContent = "Save to my profile too";
         saveProfileBtn.title = "Update your profile so this becomes the new default for future trips too.";
         saveProfileBtn.onclick = function(){ _commit(true); };
@@ -3448,7 +3448,7 @@
 
         var cancelBtn = document.createElement("button");
         cancelBtn.type = "button";
-        cancelBtn.style.cssText = "font-size:11.5px;font-weight:500;padding:6px 10px;background:transparent;border:none;color:#888;cursor:pointer;font-family:inherit;margin-left:auto;";
+        cancelBtn.style.cssText = "font-size:11.5px;font-weight:500;padding:6px 10px;background:transparent;border:none;color:var(--c-ink-3);cursor:pointer;font-family:inherit;margin-left:auto;";
         cancelBtn.textContent = "Cancel";
         cancelBtn.onclick = function(){
           editorWrap.style.display = "none";
@@ -3474,7 +3474,7 @@
     footer.style.cssText = "margin-top:10px;padding-top:10px;border-top:1px dashed #e6dec8;display:flex;justify-content:flex-end;";
     var openFull = document.createElement("a");
     openFull.href = "#";
-    openFull.style.cssText = "font-size:11px;color:#1a5fa8;text-decoration:none;font-weight:600;";
+    openFull.style.cssText = "font-size:11px;color:var(--c-primary);text-decoration:none;font-weight:600;";
     openFull.textContent = "Open full profile →";
     openFull.title = "Edit all profile fields including dietary, languages, units, emergency contact, etc.";
     openFull.onclick = function(e){
@@ -3544,7 +3544,7 @@
       btn.appendChild(top);
       if (sub) {
         var s = document.createElement("div");
-        s.style.cssText = "font-size:10.5px;color:#888;line-height:1.4;";
+        s.style.cssText = "font-size:10.5px;color:var(--c-ink-3);line-height:1.4;";
         s.textContent = sub;
         btn.appendChild(s);
       }
@@ -3656,15 +3656,15 @@
 
     var lbl = document.createElement("div");
     lbl.className = "tm-sec-title";
-    lbl.style.cssText = "margin:0;font-size:18px;font-weight:700;color:#111;letter-spacing:-.01em;";
+    lbl.style.cssText = "margin:0;font-size:18px;font-weight:700;color:var(--c-ink);letter-spacing:-.01em;";
     lbl.textContent = "Destinations";
     listHdr.appendChild(lbl);
 
     var totalLine = document.createElement("div");
     totalLine.style.cssText = "font-size:11px;color:#666;";
     totalLine.innerHTML = dests.length
-      ? '<strong style="color:#111;">' + totalDays + ' days</strong> · ' + totalNights + ' nights · ' + dests.length + ' destination' + (dests.length !== 1 ? 's' : '')
-      : '<span style="color:#aaa;font-style:italic;">No destinations yet.</span>';
+      ? '<strong style="color:var(--c-ink);">' + totalDays + ' days</strong> · ' + totalNights + ' nights · ' + dests.length + ' destination' + (dests.length !== 1 ? 's' : '')
+      : '<span style="color:var(--c-ink-4);font-style:italic;">No destinations yet.</span>';
     listHdr.appendChild(totalLine);
 
     // Round NC.X: replaced the standalone "↺ Reverse trip order" button
@@ -3679,7 +3679,7 @@
     moreBtn.setAttribute("aria-label", "Trip actions");
     moreBtn.title = "Trip actions — tidy, reverse, notes, more";
     moreBtn.style.cssText =
-      "background:#fff;border:1px solid #d8d4c8;color:#555;font-family:inherit;" +
+      "background:var(--c-bg);border:1px solid #d8d4c8;color:var(--c-ink-2);font-family:inherit;" +
       "font-size:16px;font-weight:600;line-height:1;padding:3px 11px;border-radius:5px;cursor:pointer;" +
       "margin-left:auto;flex-shrink:0;position:relative;";
     moreBtn.textContent = "⋯";
@@ -3726,7 +3726,7 @@
       } catch(_){}
       if (prefsLines.length) {
         var banner = document.createElement("div");
-        banner.style.cssText = "margin:0 0 12px;padding:9px 12px;background:#fafafa;border:1px solid #ececec;border-radius:6px;font-size:11.5px;color:#555;line-height:1.6;";
+        banner.style.cssText = "margin:0 0 12px;padding:9px 12px;background:var(--c-panel);border:1px solid #ececec;border-radius:6px;font-size:11.5px;color:var(--c-ink-2);line-height:1.6;";
         banner.innerHTML = prefsLines.map(function(p){
           return '<div><strong style="color:#777;font-weight:600;">' + p.label + ':</strong> ' + p.value.replace(/</g, "&lt;").replace(/>/g, "&gt;") + '</div>';
         }).join("");
@@ -3824,7 +3824,7 @@
                 : " — overnight stay, " + dest.nights + " night" + (dest.nights === 1 ? "" : "s") + " (blue, same as its map pin)");
     nameRow.appendChild(numBadge);
     var nameEl=document.createElement("div"); nameEl.className="tm-dest-name";
-    nameEl.style.cssText = "flex:1;min-width:0;font-size:17px;font-weight:700;color:#111;line-height:1.25;letter-spacing:-0.005em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+    nameEl.style.cssText = "flex:1;min-width:0;font-size:17px;font-weight:700;color:var(--c-ink);line-height:1.25;letter-spacing:-0.005em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
     nameEl.textContent = dest.label || dest.place;
     var chev = document.createElement("span");
     chev.textContent = "›";
@@ -3836,7 +3836,7 @@
     var isLast = (idx === (trip.destinations||[]).length - 1);
     if (isFirst || isLast) {
       var tag = document.createElement("div");
-      tag.style.cssText = "font-size:9.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#888;margin-bottom:3px;display:flex;align-items:center;gap:5px;";
+      tag.style.cssText = "font-size:9.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--c-ink-3);margin-bottom:3px;display:flex;align-items:center;gap:5px;";
       var entryCity = (trip.brief && trip.brief.entry) || (_tb && _tb.entry) || "";
       var exitCity = (trip.brief && trip.brief.tbExit) || (_tb && _tb.tbExit) || "";
       if (isFirst && isLast) {
@@ -3876,17 +3876,17 @@
         else if (dateBit) bits.push(verb + " on " + dateBit);
         if (!bits.length && !details.confirmation && !details.notes) return;
         var line = document.createElement("div");
-        line.style.cssText = "font-size:11px;color:#555;margin:1px 0 4px;line-height:1.45;";
+        line.style.cssText = "font-size:11px;color:var(--c-ink-2);margin:1px 0 4px;line-height:1.45;";
         var html = bits.join(' · ');
         if (details.confirmation) {
-          html += ' <span style="color:#888;">conf. ' + details.confirmation + '</span>';
+          html += ' <span style="color:var(--c-ink-3);">conf. ' + details.confirmation + '</span>';
         }
         if (details.url) {
           var safeUrl = String(details.url).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-          html += ' <a href="' + safeUrl + '" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();" style="margin-left:6px;font-size:10px;color:#1a5fa8;text-decoration:none;font-weight:600;">↗ booking</a>';
+          html += ' <a href="' + safeUrl + '" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();" style="margin-left:6px;font-size:10px;color:var(--c-primary);text-decoration:none;font-weight:600;">↗ booking</a>';
         }
         if (details.notes) {
-          html += '<div style="font-size:10.5px;color:#888;margin-top:1px;">' + details.notes + '</div>';
+          html += '<div style="font-size:10.5px;color:var(--c-ink-3);margin-top:1px;">' + details.notes + '</div>';
         }
         line.innerHTML = html;
         bodyDiv.appendChild(line);
@@ -3903,7 +3903,7 @@
     if (dest.label && dest.label !== dest.place) {
       var plLbl = document.createElement("div");
       plLbl.className = "tm-dest-label";
-      plLbl.style.cssText = "font-size:11px;color:#888;margin-top:-2px;margin-bottom:4px;";
+      plLbl.style.cssText = "font-size:11px;color:var(--c-ink-3);margin-top:-2px;margin-bottom:4px;";
       plLbl.textContent = dest.place;
       bodyDiv.appendChild(plLbl);
     }
@@ -3933,7 +3933,7 @@
     dates.textContent=fmtDFn(dest.dateFrom)+" – "+fmtDFn(dest.dateTo)+" "+_nightsLabel;
     var datePencil = document.createElement("span");
     datePencil.textContent = "✎";
-    datePencil.style.cssText = "font-size:11px;color:#888;font-weight:400;margin-left:6px;";
+    datePencil.style.cssText = "font-size:11px;color:var(--c-ink-3);font-weight:400;margin-left:6px;";
     dates.appendChild(datePencil);
     dateLineWrap.appendChild(dates);
     dateLineWrap.appendChild(upBtn);
@@ -4043,7 +4043,7 @@
       var dtRow = document.createElement("div");
       dtRow.style.cssText = "display:flex;flex-wrap:wrap;gap:4px;margin-top:5px;align-items:center;";
       var dtLabel = document.createElement("span");
-      dtLabel.style.cssText = "font-size:9px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.05em;margin-right:2px;";
+      dtLabel.style.cssText = "font-size:9px;font-weight:700;color:var(--c-ink-3);text-transform:uppercase;letter-spacing:0.05em;margin-right:2px;";
       dtLabel.textContent = "Day trips:";
       dtRow.appendChild(dtLabel);
 
@@ -4098,7 +4098,7 @@
         arrBtn.type = "button";
         arrBtn.textContent = "+ Add arrival buffer";
         arrBtn.title = "Add a 1-night buffer at the start of the trip — for arrival recovery, jet lag, etc. Same city extends this stay; different city adds a separate stop.";
-        arrBtn.style.cssText = "font-size:10.5px;font-weight:500;color:#1a5fa8;background:#fff;border:1px solid #c8d8f0;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;";
+        arrBtn.style.cssText = "font-size:10.5px;font-weight:500;color:var(--c-primary);background:var(--c-bg);border:1px solid var(--c-border-blue);border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;";
         arrBtn.onmouseover = function(){ arrBtn.style.background = "#f0f5fc"; };
         arrBtn.onmouseout = function(){ arrBtn.style.background = "#fff"; };
         (function(defaultCity){
@@ -4116,7 +4116,7 @@
         depBtn.type = "button";
         depBtn.textContent = "+ Add departure buffer";
         depBtn.title = "Add a 1-night buffer at the end of the trip — so a late arrival from your last stop doesn't push you onto same-day flying. Same city extends this stay; different city adds a separate stop.";
-        depBtn.style.cssText = "font-size:10.5px;font-weight:500;color:#b05820;background:#fff;border:1px solid #e8c8b0;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;";
+        depBtn.style.cssText = "font-size:10.5px;font-weight:500;color:var(--c-warn);background:var(--c-bg);border:1px solid #e8c8b0;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;";
         depBtn.onmouseover = function(){ depBtn.style.background = "#fcf5ee"; };
         depBtn.onmouseout = function(){ depBtn.style.background = "#fff"; };
         (function(defaultCity){
@@ -4158,7 +4158,7 @@
         researchBtn.type = "button";
         researchBtn.textContent = "📓";
         researchBtn.title = "Notes for " + dest.place;
-        researchBtn.style.cssText = "font-size:11px;color:#888;background:#fff;border:1px solid #ddd;border-radius:9px;padding:1px 7px;cursor:pointer;font-family:inherit;line-height:1.3;";
+        researchBtn.style.cssText = "font-size:11px;color:var(--c-ink-3);background:var(--c-bg);border:1px solid var(--c-border);border-radius:9px;padding:1px 7px;cursor:pointer;font-family:inherit;line-height:1.3;";
         (function(placeName){
           researchBtn.onclick = function(e){
             e.preventDefault();
@@ -4173,7 +4173,7 @@
       link.href = "#";
       link.textContent = "↺ Change role";
       link.title = "Switch overnight ↔ day trip without leaving the trip view";
-      link.style.cssText = "font-size:10.5px;font-weight:500;color:#1a5fa8;text-decoration:none;cursor:pointer;";
+      link.style.cssText = "font-size:10.5px;font-weight:500;color:var(--c-primary);text-decoration:none;cursor:pointer;";
       (function(destId, destPlace){
         link.onclick = function(e){
           e.preventDefault();
@@ -4220,7 +4220,7 @@
       }});
       ti=mkInpFn("edit-to-"+dest.id, dest.dateTo, {minDate:dest.dateFrom});
     }
-    var arrow=document.createElement("span"); arrow.style.cssText="font-size:10px;color:#aaa;margin:0 4px;"; arrow.textContent="→";
+    var arrow=document.createElement("span"); arrow.style.cssText="font-size:10px;color:var(--c-ink-4);margin:0 4px;"; arrow.textContent="→";
     var sv=document.createElement("button"); sv.className="date-save-btn"; sv.textContent="Save";
     sv.onclick=function(e){
       e.stopPropagation();
@@ -4242,7 +4242,7 @@
     var acts=document.createElement("div"); acts.className="tm-dest-acts";
     var openBtn=document.createElement("button"); openBtn.className="tm-dest-btn";
     openBtn.textContent=(dest.id===activeDest?"Resume ↩":"Open →");
-    if(dest.id===activeDest) openBtn.style.cssText="font-weight:600;border-color:#aac4e8;color:#1a5fa8;";
+    if(dest.id===activeDest) openBtn.style.cssText="font-weight:600;border-color:#aac4e8;color:var(--c-primary);";
     (function(did){openBtn.onclick=function(e){e.stopPropagation();global.selectDest(did);};})(dest.id);
     var editBtn=document.createElement("button"); editBtn.className="tm-dest-btn"; editBtn.id="di-edit-btn-"+dest.id; editBtn.textContent="Edit dates";
     (function(did){editBtn.onclick=function(e){e.stopPropagation();global.toggleListDateEdit(did);};})(dest.id);
@@ -4277,7 +4277,7 @@
         var modeMap={"train":"🚂","bus":"🚌","flight":"✈️","ferry":"⛴️"};
         var bkLabel=document.createElement("span"); bkLabel.style.cssText="font-size:11px;";
         bkLabel.textContent=(modeMap[bookedBk.mode]||"🚂")+" "+bookedBk.operator;
-        var bkBadge=document.createElement("span"); bkBadge.style.cssText="font-size:9px;color:#2a7a4e;font-weight:600;";
+        var bkBadge=document.createElement("span"); bkBadge.style.cssText="font-size:9px;color:var(--c-see);font-weight:600;";
         bkBadge.textContent="✓ booked";
         if(bookedBk.departure) bkLabel.textContent+=" · "+fmtDFn(bookedBk.departure)+(bookedBk.departureTime?" "+bookedBk.departureTime:"");
         row.appendChild(bkLabel); row.appendChild(bkBadge);
@@ -4299,13 +4299,13 @@
         var unk=document.createElement("span");
         if(_isFetching){
           unk.className="max-thinking";
-          unk.style.cssText="font-size:10px;color:#888;";
+          unk.style.cssText="font-size:10px;color:var(--c-ink-3);";
           unk.textContent="⇄ finding options…";
         } else if(_cachedFail){
-          unk.style.cssText="font-size:10px;color:#aaa;";
+          unk.style.cssText="font-size:10px;color:var(--c-ink-4);";
           unk.textContent="↔ route unknown";
         } else {
-          unk.style.cssText="font-size:10px;color:#aaa;";
+          unk.style.cssText="font-size:10px;color:var(--c-ink-4);";
           unk.textContent="↔ route unknown";
         }
         row.appendChild(unk);
@@ -4314,7 +4314,7 @@
       // Routing → button. v360.0.6: bumped from 10px/1×5 to 12px/7×11
       // for mobile tap target.
       var rtBtn=document.createElement("span");
-      rtBtn.style.cssText="font-size:12px;color:#1a5fa8;font-weight:600;margin-left:auto;white-space:nowrap;cursor:pointer;padding:7px 11px;border:1px solid #cce;border-radius:4px;background:#f0f5ff;flex-shrink:0;min-height:32px;display:inline-flex;align-items:center;";
+      rtBtn.style.cssText="font-size:12px;color:var(--c-primary);font-weight:600;margin-left:auto;white-space:nowrap;cursor:pointer;padding:7px 11px;border:1px solid #cce;border-radius:4px;background:#f0f5ff;flex-shrink:0;min-height:32px;display:inline-flex;align-items:center;";
       rtBtn.textContent="Routing →";
       row.appendChild(rtBtn);
 
@@ -4364,7 +4364,7 @@
         return 0;
       }
       var honestyRow = document.createElement("div");
-      honestyRow.style.cssText = "display:flex;align-items:center;gap:6px;margin-top:4px;font-size:10.5px;color:#888;";
+      honestyRow.style.cssText = "display:flex;align-items:center;gap:6px;margin-top:4px;font-size:10.5px;color:var(--c-ink-3);";
       var parts = [];
       var _hrsLbl = _fmtHrs(_legHrs);
       if (_hrsLbl) parts.push("~" + _hrsLbl + " drive");
@@ -4398,9 +4398,9 @@
   // serializeTrip. (All read at blur time, not at render time.)
   function _renderTravelerNotes(dest, container) {
     var notesWrap = document.createElement("div");
-    notesWrap.style.cssText = "margin:8px 0 10px;padding:10px 12px;background:#fafafa;border:1px solid #ececec;border-radius:8px;";
+    notesWrap.style.cssText = "margin:8px 0 10px;padding:10px 12px;background:var(--c-panel);border:1px solid #ececec;border-radius:8px;";
     var notesHdr = document.createElement("div");
-    notesHdr.style.cssText = "font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#888;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;";
+    notesHdr.style.cssText = "font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--c-ink-3);margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;";
     var notesLabel = document.createElement("span");
     notesLabel.textContent = "Notes from the road";
     var notesStatus = document.createElement("span");
@@ -4410,7 +4410,7 @@
     // owns its own status element. Desktop's single-card rendering is
     // unaffected; mobile can now render the full destination list with
     // working per-card status.
-    notesStatus.style.cssText = "font-size:9px;font-weight:500;color:#aaa;text-transform:none;letter-spacing:0;";
+    notesStatus.style.cssText = "font-size:9px;font-weight:500;color:var(--c-ink-4);text-transform:none;letter-spacing:0;";
     notesHdr.appendChild(notesLabel);
     notesHdr.appendChild(notesStatus);
     notesWrap.appendChild(notesHdr);
@@ -4420,7 +4420,7 @@
     // looked up the textarea by ID.
     notesTa.placeholder = "Things to remember from this stop…";
     notesTa.value = (typeof dest.travelerNotes === "string") ? dest.travelerNotes : "";
-    notesTa.style.cssText = "width:100%;min-height:48px;max-height:240px;font:inherit;font-size:12.5px;line-height:1.5;padding:6px 8px;border:1px solid #ddd;border-radius:5px;background:#fff;color:#111;resize:vertical;box-sizing:border-box;font-family:inherit;";
+    notesTa.style.cssText = "width:100%;min-height:48px;max-height:240px;font:inherit;font-size:12.5px;line-height:1.5;padding:6px 8px;border:1px solid var(--c-border);border-radius:5px;background:var(--c-bg);color:var(--c-ink);resize:vertical;box-sizing:border-box;font-family:inherit;";
     notesTa.onfocus = function(){ this.style.borderColor = "#1a5fa8"; this.style.boxShadow = "0 0 0 3px rgba(26,95,168,.12)"; };
 
     // v347: extracted save logic so the explicit Save button can call
@@ -4477,7 +4477,7 @@
       micBtn.type = 'button';
       micBtn.textContent = '🎤';
       micBtn.title = 'Dictate';
-      micBtn.style.cssText = 'font-size:14px;background:#fff;border:1px solid #ddd;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;line-height:1;min-height:28px;';
+      micBtn.style.cssText = 'font-size:14px;background:var(--c-bg);border:1px solid var(--c-border);border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;line-height:1;min-height:28px;';
       var rec = null;
       var listening = false;
       micBtn.onclick = function () {
@@ -4541,7 +4541,7 @@
     var saveBtn = document.createElement("button");
     saveBtn.type = "button";
     saveBtn.textContent = "Save note";
-    saveBtn.style.cssText = "font-size:11px;font-weight:600;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:5px;padding:5px 12px;cursor:pointer;font-family:inherit;transition:opacity 0.18s ease, background 0.12s ease;";
+    saveBtn.style.cssText = "font-size:11px;font-weight:600;color:var(--c-on-dark);background:var(--c-primary);border:1px solid var(--c-primary);border-radius:5px;padding:5px 12px;cursor:pointer;font-family:inherit;transition:opacity 0.18s ease, background 0.12s ease;";
     saveBtn.onmouseover = function(){ saveBtn.style.background = "#134a8a"; };
     saveBtn.onmouseout  = function(){ saveBtn.style.background = "#1a5fa8"; };
     // v353.2: button visibility tied to "is there an unsaved change?"
@@ -4682,7 +4682,7 @@
     hdrLeft.appendChild(lbl);
     hdrLeft.appendChild(meta);
     var status = document.createElement("span");
-    status.style.cssText = "font-size:9px;font-weight:500;color:#aaa;text-transform:none;letter-spacing:0;";
+    status.style.cssText = "font-size:9px;font-weight:500;color:var(--c-ink-4);text-transform:none;letter-spacing:0;";
     hdr.appendChild(hdrLeft);
     hdr.appendChild(status);
     wrap.appendChild(hdr);
@@ -4713,7 +4713,7 @@
 
     var saved = _curNotes();
     var view = document.createElement("div"); // Read-only view: text + clickable URLs.
-    view.style.cssText = "font-size:12.5px;line-height:1.55;color:#333;min-height:36px;padding:6px 8px;background:#fff;border:1px solid #e8e1c8;border-radius:5px;cursor:text;white-space:pre-wrap;word-wrap:break-word;";
+    view.style.cssText = "font-size:12.5px;line-height:1.55;color:#333;min-height:36px;padding:6px 8px;background:var(--c-bg);border:1px solid #e8e1c8;border-radius:5px;cursor:text;white-space:pre-wrap;word-wrap:break-word;";
     view.title = "Tap to edit";
 
     function renderViewMode() {
@@ -4735,7 +4735,7 @@
         var trail = "";
         while (/[)\.,;:!?]$/.test(u)) { trail = u.charAt(u.length - 1) + trail; u = u.substring(0, u.length - 1); }
         var safe = _esc(u);
-        html += '<a href="' + safe + '" target="_blank" rel="noopener noreferrer" style="color:#1a5fa8;text-decoration:underline;word-break:break-all;">' + safe + '</a>' + _esc(trail);
+        html += '<a href="' + safe + '" target="_blank" rel="noopener noreferrer" style="color:var(--c-primary);text-decoration:underline;word-break:break-all;">' + safe + '</a>' + _esc(trail);
         lastIdx = m.index + m[1].length;
       }
       html += _esc(saved.substring(lastIdx));
@@ -4746,7 +4746,7 @@
 
     var ta = document.createElement("textarea");
     ta.placeholder = "What you've read, links, opening hours, reservation deadlines…";
-    ta.style.cssText = "width:100%;min-height:80px;max-height:320px;font:inherit;font-size:12.5px;line-height:1.5;padding:6px 8px;border:1px solid #1a5fa8;border-radius:5px;background:#fff;color:#111;resize:vertical;box-sizing:border-box;font-family:inherit;display:none;outline:none;box-shadow:0 0 0 3px rgba(26,95,168,.12);";
+    ta.style.cssText = "width:100%;min-height:80px;max-height:320px;font:inherit;font-size:12.5px;line-height:1.5;padding:6px 8px;border:1px solid var(--c-primary);border-radius:5px;background:var(--c-bg);color:var(--c-ink);resize:vertical;box-sizing:border-box;font-family:inherit;display:none;outline:none;box-shadow:0 0 0 3px rgba(26,95,168,.12);";
 
     function enterEdit() {
       ta.value = saved;
@@ -4808,7 +4808,7 @@
       micBtn.type = "button";
       micBtn.textContent = "🎤 Dictate";
       micBtn.title = "Dictate (Web Speech API)";
-      micBtn.style.cssText = "font-size:11px;background:#fff;border:1px solid #e6e0cc;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;color:#8a7440;";
+      micBtn.style.cssText = "font-size:11px;background:var(--c-bg);border:1px solid #e6e0cc;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;color:#8a7440;";
       var rec = null, listening = false;
       micBtn.onclick = function () {
         if (listening) { if (rec) try { rec.stop(); } catch(_){} return; }
@@ -4907,19 +4907,19 @@
     banner.onmouseover = function(){ banner.style.background = "#fdebd8"; };
     banner.onmouseout  = function(){ banner.style.background = "transparent"; };
     var txt = document.createElement("div");
-    txt.style.cssText = "font-size:12px;color:#b05820;line-height:1.45;";
+    txt.style.cssText = "font-size:12px;color:var(--c-warn);line-height:1.45;";
     var placeName = dest.label || dest.place || "this destination";
     var bits = [];
     if (nA) bits.push("<strong>" + nA + "</strong> provider action" + (nA !== 1 ? "s" : ""));
     if (nD) bits.push("<strong>" + nD + "</strong> cancellation deadline" + (nD !== 1 ? "s" : ""));
     txt.innerHTML = "⚠ <strong>What you need to take care of for " + placeName + "</strong> — " + bits.join(" · ");
     var arrow = document.createElement("div");
-    arrow.style.cssText = "font-size:11px;font-weight:600;color:#b05820;flex-shrink:0;";
+    arrow.style.cssText = "font-size:11px;font-weight:600;color:var(--c-warn);flex-shrink:0;";
     arrow.textContent = "▾ Show";
     banner.appendChild(txt); banner.appendChild(arrow);
 
     var listHost = document.createElement("div");
-    listHost.style.cssText = "display:none;border-top:1px solid #f0c8a0;background:#fff;padding:8px 12px 4px;";
+    listHost.style.cssText = "display:none;border-top:1px solid #f0c8a0;background:var(--c-bg);padding:8px 12px 4px;";
 
     (function(did){
       banner.onclick = function(){
@@ -4951,9 +4951,9 @@
   function _renderPendingCancellationsBanner(dest, container) {
     if (!(dest.pendingCancellations && dest.pendingCancellations.items && dest.pendingCancellations.items.length)) return;
     var pcBanner = document.createElement('div');
-    pcBanner.style.cssText = 'background:#fff8f0;border:1px solid #f0dcc0;border-radius:6px;padding:8px 10px;margin:8px 0 4px;display:flex;align-items:center;justify-content:space-between;gap:8px;';
+    pcBanner.style.cssText = 'background:var(--c-tint-amber);border:1px solid #f0dcc0;border-radius:6px;padding:8px 10px;margin:8px 0 4px;display:flex;align-items:center;justify-content:space-between;gap:8px;';
     var pcTxt = document.createElement('div');
-    pcTxt.style.cssText = 'font-size:11px;color:#b05820;';
+    pcTxt.style.cssText = 'font-size:11px;color:var(--c-warn);';
     var n = dest.pendingCancellations.items.length;
     pcTxt.innerHTML = '<strong>⚠ Pending cancellations</strong> — ' + n + ' booking' + (n !== 1 ? 's' : '') + ' need provider action';
     var pcBtn = document.createElement('button');
@@ -4999,9 +4999,9 @@
       var carrierNum = [details.carrier, details.number].filter(function(x){return !!x;}).join(" ");
       var hasAny = !!(carrierNum || details.time || details.confirmation || details.notes);
       if (!hasAny) {
-        return '<div style="background:#fafafa;border:1px dashed #d8d4c8;border-radius:7px;padding:9px 12px;margin-bottom:8px;">'
+        return '<div style="background:var(--c-panel);border:1px dashed #d8d4c8;border-radius:7px;padding:9px 12px;margin-bottom:8px;">'
           + '<div style="font-size:9.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:'+color+';margin-bottom:3px;">' + roleLabel + '</div>'
-          + '<div style="font-size:11px;color:#888;">No arrival/departure details added yet. <a href="#" id="dm-edit-logistics-'+side+'" style="color:#1a5fa8;">Add them →</a></div>'
+          + '<div style="font-size:11px;color:var(--c-ink-3);">No arrival/departure details added yet. <a href="#" id="dm-edit-logistics-'+side+'" style="color:var(--c-primary);">Add them →</a></div>'
           + '</div>';
       }
       var bits = [];
@@ -5065,7 +5065,7 @@
     var dtBox = document.createElement("div");
     dtBox.style.cssText = "margin:0 0 10px;padding:9px 12px;background:#f4eef9;border:1px solid #d8c4e8;border-radius:7px;";
     var dtHdr = document.createElement("div");
-    dtHdr.style.cssText = "font-size:12px;font-weight:700;color:#5b3f8f;margin-bottom:5px;";
+    dtHdr.style.cssText = "font-size:12px;font-weight:700;color:var(--c-accent);margin-bottom:5px;";
     dtHdr.textContent = "Day trips from " + dest.place;
     dtBox.appendChild(dtHdr);
     var dtList = document.createElement("div");
@@ -5080,7 +5080,7 @@
           || (typeof route.distKm === "number" ? route.distKm : 0);
         var chip = document.createElement("button");
         chip.type = "button";
-        chip.style.cssText = "font-size:11px;font-weight:600;color:#5b3f8f;background:#fff;border:1px solid #d8c4e8;padding:4px 10px;border-radius:11px;cursor:pointer;font-family:inherit;";
+        chip.style.cssText = "font-size:11px;font-weight:600;color:var(--c-accent);background:var(--c-bg);border:1px solid #d8c4e8;padding:4px 10px;border-radius:11px;cursor:pointer;font-family:inherit;";
         // v359.52.7: chip click opens the scheduling menu (pick a day
         // or convert to overnight). Was: chip click directly ungrouped,
         // with no way to pick which day of the hub stay the day trip
@@ -5347,9 +5347,9 @@
           var arrML = _modeLabels(arrMode, "arrival");
           var arrivalWrap=document.createElement("div");
           arrivalWrap.className="itin-transport";
-          arrivalWrap.style.cssText="background:#eef5ff;border:1px solid #cfe1f7;";
+          arrivalWrap.style.cssText="background:var(--c-tint-blue);border:1px solid #cfe1f7;";
           var arrDir=document.createElement("span");
-          arrDir.style.cssText="font-size:10px;font-weight:700;color:#1a5fa8;margin-right:8px;text-transform:uppercase;letter-spacing:0.04em;";
+          arrDir.style.cssText="font-size:10px;font-weight:700;color:var(--c-primary);margin-right:8px;text-transform:uppercase;letter-spacing:0.04em;";
           arrDir.textContent="Arrival";
           var arrIcon=document.createElement("span"); arrIcon.className="itin-transport-icon";
           arrIcon.textContent=arrML.icon;
@@ -5359,7 +5359,7 @@
             ? arrCN + (ad.time ? " · " + arrML.arrivalVerb + " " + (typeof _fmtTime12h === "function" ? _fmtTime12h(ad.time) : ad.time) : "")
             : arrML.arrivalTitle;
           var arrMeta=document.createElement("span"); arrMeta.className="itin-transport-meta";
-          arrMeta.style.cssText="color:#888;";
+          arrMeta.style.cssText="color:var(--c-ink-3);";
           arrMeta.textContent="into "+dest.place;
           arrivalWrap.appendChild(arrDir);
           arrivalWrap.appendChild(arrIcon);
@@ -5369,7 +5369,7 @@
           if (ad.url) {
             var arrUrl = document.createElement("a");
             arrUrl.href = ad.url; arrUrl.target = "_blank"; arrUrl.rel = "noopener noreferrer";
-            arrUrl.style.cssText = "margin-left:8px;font-size:10px;color:#1a5fa8;text-decoration:none;font-weight:600;";
+            arrUrl.style.cssText = "margin-left:8px;font-size:10px;color:var(--c-primary);text-decoration:none;font-weight:600;";
             arrUrl.textContent = "↗ booking";
             arrUrl.onclick = function(e){ e.stopPropagation(); };
             arrivalWrap.appendChild(arrUrl);
@@ -5553,7 +5553,7 @@
     flightWrap.className = "itin-transport";
     flightWrap.style.cssText = "background:#fff5ed;border:1px solid #f3dcc4;";
     var flightDir = document.createElement("span");
-    flightDir.style.cssText = "font-size:10px;font-weight:700;color:#b05820;margin-right:8px;text-transform:uppercase;letter-spacing:0.04em;";
+    flightDir.style.cssText = "font-size:10px;font-weight:700;color:var(--c-warn);margin-right:8px;text-transform:uppercase;letter-spacing:0.04em;";
     flightDir.textContent = depML.departureTitle;
     var flightIcon = document.createElement("span"); flightIcon.className = "itin-transport-icon";
     flightIcon.textContent = depML.icon;
@@ -5577,7 +5577,7 @@
     if (ed.url) {
       var depUrl = document.createElement("a");
       depUrl.href = ed.url; depUrl.target = "_blank"; depUrl.rel = "noopener noreferrer";
-      depUrl.style.cssText = "margin-left:8px;font-size:10px;color:#1a5fa8;text-decoration:none;font-weight:600;";
+      depUrl.style.cssText = "margin-left:8px;font-size:10px;color:var(--c-primary);text-decoration:none;font-weight:600;";
       depUrl.textContent = "↗ booking";
       depUrl.onclick = function(e){ e.stopPropagation(); };
       flightWrap.appendChild(depUrl);
@@ -5651,11 +5651,11 @@
 
   // Booked hotel summary at top
   if(bookedHotel){
-    var curBanner=document.createElement("div"); curBanner.style.cssText="background:#f0f8f4;border:1px solid #b8dfc9;border-radius:6px;padding:8px 10px;margin-bottom:12px;";
-    var curLbl=document.createElement("div"); curLbl.style.cssText="font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#2a7a4e;margin-bottom:4px;"; curLbl.textContent="Booked";
+    var curBanner=document.createElement("div"); curBanner.style.cssText="background:var(--c-tint-green);border:1px solid #b8dfc9;border-radius:6px;padding:8px 10px;margin-bottom:12px;";
+    var curLbl=document.createElement("div"); curLbl.style.cssText="font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--c-see);margin-bottom:4px;"; curLbl.textContent="Booked";
     curBanner.appendChild(curLbl);
     dest.hotelBookings.filter(function(b){return b.status==="booked";}).forEach(function(b){
-      var nameEl=document.createElement("div"); nameEl.style.cssText="font-size:13px;font-weight:600;color:#111;margin-bottom:2px;"; nameEl.textContent=b.name||"Hotel";
+      var nameEl=document.createElement("div"); nameEl.style.cssText="font-size:13px;font-weight:600;color:var(--c-ink);margin-bottom:2px;"; nameEl.textContent=b.name||"Hotel";
       curBanner.appendChild(nameEl);
       curBanner.appendChild(mkHotelRecord(b,dest.id));
     });
@@ -5719,7 +5719,7 @@
         var toggle = document.createElement("button");
         toggle.type = "button";
         toggle.textContent = "▾ Show " + cancelledBookings.length + " cancelled";
-        toggle.style.cssText = "font-size:10px;color:#888;background:none;border:none;padding:2px 0;cursor:pointer;font-family:inherit;";
+        toggle.style.cssText = "font-size:10px;color:var(--c-ink-3);background:none;border:none;padding:2px 0;cursor:pointer;font-family:inherit;";
         (function(list, btn, n){
           btn.onclick = function(){
             var hidden = list.style.display === "none";
@@ -5809,7 +5809,7 @@
     // itself adds. A thin separator is all the visual hand-off
     // needed before the dynamic content.
     var execSep=document.createElement("div");
-    execSep.style.cssText="margin:18px 0 10px;padding-top:14px;border-top:1px solid #eee;";
+    execSep.style.cssText="margin:18px 0 10px;padding-top:14px;border-top:1px solid var(--c-border-3);";
     infoPane2.appendChild(execSep);
     var execHost=document.createElement("div");
     execHost.id="dm-exec-groups-"+dest.id;
@@ -5832,7 +5832,7 @@
     });
     if(hasAnyEssential){
       var pracWrap=document.createElement("div");
-      pracWrap.style.cssText="margin-top:18px;padding-top:14px;border-top:1px solid #eee;";
+      pracWrap.style.cssText="margin-top:18px;padding-top:14px;border-top:1px solid var(--c-border-3);";
       var pracHdr=document.createElement("div");
       pracHdr.style.cssText="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#666;margin-bottom:10px;";
       // Round FK: "Practical" → "Local services" — distinguishes from
@@ -5888,7 +5888,7 @@
       infoPane2.appendChild(pracWrap);
     } else if(_generatedCityData[dest.place.toLowerCase()]&&_generatedCityData[dest.place.toLowerCase()].loading){
       var pracLoad=document.createElement("div");
-      pracLoad.style.cssText="margin-top:18px;padding-top:14px;border-top:1px solid #eee;font-size:11px;color:#999;font-style:italic;";
+      pracLoad.style.cssText="margin-top:18px;padding-top:14px;border-top:1px solid var(--c-border-3);font-size:11px;color:#999;font-style:italic;";
       pracLoad.textContent="Loading practical essentials\u2026";
       infoPane2.appendChild(pracLoad);
     }
@@ -6031,17 +6031,17 @@
       xSec.className = "tk-section";
       xSec.style.cssText = "margin-bottom:16px;padding:10px 12px;background:#fdfcf8;border:1px solid #e8e2d2;border-radius:7px;";
       var xLbl = document.createElement("div");
-      xLbl.style.cssText = "font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#5b3f8f;margin-bottom:6px;";
+      xLbl.style.cssText = "font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--c-accent);margin-bottom:6px;";
       xLbl.textContent = "Trip booking active here";
       xSec.appendChild(xLbl);
       var hint = document.createElement("div");
-      hint.style.cssText = "font-size:10.5px;color:#888;font-style:italic;margin-bottom:8px;";
+      hint.style.cssText = "font-size:10.5px;color:var(--c-ink-3);font-style:italic;margin-bottom:8px;";
       hint.textContent = "Manage these in the trip view's Trip bookings section.";
       xSec.appendChild(hint);
 
       matches.forEach(function(bk){
         var row = document.createElement("div");
-        row.style.cssText = "padding:6px 8px;margin:4px 0;background:#fff;border:1px solid #e0d8c8;border-radius:5px;font-size:11.5px;line-height:1.45;cursor:pointer;";
+        row.style.cssText = "padding:6px 8px;margin:4px 0;background:var(--c-bg);border:1px solid #e0d8c8;border-radius:5px;font-size:11.5px;line-height:1.45;cursor:pointer;";
         row.title = "Click to view full booking details";
         var icon = (bk.kind === "car") ? "🚗" : (bk.kind === "flight") ? "✈" : "📋";
         var summary = "";
@@ -6189,7 +6189,7 @@
       });
       sightBookings.forEach(function(sb){
         var row = document.createElement("div");
-        row.style.cssText = "padding:8px 10px;margin-bottom:6px;background:#fafafa;border:1px solid #e8e8e8;border-radius:6px;";
+        row.style.cssText = "padding:8px 10px;margin-bottom:6px;background:var(--c-panel);border:1px solid var(--c-border-2);border-radius:6px;";
         var line1 = document.createElement("div");
         line1.style.cssText = "font-size:12.5px;font-weight:600;color:#222;line-height:1.4;";
         line1.textContent = sb.sight.n || sb.sight.name || "Sight";
@@ -6229,14 +6229,14 @@
           }
           if (!dayDateMatch) {
             var mismatch = document.createElement("div");
-            mismatch.style.cssText = "font-size:10px;color:#b05820;margin-top:2px;";
+            mismatch.style.cssText = "font-size:10px;color:var(--c-warn);margin-top:2px;";
             mismatch.textContent = "⚠ Booked for " + fmtDFn(sb.bk.date) + " but scheduled on " + sb.dayLbl;
             row.appendChild(mismatch);
           }
         }
         if (sb.bk.cancelDeadline) {
           var line3 = document.createElement("div");
-          line3.style.cssText = "font-size:10px;color:#b05820;margin-top:2px;";
+          line3.style.cssText = "font-size:10px;color:var(--c-warn);margin-top:2px;";
           line3.textContent = "Cancel by " + fmtDFn(sb.bk.cancelDeadline) + (sb.bk.cancelDeadlineTime ? " " + sb.bk.cancelDeadlineTime : "");
           row.appendChild(line3);
         }
@@ -6310,7 +6310,7 @@
     x.type = "button";
     x.textContent = "✕";
     x.title = "Dismiss";
-    x.style.cssText = "background:transparent;border:none;color:#888;font-size:16px;cursor:pointer;padding:0 4px;flex-shrink:0;line-height:1;";
+    x.style.cssText = "background:transparent;border:none;color:var(--c-ink-3);font-size:16px;cursor:pointer;padding:0 4px;flex-shrink:0;line-height:1;";
     x.onclick = function () {
       global._maxLastWaysideResult = null;
       if (b.parentNode) b.parentNode.removeChild(b);
@@ -6404,17 +6404,17 @@
     var body = document.createElement("div");
     body.style.cssText = "flex:1;font-size:12px;color:#1a3f6f;line-height:1.5;";
     body.innerHTML =
-      '<div style="font-weight:700;color:#1a5fa8;margin-bottom:2px;">Find waysides — stops along the way</div>' +
+      '<div style="font-weight:700;color:var(--c-primary);margin-bottom:2px;">Find waysides — stops along the way</div>' +
       '<div style="font-size:11.5px;color:#3a5572;">Max will suggest 3–6 worthwhile stops on each drive between hubs — waterfalls, viewpoints, lunch towns. <strong>Cuts a night · breaks up the drive.</strong></div>';
     var btn = document.createElement("button");
     btn.type = "button";
     btn.textContent = "✨ Generate";
-    btn.style.cssText = "padding:7px 14px;font-size:12px;font-weight:700;background:#5b3f8f;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;flex-shrink:0;";
+    btn.style.cssText = "padding:7px 14px;font-size:12px;font-weight:700;background:var(--c-accent);color:var(--c-on-dark);border:none;border-radius:5px;cursor:pointer;font-family:inherit;flex-shrink:0;";
     var dismissBtn = document.createElement("button");
     dismissBtn.type = "button";
     dismissBtn.textContent = "✕";
     dismissBtn.title = "Hide this banner";
-    dismissBtn.style.cssText = "background:transparent;border:none;color:#888;font-size:16px;cursor:pointer;padding:0 4px;flex-shrink:0;line-height:1;";
+    dismissBtn.style.cssText = "background:transparent;border:none;color:var(--c-ink-3);font-size:16px;cursor:pointer;padding:0 4px;flex-shrink:0;line-height:1;";
 
     btn.onclick = async function () {
       if (typeof global.generateWaysidesForTrip !== "function") {
@@ -6529,17 +6529,17 @@
     var body = document.createElement("div");
     body.style.cssText = "flex:1;font-size:12px;color:#1a3f6f;line-height:1.5;";
     body.innerHTML =
-      '<div style="font-weight:700;color:#1a5fa8;margin-bottom:2px;">Find day trips — visit while based at a hub</div>' +
+      '<div style="font-weight:700;color:var(--c-primary);margin-bottom:2px;">Find day trips — visit while based at a hub</div>' +
       '<div style="font-size:11.5px;color:#3a5572;">Max will suggest 3–6 day-trip candidates near each overnight hub — places worth a half- or full-day from your base. <strong>Less moving · maybe cheaper hotels and a slower pace staying outside a big city.</strong></div>';
     var btn = document.createElement("button");
     btn.type = "button";
     btn.textContent = "✨ Generate";
-    btn.style.cssText = "padding:7px 14px;font-size:12px;font-weight:700;background:#5b3f8f;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;flex-shrink:0;";
+    btn.style.cssText = "padding:7px 14px;font-size:12px;font-weight:700;background:var(--c-accent);color:var(--c-on-dark);border:none;border-radius:5px;cursor:pointer;font-family:inherit;flex-shrink:0;";
     var dismissBtn = document.createElement("button");
     dismissBtn.type = "button";
     dismissBtn.textContent = "✕";
     dismissBtn.title = "Hide this banner";
-    dismissBtn.style.cssText = "background:transparent;border:none;color:#888;font-size:16px;cursor:pointer;padding:0 4px;flex-shrink:0;line-height:1;";
+    dismissBtn.style.cssText = "background:transparent;border:none;color:var(--c-ink-3);font-size:16px;cursor:pointer;padding:0 4px;flex-shrink:0;line-height:1;";
 
     btn.onclick = async function () {
       if (typeof global.generateDayTripsForTrip !== "function") {
@@ -6639,7 +6639,7 @@
       var section = document.createElement("div");
       section.style.cssText = "border-top:1px solid #c8e4ce;padding-top:8px;display:flex;flex-direction:column;gap:6px;";
       var hdr = document.createElement("div");
-      hdr.style.cssText = "font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#2a7a4e;";
+      hdr.style.cssText = "font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--c-see);";
       hdr.textContent = "Could become day trips";
       section.appendChild(hdr);
       offers.forEach(function (offer) {
@@ -6655,12 +6655,12 @@
         var convertBtn = document.createElement("button");
         convertBtn.type = "button";
         convertBtn.textContent = "Convert";
-        convertBtn.style.cssText = "padding:5px 10px;font-size:11px;font-weight:600;background:#2a7a4e;color:#fff;border:none;border-radius:4px;cursor:pointer;font-family:inherit;";
+        convertBtn.style.cssText = "padding:5px 10px;font-size:11px;font-weight:600;background:var(--c-see);color:var(--c-on-dark);border:none;border-radius:4px;cursor:pointer;font-family:inherit;";
         convertBtn.title = "Convert this overnight to a day-trip from " + (offer.hubName || 'the hub');
         var keepBtn = document.createElement("button");
         keepBtn.type = "button";
         keepBtn.textContent = "Keep";
-        keepBtn.style.cssText = "padding:5px 10px;font-size:11px;font-weight:500;background:#fff;color:#3a7a4e;border:1px solid #b8dfc9;border-radius:4px;cursor:pointer;font-family:inherit;";
+        keepBtn.style.cssText = "padding:5px 10px;font-size:11px;font-weight:500;background:var(--c-bg);color:#3a7a4e;border:1px solid #b8dfc9;border-radius:4px;cursor:pointer;font-family:inherit;";
         keepBtn.title = "Keep as overnight";
         (function (offerRef) {
           convertBtn.onclick = function () {
@@ -6755,11 +6755,11 @@
     var sec = document.createElement("div");
     sec.style.cssText = "margin:10px 14px 4px;padding:10px 12px;background:#fbfaf6;border:1px solid #e7dcf2;border-left:3px solid #c8a8e0;border-radius:0 8px 8px 0;";
     var hdr = document.createElement("div");
-    hdr.style.cssText = "font-size:10px;font-weight:700;color:#5b3f8f;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;";
+    hdr.style.cssText = "font-size:10px;font-weight:700;color:var(--c-accent);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;";
     hdr.textContent = hdrLabel;
     sec.appendChild(hdr);
     var sub = document.createElement("div");
-    sub.style.cssText = "font-size:10.5px;color:#888;margin-bottom:8px;line-height:1.4;";
+    sub.style.cssText = "font-size:10.5px;color:var(--c-ink-3);margin-bottom:8px;line-height:1.4;";
     sub.textContent = subCopy;
     sec.appendChild(sub);
 
@@ -6777,11 +6777,11 @@
       // Small "on the way" badge per item, so even if the user
       // scans the list of sights and forgets about the section
       // header, each en-route stop self-identifies as one.
-      var badge = '<span style="display:inline-block;font-size:9px;font-weight:700;color:#5b3f8f;background:#ece4f5;border:1px solid #d3c1e8;border-radius:8px;padding:1px 6px;margin-left:6px;vertical-align:middle;letter-spacing:.03em;text-transform:uppercase;">on the way</span>';
+      var badge = '<span style="display:inline-block;font-size:9px;font-weight:700;color:var(--c-accent);background:#ece4f5;border:1px solid #d3c1e8;border-radius:8px;padding:1px 6px;margin-left:6px;vertical-align:middle;letter-spacing:.03em;text-transform:uppercase;">on the way</span>';
       left.innerHTML =
         '<span style="font-weight:600;color:#222;font-size:12px;">' + (pi.priority === 'iconic' ? '⭐ ' : '') + String(name).replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</span>' +
         badge +
-        (dur ? ' <span style="color:#888;font-size:10.5px;">· ' + dur + '</span>' : '') +
+        (dur ? ' <span style="color:var(--c-ink-3);font-size:10.5px;">· ' + dur + '</span>' : '') +
         (why ? '<div style="color:#666;font-size:11px;margin-top:1px;">' + String(why).replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</div>' : '');
       row.appendChild(left);
       sec.appendChild(row);
@@ -6818,7 +6818,7 @@
     var sec = document.createElement("div");
     sec.style.cssText = "margin:0 8px;padding:9px 12px;background:#fbfaf6;border-left:3px solid #c8a8e0;border-radius:0 6px 6px 0;font-size:11.5px;color:#444;line-height:1.55;";
     var hdr = document.createElement("div");
-    hdr.style.cssText = "font-size:10px;font-weight:700;color:#5b3f8f;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:5px;";
+    hdr.style.cssText = "font-size:10px;font-weight:700;color:var(--c-accent);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:5px;";
     hdr.textContent = "✨ Stops on the way to " + (nextDest.place || nextDest.label || "the next stop");
     sec.appendChild(hdr);
 
@@ -6835,7 +6835,7 @@
         : "";
       left.innerHTML =
         '<span style="font-weight:600;color:#222;">' + (pi.priority === 'iconic' ? '⭐ ' : '') + String(name).replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</span>' +
-        (dur ? ' <span style="color:#888;font-size:10.5px;">· ' + dur + '</span>' : '') +
+        (dur ? ' <span style="color:var(--c-ink-3);font-size:10.5px;">· ' + dur + '</span>' : '') +
         (why ? '<div style="color:#666;font-size:11px;margin-top:1px;">' + String(why).replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</div>' : '');
       var rm = document.createElement("button");
       rm.type = "button";
@@ -6891,13 +6891,13 @@
       "display:flex;align-items:baseline;gap:8px;margin-bottom:" +
       (_bkExpanded ? "8px" : "0") + ";cursor:pointer;";
     var ttl = document.createElement("div");
-    ttl.style.cssText = "font-size:12px;font-weight:700;color:#5b3f8f;text-transform:uppercase;letter-spacing:0.05em;";
+    ttl.style.cssText = "font-size:12px;font-weight:700;color:var(--c-accent);text-transform:uppercase;letter-spacing:0.05em;";
     ttl.textContent = "Trip bookings" + (bookings.length ? " (" + bookings.length + ")" : "");
     var sub = document.createElement("div");
-    sub.style.cssText = "font-size:10.5px;color:#888;font-style:italic;flex:1;";
+    sub.style.cssText = "font-size:10.5px;color:var(--c-ink-3);font-style:italic;flex:1;";
     sub.textContent = "Flights, car rentals, and other things that span the whole trip.";
     var chev = document.createElement("div");
-    chev.style.cssText = "font-size:11px;color:#888;flex-shrink:0;";
+    chev.style.cssText = "font-size:11px;color:var(--c-ink-3);flex-shrink:0;";
     chev.textContent = _bkExpanded ? "⌃" : "⌄";
     hdr.appendChild(ttl);
     hdr.appendChild(sub);
@@ -6921,7 +6921,7 @@
     } else {
       bookings.forEach(function(bk){
         var row = document.createElement("div");
-        row.style.cssText = "padding:8px 10px;margin:5px 0;background:#fff;border:1px solid #e0d8c8;border-radius:6px;font-size:12px;line-height:1.5;";
+        row.style.cssText = "padding:8px 10px;margin:5px 0;background:var(--c-bg);border:1px solid #e0d8c8;border-radius:6px;font-size:12px;line-height:1.5;";
 
         var iconLabel = (bk.kind === "car") ? "🚗 Car rental" :
                         (bk.kind === "flight") ? "✈ Flight" :
@@ -6941,7 +6941,7 @@
         // (price, confirmation, full pickup/dropoff times) — editing
         // is secondary, available when needed.
         var editBtn = document.createElement("button");
-        editBtn.style.cssText = "background:none;border:none;color:#1a5fa8;font-size:11px;cursor:pointer;padding:0;font-family:inherit;";
+        editBtn.style.cssText = "background:none;border:none;color:var(--c-primary);font-size:11px;cursor:pointer;padding:0;font-family:inherit;";
         editBtn.title = "Show full details (you can also edit any field)";
         editBtn.textContent = "▸ show";
         var removeBtn = document.createElement("button");
@@ -6969,7 +6969,7 @@
         row.appendChild(head);
 
         var body = document.createElement("div");
-        body.style.cssText = "color:#555;font-size:11.5px;";
+        body.style.cssText = "color:var(--c-ink-2);font-size:11.5px;";
         if (bk.kind === "car") {
           var pu = bk.pickup || {};
           var dpo = bk.dropoff || {};
@@ -7009,7 +7009,7 @@
         }
         if (meta.length) {
           var metaRow = document.createElement("div");
-          metaRow.style.cssText = "font-size:10.5px;color:#888;margin-top:3px;";
+          metaRow.style.cssText = "font-size:10.5px;color:var(--c-ink-3);margin-top:3px;";
           metaRow.textContent = meta.join(" · ");
           row.appendChild(metaRow);
         }
@@ -7018,7 +7018,7 @@
           urlRow.style.cssText = "font-size:10.5px;margin-top:3px;";
           var a = document.createElement("a");
           a.href = bk.url; a.target = "_blank"; a.rel = "noopener noreferrer";
-          a.style.cssText = "color:#1a5fa8;text-decoration:none;";
+          a.style.cssText = "color:var(--c-primary);text-decoration:none;";
           a.textContent = "↗ Open booking";
           urlRow.appendChild(a);
           row.appendChild(urlRow);
@@ -7059,7 +7059,7 @@
         host.appendChild(hdr);
 
         var sub = document.createElement("div");
-        sub.style.cssText = "font-size:10.5px;color:#888;margin-bottom:8px;font-style:italic;";
+        sub.style.cssText = "font-size:10.5px;color:var(--c-ink-3);margin-bottom:8px;font-style:italic;";
         sub.textContent = "Forwarded by email but Max couldn't auto-place. Pick where each one goes, then Attach.";
         host.appendChild(sub);
 
@@ -7092,7 +7092,7 @@
           var destSel = null;
           if (needsDest && Array.isArray(trip.destinations)) {
             destSel = document.createElement("select");
-            destSel.style.cssText = "width:100%;padding:5px 8px;font-size:11.5px;border:1px solid #ccc;border-radius:4px;background:#fff;margin-bottom:6px;";
+            destSel.style.cssText = "width:100%;padding:5px 8px;font-size:11.5px;border:1px solid var(--c-border-strong);border-radius:4px;background:var(--c-bg);margin-bottom:6px;";
             var opt0 = document.createElement("option");
             opt0.value = "";
             opt0.textContent = "Pick a destination…";
@@ -7112,7 +7112,7 @@
           var attachBtn = document.createElement("button");
           attachBtn.type = "button";
           attachBtn.textContent = "✓ Attach to this trip";
-          attachBtn.style.cssText = "padding:5px 12px;font-size:11.5px;font-weight:600;background:#2a7a4e;color:#fff;border:none;border-radius:4px;cursor:pointer;";
+          attachBtn.style.cssText = "padding:5px 12px;font-size:11.5px;font-weight:600;background:var(--c-see);color:var(--c-on-dark);border:none;border-radius:4px;cursor:pointer;";
           // v360.0.2: edit-before-attach. Users can fix LLM mistakes
           // (wrong date, wrong vendor) before committing the booking
           // to their trip. PATCH /user/unassigned-bookings/:id
@@ -7121,11 +7121,11 @@
           var editBtn = document.createElement("button");
           editBtn.type = "button";
           editBtn.textContent = "✎ Edit";
-          editBtn.style.cssText = "padding:5px 12px;font-size:11.5px;background:#fff;color:#1a5fa8;border:1px solid #1a5fa8;border-radius:4px;cursor:pointer;";
+          editBtn.style.cssText = "padding:5px 12px;font-size:11.5px;background:var(--c-bg);color:var(--c-primary);border:1px solid var(--c-primary);border-radius:4px;cursor:pointer;";
           var dismissBtn = document.createElement("button");
           dismissBtn.type = "button";
           dismissBtn.textContent = "✕ Dismiss";
-          dismissBtn.style.cssText = "padding:5px 12px;font-size:11.5px;background:#fff;color:#666;border:1px solid #ddd;border-radius:4px;cursor:pointer;";
+          dismissBtn.style.cssText = "padding:5px 12px;font-size:11.5px;background:var(--c-bg);color:#666;border:1px solid var(--c-border);border-radius:4px;cursor:pointer;";
 
           (function(id){
             editBtn.onclick = function(){
@@ -7162,7 +7162,7 @@
               })
                 .then(function(){
                   row.style.opacity = "0.4";
-                  row.innerHTML = '<div style="text-align:center;font-size:11px;color:#2a7a4e;">✓ Attached. Refreshing your trip…</div>';
+                  row.innerHTML = '<div style="text-align:center;font-size:11px;color:var(--c-see);">✓ Attached. Refreshing your trip…</div>';
                   // Auto-refresh: pull the latest trip body from the
                   // server (the booking attacher modified it server-
                   // side) then re-render the trip view so the booking
@@ -7223,12 +7223,12 @@
     var ov = document.createElement("div");
     ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:11900;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto;";
     var box = document.createElement("div");
-    box.style.cssText = "background:#fff;border-radius:12px;width:560px;max-width:100%;max-height:calc(100vh - 48px);overflow:auto;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);";
+    box.style.cssText = "background:var(--c-bg);border-radius:12px;width:560px;max-width:100%;max-height:calc(100vh - 48px);overflow:auto;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);";
 
     function inp(id, label, value, placeholder, type) {
       return '<label style="display:block;margin-bottom:8px;">' +
         '<span style="display:block;font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:2px;">' + label + '</span>' +
-        '<input id="' + id + '" type="' + (type || "text") + '" value="' + (value == null ? "" : String(value).replace(/"/g, "&quot;")) + '" placeholder="' + (placeholder || "") + '" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid #ccc;border-radius:4px;font-family:inherit;box-sizing:border-box;" />' +
+        '<input id="' + id + '" type="' + (type || "text") + '" value="' + (value == null ? "" : String(value).replace(/"/g, "&quot;")) + '" placeholder="' + (placeholder || "") + '" style="width:100%;padding:6px 9px;font-size:12px;border:1px solid var(--c-border-strong);border-radius:4px;font-family:inherit;box-sizing:border-box;" />' +
         '</label>';
     }
 
@@ -7263,7 +7263,7 @@
       // the trip. Same "+ Add a missing or new leg" pattern as the paste flow.
       fieldsHtml += '<div id="ueb-legs-host"></div>';
       fieldsHtml += '<div style="margin:4px 0 8px;">' +
-        '<button type="button" id="ueb-add-leg" style="padding:5px 11px;font-size:11.5px;font-weight:600;background:#fff;color:#1a5fa8;border:1px solid #1a5fa8;border-radius:4px;cursor:pointer;font-family:inherit;">+ Add a missing or new leg</button>' +
+        '<button type="button" id="ueb-add-leg" style="padding:5px 11px;font-size:11.5px;font-weight:600;background:var(--c-bg);color:var(--c-primary);border:1px solid var(--c-primary);border-radius:4px;cursor:pointer;font-family:inherit;">+ Add a missing or new leg</button>' +
       '</div>';
     } else if (p.type === "hotel") {
       fieldsHtml +=
@@ -7301,14 +7301,14 @@
 
     box.innerHTML =
       '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">' +
-        '<div style="width:28px;height:28px;border-radius:50%;background:#a06d00;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;">✎</div>' +
+        '<div style="width:28px;height:28px;border-radius:50%;background:#a06d00;color:var(--c-on-dark);display:flex;align-items:center;justify-content:center;font-size:14px;">✎</div>' +
         '<div style="font-size:14px;font-weight:700;">Fix ' + typeIcon + ' ' + typeLbl + ' before attaching</div>' +
       '</div>' +
-      '<div style="font-size:12px;color:#555;line-height:1.55;margin-bottom:14px;">Change anything Max got wrong, then Save. You can attach the booking to your trip after.</div>' +
+      '<div style="font-size:12px;color:var(--c-ink-2);line-height:1.55;margin-bottom:14px;">Change anything Max got wrong, then Save. You can attach the booking to your trip after.</div>' +
       fieldsHtml +
       '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">' +
-        '<button id="ueb-cancel" style="padding:8px 14px;font-size:12px;font-weight:600;background:#fff;color:#666;border:1px solid #ddd;border-radius:5px;cursor:pointer;">Cancel</button>' +
-        '<button id="ueb-save" style="padding:8px 16px;font-size:12px;font-weight:700;background:#1a5fa8;color:#fff;border:none;border-radius:5px;cursor:pointer;">Save</button>' +
+        '<button id="ueb-cancel" style="padding:8px 14px;font-size:12px;font-weight:600;background:var(--c-bg);color:#666;border:1px solid var(--c-border);border-radius:5px;cursor:pointer;">Cancel</button>' +
+        '<button id="ueb-save" style="padding:8px 16px;font-size:12px;font-weight:700;background:var(--c-primary);color:var(--c-on-dark);border:none;border-radius:5px;cursor:pointer;">Save</button>' +
       '</div>';
 
     ov.appendChild(box);
@@ -7334,7 +7334,7 @@
       legDiv.style.cssText = "margin:6px 0;padding:8px 10px;background:#f5f8fc;border:1px solid #d4e0f0;border-radius:5px;";
       legDiv.innerHTML =
         '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">' +
-          '<div style="font-size:10px;font-weight:700;color:#1a5fa8;text-transform:uppercase;letter-spacing:0.05em;">Leg ' + idx + '</div>' +
+          '<div style="font-size:10px;font-weight:700;color:var(--c-primary);text-transform:uppercase;letter-spacing:0.05em;">Leg ' + idx + '</div>' +
           '<button type="button" class="ueb-leg-remove" style="background:none;border:none;color:#c44;font-size:10.5px;cursor:pointer;padding:0;font-family:inherit;">✕ remove</button>' +
         '</div>' +
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
@@ -7632,7 +7632,7 @@
       'margin-bottom:' + (expanded ? '8px' : '0') + ';';
     var ttl = document.createElement('div');
     ttl.style.cssText =
-      'font-size:12px;font-weight:700;color:#5b3f8f;' +
+      'font-size:12px;font-weight:700;color:var(--c-accent);' +
       'text-transform:uppercase;letter-spacing:0.05em;';
     // v360.1: "Considered" implied an active mental decision the
     // user may not have made — they might have just scrolled past
@@ -7642,10 +7642,10 @@
     // hint without re-stating the heading.
     ttl.textContent = 'Places you set aside (' + considered.length + ')';
     var sub = document.createElement('div');
-    sub.style.cssText = 'font-size:10.5px;color:#888;font-style:italic;flex:1;';
+    sub.style.cssText = 'font-size:10.5px;color:var(--c-ink-3);font-style:italic;flex:1;';
     sub.textContent = 'Keep these in mind or add to the trip when ready.';
     var chev = document.createElement('div');
-    chev.style.cssText = 'font-size:11px;color:#888;flex-shrink:0;';
+    chev.style.cssText = 'font-size:11px;color:var(--c-ink-3);flex-shrink:0;';
     chev.textContent = expanded ? '⌃' : '⌄';
     hdr.appendChild(ttl);
     hdr.appendChild(sub);
@@ -7675,7 +7675,7 @@
     shown.forEach(function (c) {
       var row = document.createElement('div');
       row.style.cssText =
-        'padding:8px 10px;background:#fff;border:1px dashed #d8d0c4;' +
+        'padding:8px 10px;background:var(--c-bg);border:1px dashed #d8d0c4;' +
         'border-radius:6px;display:flex;align-items:flex-start;gap:10px;';
       var left = document.createElement('div');
       left.style.cssText = 'flex:1;min-width:0;';
@@ -7701,7 +7701,7 @@
       var act = document.createElement('button');
       act.type = 'button';
       act.style.cssText =
-        'background:transparent;border:none;color:#5b3f8f;font-family:inherit;' +
+        'background:transparent;border:none;color:var(--c-accent);font-family:inherit;' +
         'font-size:11px;font-weight:600;cursor:pointer;padding:2px 6px;flex-shrink:0;';
       act.textContent = '+ add →';
       act.title = 'Open the Considered list with this place highlighted';
@@ -7719,7 +7719,7 @@
       var seeAll = document.createElement('button');
       seeAll.type = 'button';
       seeAll.style.cssText =
-        'background:transparent;border:none;color:#5b3f8f;font-family:inherit;' +
+        'background:transparent;border:none;color:var(--c-accent);font-family:inherit;' +
         'font-size:11.5px;font-weight:600;cursor:pointer;padding:6px 0 0;text-align:left;';
       seeAll.textContent = 'See all ' + considered.length + ' →';
       seeAll.onclick = function () {
@@ -7767,7 +7767,7 @@
 
     var nameSpan = document.createElement('span');
     nameSpan.style.cssText =
-      'font-size:20px;font-weight:700;color:#111;letter-spacing:-.01em;line-height:1.2;';
+      'font-size:20px;font-weight:700;color:var(--c-ink);letter-spacing:-.01em;line-height:1.2;';
     nameSpan.textContent = trip.name || 'Untitled trip';
 
     var pencil = document.createElement('span');
@@ -7784,7 +7784,7 @@
     var profileChip = document.createElement('button');
     profileChip.type = 'button';
     profileChip.style.cssText =
-      'background:#fff;border:1px solid #d8d4c8;color:#555;font-family:inherit;' +
+      'background:var(--c-bg);border:1px solid #d8d4c8;color:var(--c-ink-2);font-family:inherit;' +
       'font-size:11.5px;font-weight:600;padding:4px 11px;border-radius:13px;' +
       'cursor:pointer;flex-shrink:0;align-self:center;';
     profileChip.textContent = 'Trip profile';
@@ -7809,7 +7809,7 @@
       inp.value = trip.name || '';
       inp.placeholder = 'Trip name';
       inp.style.cssText =
-        'font-size:20px;font-weight:700;color:#111;letter-spacing:-.01em;' +
+        'font-size:20px;font-weight:700;color:var(--c-ink);letter-spacing:-.01em;' +
         'background:transparent;border:none;border-bottom:1px solid #999;outline:none;' +
         'font-family:inherit;flex:1;min-width:0;padding:0;';
       var savedDisp = nameSpan.style.display;
@@ -8107,7 +8107,7 @@
     // `overflow:hidden` on the box itself is required for resize:both
     // to take effect; the inner body wrap is what scrolls.
     box.style.cssText =
-      'background:#fff;border-radius:10px;' +
+      'background:var(--c-bg);border-radius:10px;' +
       'width:560px;height:70vh;' +
       'min-width:320px;min-height:240px;max-width:96vw;max-height:96vh;' +
       'resize:both;overflow:hidden;' +
@@ -8120,7 +8120,7 @@
       'display:flex;align-items:baseline;justify-content:space-between;gap:12px;' +
       'padding:20px 24px 12px;border-bottom:1px solid #eee;background:#fff;border-radius:10px 10px 0 0;flex-shrink:0;';
     var h = document.createElement('div');
-    h.style.cssText = 'font-size:16px;font-weight:700;color:#111;';
+    h.style.cssText = 'font-size:16px;font-weight:700;color:var(--c-ink);';
     h.textContent = 'What needs you';
 
     var actions = document.createElement('div');
@@ -8135,7 +8135,7 @@
     var popoutBtn = document.createElement('button');
     popoutBtn.type = 'button';
     popoutBtn.style.cssText =
-      'background:#fff;border:1px solid #d8c4a4;color:#5c4520;font-family:inherit;' +
+      'background:var(--c-bg);border:1px solid #d8c4a4;color:#5c4520;font-family:inherit;' +
       'font-size:11.5px;font-weight:600;padding:5px 11px;border-radius:5px;cursor:pointer;';
     popoutBtn.textContent = '📋 Pop out';
     popoutBtn.title = 'Open this list in a separate window you can keep visible while you work through it';
@@ -8148,7 +8148,7 @@
     var printBtn = document.createElement('button');
     printBtn.type = 'button';
     printBtn.style.cssText =
-      'background:#fff;border:1px solid #d8c4a4;color:#5c4520;font-family:inherit;' +
+      'background:var(--c-bg);border:1px solid #d8c4a4;color:#5c4520;font-family:inherit;' +
       'font-size:11.5px;font-weight:600;padding:5px 11px;border-radius:5px;cursor:pointer;';
     printBtn.textContent = '🖨 Print';
     printBtn.title = 'Open a printer-friendly version of this list';
@@ -8157,7 +8157,7 @@
 
     var x = document.createElement('button');
     x.type = 'button';
-    x.style.cssText = 'background:none;border:none;color:#888;font-size:18px;cursor:pointer;padding:0 4px;';
+    x.style.cssText = 'background:none;border:none;color:var(--c-ink-3);font-size:18px;cursor:pointer;padding:0 4px;';
     x.textContent = '✕';
     x.title = 'Close';
     x.onclick = function () { ov.remove(); };
@@ -8179,7 +8179,7 @@
     box = bodyWrap; // SHIM: subsequent box.appendChild lands inside bodyWrap
 
     var sub = document.createElement('div');
-    sub.style.cssText = 'font-size:11.5px;color:#888;margin-bottom:14px;line-height:1.5;';
+    sub.style.cssText = 'font-size:11.5px;color:var(--c-ink-3);margin-bottom:14px;line-height:1.5;';
     sub.textContent =
       'Travel events, cancellation deadlines, and open provider actions — sorted by date. ' +
       'Click any row to jump to the destination that owns it.';
@@ -8194,7 +8194,7 @@
 
     if (total === 0) {
       var empty = document.createElement('div');
-      empty.style.cssText = 'font-size:12px;color:#888;font-style:italic;padding:8px 0;';
+      empty.style.cssText = 'font-size:12px;color:var(--c-ink-3);font-style:italic;padding:8px 0;';
       empty.textContent = 'Nothing the world is requiring right now — return to shaping.';
       box.appendChild(empty);
       ov.appendChild(outerBox);
@@ -8259,7 +8259,7 @@
       }
       if (opts.detail) {
         var det = document.createElement('div');
-        det.style.cssText = 'font-size:10.5px;color:#888;margin-top:2px;';
+        det.style.cssText = 'font-size:10.5px;color:var(--c-ink-3);margin-top:2px;';
         det.textContent = opts.detail;
         col.appendChild(det);
       }
@@ -8280,7 +8280,7 @@
     function _sectionLabel(text) {
       var lbl = document.createElement('div');
       lbl.style.cssText =
-        'font-size:10.5px;font-weight:700;color:#888;letter-spacing:0.05em;' +
+        'font-size:10.5px;font-weight:700;color:var(--c-ink-3);letter-spacing:0.05em;' +
         'text-transform:uppercase;margin:10px 2px 2px;';
       lbl.textContent = text;
       return lbl;
@@ -8778,7 +8778,7 @@
     var addBtn = document.createElement('button');
     addBtn.type = 'button';
     addBtn.style.cssText =
-      'background:#fff;border:1px solid #d8c4a4;color:#5c4520;font-family:inherit;' +
+      'background:var(--c-bg);border:1px solid #d8c4a4;color:#5c4520;font-family:inherit;' +
       'font-size:11.5px;font-weight:600;padding:5px 11px;border-radius:5px;' +
       'cursor:pointer;flex-shrink:0;';
     addBtn.textContent = 'Capture';
@@ -8883,7 +8883,7 @@
       var historyLink = document.createElement('button');
       historyLink.type = 'button';
       historyLink.style.cssText =
-        'background:transparent;border:none;color:#888;font-family:inherit;' +
+        'background:transparent;border:none;color:var(--c-ink-3);font-family:inherit;' +
         'font-size:11px;cursor:pointer;padding:2px 4px;font-style:italic;';
       historyLink.textContent = allWisps.length + ' captured · view history →';
       historyLink.onmouseover = function () { historyLink.style.color = '#1a5fa8'; };
@@ -8976,13 +8976,13 @@
 
     var body = document.createElement('div');
     body.style.cssText =
-      'padding:8px 4px 4px;display:flex;flex-direction:column;gap:6px;border-top:1px solid #eee;';
+      'padding:8px 4px 4px;display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--c-border-3);';
 
     function _addRow(label, sub, onClick) {
       var btn = document.createElement('button');
       btn.type = 'button';
       btn.style.cssText =
-        'text-align:left;padding:8px 10px;border:1px solid #e8e2d2;background:#fff;' +
+        'text-align:left;padding:8px 10px;border:1px solid #e8e2d2;background:var(--c-bg);' +
         'border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px;' +
         'color:#444;display:flex;flex-direction:column;gap:2px;';
       var top = document.createElement('div');
@@ -8991,7 +8991,7 @@
       btn.appendChild(top);
       if (sub) {
         var s = document.createElement('div');
-        s.style.cssText = 'font-size:10.5px;color:#888;';
+        s.style.cssText = 'font-size:10.5px;color:var(--c-ink-3);';
         s.textContent = sub;
         btn.appendChild(s);
       }

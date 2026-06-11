@@ -337,7 +337,7 @@ function mkExSight(s,dest,todayIds,allSights,context){
     _exEdit.type = "button";
     _exEdit.textContent = "\u270e";
     _exEdit.title = s.url ? "Edit URL" : "Set a custom URL";
-    _exEdit.style.cssText = "margin-left:3px;font-size:10px;color:#aaa;background:none;border:none;cursor:pointer;padding:0 2px;font-family:inherit;line-height:1;";
+    _exEdit.style.cssText = "margin-left:3px;font-size:10px;color:var(--c-ink-4);background:none;border:none;cursor:pointer;padding:0 2px;font-family:inherit;line-height:1;";
     (function(item,d){_exEdit.onclick = function(e){
       e.stopPropagation();
       _openSightUrlEditor(_exEdit, item, function(){
@@ -376,7 +376,7 @@ function mkExSight(s,dest,todayIds,allSights,context){
       var existing=document.getElementById("day-pick-"+sid);
       if(existing){existing.parentNode.removeChild(existing);return;}
       var picker=document.createElement("div"); picker.id="day-pick-"+sid;
-      picker.style.cssText="position:fixed;z-index:900;background:#fff;border:1px solid #ddd;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.12);padding:6px 0;min-width:140px;";
+      picker.style.cssText="position:fixed;z-index:900;background:var(--c-bg);border:1px solid var(--c-border);border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.12);padding:6px 0;min-width:140px;";
       var rect=btn.getBoundingClientRect();
       picker.style.left=rect.left+"px"; picker.style.top=(rect.bottom+4)+"px";
       d.days.forEach(function(day){
@@ -424,14 +424,14 @@ function mkExSight(s,dest,todayIds,allSights,context){
         var existing=document.getElementById("day-pick-"+sid);
         if(existing){existing.parentNode.removeChild(existing);return;}
         var picker=document.createElement("div"); picker.id="day-pick-"+sid;
-        picker.style.cssText="position:absolute;z-index:900;background:#fff;border:1px solid #ddd;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.12);padding:6px 0;min-width:140px;";
+        picker.style.cssText="position:absolute;z-index:900;background:var(--c-bg);border:1px solid var(--c-border);border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.12);padding:6px 0;min-width:140px;";
         // Position below button
         var rect=btn.getBoundingClientRect();
         picker.style.left=(rect.left)+"px"; picker.style.top=(rect.bottom+4)+"px";
         picker.style.position="fixed";
 
         // Today option
-        var todayOpt=document.createElement("div"); todayOpt.style.cssText="padding:7px 14px;font-size:12px;cursor:pointer;color:#1a5fa8;font-weight:500;";
+        var todayOpt=document.createElement("div"); todayOpt.style.cssText="padding:7px 14px;font-size:12px;cursor:pointer;color:var(--c-primary);font-weight:500;";
         todayOpt.textContent="\u2605 Today";
         todayOpt.onmouseover=function(){todayOpt.style.background="#f0f7ff";};
         todayOpt.onmouseout=function(){todayOpt.style.background="";};
@@ -442,7 +442,7 @@ function mkExSight(s,dest,todayIds,allSights,context){
         picker.appendChild(todayOpt);
 
         // Divider
-        var div=document.createElement("div"); div.style.cssText="height:1px;background:#f0f0f0;margin:4px 0;"; picker.appendChild(div);
+        var div=document.createElement("div"); div.style.cssText="height:1px;background:var(--c-panel-3);margin:4px 0;"; picker.appendChild(div);
 
         // Day options
         d.days.forEach(function(day){

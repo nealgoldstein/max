@@ -87,7 +87,7 @@
       if (!activeMap[c.id]) return;
       var chip = document.createElement("button");
       chip.type = "button";
-      chip.style.cssText = "font-size:11px;font-weight:600;color:#444;background:#fff;border:1px solid #d8d4c8;padding:5px 10px;border-radius:14px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;line-height:1.2;flex-shrink:0;white-space:nowrap;";
+      chip.style.cssText = "font-size:11px;font-weight:600;color:#444;background:var(--c-bg);border:1px solid #d8d4c8;padding:5px 10px;border-radius:14px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;line-height:1.2;flex-shrink:0;white-space:nowrap;";
       chip.innerHTML = '<span style="font-size:13px;">' + c.emoji + '</span><span>' + (c.shortLabel || c.label) + '</span>';
       chip.onmouseover = function () { chip.style.background = "#f5f5f5"; };
       chip.onmouseout  = function () { chip.style.background = "#fff"; };
@@ -116,7 +116,7 @@
     if (!L) return;
     global._tb.airports.forEach(function (a) {
       if (!a.lat || !a.lng) return;
-      var iconHtml = '<div style="background:#fff;color:#1a5fa8;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:12px;border:2px solid #1a5fa8;box-shadow:0 1px 4px rgba(0,0,0,.2);">✈</div>';
+      var iconHtml = '<div style="background:var(--c-bg);color:var(--c-primary);border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:12px;border:2px solid var(--c-primary);box-shadow:0 1px 4px rgba(0,0,0,.2);">✈</div>';
       var icon = L.divIcon({ html: iconHtml, className: "", iconSize: [22, 22], iconAnchor: [11, 11] });
       var m = L.marker([a.lat, a.lng], { icon: icon, zIndexOffset: -100 });
       var label = a.name + (a.code ? " (" + a.code + ")" : "") + (a.city ? " — " + a.city : "");
@@ -248,12 +248,12 @@
         m.bindTooltip(tipLabel, { permanent: false, direction: "top", offset: [0, -16], className: "ce-map-tooltip" });
       }
       m.bindPopup(
-        '<div style="font-size:12px;font-weight:600;color:#111;">' + (p.name || "").replace(/</g, "&lt;") + '</div>'
-        + '<div style="font-size:9px;color:#aaa;text-transform:uppercase;letter-spacing:.05em;margin-top:1px;">' + typeLabel + '</div>'
+        '<div style="font-size:12px;font-weight:600;color:var(--c-ink);">' + (p.name || "").replace(/</g, "&lt;") + '</div>'
+        + '<div style="font-size:9px;color:var(--c-ink-4);text-transform:uppercase;letter-spacing:.05em;margin-top:1px;">' + typeLabel + '</div>'
         + notes
         + '<div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap;">'
-        +   '<button onclick="_tbUseEntryPoint(true,&quot;' + safeName + '&quot;,&quot;' + mode + '&quot;)" style="font-size:10px;padding:4px 8px;background:#111;color:#fff;border:none;border-radius:4px;cursor:pointer;font-family:inherit;">Enter here' + modeTag + '</button>'
-        +   '<button onclick="_tbUseEntryPoint(false,&quot;' + safeName + '&quot;,&quot;' + mode + '&quot;)" style="font-size:10px;padding:4px 8px;background:#fff;color:#111;border:1px solid #111;border-radius:4px;cursor:pointer;font-family:inherit;">Leave here' + modeTag + '</button>'
+        +   '<button onclick="_tbUseEntryPoint(true,&quot;' + safeName + '&quot;,&quot;' + mode + '&quot;)" style="font-size:10px;padding:4px 8px;background:var(--c-primary-top);color:var(--c-on-dark);border:none;border-radius:4px;cursor:pointer;font-family:inherit;">Enter here' + modeTag + '</button>'
+        +   '<button onclick="_tbUseEntryPoint(false,&quot;' + safeName + '&quot;,&quot;' + mode + '&quot;)" style="font-size:10px;padding:4px 8px;background:var(--c-bg);color:var(--c-ink);border:1px solid var(--c-border-dark);border-radius:4px;cursor:pointer;font-family:inherit;">Leave here' + modeTag + '</button>'
         + '</div>'
       );
       m.on("popupopen",  function () { global._edActivePopupId = p.id || p.name; });
@@ -422,7 +422,7 @@
   function _renderMustDosSummary(allMustDos) {
     if (!allMustDos || !allMustDos.length) return null;
     var wrap = document.createElement('div');
-    wrap.style.cssText = 'margin:4px 4px 12px;padding:10px 12px;background:#fff;border:1px solid #e0e6ef;border-radius:8px;';
+    wrap.style.cssText = 'margin:4px 4px 12px;padding:10px 12px;background:var(--c-bg);border:1px solid #e0e6ef;border-radius:8px;';
     var hdr = document.createElement('div');
     hdr.style.cssText = 'font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#666;margin-bottom:6px;';
     hdr.textContent = 'Your trip includes · ' + allMustDos.length;
@@ -436,7 +436,7 @@
     allMustDos.forEach(function (m) {
       var row = document.createElement('div');
       var active = !!m.checked;
-      row.style.cssText = 'padding:5px 0;font-size:11px;line-height:1.5;border-top:1px dotted #eee;color:'
+      row.style.cssText = 'padding:5px 0;font-size:11px;line-height:1.5;border-top:1px dotted var(--c-border-3);color:'
         + (active ? '#333' : '#999') + ';display:flex;align-items:flex-start;gap:6px;';
       var badge = typeBadge[m.type] || ('• ' + (m.type || 'activity'));
       var desc = m.description ? ' <span style="color:' + (active ? '#666' : '#aaa') + ';">— ' + m.description + '</span>' : '';
@@ -508,11 +508,11 @@
   function _renderRejectedSection(rejectedCands) {
     if (!rejectedCands || !rejectedCands.length) return null;
     var wrap = document.createElement('div');
-    wrap.style.cssText = 'margin-top:14px;padding-top:10px;border-top:1px solid #eee;';
+    wrap.style.cssText = 'margin-top:14px;padding-top:10px;border-top:1px solid var(--c-border-3);';
     var toggle = document.createElement('div');
     var expanded = !!global._ceRejectedExpanded;
-    toggle.style.cssText = 'font-size:10px;font-weight:600;color:#888;cursor:pointer;padding:6px 8px;user-select:none;background:#f5f5f5;border-radius:5px;display:flex;align-items:center;justify-content:space-between;';
-    var hint = '<span style="font-weight:400;color:#aaa;">change your mind</span>';
+    toggle.style.cssText = 'font-size:10px;font-weight:600;color:var(--c-ink-3);cursor:pointer;padding:6px 8px;user-select:none;background:var(--c-panel-2);border-radius:5px;display:flex;align-items:center;justify-content:space-between;';
+    var hint = '<span style="font-weight:400;color:var(--c-ink-4);">change your mind</span>';
     function labelHtml(isOpen) {
       return '<span>' + (isOpen ? '▾' : '▸') + '  Maybe later · ' + rejectedCands.length + '</span>' + hint;
     }
@@ -528,14 +528,14 @@
     list.style.cssText += 'padding:4px 8px;background:#fafafa;border-radius:5px;';
     rejectedCands.forEach(function (c) {
       var row = document.createElement('div');
-      row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:4px 0;font-size:11px;color:#555;border-bottom:1px dotted #eee;';
+      row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:4px 0;font-size:11px;color:var(--c-ink-2);border-bottom:1px dotted var(--c-border-3);';
       var label = document.createElement('span');
       label.innerHTML = '<strong style="color:#333;">' + (c.place || '') + '</strong>'
         + (c.country ? ' <span style="color:#999;">· ' + c.country + '</span>' : '')
-        + (c.role    ? ' <span style="color:#aaa;">· ' + c.role + '</span>'    : '');
+        + (c.role    ? ' <span style="color:var(--c-ink-4);">· ' + c.role + '</span>'    : '');
       var btn = document.createElement('button');
       btn.textContent = 'Restore';
-      btn.style.cssText = 'font-size:10px;padding:2px 8px;border:1px solid #cfd8e3;border-radius:4px;background:#fff;color:#1a5fa8;cursor:pointer;font-family:inherit;';
+      btn.style.cssText = 'font-size:10px;padding:2px 8px;border:1px solid #cfd8e3;border-radius:4px;background:var(--c-bg);color:var(--c-primary);cursor:pointer;font-family:inherit;';
       (function (id) {
         btn.onclick = function () {
           if (typeof global.setCS === 'function') global.setCS(id, 'reject');
@@ -569,7 +569,7 @@
   // candidate state).
   function _renderCELensBar() {
     var bar = document.createElement('div');
-    bar.style.cssText = 'display:flex;gap:4px;margin-top:8px;padding-top:8px;border-top:1px solid #f0f0f0;flex-wrap:wrap;align-items:center;';
+    bar.style.cssText = 'display:flex;gap:4px;margin-top:8px;padding-top:8px;border-top:1px solid var(--c-border-4);flex-wrap:wrap;align-items:center;';
     var label = document.createElement('span');
     label.style.cssText = 'font-size:9px;color:#999;letter-spacing:0.05em;text-transform:uppercase;font-weight:700;margin-right:4px;';
     label.textContent = 'Organize by:';
@@ -682,17 +682,17 @@
     var hdrRow = document.createElement("div");
     hdrRow.style.cssText = "display:flex;justify-content:space-between;align-items:baseline;gap:8px;";
     var hdr = document.createElement("div");
-    hdr.style.cssText = "font-size:13px;font-weight:700;color:#1a5fa8;letter-spacing:0.02em;";
+    hdr.style.cssText = "font-size:13px;font-weight:700;color:var(--c-primary);letter-spacing:0.02em;";
     hdr.textContent = global.MaxEnginePicker.mustDoSectionTitle(mdName, mdItem);
     hdrRow.appendChild(hdr);
     if (mdItem && mdItem.fromChip && mdItem.interest) {
       var chipSrc = document.createElement("div");
-      chipSrc.style.cssText = "font-size:10px;color:#888;font-style:italic;";
+      chipSrc.style.cssText = "font-size:10px;color:var(--c-ink-3);font-style:italic;";
       chipSrc.textContent = "from: " + mdItem.interest;
       hdrRow.appendChild(chipSrc);
     }
     var drop = document.createElement("button");
-    drop.style.cssText = "font-size:10px;color:#888;background:none;border:none;cursor:pointer;font-family:inherit;padding:0;";
+    drop.style.cssText = "font-size:10px;color:var(--c-ink-3);background:none;border:none;cursor:pointer;font-family:inherit;padding:0;";
     drop.textContent = mdItem && mdItem.type === "route" ? "Drop this travel leg" : "Drop this activity";
     drop.title = mdItem && mdItem.type === "route"
       ? "Remove this travel leg from your plan. Endpoints stay only if kept for other reasons."
@@ -705,7 +705,7 @@
 
     if (mdItem && mdItem.description) {
       var sub = document.createElement("div");
-      sub.style.cssText = "font-size:11px;color:#555;line-height:1.55;margin-top:4px;";
+      sub.style.cssText = "font-size:11px;color:var(--c-ink-2);line-height:1.55;margin-top:4px;";
       sub.textContent = mdItem.description;
       sectionWrap.appendChild(sub);
     }
@@ -715,7 +715,7 @@
       if (eps.length >= 2) {
         var arrow = global.MaxEnginePicker.routeArrow(mdItem.direction);
         var routeLine = document.createElement("div");
-        routeLine.style.cssText = "font-size:12px;font-weight:600;color:#1a5fa8;margin-top:6px;";
+        routeLine.style.cssText = "font-size:12px;font-weight:600;color:var(--c-primary);margin-top:6px;";
         routeLine.textContent = eps.map(function (p) { return p.place; }).join(arrow);
         sectionWrap.appendChild(routeLine);
       }
@@ -725,7 +725,7 @@
       var ehParts = [];
       (mdItem.requiredPlaces || mdItem.endpoints || []).forEach(function (p) {
         var h = mdItem.endpointHighlights[p.place] || mdItem.endpointHighlights[(p.place || "").toLowerCase()];
-        if (h) ehParts.push('<div style="font-size:11px;color:#555;line-height:1.5;margin-top:2px;"><strong style="color:#333;">' + p.place + ':</strong> ' + h + '</div>');
+        if (h) ehParts.push('<div style="font-size:11px;color:var(--c-ink-2);line-height:1.5;margin-top:2px;"><strong style="color:#333;">' + p.place + ':</strong> ' + h + '</div>');
       });
       if (ehParts.length) {
         var ehWrap = document.createElement("div");
@@ -1074,21 +1074,21 @@
     var _hxBadge = ME ? ME.classifyCandidateBadge(c, primary, mdcItems) : { kind: 'none' };
     var reqBadge = '';
     if (_hxBadge.kind === 'manual') {
-      reqBadge = '<div style="font-size:9px;font-weight:700;color:#2a7a4e;background:#e8f5ee;padding:2px 7px;border-radius:10px;margin:2px 0 4px;display:inline-block;">📌 A must-see for you</div>';
+      reqBadge = '<div style="font-size:9px;font-weight:700;color:var(--c-see);background:#e8f5ee;padding:2px 7px;border-radius:10px;margin:2px 0 4px;display:inline-block;">📌 A must-see for you</div>';
     } else if (_hxBadge.kind === 'also') {
-      reqBadge = '<div style="font-size:9px;font-weight:700;color:#1a5fa8;background:#e8f0fc;padding:2px 7px;border-radius:10px;margin:2px 0 4px;display:inline-block;">You will also find:' + _hxBadge.refs.join(", ") + '</div>';
+      reqBadge = '<div style="font-size:9px;font-weight:700;color:var(--c-primary);background:#e8f0fc;padding:2px 7px;border-radius:10px;margin:2px 0 4px;display:inline-block;">You will also find:' + _hxBadge.refs.join(", ") + '</div>';
     } else if (_hxBadge.kind === 'required') {
       var label = _hxBadge.isRoute ? "Stop on" : "Required for";
-      reqBadge = '<div style="font-size:9px;font-weight:700;color:#1a5fa8;background:#e8f0fc;padding:2px 7px;border-radius:10px;margin:2px 0 4px;display:inline-block;">🚂 ' + label + ': ' + _hxBadge.refs.join(", ") + '</div>';
+      reqBadge = '<div style="font-size:9px;font-weight:700;color:var(--c-primary);background:#e8f0fc;padding:2px 7px;border-radius:10px;margin:2px 0 4px;display:inline-block;">🚂 ' + label + ': ' + _hxBadge.refs.join(", ") + '</div>';
     }
 
     var alsoHere = ME ? ME.alsoHereText(c, primary, mdcItems) : '';
     var alsoHereHtml = alsoHere
-      ? '<div style="font-size:11px;color:#555;line-height:1.5;margin-top:4px;"><strong style="color:#333;font-weight:600;">Also here:</strong> ' + alsoHere + '</div>'
+      ? '<div style="font-size:11px;color:var(--c-ink-2);line-height:1.5;margin-top:4px;"><strong style="color:#333;font-weight:600;">Also here:</strong> ' + alsoHere + '</div>'
       : '';
 
     var keptDot = c.status === "keep"
-      ? '<span style="color:#2a7a4e;font-weight:700;margin-right:2px;">✓</span>'
+      ? '<span style="color:var(--c-see);font-weight:700;margin-right:2px;">✓</span>'
       : (c.status === "reject" ? '<span style="color:#c05020;font-weight:700;margin-right:2px;">×</span>' : '');
 
     // Round NC.3b: role indicator on the Discovery card. Replaces the
@@ -1099,16 +1099,16 @@
     var _roleChip = '';
     if (c.status === "keep") {
       if (c.role === "daytrip") {
-        _roleChip = '<span style="font-size:10px;font-weight:600;color:#7c3aed;background:#f3eaff;border:1px solid #d6c2f5;padding:2px 7px;border-radius:10px;display:inline-block;white-space:nowrap;">Day trip</span>';
+        _roleChip = '<span style="font-size:10px;font-weight:600;color:var(--c-daytrip);background:#f3eaff;border:1px solid #d6c2f5;padding:2px 7px;border-radius:10px;display:inline-block;white-space:nowrap;">Day trip</span>';
       } else if (c.role === "onway") {
         _roleChip = '<span style="font-size:10px;font-weight:600;color:#0891b2;background:#e6f6f8;border:1px solid #a7dde6;padding:2px 7px;border-radius:10px;display:inline-block;white-space:nowrap;">On the way</span>';
       } else if (c.overnightCapable === false) {
         // Non-capable: locked to See, no toggle.
-        _roleChip = '<span title="No overnight infrastructure — this place is See-only." style="font-size:10px;font-weight:600;color:#666;background:#f0f0f0;border:1px solid #ddd;padding:2px 7px;border-radius:10px;display:inline-block;white-space:nowrap;">👁 See</span>';
+        _roleChip = '<span title="No overnight infrastructure — this place is See-only." style="font-size:10px;font-weight:600;color:#666;background:var(--c-panel-3);border:1px solid var(--c-border);padding:2px 7px;border-radius:10px;display:inline-block;white-space:nowrap;">👁 See</span>';
       } else {
         // Capable: two-button Stay / See toggle.
         var _staySelected = (c.role === "stay");
-        _roleChip = '<span class="ce-role-toggle" data-cand-id="' + c.id + '" style="display:inline-flex;align-items:center;gap:0;border:1px solid #ccc;border-radius:10px;overflow:hidden;font-size:10px;font-weight:600;">'
+        _roleChip = '<span class="ce-role-toggle" data-cand-id="' + c.id + '" style="display:inline-flex;align-items:center;gap:0;border:1px solid var(--c-border-strong);border-radius:10px;overflow:hidden;font-size:10px;font-weight:600;">'
           + '<button class="ce-role-stay" type="button" style="padding:2px 8px;border:none;background:' + (_staySelected ? "#1a5fa8" : "#fff") + ';color:' + (_staySelected ? "#fff" : "#1a5fa8") + ';cursor:pointer;font-family:inherit;font-weight:600;">Stay</button>'
           + '<button class="ce-role-see"  type="button" style="padding:2px 8px;border:none;background:' + (!_staySelected ? "#666" : "#fff") + ';color:' + (!_staySelected ? "#fff" : "#666") + ';cursor:pointer;font-family:inherit;font-weight:600;border-left:1px solid #ccc;">👁 See</button>'
           + '</span>';
@@ -1140,27 +1140,27 @@
       + _thumbHtml
       + '<div style="flex:1;min-width:0;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">'
       + keptDot
-      + '<span class="ce-card-name" style="font-size:13px;font-weight:700;color:#111;">' + c.place + '</span>'
+      + '<span class="ce-card-name" style="font-size:13px;font-weight:700;color:var(--c-ink);">' + c.place + '</span>'
       + (c.widelyRecommended ? '<span style="color:#6a4a80;font-size:10px;" title="widely recommended">★</span>' : '')
-      + '<span style="font-size:10px;color:#888;">' + (c.role || '') + (c.stayRange ? ' · ' + c.stayRange : '') + '</span>'
+      + '<span style="font-size:10px;color:var(--c-ink-3);">' + (c.role || '') + (c.stayRange ? ' · ' + c.stayRange : '') + '</span>'
       + _roleChip
       + '</div>'
       + '</div>'
       + '<div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">'
       + '<button class="ce-act-compact-keep" style="font-size:10px;font-weight:600;padding:4px 9px;border-radius:5px;border:1px solid ' + (c.status === "keep" ? "#2a7a4e" : "#ddd") + ';background:' + (c.status === "keep" ? "#e8f5ee" : "#fff") + ';color:' + (c.status === "keep" ? "#2a7a4e" : "#333") + ';cursor:pointer;font-family:inherit;" title="' + _keepTitle + '">' + (c.status === "keep" ? "✓" : (c.status === "reject" ? "↺" : "+")) + '</button>'
       + '<button class="ce-act-compact-reject" style="font-size:10px;font-weight:600;padding:4px 9px;border-radius:5px;border:1px solid ' + (c.status === "reject" ? "#c05020" : "#ddd") + ';background:' + (c.status === "reject" ? "#fff0ec" : "#fff") + ';color:' + (c.status === "reject" ? "#c05020" : "#888") + ';cursor:pointer;font-family:inherit;" title="' + (c.status === "reject" ? "Currently rejected" : "Reject") + '">×</button>'
-      + '<button class="ce-act-compact-expand" style="font-size:12px;color:#888;background:none;border:none;cursor:pointer;font-family:inherit;padding:0 4px;" title="' + (expanded ? "Hide details" : "See details") + '">' + (expanded ? "▾" : "▸") + '</button>'
+      + '<button class="ce-act-compact-expand" style="font-size:12px;color:var(--c-ink-3);background:none;border:none;cursor:pointer;font-family:inherit;padding:0 4px;" title="' + (expanded ? "Hide details" : "See details") + '">' + (expanded ? "▾" : "▸") + '</button>'
       + '</div>'
       + '</div>';
 
     var detailHtml = expanded
-      ? '<div class="ce-card-details" style="padding:4px 11px 10px;border-top:1px solid #f0f0f0;">'
+      ? '<div class="ce-card-details" style="padding:4px 11px 10px;border-top:1px solid var(--c-border-4);">'
         + reqBadge
         // v359.31: Wikipedia factual anchor — short, structural, sits
         // ABOVE the LLM whyItFits. Empty/hidden until the fetch
         // resolves; replaced/filled in by _fetchWikiSummary below.
-        + '<div class="ce-card-wiki-desc" style="display:none;font-size:10.5px;color:#888;font-style:italic;margin-top:4px;letter-spacing:.01em;"></div>'
-        + '<div class="ce-card-why" style="font-size:11px;color:#555;line-height:1.55;margin-top:4px;">' + (c.whyItFits || '') + '</div>'
+        + '<div class="ce-card-wiki-desc" style="display:none;font-size:10.5px;color:var(--c-ink-3);font-style:italic;margin-top:4px;letter-spacing:.01em;"></div>'
+        + '<div class="ce-card-why" style="font-size:11px;color:var(--c-ink-2);line-height:1.55;margin-top:4px;">' + (c.whyItFits || '') + '</div>'
         + alsoHereHtml
         + '<div class="ce-card-tags" style="margin-top:6px;">' + (c.tags || []).map(function (t) { return '<span class="ce-tag">' + t + '</span>'; }).join('') + '</div>'
         + (c.tradeoffs ? '<div class="ce-card-tradeoff" style="margin-top:6px;">⚠ ' + c.tradeoffs + '</div>' : '')
@@ -1356,7 +1356,7 @@
       wsSection.style.cssText =
         "margin:0 12px 12px 12px;padding:8px 12px;background:#f3edfa;border:1px solid #d8c4e8;border-radius:6px;";
       var wsHdr = document.createElement("div");
-      wsHdr.style.cssText = "font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#5b3f8f;margin-bottom:6px;";
+      wsHdr.style.cssText = "font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--c-accent);margin-bottom:6px;";
       wsHdr.textContent = "On the way to " + (nextHubPlace || "the next stop");
       wsSection.appendChild(wsHdr);
 
@@ -1543,12 +1543,12 @@
       });
 
       var hdr = document.createElement("div");
-      hdr.style.cssText = "margin-top:6px;padding:10px 4px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#111;";
+      hdr.style.cssText = "margin-top:6px;padding:10px 4px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--c-ink);";
       hdr.textContent = "Draft itinerary — in order";
       container.appendChild(hdr);
       if (orderRes && orderRes.reasoning && orderRes.reasoning.length) {
         var why = document.createElement("div");
-        why.style.cssText = "padding:4px 4px 8px;font-size:10px;color:#888;line-height:1.55;";
+        why.style.cssText = "padding:4px 4px 8px;font-size:10px;color:var(--c-ink-3);line-height:1.55;";
         why.innerHTML = orderRes.reasoning.map(function (r) { return "• " + r; }).join("<br>");
         container.appendChild(why);
       }
@@ -1565,8 +1565,8 @@
 
       if (tb && tb.gettingTo) {
         var arrLeg = document.createElement("div");
-        arrLeg.style.cssText = "margin:6px 12px 2px;padding:6px 10px;font-size:10px;color:#555;border-left:2px solid #c8d8ec;background:#f5f9ff;line-height:1.55;border-radius:0 4px 4px 0;";
-        arrLeg.innerHTML = '✈ <strong style="color:#1a5fa8;">Arrival</strong> · ' + tb.gettingTo;
+        arrLeg.style.cssText = "margin:6px 12px 2px;padding:6px 10px;font-size:10px;color:var(--c-ink-2);border-left:2px solid #c8d8ec;background:#f5f9ff;line-height:1.55;border-radius:0 4px 4px 0;";
+        arrLeg.innerHTML = '✈ <strong style="color:var(--c-primary);">Arrival</strong> · ' + tb.gettingTo;
         container.appendChild(arrLeg);
       }
 
@@ -1576,16 +1576,16 @@
           var key = (prev.place || "").toLowerCase() + "→" + (c.place || "").toLowerCase();
           var routeName = routeByPair[key];
           var leg = document.createElement("div");
-          leg.style.cssText = "margin:2px 12px 2px;padding:4px 8px;font-size:10px;color:#666;border-left:2px solid #e8e8e8;line-height:1.55;";
+          leg.style.cssText = "margin:2px 12px 2px;padding:4px 8px;font-size:10px;color:#666;border-left:2px solid var(--c-border-2);line-height:1.55;";
           leg.innerHTML = routeName
-            ? '↓ <strong style="color:#1a5fa8;">' + routeName + '</strong> · ' + prev.place + ' → ' + c.place
+            ? '↓ <strong style="color:var(--c-primary);">' + routeName + '</strong> · ' + prev.place + ' → ' + c.place
             : '↓ Travel: ' + prev.place + ' → ' + c.place;
           container.appendChild(leg);
         }
         var nights = (typeof global.parseNightsFromRange === "function")
           ? (global.parseNightsFromRange(c.stayRange) || 3) : 3;
         var ix = document.createElement("div");
-        ix.style.cssText = "font-size:10px;color:#888;padding:6px 6px 0;font-weight:700;letter-spacing:0.03em;";
+        ix.style.cssText = "font-size:10px;color:var(--c-ink-3);padding:6px 6px 0;font-weight:700;letter-spacing:0.03em;";
         if (hasStartDate && dateCursor && !isNaN(dateCursor)) {
           var endDate = new Date(dateCursor); endDate.setDate(endDate.getDate() + nights);
           var dayEnd = dayCursor + nights - 1;
@@ -1604,18 +1604,18 @@
 
       if (tb && tb.gettingOut) {
         var depLeg = document.createElement("div");
-        depLeg.style.cssText = "margin:2px 12px 6px;padding:6px 10px;font-size:10px;color:#555;border-left:2px solid #c8d8ec;background:#f5f9ff;line-height:1.55;border-radius:0 4px 4px 0;";
-        depLeg.innerHTML = '✈ <strong style="color:#1a5fa8;">Departure</strong> · ' + tb.gettingOut;
+        depLeg.style.cssText = "margin:2px 12px 6px;padding:6px 10px;font-size:10px;color:var(--c-ink-2);border-left:2px solid #c8d8ec;background:#f5f9ff;line-height:1.55;border-radius:0 4px 4px 0;";
+        depLeg.innerHTML = '✈ <strong style="color:var(--c-primary);">Departure</strong> · ' + tb.gettingOut;
         container.appendChild(depLeg);
       }
     }
     if (unset.length) {
       var hdr2 = document.createElement("div");
-      hdr2.style.cssText = "margin-top:18px;padding:10px 4px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#111;border-top:1px solid #e8e8e8;";
+      hdr2.style.cssText = "margin-top:18px;padding:10px 4px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--c-ink);border-top:1px solid var(--c-border-2);";
       hdr2.textContent = "Also worth considering";
       container.appendChild(hdr2);
       var hdr2Sub = document.createElement("div");
-      hdr2Sub.style.cssText = "padding:0 4px 8px;font-size:10px;color:#888;";
+      hdr2Sub.style.cssText = "padding:0 4px 8px;font-size:10px;color:var(--c-ink-3);";
       hdr2Sub.textContent = "Places not yet in the draft. Keep any that fit; they’ll slot into the order.";
       container.appendChild(hdr2Sub);
       unset.forEach(function (c) { if (typeof global.renderCard === "function") global.renderCard(c, container); });
@@ -1643,7 +1643,7 @@
   //   - MaxPickerUI.renderEntryPointsOnCeMap (already in this module)
   function _renderTripDetailsStrip() {
     var box = document.createElement("div");
-    box.style.cssText = "margin-top:10px;padding-top:8px;border-top:1px solid #f0f0f0;";
+    box.style.cssText = "margin-top:10px;padding-top:8px;border-top:1px solid var(--c-border-4);";
 
     var tb = global._tb || {};
     var hasAny = tb.entry || tb.tbExit || tb.entryMode || tb.exitMode;
@@ -1668,7 +1668,7 @@
         if (tb.tbExit) bits.push("Out: " + tb.tbExit);
         sum.textContent = bits.join(" · ");
       } else {
-        sum.innerHTML = '<em style="color:#aaa;">Pick a pin on the map, or click to set arrival and departure</em>';
+        sum.innerHTML = '<em style="color:var(--c-ink-4);">Pick a pin on the map, or click to set arrival and departure</em>';
       }
       summaryRow.appendChild(sum);
     }
@@ -1683,28 +1683,28 @@
     if (!expanded) return box;
 
     var form = document.createElement("div");
-    form.style.cssText = "margin-top:10px;padding:10px 12px;background:#fafbfc;border:1px solid #eee;border-radius:6px;";
+    form.style.cssText = "margin-top:10px;padding:10px 12px;background:#fafbfc;border:1px solid var(--c-border-3);border-radius:6px;";
     var q = function (s) { return (s || "").replace(/"/g, '&quot;'); };
     var defaultEntry = tb.entry || "";
     var defaultExit  = tb.tbExit || "";
     var transportHtml = (typeof global._tbPlacesTransportButtonHtml === "function")
       ? global._tbPlacesTransportButtonHtml() : '';
     form.innerHTML =
-       '<div style="font-size:10px;color:#888;line-height:1.5;margin-bottom:10px;">'
+       '<div style="font-size:10px;color:var(--c-ink-3);line-height:1.5;margin-bottom:10px;">'
       +  'One transportation picker for both directions — tap it for getting-there and getting-out modes. Cities below. Dates and flight numbers come after you’ve committed to entry and exit.'
       + '</div>'
       + '<div style="margin-bottom:12px;">'
-      +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#888;margin-bottom:6px;">How you’re moving</div>'
+      +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--c-ink-3);margin-bottom:6px;">How you’re moving</div>'
       +   transportHtml
       + '</div>'
       + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'
       + '<div>'
       +   '<label style="display:block;font-size:10px;color:#666;margin-bottom:3px;">Getting there — city or airport</label>'
-      +   '<input id="td-entry" value="' + q(defaultEntry) + '" placeholder="e.g. Zurich or ZRH" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;" />'
+      +   '<input id="td-entry" value="' + q(defaultEntry) + '" placeholder="e.g. Zurich or ZRH" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid var(--c-border);border-radius:4px;font-family:inherit;" />'
       + '</div>'
       + '<div>'
       +   '<label style="display:block;font-size:10px;color:#666;margin-bottom:3px;">Getting out — city or airport</label>'
-      +   '<input id="td-exit" value="' + q(defaultExit) + '" placeholder="e.g. Geneva or GVA" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;" />'
+      +   '<input id="td-exit" value="' + q(defaultExit) + '" placeholder="e.g. Geneva or GVA" style="width:100%;box-sizing:border-box;font-size:11px;padding:6px 8px;border:1px solid var(--c-border);border-radius:4px;font-family:inherit;" />'
       + '</div>'
       + '</div>';
     box.appendChild(form);
@@ -1909,23 +1909,23 @@
       return ''
         + '<div style="padding:12px 14px;border:1px solid #eee;border-left:3px solid ' + dotColor + ';border-radius:6px;background:#fafafa;margin-bottom:8px;">'
         +   '<div style="font-size:13px;font-weight:700;color:#222;margin-bottom:4px;">' + iss.title + '</div>'
-        +   '<div style="font-size:11.5px;color:#555;line-height:1.55;">' + iss.detail + '</div>'
+        +   '<div style="font-size:11.5px;color:var(--c-ink-2);line-height:1.55;">' + iss.detail + '</div>'
         + '</div>';
     }).join("");
 
     var proceedBtnHtml = hideProceed ? '' :
-        '<button id="realism-proceed" style="font-size:13px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 16px;cursor:pointer;font-family:inherit;">' + proceedLabel + '</button>';
+        '<button id="realism-proceed" style="font-size:13px;font-weight:700;color:var(--c-on-dark);background:var(--c-primary);border:1px solid var(--c-primary);border-radius:6px;padding:8px 16px;cursor:pointer;font-family:inherit;">' + proceedLabel + '</button>';
 
     ov.innerHTML = ''
-      + '<div style="background:#fff;border-radius:12px;max-width:520px;width:100%;max-height:80vh;overflow-y:auto;box-shadow:0 8px 30px rgba(0,0,0,0.18);">'
+      + '<div style="background:var(--c-bg);border-radius:12px;max-width:520px;width:100%;max-height:80vh;overflow-y:auto;box-shadow:0 8px 30px rgba(0,0,0,0.18);">'
       +   '<div style="padding:20px 22px 4px;">'
-      +     '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">' + eyebrow + '</div>'
-      +     '<div style="font-size:17px;font-weight:700;color:#111;margin-top:4px;">' + title + '</div>'
+      +     '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--c-ink-3);">' + eyebrow + '</div>'
+      +     '<div style="font-size:17px;font-weight:700;color:var(--c-ink);margin-top:4px;">' + title + '</div>'
       +     '<div style="font-size:12px;color:#666;margin-top:6px;line-height:1.55;">' + intro + '</div>'
       +   '</div>'
       +   '<div style="padding:14px 22px 8px;">' + issuesHtml + '</div>'
       +   '<div style="padding:8px 22px 18px;display:flex;justify-content:flex-end;gap:8px;">'
-      +     '<button id="realism-back" style="font-size:13px;font-weight:500;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">' + backLabel + '</button>'
+      +     '<button id="realism-back" style="font-size:13px;font-weight:500;color:var(--c-ink-2);background:var(--c-bg);border:1px solid var(--c-border-strong);border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">' + backLabel + '</button>'
       +     proceedBtnHtml
       +   '</div>'
       + '</div>';

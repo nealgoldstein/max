@@ -103,7 +103,7 @@ function renderTripBriefEdit(){
   var _prevScroll = ov.scrollTop || 0;
   var _preserve = !!_tb._preserveScrollOnce;
   _tb._preserveScrollOnce = false;
-  ov.style.cssText="position:fixed;inset:0;background:#fafafa;z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
+  ov.style.cssText="position:fixed;inset:0;background:var(--c-panel);z-index:10000;overflow-y:auto;-webkit-overflow-scrolling:touch;";
   setTimeout(function(){ ov.scrollTop = _preserve ? _prevScroll : 0; attachScrollHint(ov); }, 0);
   ov.innerHTML='<div class="tb-header">'
     +'<div class="tb-logo"><div class="tb-logo-m">M</div><div><div style="font-size:12px;font-weight:700;">Max</div><div class="tb-step">Editing your trip</div></div></div>'
@@ -117,9 +117,9 @@ function renderTripBriefEdit(){
     // renderTripStep1Place. The "Profile\u2026" menu item on the trip
     // page calls editConstraints \u2192 this function, so the splitting
     // and the transport-in-trip-profile move need to happen here too.
-    +'<div style="margin:6px 0 22px;padding:14px 0 14px 18px;border-left:3px solid #1a5fa8;">'
+    +'<div style="margin:6px 0 22px;padding:14px 0 14px 18px;border-left:3px solid var(--c-primary);">'
     +'<div style="margin-bottom:14px;">'
-    +  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#1a5fa8;margin-bottom:2px;">This trip</div>'
+    +  '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--c-primary);margin-bottom:2px;">This trip</div>'
     +  '<div style="font-size:14px;font-weight:700;color:#222;">Trip profile</div>'
     +  '<div style="font-size:11.5px;color:#666;margin-top:3px;line-height:1.55;">Specific to this trip \u2014 where you\u2019re going, why, when, how you\u2019d like to get around, and who\u2019s going.</div>'
     +'</div>'
@@ -149,7 +149,7 @@ function renderTripBriefEdit(){
     + _tbSectionHead("Getting around", "How you\u2019d like to get around in " + _pmEsc(_tb.region || "the region") + ".")
     +'<div class="tb-field">'
     +'<input id="tb-transport" value="'+(_tb.transport||"").replace(/"/g,"&quot;")+'" placeholder="e.g. Trains and walking only \u2014 no rental car. Swiss Travel Pass." oninput="_tb.transport=this.value;" />'
-    +'<div style="font-size:10.5px;color:#b05820;font-style:italic;margin-top:4px;line-height:1.55;">This shapes everything for this trip. Different regions reward different choices.</div>'
+    +'<div style="font-size:10.5px;color:var(--c-warn);font-style:italic;margin-top:4px;line-height:1.55;">This shapes everything for this trip. Different regions reward different choices.</div>'
     +'</div>'
 
     // \u2500\u2500 The travelers \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
@@ -206,8 +206,8 @@ function renderTripBriefEdit(){
           +   '<div style="font-size:14px;font-weight:700;color:#3a2e1a;">Traveler profile</div>'
           +   '<div style="font-size:11.5px;color:#5a4a2a;margin-top:6px;line-height:1.6;">' + hint + '</div>'
           +   '<div style="margin-top:8px;font-size:11px;">'
-          +     '<a href="#" onclick="if(typeof showSettingsPanel===\'function\')showSettingsPanel();event.preventDefault();" style="color:#1a5fa8;text-decoration:none;font-weight:600;">Open full profile \u2192</a>'
-          +     '<span style="color:#aaa;margin:0 8px;">\u00b7</span>'
+          +     '<a href="#" onclick="if(typeof showSettingsPanel===\'function\')showSettingsPanel();event.preventDefault();" style="color:var(--c-primary);text-decoration:none;font-weight:600;">Open full profile \u2192</a>'
+          +     '<span style="color:var(--c-ink-4);margin:0 8px;">\u00b7</span>'
           +     '<span style="color:#7a5b3a;">Anything you change below applies to this trip; use the \u201c\u2191 Apply to defaults\u201d link beside a field to also save it to your profile.</span>'
           +   '</div>'
           + '</div>';
@@ -263,7 +263,7 @@ function renderTripBriefEdit(){
           +   '<span id="tb-accom-badge"></span>'
           +   '<a href="#" id="tb-accom-promote" style="display:none;">\u2191 Apply to defaults</a>'
           + '</div>'
-          + '<div style="font-size:10.5px;color:#b05820;font-style:italic;margin-top:4px;line-height:1.55;">Be explicit even if it feels obvious.</div>'
+          + '<div style="font-size:10.5px;color:var(--c-warn);font-style:italic;margin-top:4px;line-height:1.55;">Be explicit even if it feels obvious.</div>'
           + '</div>';
       })()
 
@@ -271,7 +271,7 @@ function renderTripBriefEdit(){
     // v360.4: about-trip's own sub-section. Catch-all prose context.
     + _tbSectionHead("Anything else", "Free-form context Max should know. Optional.")
     +'<div class="tb-field"><textarea id="tb-about-trip" rows="4" placeholder="e.g. Couple in our 60s, first trip to this region. Would skip a famous-but-touristy day-trip; wouldn\u2019t skip a once-in-a-lifetime view." oninput="_tb.aboutTrip=this.value;">'+((_tb.aboutTrip||"").replace(/</g,"&lt;"))+'</textarea>'
-    +'<div style="font-size:10px;color:#aaa;margin-top:4px;line-height:1.5;">The more you share, the better the suggestions. Max reads this as prose \u2014 write naturally.</div>'
+    +'<div style="font-size:10px;color:var(--c-ink-4);margin-top:4px;line-height:1.5;">The more you share, the better the suggestions. Max reads this as prose \u2014 write naturally.</div>'
     +'</div>'
 
     // \u2500\u2500 The shape (hours, sights, default pace, day-trip drive time) \u2500\u2500
@@ -284,7 +284,7 @@ function renderTripBriefEdit(){
           }
           return '<div class="tb-shape-row" style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;">'
             + '<label style="font-weight:500;color:#222;flex:0 0 240px;margin:0;font-size:12.5px;text-transform:none;letter-spacing:0;">Hours of sightseeing per day</label>'
-            + '<input id="tb-hours-per-day" type="number" min="2" max="10" inputmode="numeric" value="'+(_tb.hoursPerDay||_defaultHoursPerDay())+'" oninput="_tb.hoursPerDay=this.value;" style="width:64px;padding:5px 8px;font-size:12px;border:1px solid #ddd;border-radius:6px;font-family:inherit;text-align:center;" />'
+            + '<input id="tb-hours-per-day" type="number" min="2" max="10" inputmode="numeric" value="'+(_tb.hoursPerDay||_defaultHoursPerDay())+'" oninput="_tb.hoursPerDay=this.value;" style="width:64px;padding:5px 8px;font-size:12px;border:1px solid var(--c-border);border-radius:6px;font-family:inherit;text-align:center;" />'
             + '<span id="tb-hpd-badge"></span>'
             + '<a href="#" id="tb-hpd-promote" style="display:none;">↑ Apply to defaults</a>'
             + '</div>';
@@ -296,7 +296,7 @@ function renderTripBriefEdit(){
           }
           return '<div class="tb-shape-row" style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;">'
             + '<label style="font-weight:500;color:#222;flex:0 0 240px;margin:0;font-size:12.5px;text-transform:none;letter-spacing:0;">Max big sights per day</label>'
-            + '<input id="tb-max-big-sights" type="number" min="1" max="6" inputmode="numeric" value="'+(_tb.maxBigSightsPerDay||_defaultMaxBigSightsPerDay())+'" oninput="_tb.maxBigSightsPerDay=this.value;" style="width:64px;padding:5px 8px;font-size:12px;border:1px solid #ddd;border-radius:6px;font-family:inherit;text-align:center;" />'
+            + '<input id="tb-max-big-sights" type="number" min="1" max="6" inputmode="numeric" value="'+(_tb.maxBigSightsPerDay||_defaultMaxBigSightsPerDay())+'" oninput="_tb.maxBigSightsPerDay=this.value;" style="width:64px;padding:5px 8px;font-size:12px;border:1px solid var(--c-border);border-radius:6px;font-family:inherit;text-align:center;" />'
             + '<span id="tb-spd-badge"></span>'
             + '<a href="#" id="tb-spd-promote" style="display:none;">↑ Apply to defaults</a>'
             + '</div>';
@@ -336,7 +336,7 @@ function renderTripBriefEdit(){
           return '<div class="tb-shape-row" style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;">'
             + '<label style="font-weight:500;color:#222;flex:0 0 240px;margin:0;font-size:12.5px;text-transform:none;letter-spacing:0;">Max drive time for a day trip</label>'
             + '<div style="display:flex;align-items:center;gap:5px;">'
-            +   '<input id="tb-day-trip-hours" type="number" min="1" max="6" step="0.5" inputmode="decimal" value="'+(_tb.dayTripHours||_defaultDayTripHours())+'" oninput="_tb.dayTripHours=this.value;" style="width:64px;padding:5px 8px;font-size:12px;border:1px solid #ddd;border-radius:6px;font-family:inherit;text-align:center;" />'
+            +   '<input id="tb-day-trip-hours" type="number" min="1" max="6" step="0.5" inputmode="decimal" value="'+(_tb.dayTripHours||_defaultDayTripHours())+'" oninput="_tb.dayTripHours=this.value;" style="width:64px;padding:5px 8px;font-size:12px;border:1px solid var(--c-border);border-radius:6px;font-family:inherit;text-align:center;" />'
             +   '<span style="font-size:11px;color:#666;">hours</span>'
             + '</div>'
             + '<span id="tb-dth-badge"></span>'
@@ -531,10 +531,10 @@ function _mountChecklistSection(mountId){
   var addInp = document.createElement("input");
   addInp.type = "text";
   addInp.placeholder = "e.g. Refill prescription, confirm pet sitter, buy adapter\u2026";
-  addInp.style.cssText = "flex:1;font-size:12.5px;padding:6px 9px;border:1px solid #ccc;border-radius:5px;font-family:inherit;box-sizing:border-box;";
+  addInp.style.cssText = "flex:1;font-size:12.5px;padding:6px 9px;border:1px solid var(--c-border-strong);border-radius:5px;font-family:inherit;box-sizing:border-box;";
   var addBtn = document.createElement("button");
   addBtn.type = "button"; addBtn.textContent = "+ Add";
-  addBtn.style.cssText = "font-size:12px;font-weight:600;padding:6px 12px;border:1px solid #1a5fa8;background:#fff;color:#1a5fa8;border-radius:5px;cursor:pointer;font-family:inherit;flex-shrink:0;";
+  addBtn.style.cssText = "font-size:12px;font-weight:600;padding:6px 12px;border:1px solid var(--c-primary);background:var(--c-bg);color:var(--c-primary);border-radius:5px;cursor:pointer;font-family:inherit;flex-shrink:0;";
   function _doAdd(){
     var v = addInp.value.trim();
     if (!v) return;
@@ -572,7 +572,7 @@ function _mountChecklistSection(mountId){
 function _mountInboxSection(mountId){
   var mount = document.getElementById(mountId);
   if (!mount) return;
-  mount.innerHTML = '<div style="font-size:11px;color:#888;font-style:italic;">Loading your forwarding inbox…</div>';
+  mount.innerHTML = '<div style="font-size:11px;color:var(--c-ink-3);font-style:italic;">Loading your forwarding inbox…</div>';
   if (typeof MaxSync === "undefined" || !MaxSync._request) {
     mount.innerHTML = '<div style="font-size:11px;color:#c44;">Sign in required.</div>';
     return;
@@ -601,7 +601,7 @@ function _renderInboxAddress(mount, data){
   box.style.cssText = "padding:10px 12px;background:#f5f8fc;border:1px solid #d4e0f0;border-radius:6px;margin-bottom:10px;";
 
   var ttl = document.createElement("div");
-  ttl.style.cssText = "font-size:10.5px;font-weight:700;color:#1a5fa8;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;";
+  ttl.style.cssText = "font-size:10.5px;font-weight:700;color:var(--c-primary);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;";
   ttl.textContent = "Your forwarding address";
   box.appendChild(ttl);
 
@@ -611,11 +611,11 @@ function _renderInboxAddress(mount, data){
   addrInput.type = "text";
   addrInput.readOnly = true;
   addrInput.value = data.address || "";
-  addrInput.style.cssText = "flex:1;padding:7px 9px;font-size:12px;font-family:monospace;border:1px solid #ccc;border-radius:4px;background:#fff;";
+  addrInput.style.cssText = "flex:1;padding:7px 9px;font-size:12px;font-family:monospace;border:1px solid var(--c-border-strong);border-radius:4px;background:var(--c-bg);";
   var copyBtn = document.createElement("button");
   copyBtn.type = "button";
   copyBtn.textContent = "📋 Copy";
-  copyBtn.style.cssText = "padding:0 12px;font-size:11.5px;font-weight:600;background:#1a5fa8;color:#fff;border:none;border-radius:4px;cursor:pointer;flex-shrink:0;";
+  copyBtn.style.cssText = "padding:0 12px;font-size:11.5px;font-weight:600;background:var(--c-primary);color:var(--c-on-dark);border:none;border-radius:4px;cursor:pointer;flex-shrink:0;";
   copyBtn.onclick = function(){
     addrInput.select();
     try {
@@ -641,7 +641,7 @@ function _renderInboxAddress(mount, data){
   if (data.lastReceivedAt) {
     var ago = _fmtAgo(data.lastReceivedAt);
     var fresh = document.createElement("div");
-    fresh.style.cssText = "font-size:10.5px;color:#2a7a4e;margin-top:6px;";
+    fresh.style.cssText = "font-size:10.5px;color:var(--c-see);margin-top:6px;";
     fresh.textContent = "✓ Last forwarded email received " + ago;
     box.appendChild(fresh);
   }
@@ -691,13 +691,13 @@ function _renderUnassignedTray(mount, items){
   tray.appendChild(hdr);
 
   var sub = document.createElement("div");
-  sub.style.cssText = "font-size:10.5px;color:#888;margin-bottom:8px;";
+  sub.style.cssText = "font-size:10.5px;color:var(--c-ink-3);margin-bottom:8px;";
   sub.textContent = "These parsed successfully but Max couldn't auto-match a trip. Pick a destination (when needed), then Attach.";
   tray.appendChild(sub);
 
   items.forEach(function(it){
     var row = document.createElement("div");
-    row.style.cssText = "padding:8px 10px;margin:5px 0;background:#fff;border:1px solid #e0d8c8;border-radius:5px;font-size:11.5px;line-height:1.5;";
+    row.style.cssText = "padding:8px 10px;margin:5px 0;background:var(--c-bg);border:1px solid #e0d8c8;border-radius:5px;font-size:11.5px;line-height:1.5;";
 
     var p = it.parsed || {};
     var icon = (p.type === "car") ? "🚗" : (p.type === "flight") ? "✈" : (p.type === "hotel") ? "🏨" : "📋";
@@ -732,7 +732,7 @@ function _renderUnassignedTray(mount, items){
     var localTrip = (typeof trip !== "undefined" && trip) ? trip : null;
     if (needsDest && localTrip && Array.isArray(localTrip.destinations)) {
       destSel = document.createElement("select");
-      destSel.style.cssText = "width:100%;padding:5px 8px;font-size:11.5px;border:1px solid #ccc;border-radius:4px;background:#fff;margin-bottom:6px;";
+      destSel.style.cssText = "width:100%;padding:5px 8px;font-size:11.5px;border:1px solid var(--c-border-strong);border-radius:4px;background:var(--c-bg);margin-bottom:6px;";
       var opt0 = document.createElement("option");
       opt0.value = "";
       opt0.textContent = "Pick a destination on " + (localTrip.name || "this trip") + "…";
@@ -752,11 +752,11 @@ function _renderUnassignedTray(mount, items){
     var attachBtn = document.createElement("button");
     attachBtn.type = "button";
     attachBtn.textContent = "✓ Attach to trip";
-    attachBtn.style.cssText = "padding:5px 12px;font-size:11.5px;font-weight:600;background:#2a7a4e;color:#fff;border:none;border-radius:4px;cursor:pointer;";
+    attachBtn.style.cssText = "padding:5px 12px;font-size:11.5px;font-weight:600;background:var(--c-see);color:var(--c-on-dark);border:none;border-radius:4px;cursor:pointer;";
     var dismissBtn = document.createElement("button");
     dismissBtn.type = "button";
     dismissBtn.textContent = "✕ Dismiss";
-    dismissBtn.style.cssText = "padding:5px 12px;font-size:11.5px;background:#fff;color:#666;border:1px solid #ddd;border-radius:4px;cursor:pointer;";
+    dismissBtn.style.cssText = "padding:5px 12px;font-size:11.5px;background:var(--c-bg);color:#666;border:1px solid var(--c-border);border-radius:4px;cursor:pointer;";
 
     (function(id, pType){
       attachBtn.onclick = function(){
@@ -779,7 +779,7 @@ function _renderUnassignedTray(mount, items){
         })
           .then(function(){
             row.style.opacity = "0.4";
-            row.innerHTML = '<div style="text-align:center;font-size:11px;color:#2a7a4e;">✓ Attached. Refresh the trip to see it.</div>';
+            row.innerHTML = '<div style="text-align:center;font-size:11px;color:var(--c-see);">✓ Attached. Refresh the trip to see it.</div>';
             // Trigger a fresh sync so the trip body updates locally.
             if (MaxSync.pullAll) try { MaxSync.pullAll(); } catch(_){}
           })
@@ -837,7 +837,7 @@ function _mountDocumentsSection(mountId){
     }
     _tb.documents.forEach(function(doc, idx){
       var row = document.createElement("div");
-      row.style.cssText = "display:flex;align-items:center;gap:8px;padding:7px 10px;background:#fafafa;border:1px solid #e0e0e0;border-radius:5px;";
+      row.style.cssText = "display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--c-panel);border:1px solid #e0e0e0;border-radius:5px;";
       var icon = document.createElement("span");
       icon.style.cssText = "font-size:16px;flex-shrink:0;";
       icon.textContent = doc.type && doc.type.indexOf("image") === 0 ? "\ud83d\uddbc" : doc.type && doc.type.indexOf("pdf") >= 0 ? "\ud83d\udcc4" : "\ud83d\udcce";
@@ -847,13 +847,13 @@ function _mountDocumentsSection(mountId){
       nm.style.cssText = "font-size:12.5px;font-weight:600;color:#222;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
       nm.textContent = doc.name || "Document";
       var sub = document.createElement("div");
-      sub.style.cssText = "font-size:10.5px;color:#888;margin-top:1px;";
+      sub.style.cssText = "font-size:10.5px;color:var(--c-ink-3);margin-top:1px;";
       sub.textContent = _fmtBytes(doc.size||0);
       meta.appendChild(nm); meta.appendChild(sub);
       var view = document.createElement("a");
       view.href = doc.dataUrl; view.target = "_blank"; view.rel = "noopener noreferrer"; view.download = doc.name;
       view.textContent = "View";
-      view.style.cssText = "font-size:11px;font-weight:600;color:#1a5fa8;text-decoration:none;padding:3px 8px;border:1px solid #cfe1f7;border-radius:5px;flex-shrink:0;";
+      view.style.cssText = "font-size:11px;font-weight:600;color:var(--c-primary);text-decoration:none;padding:3px 8px;border:1px solid #cfe1f7;border-radius:5px;flex-shrink:0;";
       var del = document.createElement("button");
       del.type = "button"; del.textContent = "\u00d7";
       del.title = "Remove";
@@ -869,7 +869,7 @@ function _mountDocumentsSection(mountId){
       listEl.appendChild(row);
     });
     var sizeLine = document.createElement("div");
-    sizeLine.style.cssText = "font-size:10.5px;color:#888;margin-top:4px;text-align:right;";
+    sizeLine.style.cssText = "font-size:10.5px;color:var(--c-ink-3);margin-top:4px;text-align:right;";
     sizeLine.textContent = "Total: " + _fmtBytes(_totalBytes());
     listEl.appendChild(sizeLine);
   }
@@ -921,7 +921,7 @@ function _mountDocumentsSection(mountId){
   // capture="environment" opens the rear camera directly on mobile.
   // Desktop browsers fall back to a normal file picker; harmless.
   var camWrap = document.createElement("label");
-  camWrap.style.cssText = "font-size:12px;font-weight:600;padding:6px 12px;border:1px solid #1a5fa8;background:#fff;color:#1a5fa8;border-radius:5px;cursor:pointer;font-family:inherit;flex-shrink:0;display:inline-flex;align-items:center;gap:5px;";
+  camWrap.style.cssText = "font-size:12px;font-weight:600;padding:6px 12px;border:1px solid var(--c-primary);background:var(--c-bg);color:var(--c-primary);border-radius:5px;cursor:pointer;font-family:inherit;flex-shrink:0;display:inline-flex;align-items:center;gap:5px;";
   camWrap.textContent = "📷 Take photo";
   camWrap.title = "Snap a photo of a passport, visa, or confirmation — opens the camera on mobile";
   var camInp = document.createElement("input");
@@ -1025,7 +1025,7 @@ async function previewConstraintChanges(){
   var ov = g("trip-brief-overlay");
   ov.innerHTML = '<div class="tb-overlay-inner" style="padding:32px 28px;text-align:center;">'
     +'<div style="font-size:13px;font-weight:600;margin-bottom:8px;">Analysing changes\u2026</div>'
-    +'<div style="font-size:11px;color:#aaa;">Max is working out what needs to be revisited.</div>'
+    +'<div style="font-size:11px;color:var(--c-ink-4);">Max is working out what needs to be revisited.</div>'
     +'</div>';
 
   // Build trip context summary — include booking counts so Max can flag invalidations
@@ -1105,9 +1105,9 @@ function showConstraintConfirmation(diffs, analysis, pendingValues){
   var ov = g("trip-brief-overlay");
   var diffHtml = diffs.map(function(d){
     return '<div style="margin-bottom:8px;">'
-      +'<div style="font-size:10px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:0.05em;">'+d.field+'</div>'
+      +'<div style="font-size:10px;font-weight:600;color:var(--c-ink-2);text-transform:uppercase;letter-spacing:0.05em;">'+d.field+'</div>'
       +'<div style="font-size:11px;color:#999;text-decoration:line-through;">'+d.from+'</div>'
-      +'<div style="font-size:11px;color:#111;">'+d.to+'</div>'
+      +'<div style="font-size:11px;color:var(--c-ink);">'+d.to+'</div>'
       +'</div>';
   }).join("");
 
@@ -1118,7 +1118,7 @@ function showConstraintConfirmation(diffs, analysis, pendingValues){
     +'</div>'
     +'<div class="tb-body">'
     +'<div style="background:#f7f7f7;border-radius:7px;padding:14px 16px;margin-bottom:16px;">'+diffHtml+'</div>'
-    +'<div style="font-size:12px;line-height:1.7;color:#333;white-space:pre-wrap;border-left:3px solid #ddd;padding-left:14px;max-height:55vh;overflow-y:auto;-webkit-overflow-scrolling:touch;">'+analysis+'</div>'
+    +'<div style="font-size:12px;line-height:1.7;color:#333;white-space:pre-wrap;border-left:3px solid var(--c-border);padding-left:14px;max-height:55vh;overflow-y:auto;-webkit-overflow-scrolling:touch;">'+analysis+'</div>'
     +'</div>'
     +'<div class="tb-footer">'
     +'<button class="tb-btn-primary" onclick="applyConstraintChanges()">Yes, apply these changes</button>'
@@ -1450,8 +1450,8 @@ async function findCandidates(){
     if(el) el.innerHTML='<div style="padding:16px;font-size:11px;">'
       +(noKey
         ?'<div style="color:#c05020;font-weight:600;margin-bottom:8px;">No API key set</div>'
-        +'<div style="color:#555;margin-bottom:10px;">Max needs your Anthropic API key to think about places.</div>'
-        +'<button onclick="cancelCandidateExplorer();setTimeout(function(){showApiKeyForm();},100);" style="font-size:11px;padding:6px 12px;background:#111;color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Set API key →</button>'
+        +'<div style="color:var(--c-ink-2);margin-bottom:10px;">Max needs your Anthropic API key to think about places.</div>'
+        +'<button onclick="cancelCandidateExplorer();setTimeout(function(){showApiKeyForm();},100);" style="font-size:11px;padding:6px 12px;background:var(--c-primary-top);color:var(--c-on-dark);border:none;border-radius:5px;cursor:pointer;font-family:inherit;">Set API key →</button>'
         :'<div style="color:#c05020;">Could not generate candidates: '+e.message+'</div>')
       +'</div>';
     var ld=g("ce-loading"); if(ld) ld.style.display="none";
@@ -1659,11 +1659,11 @@ function showCandidateDisclaimer() {
 
   var banner = document.createElement("div");
   banner.id = "ce-disclaimer";
-  banner.style.cssText = "margin-bottom:10px;padding:10px 12px;background:#fff;border:1px solid #e8e8e8;border-left:3px solid #999;border-radius:6px;font-size:11px;color:#555;line-height:1.6;";
+  banner.style.cssText = "margin-bottom:10px;padding:10px 12px;background:var(--c-bg);border:1px solid var(--c-border-2);border-left:3px solid #999;border-radius:6px;font-size:11px;color:var(--c-ink-2);line-height:1.6;";
   banner.innerHTML = '<div style="font-weight:600;color:#333;margin-bottom:4px;">A note on these suggestions</div>'
     + '<div>Max generates these candidates \u2014 but the best trips are built by people who have done their own research. Use this as a starting point, not a finished answer.</div>'
     + '<div style="margin-top:6px;display:flex;justify-content:flex-end;">'
-    + '<span id="ce-disc-dismiss" style="font-size:10px;color:#aaa;cursor:pointer;">Got it</span>'
+    + '<span id="ce-disc-dismiss" style="font-size:10px;color:var(--c-ink-4);cursor:pointer;">Got it</span>'
     + '</div>';
   banner.querySelector("#ce-disc-dismiss").onclick = function() {
     banner.remove();
@@ -2831,22 +2831,22 @@ function showCandidateExplorer(cands, editMode){
     // Picker chrome already has Home; the legacy explorer didn't, so
     // a user mid-research with this overlay open had no way back to
     // the trips list without committing or canceling.
-    +'<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:600;" onclick="cancelCandidateExplorer&amp;&amp;cancelCandidateExplorer();goHome();">&larr; Home</button>'
+    +'<button style="font-size:11px;padding:5px 11px;border:1px solid var(--c-border);border-radius:5px;background:var(--c-bg);cursor:pointer;font-family:inherit;color:#333;font-weight:600;" onclick="cancelCandidateExplorer&amp;&amp;cancelCandidateExplorer();goHome();">&larr; Home</button>'
     +(_ceEditMode
-      ? '<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:500;" onclick="cancelEditCandidates()">Cancel</button>'
-      : '<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:500;margin-right:6px;" onclick="editWhereWhy()" title="Where you\'re going + what\'s drawing you to it">\u2190 Trip brief</button>'+'<button style="font-size:11px;padding:5px 11px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#333;font-weight:500;margin-right:6px;" onclick="editHowYouTravel()" title="Your travel preferences \u2014 pace, accommodation, mobility">Travel style</button>'+'<button style="font-size:11px;padding:5px 11px;border:1px solid #c8d8f0;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#1a5fa8;font-weight:600;" onclick="if(typeof _reopenPickerAny===&quot;function&quot;)_reopenPickerAny();else if(typeof reopenPickerForEdit===&quot;function&quot;)reopenPickerForEdit();" title="Reopen Discovery to add or curate more places">\ud83e\udded Discovery</button>')
+      ? '<button style="font-size:11px;padding:5px 11px;border:1px solid var(--c-border);border-radius:5px;background:var(--c-bg);cursor:pointer;font-family:inherit;color:#333;font-weight:500;" onclick="cancelEditCandidates()">Cancel</button>'
+      : '<button style="font-size:11px;padding:5px 11px;border:1px solid var(--c-border);border-radius:5px;background:var(--c-bg);cursor:pointer;font-family:inherit;color:#333;font-weight:500;margin-right:6px;" onclick="editWhereWhy()" title="Where you\'re going + what\'s drawing you to it">\u2190 Trip brief</button>'+'<button style="font-size:11px;padding:5px 11px;border:1px solid var(--c-border);border-radius:5px;background:var(--c-bg);cursor:pointer;font-family:inherit;color:#333;font-weight:500;margin-right:6px;" onclick="editHowYouTravel()" title="Your travel preferences \u2014 pace, accommodation, mobility">Travel style</button>'+'<button style="font-size:11px;padding:5px 11px;border:1px solid var(--c-border-blue);border-radius:5px;background:var(--c-bg);cursor:pointer;font-family:inherit;color:var(--c-primary);font-weight:600;" onclick="if(typeof _reopenPickerAny===&quot;function&quot;)_reopenPickerAny();else if(typeof reopenPickerForEdit===&quot;function&quot;)reopenPickerForEdit();" title="Reopen Discovery to add or curate more places">\ud83e\udded Discovery</button>')
     +'</div>'
     +'<div class="ce-body">'
     +'<div class="ce-left">'
     // Shortlist pills retired — the summary at top of ce-cards carries this info now.
     +'<div class="ce-cards" id="ce-cards">'
-    +(cands?'':'<div class="ce-loading" id="ce-loading">'      +'<span class="ce-loading-spin">\u2736</span>'      +'<div class="max-thinking" style="font-size:12px;font-weight:600;color:#555;margin-bottom:5px;">Building your trip\u2026</div>'      +'<div id="ce-loading-detail" style="font-size:10px;color:#aaa;line-height:1.7;">This usually takes 20\u201340 seconds.<br>Max is shaping your picks into a sequenced itinerary.</div>'      +'</div>')
+    +(cands?'':'<div class="ce-loading" id="ce-loading">'      +'<span class="ce-loading-spin">\u2736</span>'      +'<div class="max-thinking" style="font-size:12px;font-weight:600;color:var(--c-ink-2);margin-bottom:5px;">Building your trip\u2026</div>'      +'<div id="ce-loading-detail" style="font-size:10px;color:var(--c-ink-4);line-height:1.7;">This usually takes 20\u201340 seconds.<br>Max is shaping your picks into a sequenced itinerary.</div>'      +'</div>')
     +'</div></div>'
     +'<div class="ce-right"><div id="ce-map" class="ce-map"></div></div>'
     +'</div>'
     +'<div class="ce-footer">'
-    +'<span style="font-size:10px;color:#888;" id="ce-cnt">0 kept</span>'
-    +'<button id="ce-ep-toggle" onclick="_tbToggleEntryPoints()" style="font-size:10px;padding:4px 9px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-family:inherit;color:#444;margin-left:10px;">Hide entry points</button>'
+    +'<span style="font-size:10px;color:var(--c-ink-3);" id="ce-cnt">0 kept</span>'
+    +'<button id="ce-ep-toggle" onclick="_tbToggleEntryPoints()" style="font-size:10px;padding:4px 9px;border:1px solid var(--c-border);border-radius:5px;background:var(--c-bg);cursor:pointer;font-family:inherit;color:#444;margin-left:10px;">Hide entry points</button>'
     // v353.2: only show the commit button after candidates have loaded.
     // Previously it was visible during the "Building your trip\u2026"
     // loading state \u2014 looked tappable but committed nothing useful,
@@ -2935,7 +2935,7 @@ function showCandidateExplorer(cands, editMode){
     if (!_initBounds && !_cachedLL && !_firstCand && _tb && _tb.region) {
       _mapMask = document.createElement("div");
       _mapMask.id = "ce-map-mask";
-      _mapMask.style.cssText = "position:absolute;inset:0;z-index:450;background:#f4f6f8;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:#888;font-size:11px;font-family:inherit;pointer-events:none;";
+      _mapMask.style.cssText = "position:absolute;inset:0;z-index:450;background:#f4f6f8;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:var(--c-ink-3);font-size:11px;font-family:inherit;pointer-events:none;";
       _mapMask.innerHTML = '<span style="font-size:18px;animation:spin 1.2s linear infinite;">\u2736</span><span>Locating '+(_tb.region||"your region")+'\u2026</span>';
       var _mapDivEl = document.getElementById("ce-map");
       if (_mapDivEl) { _mapDivEl.style.position = "relative"; _mapDivEl.appendChild(_mapMask); }
@@ -2997,7 +2997,7 @@ function showCandidateExplorer(cands, editMode){
       // Show notice if discovery candidates failed to load
       if(_tb.p2Failed && cands.filter(function(c){return !c._required;}).length === 0) {
         var note = document.createElement("div");
-        note.style.cssText = "margin:8px 4px;padding:8px 10px;background:#fff9f0;border:1px solid #f0dcc0;border-radius:6px;font-size:10px;color:#b05820;line-height:1.5;";
+        note.style.cssText = "margin:8px 4px;padding:8px 10px;background:#fff9f0;border:1px solid #f0dcc0;border-radius:6px;font-size:10px;color:var(--c-warn);line-height:1.5;";
         note.innerHTML = "\u26a0 Couldn\u2019t load discovery suggestions. <span style=\"cursor:pointer;text-decoration:underline;\" onclick=\"retryDiscoveryCandidates()\">Try again</span>";
         var el = document.getElementById("ce-cards");
         if(el) el.insertBefore(note, el.firstChild);

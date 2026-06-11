@@ -17,8 +17,8 @@ function _pmRtFieldHtml(id, initialContent, opts){
   var placeholder = (opts.placeholder || "").replace(/"/g, "&quot;");
   var content = _pmRtInitContent(initialContent);
   return ''
-    + '<div class="pm-rt-wrap" style="border:1px solid #ccc;border-radius:5px;background:#fff;font-family:inherit;">'
-    +   '<div class="pm-rt-toolbar" style="display:flex;gap:1px;padding:3px 4px;border-bottom:1px solid #eee;background:#fafafa;">'
+    + '<div class="pm-rt-wrap" style="border:1px solid var(--c-border-strong);border-radius:5px;background:var(--c-bg);font-family:inherit;">'
+    +   '<div class="pm-rt-toolbar" style="display:flex;gap:1px;padding:3px 4px;border-bottom:1px solid var(--c-border-3);background:var(--c-panel);">'
     +     '<button type="button" data-pmrt="bold" title="Bold" style="font-size:13px;font-weight:700;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:serif;">B</button>'
     +     '<button type="button" data-pmrt="italic" title="Italic" style="font-size:13px;font-style:italic;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:serif;">I</button>'
     +     '<span style="width:1px;background:#ddd;margin:3px 4px;"></span>'
@@ -27,7 +27,7 @@ function _pmRtFieldHtml(id, initialContent, opts){
     +     '<button type="button" data-pmrt="checklist" title="Checklist" style="font-size:13px;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:inherit;">☑</button>'
     +     '<button type="button" data-pmrt="attach" title="Attach file or image" style="font-size:13px;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:inherit;">📎</button>'
     +     '<button type="button" data-pmrt="doclink" title="Link to another document (or type [[)" style="font-size:13px;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:inherit;">📄</button>'
-    +     '<button type="button" data-pmrt="askmax" title="Ask Max (AI assistant)" style="font-size:13px;color:#5b3f8f;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:inherit;">✨</button>'
+    +     '<button type="button" data-pmrt="askmax" title="Ask Max (AI assistant)" style="font-size:13px;color:var(--c-accent);background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:inherit;">✨</button>'
     +     '<span style="width:1px;background:#ddd;margin:3px 4px;"></span>'
     +     '<button type="button" data-pmrt="createLink" title="Add link" style="font-size:11.5px;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:inherit;">🔗</button>'
     +     '<button type="button" data-pmrt="unlink" title="Remove link" style="font-size:11.5px;color:#444;background:transparent;border:none;border-radius:3px;padding:3px 8px;cursor:pointer;font-family:inherit;">⌧</button>'

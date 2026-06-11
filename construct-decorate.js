@@ -1074,7 +1074,7 @@ function showWispHistoryModal() {
     "font:13px/1.5 -apple-system,BlinkMacSystemFont,sans-serif;";
   var box = document.createElement("div");
   box.style.cssText =
-    "background:#fff;border-radius:10px;width:560px;max-width:96vw;max-height:90vh;" +
+    "background:var(--c-bg);border-radius:10px;width:560px;max-width:96vw;max-height:90vh;" +
     "display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,.25);overflow:hidden;";
 
   // Header
@@ -1083,11 +1083,11 @@ function showWispHistoryModal() {
     "display:flex;align-items:baseline;justify-content:space-between;gap:12px;" +
     "padding:18px 22px 12px;border-bottom:1px solid #eee;flex-shrink:0;";
   var h = document.createElement("div");
-  h.style.cssText = "font-size:16px;font-weight:700;color:#111;";
+  h.style.cssText = "font-size:16px;font-weight:700;color:var(--c-ink);";
   h.innerHTML = "✨ Captured ideas <span style=\"font-size:12px;color:#888;font-weight:500;margin-left:6px;\">" + wisps.length + "</span>";
   var x = document.createElement("button");
   x.type = "button";
-  x.style.cssText = "background:none;border:none;color:#888;font-size:18px;cursor:pointer;padding:0 4px;";
+  x.style.cssText = "background:none;border:none;color:var(--c-ink-3);font-size:18px;cursor:pointer;padding:0 4px;";
   x.textContent = "✕";
   x.onclick = function () { ov.remove(); };
   head.appendChild(h);
@@ -1126,7 +1126,7 @@ function showWispHistoryModal() {
     body.innerHTML = "";
     if (!wisps.length) {
       var empty = document.createElement("div");
-      empty.style.cssText = "font-size:12.5px;color:#888;font-style:italic;padding:20px 0;text-align:center;";
+      empty.style.cssText = "font-size:12.5px;color:var(--c-ink-3);font-style:italic;padding:20px 0;text-align:center;";
       empty.textContent = "No captured ideas yet. Type one into the ✨ input on your trip view to start.";
       body.appendChild(empty);
       return;
@@ -1138,7 +1138,7 @@ function showWispHistoryModal() {
     sorted.forEach(function (w) {
       var card = document.createElement("div");
       card.style.cssText =
-        "margin-bottom:12px;padding:11px 13px;border:1px solid #e6e2d8;border-radius:7px;background:#fff;";
+        "margin-bottom:12px;padding:11px 13px;border:1px solid #e6e2d8;border-radius:7px;background:var(--c-bg);";
 
       // Top row: wisp text + delete
       var topRow = document.createElement("div");
@@ -1165,7 +1165,7 @@ function showWispHistoryModal() {
       }
       textBlock.appendChild(textEl);
       var metaEl = document.createElement("div");
-      metaEl.style.cssText = "font-size:11px;color:#888;margin-top:3px;";
+      metaEl.style.cssText = "font-size:11px;color:var(--c-ink-3);margin-top:3px;";
       var status;
       if (w._initial) {
         // Initial wisps are pre-processed (they drove the first Discovery
@@ -1193,7 +1193,7 @@ function showWispHistoryModal() {
       var editBtn = document.createElement("button");
       editBtn.type = "button";
       editBtn.style.cssText =
-        "background:#fff;color:#1a5fa8;border:1px solid #c0d4ec;font-family:inherit;" +
+        "background:var(--c-bg);color:var(--c-primary);border:1px solid #c0d4ec;font-family:inherit;" +
         "font-size:11px;font-weight:600;padding:4px 9px;border-radius:5px;cursor:pointer;flex-shrink:0;";
       editBtn.textContent = "Edit";
       editBtn.onclick = (function (wid, originalText, ownTextEl, ownTopRow) {
@@ -1211,13 +1211,13 @@ function showWispHistoryModal() {
           var saveBtn = document.createElement("button");
           saveBtn.type = "button";
           saveBtn.style.cssText =
-            "background:#1a5fa8;color:#fff;border:none;font-family:inherit;" +
+            "background:var(--c-primary);color:var(--c-on-dark);border:none;font-family:inherit;" +
             "font-size:11px;font-weight:600;padding:5px 10px;border-radius:4px;cursor:pointer;";
           saveBtn.textContent = "Save";
           var cancelBtn = document.createElement("button");
           cancelBtn.type = "button";
           cancelBtn.style.cssText =
-            "background:#fff;color:#666;border:1px solid #ddd;font-family:inherit;" +
+            "background:var(--c-bg);color:#666;border:1px solid var(--c-border);font-family:inherit;" +
             "font-size:11px;font-weight:600;padding:5px 10px;border-radius:4px;cursor:pointer;";
           cancelBtn.textContent = "Cancel";
           editWrap.appendChild(input);
@@ -1282,7 +1282,7 @@ function showWispHistoryModal() {
       var delBtn = document.createElement("button");
       delBtn.type = "button";
       delBtn.style.cssText =
-        "background:#fff;color:#a02020;border:1px solid #e0b0b0;font-family:inherit;" +
+        "background:var(--c-bg);color:#a02020;border:1px solid #e0b0b0;font-family:inherit;" +
         "font-size:11px;font-weight:600;padding:4px 9px;border-radius:5px;cursor:pointer;flex-shrink:0;";
       delBtn.textContent = "Delete";
       delBtn.onclick = (function (wid, hasResults, isInitial, wispText) {
@@ -1324,7 +1324,7 @@ function showWispHistoryModal() {
         var items = trip.placeActivities.filter(function (m) { return m && resultIds.indexOf(m.id) >= 0; });
         if (items.length) {
           var itemsHdr = document.createElement("div");
-          itemsHdr.style.cssText = "font-size:10.5px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.04em;margin:10px 0 5px;";
+          itemsHdr.style.cssText = "font-size:10.5px;font-weight:700;color:var(--c-ink-3);text-transform:uppercase;letter-spacing:.04em;margin:10px 0 5px;";
           itemsHdr.textContent = "Max produced " + items.length + " item" + (items.length === 1 ? "" : "s");
           card.appendChild(itemsHdr);
           items.forEach(function (m) {
@@ -1450,21 +1450,21 @@ function _openPasteListModal(opts) {
   ov.id = "paste-list-overlay";
   ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:10800;display:flex;align-items:center;justify-content:center;padding:24px;";
   var box = document.createElement("div");
-  box.style.cssText = "background:#fff;border-radius:12px;width:560px;max-width:100%;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 36px rgba(0,0,0,0.22);";
+  box.style.cssText = "background:var(--c-bg);border-radius:12px;width:560px;max-width:100%;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 36px rgba(0,0,0,0.22);";
   var title = opts.title || "Paste a list of places";
   var subtitle = opts.subtitle || "First line is the trip name + region — e.g. <em>Iceland Road Trip 2026 (Iceland)</em>. Optional second line for dates — <em>September 17, 17 nights</em> works. Then one place per line. After Open, you'll land in Discovery with your places grouped into activity themes — review, keep/reject, and add what Max missed before committing destinations.";
   box.innerHTML = ''
-    + '<div style="padding:16px 20px 10px;border-bottom:1px solid #eee;">'
-    +   '<div style="font-size:15px;font-weight:700;color:#111;">' + title + '</div>'
+    + '<div style="padding:16px 20px 10px;border-bottom:1px solid var(--c-border-3);">'
+    +   '<div style="font-size:15px;font-weight:700;color:var(--c-ink);">' + title + '</div>'
     +   '<div style="font-size:11.5px;color:#777;margin-top:5px;line-height:1.5;">' + subtitle + '</div>'
     + '</div>'
     + '<div style="flex:1;overflow-y:auto;padding:14px 20px;display:flex;flex-direction:column;gap:10px;">'
-    +   '<textarea id="paste-list-ta" placeholder="Iceland Road Trip 2026 (Iceland)&#10;September 17, 17 nights&#10;&#10;1. Overnight hubs&#10;* Reykjavík (Arrival/Departure point)&#10;* Vík 2&#10;* Akureyri 3&#10;&#10;2. Sights&#10;* Gullfoss&#10;* Skógafoss" style="width:100%;min-height:260px;font:inherit;font-size:12.5px;line-height:1.5;padding:8px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;color:#111;resize:vertical;font-family:inherit;"></textarea>'
-    +   '<div id="paste-list-preview" style="font-size:11.5px;color:#555;line-height:1.55;min-height:18px;"></div>'
+    +   '<textarea id="paste-list-ta" placeholder="Iceland Road Trip 2026 (Iceland)&#10;September 17, 17 nights&#10;&#10;1. Overnight hubs&#10;* Reykjavík (Arrival/Departure point)&#10;* Vík 2&#10;* Akureyri 3&#10;&#10;2. Sights&#10;* Gullfoss&#10;* Skógafoss" style="width:100%;min-height:260px;font:inherit;font-size:12.5px;line-height:1.5;padding:8px 10px;border:1px solid var(--c-border-strong);border-radius:6px;background:var(--c-bg);color:var(--c-ink);resize:vertical;font-family:inherit;"></textarea>'
+    +   '<div id="paste-list-preview" style="font-size:11.5px;color:var(--c-ink-2);line-height:1.55;min-height:18px;"></div>'
     + '</div>'
-    + '<div style="padding:12px 20px;border-top:1px solid #eee;display:flex;justify-content:flex-end;gap:8px;">'
-    +   '<button id="paste-list-cancel" type="button" style="font-size:13px;font-weight:500;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Cancel</button>'
-    +   '<button id="paste-list-build" type="button" style="font-size:13px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 18px;cursor:pointer;font-family:inherit;" disabled>' + (opts.buildLabel || "Build trip →") + '</button>'
+    + '<div style="padding:12px 20px;border-top:1px solid var(--c-border-3);display:flex;justify-content:flex-end;gap:8px;">'
+    +   '<button id="paste-list-cancel" type="button" style="font-size:13px;font-weight:500;color:var(--c-ink-2);background:var(--c-bg);border:1px solid var(--c-border-strong);border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Cancel</button>'
+    +   '<button id="paste-list-build" type="button" style="font-size:13px;font-weight:700;color:var(--c-on-dark);background:var(--c-primary);border:1px solid var(--c-primary);border-radius:6px;padding:8px 18px;cursor:pointer;font-family:inherit;" disabled>' + (opts.buildLabel || "Build trip →") + '</button>'
     + '</div>';
   ov.appendChild(box);
   document.body.appendChild(ov);
@@ -1497,8 +1497,8 @@ function _openPasteListModal(opts) {
     if (parsed.exit && parsed.exit !== parsed.entry) bits.push('exit: <strong>' + parsed.exit + '</strong>');
     if (parsed.entry && parsed.exit === parsed.entry) bits.push('round trip via <strong>' + parsed.entry + '</strong>');
     prev.innerHTML = bits.length
-      ? ('Will create: ' + bits.join(' · ') + (parsed.destinations.length ? '' : '<br><span style="color:#888;">No destinations parsed yet — you can add them in Discovery after the trip opens.</span>'))
-      : '<span style="color:#aaa;">Paste a list above to see a preview.</span>';
+      ? ('Will create: ' + bits.join(' · ') + (parsed.destinations.length ? '' : '<br><span style="color:var(--c-ink-3);">No destinations parsed yet — you can add them in Discovery after the trip opens.</span>'))
+      : '<span style="color:var(--c-ink-4);">Paste a list above to see a preview.</span>';
     // Allow Build with just a trip name (no destinations) — the
     // research-notes editing pass is where the user actually commits.
     buildBtn.disabled = !(parsed.tripName || parsed.destinations.length);

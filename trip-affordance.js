@@ -38,7 +38,7 @@
 // via the Explore tab's per-destination day-trip section.
 function _fqBannerInnerHtml(){
   return ''
-    + '<div style="font-weight:600;color:#1a5fa8;margin-bottom:6px;">Day trips</div>'
+    + '<div style="font-weight:600;color:var(--c-primary);margin-bottom:6px;">Day trips</div>'
     + '<div>As you explore the various destinations you may find opportunities for day trips. '
     + 'You might want to stay in a larger city and take day trips from there to smaller cities. '
     + 'But sometimes, staying in a smaller city and taking day trips to the larger one may suit you better. '
@@ -47,7 +47,7 @@ function _fqBannerInnerHtml(){
     // Same two-direction framing as the day-trip text — open up the
     // option, name the obvious case, then name the counter-case so
     // neither feels like the default.
-    + '<div style="font-weight:600;color:#1a5fa8;margin:12px 0 6px;">On the way</div>'
+    + '<div style="font-weight:600;color:var(--c-primary);margin:12px 0 6px;">On the way</div>'
     + '<div>Some places are better experienced as a stop than as a stay &mdash; a waterfall along the route, a viewpoint, '
     + 'a small town with one good lunch spot. As you map the drive between two of your hubs, you may find a place that fits '
     + 'right on the line. Mark it &ldquo;along the way&rdquo; and the night it was claiming frees up for a destination you wish you had more time at. '
@@ -131,26 +131,26 @@ function _openTripDatesEditor(){
   ov.id = "trip-dates-editor";
   ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.32);z-index:10500;display:flex;align-items:center;justify-content:center;padding:20px;";
   ov.innerHTML = ''
-    + '<div style="background:#fff;border-radius:12px;max-width:420px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,0.18);">'
+    + '<div style="background:var(--c-bg);border-radius:12px;max-width:420px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,0.18);">'
     +   '<div style="padding:18px 20px 6px;">'
-    +     '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#888;">Trip dates</div>'
-    +     '<div style="font-size:17px;font-weight:700;color:#111;margin-top:4px;">' + (trip.name ? String(trip.name).replace(/</g,"&lt;") : "Untitled trip") + '</div>'
+    +     '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--c-ink-3);">Trip dates</div>'
+    +     '<div style="font-size:17px;font-weight:700;color:var(--c-ink);margin-top:4px;">' + (trip.name ? String(trip.name).replace(/</g,"&lt;") : "Untitled trip") + '</div>'
     +     '<div style="font-size:11.5px;color:#777;margin-top:3px;line-height:1.5;">Change the start to shift everything by that delta. Change the end to grow or shrink the trip — destinations scale proportionally to their current nights.</div>'
     +   '</div>'
     +   '<div style="padding:12px 20px;display:flex;flex-direction:column;gap:12px;">'
     +     '<label style="display:flex;align-items:center;gap:10px;font-size:12.5px;color:#222;">'
     +       '<span style="min-width:60px;font-weight:600;">Start</span>'
-    +       '<input type="date" id="trip-dates-start" value="' + curStart + '" style="flex:1;padding:6px 8px;font-size:12.5px;border:1px solid #ccc;border-radius:6px;font-family:inherit;" />'
+    +       '<input type="date" id="trip-dates-start" value="' + curStart + '" style="flex:1;padding:6px 8px;font-size:12.5px;border:1px solid var(--c-border-strong);border-radius:6px;font-family:inherit;" />'
     +     '</label>'
     +     '<label style="display:flex;align-items:center;gap:10px;font-size:12.5px;color:#222;">'
     +       '<span style="min-width:60px;font-weight:600;">End</span>'
-    +       '<input type="date" id="trip-dates-end" value="' + curEnd + '" style="flex:1;padding:6px 8px;font-size:12.5px;border:1px solid #ccc;border-radius:6px;font-family:inherit;" />'
+    +       '<input type="date" id="trip-dates-end" value="' + curEnd + '" style="flex:1;padding:6px 8px;font-size:12.5px;border:1px solid var(--c-border-strong);border-radius:6px;font-family:inherit;" />'
     +     '</label>'
     +     '<div id="trip-dates-preview" style="font-size:11.5px;color:#666;line-height:1.5;padding:8px 10px;background:#f8f8f6;border:1px solid #ece8db;border-radius:6px;"></div>'
     +   '</div>'
     +   '<div style="padding:8px 20px 18px;display:flex;justify-content:flex-end;gap:8px;">'
-    +     '<button id="trip-dates-cancel" type="button" style="font-size:13px;font-weight:500;color:#555;background:#fff;border:1px solid #ccc;border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Cancel</button>'
-    +     '<button id="trip-dates-apply" type="button" style="font-size:13px;font-weight:700;color:#fff;background:#1a5fa8;border:1px solid #1a5fa8;border-radius:6px;padding:8px 16px;cursor:pointer;font-family:inherit;">Apply</button>'
+    +     '<button id="trip-dates-cancel" type="button" style="font-size:13px;font-weight:500;color:var(--c-ink-2);background:var(--c-bg);border:1px solid var(--c-border-strong);border-radius:6px;padding:8px 14px;cursor:pointer;font-family:inherit;">Cancel</button>'
+    +     '<button id="trip-dates-apply" type="button" style="font-size:13px;font-weight:700;color:var(--c-on-dark);background:var(--c-primary);border:1px solid var(--c-primary);border-radius:6px;padding:8px 16px;cursor:pointer;font-family:inherit;">Apply</button>'
     +   '</div>'
     + '</div>';
   document.body.appendChild(ov);

@@ -26,7 +26,7 @@ function _pmDocLinkPickerShow(ed){
 
   var pop = document.createElement("div");
   pop.id = "pm-doclink-picker";
-  pop.style.cssText = "position:fixed;z-index:13500;background:#fff;border:1px solid #ccc;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,0.2);min-width:240px;max-width:340px;max-height:280px;overflow-y:auto;font-family:inherit;font-size:13px;";
+  pop.style.cssText = "position:fixed;z-index:13500;background:var(--c-bg);border:1px solid var(--c-border-strong);border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,0.2);min-width:240px;max-width:340px;max-height:280px;overflow-y:auto;font-family:inherit;font-size:13px;";
   pop.style.left = Math.max(8, Math.min(x, window.innerWidth - 360)) + "px";
   pop.style.top  = Math.max(8, Math.min(y + 4, window.innerHeight - 290)) + "px";
   pop._pmEditor = ed;
@@ -50,7 +50,7 @@ function _pmDocLinkPickerShow(ed){
     }
     pop.innerHTML = matches.map(function(d){
       var title = (d.title || "Untitled").replace(/</g, "&lt;");
-      return '<div class="pm-doclink-row" data-id="' + d.id + '" data-title="' + title.replace(/"/g, "&quot;") + '" style="padding:8px 14px;cursor:pointer;border-bottom:1px solid #f0f0f0;">[doc] ' + title + '</div>';
+      return '<div class="pm-doclink-row" data-id="' + d.id + '" data-title="' + title.replace(/"/g, "&quot;") + '" style="padding:8px 14px;cursor:pointer;border-bottom:1px solid var(--c-border-4);">[doc] ' + title + '</div>';
     }).join('');
     pop.querySelectorAll(".pm-doclink-row").forEach(function(row){
       row.onmouseenter = function(){ this.style.background = "#f5f5f5"; };

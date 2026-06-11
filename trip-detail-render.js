@@ -98,10 +98,10 @@ function buildExplorePane(dest){
     }
     var emp = document.createElement("div");
     emp.className = "exp-empty";
-    emp.style.cssText = "padding:14px 16px;background:#fafafa;border:1px solid #eee;border-radius:8px;font-size:11px;color:#666;line-height:1.55;display:flex;align-items:center;gap:10px;flex-wrap:wrap;";
+    emp.style.cssText = "padding:14px 16px;background:var(--c-panel);border:1px solid var(--c-border-3);border-radius:8px;font-size:11px;color:#666;line-height:1.55;display:flex;align-items:center;gap:10px;flex-wrap:wrap;";
     emp.innerHTML = '<span style="flex:1;min-width:0;">' + msg.replace(/&/g,"&amp;").replace(/</g,"&lt;") + '</span>';
     var retryBtn = document.createElement("button");
-    retryBtn.style.cssText = "background:#1a5fa8;border:none;color:#fff;font-size:11px;font-weight:600;padding:6px 12px;border-radius:5px;cursor:pointer;font-family:inherit;flex-shrink:0;";
+    retryBtn.style.cssText = "background:var(--c-primary);border:none;color:var(--c-on-dark);font-size:11px;font-weight:600;padding:6px 12px;border-radius:5px;cursor:pointer;font-family:inherit;flex-shrink:0;";
     retryBtn.textContent = btnLbl + " \u2192";
     (function(d){
       retryBtn.onclick = function(){
@@ -138,7 +138,7 @@ function buildExplorePane(dest){
     // missing. Now the header always shows here, with an empty-state
     // hint when the pool is exhausted.
     var optHdr = document.createElement("div");
-    optHdr.style.cssText = "font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#888;margin:14px 0 6px;";
+    optHdr.style.cssText = "font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--c-ink-3);margin:14px 0 6px;";
     optHdr.textContent = autoOnDays > 0 ? "Optional picks — not on a day yet" : "Sights";
     sightsSec.appendChild(optHdr);
     if (sightOnly.length > 0) {
@@ -165,7 +165,7 @@ function buildExplorePane(dest){
       }
     } else {
       var noOpt = document.createElement("div");
-      noOpt.style.cssText = "font-size:11px;color:#888;line-height:1.55;padding:8px 10px;background:#fafafa;border:1px dashed #e5e5e5;border-radius:6px;";
+      noOpt.style.cssText = "font-size:11px;color:var(--c-ink-3);line-height:1.55;padding:8px 10px;background:var(--c-panel);border:1px dashed #e5e5e5;border-radius:6px;";
       noOpt.innerHTML = (autoOnDays > 0 ? "Initially, Max found no additional interesting sights beyond the iconic placeholders. " : "")
         + "Click <strong>Refresh</strong> above to ask Max to dig deeper, or add your own from the day’s itinerary.";
       sightsSec.appendChild(noOpt);
@@ -202,7 +202,7 @@ function buildExplorePane(dest){
     var dtSec = document.createElement("div");
     dtSec.style.cssText = "margin-top:18px;";
     var dtHdr = document.createElement("div");
-    dtHdr.style.cssText = "padding:6px 10px;background:#f4eef9;border:1px solid #d8c4e8;border-radius:6px;font-size:13px;font-weight:700;color:#5b3f8f;";
+    dtHdr.style.cssText = "padding:6px 10px;background:#f4eef9;border:1px solid #d8c4e8;border-radius:6px;font-size:13px;font-weight:700;color:var(--c-accent);";
     dtHdr.textContent = "Day trips";
     dtSec.appendChild(dtHdr);
 
@@ -234,9 +234,9 @@ function buildExplorePane(dest){
       var schedTxt;
       if (scheduledIdx >= 0) {
         var schedLbl = ((dest.days || [])[scheduledIdx] && dest.days[scheduledIdx].lbl) || ("Day " + (scheduledIdx + 1));
-        schedTxt = '<span style="color:#5b3f8f;font-weight:600;">✓ scheduled on ' + schedLbl + '</span>';
+        schedTxt = '<span style="color:var(--c-accent);font-weight:600;">✓ scheduled on ' + schedLbl + '</span>';
       } else {
-        schedTxt = '<span style="color:#b05820;font-weight:600;">⚠ not yet scheduled</span>';
+        schedTxt = '<span style="color:var(--c-warn);font-weight:600;">⚠ not yet scheduled</span>';
       }
       if (route.distKm) {
         schedTxt += ' &nbsp;·&nbsp; ' + (typeof _fmtDistance === "function" ? _fmtDistance(route.distKm) : route.distKm + "km");
@@ -248,7 +248,7 @@ function buildExplorePane(dest){
       var capsules = document.createElement("div");
       capsules.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;";
       var lblEl = document.createElement("span");
-      lblEl.style.cssText = "font-size:10.5px;font-weight:600;color:#5b3f8f;";
+      lblEl.style.cssText = "font-size:10.5px;font-weight:600;color:var(--c-accent);";
       lblEl.textContent = scheduledIdx >= 0 ? "Move to:" : "Place on:";
       capsules.appendChild(lblEl);
       (dest.days || []).forEach(function(day, dIdx){
@@ -301,7 +301,7 @@ function buildExplorePane(dest){
     // Round FN.8.19: sentence case "Day trips" to match other Explore
     // section headers ("Sights", "Restaurants"). Was all-caps which
     // read as a louder banner than the surrounding sections.
-    dtCatHdr.style.cssText = "margin:18px 0 4px;padding:6px 10px;background:#f4eef9;border:1px solid #d8c4e8;border-radius:6px;font-size:13px;font-weight:700;color:#5b3f8f;";
+    dtCatHdr.style.cssText = "margin:18px 0 4px;padding:6px 10px;background:#f4eef9;border:1px solid #d8c4e8;border-radius:6px;font-size:13px;font-weight:700;color:var(--c-accent);";
     dtCatHdr.textContent = "Day trips";
     wrap.appendChild(dtCatHdr);
     dest.dayTrips.forEach(function(dt, dtIdx){
@@ -349,10 +349,10 @@ function buildExplorePane(dest){
           return ((dest.days||[])[dIdx] || {}).lbl || ("Day "+(dIdx+1));
         });
         var word = _placedOnDays.length === 1 ? "day" : "days";
-        schedTxt = '<span style="color:#5b3f8f;font-weight:600;">✓ scheduled on '
+        schedTxt = '<span style="color:var(--c-accent);font-weight:600;">✓ scheduled on '
           + dayLbls.join(", ") + '</span>';
       } else {
-        schedTxt = '<span style="color:#b05820;font-weight:600;">⚠ not yet scheduled</span>';
+        schedTxt = '<span style="color:var(--c-warn);font-weight:600;">⚠ not yet scheduled</span>';
       }
       metaLine.innerHTML = schedTxt + ' &nbsp;·&nbsp; ' + (dt.distKm != null ? _fmtDistance(dt.distKm) + ' away' : '? km away') + ' &nbsp;·&nbsp; sights and transport below';
       cHdr.appendChild(titleLine);
@@ -373,7 +373,7 @@ function buildExplorePane(dest){
       convertBtn.type = "button";
       convertBtn.textContent = "🛏 Stay overnight here";
       convertBtn.title = "Convert this day trip into its own destination (a stay) inserted after " + (dest.place || "the hub");
-      convertBtn.style.cssText = "font-size:11px;font-weight:600;color:#1a5fa8;background:#eef5ff;border:1px solid #cfe1f7;border-radius:11px;padding:3px 10px;cursor:pointer;font-family:inherit;";
+      convertBtn.style.cssText = "font-size:11px;font-weight:600;color:var(--c-primary);background:var(--c-tint-blue);border:1px solid #cfe1f7;border-radius:11px;padding:3px 10px;cursor:pointer;font-family:inherit;";
       convertBtn.onmouseover = function(){ convertBtn.style.background = "#dceaf8"; };
       convertBtn.onmouseout = function(){ convertBtn.style.background = "#eef5ff"; };
       (function(hubDest, dayTripIdx, dtName){
@@ -400,7 +400,7 @@ function buildExplorePane(dest){
       var dayCapsules = document.createElement("div");
       dayCapsules.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;align-items:center;";
       var placeLbl = document.createElement("span");
-      placeLbl.style.cssText = "font-weight:600;color:#5b3f8f;";
+      placeLbl.style.cssText = "font-weight:600;color:var(--c-accent);";
       placeLbl.textContent = _placedOnDays.length ? "Add another day:" : "Place on:";
       dayCapsules.appendChild(placeLbl);
       (dest.days || []).forEach(function(day, dIdx){
@@ -468,7 +468,7 @@ function buildExplorePane(dest){
             var pDayLbl = ((dest.days || [])[placedOnDay] || {}).lbl || ("Day " + (placedOnDay+1));
             addBtn.textContent = "+ Add to " + pDayLbl;
             addBtn.title = "Add this sight to your " + dt.place + " day trip on " + pDayLbl;
-            addBtn.style.cssText = "font-size:10.5px;font-weight:600;color:#5b3f8f;background:#fff;border:1px solid #d8c4e8;border-radius:9px;padding:3px 9px;cursor:pointer;font-family:inherit;white-space:nowrap;";
+            addBtn.style.cssText = "font-size:10.5px;font-weight:600;color:var(--c-accent);background:var(--c-bg);border:1px solid #d8c4e8;border-radius:9px;padding:3px 9px;cursor:pointer;font-family:inherit;white-space:nowrap;";
             addBtn.onmouseover = function(){ addBtn.style.background = "#f4eef9"; };
             addBtn.onmouseout = function(){ addBtn.style.background = "#fff"; };
             (function(sgData, hubDestRef, pDayIdx){
@@ -494,7 +494,7 @@ function buildExplorePane(dest){
             addBtn.textContent = "+ Add";
             addBtn.title = "Schedule the day trip first (Place on: above) — then add sights to that day.";
             addBtn.disabled = true;
-            addBtn.style.cssText = "font-size:10.5px;font-weight:500;color:#bbb;background:#fafafa;border:1px solid #eee;border-radius:9px;padding:3px 9px;cursor:not-allowed;font-family:inherit;white-space:nowrap;";
+            addBtn.style.cssText = "font-size:10.5px;font-weight:500;color:#bbb;background:var(--c-panel);border:1px solid var(--c-border-3);border-radius:9px;padding:3px 9px;cursor:not-allowed;font-family:inherit;white-space:nowrap;";
           }
           acts.appendChild(addBtn);
           row.appendChild(acts);
@@ -502,7 +502,7 @@ function buildExplorePane(dest){
         });
       } else {
         var loadHint = document.createElement("div");
-        loadHint.style.cssText = "font-size:11px;color:#888;font-style:italic;padding:4px 0;";
+        loadHint.style.cssText = "font-size:11px;color:var(--c-ink-3);font-style:italic;padding:4px 0;";
         loadHint.textContent = chipData && chipData.loading
           ? "Max is loading sights for " + dt.place + "…"
           : "Sights for " + dt.place + " will appear here once Max loads them.";
@@ -559,7 +559,7 @@ function buildExplorePane(dest){
     threshInp.type = "text";
     threshInp.value = _ftFormatHours(_ftGetThresholdHours());
     threshInp.placeholder = "3:00";
-    threshInp.style.cssText = "width:64px;font-size:11px;font-weight:600;padding:3px 7px;border:1px solid #c4d8c4;border-radius:5px;background:#fff;color:#2d5a2d;font-family:inherit;text-align:center;";
+    threshInp.style.cssText = "width:64px;font-size:11px;font-weight:600;padding:3px 7px;border:1px solid #c4d8c4;border-radius:5px;background:var(--c-bg);color:#2d5a2d;font-family:inherit;text-align:center;";
     threshInp.title = "Accepts 3, 3.5, 3:30, or 3h 30m";
     threshInp.onchange = function(){
       var parsed = _ftParseHoursInput(this.value);
@@ -607,14 +607,14 @@ function buildExplorePane(dest){
         rowSec.appendChild(rowHdr);
 
         var rowSub = document.createElement("div");
-        rowSub.style.cssText = "font-size:10.5px;color:#555;margin-top:4px;";
+        rowSub.style.cssText = "font-size:10.5px;color:var(--c-ink-2);margin-top:4px;";
         var nightWord = (cand.dest.nights === 1) ? "night" : "nights";
         var schedSummary = "";
         if (cand.scheduledDays.length) {
           var dayLbls = cand.scheduledDays.map(function(idx){
             return ((dest.days||[])[idx] || {}).lbl || ("Day "+(idx+1));
           });
-          schedSummary = ' &nbsp;·&nbsp; <span style="color:#5b3f8f;font-weight:600;">✓ scheduled on ' + dayLbls.join(", ") + '</span>';
+          schedSummary = ' &nbsp;·&nbsp; <span style="color:var(--c-accent);font-weight:600;">✓ scheduled on ' + dayLbls.join(", ") + '</span>';
         }
         rowSub.innerHTML = '<strong>' + cand.dest.nights + ' ' + nightWord + '</strong> at ' + cand.dest.place + schedSummary;
         rowSec.appendChild(rowSub);
@@ -701,7 +701,7 @@ function mkExploreSuggestion(s,dest,type){
   // promoted with a "you considered this too" affirmation.
   if (s && s._considered) {
     var consBadge = document.createElement("span");
-    consBadge.style.cssText = "display:inline-block;margin-left:8px;font-size:9.5px;font-weight:700;color:#5b3f8f;background:#f3eefa;border:1px solid #ddd0f0;border-radius:4px;padding:1px 6px;letter-spacing:.03em;text-transform:uppercase;vertical-align:middle;";
+    consBadge.style.cssText = "display:inline-block;margin-left:8px;font-size:9.5px;font-weight:700;color:var(--c-accent);background:#f3eefa;border:1px solid #ddd0f0;border-radius:4px;padding:1px 6px;letter-spacing:.03em;text-transform:uppercase;vertical-align:middle;";
     consBadge.textContent = "Considered";
     nm.appendChild(consBadge);
   } else if (s && s._alsoConsidered) {
@@ -830,8 +830,8 @@ function showAddToDay(item,type,dest,triggerBtn,opts){
   var existing=document.getElementById("exp-day-picker");
   if(existing)existing.parentNode.removeChild(existing);
   var picker=document.createElement("div"); picker.id="exp-day-picker";
-  picker.style.cssText="position:fixed;z-index:9999;background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.18);padding:6px 0;min-width:180px;";
-  var phdr=document.createElement("div"); phdr.style.cssText="font-size:10px;font-weight:700;color:#333;padding:5px 14px 6px;border-bottom:1px solid #f0f0f0;margin-bottom:3px;";
+  picker.style.cssText="position:fixed;z-index:9999;background:var(--c-bg);border:1px solid var(--c-border);border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.18);padding:6px 0;min-width:180px;";
+  var phdr=document.createElement("div"); phdr.style.cssText="font-size:10px;font-weight:700;color:#333;padding:5px 14px 6px;border-bottom:1px solid var(--c-border-4);margin-bottom:3px;";
   phdr.textContent="Add to which day?"; picker.appendChild(phdr);
   var execDayId=opts&&opts.execDayId;
   dest.days.forEach(function(day){
@@ -841,9 +841,9 @@ function showAddToDay(item,type,dest,triggerBtn,opts){
       opt.style.cssText="padding:6px 14px;font-size:11px;color:#333;cursor:pointer;display:flex;justify-content:space-between;align-items:center;"+(isCurrentDay?"background:#f0f5ff;":"");
       var dLbl=document.createElement("span");
       dLbl.textContent=day.lbl+(isCurrentDay?" ←":"");
-      if(isCurrentDay) dLbl.style.cssText="font-weight:600;color:#1a5fa8;";
+      if(isCurrentDay) dLbl.style.cssText="font-weight:600;color:var(--c-primary);";
       opt.appendChild(dLbl);
-      var sLbl=document.createElement("span"); sLbl.style.cssText="font-size:9px;color:#aaa;"; sLbl.textContent=sl.lbl; opt.appendChild(sLbl);
+      var sLbl=document.createElement("span"); sLbl.style.cssText="font-size:9px;color:var(--c-ink-4);"; sLbl.textContent=sl.lbl; opt.appendChild(sLbl);
       opt.onmouseover=function(){opt.style.background="#f5f5f5";};
       opt.onmouseout=function(){opt.style.background=isCurrentDay?"#f0f5ff":"";};
       (function(d,sl2){opt.onclick=function(e){
@@ -975,8 +975,8 @@ function buildBucketSection(dest,bucketKey,title,subtitle){
       var existing=document.getElementById("bp-"+item.id);
       if(existing){existing.parentNode.removeChild(existing);return;}
       var picker=document.createElement("div"); picker.id="bp-"+item.id;
-      picker.style.cssText="position:fixed;z-index:900;background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.14);padding:6px 0;min-width:130px;";
-      var phdr=document.createElement("div"); phdr.style.cssText="font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#bbb;padding:4px 14px 6px;border-bottom:1px solid #f0f0f0;margin-bottom:4px;"; phdr.textContent="Assign to day"; picker.appendChild(phdr);
+      picker.style.cssText="position:fixed;z-index:900;background:var(--c-bg);border:1px solid var(--c-border);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.14);padding:6px 0;min-width:130px;";
+      var phdr=document.createElement("div"); phdr.style.cssText="font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#bbb;padding:4px 14px 6px;border-bottom:1px solid var(--c-border-4);margin-bottom:4px;"; phdr.textContent="Assign to day"; picker.appendChild(phdr);
       dest.days.forEach(function(day){
         var opt=document.createElement("div"); opt.style.cssText="padding:6px 14px;font-size:11px;cursor:pointer;color:#444;";
         opt.textContent=day.lbl;
@@ -1168,7 +1168,7 @@ function buildTransportChip(bookedBk,routing,label,destId,tabTarget){
   // May 17 departure-transport chip and a same-day train suggestion looked
   // identical (both just "SBB Regional Train · 1h 25min · CHF 25").
   var dir=document.createElement("span"); dir.className="itin-transport-dir";
-  dir.style.cssText="font-size:10px;font-weight:700;color:#888;margin-right:8px;text-transform:uppercase;letter-spacing:0.04em;";
+  dir.style.cssText="font-size:10px;font-weight:700;color:var(--c-ink-3);margin-right:8px;text-transform:uppercase;letter-spacing:0.04em;";
   dir.textContent=label || "";
   var icon=document.createElement("span"); icon.className="itin-transport-icon";
   var name=document.createElement("span"); name.className="itin-transport-name";
@@ -1180,7 +1180,7 @@ function buildTransportChip(bookedBk,routing,label,destId,tabTarget){
     if(bookedBk.departure)parts.push(fmtD(bookedBk.departure)+(bookedBk.departureTime?" "+bookedBk.departureTime:""));
     if(bookedBk.confirmationNumber)parts.push("Conf: "+bookedBk.confirmationNumber);
     meta.textContent=parts.join(" \u00b7 ");
-    var booked=document.createElement("span"); booked.style.cssText="font-size:9px;color:#2a7a4e;margin-left:3px;"; booked.textContent="\u2713";
+    var booked=document.createElement("span"); booked.style.cssText="font-size:9px;color:var(--c-see);margin-left:3px;"; booked.textContent="\u2713";
     name.appendChild(booked);
   } else if(routing&&routing.options.length){
     var opt=routing.options[0];
@@ -1302,7 +1302,7 @@ function toggleSightBookForm(row,item,destId,dayId){
   var existing=row.querySelector('.sight-book-form');
   if(existing){existing.parentNode.removeChild(existing);return;}
   var form=document.createElement("div"); form.className="sight-book-form bk-form";
-  form.style.cssText="margin:4px 0 4px 12px;padding:8px;background:#fafafa;border-radius:6px;";
+  form.style.cssText="margin:4px 0 4px 12px;padding:8px;background:var(--c-panel);border-radius:6px;";
   // v359.60.71: derive a sensible default date for the booking. When
   // the sight is on a specific day (dayId set + day has .date), use
   // that. When the sight is unscheduled (suggestion), fall back to
@@ -1602,7 +1602,7 @@ function drawDestMode(destId, opts){
     inp.type = "text";
     inp.className = "tm-rename-inp";
     inp.value = dest.label || dest.place;
-    inp.style.cssText = "font-size:18px;font-weight:600;color:#111;background:#fff;border:1px solid #1a5fa8;border-radius:5px;padding:3px 7px;width:100%;font-family:inherit;outline:none;box-shadow:0 0 0 3px rgba(26,95,168,0.12);";
+    inp.style.cssText = "font-size:18px;font-weight:600;color:var(--c-ink);background:var(--c-bg);border:1px solid var(--c-primary);border-radius:5px;padding:3px 7px;width:100%;font-family:inherit;outline:none;box-shadow:0 0 0 3px rgba(26,95,168,0.12);";
     titleWrap.replaceChild(inp, title);
     renPen.style.display = "none";
     inp.focus();
@@ -1639,7 +1639,7 @@ function drawDestMode(destId, opts){
   dates.textContent=fmtD(dest.dateFrom)+" \u2013 "+fmtD(dest.dateTo)+" ("+dest.nights+" night"+(dest.nights!==1?"s":"")+")";
   var _dmDatePencil=document.createElement("span");
   _dmDatePencil.textContent=" \u270e";
-  _dmDatePencil.style.cssText="font-size:11px;color:#888;font-weight:400;margin-left:4px;";
+  _dmDatePencil.style.cssText="font-size:11px;color:var(--c-ink-3);font-weight:400;margin-left:4px;";
   dates.appendChild(_dmDatePencil);
   dates.onmouseover=function(){ dates.style.background="#f0f6fc"; };
   dates.onmouseout =function(){ dates.style.background="transparent"; };
@@ -1660,7 +1660,7 @@ function drawDestMode(destId, opts){
       _dmTi=mkDateInp("dm-edit-to-"+destId, dest.dateTo, {minDate:dest.dateFrom});
     }
     var _dmArrow=document.createElement("span");
-    _dmArrow.style.cssText="font-size:11px;color:#aaa;margin:0 2px;";
+    _dmArrow.style.cssText="font-size:11px;color:var(--c-ink-4);margin:0 2px;";
     _dmArrow.textContent="\u2192";
     var _dmSave=document.createElement("button");
     _dmSave.type="button";
@@ -1709,7 +1709,7 @@ function drawDestMode(destId, opts){
   dmMapBtn.type="button";
   dmMapBtn.textContent="\ud83d\udccd";
   dmMapBtn.title="Show on map";
-  dmMapBtn.style.cssText="background:none;border:1px solid #e8e8e8;cursor:pointer;padding:3px 8px;border-radius:5px;font-size:13px;line-height:1;font-family:inherit;color:#1a5fa8;transition:background .12s ease, border-color .12s ease;";
+  dmMapBtn.style.cssText="background:none;border:1px solid var(--c-border-2);cursor:pointer;padding:3px 8px;border-radius:5px;font-size:13px;line-height:1;font-family:inherit;color:var(--c-primary);transition:background .12s ease, border-color .12s ease;";
   dmMapBtn.onmouseover=function(){dmMapBtn.style.background="#eef5ff";dmMapBtn.style.borderColor="#c8dff8";};
   dmMapBtn.onmouseout=function(){dmMapBtn.style.background="none";dmMapBtn.style.borderColor="#e8e8e8";};
   (function(did){dmMapBtn.onclick=function(e){e.stopPropagation();if(typeof highlightDestOnMap==="function")highlightDestOnMap(did);};})(destId);
@@ -1940,7 +1940,7 @@ function drawDestMode(destId, opts){
 function buildRoutingSection(fromDest, toDest, label){
   var fromPlace=fromDest.place, toPlace=toDest.place;
   var fromId=fromDest.id, toId=toDest.id;
-  var sec=document.createElement("div"); sec.style.cssText="margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid #f5f5f5;";
+  var sec=document.createElement("div"); sec.style.cssText="margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--c-border-5);";
   var lbl=document.createElement("div"); lbl.className="gh-lbl"; lbl.textContent=label; sec.appendChild(lbl);
   var routing=getRouting(fromPlace,toPlace);
   if(routing){
@@ -2079,7 +2079,7 @@ function _buildNowNextWidgetHtml(split) {
         }
       }
       lines.push('<div style="font-size:11.5px;color:#0e3a6a;line-height:1.55;">'
-        + '<span style="font-size:9.5px;font-weight:700;color:#1a5fa8;text-transform:uppercase;letter-spacing:0.05em;margin-right:8px;">Right now</span>'
+        + '<span style="font-size:9.5px;font-weight:700;color:var(--c-primary);text-transform:uppercase;letter-spacing:0.05em;margin-right:8px;">Right now</span>'
         + '<strong>' + _esc(it.n || "") + '</strong>'
         + tail
         + '</div>');
@@ -2111,15 +2111,15 @@ function _buildNowNextWidgetHtml(split) {
   // LATER — "Later: A, B, C"
   if (split.later && split.later.length) {
     var laterNames = split.later.map(function(it){ return _esc(it.n||""); }).join(", ");
-    lines.push('<div style="font-size:10.5px;color:#888;line-height:1.55;margin-top:3px;">'
-      + '<span style="font-size:9.5px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:0.05em;margin-right:8px;">Later today</span>'
+    lines.push('<div style="font-size:10.5px;color:var(--c-ink-3);line-height:1.55;margin-top:3px;">'
+      + '<span style="font-size:9.5px;font-weight:700;color:var(--c-ink-4);text-transform:uppercase;letter-spacing:0.05em;margin-right:8px;">Later today</span>'
       + laterNames
       + '</div>');
   }
   // PAST — when there are past items but nothing current/next, mention them.
   // Otherwise skip — they're already visible struck-through in the list below.
   if (!split.current.length && !split.next && split.past.length) {
-    lines.push('<div style="font-size:10.5px;color:#aaa;line-height:1.55;margin-top:3px;font-style:italic;">'
+    lines.push('<div style="font-size:10.5px;color:var(--c-ink-4);line-height:1.55;margin-top:3px;font-style:italic;">'
       + 'All scheduled items today are done.'
       + '</div>');
   }
@@ -2136,7 +2136,7 @@ function _buildNowNextWidgetHtml(split) {
   // Sits inside the widget header row so it reads "Today, May 10
   // 🌤️ 18°/9°" at a glance.
   var wxRow = '<div class="now-next-wx-row" style="font-size:10.5px;color:#5a7a9a;margin-bottom:4px;display:flex;align-items:center;gap:6px;">'
-    + '<span style="font-weight:700;text-transform:uppercase;letter-spacing:0.05em;font-size:9.5px;color:#1a5fa8;">Today</span>'
+    + '<span style="font-weight:700;text-transform:uppercase;letter-spacing:0.05em;font-size:9.5px;color:var(--c-primary);">Today</span>'
     + '<span class="now-next-wx-slot"></span>'
     + '</div>';
   return '<div class="now-next-widget" style="margin:6px 0 8px;padding:8px 11px;background:linear-gradient(135deg,#eaf3fb 0%,#dcecf8 100%);border:1px solid #c8dff8;border-radius:6px;">'

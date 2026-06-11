@@ -6,10 +6,21 @@
 // and we want SW behavior in tests to match production.
 
 const path = require('path');
+const fs = require('fs');
 const { defineConfig, devices } = require('@playwright/test');
 
 // Resolve the app root (two levels up from this config: tests/playwright/ → max/)
 const APP_ROOT = path.resolve(__dirname, '..', '..');
+
+// Single source of truth for the dev port: read DEV_PORT from dev.config
+// (shared with ./dev.sh) so the preview server and this runner never drift
+// onto different ports. Falls back to 8765 if the file is missing/unreadable.
+let DEV_PORT = 8765;
+try {
+  const m = fs.readFileSync(path.join(APP_ROOT, 'dev.config'), 'utf8').match(/^\s*DEV_PORT\s*=\s*(\d+)/m);
+  if (m) DEV_PORT = Number(m[1]);
+} catch (e) { /* keep default */ }
+const BASE_URL = `http://localhost:${DEV_PORT}`;
 
 module.exports = defineConfig({
   testDir: __dirname,
@@ -37,7 +48,7 @@ module.exports = defineConfig({
   // Headless by default for CI; set HEADED=1 in env to see what's
   // happening.
   use: {
-    baseURL: 'http://localhost:8765',
+    baseURL: BASE_URL,
     headless: !process.env.HEADED,
     actionTimeout: 5000,
     navigationTimeout: 10000,
@@ -59,8 +70,8 @@ module.exports = defineConfig({
   // http.server is enough; no extra dependencies. The webServer block
   // tells Playwright to start it and wait until baseURL responds.
   webServer: {
-    command: `python3 -m http.server 8765 --directory "${APP_ROOT}"`,
-    url: 'http://localhost:8765/index.html',
+    command: `python3 -m http.server ${DEV_PORT} --directory "${APP_ROOT}"`,
+    url: `${BASE_URL}/index.html`,
     reuseExistingServer: !process.env.CI,
     // v360.1: bumped from 5s. Python http.server's cold-start is
     // usually <1s, but the deploy occasionally hit a 5s timeout on
