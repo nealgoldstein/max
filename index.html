@@ -37269,6 +37269,7 @@ function updateMainMap(){
           trip._osrmSegments = {};
           trip._osrmCacheSig = _destSig;
           trip._osrmBatchInflight = false;
+          trip._dtLoopFetched = {}; // PD.472: reset day-trip spur fetch guard with the route cache
         }
         // PD.136: build segment list with per-segment cache key, then
         // render each from trip._osrmSegments cache (real road path) or
@@ -37496,16 +37497,19 @@ function updateMainMap(){
           dashArray: isLoopStraight ? "3 6" : null, lineCap:"round", lineJoin:"round"
         }).addTo(_mainMap);
         _mainMarkers.push(loopLine);
-        // PD.471: the spur DRAWS for every day trip (so you see the hub
-        // connection), but the road-following OSRM fetch only fires for the
-        // route you've toggled on-demand — otherwise every day trip would
-        // kick a network call on every render (a fetch storm, and a hang
-        // when OSRM is slow/unreachable). Straight spur by default;
-        // road-following when you opt into a specific route.
-        if (isLoopStraight && loopKey && loopCached !== "failed"
-            && window._activeRouteRouting === route.id
+        // PD.472: fetch road geometry for the day-trip spur AUTOMATICALLY
+        // (so it follows roads, not a straight line across a glacier) — but
+        // only ONCE per loop. The _dtLoopFetched guard means a cache-key
+        // miss or a slow/unreachable OSRM can never re-fire the fetch on
+        // every render (that storm/hang is what the on-demand gate was
+        // masking). Only when roads are on (matches the spine). The straight
+        // spur shows until the geometry lands; on failure it stays straight.
+        if (!trip._dtLoopFetched) trip._dtLoopFetched = {};
+        if (isLoopStraight && _loopRoadsOn && loopKey && loopCached !== "failed"
+            && !trip._dtLoopFetched[loopKey]
             && typeof _ensureTripRoutesCached === "function"
             && !trip._osrmBatchInflight) {
+          trip._dtLoopFetched[loopKey] = true;
           trip._osrmBatchInflight = true;
           _ensureTripRoutesCached([{ key: loopKey, coords: loopPath }]).then(function(){
             trip._osrmBatchInflight = false;
