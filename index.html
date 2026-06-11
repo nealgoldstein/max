@@ -2790,7 +2790,16 @@ function _consumeReviewKeyFromUrl(){
     var rk = params.get("reviewKey") || params.get("key");
     if (!rk) return false;
     rk = String(rk).trim();
-    if (rk.indexOf("sk-ant-") !== 0) return false; // sanity check — only accept Anthropic keys
+    // PD.445: validate, don't sanitize-and-hope. URLSearchParams turns
+    // "+" into a space, so a handoff URL like ?key=sk-ant-…+token+<uuid>/
+    // arrives here as "sk-ant-… token <uuid>/" — a key with a session
+    // token concatenated on. That is exactly how Neal's stored key got
+    // corrupted. Refuse anything that isn't a single clean sk-ant token
+    // rather than guessing which part is the key and persisting the rest.
+    if (!_isWellFormedApiKey(rk)) {
+      console.warn("[Max] ?key= URL handoff value is not a well-formed API key — ignoring");
+      return false;
+    }
     try { localStorage.setItem("max-api-key", rk); } catch(_){}
     _apiKey = rk;
     // Strip the parameter so it's not visible after first load
@@ -2811,6 +2820,22 @@ function _consumeReviewKeyFromUrl(){
   } catch(_){ return false; }
 }
 
+// PD.445: ONE well-formedness check for an Anthropic API key, applied at
+// every boundary the key can enter through (the save form, the ?key= URL
+// handoff, and the load path). A real key is a SINGLE unbroken token:
+// "sk-ant-" + url-safe chars, ~108 long. Anything else — interior
+// whitespace, a concatenated session token, surrounding prose — is not a
+// key and must be refused at the door, not stored and later guessed back
+// out. Neal's bug: a session token ("token <uuid>-<uuid>/") had been
+// concatenated onto his key via an input path that never validated it, so
+// every model call 401'd. The key store and the token store are separate;
+// nothing in the code mixes them — the gap was the missing check here.
+function _isWellFormedApiKey(k){
+  return typeof k === "string"
+      && /^sk-ant-[A-Za-z0-9_-]+$/.test(k)   // single token, no whitespace/punctuation
+      && k.length >= 95 && k.length <= 130;   // real keys are ~108
+}
+
 function loadApiKey(){
   // Round CV: URL handoff first — overrides whatever's in localStorage so
   // a reviewer with a fresh URL always gets the latest key.
@@ -2818,7 +2843,21 @@ function loadApiKey(){
     renderApiKeyUI();
     return;
   }
-  try{_apiKey=localStorage.getItem("max-api-key")||null;}catch(e){_apiKey=null;}
+  var _stored = null;
+  try { _stored = localStorage.getItem("max-api-key") || null; } catch(e) { _stored = null; }
+  // PD.445: validate on read. A malformed stored value (e.g. a token got
+  // concatenated in) is NOT used — using it only produces silent 401s —
+  // and we don't silently guess a key out of it either. We leave the bad
+  // value in storage (non-destructive) but treat the app as keyless so
+  // the user is cleanly prompted to re-enter a valid key, which overwrites
+  // it. PD.421 kept us from deleting a VALID key on a transient 401; this
+  // is the opposite case — a value that was never a valid key at all.
+  if (_stored && !_isWellFormedApiKey(_stored)) {
+    console.warn("[Max] stored API key is malformed (not a single sk-ant token) — not using it; prompting re-entry");
+    _apiKey = null;
+  } else {
+    _apiKey = _stored;
+  }
   // Only update UI to show "key set" confirmation — never show warning banner on load
   renderApiKeyUI();
 }
@@ -2902,6 +2941,16 @@ function saveApiKey(val){
   if (v.length > 130) {
     if (typeof maxAlert === "function") {
       maxAlert("That key looks too long (" + v.length + " characters; Anthropic keys are ~108). Some extra text may have been copied with it — recopy just the key, starting at <code>sk-ant-</code> with nothing after the end of the string.");
+    }
+    return;
+  }
+  // PD.445: authoritative gate. Everything above is friendly, specific
+  // triage; this is the single source of truth for "is this a real key?"
+  // — the SAME predicate the loader and the URL handoff use, so a value
+  // that wouldn't survive on read can never be written here either.
+  if (!_isWellFormedApiKey(v)) {
+    if (typeof maxAlert === "function") {
+      maxAlert("That doesn't look like a valid API key — it should be a single <code>sk-ant-…</code> token with no spaces or extra text. Recopy just the key.");
     }
     return;
   }
@@ -27953,7 +28002,21 @@ function _pmDeriveRole(info, key, opts){
   // (The user can still flip a stay → day-trip via the popover; that
   // sets dest.nights=0, so info.overnight goes false and the cascade
   // resumes its normal classification.)
-  if (info.overnight === true) return { role: "stay", source: "committed-overnight" };
+  // PD.446: a destination's commitment is its allocated NIGHTS, not a
+  // separate `overnight` boolean. The trip-view converters
+  // (_convertSeeToOvernight, addBufferNight, etc.) set dest.nights but
+  // never set info.overnight — so a place the user explicitly made a
+  // 1-night STAY still derived as the see-biased "maybe" default here.
+  // Result: the map pin (colored from nights) showed a stay while this
+  // cascade — which the role popover/list-chip use for the CURRENT role —
+  // said "maybe", so "turn it back to a See" matched no transition and
+  // silently did nothing (Neal: "couldn't turn it back"). Treat nights>=1
+  // as the committed-overnight signal directly; this is exactly the
+  // nights-driven behavior the comment below already promises. nights=0
+  // (sight / day-trip / wayside) falls through to the normal cascade.
+  if (info.overnight === true || (typeof info.nights === "number" && info.nights >= 1)) {
+    return { role: "stay", source: "committed-overnight" };
+  }
   // Round NC.X (deeper Diamond Beach fix): the cascade now tracks
   // SOURCE alongside role, so callers can tell whether a role is a
   // user commitment ("you decided") or a suggestion ("Max suggests").
@@ -52139,6 +52202,24 @@ function _openTripDestRolePopover(destId){
 //   { kind: "destination", destId }                — entry in trip.destinations
 //   { kind: "dayTrip", hubDest, route, stop }      — stop on a kind=dayTrip route
 //   { kind: "wayside", route, stop }               — stop on a kind=transit route
+// PD.447 (architectural consolidation): THE single answer to "is this
+// destination an overnight or a See?" in dispatcher vocabulary. It wraps
+// the one role authority (_pmDeriveRole) and maps its vocabulary to the
+// trip-stop/dispatcher vocabulary. Every control that needs a
+// destination's stay/see role calls THIS — no surface recomputes
+// `nights>0 ? "overnight" : "see"` on its own. That parallel computation
+// is exactly how the trip-stop popover and the _pmDeriveRole cascade
+// drifted apart (PD.446: one said "overnight" from nights, the other said
+// "maybe" from a never-set flag), so a "turn it back to See" silently
+// no-op'd. nights is the top-priority signal inside _pmDeriveRole, so for
+// a committed destination this is equivalent to the old nights check —
+// but now there is one function, not two that can disagree.
+function _destStayOrSee(dest){
+  if (!dest) return "see";
+  var r = (typeof _pmDeriveRole === "function") ? _pmDeriveRole(dest, null, {}) : null;
+  return (r && r.role === "stay") ? "overnight" : "see";
+}
+
 function _openTripStopPopover(ctx) {
   if (!ctx || !trip) return;
 
@@ -52150,7 +52231,7 @@ function _openTripStopPopover(ctx) {
     if (!srcDest) return;
     placeName = srcDest.place;
     placeId = srcDest.placeId || null;
-    currentRole = (srcDest.nights || 0) > 0 ? "overnight" : "see";
+    currentRole = _destStayOrSee(srcDest); // PD.447: one role authority, not a parallel nights check
   } else if (ctx.kind === "dayTrip") {
     if (!ctx.hubDest || !ctx.route || !ctx.stop) return;
     placeId = ctx.stop.placeId;
@@ -52964,6 +53045,15 @@ if (typeof globalThis !== "undefined") globalThis._applyStopRoleChange = _applyS
 // changes — those treat as "move to <new target>".
 function _applyStopRoleChange(ctx, currentRole, selectedRole, opts) {
   opts = opts || {};
+  // PD.446: tolerate both role vocabularies. The single role authority
+  // _pmDeriveRole emits "stay"; the trip-stop popover emits "overnight".
+  // They denote the same committed overnight. Normalize so a control that
+  // hands us the derived "stay" still matches the "overnight->…" /
+  // "…->overnight" transitions below instead of building a "stay->see"
+  // key that matches no case and silently no-ops (Neal: "couldn't turn it
+  // back"). The two terms must never diverge again at this boundary.
+  if (currentRole === "stay")  currentRole = "overnight";
+  if (selectedRole === "stay") selectedRole = "overnight";
   var key = currentRole + "->" + selectedRole;
 
   // v360.3 (#104): post-conversion "just moved" highlight. Each case
