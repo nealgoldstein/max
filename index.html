@@ -38384,7 +38384,13 @@ function _maybeNudgeWaysideIsDayTrip(srcC, fromC, toC, placeName){
 }
 
 function _showDayTripToast(msgHtml, undoFn){
-  // Dismiss any active toast (either kind) before showing this one.
+  // PD.467: the "Undo" button was never wired for role changes — every
+  // undoFn passed here just logged a warning, so the button did nothing,
+  // and a broken undo is worse than none. Dropped it (reversing a role is
+  // one tap on the pin anyway). The confirmation message stays — the
+  // day-trip nudge rides on this toast — with a manual ✕ so it doesn't
+  // vanish before you've read it, and a bit more time on screen. `undoFn`
+  // is kept in the signature (ignored) so callers don't need touching.
   if (typeof _dismissReorderToast === "function") _dismissReorderToast(true);
   _dismissDayTripToast(true);
   var toast = document.createElement("div");
@@ -38392,18 +38398,15 @@ function _showDayTripToast(msgHtml, undoFn){
   var msg = document.createElement("div");
   msg.className = "reorder-toast-msg";
   msg.innerHTML = msgHtml;
-  var undoBtn = document.createElement("button");
-  undoBtn.className = "reorder-toast-undo";
-  undoBtn.textContent = "Undo";
-  undoBtn.onclick = function(){
-    try { undoFn(); } catch(_){}
-    _dismissDayTripToast(true);
-  };
+  var closeBtn = document.createElement("button");
+  closeBtn.className = "reorder-toast-undo"; // reuse the existing button styling
+  closeBtn.textContent = "Dismiss";
+  closeBtn.onclick = function(){ _dismissDayTripToast(true); };
   toast.appendChild(msg);
-  toast.appendChild(undoBtn);
+  toast.appendChild(closeBtn);
   document.body.appendChild(toast);
   _dayTripUndoToast = toast;
-  _dayTripUndoTimer = setTimeout(function(){ _dismissDayTripToast(false); }, 6000);
+  _dayTripUndoTimer = setTimeout(function(){ _dismissDayTripToast(false); }, 9000);
 }
 function _dismissDayTripToast(immediate){
   if (_dayTripUndoTimer) { clearTimeout(_dayTripUndoTimer); _dayTripUndoTimer = null; }
@@ -41302,31 +41305,70 @@ function _openTripStopPopover(ctx) {
     }
     return true;
   });
-  // v359.60.23: for a destination source, prepend the NATURAL
-  // wayside route — the prev → next merge that convertDestToWayside
-  // would create by collapsing the source's own neighboring legs.
-  // Selected by default since it's almost always what the user
-  // wants. Other transit routes (cross-trip) follow underneath.
-  var naturalRouteOpt = "";
-  if (ctx.kind === "destination") {
-    var _wIdx = trip.destinations.findIndex(function(d){ return d.id === ctx.destId; });
-    if (_wIdx > 0 && _wIdx < trip.destinations.length - 1) {
-      var _wPrev = trip.destinations[_wIdx - 1];
-      var _wNext = trip.destinations[_wIdx + 1];
-      var _natRouteId = "r-tr-" + _wPrev.id + "-" + _wNext.id;
-      naturalRouteOpt = '<option value="' + _natRouteId + '" selected>'
-        + (_wPrev.place || "?") + " → " + (_wNext.place || "?")
-        + " (natural — between its neighbors)"
-        + '</option>';
-    }
+  // PD.466: CONTEXT-AWARE leg list. The old default was the "natural"
+  // prev→next merge based on the sight's ARRAY POSITION — which for a
+  // mis-ordered highland sight (Sigöldugljúfur, parked at index 8 between
+  // Vík and Skaftafell) pointed at a leg nowhere near it, and the rest of
+  // the list was every consecutive pair in the whole trip, most of them
+  // irrelevant. Instead, rank the legs by how close THIS sight actually is
+  // to each (perpendicular distance to the leg line), default to the
+  // nearest, show the distance, and group "Near this sight" vs "Other
+  // legs" — context-aware, but every leg is still selectable for an
+  // off-the-wall override (Neal's ask).
+  function _legPerpKm(srcC, aC, bC){
+    if (!srcC || !aC || !bC) return Infinity;
+    var kx = 111.32 * Math.cos(aC[0]*Math.PI/180), ky = 111.32;
+    var ax=aC[1]*kx, ay=aC[0]*ky, bx=bC[1]*kx, by=bC[0]*ky, px=srcC[1]*kx, py=srcC[0]*ky;
+    var dx=bx-ax, dy=by-ay, L2=dx*dx+dy*dy;
+    if (L2===0) return Math.sqrt((px-ax)*(px-ax)+(py-ay)*(py-ay));
+    var t=Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/L2));
+    var qx=ax+t*dx, qy=ay+t*dy;
+    return Math.sqrt((px-qx)*(px-qx)+(py-qy)*(py-qy));
   }
-  var routeOptsHtml = naturalRouteOpt + transitRoutes.map(function(r){
+  function _dCoords(d){ return (d && typeof d.lat==="number" && typeof d.lng==="number") ? [d.lat,d.lng] : null; }
+  var _srcDest = (ctx.kind === "destination") ? trip.destinations.find(function(d){ return d.id === ctx.destId; }) : null;
+  var _srcC = _dCoords(_srcDest);
+  var _ranked = transitRoutes.map(function(r){
     var rf = trip.destinations.find(function(d){ return d.id === r.fromDestId; });
     var rt = trip.destinations.find(function(d){ return d.id === r.toDestId; });
-    var lbl = (rf && rf.place ? rf.place : "?") + " → " + (rt && rt.place ? rt.place : "?");
-    var sel = (!naturalRouteOpt && r.id === currentRouteId) ? " selected" : "";
-    return '<option value="' + r.id + '"' + sel + '>' + lbl + '</option>';
-  }).join("");
+    return { r:r, rf:rf, rt:rt, perp: _legPerpKm(_srcC, _dCoords(rf), _dCoords(rt)) };
+  });
+  // PD.466b: also include the source's own NATURAL leg — its array
+  // neighbours merged (prev → next), the leg convertDestToWayside makes by
+  // collapsing the source's two adjoining legs. Essential for demoting a
+  // place that sits between two others (its only leg is that merge), since
+  // routes ending AT the source are excluded above. Value === the
+  // dispatcher's _naturalRouteId so picking it routes through
+  // convertDestToWayside. Deduped against the real routes, ranked with them.
+  if (ctx.kind === "destination" && _srcDest) {
+    var _ni = trip.destinations.findIndex(function(d){ return d.id === ctx.destId; });
+    if (_ni > 0 && _ni < trip.destinations.length - 1) {
+      var _np = trip.destinations[_ni - 1], _nn = trip.destinations[_ni + 1];
+      var _natId = (_np && _nn) ? ("r-tr-" + _np.id + "-" + _nn.id) : null;
+      if (_natId && !_ranked.some(function(x){ return x.r.id === _natId; })) {
+        _ranked.push({ r:{ id:_natId }, rf:_np, rt:_nn, perp: _legPerpKm(_srcC, _dCoords(_np), _dCoords(_nn)) });
+      }
+    }
+  }
+  _ranked.sort(function(a,b){ return a.perp - b.perp; });
+  // Default selection: keep the current leg if this is already a wayside,
+  // else the geographically nearest.
+  var _selId = currentRouteId || (_ranked.length ? _ranked[0].r.id : null);
+  function _legOpt(item){
+    var lbl = ((item.rf&&item.rf.place)||"?") + " → " + ((item.rt&&item.rt.place)||"?");
+    var dist = isFinite(item.perp) ? (" · " + Math.round(item.perp) + " km off") : "";
+    return '<option value="'+item.r.id+'"'+(item.r.id===_selId?" selected":"")+'>'+lbl+dist+'</option>';
+  }
+  var _NEAR_KM = 30;
+  var _near = _ranked.filter(function(x){ return isFinite(x.perp) && x.perp <= _NEAR_KM; });
+  var _far  = _ranked.filter(function(x){ return !(isFinite(x.perp) && x.perp <= _NEAR_KM); });
+  var routeOptsHtml = "";
+  if (_near.length) {
+    routeOptsHtml += '<optgroup label="Near this sight">' + _near.map(_legOpt).join("") + '</optgroup>';
+  }
+  if (_far.length) {
+    routeOptsHtml += '<optgroup label="Other legs">' + _far.map(_legOpt).join("") + '</optgroup>';
+  }
 
   // ── Build the modal ─────────────────────────────────────────────
   var existing = document.getElementById("trip-stop-popover");
@@ -41563,7 +41605,7 @@ function _openTripStopPopover(ctx) {
   }
   var _sightsHere = _sightsCountForPlace(placeName);
   var _waysideGateBlocks = (_sightsHere > 2 && currentRole !== "wayside");
-  var _waysideHasOptions = !!(transitRoutes.length || naturalRouteOpt);
+  var _waysideHasOptions = (_ranked.length > 0); // PD.466b: real legs + the natural-merge leg
   var waysideRow = (_waysideHasOptions && !_waysideGateBlocks)
     ? _row(
         "wayside",

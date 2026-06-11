@@ -1177,11 +1177,21 @@
     if (!Array.isArray(trip.routes)) trip.routes = [];
 
     var dests = trip.destinations;
-    // Compute the expected (fromId, toId) pairs from adjacency.
+    // PD.468 (architectural): transit routes connect the places you SLEEP
+    // — overnight bases (nights >= 1) — spanning the sights between them,
+    // not every consecutive place. A trip is structurally hub-to-hub; a
+    // sight is a wayside / day-trip / see hung off a leg, not a leg of its
+    // own. This is what makes "on the way" mean "between Selfoss and Vík"
+    // instead of between two adjacent sights, and it matches the bases-only
+    // route spine (PD.465). Fallback: a draft with <2 overnight bases (an
+    // all-sights first pass) uses every destination so routes don't vanish.
+    var _baseSeq = dests.filter(function (d) { return d && d.id && typeof d.nights === 'number' && d.nights >= 1; });
+    if (_baseSeq.length < 2) _baseSeq = dests.filter(function (d) { return d && d.id; });
+    // Compute the expected (fromId, toId) pairs from the base sequence.
     var expected = [];
-    for (var i = 0; i < dests.length - 1; i++) {
-      var from = dests[i];
-      var to   = dests[i + 1];
+    for (var i = 0; i < _baseSeq.length - 1; i++) {
+      var from = _baseSeq[i];
+      var to   = _baseSeq[i + 1];
       if (!from || !to || !from.id || !to.id) continue;
       expected.push({ fromId: from.id, toId: to.id, fromDate: from.dateTo, toDate: to.dateFrom });
     }
