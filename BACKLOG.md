@@ -56,15 +56,16 @@ below. Tier 3 — T3.4/3.7 done. Tier 4 — T4.1 done.
 
 ## Open work (prioritized)
 
-### Correctness — worth doing
-- **T2.4 — `_pmCoord` geocodes by raw key** instead of the alias-aware key. Same shape as a
-  real bug already fixed elsewhere (401S); an aliased place can mis-geocode.
-- **T2.8 — `_grpIsStay` override discards the computed role.** A grouping override can win over
-  the single role authority.
-- **T2.10 — `getRejectedSights` reads a different store** than considered/kept — a rejection can
-  read inconsistently.
-- **T2.5 / T2.9 — more alias-blind key reads** (`pinByKey` vs `_pinSeen`; `toggleDestKeep`'s raw
-  `toLowerCase`). Minor; same family as T2.3.
+### Correctness — investigated 2026-06-11 (PD.487)
+- **T2.4 — DONE/deleted.** `_pmCoord` was alias-blind, but it had ZERO call sites — dead code
+  carrying a latent bug. Removed it (the live coord resolution is the main pin loop).
+- **T2.8 — NOT a bug.** `_grpIsStay` routes through the single authority (`_pmIsStayCandidate`
+  → `_pmDeriveRole`); `nights>0` is a documented fallback for un-hydrated saved trips. Correct.
+- **T2.10 — leave (diagnostic-only).** `getRejectedSights` reads per-dest `suggestions[]._rejected`
+  vs considered/kept's collection, but it only feeds a debug stats snapshot — not user-facing.
+  Reconciling means editing reject/curation logic (high-risk) for no user gain.
+- **T2.5 / T2.9 — unverified-minor alias-blind reads** (`pinByKey` vs `_pinSeen`; `toggleDestKeep`'s
+  raw `toLowerCase`). Same family as T2.3; fix only with a reproduction.
 
 ### Structural / perf — maintainability, no trip impact
 - **T3.1 — double-render on every mutation.** Audit flags HIGH-value, cheap.

@@ -22169,12 +22169,13 @@ function _renderPlacePickerMap(targetId){
   // marker pass uses). Returns null when the place hasn't geocoded
   // yet; the spur pass below uses this to defer un-geocoded segments
   // until a re-render.
-  function _pmCoord(placeName){
-    if (!placeName) return null;
-    var k = placeName.toLowerCase();
-    var ll = _coarseGeocode && _coarseGeocode[k];
-    return (ll && isFinite(ll[0]) && isFinite(ll[1])) ? ll : null;
-  }
+  // PD.487 (audit T2.4): removed the dead `_pmCoord(placeName)` helper. It
+  // resolved coords by the RAW lowercase key only — alias-blind, the exact
+  // twin of the PD.401S bug — but its caller was removed (with the ordinal
+  // pass below) and it had ZERO call sites left, so it was a latent bug
+  // nothing could trigger. Deleting it removes the trap rather than fixing
+  // code no one calls. The live coord resolution is the main pin loop below
+  // (canonical key → raw-lowercase fallback → place.lat/lng).
 
   // v357: ordinal computation + Start-from dropdown rebuild removed.
   // The picker map no longer shows a numbered route through stays;
@@ -22204,7 +22205,7 @@ function _renderPlacePickerMap(targetId){
     }
     // PD.401R: if the cache still hasn't got this place but the place
     // itself carries coordinates, pin from those — and seed the cache so
-    // the spur/_pmCoord passes agree. This is what makes the kept sights
+    // the spur passes agree. This is what makes the kept sights
     // (Skógafoss, Fjallsárlón, Lake Mývatn geothermal region, …) appear.
     if ((!ll || !isFinite(ll[0])) && typeof info.lat === "number" && isFinite(info.lat)) {
       ll = [info.lat, info.lng];
