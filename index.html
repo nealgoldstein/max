@@ -16355,9 +16355,40 @@ function sequenceDestinations(destinations, mdcItems, logistics) {
     }
   });
 
-  // Append remaining destinations (discovery places not in chain)
-  // Try to insert them geographically near related chain stops
-  ordered = ordered.concat(remaining);
+  // PD.448: actually insert the non-chain destinations GEOGRAPHICALLY,
+  // as this comment has always promised. Previously it just concat'd them
+  // onto the end — so a highland sight added via Discovery (Ljótipollur,
+  // right next to Sigöldugljúfur at #8) landed at #46 beside the airport
+  // instead of #9 beside its neighbour. Cheapest-insertion heuristic: drop
+  // each stray stop into the ordered chain at the edge where it adds the
+  // least driving detour (dist(prev,new)+dist(new,next)-dist(prev,next)).
+  // Never insert before the first stop (the arrival anchor); the departure
+  // city is re-pinned to the end by Step 4 below. Stops with no usable
+  // coords fall back to append, preserving the old behaviour for them.
+  function _seqKm(a, b){
+    if (!a || !b) return Infinity;
+    if (typeof a.lat !== "number" || typeof a.lng !== "number"
+     || typeof b.lat !== "number" || typeof b.lng !== "number") return Infinity;
+    if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.haversineKm === "function") {
+      return MaxEngineTrip.haversineKm(a.lat, a.lng, b.lat, b.lng);
+    }
+    return Infinity;
+  }
+  remaining.forEach(function(d){
+    if (!ordered.length || typeof d.lat !== "number" || typeof d.lng !== "number") {
+      ordered.push(d); return;
+    }
+    var bestPos = ordered.length, bestCost = Infinity;
+    // Candidate gaps: after the arrival anchor (i=1) through the end.
+    for (var i = 1; i <= ordered.length; i++) {
+      var prev = ordered[i-1];
+      var next = (i < ordered.length) ? ordered[i] : null;
+      var cost = next ? (_seqKm(prev, d) + _seqKm(d, next) - _seqKm(prev, next))
+                      : _seqKm(prev, d);
+      if (cost < bestCost) { bestCost = cost; bestPos = i; }
+    }
+    ordered.splice(bestPos, 0, d);
+  });
 
   // Step 4: if departure city is different from arrival, try to end near it
   if (depCity && depCity !== arrCity && ordered.length > 1) {
@@ -16387,7 +16418,11 @@ function resequenceTrip() {
 
   var cur = new Date(startDate);
   ordered.forEach(function(dest) {
-    var nights = dest.nights || 3;
+    // PD.448: preserve a real 0. `dest.nights || 3` turned every 0-night
+    // SEE/sight into a 3-night stay on re-sequence — catastrophic on a
+    // sight-heavy trip (one resequence and 30 sights each claim 3 nights).
+    // Only default to 3 when nights is genuinely absent.
+    var nights = (typeof dest.nights === "number") ? dest.nights : 3;
     dest.dateFrom = cur.toISOString().slice(0,10);
     cur.setDate(cur.getDate() + nights);
     dest.dateTo = cur.toISOString().slice(0,10);
