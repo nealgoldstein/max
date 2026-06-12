@@ -7779,25 +7779,8 @@
     nameClicker.appendChild(pencil);
     nameRow.appendChild(nameClicker);
 
-    // Trip profile chip — opens editConstraints (intent, prefs,
-    // who's coming, pace, etc.). Right-aligned via margin-left:auto.
-    var profileChip = document.createElement('button');
-    profileChip.type = 'button';
-    profileChip.style.cssText =
-      'background:var(--c-bg);border:1px solid #d8d4c8;color:var(--c-ink-2);font-family:inherit;' +
-      'font-size:11.5px;font-weight:600;padding:4px 11px;border-radius:13px;' +
-      'cursor:pointer;flex-shrink:0;align-self:center;';
-    profileChip.textContent = 'Trip profile';
-    profileChip.title = 'Edit the trip\'s intent, preferences, who\'s coming, pace…';
-    profileChip.onmouseover = function () { profileChip.style.background = '#fafafa'; };
-    profileChip.onmouseout  = function () { profileChip.style.background = '#fff'; };
-    profileChip.onclick = function (e) {
-      e.stopPropagation();
-      if (typeof global.editConstraints === 'function') {
-        global.editConstraints();
-      }
-    };
-    nameRow.appendChild(profileChip);
+    // v362 (HEADER-SPEC): "Trip profile" chip removed — Profile now lives in
+    // ONE place, the top chrome bar (✎ Profile). The name below keeps rename.
 
     nameClicker.onclick = function () {
       // Swap the span for an input matching the same font/weight so

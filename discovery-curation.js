@@ -16,11 +16,15 @@
 // then schedule the server push. Pre-mint (no trip yet) there is
 // nothing to write into; the mint itself captures the arrays.
 var _pdsTimer = null;
-function _persistDiscoveryState(){
-  // PD.354: any curation action marks the picker session dirty — the
-  // CTA flips "Return to my trip" → "Update my trip". Cleared when a
-  // picker session opens (reopenPickerForEdit) and after a rebuild.
-  try { if (typeof _tb !== "undefined" && _tb) _tb._editDirty = true; } catch(_){}
+function _persistDiscoveryState(opts){
+  // PD.354 / v362: only USER curation marks the picker session dirty — the
+  // CTA flips "Back to trip" → "Update my trip". SYSTEM normalizations that
+  // run on OPEN (the PD.299 stay-fold, hydration) pass {system:true} to SAVE
+  // without flipping the CTA — otherwise just opening Discovery to look reads
+  // "Update my trip" when nothing changed. Cleared on reopenPickerForEdit +
+  // after a rebuild.
+  var _system = !!(opts && opts.system);
+  try { if (!_system && typeof _tb !== "undefined" && _tb) _tb._editDirty = true; } catch(_){}
   window._placeSetClean = false; // PD.360: in-place mutation — next render re-reconciles
   if (_pdsTimer) clearTimeout(_pdsTimer);
   _pdsTimer = setTimeout(function(){

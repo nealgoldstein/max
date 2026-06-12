@@ -1006,8 +1006,8 @@ input[type="date"]{width:100%;font-size:var(--fs-cap);padding:5px 7px;border:1px
 .tm-submit{display:block;width:100%;font-size:var(--fs-label);padding:7px;border:1px solid var(--c-border);border-radius:5px;background:var(--c-panel-2);color:var(--c-ink-4);cursor:default;font-family:inherit;margin-top:4px;}
 .tm-submit.on{background:var(--c-primary-top);color:var(--c-on-dark);border-color:var(--c-border-dark);cursor:pointer;}
 /* Destination mode */
-.dm-hdr{padding:12px 14px 0;flex-shrink:0;}
-.dm-hdr-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:10px;}
+.dm-hdr{padding:12px 14px 8px;flex-shrink:0;position:sticky;top:0;z-index:6;background:var(--c-bg);border-bottom:1px solid var(--c-border);}
+.dm-hdr-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:10px;}
 .dm-back{font-size:15px;color:var(--c-primary);background:none;border:none;cursor:pointer;font-family:inherit;padding:6px 10px 6px 0;display:flex;align-items:center;gap:6px;font-weight:700;}
 .dm-back:hover{color:#0e3a6e;text-decoration:underline;}
 .dm-add-dest-btn{font-size:var(--fs-note);font-weight:700;color:var(--c-on-dark);background:var(--c-primary);border:1px solid var(--c-primary);border-radius:7px;cursor:pointer;font-family:inherit;padding:9px 16px;letter-spacing:-.01em;}
@@ -2490,6 +2490,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
     <div id="hs-actions" style="margin-top:20px;padding-top:14px;border-top:1px solid var(--c-border-3);display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
       <button onclick="selectHomeOption('new')" class="btn btn-top">+ Start a new trip</button>
       <button onclick="selectHomeOption('browse')" class="btn btn-soft">Discover where to go →</button>
+      <button onclick="selectHomeOption('import')" class="btn btn-soft" title="Open a saved Max trip (.json) or a text list (.txt / .md).">Load from file</button>
       <span style="margin-left:auto;font-size:10.5px;color:#bbb;">Max gathers; you evaluate, edit, add. <span onclick="showAboutMax()" style="color:var(--c-primary);cursor:pointer;">How it works →</span></span>
     </div>
     <div id="new-trip-form" style="margin-top:12px;display:none;">
@@ -2504,7 +2505,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
     <div id="browse-chat" style="display:none;margin-top:12px;"></div>
     <div id="trip-brief-overlay" style="display:none;"></div>
     <div id="candidate-explorer-overlay" style="display:none;"></div>
-    <input type="file" id="hs-trip-file-input" accept=".json,.txt,.md" style="display:none;" onchange="loadTripFile(this)">
+    <input type="file" id="hs-trip-file-input" accept=".json,application/json" style="display:none;" onchange="loadTripFile(this)">
   </div>
 </div>
 
@@ -2523,9 +2524,12 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
       <!-- v359.49: Scaffold chip removed (Neal call). Trip name gets a
            visible ✎ so editability is obvious; the whole name+pencil
            is one click target. -->
-      <div class="trip-name-block" id="trip-name-wrap" onclick="editTripName(this)" title="Click to rename" style="cursor:pointer;display:flex;align-items:center;gap:6px;">
+      <!-- v362: rename removed here — it was redundant with the main trip-view
+           header + Discovery, and did nothing in the destination view. This is
+           now a plain, non-clickable trip-name label (kept for the "which trip
+           am I in" cue and to preserve the header grid). -->
+      <div id="trip-name-wrap" style="display:flex;align-items:center;gap:6px;">
         <span id="trip-name-display" style="font-size:14px;font-weight:600;color:#222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">Trip</span>
-        <span class="trip-name-edit" style="font-size:11px;color:var(--c-ink-4);flex-shrink:0;">&#9998;</span>
       </div>
       <!-- Mode toggle. v359.1: Picker is a peer of Trip / Destination —
            third pill flips _leftMode to "picker" and opens the picker
@@ -2560,7 +2564,7 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
              frequency as Discovery's chrome, same affordances. The
              ⋯ menu shrinks to genuinely rare actions only. -->
         <button class="mw-menu" data-menu="ask" onclick="showAskMaxModal()" title="Chat with Max about this trip">&#128172; Ask</button>
-        <button class="mw-menu" data-menu="profile" onclick="editConstraints()" title="Trip profile — dates, pace, transport, etc.">&#9998; Profile</button>
+        <button class="mw-menu" data-menu="profile" onclick="editConstraints()" title="Trip setup — where you're going, dates, pace, transport (specific to this trip)">&#9998; Trip setup</button>
         <!-- v360.1 (slice 2d-ii) / PD.273: consolidated ⋯ menu. One
              trigger, one dropdown. With the four frequent moves
              above, this is genuinely rare actions only. -->
@@ -12488,7 +12492,7 @@ function _pd289ConsolidateStaysExtras() {
     // mutations were in place (same array identity), so go through
     // the explicit touch-persist path.
     try {
-      if (typeof _persistDiscoveryState === "function") _persistDiscoveryState();
+      if (typeof _persistDiscoveryState === "function") _persistDiscoveryState({system:true});
       else if (typeof localSave === "function") localSave();
     } catch(e) {
       console.warn("[PD.358] fold persist failed:", e && e.message);
@@ -23669,9 +23673,9 @@ function renderActivityPicker(){
     : (_pickerDirty ? "saveActivityPickerEdits()"
                     : "(function(){try{var _t=(typeof TripStore!=='undefined'&&TripStore.isLoaded&&TripStore.isLoaded()&&TripStore.trip)||((typeof trip!=='undefined')?trip:null);if(typeof MaxRoute!=='undefined'&&_t&&_t.id){MaxRoute.navigate({screen:MaxRoute.SCREENS.TRIP,tripId:_t.id});}}catch(_){}})()");
   var primaryBtnLabel = !isEdit ? "Plan my trip →"
-    : (_pickerDirty ? "Update my trip →" : "Return to my trip →");
+    : (_pickerDirty ? "Update my trip →" : "Back to trip →");
   var backHandler = isEdit ? "cancelPickerEdit()" : "renderTripBrief()";
-  var backLabel = isEdit ? "← Cancel" : "← Profile";
+  var backLabel = isEdit ? "← Cancel" : "← Trip setup";
 
   // v359.2: Unified header is rendered on BOTH fresh-build flow AND
   // re-edit flow (previously only isEdit). Detect whether a built trip
@@ -23697,10 +23701,8 @@ function renderActivityPicker(){
   var _pickerActionBtns = ''
     + '<button class="file-btn" onclick="goHome()" title="All trips">&larr; Home</button>'
     + '<button class="file-btn" onclick="showAskMaxModal()" title="Chat with an AI about this trip / region">&#128172; Ask</button>';
-  if (_hasTrip) {
-    _pickerActionBtns += ''
-      + '<button class="file-btn" onclick="saveTrip()" title="Save">Save</button>';
-  }
+  // v362 (HEADER-SPEC): "Save" removed — autosave covers every change.
+  // The off-device copy is Home → Load from file / ··· → Download backup.
   // v359.39 / PD.268: Profile button — quick access to the brief
   // (place name, dates, pace, transport, etc.) without losing current
   // picks. _tb state is preserved across the round trip;
@@ -23708,12 +23710,12 @@ function renderActivityPicker(){
   // when _mdcItems is already populated. Visible in BOTH fresh-build
   // and edit modes — the old edit-mode hide assumed the now-removed
   // editConstraints button covered it.
-  _pickerActionBtns += '<button class="file-btn" onclick="renderTripBrief()" title="Profile — dates, pace, transport, etc. without losing your picks">&#x270E; Profile</button>';
+  _pickerActionBtns += '<button class="file-btn" onclick="renderTripBrief()" title="Trip setup — dates, pace, transport (specific to this trip), without losing your picks">&#x270E; Trip setup</button>';
   // v359.6: ⚙ Settings gear — opens the user-level "My preferences" panel.
   // Sits before the 🔑 API-key button so it falls inside the main
   // action group rather than getting tucked next to the dim BYOK key.
   _pickerActionBtns += '<button class="file-btn" onclick="showSettingsPanel()" title="Your traveler profile — how you generally like to travel">&#9881;</button>';
-  _pickerActionBtns += '<button class="file-btn" onclick="showApiKeyForm()" title="Set API key" style="opacity:0.6;">&#x1F511;</button>';
+  // v362 (HEADER-SPEC): 🔑 API key removed from Discovery — it lives on Home only.
   // v359.2.3: all mode pills removed from picker chrome too. The
   // "Choreograph my trip →" CTA at the bottom of the picker is the
   // picker → trip exit. The empty .mode-pills div keeps the CSS
@@ -23723,15 +23725,12 @@ function renderActivityPicker(){
   // trip already exists (re-edit flow). On fresh build the "name"
   // comes from _tb.placeName which the brief already controls — no
   // need for a rename affordance.
-  var _hasNamedTrip = !!(trip && trip.id && trip.name);
-  var _pickerNameBlock = _hasNamedTrip
-    ? ('<div class="trip-name-block" onclick="editTripName(this)" title="Click to rename" style="cursor:pointer;display:flex;align-items:center;gap:6px;">'
-      +   '<span style="font-size:14px;font-weight:600;color:#222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">' + _tripLabel + '</span>'
-      +   '<span class="trip-name-edit" style="font-size:11px;color:var(--c-ink-4);flex-shrink:0;">&#9998;</span>'
-      + '</div>')
-    : ('<div class="trip-name-block">'
-      +   '<span style="font-size:14px;font-weight:600;color:#222;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + _tripLabel + '</span>'
-      + '</div>');
+  // v362 (HEADER-SPEC): trip name is a plain, non-clickable label in Discovery
+  // too — trip rename lives only in the trip-view header.
+  var _pickerNameBlock =
+    '<div style="display:flex;align-items:center;gap:6px;">'
+    + '<span style="font-size:14px;font-weight:600;color:#222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">' + _tripLabel + '</span>'
+    + '</div>';
   var _pickerChromeRow = ''
     + '<div class="lp-hdr-unified">'
     +   _pickerNameBlock
