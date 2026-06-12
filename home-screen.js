@@ -756,7 +756,7 @@ function renderHomeScreen(){
       // happens before they click.
       dup.textContent = "Copy";
       dup.title = "Duplicate this trip";
-      dup.style.cssText = "background:var(--c-bg);border:1px solid #cfe1f7;color:var(--c-primary);font-size:11px;font-weight:600;padding:4px 10px;cursor:pointer;font-family:inherit;border-radius:5px;margin-right:6px;";
+      dup.style.cssText = "background:var(--c-bg);border:1px solid var(--c-border-blue);color:var(--c-primary);font-size:11px;font-weight:600;padding:4px 10px;cursor:pointer;font-family:inherit;border-radius:5px;margin-right:6px;";
       (function(id, c){
         dup.onclick = function(e){
           e.stopPropagation();

@@ -853,7 +853,7 @@ function _mountDocumentsSection(mountId){
       var view = document.createElement("a");
       view.href = doc.dataUrl; view.target = "_blank"; view.rel = "noopener noreferrer"; view.download = doc.name;
       view.textContent = "View";
-      view.style.cssText = "font-size:11px;font-weight:600;color:var(--c-primary);text-decoration:none;padding:3px 8px;border:1px solid #cfe1f7;border-radius:5px;flex-shrink:0;";
+      view.style.cssText = "font-size:11px;font-weight:600;color:var(--c-primary);text-decoration:none;padding:3px 8px;border:1px solid var(--c-border-blue);border-radius:5px;flex-shrink:0;";
       var del = document.createElement("button");
       del.type = "button"; del.textContent = "\u00d7";
       del.title = "Remove";

@@ -636,7 +636,7 @@
       // generic title rather than looking up the hub name (would
       // require getDest + null guard for a tooltip not worth it).
       cancelBtn.title = "Convert this day trip into its own destination (a stay) inserted after the hub";
-      cancelBtn.style.cssText = "font-size:11px;font-weight:600;color:var(--c-primary);background:var(--c-tint-blue);border:1px solid #cfe1f7;border-radius:11px;padding:3px 10px;cursor:pointer;font-family:inherit;";
+      cancelBtn.style.cssText = "font-size:11px;font-weight:600;color:var(--c-primary);background:var(--c-tint-blue);border:1px solid var(--c-border-blue);border-radius:11px;padding:3px 10px;cursor:pointer;font-family:inherit;";
       cancelBtn.onmouseover = function(){ cancelBtn.style.background = "#dceaf8"; };
       cancelBtn.onmouseout = function(){ cancelBtn.style.background = "#eef5ff"; };
       (function(did, dtPlace, isPeer){
@@ -1059,7 +1059,7 @@
     if (!status || status.phase !== "during") return;
     var wrap = document.createElement("div");
     wrap.id = "today-banner";
-    wrap.style.cssText = "margin:0 2px 12px;padding:11px 14px;border:1px solid #c8dff8;background:linear-gradient(135deg,#eaf3fb 0%,#dcecf8 100%);border-radius:8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;";
+    wrap.style.cssText = "margin:0 2px 12px;padding:11px 14px;border:1px solid var(--c-border-blue);background:linear-gradient(135deg,#eaf3fb 0%,#dcecf8 100%);border-radius:8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;";
     var leftCol = document.createElement("div");
     leftCol.style.cssText = "flex:1;min-width:0;line-height:1.4;";
     var topLine = document.createElement("div");
@@ -1900,7 +1900,7 @@
     if (trip.geoAffordanceNotice && trip.geoAffordanceNotice.dismissed) return;
     var nb = document.createElement("div");
     nb.id = "fq-trip-banner";
-    nb.style.cssText = "margin:6px 2px 10px;padding:10px 12px;background:#eaf3fb;border:1px solid #c8dff8;border-radius:7px;font-size:11px;line-height:1.55;color:#1a3f6f;";
+    nb.style.cssText = "margin:6px 2px 10px;padding:10px 12px;background:var(--c-tint-blue);border:1px solid var(--c-border-blue);border-radius:7px;font-size:11px;line-height:1.55;color:#1a3f6f;";
     nb.innerHTML = (typeof global._fqBannerInnerHtml === "function") ? global._fqBannerInnerHtml() : "";
     var dismissRow = document.createElement("div");
     dismissRow.style.cssText = "margin-top:8px;display:flex;justify-content:flex-end;";
@@ -2754,7 +2754,7 @@
     var _gwCardHtml = "";
     if (_gwEntryCardHtml || _gwExitCardHtml) {
       _gwCardHtml = ''
-        + '<div id="tm-max-suggests" style="margin-top:12px;padding:12px 14px;background:#f0f4fa;border:1px solid var(--c-border-blue);border-radius:7px;">'
+        + '<div id="tm-max-suggests" style="margin-top:12px;padding:12px 14px;background:var(--c-tint-blue);border:1px solid var(--c-border-blue);border-radius:7px;">'
         +   '<div style="font-size:11px;font-weight:700;color:var(--c-primary);letter-spacing:0.05em;text-transform:uppercase;margin-bottom:8px;">✦ Max suggests</div>'
         +   _gwEntryCardHtml
         +   _gwExitCardHtml
@@ -4314,7 +4314,7 @@
       // Routing → button. v360.0.6: bumped from 10px/1×5 to 12px/7×11
       // for mobile tap target.
       var rtBtn=document.createElement("span");
-      rtBtn.style.cssText="font-size:12px;color:var(--c-primary);font-weight:600;margin-left:auto;white-space:nowrap;cursor:pointer;padding:7px 11px;border:1px solid #cce;border-radius:4px;background:#f0f5ff;flex-shrink:0;min-height:32px;display:inline-flex;align-items:center;";
+      rtBtn.style.cssText="font-size:12px;color:var(--c-primary);font-weight:600;margin-left:auto;white-space:nowrap;cursor:pointer;padding:7px 11px;border:1px solid #cce;border-radius:4px;background:var(--c-tint-blue);flex-shrink:0;min-height:32px;display:inline-flex;align-items:center;";
       rtBtn.textContent="Routing →";
       row.appendChild(rtBtn);
 
@@ -5063,7 +5063,7 @@
     if (!hubRoutes.length) return;
 
     var dtBox = document.createElement("div");
-    dtBox.style.cssText = "margin:0 0 10px;padding:9px 12px;background:#f4eef9;border:1px solid #d8c4e8;border-radius:7px;";
+    dtBox.style.cssText = "margin:0 0 10px;padding:9px 12px;background:var(--c-tint-purple);border:1px solid #d8c4e8;border-radius:7px;";
     var dtHdr = document.createElement("div");
     dtHdr.style.cssText = "font-size:12px;font-weight:700;color:var(--c-accent);margin-bottom:5px;";
     dtHdr.textContent = "Day trips from " + dest.place;
@@ -5347,7 +5347,7 @@
           var arrML = _modeLabels(arrMode, "arrival");
           var arrivalWrap=document.createElement("div");
           arrivalWrap.className="itin-transport";
-          arrivalWrap.style.cssText="background:var(--c-tint-blue);border:1px solid #cfe1f7;";
+          arrivalWrap.style.cssText="background:var(--c-tint-blue);border:1px solid var(--c-border-blue);";
           var arrDir=document.createElement("span");
           arrDir.style.cssText="font-size:10px;font-weight:700;color:var(--c-primary);margin-right:8px;text-transform:uppercase;letter-spacing:0.04em;";
           arrDir.textContent="Arrival";
@@ -5466,7 +5466,7 @@
     var dayStr=dayDate.toISOString().slice(0,10);
     (dest.generalBookings||[]).filter(function(b){return b.status==='booked'&&b.date===dayStr;}).forEach(function(b){
       var chip=document.createElement('div'); chip.className='itin-hotel-item';
-      chip.style.cssText='background:#f0f4ff;border-color:#c0ccf0;cursor:pointer;';
+      chip.style.cssText='background:var(--c-tint-blue);border-color:#c0ccf0;cursor:pointer;';
       var icon=document.createElement('span'); icon.className='itin-hotel-icon';
       var iconMap={tour:'🎟',ticket:'🎟',restaurant:'🍽',other:'📌'};
       icon.textContent=iconMap[b.type]||'📌';
@@ -5602,7 +5602,7 @@
   var totalItems=dest.days.reduce(function(acc,d){return acc+(d.items?d.items.length:0);},0);
   if(totalItems===0){
     var hint=document.createElement("div");
-    hint.style.cssText="margin:12px 14px 4px;padding:10px 12px;background:#f0f5ff;border:1px solid #c8d8f8;border-radius:7px;font-size:11px;color:#2056b0;line-height:1.5;";
+    hint.style.cssText="margin:12px 14px 4px;padding:10px 12px;background:var(--c-tint-blue);border:1px solid var(--c-border-blue);border-radius:7px;font-size:11px;color:#2056b0;line-height:1.5;";
     var isGenerating=_generatedCityData[dest.place.toLowerCase()]&&_generatedCityData[dest.place.toLowerCase()].loading;
     hint.innerHTML=isGenerating
       ?"⌛ Max is generating suggestions for "+String(dest.place||"").replace(/&/g,"&amp;").replace(/</g,"&lt;")+" — sights show up under See and Do, places to stay and restaurants under Stay and Eat once ready."
@@ -6400,7 +6400,7 @@
     // banner alongside the button; it duplicated the button's
     // signal and didn't carry information, so it's gone.
     var banner = document.createElement("div");
-    banner.style.cssText = "margin:14px 2px 10px;padding:12px 14px;background:#eaf3fb;border:1px solid #c8dff8;border-radius:8px;display:flex;gap:12px;align-items:center;";
+    banner.style.cssText = "margin:14px 2px 10px;padding:12px 14px;background:var(--c-tint-blue);border:1px solid var(--c-border-blue);border-radius:8px;display:flex;gap:12px;align-items:center;";
     var body = document.createElement("div");
     body.style.cssText = "flex:1;font-size:12px;color:#1a3f6f;line-height:1.5;";
     body.innerHTML =
@@ -6525,7 +6525,7 @@
     if (dismissed) return;
 
     var banner = document.createElement("div");
-    banner.style.cssText = "margin:14px 2px 10px;padding:12px 14px;background:#eaf3fb;border:1px solid #c8dff8;border-radius:8px;display:flex;gap:12px;align-items:center;";
+    banner.style.cssText = "margin:14px 2px 10px;padding:12px 14px;background:var(--c-tint-blue);border:1px solid var(--c-border-blue);border-radius:8px;display:flex;gap:12px;align-items:center;";
     var body = document.createElement("div");
     body.style.cssText = "flex:1;font-size:12px;color:#1a3f6f;line-height:1.5;";
     body.innerHTML =

@@ -85,7 +85,7 @@ function renderPickerSidebar(cands){
     if (keptCount < 2) return;
     var banner = document.createElement("div");
     banner.id = "fq-picker-banner";
-    banner.style.cssText = "margin:0 0 10px;padding:10px 12px;background:#eaf3fb;border:1px solid #c8dff8;border-radius:7px;font-size:11px;line-height:1.55;color:#1a3f6f;";
+    banner.style.cssText = "margin:0 0 10px;padding:10px 12px;background:var(--c-tint-blue);border:1px solid var(--c-border-blue);border-radius:7px;font-size:11px;line-height:1.55;color:#1a3f6f;";
     banner.innerHTML = _fqBannerInnerHtml();
     el.appendChild(banner);
   })();
@@ -379,7 +379,7 @@ function renderCandidateCards(cands){
     if (keptCount < 2) return;
     var banner = document.createElement("div");
     banner.id = "fq-picker-banner";
-    banner.style.cssText = "margin:6px 4px 12px;padding:10px 12px;background:#eaf3fb;border:1px solid #c8dff8;border-radius:7px;font-size:11px;line-height:1.55;color:#1a3f6f;";
+    banner.style.cssText = "margin:6px 4px 12px;padding:10px 12px;background:var(--c-tint-blue);border:1px solid var(--c-border-blue);border-radius:7px;font-size:11px;line-height:1.55;color:#1a3f6f;";
     banner.innerHTML = _fqBannerInnerHtml();
     el.appendChild(banner);
   })();

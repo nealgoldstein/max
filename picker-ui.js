@@ -1076,10 +1076,10 @@
     if (_hxBadge.kind === 'manual') {
       reqBadge = '<div style="font-size:9px;font-weight:700;color:var(--c-see);background:#e8f5ee;padding:2px 7px;border-radius:10px;margin:2px 0 4px;display:inline-block;">📌 A must-see for you</div>';
     } else if (_hxBadge.kind === 'also') {
-      reqBadge = '<div style="font-size:9px;font-weight:700;color:var(--c-primary);background:#e8f0fc;padding:2px 7px;border-radius:10px;margin:2px 0 4px;display:inline-block;">You will also find:' + _hxBadge.refs.join(", ") + '</div>';
+      reqBadge = '<div style="font-size:9px;font-weight:700;color:var(--c-primary);background:var(--c-tint-blue);padding:2px 7px;border-radius:10px;margin:2px 0 4px;display:inline-block;">You will also find:' + _hxBadge.refs.join(", ") + '</div>';
     } else if (_hxBadge.kind === 'required') {
       var label = _hxBadge.isRoute ? "Stop on" : "Required for";
-      reqBadge = '<div style="font-size:9px;font-weight:700;color:var(--c-primary);background:#e8f0fc;padding:2px 7px;border-radius:10px;margin:2px 0 4px;display:inline-block;">🚂 ' + label + ': ' + _hxBadge.refs.join(", ") + '</div>';
+      reqBadge = '<div style="font-size:9px;font-weight:700;color:var(--c-primary);background:var(--c-tint-blue);padding:2px 7px;border-radius:10px;margin:2px 0 4px;display:inline-block;">🚂 ' + label + ': ' + _hxBadge.refs.join(", ") + '</div>';
     }
 
     var alsoHere = ME ? ME.alsoHereText(c, primary, mdcItems) : '';

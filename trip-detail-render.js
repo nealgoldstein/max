@@ -202,7 +202,7 @@ function buildExplorePane(dest){
     var dtSec = document.createElement("div");
     dtSec.style.cssText = "margin-top:18px;";
     var dtHdr = document.createElement("div");
-    dtHdr.style.cssText = "padding:6px 10px;background:#f4eef9;border:1px solid #d8c4e8;border-radius:6px;font-size:13px;font-weight:700;color:var(--c-accent);";
+    dtHdr.style.cssText = "padding:6px 10px;background:var(--c-tint-purple);border:1px solid #d8c4e8;border-radius:6px;font-size:13px;font-weight:700;color:var(--c-accent);";
     dtHdr.textContent = "Day trips";
     dtSec.appendChild(dtHdr);
 
@@ -214,7 +214,7 @@ function buildExplorePane(dest){
         return (p && p.name) || s.placeId || "?";
       });
       var rowSec = document.createElement("div");
-      rowSec.style.cssText = "margin:8px 4px;padding:10px 12px;background:#faf6ff;border:1px solid #e5d8f0;border-radius:7px;";
+      rowSec.style.cssText = "margin:8px 4px;padding:10px 12px;background:var(--c-tint-purple);border:1px solid #e5d8f0;border-radius:7px;";
 
       var titleLine = document.createElement("div");
       titleLine.style.cssText = "font-size:13px;font-weight:700;color:#222;";
@@ -301,7 +301,7 @@ function buildExplorePane(dest){
     // Round FN.8.19: sentence case "Day trips" to match other Explore
     // section headers ("Sights", "Restaurants"). Was all-caps which
     // read as a louder banner than the surrounding sections.
-    dtCatHdr.style.cssText = "margin:18px 0 4px;padding:6px 10px;background:#f4eef9;border:1px solid #d8c4e8;border-radius:6px;font-size:13px;font-weight:700;color:var(--c-accent);";
+    dtCatHdr.style.cssText = "margin:18px 0 4px;padding:6px 10px;background:var(--c-tint-purple);border:1px solid #d8c4e8;border-radius:6px;font-size:13px;font-weight:700;color:var(--c-accent);";
     dtCatHdr.textContent = "Day trips";
     wrap.appendChild(dtCatHdr);
     dest.dayTrips.forEach(function(dt, dtIdx){
@@ -373,7 +373,7 @@ function buildExplorePane(dest){
       convertBtn.type = "button";
       convertBtn.textContent = "🛏 Stay overnight here";
       convertBtn.title = "Convert this day trip into its own destination (a stay) inserted after " + (dest.place || "the hub");
-      convertBtn.style.cssText = "font-size:11px;font-weight:600;color:var(--c-primary);background:var(--c-tint-blue);border:1px solid #cfe1f7;border-radius:11px;padding:3px 10px;cursor:pointer;font-family:inherit;";
+      convertBtn.style.cssText = "font-size:11px;font-weight:600;color:var(--c-primary);background:var(--c-tint-blue);border:1px solid var(--c-border-blue);border-radius:11px;padding:3px 10px;cursor:pointer;font-family:inherit;";
       convertBtn.onmouseover = function(){ convertBtn.style.background = "#dceaf8"; };
       convertBtn.onmouseout = function(){ convertBtn.style.background = "#eef5ff"; };
       (function(hubDest, dayTripIdx, dtName){
@@ -2139,7 +2139,7 @@ function _buildNowNextWidgetHtml(split) {
     + '<span style="font-weight:700;text-transform:uppercase;letter-spacing:0.05em;font-size:9.5px;color:var(--c-primary);">Today</span>'
     + '<span class="now-next-wx-slot"></span>'
     + '</div>';
-  return '<div class="now-next-widget" style="margin:6px 0 8px;padding:8px 11px;background:linear-gradient(135deg,#eaf3fb 0%,#dcecf8 100%);border:1px solid #c8dff8;border-radius:6px;">'
+  return '<div class="now-next-widget" style="margin:6px 0 8px;padding:8px 11px;background:linear-gradient(135deg,#eaf3fb 0%,#dcecf8 100%);border:1px solid var(--c-border-blue);border-radius:6px;">'
     + wxRow
     + lines.join("")
     + '</div>';

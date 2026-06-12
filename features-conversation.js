@@ -847,7 +847,7 @@ function showAskMaxKeyModal(opts) {
     ? '<div style="font-size:13px;color:#444;line-height:1.6;margin-bottom:16px;">' +
         '<p style="margin:0 0 10px;"><strong>Max\'s chat needs your own Anthropic API key.</strong></p>' +
         '<p style="margin:0 0 10px;">Everything else in Max — picker suggestions, candidate cities, calendar export — runs on a shared budget. Chat is open-ended, so we ask you to bring your own key for that one feature. Your key stays in your browser only and is never sent to Max\'s servers.</p>' +
-        '<div style="background:#eef5fb;border:1px solid #c8dff8;border-radius:6px;padding:12px 14px;margin:12px 0;">' +
+        '<div style="background:#eef5fb;border:1px solid var(--c-border-blue);border-radius:6px;padding:12px 14px;margin:12px 0;">' +
           '<div style="font-size:11px;font-weight:700;color:var(--c-primary);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">Why use Claude inside Max instead of in a separate tab?</div>' +
           '<div style="font-size:12.5px;color:#333;line-height:1.6;">' +
             'You can absolutely keep using <a href="https://claude.ai" target="_blank" rel="noopener noreferrer" style="color:var(--c-primary);">claude.ai</a> (or ChatGPT, or any other AI) on its own. Using it <em>inside Max</em> just adds three things:' +
