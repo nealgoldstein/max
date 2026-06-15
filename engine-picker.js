@@ -2169,29 +2169,27 @@
     // After PD.14, most fresh-trip flows won't bridge anything
     // because MaxRoleWriter already syncs c.role at toggle-time;
     // this survives for legacy data only.
+    // slice 3 (dedup): the DECISION of which overrides to bridge is the tested,
+    // read-only MaxPublish.deriveStayOverrideBridges (was inlined here). The
+    // APPLICATION (atomic MaxRoleWriter.set, or a direct fallback in engine-only
+    // contexts where the writer is absent) stays in publishTrip — the helper is
+    // deliberately side-effect-free so the actions can be inspected/logged.
     try {
-      var _placeMeta = (_tb && _tb.placeMeta) || {};
-      var _normFn = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase(); };
-      var _writer = (typeof global !== "undefined" && global.MaxRoleWriter) ? global.MaxRoleWriter : null;
-      var _bridged = 0;
-      kept.forEach(function(c){
-        if (!c || !c.place) return;
-        var k = _normFn(c.place);
-        var meta = _placeMeta[k];
-        if (!meta) return;
-        var nextRole = (meta.stayOverride === true) ? "stay"
-                     : (meta.stayOverride === false) ? "see"
-                     : null;
-        if (!nextRole || c.role === nextRole) return;
-        if (_writer && typeof _writer.set === "function") {
-          _writer.set(c.place, nextRole, { persist: false });
-        } else {
-          c.role = nextRole;
-          c._roleTouched = true;
-        }
-        _bridged++;
-      });
-      if (_bridged) console.log("[Max publishTrip] bridged " + _bridged + " Discovery role overrides into c.role");
+      var _bridges = MaxPublish.deriveStayOverrideBridges(kept, (_tb && _tb.placeMeta) || {});
+      if (_bridges.length) {
+        var _writer = (typeof global !== "undefined" && global.MaxRoleWriter) ? global.MaxRoleWriter : null;
+        var _keptByPlace = {};
+        kept.forEach(function(c){ if (c && c.place) _keptByPlace[c.place] = c; });
+        _bridges.forEach(function(a){
+          if (_writer && typeof _writer.set === "function") {
+            _writer.set(a.place, a.toRole, { persist: false });
+          } else {
+            var c = _keptByPlace[a.place];
+            if (c) { c.role = a.toRole; c._roleTouched = true; }
+          }
+        });
+        console.log("[Max publishTrip] bridged " + _bridges.length + " Discovery role overrides into c.role");
+      }
     } catch(e) {
       console.warn("[Max publishTrip] placeMeta→c.role bridge failed (non-fatal):", e && e.message);
     }
@@ -2256,7 +2254,7 @@
     // the trip-edit Apply path, and ends the bug class where a new
     // dest.* field would silently get dropped on rebuild because nobody
     // remembered to add it to the snapshot list.
-    var isRebuild = !!(_tb && _tb._isRebuild) || !!(trip && Array.isArray(trip.destinations) && trip.destinations.length > 0);
+    var isRebuild = MaxPublish.detectRebuild(_tb, trip); // slice 2 (dedup): was an inline copy of this exact Round DW check
     var oldDestinations = isRebuild ? (trip.destinations||[]).slice() : [];
 
     // Round HL: brief + mdcItems construction now lives in
