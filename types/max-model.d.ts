@@ -17,6 +17,30 @@
 declare var module: any;
 declare var window: any;
 
+// ── Cross-module global surface ──────────────────────────────────────────────
+// Max is (still) a classic-script app: ~56 modules share state through globals on
+// window (extensibility lever #2 is migrating this to ES modules). Declared here
+// as `any` so a `// @ts-check` module can reference a sibling's global without a
+// TS2304 — faithful to the current architecture. Tightening these (real types) or
+// removing them (as #2 lands) is future work; today they unblock typing.
+declare var _tb: any;
+declare var trip: any;
+declare var _currentTripId: any;
+declare var _pmPlaceMeta: any;
+declare var TripStore: any;
+declare var MaxDB: any;
+declare var MaxDecisions: any;
+declare var MaxDiscovery: any;
+declare var MaxEnginePicker: any;
+declare var MaxEngineTrip: any;
+declare var MaxMigration: any;
+declare var MaxData: any;
+declare var MaxRoute: any;
+declare var MaxSync: any;
+declare function _normPlaceName(s: any): string;
+declare function autoSave(): void;
+declare function _upsertTripIndexEntry(entry: any): any;
+
 /** A wayside's transit-leg placement (decision-model). */
 interface MaxLeg { fromPlace: string; toPlace: string; }
 

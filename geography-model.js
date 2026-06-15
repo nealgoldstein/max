@@ -1,3 +1,4 @@
+// @ts-check
 // geography-model.js — geography model + MaxRoleWriter (Round NC.X). Extracted from
 // index.html (PD.458). Self-contained window.MaxRoleWriter exposure travels with its def.
 
