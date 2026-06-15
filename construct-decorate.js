@@ -931,6 +931,10 @@ async function evaluateWispsForDiscovery() {
   }
   // Mark in-progress + re-render so the panel shows an "Evaluating…" state.
   window._wispEvalInProgress = true;
+  // R2: wrap everything below in try/finally. The flag gates re-entry (line
+  // ~918) and drives the "Evaluating…" spinner; a throw anywhere in the merge/
+  // persist path used to leave it stuck true → permanent lockout until reload.
+  try {
   if (typeof drawTripMode === "function") {
     try { drawTripMode(); } catch (_) {}
   }
@@ -1112,6 +1116,12 @@ async function evaluateWispsForDiscovery() {
   // schedule. The in-picker banner still fires when they do open it.
   if (typeof drawTripMode === "function") {
     try { drawTripMode(); } catch (_) {}
+  }
+  } finally {
+    // R2: never leave the eval flag stuck. The explicit clears on the early
+    // return paths above are now redundant but harmless; this guarantees the
+    // flag is cleared on EVERY exit, including an unexpected throw.
+    window._wispEvalInProgress = false;
   }
 }
 if (typeof globalThis !== "undefined") globalThis.evaluateWispsForDiscovery = evaluateWispsForDiscovery;

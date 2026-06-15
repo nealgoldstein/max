@@ -6375,7 +6375,7 @@
       }
     }
     var transits = (trip.routes || []).filter(function (r) {
-      var sub = r && (r.subKind || r.kind);
+      var sub = MaxMigration.routeSubKind(r);
       if (sub !== 'transit') return false;
       // Only count routes that map onto a current adjacent pair.
       return !!adjPairs[(r.fromDestId || '') + '→' + (r.toDestId || '')];
@@ -6740,7 +6740,7 @@
       otherDest = trip.destinations[idx - 1];
       if (!otherDest) return;
       route = trip.routes.find(function (r) {
-        var sub = r && (r.subKind || r.kind);
+        var sub = MaxMigration.routeSubKind(r);
         return sub === 'transit' && r.fromDestId === otherDest.id && r.toDestId === dest.id;
       });
       hdrLabel = "✨ On the way from " + (otherDest.place || otherDest.label || "the previous stop");
@@ -6751,7 +6751,7 @@
       otherDest = trip.destinations[idx + 1];
       if (!otherDest) return;
       route = trip.routes.find(function (r) {
-        var sub = r && (r.subKind || r.kind);
+        var sub = MaxMigration.routeSubKind(r);
         return sub === 'transit' && r.fromDestId === dest.id && r.toDestId === otherDest.id;
       });
       hdrLabel = "✨ On the way to " + (otherDest.place || otherDest.label || "the next stop");
@@ -6820,7 +6820,7 @@
     var nextDest = trip.destinations[idx + 1];
     if (!nextDest) return;
     var route = (trip.routes || []).find(function (r) {
-      var sub = r && (r.subKind || r.kind);
+      var sub = MaxMigration.routeSubKind(r);
       return sub === 'transit' && r.fromDestId === dest.id && r.toDestId === nextDest.id;
     });
     if (!route || !Array.isArray(route.planItems) || !route.planItems.length) return;

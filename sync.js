@@ -709,7 +709,12 @@
       var m = _readRevs();
       m[tripId] = rev;
       localStorage.setItem(REVS_KEY, JSON.stringify(m));
-    } catch (_) {}
+    } catch (e) {
+      // R7: a dropped rev write makes the local baseRev diverge from the
+      // server's, so the next save can spuriously CONFLICT (then force-
+      // overwrite). Surface it instead of masking it silently.
+      try { console.warn('[Max sync] failed to persist rev for', tripId, (e && e.message) || e); } catch (_) {}
+    }
   }
 
   function _setStatus(text, color) {

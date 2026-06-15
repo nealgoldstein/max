@@ -427,15 +427,18 @@
     MobileDragDrop.polyfill({ holdToDrag: 300 });
   }
 </script>
-<!-- v359.45 / T3.3: schema migrations module. CORRECTION: migrateTripShape
-     (v0→v4) is NOT wired into db.js — tripRead/tripReadRaw just JSON-parse.
-     The LIVE migrator is tripstore.js `_migrate` (v0→v1, SCHEMA_VERSION = 1).
-     ⚠ The two stamp the SAME `trip._schemaVersion` with INCOMPATIBLE numbering
-     (tripstore caps at 1, this module at 4). Do NOT wire migrateTripShape into
-     the load path without first reconciling the version scheme — otherwise a
-     tripstore-stamped v1 trip gets re-migrated v1→v4, or its version stamp
-     downgraded. migration.js is currently a reference/Node-tested implementation
-     only (used by tests/migration-tests.js), plus its v3 segment read helpers. -->
+<!-- v359.45 / T3.3 (Option A — SHIPPED): schema migrations module. The LIVE
+     load path is tripstore.js `_migrate`: it does its own structural backfill
+     (id-from-key, default fields, drop mdcItems) and DELEGATES the shape
+     migration (v0→v4) to MaxMigration.migrateTripShape (below). tripstore's
+     SCHEMA_VERSION is aligned to 4, so the two no longer stamp
+     `trip._schemaVersion` with incompatible numbers — the v0→v1 structural and
+     v0→v4 shape passes are complementary and idempotent. migration.js is also
+     Node-tested (tests/migration-tests.js) and supplies the v3 segment read
+     helpers. ⚠ If you add a NEW ingestion path (file import, sync pull, paste),
+     route it through the same _migrate so every trip reaches the v4 subKind
+     shape on load — that is the precondition for removing the remaining
+     dual-shape `subKind || kind` route readers (BACKLOG task #28). -->
 <script src="util-esc.js?v=DEV"></script>
 <script src="migration.js?v=DEV"></script>
 <!-- Round HA: Phase 0 of the engine/UI split. db.js exposes window.MaxDB
@@ -26723,7 +26726,7 @@ function _scheduleMainMapUpdate() {
   _mainMapRepaintScheduled = true;
   Promise.resolve().then(function () {
     _mainMapRepaintScheduled = false;
-    if (typeof updateMainMap === "function") { try { updateMainMap(); } catch (_) {} }
+    if (typeof updateMainMap === "function") { try { updateMainMap(); } catch (e) { console.warn("[Max PD.433] coalesced updateMainMap threw:", (e && e.message) || e); } }
   });
 }
 if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.on === "function") {
