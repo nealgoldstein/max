@@ -60,4 +60,46 @@ test.describe('structural guards', () => {
     }));
     expect(mdc.onTrip, 'trip.mdcItems must not be emitted by publish (retired field)').toBe(false);
   });
+
+  // T3.6 slice 1 — _rankPopoverTransitLegs extracted (pure) from the
+  // ~850-line _openTripStopPopover. Pin its behaviour so the extraction
+  // (and any future refactor of the popover) can't silently change the
+  // Wayside dropdown's leg list.
+  test('T3.6: _rankPopoverTransitLegs ranks legs purely from trip + ctx', async ({ page }) => {
+    await bootClean(page);
+    const r = await page.evaluate(() => {
+      const trip = {
+        destinations: [
+          { id: 'A', place: 'Aville', lat: 64.0, lng: -22.0 },
+          { id: 'B', place: 'Btown',  lat: 63.5, lng: -20.0 },
+          { id: 'C', place: 'Cby',    lat: 64.2, lng: -15.0 },
+        ],
+        routes: [
+          { id: 'r-tr-A-B', subKind: 'transit', fromDestId: 'A', toDestId: 'B' },
+          { id: 'r-tr-B-C', subKind: 'transit', fromDestId: 'B', toDestId: 'C' },
+        ],
+      };
+      const fn = window._rankPopoverTransitLegs;
+      // destination kind on the MIDDLE stop: both real legs touch B and are
+      // excluded; the natural-merge leg A→C is synthesised in their place.
+      const dest = fn(trip, { kind: 'destination', destId: 'B' }, null);
+      // wayside kind: no self-exclusion, so both transit legs are offered and
+      // the currentRouteId stays selected.
+      const way = fn(trip, { kind: 'wayside' }, 'r-tr-A-B');
+      return {
+        destCount: dest.count,
+        destHasNatural: dest.html.includes('r-tr-A-C') && dest.html.includes('Aville → Cby'),
+        wayCount: way.count,
+        waySelectsCurrent: way.html.includes('value="r-tr-A-B" selected'),
+        emptyGuard: fn(null, null, null),
+        typeofFn: typeof fn,
+      };
+    });
+    expect(r.typeofFn, 'helper exposed on window').toBe('function');
+    expect(r.destCount, 'middle-stop destination ⇒ one synthesised natural leg').toBe(1);
+    expect(r.destHasNatural, 'natural-merge leg A→C present').toBe(true);
+    expect(r.wayCount, 'wayside ⇒ both real transit legs offered').toBe(2);
+    expect(r.waySelectsCurrent, 'currentRouteId stays selected').toBe(true);
+    expect(r.emptyGuard, 'null args ⇒ safe empty result').toEqual({ html: '', count: 0 });
+  });
 });

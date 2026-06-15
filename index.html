@@ -32946,6 +32946,85 @@ function _destStayOrSee(dest){
   return (r && r.role === "stay") ? "overnight" : "see";
 }
 
+// T3.6 (extracted from _openTripStopPopover): PURE transit-leg ranking for
+// the stop popover's Wayside dropdown. Given the trip, the popover ctx, and
+// the current route id, returns { html, count } — the <optgroup> option
+// markup and the count of ranked legs (count>0 ⇒ the wayside row has real
+// options). No DOM and no side effects, so it can be unit-tested in isolation.
+function _rankPopoverTransitLegs(trip, ctx, currentRouteId) {
+  if (!trip || !ctx) return { html: "", count: 0 };
+  var dests = trip.destinations || [];
+  // Exclude routes where the source destination is itself the from
+  // or to endpoint (you can't be "along the way" to yourself).
+  var transitRoutes = (trip.routes || []).filter(function(r){
+    var sub = (typeof MaxMigration !== "undefined" && MaxMigration.routeSubKind)
+      ? MaxMigration.routeSubKind(r)
+      : (r && (r.subKind || (r.kind && r.kind !== "route" ? r.kind : null)));
+    if (sub !== "transit") return false;
+    if (ctx.kind === "destination") {
+      if (r.fromDestId === ctx.destId || r.toDestId === ctx.destId) return false;
+    }
+    return true;
+  });
+  // PD.466: CONTEXT-AWARE leg list. Rank the legs by how close THIS sight
+  // actually is to each (perpendicular distance to the leg line), default to
+  // the nearest, show the distance, and group "Near this sight" vs "Other
+  // legs" — but every leg is still selectable for an off-the-wall override.
+  function _legPerpKm(srcC, aC, bC){
+    if (!srcC || !aC || !bC) return Infinity;
+    var kx = 111.32 * Math.cos(aC[0]*Math.PI/180), ky = 111.32;
+    var ax=aC[1]*kx, ay=aC[0]*ky, bx=bC[1]*kx, by=bC[0]*ky, px=srcC[1]*kx, py=srcC[0]*ky;
+    var dx=bx-ax, dy=by-ay, L2=dx*dx+dy*dy;
+    if (L2===0) return Math.sqrt((px-ax)*(px-ax)+(py-ay)*(py-ay));
+    var t=Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/L2));
+    var qx=ax+t*dx, qy=ay+t*dy;
+    return Math.sqrt((px-qx)*(px-qx)+(py-qy)*(py-qy));
+  }
+  function _dCoords(d){ return (d && typeof d.lat==="number" && typeof d.lng==="number") ? [d.lat,d.lng] : null; }
+  var _srcDest = (ctx.kind === "destination") ? dests.find(function(d){ return d.id === ctx.destId; }) : null;
+  var _srcC = _dCoords(_srcDest);
+  var _ranked = transitRoutes.map(function(r){
+    var rf = dests.find(function(d){ return d.id === r.fromDestId; });
+    var rt = dests.find(function(d){ return d.id === r.toDestId; });
+    return { r:r, rf:rf, rt:rt, perp: _legPerpKm(_srcC, _dCoords(rf), _dCoords(rt)) };
+  });
+  // PD.466b: also include the source's own NATURAL leg — its array neighbours
+  // merged (prev → next), the leg convertDestToWayside makes by collapsing the
+  // source's two adjoining legs. Value === the dispatcher's _naturalRouteId so
+  // picking it routes through convertDestToWayside. Deduped + ranked with the rest.
+  if (ctx.kind === "destination" && _srcDest) {
+    var _ni = dests.findIndex(function(d){ return d.id === ctx.destId; });
+    if (_ni > 0 && _ni < dests.length - 1) {
+      var _np = dests[_ni - 1], _nn = dests[_ni + 1];
+      var _natId = (_np && _nn) ? ("r-tr-" + _np.id + "-" + _nn.id) : null;
+      if (_natId && !_ranked.some(function(x){ return x.r.id === _natId; })) {
+        _ranked.push({ r:{ id:_natId }, rf:_np, rt:_nn, perp: _legPerpKm(_srcC, _dCoords(_np), _dCoords(_nn)) });
+      }
+    }
+  }
+  _ranked.sort(function(a,b){ return a.perp - b.perp; });
+  // Default selection: keep the current leg if this is already a wayside,
+  // else the geographically nearest.
+  var _selId = currentRouteId || (_ranked.length ? _ranked[0].r.id : null);
+  function _legOpt(item){
+    var lbl = ((item.rf&&item.rf.place)||"?") + " → " + ((item.rt&&item.rt.place)||"?");
+    var dist = isFinite(item.perp) ? (" · " + Math.round(item.perp) + " km off") : "";
+    return '<option value="'+item.r.id+'"'+(item.r.id===_selId?" selected":"")+'>'+lbl+dist+'</option>';
+  }
+  var _NEAR_KM = 30;
+  var _near = _ranked.filter(function(x){ return isFinite(x.perp) && x.perp <= _NEAR_KM; });
+  var _far  = _ranked.filter(function(x){ return !(isFinite(x.perp) && x.perp <= _NEAR_KM); });
+  var routeOptsHtml = "";
+  if (_near.length) {
+    routeOptsHtml += '<optgroup label="Near this sight">' + _near.map(_legOpt).join("") + '</optgroup>';
+  }
+  if (_far.length) {
+    routeOptsHtml += '<optgroup label="Other legs">' + _far.map(_legOpt).join("") + '</optgroup>';
+  }
+  return { html: routeOptsHtml, count: _ranked.length };
+}
+if (typeof globalThis !== "undefined") globalThis._rankPopoverTransitLegs = _rankPopoverTransitLegs;
+
 function _openTripStopPopover(ctx) {
   if (!ctx || !trip) return;
 
@@ -32981,83 +33060,13 @@ function _openTripStopPopover(ctx) {
     return '<option value="' + h.id + '"' + sel + '>' + (h.place || "?") + '</option>';
   }).join("");
 
-  // ── Transit-route options for the Wayside dropdown ──────────────
-  // Exclude routes where the source destination is itself the from
-  // or to endpoint (you can't be "along the way" to yourself).
-  var transitRoutes = (trip.routes || []).filter(function(r){
-    var sub = (typeof MaxMigration !== "undefined" && MaxMigration.routeSubKind)
-      ? MaxMigration.routeSubKind(r)
-      : (r && (r.subKind || (r.kind && r.kind !== "route" ? r.kind : null)));
-    if (sub !== "transit") return false;
-    if (ctx.kind === "destination") {
-      if (r.fromDestId === ctx.destId || r.toDestId === ctx.destId) return false;
-    }
-    return true;
-  });
-  // PD.466: CONTEXT-AWARE leg list. The old default was the "natural"
-  // prev→next merge based on the sight's ARRAY POSITION — which for a
-  // mis-ordered highland sight (Sigöldugljúfur, parked at index 8 between
-  // Vík and Skaftafell) pointed at a leg nowhere near it, and the rest of
-  // the list was every consecutive pair in the whole trip, most of them
-  // irrelevant. Instead, rank the legs by how close THIS sight actually is
-  // to each (perpendicular distance to the leg line), default to the
-  // nearest, show the distance, and group "Near this sight" vs "Other
-  // legs" — context-aware, but every leg is still selectable for an
-  // off-the-wall override (Neal's ask).
-  function _legPerpKm(srcC, aC, bC){
-    if (!srcC || !aC || !bC) return Infinity;
-    var kx = 111.32 * Math.cos(aC[0]*Math.PI/180), ky = 111.32;
-    var ax=aC[1]*kx, ay=aC[0]*ky, bx=bC[1]*kx, by=bC[0]*ky, px=srcC[1]*kx, py=srcC[0]*ky;
-    var dx=bx-ax, dy=by-ay, L2=dx*dx+dy*dy;
-    if (L2===0) return Math.sqrt((px-ax)*(px-ax)+(py-ay)*(py-ay));
-    var t=Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/L2));
-    var qx=ax+t*dx, qy=ay+t*dy;
-    return Math.sqrt((px-qx)*(px-qx)+(py-qy)*(py-qy));
-  }
-  function _dCoords(d){ return (d && typeof d.lat==="number" && typeof d.lng==="number") ? [d.lat,d.lng] : null; }
-  var _srcDest = (ctx.kind === "destination") ? trip.destinations.find(function(d){ return d.id === ctx.destId; }) : null;
-  var _srcC = _dCoords(_srcDest);
-  var _ranked = transitRoutes.map(function(r){
-    var rf = trip.destinations.find(function(d){ return d.id === r.fromDestId; });
-    var rt = trip.destinations.find(function(d){ return d.id === r.toDestId; });
-    return { r:r, rf:rf, rt:rt, perp: _legPerpKm(_srcC, _dCoords(rf), _dCoords(rt)) };
-  });
-  // PD.466b: also include the source's own NATURAL leg — its array
-  // neighbours merged (prev → next), the leg convertDestToWayside makes by
-  // collapsing the source's two adjoining legs. Essential for demoting a
-  // place that sits between two others (its only leg is that merge), since
-  // routes ending AT the source are excluded above. Value === the
-  // dispatcher's _naturalRouteId so picking it routes through
-  // convertDestToWayside. Deduped against the real routes, ranked with them.
-  if (ctx.kind === "destination" && _srcDest) {
-    var _ni = trip.destinations.findIndex(function(d){ return d.id === ctx.destId; });
-    if (_ni > 0 && _ni < trip.destinations.length - 1) {
-      var _np = trip.destinations[_ni - 1], _nn = trip.destinations[_ni + 1];
-      var _natId = (_np && _nn) ? ("r-tr-" + _np.id + "-" + _nn.id) : null;
-      if (_natId && !_ranked.some(function(x){ return x.r.id === _natId; })) {
-        _ranked.push({ r:{ id:_natId }, rf:_np, rt:_nn, perp: _legPerpKm(_srcC, _dCoords(_np), _dCoords(_nn)) });
-      }
-    }
-  }
-  _ranked.sort(function(a,b){ return a.perp - b.perp; });
-  // Default selection: keep the current leg if this is already a wayside,
-  // else the geographically nearest.
-  var _selId = currentRouteId || (_ranked.length ? _ranked[0].r.id : null);
-  function _legOpt(item){
-    var lbl = ((item.rf&&item.rf.place)||"?") + " → " + ((item.rt&&item.rt.place)||"?");
-    var dist = isFinite(item.perp) ? (" · " + Math.round(item.perp) + " km off") : "";
-    return '<option value="'+item.r.id+'"'+(item.r.id===_selId?" selected":"")+'>'+lbl+dist+'</option>';
-  }
-  var _NEAR_KM = 30;
-  var _near = _ranked.filter(function(x){ return isFinite(x.perp) && x.perp <= _NEAR_KM; });
-  var _far  = _ranked.filter(function(x){ return !(isFinite(x.perp) && x.perp <= _NEAR_KM); });
-  var routeOptsHtml = "";
-  if (_near.length) {
-    routeOptsHtml += '<optgroup label="Near this sight">' + _near.map(_legOpt).join("") + '</optgroup>';
-  }
-  if (_far.length) {
-    routeOptsHtml += '<optgroup label="Other legs">' + _far.map(_legOpt).join("") + '</optgroup>';
-  }
+  // ── Transit-route options for the Wayside dropdown (PD.466) ─────
+  // Pure leg-ranking extracted to _rankPopoverTransitLegs (T3.6) so it can
+  // be unit-tested; see that function for the perpendicular-distance ranking
+  // and natural-merge-leg logic.
+  var _legRank = _rankPopoverTransitLegs(trip, ctx, currentRouteId);
+  var routeOptsHtml = _legRank.html;
+  var _rankedCount = _legRank.count;
 
   // ── Build the modal ─────────────────────────────────────────────
   var existing = document.getElementById("trip-stop-popover");
@@ -33294,7 +33303,7 @@ function _openTripStopPopover(ctx) {
   }
   var _sightsHere = _sightsCountForPlace(placeName);
   var _waysideGateBlocks = (_sightsHere > 2 && currentRole !== "wayside");
-  var _waysideHasOptions = (_ranked.length > 0); // PD.466b: real legs + the natural-merge leg
+  var _waysideHasOptions = (_rankedCount > 0); // PD.466b: real legs + the natural-merge leg
   var waysideRow = (_waysideHasOptions && !_waysideGateBlocks)
     ? _row(
         "wayside",
