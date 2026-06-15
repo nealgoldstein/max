@@ -427,9 +427,15 @@
     MobileDragDrop.polyfill({ holdToDrag: 300 });
   }
 </script>
-<!-- v359.45 Phase 1: schema migrations. Loaded BEFORE db.js so that
-     db.js's tripRead/tripReadRaw can call MaxMigration.migrateTripShape
-     synchronously on legacy envelopes. -->
+<!-- v359.45 / T3.3: schema migrations module. CORRECTION: migrateTripShape
+     (v0→v4) is NOT wired into db.js — tripRead/tripReadRaw just JSON-parse.
+     The LIVE migrator is tripstore.js `_migrate` (v0→v1, SCHEMA_VERSION = 1).
+     ⚠ The two stamp the SAME `trip._schemaVersion` with INCOMPATIBLE numbering
+     (tripstore caps at 1, this module at 4). Do NOT wire migrateTripShape into
+     the load path without first reconciling the version scheme — otherwise a
+     tripstore-stamped v1 trip gets re-migrated v1→v4, or its version stamp
+     downgraded. migration.js is currently a reference/Node-tested implementation
+     only (used by tests/migration-tests.js), plus its v3 segment read helpers. -->
 <script src="util-esc.js?v=DEV"></script>
 <script src="migration.js?v=DEV"></script>
 <!-- Round HA: Phase 0 of the engine/UI split. db.js exposes window.MaxDB
@@ -26742,6 +26748,22 @@ if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.on === "functio
     _scheduleMainMapUpdate();
   });
 }
+
+// T3.2: the ONE repaint funnel. The bus (PD.333) is advisory — ~150 call sites
+// still poke drawTripMode/drawDestMode/updateMainMap directly, each wrapped in a
+// defensive `if(typeof draw…==="function")`. New code (and, incrementally, those
+// callers) should call requestTripRepaint() instead: it routes through the single
+// tripChange handler above, which re-renders whichever surface is visible AND
+// coalesces the map repaint (PD.433). A pure repaint — no autoSave, no URL stamp.
+// (Persisting mutations still go through _emitTripMutation, which also repaints.)
+function requestTripRepaint(){
+  if (typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.emit === "function") {
+    MaxEngineTrip.emit("tripChange");
+  } else {
+    _scheduleMainMapUpdate();
+  }
+}
+if (typeof globalThis !== "undefined") globalThis.requestTripRepaint = requestTripRepaint;
 
 // ARCH Phase 5: TripStore subscriber for the picker. The picker
 // owns its own render path (_renderPlaceActivityItems) and isn't

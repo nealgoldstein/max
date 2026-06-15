@@ -83,9 +83,20 @@ below. Tier 3 — T3.4/3.7 done. Tier 4 — T4.1 done.
   (`index.html` ~26681) coalesces repaints into one microtask; both the `tripChange`
   and `mapDataChange` subscribers route through it, so a mutation emitting both repaints
   `updateMainMap` ONCE, not twice. Also fixed the nights-flip case (the audit's risk note).
-- **T3.2 — 125 direct `drawTripMode`/`drawDestMode`/`updateMainMap` calls** bypass the central
-  subscription.
-- **T3.3 — dead schema migrator + two version systems** on one field.
+- **T3.2 — ~150 direct `drawTripMode`/`drawDestMode`/`updateMainMap` calls** bypass the central
+  subscription. **Funnel introduced (step 1 done):** `requestTripRepaint()` (`index.html` ~26752)
+  routes a repaint through the single `tripChange` handler (+ PD.433 map coalescing). REMAINING:
+  migrate call sites to it incrementally (per-batch, behind CI — not a blind bulk sweep, since
+  some callers pass opts / rely on synchronous render), then a contract-check banning new direct calls.
+- **T3.3 — two migrators on one field. ⚠ Landmine de-fanged; merge still a decision.** The LIVE
+  migrator is `tripstore.js _migrate` (v0→v1, `SCHEMA_VERSION=1`). `migration.js migrateTripShape`
+  (v0→**v4**) is NOT wired into the load path (db.js just JSON-parses) — only `tests/migration-tests.js`
+  and migration.js's own v3 read-helpers use it. Both stamp the SAME `trip._schemaVersion` with
+  INCOMPATIBLE numbering. **Fixed the misleading comment** (`index.html` ~430) that claimed db.js
+  calls it — that false claim was the landmine (wiring it in would re-migrate v1 trips to v4 or
+  downgrade the stamp). REMAINING (a real decision, persistence-risk, needs legacy fixtures): pick
+  ONE — adopt migration.js's complete migrator (reconcile the version scheme, drop the dual-shape
+  route ORs) OR delete the unused one and keep tripstore's. Don't merge blind.
 - **T3.5 — placeMeta/tripMeta two-store** with "_tb wins" stale hydrate.
 - **T3.6 — god-functions** (`publishTrip` et al.) with mixed responsibilities.
 - **T3.8 — `mdcItems` zombie field. ✅ DONE (PD.488).** Publish no longer emits it
