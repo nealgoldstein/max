@@ -27,17 +27,31 @@
 
   function _norm(s) { return String(s == null ? "" : s).toLowerCase().replace(/\s+/g, " ").trim(); }
 
+  // leg — a wayside's placement: which transit leg (between two named hubs)
+  // the user dropped it on. {fromPlace, toPlace} or null. P4.4c: a wayside's
+  // leg is a DECISION attribute (where the user put it), not a place fact — so
+  // it lives on the decision next to role/hub, not smeared on the candidate.
+  function _normLeg(leg) {
+    if (!leg || typeof leg !== "object") return null;
+    var f = (leg.fromPlace == null) ? "" : String(leg.fromPlace);
+    var t = (leg.toPlace == null) ? "" : String(leg.toPlace);
+    if (!f && !t) return null;
+    return { fromPlace: f, toPlace: t };
+  }
+
   // ── A single user decision about one place ────────────────────────────
   //   kept:     true (committed) | false (explicitly dropped) | null (undecided)
   //   rejected: removed from consideration entirely
   //   role:     how a kept place participates — stay | see | daytrip | onway
   //   hub:      the day-trip / wayside hub, when role needs one
+  //   leg:      the wayside's {fromPlace,toPlace} transit leg, or null
   function Decision(spec) {
     spec = spec || {};
     this.kept     = (spec.kept === true) ? true : (spec.kept === false ? false : null);
     this.rejected = spec.rejected === true;
     this.role     = spec.role || null;
     this.hub      = spec.hub || "";
+    this.leg      = _normLeg(spec.leg);
   }
 
   // ── The decision LOG — keyed by place identity; the ONE write door ────

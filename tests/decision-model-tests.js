@@ -113,6 +113,35 @@ test("role projection: decided > fact > kind default", function () {
   assert.strictEqual(MD.roleOf({ kind: "sight" }, null), "see");
 });
 
+// ── P4.4c: a wayside's leg is a decision attribute ────────────────────
+test("Decision.leg defaults to null when unspecified", function () {
+  assert.strictEqual(new MD.Decision({}).leg, null);
+  assert.strictEqual(new MD.Decision({ role: "onway" }).leg, null);
+});
+test("Decision.leg captures {fromPlace,toPlace} verbatim", function () {
+  var d = new MD.Decision({ role: "onway", leg: { fromPlace: "Reykjavik", toPlace: "Vik" } });
+  assert.deepStrictEqual(d.leg, { fromPlace: "Reykjavik", toPlace: "Vik" });
+});
+test("Decision.leg normalizes a half-specified or empty leg", function () {
+  assert.deepStrictEqual(new MD.Decision({ leg: { fromPlace: "Selfoss" } }).leg, { fromPlace: "Selfoss", toPlace: "" });
+  assert.strictEqual(new MD.Decision({ leg: {} }).leg, null);          // empty → null
+  assert.strictEqual(new MD.Decision({ leg: { fromPlace: "", toPlace: "" } }).leg, null);
+  assert.strictEqual(new MD.Decision({ leg: "Reykjavik->Vik" }).leg, null); // non-object → null
+});
+test("Decision.leg survives the log round-trip (set → get)", function () {
+  var D = new Decisions();
+  D.set("Seljalandsfoss", { role: "onway", leg: { fromPlace: "Reykjavik", toPlace: "Vik" } });
+  assert.deepStrictEqual(D.get("Seljalandsfoss").leg, { fromPlace: "Reykjavik", toPlace: "Vik" });
+  // identity normalized (case/space-insensitive), like the other fields
+  assert.deepStrictEqual(D.get("  seljalandsfoss ").leg, { fromPlace: "Reykjavik", toPlace: "Vik" });
+});
+test("Decision.leg is a COPY — mutating it never bleeds across decisions", function () {
+  var src = { fromPlace: "A", toPlace: "B" };
+  var d = new MD.Decision({ leg: src });
+  d.leg.fromPlace = "X";
+  assert.strictEqual(src.fromPlace, "A", "input leg object not mutated");
+});
+
 console.log("\n──────────────────────────────────────────────────");
 console.log("PASS: " + pass + "    FAIL: " + fail);
 process.exit(fail > 0 ? 1 : 0);
