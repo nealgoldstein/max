@@ -190,4 +190,34 @@ test.describe('structural guards', () => {
     expect(r.conflictLocalWins, 'true conflict ⇒ local wins').toBe(true);
     expect(r.nullSafe, 'null args ⇒ empty object').toBe(true);
   });
+
+  // T3.6: _pmOrderSectionsByCategory extracted (pure) from _renderPlaceActivityItems'
+  // Round CZ section ordering. Pin: orders by canonical-category rank, preserves
+  // within-category original order, sorts in place.
+  test('T3.6: _pmOrderSectionsByCategory orders by category, preserves within-category order', async ({ page }) => {
+    await bootClean(page);
+    const r = await page.evaluate(() => {
+      const fn = window._pmOrderSectionsByCategory;
+      if (typeof fn !== 'function') return { typeofFn: typeof fn };
+      const cats = (window._CATEGORIES || []).map((c) => c.id);
+      if (cats.length < 2) return { typeofFn: 'function', cats: cats.length };
+      const c0 = cats[0], c1 = cats[1];
+      const bySection = { A: [{ category: c0 }], B: [{ category: c1 }], C: [{ category: c1 }] };
+      const input = ['B', 'C', 'A'];
+      const out = fn(input, bySection);
+      return {
+        typeofFn: 'function',
+        result: out.join(','),
+        aFirst: out.indexOf('A') < out.indexOf('B'),   // higher-rank category first
+        bBeforeC: out.indexOf('B') < out.indexOf('C'),  // within-category original order
+        inPlace: out === input,
+        emptySafe: JSON.stringify(fn(null, null)),
+      };
+    });
+    expect(r.typeofFn, 'helper exposed on window').toBe('function');
+    expect(r.aFirst, 'category rank orders sections').toBe(true);
+    expect(r.bBeforeC, 'within-category original order preserved').toBe(true);
+    expect(r.inPlace, 'sorts in place (same array identity)').toBe(true);
+    expect(r.emptySafe, 'null args safe').toBe('[]');
+  });
 });

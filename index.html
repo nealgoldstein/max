@@ -13774,6 +13774,44 @@ function _pmBuildPlaceRow(key, pInfo, deps) {
 }
 if (typeof globalThis !== "undefined") globalThis._pmBuildPlaceRow = _pmBuildPlaceRow;
 
+// T3.6 (extracted from _renderPlaceActivityItems): Round CZ section ordering.
+// Sorts sectionOrder IN PLACE by each section's dominant canonical category
+// (most-common item.category, else _categoryFromSection), preserving the
+// original within-category order. Pure aside from the in-place sort; reads the
+// _CATEGORIES / _categoryFromSection globals. Returns sectionOrder for chaining.
+function _pmOrderSectionsByCategory(sectionOrder, bySection){
+  sectionOrder = sectionOrder || [];
+  bySection = bySection || {};
+  function _sectionCategory(sec, secItems){
+    var counts = {};
+    (secItems||[]).forEach(function(it){
+      var cat = (it && it.category) ? String(it.category).toLowerCase() : null;
+      if (cat && _CATEGORIES.some(function(c){return c.id === cat;})) {
+        counts[cat] = (counts[cat] || 0) + 1;
+      }
+    });
+    var dominant = null, max = 0;
+    Object.keys(counts).forEach(function(k){ if (counts[k] > max) { max = counts[k]; dominant = k; } });
+    return dominant || _categoryFromSection(sec);
+  }
+  var sectionCategoryMap = {};
+  sectionOrder.forEach(function(sec){ sectionCategoryMap[sec] = _sectionCategory(sec, bySection[sec]); });
+  var categoryRank = {};
+  _CATEGORIES.forEach(function(c, i){ categoryRank[c.id] = i; });
+  var origIdx = {};
+  sectionOrder.forEach(function(sec, i){ origIdx[sec] = i; });
+  sectionOrder.sort(function(a, b){
+    var ra = categoryRank[sectionCategoryMap[a]];
+    var rb = categoryRank[sectionCategoryMap[b]];
+    if (ra == null) ra = 99;
+    if (rb == null) rb = 99;
+    if (ra !== rb) return ra - rb;
+    return origIdx[a] - origIdx[b];
+  });
+  return sectionOrder;
+}
+if (typeof globalThis !== "undefined") globalThis._pmOrderSectionsByCategory = _pmOrderSectionsByCategory;
+
 function _renderPlaceActivityItems(){
   var list = document.getElementById("tb-place-act-list");
   if(!list) return;
@@ -14102,40 +14140,9 @@ function _renderPlaceActivityItems(){
   // appearance — subsequent appearances reference back).
   var shownIn = {}; // place.toLowerCase() -> first section name where shown
 
-  // Round CZ: figure out each section's parent category and re-order
-  // sectionOrder so they're grouped by the 6 canonical categories.
-  // Within each category, the original section order is preserved.
-  function _sectionCategory(sec, secItems){
-    var counts = {};
-    (secItems||[]).forEach(function(it){
-      var cat = (it && it.category) ? String(it.category).toLowerCase() : null;
-      if (cat && _CATEGORIES.some(function(c){return c.id === cat;})) {
-        counts[cat] = (counts[cat] || 0) + 1;
-      }
-    });
-    var dominant = null, max = 0;
-    Object.keys(counts).forEach(function(k){ if (counts[k] > max) { max = counts[k]; dominant = k; } });
-    return dominant || _categoryFromSection(sec);
-  }
-  // Compute category for each section
-  var sectionCategoryMap = {};
-  sectionOrder.forEach(function(sec){
-    sectionCategoryMap[sec] = _sectionCategory(sec, bySection[sec]);
-  });
-  // Re-order sections by category (canonical order), then by their
-  // original within-category order.
-  var categoryRank = {};
-  _CATEGORIES.forEach(function(c, i){ categoryRank[c.id] = i; });
-  var origIdx = {};
-  sectionOrder.forEach(function(sec, i){ origIdx[sec] = i; });
-  sectionOrder.sort(function(a, b){
-    var ra = categoryRank[sectionCategoryMap[a]];
-    var rb = categoryRank[sectionCategoryMap[b]];
-    if (ra == null) ra = 99;
-    if (rb == null) rb = 99;
-    if (ra !== rb) return ra - rb;
-    return origIdx[a] - origIdx[b];
-  });
+  // Round CZ: order sections by dominant canonical category (preserving
+  // within-category order). Extracted to the pure _pmOrderSectionsByCategory.
+  _pmOrderSectionsByCategory(sectionOrder, bySection);
   // v359.55.2: user-added section pinned LAST regardless of category
   // sorting. The earlier categoryRank sort can pull "Places you added"
   // toward the top when its items don't carry a recognized category;
