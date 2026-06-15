@@ -28334,6 +28334,14 @@ if (typeof globalThis !== "undefined") globalThis._ensureTripRoutesCached = _ens
 
 function updateMainMap(){
   if(!_mainMap)return;
+  // R1 (PD.432 parity): refresh the stay/see kind map BEFORE coloring pins.
+  // _pmIsStayCandidate trusts window._pmKindByKey whenever it's non-empty and
+  // only re-derives when empty — so a map-only repaint (via the coalesced
+  // _scheduleMainMapUpdate) that follows a model role/section change without a
+  // picker render would color a pin from a stale cache. The picker render
+  // (~13779) and the picker map (~22436) already refresh here; the main map
+  // must too. One O(n) refresh per coalesced repaint — same cost as those.
+  if (typeof _pmRefreshKindMap === "function") { try { _pmRefreshKindMap(); } catch(_){} }
   clearMainMarkers();
   // v294.15: drop the trip-route polyline + halo on every re-render. They
   // get redrawn below when in trip mode AND _routeShown is true. This
