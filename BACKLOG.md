@@ -79,13 +79,19 @@ below. Tier 3 — T3.4/3.7 done. Tier 4 — T4.1 done.
   raw `toLowerCase`). Same family as T2.3; fix only with a reproduction.
 
 ### Structural / perf — maintainability, no trip impact
-- **T3.1 — double-render on every mutation.** Audit flags HIGH-value, cheap.
+- **T3.1 — double-render on every mutation. ✅ DONE (PD.433).** `_scheduleMainMapUpdate()`
+  (`index.html` ~26681) coalesces repaints into one microtask; both the `tripChange`
+  and `mapDataChange` subscribers route through it, so a mutation emitting both repaints
+  `updateMainMap` ONCE, not twice. Also fixed the nights-flip case (the audit's risk note).
 - **T3.2 — 125 direct `drawTripMode`/`drawDestMode`/`updateMainMap` calls** bypass the central
   subscription.
 - **T3.3 — dead schema migrator + two version systems** on one field.
 - **T3.5 — placeMeta/tripMeta two-store** with "_tb wins" stale hydrate.
 - **T3.6 — god-functions** (`publishTrip` et al.) with mixed responsibilities.
-- **T3.8 — `mdcItems` zombie field** still emitted by publish.
+- **T3.8 — `mdcItems` zombie field. ✅ DONE (PD.488).** Publish no longer emits it
+  (`engine-picker.js` ~2318); no `trip.mdcItems =` write remains. The `tripstore` delete-on-save
+  and the `max-data` legacy fallback are KEPT intentionally — they migrate pre-PD.488 saved
+  trips that still carry the field.
 - **T4.2 — `86400000`/`msDay` redefined ~12×;** **T4.3 — `_isStaySection` duplicates `SectionKind.isStay`.**
 
 ### UI design system — remaining (needs eyes on each view; not blocking)
