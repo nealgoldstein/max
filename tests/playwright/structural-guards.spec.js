@@ -220,4 +220,25 @@ test.describe('structural guards', () => {
     expect(r.inPlace, 'sorts in place (same array identity)').toBe(true);
     expect(r.emptySafe, 'null args safe').toBe('[]');
   });
+
+  // T3.6: pure search/slug helpers lifted out of _renderPlaceActivityItems.
+  test('T3.6: _searchNormalize + _pmSectionSlug are pure top-level helpers', async ({ page }) => {
+    await bootClean(page);
+    const r = await page.evaluate(() => ({
+      sn: typeof window._searchNormalize,
+      sl: typeof window._pmSectionSlug,
+      vik: window._searchNormalize && window._searchNormalize('Vík'),
+      thing: window._searchNormalize && window._searchNormalize('Þingvellir'),
+      ae: window._searchNormalize && window._searchNormalize('Ægir'),
+      empty: window._searchNormalize && window._searchNormalize(''),
+      slug: window._pmSectionSlug && window._pmSectionSlug('Hot Springs & Pools!'),
+    }));
+    expect(r.sn).toBe('function');
+    expect(r.sl).toBe('function');
+    expect(r.vik, 'diacritic folded').toBe('vik');
+    expect(r.thing, 'þ → th').toBe('thingvellir');
+    expect(r.ae, 'æ → ae').toBe('aegir');
+    expect(r.empty).toBe('');
+    expect(r.slug).toBe('tb-sec-hot-springs-pools');
+  });
 });

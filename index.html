@@ -13812,6 +13812,23 @@ function _pmOrderSectionsByCategory(sectionOrder, bySection){
 }
 if (typeof globalThis !== "undefined") globalThis._pmOrderSectionsByCategory = _pmOrderSectionsByCategory;
 
+// T3.6 (pure, extracted from _renderPlaceActivityItems): accent-insensitive
+// normalize so "vik" matches "Vík" and "thingvellir" matches "Þingvellir".
+// Strips combining marks via NFD, then collapses Icelandic chars that don't
+// decompose (þ, æ, ð, ø).
+function _searchNormalize(s){
+  if (!s) return "";
+  var n = String(s).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  return n.replace(/þ/g, "th").replace(/æ/g, "ae").replace(/ð/g, "d").replace(/ø/g, "o");
+}
+if (typeof globalThis !== "undefined") globalThis._searchNormalize = _searchNormalize;
+
+// T3.6 (pure): section name → stable DOM id slug.
+function _pmSectionSlug(sec){
+  return "tb-sec-" + String(sec || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+if (typeof globalThis !== "undefined") globalThis._pmSectionSlug = _pmSectionSlug;
+
 function _renderPlaceActivityItems(){
   var list = document.getElementById("tb-place-act-list");
   if(!list) return;
@@ -14435,9 +14452,7 @@ function _renderPlaceActivityItems(){
   // organizing unit; the 6 canonical categories were a hidden
   // intermediate axis the user didn't navigate by. Click any TOC
   // entry to scroll to that section.
-  function _pmSectionSlug(sec){
-    return "tb-sec-" + String(sec || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  }
+  // _pmSectionSlug + _searchNormalize are now top-level pure helpers (T3.6).
   // v359.55.15: search/filter across notes, links, and place names.
   // Query lives on _tb._researchSearch so it survives re-renders.
   var _searchQ = (_tb && typeof _tb._researchSearch === "string") ? _tb._researchSearch.toLowerCase() : "";
@@ -14449,17 +14464,7 @@ function _renderPlaceActivityItems(){
     console.log("[Max render] _renderPlaceActivityItems running. q=" + JSON.stringify(_searchQ)
       + " placeActivities=" + _diagActs + " candidates=" + _diagCands);
   } catch(_){}
-  // Accent-insensitive normalize so "vik" matches "Vík" and "thingvellir"
-  // matches "Þingvellir". Strips combining marks via NFD decomposition,
-  // then collapses a few Icelandic-specific characters that don't
-  // decompose (þ, æ, ð).
-  function _searchNormalize(s){
-    if (!s) return "";
-    // ̀-ͯ is the Combining Diacritical Marks Unicode block.
-    var n = String(s).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
-    return n.replace(/þ/g, "th").replace(/æ/g, "ae").replace(/ð/g, "d").replace(/ø/g, "o");
-  }
-  var _searchQNorm = _searchNormalize(_searchQ);
+  var _searchQNorm = _searchNormalize(_searchQ); // top-level pure helper (T3.6)
   function _pmRowMatchesSearch(d, secName){
     if (!_searchQ) return true;
     if (!d) return false;
