@@ -1032,10 +1032,8 @@ function _dropActivity(mdName){
   // Mark every candidate under it as rejected
   cands.forEach(function(c){
     c.status = "reject";
-    // PD.455: project the reject onto the published snapshot through the one
-    // mirror primitive, so trip.candidates can't go stale after a must-do drop.
-    if (typeof MaxRoleWriter !== "undefined" && MaxRoleWriter && MaxRoleWriter.mirror) MaxRoleWriter.mirror(c);
-    else if (typeof window !== "undefined" && window.MaxRoleWriter && window.MaxRoleWriter.mirror) window.MaxRoleWriter.mirror(c);
+    // P4.4d: _tb.candidates IS trip.candidates now (one shared array), so the
+    // reject above already updates the published snapshot — no mirror needed.
     // Strip this must-do out of its _requiredFor so other sections don't show "also supports"
     c._requiredFor = (c._requiredFor||[]).filter(function(r){ return r !== mdName; });
     if (!c._requiredFor.length) c._required = false;
@@ -1240,10 +1238,8 @@ async function setCS(id,status){
   }
   var prevStatus = c.status;
   c.status=(c.status===status)?null:status;
-  // PD.455: keep the published snapshot in step with this status toggle via the
-  // one mirror primitive (instead of leaving trip.candidates stale until republish).
-  if (typeof MaxRoleWriter !== "undefined" && MaxRoleWriter && MaxRoleWriter.mirror) MaxRoleWriter.mirror(c);
-  else if (typeof window !== "undefined" && window.MaxRoleWriter && window.MaxRoleWriter.mirror) window.MaxRoleWriter.mirror(c);
+  // P4.4d: c is a shared trip.candidates object now — the toggle above already
+  // updates the published snapshot; no mirror needed.
   // Un-rejecting a candidate that previously cascaded a must-do drop? Re-wire
   // its required links and re-check the dropped must-dos. This matters because
   // rejecting Montreux (endpoint of the Lake Geneva circuit) drops the circuit

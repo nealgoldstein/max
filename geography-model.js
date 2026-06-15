@@ -204,28 +204,12 @@ if (typeof globalThis !== "undefined") globalThis._geographyOf = _geographyOf;
 // case that "needs" to bypass MaxRoleWriter, the answer is almost
 // always: add a method to MaxRoleWriter, not a parallel path.
 //
-// PD.455 (architectural): the ONE projection from the working model to the
-// published snapshot. _tb.candidates is the source of truth; trip.candidates is
-// a derived copy. Any code that mutates a working candidate's role/status calls
-// mirror(cand) to project it — so the snapshot can never go stale, and there is
-// exactly one definition of "how the snapshot tracks the working model" instead
-// of hand-written dual-writes scattered around. set() uses it too.
-function _mirrorCandToTrip(cand){
-  try {
-    if (typeof trip === "undefined" || !trip || !Array.isArray(trip.candidates) || !cand) return;
-    var norm = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
-    var t = null;
-    if (cand.id) t = trip.candidates.find(function(c){ return c && c.id === cand.id; });
-    if (!t) { var nk = norm(cand.place || ""); if (nk) t = trip.candidates.find(function(c){ return c && c.place && norm(c.place) === nk; }); }
-    if (!t) return;
-    t.role = cand.role;
-    t.status = cand.status;
-    t._roleTouched = cand._roleTouched;
-    t.intent = cand.intent;
-    t.dayTripHub = cand.dayTripHub;
-    t.waysideFromHub = cand.waysideFromHub;
-  } catch (_) {}
-}
+// P4.4d: _mirrorCandToTrip / MaxRoleWriter.mirror DELETED. _tb.candidates and
+// trip.candidates are now ONE shared array (the picker hydrations share the
+// reference, like the trip view), so a working candidate IS its published-
+// snapshot twin — there is nothing to project. The lean persisted shape is
+// regenerated from the working model via MaxCandidates.snapshotFrom at save
+// (publishTrip / applyCandidateChanges). The dual-shape bookkeeping is gone.
 
 // P4.4c: record a wayside's leg as a DECISION (where the user placed it),
 // keyed by place identity, next to role/hub. Called at the wayside-assignment
@@ -250,9 +234,6 @@ function _recordWaysideLegDecision(place, fromPlace, toPlace) {
 if (typeof globalThis !== "undefined") globalThis._recordWaysideLegDecision = _recordWaysideLegDecision;
 
 var MaxRoleWriter = {
-  // Project a working candidate's role/status onto its published-snapshot twin.
-  // THE single sync primitive — see _mirrorCandToTrip.
-  mirror: function(cand){ _mirrorCandToTrip(cand); },
   set: function(idOrPlace, role, opts){
     opts = opts || {};
     if (typeof _tb === "undefined" || !_tb || !Array.isArray(_tb.candidates)) return null;
@@ -385,18 +366,9 @@ var MaxRoleWriter = {
         });
       }
     } catch(_){}
-    // ── PD.67 (architectural): mirror to trip.candidates ────────────
-    // trip.candidates is the authoritative snapshot the trip-view pin
-    // renderer + map read from. _tb.candidates is the picker's working
-    // copy. Both must agree on c.role for the trip view and picker to
-    // show the same state. Before this, a role change written via
-    // MaxRoleWriter from any surface (picker toggle, trip-view popover
-    // via _writeTripRoleForDest) only updated _tb.candidates; the
-    // trip-view pin re-rendered against a stale trip.candidates and
-    // showed the old role until a publishTrip rebuild overwrote it.
-    // PD.455: project the just-mutated working candidate onto its snapshot
-    // twin through the ONE mirror primitive (no inline dual-write).
-    _mirrorCandToTrip(cand);
+    // P4.4d: no mirror — _tb.candidates IS trip.candidates (one shared array),
+    // so the mutations above already update the published snapshot. The lean
+    // persisted shape is regenerated via MaxCandidates.snapshotFrom at save.
     // P4.2 (shadow mode): record this user decision into the canonical decision
     // log, IN PARALLEL with the record flags above. Not yet load-bearing — it
     // exists so we can prove the log + the live records agree (keepOf == _keep)
@@ -433,10 +405,10 @@ if (typeof window !== "undefined") window.MaxRoleWriter = MaxRoleWriter;
 
 // PD.456 (perfect-model #1/#4): the ONE projection from a working candidate to
 // its PERSISTED snapshot shape. trip.candidates is born here and only here — a
-// pure function of the working model, so the snapshot is a derived view, not an
-// independently-edited second copy. publishTrip maps through snapshotFrom();
-// _mirrorCandToTrip keeps the SAME field subset in step between publishes. One
-// definition means the persisted shape can't drift from what the writer mirrors.
+// pure function of the working model. P4.4d: the working buffer and the snapshot
+// are now one shared array, so there's nothing to keep "in step" between
+// publishes — at save, snapshotFrom() regenerates the lean persisted copy from
+// the working model, the single definition of the durable shape.
 var MaxCandidates = {
   // working candidate -> persisted snapshot object (the durable field subset)
   snapshotOf: function (c) {
