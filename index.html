@@ -2046,6 +2046,11 @@ body.itin-dragging .slist{outline:1px dashed #d8d4c8;outline-offset:2px;border-r
    filter — the matching row stays in context but is visually marked
    so the eye finds it after the auto-scroll. */
 .tb-act-table-row.tb-search-hit{background:#fff8d6 !important;border-color:#e0c060 !important;box-shadow:0 0 0 2px #f0d878 !important;}
+/* PD.407: inline trip-view search highlights (generic — applied to the
+   leaf-most matching elements in #lp-content; a class toggle only, no DOM
+   mutation). The active match (↑/↓ nav target) gets a stronger ring. */
+.trip-search-hit{background:#fff8d6 !important;border-radius:4px;box-shadow:0 0 0 2px #f0d878;scroll-margin-top:64px;}
+.trip-search-hit-active{background:#ffe9a8 !important;box-shadow:0 0 0 3px #e0a83c;}
 /* tb-search-flash: temporary class added to the first/best hit when
    the search results land. Pulses bigger glow for ~1.4s so the eye
    has something to lock onto after the smooth scroll. */
@@ -37893,6 +37898,126 @@ function _notifyOnwayDemotions(syncResult){
   if (typeof maxAlert === "function") { try { maxAlert(msg); return; } catch(_){} }
   console.log("[Max] onway demoted:", msg);
 }
+
+// PD.407: inline trip-view search. The #trip-inline-search-bar markup lives
+// ABOVE #lp-content (so drawTripMode's innerHTML="" can't destroy it). This
+// wires it: a generic scan over the rendered trip content adds a highlight
+// class to the leaf-most elements whose text matches the query, with a match
+// counter + ↑/↓ navigation + clear. It only TOGGLES a class — no re-render and
+// no text-node mutation — so it can't disturb the trip view's own DOM/handlers.
+var _tripSearchState = { hits: [], idx: 0, navStarted: false };
+
+function _tripSearchClearHighlights(){
+  var content = document.getElementById("lp-content");
+  if (!content) return;
+  content.querySelectorAll(".trip-search-hit, .trip-search-hit-active").forEach(function(el){
+    el.classList.remove("trip-search-hit");
+    el.classList.remove("trip-search-hit-active");
+  });
+}
+
+function _tripSearchUpdateNav(){
+  var counter = document.getElementById("trip-inline-search-counter");
+  var prev = document.getElementById("trip-inline-search-prev");
+  var next = document.getElementById("trip-inline-search-next");
+  var clear = document.getElementById("trip-inline-search-clear");
+  var inp = document.getElementById("trip-inline-search");
+  var hasQuery = !!(inp && inp.value.trim());
+  var n = _tripSearchState.hits.length;
+  if (counter) {
+    if (!hasQuery) counter.textContent = "";
+    else if (!n) counter.textContent = "no matches";
+    else if (!_tripSearchState.navStarted) counter.textContent = n + (n === 1 ? " match" : " matches");
+    else counter.textContent = (_tripSearchState.idx + 1) + " / " + n;
+    counter.style.visibility = hasQuery ? "visible" : "hidden";
+  }
+  var navVis = (n > 1) ? "visible" : "hidden";
+  if (prev) prev.style.visibility = navVis;
+  if (next) next.style.visibility = navVis;
+  if (clear) clear.style.visibility = hasQuery ? "visible" : "hidden";
+}
+
+function _tripSearchApply(){
+  var inp = document.getElementById("trip-inline-search");
+  var content = document.getElementById("lp-content");
+  _tripSearchClearHighlights();
+  _tripSearchState.hits = [];
+  _tripSearchState.idx = 0;
+  _tripSearchState.navStarted = false;
+  var q = inp ? inp.value.trim().toLowerCase() : "";
+  if (!q || !content) { _tripSearchUpdateNav(); return; }
+  var hits = [];
+  var all = content.querySelectorAll("*");
+  for (var i = 0; i < all.length; i++) {
+    var el = all[i];
+    if (!el) continue;
+    var txt = (el.textContent || "").toLowerCase();
+    if (txt.indexOf(q) === -1) continue;
+    // Leaf-most: skip if a child element ALSO contains the query, so we mark
+    // the smallest container (the match), not every ancestor up to #lp-content.
+    var childHas = false;
+    for (var c = 0; c < el.children.length; c++) {
+      if ((el.children[c].textContent || "").toLowerCase().indexOf(q) !== -1) { childHas = true; break; }
+    }
+    if (childHas) continue;
+    // Skip hidden / collapsed elements (display:none → no offsetParent).
+    if (!el.offsetParent && el.offsetWidth === 0 && el.offsetHeight === 0) continue;
+    hits.push(el);
+  }
+  hits.forEach(function(el){ el.classList.add("trip-search-hit"); });
+  _tripSearchState.hits = hits;
+  _tripSearchUpdateNav();
+}
+
+function _tripSearchStep(dir){
+  var n = _tripSearchState.hits.length;
+  if (!n) return;
+  if (!_tripSearchState.navStarted) {
+    _tripSearchState.navStarted = true;
+    _tripSearchState.idx = (dir < 0) ? (n - 1) : 0;
+  } else {
+    _tripSearchState.idx = (((_tripSearchState.idx + dir) % n) + n) % n;
+  }
+  _tripSearchState.hits.forEach(function(el, i){
+    el.classList.toggle("trip-search-hit-active", i === _tripSearchState.idx);
+  });
+  var active = _tripSearchState.hits[_tripSearchState.idx];
+  if (active && typeof active.scrollIntoView === "function") {
+    try { active.scrollIntoView({ block: "center", behavior: "smooth" }); }
+    catch (_) { try { active.scrollIntoView(); } catch (__) {} }
+  }
+  _tripSearchUpdateNav();
+}
+
+function _ensureTripInlineSearch(){
+  var bar = document.getElementById("trip-inline-search-bar");
+  var inp = document.getElementById("trip-inline-search");
+  if (!bar || !inp) return;
+  // Show the bar only when a built trip exists.
+  var built = (typeof trip !== "undefined" && trip && Array.isArray(trip.destinations) && trip.destinations.length > 0);
+  bar.style.display = built ? "flex" : "none";
+  if (!built) { if (inp.value) inp.value = ""; _tripSearchClearHighlights(); _tripSearchState.hits = []; _tripSearchUpdateNav(); }
+  if (!bar._wired) {
+    bar._wired = true;
+    inp.addEventListener("input", function(){ _tripSearchApply(); });
+    inp.addEventListener("keydown", function(e){
+      if (e.key === "Enter" || e.key === "ArrowDown") { e.preventDefault(); _tripSearchStep(1); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); _tripSearchStep(-1); }
+      else if (e.key === "Escape") { e.preventDefault(); inp.value = ""; _tripSearchApply(); }
+    });
+    var prev = document.getElementById("trip-inline-search-prev");
+    var next = document.getElementById("trip-inline-search-next");
+    var clear = document.getElementById("trip-inline-search-clear");
+    if (prev) prev.onclick = function(){ _tripSearchStep(-1); };
+    if (next) next.onclick = function(){ _tripSearchStep(1); };
+    if (clear) clear.onclick = function(){ inp.value = ""; _tripSearchApply(); try { inp.focus(); } catch (_) {} };
+  }
+  // This runs BEFORE #lp-content is rebuilt; if a query is active, re-apply the
+  // highlights AFTER the (synchronous) rebuild completes so they survive a
+  // re-render.
+  if (built && inp.value.trim()) setTimeout(_tripSearchApply, 0);
+}
+if (typeof globalThis !== "undefined") globalThis._ensureTripInlineSearch = _ensureTripInlineSearch;
 
 function drawTripMode(opts){
   // PD.83c + PD.198 (architectural): if the picker overlay is
