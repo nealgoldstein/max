@@ -226,19 +226,24 @@ test.describe('P4.4 gate — wayside leg assignment survives publish → reopen'
 
     const built = await waysideLegs(page);
     expect(built.transitLegs, 'at least one transit leg exists').toBeGreaterThanOrEqual(1);
-    expect(built.total, 'wayside committed as a stop on a transit leg').toBeGreaterThanOrEqual(1);
+    // EXACTLY one stop — not >=1. P4.4d guard: sharing the candidate reference
+    // could let a reopened wayside re-commit and DUPLICATE the route stop (the
+    // publish commit mints a fresh planItem with no dedup). A loose >=1 would
+    // miss that corruption; pin it to one.
+    expect(built.total, 'wayside committed as exactly one stop on a transit leg').toBe(1);
     const placedLeg = built.legsWith[0];               // the leg it landed on
     expect(placedLeg).toBeTruthy();
 
-    // Reopen the explorer, then re-publish — the round-trip that drops the
-    // wayside if waysideLeg / route bookkeeping regresses.
+    // Reopen the explorer, then re-publish — the round-trip that drops OR
+    // duplicates the wayside if the candidate-array / route bookkeeping regresses.
     await page.evaluate(() => { if (typeof window.reopenCandidateExplorer === 'function') window.reopenCandidateExplorer(); });
     await page.waitForFunction(() => window._tb && Array.isArray(window._tb.candidates) && window._tb.candidates.length, { timeout: 8000 });
     await page.evaluate(async () => { await window.buildFromCandidates(); });
     await page.waitForSelector('.tm-dest', { timeout: 8000 });
 
     const after = await waysideLegs(page);
-    expect(after.total, 'wayside stop survived the reopen → republish cycle').toBeGreaterThanOrEqual(1);
+    // Still EXACTLY one — survived the round-trip without being dropped or duplicated.
+    expect(after.total, 'wayside is exactly one stop after reopen → republish (no drop, no dupe)').toBe(1);
     // ...and it's still on the SAME leg (same endpoints), not drifted elsewhere.
     expect(after.legsWith.some((l) => l.from === placedLeg.from && l.to === placedLeg.to),
       'wayside stayed on its original leg').toBe(true);
