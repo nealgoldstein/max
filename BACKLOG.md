@@ -161,9 +161,34 @@ fixed in 4 verified waves (Node gate + Chrome + Playwright guards):
 - Commits: `153dc4d` (wave 1), `af896de` (wave 2), `60ffd16` (R1), `766102c` (wave 3), `058a2f2` (wave 4).
 
 > Genuinely-open architectural work left: T3.2 call-site migration (funnel + ratchet done; sites are
-> incremental, ratchet-protected), T3.6 god-function extraction (2 slices done; the rest is
-> lower-value side-effectful decomposition), T3.3 dual-shape OR removal (now safe — all readers
-> migrated; low-value), T4.2 (cosmetic).
+> incremental, ratchet-protected), T3.6 god-function extraction (in progress, below), T4.2 (cosmetic).
+
+### God-function decomposition (T3.6) — change-risk = bug-risk program (2026-06)
+Reframed: maintainability/extensibility and bugs are the same thing seen from two sides — a bug is a
+change colliding with hidden coupling or a duplicate. So decomposition is bug-prevention, equal
+priority to fixing armed bugs. Attack order: (1) god-functions, (2) bypass call-site → single funnel
+(T3.2) + ban regrowth, (3) collapse remaining parallel state, (4) ratchets that fail the build when
+coupling creeps back.
+
+**publishTrip dedup — done so far (each: a drift-risk inline copy of an already-extracted+tested
+engine-publish.js / MaxPublish helper, now delegated):**
+- slice 1 (e624723): entry/exit validation → `MaxPublish.validateEntryExit`.
+- slices 2+3 (7977ae1): rebuild detect → `detectRebuild`; PD.16 stayOverride bridge decision →
+  `deriveStayOverrideBridges` (application kept local).
+- Earlier T3.6 (1a03020 / 6eb72f4): `_rankPopoverTransitLegs`, `_pmBuildPlaceRow`.
+
+**⚠ HIGH-VALUE FINDING — unwired tested helpers (next slices):** `dedupCandidatesByPlace`,
+`synthesizeMissingCandidates`, `filterCandidatesForDestinations`, `rehydrateClassifierBuckets` are
+exported from engine-publish.js and UNIT-TESTED but have **zero production callers** — publishTrip
+re-implements each inline (dedupe ~engine-picker.js:1393, synthesis ~1333/1367/889, classifier
+rehydrate ~1977+). So the LIVE publish path is untested and the green tests cover dead code; the two
+copies can diverge silently. Wiring publishTrip to delegate (and deleting the inline) makes the
+tests actually guard the live path — but each needs careful equivalence verification FIRST (publish
+is the most critical path; the inline copies may already have drifted from the helpers). Do these
+per-helper, behind the gate + build-harness, not in a rush.
+
+**Remaining god-functions:** `_renderPlaceActivityItems` (more row/section extraction), `updateMainMap`
+(side-effectful block extraction), `_openTripStopPopover` (role-apply handlers).
 
 ### UI design system — remaining (needs eyes on each view; not blocking)
 - **Button MARKUP → `.btn` classes beyond home.** ~159 inline-styled buttons across
