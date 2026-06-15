@@ -3493,6 +3493,17 @@ function serializeTrip(){
   // in storage (and bloat it — road geometry is hundreds of points per
   // segment). Strip them here so every save/export starts routing fresh.
   var _transientKeys = { _osrmSegments:1, _osrmCacheSig:1, _osrmBatchInflight:1, _dtLoopFetched:1 };
+  // P4.5: persist the decision LOG on the trip, so the user's keep/role/hub/leg
+  // choices survive reload as data (not only as per-record _keep/_decided flags).
+  // Stamped from the live working log (_tb._decisions) at the serialization
+  // choke point — restored in _reconcileUserListedKeeps on the next load.
+  try {
+    if (typeof _tb !== "undefined" && _tb && _tb._decisions
+        && typeof _tb._decisions.toJSON === "function" && trip) {
+      if (!trip.brief || typeof trip.brief !== "object") trip.brief = {};
+      trip.brief._decisionLog = _tb._decisions.toJSON();
+    }
+  } catch (_) {}
   return JSON.stringify(
     {trip:trip,activeDest:activeDest,destCtr:destCtr,sidCtr:sidCtr,bkCtr:bkCtr,activeDmSection:_activeDmSection},
     function(key, value){ return _transientKeys[key] ? undefined : value; },
@@ -12561,7 +12572,15 @@ function _reconcileUserListedKeeps(){
   // log is authoritative. (P4.5 will persist the log directly and retire the
   // record flags entirely.)
   var _keepNf = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
-  if (typeof MaxDecisions !== "undefined" && _tb && !_tb._decisions) _tb._decisions = new MaxDecisions.Decisions();
+  if (typeof MaxDecisions !== "undefined" && _tb && !_tb._decisions) {
+    // P4.5: restore the persisted decision log (the durable record of the user's
+    // choices, incl. role/hub/leg) BEFORE the per-record seed below. Legacy trips
+    // with no persisted log get an empty log and fall back to the _decided-seed.
+    var _persistedLog = (typeof trip !== "undefined" && trip && trip.brief && trip.brief._decisionLog) || null;
+    _tb._decisions = (_persistedLog && typeof MaxDecisions.fromJSON === "function")
+      ? MaxDecisions.fromJSON(_persistedLog)
+      : new MaxDecisions.Decisions();
+  }
   var _decLog = (_tb && _tb._decisions) || null;
   if (_decLog) {
     (_tb.placeActivities || []).forEach(function(it){
