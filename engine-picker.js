@@ -2234,24 +2234,17 @@
     // (after buildBrief runs). The "fall back to geographic inference"
     // behavior of orderKeptCandidates depends on _tb.entry being ""
     // when it doesn't match a kept candidate — keeping that semantic.
-    if (_tb.entry) _tb._typedEntry = _tb.entry; else _tb._typedEntry = "";
-    if (_tb.tbExit) _tb._typedExit = _tb.tbExit; else _tb._typedExit = "";
-    if (_tb.entry) {
-      var entryMatchesKept = kept.some(function(c){
-        var cN = _normPlaceName(c.place||"");
-        var eN = _normPlaceName(_tb.entry||"");
-        return cN && eN && (cN.indexOf(eN) >= 0 || eN.indexOf(cN) >= 0);
-      });
-      if (!entryMatchesKept) _tb.entry = "";
-    }
-    if (_tb.tbExit) {
-      var exitMatchesKept = kept.some(function(c){
-        var cN = _normPlaceName(c.place||"");
-        var xN = _normPlaceName(_tb.tbExit||"");
-        return cN && xN && (cN.indexOf(xN) >= 0 || xN.indexOf(cN) >= 0);
-      });
-      if (!exitMatchesKept) _tb.tbExit = "";
-    }
+    // publishTrip slice 1 (dedup): delegate entry/exit validation to the single
+    // tested helper MaxPublish.validateEntryExit instead of the inline copy that
+    // lived here. The two were the same Round HZ/v358.3 logic in two places — a
+    // drift-risk duplicate (the extracted helper had unit tests; publishTrip ran
+    // its own un-tested copy). One implementation now; typed* still preserved for
+    // restoration after buildBrief. (engine-publish.js loads before this script.)
+    var _ee = MaxPublish.validateEntryExit(_tb.entry, _tb.tbExit, kept);
+    _tb.entry       = _ee.entry;
+    _tb.tbExit      = _ee.tbExit;
+    _tb._typedEntry = _ee.typedEntry;
+    _tb._typedExit  = _ee.typedExit;
 
     // Round DW: detect rebuild vs fresh build. Rebuilds preserve the
     // existing trip object — and its destinations array — so
