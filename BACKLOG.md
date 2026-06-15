@@ -199,8 +199,26 @@ day-selector at 26420/26431). Switching to the async coalesced funnel is a timin
 each UI path EXERCISED to verify — do per-site with the path driven, then drop BASELINE by the count
 migrated. Not a blind sweep.
 
-**Remaining god-functions:** `_renderPlaceActivityItems` (more row/section extraction), `updateMainMap`
-(side-effectful block extraction), `_openTripStopPopover` (role-apply handlers).
+**Remaining god-functions (extraction candidates mapped):** slices done so far —
+`_rankPopoverTransitLegs`, `_pmBuildPlaceRow`, the publishTrip helper-delegations, and
+`_pmOrderSectionsByCategory` (Round CZ section ordering, 5dab9c3). Next clean PURE seams (per the
+2026-06 classification, each takes a small explicit context + is unit-testable):
+- `_renderPlaceActivityItems`: `_searchNormalize` + `_pmRowMatchesSearch` (search), `_whyFitsLineFor`
+  (shared with the row-builder), `_pmSectionSlug` (trivial).
+- `updateMainMap`: `_mapResolveDestCoords` (coord/dest-hit resolution — cleanest), `_routeHasRenderableWayside`,
+  `_buildDestPinGroups`, `_resolveGatewayBadges`.
+- `_openTripStopPopover`: `_collectStopWhatsHere` (collect/render split), day-trip-option building,
+  the wayside-offer decision rule.
+Side-effectful Leaflet/DOM blocks (basemap layer swap, drag wiring, the throttle preamble) are
+explicitly NOT early seams — low ROI, leave.
+
+**Funnel migration (item 2) — BASELINE 154→152→138.** Batch 1 (aa9f674) migrated 14 confidently-safe
+control-toggle / repaint-after-mutation handlers to `_scheduleMainMapUpdate()` / `requestTripRepaint()`.
+Batch 2 (~25 `global.drawTripMode()` inline handlers in trip-ui.js / features-conversation.js /
+edit-constraints.js / features-trip.js) is "likely safe" but each needs its trip-view path EXERCISED
+before migrating — not a blind sweep. `drawDestMode(id)` sites stay (no dest funnel). Floor is ~8–9
+occurrences that can never be removed (the 2 function definitions, the 3 funnel-internal calls, the
+menubar onclick string, 2 comments) — don't drop BASELINE below that.
 
 ### Parallel-state collapse (item 3) — audit 2026-06
 A focused audit for remaining "same fact in two places / two writers / derived-and-stored" drift.
