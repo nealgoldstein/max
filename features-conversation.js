@@ -903,13 +903,20 @@ function showAskMaxKeyModal(opts) {
   saveBtn.onclick = function(){
     var v = (keyInput.value || "").trim();
     if (!v) { msg.textContent = "Paste your key first."; msg.style.color = "#c44"; return; }
-    if (!/^sk-ant-/.test(v)) {
-      msg.textContent = "That doesn't look like an Anthropic key (should start with sk-ant-).";
+    // F1 (parallel-state dedup): validate via the SINGLE PD.445 gate
+    // (_isWellFormedApiKey) and persist through the SINGLE write door
+    // (saveApiKey, which sets the shared global _apiKey). This modal used to be
+    // a THIRD api-key writer with only a loose ^sk-ant- prefix check — the exact
+    // weaker-invariant bypass PD.445 closed (a malformed-but-prefixed key, e.g.
+    // one with a trailing token, would get stored here, then fail on read).
+    var ok = (typeof _isWellFormedApiKey === "function") ? _isWellFormedApiKey(v) : /^sk-ant-/.test(v);
+    if (!ok) {
+      msg.textContent = "That doesn't look like a valid key — it should be a single sk-ant-… token with no spaces or extra text.";
       msg.style.color = "#c44";
       return;
     }
-    try { localStorage.setItem("max-api-key", v); } catch (_) {}
-    _apiKey = v;  // module-scope variable used by callMax
+    if (typeof saveApiKey === "function") { saveApiKey(v); }
+    else { try { localStorage.setItem("max-api-key", v); } catch (_) {} _apiKey = v; }
     ov.remove();
     if (typeof opts.onSaved === "function") opts.onSaved();
   };

@@ -982,6 +982,30 @@ describe('engine-picker.js — pure helpers', () => {
     assert.strictEqual(MaxEnginePicker.parseNightsFromRange(''), 3);
     assert.strictEqual(MaxEnginePicker.parseNightsFromRange(null), 3);
   });
+
+  // F2: the LIVE trip-name derivation (a dead, divergent MaxPublish twin was
+  // removed). _titleCaseCity is absent in Node, so it falls back to identity —
+  // these inputs don't depend on casing.
+  test('deriveTripName prefers placeName, then region, then kept ("+N more")', () => {
+    assert.strictEqual(MaxEnginePicker.deriveTripName({ placeName: 'Iceland' }, []), 'Iceland');
+    assert.strictEqual(MaxEnginePicker.deriveTripName({ region: 'Patagonia' }, []), 'Patagonia');
+    assert.strictEqual(MaxEnginePicker.deriveTripName({}, [{ place: 'Vik' }]), 'Vik');
+    assert.strictEqual(
+      MaxEnginePicker.deriveTripName({}, [{ place: 'Vik' }, { place: 'Hofn' }, { place: 'X' }]),
+      'Vik + 2 more'
+    );
+    assert.strictEqual(MaxEnginePicker.deriveTripName({}, []), 'New trip');
+  });
+
+  test('isAutoName matches auto names only (live semantics)', () => {
+    assert.strictEqual(MaxEnginePicker.isAutoName(''), true);
+    assert.strictEqual(MaxEnginePicker.isAutoName(null), true);
+    assert.strictEqual(MaxEnginePicker.isAutoName('New trip'), true);
+    assert.strictEqual(MaxEnginePicker.isAutoName('Untitled trip'), true);
+    assert.strictEqual(MaxEnginePicker.isAutoName('Untitled — Jun 6'), true);
+    // live isAutoName is STRICTER than the old twin: a bare/other name is NOT auto
+    assert.strictEqual(MaxEnginePicker.isAutoName('Iceland Ring Road'), false);
+  });
 });
 
 // ── Suite: state sharing ─────────────────────────────────────────

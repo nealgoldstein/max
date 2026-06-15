@@ -262,36 +262,15 @@
     return false;
   }
 
-  // ── Trip name derivation ──────────────────────────────────────
-
-  // Round EB / HL: derive a trip name when the user hasn't set one
-  // explicitly. Prefer brief.placeName, then region, then first
-  // kept candidate's place, then a generic fallback.
-  //
-  // Pure — doesn't read _tb directly.
-  function deriveTripName(brief, keptCandidates, fallback) {
-    fallback = fallback || "New trip";
-    if (!brief && !keptCandidates) return fallback;
-    var b = brief || {};
-    if (b.placeName && String(b.placeName).trim()) return String(b.placeName).trim();
-    if (b.region && String(b.region).trim()) return String(b.region).trim();
-    var kept = Array.isArray(keptCandidates) ? keptCandidates : [];
-    var first = kept.find(function (c) { return c && c.place; });
-    if (first) return first.place;
-    return fallback;
-  }
-
-  // Is a name "auto" — i.e. something we should override with our
-  // derivation? Empty, "New trip", or "Untitled".
-  function isAutoName(name) {
-    if (!name) return true;
-    var s = String(name).trim().toLowerCase();
-    if (!s) return true;
-    if (s === "new trip") return true;
-    if (s === "untitled") return true;
-    if (s.indexOf("untitled") === 0) return true;
-    return false;
-  }
+  // ── Trip name derivation — RETIRED (F2) ───────────────────────
+  // deriveTripName + isAutoName lived here too, but were a DEAD, DIVERGENT twin
+  // of the LIVE MaxEnginePicker.deriveTripName / isAutoName (engine-picker.js
+  // ~1887): this copy had no title-casing, returned a bare first.place for
+  // multi-kept (vs "X + N more"), and used a looser isAutoName (any "untitled*").
+  // Production always used the MaxEnginePicker versions; these were tested but
+  // never called — the tests guarded a copy that could disagree with the real
+  // name. Removed so there is ONE implementation, now tested in
+  // tests/engine-tests.js against the live MaxEnginePicker.
 
   // ── Diagnostics ────────────────────────────────────────────────
 
@@ -324,8 +303,6 @@
     // Round DW
     detectRebuild:                  detectRebuild,
     // Round EB / HL
-    deriveTripName:                 deriveTripName,
-    isAutoName:                     isAutoName,
     // Diagnostics
     describeFilterOutput:           describeFilterOutput
   };

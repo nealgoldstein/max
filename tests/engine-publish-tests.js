@@ -366,38 +366,9 @@ test("detectRebuild — fresh build (no flag, no destinations)", function () {
 });
 
 // ── Trip name derivation ──────────────────────────────────────────
-console.log("\nengine-publish — trip name derivation\n");
-
-test("derive trip name from brief.placeName", function () {
-  var name = global.MaxPublish.deriveTripName({ placeName: "Iceland" }, []);
-  assert.strictEqual(name, "Iceland");
-});
-
-test("derive trip name falls through to region", function () {
-  var name = global.MaxPublish.deriveTripName({ region: "Iceland" }, []);
-  assert.strictEqual(name, "Iceland");
-});
-
-test("derive trip name falls through to first kept candidate", function () {
-  var name = global.MaxPublish.deriveTripName({}, [{ place: "Vík" }]);
-  assert.strictEqual(name, "Vík");
-});
-
-test("derive trip name uses fallback when nothing matches", function () {
-  var name = global.MaxPublish.deriveTripName({}, []);
-  assert.strictEqual(name, "New trip");
-  var name2 = global.MaxPublish.deriveTripName({}, [], "Untitled trip");
-  assert.strictEqual(name2, "Untitled trip");
-});
-
-test("isAutoName recognizes empty + 'New trip' + 'Untitled'", function () {
-  assert.strictEqual(global.MaxPublish.isAutoName(""), true);
-  assert.strictEqual(global.MaxPublish.isAutoName(null), true);
-  assert.strictEqual(global.MaxPublish.isAutoName("New trip"), true);
-  assert.strictEqual(global.MaxPublish.isAutoName("untitled"), true);
-  assert.strictEqual(global.MaxPublish.isAutoName("Untitled — Sept 12"), true);
-  assert.strictEqual(global.MaxPublish.isAutoName("My Iceland Trip"), false);
-});
+// F2: deriveTripName / isAutoName trip-name derivation moved to the LIVE
+// MaxEnginePicker versions — tested in tests/engine-tests.js. The dead,
+// divergent MaxPublish twin was removed.
 
 // ── describeFilterOutput diagnostic ───────────────────────────────
 console.log("\nengine-publish — diagnostic\n");
