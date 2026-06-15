@@ -910,7 +910,7 @@ check("T3.2: direct trip-render calls don't grow past the ratchet baseline",
   // repaints through the funnels. Migrating an existing site LOWERS the count —
   // when you do, drop BASELINE to match (a green ratchet only moves down).
   (function () {
-    var BASELINE = 154; // total drawTripMode(/drawDestMode(/updateMainMap( in root *.js,*.html
+    var BASELINE = 152; // total drawTripMode(/drawDestMode(/updateMainMap( in root *.js,*.html (T3.2: 154→152, 2 exec-mode day-selector repaints migrated to _scheduleMainMapUpdate)
     var files = fs.readdirSync(ROOT).filter(function (f) { return /\.(js|html)$/.test(f); });
     var total = 0;
     files.forEach(function (f) {
