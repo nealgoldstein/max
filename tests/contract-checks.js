@@ -902,6 +902,27 @@ check("Discovery 1: build + reopen finalize placement through ONE pipeline (PD.4
     && (indexSrc.match(/_finalizeDiscoveryPlacement\(/g) || []).length >= 2,
   "a caller hand-rolled the placement sequence again instead of the one pipeline");
 
+check("T3.2: direct trip-render calls don't grow past the ratchet baseline",
+  // The bus is advisory (PD.333) and ~150 sites still call drawTripMode/
+  // drawDestMode/updateMainMap directly. requestTripRepaint() (full repaint) and
+  // _scheduleMainMapUpdate() (map-only) are the funnels. This RATCHET freezes the
+  // direct-call count at today's baseline so the debt can't REGROW: route new
+  // repaints through the funnels. Migrating an existing site LOWERS the count —
+  // when you do, drop BASELINE to match (a green ratchet only moves down).
+  (function () {
+    var BASELINE = 154; // total drawTripMode(/drawDestMode(/updateMainMap( in root *.js,*.html
+    var files = fs.readdirSync(ROOT).filter(function (f) { return /\.(js|html)$/.test(f); });
+    var total = 0;
+    files.forEach(function (f) {
+      var src = fs.readFileSync(path.join(ROOT, f), "utf8");
+      ["drawTripMode(", "drawDestMode(", "updateMainMap("].forEach(function (p) {
+        total += src.split(p).length - 1;
+      });
+    });
+    return total <= BASELINE;
+  })(),
+  "a new direct drawTripMode/drawDestMode/updateMainMap call was added (count exceeded the T3.2 ratchet) — route the repaint through requestTripRepaint() / _scheduleMainMapUpdate() instead");
+
 // ───────────────────────────────────────────────────────────────────
 console.log("\n" + "─".repeat(50));
 console.log("PASS: " + pass + "    FAIL: " + fail);
