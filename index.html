@@ -25528,6 +25528,24 @@ function _maxPlaceSetAudit(quiet) {
     var _gtA = (typeof _listedGroundTruth === "function") ? _listedGroundTruth() : { stays: [], sights: [] };
     var _gtList = (_gtA.stays || []).map(function(n){ return { name: n, role: "stay" }; })
       .concat((_gtA.sights || []).map(function(n){ return { name: n, role: "see" }; }));
+    // PD.401L: a place the user listed can live in a route/region container
+    // (a type:route umbrella like "Golden Circle") and never surface in the
+    // notes/classified set _listedGroundTruth reads. Union in the canonical
+    // in-memory listed map (_userListedNames) so such a place is part of the
+    // listed set and gets matched as FOUND below — not reported "missing".
+    try {
+      var _ulnA = (_tb && _tb._userListedNames) || {};
+      var _uldA = (_tb && _tb._userListedDisplay) || {};
+      var _gtSeen = {};
+      _gtList.forEach(function(g){ _gtSeen[_nfTk(g.name)] = true; });
+      Object.keys(_ulnA).forEach(function(k){
+        var disp = _uldA[k] || k;
+        var nk = _nfTk(disp);
+        if (!nk || _gtSeen[nk]) return;
+        _gtSeen[nk] = true;
+        _gtList.push({ name: disp, role: (_ulnA[k] === "stay") ? "stay" : "see" });
+      });
+    } catch(_){}
     if (_gtList.length) {
       // PRESENT = ANY record ∪ destinations, tokenized for lenient matching.
       // PD.431: presence is "is this place on the page at all?", NOT "is it

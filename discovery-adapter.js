@@ -132,6 +132,24 @@ function _applyDiscoveryModelToSights(){
   // Rebuild the owned (sight) items from the model's derivation.
   var prevById = {};
   owned.forEach(function(it){ if (it && it.section) prevById[it.section] = it; });
+  // When the model RENAMES a section relative to the source LLM item
+  // (e.g. "Relax in hot springs" -> "Lakes & lagoons"), prevById (keyed by
+  // section NAME) misses, so the editorial flags the LLM stamped (iconic,
+  // _headliner, description, category) are lost. Recover them from the
+  // previous owned item with the greatest PLACE overlap — placement stays
+  // the model's; only the item's editorial attributes are inherited.
+  var _ovPk = (window.PlaceKey && PlaceKey.resolve) ? PlaceKey.resolve : function(s){ return String(s||"").toLowerCase().trim(); };
+  function _ownedPlaceKeys(it){ return ((it && it.requiredPlaces) || []).map(function(p){ return (p && p.place) ? _ovPk(p.place) : null; }).filter(Boolean); }
+  function _bestOverlapItem(grp){
+    var gk = {}; (grp.places || []).forEach(function(p){ var nm = p.place || (p.src && p.src.place); var k = nm ? _ovPk(nm) : null; if (k) gk[k] = true; });
+    var best = null, bestN = 0;
+    owned.forEach(function(it){
+      if (!it || (window._isStaySection && window._isStaySection(it.section))) return;
+      var n = 0; _ownedPlaceKeys(it).forEach(function(k){ if (gk[k]) n++; });
+      if (n > bestN) { bestN = n; best = it; }
+    });
+    return bestN > 0 ? best : null;
+  }
   var newSightItems = model.sections().map(function(grp){
     var template = prevById[grp.section] || {};
     // Clone ALL item-level fields the template carried (iconic,
@@ -140,6 +158,17 @@ function _applyDiscoveryModelToSights(){
     // only what placement determines.
     var item = {};
     for (var k in template) { if (Object.prototype.hasOwnProperty.call(template, k)) item[k] = template[k]; }
+    // Editorial-flag recovery when the model renamed this section (no
+    // exact-name template): inherit from the best place-overlap source item.
+    if (!prevById[grp.section]) {
+      var _ov = _bestOverlapItem(grp);
+      if (_ov) {
+        if (_ov.iconic) item.iconic = true;
+        if (_ov._headliner) item._headliner = true;
+        if (_ov.description && item.description == null) item.description = _ov.description;
+        if (_ov.category && item.category == null) item.category = _ov.category;
+      }
+    }
     item.id = template.id || ("model-" + grp.section.toLowerCase().replace(/[^a-z0-9]+/g, "-"));
     item.section = grp.section;
     item.name = template.name || grp.section;
