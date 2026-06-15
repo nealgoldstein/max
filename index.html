@@ -13613,6 +13613,128 @@ function _pmCheckAllUnchecked(){
 }
 if (typeof globalThis !== "undefined") globalThis._pmCheckAllUnchecked = _pmCheckAllUnchecked;
 
+// T3.6 slice 2 (extracted from _renderPlaceActivityItems' by-Place loop):
+// builds ONE place row's DOM node. Pulling it out of the ~2,500-line render
+// isolates the row markup and is the seam a future single-row re-render
+// (a keep-toggle repainting one row instead of wiping + rebuilding the whole
+// list) needs. `deps` carries the two render-local inputs — the childrenByHub
+// map and the whyItFits-line builder; every other helper (_pmEsc,
+// _pmRoleIndicatorHtml, togglePlaceByPlaceMode, …) is global.
+function _pmBuildPlaceRow(key, pInfo, deps) {
+  deps = deps || {};
+  var childrenByHub = deps.childrenByHub || {};
+  var whyFitsLineFor = deps.whyFitsLineFor || function(){ return ""; };
+  // Build a synthetic "destination" object for the existing chip
+  // builders. We need it to carry .place + .placeRefs so the
+  // stay chip + research button + nights can render with the
+  // same logic as by-Activity.
+  var d = {
+    place: pInfo.place,
+    nightsMax: 0,
+    items: pInfo.activities.map(function(a){ return a.item; }),
+    placeRefs: pInfo.activities.map(function(a){ return { item: a.item, placeRef: a.placeRef }; })
+  };
+  // Max nights across this place's refs.
+  pInfo.activities.forEach(function(a){
+    var n = (typeof a.placeRef.nights === "number") ? a.placeRef.nights : 0;
+    if (a.item.type !== "route" && n > d.nightsMax) d.nightsMax = n;
+  });
+
+  var row = document.createElement("div");
+  row.className = "tb-act-table-row tb-dest-major" + (pInfo.kept ? " on" : " off");
+  row.id = "tb-place-place-row-" + key.replace(/[^a-z0-9]/gi, "_");
+  row.setAttribute("data-place", d.place);  // PD.54: bulk-select hook
+
+  // Build the chips inline.
+  var _placeArg = _pmEsc(d.place);
+  // Round PD.1: by-Place rendering no longer surfaces role
+  // (Stay/See/Day trip/Maybe). Discovery is a flat list now;
+  // role decisions happen at trip-build time via _pmDeriveRole.
+  // The pill variables stay declared but empty so the row HTML
+  // below doesn't crash when it concatenates them.
+  var stayChip   = '';
+  var dtBadge    = '';
+  var maybeBadge = '';
+
+  var nightsLine = d.nightsMax ? (d.nightsMax + ' night' + (d.nightsMax === 1 ? '' : 's') + ' suggested') : '';
+  var kids = (childrenByHub[key] || []);
+  var sightsLine = kids.length
+    ? ('<div class="tb-dest-meta" style="font-size:10.5px;color:var(--c-accent);margin-top:3px;line-height:1.45;">'
+        + '<span style="color:#7c5cbf;font-weight:600;">Sights here:</span> '
+        + kids.slice(0, 4).map(_pmEsc).join(", ") + (kids.length > 4 ? " · +" + (kids.length - 4) + " more" : "")
+        + '</div>')
+    : '';
+  // PD.114: inline "Max suggests near here" — enrichment items
+  // (from PD.111 Enhance) sourced from this place. Visually
+  // distinct from "Sights here" (which surfaces existing
+  // children); reads as additive suggestions, not commitments.
+  var _enrichKids = (_tb._enrichmentsByPlace && _tb._enrichmentsByPlace[key]) || [];
+  // PD.173: enrichment names are clickable links to their full row.
+  var enrichLine = _enrichKids.length
+    ? ('<div class="tb-dest-meta" style="font-size:10.5px;color:#7a6294;margin-top:3px;line-height:1.45;font-style:italic;">'
+        + '<span style="color:#7a6294;font-weight:600;font-style:normal;">✦ Max suggests near here:</span> '
+        + _enrichKids.slice(0, 4).map(function(p){
+            var nm = p && p.place ? String(p.place) : "";
+            var arg = nm.replace(/'/g, "\\'");
+            return '<a href="#" onclick="event.preventDefault();event.stopPropagation();if(typeof _pmJumpToPlaceRow===&quot;function&quot;)_pmJumpToPlaceRow(\'' + arg + '\');" style="color:#7a6294;text-decoration:underline;text-decoration-color:rgba(122,98,148,0.4);cursor:pointer;">' + _pmEsc(nm) + '</a>';
+          }).join(", ")
+        + (_enrichKids.length > 4 ? " · +" + (_enrichKids.length - 4) + " more" : "")
+        + '</div>')
+    : '';
+
+  // Activity badges — list every activity this place appears under.
+  var activityList = pInfo.activities.map(function(a){
+    var nm = _pmEsc(a.item.name || a.item.section || "");
+    // Round PD.4: iconic ★ marker dropped from activity pills.
+    // Auto-check behavior on iconic activities is preserved
+    // upstream; the visible badge was misreading as "Max says
+    // this matters more than what you asked for."
+    var iconic = '';
+    return '<span style="display:inline-flex;align-items:center;font-size:10.5px;color:var(--c-ink-2);background:#f5f1e8;border:1px solid #e6dfca;border-radius:5px;padding:2px 7px;">'
+      + nm + iconic + '</span>';
+  }).join(" ");
+
+  // Round PD.6: keep-checkbox restored on the LEFT; remove ×
+  // moved to the RIGHT of the name line. Two distinct
+  // affordances — checkbox = is this place in or out of the
+  // trip, × = remove from the list entirely.
+  row.innerHTML = '<div class="tb-act-col-left">'
+    + '<div style="display:flex;align-items:flex-start;gap:8px;">'
+    +   '<div class="tb-act-check'+(pInfo.kept?" on":"")+'" onclick="event.stopPropagation();togglePlaceByPlaceMode(&#39;' + _placeArg + '&#39;)" title="Keep / drop this place"></div>'
+    +   '<div style="flex:1;min-width:0;">'
+    +     '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
+    +       '<div class="tb-act-name" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;flex:1;min-width:0;">'
+    // PD.123: click place name → focus pin on map.
+    +         '<span style="cursor:pointer;text-decoration:underline;text-decoration-color:rgba(0,0,0,0.15);text-underline-offset:3px;" title="Show on map" onclick="event.stopPropagation();if(typeof _pmFocusPlace===&quot;function&quot;)_pmFocusPlace(&#39;' + _placeArg + '&#39;);">' + _placeArg + '</span>'
+    +         _pmRoleIndicatorHtml(d.place)
+    +         _pmOnUserListedBadgeHtml(d.place)
+    +         _pmHeadlinerBadgeHtml(d.place)
+    +         (pInfo.kept ? stayChip : maybeBadge)
+    +         (pInfo.kept ? dtBadge : '')
+    +       '</div>'
+    +       '<span class="pm-row-menu-wrap">'
+    +         '<button type="button" class="pm-row-menu-btn" onclick="_pmToggleRowMenu(this);event.stopPropagation();" title="More options">⋯</button>'
+    +         '<div class="pm-row-menu-pop">'
+    +           '<button type="button" class="pm-row-menu-item" style="color:var(--c-primary);" onclick="event.stopPropagation();_pmTogglePlaceStay(&#39;' + _placeArg + '&#39;);">'
+    +             (_pmIsStayCandidate(d.place) ? 'Mark as just visiting' : 'Mark as overnight stay')
+    +           '</button>'
+    +           '<button type="button" class="pm-row-menu-item" title="Rejects this place and teaches Max to steer away from anything like it." onclick="event.stopPropagation();_pmRemoveFromList(&#39;' + _placeArg + '&#39;);">Not interested ever</button>'
+    +         '</div>'
+    +       '</span>'
+    +     '</div>'
+    +     (nightsLine ? '<div class="tb-dest-meta">' + nightsLine + '</div>' : '')
+    +     sightsLine
+    +     enrichLine
+    +     whyFitsLineFor(d.place)
+    +     (activityList ? '<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">' + activityList + '</div>' : '')
+    +   '</div>'
+    + '</div>'
+    + '</div>';
+
+  return row;
+}
+if (typeof globalThis !== "undefined") globalThis._pmBuildPlaceRow = _pmBuildPlaceRow;
+
 function _renderPlaceActivityItems(){
   var list = document.getElementById("tb-place-act-list");
   if(!list) return;
@@ -14988,114 +15110,13 @@ function _renderPlaceActivityItems(){
         if (idx === _bucketBoundaryIdx && visitOrder.length) {
           _emitPlaceSectionHeader("Just visiting", visitOrder.length);
         }
-        var pInfo = byPlace[key];
-        // Build a synthetic "destination" object for the existing chip
-        // builders. We need it to carry .place + .placeRefs so the
-        // stay chip + research button + nights can render with the
-        // same logic as by-Activity.
-        var d = {
-          place: pInfo.place,
-          nightsMax: 0,
-          items: pInfo.activities.map(function(a){ return a.item; }),
-          placeRefs: pInfo.activities.map(function(a){ return { item: a.item, placeRef: a.placeRef }; })
-        };
-        // Max nights across this place's refs.
-        pInfo.activities.forEach(function(a){
-          var n = (typeof a.placeRef.nights === "number") ? a.placeRef.nights : 0;
-          if (a.item.type !== "route" && n > d.nightsMax) d.nightsMax = n;
+        // T3.6 slice 2: single-row markup extracted to _pmBuildPlaceRow so a
+        // future single-row re-render can reuse it. _childrenByHub + the
+        // whyItFits-line builder are the only render-locals it needs.
+        var row = _pmBuildPlaceRow(key, byPlace[key], {
+          childrenByHub: _childrenByHub,
+          whyFitsLineFor: _whyFitsLineFor
         });
-
-        var row = document.createElement("div");
-        row.className = "tb-act-table-row tb-dest-major" + (pInfo.kept ? " on" : " off");
-        row.id = "tb-place-place-row-" + key.replace(/[^a-z0-9]/gi, "_");
-        row.setAttribute("data-place", d.place);  // PD.54: bulk-select hook
-
-        // Build the chips inline.
-        var _placeArg = _pmEsc(d.place);
-        // Round PD.1: by-Place rendering no longer surfaces role
-        // (Stay/See/Day trip/Maybe). Discovery is a flat list now;
-        // role decisions happen at trip-build time via _pmDeriveRole.
-        // The pill variables stay declared but empty so the row HTML
-        // below doesn't crash when it concatenates them.
-        var stayChip   = '';
-        var dtBadge    = '';
-        var maybeBadge = '';
-
-        var nightsLine = d.nightsMax ? (d.nightsMax + ' night' + (d.nightsMax === 1 ? '' : 's') + ' suggested') : '';
-        var kids = (_childrenByHub[key] || []);
-        var sightsLine = kids.length
-          ? ('<div class="tb-dest-meta" style="font-size:10.5px;color:var(--c-accent);margin-top:3px;line-height:1.45;">'
-              + '<span style="color:#7c5cbf;font-weight:600;">Sights here:</span> '
-              + kids.slice(0, 4).map(_pmEsc).join(", ") + (kids.length > 4 ? " · +" + (kids.length - 4) + " more" : "")
-              + '</div>')
-          : '';
-        // PD.114: inline "Max suggests near here" — enrichment items
-        // (from PD.111 Enhance) sourced from this place. Visually
-        // distinct from "Sights here" (which surfaces existing
-        // children); reads as additive suggestions, not commitments.
-        var _enrichKids = (_tb._enrichmentsByPlace && _tb._enrichmentsByPlace[key]) || [];
-        // PD.173: enrichment names are clickable links to their full row.
-        var enrichLine = _enrichKids.length
-          ? ('<div class="tb-dest-meta" style="font-size:10.5px;color:#7a6294;margin-top:3px;line-height:1.45;font-style:italic;">'
-              + '<span style="color:#7a6294;font-weight:600;font-style:normal;">✦ Max suggests near here:</span> '
-              + _enrichKids.slice(0, 4).map(function(p){
-                  var nm = p && p.place ? String(p.place) : "";
-                  var arg = nm.replace(/'/g, "\\'");
-                  return '<a href="#" onclick="event.preventDefault();event.stopPropagation();if(typeof _pmJumpToPlaceRow===&quot;function&quot;)_pmJumpToPlaceRow(\'' + arg + '\');" style="color:#7a6294;text-decoration:underline;text-decoration-color:rgba(122,98,148,0.4);cursor:pointer;">' + _pmEsc(nm) + '</a>';
-                }).join(", ")
-              + (_enrichKids.length > 4 ? " · +" + (_enrichKids.length - 4) + " more" : "")
-              + '</div>')
-          : '';
-
-        // Activity badges — list every activity this place appears under.
-        var activityList = pInfo.activities.map(function(a){
-          var nm = _pmEsc(a.item.name || a.item.section || "");
-          // Round PD.4: iconic ★ marker dropped from activity pills.
-          // Auto-check behavior on iconic activities is preserved
-          // upstream; the visible badge was misreading as "Max says
-          // this matters more than what you asked for."
-          var iconic = '';
-          return '<span style="display:inline-flex;align-items:center;font-size:10.5px;color:var(--c-ink-2);background:#f5f1e8;border:1px solid #e6dfca;border-radius:5px;padding:2px 7px;">'
-            + nm + iconic + '</span>';
-        }).join(" ");
-
-        // Round PD.6: keep-checkbox restored on the LEFT; remove ×
-        // moved to the RIGHT of the name line. Two distinct
-        // affordances — checkbox = is this place in or out of the
-        // trip, × = remove from the list entirely.
-        row.innerHTML = '<div class="tb-act-col-left">'
-          + '<div style="display:flex;align-items:flex-start;gap:8px;">'
-          +   '<div class="tb-act-check'+(pInfo.kept?" on":"")+'" onclick="event.stopPropagation();togglePlaceByPlaceMode(&#39;' + _placeArg + '&#39;)" title="Keep / drop this place"></div>'
-          +   '<div style="flex:1;min-width:0;">'
-          +     '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
-          +       '<div class="tb-act-name" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;flex:1;min-width:0;">'
-          // PD.123: click place name → focus pin on map.
-          +         '<span style="cursor:pointer;text-decoration:underline;text-decoration-color:rgba(0,0,0,0.15);text-underline-offset:3px;" title="Show on map" onclick="event.stopPropagation();if(typeof _pmFocusPlace===&quot;function&quot;)_pmFocusPlace(&#39;' + _placeArg + '&#39;);">' + _placeArg + '</span>'
-          +         _pmRoleIndicatorHtml(d.place)
-          +         _pmOnUserListedBadgeHtml(d.place)
-          +         _pmHeadlinerBadgeHtml(d.place)
-          +         (pInfo.kept ? stayChip : maybeBadge)
-          +         (pInfo.kept ? dtBadge : '')
-          +       '</div>'
-          +       '<span class="pm-row-menu-wrap">'
-          +         '<button type="button" class="pm-row-menu-btn" onclick="_pmToggleRowMenu(this);event.stopPropagation();" title="More options">⋯</button>'
-          +         '<div class="pm-row-menu-pop">'
-          +           '<button type="button" class="pm-row-menu-item" style="color:var(--c-primary);" onclick="event.stopPropagation();_pmTogglePlaceStay(&#39;' + _placeArg + '&#39;);">'
-          +             (_pmIsStayCandidate(d.place) ? 'Mark as just visiting' : 'Mark as overnight stay')
-          +           '</button>'
-          +           '<button type="button" class="pm-row-menu-item" title="Rejects this place and teaches Max to steer away from anything like it." onclick="event.stopPropagation();_pmRemoveFromList(&#39;' + _placeArg + '&#39;);">Not interested ever</button>'
-          +         '</div>'
-          +       '</span>'
-          +     '</div>'
-          +     (nightsLine ? '<div class="tb-dest-meta">' + nightsLine + '</div>' : '')
-          +     sightsLine
-          +     enrichLine
-          +     _whyFitsLineFor(d.place)
-          +     (activityList ? '<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">' + activityList + '</div>' : '')
-          +   '</div>'
-          + '</div>'
-          + '</div>';
-
         list.appendChild(row);
       });
 

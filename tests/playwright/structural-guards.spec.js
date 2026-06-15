@@ -102,4 +102,60 @@ test.describe('structural guards', () => {
     expect(r.waySelectsCurrent, 'currentRouteId stays selected').toBe(true);
     expect(r.emptyGuard, 'null args ⇒ safe empty result').toEqual({ html: '', count: 0 });
   });
+
+  // T3.6 slice 2 — _pmBuildPlaceRow extracted from _renderPlaceActivityItems'
+  // by-Place loop (~107 lines). Pin that it builds a well-formed row node from
+  // a synthetic pInfo + deps, so the row markup can't silently drift and so the
+  // extraction stays the reusable seam for a future single-row re-render.
+  test('T3.6: _pmBuildPlaceRow builds a place row node from pInfo + deps', async ({ page }) => {
+    await bootClean(page);
+    const r = await page.evaluate(() => {
+      const fn = window._pmBuildPlaceRow;
+      if (typeof fn !== 'function') return { typeofFn: typeof fn };
+      const pInfo = {
+        place: 'Testville',
+        kept: true,
+        activities: [
+          { item: { name: 'Coastal Hike', type: 'sight' }, placeRef: { nights: 2 } },
+          { item: { name: 'Harbor Walk',  type: 'sight' }, placeRef: { nights: 0 } },
+        ],
+      };
+      let row, threw = null;
+      try {
+        row = fn('testville', pInfo, {
+          childrenByHub: { testville: ['Cove A', 'Cove B'] },
+          whyFitsLineFor: () => '<div class="why">because</div>',
+        });
+      } catch (e) { threw = String((e && e.message) || e); }
+      if (threw) return { threw };
+      const html = row.outerHTML;
+      return {
+        typeofFn: 'function',
+        isNode: row instanceof HTMLElement,
+        className: row.className,
+        id: row.id,
+        dataPlace: row.getAttribute('data-place'),
+        hasCheckboxOn: html.includes('tb-act-check on'),
+        hasName: html.includes('>Testville</span>'),
+        hasNights: html.includes('2 nights suggested'),
+        hasSightsHere: html.includes('Sights here:') && html.includes('Cove A'),
+        hasWhy: html.includes('class="why"'),
+        hasMenu: html.includes('pm-row-menu-btn'),
+        hasBadges: html.includes('Coastal Hike') && html.includes('Harbor Walk'),
+      };
+    });
+    expect(r.typeofFn, 'helper exposed on window').toBe('function');
+    expect(r.threw, 'row build must not throw').toBeUndefined();
+    expect(r.isNode, 'returns a DOM element').toBe(true);
+    expect(r.className).toBe('tb-act-table-row tb-dest-major on');
+    expect(r.id).toBe('tb-place-place-row-testville');
+    expect(r.dataPlace).toBe('Testville');
+    expect(r.hasCheckboxOn, 'kept ⇒ checkbox on').toBe(true);
+    expect(r.hasName, 'place name rendered').toBe(true);
+    expect(r.hasNights, 'nights line from max placeRef nights').toBe(true);
+    expect(r.hasSightsHere, 'Sights-here line from childrenByHub dep').toBe(true);
+    expect(r.hasWhy, 'whyFitsLineFor dep injected').toBe(true);
+    expect(r.hasMenu, 'row ⋯ menu rendered').toBe(true);
+    expect(r.hasBadges, 'one activity badge per activity').toBe(true);
+  });
 });
