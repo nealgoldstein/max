@@ -142,6 +142,44 @@ test("Decision.leg is a COPY — mutating it never bleeds across decisions", fun
   assert.strictEqual(src.fromPlace, "A", "input leg object not mutated");
 });
 
+// ── P4.5: the log is the durable decision record (persist round-trip) ──
+test("toJSON → fromJSON reconstructs every decision verbatim (incl. leg)", function () {
+  var D = new Decisions();
+  D.set("Höfn", { kept: false });                                   // an uncheck
+  D.set("Reykjahlíð", { kept: true });                              // a commit
+  D.set("Mývatn", { rejected: true });                              // a reject
+  D.set("Seljalandsfoss", { role: "onway", leg: { fromPlace: "Reykjavik", toPlace: "Vik" } });
+  D.set("Landmannalaugar", { role: "daytrip", hub: "vík" });
+  var restored = MD.fromJSON(JSON.parse(JSON.stringify(D.toJSON())));
+  assert.strictEqual(restored.size(), D.size(), "same number of decisions");
+  assert.strictEqual(restored.get("Höfn").kept, false);
+  assert.strictEqual(restored.get("Reykjahlíð").kept, true);
+  assert.strictEqual(restored.get("Mývatn").rejected, true);
+  assert.deepStrictEqual(restored.get("Seljalandsfoss").leg, { fromPlace: "Reykjavik", toPlace: "Vik" });
+  assert.strictEqual(restored.get("Seljalandsfoss").role, "onway");
+  assert.strictEqual(restored.get("Landmannalaugar").hub, "vík");
+});
+test("the restored log projects keep identically to the original", function () {
+  var D = new Decisions();
+  D.set("Höfn", { kept: false });
+  D.set("Reykjahlíð", { kept: true });
+  var R = MD.fromJSON(JSON.parse(JSON.stringify(D.toJSON())));
+  assert.strictEqual(MD.keepOf(USER, R.get("Höfn")), false);       // uncheck survived storage
+  assert.strictEqual(MD.keepOf(MAXHUB, R.get("Reykjahlíð")), true); // commit survived storage
+});
+test("restored log preserves normalized identity (case/space-insensitive get)", function () {
+  var D = new Decisions();
+  D.set("  Blue  Lagoon ", { kept: true });
+  var R = MD.fromJSON(JSON.parse(JSON.stringify(D.toJSON())));
+  assert.strictEqual(R.get("blue lagoon").kept, true);
+});
+test("fromJSON tolerates empty / missing / malformed input", function () {
+  assert.strictEqual(MD.fromJSON(null).size(), 0);
+  assert.strictEqual(MD.fromJSON(undefined).size(), 0);
+  assert.strictEqual(MD.fromJSON({}).size(), 0);
+  assert.strictEqual(MD.fromJSON("nope").size(), 0);
+});
+
 console.log("\n──────────────────────────────────────────────────");
 console.log("PASS: " + pass + "    FAIL: " + fail);
 process.exit(fail > 0 ? 1 : 0);

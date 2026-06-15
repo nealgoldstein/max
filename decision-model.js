@@ -76,6 +76,32 @@
   };
   Decisions.prototype.size = function () { return Object.keys(this._byKey).length; };
 
+  // ── Persistence (P4.5) — the log is the durable decision record ───────
+  // toJSON: a plain, storable map keyed by the SAME normalized identity, so a
+  // round-trip through storage reconstructs the exact decisions. fromJSON: the
+  // inverse, rebuilding Decision instances (re-normalizing each field). Keys are
+  // already normalized, so they're preserved verbatim — no re-keying.
+  Decisions.prototype.toJSON = function () {
+    var out = {};
+    for (var k in this._byKey) {
+      if (!Object.prototype.hasOwnProperty.call(this._byKey, k)) continue;
+      var d = this._byKey[k];
+      out[k] = { kept: d.kept, rejected: d.rejected, role: d.role, hub: d.hub, leg: d.leg };
+    }
+    return out;
+  };
+  function fromJSON(obj) {
+    var D = new Decisions();
+    if (obj && typeof obj === "object") {
+      for (var k in obj) {
+        if (!Object.prototype.hasOwnProperty.call(obj, k)) continue;
+        if (!k) continue;
+        D._byKey[k] = new Decision(obj[k] || {});   // keys already normalized
+      }
+    }
+    return D;
+  }
+
   // ── THE PROJECTION — (facts, decision) -> derived view ────────────────
   // facts: { origin: "user"|"max"|"max-hub", role, kind, themeFit, nearListed }
   // decision: a Decision, or null when the user has not decided.
@@ -122,6 +148,7 @@
   var MaxDecisions = {
     Decision: Decision,
     Decisions: Decisions,
+    fromJSON: fromJSON,
     keepOf: keepOf,
     roleOf: roleOf,
     sectionOf: sectionOf,
