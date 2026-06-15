@@ -661,7 +661,7 @@ test("loading a v0 trip writes a _preMigrationBackup with the original", functio
   var t = global.TripStore.load("legacy-snap-001");
   assert(t._preMigrationBackup, "snapshot should be created");
   assert.strictEqual(t._preMigrationBackup.fromVersion, 0);
-  assert.strictEqual(t._preMigrationBackup.toVersion, 1);
+  assert.strictEqual(t._preMigrationBackup.toVersion, 4);   // T3.3: SCHEMA_VERSION now 4 (was 1)
   assert(t._preMigrationBackup.snapshot, "snapshot data present");
   // The snapshot should have the mdcItems that got stripped.
   assert(Array.isArray(t._preMigrationBackup.snapshot.mdcItems));
@@ -675,10 +675,10 @@ test("a trip already at SCHEMA_VERSION does NOT get a redundant backup", functio
     name: "Current Trip",
     destinations: [],
     placeActivities: [],
-    _schemaVersion: 1
+    _schemaVersion: 4   // T3.3: current SCHEMA_VERSION (was 1)
   };
   _storage["max-trip-current-001"] = JSON.stringify({
-    trip: current, _schemaVersion: 1, __saved__: 0
+    trip: current, _schemaVersion: 4, __saved__: 0
   });
   global.TripStore.unload();
   var t = global.TripStore.load("current-001");

@@ -28,8 +28,13 @@
   "use strict";
 
   // ── Schema version ─────────────────────────────────────────────────
-  // Bump whenever the trip object shape changes. Add a migrator below.
-  var SCHEMA_VERSION = 1;
+  // T3.3: ONE migrator now. Aligned to migration.js's CURRENT_SCHEMA_VERSION
+  // (4) — tripstore._migrate keeps its structural backfill (id-from-key,
+  // default fields, mdcItems drop) and delegates the SHAPE evolution
+  // (places dict, route kind→subKind, segments, arrival/departure synthesis)
+  // to MaxMigration.migrateTripShape, so the two no longer stamp the same
+  // _schemaVersion field with incompatible numbers.
+  var SCHEMA_VERSION = 4;
 
   // ── In-memory state ────────────────────────────────────────────────
   var _trip = null;          // the canonical trip object (null when no trip loaded)
@@ -418,15 +423,29 @@
           snapErr && snapErr.message);
       }
     }
-    if (v < 1) _migrateV0ToV1(trip, storageKey);
-    // Future: if (v < 2) _migrateV1ToV2(trip);
-    trip._schemaVersion = SCHEMA_VERSION;
-    // Roll off backups that are more than ONE version behind.
-    if (trip._preMigrationBackup
-        && typeof trip._preMigrationBackup.fromVersion === "number"
-        && SCHEMA_VERSION - trip._preMigrationBackup.fromVersion >= 2) {
-      delete trip._preMigrationBackup;
+    // tripstore's structural backfill — id-from-key, default fields, drop
+    // mdcItems. Idempotent (`if (!x) x = default`), so safe to run for any v.
+    _migrateV0ToV1(trip, storageKey);
+    // T3.3: delegate the SHAPE migration (v0→v4: places dict, dest.placeId,
+    // days, dayTrips→PlanItems, route kind→subKind, segments + refs,
+    // arrival/departure synthesis) to the one complete, Node-tested migrator.
+    // Idempotent + version-gated — verified on a real v1-stamped/v3-shaped trip
+    // (it completes the missing arrival/departure routes and never double-migrates).
+    try {
+      if (typeof MaxMigration !== "undefined" && MaxMigration
+          && typeof MaxMigration.migrateTripShape === "function") {
+        MaxMigration.migrateTripShape({ trip: trip });
+      }
+    } catch (mErr) {
+      console.warn("[TripStore] migrateTripShape failed (non-fatal):", mErr && mErr.message);
     }
+    trip._schemaVersion = SCHEMA_VERSION;
+    // T3.3: keep the pre-migration snapshot. The old "roll off backups >1
+    // version behind" was written for a 1-version scheme (never fired); under
+    // the v0→v4 scheme it would delete the very backup it just created on a
+    // multi-version jump — exactly when recovery matters most. One snapshot per
+    // migrated trip persists with it (cleared naturally once the trip re-saves
+    // at the current version and stops migrating).
     return trip;
   }
 

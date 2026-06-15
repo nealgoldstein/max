@@ -88,15 +88,19 @@ below. Tier 3 — T3.4/3.7 done. Tier 4 — T4.1 done.
   routes a repaint through the single `tripChange` handler (+ PD.433 map coalescing). REMAINING:
   migrate call sites to it incrementally (per-batch, behind CI — not a blind bulk sweep, since
   some callers pass opts / rely on synchronous render), then a contract-check banning new direct calls.
-- **T3.3 — two migrators on one field. ⚠ Landmine de-fanged; merge still a decision.** The LIVE
-  migrator is `tripstore.js _migrate` (v0→v1, `SCHEMA_VERSION=1`). `migration.js migrateTripShape`
-  (v0→**v4**) is NOT wired into the load path (db.js just JSON-parses) — only `tests/migration-tests.js`
-  and migration.js's own v3 read-helpers use it. Both stamp the SAME `trip._schemaVersion` with
-  INCOMPATIBLE numbering. **Fixed the misleading comment** (`index.html` ~430) that claimed db.js
-  calls it — that false claim was the landmine (wiring it in would re-migrate v1 trips to v4 or
-  downgrade the stamp). REMAINING (a real decision, persistence-risk, needs legacy fixtures): pick
-  ONE — adopt migration.js's complete migrator (reconcile the version scheme, drop the dual-shape
-  route ORs) OR delete the unused one and keep tripstore's. Don't merge blind.
+- **T3.3 — two migrators on one field. ✅ DONE (Option A — one migrator).** `tripstore._migrate`
+  now keeps its structural backfill (id-from-key, default fields, drop `mdcItems`) and **delegates
+  the shape migration to `MaxMigration.migrateTripShape`** (the complete, Node-tested v0→v4 one);
+  `SCHEMA_VERSION` aligned to 4 so the two no longer stamp `_schemaVersion` with incompatible
+  numbers. The two v0→v1 are complementary (structural vs shape), both idempotent. The harmful
+  `_preMigrationBackup` rolloff (deleted the snapshot on a multi-version jump) was removed.
+  **Verified in a real browser** (Claude-in-Chrome): a v1-stamped, v3-shaped real trip
+  (Live-Iceland, 40 dests) migrates on load to v4, gains its missing arrival/departure routes
+  (13→15), renders fully, zero console errors. Node 964 green (data-preservation version
+  assertions updated). REMAINING (separate cleanup slice): now that every trip migrates to the
+  `subKind` shape on load, the ~6 dual-shape route ORs (`r.subKind || r.kind…`) can be removed —
+  do it once, behind the gate + a Chrome check, since a file-imported v2 trip still relies on them
+  until its first migrated save.
 - **T3.5 — placeMeta/tripMeta two-store. ◑ Partial.** Fixed the clear data-loss:
   `_pmPersistResearchToTrip` now MERGES `_tb.placeMeta` into `trip.brief.placeMeta`
   instead of replacing it, so a key present only in `trip.brief` (e.g. from a sync
