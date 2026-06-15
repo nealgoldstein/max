@@ -115,7 +115,21 @@ below. Tier 3 — T3.4/3.7 done. Tier 4 — T4.1 done.
   (`engine-picker.js` ~2318); no `trip.mdcItems =` write remains. The `tripstore` delete-on-save
   and the `max-data` legacy fallback are KEPT intentionally — they migrate pre-PD.488 saved
   trips that still carry the field.
-- **T4.2 — `86400000`/`msDay` redefined ~12×;** **T4.3 — `_isStaySection` duplicates `SectionKind.isStay`.**
+- **T3.4 — raw trip writes bypass id==key. ✅ DONE (PD.475 + writeRaw routing).** Verified: all
+  trip-ENVELOPE writers route through `MaxDB.trip.writeRaw` (the id==key assert) — sync.js (834/1045),
+  tripstore._persist, the index.html save helper — with only id==key-safe defensive raw fallbacks.
+  The 3 remaining raw `setItem` are for the `max-trips-index` LIST (not envelopes; the assert doesn't
+  apply); unifying those into one index-writer is optional low-value tidy.
+- **T4.3 — `_isStaySection` vs `SectionKind.isStay`. ✅ DONE.** `_isStaySection` (index.html ~5930)
+  already delegates to `SectionKind.isStay`; the inline fallback is load-order defense, not a duplicate.
+- **T4.2 — `86400000`/`msDay` redefined ~12×. ◯ Deferred (cosmetic).** A magic-number→named-constant
+  rename spanning ~10 independent script scopes + the server; readability-only, lowest leverage.
+
+> **Audit drift note (2026-06):** the 2026-06-10 audit's Tier-3/4 list is stale — T3.1, T3.4, T3.8,
+> T4.3 were all completed afterward (PD.433/PD.475/PD.488 + delegation) and just weren't crossed off.
+> Genuinely-open architectural work left: T3.2 call-site migration (funnel + ratchet done; sites are
+> incremental), T3.6 god-function extraction (large), T3.5 prefer-newer timestamps, T3.3 dual-shape OR
+> removal (low-value cleanup), T4.2 (cosmetic).
 
 ### UI design system — remaining (needs eyes on each view; not blocking)
 - **Button MARKUP → `.btn` classes beyond home.** ~159 inline-styled buttons across
