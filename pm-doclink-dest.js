@@ -182,11 +182,47 @@ function toggleDestKeep(placeName){
     });
   });
   var nextRole = anyKept ? "maybe" : _pmRoleForCheck(placeName);
-  if (!MaxRoleWriter.set(placeName, nextRole)) return;
-  _renderPlaceActivityItems();
+  // PD.450 (#5: render reads, never writes). A keep-toggle never moves a row —
+  // it only flips ONE place's checked state — so re-rendering all ~400 rows
+  // (the "it rewrites the entire screen" flash) is pure waste. We flip just this
+  // place's checkbox in the DOM. But MaxRoleWriter.set persists, which emits a
+  // tripChange whose listener would re-render the WHOLE list and undo the win —
+  // so announce a surgical toggle is in flight; the listener reflects THIS place
+  // surgically and skips the full redraw. Cleared on the next tick so a genuine
+  // structural change right after still gets its full render.
+  try { if (typeof window !== "undefined") { window._pmSurgicalToggleInFlight = placeName; setTimeout(function(){ window._pmSurgicalToggleInFlight = null; }, 0); } } catch (_) {}
+  if (!MaxRoleWriter.set(placeName, nextRole)) { try { window._pmSurgicalToggleInFlight = null; } catch(_){} return; }
+  _pmSurgicalKeepUpdate(placeName);
   _updatePlaceActivitySummary();
   if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
 }
+
+// PD.450: flip the checkbox + row state for EVERY row showing this place,
+// in place, without touching the rest of the list. Reads current keep-state
+// from the records (the single source of truth) — never writes.
+function _pmSurgicalKeepUpdate(placeName){
+  try {
+    if (!placeName) return;
+    var nf = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
+    var pk = nf(placeName);
+    var kept = false;
+    (_tb && _tb.placeActivities || []).forEach(function(it){
+      (it && it.requiredPlaces || []).forEach(function(p){ if (p && p.place && nf(p.place) === pk && p._keep) kept = true; });
+    });
+    var listEl = (typeof document !== "undefined") && document.getElementById("tb-place-act-list");
+    if (!listEl) return;
+    var rows = listEl.querySelectorAll(".tb-act-table-row[data-place]");
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      if (nf(row.getAttribute("data-place")) !== pk) continue;
+      row.classList.toggle("on", kept);
+      row.classList.toggle("off", !kept);
+      var chk = row.querySelector(".tb-act-check");
+      if (chk) chk.classList.toggle("on", kept);
+    }
+  } catch (_) {}
+}
+if (typeof globalThis !== "undefined") globalThis._pmSurgicalKeepUpdate = _pmSurgicalKeepUpdate;
 
 // v360.2: section-scoped toggle. When a destination appears in
 // multiple picker sections ("Cities", "Hot springs", etc.) and some

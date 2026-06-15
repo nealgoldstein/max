@@ -84,6 +84,14 @@
     return (dLat * dLat + dLng * dLng) <= (km * km);
   }
 
+  // Coordinates CONTRADICT a name match: both records carry usable coords AND
+  // they sit farther than `km` apart. This is the one veto that subordinates
+  // every name heuristic to geography — when it holds, the names are a
+  // coincidence (shared generic tokens) and the entities are DIFFERENT.
+  function _coordsDisagree(a, b, km) {
+    return !!(a && b && a.coords && b.coords && !_coordsClose(a.coords, b.coords, km));
+  }
+
   // Are two places the SAME place? PD.401P: identity is NAME-DRIVEN.
   // Coordinates only ever CONFIRM a name relation (containment) — they
   // never merge two UNRELATED names. The old "same coordinates → same
@@ -97,50 +105,191 @@
   //   • word-prefix containment ("Þingvellir" ⊂ "Þingvellir National
   //     Park") — same, but ONLY when coordinates also agree (the name
   //     relation is real, the proximity confirms it).
+  // Generic geographic-FEATURE descriptors (+ Icelandic geological terms). When
+  // the longer name is the shorter name followed ONLY by words from this set,
+  // they are the SAME place — the suffix merely DESCRIBES what the named place is
+  // ("Goðafoss" = "Goðafoss Waterfall", "Strokkur" = "Strokkur Geyser",
+  // "Þingvellir" = "Þingvellir National Park", "Kerið Crater" = "Kerið Crater
+  // Lake"). Civic / POI types (museum, church, power station, hotel, harbour,
+  // airport…) are DELIBERATELY ABSENT: those denote a DISTINCT entity AT a place
+  // ("Reykjavik" ≠ "Reykjavik Maritime Museum", "Krafla" ≠ "Krafla Power
+  // Station"). This collapses the LLM's name-variant proliferation at the ONE
+  // identity, so the write door, the canonicalizer and every count dedup them
+  // the same way — proliferation becomes impossible by construction, not patched.
+  var _FEATURE_WORDS = Object.create(null);
+  ("waterfall falls foss geyser glacier jokull jökull crater lake cave hellir " +
+   "volcano fissure gja gjá gorge canyon gljufur gljúfur peninsula lighthouse viti " +
+   "beach lagoon fjord mountain peak peaks tindar cliff cliffs arch rock rocks " +
+   "spring springs field fields tongue summit ridge plateau valley gully ravine " +
+   "national nature reserve park " +
+   // PD.432: descriptive geographic qualifiers — a place named "Arnarstapi
+   // coastal cliffs" is the same place as "Arnarstapi", and "Reykjanes lava
+   // coastal region" the same as "Reykjanes". These only ever DESCRIBE a named
+   // place, so they collapse the variant; a coord veto still blocks far-apart heads.
+   "coastal coast lava region area")
+    .split(/\s+/).forEach(function (w) { if (w) _FEATURE_WORDS[w] = 1; });
+
+  // Two names CONFLICT on identity when, after dropping the tokens they share,
+  // EACH still carries a distinctive (non-generic) token the other lacks. That
+  // is the signature of two different entities that merely share a city +
+  // category word ("Reykjavík MARITIME Museum" vs "Reykjavík ART Museum
+  // Hafnarhús"). Generic geographic-feature words don't count as distinctive,
+  // so true variants ("Goðafoss" / "Goðafoss WATERFALL") never conflict. Unknown
+  // words DO count as distinctive, so the veto errs toward keeping BOTH pins —
+  // a recoverable duplicate beats a permanently hidden place (never-hide).
+  function _conflictingNames(a, b) {
+    var aT = _norm(a).split(/\s+/).filter(Boolean);
+    var bT = _norm(b).split(/\s+/).filter(Boolean);
+    if (!aT.length || !bT.length) return false;
+    var shared = Object.create(null);
+    aT.forEach(function (t) { if (bT.indexOf(t) >= 0) shared[t] = 1; });
+    function distinctive(list) {
+      var out = []; list.forEach(function (t) { if (!shared[t] && !_FEATURE_WORDS[t]) out.push(t); });
+      return out;
+    }
+    return distinctive(aT).length > 0 && distinctive(bT).length > 0;
+  }
+
+  function _featureVariant(a, b) {
+    var na = _norm(a.place), nb = _norm(b.place);
+    if (!na || !nb || na === nb) return false;
+    var lo = na.length <= nb.length ? na : nb;
+    var hi = na.length <= nb.length ? nb : na;
+    if (hi.indexOf(lo + " ") !== 0) return false;          // lo is a whole-word PREFIX of hi
+    var rest = hi.slice(lo.length).trim().split(/\s+/);
+    if (!rest.length) return false;
+    for (var i = 0; i < rest.length; i++) { if (!_FEATURE_WORDS[rest[i]]) return false; }
+    // Coord VETO: if both carry coordinates and they're > 5 km apart, they only
+    // share a name head and are different places — do NOT merge.
+    if (a.coords && b.coords && !_coordsClose(a.coords, b.coords, 5)) return false;
+    return true;
+  }
+
+  // PD.438: normalize an entity's KIND ("stay"/base vs "sight") from whatever
+  // field carries it (kind | role), or null if none is supplied.
+  function _entityKind(x) {
+    if (!x) return null;
+    // _kind is the INTRINSIC stamp authored at the write door; kind/role are
+    // accepted too for callers that pass an explicit hint.
+    var k = x._kind || x.kind || x.role;
+    if (!k) return null;
+    k = String(k).toLowerCase();
+    if (k === "destination" || k === "stay" || k === "overnight") return "stay";
+    if (k === "sight" || k === "see" || k === "daytrip" || k === "onway") return "sight";
+    return null;
+  }
+  function _entityIsUser(x) {
+    return !!(x && (x.source === "user" || x._origin === "user" || x.origin === "user"));
+  }
+
   function sameEntity(a, b) {
+    // GROUND-TRUTH VETO (first): if both records carry coordinates that disagree
+    // beyond 5 km, they are DIFFERENT entities no matter how their names relate.
+    // Without this, PK.same merged "Snæfellsjökull National Park" and
+    // "Þingvellir National Park" (140 km apart) on shared generic tokens.
+    if (_coordsDisagree(a, b, 5)) return false;
     var ka = _norm(a.place), kb = _norm(b.place);
+    // EXACT NAME = the SAME place, regardless of kind (PD.440). "Lake Mývatn" the
+    // base and a stray "Lake Mývatn" sight record are ONE place — they merge (the
+    // base wins), so a base can't keep a same-named duplicate sight. The kind
+    // veto below is ONLY for LOOSER name relations.
     if (ka && kb && ka === kb) return true;
-    if (PK && typeof PK.same === "function" && PK.same(a.place, b.place)) return true;
+    // KIND VETO (PD.438): for looser name relations, a place YOU listed as a base
+    // and a place YOU listed as a sight with a DIFFERENT name are different
+    // entities — "Skaftafell" the base ≠ "Skaftafell glacier region" the sight.
+    // ORIGIN-GATED so a MAX suggestion still merges into your base ("user kind
+    // wins"). ADDITIVE: callers without kind/origin are unaffected.
+    var _ka = _entityKind(a), _kb = _entityKind(b);
+    if (_ka && _kb && _ka !== _kb && _entityIsUser(a) && _entityIsUser(b)) return false;
+    // PK.same is loose token-overlap; accept it ONLY when the names don't carry
+    // conflicting distinctive tokens (else two distinct civic POIs sharing a
+    // city + category word would merge and hide a pin).
+    if (PK && typeof PK.same === "function" && PK.same(a.place, b.place)
+        && !_conflictingNames(a.place, b.place)) return true;
+    // Redundant geographic-feature suffix → same place, by name. No coord gate is
+    // needed (the feature word is descriptive, not distinguishing); a coord VETO
+    // inside _featureVariant still blocks far-apart name-heads.
+    if (_featureVariant(a, b)) return true;
     if (PK && typeof PK.contains === "function" && PK.contains(a.place, b.place)) {
       return (a.coords && b.coords) ? _coordsClose(a.coords, b.coords, 0.6) : false;
     }
     return false;
   }
 
-  // ── PlacementPolicy — the ONE pure function ───────────────────────
-  // A place's section is a pure function of its attributes. No state,
-  // no mutation, no ordering dependency. THIS replaces the pass chain.
+  // ── PlacementPolicy — ordered PlacementRules ──────────────────────
+  // A place's section is the section of the FIRST rule whose match() holds.
+  // Each rule is a single, independently-testable decision; ADDING A CATEGORY
+  // IS ADDING A RULE (open/closed) — never editing a branch of one function.
+  // The default chain below reproduces the historical sectionFor() EXACTLY;
+  // order is significant. A PlacementRule is { id, match(place)->bool,
+  // section(place)->string }.
   //
   //   origin   : "user" | "max-hub" | "max"
   //   role     : "stay" | "sight"
   //   decision : "checked" | "unchecked" | "rejected"
-  //   themeFit : a theme section name the LLM assigned, or null
+  //   themeFit : a theme section name (LLM / added / own-category), or null
+  var _DEFAULT_PLACEMENT_RULES = [
+    { id: "stay-user", match: function (p) { return p.role === "stay" && p.origin === "user"; },
+      section: function () { return SECTION.STAYS_USER; } },
+    { id: "stay-rec", match: function (p) { return p.role === "stay"; },
+      section: function () { return SECTION.STAYS_REC; } },
+    // A named-route umbrella (no specific theme) belongs in scenic routes
+    // regardless of check state — it is a route, not a sight.
+    { id: "scenic-route", match: function (p) { return _inScenic(p); },
+      section: function () { return SECTION.SCENIC; } },
+    // Committed (checked) sight in its theme.
+    { id: "checked-theme", match: function (p) { return p.decision === "checked" && !!p.themeFit; },
+      section: function (p) { return p.themeFit; } },
+    // PD.406 (reverses PD.405): a kept sight the categorizer missed pools into
+    // the shared "Unique sights" bucket — it does NOT get its own single-member
+    // category named for the place. Per-place self-named chips ("Kirkjufell (1)",
+    // "Húsavík (1)") read as categorizer noise and make the section chips fail to
+    // add up; one "Unique sights (N)" chip groups every themeless kept sight,
+    // stays countable, and the user can still see each place inside it. (Manual
+    // adds are unaffected — they carry themeFit=place via the ingest path and so
+    // match checked-theme above, which is the deliberate "Places you added" UX.)
+    { id: "checked-unique", match: function (p) { return p.decision === "checked"; },
+      section: function () { return SECTION.UNIQUE; } },
+    // Unchecked sight shown in its theme. (Rejected places never reach the
+    // queries, so no rejected branch is needed.)
+    { id: "unchecked-theme", match: function (p) { return !!p.themeFit; },
+      section: function (p) { return p.themeFit; } },
+    // Enhance leftover near a listed place.
+    { id: "near-listed", match: function (p) { return !!p.nearListed; },
+      section: function () { return SECTION.SIGHTS_NEAR; } },
+    // A Max suggestion with no theme — the catch-all (always matches; keep last).
+    { id: "default-more", match: function () { return true; },
+      section: function () { return SECTION.MORE; } }
+  ];
+  // Module-scoped active chain so sectionFor is robust to detached calls.
+  var _placementRules = _DEFAULT_PLACEMENT_RULES.slice();
+
   var PlacementPolicy = {
+    rules: _placementRules, // live reference; addRule/resetRules mutate in place
+    // Register a new PlacementRule. By default it is inserted BEFORE the
+    // catch-all so a specific category wins over "More places to consider";
+    // pass { atEnd: true } to append after it. THIS is how a new section type
+    // is added — open/closed, no edit to sectionFor.
+    addRule: function (rule, opts) {
+      if (!rule || typeof rule.match !== "function" || typeof rule.section !== "function") {
+        throw new Error("PlacementRule must implement match(place) and section(place)");
+      }
+      opts = opts || {};
+      if (opts.atEnd) { _placementRules.push(rule); return rule; }
+      var i = _placementRules.length - 1; // before the final catch-all
+      _placementRules.splice(i < 0 ? 0 : i, 0, rule);
+      return rule;
+    },
+    resetRules: function () {
+      _placementRules.length = 0;
+      Array.prototype.push.apply(_placementRules, _DEFAULT_PLACEMENT_RULES);
+    },
     sectionFor: function (p) {
       if (!p) return SECTION.MORE;
-      if (p.role === "stay") {
-        return (p.origin === "user") ? SECTION.STAYS_USER : SECTION.STAYS_REC;
+      for (var i = 0; i < _placementRules.length; i++) {
+        if (_placementRules[i].match(p)) return _placementRules[i].section(p);
       }
-      // A named-route umbrella (no specific theme) belongs in scenic
-      // routes regardless of check state — it is a route, not a sight.
-      if (_inScenic(p)) return SECTION.SCENIC;
-      // sight
-      if (p.decision === "checked") {
-        if (p.themeFit) return p.themeFit;           // committed → its theme
-        // PD.405: a kept sight the categorizer missed is NEVER dumped in a
-        // generic bucket. It gets its OWN single-member category — the place
-        // name — so the picker shows it as a real (if unique) theme the user
-        // can grow ("more like this"). Only a nameless miss falls back to the
-        // shared "Unique sights" bucket.
-        return (p.place && String(p.place).trim()) ? String(p.place).trim() : SECTION.UNIQUE;
-      }
-      // unchecked (rejected places are excluded from the view entirely)
-      if (p.themeFit) return p.themeFit;             // shown unchecked in its theme
-      // PD.405: "From your list" removed as a destination — a listed place is
-      // always checked (the contract), so the unchecked-user-sight bucket was
-      // a contradiction. An unchecked sight falls through like any other.
-      if (p.nearListed) return SECTION.SIGHTS_NEAR;  // enhance leftover near a listed place
-      return SECTION.MORE;                           // a Max suggestion with no theme
+      return SECTION.MORE; // defensive — default-more always matches
     }
   };
 
@@ -148,10 +297,37 @@
   function DiscoveryModel() {
     this._byKey = Object.create(null); // key → Place
     this._order = [];                  // insertion order of keys
+    this._listeners = Object.create(null); // event → [fn] (observer pattern)
   }
 
   DiscoveryModel.SECTION = SECTION;
   DiscoveryModel.PlacementPolicy = PlacementPolicy;
+
+  // ── Events (observer pattern) ─────────────────────────────────────
+  // Every single-writer mutation emits "change"; the view subscribes and
+  // re-projects, persistence subscribes and saves. This is what lets the
+  // renderer be a pure read-only projection instead of writing state back.
+  DiscoveryModel.prototype.on = function (evt, fn) {
+    if (!evt || typeof fn !== "function") return function () {};
+    (this._listeners[evt] = this._listeners[evt] || []).push(fn);
+    var self = this;
+    return function () { self.off(evt, fn); }; // unsubscribe handle
+  };
+  DiscoveryModel.prototype.off = function (evt, fn) {
+    var ls = this._listeners[evt];
+    if (!ls) return;
+    var i = ls.indexOf(fn);
+    if (i !== -1) ls.splice(i, 1);
+  };
+  DiscoveryModel.prototype._emit = function (evt, data) {
+    var ls = this._listeners[evt];
+    if (!ls || !ls.length) return;
+    // copy so a handler that unsubscribes mid-emit doesn't skip its neighbors
+    ls.slice().forEach(function (fn) {
+      try { fn(data); }
+      catch (e) { if (typeof console !== "undefined") console.warn("[DiscoveryModel] listener error on " + evt + ":", e && e.message); }
+    });
+  };
 
   DiscoveryModel.prototype._findExisting = function (raw) {
     // PD.401k: prefer the identity stamped at the write door (_key). No
@@ -190,6 +366,7 @@
       if (raw.listedRole) existing.listedRole = raw.listedRole;
       if (raw.nearListed) existing.nearListed = true;
       if (raw.src && !existing.src) existing.src = raw.src;
+      this._emit("change", { type: "upsert", place: existing });
       return existing;
     }
     var key = raw._key || _norm(raw.place);
@@ -209,24 +386,67 @@
     };
     this._byKey[key] = place;
     this._order.push(key);
+    this._emit("change", { type: "upsert", place: place });
     return place;
   };
 
-  // Single-writer mutations.
+  // Single-writer mutations. Each emits "change" so views/persistence react.
   DiscoveryModel.prototype.setDecision = function (placeName, decision) {
     var e = this._findExisting({ place: placeName });
-    if (e) e.decision = decision;
+    if (e) { e.decision = decision; this._emit("change", { type: "decision", place: e }); }
     return e;
   };
   DiscoveryModel.prototype.setRole = function (placeName, role) {
     var e = this._findExisting({ place: placeName });
-    if (e) e.role = role;
+    if (e) { e.role = role; this._emit("change", { type: "role", place: e }); }
+    return e;
+  };
+  // setTheme — the single writer for a place's themeFit (used by ThemingService
+  // in place of the old applyTheming stamping p._themeFit on raw arrays).
+  DiscoveryModel.prototype.setTheme = function (placeName, theme) {
+    var e = this._findExisting({ place: placeName });
+    if (e) { e.themeFit = theme || null; this._emit("change", { type: "theme", place: e }); }
     return e;
   };
 
   DiscoveryModel.prototype.all = function () {
     var self = this;
     return this._order.map(function (k) { return self._byKey[k]; });
+  };
+
+  // ── Persistence: snapshot()/restore() ─────────────────────────────
+  // A plain, serializable view of the ledger (no src back-references, no
+  // listeners) that round-trips every domain attribute the queries read.
+  // PersistenceService uses these instead of reaching into _byKey.
+  DiscoveryModel.prototype.snapshot = function () {
+    var self = this;
+    return this._order.map(function (k) {
+      var p = self._byKey[k];
+      return {
+        key: p.key, place: p.place,
+        coords: p.coords ? { lat: p.coords.lat, lng: p.coords.lng } : null,
+        origin: p.origin, role: p.role, decision: p.decision, themeFit: p.themeFit,
+        listedRole: p.listedRole, nearListed: p.nearListed,
+        routeUmbrella: p.routeUmbrella, _decisionSet: p._decisionSet
+      };
+    });
+  };
+  DiscoveryModel.restore = function (snap) {
+    var m = new DiscoveryModel();
+    (snap || []).forEach(function (rec) {
+      if (!rec || !rec.key) return;
+      m._byKey[rec.key] = {
+        key: rec.key, place: rec.place,
+        coords: rec.coords || null,
+        origin: rec.origin || "max", role: rec.role || "sight",
+        decision: rec.decision || "unchecked", themeFit: rec.themeFit || null,
+        listedRole: rec.listedRole || null, nearListed: !!rec.nearListed,
+        routeUmbrella: !!rec.routeUmbrella, src: null,
+        _decisionSet: !!rec._decisionSet
+      };
+      m._order.push(rec.key);
+    });
+    return m;
   };
 
   // ── Pure queries ──────────────────────────────────────────────────
@@ -354,6 +574,12 @@
       var isCatch = !!_CATCH_SET[sec];
       var themeFit = isCatch ? null : sec;               // a real theme, or null for catchalls
       var nearListed = (sec === SECTION.SIGHTS_NEAR);
+      // SSOT Stage 5: "Places you added" is NOT a real section — it was a
+      // generic bucket for manually-added places. Each such place becomes its
+      // OWN single-member category named for the place (the PD.405 pattern),
+      // for BOTH checked and unchecked, so the "Places you added" chip never
+      // appears and a manual add reads as the real (if unique) thing it is.
+      var isAdded = (sec === "Places you added");
       (it.requiredPlaces || []).forEach(function (p) {
         if (!p || !p.place) return;
         if (isHub(p)) return;                            // a hub is a stay proposal, not a sight
@@ -366,7 +592,8 @@
         // places into DIFFERENT themes is to carry the assignment on the
         // place itself. The theming pass stamps p._themeFit; the model then
         // splits the group by placing each place in its own theme.
-        var placeTheme = (p._themeFit && String(p._themeFit)) || themeFit;
+        // "Places you added" → each place's OWN name is its category.
+        var placeTheme = (p._themeFit && String(p._themeFit)) || (isAdded ? p.place : themeFit);
         m.upsert({
           place: p.place,
           _key: p._key,                                  // PD.401k: identity from the write door

@@ -1053,6 +1053,64 @@ test("singleFlight closes the PD.315 bug class by construction (concurrent write
   });
 });
 
+// ── PD.429: record-derived listed set (retires the parallel map) ──────
+test("deriveListedFromRecords: a user record is derived with role by section; Max records are excluded", function () {
+  // ASCII names so the Node-env _normKey (lowercase fallback, no PlaceKey) is
+  // predictable; diacritic identity is exercised live via PlaceKey.resolve.
+  var trip = { placeActivities: [
+    { section: "Overnight stays", type: "activity", requiredPlaces: [
+      { place: "Vik", _origin: "user" } ] },
+    { section: "Hike to waterfalls", type: "activity", requiredPlaces: [
+      { place: "Godafoss Waterfall", _origin: "user" },
+      { place: "Dettifoss", _origin: "max" } ] }
+  ]};
+  var d = global.MaxData.deriveListedFromRecords(trip);
+  assert.strictEqual(d.names["vik"], "stay", "user stay → stay role");
+  assert.strictEqual(d.names["godafoss waterfall"], "see", "user sight → see role");
+  assert.ok(!("dettifoss" in d.names), "a Max record is NOT in the listed set");
+  assert.strictEqual(Object.keys(d.names).length, 2);
+  assert.strictEqual(d.display["godafoss waterfall"], "Godafoss Waterfall");
+});
+test("deriveListedFromRecords: two name-variants interned to ONE record count once (the Goðafoss bug, by construction)", function () {
+  var trip = { placeActivities: [
+    { section: "Hike to waterfalls", type: "activity", requiredPlaces: [
+      { place: "Goðafoss Waterfall", _origin: "user", _key: "godafoss waterfall" } ] }
+  ]};
+  var d = global.MaxData.deriveListedFromRecords(trip);
+  assert.strictEqual(Object.keys(d.names).length, 1, "one place → one listed entry");
+});
+test("deriveListedFromRecords: a record with NO _origin is NOT listed (origin is the only oracle, no name-map fallback)", function () {
+  var trip = { placeActivities: [
+    { section: "More places to consider", type: "activity", requiredPlaces: [
+      { place: "Arnarstapi coastal cliffs", _key: "arnarstapi coastal cliffs" } ] }
+  ]};
+  var d = global.MaxData.deriveListedFromRecords(trip);
+  assert.strictEqual(Object.keys(d.names).length, 0, "un-stamped record is not silently treated as user-listed");
+});
+test("deriveListedFromRecords: same place in two items (stay + theme) → one entry, stay wins", function () {
+  var trip = { placeActivities: [
+    { section: "Walk the coast", type: "activity", requiredPlaces: [ { place: "Vik", _origin: "user" } ] },
+    { section: "Overnight stays", type: "activity", requiredPlaces: [ { place: "Vik", _origin: "user" } ] }
+  ]};
+  var d = global.MaxData.deriveListedFromRecords(trip);
+  assert.strictEqual(Object.keys(d.names).length, 1);
+  assert.strictEqual(d.names["vik"], "stay", "a stay role outranks a see for the same place");
+});
+test("deriveListedFromRecords: a user-listed CIRCUIT modeled as a route umbrella IS counted; Max infra waypoints are not", function () {
+  // "Golden Circle" is a circuit the user typed (origin user, on a route item)
+  // → listed. A Max-strung waypoint on the same route (origin max) is infra →
+  // not listed. This is the Golden/Diamond Circle case.
+  var trip = { placeActivities: [
+    { section: "Drive scenic routes", type: "route", requiredPlaces: [
+      { place: "Golden Circle", _origin: "user", _key: "golden circle" },
+      { place: "Random viewpoint", _origin: "max", _key: "random viewpoint" } ] }
+  ]};
+  var d = global.MaxData.deriveListedFromRecords(trip);
+  assert.strictEqual(d.names["golden circle"], "see", "a listed circuit counts (as a see)");
+  assert.ok(!("random viewpoint" in d.names), "a Max infra waypoint does not count");
+  assert.strictEqual(Object.keys(d.names).length, 1);
+});
+
 // ── Final ────────────────────────────────────────────────────────────
 _testChain.then(function () {
   console.log("\n──────────────────────────────────────────────────");

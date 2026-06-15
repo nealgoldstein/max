@@ -59,6 +59,17 @@ test("rule 1: duplicate entries within one item merge (coords/keep survive)", fu
   assert.strictEqual(out[0].requiredPlaces[0]._keep, true); // keep survives
 });
 
+test("PD.441: a base's duplicate sight copy is dropped at the write door (one place, one kind)", function () {
+  var out = canon([
+    item("Recommended overnight stays", [ P("Lake Mývatn", { lat: 65.6, lng: -17.0, _kind: "stay", _origin: "user", nights: 2, overnight: true }) ]),
+    item("Lakes & lagoons",             [ P("Lake Mývatn", { lat: 65.6, lng: -17.0, _kind: "sight", _origin: "user" }) ]),               // duplicate of the base → DROP
+    item("Experience ice and glaciers", [ P("Skaftafell glacier region", { lat: 64.0167, lng: -16.9667, _kind: "sight", _origin: "user" }) ]) // distinct sight → KEEP
+  ]);
+  assert.deepStrictEqual(keysIn(out, "Recommended overnight stays"), ["lake mývatn"], "the base stays in its stay section");
+  assert.deepStrictEqual(keysIn(out, "Lakes & lagoons"), [], "the base's duplicate sight copy is gone");
+  assert.deepStrictEqual(keysIn(out, "Experience ice and glaciers"), ["skaftafell glacier region"], "a genuinely different sight survives");
+});
+
 test("rule 2: themed placement removes catchall stubs", function () {
   var out = canon([
     item("Hike to waterfalls", [P("Goðafoss")]),

@@ -38,10 +38,11 @@ test("placement: max-hub stay → Recommended overnight stays", function () {
 test("placement: checked sight with a theme → that theme", function () {
   assert.strictEqual(Policy.sectionFor({ role: "sight", decision: "checked", themeFit: "Chase waterfalls" }), "Chase waterfalls");
 });
-test("placement: checked sight with NO theme → its OWN single-member category (the place name)", function () {
-  // PD.405: a kept sight the categorizer missed is never dumped in a generic
-  // bucket — it becomes its own category named for the place.
-  assert.strictEqual(Policy.sectionFor({ place: "Goðafoss Waterfall", role: "sight", decision: "checked", themeFit: null }), "Goðafoss Waterfall");
+test("placement: checked sight with NO theme → pools into shared 'Unique sights' (PD.406, reverses PD.405)", function () {
+  // PD.406: a kept sight the categorizer missed pools into the shared "Unique
+  // sights" bucket — it does NOT get its own self-named single-member category
+  // ("Kirkjufell (1)" / "Húsavík (1)" read as noise and break the chip math).
+  assert.strictEqual(Policy.sectionFor({ place: "Goðafoss Waterfall", role: "sight", decision: "checked", themeFit: null }), S.UNIQUE);
 });
 test("placement: checked sight with NO theme AND no name → 'Unique sights' fallback", function () {
   assert.strictEqual(Policy.sectionFor({ role: "sight", decision: "checked", themeFit: null }), S.UNIQUE);
@@ -69,10 +70,13 @@ test("invariant: a checked sight is NEVER in a to-consider catchall", function (
   m.setDecision("Geysir", "checked");
   var more = m.sections().find(function (x) { return x.section === S.MORE; });
   assert.ok(!more, "the catchall is empty once the only place is checked");
-  // PD.405: a checked, un-themed sight commits to its OWN single-member
-  // category (the place name) — never a generic to-consider catchall.
+  // PD.406: a checked, un-themed sight pools into the shared "Unique sights"
+  // bucket — never a generic to-consider catchall, and never a self-named
+  // single-member category.
   var own = m.sections().find(function (x) { return x.section === "Geysir"; });
-  assert.ok(own && own.places.length === 1, "the checked sight committed to its own category");
+  assert.ok(!own, "the checked sight does NOT get a self-named category");
+  var uniq = m.sections().find(function (x) { return x.section === S.UNIQUE; });
+  assert.ok(uniq && uniq.places.length === 1, "the checked sight pools into 'Unique sights'");
 });
 
 // ── COUNTS CANNOT DISAGREE (one derivation) ──────────────────────────
@@ -233,11 +237,11 @@ test("PD.404/405: catchallSections / isCatchallSection expose the themeFit-null 
     .forEach(function (s) { assert.ok(cs.indexOf(s) !== -1, "missing catchall: " + s); });
   assert.strictEqual(M.isCatchallSection("Unique sights"), true);
   assert.strictEqual(M.isCatchallSection("Walk to natural wonders"), false);
-  // PD.405: a checked, un-themed NAMED sight lands in its OWN category (the
-  // place name) — which is NOT a catchall (so it isn't re-themed away).
+  // PD.406: a checked, un-themed NAMED sight pools into "Unique sights" (a
+  // catchall) — NOT its own self-named single-member category.
   var named = model([{ place: "Goðafoss", origin: "user", role: "sight", decision: "checked" }]);
-  assert.strictEqual(Policy.sectionFor(named.all()[0]), "Goðafoss");
-  assert.strictEqual(M.isCatchallSection(Policy.sectionFor(named.all()[0])), false);
+  assert.strictEqual(Policy.sectionFor(named.all()[0]), "Unique sights");
+  assert.strictEqual(M.isCatchallSection(Policy.sectionFor(named.all()[0])), true);
   // A nameless checked miss falls back to "Unique sights", which IS a catchall.
   assert.strictEqual(M.isCatchallSection(Policy.sectionFor({ role: "sight", decision: "checked", themeFit: null })), true);
 });
@@ -283,6 +287,198 @@ test("PD.404: a per-place _themeFit SURVIVES canonicalize + model placement (per
   m2.sections().forEach(function (g) { secs[g.section] = g.places.map(function (p) { return p.place; }); });
   assert.deepStrictEqual(secs["Visit natural wonders"], ["Gullfoss"], "themed sight must land in its theme after canonicalize+merge");
   assert.ok(!secs["Unique sights"], "must not remain in the catch-all");
+});
+
+// ── Phase 1: PlacementRule registry (open/closed extension point) ────
+test("PlacementPolicy: default rule chain reproduces the historical sectionFor", function () {
+  assert.strictEqual(Policy.sectionFor({ role: "stay", origin: "user" }), S.STAYS_USER);
+  assert.strictEqual(Policy.sectionFor({ role: "stay", origin: "max-hub" }), S.STAYS_REC);
+  assert.strictEqual(Policy.sectionFor({ role: "sight", decision: "checked", themeFit: "Chase waterfalls" }), "Chase waterfalls");
+  // PD.406: a checked, un-themed sight pools into "Unique sights" (no self-named category).
+  assert.strictEqual(Policy.sectionFor({ place: "Goðafoss", role: "sight", decision: "checked" }), S.UNIQUE);
+  assert.strictEqual(Policy.sectionFor({ role: "sight", decision: "checked" }), S.UNIQUE);
+  assert.strictEqual(Policy.sectionFor({ role: "sight", decision: "unchecked", themeFit: "Relax" }), "Relax");
+  assert.strictEqual(Policy.sectionFor({ role: "sight", decision: "unchecked", nearListed: true }), S.SIGHTS_NEAR);
+  assert.strictEqual(Policy.sectionFor({ role: "sight", decision: "unchecked" }), S.MORE);
+  assert.ok(Array.isArray(Policy.rules) && Policy.rules.length >= 8, "rules are an ordered registry");
+});
+
+test("PlacementPolicy.addRule: a new category wins over the catch-all, then resetRules restores", function () {
+  var spa = { role: "sight", decision: "unchecked", place: "Blue Lagoon", tags: ["spa"] };
+  assert.strictEqual(Policy.sectionFor(spa), S.MORE, "unthemed sight defaults to More");
+  Policy.addRule({ id: "spa", match: function (p) { return p.tags && p.tags.indexOf("spa") !== -1; },
+    section: function () { return "Relax in hot springs"; } });
+  try {
+    assert.strictEqual(Policy.sectionFor(spa), "Relax in hot springs", "the registered rule places the spa sight");
+    assert.strictEqual(Policy.sectionFor({ role: "stay", origin: "user" }), S.STAYS_USER, "built-in rules still win first");
+  } finally {
+    Policy.resetRules();
+  }
+  assert.strictEqual(Policy.sectionFor(spa), S.MORE, "resetRules restores the default chain");
+});
+
+// ── Phase 1: change events (observer pattern) ────────────────────────
+test("model emits 'change' on upsert/setDecision/setRole/setTheme; off() unsubscribes", function () {
+  var m = new DiscoveryModel();
+  var events = [];
+  var unsub = m.on("change", function (e) { events.push(e.type); });
+  m.upsert({ place: "Geysir", decision: "unchecked" });
+  m.setDecision("Geysir", "checked");
+  m.setRole("Geysir", "sight");
+  m.setTheme("Geysir", "See natural wonders");
+  assert.deepStrictEqual(events, ["upsert", "decision", "role", "theme"]);
+  unsub();
+  m.setDecision("Geysir", "unchecked");
+  assert.strictEqual(events.length, 4, "no events after unsubscribe");
+});
+
+test("setTheme re-places the sight into its new theme (single writer)", function () {
+  var m = new DiscoveryModel();
+  m.upsert({ place: "Reynisfjara", role: "sight", decision: "unchecked" });
+  assert.strictEqual(Policy.sectionFor(m.all()[0]), S.MORE);
+  m.setTheme("Reynisfjara", "Walk the coast");
+  assert.strictEqual(Policy.sectionFor(m.all()[0]), "Walk the coast");
+});
+
+// ── Phase 1: snapshot()/restore() round-trip ─────────────────────────
+test("snapshot()/restore() is plain-serializable and round-trips the queries", function () {
+  var m = new DiscoveryModel();
+  m.upsert({ place: "Gullfoss", role: "sight", decision: "checked", themeFit: "See natural wonders", coords: { lat: 64.3, lng: -20.1 } });
+  m.upsert({ place: "Geysir", role: "sight", decision: "unchecked", themeFit: "See natural wonders" });
+  m.upsert({ place: "Vik", role: "stay", origin: "user" });
+  var snap = JSON.parse(JSON.stringify(m.snapshot())); // proves it's plain JSON
+  var r = DiscoveryModel.restore(snap);
+  assert.strictEqual(r.considered().length, m.considered().length, "considered round-trips");
+  assert.strictEqual(r.committed().length, m.committed().length, "committed round-trips");
+  var a = m.sections().map(function (g) { return g.section + ":" + g.places.length; }).join("|");
+  var b = r.sections().map(function (g) { return g.section + ":" + g.places.length; }).join("|");
+  assert.strictEqual(b, a, "sections round-trip identically");
+});
+
+// ── Identity: redundant geographic-feature variants merge (proliferation fix) ──
+test("sameEntity MERGES a bare name with its natural-feature variant", function () {
+  [["Goðafoss", "Goðafoss Waterfall"], ["Strokkur", "Strokkur Geyser"],
+   ["Kerið", "Kerið Crater"], ["Kerið Crater", "Kerið Crater Lake"],
+   ["Þingvellir", "Þingvellir National Park"], ["Krafla", "Krafla Volcano"],
+   ["Stokksnes", "Stokksnes Peninsula"], ["Falljökull", "Falljökull Glacier"]
+  ].forEach(function (p) {
+    assert.ok(M.sameEntity({ place: p[0] }, { place: p[1] }), "should merge: " + p[0] + " ↔ " + p[1]);
+    assert.ok(M.sameEntity({ place: p[1] }, { place: p[0] }), "merge must be symmetric: " + p[1] + " ↔ " + p[0]);
+  });
+});
+
+test("sameEntity does NOT merge a place with a distinct CIVIC/POI at that place", function () {
+  [["Reykjavik", "Reykjavik Maritime Museum"], ["Krafla", "Krafla Power Station"],
+   ["Reykjavik", "Reykjavik Old Harbour"], ["Hallgrímskirkja", "Hallgrímskirkja Church"]
+  ].forEach(function (p) {
+    assert.ok(!M.sameEntity({ place: p[0] }, { place: p[1] }), "must NOT merge: " + p[0] + " ↔ " + p[1]);
+  });
+});
+
+test("sameEntity does NOT merge two different features that merely share a name head", function () {
+  assert.ok(!M.sameEntity({ place: "Garðskagi Lighthouse" }, { place: "Garðskagi Peninsula" }));
+  assert.ok(!M.sameEntity({ place: "Krafla Volcano" }, { place: "Krafla Fissure" }));
+});
+
+test("PD.438: a USER base and a USER sight never merge, even with matching name + coords", function () {
+  var C = { lat: 64.0167, lng: -16.9667 };
+  // The real bug: you listed Skaftafell as an overnight base AND listed a glacier
+  // sight that shares its name and geocodes to the same point. Both are YOURS and
+  // are DIFFERENT entities — the base must not be absorbed into the sight.
+  assert.ok(!M.sameEntity({ place: "Skaftafell", coords: C, kind: "stay", source: "user" },
+                          { place: "Skaftafell glacier region", coords: C, kind: "sight", source: "user" }),
+    "user base vs user sight must NOT merge");
+  assert.ok(!M.sameEntity({ place: "Skaftafell glacier region", coords: C, role: "see", _origin: "user" },
+                          { place: "Skaftafell", coords: C, role: "stay", _origin: "user" }),
+    "veto is symmetric and reads role + _origin too");
+  // ORIGIN-GATED: a MAX suggestion still merges into your base (user kind wins,
+  // Max's kind-claim doesn't split your place).
+  assert.ok(M.sameEntity({ place: "Skaftafell", coords: C, kind: "stay", source: "user" },
+                         { place: "Skaftafell", coords: C, kind: "sight", source: "max" }),
+    "a user base still absorbs a Max same-name sight (not both user)");
+  // Same kind still merges (the base-name + feature variant within sights).
+  assert.ok(M.sameEntity({ place: "Goðafoss", kind: "sight", source: "user" }, { place: "Goðafoss Waterfall", kind: "sight", source: "user" }),
+    "two SIGHTS that are name-variants still merge");
+  // No kind/origin supplied → behavior unchanged (the veto is additive).
+  assert.ok(M.sameEntity({ place: "Skaftafell", coords: C }, { place: "Skaftafell glacier region", coords: C }),
+    "without explicit kind/origin, the old name/coord merge still applies");
+});
+
+test("PD.440: an EXACT-name base and sight are the same place; only DIFFERENT names are vetoed", function () {
+  var My = { lat: 65.6, lng: -17.0 };
+  // Exact same name → ONE place, merges (the base absorbs a stray same-name sight).
+  assert.ok(M.sameEntity({ place: "Lake Mývatn", coords: My, kind: "stay",  source: "user" },
+                         { place: "Lake Mývatn", coords: My, kind: "sight", source: "user" }),
+    "an exact-name base and sight are the same place (base wins the merge)");
+  // Different names with conflicting kinds → still vetoed (genuinely distinct).
+  var Sk = { lat: 64.0167, lng: -16.9667 };
+  assert.ok(!M.sameEntity({ place: "Skaftafell", coords: Sk, kind: "stay",  source: "user" },
+                          { place: "Skaftafell glacier region", coords: Sk, kind: "sight", source: "user" }),
+    "a base and a differently-named sight stay distinct");
+});
+
+test("PD.438: dedupeListedNames keeps a base and a same-named sight SEPARATE", function () {
+  var MD = require("../max-data.js");
+  var dd = MD.dedupeListedNames || (global.MaxData && global.MaxData.dedupeListedNames);
+  // "Goðafoss"(base) + "Goðafoss Waterfall"(sight) are a name-variant that
+  // sameEntity merges name-only — but they're DIFFERENT roles, so they must
+  // stay as two distinct listed places (the base isn't renamed into the sight).
+  var out = dd({ "goðafoss": "stay", "goðafoss waterfall": "see" },
+               { "goðafoss": "Goðafoss", "goðafoss waterfall": "Goðafoss Waterfall" });
+  assert.strictEqual(Object.keys(out.names).length, 2, "a base and a same-named sight remain two distinct listed places");
+  assert.strictEqual(out.names["goðafoss"], "stay");
+  assert.strictEqual(out.names["goðafoss waterfall"], "see");
+  // Same role still merges (two sights that are name-variants collapse to one).
+  var out2 = dd({ "goðafoss": "see", "goðafoss waterfall": "see" },
+                { "goðafoss": "Goðafoss", "goðafoss waterfall": "Goðafoss Waterfall" });
+  assert.strictEqual(Object.keys(out2.names).length, 1, "two SIGHTS that are name-variants still merge to one");
+});
+
+test("feature-variant merge is VETOED when coords are far apart (same head, different place)", function () {
+  var town = { place: "Vík", coords: { lat: 63.42, lng: -19.0 } };
+  var far  = { place: "Vík Beach", coords: { lat: 64.8, lng: -18.0 } }; // ~150 km away
+  assert.ok(!M.sameEntity(town, far), "far coords must veto the name-variant merge");
+  var near = { place: "Vík Beach", coords: { lat: 63.41, lng: -19.01 } };
+  assert.ok(M.sameEntity(town, near), "near coords allow the merge");
+});
+
+test("coord veto blocks a PK.same token-overlap merge of two DISTINCT places", function () {
+  // Live regression: these two real parks are 140 km apart but share the
+  // generic tokens "National Park"; PK.same called them identical and one pin
+  // vanished. The ground-truth coord veto must keep them distinct.
+  var snae = { place: "Snæfellsjökull National Park", coords: { lat: 64.80, lng: -23.78 } };
+  var thing = { place: "Þingvellir National Park",      coords: { lat: 64.26, lng: -21.13 } };
+  assert.ok(!M.sameEntity(snae, thing), "far-apart parks sharing generic tokens must NOT merge");
+  assert.ok(!M.sameEntity(thing, snae), "veto must be symmetric");
+});
+
+test("distinctive-token conflict blocks merging two same-city, same-category POIs", function () {
+  // Live regression: PK.same merged these on shared "reykjavík"+"museum", both
+  // in the old harbour so coords couldn't separate them — one pin vanished.
+  var maritime = { place: "Reykjavík Maritime Museum",        coords: { lat: 64.155, lng: -21.95 } };
+  var art      = { place: "Reykjavík Art Museum Hafnarhús",   coords: { lat: 64.149, lng: -21.94 } };
+  assert.ok(!M.sameEntity(maritime, art), "maritime vs art museum must NOT merge");
+  assert.ok(!M.sameEntity(art, maritime), "veto must be symmetric");
+  // But a bare name + its generic-feature variant still merges (no conflict).
+  assert.ok(M.sameEntity({ place: "Goðafoss" }, { place: "Goðafoss Waterfall" }), "feature variant unaffected");
+});
+
+test("coord veto does NOT fire when coords agree or are absent (names still merge)", function () {
+  // Same park, two geocodes within tolerance → still one entity.
+  var a = { place: "Þingvellir National Park", coords: { lat: 64.255, lng: -21.13 } };
+  var b = { place: "Þingvellir",               coords: { lat: 64.256, lng: -21.131 } };
+  assert.ok(M.sameEntity(a, b), "near coords + name relation still merge");
+  // No coords → fall back to name identity (unchanged behaviour).
+  assert.ok(M.sameEntity({ place: "Goðafoss" }, { place: "Goðafoss Waterfall" }), "missing coords → name rules apply");
+});
+
+test("upsert dedups feature-variants into ONE place (proliferation impossible at the write door)", function () {
+  var m = new DiscoveryModel();
+  m.upsert({ place: "Goðafoss", role: "sight", decision: "unchecked" });
+  m.upsert({ place: "Goðafoss Waterfall", role: "sight", decision: "unchecked" });
+  m.upsert({ place: "Strokkur Geyser", role: "sight", decision: "unchecked" });
+  m.upsert({ place: "Strokkur", role: "sight", decision: "unchecked" });
+  assert.strictEqual(m.all().length, 2, "variants must collapse to 2 distinct places, got " + m.all().length);
 });
 
 console.log("\n" + "─".repeat(50));

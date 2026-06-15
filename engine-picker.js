@@ -1201,19 +1201,36 @@
       return false;
     }
 
+    // PD.436: an arrival/departure gateway is where you FLY IN/OUT — a city,
+    // i.e. a DESTINATION. A sight (a canyon, a waterfall) has no airport and
+    // must never be promoted to a gateway, even if a hint names it. Reject a
+    // candidate as a gateway only when it's EXPLICITLY a sight (overnightCapable
+    // false / role "see" / singleSight) — never over-exclude an unmarked city.
+    function _gatewayEligible(c) {
+      if (!c) return false;
+      if (c.overnightCapable === false) return false;
+      if (c.role === "see") return false;
+      if (c.singleSight === true) return false;
+      return true;
+    }
+
     // Find entry candidate
     var entryCand = null;
     var entryInferred = false;
     if (entryN) {
-      remaining.forEach(function(c){ if (!entryCand && matchesName(c, entryN)) entryCand = c; });
+      remaining.forEach(function(c){ if (!entryCand && matchesName(c, entryN) && _gatewayEligible(c)) entryCand = c; });
       if (!entryCand) {
         // Check route blocks — if one endpoint matches entry, put that block first
         routeBlocks.forEach(function(b){
-          b.candidates.forEach(function(c){ if (!entryCand && matchesName(c, entryN)) entryCand = c; });
+          b.candidates.forEach(function(c){ if (!entryCand && matchesName(c, entryN) && _gatewayEligible(c)) entryCand = c; });
         });
       }
-    } else {
-      // No entry city specified — infer a natural starting point.
+    }
+    // PD.436: fall through to inference when no entry was named OR the named
+    // entry resolved to no eligible gateway (e.g. it was a sight, now rejected
+    // above) — so the arrival defaults to a real gateway city, never a sight.
+    if (!entryCand) {
+      // No usable entry city — infer a natural starting point.
       // Preference order:
       //   1. A major-gateway candidate (marked _cityPick by the major-cities discovery call)
       //      that's among the "remaining" non-route-block candidates
@@ -1319,7 +1336,10 @@
     // Find exit candidate
     var exitCand = null;
     if (exitN) {
-      remaining.forEach(function(c){ if (!exitCand && matchesName(c, exitN) && c !== entryCand) exitCand = c; });
+      // PD.436: same gateway guard — a sight named as the exit hint (the
+      // "Fjaðrárgljúfur Canyon" departure bug) is rejected; the exit falls
+      // through to a real city via the round-trip / inference paths below.
+      remaining.forEach(function(c){ if (!exitCand && matchesName(c, exitN) && c !== entryCand && _gatewayEligible(c)) exitCand = c; });
     }
     // Round CP.1: if no exit was specified AND we inferred an entry from the
     // major-gateway fallback, assume round trip — the user almost certainly
@@ -1801,9 +1821,11 @@
       // sight that hangs off a parent destination?" Carry it through
       // publish/rebuild the same way classification metadata does.
       _sightsClassified: Object.assign({}, s._sightsClassified || {}),
-      // Same persistence problem applied to the display-name map.
-      _userListedDisplay: Object.assign({}, s._userListedDisplay || {}),
-      _userListedNames: Object.assign({}, s._userListedNames || {}),
+      // PD.429: the listed set is NO LONGER persisted as a parallel brief map.
+      // Listed-ness lives on the records (_origin:"user", baked at build-done),
+      // and the raw paste text survives in tripMeta.notes below as the deep
+      // migration seed. _userListedNames / _userListedDisplay intentionally not
+      // carried — the brief no longer holds a parallel copy that can drift.
       // v359.55.13: trip-level notes/links — a single object for the
       // whole trip (gear, weather, general guides). Mirrors placeMeta
       // but isn't keyed by place.
@@ -1974,6 +1996,31 @@
     var _pd234TbSights = (_tb && _tb._sightsClassified) || {};
     var _pd234BriefSights = (trip && trip.brief && trip.brief._sightsClassified) || {};
     var _pd234SightSet = Object.keys(_pd234TbSights).length ? _pd234TbSights : _pd234BriefSights;
+    // PD.430 (architectural): a place YOU typed under "sights" is DECORATION,
+    // not a destination. The trip's structure is the places you marked as STAYS
+    // — the route moves between them; sights hang off it. Your role designation
+    // is authoritative over the classifier, so merge your raw-input sight names
+    // into the sight set that BOTH the kept-filter and the reconcile-synthesis
+    // below exclude from the destinations build. This is what stops 34 sights
+    // from inflating the trip to "45 destinations". EXCEPTION: if you later
+    // promoted one to a stay in the picker (placeMeta.stayOverride === true),
+    // honor that — it becomes a destination.
+    try {
+      if (typeof _listedGroundTruth === "function") {
+        var _gtPub = _listedGroundTruth();
+        var _pmPub = (_tb && _tb.placeMeta) || {};
+        var _augSights = Object.assign({}, _pd234SightSet);
+        (_gtPub.sights || []).forEach(function (nm) {
+          var k = _pd234NrmFn(nm); if (!k) return;
+          var meta = _pmPub[k];
+          if (meta && meta.stayOverride === true) return; // you promoted it to a stay
+          _augSights[k] = true;
+        });
+        _pd234SightSet = _augSights;
+        console.log("[Max PD.430] destinations build excludes " + (_gtPub.sights || []).length
+          + " user-listed sight(s) — sights are decoration, not stops");
+      }
+    } catch (_) {}
 
     // Dedup duplicate candidates by normalized name BEFORE the filter
     // so reconciled / backstopped duplicates don't each spawn a
@@ -3453,36 +3500,30 @@
     // (Edit destinations, change arrival/departure on trip view) lose the
     // picker's per-place night counts and fall back to LLM stayRange, which
     // makes the trip's day count balloon by ~5 nights per rebuild.
-    trip.candidates = (_tb.candidates||[]).map(function(c){
-      return {
-        id:c.id, place:c.place, country:c.country||null, role:c.role||null,
-        whyItFits:c.whyItFits||"", tags:c.tags||[], tradeoffs:c.tradeoffs||null,
-        stayRange:c.stayRange||"", lat:c.lat||null, lng:c.lng||null,
-        nights: (typeof c.nights === "number") ? c.nights : undefined,
-        status:c.status||null, _required:!!c._required, _requiredFor:(c._requiredFor||[]).slice(),
-        // Round NC.3e: c.role (above on line 3088) is the source of
-        // truth; tripRole (NC.1 transitional) retired here. Keep
-        // c.overnightCapable so the rehydrate doesn't have to re-derive
-        // it from singleSight every reload.
-        overnightCapable: (typeof c.overnightCapable === "boolean") ? c.overnightCapable : null,
-        // v359.24: preserve user's role decision so re-opens of the
-        // picker (Edit destinations) rehydrate the intent/hub the user
-        // set, instead of falling back to the auto-suggestion.
-        intent: c.intent || undefined,
-        dayTripHub: c.dayTripHub || undefined,
-        // NC.9: persist the user-commitment flag + the wayside hub.
-        // Without _roleTouched, the trip-view pin renderer reads
-        // c._roleTouched as undefined and runs its predictor override
-        // (line ~35379 in index.html), which can downgrade a Stay to a
-        // Day trip whenever the place is close to another stay. Neal:
-        // "I added Selfoss as a stay, and it was added as a day trip."
-        // Same fix on the index.html projection — both publish paths
-        // missed these fields. waysideFromHub follows the same
-        // reasoning as dayTripHub above.
-        _roleTouched: !!c._roleTouched,
-        waysideFromHub: c.waysideFromHub || undefined
-      };
-    });
+    // PD.456: the snapshot is born through the ONE projection (MaxCandidates.
+    // snapshotFrom) — a pure function of the working model. Inline fallback kept
+    // only for load-order safety if the domain module hasn't attached yet.
+    var _MC = (typeof MaxCandidates !== "undefined" && MaxCandidates)
+      || (typeof global !== "undefined" && global.MaxCandidates)
+      || (typeof window !== "undefined" && window.MaxCandidates) || null;
+    if (_MC && typeof _MC.snapshotFrom === "function") {
+      trip.candidates = _MC.snapshotFrom(_tb.candidates || []);
+    } else {
+      trip.candidates = (_tb.candidates||[]).map(function(c){
+        return {
+          id:c.id, place:c.place, country:c.country||null, role:c.role||null,
+          whyItFits:c.whyItFits||"", tags:c.tags||[], tradeoffs:c.tradeoffs||null,
+          stayRange:c.stayRange||"", lat:c.lat||null, lng:c.lng||null,
+          nights: (typeof c.nights === "number") ? c.nights : undefined,
+          status:c.status||null, _required:!!c._required, _requiredFor:(c._requiredFor||[]).slice(),
+          overnightCapable: (typeof c.overnightCapable === "boolean") ? c.overnightCapable : null,
+          intent: c.intent || undefined,
+          dayTripHub: c.dayTripHub || undefined,
+          _roleTouched: !!c._roleTouched,
+          waysideFromHub: c.waysideFromHub || undefined
+        };
+      });
+    }
     trip.requiredPlaces = (_tb.requiredPlaces||[]).slice();
     // Persist the trip-brief fields the Explorer needs to rehydrate
     if (trip.brief) {
@@ -4174,13 +4215,8 @@
           });
           if (parentDestForWithin) return;
         }
-        // Skip if this sight is already a destination on the trip.
-        var existingDest = (trip.destinations || []).find(function (d) {
-          return d && d.place && _pd225NrmFn(d.place) === sightKey;
-        });
-        if (existingDest) return;
-
-        // Resolve display name + coords from candidates / sightsClassified meta / key.
+        // Resolve display name + coords FIRST so the identity check below can
+        // use the coordinate-aware canonical identity.
         var cand = (_tb.candidates || []).find(function (c) {
           return c && c.place && _pd225NrmFn(c.place) === sightKey;
         });
@@ -4192,6 +4228,27 @@
         var lng = (cand && typeof cand.lng === "number") ? cand.lng : null;
         var country = (cand && cand.country) || meta.country
           || (trip.brief && trip.brief.region) || null;
+
+        // Skip if this sight is ALREADY a destination — by the ONE canonical
+        // identity (sameEntity), so a name-variant of a place already added
+        // this pass ("Goðafoss" vs "Goðafoss Waterfall") cannot spawn a SECOND
+        // zero-night destination for the same place.
+        var _sightLL = (typeof lat === "number" && typeof lng === "number") ? { lat: lat, lng: lng } : null;
+        var _MDpd = global.MaxDiscovery;
+        var existingDest = (trip.destinations || []).find(function (d) {
+          if (!d || !d.place) return false;
+          if (_pd225NrmFn(d.place) === sightKey) return true;
+          if (_MDpd && typeof _MDpd.sameEntity === "function") {
+            try {
+              return _MDpd.sameEntity(
+                { place: displayName, coords: _sightLL },
+                { place: d.place, coords: (typeof d.lat === "number" && typeof d.lng === "number") ? { lat: d.lat, lng: d.lng } : null }
+              );
+            } catch (_) {}
+          }
+          return false;
+        });
+        if (existingDest) return;
 
         // Mint a place record + a 0-night destination shell.
         var placeId = _ensurePlace(trip, {

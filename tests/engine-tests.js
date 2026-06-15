@@ -1348,6 +1348,38 @@ describe('engine-picker.js — orderKeptCandidates', () => {
     assert.deepStrictEqual(result.reasoning, []);
     assert.strictEqual(result.inferredEntry, null);
   });
+
+  // PD.436: a SIGHT must never become the arrival/departure gateway — an
+  // airport is a destination, not a canyon. Even when an exit hint names the
+  // sight, the guard rejects it so the exit isn't pinned to a place with no
+  // airport (the "Departing Fjaðrárgljúfur Canyon" bug).
+  test('a sight named as the exit is NOT pinned as the departure gateway', () => {
+    window._tb = { region: 'Switzerland' };
+    const result = MaxEnginePicker.orderKeptCandidates(
+      [
+        { id: 'c1', place: 'Zurich',       lat: 47.37, lng: 8.55 },
+        { id: 'c2', place: 'Glacier Gorge', lat: 47.05, lng: 8.00, role: 'see', overnightCapable: false },
+        { id: 'c3', place: 'Geneva',       lat: 46.20, lng: 6.14 },
+      ],
+      [], 'Zurich', 'Glacier Gorge'   // exit hint names the SIGHT
+    );
+    const last = result.ordered[result.ordered.length - 1];
+    assert.notStrictEqual(last.place, 'Glacier Gorge', 'a sight must not be pinned last as the exit gateway');
+    assert.ok(result.ordered.some(c => c.place === 'Glacier Gorge'), 'the sight is still in the trip, just not the gateway');
+  });
+
+  test('a sight named as the entry is NOT used as the arrival gateway', () => {
+    window._tb = { region: 'Switzerland' };
+    const result = MaxEnginePicker.orderKeptCandidates(
+      [
+        { id: 'c1', place: 'Waterfall Trail', lat: 46.60, lng: 7.90, role: 'see', overnightCapable: false },
+        { id: 'c2', place: 'Zurich',          lat: 47.37, lng: 8.55, _cityPick: true },
+        { id: 'c3', place: 'Bern',            lat: 46.95, lng: 7.45 },
+      ],
+      [], 'Waterfall Trail', ''   // entry hint names the SIGHT
+    );
+    assert.notStrictEqual(result.ordered[0].place, 'Waterfall Trail', 'a sight must not be the arrival gateway');
+  });
 });
 
 // ── Suite: extractRoutePreference (Round NC.X) ──────────────────

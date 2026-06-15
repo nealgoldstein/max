@@ -204,7 +204,33 @@ if (typeof globalThis !== "undefined") globalThis._geographyOf = _geographyOf;
 // case that "needs" to bypass MaxRoleWriter, the answer is almost
 // always: add a method to MaxRoleWriter, not a parallel path.
 //
+// PD.455 (architectural): the ONE projection from the working model to the
+// published snapshot. _tb.candidates is the source of truth; trip.candidates is
+// a derived copy. Any code that mutates a working candidate's role/status calls
+// mirror(cand) to project it — so the snapshot can never go stale, and there is
+// exactly one definition of "how the snapshot tracks the working model" instead
+// of hand-written dual-writes scattered around. set() uses it too.
+function _mirrorCandToTrip(cand){
+  try {
+    if (typeof trip === "undefined" || !trip || !Array.isArray(trip.candidates) || !cand) return;
+    var norm = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
+    var t = null;
+    if (cand.id) t = trip.candidates.find(function(c){ return c && c.id === cand.id; });
+    if (!t) { var nk = norm(cand.place || ""); if (nk) t = trip.candidates.find(function(c){ return c && c.place && norm(c.place) === nk; }); }
+    if (!t) return;
+    t.role = cand.role;
+    t.status = cand.status;
+    t._roleTouched = cand._roleTouched;
+    t.intent = cand.intent;
+    t.dayTripHub = cand.dayTripHub;
+    t.waysideFromHub = cand.waysideFromHub;
+  } catch (_) {}
+}
+
 var MaxRoleWriter = {
+  // Project a working candidate's role/status onto its published-snapshot twin.
+  // THE single sync primitive — see _mirrorCandToTrip.
+  mirror: function(cand){ _mirrorCandToTrip(cand); },
   set: function(idOrPlace, role, opts){
     opts = opts || {};
     if (typeof _tb === "undefined" || !_tb || !Array.isArray(_tb.candidates)) return null;
@@ -223,44 +249,49 @@ var MaxRoleWriter = {
     if (!cand) return null;
     var prev = cand.role || null;
     var hub = opts.hub ? String(opts.hub).toLowerCase() : "";
-    // ── Active roles (stay/see/daytrip/onway) ───────────────────────
-    if (validActive[role]) {
-      cand.role = role;
-      cand._roleTouched = true;
-      cand.status = "keep";
-      if (role === "daytrip") {
-        cand.dayTripHub = hub || cand.dayTripHub || "";
-        cand.waysideFromHub = "";
-        cand.intent = "dayTrip";  // NC.9.4: align intent with role
-      } else if (role === "onway") {
-        cand.waysideFromHub = hub || cand.waysideFromHub || "";
-        cand.dayTripHub = "";
-        cand.intent = "wayside";  // NC.9.4
-      } else {
-        // stay / see — clear stale hubs so _pmDeriveRole's
-        // validation cascade doesn't find a ghost hub. NC.9.4: also
-        // clear `intent` so the publishTrip day-trip / wayside commit
-        // passes (which filter by intent === "dayTrip" / "wayside")
-        // don't treat this candidate as a day-trip / wayside on the
-        // next publish. Without this, switching Selfoss from Day-trip
-        // to Stay in Discovery would still match the day-trip commit
-        // filter's intent check; the dayTripHub guard saved us, but
-        // intent should reflect the user's current call to keep the
-        // model honest end-to-end.
-        cand.dayTripHub = "";
-        cand.waysideFromHub = "";
-        cand.intent = "";
+    // PD.454 (architectural): ONE definition of what a role DOES to a candidate,
+    // applied to BOTH the working copy (_tb.candidates) and the published
+    // snapshot (trip.candidates) below. Before this, the same role/status/hub/
+    // intent mutation was written out twice — here and in the trip-mirror — and
+    // the two copies drifted, which is how "I set Selfoss to Stay and it
+    // published as a Day trip" happened. Now they share one mutator and cannot
+    // disagree. Side effects that belong only to the working model (rejection
+    // history) stay OUTSIDE this pure mutator.
+    function _applyRoleTo(c){
+      if (!c) return;
+      if (validActive[role]) {
+        c.role = role;
+        c._roleTouched = true;
+        c.status = "keep";
+        if (role === "daytrip") {
+          c.dayTripHub = hub || c.dayTripHub || "";
+          c.waysideFromHub = "";
+          c.intent = "dayTrip";  // NC.9.4: align intent with role
+        } else if (role === "onway") {
+          c.waysideFromHub = hub || c.waysideFromHub || "";
+          c.dayTripHub = "";
+          c.intent = "wayside";  // NC.9.4
+        } else {
+          // stay / see — clear stale hubs so _pmDeriveRole's validation cascade
+          // doesn't find a ghost hub, and clear `intent` so the publishTrip
+          // day-trip / wayside commit passes (which filter by intent) don't
+          // treat this candidate as a day-trip / wayside on the next publish.
+          c.dayTripHub = "";
+          c.waysideFromHub = "";
+          c.intent = "";
+        }
+      } else if (role === "maybe") {
+        // Maybe doesn't touch c.role (user hasn't decided), so we leave
+        // _roleTouched alone too. status=null is what _pmDeriveRole reads.
+        c.status = null;
+      } else if (role === "reject") {
+        c.status = "reject";
+        c._roleTouched = true;
       }
-    } else if (role === "maybe") {
-      cand.status = null;
-      // Maybe doesn't touch c.role (user hasn't decided), so we leave
-      // _roleTouched alone too. status=null is what _pmDeriveRole reads.
-    } else if (role === "reject") {
-      cand.status = "reject";
-      cand._roleTouched = true;
-      // PD.151: track rejection history so the user can undo. The
-      // restore action will set the role back to whatever it was
-      // immediately before rejection (or "see" as a sensible default).
+    }
+    _applyRoleTo(cand);
+    if (role === "reject") {
+      // PD.151: rejection history (working model ONLY) so the user can undo.
       try {
         if (!_tb._rejectionHistory) _tb._rejectionHistory = [];
         // De-dup by id (if a place is re-rejected, refresh its entry).
@@ -319,6 +350,15 @@ var MaxRoleWriter = {
             p._waysideFromHub = (role === "onway") ? hub : "";
             p._keep = keep;
             p._rejected = rejected;
+            // PD.452 (architectural): every user action through this writer —
+            // keep, see, daytrip, onway, AND uncheck ("maybe") / reject — stamps
+            // a DURABLE decision marker on the record. This is the single bit the
+            // keep-derivation reads: "_decided" means the user made a call, so
+            // honor the stored _keep verbatim; absent it, keep is a pure default
+            // (your places on, Max's suggestions off). Before this, "maybe" wrote
+            // nothing durable, so the build-default re-checked an unchecked place
+            // every render — the bug that forced all the referee passes.
+            p._decided = true;
           });
         });
       }
@@ -332,41 +372,9 @@ var MaxRoleWriter = {
     // via _writeTripRoleForDest) only updated _tb.candidates; the
     // trip-view pin re-rendered against a stale trip.candidates and
     // showed the old role until a publishTrip rebuild overwrote it.
-    try {
-      if (typeof trip !== "undefined" && trip && Array.isArray(trip.candidates)) {
-        var tCand = null;
-        if (cand.id) tCand = trip.candidates.find(function(c){ return c && c.id === cand.id; });
-        if (!tCand) {
-          var nk = norm(cand.place || "");
-          if (nk) tCand = trip.candidates.find(function(c){ return c && c.place && norm(c.place) === nk; });
-        }
-        if (tCand) {
-          if (validActive[role]) {
-            tCand.role = role;
-            tCand._roleTouched = true;
-            tCand.status = "keep";
-            if (role === "daytrip") {
-              tCand.dayTripHub = hub || tCand.dayTripHub || "";
-              tCand.waysideFromHub = "";
-              tCand.intent = "dayTrip";
-            } else if (role === "onway") {
-              tCand.waysideFromHub = hub || tCand.waysideFromHub || "";
-              tCand.dayTripHub = "";
-              tCand.intent = "wayside";
-            } else {
-              tCand.dayTripHub = "";
-              tCand.waysideFromHub = "";
-              tCand.intent = "";
-            }
-          } else if (role === "maybe") {
-            tCand.status = null;
-          } else if (role === "reject") {
-            tCand.status = "reject";
-            tCand._roleTouched = true;
-          }
-        }
-      }
-    } catch(_){}
+    // PD.455: project the just-mutated working candidate onto its snapshot
+    // twin through the ONE mirror primitive (no inline dual-write).
+    _mirrorCandToTrip(cand);
     // ── Event emission (engine event bus) ───────────────────────────
     try {
       if (typeof MaxEnginePicker !== "undefined"
@@ -383,6 +391,43 @@ var MaxRoleWriter = {
   }
 };
 if (typeof window !== "undefined") window.MaxRoleWriter = MaxRoleWriter;
+
+// PD.456 (perfect-model #1/#4): the ONE projection from a working candidate to
+// its PERSISTED snapshot shape. trip.candidates is born here and only here — a
+// pure function of the working model, so the snapshot is a derived view, not an
+// independently-edited second copy. publishTrip maps through snapshotFrom();
+// _mirrorCandToTrip keeps the SAME field subset in step between publishes. One
+// definition means the persisted shape can't drift from what the writer mirrors.
+var MaxCandidates = {
+  // working candidate -> persisted snapshot object (the durable field subset)
+  snapshotOf: function (c) {
+    if (!c) return null;
+    return {
+      id: c.id, place: c.place, country: c.country || null, role: c.role || null,
+      whyItFits: c.whyItFits || "", tags: c.tags || [], tradeoffs: c.tradeoffs || null,
+      stayRange: c.stayRange || "", lat: c.lat || null, lng: c.lng || null,
+      nights: (typeof c.nights === "number") ? c.nights : undefined,
+      status: c.status || null, _required: !!c._required, _requiredFor: (c._requiredFor || []).slice(),
+      overnightCapable: (typeof c.overnightCapable === "boolean") ? c.overnightCapable : null,
+      intent: c.intent || undefined,
+      dayTripHub: c.dayTripHub || undefined,
+      _roleTouched: !!c._roleTouched,
+      waysideFromHub: c.waysideFromHub || undefined,
+      // Round HZ: persist the user's manual sequence + manual-pin flag so a
+      // reopened picker re-acquires their order. The applyCandidateChanges
+      // projection carried these but publishTrip's did NOT — unifying both
+      // through this one function fixes that silent order-loss on publish.
+      order: (typeof c.order === "number") ? c.order : null,
+      manuallyOrdered: !!c.manuallyOrdered
+    };
+  },
+  // working list -> persisted snapshot list (drops nothing; pure map)
+  snapshotFrom: function (list) {
+    return (Array.isArray(list) ? list : []).map(MaxCandidates.snapshotOf).filter(Boolean);
+  }
+};
+if (typeof window !== "undefined") window.MaxCandidates = MaxCandidates;
+if (typeof globalThis !== "undefined") globalThis.MaxCandidates = MaxCandidates;
 
 // ──────────────────────────────────────────────────────────────────────
 // Round PD.73 / PD.330: trip lifecycle.
@@ -448,10 +493,10 @@ function _initialTripSave(opts){
       region:   _tb.region   || "",
       sentence: _tb.sentence || ""
     };
-    // PD.92: paste-list metadata. The user-typed source-of-truth fields
-    // travel WITH the trip on the brief.
-    if (_tb._userListedNames)   initialBrief._userListedNames   = Object.assign({}, _tb._userListedNames);
-    if (_tb._userListedDisplay) initialBrief._userListedDisplay = Object.assign({}, _tb._userListedDisplay);
+    // PD.429: the listed set is NO LONGER persisted as a parallel map on the
+    // brief. Listed-ness lives on the records (_origin:"user", baked at build),
+    // and the raw user input survives in tripMeta.notes below as the deep
+    // migration seed. (initialBrief._userListedNames intentionally not written.)
     if (_tb.tripMeta) {
       initialBrief.tripMeta = {};
       if (_tb.tripMeta.notes) initialBrief.tripMeta.notes = _tb.tripMeta.notes;
@@ -528,8 +573,8 @@ function _initialTripSave(opts){
       var briefUpdates = {};
       if (_tb.region)   briefUpdates.region   = _tb.region;
       if (_tb.sentence) briefUpdates.sentence = _tb.sentence;
-      if (_tb._userListedNames)   briefUpdates._userListedNames   = Object.assign({}, _tb._userListedNames);
-      if (_tb._userListedDisplay) briefUpdates._userListedDisplay = Object.assign({}, _tb._userListedDisplay);
+      // PD.429: listed set no longer persisted as a parallel brief map — it
+      // derives from the records' baked _origin:"user". (See initialBrief.)
       if (_tb.tripMeta) {
         var existingMeta = (TripStore.trip.brief && TripStore.trip.brief.tripMeta) || {};
         var nextMeta = Object.assign({}, existingMeta);

@@ -1,0 +1,79 @@
+// discovery-enhance.js — SSOT Phase 4: the EnhancementService + SuggestionSource.
+//
+// THE EXTENSION POINT for "enhanceability". A SuggestionSource finds candidate
+// places; it never touches the model, the DOM, or storage. EnhancementService
+// runs a source and routes every result through model.upsert — so dedup (the
+// model's coordinate-aware write door), persistence (Phase 3's change→save
+// pump), and the "a listed place never disappears" guarantee all come for free,
+// identically for every source.
+//
+// Adding a new way to enhance Discovery — "Michelin restaurants near each stay",
+// a curated DB, a partner API, a non-LLM heuristic — is:
+//     MaxEnhance.register(mySource)
+// with NO edits to the picker, the counts, or persistence. That is the
+// open/closed principle made concrete.
+//
+//   interface SuggestionSource {
+//     id: string;                         // "more-like-this" | "day-trips" | ...
+//     label: string;                      // user-facing button text
+//     appliesTo?(ctx): boolean;           // e.g. day-trips need >= 2 kept hubs
+//     fetch(ctx): PlaceSeed[] | Promise<PlaceSeed[]>;
+//   }
+//   // PlaceSeed is a model.upsert payload:
+//   //   { place, coords?, origin?, role?, decision?, themeFit?, nearListed?, src? }
+//
+// The three current sources map on cleanly (wired live in Phase 5):
+//   • "more-like-this" — enhanceDiscovery's thematic + enrichment extraction
+//   • "day-trips"      — runPickerDayTripDiscovery   (appliesTo: >= 2 hubs)
+//   • "waysides"       — runPickerWaysideDiscovery    (appliesTo: >= 2 hubs)
+(function (global) {
+  "use strict";
+
+  var _sources = Object.create(null);
+  var _order = [];
+
+  function register(source) {
+    if (!source || !source.id || typeof source.fetch !== "function") {
+      throw new Error("SuggestionSource needs { id, fetch(ctx) -> PlaceSeed[] }");
+    }
+    if (!_sources[source.id]) _order.push(source.id);
+    _sources[source.id] = source;
+    return source;
+  }
+  function get(id) { return _sources[id] || null; }
+  function sources() { return _order.map(function (id) { return _sources[id]; }); }
+  // The sources currently offerable for a context (their appliesTo holds).
+  function available(ctx) {
+    return sources().filter(function (s) {
+      return typeof s.appliesTo !== "function" || !!s.appliesTo(ctx);
+    });
+  }
+
+  // Run a source against a model: fetch seeds, upsert each (the model dedups),
+  // resolve to { id, added, merged, total }. One run, one uniform path.
+  function run(sourceId, model, ctx) {
+    var source = get(sourceId);
+    if (!source) return Promise.reject(new Error("no such SuggestionSource: " + sourceId));
+    if (!model || typeof model.upsert !== "function") {
+      return Promise.reject(new Error("EnhancementService.run needs a DiscoveryModel"));
+    }
+    ctx = ctx || {};
+    if (typeof source.appliesTo === "function" && !source.appliesTo(ctx)) {
+      return Promise.resolve({ id: sourceId, added: 0, merged: 0, total: 0, skipped: "not-applicable" });
+    }
+    return Promise.resolve(source.fetch(ctx)).then(function (seeds) {
+      seeds = Array.isArray(seeds) ? seeds.filter(function (s) { return s && s.place; }) : [];
+      var before = model.all().length;
+      seeds.forEach(function (seed) { model.upsert(seed); });
+      var added = model.all().length - before;
+      return { id: sourceId, added: added, merged: seeds.length - added, total: seeds.length };
+    });
+  }
+
+  var api = {
+    register: register, get: get, sources: sources, available: available, run: run,
+    reset: function () { _sources = Object.create(null); _order = []; }
+  };
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  global.MaxEnhance = api;
+})(typeof globalThis !== "undefined" ? globalThis : this);

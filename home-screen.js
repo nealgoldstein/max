@@ -718,7 +718,7 @@ function renderHomeScreen(){
       if (countdownChip) name.appendChild(countdownChip);
       var meta=document.createElement("div"); meta.className="tc-meta";
       var parts=[]; if(entry.dateRange)parts.push(entry.dateRange);
-      if(entry.destCount)parts.push(entry.destCount+" destination"+(entry.destCount!==1?"s":""));
+      if(entry.destCount)parts.push(entry.destCount+" place"+(entry.destCount!==1?"s":""));
       meta.textContent=parts.join(" \u00b7 ");
       info.appendChild(name); info.appendChild(meta);
 
@@ -1250,10 +1250,14 @@ function parsePlacesList(text) {
     if (!item) continue;
 
     // Round-trip / entry / exit auto-wire from the parenthetical.
+    // PD.436: require an EXPLICIT travel directive. The old test fired on bare
+    // "start/begin/end/finish", which appear descriptively ("east end of the
+    // ring road", "finish the loop") and wrongly promoted a sight to the
+    // arrival/departure gateway. Keep only travel-intent words.
     if (intent) {
       var iLower = intent.toLowerCase();
-      var hasArrival   = /\b(arrival|entry|start|begin)\b/.test(iLower);
-      var hasDeparture = /\b(departure|exit|end|finish)\b/.test(iLower);
+      var hasArrival   = /\b(arrival|arrive|arriving|entry|fly in|flying in)\b/.test(iLower);
+      var hasDeparture = /\b(departure|depart|departing|exit|fly out|flying out)\b/.test(iLower);
       if (hasArrival && !out.entry) out.entry = item;
       if (hasDeparture && !out.exit) out.exit = item;
     }
@@ -1874,12 +1878,10 @@ async function _buildPickerFromPastedList(parseResult, rawText, opts) {
       _tb._userListedNames[k] = p.isStay ? "stay" : "see";
       if (!_tb._userListedDisplay[k]) _tb._userListedDisplay[k] = String(p.place).trim();
     });
-    // Persist on trip.brief so reopens restore the list (the picker
-    // rehydration restores trip.brief → _tb).
-    if (typeof trip !== "undefined" && trip && trip.brief) {
-      trip.brief._userListedNames = Object.assign({}, _tb._userListedNames);
-      trip.brief._userListedDisplay = Object.assign({}, _tb._userListedDisplay);
-    }
+    // PD.429: the listed set is NOT persisted as a parallel brief map. _tb's
+    // copy here is transient BUILD INPUT (drives origin-baking); the durable
+    // record is the raw paste text in tripMeta.notes plus the records'
+    // _origin:"user" baked at build-done. Reopens re-project from the records.
   } catch(_){}
   // v359.60.28: stronger mandate — EVERY listed place must appear in
   // the output. Previous "anchor your activities around them" was too
@@ -2342,6 +2344,96 @@ if (typeof globalThis !== "undefined") globalThis._applyPastedListNights = _appl
 // type="activity", category/section set, iconic:false, checked:true,
 // requiredPlaces:[{place, country, nights, overnight, _keep:true}].
 // _keep:true so the place survives continuePlaceModeToStep2's filter.
+// PD.429: BAKE user provenance onto records — the final-authority pass that
+// lets the parallel `_userListedNames` set be retired. Every requiredPlace
+// whose name covers a user-listed name (token-subset, same rule the backstop
+// uses) gets `_origin:"user"` stamped PERMANENTLY on the record, so "is this
+// place yours?" is answered by the record itself — never by a name-map
+// fallback inside _placeOrigin. Unlike the backstop, this NEVER injects: it
+// only stamps records that already exist. Run it as the LAST step after all
+// record creation (incl. route-surfacing into concept themes), so a late-born
+// record — e.g. a surfaced route-only sight the user actually listed
+// ("Arnarstapi coastal cliffs") — is stamped too, instead of masquerading as
+// a Max suggestion. Authority order: the transient pasted list (build), else
+// the persisted name-map (one-time migration of an already-built trip on load).
+// Idempotent; returns the number of records newly stamped.
+function _stampListedOrigin() {
+  if (!_tb || !Array.isArray(_tb.placeActivities)) return 0;
+  var normFn = (typeof globalThis._normPlaceName === "function") ? globalThis._normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
+  function _toks(name){ var n = normFn(name); return n ? n.split(/\s+/).filter(Boolean) : []; }
+  // Authority = what the user typed. Three sources, in order of fidelity:
+  //   1. the live build input (_pastedListPlaces), present during a build;
+  //   2. a name-map still in _tb (a legacy brief seed restored on hydration);
+  //   3. the RAW PASTE TEXT in tripMeta.notes — the durable, user-owned seed
+  //      that survives on every trip, so origin-baking never depends on a
+  //      persisted parallel map. This is what lets the brief map be retired
+  //      while still guaranteeing no listed place loses its provenance.
+  var authority = (Array.isArray(_tb._pastedListPlaces) && _tb._pastedListPlaces.length)
+    ? _tb._pastedListPlaces.map(function(p){ return { place: p.place, isStay: !!(p.isStay || (typeof p.nights==="number" && p.nights>0)), _autoCreated: !!p._autoCreated }; })
+    : (function(){
+        var ln = _tb._userListedNames || {}, disp = _tb._userListedDisplay || {};
+        return Object.keys(ln).map(function(k){ return { place: disp[k] || k, isStay: ln[k] === "stay" }; });
+      })();
+  // A classifier-synthesized parent (auto-created) is NOT a thing the user
+  // typed — exclude it, exactly as the source builder does.
+  authority = authority.filter(function(a){ return a && a.place && !a._autoCreated; });
+  // Last resort: parse the raw paste text. Covers a freshly-built trip whose
+  // records the build didn't fully stamp, reopened with no in-memory list.
+  if (!authority.length && typeof parsePlacesList === "function") {
+    try {
+      var _notes = (_tb.tripMeta && _tb.tripMeta.notes)
+        || (typeof trip !== "undefined" && trip && trip.brief && trip.brief.tripMeta && trip.brief.tripMeta.notes) || "";
+      if (_notes) {
+        var _pl = parsePlacesList(_notes);
+        if (_pl && Array.isArray(_pl.destinations)) {
+          authority = _pl.destinations
+            .filter(function(d){ return d && d.place && !d._autoCreated; })
+            .map(function(d){ return { place: d.place, isStay: !!(d.isStay || (typeof d.nights==="number" && d.nights>0)) }; });
+        }
+      }
+    } catch(_){}
+  }
+  if (!authority.length) return 0;
+  // Index every existing record by its token set. Route items are included:
+  // a circuit you listed ("Golden Circle") lives as a route-umbrella place and
+  // must be stampable as yours. Max's infra waypoints simply never match an
+  // authority name, so they stay un-stamped.
+  var recs = [];
+  _tb.placeActivities.forEach(function(it){
+    if (!it) return;
+    (it.requiredPlaces || []).forEach(function(p){
+      if (!p || !p.place) return;
+      var set = {}; _toks(p.place).forEach(function(tk){ set[tk] = true; });
+      recs.push({ set: set, p: p });
+    });
+  });
+  var _isReb = !!(_tb && _tb._isRebuild);
+  var stamped = 0;
+  authority.forEach(function(up){
+    var ut = _toks(up.place); if (!ut.length) return;
+    for (var i = 0; i < recs.length; i++) {
+      var set = recs[i].set, all = true;
+      for (var j = 0; j < ut.length; j++) { if (!set[ut[j]]) { all = false; break; } }
+      if (!all) continue;
+      var p = recs[i].p;
+      // Never downgrade a hub; only stamp where origin is absent or "max".
+      // PD.453: this function stamps PROVENANCE only — never check-state. The
+      // single keep-derivation (end of _reconcileUserListedKeeps) sets _keep
+      // from origin + the user's decision, so a freshly-stamped user place
+      // defaults checked there, with no referee here. Removing the old
+      // _keep=true write removes a writer (this was a source of the "can't
+      // uncheck a base" bug, since it re-asserted keep on every build pass).
+      if (p._origin !== "user" && p._origin !== "max-hub") {
+        p._origin = "user"; stamped++;
+      }
+      break; // first covering record wins (mirrors the backstop's _coverReq)
+    }
+  });
+  if (stamped) { try { console.log("[Max PD.429] baked _origin:user onto " + stamped + " record(s) from the listed authority"); } catch(_){} }
+  return stamped;
+}
+if (typeof globalThis !== "undefined") globalThis._stampListedOrigin = _stampListedOrigin;
+
 function _backstopPastedListPlaces(stage) {
   // PD.374: this function serves two roles — CONSTRUCTOR (pre-LLM,
   // builds every listed place into the picker) and BACKSTOP
@@ -2365,19 +2457,66 @@ function _backstopPastedListPlaces(stage) {
     return n ? n.split(/\s+/).filter(Boolean) : [];
   }
   var coveredTokenSets = []; // array of Set-like { [token]: true }
-  function _registerCovered(name){
+  var coveredReqPlaces = []; // {set, place} — requiredPlace refs we can upgrade
+  function _registerCovered(name, reqRef){
     var toks = _tokensOf(name);
     if (!toks.length) return;
     var set = {};
     toks.forEach(function(t){ set[t] = true; });
     coveredTokenSets.push(set);
+    if (reqRef) coveredReqPlaces.push({ set: set, place: reqRef });
   }
   _tb.placeActivities.forEach(function(it){
     if (!it) return;
-    (it.requiredPlaces || []).forEach(function(p){ if (p && p.place) _registerCovered(p.place); });
+    (it.requiredPlaces || []).forEach(function(p){ if (p && p.place) _registerCovered(p.place, p); });
     (it.endpoints     || []).forEach(function(p){ if (p && p.place) _registerCovered(p.place); });
     (it.viableLocations|| []).forEach(function(p){ if (p && p.place) _registerCovered(p.place); });
   });
+  // THE USER'S LISTING WINS. A place you listed that is already present —
+  // possibly under a fuller Max name ("Þingvellir" → "Þingvellir National
+  // Park") — must carry YOUR provenance and stay KEPT, never show up as an
+  // unchecked Max suggestion. So upgrade the covering record in place: origin
+  // → user (it's yours, not a Max idea), and keep → true on a first build
+  // (a rebuild respects whatever you later unchecked). This also stops the
+  // place from masquerading as a "considered" gray pin you never asked to weigh.
+  (function _userListingWins(){
+    var _isReb = !!(_tb && _tb._isRebuild);
+    function _coverReq(userName){
+      var ut = _tokensOf(userName);
+      if (!ut.length) return null;
+      for (var ci = 0; ci < coveredReqPlaces.length; ci++) {
+        var set = coveredReqPlaces[ci].set, allHit = true;
+        for (var ti = 0; ti < ut.length; ti++) { if (!set[ut[ti]]) { allHit = false; break; } }
+        if (allHit) return coveredReqPlaces[ci].place;
+      }
+      return null;
+    }
+    _tb._pastedListPlaces.forEach(function(up){
+      if (!up || !up.place) return;
+      var cov = _coverReq(up.place);
+      if (!cov) return;
+      if (!cov._origin || cov._origin === "max") cov._origin = "user";
+      // PD.453: provenance only — keep is owned by the single derivation, which
+      // checks a user-origin undecided place by default. No keep referee here.
+      // Adopt the canonical "correct" fuller name for the place (your
+      // "Þingvellir" → "Þingvellir National Park") AND record the rename, so the
+      // change is transparent rather than a silent substitution. The display
+      // name for your listed entry is updated to the canonical; the correction
+      // is surfaced in the receipt banner.
+      if (cov.place && normFn(cov.place) !== normFn(up.place)) {
+        var _k = normFn(up.place);
+        _tb._userListedDisplay = _tb._userListedDisplay || {};
+        var _from = (_tb._userListedDisplay[_k] != null) ? _tb._userListedDisplay[_k] : up.place;
+        if (_from !== cov.place) {
+          _tb.brief = _tb.brief || {};
+          _tb.brief._listedNameCorrections = _tb.brief._listedNameCorrections || [];
+          if (!_tb.brief._listedNameCorrections.some(function(c){ return c.to === cov.place; }))
+            _tb.brief._listedNameCorrections.push({ from: _from, to: cov.place });
+          _tb._userListedDisplay[_k] = cov.place;
+        }
+      }
+    });
+  })();
   // A user-listed place is "covered" if there exists a covered name
   // whose token set ⊇ the user's token set (every token of the user's
   // name appears in some covered name). One-word user names match

@@ -24,7 +24,8 @@ case "${1:-help}" in
     echo "→ Serving  $ROOT"
     echo "  Open:    http://localhost:$PORT/index.html"
     echo "  (Ctrl-C to stop. Leave this window running while you work.)"
-    exec python3 -m http.server "$PORT" --directory "$ROOT"
+    # no-cache server: every reload refetches, so dev code is never stale.
+    exec python3 "$ROOT/dev-server.py" "$PORT" "$ROOT"
     ;;
 
   check|test)

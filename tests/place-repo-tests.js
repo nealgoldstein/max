@@ -103,6 +103,35 @@ test("interning is idempotent and merges sections/kinds", function () {
   assert.strictEqual(repo.find("Gullfoss").sections.length, 2);
 });
 
+// ── Entity interning (the ONE identity) ───────────────────────────────────
+// With the discovery model loaded, the repo interns by sameEntity: true
+// name-variants collapse to ONE place, but BOTH names still resolve, and
+// genuinely-distinct places that merely share tokens stay separate.
+global.MaxDiscovery = require("../discovery-model.js");
+
+test("name-variants of one place intern to a SINGLE record (Goðafoss)", function () {
+  var repo = new Repo();
+  repo.add({ place: "Goðafoss", section: "Hike to waterfalls", kind: "sight" });
+  repo.add({ place: "Goðafoss Waterfall", section: "See natural wonders", kind: "sight" });
+  assert.strictEqual(repo.all().length, 1, "two names for one place = one record");
+  assert.strictEqual(repo.has("Goðafoss"), true, "bare name still resolves");
+  assert.strictEqual(repo.has("Goðafoss Waterfall"), true, "variant name still resolves");
+});
+
+test("distinct places that share tokens do NOT intern together", function () {
+  var repo = new Repo();
+  repo.add({ place: "Reykjavík Maritime Museum", lat: 64.155, lng: -21.95, kind: "sight" });
+  repo.add({ place: "Reykjavík Art Museum",      lat: 64.149, lng: -21.94, kind: "sight" });
+  assert.strictEqual(repo.all().length, 2, "two distinct museums stay separate");
+});
+
+test("far-apart places sharing generic tokens stay separate (coord veto)", function () {
+  var repo = new Repo();
+  repo.add({ place: "Snæfellsjökull National Park", lat: 64.80, lng: -23.78, kind: "sight" });
+  repo.add({ place: "Þingvellir National Park",      lat: 64.26, lng: -21.13, kind: "sight" });
+  assert.strictEqual(repo.all().length, 2, "140km-apart parks stay separate");
+});
+
 console.log("\n" + "─".repeat(50));
 console.log("PASS: " + pass + "    FAIL: " + fail);
 if (fail > 0) process.exit(1);

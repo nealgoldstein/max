@@ -45,6 +45,13 @@
   // `global` is the IIFE parameter — `window` in browser, Node `global`
   // in tests.
   function _setTripRef(t) {
+    // The persist idempotency signature is bound to the CURRENT trip's
+    // identity + storage. Switching to a different trip (or unloading)
+    // invalidates it, so clear it then — otherwise a stale signature could
+    // suppress the new trip's first write. A same-id replace (the cross-tab
+    // sync path) deliberately KEEPS the signature so the no-op-write guard
+    // can still converge the two tabs.
+    if (!t || !_trip || t.id !== _trip.id) _lastPersistSig = null;
     _trip = t;
     global.trip = t;
   }
@@ -93,11 +100,36 @@
   // Wraps MaxDB. All persistence flows through here. Push-only sync
   // policy is enforced in replace() — sync pulls cannot overwrite
   // local state without explicit user action.
+  // Signature of the last envelope this tab wrote OR adopted, with the
+  // volatile __saved__ stamp stripped. Persistence is IDEMPOTENT against it:
+  // a write whose semantic content is unchanged is skipped. This is what
+  // breaks the cross-tab render loop — two tabs open on one trip used to
+  // ping-pong forever (tab A writes → tab B's `storage` handler restores +
+  // re-renders + persists → tab A's handler fires → …). A no-op write emits
+  // no `storage` event, so the moment both tabs hold equal content the loop
+  // ends by construction, not by a throttle or a guard flag.
+  var _lastPersistSig = null;
+  // Signature over SUBSTANTIVE content only: the two volatile metadata stamps
+  // (__saved__ wall-clock and _version counter) are dropped, because a mutate
+  // bumps _version even when nothing meaningful changed. Without dropping it,
+  // the cross-tab cycle's ever-incrementing _version would make every envelope
+  // look different and the no-op-write guard could never converge.
+  function _envSig(envelope) {
+    try {
+      return JSON.stringify(envelope, function (k, v) {
+        return (k === "__saved__" || k === "_version") ? undefined : v;
+      });
+    } catch (_) { return null; }
+  }
+
   function _persist() {
     if (!_trip || !_trip.id) return false;
     try {
       _trip.__saved__ = Date.now();
       var envelope = { trip: _trip, _schemaVersion: SCHEMA_VERSION };
+      var _sig = _envSig(envelope);
+      if (_sig !== null && _sig === _lastPersistSig) return true; // no-op: content unchanged
+      _lastPersistSig = _sig;
       // Prefer writeRaw with silent:true to suppress MaxDB's tripWritten
       // event. The engine-trip.js subscriber (engine-trip.js ~line 2955)
       // listens for tripWritten and replaces global.trip from the envelope.
@@ -496,6 +528,10 @@
     }
     _setTripRef(_migrate(envelope.trip, id));
     _version = (_trip._version || 0);
+    // Prime the idempotency signature: we just adopted this exact content, so
+    // a render that re-persists it unchanged must NOT echo a write back out
+    // (the cross-tab sync loop). Volatile __saved__ is stripped by _envSig.
+    _lastPersistSig = _envSig({ trip: _trip, _schemaVersion: SCHEMA_VERSION });
     emit("tripChange", { mutator: "load", payload: { id: id }, version: _version });
     emit("tripLoaded", { id: id });
     return _trip;

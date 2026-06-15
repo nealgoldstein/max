@@ -1032,6 +1032,10 @@ function _dropActivity(mdName){
   // Mark every candidate under it as rejected
   cands.forEach(function(c){
     c.status = "reject";
+    // PD.455: project the reject onto the published snapshot through the one
+    // mirror primitive, so trip.candidates can't go stale after a must-do drop.
+    if (typeof MaxRoleWriter !== "undefined" && MaxRoleWriter && MaxRoleWriter.mirror) MaxRoleWriter.mirror(c);
+    else if (typeof window !== "undefined" && window.MaxRoleWriter && window.MaxRoleWriter.mirror) window.MaxRoleWriter.mirror(c);
     // Strip this must-do out of its _requiredFor so other sections don't show "also supports"
     c._requiredFor = (c._requiredFor||[]).filter(function(r){ return r !== mdName; });
     if (!c._requiredFor.length) c._required = false;
@@ -1236,6 +1240,10 @@ async function setCS(id,status){
   }
   var prevStatus = c.status;
   c.status=(c.status===status)?null:status;
+  // PD.455: keep the published snapshot in step with this status toggle via the
+  // one mirror primitive (instead of leaving trip.candidates stale until republish).
+  if (typeof MaxRoleWriter !== "undefined" && MaxRoleWriter && MaxRoleWriter.mirror) MaxRoleWriter.mirror(c);
+  else if (typeof window !== "undefined" && window.MaxRoleWriter && window.MaxRoleWriter.mirror) window.MaxRoleWriter.mirror(c);
   // Un-rejecting a candidate that previously cascaded a must-do drop? Re-wire
   // its required links and re-check the dropped must-dos. This matters because
   // rejecting Montreux (endpoint of the Lake Geneva circuit) drops the circuit
@@ -1288,13 +1296,18 @@ async function setCS(id,status){
   // sync with what the trip sequencer would build.
   _tbResequenceCandidates();
   renderCandidateCards(_tb.candidates);
-  // v360.3 (#124): debounced auto-discovery of day-trips + waysides
-  // once the user has settled on a hub set. Discovery is where you
-  // decide WHAT to see; the helper functions live in engine-picker.js
-  // (runPickerDayTripDiscovery + runPickerWaysideDiscovery). They're
-  // idempotent — won't re-run for the same hub/leg combination — so
-  // calling them repeatedly during keep/reject toggles is safe.
-  _schedulePickerSecondaryDiscovery();
+  // ROOT FIX (proliferation / "fetching routes" flood on first return to
+  // Discovery): the auto-trigger of secondary day-trip/wayside discovery is
+  // REMOVED here. It fired on entering the picker and, on a multi-hub trip,
+  // auto-batched an LLM wayside fetch for EVERY leg + a day-trip fetch per hub
+  // — dozens of unrequested model calls that froze the UI and flooded the sight
+  // list. Expensive LLM discovery must be USER-INVOKED, not auto-fired on a
+  // status toggle. Waysides already have an explicit "✨ Generate" button in the
+  // trip view; day-trips get the same treatment (see _renderWaysidePromptBanner).
+  // The runPickerDayTripDiscovery / runPickerWaysideDiscovery functions remain
+  // for explicit invocation. (To re-introduce automatic discovery later, do it
+  // as a deduplicated MaxEnhance SuggestionSource through model.upsert, not a
+  // render-coupled flood.)
   // PD.334: every curation action SAVES. See _persistDiscoveryState.
   _persistDiscoveryState();
 }

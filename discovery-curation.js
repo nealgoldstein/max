@@ -37,7 +37,23 @@ function _persistDiscoveryState(opts){
         TripStore.batch(function(){
           if (typeof _tb !== "undefined" && _tb) {
             if (Array.isArray(_tb.candidates))      TripStore.setCandidates(_tb.candidates);
-            if (Array.isArray(_tb.placeActivities)) TripStore.setPlaceActivities(_tb.placeActivities);
+            if (Array.isArray(_tb.placeActivities)) {
+              // SSOT Phase 5: canonicalize through the ONE dedup door at the
+              // persist chokepoint, so no writer can ratchet the saved set across
+              // trip↔discovery round-trips (the historical "55 → 149 → 209"
+              // growth). Idempotent + coordinate-aware (MaxDiscovery.sameEntity);
+              // mutate IN PLACE to keep the PD.303 by-reference bridge intact.
+              try {
+                if (typeof MaxData !== "undefined" && typeof MaxData.canonicalizePlaceActivities === "function") {
+                  var _canonPA = MaxData.canonicalizePlaceActivities(_tb.placeActivities);
+                  if (_canonPA !== _tb.placeActivities) {
+                    _tb.placeActivities.length = 0;
+                    Array.prototype.push.apply(_tb.placeActivities, _canonPA);
+                  }
+                }
+              } catch (e) { if (typeof console !== "undefined") console.warn("[Max Phase5] canonicalize-on-save failed:", e && e.message); }
+              TripStore.setPlaceActivities(_tb.placeActivities);
+            }
             // PD.358: curation mutates items IN PLACE, so the
             // reassignment above is often a same-ref no-op (PD.356a).
             // touch() makes the persist explicit and unconditional.

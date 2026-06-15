@@ -30,7 +30,18 @@ function _discoveryOpts(){
     // Match MaxData.consideredPlaceKeys exactly: a place that appears in
     // ANY stay section is a stay, not a considered sight — exclude it
     // from the count the same way, so the banner == the trip pill.
-    var _pa = (typeof _tb !== "undefined" && _tb && Array.isArray(_tb.placeActivities)) ? _tb.placeActivities : [];
+    //
+    // SSOT Stage 2 (kill the 17<->131 bistability): read the stay-section
+    // places from the PERSISTED trip (t.placeActivities), NOT the volatile
+    // _tb.placeActivities. The render's _applyDiscoveryModelToSights()
+    // REASSIGNS _tb.placeActivities every paint; building destKeys from that
+    // same mutating array made the exclusion set depend on the render's own
+    // output — a feedback loop with two self-consistent fixed points (17 and
+    // 131) that flipped on every re-open. The persisted trip is the stable,
+    // canonical input MaxData already uses, so deriving destKeys from it makes
+    // the considered set deterministic across re-opens (and matches the comment
+    // above, which always intended "same as MaxData.consideredPlaceKeys").
+    var _pa = (t && Array.isArray(t.placeActivities)) ? t.placeActivities : [];
     _pa.forEach(function(it){
       if (it && window._isStaySection && window._isStaySection(it.section)) {
         (it.requiredPlaces || []).forEach(function(p){ if (p && p.place) destKeys[_rk(p.place)] = 1; });
@@ -49,6 +60,33 @@ function _discoveryOpts(){
   };
 }
 
+// SSOT Stage 2: the canonical, render-independent source for every Discovery
+// COUNT. The receipt banner used to build its model from _tb.placeActivities —
+// the working array the render rewrites every paint. The reconcile pass
+// (_reconcileUserListedKeeps -> the PD.256/258/285 orphan-catchall rebuild) can
+// DROP whole synthetic-enhance sections from _tb (e.g. the 114-place "Sights
+// near places you listed"), and whether it has run depends on a 150ms render
+// throttle (PD.376) — so the same trip read the banner as 17 OR 131 depending on
+// timing, flipping on every re-open. The PERSISTED trip.placeActivities is the
+// stable, lossless source the map and the trip pill already read; deriving the
+// count from it makes the banner deterministic across re-opens AND identical to
+// the map by construction. Falls back to _tb only if no trip is loaded yet.
+function _discoveryCountSource(){
+  var t = (typeof TripStore !== "undefined" && TripStore.isLoaded && TripStore.isLoaded()) ? TripStore.trip
+    : ((typeof trip !== "undefined") ? trip : null);
+  if (t && Array.isArray(t.placeActivities) && t.placeActivities.length) {
+    // SSOT Stage 3: unify the two considered pools. Fold the legacy
+    // dest.suggestions._considered set into placeActivities (non-destructive)
+    // so the banner counts the SAME complete, sectioned set the map draws —
+    // banner == map by construction, no more 131-vs-186 gap.
+    if (typeof MaxData !== "undefined" && typeof MaxData.foldConsideredSuggestionsIntoPlaceActivities === "function") {
+      try { return MaxData.foldConsideredSuggestionsIntoPlaceActivities(t).placeActivities; } catch(_){}
+    }
+    return t.placeActivities;
+  }
+  return (typeof _tb !== "undefined" && _tb && Array.isArray(_tb.placeActivities)) ? _tb.placeActivities : [];
+}
+
 // PD.401c: the considered count, derived from the SAME model + the SAME
 // ingestion every other surface uses. Returns { total, catchall, other }
 // so the receipt banner reads the identical set as the chips and the pill.
@@ -56,7 +94,18 @@ function _discoveryConsideredCounts(){
   if (typeof _tb === "undefined" || !_tb || !Array.isArray(_tb.placeActivities)) return null;
   if (typeof MaxDiscovery === "undefined" || !MaxDiscovery.DiscoveryModel) return null;
   var S = MaxDiscovery.SECTION, Policy = MaxDiscovery.PlacementPolicy;
-  var model = MaxDiscovery.DiscoveryModel.fromPlaceActivities(_tb.placeActivities, _discoveryOpts());
+  // SSOT Phase 6 (cutover step 1): the live banner now DEPENDS ON the
+  // IngestionService — the one trip→model pipeline — rather than re-building its
+  // own model inline. Behavior-identical (window._isStaySection delegates to
+  // SectionKind.isStay, so the picker and the service share one stay-predicate),
+  // but the service is now load-bearing in the live path, not just in tests. The
+  // inline build (_discoveryCountSource + _discoveryOpts) remains only as a
+  // load-order fallback; once every surface routes through MaxIngestion it goes.
+  var _ct = (typeof TripStore !== "undefined" && TripStore.isLoaded && TripStore.isLoaded()) ? TripStore.trip
+    : ((typeof trip !== "undefined") ? trip : null);
+  var model = (typeof MaxIngestion !== "undefined" && MaxIngestion && typeof MaxIngestion.buildModel === "function" && _ct)
+    ? MaxIngestion.buildModel(_ct)
+    : MaxDiscovery.DiscoveryModel.fromPlaceActivities(_discoveryCountSource(), _discoveryOpts());
   var unchecked = model.considered();
   var catchall = 0;
   unchecked.forEach(function(p){
@@ -153,9 +202,27 @@ function _applyDiscoveryModelToSights(){
   // Reassemble: passthrough (stays/routes) FIRST in their order, then
   // the model's sight sections. The stays owner already pinned the stay
   // sections to the top of `passthrough`.
-  _tb.placeActivities = passthrough.concat(newSightItems).filter(function(it){
+  var _newPA = passthrough.concat(newSightItems).filter(function(it){
     return it && Array.isArray(it.requiredPlaces) && (it.requiredPlaces.length || window._isStaySection(it.section) || it.type === "route");
   });
+  // PD.445 (#5: render reads, never writes): reassign placeActivities ONLY when
+  // the placement actually CHANGED. In the steady state — the data was already
+  // model-placed by the last save — this is a structural no-op, so the render
+  // stops reassigning the array, stops dirtying _placeSetClean, and stops forcing
+  // a canonicalize on every render. The render becomes read-only when nothing
+  // changed (killing the mutate-every-render loop/freeze risk). The in-place
+  // _keep/_rejected flags set above are idempotent, so skipping the swap loses
+  // nothing. When placement DID change, the signatures differ and we reassign.
+  function _paSig(arr) {
+    return (arr || []).map(function (it) {
+      return (it && it.section || "") + "" + ((it && it.requiredPlaces) || []).map(function (p) {
+        return (p && p.place) ? p.place : "";
+      }).join("");
+    }).join("");
+  }
+  if (_paSig(_newPA) !== _paSig(_tb.placeActivities)) {
+    _tb.placeActivities = _newPA;
+  }
 }
 
 // PD.401i: the ONE accessor for a section's displayed place count. The

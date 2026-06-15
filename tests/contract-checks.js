@@ -265,7 +265,11 @@ check("Rule 10a: the place-set audit exists and runs at build:done",
     && indexSrc.indexOf("_maxPlaceSetAudit(false);") !== -1,
   "builds no longer end with a reconciled accounting");
 check("Rule 10b: the receipt reports your-list coverage (incl. missing)",
-  indexSrc.indexOf("you listed") !== -1 && indexSrc.indexOf("_aud.missing") !== -1,
+  // PD.434: coverage moved from the compact strip into the narrative — it states
+  // your list ("Your list had …"), computes a genuine drop from the PlaceSet
+  // (_pmiss), and surfaces it ("… here yet").
+  indexSrc.indexOf("Your list had") !== -1 && indexSrc.indexOf("_pmiss") !== -1
+    && indexSrc.indexOf("here yet") !== -1,
   "the user can't see whether their places survived");
 
 // ── Rule 11: hubs propose, the user commits (PD.378) ───────────────
@@ -287,14 +291,21 @@ check("Rule 11c: provenance + verdict flags survive the reopen clone",
   "reopen drops _autoCreated/_rejected — hubs vanish, rejections revert");
 
 // ── Rule 12: the numbers are explained on screen (PD.379) ──────────
-check("Rule 12a: the provenance banner renders the full accounting",
-  indexSrc.indexOf("on this page: ") !== -1
-    && indexSrc.indexOf("Max suggested") !== -1
-    && indexSrc.indexOf("overnight hub") !== -1,
+check("Rule 12a: the ONE narrative banner renders the full accounting (PD.434)",
+  // The stacked coverage/breakdown/slots banners were collapsed into ONE
+  // narrative computed from ONE accounting: your list (taught as destinations
+  // vs sights), Max's suggestions split by KIND, and the page total — so the
+  // numbers reconcile and the user learns the vocabulary.
+  indexSrc.indexOf("what we call <em>destinations</em>") !== -1
+    && indexSrc.indexOf("what we call <em>sights</em>") !== -1
+    && indexSrc.indexOf("It came back with ") !== -1
+    && indexSrc.indexOf(" more destination") !== -1 && indexSrc.indexOf(" more sight") !== -1,
   "the user can no longer see where the numbers come from");
-check("Rule 12b: slots-vs-places is explained with the doubled places named",
-  indexSrc.indexOf("Section counts add up to ") !== -1
-    && indexSrc.indexOf("in more than one section") !== -1,
+check("Rule 12b: the narrative explains that a sight can sit in several categories (PD.434)",
+  // A place can be a slot in multiple categories (themes), so the section
+  // chips can sum to more than the unique place total — the banner says so.
+  indexSrc.indexOf("Some sights fit into multiple categories") !== -1
+    && indexSrc.indexOf("Max has sorted the ") !== -1,
   "section sums exceeding the place count went unexplained again");
 check("Rule 12c: uncommitted hubs never enter the considered pool",
   (function () {
@@ -401,9 +412,13 @@ check("Rule 18a: the audit computes a considered PREVIEW excluding destinations"
   indexSrc.indexOf("out.considered = 0") !== -1
     && indexSrc.indexOf("if (r.kinds.destination) return") !== -1,
   "the considered preview no longer excludes destinations — it won't match the trip pill");
-check("Rule 18b: the receipt shows the considered bridge number",
-  indexSrc.indexOf("will appear as <strong>Considered</strong> sights") !== -1,
-  "the discovery receipt no longer previews the trip's Considered count");
+check("Rule 18b: the discovery banner does NOT show the separate-source 'considered' number (PD.431)",
+  // The "N will appear as Considered" bridge came from countConsideredSights —
+  // a DIFFERENT derivation than the audit registry, so it didn't reconcile with
+  // "Max suggested M sights". The one-accounting banner omits it; "Considered"
+  // stays a trip-view concept. (Guard against it being re-added to the banner.)
+  indexSrc.indexOf("will appear as <strong>Considered</strong> sights on your trip map") === -1,
+  "a count from a non-audit source crept back into the discovery banner");
 
 // ── Rule 19: considered is ONE derivation (PD.387/388) ─────────────
 check("Rule 19a: the considered set is derived from placeActivities (single owner)",
@@ -524,18 +539,21 @@ check("Rule 26b: the canon delegates its matcher to the ONE identity (PD.401k)",
   maxDataSrc.indexOf("_sameEntity ? _sameEntity(e, cand)") !== -1
     && maxDataSrc.indexOf("function _isAlreadyThemed") === -1,
   "the canon forked its own containment matcher again instead of the one identity");
-check("Rule 26c: coverage is a single lookup against the place repository (PD.401M)",
-  // The bespoke coverage scan (and its relatedTo loop) is gone; coverage
-  // now calls PlaceRepository.find(), which uses relatedTo internally —
-  // so Þingvellir still matches its qualified form, AND a listed place
-  // that became a route/region/stay is present, not missing.
+check("Rule 26c: coverage DERIVES from the repository records by origin (PD.429)",
+  // PD.429: coverage is no longer a name→find() lookup driven by the parallel
+  // _userListedNames map. It iterates the ONE registry's records and treats a
+  // record as listed iff origin === "user" (baked by _stampListedOrigin). Two
+  // names for one place are ONE interned record → counted once, no merge note.
+  // The repo is still the single registry (fromTrip), and the missing-place
+  // safety net keeps sameEntity fuzz so a variant name isn't falsely "missing".
   indexSrc.indexOf("PlaceRepository.fromTrip(") !== -1
-    && indexSrc.indexOf("_repo.find(lk)") !== -1
+    && /_allRecs\.forEach\(function\(r\)\{[\s\S]*?r\.origin !== "user"/.test(indexSrc)
+    && indexSrc.indexOf("MaxData.deriveListedFromRecords") !== -1
     && (function () {
       var pr = fs.readFileSync(path.join(ROOT, "place-repo.js"), "utf8");
       return /function _related/.test(pr) && pr.indexOf("PK.relatedTo") !== -1;
     })(),
-  "the coverage check no longer goes through the place repository / lost its relatedTo fuzz");
+  "coverage no longer derives the listed set from the repository records by origin");
 check("Rule 26f: the audit has ONE registry — no byKey second owner (PD.401M)",
   (function () {
     var fn = fnBody(indexSrc, /function _maxPlaceSetAudit\s*\(/);
@@ -598,7 +616,7 @@ check("Rule 31h: a name-merge LEARNS the alias (one stable identity, PD.401N)",
   "the write door stopped learning aliases on merge — identity reverts to two heuristics");
 check("Rule 31a: the write door stamps a coordinate-canonical _key",
   maxDataSrc.indexOf("function _internKey") !== -1
-    && maxDataSrc.indexOf("p._key = _internKey(p)") !== -1
+    && maxDataSrc.indexOf("p._key = _internKey(p, ") !== -1   // PD.438: now carries kind
     && maxDataSrc.indexOf("_MD.sameEntity") !== -1,
   "identity isn't interned at the write door — readers will recompute and drift");
 check("Rule 31b: the one identity accessor exists and the model reads _key",
@@ -689,6 +707,20 @@ check("Rule 29b: the model apply is NOT gated by _placeSetClean",
     return applyAt !== -1 && (gateAt === -1 || applyAt < gateAt);
   })(),
   "the model apply got gated behind the discipline flag again");
+
+// ── Rule 30: the orphan-catchall rebuild MERGES, never OVERWRITES ──
+// SSOT Stage 5. The user-listed orphan-sights pass found the "Sights near
+// places you listed" section BY NAME and did `existingSights.requiredPlaces =
+// sightRequiredPlaces` — overwriting it. That section is frequently a
+// type:"synthetic-enhance" item carrying ✦ Enhance ("more like this") additions
+// and migrated legacy sights that share the label (PD.312). The overwrite
+// deleted all of them every render — the 114-place "Sights near" disappearance
+// that flipped the considered count 131<->17 on re-entry and made "more like
+// this" additions vanish. The rebuild must UNION the orphans into the existing
+// section, never replace its requiredPlaces wholesale.
+check("Rule 30: orphan-sights rebuild does not overwrite the 'Sights near' section",
+  indexSrc.indexOf("existingSights.requiredPlaces = sightRequiredPlaces") === -1,
+  "the orphan-catchall rebuild overwrites 'Sights near places you listed' — it deletes Enhance additions + migrated legacy sights every render (the 114-place disappearance)");
 
 // ── Rule 28: no third-party CDN for Leaflet (PD.401f) ──────────────
 // Leaflet is vendored locally (vendor/leaflet/). A CDN <script>/<link>
@@ -790,6 +822,85 @@ check("Theming 1: the theming pass is ON by default (PD.486; '0' is the escape h
   // only disable when the flag is the explicit string "0".
   /_runThemingPass[\s\S]{0,1200}var on = true;[\s\S]{0,300}getItem\("max-theming-pass"\) === "0"/.test(indexSrc),
   "the theming pass default reverted to OFF — listed sights would pile in a catch-all again");
+
+check("Identity 1: kind is intrinsic, and a USER base never merges with a USER sight (PD.438)",
+  // Kind is stamped ONCE at the write door (beside _key), and sameEntity reads
+  // it intrinsically with an origin-gated veto — so a base you listed and a
+  // same-named sight you listed stay distinct everywhere, by construction, while
+  // a Max suggestion still folds into your base.
+  (function () {
+    var dm = fs.readFileSync(path.join(ROOT, "discovery-model.js"), "utf8");
+    return dm.indexOf("function _entityKind") !== -1
+      && dm.indexOf("_entityIsUser") !== -1
+      && maxDataSrc.indexOf("p._kind = _itKind") !== -1;
+  })(),
+  "the intrinsic kind stamp or the origin-gated kind veto was removed — a base can be absorbed by a sight again");
+
+check("Identity 3: the listed-set PRESENCE invariant lives at the write door (PD.443)",
+  // Every listed STAY ends in a stay section and every listed SIGHT on the page —
+  // RESTORED at canonicalizePlaceActivities (which runs on every save), identity-
+  // aware and idempotent. The scattered pipeline postcondition _assertUserListed-
+  // Present is gone; removal (PD.441/442) and restoration (PD.443) are one owner.
+  (function () {
+    var cd = fs.readFileSync(path.join(ROOT, "construct-decorate.js"), "utf8");
+    return maxDataSrc.indexOf("the write door also RESTORES a listed place") !== -1
+      && maxDataSrc.indexOf("_presentByIdentity") !== -1
+      && cd.indexOf("window._assertUserListedPresent = function") === -1;  // the pass is gone
+  })(),
+  "the listed-set presence invariant left the write door, or the scattered _assertUserListedPresent pass came back");
+
+check("Identity 2: the kind invariant lives at the WRITE DOOR, not a scattered pass (PD.442)",
+  // The kind invariant — a place you listed as a SIGHT is never left in a stay
+  // section, exact-matched against your canonical list — now lives ONCE in
+  // canonicalizePlaceActivities (reading _listedGroundTruth), subsuming the
+  // deleted, loosely-matched _collapseKindConflicts pass.
+  (function () {
+    var cd = fs.readFileSync(path.join(ROOT, "construct-decorate.js"), "utf8");
+    return maxDataSrc.indexOf("_listedGroundTruth") !== -1
+      && maxDataSrc.indexOf("a place you listed as a SIGHT is not a base") !== -1
+      && cd.indexOf("window._collapseKindConflicts = function") === -1;  // the pass is gone
+  })(),
+  "the kind invariant left the write door, or the scattered _collapseKindConflicts pass came back");
+
+check("Enhance 1: auto-enhance is permanently one-shot — existing enhance content blocks it (PD.437)",
+  // Auto-enhance must run ONCE and then only on explicit "More like this". The
+  // durable gate is the enhance content itself (a type:"synthetic-enhance"
+  // section that survives reopen), so a re-entry can't re-fire it even when a
+  // trip's destinations were lost (the navigation count-drift bug).
+  (function () {
+    var eb = fs.readFileSync(path.join(ROOT, "engine-build.js"), "utf8");
+    return eb.indexOf('type === "synthetic-enhance"') !== -1
+      && eb.indexOf("_hasEnhanceContent") !== -1;
+  })(),
+  "the durable enhance-content gate was removed — auto-enhance can re-fire on navigation again");
+
+check("Gateway 1: the paste parser won't promote a sight to a gateway on descriptive 'end'/'finish' (PD.436)",
+  // The arrival/departure auto-wire must require an EXPLICIT travel word, not
+  // bare start/begin/end/finish (which appear in sight descriptions like
+  // "east end of the ring road" and used to hijack the exit gateway).
+  indexSrc.indexOf("departure|depart|departing|exit|fly out|flying out") !== -1
+    && indexSrc.indexOf("departure|exit|end|finish") === -1,
+  "the loose arrival/departure keyword returned — a sight can hijack the gateway again");
+
+check("Gateway 2: a sight can never be the arrival/departure gateway (PD.436)",
+  // orderKeptCandidates guards entry AND exit matches with _gatewayEligible,
+  // and falls through to inference when a hint resolves to no eligible city.
+  (function () {
+    var ep = fs.readFileSync(path.join(ROOT, "engine-picker.js"), "utf8");
+    return ep.indexOf("function _gatewayEligible") !== -1
+      && (ep.match(/_gatewayEligible\(/g) || []).length >= 3;
+  })(),
+  "the gateway-eligibility guard was removed — a canyon can be the departure city again");
+
+check("Discovery 1: build + reopen finalize placement through ONE pipeline (PD.435)",
+  // The ordered placement sequence (consolidate orphan themes → surface
+  // route-only sights → bake user provenance + re-project cache → collapse
+  // kind conflicts) lives in _finalizeDiscoveryPlacement and is CALLED by every
+  // finalize site, never re-inlined — so the build and reopen paths cannot
+  // drift apart again (they used to run different orderings).
+  /window\._finalizeDiscoveryPlacement\s*=/.test(indexSrc)
+    && (indexSrc.match(/_finalizeDiscoveryPlacement\(/g) || []).length >= 2,
+  "a caller hand-rolled the placement sequence again instead of the one pipeline");
 
 // ───────────────────────────────────────────────────────────────────
 console.log("\n" + "─".repeat(50));

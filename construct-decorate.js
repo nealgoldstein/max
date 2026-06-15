@@ -28,6 +28,89 @@ window._placeOrigin = function (p) {
 // places default to checked. "Max never checks anything."
 window._defaultKeepForOrigin = function (o) { return o === "user"; };
 
+// PD.429: the listed set is no longer an independent persisted store. This
+// helper makes _tb._userListedNames / _userListedDisplay a pure PROJECTION of
+// the records: (1) bake _origin:"user" onto every record covering a listed
+// name (migrating a pre-PD.429 trip from whatever authority is present — the
+// build's pasted list, or a legacy brief map still in _tb), then (2) recompute
+// the cache straight from the records. After this the cache cannot drift from
+// the records, because it IS the records — the bug class that double-counted
+// "Goðafoss" is gone by construction. Call it wherever a trip hydrates into _tb
+// and after any record-shape change (build, reopen, "more like this").
+window._refreshUserListedFromRecords = function () {
+  try {
+    if (typeof _tb === "undefined" || !_tb || !Array.isArray(_tb.placeActivities)) return;
+    if (typeof _stampListedOrigin === "function") _stampListedOrigin();
+    if (typeof MaxData !== "undefined" && MaxData.deriveListedFromRecords) {
+      var d = MaxData.deriveListedFromRecords(_tb, {
+        normKey: (typeof _normPlaceName === "function") ? _normPlaceName : null,
+        isStaySection: (typeof window !== "undefined" && typeof window._isStaySection === "function") ? window._isStaySection : null
+      });
+      _tb._userListedNames   = d.names;
+      _tb._userListedDisplay = d.display;
+    }
+  } catch (_) {}
+};
+
+// PD.442 (#2): `_collapseKindConflicts` was DELETED. The kind invariant — a
+// place you listed as a SIGHT never sits in a stay section, and a base is never
+// duplicated as a sight — now lives ONCE at the write door
+// (canonicalizePlaceActivities, PD.441 + PD.442), which runs on every save. The
+// scattered, loosely-matched pass that used to over-remove a base ("Skaftafell"
+// vs your "Skaftafell glacier region") is gone; enforcement is exact and
+// identity-keyed at the one chokepoint.
+
+// PD.443 (#2): `_assertUserListedPresent` was DELETED. The listed-set PRESENCE
+// invariant — every listed STAY in a stay section, every listed SIGHT on the
+// page — now lives at the WRITE DOOR (canonicalizePlaceActivities, PD.443),
+// which runs on every save. Removal (PD.441/442) and restoration (PD.443) are
+// owned at one chokepoint, identity-aware and idempotent, so no upstream pass
+// has to be trusted and there's no pipeline postcondition to keep in sync.
+
+// PD.435: the ONE ordered placement-finalize pipeline. Every site that finalizes
+// _tb.placeActivities AFTER theming — the reopen pass, the render self-heal, a
+// "more like this" add — runs THIS exact sequence, so the steps can never drift
+// or be reordered between callers (the bug the build/reopen divergence created).
+// The steps are the proven, separately-tested passes; this only owns their
+// ORDER and the single entry point:
+//   1. consolidateOrphanThemes — re-home a themeless sight into a fitting theme.
+//   2. surfaceRouteOnlySights  — lift a route-only sight into its theme section.
+//   3. _refreshUserListedFromRecords — bake user provenance + re-project the
+//      listed cache from the records (calls _stampListedOrigin internally).
+//   (The kind invariant — a sight is never in a stay section, a base never
+//    duplicated as a sight — now lives at the WRITE DOOR, PD.441/442, not here.)
+// Operates on _tb.placeActivities in place; each step is idempotent. Returns a
+// small summary for diagnostics/logging.
+//   opts.refreshListedCache — REOPEN passes true: in addition to baking
+//     provenance, re-project _tb._userListedNames from the records (a migration
+//     concern for existing trips). BUILD leaves it false: the listed cache is
+//     constructed elsewhere during the build, and re-projecting it mid-build
+//     disrupts destination construction. This is the ONE intentional build vs
+//     reopen difference; the four-step ORDER is shared.
+window._finalizeDiscoveryPlacement = function (opts) {
+  opts = opts || {};
+  var out = { rehomed: 0, surfaced: 0, removed: 0 };
+  try {
+    if (typeof _tb === "undefined" || !_tb || !Array.isArray(_tb.placeActivities)) return out;
+    var nf = (typeof _normPlaceName === "function") ? _normPlaceName : null;
+    var isStay = (typeof window._isStaySection === "function") ? window._isStaySection : null;
+    if (typeof MaxGenPost !== "undefined" && MaxGenPost) {
+      if (typeof MaxGenPost.consolidateOrphanThemes === "function")
+        out.rehomed = MaxGenPost.consolidateOrphanThemes(_tb.placeActivities, { normPlaceName: nf }) || 0;
+      if (typeof MaxGenPost.surfaceRouteOnlySights === "function")
+        out.surfaced = MaxGenPost.surfaceRouteOnlySights(_tb.placeActivities, { normPlaceName: nf, isStaySection: isStay }) || 0;
+    }
+    // Provenance bake is universal; cache re-projection is reopen-only.
+    if (opts.refreshListedCache && typeof _refreshUserListedFromRecords === "function") _refreshUserListedFromRecords();
+    else if (typeof _stampListedOrigin === "function") _stampListedOrigin();
+    // Kind + presence invariants are OWNED at the write door (PD.441/442/443),
+    // which runs on the save that follows — so the pipeline no longer re-asserts
+    // them here. This block is now pure best-effort PLACEMENT (theme/route).
+  } catch (_) {}
+  return out;
+};
+if (typeof globalThis !== "undefined") globalThis._finalizeDiscoveryPlacement = window._finalizeDiscoveryPlacement;
+
 // PD.401k: the ONE place-identity accessor every reader uses. Prefers the
 // canonical `_key` stamped at the write door (coordinate-aware interning);
 // falls back to PlaceKey.resolve for a bare name or an un-stamped object.
@@ -208,6 +291,24 @@ async function _runThemingPass() {
         movableSections: movable
       });
     }
+    // Re-home any sight the theming pass left un-themed into a fitting EXISTING
+    // theme (waterfall→waterfalls, geyser→thermal, glacier→glaciers …) so a
+    // kept-but-uncategorized sight can't render as a lonely self-named category
+    // (the "Geysir (1)" / "Goðafoss Waterfall (1)" complaint). Conservative:
+    // moves only on a clear feature-concept match to a theme that already
+    // exists, so it cannot mis-file.
+    // PD.435: finalize placement through the ONE canonical pipeline — the SAME
+    // sequence the reopen pass and the render self-heal run (consolidate orphan
+    // themes → surface route-only sights → bake user provenance + re-project the
+    // listed cache → collapse kind conflicts). pa === _tb.placeActivities here
+    // (see above), so the in-place steps act on the array we just themed, and
+    // build can no longer drift from the other callers. None of these steps
+    // reassign _tb.placeActivities, so there's no mid-build render loop (the
+    // PD.404 caution below still applies only to _applyDiscoveryModelToSights).
+    var _fin = (typeof window._finalizeDiscoveryPlacement === "function")
+      ? window._finalizeDiscoveryPlacement() : { rehomed: 0, surfaced: 0 };
+    if (_fin.rehomed) console.log("[Max] orphan-theme consolidation re-homed " + _fin.rehomed + " sight(s) into existing themes");
+    if (_fin.surfaced) console.log("[Max] surfaced " + _fin.surfaced + " route-only sight(s) into theme sections");
     // Flag-on-only summary for live verification: JSON.stringify(window.__PD404_THEME)
     try {
       window.__PD404_THEME = { parsed: parsed, sorted: sorted, listLen: names.length,

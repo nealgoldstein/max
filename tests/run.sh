@@ -14,7 +14,15 @@ node tests/canonical-placeset-tests.js
 node tests/place-key-tests.js
 node tests/section-kind-tests.js
 node tests/discovery-model-tests.js
+node tests/discovery-ingestion-tests.js
+node tests/discovery-persistence-tests.js
+node tests/discovery-enhance-tests.js
+node tests/discovery-session-tests.js
+node tests/discovery-ssot-tests.js
 node tests/place-repo-tests.js
+node tests/place-set-tests.js
+node tests/golden-build-tests.js
+node tests/candidates-snapshot-tests.js
 node tests/gen-prompt-tests.js
 node tests/gen-postprocess-tests.js
 node tests/engine-tests.js

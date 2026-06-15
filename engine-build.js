@@ -217,12 +217,14 @@
       emit("build:reconcile-done");
 
       // Phase 5: enhance (best-effort) — FRESH BUILDS ONLY (PD.345).
-      // Rebuilds are the user EDITING an existing Discovery set; an
-      // unconditional enhance added another batch of suggestions on
-      // every Discovery→edit→rebuild round-trip, ratcheting the
-      // unchecked-sights count up each cycle (observed 50 → 187).
-      // "✦ More like this" is the explicit way to ask for more on an
-      // existing set.
+      // A FRESH build runs enhance ONCE: the first time you create a trip,
+      // Max hands you the richer, taste-shaped set up front. This is wanted.
+      // REBUILDS (returning to Discovery to edit) NEVER enhance — an
+      // unconditional enhance on every Discovery→edit→rebuild round-trip
+      // ratcheted the unchecked-sights count up each cycle (observed 50 →
+      // 187). After the first build, "✦ More like this" (MaxBuild.rerunEnhance)
+      // is the explicit, user-initiated way to ask for another round; auto
+      // enhance never fires again on its own.
       if (mode !== "rebuild") {
         var enhanceResult = await _runEnhancePhase();
         emit("build:enhance-done", { added: enhanceResult.added });
@@ -346,17 +348,70 @@
     }
   }
 
+  function _liveTrip() {
+    try {
+      return (global.TripStore && global.TripStore.isLoaded && global.TripStore.isLoaded())
+        ? global.TripStore.trip : (typeof global.trip !== "undefined" ? global.trip : null);
+    } catch (_) { return null; }
+  }
+
   async function _runEnhancePhase() {
+    if (typeof global.enhanceDiscovery !== "function") return { added: 0 };
+    // ONE-TIME EVENT: auto-enhance runs the FIRST time Discovery is generated
+    // for a trip and never automatically again — so NO path (fresh, rebuild,
+    // re-open, or a mislabeled mode) can fire it twice. TWO independent signals,
+    // either of which is decisive:
+    //   1. An explicit stamp on trip.brief — brief survives publishTrip's
+    //      rebuild (top-level trip fields do NOT, which is why the stamp lives
+    //      on the brief, the trip's durable metadata).
+    //   2. Lifecycle state: a first create reaches this phase BEFORE the trip
+    //      has any destinations (those are produced later by publishTrip on
+    //      commit); any re-open is against a trip that already HAS destinations.
+    // The only thing that enhances again is the explicit "✦ More like this"
+    // (rerunEnhance), which does not pass through here.
+    var _t = _liveTrip();
+    // PD.437: the ENHANCE CONTENT ITSELF is the most durable one-shot signal.
+    // Auto-enhance appends a `type:"synthetic-enhance"` section; that section
+    // lives in placeActivities and survives every reopen. So if the trip already
+    // carries enhance content, auto-enhance has demonstrably run — never again,
+    // even if `destinations` is empty (a contaminated trip) AND the brief stamp
+    // was lost. This is what stops the "count grows a little on each trip↔
+    // discovery navigation" drift: a re-entry can't re-fire what's already here.
+    var _hasEnhanceContent = !!(_t && Array.isArray(_t.placeActivities) && _t.placeActivities.some(
+      function (it) { return it && it.type === "synthetic-enhance"; }));
+    var _alreadyBuilt = !!(_t && (
+      _t._autoEnhancedAt ||
+      (_t.brief && _t.brief._autoEnhancedAt) ||
+      (Array.isArray(_t.destinations) && _t.destinations.length > 0) ||
+      _hasEnhanceContent
+    ));
+    if (_alreadyBuilt) {
+      return { added: 0, skipped: "not-first-discovery" };
+    }
     // PD.310: emit build:enhance-start before the LLM await so
     // subscribers can show a phase-2 status during the wait.
     emit("build:enhance-start");
-    if (typeof global.enhanceDiscovery !== "function") return { added: 0 };
     try {
       var added = await global.enhanceDiscovery(null, {
         suppressToast: true,
         suppressMaxAlert: true,
         silentNoOp: true
       });
+      // Stamp the trip so auto-enhance is permanently spent for it. The stamp
+      // goes on trip.brief because that's what survives publishTrip's rebuild
+      // (a bare top-level field is dropped on commit); the top-level copy keeps
+      // in-session reads cheap before the brief exists.
+      var _t2 = _liveTrip();
+      if (_t2) {
+        var _now = Date.now();
+        _t2._autoEnhancedAt = _now;
+        if (_t2.brief && typeof _t2.brief === "object") _t2.brief._autoEnhancedAt = _now;
+        try {
+          if (global.TripStore && typeof global.TripStore.touch === "function") {
+            global.TripStore.touch("autoEnhanced");
+          }
+        } catch (_) {}
+      }
       return { added: added || 0 };
     } catch (err) {
       // Best-effort. A failed enhance does not abort the build.

@@ -1016,7 +1016,11 @@
       + '</div>'
       + '<div style="font-size:12px;color:#666;">'
       +   '<strong>' + totalDays + ' days</strong> · ' + totalNights + ' nights · '
-      +   trip.destinations.length + ' destination' + (trip.destinations.length !== 1 ? 's' : '')
+      +   (function () {
+            var _s = (trip.destinations || []).filter(function (d) { return (d.nights || 0) > 0; }).length;
+            var _g = (trip.destinations || []).length - _s;
+            return _s + ' stay' + (_s !== 1 ? 's' : '') + (_g ? ' · ' + _g + ' sight' + (_g !== 1 ? 's' : '') : '');
+          })()
       +   underHtml
       + '</div>';
     container.appendChild(datesBar);
@@ -3662,8 +3666,14 @@
 
     var totalLine = document.createElement("div");
     totalLine.style.cssText = "font-size:11px;color:#666;";
+    // Honest split: overnight bases ("stays") vs zero-night visit-stops
+    // ("sights"). "44 destinations" conflated 12 real stays with 32 sights.
+    var _staysN = dests.filter(function (d) { return (d.nights || 0) > 0; }).length;
+    var _sightsN = dests.length - _staysN;
     totalLine.innerHTML = dests.length
-      ? '<strong style="color:var(--c-ink);">' + totalDays + ' days</strong> · ' + totalNights + ' nights · ' + dests.length + ' destination' + (dests.length !== 1 ? 's' : '')
+      ? '<strong style="color:var(--c-ink);">' + totalDays + ' days</strong> · ' + totalNights + ' nights · '
+        + _staysN + ' stay' + (_staysN !== 1 ? 's' : '')
+        + (_sightsN ? ' · ' + _sightsN + ' sight' + (_sightsN !== 1 ? 's' : '') : '')
       : '<span style="color:var(--c-ink-4);font-style:italic;">No destinations yet.</span>';
     listHdr.appendChild(totalLine);
 

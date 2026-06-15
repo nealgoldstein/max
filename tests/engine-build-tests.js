@@ -175,6 +175,53 @@ console.log("\nengine-build.js — input contract\n");
 
   console.log("\nengine-build.js — phase ordering\n");
 
+  await test("fresh build DOES auto-enhance once (the first-create rich set)", async function () {
+    _resetCalls();
+    _resetTb();
+    global.TripStore.trip = null;            // brand-new trip: no destinations yet
+    await global.MaxBuild.findCandidates({
+      mode: "candidate-first", region: "Iceland", requiredPlaces: []
+    });
+    assert(calls.some(function (c) { return c.fn === "enhanceDiscovery"; }),
+      "enhanceDiscovery SHOULD fire once on a fresh build — first create hands the traveler the richer set");
+  });
+
+  await test("auto-enhance NEVER fires again once the trip has been built (one-time event)", async function () {
+    _resetCalls();
+    _resetTb();
+    // A trip that already has destinations = Discovery has already run for it.
+    // Even a non-rebuild build must NOT auto-enhance a second time.
+    global.TripStore.trip = { id: "t1", destinations: [{ id: "d1", place: "Reykjavik" }] };
+    await global.MaxBuild.findCandidates({
+      mode: "candidate-first", region: "Iceland", requiredPlaces: []
+    });
+    assert(!calls.some(function (c) { return c.fn === "enhanceDiscovery"; }),
+      "enhanceDiscovery must NOT fire — auto-enhance is a one-time event, already spent");
+    global.TripStore.trip = null;
+  });
+
+  await test("PD.437: existing enhance content blocks auto-enhance even with 0 destinations", async function () {
+    _resetCalls();
+    _resetTb();
+    // A CONTAMINATED trip: destinations were lost (0), but it already carries the
+    // synthetic-enhance section from its first build. Auto-enhance must still see
+    // it's spent and NOT re-fire — this is the "count grows a little each time you
+    // navigate trip↔discovery" drift, killed at the gate.
+    global.TripStore.trip = {
+      id: "t-enh", destinations: [],
+      placeActivities: [
+        { id: "synth-enh-1", type: "synthetic-enhance", section: "More places to consider",
+          requiredPlaces: [{ place: "Kerið", _keep: false, _origin: "max" }] }
+      ]
+    };
+    await global.MaxBuild.findCandidates({
+      mode: "candidate-first", region: "Iceland", requiredPlaces: []
+    });
+    assert(!calls.some(function (c) { return c.fn === "enhanceDiscovery"; }),
+      "enhanceDiscovery must NOT fire — enhance content already present, auto-enhance is spent");
+    global.TripStore.trip = null;
+  });
+
   await test("phases run in order: primary → mint → enhance", async function () {
     _resetCalls();
     _resetTb();

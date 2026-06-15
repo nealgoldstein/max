@@ -306,6 +306,19 @@
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
+      // DEV: NO service worker on localhost. A lingering old SW kept serving
+      // STALE JS after every edit ("I'm still running stale code") — it controls
+      // the page until replaced, and the no-store asset strategy only takes hold
+      // a reload or two later. On localhost we UNREGISTER any existing worker and
+      // delete its caches, and never register one, so dev ALWAYS loads fresh from
+      // the network. Production (below) keeps the SW for offline + fast loads.
+      if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+        try {
+          navigator.serviceWorker.getRegistrations().then(function (regs) { regs.forEach(function (r) { r.unregister(); }); });
+          if (window.caches && caches.keys) { caches.keys().then(function (ks) { ks.forEach(function (k) { caches.delete(k); }); }); }
+        } catch (_) {}
+        return;
+      }
       // PD.443: updateViaCache:'none' makes the browser revalidate
       // sw.js itself on every check (never serve it from the HTTP
       // cache), so a new SW is detected promptly instead of up to 24h
@@ -456,7 +469,22 @@
 <script src="discovery-model.js?v=DEV"></script>
 <script src="discovery-adapter.js?v=DEV"></script>
 <script src="place-repo.js?v=DEV"></script>
+<!-- PD.432: the clean domain model — Place × kind × source × decision, one set,
+     counts() that reconcile by construction, projections for list/map. -->
+<script src="place-set.js?v=DEV"></script>
 <script src="max-data.js?v=DEV"></script>
+<!-- SSOT Phase 2: the ONE ingestion (trip → DiscoveryModel). Loads after
+     max-data.js (uses its fold/getters) and resolves deps at call time. -->
+<script src="discovery-ingestion.js?v=DEV"></script>
+<!-- SSOT Phase 3: the persistence seam (model→trip writer + debounced
+     event→save pump). Pure of TripStore/DOM; wired live in Phase 5/6. -->
+<script src="discovery-persistence.js?v=DEV"></script>
+<!-- SSOT Phase 4: EnhancementService + SuggestionSource registry — the
+     extension point for "enhanceability". Sources wired live in Phase 5. -->
+<script src="discovery-enhance.js?v=DEV"></script>
+<!-- SSOT Phase 5: the DiscoverySession coordinator — one live model composing
+     ingestion + enhancement + persistence. The picker's future thin shell. -->
+<script src="discovery-session.js?v=DEV"></script>
 <!-- PD.402: gen-prompt.js — pure activity-generation prompt assembly,
      extracted verbatim from _generateActivitiesForPlaceImpl. -->
 <script src="gen-prompt.js?v=DEV"></script>
@@ -8538,7 +8566,10 @@ async function runCandidateSearch(requiredPlaces) {
               id: "synth-overnight-stays",
               section: "Recommended overnight stays",
               name: "Place to stay overnight",
-              type: "manual",
+              // PD.430: a STAY section, not a manual add. Typing it "manual"
+              // made the must-dos grouping label Max's recommended bases
+              // "Places you added (26)". It's the same kind as your own stays.
+              type: "synthetic-stays",
               description: _pd290UseLlmStays
                 ? "Cities and towns Max picked as overnight bases for this trip. These anchor the trip's geography — they're where you sleep and the bases for day trips."
                 : "Cities and towns you flagged as overnight stays. These anchor the trip\'s geography — they\'re where you sleep and the bases for day trips.",
@@ -8597,7 +8628,7 @@ async function runCandidateSearch(requiredPlaces) {
                 id: "synth-other-stays",
                 section: "Overnight stays to consider",
                 name: "Overnight stays Max suggests",
-                type: "manual",
+                type: "synthetic-stays", // PD.430: a stay section, not a manual add
                 description: "Places Max thinks are worth considering as overnight stays based on your list. Check the ones that fit your trip; ignore the rest.",
                 checked: false,
                 requiredPlaces: llmExtraStays.map(function(c){
@@ -12458,7 +12489,7 @@ function _pd289ConsolidateStaysExtras() {
         id: "synth-other-stays",
         section: "Overnight stays to consider",
         name: "Overnight stays Max suggests",
-        type: "manual",
+        type: "synthetic-stays", // PD.430: a stay section, not a manual add
         description: "Places Max thinks are worth considering as overnight stays based on your list. Check the ones that fit your trip; ignore the rest.",
         checked: false,
         requiredPlaces: []
@@ -12511,6 +12542,29 @@ if (typeof globalThis !== "undefined") globalThis._pd289ConsolidateStaysExtras =
 function _reconcileUserListedKeeps(){
   if (typeof _tb === "undefined" || !_tb) return;
   if (!Array.isArray(_tb.placeActivities)) _tb.placeActivities = [];
+  // PD.452 (#5 — render reads, never writes): the structural rebuild below
+  // recreates the stay/sight record objects every render, so per-record state
+  // would be lost. Rather than let the rebuild RE-DERIVE _keep (which fought the
+  // user's uncheck — the long "I can't uncheck a base" bug), carry the user's
+  // raw DECISION across the rebuild and let ONE rule interpret it at the end:
+  //
+  //     keep = _decided ? (the value the user chose) : (origin === "user")
+  //
+  // "_decided" is stamped by MaxRoleWriter on every user action (keep OR
+  // uncheck). So: a place you listed but never touched defaults checked; a Max
+  // suggestion you never touched defaults UNCHECKED — "Max checks nothing" is
+  // just the default branch, not a guard. A user decision (either way) is
+  // honored verbatim and survives every render. This replaces the keep-snapshot
+  // referee AND the per-section keep referees with a single derivation.
+  var _keepNf = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
+  var _keepSnap = {};
+  (_tb.placeActivities || []).forEach(function(it){
+    (it && it.requiredPlaces || []).forEach(function(p){
+      if (!p || !p.place) return;
+      var _sk = _keepNf(p.place);
+      if (_sk && !(_sk in _keepSnap)) _keepSnap[_sk] = { keep: p._keep, rej: p._rejected, decided: (p._decided === true) };
+    });
+  });
   // PD.360: this pass now runs at WRITE milestones (build events,
   // merge completion, hydration) — see _runPlaceSetPasses. The
   // render-site call remains only as a self-heal for writers that
@@ -12636,13 +12690,17 @@ function _reconcileUserListedKeeps(){
     if (derived) {
       listed = derived;
       _tb._userListedNames = derived;
-      try {
-        if (typeof trip !== "undefined" && trip && trip.brief) {
-          trip.brief._userListedNames = Object.assign({}, derived);
-        }
-      } catch(_){}
+      // PD.429: do NOT persist a parallel _userListedNames to the brief. The
+      // candidate-derived map here is only a transient migration authority; the
+      // refresh below bakes it onto the records, which ARE the persisted truth.
     }
   }
+  // PD.429: with whatever authority is now in _tb (a legacy brief map, a
+  // candidate backfill, or nothing because the records already carry origin),
+  // bake _origin:"user" onto the records and re-project the cache from them.
+  // After this the cache is a pure function of the records — it cannot drift.
+  if (typeof _refreshUserListedFromRecords === "function") _refreshUserListedFromRecords();
+  listed = _tb._userListedNames || listed;   // re-sync local to the re-projected cache
   // PD.162: don't early-return on empty listed. The synthetic stays
   // section also needs to run for sentence-driven flow (where the user
   // never pasted a list, so listed is empty). Subsequent passes that
@@ -12871,7 +12929,12 @@ function _reconcileUserListedKeeps(){
         place: displayName,
         country: country,
         _origin: "user", // PD.382: this section is yours
-        _keep: !rejected[k],
+        // PD.448: a listed base defaults to KEPT, but the rebuild must PRESERVE
+        // an explicit uncheck. Unchecking sets role "maybe" (not _roleTouched),
+        // so the old `_keep: !rejected` re-checked it every render — "Max should
+        // not check anything, or uncheck anything." Honor the existing record's
+        // _keep:false (your uncheck); only default to kept when there's no record.
+        _keep: !rejected[k] && !(pmeta && pmeta._keep === false),
         _rejected: !!rejected[k],
         nights: 0,
         overnight: true
@@ -12930,7 +12993,9 @@ function _reconcileUserListedKeeps(){
           return; // never harvested into rec
         }
         if (_recByKey[k]) {
-          if (p._keep === true) _recByKey[k]._keep = true;
+          // PD.452: carry the raw decision forward; the final derivation decides
+          // the actual check-state. A user commit on any ref wins.
+          if (p._decided === true) { _recByKey[k]._decided = true; if (p._keep === true) _recByKey[k]._keep = true; }
           return;
         }
         _recByKey[k] = {
@@ -12940,7 +13005,11 @@ function _reconcileUserListedKeeps(){
           nights: (typeof p.nights === "number") ? p.nights : 0,
           overnight: true,
           _origin: p._origin || (p._autoCreated ? "max-hub" : "max"), // PD.382
-          _keep: (p._keep === true), // default UNCHECKED; honor a prior commit
+          // PD.452: carry the user's raw decision; the single keep-derivation at
+          // the end of the reconcile sets the real _keep (a Max base with no user
+          // decision defaults UNCHECKED — "Max checks nothing", implicit).
+          _keep: (p._keep === true),
+          _decided: (p._decided === true),
           _autoCreated: !!p._autoCreated
         };
       });
@@ -13184,7 +13253,29 @@ function _reconcileUserListedKeeps(){
       return it && it.section === "Sights near places you listed";
     });
     if (existingSights) {
-      existingSights.requiredPlaces = sightRequiredPlaces;
+      // The CORRECT operation here is a UNION, not an overwrite — this is not a
+      // hack but the right merge given the current render order. By the time this
+      // runs, _applyDiscoveryModelToSights() has already COLLAPSED the orphan
+      // (synthetic-sights) and the ✦ Enhance (synthetic-enhance) items into ONE
+      // "Sights near places you listed" item (the model groups by section). The
+      // old `requiredPlaces = sightRequiredPlaces` overwrite therefore deleted
+      // the Enhance + migrated places every render (the 114-place disappearance
+      // that flipped the count 131<->17). Union by place key; only genuinely-new
+      // orphan sights are appended; a user-rejected duplicate wins via canonicalize.
+      //
+      // DEFERRED (see DEFERRED-ARCHITECTURE.md / task "render-lifecycle"): the
+      // only way to retire this block entirely is to ingest orphan user-listed
+      // sights INTO the model BEFORE projection, so the model owns the merge.
+      // That is the model-as-sole-writer rewrite, deliberately deferred. Locked
+      // by contract-checks Rule 30 so the unsafe overwrite can never come back.
+      if (!Array.isArray(existingSights.requiredPlaces)) existingSights.requiredPlaces = [];
+      var _haveSightKeys = {};
+      existingSights.requiredPlaces.forEach(function(p){ if (p && p.place) _haveSightKeys[nrm(p.place)] = true; });
+      sightRequiredPlaces.forEach(function(p){
+        if (!p || !p.place) return;
+        var pk = nrm(p.place);
+        if (pk && !_haveSightKeys[pk]) { existingSights.requiredPlaces.push(p); _haveSightKeys[pk] = true; }
+      });
       existingSights.checked = true;
       return;
     }
@@ -13348,6 +13439,30 @@ function _reconcileUserListedKeeps(){
   // construction, not by another pass. Stay/route/condition sections
   // pass through unchanged.
   _applyDiscoveryModelToSights();
+  // PD.452: the ONE keep rule. The rebuild is done; now set every record's
+  // check-state from a single derivation — never from whatever the rebuild
+  // happened to leave behind. First carry the pre-rebuild decision back onto the
+  // recreated objects (by identity), then derive:
+  //   • the user explicitly decided  → honor their choice verbatim
+  //   • otherwise                     → default: your places on, Max's off
+  // "Max checks nothing" and "the render never changes a user's check" both fall
+  // out of this; no separate enforcement pass exists or is needed.
+  var _origOf = (typeof window !== "undefined" && typeof window._placeOrigin === "function")
+    ? window._placeOrigin
+    : function(p){ return (p && p._origin) || ((p && p._autoCreated) ? "max-hub" : "max"); };
+  (_tb.placeActivities || []).forEach(function(it){
+    (it && it.requiredPlaces || []).forEach(function(p){
+      if (!p || !p.place) return;
+      var _sk = _keepNf(p.place);
+      var _s = _sk && _keepSnap[_sk];
+      // carry the raw decision across the rebuild
+      if (_s) { p._rejected = _s.rej; if (_s.decided) { p._decided = true; p._keep = _s.keep; } }
+      // derive the final keep — one rule, no referees
+      if (p._rejected) { p._keep = false; return; }
+      if (p._decided === true) { p._keep = (p._keep === true); return; }
+      p._keep = (_origOf(p) === "user");
+    });
+  });
 }
 
 // PD.401g: the Discovery placement adapter (_discoveryOpts,
@@ -13383,6 +13498,17 @@ if (typeof globalThis !== "undefined") {
 function _runPlaceSetPasses(reason){
   try {
     if (typeof _reconcileUserListedKeeps === "function") _reconcileUserListedKeeps();
+    // PD.429: every build mode lands here — bake _origin:"user" onto the records
+    // and re-project the listed cache from them, so the records are the durable
+    // SSOT and no parallel _userListedNames store needs to be persisted.
+    if (typeof _refreshUserListedFromRecords === "function") _refreshUserListedFromRecords();
+    // PD.429: PERSIST the bake. build:done stamps _tb IN MEMORY, but the build's
+    // own save already happened, so without this the baked _origin never reaches
+    // storage and the records only get their provenance on the next reopen. A
+    // system persist (debounced, idempotent, canonicalized through the one write
+    // door) saves the baked records at build time — records are complete at save,
+    // not just after a reopen.
+    if (typeof _persistDiscoveryState === "function") { try { _persistDiscoveryState({ system: true }); } catch(_){} }
     console.log("[Max PD.360] place-set passes ran (" + (reason || "?") + ")");
   } catch(e){ console.warn("[Max PD.360] passes failed (" + reason + "):", e && e.message); }
 }
@@ -13446,6 +13572,9 @@ function _renderPlaceActivityItems(){
       && !(window.MaxBuild && MaxBuild.isBuilding && MaxBuild.isBuilding())) {
     try { _applyDiscoveryModelToSights(); } catch(e){ console.warn("[Max PD.401h] model apply failed:", e && e.message); }
   }
+  // PD.432: refresh the model kind map AFTER sections are finalized, so the
+  // row's stay/see chip and the pin both read the same model-derived kind.
+  if (typeof _pmRefreshKindMap === "function") _pmRefreshKindMap();
   // PD.360: render is a SELF-HEAL backstop for the HEAVIER passes
   // (canonicalize + cache rehydration). Writers (build milestones,
   // merges, hydration) run them; if data arrives un-reconciled, a writer
@@ -13488,6 +13617,12 @@ function _renderPlaceActivityItems(){
   // stays where they were unless a search target hijacks the scroll.
   var _scrollPane = document.getElementById("tb-picker-list-pane");
   var _savedScrollTop = _scrollPane ? _scrollPane.scrollTop : null;
+  // PD.446: pin the list's height across the innerHTML wipe so the pane never
+  // collapses to zero. Without this, the wipe clamps scrollTop to the top and
+  // the page visibly JUMPS up and snaps back on every checkbox toggle. Pin →
+  // wipe → rebuild → unpin (after the scroll restore below) makes it seamless.
+  var _pinnedH = list.offsetHeight;
+  if (_pinnedH) { try { list.style.minHeight = _pinnedH + "px"; } catch(_){} }
   list.innerHTML = "";
   // Round NC.X: build a children-by-hub map so each destination row
   // can show "Sights here: X, Y, Z" (the sights the LLM tagged as
@@ -15094,14 +15229,13 @@ function _renderPlaceActivityItems(){
       synthSubtitle = '<div class="tb-act-section-subtitle" style="flex-basis:100%;font-size:11px;color:#666;line-height:1.5;margin-top:4px;font-style:italic;">'
         + _pmEsc(_synthHdrItem.description) + '</div>';
     }
-    // PD.231: section count label picks the right noun per section type.
-    // The generic "destination" everywhere was misleading — "Sights you
-    // listed → 33 destinations" made user-listed sights look like trip
-    // destinations. Synthetic sections know their type (synthetic-stays,
-    // synthetic-sights, etc.); fall back to "destination" for LLM
-    // activity sections, where the count IS roughly "places you could
-    // make destinations".
-    var _pd231Noun = "destination";
+    // PD.231 / PD.430: section count label picks the right noun. The ONE
+    // distinction that matters: a DESTINATION is an overnight (a STAY); a SIGHT
+    // is everything else (a place you visit but don't sleep). Discovery's
+    // non-stay, non-route sections are SIGHTS — so the default noun is "sight",
+    // NOT "destination". (The old "destination" default is what made a section
+    // of your listed sights read "26 destinations" — conflating the two.)
+    var _pd231Noun = "sight";
     if (_synthHdrItem && typeof _synthHdrItem.type === "string") {
       if (_synthHdrItem.type === "synthetic-sights") _pd231Noun = "sight";
       else if (_synthHdrItem.type === "synthetic-stays") _pd231Noun = "stay";
@@ -15899,11 +16033,12 @@ function _renderPlaceActivityItems(){
   // don't want to fight it. rAF ensures freshly-added children have
   // laid out, otherwise the assignment can clamp against a stale
   // scrollHeight that's still 0 from the innerHTML wipe.
-  if (_scrollPane && _savedScrollTop !== null && !_searchQ) {
-    requestAnimationFrame(function(){
+  requestAnimationFrame(function(){
+    if (_scrollPane && _savedScrollTop !== null && !_searchQ) {
       try { _scrollPane.scrollTop = _savedScrollTop; } catch(_){}
-    });
-  }
+    }
+    try { list.style.minHeight = ""; } catch(_){}   // PD.446: unpin once scroll is restored
+  });
   // Round PD.54: post-render bulk-mode injection.
   if (typeof _pmBulk !== "undefined" && _pmBulk.isOn && _pmBulk.isOn()) {
     _pmBulk.injectCheckboxes();
@@ -16074,12 +16209,27 @@ if (typeof globalThis !== "undefined") globalThis._pmRoleForCheck = _pmRoleForCh
 // for callers that want the original paste text.
 function _resolveListedInfo(placeName){
   if (!placeName) return null;
-  if (typeof _tb === "undefined" || !_tb || !_tb._userListedNames) return null;
+  if (typeof _tb === "undefined" || !_tb || !Array.isArray(_tb.placeActivities)) return null;
   var nrm = (typeof _normPlaceName === "function")
     ? _normPlaceName
     : function(s){ return String(s||"").toLowerCase(); };
-  var listed = _tb._userListedNames;
-  var display = (_tb._userListedDisplay) || {};
+  // PD.429: the listed set DERIVES from the records (origin === "user"), not the
+  // retired _userListedNames map. Build a name-keyed view for the fuzzy resolver
+  // below (exact/alias/prefix/token/overlap), with role by section and the
+  // record's canonical name as the display.
+  var listed = {}, display = {};
+  _tb.placeActivities.forEach(function(it){
+    if (!it) return;
+    var _stay = !!(window._isStaySection && window._isStaySection(it.section));
+    (it.requiredPlaces || []).forEach(function(p){
+      if (!p || !p.place || p._origin !== "user") return;
+      var _kk = nrm(p.place);
+      if (!_kk) return;
+      if (!listed[_kk] || _stay) listed[_kk] = _stay ? "stay" : "see";
+      if (!display[_kk]) display[_kk] = String(p.place).trim();
+    });
+  });
+  if (!Object.keys(listed).length) return null;
   var k = nrm(placeName);
   if (!k) return null;
   function _hit(key, matchType){
@@ -17658,14 +17808,58 @@ if (typeof globalThis !== "undefined") globalThis._pmInAnyStaySection = _pmInAny
 // "stay or see for this place?" (skipping the unkept→maybe tier); the
 // cascade consults the same signals it always did — _roleTouched role,
 // stayOverride, the stay-section helper above, and the overnight flag.
+// PD.432: a place's KIND (destination vs sight) is its ROLE IN YOUR MODEL — the
+// section it sits in (a stay section = destination; a sight theme = sight), with
+// your typed designations authoritative. This is NOT the old capability
+// predictor ("could you base here?"). Build a name→kind map once per render so
+// the pin, popup, and ⋯ menu read your model, matching the banner's count.
+// Refreshed at the start of the map/list render. Stay-section membership wins
+// (a place that's a base anywhere is a destination); your typed list overrides.
+function _pmRefreshKindMap(){
+  try {
+    var nf = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase(); };
+    var m = {};
+    (window._tb && Array.isArray(_tb.placeActivities) ? _tb.placeActivities : []).forEach(function(it){
+      if (!it || it.type === "route") return;
+      var stay = !!(window._isStaySection && window._isStaySection(it.section));
+      (it.requiredPlaces || []).forEach(function(p){
+        if (!p || !p.place) return;
+        var k = nf(p.place);
+        if (stay) m[k] = "destination";
+        else if (m[k] !== "destination") m[k] = "sight";
+      });
+    });
+    try {
+      if (typeof _listedGroundTruth === "function") {
+        var gt = _listedGroundTruth();
+        (gt.stays  || []).forEach(function(n){ m[nf(n)] = "destination"; });
+        (gt.sights || []).forEach(function(n){ if (m[nf(n)] !== "destination") m[nf(n)] = "sight"; });
+      }
+    } catch(_){}
+    window._pmKindByKey = m;
+  } catch(_){ window._pmKindByKey = window._pmKindByKey || {}; }
+  return window._pmKindByKey;
+}
+if (typeof globalThis !== "undefined") globalThis._pmRefreshKindMap = _pmRefreshKindMap;
+
 function _pmIsStayCandidate(placeName){
   if (!placeName) return false;
   try {
-    var k = (typeof _pmMetaKey === "function") ? _pmMetaKey(placeName) : window._pmKey(placeName);
-    if (typeof _pmDeriveRole === "function") {
-      var r = _pmDeriveRole({ place: placeName, kept: true }, k, {});
-      return !!(r && r.role === "stay");
+    var key = (typeof _pmMetaKey === "function") ? _pmMetaKey(placeName) : window._pmKey(placeName);
+    var r = (typeof _pmDeriveRole === "function") ? _pmDeriveRole({ place: placeName, kept: true }, key, {}) : null;
+    // 1. An EXPLICIT decision (you toggled it, a flag, or a Stay/See override)
+    //    wins — your call is sticky.
+    if (r && (r.source === "user" || r.source === "flag" || r.source === "stay-override")) {
+      return r.role === "stay";
     }
+    // 2. PD.432: otherwise the place's ROLE IN YOUR MODEL (section/designation),
+    //    not the capability predictor — so a sight stays a sight on the map.
+    var nf = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase(); };
+    var m = (window._pmKindByKey && Object.keys(window._pmKindByKey).length) ? window._pmKindByKey
+          : (typeof _pmRefreshKindMap === "function" ? _pmRefreshKindMap() : null);
+    if (m) { var mk = m[nf(placeName)]; if (mk) return mk === "destination"; }
+    // 3. Fallback to the cascade for a place not in the model yet.
+    return !!(r && r.role === "stay");
   } catch(_){}
   return false;
 }
@@ -18264,7 +18458,9 @@ function _dispatchRoute() {
               var k = _bfN(p.place);
               if (k) _tb._userListedNames[k] = p.isStay ? "stay" : "see";
             });
-            trip.brief._userListedNames = Object.assign({}, _tb._userListedNames);
+            // PD.429: don't re-persist a parallel map to the brief — it is a
+            // transient migration authority only; the refresh below bakes it
+            // onto the records, which are the persisted truth.
           }
         } catch(_){}
       }
@@ -18272,6 +18468,9 @@ function _dispatchRoute() {
         _tb.tripMeta = Object.assign({ notes: "", links: [] }, trip.brief.tripMeta);
       }
     }
+    // PD.429: project the listed cache from the records (baking origin from
+    // whatever authority was just restored), so the cache can't drift.
+    if (typeof _refreshUserListedFromRecords === "function") _refreshUserListedFromRecords();
     // PD.333 (audit A1): Discovery has TWO surfaces. Restore the one
     // this trip actually uses:
     //   * placeActivities present → the activity picker (newer flow)
@@ -19945,12 +20144,34 @@ function _pmReceiptStripHtml(){
           nOther = n - nCatch;
         }
         if (!n) return '';
+        // Name the specific theme-section sights so the user knows WHICH sight
+        // and WHICH theme, instead of an opaque "N sit unchecked in their theme
+        // sections." Small lists are named ("Þingvellir National Park is
+        // unchecked — add it to 'Visit natural wonders'"); larger ones summarize.
+        var _themeSights = [];
+        try {
+          var _csTrip = (typeof TripStore !== "undefined" && TripStore.isLoaded && TripStore.isLoaded()) ? TripStore.trip
+            : ((typeof trip !== "undefined") ? trip : null);
+          if (_csTrip && typeof MaxData !== "undefined" && MaxData.consideredPlaceKeys) {
+            var _csSet = MaxData.consideredPlaceKeys(_csTrip);
+            var _catch2 = { "Sights near places you listed": 1, "More places to consider": 1 };
+            Object.keys(_csSet).forEach(function (k) {
+              var s = _csSet[k];
+              if (s && s.section && !_catch2[s.section]) _themeSights.push({ name: s.name, section: s.section });
+            });
+          }
+        } catch (_) {}
+        var _catchTxt = nCatch + ' are unchecked in <strong>“Sights near places you listed”</strong> and <strong>“More places to consider”</strong>';
         var _whereTxt;
         if (nOther <= 0) {
           _whereTxt = 'They are unchecked in <strong>“Sights near places you listed”</strong> and <strong>“More places to consider”</strong>, and are gray pins on the map. Check them in those sections, or tap a gray pin to add it.';
+        } else if (_themeSights.length && _themeSights.length <= 4) {
+          var _named = _themeSights.map(function (s) {
+            return '<strong>' + s.name + '</strong> — add it to <strong>“' + s.section + '”</strong>';
+          }).join('; ');
+          _whereTxt = _catchTxt + '. ' + _named + '. All are gray pins on the map — check them where they are, or tap a gray pin to add it.';
         } else {
-          _whereTxt = nCatch + ' are unchecked in <strong>“Sights near places you listed”</strong> and <strong>“More places to consider”</strong>; '
-            + nOther + ' sit unchecked in their theme sections. All are gray pins on the map. Check them where they are, or tap a gray pin to add it.';
+          _whereTxt = _catchTxt + '; ' + nOther + ' sit unchecked in their theme sections. All are gray pins on the map. Check them where they are, or tap a gray pin to add it.';
         }
         // PD.379: THE NUMBERS, EXPLAINED. "Even though the numbers may
         // be correct, a user has to be able to understand where the
@@ -19967,92 +20188,116 @@ function _pmReceiptStripHtml(){
             var _nListed = _aud.listed.length;
             var _nMax = _aud.maxChecked + _aud.maxUnchecked;
             var _nHubs = (_aud.hubs || []).length;
-            // Line 1 — your-list coverage (green) or missing (red).
-            if (_nListed) {
-              if (!_aud.missing.length) {
-                _covHtml += '<div style="margin:0 0 6px;padding:7px 12px;background:#eef7ef;border:1px solid #cfe6d2;border-radius:6px;font-size:11.5px;color:#1e5c2a;font-weight:600;">'
-                  + '✓ All ' + _nListed + ' place' + (_nListed === 1 ? '' : 's') + ' you listed ' + (_nListed === 1 ? 'is' : 'are') + ' here.'
-                  + '</div>';
-              } else {
-                _covHtml += '<div style="margin:0 0 6px;padding:7px 12px;background:#fdf0ee;border:1px solid #f0c9c2;border-radius:6px;font-size:11.5px;color:#8a2e1f;font-weight:600;">'
-                  + '⚠ ' + _aud.missing.length + ' of your ' + _nListed + ' listed place' + (_nListed === 1 ? '' : 's') + ' ' + (_aud.missing.length === 1 ? 'is' : 'are') + ' missing: '
-                  + _aud.missing.slice(0, 6).map(_esc).join(', ')
-                  + (_aud.missing.length > 6 ? '…' : '')
-                  + '</div>';
+            // PD.433: the duplicate note now lives INSIDE the narrative below and
+            // is expressed PER KIND (sights vs destinations), so it lines up with
+            // the "12 destinations and 33 sights" split instead of mixing in the
+            // grand raw total. (The old rawCount/total note was removed here.)
+            // PD.432: ONE narrative accounting block, read from the ONE domain
+            // model — MaxPlaceSet.fromTrip(...).counts(). Your typed list and
+            // Max's suggestions are ingested into a single PlaceSet (deduped by
+            // identity), and every number is a filter over it, so they reconcile
+            // by construction. The ground truth still supplies your typed list
+            // (and the duplicate detail); the PlaceSet does the rest.
+            var _gtB = (typeof _listedGroundTruth === "function") ? _listedGroundTruth()
+              : { stayCount:0, sightCount:0, duplicates:[], rawCount:0, total:0, stays:[], sights:[] };
+            var _pc = null;
+            var _pmiss = [];
+            try {
+              if (typeof MaxPlaceSet !== "undefined" && MaxPlaceSet.fromTrip
+                  && typeof _tb !== "undefined" && _tb && Array.isArray(_tb.placeActivities)) {
+                var _pset = MaxPlaceSet.fromTrip(_tb, {
+                  typedList: { destinations: _gtB.stays || [], sights: _gtB.sights || [] },
+                  isStaySection: (typeof window._isStaySection === "function") ? window._isStaySection : null,
+                  placeOrigin: (typeof window._placeOrigin === "function") ? window._placeOrigin : null
+                });
+                _pc = _pset.counts();
+                // PD.432: "missing" comes from the SET — your typed list is
+                // ingested into it, so a listed place is present by construction
+                // and missing() is identity-aware ("Djúpalónssandur beach"
+                // matches a "Djúpalónssandur" record). No more false alarms.
+                _pmiss = _pset.missing((_gtB.stays || []).concat(_gtB.sights || []));
               }
-            }
-            // Line 2 — where every place came from.
-            if (_aud.pageTotal) {
-              // PD.401M: the page breakdown comes from the ONE registry and
-              // its total is the SUM of its parts — listed(found) + max +
-              // hubs — so it always reconciles. "you listed" here is the
-              // FOUND count (missing ones are in the warning line above).
-              var _nListedFound = _aud.listed.filter(function(l){ return l.found; }).length;
-              var _parts = [];
-              if (_nListedFound) _parts.push('<strong>' + _nListedFound + ' you listed</strong>');
-              if (_nMax) _parts.push('<strong>' + _nMax + '</strong> Max suggested'
-                + ' (' + _aud.maxUnchecked + ' unchecked' + (_aud.maxChecked ? ', ' + _aud.maxChecked + ' you checked' : '') + ')');
-              if (_nHubs) _parts.push('<strong>' + _nHubs + '</strong> overnight hub' + (_nHubs === 1 ? '' : 's')
-                + ' Max added near your sights (unchecked — check one to make it a base)');
-              if (_parts.length) {
-                // PD.386: the bridge to the trip. The unchecked Max
-                // sights become "Considered (N)" in the trip view —
-                // show the EXACT number both views share so the math
-                // reconciles. Destinations and hubs (counted above)
-                // are NOT considered sights, which is why this can be
-                // smaller than "Max suggested unchecked".
-                var _consTxt = (typeof _aud.considered === "number")
-                  ? ' <span style="color:var(--c-accent);">→ <strong>' + _aud.considered
-                    + '</strong> will appear as <strong>Considered</strong> sights in your trip'
-                    + ' (the number on the trip map).</span>'
-                  : '';
-                _covHtml += '<div style="margin:0 0 6px;padding:7px 12px;background:#f4f4f1;border:1px solid var(--c-border);border-radius:6px;font-size:11.5px;color:#444;line-height:1.55;">'
-                  + '<strong>' + _aud.pageTotal + ' place' + (_aud.pageTotal === 1 ? '' : 's') + '</strong> on this page: '
-                  + _parts.join(' + ') + '.' + _consTxt
-                  + '</div>';
+            } catch (_) {}
+            // PD.440: "Your list had X" comes from YOUR TYPED LIST (the ground
+            // truth) — authoritative, and distinct is always ≤ raw. The PlaceSet
+            // record count can drift ABOVE the typed count when records duplicate
+            // (a base that also picked up a sight record), which produced the
+            // nonsensical "reduced 35 → 38" (a reduction that grew). Max's
+            // additions still come from the PlaceSet (that's a page concept).
+            var _yourD = (typeof _gtB.stayCount  === "number") ? _gtB.stayCount  : (_pc ? _pc.userDestinations : 0);
+            var _yourS = (typeof _gtB.sightCount === "number") ? _gtB.sightCount : (_pc ? _pc.userSights : 0);
+            var _maxD  = _pc ? _pc.maxDestinations : (_aud.maxStays || 0);
+            var _maxS  = _pc ? _pc.maxSights       : (_aud.maxSights || 0);
+            var _pageT = _pc ? _pc.total           : (_aud.pageTotal || 0);
+            if (_yourD || _yourS || _maxD || _maxS) {
+              // PD.434: the narrative in the user's voice — teach the model
+              // (places to stay = destinations, places to see = sights), explain
+              // the merge in the units it happened to, say what Max did, and how
+              // to drive the next round. Every COUNT is model-derived so the copy
+              // stays correct as the trip changes; the guidance text is constant.
+              var _S = function (n) { return n === 1 ? '' : 's'; };
+              var _rawD = (typeof _gtB.rawStayCount === "number") ? _gtB.rawStayCount : _yourD;
+              var _rawS = (typeof _gtB.rawSightCount === "number") ? _gtB.rawSightCount : _yourS;
+              var _narr = 'Your list had <strong>' + _rawD + ' place' + _S(_rawD)
+                + ' to stay</strong> (what we call <em>destinations</em>) and <strong>' + _rawS
+                + ' additional place' + _S(_rawS) + ' you want to see</strong> (what we call <em>sights</em>).';
+              // The merge — conditional, per kind, expressed as a reduction to the
+              // distinct count the rest of the banner uses.
+              var _dupSentence = function (distinctN, dups, noun) {
+                if (!dups || !dups.length) return '';
+                var pairs = dups.map(function(d){ return '“' + _esc(d.from) + '” and “' + _esc(d.into) + '” are the same place'; }).join('; ');
+                return pairs + ', so Max reduced your list to ' + distinctN + ' distinct ' + noun + _S(distinctN);
+              };
+              var _mergeBits = [];
+              var _md = _dupSentence(_yourD, _gtB.stayDuplicates, 'destination');
+              var _ms = _dupSentence(_yourS, _gtB.sightDuplicates, 'sight');
+              if (_md) _mergeBits.push(_md);
+              if (_ms) _mergeBits.push(_ms);
+              if (_mergeBits.length) _narr += ' But ' + _mergeBits.join('; and ') + '.';
+              var _ncB = (typeof trip !== "undefined" && trip && trip.brief && trip.brief._listedNameCorrections)
+                || (_tb && _tb.brief && _tb.brief._listedNameCorrections) || [];
+              if (_ncB.length) {
+                _narr += ' <span style="color:#3a6b43;">(Renamed to the canonical form: '
+                  + _ncB.map(function(c){ return '“' + _esc(c.from) + '” → “' + _esc(c.to) + '”'; }).join('; ') + '.)</span>';
               }
-            }
-            // Line 3 — slots vs places, only when they differ.
-            if (_aud.multi && _aud.multi.length) {
-              var _extra = _aud.slots - _aud.unique;
-              _covHtml += '<details style="margin:0 0 6px;padding:6px 12px;background:#f4f4f1;border:1px solid var(--c-border);border-radius:6px;font-size:11px;color:var(--c-ink-2);line-height:1.55;">'
-                + '<summary style="cursor:pointer;font-weight:600;color:#444;">Section counts add up to ' + _aud.slots
-                + ', not ' + _aud.unique + ' — ' + _aud.multi.length + ' place' + (_aud.multi.length === 1 ? '' : 's')
-                + ' appear' + (_aud.multi.length === 1 ? 's' : '') + ' in more than one section. Why?</summary>'
-                + '<div style="margin-top:6px;">A place can be an overnight stay <em>and</em> show under a sights theme, so it counts in both sections. '
-                + 'The doubled place' + (_aud.multi.length === 1 ? '' : 's') + ': '
-                + _aud.multi.slice(0, 15).map(function(m){
-                    return '<strong>' + _esc(m.place) + '</strong> (' + m.sections.map(_esc).join(' + ') + ')';
-                  }).join('; ')
-                + (_aud.multi.length > 15 ? '…' : '') + '.</div>'
-                + '</details>';
+              if (_pmiss && _pmiss.length) {
+                _narr += ' <span style="color:#8a2e1f;font-weight:600;">⚠ ' + _pmiss.length + ' '
+                  + (_pmiss.length===1 ? "isn't" : "aren't") + ' here yet: '
+                  + _pmiss.slice(0,6).map(_esc).join(', ') + (_pmiss.length>6 ? '…' : '') + '.</span>';
+              }
+              _narr += ' And then Max, learning from your choices, went to work. It came back with <strong>'
+                + _maxD + ' more destination' + _S(_maxD) + ' and ' + _maxS + ' more sight' + _S(_maxS)
+                + '</strong> — unchecked, for you to consider. Keep what appeals to you (check it), reject what misses, '
+                + 'and think about the rest (just leave them unchecked and they\'ll stay available to you). '
+                + 'Max will learn from your choices. Whenever you want another round, <strong>✦ More like this</strong> '
+                + 'generates curated suggestions shaped by what you liked — and steers clear of what you rejected. '
+                + '<strong>✦ What\'s missing?</strong> flags themes (food, architecture, hikes) absent from your list.';
+              // Closing paragraph — the page total in the SAME units (your kept
+              // ones + Max's), plus the multi-category note.
+              var _totD = _yourD + _maxD, _totS = _yourS + _maxS;
+              var _narr2 = 'Max has sorted the <strong>' + _totD + ' destination' + _S(_totD)
+                + ' and ' + _totS + ' sight' + _S(_totS) + '</strong> into activity categories to make it '
+                + 'easier for you to think about. Some sights fit into multiple categories, and you can change the categories as you see fit. '
+                + 'There is nothing sacrosanct about these categories, just a way to help you organize your thoughts.';
+              _covHtml += '<div style="margin:0 0 8px;padding:9px 13px;background:#eef3f7;border:1px solid #cfdce6;border-radius:7px;font-size:11.5px;color:#2a3a47;line-height:1.6;">'
+                + '<p style="margin:0 0 7px;">' + _narr + '</p>'
+                + '<p style="margin:0;">' + _narr2 + '</p>'
+                + '</div>';
             }
           }
         } catch(_){}
         // PD.339: truthful receipt + a one-tap "keep them all" action.
         // PD.413: compact strip + collapsible detail (was 3 stacked
-        // footer banners that squeezed the list). The detail keeps the
-        // full breakdown verbatim (incl. the "Considered" copy).
-        var _detail = _covHtml
-          + '<div style="margin:0 0 10px;padding:8px 12px;background:#f3eefa;border:1px solid #ddd0f0;border-radius:6px;font-size:11.5px;color:#3a2d56;line-height:1.5;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
-          +   '<span style="flex:1;min-width:200px;"><strong>' + n + ' unchecked sight' + (n === 1 ? '' : 's') + '</strong> — These are Max\'s suggestions and stay available after you build: ' + _whereTxt + '</span>'
-          +   '<button type="button" onclick="if(typeof _pmCheckAllUnchecked===\'function\')_pmCheckAllUnchecked();" style="flex:0 0 auto;font-size:11px;font-weight:700;color:var(--c-accent);background:var(--c-bg);border:1px solid #ddd0f0;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;">✓ Check them all</button>'
-          + '</div>';
-        var _bits = [];
-        try {
-          if (typeof _nListed !== "undefined" && _nListed) {
-            if (typeof _aud !== "undefined" && _aud && _aud.missing && _aud.missing.length)
-              _bits.push('⚠ ' + _aud.missing.length + ' of ' + _nListed + ' listed missing');
-            else _bits.push('✓ All ' + _nListed + ' listed here');
-          }
-          if (typeof _nMax !== "undefined" && _nMax) _bits.push('<strong>' + _nMax + '</strong> Max suggested');
-          if (typeof _aud !== "undefined" && _aud && typeof _aud.considered === "number" && _aud.considered)
-            _bits.push('→ <strong>' + _aud.considered + '</strong> considered (gray pins)');
-        } catch(_){}
-        var _summary = _bits.length ? _bits.join(' · ')
-          : ('<strong>' + n + '</strong> unchecked sight' + (n === 1 ? '' : 's') + ' — Max suggestions, kept after build');
-        return '<div id="tb-receipt-strip" style="flex-shrink:0;margin:8px 22px 0;padding:6px 12px;background:#f7f6f2;border:1px solid #e6e1d5;border-radius:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:11.5px;color:#444;line-height:1.4;">'
-          + '<span style="flex:1;min-width:160px;">' + _summary + '</span>'
+        // footer banners that squeezed the list).
+        // PD.434: the narrative block IS the whole detail now. The old purple
+        // "Max's N unchecked suggestions stay available… ✓ Check them all" box
+        // was removed — the narrative already explains unchecked suggestions,
+        // and the strip already carries the one-tap "✓ Check them all".
+        var _detail = _covHtml;
+        // PD.434: the strip no longer repeats the counts ("You: 12 dest · 33
+        // sights · Max: +0 · +38") — the narrative already states them in prose,
+        // so the bar is now just the two actions: keep-all and collapse.
+        return '<div id="tb-receipt-strip" style="flex-shrink:0;margin:8px 22px 0;padding:6px 12px;background:#f7f6f2;border:1px solid #e6e1d5;border-radius:6px;display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap;font-size:11.5px;color:#444;line-height:1.4;">'
           + '<button type="button" onclick="if(typeof _pmCheckAllUnchecked===\'function\')_pmCheckAllUnchecked();" style="flex:0 0 auto;font-size:11px;font-weight:700;color:var(--c-accent);background:var(--c-bg);border:1px solid #ddd0f0;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;">✓ Check them all</button>'
           + '<button type="button" onclick="if(typeof _pmToggleReceiptDetail===\'function\')_pmToggleReceiptDetail(this)" style="flex:0 0 auto;font-size:11px;font-weight:600;color:#666;background:var(--c-bg);border:1px solid var(--c-border);border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;">Hide ▴</button>'
           + '</div>'
@@ -22061,6 +22306,9 @@ function _renderPlacePickerMap(targetId){
   targetId = targetId || "tb-pm-map";
   var mapDiv = document.getElementById(targetId);
   if (!mapDiv) return;
+  // PD.432: refresh the model kind map so pin colors read the current model
+  // (stay vs sight = trip-role), not a stale cache.
+  if (typeof _pmRefreshKindMap === "function") _pmRefreshKindMap();
   // PD.89: force-keep user-listed places before allPlaces is built
   // from placeActivities — guarantees their pins render blue, never
   // gray, unless the user explicitly rejected them via the popover.
@@ -22358,15 +22606,12 @@ function _renderPlacePickerMap(targetId){
         var _listedRole = null;
         var _listedInfo = null;
         try {
-          // PD.146 / PD.150: fuzzy resolver returns full info object.
+          // PD.146 / PD.150: fuzzy resolver returns full info object. PD.429:
+          // it now derives from the records (origin === "user"); the old direct
+          // _userListedNames fallback is gone with the parallel map.
           if (window._tb && typeof _resolveListedInfo === "function") {
             _listedInfo = _resolveListedInfo(placeName);
             if (_listedInfo) _listedRole = _listedInfo.role;
-          } else if (window._tb && typeof _pmMetaKey === "function") {
-            var _kFallback = _pmMetaKey(placeName);
-            if (window._tb._userListedNames && window._tb._userListedNames[_kFallback]) {
-              _listedRole = window._tb._userListedNames[_kFallback];
-            }
           }
           if (window._tb && Array.isArray(window._tb.candidates) && typeof _pmMetaKey === "function") {
             var _kForCand = _pmMetaKey(placeName);
@@ -23210,7 +23455,11 @@ function renderActivityPicker(){
     var _fnf_ssCount = 0;
     if (_fnf_isSSFn) {
       (_tb.candidates || []).forEach(function(c){
-        if (_fnf_isSSFn(c)) _fnf_ssCount++;
+        // PD.431: the banner says "CHECKED single-sight places" — so count only
+        // CHECKED ones. The old loop counted every single-sight candidate
+        // (checked AND unchecked), so "50 checked" overlapped the "48 unchecked
+        // sights"/"48 considered" banners and the totals couldn't add up.
+        if (c && c.status === "keep" && _fnf_isSSFn(c)) _fnf_ssCount++;
       });
     }
     var _fnf_ssBannerHtml = "";
@@ -23913,25 +24162,52 @@ function renderActivityPicker(){
   try {
     var _hintSlot = document.getElementById("tb-picker-enhance-hint");
     if (_hintSlot && !(trip && trip._enhanceHintDismissed)) {
-      var _hintListed = (trip && trip.brief && trip.brief._userListedNames)
-        || (_tb && _tb._userListedNames) || null;
-      var _hintN = _hintListed ? Object.keys(_hintListed).length : 0;
+      // PD.429: "You named N" derives from the RECORDS (origin === "user"),
+      // the same SSOT as the coverage banner — so the hint, the banner, and the
+      // pins all agree by construction. Records are interned by identity, so a
+      // place you typed two ways ("Goðafoss" + "Goðafoss Waterfall") is ONE
+      // record, counted once. Falls back to the deduped name-map only if the
+      // record accessor is unavailable.
+      // PD.430: stays and sights are DIFFERENT and counted separately — the
+      // trip moves between stays (destinations); sights are decoration. Both
+      // come from the raw input ground truth, so they stay stable as the trip
+      // evolves.
+      var _gt = (typeof _listedGroundTruth === "function") ? _listedGroundTruth() : { stayCount: 0, sightCount: 0, total: 0 };
+      var _hintStays = _gt.stayCount, _hintSights = _gt.sightCount;
+      var _hintN = (function () {
+        if (_gt.total) return _gt.total;
+        // Fallback (no paste text — sentence mode): derive from the live records.
+        try {
+          var _src = (_tb && Array.isArray(_tb.placeActivities) && _tb.placeActivities.length) ? _tb
+            : (trip && Array.isArray(trip.placeActivities) && trip.placeActivities.length) ? trip : null;
+          if (_src && typeof MaxData !== "undefined" && MaxData.deriveListedFromRecords) {
+            var _d = MaxData.deriveListedFromRecords(_src, {
+              normKey: (typeof _normPlaceName === "function") ? _normPlaceName : null,
+              isStaySection: (typeof window._isStaySection === "function") ? window._isStaySection : null
+            });
+            return Object.keys(_d.names).length;
+          }
+        } catch (_) {}
+        return 0;
+      })();
+      // "You named X stays and Y sights" when we have the split; else fall back
+      // to the bare total (sentence-mode trips have no stay/sight sections).
+      var _namedPhrase = (_hintStays || _hintSights)
+        ? ('You named ' + _hintStays + ' place' + (_hintStays === 1 ? '' : 's') + ' to stay and '
+            + _hintSights + ' sight' + (_hintSights === 1 ? '' : 's'))
+        : ('You named ' + _hintN + ' place' + (_hintN === 1 ? '' : 's'));
       var _hintHtml = "";
-      if (_hintN >= 15) {
-        // PD.306: build now auto-runs Enhance, so this banner reframes
-        // the two AI buttons as REFINEMENT actions for after the
-        // initial pass — not as the "you need to click this" CTAs they
-        // used to be.
-        _hintHtml = '<div style="flex:1;">'
-          +   '<strong style="color:var(--c-accent);">You named ' + _hintN + ' places — Max added more like them automatically.</strong> '
-          +   'Reject what misses; Max learns from your choices. '
-          +   '<strong>✦ More like this</strong> runs another round shaped by your kept + rejected set. '
-          +   '<strong>✦ What\'s missing?</strong> flags themes (food, architecture, hikes) absent from your set.'
-          + '</div>';
-      } else if (_hintN < 5 && _tb && Array.isArray(_tb.candidates) && _tb.candidates.length > 0) {
-        // PD.116/PD.306: sentence-driven path. Max generated everything,
-        // INCLUDING the Enhance pass. The user's job is to curate —
-        // reject is the teaching move.
+      // PD.434: the paste-list hint ("You named N… ✦ More like this… ✦ What's
+      // missing?") was REMOVED — the narrative banner now carries that guidance
+      // verbatim, so repeating it here was pure duplication (the user was seeing
+      // two near-identical paragraphs). The sentence-mode teaching hint below
+      // stays: it's distinct content for the no-list case (rejection-as-teaching)
+      // that the narrative doesn't cover.
+      if (_hintN < 5 && _tb && Array.isArray(_tb.candidates) && _tb.candidates.length > 0) {
+        // PD.116/PD.306: sentence-driven path. The first build generated
+        // everything, INCLUDING the one-time Enhance pass. The user's job is
+        // to curate — reject is the teaching move that sharpens the next,
+        // on-demand "More like this" round (returns never re-enhance on their own).
         _hintHtml = '<div style="flex:1;">'
           +   '<strong style="color:var(--c-accent);">Max\'s first guess is on the page.</strong> '
           +   'It can find places, but it doesn\'t know what\'s right for you yet — only you do. '
@@ -25066,10 +25342,74 @@ if (typeof globalThis !== "undefined") globalThis._tbInstall = _tbInstall;
 //   • YOUR LIST coverage: each listed place → found/checked/where,
 //     and a loud list of any that are MISSING
 //   • Max's suggestions, checked vs unchecked
+// PD.430: STAYS and SIGHTS are different kinds of thing and are counted
+// separately — never pooled into one "N places" number. A stay is the trip's
+// STRUCTURE (a destination the route moves between); a sight is DECORATION hung
+// off the route. The user typed them in two sections; this returns that split
+// from the raw paste text (tripMeta.notes), deduped by identity WITHIN each
+// role. It's the one stable ground truth: it doesn't shift as the build turns
+// stays into destinations and leaves sights in discovery, which is exactly what
+// made the pooled count wander (19 / 45 / 47 / 48 across the same trip).
+var _lgtCache = { notes: null, out: null };
+function _listedGroundTruth() {
+  var out = { stays: [], sights: [], stayCount: 0, sightCount: 0, total: 0 };
+  try {
+    var _t = (typeof TripStore !== "undefined" && TripStore.isLoaded && TripStore.isLoaded()) ? TripStore.trip
+      : (typeof trip !== "undefined" ? trip : null);
+    var notes = (typeof _tb !== "undefined" && _tb && _tb.tripMeta && _tb.tripMeta.notes)
+      || (_t && _t.brief && _t.brief.tripMeta && _t.brief.tripMeta.notes) || "";
+    // PD.444 (#4): INGEST ONCE. Your typed list is parsed a single time per
+    // distinct notes string and cached — so the many callers (write door, banner,
+    // pins) read the SAME authoritative set, and a 35-place list isn't re-parsed
+    // on every save/render. The notes string is the cache key: change your list,
+    // it recomputes; otherwise it's the one ingested truth.
+    if (notes && _lgtCache.notes === notes && _lgtCache.out) return _lgtCache.out;
+    if (!notes || typeof parsePlacesList !== "function") return out;
+    var pl = parsePlacesList(notes);
+    var nf = (typeof _normPlaceName === "function") ? _normPlaceName : function (s) { return String(s || "").toLowerCase().trim(); };
+    var stayMap = {}, sightMap = {}, stayDisp = {}, sightDisp = {};
+    (pl && pl.destinations || []).forEach(function (d) {
+      if (!d || !d.place || d._autoCreated) return;
+      var k = nf(d.place); if (!k) return;
+      if (d.isStay || (typeof d.nights === "number" && d.nights > 0)) { stayMap[k] = "stay"; if (!stayDisp[k]) stayDisp[k] = String(d.place).trim(); }
+      else { sightMap[k] = "see"; if (!sightDisp[k]) sightDisp[k] = String(d.place).trim(); }
+    });
+    var _rawStay = Object.keys(stayMap).length, _rawSight = Object.keys(sightMap).length;
+    var _rawCount = _rawStay + _rawSight; // distinct typed names (pre-identity-merge)
+    var dd = (typeof MaxData !== "undefined" && MaxData.dedupeListedNames) ? MaxData.dedupeListedNames : null;
+    var _s = dd ? dd(stayMap, stayDisp) : { names: stayMap, display: stayDisp, dropped: [] };
+    var _g = dd ? dd(sightMap, sightDisp) : { names: sightMap, display: sightDisp, dropped: [] };
+    out.stays = Object.keys(_s.names).map(function (k) { return _s.display[k] || k; });
+    out.sights = Object.keys(_g.names).map(function (k) { return _g.display[k] || k; });
+    out.stayCount = out.stays.length;
+    out.sightCount = out.sights.length;
+    out.total = out.stayCount + out.sightCount;
+    // PD.431: keep the user informed about identity merges — two names you typed
+    // that are the SAME place ("Goðafoss" + "Goðafoss Waterfall"). rawCount is
+    // what you typed; total is distinct places; duplicates explains the gap so
+    // "you named 46 → 45 listed" is never a silent, unexplained drop.
+    out.rawCount = _rawCount;
+    // PD.433: raw (pre-merge) counts PER KIND, and duplicates SPLIT by kind, so
+    // the banner can express a merge in the right units — "you typed 34 sights,
+    // 1 is a duplicate, so 33 sights" — instead of mixing per-kind totals (12 +
+    // 33) with the grand raw total (46). A duplicate is a sight-merge or a
+    // stay-merge; it is never ambiguous.
+    out.rawStayCount = _rawStay;
+    out.rawSightCount = _rawSight;
+    function _mapDrop(d) { return { from: d.fromDisplay || d.from, into: d.intoDisplay || d.into }; }
+    out.stayDuplicates = (_s.dropped || []).map(_mapDrop);
+    out.sightDuplicates = (_g.dropped || []).map(_mapDrop);
+    out.duplicates = out.stayDuplicates.concat(out.sightDuplicates);
+    _lgtCache.notes = notes; _lgtCache.out = out;   // PD.444: cache the one ingestion
+  } catch (_) {}
+  return out;
+}
+if (typeof globalThis !== "undefined") globalThis._listedGroundTruth = _listedGroundTruth;
+
 // Runs automatically at build:done; on demand via MaxAudit.run().
 function _maxPlaceSetAudit(quiet) {
   var out = { sections: [], slots: 0, unique: 0, multi: [], listed: [],
-              missing: [], maxChecked: 0, maxUnchecked: 0 };
+              missing: [], mergedListed: [], maxChecked: 0, maxUnchecked: 0 };
   try {
     if (typeof _tb === "undefined" || !_tb || !Array.isArray(_tb.placeActivities)) return out;
     // PD.401M: ONE registry for the WHOLE audit. The place repository is
@@ -25104,20 +25444,45 @@ function _maxPlaceSetAudit(quiet) {
     _allRecs.forEach(function(r){
       if (r.sections.length > 1) out.multi.push({ place: r.place, sections: r.sections.slice() });
     });
-    // Coverage — a single lookup against the same registry.
-    var listedNames = (_tb._userListedNames) || {};
-    Object.keys(listedNames).forEach(function(lk){
-      var disp = (_tb._userListedDisplay && _tb._userListedDisplay[lk]) || lk;
-      var hit = _repo ? (_repo.find(lk) || (disp !== lk ? _repo.find(disp) : null)) : null;
-      if (hit) {
-        out.listed.push({ place: disp, found: true,
-          checked: hit.anyKeep, sections: hit.sections.slice() });
-        hit._isListed = true;               // flag the ONE repo record
-      } else {
-        out.listed.push({ place: disp, found: false, checked: false, sections: [] });
-        out.missing.push(disp);
-      }
-    });
+    // Flag every user-origin record so the provenance partition below excludes
+    // it from the Max counts (it's yours, not a Max suggestion).
+    _allRecs.forEach(function(r){ if (r && r.origin === "user") r._isListed = true; });
+    // Coverage — ANCHORED TO YOUR RAW LIST (the ground truth), not to a record
+    // count (PD.430). Post-build, a listed place can live in TWO pools at once —
+    // a trip DESTINATION and a discovery RECORD — and counting records summed
+    // those, inflating "46 listed" to "47". The raw list is what you typed (12
+    // stays + 34 sights); each entry is "found" if it's present in EITHER pool,
+    // and "missing" if neither — so the count equals your input and a genuine
+    // drop is still surfaced. Falls back to the record-derived set only when
+    // there is no paste list (sentence-mode trips).
+    var _nfTk = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase(); };
+    function _covToks(s){ return _nfTk(String(s||"").replace(/[\/,&]+/g, " ")).split(/\s+/).filter(Boolean); }
+    var _gtA = (typeof _listedGroundTruth === "function") ? _listedGroundTruth() : { stays: [], sights: [] };
+    var _gtList = (_gtA.stays || []).map(function(n){ return { name: n, role: "stay" }; })
+      .concat((_gtA.sights || []).map(function(n){ return { name: n, role: "see" }; }));
+    if (_gtList.length) {
+      // PRESENT = ANY record ∪ destinations, tokenized for lenient matching.
+      // PD.431: presence is "is this place on the page at all?", NOT "is it
+      // tagged user?". A listed place whose record got tagged max/absent (an
+      // origin-baking gap) is STILL present — flagging it "missing" was a false
+      // alarm. "Missing" now means genuinely NO record exists for it anywhere.
+      var _present = [];
+      _allRecs.forEach(function(r){ if (r && r.place) _present.push({ t: _covToks(r.place), keep: r.anyKeep }); });
+      ((_audTrip && _audTrip.destinations) || []).forEach(function(d){ if (d && d.place) _present.push({ t: _covToks(d.place), keep: true }); });
+      _gtList.forEach(function(g){
+        var _ut = _covToks(g.name);
+        var hit = _ut.length ? _present.find(function(p){ return _ut.every(function(tk){ return p.t.indexOf(tk) >= 0; }); }) : null;
+        out.listed.push({ place: g.name, found: !!hit, checked: hit ? !!hit.keep : false, sections: [], role: g.role });
+        if (!hit) out.missing.push(g.name);
+      });
+    } else {
+      // Sentence-mode fallback: no paste list, so derive the listed set from the
+      // user-origin records directly.
+      _allRecs.forEach(function(r){
+        if (!r || r.origin !== "user") return;
+        out.listed.push({ place: r.place, found: true, checked: r.anyKeep, sections: r.sections.slice() });
+      });
+    }
     out.considered = 0;
     try {
       var _audTripC = (typeof TripStore !== "undefined" && TripStore.isLoaded && TripStore.isLoaded())
@@ -25132,14 +25497,27 @@ function _maxPlaceSetAudit(quiet) {
     // So the page total = listed + hubs + max BY CONSTRUCTION — the
     // breakdown can't fail to add up (the "87 vs 46+43+1" bug).
     out.hubs = [];
+    out.maxStays = 0; out.maxSights = 0;   // PD.431: Max's suggestions, by KIND
+    var _isStaySecFnA = (typeof window._isStaySection === "function") ? window._isStaySection : function(){ return false; };
     var _listedFound = out.listed.filter(function(l){ return l.found; }).length;
     (_repo ? _repo.all() : []).forEach(function(r){
       if (r.kinds.destination) return;      // trip stop, not a "page" place
+      // A pure route waypoint (on a scenic-route umbrella, not also a sight) is
+      // route infrastructure — kept because the ROUTE is, not a sight the user
+      // checked. Excluding it stops the false "1 you checked" (e.g. "Arnarstapi"
+      // on "Drive the Ring Road") and keeps "Max suggested" to actual sights.
+      if (r.kinds.route && !r.kinds.sight) return;
       if (r._isListed) return;              // counted in listed
-      if (r.origin === "max-hub") { out.hubs.push({ place: r.place, checked: r.anyKeep }); return; }
+      // A hub is a Max-suggested overnight base — a DESTINATION.
+      if (r.origin === "max-hub") { out.hubs.push({ place: r.place, checked: r.anyKeep }); out.maxStays++; return; }
+      // PD.431: split Max's non-hub suggestions into stays vs sights, so the one
+      // banner can say "Max suggested N destinations and M sights" from ONE set.
+      var _rIsStay = !!(r.kinds.stay) || (r.sections && r.sections.some(function(s){ return _isStaySecFnA(s); }));
+      if (_rIsStay) out.maxStays++; else out.maxSights++;
       if (r.anyKeep) out.maxChecked++; else out.maxUnchecked++;
     });
     // The page total is the sum of its parts — one registry, one count.
+    // By construction: maxStays + maxSights === maxChecked + maxUnchecked + hubs.
     out.pageTotal = _listedFound + out.maxChecked + out.maxUnchecked + out.hubs.length;
     if (!quiet) {
       var listedFound = out.listed.filter(function(l){ return l.found; }).length;
@@ -26297,6 +26675,15 @@ if (typeof TripStore !== "undefined" && typeof TripStore.on === "function") {
       var pickerList = document.getElementById("tb-place-act-list");
       if (!pickerList) return;
       if (pickerList.offsetParent === null) return;  // not visible
+      // PD.450: a keep-toggle already updated its own checkbox in the DOM and
+      // doesn't move any row, so a full re-render here is pure flash ("it
+      // rewrites the entire screen"). Reflect just that place surgically and
+      // skip the redraw. Any other change falls through to a normal render.
+      var _inflight = (typeof window !== "undefined") && window._pmSurgicalToggleInFlight;
+      if (_inflight && typeof _pmSurgicalKeepUpdate === "function") {
+        _pmSurgicalKeepUpdate(_inflight);
+        return;
+      }
       if (typeof _renderPlaceActivityItems === "function") {
         _renderPlaceActivityItems();
       }
@@ -31751,18 +32138,9 @@ function removeDestFromTrip(destId){
       lng: dest.lng
     });
   }
-  // Round NC.X: route through MaxRoleWriter for _tb.candidates side
-  // (handles c.status + _roleTouched + flags atomically). trip.candidates
-  // still gets a direct write — that's a separate snapshot.
+  // PD.455: MaxRoleWriter.set handles the working candidate AND mirrors to the
+  // trip.candidates snapshot (one primitive) — no separate snapshot write needed.
   MaxRoleWriter.set(dest.place, "reject", { persist: false });
-  try {
-    var norm = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){return String(s||"").toLowerCase();};
-    var k = norm(dest.place);
-    if (Array.isArray(trip.candidates)) {
-      var tCand = trip.candidates.find(function(c){ return c && c.place && norm(c.place) === k; });
-      if (tCand) tCand.status = "reject";
-    }
-  } catch(_){}
 
   trip.destinations.splice(idx, 1);
 

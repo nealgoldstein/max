@@ -34,17 +34,20 @@ function test(name, fn) {
 // ── Mock environment ──────────────────────────────────────────────────
 // In-memory key-value store for MaxDB.
 var _storage = {};
-function _resetStorage() { _storage = {}; }
+var _writeCount = 0;
+function _resetStorage() { _storage = {}; _writeCount = 0; }
 
 global.MaxDB = {
   trip: {
     write: function (id, envelope) {
+      _writeCount++;
       _storage["max-trip-" + id] = JSON.stringify(envelope);
       return true;
     },
     writeRaw: function (id, raw, opts) {
       // Mock honors silent flag the same way db.js does (suppress
       // the event, but we don't emit anything from the mock anyway).
+      _writeCount++;
       _storage["max-trip-" + id] = raw;
       return true;
     },
@@ -674,6 +677,37 @@ test("load sets global.trip to the loaded object", function () {
   assert.strictEqual(global.trip, null);
   var loaded = TripStore.load(id);
   assert.strictEqual(global.trip, loaded);
+});
+
+test("replace() with identical content is a NO-OP write (breaks the cross-tab loop)", function () {
+  reset();
+  var t = TripStore.mint({});
+  TripStore.setName("Iceland");
+  var before = _writeCount;
+  // Exactly the cross-tab path: the `storage` handler restores the other
+  // tab's envelope via restoreTrip → TripStore.replace(deepCopy). Same id,
+  // same content → the second tab must NOT echo a write back, or the two
+  // tabs ping-pong forever. (Volatile __saved__ / _version are ignored.)
+  var deepCopy = JSON.parse(JSON.stringify(TripStore.trip));
+  TripStore.replace(deepCopy);
+  assert.strictEqual(_writeCount, before, "replacing identical content must not write");
+  // A replace carrying a REAL change still persists.
+  var changed = JSON.parse(JSON.stringify(TripStore.trip));
+  changed.name = "Iceland 2";
+  TripStore.replace(changed);
+  assert.strictEqual(_writeCount, before + 1, "a genuine change must still persist");
+});
+
+test("load primes the signature so an immediate identical replace doesn't echo", function () {
+  reset();
+  var t = TripStore.mint({});
+  var id = t.id;
+  TripStore.unload();
+  TripStore.load(id);
+  var after = _writeCount;
+  var deepCopy = JSON.parse(JSON.stringify(TripStore.trip));
+  TripStore.replace(deepCopy);   // simulates a sync reflecting what we just loaded
+  assert.strictEqual(_writeCount, after, "no echo write after load + identical replace");
 });
 
 test("unload clears global.trip", function () {

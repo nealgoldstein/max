@@ -112,6 +112,11 @@ function _phaseStatus() {
   if (out.hasTrip) {
     out.destCount = trip.destinations.length;
     out.nights = trip.destinations.reduce(function(s, d){ return s + (d.nights || 0); }, 0);
+    // PD.430: stays and sights are different kinds of stop and are counted
+    // separately — a STAY has nights (the route moves between them); a SIGHT is
+    // a 0-night decoration on the route. Never present them as one "N dest".
+    out.stayCount  = trip.destinations.filter(function(d){ return (d.nights || 0) > 0; }).length;
+    out.sightCount = trip.destinations.filter(function(d){ return !((d.nights || 0) > 0); }).length;
   }
   // v360.1: union-dedupe-filter across both data sources so this
   // count matches MaxTripUI._collectSetAsidePlaces (which feeds the
@@ -213,7 +218,9 @@ function _phaseChipsHtml(currentPhase) {
   if (currentPhase !== "structure" && s.hasTrip) {
     // PD.333 (audit B): this chip is a USER NAVIGATION to the trip
     // view — it stamps the URL itself now that drawTripMode doesn't.
-    chips.push(_chip("🗺 " + s.destCount + " dest · " + s.nights + " nights", "(function(){var ov=document.getElementById('trip-brief-overlay');if(ov)ov.style.display='none';var ce=document.getElementById('candidate-explorer-overlay');if(ce)ce.style.display='none';try{if(typeof MaxRoute!=='undefined'&&trip&&trip.id)MaxRoute.navigate({screen:MaxRoute.SCREENS.TRIP,tripId:trip.id});}catch(_){}if(typeof drawTripMode==='function'){_leftMode='trip';drawTripMode();updateMainMap&&updateMainMap();}})()"));
+    chips.push(_chip("🗺 " + s.stayCount + " stay" + (s.stayCount === 1 ? "" : "s")
+      + (s.sightCount ? (" · " + s.sightCount + " sight" + (s.sightCount === 1 ? "" : "s")) : "")
+      + " · " + s.nights + " night" + (s.nights === 1 ? "" : "s"), "(function(){var ov=document.getElementById('trip-brief-overlay');if(ov)ov.style.display='none';var ce=document.getElementById('candidate-explorer-overlay');if(ce)ce.style.display='none';try{if(typeof MaxRoute!=='undefined'&&trip&&trip.id)MaxRoute.navigate({screen:MaxRoute.SCREENS.TRIP,tripId:trip.id});}catch(_){}if(typeof drawTripMode==='function'){_leftMode='trip';drawTripMode();updateMainMap&&updateMainMap();}})()"));
   }
   if (!chips.length) return "";
   return '<div class="phase-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 4px;">' + chips.join("") + '</div>';

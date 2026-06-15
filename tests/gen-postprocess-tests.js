@@ -209,6 +209,102 @@ test("applyTheming leaves a place untouched when the entry has no section", func
   assert.strictEqual(n, 0);
   assert.strictEqual(items[0].requiredPlaces[0]._themeFit, undefined);
 });
+test("consolidateOrphanThemes re-homes a themeless waterfall into the waterfalls theme", function () {
+  var items = [
+    { section: "Hike to waterfalls", requiredPlaces: [{ place: "Skógafoss", _themeFit: "Hike to waterfalls" }] },
+    { section: "Goðafoss", requiredPlaces: [{ place: "Goðafoss" }] }  // themeless → would be a self-named category
+  ];
+  var n = M.consolidateOrphanThemes(items, { normPlaceName: nrm });
+  assert.strictEqual(n, 1);
+  assert.strictEqual(items[1].requiredPlaces[0]._themeFit, "Hike to waterfalls");
+});
+test("consolidateOrphanThemes matches concept across languages (geyser → thermal theme)", function () {
+  var items = [
+    { section: "Soak in thermal waters", requiredPlaces: [{ place: "Mývatn Nature Baths", _themeFit: "Soak in thermal waters" }] },
+    { section: "Geysir", requiredPlaces: [{ place: "Geysir" }] }
+  ];
+  var n = M.consolidateOrphanThemes(items, { normPlaceName: nrm });
+  assert.strictEqual(n, 1);
+  assert.strictEqual(items[1].requiredPlaces[0]._themeFit, "Soak in thermal waters");
+});
+test("consolidateOrphanThemes opens the default concept theme when none exists (recognized feature is never pooled)", function () {
+  var items = [
+    { section: "Hike to waterfalls", requiredPlaces: [{ place: "Skógafoss", _themeFit: "Hike to waterfalls" }] },
+    { section: "Geysir", requiredPlaces: [{ place: "Geysir" }] }  // thermal concept, no thermal theme present
+  ];
+  var n = M.consolidateOrphanThemes(items, { normPlaceName: nrm });
+  assert.strictEqual(n, 1);
+  assert.strictEqual(items[1].requiredPlaces[0]._themeFit, "Soak in thermal waters");
+});
+test("consolidateOrphanThemes groups same-concept orphans into ONE default theme (no per-place forks)", function () {
+  var items = [
+    { section: "Kirkjufell", requiredPlaces: [{ place: "Kirkjufell" }] },   // mountain (fell)
+    { section: "Snæfellsjökull", requiredPlaces: [{ place: "Snæfell Peak" }] } // mountain (peak)
+  ];
+  var n = M.consolidateOrphanThemes(items, { normPlaceName: nrm });
+  assert.strictEqual(n, 2);
+  assert.strictEqual(items[0].requiredPlaces[0]._themeFit, "Mountains & peaks");
+  assert.strictEqual(items[1].requiredPlaces[0]._themeFit, "Mountains & peaks");
+});
+test("consolidateOrphanThemes leaves a CONCEPT-LESS sight alone (a town pools, never mis-filed)", function () {
+  var items = [
+    { section: "Hike to waterfalls", requiredPlaces: [{ place: "Skógafoss", _themeFit: "Hike to waterfalls" }] },
+    { section: "Húsavík", requiredPlaces: [{ place: "Húsavík" }] }  // a town — no feature concept → untouched
+  ];
+  var n = M.consolidateOrphanThemes(items, { normPlaceName: nrm });
+  assert.strictEqual(n, 0);
+  assert.strictEqual(items[1].requiredPlaces[0]._themeFit, undefined);
+});
+test("consolidateOrphanThemes never touches stays or already-themed places", function () {
+  var items = [
+    { section: "Hike to waterfalls", requiredPlaces: [{ place: "Skógafoss", _themeFit: "Hike to waterfalls" }] },
+    { section: "Overnight stays", requiredPlaces: [{ place: "Selfoss", role: "stay" }] }  // 'foss' but a STAY → must not move
+  ];
+  var n = M.consolidateOrphanThemes(items, { normPlaceName: nrm });
+  assert.strictEqual(n, 0);
+  assert.strictEqual(items[1].requiredPlaces[0]._themeFit, undefined);
+});
+test("surfaceRouteOnlySights files a route-only sight into its matching theme", function () {
+  var items = [
+    { type: "route", section: "Drive scenic routes", requiredPlaces: [
+        { place: "Ásbyrgi Canyon", _keep: true, lat: 66.0, lng: -16.5 },
+        { place: "Reykjavík", _keep: true } ] },
+    // Reykjavík is ALSO a stay → not route-only.
+    { type: "synthetic-stays", section: "Overnight stays", requiredPlaces: [ { place: "Reykjavík", _keep: true } ] },
+    { type: "activity", section: "Walk in canyons", requiredPlaces: [ { place: "Sigöldugljúfur Canyon", _themeFit: "Walk in canyons" } ] }
+  ];
+  var n = M.surfaceRouteOnlySights(items, { normPlaceName: nrm, isStaySection: function(s){ return s === "Overnight stays"; } });
+  assert.strictEqual(n, 1, "only Ásbyrgi (route-only canyon) surfaces; Reykjavík is a stay, not route-only");
+  var canyon = items.find(function(it){ return it.type !== "route" && it.section === "Walk in canyons"; });
+  assert.ok(canyon.requiredPlaces.some(function(p){ return /Ásbyrgi/.test(p.place); }), "Ásbyrgi now appears in Walk in canyons");
+});
+test("surfaceRouteOnlySights puts a concept-less route-only sight into More places to consider", function () {
+  var items = [
+    { type: "route", section: "Drive scenic routes", requiredPlaces: [ { place: "Diamond Circle", _keep: true } ] },
+    { type: "activity", section: "Walk in canyons", requiredPlaces: [ { place: "X Canyon", _themeFit: "Walk in canyons" } ] }
+  ];
+  var n = M.surfaceRouteOnlySights(items, { normPlaceName: nrm });
+  assert.strictEqual(n, 1);
+  var more = items.find(function(it){ return it.type !== "route" && it.section === "More places to consider"; });
+  assert.ok(more && more.requiredPlaces.some(function(p){ return /Diamond Circle/.test(p.place); }), "concept-less route sight is at least visible in the catch-all");
+});
+test("surfaceRouteOnlySights opens the default concept theme for a route-only feature (Kirkjufell → Mountains & peaks)", function () {
+  var items = [
+    { type: "route", section: "Drive scenic routes", requiredPlaces: [ { place: "Kirkjufell", _keep: true, lat: 64.9, lng: -23.3 } ] }
+  ];
+  var n = M.surfaceRouteOnlySights(items, { normPlaceName: nrm });
+  assert.strictEqual(n, 1);
+  var mtn = items.find(function(it){ return it.type !== "route" && it.section === "Mountains & peaks"; });
+  assert.ok(mtn && mtn.requiredPlaces.some(function(p){ return /Kirkjufell/.test(p.place); }), "Kirkjufell surfaces into its concept theme, not the catch-all");
+});
+test("surfaceRouteOnlySights leaves a sight already in a theme alone", function () {
+  var items = [
+    { type: "route", section: "Drive scenic routes", requiredPlaces: [ { place: "Ásbyrgi Canyon", _keep: true } ] },
+    { type: "activity", section: "Walk in canyons", requiredPlaces: [ { place: "Ásbyrgi Canyon", _themeFit: "Walk in canyons" } ] }
+  ];
+  var n = M.surfaceRouteOnlySights(items, { normPlaceName: nrm });
+  assert.strictEqual(n, 0, "already in a non-route section → not route-only, nothing surfaced");
+});
 test("applyTheming never re-themes a place INTO another catch-all", function () {
   var items = themingItems();
   var map = [{ place: "Gullfoss", section: "More places to consider" }]; // a movable/catch-all target

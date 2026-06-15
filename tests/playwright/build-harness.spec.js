@@ -643,14 +643,15 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
         if (!CATCH[it.section]) return;
         (it.requiredPlaces || []).forEach((pp) => { if (pp && pp._keep !== false) badly.push(it.section + ':' + pp.place); });
       });
-      // PD.405: a checked, un-themed sight commits to its OWN category (named
-      // for the place) — never a generic "keeping" bucket.
+      // PD.406 (reverses PD.405): a checked, un-themed sight pools into the
+      // shared "Unique sights" bucket — never a generic to-consider catchall,
+      // and never its own self-named single-member category.
       const landed = (window._tb.placeActivities || []).find((it) =>
         (it.requiredPlaces || []).some((pp) => pp.place === 'InvariantSight'));
       return { badly, landedSection: landed ? landed.section : null };
     });
     expect(r.badly, 'no checked place may remain in a to-consider catchall').toEqual([]);
-    expect(r.landedSection, 'the checked sight committed to its own category (PD.405)').toBe('InvariantSight');
+    expect(r.landedSection, 'the checked sight pools into "Unique sights" (PD.406)').toBe('Unique sights');
   });
 
   // PD.401h: the painted section chips must equal the banner — in the DOM.

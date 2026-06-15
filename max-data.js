@@ -172,7 +172,24 @@
   // NOT already a destination. Deduped by canonical key.
   function consideredPlaceKeys(trip) {
     if (!trip) return {};
-    var pa = getPlaceActivities(trip);
+    // SSOT Phase 2: delegate to the ONE ingestion service when present, so the
+    // trip→model pipeline (pool union + identity dedup + the stay/dest/hub opts)
+    // lives in exactly one place. The inline derivation below is kept as a
+    // fallback for load-order safety and for Node tests that don't load the
+    // ingestion module — it is the SAME pipeline, open-coded.
+    var ING = global.MaxIngestion;
+    if (ING && typeof ING.buildModel === "function") {
+      var ingModel = ING.buildModel(trip);
+      if (ingModel) return ingModel.consideredKeyedSet();
+    }
+    // SSOT Stage 3: derive from the UNIFIED place set — placeActivities with the
+    // legacy dest.suggestions._considered pool folded in — so there is ONE
+    // source. This replaces the old read-time "legacy absorption" (below) that
+    // tacked the suggestion pool onto the count with section:null (the live
+    // "(none): 55"); now those sights are real, sectioned members of the set.
+    var pa = (typeof foldConsideredSuggestionsIntoPlaceActivities === "function")
+      ? foldConsideredSuggestionsIntoPlaceActivities(trip).placeActivities
+      : getPlaceActivities(trip);
     var SK = global.SectionKind || null;
     var isStaySec = function (s) { return SK ? SK.isStay(s) : false; };
     var excluded = {};
@@ -214,24 +231,80 @@
         });
       });
     }
-    // PD.387: LEGACY ABSORPTION. placeActivities is authoritative, but
-    // trips saved before this refactor carry their considered set ONLY
-    // in the old dest.suggestions pool (PD.269). Supplement — never
-    // override — from that pool for any considered sight not already
-    // derived, so legacy trips still render. New trips get nothing
-    // extra here (their pool is a projection of placeActivities), so
-    // the count stays identical to the discovery preview.
+    // PD.387 LEGACY ABSORPTION removed (SSOT Stage 3): the dest.suggestions
+    // _considered pool is now folded INTO placeActivities by
+    // foldConsideredSuggestionsIntoPlaceActivities() above and derived through
+    // the ONE model, with a real section — so there is no second read-time pool
+    // to supplement (and no more section:null "(none)" entries). The fold is
+    // idempotent and additive, so this is a strict superset of the old behavior:
+    // every sight the absorption used to surface is still surfaced, now sectioned.
+    return out;
+  }
+
+  // SSOT Stage 3: fold the legacy dest.suggestions._considered pool INTO
+  // placeActivities, so there is ONE source of considered sights instead of
+  // two that drift. Historically considered sights lived in placeActivities
+  // (what the picker reads) AND in the old PD.269 dest.suggestions pool (which
+  // consideredPlaceKeys "absorbed" at read time with section:null — the live
+  // "(none): 55"). The picker banner read the first, the map/pill read both, so
+  // they disagreed (131 vs 186). This folds every considered suggestion not
+  // already represented in placeActivities into the "Sights near places you
+  // listed" catch-all, then canonicalizes (coordinate-aware dedup). Returns a
+  // NEW placeActivities array (deep-cloned; the live trip is untouched until the
+  // caller persists) plus the count added. IDEMPOTENT: re-running finds
+  // everything already present and adds nothing. NEVER drops a place — it only
+  // adds and dedups, so it cannot trip the 401V "a listed place must never
+  // disappear" guard.
+  function foldConsideredSuggestionsIntoPlaceActivities(trip) {
+    var orig = getPlaceActivities(trip);
+    if (!trip) return { added: 0, placeActivities: orig };
+    // Deep-ish clone so canonicalize / push never mutate the live trip.
+    var pa = orig.map(function (it) {
+      return Object.assign({}, it, {
+        requiredPlaces: (it.requiredPlaces || []).map(function (p) { return Object.assign({}, p); })
+      });
+    });
+    var SK = global.SectionKind || null;
+    var SIGHTS_NEAR = (SK && SK.NAMES && SK.NAMES.SIGHTS_NEAR) ? SK.NAMES.SIGHTS_NEAR : "Sights near places you listed";
+    // What's already represented, and what's excluded (destinations + stays).
+    var present = {};
+    var excluded = {};
+    getDestinations(trip).forEach(function (d) { if (d && d.place) excluded[_normKey(d.place)] = true; });
+    pa.forEach(function (it) {
+      var isStay = SK ? SK.isStay(it.section) : false;
+      (it.requiredPlaces || []).forEach(function (p) {
+        if (!p || !p.place) return;
+        var k = _normKey(p.place);
+        present[k] = true;
+        if (isStay) excluded[k] = true;
+      });
+    });
+    // Collect considered suggestions not already represented.
+    var toAdd = [];
     getDestinations(trip).forEach(function (d) {
       getSuggestions(d).forEach(function (s) {
         if (!s || !s._considered) return;
         var name = s.name || s.label || s.place || s.n || s.st;
         if (!name) return;
         var k = _normKey(name);
-        if (!k || excluded[k] || out[k]) return;
-        out[k] = { name: name, lat: s.lat, lng: s.lng, section: null, _legacy: true, _src: s };
+        if (!k || excluded[k] || present[k]) return;
+        present[k] = true; // dedup within the legacy pool too
+        toAdd.push({ place: name, lat: s.lat, lng: s.lng, _keep: false, _migratedFromSuggestion: true });
       });
     });
-    return out;
+    if (!toAdd.length) return { added: 0, placeActivities: orig };
+    // Find or create the catch-all item.
+    var item = null;
+    for (var i = 0; i < pa.length; i++) { if (pa[i] && pa[i].section === SIGHTS_NEAR) { item = pa[i]; break; } }
+    if (!item) {
+      item = { id: "synth-near-migrated-" + Date.now().toString(36), type: "synthetic-enhance",
+        section: SIGHTS_NEAR, name: "Sights near places you listed", checked: false, requiredPlaces: [] };
+      pa.push(item);
+    }
+    if (!Array.isArray(item.requiredPlaces)) item.requiredPlaces = [];
+    Array.prototype.push.apply(item.requiredPlaces, toAdd);
+    var canon = (typeof canonicalizePlaceActivities === "function") ? canonicalizePlaceActivities(pa) : pa;
+    return { added: toAdd.length, placeActivities: canon };
   }
 
   // PD.388 / PD.401j: committed sights — the green teardrops. The
@@ -421,6 +494,109 @@
       ? brief._userListedDisplay : {};
   }
 
+  // PD.429: DERIVE the user's listed set FROM THE RECORDS — the read SSOT that
+  // retires the parallel `_userListedNames` map. A place is "yours" iff a record
+  // carries `_origin:"user"` (baked by _stampListedOrigin); its role is stay vs
+  // see by section; its display is the record's canonical name. Records are
+  // already interned by identity, so two names for one place ("Goðafoss" +
+  // "Goðafoss Waterfall") are ONE record → counted once, no merge note needed.
+  // Returns { names: key->("stay"|"see"), display: key->name }. PURE.
+  //   opts.isStaySection(section) — optional; defaults to the two stay sections.
+  function deriveListedFromRecords(trip, opts) {
+    opts = opts || {};
+    var out = { names: {}, display: {} };
+    var pa = getPlaceActivities(trip);
+    if (!Array.isArray(pa)) return out;
+    var isStay = (typeof opts.isStaySection === "function") ? opts.isStaySection
+      : (typeof global._isStaySection === "function") ? global._isStaySection
+      : function (s) { return /^(overnight stays|recommended overnight stays)$/i.test(String(s || "").trim()); };
+    // Key by the SAME normalizer the readers use to look up the cache. Callers
+    // that replace _tb._userListedNames pass window._normPlaceName so the
+    // projection is a drop-in; the default _normKey is fine for count-only use.
+    var keyOf = (typeof opts.normKey === "function") ? opts.normKey : _normKey;
+    pa.forEach(function (it) {
+      if (!it) return;
+      var stay = isStay(it.section);
+      (it.requiredPlaces || []).forEach(function (p) {
+        if (!p || !p.place) return;
+        // The ONE oracle: origin === "user". This naturally includes a circuit
+        // you listed that's modeled as a route umbrella ("Golden Circle",
+        // "Diamond Circle") — origin user on a route item — while excluding
+        // Max's infrastructure waypoints (origin max strung along a route). A
+        // place that's both a route waypoint and a themed sight shares one
+        // _key, so it's counted once regardless of how many items hold it.
+        if (p._origin !== "user") return;
+        // Key by normalized NAME (not the coord-canonical _key) so the result is
+        // a drop-in for the retired _userListedNames cache that readers expect.
+        // Records are already interned by identity, so one place yields one name.
+        var k = keyOf(p.place);
+        if (!k) return;
+        var role = stay ? "stay" : "see";
+        if (!out.names[k]) { out.names[k] = role; out.display[k] = String(p.place).trim(); }
+        else if (role === "stay") out.names[k] = "stay"; // a stay outranks a see
+      });
+    });
+    return out;
+  }
+
+  // PD.428 (Task #28): physically dedupe the stored listed-name set by ENTITY
+  // identity. The paste-list can carry two NAMES for ONE place ("godafoss" +
+  // "godafoss waterfall"); both get stored as separate keys, which inflates the
+  // listed count and forces a confusing "X = X, counted once" merge note even
+  // though there's only one pin. This collapses each identity-group to ONE
+  // canonical key — the most descriptive (longest) name, which matches the
+  // place record's canonical form ("Goðafoss Waterfall") and the user's stated
+  // preference to keep the correct full name. Roles merge (a "stay" beats a
+  // "see" — an overnight is the stronger commitment). PURE: returns new maps +
+  // the list of dropped→kept pairs; mutates nothing. Idempotent (a deduped set
+  // passes through unchanged). Uses MaxDiscovery.sameEntity for identity, with a
+  // name-only fallback so it works on the name-keyed map (no coords needed —
+  // sameEntity's feature-variant rule is name-only).
+  function dedupeListedNames(names, display) {
+    var result = { names: {}, display: {}, dropped: [] };
+    if (!names || typeof names !== "object") return result;
+    var SE = (global.MaxDiscovery && typeof global.MaxDiscovery.sameEntity === "function")
+      ? global.MaxDiscovery.sameEntity : null;
+    function same(a, b) {
+      if (a === b) return true;
+      if (SE) { try { return SE({ place: a }, { place: b }); } catch (_) {} }
+      return false;
+    }
+    display = (display && typeof display === "object") ? display : {};
+    var keys = Object.keys(names);
+    var groups = []; // each: { canon, keys:[...], role }
+    keys.forEach(function (k) {
+      var g = null;
+      for (var i = 0; i < groups.length; i++) {
+        // PD.438: never group a base (stay) with a sight (see) — a place you
+        // sleep and a place you see are different entities even when their
+        // names match ("Skaftafell" the base vs "Skaftafell glacier region").
+        // Only merge within the same role.
+        if (groups[i].role === names[k] && same(groups[i].canon, k)) { g = groups[i]; break; }
+      }
+      if (!g) { g = { canon: k, keys: [], role: names[k] }; groups.push(g); }
+      g.keys.push(k);
+      // role merge: a stay outranks a see.
+      if (names[k] === "stay") g.role = "stay";
+      // canonical = the LONGEST (most descriptive) key in the group.
+      if (k.length > g.canon.length) g.canon = k;
+    });
+    groups.forEach(function (g) {
+      result.names[g.canon] = g.role;
+      // carry a display for the canonical key (prefer an explicit one).
+      if (display[g.canon] != null) result.display[g.canon] = display[g.canon];
+      else {
+        for (var i = 0; i < g.keys.length; i++) {
+          if (display[g.keys[i]] != null) { result.display[g.canon] = display[g.keys[i]]; break; }
+        }
+      }
+      g.keys.forEach(function (k) {
+        if (k !== g.canon) result.dropped.push({ from: k, into: g.canon, fromDisplay: display[k] || k, intoDisplay: result.display[g.canon] || g.canon });
+      });
+    });
+    return result;
+  }
+
   // ── User-owned annotations ───────────────────────────────────────
 
   function getDestNote(trip, destId) {
@@ -548,9 +724,14 @@
     var _sameEntity = (_MD && typeof _MD.sameEntity === "function") ? _MD.sameEntity : null;
     var _interned = []; // { key, place, coords }
     var _PKlearn = (global.PlaceKey && typeof global.PlaceKey.learn === "function") ? global.PlaceKey : null;
-    function _internKey(p) {
+    function _internKey(p, kind) {
       var coords = (typeof p.lat === "number" && typeof p.lng === "number") ? { lat: p.lat, lng: p.lng } : null;
-      var cand = { place: p.place, coords: coords };
+      // PD.438: carry the record's KIND and ORIGIN so sameEntity's origin-gated
+      // kind-veto can keep a base ("Skaftafell") and a same-named sight you also
+      // listed ("Skaftafell glacier region") as DISTINCT identities — instead of
+      // interning them to one key (which a later group-by-key pass would collapse,
+      // dropping the base). A MAX suggestion still merges into your base.
+      var cand = { place: p.place, coords: coords, kind: kind || null, _origin: p._origin || null };
       for (var i = 0; i < _interned.length; i++) {
         var e = _interned[i];
         var same = _sameEntity ? _sameEntity(e, cand) : (_normKey(e.place) === _normKey(p.place));
@@ -574,9 +755,14 @@
         }
       }
       var key = _normKey(p.place);
-      _interned.push({ key: key, place: p.place, coords: coords });
+      _interned.push({ key: key, place: p.place, coords: coords, kind: kind || null, _origin: p._origin || null });
       return key;
     }
+    // KIND of a section: a stay section interns its places as "stay", everything
+    // else as "sight" — so the kind-veto fires between a base and a sight.
+    var _isStaySecMD = (typeof global !== "undefined" && global._isStaySection) ? global._isStaySection
+      : (typeof window !== "undefined" && window._isStaySection) ? window._isStaySection
+      : function (s) { return /^(overnight stays|recommended overnight stays|overnight stays to consider)$/i.test(String(s || "").trim()); };
     // PD.401M (reverted): reference-interning to ONE Place object per key
     // was backed out — `mergePlace` across same-key occurrences flipped an
     // auto-hub's check-state (a "Max never checks" violation surfaced by
@@ -586,8 +772,19 @@
     // reference needs a check-state reconciliation it didn't have.
     items.forEach(function (it) {
       if (isExempt(it)) return;
+      // A route umbrella legitimately passes sights; only a real stay section
+      // marks its places as "stay". Everything else interns as "sight".
+      var _itKind = (it.type !== "route" && _isStaySecMD(it.section)) ? "stay" : "sight";
       (it.requiredPlaces || []).forEach(function (p) {
-        if (p && p.place) p._key = _internKey(p);
+        if (p && p.place) {
+          // PD.438: stamp KIND intrinsically at the ONE write door, beside _key.
+          // A route umbrella never re-stamps (it doesn't own its sights' kind);
+          // a real section does. After this, kind travels WITH the record, so
+          // every identity check that reads it is kind-aware by construction —
+          // no per-call threading. (Route umbrellas leave an existing _kind.)
+          if (it.type !== "route" || !p._kind) p._kind = _itKind;
+          p._key = _internKey(p, p._kind);
+        }
       });
     });
 
@@ -617,6 +814,46 @@
         if (!isCatchall && !isStayBucket) { themedKeys[k] = true; }
       });
     });
+
+    // PD.441: ONE PLACE, ONE KIND — enforced at the write door. A key that lives
+    // in a stay section is a BASE; drop every copy of it from non-stay (sight)
+    // sections, so a base you listed can NEVER be duplicated as a sight, no
+    // matter which pass (LLM, enhance, surfacing, origin-baking) manufactured the
+    // copy. This is by-construction, not a heal: the data is canonical the moment
+    // it's written. A genuinely different sight at the same place has a DIFFERENT
+    // key (the kind veto keeps "Skaftafell" and "Skaftafell glacier region"
+    // distinct), so this removes ONLY true same-identity duplicates. Route
+    // umbrellas legitimately pass a base, so they're exempt.
+    items.forEach(function (it) {
+      if (isExempt(it) || it.type === "route" || !Array.isArray(it.requiredPlaces)) return;
+      if (_isStaySecMD(it.section)) return;            // keep the base in its stay section
+      it.requiredPlaces = it.requiredPlaces.filter(function (p) {
+        return !(p && p._key && recStayKeys[p._key]);  // a base shows once, as a base
+      });
+    });
+
+    // PD.442 (#4/#2): the write door reads your CANONICAL listed set and OWNS the
+    // kind invariant — a place you listed as a SIGHT is never left in a stay
+    // section (it's not a base). With PD.441 (a base is never duplicated as a
+    // sight), kind is enforced ONCE, here, by exact match against your
+    // authoritative list — subsuming the scattered _collapseKindConflicts pass.
+    // Reads _listedGroundTruth from the global, the same way this module already
+    // reaches MaxDiscovery / _isStaySection; degrades to a no-op without it
+    // (node, or a sentence-mode trip), where PD.441 + section kind still hold.
+    var _listed = (typeof global !== "undefined" && typeof global._listedGroundTruth === "function")
+      ? (function () { try { return global._listedGroundTruth(); } catch (_) { return null; } })() : null;
+    if (_listed && Array.isArray(_listed.sights) && _listed.sights.length) {
+      var _sightK = {}, _stayK = {};
+      _listed.sights.forEach(function (n) { _sightK[_normKey(n)] = true; });
+      (_listed.stays || []).forEach(function (n) { _stayK[_normKey(n)] = true; });
+      items.forEach(function (it) {
+        if (isExempt(it) || it.type === "route" || !_isStaySecMD(it.section) || !Array.isArray(it.requiredPlaces)) return;
+        it.requiredPlaces = it.requiredPlaces.filter(function (p) {
+          var k = (p && p.place) ? _normKey(p.place) : null;
+          return !(k && _sightK[k] && !_stayK[k]);     // a place you listed as a SIGHT is not a base
+        });
+      });
+    }
 
     // PD.401k: "already themed" is now EXACT — a catchall place is themed
     // iff its `_key` is in themedKeys. The interning (sameEntity) already
@@ -666,6 +903,43 @@
       }
     });
 
+    // PD.443 (#2): the write door also RESTORES a listed place a pass dropped, so
+    // the listed-set PRESENCE invariant is owned here too — every listed STAY ends
+    // in a stay section, every listed SIGHT somewhere on the page, on every save.
+    // This subsumes the pipeline's _assertUserListedPresent. Identity-aware so a
+    // present name-variant counts (no double-add). Idempotent: present → no-op.
+    if (_listed && (_listed.stays || _listed.sights)) {
+      var _SEr = (global.MaxDiscovery && typeof global.MaxDiscovery.sameEntity === "function") ? global.MaxDiscovery.sameEntity : null;
+      function _presentByIdentity(name, stayOnly) {
+        return items.some(function (it) {
+          if (!it || it.type === "route" || !Array.isArray(it.requiredPlaces)) return false;
+          if (stayOnly && !_isStaySecMD(it.section)) return false;
+          return it.requiredPlaces.some(function (p) {
+            if (!p || !p.place || p._rejected === true) return false;
+            if (_SEr) { try { return _SEr({ place: p.place }, { place: name }); } catch (_) {} }
+            return _normKey(p.place) === _normKey(name);
+          });
+        });
+      }
+      function _ensureSection(name, makeFirst) {
+        var sec = items.find(function (it) { return it && it.section === name && it.type !== "route"; });
+        if (!sec) { sec = { id: "synth-listed-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), type: "activity", section: name, requiredPlaces: [] }; if (makeFirst) items.unshift(sec); else items.push(sec); }
+        if (!Array.isArray(sec.requiredPlaces)) sec.requiredPlaces = [];
+        return sec;
+      }
+      (_listed.stays || []).forEach(function (n) {
+        if (_presentByIdentity(n, true)) return;
+        var sec = items.find(function (it) { return it && _isStaySecMD(it.section) && it.type !== "route"; }) || _ensureSection(STAY_USER, true);
+        if (!Array.isArray(sec.requiredPlaces)) sec.requiredPlaces = [];
+        sec.requiredPlaces.push({ place: n, _origin: "user", _kind: "stay", _key: _normKey(n), _keep: true });
+      });
+      (_listed.sights || []).forEach(function (n) {
+        if (_presentByIdentity(n, false)) return;
+        var sec = _ensureSection("Sights near places you listed", false);
+        sec.requiredPlaces.push({ place: n, _origin: "user", _kind: "sight", _key: _normKey(n), _keep: true });
+      });
+    }
+
     // Pass 3 (rule 5): drop emptied non-exempt items.
     return items.filter(function (it) {
       if (isExempt(it)) return true;
@@ -694,6 +968,7 @@
     // Considered / rejected
     getConsideredSights:   getConsideredSights,
     consideredPlaceKeys:   consideredPlaceKeys,
+    foldConsideredSuggestionsIntoPlaceActivities: foldConsideredSuggestionsIntoPlaceActivities,
     consideredBySection:   consideredBySection,
     getCommittedSights:    getCommittedSights,
     countConsideredSights: countConsideredSights,
@@ -701,6 +976,8 @@
     // User-listed
     getUserListedNames:    getUserListedNames,
     getUserListedDisplay:  getUserListedDisplay,
+    dedupeListedNames:     dedupeListedNames,
+    deriveListedFromRecords: deriveListedFromRecords,
     // Annotations
     getDestNote:           getDestNote,
     getDestStory:          getDestStory,

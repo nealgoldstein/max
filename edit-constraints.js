@@ -1738,9 +1738,9 @@ function reopenCandidateExplorer(){
               if (!_tb._userListedDisplay[k]) _tb._userListedDisplay[k] = String(p.place).trim();
             }
           });
-          // Persist for future reopens so we don't re-parse every time.
-          trip.brief._userListedNames = Object.assign({}, _tb._userListedNames);
-          trip.brief._userListedDisplay = Object.assign({}, _tb._userListedDisplay);
+          // PD.429: do NOT persist a parallel brief map — this re-parse is a
+          // transient migration authority; _refreshUserListedFromRecords (run
+          // on reopen) bakes it onto the records, which are the durable truth.
         }
       } catch(_){}
     }
@@ -1890,8 +1890,8 @@ function reopenPickerForEdit(){
               if (!_tb._userListedDisplay[k]) _tb._userListedDisplay[k] = String(p.place).trim();
             }
           });
-          trip.brief._userListedNames = Object.assign({}, _tb._userListedNames);
-          trip.brief._userListedDisplay = Object.assign({}, _tb._userListedDisplay);
+          // PD.429: transient migration authority only — not persisted as a
+          // parallel brief map (records carry _origin:"user").
         }
       } catch(_){}
       // PD.149: also rehydrate the display map alone if it's already
@@ -2393,6 +2393,32 @@ function reopenPickerForEdit(){
     }
   })();
 
+  // Apply the build-time categorization fixes on REOPEN too, so refreshing an
+  // existing trip surfaces route-only sights into themes and re-homes orphan
+  // self-named categories — without a full rebuild. Both are idempotent
+  // (no-op once applied), and they mutate the placeActivities array in place.
+  try {
+    if (typeof MaxGenPost !== "undefined" && MaxGenPost && Array.isArray(_tb.placeActivities)) {
+      // PD.435: run the ONE canonical placement-finalize pipeline (consolidate
+      // orphan themes → surface route-only sights → bake provenance + re-project
+      // the listed cache → collapse kind conflicts). Centralizing the sequence
+      // here means the reopen path can never drift from the others.
+      var _fin = (typeof window._finalizeDiscoveryPlacement === "function") ? window._finalizeDiscoveryPlacement({ refreshListedCache: true }) : null;
+      if (_fin && _fin.surfaced) console.log("[Max] reopen: surfaced " + _fin.surfaced + " route-only sight(s) into theme sections");
+      // PD.430: migrate stay-section items that an older build typed "manual"
+      // (which the must-dos grouping mislabeled "Places you added (26)") to the
+      // stay type, so an existing trip self-heals on reopen without a rebuild.
+      var _isStaySecFn = (typeof window._isStaySection === "function") ? window._isStaySection : null;
+      var _retyped = 0;
+      _tb.placeActivities.forEach(function(it){
+        if (it && it.type === "manual" && it.section && _isStaySecFn && _isStaySecFn(it.section)) {
+          it.type = "synthetic-stays"; _retyped++;
+        }
+      });
+      if (_retyped) console.log("[Max PD.430] retyped " + _retyped + " stay section(s) from 'manual' → 'synthetic-stays' (not 'Places you added')");
+    }
+  } catch (e) { console.warn("[Max] reopen categorization pass failed (non-fatal):", e && e.message); }
+
   console.log("[Max] reopenPickerForEdit: hydrated", _tb.placeActivities.length, "activities; opening picker");
   // Ensure the trip-brief overlay container is visible.
   var ov = g("trip-brief-overlay");
@@ -2735,37 +2761,32 @@ async function applyCandidateChanges(){
     }
   }
 
-  // Update the snapshot on the trip so next re-entry reflects the new state.
-  // Includes nights (Round CG.2) so subsequent rebuilds preserve picker
-  // night counts instead of falling back to LLM stayRange.
-  trip.candidates = (_tb.candidates||[]).map(function(c){
-    return {
-      id:c.id, place:c.place, country:c.country||null, role:c.role||null,
-      whyItFits:c.whyItFits||"", tags:c.tags||[], tradeoffs:c.tradeoffs||null,
-      stayRange:c.stayRange||"", lat:c.lat||null, lng:c.lng||null,
-      nights: (typeof c.nights === "number") ? c.nights : undefined,
-      status:c.status||null, _required:!!c._required, _requiredFor:(c._requiredFor||[]).slice(),
-      // Round NC.3e: c.role + c.overnightCapable already in the projection
-      // on the line above. tripRole (NC.1 transitional) retired here.
-      overnightCapable: (typeof c.overnightCapable === "boolean") ? c.overnightCapable : null,
-      // Round HZ (picker hero map): persist explicit sequence position +
-      // manual-pin flag so a reopened picker re-acquires the user's order.
-      // Missing on legacy trips → null/false, which the next
-      // _tbResequenceCandidates pass repopulates from orderKeptCandidates.
-      order:(typeof c.order==="number"?c.order:null), manuallyOrdered:!!c.manuallyOrdered,
-      // NC.9: persist the user-commitment flag + day-trip / wayside
-      // hubs. Without _roleTouched, the trip-view pin renderer reads
-      // it as undefined and runs the predictor override at line
-      // ~35379, which can demote a Stay to a Day trip whenever the
-      // place is close to another stay. Neal: "I added Selfoss as a
-      // stay, and it was added as a day trip." Same fix in
-      // engine-picker.js — both publish paths missed these fields.
-      _roleTouched: !!c._roleTouched,
-      dayTripHub: c.dayTripHub || undefined,
-      waysideFromHub: c.waysideFromHub || undefined,
-      intent: c.intent || undefined
-    };
-  });
+  // PD.456: regenerate the trip snapshot through the ONE projection — same
+  // function publishTrip uses, so the two birth sites can't carry different
+  // field sets (this path used to persist order/manuallyOrdered that publish
+  // dropped). Inline fallback only for load-order safety.
+  var _MC = (typeof MaxCandidates !== "undefined" && MaxCandidates)
+    || (typeof global !== "undefined" && global.MaxCandidates)
+    || (typeof window !== "undefined" && window.MaxCandidates) || null;
+  if (_MC && typeof _MC.snapshotFrom === "function") {
+    trip.candidates = _MC.snapshotFrom(_tb.candidates || []);
+  } else {
+    trip.candidates = (_tb.candidates||[]).map(function(c){
+      return {
+        id:c.id, place:c.place, country:c.country||null, role:c.role||null,
+        whyItFits:c.whyItFits||"", tags:c.tags||[], tradeoffs:c.tradeoffs||null,
+        stayRange:c.stayRange||"", lat:c.lat||null, lng:c.lng||null,
+        nights: (typeof c.nights === "number") ? c.nights : undefined,
+        status:c.status||null, _required:!!c._required, _requiredFor:(c._requiredFor||[]).slice(),
+        overnightCapable: (typeof c.overnightCapable === "boolean") ? c.overnightCapable : null,
+        order:(typeof c.order==="number"?c.order:null), manuallyOrdered:!!c.manuallyOrdered,
+        _roleTouched: !!c._roleTouched,
+        dayTripHub: c.dayTripHub || undefined,
+        waysideFromHub: c.waysideFromHub || undefined,
+        intent: c.intent || undefined
+      };
+    });
+  }
   trip.placeActivities = (_mdcItems||[]).map(function(m){return {
     id:m.id, name:m.name, type:m.type, checked:m.checked,
     requiredPlaces:m.requiredPlaces, endpoints:m.endpoints, viableLocations:m.viableLocations,

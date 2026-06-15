@@ -69,10 +69,40 @@
         && !(Math.abs(lat) < 0.01 && Math.abs(lng) < 0.01);
   }
 
+  // The ONE canonical place-identity. sameEntity is coordinate-aware: it
+  // merges true name-variants ("Goðafoss" / "Goðafoss Waterfall", a bare name
+  // and its natural-feature form) but its vetoes (coord-disagreement,
+  // conflicting distinctive tokens) NEVER merge two distinct places — so
+  // interning by it collapses variants WITHOUT hiding anything (the exact
+  // concern that pushed this repo to name-keying originally). Falls back to
+  // name identity when the discovery model isn't loaded (e.g. Node unit tests
+  // that don't require discovery-model.js).
+  function _sameEntity(aPlace, aCoords, bPlace, bCoords) {
+    var MD = global.MaxDiscovery;
+    if (MD && typeof MD.sameEntity === "function") {
+      try { return MD.sameEntity({ place: aPlace, coords: aCoords || null },
+                                 { place: bPlace, coords: bCoords || null }); }
+      catch (_) {}
+    }
+    return _norm(aPlace) === _norm(bPlace);
+  }
+
   function PlaceRepository() {
     this._byKey = Object.create(null);   // key → record (SINGLE store)
     this._order = [];
   }
+
+  // Find an already-interned record that is the SAME ENTITY as raw (by the
+  // canonical identity). O(n) scan — the registry is small. Returns the
+  // record so the new name can be aliased onto it.
+  PlaceRepository.prototype._findSameEntity = function (raw) {
+    var aCoords = _realLL(raw.lat, raw.lng) ? { lat: raw.lat, lng: raw.lng } : null;
+    for (var i = 0; i < this._order.length; i++) {
+      var rec = this._byKey[this._order[i]];
+      if (rec && _sameEntity(raw.place, aCoords, rec.place, rec.coords)) return rec;
+    }
+    return null;
+  };
 
   // add(raw) — the write door of the repository. Idempotent: a place that
   // resolves to an existing `_key` merges in (records its kind + section).
@@ -88,6 +118,15 @@
     var key = _norm(raw.place);
     if (!key) return null;
     var rec = this._byKey[key];
+    // Entity interning: no exact-name record, but the place may already be
+    // present under a VARIANT name (Goðafoss ⇄ Goðafoss Waterfall). Alias this
+    // name onto that one record so coverage still resolves both names while
+    // all()/counts see one place. _order holds only distinct records, so the
+    // alias name is added to the index but NOT to _order.
+    if (!rec) {
+      var _same = this._findSameEntity(raw);
+      if (_same) { this._byKey[key] = _same; rec = _same; }
+    }
     if (rec) {
       if (raw.kind) rec.kinds[raw.kind] = true;
       if (raw.section && rec.sections.indexOf(raw.section) === -1) rec.sections.push(raw.section);

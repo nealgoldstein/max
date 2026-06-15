@@ -114,7 +114,29 @@ self.addEventListener('fetch', function (event) {
     return;
   }
 
-  // Static assets (JS, CSS, images) — cache-first. The ?v=<stamp>
+  // DEV (localhost): NETWORK-FIRST for same-origin assets. In dev the asset
+  // URLs carry a constant ?v=DEV stamp (deploy.sh only bumps it in prod), so
+  // cache-first below would serve a stale discovery-model.js / index script
+  // forever even though the file on disk changed — the "my edits don't show
+  // up, do I need a new trip?" trap. Network-first fetches the current file
+  // every time and only falls back to cache when the dev server is down.
+  var _devHost = (self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1');
+  if (_devHost) {
+    event.respondWith(
+      // no-store so the browser's own HTTP disk cache can't hand back a stale
+      // ?v=DEV asset either (same reason the navigation handler uses no-store).
+      fetch(req, { cache: 'no-store' }).then(function (resp) {
+        if (resp && resp.status === 200 && resp.type === 'basic') {
+          var copy = resp.clone();
+          caches.open(CACHE).then(function (c) { c.put(req, copy); });
+        }
+        return resp;
+      }).catch(function () { return caches.match(req); })
+    );
+    return;
+  }
+
+  // Static assets (JS, CSS, images) — cache-first in PROD. The ?v=<stamp>
   // query string makes cache invalidation automatic: a new deploy
   // changes the URL → URL not in cache → network fetch → cached
   // for next time. Old URLs eventually age out via the activate

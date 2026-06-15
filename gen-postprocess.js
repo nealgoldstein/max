@@ -251,6 +251,179 @@
     return themed;
   }
 
+  // ── Orphan-theme consolidation ────────────────────────────────────────
+  // The "Geysir (1)" / "Goðafoss Waterfall (1)" fix. A kept sight the theming
+  // pass left UN-themed renders in its OWN single-member, place-named category
+  // (PD.405). This re-homes such a sight into the best-fitting EXISTING theme,
+  // matched by geographic FEATURE CONCEPT: a waterfall ("…foss") joins the
+  // waterfalls theme, a geyser the thermal theme, a glacier ("…jökull") the
+  // glaciers theme. Deterministic and CONSERVATIVE — it only moves a place
+  // when a theme sharing its concept already exists, so it can never mis-file
+  // a sight into an unrelated category, and it never touches a stay or an
+  // already-themed place. Returns the count re-homed.
+  //
+  // Concept synonyms span English + Icelandic feature terms (so the theme name
+  // "waterfalls" and the place "Goðafoss" map to the same concept). Order is
+  // significant: the more distinctive concept wins (glacier before mountain so
+  // "Snæfellsjökull" reads as glacier, not "fell"→mountain).
+  var _CONCEPTS = [
+    ["waterfall", ["foss", "waterfall", "falls"]],
+    ["glacier",   ["jokull", "jökull", "glacier", "icecap", "ice cap"]],
+    ["thermal",   ["geyser", "geysir", "thermal", "hot spring", "hverir", "baths", "bath", "laug"]],
+    ["volcanic",  ["volcano", "volcanic", "crater", "lava", "gigur", "gígur", "fissure", "eldfjall", "caldera"]],
+    ["canyon",    ["canyon", "gorge", "ravine", "gljufur", "gljúfur"]],
+    ["fjord",     ["fjord", "fjörður", "fjordur", "fjords"]],
+    ["beach",     ["beach", "sandur", "strönd", "strond", "shore", "coast", "coastal", "coastline"]],
+    ["cliff",     ["cliff", "cliffs", "bjarg", "sea cliff"]],
+    ["lake",      ["lagoon", "lake", "vatn", "lón", "lon"]],
+    ["cave",      ["cave", "hellir", "lava tube"]],
+    ["mountain",  ["mountain", "peak", "peaks", "fell", "tindar", "summit", "ridge"]]
+  ];
+  function _conceptOf(name, norm) {
+    var s = norm(name);
+    if (!s) return null;
+    for (var ci = 0; ci < _CONCEPTS.length; ci++) {
+      var syns = _CONCEPTS[ci][1];
+      for (var i = 0; i < syns.length; i++) {
+        if (s.indexOf(syns[i]) >= 0) return _CONCEPTS[ci][0];
+      }
+    }
+    return null;
+  }
+
+  // A default, growable, CONCEPT-named theme for each feature concept. Used as
+  // the fallback when an orphan/route-only sight has a clear concept but no
+  // same-concept theme already exists to re-home it into. This is what keeps
+  // "Kirkjufell" (a mountain) out of the generic "Unique sights" pool: it gets
+  // a real "Mountains & peaks" category it shares with any other peak, instead
+  // of a place-named singleton. Concept-less sights (a town like Húsavík) still
+  // pool — there is no honest feature category for them.
+  var _CONCEPT_THEME = {
+    waterfall: "Chase waterfalls",
+    glacier:   "Glaciers & ice caps",
+    thermal:   "Soak in thermal waters",
+    volcanic:  "Volcanic landscapes",
+    canyon:    "Canyons & gorges",
+    fjord:     "Fjords & coastline",
+    beach:     "Beaches & black sand",
+    cliff:     "Sea cliffs & coast",
+    lake:      "Lakes & lagoons",
+    cave:      "Caves & lava tubes",
+    mountain:  "Mountains & peaks"
+  };
+  // Resolve the theme an orphan with concept `c` should join: prefer a theme
+  // that already carries the concept (so we don't fork a near-duplicate), else
+  // the default concept theme. Registers the choice in `byConcept` so siblings
+  // of the same concept all land together rather than each forking a variant.
+  function _themeForConcept(c, byConcept) {
+    if (!c) return null;
+    var t = (byConcept && byConcept[c]) || _CONCEPT_THEME[c] || null;
+    if (t && byConcept) byConcept[c] = t;
+    return t;
+  }
+
+  function consolidateOrphanThemes(items, opts) {
+    opts = opts || {};
+    var norm = (typeof opts.normPlaceName === "function")
+      ? opts.normPlaceName
+      : function (s) { return String(s || "").toLowerCase().replace(/\s+/g, " ").trim(); };
+    // The theme universe = the distinct themes places were assigned to.
+    var themeSet = {};
+    (items || []).forEach(function (it) {
+      (it.requiredPlaces || []).forEach(function (p) { if (p && p._themeFit) themeSet[p._themeFit] = true; });
+    });
+    var themes = Object.keys(themeSet);
+    // NOTE: we do NOT bail when there are no existing themes — a recognized
+    // concept can OPEN its default theme (via _themeForConcept) even when the
+    // trip carries none yet, so an all-orphan set still categorizes.
+    // Map a concept → the existing theme that carries it (by the theme's NAME,
+    // e.g. "Hike to waterfalls" → waterfall). First theme wins per concept.
+    var themeByConcept = {};
+    themes.forEach(function (th) { var c = _conceptOf(th, norm); if (c && !themeByConcept[c]) themeByConcept[c] = th; });
+    var rehomed = 0;
+    (items || []).forEach(function (it) {
+      (it.requiredPlaces || []).forEach(function (p) {
+        if (!p || !p.place || p._themeFit || p.role === "stay") return;
+        var c = _conceptOf(p.place, norm);
+        if (!c) return;
+        // Prefer an existing same-concept theme; otherwise open the default
+        // concept theme ("Mountains & peaks" …) so a recognized feature is
+        // never dumped in the generic pool just because the LLM didn't name
+        // a matching theme. Concept-less sights are left for the pool.
+        var target = _themeForConcept(c, themeByConcept);
+        if (target) { p._themeFit = target; rehomed++; }
+      });
+    });
+    return rehomed;
+  }
+
+  // ── Surface route-only sights ──────────────────────────────────────────
+  // A sight that exists ONLY as a waypoint on a scenic-route umbrella (e.g.
+  // "Ásbyrgi Canyon", "Kirkjufell" strung onto "Drive the Ring Road") is
+  // invisible as a sight: it's folded into the single "Drive scenic routes (1)"
+  // chip and never appears in a theme section, so the user can't see it and the
+  // section counts don't reconcile with the page total. This files each such
+  // place ALSO into its proper theme (by feature concept — canyon → "Walk in
+  // canyons", glacier → glaciers …), or into "More places to consider" when no
+  // theme matches, so it shows individually. The route keeps its waypoint (the
+  // drive line is intact); the place just also becomes a visible sight. Bases
+  // are never affected — they live in stay sections, so they aren't route-only.
+  // Returns the count surfaced.
+  function surfaceRouteOnlySights(items, opts) {
+    opts = opts || {};
+    var norm = (typeof opts.normPlaceName === "function") ? opts.normPlaceName
+      : function (s) { return String(s || "").toLowerCase().replace(/\s+/g, " ").trim(); };
+    var isStay = (typeof opts.isStaySection === "function") ? opts.isStaySection : function () { return false; };
+    var CATCH = { "Sights near places you listed": 1, "More places to consider": 1 };
+    var nonRoute = {}, routeRef = {};
+    (items || []).forEach(function (it) {
+      if (!it) return;
+      var onRoute = (it.type === "route");
+      (it.requiredPlaces || []).forEach(function (p) {
+        if (!p || !p.place) return;
+        var k = norm(p.place);
+        if (onRoute) { if (!routeRef[k]) routeRef[k] = p; }
+        else nonRoute[k] = true;
+      });
+    });
+    var routeOnly = Object.keys(routeRef).filter(function (k) { return !nonRoute[k]; });
+    if (!routeOnly.length) return 0;
+    var themeByConcept = {};
+    (items || []).forEach(function (it) {
+      if (!it || it.type === "route" || !it.section || CATCH[it.section] || isStay(it.section)) return;
+      var c = _conceptOf(it.section, norm);
+      if (c && !themeByConcept[c]) themeByConcept[c] = it.section;
+    });
+    function _sightItemFor(sec) {
+      var it = (items || []).find(function (x) { return x && x.type !== "route" && x.section === sec; });
+      if (!it) {
+        it = { id: "synth-route-sight-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 5),
+               type: "activity", section: sec, name: sec, checked: false, requiredPlaces: [] };
+        items.push(it);
+      }
+      if (!Array.isArray(it.requiredPlaces)) it.requiredPlaces = [];
+      return it;
+    }
+    var surfaced = 0;
+    routeOnly.forEach(function (k) {
+      var p = routeRef[k];
+      var c = _conceptOf(p.place, norm);
+      // A recognized feature (mountain, glacier, canyon …) surfaces into its
+      // concept theme — existing or default — not the catch-all. Only a
+      // concept-less waypoint (a town) goes to "More places to consider".
+      var theme = _themeForConcept(c, themeByConcept);
+      var dest = _sightItemFor(theme || "More places to consider");
+      if (dest.requiredPlaces.some(function (q) { return q && norm(q.place) === k; })) return;
+      dest.requiredPlaces.push({
+        place: p.place, lat: p.lat, lng: p.lng, country: p.country,
+        _keep: p._keep === true, _origin: p._origin || "max",
+        _themeFit: theme || null, _surfacedFromRoute: true
+      });
+      surfaced++;
+    });
+    return surfaced;
+  }
+
   // PD.404 (#80): robustly coerce the theming pass's raw LLM text into an
   // array of assignment objects. The model sometimes wraps the array in
   // prose, fences it, nests it under a key, or (on long lists) truncates it
@@ -288,6 +461,8 @@
     mergeDuplicateSections: mergeDuplicateSections,
     decorateConstructedWithCoords: decorateConstructedWithCoords,
     applyTheming: applyTheming,
+    consolidateOrphanThemes: consolidateOrphanThemes,
+    surfaceRouteOnlySights: surfaceRouteOnlySights,
     coerceThemingMap: coerceThemingMap
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
