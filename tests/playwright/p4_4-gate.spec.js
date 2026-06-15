@@ -249,3 +249,75 @@ test.describe('P4.4 gate — wayside leg assignment survives publish → reopen'
       'wayside stayed on its original leg').toBe(true);
   });
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+// 4. P4.5 — the decision LOG itself persists on the trip and restores on reload.
+//    The decision round-trip above covers the candidate SNAPSHOT; this covers
+//    the LOG (trip.brief._decisionLog), which is the durable record carrying
+//    role + hub + leg — the fields the old _decided-seed dropped on reload.
+//    Guards P4.5b (persist/restore wiring).
+// ───────────────────────────────────────────────────────────────────────────
+test.describe('P4.5 gate — decision log persists to the trip and restores on reload', () => {
+  test('role + hub + leg survive reload via the persisted decision log', async ({ page }) => {
+    await buildBaseTrip(page);
+
+    // Record decisions that carry hub + leg — fields the candidate snapshot's
+    // status/role alone don't fully reconstruct, and that the legacy _decided-
+    // seed (kept/rejected/role only) drops on reload. These go INTO the log.
+    await page.evaluate(() => {
+      window.MaxRoleWriter.set('c3', 'daytrip', { hub: 'akureyri' });   // Höfn → day-trip from Akureyri
+      if (typeof window._recordWaysideLegDecision === 'function') {
+        window._recordWaysideLegDecision('Seljalandsfoss', 'Reykjavik', 'Vik');
+      }
+    });
+
+    // Publish, then force a save so serializeTrip definitely runs and stamps
+    // trip.brief._decisionLog from the live log (belt-and-suspenders vs relying
+    // on the build's own debounced save).
+    await page.evaluate(async () => { await window.buildFromCandidates(); });
+    await page.waitForFunction(() => window.trip && window.trip.id, { timeout: 8000 });
+    await page.evaluate(() => {
+      if (typeof window.localSave === 'function') { try { window.localSave(); } catch (_) {} }
+      else if (typeof window.serializeTrip === 'function') { try { window.serializeTrip(); } catch (_) {} }
+    });
+
+    const stamped = await page.evaluate(() => {
+      const log = window.trip && window.trip.brief && window.trip.brief._decisionLog;
+      return {
+        present: !!log,
+        keys: log ? Object.keys(log).length : 0,
+        hofn: log ? (log['höfn'] || log['hofn'] || null) : null,
+        sel: log ? (log['seljalandsfoss'] || null) : null,
+      };
+    });
+    expect(stamped.present, 'decision log stamped onto trip.brief._decisionLog at save').toBe(true);
+    expect(stamped.keys, 'log carries the recorded decisions').toBeGreaterThanOrEqual(1);
+
+    // THE SCENARIO: hard reload, then trigger the restore (reconcile rebuilds
+    // _tb._decisions from the persisted log).
+    await page.reload();
+    await page.waitForFunction(() => window.MaxDB && window.trip && window.trip.id, { timeout: 10000 });
+
+    const restored = await page.evaluate(() => {
+      window._tb = window._tb || {};
+      if (typeof window._reconcileUserListedKeeps === 'function') {
+        try { window._reconcileUserListedKeeps(); } catch (_) {}
+      }
+      const D = window._tb && window._tb._decisions;
+      const get = (p) => (D && typeof D.get === 'function') ? D.get(p) : null;
+      const hofn = get('Höfn') || get('Hofn');
+      const sel = get('Seljalandsfoss');
+      return {
+        logRestored: !!D,
+        hofnRole: hofn ? hofn.role : null,
+        hofnHub: hofn ? hofn.hub : null,
+        selLeg: sel ? sel.leg : null,
+      };
+    });
+    expect(restored.logRestored, 'decision log restored into _tb._decisions on reload').toBe(true);
+    expect(restored.hofnHub, 'day-trip hub survived reload via the log (the seed dropped hub)').toBe('akureyri');
+    expect(restored.hofnRole).toBe('daytrip');
+    expect(restored.selLeg, 'wayside leg survived reload via the log (the seed dropped leg)')
+      .toEqual({ fromPlace: 'Reykjavik', toPlace: 'Vik' });
+  });
+});
