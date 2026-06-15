@@ -4766,6 +4766,15 @@ function ensureCoarseGeocode(place, onResolve, country){
   if (_coarseGeocode[key]) { if (onResolve) onResolve(_coarseGeocode[key]); return _coarseGeocode[key]; }
   if (_coarseGeocodeInFlight[key]) return null;
   _coarseGeocodeInFlight[key] = true;
+  // R3: capture the requesting trip so a late-resolving geocode doesn't fire
+  // its onResolve (which pins a coord onto the picker/map) after the user has
+  // switched trips. The cache write below is kept (harmless + benefits a
+  // revisit); only the surface callback is guarded against the clobber.
+  var _reqTripId = (typeof trip !== "undefined" && trip && trip.id) ? trip.id : null;
+  function _fireResolve(coords){
+    var _cur = (typeof trip !== "undefined" && trip && trip.id) ? trip.id : null;
+    if (_cur === _reqTripId && onResolve) onResolve(coords);
+  }
   // Enqueue rather than fire immediately — avoids Nominatim rate-limit
   // cascades when the picker requests 20+ pins at once.
   _enqueueGeo(async function(){
@@ -4801,7 +4810,7 @@ function ensureCoarseGeocode(place, onResolve, country){
           }
           _coarseGeocode[key] = [lat, lon];
           _persistCoarseGeocode();
-          if (onResolve) onResolve(_coarseGeocode[key]);
+          _fireResolve(_coarseGeocode[key]);
         }
       } else if (iso) {
         // No result with strict country filter — retry without the filter.
@@ -4822,7 +4831,7 @@ function ensureCoarseGeocode(place, onResolve, country){
             }
             _coarseGeocode[key] = [lat2, lon2];
             _persistCoarseGeocode();
-            if (onResolve) onResolve(_coarseGeocode[key]);
+            _fireResolve(_coarseGeocode[key]);
           }
         }
       }

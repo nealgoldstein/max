@@ -194,10 +194,18 @@ function toggleDestKeep(placeName){
   // place's checkbox in the DOM. But MaxRoleWriter.set persists, which emits a
   // tripChange whose listener would re-render the WHOLE list and undo the win —
   // so announce a surgical toggle is in flight; the listener reflects THIS place
-  // surgically and skips the full redraw. Cleared on the next tick so a genuine
-  // structural change right after still gets its full render.
-  try { if (typeof window !== "undefined") { window._pmSurgicalToggleInFlight = placeName; setTimeout(function(){ window._pmSurgicalToggleInFlight = null; }, 0); } } catch (_) {}
-  if (!MaxRoleWriter.set(placeName, nextRole)) { try { window._pmSurgicalToggleInFlight = null; } catch(_){} return; }
+  // surgically and skips the full redraw.
+  // R5: scope the hint to EXACTLY the MaxRoleWriter.set() call. set() persists
+  // and emits tripChange synchronously (TripStore.batch → emit, all sync), so
+  // the picker listener has already consumed the hint by the time set() returns
+  // — clearing it right after is safe and means any LATER tripChange in this
+  // same tick correctly gets a full render. The old setTimeout(0) left the hint
+  // set through the rest of the tick + all microtasks, so any unrelated same-
+  // tick tripChange was mis-handled as surgical and skipped its needed redraw.
+  try { if (typeof window !== "undefined") window._pmSurgicalToggleInFlight = placeName; } catch (_) {}
+  var _setOk = MaxRoleWriter.set(placeName, nextRole);
+  try { if (typeof window !== "undefined") window._pmSurgicalToggleInFlight = null; } catch (_) {}
+  if (!_setOk) return;
   _pmSurgicalKeepUpdate(placeName);
   _updatePlaceActivitySummary();
   if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();

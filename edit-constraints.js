@@ -3011,9 +3011,17 @@ async function geocodeMissingCoords(cands){
   if (!need.length) return;
   _geocodeInFlight = true;
   var progressed = false;
+  // R4: capture the requesting trip. This loop runs await fetch + 250ms pace
+  // per place (seconds for N places); if the user switches trips mid-loop we
+  // must not keep mutating + autoSaving against whatever trip is now current.
+  var _curTripId = function(){ return (typeof trip !== "undefined" && trip && trip.id) ? trip.id : null; };
+  var _reqTripId = _curTripId();
   try {
     var region = (_tb && _tb.region) ? _tb.region : "";
     for (var i = 0; i < need.length; i++) {
+      // Bail if the user moved to another trip — stop hammering Nominatim and
+      // stop mutating an array that's no longer the active trip's.
+      if (_curTripId() !== _reqTripId) break;
       var c = need[i];
       c._geocodeTried = true;
       // Bias the geocoder toward the trip's region so user-typed manual must-dos
@@ -3055,7 +3063,10 @@ async function geocodeMissingCoords(cands){
       // Pace requests — Nominatim asks for <1 req/sec; 250ms is safe for small batches
       await new Promise(function(res){ setTimeout(res, 250); });
     }
-    if (progressed) {
+    // R4: only persist + re-render if we're still on the trip that requested
+    // this pass — otherwise autoSave would write the now-current trip and the
+    // render would paint a stale candidate array into the explorer.
+    if (progressed && _curTripId() === _reqTripId) {
       if (typeof autoSave === "function") autoSave();
       // Re-render so pins appear on the map
       if (document.getElementById("candidate-explorer-overlay")
