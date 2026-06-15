@@ -1831,7 +1831,6 @@ function reopenPickerForEdit(){
         order: (typeof c.order === "number") ? c.order : null,
         manuallyOrdered: !!c.manuallyOrdered,
         overnightCapable: (typeof c.overnightCapable === "boolean") ? c.overnightCapable : null,
-        singleSight: (typeof c.singleSight === "boolean") ? c.singleSight : null,
         intent: c.intent || null,
         dayTripHub: c.dayTripHub || null,
         waysideFromHub: c.waysideFromHub || null,

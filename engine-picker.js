@@ -202,6 +202,22 @@
     return c;
   }
 
+  // P4.4b: THE single "is this a single-sight (no-lodging) place?" accessor.
+  // singleSight is a DERIVED fact, not a stored field — it tracks
+  // overnightCapable, which the snapshot already persists. Readers go through
+  // here instead of reading a stored c.singleSight, so the field no longer has
+  // to be carried on the working candidate / re-attached on reopen. Falls back
+  // to the legacy raw flag for un-ingested objects (the LLM still emits it; the
+  // ingestion conversion overnightCapable = !singleSight remains the one place
+  // that consumes it).
+  function isSingleSight(c) {
+    if (!c || typeof c !== "object") return false;
+    if (typeof c.overnightCapable === "boolean") return c.overnightCapable === false;
+    if (typeof c.singleSight === "boolean") return c.singleSight === true;
+    return false;
+  }
+  if (typeof globalThis !== "undefined") globalThis.isSingleSight = isSingleSight;
+
   // ── Picker draft state (Round HI: Phase 3 step 2) ──────────
   // _tb is the picker's draft state — brief fields, candidates in
   // flight, requiredPlaces, region, entry/exit cities, etc.
@@ -1208,9 +1224,8 @@
     // false / role "see" / singleSight) — never over-exclude an unmarked city.
     function _gatewayEligible(c) {
       if (!c) return false;
-      if (c.overnightCapable === false) return false;
       if (c.role === "see") return false;
-      if (c.singleSight === true) return false;
+      if (isSingleSight(c)) return false;   // P4.4b: derived (overnightCapable false)
       return true;
     }
 

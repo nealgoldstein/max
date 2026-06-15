@@ -12819,7 +12819,7 @@ function _reconcileUserListedKeeps(){
       if (c.status === "reject") return;
       if (c.role === "stay" || c.overnightCapable === true || c.overnight === true) {
         stayKeys[k] = true; delete sightKeys[k];
-      } else if (c.singleSight === true || c.overnightCapable === false) {
+      } else if (typeof isSingleSight === "function" ? isSingleSight(c) : (c.singleSight === true || c.overnightCapable === false)) {
         if (!stayKeys[k]) sightKeys[k] = true;
       }
     });
@@ -23601,8 +23601,8 @@ function renderActivityPicker(){
       if (c.role === "stay") return true;
       // Be generous — include things not explicitly tagged as sight/daytrip/onway.
       if (c.role && c.role !== "see" && c.role !== "daytrip" && c.role !== "onway") return true;
-      // Fall back to overnightCapable flag.
-      return c.singleSight === false || c.overnight === true;
+      // Fall back to overnightCapable flag (P4.4b: derived via isSingleSight).
+      return (typeof isSingleSight === "function" ? !isSingleSight(c) : c.singleSight === false) || c.overnight === true;
     });
     var _fnc_anchorEntry = _fnc_orderedStays[0] || _fnc_ordered[0] || null;
     // PD.158: no exit anchor — "X km from <last destination>" is
