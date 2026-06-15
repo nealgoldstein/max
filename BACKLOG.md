@@ -7,6 +7,41 @@ Last updated: **2026-06-11** · `index.html` ≈ **38,432** lines · ~**50** JS 
 
 ---
 
+## Extensibility roadmap (the next architectural tier)
+Three levers to lower change-risk further (change-risk = bug-risk). Ordered: each de-risks the next.
+
+- **#1 — Types on the data shapes. ◑ FOUNDATION DONE + extensible.** `tsconfig.json` (allowJs,
+  checkJs OFF globally, opt-in per file via `// @ts-check`), `types/max-model.d.ts` (the first
+  written-down Trip/Brief/Destination/Route/Candidate/PlaceActivity/RequiredPlace/PlaceMeta/Facts/
+  Decision shapes — ambient, permissive), `tsc --noEmit` wired into `tests/run.sh` (skips if
+  typescript not installed). Typed clean so far: `decision-model.js`, `migration.js`,
+  `engine-publish.js`. Verified teeth (a string/number compare errored TS2367). **To continue:** add
+  modules to `// @ts-check` + tsconfig `include` one at a time, fixing what tsc flags. Next:
+  `geography-model.js` (~126 issues — its own slice), then the engine-* + tripstore. As a shape gets
+  fully enumerated, drop its `[k:string]:any` index signature to also catch unknown-field typos.
+- **#2 — Module system / build step. ◻ Planned (the big, app-breaking-risky one).** 60 ordered
+  `<script>` tags + 202 global exposures = the load-order-race class + no encapsulation/dead-code
+  detection. Target: ES modules + a bundler (esbuild). **Must be incremental + leaf-first**, with the
+  bundler emitting the same global output during transition and each step Chrome-verified — a wrong
+  export breaks the WHOLE app load, and the bundled production artifact can't be verified in the
+  sandbox (only the raw-file dev server). NOT a tail-of-session job; do as a dedicated project once #1
+  covers more modules (a typed codebase makes module-boundary refactors safe). First step: esbuild
+  config + convert ONE leaf module to ESM behind dual-output, verify identical behavior.
+- **#3 — Complete the canonical model (FACTS / DECISIONS / derived VIEW). ◻ Planned (large, incremental).**
+  The decision-model/geography-model strangler-fig is partial; lots of state is still read directly
+  from `trip`/`_tb`/`brief`. Finish so ALL state is one source, every view a pure projection, every
+  mutation through the decision log + single doors — then a new view (e.g. the spreadsheet) is "write
+  a projection" and a behavior change is "change one place." Same per-slice + Chrome-verify pattern as
+  the publishTrip dedup; multi-session.
+
+> Why #1 first/now: shape-drift was the root of most of what this whole effort fixed. #1 is the only
+> one of the three that's incrementally adoptable with zero app-breaking risk, and it makes #2 and #3
+> materially safer (the checker watches module-boundary + state-flow refactors). #2 and #3 are
+> dedicated projects, not single-turn work — starting #2 half-way and committing would leave the app
+> broken, which is the opposite of the goal.
+
+---
+
 ## How to verify & ship
 
 ```bash
