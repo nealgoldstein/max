@@ -1,3 +1,4 @@
+// @ts-check
 // engine-routing.js — MaxRoute. Hash-based screen routing for Max.
 //
 // PD.330. Before this module, screen state was held in trip._lastScreen,
@@ -198,4 +199,4 @@
     _reset:   function () { _listeners = []; }
   };
 
-})(typeof globalThis !== "undefined" ? globalThis : window);
+})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : window));

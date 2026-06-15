@@ -15,7 +15,12 @@
 // canonical-model completion (#3) safe to attempt.
 
 declare var module: any;
-declare var window: any;
+declare var global: any;
+
+// The app reaches sibling globals via `window.<name>` too. A permissive index
+// signature lets `window.<appGlobal>` resolve under // @ts-check without typing
+// every property (mirrors the classic-script reality). Tighten as #2 lands.
+interface Window { [key: string]: any; }
 
 // ── Cross-module global surface ──────────────────────────────────────────────
 // Max is (still) a classic-script app: ~56 modules share state through globals on
@@ -40,6 +45,15 @@ declare var MaxSync: any;
 declare function _normPlaceName(s: any): string;
 declare function autoSave(): void;
 declare function _upsertTripIndexEntry(entry: any): any;
+declare var _coarseGeocode: any;
+declare var _generatedCityData: any;
+declare var _mdcItems: any;
+declare var _parseTripDuration: any;
+declare var parseNightsFromRange: any;
+declare var haversineKm: any;
+declare var findAttachedEvents: any;
+declare var newActionId: any;
+declare var updateTrackerBadge: any;
 
 /** A wayside's transit-leg placement (decision-model). */
 interface MaxLeg { fromPlace: string; toPlace: string; }

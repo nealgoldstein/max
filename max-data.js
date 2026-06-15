@@ -1,3 +1,4 @@
+// @ts-check
 // max-data.js — schema accessor layer.
 //
 // PD.319-3. Before this module, every renderer read raw `trip.X`.
@@ -988,4 +989,4 @@
     canonicalizePlaceActivities: canonicalizePlaceActivities
   };
 
-})(typeof globalThis !== "undefined" ? globalThis : window);
+})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : window));

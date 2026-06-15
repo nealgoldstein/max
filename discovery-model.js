@@ -1,3 +1,4 @@
+// @ts-check
 // discovery-model.js — PD.400: the Discovery domain, re-architected.
 //
 // WHY THIS EXISTS
@@ -645,4 +646,4 @@
   global.DiscoveryModel = DiscoveryModel;
   global.MaxDiscovery = api;
 
-})(typeof globalThis !== "undefined" ? globalThis : this);
+})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : this));

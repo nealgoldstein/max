@@ -1,3 +1,4 @@
+// @ts-check
 // engine-build.js — the single orchestrator for "build a trip."
 //
 // Before this module existed there were three nearly-parallel build
@@ -465,4 +466,4 @@
     _diagnostic:    _diagnostic
   };
 
-})(typeof globalThis !== "undefined" ? globalThis : window);
+})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : window));

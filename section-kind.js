@@ -1,3 +1,4 @@
+// @ts-check
 // section-kind.js — PD.381: section identity in ONE place.
 //
 // A "section" string was doing double duty as both a display label AND
@@ -84,4 +85,4 @@
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   global.SectionKind = api;
 
-})(typeof globalThis !== "undefined" ? globalThis : this);
+})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : this));

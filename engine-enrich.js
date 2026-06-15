@@ -1,3 +1,4 @@
+// @ts-check
 // engine-enrich.js — serialized background enrichment queue.
 //
 // PD.325. Before this module, every fresh trip fired generateCityData
@@ -61,7 +62,8 @@
   // The "is this dest already enriched?" probe — injected. Lets the
   // queue skip dest that already have suggestions. Signature:
   // (destId) → boolean. Defaults to "always re-enrich" (cautious).
-  var _isAlreadyEnriched = function () { return false; };
+  /** @type {(destId?: any) => boolean} */
+  var _isAlreadyEnriched = function () { return false; }; // pluggable hook (set via injectHooks)
 
   // The "persist current state" hook — called after each successful
   // enrichment so progress survives reload. Injected (typically
@@ -339,4 +341,4 @@
     _setBackoffBase: function (ms) { BASE_BACKOFF_MS = ms; }
   };
 
-})(typeof globalThis !== "undefined" ? globalThis : window);
+})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : window));

@@ -1,3 +1,4 @@
+// @ts-check
 // place-key.js — PD.357 (Phase 3): ONE place identity.
 //
 // Every recurring bug in the "renamed place" family — "Mývatn
@@ -162,4 +163,4 @@
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   global.PlaceKey = api;
 
-})(typeof globalThis !== "undefined" ? globalThis : this);
+})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : this));

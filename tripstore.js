@@ -1,3 +1,4 @@
+// @ts-check
 // ─────────────────────────────────────────────────────────────────────
 // TripStore — single source of truth for trip state.
 //
@@ -978,4 +979,4 @@
   if (typeof module !== "undefined" && module.exports) {
     module.exports = TripStore;
   }
-})(typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : this));
+})(/** @type {any} */ (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : this)));

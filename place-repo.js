@@ -1,3 +1,4 @@
+// @ts-check
 // place-repo.js — PD.401M: the place repository.
 //
 // THE single store of every place that exists in a trip's discovery
@@ -253,4 +254,4 @@
   global.PlaceRepo = api;
   global.PlaceRepository = PlaceRepository;
 
-})(typeof globalThis !== "undefined" ? globalThis : this);
+})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : this));
