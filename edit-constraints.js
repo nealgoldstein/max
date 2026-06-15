@@ -1679,29 +1679,12 @@ function reopenCandidateExplorer(){
   if (!trip || !trip.candidates || !trip.candidates.length) return;
   // Rehydrate trip-brief scratch from the trip so the Explorer's helpers work
   _tb = _tb || {};
-  _tb.candidates = trip.candidates.map(function(c){
-    return {
-      id:c.id, place:c.place, country:c.country||null, role:c.role||null,
-      whyItFits:c.whyItFits||"", tags:c.tags||[], tradeoffs:c.tradeoffs||null,
-      stayRange:c.stayRange||"", lat:c.lat||null, lng:c.lng||null,
-      status:c.status||null, _required:!!c._required, _requiredFor:(c._requiredFor||[]).slice(),
-      // Round HZ (picker hero map): persist explicit sequence position +
-      // manual-pin flag so a reopened picker re-acquires the user's order.
-      // Missing on legacy trips → null/false, which the next
-      // _tbResequenceCandidates pass repopulates from orderKeptCandidates.
-      order:(typeof c.order==="number"?c.order:null), manuallyOrdered:!!c.manuallyOrdered,
-      // Round NC.3e: c.role is the source of truth. Legacy trips with
-      // only c.tripRole or c.intent get migrated via normalize on the
-      // next line. c.overnightCapable falls back to !c.singleSight or
-      // defaults to true if neither is present.
-      role: c.role || null,
-      overnightCapable: (typeof c.overnightCapable === "boolean") ? c.overnightCapable : null,
-      // Round PD.23: see reopenPickerForEdit for the same fix.
-      dayTripHub: c.dayTripHub || null,
-      waysideFromHub: c.waysideFromHub || null,
-      _roleTouched: !!c._roleTouched
-    };
-  });
+  // P4.4d: working buffer and persisted snapshot are ONE array now. With the
+  // enrichment fields (tripRole / singleSight / waysideLeg) gone, the explorer
+  // shares trip.candidates by reference instead of a .map() copy — picker edits
+  // mutate the snapshot objects directly, and the lean snapshot is regenerated
+  // via snapshotFrom at save. No mirror() needed.
+  _tb.candidates = trip.candidates;
   _ensureTripRoleDefaults(_tb.candidates);
   _tb.requiredPlaces = (trip.requiredPlaces||[]).slice();
   if (trip.brief) {
@@ -1813,36 +1796,13 @@ function reopenPickerForEdit(){
   // reopenCandidateExplorer does so both paths arrive at a consistent
   // picker state.
   if (Array.isArray(trip.candidates)) {
-    _tb.candidates = trip.candidates.map(function(c){
-      return {
-        id: c.id,
-        place: c.place,
-        country: c.country || null,
-        role: c.role || null,
-        whyItFits: c.whyItFits || "",
-        tags: c.tags || [],
-        tradeoffs: c.tradeoffs || null,
-        stayRange: c.stayRange || "",
-        lat: (typeof c.lat === "number") ? c.lat : null,
-        lng: (typeof c.lng === "number") ? c.lng : null,
-        status: c.status || null,
-        _required: !!c._required,
-        _requiredFor: (c._requiredFor || []).slice(),
-        order: (typeof c.order === "number") ? c.order : null,
-        manuallyOrdered: !!c.manuallyOrdered,
-        overnightCapable: (typeof c.overnightCapable === "boolean") ? c.overnightCapable : null,
-        intent: c.intent || null,
-        dayTripHub: c.dayTripHub || null,
-        waysideFromHub: c.waysideFromHub || null,
-        waysideLeg: c.waysideLeg || null,
-        // Round PD.23: preserve user-commitment flag across reopen
-        // so the popup's "You selected" vs "Max suggests" label
-        // (PD.22) reads truthfully. Without this, every reopened
-        // candidate looked untouched even when the user had set a
-        // role in the prior session.
-        _roleTouched: !!c._roleTouched
-      };
-    });
+    // P4.4d: the working buffer and the persisted snapshot are ONE array now.
+    // The three enrichment fields (tripRole / singleSight / waysideLeg) that
+    // forced a richer copy are gone, so the picker shares trip.candidates by
+    // reference (like the trip view). Picker edits mutate the snapshot objects
+    // directly; the lean snapshot is regenerated from them via snapshotFrom at
+    // save. No .map() copy, no mirror().
+    _tb.candidates = trip.candidates;
     if (typeof _ensureTripRoleDefaults === "function") {
       _ensureTripRoleDefaults(_tb.candidates);
     }

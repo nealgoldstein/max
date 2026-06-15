@@ -3655,6 +3655,20 @@
             dropped++;
             return;
           }
+          // P4.4d: idempotent commit. With the candidate array collapsed to ONE
+          // shared reference, a reopened wayside re-arrives with intent intact
+          // and would be re-committed here on every republish — minting a fresh
+          // planItem each time and DUPLICATING the route stop. Skip if this place
+          // is already a stop on the target leg (match by the place name behind
+          // its placeId). syncTransitRoutes has already preserved the prior stop.
+          if (Array.isArray(leg.planItems) && leg.planItems.some(function (pi) {
+            if (!pi || pi.type !== "stop") return false;
+            var pn = (pi.placeId && trip.places[pi.placeId]) ? trip.places[pi.placeId].name : (pi.name || "");
+            return _normName(pn) === _normName(c.place);
+          })) {
+            committed++;   // already on the leg — count it, don't duplicate
+            return;
+          }
           // Mint a place + planItem and attach.
           var pid = "p-w-" + Math.random().toString(36).slice(2, 10);
           trip.places[pid] = {
