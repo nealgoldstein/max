@@ -18976,7 +18976,19 @@ function _pmPersistResearchToTrip(){
   if (typeof trip === "undefined" || !trip) return;
   if (!trip.brief) trip.brief = {};
   if (typeof _tb !== "undefined" && _tb) {
-    if (_tb.placeMeta) trip.brief.placeMeta = JSON.parse(JSON.stringify(_tb.placeMeta));
+    // T3.5: MERGE, don't REPLACE. The old `trip.brief.placeMeta = clone(_tb)`
+    // dropped any placeMeta key present in trip.brief but absent from _tb (e.g.
+    // a key that arrived via a sync pull after _tb hydrated) — silent note loss.
+    // Merging keeps those keys; _tb still wins on keys both hold (matching prior
+    // behavior). (A true prefer-newer on a shared key needs per-entry timestamps
+    // — tracked in BACKLOG T3.5; this removes the clear data-loss case.)
+    if (_tb.placeMeta) {
+      trip.brief.placeMeta = Object.assign(
+        {},
+        (trip.brief.placeMeta && typeof trip.brief.placeMeta === "object") ? trip.brief.placeMeta : {},
+        JSON.parse(JSON.stringify(_tb.placeMeta))
+      );
+    }
     if (_tb.tripMeta) {
       trip.brief.tripMeta = {
         notes: _tb.tripMeta.notes || "",

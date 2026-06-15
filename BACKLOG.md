@@ -97,8 +97,16 @@ below. Tier 3 — T3.4/3.7 done. Tier 4 — T4.1 done.
   downgrade the stamp). REMAINING (a real decision, persistence-risk, needs legacy fixtures): pick
   ONE — adopt migration.js's complete migrator (reconcile the version scheme, drop the dual-shape
   route ORs) OR delete the unused one and keep tripstore's. Don't merge blind.
-- **T3.5 — placeMeta/tripMeta two-store** with "_tb wins" stale hydrate.
-- **T3.6 — god-functions** (`publishTrip` et al.) with mixed responsibilities.
+- **T3.5 — placeMeta/tripMeta two-store. ◑ Partial.** Fixed the clear data-loss:
+  `_pmPersistResearchToTrip` now MERGES `_tb.placeMeta` into `trip.brief.placeMeta`
+  instead of replacing it, so a key present only in `trip.brief` (e.g. from a sync
+  pull) is no longer dropped. REMAINING: a true prefer-newer on a key BOTH stores
+  hold needs per-entry timestamps (or the shared-ref treatment placeActivities got);
+  `_tb` still wins on shared keys. Lower-risk than a hydrate redesign; deferred.
+- **T3.6 — god-functions** (`publishTrip` ~2434 lines, `_renderPlaceActivityItems`
+  ~2500, `updateMainMap` ~1245, `_openTripStopPopover` ~812) with mixed
+  responsibilities. Large extraction — do per-piece behind CI with the app driven,
+  NOT a blind bulk refactor. Not started.
 - **T3.8 — `mdcItems` zombie field. ✅ DONE (PD.488).** Publish no longer emits it
   (`engine-picker.js` ~2318); no `trip.mdcItems =` write remains. The `tripstore` delete-on-save
   and the `max-data` legacy fallback are KEPT intentionally — they migrate pre-PD.488 saved
