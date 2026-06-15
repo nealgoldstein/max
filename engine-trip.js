@@ -1,3 +1,4 @@
+// @ts-check
 // engine-trip.js — Max trip engine, pure helpers (Round HB: Phase 1)
 //
 // Phase 1 of the engine/UI split. This module owns the trip engine's
@@ -1330,7 +1331,7 @@
           ? haversineKm
           : (typeof global.haversineKm === "function" ? global.haversineKm : null);
         function _perpKm(a, b, p) {
-          if (!a || !b || !p) return Infinity;
+          if (!a || !b || !p) return { perp: Infinity, t: -1 }; // consistent shape: the sole caller reads .perp/.t (was reading them off a bare number → undefined)
           var meanLat = (a[0] + b[0] + p[0]) / 3 * Math.PI / 180;
           var kx = Math.cos(meanLat) * 111.32;
           var ky = 111.32;
@@ -1339,7 +1340,7 @@
           var px = p[1]*kx, py = p[0]*ky;
           var dx = bx-ax, dy = by-ay;
           var len2 = dx*dx + dy*dy;
-          if (len2 < 1e-6) return Math.sqrt((px-ax)*(px-ax) + (py-ay)*(py-ay));
+          if (len2 < 1e-6) return { perp: Math.sqrt((px-ax)*(px-ax) + (py-ay)*(py-ay)), t: 0 };
           var t = ((px - ax) * dx + (py - ay) * dy) / len2;
           var tC = Math.max(-0.1, Math.min(1.1, t));
           var cx = ax + tC * dx, cy = ay + tC * dy;
@@ -2556,7 +2557,7 @@
       // Both 'YYYY-MM-DD' — compute b - a in days.
       var a = new Date(aStr + 'T12:00:00');
       var b = new Date(bStr + 'T12:00:00');
-      return Math.round((b - a) / 86400000);
+      return Math.round((+b - +a) / 86400000); // +Date → ms (type-clean; was Date-minus-Date)
     }
     if (today < startStr) {
       return { phase: 'before', daysUntilStart: diffDays(today, startStr) };
@@ -2750,7 +2751,7 @@
     if (firstFrom) {
       var depDate = new Date(firstFrom);
       if (!isNaN(depDate.getTime())) {
-        daysUntilDeparture = Math.floor((depDate - now) / 86400000);
+        daysUntilDeparture = Math.floor((+depDate - +now) / 86400000); // +Date → ms (type-clean)
       }
     }
 

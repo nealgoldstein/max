@@ -54,6 +54,9 @@ declare var haversineKm: any;
 declare var findAttachedEvents: any;
 declare var newActionId: any;
 declare var updateTrackerBadge: any;
+declare var destCtr: any;
+declare var sidCtr: any;
+declare var bkCtr: any;
 
 /** A wayside's transit-leg placement (decision-model). */
 interface MaxLeg { fromPlace: string; toPlace: string; }
