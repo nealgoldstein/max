@@ -27300,7 +27300,7 @@ function initMapRouteBtn(){
     _routeShown = !_routeShown;
     try { localStorage.setItem('max-route-shown', _routeShown ? '1' : '0'); } catch(e){}
     paint();
-    if (typeof updateMainMap === 'function') updateMainMap();
+    _scheduleMainMapUpdate(); // T3.2: control-toggle repaint → coalesced funnel
   };
   paint();
 }
@@ -27331,7 +27331,7 @@ function initMapRoadsBtn(){
         if (typeof _showRoadsDisclaimer === 'function') _showRoadsDisclaimer();
       }
     }
-    if (typeof updateMainMap === 'function') updateMainMap();
+    _scheduleMainMapUpdate(); // T3.2: control-toggle repaint → coalesced funnel
   };
   paint();
 }
@@ -27423,7 +27423,7 @@ function initMapConsideredBtn(){
     _consideredMapVisible = !_consideredMapVisible;
     try { localStorage.setItem('max-considered-map', _consideredMapVisible ? '1' : '0'); } catch(e){}
     _paintConsideredBtn();
-    if (typeof updateMainMap === 'function') updateMainMap();
+    _scheduleMainMapUpdate(); // T3.2: control-toggle repaint → coalesced funnel
   };
   _paintConsideredBtn();
 }
@@ -27519,7 +27519,7 @@ function initMapDayTripsBtn(){
     _dayTripsShown = !_dayTripsShown;
     try { localStorage.setItem('max-daytrips-shown', _dayTripsShown ? '1' : '0'); } catch(e){}
     paint();
-    if (typeof updateMainMap === 'function') updateMainMap();
+    _scheduleMainMapUpdate(); // T3.2: control-toggle repaint → coalesced funnel
   };
   paint();
 }
@@ -30334,8 +30334,8 @@ async function _generateMissingNarratives(){
       _generateOneNarrative(d).catch(function(){}).then(function(){
         inFlight--;
         // Re-render only if still on trip view + still in story mode
-        if (typeof drawTripMode === "function" && _leftMode === "trip" && trip.viewMode === "story") {
-          try { drawTripMode(); } catch(_){}
+        if (typeof requestTripRepaint === "function" && _leftMode === "trip" && trip.viewMode === "story") {
+          try { requestTripRepaint(); } catch(_){} // T3.2: repaint-after-async → funnel
         }
         if (queue.length) pump();
         else if (inFlight === 0) window._narrativesInFlight = false;
@@ -33884,7 +33884,7 @@ function _openTripStopPopover(ctx) {
     _rtSync();
     _rtBtn.onclick = function(){
       window._activeRouteRouting = (window._activeRouteRouting === _rtId) ? null : _rtId;
-      if (typeof updateMainMap === "function") { try { updateMainMap(); } catch(_){} }
+      try { _scheduleMainMapUpdate(); } catch(_){} // T3.2: control-toggle repaint → coalesced funnel
       _rtSync();
     };
     var _box = ov.firstElementChild;
@@ -34640,7 +34640,7 @@ function _addConsideredAsWayside(placeName, coords, fromHub, toHub){
     catch (e) { console.warn("[Max PD.294] convertDestToWayside threw:", e && e.message); }
   }
   if (typeof autoSave === "function") autoSave();
-  if (typeof drawTripMode === "function") drawTripMode();
+  requestTripRepaint(); // T3.2: repaint-after-mutation → funnel
 }
 if (typeof globalThis !== "undefined") globalThis._addConsideredAsWayside = _addConsideredAsWayside;
 
@@ -34691,7 +34691,7 @@ function _addConsideredAsDestination(placeName, coords){
   }
   if (typeof _ftRecomputeTripDates === "function") _ftRecomputeTripDates();
   if (typeof autoSave === "function") autoSave();
-  if (typeof drawTripMode === "function") drawTripMode();
+  requestTripRepaint(); // T3.2: repaint-after-mutation → funnel
   if (typeof showSaveStatus === "function") showSaveStatus("✓ Added " + placeName + " as overnight stop", 2800);
 }
 
@@ -34749,7 +34749,7 @@ function _addConsideredAsDayTrip(placeName, coords, hubDest){
     });
   }
   if (typeof autoSave === "function") autoSave();
-  if (typeof drawTripMode === "function") drawTripMode();
+  requestTripRepaint(); // T3.2: repaint-after-mutation → funnel
   if (typeof showSaveStatus === "function") showSaveStatus("✓ Added " + placeName + " as day trip from " + hubDest.place, 2800);
 }
 
@@ -35001,7 +35001,7 @@ function _openTidyTripPreview(){
     trip.tidyState = {};
     close();
     if (typeof autoSave === "function") autoSave();
-    if (typeof drawTripMode === "function") drawTripMode();
+    requestTripRepaint(); // T3.2: repaint-after-mutation → funnel
     if (typeof showSaveStatus === "function") showSaveStatus("✓ Reshaped " + n + " destination" + (n === 1 ? "" : "s"), 3200);
   };
 }
@@ -35071,7 +35071,7 @@ function _openTripNotesPopover(){
     try { n.updatedAt = Date.now(); } catch(_){}
     try { if (ov && ov.parentNode) ov.parentNode.removeChild(ov); } catch(_){}
     try { if (typeof autoSave === "function") autoSave(); } catch(_){}
-    try { if (typeof _leftMode !== "undefined" && _leftMode === "trip" && typeof drawTripMode === "function") drawTripMode(); } catch(_){}
+    try { if (typeof _leftMode !== "undefined" && _leftMode === "trip" && typeof requestTripRepaint === "function") requestTripRepaint(); } catch(_){} // T3.2
   }
   ov.onclick = function(e){ if (e.target === ov) close(); };
 
@@ -37794,7 +37794,7 @@ function _toggleDecideLater(ctx){
   if (ctx === "picker") {
     if (typeof renderActivityPicker === "function") renderActivityPicker();
   } else {
-    if (typeof drawTripMode === "function") drawTripMode();
+    requestTripRepaint(); // T3.2: repaint-after-mutation → funnel
   }
 }
 
@@ -38490,7 +38490,7 @@ function drawTripMode(opts){
     toggleBtn.textContent = n._expanded ? "Hide options" : "Show fix options →";
     toggleBtn.onclick = function(){
       n._expanded = !n._expanded;
-      if (typeof drawTripMode === "function") drawTripMode();
+      requestTripRepaint(); // T3.2: toggle repaint → funnel
     };
     head.appendChild(toggleBtn);
     nb.appendChild(head);
@@ -38537,7 +38537,7 @@ function drawTripMode(opts){
         setTripBudgetDuration(newDuration); // F3: single door (was writing brief + _tb inline)
         delete trip.overBudgetNotice;
         autoSave();
-        if (typeof drawTripMode === "function") drawTripMode();
+        requestTripRepaint(); // T3.2: repaint-after-mutation → funnel
         // v359.51.19: visual feedback so the user knows the action took.
         if (typeof showSaveStatus === "function") showSaveStatus("✓ Trip extended to " + n.pickerDays + " days", 2800);
       }
