@@ -208,26 +208,36 @@ A focused audit for remaining "same fact in two places / two writers / derived-a
   + raw setItem) — now routes through the single PD.445 gate `_isWellFormedApiKey` + door `saveApiKey`.
 - ✅ **F2 (HIGH, 882edd9):** dead divergent `MaxPublish.deriveTripName/isAutoName` twin removed; the
   LIVE `MaxEnginePicker` versions are now the only impl + are tested.
-- ◻ **F3 (MED) — duration/dates triple-store.** "How long is the trip" lives in
-  `trip.destinations[].nights`, `trip.brief.duration/startDate/endDate`, and `_tb.duration/…`, and
-  edit sites each write a different SUBSET (trip-affordance.js:280, index.html:38507 extend-to-fit,
-  edit-constraints.js:1167, engine-picker.js publish). `trip.brief.duration` is a live BUDGET source
-  (itinerary-ordering.js:1171, engine-trip.js:389, trip-ui.js:992) → a stale subset gives wrong
-  over/under-budget verdicts. FIX: make `destinations[].nights` the single truth; derive `duration`
-  via one read-time helper, or one atomic setter. Multi-site — careful slice, not yet done.
+- ✅ **F3 (MED) — duration drift FIXED (fceecc3).** Correction to the original framing: `brief.duration`
+  is the user's BUDGET/INTENT (a range like "7-10 days"), NOT derived from nights — the budget gate
+  measures planned nights against it (confirmed via parseTripDuration + the readers). So the fix was
+  "one setter, sync the mirrors," not "derive." Added `setTripBudgetDuration(durStr)` (writes
+  `trip.brief.duration` + `_tb.duration` atomically) and rerouted the drifting writers
+  (`_extendBudgetToFit`, edit-constraints Apply Parameters, the over-budget modal). Chrome-verified
+  both stores stay in sync. REMAINING (lower priority, separate slice): `startDate/endDate` have the
+  same `_tb`/brief mirror pattern but don't affect a budget verdict — a `setTripDates` door would
+  finish it. (trip-affordance.js:281 overwriting the budget with derived length on a date edit is a
+  PRODUCT question, left as-is.)
 - ◻ **F4 — NOT a dedup (product decision).** The budget banner (index.html:23300) uses
   `displayNights` (actual PLANNED nights) while `computeStayTotalSummary` sums each candidate's
   SUGGESTED `stayRange` — different quantities. Unifying changes what the banner means; leave to
   product, don't mechanically merge.
-- ◻ **F5 (MED) — `_userListedNames`/`_userListedDisplay` dual-store** (`_tb` ⊕ `trip.brief`). Touches
-  the "a listed place must never disappear" contract (401V tripwire). PD.429 already bakes
-  `_origin:"user"` on records as the intended single source but the brief-map + `_tb`-map are still
-  written/read/rehydrated (home-screen.js:1850/1857/1960, edit-constraints.js:1706/1833,
-  max-data.js:487). FIX = finish the PD.429 retirement: make baked `_origin` (+ raw-paste seed) the
-  source, delete the mirror + the two rehydrate blocks. Risky (the sacred invariant) — dedicated slice.
-- ◻ **F6/F7 (LOW):** trip-index entry caches trip fields with multiple writers (index.html:5288 +
-  3 raw `setItem`); `max-road-routing`/`max-coarse-geocode` keys written from several places — wrap
-  each behind one setter. Low blast (cosmetic / cache).
+- ◑ **F5 — `_userListedNames`/`_userListedDisplay` dual-store: RATCHETED, full retirement deferred.**
+  Finding (analysis): the parallel state is ~80% already collapsed — `_tb._userListedNames` is a LIVE
+  PROJECTION of the records (`_refreshUserListedFromRecords` re-derives from `_origin:"user"` on every
+  build/hydrate, so it can't drift), and there is NO live writer to `trip.brief._userListedNames` (it's
+  a frozen legacy artifact + a hydration seed for pre-PD.429 trips). DONE: a contract-check ratchet
+  (BASELINE=37) freezes brief-mirror references so dependence can only shrink; new code must read
+  records `_origin` / the `_tb` projection / `MaxData.deriveListedFromRecords`. DEFERRED (needs a
+  migration window — the only steps that can drop a listed place): migrating the direct brief-mirror
+  readers (esp. `map-pin-panel.js` iconic seed — hydration-ordering risk) and DELETING the persisted
+  mirror. A notes-less, never-`_origin`-baked legacy trip could otherwise lose provenance → 401V. Do
+  per-reader, behind the gate + Chrome on a real legacy trip; never delete the seed until records-or-
+  notes coverage is proven for the loaded trip.
+- ✅ **F6/F7 (LOW) — DONE (c0102fb).** `max-road-routing` toggle → single `_setRoadRouting(on)` door;
+  the duplicate/share-import trips-index raw writers → single `_appendTripIndexEntry(entry)` door
+  (kept the read-PERSISTED-index-fresh-and-merge behavior on purpose — using in-memory `_tripsIndex`
+  in those flows could be stale and drop other trips).
 
 ### UI design system — remaining (needs eyes on each view; not blocking)
 - **Button MARKUP → `.btn` classes beyond home.** ~159 inline-styled buttons across

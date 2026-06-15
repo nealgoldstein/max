@@ -923,6 +923,29 @@ check("T3.2: direct trip-render calls don't grow past the ratchet baseline",
   })(),
   "a new direct drawTripMode/drawDestMode/updateMainMap call was added (count exceeded the T3.2 ratchet) — route the repaint through requestTripRepaint() / _scheduleMainMapUpdate() instead");
 
+check("F5: trip.brief._userListed* mirror dependence doesn't grow past the ratchet",
+  // PD.429 makes the records' _origin:"user" the single source for the user's
+  // listed set, and _tb._userListedNames/_userListedDisplay is a LIVE projection
+  // of it (_refreshUserListedFromRecords runs on every build/hydrate). The
+  // trip.brief._userListedNames/_userListedDisplay map is a FROZEN legacy mirror
+  // (no live writer) kept only as a hydration seed for pre-PD.429 trips. Don't add
+  // NEW dependence on it — read the records (_origin) / the _tb projection /
+  // MaxData.deriveListedFromRecords instead. This RATCHET freezes the brief-mirror
+  // reference count so it can only shrink. (Fully DELETING the mirror needs a
+  // migration window: a notes-less legacy trip could otherwise lose provenance and
+  // a listed place could disappear — the 401V invariant. See BACKLOG F5.)
+  (function () {
+    var BASELINE = 37; // brief._userListedNames|Display refs in root *.js,*.html
+    var files = fs.readdirSync(ROOT).filter(function (f) { return /\.(js|html)$/.test(f); });
+    var total = 0;
+    files.forEach(function (f) {
+      var src = fs.readFileSync(path.join(ROOT, f), "utf8");
+      total += (src.match(/brief\._userListed(Names|Display)/g) || []).length;
+    });
+    return total <= BASELINE;
+  })(),
+  "new dependence on trip.brief._userListedNames/_userListedDisplay was added — derive the listed set from records (_origin:\"user\") / the _tb projection instead (F5)");
+
 // ───────────────────────────────────────────────────────────────────
 console.log("\n" + "─".repeat(50));
 console.log("PASS: " + pass + "    FAIL: " + fail);
