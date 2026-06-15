@@ -144,7 +144,30 @@ test("synthesize creates candidates for placeActivity requiredPlaces not in kept
   assert.strictEqual(injected.length, 1);
   assert.strictEqual(injected[0].place, "Selfoss");
   assert.strictEqual(injected[0].status, "keep");
-  assert.strictEqual(injected[0]._synthetic, true);
+  // LIVE shape (matches publishTrip's reconcile-synthesis): role "see" so a
+  // reconciled listed place stays a sight, reconciled tags + _required. NOT the
+  // old _synthetic / role:"stay" shape the dead helper used to emit.
+  assert.strictEqual(injected[0].role, "see");
+  assert.strictEqual(injected[0]._required, true);
+  assert.deepStrictEqual(injected[0].tags, ["reconciled"]);
+  assert.strictEqual(injected[0]._synthetic, undefined, "old _synthetic field is gone");
+});
+
+test("synthesize guards (0,0) coords to null (no null-island centroid poison)", function () {
+  var kept = [];
+  var activities = [
+    { id: "a1", checked: true, requiredPlaces: [
+      { place: "Selfoss", lat: 0, lng: 0 },
+      { place: "Vík", lat: 63.4, lng: -19.0 }
+    ] }
+  ];
+  var injected = global.MaxPublish.synthesizeMissingCandidates(kept, activities, {});
+  var sel = injected.filter(function (c) { return c.place === "Selfoss"; })[0];
+  var vik = injected.filter(function (c) { return c.place === "Vík"; })[0];
+  assert.strictEqual(sel.lat, null, "(0,0) latitude guarded to null");
+  assert.strictEqual(sel.lng, null, "(0,0) longitude guarded to null");
+  assert.strictEqual(vik.lat, 63.4, "real coord preserved");
+  assert.strictEqual(vik.lng, -19.0);
 });
 
 test("synthesize skips unchecked sections", function () {

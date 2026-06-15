@@ -115,7 +115,6 @@
     });
 
     var injected = [];
-    var injectedKeys = {};
     placeActivities.forEach(function (it) {
       if (!it || it.checked === false) return;
       (it.requiredPlaces || []).forEach(function (p) {
@@ -123,21 +122,32 @@
         if (p._keep === false) return;
         var k = _normKey(p.place);
         if (!k) return;
-        if (keptKeys[k]) return;
-        if (sights[k]) return;
-        if (injectedKeys[k]) return; // dedupe within injections
-        injectedKeys[k] = true;
+        if (keptKeys[k]) return;   // already kept OR already injected this pass
+        if (sights[k]) return;     // PD.234: classifier said sight
+        // v359.60.18: (0,0) is the Atlantic off Africa — it satisfies isFinite
+        // but poisons the geo-reorder centroid. null lets getCoord fall through
+        // to getCityCenter. Guard lat/lng to null unless the coord is real.
+        var hasReal = (typeof p.lat === "number" && (p.lat !== 0 || p.lng !== 0));
         injected.push({
+          // P4.4a: role "see" (NOT "stay") so a reconciled listed place stays a
+          // sight, not defaulted to stay by the overnightCapable branch.
           place: p.place,
           country: p.country || "",
-          status: "keep",
-          _synthetic: true,
-          _syntheticFrom: it.id || it.name || "placeActivity",
-          intent: null,
-          role: "stay",
-          lat: (typeof p.lat === "number") ? p.lat : null,
-          lng: (typeof p.lng === "number") ? p.lng : null
+          role: "see",
+          stayRange: (typeof p.nights === "number" && p.nights > 0)
+            ? (p.nights + (p.nights === 1 ? " night" : " nights"))
+            : "1-2 nights",
+          whyItFits: it.description || "Added to round out the route.",
+          tradeoffs: "",
+          tags: ["reconciled"],
+          lat: hasReal ? p.lat : null,
+          lng: hasReal ? p.lng : null,
+          nights: (typeof p.nights === "number") ? p.nights : 1,
+          _required: true,
+          _requiredFor: ["reconciled"],
+          status: "keep"
         });
+        keptKeys[k] = true; // dedupe within injections + against later kept checks
       });
     });
     return injected;

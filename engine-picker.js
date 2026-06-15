@@ -2067,64 +2067,22 @@
     // kept-filter excluded Harpa, this pass synthesized it back from
     // "Sights you listed" placeActivity. The classifier already said
     // sight; this pass would have overruled it.
+    // slice 5 (dedup): the DECISION of which placeActivity places to synthesize
+    // is now MaxPublish.synthesizeMissingCandidates (rewritten to emit this exact
+    // live shape — role "see", the (0,0)→null guard, reconciled tags/_required —
+    // and its unit tests updated to match). publishTrip keeps only the APPLICATION
+    // (push into kept + _tb.candidates, log). Was a large inline copy here whose
+    // shape had diverged from the dead helper; one implementation now, and the
+    // tests finally guard the live shape.
     try {
-      var keptKeys = {};
-      kept.forEach(function(c){
-        if (c && c.place) {
-          var k = _normPlaceName(c.place);
-          if (k) keptKeys[k] = true;
-        }
-      });
-      var injected = [];
-      (Array.isArray(_tb.placeActivities) ? _tb.placeActivities : []).forEach(function(it){
-        if (!it || it.checked === false) return;
-        (it.requiredPlaces || []).forEach(function(p){
-          if (!p || !p.place) return;
-          if (p._keep === false) return;
-          var k = _normPlaceName(p.place);
-          if (!k || keptKeys[k]) return;
-          // PD.234: don't synthesize a destination candidate for a
-          // sight. The classifier decided.
-          if (_pd234SightSet[k]) return;
-          // No kept candidate exists for this place — synthesize one
-          // and mark kept. Shape matches the stub at runCandidateSearch
-          // line ~6912 so downstream code treats it as a normal
-          // required-anchor candidate.
-          // v359.60.18: lat/lng default to null (not 0). (0,0) is the
-          // Atlantic off Africa — it satisfies isFinite checks but
-          // poisons the geo-reorder centroid. Null lets getCoord fall
-          // through to getCityCenter, which knows most Iceland places.
-          var _pLat = (typeof p.lat === "number" && (p.lat !== 0 || p.lng !== 0)) ? p.lat : null;
-          var _pLng = (typeof p.lng === "number" && (p.lat !== 0 || p.lng !== 0)) ? p.lng : null;
-          var synth = {
-            // P4.4a: was role:"anchor" + tripRole:"unspecified", which
-            // normalizeCandidateRole mapped to "see". With tripRole retired,
-            // set the derived role directly so a reconciled listed place stays
-            // a sight (not defaulted to "stay" by the overnightCapable branch).
-            place: p.place,
-            country: p.country || "",
-            role: "see",
-            stayRange: (typeof p.nights === "number" && p.nights > 0)
-              ? (p.nights + (p.nights === 1 ? " night" : " nights"))
-              : "1-2 nights",
-            whyItFits: it.description || "Added to round out the route.",
-            tradeoffs: "",
-            tags: ["reconciled"],
-            lat: _pLat,
-            lng: _pLng,
-            nights: (typeof p.nights === "number") ? p.nights : 1,
-            _required: true,
-            _requiredFor: ["reconciled"],
-            status: "keep"
-          };
-          kept.push(synth);
-          keptKeys[k] = true;
-          if (Array.isArray(_tb.candidates)) _tb.candidates.push(synth);
-          injected.push(p.place);
+      var _synth = MaxPublish.synthesizeMissingCandidates(kept, _tb.placeActivities, _pd234SightSet);
+      if (_synth.length) {
+        _synth.forEach(function(c){
+          kept.push(c);
+          if (Array.isArray(_tb.candidates)) _tb.candidates.push(c);
         });
-      });
-      if (injected.length) {
-        console.log("[Max publishTrip] reconciled " + injected.length + " place(s) from placeActivities into candidates:", injected.join(", "));
+        console.log("[Max publishTrip] reconciled " + _synth.length + " place(s) from placeActivities into candidates:",
+          _synth.map(function(c){ return c.place; }).join(", "));
       }
     } catch(e) {
       console.warn("[Max publishTrip] placeActivities reconciliation failed (non-fatal):", e && e.message);
