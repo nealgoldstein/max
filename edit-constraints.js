@@ -1833,7 +1833,6 @@ function reopenPickerForEdit(){
         overnightCapable: (typeof c.overnightCapable === "boolean") ? c.overnightCapable : null,
         singleSight: (typeof c.singleSight === "boolean") ? c.singleSight : null,
         intent: c.intent || null,
-        tripRole: c.tripRole || null,
         dayTripHub: c.dayTripHub || null,
         waysideFromHub: c.waysideFromHub || null,
         waysideLeg: c.waysideLeg || null,

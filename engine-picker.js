@@ -2110,9 +2110,13 @@
           var _pLat = (typeof p.lat === "number" && (p.lat !== 0 || p.lng !== 0)) ? p.lat : null;
           var _pLng = (typeof p.lng === "number" && (p.lat !== 0 || p.lng !== 0)) ? p.lng : null;
           var synth = {
+            // P4.4a: was role:"anchor" + tripRole:"unspecified", which
+            // normalizeCandidateRole mapped to "see". With tripRole retired,
+            // set the derived role directly so a reconciled listed place stays
+            // a sight (not defaulted to "stay" by the overnightCapable branch).
             place: p.place,
             country: p.country || "",
-            role: "anchor",
+            role: "see",
             stayRange: (typeof p.nights === "number" && p.nights > 0)
               ? (p.nights + (p.nights === 1 ? " night" : " nights"))
               : "1-2 nights",
@@ -2124,8 +2128,7 @@
             nights: (typeof p.nights === "number") ? p.nights : 1,
             _required: true,
             _requiredFor: ["reconciled"],
-            status: "keep",
-            tripRole: "unspecified"  // Round NC.1 (gallery-pivot)
+            status: "keep"
           };
           kept.push(synth);
           keptKeys[k] = true;
@@ -2490,8 +2493,7 @@
         whyItFits: "Where you arrive — Max suggests one night to recover before moving on. Adjust or drop if you'd rather push through.",
         tradeoffs: "",
         tags: ["arrival"],
-        lat: null, lng: null,
-        tripRole: "unspecified"  // Round NC.1 (gallery-pivot)
+        lat: null, lng: null
       };
       ordered = [entryStop].concat(ordered);
       if (orderResult.reasoning) {
@@ -2526,8 +2528,7 @@
         whyItFits: "Where you depart — Max added one night here so the trip ends at your fly-out city. Adjust or drop if you'd rather fly home directly from your last activity stop.",
         tradeoffs: "",
         tags: ["departure"],
-        lat: null, lng: null,
-        tripRole: "unspecified"  // Round NC.1 (gallery-pivot)
+        lat: null, lng: null
       };
       ordered = ordered.concat([exitStop]);
       if (orderResult.reasoning) {

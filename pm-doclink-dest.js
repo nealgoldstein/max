@@ -433,8 +433,7 @@ function _pmEnsureCandidate(placeName){
     role: "see",
     status: "keep",
     _required: false,
-    intent: "",
-    tripRole: "unspecified"
+    intent: ""
   };
   _tb.candidates.push(cand);
   return cand;
