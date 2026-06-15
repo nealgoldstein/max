@@ -183,14 +183,13 @@ engine-publish.js / MaxPublish helper, now delegated):**
   EQUIVALENT — publishTrip now delegates to them, so the unit tests finally guard the LIVE path and
   ~60 lines of duplicate logic left publishTrip. (filter is fed the AUGMENTED `_pd234SightSet`, not
   raw `_tb._sightsClassified` — guarding the PD.430 destination-inflation bug.)
-- ⚠ **`synthesizeMissingCandidates` is DIVERGED — LANDMINE, do NOT wire as-is.** The dead helper
-  emits a STALE shape: `role:"stay"` where the live inline (engine-picker.js, reconcile-synthesis
-  pass) emits `role:"see"` (P4.4a), and it lacks the live `(0,0)→null` lat/lng guard (v359.60.18).
-  Wiring it would (a) flip reconciled listed places from see→stay and (b) reintroduce the null-island
-  geo-centroid poison. Its green unit tests assert the obsolete shape — false confidence. NEXT SLICE
-  (careful): rewrite the helper to emit the live shape EXACTLY, update engine-publish-tests.js to the
-  live shape, then wire publishTrip + delete the inline; verify with a shape-diff + build-harness.
-  Until then the live inline is the source of truth.
+- ✅ **`synthesizeMissingCandidates` — RESOLVED (slice 5, 6260782).** Was DIVERGED (dead helper
+  emitted `role:"stay"` + lacked the `(0,0)→null` guard). Rewrote the helper to emit the EXACT live
+  shape (`role:"see"`, the v359.60.18 coord guard, reconciled tags/_required, whyItFits from the
+  activity), rewrote its unit tests to the live shape + added a `(0,0)`-guard test, and wired
+  publishTrip to delegate the decision (application — push into kept/_tb.candidates + log — kept
+  local). Inline copy deleted. One implementation; the tests now guard the live publish path.
+  Chrome-verified live (role:"see", (0,0)→null, real coords kept). **All 4 unwired helpers resolved.**
 
 **Funnel migration (item 2) status:** the BASELINE=154 ratchet (contract-checks.js) already PREVENTS
 new direct drawTripMode/drawDestMode/updateMainMap calls — the bypass class can't grow. Migrating the
