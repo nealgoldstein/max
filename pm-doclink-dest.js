@@ -174,11 +174,17 @@ function toggleDestKeep(placeName){
   if (!placeName) return;
   if (typeof _pmEnsureCandidate === "function") _pmEnsureCandidate(placeName);
   if (typeof MaxRoleWriter === "undefined" || !MaxRoleWriter || typeof MaxRoleWriter.set !== "function") return;
-  var key = (placeName || "").toLowerCase();
+  // H1: key via the canonical normalizer so this anyKept scan agrees with the
+  // surgical DOM update (_pmSurgicalKeepUpdate, which uses _normPlaceName) and
+  // with MaxRoleWriter. A raw toLowerCase mismatched on alias/diacritic places,
+  // so the role write and the checkbox could disagree and flip a kept place off
+  // — the disappearing-place class the PlaceKey layer exists to prevent.
+  var nf = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
+  var key = nf(placeName);
   var anyKept = false;
   (_tb.placeActivities || []).forEach(function(item){
     (item.requiredPlaces || []).forEach(function(p){
-      if (p && p.place && p.place.toLowerCase() === key && p._keep) anyKept = true;
+      if (p && p.place && nf(p.place) === key && p._keep) anyKept = true;
     });
   });
   var nextRole = anyKept ? "maybe" : _pmRoleForCheck(placeName);
@@ -249,13 +255,16 @@ if (typeof globalThis !== "undefined") globalThis.toggleDestKeepInSection = togg
 // because routes are transit (nights stay 0).
 function _adjustDestNights(placeName, delta){
   var items = _tb.placeActivities || [];
-  var key = (placeName || "").toLowerCase();
+  // L1: same canonical keying as toggleDestKeep/_pmSurgicalKeepUpdate so the
+  // nights stepper hits alias/diacritic places too (raw toLowerCase missed them).
+  var nf = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
+  var key = nf(placeName);
   // Find current max
   var current = 0;
   items.forEach(function(item){
     if (item.type === "route") return;
     (item.requiredPlaces||[]).forEach(function(p){
-      if (p && p.place && p.place.toLowerCase() === key) {
+      if (p && p.place && nf(p.place) === key) {
         var n = parseInt(p.nights, 10);
         if (isFinite(n) && n > current) current = n;
       }
@@ -268,7 +277,7 @@ function _adjustDestNights(placeName, delta){
   items.forEach(function(item){
     if (item.type === "route") return;
     (item.requiredPlaces||[]).forEach(function(p){
-      if (p && p.place && p.place.toLowerCase() === key) p.nights = next;
+      if (p && p.place && nf(p.place) === key) p.nights = next;
     });
   });
   _renderPlaceActivityItems();

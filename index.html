@@ -28507,10 +28507,15 @@ function updateMainMap(){
     var _gwExitGlyph  = _briefExitName  ? _gwGlyphFn(_briefExitMode)  : "";
 
     function _matchDestByName(name){
-      var n = String(name || "").trim().toLowerCase();
+      // H2: canonical keying (like the numbered-pin grouping above) so an
+      // entry/exit name that differs from the destination's stored name only by
+      // diacritic/alias still matches. A raw toLowerCase miss falls through to
+      // drawing a SEPARATE gateway pin on top of the existing destination pin.
+      var nf = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").trim().toLowerCase(); };
+      var n = nf(name);
       if (!n) return -1;
       for (var i = 0; i < trip.destinations.length; i++) {
-        if (String(trip.destinations[i].place || "").trim().toLowerCase() === n) return i;
+        if (nf(trip.destinations[i].place || "") === n) return i;
       }
       return -1;
     }
