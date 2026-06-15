@@ -177,15 +177,28 @@ engine-publish.js / MaxPublish helper, now delegated):**
   `deriveStayOverrideBridges` (application kept local).
 - Earlier T3.6 (1a03020 / 6eb72f4): `_rankPopoverTransitLegs`, `_pmBuildPlaceRow`.
 
-**⚠ HIGH-VALUE FINDING — unwired tested helpers (next slices):** `dedupCandidatesByPlace`,
-`synthesizeMissingCandidates`, `filterCandidatesForDestinations`, `rehydrateClassifierBuckets` are
-exported from engine-publish.js and UNIT-TESTED but have **zero production callers** — publishTrip
-re-implements each inline (dedupe ~engine-picker.js:1393, synthesis ~1333/1367/889, classifier
-rehydrate ~1977+). So the LIVE publish path is untested and the green tests cover dead code; the two
-copies can diverge silently. Wiring publishTrip to delegate (and deleting the inline) makes the
-tests actually guard the live path — but each needs careful equivalence verification FIRST (publish
-is the most critical path; the inline copies may already have drifted from the helpers). Do these
-per-helper, behind the gate + build-harness, not in a rush.
+**Unwired tested helpers — RESOLVED for 3 of 4 (slice 4, 7133cec):** an equivalence audit
+(data-integrity subagent) compared each helper to publishTrip's inline copy:
+- ✅ `rehydrateClassifierBuckets`, `dedupCandidatesByPlace`, `filterCandidatesForDestinations` were
+  EQUIVALENT — publishTrip now delegates to them, so the unit tests finally guard the LIVE path and
+  ~60 lines of duplicate logic left publishTrip. (filter is fed the AUGMENTED `_pd234SightSet`, not
+  raw `_tb._sightsClassified` — guarding the PD.430 destination-inflation bug.)
+- ⚠ **`synthesizeMissingCandidates` is DIVERGED — LANDMINE, do NOT wire as-is.** The dead helper
+  emits a STALE shape: `role:"stay"` where the live inline (engine-picker.js, reconcile-synthesis
+  pass) emits `role:"see"` (P4.4a), and it lacks the live `(0,0)→null` lat/lng guard (v359.60.18).
+  Wiring it would (a) flip reconciled listed places from see→stay and (b) reintroduce the null-island
+  geo-centroid poison. Its green unit tests assert the obsolete shape — false confidence. NEXT SLICE
+  (careful): rewrite the helper to emit the live shape EXACTLY, update engine-publish-tests.js to the
+  live shape, then wire publishTrip + delete the inline; verify with a shape-diff + build-harness.
+  Until then the live inline is the source of truth.
+
+**Funnel migration (item 2) status:** the BASELINE=154 ratchet (contract-checks.js) already PREVENTS
+new direct drawTripMode/drawDestMode/updateMainMap calls — the bypass class can't grow. Migrating the
+~41 EXISTING direct calls is delicate: each one examined is coupled to synchronous context (init
+sequence at 25958, `render()` then updateMainMap at 27617, navigation repaint at 29834, exec-mode
+day-selector at 26420/26431). Switching to the async coalesced funnel is a timing change that needs
+each UI path EXERCISED to verify — do per-site with the path driven, then drop BASELINE by the count
+migrated. Not a blind sweep.
 
 **Remaining god-functions:** `_renderPlaceActivityItems` (more row/section extraction), `updateMainMap`
 (side-effectful block extraction), `_openTripStopPopover` (role-apply handlers).
