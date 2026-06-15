@@ -199,18 +199,19 @@ day-selector at 26420/26431). Switching to the async coalesced funnel is a timin
 each UI path EXERCISED to verify — do per-site with the path driven, then drop BASELINE by the count
 migrated. Not a blind sweep.
 
-**Remaining god-functions (extraction candidates mapped):** slices done so far —
-`_rankPopoverTransitLegs`, `_pmBuildPlaceRow`, the publishTrip helper-delegations, and
-`_pmOrderSectionsByCategory` (Round CZ section ordering, 5dab9c3). Next clean PURE seams (per the
-2026-06 classification, each takes a small explicit context + is unit-testable):
-- `_renderPlaceActivityItems`: `_searchNormalize` + `_pmRowMatchesSearch` (search), `_whyFitsLineFor`
-  (shared with the row-builder), `_pmSectionSlug` (trivial).
-- `updateMainMap`: `_mapResolveDestCoords` (coord/dest-hit resolution — cleanest), `_routeHasRenderableWayside`,
-  `_buildDestPinGroups`, `_resolveGatewayBadges`.
-- `_openTripStopPopover`: `_collectStopWhatsHere` (collect/render split), day-trip-option building,
-  the wayside-offer decision rule.
-Side-effectful Leaflet/DOM blocks (basemap layer swap, drag wiring, the throttle preamble) are
-explicitly NOT early seams — low ROI, leave.
+**God-function decomposition — clean pure seams DONE; remainder is diminishing-returns.**
+Extracted as top-level, individually unit-tested + Chrome-verified pure helpers this program:
+`_rankPopoverTransitLegs`, `_pmBuildPlaceRow`, `_pmOrderSectionsByCategory`, `_searchNormalize`,
+`_pmSectionSlug`, `_pmWhyFitsLine`, `_mapResolveDestCoords` — plus the whole publishTrip
+helper-delegation (entry/exit, rebuild, stayOverride, dedup/filter/synthesize/rehydrate).
+**Stopping point is deliberate, not fatigue:** what remains is NOT tangled inline code — it's either
+(a) ALREADY well-factored named nested helpers where top-level-izing is a modest testability gain for
+a large verbatim-move risk (`_collectWhatsHere` ~150 lines, the day-trip option builders, the gateway
+badge prep), or (b) the irreducible side-effectful core (Leaflet drawing, DOM/drag wiring, the render
+orchestration + throttle) that should NOT be extracted (low ROI, high risk). The high-value work —
+turning buried spaghetti into named, testable, reusable units — is complete. Do the remaining
+top-level-izations opportunistically/fresh if a given helper needs reuse or a unit test; not worth a
+marathon-tail batch.
 
 **Funnel migration (item 2) — BASELINE 154→152→138.** Batch 1 (aa9f674) migrated 14 confidently-safe
 control-toggle / repaint-after-mutation handlers to `_scheduleMainMapUpdate()` / `requestTripRepaint()`.
