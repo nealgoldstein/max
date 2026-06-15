@@ -23508,9 +23508,24 @@ function _skipBudgetGate(){
 // Doesn't touch start/end dates directly; _parseTripDuration reads
 // _tb.duration as the source of truth, and the trip build pipeline
 // computes dates from the candidate nights anyway.
+// F3 (parallel-state): single door for the trip's BUDGET duration — an INTENT
+// like "7-10 days" (the budget the planned nights are measured against), NOT a
+// value derived from destinations[].nights. It lives in TWO stores: trip.brief
+// .duration (persisted, the one the budget gate prefers) and _tb.duration (the
+// picker working copy). Edit sites used to write only one, so a budget reader
+// could see a stale value. Write both atomically here. brief is written only
+// when a trip exists (pre-publish the picker has _tb only; publish reconciles
+// _tb→brief). Duration is INTENT — do NOT derive it from nights.
+function setTripBudgetDuration(durStr){
+  durStr = durStr || "";
+  try { if (typeof trip !== "undefined" && trip) { if (!trip.brief || typeof trip.brief !== "object") trip.brief = {}; trip.brief.duration = durStr; } } catch(_){}
+  try { if (typeof _tb !== "undefined" && _tb) _tb.duration = durStr; } catch(_){}
+}
+if (typeof globalThis !== "undefined") globalThis.setTripBudgetDuration = setTripBudgetDuration;
+
 function _extendBudgetToFit(targetDays){
   if (!targetDays || targetDays < 1) return;
-  _tb.duration = targetDays + " days";
+  setTripBudgetDuration(targetDays + " days");
   // The brief may also have explicit startDate/endDate \u2014 if so, push
   // the end out so they stay consistent with the new duration.
   if (_tb.startDate) {
@@ -38504,8 +38519,7 @@ function drawTripMode(opts){
       true,
       function(){
         var newDuration = n.pickerDays + " days";
-        if (trip.brief) trip.brief.duration = newDuration;
-        if (typeof _tb !== "undefined" && _tb) _tb.duration = newDuration;
+        setTripBudgetDuration(newDuration); // F3: single door (was writing brief + _tb inline)
         delete trip.overBudgetNotice;
         autoSave();
         if (typeof drawTripMode === "function") drawTripMode();

@@ -1164,7 +1164,12 @@ function applyConstraintChanges(){
     // this, changing the duration in Parameters left trip.brief.duration
     // stale, and the over-budget banner kept appearing against the old
     // budget. Mirror it now.
-    if (typeof p.duration !== "undefined") trip.brief.duration = p.duration;
+    // F3: route through the single budget-duration door so _tb.duration stays
+    // in sync too (the EW.2 fix mirrored to brief but left _tb stale).
+    if (typeof p.duration !== "undefined") {
+      if (typeof setTripBudgetDuration === "function") setTripBudgetDuration(p.duration);
+      else trip.brief.duration = p.duration;
+    }
     if (typeof p.when !== "undefined") trip.brief.when = p.when;
     if (typeof p.startDate !== "undefined") trip.brief.startDate = p.startDate;
     if (typeof p.endDate !== "undefined") trip.brief.endDate = p.endDate;
