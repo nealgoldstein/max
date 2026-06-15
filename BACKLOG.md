@@ -101,12 +101,14 @@ below. Tier 3 — T3.4/3.7 done. Tier 4 — T4.1 done.
   `subKind` shape on load, the ~6 dual-shape route ORs (`r.subKind || r.kind…`) can be removed —
   do it once, behind the gate + a Chrome check, since a file-imported v2 trip still relies on them
   until its first migrated save.
-- **T3.5 — placeMeta/tripMeta two-store. ◑ Partial.** Fixed the clear data-loss:
-  `_pmPersistResearchToTrip` now MERGES `_tb.placeMeta` into `trip.brief.placeMeta`
-  instead of replacing it, so a key present only in `trip.brief` (e.g. from a sync
-  pull) is no longer dropped. REMAINING: a true prefer-newer on a key BOTH stores
-  hold needs per-entry timestamps (or the shared-ref treatment placeActivities got);
-  `_tb` still wins on shared keys. Lower-risk than a hydrate redesign; deferred.
+- **T3.5 — placeMeta/tripMeta two-store. ✅ DONE (risk-audit M2).** Prefer-newer
+  resolved WITHOUT per-entry timestamps via a hydrate-time baseline: hydrate now
+  deep-copies (was a shallow `Object.assign` that shared each entry's value object,
+  so in-place edits cross-mutated `trip.brief`) and snapshots `_tb._placeMetaBaseline`;
+  persist routes through the pure `_pmMergePlaceMeta(tb, brief, base)` — edited-locally
+  wins, untouched-local-but-changed-remote (sync pull) wins, brief-only key preserved,
+  no-baseline degrades to the old local-wins (no regression). Both hydrate paths seed
+  the baseline. Chrome-verified (8 cases) + Playwright guard.
 - **T3.6 — god-functions** (`publishTrip` ~2434 lines, `_renderPlaceActivityItems`
   ~2500, `updateMainMap` ~1245, `_openTripStopPopover` ~812) with mixed
   responsibilities. Large extraction — do per-piece behind CI with the app driven,
@@ -142,9 +144,26 @@ below. Tier 3 — T3.4/3.7 done. Tier 4 — T4.1 done.
 
 > **Audit drift note (2026-06):** the 2026-06-10 audit's Tier-3/4 list is stale — T3.1, T3.4, T3.8,
 > T4.3 were all completed afterward (PD.433/PD.475/PD.488 + delegation) and just weren't crossed off.
+
+### Latent-bug architectural risk audit — 2026-06 (✅ ALL FIXED)
+A two-pass read-only audit (data-integrity + render/consistency) found 15 latent-bug risks; all
+fixed in 4 verified waves (Node gate + Chrome + Playwright guards):
+- **H1/L1** raw `toLowerCase` keying in `toggleDestKeep`/`_adjustDestNights` → now canonical
+  `_normPlaceName` (disappearing-place class; the role-write + DOM update could disagree on a
+  diacritic/alias place). **H2** same for the gateway matcher `_matchDestByName` (duplicate pin).
+- **R1** `updateMainMap` colored pins from a stale `_pmKindByKey` → now refreshes it first (PD.432
+  parity). **M1** the last 4 `subKind||kind` dual-shape route readers → `routeSubKind`.
+- **M2/T3.5** placeMeta prefer-newer (above). **M3** candidate-projection fallback drift.
+  **L2** `_routingCache` `_failed` sentinels latching past a transient outage (PD.479 class).
+- **R2** `_wispEvalInProgress` stuck-flag lockout → try/finally. **R3/R4** async geocode clobbers
+  after trip-switch → captured-trip-id guards. **R5** surgical-toggle flag scoped to the sync emit.
+  **R6** map funnel + **R7** rev-write swallowed errors → now warn. **H3** false migration comment.
+- Commits: `153dc4d` (wave 1), `af896de` (wave 2), `60ffd16` (R1), `766102c` (wave 3), `058a2f2` (wave 4).
+
 > Genuinely-open architectural work left: T3.2 call-site migration (funnel + ratchet done; sites are
-> incremental), T3.6 god-function extraction (large), T3.5 prefer-newer timestamps, T3.3 dual-shape OR
-> removal (low-value cleanup), T4.2 (cosmetic).
+> incremental, ratchet-protected), T3.6 god-function extraction (2 slices done; the rest is
+> lower-value side-effectful decomposition), T3.3 dual-shape OR removal (now safe — all readers
+> migrated; low-value), T4.2 (cosmetic).
 
 ### UI design system — remaining (needs eyes on each view; not blocking)
 - **Button MARKUP → `.btn` classes beyond home.** ~159 inline-styled buttons across
