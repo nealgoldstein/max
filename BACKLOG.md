@@ -202,6 +202,33 @@ migrated. Not a blind sweep.
 **Remaining god-functions:** `_renderPlaceActivityItems` (more row/section extraction), `updateMainMap`
 (side-effectful block extraction), `_openTripStopPopover` (role-apply handlers).
 
+### Parallel-state collapse (item 3) — audit 2026-06
+A focused audit for remaining "same fact in two places / two writers / derived-and-stored" drift.
+- ✅ **F1 (HIGH, 882edd9):** the Ask-Max key modal was a THIRD api-key writer (loose `^sk-ant-` check
+  + raw setItem) — now routes through the single PD.445 gate `_isWellFormedApiKey` + door `saveApiKey`.
+- ✅ **F2 (HIGH, 882edd9):** dead divergent `MaxPublish.deriveTripName/isAutoName` twin removed; the
+  LIVE `MaxEnginePicker` versions are now the only impl + are tested.
+- ◻ **F3 (MED) — duration/dates triple-store.** "How long is the trip" lives in
+  `trip.destinations[].nights`, `trip.brief.duration/startDate/endDate`, and `_tb.duration/…`, and
+  edit sites each write a different SUBSET (trip-affordance.js:280, index.html:38507 extend-to-fit,
+  edit-constraints.js:1167, engine-picker.js publish). `trip.brief.duration` is a live BUDGET source
+  (itinerary-ordering.js:1171, engine-trip.js:389, trip-ui.js:992) → a stale subset gives wrong
+  over/under-budget verdicts. FIX: make `destinations[].nights` the single truth; derive `duration`
+  via one read-time helper, or one atomic setter. Multi-site — careful slice, not yet done.
+- ◻ **F4 — NOT a dedup (product decision).** The budget banner (index.html:23300) uses
+  `displayNights` (actual PLANNED nights) while `computeStayTotalSummary` sums each candidate's
+  SUGGESTED `stayRange` — different quantities. Unifying changes what the banner means; leave to
+  product, don't mechanically merge.
+- ◻ **F5 (MED) — `_userListedNames`/`_userListedDisplay` dual-store** (`_tb` ⊕ `trip.brief`). Touches
+  the "a listed place must never disappear" contract (401V tripwire). PD.429 already bakes
+  `_origin:"user"` on records as the intended single source but the brief-map + `_tb`-map are still
+  written/read/rehydrated (home-screen.js:1850/1857/1960, edit-constraints.js:1706/1833,
+  max-data.js:487). FIX = finish the PD.429 retirement: make baked `_origin` (+ raw-paste seed) the
+  source, delete the mirror + the two rehydrate blocks. Risky (the sacred invariant) — dedicated slice.
+- ◻ **F6/F7 (LOW):** trip-index entry caches trip fields with multiple writers (index.html:5288 +
+  3 raw `setItem`); `max-road-routing`/`max-coarse-geocode` keys written from several places — wrap
+  each behind one setter. Low blast (cosmetic / cache).
+
 ### UI design system — remaining (needs eyes on each view; not blocking)
 - **Button MARKUP → `.btn` classes beyond home.** ~159 inline-styled buttons across
   trip/picker/Discovery. NOT a blind sweep: buttons are heterogeneous and
