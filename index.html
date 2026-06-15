@@ -25410,15 +25410,36 @@ function _listedGroundTruth() {
     // pins) read the SAME authoritative set, and a 35-place list isn't re-parsed
     // on every save/render. The notes string is the cache key: change your list,
     // it recomputes; otherwise it's the one ingested truth.
-    if (notes && _lgtCache.notes === notes && _lgtCache.out) return _lgtCache.out;
-    if (!notes || typeof parsePlacesList !== "function") return out;
-    var pl = parsePlacesList(notes);
+    // P4.4 build-gate fix: when the authoritative classified listed set is in
+    // memory (a fresh build), derive stay/sight from IT — the classifier
+    // already decided city-vs-poi and wrote it onto _tb._pastedListPlaces.
+    // Re-parsing raw notes is lossy: a bare list (no section headers) defaults
+    // EVERY line to "stay" (parsePlacesList mode default) and consumes the
+    // first line as the trip name, which then dragged listed SIGHTS into
+    // "Overnight stays" through the write door (PD.442/443). The notes
+    // re-parse remains the fallback for rehydrated trips with no
+    // _pastedListPlaces in memory.
+    var _authListed = (typeof _tb !== "undefined" && _tb && Array.isArray(_tb._pastedListPlaces) && _tb._pastedListPlaces.length)
+      ? _tb._pastedListPlaces : null;
+    if (!_authListed) {
+      if (notes && _lgtCache.notes === notes && _lgtCache.out) return _lgtCache.out;
+      if (!notes || typeof parsePlacesList !== "function") return out;
+    }
+    var pl = (notes && typeof parsePlacesList === "function") ? parsePlacesList(notes) : null;
     var nf = (typeof _normPlaceName === "function") ? _normPlaceName : function (s) { return String(s || "").toLowerCase().trim(); };
     var stayMap = {}, sightMap = {}, stayDisp = {}, sightDisp = {};
-    (pl && pl.destinations || []).forEach(function (d) {
+    var _srcDests = _authListed || (pl && pl.destinations) || [];
+    _srcDests.forEach(function (d) {
       if (!d || !d.place || d._autoCreated) return;
       var k = nf(d.place); if (!k) return;
-      if (d.isStay || (typeof d.nights === "number" && d.nights > 0)) { stayMap[k] = "stay"; if (!stayDisp[k]) stayDisp[k] = String(d.place).trim(); }
+      // Authoritative entries carry _classification (city|poi) from the
+      // classifier; notes-parsed entries carry isStay. Either source: a
+      // city / explicit stay / positive night-count is a stay; a poi /
+      // everything else is a sight.
+      var _isStayEntry = _authListed
+        ? (d._classification === "city" || (d._classification == null && typeof d.nights === "number" && d.nights > 0))
+        : (d.isStay || (typeof d.nights === "number" && d.nights > 0));
+      if (_isStayEntry) { stayMap[k] = "stay"; if (!stayDisp[k]) stayDisp[k] = String(d.place).trim(); }
       else { sightMap[k] = "see"; if (!sightDisp[k]) sightDisp[k] = String(d.place).trim(); }
     });
     var _rawStay = Object.keys(stayMap).length, _rawSight = Object.keys(sightMap).length;
@@ -25447,7 +25468,7 @@ function _listedGroundTruth() {
     out.stayDuplicates = (_s.dropped || []).map(_mapDrop);
     out.sightDuplicates = (_g.dropped || []).map(_mapDrop);
     out.duplicates = out.stayDuplicates.concat(out.sightDuplicates);
-    _lgtCache.notes = notes; _lgtCache.out = out;   // PD.444: cache the one ingestion
+    if (!_authListed) { _lgtCache.notes = notes; _lgtCache.out = out; }   // PD.444: cache the one ingestion (notes path only)
   } catch (_) {}
   return out;
 }
