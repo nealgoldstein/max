@@ -28435,6 +28435,54 @@ function _ensureTripRoutesCached(segments){
 }
 if (typeof globalThis !== "undefined") globalThis._ensureTripRoutesCached = _ensureTripRoutesCached;
 
+// T3.6 (extracted from updateMainMap): PURE destination coordinate + name
+// resolution for the trip map. Given a trip, returns the dest/stop center
+// resolvers, the all-dest coord list + name-key set, and the "does this wayside
+// coincide with a real destination (by name or ~500m proximity)" test. No
+// Leaflet/DOM — reads only globals (_coordsReal, getCityCenter, _normPlaceName,
+// MaxEngineTrip.haversineKm). Unit-testable in isolation.
+function _mapResolveDestCoords(trip){
+  trip = trip || {};
+  var dests = trip.destinations || [];
+  function resolveDestCtr(d) {
+    if (!d) return null;
+    if (_coordsReal(d.lat, d.lng)) return [d.lat, d.lng];
+    if (d.place) { var c = getCityCenter(d.place); if (c && isFinite(c[0])) return c; }
+    return null;
+  }
+  function resolveStopCtr(stop) {
+    var place = stop && trip.places && trip.places[stop.placeId];
+    if (place && _coordsReal(place.lat, place.lng)) return [place.lat, place.lng];
+    if (place && place.name) { var c = getCityCenter(place.name); if (c && isFinite(c[0])) return c; }
+    return null;
+  }
+  var destCoordsAll = dests.map(resolveDestCtr).filter(Boolean);
+  var destNameKeySet = {};
+  dests.forEach(function(d){
+    if (!d || !d.place) return;
+    var k = (typeof _normPlaceName === "function") ? _normPlaceName(d.place) : String(d.place).toLowerCase().trim();
+    if (k) destNameKeySet[k] = true;
+  });
+  function waysideHitsDestination(ctr, name) {
+    if (name) {
+      var nk = (typeof _normPlaceName === "function") ? _normPlaceName(name) : String(name).toLowerCase().trim();
+      if (nk && destNameKeySet[nk]) return true;
+    }
+    if (ctr && destCoordsAll.length && typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.haversineKm === "function") {
+      for (var i = 0; i < destCoordsAll.length; i++) {
+        var dc = destCoordsAll[i];
+        if (!dc) continue;
+        if (MaxEngineTrip.haversineKm(ctr[0], ctr[1], dc[0], dc[1]) <= 0.5) return true; // ~500 m
+      }
+    }
+    return false;
+  }
+  return { resolveDestCtr: resolveDestCtr, resolveStopCtr: resolveStopCtr,
+           destCoordsAll: destCoordsAll, destNameKeySet: destNameKeySet,
+           waysideHitsDestination: waysideHitsDestination };
+}
+if (typeof globalThis !== "undefined") globalThis._mapResolveDestCoords = _mapResolveDestCoords;
+
 function updateMainMap(){
   if(!_mainMap)return;
   // R1 (PD.432 parity): refresh the stay/see kind map BEFORE coloring pins.
@@ -28963,46 +29011,14 @@ function updateMainMap(){
     // visible map. Treat near-[0,0] as NOT real and fall back to the
     // name geocode (getCityCenter), which recovers the true location for
     // named sights/cities. Uses the shared _coordsReal predicate.
-    function _resolveDestCtr(d) {
-      if (!d) return null;
-      if (_coordsReal(d.lat, d.lng)) return [d.lat, d.lng];
-      if (d.place) {
-        var c = getCityCenter(d.place);
-        if (c && isFinite(c[0])) return c;
-      }
-      return null;
-    }
-    function _resolveStopCtr(stop) {
-      var place = stop && trip.places && trip.places[stop.placeId];
-      if (place && _coordsReal(place.lat, place.lng)) return [place.lat, place.lng];
-      if (place && place.name) {
-        var c = getCityCenter(place.name);
-        if (c && isFinite(c[0])) return c;
-      }
-      return null;
-    }
-    var _destCoordsAll = trip.destinations.map(_resolveDestCtr).filter(Boolean);
-    var _destNameKeySet = {};
-    trip.destinations.forEach(function(d){
-      if (!d || !d.place) return;
-      var k = (typeof _normPlaceName === "function") ? _normPlaceName(d.place) : String(d.place).toLowerCase().trim();
-      if (k) _destNameKeySet[k] = true;
-    });
-    function _waysideHitsDestination(ctr, name) {
-      if (name) {
-        var nk = (typeof _normPlaceName === "function") ? _normPlaceName(name) : String(name).toLowerCase().trim();
-        if (nk && _destNameKeySet[nk]) return true;
-      }
-      if (ctr && _destCoordsAll.length && typeof MaxEngineTrip !== "undefined" && typeof MaxEngineTrip.haversineKm === "function") {
-        for (var i = 0; i < _destCoordsAll.length; i++) {
-          var dc = _destCoordsAll[i];
-          if (!dc) continue;
-          var dKm = MaxEngineTrip.haversineKm(ctr[0], ctr[1], dc[0], dc[1]);
-          if (dKm <= 0.5) return true; // ~500 m
-        }
-      }
-      return false;
-    }
+    // T3.6: dest coord/name resolution extracted to the pure _mapResolveDestCoords.
+    // Locals kept so the rest of updateMainMap is unchanged.
+    var _mrc = _mapResolveDestCoords(trip);
+    var _resolveDestCtr = _mrc.resolveDestCtr;
+    var _resolveStopCtr = _mrc.resolveStopCtr;
+    var _destCoordsAll = _mrc.destCoordsAll;
+    var _destNameKeySet = _mrc.destNameKeySet;
+    var _waysideHitsDestination = _mrc.waysideHitsDestination;
 
     // v294.15: trip-route polyline (white halo + dashed blue), opt-in via
     // the Route button. Only worth drawing with ≥2 distinct destinations.

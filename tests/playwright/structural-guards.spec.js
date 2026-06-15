@@ -241,4 +241,34 @@ test.describe('structural guards', () => {
     expect(r.empty).toBe('');
     expect(r.slug).toBe('tb-sec-hot-springs-pools');
   });
+
+  // T3.6: pure dest coord/name resolution lifted out of updateMainMap.
+  test('T3.6: _mapResolveDestCoords resolves coords + wayside-hits-destination', async ({ page }) => {
+    await bootClean(page);
+    const r = await page.evaluate(() => {
+      const fn = window._mapResolveDestCoords;
+      if (typeof fn !== 'function') return { typeofFn: typeof fn };
+      const trip = {
+        destinations: [{ place: 'Reykjavik', lat: 64.14, lng: -21.94 }, { place: 'Vik', lat: 63.42, lng: -19.01 }],
+        places: { p1: { name: 'Reykjavik', lat: 64.14, lng: -21.94 } },
+      };
+      const m = fn(trip);
+      return {
+        typeofFn: 'function',
+        destCtr: JSON.stringify(m.resolveDestCtr(trip.destinations[0])),
+        coordsCount: m.destCoordsAll.length,
+        hitByName: m.waysideHitsDestination(null, 'Reykjavik'),
+        hitByProximity: m.waysideHitsDestination([64.141, -21.941], 'X'),
+        miss: m.waysideHitsDestination([0, 0], 'Nowhere'),
+        emptySafe: JSON.stringify(fn(null).destCoordsAll),
+      };
+    });
+    expect(r.typeofFn).toBe('function');
+    expect(r.destCtr).toBe('[64.14,-21.94]');
+    expect(r.coordsCount).toBe(2);
+    expect(r.hitByName, 'name match').toBe(true);
+    expect(r.hitByProximity, '~500m proximity match').toBe(true);
+    expect(r.miss, 'far + unknown name ⇒ no hit').toBe(false);
+    expect(r.emptySafe, 'null trip safe').toBe('[]');
+  });
 });
