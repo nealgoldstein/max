@@ -158,4 +158,36 @@ test.describe('structural guards', () => {
     expect(r.hasMenu, 'row ⋯ menu rendered').toBe(true);
     expect(r.hasBadges, 'one activity badge per activity').toBe(true);
   });
+
+  // T3.5 (M2) — _pmMergePlaceMeta prefer-newer resolution. This guards the
+  // placeMeta two-store merge: a key the user didn't touch this session but that
+  // changed in trip.brief (e.g. a sync pull) must win, while a brief-only key is
+  // preserved and a locally-edited key keeps the local value. Getting this wrong
+  // silently loses a user's research notes, so pin every branch.
+  test('T3.5: _pmMergePlaceMeta resolves prefer-newer without losing notes', async ({ page }) => {
+    await bootClean(page);
+    const r = await page.evaluate(() => {
+      const f = window._pmMergePlaceMeta;
+      if (typeof f !== 'function') return { typeofFn: typeof f };
+      const N = (o) => JSON.stringify(o);
+      return {
+        typeofFn: 'function',
+        briefOnly: N(f({}, { A: { notes: 'a' } }, {})) === N({ A: { notes: 'a' } }),
+        localEditWins: f({ A: { notes: 'edited' } }, { A: { notes: 'old' } }, { A: { notes: 'old' } }).A.notes === 'edited',
+        remoteWinsWhenUntouched: f({ A: { notes: 'old' } }, { A: { notes: 'synced' } }, { A: { notes: 'old' } }).A.notes === 'synced',
+        noBaselineLocalWins: f({ A: { notes: 'local' } }, { A: { notes: 'remote' } }, {}).A.notes === 'local',
+        localNewKept: f({ B: { notes: 'new' } }, {}, {}).B.notes === 'new',
+        conflictLocalWins: f({ A: { notes: 'le' } }, { A: { notes: 're' } }, { A: { notes: 'orig' } }).A.notes === 'le',
+        nullSafe: N(f(null, null, null)) === '{}',
+      };
+    });
+    expect(r.typeofFn, 'helper exposed on window').toBe('function');
+    expect(r.briefOnly, 'brief-only key preserved (no data loss)').toBe(true);
+    expect(r.localEditWins, 'locally-edited key keeps local value').toBe(true);
+    expect(r.remoteWinsWhenUntouched, 'untouched-local + changed-remote ⇒ remote wins').toBe(true);
+    expect(r.noBaselineLocalWins, 'no baseline ⇒ degrade to local-wins (no regression)').toBe(true);
+    expect(r.localNewKept, 'local-only new key kept').toBe(true);
+    expect(r.conflictLocalWins, 'true conflict ⇒ local wins').toBe(true);
+    expect(r.nullSafe, 'null args ⇒ empty object').toBe(true);
+  });
 });

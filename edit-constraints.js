@@ -1874,7 +1874,16 @@ function reopenPickerForEdit(){
     if (typeof trip.brief.maxBigSightsPerDay === "number") _tb.maxBigSightsPerDay = trip.brief.maxBigSightsPerDay;
     // v359.55.3: hydrate the research-card data (notes, source links,
     // stay/see overrides) so it survives picker reopens after Choreograph.
-    _tb.placeMeta = Object.assign({}, trip.brief.placeMeta || {});
+    // T3.5 (M2): DEEP copy (was a shallow Object.assign, which shared each
+    // entry's value object with trip.brief.placeMeta so in-place edits
+    // cross-mutated the persisted copy). Then snapshot the hydrated state as a
+    // baseline so persist can tell which keys the user actually edited this
+    // session (differ from baseline → local wins) vs which were merely hydrated
+    // (== baseline → a newer trip.brief value, e.g. from a sync pull, should win
+    // rather than be clobbered by the stale _tb copy).
+    _tb.placeMeta = (trip.brief.placeMeta && typeof trip.brief.placeMeta === "object")
+      ? JSON.parse(JSON.stringify(trip.brief.placeMeta)) : {};
+    try { _tb._placeMetaBaseline = JSON.parse(JSON.stringify(_tb.placeMeta)); } catch(_) { _tb._placeMetaBaseline = {}; }
     // Round NC.X: bridge each kept candidate's c.role BACK into
     // placeMeta.stayOverride so the Discovery role-chip reflects what
     // was committed in the trip. Without this, the picker reopens
@@ -2729,21 +2738,14 @@ async function applyCandidateChanges(){
   if (_MC && typeof _MC.snapshotFrom === "function") {
     trip.candidates = _MC.snapshotFrom(_tb.candidates || []);
   } else {
-    trip.candidates = (_tb.candidates||[]).map(function(c){
-      return {
-        id:c.id, place:c.place, country:c.country||null, role:c.role||null,
-        whyItFits:c.whyItFits||"", tags:c.tags||[], tradeoffs:c.tradeoffs||null,
-        stayRange:c.stayRange||"", lat:c.lat||null, lng:c.lng||null,
-        nights: (typeof c.nights === "number") ? c.nights : undefined,
-        status:c.status||null, _required:!!c._required, _requiredFor:(c._requiredFor||[]).slice(),
-        overnightCapable: (typeof c.overnightCapable === "boolean") ? c.overnightCapable : null,
-        order:(typeof c.order==="number"?c.order:null), manuallyOrdered:!!c.manuallyOrdered,
-        _roleTouched: !!c._roleTouched,
-        dayTripHub: c.dayTripHub || undefined,
-        waysideFromHub: c.waysideFromHub || undefined,
-        intent: c.intent || undefined
-      };
-    });
+    // M3: MaxCandidates not loaded (load-order safety only — should not happen
+    // at a real save). Do NOT hand-list fields here: that list silently drifts
+    // from snapshotFrom and would DROP any field the canonical snapshot later
+    // adds (a data-loss-on-the-fallback-path bug). Fall back to a full shallow
+    // clone (over-includes, never loses) and warn; the next save with
+    // MaxCandidates loaded regenerates the proper lean shape.
+    try { console.warn("[Max M3] MaxCandidates.snapshotFrom unavailable at save — full-clone fallback for trip.candidates"); } catch(_){}
+    trip.candidates = (_tb.candidates||[]).map(function(c){ return Object.assign({}, c); });
   }
   trip.placeActivities = (_mdcItems||[]).map(function(m){return {
     id:m.id, name:m.name, type:m.type, checked:m.checked,
