@@ -1981,16 +1981,10 @@
     // if _tb's classifier buckets are empty but trip.brief has them,
     // copy them over before any downstream pass runs.
     try {
-      if ((!_tb._sightsClassified || !Object.keys(_tb._sightsClassified).length)
-          && trip && trip.brief && trip.brief._sightsClassified
-          && Object.keys(trip.brief._sightsClassified).length) {
-        _tb._sightsClassified = Object.assign({}, trip.brief._sightsClassified);
-      }
-      if ((!_tb._classificationByPlace || !Object.keys(_tb._classificationByPlace).length)
-          && trip && trip.brief && trip.brief._classificationByPlace
-          && Object.keys(trip.brief._classificationByPlace).length) {
-        _tb._classificationByPlace = Object.assign({}, trip.brief._classificationByPlace);
-      }
+      // slice 4 (dedup): classifier-bucket rehydrate is now the tested
+      // MaxPublish.rehydrateClassifierBuckets (was inlined here, byte-identical).
+      // Mutates _tb in place, copying empty buckets from trip.brief.
+      MaxPublish.rehydrateClassifierBuckets(_tb, trip && trip.brief);
       console.log("[Max PD.236] publishTrip start. sightsClassified=" +
         Object.keys(_tb._sightsClassified || {}).length);
     } catch (_) {}
@@ -2037,48 +2031,26 @@
       }
     } catch (_) {}
 
-    // Dedup duplicate candidates by normalized name BEFORE the filter
-    // so reconciled / backstopped duplicates don't each spawn a
-    // destination. Keep first occurrence.
-    var _pd234Seen = Object.create(null);
-    var _pd234Deduped = [];
-    var _pd234DropCount = 0;
-    (_tb.candidates || []).forEach(function (c) {
-      if (!c || !c.place) { _pd234Deduped.push(c); return; }
-      var k = _pd234NrmFn(c.place);
-      if (!k) { _pd234Deduped.push(c); return; }
-      if (_pd234Seen[k]) { _pd234DropCount++; return; }
-      _pd234Seen[k] = true;
-      _pd234Deduped.push(c);
-    });
-    if (_pd234DropCount) {
-      console.log("[Max PD.234] dedup'd " + _pd234DropCount + " duplicate candidate(s)");
-      _tb.candidates = _pd234Deduped;
+    // Dedup duplicate candidates by normalized name BEFORE the filter so
+    // reconciled / backstopped duplicates don't each spawn a destination.
+    // slice 4 (dedup): MaxPublish.dedupCandidatesByPlace (was inlined here,
+    // byte-identical). Preserve reassign-+-log only when something dropped.
+    var _dd = MaxPublish.dedupCandidatesByPlace(_tb.candidates || []);
+    if (_dd.droppedCount) {
+      console.log("[Max PD.234] dedup'd " + _dd.droppedCount + " duplicate candidate(s)");
+      _tb.candidates = _dd.deduped;
     }
 
-    var _pd234Skipped = [];
-    var kept=(_tb.candidates||[]).filter(function(c){
-      if (c.status !== "keep") return false;
-      // v360.3 (#124 Turn 3): exclude day-trip / wayside-intent
-      // candidates — those commit separately as planItem stops on
-      // their respective routes (see passes further down). Without
-      // this they'd double-commit.
-      if (c.intent === "wayside" || c.intent === "dayTrip") return false;
-      // PD.234: exclude any candidate the classifier put in the sights
-      // bucket. They get attached to a parent's suggestions[] by PD.223
-      // (within) or augmented as 0-night stops by PD.225 (from / orphan).
-      if (c.place) {
-        var k = _pd234NrmFn(c.place);
-        if (_pd234SightSet[k]) {
-          _pd234Skipped.push(c.place);
-          return false;
-        }
-      }
-      return true;
-    });
-    if (_pd234Skipped.length) {
-      console.log("[Max PD.234] excluded " + _pd234Skipped.length + " sight candidate(s) from destinations build:");
-      _pd234Skipped.forEach(function (line) { console.log("  - " + line); });
+    // slice 4 (dedup): destination filter is MaxPublish.filterCandidatesForDestinations
+    // (predicate was inlined here, identical). It MUST receive the AUGMENTED
+    // _pd234SightSet (brief-fallback + the PD.430 user-listed-sight merge above),
+    // NOT the raw _tb._sightsClassified — otherwise user-listed sights re-inflate
+    // the destination count (the exact PD.430 "34 sights → 45 destinations" bug).
+    var _flt = MaxPublish.filterCandidatesForDestinations(_tb.candidates || [], _pd234SightSet);
+    var kept = _flt.kept;
+    if (_flt.skippedSights.length) {
+      console.log("[Max PD.234] excluded " + _flt.skippedSights.length + " sight candidate(s) from destinations build:");
+      _flt.skippedSights.forEach(function (line) { console.log("  - " + line); });
     }
 
     // v359.60.5: reconcile placeActivities → candidates. Completeness-pass
