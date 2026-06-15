@@ -5241,6 +5241,20 @@ function saveTripsIndex(){
   catch(e){}
 }
 
+// F6 (parallel-state): single door for appending a trips-index row from the
+// duplicate / share-import flows. These intentionally read the PERSISTED index
+// fresh and merge (NOT the in-memory _tripsIndex, which can be stale in these
+// flows — using it could drop other trips), then the caller hard-reloads. This
+// was duplicated as a raw read-push-setItem in two places; encapsulated here.
+function _appendTripIndexEntry(entry){
+  try {
+    var idx = JSON.parse(localStorage.getItem("max-trips-index") || "[]");
+    if (!Array.isArray(idx)) idx = [];
+    idx.push(entry);
+    localStorage.setItem("max-trips-index", JSON.stringify(idx));
+  } catch (_) {}
+}
+
 // PD.327: single mutator for "add this trip to the trips index" across
 // the 8 mint paths (paste-list build, sentence build, file import,
 // publishTrip, _initialTripSave, etc.). Before this, every flow did a
@@ -26118,14 +26132,11 @@ function _resumePendingShareDuplicate(token){
     }).then(function(){
       try {
         _persistTripRaw(newId, JSON.stringify(newEnv));
-        var idx = [];
-        try { idx = JSON.parse(localStorage.getItem("max-trips-index") || "[]"); } catch (_) {}
-        idx.push({
+        _appendTripIndexEntry({ // F6: single door (read-fresh-merge)
           id: newId, name: newName,
           savedAt: new Date().toISOString(),
           destCount: (clone.destinations || []).length,
         });
-        localStorage.setItem("max-trips-index", JSON.stringify(idx));
       } catch (_) {}
       // Hard reload so the app boots cleanly into the home screen
       // with the new trip in the index. Cleaner than trying to
@@ -26243,15 +26254,12 @@ function _duplicateSharedTripToMyAccount(){
     try {
       _persistTripRaw(newId, JSON.stringify(envelope));
       // Index entry — minimal; pullAll will fill in dates etc.
-      var idxEntry = {
+      // F6: single door (read-fresh-merge, then the caller hard-reloads).
+      _appendTripIndexEntry({
         id: newId, name: newName,
         savedAt: new Date().toISOString(),
         destCount: (clone.destinations || []).length,
-      };
-      var idx = [];
-      try { idx = JSON.parse(localStorage.getItem("max-trips-index") || "[]"); } catch (_) {}
-      idx.push(idxEntry);
-      localStorage.setItem("max-trips-index", JSON.stringify(idx));
+      });
     } catch (_) {}
     // Navigate: drop ?share=, reload, the app will pull and show the new trip.
     try { history.replaceState(null, "", location.pathname); }
@@ -27271,6 +27279,14 @@ var _useRoadRouting = (function(){
   try { var v = localStorage.getItem('max-road-routing'); return v === '1'; } // default false
   catch(e){ return false; }
 })();
+// F7 (parallel-state): single door for the road-routing toggle so the in-memory
+// _useRoadRouting and its persisted 'max-road-routing' key are always written
+// together (the pair was set inline in initMapRoadsBtn AND paste-browse-modal).
+function _setRoadRouting(on){
+  _useRoadRouting = !!on;
+  try { localStorage.setItem('max-road-routing', _useRoadRouting ? '1' : '0'); } catch(_){}
+}
+if (typeof globalThis !== "undefined") globalThis._setRoadRouting = _setRoadRouting;
 
 function initMapRouteBtn(){
   var btn = document.getElementById('map-route-btn');
@@ -27301,8 +27317,7 @@ function initMapRoadsBtn(){
     btn.style.color = _useRoadRouting ? '#fff' : '#1a5fa8';
   }
   btn.onclick = function(){
-    _useRoadRouting = !_useRoadRouting;
-    try { localStorage.setItem('max-road-routing', _useRoadRouting ? '1' : '0'); } catch(e){}
+    _setRoadRouting(!_useRoadRouting); // F7: single door
     paint();
     // PD.463: one-time disclaimer the first time Roads is turned ON. The
     // road-following lines LOOK like driving directions but aren't — OSRM's

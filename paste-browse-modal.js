@@ -744,8 +744,8 @@ function enterApp(){
         } catch(_){}
       }
       if (_pending !== null && _pending !== _useRoadRouting) {
-        _useRoadRouting = _pending;
-        try { localStorage.setItem('max-road-routing', _useRoadRouting ? '1' : '0'); } catch(_){}
+        if (typeof _setRoadRouting === "function") _setRoadRouting(_pending); // F7: single door
+        else { _useRoadRouting = _pending; try { localStorage.setItem('max-road-routing', _useRoadRouting ? '1' : '0'); } catch(_){} }
         // Repaint the trip-view's own Roads button to match.
         var _rb = document.getElementById('map-roads-btn');
         if (_rb) {
