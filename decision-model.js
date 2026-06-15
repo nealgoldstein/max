@@ -1,3 +1,4 @@
+// @ts-check
 // decision-model.js — P4 (the perfect model): the user's DECISIONS as data,
 // separated from facts and from derived views.
 //
@@ -24,6 +25,9 @@
 
 (function (global) {
   "use strict";
+  // The injected global carries app globals (MaxDiscovery, MaxDecisions) that
+  // aren't on the lib `globalThis` type — alias as any for the @ts-check pass.
+  var _G = /** @type {any} */ (global);
 
   function _norm(s) { return String(s == null ? "" : s).toLowerCase().replace(/\s+/g, " ").trim(); }
 
@@ -106,6 +110,7 @@
   // facts: { origin: "user"|"max"|"max-hub", role, kind, themeFit, nearListed }
   // decision: a Decision, or null when the user has not decided.
 
+  /** @param {Facts} facts @returns {string} */
   function _origin(facts) {
     var o = facts && facts.origin;
     return (o === "user" || o === "max" || o === "max-hub") ? o : "max";
@@ -114,6 +119,7 @@
   // keep rule — PD.452, proven live. rejected -> false; a user decision ->
   // their exact choice; otherwise the default by origin (your places on, Max's
   // off). "Max checks nothing" is simply the else-branch.
+  /** @param {Facts} facts @param {?MaxDecisionSpec} decision @returns {boolean} */
   function keepOf(facts, decision) {
     if (decision && decision.rejected) return false;
     if (decision && decision.kept !== null) return decision.kept === true;
@@ -122,6 +128,7 @@
 
   // role — a decided role wins; else the fact's suggested role; else a default
   // by kind (a place you sleep in is a stay, otherwise a sight).
+  /** @param {Facts} facts @param {?MaxDecisionSpec} decision @returns {string} */
   function roleOf(facts, decision) {
     if (decision && decision.role) return decision.role;
     if (facts && facts.role) return facts.role;
@@ -132,11 +139,12 @@
   // which is already a pure function of place attributes. We pass it a place
   // shaped the way PlacementPolicy expects (decision reflected as its string).
   function sectionOf(placeForPolicy) {
-    var P = global.MaxDiscovery && global.MaxDiscovery.PlacementPolicy;
+    var P = _G.MaxDiscovery && _G.MaxDiscovery.PlacementPolicy;
     return (P && typeof P.sectionFor === "function") ? P.sectionFor(placeForPolicy) : null;
   }
 
   // the full derived view in one call
+  /** @param {Facts} facts @param {?MaxDecisionSpec} decision @param {any} [placeForPolicy] */
   function project(facts, decision, placeForPolicy) {
     return {
       keep: keepOf(facts, decision),
@@ -156,5 +164,5 @@
   };
 
   if (typeof module !== "undefined" && module.exports) module.exports = MaxDecisions;
-  if (global && !global.MaxDecisions) global.MaxDecisions = MaxDecisions;
+  if (_G && !_G.MaxDecisions) _G.MaxDecisions = MaxDecisions;
 })(typeof globalThis !== "undefined" ? globalThis : this);

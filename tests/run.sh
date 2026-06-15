@@ -33,3 +33,16 @@ node tests/data-preservation-tests.js
 node tests/engine-publish-tests.js
 node tests/engine-enrich-tests.js
 node tests/engine-routing-tests.js
+
+# Incremental JSDoc type-checking (extensibility lever #1). tsc checks ONLY the
+# files that opt in with a top-line `// @ts-check` (see tsconfig.json), against
+# the shapes in types/max-model.d.ts. A type error fails the gate (set -e).
+# Skips with a notice if typescript isn't installed, so the Node suite still
+# runs without `npm install`.
+if [ -x node_modules/.bin/tsc ]; then
+  echo "── typecheck (tsc --noEmit, // @ts-check files) ──"
+  node_modules/.bin/tsc --noEmit
+  echo "  ✓ typecheck clean"
+else
+  echo "── typecheck SKIPPED — run 'npm install' to enable tsc ──"
+fi
