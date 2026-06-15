@@ -10,15 +10,20 @@ Last updated: **2026-06-11** · `index.html` ≈ **38,432** lines · ~**50** JS 
 ## Extensibility roadmap (the next architectural tier)
 Three levers to lower change-risk further (change-risk = bug-risk). Ordered: each de-risks the next.
 
-- **#1 — Types on the data shapes. ◑ FOUNDATION DONE + extensible.** `tsconfig.json` (allowJs,
-  checkJs OFF globally, opt-in per file via `// @ts-check`), `types/max-model.d.ts` (the first
-  written-down Trip/Brief/Destination/Route/Candidate/PlaceActivity/RequiredPlace/PlaceMeta/Facts/
-  Decision shapes — ambient, permissive), `tsc --noEmit` wired into `tests/run.sh` (skips if
-  typescript not installed). Typed clean so far: `decision-model.js`, `migration.js`,
-  `engine-publish.js`. Verified teeth (a string/number compare errored TS2367). **To continue:** add
-  modules to `// @ts-check` + tsconfig `include` one at a time, fixing what tsc flags. Next:
-  `geography-model.js` (~126 issues — its own slice), then the engine-* + tripstore. As a shape gets
-  fully enumerated, drop its `[k:string]:any` index signature to also catch unknown-field typos.
+- **#1 — Types on the data shapes. ◑ CORE LAYER DONE; UI + monolith remain.** `tsconfig.json` (allowJs,
+  checkJs OFF globally, opt-in per file via `// @ts-check`), `types/max-model.d.ts` (the written-down
+  Trip/Brief/Destination/Route/Candidate/PlaceActivity/RequiredPlace/PlaceMeta/Facts/Decision shapes +
+  the cross-module global surface), `tsc --noEmit` wired into `tests/run.sh` (skips if typescript not
+  installed). **14 modules typed clean** — the whole data + engine layer: decision-model, migration,
+  engine-publish, geography-model, discovery-model, max-data, place-repo, section-kind, place-key,
+  engine-routing, engine-enrich, engine-build, tripstore, engine-trip. Surfaced + fixed real latent
+  type bugs along the way (engine-trip's `_perpKm` shape union, two Date-minus-Date sites; engine-enrich's
+  pluggable-hook arity). Established mechanics: declare a sibling's global on the surface; cast the IIFE
+  bootstrap arg to any; don't ambient-declare a global a typed module OWNS. **Remaining (incremental,
+  lower marginal value than the core):** the UI modules (trip-ui, features-*, construct-decorate,
+  edit-constraints, map-pin-panel, home-screen, …), engine-picker.js (large), and index.html (the 39k
+  monolith — biggest; best tackled after/with #2). As a shape gets fully enumerated, drop its
+  `[k:string]:any` index signature to also catch unknown-field typos.
 - **#2 — Module system / build step. ◻ Planned (the big, app-breaking-risky one).** 60 ordered
   `<script>` tags + 202 global exposures = the load-order-race class + no encapsulation/dead-code
   detection. Target: ES modules + a bundler (esbuild). **Must be incremental + leaf-first**, with the
