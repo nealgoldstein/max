@@ -243,6 +243,10 @@ function _hydratePickerFromCommittedSrc() {
         _roleTouched: true,
         waysideFromHub: (src.fromPlace || "").toLowerCase()
       });
+      // P4.4c: the leg also lands in the decision log (the source publish reads).
+      if (typeof _recordWaysideLegDecision === "function") {
+        _recordWaysideLegDecision(stop.name, src.fromPlace, src.toPlace);
+      }
       wsHydrated++;
     });
   });

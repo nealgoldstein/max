@@ -3612,9 +3612,30 @@
         var committed = 0, dropped = 0;
         waysideCands.forEach(function (c) {
           var leg = null;
-          if (c.waysideLeg) {
+          // P4.4c: the leg is a DECISION attribute — read it from the decision
+          // log first (the source). Fall back to the candidate's waysideLeg for
+          // un-recorded cases, then to the geometric fit below.
+          var _decLeg = null;
+          try {
+            var _wd = (_tb._decisions && typeof _tb._decisions.get === "function") ? _tb._decisions.get(c.place) : null;
+            _decLeg = _wd ? _wd.leg : null;
+          } catch (_) {}
+          if (_decLeg && (_decLeg.fromPlace || _decLeg.toPlace)) {
+            leg = _findLegByPlaceNames(_decLeg.fromPlace, _decLeg.toPlace);
+          }
+          if (!leg && c.waysideLeg) {
             leg = _findLegByPlaceNames(c.waysideLeg.fromPlace, c.waysideLeg.toPlace);
           }
+          // Shadow check (P4.4c): the decision log should agree with the
+          // candidate's legacy field. A mismatch means a write-path missed the
+          // log — surface it without changing behavior.
+          try {
+            if (_decLeg && c.waysideLeg
+                && (_decLeg.fromPlace !== c.waysideLeg.fromPlace || _decLeg.toPlace !== c.waysideLeg.toPlace)) {
+              console.warn("[Max P4.4c] wayside leg mismatch for " + c.place
+                + " — decision=" + JSON.stringify(_decLeg) + " candidate=" + JSON.stringify(c.waysideLeg));
+            }
+          } catch (_) {}
           if (!leg) {
             // Geometric fallback. Build a minimal "candidate" ordered
             // by trip.destinations so _bestWaysideLegForCandidate sees

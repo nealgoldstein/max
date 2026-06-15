@@ -174,6 +174,14 @@ test.describe('P4.4 gate — wayside leg assignment survives publish → reopen'
     ];
     await page.evaluate((b) => { window.MaxEnginePicker.resetState(b); window._mdcItems = []; },
       brief({ entry: 'Reykjavik', candidates: cands }));
+    // P4.4c: record the wayside's leg in the decision log (what the live
+    // assignment sites now do), so publish resolves the leg from the decision
+    // — not the candidate's legacy waysideLeg field.
+    await page.evaluate(() => {
+      if (typeof window._recordWaysideLegDecision === 'function') {
+        window._recordWaysideLegDecision('Seljalandsfoss', 'Reykjavik', 'Vik');
+      }
+    });
     await page.evaluate(async () => { await window.buildFromCandidates(); });
     await page.waitForSelector('.tm-dest', { timeout: 8000 });
   }

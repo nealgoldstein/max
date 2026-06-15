@@ -1422,6 +1422,10 @@
                   status: "keep",
                 });
               }
+              // P4.4c: record the leg in the decision log (source publish reads).
+              if (typeof global._recordWaysideLegDecision === "function") {
+                global._recordWaysideLegDecision(wsCand.name, wsCand.fromPlace, wsCand.toPlace);
+              }
             } else if (match) {
               match.status = "reject";
             }

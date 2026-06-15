@@ -227,6 +227,28 @@ function _mirrorCandToTrip(cand){
   } catch (_) {}
 }
 
+// P4.4c: record a wayside's leg as a DECISION (where the user placed it),
+// keyed by place identity, next to role/hub. Called at the wayside-assignment
+// sites so the leg lives in the decision log — the source publishTrip now
+// reads — rather than only on the working candidate. Idempotent; preserves
+// any existing hub on the place's decision.
+function _recordWaysideLegDecision(place, fromPlace, toPlace) {
+  try {
+    if (typeof MaxDecisions === "undefined" || !MaxDecisions) return;
+    if (typeof _tb === "undefined" || !_tb) return;
+    if (!_tb._decisions) _tb._decisions = new MaxDecisions.Decisions();
+    var prev = _tb._decisions.get(place);
+    _tb._decisions.set(place, {
+      kept: true,
+      rejected: false,
+      role: "onway",
+      hub: (prev && prev.hub) || "",
+      leg: { fromPlace: fromPlace || "", toPlace: toPlace || "" }
+    });
+  } catch (_) {}
+}
+if (typeof globalThis !== "undefined") globalThis._recordWaysideLegDecision = _recordWaysideLegDecision;
+
 var MaxRoleWriter = {
   // Project a working candidate's role/status onto its published-snapshot twin.
   // THE single sync primitive — see _mirrorCandToTrip.
@@ -387,7 +409,8 @@ var MaxRoleWriter = {
           kept: _kept,
           rejected: (role === "reject"),
           role: validActive[role] ? role : (cand.role || null),
-          hub: hub
+          hub: hub,
+          leg: opts.leg || null   // P4.4c: a wayside's leg travels on the decision
         });
       }
     } catch (_) {}
