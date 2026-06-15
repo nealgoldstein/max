@@ -1,3 +1,4 @@
+// @ts-check
 // engine-publish.js — pure helpers for publishTrip.
 //
 // PD.320. The full publishTrip function in engine-picker.js (~2400

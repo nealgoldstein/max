@@ -15,6 +15,7 @@
 // canonical-model completion (#3) safe to attempt.
 
 declare var module: any;
+declare var window: any;
 
 /** A wayside's transit-leg placement (decision-model). */
 interface MaxLeg { fromPlace: string; toPlace: string; }

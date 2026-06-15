@@ -1,3 +1,4 @@
+// @ts-check
 // migration.js — Trip envelope shape migrations
 //
 // Pure, side-effect-free functions that transform a legacy trip
