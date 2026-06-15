@@ -110,7 +110,15 @@ below. Tier 3 — T3.4/3.7 done. Tier 4 — T4.1 done.
 - **T3.6 — god-functions** (`publishTrip` ~2434 lines, `_renderPlaceActivityItems`
   ~2500, `updateMainMap` ~1245, `_openTripStopPopover` ~812) with mixed
   responsibilities. Large extraction — do per-piece behind CI with the app driven,
-  NOT a blind bulk refactor. Not started.
+  NOT a blind bulk refactor. **◑ Started (slice 1 / 1a03020).** Extracted the PURE
+  transit-leg ranking (~76 lines) out of `_openTripStopPopover` into top-level
+  `_rankPopoverTransitLegs(trip, ctx, currentRouteId) → {html,count}` — no DOM, no
+  side effects; pinned by a deterministic Playwright unit test + Chrome-verified live.
+  **ROI note after probing all four:** slice 1 was the one cleanly-PURE block. The
+  remainder (`updateMainMap`, the popover's role-apply handlers, the picker row loop)
+  is side-effectful render/DOM code — extractions are smaller, lower-value, and each
+  needs a full Chrome render check. Proceed only per-slice behind the gate; not a
+  quick win like slice 1.
 - **T3.8 — `mdcItems` zombie field. ✅ DONE (PD.488).** Publish no longer emits it
   (`engine-picker.js` ~2318); no `trip.mdcItems =` write remains. The `tripstore` delete-on-save
   and the `max-data` legacy fallback are KEPT intentionally — they migrate pre-PD.488 saved
