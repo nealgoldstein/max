@@ -1,0 +1,49 @@
+name: gate
+
+# Runs the SAME gate as ./dev.sh check — the Node suite + the Playwright
+# browser suite — on a normal Linux runner where headless-Chromium navigation
+# works (it does NOT in the Cowork sandbox, which is why this exists: it gives
+# automated browser-gate results on every push without a manual Mac run).
+#
+# No secrets needed: the build-harness drives a canned-LLM mock (playback mode),
+# and playwright.config.js boots its own python http.server.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # python3 (for the Playwright webServer) is preinstalled on ubuntu-latest.
+
+      - name: Node suite (engine / contract checks)
+        run: bash tests/run.sh
+
+      - name: Install Playwright deps + Chromium
+        working-directory: tests/playwright
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Playwright browser suite
+        working-directory: tests/playwright
+        run: npx playwright test
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: tests/playwright/playwright-report/
+          retention-days: 7
