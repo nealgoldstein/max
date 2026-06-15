@@ -375,6 +375,22 @@ var MaxRoleWriter = {
     // PD.455: project the just-mutated working candidate onto its snapshot
     // twin through the ONE mirror primitive (no inline dual-write).
     _mirrorCandToTrip(cand);
+    // P4.2 (shadow mode): record this user decision into the canonical decision
+    // log, IN PARALLEL with the record flags above. Not yet load-bearing — it
+    // exists so we can prove the log + the live records agree (keepOf == _keep)
+    // before cutting the derivation over to the log in P4.3.
+    try {
+      if (typeof MaxDecisions !== "undefined" && MaxDecisions && typeof _tb !== "undefined" && _tb) {
+        if (!_tb._decisions) _tb._decisions = new MaxDecisions.Decisions();
+        var _kept = (role === "reject" || role === "maybe") ? false : true;
+        _tb._decisions.set(cand.place, {
+          kept: _kept,
+          rejected: (role === "reject"),
+          role: validActive[role] ? role : (cand.role || null),
+          hub: hub
+        });
+      }
+    } catch (_) {}
     // ── Event emission (engine event bus) ───────────────────────────
     try {
       if (typeof MaxEnginePicker !== "undefined"

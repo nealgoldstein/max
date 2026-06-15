@@ -472,6 +472,10 @@
 <!-- PD.432: the clean domain model — Place × kind × source × decision, one set,
      counts() that reconcile by construction, projections for list/map. -->
 <script src="place-set.js?v=DEV"></script>
+<!-- P4: the user's DECISIONS as data — the one user-writable surface, with
+     keep/role/section as pure projections of (facts + decision). Loaded before
+     geography-model (which records into the log in shadow mode). -->
+<script src="decision-model.js?v=DEV"></script>
 <script src="max-data.js?v=DEV"></script>
 <!-- SSOT Phase 2: the ONE ingestion (trip → DiscoveryModel). Loads after
      max-data.js (uses its fold/getters) and resolves deps at call time. -->
@@ -12542,29 +12546,34 @@ if (typeof globalThis !== "undefined") globalThis._pd289ConsolidateStaysExtras =
 function _reconcileUserListedKeeps(){
   if (typeof _tb === "undefined" || !_tb) return;
   if (!Array.isArray(_tb.placeActivities)) _tb.placeActivities = [];
-  // PD.452 (#5 — render reads, never writes): the structural rebuild below
-  // recreates the stay/sight record objects every render, so per-record state
-  // would be lost. Rather than let the rebuild RE-DERIVE _keep (which fought the
-  // user's uncheck — the long "I can't uncheck a base" bug), carry the user's
-  // raw DECISION across the rebuild and let ONE rule interpret it at the end:
+  // P4.3 (perfect model): keep is now a PURE PROJECTION of (facts + the DECISION
+  // LOG). The log (_tb._decisions) is the single source of the user's choices and
+  // — unlike per-record flags — it survives the structural rebuild on its own
+  // (it lives on _tb, not on the recreated records). So there is no snapshot/
+  // restore and no "_decided" dance: the derivation at the end of this function
+  // computes keep from MaxDecisions.keepOf. "Max checks nothing" and "the render
+  // never changes a user's choice" are just what that projection returns.
   //
-  //     keep = _decided ? (the value the user chose) : (origin === "user")
-  //
-  // "_decided" is stamped by MaxRoleWriter on every user action (keep OR
-  // uncheck). So: a place you listed but never touched defaults checked; a Max
-  // suggestion you never touched defaults UNCHECKED — "Max checks nothing" is
-  // just the default branch, not a guard. A user decision (either way) is
-  // honored verbatim and survives every render. This replaces the keep-snapshot
-  // referee AND the per-section keep referees with a single derivation.
+  // We only SEED the log here, once per place, from any decision the records
+  // still carry: a reload starts with an empty in-memory log, but records loaded
+  // from storage hold _decided/_rejected (stamped + persisted by MaxRoleWriter).
+  // Seeding runs BEFORE the rebuild, while those flags are intact; thereafter the
+  // log is authoritative. (P4.5 will persist the log directly and retire the
+  // record flags entirely.)
   var _keepNf = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
-  var _keepSnap = {};
-  (_tb.placeActivities || []).forEach(function(it){
-    (it && it.requiredPlaces || []).forEach(function(p){
-      if (!p || !p.place) return;
-      var _sk = _keepNf(p.place);
-      if (_sk && !(_sk in _keepSnap)) _keepSnap[_sk] = { keep: p._keep, rej: p._rejected, decided: (p._decided === true) };
+  if (typeof MaxDecisions !== "undefined" && _tb && !_tb._decisions) _tb._decisions = new MaxDecisions.Decisions();
+  var _decLog = (_tb && _tb._decisions) || null;
+  if (_decLog) {
+    (_tb.placeActivities || []).forEach(function(it){
+      (it && it.requiredPlaces || []).forEach(function(p){
+        if (!p || !p.place) return;
+        if (_decLog.decided(p.place)) return;               // log already holds the user's call
+        if (p._decided === true || p._rejected === true) {  // a persisted user decision → seed it
+          _decLog.set(p.place, { kept: (p._keep === true), rejected: (p._rejected === true), role: p.role || null });
+        }
+      });
     });
-  });
+  }
   // PD.360: this pass now runs at WRITE milestones (build events,
   // merge completion, hydration) — see _runPlaceSetPasses. The
   // render-site call remains only as a self-heal for writers that
@@ -13439,28 +13448,33 @@ function _reconcileUserListedKeeps(){
   // construction, not by another pass. Stay/route/condition sections
   // pass through unchanged.
   _applyDiscoveryModelToSights();
-  // PD.452: the ONE keep rule. The rebuild is done; now set every record's
-  // check-state from a single derivation — never from whatever the rebuild
-  // happened to leave behind. First carry the pre-rebuild decision back onto the
-  // recreated objects (by identity), then derive:
-  //   • the user explicitly decided  → honor their choice verbatim
-  //   • otherwise                     → default: your places on, Max's off
-  // "Max checks nothing" and "the render never changes a user's check" both fall
-  // out of this; no separate enforcement pass exists or is needed.
+  // P4.3: the ONE keep rule, now a PURE PROJECTION of (facts + decision log).
+  // The rebuild is done; set every record's check-state from MaxDecisions.keepOf
+  // reading _tb._decisions. records carry NO decision authority — _keep/_rejected
+  // are computed here every reconcile. "Max checks nothing" and "the render never
+  // changes a user's choice" are just what keepOf returns. (Load-order fallback
+  // to the prior origin-default rule if the module hasn't attached yet.)
   var _origOf = (typeof window !== "undefined" && typeof window._placeOrigin === "function")
     ? window._placeOrigin
     : function(p){ return (p && p._origin) || ((p && p._autoCreated) ? "max-hub" : "max"); };
+  var _isStaySec = (typeof window !== "undefined" && typeof window._isStaySection === "function")
+    ? window._isStaySection : function(){ return false; };
+  var _MD = (typeof MaxDecisions !== "undefined") ? MaxDecisions : null;
   (_tb.placeActivities || []).forEach(function(it){
+    var _stay = _isStaySec(it && it.section);
     (it && it.requiredPlaces || []).forEach(function(p){
       if (!p || !p.place) return;
-      var _sk = _keepNf(p.place);
-      var _s = _sk && _keepSnap[_sk];
-      // carry the raw decision across the rebuild
-      if (_s) { p._rejected = _s.rej; if (_s.decided) { p._decided = true; p._keep = _s.keep; } }
-      // derive the final keep — one rule, no referees
-      if (p._rejected) { p._keep = false; return; }
-      if (p._decided === true) { p._keep = (p._keep === true); return; }
-      p._keep = (_origOf(p) === "user");
+      var _dec = _decLog ? _decLog.get(p.place) : null;
+      if (_MD) {
+        var _facts = { origin: _origOf(p), kind: _stay ? "destination" : "sight" };
+        p._keep = _MD.keepOf(_facts, _dec);
+        p._rejected = !!(_dec && _dec.rejected);
+      } else {
+        // load-order fallback: the prior origin-default rule
+        if (p._rejected) { p._keep = false; }
+        else if (p._decided === true) { p._keep = (p._keep === true); }
+        else { p._keep = (_origOf(p) === "user"); }
+      }
     });
   });
 }
@@ -13513,6 +13527,39 @@ function _runPlaceSetPasses(reason){
   } catch(e){ console.warn("[Max PD.360] passes failed (" + reason + "):", e && e.message); }
 }
 if (typeof globalThis !== "undefined") globalThis._runPlaceSetPasses = _runPlaceSetPasses;
+
+// P4.2 (shadow mode): prove the decision LOG agrees with the live record flags.
+// For every place the user has DECIDED (it's in the log), the pure projection
+// MaxDecisions.keepOf(facts, decision) must equal the record's _keep. If this
+// reports zero disagreements across real use, the log is a faithful stand-in and
+// P4.3 can cut the live derivation over to it. Diagnostic only — writes nothing.
+function _p4ShadowCheck(){
+  try {
+    if (typeof _tb === "undefined" || !_tb || typeof MaxDecisions === "undefined") return { ready: false };
+    var D = _tb._decisions;
+    if (!D) return { ready: true, decided: 0, note: "no decisions recorded yet" };
+    var nrm = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
+    var isStay = (typeof window._isStaySection === "function") ? window._isStaySection : function(){ return false; };
+    var origOf = (typeof window._placeOrigin === "function") ? window._placeOrigin
+      : function(p){ return (p && p._origin) || ((p && p._autoCreated) ? "max-hub" : "max"); };
+    var decided = 0, agree = 0, disagree = [];
+    (_tb.placeActivities || []).forEach(function(it){
+      var stay = isStay(it && it.section);
+      (it && it.requiredPlaces || []).forEach(function(p){
+        if (!p || !p.place) return;
+        var dec = D.get(p.place);
+        if (!dec) return; // only audit places the user actually decided
+        decided++;
+        var facts = { origin: origOf(p), kind: stay ? "destination" : "sight" };
+        var projected = MaxDecisions.keepOf(facts, dec);
+        if (projected === !!p._keep) agree++;
+        else disagree.push({ place: p.place, record: !!p._keep, projected: projected, origin: facts.origin });
+      });
+    });
+    return { ready: true, decided: decided, agree: agree, disagree: disagree, clean: disagree.length === 0 };
+  } catch (e) { return { error: e && e.message }; }
+}
+if (typeof globalThis !== "undefined") globalThis._p4ShadowCheck = _p4ShadowCheck;
 
 // PD.339: "Check them all" — keep every unchecked (non-rejected)
 // sight in one tap. Persists immediately (PD.334 pipeline).
