@@ -271,4 +271,26 @@ test.describe('structural guards', () => {
     expect(r.miss, 'far + unknown name ⇒ no hit').toBe(false);
     expect(r.emptySafe, 'null trip safe').toBe('[]');
   });
+
+  // T3.6: _pmWhyFitsLine extracted (pure) from _renderPlaceActivityItems; shared
+  // with _pmBuildPlaceRow.
+  test('T3.6: _pmWhyFitsLine builds the ✦ Max line from a candidate map', async ({ page }) => {
+    await bootClean(page);
+    const r = await page.evaluate(() => {
+      const fn = window._pmWhyFitsLine;
+      if (typeof fn !== 'function') return { typeofFn: typeof fn };
+      const map = { reykjavik: { whyItFits: 'The capital — gateway to the ring road.' } };
+      const hit = fn('Reykjavik', map);
+      return {
+        typeofFn: 'function',
+        hasWhy: hit.includes('✦ Max:') && hit.includes('gateway to the ring road'),
+        noCand: fn('Nowhere', map) === '',
+        nullSafe: fn('X', null) === '',
+      };
+    });
+    expect(r.typeofFn).toBe('function');
+    expect(r.hasWhy, 'renders ✦ Max line for a matching candidate').toBe(true);
+    expect(r.noCand, 'no candidate ⇒ empty').toBe(true);
+    expect(r.nullSafe, 'null map safe').toBe(true);
+  });
 });

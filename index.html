@@ -13829,6 +13829,26 @@ function _pmSectionSlug(sec){
 }
 if (typeof globalThis !== "undefined") globalThis._pmSectionSlug = _pmSectionSlug;
 
+// T3.6 (pure, extracted from _renderPlaceActivityItems): the "✦ Max: <why>"
+// italic row line for a place, looked up in a normalized-name → candidate map.
+// Truncates long whyItFits to keep the row compact. Used by both the renderer
+// and _pmBuildPlaceRow (one tested impl instead of a per-render closure).
+function _pmWhyFitsLine(placeName, candByPlaceKey){
+  try {
+    candByPlaceKey = candByPlaceKey || {};
+    var k = (typeof _normPlaceName === "function") ? _normPlaceName(placeName) : String(placeName||"").toLowerCase();
+    var c = candByPlaceKey[k];
+    if (!c || !c.whyItFits) return "";
+    var why = String(c.whyItFits).trim();
+    if (why.length > 160) why = why.slice(0, 157).replace(/\s+\S*$/, "") + "…";
+    return '<div class="tb-dest-meta" style="font-size:10.5px;color:var(--c-ink-2);margin-top:3px;line-height:1.5;font-style:italic;">'
+      + '<span style="color:#7a6294;font-weight:600;font-style:normal;">✦ Max:</span> '
+      + _pmEsc(why)
+      + '</div>';
+  } catch(_){ return ""; }
+}
+if (typeof globalThis !== "undefined") globalThis._pmWhyFitsLine = _pmWhyFitsLine;
+
 function _renderPlaceActivityItems(){
   var list = document.getElementById("tb-place-act-list");
   if(!list) return;
@@ -13887,21 +13907,9 @@ function _renderPlaceActivityItems(){
       if (k && !_candByPlaceKey[k]) _candByPlaceKey[k] = c;
     });
   } catch(_){}
-  function _whyFitsLineFor(placeName){
-    try {
-      var k = (typeof _normPlaceName === "function") ? _normPlaceName(placeName) : String(placeName||"").toLowerCase();
-      var c = _candByPlaceKey[k];
-      if (!c || !c.whyItFits) return "";
-      // Truncate very long descriptions to keep the row compact;
-      // popup carries the full text + otherAttractions + tradeoffs.
-      var why = String(c.whyItFits).trim();
-      if (why.length > 160) why = why.slice(0, 157).replace(/\s+\S*$/, "") + "…";
-      return '<div class="tb-dest-meta" style="font-size:10.5px;color:var(--c-ink-2);margin-top:3px;line-height:1.5;font-style:italic;">'
-        + '<span style="color:#7a6294;font-weight:600;font-style:normal;">✦ Max:</span> '
-        + _pmEsc(why)
-        + '</div>';
-    } catch(_){ return ""; }
-  }
+  // T3.6: logic now in the pure top-level _pmWhyFitsLine; thin binding over the
+  // render-local candidate map (also handed to _pmBuildPlaceRow as a dep).
+  function _whyFitsLineFor(placeName){ return _pmWhyFitsLine(placeName, _candByPlaceKey); }
   // Round NC.X: snapshot the scroll position of the picker-list pane
   // BEFORE wiping the list. Toggling a place's checkbox used to scroll
   // the user to the bottom (probably layout clamping after the
