@@ -57,14 +57,23 @@ Three levers to lower change-risk further (change-risk = bug-risk). Ordered: eac
   mutation through the decision log + single doors — then a new view (e.g. the spreadsheet) is "write
   a projection" and a behavior change is "change one place." Same per-slice + Chrome-verify pattern as
   the publishTrip dedup; multi-session.
-  **Slice log:** ✅ `MaxDecisions.factsOf(ctx)` — the FACTS leg is now a pure function (was inline
-  `{origin,kind}` literals duplicated at the keep-reconcile + shadow-check; the KIND rule lives in one
-  place). keepOf/roleOf/sectionOf/project already exist; the projection now reads facts from one source.
-  **Next slices (ordered):** (a) give place-set.js:238 `factsOf` (last inline kind-rule); (b) extract a
-  single `decisionOf(p)`/`factsCtxOf(p)` resolver so call sites stop hand-building origin+isStay; (c) the
-  big one — stop STORING `_keep` and derive it at read time via `keepOf` (≈50 `_keep` write sites + ≈97
-  reads are the smear this model exists to delete; cut over read clusters first, then retire writers,
-  guarded by the existing P4.2 shadow contract-check); (d) same treatment for role/section.
+  **Slice log:**
+  ✅ `MaxDecisions.factsOf(ctx)` — the FACTS leg is a pure function (was inline `{origin,kind}` literals
+     duplicated at the keep-reconcile + shadow-check; the KIND rule now lives in one place).
+  ✅ KEEP projection PROVEN + GATED — `_p4ShadowCheck` audits EVERY place (stored `_keep` ===
+     keepOf(facts,decision)); clean on the real trip (63/63); CI gate in p4_4-gate.spec.js enforces it
+     (build + after real decisions). So keep is derivable; the cutover is unblocked.
+  ✅ ROLE projection PROVEN + GATED — `_p4RoleShadowCheck` audits placeActivities, deriving the live role
+     from the smeared signals (`_isDayTrip`→daytrip, `_waysideFromHub`→onway, stay-section→stay, else see)
+     and comparing to roleOf; clean on the real trip (53/53, disagreeUndecided:[]); CI gate enforces
+     `decidedClean` (explicit role decisions must reproduce).
+  **Both projections are now faithful stand-ins for the stored/smeared state — the bulletproofing
+  invariant is in place and CI-enforced.** What remains is the CUTOVER (the extensibility payoff):
+  **Next slices (ordered):** (a) stop STORING `_keep` / reading smeared role and DERIVE at read time via
+  keepOf/roleOf — the ≈50 `_keep` writers + the `_isDayTrip`/`_waysideFromHub` role smear are what this
+  deletes; cut read clusters first, then retire writers, each guarded by the two shadow checks + CI gates
+  (a regression turns them red). Risk lives in live UI handlers (e.g. `toggleMdcItem`) → per-slice
+  browser-verify. (b) give place-set.js:238 `factsOf` (last inline kind-rule). (c) `sectionOf` cutover.
 
 > Why #1 first/now: shape-drift was the root of most of what this whole effort fixed. #1 is the only
 > one of the three that's incrementally adoptable with zero app-breaking risk, and it makes #2 and #3
