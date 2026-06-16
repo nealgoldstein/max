@@ -55,21 +55,64 @@ if (missing.length) {
 
 // `;\n` between files guards against ASI hazards (a file ending without a
 // semicolon followed by one starting with `(`).
-// .mjs modules are real ESM — compile each to an IIFE via esbuild (it still runs
-// its globalThis exposure, so classic consumers reading the global are unaffected).
-// Classic .js modules concatenate raw (behavior-identical to the tags). As more
-// modules convert to ESM, more of the bundle becomes esbuild-compiled, leaf by leaf.
+//
+// INTERIM bundling for #2 Stage 2 (NOT the final form). No .mjs has a real
+// cross-module `import` yet — every module still shares state through globals
+// (explicit globalThis.X exposure AND implicit top-level bindings that other
+// modules read as bare globals). That means esbuild-per-entry is the WRONG tool
+// here: `format:"iife"` wraps each module in its own function scope, which
+// module-scopes those top-level bindings and breaks every bare cross-module read
+// (it would also double-execute any real import, since each entry re-bundles its
+// deps). The app today depends on global scope, so we reproduce it: for .mjs,
+// strip the trailing top-level export statements and concatenate the module as
+// global-scope classic code — byte-for-byte the behavior these files had when
+// they were .js. The SOURCE keeps its `export`s (so TypeScript treats them as
+// modules and raw index.html's type=module tags stay valid); only the bundled
+// OUTPUT is globalized. When the import-rewiring phase lands real import graphs,
+// this branch is replaced by a single-entry `esbuild.buildSync({bundle:true})`
+// that follows the import tree (and `esbuild` stays required for that).
+var EXPORT_LINE = /^[ \t]*export\s+(?:default\s+[\w$.]+|\{[^}]*\})\s*;?[ \t]*$/gm;
+
+// Concat collision guard. In one shared scope, two modules declaring the same
+// top-level `const`/`let` name is a hard SyntaxError ("already been declared").
+// Classic `var`/`function` are redeclarable so they never collide; only block-
+// scoped top-level decls do. Collect them per module and fail the build with a
+// precise message if any name (other than the `global` typing alias, demoted to
+// var below) appears in more than one module — so a future batch trips this at
+// build time, not as a cryptic 14-minute Playwright red.
+var TOP_LEXICAL = /^(?:const|let)[ \t]+([A-Za-z_$][\w$]*)/gm;
+var lexOwners = {};
+order.forEach(function (f) {
+  if (!/\.mjs$/.test(f)) return;
+  var src = fs.readFileSync(path.join(ROOT, f), "utf8").replace(/^[ \t]*\/\/.*$/gm, "");
+  var mm; while ((mm = TOP_LEXICAL.exec(src)) !== null) {
+    var name = mm[1];
+    if (name === "global") continue; // demoted to var in the concat below
+    (lexOwners[name] = lexOwners[name] || []).push(f);
+  }
+});
+var collisions = Object.keys(lexOwners).filter(function (n) {
+  return lexOwners[n].length > 1;
+});
+if (collisions.length) {
+  console.error("[build] top-level const/let name collision across concatenated modules:");
+  collisions.forEach(function (n) {
+    console.error("  '" + n + "' in: " + lexOwners[n].join(", "));
+  });
+  console.error("  Rename one, or make it a `var`, so the global-scope concat stays valid.");
+  process.exit(1);
+}
+
 var bundle = order.map(function (f) {
   var header = "/* ===== " + f + " ===== */\n";
+  var code = fs.readFileSync(path.join(ROOT, f), "utf8");
   if (/\.mjs$/.test(f)) {
-    var r = esbuild.buildSync({
-      entryPoints: [path.join(ROOT, f)],
-      bundle: true, format: "iife", platform: "browser",
-      write: false, logLevel: "silent"
-    });
-    return header + r.outputFiles[0].text;
+    code = code.replace(EXPORT_LINE, "");
+    // The `const/let global = (globalThis)` typing alias is identical in every
+    // module; demote to `var` so the 24 copies coexist in the concatenated scope.
+    code = code.replace(/^([ \t]*)(?:const|let)([ \t]+global[ \t]*=)/gm, "$1var$2");
   }
-  return header + fs.readFileSync(path.join(ROOT, f), "utf8");
+  return header + code;
 }).join("\n;\n");
 
 var outDir = path.join(ROOT, "dist");
