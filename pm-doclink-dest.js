@@ -1,3 +1,4 @@
+// @ts-check
 // pm-doclink-dest.js — extracted verbatim from index.html (PD.483 bloat reduction).
 // Place-meta doc-link picker + destination keep/nights toggles.
 // Pure function-cluster: declarations + globalThis-guarded exposures, no

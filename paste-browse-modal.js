@@ -1,3 +1,4 @@
+// @ts-check
 // paste-browse-modal.js — extracted verbatim from index.html (PD.483 bloat reduction).
 // Paste-list brief modal + browse-chat + home selection.
 // Pure function-cluster: declarations + globalThis-guarded exposures, no

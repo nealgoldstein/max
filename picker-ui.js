@@ -1,3 +1,4 @@
+// @ts-check
 // picker-ui.js — UI rendering for the picker (Round HW: Phase 4 of
 // the engine/UI split).
 //
@@ -1590,7 +1591,7 @@
           ? (global.parseNightsFromRange(c.stayRange) || 3) : 3;
         var ix = document.createElement("div");
         ix.style.cssText = "font-size:10px;color:var(--c-ink-3);padding:6px 6px 0;font-weight:700;letter-spacing:0.03em;";
-        if (hasStartDate && dateCursor && !isNaN(dateCursor)) {
+        if (hasStartDate && dateCursor && !isNaN(+dateCursor)) {
           var endDate = new Date(dateCursor); endDate.setDate(endDate.getDate() + nights);
           var dayEnd = dayCursor + nights - 1;
           var rangeStr = (nights > 1)

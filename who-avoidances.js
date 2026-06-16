@@ -1,3 +1,4 @@
+// @ts-check
 // who-avoidances.js — Who's-traveling (party) + Avoidances editors. Extracted from
 // index.html (PD.459).
 

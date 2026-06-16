@@ -1,3 +1,4 @@
+// @ts-check
 // trip-affordance.js — geographic-affordance pass + multi-destination day-trip
 // mechanism (Rounds FQ/FT). Extracted from index.html (PD.457).
 
@@ -165,8 +166,8 @@ function _openTripDatesEditor(){
 
   function _diffDays(a, b){
     var da = new Date(a + "T12:00:00"), db = new Date(b + "T12:00:00");
-    if (isNaN(da) || isNaN(db)) return null;
-    return Math.round((db - da) / 86400000);
+    if (isNaN(+da) || isNaN(+db)) return null;
+    return Math.round((+db - +da) / 86400000);
   }
   function _refreshPreview(){
     var s = startInp.value, e = endInp.value;

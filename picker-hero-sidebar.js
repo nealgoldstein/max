@@ -1,3 +1,4 @@
+// @ts-check
 // picker-hero-sidebar.js — Picker hero map sidebar list. Extracted verbatim from index.html (PD.474, bloat reduction).
 
 // ── Round HZ (picker hero map, step 4): sidebar list renderer ─────

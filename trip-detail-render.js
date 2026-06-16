@@ -1,3 +1,4 @@
+// @ts-check
 // trip-detail-render.js — Explore pane, Sights section, Day-trips
 // section, Later/Maybe bucket builder, Destination-mode renderer, and
 // Days-and-sights rendering. Extracted verbatim from index.html
@@ -882,7 +883,7 @@ function showAddToDay(item,type,dest,triggerBtn,opts){
     picker.style.left=r.left+"px"; picker.style.top=(r.bottom+4)+"px";
   }
   document.body.appendChild(picker);
-  setTimeout(function(){document.addEventListener("click",function dismiss(e){if(!picker.contains(e.target)){picker.parentNode&&picker.parentNode.removeChild(picker);document.removeEventListener("click",dismiss,true);}},true);},0);
+  setTimeout(function(){document.addEventListener("click",function dismiss(e){if(!picker.contains(/** @type {any} */(e.target))){picker.parentNode&&picker.parentNode.removeChild(picker);document.removeEventListener("click",dismiss,true);}},true);},0);
 }
 
 async function refreshRestaurantSuggestions(dest,btn){
@@ -1019,7 +1020,7 @@ function buildBucketSection(dest,bucketKey,title,subtitle){
       });
       var r2=btn.getBoundingClientRect(); picker.style.left=r2.left+"px"; picker.style.top=(r2.bottom+4)+"px";
       document.body.appendChild(picker);
-      setTimeout(function(){document.addEventListener("click",function dismiss(ev){if(!picker.contains(ev.target)){picker.parentNode&&picker.parentNode.removeChild(picker);document.removeEventListener("click",dismiss);}});},10);
+      setTimeout(function(){document.addEventListener("click",function dismiss(ev){if(!picker.contains(/** @type {any} */(ev.target))){picker.parentNode&&picker.parentNode.removeChild(picker);document.removeEventListener("click",dismiss);}});},10);
     };})(s,bucketKey,assignBtn);
     acts.appendChild(assignBtn);
 

@@ -9105,8 +9105,6 @@
     // positions (geo-affordance / "Day trips" tips between Trip
     // Bookings and Add Waysides; decisions-deferred / "Itinerary empty
     // days" between Spark intake and Destinations).
-    renderGeoAffordanceBanner:   _renderGeoAffordanceBanner,
-    renderDecisionsDeferredPanel:_renderDecisionsDeferredPanel,
     // v360.1: canonical operational-items collector. Exposed so the
     // home dashboard (index.html _buildDashboardItems) can delegate
     // instead of maintaining a second implementation.

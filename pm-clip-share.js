@@ -1,3 +1,4 @@
+// @ts-check
 // pm-clip-share.js — extracted verbatim from index.html (PD.483 bloat reduction).
 // Place-meta web-clip capture + Discovery share flow.
 // Pure function-cluster: declarations + globalThis-guarded exposures, no

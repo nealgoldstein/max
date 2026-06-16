@@ -1,3 +1,4 @@
+// @ts-check
 // pm-docs-editor.js — extracted verbatim from index.html (PD.483 bloat reduction).
 // Place-meta docs editor: tag filter, drag-drop, doc editor.
 // Pure function-cluster: declarations + globalThis-guarded exposures, no

@@ -53,10 +53,8 @@ declare function _upsertTripIndexEntry(entry: any): any;
 declare var _coarseGeocode: any;
 declare var _generatedCityData: any;
 declare var _mdcItems: any;
-declare var _parseTripDuration: any;
 declare var parseNightsFromRange: any;
 declare var haversineKm: any;
-declare var findAttachedEvents: any;
 declare var newActionId: any;
 declare var updateTrackerBadge: any;
 declare var destCtr: any;
@@ -197,8 +195,6 @@ declare var MaxPickerUI: any;
 declare var MaxPublish: any;
 declare var PlaceKey: any;
 declare var _actionCtr: any;
-declare var _backstopPastedListPlaces: any;
-declare var _defaultDayTripRadiusKm: any;
 declare var _emitTripMutation: any;
 declare var _escHtml: any;
 declare var _fileHandle: any;
@@ -207,7 +203,6 @@ declare var _mdcItemDelete: any;
 declare var _mergeAdjacentSamePlaceDests: any;
 declare var _reconcileDestinations: any;
 declare var _refreshUserListedFromRecords: any;
-declare var _stampListedOrigin: any;
 declare var _tripsIndex: any;
 declare var _wispDelete: any;
 declare var _wispMarkProcessed: any;
@@ -223,10 +218,7 @@ declare var getCityCenter: any;
 declare var localSave: any;
 declare var makeDays: any;
 declare var maxAlert: any;
-declare var parsePlacesList: any;
 declare var renderActivityPicker: any;
-declare var reopenCandidateExplorer: any;
-declare var reopenPickerForEdit: any;
 declare var saveTripsIndex: any;
 declare var showSaveStatus: any;
 
@@ -342,27 +334,12 @@ declare var updateIndexEntry: any;
 declare var updateMainMap: any;
 
 // Batch 3: globals owned by deferred modules, referenced by typed ones.
-declare var _pmDocsRefreshActive: any;
-declare var _pmOpenDocEditor: any;
-declare var _pmShowUndo: any;
 
 // Batch 4: more UI/glue + booking-form globals.
 declare var _ceMap: any;
-declare var _getPaceMode: any;
 declare var _openSightUrlEditor: any;
-declare var _paceDirective: any;
-declare var _paceSightCount: any;
-declare var _rebuildGettingToFromFields: any;
 declare var _sightExternalUrl: any;
-declare var _tbTransportModes: any;
-declare var _tripDetailsExpanded: any;
 declare var clearPendingAction: any;
-declare var collectDeadlines: any;
-declare var delS: any;
-declare var doFF: any;
-declare var drawDestMode: any;
-declare var fDayOf: any;
-declare var fS: any;
 declare var fmtD: any;
 declare var getDest: any;
 declare var mkCancelField: any;
@@ -373,9 +350,75 @@ declare var mkTransportRecord: any;
 declare var newBkId: any;
 declare var openMailtoActions: any;
 declare var pendingCount: any;
-declare var refreshRestaurantSuggestions: any;
-declare var renderCandidateCards: any;
+
+// DOM element lookups return any (we type the data model, not DOM element types).
+interface Document {
+  getElementById(elementId: string): any;
+  querySelector(selectors: string): any;
+}
+
+// Batch 5: remaining UI/glue globals.
+
+// DOM is checked permissively — we type the data model, not DOM node shapes.
+// Arbitrary property access on Element/Node/EventTarget resolves to any so the
+// type-net focuses on app data flow, not on per-site DOM element casts.
+interface Element { [key: string]: any; }
+interface Node { [key: string]: any; }
+interface EventTarget { [key: string]: any; }
+interface HTMLElement { [key: string]: any; }
+interface GlobalEventHandlers { [key: string]: any; }
+
+// Re-declared: globals defined in not-yet-typed (deferred) UI modules but
+// referenced from typed modules — TS resolves cross-script only within the
+// include set, so these need ambient any until their owner module is typed.
+declare var _backstopPastedListPlaces: any;
+declare var _briefIsLocked: any;
+declare var _briefRenderLocked: any;
+declare var _briefTrunc: any;
+declare var _buildPickerFromPastedList: any;
+declare var _defaultAccommodation: any;
+declare var _defaultAllergies: any;
+declare var _defaultDayTripHours: any;
+declare var _defaultDietary: any;
+declare var _defaultEmergencyName: any;
+declare var _defaultEmergencyPhone: any;
+declare var _defaultHardLimits: any;
+declare var _defaultHoursPerDay: any;
+declare var _defaultLanguages: any;
+declare var _defaultLoyaltyPrograms: any;
+declare var _defaultMaxBigSightsPerDay: any;
+declare var _defaultMobility: any;
+declare var _defaultPaceMode: any;
+declare var _defaultTransport: any;
+declare var _defaultTravelersCount: any;
+declare var _defaultWithKids: any;
+declare var _ensureTripInlineSearch: any;
+declare var _fmtDistance: any;
+declare var _getPaceMode: any;
+declare var _paceDirective: any;
+declare var _paceSightCount: any;
+declare var _sf6Btn: any;
+declare var _stampListedOrigin: any;
+declare var checkAndShowOverlaps: any;
+declare var checkDeadlineAlert: any;
+declare var checkTimeConflicts: any;
+declare var collectDeadlines: any;
+declare var delS: any;
+declare var destStory: any;
+declare var digDeeper: any;
+declare var doAI: any;
+declare var doFF: any;
+declare var findAttachedEvents: any;
+declare var getLeg: any;
+declare var migrateDest: any;
+declare var mkDateInp: any;
+declare var parsePlacesList: any;
+declare var renderHomeDashboard: any;
+declare var renderMaxNoteCard: any;
 declare var sStory: any;
-declare var showAddToDay: any;
+declare var saveDates: any;
+declare var selectDest: any;
 declare var showHome: any;
+declare var showUndoToast: any;
 declare var togMov: any;
+declare var toggleTransportForm: any;
