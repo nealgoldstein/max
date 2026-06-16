@@ -249,7 +249,7 @@ check("Rule 9b: candidates are a routed view with a no-op write guard",
   "candidates regressed to an independent copy");
 check("Rule 9c: publish's fresh stub carries the live arrays across the swap",
   (function () {
-    var ep = fs.readFileSync(path.join(ROOT, "engine-picker.js"), "utf8");
+    var ep = fs.readFileSync(path.join(ROOT, "engine-picker.mjs"), "utf8");
     return ep.indexOf("candidates: (_tb && Array.isArray(_tb.candidates))") !== -1
         && ep.indexOf("placeActivities: (_tb && Array.isArray(_tb.placeActivities))") !== -1;
   })(),
@@ -309,7 +309,7 @@ check("Rule 12b: the narrative explains that a sight can sit in several categori
   "section sums exceeding the place count went unexplained again");
 check("Rule 12c: uncommitted hubs never enter the considered pool",
   (function () {
-    var ep = fs.readFileSync(path.join(ROOT, "engine-picker.js"), "utf8");
+    var ep = fs.readFileSync(path.join(ROOT, "engine-picker.mjs"), "utf8");
     return ep.indexOf("_pd269SkipHubs") !== -1;
   })(),
   "phantom town pins return to the trip view's considered sights");
@@ -468,7 +468,7 @@ check("Rule 22a: the stay partition uses _origin, not just name-hydration",
 // ── Rule 23: build banner copy is mode-driven (PD.394) ─────────────
 check("Rule 23a: MaxBuild exposes the build mode",
   (function () {
-    var eb = fs.readFileSync(path.join(ROOT, "engine-build.js"), "utf8");
+    var eb = fs.readFileSync(path.join(ROOT, "engine-build.mjs"), "utf8");
     return /function mode\(\)/.test(eb) && /mode:\s*mode,/.test(eb);
   })());
 check("Rule 23b: recontext maps activity-first → 'looking for other places'",
@@ -868,7 +868,7 @@ check("Enhance 1: auto-enhance is permanently one-shot — existing enhance cont
   // section that survives reopen), so a re-entry can't re-fire it even when a
   // trip's destinations were lost (the navigation count-drift bug).
   (function () {
-    var eb = fs.readFileSync(path.join(ROOT, "engine-build.js"), "utf8");
+    var eb = fs.readFileSync(path.join(ROOT, "engine-build.mjs"), "utf8");
     return eb.indexOf('type === "synthetic-enhance"') !== -1
       && eb.indexOf("_hasEnhanceContent") !== -1;
   })(),
@@ -886,7 +886,7 @@ check("Gateway 2: a sight can never be the arrival/departure gateway (PD.436)",
   // orderKeptCandidates guards entry AND exit matches with _gatewayEligible,
   // and falls through to inference when a hint resolves to no eligible city.
   (function () {
-    var ep = fs.readFileSync(path.join(ROOT, "engine-picker.js"), "utf8");
+    var ep = fs.readFileSync(path.join(ROOT, "engine-picker.mjs"), "utf8");
     return ep.indexOf("function _gatewayEligible") !== -1
       && (ep.match(/_gatewayEligible\(/g) || []).length >= 3;
   })(),

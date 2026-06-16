@@ -16,7 +16,7 @@ global.history = {};               // pushState/replaceState absent → falls th
 global.location = { hash: "" };    // mutate per-test
 global.addEventListener = function () {}; // skip listener wiring
 
-require(path.join(__dirname, "..", "engine-routing.js"));
+require(path.join(__dirname, "..", "engine-routing.mjs"));
 
 var MaxRoute = global.MaxRoute;
 if (!MaxRoute) {
