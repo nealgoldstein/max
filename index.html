@@ -13647,36 +13647,32 @@ function _p4RoleShadowCheck(){
     if (typeof _tb === "undefined" || !_tb || typeof MaxDecisions === "undefined") return { ready: false };
     if (typeof MaxDecisions.roleOf !== "function") return { ready: false, note: "roleOf unavailable" };
     var D = _tb._decisions || null;
+    var isStay = (typeof window._isStaySection === "function") ? window._isStaySection : function(){ return false; };
     var origOf = (typeof window._placeOrigin === "function") ? window._placeOrigin
-      : function(c){ return (c && c._origin) || "max"; };
-    // Audit BOTH surfaces a role can live on: the picker working set
-    // (_tb.candidates, present during discovery) AND the published trip
-    // (trip.candidates, present when viewing a saved trip — where the keep
-    // check finds its places). Dedup by place so a candidate counted once.
-    var seen = {}, cands = [];
-    function _addCands(arr){
-      (arr || []).forEach(function(c){
-        if (!c || !c.place) return;
-        var k = String(c.place).toLowerCase().trim();
-        if (seen[k]) return; seen[k] = true;
-        cands.push(c);
-      });
+      : function(p){ return (p && p._origin) || ((p && p._autoCreated) ? "max-hub" : "max"); };
+    // The LIVE role is smeared across signals on the place + its section. This
+    // derivation is EXACTLY what roleOf is meant to replace; the check compares
+    // the two so the gap (what the projection can't yet reproduce) is visible.
+    function liveRole(p, stay){
+      if (p && p._waysideFromHub) return "onway";
+      if (p && p._isDayTrip) return "daytrip";
+      return stay ? "stay" : "see";
     }
-    _addCands(_tb.candidates);
-    if (typeof trip !== "undefined" && trip && Array.isArray(trip.candidates)) _addCands(trip.candidates);
     var decided = 0, undecided = 0, agree = 0, disagreeDecided = [], disagreeUndecided = [];
-    cands.forEach(function(c){
-      if (!c || !c.place || !c.role) return;
-      var dec = D ? D.get(c.place) : null;
-      // best-effort kind: only affects the UNDECIDED default branch of roleOf;
-      // decided rows return decision.role and ignore kind entirely.
-      var facts = MaxDecisions.factsOf({ origin: origOf(c), isStay: !!c.overnightCapable });
-      var projected = MaxDecisions.roleOf(facts, dec || null);
-      var hasRoleDecision = !!(dec && dec.role);
-      if (hasRoleDecision) decided++; else undecided++;
-      if (projected === c.role) { agree++; return; }
-      (hasRoleDecision ? disagreeDecided : disagreeUndecided).push(
-        { place: c.place, live: c.role, projected: projected, origin: facts.origin });
+    (_tb.placeActivities || []).forEach(function(it){
+      var stay = isStay(it && it.section);
+      (it && it.requiredPlaces || []).forEach(function(p){
+        if (!p || !p.place) return;
+        var dec = D ? D.get(p.place) : null;
+        var hasRoleDecision = !!(dec && dec.role);
+        if (hasRoleDecision) decided++; else undecided++;
+        var facts = MaxDecisions.factsOf({ origin: origOf(p), isStay: stay });
+        var projected = MaxDecisions.roleOf(facts, dec || null);
+        var live = liveRole(p, stay);
+        if (projected === live) { agree++; return; }
+        (hasRoleDecision ? disagreeDecided : disagreeUndecided).push(
+          { place: p.place, live: live, projected: projected, origin: facts.origin });
+      });
     });
     return {
       ready: true, decided: decided, undecided: undecided, agree: agree,
