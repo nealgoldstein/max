@@ -36,7 +36,7 @@ var indexSrc = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
 // care that a function EXISTS and keeps a property — not which file holds
 // it — so fold the extracted modules into the same haystack. File-specific
 // checks (db.js, sync.js, …) still read their own files separately.
-["app-main.js", "util-esc.js", "apikey.js", "features-conversation.js", "features-trip.js", "trip-edit.js",
+["app-main.js", "util-esc.mjs", "apikey.js", "features-conversation.js", "features-trip.js", "trip-edit.js",
  "trip-detail-render.js", "exec-mode.js", "logistics.js", "home-screen.js",
  "trip-affordance.js", "geography-model.js", "who-avoidances.js", "edit-constraints.js",
  "map-pin-panel.js", "itinerary-ordering.js", "discovery-curation.js",
@@ -187,7 +187,7 @@ check("Rule 6f: the mint snapshots drafts before the source flips",
 // Place-name matching routes through PlaceKey: the canonicalizer's
 // key is alias-aware, the badge/keep resolver learns from fuzzy hits,
 // and learned aliases persist on trip.brief._placeAliases.
-var placeKeySrc = fs.readFileSync(path.join(ROOT, "place-key.js"), "utf8");
+var placeKeySrc = fs.readFileSync(path.join(ROOT, "place-key.mjs"), "utf8");
 check("Rule 7a: PlaceKey module exists with learn/resolve/same",
   /function learn\(/.test(placeKeySrc) && /function resolve\(/.test(placeKeySrc)
     && /function same\(/.test(placeKeySrc));
@@ -317,7 +317,7 @@ check("Rule 12c: uncommitted hubs never enter the considered pool",
 // ── Rule 13: section identity has one owner (PD.381) ───────────────
 check("Rule 13a: SectionKind module exists with the predicates",
   (function () {
-    var sk = fs.readFileSync(path.join(ROOT, "section-kind.js"), "utf8");
+    var sk = fs.readFileSync(path.join(ROOT, "section-kind.mjs"), "utf8");
     return /function isStay\(/.test(sk) && /function isCatchall\(/.test(sk)
       && /function catchallRank\(/.test(sk) && /function isSynthetic\(/.test(sk);
   })());
@@ -529,7 +529,7 @@ check("Rule 25c: the section chip reads the model count, not a bespoke hack (PD.
 // ── Rule 26: ONE identity matcher (PD.397) ─────────────────────────
 check("Rule 26a: PlaceKey owns contains + relatedTo",
   (function () {
-    var pk = fs.readFileSync(path.join(ROOT, "place-key.js"), "utf8");
+    var pk = fs.readFileSync(path.join(ROOT, "place-key.mjs"), "utf8");
     return /function contains\(/.test(pk) && /function relatedTo\(/.test(pk);
   })());
 check("Rule 26b: the canon delegates its matcher to the ONE identity (PD.401k)",
@@ -550,7 +550,7 @@ check("Rule 26c: coverage DERIVES from the repository records by origin (PD.429)
     && /_allRecs\.forEach\(function\(r\)\{[\s\S]*?r\.origin !== "user"/.test(indexSrc)
     && indexSrc.indexOf("MaxData.deriveListedFromRecords") !== -1
     && (function () {
-      var pr = fs.readFileSync(path.join(ROOT, "place-repo.js"), "utf8");
+      var pr = fs.readFileSync(path.join(ROOT, "place-repo.mjs"), "utf8");
       return /function _related/.test(pr) && pr.indexOf("PK.relatedTo") !== -1;
     })(),
   "coverage no longer derives the listed set from the repository records by origin");

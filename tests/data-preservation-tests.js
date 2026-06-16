@@ -88,8 +88,7 @@ var maxDataSrc = fs.readFileSync(path.join(__dirname, "..", "max-data.js"), "utf
 new Function(maxDataSrc)();
 
 // Load MaxMerge user-state preservation.
-var maxMergeSrc = fs.readFileSync(path.join(__dirname, "..", "max-merge.js"), "utf8");
-new Function(maxMergeSrc)();
+require("../max-merge.mjs");
 
 assert(typeof global.TripStore === "object", "TripStore must load");
 assert(typeof global.MaxData === "object", "MaxData accessor must load");

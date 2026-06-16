@@ -24,7 +24,7 @@ function loadModule(rel) {
   // eslint-disable-next-line no-eval
   eval(code);
 }
-loadModule('migration.js');
+require('../migration.mjs');
 
 let passed = 0;
 let failed = 0;
