@@ -13544,6 +13544,19 @@ function _reconcileUserListedKeeps(){
         var _facts = _MD.factsOf({ origin: _origOf(p), isStay: _stay });
         p._keep = _MD.keepOf(_facts, _dec);
         p._rejected = !!(_dec && _dec.rejected);
+        // P4.3 role-signal derivation: for a DECIDED role, re-derive the smeared
+        // role signals from the decision so the reconcile is their authority (like
+        // _keep). roleOf returns _dec.role for decided places; hub/leg come from the
+        // decision — gated by _p4RoleShadowCheck.hubLegClean (verified true on the
+        // real trip). Undecided places are left untouched: the role shadow check's
+        // disagreeUndecided is empty, so they carry no role-signal divergence, and
+        // not overwriting them keeps this a strict no-op until a role is decided.
+        if (_dec && _dec.role && typeof _MD.roleOf === "function") {
+          var _role = _MD.roleOf(_facts, _dec);
+          p._isDayTrip = (_role === "daytrip");
+          p._dayTripHub = (_role === "daytrip") ? (_dec.hub || "") : "";
+          p._waysideFromHub = (_role === "onway" && _dec.leg) ? (_dec.leg.fromPlace || "") : "";
+        }
       });
     });
   }
