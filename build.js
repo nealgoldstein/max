@@ -37,6 +37,11 @@ while ((m = srcRe.exec(html)) !== null) {
   var src = m[1].replace(/\?.*$/, "");
   if (/^https?:\/\//.test(src)) continue;        // CDN
   if (/(^|\/)vendor\//.test(src)) continue;       // vendored libs
+  // app-main.js (the extracted monolith body) loads AFTER the page body, so it
+  // must stay a standalone tag at its own position — concatenating it into the
+  // early module bundle would run it before the DOM exists. Keep it out of the
+  // concat; index.bundle.html leaves its tag in place.
+  if (/(^|\/)app-main\.js$/.test(src)) continue;
   if (!/\.js$/.test(src)) continue;
   order.push(src.replace(/^\//, ""));
 }

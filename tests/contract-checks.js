@@ -36,7 +36,7 @@ var indexSrc = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
 // care that a function EXISTS and keeps a property — not which file holds
 // it — so fold the extracted modules into the same haystack. File-specific
 // checks (db.js, sync.js, …) still read their own files separately.
-["util-esc.js", "apikey.js", "features-conversation.js", "features-trip.js", "trip-edit.js",
+["app-main.js", "util-esc.js", "apikey.js", "features-conversation.js", "features-trip.js", "trip-edit.js",
  "trip-detail-render.js", "exec-mode.js", "logistics.js", "home-screen.js",
  "trip-affordance.js", "geography-model.js", "who-avoidances.js", "edit-constraints.js",
  "map-pin-panel.js", "itinerary-ordering.js", "discovery-curation.js",
