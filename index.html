@@ -13564,6 +13564,31 @@ function _keepOf(p){
 }
 if (typeof globalThis !== "undefined") globalThis._keepOf = _keepOf;
 
+// P4.3 read accessors for the DECISION + ROLE legs (mirrors _keepOf).
+// _decisionOf(p) — the user's decision for a place from the log (carries
+// role / hub / leg), or null. The single read path for "what did the user
+// choose here." _roleOf(p, isStay) — DERIVE the role via the projection.
+// roleOf returns decision.role for a decided place (daytrips/waysides ARE
+// decided), so kind/section only matters for the undecided stay/see default;
+// pass isStay when you have the section, omit otherwise. Both fall back to the
+// smeared signals only pre-load, so they are always safe to call.
+function _decisionOf(p){
+  if (!p || !p.place) return null;
+  if (typeof _tb === "undefined" || !_tb || !_tb._decisions || typeof _tb._decisions.get !== "function") return null;
+  return _tb._decisions.get(p.place) || null;
+}
+function _roleOf(p, isStay){
+  if (!p) return null;
+  if (typeof MaxDecisions === "undefined" || !MaxDecisions || typeof MaxDecisions.roleOf !== "function") {
+    if (p._waysideFromHub) return "onway";
+    if (p._isDayTrip) return "daytrip";
+    return isStay ? "stay" : "see";
+  }
+  var _o = (typeof window._placeOrigin === "function") ? window._placeOrigin(p) : (p._origin || "max");
+  return MaxDecisions.roleOf({ origin: _o, kind: isStay ? "destination" : "sight" }, _decisionOf(p));
+}
+if (typeof globalThis !== "undefined") { globalThis._decisionOf = _decisionOf; globalThis._roleOf = _roleOf; }
+
 // PD.401g: the Discovery placement adapter (_discoveryOpts,
 // _discoveryConsideredCounts, _applyDiscoveryModelToSights) was EXTRACTED
 // into discovery-adapter.js — the next strangler-fig step shrinking this
@@ -13674,7 +13699,7 @@ function _p4RoleShadowCheck(){
       if (p && p._isDayTrip) return "daytrip";
       return stay ? "stay" : "see";
     }
-    var decided = 0, undecided = 0, agree = 0, disagreeDecided = [], disagreeUndecided = [];
+    var decided = 0, undecided = 0, agree = 0, disagreeDecided = [], disagreeUndecided = [], hubLegDisagree = [];
     (_tb.placeActivities || []).forEach(function(it){
       var stay = isStay(it && it.section);
       (it && it.requiredPlaces || []).forEach(function(p){
@@ -13685,16 +13710,28 @@ function _p4RoleShadowCheck(){
         var facts = MaxDecisions.factsOf({ origin: origOf(p), isStay: stay });
         var projected = MaxDecisions.roleOf(facts, dec || null);
         var live = liveRole(p, stay);
-        if (projected === live) { agree++; return; }
-        (hasRoleDecision ? disagreeDecided : disagreeUndecided).push(
+        if (projected === live) { agree++; }
+        else (hasRoleDecision ? disagreeDecided : disagreeUndecided).push(
           { place: p.place, live: live, projected: projected, origin: facts.origin });
+        // hub/leg: the decision's hub/leg must match the smeared values, so the
+        // reconcile can derive _dayTripHub / _waysideFromHub from the decision.
+        if (live === "daytrip") {
+          var liveHub = String(p._dayTripHub || ""), decHub = String((dec && dec.hub) || "");
+          if (liveHub !== decHub) hubLegDisagree.push({ place: p.place, field: "hub", live: liveHub, decision: decHub });
+        } else if (live === "onway") {
+          var liveFrom = String(p._waysideFromHub || ""), decFrom = String((dec && dec.leg && dec.leg.fromPlace) || "");
+          if (liveFrom !== decFrom) hubLegDisagree.push({ place: p.place, field: "leg.from", live: liveFrom, decision: decFrom });
+        }
       });
     });
     return {
       ready: true, decided: decided, undecided: undecided, agree: agree,
       disagreeDecided: disagreeDecided, disagreeUndecided: disagreeUndecided,
-      // the gate-able invariant: decided role decisions must reproduce the live role.
-      decidedClean: disagreeDecided.length === 0
+      hubLegDisagree: hubLegDisagree,
+      // gate-able invariants: decided roles reproduce the live role, AND the decision's
+      // hub/leg match the smeared values (so the reconcile can derive them next).
+      decidedClean: disagreeDecided.length === 0,
+      hubLegClean: hubLegDisagree.length === 0
     };
   } catch (e) { return { error: e && e.message }; }
 }
