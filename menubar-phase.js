@@ -1,3 +1,4 @@
+// @ts-check
 // menubar-phase.js — extracted verbatim from index.html (PD.483 bloat reduction).
 // Mac-style menu bar (File/Edit/Settings) + phase-status chips.
 // Pure function-cluster: declarations + globalThis-guarded exposures, no
@@ -53,7 +54,7 @@ function _mwClose(){
 function _mwCloseAllNoListenerReset(){
   var btns = document.querySelectorAll('.mw-menu');
   for (var i = 0; i < btns.length; i++) btns[i].classList.remove('is-open');
-  var dds = document.querySelectorAll('.mw-dropdown');
+  var dds = /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('.mw-dropdown'));
   for (var j = 0; j < dds.length; j++) dds[j].style.display = 'none';
 }
 function _mwOutsideClick(e){
@@ -261,7 +262,7 @@ function showBriefApiKeyForm(){
 }
 
 function saveBriefKey(){
-  var inp=document.getElementById("brief-key-inp");
+  var inp=/** @type {HTMLInputElement} */ (document.getElementById("brief-key-inp"));
   if(!inp) return;
   var v=inp.value.trim();
   if(v.length<10) return;
@@ -294,7 +295,7 @@ function showHomeApiKeyForm(){
   ov.onclick = function(e){ if(e.target===ov) ov.remove(); };
   document.getElementById("home-key-cancel").onclick = function(){ ov.remove(); };
   document.getElementById("home-key-save").onclick = function(){
-    var v = document.getElementById("home-key-inp").value.trim();
+    var v = (/** @type {HTMLInputElement} */ (document.getElementById("home-key-inp"))).value.trim();
     if (!v || v.length < 20) { document.getElementById("home-key-inp").style.borderColor="#c05020"; return; }
     saveApiKey(v);
     ov.remove();

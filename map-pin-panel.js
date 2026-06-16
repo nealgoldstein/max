@@ -1,3 +1,4 @@
+// @ts-check
 // map-pin-panel.js — Map pin action panel (bottom sheet). Extracted verbatim from index.html (PD.473, bloat reduction).
 
 // ── Map pin action panel (bottom sheet on map) ───────────────
@@ -82,7 +83,7 @@ function showMapPinPanel(item,dest,itemType,mapEvent){
   if(mapEvent&&mapEvent.containerPoint){
     var cp=mapEvent.containerPoint;
     var rp=document.querySelector('.rp');
-    var rpRect=rp?rp.getBoundingClientRect():{left:0,top:0};
+    var rpRect=/** @type {any} */ (rp?rp.getBoundingClientRect():{left:0,top:0});
     var pw=panel.offsetWidth||260;
     var ph=panel.offsetHeight||140;
     var x=cp.x-pw/2;
@@ -94,7 +95,7 @@ function showMapPinPanel(item,dest,itemType,mapEvent){
     panel.style.top=y+'px';
   } else {
     // Fallback: center-ish
-    var rp2=document.querySelector('.rp');
+    var rp2=/** @type {HTMLElement} */ (document.querySelector('.rp'));
     var w2=rp2?rp2.offsetWidth:800;
     panel.style.left=Math.max(8,(w2-260)/2)+'px';
     panel.style.top='80px';

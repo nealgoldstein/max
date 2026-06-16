@@ -1,3 +1,4 @@
+// @ts-check
 // discovery-adapter.js — PD.401g: the Discovery placement adapter.
 //
 // Extracted verbatim from index.html's inline script (strangler-fig:
@@ -191,7 +192,7 @@ function _applyDiscoveryModelToSights(){
   // carries route semantics the model deliberately doesn't own). This
   // replaces the old _routeUmbrellasToScenicRoutes pre-pass: the WHAT is
   // the model's; this is only the WHERE-it-lives plumbing.
-  var _scenicGroup = null;
+  var _scenicGroup = /** @type {any} */ (null);
   newSightItems = newSightItems.filter(function(it){
     if (it && it.section === S.SCENIC) { _scenicGroup = it; return false; }
     return true;

@@ -1,3 +1,4 @@
+// @ts-check
 // entry-point-map.js — Entry-point map. Extracted verbatim from index.html (PD.474, bloat reduction).
 
 // ── ENTRY-POINT MAP ─────────────────────────────────────────
@@ -137,7 +138,7 @@ function _tbUseEntryPoint(isEntry, name, mode){
   // even before the re-render below (and in case the input is preserved across
   // re-renders without being rebuilt from _tb).
   var inpId = isEntry ? "td-entry" : "td-exit";
-  var inp = document.getElementById(inpId);
+  var inp = /** @type {HTMLInputElement} */ (document.getElementById(inpId));
   if (inp) inp.value = name;
   // PD.230: ALSO update the Discovery picker's own inputs. The Trip
   // Details strip uses td-entry/td-exit; the Discovery picker uses
@@ -148,7 +149,7 @@ function _tbUseEntryPoint(isEntry, name, mode){
   // user's previously-typed value (e.g. "Kef") because that input was
   // never rewritten.
   var pickerInpId = isEntry ? "tb-picker-entry" : "tb-picker-exit";
-  var pickerInp = document.getElementById(pickerInpId);
+  var pickerInp = /** @type {HTMLInputElement} */ (document.getElementById(pickerInpId));
   if (pickerInp) pickerInp.value = name;
   // Close the open popup so the user can see the map update, and give them
   // clear feedback — the collapsed trip-details strip was too subtle and the
@@ -320,11 +321,11 @@ function _tbPlacesCaptureFields(){
   var map = {"td-entry":"entry","td-exit":"tbExit","td-arrNum":"arrivalNumber",
              "td-depNum":"departureNumber","td-arrTime":"arrivalTime","td-depTime":"departureTime"};
   Object.keys(map).forEach(function(id){
-    var el = document.getElementById(id); if (el) _tb[map[id]] = el.value.trim();
+    var el = /** @type {HTMLInputElement} */ (document.getElementById(id)); if (el) _tb[map[id]] = el.value.trim();
   });
-  var dEl = document.getElementById("td-date");
+  var dEl = /** @type {HTMLInputElement} */ (document.getElementById("td-date"));
   if (dEl && dEl.value) _tb.when = dEl.value;
-  var ddEl = document.getElementById("td-depDate");
+  var ddEl = /** @type {HTMLInputElement} */ (document.getElementById("td-depDate"));
   if (ddEl) _tb.departureDate = ddEl.value;
   _rebuildGettingToFromFields();
 }
@@ -357,7 +358,7 @@ function _tbPlacesPickMode(which, id){
             // Update the live input directly if the strip is still mounted,
             // otherwise re-render to reflect the new value.
             var inpId = (cityKey === "entry") ? "td-entry" : "td-exit";
-            var inp = document.getElementById(inpId);
+            var inp = /** @type {HTMLInputElement} */ (document.getElementById(inpId));
             if (inp) inp.value = _tb[cityKey];
             else _tbPlacesReRender();
           }
