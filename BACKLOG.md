@@ -14,16 +14,22 @@ Three levers to lower change-risk further (change-risk = bug-risk). Ordered: eac
   checkJs OFF globally, opt-in per file via `// @ts-check`), `types/max-model.d.ts` (the written-down
   Trip/Brief/Destination/Route/Candidate/PlaceActivity/RequiredPlace/PlaceMeta/Facts/Decision shapes +
   the cross-module global surface), `tsc --noEmit` wired into `tests/run.sh` (skips if typescript not
-  installed). **14 modules typed clean** — the whole data + engine layer: decision-model, migration,
-  engine-publish, geography-model, discovery-model, max-data, place-repo, section-kind, place-key,
-  engine-routing, engine-enrich, engine-build, tripstore, engine-trip. Surfaced + fixed real latent
-  type bugs along the way (engine-trip's `_perpKm` shape union, two Date-minus-Date sites; engine-enrich's
-  pluggable-hook arity). Established mechanics: declare a sibling's global on the surface; cast the IIFE
-  bootstrap arg to any; don't ambient-declare a global a typed module OWNS. **Remaining (incremental,
-  lower marginal value than the core):** the UI modules (trip-ui, features-*, construct-decorate,
-  edit-constraints, map-pin-panel, home-screen, …), engine-picker.js (large), and index.html (the 39k
-  monolith — biggest; best tackled after/with #2). As a shape gets fully enumerated, drop its
-  `[k:string]:any` index signature to also catch unknown-field typos.
+  installed). **49 of 55 modules typed clean** — the whole data + engine layer PLUS most of the UI tier
+  (who-avoidances, logistics, pm-* cluster, picker-ui/-hero-sidebar, edit-constraints, discovery-curation,
+  paste-browse-modal, trip-affordance, trip-detail-render, construct-decorate, map-pin-panel, …).
+  Surfaced + fixed real latent type bugs along the way (engine-trip's `_perpKm` shape union, several
+  Date-minus-Date sites; engine-enrich's pluggable-hook arity; trip-ui's duplicate object keys
+  renderGeoAffordanceBanner/renderDecisionsDeferredPanel). Mechanics: declare a sibling's global on the
+  surface; cast the IIFE bootstrap arg to any; don't ambient-declare a global a typed module OWNS; **DOM
+  is checked permissively** — Element/Node/EventTarget/HTMLElement/GlobalEventHandlers/Document carry an
+  index signature so DOM node access resolves to `any` (we type the data model, not DOM shapes), which
+  collapsed ~250 per-site DOM casts. **Remaining 6 modules (DEFERRED — real blocker, not just grind):**
+  itinerary-ordering, trip-edit, home-screen, features-conversation, engine-picker, trip-ui carry genuine
+  cross-module top-level NAME COLLISIONS (TS6200/TS2403 — `fmtD`, `getDest`, `i`, `actions`,
+  `mkHotelRecord`, … defined in more than one of these extracted-sibling files). That dup smell should be
+  resolved (dedup/scope the shared helpers) BEFORE typing them — typing would otherwise just paper over a
+  real structural issue. Then index.html (the 39k monolith — biggest; best tackled after/with #2). As a
+  shape gets fully enumerated, drop its `[k:string]:any` index signature to also catch unknown-field typos.
 - **#2 — Module system / build step. ◑ Phase B bootstrap DONE; ESM cutover is the dedicated project.**
   60 ordered `<script>` tags + 200+ globals = the load-order-race class + no encapsulation/dead-code
   detection. **Phase B (the build+verify foundation) is in:** `build.js` concatenates the 55 local
