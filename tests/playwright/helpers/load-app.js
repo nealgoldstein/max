@@ -64,7 +64,7 @@ async function bootSeeded(page, seed) {
       console.error('seed setup failed:', e);
     }
   }, seed);
-  await page.goto('/index.html');
+  await page.goto('/index.bundle.html');
   // Wait for the engines AND the inline-script exports to be on
   // window. v359.60.13: previously only checked MaxEngineTrip /
   // Picker / DB (external scripts). Those load before the inline
@@ -102,7 +102,7 @@ async function bootSeeded(page, seed) {
 
 async function bootClean(page) {
   await _resetStorage(page);
-  await page.goto('/index.html');
+  await page.goto('/index.bundle.html');
   await page.waitForFunction(() =>
     typeof window.MaxEngineTrip !== 'undefined' &&
     typeof window.MaxEnginePicker !== 'undefined' &&

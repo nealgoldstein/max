@@ -70,8 +70,14 @@ module.exports = defineConfig({
   // http.server is enough; no extra dependencies. The webServer block
   // tells Playwright to start it and wait until baseURL responds.
   webServer: {
-    command: `python3 -m http.server ${DEV_PORT} --directory "${APP_ROOT}"`,
-    url: `${BASE_URL}/index.html`,
+    // Build the bundle first, then serve. The Playwright suite loads
+    // index.bundle.html (the order-preserved artifact we deploy) — not the raw
+    // multi-tag index.html — because converting modules to ESM makes them deferred
+    // type=module scripts in raw index.html, so load-order there no longer matches
+    // production. The bundle is in-order and IS what ships, so it's the correct
+    // thing to gate on. Building here keeps index.bundle.html fresh on every run.
+    command: `npm --prefix "${APP_ROOT}" run build && python3 -m http.server ${DEV_PORT} --directory "${APP_ROOT}"`,
+    url: `${BASE_URL}/index.bundle.html`,
     reuseExistingServer: !process.env.CI,
     // v360.1: bumped from 5s. Python http.server's cold-start is
     // usually <1s, but the deploy occasionally hit a 5s timeout on
