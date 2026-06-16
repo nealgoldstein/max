@@ -10,26 +10,29 @@ Last updated: **2026-06-11** · `index.html` ≈ **38,432** lines · ~**50** JS 
 ## Extensibility roadmap (the next architectural tier)
 Three levers to lower change-risk further (change-risk = bug-risk). Ordered: each de-risks the next.
 
-- **#1 — Types on the data shapes. ◑ CORE LAYER DONE; UI + monolith remain.** `tsconfig.json` (allowJs,
-  checkJs OFF globally, opt-in per file via `// @ts-check`), `types/max-model.d.ts` (the written-down
-  Trip/Brief/Destination/Route/Candidate/PlaceActivity/RequiredPlace/PlaceMeta/Facts/Decision shapes +
-  the cross-module global surface), `tsc --noEmit` wired into `tests/run.sh` (skips if typescript not
-  installed). **49 of 55 modules typed clean** — the whole data + engine layer PLUS most of the UI tier
-  (who-avoidances, logistics, pm-* cluster, picker-ui/-hero-sidebar, edit-constraints, discovery-curation,
-  paste-browse-modal, trip-affordance, trip-detail-render, construct-decorate, map-pin-panel, …).
-  Surfaced + fixed real latent type bugs along the way (engine-trip's `_perpKm` shape union, several
-  Date-minus-Date sites; engine-enrich's pluggable-hook arity; trip-ui's duplicate object keys
-  renderGeoAffordanceBanner/renderDecisionsDeferredPanel). Mechanics: declare a sibling's global on the
-  surface; cast the IIFE bootstrap arg to any; don't ambient-declare a global a typed module OWNS; **DOM
-  is checked permissively** — Element/Node/EventTarget/HTMLElement/GlobalEventHandlers/Document carry an
-  index signature so DOM node access resolves to `any` (we type the data model, not DOM shapes), which
-  collapsed ~250 per-site DOM casts. **Remaining 6 modules (DEFERRED — real blocker, not just grind):**
-  itinerary-ordering, trip-edit, home-screen, features-conversation, engine-picker, trip-ui carry genuine
-  cross-module top-level NAME COLLISIONS (TS6200/TS2403 — `fmtD`, `getDest`, `i`, `actions`,
-  `mkHotelRecord`, … defined in more than one of these extracted-sibling files). That dup smell should be
-  resolved (dedup/scope the shared helpers) BEFORE typing them — typing would otherwise just paper over a
-  real structural issue. Then index.html (the 39k monolith — biggest; best tackled after/with #2). As a
-  shape gets fully enumerated, drop its `[k:string]:any` index signature to also catch unknown-field typos.
+- **#1 — Types on the data shapes. ✅ ALL 55 APP MODULES CLEAN; only the index.html monolith remains.**
+  `tsconfig.json` (allowJs, checkJs OFF globally, opt-in per file via `// @ts-check`), `types/max-model.d.ts`
+  (the written-down Trip/Brief/Destination/Route/Candidate/PlaceActivity/RequiredPlace/PlaceMeta/Facts/
+  Decision shapes + the cross-module global surface), `tsc --noEmit` wired into `tests/run.sh` + CI gate.
+  **55 of 55 modules `// @ts-check` clean (tsc --noEmit: 0 errors).** The whole data + engine layer AND the
+  entire UI tier are typed.
+  Surfaced + fixed real latent bugs along the way (engine-trip's `_perpKm` shape union, many Date-minus-Date
+  sites; engine-enrich's pluggable-hook arity; trip-ui's duplicate object keys
+  renderGeoAffordanceBanner/renderDecisionsDeferredPanel).
+  Mechanics: declare a sibling's global on the surface; cast the IIFE bootstrap arg to any; don't
+  ambient-declare a global a typed module OWNS (that was the entire cause of the apparent "cross-module
+  collisions" — `fmtD`/`getDest`/`mkHotelRecord` etc. are each defined exactly ONCE in trip-edit.js and the
+  apparent conflict was my own `declare var` lines; **there was no real code duplication**); **DOM is checked
+  permissively** — Element/Node/EventTarget/HTMLElement/GlobalEventHandlers/Document carry an index
+  signature so DOM node access resolves to `any` (we type the data model, not DOM shapes), which collapsed
+  ~250 per-site DOM casts. Final UI residuals were pure inference noise (null/[] accumulators inferred as
+  `never` → annotated source decls; Date arithmetic → `+operand`; DOM string props → `String(x)`).
+  **Two genuine smells found + made type-consistent but NOT yet refactored** (cast to consistent types, no
+  behavior change — rename if/when these functions are touched): (a) trip-ui's operational-surface render
+  function reuses one `var actions` for both a DOM div and a data array; (b) a trip-edit function has two
+  `for (var i)` loops with divergent inferred types.
+  **Remaining: index.html** (the 39k monolith — biggest; best tackled after/with #2). As a shape gets fully
+  enumerated, drop its `[k:string]:any` index signature to also catch unknown-field typos.
 - **#2 — Module system / build step. ◑ Phase B bootstrap DONE; ESM cutover is the dedicated project.**
   60 ordered `<script>` tags + 200+ globals = the load-order-race class + no encapsulation/dead-code
   detection. **Phase B (the build+verify foundation) is in:** `build.js` concatenates the 55 local
