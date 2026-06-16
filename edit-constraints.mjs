@@ -3111,3 +3111,5 @@ function _rebuildGettingToFromFields(){
   if (_tb.departureDate)   goParts.push("on " + _tb.departureDate);
   _tb.gettingOut = goParts.join(", ");
 }
+
+export {};

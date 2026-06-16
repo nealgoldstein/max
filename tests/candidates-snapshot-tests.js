@@ -8,7 +8,7 @@
 "use strict";
 
 var assert = require("assert");
-require("../geography-model.js");
+require("../geography-model.mjs");
 var MC = globalThis.MaxCandidates;
 
 var pass = 0, fail = 0;

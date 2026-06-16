@@ -272,3 +272,5 @@ if (typeof globalThis !== "undefined") {
   globalThis._applyDiscoveryModelToSights = _applyDiscoveryModelToSights;
   globalThis._pmModelSectionCount = _pmModelSectionCount;
 }
+
+export {};

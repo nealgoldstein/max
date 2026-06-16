@@ -2213,3 +2213,5 @@ function uDone(sid,destId){
   var day=fDayOf(sid,destId);var old=g("sr-"+sid);
   if(old&&day)old.parentNode.replaceChild(mkSight(s,day.id,destId),old);
 }
+
+export {};

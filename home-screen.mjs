@@ -2653,3 +2653,5 @@ function _backstopPastedListPlaces(stage) {
   if (typeof renderActivityPicker === "function") renderActivityPicker();
 }
 if (typeof globalThis !== "undefined") globalThis._backstopPastedListPlaces = _backstopPastedListPlaces;
+
+export {};

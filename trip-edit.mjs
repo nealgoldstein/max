@@ -2055,3 +2055,5 @@ function mkHotelRecord(bk,destId){
   };})(bk,rec);
   a.appendChild(db); rec.appendChild(a); return rec;
 }
+
+export {};

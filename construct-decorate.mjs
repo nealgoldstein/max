@@ -1627,3 +1627,5 @@ function _openPasteListModal(opts) {
   setTimeout(function() { try { ta.focus(); } catch(_){} }, 30);
 }
 if (typeof globalThis !== "undefined") globalThis._openPasteListModal = _openPasteListModal;
+
+export {};

@@ -627,3 +627,5 @@ function _initialTripSave(opts){
 // MaxRoute hashchange/popstate listener calls back into this
 // function. Browser back/forward, deep-link load, and in-app
 // navigation all funnel through here.
+
+export {};

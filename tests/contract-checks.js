@@ -36,11 +36,11 @@ var indexSrc = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
 // care that a function EXISTS and keeps a property — not which file holds
 // it — so fold the extracted modules into the same haystack. File-specific
 // checks (db.js, sync.js, …) still read their own files separately.
-["app-main.js", "util-esc.mjs", "apikey.mjs", "features-conversation.js", "features-trip.js", "trip-edit.js",
- "trip-detail-render.js", "exec-mode.mjs", "logistics.mjs", "home-screen.js",
- "trip-affordance.mjs", "geography-model.js", "who-avoidances.mjs", "edit-constraints.js",
- "map-pin-panel.js", "itinerary-ordering.js", "discovery-curation.js",
- "entry-point-map.mjs", "picker-hero-sidebar.mjs", "construct-decorate.js",
+["app-main.js", "util-esc.mjs", "apikey.mjs", "features-conversation.mjs", "features-trip.mjs", "trip-edit.mjs",
+ "trip-detail-render.mjs", "exec-mode.mjs", "logistics.mjs", "home-screen.mjs",
+ "trip-affordance.mjs", "geography-model.mjs", "who-avoidances.mjs", "edit-constraints.mjs",
+ "map-pin-panel.mjs", "itinerary-ordering.mjs", "discovery-curation.mjs",
+ "entry-point-map.mjs", "picker-hero-sidebar.mjs", "construct-decorate.mjs",
  "pm-doclink-dest.mjs", "pm-clip-share.mjs", "pm-docs-editor.mjs", "pm-docs-core.mjs", "pm-richtext.mjs", "menubar-phase.mjs", "paste-browse-modal.mjs"
 ].forEach(function (f) {
   var p = path.join(ROOT, f);
@@ -83,8 +83,8 @@ check("Rule 1b: drawTripMode contains NO MaxRoute.navigate",
 // into trip-detail-render.js (bloat reduction). Same precedent as the
 // discovery-adapter extraction below — point the grep at the module that
 // now owns drawDestMode, falling back to the inline source if absent.
-var renderSrc = fs.existsSync(path.join(ROOT, "trip-detail-render.js"))
-  ? fs.readFileSync(path.join(ROOT, "trip-detail-render.js"), "utf8") : indexSrc;
+var renderSrc = fs.existsSync(path.join(ROOT, "trip-detail-render.mjs"))
+  ? fs.readFileSync(path.join(ROOT, "trip-detail-render.mjs"), "utf8") : indexSrc;
 var ddm = fnBody(renderSrc, /function drawDestMode\s*\(/);
 check("Rule 1c: drawDestMode exists", !!ddm);
 check("Rule 1d: drawDestMode's stamp is fresh-arrival-guarded",
@@ -143,8 +143,8 @@ var maxDataSrc = fs.readFileSync(path.join(ROOT, "max-data.mjs"), "utf8");
 // into discovery-adapter.js. Checks that used to grep the inline code now
 // read it here. `placementSrc` is "wherever the adapter lives" so the
 // rules don't care which file holds it.
-var adapterSrc = fs.existsSync(path.join(ROOT, "discovery-adapter.js"))
-  ? fs.readFileSync(path.join(ROOT, "discovery-adapter.js"), "utf8") : "";
+var adapterSrc = fs.existsSync(path.join(ROOT, "discovery-adapter.mjs"))
+  ? fs.readFileSync(path.join(ROOT, "discovery-adapter.mjs"), "utf8") : "";
 var placementSrc = indexSrc + "\n" + adapterSrc;
 check("Rule 5a: MaxData.canonicalizePlaceActivities exists",
   /function canonicalizePlaceActivities\s*\(/.test(maxDataSrc));
@@ -842,7 +842,7 @@ check("Identity 3: the listed-set PRESENCE invariant lives at the write door (PD
   // aware and idempotent. The scattered pipeline postcondition _assertUserListed-
   // Present is gone; removal (PD.441/442) and restoration (PD.443) are one owner.
   (function () {
-    var cd = fs.readFileSync(path.join(ROOT, "construct-decorate.js"), "utf8");
+    var cd = fs.readFileSync(path.join(ROOT, "construct-decorate.mjs"), "utf8");
     return maxDataSrc.indexOf("the write door also RESTORES a listed place") !== -1
       && maxDataSrc.indexOf("_presentByIdentity") !== -1
       && cd.indexOf("window._assertUserListedPresent = function") === -1;  // the pass is gone
@@ -855,7 +855,7 @@ check("Identity 2: the kind invariant lives at the WRITE DOOR, not a scattered p
   // canonicalizePlaceActivities (reading _listedGroundTruth), subsuming the
   // deleted, loosely-matched _collapseKindConflicts pass.
   (function () {
-    var cd = fs.readFileSync(path.join(ROOT, "construct-decorate.js"), "utf8");
+    var cd = fs.readFileSync(path.join(ROOT, "construct-decorate.mjs"), "utf8");
     return maxDataSrc.indexOf("_listedGroundTruth") !== -1
       && maxDataSrc.indexOf("a place you listed as a SIGHT is not a base") !== -1
       && cd.indexOf("window._collapseKindConflicts = function") === -1;  // the pass is gone

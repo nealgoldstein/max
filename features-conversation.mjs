@@ -3999,3 +3999,5 @@ function _editTripBooking(bookingId) {
   };
 }
 if (typeof globalThis !== "undefined") globalThis._editTripBooking = _editTripBooking;
+
+export {};

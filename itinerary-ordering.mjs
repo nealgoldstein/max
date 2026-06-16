@@ -1327,3 +1327,5 @@ function doCreateTrip(){
   hideNewTripForm();
   enterApp();
 }
+
+export {};
