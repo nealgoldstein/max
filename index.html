@@ -13529,23 +13529,24 @@ function _reconcileUserListedKeeps(){
   var _isStaySec = (typeof window !== "undefined" && typeof window._isStaySection === "function")
     ? window._isStaySection : function(){ return false; };
   var _MD = (typeof MaxDecisions !== "undefined") ? MaxDecisions : null;
-  (_tb.placeActivities || []).forEach(function(it){
-    var _stay = _isStaySec(it && it.section);
-    (it && it.requiredPlaces || []).forEach(function(p){
-      if (!p || !p.place) return;
-      var _dec = _decLog ? _decLog.get(p.place) : null;
-      if (_MD) {
+  // P4.3 CUTOVER: keepOf is now the SOLE keep derivation here. The prior per-place
+  // origin-default fallback was dead code — decision-model.js is a synchronous
+  // classic <script> loaded before this ever runs, so _MD is always present (the
+  // _p4ShadowCheck gate, clean across real use, also proves keepOf is the value
+  // every place already carries). If _MD were somehow absent we SKIP (leave keeps
+  // as last-set) rather than resurrect the legacy rule the model replaced.
+  if (_MD) {
+    (_tb.placeActivities || []).forEach(function(it){
+      var _stay = _isStaySec(it && it.section);
+      (it && it.requiredPlaces || []).forEach(function(p){
+        if (!p || !p.place) return;
+        var _dec = _decLog ? _decLog.get(p.place) : null;
         var _facts = _MD.factsOf({ origin: _origOf(p), isStay: _stay });
         p._keep = _MD.keepOf(_facts, _dec);
         p._rejected = !!(_dec && _dec.rejected);
-      } else {
-        // load-order fallback: the prior origin-default rule
-        if (p._rejected) { p._keep = false; }
-        else if (p._decided === true) { p._keep = (p._keep === true); }
-        else { p._keep = (_origOf(p) === "user"); }
-      }
+      });
     });
-  });
+  }
 }
 
 // PD.401g: the Discovery placement adapter (_discoveryOpts,
