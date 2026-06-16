@@ -143,7 +143,7 @@ t("canonicalizer dedupes alias-linked names via PlaceKey",
   (function () {
     PlaceKey.reset();
     global.PlaceKey = PlaceKey;
-    delete require.cache[require.resolve("../max-data.js")];
+    delete require.cache[require.resolve("../max-data.mjs")];
     require("../max-data.mjs");
     var MaxData = global.MaxData;
     if (!MaxData || typeof MaxData.canonicalizePlaceActivities !== "function") return false;

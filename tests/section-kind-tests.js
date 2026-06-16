@@ -61,7 +61,7 @@ t("isSynthetic: an LLM theme section is NOT structural",
 t("canonicalizer routes a catchall dupe to the best-precedence bucket",
   (function () {
     global.SectionKind = SK;
-    delete require.cache[require.resolve("../max-data.js")];
+    delete require.cache[require.resolve("../max-data.mjs")];
     require("../max-data.mjs");
     var MaxData = global.MaxData;
     if (!MaxData || typeof MaxData.canonicalizePlaceActivities !== "function") return false;
