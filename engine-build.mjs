@@ -30,7 +30,7 @@
 // input instead of reading _tb. For now the orchestrator writes the
 // input into _tb at entry; phases continue to read from there.
 
-(function (global) {
+const global = /** @type {any} */ (globalThis);
   "use strict";
 
   // ── Lifecycle flag ────────────────────────────────────────────────
@@ -466,4 +466,5 @@
     _diagnostic:    _diagnostic
   };
 
-})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : window));
+
+export {};

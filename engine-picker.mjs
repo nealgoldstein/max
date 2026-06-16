@@ -24,7 +24,7 @@
 // We DO keep it free of trip-engine dependencies so the two engines
 // stay decoupled and meet only at the trip database.
 
-(function (global) {
+const global = /** @type {any} */ (globalThis);
   'use strict';
 
   // _normPlaceName lives in engine-trip.js (Phase 1, exposed on window).
@@ -5148,4 +5148,5 @@
   global.buildDayTripNote        = buildDayTripNote;
   global.collectUserDayTripPairs = collectUserDayTripPairs;
 
-})(typeof window !== 'undefined' ? window : this);
+
+export {};

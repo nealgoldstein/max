@@ -46,7 +46,7 @@
 //   { screen: 'brief', tripId: '<id>' }
 //   { screen: 'dest', tripId: '<id>', destId: '<destId>' }
 
-(function (global) {
+const global = /** @type {any} */ (globalThis);
   "use strict";
 
   var SCREENS = {
@@ -199,4 +199,5 @@
     _reset:   function () { _listeners = []; }
   };
 
-})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : window));
+
+export {};

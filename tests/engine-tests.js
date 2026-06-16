@@ -63,9 +63,9 @@ function loadModule(rel) {
 }
 
 loadModule('db.js');
-loadModule('engine-trip.js');
-loadModule('engine-picker.js');
-loadModule('engine-classify.js');
+require('../engine-trip.mjs');
+require('../engine-picker.mjs');
+require('../engine-classify.mjs');
 
 // ── Test runner ─────────────────────────────────────────────────
 
@@ -796,7 +796,7 @@ describe('engine-trip.js — mutator namespace surface', () => {
   });
   test('engine-trip.js has no DOM dependencies', () => {
     var fs = require('fs');
-    var src = fs.readFileSync(__dirname + '/../engine-trip.js', 'utf8');
+    var src = fs.readFileSync(__dirname + '/../engine-trip.mjs', 'utf8');
     // Strip out comments (line + block) before scanning.
     src = src.replace(/\/\*[\s\S]*?\*\//g, '');
     src = src.replace(/\/\/.*$/gm, '');

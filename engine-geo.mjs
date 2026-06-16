@@ -29,7 +29,7 @@
 //   MaxGeo.detectCountry(text) → most-mentioned country in a string
 //   MaxGeo.all()              → all entries
 
-(function (global) {
+const global = /** @type {any} */ (globalThis);
   'use strict';
 
   // Field key (kept short to make the data block readable):
@@ -410,4 +410,5 @@
   if (typeof global.MaxEngineTrip !== "undefined") {
     global.MaxEngineTrip.geo = MaxGeo;
   }
-})(typeof window !== "undefined" ? window : globalThis);
+
+export {};

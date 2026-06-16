@@ -35,7 +35,7 @@
 // future enrichers (per-day-plan LLM, restaurants, etc.) share the
 // same queue primitive.
 
-(function (global) {
+const global = /** @type {any} */ (globalThis);
   "use strict";
 
   // ── Configuration ───────────────────────────────────────────────
@@ -341,4 +341,5 @@
     _setBackoffBase: function (ms) { BASE_BACKOFF_MS = ms; }
   };
 
-})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : window));
+
+export {};

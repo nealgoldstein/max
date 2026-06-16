@@ -20,7 +20,7 @@
 // All helpers are pure — same inputs always produce the same output,
 // no global reads, no DOM access, no I/O. Safe to call from tests.
 
-(function (global) {
+const global = /** @type {any} */ (globalThis);
   "use strict";
 
   // ── Shared utilities ────────────────────────────────────────────
@@ -308,4 +308,5 @@
     describeFilterOutput:           describeFilterOutput
   };
 
-})(typeof globalThis !== "undefined" ? globalThis : window);
+
+export {};

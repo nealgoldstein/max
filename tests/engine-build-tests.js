@@ -94,8 +94,7 @@ global.TripStore = {
 
 var path = require("path");
 var fs = require("fs");
-var mod = fs.readFileSync(path.join(__dirname, "..", "engine-build.js"), "utf8");
-new Function(mod)();
+require("../engine-build.mjs");
 
 assert(typeof global.MaxBuild === "object", "MaxBuild not exported");
 assert(typeof global.MaxBuild.findCandidates === "function", "MaxBuild.findCandidates missing");

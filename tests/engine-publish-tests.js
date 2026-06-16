@@ -29,8 +29,7 @@ function test(name, fn) {
 }
 
 // Load the module.
-var src = fs.readFileSync(path.join(__dirname, "..", "engine-publish.js"), "utf8");
-new Function(src)();
+require("../engine-publish.mjs");
 assert(typeof global.MaxPublish === "object", "MaxPublish must load");
 
 // ── PD.234: dedupCandidatesByPlace ─────────────────────────────────

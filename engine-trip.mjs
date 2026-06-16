@@ -18,7 +18,7 @@
 // Phase 2 will narrow callers to the namespaced surface and drop the
 // window aliases.
 
-(function (global) {
+const global = /** @type {any} */ (globalThis);
   'use strict';
 
   // ── Geographic affordance (FQ) — pure pieces ───────────────
@@ -3156,4 +3156,5 @@
   global.makeDays      = makeDays;
   global.getCityCenter = getCityCenter;
 
-})(typeof window !== 'undefined' ? window : this);
+
+export {};

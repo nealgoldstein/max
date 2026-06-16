@@ -49,7 +49,7 @@
 //     Sun Voyager are all `within` Reykjavík); `from` requires the
 //     LLM to assert it explicitly.
 
-(function (global) {
+const global = /** @type {any} */ (globalThis);
   'use strict';
 
   // Normalizer for name-matching. Prefer the engine-trip version when
@@ -431,4 +431,5 @@
   global.MaxEngineClassify = MaxEngineClassify;
   global.classifyListEntries = classifyListEntries;
 
-})(typeof window !== 'undefined' ? window : this);
+
+export {};

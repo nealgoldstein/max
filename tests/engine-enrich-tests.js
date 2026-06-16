@@ -41,8 +41,7 @@ function test(name, fn) {
 }
 
 // Load module.
-var src = fs.readFileSync(path.join(__dirname, "..", "engine-enrich.js"), "utf8");
-new Function(src)();
+require("../engine-enrich.mjs");
 assert(typeof global.MaxEnrich === "object", "MaxEnrich must load");
 // Speed up timing for tests.
 global.MaxEnrich._setIntervalMs(20);
