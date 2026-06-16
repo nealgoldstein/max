@@ -24,13 +24,14 @@
 "use strict";
 var fs = require("fs");
 var path = require("path");
+var esbuild = require("esbuild");
 
 var ROOT = __dirname;
 var html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
 
 // Pull <script src="..."> in document order; keep only LOCAL .js (skip vendor +
 // CDN/absolute URLs). Strip any ?v= cache-buster.
-var srcRe = /<script\s+src="([^"]+)"/g;
+var srcRe = /<script\b[^>]*\bsrc="([^"]+)"/g;
 var order = [];
 var m;
 while ((m = srcRe.exec(html)) !== null) {
@@ -42,7 +43,7 @@ while ((m = srcRe.exec(html)) !== null) {
   // early module bundle would run it before the DOM exists. Keep it out of the
   // concat; index.bundle.html leaves its tag in place.
   if (/(^|\/)app-main\.js$/.test(src)) continue;
-  if (!/\.js$/.test(src)) continue;
+  if (!/\.m?js$/.test(src)) continue;
   order.push(src.replace(/^\//, ""));
 }
 
@@ -54,8 +55,21 @@ if (missing.length) {
 
 // `;\n` between files guards against ASI hazards (a file ending without a
 // semicolon followed by one starting with `(`).
+// .mjs modules are real ESM — compile each to an IIFE via esbuild (it still runs
+// its globalThis exposure, so classic consumers reading the global are unaffected).
+// Classic .js modules concatenate raw (behavior-identical to the tags). As more
+// modules convert to ESM, more of the bundle becomes esbuild-compiled, leaf by leaf.
 var bundle = order.map(function (f) {
-  return "/* ===== " + f + " ===== */\n" + fs.readFileSync(path.join(ROOT, f), "utf8");
+  var header = "/* ===== " + f + " ===== */\n";
+  if (/\.mjs$/.test(f)) {
+    var r = esbuild.buildSync({
+      entryPoints: [path.join(ROOT, f)],
+      bundle: true, format: "iife", platform: "browser",
+      write: false, logLevel: "silent"
+    });
+    return header + r.outputFiles[0].text;
+  }
+  return header + fs.readFileSync(path.join(ROOT, f), "utf8");
 }).join("\n;\n");
 
 var outDir = path.join(ROOT, "dist");
@@ -76,7 +90,7 @@ var bundledHtml = html;
 var inserted = false;
 order.forEach(function (rel) {
   var esc = rel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  var re = new RegExp('[ \\t]*<script src="/?' + esc + '(\\?[^"]*)?"\\s*></script>\\n?');
+  var re = new RegExp('[ \\t]*<script[^>]*\\bsrc="/?' + esc + '(\\?[^"]*)?"[^>]*></script>\\n?');
   bundledHtml = bundledHtml.replace(re, inserted ? "" : '<script src="dist/app.bundle.js?v=DEV"></script>\n');
   inserted = true;
 });

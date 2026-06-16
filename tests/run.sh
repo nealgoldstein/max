@@ -23,7 +23,7 @@ node tests/place-repo-tests.js
 node tests/place-set-tests.js
 node tests/golden-build-tests.js
 node tests/candidates-snapshot-tests.js
-node tests/decision-model-tests.js
+node tests/decision-model-tests.mjs
 node tests/gen-prompt-tests.js
 node tests/gen-postprocess-tests.js
 node tests/engine-tests.js

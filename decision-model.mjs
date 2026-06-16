@@ -23,11 +23,10 @@
 // checked; an uncheck is durable) — so the live derivation can be swapped for
 // this with confidence.
 
-(function (global) {
   "use strict";
   // The injected global carries app globals (MaxDiscovery, MaxDecisions) that
   // aren't on the lib `globalThis` type — alias as any for the @ts-check pass.
-  var _G = /** @type {any} */ (global);
+  var _G = /** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : {});
 
   function _norm(s) { return String(s == null ? "" : s).toLowerCase().replace(/\s+/g, " ").trim(); }
 
@@ -177,6 +176,7 @@
     project: project
   };
 
-  if (typeof module !== "undefined" && module.exports) module.exports = MaxDecisions;
   if (_G && !_G.MaxDecisions) _G.MaxDecisions = MaxDecisions;
-})(typeof globalThis !== "undefined" ? globalThis : this);
+
+export { MaxDecisions };
+export default MaxDecisions;

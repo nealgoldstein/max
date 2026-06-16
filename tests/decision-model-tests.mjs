@@ -11,8 +11,8 @@
 
 "use strict";
 
-var assert = require("assert");
-var MD = require("../decision-model.js");
+import assert from "assert";
+import MD from "../decision-model.mjs";
 var Decisions = MD.Decisions;
 
 var pass = 0, fail = 0;
