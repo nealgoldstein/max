@@ -6219,7 +6219,7 @@ async function expandMustDos() {
         // _keep===false means "I unchecked this place"; the picker
         // remembers it so the user can re-check next edit, but it
         // shouldn't drive candidate generation or seed the trip.
-        if (p._keep === false) return;
+        if (_keepOf(p) === false) return;
         if (!requiredMap[p.place]) requiredMap[p.place] = {place:p.place, country:p.country||'', requiredFor:[], flexible:false};
         requiredMap[p.place].requiredFor.push(item.type === "manual" ? "__manual__" : item.name);
         if (item.type === "condition") requiredMap[p.place].flexible = true;
@@ -7357,7 +7357,7 @@ async function analyzeCoverageGaps(btn){
       it.requiredPlaces.forEach(function(p){
         if (!p || !p.place) return;
         if (p._rejected === true) return;
-        if (p._keep === false) return;
+        if (_keepOf(p) === false) return;
         var k = nrm(p.place);
         if (k && !seen[k]) { seen[k] = true; kept.push(p.place); }
       });
@@ -8528,7 +8528,7 @@ async function runCandidateSearch(requiredPlaces) {
         if (it.checked === false) return;
         (it.requiredPlaces||[]).forEach(function(p){
           if (!p || !p.place) return;
-          if (p._keep === false) return;
+          if (_keepOf(p) === false) return;
           // Round CC: even if a place flagged overnight:false sneaks past the
           // parse-time filter (e.g., via "+ more like this" or "+ Add a place"
           // where the user might add a summit by name), don't admit it to
@@ -15190,7 +15190,7 @@ function _renderPlaceActivityItems(){
             placeOrder.push(key);
           }
           byPlace[key].activities.push({ item: item, placeRef: p });
-          if (p._keep === true) byPlace[key].kept = true;
+          if (_keepOf(p) === true) byPlace[key].kept = true;
           if (p._isDayTrip === true) byPlace[key].isDayTrip = true;
           if (p._dayTripHub && !byPlace[key].dayTripHub) byPlace[key].dayTripHub = p._dayTripHub;
         });
