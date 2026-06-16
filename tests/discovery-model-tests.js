@@ -271,7 +271,7 @@ test("PD.404: a per-place _themeFit SURVIVES canonicalize + model placement (per
   // an enhance duplicate, then place the sight in its theme on render.
   global.SectionKind = (function () { try { var sk = require("../section-kind.mjs").default; return sk.SectionKind || sk; } catch (_) { return undefined; } })();
   global.MaxDiscovery = M;
-  var canon = require("../max-data.js").canonicalizePlaceActivities
+  var canon = require("../max-data.mjs").canonicalizePlaceActivities
     || (global.MaxData && global.MaxData.canonicalizePlaceActivities);
   assert.strictEqual(typeof canon, "function", "canonicalizePlaceActivities must be available");
   var pa = [
@@ -418,7 +418,7 @@ test("PD.440: an EXACT-name base and sight are the same place; only DIFFERENT na
 });
 
 test("PD.438: dedupeListedNames keeps a base and a same-named sight SEPARATE", function () {
-  var MD = require("../max-data.js");
+  var MD = require("../max-data.mjs");
   var dd = MD.dedupeListedNames || (global.MaxData && global.MaxData.dedupeListedNames);
   // "Goðafoss"(base) + "Goðafoss Waterfall"(sight) are a name-variant that
   // sameEntity merges name-only — but they're DIFFERENT roles, so they must

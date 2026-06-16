@@ -62,7 +62,7 @@ function loadModule(rel) {
   eval(code);
 }
 
-loadModule('db.js');
+require('../db.mjs');
 require('../engine-trip.mjs');
 require('../engine-picker.mjs');
 require('../engine-classify.mjs');

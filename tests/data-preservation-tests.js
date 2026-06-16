@@ -80,12 +80,10 @@ global.localStorage = {
 };
 
 // Load TripStore.
-var tripStoreSrc = fs.readFileSync(path.join(__dirname, "..", "tripstore.js"), "utf8");
-new Function(tripStoreSrc)();
+require("../tripstore.mjs");
 
 // Load MaxData accessor layer.
-var maxDataSrc = fs.readFileSync(path.join(__dirname, "..", "max-data.js"), "utf8");
-new Function(maxDataSrc)();
+require("../max-data.mjs");
 
 // Load MaxMerge user-state preservation.
 require("../max-merge.mjs");

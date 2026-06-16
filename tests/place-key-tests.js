@@ -144,7 +144,7 @@ t("canonicalizer dedupes alias-linked names via PlaceKey",
     PlaceKey.reset();
     global.PlaceKey = PlaceKey;
     delete require.cache[require.resolve("../max-data.js")];
-    require("../max-data.js");
+    require("../max-data.mjs");
     var MaxData = global.MaxData;
     if (!MaxData || typeof MaxData.canonicalizePlaceActivities !== "function") return false;
     PlaceKey.learn("myvatn natursone baths", "myvatn nature baths");

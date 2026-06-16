@@ -28,7 +28,7 @@
 // Writes go through TripStore mutators, not this layer. This is
 // READ-ONLY.
 
-(function (global) {
+const global = /** @type {any} */ (globalThis);
   "use strict";
 
   // ── Helpers ──────────────────────────────────────────────────────
@@ -989,4 +989,5 @@
     canonicalizePlaceActivities: canonicalizePlaceActivities
   };
 
-})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : window));
+
+export default globalThis.MaxData;

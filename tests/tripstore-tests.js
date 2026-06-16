@@ -76,7 +76,7 @@ global.localStorage = {
 };
 
 // Load the module under test.
-var TripStore = require(path.join(__dirname, "..", "tripstore.js"));
+var TripStore = require(path.join(__dirname, "..", "tripstore.mjs")).default;
 
 function reset() {
   _resetStorage();

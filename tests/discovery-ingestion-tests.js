@@ -12,7 +12,7 @@ global.window = global;
 global.PlaceKey = require("../place-key.mjs").default;
 require("../section-kind.mjs").default;        // global.SectionKind
 require("../discovery-model.mjs").default;     // global.MaxDiscovery
-require("../max-data.js");            // global.MaxData
+require("../max-data.mjs");            // global.MaxData
 var ING = require("../discovery-ingestion.mjs").default; // global.MaxIngestion
 var MaxData = global.MaxData;
 

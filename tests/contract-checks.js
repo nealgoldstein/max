@@ -46,7 +46,7 @@ var indexSrc = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
   var p = path.join(ROOT, f);
   if (fs.existsSync(p)) indexSrc += "\n" + fs.readFileSync(p, "utf8");
 });
-var dbSrc = fs.readFileSync(path.join(ROOT, "db.js"), "utf8");
+var dbSrc = fs.readFileSync(path.join(ROOT, "db.mjs"), "utf8");
 
 var pass = 0, fail = 0;
 function check(name, ok, detail) {
@@ -138,7 +138,7 @@ check("Rule 4c: LLM output MERGES around constructed items (never replaces)",
 // ── Rule 5: canonical place-set invariant (PD.349) ─────────────────
 // One dedupe owner; enforced at the render chokepoint every path
 // crosses. Re-running any pass can never grow the Discovery set.
-var maxDataSrc = fs.readFileSync(path.join(ROOT, "max-data.js"), "utf8");
+var maxDataSrc = fs.readFileSync(path.join(ROOT, "max-data.mjs"), "utf8");
 // PD.401g: the Discovery placement adapter was extracted out of index.html
 // into discovery-adapter.js. Checks that used to grep the inline code now
 // read it here. `placementSrc` is "wherever the adapter lives" so the
@@ -158,7 +158,7 @@ check("Rule 5b: the render chokepoint enforces canonical form",
 // through TripStore.setPlaceActivities, which canonicalizes at write
 // and treats identical state as a silent no-op (loop-proof). And
 // renderers never trigger builds: the picker auto-fire is deleted.
-var tripstoreSrc = fs.readFileSync(path.join(ROOT, "tripstore.js"), "utf8");
+var tripstoreSrc = fs.readFileSync(path.join(ROOT, "tripstore.mjs"), "utf8");
 check("Rule 6a: TripStore.setPlaceActivities canonicalizes at write",
   tripstoreSrc.indexOf("canonicalizePlaceActivities") !== -1,
   "canonical-at-write was removed from the one door");

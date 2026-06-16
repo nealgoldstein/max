@@ -62,7 +62,7 @@ t("canonicalizer routes a catchall dupe to the best-precedence bucket",
   (function () {
     global.SectionKind = SK;
     delete require.cache[require.resolve("../max-data.js")];
-    require("../max-data.js");
+    require("../max-data.mjs");
     var MaxData = global.MaxData;
     if (!MaxData || typeof MaxData.canonicalizePlaceActivities !== "function") return false;
     // Same place in two catchalls → must survive only in the

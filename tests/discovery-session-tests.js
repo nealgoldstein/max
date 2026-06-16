@@ -13,7 +13,7 @@ global.window = global;
 global.PlaceKey = require("../place-key.mjs").default;
 require("../section-kind.mjs").default;
 require("../discovery-model.mjs").default;
-require("../max-data.js");
+require("../max-data.mjs");
 require("../discovery-ingestion.mjs").default;
 require("../discovery-persistence.mjs").default;
 require("../discovery-enhance.mjs").default;

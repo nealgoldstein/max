@@ -55,7 +55,7 @@
 // Subscribers register via MaxDB.on(event, cb) and unsubscribe via
 // MaxDB.off(event, cb) or the function returned by .on(...).
 
-(function (global) {
+const global = /** @type {any} */ (globalThis);
   'use strict';
 
   // ── Detect iframe / disabled persistence ────────────────────
@@ -1047,4 +1047,5 @@
     // IDB-only orphans (the resurrection vector before PD.250).
     try { _hydrationPromise = hydrateTripIdbMirror(); } catch (_) { _hydrationPromise = Promise.resolve(); }
   }
-})(typeof window !== 'undefined' ? window : this);
+
+export default globalThis.MaxDB;

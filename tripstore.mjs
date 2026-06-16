@@ -25,7 +25,7 @@
 // a bug.
 // ─────────────────────────────────────────────────────────────────────
 
-(function (global) {
+const global = /** @type {any} */ (globalThis);
   "use strict";
 
   // ── Schema version ─────────────────────────────────────────────────
@@ -979,4 +979,5 @@
   if (typeof module !== "undefined" && module.exports) {
     module.exports = TripStore;
   }
-})(/** @type {any} */ (typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : this)));
+
+export default TripStore;

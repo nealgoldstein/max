@@ -31,7 +31,7 @@
 // PURE: DOM-free, async-free, Node-testable. Projections return plain data;
 // the view layer maps rows → DOM and pins → markers.
 
-(function (global) {
+const global = /** @type {any} */ (globalThis);
   "use strict";
 
   function _norm(s) { return String(s == null ? "" : s).toLowerCase().replace(/\s+/g, " ").trim(); }
@@ -250,4 +250,5 @@
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   global.MaxPlaceSet = api;
 
-})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : this));
+
+export default api;

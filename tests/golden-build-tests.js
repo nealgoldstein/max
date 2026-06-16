@@ -26,8 +26,8 @@ var assert = require("assert");
 global.window = global;
 global.PlaceKey = require("../place-key.mjs").default;
 require("../discovery-model.mjs").default;           // MaxDiscovery.sameEntity (the ONE identity)
-require("../max-data.js");                   // MaxData.canonicalizePlaceActivities (the write door)
-var PS = require("../place-set.js");         // MaxPlaceSet.fromTrip / counts
+require("../max-data.mjs");                   // MaxData.canonicalizePlaceActivities (the write door)
+var PS = require("../place-set.mjs").default;         // MaxPlaceSet.fromTrip / counts
 var canon = global.MaxData.canonicalizePlaceActivities;
 
 var pass = 0, fail = 0;
