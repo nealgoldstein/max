@@ -1,3 +1,4 @@
+// @ts-check
 // util-esc.js — ONE canonical HTML escaper (PD.484 / audit T4.1).
 //
 // Before this, ~18 copies of esc()/_esc() were scattered across index.html

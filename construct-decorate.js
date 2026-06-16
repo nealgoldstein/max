@@ -1,3 +1,4 @@
+// @ts-check
 // construct-decorate.js — extracted verbatim from index.html (PD.483 bloat reduction).
 // Construct-then-decorate + PD.382 provenance + paste-list modal.
 // Pure function-cluster: declarations + globalThis-guarded exposures, no
@@ -1584,8 +1585,8 @@ function _openPasteListModal(opts) {
   // active text-editing — losing a pasted list to an errant click
   // on the dim area is high-cost. Cancel button is the explicit exit.
   document.getElementById("paste-list-cancel").onclick = close;
-  var ta = document.getElementById("paste-list-ta");
-  var buildBtn = document.getElementById("paste-list-build");
+  var ta = /** @type {HTMLTextAreaElement} */ (document.getElementById("paste-list-ta"));
+  var buildBtn = /** @type {HTMLButtonElement} */ (document.getElementById("paste-list-build"));
   var prev = document.getElementById("paste-list-preview");
   function refresh() {
     var parsed = parsePlacesList(ta.value);

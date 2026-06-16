@@ -181,3 +181,48 @@ interface Trip {
   placeActivities?: PlaceActivity[];
   [k: string]: any;
 }
+
+// Cross-module globals referenced by the UI/glue layer (construct-decorate, sync,
+// apikey, engine-picker, …). Declared 'any' — same incremental approach. Owned-by-a-
+// typed-module names are excluded (TS resolves those).
+declare var MaxEnrich: any;
+declare var MaxGenPost: any;
+declare var MaxGenPrompt: any;
+declare var MaxPickerUI: any;
+declare var MaxPublish: any;
+declare var PlaceKey: any;
+declare var _actionCtr: any;
+declare var _autoSeedIconicSightsToDays: any;
+declare var _backstopPastedListPlaces: any;
+declare var _defaultDayTripRadiusKm: any;
+declare var _emitTripMutation: any;
+declare var _escHtml: any;
+declare var _fileHandle: any;
+declare var _listedGroundTruth: any;
+declare var _mdcItemDelete: any;
+declare var _mergeAdjacentSamePlaceDests: any;
+declare var _reconcileDestinations: any;
+declare var _refreshUserListedFromRecords: any;
+declare var _stampListedOrigin: any;
+declare var _tripsIndex: any;
+declare var _wispDelete: any;
+declare var _wispMarkProcessed: any;
+declare var _wispUnprocessed: any;
+declare var _wispsArrayMigrated: any;
+declare var activeDest: any;
+declare var addPendingAction: any;
+declare var callMax: any;
+declare var discoverBreadthPlaces: any;
+declare var drawTripMode: any;
+declare var g: any;
+declare var generateCityData: any;
+declare var getCityCenter: any;
+declare var localSave: any;
+declare var makeDays: any;
+declare var maxAlert: any;
+declare var parsePlacesList: any;
+declare var renderActivityPicker: any;
+declare var reopenCandidateExplorer: any;
+declare var reopenPickerForEdit: any;
+declare var saveTripsIndex: any;
+declare var showSaveStatus: any;

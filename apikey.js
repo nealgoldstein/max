@@ -1,3 +1,4 @@
+// @ts-check
 // apikey.js — Anthropic API-key management (BYOK).
 // Extracted verbatim from index.html (PD.449, bloat reduction). Plain
 // classic script: every symbol stays GLOBAL exactly as when inline, so
