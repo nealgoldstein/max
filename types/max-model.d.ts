@@ -22,6 +22,11 @@ declare var global: any;
 // every property (mirrors the classic-script reality). Tighten as #2 lands.
 interface Window { [key: string]: any; }
 
+// The app attaches custom fields to Error instances (the sync layer's _request
+// tags code/status/data/serverRev so callers can branch). Declaration-merge them
+// onto the global Error so // @ts-check files can read/write them.
+interface Error { code?: string; status?: number; data?: any; serverRev?: any; }
+
 // ── Cross-module global surface ──────────────────────────────────────────────
 // Max is (still) a classic-script app: ~56 modules share state through globals on
 // window (extensibility lever #2 is migrating this to ES modules). Declared here

@@ -1,3 +1,4 @@
+// @ts-check
 // max-sync.js — desktop ↔ server bridge.
 //
 // Where this fits:
@@ -1235,8 +1236,8 @@
     ov.appendChild(box);
     document.body.appendChild(ov);
 
-    var urlInp = document.getElementById('max-sync-url');
-    var emailInp = document.getElementById('max-sync-email');
+    var urlInp = /** @type {HTMLInputElement} */ (document.getElementById('max-sync-url'));
+    var emailInp = /** @type {HTMLInputElement} */ (document.getElementById('max-sync-email'));
     var msg = document.getElementById('max-sync-msg');
     var inBtn = document.getElementById('max-sync-in');
     var outBtn = document.getElementById('max-sync-out');
@@ -1261,11 +1262,11 @@
         var url = (urlInp && urlInp.value.trim()) || DEFAULT_URL;
         var email = emailInp && emailInp.value.trim();
         // v359.60.82: name input only renders in the signed-out state.
-        var nameInp = document.getElementById('max-sync-name');
+        var nameInp = /** @type {HTMLInputElement} */ (document.getElementById('max-sync-name'));
         var name = nameInp ? nameInp.value.trim() : '';
         // v359.60.87: marketing opt-in checkbox only renders in the
         // signed-out state.
-        var marketingInp = document.getElementById('max-sync-marketing');
+        var marketingInp = /** @type {HTMLInputElement} */ (document.getElementById('max-sync-marketing'));
         var marketingOptIn = marketingInp ? !!marketingInp.checked : false;
         if (!email) {
           _msg('Enter an email', '#c44');
