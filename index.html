@@ -13597,35 +13597,36 @@ function _runPlaceSetPasses(reason){
 }
 if (typeof globalThis !== "undefined") globalThis._runPlaceSetPasses = _runPlaceSetPasses;
 
-// P4.2 (shadow mode): prove the decision LOG agrees with the live record flags.
-// For every place the user has DECIDED (it's in the log), the pure projection
-// MaxDecisions.keepOf(facts, decision) must equal the record's _keep. If this
-// reports zero disagreements across real use, the log is a faithful stand-in and
-// P4.3 can cut the live derivation over to it. Diagnostic only — writes nothing.
+// P4.2 (shadow mode): prove the pure projection agrees with the live record flags.
+// For EVERY place — decided (in the log) or not — MaxDecisions.keepOf(facts,
+// decision) must equal the record's _keep (undecided places project from the
+// origin default, decision=null). If this reports zero disagreements across real
+// use, the projection is a faithful stand-in for the stored flag and the live
+// derivation can be cut over to compute _keep at read time instead of storing it
+// (#3, the ~50 _keep writers are the smear this retires). Diagnostic only —
+// writes nothing. Report distinguishes decided vs undecided disagreements so a
+// stray direct _keep write (undecided + disagree) is immediately visible.
 function _p4ShadowCheck(){
   try {
     if (typeof _tb === "undefined" || !_tb || typeof MaxDecisions === "undefined") return { ready: false };
-    var D = _tb._decisions;
-    if (!D) return { ready: true, decided: 0, note: "no decisions recorded yet" };
-    var nrm = (typeof _normPlaceName === "function") ? _normPlaceName : function(s){ return String(s||"").toLowerCase().trim(); };
+    var D = _tb._decisions || null;
     var isStay = (typeof window._isStaySection === "function") ? window._isStaySection : function(){ return false; };
     var origOf = (typeof window._placeOrigin === "function") ? window._placeOrigin
       : function(p){ return (p && p._origin) || ((p && p._autoCreated) ? "max-hub" : "max"); };
-    var decided = 0, agree = 0, disagree = [];
+    var decided = 0, undecided = 0, agree = 0, disagree = [];
     (_tb.placeActivities || []).forEach(function(it){
       var stay = isStay(it && it.section);
       (it && it.requiredPlaces || []).forEach(function(p){
         if (!p || !p.place) return;
-        var dec = D.get(p.place);
-        if (!dec) return; // only audit places the user actually decided
-        decided++;
+        var dec = D ? D.get(p.place) : null;
+        if (dec) decided++; else undecided++;
         var facts = MaxDecisions.factsOf({ origin: origOf(p), isStay: stay });
-        var projected = MaxDecisions.keepOf(facts, dec);
+        var projected = MaxDecisions.keepOf(facts, dec || null);
         if (projected === !!p._keep) agree++;
-        else disagree.push({ place: p.place, record: !!p._keep, projected: projected, origin: facts.origin });
+        else disagree.push({ place: p.place, record: !!p._keep, projected: projected, origin: facts.origin, decided: !!dec });
       });
     });
-    return { ready: true, decided: decided, agree: agree, disagree: disagree, clean: disagree.length === 0 };
+    return { ready: true, decided: decided, undecided: undecided, agree: agree, disagree: disagree, clean: disagree.length === 0 };
   } catch (e) { return { error: e && e.message }; }
 }
 if (typeof globalThis !== "undefined") globalThis._p4ShadowCheck = _p4ShadowCheck;
