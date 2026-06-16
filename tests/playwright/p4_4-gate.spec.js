@@ -358,5 +358,18 @@ test.describe('#3 gate — stored _keep equals the keep projection (every place)
     const afterDecisions = await page.evaluate(() => window._p4ShadowCheck());
     expect(afterDecisions.clean,
       'stored _keep matches keepOf for every place after decisions: ' + JSON.stringify(afterDecisions.disagree || [])).toBe(true);
+
+    // ROLE leg: every place where a role was DECIDED must have its live role
+    // reproduced by roleOf (decidedClean). The MaxRoleWriter.set('c3','stay')
+    // above exercises this. Undecided role divergence is expected (engine roles
+    // the projection default doesn't yet carry), so — mirroring how keep is
+    // gated — we lock only the decided invariant: an explicit role decision must
+    // reproduce. A red here means a role write bypassed the decision log.
+    const roleAfter = await page.evaluate(() =>
+      (typeof window._p4RoleShadowCheck === 'function') ? window._p4RoleShadowCheck() : { ready: false });
+    if (roleAfter.ready) {
+      expect(roleAfter.decidedClean,
+        'roleOf reproduces the live role for every DECIDED place: ' + JSON.stringify(roleAfter.disagreeDecided || [])).toBe(true);
+    }
   });
 });
