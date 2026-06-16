@@ -67,13 +67,23 @@ Three levers to lower change-risk further (change-risk = bug-risk). Ordered: eac
      from the smeared signals (`_isDayTrip`→daytrip, `_waysideFromHub`→onway, stay-section→stay, else see)
      and comparing to roleOf; clean on the real trip (53/53, disagreeUndecided:[]); CI gate enforces
      `decidedClean` (explicit role decisions must reproduce).
-  **Both projections are now faithful stand-ins for the stored/smeared state — the bulletproofing
-  invariant is in place and CI-enforced.** What remains is the CUTOVER (the extensibility payoff):
-  **Next slices (ordered):** (a) stop STORING `_keep` / reading smeared role and DERIVE at read time via
-  keepOf/roleOf — the ≈50 `_keep` writers + the `_isDayTrip`/`_waysideFromHub` role smear are what this
-  deletes; cut read clusters first, then retire writers, each guarded by the two shadow checks + CI gates
-  (a regression turns them red). Risk lives in live UI handlers (e.g. `toggleMdcItem`) → per-slice
-  browser-verify. (b) give place-set.js:238 `factsOf` (last inline kind-rule). (c) `sectionOf` cutover.
+  ✅ KEEP CUTOVER (reads) DONE — `keepOf` is the SOLE keep rule in the reconcile (dead origin-default
+     fallback deleted); added `_keepOf(p)` accessor that DERIVES keep from (origin + decision log) — keepOf
+     ignores kind so it needs no section context; **every render/logic keep read in index.html now derives
+     via `_keepOf` instead of the cached flag** (truthy + comparison forms, ~20 reads). Verified live:
+     `(…).every(p=>_keepOf(p)===!!p._keep)` is `true`. The render layer is now a pure projection of keep.
+  **Where the cache still legitimately lives:** `p._keep` is now a GATED, DERIVED CACHE — written only by
+  the reconcile (via keepOf), read only by `_p4ShadowCheck` (to verify it), the legacy migration/record-
+  serialization layer, and the accessor's pre-load fallback. It can no longer silently diverge (gates).
+  **#2 finding (the serialization "circularity"):** NOT a bug — it's a guarded one-time legacy migration
+  (seed the log from pre-P4.5 records' `_decided`/`_keep`, only if the log doesn't already hold it), then
+  the log is authoritative. Fully DELETING the physical `_keep` field is therefore a data-migration
+  decision (drop pre-log-persistence trips), not a refactor — and it touches saved-trip persistence (high
+  stakes). Deferred deliberately: the gated-cache end-state already delivers the bulletproofing + the
+  pure-projection render. **Remaining if pursued later:** (a) drop record-level `_keep`/`_decided`
+  persistence + the migration seed (needs the data decision); (b) the ≈50 `_keep` WRITERS (still set the
+  cache — harmless now, retire for cleanliness, per-handler browser-verify); (c) role read cutover via
+  `_keepOf`-style `_roleOf(p)`; (d) place-set.js:238 inline kind-rule; (e) `sectionOf` cutover.
 
 > Why #1 first/now: shape-drift was the root of most of what this whole effort fixed. #1 is the only
 > one of the three that's incrementally adoptable with zero app-breaking risk, and it makes #2 and #3
