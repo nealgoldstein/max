@@ -13549,6 +13549,21 @@ function _reconcileUserListedKeeps(){
   }
 }
 
+// P4.3 read accessor — DERIVE a place's keep from the projection (origin +
+// decision log), the single source. keepOf ignores kind, so this is fully
+// self-contained from the place: no section context needed. The reconcile caches
+// the identical value onto p._keep; routing reads through here lets that cache be
+// retired once every read derives. Falls back to the cached flag only if the
+// model / decision log isn't attached yet (pre-load), so it is always safe to call.
+function _keepOf(p){
+  if (!p) return false;
+  if (typeof MaxDecisions === "undefined" || !MaxDecisions || typeof MaxDecisions.keepOf !== "function") return !!p._keep;
+  var _o = (typeof window._placeOrigin === "function") ? window._placeOrigin(p) : (p._origin || "max");
+  var _d = (typeof _tb !== "undefined" && _tb && _tb._decisions && typeof _tb._decisions.get === "function") ? _tb._decisions.get(p.place) : null;
+  return MaxDecisions.keepOf({ origin: _o }, _d || null);
+}
+if (typeof globalThis !== "undefined") globalThis._keepOf = _keepOf;
+
 // PD.401g: the Discovery placement adapter (_discoveryOpts,
 // _discoveryConsideredCounts, _applyDiscoveryModelToSights) was EXTRACTED
 // into discovery-adapter.js — the next strangler-fig step shrinking this
@@ -14145,7 +14160,7 @@ function _renderPlaceActivityItems(){
       .trim();
   }
   items.forEach(function(item){
-    var anyKept = (item.requiredPlaces||[]).some(function(p){ return p && p._keep; });
+    var anyKept = (item.requiredPlaces||[]).some(function(p){ return p && _keepOf(p); });
     item.checked = anyKept;
     var sec = (item.section || "").trim();
     if (!sec) {
@@ -15283,7 +15298,7 @@ function _renderPlaceActivityItems(){
         }
       }
       var secKeptR = secItems.some(function(it){
-        return (it.requiredPlaces||[]).some(function(p){ return p && p._keep; });
+        return (it.requiredPlaces||[]).some(function(p){ return p && _keepOf(p); });
       });
       var hdrWrapR = document.createElement("div");
       hdrWrapR.className = "tb-act-section-hdr" + (secKeptR ? " on" : "");
@@ -15300,7 +15315,7 @@ function _renderPlaceActivityItems(){
       list.appendChild(hdrWrapR);
 
       secItems.forEach(function(item){
-        var anyKept = (item.requiredPlaces||[]).some(function(p){ return p && p._keep; });
+        var anyKept = (item.requiredPlaces||[]).some(function(p){ return p && _keepOf(p); });
         item.checked = anyKept;
         // Round PD.4: iconic badge removed from Discovery rows.
         var iconicTag = '';
@@ -23261,7 +23276,7 @@ function _updatePlaceActivitySummary(){
   if(!el) return;
   var items = _tb.placeActivities || [];
   var activeItems = items.filter(function(i){
-    return Array.isArray(i.requiredPlaces) && i.requiredPlaces.some(function(p){return p && p._keep;});
+    return Array.isArray(i.requiredPlaces) && i.requiredPlaces.some(function(p){return p && _keepOf(p);});
   });
   // Distinct kept places across all active activities \u2014 that's the actual
   // destination set we'll seed the trip with. Routes contribute their endpoints
@@ -25219,9 +25234,9 @@ function continuePlaceModeToStep2(){
   // For each, narrow requiredPlaces to just the kept ones \u2014 this is the
   // user's expressed commitment, not the full superset Max suggested.
   var items = (_tb.placeActivities||[]).filter(function(i){
-    return Array.isArray(i.requiredPlaces) && i.requiredPlaces.some(function(p){return p && p._keep;});
+    return Array.isArray(i.requiredPlaces) && i.requiredPlaces.some(function(p){return p && _keepOf(p);});
   }).map(function(i){
-    var keptPlaces = (i.requiredPlaces||[]).filter(function(p){return p && p._keep;}).map(function(p){
+    var keptPlaces = (i.requiredPlaces||[]).filter(function(p){return p && _keepOf(p);}).map(function(p){
       // Strip _keep before pushing into _mdcItems \u2014 the rest of the system
       // doesn't know about it and shouldn't.
       var clean = {place: p.place, country: p.country};
