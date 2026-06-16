@@ -14068,7 +14068,7 @@ function _renderPlaceActivityItems(){
       }
       var n = (typeof p.nights === "number") ? p.nights : 0;
       if (it.type !== "route" && n > _placesForPreds[key].nights) _placesForPreds[key].nights = n;
-      if (p._keep) _placesForPreds[key].kept = true;
+      if (_keepOf(p)) _placesForPreds[key].kept = true;
       if (p._userChoseStay) _placesForPreds[key].userChoseStay = true;
       if (p.overnight !== false && _placesForPreds[key].overnight !== true) _placesForPreds[key].overnight = true;
       else if (p.overnight === false && _placesForPreds[key].overnight === undefined) _placesForPreds[key].overnight = false;
@@ -14110,7 +14110,7 @@ function _renderPlaceActivityItems(){
         }
         var n = (typeof p.nights === "number") ? p.nights : 0;
         if (it.type !== "route" && n > places[key].nights) places[key].nights = n;
-        if (p._keep) places[key].kept = true;
+        if (_keepOf(p)) places[key].kept = true;
       });
     });
     function distKm(a, b){
@@ -19450,7 +19450,7 @@ function _pmExportResearchAsMarkdown(triggerBtn){
     if (!places.length) return;
     // Only include places that have user-attached research OR a kept flag.
     var includable = places.filter(function(p){
-      if (p._keep) return true;
+      if (_keepOf(p)) return true;
       var meta = _placeMetaFor(p.place);
       return !!(meta && ((meta.notes && meta.notes.trim()) || (Array.isArray(meta.links) && meta.links.length)));
     });
@@ -20286,7 +20286,7 @@ function _pmDebugRole(placeName){
     (((window._tb && _tb.placeActivities) || [])).forEach(function(it){
       (it.requiredPlaces || []).forEach(function(p){
         if (!p || !p.place || window._pmKey(p.place) !== key) return;
-        if (p._keep) info.kept = true;
+        if (_keepOf(p)) info.kept = true;
         if (p._rejected === true) info._rejected = true;
         if (p._isDayTrip === true) { info._isDayTrip = true; if (p._dayTripHub) info._dayTripHub = p._dayTripHub; }
         if (p._waysideFromHub) info._waysideFromHub = p._waysideFromHub;
@@ -20855,7 +20855,7 @@ function _pmOpenPlacePopup(placeKey, marker, mapInstance){
       if (!p || !p.place) return;
       var k = window._pmKey(p);                        // PD.401k: one identity
       if (!allPlaces[k]) allPlaces[k] = { place: p.place, kept: false, _isDayTrip: false, _dayTripHub: "", _waysideFromHub: "", _rejected: false, overnight: undefined };
-      if (p._keep) allPlaces[k].kept = true;
+      if (_keepOf(p)) allPlaces[k].kept = true;
       if (p._rejected === true) allPlaces[k]._rejected = true;
       if (p._isDayTrip === true) {
         allPlaces[k]._isDayTrip = true;
@@ -21563,7 +21563,7 @@ function _openPlacePickerMapOverlay(){
       if (!p || !p.place) return;
       var k = window._pmKey(p.place);
       if (!byKey[k]) byKey[k] = { place: p.place, lat: null, lng: null, keep: false, iconic: false, _isDayTrip: false, _dayTripHub: "" };
-      if (p._keep) byKey[k].keep = true;
+      if (_keepOf(p)) byKey[k].keep = true;
       if (iconicItem || p.iconic) byKey[k].iconic = true;
       // v354: thread day-trip flags through so the mobile overlay
       // renders the same hero-map spurs the inline picker map shows.
@@ -22706,7 +22706,7 @@ function _renderPlacePickerMap(targetId){
           && allPlaces[key].lat == null) {
         allPlaces[key].lat = p.lat; allPlaces[key].lng = p.lng;
       }
-      if (p._keep) allPlaces[key].kept = true;
+      if (_keepOf(p)) allPlaces[key].kept = true;
       if (p._rejected === true) allPlaces[key]._rejected = true;
       if (iconic) allPlaces[key].iconic = true;
       if (item.type === "route") allPlaces[key].anyRoute = true;
@@ -23285,7 +23285,7 @@ function _updatePlaceActivitySummary(){
   var totalNights = 0;
   activeItems.forEach(function(it){
     (it.requiredPlaces||[]).forEach(function(p){
-      if (!p || !p._keep) return;
+      if (!p || !_keepOf(p)) return;
       // Use _normPlaceName so umlaut/diacritic variants ("Z\u00fcrich" vs "Zurich")
       // dedupe to one entry instead of being counted twice.
       var key = (typeof _normPlaceName === "function") ? _normPlaceName(p.place||"") : (p.place||"").toLowerCase();
@@ -23461,7 +23461,7 @@ function _makeItFit(){
   var keepRefs = [];
   (_tb.placeActivities || []).forEach(function(it, actIdx){
     (it.requiredPlaces || []).forEach(function(p, plcIdx){
-      if (!p || !p._keep) return;
+      if (!p || !_keepOf(p)) return;
       // Routes don't contribute nights (transit, not stay).
       if (it.type === "route") return;
       var key = (typeof _normPlaceName === "function") ? _normPlaceName(p.place||"") : (p.place||"").toLowerCase();
