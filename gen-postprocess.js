@@ -1,3 +1,4 @@
+// @ts-check
 // gen-postprocess.js — PD.403: the pure post-LLM transforms of the
 // activity-generation flow, extracted verbatim from
 // _generateActivitiesForPlaceImpl in index.html.
@@ -468,4 +469,4 @@
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   global.MaxGenPost = api;
 
-})(typeof globalThis !== "undefined" ? globalThis : this);
+})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : this));

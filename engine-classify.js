@@ -1,3 +1,4 @@
+// @ts-check
 // engine-classify.js — Place classification (PD.205, Phase 1 of the
 // classifier rollout described in place-classification-spec.md).
 //

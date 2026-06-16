@@ -1,3 +1,4 @@
+// @ts-check
 // discovery-persistence.js — SSOT Phase 3: the persistence seam.
 //
 // Two responsibilities, both pure of TripStore/DOM so they're unit-testable and
@@ -113,4 +114,4 @@
   var api = { writeModelToTrip: writeModelToTrip, bind: bind };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   global.MaxPersistence = api;
-})(typeof globalThis !== "undefined" ? globalThis : this);
+})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : this));

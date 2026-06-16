@@ -1,3 +1,4 @@
+// @ts-check
 // engine-geo.js — country reference data + lookup helpers.
 //
 // Round PD.95: Option C from the country-list discussion. A small,

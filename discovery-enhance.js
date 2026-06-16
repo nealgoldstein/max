@@ -1,3 +1,4 @@
+// @ts-check
 // discovery-enhance.js — SSOT Phase 4: the EnhancementService + SuggestionSource.
 //
 // THE EXTENSION POINT for "enhanceability". A SuggestionSource finds candidate
@@ -76,4 +77,4 @@
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   global.MaxEnhance = api;
-})(typeof globalThis !== "undefined" ? globalThis : this);
+})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : this));

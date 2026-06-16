@@ -1,3 +1,4 @@
+// @ts-check
 // pm-docs-core.js — extracted verbatim from index.html (PD.483 bloat reduction).
 // Place-meta docs core: format/strip, ensure/render/sync notes.
 // Pure function-cluster: declarations + globalThis-guarded exposures, no

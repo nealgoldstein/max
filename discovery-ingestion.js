@@ -1,3 +1,4 @@
+// @ts-check
 // discovery-ingestion.js — SSOT Phase 2: the ONE ingestion service.
 //
 // Turns trip data into a DiscoveryModel through a SINGLE pipeline:
@@ -85,4 +86,4 @@
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   global.MaxIngestion = api;
-})(typeof globalThis !== "undefined" ? globalThis : this);
+})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : this));

@@ -1,3 +1,4 @@
+// @ts-check
 // db.js — Max trip database (Round HA: Phase 0 of the engine/UI split)
 //
 // Single source of truth for trip persistence. Both the picker engine

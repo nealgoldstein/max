@@ -1,3 +1,4 @@
+// @ts-check
 // gen-prompt.js — PD.402: the activity-generation PROMPT assembly.
 //
 // Extracted verbatim from _generateActivitiesForPlaceImpl in index.html
@@ -204,4 +205,4 @@
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   global.MaxGenPrompt = api;
 
-})(typeof globalThis !== "undefined" ? globalThis : this);
+})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : this));

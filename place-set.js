@@ -1,3 +1,4 @@
+// @ts-check
 // place-set.js — THE domain model for Discovery (PD.432 architecture).
 //
 // One atom, one collection, one accounting. Everything the Discovery screen
@@ -249,4 +250,4 @@
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   global.MaxPlaceSet = api;
 
-})(typeof globalThis !== "undefined" ? globalThis : this);
+})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : this));

@@ -1,3 +1,4 @@
+// @ts-check
 // max-merge.js — preserves user state when destinations are regenerated.
 //
 // PD.319-4. The Rebuild flow (saveActivityPickerEdits → MaxBuild
@@ -302,4 +303,4 @@
     describePreservation: describePreservation
   };
 
-})(typeof globalThis !== "undefined" ? globalThis : window);
+})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : window));

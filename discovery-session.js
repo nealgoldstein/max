@@ -1,3 +1,4 @@
+// @ts-check
 // discovery-session.js — SSOT Phase 5: the DiscoverySession coordinator.
 //
 // ONE live model per picker session, composing all four services. This is the
@@ -83,4 +84,4 @@
   var api = { DiscoverySession: DiscoverySession, open: open };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   global.MaxDiscoverySession = api;
-})(typeof globalThis !== "undefined" ? globalThis : this);
+})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : this));
