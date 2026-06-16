@@ -10850,7 +10850,7 @@ function _p4RoleShadowCheck(){
       if (p && p._isDayTrip) return "daytrip";
       return stay ? "stay" : "see";
     }
-    var decided = 0, undecided = 0, agree = 0, disagreeDecided = [], disagreeUndecided = [], hubLegDisagree = [];
+    var decided = 0, undecided = 0, agree = 0, disagreeDecided = [], disagreeUndecided = [], hubLegDisagree = [], sectionDivergence = [];
     (_tb.placeActivities || []).forEach(function(it){
       var stay = isStay(it && it.section);
       (it && it.requiredPlaces || []).forEach(function(p){
@@ -10862,8 +10862,16 @@ function _p4RoleShadowCheck(){
         var projected = MaxDecisions.roleOf(facts, dec || null);
         var live = liveRole(p, stay);
         if (projected === live) { agree++; }
-        else (hasRoleDecision ? disagreeDecided : disagreeUndecided).push(
-          { place: p.place, live: live, projected: projected, origin: facts.origin });
+        else {
+          var _row = { place: p.place, live: live, projected: projected, origin: facts.origin };
+          // A stay<->see disagreement is the SECTION leg (sectionOf), NOT the role-signal
+          // cutover this check gates: roleOf returns the user's decision, the section just
+          // hasn't been derived from it yet. Route to sectionDivergence (informational).
+          var _isSectionLeg = (projected === "stay" || projected === "see") && (live === "stay" || live === "see");
+          if (!hasRoleDecision) disagreeUndecided.push(_row);
+          else if (_isSectionLeg) sectionDivergence.push(_row);
+          else disagreeDecided.push(_row);
+        }
         // hub/leg: the decision's hub/leg must match the smeared values, so the
         // reconcile can derive _dayTripHub / _waysideFromHub from the decision.
         if (live === "daytrip") {
@@ -10879,10 +10887,13 @@ function _p4RoleShadowCheck(){
       ready: true, decided: decided, undecided: undecided, agree: agree,
       disagreeDecided: disagreeDecided, disagreeUndecided: disagreeUndecided,
       hubLegDisagree: hubLegDisagree,
-      // gate-able invariants: decided roles reproduce the live role, AND the decision's
-      // hub/leg match the smeared values (so the reconcile can derive them next).
+      sectionDivergence: sectionDivergence,
+      // gate-able invariants: decided DAYTRIP/ONWAY roles reproduce the live role, AND the
+      // decision's hub/leg match the smeared values. stay<->see mismatches are tracked in
+      // sectionDivergence (the unbuilt sectionOf leg), NOT gated here.
       decidedClean: disagreeDecided.length === 0,
-      hubLegClean: hubLegDisagree.length === 0
+      hubLegClean: hubLegDisagree.length === 0,
+      sectionClean: sectionDivergence.length === 0
     };
   } catch (e) { return { error: e && e.message }; }
 }
