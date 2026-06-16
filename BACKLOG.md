@@ -24,14 +24,18 @@ Three levers to lower change-risk further (change-risk = bug-risk). Ordered: eac
   edit-constraints, map-pin-panel, home-screen, …), engine-picker.js (large), and index.html (the 39k
   monolith — biggest; best tackled after/with #2). As a shape gets fully enumerated, drop its
   `[k:string]:any` index signature to also catch unknown-field typos.
-- **#2 — Module system / build step. ◻ Planned (the big, app-breaking-risky one).** 60 ordered
-  `<script>` tags + 202 global exposures = the load-order-race class + no encapsulation/dead-code
-  detection. Target: ES modules + a bundler (esbuild). **Must be incremental + leaf-first**, with the
-  bundler emitting the same global output during transition and each step Chrome-verified — a wrong
-  export breaks the WHOLE app load, and the bundled production artifact can't be verified in the
-  sandbox (only the raw-file dev server). NOT a tail-of-session job; do as a dedicated project once #1
-  covers more modules (a typed codebase makes module-boundary refactors safe). First step: esbuild
-  config + convert ONE leaf module to ESM behind dual-output, verify identical behavior.
+- **#2 — Module system / build step. ◑ Phase B bootstrap DONE; ESM cutover is the dedicated project.**
+  60 ordered `<script>` tags + 200+ globals = the load-order-race class + no encapsulation/dead-code
+  detection. **Phase B (the build+verify foundation) is in:** `build.js` concatenates the 55 local
+  module `<script src>` files in index.html order into `dist/app.bundle.js` — concatenation (not
+  esbuild `--bundle`) on purpose, so it's behavior-IDENTICAL to today's tags (same global scope, same
+  order). `npm run build` builds + `node --check`s it; CI (gate.yml) now installs root deps, runs
+  `tsc`, and builds the bundle on every push. Verified locally: 55 modules → a valid 2.9 MB bundle.
+  **Remaining (Phase C — dedicated, can't be agent-sandbox-verified):** point an index variant at the
+  bundle, run the Playwright suite against it (proves the bundle serves correctly), THEN migrate
+  modules to real `import/export` leaf-first (decision-model/migration first — already typed + pure),
+  esbuild dual-emitting globals during transition, full Playwright gating each step. A wrong export
+  breaks the whole load; the bundled artifact must be verified in CI/your machine, not asserted.
 - **#3 — Complete the canonical model (FACTS / DECISIONS / derived VIEW). ◻ Planned (large, incremental).**
   The decision-model/geography-model strangler-fig is partial; lots of state is still read directly
   from `trip`/`_tb`/`brief`. Finish so ALL state is one source, every view a pure projection, every

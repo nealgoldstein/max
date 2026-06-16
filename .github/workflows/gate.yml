@@ -27,7 +27,16 @@ jobs:
 
       # python3 (for the Playwright webServer) is preinstalled on ubuntu-latest.
 
-      - name: Node suite (engine / contract checks)
+      - name: Install root dev deps (typescript + build tooling)
+        run: npm install --no-audit --no-fund
+
+      - name: Type-check (tsc --noEmit over // @ts-check files, lever #1)
+        run: npx tsc --noEmit
+
+      - name: Build bundle (Phase B, lever #2) — concat + validate it parses
+        run: npm run build
+
+      - name: Node suite (engine / contract checks; also re-runs tsc)
         run: bash tests/run.sh
 
       - name: Install Playwright deps + Chromium
