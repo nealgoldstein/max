@@ -36,12 +36,12 @@ var indexSrc = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
 // care that a function EXISTS and keeps a property — not which file holds
 // it — so fold the extracted modules into the same haystack. File-specific
 // checks (db.js, sync.js, …) still read their own files separately.
-["app-main.js", "util-esc.mjs", "apikey.js", "features-conversation.js", "features-trip.js", "trip-edit.js",
- "trip-detail-render.js", "exec-mode.js", "logistics.js", "home-screen.js",
- "trip-affordance.js", "geography-model.js", "who-avoidances.js", "edit-constraints.js",
+["app-main.js", "util-esc.mjs", "apikey.mjs", "features-conversation.js", "features-trip.js", "trip-edit.js",
+ "trip-detail-render.js", "exec-mode.mjs", "logistics.mjs", "home-screen.js",
+ "trip-affordance.mjs", "geography-model.js", "who-avoidances.mjs", "edit-constraints.js",
  "map-pin-panel.js", "itinerary-ordering.js", "discovery-curation.js",
- "entry-point-map.js", "picker-hero-sidebar.js", "construct-decorate.js",
- "pm-doclink-dest.js", "pm-clip-share.js", "pm-docs-editor.js", "pm-docs-core.js", "pm-richtext.js", "menubar-phase.js", "paste-browse-modal.js"
+ "entry-point-map.mjs", "picker-hero-sidebar.mjs", "construct-decorate.js",
+ "pm-doclink-dest.mjs", "pm-clip-share.mjs", "pm-docs-editor.mjs", "pm-docs-core.mjs", "pm-richtext.mjs", "menubar-phase.mjs", "paste-browse-modal.mjs"
 ].forEach(function (f) {
   var p = path.join(ROOT, f);
   if (fs.existsSync(p)) indexSrc += "\n" + fs.readFileSync(p, "utf8");

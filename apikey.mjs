@@ -196,3 +196,5 @@ function clearApiKey(){
   _apiKey=null;
   try{localStorage.removeItem("max-api-key");}catch(e){}
 }
+
+export {};

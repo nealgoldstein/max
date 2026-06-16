@@ -401,3 +401,5 @@ function _tbPlacesReRender(){
 function _renderTripDetailsStrip(kept){
   return MaxPickerUI.renderTripDetailsStrip();
 }
+
+export {};

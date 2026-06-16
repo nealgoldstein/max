@@ -311,3 +311,5 @@ function showHomeApiKeyForm(){
   document.getElementById("home-key-inp").onkeydown = function(e){ if(e.key==="Enter") document.getElementById("home-key-save").click(); };
   setTimeout(function(){ document.getElementById("home-key-inp").focus(); }, 50);
 }
+
+export {};

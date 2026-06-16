@@ -1308,3 +1308,5 @@ async function setCS(id,status){
   // PD.334: every curation action SAVES. See _persistDiscoveryState.
   _persistDiscoveryState();
 }
+
+export {};

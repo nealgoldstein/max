@@ -564,3 +564,5 @@ var _sightStories = {};
 var _destStories  = {};
 var _destNotes    = {};  // { destId: {text, hidden, seen, createdAt} }
 var _ffHistories  = {};
+
+export {};

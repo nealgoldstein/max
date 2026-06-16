@@ -457,3 +457,5 @@ function _pmEnsureCandidate(placeName){
   return cand;
 }
 if (typeof globalThis !== "undefined") globalThis._pmEnsureCandidate = _pmEnsureCandidate;
+
+export {};

@@ -283,3 +283,88 @@ declare var showToast: any;
 interface Event { [key: string]: any; }
 interface Navigator { [key: string]: any; }
 interface Function { [key: string]: any; }
+
+// ESM-conversion cross-module surface: globals DEFINED in converted .mjs modules
+// (now module-scoped to TS) but referenced by still-classic modules. Ambient any
+// until those references migrate to imports (the rewiring phase). Runtime is
+// unaffected — the .mjs modules still set these on globalThis.
+declare var _EP_MODE_LABEL: any;
+declare var _EP_TYPE_TO_MODE: any;
+declare var _apiKey: any;
+declare var _briefPersonalContext: any;
+declare var _destNotes: any;
+declare var _destStories: any;
+declare var _edMap: any;
+declare var _edMarkers: any;
+declare var _ensureEntryPointsForRegion: any;
+declare var _epCache: any;
+declare var _epIconFor: any;
+declare var _epLoading: any;
+declare var _escapeHtml: any;
+declare var _ffHistories: any;
+declare var _fqBannerInnerHtml: any;
+declare var _ftGetThresholdHours: any;
+declare var _ftPeerDayTripCandidates: any;
+declare var _ftRecomputeTripDates: any;
+declare var _ftReverseNightTransfer: any;
+declare var _ftSchedulePeerDayTrip: any;
+declare var _isWellFormedApiKey: any;
+declare var _phaseChipsHtml: any;
+declare var _pmDocAdd: any;
+declare var _pmDocLinkNavigate: any;
+declare var _pmDocLinkPickerClose: any;
+declare var _pmDocLinkPickerShow: any;
+declare var _pmDocOpen: any;
+declare var _pmDocRemove: any;
+declare var _pmDocsBindDnd: any;
+declare var _pmDocsClearActive: any;
+declare var _pmDocsEnsure: any;
+declare var _pmDocsReadFromDom: any;
+declare var _pmDocsRefreshActive: any;
+declare var _pmDocsRender: any;
+declare var _pmDocsSetActive: any;
+declare var _pmDocsSyncToNotes: any;
+declare var _pmEnsureCandidate: any;
+declare var _pmFmtAbsolute: any;
+declare var _pmFmtRelative: any;
+declare var _pmMaybeRenderSharedDiscovery: any;
+declare var _pmMaybeStartClipFlow: any;
+declare var _pmOpenDocEditor: any;
+declare var _pmRtCmd: any;
+declare var _pmRtFieldHtml: any;
+declare var _pmRtInitContent: any;
+declare var _pmRtSetup: any;
+declare var _pmShareDiscovery: any;
+declare var _pmShowClipperSetup: any;
+declare var _pmShowUndo: any;
+declare var _pmSurgicalKeepUpdate: any;
+declare var _pmUnRejectFromList: any;
+declare var _renderTripDetailsStrip: any;
+declare var _sightStories: any;
+declare var _tbAvoidFieldHtml: any;
+declare var _tbAvoidSummary: any;
+declare var _tbCaptureAvoid: any;
+declare var _tbCaptureDates: any;
+declare var _tbDatesFieldHtml: any;
+declare var _tbPartySummary: any;
+declare var _tbSectionHead: any;
+declare var _tbSetupShapeBadges: any;
+declare var _tbTransportModes: any;
+declare var duplicateTrip: any;
+declare var enterApp: any;
+declare var fetchRegionEntryPoints: any;
+declare var getAllSights: any;
+declare var getTodayIds: any;
+declare var goToTripStep2: any;
+declare var hideNewTripForm: any;
+declare var loadApiKey: any;
+declare var mkExSight: any;
+declare var rIcon: any;
+declare var renderCandidateCards: any;
+declare var renderTripBrief: any;
+declare var renderTripStep1: any;
+declare var saveApiKey: any;
+declare var selectTrip: any;
+declare var setCS: any;
+declare var showApiKeyForm: any;
+declare var showTripBrief: any;

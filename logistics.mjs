@@ -605,3 +605,5 @@ function _tbSetupShapeBadges(){
 // Place-first flow (Stage C). User names a place; Max surfaces what's there;
 // user picks what's must-do vs skip. The picked items populate _mdcItems so
 // Step 2 → candidate search can run without a second LLM regen.
+
+export {};

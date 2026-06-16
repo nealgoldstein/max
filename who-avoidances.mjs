@@ -1033,3 +1033,5 @@ function toggleTag(el){
   var idx=_tb.interests.indexOf(tag);
   if(idx>-1) _tb.interests.splice(idx,1); else _tb.interests.push(tag);
 }
+
+export {};

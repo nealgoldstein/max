@@ -272,3 +272,5 @@ if (typeof globalThis !== "undefined") {
   globalThis._pmDocsRefreshActive = _pmDocsRefreshActive;
   globalThis._pmOpenDocEditor = _pmOpenDocEditor;
 }
+
+export {};

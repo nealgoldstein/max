@@ -513,3 +513,5 @@ function switchTab(destId, tab) {
     if(btn)  btn.className  = "tab-btn"  + (t===tab?" on":"");
   });
 }
+
+export {};

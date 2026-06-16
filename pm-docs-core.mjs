@@ -237,3 +237,5 @@ function _pmDocOpen(idx){
     _pmDocsRefreshActive();
   });
 }
+
+export {};
