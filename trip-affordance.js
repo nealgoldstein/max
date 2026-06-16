@@ -285,7 +285,7 @@ function _applyTripDateChange(newStart, newNights){
   }
 
   if (typeof _emitTripMutation === "function") {
-    _emitTripMutation({ reason: "tripDatesEdit" });
+    /** @type {any} */(_emitTripMutation)({ reason: "tripDatesEdit" });
   } else {
     if (typeof autoSave === "function") try { autoSave(); } catch(_) {}
     if (typeof drawTripMode === "function") drawTripMode();

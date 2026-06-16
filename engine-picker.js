@@ -4378,7 +4378,7 @@
     if (global.MaxDB && global.MaxDB.trip && global.MaxDB.trip.writeRaw) {
       _published_saved = (global.MaxDB.trip.writeRaw(tripId, global.serializeTrip()) !== false);
     } else if (typeof localSave === "function") {
-      _published_saved = (localSave() !== false);
+      _published_saved = (/** @type {any} */(localSave)() !== false);
     } else {
       _published_saved = false;
     }

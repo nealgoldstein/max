@@ -1,3 +1,4 @@
+// @ts-check
 // app-main.js — the main application body, extracted verbatim from the
 // index.html inline <script> (PD: monolith → module, enables type-check + ESM).
 // Loaded as a classic script at its original position (after the page body),
@@ -374,7 +375,7 @@ async function callMax(messages, maxTokens, timeoutMs, opts) {
   // PD.375: register this request as the leader; followers with the
   // same key JOIN the promise above. Always settled (success or
   // error) in the wrapper below so a follower can never hang.
-  var _flightDone = null;
+  var _flightDone = /** @type {any} */ (null);
   if (!noCache) {
     var _flightPromise = new Promise(function(res, rej){ _flightDone = { res: res, rej: rej }; });
     _flightPromise.catch(function(){}); // no unhandled-rejection noise when nobody joined
@@ -759,7 +760,7 @@ function loadTripFile(input){
       return;
     }
     try{
-      var data=JSON.parse(raw);
+      var data=JSON.parse(/** @type {any} */(raw));
       if(!data.trip||!data.trip.destinations) throw new Error("Not a valid trip file");
       trip=data.trip; activeDest=data.activeDest||null;
       if(!trip.pendingActions) trip.pendingActions=[];
@@ -1388,7 +1389,7 @@ var MaxMapPin = {
     if (badges.sequence) {
       var seq = String(badges.sequence);
       var wide = seq.length > 1;
-      var sw = wide ? 18 : 14;
+      var sw = /** @type {any} */ (wide ? 18 : 14);
       var sr = wide ? "7px" : "50%";
       html += '<div style="position:absolute;bottom:-5px;right:-5px;'
             + 'background:#fff;border:1.5px solid ' + borderColor + ';border-radius:' + sr + ';'
@@ -2981,9 +2982,9 @@ function _wispDelete(trip, wispId, alsoDeleteItems) {
   if (!wisp) return 0;
   trip.brief.tripMeta.wisps = keep;
   var removed = 1;
-  if (alsoDeleteItems && Array.isArray(wisp.resultItemIds) && wisp.resultItemIds.length) {
+  if (alsoDeleteItems && Array.isArray(/** @type {any} */(wisp).resultItemIds) && /** @type {any} */(wisp).resultItemIds.length) {
     var idSet = {};
-    wisp.resultItemIds.forEach(function (id) { idSet[id] = true; });
+    /** @type {any} */(wisp).resultItemIds.forEach(function (id) { idSet[id] = true; });
     if (Array.isArray(trip.placeActivities)) {
       trip.placeActivities = trip.placeActivities.filter(function (m) {
         if (m && idSet[m.id]) { removed++; return false; }
@@ -5573,7 +5574,7 @@ async function runCandidateSearch(requiredPlaces) {
     var p1AnyOk = false, citiesFailed = false, thematicFailed = false;
     results.forEach(function(r, i){
       var ok = r.status === "fulfilled" && r.value && r.value.length;
-      if (ok) allCands = allCands.concat(r.value);
+      if (ok) allCands = allCands.concat(/** @type {any} */(r).value);
       if (i < p1BatchCount) {
         if (ok) p1AnyOk = true;
       } else if (i === citiesIdx && !ok) {
@@ -11939,7 +11940,7 @@ function _renderPlaceActivityItems(){
         document.getElementById("pm-undo-rejects-close").onclick = function(){ pop.remove(); };
         setTimeout(function(){
           document.addEventListener("mousedown", function _outside(ev){
-            if (!pop.contains(ev.target) && ev.target !== undoBtn) {
+            if (!pop.contains(/** @type {any} */(ev.target)) && ev.target !== undoBtn) {
               try { pop.remove(); } catch(_){}
               document.removeEventListener("mousedown", _outside);
             }
@@ -12125,13 +12126,13 @@ function _renderPlaceActivityItems(){
         e.preventDefault();
         e.stopPropagation();
         if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
-        if (searchNext && typeof searchNext.onclick === "function") searchNext.onclick();
+        if (searchNext && typeof searchNext.onclick === "function") (/** @type {any} */(searchNext.onclick))();
       } else if (e.key === "ArrowDown") {
         e.preventDefault();
-        if (searchNext && typeof searchNext.onclick === "function") searchNext.onclick();
+        if (searchNext && typeof searchNext.onclick === "function") (/** @type {any} */(searchNext.onclick))();
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
-        if (searchPrev && typeof searchPrev.onclick === "function") searchPrev.onclick();
+        if (searchPrev && typeof searchPrev.onclick === "function") (/** @type {any} */(searchPrev.onclick))();
       }
     });
     searchInp.addEventListener("keypress", _killEnter);
@@ -16081,7 +16082,7 @@ var MaxPredictors = {
       var srcIsSight = (src.overnight === false);
       var srcIsShortStay = (src.nights <= 2 && !srcIsSight);
       if (!srcIsSight && !srcIsShortStay) return;
-      var bestHub = null, bestDist = Infinity;
+      var bestHub = /** @type {any} */ (null), bestDist = Infinity;
       Object.keys(places).forEach(function(hubKey){
         if (hubKey === srcKey) return;
         var hub = places[hubKey];
@@ -16150,7 +16151,7 @@ var MaxPredictors = {
       var srcIsSight = (src.overnight === false);
       var srcIsShortStay = (src.nights <= 2 && !srcIsSight);
       if (!srcIsSight && !srcIsShortStay) return;
-      var bestLeg = null, bestPerp = Infinity;
+      var bestLeg = /** @type {any} */ (null), bestPerp = Infinity;
       legs.forEach(function(leg){
         if (leg.fromKey === srcKey || leg.toKey === srcKey) return;
         var r = _perp(src, leg);
@@ -16233,7 +16234,7 @@ function _pmMovePlaceToSection(placeName, fromSection, toSection){
   }
   if (fromSection === toSection) return;
   var nameLC = window._pmKey(placeName);
-  var moved = null; // capture the first matching requiredPlace to transplant
+  var moved = /** @type {any} */ (null); // capture the first matching requiredPlace to transplant
   _tb.placeActivities.forEach(function(act){
     if (!act || act.section !== fromSection) return;
     if (!Array.isArray(act.requiredPlaces)) return;
@@ -18976,7 +18977,6 @@ function _buildHeroMapPoints(){
       exitGlyph:  (i === _hmExitDestIdx)  ? _hmExitGlyph  : "",
       dateFrom: d.dateFrom || "",
       dateTo: d.dateTo || "",
-      nights: d.nights || 0,
       // v353.2: flag the currently-active destination so the popup
       // can focus on it instead of doing a generic fitBounds across
       // every destination. When you tap "View larger →" while
@@ -20575,20 +20575,7 @@ function _updatePlaceActivitySummary(){
     var budgetLbl = (budget.min === budget.max)
       ? (budget.max + " day" + (budget.max!==1?"s":""))
       : (budget.min + "\u2013" + budget.max + " days");
-    if (false /* v359.55: budget never gates the picker — decisions move to trip view */) {
-      _overBudget = true;
-    } else if (false) {
-      _OBSOLETE_DEAD_BLOCK_REMOVED = '<div style="display:none;">'
-        + '<div>'+over+' day'+(over!==1?"s":"")+' over your '+budgetLbl+' budget</div>'
-        + '<div style="font-size:11px;color:#94381a;">Max won\u2019t silently extend your trip. Pick one:</div>'
-        + '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">'
-        +   '<button type="button" onclick="_makeItFit()" style="font-size:10.5px;font-weight:600;color:var(--c-on-dark);background:#b0451a;border:1px solid #b0451a;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;" title="Trim the longest stays and bump pace denser to fit your budget">Make it fit</button>'
-        +   '<button type="button" onclick="_extendBudgetToFit(' + extendDays + ')" style="font-size:10.5px;font-weight:600;color:#b0451a;background:var(--c-bg);border:1px solid #e6b89c;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;">Extend to '+extendDays+' days</button>'
-        +   '<button type="button" onclick="_skipBudgetGate()" style="font-size:10.5px;font-weight:500;color:#94381a;background:var(--c-bg);border:1px dashed #e6b89c;border-radius:5px;padding:5px 10px;cursor:pointer;font-family:inherit;" title="Proceed anyway \u2014 reconcile in the trip view later">Skip for now</button>'
-        +   '<span style="font-size:10.5px;color:#94381a;align-self:center;">or trim picks above</span>'
-        + '</div>'
-        + '</div>';
-    } else if (displayNights + 1 < budget.min) {
+    if (displayNights + 1 < budget.min) {
       var under = budget.min - (displayNights + 1);
       fitNote = '<div style="margin-top:6px;padding:6px 9px;background:#f0f7ec;border:1px solid #cae0bb;border-radius:6px;font-size:11px;color:#3f6a2a;">'
         + '<strong>'+under+' day'+(under!==1?"s":"")+' under your '+budgetLbl+' budget.</strong> '
@@ -22000,7 +21987,7 @@ async function expandActivitySection(sectionName){
     });
   });
   // Mark the button as loading
-  var btn = null;
+  var btn = /** @type {any} */ (null);
   document.querySelectorAll('.tb-more-like-btn').forEach(function(b){ if(b.dataset.section === sectionName) btn = b; });
   if (btn) { btn.disabled = true; btn.textContent = "Discovering…"; }
 
@@ -22072,7 +22059,7 @@ async function expandActivitySection(sectionName){
     setTimeout(function(){
       var btn2 = null;
       document.querySelectorAll('.tb-more-like-btn').forEach(function(b){ if (b.dataset.section === sectionName) btn2 = b; });
-      if (btn2) btn2.textContent = "+ more like this";
+      if (btn2) /** @type {any} */(btn2).textContent = "+ more like this";
     }, 2400);
   } catch(e) {
     console.warn("[Max] expandActivitySection failed:", e && e.message);
@@ -24925,7 +24912,7 @@ function initMapStyleBtn(){
   };
   // Expose render so trip-mode rendering can refresh the label
   // when it shows the button.
-  initMapStyleBtn._renderLabel = render;
+  /** @type {any} */(initMapStyleBtn)._renderLabel = render;
   // Restore saved preferences
   try{var saved=localStorage.getItem('max-map-style');if(saved&&styles.indexOf(saved)>-1)_mapStylePref=saved;}catch(e){}
   try{var savedT=localStorage.getItem('max-trip-map-style');if(savedT&&styles.indexOf(savedT)>-1)_tripMapStylePref=savedT;}catch(e){}
@@ -25798,7 +25785,7 @@ function updateMainMap(){
     var styleBtn=document.getElementById('map-style-btn');
     if(styleBtn) {
       styleBtn.style.display='block';
-      if (typeof initMapStyleBtn._renderLabel === "function") initMapStyleBtn._renderLabel();
+      if (typeof /** @type {any} */(initMapStyleBtn)._renderLabel === "function") /** @type {any} */(initMapStyleBtn)._renderLabel();
     }
     buildMainLegend("trip");
     var overlay=g("no-dest-overlay");
@@ -27023,7 +27010,7 @@ function updateMainMap(){
       styleBtn2.style.display='block';
       // v359.57.1: refresh label so it reflects the dest-mode pref
       // when re-entering dest mode from trip mode.
-      if (typeof initMapStyleBtn._renderLabel === "function") initMapStyleBtn._renderLabel();
+      if (typeof /** @type {any} */(initMapStyleBtn)._renderLabel === "function") /** @type {any} */(initMapStyleBtn)._renderLabel();
     }
     buildMainLegend("dest");
     updateDaySelector();
@@ -29854,7 +29841,7 @@ function _openTripDestRolePopover(destId){
     return Math.sqrt((px-cx)*(px-cx) + (py-cy)*(py-cy));
   }
   var _srcNights = src.nights || 0;
-  var _bestHubOpt = null;
+  var _bestHubOpt = /** @type {any} */ (null);
   hubOptions.forEach(function(o){
     if (!o.hub) return;
     var hN = o.hub.nights || 0;
@@ -29883,7 +29870,7 @@ function _openTripDestRolePopover(destId){
   var prevToSrcKm = Infinity;
   var srcToNextKm = Infinity;
   if (waysideAvailable && srcCoords) {
-    var _prevC = _coordsFor(waysidePrev);
+    var _prevC = /** @type {any} */ (_coordsFor(waysidePrev));
     var _nextC = _coordsFor(waysideNext);
     if (_prevC && _nextC) {
       waysidePerpKm = _perpKm(_prevC, _nextC, srcCoords);
@@ -30086,7 +30073,7 @@ function _openTripDestRolePopover(destId){
   // label uses the last stop before src (which is a wayside if one
   // exists, otherwise the prev hub) so the route reads naturally.
   var _prevDest = (srcTripIdx > 0) ? trip.destinations[srcTripIdx - 1] : null;
-  var _prevC = _prevDest ? _destDirCoord(_prevDest) : null;
+  var _prevC = /** @type {any} */ (_prevDest ? _destDirCoord(_prevDest) : null);
   var _srcC = _destDirCoord(src);
 
   // Find the transit route from prev → src and pull its stops in
@@ -30191,15 +30178,15 @@ function _openTripDestRolePopover(destId){
     if (km == null || !isFinite(km)) return null;
     return Math.round(km * 0.621371);
   };
-  var _hav = function(a, b){
+  var _havN = function(a, b){
     if (!a || !b) return null;
     if (typeof MaxEngineTrip === "undefined" || typeof MaxEngineTrip.haversineKm !== "function") return null;
     return MaxEngineTrip.haversineKm(a[0], a[1], b[0], b[1]);
   };
   var _prevD = waysidePrev ? _coordsFor(waysidePrev) : null;
   var _nextD = waysideNext ? _coordsFor(waysideNext) : null;
-  var _miPrev = _distMi(_hav(srcCoords, _prevD));
-  var _miNext = _distMi(_hav(srcCoords, _nextD));
+  var _miPrev = _distMi(_havN(srcCoords, _prevD));
+  var _miNext = _distMi(_havN(srcCoords, _nextD));
   var _distLineParts = [];
   if (waysidePrev && _miPrev != null) _distLineParts.push(_miPrev + " mi from " + waysidePrev.place);
   if (waysideNext && _miNext != null) _distLineParts.push(_miNext + " mi to " + waysideNext.place);
@@ -31197,22 +31184,22 @@ function _openTripStopPopover(ctx) {
   ov.querySelector("#trip-stop-apply").onclick = function(){
     var picked = ov.querySelector('input[name="trip-stop-pick"]:checked');
     var selectedRole = picked ? picked.value : currentRole;
-    var hubId      = (ov.querySelector("#trip-stop-hub")      || {}).value || null;
-    var routeId    = (ov.querySelector("#trip-stop-route")    || {}).value || null;
+    var hubId      = (/** @type {any} */(ov.querySelector("#trip-stop-hub")      || {})).value || null;
+    var routeId    = (/** @type {any} */(ov.querySelector("#trip-stop-route")    || {})).value || null;
     // v359.60.23: dtRouteId only applies when "Add to" radio is selected.
     // When "New day trip" is selected, leave dtRouteId null so the
     // dispatcher routes to convertDestToDayTrip.
     var dtModeRadio = ov.querySelector('input[name="trip-stop-dt-mode"]:checked');
     var dtMode = dtModeRadio ? dtModeRadio.value : "new";
     var dtRouteId = (dtMode === "addTo")
-      ? ((ov.querySelector("#trip-stop-dt-route") || {}).value || null)
+      ? ((/** @type {any} */(ov.querySelector("#trip-stop-dt-route") || {})).value || null)
       : null;
     // v359.60.31: Insert-after position for multi-stop day-trip loops.
     // Only meaningful when dtMode === "addTo"; ignored otherwise.
     // Empty string ("") = Smart (closest-neighbor gap-minimizing insert).
     // "_start" / "_end" / "<stopId>" → explicit position.
     var dtInsertAfter = (dtMode === "addTo")
-      ? ((ov.querySelector("#trip-stop-dt-insert") || {}).value || "")
+      ? ((/** @type {any} */(ov.querySelector("#trip-stop-dt-insert") || {})).value || "")
       : "";
     close();
     _applyStopRoleChange(ctx, currentRole, selectedRole, {
@@ -31610,13 +31597,13 @@ function _tidyTripScan(){
     // 1) Wayside check — find the corridor (consecutive hub pair) the
     //    sight best fits. Only consider corridors whose hubs flank the
     //    sight in chronological order.
-    var bestWayside = null;
+    var bestWayside = /** @type {any} */ (null);
     corridors.forEach(function(c){
       // Sight must be between from and to in array order to be a
       // proper wayside on THIS corridor.
       if (s.idx < c.from.idx || s.idx > c.to.idx) return;
       if (!c.from.coords || !c.to.coords) return;
-      var pp = _perpKm(c.from.coords, c.to.coords, s.coords);
+      var pp = /** @type {any} */ (_perpKm(c.from.coords, c.to.coords, s.coords));
       if (!pp || pp.perp > WAYSIDE_PERP_MAX) return;
       if (pp.t < WAYSIDE_T_LO || pp.t > WAYSIDE_T_HI) return;
       if (!bestWayside || pp.perp < bestWayside.perp) {
@@ -31630,7 +31617,7 @@ function _tidyTripScan(){
 
     // 2) Day-trip check — nearest hub with strictly more nights, in
     //    range.
-    var bestHub = null;
+    var bestHub = /** @type {any} */ (null);
     hubs.forEach(function(h){
       if (h.dest.id === s.dest.id) return;
       if ((h.dest.nights || 0) <= (s.dest.nights || 0)) return;
@@ -34555,7 +34542,7 @@ function _attachCityTypeahead(input){
       var item = document.createElement("button");
       item.type = "button";
       item.textContent = m.label;
-      item.dataset.idx = i;
+      item.dataset.idx = String(i);
       var bg = (i === activeIdx) ? "#eef5ff" : "#fff";
       item.style.cssText = "display:block;width:100%;text-align:left;padding:6px 10px;background:" + bg + ";border:none;border-bottom:1px solid #f0f0f0;font-size:12px;color:#222;cursor:pointer;font-family:inherit;";
       item.onmouseover = function(){ activeIdx = i; render(); };
@@ -35773,7 +35760,7 @@ function drawTripMode(opts){
     // brief) so it survives autoSave but doesn't bleed into rebuilds.
     var head = document.createElement("div");
     head.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;";
-    var summary = document.createElement("div");
+    var summary = /** @type {any} */ (document.createElement("div"));
     summary.style.cssText = "flex:1;min-width:200px;";
     summary.innerHTML = '<strong style="color:#b0651a;">Your picks total ' + n.pickerDays + ' days &mdash; ' + n.overage + ' over your ' + n.budgetDays + '-day budget.</strong>';
     head.appendChild(summary);
@@ -35838,7 +35825,7 @@ function drawTripMode(opts){
 
     // Option 2: Apply Max's trim (only if there are deltas).
     if (n.proposedDeltas && n.proposedDeltas.length) {
-      var summary = n.proposedDeltas.map(function(d){
+      var summary = /** @type {any} */ (n.proposedDeltas).map(function(d){
         return d.place + " " + d.before + "n→" + d.after + "n";
       }).join(", ");
       btnWrap.appendChild(_mkChoice(
@@ -36175,7 +36162,7 @@ function drawTripMode(opts){
       var a = new Date(fromIso + "T12:00:00");
       var b = new Date(toIso + "T12:00:00");
       if (isNaN(a.getTime()) || isNaN(b.getTime())) return null;
-      return Math.max(0, Math.round((b - a) / 86400000));
+      return Math.max(0, Math.round((+b - +a) / 86400000));
     } catch(_) { return null; }
   }
   function _shiftIso(fromIso, nights){
@@ -36207,7 +36194,7 @@ function drawTripMode(opts){
     } else {
       // Both dates valid — recompute nights to keep them in sync.
       var nb = _nightsBetween(this.value, ti2.value);
-      if (nb !== null) ni.value = nb;
+      if (nb !== null) ni.value = String(nb);
     }
     g("dest-to").value=ti2.value;
     syncAddVis();
@@ -36240,7 +36227,7 @@ function drawTripMode(opts){
     // Round NC.X: keep nights in sync when user edits Leaving.
     if (fi2.value && this.value) {
       var nb = _nightsBetween(fi2.value, this.value);
-      if (nb !== null) ni.value = nb;
+      if (nb !== null) ni.value = String(nb);
     }
     syncAddVis();
   };
@@ -36307,12 +36294,12 @@ function drawTripMode(opts){
     if (!isFinite(_initNights) || _initNights < 1) {
       _initNights = (last && last.nights) || 3;
     }
-    ni.value = _initNights;
+    ni.value = String(_initNights);
     syncAddVis(); // update submit button state now that dates are set
   } else {
     // Fresh trip — no prior destination to anchor from. Default to
     // 3 nights so the user has a starting number; they can edit.
-    ni.value = 3;
+    ni.value = "3";
   }
 
   checkAndShowOverlaps();

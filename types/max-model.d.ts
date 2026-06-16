@@ -36,7 +36,6 @@ interface Error { code?: string; status?: number; data?: any; serverRev?: any; }
 declare var _tb: any;
 declare var trip: any;
 declare var _currentTripId: any;
-declare var _pmPlaceMeta: any;
 declare var TripStore: any;
 declare var MaxDB: any;
 declare var MaxDecisions: any;
@@ -50,14 +49,10 @@ declare var MaxSync: any;
 declare function _normPlaceName(s: any): string;
 declare function autoSave(opts?: any): void;
 declare function _upsertTripIndexEntry(entry: any): any;
-declare var _coarseGeocode: any;
 declare var _generatedCityData: any;
 declare var _mdcItems: any;
 declare var parseNightsFromRange: any;
 declare var haversineKm: any;
-declare var destCtr: any;
-declare var sidCtr: any;
-declare var bkCtr: any;
 
 /** A wayside's transit-leg placement (decision-model). */
 interface MaxLeg { fromPlace: string; toPlace: string; }
@@ -192,33 +187,15 @@ declare var MaxGenPrompt: any;
 declare var MaxPickerUI: any;
 declare var MaxPublish: any;
 declare var PlaceKey: any;
-declare var _actionCtr: any;
-declare var _emitTripMutation: any;
 declare var _escHtml: any;
 declare var _fileHandle: any;
-declare var _listedGroundTruth: any;
-declare var _mdcItemDelete: any;
 declare var _mergeAdjacentSamePlaceDests: any;
 declare var _reconcileDestinations: any;
 declare var _refreshUserListedFromRecords: any;
-declare var _tripsIndex: any;
-declare var _wispDelete: any;
-declare var _wispMarkProcessed: any;
-declare var _wispUnprocessed: any;
-declare var _wispsArrayMigrated: any;
 declare var activeDest: any;
 declare var addPendingAction: any;
-declare var callMax: any;
-declare var discoverBreadthPlaces: any;
-declare var drawTripMode: any;
-declare var g: any;
 declare var getCityCenter: any;
-declare var localSave: any;
 declare var makeDays: any;
-declare var maxAlert: any;
-declare var renderActivityPicker: any;
-declare var saveTripsIndex: any;
-declare var showSaveStatus: any;
 
 // ── Batch 2: UI/glue cross-module globals (auto-collected) ──
 declare var L: any;
@@ -229,14 +206,7 @@ declare var MaxIngestion: any;
 declare var MaxMapPin: any;
 declare var MaxTripUI: any;
 declare var Pikaday: any;
-declare var _activeDmSection: any;
-declare var _briefMissingFieldMsg: any;
-declare var _categoryFromSection: any;
-declare var _dispatchRoute: any;
-declare var _ensureMdcItemsHasPlace: any;
-declare var _ensureTripRoleDefaults: any;
 declare var _findMatchingRequired: any;
-declare var _fmtTime12h: any;
 declare var _fqFastestPractical: any;
 declare var _fqGetTransitInfo: any;
 declare var _fqHaversineKm: any;
@@ -246,90 +216,30 @@ declare var _fqPairMemo: any;
 declare var _ftFormatHours: any;
 declare var _ftParseHoursInput: any;
 declare var _fuCoordSane: any;
-declare var _inIframe: any;
-declare var _leftMode: any;
 declare var _mainMap: any;
 declare var _makeCandidateIcon: any;
 declare var _mapExecMode: any;
 declare var _maxBuildBannerSet: any;
-declare var _mdcItemsDedupe: any;
-declare var _moveDayTripRouteToDay: any;
-declare var _notesIconBtn: any;
 declare var _offEnhDone: any;
 declare var _offEnhStart: any;
 declare var _offError: any;
-declare var _persistTripRaw: any;
-declare var _pmAskMaxOpen: any;
-declare var _pmAttGc: any;
-declare var _pmAttGcRan: any;
-declare var _pmAttHydrate: any;
-declare var _pmAttSerializeBody: any;
-declare var _pmAttachDictation: any;
-declare var _pmEnsureResearchMeta: any;
-declare var _pmEsc: any;
-declare var _pmFocusPlace: any;
-declare var _pmGetPlaceNotes: any;
-declare var _pmIsStayCandidate: any;
-declare var _pmOpenSearchedDoc: any;
-declare var _pmOpenTripResearchCard: any;
-declare var _pmRenderNotesSearchResults: any;
-declare var _pmRoleForCheck: any;
-declare var _pmRtAttachFile: any;
-declare var _pmRtBindAttachmentHandlers: any;
-declare var _pmSearchNotes: any;
 declare var _reEvaluateOverBudget: any;
-declare var _recallLastScreen: any;
-declare var _refreshAllPlacePickerMaps: any;
 declare var _renderEntryPointsOnCeMap: any;
-declare var _renderPlaceActivityItems: any;
 declare var _roleInfo: any;
 declare var _saveTimer: any;
-declare var _setRoadRouting: any;
-declare var _showAllHotelsDests: any;
-declare var _showDayTripToast: any;
-declare var _splitIntentString: any;
-declare var _syncInitialIntentWisps: any;
-declare var _tbInstall: any;
 declare var _titleCaseCity: any;
 declare var _undoTimer: any;
-declare var _updatePlaceActivitySummary: any;
-declare var _useRoadRouting: any;
-declare var addDayTripPlace: any;
-declare var addDayTripToDay: any;
-declare var attachScrollHint: any;
 declare var clockMinutesBetween: any;
-declare var closeMapPinPanel: any;
 declare var computePendingActions: any;
 declare var currentDayItems: any;
 declare var currentTripStatus: any;
 declare var dayRationale: any;
-declare var ensureCoarseGeocode: any;
-declare var highlightDestOnMap: any;
-declare var highlightSightOnMap: any;
-declare var initMainMap: any;
-declare var loadTripsIndex: any;
-declare var localLoad: any;
-declare var makeMapIcon: any;
-declare var makePopup: any;
 declare var movingId: any;
-declare var openMap: any;
-declare var openTripFile: any;
 declare var orderKeptCandidates: any;
 declare var parseStartDateFromBrief: any;
-declare var removeDayTripFromDayItem: any;
-declare var renderTripStep1Place: any;
 declare var runPickerDayTripDiscovery: any;
 declare var runPickerWaysideDiscovery: any;
-declare var setLeftMode: any;
-declare var setTripBudgetDuration: any;
-declare var showAIDisclaimer: any;
-declare var showActionLog: any;
-declare var showKeepToast: any;
-declare var toggleDayDropdown: any;
 declare var transitRationale: any;
-declare var ungroupDayTrip: any;
-declare var updateIndexEntry: any;
-declare var updateMainMap: any;
 
 // Batch 3: globals owned by deferred modules, referenced by typed ones.
 
@@ -352,3 +262,24 @@ interface Node { [key: string]: any; }
 interface EventTarget { [key: string]: any; }
 interface HTMLElement { [key: string]: any; }
 interface GlobalEventHandlers { [key: string]: any; }
+
+// app-main.js cross-module surface: globals it references that live in other
+// modules / the remaining small inline blocks (declared ambient any).
+declare var MaxPlaceSet: any;
+declare var PlaceRepository: any;
+declare var SectionKind: any;
+declare var _PA_BUF: any;
+declare var _addAirportsToCeMap: any;
+declare var _isSingleSight: any;
+declare var _maxBuildBannerRecontext: any;
+declare var _paintMapMenuTrigger: any;
+declare var _renderPickerCategoryNav: any;
+declare var _serializeTbForPrompt: any;
+declare var bindCrossLink: any;
+declare var buildDayTripNote: any;
+declare var extendDays: any;
+declare var isSingleSight: any;
+declare var showToast: any;
+interface Event { [key: string]: any; }
+interface Navigator { [key: string]: any; }
+interface Function { [key: string]: any; }
