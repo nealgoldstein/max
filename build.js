@@ -60,3 +60,20 @@ fs.writeFileSync(outFile, bundle);
 
 console.log("[build] bundled " + order.length + " local modules → dist/app.bundle.js ("
   + (bundle.length / 1024).toFixed(0) + " KB)");
+
+// Phase B verify harness: emit index.bundle.html — index.html with the
+// contiguous local-module <script src> tags collapsed to a single bundle tag (at
+// the first one's position; the rest removed). Vendor + the inline block are
+// untouched, and the modules still load before the inline block, so it's a
+// behavior-equivalent load variant the bundle can be SMOKE-TESTED through
+// (Chrome against the dev server, or Playwright in CI) before any ESM cutover.
+var bundledHtml = html;
+var inserted = false;
+order.forEach(function (rel) {
+  var esc = rel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  var re = new RegExp('[ \\t]*<script src="/?' + esc + '(\\?[^"]*)?"\\s*></script>\\n?');
+  bundledHtml = bundledHtml.replace(re, inserted ? "" : '<script src="dist/app.bundle.js?v=DEV"></script>\n');
+  inserted = true;
+});
+fs.writeFileSync(path.join(ROOT, "index.bundle.html"), bundledHtml);
+console.log("[build] wrote index.bundle.html (bundle load variant for verification)");

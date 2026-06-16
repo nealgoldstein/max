@@ -31,11 +31,17 @@ Three levers to lower change-risk further (change-risk = bug-risk). Ordered: eac
   esbuild `--bundle`) on purpose, so it's behavior-IDENTICAL to today's tags (same global scope, same
   order). `npm run build` builds + `node --check`s it; CI (gate.yml) now installs root deps, runs
   `tsc`, and builds the bundle on every push. Verified locally: 55 modules → a valid 2.9 MB bundle.
-  **Remaining (Phase C — dedicated, can't be agent-sandbox-verified):** point an index variant at the
-  bundle, run the Playwright suite against it (proves the bundle serves correctly), THEN migrate
-  modules to real `import/export` leaf-first (decision-model/migration first — already typed + pure),
-  esbuild dual-emitting globals during transition, full Playwright gating each step. A wrong export
-  breaks the whole load; the bundled artifact must be verified in CI/your machine, not asserted.
+  **Phase B VERIFIED (the bundle serves correctly):** `build.js` now also emits `index.bundle.html`
+  (index.html with the 55 contiguous local module tags collapsed to one bundle tag; vendor + inline
+  untouched). Confirmed in a real browser (Chrome vs the dev server): it boots the full app from the
+  single bundle with all core globals up (MaxEngineTrip/EnginePicker/TripStore/MaxDecisions/Migration/
+  _normPlaceName) and ZERO console errors. Added `tests/playwright/bundle-smoke.spec.js` (skips if
+  unbuilt, runs in CI after the build step) so this is gated on every push. So "the bundle works as a
+  load path" is now proven, not assumed — the exact thing that was blocked.
+  **Remaining (Phase C — the ESM cutover, now unblocked):** migrate modules to real `import/export`
+  leaf-first (decision-model/migration first — typed + pure), esbuild replacing the concat as the
+  graph forms, the bundle-smoke + full Playwright gating each step. Each leaf is a small CI-verified
+  slice now that the harness exists.
 - **#3 — Complete the canonical model (FACTS / DECISIONS / derived VIEW). ◻ Planned (large, incremental).**
   The decision-model/geography-model strangler-fig is partial; lots of state is still read directly
   from `trip`/`_tb`/`brief`. Finish so ALL state is one source, every view a pure projection, every
