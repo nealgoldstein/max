@@ -7382,7 +7382,7 @@ async function analyzeCoverageGaps(btn){
     var sectionSummary = [];
     (_tb.placeActivities || []).forEach(function(it){
       if (!it || !it.section) return;
-      var keptCount = (it.requiredPlaces || []).filter(function(p){ return p && p._keep && !p._rejected; }).length;
+      var keptCount = (it.requiredPlaces || []).filter(function(p){ return p && _keepOf(p) && !p._rejected; }).length;
       if (keptCount > 0) sectionSummary.push({ section: it.section, kept: keptCount });
     });
     var sectionContext = sectionSummary.length
@@ -15409,7 +15409,7 @@ function _renderPlaceActivityItems(){
     });
 
     var secKept = destOrder.some(function(key){
-      return byDest[key].placeRefs.some(function(r){ return r.placeRef && r.placeRef._keep; });
+      return byDest[key].placeRefs.some(function(r){ return r.placeRef && _keepOf(r.placeRef); });
     });
 
     // Section header — verb-phrased, with a count of destinations and a
@@ -15507,7 +15507,7 @@ function _renderPlaceActivityItems(){
         var _dKey = (d.place || "").toLowerCase();
         (_tb.placeActivities || []).some(function(_it){
           return (_it.requiredPlaces || []).some(function(_p){
-            if (_p && _p.place && _p.place.toLowerCase() === _dKey && _p._keep) {
+            if (_p && _p.place && _p.place.toLowerCase() === _dKey && _keepOf(_p)) {
               destKeptInSection = true;
               return true;
             }
@@ -20127,7 +20127,7 @@ function _pmDeriveRole(info, key, opts){
         for (var j = 0; j < rps.length; j++) {
           var p = rps[j];
           if (!p || !p.place || window._pmKey(p.place) !== hubKey) continue;
-          if (p._keep && p._isDayTrip !== true && p._rejected !== true && !p._waysideFromHub && p.overnight !== false) return true;
+          if (_keepOf(p) && p._isDayTrip !== true && p._rejected !== true && !p._waysideFromHub && p.overnight !== false) return true;
         }
       }
     } catch(_){}
@@ -22990,7 +22990,7 @@ function _renderPlacePickerMap(targetId){
                 var _kept = false;
                 ((_tb && _tb.placeActivities) || []).forEach(function(it){
                   (it && it.requiredPlaces || []).forEach(function(p){
-                    if (p && p.place && window._pmKey(p.place) === _kKey && p._keep) _kept = true;
+                    if (p && p.place && window._pmKey(p.place) === _kKey && _keepOf(p)) _kept = true;
                   });
                 });
                 if (!_kept) {
