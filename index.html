@@ -13631,6 +13631,49 @@ function _p4ShadowCheck(){
 }
 if (typeof globalThis !== "undefined") globalThis._p4ShadowCheck = _p4ShadowCheck;
 
+// P4.2 (shadow mode) — ROLE leg. The analog of _p4ShadowCheck for role: for every
+// candidate, MaxDecisions.roleOf(facts, decision) should equal the live cand.role.
+// For a DECIDED candidate (MaxRoleWriter recorded a decision) roleOf returns the
+// decision's role, which MaxRoleWriter also wrote to cand.role — so these MUST
+// agree, and a disagreement means a role write bypassed the decision log. UNDECIDED
+// candidates carry the engine's assigned role, which the projection's default
+// (stay/see by kind) does NOT yet reproduce — so undecided disagreements are
+// EXPECTED and quantify the remaining role-cutover work (facts.role must carry the
+// engine's suggestion before role can be derived). Report splits the two so the
+// signal that matters — decided agreement — is isolated. Diagnostic only, writes
+// nothing. The decided rows are the precursor proof for cutting role over.
+function _p4RoleShadowCheck(){
+  try {
+    if (typeof _tb === "undefined" || !_tb || typeof MaxDecisions === "undefined") return { ready: false };
+    if (typeof MaxDecisions.roleOf !== "function") return { ready: false, note: "roleOf unavailable" };
+    var D = _tb._decisions || null;
+    var origOf = (typeof window._placeOrigin === "function") ? window._placeOrigin
+      : function(c){ return (c && c._origin) || "max"; };
+    var cands = _tb.candidates || [];
+    var decided = 0, undecided = 0, agree = 0, disagreeDecided = [], disagreeUndecided = [];
+    cands.forEach(function(c){
+      if (!c || !c.place || !c.role) return;
+      var dec = D ? D.get(c.place) : null;
+      // best-effort kind: only affects the UNDECIDED default branch of roleOf;
+      // decided rows return decision.role and ignore kind entirely.
+      var facts = MaxDecisions.factsOf({ origin: origOf(c), isStay: !!c.overnightCapable });
+      var projected = MaxDecisions.roleOf(facts, dec || null);
+      var hasRoleDecision = !!(dec && dec.role);
+      if (hasRoleDecision) decided++; else undecided++;
+      if (projected === c.role) { agree++; return; }
+      (hasRoleDecision ? disagreeDecided : disagreeUndecided).push(
+        { place: c.place, live: c.role, projected: projected, origin: facts.origin });
+    });
+    return {
+      ready: true, decided: decided, undecided: undecided, agree: agree,
+      disagreeDecided: disagreeDecided, disagreeUndecided: disagreeUndecided,
+      // the gate-able invariant: decided role decisions must reproduce the live role.
+      decidedClean: disagreeDecided.length === 0
+    };
+  } catch (e) { return { error: e && e.message }; }
+}
+if (typeof globalThis !== "undefined") globalThis._p4RoleShadowCheck = _p4RoleShadowCheck;
+
 // PD.339: "Check them all" — keep every unchecked (non-rejected)
 // sight in one tap. Persists immediately (PD.334 pipeline).
 function _pmCheckAllUnchecked(){
