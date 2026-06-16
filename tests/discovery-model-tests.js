@@ -8,7 +8,7 @@
 "use strict";
 
 var assert = require("assert");
-global.PlaceKey = require("../place-key.js");
+global.PlaceKey = require("../place-key.mjs").default;
 var M = require("../discovery-model.js");
 var DiscoveryModel = M.DiscoveryModel;
 var Policy = M.PlacementPolicy;
@@ -269,7 +269,7 @@ test("PD.404: a per-place _themeFit SURVIVES canonicalize + model placement (per
   // The theming pass stamps _themeFit on places sitting in a catch-all.
   // It must survive the write-door canonicalizer AND the dedupe-merge with
   // an enhance duplicate, then place the sight in its theme on render.
-  global.SectionKind = (function () { try { var sk = require("../section-kind.js"); return sk.SectionKind || sk; } catch (_) { return undefined; } })();
+  global.SectionKind = (function () { try { var sk = require("../section-kind.mjs").default; return sk.SectionKind || sk; } catch (_) { return undefined; } })();
   global.MaxDiscovery = M;
   var canon = require("../max-data.js").canonicalizePlaceActivities
     || (global.MaxData && global.MaxData.canonicalizePlaceActivities);

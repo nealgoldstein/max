@@ -27,7 +27,7 @@
 //                                      (stays + catchalls) — never folded
 //                                      or canonicalized as an LLM section
 
-(function (global) {
+const global = /** @type {any} */ (globalThis);
   "use strict";
 
   var NAMES = {
@@ -82,7 +82,6 @@
     isSynthetic: isSynthetic
   };
 
-  if (typeof module !== "undefined" && module.exports) module.exports = api;
   global.SectionKind = api;
 
-})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : this));
+export default api;

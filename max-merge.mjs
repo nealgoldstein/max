@@ -33,7 +33,7 @@
 // Tests in tests/data-preservation-tests.js verify every user-owned
 // field listed in data-inventory.md survives a merge cycle.
 
-(function (global) {
+const global = /** @type {any} */ (globalThis);
   "use strict";
 
   function _normKey(name) {
@@ -303,4 +303,4 @@
     describePreservation: describePreservation
   };
 
-})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : window));
+export default globalThis.MaxMerge;

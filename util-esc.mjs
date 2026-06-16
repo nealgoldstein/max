@@ -18,7 +18,7 @@
 //   • the place-picker popout builds its esc() inside a serialized string
 //     for a SEPARATE browser window that can't see this global;
 //   • picker-hero-sidebar's `esc` is an Escape-KEY handler, not an escaper.
-(function (g) {
+const g = /** @type {any} */ (globalThis);
   function _escHtml(s) {
     return String(s == null ? "" : s)
       .replace(/&/g, "&amp;")
@@ -28,4 +28,4 @@
       .replace(/'/g, "&#39;");
   }
   g._escHtml = _escHtml;
-})(typeof window !== "undefined" ? window : globalThis);
+export { _escHtml };

@@ -50,7 +50,7 @@
 // version 0 (pre-migration). After migration, _schemaVersion is
 // bumped so subsequent reads short-circuit.
 
-(function (global) {
+const global = /** @type {any} */ (globalThis);
   'use strict';
 
   var CURRENT_SCHEMA_VERSION = 4;
@@ -813,4 +813,4 @@
       shiftIsoDate: _shiftIsoDate,
     },
   };
-})(typeof window !== 'undefined' ? window : this);
+export default globalThis.MaxMigration;

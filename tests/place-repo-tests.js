@@ -6,8 +6,8 @@
 
 "use strict";
 var assert = require("assert");
-global.PlaceKey = require("../place-key.js");
-var Repo = require("../place-repo.js").PlaceRepository;
+global.PlaceKey = require("../place-key.mjs").default;
+var Repo = require("../place-repo.mjs").default.PlaceRepository;
 
 var pass = 0, fail = 0;
 function test(name, fn) {

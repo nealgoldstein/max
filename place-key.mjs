@@ -28,7 +28,7 @@
 // let two distinct real places collapse through a chain of weak
 // matches; one hop bounds the damage of a bad learn.
 
-(function (global) {
+const global = /** @type {any} */ (globalThis);
   "use strict";
 
   var _aliases = Object.create(null); // normAlias → normCanonical
@@ -160,7 +160,6 @@
     clearDirty: clearDirty
   };
 
-  if (typeof module !== "undefined" && module.exports) module.exports = api;
   global.PlaceKey = api;
 
-})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : this));
+export default api;

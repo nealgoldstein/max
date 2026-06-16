@@ -31,8 +31,8 @@ var assert = require("assert");
 
 // Production script order: window shim, PlaceKey, SectionKind, model, data.
 global.window = global;
-global.PlaceKey = require("../place-key.js");
-require("../section-kind.js");          // sets global.SectionKind
+global.PlaceKey = require("../place-key.mjs").default;
+require("../section-kind.mjs").default;          // sets global.SectionKind
 require("../discovery-model.js");       // sets global.MaxDiscovery
 require("../max-data.js");              // sets global.MaxData
 var MaxData = global.MaxData;

@@ -24,7 +24,7 @@
 // `_key` when present (coordinate-canonical, authored by the write door),
 // else by name identity (PlaceKey.resolve).
 
-(function (global) {
+const global = /** @type {any} */ (globalThis);
   "use strict";
 
   var PK = global.PlaceKey || null;
@@ -250,8 +250,7 @@
   };
 
   var api = { PlaceRepository: PlaceRepository };
-  if (typeof module !== "undefined" && module.exports) module.exports = api;
   global.PlaceRepo = api;
   global.PlaceRepository = PlaceRepository;
 
-})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : this));
+export default api;

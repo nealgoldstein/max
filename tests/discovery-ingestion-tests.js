@@ -9,8 +9,8 @@
 var assert = require("assert");
 
 global.window = global;
-global.PlaceKey = require("../place-key.js");
-require("../section-kind.js");        // global.SectionKind
+global.PlaceKey = require("../place-key.mjs").default;
+require("../section-kind.mjs").default;        // global.SectionKind
 require("../discovery-model.js");     // global.MaxDiscovery
 require("../max-data.js");            // global.MaxData
 var ING = require("../discovery-ingestion.js"); // global.MaxIngestion

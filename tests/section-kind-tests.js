@@ -2,7 +2,7 @@
 
 "use strict";
 
-var SK = require("../section-kind.js");
+var SK = require("../section-kind.mjs").default;
 
 var pass = 0, fail = 0;
 function t(name, ok, detail) {

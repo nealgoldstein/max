@@ -7,7 +7,7 @@
 
 "use strict";
 
-var PlaceKey = require("../place-key.js");
+var PlaceKey = require("../place-key.mjs").default;
 
 var pass = 0, fail = 0;
 function t(name, ok, detail) {
