@@ -116,6 +116,19 @@
     return (o === "user" || o === "max" || o === "max-hub") ? o : "max";
   }
 
+  // FACTS — the immutable, derived-once attributes of a place, in the canonical
+  // shape the projection consumes. The KIND rule ("a place living in a stay
+  // section is a destination; otherwise it is a sight") and the Facts shape live
+  // HERE, so the live app stops rebuilding them inline (they were duplicated at
+  // the keep-reconcile and the shadow-check). PURE: the caller resolves origin
+  // (via the app's _placeOrigin) and stay-ness (via the section); factsOf just
+  // packages them. Behaviour-identical to the inline `{ origin, kind }` literals.
+  /** @param {{ isStay?: boolean, origin?: string }} [ctx] @returns {Facts} */
+  function factsOf(ctx) {
+    ctx = ctx || {};
+    return { origin: ctx.origin, kind: ctx.isStay ? "destination" : "sight" };
+  }
+
   // keep rule — PD.452, proven live. rejected -> false; a user decision ->
   // their exact choice; otherwise the default by origin (your places on, Max's
   // off). "Max checks nothing" is simply the else-branch.
@@ -157,6 +170,7 @@
     Decision: Decision,
     Decisions: Decisions,
     fromJSON: fromJSON,
+    factsOf: factsOf,
     keepOf: keepOf,
     roleOf: roleOf,
     sectionOf: sectionOf,

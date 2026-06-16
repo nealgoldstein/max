@@ -27,6 +27,27 @@ var MAXSIGHT = { origin: "max", kind: "sight" };
 
 console.log("decision-model-tests — P4\n");
 
+// ── FACTS builder: the canonical {origin, kind} shape (#3 strangler) ───
+test("factsOf: stay section -> destination", function () {
+  assert.deepStrictEqual(MD.factsOf({ origin: "user", isStay: true }), { origin: "user", kind: "destination" });
+});
+test("factsOf: non-stay section -> sight", function () {
+  assert.deepStrictEqual(MD.factsOf({ origin: "max", isStay: false }), { origin: "max", kind: "sight" });
+});
+test("factsOf: missing ctx -> sight, undefined origin (no throw)", function () {
+  assert.deepStrictEqual(MD.factsOf(), { origin: undefined, kind: "sight" });
+});
+test("factsOf composes with keepOf: user stay defaults CHECKED", function () {
+  assert.strictEqual(MD.keepOf(MD.factsOf({ origin: "user", isStay: true }), null), true);
+});
+test("factsOf composes with keepOf: max sight defaults UNCHECKED", function () {
+  assert.strictEqual(MD.keepOf(MD.factsOf({ origin: "max", isStay: false }), null), false);
+});
+test("factsOf composes with roleOf: destination -> stay, sight -> see", function () {
+  assert.strictEqual(MD.roleOf(MD.factsOf({ origin: "user", isStay: true }), null), "stay");
+  assert.strictEqual(MD.roleOf(MD.factsOf({ origin: "max", isStay: false }), null), "see");
+});
+
 // ── keep rule: the defaults (no decision) ─────────────────────────────
 test("undecided user place defaults CHECKED", function () {
   assert.strictEqual(MD.keepOf(USER, null), true);
