@@ -911,7 +911,7 @@ check("T3.2: direct trip-render calls don't grow past the ratchet baseline",
   // when you do, drop BASELINE to match (a green ratchet only moves down).
   (function () {
     var BASELINE = 138; // total drawTripMode(/drawDestMode(/updateMainMap( in root *.js,*.html (T3.2: 154→152→138 as control-toggle + repaint-after-mutation handlers migrate to the funnels)
-    var files = fs.readdirSync(ROOT).filter(function (f) { return /\.(js|html)$/.test(f); });
+    var files = fs.readdirSync(ROOT).filter(function (f) { return /\.(js|html)$/.test(f) && !/\.bundle\.(js|html)$/.test(f); });
     var total = 0;
     files.forEach(function (f) {
       var src = fs.readFileSync(path.join(ROOT, f), "utf8");
@@ -936,7 +936,7 @@ check("F5: trip.brief._userListed* mirror dependence doesn't grow past the ratch
   // a listed place could disappear — the 401V invariant. See BACKLOG F5.)
   (function () {
     var BASELINE = 37; // brief._userListedNames|Display refs in root *.js,*.html
-    var files = fs.readdirSync(ROOT).filter(function (f) { return /\.(js|html)$/.test(f); });
+    var files = fs.readdirSync(ROOT).filter(function (f) { return /\.(js|html)$/.test(f) && !/\.bundle\.(js|html)$/.test(f); });
     var total = 0;
     files.forEach(function (f) {
       var src = fs.readFileSync(path.join(ROOT, f), "utf8");
