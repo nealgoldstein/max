@@ -1,3 +1,4 @@
+// @ts-check
 // engine-picker.js — Max picker engine, pure helpers (Round HH: Phase 3)
 //
 // Phase 3 of the engine/UI split. The picker engine owns the workflow
@@ -1349,7 +1350,7 @@
     }
 
     // Find exit candidate
-    var exitCand = null;
+    var exitCand = /** @type {any} */ (null);
     if (exitN) {
       // PD.436: same gateway guard — a sight named as the exit hint (the
       // "Fjaðrárgljúfur Canyon" departure bug) is rejected; the exit falls
@@ -1507,7 +1508,7 @@
       });
       // Walk `ordered` and group consecutive items into "sequences": each
       // sequence is either a single free candidate or a route-block run.
-      var sequences = [];
+      var sequences = /** @type {any[]} */ ([]);
       var k = 0;
       while (k < ordered.length) {
         var cur = ordered[k];
@@ -2860,7 +2861,7 @@
         // (so 2-night → 3+ hub absorbs, but 2 → 2 doesn't)
         var srcCoord = getCoord(src);
         if (!srcCoord) continue;
-        var bestHub = null;
+        var bestHub = /** @type {any} */ (null);
         var bestDist = Infinity;
         for (var j = 0; j < trip.destinations.length; j++) {
           if (j === i) continue;
@@ -4684,7 +4685,7 @@
       if (src.nights > 2) return;
       if (src.lat == null) return;
       if (src.userChoseStay) return;
-      var bestHub = null;
+      var bestHub = /** @type {any} */ (null);
       var bestDist = Infinity;
       Object.keys(places).forEach(function (hubKey) {
         if (hubKey === srcKey) return;

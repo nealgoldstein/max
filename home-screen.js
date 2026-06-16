@@ -1,3 +1,4 @@
+// @ts-check
 // home-screen.js — Home screen + pasted-list import pipeline (parsePlacesList,
 // _buildTripFromPastedList, etc.). Extracted from index.html (PD.456). Self-contained
 // globalThis exposures travel with their defs.
@@ -55,15 +56,15 @@ function _selectCurrentTripId(){
   if (!_tripsIndex || !_tripsIndex.length) return null;
   var today = new Date(); today.setHours(0,0,0,0);
   var msDay = 86400000;
-  var inProgress = null;
-  var upcoming = null;
+  var inProgress = /** @type {any} */ (null);
+  var upcoming = /** @type {any} */ (null);
   var upcomingDays = Infinity;
   _tripsIndex.forEach(function(e){
     if (!e.startDate || !e.endDate) return;
     var s = new Date(e.startDate + "T12:00:00");
     var en = new Date(e.endDate + "T12:00:00");
-    var sDays = Math.round((s - today) / msDay);
-    var eDays = Math.round((en - today) / msDay);
+    var sDays = Math.round((+s - +today) / msDay);
+    var eDays = Math.round((+en - +today) / msDay);
     if (sDays <= 0 && eDays >= 0) inProgress = e;
     else if (sDays > 0 && sDays < upcomingDays) { upcoming = e; upcomingDays = sDays; }
   });
@@ -111,7 +112,7 @@ function _buildDashboardItems(trip, tripId){
   var typeToKind = { Hotel: "deadline-hotel", Activity: "deadline-sight", Transport: "deadline-transport" };
   var deadlines = (ops.deadlines || []).map(function (d) {
     var dd = d.deadline ? new Date(d.deadline + "T12:00:00") : null;
-    var daysLeft = dd ? Math.round((dd - todayMid) / 86400000) : null;
+    var daysLeft = dd ? Math.round((+dd - +todayMid) / 86400000) : null;
     return Object.assign({}, d, {
       daysLeft: daysLeft,
       kind: typeToKind[d.type] || "deadline-hotel",
@@ -181,8 +182,8 @@ function renderHomeDashboard(){
 
     var s  = e.startDate ? new Date(e.startDate + "T12:00:00") : null;
     var en = e.endDate   ? new Date(e.endDate   + "T12:00:00") : null;
-    var startDays = s  ? Math.round((s  - t0) / msDay) : null;
-    var endDays   = en ? Math.round((en - t0) / msDay) : null;
+    var startDays = s  ? Math.round((+s  - +t0) / msDay) : null;
+    var endDays   = en ? Math.round((+en - +t0) / msDay) : null;
     var inProgress = (startDays !== null && endDays !== null && startDays <= 0 && endDays >= 0);
     var upcoming   = (startDays !== null && startDays > 0);
     var ended      = (endDays !== null && endDays < 0);
@@ -210,7 +211,7 @@ function renderHomeDashboard(){
       endDays: endDays,
       inProgress: inProgress,
       ended: ended,
-      totalDays: (s && en) ? (Math.round((en - s) / msDay) + 1) : null,
+      totalDays: (s && en) ? (Math.round((+en - +s) / msDay) + 1) : null,
       sortKey: sortKey,
     });
   });
@@ -692,8 +693,8 @@ function renderHomeScreen(){
           var start = new Date(entry.startDate + "T12:00:00");
           var end = new Date(entry.endDate + "T12:00:00");
           var msDay = 24 * 60 * 60 * 1000;
-          var startDays = Math.round((start - now) / msDay);
-          var endDays = Math.round((end - now) / msDay);
+          var startDays = Math.round((+start - +now) / msDay);
+          var endDays = Math.round((+end - +now) / msDay);
           var label, color, bg, border;
           if (startDays > 0) {
             label = "In " + startDays + (startDays === 1 ? " day" : " days");

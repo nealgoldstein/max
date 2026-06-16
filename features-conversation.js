@@ -1,3 +1,4 @@
+// @ts-check
 // features-conversation.js — Story narration, Ask-Max chat, and the
 // booking-confirmation parser. Extracted verbatim from index.html
 // (PD.450, bloat reduction). Pure global function collection (45 fns,
@@ -390,7 +391,7 @@ function togMov(sid,dayId,destId,event,isEvening){
     opt.textContent=bucket.lbl;
     opt.onmouseover=function(){opt.style.background="#f5f5f5";};opt.onmouseout=function(){opt.style.background="";};
     (function(bk){opt.onclick=function(e){
-      e.stopPropagation();var sight=null;
+      e.stopPropagation();var sight=/** @type {any} */(null);
       dest.days.forEach(function(d){var _im=d.items||d.sights||[];for(var i=_im.length-1;i>=0;i--){if(_im[i].id===sid){sight=_im.splice(i,1)[0];}}});
       if(sight){if(!dest[bk+"Items"])dest[bk+"Items"]=[];dest[bk+"Items"].push({id:sight.id,type:sight.type||"sight",n:sight.n,p:sight.p,done:sight.done,st:sight.st,note:null});}
       popup.parentNode&&popup.parentNode.removeChild(popup);movingId=null;_emitTripMutation();
@@ -2547,7 +2548,7 @@ async function _parseBookingConfirmation(text, html) {
 // real management URL is present.
 function _extractBookingUrl(text) {
   if (!text) return null;
-  var urls = [];
+  var urls = /** @type {any[]} */ ([]);
   var m;
   // Markdown links: [label](url) — Booking.com confirmation emails
   // routinely format CTAs this way when copied from rendered output.
@@ -3073,8 +3074,8 @@ function _showBookingPreviewModal(destId, p, originalText) {
   var isTransport = (p.type === "flight" || p.type === "train" || p.type === "bus" || p.type === "ferry");
   var defaultDirection = "arrival";
   if (isTransport && p.depDate && dest.dateFrom && dest.dateTo) {
-    var msFrom = Math.abs(new Date(p.depDate + "T12:00:00") - new Date(dest.dateFrom + "T12:00:00"));
-    var msTo = Math.abs(new Date(p.depDate + "T12:00:00") - new Date(dest.dateTo + "T12:00:00"));
+    var msFrom = Math.abs(+new Date(p.depDate + "T12:00:00") - +new Date(dest.dateFrom + "T12:00:00"));
+    var msTo = Math.abs(+new Date(p.depDate + "T12:00:00") - +new Date(dest.dateTo + "T12:00:00"));
     if (msTo < msFrom) defaultDirection = "departure";
   }
 

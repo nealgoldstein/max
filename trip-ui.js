@@ -1,3 +1,4 @@
+// @ts-check
 // trip-ui.js — Shared trip-view rendering between desktop and mobile.
 //
 // Where this fits:
@@ -3383,9 +3384,9 @@
         } else if (f.type === "number") {
           inputEl = document.createElement("input");
           inputEl.type = "number";
-          if (f.min != null) inputEl.min = f.min;
-          if (f.max != null) inputEl.max = f.max;
-          if (f.step != null) inputEl.step = f.step;
+          if (f.min != null) inputEl.min = String(f.min);
+          if (f.max != null) inputEl.max = String(f.max);
+          if (f.step != null) inputEl.step = String(f.step);
           inputEl.value = (initVal != null && initVal !== "") ? String(initVal) : "";
           inputEl.style.cssText = "font-size:12px;padding:6px 8px;border:1px solid var(--c-border-strong);border-radius:5px;font-family:inherit;width:120px;box-sizing:border-box;";
         } else {
@@ -8116,7 +8117,7 @@
     h.style.cssText = 'font-size:16px;font-weight:700;color:var(--c-ink);';
     h.textContent = 'What needs you';
 
-    var actions = document.createElement('div');
+    var actions = /** @type {any} */ (document.createElement('div'));
     actions.style.cssText = 'display:flex;align-items:center;gap:8px;';
 
     // Pop out → opens the same list in a separate browser window
@@ -8179,7 +8180,7 @@
     box.appendChild(sub);
 
     var data = _collectOperationalItems(trip);
-    var actions = data.actions;
+    var actions = /** @type {any} */ (data.actions);
     var deadlines = data.deadlines;
     var todayEvents = data.today;
     var tomorrowEvents = data.tomorrow;
@@ -8334,7 +8335,7 @@
       deadlines.forEach(function (d) {
         var dd = d.deadline ? new Date(d.deadline + 'T12:00:00') : null;
         var urgent = !!dd && dd <= todayMid;
-        var daysLeft = dd ? Math.round((dd - todayMid) / 86400000) : null;
+        var daysLeft = dd ? Math.round((+dd - +todayMid) / 86400000) : null;
         var label;
         if (urgent && daysLeft === 0)        label = 'TODAY';
         else if (urgent)                     label = 'PAST';
@@ -8408,7 +8409,7 @@
     // sub-line." Same `_collectOperationalItems` source as every
     // other operational surface; counts always agree.
     var data = _collectOperationalItems(trip);
-    var actions = data.actions;
+    var actions = /** @type {any} */ (data.actions);
     var deadlines = data.deadlines;
     var todayEvents = data.today;
     var tomorrowEvents = data.tomorrow;
@@ -8511,7 +8512,7 @@
         deadlines.map(function (d) {
           var dd = d.deadline ? new Date(d.deadline + 'T12:00:00') : null;
           var urgent = !!dd && dd <= todayMid;
-          var daysLeft = dd ? Math.round((dd - todayMid) / 86400000) : null;
+          var daysLeft = dd ? Math.round((+dd - +todayMid) / 86400000) : null;
           var label;
           if (urgent && daysLeft === 0)        label = 'TODAY';
           else if (urgent)                     label = 'PAST';
@@ -8608,7 +8609,7 @@
     // line1 in uppercase. Visual hierarchy still reads "WHEN ·
     // what" — date first, then the event name.
     var data = _collectOperationalItems(trip);
-    var actions = data.actions;
+    var actions = /** @type {any} */ (data.actions);
     var deadlines = data.deadlines;
     var todayEvents = data.today;
     var tomorrowEvents = data.tomorrow;
@@ -8686,7 +8687,7 @@
         rows: deadlines.map(function (d) {
           var dd = d.deadline ? new Date(d.deadline + 'T12:00:00') : null;
           var urgent = !!dd && dd <= todayMid;
-          var daysLeft = dd ? Math.round((dd - todayMid) / 86400000) : null;
+          var daysLeft = dd ? Math.round((+dd - +todayMid) / 86400000) : null;
           var label;
           if (urgent && daysLeft === 0)        label = 'TODAY';
           else if (urgent)                     label = 'PAST';

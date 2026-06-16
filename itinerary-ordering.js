@@ -1,3 +1,4 @@
+// @ts-check
 // itinerary-ordering.js — Itinerary ordering. Extracted verbatim from index.html (PD.473, bloat reduction).
 
 // ── ITINERARY ORDERING ─────────────────────────────────────
@@ -840,7 +841,7 @@ function showSettingsPanel(){
   document.getElementById("sp-save").onclick = function(){
     var hpd = parseInt(document.getElementById("sp-hpd").value, 10);
     var spd = parseInt(document.getElementById("sp-spd").value, 10);
-    var pm  = (box.querySelector('input[name="sp-pace"]:checked') || {}).value || "enough";
+    var pm  = (/** @type {any} */ (box.querySelector('input[name="sp-pace"]:checked') || {})).value || "enough";
     var dth = parseFloat(document.getElementById("sp-dth").value);
     // v359.51.14: day-trip radius pref. v359.51.15: convert from
     // input unit (km or miles, per data-unit attribute) to km
@@ -1055,7 +1056,7 @@ function adjustPaceByItems(direction){
     var days = dest.days || [];
     if (!days.length) return;
     if (direction === "looser") {
-      var target = null;
+      var target = /** @type {any} */ (null);
       days.forEach(function(d){
         if (!d.items || !d.items.length) return;
         if (!target || d.items.length > target.items.length) target = d;
@@ -1072,7 +1073,7 @@ function adjustPaceByItems(direction){
         touched++;
       }
     } else {
-      var target2 = null;
+      var target2 = /** @type {any} */ (null);
       days.forEach(function(d){
         d.items = d.items || [];
         if (!target2 || d.items.length < target2.items.length) target2 = d;
@@ -1121,7 +1122,7 @@ function _tripLengthDays(){
   var last = trip.destinations[trip.destinations.length-1].dateTo;
   if (!first || !last) return 0;
   var a = new Date(first+"T12:00:00"), b = new Date(last+"T12:00:00");
-  return Math.round((b-a)/86400000);
+  return Math.round((+b-+a)/86400000);
 }
 
 // Find bookings on this destination whose dates would fall OUTSIDE the new [from,to] window.
@@ -1164,7 +1165,7 @@ function adjustPaceByNights(direction){
   candidates.sort(function(a,b){
     return direction === "looser" ? itemsPerDay(b) - itemsPerDay(a) : itemsPerDay(a) - itemsPerDay(b);
   });
-  var target = candidates[0];
+  var target = /** @type {any} */ (candidates[0]);
   var targetIdx = trip.destinations.indexOf(target);
 
   // Safety: trip duration budget from the brief
@@ -1247,7 +1248,7 @@ function rebalanceNights(){
     var items = (d.days||[]).reduce(function(s,day){return s + ((day.items||[]).length);}, 0);
     return items / Math.max(d.nights||1, 1);
   }
-  var src = null, sink = null;
+  var src = /** @type {any} */ (null), sink = /** @type {any} */ (null);
   var srcScore = Infinity, sinkScore = -Infinity;
   trip.destinations.forEach(function(d){
     var s = itemsPerDay(d);

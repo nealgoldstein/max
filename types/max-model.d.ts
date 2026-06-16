@@ -48,15 +48,13 @@ declare var MaxData: any;
 declare var MaxRoute: any;
 declare var MaxSync: any;
 declare function _normPlaceName(s: any): string;
-declare function autoSave(): void;
+declare function autoSave(opts?: any): void;
 declare function _upsertTripIndexEntry(entry: any): any;
 declare var _coarseGeocode: any;
 declare var _generatedCityData: any;
 declare var _mdcItems: any;
 declare var parseNightsFromRange: any;
 declare var haversineKm: any;
-declare var newActionId: any;
-declare var updateTrackerBadge: any;
 declare var destCtr: any;
 declare var sidCtr: any;
 declare var bkCtr: any;
@@ -337,19 +335,6 @@ declare var updateMainMap: any;
 
 // Batch 4: more UI/glue + booking-form globals.
 declare var _ceMap: any;
-declare var _openSightUrlEditor: any;
-declare var _sightExternalUrl: any;
-declare var clearPendingAction: any;
-declare var fmtD: any;
-declare var getDest: any;
-declare var mkCancelField: any;
-declare var mkCurrSel: any;
-declare var mkField: any;
-declare var mkHotelRecord: any;
-declare var mkTransportRecord: any;
-declare var newBkId: any;
-declare var openMailtoActions: any;
-declare var pendingCount: any;
 
 // DOM element lookups return any (we type the data model, not DOM element types).
 interface Document {
@@ -367,58 +352,3 @@ interface Node { [key: string]: any; }
 interface EventTarget { [key: string]: any; }
 interface HTMLElement { [key: string]: any; }
 interface GlobalEventHandlers { [key: string]: any; }
-
-// Re-declared: globals defined in not-yet-typed (deferred) UI modules but
-// referenced from typed modules — TS resolves cross-script only within the
-// include set, so these need ambient any until their owner module is typed.
-declare var _backstopPastedListPlaces: any;
-declare var _briefIsLocked: any;
-declare var _briefRenderLocked: any;
-declare var _briefTrunc: any;
-declare var _buildPickerFromPastedList: any;
-declare var _defaultAccommodation: any;
-declare var _defaultAllergies: any;
-declare var _defaultDayTripHours: any;
-declare var _defaultDietary: any;
-declare var _defaultEmergencyName: any;
-declare var _defaultEmergencyPhone: any;
-declare var _defaultHardLimits: any;
-declare var _defaultHoursPerDay: any;
-declare var _defaultLanguages: any;
-declare var _defaultLoyaltyPrograms: any;
-declare var _defaultMaxBigSightsPerDay: any;
-declare var _defaultMobility: any;
-declare var _defaultPaceMode: any;
-declare var _defaultTransport: any;
-declare var _defaultTravelersCount: any;
-declare var _defaultWithKids: any;
-declare var _ensureTripInlineSearch: any;
-declare var _fmtDistance: any;
-declare var _getPaceMode: any;
-declare var _paceDirective: any;
-declare var _paceSightCount: any;
-declare var _sf6Btn: any;
-declare var _stampListedOrigin: any;
-declare var checkAndShowOverlaps: any;
-declare var checkDeadlineAlert: any;
-declare var checkTimeConflicts: any;
-declare var collectDeadlines: any;
-declare var delS: any;
-declare var destStory: any;
-declare var digDeeper: any;
-declare var doAI: any;
-declare var doFF: any;
-declare var findAttachedEvents: any;
-declare var getLeg: any;
-declare var migrateDest: any;
-declare var mkDateInp: any;
-declare var parsePlacesList: any;
-declare var renderHomeDashboard: any;
-declare var renderMaxNoteCard: any;
-declare var sStory: any;
-declare var saveDates: any;
-declare var selectDest: any;
-declare var showHome: any;
-declare var showUndoToast: any;
-declare var togMov: any;
-declare var toggleTransportForm: any;

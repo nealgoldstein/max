@@ -1,3 +1,4 @@
+// @ts-check
 // trip-edit.js — destination add/list editing, date editing & overlap
 // detection, booking infrastructure, action queue, time-conflict
 // detection, and transport booking. Extracted verbatim from index.html
@@ -35,7 +36,7 @@ function addDest(){
   }
   var errEl=g("dest-err-vis")||g("dest-err"); if(errEl)errEl.style.display="none";
   var fD=new Date(from+"T12:00:00"), tD=new Date(to+"T12:00:00");
-  var nights=Math.max(1,Math.round((tD-fD)/86400000));
+  var nights=Math.max(1,Math.round((+tD-+fD)/86400000));
   var dest={
     id:id,place:place,intent:intent,dateFrom:from,dateTo:to,nights:nights,
     days:makeDays(id,place,intent,from,nights),
@@ -211,8 +212,8 @@ async function _getDestWeatherUncached(lat, lng, fromISO, toISO, key){
   // Decide forecast vs climate based on distance from today.
   var today = new Date(); today.setHours(12,0,0,0);
   var msDay = 86400 * 1000;
-  var startDays = Math.round((new Date(fromISO+"T12:00:00") - today) / msDay);
-  var endDays   = toISO ? Math.round((new Date(toISO+"T12:00:00") - today) / msDay) : startDays;
+  var startDays = Math.round((+new Date(fromISO+"T12:00:00") - +today) / msDay);
+  var endDays   = toISO ? Math.round((+new Date(toISO+"T12:00:00") - +today) / msDay) : startDays;
   var data;
   try {
     if (endDays >= 0 && startDays <= 16) {
@@ -585,12 +586,12 @@ function delDestWithUndo(e, id) {
   // Snapshot is taken BEFORE this mutation so undo restores both
   // the deletion and the attachment shift.
   var attached = (dest.attachedEvents && dest.attachedEvents.length) ? dest.attachedEvents : [];
-  var relocatedTo = null;
+  var relocatedTo = /** @type {any} */ (null);
   var relocatedCount = 0;
   if (attached.length && typeof _fqHaversineKm === "function" &&
       typeof dest.lat === "number" && typeof dest.lng === "number") {
     // Find closest other destination with coords.
-    var nearest = null, nearestKm = Infinity;
+    var nearest = /** @type {any} */ (null), nearestKm = Infinity;
     trip.destinations.forEach(function (d) {
       if (!d || d.id === id) return;
       if (typeof d.lat !== "number" || typeof d.lng !== "number") return;
@@ -891,7 +892,7 @@ function computeDateChangeImpact(dest,newFrom,newTo){
   if(newTo>dest.dateTo&&destIdx<trip.destinations.length-1){
     var nd=trip.destinations[destIdx+1];
     if(newTo>nd.dateFrom){
-      var overlapDays=Math.ceil((new Date(newTo+'T12:00:00')-new Date(nd.dateFrom+'T12:00:00'))/86400000)+1;
+      var overlapDays=Math.ceil((+new Date(newTo+'T12:00:00')-+new Date(nd.dateFrom+'T12:00:00'))/86400000)+1;
       var ovBookings=[];
       (nd.hotelBookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
         ovBookings.push({type:'Hotel',name:b.name,detail:'Conf: '+(b.confirmationNumber||'see booking')+' — contact provider to adjust or cancel',keepInApp:false});
@@ -916,7 +917,7 @@ function computeDateChangeImpact(dest,newFrom,newTo){
   if(newFrom<dest.dateFrom&&destIdx>0){
     var pd=trip.destinations[destIdx-1];
     if(pd.dateTo>newFrom){
-      var pdOverlapDays=Math.ceil((new Date(pd.dateTo+'T12:00:00')-new Date(newFrom+'T12:00:00'))/86400000)+1;
+      var pdOverlapDays=Math.ceil((+new Date(pd.dateTo+'T12:00:00')-+new Date(newFrom+'T12:00:00'))/86400000)+1;
       var pdBookings=[];
       (pd.hotelBookings||[]).filter(function(b){return b.status==='booked';}).forEach(function(b){
         pdBookings.push({type:'Hotel',name:b.name,detail:'Conf: '+(b.confirmationNumber||'see booking')+' — contact provider to adjust or cancel',keepInApp:false});
@@ -1132,7 +1133,7 @@ function applyDateChange(dest,newFrom,newTo,affected){
   var oldTo=dest.dateTo;
   dest.dateFrom=newFrom; dest.dateTo=newTo;
   var fD=new Date(newFrom+"T12:00:00"), tD=new Date(newTo+"T12:00:00");
-  dest.nights=Math.max(1,Math.round((tD-fD)/86400000));
+  dest.nights=Math.max(1,Math.round((+tD-+fD)/86400000));
   // Update existing day labels; add/remove days as needed
   var count=Math.min(dest.nights,7);
   for(var i=0;i<count;i++){
@@ -1222,7 +1223,7 @@ function applyDateChange(dest,newFrom,newTo,affected){
   var editedIdx = trip.destinations.findIndex(function(d){return d.id===destId;});
   if (editedIdx >= 0) {
     var prevTo = dest.dateTo;
-    for (var i = editedIdx + 1; i < trip.destinations.length; i++) {
+    for (var i = +(editedIdx + 1); i < trip.destinations.length; i++) {
       var nd = trip.destinations[i];
       var newFromIso = prevTo;
       var fromD = new Date(newFromIso + 'T12:00:00');
@@ -1371,7 +1372,7 @@ function updateTrackerBadge(){
     var badge=btn.querySelector('.dm-tab-badge');
     if(n>0){
       if(!badge){badge=document.createElement('span');badge.className='dm-tab-badge';btn.appendChild(badge);}
-      badge.textContent=n;
+      badge.textContent=String(n);
       // Round FN.3: also flag the tab itself so the attention signal
       // shows even when the user is looking at a different tab.
       btn.classList.add('has-attention');
@@ -1506,7 +1507,7 @@ function mkDateInp(id, value, opts){
     var pikOpts={
       field: inp,
       toString: function(d){ return d.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}); },
-      parse: function(s){ var d=new Date(s); return isNaN(d)?new Date():d; },
+      parse: function(s){ var d=new Date(s); return isNaN(+d)?new Date():d; },
       onSelect: function(date){
         inp._isoValue=date.toISOString().slice(0,10);
         inp.value=_pik.toString(date);
@@ -1882,7 +1883,7 @@ function toggleHotelForm(btn,container,formId,opts,onSaved){
       try { nameInp.focus(); } catch(_) {}
       return;
     }
-    var hotelCoords=null;
+    var hotelCoords=/** @type {any} */(null);
     var allDists=getDistricts(dest.place,dest.intent);
     allDists.forEach(function(d){d.hotels.forEach(function(h){if(h.name===finalName&&h.lat){hotelCoords={lat:h.lat,lng:h.lng};}});});
     var bk={id:newBkId(),name:finalName,area:opts.area,checkIn:ciInp.value,checkInTime:ciTime.value||null,checkOut:coInp.value,checkOutTime:coTime.value||null,
