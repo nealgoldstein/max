@@ -10,7 +10,7 @@ Last updated: **2026-06-11** · `index.html` ≈ **38,432** lines · ~**50** JS 
 ## Extensibility roadmap (the next architectural tier)
 Three levers to lower change-risk further (change-risk = bug-risk). Ordered: each de-risks the next.
 
-- **#1 — Types on the data shapes. ✅ ALL 55 APP MODULES CLEAN; only the index.html monolith remains.**
+- **#1 — Types on the data shapes. ✅ COMPLETE — all 56 modules + app-main.js (the extracted 36k monolith) typed.**
   `tsconfig.json` (allowJs, checkJs OFF globally, opt-in per file via `// @ts-check`), `types/max-model.d.ts`
   (the written-down Trip/Brief/Destination/Route/Candidate/PlaceActivity/RequiredPlace/PlaceMeta/Facts/
   Decision shapes + the cross-module global surface), `tsc --noEmit` wired into `tests/run.sh` + CI gate.
