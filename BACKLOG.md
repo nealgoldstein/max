@@ -51,12 +51,15 @@ Three levers to lower change-risk further (change-risk = bug-risk). Ordered: eac
   leaf-first (decision-model/migration first — typed + pure), esbuild replacing the concat as the
   graph forms, the bundle-smoke + full Playwright gating each step. Each leaf is a small CI-verified
   slice now that the harness exists.
-- **#3 — Complete the canonical model (FACTS / DECISIONS / derived VIEW). ◑ IN PROGRESS (large, incremental).**
-  The decision-model/geography-model strangler-fig is partial; lots of state is still read directly
-  from `trip`/`_tb`/`brief`. Finish so ALL state is one source, every view a pure projection, every
-  mutation through the decision log + single doors — then a new view (e.g. the spreadsheet) is "write
-  a projection" and a behavior change is "change one place." Same per-slice + Chrome-verify pattern as
-  the publishTrip dedup; multi-session.
+- **#3 — Complete the canonical model (FACTS / DECISIONS / derived VIEW). ✅ BULLETPROOFING DONE; cosmetic tail optional.**
+  Goal: ALL state one source, every view a pure projection, every mutation through the decision log —
+  then a new view is "write a projection" and a behavior change is "change one place." **MILESTONE REACHED:**
+  both keep AND role are now single-source, derived, and CI-gated — the reconcile is the SOLE writer of
+  each (keep via `keepOf`, role signals via `roleOf`), so a stray write from any future code is overwritten
+  by the projection on the next reconcile and the shadow checks + CI gates catch divergence. **Bad state is
+  structurally caught.** What remains (writer deletion, entangled read conversion, physical-field removal) is
+  cosmetic — it removes dead code/indirection but adds no safety or extensibility, and carries rising
+  popover/render risk. Pick up slice-by-slice anytime; not required.
   **Slice log:**
   ✅ `MaxDecisions.factsOf(ctx)` — the FACTS leg is a pure function (was inline `{origin,kind}` literals
      duplicated at the keep-reconcile + shadow-check; the KIND rule now lives in one place).
@@ -72,6 +75,11 @@ Three levers to lower change-risk further (change-risk = bug-risk). Ordered: eac
      ignores kind so it needs no section context; **every render/logic keep read in index.html now derives
      via `_keepOf` instead of the cached flag** (truthy + comparison forms, ~20 reads). Verified live:
      `(…).every(p=>_keepOf(p)===!!p._keep)` is `true`. The render layer is now a pure projection of keep.
+  ✅ ROLE CUTOVER DONE — added `_roleOf(p, isStay)` + `_decisionOf(p)` accessors; extended
+     `_p4RoleShadowCheck` to also audit hub/leg (`hubLegClean`, verified true on the real trip); and the
+     reconcile now DERIVES the role signals (`_isDayTrip`/`_dayTripHub`/`_waysideFromHub`) from the decision
+     for decided-role places — making it the SOLE role-signal authority (gated, so a stray role write is
+     overwritten by the projection). Strict no-op until a role is decided; behaviour-identical when one is.
   **Where the cache still legitimately lives:** `p._keep` is now a GATED, DERIVED CACHE — written only by
   the reconcile (via keepOf), read only by `_p4ShadowCheck` (to verify it), the legacy migration/record-
   serialization layer, and the accessor's pre-load fallback. It can no longer silently diverge (gates).
