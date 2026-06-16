@@ -321,3 +321,42 @@ test.describe('P4.5 gate — decision log persists to the trip and restores on r
       .toEqual({ fromPlace: 'Reykjavik', toPlace: 'Vik' });
   });
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+// 5. #3 — the keep PROJECTION is faithful. For EVERY place (decided + undecided)
+//    the stored _keep must equal MaxDecisions.keepOf(factsOf(origin,isStay),
+//    decision). _p4ShadowCheck() audits this live. When it is clean, the live
+//    derivation can compute _keep at read time instead of storing it, and the
+//    ~50 direct _keep writers can be retired. This gate makes that invariant
+//    permanent: if a future change smears _keep (a direct write bypassing the
+//    decision log), clean goes false and CI fails here.
+//    Defensive: if this build harness does not populate _tb.placeActivities the
+//    invariant isn't exercised, so we SKIP rather than pass vacuously.
+// ───────────────────────────────────────────────────────────────────────────
+test.describe('#3 gate — stored _keep equals the keep projection (every place)', () => {
+  test('shadow check is clean after a build and after real decisions', async ({ page }) => {
+    await buildBaseTrip(page);
+
+    const afterBuild = await page.evaluate(() =>
+      (typeof window._p4ShadowCheck === 'function') ? window._p4ShadowCheck() : { ready: false });
+    const total = (afterBuild.decided || 0) + (afterBuild.undecided || 0);
+    test.skip(!afterBuild.ready || total === 0,
+      'harness did not populate _tb.placeActivities — keep invariant not exercised here');
+
+    expect(afterBuild.clean,
+      'stored _keep matches keepOf for every place after build: ' + JSON.stringify(afterBuild.disagree || [])).toBe(true);
+
+    // Exercise the DECIDED path (the real trip snapshot had decided:0): drive
+    // real decisions through the live write doors, rebuild, and re-audit.
+    await page.evaluate(async () => {
+      await window.setCS('c2', 'reject');        // reject a base
+      window.MaxRoleWriter.set('c3', 'stay');    // commit a base as a stay
+      await window.buildFromCandidates();
+    });
+    await page.waitForFunction(() => window.trip && Array.isArray(window.trip.candidates), { timeout: 8000 });
+
+    const afterDecisions = await page.evaluate(() => window._p4ShadowCheck());
+    expect(afterDecisions.clean,
+      'stored _keep matches keepOf for every place after decisions: ' + JSON.stringify(afterDecisions.disagree || [])).toBe(true);
+  });
+});
