@@ -51,12 +51,20 @@ Three levers to lower change-risk further (change-risk = bug-risk). Ordered: eac
   leaf-first (decision-model/migration first — typed + pure), esbuild replacing the concat as the
   graph forms, the bundle-smoke + full Playwright gating each step. Each leaf is a small CI-verified
   slice now that the harness exists.
-- **#3 — Complete the canonical model (FACTS / DECISIONS / derived VIEW). ◻ Planned (large, incremental).**
+- **#3 — Complete the canonical model (FACTS / DECISIONS / derived VIEW). ◑ IN PROGRESS (large, incremental).**
   The decision-model/geography-model strangler-fig is partial; lots of state is still read directly
   from `trip`/`_tb`/`brief`. Finish so ALL state is one source, every view a pure projection, every
   mutation through the decision log + single doors — then a new view (e.g. the spreadsheet) is "write
   a projection" and a behavior change is "change one place." Same per-slice + Chrome-verify pattern as
   the publishTrip dedup; multi-session.
+  **Slice log:** ✅ `MaxDecisions.factsOf(ctx)` — the FACTS leg is now a pure function (was inline
+  `{origin,kind}` literals duplicated at the keep-reconcile + shadow-check; the KIND rule lives in one
+  place). keepOf/roleOf/sectionOf/project already exist; the projection now reads facts from one source.
+  **Next slices (ordered):** (a) give place-set.js:238 `factsOf` (last inline kind-rule); (b) extract a
+  single `decisionOf(p)`/`factsCtxOf(p)` resolver so call sites stop hand-building origin+isStay; (c) the
+  big one — stop STORING `_keep` and derive it at read time via `keepOf` (≈50 `_keep` write sites + ≈97
+  reads are the smear this model exists to delete; cut over read clusters first, then retire writers,
+  guarded by the existing P4.2 shadow contract-check); (d) same treatment for role/section.
 
 > Why #1 first/now: shape-drift was the root of most of what this whole effort fixed. #1 is the only
 > one of the three that's incrementally adoptable with zero app-breaking risk, and it makes #2 and #3
