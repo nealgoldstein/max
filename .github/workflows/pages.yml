@@ -1,0 +1,58 @@
+name: deploy-pages
+# Stage 1 of the #2 build-deploy pipeline: build the bundle and publish it to
+# GitHub Pages. INERT until the repo's Pages "Source" is switched to
+# "GitHub Actions" (Settings → Pages). Until then, branch-serve continues and
+# this workflow's deploy step has no effect on the live site. Reversible: switch
+# Source back to "Deploy from a branch" to restore the raw-file deploy.
+#
+# What it serves: the whole repo (so no referenced asset goes missing) with
+# index.html REPLACED by index.bundle.html — i.e. the Phase-B-verified bundle
+# load path (one dist/app.bundle.js + app-main.js) instead of the ~57 raw tags.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install + build the bundle
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+      - name: Assemble the site (whole repo, index = bundle variant)
+        run: |
+          rm -rf _site && mkdir -p _site
+          rsync -a \
+            --exclude '.git' --exclude 'node_modules' --exclude 'tests' \
+            --exclude 'server' --exclude '_site' --exclude 'test-results' \
+            ./ _site/
+          # the verified bundle load path becomes the site index
+          cp index.bundle.html _site/index.html
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
