@@ -107,7 +107,7 @@ test("interning is idempotent and merges sections/kinds", function () {
 // With the discovery model loaded, the repo interns by sameEntity: true
 // name-variants collapse to ONE place, but BOTH names still resolve, and
 // genuinely-distinct places that merely share tokens stay separate.
-global.MaxDiscovery = require("../discovery-model.js");
+global.MaxDiscovery = require("../discovery-model.mjs").default;
 
 test("name-variants of one place intern to a SINGLE record (Goðafoss)", function () {
   var repo = new Repo();

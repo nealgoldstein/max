@@ -12,7 +12,7 @@
 var assert = require("assert");
 var fs = require("fs");
 var path = require("path");
-var M = require("../gen-postprocess.js");
+var M = require("../gen-postprocess.mjs").default;
 
 var pass = 0, fail = 0;
 function test(name, fn) {

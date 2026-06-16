@@ -12,12 +12,12 @@ var assert = require("assert");
 global.window = global;
 global.PlaceKey = require("../place-key.mjs").default;
 require("../section-kind.mjs").default;
-require("../discovery-model.js");
+require("../discovery-model.mjs").default;
 require("../max-data.js");
-require("../discovery-ingestion.js");
-require("../discovery-persistence.js");
-require("../discovery-enhance.js");
-var S = require("../discovery-session.js"); // global.MaxDiscoverySession
+require("../discovery-ingestion.mjs").default;
+require("../discovery-persistence.mjs").default;
+require("../discovery-enhance.mjs").default;
+var S = require("../discovery-session.mjs").default; // global.MaxDiscoverySession
 var E = global.MaxEnhance;
 var ING = global.MaxIngestion;
 

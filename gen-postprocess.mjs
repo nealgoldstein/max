@@ -25,7 +25,7 @@
 // passing the real _normPlaceName / _isTransitOnlyByDenylist reproduces
 // behavior exactly, and omitting them falls back identically.
 
-(function (global) {
+const global = /** @type {any} */ (globalThis);
   "use strict";
 
   function normalizePlaceArr(arr, regionCountry){
@@ -466,7 +466,6 @@
     surfaceRouteOnlySights: surfaceRouteOnlySights,
     coerceThemingMap: coerceThemingMap
   };
-  if (typeof module !== "undefined" && module.exports) module.exports = api;
   global.MaxGenPost = api;
 
-})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : this));
+export default api;

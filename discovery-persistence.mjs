@@ -15,7 +15,7 @@
 //      model's "change" (Phase 1) and call save(model) at most once per quiet
 //      window. This is how persistence (and, later, the renderer) react to
 //      mutations without every call site remembering to save.
-(function (global) {
+const global = /** @type {any} */ (globalThis);
   "use strict";
 
   function _SK() { return global.SectionKind || null; }
@@ -112,6 +112,5 @@
   }
 
   var api = { writeModelToTrip: writeModelToTrip, bind: bind };
-  if (typeof module !== "undefined" && module.exports) module.exports = api;
   global.MaxPersistence = api;
-})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : this));
+export default api;

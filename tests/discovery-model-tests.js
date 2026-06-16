@@ -9,7 +9,7 @@
 
 var assert = require("assert");
 global.PlaceKey = require("../place-key.mjs").default;
-var M = require("../discovery-model.js");
+var M = require("../discovery-model.mjs").default;
 var DiscoveryModel = M.DiscoveryModel;
 var Policy = M.PlacementPolicy;
 var S = M.SECTION;

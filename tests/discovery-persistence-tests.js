@@ -11,10 +11,10 @@ var assert = require("assert");
 global.window = global;
 global.PlaceKey = require("../place-key.mjs").default;
 require("../section-kind.mjs").default;        // global.SectionKind
-require("../discovery-model.js");     // global.MaxDiscovery
+require("../discovery-model.mjs").default;     // global.MaxDiscovery
 require("../max-data.js");            // global.MaxData
-require("../discovery-ingestion.js"); // global.MaxIngestion
-var P = require("../discovery-persistence.js"); // global.MaxPersistence
+require("../discovery-ingestion.mjs").default; // global.MaxIngestion
+var P = require("../discovery-persistence.mjs").default; // global.MaxPersistence
 var ING = global.MaxIngestion;
 
 var pass = 0, fail = 0;

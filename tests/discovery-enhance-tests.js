@@ -12,8 +12,8 @@ var assert = require("assert");
 global.window = global;
 global.PlaceKey = require("../place-key.mjs").default;
 require("../section-kind.mjs").default;
-require("../discovery-model.js");   // global.MaxDiscovery
-var E = require("../discovery-enhance.js"); // global.MaxEnhance
+require("../discovery-model.mjs").default;   // global.MaxDiscovery
+var E = require("../discovery-enhance.mjs").default; // global.MaxEnhance
 var DM = global.MaxDiscovery.DiscoveryModel;
 
 var pass = 0, fail = 0;

@@ -37,7 +37,7 @@
 // testable. The picker is migrated onto it incrementally; until then
 // it is the authority the new code reads from.
 
-(function (global) {
+const global = /** @type {any} */ (globalThis);
   "use strict";
 
   var PK = global.PlaceKey || null;
@@ -642,8 +642,7 @@
     catchallSections: catchallSections,
     _coordsClose: _coordsClose
   };
-  if (typeof module !== "undefined" && module.exports) module.exports = api;
   global.DiscoveryModel = DiscoveryModel;
   global.MaxDiscovery = api;
 
-})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : this));
+export default api;

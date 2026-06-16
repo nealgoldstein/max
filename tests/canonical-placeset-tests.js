@@ -22,7 +22,7 @@ global.PlaceKey = require("../place-key.mjs").default;
 // before max-data.js, so the canonicalizer's interning can use the ONE
 // identity (MaxDiscovery.sameEntity, coordinate-aware). Without it,
 // max-data degrades gracefully to name-only identity.
-require("../discovery-model.js");
+require("../discovery-model.mjs").default;
 require("../max-data.js");
 var canon = global.MaxData.canonicalizePlaceActivities;
 

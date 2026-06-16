@@ -15,7 +15,7 @@
 // Vanilla namespaced service (no bundler): one global API, dependencies resolved
 // at CALL time from the runtime globals (MaxDiscovery, MaxData, SectionKind,
 // PlaceKey), so script load order among the helpers is immaterial.
-(function (global) {
+const global = /** @type {any} */ (globalThis);
   "use strict";
 
   function _MD()   { return global.MaxDiscovery; }
@@ -84,6 +84,5 @@
     unifiedPlaceActivities: unifiedPlaceActivities,
     ingestionOpts: ingestionOpts
   };
-  if (typeof module !== "undefined" && module.exports) module.exports = api;
   global.MaxIngestion = api;
-})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : this));
+export default api;

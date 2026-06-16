@@ -13,7 +13,7 @@
 var assert = require("assert");
 var fs = require("fs");
 var path = require("path");
-var GP = require("../gen-prompt.js");
+var GP = require("../gen-prompt.mjs").default;
 
 var pass = 0, fail = 0;
 function test(name, fn) {

@@ -27,7 +27,7 @@
 //   • "more-like-this" — enhanceDiscovery's thematic + enrichment extraction
 //   • "day-trips"      — runPickerDayTripDiscovery   (appliesTo: >= 2 hubs)
 //   • "waysides"       — runPickerWaysideDiscovery    (appliesTo: >= 2 hubs)
-(function (global) {
+const global = /** @type {any} */ (globalThis);
   "use strict";
 
   var _sources = Object.create(null);
@@ -75,6 +75,5 @@
     register: register, get: get, sources: sources, available: available, run: run,
     reset: function () { _sources = Object.create(null); _order = []; }
   };
-  if (typeof module !== "undefined" && module.exports) module.exports = api;
   global.MaxEnhance = api;
-})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : this));
+export default api;

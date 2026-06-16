@@ -497,7 +497,7 @@ check("Rule 25a: the catchall invariant is the model's derivation, not a pass (P
   // the fallback constant KEEPING → UNIQUE.)
   indexSrc.indexOf("function _ensureCatchallsUnchecked") === -1
     && (function () {
-      var dm = fs.readFileSync(path.join(ROOT, "discovery-model.js"), "utf8");
+      var dm = fs.readFileSync(path.join(ROOT, "discovery-model.mjs"), "utf8");
       return dm.indexOf("SECTION.UNIQUE") !== -1 && /sectionFor\s*:\s*function/.test(dm);
     })(),
   "the deleted catchall pass came back, or the model stopped deriving the kept-sight fallback");
@@ -571,7 +571,7 @@ check("Rule 26d: the model ingestion excludes dests/hubs (no catchall padding)",
     // Formerly enforced by _ensureCatchallsUnchecked (deleted PD.401d).
     // Now fromPlaceActivities skips hubs and destinations at ingestion,
     // so they can never become catchall rows in the first place.
-    var dm = fs.readFileSync(path.join(ROOT, "discovery-model.js"), "utf8");
+    var dm = fs.readFileSync(path.join(ROOT, "discovery-model.mjs"), "utf8");
     return /if\s*\(\s*isHub\(p\)\s*\)\s*return/.test(dm)
       && /if\s*\(\s*isDestination\(p\)\s*\)\s*return/.test(dm);
   })(),
@@ -581,7 +581,7 @@ check("Rule 26e: route-umbrella detection is folded into the model (PD.401e)",
     // The _routeUmbrellasToScenicRoutes pre-pass is DELETED. The model
     // now owns the decision (isRouteUmbrella → SECTION.SCENIC) and the
     // adapter merges it into the route container.
-    var dm = fs.readFileSync(path.join(ROOT, "discovery-model.js"), "utf8");
+    var dm = fs.readFileSync(path.join(ROOT, "discovery-model.mjs"), "utf8");
     return indexSrc.indexOf("function _routeUmbrellasToScenicRoutes") === -1
       && /function isRouteUmbrella\(/.test(dm)
       && dm.indexOf("SCENIC") !== -1
@@ -597,7 +597,7 @@ check("Rule 26e: route-umbrella detection is folded into the model (PD.401e)",
 // holdout — non-divergent, and coupled to inline-generated scripts.)
 check("Rule 31j: identity is name-driven — no pure-coordinate merge (PD.401P)",
   (function () {
-    var dm = fs.readFileSync(path.join(ROOT, "discovery-model.js"), "utf8");
+    var dm = fs.readFileSync(path.join(ROOT, "discovery-model.mjs"), "utf8");
     var fn = fnBody(dm, /function sameEntity\s*\(/);
     if (fn === null) return false;
     // sameEntity must NOT merge on coordinates ALONE (the 0.3km branch is
@@ -622,7 +622,7 @@ check("Rule 31a: the write door stamps a coordinate-canonical _key",
 check("Rule 31b: the one identity accessor exists and the model reads _key",
   indexSrc.indexOf("window._pmKey = function") !== -1
     && (function () {
-      var dm = fs.readFileSync(path.join(ROOT, "discovery-model.js"), "utf8");
+      var dm = fs.readFileSync(path.join(ROOT, "discovery-model.mjs"), "utf8");
       return dm.indexOf("raw._key || _norm(raw.place)") !== -1;
     })(),
   "the single identity accessor is missing or the model recomputes identity");
@@ -747,7 +747,7 @@ check("Rule 28b: the vendored Leaflet files exist",
 // build through.
 check("Rule 27a: DiscoveryModel owns the one ingestion (fromPlaceActivities)",
   (function () {
-    var dm = fs.readFileSync(path.join(ROOT, "discovery-model.js"), "utf8");
+    var dm = fs.readFileSync(path.join(ROOT, "discovery-model.mjs"), "utf8");
     return /DiscoveryModel\.fromPlaceActivities\s*=/.test(dm)
       && /consideredKeyedSet\s*=\s*function/.test(dm);
   })(),
@@ -829,7 +829,7 @@ check("Identity 1: kind is intrinsic, and a USER base never merges with a USER s
   // same-named sight you listed stay distinct everywhere, by construction, while
   // a Max suggestion still folds into your base.
   (function () {
-    var dm = fs.readFileSync(path.join(ROOT, "discovery-model.js"), "utf8");
+    var dm = fs.readFileSync(path.join(ROOT, "discovery-model.mjs"), "utf8");
     return dm.indexOf("function _entityKind") !== -1
       && dm.indexOf("_entityIsUser") !== -1
       && maxDataSrc.indexOf("p._kind = _itKind") !== -1;

@@ -14,7 +14,7 @@
 // → save. The view never writes state; it subscribes to the model and projects.
 // Because all writes funnel through the model's one coordinate-aware upsert,
 // nothing can ratchet or disappear — that is enforced, not hoped.
-(function (global) {
+const global = /** @type {any} */ (globalThis);
   "use strict";
 
   function _ing()    { return global.MaxIngestion; }
@@ -82,6 +82,5 @@
   function open(trip, opts) { return new DiscoverySession(trip, opts); }
 
   var api = { DiscoverySession: DiscoverySession, open: open };
-  if (typeof module !== "undefined" && module.exports) module.exports = api;
   global.MaxDiscoverySession = api;
-})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : this));
+export default api;

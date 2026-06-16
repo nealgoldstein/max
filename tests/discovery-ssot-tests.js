@@ -33,7 +33,7 @@ var assert = require("assert");
 global.window = global;
 global.PlaceKey = require("../place-key.mjs").default;
 require("../section-kind.mjs").default;          // sets global.SectionKind
-require("../discovery-model.js");       // sets global.MaxDiscovery
+require("../discovery-model.mjs").default;       // sets global.MaxDiscovery
 require("../max-data.js");              // sets global.MaxData
 var MaxData = global.MaxData;
 var MD = global.MaxDiscovery;

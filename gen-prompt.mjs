@@ -19,7 +19,7 @@
 // build() reproduces the inline assembly byte-for-byte; the only changes
 // are reading from the opts above instead of _tb / app helpers directly.
 
-(function (global) {
+const global = /** @type {any} */ (globalThis);
   "use strict";
 
   // The geographic-completeness signal regex (moved verbatim from the
@@ -202,7 +202,6 @@
   }
 
   var api = { build: build, detectCompleteness: detectCompleteness, buildThemingPrompt: buildThemingPrompt };
-  if (typeof module !== "undefined" && module.exports) module.exports = api;
   global.MaxGenPrompt = api;
 
-})(/** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : this));
+export default api;

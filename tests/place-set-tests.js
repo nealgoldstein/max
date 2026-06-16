@@ -9,7 +9,7 @@
 var assert = require("assert");
 // sameEntity is optional — the module falls back to name equality without it.
 try { global.PlaceKey = require("../place-key.mjs").default; } catch (_) {}
-try { global.MaxDiscovery = require("../discovery-model.js"); } catch (_) {}
+try { global.MaxDiscovery = require("../discovery-model.mjs").default; } catch (_) {}
 var PS = require("../place-set.js");
 var PlaceSet = PS.PlaceSet, Place = PS.Place;
 
