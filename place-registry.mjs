@@ -131,11 +131,74 @@ function destinationsProjectionCheck(trip) {
   return { ok: diffs.length === 0, diffs: diffs };
 }
 
+// ── #Place high-value arc — candidate ↔ requiredPlace MIRROR drift ────────
+// trip.candidates (the discovery working set's persisted snapshot) and the
+// placeActivities[*].requiredPlaces flags are TWO representations of the SAME
+// decision. MaxRoleWriter keeps them in step by mutating a requiredPlace's
+// flags whenever a candidate's role changes — matching the two by a NAME
+// NORMALIZER. When the normalizers disagree (PD.86: "Akureyri" vs
+// "Akureyri, Iceland") the candidate's role is set but the requiredPlace flag
+// never flips — silent drift, the gray-pin bug class. This pure check derives
+// the EXPECTED requiredPlace flags from each DECIDED candidate and reports
+// where the live flags disagree, matching by the canonical key (PlaceKey).
+//
+// UNLIKE registryShadowCheck (a faithful union that must be green), this can
+// legitimately go red on REAL drift — so it ships first as a non-fatal
+// OBSERVER to measure trips in the wild, and is promoted to a hard gate only
+// once the wild proves clean (or the drift sites are funneled out).
+function _cmKept(c) {                       // mirror MaxRoleWriter keep-derivation
+  var role = c && c.role;
+  if (role === "reject" || role === "maybe") return false;
+  if (role) return true;                    // a real role assignment (stay/see/daytrip/onway)
+  return !!(c && c.status === "keep");      // no role: fall back to persisted status
+}
+function _cmRejected(c) {
+  return !!(c && (c.role === "reject" || c.status === "reject"));
+}
+function _cmDecided(c) {                     // only assert on candidates that made a call
+  if (!c) return false;
+  if (_cmRejected(c)) return true;
+  if (c.role && c.role !== "maybe") return true;
+  return c.status === "keep";
+}
+function candidateMirrorCheck(trip) {
+  var mismatches = [];
+  var cands = (trip && trip.candidates) || [];
+  var byKey = new Map();                     // requiredPlaces indexed by canonical key
+  ((trip && trip.placeActivities) || []).forEach(function (it) {
+    if (!it || it.type === "route") return;
+    (it.requiredPlaces || []).forEach(function (p) {
+      if (!p) return;
+      var k = _regKey(p.place || p.name);
+      if (!k) return;
+      if (!byKey.has(k)) byKey.set(k, []);
+      byKey.get(k).push(p);
+    });
+  });
+  var checked = 0;
+  cands.forEach(function (c) {
+    if (!_cmDecided(c)) return;
+    var k = _regKey(c && c.place);
+    if (!k) return;
+    var rps = byKey.get(k);
+    if (!rps || !rps.length) return;         // no matched requiredPlace -> nothing to mirror
+    var expKeep = _cmKept(c), expRej = _cmRejected(c), expDay = (c.role === "daytrip");
+    rps.forEach(function (p) {
+      checked++;
+      if (!!p._keep !== expKeep)     mismatches.push({ place: c.place, key: k, field: "_keep",     expected: expKeep, actual: !!p._keep });
+      if (!!p._rejected !== expRej)  mismatches.push({ place: c.place, key: k, field: "_rejected",  expected: expRej,  actual: !!p._rejected });
+      if (!!p._isDayTrip !== expDay) mismatches.push({ place: c.place, key: k, field: "_isDayTrip", expected: expDay,  actual: !!p._isDayTrip });
+    });
+  });
+  return { ok: mismatches.length === 0, checked: checked, mismatches: mismatches };
+}
+
 var MaxPlaces = {
   buildRegistry: buildRegistry,
   registryShadowCheck: registryShadowCheck,
   destinationsOf: destinationsOf,
-  destinationsProjectionCheck: destinationsProjectionCheck
+  destinationsProjectionCheck: destinationsProjectionCheck,
+  candidateMirrorCheck: candidateMirrorCheck
 };
 
 export { MaxPlaces };
@@ -149,9 +212,13 @@ export default MaxPlaces;
 {
   const __expg = /** @type {any} */ (globalThis);
   __expg.MaxPlaces = MaxPlaces;
+  __expg._cmDecided = _cmDecided;
+  __expg._cmKept = _cmKept;
+  __expg._cmRejected = _cmRejected;
   __expg._pointGeo = _pointGeo;
   __expg._regKey = _regKey;
   __expg.buildRegistry = buildRegistry;
+  __expg.candidateMirrorCheck = candidateMirrorCheck;
   __expg.destinationsOf = destinationsOf;
   __expg.destinationsProjectionCheck = destinationsProjectionCheck;
   __expg.registryShadowCheck = registryShadowCheck;

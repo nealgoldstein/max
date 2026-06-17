@@ -84,6 +84,74 @@ test("access layer preserves order + carries full record (rich fields intact)", 
   assert.ok(MaxPlaces.destinationsProjectionCheck(t2).ok);
 });
 
+// ── high-value arc: candidate ↔ requiredPlace MIRROR drift detector ────────
+// The check derives EXPECTED requiredPlace flags from each decided candidate
+// and reports where the live flags disagree. Green on a consistent trip; it
+// must CATCH every flavor of real drift (the gray-pin bug class).
+console.log("\n#Place high-value arc — candidate↔requiredPlace mirror drift");
+
+function mirrorTrip(rpOverrides) {
+  // a candidate of each decided kind, each with a matching requiredPlace whose
+  // flags are correct — then callers corrupt one to prove the check catches it.
+  var rp = {
+    keep:   { place: "Gullfoss",  _keep: true,  _rejected: false, _isDayTrip: false },
+    daytrip:{ place: "Geysir",    _keep: true,  _rejected: false, _isDayTrip: true  },
+    reject: { place: "TouristTrap", _keep: false, _rejected: true,  _isDayTrip: false }
+  };
+  Object.keys(rpOverrides || {}).forEach(function (k) { Object.assign(rp[k], rpOverrides[k]); });
+  return {
+    candidates: [
+      { place: "Gullfoss", role: "see",     status: "keep" },
+      { place: "Geysir",   role: "daytrip", status: "keep", dayTripHub: "Reykjavik" },
+      { place: "TouristTrap", role: "reject", status: "reject" },
+      { place: "Maybeland", role: "maybe",  status: null }   // undecided → never asserted
+    ],
+    placeActivities: [
+      { type: "activity", requiredPlaces: [rp.keep, rp.daytrip, rp.reject,
+        { place: "Maybeland", _keep: false, _rejected: false, _isDayTrip: false } ] },
+      { type: "route", requiredPlaces: [{ place: "leg" }] }  // routes ignored
+    ]
+  };
+}
+
+test("mirror check is OK when candidate roles and requiredPlace flags agree", function () {
+  var r = MaxPlaces.candidateMirrorCheck(mirrorTrip());
+  assert.ok(r.ok, "unexpected mismatches: " + JSON.stringify(r.mismatches));
+  assert.strictEqual(r.checked, 3, "should check the 3 decided+matched candidates");
+});
+test("empty candidates / missing trip → ok (no false positive)", function () {
+  assert.ok(MaxPlaces.candidateMirrorCheck({}).ok);
+  assert.ok(MaxPlaces.candidateMirrorCheck(null).ok);
+  assert.ok(MaxPlaces.candidateMirrorCheck({ candidates: [], placeActivities: [] }).ok);
+});
+test("CATCHES kept candidate whose requiredPlace _keep never flipped (PD.86)", function () {
+  var r = MaxPlaces.candidateMirrorCheck(mirrorTrip({ keep: { _keep: false } }));
+  assert.ok(!r.ok);
+  assert.ok(r.mismatches.some(function (m) { return m.field === "_keep" && m.key === "gullfoss" && m.expected === true; }));
+});
+test("CATCHES rejected candidate whose requiredPlace _rejected stayed false", function () {
+  var r = MaxPlaces.candidateMirrorCheck(mirrorTrip({ reject: { _rejected: false, _keep: true } }));
+  assert.ok(!r.ok);
+  assert.ok(r.mismatches.some(function (m) { return m.field === "_rejected" && m.expected === true; }));
+});
+test("CATCHES daytrip candidate whose requiredPlace _isDayTrip stayed false", function () {
+  var r = MaxPlaces.candidateMirrorCheck(mirrorTrip({ daytrip: { _isDayTrip: false } }));
+  assert.ok(!r.ok);
+  assert.ok(r.mismatches.some(function (m) { return m.field === "_isDayTrip" && m.key === "geysir"; }));
+});
+test("undecided (maybe) candidate is never asserted, even if flags look off", function () {
+  // Maybeland is maybe/null → no expectation, so corrupting its flags is silent
+  var t = mirrorTrip();
+  t.placeActivities[0].requiredPlaces[3]._keep = true;
+  assert.ok(MaxPlaces.candidateMirrorCheck(t).ok);
+});
+test("a decided candidate with NO matching requiredPlace is skipped (no false positive)", function () {
+  var t = { candidates: [{ place: "Orphan", role: "see", status: "keep" }], placeActivities: [] };
+  var r = MaxPlaces.candidateMirrorCheck(t);
+  assert.ok(r.ok);
+  assert.strictEqual(r.checked, 0);
+});
+
 console.log("\n──────────────────────────────────────────────────");
 console.log("PASS: " + pass + "    FAIL: " + fail);
 process.exit(fail > 0 ? 1 : 0);
