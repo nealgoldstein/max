@@ -55,15 +55,16 @@ function buildRegistry(trip) {
         role: role,
         exploredFrom: MaxDecisions.exploredFromOf(rec),
         decision: _decisionOf(rec),
-        // destinations carry their persisted id so the projection can reconstruct
-        // trip.destinations exactly (the spine: id + name + coords + order).
-        _destId: (forceRole === "destination" && rec.id != null) ? rec.id : null
+        // a destination Place keeps a reference to its source record, so the
+        // access layer (destinationsOf) returns the SAME objects in registry
+        // order — making a reader's switch from trip.destinations a no-op.
+        _destRecord: (forceRole === "destination") ? rec : null
       });
       return;
     }
     if (role === "destination") {                                    // dest wins
       place.role = "destination";
-      if (rec.id != null) place._destId = rec.id;
+      if (forceRole === "destination") place._destRecord = rec;
     }
     if (place.geo.lat == null && typeof rec.lat === "number") place.geo = _pointGeo(rec);
   }
@@ -101,36 +102,30 @@ function registryShadowCheck(trip) {
   return { ok: missing.length === 0 && wrongRole.length === 0, size: reg.size, missing: missing, wrongRole: wrongRole };
 }
 
-// ── Phase D cutover, slice 1 — the `destinations` PROJECTION ──────────────
-// Reconstruct the destinations spine (id + name + coords, in order) from the
-// registry. This is what readers of trip.destinations migrate to; once every
-// reader is on it and the rich per-destination fields move into the Place's stay
-// block, trip.destinations becomes a pure projection and the stored array retires.
+// ── Phase D cutover — the `destinations` ACCESS LAYER ─────────────────────
+// Return the destination records, sourced from the registry in order. This is
+// the single accessor readers of trip.destinations migrate to: it yields the
+// SAME record objects, so each migration is a behavioral no-op. Once every
+// reader goes through here, the rich fields move into the Place and the stored
+// array becomes derived — but readers never change again.
 function destinationsOf(trip) {
   var out = [];
   buildRegistry(trip).forEach(function (p) {
-    if (p.role === "destination") out.push({ id: p._destId, place: p.identity.name, lat: p.geo.lat, lng: p.geo.lng });
+    if (p.role === "destination" && p._destRecord) out.push(p._destRecord);
   });
   return out;
 }
-// Shadow check: the projection reproduces trip.destinations exactly on the spine
-// fields, in order. Faithfulness here is the precondition for cutting readers over.
+// Shadow check: the access layer returns trip.destinations EXACTLY — same record
+// objects (reference identity), same order, same count. Reference identity is the
+// strongest possible faithfulness proof: a reader cannot tell the difference.
 function destinationsProjectionCheck(trip) {
   var proj = destinationsOf(trip);
-  var orig = ((trip && trip.destinations) || []).map(function (d) {
-    return {
-      id: (d && d.id != null) ? d.id : null,
-      place: (d && (d.place || d.name)) || "",
-      lat: (d && typeof d.lat === "number") ? d.lat : null,
-      lng: (d && typeof d.lng === "number") ? d.lng : null
-    };
-  });
+  var orig = (trip && trip.destinations) || [];
   var diffs = [];
   if (proj.length !== orig.length) diffs.push("count " + proj.length + " != " + orig.length);
   for (var i = 0; i < Math.min(proj.length, orig.length); i++) {
-    var a = proj[i], b = orig[i];
-    if (a.id !== b.id || a.place !== b.place || a.lat !== b.lat || a.lng !== b.lng) {
-      diffs.push("#" + i + " " + JSON.stringify(a) + " != " + JSON.stringify(b));
+    if (proj[i] !== orig[i]) {
+      diffs.push("#" + i + " record-identity mismatch (" + ((orig[i] && (orig[i].place || orig[i].name)) || "?") + ")");
     }
   }
   return { ok: diffs.length === 0, diffs: diffs };

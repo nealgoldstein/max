@@ -63,27 +63,24 @@ test("empty / missing trip → empty registry, shadow ok", function () {
   assert.ok(MaxPlaces.registryShadowCheck({}).ok);
 });
 
-// ── Phase D cutover, slice 1: the destinations PROJECTION ──
-test("destinationsOf projects the spine in trip.destinations order", function () {
+// ── Phase D cutover: the destinations ACCESS LAYER (full records by reference) ──
+test("destinationsOf returns the SAME destination records, in order", function () {
   var proj = MaxPlaces.destinationsOf(trip);
-  assert.deepStrictEqual(proj, [
-    { id: null, place: "Reykjavik", lat: 64.1, lng: -21.9 },
-    { id: null, place: "Akureyri", lat: 65.7, lng: -18.1 }
-  ]);
+  assert.strictEqual(proj.length, 2);
+  assert.strictEqual(proj[0], trip.destinations[0]); // reference identity — no-op swap
+  assert.strictEqual(proj[1], trip.destinations[1]);
 });
-test("SHADOW: destinations projection reproduces trip.destinations exactly", function () {
+test("SHADOW: access layer reproduces trip.destinations exactly (reference identity)", function () {
   var r = MaxPlaces.destinationsProjectionCheck(trip);
   assert.ok(r.ok, "diffs: " + r.diffs.join(" | "));
 });
-test("projection carries the destination's persisted id + preserves order", function () {
-  var t2 = { destinations: [
-    { id: "d-2", place: "Vik", lat: 63.4, lng: -19.0 },
-    { id: "d-1", place: "Hofn", lat: 64.2, lng: -15.2 }
-  ] };
-  assert.deepStrictEqual(MaxPlaces.destinationsOf(t2), [
-    { id: "d-2", place: "Vik", lat: 63.4, lng: -19.0 },
-    { id: "d-1", place: "Hofn", lat: 64.2, lng: -15.2 }
-  ]);
+test("access layer preserves order + carries full record (rich fields intact)", function () {
+  var d2 = { id: "d-2", place: "Vik", lat: 63.4, lng: -19.0, nights: 2, hotelBookings: [{ x: 1 }] };
+  var d1 = { id: "d-1", place: "Hofn", lat: 64.2, lng: -15.2, nights: 1 };
+  var t2 = { destinations: [d2, d1] };
+  var proj = MaxPlaces.destinationsOf(t2);
+  assert.strictEqual(proj[0], d2);   // full record, incl. hotelBookings
+  assert.strictEqual(proj[1], d1);
   assert.ok(MaxPlaces.destinationsProjectionCheck(t2).ok);
 });
 
