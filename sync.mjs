@@ -1710,3 +1710,6 @@
     if (!document.hidden) _startPolling();
   }
 })(typeof window !== 'undefined' ? window : this);
+
+
+export {};

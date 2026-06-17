@@ -9,6 +9,14 @@
 
 set -e
 cd "$(dirname "$0")/.."
+# #2 Stage 2 safety net: every .mjs must re-publish its non-colliding top-level
+# decls on globalThis (esbuild isolates each module to an IIFE). A forgotten
+# exposure is invisible to tsc and the Node tests but breaks app-main.js boot in
+# the browser — so verify it here, deterministically, instead of via a 14-minute
+# Playwright red. Skips gracefully if acorn isn't installed.
+if [ -f node_modules/acorn/package.json ]; then
+  node tools/auto-expose.js --check
+fi
 node tests/contract-checks.js
 node tests/canonical-placeset-tests.js
 node tests/place-key-tests.js

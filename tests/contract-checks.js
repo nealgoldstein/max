@@ -206,7 +206,7 @@ check("Rule 7d: learned aliases persist on the brief",
   "the persistence bridge (serialize on save / hydrate on load) broke");
 
 // ── Rule 8: the parallel-store debt is paid (PD.358–PD.362) ────────
-var syncSrc = fs.readFileSync(path.join(ROOT, "sync.js"), "utf8");
+var syncSrc = fs.readFileSync(path.join(ROOT, "sync.mjs"), "utf8");
 check("Rule 8a: _mdcItems is a routed view, not a store",
   !/var _mdcItems = \[\];/.test(indexSrc)
     && indexSrc.indexOf('Object.defineProperty(window, "_mdcItems"') !== -1,
@@ -784,7 +784,7 @@ check("GC 3: empty-shell reaping has an age floor",
 //    curated list from being silently replaced by an older copy. These
 //    are the structural rules behind "my list vanished"; locking them in
 //    source means a future edit that removes one fails the deploy gate.
-var syncSrc = fs.readFileSync(path.join(ROOT, "sync.js"), "utf8");
+var syncSrc = fs.readFileSync(path.join(ROOT, "sync.mjs"), "utf8");
 
 check("Sync 1: a server body is pulled ONLY when the server is strictly ahead (rev-gated)",
   // shouldPull must require s.rev > our recorded rev (or no local body),
