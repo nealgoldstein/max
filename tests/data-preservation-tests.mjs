@@ -13,9 +13,8 @@
 // (reservations, notes, day items), brief fields, considered/
 // rejected sights, paste-list metadata, and accessor-layer reads.
 
-var path = require("path");
-var fs = require("fs");
-var assert = require("assert");
+import assert from "node:assert";
+import { mock } from "node:test";
 
 // ── Harness ──────────────────────────────────────────────────────────
 var pass = 0, fail = 0;
@@ -55,7 +54,7 @@ function test(name, fn) {
 var _storage = {};
 function _resetStorage() { _storage = {}; }
 
-global.MaxDB = {
+const MaxDB = {
   trip: {
     write: function (id, env) { _storage["max-trip-" + id] = JSON.stringify(env); return true; },
     writeRaw: function (id, raw) { _storage["max-trip-" + id] = raw; return true; },
@@ -71,6 +70,9 @@ global.MaxDB = {
     }
   }
 };
+// #2 Stage 3: tripstore imports MaxDB from ./db.mjs — mock that module
+// (node:test mock.module; run with --experimental-test-module-mocks).
+mock.module("../db.mjs", { defaultExport: MaxDB });
 
 global.localStorage = {
   _store: {},
@@ -79,14 +81,10 @@ global.localStorage = {
   removeItem: function (k) { delete this._store[k]; }
 };
 
-// Load TripStore.
-require("../tripstore.mjs");
-
-// Load MaxData accessor layer.
-require("../max-data.mjs");
-
-// Load MaxMerge user-state preservation.
-require("../max-merge.mjs");
+// Load (dynamic import AFTER mock.module so the db.mjs mock applies).
+await import("../tripstore.mjs");
+await import("../max-data.mjs");
+await import("../max-merge.mjs");
 
 assert(typeof global.TripStore === "object", "TripStore must load");
 assert(typeof global.MaxData === "object", "MaxData accessor must load");

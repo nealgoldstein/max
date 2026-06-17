@@ -35,9 +35,9 @@ node tests/decision-model-tests.mjs
 node tests/gen-prompt-tests.js
 node tests/gen-postprocess-tests.js
 node tests/engine-tests.js
-node tests/tripstore-tests.js
+node --experimental-test-module-mocks tests/tripstore-tests.mjs
 node tests/engine-build-tests.js
-node tests/data-preservation-tests.js
+node --experimental-test-module-mocks tests/data-preservation-tests.mjs
 node tests/engine-publish-tests.js
 node tests/engine-enrich-tests.js
 node tests/engine-routing-tests.js

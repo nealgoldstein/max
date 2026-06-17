@@ -13,8 +13,8 @@
 // The tests run in a Node sandbox with a mock MaxDB (in-memory key-
 // value store) and a mock localStorage. No browser required.
 
-var path = require("path");
-var assert = require("assert");
+import assert from "node:assert";
+import { mock } from "node:test";
 
 // ── Test harness ──────────────────────────────────────────────────────
 var pass = 0, fail = 0;
@@ -37,7 +37,7 @@ var _storage = {};
 var _writeCount = 0;
 function _resetStorage() { _storage = {}; _writeCount = 0; }
 
-global.MaxDB = {
+const MaxDB = {
   trip: {
     write: function (id, envelope) {
       _writeCount++;
@@ -67,6 +67,10 @@ global.MaxDB = {
     }
   }
 };
+// #2 Stage 3: tripstore now `import MaxDB from "./db.mjs"`. Mock that module
+// (node:test mock.module, run with --experimental-test-module-mocks) instead of
+// the old global.MaxDB injection, so the real import resolves to this fake.
+mock.module("../db.mjs", { defaultExport: MaxDB });
 
 // localStorage shim for fallback path coverage.
 global.localStorage = {
@@ -75,8 +79,8 @@ global.localStorage = {
   removeItem: function (k) { delete _storage[k]; }
 };
 
-// Load the module under test.
-var TripStore = require(path.join(__dirname, "..", "tripstore.mjs")).default;
+// Load the module under test (dynamic import AFTER mock.module so the mock applies).
+const TripStore = (await import("../tripstore.mjs")).default;
 
 function reset() {
   _resetStorage();
