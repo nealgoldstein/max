@@ -1,5 +1,6 @@
 // @ts-check
 import MaxMerge from "./max-merge.mjs";
+import { MaxPlaces } from "./place-registry.mjs"; // #Place D cutover: destinations access layer
 // engine-build.js — the single orchestrator for "build a trip."
 //
 // Before this module existed there were three nearly-parallel build
@@ -384,7 +385,7 @@ const global = /** @type {any} */ (globalThis);
     var _alreadyBuilt = !!(_t && (
       _t._autoEnhancedAt ||
       (_t.brief && _t.brief._autoEnhancedAt) ||
-      (Array.isArray(_t.destinations) && _t.destinations.length > 0) ||
+      (MaxPlaces.destinationsOf(_t).length > 0) ||
       _hasEnhanceContent
     ));
     if (_alreadyBuilt) {
