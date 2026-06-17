@@ -1,4 +1,5 @@
 // @ts-check
+import TripStore from "./tripstore.mjs";
 // gen-postprocess.js — PD.403: the pure post-LLM transforms of the
 // activity-generation flow, extracted verbatim from
 // _generateActivitiesForPlaceImpl in index.html.

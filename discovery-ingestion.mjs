@@ -1,4 +1,5 @@
 // @ts-check
+import MaxData from "./max-data.mjs";
 import SectionKind from "./section-kind.mjs";
 import PlaceKey from "./place-key.mjs";
 // discovery-ingestion.js — SSOT Phase 2: the ONE ingestion service.

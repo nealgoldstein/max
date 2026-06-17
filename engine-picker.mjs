@@ -1,4 +1,5 @@
 // @ts-check
+import TripStore from "./tripstore.mjs";
 import MaxDB from "./db.mjs";
 import MaxMigration from "./migration.mjs";
 // engine-picker.js — Max picker engine, pure helpers (Round HH: Phase 3)

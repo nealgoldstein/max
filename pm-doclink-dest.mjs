@@ -1,4 +1,5 @@
 // @ts-check
+import TripStore from "./tripstore.mjs";
 import PlaceKey from "./place-key.mjs";
 // pm-doclink-dest.js — extracted verbatim from index.html (PD.483 bloat reduction).
 // Place-meta doc-link picker + destination keep/nights toggles.

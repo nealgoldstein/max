@@ -1,4 +1,5 @@
 // @ts-check
+import TripStore from "./tripstore.mjs";
 import MaxDB from "./db.mjs";
 // itinerary-ordering.js — Itinerary ordering. Extracted verbatim from index.html (PD.473, bloat reduction).
 

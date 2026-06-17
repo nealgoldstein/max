@@ -1,4 +1,5 @@
 // @ts-check
+import TripStore from "./tripstore.mjs";
 import MaxDB from "./db.mjs";
 // home-screen.js — Home screen + pasted-list import pipeline (parsePlacesList,
 // _buildTripFromPastedList, etc.). Extracted from index.html (PD.456). Self-contained

@@ -1,4 +1,5 @@
 // @ts-check
+import TripStore from "./tripstore.mjs";
 // engine-enrich.js — serialized background enrichment queue.
 //
 // PD.325. Before this module, every fresh trip fired generateCityData

@@ -1,4 +1,6 @@
 // @ts-check
+import MaxData from "./max-data.mjs";
+import TripStore from "./tripstore.mjs";
 import SectionKind from "./section-kind.mjs";
 import PlaceKey from "./place-key.mjs";
 // discovery-adapter.js — PD.401g: the Discovery placement adapter.

@@ -1,4 +1,6 @@
 // @ts-check
+import MaxData from "./max-data.mjs";
+import TripStore from "./tripstore.mjs";
 import PlaceKey from "./place-key.mjs";
 // discovery-curation.js — Discovery curation persistence. Extracted verbatim from index.html (PD.473, bloat reduction).
 
