@@ -312,4 +312,28 @@ function showHomeApiKeyForm(){
   setTimeout(function(){ document.getElementById("home-key-inp").focus(); }, 50);
 }
 
+
+/* #2 Stage 2 interim: expose this module's non-colliding top-level bindings
+   as globals (restores pre-ESM flat-script behavior for bare-global + window.*
+   consumers, incl. app-main.js boot refs). esbuild isolates each .mjs to an IIFE;
+   any-cast keeps it tsc-valid; the import-rewiring phase removes this. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg._mwOpenName = _mwOpenName;
+  __expg._mwToggle = _mwToggle;
+  __expg._mwHoverSwitch = _mwHoverSwitch;
+  __expg._mwOpen = _mwOpen;
+  __expg._mwClose = _mwClose;
+  __expg._mwCloseAllNoListenerReset = _mwCloseAllNoListenerReset;
+  __expg._mwOutsideClick = _mwOutsideClick;
+  __expg.goHome = goHome;
+  __expg._phaseStatus = _phaseStatus;
+  __expg._phaseChipsHtml = _phaseChipsHtml;
+  __expg.showNewTripForm = showNewTripForm;
+  __expg.hideNewTripForm = hideNewTripForm;
+  __expg.showBriefApiKeyForm = showBriefApiKeyForm;
+  __expg.saveBriefKey = saveBriefKey;
+  __expg.showHomeApiKeyForm = showHomeApiKeyForm;
+}
+
 export {};

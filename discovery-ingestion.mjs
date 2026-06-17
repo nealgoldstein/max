@@ -86,3 +86,17 @@ const global = /** @type {any} */ (globalThis);
   };
   global.MaxIngestion = api;
 export default api;
+
+/* #2 Stage 2 interim: expose this module's non-colliding top-level bindings
+   as globals (restores pre-ESM flat-script behavior for bare-global + window.*
+   consumers, incl. app-main.js boot refs). esbuild isolates each .mjs to an IIFE;
+   any-cast keeps it tsc-valid; the import-rewiring phase removes this. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg._Data = _Data;
+  __expg._placeActivities = _placeActivities;
+  __expg._destinations = _destinations;
+  __expg.unifiedPlaceActivities = unifiedPlaceActivities;
+  __expg.ingestionOpts = ingestionOpts;
+  __expg.buildModel = buildModel;
+}

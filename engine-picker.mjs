@@ -5149,4 +5149,68 @@ const global = /** @type {any} */ (globalThis);
   global.collectUserDayTripPairs = collectUserDayTripPairs;
 
 
+
+/* #2 Stage 2 interim: expose this module's non-colliding top-level bindings
+   as globals (restores pre-ESM flat-script behavior for bare-global + window.*
+   consumers, incl. app-main.js boot refs). esbuild isolates each .mjs to an IIFE;
+   any-cast keeps it tsc-valid; the import-rewiring phase removes this. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg.extractRoutePreference = extractRoutePreference;
+  __expg._findMatchingRequired = _findMatchingRequired;
+  __expg.parseStartDateFromBrief = parseStartDateFromBrief;
+  __expg.parseNightsFromRange = parseNightsFromRange;
+  __expg.pinColorForRole = pinColorForRole;
+  __expg.normalizeCandidateRole = normalizeCandidateRole;
+  __expg.isSingleSight = isSingleSight;
+  __expg.pickerListeners = pickerListeners;
+  __expg.pickerServices = pickerServices;
+  __expg.pickerOn = pickerOn;
+  __expg.pickerOff = pickerOff;
+  __expg.pickerEmit = pickerEmit;
+  __expg.pickerInjectService = pickerInjectService;
+  __expg.pickerGetService = pickerGetService;
+  __expg.groupCandidatesByMustDo = groupCandidatesByMustDo;
+  __expg.applyRequiredAndAutoKeep = applyRequiredAndAutoKeep;
+  __expg.partitionByStatus = partitionByStatus;
+  __expg.classifyCandidateBadge = classifyCandidateBadge;
+  __expg.regionSeedCoord = regionSeedCoord;
+  __expg.parseNightRange = parseNightRange;
+  __expg.parseTripDuration = parseTripDuration;
+  __expg.keptDaysRangeText = keptDaysRangeText;
+  __expg.alsoHereText = alsoHereText;
+  __expg.coordSane = coordSane;
+  __expg.keptCandidates = keptCandidates;
+  __expg.activeCandidates = activeCandidates;
+  __expg.groupByCountry = groupByCountry;
+  __expg.MUST_DO_TYPE_ORDER = MUST_DO_TYPE_ORDER;
+  __expg.partitionMustDosByType = partitionMustDosByType;
+  __expg.mustDoSectionTitle = mustDoSectionTitle;
+  __expg.mustDoSectionRenderable = mustDoSectionRenderable;
+  __expg.routeArrow = routeArrow;
+  __expg.regionWithinCountrySort = regionWithinCountrySort;
+  __expg.partitionActiveByCommitment = partitionActiveByCommitment;
+  __expg.bestPickFirstSort = bestPickFirstSort;
+  __expg.computeStayTotalSummary = computeStayTotalSummary;
+  __expg._bestWaysideLegForCandidate = _bestWaysideLegForCandidate;
+  __expg._synthTripForPicker = _synthTripForPicker;
+  __expg.runPickerDayTripDiscovery = runPickerDayTripDiscovery;
+  __expg.runPickerWaysideDiscovery = runPickerWaysideDiscovery;
+  __expg.orderKeptCandidates = orderKeptCandidates;
+  __expg.buildBrief = buildBrief;
+  __expg.cloneMdcItems = cloneMdcItems;
+  __expg.deriveTripName = deriveTripName;
+  __expg.isAutoName = isAutoName;
+  __expg._ensurePlace = _ensurePlace;
+  __expg._buildDaysShim = _buildDaysShim;
+  __expg.publishTrip = publishTrip;
+  __expg._userReasonsCacheKey = _userReasonsCacheKey;
+  __expg.deriveUserReasons = deriveUserReasons;
+  __expg.buildDayTripNote = buildDayTripNote;
+  __expg.collectUserDayTripPairs = collectUserDayTripPairs;
+  __expg.collectImpliedDayTripPairs = collectImpliedDayTripPairs;
+  __expg.orderPlacePickerStays = orderPlacePickerStays;
+  __expg.MaxEnginePicker = MaxEnginePicker;
+}
+
 export {};

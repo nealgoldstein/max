@@ -432,4 +432,23 @@ const global = /** @type {any} */ (globalThis);
   global.classifyListEntries = classifyListEntries;
 
 
+
+/* #2 Stage 2 interim: expose this module's non-colliding top-level bindings
+   as globals (restores pre-ESM flat-script behavior for bare-global + window.*
+   consumers, incl. app-main.js boot refs). esbuild isolates each .mjs to an IIFE;
+   any-cast keeps it tsc-valid; the import-rewiring phase removes this. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg.VALID_CLASSIFICATIONS = VALID_CLASSIFICATIONS;
+  __expg.ACTIVITY_VERB_PREFIX = ACTIVITY_VERB_PREFIX;
+  __expg.ROLE_TAG_HINT = ROLE_TAG_HINT;
+  __expg.heuristicClassify = heuristicClassify;
+  __expg.buildClassifierPrompt = buildClassifierPrompt;
+  __expg.parseClassifierResponse = parseClassifierResponse;
+  __expg.applyParentageRules = applyParentageRules;
+  __expg.classifyListEntries = classifyListEntries;
+  __expg.applyClassificationsToEntries = applyClassificationsToEntries;
+  __expg.MaxEngineClassify = MaxEngineClassify;
+}
+
 export {};

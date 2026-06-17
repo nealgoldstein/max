@@ -991,3 +991,43 @@ const global = /** @type {any} */ (globalThis);
 
 
 export default globalThis.MaxData;
+
+/* #2 Stage 2 interim: expose this module's non-colliding top-level bindings
+   as globals (restores pre-ESM flat-script behavior for bare-global + window.*
+   consumers, incl. app-main.js boot refs). esbuild isolates each .mjs to an IIFE;
+   any-cast keeps it tsc-valid; the import-rewiring phase removes this. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg._isFiniteCoord = _isFiniteCoord;
+  __expg.getPlaceActivities = getPlaceActivities;
+  __expg.getCandidates = getCandidates;
+  __expg.getDestinations = getDestinations;
+  __expg.getRoutes = getRoutes;
+  __expg.getPlaces = getPlaces;
+  __expg.getBrief = getBrief;
+  __expg.getNotes = getNotes;
+  __expg.findDestination = findDestination;
+  __expg.findDestinationByPlace = findDestinationByPlace;
+  __expg.getSuggestions = getSuggestions;
+  __expg.getDayItems = getDayItems;
+  __expg.getDayTrips = getDayTrips;
+  __expg.getReservations = getReservations;
+  __expg.getBookings = getBookings;
+  __expg.consideredPlaceKeys = consideredPlaceKeys;
+  __expg.foldConsideredSuggestionsIntoPlaceActivities = foldConsideredSuggestionsIntoPlaceActivities;
+  __expg.getCommittedSights = getCommittedSights;
+  __expg.getConsideredSights = getConsideredSights;
+  __expg.consideredBySection = consideredBySection;
+  __expg.countConsideredSights = countConsideredSights;
+  __expg.getRejectedSights = getRejectedSights;
+  __expg.getUserListedNames = getUserListedNames;
+  __expg.getUserListedDisplay = getUserListedDisplay;
+  __expg.deriveListedFromRecords = deriveListedFromRecords;
+  __expg.dedupeListedNames = dedupeListedNames;
+  __expg.getDestNote = getDestNote;
+  __expg.getDestStory = getDestStory;
+  __expg.getSightStory = getSightStory;
+  __expg.describeTrip = describeTrip;
+  __expg._CATCHALL_PRECEDENCE = _CATCHALL_PRECEDENCE;
+  __expg.canonicalizePlaceActivities = canonicalizePlaceActivities;
+}

@@ -238,4 +238,26 @@ function _pmDocOpen(idx){
   });
 }
 
+
+/* #2 Stage 2 interim: expose this module's non-colliding top-level bindings
+   as globals (restores pre-ESM flat-script behavior for bare-global + window.*
+   consumers, incl. app-main.js boot refs). esbuild isolates each .mjs to an IIFE;
+   any-cast keeps it tsc-valid; the import-rewiring phase removes this. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg._pmStripHtml = _pmStripHtml;
+  __expg._pmFmtRelative = _pmFmtRelative;
+  __expg._pmFmtAbsolute = _pmFmtAbsolute;
+  __expg._pmDocsEnsure = _pmDocsEnsure;
+  __expg._pmDocsSyncToNotes = _pmDocsSyncToNotes;
+  __expg._pmDocsRender = _pmDocsRender;
+  __expg._pmDocsReadFromDom = _pmDocsReadFromDom;
+  __expg._pmDocsSetActive = _pmDocsSetActive;
+  __expg._pmDocsClearActive = _pmDocsClearActive;
+  __expg._pmActiveResearchClose = _pmActiveResearchClose;
+  __expg._pmDocAdd = _pmDocAdd;
+  __expg._pmDocRemove = _pmDocRemove;
+  __expg._pmDocOpen = _pmDocOpen;
+}
+
 export {};

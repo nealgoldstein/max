@@ -675,10 +675,12 @@ async function buildFromCandidates(){
 
 
 
-/* #2 Stage 2 interim: expose this module's top-level bindings as globals for
-   other-module/classic consumers (incl. window.* reads tsc cannot see) and
-   app-main.js boot-time bare-global refs. esbuild isolates each .mjs to an IIFE;
-   the any-cast keeps this valid without ambient decls; import-rewiring removes it. */
+
+
+/* #2 Stage 2 interim: expose this module's non-colliding top-level bindings
+   as globals (restores pre-ESM flat-script behavior for bare-global + window.*
+   consumers, incl. app-main.js boot refs). esbuild isolates each .mjs to an IIFE;
+   any-cast keeps it tsc-valid; the import-rewiring phase removes this. */
 {
   const __expg = /** @type {any} */ (globalThis);
   __expg._pdsTimer = _pdsTimer;

@@ -1309,4 +1309,24 @@ async function setCS(id,status){
   _persistDiscoveryState();
 }
 
+
+/* #2 Stage 2 interim: expose this module's non-colliding top-level bindings
+   as globals (restores pre-ESM flat-script behavior for bare-global + window.*
+   consumers, incl. app-main.js boot refs). esbuild isolates each .mjs to an IIFE;
+   any-cast keeps it tsc-valid; the import-rewiring phase removes this. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg.renderPickerSidebar = renderPickerSidebar;
+  __expg._makePickerSidebarRow = _makePickerSidebarRow;
+  __expg._addPickerSidebarMarker = _addPickerSidebarMarker;
+  __expg._makePickerRejectedSection = _makePickerRejectedSection;
+  __expg._escapeHtml = _escapeHtml;
+  __expg.renderCandidateCards = renderCandidateCards;
+  __expg.rIcon = rIcon;
+  __expg.addPlaceToCandidates = addPlaceToCandidates;
+  __expg._dropActivity = _dropActivity;
+  __expg.showRejectRequiredModal = showRejectRequiredModal;
+  __expg.setCS = setCS;
+}
+
 export {};

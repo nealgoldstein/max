@@ -411,4 +411,28 @@ const global = /** @type {any} */ (globalThis);
     global.MaxEngineTrip.geo = MaxGeo;
   }
 
+
+/* #2 Stage 2 interim: expose this module's non-colliding top-level bindings
+   as globals (restores pre-ESM flat-script behavior for bare-global + window.*
+   consumers, incl. app-main.js boot refs). esbuild isolates each .mjs to an IIFE;
+   any-cast keeps it tsc-valid; the import-rewiring phase removes this. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg.DATA = DATA;
+  __expg.byIso = byIso;
+  __expg.byNorm = byNorm;
+  __expg.bySubregion = bySubregion;
+  __expg.COUNTRY_WORD_SET = COUNTRY_WORD_SET;
+  __expg.byName = byName;
+  __expg.isCountry = isCountry;
+  __expg.byIsoCode = byIsoCode;
+  __expg.subregionOf = subregionOf;
+  __expg.countriesIn = countriesIn;
+  __expg.neighbors = neighbors;
+  __expg.stripCountrySuffix = stripCountrySuffix;
+  __expg.detectCountry = detectCountry;
+  __expg.all = all;
+  __expg.MaxGeo = MaxGeo;
+}
+
 export {};

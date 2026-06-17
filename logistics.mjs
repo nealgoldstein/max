@@ -606,4 +606,29 @@ function _tbSetupShapeBadges(){
 // user picks what's must-do vs skip. The picked items populate _mdcItems so
 // Step 2 → candidate search can run without a second LLM regen.
 
+
+/* #2 Stage 2 interim: expose this module's non-colliding top-level bindings
+   as globals (restores pre-ESM flat-script behavior for bare-global + window.*
+   consumers, incl. app-main.js boot refs). esbuild isolates each .mjs to an IIFE;
+   any-cast keeps it tsc-valid; the import-rewiring phase removes this. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg._logRentals = _logRentals;
+  __expg._logRentalCtr = _logRentalCtr;
+  __expg.showLogisticsScreen = showLogisticsScreen;
+  __expg.toggleSameDep = toggleSameDep;
+  __expg.setTransport = setTransport;
+  __expg.addRental = addRental;
+  __expg.removeRental = removeRental;
+  __expg.renderRentals = renderRentals;
+  __expg.saveLogistics = saveLogistics;
+  __expg.skipLogistics = skipLogistics;
+  __expg.showLogisticsConfirmation = showLogisticsConfirmation;
+  __expg.sequenceDestinations = sequenceDestinations;
+  __expg.resequenceTrip = resequenceTrip;
+  __expg.showTripBrief = showTripBrief;
+  __expg.renderTripStep1 = renderTripStep1;
+  __expg._tbSetupShapeBadges = _tbSetupShapeBadges;
+}
+
 export {};

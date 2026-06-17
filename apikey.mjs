@@ -197,4 +197,23 @@ function clearApiKey(){
   try{localStorage.removeItem("max-api-key");}catch(e){}
 }
 
+
+/* #2 Stage 2 interim: expose this module's non-colliding top-level bindings
+   as globals (restores pre-ESM flat-script behavior for bare-global + window.*
+   consumers, incl. app-main.js boot refs). esbuild isolates each .mjs to an IIFE;
+   any-cast keeps it tsc-valid; the import-rewiring phase removes this. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg._apiKey = _apiKey;
+  __expg._apiKeyPrompted = _apiKeyPrompted;
+  __expg._consumeReviewKeyFromUrl = _consumeReviewKeyFromUrl;
+  __expg._isWellFormedApiKey = _isWellFormedApiKey;
+  __expg.loadApiKey = loadApiKey;
+  __expg.renderApiKeyUI = renderApiKeyUI;
+  __expg.showApiKeyForm = showApiKeyForm;
+  __expg.hideApiKeyForm = hideApiKeyForm;
+  __expg.saveApiKey = saveApiKey;
+  __expg.clearApiKey = clearApiKey;
+}
+
 export {};

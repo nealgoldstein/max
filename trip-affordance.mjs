@@ -565,4 +565,26 @@ var _destStories  = {};
 var _destNotes    = {};  // { destId: {text, hidden, seen, createdAt} }
 var _ffHistories  = {};
 
+
+/* #2 Stage 2 interim: expose this module's non-colliding top-level bindings
+   as globals (restores pre-ESM flat-script behavior for bare-global + window.*
+   consumers, incl. app-main.js boot refs). esbuild isolates each .mjs to an IIFE;
+   any-cast keeps it tsc-valid; the import-rewiring phase removes this. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg._fqBannerInnerHtml = _fqBannerInnerHtml;
+  __expg._ftGetThresholdHours = _ftGetThresholdHours;
+  __expg._ftRecomputeTripDates = _ftRecomputeTripDates;
+  __expg._openTripDatesEditor = _openTripDatesEditor;
+  __expg._applyTripDateChange = _applyTripDateChange;
+  __expg._ftResizeDestDays = _ftResizeDestDays;
+  __expg._ftSchedulePeerDayTrip = _ftSchedulePeerDayTrip;
+  __expg._ftReverseNightTransfer = _ftReverseNightTransfer;
+  __expg._ftPeerDayTripCandidates = _ftPeerDayTripCandidates;
+  __expg._sightStories = _sightStories;
+  __expg._destStories = _destStories;
+  __expg._destNotes = _destNotes;
+  __expg._ffHistories = _ffHistories;
+}
+
 export {};

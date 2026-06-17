@@ -458,4 +458,27 @@ function _pmEnsureCandidate(placeName){
 }
 if (typeof globalThis !== "undefined") globalThis._pmEnsureCandidate = _pmEnsureCandidate;
 
+
+/* #2 Stage 2 interim: expose this module's non-colliding top-level bindings
+   as globals (restores pre-ESM flat-script behavior for bare-global + window.*
+   consumers, incl. app-main.js boot refs). esbuild isolates each .mjs to an IIFE;
+   any-cast keeps it tsc-valid; the import-rewiring phase removes this. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg._pmDocLinkPickerClose = _pmDocLinkPickerClose;
+  __expg._pmDocLinkPickerShow = _pmDocLinkPickerShow;
+  __expg._pmDocLinkInsert = _pmDocLinkInsert;
+  __expg._pmDocLinkNavigate = _pmDocLinkNavigate;
+  __expg.toggleDestKeep = toggleDestKeep;
+  __expg._pmSurgicalKeepUpdate = _pmSurgicalKeepUpdate;
+  __expg.toggleDestKeepInSection = toggleDestKeepInSection;
+  __expg._adjustDestNights = _adjustDestNights;
+  __expg.togglePlaceActivity = togglePlaceActivity;
+  __expg.togglePlaceInActivity = togglePlaceInActivity;
+  __expg.togglePlaceByPlaceMode = togglePlaceByPlaceMode;
+  __expg._pmRemoveFromList = _pmRemoveFromList;
+  __expg._pmUnRejectFromList = _pmUnRejectFromList;
+  __expg._pmEnsureCandidate = _pmEnsureCandidate;
+}
+
 export {};

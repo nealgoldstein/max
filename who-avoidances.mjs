@@ -1034,4 +1034,50 @@ function toggleTag(el){
   if(idx>-1) _tb.interests.splice(idx,1); else _tb.interests.push(tag);
 }
 
+
+/* #2 Stage 2 interim: expose this module's non-colliding top-level bindings
+   as globals (restores pre-ESM flat-script behavior for bare-global + window.*
+   consumers, incl. app-main.js boot refs). esbuild isolates each .mjs to an IIFE;
+   any-cast keeps it tsc-valid; the import-rewiring phase removes this. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg._tbPartyFieldHtml = _tbPartyFieldHtml;
+  __expg._tbAvoidFieldHtml = _tbAvoidFieldHtml;
+  __expg._tbPickPartyComp = _tbPickPartyComp;
+  __expg._tbPickAbility = _tbPickAbility;
+  __expg._tbToggleAvoid = _tbToggleAvoid;
+  __expg._tbCaptureParty = _tbCaptureParty;
+  __expg._tbCaptureAvoid = _tbCaptureAvoid;
+  __expg._tbPartySummary = _tbPartySummary;
+  __expg._briefPersonalContext = _briefPersonalContext;
+  __expg._tbAvoidSummary = _tbAvoidSummary;
+  __expg._tbHydrateDates = _tbHydrateDates;
+  __expg._tbParseYMD = _tbParseYMD;
+  __expg._tbFormatYMD = _tbFormatYMD;
+  __expg._tbRecalcDates = _tbRecalcDates;
+  __expg._tbDatesFieldHtml = _tbDatesFieldHtml;
+  __expg._tbSetDateMode = _tbSetDateMode;
+  __expg._tbOnDateChange = _tbOnDateChange;
+  __expg._tbTransportModes = _tbTransportModes;
+  __expg._tbModePillsHtml = _tbModePillsHtml;
+  __expg._tbToggleStep2ModePopover = _tbToggleStep2ModePopover;
+  __expg._tbPickMode = _tbPickMode;
+  __expg._tbEntryExitFieldsHtml = _tbEntryExitFieldsHtml;
+  __expg._tbEntryExitModesOnlyHtml = _tbEntryExitModesOnlyHtml;
+  __expg._tbSetFixed = _tbSetFixed;
+  __expg._tbEntryExitSummary = _tbEntryExitSummary;
+  __expg._tbCaptureDates = _tbCaptureDates;
+  __expg._tbSectionHead = _tbSectionHead;
+  __expg.renderTripBrief = renderTripBrief;
+  __expg._legacyRenderTripBrief = _legacyRenderTripBrief;
+  __expg.goToTripStep2 = goToTripStep2;
+  __expg.renderTripStep2 = renderTripStep2;
+  __expg.toggleSentence = toggleSentence;
+  __expg.saveStep2AndProceed = saveStep2AndProceed;
+  __expg._captureInitialWispsFromForm = _captureInitialWispsFromForm;
+  __expg.openGradientConversation = openGradientConversation;
+  __expg.submitGradientConversation = submitGradientConversation;
+  __expg.toggleTag = toggleTag;
+}
+
 export {};

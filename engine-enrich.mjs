@@ -342,4 +342,38 @@ const global = /** @type {any} */ (globalThis);
   };
 
 
+
+/* #2 Stage 2 interim: expose this module's non-colliding top-level bindings
+   as globals (restores pre-ESM flat-script behavior for bare-global + window.*
+   consumers, incl. app-main.js boot refs). esbuild isolates each .mjs to an IIFE;
+   any-cast keeps it tsc-valid; the import-rewiring phase removes this. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg.DEFAULT_INTERVAL_MS = DEFAULT_INTERVAL_MS;
+  __expg.MAX_BACKOFF_MS = MAX_BACKOFF_MS;
+  __expg.BASE_BACKOFF_MS = BASE_BACKOFF_MS;
+  __expg._queue = _queue;
+  __expg._enqueued = _enqueued;
+  __expg._enricher = _enricher;
+  __expg._isAlreadyEnriched = _isAlreadyEnriched;
+  __expg._persistOnSuccess = _persistOnSuccess;
+  __expg._processing = _processing;
+  __expg._lastCallAt = _lastCallAt;
+  __expg._dispatchToken = _dispatchToken;
+  __expg._pendingTimers = _pendingTimers;
+  __expg.setEnricher = setEnricher;
+  __expg.setAlreadyEnrichedProbe = setAlreadyEnrichedProbe;
+  __expg.setPersistHook = setPersistHook;
+  __expg.enqueue = enqueue;
+  __expg.enqueueAll = enqueueAll;
+  __expg.cancel = cancel;
+  __expg.priority = priority;
+  __expg._tick = _tick;
+  __expg._dispatch = _dispatch;
+  __expg._onSuccess = _onSuccess;
+  __expg._onFailure = _onFailure;
+  __expg.status = status;
+  __expg._reset = _reset;
+}
+
 export {};

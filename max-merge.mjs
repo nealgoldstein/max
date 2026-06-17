@@ -304,3 +304,19 @@ const global = /** @type {any} */ (globalThis);
   };
 
 export default globalThis.MaxMerge;
+
+/* #2 Stage 2 interim: expose this module's non-colliding top-level bindings
+   as globals (restores pre-ESM flat-script behavior for bare-global + window.*
+   consumers, incl. app-main.js boot refs). esbuild isolates each .mjs to an IIFE;
+   any-cast keeps it tsc-valid; the import-rewiring phase removes this. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg.DEST_USER_FIELDS = DEST_USER_FIELDS;
+  __expg.DEST_USER_ARRAYS = DEST_USER_ARRAYS;
+  __expg.SUGGESTION_USER_FLAGS = SUGGESTION_USER_FLAGS;
+  __expg.TRIP_ID_KEYED_MAPS = TRIP_ID_KEYED_MAPS;
+  __expg.TRIP_USER_FIELDS = TRIP_USER_FIELDS;
+  __expg.TRIP_USER_OBJECTS = TRIP_USER_OBJECTS;
+  __expg.mergeUserStateIntoRegenerated = mergeUserStateIntoRegenerated;
+  __expg.describePreservation = describePreservation;
+}

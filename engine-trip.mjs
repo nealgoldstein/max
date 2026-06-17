@@ -3157,4 +3157,59 @@ const global = /** @type {any} */ (globalThis);
   global.getCityCenter = getCityCenter;
 
 
+
+/* #2 Stage 2 interim: expose this module's non-colliding top-level bindings
+   as globals (restores pre-ESM flat-script behavior for bare-global + window.*
+   consumers, incl. app-main.js boot refs). esbuild isolates each .mjs to an IIFE;
+   any-cast keeps it tsc-valid; the import-rewiring phase removes this. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg._fqHaversineKm = _fqHaversineKm;
+  __expg._fqPairKey = _fqPairKey;
+  __expg._fqFastestPractical = _fqFastestPractical;
+  __expg._fqPlacesSig = _fqPlacesSig;
+  __expg._ftParseHoursInput = _ftParseHoursInput;
+  __expg._ftFormatHours = _ftFormatHours;
+  __expg._titleCaseCity = _titleCaseCity;
+  __expg.services = services;
+  __expg.injectService = injectService;
+  __expg.getService = getService;
+  __expg._fqInflight = _fqInflight;
+  __expg._fqPairMemo = _fqPairMemo;
+  __expg._fqLastSig = _fqLastSig;
+  __expg._fqLastVerdict = _fqLastVerdict;
+  __expg._fqGetTransitInfo = _fqGetTransitInfo;
+  __expg._fqComputeVerdict = _fqComputeVerdict;
+  __expg._fqVerdictForPlaces = _fqVerdictForPlaces;
+  __expg._reEvaluateOverBudget = _reEvaluateOverBudget;
+  __expg._reconcileDestinations = _reconcileDestinations;
+  __expg.addPendingAction = addPendingAction;
+  __expg._mergeAdjacentSamePlaceDests = _mergeAdjacentSamePlaceDests;
+  __expg.getCityCenter = getCityCenter;
+  __expg.makeDays = makeDays;
+  __expg.syncTransitRoutes = syncTransitRoutes;
+  __expg._llmCallWaysidesForRoute = _llmCallWaysidesForRoute;
+  __expg._normName = _normName;
+  __expg._commitWaysidesToRoute = _commitWaysidesToRoute;
+  __expg._legFitness = _legFitness;
+  __expg._reassignWaysidesToBestLeg = _reassignWaysidesToBestLeg;
+  __expg.generateWaysidesForTrip = generateWaysidesForTrip;
+  __expg._llmCallDayTripsForHub = _llmCallDayTripsForHub;
+  __expg._commitDayTripsToHub = _commitDayTripsToHub;
+  __expg.generateDayTripsForTrip = generateDayTripsForTrip;
+  __expg.commitmentState = commitmentState;
+  __expg.summarizeDecisionsDeferred = summarizeDecisionsDeferred;
+  __expg.nightCountRationale = nightCountRationale;
+  __expg.dayRationale = dayRationale;
+  __expg.neighborhoodRationale = neighborhoodRationale;
+  __expg.transitRationale = transitRationale;
+  __expg.sightPlacementRationale = sightPlacementRationale;
+  __expg.currentTripStatus = currentTripStatus;
+  __expg.currentDayItems = currentDayItems;
+  __expg.clockMinutesBetween = clockMinutesBetween;
+  __expg.preArrivalActions = preArrivalActions;
+  __expg.computePendingActions = computePendingActions;
+  __expg.MaxEngineTrip = MaxEngineTrip;
+}
+
 export {};

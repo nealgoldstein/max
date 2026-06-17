@@ -814,3 +814,34 @@ const global = /** @type {any} */ (globalThis);
     },
   };
 export default globalThis.MaxMigration;
+
+/* #2 Stage 2 interim: expose this module's non-colliding top-level bindings
+   as globals (restores pre-ESM flat-script behavior for bare-global + window.*
+   consumers, incl. app-main.js boot refs). esbuild isolates each .mjs to an IIFE;
+   any-cast keeps it tsc-valid; the import-rewiring phase removes this. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg.CURRENT_SCHEMA_VERSION = CURRENT_SCHEMA_VERSION;
+  __expg._makePlaceId = _makePlaceId;
+  __expg._makeDayTripPlanItemId = _makeDayTripPlanItemId;
+  __expg._makeDayTripRouteId = _makeDayTripRouteId;
+  __expg._makeDayId = _makeDayId;
+  __expg._getOrCreatePlace = _getOrCreatePlace;
+  __expg._buildDaysForDest = _buildDaysForDest;
+  __expg._migrateV0toV1 = _migrateV0toV1;
+  __expg._migrateV1toV2 = _migrateV1toV2;
+  __expg._migrateV2toV3 = _migrateV2toV3;
+  __expg._migrateV3toV4 = _migrateV3toV4;
+  __expg.migrateTripShape = migrateTripShape;
+  __expg.needsMigration = needsMigration;
+  __expg.routeSubKind = routeSubKind;
+  __expg.isDayTripRoute = isDayTripRoute;
+  __expg.isTransitRoute = isTransitRoute;
+  __expg.routesForDay = routesForDay;
+  __expg._shiftIsoDate = _shiftIsoDate;
+  __expg.newDaySegment = newDaySegment;
+  __expg.newRouteSegment = newRouteSegment;
+  __expg.newReference = newReference;
+  __expg.addRouteRefToDay = addRouteRefToDay;
+  __expg.removeRouteRefFromDay = removeRouteRefFromDay;
+}

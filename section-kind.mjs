@@ -85,3 +85,21 @@ const global = /** @type {any} */ (globalThis);
   global.SectionKind = api;
 
 export default api;
+
+/* #2 Stage 2 interim: expose this module's non-colliding top-level bindings
+   as globals (restores pre-ESM flat-script behavior for bare-global + window.*
+   consumers, incl. app-main.js boot refs). esbuild isolates each .mjs to an IIFE;
+   any-cast keeps it tsc-valid; the import-rewiring phase removes this. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg.NAMES = NAMES;
+  __expg.CATCHALL_ORDER = CATCHALL_ORDER;
+  __expg.CATCHALL_RANK = CATCHALL_RANK;
+  __expg.isStay = isStay;
+  __expg.isCommittedStay = isCommittedStay;
+  __expg.isStayConsider = isStayConsider;
+  __expg.isCatchall = isCatchall;
+  __expg.catchallRank = catchallRank;
+  __expg.catchallPrecedence = catchallPrecedence;
+  __expg.isSynthetic = isSynthetic;
+}

@@ -402,4 +402,38 @@ function _renderTripDetailsStrip(kept){
   return MaxPickerUI.renderTripDetailsStrip();
 }
 
+
+/* #2 Stage 2 interim: expose this module's non-colliding top-level bindings
+   as globals (restores pre-ESM flat-script behavior for bare-global + window.*
+   consumers, incl. app-main.js boot refs). esbuild isolates each .mjs to an IIFE;
+   any-cast keeps it tsc-valid; the import-rewiring phase removes this. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg._epCache = _epCache;
+  __expg._epLoading = _epLoading;
+  __expg._edMap = _edMap;
+  __expg._edMarkers = _edMarkers;
+  __expg._edActivePopupId = _edActivePopupId;
+  __expg._findCityCoordsForMap = _findCityCoordsForMap;
+  __expg._epIconFor = _epIconFor;
+  __expg.fetchRegionEntryPoints = fetchRegionEntryPoints;
+  __expg._EP_TYPE_TO_MODE = _EP_TYPE_TO_MODE;
+  __expg._EP_MODE_LABEL = _EP_MODE_LABEL;
+  __expg._tbUseEntryPoint = _tbUseEntryPoint;
+  __expg._tbEntryPointsVisible = _tbEntryPointsVisible;
+  __expg._tbToggleEntryPoints = _tbToggleEntryPoints;
+  __expg._ensureEntryPointsForRegion = _ensureEntryPointsForRegion;
+  __expg._tbModeIcon = _tbModeIcon;
+  __expg._tbPlacesModeIconHtml = _tbPlacesModeIconHtml;
+  __expg._tbPlacesTransportButtonHtml = _tbPlacesTransportButtonHtml;
+  __expg._tbPlacesToggleTransportPopover = _tbPlacesToggleTransportPopover;
+  __expg._tbPlacesToggleModePopover = _tbPlacesToggleModePopover;
+  __expg._tbPlacesFixedPillsHtml = _tbPlacesFixedPillsHtml;
+  __expg._tbPlacesCaptureFields = _tbPlacesCaptureFields;
+  __expg._tbPlacesPickMode = _tbPlacesPickMode;
+  __expg._tbPlacesSetFixed = _tbPlacesSetFixed;
+  __expg._tbPlacesReRender = _tbPlacesReRender;
+  __expg._renderTripDetailsStrip = _renderTripDetailsStrip;
+}
+
 export {};

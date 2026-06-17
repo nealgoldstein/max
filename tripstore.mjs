@@ -981,3 +981,61 @@ const global = /** @type {any} */ (globalThis);
   }
 
 export default TripStore;
+
+/* #2 Stage 2 interim: expose this module's non-colliding top-level bindings
+   as globals (restores pre-ESM flat-script behavior for bare-global + window.*
+   consumers, incl. app-main.js boot refs). esbuild isolates each .mjs to an IIFE;
+   any-cast keeps it tsc-valid; the import-rewiring phase removes this. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg.SCHEMA_VERSION = SCHEMA_VERSION;
+  __expg._trip = _trip;
+  __expg._version = _version;
+  __expg._setTripRef = _setTripRef;
+  __expg._lastPersistSig = _lastPersistSig;
+  __expg._envSig = _envSig;
+  __expg._batchDepth = _batchDepth;
+  __expg._batchDirty = _batchDirty;
+  __expg.touch = touch;
+  __expg.batch = batch;
+  __expg._inFlight = _inFlight;
+  __expg.singleFlight = singleFlight;
+  __expg._singleFlightInFlight = _singleFlightInFlight;
+  __expg._adoptLegacyTripIfNeeded = _adoptLegacyTripIfNeeded;
+  __expg._mutatorDepth = _mutatorDepth;
+  __expg._AUDIT_CAP = _AUDIT_CAP;
+  __expg._appendAudit = _appendAudit;
+  __expg._trimPayload = _trimPayload;
+  __expg._mutate = _mutate;
+  __expg._migrate = _migrate;
+  __expg._migrateV0ToV1 = _migrateV0ToV1;
+  __expg.mint = mint;
+  __expg.load = load;
+  __expg.replace = replace;
+  __expg.unload = unload;
+  __expg.setName = setName;
+  __expg.setBrief = setBrief;
+  __expg.updateBrief = updateBrief;
+  __expg.setNotes = setNotes;
+  __expg.setDestinations = setDestinations;
+  __expg.addDestination = addDestination;
+  __expg.removeDestination = removeDestination;
+  __expg.updateDestination = updateDestination;
+  __expg.reorderDestinations = reorderDestinations;
+  __expg.setPlaceActivities = setPlaceActivities;
+  __expg.updatePlaceActivity = updatePlaceActivity;
+  __expg.removePlaceActivity = removePlaceActivity;
+  __expg.setCandidates = setCandidates;
+  __expg.updatePicker = updatePicker;
+  __expg.publish = publish;
+  __expg.setDestNote = setDestNote;
+  __expg.setDestStory = setDestStory;
+  __expg.setSightStory = setSightStory;
+  __expg.getTrip = getTrip;
+  __expg.getVersion = getVersion;
+  __expg.isLoaded = isLoaded;
+  __expg.notifyChange = notifyChange;
+  __expg._testOnlySetTrip = _testOnlySetTrip;
+  __expg._testOnlyClearListeners = _testOnlyClearListeners;
+  __expg.TripStore = TripStore;
+}

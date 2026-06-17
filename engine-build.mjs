@@ -467,4 +467,26 @@ const global = /** @type {any} */ (globalThis);
   };
 
 
+
+/* #2 Stage 2 interim: expose this module's non-colliding top-level bindings
+   as globals (restores pre-ESM flat-script behavior for bare-global + window.*
+   consumers, incl. app-main.js boot refs). esbuild isolates each .mjs to an IIFE;
+   any-cast keeps it tsc-valid; the import-rewiring phase removes this. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg._building = _building;
+  __expg.isBuilding = isBuilding;
+  __expg._phase = _phase;
+  __expg._buildMode = _buildMode;
+  __expg.phase = phase;
+  __expg.mode = mode;
+  __expg._normalize = _normalize;
+  __expg._runPrimaryPhase = _runPrimaryPhase;
+  __expg._runMintPhase = _runMintPhase;
+  __expg._liveTrip = _liveTrip;
+  __expg._runEnhancePhase = _runEnhancePhase;
+  __expg.rerunEnhance = rerunEnhance;
+  __expg._diagnostic = _diagnostic;
+}
+
 export {};

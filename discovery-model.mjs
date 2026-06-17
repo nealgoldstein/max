@@ -646,3 +646,33 @@ const global = /** @type {any} */ (globalThis);
   global.MaxDiscovery = api;
 
 export default api;
+
+/* #2 Stage 2 interim: expose this module's non-colliding top-level bindings
+   as globals (restores pre-ESM flat-script behavior for bare-global + window.*
+   consumers, incl. app-main.js boot refs). esbuild isolates each .mjs to an IIFE;
+   any-cast keeps it tsc-valid; the import-rewiring phase removes this. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg.SECTION = SECTION;
+  __expg._ROUTE_RE = _ROUTE_RE;
+  __expg.isRouteUmbrella = isRouteUmbrella;
+  __expg._inScenic = _inScenic;
+  __expg._coordsClose = _coordsClose;
+  __expg._coordsDisagree = _coordsDisagree;
+  __expg._FEATURE_WORDS = _FEATURE_WORDS;
+  __expg._conflictingNames = _conflictingNames;
+  __expg._featureVariant = _featureVariant;
+  __expg._entityKind = _entityKind;
+  __expg._entityIsUser = _entityIsUser;
+  __expg.sameEntity = sameEntity;
+  __expg._DEFAULT_PLACEMENT_RULES = _DEFAULT_PLACEMENT_RULES;
+  __expg._placementRules = _placementRules;
+  __expg.PlacementPolicy = PlacementPolicy;
+  __expg.DiscoveryModel = DiscoveryModel;
+  __expg.SECTION_ORDER = SECTION_ORDER;
+  __expg.CATCHALL_LAST = CATCHALL_LAST;
+  __expg._CATCH_SET = _CATCH_SET;
+  __expg._defaultOrigin = _defaultOrigin;
+  __expg.isCatchallSection = isCatchallSection;
+  __expg.catchallSections = catchallSections;
+}

@@ -484,4 +484,25 @@ function _pmShowUndo(message, undoFn){
 }
 if (typeof globalThis !== "undefined") globalThis._pmShowUndo = _pmShowUndo;
 
+
+/* #2 Stage 2 interim: expose this module's non-colliding top-level bindings
+   as globals (restores pre-ESM flat-script behavior for bare-global + window.*
+   consumers, incl. app-main.js boot refs). esbuild isolates each .mjs to an IIFE;
+   any-cast keeps it tsc-valid; the import-rewiring phase removes this. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg._pmMaybeStartClipFlow = _pmMaybeStartClipFlow;
+  __expg._pmShowClipPicker = _pmShowClipPicker;
+  __expg._pmExecuteClipSave = _pmExecuteClipSave;
+  __expg._pmGetClipperBookmarklet = _pmGetClipperBookmarklet;
+  __expg._pmShowClipperSetup = _pmShowClipperSetup;
+  __expg._pmCollectDiscoveryShare = _pmCollectDiscoveryShare;
+  __expg._pmSlimMetaForShare = _pmSlimMetaForShare;
+  __expg._pmShareDiscovery = _pmShareDiscovery;
+  __expg._pmShareModalShow = _pmShareModalShow;
+  __expg._pmMaybeRenderSharedDiscovery = _pmMaybeRenderSharedDiscovery;
+  __expg._pmRenderSharedDiscoveryViewer = _pmRenderSharedDiscoveryViewer;
+  __expg._pmShowUndo = _pmShowUndo;
+}
+
 export {};
