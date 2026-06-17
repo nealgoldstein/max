@@ -997,16 +997,19 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
       if (!item) return { err: 'no activity with requiredPlaces' };
       const keepOf = (p) => (typeof window._keepOf === 'function') ? !!window._keepOf(p) : !!p._keep;
       const p0 = item.requiredPlaces[0];
-      const before = { stored: !!p0._keep, derived: keepOf(p0) };
+      const before = { stored: !!p0._keep, derived: keepOf(p0), place: p0.place, origin: p0._origin, section: item.section, decided: !!p0._decided };
       let threw = '';
       try { window.togglePlaceInActivity(item.id, 0); } catch (e) { threw = String(e && e.message || e); }
-      const cur = (window._tb.placeActivities.find((it) => it.id === item.id) || {}).requiredPlaces[0];
-      const after = { stored: !!cur._keep, derived: keepOf(cur) };
-      return { threw, before, after,
+      const p0Immediate = !!p0._keep;   // the same object, right after the call (before any re-find)
+      const itemAfter = window._tb.placeActivities.find((it) => it.id === item.id) || {};
+      const cur = (itemAfter.requiredPlaces || [])[0] || {};
+      const after = { stored: !!cur._keep, derived: keepOf(cur), place: cur.place, sameObject: cur === p0 };
+      return { threw, before, after, p0Immediate,
                flipped: after.stored !== before.stored,
-               consistentBefore: before.stored === before.derived,
+               flippedImmediate: p0Immediate !== before.stored,
                consistentAfter: after.stored === after.derived };
     });
+    console.log('[keep-toggle] ' + JSON.stringify(r));
     expect(r.err || '').toBe('');
     expect(r.threw, 'toggle threw: ' + r.threw).toBe('');
     expect(r.flipped, 'toggle must flip the stored keep').toBe(true);
