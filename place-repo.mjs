@@ -245,7 +245,7 @@ const global = /** @type {any} */ (globalThis);
       (it.requiredPlaces || []).forEach(function (p) {
         if (!p || !p.place) return;
         repo.add({ place: p.place, _key: p._key, lat: p.lat, lng: p.lng,
-                   section: secForCount, kind: kind, _keep: p._keep !== false, _origin: originOf(p), src: p });
+                   section: secForCount, kind: kind, _keep: (typeof _keepOf === "function" ? _keepOf(p) : p._keep !== false), _origin: originOf(p), src: p });
       });
     });
     return repo;

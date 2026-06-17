@@ -237,7 +237,7 @@ const global = /** @type {any} */ (globalThis);
           coords: (typeof p.lat === "number" && typeof p.lng === "number") ? { lat: p.lat, lng: p.lng } : null,
           kind: stay ? "destination" : "sight",
           source: originOf(p),
-          decision: (p._rejected === true) ? "rejected" : (p._keep === false ? "unchecked" : "kept"),
+          decision: (p._rejected === true) ? "rejected" : ((typeof _keepOf === "function" ? _keepOf(p) : p._keep !== false) ? "kept" : "unchecked"),
           theme: stay ? null : sec,
           nights: (typeof p.nights === "number") ? p.nights : (stay ? 1 : 0)
         });

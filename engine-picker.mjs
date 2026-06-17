@@ -4671,7 +4671,7 @@ const global = /** @type {any} */ (globalThis);
         // "route" activities don't contribute nights — same as the
         // picker UI's predictor (which ignores it.type === "route").
         if (item.type !== "route" && n > places[key].nights) places[key].nights = n;
-        if (_keepOf(p)) places[key].kept = true;   // #Place D: read keep via the one accessor
+        if (typeof _keepOf === "function" ? _keepOf(p) : p._keep) places[key].kept = true;   // #Place D: keep via the one accessor (Node-safe guard)
         if (p._userChoseStay) places[key].userChoseStay = true;
       });
     });
