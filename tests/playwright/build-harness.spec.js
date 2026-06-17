@@ -980,4 +980,37 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
     // that decides whether _keepOf is safe to standardize on.
   });
 
+  // ── #Place D 2.5 CHARACTERIZATION: the place-keep toggle ───────────────────
+  // togglePlaceInActivity currently writes p._keep DIRECTLY. Before routing that
+  // write through MaxRoleWriter.set (so the decision log — and _keepOf — stays
+  // authoritative), pin its observable contract: a toggle FLIPS the place's keep,
+  // and _keepOf AGREES with the stored flag afterward (the no-staleness
+  // invariant the migration must preserve). This test must pass BEFORE the
+  // write-side change and STILL pass after.
+  test('GATE: place-keep toggle flips keep and _keepOf stays consistent', async ({ page }) => {
+    await bootClean(page);
+    await runPipeline(page);
+    const r = await page.evaluate(() => {
+      if (typeof window.togglePlaceInActivity !== 'function') return { err: 'togglePlaceInActivity missing' };
+      const pa = window._tb && window._tb.placeActivities || [];
+      const item = pa.find((it) => it && it.type !== 'route' && (it.requiredPlaces || []).length);
+      if (!item) return { err: 'no activity with requiredPlaces' };
+      const keepOf = (p) => (typeof window._keepOf === 'function') ? !!window._keepOf(p) : !!p._keep;
+      const p0 = item.requiredPlaces[0];
+      const before = { stored: !!p0._keep, derived: keepOf(p0) };
+      let threw = '';
+      try { window.togglePlaceInActivity(item.id, 0); } catch (e) { threw = String(e && e.message || e); }
+      const cur = (window._tb.placeActivities.find((it) => it.id === item.id) || {}).requiredPlaces[0];
+      const after = { stored: !!cur._keep, derived: keepOf(cur) };
+      return { threw, before, after,
+               flipped: after.stored !== before.stored,
+               consistentBefore: before.stored === before.derived,
+               consistentAfter: after.stored === after.derived };
+    });
+    expect(r.err || '').toBe('');
+    expect(r.threw, 'toggle threw: ' + r.threw).toBe('');
+    expect(r.flipped, 'toggle must flip the stored keep').toBe(true);
+    expect(r.consistentAfter, 'after toggle, _keepOf must agree with stored (no staleness): ' + JSON.stringify(r)).toBe(true);
+  });
+
 });
