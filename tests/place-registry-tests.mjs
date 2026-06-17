@@ -63,6 +63,30 @@ test("empty / missing trip → empty registry, shadow ok", function () {
   assert.ok(MaxPlaces.registryShadowCheck({}).ok);
 });
 
+// ── Phase D cutover, slice 1: the destinations PROJECTION ──
+test("destinationsOf projects the spine in trip.destinations order", function () {
+  var proj = MaxPlaces.destinationsOf(trip);
+  assert.deepStrictEqual(proj, [
+    { id: null, place: "Reykjavik", lat: 64.1, lng: -21.9 },
+    { id: null, place: "Akureyri", lat: 65.7, lng: -18.1 }
+  ]);
+});
+test("SHADOW: destinations projection reproduces trip.destinations exactly", function () {
+  var r = MaxPlaces.destinationsProjectionCheck(trip);
+  assert.ok(r.ok, "diffs: " + r.diffs.join(" | "));
+});
+test("projection carries the destination's persisted id + preserves order", function () {
+  var t2 = { destinations: [
+    { id: "d-2", place: "Vik", lat: 63.4, lng: -19.0 },
+    { id: "d-1", place: "Hofn", lat: 64.2, lng: -15.2 }
+  ] };
+  assert.deepStrictEqual(MaxPlaces.destinationsOf(t2), [
+    { id: "d-2", place: "Vik", lat: 63.4, lng: -19.0 },
+    { id: "d-1", place: "Hofn", lat: 64.2, lng: -15.2 }
+  ]);
+  assert.ok(MaxPlaces.destinationsProjectionCheck(t2).ok);
+});
+
 console.log("\n──────────────────────────────────────────────────");
 console.log("PASS: " + pass + "    FAIL: " + fail);
 process.exit(fail > 0 ? 1 : 0);

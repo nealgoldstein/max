@@ -54,11 +54,17 @@ function buildRegistry(trip) {
         geo: _pointGeo(rec),
         role: role,
         exploredFrom: MaxDecisions.exploredFromOf(rec),
-        decision: _decisionOf(rec)
+        decision: _decisionOf(rec),
+        // destinations carry their persisted id so the projection can reconstruct
+        // trip.destinations exactly (the spine: id + name + coords + order).
+        _destId: (forceRole === "destination" && rec.id != null) ? rec.id : null
       });
       return;
     }
-    if (role === "destination") place.role = "destination";          // dest wins
+    if (role === "destination") {                                    // dest wins
+      place.role = "destination";
+      if (rec.id != null) place._destId = rec.id;
+    }
     if (place.geo.lat == null && typeof rec.lat === "number") place.geo = _pointGeo(rec);
   }
   (trip.destinations || []).forEach(function (d) { upsert(d, "destination"); });
@@ -95,7 +101,47 @@ function registryShadowCheck(trip) {
   return { ok: missing.length === 0 && wrongRole.length === 0, size: reg.size, missing: missing, wrongRole: wrongRole };
 }
 
-var MaxPlaces = { buildRegistry: buildRegistry, registryShadowCheck: registryShadowCheck };
+// ── Phase D cutover, slice 1 — the `destinations` PROJECTION ──────────────
+// Reconstruct the destinations spine (id + name + coords, in order) from the
+// registry. This is what readers of trip.destinations migrate to; once every
+// reader is on it and the rich per-destination fields move into the Place's stay
+// block, trip.destinations becomes a pure projection and the stored array retires.
+function destinationsOf(trip) {
+  var out = [];
+  buildRegistry(trip).forEach(function (p) {
+    if (p.role === "destination") out.push({ id: p._destId, place: p.identity.name, lat: p.geo.lat, lng: p.geo.lng });
+  });
+  return out;
+}
+// Shadow check: the projection reproduces trip.destinations exactly on the spine
+// fields, in order. Faithfulness here is the precondition for cutting readers over.
+function destinationsProjectionCheck(trip) {
+  var proj = destinationsOf(trip);
+  var orig = ((trip && trip.destinations) || []).map(function (d) {
+    return {
+      id: (d && d.id != null) ? d.id : null,
+      place: (d && (d.place || d.name)) || "",
+      lat: (d && typeof d.lat === "number") ? d.lat : null,
+      lng: (d && typeof d.lng === "number") ? d.lng : null
+    };
+  });
+  var diffs = [];
+  if (proj.length !== orig.length) diffs.push("count " + proj.length + " != " + orig.length);
+  for (var i = 0; i < Math.min(proj.length, orig.length); i++) {
+    var a = proj[i], b = orig[i];
+    if (a.id !== b.id || a.place !== b.place || a.lat !== b.lat || a.lng !== b.lng) {
+      diffs.push("#" + i + " " + JSON.stringify(a) + " != " + JSON.stringify(b));
+    }
+  }
+  return { ok: diffs.length === 0, diffs: diffs };
+}
+
+var MaxPlaces = {
+  buildRegistry: buildRegistry,
+  registryShadowCheck: registryShadowCheck,
+  destinationsOf: destinationsOf,
+  destinationsProjectionCheck: destinationsProjectionCheck
+};
 
 export { MaxPlaces };
 export default MaxPlaces;
@@ -111,5 +157,7 @@ export default MaxPlaces;
   __expg._pointGeo = _pointGeo;
   __expg._regKey = _regKey;
   __expg.buildRegistry = buildRegistry;
+  __expg.destinationsOf = destinationsOf;
+  __expg.destinationsProjectionCheck = destinationsProjectionCheck;
   __expg.registryShadowCheck = registryShadowCheck;
 }
