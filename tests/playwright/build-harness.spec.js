@@ -995,8 +995,9 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
       if (typeof window.togglePlaceActivity !== 'function') return { err: 'togglePlaceActivity missing' };
       const pa = window._tb && window._tb.placeActivities || [];
       const isStay = (typeof window._isStaySection === 'function') ? window._isStaySection : function(){ return false; };
-      // a SIGHT activity (non-route, non-stay) with requiredPlaces
-      const item = pa.find((it) => it && it.type !== 'route' && !isStay(it) && (it.requiredPlaces || []).length);
+      // a SIGHT activity (non-route, non-stay) with requiredPlaces.
+      // _isStaySection takes the section NAME string (construct-decorate.mjs:251).
+      const item = pa.find((it) => it && it.type !== 'route' && !isStay(it.section) && (it.requiredPlaces || []).length);
       if (!item) return { err: 'no sight activity with requiredPlaces' };
       const anyKeep = (rps) => (rps || []).some((p) => p && p._keep);
       const before = { anyKept: anyKeep(item.requiredPlaces), section: item.section, n: item.requiredPlaces.length };

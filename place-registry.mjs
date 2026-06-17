@@ -218,7 +218,7 @@ function keepShadowCheck(trip, opts) {
   var diffs = [], checked = 0;
   ((trip && trip.placeActivities) || []).forEach(function (it) {
     if (!it || it.type === "route") return;
-    var isStay = false; try { isStay = !!isStayFn(it); } catch (_) {}
+    var isStay = false; try { isStay = !!isStayFn(it.section); } catch (_) {}  // _isStaySection takes the section NAME
     (it.requiredPlaces || []).forEach(function (p) {
       if (!p) return;
       checked++;
