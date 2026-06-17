@@ -2056,4 +2056,36 @@ function mkHotelRecord(bk,destId){
   a.appendChild(db); rec.appendChild(a); return rec;
 }
 
+
+/* #2 Stage 2 interim: expose this module's cross-module bindings as globals
+   for other-module/classic consumers. esbuild compiles each .mjs to an isolated
+   IIFE, so top-level decls are module-private unless re-exposed; the later
+   import-rewiring phase replaces these with real imports. */
+globalThis._fmtDistance = _fmtDistance;
+globalThis._openSightUrlEditor = _openSightUrlEditor;
+globalThis._sf6Btn = _sf6Btn;
+globalThis._sightExternalUrl = _sightExternalUrl;
+globalThis.addDest = addDest;
+globalThis.checkAndShowOverlaps = checkAndShowOverlaps;
+globalThis.checkTimeConflicts = checkTimeConflicts;
+globalThis.clearPendingAction = clearPendingAction;
+globalThis.fmtD = fmtD;
+globalThis.getDest = getDest;
+globalThis.getLeg = getLeg;
+globalThis.mkCancelField = mkCancelField;
+globalThis.mkCurrSel = mkCurrSel;
+globalThis.mkDateInp = mkDateInp;
+globalThis.mkField = mkField;
+globalThis.mkHotelRecord = mkHotelRecord;
+globalThis.mkTransportRecord = mkTransportRecord;
+globalThis.newActionId = newActionId;
+globalThis.newBkId = newBkId;
+globalThis.onFromChange = onFromChange;
+globalThis.openMailtoActions = openMailtoActions;
+globalThis.pendingCount = pendingCount;
+globalThis.saveDates = saveDates;
+globalThis.selectDest = selectDest;
+globalThis.toggleTransportForm = toggleTransportForm;
+globalThis.updateTrackerBadge = updateTrackerBadge;
+
 export {};

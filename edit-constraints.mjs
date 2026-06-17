@@ -3112,4 +3112,31 @@ function _rebuildGettingToFromFields(){
   _tb.gettingOut = goParts.join(", ");
 }
 
+
+/* #2 Stage 2 interim: expose this module's cross-module bindings as globals
+   for other-module/classic consumers. esbuild compiles each .mjs to an isolated
+   IIFE, so top-level decls are module-private unless re-exposed; the later
+   import-rewiring phase replaces these with real imports. */
+globalThis._ceCardExpanded = _ceCardExpanded;
+globalThis._ceEditMode = _ceEditMode;
+globalThis._ceLens = _ceLens;
+globalThis._ceMarkerById = _ceMarkerById;
+globalThis._ceMarkers = _ceMarkers;
+globalThis._cePolyline = _cePolyline;
+globalThis._ceRejectedExpanded = _ceRejectedExpanded;
+globalThis._ceSelectCandidateOnMap = _ceSelectCandidateOnMap;
+globalThis._ceSelectedCandId = _ceSelectedCandId;
+globalThis._rebuildGettingToFromFields = _rebuildGettingToFromFields;
+globalThis._redrawCePolyline = _redrawCePolyline;
+globalThis._tripDetailsExpanded = _tripDetailsExpanded;
+globalThis.applyCandidateChanges = applyCandidateChanges;
+globalThis.editConstraints = editConstraints;
+globalThis.geocodeMissingCandidates = geocodeMissingCandidates;
+globalThis.geocodeMissingCoords = geocodeMissingCoords;
+globalThis.renderTripBriefEdit = renderTripBriefEdit;
+globalThis.reopenCandidateExplorer = reopenCandidateExplorer;
+globalThis.reopenPickerForEdit = reopenPickerForEdit;
+globalThis.showCandidateDisclaimer = showCandidateDisclaimer;
+globalThis.showCandidateExplorer = showCandidateExplorer;
+
 export {};

@@ -2654,4 +2654,13 @@ function _backstopPastedListPlaces(stage) {
 }
 if (typeof globalThis !== "undefined") globalThis._backstopPastedListPlaces = _backstopPastedListPlaces;
 
+
+/* #2 Stage 2 interim: expose this module's cross-module bindings as globals
+   for other-module/classic consumers. esbuild compiles each .mjs to an isolated
+   IIFE, so top-level decls are module-private unless re-exposed; the later
+   import-rewiring phase replaces these with real imports. */
+globalThis.renderHomeDashboard = renderHomeDashboard;
+globalThis.renderHomeScreen = renderHomeScreen;
+globalThis.showHome = showHome;
+
 export {};

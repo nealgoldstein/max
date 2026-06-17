@@ -1103,4 +1103,15 @@ async function generateCityData(place,destId,_isAutoRetry){
   }
 }
 
+
+/* #2 Stage 2 interim: expose this module's cross-module bindings as globals
+   for other-module/classic consumers. esbuild compiles each .mjs to an isolated
+   IIFE, so top-level decls are module-private unless re-exposed; the later
+   import-rewiring phase replaces these with real imports. */
+globalThis._autoSeedIconicSightsToDays = _autoSeedIconicSightsToDays;
+globalThis.ensureSuggestions = ensureSuggestions;
+globalThis.fetchCityMeta = fetchCityMeta;
+globalThis.generateCityData = generateCityData;
+globalThis.showMapPinPanel = showMapPinPanel;
+
 export {};

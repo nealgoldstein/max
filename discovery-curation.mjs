@@ -670,4 +670,15 @@ async function buildFromCandidates(){
   return await MaxEnginePicker.publishTrip();
 }
 
+
+/* #2 Stage 2 interim: expose this module's cross-module bindings as globals
+   for other-module/classic consumers. esbuild compiles each .mjs to an isolated
+   IIFE, so top-level decls are module-private unless re-exposed; the later
+   import-rewiring phase replaces these with real imports. */
+globalThis._hydratePickerFromCommittedSrc = _hydratePickerFromCommittedSrc;
+globalThis._parseTripDuration = _parseTripDuration;
+globalThis._pdsTimer = _pdsTimer;
+globalThis._tbResequenceCandidates = _tbResequenceCandidates;
+globalThis.updateCEShortlist = updateCEShortlist;
+
 export {};

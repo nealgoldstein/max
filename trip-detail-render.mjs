@@ -2214,4 +2214,20 @@ function uDone(sid,destId){
   if(old&&day)old.parentNode.replaceChild(mkSight(s,day.id,destId),old);
 }
 
+
+/* #2 Stage 2 interim: expose this module's cross-module bindings as globals
+   for other-module/classic consumers. esbuild compiles each .mjs to an isolated
+   IIFE, so top-level decls are module-private unless re-exposed; the later
+   import-rewiring phase replaces these with real imports. */
+globalThis._hiddenStories = _hiddenStories;
+globalThis._wireItinDropTarget = _wireItinDropTarget;
+globalThis.buildHotelChip = buildHotelChip;
+globalThis.drawDestMode = drawDestMode;
+globalThis.fDayOf = fDayOf;
+globalThis.fS = fS;
+globalThis.mkCachedStoryBox = mkCachedStoryBox;
+globalThis.mkItinAddRow = mkItinAddRow;
+globalThis.refreshRestaurantSuggestions = refreshRestaurantSuggestions;
+globalThis.showAddToDay = showAddToDay;
+
 export {};

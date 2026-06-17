@@ -1328,4 +1328,38 @@ function doCreateTrip(){
   enterApp();
 }
 
+
+/* #2 Stage 2 interim: expose this module's cross-module bindings as globals
+   for other-module/classic consumers. esbuild compiles each .mjs to an isolated
+   IIFE, so top-level decls are module-private unless re-exposed; the later
+   import-rewiring phase replaces these with real imports. */
+globalThis._defaultAccommodation = _defaultAccommodation;
+globalThis._defaultAllergies = _defaultAllergies;
+globalThis._defaultAvoid = _defaultAvoid;
+globalThis._defaultAvoidOther = _defaultAvoidOther;
+globalThis._defaultDateFormat = _defaultDateFormat;
+globalThis._defaultDayTripHours = _defaultDayTripHours;
+globalThis._defaultDayTripRadiusKm = _defaultDayTripRadiusKm;
+globalThis._defaultDietary = _defaultDietary;
+globalThis._defaultDistanceUnits = _defaultDistanceUnits;
+globalThis._defaultEmergencyName = _defaultEmergencyName;
+globalThis._defaultEmergencyPhone = _defaultEmergencyPhone;
+globalThis._defaultHardLimits = _defaultHardLimits;
+globalThis._defaultHoursPerDay = _defaultHoursPerDay;
+globalThis._defaultLanguages = _defaultLanguages;
+globalThis._defaultLoyaltyPrograms = _defaultLoyaltyPrograms;
+globalThis._defaultMaxBigSightsPerDay = _defaultMaxBigSightsPerDay;
+globalThis._defaultMobility = _defaultMobility;
+globalThis._defaultPaceMode = _defaultPaceMode;
+globalThis._defaultTemperatureUnits = _defaultTemperatureUnits;
+globalThis._defaultTransport = _defaultTransport;
+globalThis._defaultTravelersCount = _defaultTravelersCount;
+globalThis._defaultWithKids = _defaultWithKids;
+globalThis._getPaceMode = _getPaceMode;
+globalThis._hasAvoidDefaults = _hasAvoidDefaults;
+globalThis._paceDirective = _paceDirective;
+globalThis._paceSightCount = _paceSightCount;
+globalThis._shiftDate = _shiftDate;
+globalThis.findAttachedEvents = findAttachedEvents;
+
 export {};
