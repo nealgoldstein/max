@@ -190,3 +190,39 @@ track — high effort, internal-only payoff — to undertake only if the bridgin
 complexity keeps causing bugs. Each phase ships behind a shadow check and a
 mutation-verified guard, the same way the decision model (#3) and the ESM
 migration (#2) were landed.
+
+---
+
+## 6. Phase D — the storage flip (design)
+
+Checkpoint tag `place-d-readers-done` marks the safe rollback point (registry +
+access layer proven, all clean readers routed). The flip proceeds from there.
+
+**Key de-risking decision: keep the arrays as the PERSISTENCE format.** The
+registry does NOT need its own serialization or a schema migration. On load it is
+rebuilt from the trip's arrays (as it is today). "Authority" is therefore an
+in-memory + write-discipline property, not a storage-format change — which removes
+the single biggest risk (persistence/migration) from the flip entirely.
+
+So the flip reduces to: **one write door + projections everywhere.**
+
+1. **Prove the write-door invariant** (DONE): every `TripStore` destination write
+   (setDestinations/addDestination/removeDestination) leaves
+   `registryShadowCheck`/`destinationsProjectionCheck` green — gated in
+   tripstore-tests. This is the contract the flip stands on.
+2. **Funnel scattered writers through the door.** The mutators that currently
+   splice/assign `trip.destinations` inline (trip-affordance, logistics,
+   itinerary-ordering) call `TripStore` mutators instead. Each is browser-verified
+   (Playwright); the invariant test above fails loudly if any path desyncs.
+3. **Flip reads to projections** (mostly DONE for destinations) — readers use
+   `MaxPlaces.destinationsOf`, never the raw array.
+4. **Repeat for the HIGH-VALUE arrays — placeActivities & candidates.** This is
+   where the drift bug class actually lives (PD.303 bridge, keep/role smear,
+   candidates↔placeActivities). Same arc: projection + shadow → route readers →
+   funnel writers. The payoff concentrates here, not in destinations.
+5. **Collapse.** Once every read is a projection and every write goes through the
+   door, the six representations are observably one; `_tb.candidates`/the mirror
+   bridges and the ad-hoc reconciliation passes delete.
+
+Net: no persistence change, no big-bang. Each step is additively shadowed,
+invariant-gated, and reversible to the checkpoint tag.

@@ -15,6 +15,7 @@
 
 import assert from "node:assert";
 import { mock } from "node:test";
+import MaxPlaces from "../place-registry.mjs"; // #Place D flip: registry-faithfulness invariant
 
 // ── Test harness ──────────────────────────────────────────────────────
 var pass = 0, fail = 0;
@@ -1147,6 +1148,32 @@ test("schema migration runs on load (legacy envelope without id is healed)", fun
 });
 
 // ── Result ────────────────────────────────────────────────────────────
+
+// ── #Place Phase D flip: every TripStore write leaves the registry FAITHFUL ──
+// The storage flip makes the registry authoritative; its precondition is that
+// the existing write door (setDestinations/addDestination/removeDestination)
+// never desyncs the registry from trip.destinations. Prove the invariant holds
+// across the write surface — so when authority flips, the data already agrees.
+test("registry stays faithful across TripStore destination writes", function () {
+  reset();
+  TripStore.mint({ region: "Iceland" });
+  TripStore.setDestinations([
+    { id: "d1", place: "Reykjavik", lat: 64.1, lng: -21.9, nights: 2 },
+    { id: "d2", place: "Vik", lat: 63.4, lng: -19.0, nights: 1 }
+  ]);
+  assert.ok(MaxPlaces.registryShadowCheck(TripStore.trip).ok, "registry desync after setDestinations");
+  assert.ok(MaxPlaces.destinationsProjectionCheck(TripStore.trip).ok, "projection desync after setDestinations");
+  assert.strictEqual(MaxPlaces.destinationsOf(TripStore.trip).length, 2);
+
+  TripStore.addDestination({ id: "d3", place: "Hofn", lat: 64.25, lng: -15.2, nights: 1 });
+  assert.ok(MaxPlaces.registryShadowCheck(TripStore.trip).ok, "registry desync after addDestination");
+  assert.strictEqual(MaxPlaces.destinationsOf(TripStore.trip).length, 3);
+
+  TripStore.removeDestination("d2");
+  assert.ok(MaxPlaces.registryShadowCheck(TripStore.trip).ok, "registry desync after removeDestination");
+  assert.ok(MaxPlaces.destinationsProjectionCheck(TripStore.trip).ok, "projection desync after removeDestination");
+  assert.ok(!MaxPlaces.destinationsOf(TripStore.trip).some(function (d) { return d.id === "d2"; }), "removed dest still present");
+});
 
 console.log("\n──────────────────────────────────────────────────");
 console.log("PASS: " + pass + "    FAIL: " + fail);
