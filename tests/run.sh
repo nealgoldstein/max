@@ -30,6 +30,7 @@ node tests/discovery-ssot-tests.js
 node tests/place-repo-tests.js
 node tests/place-set-tests.js
 node tests/golden-build-tests.js
+node tests/listed-presence-tests.js
 node tests/candidates-snapshot-tests.js
 node tests/decision-model-tests.mjs
 node tests/gen-prompt-tests.js
