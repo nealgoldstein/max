@@ -53,24 +53,31 @@ if (missing.length) {
   process.exit(1);
 }
 
-// `;\n` between files guards against ASI hazards (a file ending without a
-// semicolon followed by one starting with `(`).
-// .mjs modules are real ESM — compile each to an IIFE via esbuild (it still runs
-// its globalThis exposure, so classic consumers reading the global are unaffected).
-// Classic .js modules concatenate raw (behavior-identical to the tags). As more
-// modules convert to ESM, more of the bundle becomes esbuild-compiled, leaf by leaf.
-var bundle = order.map(function (f) {
-  var header = "/* ===== " + f + " ===== */\n";
-  if (/\.mjs$/.test(f)) {
-    var r = esbuild.buildSync({
-      entryPoints: [path.join(ROOT, f)],
-      bundle: true, format: "iife", platform: "browser",
-      write: false, logLevel: "silent"
-    });
-    return header + r.outputFiles[0].text;
-  }
-  return header + fs.readFileSync(path.join(ROOT, f), "utf8");
-}).join("\n;\n");
+// #2 Stage 3 — SINGLE-ENTRY graph bundle. We synthesize one entry module that
+// side-effect-imports every local module in index.html order, and let esbuild
+// bundle the whole import graph in ONE pass (each module included exactly once,
+// in dependency order — which for today's side-effect-only imports is just the
+// entry order). This is the foundation the import-rewiring phase needs: as a
+// module switches a `globalThis.X` cross-ref to a real `import`, esbuild dedupes
+// it in this same graph (the OLD per-entry approach would have inlined and
+// DOUBLE-EXECUTED a shared dependency once real imports existed).
+//
+// Two deliberate choices for THIS step (behavior must equal the per-entry concat):
+//   * treeShaking:false — keep every top-level statement. Modules still publish
+//     their API via globalThis (auto-expose.js); dead-code elimination only
+//     becomes safe once cross-refs are real imports, so it's off until then.
+//   * No minify, keepNames — preserve identifiers so `globalThis.X = X` exposes
+//     the right global name. esbuild auto-renames the cross-module private-helper
+//     COLLISIONS (api/_norm/on/…) to keep them isolated — strictly better than
+//     the per-entry IIFEs, and those names are never exposed anyway.
+var entryContents = order.map(function (f) { return 'import "./' + f + '";'; }).join("\n") + "\n";
+var built = esbuild.buildSync({
+  stdin: { contents: entryContents, resolveDir: ROOT, sourcefile: "app.entry.mjs", loader: "js" },
+  bundle: true, format: "iife", platform: "browser",
+  treeShaking: false, keepNames: true,
+  write: false, logLevel: "silent"
+});
+var bundle = built.outputFiles[0].text;
 
 var outDir = path.join(ROOT, "dist");
 if (!fs.existsSync(outDir)) fs.mkdirSync(outDir);
