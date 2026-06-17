@@ -33,6 +33,7 @@ node tests/golden-build-tests.js
 node tests/listed-presence-tests.js
 node tests/candidates-snapshot-tests.js
 node tests/decision-model-tests.mjs
+node tests/containment-tests.mjs
 node tests/gen-prompt-tests.js
 node tests/gen-postprocess-tests.js
 node tests/engine-tests.js

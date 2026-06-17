@@ -209,6 +209,43 @@
     return { ok: mism.length === 0, mismatches: mism };
   }
 
+  // ── #Place model, Phase B — the `explored-from` edge (OBJECT-MODEL.md G4) ──
+  // The SUBJECTIVE itinerary relation as an explicit edge derived from a place
+  // RECORD's signals (role + _dayTripHub/_waysideFromHub + keep/reject). This is
+  // the same mapping geography-model._geographyOf already computes, restated in the
+  // unified Place vocabulary — so it can be proven faithful, then become the source
+  // of truth and the loose string fields retired. PURE; mirrors _geographyOf's
+  // precedence exactly (rejected→none; role; flag-fallback; kept→base).
+  function exploredFromOf(place) {
+    if (!place || typeof place === "string") return { kind: "unassigned" };
+    var role = place.role;
+    var hub = place._dayTripHub || place.dayTripHub || "";
+    var way = place._waysideFromHub || place.waysideFromHub || "";
+    var kept = (place._keep === true) || (place.status === "keep");
+    var rejected = (place._rejected === true) || (place.status === "reject");
+    if (rejected) return { kind: "unassigned" };
+    if (place._keep === false && !role) return { kind: "unassigned" }; // maybe
+    if (role === "stay")    return { kind: "base" };
+    if (role === "daytrip") return { kind: "daytrip", hub: hub || "" };
+    if (role === "onway")   return { kind: "onway", hub: way || "" };
+    if (role === "see")     return { kind: "trip" };
+    if (role === "maybe")   return { kind: "unassigned" };
+    if (hub)  return { kind: "daytrip", hub: hub };   // flag-based fallback
+    if (way)  return { kind: "onway", hub: way };
+    if (kept) return { kind: "base" };
+    return { kind: "unassigned" };
+  }
+  // Coarsen an explored-from edge to the legacy geography-model vocabulary, so the
+  // shadow check can assert the new edge never contradicts the existing derivation.
+  // base→destination, daytrip→in-destination, onway/trip→trip, unassigned→none.
+  function coarsenExploredFrom(edge) {
+    var k = edge && edge.kind;
+    if (k === "base") return "destination";
+    if (k === "daytrip") return "in-destination";
+    if (k === "onway" || k === "trip") return "trip";
+    return "none";
+  }
+
   var MaxDecisions = {
     Decision: Decision,
     Decisions: Decisions,
@@ -220,7 +257,9 @@
     project: project,
     axesOf: axesOf,
     legacyRoleOf: legacyRoleOf,
-    axesRoundTripCheck: axesRoundTripCheck
+    axesRoundTripCheck: axesRoundTripCheck,
+    exploredFromOf: exploredFromOf,
+    coarsenExploredFrom: coarsenExploredFrom
   };
 
   if (_G && !_G.MaxDecisions) _G.MaxDecisions = MaxDecisions;
@@ -243,6 +282,8 @@ export default MaxDecisions;
   __expg._origin = _origin;
   __expg.axesOf = axesOf;
   __expg.axesRoundTripCheck = axesRoundTripCheck;
+  __expg.coarsenExploredFrom = coarsenExploredFrom;
+  __expg.exploredFromOf = exploredFromOf;
   __expg.factsOf = factsOf;
   __expg.fromJSON = fromJSON;
   __expg.keepOf = keepOf;
