@@ -1,4 +1,5 @@
 // @ts-check
+import { DiscoveryModel } from "./discovery-model.mjs";
 import SectionKind from "./section-kind.mjs";
 import PlaceKey from "./place-key.mjs";
 // max-data.js — schema accessor layer.

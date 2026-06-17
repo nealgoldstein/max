@@ -1,4 +1,5 @@
 // @ts-check
+import { MaxBuild } from "./engine-build.mjs";
 // max-merge.js — preserves user state when destinations are regenerated.
 //
 // PD.319-4. The Rebuild flow (saveActivityPickerEdits → MaxBuild

@@ -1,4 +1,6 @@
 // @ts-check
+import { MaxRoute } from "./engine-routing.mjs";
+import { MaxEnrich } from "./engine-enrich.mjs";
 import MaxMigration from "./migration.mjs";
 import { _escHtml } from "./util-esc.mjs";
 // trip-detail-render.js — Explore pane, Sights section, Day-trips

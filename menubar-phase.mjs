@@ -1,4 +1,5 @@
 // @ts-check
+import { MaxRoute } from "./engine-routing.mjs";
 // menubar-phase.js — extracted verbatim from index.html (PD.483 bloat reduction).
 // Mac-style menu bar (File/Edit/Settings) + phase-status chips.
 // Pure function-cluster: declarations + globalThis-guarded exposures, no

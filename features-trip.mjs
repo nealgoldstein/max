@@ -1,4 +1,5 @@
 // @ts-check
+import { MaxGeo } from "./engine-geo.mjs";
 // features-trip.js — Tracker, trip-name editing, spend tracking,
 // general bookings, misc data, and on-demand routing fetch. Extracted
 // verbatim from index.html (PD.451, bloat reduction). Declaration-only

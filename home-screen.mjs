@@ -1,4 +1,9 @@
 // @ts-check
+import { MaxRoute } from "./engine-routing.mjs";
+import { MaxGeo } from "./engine-geo.mjs";
+import { MaxEnrich } from "./engine-enrich.mjs";
+import { MaxBuild } from "./engine-build.mjs";
+import { MaxEngineClassify } from "./engine-classify.mjs";
 import TripStore from "./tripstore.mjs";
 import MaxDB from "./db.mjs";
 // home-screen.js — Home screen + pasted-list import pipeline (parsePlacesList,

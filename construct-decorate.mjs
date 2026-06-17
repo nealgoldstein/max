@@ -1,4 +1,7 @@
 // @ts-check
+import { MaxGenPrompt } from "./gen-prompt.mjs";
+import { MaxEnrich } from "./engine-enrich.mjs";
+import { DiscoveryModel } from "./discovery-model.mjs";
 import MaxData from "./max-data.mjs";
 import PlaceKey from "./place-key.mjs";
 import { _escHtml } from "./util-esc.mjs";

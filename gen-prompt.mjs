@@ -206,6 +206,8 @@ const global = /** @type {any} */ (globalThis);
 
 export default api;
 
+export const MaxGenPrompt = /** @type {any} */ (globalThis).MaxGenPrompt;
+
 /* #2 Stage 2 interim (auto-expose.js): re-publish this module's non-colliding top-level
    declarations as globals. esbuild isolates each .mjs to an IIFE, so other
    modules' and app-main.js's bare-global / window.X reads would otherwise

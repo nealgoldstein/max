@@ -1,4 +1,5 @@
 // @ts-check
+import { MaxGeo } from "./engine-geo.mjs";
 import TripStore from "./tripstore.mjs";
 import MaxDB from "./db.mjs";
 import MaxMigration from "./migration.mjs";

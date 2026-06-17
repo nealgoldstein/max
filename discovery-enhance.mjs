@@ -1,4 +1,5 @@
 // @ts-check
+import { DiscoveryModel } from "./discovery-model.mjs";
 // discovery-enhance.js — SSOT Phase 4: the EnhancementService + SuggestionSource.
 //
 // THE EXTENSION POINT for "enhanceability". A SuggestionSource finds candidate

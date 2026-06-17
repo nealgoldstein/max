@@ -1,4 +1,5 @@
 // @ts-check
+import { MaxRoute } from "./engine-routing.mjs";
 import MaxDB from "./db.mjs";
 // paste-browse-modal.js — extracted verbatim from index.html (PD.483 bloat reduction).
 // Paste-list brief modal + browse-chat + home selection.

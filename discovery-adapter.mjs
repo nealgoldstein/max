@@ -1,4 +1,5 @@
 // @ts-check
+import { DiscoveryModel } from "./discovery-model.mjs";
 import MaxData from "./max-data.mjs";
 import TripStore from "./tripstore.mjs";
 import SectionKind from "./section-kind.mjs";

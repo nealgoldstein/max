@@ -1,4 +1,8 @@
 // @ts-check
+import { MaxRoute } from "./engine-routing.mjs";
+import { MaxGeo } from "./engine-geo.mjs";
+import { MaxEnrich } from "./engine-enrich.mjs";
+import { MaxBuild } from "./engine-build.mjs";
 import MaxDB from "./db.mjs";
 // edit-constraints.js — re-open Step 1 (brief) from within planning. Extracted from
 // index.html (PD.460).

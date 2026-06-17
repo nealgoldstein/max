@@ -391,3 +391,29 @@ unless there's a concrete reason.
   exposures must be `typeof`-guarded (a cross-script exposure runs before its function's script
   loads — PD.483b).
 - Sensitive: the Turso auth token was shared in an earlier session — treat as secret, never print it.
+
+## #2 Stage 3 — DEFERRED: engine-core + browser-UI facade import-rewiring
+
+Status: deferred (high risk, zero bundle payoff — these core modules load on every
+boot so tree-shaking can't drop them). The leaves, the MaxDB/MaxData/TripStore
+seams, and the Node-safe acyclic facades (MaxRoute, MaxGeo, MaxGenPrompt, MaxEnrich,
+MaxBuild, MaxEngineClassify, DiscoveryModel) ARE rewired to real imports. What's
+left needs per-edge surgery because of three compounding hazards:
+
+  1. CIRCULAR IMPORTS — engine-trip <-> engine-picker <-> engine-build <-> ... call
+     each other. Converting their globals to imports creates ESM cycles. Fix:
+     extract shared helpers into leaf modules to break the cycles, then convert the
+     facades to LIVE-BINDING exports (`export { X }`, not `export const X =
+     globalThis.X` which snapshots to undefined mid-cycle).
+  2. NODE-UNSAFE TOP-LEVEL SIDE-EFFECTS — sync.mjs / picker-ui.mjs / trip-ui.mjs run
+     DOM/window code at module load (e.g. sync _wirePrefsBridge). Importing them
+     into a Node-tested module crashes the test (window undefined). Fix: guard those
+     top-level side-effects behind a typeof-window check, OR mock.module them in the
+     affected tests.
+  3. TEST MOCK SEAMS — `trip` (47 consumers, mutable shared state), `_tb` (28),
+     MaxDiscovery (mocked in 3 tests), and engine-build's global.TripStore (test
+     mutates it per-test). Each needs its mocking tests converted to mock.module.
+
+Then app-main.js converts last (turn its ~305 bare-global reads into imports), drop
+the now-unused globalThis exposures, delete tools/auto-expose.js, and enable
+esbuild treeShaking in build.js. ~100 symbols / ~350 edges remain.

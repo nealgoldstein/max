@@ -1,4 +1,5 @@
 // @ts-check
+import { MaxRoute } from "./engine-routing.mjs";
 import TripStore from "./tripstore.mjs";
 import MaxDB from "./db.mjs";
 import { MaxDecisions } from "./decision-model.mjs";

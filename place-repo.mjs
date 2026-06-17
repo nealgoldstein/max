@@ -1,4 +1,5 @@
 // @ts-check
+import { DiscoveryModel } from "./discovery-model.mjs";
 import PlaceKey from "./place-key.mjs";
 // place-repo.js — PD.401M: the place repository.
 //

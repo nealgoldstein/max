@@ -1,4 +1,5 @@
 // @ts-check
+import { MaxBuild } from "./engine-build.mjs";
 import MaxDB from "./db.mjs";
 // who-avoidances.js — Who's-traveling (party) + Avoidances editors. Extracted from
 // index.html (PD.459).
