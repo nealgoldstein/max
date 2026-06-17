@@ -118,6 +118,60 @@ test("empty / missing trip → empty sights, shadow ok", function () {
   assert.ok(MaxPlaces.sightsProjectionCheck({}).ok);
 });
 
+// ── Phase D ROOT-CAUSE: keep as a PROJECTION (keepFor) + redundancy shadow ──
+console.log("\n#Place Phase D root-cause — keep projection (keepFor / keepShadowCheck)");
+
+var U = function (rp) { return "user"; };   // origin resolvers for the pure tests
+var M = function (rp) { return "max"; };
+var notStay = function () { return false; };
+
+test("user-listed place with NO candidate → keep defaults ON (origin rule)", function () {
+  var t = { candidates: [], placeActivities: [] };
+  assert.strictEqual(MaxPlaces.keepFor(t, { place: "Vatnajökull" }, { origin: "user" }), true);
+});
+test("max-suggested place with NO candidate → keep defaults OFF", function () {
+  var t = { candidates: [], placeActivities: [] };
+  assert.strictEqual(MaxPlaces.keepFor(t, { place: "RandomPOI" }, { origin: "max" }), false);
+});
+test("an explicit kept candidate forces keep ON regardless of origin", function () {
+  var t = { candidates: [{ place: "Geysir", role: "see", status: "keep" }] };
+  assert.strictEqual(MaxPlaces.keepFor(t, { place: "Geysir" }, { origin: "max" }), true);
+});
+test("an explicit rejected candidate forces keep OFF even for a user place", function () {
+  var t = { candidates: [{ place: "Mall", role: "reject", status: "reject" }] };
+  assert.strictEqual(MaxPlaces.keepFor(t, { place: "Mall" }, { origin: "user" }), false);
+});
+test("an undecided (maybe) candidate falls back to the origin default", function () {
+  var t = { candidates: [{ place: "Foss", role: "maybe", status: null }] };
+  assert.strictEqual(MaxPlaces.keepFor(t, { place: "Foss" }, { origin: "user" }), true);
+  assert.strictEqual(MaxPlaces.keepFor(t, { place: "Foss" }, { origin: "max" }), false);
+});
+test("SHADOW: stored _keep already EQUALS the projection → flag is redundant", function () {
+  var t = {
+    candidates: [{ place: "Geysir", role: "see", status: "keep" }],
+    placeActivities: [{ type: "activity", requiredPlaces: [
+      { place: "Geysir", _keep: true, _origin: "max" },     // matches kept candidate
+      { place: "MyTown", _keep: true, _origin: "user" }      // user default ON, no candidate
+    ] }]
+  };
+  var r = MaxPlaces.keepShadowCheck(t, { isStay: notStay, origin: function (p) { return p._origin; } });
+  assert.ok(r.ok, "unexpected diffs: " + JSON.stringify(r.diffs));
+  assert.strictEqual(r.checked, 2);
+});
+test("SHADOW: catches a stored _keep that DRIFTED from the projection", function () {
+  var t = {
+    candidates: [{ place: "Geysir", role: "reject", status: "reject" }], // decision says OFF
+    placeActivities: [{ type: "activity", requiredPlaces: [
+      { place: "Geysir", _keep: true, _origin: "max" }        // stored ON → drift
+    ] }]
+  };
+  var r = MaxPlaces.keepShadowCheck(t, { isStay: notStay, origin: function (p) { return p._origin; } });
+  assert.ok(!r.ok);
+  assert.strictEqual(r.diffs[0].place, "Geysir");
+  assert.strictEqual(r.diffs[0].stored, true);
+  assert.strictEqual(r.diffs[0].derived, false);
+});
+
 // ── high-value arc: candidate ↔ requiredPlace MIRROR drift detector ────────
 // The check derives EXPECTED requiredPlace flags from each decided candidate
 // and reports where the live flags disagree. Green on a consistent trip; it

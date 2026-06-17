@@ -171,6 +171,65 @@ function sightsProjectionCheck(trip) {
   return { ok: missing.length === 0 && invented.length === 0, missing: missing, invented: invented };
 }
 
+// ── Phase D ROOT-CAUSE arc — keep/role as a PROJECTION, not a cached flag ──
+// The disease behind every mirror bug: each requiredPlace STORES its own _keep
+// (read in ~49 places) and MaxRoleWriter keeps it in sync with the flat
+// decision. Stored-and-mirrored state can drift. The cure is structural: derive
+// keep/role from the ONE decision (the candidate snapshot) through the canonical
+// keepOf/roleOf rules, make the stored flags a pure projection, then DELETE the
+// mirror — after which divergence is impossible by construction, not merely
+// detected.
+//
+// keepFor/roleFor are the place-keyed projection over keepOf/roleOf.
+// keepShadowCheck proves the stored flag already EQUALS the projection (so it is
+// redundant and safe to retire). PURE core; the shadow resolves section-kind and
+// origin via the live app predicates (window._isStaySection / _placeOrigin),
+// with Node fallbacks + test overrides.
+function _decisionFromCandidate(trip, key) {
+  var cands = (trip && trip.candidates) || [];
+  for (var i = 0; i < cands.length; i++) {
+    var c = cands[i];
+    if (!c || _regKey(c.place) !== key) continue;
+    var rejected = (c.role === "reject" || c.status === "reject");
+    var kept = rejected ? false
+             : (c.role && c.role !== "maybe") ? true
+             : (c.status === "keep") ? true
+             : null;                                   // undecided -> origin default
+    var role = (c.role && c.role !== "maybe" && c.role !== "reject") ? c.role : null;
+    return { kept: kept, rejected: rejected, role: role, hub: c.dayTripHub || c.waysideFromHub || null };
+  }
+  return null;
+}
+function keepFor(trip, rp, ctx) {
+  ctx = ctx || {};
+  var facts = MaxDecisions.factsOf({ isStay: !!ctx.isStay, origin: ctx.origin || (rp && rp._origin) });
+  return MaxDecisions.keepOf(facts, _decisionFromCandidate(trip, _regKey(rp && (rp.place || rp.name))));
+}
+function roleFor(trip, rp, ctx) {
+  ctx = ctx || {};
+  var facts = MaxDecisions.factsOf({ isStay: !!ctx.isStay, origin: ctx.origin || (rp && rp._origin) });
+  if (rp && rp.role && !facts.role) facts.role = rp.role;   // a stored suggested role rides along
+  return MaxDecisions.roleOf(facts, _decisionFromCandidate(trip, _regKey(rp && (rp.place || rp.name))));
+}
+function keepShadowCheck(trip, opts) {
+  opts = opts || {};
+  var isStayFn = opts.isStay || ((typeof globalThis !== "undefined" && typeof globalThis._isStaySection === "function") ? globalThis._isStaySection : function () { return false; });
+  var originFn = opts.origin || ((typeof globalThis !== "undefined" && typeof globalThis._placeOrigin === "function") ? globalThis._placeOrigin : function (p) { return (p && p._origin) || undefined; });
+  var diffs = [], checked = 0;
+  ((trip && trip.placeActivities) || []).forEach(function (it) {
+    if (!it || it.type === "route") return;
+    var isStay = false; try { isStay = !!isStayFn(it); } catch (_) {}
+    (it.requiredPlaces || []).forEach(function (p) {
+      if (!p) return;
+      checked++;
+      var stored = (p._keep === true);
+      var derived = keepFor(trip, p, { isStay: isStay, origin: originFn(p) });
+      if (stored !== derived) diffs.push({ place: p.place || p.name, stored: stored, derived: derived });
+    });
+  });
+  return { ok: diffs.length === 0, checked: checked, diffs: diffs };
+}
+
 // ── #Place high-value arc — candidate ↔ requiredPlace MIRROR drift ────────
 // trip.candidates (the discovery working set's persisted snapshot) and the
 // placeActivities[*].requiredPlaces flags are TWO representations of the SAME
@@ -287,6 +346,9 @@ var MaxPlaces = {
   destinationsProjectionCheck: destinationsProjectionCheck,
   sightsOf: sightsOf,
   sightsProjectionCheck: sightsProjectionCheck,
+  keepFor: keepFor,
+  roleFor: roleFor,
+  keepShadowCheck: keepShadowCheck,
   candidateMirrorCheck: candidateMirrorCheck,
   candidateMirrorScan: candidateMirrorScan
 };
@@ -305,6 +367,7 @@ export default MaxPlaces;
   __expg._cmDecided = _cmDecided;
   __expg._cmKept = _cmKept;
   __expg._cmRejected = _cmRejected;
+  __expg._decisionFromCandidate = _decisionFromCandidate;
   __expg._pointGeo = _pointGeo;
   __expg._regKey = _regKey;
   __expg.buildRegistry = buildRegistry;
@@ -312,7 +375,10 @@ export default MaxPlaces;
   __expg.candidateMirrorScan = candidateMirrorScan;
   __expg.destinationsOf = destinationsOf;
   __expg.destinationsProjectionCheck = destinationsProjectionCheck;
+  __expg.keepFor = keepFor;
+  __expg.keepShadowCheck = keepShadowCheck;
   __expg.registryShadowCheck = registryShadowCheck;
+  __expg.roleFor = roleFor;
   __expg.sightsOf = sightsOf;
   __expg.sightsProjectionCheck = sightsProjectionCheck;
 }

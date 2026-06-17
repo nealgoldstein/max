@@ -97,6 +97,9 @@ test('OBSERVER: candidate↔requiredPlace mirror drift after a live role change'
     } catch (e) { /* observation only */ }
     const r = MP.candidateMirrorCheck(trip);
     const scan = (typeof MP.candidateMirrorScan === 'function') ? MP.candidateMirrorScan(trip) : { ok: true, suspects: [] };
+    // ROOT-CAUSE shadow: is the stored _keep flag already redundant with the
+    // keepFor projection? (Uses the live _isStaySection / _placeOrigin globals.)
+    const keepShadow = (typeof MP.keepShadowCheck === 'function') ? MP.keepShadowCheck(trip) : { ok: true, checked: 0, diffs: [] };
     // Inventory: so checked=0 is never ambiguous — we can SEE whether the
     // suffixed requiredPlace exists and what key it resolved to.
     const PK = window.PlaceKey;
@@ -111,7 +114,8 @@ test('OBSERVER: candidate↔requiredPlace mirror drift after a live role change'
     });
     const candInv = (trip.candidates || []).map((c) => ({ place: c.place, role: c.role, status: c.status, key: PK ? PK.resolve(c.place) : null }));
     return { drove, ok: r.ok, checked: r.checked, mismatches: r.mismatches,
-             scanOk: scan.ok, suspects: scan.suspects, candInv, rpInv };
+             scanOk: scan.ok, suspects: scan.suspects, candInv, rpInv,
+             keepOk: keepShadow.ok, keepChecked: keepShadow.checked, keepDiffs: keepShadow.diffs };
   });
 
   expect(obs.err || '').toBe('');
@@ -121,6 +125,7 @@ test('OBSERVER: candidate↔requiredPlace mirror drift after a live role change'
               ' scanDrift=' + (obs.scanOk ? 'none' : JSON.stringify(obs.suspects)));
   console.log('[mirror-observer] candidates=' + JSON.stringify(obs.candInv));
   console.log('[mirror-observer] requiredPlaces=' + JSON.stringify(obs.rpInv));
+  console.log('[keep-shadow] checked=' + obs.keepChecked + ' storedEqualsDerived=' + (obs.keepOk ? 'yes' : 'NO ' + JSON.stringify(obs.keepDiffs)));
   test.info().annotations.push({ type: 'mirror-drift', description: JSON.stringify(obs) });
   expect(typeof obs.checked).toBe('number'); // assert only that the check RAN
 });
