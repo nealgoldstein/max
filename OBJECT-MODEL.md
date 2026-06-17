@@ -11,8 +11,9 @@ this, never away from it.
 **At its core, everything is a Place.** A Place is a geographic area — as precise
 as a lat/lng point or polygon, or as broad as a city, region, country, or park.
 
-There are **three orthogonal axes**. They are independent: one Place can carry any
-combination.
+There are **three orthogonal axes** — though the third (Containment) is really
+**two distinct relations**, so the implementation has **four** independent
+concerns. They are independent: one Place can carry any combination.
 
 ### Axis 1 — Geography ("where is it?")
 - `point` — a single lat/lng
@@ -25,14 +26,37 @@ combination.
 - `sight` — a place you **visit** (viewpoint, museum, trail, restaurant, …)
 
 ### Axis 3 — Containment ("what is inside what?")
-- A general **Place-contains-Place** graph. Examples:
+Containment is a general **Place-contains-Place** graph — and it is **two distinct
+relations** that must not be merged (merging them recreates exactly the kind of
+axis-conflation this model exists to kill):
+
+- **`geo-within` — geographic nesting (objective, derivable).** Pure geography: one
+  place's extent lies inside another's.
   - Switzerland ⊃ Zermatt ⊃ Gornergrat railway
-  - Yellowstone (a *sight*, a *region*) ⊃ lodges (*destinations*)
-  - A Trip ⊃ destinations and sights
-- Containment is **general and bidirectional in kind**: a destination may contain
-  sights, **and a sight may contain destinations** (a national park sight contains
-  lodge destinations). The same park is simultaneously a *region* (geography), a
-  *sight* (role), and a *container* (containment).
+  - Yellowstone (a *region*) ⊃ a lodge inside its boundary
+  - Derivable from coordinates/polygons once Geography (Axis 1) is richer; it is a
+    *fact*, not a choice.
+
+- **`explored-from` — itinerary association (subjective, a decision).** "This sight
+  is experienced while based at this destination (day-trip), or while traveling a
+  leg (wayside), or belongs to the trip at large." The guide says this *depends on
+  how travelers typically experience it* — so it is a **decision**, and lives with
+  the decision log, not with facts.
+
+These can disagree, and that's correct: a lodge is `geo-within` Yellowstone, but a
+sight inside Yellowstone may be `explored-from` that lodge — so as ONE relation you
+get a cycle; as two relations there is no contradiction. The general case holds:
+a destination may contain sights, **and a sight may contain destinations** (a
+national-park *sight*/*region* contains lodge *destinations*). The same park is
+simultaneously a region (geography), a sight (role), a `geo-within` container, and
+an `explored-from` anchor.
+
+### Modeling discipline — keep Place lean
+"Everything is a Place" must NOT become a god-object with 40 optional fields. The
+type is a **small core** — `{ id, identity, geo, role }` — plus **composable
+sub-structures** for role-specific and containment data (e.g. a `stay` block only
+on destinations; `geoWithin`/`exploredFrom` edges as separate relations). One
+honest small type beats six shapes; one dishonest mega-type is worse than six.
 
 ### Derived consequences
 - **Trip is a Place** (role=`trip`). Its geographic boundary is **not** a fixed
@@ -94,8 +118,8 @@ What's already aligned (assets to build on):
 | G1 | **No unified Place type** | 6 representations bridged by identity | one Place; destinations/sights/candidates are *projections by role* |
 | G2 | **Trip is not a Place** | top-level container object | root Place, role=`trip`, geography derived |
 | G3 | **Geography is point-only** | lat/lng points | point \| polygon \| region; extent derivable |
-| G4 | **Containment is implicit + one-directional** | `_dayTripHub`/`_waysideFromHub` strings; sights are leaves | general Place⊃Place graph; sight may contain destinations |
-| G5 | **Role conflates axes** | `role ∈ {stay,see,daytrip,onway,maybe,reject}` mixes role + containment + decision | role ∈ {trip,destination,sight}; hub/leg are *containment*; keep/reject are *decision* |
+| G4 | **Containment is implicit, one-directional, and single-relation** | `_dayTripHub`/`_waysideFromHub` strings; sights are leaves; geo-nesting and itinerary-association are blurred | **two** relations: `geo-within` (objective) + `explored-from` (a decision); general graph; sight may contain destinations |
+| G5 | **Role conflates four concerns into one string** | `role ∈ {stay,see,daytrip,onway,maybe,reject}` mixes role + geo-containment + itinerary-association + decision | role ∈ {trip,destination,sight}; hub/leg → `explored-from`; coords → `geo-within`; keep/reject → *decision* |
 
 ---
 
@@ -108,22 +132,28 @@ phase is gated by `tests/run.sh` + Playwright + a mutation-verified guard. Order
 by **value first**, since the full type-unification (G1) is the highest-cost,
 lowest-user-visible-payoff item.
 
-### Phase A — Formalize + orthogonalize Role (G5)  *(low risk, high clarity)*
-- Define the target `Place` shape in `types/max-model.d.ts` (spec only, no runtime).
-- Split the overloaded `role`: `role ∈ {trip, destination, sight}` becomes the only
-  role axis; move `daytrip`/`onway` semantics into **containment** (hub/leg) and
-  keep/reject into **decision** — both already exist on `Decision`. Add a shadow
-  check (`_placeAxesShadowCheck`) asserting the derived (role, containment,
-  decision) triple reproduces today's `role` string for every place.
+### Phase A — Formalize + orthogonalize the axes (G5)  *(low risk, high clarity)*
+- Define the lean target `Place` shape in `types/max-model.d.ts` (spec only, no
+  runtime): small core + composable blocks (see "Modeling discipline").
+- Decompose the overloaded `role` into its four real concerns:
+  `role ∈ {trip,destination,sight}`; `daytrip`/`onway` → the **`explored-from`**
+  relation (hub/leg, already on `Decision`); coords → **`geo-within`** (Phase C);
+  keep/reject → **decision** (already on `Decision`). Add a pure, reversible
+  `axesOf(legacyRole, decision)` ⇄ `legacyRoleOf(axes)` in `decision-model`.
+- **Shadow check** (`_placeAxesShadowCheck`, Node-tested + browser-runnable):
+  for every place, `axesOf` then `legacyRoleOf` reconstructs today's `role` string
+  exactly — proving the four-way split loses no information before any cutover.
 
-### Phase B — Containment as a first-class edge (G4)  *(high value)*
-- Introduce an explicit parent/children relation on places, **derived initially**
-  from `_dayTripHub`/`_waysideFromHub`/section signals (shadow), then make it the
-  source of truth and retire the strings.
+### Phase B — Containment as first-class edges (G4)  *(high value)*
+- Introduce **two** explicit relations, not one:
+  - **`explored-from`** — derived initially from `_dayTripHub`/`_waysideFromHub`/
+    section signals (shadow), then made the source of truth and the strings retired.
+    This is the itinerary decision from Phase A, now an edge.
+  - **`geo-within`** — derived from coordinates/regions (lands with Phase C).
 - **Allow the general case**: a sight may contain destinations. This unlocks the
   national-park-with-lodges model — the first genuinely new product capability.
 - Shadow check: every existing hub/wayside relationship round-trips through the new
-  edges.
+  `explored-from` edges; `geo-within` never contradicts known nestings.
 
 ### Phase C — Geography: point | polygon | region (G3)  *(high value, fuzzy trips)*
 - Add `geo: { type: 'point'|'polygon'|'region', … }` to the place shape; existing
