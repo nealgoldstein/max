@@ -2655,12 +2655,41 @@ function _backstopPastedListPlaces(stage) {
 if (typeof globalThis !== "undefined") globalThis._backstopPastedListPlaces = _backstopPastedListPlaces;
 
 
-/* #2 Stage 2 interim: expose this module's cross-module bindings as globals
-   for other-module/classic consumers. esbuild compiles each .mjs to an isolated
-   IIFE, so top-level decls are module-private unless re-exposed; the later
-   import-rewiring phase replaces these with real imports. */
-globalThis.renderHomeDashboard = renderHomeDashboard;
-globalThis.renderHomeScreen = renderHomeScreen;
-globalThis.showHome = showHome;
+
+
+
+
+/* #2 Stage 2 interim: expose this module's top-level bindings as globals for
+   other-module/classic consumers (incl. window.* reads tsc cannot see) and
+   app-main.js boot-time bare-global refs. esbuild isolates each .mjs to an IIFE;
+   the any-cast keeps this valid without ambient decls; import-rewiring removes it. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg.showHome = showHome;
+  __expg._readTripById = _readTripById;
+  __expg._selectCurrentTripId = _selectCurrentTripId;
+  __expg._buildDashboardItems = _buildDashboardItems;
+  __expg.renderHomeDashboard = renderHomeDashboard;
+  __expg._tripSearch = _tripSearch;
+  __expg._tripSearchNorm = _tripSearchNorm;
+  __expg._tripSearchScan = _tripSearchScan;
+  __expg._tripSearchSyncCounter = _tripSearchSyncCounter;
+  __expg._tripSearchGoTo = _tripSearchGoTo;
+  __expg._tripSearchOnInput = _tripSearchOnInput;
+  __expg.openTripSearch = openTripSearch;
+  __expg.updateSyncButtons = updateSyncButtons;
+  __expg.renderHomeScreen = renderHomeScreen;
+  __expg.renderHomeOptions = renderHomeOptions;
+  __expg.parsePlacesList = parsePlacesList;
+  __expg._normalizeImportedRegion = _normalizeImportedRegion;
+  __expg._titleCaseHelper = _titleCaseHelper;
+  __expg._buildTripFromPastedList = _buildTripFromPastedList;
+  __expg._buildStubTripFromPastedList = _buildStubTripFromPastedList;
+  __expg._buildPickerFromPastedList = _buildPickerFromPastedList;
+  __expg._showPostImportSightsModal = _showPostImportSightsModal;
+  __expg._applyPastedListNights = _applyPastedListNights;
+  __expg._stampListedOrigin = _stampListedOrigin;
+  __expg._backstopPastedListPlaces = _backstopPastedListPlaces;
+}
 
 export {};

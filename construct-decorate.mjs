@@ -1628,4 +1628,25 @@ function _openPasteListModal(opts) {
 }
 if (typeof globalThis !== "undefined") globalThis._openPasteListModal = _openPasteListModal;
 
+
+
+
+/* #2 Stage 2 interim: expose this module's top-level bindings as globals for
+   other-module/classic consumers (incl. window.* reads tsc cannot see) and
+   app-main.js boot-time bare-global refs. esbuild isolates each .mjs to an IIFE;
+   the any-cast keeps this valid without ambient decls; import-rewiring removes it. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg._constructUserListedItems = _constructUserListedItems;
+  __expg._runThemingPass = _runThemingPass;
+  __expg._reconcileListedSightsToSections = _reconcileListedSightsToSections;
+  __expg.validateTripRoute = validateTripRoute;
+  __expg._reopenPickerAny = _reopenPickerAny;
+  __expg.evaluateWispsForDiscovery = evaluateWispsForDiscovery;
+  __expg.returnToPickerForMore = returnToPickerForMore;
+  __expg.showWispHistoryModal = showWispHistoryModal;
+  __expg._addPastedListToCurrentTrip = _addPastedListToCurrentTrip;
+  __expg._openPasteListModal = _openPasteListModal;
+}
+
 export {};

@@ -3113,30 +3113,59 @@ function _rebuildGettingToFromFields(){
 }
 
 
-/* #2 Stage 2 interim: expose this module's cross-module bindings as globals
-   for other-module/classic consumers. esbuild compiles each .mjs to an isolated
-   IIFE, so top-level decls are module-private unless re-exposed; the later
-   import-rewiring phase replaces these with real imports. */
-globalThis._ceCardExpanded = _ceCardExpanded;
-globalThis._ceEditMode = _ceEditMode;
-globalThis._ceLens = _ceLens;
-globalThis._ceMarkerById = _ceMarkerById;
-globalThis._ceMarkers = _ceMarkers;
-globalThis._cePolyline = _cePolyline;
-globalThis._ceRejectedExpanded = _ceRejectedExpanded;
-globalThis._ceSelectCandidateOnMap = _ceSelectCandidateOnMap;
-globalThis._ceSelectedCandId = _ceSelectedCandId;
-globalThis._rebuildGettingToFromFields = _rebuildGettingToFromFields;
-globalThis._redrawCePolyline = _redrawCePolyline;
-globalThis._tripDetailsExpanded = _tripDetailsExpanded;
-globalThis.applyCandidateChanges = applyCandidateChanges;
-globalThis.editConstraints = editConstraints;
-globalThis.geocodeMissingCandidates = geocodeMissingCandidates;
-globalThis.geocodeMissingCoords = geocodeMissingCoords;
-globalThis.renderTripBriefEdit = renderTripBriefEdit;
-globalThis.reopenCandidateExplorer = reopenCandidateExplorer;
-globalThis.reopenPickerForEdit = reopenPickerForEdit;
-globalThis.showCandidateDisclaimer = showCandidateDisclaimer;
-globalThis.showCandidateExplorer = showCandidateExplorer;
+
+
+
+
+/* #2 Stage 2 interim: expose this module's top-level bindings as globals for
+   other-module/classic consumers (incl. window.* reads tsc cannot see) and
+   app-main.js boot-time bare-global refs. esbuild isolates each .mjs to an IIFE;
+   the any-cast keeps this valid without ambient decls; import-rewiring removes it. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg.editConstraints = editConstraints;
+  __expg.renderTripBriefEdit = renderTripBriefEdit;
+  __expg._mountChecklistSection = _mountChecklistSection;
+  __expg._mountInboxSection = _mountInboxSection;
+  __expg._renderInboxAddress = _renderInboxAddress;
+  __expg._fmtAgo = _fmtAgo;
+  __expg._renderUnassignedTray = _renderUnassignedTray;
+  __expg._mountDocumentsSection = _mountDocumentsSection;
+  __expg.cancelEditConstraints = cancelEditConstraints;
+  __expg.previewConstraintChanges = previewConstraintChanges;
+  __expg.showConstraintConfirmation = showConstraintConfirmation;
+  __expg.applyConstraintChanges = applyConstraintChanges;
+  __expg.resequenceWithCurrentBrief = resequenceWithCurrentBrief;
+  __expg.cancelTripBrief = cancelTripBrief;
+  __expg._rebuildRequiredPlacesFromMdcItems = _rebuildRequiredPlacesFromMdcItems;
+  __expg._toggleMustDoFromSummary = _toggleMustDoFromSummary;
+  __expg._ceMap = _ceMap;
+  __expg._ceMarkers = _ceMarkers;
+  __expg._ceRejectedExpanded = _ceRejectedExpanded;
+  __expg._ceEditMode = _ceEditMode;
+  __expg._ceCardExpanded = _ceCardExpanded;
+  __expg._ceLens = _ceLens;
+  __expg._ceSectionExpanded = _ceSectionExpanded;
+  __expg._cePolyline = _cePolyline;
+  __expg._ceSelectedCandId = _ceSelectedCandId;
+  __expg._ceMarkerById = _ceMarkerById;
+  __expg._ceSelectCandidateOnMap = _ceSelectCandidateOnMap;
+  __expg._redrawCePolyline = _redrawCePolyline;
+  __expg.retryDiscoveryCandidates = retryDiscoveryCandidates;
+  __expg.geocodeMissingCandidates = geocodeMissingCandidates;
+  __expg.showCandidateDisclaimer = showCandidateDisclaimer;
+  __expg.reopenCandidateExplorer = reopenCandidateExplorer;
+  __expg.cancelEditCandidates = cancelEditCandidates;
+  __expg.reopenPickerForEdit = reopenPickerForEdit;
+  __expg.saveActivityPickerEdits = saveActivityPickerEdits;
+  __expg.cancelPickerEdit = cancelPickerEdit;
+  __expg.closePlacesOverlay = closePlacesOverlay;
+  __expg.applyCandidateChanges = applyCandidateChanges;
+  __expg.showCandidateExplorer = showCandidateExplorer;
+  __expg._geocodeInFlight = _geocodeInFlight;
+  __expg.geocodeMissingCoords = geocodeMissingCoords;
+  __expg._tripDetailsExpanded = _tripDetailsExpanded;
+  __expg._rebuildGettingToFromFields = _rebuildGettingToFromFields;
+}
 
 export {};

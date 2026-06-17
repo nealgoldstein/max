@@ -273,4 +273,20 @@ if (typeof globalThis !== "undefined") {
   globalThis._pmModelSectionCount = _pmModelSectionCount;
 }
 
+
+
+
+/* #2 Stage 2 interim: expose this module's top-level bindings as globals for
+   other-module/classic consumers (incl. window.* reads tsc cannot see) and
+   app-main.js boot-time bare-global refs. esbuild isolates each .mjs to an IIFE;
+   the any-cast keeps this valid without ambient decls; import-rewiring removes it. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg._discoveryOpts = _discoveryOpts;
+  __expg._discoveryCountSource = _discoveryCountSource;
+  __expg._discoveryConsideredCounts = _discoveryConsideredCounts;
+  __expg._applyDiscoveryModelToSights = _applyDiscoveryModelToSights;
+  __expg._pmModelSectionCount = _pmModelSectionCount;
+}
+
 export {};

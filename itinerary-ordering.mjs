@@ -1329,37 +1329,63 @@ function doCreateTrip(){
 }
 
 
-/* #2 Stage 2 interim: expose this module's cross-module bindings as globals
-   for other-module/classic consumers. esbuild compiles each .mjs to an isolated
-   IIFE, so top-level decls are module-private unless re-exposed; the later
-   import-rewiring phase replaces these with real imports. */
-globalThis._defaultAccommodation = _defaultAccommodation;
-globalThis._defaultAllergies = _defaultAllergies;
-globalThis._defaultAvoid = _defaultAvoid;
-globalThis._defaultAvoidOther = _defaultAvoidOther;
-globalThis._defaultDateFormat = _defaultDateFormat;
-globalThis._defaultDayTripHours = _defaultDayTripHours;
-globalThis._defaultDayTripRadiusKm = _defaultDayTripRadiusKm;
-globalThis._defaultDietary = _defaultDietary;
-globalThis._defaultDistanceUnits = _defaultDistanceUnits;
-globalThis._defaultEmergencyName = _defaultEmergencyName;
-globalThis._defaultEmergencyPhone = _defaultEmergencyPhone;
-globalThis._defaultHardLimits = _defaultHardLimits;
-globalThis._defaultHoursPerDay = _defaultHoursPerDay;
-globalThis._defaultLanguages = _defaultLanguages;
-globalThis._defaultLoyaltyPrograms = _defaultLoyaltyPrograms;
-globalThis._defaultMaxBigSightsPerDay = _defaultMaxBigSightsPerDay;
-globalThis._defaultMobility = _defaultMobility;
-globalThis._defaultPaceMode = _defaultPaceMode;
-globalThis._defaultTemperatureUnits = _defaultTemperatureUnits;
-globalThis._defaultTransport = _defaultTransport;
-globalThis._defaultTravelersCount = _defaultTravelersCount;
-globalThis._defaultWithKids = _defaultWithKids;
-globalThis._getPaceMode = _getPaceMode;
-globalThis._hasAvoidDefaults = _hasAvoidDefaults;
-globalThis._paceDirective = _paceDirective;
-globalThis._paceSightCount = _paceSightCount;
-globalThis._shiftDate = _shiftDate;
-globalThis.findAttachedEvents = findAttachedEvents;
+
+
+
+
+/* #2 Stage 2 interim: expose this module's top-level bindings as globals for
+   other-module/classic consumers (incl. window.* reads tsc cannot see) and
+   app-main.js boot-time bare-global refs. esbuild isolates each .mjs to an IIFE;
+   the any-cast keeps this valid without ambient decls; import-rewiring removes it. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg.findAttachedEvents = findAttachedEvents;
+  __expg._getPaceMode = _getPaceMode;
+  __expg._defaultHoursPerDay = _defaultHoursPerDay;
+  __expg._defaultMaxBigSightsPerDay = _defaultMaxBigSightsPerDay;
+  __expg._defaultPaceMode = _defaultPaceMode;
+  __expg._defaultDayTripHours = _defaultDayTripHours;
+  __expg._defaultDayTripRadiusKm = _defaultDayTripRadiusKm;
+  __expg._defaultTravelersCount = _defaultTravelersCount;
+  __expg._defaultWithKids = _defaultWithKids;
+  __expg._defaultTransport = _defaultTransport;
+  __expg._defaultAccommodation = _defaultAccommodation;
+  __expg._defaultHardLimits = _defaultHardLimits;
+  __expg._tbUnlockShape = _tbUnlockShape;
+  __expg._briefIsLocked = _briefIsLocked;
+  __expg._briefRenderLocked = _briefRenderLocked;
+  __expg._briefTrunc = _briefTrunc;
+  __expg._tbSetDisplayPref = _tbSetDisplayPref;
+  __expg._isReturningUser = _isReturningUser;
+  __expg._defaultMobility = _defaultMobility;
+  __expg._defaultDietary = _defaultDietary;
+  __expg._defaultLanguages = _defaultLanguages;
+  __expg._defaultAllergies = _defaultAllergies;
+  __expg._defaultEmergencyName = _defaultEmergencyName;
+  __expg._defaultEmergencyPhone = _defaultEmergencyPhone;
+  __expg._defaultLoyaltyPrograms = _defaultLoyaltyPrograms;
+  __expg._defaultDistanceUnits = _defaultDistanceUnits;
+  __expg._defaultTemperatureUnits = _defaultTemperatureUnits;
+  __expg._defaultDateFormat = _defaultDateFormat;
+  __expg._defaultCurrency = _defaultCurrency;
+  __expg._defaultAvoid = _defaultAvoid;
+  __expg._defaultAvoidOther = _defaultAvoidOther;
+  __expg._hasAvoidDefaults = _hasAvoidDefaults;
+  __expg.showSettingsPanel = showSettingsPanel;
+  __expg._paceDirective = _paceDirective;
+  __expg._paceSightCount = _paceSightCount;
+  __expg.showLogisticsNudge = showLogisticsNudge;
+  __expg._paceMode = _paceMode;
+  __expg.showPaceToast = showPaceToast;
+  __expg.dismissPaceToast = dismissPaceToast;
+  __expg.adjustPace = adjustPace;
+  __expg.adjustPaceByItems = adjustPaceByItems;
+  __expg._shiftDate = _shiftDate;
+  __expg._tripLengthDays = _tripLengthDays;
+  __expg._collectBookingConflicts = _collectBookingConflicts;
+  __expg.adjustPaceByNights = adjustPaceByNights;
+  __expg.rebalanceNights = rebalanceNights;
+  __expg.doCreateTrip = doCreateTrip;
+}
 
 export {};

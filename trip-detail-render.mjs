@@ -2215,19 +2215,42 @@ function uDone(sid,destId){
 }
 
 
-/* #2 Stage 2 interim: expose this module's cross-module bindings as globals
-   for other-module/classic consumers. esbuild compiles each .mjs to an isolated
-   IIFE, so top-level decls are module-private unless re-exposed; the later
-   import-rewiring phase replaces these with real imports. */
-globalThis._hiddenStories = _hiddenStories;
-globalThis._wireItinDropTarget = _wireItinDropTarget;
-globalThis.buildHotelChip = buildHotelChip;
-globalThis.drawDestMode = drawDestMode;
-globalThis.fDayOf = fDayOf;
-globalThis.fS = fS;
-globalThis.mkCachedStoryBox = mkCachedStoryBox;
-globalThis.mkItinAddRow = mkItinAddRow;
-globalThis.refreshRestaurantSuggestions = refreshRestaurantSuggestions;
-globalThis.showAddToDay = showAddToDay;
+
+
+
+
+/* #2 Stage 2 interim: expose this module's top-level bindings as globals for
+   other-module/classic consumers (incl. window.* reads tsc cannot see) and
+   app-main.js boot-time bare-global refs. esbuild isolates each .mjs to an IIFE;
+   the any-cast keeps this valid without ambient decls; import-rewiring removes it. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg._renderRestaurantsSection = _renderRestaurantsSection;
+  __expg.buildExplorePane = buildExplorePane;
+  __expg.buildRestaurantSection = buildRestaurantSection;
+  __expg.mkExploreSuggestion = mkExploreSuggestion;
+  __expg.showAddToDay = showAddToDay;
+  __expg.refreshRestaurantSuggestions = refreshRestaurantSuggestions;
+  __expg.buildBucketSection = buildBucketSection;
+  __expg._hiddenStories = _hiddenStories;
+  __expg.mkCachedStoryBox = mkCachedStoryBox;
+  __expg.buildHotelChip = buildHotelChip;
+  __expg.buildTransportChip = buildTransportChip;
+  __expg._wireItinDropTarget = _wireItinDropTarget;
+  __expg.mkItinItem = mkItinItem;
+  __expg.toggleSightBookForm = toggleSightBookForm;
+  __expg.mkItinAddRow = mkItinAddRow;
+  __expg.suggestRestaurants = suggestRestaurants;
+  __expg.drawDestMode = drawDestMode;
+  __expg.buildRoutingSection = buildRoutingSection;
+  __expg.mkDay = mkDay;
+  __expg._buildNowNextWidgetHtml = _buildNowNextWidgetHtml;
+  __expg.mkSight = mkSight;
+  __expg.fS = fS;
+  __expg.fDayOf = fDayOf;
+  __expg.togP = togP;
+  __expg.mDone = mDone;
+  __expg.uDone = uDone;
+}
 
 export {};

@@ -1104,14 +1104,38 @@ async function generateCityData(place,destId,_isAutoRetry){
 }
 
 
-/* #2 Stage 2 interim: expose this module's cross-module bindings as globals
-   for other-module/classic consumers. esbuild compiles each .mjs to an isolated
-   IIFE, so top-level decls are module-private unless re-exposed; the later
-   import-rewiring phase replaces these with real imports. */
-globalThis._autoSeedIconicSightsToDays = _autoSeedIconicSightsToDays;
-globalThis.ensureSuggestions = ensureSuggestions;
-globalThis.fetchCityMeta = fetchCityMeta;
-globalThis.generateCityData = generateCityData;
-globalThis.showMapPinPanel = showMapPinPanel;
+
+
+
+
+/* #2 Stage 2 interim: expose this module's top-level bindings as globals for
+   other-module/classic consumers (incl. window.* reads tsc cannot see) and
+   app-main.js boot-time bare-global refs. esbuild isolates each .mjs to an IIFE;
+   the any-cast keeps this valid without ambient decls; import-rewiring removes it. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg.showMapPinPanel = showMapPinPanel;
+  __expg.ensureSuggestions = ensureSuggestions;
+  __expg.fetchCityMeta = fetchCityMeta;
+  __expg._initSightSources = _initSightSources;
+  __expg._placedDayItemNamesSet = _placedDayItemNamesSet;
+  __expg._sightTokensMatchAny = _sightTokensMatchAny;
+  __expg._buildRejectedTokenSets = _buildRejectedTokenSets;
+  __expg._recomputeSuggestions = _recomputeSuggestions;
+  __expg._setLLMSights = _setLLMSights;
+  __expg._addUserListedSight = _addUserListedSight;
+  __expg._addEssentialsSights = _addEssentialsSights;
+  __expg._addUserAddedSight = _addUserAddedSight;
+  __expg._removeSightById = _removeSightById;
+  __expg._addConsideredSight = _addConsideredSight;
+  __expg._addRejectedSight = _addRejectedSight;
+  __expg._promoteConsideredSight = _promoteConsideredSight;
+  __expg._autoSeedIconicSightsToDays = _autoSeedIconicSightsToDays;
+  __expg.mergeEssentialsIntoSuggestions = mergeEssentialsIntoSuggestions;
+  __expg._nominatimBlocked = _nominatimBlocked;
+  __expg._markNominatimBlocked = _markNominatimBlocked;
+  __expg.geocodeEssentials = geocodeEssentials;
+  __expg.generateCityData = generateCityData;
+}
 
 export {};

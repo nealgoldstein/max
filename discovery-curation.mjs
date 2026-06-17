@@ -671,14 +671,34 @@ async function buildFromCandidates(){
 }
 
 
-/* #2 Stage 2 interim: expose this module's cross-module bindings as globals
-   for other-module/classic consumers. esbuild compiles each .mjs to an isolated
-   IIFE, so top-level decls are module-private unless re-exposed; the later
-   import-rewiring phase replaces these with real imports. */
-globalThis._hydratePickerFromCommittedSrc = _hydratePickerFromCommittedSrc;
-globalThis._parseTripDuration = _parseTripDuration;
-globalThis._pdsTimer = _pdsTimer;
-globalThis._tbResequenceCandidates = _tbResequenceCandidates;
-globalThis.updateCEShortlist = updateCEShortlist;
+
+
+
+
+/* #2 Stage 2 interim: expose this module's top-level bindings as globals for
+   other-module/classic consumers (incl. window.* reads tsc cannot see) and
+   app-main.js boot-time bare-global refs. esbuild isolates each .mjs to an IIFE;
+   the any-cast keeps this valid without ambient decls; import-rewiring removes it. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg._pdsTimer = _pdsTimer;
+  __expg._persistDiscoveryState = _persistDiscoveryState;
+  __expg._hydratePickerFromCommittedSrc = _hydratePickerFromCommittedSrc;
+  __expg._pickerSecondaryDiscoveryTimer = _pickerSecondaryDiscoveryTimer;
+  __expg._schedulePickerSecondaryDiscovery = _schedulePickerSecondaryDiscovery;
+  __expg._tbResequenceCandidates = _tbResequenceCandidates;
+  __expg.updateCEShortlist = updateCEShortlist;
+  __expg._parseNightRange = _parseNightRange;
+  __expg._parseTripDuration = _parseTripDuration;
+  __expg.renderCEStayTotal = renderCEStayTotal;
+  __expg.cancelCandidateExplorer = cancelCandidateExplorer;
+  __expg.editWhereWhy = editWhereWhy;
+  __expg.editHowYouTravel = editHowYouTravel;
+  __expg.doCompare = doCompare;
+  __expg.openComparePicker = openComparePicker;
+  __expg.openCompareModal = openCompareModal;
+  __expg.showPreBuildModal = showPreBuildModal;
+  __expg.buildFromCandidates = buildFromCandidates;
+}
 
 export {};

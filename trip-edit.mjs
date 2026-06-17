@@ -2057,35 +2057,78 @@ function mkHotelRecord(bk,destId){
 }
 
 
-/* #2 Stage 2 interim: expose this module's cross-module bindings as globals
-   for other-module/classic consumers. esbuild compiles each .mjs to an isolated
-   IIFE, so top-level decls are module-private unless re-exposed; the later
-   import-rewiring phase replaces these with real imports. */
-globalThis._fmtDistance = _fmtDistance;
-globalThis._openSightUrlEditor = _openSightUrlEditor;
-globalThis._sf6Btn = _sf6Btn;
-globalThis._sightExternalUrl = _sightExternalUrl;
-globalThis.addDest = addDest;
-globalThis.checkAndShowOverlaps = checkAndShowOverlaps;
-globalThis.checkTimeConflicts = checkTimeConflicts;
-globalThis.clearPendingAction = clearPendingAction;
-globalThis.fmtD = fmtD;
-globalThis.getDest = getDest;
-globalThis.getLeg = getLeg;
-globalThis.mkCancelField = mkCancelField;
-globalThis.mkCurrSel = mkCurrSel;
-globalThis.mkDateInp = mkDateInp;
-globalThis.mkField = mkField;
-globalThis.mkHotelRecord = mkHotelRecord;
-globalThis.mkTransportRecord = mkTransportRecord;
-globalThis.newActionId = newActionId;
-globalThis.newBkId = newBkId;
-globalThis.onFromChange = onFromChange;
-globalThis.openMailtoActions = openMailtoActions;
-globalThis.pendingCount = pendingCount;
-globalThis.saveDates = saveDates;
-globalThis.selectDest = selectDest;
-globalThis.toggleTransportForm = toggleTransportForm;
-globalThis.updateTrackerBadge = updateTrackerBadge;
+
+
+
+
+/* #2 Stage 2 interim: expose this module's top-level bindings as globals for
+   other-module/classic consumers (incl. window.* reads tsc cannot see) and
+   app-main.js boot-time bare-global refs. esbuild isolates each .mjs to an IIFE;
+   the any-cast keeps this valid without ambient decls; import-rewiring removes it. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg.onFromChange = onFromChange;
+  __expg.addDest = addDest;
+  __expg.guessPlace = guessPlace;
+  __expg.extractCityName = extractCityName;
+  __expg._weatherCache = _weatherCache;
+  __expg._saveWeatherCache = _saveWeatherCache;
+  __expg._weatherKey = _weatherKey;
+  __expg._weatherCacheTtl = _weatherCacheTtl;
+  __expg._weatherInflight = _weatherInflight;
+  __expg._weatherBackoffUntil = _weatherBackoffUntil;
+  __expg._wxCodeIcon = _wxCodeIcon;
+  __expg.getDestWeather = getDestWeather;
+  __expg._getDestWeatherUncached = _getDestWeatherUncached;
+  __expg.renderDestWeatherStrip = renderDestWeatherStrip;
+  __expg.renderDayWeatherChip = renderDayWeatherChip;
+  __expg.fmtD = fmtD;
+  __expg._fmtDistance = _fmtDistance;
+  __expg._fmtTemp = _fmtTemp;
+  __expg._fmtTempUnit = _fmtTempUnit;
+  __expg._fmtTempApiUnit = _fmtTempApiUnit;
+  __expg._sightExternalUrl = _sightExternalUrl;
+  __expg._openSightUrlEditor = _openSightUrlEditor;
+  __expg.renderDestList = renderDestList;
+  __expg.toggleListDateEdit = toggleListDateEdit;
+  __expg.closeListDateEdit = closeListDateEdit;
+  __expg.selectDest = selectDest;
+  __expg.delDestWithUndo = delDestWithUndo;
+  __expg.delDest = delDest;
+  __expg.getDest = getDest;
+  __expg._sf6Btn = _sf6Btn;
+  __expg.editDates = editDates;
+  __expg.cancelEditDates = cancelEditDates;
+  __expg.saveDates = saveDates;
+  __expg.computeDateChangeImpact = computeDateChangeImpact;
+  __expg.buildCancelItems = buildCancelItems;
+  __expg.openMailtoChecklist = openMailtoChecklist;
+  __expg.buildCancelRows = buildCancelRows;
+  __expg.showCancellationChecklist = showCancellationChecklist;
+  __expg.showDateChangeDialog = showDateChangeDialog;
+  __expg.applyDateChange = applyDateChange;
+  __expg.checkOverlaps = checkOverlaps;
+  __expg.checkAndShowOverlaps = checkAndShowOverlaps;
+  __expg.newActionId = newActionId;
+  __expg.clearPendingAction = clearPendingAction;
+  __expg.clearAllPendingActions = clearAllPendingActions;
+  __expg.pendingCount = pendingCount;
+  __expg.destPendingCount = destPendingCount;
+  __expg.updateTrackerBadge = updateTrackerBadge;
+  __expg.openMailtoActions = openMailtoActions;
+  __expg.timeToMins = timeToMins;
+  __expg.timesOverlap = timesOverlap;
+  __expg.checkTimeConflicts = checkTimeConflicts;
+  __expg.newBkId = newBkId;
+  __expg.getLeg = getLeg;
+  __expg.mkDateInp = mkDateInp;
+  __expg.mkField = mkField;
+  __expg.mkCancelField = mkCancelField;
+  __expg.mkCurrSel = mkCurrSel;
+  __expg.toggleTransportForm = toggleTransportForm;
+  __expg.mkTransportRecord = mkTransportRecord;
+  __expg.toggleHotelForm = toggleHotelForm;
+  __expg.mkHotelRecord = mkHotelRecord;
+}
 
 export {};

@@ -628,4 +628,20 @@ function _initialTripSave(opts){
 // function. Browser back/forward, deep-link load, and in-app
 // navigation all funnel through here.
 
+
+
+
+/* #2 Stage 2 interim: expose this module's top-level bindings as globals for
+   other-module/classic consumers (incl. window.* reads tsc cannot see) and
+   app-main.js boot-time bare-global refs. esbuild isolates each .mjs to an IIFE;
+   the any-cast keeps this valid without ambient decls; import-rewiring removes it. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg._geographyOf = _geographyOf;
+  __expg._recordWaysideLegDecision = _recordWaysideLegDecision;
+  __expg.MaxRoleWriter = MaxRoleWriter;
+  __expg.MaxCandidates = MaxCandidates;
+  __expg._initialTripSave = _initialTripSave;
+}
+
 export {};

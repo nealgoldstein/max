@@ -855,12 +855,32 @@ function getDistricts(place,intent,dest){
 // assignment (no setTimeout, no eval indirection).
 
 
-/* #2 Stage 2 interim: expose this module's cross-module bindings as globals
-   for other-module/classic consumers. esbuild compiles each .mjs to an isolated
-   IIFE, so top-level decls are module-private unless re-exposed; the later
-   import-rewiring phase replaces these with real imports. */
-globalThis.getDistricts = getDistricts;
-globalThis.getRouting = getRouting;
-globalThis.renderTList = renderTList;
+
+
+
+
+/* #2 Stage 2 interim: expose this module's top-level bindings as globals for
+   other-module/classic consumers (incl. window.* reads tsc cannot see) and
+   app-main.js boot-time bare-global refs. esbuild isolates each .mjs to an IIFE;
+   the any-cast keeps this valid without ambient decls; import-rewiring removes it. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg.mkTrackerInner = mkTrackerInner;
+  __expg.renderTList = renderTList;
+  __expg.switchCat = switchCat;
+  __expg.doTI = doTI;
+  __expg._doTIInline = _doTIInline;
+  __expg.editTripName = editTripName;
+  __expg.toggleSpending = toggleSpending;
+  __expg.calcTotalSpend = calcTotalSpend;
+  __expg.toggleGeneralForm = toggleGeneralForm;
+  __expg.mkGeneralRecord = mkGeneralRecord;
+  __expg.getRouting = getRouting;
+  __expg._routingFetchInFlight = _routingFetchInFlight;
+  __expg.fetchRoutingAsync = fetchRoutingAsync;
+  __expg.routingHeadline = routingHeadline;
+  __expg.getPracticalInfo = getPracticalInfo;
+  __expg.getDistricts = getDistricts;
+}
 
 export {};

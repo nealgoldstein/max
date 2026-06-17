@@ -4001,20 +4001,71 @@ function _editTripBooking(bookingId) {
 if (typeof globalThis !== "undefined") globalThis._editTripBooking = _editTripBooking;
 
 
-/* #2 Stage 2 interim: expose this module's cross-module bindings as globals
-   for other-module/classic consumers. esbuild compiles each .mjs to an isolated
-   IIFE, so top-level decls are module-private unless re-exposed; the later
-   import-rewiring phase replaces these with real imports. */
-globalThis.checkDeadlineAlert = checkDeadlineAlert;
-globalThis.collectDeadlines = collectDeadlines;
-globalThis.destStory = destStory;
-globalThis.digDeeper = digDeeper;
-globalThis.doAI = doAI;
-globalThis.doFF = doFF;
-globalThis.migrateDest = migrateDest;
-globalThis.renderMaxNoteCard = renderMaxNoteCard;
-globalThis.sStory = sStory;
-globalThis.showUndoToast = showUndoToast;
-globalThis.togMov = togMov;
+
+
+
+
+/* #2 Stage 2 interim: expose this module's top-level bindings as globals for
+   other-module/classic consumers (incl. window.* reads tsc cannot see) and
+   app-main.js boot-time bare-global refs. esbuild isolates each .mjs to an IIFE;
+   the any-cast keeps this valid without ambient decls; import-rewiring removes it. */
+{
+  const __expg = /** @type {any} */ (globalThis);
+  __expg.sStory = sStory;
+  __expg.renderMaxNoteCard = renderMaxNoteCard;
+  __expg.generateMaxNote = generateMaxNote;
+  __expg.destStory = destStory;
+  __expg.digDeeper = digDeeper;
+  __expg.doFF = doFF;
+  __expg.closeMovPanel = closeMovPanel;
+  __expg.togMov = togMov;
+  __expg.moveSight = moveSight;
+  __expg.migrateDest = migrateDest;
+  __expg.showUndoToast = showUndoToast;
+  __expg.removeSightToLater = removeSightToLater;
+  __expg.delS = delS;
+  __expg.onAI = onAI;
+  __expg.doAI = doAI;
+  __expg._showDayTripConversionToast = _showDayTripConversionToast;
+  __expg.collectDeadlines = collectDeadlines;
+  __expg.collectAllDeadlines = collectAllDeadlines;
+  __expg.checkDeadlineAlert = checkDeadlineAlert;
+  __expg._askModalState = _askModalState;
+  __expg.showAskMaxKeyModal = showAskMaxKeyModal;
+  __expg.showAskMaxModal = showAskMaxModal;
+  __expg._renderAskMaxPane = _renderAskMaxPane;
+  __expg._askMaxSend = _askMaxSend;
+  __expg._buildAskMaxSystemPrompt = _buildAskMaxSystemPrompt;
+  __expg.showGlobalPasteConfirmationModal = showGlobalPasteConfirmationModal;
+  __expg.showBatchImportBookingsModal = showBatchImportBookingsModal;
+  __expg._parseBookingBatch = _parseBookingBatch;
+  __expg._parseBookingBatchLlm = _parseBookingBatchLlm;
+  __expg._parseBookingCsv = _parseBookingCsv;
+  __expg._renderBatchPreview = _renderBatchPreview;
+  __expg._bimEsc = _bimEsc;
+  __expg._findExistingBookingForCancellation = _findExistingBookingForCancellation;
+  __expg._bimNameKey = _bimNameKey;
+  __expg._bimNameMatch = _bimNameMatch;
+  __expg._bimDateDiff = _bimDateDiff;
+  __expg._findExistingForMerge = _findExistingForMerge;
+  __expg._bimIsEmpty = _bimIsEmpty;
+  __expg._bimSetIfEmpty = _bimSetIfEmpty;
+  __expg._bimAppendNotes = _bimAppendNotes;
+  __expg._mergeIncomingIntoHotel = _mergeIncomingIntoHotel;
+  __expg._mergeIncomingIntoLeg = _mergeIncomingIntoLeg;
+  __expg._mergeIncomingIntoGeneral = _mergeIncomingIntoGeneral;
+  __expg._commitBatchBookings = _commitBatchBookings;
+  __expg.showPasteConfirmationModal = showPasteConfirmationModal;
+  __expg._parseBookingConfirmation = _parseBookingConfirmation;
+  __expg._extractBookingUrl = _extractBookingUrl;
+  __expg._parseTimeRange = _parseTimeRange;
+  __expg._inferYearForBooking = _inferYearForBooking;
+  __expg._parseDateRangeString = _parseDateRangeString;
+  __expg._normalizeBookingExtraction = _normalizeBookingExtraction;
+  __expg._scoreDestMatch = _scoreDestMatch;
+  __expg._proximityDestScore = _proximityDestScore;
+  __expg._showBookingPreviewModal = _showBookingPreviewModal;
+  __expg._editTripBooking = _editTripBooking;
+}
 
 export {};
