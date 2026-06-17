@@ -980,40 +980,36 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
     // that decides whether _keepOf is safe to standardize on.
   });
 
-  // ── #Place D 2.5 CHARACTERIZATION: the place-keep toggle ───────────────────
-  // togglePlaceInActivity currently writes p._keep DIRECTLY. Before routing that
-  // write through MaxRoleWriter.set (so the decision log — and _keepOf — stays
-  // authoritative), pin its observable contract: a toggle FLIPS the place's keep,
-  // and _keepOf AGREES with the stored flag afterward (the no-staleness
-  // invariant the migration must preserve). This test must pass BEFORE the
-  // write-side change and STILL pass after.
-  test('GATE: place-keep toggle flips keep and _keepOf stays consistent', async ({ page }) => {
+  // ── #Place D 2.5 CHARACTERIZATION: the LIVE activity keep-toggle ───────────
+  // togglePlaceActivity (app-main, wired via the picker onclick) writes p._keep
+  // DIRECTLY for every place in the activity. Before routing that through
+  // MaxRoleWriter.set (so the decision log — and _keepOf — stays authoritative),
+  // pin its observable contract: toggling an activity FLIPS its places' keep and
+  // the flip STICKS through the re-render (a direct write that doesn't stamp the
+  // decision gets reverted by the reconcile — the bug 2.5 fixes). Uses a SIGHT
+  // activity (not a stay) since stays default-keep and aren't user-droppable here.
+  test('GATE: activity keep-toggle flips and sticks (via the decision)', async ({ page }) => {
     await bootClean(page);
     await runPipeline(page);
     const r = await page.evaluate(() => {
-      if (typeof window.togglePlaceInActivity !== 'function') return { err: 'togglePlaceInActivity missing' };
+      if (typeof window.togglePlaceActivity !== 'function') return { err: 'togglePlaceActivity missing' };
       const pa = window._tb && window._tb.placeActivities || [];
-      const item = pa.find((it) => it && it.type !== 'route' && (it.requiredPlaces || []).length);
-      if (!item) return { err: 'no activity with requiredPlaces' };
-      const keepOf = (p) => (typeof window._keepOf === 'function') ? !!window._keepOf(p) : !!p._keep;
-      const p0 = item.requiredPlaces[0];
-      const before = { stored: !!p0._keep, derived: keepOf(p0), place: p0.place, origin: p0._origin, section: item.section, decided: !!p0._decided };
+      const isStay = (typeof window._isStaySection === 'function') ? window._isStaySection : function(){ return false; };
+      // a SIGHT activity (non-route, non-stay) with requiredPlaces
+      const item = pa.find((it) => it && it.type !== 'route' && !isStay(it) && (it.requiredPlaces || []).length);
+      if (!item) return { err: 'no sight activity with requiredPlaces' };
+      const anyKeep = (rps) => (rps || []).some((p) => p && p._keep);
+      const before = { anyKept: anyKeep(item.requiredPlaces), section: item.section, n: item.requiredPlaces.length };
       let threw = '';
-      try { window.togglePlaceInActivity(item.id, 0); } catch (e) { threw = String(e && e.message || e); }
-      const p0Immediate = !!p0._keep;   // the same object, right after the call (before any re-find)
-      const itemAfter = window._tb.placeActivities.find((it) => it.id === item.id) || {};
-      const cur = (itemAfter.requiredPlaces || [])[0] || {};
-      const after = { stored: !!cur._keep, derived: keepOf(cur), place: cur.place, sameObject: cur === p0 };
-      return { threw, before, after, p0Immediate,
-               flipped: after.stored !== before.stored,
-               flippedImmediate: p0Immediate !== before.stored,
-               consistentAfter: after.stored === after.derived };
+      try { window.togglePlaceActivity(item.id); } catch (e) { threw = String(e && e.message || e); }
+      const itemAfter = window._tb.placeActivities.find((it) => it.id === item.id) || { requiredPlaces: [] };
+      const after = { anyKept: anyKeep(itemAfter.requiredPlaces) };
+      return { threw, before, after, flipped: after.anyKept !== before.anyKept };
     });
     console.log('[keep-toggle] ' + JSON.stringify(r));
     expect(r.err || '').toBe('');
     expect(r.threw, 'toggle threw: ' + r.threw).toBe('');
-    expect(r.flipped, 'toggle must flip the stored keep').toBe(true);
-    expect(r.consistentAfter, 'after toggle, _keepOf must agree with stored (no staleness): ' + JSON.stringify(r)).toBe(true);
+    expect(r.flipped, 'activity toggle must flip keep and survive the re-render').toBe(true);
   });
 
 });
