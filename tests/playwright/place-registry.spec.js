@@ -59,3 +59,47 @@ test('unified Place registry + destinations projection are faithful to a real tr
   expect(res.projNames).toEqual(res.tripDestNames);
   expect(res.projNames.length).toBeGreaterThanOrEqual(3);
 });
+
+// OBSERVER (non-fatal): measure candidate↔requiredPlace mirror drift on a live
+// trip that exercises a real role CHANGE through MaxRoleWriter — the exact path
+// PD.86 drift travels. This does NOT fail the gate on mismatch; it logs the
+// finding so we can see whether real trips carry drift before promoting
+// candidateMirrorCheck to a hard assertion (or funneling the drift sites out).
+test('OBSERVER: candidate↔requiredPlace mirror drift after a live role change', async ({ page }) => {
+  await bootClean(page);
+  // Seed a sight candidate whose requiredPlace name carries a country suffix —
+  // the classic normalizer-gap shape ("Gullfoss" vs "Gullfoss, Iceland").
+  const withSight = brief({
+    candidates: BASES.concat([
+      { id: 'c9', place: 'Gullfoss', country: 'Iceland', whyItFits: 'waterfall', lat: 64.33, lng: -20.12, status: 'keep' },
+    ]),
+    requiredPlaces: ['Gullfoss, Iceland'],
+  });
+  await page.evaluate((b) => { window.MaxEnginePicker.resetState(b); window._mdcItems = []; }, withSight);
+  await page.evaluate(async () => { await window.buildFromCandidates(); });
+  await page.waitForSelector('.tm-dest', { timeout: 8000 });
+
+  const obs = await page.evaluate(() => {
+    const trip = window.TripStore && window.TripStore.trip;
+    const MP = window.MaxPlaces;
+    if (!trip || !MP) return { err: !trip ? 'no live trip' : 'MaxPlaces not exposed' };
+    // Drive a real role change through the canonical writer (set(idOrPlace,
+    // role, opts)) — the exact mutation path PD.86 drift travels.
+    let drove = false;
+    try {
+      if (window.MaxRoleWriter && typeof window.MaxRoleWriter.set === 'function') {
+        const c = window.MaxRoleWriter.set('Gullfoss', 'daytrip', { hub: 'Reykjavik' });
+        drove = !!c;
+      }
+    } catch (e) { /* observation only */ }
+    const r = MP.candidateMirrorCheck(trip);
+    return { drove, ok: r.ok, checked: r.checked, mismatches: r.mismatches };
+  });
+
+  expect(obs.err || '').toBe('');
+  // NON-FATAL: report, never fail. CI log shows the measurement.
+  console.log('[mirror-observer] drove=' + obs.drove + ' checked=' + obs.checked +
+              ' drift=' + (obs.ok ? 'none' : JSON.stringify(obs.mismatches)));
+  test.info().annotations.push({ type: 'mirror-drift', description: JSON.stringify(obs) });
+  expect(typeof obs.checked).toBe('number'); // assert only that the check RAN
+});
