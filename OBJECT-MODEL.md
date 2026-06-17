@@ -272,9 +272,19 @@ Finishable checklist:
      direct-write — they can only migrate AFTER step 2.5.
 2.5. **Route the direct `_keep` WRITES through `MaxRoleWriter.set`** (which writes
    the decision log + mirrors to the cache), so `_keepOf` is always authoritative.
-   The single-place doclink toggle already does this (`pm-doclink-dest:209`); the
-   multi-place toggles and app-main checkbox writes do not. Delicate (emit/render
-   timing — watch for the double-emit class) and browser-verified.
+   - Investigation found most "direct write" toggles are DEAD (no callers):
+     `togglePlaceInActivity`, `toggleActivityCheckbox`, `toggleMustDoItem`.
+   - Live picker keep-toggles `toggleDestKeep` / `toggleDestKeepInSection` /
+     `togglePlaceByPlaceMode` already route through `set` ✓.
+   - DONE: `togglePlaceActivity` (the activity master-checkbox) routed through
+     `set` (commit 7e9d3dc). This ALSO fixed a real bug — the direct write was
+     reverted by the re-render's reconcile, so the toggle silently didn't stick.
+     Gated by build-harness `activity keep-toggle flips and sticks` (CI green).
+   - REMAINING: `toggleMdcItem` (app-main:3986) direct-writes `_keep` but on the
+     `_mdcItems` MUST-DO DISCOVERY buffer (a pre-trip stage), not trip
+     placeActivities — a separate sub-system; route when that phase is tackled.
+   - Follow-up: `togglePlaceActivity`'s per-place `set` may emit per call (extra
+     renders during the batch — perf, not correctness; dedupe like resequence).
 3. **Retire the `_keep` cache.** CAVEAT to verify first: `_keepOf` falls back to
    `!!p._keep` only when the decision log isn't attached, and returns the ORIGIN
    DEFAULT when the log is merely sparse. Before deleting the stored flag, prove
