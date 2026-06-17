@@ -1,4 +1,5 @@
 // @ts-check
+import { _escHtml } from "./util-esc.mjs";
 // max-sync.js — desktop ↔ server bridge.
 //
 // Where this fits:

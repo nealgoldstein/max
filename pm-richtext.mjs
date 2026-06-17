@@ -1,4 +1,5 @@
 // @ts-check
+import { _escHtml } from "./util-esc.mjs";
 // pm-richtext.js — extracted verbatim from index.html (PD.483 bloat reduction).
 // Place-meta rich-text research panel (init, setup, checkbox rows).
 // Pure function-cluster: declarations + globalThis-guarded exposures, no
