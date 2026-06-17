@@ -228,7 +228,7 @@ const global = /** @type {any} */ (globalThis);
         (it.requiredPlaces || []).forEach(function (p) {
           if (!p || !p.place) return;
           if (p._autoCreated) return; // a Max hub is a stay proposal, not a sight
-          if (!(p._keep === false && p._rejected !== true)) return; // unchecked only
+          if (!((typeof _keepOf === "function" ? !_keepOf(p) : p._keep === false) && p._rejected !== true)) return; // unchecked only — keep via _keepOf
           var k = _normKey(p.place);
           if (!k || excluded[k] || out[k]) return;
           out[k] = { name: p.place, lat: p.lat, lng: p.lng, section: it.section };
@@ -350,7 +350,7 @@ const global = /** @type {any} */ (globalThis);
         if (!it || it.type === "route" || isStaySec(it.section)) return;
         (it.requiredPlaces || []).forEach(function (p) {
           if (!p || !p.place || p._autoCreated) return;
-          if (p._keep === false || p._rejected === true) return;
+          if ((typeof _keepOf === "function" ? !_keepOf(p) : p._keep === false) || p._rejected === true) return;
           var k = _normKey(p.place);
           if (!k || excluded[k] || seenF[k]) return;
           seenF[k] = true;

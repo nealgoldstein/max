@@ -588,7 +588,7 @@ const global = /** @type {any} */ (globalThis);
         if (isHub(p)) return;                            // a hub is a stay proposal, not a sight
         if (isDestination(p)) return;                    // a destination is not a considered sight
         var decision = (p._rejected === true) ? "rejected"
-          : (p._keep === false ? "unchecked" : "checked");
+          : ((typeof _keepOf === "function" ? !_keepOf(p) : p._keep === false) ? "unchecked" : "checked");
         // PD.404: a PER-PLACE themeFit overrides the item's section-derived
         // one. A catch-all item (e.g. "Sights you're keeping") groups many
         // places under one section, so the only way to sort individual

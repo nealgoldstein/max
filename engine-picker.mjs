@@ -4012,7 +4012,7 @@ const global = /** @type {any} */ (globalThis);
             if (!p || !p.place) return;
             var k = _pd223NrmFn(p.place);
             var _isRej0 = p._rejected === true;
-            var _isCons0 = p._keep === false && !_isRej0;
+            var _isCons0 = (typeof _keepOf === "function" ? !_keepOf(p) : p._keep === false) && !_isRej0;
             if (_isCons0 || _isRej0) _pd269Refs++;
             // PD.379: auto-created hubs are STAY PROPOSALS, not sights
             // — an uncommitted hub stays in Discovery's Recommended
