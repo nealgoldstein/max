@@ -3,6 +3,7 @@ import { MaxRoute } from "./engine-routing.mjs";
 import { MaxGeo } from "./engine-geo.mjs";
 import { MaxEnrich } from "./engine-enrich.mjs";
 import { MaxBuild } from "./engine-build.mjs";
+import { MaxPlaces } from "./place-registry.mjs"; // #Place D cutover: destinations access layer
 import { MaxEngineClassify } from "./engine-classify.mjs";
 import TripStore from "./tripstore.mjs";
 import MaxDB from "./db.mjs";
@@ -347,7 +348,7 @@ function _tripSearchScan(q) {
   var out = [];
   if (typeof trip === "undefined" || !trip || !trip.destinations) return out;
   var N = _tripSearchNorm;
-  (trip.destinations || []).forEach(function (dest) {
+  MaxPlaces.destinationsOf(trip).forEach(function (dest) {
     var destLabel = dest.label || dest.place || "";
     if (N(dest.place).indexOf(q) >= 0 || N(dest.label).indexOf(q) >= 0) {
       out.push({ kind: "dest", destId: dest.id, dayId: null, context: destLabel });
@@ -482,7 +483,7 @@ function _ensureTripInlineSearch() {
   var bar = document.getElementById("trip-inline-search-bar");
   if (!bar) return;
   var hasTrip = !!(typeof trip !== "undefined" && trip &&
-                   Array.isArray(trip.destinations) && trip.destinations.length);
+                   MaxPlaces.destinationsOf(trip).length);
   bar.style.display = hasTrip ? "flex" : "none";
   var inp = document.getElementById("trip-inline-search");
   if (bar._wired) {

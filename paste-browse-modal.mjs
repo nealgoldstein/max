@@ -1,6 +1,7 @@
 // @ts-check
 import { MaxRoute } from "./engine-routing.mjs";
 import MaxDB from "./db.mjs";
+import { MaxPlaces } from "./place-registry.mjs"; // #Place D cutover: destinations access layer
 // paste-browse-modal.js — extracted verbatim from index.html (PD.483 bloat reduction).
 // Paste-list brief modal + browse-chat + home selection.
 // Pure function-cluster: declarations + globalThis-guarded exposures, no
@@ -351,7 +352,7 @@ function selectTrip(id){
       var current = MaxRoute.parse();
       if (!current || current.tripId !== id) {
         var _isDiscoveryStage = trip
-          && !(Array.isArray(trip.destinations) && trip.destinations.length)
+          && !(MaxPlaces.destinationsOf(trip).length)
           && ((Array.isArray(trip.candidates) && trip.candidates.length)
               || (Array.isArray(trip.placeActivities) && trip.placeActivities.length));
         // PD.338a: otherwise, reopen where the user LEFT OFF on this
@@ -365,8 +366,8 @@ function selectTrip(id){
           var _last = (typeof _recallLastScreen === "function") ? _recallLastScreen(id) : null;
           if (_last && _last.screen && _last.screen !== MaxRoute.SCREENS.HOME) {
             if (_last.screen === MaxRoute.SCREENS.DEST) {
-              var _destOk = _last.destId && Array.isArray(trip.destinations)
-                && trip.destinations.some(function(d){ return d && d.id === _last.destId; });
+              var _destOk = _last.destId
+                && MaxPlaces.destinationsOf(trip).some(function(d){ return d && d.id === _last.destId; });
               if (_destOk) { _target.screen = MaxRoute.SCREENS.DEST; _target.destId = _last.destId; }
             } else {
               _target.screen = _last.screen;
@@ -551,7 +552,7 @@ function migrateCarRentalsIntoTracker(){
     var returnLC = (r.returnLocation||"").toLowerCase().trim();
     function findDestByPlace(nameLC){
       if(!nameLC) return null;
-      return (trip.destinations||[]).find(function(d){
+      return MaxPlaces.destinationsOf(trip).find(function(d){
         var dp = (d.place||"").toLowerCase();
         return dp && (dp.indexOf(nameLC) >= 0 || nameLC.indexOf(dp) >= 0);
       });
@@ -588,8 +589,8 @@ function migrateCarRentalsIntoTracker(){
     }
 
     // If neither matched, fall back to adding to the first destination with a note about the pickup location
-    if(!pickupDest && !returnDest && trip.destinations && trip.destinations.length){
-      var first = trip.destinations[0];
+    if(!pickupDest && !returnDest && MaxPlaces.destinationsOf(trip).length){
+      var first = MaxPlaces.destinationsOf(trip)[0];
       if(!first.trackerItems) first.trackerItems = {booked:[],see:[],visited:[]};
       var orphanParts = ["\uD83D\uDE97 Car rental"];
       if(r.company) orphanParts.push(r.company);
@@ -679,7 +680,7 @@ function enterApp(){
   // don't leave the empty-state stranded over a map that has data.
   var _ndOv = document.getElementById("no-dest-overlay");
   if (_ndOv) {
-    var _hasDests = Array.isArray(trip.destinations) && trip.destinations.length > 0;
+    var _hasDests = MaxPlaces.destinationsOf(trip).length > 0;
     _ndOv.style.display = _hasDests ? "none" : "flex";
   }
   var tn=g("trip-name-display"); if(tn){
