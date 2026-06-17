@@ -923,16 +923,16 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
     expect(r.hasThemed, 'the retried result produced a themed section').toBe(true);
   });
 
-  // ── #Place D root-cause OBSERVER (non-fatal): keep-shadow on a REAL pipeline ──
+  // ── #Place D root-cause GATE: keep-shadow on a REAL pipeline ──────────────
   // The keepFor projection (place-registry.mjs) must equal the stored _keep flag
   // the ENGINE actually writes, before we migrate the ~49 _keep readers and
-  // delete the MaxRoleWriter mirror. The pipeline above produced real
+  // delete the MaxRoleWriter mirror. The pipeline above produces real
   // placeActivities (stays + sights + day-trips + the Hverir overnight edge).
-  // Here we compare stored _keep vs keepFor across every requiredPlace. NON-FATAL:
-  // it logs the result so we can see whether real engine output already matches
-  // the projection; it never fails the gate. Promote to a hard assertion only
-  // once the wild proves clean.
-  test('OBSERVER: keep-shadow — stored _keep vs keepFor on a real pipeline trip', async ({ page }) => {
+  // PROVEN clean (16/16) on real engine output, so this is now a HARD gate: the
+  // stored flag IS redundant, and any future divergence between it and the
+  // projection — the very drift the mirror can introduce — fails CI here. This
+  // gate guards the reader migration + the eventual mirror deletion.
+  test('GATE: keep-shadow — stored _keep equals keepFor on a real pipeline trip', async ({ page }) => {
     await bootClean(page);
     await runPipeline(page);
     const obs = await page.evaluate(() => {
@@ -953,7 +953,8 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
     console.log('[keep-shadow] checked=' + obs.checked + ' requiredPlaces=' + obs.rpCount +
                 ' storedEqualsDerived=' + (obs.ok ? 'yes' : 'NO ' + JSON.stringify(obs.diffs)));
     test.info().annotations.push({ type: 'keep-shadow', description: JSON.stringify(obs) });
-    expect(typeof obs.checked).toBe('number');   // assert only that the check RAN
+    expect(obs.rpCount, 'pipeline must produce requiredPlaces (non-vacuous)').toBeGreaterThan(0);
+    expect(obs.ok, 'stored _keep diverged from the keepFor projection: ' + JSON.stringify(obs.diffs)).toBe(true);
   });
 
 });
