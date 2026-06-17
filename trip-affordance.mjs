@@ -1,4 +1,5 @@
 // @ts-check
+import MaxDB from "./db.mjs";
 // trip-affordance.js — geographic-affordance pass + multi-destination day-trip
 // mechanism (Rounds FQ/FT). Extracted from index.html (PD.457).
 

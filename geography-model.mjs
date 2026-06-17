@@ -1,4 +1,5 @@
 // @ts-check
+import MaxDB from "./db.mjs";
 import { MaxDecisions } from "./decision-model.mjs";
 // geography-model.js — geography model + MaxRoleWriter (Round NC.X). Extracted from
 // index.html (PD.458). Self-contained window.MaxRoleWriter exposure travels with its def.

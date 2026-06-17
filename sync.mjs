@@ -1,4 +1,5 @@
 // @ts-check
+import MaxDB from "./db.mjs";
 import { _escHtml } from "./util-esc.mjs";
 // max-sync.js — desktop ↔ server bridge.
 //

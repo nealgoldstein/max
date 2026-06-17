@@ -1,4 +1,5 @@
 // @ts-check
+import MaxDB from "./db.mjs";
 // edit-constraints.js — re-open Step 1 (brief) from within planning. Extracted from
 // index.html (PD.460).
 

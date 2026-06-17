@@ -1,4 +1,5 @@
 // @ts-check
+import MaxDB from "./db.mjs";
 import MaxMigration from "./migration.mjs";
 // engine-trip.js — Max trip engine, pure helpers (Round HB: Phase 1)
 //

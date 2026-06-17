@@ -1,4 +1,5 @@
 // @ts-check
+import MaxDB from "./db.mjs";
 // logistics.js — Logistics screen (arrival/departure, ground transport, car rentals)
 // + resequencing trigger. Extracted from index.html (PD.455).
 

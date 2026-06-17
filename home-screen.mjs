@@ -1,4 +1,5 @@
 // @ts-check
+import MaxDB from "./db.mjs";
 // home-screen.js — Home screen + pasted-list import pipeline (parsePlacesList,
 // _buildTripFromPastedList, etc.). Extracted from index.html (PD.456). Self-contained
 // globalThis exposures travel with their defs.

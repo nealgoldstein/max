@@ -1,4 +1,5 @@
 // @ts-check
+import MaxDB from "./db.mjs";
 import MaxMigration from "./migration.mjs";
 import { _escHtml } from "./util-esc.mjs";
 // trip-ui.js — Shared trip-view rendering between desktop and mobile.

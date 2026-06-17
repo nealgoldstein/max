@@ -1,4 +1,5 @@
 // @ts-check
+import MaxDB from "./db.mjs";
 // map-pin-panel.js — Map pin action panel (bottom sheet). Extracted verbatim from index.html (PD.473, bloat reduction).
 
 // ── Map pin action panel (bottom sheet on map) ───────────────

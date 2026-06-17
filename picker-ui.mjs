@@ -1,4 +1,5 @@
 // @ts-check
+import MaxDB from "./db.mjs";
 // picker-ui.js — UI rendering for the picker (Round HW: Phase 4 of
 // the engine/UI split).
 //
