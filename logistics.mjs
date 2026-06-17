@@ -1,5 +1,6 @@
 // @ts-check
 import MaxDB from "./db.mjs";
+import TripStore from "./tripstore.mjs"; // #Place D flip: route destination writes through the store door
 // logistics.js — Logistics screen (arrival/departure, ground transport, car rentals)
 // + resequencing trigger. Extracted from index.html (PD.455).
 
@@ -282,7 +283,12 @@ function resequenceTrip() {
     dest.days = makeDays(dest.id, dest.place, dest.intent, dest.dateFrom, nights);
   });
 
-  trip.destinations = ordered;
+  // #Place D flip: the reorder write now goes through the store door (keeps the
+  // registry faithful by construction; gated by tripstore-tests). _mutate already
+  // version-bumps + persists + emits; _emitTripMutation below is now redundant for
+  // those but kept for its explicit renderer/map refresh — a benign double on this
+  // one-shot user action, to be deduped once browser-verified.
+  TripStore.setDestinations(ordered);
   // TM.4 (v328): autoSave + drawTripMode + updateMainMap → emit. The
   // listener routes to the right renderer based on _leftMode and the
   // mapDataChange emit refreshes the map. Same effect, no inline coupling.
