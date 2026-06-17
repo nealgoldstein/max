@@ -260,7 +260,21 @@ Finishable checklist:
 2. **Migrate the ~49 `_keep` READS onto `_keepOf`**, leaf-first, each a
    behavioral no-op (proven equal), gate-verified. EXCLUDE the shadow/detector
    reads in place-registry.mjs (they must read the stored flag to compare) and
-   `_keepOf` itself. Use the guarded-global pattern the other app globals use.
+   `_keepOf` itself. Use the guarded-global pattern (`typeof _keepOf === "function"
+   ? _keepOf(p) : <exact original expression>`) so Node-imported modules keep
+   their original behavior (suite proves identity) and the browser derives.
+   - DONE (8 reads, log-fed paths): engine-picker:4674/4015, place-set:240,
+     place-repo:248, max-data:231/353, discovery-model:591.
+   - **BLOCKED on the write side:** the remaining reads are all downstream of
+     DIRECT `p._keep =` writes that bypass the decision log (the checkbox toggles
+     `pm-doclink-dest:309/334`, `app-main` checkbox writes ~4005/8775, and the
+     reconcile flips). `_keepOf` is log-first, so those reads are read-after-
+     direct-write — they can only migrate AFTER step 2.5.
+2.5. **Route the direct `_keep` WRITES through `MaxRoleWriter.set`** (which writes
+   the decision log + mirrors to the cache), so `_keepOf` is always authoritative.
+   The single-place doclink toggle already does this (`pm-doclink-dest:209`); the
+   multi-place toggles and app-main checkbox writes do not. Delicate (emit/render
+   timing — watch for the double-emit class) and browser-verified.
 3. **Retire the `_keep` cache.** CAVEAT to verify first: `_keepOf` falls back to
    `!!p._keep` only when the decision log isn't attached, and returns the ORIGIN
    DEFAULT when the log is merely sparse. Before deleting the stored flag, prove
