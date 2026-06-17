@@ -165,6 +165,50 @@
     };
   }
 
+  // ── #Place model, Phase A — orthogonal axes (OBJECT-MODEL.md G5) ──────
+  // The legacy `role` string conflates FOUR independent concerns. Decompose it:
+  //   • placeRole    — destination | sight        (Axis 2)
+  //   • exploredFrom — base | daytrip | onway | trip | unassigned   (the
+  //                    SUBJECTIVE itinerary relation; hub/leg ride along, and
+  //                    already live on Decision — they are not in the role string)
+  //   • rejected     — a DECISION, not a role
+  // (geo-within — the OBJECTIVE nesting relation — is Axis 1 / Phase C, not here.)
+  //
+  // axesOf and legacyRoleOf are PURE and REVERSIBLE: legacyRoleOf(axesOf(r)) === r
+  // for every legacy role. The shadow test proves it, so the four-way split can be
+  // adopted with zero information loss before any cutover.
+  /** @param {?string} role @param {?MaxDecisionSpec} [decision] */
+  function axesOf(role, decision) {
+    var d = decision || null;
+    switch (role) {
+      case "stay":    return { placeRole: "destination", exploredFrom: { kind: "base" }, rejected: false };
+      case "daytrip": return { placeRole: "sight", exploredFrom: { kind: "daytrip", hub: (d && d.hub) || null }, rejected: false };
+      case "onway":   return { placeRole: "sight", exploredFrom: { kind: "onway", leg: (d && d.leg) || null }, rejected: false };
+      case "see":     return { placeRole: "sight", exploredFrom: { kind: "trip" }, rejected: false };
+      case "maybe":   return { placeRole: "sight", exploredFrom: { kind: "unassigned" }, rejected: false };
+      case "reject":  return { placeRole: "sight", exploredFrom: { kind: "unassigned" }, rejected: true };
+      default:        return { placeRole: "sight", exploredFrom: { kind: "unassigned" }, rejected: false };
+    }
+  }
+  /** @param {?{placeRole?:string, exploredFrom?:{kind?:string}, rejected?:boolean}} axes */
+  function legacyRoleOf(axes) {
+    if (!axes) return "see";
+    if (axes.rejected) return "reject";
+    if (axes.placeRole === "destination") return "stay";
+    var k = axes.exploredFrom && axes.exploredFrom.kind;
+    if (k === "daytrip") return "daytrip";
+    if (k === "onway") return "onway";
+    if (k === "unassigned") return "maybe";
+    return "see"; // "trip" and any other → undecided sight
+  }
+  // Shadow check: prove the decomposition reconstructs every legacy role string.
+  // Returns { ok, mismatches }. Node-tested + browser-runnable (_placeAxesShadowCheck).
+  function axesRoundTripCheck(roles) {
+    var canonical = roles || ["stay", "see", "daytrip", "onway", "maybe", "reject"];
+    var mism = canonical.filter(function (r) { return legacyRoleOf(axesOf(r)) !== r; });
+    return { ok: mism.length === 0, mismatches: mism };
+  }
+
   var MaxDecisions = {
     Decision: Decision,
     Decisions: Decisions,
@@ -173,7 +217,10 @@
     keepOf: keepOf,
     roleOf: roleOf,
     sectionOf: sectionOf,
-    project: project
+    project: project,
+    axesOf: axesOf,
+    legacyRoleOf: legacyRoleOf,
+    axesRoundTripCheck: axesRoundTripCheck
   };
 
   if (_G && !_G.MaxDecisions) _G.MaxDecisions = MaxDecisions;
@@ -194,9 +241,12 @@ export default MaxDecisions;
   __expg._G = _G;
   __expg._normLeg = _normLeg;
   __expg._origin = _origin;
+  __expg.axesOf = axesOf;
+  __expg.axesRoundTripCheck = axesRoundTripCheck;
   __expg.factsOf = factsOf;
   __expg.fromJSON = fromJSON;
   __expg.keepOf = keepOf;
+  __expg.legacyRoleOf = legacyRoleOf;
   __expg.project = project;
   __expg.roleOf = roleOf;
   __expg.sectionOf = sectionOf;

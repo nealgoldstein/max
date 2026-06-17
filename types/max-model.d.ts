@@ -508,3 +508,41 @@ declare var togMov: any;
 declare var toggleTransportForm: any;
 declare var updateCEShortlist: any;
 declare var updateTrackerBadge: any;
+
+// ─────────────────────────────────────────────────────────────────────────
+// #Place model (OBJECT-MODEL.md) — the unified target shape. SPEC ONLY: no
+// runtime depends on these yet; the live app converges onto them phase by
+// phase. Kept LEAN by design — a small core plus composable blocks that are
+// present only when relevant (never a god-object). The four orthogonal
+// concerns the legacy `role` string conflated each get their own field.
+// ─────────────────────────────────────────────────────────────────────────
+type PlaceRole = "trip" | "destination" | "sight";              // Axis 2
+type GeoType = "point" | "polygon" | "region";                  // Axis 1
+
+interface PlaceGeo {
+  type: GeoType;
+  lat?: number; lng?: number;                                   // point
+  polygon?: Array<[number, number]>;                           // polygon
+  bbox?: [number, number, number, number];                    // region extent
+}
+
+// Axis 3a — the SUBJECTIVE itinerary relation (a decision: "explored from").
+interface ExploredFrom {
+  kind: "base" | "daytrip" | "onway" | "trip" | "unassigned";
+  hub?: string | null;                                          // daytrip anchor
+  leg?: { fromPlace: string; toPlace: string } | null;         // onway leg
+}
+
+interface PlaceDecision { kept: boolean | null; rejected: boolean; }
+
+interface Place {
+  id: string;
+  identity: { key: string; name: string };
+  geo: PlaceGeo;
+  role: PlaceRole;
+  // composable blocks — present only when relevant
+  stay?: { nights?: number };          // destinations only
+  exploredFrom?: ExploredFrom;         // Axis 3a — subjective itinerary relation
+  geoWithin?: string | null;           // Axis 3b — OBJECTIVE nesting: parent place id
+  decision?: PlaceDecision;
+}

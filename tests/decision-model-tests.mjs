@@ -201,6 +201,44 @@ test("fromJSON tolerates empty / missing / malformed input", function () {
   assert.strictEqual(MD.fromJSON("nope").size(), 0);
 });
 
+// ── #Place Phase A: orthogonal axes are a LOSSLESS, reversible split ───
+// (OBJECT-MODEL.md G5). legacyRoleOf(axesOf(r)) === r for every legacy role —
+// proving the four-way decomposition can be adopted with zero information loss.
+test("axes round-trip: every legacy role reconstructs exactly", function () {
+  var r = MD.axesRoundTripCheck();
+  assert.ok(r.ok, "role(s) did not round-trip: " + r.mismatches.join(", "));
+});
+test("axesOf: stay -> destination + base", function () {
+  var a = MD.axesOf("stay");
+  assert.strictEqual(a.placeRole, "destination");
+  assert.strictEqual(a.exploredFrom.kind, "base");
+  assert.strictEqual(a.rejected, false);
+});
+test("axesOf: daytrip -> sight + explored-from hub (decision rides along)", function () {
+  var a = MD.axesOf("daytrip", { hub: "Reykjavik" });
+  assert.strictEqual(a.placeRole, "sight");
+  assert.strictEqual(a.exploredFrom.kind, "daytrip");
+  assert.strictEqual(a.exploredFrom.hub, "Reykjavik");
+});
+test("axesOf: onway -> sight + explored-from leg", function () {
+  var leg = { fromPlace: "A", toPlace: "B" };
+  var a = MD.axesOf("onway", { leg: leg });
+  assert.strictEqual(a.placeRole, "sight");
+  assert.strictEqual(a.exploredFrom.kind, "onway");
+  assert.deepStrictEqual(a.exploredFrom.leg, leg);
+});
+test("axesOf: reject is a DECISION, not a role", function () {
+  var a = MD.axesOf("reject");
+  assert.strictEqual(a.rejected, true);
+  assert.strictEqual(MD.legacyRoleOf(a), "reject");
+});
+test("see vs maybe stay distinct (trip-level vs unplaced)", function () {
+  assert.strictEqual(MD.axesOf("see").exploredFrom.kind, "trip");
+  assert.strictEqual(MD.axesOf("maybe").exploredFrom.kind, "unassigned");
+  assert.strictEqual(MD.legacyRoleOf(MD.axesOf("see")), "see");
+  assert.strictEqual(MD.legacyRoleOf(MD.axesOf("maybe")), "maybe");
+});
+
 console.log("\n──────────────────────────────────────────────────");
 console.log("PASS: " + pass + "    FAIL: " + fail);
 process.exit(fail > 0 ? 1 : 0);
