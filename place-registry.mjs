@@ -131,6 +131,46 @@ function destinationsProjectionCheck(trip) {
   return { ok: diffs.length === 0, diffs: diffs };
 }
 
+// ── Phase D — the `sights` ACCESS LAYER (flat, identity-deduped) ───────────
+// The sight analog of destinationsOf, with one structural difference: sights
+// live as requiredPlaces NESTED in placeActivities sections, and a place may
+// appear in SEVERAL sections — so there is no single canonical record to
+// return by reference the way destinations had. This projection returns the
+// deduped lean Place objects (role "sight") the registry already builds,
+// carrying the axes flat readers need: identity.name, geo {lat,lng}, decision
+// {kept, rejected}, exploredFrom. It serves the FLAT consumers (map pins,
+// coverage audits, "is this a kept sight" membership); section-grouped
+// renderers keep reading trip.placeActivities (their grouping is load-bearing).
+function sightsOf(trip) {
+  var out = [];
+  buildRegistry(trip).forEach(function (p) { if (p.role === "sight") out.push(p); });
+  return out;
+}
+// Shadow check: the sight projection is IDENTITY-faithful — every non-rejected
+// requiredPlace identity is represented in the registry (as a sight, or as a
+// destination when the same place is also a stay — dest role wins), and no
+// sight Place is invented (each traces to a source requiredPlace). Set-identity,
+// not reference identity (dedup makes the latter impossible). { ok, missing,
+// invented }.
+function sightsProjectionCheck(trip) {
+  var reg = buildRegistry(trip);
+  var sightKeys = new Set();
+  reg.forEach(function (p) { if (p.role === "sight") sightKeys.add(p.id); });
+  var wantKeys = new Set();
+  ((trip && trip.placeActivities) || []).forEach(function (it) {
+    if (!it || it.type === "route") return;
+    (it.requiredPlaces || []).forEach(function (p) {
+      if (!p || p._rejected === true) return;
+      var k = _regKey(p.place || p.name);
+      if (k) wantKeys.add(k);
+    });
+  });
+  var missing = [], invented = [];
+  wantKeys.forEach(function (k) { if (!reg.get(k)) missing.push(k); });
+  sightKeys.forEach(function (k) { if (!wantKeys.has(k)) invented.push(k); });
+  return { ok: missing.length === 0 && invented.length === 0, missing: missing, invented: invented };
+}
+
 // ── #Place high-value arc — candidate ↔ requiredPlace MIRROR drift ────────
 // trip.candidates (the discovery working set's persisted snapshot) and the
 // placeActivities[*].requiredPlaces flags are TWO representations of the SAME
@@ -245,6 +285,8 @@ var MaxPlaces = {
   registryShadowCheck: registryShadowCheck,
   destinationsOf: destinationsOf,
   destinationsProjectionCheck: destinationsProjectionCheck,
+  sightsOf: sightsOf,
+  sightsProjectionCheck: sightsProjectionCheck,
   candidateMirrorCheck: candidateMirrorCheck,
   candidateMirrorScan: candidateMirrorScan
 };
@@ -271,4 +313,6 @@ export default MaxPlaces;
   __expg.destinationsOf = destinationsOf;
   __expg.destinationsProjectionCheck = destinationsProjectionCheck;
   __expg.registryShadowCheck = registryShadowCheck;
+  __expg.sightsOf = sightsOf;
+  __expg.sightsProjectionCheck = sightsProjectionCheck;
 }

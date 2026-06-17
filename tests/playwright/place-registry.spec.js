@@ -45,9 +45,11 @@ test('unified Place registry + destinations projection are faithful to a real tr
     if (!MP) return { err: 'MaxPlaces not exposed' };
     const reg = MP.registryShadowCheck(trip);
     const proj = MP.destinationsProjectionCheck(trip);
+    const sproj = (typeof MP.sightsProjectionCheck === 'function') ? MP.sightsProjectionCheck(trip) : { ok: true };
     return {
       registryOk: reg.ok, registryMissing: reg.missing, regSize: reg.size,
       projOk: proj.ok, projDiffs: proj.diffs,
+      sightsProjOk: sproj.ok, sightsMissing: sproj.missing, sightsInvented: sproj.invented,
       projNames: MP.destinationsOf(trip).map((d) => d.place).sort(),
       tripDestNames: (trip.destinations || []).map((d) => d.place).sort(),
     };
@@ -56,6 +58,7 @@ test('unified Place registry + destinations projection are faithful to a real tr
   expect(res.err || '').toBe('');
   expect(res.registryOk, 'registry not a faithful union: ' + JSON.stringify(res.registryMissing)).toBe(true);
   expect(res.projOk, 'destinations projection drifted: ' + JSON.stringify(res.projDiffs)).toBe(true);
+  expect(res.sightsProjOk, 'sights projection drifted: missing=' + JSON.stringify(res.sightsMissing) + ' invented=' + JSON.stringify(res.sightsInvented)).toBe(true);
   expect(res.projNames).toEqual(res.tripDestNames);
   expect(res.projNames.length).toBeGreaterThanOrEqual(3);
 });

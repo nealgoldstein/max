@@ -84,6 +84,40 @@ test("access layer preserves order + carries full record (rich fields intact)", 
   assert.ok(MaxPlaces.destinationsProjectionCheck(t2).ok);
 });
 
+// ── Phase D: the sights ACCESS LAYER (flat, identity-deduped) ──────────────
+console.log("\n#Place Phase D — sights projection (flat, deduped)");
+
+test("sightsOf returns the deduped sight Places (role=sight), not destinations", function () {
+  var s = MaxPlaces.sightsOf(trip);
+  var names = s.map(function (p) { return p.identity.name; }).sort();
+  assert.deepStrictEqual(names, ["Gullfoss"]);            // Reykjavik is a dest; RejectedSpot excluded
+  assert.strictEqual(s[0].role, "sight");
+  assert.strictEqual(s[0].decision.kept, true);
+  assert.deepStrictEqual(s[0].geo, { type: "point", lat: 64.3, lng: -20.1 });
+});
+test("SHADOW: sight projection is identity-faithful (nothing dropped or invented)", function () {
+  var r = MaxPlaces.sightsProjectionCheck(trip);
+  assert.ok(r.ok, "missing=" + r.missing.join(",") + " invented=" + r.invented.join(","));
+});
+test("a place that is BOTH a stay and a requiredPlace is a destination, not a sight", function () {
+  // Reykjavik appears as a dest AND a stay requiredPlace → dest role wins, not in sightsOf
+  var names = MaxPlaces.sightsOf(trip).map(function (p) { return p.identity.name; });
+  assert.ok(names.indexOf("Reykjavik") < 0, "Reykjavik leaked into sights");
+  assert.ok(MaxPlaces.sightsProjectionCheck(trip).ok);
+});
+test("the same place across multiple sections dedupes to one sight Place", function () {
+  var t = { placeActivities: [
+    { type: "activity", requiredPlaces: [{ place: "Gullfoss", _keep: true, lat: 64.3, lng: -20.1 }] },
+    { type: "activity", requiredPlaces: [{ place: "Gullfoss", _keep: true }] }  // repeat in 2nd section
+  ] };
+  assert.strictEqual(MaxPlaces.sightsOf(t).length, 1, "duplicate sight not deduped");
+  assert.ok(MaxPlaces.sightsProjectionCheck(t).ok);
+});
+test("empty / missing trip → empty sights, shadow ok", function () {
+  assert.strictEqual(MaxPlaces.sightsOf(null).length, 0);
+  assert.ok(MaxPlaces.sightsProjectionCheck({}).ok);
+});
+
 // ── high-value arc: candidate ↔ requiredPlace MIRROR drift detector ────────
 // The check derives EXPECTED requiredPlace flags from each decided candidate
 // and reports where the live flags disagree. Green on a consistent trip; it
