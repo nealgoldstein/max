@@ -1,4 +1,6 @@
 // @ts-check
+import SectionKind from "./section-kind.mjs";
+import PlaceKey from "./place-key.mjs";
 // discovery-ingestion.js — SSOT Phase 2: the ONE ingestion service.
 //
 // Turns trip data into a DiscoveryModel through a SINGLE pipeline:

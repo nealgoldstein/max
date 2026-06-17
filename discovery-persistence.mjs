@@ -1,4 +1,5 @@
 // @ts-check
+import SectionKind from "./section-kind.mjs";
 // discovery-persistence.js — SSOT Phase 3: the persistence seam.
 //
 // Two responsibilities, both pure of TripStore/DOM so they're unit-testable and

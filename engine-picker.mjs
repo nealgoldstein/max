@@ -1,4 +1,5 @@
 // @ts-check
+import MaxMigration from "./migration.mjs";
 // engine-picker.js — Max picker engine, pure helpers (Round HH: Phase 3)
 //
 // Phase 3 of the engine/UI split. The picker engine owns the workflow

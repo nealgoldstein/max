@@ -1,4 +1,5 @@
 // @ts-check
+import MaxMigration from "./migration.mjs";
 // ─────────────────────────────────────────────────────────────────────
 // TripStore — single source of truth for trip state.
 //

@@ -1,4 +1,6 @@
 // @ts-check
+import SectionKind from "./section-kind.mjs";
+import PlaceKey from "./place-key.mjs";
 // max-data.js — schema accessor layer.
 //
 // PD.319-3. Before this module, every renderer read raw `trip.X`.

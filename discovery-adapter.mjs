@@ -1,4 +1,6 @@
 // @ts-check
+import SectionKind from "./section-kind.mjs";
+import PlaceKey from "./place-key.mjs";
 // discovery-adapter.js — PD.401g: the Discovery placement adapter.
 //
 // Extracted verbatim from index.html's inline script (strangler-fig:

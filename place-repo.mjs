@@ -1,4 +1,5 @@
 // @ts-check
+import PlaceKey from "./place-key.mjs";
 // place-repo.js — PD.401M: the place repository.
 //
 // THE single store of every place that exists in a trip's discovery

@@ -1,4 +1,6 @@
 // @ts-check
+import SectionKind from "./section-kind.mjs";
+import PlaceKey from "./place-key.mjs";
 // discovery-model.js — PD.400: the Discovery domain, re-architected.
 //
 // WHY THIS EXISTS

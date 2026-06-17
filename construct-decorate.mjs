@@ -1,4 +1,5 @@
 // @ts-check
+import PlaceKey from "./place-key.mjs";
 import { _escHtml } from "./util-esc.mjs";
 // construct-decorate.js — extracted verbatim from index.html (PD.483 bloat reduction).
 // Construct-then-decorate + PD.382 provenance + paste-list modal.

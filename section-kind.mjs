@@ -1,4 +1,5 @@
 // @ts-check
+import PlaceKey from "./place-key.mjs";
 // section-kind.js — PD.381: section identity in ONE place.
 //
 // A "section" string was doing double duty as both a display label AND

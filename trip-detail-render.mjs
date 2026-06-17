@@ -1,4 +1,5 @@
 // @ts-check
+import MaxMigration from "./migration.mjs";
 import { _escHtml } from "./util-esc.mjs";
 // trip-detail-render.js — Explore pane, Sights section, Day-trips
 // section, Later/Maybe bucket builder, Destination-mode renderer, and

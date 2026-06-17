@@ -1,4 +1,5 @@
 // @ts-check
+import MaxMigration from "./migration.mjs";
 // engine-trip.js — Max trip engine, pure helpers (Round HB: Phase 1)
 //
 // Phase 1 of the engine/UI split. This module owns the trip engine's

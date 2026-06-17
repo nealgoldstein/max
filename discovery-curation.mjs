@@ -1,4 +1,5 @@
 // @ts-check
+import PlaceKey from "./place-key.mjs";
 // discovery-curation.js — Discovery curation persistence. Extracted verbatim from index.html (PD.473, bloat reduction).
 
 // ── PD.334: Discovery curation is REAL DATA — save it like data ────
