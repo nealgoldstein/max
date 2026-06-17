@@ -1,6 +1,7 @@
 // @ts-check
 import { MaxRoute } from "./engine-routing.mjs";
 import { MaxEnrich } from "./engine-enrich.mjs";
+import { MaxPlaces } from "./place-registry.mjs"; // #Place D cutover: destinations access layer
 import MaxMigration from "./migration.mjs";
 import { _escHtml } from "./util-esc.mjs";
 // trip-detail-render.js — Explore pane, Sights section, Day-trips
@@ -542,7 +543,7 @@ function buildExplorePane(dest){
   // adjust the threshold to surface options Max wouldn't have
   // suggested by default.
   (function(){
-    if (!trip || !Array.isArray(trip.destinations) || trip.destinations.length < 2) return;
+    if (MaxPlaces.destinationsOf(trip).length < 2) return;
     var peerSec = document.createElement("div");
     peerSec.style.cssText = "margin-top:18px;";
     var peerHdr = document.createElement("div");

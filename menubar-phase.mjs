@@ -1,5 +1,6 @@
 // @ts-check
 import { MaxRoute } from "./engine-routing.mjs";
+import { MaxPlaces } from "./place-registry.mjs"; // #Place D cutover: destinations access layer
 // menubar-phase.js — extracted verbatim from index.html (PD.483 bloat reduction).
 // Mac-style menu bar (File/Edit/Settings) + phase-status chips.
 // Pure function-cluster: declarations + globalThis-guarded exposures, no
@@ -29,7 +30,7 @@ function _mwOpen(name){
   // keeps the menu honest about what's available right now.
   var _expBtn = document.getElementById("mw-export-trip");
   if (_expBtn) {
-    var _hasDests = !!(trip && Array.isArray(trip.destinations) && trip.destinations.length);
+    var _hasDests = MaxPlaces.destinationsOf(trip).length > 0;
     _expBtn.style.display = _hasDests ? "" : "none";
   }
   btn.classList.add('is-open');
@@ -74,7 +75,7 @@ function _mwOutsideClick(e){
 
 function goHome(){
   if (document.body) document.body.classList.remove("picker-active");
-  if(trip.destinations.length>0&&!confirm("Return to trips? Your trip is saved."))return;
+  if(MaxPlaces.destinationsOf(trip).length>0&&!confirm("Return to trips? Your trip is saved."))return;
   // PD.332: goHome can be invoked from INSIDE Discovery (the picker
   // header's ← Home). showHome only swaps the home/app panels — the
   // picker overlay is fullscreen and reparented to <body>, so it kept
@@ -104,21 +105,22 @@ function goHome(){
 // other phases. Style is uniform: small pill row, no visual
 // dominance over the page title.
 function _phaseStatus() {
+  var _dests = MaxPlaces.destinationsOf(trip); // #Place D: destinations access layer (== trip.destinations)
   var out = {
-    hasTrip:        !!(trip && trip.destinations && trip.destinations.length),
+    hasTrip:        _dests.length > 0,
     destCount:      0,
     nights:         0,
     consideredCount: 0,
     discoveredCount: 0
   };
   if (out.hasTrip) {
-    out.destCount = trip.destinations.length;
-    out.nights = trip.destinations.reduce(function(s, d){ return s + (d.nights || 0); }, 0);
+    out.destCount = _dests.length;
+    out.nights = _dests.reduce(function(s, d){ return s + (d.nights || 0); }, 0);
     // PD.430: stays and sights are different kinds of stop and are counted
     // separately — a STAY has nights (the route moves between them); a SIGHT is
     // a 0-night decoration on the route. Never present them as one "N dest".
-    out.stayCount  = trip.destinations.filter(function(d){ return (d.nights || 0) > 0; }).length;
-    out.sightCount = trip.destinations.filter(function(d){ return !((d.nights || 0) > 0); }).length;
+    out.stayCount  = _dests.filter(function(d){ return (d.nights || 0) > 0; }).length;
+    out.sightCount = _dests.filter(function(d){ return !((d.nights || 0) > 0); }).length;
   }
   // v360.1: union-dedupe-filter across both data sources so this
   // count matches MaxTripUI._collectSetAsidePlaces (which feeds the
@@ -148,7 +150,7 @@ function _phaseStatus() {
       if (!name) return;
       inDest[String(name).toLowerCase().trim()] = true;
     }
-    (trip.destinations || []).forEach(function(d){
+    _dests.forEach(function(d){
       if (!d) return;
       _mark(d.place);
       (d.days || []).forEach(function(day){
