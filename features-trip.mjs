@@ -1,5 +1,6 @@
 // @ts-check
 import { MaxGeo } from "./engine-geo.mjs";
+import { MaxPlaces } from "./place-registry.mjs"; // #Place D cutover: destinations access layer
 // features-trip.js — Tracker, trip-name editing, spend tracking,
 // general bookings, misc data, and on-demand routing fetch. Extracted
 // verbatim from index.html (PD.451, bloat reduction). Declaration-only
@@ -495,7 +496,7 @@ function toggleSpending(){
 
 function calcTotalSpend(){
   var total={};
-  trip.destinations.forEach(function(dest){
+  MaxPlaces.destinationsOf(trip).forEach(function(dest){
     dest.hotelBookings.filter(function(b){return b.status!=="cancelled"&&b.pricePaid;}).forEach(function(b){
       total[b.currency]=(total[b.currency]||0)+b.pricePaid;
     });
@@ -518,7 +519,7 @@ function calcTotalSpend(){
   var countriesByCurrency = {};
   if (typeof MaxGeo !== "undefined" && MaxGeo.all && Array.isArray(trip.destinations)) {
     var _tripCountryNames = {};
-    trip.destinations.forEach(function(d){
+    MaxPlaces.destinationsOf(trip).forEach(function(d){
       if (!d) return;
       var dc = d.country
         || (d.brief && d.brief.country)
