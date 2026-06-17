@@ -193,17 +193,22 @@ function candidateMirrorCheck(trip) {
   return { ok: mismatches.length === 0, checked: checked, mismatches: mismatches };
 }
 
-// DIAGNOSTIC scan (looser). candidateMirrorCheck matches by canonical key —
-// EXACTLY as MaxRoleWriter's flag-sync does — so it is blind to the PD.86 gap
-// where the two normalizers disagree: resolve("Gullfoss") = "gullfoss" but
-// resolve("Gullfoss, Iceland") = "gullfoss iceland", so the role is set on the
-// candidate and the requiredPlace flag never flips (the gray-pin bug). This
-// scan matches with PlaceKey.relatedTo — THE identity relation the rest of the
-// app uses (token-overlap + word-prefix containment) — and reports decided
-// candidates whose decision did NOT reach a RELATED requiredPlace. It only
-// considers pairs the strict KEY missed (else candidateMirrorCheck covers
-// them), so the two never double-count. A non-empty result is a LIVE
-// normalizer-gap bug. Observer-only; never a gate.
+// DIAGNOSTIC scan (looser) — SURFACES SUSPECTS, does not prove bugs.
+// candidateMirrorCheck matches by canonical key — the same _normPlaceName the
+// writer uses, which already strips country suffixes (PD.96), so it is sound
+// and false-positive-free. This scan additionally matches with
+// PlaceKey.relatedTo (token-overlap + word-prefix containment) to surface pairs
+// the writer's EXACT matcher skipped — e.g. candidate "Þingvellir" vs
+// requiredPlace "Þingvellir National Park", which the writer never bridges.
+//
+// IMPORTANT: a hit is NOT necessarily a bug. The `contains` relation is
+// ambiguous: "Þingvellir" ⊂ "Þingvellir National Park" is the SAME place (real
+// drift), but "Reykjavik" ⊂ "Reykjavik Old Harbour" is a DIFFERENT sub-place
+// that legitimately holds its own flags. So a suspect needs a semantic call:
+// if same place, the safe fix is an ALIAS (PlaceKey.learn) so both names
+// resolve equal thereafter — NOT loosening the writer's matcher, which would
+// smear a container's decision onto its sub-places. Only considers pairs the
+// strict KEY missed (no double-count). Review tool; never a gate.
 function candidateMirrorScan(trip) {
   var suspects = [];
   var cands = (trip && trip.candidates) || [];
