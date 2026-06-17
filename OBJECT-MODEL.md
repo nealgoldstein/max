@@ -226,3 +226,49 @@ So the flip reduces to: **one write door + projections everywhere.**
 
 Net: no persistence change, no big-bang. Each step is additively shadowed,
 invariant-gated, and reversible to the checkpoint tag.
+
+---
+
+## 7. Phase D — the `_keep` flag retirement (DECIDED, in progress)
+
+The high-value arc (step 4 above) opened on `candidates`/`placeActivities` and
+quickly found the real disease: the keep/role **decision** is stored on every
+`requiredPlace` as `_keep`/`_isDayTrip` (read in ~49 places) and kept in sync
+with the flat decision by the `MaxRoleWriter` **mirror**. Stored-and-mirrored
+state is what drifts (the gray-pin bugs).
+
+**Important history — this has been attempted before.** `app-main.js:_keepOf`
+(P4.3) is already a keep PROJECTION from the decision log, and its own comment
+states the endgame: *"the reconcile caches the identical value onto `p._keep`;
+routing reads through here lets that cache be retired once every read derives."*
+That retirement was never finished, so the cache + mirror persisted. The lesson:
+**finish this one — do not add another accessor.** (During this arc a parallel
+`MaxPlaces.keepFor` was built; it is retained ONLY as a proof harness, never to
+be consumed by app code.)
+
+**DECISION (evidence-backed): standardize on `_keepOf`.** On the real build
+pipeline (16 requiredPlaces across stays/sights/day-trips + the Hverir overnight
+edge), a three-way reconcile proved `stored _keep === keepFor === _keepOf`
+(`[keep-3way] allAgree=16 disagree=none`). The source choice is therefore moot;
+`_keepOf` is the existing intended accessor, so it wins.
+
+Finishable checklist:
+
+1. **Shadow gate** (DONE): `keepShadowCheck` proves stored `_keep` == projection
+   on the real pipeline — a HARD gate in build-harness. Three-way reconcile vs
+   `_keepOf` also green.
+2. **Migrate the ~49 `_keep` READS onto `_keepOf`**, leaf-first, each a
+   behavioral no-op (proven equal), gate-verified. EXCLUDE the shadow/detector
+   reads in place-registry.mjs (they must read the stored flag to compare) and
+   `_keepOf` itself. Use the guarded-global pattern the other app globals use.
+3. **Retire the `_keep` cache.** CAVEAT to verify first: `_keepOf` falls back to
+   `!!p._keep` only when the decision log isn't attached, and returns the ORIGIN
+   DEFAULT when the log is merely sparse. Before deleting the stored flag, prove
+   the decision log (P4.5 persisted) is COMPLETE for non-default decisions across
+   publish→reload — otherwise retiring the cache would silently change keep for
+   log-missing places. The p4_4-gate reload round-trips are the start of that proof.
+4. **Delete the `MaxRoleWriter` mirror** (the `_keep`/`_isDayTrip` requiredPlace
+   write block). Once nothing reads the cache, the mirror has nothing to keep in
+   sync — divergence becomes impossible by construction, not detected.
+
+Same arc for `_isDayTrip`/`_rejected` via `roleOf`/the decision once `_keep` lands.
