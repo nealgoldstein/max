@@ -947,14 +947,37 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
       const r = MP.keepShadowCheck({ placeActivities: pa, candidates: cands }); // live _isStaySection / _placeOrigin
       let rpCount = 0;
       pa.forEach((it) => { if (it && it.type !== 'route') rpCount += (it.requiredPlaces || []).length; });
-      return { ok: r.ok, checked: r.checked, diffs: r.diffs, rpCount };
+      // THREE-WAY reconcile: stored _keep vs keepFor (candidate snapshot) vs the
+      // EXISTING _keepOf (decision log). If all three agree, the source choice is
+      // moot and we standardize on _keepOf (the prior, intended accessor) to
+      // finish its retirement — rather than shipping a 4th representation.
+      const probe = { placeActivities: pa, candidates: cands };
+      const threeway = { both: 0, keepForOnly: 0, keepOfOnly: 0, neither: 0, disagree: [] };
+      const hasKeepOf = (typeof window._keepOf === 'function');
+      pa.forEach((it) => {
+        if (!it || it.type === 'route') return;
+        const isStay = (typeof window._isStaySection === 'function') ? !!window._isStaySection(it) : false;
+        (it.requiredPlaces || []).forEach((p) => {
+          if (!p) return;
+          const stored = (p._keep === true);
+          const kf = MP.keepFor(probe, p, { isStay, origin: (typeof window._placeOrigin === 'function') ? window._placeOrigin(p) : p._origin });
+          const ko = hasKeepOf ? !!window._keepOf(p) : null;
+          if (stored === kf && (ko === null || stored === ko)) threeway.both++;
+          else { threeway.disagree.push({ place: p.place || p.name, stored, keepFor: kf, keepOf: ko }); }
+        });
+      });
+      return { ok: r.ok, checked: r.checked, diffs: r.diffs, rpCount, hasKeepOf, threeway };
     });
     expect(obs.err || '').toBe('');
     console.log('[keep-shadow] checked=' + obs.checked + ' requiredPlaces=' + obs.rpCount +
                 ' storedEqualsDerived=' + (obs.ok ? 'yes' : 'NO ' + JSON.stringify(obs.diffs)));
+    console.log('[keep-3way] hasKeepOf=' + obs.hasKeepOf + ' allAgree=' + obs.threeway.both +
+                ' disagree=' + (obs.threeway.disagree.length ? JSON.stringify(obs.threeway.disagree) : 'none'));
     test.info().annotations.push({ type: 'keep-shadow', description: JSON.stringify(obs) });
     expect(obs.rpCount, 'pipeline must produce requiredPlaces (non-vacuous)').toBeGreaterThan(0);
     expect(obs.ok, 'stored _keep diverged from the keepFor projection: ' + JSON.stringify(obs.diffs)).toBe(true);
+    // NON-FATAL on the _keepOf leg for now — this is the reconcile measurement
+    // that decides whether _keepOf is safe to standardize on.
   });
 
 });
