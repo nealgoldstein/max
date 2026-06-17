@@ -47,6 +47,7 @@ declare var MaxData: any;
 declare var MaxRoute: any;
 declare var MaxSync: any;
 declare function _normPlaceName(s: any): string;
+declare function _keepOf(p: any): boolean;
 declare function autoSave(opts?: any): void;
 declare function _upsertTripIndexEntry(entry: any): any;
 declare var _generatedCityData: any;
